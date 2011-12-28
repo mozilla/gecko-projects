@@ -41,6 +41,8 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
+#include "mozilla/Attributes.h"
+
 #ifdef MOZ_LOGGING
 #define FORCE_PR_LOG
 #endif
@@ -88,6 +90,7 @@
 #include "nsILocalFileWin.h"
 #endif
 #include "xpcprivate.h"
+#include "xpcpublic.h"
 #include "nsIResProtocolHandler.h"
 
 #include "mozilla/scache/StartupCache.h"
@@ -233,7 +236,7 @@ Atob(JSContext *cx, uintN argc, jsval *vp)
     if (!argc)
         return true;
 
-    return nsXPConnect::Base64Decode(cx, JS_ARGV(cx, vp)[0], &JS_RVAL(cx, vp));
+    return xpc::Base64Decode(cx, JS_ARGV(cx, vp)[0], &JS_RVAL(cx, vp));
 }
 
 static JSBool
@@ -242,7 +245,7 @@ Btoa(JSContext *cx, uintN argc, jsval *vp)
     if (!argc)
         return true;
 
-    return nsXPConnect::Base64Encode(cx, JS_ARGV(cx, vp)[0], &JS_RVAL(cx, vp));
+    return xpc::Base64Encode(cx, JS_ARGV(cx, vp)[0], &JS_RVAL(cx, vp));
 }
 
 static JSBool
@@ -319,8 +322,8 @@ private:
     char*      mBuf;
 
     // prevent copying and assignment
-    JSCLContextHelper(const JSCLContextHelper &); // not implemented
-    const JSCLContextHelper& operator=(const JSCLContextHelper &); // not implemented
+    JSCLContextHelper(const JSCLContextHelper &) MOZ_DELETE;
+    const JSCLContextHelper& operator=(const JSCLContextHelper &) MOZ_DELETE;
 };
 
 
@@ -334,9 +337,9 @@ public:
 private:
     JSContext* mContext;
     JSErrorReporter mOldReporter;
-    // prevent copying and assignment
-    JSCLAutoErrorReporterSetter(const JSCLAutoErrorReporterSetter &); // not implemented
-    const JSCLAutoErrorReporterSetter& operator=(const JSCLAutoErrorReporterSetter &); // not implemented
+
+    JSCLAutoErrorReporterSetter(const JSCLAutoErrorReporterSetter &) MOZ_DELETE;
+    const JSCLAutoErrorReporterSetter& operator=(const JSCLAutoErrorReporterSetter &) MOZ_DELETE;
 };
 
 static nsresult

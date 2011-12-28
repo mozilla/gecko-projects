@@ -546,10 +546,6 @@ mjit::Compiler::performCompilation(JITScript **jitp)
 
     JaegerSpew(JSpew_Scripts, "successfully compiled (code \"%p\") (size \"%u\")\n",
                (*jitp)->code.m_code.executableAddress(), unsigned((*jitp)->code.m_size));
-
-    if (!*jitp)
-        return Compile_Abort;
-
     return Compile_Okay;
 }
 
@@ -2474,12 +2470,6 @@ mjit::Compiler::generateMethod()
             frame.popn(2);
           END_CASE(JSOP_ENUMELEM)
 
-          BEGIN_CASE(JSOP_BLOCKCHAIN)
-          END_CASE(JSOP_BLOCKCHAIN)
-
-          BEGIN_CASE(JSOP_NULLBLOCKCHAIN)
-          END_CASE(JSOP_NULLBLOCKCHAIN)
-
           BEGIN_CASE(JSOP_CONDSWITCH)
             /* No-op for the decompiler. */
           END_CASE(JSOP_CONDSWITCH)
@@ -2548,7 +2538,7 @@ mjit::Compiler::generateMethod()
 
             jsbytecode *pc2 = NULL;
             if (fun->joinable()) {
-                pc2 = AdvanceOverBlockchainOp(PC + JSOP_LAMBDA_LENGTH);
+                pc2 = PC + JSOP_LAMBDA_LENGTH;
                 JSOp next = JSOp(*pc2);
 
                 if (next == JSOP_INITMETHOD) {
@@ -2571,9 +2561,6 @@ mjit::Compiler::generateMethod()
 
             prepareStubCall(Uses(uses));
             masm.move(ImmPtr(fun), Registers::ArgReg1);
-
-            if (stub != stubs::Lambda)
-                masm.storePtr(ImmPtr(pc2), FrameAddress(offsetof(VMFrame, scratch)));
 
             INLINE_STUBCALL(stub, REJOIN_PUSH_OBJECT);
 
@@ -2691,6 +2678,8 @@ mjit::Compiler::generateMethod()
           END_CASE(JSOP_GETXPROP)
 
           BEGIN_CASE(JSOP_ENTERBLOCK)
+          BEGIN_CASE(JSOP_ENTERLET0)
+          BEGIN_CASE(JSOP_ENTERLET1)
             enterBlock(script->getObject(fullAtomIndex(PC)));
           END_CASE(JSOP_ENTERBLOCK);
 
@@ -7147,9 +7136,9 @@ mjit::Compiler::enterBlock(JSObject *obj)
     /* For now, don't bother doing anything for this opcode. */
     frame.syncAndForgetEverything();
     masm.move(ImmPtr(obj), Registers::ArgReg1);
-    uint32_t n = js_GetEnterBlockStackDefs(cx, script, PC);
     INLINE_STUBCALL(stubs::EnterBlock, REJOIN_NONE);
-    frame.enterBlock(n);
+    if (*PC == JSOP_ENTERBLOCK)
+        frame.enterBlock(StackDefs(script, PC));
 }
 
 void
@@ -7159,10 +7148,8 @@ mjit::Compiler::leaveBlock()
      * Note: After bug 535912, we can pass the block obj directly, inline
      * PutBlockObject, and do away with the muckiness in PutBlockObject.
      */
-    uint32_t n = js_GetVariableStackUses(JSOP_LEAVEBLOCK, PC);
-    JSObject *obj = script->getObject(fullAtomIndex(PC + UINT16_LEN));
+    uint32_t n = StackUses(script, PC);
     prepareStubCall(Uses(n));
-    masm.move(ImmPtr(obj), Registers::ArgReg1);
     INLINE_STUBCALL(stubs::LeaveBlock, REJOIN_NONE);
     frame.leaveBlock(n);
 }
