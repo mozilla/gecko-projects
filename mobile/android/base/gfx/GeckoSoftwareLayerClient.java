@@ -140,8 +140,7 @@ public class GeckoSoftwareLayerClient extends LayerClient implements GeckoEventL
             layerController.setViewportMetrics(mGeckoViewport);
         }
 
-        GeckoAppShell.registerGeckoEventListener("Viewport:Expose", this);
-        GeckoAppShell.registerGeckoEventListener("Viewport:UpdateAndDraw", this);
+        GeckoAppShell.registerGeckoEventListener("Viewport:Update", this);
         GeckoAppShell.registerGeckoEventListener("Viewport:UpdateLater", this);
     }
 
@@ -180,22 +179,20 @@ public class GeckoSoftwareLayerClient extends LayerClient implements GeckoEventL
             mGeckoViewport.setSize(viewportSize);
 
             LayerController controller = getLayerController();
-            synchronized (controller) {
-                PointF displayportOrigin = mGeckoViewport.getDisplayportOrigin();
-                mTileLayer.setOrigin(PointUtils.round(displayportOrigin));
-                mTileLayer.setResolution(mGeckoViewport.getZoomFactor());
+            PointF displayportOrigin = mGeckoViewport.getDisplayportOrigin();
+            mTileLayer.setOrigin(PointUtils.round(displayportOrigin));
+            mTileLayer.setResolution(mGeckoViewport.getZoomFactor());
 
-                if (onlyUpdatePageSize) {
-                    // Don't adjust page size when zooming unless zoom levels are
-                    // approximately equal.
-                    if (FloatUtils.fuzzyEquals(controller.getZoomFactor(),
-                            mGeckoViewport.getZoomFactor()))
-                        controller.setPageSize(mGeckoViewport.getPageSize());
-                } else {
-                    Log.d(LOGTAG, "Received viewport update from gecko");
-                    controller.setViewportMetrics(mGeckoViewport);
-                    controller.abortPanZoomAnimation();
-                }
+            if (onlyUpdatePageSize) {
+                // Don't adjust page size when zooming unless zoom levels are
+                // approximately equal.
+                if (FloatUtils.fuzzyEquals(controller.getZoomFactor(),
+                        mGeckoViewport.getZoomFactor()))
+                    controller.setPageSize(mGeckoViewport.getPageSize());
+            } else {
+                Log.d(LOGTAG, "Received viewport update from gecko");
+                controller.setViewportMetrics(mGeckoViewport);
+                controller.abortPanZoomAnimation();
             }
         } catch (JSONException e) {
             Log.e(LOGTAG, "Bad viewport description: " + viewportDescription);
@@ -208,15 +205,17 @@ public class GeckoSoftwareLayerClient extends LayerClient implements GeckoEventL
      * a little more JNI magic.
      */
     public void endDrawing(int x, int y, int width, int height, String metadata) {
-        try {
-            updateViewport(metadata, !mUpdateViewportOnEndDraw);
-            mUpdateViewportOnEndDraw = false;
-            Rect rect = new Rect(x, y, x + width, y + height);
+        synchronized (getLayerController()) {
+            try {
+                updateViewport(metadata, !mUpdateViewportOnEndDraw);
+                mUpdateViewportOnEndDraw = false;
+                Rect rect = new Rect(x, y, x + width, y + height);
 
-            if (mTileLayer instanceof SingleTileLayer)
-                ((SingleTileLayer)mTileLayer).invalidate(rect);
-        } finally {
-            endTransaction(mTileLayer);
+                if (mTileLayer instanceof SingleTileLayer)
+                    ((SingleTileLayer)mTileLayer).invalidate(rect);
+            } finally {
+                endTransaction(mTileLayer);
+            }
         }
     }
 
@@ -341,15 +340,19 @@ public class GeckoSoftwareLayerClient extends LayerClient implements GeckoEventL
     }
 
     public void handleMessage(String event, JSONObject message) {
-        if ("Viewport:Expose".equals(event)) {
-            GeckoAppShell.sendEventToGecko(new GeckoEvent(GeckoEvent.EXPOSE));
-        } else if ("Viewport:UpdateAndDraw".equals(event)) {
-            mUpdateViewportOnEndDraw = true;
-
-            // Redraw everything.
-            Rect rect = new Rect(0, 0, mBufferSize.width, mBufferSize.height);
-            GeckoAppShell.sendEventToGecko(new GeckoEvent(GeckoEvent.DRAW, rect));
+        if ("Viewport:Update".equals(event)) {
+            beginTransaction(mTileLayer);
+            try {
+                updateViewport(message.getString("viewport"), false);
+            } catch (JSONException e) {
+                Log.e(LOGTAG, "Unable to update viewport", e);
+            } finally {
+                endTransaction(mTileLayer);
+            }
         } else if ("Viewport:UpdateLater".equals(event)) {
+            if (!mTileLayer.inTransaction()) {
+                Log.e(LOGTAG, "Viewport:UpdateLater called while not in transaction. You should be using Viewport:Update instead!");
+            }
             mUpdateViewportOnEndDraw = true;
         }
     }
