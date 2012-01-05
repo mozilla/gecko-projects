@@ -108,6 +108,7 @@ abstract public class GeckoApp
     public static boolean mFullScreen = false;
     public static File sGREDir = null;
     public static Menu sMenu;
+    private static GeckoThread sGeckoThread = null;
     public Handler mMainHandler;
     private File mProfileDir;
     private static boolean sIsGeckoReady = false;
@@ -384,29 +385,6 @@ abstract public class GeckoApp
         return pluginCL.loadClass(className);
     }
 
-    // Returns true when the intent is going to be handled by gecko launch
-    boolean launch(Intent intent)
-    {
-        Log.w(LOGTAG, "zerdatime " + new Date().getTime() + " - launch");
-        
-        if (!checkAndSetLaunchState(LaunchState.Launching, LaunchState.Launched))
-            return false;
-
-        if (intent == null)
-            intent = getIntent();
-
-        String args = intent.getStringExtra("args");
-        if (args != null && args.contains("-profile")) {
-            // XXX: TO-DO set mProfileDir to the path passed in
-            mUserDefinedProfile = true;
-        }
-
-        prefetchDNS(intent.getData());
-        new GeckoThread(intent, mLastUri, mLastTitle).start();
-
-        return true;
-    }
-
     @Override
     public boolean onCreateOptionsMenu(Menu menu)
     {
@@ -614,8 +592,11 @@ abstract public class GeckoApp
 
                 if (lastHistoryEntry.mUri.equals(mLastUri))
                     return;
-   
-                mLastViewport = mSoftwareLayerClient.getGeckoViewportMetrics().toJSON();
+
+                ViewportMetrics viewportMetrics = mSoftwareLayerClient.getGeckoViewportMetrics();
+                if (viewportMetrics != null)
+                    mLastViewport = viewportMetrics.toJSON();
+
                 mLastUri = lastHistoryEntry.mUri;
                 mLastTitle = lastHistoryEntry.mTitle;
                 Bitmap bitmap = mSoftwareLayerClient.getBitmap();
@@ -1429,7 +1410,9 @@ abstract public class GeckoApp
             mLastViewport = savedInstanceState.getString(SAVED_STATE_VIEWPORT);
             mLastScreen = savedInstanceState.getByteArray(SAVED_STATE_SCREEN);
         }
-        String uri = getIntent().getDataString();
+
+        Intent intent = getIntent();
+        String uri = intent.getDataString();
         String title = uri;
         if (uri != null && uri.length() > 0) {
             mLastUri = uri;
@@ -1441,10 +1424,27 @@ abstract public class GeckoApp
             showAboutHome();
         }
 
+        mAppContext = this;
+
+        if (sGREDir == null)
+            sGREDir = new File(this.getApplicationInfo().dataDir);
+
+        String args = intent.getStringExtra("args");
+        if (args != null && args.contains("-profile")) {
+            // XXX: TO-DO set mProfileDir to the path passed in
+            mUserDefinedProfile = true;
+        }
+
+        prefetchDNS(intent.getData());
+
+        sGeckoThread = new GeckoThread(intent, mLastUri, mLastTitle);
+        if (!ACTION_DEBUG.equals(intent.getAction()) &&
+            checkAndSetLaunchState(LaunchState.Launching, LaunchState.Launched))
+            sGeckoThread.start();
+
         super.onCreate(savedInstanceState);
 
         setContentView(R.layout.gecko_app);
-        mAppContext = this;
 
         if (Build.VERSION.SDK_INT >= 11) {
             mBrowserToolbar = (BrowserToolbar) getLayoutInflater().inflate(R.layout.gecko_app_actionbar, null);
@@ -1513,9 +1513,6 @@ abstract public class GeckoApp
         mPluginContainer = (AbsoluteLayout) findViewById(R.id.plugin_container);
 
         Log.w(LOGTAG, "zerdatime " + new Date().getTime() + " - UI almost up");
-
-        if (sGREDir == null)
-            sGREDir = new File(this.getApplicationInfo().dataDir);
 
         if (!sTryCatchAttached) {
             sTryCatchAttached = true;
@@ -1656,13 +1653,13 @@ abstract public class GeckoApp
                 public void run() {
                     Log.i(LOGTAG, "Launching from debug intent after 5s wait");
                     setLaunchState(LaunchState.Launching);
-                    launch(getIntent());
+                    sGeckoThread.start();
                 }
             }, 1000 * 5 /* 5 seconds */);
             Log.i(LOGTAG, "Intent : ACTION_DEBUG - waiting 5s before launching");
             return;
         }
-        if (checkLaunchState(LaunchState.WaitForDebugger) || launch(intent))
+        if (checkLaunchState(LaunchState.WaitForDebugger) || intent == getIntent())
             return;
 
         if (Intent.ACTION_MAIN.equals(action)) {

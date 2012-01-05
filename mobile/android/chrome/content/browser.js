@@ -155,6 +155,21 @@ var Strings = {};
   });
 });
 
+var MetadataProvider = {
+  getDrawMetadata: function getDrawMetadata() {
+    return BrowserApp.getDrawMetadata();
+  },
+
+  paintingSuppressed: function paintingSuppressed() {
+    let browser = BrowserApp.selectedBrowser;
+    if (!browser)
+      return false;
+    let cwu = browser.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                                   .getInterface(Ci.nsIDOMWindowUtils);
+    return cwu.paintingSuppressed;
+  }
+};
+
 var BrowserApp = {
   _tabs: [],
   _selectedTab: null,
@@ -169,7 +184,7 @@ var BrowserApp = {
     BrowserEventHandler.init();
     ViewportHandler.init();
 
-    getBridge().setDrawMetadataProvider(this.getDrawMetadata.bind(this));
+    getBridge().setDrawMetadataProvider(MetadataProvider);
 
     Services.obs.addObserver(this, "Tab:Add", false);
     Services.obs.addObserver(this, "Tab:Load", false);
@@ -225,9 +240,9 @@ var BrowserApp = {
     // Init FormHistory
     Cc["@mozilla.org/satchel/form-history;1"].getService(Ci.nsIFormHistory2);
 
-    let uri = "about:home";
+    let url = "about:home";
     if ("arguments" in window && window.arguments[0])
-      uri = window.arguments[0];
+      url = window.arguments[0];
 
     // XXX maybe we don't do this if the launch was kicked off from external
     Services.io.offline = false;
@@ -239,10 +254,33 @@ var BrowserApp = {
 
     // restore the previous session
     let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
-    if (ss.shouldRestore())
-      ss.restoreLastSession(true);
-    else
-      this.addTab(uri);
+    if (ss.shouldRestore()) {
+      // A restored tab should not be active if we are loading a URL
+      let restoreToFront = false;
+
+      // Open any commandline URLs, except the homepage
+      if (url && url != "about:home") {
+        this.addTab(url);
+      } else {
+        // Let the session make a restored tab active
+        restoreToFront = true;
+
+        // Be ready to handle any restore failures by making sure we have a valid tab opened
+        let restoreCleanup = {
+          observe: function(aSubject, aTopic, aData) {
+            Services.obs.removeObserver(restoreCleanup, "sessionstore-windows-restored");
+            if (aData == "fail")
+              BrowserApp.addTab("about:home");
+          }
+        };
+        Services.obs.addObserver(restoreCleanup, "sessionstore-windows-restored", false);
+      }
+
+      // Start the restore
+      ss.restoreLastSession(restoreToFront);
+    } else {
+      this.addTab(url);
+    }
 
     // notify java that gecko has loaded
     sendMessageToJava({
@@ -768,7 +806,7 @@ var BrowserApp = {
     delete this.defaultBrowserWidth;
     let width = Services.prefs.getIntPref("browser.viewport.desktopWidth");
     return this.defaultBrowserWidth = width;
-   }
+  }
 };
 
 var NativeWindow = {
@@ -1453,8 +1491,7 @@ Tab.prototype = {
       return;
     sendMessageToJava({
       gecko: {
-        type: "Viewport:Update",
-        viewport: JSON.stringify(this.viewport)
+        type: "Viewport:UpdateAndDraw"
       }
     });
   },
