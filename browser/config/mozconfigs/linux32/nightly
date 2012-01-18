@@ -26,3 +26,6 @@ ac_add_options --with-ccache=/usr/bin/ccache
 
 # Treat warnings as errors in directories with FAIL_ON_WARNINGS.
 ac_add_options --enable-warnings-as-errors
+
+# Enable profiling
+ac_add_options --enable-profiling
