@@ -2155,6 +2155,7 @@ gc_root_traversal(JSTracer *trc, const RootEntry &entry)
          * that mark callbacks are not in place during compartment GCs.
          */
         JSTracer checker;
+        JS_ASSERT(trc->runtime == trc->context->runtime);
         JS_TracerInit(&checker, trc->context, EmptyMarkCallback);
         ConservativeGCTest test = MarkIfGCThingWord(&checker, reinterpret_cast<uintptr_t>(ptr));
         if (test != CGCT_VALID && entry.value.name) {
@@ -3098,9 +3099,6 @@ ValidateIncrementalMarking(JSContext *cx)
     js::gc::State state = rt->gcIncrementalState;
     rt->gcIncrementalState = NO_INCREMENTAL;
 
-    /* As we're re-doing marking, we need to reset the weak map list. */
-    WeakMapBase::resetWeakMapList(rt);
-
     JS_ASSERT(gcmarker->isDrained());
     gcmarker->reset();
 
@@ -3497,6 +3495,7 @@ IncrementalGCSlice(JSContext *cx, int64_t budget, JSGCInvocationKind gckind)
         if (!rt->gcMarker.hasBufferedGrayRoots())
             sliceBudget.reset();
 
+        rt->gcMarker.context = cx;
         bool finished = rt->gcMarker.drainMarkStack(sliceBudget);
 
         for (GCCompartmentsIter c(rt); !c.done(); c.next()) {
