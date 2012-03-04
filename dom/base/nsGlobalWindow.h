@@ -142,6 +142,8 @@ class nsDOMMozURLProperty;
 class nsIDOMCrypto;
 #endif
 
+class nsWindowSizes;
+
 namespace mozilla {
 namespace dom {
 class Navigator;
@@ -576,8 +578,7 @@ public:
     return sWindowsById;
   }
 
-  PRInt64 SizeOf() const;
-  size_t SizeOfStyleSheets(nsMallocSizeOfFun aMallocSizeOf) const;
+  void SizeOfIncludingThis(nsWindowSizes* aWindowSizes) const;
 
   void UnmarkGrayTimers();
 private:
@@ -1000,7 +1001,6 @@ protected:
   friend class nsDOMScriptableHelper;
   friend class nsDOMWindowUtils;
   friend class PostMessageEvent;
-  static nsIDOMStorageList* sGlobalStorageList;
 
   static WindowByIdTable* sWindowsById;
   static bool sWarnedAboutWindowInternal;

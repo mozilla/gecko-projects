@@ -269,7 +269,6 @@ using namespace mozilla::dom;
 using mozilla::TimeStamp;
 using mozilla::TimeDuration;
 
-nsIDOMStorageList *nsGlobalWindow::sGlobalStorageList  = nsnull;
 nsGlobalWindow::WindowByIdTable *nsGlobalWindow::sWindowsById = nsnull;
 bool nsGlobalWindow::sWarnedAboutWindowInternal = false;
 
@@ -467,6 +466,13 @@ public:
   NPBool ConvertPoint(double sourceX, double sourceY, NPCoordinateSpace sourceSpace,
                       double *destX, double *destY, NPCoordinateSpace destSpace);
   void SendIdleEvent();
+  
+  NPError InitAsyncSurface(NPSize *size, NPImageFormat format,
+                           void *initData, NPAsyncSurface *surface)
+  { return NPERR_GENERIC_ERROR; }
+
+  NPError FinalizeAsyncSurface(NPAsyncSurface *surface) { return NPERR_GENERIC_ERROR; }
+  void SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect *changed) { return; }
 
   NS_DECL_CYCLE_COLLECTION_CLASS(nsDummyJavaPluginOwner)
 
@@ -601,6 +607,12 @@ nsDummyJavaPluginOwner::InvalidateRect(NPRect *invalidRect)
 
 NS_IMETHODIMP
 nsDummyJavaPluginOwner::InvalidateRegion(NPRegion invalidRegion)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsDummyJavaPluginOwner::RedrawPlugin()
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -1074,8 +1086,6 @@ nsGlobalWindow::~nsGlobalWindow()
 void
 nsGlobalWindow::ShutDown()
 {
-  NS_IF_RELEASE(sGlobalStorageList);
-
   if (gDumpFile && gDumpFile != stdout) {
     fclose(gDumpFile);
   }
@@ -8183,32 +8193,6 @@ nsGlobalWindow::GetSessionStorage(nsIDOMStorage ** aSessionStorage)
 }
 
 NS_IMETHODIMP
-nsGlobalWindow::GetGlobalStorage(nsIDOMStorageList ** aGlobalStorage)
-{
-  NS_ENSURE_ARG_POINTER(aGlobalStorage);
-
-  nsCOMPtr<nsIDocument> document = do_QueryInterface(GetExtantDocument());
-  if (document) {
-    document->WarnOnceAbout(nsIDocument::eGlobalStorage);
-  }
-
-  if (!Preferences::GetBool(kStorageEnabled)) {
-    *aGlobalStorage = nsnull;
-    return NS_OK;
-  }
-
-  if (!sGlobalStorageList) {
-    nsresult rv = NS_NewDOMStorageList(&sGlobalStorageList);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  *aGlobalStorage = sGlobalStorageList;
-  NS_IF_ADDREF(*aGlobalStorage);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsGlobalWindow::GetLocalStorage(nsIDOMStorage ** aLocalStorage)
 {
   FORWARD_TO_INNER(GetLocalStorage, (aLocalStorage), NS_ERROR_UNEXPECTED);
@@ -10184,35 +10168,26 @@ nsGlobalWindow::HasPerformanceSupport()
   return Preferences::GetBool("dom.enable_performance", false);
 }
 
-PRInt64
-nsGlobalWindow::SizeOf() const
+void
+nsGlobalWindow::SizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 {
-  PRInt64 size = sizeof(*this);
+  aWindowSizes->mDOM += aWindowSizes->mMallocSizeOf(this);
 
   if (IsInnerWindow()) {
     nsEventListenerManager* elm =
       const_cast<nsGlobalWindow*>(this)->GetListenerManager(false);
     if (elm) {
-      size += elm->SizeOf();
+      aWindowSizes->mDOM +=
+        elm->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
     }
     if (mDoc) {
-      size += mDoc->SizeOf();
+      mDoc->DocSizeOfIncludingThis(aWindowSizes);
     }
   }
 
-  size += mNavigator ? mNavigator->SizeOf() : 0;
-
-  return size;
-}
-
-size_t
-nsGlobalWindow::SizeOfStyleSheets(nsMallocSizeOfFun aMallocSizeOf) const
-{
-  size_t n = 0;
-  if (IsInnerWindow() && mDoc) {
-    n += mDoc->SizeOfStyleSheets(aMallocSizeOf);
-  }
-  return n;
+  aWindowSizes->mDOM +=
+    mNavigator ?
+      mNavigator->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf) : 0;
 }
 
 // nsGlobalChromeWindow implementation

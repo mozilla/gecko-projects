@@ -65,8 +65,8 @@
 
 /* JS::Value can store a full int32_t. */
 #define JSVAL_INT_BITS          32
-#define JSVAL_INT_MIN           ((jsint)0x80000000)
-#define JSVAL_INT_MAX           ((jsint)0x7fffffff)
+#define JSVAL_INT_MIN           ((int32_t)0x80000000)
+#define JSVAL_INT_MAX           ((int32_t)0x7fffffff)
 
 /************************************************************************/
 
@@ -1426,17 +1426,20 @@ typedef JSBool
 (* JSContextCallback)(JSContext *cx, unsigned contextOp);
 
 typedef enum JSGCStatus {
-    /* These callbacks happen outside the GC lock. */
     JSGC_BEGIN,
-    JSGC_END,
-
-    /* These callbacks happen within the GC lock. */
-    JSGC_MARK_END,
-    JSGC_FINALIZE_END
+    JSGC_END
 } JSGCStatus;
 
-typedef JSBool
-(* JSGCCallback)(JSContext *cx, JSGCStatus status);
+typedef void
+(* JSGCCallback)(JSRuntime *rt, JSGCStatus status);
+
+typedef enum JSFinalizeStatus {
+    JSFINALIZE_START,
+    JSFINALIZE_END
+} JSFinalizeStatus;
+
+typedef void
+(* JSFinalizeCallback)(JSContext *cx, JSFinalizeStatus status);
 
 /*
  * Generic trace operation that calls JS_CallTracer on each traceable thing
@@ -1648,7 +1651,7 @@ JSVAL_IS_INT(jsval v)
     return JSVAL_IS_INT32_IMPL(JSVAL_TO_IMPL(v));
 }
 
-static JS_ALWAYS_INLINE jsint
+static JS_ALWAYS_INLINE int32_t
 JSVAL_TO_INT(jsval v)
 {
     JS_ASSERT(JSVAL_IS_INT(v));
@@ -2059,7 +2062,7 @@ class AutoIdRooter : private AutoGCRooter
                                            set of the same-named property in an
                                            object that delegates to a prototype
                                            containing this property */
-#define JSPROP_INDEX            0x80    /* name is actually (jsint) index */
+#define JSPROP_INDEX            0x80    /* name is actually (int) index */
 #define JSPROP_SHORTID          0x100   /* set in JS_DefineProperty attrs
                                            if getters/setters use a shortid */
 #define JSPROP_NATIVE_ACCESSORS 0x08    /* set in JSPropertyDescriptor.flags
@@ -2241,7 +2244,7 @@ extern JS_PUBLIC_API(JSBool)
 JS_ValueToNumber(JSContext *cx, jsval v, double *dp);
 
 extern JS_PUBLIC_API(JSBool)
-JS_DoubleIsInt32(double d, jsint *ip);
+JS_DoubleIsInt32(double d, int32_t *ip);
 
 extern JS_PUBLIC_API(int32_t)
 JS_DoubleToInt32(double d);
@@ -2348,11 +2351,11 @@ JS_EndRequest(JSContext *cx);
 extern JS_PUBLIC_API(void)
 JS_YieldRequest(JSContext *cx);
 
-extern JS_PUBLIC_API(jsrefcount)
+extern JS_PUBLIC_API(unsigned)
 JS_SuspendRequest(JSContext *cx);
 
 extern JS_PUBLIC_API(void)
-JS_ResumeRequest(JSContext *cx, jsrefcount saveDepth);
+JS_ResumeRequest(JSContext *cx, unsigned saveDepth);
 
 extern JS_PUBLIC_API(JSBool)
 JS_IsInRequest(JSRuntime *rt);
@@ -2393,7 +2396,7 @@ class JSAutoRequest {
 
   protected:
     JSContext *mContext;
-    jsrefcount mSaveDepth;
+    unsigned  mSaveDepth;
     JS_DECL_USE_GUARD_OBJECT_NOTIFIER
 
 #if 0
@@ -2425,7 +2428,7 @@ class JSAutoSuspendRequest {
 
   protected:
     JSContext *mContext;
-    jsrefcount mSaveDepth;
+    unsigned mSaveDepth;
     JS_DECL_USE_GUARD_OBJECT_NOTIFIER
 
 #if 0
@@ -3119,7 +3122,6 @@ typedef void
 
 struct JSTracer {
     JSRuntime           *runtime;
-    JSContext           *context;
     JSTraceCallback     callback;
     JSTraceNamePrinter  debugPrinter;
     const void          *debugPrintArg;
@@ -3218,7 +3220,7 @@ JS_CallTracer(JSTracer *trc, void *thing, JSGCTraceKind kind);
  * API for JSTraceCallback implementations.
  */
 extern JS_PUBLIC_API(void)
-JS_TracerInit(JSTracer *trc, JSContext *cx, JSTraceCallback callback);
+JS_TracerInit(JSTracer *trc, JSRuntime *rt, JSTraceCallback callback);
 
 extern JS_PUBLIC_API(void)
 JS_TraceChildren(JSTracer *trc, void *thing, JSGCTraceKind kind);
@@ -3251,7 +3253,7 @@ JS_GetTraceEdgeName(JSTracer *trc, char *buffer, int bufferSize);
  * thingToIgnore:   thing to ignore during the graph traversal when non-null.
  */
 extern JS_PUBLIC_API(JSBool)
-JS_DumpHeap(JSContext *cx, FILE *fp, void* startThing, JSGCTraceKind kind,
+JS_DumpHeap(JSRuntime *rt, FILE *fp, void* startThing, JSGCTraceKind kind,
             void *thingToFind, size_t maxDepth, void *thingToIgnore);
 
 #endif
@@ -3268,11 +3270,11 @@ JS_CompartmentGC(JSContext *cx, JSCompartment *comp);
 extern JS_PUBLIC_API(void)
 JS_MaybeGC(JSContext *cx);
 
-extern JS_PUBLIC_API(JSGCCallback)
-JS_SetGCCallback(JSContext *cx, JSGCCallback cb);
+extern JS_PUBLIC_API(void)
+JS_SetGCCallback(JSRuntime *rt, JSGCCallback cb);
 
-extern JS_PUBLIC_API(JSGCCallback)
-JS_SetGCCallbackRT(JSRuntime *rt, JSGCCallback cb);
+extern JS_PUBLIC_API(void)
+JS_SetFinalizeCallback(JSRuntime *rt, JSFinalizeCallback cb);
 
 extern JS_PUBLIC_API(JSBool)
 JS_IsGCMarkingTracer(JSTracer *trc);
@@ -3490,11 +3492,11 @@ struct JSClass {
 #define JSCLASS_NO_INTERNAL_MEMBERS     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 #define JSCLASS_NO_OPTIONAL_MEMBERS     0,0,0,0,0,JSCLASS_NO_INTERNAL_MEMBERS
 
-extern JS_PUBLIC_API(jsint)
+extern JS_PUBLIC_API(int)
 JS_IdArrayLength(JSContext *cx, JSIdArray *ida);
 
 extern JS_PUBLIC_API(jsid)
-JS_IdArrayGet(JSContext *cx, JSIdArray *ida, jsint index);
+JS_IdArrayGet(JSContext *cx, JSIdArray *ida, int index);
 
 extern JS_PUBLIC_API(void)
 JS_DestroyIdArray(JSContext *cx, JSIdArray *ida);
@@ -3707,6 +3709,9 @@ JS_IsExtensible(JSObject *obj);
 
 extern JS_PUBLIC_API(JSBool)
 JS_IsNative(JSObject *obj);
+
+extern JS_PUBLIC_API(JSRuntime *)
+JS_GetObjectRuntime(JSObject *obj);
 
 /*
  * Unlike JS_NewObject, JS_NewObjectWithGivenProto does not compute a default
@@ -3975,7 +3980,7 @@ JS_DeleteUCProperty2(JSContext *cx, JSObject *obj,
                      jsval *rval);
 
 extern JS_PUBLIC_API(JSObject *)
-JS_NewArrayObject(JSContext *cx, jsint length, jsval *vector);
+JS_NewArrayObject(JSContext *cx, int length, jsval *vector);
 
 extern JS_PUBLIC_API(JSBool)
 JS_IsArrayObject(JSContext *cx, JSObject *obj);
@@ -4080,7 +4085,7 @@ struct JSPrincipals {
     char *codebase;
 
     /* Don't call "destroy"; use reference counting macros below. */
-    jsrefcount refcount;
+    int refcount;
 
     void   (* destroy)(JSContext *cx, JSPrincipals *);
     JSBool (* subsume)(JSPrincipals *, JSPrincipals *);
@@ -4090,10 +4095,10 @@ struct JSPrincipals {
 #define JSPRINCIPALS_HOLD(cx, principals)   JS_HoldPrincipals(cx,principals)
 #define JSPRINCIPALS_DROP(cx, principals)   JS_DropPrincipals(cx,principals)
 
-extern JS_PUBLIC_API(jsrefcount)
+extern JS_PUBLIC_API(int)
 JS_HoldPrincipals(JSContext *cx, JSPrincipals *principals);
 
-extern JS_PUBLIC_API(jsrefcount)
+extern JS_PUBLIC_API(int)
 JS_DropPrincipals(JSContext *cx, JSPrincipals *principals);
 
 #else

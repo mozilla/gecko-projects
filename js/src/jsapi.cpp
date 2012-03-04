@@ -547,9 +547,9 @@ JS_ValueToNumber(JSContext *cx, jsval v, double *dp)
 }
 
 JS_PUBLIC_API(JSBool)
-JS_DoubleIsInt32(double d, jsint *ip)
+JS_DoubleIsInt32(double d, int32_t *ip)
 {
-    return JSDOUBLE_IS_INT32(d, (int32_t *)ip);
+    return JSDOUBLE_IS_INT32(d, ip);
 }
 
 JS_PUBLIC_API(int32_t)
@@ -755,6 +755,7 @@ JSRuntime::JSRuntime()
 #endif
     gcCallback(NULL),
     gcSliceCallback(NULL),
+    gcFinalizeCallback(NULL),
     gcMallocBytes(0),
     gcBlackRootsTraceOp(NULL),
     gcBlackRootsData(NULL),
@@ -1072,14 +1073,14 @@ JS_YieldRequest(JSContext *cx)
 #endif
 }
 
-JS_PUBLIC_API(jsrefcount)
+JS_PUBLIC_API(unsigned)
 JS_SuspendRequest(JSContext *cx)
 {
 #ifdef JS_THREADSAFE
     JSRuntime *rt = cx->runtime;
     JS_ASSERT(rt->onOwnerThread());
 
-    jsrefcount saveDepth = rt->requestDepth;
+    unsigned saveDepth = rt->requestDepth;
     if (!saveDepth)
         return 0;
 
@@ -1093,7 +1094,7 @@ JS_SuspendRequest(JSContext *cx)
 }
 
 JS_PUBLIC_API(void)
-JS_ResumeRequest(JSContext *cx, jsrefcount saveDepth)
+JS_ResumeRequest(JSContext *cx, unsigned saveDepth)
 {
 #ifdef JS_THREADSAFE
     JSRuntime *rt = cx->runtime;
@@ -2024,7 +2025,7 @@ JS_EnumerateStandardClasses(JSContext *cx, JSObject *obj)
 }
 
 static JSIdArray *
-NewIdArray(JSContext *cx, jsint length)
+NewIdArray(JSContext *cx, int length)
 {
     JSIdArray *ida;
 
@@ -2039,7 +2040,7 @@ NewIdArray(JSContext *cx, jsint length)
  * Unlike realloc(3), this function frees ida on failure.
  */
 static JSIdArray *
-SetIdArrayLength(JSContext *cx, JSIdArray *ida, jsint length)
+SetIdArrayLength(JSContext *cx, JSIdArray *ida, int length)
 {
     JSIdArray *rida;
 
@@ -2055,12 +2056,10 @@ SetIdArrayLength(JSContext *cx, JSIdArray *ida, jsint length)
 }
 
 static JSIdArray *
-AddAtomToArray(JSContext *cx, JSAtom *atom, JSIdArray *ida, jsint *ip)
+AddAtomToArray(JSContext *cx, JSAtom *atom, JSIdArray *ida, int *ip)
 {
-    jsint i, length;
-
-    i = *ip;
-    length = ida->length;
+    int i = *ip;
+    int length = ida->length;
     if (i >= length) {
         ida = SetIdArrayLength(cx, ida, JS_MAX(length * 2, 8));
         if (!ida)
@@ -2074,7 +2073,7 @@ AddAtomToArray(JSContext *cx, JSAtom *atom, JSIdArray *ida, jsint *ip)
 
 static JSIdArray *
 EnumerateIfResolved(JSContext *cx, JSObject *obj, JSAtom *atom, JSIdArray *ida,
-                    jsint *ip, JSBool *foundp)
+                    int *ip, JSBool *foundp)
 {
     *foundp = obj->nativeContains(cx, ATOM_TO_JSID(atom));
     if (*foundp)
@@ -2086,7 +2085,7 @@ JS_PUBLIC_API(JSIdArray *)
 JS_EnumerateResolvedStandardClasses(JSContext *cx, JSObject *obj, JSIdArray *ida)
 {
     JSRuntime *rt;
-    jsint i, j, k;
+    int i, j, k;
     JSAtom *atom;
     JSBool found;
     JSObjectOp init;
@@ -2428,9 +2427,9 @@ JS_SetExtraGCRootsTracer(JSRuntime *rt, JSTraceDataOp traceOp, void *data)
 }
 
 JS_PUBLIC_API(void)
-JS_TracerInit(JSTracer *trc, JSContext *cx, JSTraceCallback callback)
+JS_TracerInit(JSTracer *trc, JSRuntime *rt, JSTraceCallback callback)
 {
-    InitTracer(trc, cx->runtime, cx, callback);
+    InitTracer(trc, rt, callback);
 }
 
 JS_PUBLIC_API(void)
@@ -2605,7 +2604,7 @@ struct JSHeapDumpNode {
 typedef struct JSDumpingTracer {
     JSTracer            base;
     JSDHashTable        visited;
-    JSBool              ok;
+    bool                ok;
     void                *startThing;
     void                *thingToFind;
     void                *thingToIgnore;
@@ -2619,7 +2618,6 @@ DumpNotify(JSTracer *trc, void **thingp, JSGCTraceKind kind)
 {
     void *thing = *thingp;
     JSDumpingTracer *dtrc;
-    JSContext *cx;
     JSDHashEntryStub *entry;
 
     JS_ASSERT(trc->callback == DumpNotify);
@@ -2627,8 +2625,6 @@ DumpNotify(JSTracer *trc, void **thingp, JSGCTraceKind kind)
 
     if (!dtrc->ok || thing == dtrc->thingToIgnore)
         return;
-
-    cx = trc->context;
 
     /*
      * Check if we have already seen thing unless it is thingToFind to include
@@ -2650,8 +2646,7 @@ DumpNotify(JSTracer *trc, void **thingp, JSGCTraceKind kind)
         entry = (JSDHashEntryStub *)
             JS_DHashTableOperate(&dtrc->visited, thing, JS_DHASH_ADD);
         if (!entry) {
-            JS_ReportOutOfMemory(cx);
-            dtrc->ok = JS_FALSE;
+            dtrc->ok = false;
             return;
         }
         if (entry->key)
@@ -2664,7 +2659,7 @@ DumpNotify(JSTracer *trc, void **thingp, JSGCTraceKind kind)
     size_t bytes = offsetof(JSHeapDumpNode, edgeName) + edgeNameSize;
     JSHeapDumpNode *node = (JSHeapDumpNode *) OffTheBooks::malloc_(bytes);
     if (!node) {
-        dtrc->ok = JS_FALSE;
+        dtrc->ok = false;
         return;
     }
 
@@ -2685,7 +2680,6 @@ DumpNode(JSDumpingTracer *dtrc, FILE* fp, JSHeapDumpNode *node)
 {
     JSHeapDumpNode *prev, *following;
     size_t chainLimit;
-    JSBool ok;
     enum { MAX_PARENTS_TO_PRINT = 10 };
 
     JS_PrintTraceThingInfo(dtrc->buffer, sizeof dtrc->buffer,
@@ -2718,21 +2712,21 @@ DumpNode(JSDumpingTracer *dtrc, FILE* fp, JSHeapDumpNode *node)
 
     node = prev;
     prev = following;
-    ok = JS_TRUE;
+    bool ok = true;
     do {
         /* Loop must continue even when !ok to restore the parent chain. */
         if (ok) {
             if (!prev) {
                 /* Print edge from some runtime root or startThing. */
                 if (fputs(node->edgeName, fp) < 0)
-                    ok = JS_FALSE;
+                    ok = false;
             } else {
                 JS_PrintTraceThingInfo(dtrc->buffer, sizeof dtrc->buffer,
                                        &dtrc->base, prev->thing, prev->kind,
                                        JS_FALSE);
                 if (fprintf(fp, "(%p %s).%s",
                            prev->thing, dtrc->buffer, node->edgeName) < 0) {
-                    ok = JS_FALSE;
+                    ok = false;
                 }
             }
         }
@@ -2746,7 +2740,7 @@ DumpNode(JSDumpingTracer *dtrc, FILE* fp, JSHeapDumpNode *node)
 }
 
 JS_PUBLIC_API(JSBool)
-JS_DumpHeap(JSContext *cx, FILE *fp, void* startThing, JSGCTraceKind startKind,
+JS_DumpHeap(JSRuntime *rt, FILE *fp, void* startThing, JSGCTraceKind startKind,
             void *thingToFind, size_t maxDepth, void *thingToIgnore)
 {
     JSDumpingTracer dtrc;
@@ -2757,12 +2751,11 @@ JS_DumpHeap(JSContext *cx, FILE *fp, void* startThing, JSGCTraceKind startKind,
     if (maxDepth == 0)
         return JS_TRUE;
 
-    JS_TracerInit(&dtrc.base, cx, DumpNotify);
+    JS_TracerInit(&dtrc.base, rt, DumpNotify);
     if (!JS_DHashTableInit(&dtrc.visited, JS_DHashGetStubOps(),
                            NULL, sizeof(JSDHashEntryStub),
                            JS_DHASH_DEFAULT_CAPACITY(100))) {
-        JS_ReportOutOfMemory(cx);
-        return JS_FALSE;
+        return false;
     }
     dtrc.ok = JS_TRUE;
     dtrc.startThing = startThing;
@@ -2863,23 +2856,18 @@ JS_MaybeGC(JSContext *cx)
     MaybeGC(cx);
 }
 
-JS_PUBLIC_API(JSGCCallback)
-JS_SetGCCallback(JSContext *cx, JSGCCallback cb)
+JS_PUBLIC_API(void)
+JS_SetGCCallback(JSRuntime *rt, JSGCCallback cb)
 {
-    AssertNoGC(cx);
-    CHECK_REQUEST(cx);
-    return JS_SetGCCallbackRT(cx->runtime, cb);
+    AssertNoGC(rt);
+    rt->gcCallback = cb;
 }
 
-JS_PUBLIC_API(JSGCCallback)
-JS_SetGCCallbackRT(JSRuntime *rt, JSGCCallback cb)
+JS_PUBLIC_API(void)
+JS_SetFinalizeCallback(JSRuntime *rt, JSFinalizeCallback cb)
 {
-    JSGCCallback oldcb;
-
     AssertNoGC(rt);
-    oldcb = rt->gcCallback;
-    rt->gcCallback = cb;
-    return oldcb;
+    rt->gcFinalizeCallback = cb;
 }
 
 JS_PUBLIC_API(JSBool)
@@ -3011,14 +2999,14 @@ JS_SetNativeStackQuota(JSRuntime *rt, size_t stackSize)
 
 /************************************************************************/
 
-JS_PUBLIC_API(jsint)
+JS_PUBLIC_API(int)
 JS_IdArrayLength(JSContext *cx, JSIdArray *ida)
 {
     return ida->length;
 }
 
 JS_PUBLIC_API(jsid)
-JS_IdArrayGet(JSContext *cx, JSIdArray *ida, jsint index)
+JS_IdArrayGet(JSContext *cx, JSIdArray *ida, int index)
 {
     JS_ASSERT(index >= 0 && index < ida->length);
     return ida->vector[index];
@@ -3350,6 +3338,12 @@ JS_PUBLIC_API(JSBool)
 JS_IsNative(JSObject *obj)
 {
     return obj->isNative();
+}
+
+JS_PUBLIC_API(JSRuntime *)
+JS_GetObjectRuntime(JSObject *obj)
+{
+    return obj->compartment()->rt;
 }
 
 JS_PUBLIC_API(JSBool)
@@ -4301,7 +4295,7 @@ JS_NewPropertyIterator(JSContext *cx, JSObject *obj)
 {
     JSObject *iterobj;
     void *pdata;
-    jsint index;
+    int index;
     JSIdArray *ida;
 
     AssertNoGC(cx);
@@ -4338,7 +4332,7 @@ JS_NewPropertyIterator(JSContext *cx, JSObject *obj)
 JS_PUBLIC_API(JSBool)
 JS_NextProperty(JSContext *cx, JSObject *iterobj, jsid *idp)
 {
-    jsint i;
+    int32_t i;
     const Shape *shape;
     JSIdArray *ida;
 
@@ -4405,7 +4399,7 @@ JS_SetReservedSlot(JSObject *obj, uint32_t index, jsval v)
 }
 
 JS_PUBLIC_API(JSObject *)
-JS_NewArrayObject(JSContext *cx, jsint length, jsval *vector)
+JS_NewArrayObject(JSContext *cx, int length, jsval *vector)
 {
     JS_THREADSAFE_ASSERT(cx->compartment != cx->runtime->atomsCompartment);
     AssertNoGC(cx);
@@ -4451,16 +4445,16 @@ JS_CheckAccess(JSContext *cx, JSObject *obj, jsid id, JSAccessMode mode,
 }
 
 #ifdef JS_THREADSAFE
-JS_PUBLIC_API(jsrefcount)
+JS_PUBLIC_API(int)
 JS_HoldPrincipals(JSContext *cx, JSPrincipals *principals)
 {
     return JS_ATOMIC_INCREMENT(&principals->refcount);
 }
 
-JS_PUBLIC_API(jsrefcount)
+JS_PUBLIC_API(int)
 JS_DropPrincipals(JSContext *cx, JSPrincipals *principals)
 {
-    jsrefcount rc = JS_ATOMIC_DECREMENT(&principals->refcount);
+    int rc = JS_ATOMIC_DECREMENT(&principals->refcount);
     if (rc == 0)
         principals->destroy(cx, principals);
     return rc;

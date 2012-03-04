@@ -407,7 +407,6 @@ pref("extensions.spellcheck.inline.max-misspellings", 500);
 
 pref("editor.use_custom_colors", false);
 pref("editor.singleLine.pasteNewlines",      2);
-pref("editor.quotesPreformatted",            false);
 pref("editor.use_css",                       true);
 pref("editor.css.default_length_unit",       "px");
 pref("editor.resizing.preserve_ratio",       true);
@@ -2019,6 +2018,9 @@ pref("plugin.scan.WindowsMediaPlayer", "7.0");
 // Locate plugins by the directories specified in the Windows registry for PLIDs
 // Which is currently HKLM\Software\MozillaPlugins\xxxPLIDxxx\Path
 pref("plugin.scan.plid.all", true);
+
+// Allow the new AsyncDrawing mode to be used for plugins.
+pref("plugin.allow.asyncdrawing", false);
 
 // Help Windows NT, 2000, and XP dialup a RAS connection
 // when a network address is unreachable.

@@ -152,7 +152,6 @@
 #include "prprf.h"
 
 #include "nsSVGFeatures.h"
-#include "nsDOMMemoryReporter.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsCycleCollector.h"
 #include "xpcpublic.h"
@@ -1981,7 +1980,7 @@ nsGenericElement::GetChildrenList()
   return slots->mChildrenList;
 }
 
-nsIDOMDOMTokenList*
+nsDOMTokenList*
 nsGenericElement::GetClassList(nsresult *aResult)
 {
   *aResult = NS_ERROR_OUT_OF_MEMORY;
@@ -2469,6 +2468,9 @@ nsGenericElement::nsDOMSlots::Traverse(nsCycleCollectionTraversalCallback &cb, b
 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mChildrenList");
   cb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIDOMNodeList*, mChildrenList));
+
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mClassList");
+  cb.NoteXPCOMChild(mClassList.get());
 }
 
 void
@@ -2483,6 +2485,10 @@ nsGenericElement::nsDOMSlots::Unlink(bool aIsXUL)
   if (aIsXUL)
     NS_IF_RELEASE(mControllers);
   mChildrenList = nsnull;
+  if (mClassList) {
+    mClassList->DropReference();
+    mClassList = nsnull;
+  }
 }
 
 nsGenericElement::nsGenericElement(already_AddRefed<nsINodeInfo> aNodeInfo)
@@ -6197,29 +6203,32 @@ nsGenericElement::MozMatchesSelector(const nsAString& aSelector, bool* aReturn)
   return rv;
 }
 
-PRInt64
-nsINode::SizeOf() const
+size_t
+nsINode::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
-  PRInt64 size = sizeof(*this);
-
+  size_t n = 0;
   nsEventListenerManager* elm =
     const_cast<nsINode*>(this)->GetListenerManager(false);
   if (elm) {
-    size += elm->SizeOf();
+    n += elm->SizeOfIncludingThis(aMallocSizeOf);
   }
 
-  return size;
+  // Measurement of the following members may be added later if DMD finds it is
+  // worthwhile:
+  // - mNodeInfo (Nb: allocated in nsNodeInfo.cpp with a nsFixedSizeAllocator)
+  // - mSlots
+  //
+  // The following members are not measured:
+  // - mParent, mNextSibling, mPreviousSibling, mFirstChild: because they're
+  //   non-owning
+  return n;
 }
 
-PRInt64
-nsGenericElement::SizeOf() const
+size_t
+nsGenericElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
-  PRInt64 size = MemoryReporter::GetBasicSize<nsGenericElement, Element>(this);
-
-  size -= sizeof(mAttrsAndChildren);
-  size += mAttrsAndChildren.SizeOf();
-
-  return size;
+  return Element::SizeOfExcludingThis(aMallocSizeOf) +
+         mAttrsAndChildren.SizeOfExcludingThis(aMallocSizeOf);
 }
 
 #define EVENT(name_, id_, type_, struct_)                                    \
