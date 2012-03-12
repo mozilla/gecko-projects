@@ -159,6 +159,8 @@
 #include "nsLayoutStatics.h"
 #include "mozilla/Telemetry.h"
 
+#include "mozilla/CORSMode.h"
+
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -6234,6 +6236,48 @@ nsGenericElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
   return Element::SizeOfExcludingThis(aMallocSizeOf) +
          mAttrsAndChildren.SizeOfExcludingThis(aMallocSizeOf);
+}
+
+static const nsAttrValue::EnumTable kCORSAttributeTable[] = {
+  // Order matters here
+  // See ParseCORSValue
+  { "anonymous",       CORS_ANONYMOUS       },
+  { "use-credentials", CORS_USE_CREDENTIALS },
+  { 0 }
+};
+
+/* static */ void
+nsGenericElement::ParseCORSValue(const nsAString& aValue,
+                                 nsAttrValue& aResult)
+{
+  DebugOnly<bool> success =
+    aResult.ParseEnumValue(aValue, kCORSAttributeTable, false,
+                           // default value is anonymous if aValue is
+                           // not a value we understand
+                           &kCORSAttributeTable[0]);
+  MOZ_ASSERT(success);
+}
+
+/* static */ CORSMode
+nsGenericElement::StringToCORSMode(const nsAString& aValue)
+{
+  if (aValue.IsVoid()) {
+    return CORS_NONE;
+  }
+
+  nsAttrValue val;
+  nsGenericElement::ParseCORSValue(aValue, val);
+  return CORSMode(val.GetEnumValue());
+}
+
+/* static */ CORSMode
+nsGenericElement::AttrValueToCORSMode(const nsAttrValue* aValue)
+{
+  if (!aValue) {
+    return CORS_NONE;
+  }
+
+  return CORSMode(aValue->GetEnumValue());
 }
 
 #define EVENT(name_, id_, type_, struct_)                                    \
