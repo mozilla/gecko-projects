@@ -935,10 +935,10 @@ xpicleanup@BIN_SUFFIX@
   components/nsTelephonyWorker.js
   components/Telephony.manifest
   components/Telephony.js
-  components/nsWifiWorker.js
-  components/nsWifiWorker.manifest
-  components/nsDOMWifiManager.js
-  components/nsDOMWifiManager.manifest
+  components/WifiWorker.js
+  components/WifiWorker.manifest
+  components/DOMWifiManager.js
+  components/DOMWifiManager.manifest
 #endif
   components/txEXSLTRegExFunctions.js
   components/Weave.js
