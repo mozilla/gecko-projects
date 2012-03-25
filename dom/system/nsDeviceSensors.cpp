@@ -37,7 +37,7 @@
 #include "mozilla/Hal.h"
 #include "mozilla/HalSensor.h"
 
-#include "nsDeviceMotion.h"
+#include "nsDeviceSensors.h"
 
 #include "nsAutoPtr.h"
 #include "nsIDOMEvent.h"
@@ -57,73 +57,72 @@ using namespace hal;
 #define DEFAULT_SENSOR_POLL 100
 
 static const nsTArray<nsIDOMWindow*>::index_type NoIndex =
-    nsTArray<nsIDOMWindow*>::NoIndex;
+  nsTArray<nsIDOMWindow*>::NoIndex;
 
-class nsDeviceMotionData : public nsIDeviceMotionData
+class nsDeviceSensorData : public nsIDeviceSensorData
 {
 public:
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIDEVICEMOTIONDATA
+  NS_DECL_NSIDEVICESENSORDATA
 
-  nsDeviceMotionData(unsigned long type, double x, double y, double z);
+  nsDeviceSensorData(unsigned long type, double x, double y, double z);
 
 private:
-  ~nsDeviceMotionData();
+  ~nsDeviceSensorData();
 
 protected:
   unsigned long mType;
   double mX, mY, mZ;
 };
 
-nsDeviceMotionData::nsDeviceMotionData(unsigned long type, double x, double y, double z)
+nsDeviceSensorData::nsDeviceSensorData(unsigned long type, double x, double y, double z)
   : mType(type), mX(x), mY(y), mZ(z)
 {
 }
 
-NS_INTERFACE_MAP_BEGIN(nsDeviceMotionData)
-NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDeviceMotionData)
+NS_INTERFACE_MAP_BEGIN(nsDeviceSensorData)
+NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDeviceSensorData)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_ADDREF(nsDeviceMotionData)
-NS_IMPL_RELEASE(nsDeviceMotionData)
+NS_IMPL_ADDREF(nsDeviceSensorData)
+NS_IMPL_RELEASE(nsDeviceSensorData)
 
-nsDeviceMotionData::~nsDeviceMotionData()
+nsDeviceSensorData::~nsDeviceSensorData()
 {
 }
 
-NS_IMETHODIMP nsDeviceMotionData::GetType(PRUint32 *aType)
+NS_IMETHODIMP nsDeviceSensorData::GetType(PRUint32 *aType)
 {
   NS_ENSURE_ARG_POINTER(aType);
   *aType = mType;
   return NS_OK;
 }
 
-NS_IMETHODIMP nsDeviceMotionData::GetX(double *aX)
+NS_IMETHODIMP nsDeviceSensorData::GetX(double *aX)
 {
   NS_ENSURE_ARG_POINTER(aX);
   *aX = mX;
   return NS_OK;
 }
 
-NS_IMETHODIMP nsDeviceMotionData::GetY(double *aY)
+NS_IMETHODIMP nsDeviceSensorData::GetY(double *aY)
 {
   NS_ENSURE_ARG_POINTER(aY);
   *aY = mY;
   return NS_OK;
 }
 
-NS_IMETHODIMP nsDeviceMotionData::GetZ(double *aZ)
+NS_IMETHODIMP nsDeviceSensorData::GetZ(double *aZ)
 {
   NS_ENSURE_ARG_POINTER(aZ);
   *aZ = mZ;
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsDeviceMotion, nsIDeviceMotion)
+NS_IMPL_ISUPPORTS1(nsDeviceSensors, nsIDeviceSensors)
 
-nsDeviceMotion::nsDeviceMotion()
-: mStarted(false),
-  mEnabled(true)
+nsDeviceSensors::nsDeviceSensors()
+: mEnabled(true)
 {
   mLastDOMMotionEventTime = TimeStamp::Now();
 
@@ -134,101 +133,63 @@ nsDeviceMotion::nsDeviceMotion()
     if (NS_SUCCEEDED(rv) && bvalue == false)
       mEnabled = false;
   }
+
+  for (int i = 0; i < NUM_SENSOR_TYPE; i++) {
+    nsTArray<nsIDOMWindow*> *windows = new nsTArray<nsIDOMWindow*>();
+    mWindowListeners.AppendElement(windows);
+  }
+
   mLastDOMMotionEventTime = TimeStamp::Now();
 }
 
-nsDeviceMotion::~nsDeviceMotion()
+nsDeviceSensors::~nsDeviceSensors()
 {
-  if (mStarted)
-    Shutdown();
-
-  if (mTimeoutTimer)
-    mTimeoutTimer->Cancel();
-}
-
-void
-nsDeviceMotion::StartDisconnectTimer()
-{
-  if (mTimeoutTimer)
-    mTimeoutTimer->Cancel();
-
-  mTimeoutTimer = do_CreateInstance("@mozilla.org/timer;1");
-  if (mTimeoutTimer)
-    mTimeoutTimer->InitWithFuncCallback(TimeoutHandler,
-                                        this,
-                                        2000, 
-                                        nsITimer::TYPE_ONE_SHOT);  
-}
-
-void
-nsDeviceMotion::TimeoutHandler(nsITimer *aTimer, void *aClosure)
-{
-  // the reason that we use self, instead of just using nsITimerCallback or nsIObserver
-  // is so that subclasses are free to use timers without worry about the base classes's
-  // usage.
-  nsDeviceMotion *self = reinterpret_cast<nsDeviceMotion *>(aClosure);
-  if (!self) {
-    NS_ERROR("no self");
-    return;
+  for (int i = 0; i < NUM_SENSOR_TYPE; i++) {
+    if (IsSensorEnabled(i))  
+      UnregisterSensorObserver((SensorType)i, this);
   }
-  
-  // what about listeners that don't clean up properly?  they will leak
-  if (self->mListeners.Count() == 0 && self->mWindowListeners.Length() == 0) {
-    self->Shutdown();
-    self->mStarted = false;
+
+  for (int i = 0; i < NUM_SENSOR_TYPE; i++) {
+    delete mWindowListeners[i];
   }
 }
 
-NS_IMETHODIMP nsDeviceMotion::AddListener(nsIDeviceMotionListener *aListener)
+NS_IMETHODIMP nsDeviceSensors::AddWindowListener(PRUint32 aType, nsIDOMWindow *aWindow)
 {
-  if (mListeners.IndexOf(aListener) != -1)
-    return NS_OK; // already exists
-
-  if (mStarted == false) {
-    mStarted = true;
-    Startup();
-  }
-
-  mListeners.AppendObject(aListener);
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsDeviceMotion::RemoveListener(nsIDeviceMotionListener *aListener)
-{
-  if (mListeners.IndexOf(aListener) == -1)
-    return NS_OK; // doesn't exist
-
-  mListeners.RemoveObject(aListener);
-  StartDisconnectTimer();
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsDeviceMotion::AddWindowListener(nsIDOMWindow *aWindow)
-{
-  if (mWindowListeners.IndexOf(aWindow) != NoIndex)
-      return NS_OK;
-
-  if (mStarted == false) {
-    mStarted = true;
-    Startup();
-  }
-
-  mWindowListeners.AppendElement(aWindow);
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsDeviceMotion::RemoveWindowListener(nsIDOMWindow *aWindow)
-{
-  if (mWindowListeners.IndexOf(aWindow) == NoIndex)
+  if (mWindowListeners[aType]->IndexOf(aWindow) != NoIndex)
     return NS_OK;
 
-  mWindowListeners.RemoveElement(aWindow);
-  StartDisconnectTimer();
+  if (!IsSensorEnabled(aType)) {
+    RegisterSensorObserver((SensorType)aType, this);
+  }
+
+  mWindowListeners[aType]->AppendElement(aWindow);
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsDeviceSensors::RemoveWindowListener(PRUint32 aType, nsIDOMWindow *aWindow)
+{
+  if (mWindowListeners[aType]->IndexOf(aWindow) == NoIndex)
+    return NS_OK;
+
+  mWindowListeners[aType]->RemoveElement(aWindow);
+
+  if (mWindowListeners[aType]->Length() == 0)
+    UnregisterSensorObserver((SensorType)aType, this);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsDeviceSensors::RemoveWindowAsListener(nsIDOMWindow *aWindow)
+{
+  for (int i = 0; i < NUM_SENSOR_TYPE; i++) {
+    RemoveWindowListener((SensorType)i, aWindow);
+  }
   return NS_OK;
 }
 
 void 
-nsDeviceMotion::Notify(const mozilla::hal::SensorData& aSensorData)
+nsDeviceSensors::Notify(const mozilla::hal::SensorData& aSensorData)
 {
   if (!mEnabled)
     return;
@@ -239,16 +200,9 @@ nsDeviceMotion::Notify(const mozilla::hal::SensorData& aSensorData)
   double y = aSensorData.values()[1];
   double z = aSensorData.values()[2];
 
-  nsCOMArray<nsIDeviceMotionListener> listeners = mListeners;
-  for (PRUint32 i = listeners.Count(); i > 0 ; ) {
-    --i;
-    nsRefPtr<nsDeviceMotionData> a = new nsDeviceMotionData(type, x, y, z);
-    listeners[i]->OnMotionChange(a);
-  }
-
   nsCOMArray<nsIDOMWindow> windowListeners;
-  for (PRUint32 i = 0; i < mWindowListeners.Length(); i++) {
-    windowListeners.AppendObject(mWindowListeners[i]);
+  for (PRUint32 i = 0; i < mWindowListeners[type]->Length(); i++) {
+    windowListeners.AppendObject(mWindowListeners[type]->SafeElementAt(i));
   }
 
   for (PRUint32 i = windowListeners.Count(); i > 0 ; ) {
@@ -267,18 +221,18 @@ nsDeviceMotion::Notify(const mozilla::hal::SensorData& aSensorData)
 
     if (domdoc) {
       nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(windowListeners[i]);
-      if (type == nsIDeviceMotionData::TYPE_ACCELERATION || 
-        type == nsIDeviceMotionData::TYPE_LINEAR_ACCELERATION || 
-	type == nsIDeviceMotionData::TYPE_GYROSCOPE)
+      if (type == nsIDeviceSensorData::TYPE_ACCELERATION || 
+        type == nsIDeviceSensorData::TYPE_LINEAR_ACCELERATION || 
+        type == nsIDeviceSensorData::TYPE_GYROSCOPE)
         FireDOMMotionEvent(domdoc, target, type, x, y, z);
-      else if (type == nsIDeviceMotionData::TYPE_ORIENTATION)
+      else if (type == nsIDeviceSensorData::TYPE_ORIENTATION)
         FireDOMOrientationEvent(domdoc, target, x, y, z);
     }
   }
 }
 
 void
-nsDeviceMotion::FireDOMOrientationEvent(nsIDOMDocument *domdoc,
+nsDeviceSensors::FireDOMOrientationEvent(nsIDOMDocument *domdoc,
                                         nsIDOMEventTarget *target,
                                         double alpha,
                                         double beta,
@@ -311,7 +265,7 @@ nsDeviceMotion::FireDOMOrientationEvent(nsIDOMDocument *domdoc,
 
 
 void
-nsDeviceMotion::FireDOMMotionEvent(nsIDOMDocument *domdoc,
+nsDeviceSensors::FireDOMMotionEvent(nsIDOMDocument *domdoc,
                                    nsIDOMEventTarget *target,
                                    PRUint32 type,
                                    double x,
@@ -321,19 +275,19 @@ nsDeviceMotion::FireDOMMotionEvent(nsIDOMDocument *domdoc,
   bool fireEvent = TimeStamp::Now() > mLastDOMMotionEventTime + TimeDuration::FromMilliseconds(DEFAULT_SENSOR_POLL);
 
   switch (type) {
-  case nsIDeviceMotionData::TYPE_LINEAR_ACCELERATION:
-      mLastAcceleration = new nsDOMDeviceAcceleration(x, y, z);
-      break;
-  case nsIDeviceMotionData::TYPE_ACCELERATION:
-      mLastAccelerationIncluduingGravity = new nsDOMDeviceAcceleration(x, y, z);
-      break;
-  case nsIDeviceMotionData::TYPE_GYROSCOPE:
-      mLastRotationRate = new nsDOMDeviceRotationRate(x, y, z);
-      break;
+  case nsIDeviceSensorData::TYPE_LINEAR_ACCELERATION:
+    mLastAcceleration = new nsDOMDeviceAcceleration(x, y, z);
+    break;
+  case nsIDeviceSensorData::TYPE_ACCELERATION:
+    mLastAccelerationIncluduingGravity = new nsDOMDeviceAcceleration(x, y, z);
+    break;
+  case nsIDeviceSensorData::TYPE_GYROSCOPE:
+    mLastRotationRate = new nsDOMDeviceRotationRate(x, y, z);
+    break;
   }
 
   if (!fireEvent && (!mLastAcceleration || !mLastAccelerationIncluduingGravity || !mLastRotationRate)) {
-      return;
+    return;
   }
 
   nsCOMPtr<nsIDOMEvent> event;
@@ -341,9 +295,8 @@ nsDeviceMotion::FireDOMMotionEvent(nsIDOMDocument *domdoc,
 
   nsCOMPtr<nsIDOMDeviceMotionEvent> me = do_QueryInterface(event);
 
-  if (!me) {
+  if (!me)
     return;
-  }
 
   me->InitDeviceMotionEvent(NS_LITERAL_STRING("devicemotion"),
                             true,
@@ -356,7 +309,7 @@ nsDeviceMotion::FireDOMMotionEvent(nsIDOMDocument *domdoc,
   nsCOMPtr<nsIPrivateDOMEvent> privateEvent = do_QueryInterface(event);
   if (privateEvent)
     privateEvent->SetTrusted(true);
-  
+
   bool defaultActionEnabled = true;
   target->DispatchEvent(event, &defaultActionEnabled);
 
@@ -365,22 +318,3 @@ nsDeviceMotion::FireDOMMotionEvent(nsIDOMDocument *domdoc,
   mLastAcceleration = nsnull;
   mLastDOMMotionEventTime = TimeStamp::Now();
 }
-
-void nsDeviceMotion::Startup()
-{
-  // Bug 734855 - we probably can make this finer grain
-  // based on the DOM APIs that are being invoked.
-  RegisterSensorObserver(SENSOR_ACCELERATION, this);
-  RegisterSensorObserver(SENSOR_ORIENTATION, this);
-  RegisterSensorObserver(SENSOR_LINEAR_ACCELERATION, this);
-  RegisterSensorObserver(SENSOR_GYROSCOPE, this);
-}
-
-void nsDeviceMotion::Shutdown()
-{
-  UnregisterSensorObserver(SENSOR_ACCELERATION, this);
-  UnregisterSensorObserver(SENSOR_ORIENTATION, this);
-  UnregisterSensorObserver(SENSOR_LINEAR_ACCELERATION, this);
-  UnregisterSensorObserver(SENSOR_GYROSCOPE, this);
-}
-
