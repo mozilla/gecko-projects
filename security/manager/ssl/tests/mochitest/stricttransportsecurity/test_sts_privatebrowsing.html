@@ -222,7 +222,7 @@ function dump_STSState() {
   //  ... clear any STS data ...
   var tests = [
     test_sts_before_private_mode,
-    clean_up_sts_state,
+    clean_up_sts_state
   ];
   // 1.  test that STS works in private browsing mode
   //     (load sts-bootstrapped "subdomain" tests)
@@ -231,11 +231,11 @@ function dump_STSState() {
   //  ... clear any STS data ...
   // Skip these tests if there is no private mode support.
   if (gPBSvc) {
-    tests += [
+    tests.concat([
       test_sts_in_private_mode,
       test_sts_after_exiting_private_mode,
-      clean_up_sts_state,
-    ];
+      clean_up_sts_state
+    ]);
   }
 
   function nextTest() {
