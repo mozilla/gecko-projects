@@ -556,7 +556,7 @@
                 this.mTab.removeAttribute("progress");
 
                 if (aWebProgress.DOMWindow == this.mBrowser.contentWindow) {
-                  if (!Components.isSuccessCode(aRequest.status) &&
+                  if (!Components.isSuccessCode(aStatus) &&
                       !isTabEmpty(this.mTab)) {
                     // Restore the current document's location in case the
                     // request was stopped (possibly from a content script)
