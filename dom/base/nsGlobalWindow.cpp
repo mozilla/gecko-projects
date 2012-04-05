@@ -808,7 +808,7 @@ public:
     return true;
   }
   JSString *obj_toString(JSContext *cx, JSObject *wrapper);
-  void finalize(JSContext *cx, JSObject *proxy);
+  void finalize(JSFreeOp *fop, JSObject *proxy);
 
   static nsOuterWindowProxy singleton;
 };
@@ -823,7 +823,7 @@ nsOuterWindowProxy::obj_toString(JSContext *cx, JSObject *proxy)
 }
 
 void
-nsOuterWindowProxy::finalize(JSContext *cx, JSObject *proxy)
+nsOuterWindowProxy::finalize(JSFreeOp *fop, JSObject *proxy)
 {
   nsISupports *global =
     static_cast<nsISupports*>(js::GetProxyExtra(proxy, 0).toPrivate());
@@ -8451,15 +8451,6 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
       nsCAutoString currentDomain;
       rv = codebase->GetAsciiHost(currentDomain);
       if (NS_FAILED(rv)) {
-        return NS_OK;
-      }
-
-      if (!nsDOMStorageList::CanAccessDomain(NS_ConvertUTF16toUTF8(aData),
-                                             currentDomain)) {
-        // This window can't reach the global storage object for the
-        // domain for which the change happened, so don't fire any
-        // events in this window.
-
         return NS_OK;
       }
     }

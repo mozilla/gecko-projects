@@ -707,7 +707,7 @@ JSRuntime::JSRuntime()
     nativeStackQuota(0),
     interpreterFrames(NULL),
     cxCallback(NULL),
-    compartmentCallback(NULL),
+    destroyCompartmentCallback(NULL),
     activityCallback(NULL),
     activityCallbackArg(NULL),
 #ifdef JS_THREADSAFE
@@ -776,6 +776,7 @@ JSRuntime::JSRuntime()
     gcLock(NULL),
     gcHelperThread(thisFromCtor()),
 #endif
+    defaultFreeOp_(thisFromCtor(), false, false),
     debuggerMutations(0),
     securityCallbacks(const_cast<JSSecurityCallbacks *>(&NullSecurityCallbacks)),
     destroyPrincipals(NULL),
@@ -1324,12 +1325,10 @@ JS_GetImplementationVersion(void)
     return "JavaScript-C 1.8.5+ 2011-04-16";
 }
 
-JS_PUBLIC_API(JSCompartmentCallback)
-JS_SetCompartmentCallback(JSRuntime *rt, JSCompartmentCallback callback)
+JS_PUBLIC_API(void)
+JS_SetDestroyCompartmentCallback(JSRuntime *rt, JSDestroyCompartmentCallback callback)
 {
-    JSCompartmentCallback old = rt->compartmentCallback;
-    rt->compartmentCallback = callback;
-    return old;
+    rt->destroyCompartmentCallback = callback;
 }
 
 JS_PUBLIC_API(JSWrapObjectCallback)
@@ -2230,6 +2229,18 @@ JS_free(JSContext *cx, void *p)
 }
 
 JS_PUBLIC_API(void)
+JS_freeop(JSFreeOp *fop, void *p)
+{
+    return FreeOp::get(fop)->free_(p);
+}
+
+JS_PUBLIC_API(JSFreeOp *)
+JS_GetDefaultFreeOp(JSRuntime *rt)
+{
+    return rt->defaultFreeOp();
+}
+
+JS_PUBLIC_API(void)
 JS_updateMallocCounter(JSContext *cx, size_t nbytes)
 {
     return cx->runtime->updateMallocCounter(cx, nbytes);
@@ -2331,39 +2342,63 @@ JS_AddNamedGCThingRoot(JSContext *cx, void **rp, const char *name)
 
 /* We allow unrooting from finalizers within the GC */
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(void)
 JS_RemoveValueRoot(JSContext *cx, jsval *vp)
 {
     CHECK_REQUEST(cx);
-    return js_RemoveRoot(cx->runtime, (void *)vp);
+    js_RemoveRoot(cx->runtime, (void *)vp);
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(void)
 JS_RemoveStringRoot(JSContext *cx, JSString **rp)
 {
     CHECK_REQUEST(cx);
-    return js_RemoveRoot(cx->runtime, (void *)rp);
+    js_RemoveRoot(cx->runtime, (void *)rp);
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(void)
 JS_RemoveObjectRoot(JSContext *cx, JSObject **rp)
 {
     CHECK_REQUEST(cx);
-    return js_RemoveRoot(cx->runtime, (void *)rp);
+    js_RemoveRoot(cx->runtime, (void *)rp);
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(void)
 JS_RemoveScriptRoot(JSContext *cx, JSScript **rp)
 {
     CHECK_REQUEST(cx);
-    return js_RemoveRoot(cx->runtime, (void *)rp);
+    js_RemoveRoot(cx->runtime, (void *)rp);
 }
 
-JS_PUBLIC_API(JSBool)
+JS_PUBLIC_API(void)
 JS_RemoveGCThingRoot(JSContext *cx, void **rp)
 {
     CHECK_REQUEST(cx);
-    return js_RemoveRoot(cx->runtime, (void *)rp);
+    js_RemoveRoot(cx->runtime, (void *)rp);
+}
+
+JS_PUBLIC_API(void)
+JS_RemoveValueRootRT(JSRuntime *rt, jsval *vp)
+{
+    js_RemoveRoot(rt, (void *)vp);
+}
+
+JS_PUBLIC_API(void)
+JS_RemoveStringRootRT(JSRuntime *rt, JSString **rp)
+{
+    js_RemoveRoot(rt, (void *)rp);
+}
+
+JS_PUBLIC_API(void)
+JS_RemoveObjectRootRT(JSRuntime *rt, JSObject **rp)
+{
+    js_RemoveRoot(rt, (void *)rp);
+}
+
+JS_PUBLIC_API(void)
+JS_RemoveScriptRoot(JSRuntime *rt, JSScript **rp)
+{
+    js_RemoveRoot(rt, (void *)rp);
 }
 
 JS_NEVER_INLINE JS_PUBLIC_API(void)
@@ -3015,7 +3050,7 @@ JS_IdArrayGet(JSContext *cx, JSIdArray *ida, int index)
 JS_PUBLIC_API(void)
 JS_DestroyIdArray(JSContext *cx, JSIdArray *ida)
 {
-    cx->free_(ida);
+    DestroyIdArray(cx->runtime->defaultFreeOp(), ida);
 }
 
 JS_PUBLIC_API(JSBool)
@@ -4190,7 +4225,7 @@ JS_ClearScope(JSContext *cx, JSObject *obj)
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
 
-    JSFinalizeOp clearOp = obj->getOps()->clear;
+    ClearOp clearOp = obj->getOps()->clear;
     if (clearOp)
         clearOp(cx, obj);
 
@@ -4230,7 +4265,7 @@ JS_Enumerate(JSContext *cx, JSObject *obj)
 const uint32_t JSSLOT_ITER_INDEX = 0;
 
 static void
-prop_iter_finalize(JSContext *cx, JSObject *obj)
+prop_iter_finalize(FreeOp *fop, JSObject *obj)
 {
     void *pdata = obj->getPrivate();
     if (!pdata)
@@ -4239,7 +4274,7 @@ prop_iter_finalize(JSContext *cx, JSObject *obj)
     if (obj->getSlot(JSSLOT_ITER_INDEX).toInt32() >= 0) {
         /* Non-native case: destroy the ida enumerated when obj was created. */
         JSIdArray *ida = (JSIdArray *) pdata;
-        JS_DestroyIdArray(cx, ida);
+        DestroyIdArray(fop, ida);
     }
 }
 

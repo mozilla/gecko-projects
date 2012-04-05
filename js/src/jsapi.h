@@ -1344,13 +1344,33 @@ typedef JSBool
 typedef JSType
 (* JSTypeOfOp)(JSContext *cx, JSObject *obj);
 
+typedef struct JSFreeOp JSFreeOp;
+
+struct JSFreeOp {
+#ifndef __cplusplus
+    JSRuntime   *runtime;
+#else
+  private:
+    JSRuntime   *runtime_;
+
+  protected:
+    JSFreeOp(JSRuntime *rt)
+      : runtime_(rt) { }
+
+  public:
+    JSRuntime *runtime() const {
+        return runtime_;
+    }
+#endif
+};
+
 /*
  * Finalize obj, which the garbage collector has determined to be unreachable
  * from other live objects or from GC roots.  Obviously, finalizers must never
  * store a reference to obj.
  */
 typedef void
-(* JSFinalizeOp)(JSContext *cx, JSObject *obj);
+(* JSFinalizeOp)(JSFreeOp *fop, JSObject *obj);
 
 /*
  * Finalizes external strings created by JS_NewExternalString.
@@ -1455,7 +1475,7 @@ typedef enum JSFinalizeStatus {
 } JSFinalizeStatus;
 
 typedef void
-(* JSFinalizeCallback)(JSContext *cx, JSFinalizeStatus status);
+(* JSFinalizeCallback)(JSFreeOp *fop, JSFinalizeStatus status);
 
 /*
  * Generic trace operation that calls JS_CallTracer on each traceable thing
@@ -1577,12 +1597,8 @@ typedef JSObject *
 typedef JSObject *
 (* JSPreWrapCallback)(JSContext *cx, JSObject *scope, JSObject *obj, unsigned flags);
 
-typedef enum {
-    JSCOMPARTMENT_DESTROY
-} JSCompartmentOp;
-
-typedef JSBool
-(* JSCompartmentCallback)(JSContext *cx, JSCompartment *compartment, unsigned compartmentOp);
+typedef void
+(* JSDestroyCompartmentCallback)(JSFreeOp *fop, JSCompartment *compartment);
 
 /*
  * Read structured data from the reader r. This hook is used to read a value
@@ -2661,8 +2677,8 @@ JS_SetJitHardening(JSRuntime *rt, JSBool enabled);
 extern JS_PUBLIC_API(const char *)
 JS_GetImplementationVersion(void);
 
-extern JS_PUBLIC_API(JSCompartmentCallback)
-JS_SetCompartmentCallback(JSRuntime *rt, JSCompartmentCallback callback);
+extern JS_PUBLIC_API(void)
+JS_SetDestroyCompartmentCallback(JSRuntime *rt, JSDestroyCompartmentCallback callback);
 
 extern JS_PUBLIC_API(JSWrapObjectCallback)
 JS_SetWrapObjectCallbacks(JSRuntime *rt,
@@ -2954,8 +2970,22 @@ JS_malloc(JSContext *cx, size_t nbytes);
 extern JS_PUBLIC_API(void *)
 JS_realloc(JSContext *cx, void *p, size_t nbytes);
 
+/*
+ * A wrapper for js_free(p) that may delay js_free(p) invocation as a
+ * performance optimization.
+ */
 extern JS_PUBLIC_API(void)
 JS_free(JSContext *cx, void *p);
+
+/*
+ * A wrapper for js_free(p) that may delay js_free(p) invocation as a
+ * performance optimization as specified by the given JSFreeOp instance.
+ */
+extern JS_PUBLIC_API(void)
+JS_freeop(JSFreeOp *fop, void *p);
+
+extern JS_PUBLIC_API(JSFreeOp *)
+JS_GetDefaultFreeOp(JSRuntime *rt);    
 
 extern JS_PUBLIC_API(void)
 JS_updateMallocCounter(JSContext *cx, size_t nbytes);
@@ -3027,20 +3057,32 @@ JS_AddNamedScriptRoot(JSContext *cx, JSScript **rp, const char *name);
 extern JS_PUBLIC_API(JSBool)
 JS_AddNamedGCThingRoot(JSContext *cx, void **rp, const char *name);
 
-extern JS_PUBLIC_API(JSBool)
+extern JS_PUBLIC_API(void)
 JS_RemoveValueRoot(JSContext *cx, jsval *vp);
 
-extern JS_PUBLIC_API(JSBool)
+extern JS_PUBLIC_API(void)
 JS_RemoveStringRoot(JSContext *cx, JSString **rp);
 
-extern JS_PUBLIC_API(JSBool)
+extern JS_PUBLIC_API(void)
 JS_RemoveObjectRoot(JSContext *cx, JSObject **rp);
 
-extern JS_PUBLIC_API(JSBool)
+extern JS_PUBLIC_API(void)
 JS_RemoveScriptRoot(JSContext *cx, JSScript **rp);
 
-extern JS_PUBLIC_API(JSBool)
+extern JS_PUBLIC_API(void)
 JS_RemoveGCThingRoot(JSContext *cx, void **rp);
+
+extern JS_PUBLIC_API(void)
+JS_RemoveValueRootRT(JSRuntime *rt, jsval *vp);
+
+extern JS_PUBLIC_API(void)
+JS_RemoveStringRootRT(JSRuntime *rt, JSString **rp);
+
+extern JS_PUBLIC_API(void)
+JS_RemoveObjectRootRT(JSRuntime *rt, JSObject **rp);
+
+extern JS_PUBLIC_API(void)
+JS_RemoveScriptRootRT(JSRuntime *rt, JSScript **rp);
 
 /* TODO: remove these APIs */
 
@@ -3050,7 +3092,7 @@ js_AddRootRT(JSRuntime *rt, jsval *vp, const char *name);
 extern JS_FRIEND_API(JSBool)
 js_AddGCThingRootRT(JSRuntime *rt, void **rp, const char *name);
 
-extern JS_FRIEND_API(JSBool)
+extern JS_FRIEND_API(void)
 js_RemoveRoot(JSRuntime *rt, void *rp);
 
 /*

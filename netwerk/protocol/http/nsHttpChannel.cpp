@@ -72,6 +72,7 @@
 #include "nsAlgorithm.h"
 #include "sampler.h"
 #include "nsIConsoleService.h"
+#include "base/compiler_specific.h"
 
 using namespace mozilla;
 
@@ -121,7 +122,7 @@ AutoRedirectVetoNotifier::ReportRedirectResult(bool succeeded)
 //-----------------------------------------------------------------------------
 
 nsHttpChannel::nsHttpChannel()
-    : HttpAsyncAborter<nsHttpChannel>(this)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(HttpAsyncAborter<nsHttpChannel>(this))
     , mLogicalOffset(0)
     , mCacheAccess(0)
     , mPostID(0)
@@ -4155,7 +4156,7 @@ nsHttpChannel::Get##name##Time(PRTime* _retval) {              \
         return NS_OK;                                          \
     }                                                          \
     *_retval = mChannelCreationTime +                          \
-        (stamp - mChannelCreationTimestamp).ToSeconds() * 1e6; \
+        (PRTime) ((stamp - mChannelCreationTimestamp).ToSeconds() * 1e6); \
     return NS_OK;                                              \
 }
 
@@ -4601,10 +4602,18 @@ nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
         // already streamed some data from another source (see, for example,
         // OnDoneReadingPartialCacheEntry).
         //
+
+        // report the current stream offset to our listener... if we've
+        // streamed more than PR_UINT32_MAX, then avoid overflowing the
+        // stream offset.  it's the best we can do without a 64-bit stream
+        // listener API. (Copied from nsInputStreamPump::OnStateTransfer.)
+        PRUint32 odaOffset = mLogicalOffset > PR_UINT32_MAX
+                           ? PR_UINT32_MAX : PRUint32(mLogicalOffset);
+
         nsresult rv =  mListener->OnDataAvailable(this,
                                                   mListenerContext,
                                                   input,
-                                                  mLogicalOffset,
+                                                  odaOffset,
                                                   count);
         if (NS_SUCCEEDED(rv))
             mLogicalOffset = progress;

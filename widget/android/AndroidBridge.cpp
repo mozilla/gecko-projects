@@ -73,6 +73,8 @@
 
 using namespace mozilla;
 
+NS_IMPL_THREADSAFE_ISUPPORTS0(nsFilePickerCallback)
+
 AndroidBridge *AndroidBridge::sBridge = 0;
 
 AndroidBridge *
@@ -134,6 +136,7 @@ AndroidBridge::Init(JNIEnv *jEnv,
     jShowAlertNotification = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "showAlertNotification", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
     jShowFilePickerForExtensions = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "showFilePickerForExtensions", "(Ljava/lang/String;)Ljava/lang/String;");
     jShowFilePickerForMimeType = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "showFilePickerForMimeType", "(Ljava/lang/String;)Ljava/lang/String;");
+    jShowFilePickerAsync = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "showFilePickerAsync", "(Ljava/lang/String;J)V");
     jAlertsProgressListener_OnProgress = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "alertsProgressListener_OnProgress", "(Ljava/lang/String;JJLjava/lang/String;)V");
     jAlertsProgressListener_OnCancel = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "alertsProgressListener_OnCancel", "(Ljava/lang/String;)V");
     jGetDpi = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "getDpi", "()I");
@@ -772,6 +775,20 @@ AndroidBridge::ShowFilePickerForMimeType(nsAString& aFilePath, const nsAString& 
 }
 
 void
+AndroidBridge::ShowFilePickerAsync(const nsAString& aMimeType, nsFilePickerCallback* callback)
+{
+    JNIEnv *env = GetJNIEnv();
+    if (!env)
+        return;
+
+    AutoLocalJNIFrame jniFrame(env); 
+    jstring jMimeType = env->NewString(nsPromiseFlatString(aMimeType).get(),
+                                       aMimeType.Length());
+    callback->AddRef();
+    env->CallStaticVoidMethod(mGeckoAppShellClass, jShowFilePickerAsync, jMimeType, (jlong) callback);
+}
+
+void
 AndroidBridge::SetFullScreen(bool aFullScreen)
 {
     ALOG_BRIDGE("AndroidBridge::SetFullScreen");
@@ -1316,7 +1333,7 @@ namespace mozilla {
                 return NS_OK;
             
             AndroidBridge::Bridge()->FireAndWaitForTracerEvent();
-            mHasRun = PR_TRUE;
+            mHasRun = true;
             mTracerCondVar->Notify();
             return NS_OK;
         }
@@ -1325,7 +1342,7 @@ namespace mozilla {
             if (!mTracerLock || !mTracerCondVar)
                 return false;
             MutexAutoLock lock(*mTracerLock);
-            mHasRun = PR_FALSE;
+            mHasRun = false;
             mMainThread->Dispatch(this, NS_DISPATCH_NORMAL);
             while (!mHasRun)
                 mTracerCondVar->Wait();
@@ -1334,13 +1351,13 @@ namespace mozilla {
 
         void Signal() {
             MutexAutoLock lock(*mTracerLock);
-            mHasRun = PR_TRUE;
+            mHasRun = true;
             mTracerCondVar->Notify();
         }
     private:
         Mutex* mTracerLock;
         CondVar* mTracerCondVar;
-        PRBool mHasRun;
+        bool mHasRun;
         nsCOMPtr<nsIThread> mMainThread;
 
     };

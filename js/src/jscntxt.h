@@ -183,6 +183,45 @@ struct ConservativeGCData
     }
 };
 
+class FreeOp : public JSFreeOp {
+    bool        shouldFreeLater_;
+    bool        onBackgroundThread_;
+
+  public:
+    static FreeOp *get(JSFreeOp *fop) {
+        return static_cast<FreeOp *>(fop);
+    }
+
+    FreeOp(JSRuntime *rt, bool shouldFreeLater, bool onBackgroundThread)
+      : JSFreeOp(rt),
+        shouldFreeLater_(shouldFreeLater),
+        onBackgroundThread_(onBackgroundThread)
+    {
+    }
+
+    bool shouldFreeLater() const {
+        return shouldFreeLater_;
+    }
+
+    bool onBackgroundThread() const {
+        return onBackgroundThread_;
+    }
+
+    inline void free_(void* p);
+
+    JS_DECLARE_DELETE_METHODS(free_, inline)
+
+    static void staticAsserts() {
+        /*
+         * Check that JSFreeOp is the first base class for FreeOp and we can
+         * reinterpret a pointer to JSFreeOp as a pointer to FreeOp without
+         * any offset adjustments. JSClass::freeOp <-> Class::freeOp depends
+         * on this.
+         */
+        JS_STATIC_ASSERT(offsetof(FreeOp, shouldFreeLater_) == sizeof(JSFreeOp));
+    }
+};
+
 } /* namespace js */
 
 struct JSRuntime : js::RuntimeFriendFields
@@ -249,8 +288,8 @@ struct JSRuntime : js::RuntimeFriendFields
     /* Context create/destroy callback. */
     JSContextCallback   cxCallback;
 
-    /* Compartment create/destroy callback. */
-    JSCompartmentCallback compartmentCallback;
+    /* Compartment destroy callback. */
+    JSDestroyCompartmentCallback destroyCompartmentCallback;
 
     js::ActivityCallback  activityCallback;
     void                 *activityCallbackArg;
@@ -505,6 +544,14 @@ struct JSRuntime : js::RuntimeFriendFields
     js::GCHelperThread  gcHelperThread;
 #endif /* JS_THREADSAFE */
 
+  private:
+    js::FreeOp          defaultFreeOp_;
+
+  public:
+    js::FreeOp *defaultFreeOp() {
+        return &defaultFreeOp_;
+    }
+
     uint32_t            debuggerMutations;
 
     const JSSecurityCallbacks *securityCallbacks;
@@ -744,7 +791,7 @@ namespace VersionFlags {
 static const unsigned MASK         = 0x0FFF; /* see JSVersion in jspubtd.h */
 static const unsigned HAS_XML      = 0x1000; /* flag induced by XML option */
 static const unsigned FULL_MASK    = 0x3FFF;
-}
+} /* namespace VersionFlags */
 
 static inline JSVersion
 VersionNumber(JSVersion version)
@@ -806,6 +853,17 @@ VersionIsKnown(JSVersion version)
 typedef HashSet<JSObject *,
                 DefaultHasher<JSObject *>,
                 SystemAllocPolicy> BusyArraysSet;
+
+inline void
+FreeOp::free_(void* p) {
+#ifdef JS_THREADSAFE
+    if (shouldFreeLater()) {
+        runtime()->gcHelperThread.freeLater(p);
+        return;
+    }
+#endif
+    runtime()->free_(p);
+}
 
 } /* namespace js */
 
