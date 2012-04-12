@@ -26,6 +26,3 @@ ac_add_options --with-ccache
 
 # Enable profiling
 ac_add_options --enable-profiling
-
-# Enable shark
-ac_add_options --enable-shark
