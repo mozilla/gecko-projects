@@ -1,4 +1,5 @@
-/* ***** BEGIN LICENSE BLOCK *****
+/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
  * The contents of this file are subject to the Mozilla Public License Version
@@ -11,15 +12,14 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is Android Sync Client.
+ * The Original Code is Mozilla Corporation code.
  *
- * The Initial Developer of the Original Code is
- * the Mozilla Foundation.
+ * The Initial Developer of the Original Code is Mozilla Foundation.
  * Portions created by the Initial Developer are Copyright (C) 2011
  * the Initial Developer. All Rights Reserved.
  *
  * Contributor(s):
- * Jason Voll <jvoll@mozilla.com>
+ *   Bas Schouten <bschouten@mozilla.com>
  *
  * Alternatively, the contents of this file may be used under the terms of
  * either the GNU General Public License Version 2 or later (the "GPL"), or
@@ -35,24 +35,21 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-package org.mozilla.gecko.sync.repositories.android;
+#include "TestDrawTargetD2D.h"
 
-import org.mozilla.gecko.sync.repositories.delegates.RepositorySessionCreationDelegate;
+using namespace mozilla::gfx;
+TestDrawTargetD2D::TestDrawTargetD2D()
+{
+  ::D3D10CreateDevice1(NULL,
+                       D3D10_DRIVER_TYPE_HARDWARE,
+                       NULL,
+                       D3D10_CREATE_DEVICE_BGRA_SUPPORT |
+                       D3D10_CREATE_DEVICE_PREVENT_INTERNAL_THREADING_OPTIMIZATIONS,
+                       D3D10_FEATURE_LEVEL_10_0,
+                       D3D10_1_SDK_VERSION,
+                       byRef(mDevice));
 
-import android.content.Context;
+  Factory::SetDirect3D10Device(mDevice);
 
-public class AndroidBrowserPasswordsRepository extends AndroidBrowserRepository {
-
-  @Override
-  protected AndroidBrowserRepositoryDataAccessor getDataAccessor(Context context) {
-    return new AndroidBrowserPasswordsDataAccessor(context);
-  }
-
-  @Override
-  protected void sessionCreator(RepositorySessionCreationDelegate delegate,
-      Context context) {
-    AndroidBrowserPasswordsRepositorySession session = new AndroidBrowserPasswordsRepositorySession(AndroidBrowserPasswordsRepository.this, context);
-    delegate.onSessionCreated(session);
-  }
-
+  mDT = Factory::CreateDrawTarget(BACKEND_DIRECT2D, IntSize(DT_WIDTH, DT_HEIGHT), FORMAT_B8G8R8A8);
 }

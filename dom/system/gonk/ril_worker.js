@@ -928,12 +928,10 @@ let RIL = {
    *        Call index (1-based) as reported by REQUEST_GET_CURRENT_CALLS.
    */
   hangUp: function hangUp(options) {
-    //TODO need to check whether call is holding/waiting/background
-    // and then use REQUEST_HANGUP_WAITING_OR_BACKGROUND
-    Buf.newParcel(REQUEST_HANGUP);
-    Buf.writeUint32(1);
-    Buf.writeUint32(options.callIndex);
-    Buf.sendParcel();
+    let call = this.currentCalls[options.callIndex];
+    if (call && call.state != CALL_STATE_HOLDING) {
+      Buf.simpleRequest(REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND);
+    }
   },
 
   /**
@@ -950,36 +948,56 @@ let RIL = {
   },
 
   /**
-   * Answer an incoming call.
+   * Answer an incoming/waiting call.
    *
    * @param callIndex
    *        Call index of the call to answer.
    */
   answerCall: function answerCall(options) {
-    // Check for races. Since we dispatched the incoming call notification the
-    // incoming call may have changed. The main thread thinks that it is
-    // answering the call with the given index, so only answer if that is still
-    // incoming.
+    // Check for races. Since we dispatched the incoming/waiting call
+    // notification the incoming/waiting call may have changed. The main
+    // thread thinks that it is answering the call with the given index,
+    // so only answer if that is still incoming/waiting.
     let call = this.currentCalls[options.callIndex];
-    if (call && call.state == CALL_STATE_INCOMING) {
-      Buf.simpleRequest(REQUEST_ANSWER);
+    if (!call) {
+      return;
+    }
+    
+    switch (call.state) {
+      case CALL_STATE_INCOMING:
+        Buf.simpleRequest(REQUEST_ANSWER);
+        break;
+      case CALL_STATE_WAITING:
+        // Answer the waiting (second) call, and hold the first call.
+        Buf.simpleRequest(REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE);
+        break;
     }
   },
 
   /**
-   * Reject an incoming call.
+   * Reject an incoming/waiting call.
    *
    * @param callIndex
    *        Call index of the call to reject.
    */
-  rejectCall: function rejectCall() {
-    // Check for races. Since we dispatched the incoming call notification the
-    // incoming call may have changed. The main thread thinks that it is
-    // rejecting the call with the given index, so only reject if that is still
-    // incoming.
+  rejectCall: function rejectCall(options) {
+    // Check for races. Since we dispatched the incoming/waiting call
+    // notification the incoming/waiting call may have changed. The main
+    // thread thinks that it is rejecting the call with the given index,
+    // so only reject if that is still incoming/waiting.
     let call = this.currentCalls[options.callIndex];
-    if (call && call.state == CALL_STATE_INCOMING) {
-      Buf.simpleRequest(REQUEST_UDUB);
+    if (!call) {
+      return;
+    }
+    
+    switch (call.state) {
+      case CALL_STATE_INCOMING:
+        Buf.simpleRequest(REQUEST_UDUB);
+        break;
+      case CALL_STATE_WAITING:
+        // Reject the waiting (second) call, and remain the first call.
+        Buf.simpleRequest(REQUEST_HANGUP_WAITING_OR_BACKGROUND);
+        break;
     }
   },
   
@@ -1856,9 +1874,27 @@ RIL[REQUEST_HANGUP] = function REQUEST_HANGUP(length, options) {
 
   this.getCurrentCalls();
 }; 
-RIL[REQUEST_HANGUP_WAITING_OR_BACKGROUND] = null;
-RIL[REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND] = null;
-RIL[REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE] = null;
+RIL[REQUEST_HANGUP_WAITING_OR_BACKGROUND] = function REQUEST_HANGUP_WAITING_OR_BACKGROUND(length, options) {
+  if (options.rilRequestError) {
+    return;
+  }
+  
+  this.getCurrentCalls();
+};
+RIL[REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND] = function REQUEST_HANGUP_FOREGROUND_RESUME_BACKGROUND(length, options) {
+  if (options.rilRequestError) {
+    return;
+  }
+
+  this.getCurrentCalls();
+};
+RIL[REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE] = function REQUEST_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE(length, options) {
+  if (options.rilRequestError) {
+    return;
+  }
+
+  this.getCurrentCalls();
+};
 RIL[REQUEST_SWITCH_HOLDING_AND_ACTIVE] = function REQUEST_SWITCH_HOLDING_AND_ACTIVE(length, options) {
   if (options.rilRequestError) {
     return;
@@ -1930,7 +1966,7 @@ RIL[REQUEST_VOICE_REGISTRATION_STATE] = function REQUEST_VOICE_REGISTRATION_STAT
   }
 
   let state = Buf.readStringList();
-debug("voice registration state: " + state);
+  if (DEBUG) debug("voice registration state: " + state);
   this._processVoiceRegistrationState(state);
 };
 RIL[REQUEST_DATA_REGISTRATION_STATE] = function REQUEST_DATA_REGISTRATION_STATE(length, options) {
@@ -2054,9 +2090,11 @@ RIL[REQUEST_SIM_IO] = function REQUEST_SIM_IO(length, options) {
   if (sw1 != ICC_STATUS_NORMAL_ENDING) {
     // See GSM11.11, TS 51.011 clause 9.4, and ISO 7816-4 for the error
     // description.
-    debug("ICC I/O Error EF id = " + options.fileid.toString(16) +
-          " command = " + options.command.toString(16) +
-          "(" + sw1.toString(16) + "/" + sw2.toString(16) + ")");
+    if (DEBUG) {
+      debug("ICC I/O Error EF id = " + options.fileid.toString(16) +
+            " command = " + options.command.toString(16) +
+            "(" + sw1.toString(16) + "/" + sw2.toString(16) + ")");
+    }
     return;
   }
 

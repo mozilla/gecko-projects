@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
-/* ***** BEGIN LICENSE BLOCK *****
+/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
  * The contents of this file are subject to the Mozilla Public License Version
@@ -13,15 +12,14 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is Indexed Database.
+ * The Original Code is Mozilla Corporation code.
  *
- * The Initial Developer of the Original Code is
- * The Mozilla Foundation.
- * Portions created by the Initial Developer are Copyright (C) 2010
+ * The Initial Developer of the Original Code is Mozilla Foundation.
+ * Portions created by the Initial Developer are Copyright (C) 2011
  * the Initial Developer. All Rights Reserved.
  *
  * Contributor(s):
- *   Ben Turner <bent.mozilla@gmail.com>
+ *   Bas Schouten <bschouten@mozilla.com>
  *
  * Alternatively, the contents of this file may be used under the terms of
  * either the GNU General Public License Version 2 or later (the "GPL"), or
@@ -37,24 +35,52 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#include "nsISupports.idl"
+#pragma once
 
-[scriptable, builtinclass, uuid(7aad2542-a5cb-4a57-b20c-c7d16b8582ab)]
-interface nsIIDBDatabaseException : nsISupports
+#include <string>
+#include <vector>
+
+#ifdef _MSC_VER
+// On MSVC otherwise our generic member pointer trick doesn't work.
+#pragma pointers_to_members(full_generality, single_inheritance)
+#endif
+
+#define VERIFY(arg) if (!(arg)) { \
+  LogMessage("VERIFY FAILED: "#arg"\n"); \
+  mTestFailed = true; \
+  }
+
+#define REGISTER_TEST(className, testName) \
+  mTests.push_back(Test(static_cast<TestCall>(&className::testName), #testName, this))
+
+class TestBase
 {
-  // const unsigned short NO_ERR = 0;
-  const unsigned short UNKNOWN_ERR = 1;
-  const unsigned short NON_TRANSIENT_ERR = 2;
-  const unsigned short NOT_FOUND_ERR = 3;
-  const unsigned short CONSTRAINT_ERR = 4;
-  const unsigned short DATA_ERR = 5;
-  const unsigned short NOT_ALLOWED_ERR = 6;
-  const unsigned short TRANSACTION_INACTIVE_ERR = 7;
-  const unsigned short ABORT_ERR = 8;
-  const unsigned short READ_ONLY_ERR = 9;
-  const unsigned short TIMEOUT_ERR = 10;
-  const unsigned short QUOTA_ERR = 11;
-  const unsigned short VERSION_ERR = 12;
+public:
+  TestBase() {}
 
-  readonly attribute unsigned short code;
+  typedef void (TestBase::*TestCall)();
+
+  int RunTests(int *aFailures);
+
+protected:
+  static void LogMessage(std::string aMessage);
+
+  struct Test {
+    Test(TestCall aCall, std::string aName, void *aImplPointer)
+      : funcCall(aCall)
+      , name(aName)
+      , implPointer(aImplPointer)
+    {
+    }
+    TestCall funcCall;
+    std::string name;
+    void *implPointer;
+  };
+  std::vector<Test> mTests;
+
+  bool mTestFailed;
+
+private:
+  // This doesn't really work with our generic member pointer trick.
+  TestBase(const TestBase &aOther);
 };

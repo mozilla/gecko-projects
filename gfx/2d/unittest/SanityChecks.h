@@ -1,5 +1,5 @@
-/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* ***** BEGIN LICENSE BLOCK *****
+/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
  * The contents of this file are subject to the Mozilla Public License Version
@@ -12,14 +12,14 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * The Original Code is mozilla.org code.
+ * The Original Code is Mozilla Corporation code.
  *
- * The Initial Developer of the Original Code is
- * Mozilla Corporation
- * Portions created by the Initial Developer are Copyright (C) 2007
+ * The Initial Developer of the Original Code is Mozilla Foundation.
+ * Portions created by the Initial Developer are Copyright (C) 2011
  * the Initial Developer. All Rights Reserved.
  *
  * Contributor(s):
+ *   Bas Schouten <bschouten@mozilla.com>
  *
  * Alternatively, the contents of this file may be used under the terms of
  * either the GNU General Public License Version 2 or later (the "GPL"), or
@@ -35,16 +35,14 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#include "domstubs.idl"
+#pragma once
 
-[scriptable, uuid(b52356e1-45c5-4d61-b61a-fb9bd91690e1)]
-interface nsIDOMFileException : nsISupports
+#include "TestBase.h"
+
+class SanityChecks : public TestBase
 {
-  const unsigned short NOT_FOUND_ERR = 1;
-  const unsigned short SECURITY_ERR = 2;
-  const unsigned short ABORT_ERR = 3;
-  const unsigned short NOT_READABLE_ERR = 4;
-  const unsigned short ENCODING_ERR = 5;
- 
-  readonly attribute unsigned short code;
+public:
+  SanityChecks();
+
+  void AlwaysPasses();
 };
