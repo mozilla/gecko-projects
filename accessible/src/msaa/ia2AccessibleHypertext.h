@@ -38,30 +38,36 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef _ACCESSIBLE_COMPONENt_H
-#define _ACCESSIBLE_COMPONENT_H
+#ifndef _ACCESSIBLE_HYPERTEXT_H
+#define _ACCESSIBLE_HYPERTEXT_H
 
 #include "nsISupports.h"
 
-#include "AccessibleComponent.h"
+#include "CAccessibleText.h"
+#include "AccessibleHypertext.h"
 
-class CAccessibleComponent: public IAccessibleComponent
+class ia2AccessibleHypertext : public CAccessibleText,
+                               public IAccessibleHypertext
 {
 public:
 
   // IUnknown
   STDMETHODIMP QueryInterface(REFIID, void**);
 
-  // IAccessibleComponent
-  virtual /* [propget] */ HRESULT STDMETHODCALLTYPE get_locationInParent(
-      /* [out] */ long *x,
-      /* [retval][out] */ long *y);
+  // IAccessibleText
+  FORWARD_IACCESSIBLETEXT(CAccessibleText)
 
-  virtual /* [propget] */ HRESULT STDMETHODCALLTYPE get_foreground(
-      /* [retval][out] */ IA2Color *foreground);
+  // IAccessibleHypertext
+  virtual /* [propget] */ HRESULT STDMETHODCALLTYPE get_nHyperlinks(
+      /* [retval][out] */ long* hyperlinkCount);
 
-  virtual /* [propget] */ HRESULT STDMETHODCALLTYPE get_background(
-      /* [retval][out] */ IA2Color *background);
+  virtual /* [propget] */ HRESULT STDMETHODCALLTYPE get_hyperlink(
+      /* [in] */ long index,
+      /* [retval][out] */ IAccessibleHyperlink** hyperlink);
+
+  virtual /* [propget] */ HRESULT STDMETHODCALLTYPE get_hyperlinkIndex(
+      /* [in] */ long charIndex,
+      /* [retval][out] */ long* hyperlinkIndex);
 
   // nsISupports
   NS_IMETHOD QueryInterface(const nsIID& uuid, void** result) = 0;
