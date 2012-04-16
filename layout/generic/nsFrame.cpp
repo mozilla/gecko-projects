@@ -1436,8 +1436,8 @@ nsFrame::DisplayBorderBackgroundOutline(nsDisplayListBuilder*   aBuilder,
   if (!IsVisibleForPainting(aBuilder))
     return NS_OK;
 
-  bool hasBoxShadow = GetStyleBorder()->mBoxShadow != nsnull;
-  if (hasBoxShadow) {
+  nsCSSShadowArray* shadows = GetStyleBorder()->mBoxShadow;
+  if (shadows && shadows->HasShadowWithInset(false)) {
     nsresult rv = aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
         nsDisplayBoxShadowOuter(aBuilder, this));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1448,7 +1448,7 @@ nsFrame::DisplayBorderBackgroundOutline(nsDisplayListBuilder*   aBuilder,
     DisplayBackgroundUnconditional(aBuilder, aLists, aForceBackground, &bg);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (hasBoxShadow) {
+  if (shadows && shadows->HasShadowWithInset(true)) {
     rv = aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
         nsDisplayBoxShadowInner(aBuilder, this));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -2155,13 +2155,17 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
       (aFlags & DISPLAY_CHILD_FORCE_STACKING_CONTEXT)) {
     // Genuine stacking contexts, and positioned pseudo-stacking-contexts,
     // go in this level.
-    rv = aLists.PositionedDescendants()->AppendNewToTop(new (aBuilder)
-        nsDisplayWrapList(aBuilder, child, &list));
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (!list.IsEmpty()) {
+      rv = aLists.PositionedDescendants()->AppendNewToTop(new (aBuilder)
+          nsDisplayWrapList(aBuilder, child, &list));
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   } else if (disp->IsFloating()) {
-    rv = aLists.Floats()->AppendNewToTop(new (aBuilder)
-        nsDisplayWrapList(aBuilder, child, &list));
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (!list.IsEmpty()) {
+      rv = aLists.Floats()->AppendNewToTop(new (aBuilder)
+          nsDisplayWrapList(aBuilder, child, &list));
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   } else {
     aLists.Content()->AppendToTop(&list);
   }
