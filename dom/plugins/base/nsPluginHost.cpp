@@ -352,6 +352,8 @@ nsPluginHost::nsPluginHost()
 
   mPluginsDisabled = Preferences::GetBool("plugin.disable", false);
 
+  Preferences::AddStrongObserver(this, "plugin.disable");
+
   nsCOMPtr<nsIObserverService> obsService =
     mozilla::services::GetObserverService();
   if (obsService) {
@@ -385,7 +387,7 @@ nsPluginHost::~nsPluginHost()
 {
   PLUGIN_LOG(PLUGIN_LOG_ALWAYS,("nsPluginHost::dtor\n"));
 
-  Destroy();
+  UnloadPlugins();
   sInst = nsnull;
 }
 
@@ -809,14 +811,12 @@ nsresult nsPluginHost::Init()
   return NS_OK;
 }
 
-nsresult nsPluginHost::Destroy()
+nsresult nsPluginHost::UnloadPlugins()
 {
-  PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("nsPluginHost::Destroy Called\n"));
+  PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("nsPluginHost::UnloadPlugins Called\n"));
 
-  if (mIsDestroyed)
+  if (!mPluginsLoaded)
     return NS_OK;
-
-  mIsDestroyed = true;
 
   // we should call nsIPluginInstance::Stop and nsIPluginInstance::SetWindow
   // for those plugins who want it
@@ -846,6 +846,8 @@ nsresult nsPluginHost::Destroy()
     mPrivateDirServiceProvider = nsnull;
   }
 #endif /* XP_WIN */
+
+  mPluginsLoaded = false;
 
   return NS_OK;
 }
@@ -909,36 +911,6 @@ nsPluginHost::GetPluginTempDir(nsIFile **aDir)
   }
 
   return sPluginTempDir->Clone(aDir);
-}
-
-nsresult nsPluginHost::CreateListenerForChannel(nsIChannel* aChannel,
-                                                nsObjectLoadingContent* aContent,
-                                                nsIStreamListener** aListener)
-{
-  NS_PRECONDITION(aChannel && aContent,
-                  "Invalid arguments to InstantiatePluginForChannel");
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = aChannel->GetURI(getter_AddRefs(uri));
-  if (NS_FAILED(rv))
-    return rv;
-
-#ifdef PLUGIN_LOGGING
-  if (PR_LOG_TEST(nsPluginLogging::gPluginLog, PLUGIN_LOG_NORMAL)) {
-    nsCAutoString urlSpec;
-    uri->GetAsciiSpec(urlSpec);
-
-    PR_LOG(nsPluginLogging::gPluginLog, PLUGIN_LOG_NORMAL,
-           ("nsPluginHost::InstantiatePluginForChannel Begin content=%p, url=%s\n",
-           aContent, urlSpec.get()));
-
-    PR_LogFlush();
-  }
-#endif
-
-  // Note that we're not setting up a plugin instance here; the stream
-  // listener's OnStartRequest will handle doing that.
-
-  return NewEmbeddedPluginStreamListener(uri, aContent, nsnull, aListener);
 }
 
 nsresult
@@ -3240,31 +3212,23 @@ nsPluginHost::StopPluginInstance(nsNPAPIPluginInstance* aInstance)
   return NS_OK;
 }
 
-nsresult nsPluginHost::NewEmbeddedPluginStreamListener(nsIURI* aURL,
+nsresult nsPluginHost::NewEmbeddedPluginStreamListener(nsIURI* aURI,
                                                        nsObjectLoadingContent *aContent,
                                                        nsNPAPIPluginInstance* aInstance,
-                                                       nsIStreamListener** aListener)
+                                                       nsIStreamListener **aStreamListener)
 {
-  NS_ENSURE_ARG_POINTER(aURL);
+  NS_ENSURE_ARG_POINTER(aURI);
+  NS_ENSURE_ARG_POINTER(aStreamListener);
 
   nsRefPtr<nsPluginStreamListenerPeer> listener = new nsPluginStreamListenerPeer();
-
-  // If we have an instance, everything has been set up
-  // if we only have an owner, then we need to pass it in
-  // so the listener can set up the instance later after
-  // we've determined the mimetype of the stream.
-  nsresult rv = NS_ERROR_ILLEGAL_VALUE;
-  if (aInstance) {
-    rv = listener->InitializeEmbedded(aURL, aInstance, nsnull);
-  } else if (aContent) {
-    rv = listener->InitializeEmbedded(aURL, nsnull, aContent);
+  nsresult rv = listener->InitializeEmbedded(aURI, aInstance, aContent);
+  if (NS_FAILED(rv)) {
+    return rv;
   }
 
-  if (NS_SUCCEEDED(rv)) {
-    NS_ADDREF(*aListener = listener);
-  }
+  listener.forget(aStreamListener);
 
-  return rv;
+  return NS_OK;
 }
 
 nsresult nsPluginHost::NewEmbeddedPluginStream(nsIURI* aURL,
@@ -3306,6 +3270,7 @@ nsresult nsPluginHost::NewFullPagePluginStreamListener(nsIURI* aURI,
                                                        nsNPAPIPluginInstance *aInstance,
                                                        nsIStreamListener **aStreamListener)
 {
+  NS_ENSURE_ARG_POINTER(aURI);
   NS_ENSURE_ARG_POINTER(aStreamListener);
 
   nsRefPtr<nsPluginStreamListenerPeer> listener = new nsPluginStreamListenerPeer();
@@ -3325,7 +3290,7 @@ NS_IMETHODIMP nsPluginHost::Observe(nsISupports *aSubject,
 {
   if (!nsCRT::strcmp(NS_XPCOM_SHUTDOWN_OBSERVER_ID, aTopic)) {
     OnShutdown();
-    Destroy();
+    UnloadPlugins();
     sInst->Release();
   }
 #ifdef MOZ_WIDGET_ANDROID

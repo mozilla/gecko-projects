@@ -141,7 +141,6 @@ static NS_DEFINE_CID(kXTFServiceCID, NS_XTFSERVICE_CID);
 #include "nsIMEStateManager.h"
 #include "nsContentErrors.h"
 #include "nsUnicharUtilCIID.h"
-#include "nsCompressedCharMap.h"
 #include "nsINativeKeyBindings.h"
 #include "nsIDOMNSEvent.h"
 #include "nsXULPopupManager.h"
@@ -4643,7 +4642,7 @@ nsContentUtils::GetAccelKeyCandidates(nsIDOMKeyEvent* aDOMKeyEvent,
     }
 
     PRUint32 len = nativeKeyEvent->alternativeCharCodes.Length();
-    if (!nativeKeyEvent->isShift) {
+    if (!nativeKeyEvent->IsShift()) {
       for (PRUint32 i = 0; i < len; ++i) {
         PRUint32 ch =
           nativeKeyEvent->alternativeCharCodes[i].mUnshiftedCharCode;
