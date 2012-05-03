@@ -259,33 +259,34 @@ JS_ClearInterrupt(JSRuntime *rt, JSInterruptHook *hoop, void **closurep)
 /************************************************************************/
 
 JS_PUBLIC_API(JSBool)
-JS_SetWatchPoint(JSContext *cx, JSObject *obj, jsid id,
-                 JSWatchPointHandler handler, JSObject *closure)
+JS_SetWatchPoint(JSContext *cx, JSObject *obj_, jsid id,
+                 JSWatchPointHandler handler, JSObject *closure_)
 {
-    assertSameCompartment(cx, obj);
+    assertSameCompartment(cx, obj_);
     id = js_CheckForStringIndex(id);
+
+    RootedVarObject obj(cx, obj_), closure(cx, closure_);
 
     JSObject *origobj;
     Value v;
     unsigned attrs;
-    jsid propid;
 
     origobj = obj;
-    OBJ_TO_INNER_OBJECT(cx, obj);
+    OBJ_TO_INNER_OBJECT(cx, obj.reference());
     if (!obj)
         return false;
 
-    AutoValueRooter idroot(cx);
+    RootedVarId propid(cx);
+
     if (JSID_IS_INT(id)) {
         propid = id;
     } else if (JSID_IS_OBJECT(id)) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_WATCH_PROP);
         return false;
     } else {
-        if (!js_ValueToStringId(cx, IdToValue(id), &propid))
+        if (!js_ValueToStringId(cx, IdToValue(id), propid.address()))
             return false;
         propid = js_CheckForStringIndex(propid);
-        idroot.set(IdToValue(propid));
     }
 
     /*
@@ -739,7 +740,9 @@ JS_EvaluateUCInStackFrame(JSContext *cx, JSStackFrame *fpArg,
     if (!CheckDebugMode(cx))
         return false;
 
-    Env *env = JS_GetFrameScopeChain(cx, fpArg);
+    SkipRoot skip(cx, &chars);
+
+    RootedVar<Env*> env(cx, JS_GetFrameScopeChain(cx, fpArg));
     if (!env)
         return false;
 
@@ -998,7 +1001,7 @@ JS_GetScriptTotalSize(JSContext *cx, JSScript *script)
 {
     size_t nbytes, pbytes;
     jssrcnote *sn, *notes;
-    JSObjectArray *objarray;
+    ObjectArray *objarray;
     JSPrincipals *principals;
 
     nbytes = sizeof *script;
@@ -1015,7 +1018,7 @@ JS_GetScriptTotalSize(JSContext *cx, JSScript *script)
         continue;
     nbytes += (sn - notes + 1) * sizeof *sn;
 
-    if (JSScript::isValidOffset(script->objectsOffset)) {
+    if (script->hasObjects()) {
         objarray = script->objects();
         size_t i = objarray->length;
         nbytes += sizeof *objarray + i * sizeof objarray->vector[0];
@@ -1024,7 +1027,7 @@ JS_GetScriptTotalSize(JSContext *cx, JSScript *script)
         } while (i != 0);
     }
 
-    if (JSScript::isValidOffset(script->regexpsOffset)) {
+    if (script->hasRegexps()) {
         objarray = script->regexps();
         size_t i = objarray->length;
         nbytes += sizeof *objarray + i * sizeof objarray->vector[0];
@@ -1033,10 +1036,8 @@ JS_GetScriptTotalSize(JSContext *cx, JSScript *script)
         } while (i != 0);
     }
 
-    if (JSScript::isValidOffset(script->trynotesOffset)) {
-        nbytes += sizeof(JSTryNoteArray) +
-            script->trynotes()->length * sizeof(JSTryNote);
-    }
+    if (script->hasTrynotes())
+        nbytes += sizeof(TryNoteArray) + script->trynotes()->length * sizeof(JSTryNote);
 
     principals = script->principals;
     if (principals) {
