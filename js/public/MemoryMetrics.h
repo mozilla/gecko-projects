@@ -123,7 +123,9 @@ struct CompartmentStats
     size_t gcHeapShapesBase;
     size_t gcHeapScripts;
     size_t gcHeapTypeObjects;
+#if JS_HAS_XML_SUPPORT
     size_t gcHeapXML;
+#endif
 
     size_t objectSlots;
     size_t objectElements;
@@ -165,7 +167,7 @@ struct RuntimeStats
       , mallocSizeOf(mallocSizeOf)
     {}
 
-    js::RuntimeSizes runtime;
+    RuntimeSizes runtime;
 
     size_t gcHeapChunkTotal;
     size_t gcHeapCommitted;

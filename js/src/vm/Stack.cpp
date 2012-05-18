@@ -621,6 +621,18 @@ StackSpace::sizeOfCommitted()
 #endif
 }
 
+#ifdef DEBUG
+bool
+StackSpace::containsSlow(StackFrame *fp)
+{
+    for (AllFramesIter i(*this); !i.done(); ++i) {
+        if (i.fp() == fp)
+            return true;
+    }
+    return false;
+}
+#endif
+
 /*****************************************************************************/
 
 ContextStack::ContextStack(JSContext *cx)
@@ -810,7 +822,8 @@ ContextStack::pushExecuteFrame(JSContext *cx, JSScript *script, const Value &thi
     MaybeExtend extend;
     if (evalInFrame) {
         /* Though the prev-frame is given, need to search for prev-call. */
-        StackIter iter(cx, StackIter::GO_THROUGH_SAVED);
+        StackSegment &seg = cx->stack.space().containingSegment(evalInFrame);
+        StackIter iter(cx->runtime, seg);
         while (!iter.isScript() || iter.fp() != evalInFrame)
             ++iter;
         evalInFrameCalls = iter.calls_;
@@ -1155,8 +1168,8 @@ StackIter::settleOnNewState()
             if (op == JSOP_CALL || op == JSOP_FUNCALL) {
                 unsigned argc = GET_ARGC(pc_);
                 DebugOnly<unsigned> spoff = sp_ - fp_->base();
-                JS_ASSERT_IF(cx_->stackIterAssertionEnabled,
-                             spoff == js_ReconstructStackDepth(cx_, fp_->script(), pc_));
+                JS_ASSERT_IF(maybecx_ && maybecx_->stackIterAssertionEnabled,
+                             spoff == js_ReconstructStackDepth(maybecx_, fp_->script(), pc_));
                 Value *vp = sp_ - (2 + argc);
 
                 CrashIfInvalidSlot(fp_, vp);
@@ -1205,7 +1218,7 @@ StackIter::settleOnNewState()
 }
 
 StackIter::StackIter(JSContext *cx, SavedOption savedOption)
-  : cx_(cx),
+  : maybecx_(cx),
     savedOption_(savedOption)
 {
 #ifdef JS_METHODJIT
@@ -1220,6 +1233,18 @@ StackIter::StackIter(JSContext *cx, SavedOption savedOption)
     } else {
         state_ = DONE;
     }
+}
+
+StackIter::StackIter(JSRuntime *rt, StackSegment &seg)
+  : maybecx_(NULL), savedOption_(STOP_AT_SAVED)
+{
+#ifdef JS_METHODJIT
+    CompartmentVector &v = rt->compartments;
+    for (size_t i = 0; i < v.length(); i++)
+        mjit::ExpandInlineFrames(v[i]);
+#endif
+    startOnSegment(&seg);
+    settleOnNewState();
 }
 
 StackIter &
