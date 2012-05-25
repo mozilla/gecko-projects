@@ -352,8 +352,9 @@ class CGHeaders(CGWrapper):
 
             for t in types:
                 if t.unroll().isInterface():
-                    if t.unroll().isArrayBuffer():
+                    if t.unroll().isSpiderMonkeyInterface():
                         bindingHeaders.add("jsfriendapi.h")
+                        bindingHeaders.add("mozilla/dom/TypedArray.h")
                     else:
                         typeDesc = d.getDescriptor(t.unroll().inner.identifier.name)
                         if typeDesc is not None:
@@ -1236,7 +1237,7 @@ class CastableObjectUnwrapper():
     def __str__(self):
         return string.Template(
 """{
-  nsresult rv = UnwrapObject<${protoID}>(cx, ${source}, ${target});
+  nsresult rv = UnwrapObject<${protoID}, ${type}>(cx, ${source}, ${target});
   if (NS_FAILED(rv)) {
     ${codeOnFailure}
   }
@@ -1374,10 +1375,11 @@ def getJSToNativeConversionTemplate(type, descriptorProvider, failureCode=None,
         if failureCode is not None:
             raise TypeError("Can't handle sequences when failureCode is not None")
         nullable = type.nullable();
+        # Be very careful not to change "type": we need it later
         if nullable:
-            type = type.inner;
-
-        elementType = type.inner;
+            elementType = type.inner.inner
+        else:
+            elementType = type.inner
         # We don't know anything about the object-ness of the things
         # we wrap, so don't pass through isDefinitelyObject
         (elementTemplate, elementDeclType,
@@ -1386,11 +1388,12 @@ def getJSToNativeConversionTemplate(type, descriptorProvider, failureCode=None,
         if elementHolderType is not None:
             raise TypeError("Shouldn't need holders for sequences")
 
-        # Have to make sure to use a fallible array, because it's trivial for
-        # page JS to create things with very large lengths.
-        typeName = CGWrapper(elementDeclType, pre="nsTArray< ", post=" >")
+        typeName = CGWrapper(elementDeclType, pre="Sequence< ", post=" >")
         if nullable:
             typeName = CGWrapper(typeName, pre="Nullable< ", post=" >")
+            arrayRef = "${holderName}.Value()"
+        else:
+            arrayRef = "${holderName}"
         templateBody = ("""JSObject* seq = &${val}.toObject();\n
 if (!IsArrayLike(cx, seq)) {
   return Throw<%s>(cx, NS_ERROR_XPC_BAD_CONVERT_JS);
@@ -1400,9 +1403,7 @@ uint32_t length;
 if (!JS_GetArrayLength(cx, seq, &length)) {
   return false;
 }
-// Jump through a hoop to do a fallible allocation but later end up with
-// an infallible array.
-FallibleTArray< %s > arr;
+Sequence< %s > &arr = %s;
 if (!arr.SetCapacity(length)) {
   return Throw<%s>(cx, NS_ERROR_OUT_OF_MEMORY);
 }
@@ -1413,33 +1414,30 @@ for (uint32_t i = 0; i < length; ++i) {
   }
 """ % (toStringBool(descriptorProvider.workers),
        elementDeclType.define(),
+       arrayRef,
        toStringBool(descriptorProvider.workers)))
 
         templateBody += CGIndenter(CGGeneric(
                 string.Template(elementTemplate).substitute(
                     {
                         "val" : "temp",
-                        "declName" : "*arr.AppendElement()"
+                        "declName" : "(*arr.AppendElement())"
                         }
                     ))).define()
 
-        templateBody += """
-}
-// And the other half of the hoop-jump"""
-        if nullable:
-            templateBody += """
-${declName}.SetValue().SwapElements(arr);
-"""
-        else:
-            templateBody += """
-${declName}.SwapElements(arr);
-"""
+        templateBody += "\n}"
         templateBody = wrapObjectTemplate(templateBody, isDefinitelyObject,
-                                          type, "${declName}.SetNull()",
+                                          type, "${holderName}.SetNull()",
                                           descriptorProvider.workers)
-        return (templateBody, typeName, None)
+        # And now at the very end (so we make sure it happens in the
+        # null case too, set our declName.
+        templateBody += ("\n" + "${declName} = &${holderName};")
+        # This is a bit of a hack: we're using NonNull with a const type inside
+        # to effectively produce a const ref from a non-const object.
+        return (templateBody, CGWrapper(typeName, pre="NonNull<const ", post=" >"),
+                typeName)
 
-    if type.isInterface() and not type.isArrayBuffer():
+    if type.isGeckoInterface():
         descriptor = descriptorProvider.getDescriptor(
             type.unroll().inner.identifier.name)
         # This is an interface that we implement as a concrete class
@@ -1461,8 +1459,6 @@ ${declName}.SwapElements(arr);
         #    tuple.
         #  - holderType is the type we want to return as the third element
         #    of our tuple.
-        #  - declInit is the initializer expression for our decl, if any.
-        #  - target is where a pointer to the object is being stored
 
         # Set up some sensible defaults for these things insofar as we can.
         holderType = None
@@ -1471,13 +1467,11 @@ ${declName}.SwapElements(arr);
                 declType = "nsRefPtr<" + typeName + ">"
             else:
                 declType = typePtr
-            target = "&${declName}"
         else:
             if forceOwningType:
                 declType = "OwningNonNull<" + typeName + ">"
             else:
                 declType = "NonNull<" + typeName + ">"
-            target = "${declName}.Slot()"
 
         templateBody = ""
         if descriptor.castable:
@@ -1485,13 +1479,13 @@ ${declName}.SwapElements(arr);
                 templateBody += str(CastableObjectUnwrapper(
                         descriptor,
                         "&${val}.toObject()",
-                        target,
+                        "${declName}",
                         failureCode))
             else:
                 templateBody += str(FailureFatalCastableObjectUnwrapper(
                         descriptor,
                         "&${val}.toObject()",
-                        target))
+                        "${declName}"))
         elif descriptor.interface.isCallback():
             templateBody += str(CallbackObjectUnwrapper(
                     descriptor,
@@ -1536,34 +1530,47 @@ ${declName}.SwapElements(arr);
 
         templateBody = wrapObjectTemplate(templateBody, isDefinitelyObject,
                                           type, "${declName} = NULL",
-                                          descriptor.workers)
+                                          descriptor.workers, failureCode)
 
         declType = CGGeneric(declType)
         if holderType is not None:
             holderType = CGGeneric(holderType)
         return (templateBody, declType, holderType)
 
-    if type.isArrayBuffer():
+    if type.isSpiderMonkeyInterface():
         if isSequenceMember:
-            raise TypeError("Can't handle sequences of arraybuffers")
-        declType = "JSObject*"
-        template = (
-            "if (${val}.isObject() && JS_IsArrayBufferObject(&${val}.toObject(), cx)) {\n"
-            "  ${declName} = &${val}.toObject();\n"
-            "}")
+            raise TypeError("Can't handle sequences of arraybuffers or "
+                            "arraybuffer views because making sure all the "
+                            "objects are properly rooted is hard")
+        name = type.name
+        if type.isArrayBuffer():
+            jsname = "ArrayBufferObject"
+        elif type.isArrayBufferView():
+            jsname = "TypedArrayObject"
+        else:
+            jsname = type.name
+
+        holderType = "Maybe<%s>" % name
         if type.nullable():
-            template += (
-                " else if (${val}.isNullOrUndefined()) {\n"
-                "  ${declName} = NULL;\n"
-                "}")
+            declType = name + "*"
+        else:
+            declType = "NonNull<" + name + ">"
+        template = (
+            "if (!JS_Is%s(&${val}.toObject(), cx)) {\n"
+            "  %s" # No newline here because onFailure() handles that
+            "}\n"
+            "${holderName}.construct(cx, &${val}.toObject());\n" %
+            (jsname, onFailure(failureCode, descriptorProvider.workers).define()))
+        if type.nullable:
+            template += "${declName} = ${holderName}.addr();"
+        else:
+            template += "${declName} = ${holderName}.ref();"
+        template = wrapObjectTemplate(template, isDefinitelyObject, type,
+                                      "${declName} = NULL",
+                                      descriptorProvider.workers,
+                                      failureCode)
 
-        template += (
-            " else {\n" +
-            CGIndenter(onFailure(failureCode,
-                                 descriptorProvider.workers)).define() +
-            "}")
-
-        return (template, CGGeneric(declType), None)
+        return (template, CGGeneric(declType), CGGeneric(holderType))
 
     if type.isString():
         if isSequenceMember:
@@ -1829,7 +1836,7 @@ for (uint32_t i = 0; i < length; ++i) {
 %s
 }\n""" % (result, innerTemplate)) + setValue("JS::ObjectValue(*returnArray)")
 
-    if type.isInterface() and not type.isArrayBuffer():
+    if type.isGeckoInterface():
         descriptor = descriptorProvider.getDescriptor(type.unroll().inner.identifier.name)
         if type.nullable():
             wrappingCode = ("if (!%s) {\n" % (result) +
@@ -1976,7 +1983,7 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
         if returnType.nullable():
             raise TypeError("We don't support nullable enum return values")
         return CGGeneric(returnType.inner.identifier.name), False
-    if returnType.isInterface() and not returnType.isArrayBuffer():
+    if returnType.isGeckoInterface():
         result = CGGeneric(descriptorProvider.getDescriptor(
             returnType.unroll().inner.identifier.name).nativeType)
         if resultAlreadyAddRefed:
@@ -1996,10 +2003,11 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
         nullable = returnType.nullable()
         if nullable:
             returnType = returnType.inner
-        # Assume no need to addref for now
+        # If our result is already addrefed, use the right type in the
+        # sequence argument here.
         (result, needsCx) = getRetvalDeclarationForType(returnType.inner,
                                                         descriptorProvider,
-                                                        False)
+                                                        resultAlreadyAddRefed)
         result = CGWrapper(result, pre="nsTArray< ", post=" >")
         if nullable:
             result = CGWrapper(result, pre="Nullable< ", post=" >")
@@ -2351,29 +2359,31 @@ class CGMethodCall(CGThing):
             pickFirstSignature("%s.isNullOrUndefined()" % distinguishingArg,
                                lambda s: s[1][distinguishingIndex].type.nullable())
 
-            # Now check for distinguishingArg being a platform object.
-            # We can actually check separately for array buffers and
-            # other things.
-            # XXXbz Do we need to worry about security
-            # wrappers around the array buffer?
-            pickFirstSignature("%s.isObject() && JS_IsArrayBufferObject(&%s.toObject(), cx)" %
-                               (distinguishingArg, distinguishingArg),
-                               lambda s: (s[1][distinguishingIndex].type.isArrayBuffer() or
-                                          s[1][distinguishingIndex].type.isObject()))
-            
+            # Now check for distinguishingArg being an object that implements a
+            # non-callback interface.  That includes typed arrays and
+            # arraybuffers.
             interfacesSigs = [
                 s for s in possibleSignatures
                 if (s[1][distinguishingIndex].type.isObject() or
                     (s[1][distinguishingIndex].type.isInterface() and
-                     not s[1][distinguishingIndex].type.isArrayBuffer() and
                      not s[1][distinguishingIndex].type.isCallback())) ]
             # There might be more than one of these; we need to check
             # which ones we unwrap to.
             
             if len(interfacesSigs) > 0:
-                caseBody.append(CGGeneric("if (%s.isObject() &&\n"
-                                          "    IsPlatformObject(cx, &%s.toObject())) {" %
-                                          (distinguishingArg, distinguishingArg)))
+                # The spec says that we should check for "platform objects
+                # implementing an interface", but it's enough to guard on these
+                # being an object.  The code for unwrapping non-callback
+                # interfaces and typed arrays will just bail out and move on to
+                # the next overload if the object fails to unwrap correctly.  We
+                # could even not do the isObject() check up front here, but in
+                # cases where we have multiple object overloads it makes sense
+                # to do it only once instead of for each overload.  That will
+                # also allow the unwrapping test to skip having to do codegen
+                # for the null-or-undefined case, which we already handled
+                # above.
+                caseBody.append(CGGeneric("if (%s.isObject()) {" %
+                                          (distinguishingArg)))
                 for sig in interfacesSigs:
                     caseBody.append(CGIndenter(CGGeneric("do {")));
                     type = sig[1][distinguishingIndex].type
@@ -2549,7 +2559,7 @@ class CGAbstractBindingMethod(CGAbstractStaticMethod):
     def definition_body(self):
         unwrapThis = CGIndenter(CGGeneric(
             str(FailureFatalCastableObjectUnwrapper(self.descriptor,
-                                                    "obj", "&self"))))
+                                                    "obj", "self"))))
         return CGList([ self.getThis(), unwrapThis,
                         self.generate_code() ], "\n").define()
 
