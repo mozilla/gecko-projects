@@ -689,6 +689,12 @@ let RIL = {
         // call state.
         let model_id = libcutils.property_get("ril.model_id");
         if (DEBUG) debug("Detected RIL model " + model_id);
+        if (!model_id) {
+          // On some RIL models, the RIL has to be "warmed up" for us to read this property.
+          // It apparently isn't warmed up yet, going to try again later.
+          if (DEBUG) debug("Could not detect correct model_id. Going to try later.");
+          return;
+        }
         if (model_id == "I9100") {
           if (DEBUG) {
             debug("Detected I9100, enabling " +
@@ -2186,6 +2192,48 @@ let RIL = {
     }
   },
 
+  _processOperator: function _processOperator(operatorData) {
+    if (operatorData.length < 3) {
+      if (DEBUG) {
+        debug("Expected at least 3 strings for operator.");
+      }
+    }
+
+    if (!this.operator) {
+      this.operator = {type: "operatorchange"};
+    }
+
+    let [longName, shortName, networkTuple] = operatorData;
+    let thisTuple = String(this.operator.mcc) + this.operator.mnc;
+
+    if (this.operator.longName !== longName ||
+        this.operator.shortName !== shortName ||
+        thisTuple !== networkTuple) {
+
+      this.operator.longName = longName;
+      this.operator.shortName = shortName;
+      this.operator.mcc = 0;
+      this.operator.mnc = 0;
+
+      // According to ril.h, the operator fields will be NULL when the operator
+      // is not currently registered. We can avoid trying to parse the numeric
+      // tuple in that case.
+      if (DEBUG && !longName) {
+        debug("Operator is currently unregistered");
+      }
+
+      if (longName && shortName && networkTuple) {
+        try {
+          this._processNetworkTuple(networkTuple, this.operator);
+        } catch (e) {
+          debug("Error processing operator tuple: " + e);
+        }
+      }
+
+      this._sendNetworkInfoMessage(NETWORK_INFO_OPERATOR, this.operator);
+    }
+  },
+
   /**
    * Helpers for processing call state and handle the active call.
    */
@@ -2982,36 +3030,12 @@ RIL[REQUEST_OPERATOR] = function REQUEST_OPERATOR(length, options) {
     return;
   }
 
-  let operator = Buf.readStringList();
+  let operatorData = Buf.readStringList();
+  if (DEBUG) debug("operator: " + operatorData);
 
-  if (DEBUG) debug("Operator data: " + operator);
-  if (operator.length < 3) {
-    if (DEBUG) debug("Expected at least 3 strings for operator.");
-  }
+  this._processOperator(operatorData);
 
-  if (!this.operator) {
-    this.operator = {type: "operatorchange"};
-  }
 
-  let numeric = String(this.operator.mcc) + this.operator.mnc;
-  if (this.operator.longName != operator[0] ||
-      this.operator.shortName != operator[1] ||
-      numeric != operator[2]) {
-
-    this.operator.longName = operator[0];
-    this.operator.shortName = operator[1];
-    this.operator.mcc = 0;
-    this.operator.mnc = 0;
-
-    let networkTuple = operator[2];
-    try {
-      this._processNetworkTuple(networkTuple, this.operator);
-    } catch (e) {
-      debug("Error processing operator tuple: " + e);
-    }
-
-    this._sendNetworkInfoMessage(NETWORK_INFO_OPERATOR, this.operator);
-  }
 };
 RIL[REQUEST_RADIO_POWER] = null;
 RIL[REQUEST_DTMF] = null;
