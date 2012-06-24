@@ -1358,7 +1358,7 @@ var NativeWindow = {
 var SelectionHandler = {
   // Keeps track of data about the dimensions of the selection
   cache: null,
-  selectedText: "",
+  _active: false,
 
   // The window that holds the selection (can be a sub-frame)
   get _view() {
@@ -1370,6 +1370,8 @@ var SelectionHandler = {
   set _view(aView) {
     this._viewRef = Cu.getWeakReference(aView);
   },
+
+  _isRTL: false,
 
   // The DIV elements for the start/end handles
   get _start() {
@@ -1409,21 +1411,19 @@ var SelectionHandler = {
   observe: function sh_observe(aSubject, aTopic, aData) {
     let data = JSON.parse(aData);
 
-    if (this._view)
+    if (this._active)
       this.endSelection(data.x, data.y);
   },
 
   // aX/aY are in top-level window browser coordinates
   startSelection: function sh_startSelection(aElement, aX, aY) {
     // Clear out any existing selection
-    if (this._view)
-      this.endSelection(0, 0);
+    if (this._active)
+      this.endSelection();
 
     // Get the element's view
     this._view = aElement.ownerDocument.defaultView;
-
-    // Clear out the text cache
-    this.selectedText = "";
+    this._isRTL = (this._view.getComputedStyle(aElement, "").direction == "rtl");
 
     // Remove any previous selected or created ranges. Tapping anywhere on a
     // page will create an empty range.
@@ -1445,32 +1445,28 @@ var SelectionHandler = {
 
       // Select the word nearest the caret
       selectionController.wordMove(false, false);
-      selectionController.wordMove(true, true);
+
+      // Move forward in LTR, backward in RTL
+      selectionController.wordMove(!this._isRTL, true);
     } catch(e) {
       // If we couldn't select the word at the given point, bail
       Cu.reportError("Error selecting word: " + e);
       return;
     }
 
-    // Find the selected text rect and send it back so the handles can position correctly
-    if (selection.rangeCount == 0 || !selection.getRangeAt(0))
+    // If there isn't an appropriate selection, bail
+    if (!selection.rangeCount || !selection.getRangeAt(0) || !selection.toString().trim().length) {
+      selection.collapseToStart();
       return;
+    }
 
     // Initialize the cache
     this.cache = {};
     this.updateCacheForSelection();
     this.updateCacheOffset();
 
-    // Cache the selected text since the selection might be gone by the time we get the "end" message
-    this.selectedText = selection.toString().trim();
-
-    // If the range didn't have any text, let's bail
-    if (!this.selectedText.length) {
-      selection.collapseToStart();
-      return;
-    }
-
     this.showHandles();
+    this._active = true;
   },
 
   // aX/aY are in top-level window browser coordinates
@@ -1505,12 +1501,23 @@ var SelectionHandler = {
     // Send mouse events to the top-level window
     let cwu = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
 
-    // If we're moving the start handle, we need to re-position the carat
-    if (aIsStartHandle)
-      this._sendStartMouseEvents(cwu);
+    // The handles work the same on both LTR and RTL pages, but the underlying selection
+    // works differently, so we need to reverse how we send mouse events on RTL pages.
+    if (this._isRTL) {
+      // Position the caret at the end handle using a fake mouse click
+      if (!aIsStartHandle)
+        this._sendEndMouseEvents(cwu, false);
 
-    // We always need to fire events for the end to move the selection
-    this._sendEndMouseEvents(cwu);
+      // Selects text between the carat and the start handle using a fake shift+click
+      this._sendStartMouseEvents(cwu, true);
+    } else {
+      // Position the caret at the start handle using a fake mouse click
+      if (aIsStartHandle)
+        this._sendStartMouseEvents(cwu, false);
+
+      // Selects text between the carat and the end handle using a fake shift+click
+      this._sendEndMouseEvents(cwu, true);
+    }
 
     // Update the cached selection area after firing the mouse events
     let selectionReversed = this.updateCacheForSelection(aIsStartHandle);
@@ -1527,80 +1534,91 @@ var SelectionHandler = {
       this._end = oldStart;
 
       // Re-send mouse events to update the selection corresponding to the new handles
-      this._sendStartMouseEvents(cwu);
-      this._sendEndMouseEvents(cwu);
+      if (this._isRTL) {
+        this._sendEndMouseEvents(cwu, false);
+        this._sendStartMouseEvents(cwu, true);
+      } else {
+        this._sendStartMouseEvents(cwu, false);
+        this._sendEndMouseEvents(cwu, true);
+      }
     }
   },
 
-  // Positions the caret using a fake mouse click
-  _sendStartMouseEvents: function sh_sendStartMouseEvents(cwu) {
+  _sendStartMouseEvents: function sh_sendStartMouseEvents(cwu, useShift) {
     let start = this._start.getBoundingClientRect();
     let x = start.right - this.HANDLE_PADDING;
     // Send mouse events 1px above handle to avoid hitting the handle div (bad things happen in that case)
     let y = start.top - 1;
 
-    if (!this._shouldSendMouseEvent(x, y))
-      return;
-
-    cwu.sendMouseEventToWindow("mousedown", x, y, 0, 0, 0, true);
-    cwu.sendMouseEventToWindow("mouseup", x, y, 0, 0, 0, true);
+    this._sendMouseEvents(cwu, useShift, x, y);
   },
 
-  // Selects text between the carat at the start and an end point using a fake shift+click
-  _sendEndMouseEvents: function sh_sendEndMouseEvents(cwu) {
+  _sendEndMouseEvents: function sh_sendEndMouseEvents(cwu, useShift) {
     let end = this._end.getBoundingClientRect();
     let x = end.left + this.HANDLE_PADDING;
     // Send mouse events 1px above handle to avoid hitting the handle div (bad things happen in that case)
     let y = end.top - 1;
 
-    if (!this._shouldSendMouseEvent(x, y))
-      return;
-
-    cwu.sendMouseEventToWindow("mousedown", x, y, 0, 1, Ci.nsIDOMNSEvent.SHIFT_MASK, true);
-    cwu.sendMouseEventToWindow("mouseup", x, y, 0, 1, Ci.nsIDOMNSEvent.SHIFT_MASK, true);
+    this._sendMouseEvents(cwu, useShift, x, y);
   },
 
-  _shouldSendMouseEvent: function sh_shouldSendMouseEvent(x, y) {
+  _sendMouseEvents: function sh_sendMouseEvents(cwu, useShift, x, y) {
     let contentWindow = BrowserApp.selectedBrowser.contentWindow;
     let element = ElementTouchHelper.elementFromPoint(contentWindow, x, y);
     if (!element)
       element = ElementTouchHelper.anyElementFromPoint(contentWindow, x, y);
 
     // Don't send mouse events to the other handle
-    return !(element instanceof Ci.nsIDOMHTMLHtmlElement);
+    if (element instanceof Ci.nsIDOMHTMLHtmlElement)
+      return;
+
+    cwu.sendMouseEventToWindow("mousedown", x, y, 0, 0, useShift ? Ci.nsIDOMNSEvent.SHIFT_MASK : 0, true);
+    cwu.sendMouseEventToWindow("mouseup", x, y, 0, 0, useShift ? Ci.nsIDOMNSEvent.SHIFT_MASK : 0, true);
   },
 
   // aX/aY are in top-level window browser coordinates
   endSelection: function sh_endSelection(aX, aY) {
     this.hideHandles();
-    this._view.getSelection().removeAllRanges();
 
-    let contentWindow = BrowserApp.selectedBrowser.contentWindow;
-    let element = ElementTouchHelper.elementFromPoint(contentWindow, aX, aY);
-    if (!element)
-      element = ElementTouchHelper.anyElementFromPoint(contentWindow, aX, aY);
-
-    // Only try copying text if the tap happens in the same view
-    if (element.ownerDocument.defaultView == this._view) {
-      let cwu = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
-      let scrollX = {}, scrollY = {};
-      cwu.getScrollXY(false, scrollX, scrollY);
-
-      // aX/aY already accounts for the top-level scroll, add that back from the cache.offset values
-      let pointInSelection = (aX - this.cache.offset.x + scrollX.value > this.cache.rect.left &&
-                              aX - this.cache.offset.x + scrollX.value < this.cache.rect.right) &&
-                             (aY - this.cache.offset.y + scrollY.value > this.cache.rect.top &&
-                              aY - this.cache.offset.y + scrollY.value < this.cache.rect.bottom);
-
-      if (pointInSelection && this.selectedText.length) {
-        let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
-        clipboard.copyString(this.selectedText);
-        NativeWindow.toast.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), "short");
+    let selectedText = "";
+    if (this._view) {
+      let selection = this._view.getSelection();
+      if (selection) {
+        selectedText = selection.toString().trim();
+        selection.removeAllRanges();
       }
     }
 
+    // Only try copying text if there's text to copy!
+    if (arguments.length == 2 && selectedText.length) {
+      let contentWindow = BrowserApp.selectedBrowser.contentWindow;
+      let element = ElementTouchHelper.elementFromPoint(contentWindow, aX, aY);
+      if (!element)
+        element = ElementTouchHelper.anyElementFromPoint(contentWindow, aX, aY);
+
+      // Only try copying text if the tap happens in the same view
+      if (element.ownerDocument.defaultView == this._view) {
+        let cwu = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+        let scrollX = {}, scrollY = {};
+        cwu.getScrollXY(false, scrollX, scrollY);
+
+        // aX/aY already accounts for the top-level scroll, add that back from the cache.offset values
+        let pointInSelection = (aX - this.cache.offset.x + scrollX.value > this.cache.rect.left &&
+                                aX - this.cache.offset.x + scrollX.value < this.cache.rect.right) &&
+                               (aY - this.cache.offset.y + scrollY.value > this.cache.rect.top &&
+                                aY - this.cache.offset.y + scrollY.value < this.cache.rect.bottom);
+        if (pointInSelection) {
+          let clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
+          clipboard.copyString(selectedText);
+          NativeWindow.toast.show(Strings.browser.GetStringFromName("selectionHelper.textCopied"), "short");
+        }
+      }
+    }
+
+    this._isRTL = false;
     this._view = null;
     this.cache = null;
+    this._active = false;
   },
 
   // Returns true if the selection has been reversed. Takes optional aIsStartHandle
@@ -1667,7 +1685,7 @@ var SelectionHandler = {
 
     if (!this._start || !this._end) {
       Cu.reportError("SelectionHandler.showHandles: Couldn't find anonymous handle elements");
-      this.endSelection(0, 0);
+      this.endSelection();
       return;
     }
 
@@ -1681,6 +1699,8 @@ var SelectionHandler = {
 
     this._start.addEventListener("touchstart", this, true);
     this._end.addEventListener("touchstart", this, true);
+
+    this._view.addEventListener("pagehide", this, false);
   },
 
   hideHandles: function sh_hideHandles() {
@@ -1698,6 +1718,8 @@ var SelectionHandler = {
 
     this._start = null;
     this._end = null;
+
+    this._view.removeEventListener("pagehide", this, false);
   },
 
   _touchId: null,
@@ -1730,10 +1752,6 @@ var SelectionHandler = {
         this._touchId = null;
         this._touchDelta = null;
 
-        // Update the cached selected text
-        let selection = this._view.getSelection();
-        this.selectedText = selection.toString().trim();
-
         // Adjust the handles to be in the correct spot relative to the text selection
         this.positionHandles();
         break;
@@ -1744,6 +1762,10 @@ var SelectionHandler = {
         // Adjust the touch to account for what part of the handle the user first touched
         this.moveSelection(isStartHandle, touch.clientX - this._touchDelta.x,
                                           touch.clientY - this._touchDelta.y);
+        break;
+
+      case "pagehide":
+        this.endSelection();
         break;
     }
   }
