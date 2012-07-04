@@ -14,14 +14,12 @@
 #include "json.h"
 #include "jsweakmap.h"
 
-#include "builtin/Eval.h"
 #include "builtin/MapObject.h"
 #include "builtin/RegExp.h"
 #include "frontend/BytecodeEmitter.h"
 #include "vm/GlobalObject-inl.h"
 
 #include "jsobjinlines.h"
-
 #include "vm/RegExpObject-inl.h"
 #include "vm/RegExpStatics-inl.h"
 
@@ -206,7 +204,7 @@ GlobalObject::initFunctionAndObjectClasses(JSContext *cx)
 
     /* ES5 15.1.2.1. */
     RootedId id(cx, NameToId(cx->runtime->atomState.evalAtom));
-    JSObject *evalobj = js_DefineFunction(cx, self, id, IndirectEval, 1, JSFUN_STUB_GSOPS);
+    JSObject *evalobj = js_DefineFunction(cx, self, id, eval, 1, JSFUN_STUB_GSOPS);
     if (!evalobj)
         return NULL;
     self->setOriginalEval(evalobj);
@@ -293,14 +291,14 @@ GlobalObject::initStandardClasses(JSContext *cx, Handle<GlobalObject*> global)
 #if JS_HAS_XML_SUPPORT
            (!VersionHasAllowXML(cx->findVersion()) || js_InitXMLClasses(cx, global)) &&
 #endif
+#if JS_HAS_GENERATORS
            js_InitIteratorClasses(cx, global) &&
+#endif
            js_InitDateClass(cx, global) &&
            js_InitWeakMapClass(cx, global) &&
            js_InitProxyClass(cx, global) &&
            js_InitMapClass(cx, global) &&
-           GlobalObject::initMapIteratorProto(cx, global) &&
-           js_InitSetClass(cx, global) &&
-           GlobalObject::initSetIteratorProto(cx, global);
+           js_InitSetClass(cx, global);
 }
 
 void
