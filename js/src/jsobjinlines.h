@@ -286,7 +286,7 @@ JSObject::dynamicSlotIndex(size_t slot)
 }
 
 inline void
-JSObject::setLastPropertyInfallible(const js::Shape *shape)
+JSObject::setLastPropertyInfallible(js::Shape *shape)
 {
     JS_ASSERT(!shape->inDictionary());
     JS_ASSERT(shape->compartment() == compartment());
@@ -294,7 +294,7 @@ JSObject::setLastPropertyInfallible(const js::Shape *shape)
     JS_ASSERT(slotSpan() == shape->slotSpan());
     JS_ASSERT(numFixedSlots() == shape->numFixedSlots());
 
-    shape_ = const_cast<js::Shape *>(shape);
+    shape_ = shape;
 }
 
 inline void
@@ -315,7 +315,7 @@ JSObject::canRemoveLastProperty()
      * converted to dictionary mode instead. See BaseShape comment in jsscope.h
      */
     JS_ASSERT(!inDictionaryMode());
-    const js::Shape *previous = lastProperty()->previous();
+    js::Shape *previous = lastProperty()->previous();
     return previous->getObjectParent() == lastProperty()->getObjectParent()
         && previous->getObjectFlags() == lastProperty()->getObjectFlags();
 }
@@ -927,7 +927,7 @@ inline bool
 JSObject::hasProperty(JSContext *cx, js::HandleId id, bool *foundp, unsigned flags)
 {
     js::RootedObject pobj(cx);
-    JSProperty *prop;
+    js::RootedShape prop(cx);
     JSAutoResolveFlags rf(cx, flags);
     if (!lookupGeneric(cx, id, &pobj, &prop))
         return false;
@@ -958,7 +958,7 @@ JSObject::nativeSetSlot(unsigned slot, const js::Value &value)
 }
 
 inline void
-JSObject::nativeSetSlotWithType(JSContext *cx, const js::Shape *shape, const js::Value &value)
+JSObject::nativeSetSlotWithType(JSContext *cx, js::Shape *shape, const js::Value &value)
 {
     nativeSetSlot(shape->slot(), value);
     js::types::AddTypePropertyId(cx, this, shape->propid(), value);
@@ -1034,7 +1034,8 @@ JSObject::sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf,
 }
 
 inline JSBool
-JSObject::lookupGeneric(JSContext *cx, js::HandleId id, js::MutableHandleObject objp, JSProperty **propp)
+JSObject::lookupGeneric(JSContext *cx, js::HandleId id,
+                        js::MutableHandleObject objp, js::MutableHandleShape propp)
 {
     js::RootedObject self(cx, this);
 
@@ -1045,7 +1046,8 @@ JSObject::lookupGeneric(JSContext *cx, js::HandleId id, js::MutableHandleObject 
 }
 
 inline JSBool
-JSObject::lookupProperty(JSContext *cx, js::PropertyName *name, js::MutableHandleObject objp, JSProperty **propp)
+JSObject::lookupProperty(JSContext *cx, js::PropertyName *name,
+                         js::MutableHandleObject objp, js::MutableHandleShape propp)
 {
     js::Rooted<jsid> id(cx, js::NameToId(name));
     return lookupGeneric(cx, id, objp, propp);
@@ -1097,7 +1099,8 @@ JSObject::defineSpecial(JSContext *cx, js::SpecialId sid, const js::Value &value
 }
 
 inline JSBool
-JSObject::lookupElement(JSContext *cx, uint32_t index, js::MutableHandleObject objp, JSProperty **propp)
+JSObject::lookupElement(JSContext *cx, uint32_t index,
+                        js::MutableHandleObject objp, js::MutableHandleShape propp)
 {
     js::RootedObject self(cx, this);
 
@@ -1106,7 +1109,8 @@ JSObject::lookupElement(JSContext *cx, uint32_t index, js::MutableHandleObject o
 }
 
 inline JSBool
-JSObject::lookupSpecial(JSContext *cx, js::SpecialId sid, js::MutableHandleObject objp, JSProperty **propp)
+JSObject::lookupSpecial(JSContext *cx, js::SpecialId sid,
+                        js::MutableHandleObject objp, js::MutableHandleShape propp)
 {
     js::Rooted<jsid> id(cx, SPECIALID_TO_JSID(sid));
     return lookupGeneric(cx, id, objp, propp);
@@ -1154,7 +1158,7 @@ JSObject::getElementIfPresent(JSContext *cx, js::HandleObject receiver, uint32_t
         return false;
 
     js::RootedObject obj2(cx);
-    JSProperty *prop;
+    js::RootedShape prop(cx);
     if (!self->lookupGeneric(cx, id, &obj2, &prop))
         return false;
 
@@ -1536,7 +1540,7 @@ CopyInitializerObject(JSContext *cx, HandleObject baseobj)
 
 JSObject *
 NewReshapedObject(JSContext *cx, HandleTypeObject type, JSObject *parent,
-                  gc::AllocKind kind, const Shape *shape);
+                  gc::AllocKind kind, Shape *shape);
 
 /*
  * As for gc::GetGCObjectKind, where numSlots is a guess at the final size of
