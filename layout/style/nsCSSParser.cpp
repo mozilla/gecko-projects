@@ -653,6 +653,12 @@ protected:
   // True if we are in quirks mode; false in standards or almost standards mode
   bool          mNavQuirkMode : 1;
 
+  // True when the hashless color quirk applies.
+  bool mHashlessColorQuirk : 1;
+
+  // True when the unitless length quirk applies.
+  bool mUnitlessLengthQuirk : 1;
+
   // True if unsafe rules should be allowed
   bool mUnsafeRulesEnabled : 1;
 
@@ -746,6 +752,8 @@ CSSParserImpl::CSSParserImpl()
     mNameSpaceMap(nsnull),
     mHavePushBack(false),
     mNavQuirkMode(false),
+    mHashlessColorQuirk(false),
+    mUnitlessLengthQuirk(false),
     mUnsafeRulesEnabled(false),
     mHTMLMediaMode(false),
     mParsingCompoundProperty(false)
@@ -3752,7 +3760,7 @@ CSSParserImpl::ParseColor(nsCSSValue& aValue)
   }
 
   // try 'xxyyzz' without '#' prefix for compatibility with IE and Nav4x (bug 23236 and 45804)
-  if (mNavQuirkMode && !IsParsingCompoundProperty()) {
+  if (mHashlessColorQuirk) {
     // - If the string starts with 'a-f', the nsCSSScanner builds the
     //   token as a eCSSToken_Ident and we can parse the string as a
     //   'xxyyzz' RGB color.
@@ -4391,9 +4399,15 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
                             PRInt32 aVariantMask,
                             const PRInt32 aKeywordTable[])
 {
-  NS_ASSERTION(IsParsingCompoundProperty() ||
-               ((~aVariantMask) & (VARIANT_LENGTH|VARIANT_COLOR)),
-               "cannot distinguish lengths and colors in quirks mode");
+  NS_ASSERTION(!(mHashlessColorQuirk && (aVariantMask & VARIANT_COLOR)) ||
+               !(aVariantMask & VARIANT_NUMBER),
+               "can't distinguish colors from numbers");
+  NS_ASSERTION(!(mHashlessColorQuirk && (aVariantMask & VARIANT_COLOR)) ||
+               !(mUnitlessLengthQuirk && (aVariantMask & VARIANT_LENGTH)),
+               "can't distinguish colors from lengths");
+  NS_ASSERTION(!(mUnitlessLengthQuirk && (aVariantMask & VARIANT_LENGTH)) ||
+               !(aVariantMask & VARIANT_NUMBER),
+               "can't distinguish lengths from numbers");
   NS_ABORT_IF_FALSE(!(aVariantMask & VARIANT_IDENTIFIER) ||
                     !(aVariantMask & VARIANT_IDENTIFIER_NO_INHERIT),
                     "must not set both VARIANT_IDENTIFIER and "
@@ -4497,7 +4511,7 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
     aValue.SetPercentValue(tk->mNumber);
     return true;
   }
-  if (mNavQuirkMode && !IsParsingCompoundProperty()) { // NONSTANDARD: Nav interprets unitless numbers as px
+  if (mUnitlessLengthQuirk) { // NONSTANDARD: Nav interprets unitless numbers as px
     if (((aVariantMask & VARIANT_LENGTH) != 0) &&
         (eCSSToken_Number == tk->mType)) {
       aValue.SetFloatValue(tk->mNumber, eCSSUnit_Pixel);
@@ -4553,7 +4567,7 @@ CSSParserImpl::ParseVariant(nsCSSValue& aValue,
     return ParseElement(aValue);
   }
   if ((aVariantMask & VARIANT_COLOR) != 0) {
-    if ((mNavQuirkMode && !IsParsingCompoundProperty()) || // NONSTANDARD: Nav interprets 'xxyyzz' values even without '#' prefix
+    if (mHashlessColorQuirk || // NONSTANDARD: Nav interprets 'xxyyzz' values even without '#' prefix
         (eCSSToken_ID == tk->mType) ||
         (eCSSToken_Ref == tk->mType) ||
         (eCSSToken_Ident == tk->mType) ||
@@ -5614,36 +5628,63 @@ static const nsCSSProperty kOutlineRadiusIDs[] = {
 bool
 CSSParserImpl::ParseProperty(nsCSSProperty aPropID)
 {
+  // Can't use AutoRestore<bool> because it's a bitfield.
+  NS_ABORT_IF_FALSE(!mHashlessColorQuirk,
+                    "hashless color quirk should not be set");
+  NS_ABORT_IF_FALSE(!mUnitlessLengthQuirk,
+                    "unitless length quirk should not be set");
+  if (mNavQuirkMode) {
+    mHashlessColorQuirk =
+      nsCSSProps::PropHasFlags(aPropID, CSS_PROPERTY_HASHLESS_COLOR_QUIRK);
+    mUnitlessLengthQuirk =
+      nsCSSProps::PropHasFlags(aPropID, CSS_PROPERTY_UNITLESS_LENGTH_QUIRK);
+  }
+
   NS_ASSERTION(aPropID < eCSSProperty_COUNT, "index out of range");
+  bool result;
   switch (nsCSSProps::PropertyParseType(aPropID)) {
     case CSS_PROPERTY_PARSE_INACCESSIBLE: {
       // The user can't use these
       REPORT_UNEXPECTED(PEInaccessibleProperty2);
-      return false;
+      result = false;
+      break;
     }
     case CSS_PROPERTY_PARSE_FUNCTION: {
-      return ParsePropertyByFunction(aPropID);
+      result = ParsePropertyByFunction(aPropID);
+      break;
     }
     case CSS_PROPERTY_PARSE_VALUE: {
+      result = false;
       nsCSSValue value;
       if (ParseSingleValueProperty(value, aPropID)) {
         if (ExpectEndProperty()) {
           AppendValue(aPropID, value);
-          return true;
+          result = true;
         }
         // XXX Report errors?
       }
       // XXX Report errors?
-      return false;
+      break;
     }
     case CSS_PROPERTY_PARSE_VALUE_LIST: {
-      return ParseValueList(aPropID);
+      result = ParseValueList(aPropID);
+      break;
+    }
+    default: {
+      result = false;
+      NS_ABORT_IF_FALSE(false,
+                        "Property's flags field in nsCSSPropList.h is missing "
+                        "one of the CSS_PROPERTY_PARSE_* constants");
+      break;
     }
   }
-  NS_ABORT_IF_FALSE(false,
-                    "Property's flags field in nsCSSPropList.h is missing "
-                    "one of the CSS_PROPERTY_PARSE_* constants");
-  return false;
+
+  if (mNavQuirkMode) {
+    mHashlessColorQuirk = false;
+    mUnitlessLengthQuirk = false;
+  }
+
+  return result;
 }
 
 bool
@@ -7250,6 +7291,9 @@ CSSParserImpl::ParseCalc(nsCSSValue &aValue, PRInt32 aVariantMask)
   NS_ASSERTION(!(aVariantMask & VARIANT_NUMBER), "unexpected variant mask");
   NS_ABORT_IF_FALSE(aVariantMask != 0, "unexpected variant mask");
 
+  bool oldUnitlessLengthQuirk = mUnitlessLengthQuirk;
+  mUnitlessLengthQuirk = false;
+
   // One-iteration loop so we can break to the error-handling case.
   do {
     // The toplevel of a calc() is always an nsCSSValue::Array of length 1.
@@ -7262,10 +7306,12 @@ CSSParserImpl::ParseCalc(nsCSSValue &aValue, PRInt32 aVariantMask)
       break;
 
     aValue.SetArrayValue(arr, eCSSUnit_Calc);
+    mUnitlessLengthQuirk = oldUnitlessLengthQuirk;
     return true;
   } while (false);
 
   SkipUntil(')');
+  mUnitlessLengthQuirk = oldUnitlessLengthQuirk;
   return false;
 }
 

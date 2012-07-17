@@ -5191,6 +5191,8 @@ CompExprTransplanter::transplant(ParseNode *pn)
                     *pnup = NULL;
                     if (!tc->lexdeps->put(atom, dn2))
                         return false;
+                    if (dn->isClosed())
+                        dn2->pn_dflags |= PND_CLOSED;
                 } else if (dn->isPlaceholder()) {
                     /*
                      * The variable first occurs free in the 'yield' expression;
@@ -5304,7 +5306,7 @@ Parser::comprehensionTail(ParseNode *kid, unsigned blockid, bool isGenexp,
         return NULL;
 
     if (!transplanter.transplant(kid))
-        return false;
+        return NULL;
 
     JS_ASSERT(tc->blockChain && tc->blockChain == pn->pn_objbox->object);
     data.initLet(HoistVars, *tc->blockChain, JSMSG_ARRAY_INIT_TOO_BIG);
