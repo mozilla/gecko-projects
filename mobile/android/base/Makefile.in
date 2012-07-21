@@ -86,6 +86,7 @@ FENNEC_JAVA_FILES = \
   MultiChoicePreference.java \
   NSSBridge.java \
   CustomEditText.java \
+  OnInterceptTouchListener.java \
   PrivateDataPreference.java \
   PropertyAnimator.java \
   ProfileMigrator.java \
@@ -136,7 +137,6 @@ FENNEC_JAVA_FILES = \
   gfx/ScreenshotLayer.java \
   gfx/ScrollbarLayer.java \
   gfx/SingleTileLayer.java \
-  gfx/SurfaceTextureLayer.java \
   gfx/TextLayer.java \
   gfx/TextureGenerator.java \
   gfx/TextureReaper.java \

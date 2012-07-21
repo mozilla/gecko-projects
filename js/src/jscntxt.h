@@ -159,18 +159,18 @@ struct ConservativeGCData
     }
 };
 
-class ToSourceCache
+class SourceDataCache
 {
-    typedef HashMap<JSFunction *,
-                    JSString *,
-                    DefaultHasher<JSFunction *>,
+    typedef HashMap<ScriptSource *,
+                    JSFixedString *,
+                    DefaultHasher<ScriptSource *>,
                     SystemAllocPolicy> Map;
-    Map *map_;
-  public:
-    ToSourceCache() : map_(NULL) {}
-    JSString *lookup(JSFunction *fun);
-    void put(JSFunction *fun, JSString *);
-    void purge();
+     Map *map_;
+   public:
+    SourceDataCache() : map_(NULL) {}
+    JSFixedString *lookup(ScriptSource *ss);
+    void put(ScriptSource *ss, JSFixedString *);
+     void purge();
 };
 
 struct EvalCacheLookup
@@ -502,7 +502,8 @@ struct JSRuntime : js::RuntimeFriendFields
      */
     volatile uint32_t   gcNumArenasFreeCommitted;
     js::GCMarker        gcMarker;
-    void                *gcVerifyData;
+    void                *gcVerifyPreData;
+    void                *gcVerifyPostData;
     bool                gcChunkAllocationSinceLastGC;
     int64_t             gcNextFullGCTime;
     int64_t             gcLastGCTime;
@@ -716,6 +717,8 @@ struct JSRuntime : js::RuntimeFriendFields
         return !JS_CLIST_IS_EMPTY(&contextList);
     }
 
+    JS_SourceHook       sourceHook;
+
     /* Per runtime debug hooks -- see jsprvtd.h and jsdbgapi.h. */
     JSDebugHooks        debugHooks;
 
@@ -750,6 +753,10 @@ struct JSRuntime : js::RuntimeFriendFields
     PRLock              *gcLock;
 
     js::GCHelperThread  gcHelperThread;
+
+#ifdef JS_THREADSAFE
+    js::SourceCompressorThread sourceCompressorThread;
+#endif
 
   private:
     js::FreeOp          defaultFreeOp_;
@@ -800,7 +807,7 @@ struct JSRuntime : js::RuntimeFriendFields
     js::PropertyCache   propertyCache;
     js::NewObjectCache  newObjectCache;
     js::NativeIterCache nativeIterCache;
-    js::ToSourceCache   toSourceCache;
+    js::SourceDataCache sourceDataCache;
     js::EvalCache       evalCache;
 
     /* State used by jsdtoa.cpp. */
@@ -829,6 +836,8 @@ struct JSRuntime : js::RuntimeFriendFields
     js::PreserveWrapperCallback            preserveWrapperCallback;
 
     js::ScriptFilenameTable scriptFilenameTable;
+
+    js::ScriptSource *scriptSources;
 
 #ifdef DEBUG
     size_t              noGCOrAllocationCheck;

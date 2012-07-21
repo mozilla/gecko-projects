@@ -536,3 +536,5 @@ DOMCI_CLASS(OpenWindowEventDetail)
 DOMCI_CLASS(DOMFileHandle)
 DOMCI_CLASS(FileRequest)
 DOMCI_CLASS(LockedFile)
+
+DOMCI_CLASS(MozActivity)
