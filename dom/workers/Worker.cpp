@@ -120,7 +120,7 @@ protected:
       parent->AssertIsOnWorkerThread();
     }
 
-    JSObject* obj = JS_NewObject(aCx, aClass, nsnull, nsnull);
+    JSObject* obj = JS_NewObject(aCx, aClass, nullptr, nullptr);
     if (!obj) {
       return false;
     }
@@ -154,7 +154,7 @@ private:
   ~Worker();
 
   static JSBool
-  GetEventListener(JSContext* aCx, JSHandleObject aObj, JSHandleId aIdval, jsval* aVp)
+  GetEventListener(JSContext* aCx, JSHandleObject aObj, JSHandleId aIdval, JSMutableHandleValue aVp)
   {
     JS_ASSERT(JSID_IS_INT(aIdval));
     JS_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < STRING_COUNT);
@@ -173,13 +173,13 @@ private:
       JS_ReportError(aCx, "Failed to get listener!");
     }
 
-    *aVp = listener ? OBJECT_TO_JSVAL(listener) : JSVAL_NULL;
+    aVp.set(listener ? OBJECT_TO_JSVAL(listener) : JSVAL_NULL);
     return true;
   }
 
   static JSBool
   SetEventListener(JSContext* aCx, JSHandleObject aObj, JSHandleId aIdval, JSBool aStrict,
-                   jsval* aVp)
+                   JSMutableHandleValue aVp)
   {
     JS_ASSERT(JSID_IS_INT(aIdval));
     JS_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < STRING_COUNT);
@@ -191,7 +191,7 @@ private:
     }
 
     JSObject* listener;
-    if (!JS_ValueToObject(aCx, *aVp, &listener)) {
+    if (!JS_ValueToObject(aCx, aVp, &listener)) {
       return false;
     }
 

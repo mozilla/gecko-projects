@@ -12,6 +12,8 @@
 #include "nsDOMCSSRGBColor.h"
 #include "nsIDOMRect.h"
 #include "nsDOMClassInfoID.h" // DOMCI_DATA
+#include "nsIURI.h"
+#include "nsDOMError.h"
 
 nsROCSSPrimitiveValue::nsROCSSPrimitiveValue()
   : mType(CSS_PX)
@@ -387,7 +389,7 @@ NS_IMETHODIMP
 nsROCSSPrimitiveValue::GetRectValue(nsIDOMRect** aReturn)
 {
   if (mType != CSS_RECT) {
-    *aReturn = nsnull;
+    *aReturn = nullptr;
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
   NS_ASSERTION(mValue.mRect, "mValue.mRect should never be null");
@@ -400,7 +402,7 @@ NS_IMETHODIMP
 nsROCSSPrimitiveValue::GetRGBColorValue(nsIDOMRGBColor** aReturn)
 {
   if (mType != CSS_RGBCOLOR) {
-    *aReturn = nsnull;
+    *aReturn = nullptr;
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
   NS_ASSERTION(mValue.mColor, "mValue.mColor should never be null");
@@ -551,7 +553,7 @@ nsROCSSPrimitiveValue::Reset()
     case CSS_COUNTER: // FIXME: Counter should use an object
       NS_ASSERTION(mValue.mString, "Null string should never happen");
       nsMemory::Free(mValue.mString);
-      mValue.mString = nsnull;
+      mValue.mString = nullptr;
       break;
     case CSS_URI:
       NS_IF_RELEASE(mValue.mURI);

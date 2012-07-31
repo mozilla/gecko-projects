@@ -21,7 +21,7 @@
 
 using namespace mozilla;
 
-nsBoxLayout* nsStackLayout::gInstance = nsnull;
+nsBoxLayout* nsStackLayout::gInstance = nullptr;
 
 #define SPECIFIED_LEFT (1 << NS_SIDE_LEFT)
 #define SPECIFIED_RIGHT (1 << NS_SIDE_RIGHT)
@@ -178,7 +178,7 @@ nsStackLayout::GetOffset(nsBoxLayoutState& aState, nsIBox* aChild, nsMargin& aOf
   if (content) {
     bool ltr = aChild->GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR;
     nsAutoString value;
-    PRInt32 error;
+    nsresult error;
 
     content->GetAttr(kNameSpaceID_None, nsGkAtoms::start, value);
     if (!value.IsEmpty()) {

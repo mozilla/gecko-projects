@@ -32,7 +32,8 @@ nsresult nsRawReader::ResetDecode()
   return nsBuiltinDecoderReader::ResetDecode();
 }
 
-nsresult nsRawReader::ReadMetadata(nsVideoInfo* aInfo)
+nsresult nsRawReader::ReadMetadata(nsVideoInfo* aInfo,
+                                   nsHTMLMediaElement::MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(),
                "Should be on decode thread.");
@@ -102,6 +103,8 @@ nsresult nsRawReader::ReadMetadata(nsVideoInfo* aInfo)
   }
 
   *aInfo = mInfo;
+
+  *aTags = nullptr;
 
   return NS_OK;
 }
@@ -263,7 +266,7 @@ nsresult nsRawReader::Seek(PRInt64 aTime, PRInt64 aStartTime, PRInt64 aEndTime, 
     nsAutoPtr<VideoData> video(mVideoQueue.PeekFront());
     if (video && video->mEndTime < aTime) {
       mVideoQueue.PopFront();
-      video = nsnull;
+      video = nullptr;
     } else {
       video.forget();
     }

@@ -88,7 +88,7 @@ public:
    * nsBlockFrame::CreateContinuationFor() instead.
    * @param aNextInFlowResult will contain the next-in-flow
    *        <b>if and only if</b> one is created. If a next-in-flow already
-   *        exists aNextInFlowResult is set to nsnull.
+   *        exists aNextInFlowResult is set to nullptr.
    * @return NS_OK if a next-in-flow already exists or is successfully created.
    */
   nsresult CreateNextInFlow(nsPresContext* aPresContext,
@@ -141,7 +141,8 @@ public:
   // shadow.
   static void SyncWindowProperties(nsPresContext*       aPresContext,
                                    nsIFrame*            aFrame,
-                                   nsIView*             aView);
+                                   nsIView*             aView,
+                                   nsRenderingContext*  aRC = nullptr);
 
   // Sets the view's attributes from the frame style.
   // - visibility
@@ -154,6 +155,20 @@ public:
                                       nsStyleContext*  aStyleContext,
                                       nsIView*         aView,
                                       PRUint32         aFlags = 0);
+
+  /**
+   * Converts the minimum and maximum sizes given in inner window app units to
+   * outer window device pixel sizes and assigns these constraints to the widget.
+   *
+   * @param aPresContext pres context
+   * @param aWidget widget for this frame
+   * @param minimum size of the window in app units
+   * @param maxmimum size of the window in app units
+   */
+  static void SetSizeConstraints(nsPresContext* aPresContext,
+                                 nsIWidget* aWidget,
+                                 const nsSize& aMinSize,
+                                 const nsSize& aMaxSize);
 
   // Used by both nsInlineFrame and nsFirstLetterFrame.
   void DoInlineIntrinsicWidth(nsRenderingContext *aRenderingContext,
@@ -188,7 +203,7 @@ public:
                        nscoord                        aY,
                        PRUint32                       aFlags,
                        nsReflowStatus&                aStatus,
-                       nsOverflowContinuationTracker* aTracker = nsnull);
+                       nsOverflowContinuationTracker* aTracker = nullptr);
 
   /**
    * The second half of frame reflow. Does the following:
@@ -307,7 +322,7 @@ public:
    * requesting reflow. Checks the principal and overflow lists (not
    * overflow containers / excess overflow containers). Does not check any
    * other auxiliary lists.
-   * @param aChild a child frame or nsnull
+   * @param aChild a child frame or nullptr
    * @return If aChild is non-null, the next-siblings of aChild, if any.
    *         If aChild is null, all child frames on the principal list, if any.
    */
@@ -422,7 +437,7 @@ protected:
    * Moves any frames on both the prev-in-flow's overflow list and the
    * receiver's overflow to the receiver's child list.
    *
-   * Resets the overlist pointers to nsnull, and updates the receiver's child
+   * Resets the overlist pointers to nullptr, and updates the receiver's child
    * count and content mapping.
    *
    * @return true if any frames were moved and false otherwise

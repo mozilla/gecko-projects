@@ -117,7 +117,7 @@ nsDeckFrame::GetSelectedIndex()
   nsAutoString value;
   if (mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::selectedIndex, value))
   {
-    PRInt32 error;
+    nsresult error;
 
     // convert it to an integer
     index = value.ToInteger(&error);
@@ -129,7 +129,7 @@ nsDeckFrame::GetSelectedIndex()
 nsIFrame* 
 nsDeckFrame::GetSelectedBox()
 {
-  return (mIndex >= 0) ? mFrames.FrameAt(mIndex) : nsnull; 
+  return (mIndex >= 0) ? mFrames.FrameAt(mIndex) : nullptr; 
 }
 
 NS_IMETHODIMP

@@ -108,12 +108,13 @@ Parser::Parser(JSContext *cx, const CompileOptions &options,
                const jschar *chars, size_t length, bool foldConstants)
   : AutoGCRooter(cx, PARSER),
     context(cx),
-    strictModeGetter(this),
+    strictModeGetter(thisForCtor()),
     tokenStream(cx, options, chars, length, &strictModeGetter),
     tempPoolMark(NULL),
     allocator(cx),
     traceListHead(NULL),
     tc(NULL),
+    sct(NULL),
     keepAtoms(cx->runtime),
     foldConstants(foldConstants),
     compileAndGo(options.compileAndGo)
@@ -782,7 +783,7 @@ Define(ParseNode *pn, JSAtom *atom, TreeContext *tc, bool let = false)
             pnup = &pnu->pn_link;
         }
 
-        if (pnu != dn->dn_uses) {
+        if (!pnu || pnu != dn->dn_uses) {
             *pnup = pn->dn_uses;
             pn->dn_uses = dn->dn_uses;
             dn->dn_uses = pnu;
@@ -6514,6 +6515,14 @@ Parser::atomNode(ParseNodeKind kind, JSOp op)
     node->setOp(op);
     const Token &tok = tokenStream.currentToken();
     node->pn_atom = tok.atom();
+
+    // Large strings are fast to parse but slow to compress. Stop compression on
+    // them, so we don't wait for a long time for compression to finish at the
+    // end of compilation.
+    const size_t HUGE_STRING = 50000;
+    if (sct && kind == PNK_STRING && node->pn_atom->length() >= HUGE_STRING)
+        sct->abort();
+
     return node;
 }
 

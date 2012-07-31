@@ -21,7 +21,6 @@
 #include "nsThreadUtils.h"
 #include "nsWeakReference.h"
 #include "mozilla/Attributes.h"
-#include "LayersBackend.h"
 
 class gfxASurface;
 
@@ -52,13 +51,13 @@ public:
                     const nsIntRect&  aRect,
                     EVENT_CALLBACK    aHandleEventFunction,
                     nsDeviceContext*  aContext,
-                    nsWidgetInitData* aInitData = nsnull);
+                    nsWidgetInitData* aInitData = nullptr);
 
   virtual already_AddRefed<nsIWidget>
   CreateChild(const nsIntRect  &aRect,
               EVENT_CALLBACK   aHandleEventFunction,
               nsDeviceContext  *aContext,
-              nsWidgetInitData *aInitData = nsnull,
+              nsWidgetInitData *aInitData = nullptr,
               bool             aForceUseIWidgetParent = false);
 
   NS_IMETHOD Destroy();
@@ -122,7 +121,7 @@ public:
   virtual nsIntPoint WidgetToScreenOffset()
   { return nsIntPoint(0, 0); }
 
-  void InitEvent(nsGUIEvent& event, nsIntPoint* aPoint = nsnull);
+  void InitEvent(nsGUIEvent& event, nsIntPoint* aPoint = nullptr);
 
   NS_IMETHOD DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus);
 
@@ -136,10 +135,10 @@ public:
 
 //NS_IMETHOD              CaptureMouse(bool aCapture);
   virtual LayerManager*
-  GetLayerManager(PLayersChild* aShadowManager = nsnull,
+  GetLayerManager(PLayersChild* aShadowManager = nullptr,
                   LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                   LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                  bool* aAllowRetaining = nsnull);
+                  bool* aAllowRetaining = nullptr);
 //  virtual nsDeviceContext* GetDeviceContext();
   virtual gfxASurface*      GetThebesSurface();
 
@@ -178,7 +177,7 @@ private:
   public:
     NS_DECL_NSIRUNNABLE
     PaintTask(PuppetWidget* widget) : mWidget(widget) {}
-    void Revoke() { mWidget = nsnull; }
+    void Revoke() { mWidget = nullptr; }
   private:
     PuppetWidget* mWidget;
   };

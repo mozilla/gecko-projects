@@ -35,6 +35,7 @@
 #include "nsTArray.h"
 #include "nsWindow.h"
 #include "cutils/properties.h"
+#include "BasicLayers.h"
 
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk" , ## args)
 #define LOGW(args...) __android_log_print(ANDROID_LOG_WARN, "Gonk", ## args)
@@ -57,9 +58,9 @@ static gfxMatrix sRotationMatrix;
 
 static nsRefPtr<GLContext> sGLContext;
 static nsTArray<nsWindow *> sTopWindows;
-static nsWindow *gWindowToRedraw = nsnull;
-static nsWindow *gFocusedWindow = nsnull;
-static android::FramebufferNativeWindow *gNativeWindow = nsnull;
+static nsWindow *gWindowToRedraw = nullptr;
+static nsWindow *gFocusedWindow = nullptr;
+static android::FramebufferNativeWindow *gNativeWindow = nullptr;
 static bool sFramebufferOpen;
 static bool sUsingOMTC;
 static bool sScreenInitialized;
@@ -143,7 +144,7 @@ static void *frameBufferWatcher(void *) {
             NS_DispatchToMainThread(mScreenOnEvent);
         }
     }
-    
+
     return NULL;
 }
 
@@ -162,7 +163,7 @@ nsWindow::nsWindow()
         }
 
         nsIntSize screenSize;
-        bool gotFB = Framebuffer::GetSize(&screenSize);
+        mozilla::DebugOnly<bool> gotFB = Framebuffer::GetSize(&screenSize);
         MOZ_ASSERT(gotFB);
         gScreenBounds = nsIntRect(nsIntPoint(0, 0), screenSize);
 
@@ -249,7 +250,7 @@ nsWindow::DoDraw(void)
 
             // No double-buffering needed.
             AutoLayerManagerSetup setupLayerManager(
-                gWindowToRedraw, ctx, BasicLayerManager::BUFFER_NONE,
+                gWindowToRedraw, ctx, mozilla::layers::BUFFER_NONE,
                 ScreenRotation(EffectiveScreenRotation()));
             gWindowToRedraw->mEventCallback(&event);
         }
@@ -309,9 +310,9 @@ nsWindow::Destroy(void)
 {
     sTopWindows.RemoveElement(this);
     if (this == gWindowToRedraw)
-        gWindowToRedraw = nsnull;
+        gWindowToRedraw = nullptr;
     if (this == gFocusedWindow)
-        gFocusedWindow = nsnull;
+        gFocusedWindow = nullptr;
     return NS_OK;
 }
 
@@ -466,7 +467,7 @@ nsWindow::GetNativeData(PRUint32 aDataType)
     case NS_NATIVE_WIDGET:
         return this;
     }
-    return nsnull;
+    return nullptr;
 }
 
 NS_IMETHODIMP
@@ -519,7 +520,7 @@ nsWindow::GetLayerManager(PLayersChild* aShadowManager,
 
     if (!topWindow) {
         LOGW(" -- no topwindow\n");
-        return nsnull;
+        return nullptr;
     }
 
     if (sUsingOMTC) {
@@ -689,7 +690,7 @@ nsScreenGonk::GetRotation(PRUint32* aRotation)
 NS_IMETHODIMP
 nsScreenGonk::SetRotation(PRUint32 aRotation)
 {
-    if (!(ROTATION_0_DEG <= aRotation && aRotation <= ROTATION_270_DEG))
+    if (!(aRotation <= ROTATION_270_DEG))
         return NS_ERROR_ILLEGAL_VALUE;
 
     if (sScreenRotation == aRotation)
@@ -767,7 +768,7 @@ NS_IMPL_ISUPPORTS1(nsScreenManagerGonk, nsIScreenManager)
 
 nsScreenManagerGonk::nsScreenManagerGonk()
 {
-    mOneScreen = new nsScreenGonk(nsnull);
+    mOneScreen = new nsScreenGonk(nullptr);
 }
 
 nsScreenManagerGonk::~nsScreenManagerGonk()

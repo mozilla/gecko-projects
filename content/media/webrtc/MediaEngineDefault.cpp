@@ -25,6 +25,14 @@ NS_IMPL_THREADSAFE_ISUPPORTS1(MediaEngineDefaultVideoSource, nsITimerCallback)
 /**
  * Default video source.
  */
+
+MediaEngineDefaultVideoSource::MediaEngineDefaultVideoSource()
+  : mTimer(nsnull), mState(kReleased)
+{}
+
+MediaEngineDefaultVideoSource::~MediaEngineDefaultVideoSource()
+{}
+
 void
 MediaEngineDefaultVideoSource::GetName(nsAString& aName)
 {
@@ -157,7 +165,7 @@ MediaEngineDefaultVideoSource::Stop()
 nsresult
 MediaEngineDefaultVideoSource::Snapshot(PRUint32 aDuration, nsIDOMFile** aFile)
 {
-  *aFile = nsnull;
+  *aFile = nullptr;
 
 #ifndef MOZ_WIDGET_ANDROID
   return NS_ERROR_NOT_IMPLEMENTED;

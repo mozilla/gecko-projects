@@ -47,7 +47,8 @@ public:
     return mTheoraState != 0 && mTheoraState->mActive;
   }
 
-  virtual nsresult ReadMetadata(nsVideoInfo* aInfo);
+  virtual nsresult ReadMetadata(nsVideoInfo* aInfo,
+                                nsHTMLMediaElement::MetadataTags** aTags);
   virtual nsresult Seek(PRInt64 aTime, PRInt64 aStartTime, PRInt64 aEndTime, PRInt64 aCurrentTime);
   virtual nsresult GetBuffered(nsTimeRanges* aBuffered, PRInt64 aStartTime);
 
@@ -217,7 +218,7 @@ private:
   bool ReadHeaders(nsOggCodecState* aState);
 
   // Returns the next Ogg packet for an bitstream/codec state. Returns a
-  // pointer to an ogg_packet on success, or nsnull if the read failed.
+  // pointer to an ogg_packet on success, or nullptr if the read failed.
   // The caller is responsible for deleting the packet and its |packet| field.
   ogg_packet* NextOggPacket(nsOggCodecState* aCodecState);
 

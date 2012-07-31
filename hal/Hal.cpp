@@ -238,6 +238,7 @@ public:
     }
 
     GetCurrentInformationInternal(&mInfo);
+    mHasValidCache = true;
     return mInfo;
   }
 
@@ -481,7 +482,7 @@ UnregisterSensorObserver(SensorType aSensor, ISensorObserver *aObserver) {
     }
   }
   delete [] gSensorObservers;
-  gSensorObservers = nsnull;
+  gSensorObservers = nullptr;
 }
 
 void

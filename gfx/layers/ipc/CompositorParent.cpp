@@ -33,13 +33,13 @@ namespace layers {
 // CompositorParent, but that's not always true.  This assumption only
 // affects CrossProcessCompositorParent below.
 static CompositorParent* sCurrentCompositor;
-static Thread* sCompositorThread = nsnull;
+static Thread* sCompositorThread = nullptr;
 // When ContentParent::StartUp() is called, we use the Thread global.
 // When StartUpWithExistingThread() is used, we have to use the two
 // duplicated globals, because there's no API to make a Thread from an
 // existing thread.
 static PlatformThreadId sCompositorThreadID = 0;
-static MessageLoop* sCompositorLoop = nsnull;
+static MessageLoop* sCompositorLoop = nullptr;
 
 struct LayerTreeState {
   nsRefPtr<Layer> mRoot;
@@ -97,7 +97,7 @@ bool CompositorParent::CreateThread()
   sCompositorThread = new Thread("Compositor");
   if (!sCompositorThread->Start()) {
     delete sCompositorThread;
-    sCompositorThread = nsnull;
+    sCompositorThread = nullptr;
     return false;
   }
   return true;
@@ -108,9 +108,9 @@ void CompositorParent::DestroyThread()
   NS_ASSERTION(NS_IsMainThread(), "Should be on the main Thread!");
   if (sCompositorThread) {
     delete sCompositorThread;
-    sCompositorThread = nsnull;
+    sCompositorThread = nullptr;
   }
-  sCompositorLoop = nsnull;
+  sCompositorLoop = nullptr;
   sCompositorThreadID = 0;
 }
 
@@ -134,7 +134,7 @@ CompositorParent::CompositorParent(nsIWidget* aWidget,
   , mPauseCompositionMonitor("PauseCompositionMonitor")
   , mResumeCompositionMonitor("ResumeCompositionMonitor")
 {
-  NS_ABORT_IF_FALSE(sCompositorThread != nsnull || sCompositorThreadID,
+  NS_ABORT_IF_FALSE(sCompositorThread != nullptr || sCompositorThreadID,
                     "The compositor thread must be Initialized before instanciating a COmpositorParent.");
   MOZ_COUNT_CTOR(CompositorParent);
   mCompositorID = 0;
@@ -364,10 +364,10 @@ public:
    * phase.
    */
   AutoResolveRefLayers(Layer* aRoot) : mRoot(aRoot)
-  { WalkTheTree<Resolve>(mRoot, nsnull); }
+  { WalkTheTree<Resolve>(mRoot, nullptr); }
 
   ~AutoResolveRefLayers()
-  { WalkTheTree<Detach>(mRoot, nsnull); }
+  { WalkTheTree<Detach>(mRoot, nullptr); }
 
 private:
   enum Op { Resolve, Detach };
@@ -510,7 +510,10 @@ CompositorParent::TransformFixedLayers(Layer* aLayer,
     gfxPoint translation(aTranslation.x - (anchor.x - anchor.x / aScaleDiff.x),
                          aTranslation.y - (anchor.y - anchor.y / aScaleDiff.y));
 
-    gfx3DMatrix layerTransform = aLayer->GetTransform();
+    // We are only translating the transform, so it is OK to translate the
+    // transform without the resolution scale.  This allows us to avoid applying
+    // the resolution scale and its inverse an extra time.
+    gfx3DMatrix layerTransform = aLayer->GetBaseTransform();
     Translate2D(layerTransform, translation);
     ShadowLayer* shadow = aLayer->AsShadowLayer();
     shadow->SetShadowTransform(layerTransform);
@@ -536,7 +539,8 @@ SetShadowProperties(Layer* aLayer)
 {
   // FIXME: Bug 717688 -- Do these updates in ShadowLayersParent::RecvUpdate.
   ShadowLayer* shadow = aLayer->AsShadowLayer();
-  shadow->SetShadowTransform(aLayer->GetTransform());
+  // Set the shadow's base transform to the layer's base transform.
+  shadow->SetShadowTransform(aLayer->GetBaseTransform());
   shadow->SetShadowVisibleRegion(aLayer->GetVisibleRegion());
   shadow->SetShadowClipRect(aLayer->GetClipRect());
 
@@ -592,6 +596,8 @@ CompositorParent::TransformShadowTree(TimeStamp aCurrentFrame)
   Layer* root = mLayerManager->GetRoot();
 
   const FrameMetrics& metrics = container->GetFrameMetrics();
+  // We must apply the resolution scale before a pan/zoom transform, so we call
+  // GetTransform here.
   const gfx3DMatrix& rootTransform = root->GetTransform();
   const gfx3DMatrix& currentTransform = layer->GetTransform();
 
@@ -683,7 +689,14 @@ CompositorParent::TransformShadowTree(TimeStamp aCurrentFrame)
       scaleDiff.y = tempScaleDiffY;
     }
 
-    shadow->SetShadowTransform(treeTransform * currentTransform);
+    // The transform already takes the resolution scale into account.  Since we
+    // will apply the resolution scale again when computing the effective
+    // transform, we must apply the inverse resolution scale here.
+    gfx3DMatrix computedTransform = treeTransform * currentTransform;
+    computedTransform.Scale(1.0f/layer->GetXScale(),
+                            1.0f/layer->GetYScale(),
+                            1);
+    shadow->SetShadowTransform(computedTransform);
     TransformFixedLayers(layer, offset, scaleDiff);
   }
 
@@ -802,25 +815,25 @@ static CompositorMap* sCompositorMap;
 
 void CompositorParent::CreateCompositorMap()
 {
-  if (sCompositorMap == nsnull) {
+  if (sCompositorMap == nullptr) {
     sCompositorMap = new CompositorMap;
   }
 }
 
 void CompositorParent::DestroyCompositorMap()
 {
-  if (sCompositorMap != nsnull) {
+  if (sCompositorMap != nullptr) {
     NS_ASSERTION(sCompositorMap->empty(), 
                  "The Compositor map should be empty when destroyed>");
     delete sCompositorMap;
-    sCompositorMap = nsnull;
+    sCompositorMap = nullptr;
   }
 }
 
 CompositorParent* CompositorParent::GetCompositor(PRUint64 id)
 {
   CompositorMap::iterator it = sCompositorMap->find(id);
-  return it != sCompositorMap->end() ? it->second : nsnull;
+  return it != sCompositorMap->end() ? it->second : nullptr;
 }
 
 void CompositorParent::AddCompositor(CompositorParent* compositor, PRUint64* outID)
@@ -836,7 +849,7 @@ CompositorParent* CompositorParent::RemoveCompositor(PRUint64 id)
 {
   CompositorMap::iterator it = sCompositorMap->find(id);
   if (it == sCompositorMap->end()) {
-    return nsnull;
+    return nullptr;
   }
   sCompositorMap->erase(it);
   return it->second;
@@ -955,7 +968,7 @@ CompositorParent::Create(Transport* aTransport, ProcessId aOtherProcess)
   ProcessHandle handle;
   if (!base::OpenProcessHandle(aOtherProcess, &handle)) {
     // XXX need to kill |aOtherProcess|, it's boned
-    return nsnull;
+    return nullptr;
   }
   cpcp->mSelfRef = cpcp;
   CompositorLoop()->PostTask(
@@ -983,7 +996,7 @@ GetIndirectShadowTree(uint64_t aId)
 {
   LayerTreeMap::const_iterator cit = sIndirectLayerTrees.find(aId);
   if (sIndirectLayerTrees.end() == cit) {
-    return nsnull;
+    return nullptr;
   }
   return &cit->second;
 }

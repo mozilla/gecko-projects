@@ -149,7 +149,7 @@ public:
 
   // Constructs a VideoData object. Makes a copy of YCbCr data in aBuffer.
   // aTimecode is a codec specific number representing the timestamp of
-  // the frame of video data. Returns nsnull if an error occurs. This may
+  // the frame of video data. Returns nullptr if an error occurs. This may
   // indicate that memory couldn't be allocated to create the VideoData
   // object, or it may indicate some problem with the input data (e.g.
   // negative stride).
@@ -245,7 +245,7 @@ template <class T>
 class MediaQueueDeallocator : public nsDequeFunctor {
   virtual void* operator() (void* anObject) {
     delete static_cast<T*>(anObject);
-    return nsnull;
+    return nullptr;
   }
 };
 
@@ -415,10 +415,12 @@ public:
   virtual bool HasAudio() = 0;
   virtual bool HasVideo() = 0;
 
-  // Read header data for all bitstreams in the file. Fills mInfo with
-  // the data required to present the media. Returns NS_OK on success,
-  // or NS_ERROR_FAILURE on failure.
-  virtual nsresult ReadMetadata(nsVideoInfo* aInfo) = 0;
+  // Read header data for all bitstreams in the file. Fills aInfo with
+  // the data required to present the media, and optionally fills *aTags
+  // with tag metadata from the file.
+  // Returns NS_OK on success, or NS_ERROR_FAILURE on failure.
+  virtual nsresult ReadMetadata(nsVideoInfo* aInfo,
+                                nsHTMLMediaElement::MetadataTags** aTags) = 0;
 
   // Stores the presentation time of the first frame we'd be able to play if
   // we started playback at the current position. Returns the first video
@@ -458,14 +460,14 @@ public:
     virtual void* operator()(void* anObject) {
       const VideoData* v = static_cast<const VideoData*>(anObject);
       if (!v->mImage) {
-        return nsnull;
+        return nullptr;
       }
       NS_ASSERTION(v->mImage->GetFormat() == mozilla::layers::Image::PLANAR_YCBCR,
                    "Wrong format?");
       mozilla::layers::PlanarYCbCrImage* vi = static_cast<mozilla::layers::PlanarYCbCrImage*>(v->mImage.get());
 
       mResult += vi->GetDataSize();
-      return nsnull;
+      return nullptr;
     }
 
     PRInt64 mResult;
@@ -484,7 +486,7 @@ public:
     virtual void* operator()(void* anObject) {
       const AudioData* audioData = static_cast<const AudioData*>(anObject);
       mResult += audioData->mFrames * audioData->mChannels * sizeof(AudioDataValue);
-      return nsnull;
+      return nullptr;
     }
 
     PRInt64 mResult;

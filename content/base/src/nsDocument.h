@@ -113,11 +113,11 @@ public:
   typedef mozilla::dom::Element Element;
   
   nsIdentifierMapEntry(const nsAString& aKey) :
-    nsStringHashKey(&aKey), mNameContentList(nsnull)
+    nsStringHashKey(&aKey), mNameContentList(nullptr)
   {
   }
   nsIdentifierMapEntry(const nsAString *aKey) :
-    nsStringHashKey(aKey), mNameContentList(nsnull)
+    nsStringHashKey(aKey), mNameContentList(nullptr)
   {
   }
   nsIdentifierMapEntry(const nsIdentifierMapEntry& aOther) :
@@ -172,7 +172,7 @@ public:
    */
   void SetImageElement(Element* aElement);
 
-  bool HasContentChangeCallback() { return mChangeCallbacks != nsnull; }
+  bool HasContentChangeCallback() { return mChangeCallbacks != nullptr; }
   void AddContentChangeCallback(nsIDocument::IDTargetObserver aCallback,
                                 void* aData, bool aForImage);
   void RemoveContentChangeCallback(nsIDocument::IDTargetObserver aCallback,
@@ -236,7 +236,7 @@ class nsDocHeaderData
 {
 public:
   nsDocHeaderData(nsIAtom* aField, const nsAString& aData)
-    : mField(aField), mData(aData), mNext(nsnull)
+    : mField(aField), mData(aData), mNext(nullptr)
   {
   }
 
@@ -496,7 +496,7 @@ public:
                                      nsISupports* aContainer,
                                      nsIStreamListener **aDocListener,
                                      bool aReset = true,
-                                     nsIContentSink* aContentSink = nsnull) = 0;
+                                     nsIContentSink* aContentSink = nullptr) = 0;
 
   virtual void StopDocumentLoad();
 
@@ -937,14 +937,26 @@ public:
   virtual void RestorePreviousFullScreenState();
   virtual bool IsFullScreenDoc();
   virtual void SetApprovedForFullscreen(bool aIsApproved);
+  virtual nsresult RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement,
+                                                const nsAString& aNewOrigin);
+
+  virtual nsresult RemoteFrameFullscreenReverted();
 
   static void ExitFullScreen();
 
   // This is called asynchronously by nsIDocument::AsyncRequestFullScreen()
-  // to move document into full-screen mode if allowed. aWasCallerChrome
+  // to move this document into full-screen mode if allowed. aWasCallerChrome
   // should be true when nsIDocument::AsyncRequestFullScreen() was called
-  // by chrome code.
-  void RequestFullScreen(Element* aElement, bool aWasCallerChrome);
+  // by chrome code. aNotifyOnOriginChange denotes whether we should send a
+  // fullscreen-origin-change notification if requesting fullscreen in this
+  // document causes the origin which is fullscreen to change. We may want to
+  // *not* send this notification if we're calling RequestFullscreen() as part
+  // of a continuation of a request in a subdocument, whereupon the caller will
+  // need to send the notification with the origin of the document which
+  // originally requested fullscreen, not *this* document's origin.
+  void RequestFullScreen(Element* aElement,
+                         bool aWasCallerChrome,
+                         bool aNotifyOnOriginChange);
 
   // Removes all elements from the full-screen stack, removing full-scren
   // styles from the top element in the stack.

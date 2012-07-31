@@ -53,7 +53,7 @@ private:
 class PacketQueueDeallocator : public nsDequeFunctor {
   virtual void* operator() (void* anObject) {
     delete static_cast<NesteggPacketHolder*>(anObject);
-    return nsnull;
+    return nullptr;
   }
 };
 
@@ -128,7 +128,8 @@ public:
     return false;
   }
 
-  virtual nsresult ReadMetadata(nsVideoInfo* aInfo);
+  virtual nsresult ReadMetadata(nsVideoInfo* aInfo,
+                                nsHTMLMediaElement::MetadataTags** aTags);
   virtual nsresult Seek(PRInt64 aTime, PRInt64 aStartTime, PRInt64 aEndTime, PRInt64 aCurrentTime);
   virtual nsresult GetBuffered(nsTimeRanges* aBuffered, PRInt64 aStartTime);
   virtual void NotifyDataArrived(const char* aBuffer, PRUint32 aLength, PRInt64 aOffset);

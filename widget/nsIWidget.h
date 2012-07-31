@@ -22,7 +22,7 @@
 #include "nsWidgetInitData.h"
 #include "nsTArray.h"
 #include "nsXULAppAPI.h"
-#include "LayersBackend.h"
+#include "LayersTypes.h"
 
 // forward declarations
 class   nsFontMetrics;
@@ -162,7 +162,6 @@ enum nsTopLevelWidgetZPlacement { // for PlaceBehind()
   eZPlacementBelow,       // just below another widget
   eZPlacementTop          // top of the window stack
 };
-
 
 /**
  * Preference for receiving IME updates
@@ -351,6 +350,27 @@ struct InputContextAction {
   }
 };
 
+/**
+ * Size constraints for setting the minimum and maximum size of a widget.
+ * Values are in device pixels.
+ */
+struct SizeConstraints {
+  SizeConstraints()
+    : mMaxSize(NS_MAXSIZE, NS_MAXSIZE)
+  {
+  }
+
+  SizeConstraints(nsIntSize aMinSize,
+                  nsIntSize aMaxSize)
+  : mMinSize(aMinSize),
+    mMaxSize(aMaxSize)
+  {
+  }
+
+  nsIntSize mMinSize;
+  nsIntSize mMaxSize;
+};
+
 } // namespace widget
 } // namespace mozilla
 
@@ -369,6 +389,7 @@ class nsIWidget : public nsISupports {
     typedef mozilla::widget::IMEState IMEState;
     typedef mozilla::widget::InputContext InputContext;
     typedef mozilla::widget::InputContextAction InputContextAction;
+    typedef mozilla::widget::SizeConstraints SizeConstraints;
 
     // Used in UpdateThemeGeometries.
     struct ThemeGeometry {
@@ -386,8 +407,8 @@ class nsIWidget : public nsISupports {
     NS_DECLARE_STATIC_IID_ACCESSOR(NS_IWIDGET_IID)
 
     nsIWidget()
-      : mLastChild(nsnull)
-      , mPrevSibling(nsnull)
+      : mLastChild(nullptr)
+      , mPrevSibling(nullptr)
     {}
 
         
@@ -423,7 +444,7 @@ class nsIWidget : public nsISupports {
                       const nsIntRect  &aRect,
                       EVENT_CALLBACK   aHandleEventFunction,
                       nsDeviceContext *aContext,
-                      nsWidgetInitData *aInitData = nsnull) = 0;
+                      nsWidgetInitData *aInitData = nullptr) = 0;
 
     /**
      * Allocate, initialize, and return a widget that is a child of
@@ -445,7 +466,7 @@ class nsIWidget : public nsISupports {
     CreateChild(const nsIntRect  &aRect,
                 EVENT_CALLBACK   aHandleEventFunction,
                 nsDeviceContext  *aContext,
-                nsWidgetInitData *aInitData = nsnull,
+                nsWidgetInitData *aInitData = nullptr,
                 bool             aForceUseIWidgetParent = false) = 0;
 
     /**
@@ -508,10 +529,10 @@ class nsIWidget : public nsISupports {
     NS_IMETHOD UnregisterTouchWindow() = 0;
 
     /**
-     * Return the parent Widget of this Widget or nsnull if this is a 
+     * Return the parent Widget of this Widget or nullptr if this is a 
      * top level window
      *
-     * @return the parent widget or nsnull if it does not have a parent
+     * @return the parent widget or nullptr if it does not have a parent
      *
      */
     virtual nsIWidget* GetParent(void) = 0;
@@ -525,10 +546,10 @@ class nsIWidget : public nsISupports {
 
     /**
      * Return the top (non-sheet) parent of this Widget if it's a sheet,
-     * or nsnull if this isn't a sheet (or some other error occurred).
+     * or nullptr if this isn't a sheet (or some other error occurred).
      * Sheets are only supported on some platforms (currently only OS X).
      *
-     * @return the top (non-sheet) parent widget or nsnull
+     * @return the top (non-sheet) parent widget or nullptr
      *
      */
     virtual nsIWidget* GetSheetWindowParent(void) = 0;
@@ -658,7 +679,8 @@ class nsIWidget : public nsISupports {
     NS_IMETHOD MoveClient(PRInt32 aX, PRInt32 aY) = 0;
 
     /**
-     * Resize this widget. 
+     * Resize this widget. Any size constraints set for the window by a
+     * previous call to SetSizeConstraints will be applied.
      *
      * @param aWidth  the new width expressed in the parent's coordinate system
      * @param aHeight the new height expressed in the parent's coordinate system
@@ -670,7 +692,8 @@ class nsIWidget : public nsISupports {
                       bool     aRepaint) = 0;
 
     /**
-     * Move or resize this widget.
+     * Move or resize this widget. Any size constraints set for the window by
+     * a previous call to SetSizeConstraints will be applied.
      *
      * @param aX       the new x position expressed in the parent's coordinate system
      * @param aY       the new y position expressed in the parent's coordinate system
@@ -1038,16 +1061,16 @@ class nsIWidget : public nsISupports {
      * @param aAllowRetaining an outparam that states whether the returned
      * layer manager should be used for retained layers
      */
-    inline LayerManager* GetLayerManager(bool* aAllowRetaining = nsnull)
+    inline LayerManager* GetLayerManager(bool* aAllowRetaining = nullptr)
     {
-        return GetLayerManager(nsnull, mozilla::layers::LAYERS_NONE,
+        return GetLayerManager(nullptr, mozilla::layers::LAYERS_NONE,
                                LAYER_MANAGER_CURRENT, aAllowRetaining);
     }
 
     inline LayerManager* GetLayerManager(LayerManagerPersistence aPersistence,
-                                         bool* aAllowRetaining = nsnull)
+                                         bool* aAllowRetaining = nullptr)
     {
-        return GetLayerManager(nsnull, mozilla::layers::LAYERS_NONE,
+        return GetLayerManager(nullptr, mozilla::layers::LAYERS_NONE,
                                aPersistence, aAllowRetaining);
     }
 
@@ -1059,7 +1082,7 @@ class nsIWidget : public nsISupports {
     virtual LayerManager* GetLayerManager(PLayersChild* aShadowManager,
                                           LayersBackend aBackendHint,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                                          bool* aAllowRetaining = nsnull) = 0;
+                                          bool* aAllowRetaining = nullptr) = 0;
 
     /**
      * Called before the LayerManager draws the layer tree.
@@ -1587,6 +1610,26 @@ class nsIWidget : public nsISupports {
         GetBounds(bounds);
         return bounds;
     }
+
+    /**
+     * Set size constraints on the window size such that it is never less than
+     * the specified minimum size and never larger than the specified maximum
+     * size. The size constraints are sizes of the outer rectangle including
+     * the window frame and title bar. Use 0 for an unconstrained minimum size
+     * and NS_MAXSIZE for an unconstrained maximum size. Note that this method
+     * does not necessarily change the size of a window to conform to this size,
+     * thus Resize should be called afterwards.
+     *
+     * @param aConstraints: the size constraints in device pixels
+     */
+    virtual void SetSizeConstraints(const SizeConstraints& aConstraints) = 0;
+
+    /**
+     * Return the size constraints currently observed by the widget.
+     *
+     * @return the constraints in device pixels
+     */
+    virtual const SizeConstraints& GetSizeConstraints() const = 0;
 
 protected:
 

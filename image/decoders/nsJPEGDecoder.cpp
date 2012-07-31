@@ -54,7 +54,7 @@ GetICCProfile(struct jpeg_decompress_struct &info)
 {
   JOCTET* profilebuf;
   PRUint32 profileLength;
-  qcms_profile* profile = nsnull;
+  qcms_profile* profile = nullptr;
 
   if (read_icc_profile(&info, &profilebuf, &profileLength)) {
     profile = qcms_profile_from_memory(profilebuf, profileLength);
@@ -79,21 +79,21 @@ nsJPEGDecoder::nsJPEGDecoder(RasterImage &aImage, imgIDecoderObserver* aObserver
 {
   mState = JPEG_HEADER;
   mReading = true;
-  mImageData = nsnull;
+  mImageData = nullptr;
 
   mBytesToSkip = 0;
   memset(&mInfo, 0, sizeof(jpeg_decompress_struct));
   memset(&mSourceMgr, 0, sizeof(mSourceMgr));
   mInfo.client_data = (void*)this;
 
-  mSegment = nsnull;
+  mSegment = nullptr;
   mSegmentLen = 0;
 
-  mBackBuffer = nsnull;
+  mBackBuffer = nullptr;
   mBackBufferLen = mBackBufferSize = mBackBufferUnreadLen = 0;
 
-  mInProfile = nsnull;
-  mTransform = nsnull;
+  mInProfile = nullptr;
+  mTransform = nullptr;
 
   mCMSMode = 0;
 
@@ -105,7 +105,7 @@ nsJPEGDecoder::nsJPEGDecoder(RasterImage &aImage, imgIDecoderObserver* aObserver
 nsJPEGDecoder::~nsJPEGDecoder()
 {
   // Step 8: Release JPEG decompression object
-  mInfo.src = nsnull;
+  mInfo.src = nullptr;
   jpeg_destroy_decompress(&mInfo);
 
   PR_FREEIF(mBackBuffer);
@@ -176,7 +176,7 @@ nsJPEGDecoder::FinishInternal()
   if ((mState != JPEG_DONE && mState != JPEG_SINK_NON_JPEG_TRAILER) &&
       (mState != JPEG_ERROR) &&
       !IsSizeDecode())
-    this->Write(nsnull, 0);
+    this->Write(nullptr, 0);
 }
 
 void
@@ -189,7 +189,9 @@ nsJPEGDecoder::WriteInternal(const char *aBuffer, PRUint32 aCount)
 
   /* Return here if there is a fatal error within libjpeg. */
   nsresult error_code;
-  if ((error_code = setjmp(mErr.setjmp_buffer)) != 0) {
+  // XXX: This cast to nsresult makes absolutely no sense and is thoroughly
+  // broken (bug 778103).  I hope this code path is never hit.
+  if ((error_code = (nsresult)setjmp(mErr.setjmp_buffer)) != 0) {
     if (error_code == NS_ERROR_FAILURE) {
       PostDataError();
       /* Error due to corrupt stream - return NS_OK and consume silently
@@ -239,7 +241,7 @@ nsJPEGDecoder::WriteInternal(const char *aBuffer, PRUint32 aCount)
 
     /* We're doing a full decode. */
     if (mCMSMode != eCMSMode_Off &&
-        (mInProfile = GetICCProfile(mInfo)) != nsnull) {
+        (mInProfile = GetICCProfile(mInfo)) != nullptr) {
       PRUint32 profileSpace = qcms_profile_get_color_space(mInProfile);
       bool mismatch = false;
 

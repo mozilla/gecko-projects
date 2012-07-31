@@ -100,7 +100,7 @@ static int64_t webm_tell(void *aUserData)
 
 nsWebMReader::nsWebMReader(nsBuiltinDecoder* aDecoder)
   : nsBuiltinDecoderReader(aDecoder),
-  mContext(nsnull),
+  mContext(nullptr),
   mPacketCount(0),
   mChannels(0),
   mVideoTrack(0),
@@ -174,11 +174,12 @@ void nsWebMReader::Cleanup()
 {
   if (mContext) {
     nestegg_destroy(mContext);
-    mContext = nsnull;
+    mContext = nullptr;
   }
 }
 
-nsresult nsWebMReader::ReadMetadata(nsVideoInfo* aInfo)
+nsresult nsWebMReader::ReadMetadata(nsVideoInfo* aInfo,
+                                    nsHTMLMediaElement::MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
@@ -337,6 +338,8 @@ nsresult nsWebMReader::ReadMetadata(nsVideoInfo* aInfo)
   }
 
   *aInfo = mInfo;
+
+  *aTags = nullptr;
 
   return NS_OK;
 }

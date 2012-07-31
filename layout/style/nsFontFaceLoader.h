@@ -72,7 +72,7 @@ protected:
   virtual nsresult LogMessage(gfxProxyFontEntry *aProxy,
                               const char *aMessage,
                               PRUint32 aFlags = nsIScriptError::errorFlag,
-                              nsresult aStatus = 0);
+                              nsresult aStatus = NS_OK);
 
   nsresult CheckFontLoad(gfxProxyFontEntry *aFontToLoad,
                          const gfxFontFaceSrc *aFontFaceSrc,
@@ -109,7 +109,7 @@ public:
   // cancel the load and remove its reference to mFontSet
   void Cancel();
 
-  void DropChannel() { mChannel = nsnull; }
+  void DropChannel() { mChannel = nullptr; }
 
   void StartedLoading(nsIStreamLoader *aStreamLoader);
 

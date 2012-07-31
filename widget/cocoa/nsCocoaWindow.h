@@ -205,7 +205,7 @@ public:
                                    const nsIntRect &aRect,
                                    EVENT_CALLBACK aHandleEventFunction,
                                    nsDeviceContext *aContext,
-                                   nsWidgetInitData *aInitData = nsnull);
+                                   nsWidgetInitData *aInitData = nullptr);
 
     NS_IMETHOD              Destroy();
 
@@ -224,6 +224,7 @@ public:
 
     NS_IMETHOD              ConstrainPosition(bool aAllowSlop,
                                               PRInt32 *aX, PRInt32 *aY);
+    virtual void            SetSizeConstraints(const SizeConstraints& aConstraints);
     NS_IMETHOD              Move(PRInt32 aX, PRInt32 aY);
     NS_IMETHOD              PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
                                         nsIWidget *aWidget, bool aActivate);
@@ -244,10 +245,10 @@ public:
 
     NS_IMETHOD Invalidate(const nsIntRect &aRect);
     virtual nsresult ConfigureChildren(const nsTArray<Configuration>& aConfigurations);
-    virtual LayerManager* GetLayerManager(PLayersChild* aShadowManager = nsnull,
+    virtual LayerManager* GetLayerManager(PLayersChild* aShadowManager = nullptr,
                                           LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                                          bool* aAllowRetaining = nsnull);
+                                          bool* aAllowRetaining = nullptr);
     NS_IMETHOD DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus) ;
     NS_IMETHOD CaptureRollupEvents(nsIRollupListener * aListener, bool aDoCapture, bool aConsumeRollupEvent);
     NS_IMETHOD GetAttention(PRInt32 aCycleCount);

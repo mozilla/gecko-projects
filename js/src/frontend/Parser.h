@@ -42,6 +42,8 @@ struct Parser : private AutoGCRooter
 
     TreeContext         *tc;            /* innermost tree context (stack-allocated) */
 
+    SourceCompressionToken *sct;        /* compression token for aborting */
+
     /* Root atoms and objects allocated for the parsed tree. */
     AutoKeepAtoms       keepAtoms;
 
@@ -107,6 +109,8 @@ struct Parser : private AutoGCRooter
     typedef bool (Parser::*Reporter)(ParseNode *pn, unsigned errorNumber, ...);
 
   private:
+    Parser *thisForCtor() { return this; }
+
     ParseNode *allocParseNode(size_t size) {
         JS_ASSERT(size == sizeof(ParseNode));
         return static_cast<ParseNode *>(allocator.allocNode());

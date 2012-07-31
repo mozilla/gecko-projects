@@ -294,7 +294,7 @@ public:
     NS_ASSERTION(IsOuterWindow(),
                  "Inner window supports nsWrapperCache, fix WrapObject!");
     *triedToWrap = true;
-    return EnsureInnerWindow() ? GetWrapper() : nsnull;
+    return EnsureInnerWindow() ? GetWrapper() : nullptr;
   }
 
   // nsIScriptGlobalObject
@@ -385,6 +385,7 @@ public:
   virtual NS_HIDDEN_(void) RefreshCompartmentPrincipal();
   virtual NS_HIDDEN_(nsresult) SetFullScreenInternal(bool aIsFullScreen, bool aRequireTrust);
   virtual NS_HIDDEN_(bool) IsPartOfApp();
+  virtual NS_HIDDEN_(bool) IsInAppOrigin();
 
   // nsIDOMStorageIndexedDB
   NS_DECL_NSIDOMSTORAGEINDEXEDDB
@@ -426,7 +427,7 @@ public:
     GetTop(getter_AddRefs(top));
     if (top)
       return static_cast<nsGlobalWindow *>(top.get());
-    return nsnull;
+    return nullptr;
   }
 
   inline nsGlobalWindow* GetScriptableTop()
@@ -436,7 +437,7 @@ public:
     if (top) {
       return static_cast<nsGlobalWindow *>(top.get());
     }
-    return nsnull;
+    return nullptr;
   }
 
   // Call this when a modal dialog is about to be opened.  Returns
@@ -559,20 +560,20 @@ public:
 
   static nsGlobalWindow* GetOuterWindowWithId(PRUint64 aWindowID) {
     if (!sWindowsById) {
-      return nsnull;
+      return nullptr;
     }
 
     nsGlobalWindow* outerWindow = sWindowsById->Get(aWindowID);
-    return outerWindow && !outerWindow->IsInnerWindow() ? outerWindow : nsnull;
+    return outerWindow && !outerWindow->IsInnerWindow() ? outerWindow : nullptr;
   }
 
   static nsGlobalWindow* GetInnerWindowWithId(PRUint64 aInnerWindowID) {
     if (!sWindowsById) {
-      return nsnull;
+      return nullptr;
     }
 
     nsGlobalWindow* innerWindow = sWindowsById->Get(aInnerWindowID);
-    return innerWindow && innerWindow->IsInnerWindow() ? innerWindow : nsnull;
+    return innerWindow && innerWindow->IsInnerWindow() ? innerWindow : nullptr;
   }
 
   static bool HasIndexedDBSupport();
@@ -640,7 +641,7 @@ protected:
   inline void MaybeClearInnerWindow(nsGlobalWindow* aExpectedInner)
   {
     if(mInnerWindow == aExpectedInner) {
-      mInnerWindow = nsnull;
+      mInnerWindow = nullptr;
     }
   }
 
@@ -703,7 +704,7 @@ protected:
    * @param argc The number of arguments in argv.
    * @param aExtraArgument Another way to pass arguments in.  This is mutually
    *                       exclusive with the argv/argc approach.
-   * @param aJSCallerContext The calling script's context. This must be nsnull
+   * @param aJSCallerContext The calling script's context. This must be nullptr
    *                         when aCalledNoScript is true.
    * @param aReturn [out] The window that was opened, if any.
    *
@@ -740,7 +741,7 @@ protected:
 
   // The timeout implementation functions.
   void RunTimeout(nsTimeout *aTimeout);
-  void RunTimeout() { RunTimeout(nsnull); }
+  void RunTimeout() { RunTimeout(nullptr); }
   // Return true if |aTimeout| was cleared while its handler ran.
   bool RunTimeoutHandler(nsTimeout* aTimeout, nsIScriptContext* aScx);
   // Return true if |aTimeout| needs to be reinserted into the timeout list.
@@ -813,7 +814,7 @@ protected:
 
   bool IsFrame()
   {
-    return GetParentInternal() != nsnull;
+    return GetParentInternal() != nullptr;
   }
 
   // If aLookForCallerOnJSStack is true, this method will look at the JS stack
@@ -977,6 +978,9 @@ protected:
   // This is TriState_Unknown if the object is the content window of an
   // iframe which is neither mozBrowser nor mozApp.
   TriState               mIsApp : 2;
+
+  // Principal of the web app running in this window, if any.
+  nsCOMPtr<nsIPrincipal>        mAppPrincipal;
 
   nsCOMPtr<nsIScriptContext>    mContext;
   nsWeakPtr                     mOpener;
@@ -1159,11 +1163,11 @@ NS_NewScriptGlobalObject(bool aIsChrome, bool aIsModalContentWindow)
   nsRefPtr<nsGlobalWindow> global;
 
   if (aIsChrome) {
-    global = new nsGlobalChromeWindow(nsnull);
+    global = new nsGlobalChromeWindow(nullptr);
   } else if (aIsModalContentWindow) {
-    global = new nsGlobalModalWindow(nsnull);
+    global = new nsGlobalModalWindow(nullptr);
   } else {
-    global = new nsGlobalWindow(nsnull);
+    global = new nsGlobalWindow(nullptr);
   }
 
   return global.forget();

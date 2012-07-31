@@ -437,9 +437,8 @@ struct JSScript : public js::gc::Cell
     /* Persistent type information retained across GCs. */
     js::types::TypeScript *types;
 
-    js::ScriptSource *source; /* source code */
-
   private:
+    js::ScriptSource *scriptSource_; /* source code */
 #ifdef JS_METHODJIT
     JITScriptSet *mJITInfo;
 #endif
@@ -620,6 +619,14 @@ struct JSScript : public js::gc::Cell
     JSFixedString *sourceData(JSContext *cx);
 
     bool loadSource(JSContext *cx, bool *worked);
+
+    js::ScriptSource *scriptSource() {
+        return scriptSource_;
+    }
+
+    void setScriptSource(JSContext *cx, js::ScriptSource *ss);
+
+  public:
 
     /* Return whether this script was compiled for 'eval' */
     bool isForEval() { return isCachedEval || isActiveEval; }
@@ -974,14 +981,14 @@ struct ScriptSource
     ScriptSource *next;
   private:
     union {
-        // When the script source is ready, compressedLength > 0 implies
+        // When the script source is ready, compressedLength_ != 0 implies
         // compressed holds the compressed data; otherwise, source holds the
         // uncompressed source.
         jschar *source;
         unsigned char *compressed;
     } data;
     uint32_t length_;
-    uint32_t compressedLength;
+    uint32_t compressedLength_;
     bool marked:1;
     bool onRuntime_:1;
     bool argumentsNotIncluded_:1;
@@ -997,7 +1004,7 @@ struct ScriptSource
                                           SourceCompressionToken *tok = NULL,
                                           bool ownSource = false);
     void attachToRuntime(JSRuntime *rt);
-    void mark() { JS_ASSERT(ready_); JS_ASSERT(onRuntime_); marked = true; }
+    void mark() { marked = true; }
     void destroy(JSRuntime *rt);
     uint32_t length() const { return length_; }
     bool onRuntime() const { return onRuntime_; }
@@ -1016,8 +1023,7 @@ struct ScriptSource
     static bool performXDR(XDRState<mode> *xdr, ScriptSource **ss);
 
   private:
-    bool compressed() { return !!compressedLength; }
-    void considerCompressing(JSRuntime *rt, const jschar *src, bool ownSource = false);
+    bool compressed() { return compressedLength_ != 0; }
 };
 
 #ifdef JS_THREADSAFE
@@ -1054,6 +1060,8 @@ class SourceCompressorThread
     PRCondVar *wakeup;
     // The main thread can block on this to wait for compression to finish.
     PRCondVar *done;
+    // Flag which can be set by the main thread to ask compression to abort.
+    volatile bool stop;
 
     void threadLoop();
     static void compressorThread(void *arg);
@@ -1071,6 +1079,7 @@ class SourceCompressorThread
     bool init();
     void compress(SourceCompressionToken *tok);
     void waitOnCompression(SourceCompressionToken *userTok);
+    void abort(SourceCompressionToken *userTok);
 };
 #endif
 
@@ -1079,19 +1088,21 @@ struct SourceCompressionToken
     friend struct ScriptSource;
     friend class SourceCompressorThread;
   private:
-    JSRuntime *rt;
+    JSContext *cx;
     ScriptSource *ss;
     const jschar *chars;
   public:
-    SourceCompressionToken(JSRuntime *rt)
-      : rt(rt), ss(NULL), chars(NULL) {}
+    SourceCompressionToken(JSContext *cx)
+      : cx(cx), ss(NULL), chars(NULL) {}
     ~SourceCompressionToken()
     {
         JS_ASSERT_IF(!ss, !chars);
         if (ss)
             ensureReady();
     }
+
     void ensureReady();
+    void abort();
 };
 
 extern void

@@ -43,6 +43,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsIViewManager.h"
 #include "nsDOMError.h"
+#include "nsMenuFrame.h"
 
 using namespace mozilla;
 
@@ -53,7 +54,7 @@ using namespace mozilla;
 #endif
 
 nsXULPopupListener::nsXULPopupListener(nsIDOMElement *aElement, bool aIsContext)
-  : mElement(aElement), mPopupContent(nsnull), mIsContext(aIsContext)
+  : mElement(aElement), mPopupContent(nullptr), mIsContext(aIsContext)
 {
 }
 
@@ -167,7 +168,7 @@ nsXULPopupListener::HandleEvent(nsIDOMEvent* aEvent)
   // submenu of an already-showing popup.  We don't need to do anything at all.
   nsCOMPtr<nsIContent> targetContent = do_QueryInterface(target);
   if (!mIsContext) {
-    nsIAtom *tag = targetContent ? targetContent->Tag() : nsnull;
+    nsIAtom *tag = targetContent ? targetContent->Tag() : nullptr;
     if (tag == nsGkAtoms::menu || tag == nsGkAtoms::menuitem)
       return NS_OK;
   }
@@ -276,7 +277,7 @@ nsXULPopupListener::ClosePopup()
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm)
       pm->HidePopup(mPopupContent, false, true, true);
-    mPopupContent = nsnull;  // release the popup
+    mPopupContent = nullptr;  // release the popup
   }
 } // ClosePopup
 
@@ -292,7 +293,7 @@ GetImmediateChild(nsIContent* aContent, nsIAtom *aTag)
     }
   }
 
-  return nsnull;
+  return nullptr;
 }
 
 //
@@ -387,8 +388,8 @@ nsXULPopupListener::LaunchPopup(nsIDOMEvent* aEvent, nsIContent* aTargetContent)
   nsCOMPtr<nsIContent> popup = do_QueryInterface(popupElement);
   nsIContent* parent = popup->GetParent();
   if (parent) {
-    nsIFrame* frame = parent->GetPrimaryFrame();
-    if (frame && frame->GetType() == nsGkAtoms::menuFrame)
+    nsMenuFrame* menu = do_QueryFrame(parent->GetPrimaryFrame());
+    if (menu)
       return NS_OK;
   }
 

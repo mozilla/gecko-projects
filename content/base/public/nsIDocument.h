@@ -92,8 +92,8 @@ class Element;
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x8c6a1e62, 0xd5ad, 0x4297, \
-  { 0xb9, 0x41, 0x64, 0x49, 0x22, 0x2e, 0xc4, 0xf0 } }
+{ 0xbd70ee06, 0x2a7d, 0x4258, \
+  { 0x86, 0x4b, 0xbd, 0x28, 0xad, 0x9f, 0xd1, 0x41 } }
 
 // Flag for AddStyleSheet().
 #define NS_STYLESHEET_FROM_CATALOG                (1 << 0)
@@ -167,7 +167,7 @@ public:
                                      nsISupports* aContainer,
                                      nsIStreamListener **aDocListener,
                                      bool aReset,
-                                     nsIContentSink* aSink = nsnull) = 0;
+                                     nsIContentSink* aSink = nullptr) = 0;
   virtual void StopDocumentLoad() = 0;
 
   /**
@@ -219,7 +219,7 @@ public:
    */
   already_AddRefed<nsILoadGroup> GetDocumentLoadGroup() const
   {
-    nsILoadGroup *group = nsnull;
+    nsILoadGroup *group = nullptr;
     if (mDocumentLoadGroup)
       CallQueryReferent(mDocumentLoadGroup.get(), &group);
 
@@ -435,7 +435,7 @@ public:
 
   nsIPresShell* GetShell() const
   {
-    return GetBFCacheEntry() ? nsnull : mPresShell;
+    return GetBFCacheEntry() ? nullptr : mPresShell;
   }
 
   void SetBFCacheEntry(nsIBFCacheEntry* aEntry)
@@ -500,7 +500,7 @@ public:
   // if the root isn't <html>)
   Element* GetHtmlElement();
   // Returns the first child of GetHtmlContent which has the given tag,
-  // or nsnull if that doesn't exist.
+  // or nullptr if that doesn't exist.
   Element* GetHtmlChildElement(nsIAtom* aTag);
   // Get the canonical <body> element, or return null if there isn't one (e.g.
   // if the root isn't <html> or if the <body> isn't there)
@@ -662,7 +662,7 @@ public:
 
   bool IsInBackgroundWindow() const
   {
-    nsPIDOMWindow* outer = mWindow ? mWindow->GetOuterWindow() : nsnull;
+    nsPIDOMWindow* outer = mWindow ? mWindow->GetOuterWindow() : nullptr;
     return outer && outer->IsBackground();
   }
   
@@ -722,6 +722,27 @@ public:
    * returned to full-screen status by calling RestorePreviousFullScreenState().
    */
   virtual void AsyncRequestFullScreen(Element* aElement) = 0;
+
+  /**
+   * Called when a frame in a child process has entered fullscreen or when a
+   * fullscreen frame in a child process changes to another origin.
+   * aFrameElement is the frame element which contains the child-process
+   * fullscreen document, and aNewOrigin is the origin of the new fullscreen
+   * document.
+   */
+  virtual nsresult RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement,
+                                                const nsAString& aNewOrigin) = 0;
+
+  /**
+   * Called when a frame in a remote child document has rolled back fullscreen
+   * so that all its fullscreen element stacks are empty; we must continue the
+   * rollback in this parent process' doc tree branch which is fullscreen.
+   * Note that only one branch of the document tree can have its documents in
+   * fullscreen state at one time. We're in inconsistent state if the a 
+   * fullscreen document has a parent and that parent isn't fullscreen. We
+   * preserve this property across process boundaries.
+   */
+   virtual nsresult RemoteFrameFullscreenReverted() = 0;
 
   /**
    * Restores the previous full-screen element to full-screen status. If there
@@ -861,7 +882,7 @@ public:
    */
   already_AddRefed<nsISupports> GetContainer() const
   {
-    nsISupports* container = nsnull;
+    nsISupports* container = nullptr;
     if (mDocumentContainer)
       CallQueryReferent(mDocumentContainer.get(), &container);
 
@@ -878,7 +899,7 @@ public:
       nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(container);
       return loadContext;
     }
-    return nsnull;
+    return nullptr;
   }
 
   /**
@@ -1480,7 +1501,7 @@ public:
   void SetStateObject(nsIStructuredCloneContainer *scContainer)
   {
     mStateObjectContainer = scContainer;
-    mStateObjectCached = nsnull;
+    mStateObjectCached = nullptr;
   }
 
   /**
@@ -1699,7 +1720,7 @@ protected:
 
   void SetContentTypeInternal(const nsACString& aType)
   {
-    mCachedEncoder = nsnull;
+    mCachedEncoder = nullptr;
     mContentType = aType;
   }
 
@@ -1946,7 +1967,7 @@ public:
   /**
    * @param aSubTreeOwner The document in which a subtree will be modified.
    * @param aTarget       The target of the possible DOMSubtreeModified event.
-   *                      Can be nsnull, in which case mozAutoSubtreeModified
+   *                      Can be nullptr, in which case mozAutoSubtreeModified
    *                      is just used to batch DOM mutations.
    */
   mozAutoSubtreeModified(nsIDocument* aSubtreeOwner, nsINode* aTarget)
@@ -1956,7 +1977,7 @@ public:
 
   ~mozAutoSubtreeModified()
   {
-    UpdateTarget(nsnull, nsnull);
+    UpdateTarget(nullptr, nullptr);
   }
 
   void UpdateTarget(nsIDocument* aSubtreeOwner, nsINode* aTarget)
@@ -2040,7 +2061,7 @@ nsINode::GetOwnerDocument() const
 {
   nsIDocument* ownerDoc = OwnerDoc();
 
-  return ownerDoc != this ? ownerDoc : nsnull;
+  return ownerDoc != this ? ownerDoc : nullptr;
 }
 
 inline nsINode*

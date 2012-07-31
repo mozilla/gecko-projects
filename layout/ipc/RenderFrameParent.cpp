@@ -23,7 +23,6 @@
 #include "nsSubDocumentFrame.h"
 #include "nsViewportFrame.h"
 #include "RenderFrameParent.h"
-#include "LayersBackend.h"
 
 typedef nsContentView::ViewConfig ViewConfig;
 using namespace mozilla::dom;
@@ -249,7 +248,7 @@ TransformShadowTree(nsDisplayListBuilder* aBuilder, nsFrameLoader* aFrameLoader,
 
   const FrameMetrics* metrics = GetFrameMetrics(aLayer);
 
-  gfx3DMatrix shadowTransform = aLayer->GetTransform();
+  gfx3DMatrix shadowTransform = aLayer->GetBaseTransform();
   ViewTransform layerTransform = aTransform;
 
   if (metrics && metrics->IsScrollable()) {
@@ -446,7 +445,7 @@ BuildBackgroundPatternFor(ContainerLayer* aContainer,
   bgRgn.MoveBy(-frameRect.TopLeft());
   layer->SetVisibleRegion(bgRgn);
 
-  aContainer->InsertAfter(layer, nsnull);
+  aContainer->InsertAfter(layer, nullptr);
 }
 
 already_AddRefed<LayerManager>
@@ -480,7 +479,7 @@ public:
     }
   }
 
-  void ClearRenderFrame() { mRenderFrame = nsnull; }
+  void ClearRenderFrame() { mRenderFrame = nullptr; }
 
 private:
   MessageLoop* mUILoop;
@@ -588,7 +587,7 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
     // draw a manager's subtree.  The latter is bad bad bad, but the
     // the NS_ABORT_IF_FALSE() above will flag it.  Returning NULL
     // here will just cause the shadow subtree not to be rendered.
-    return nsnull;
+    return nullptr;
   }
 
   uint64_t id = GetLayerTreeId();
@@ -599,12 +598,12 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
     if (!layer) {
       // Probably a temporary layer manager that doesn't know how to
       // use ref layers.
-      return nsnull;
+      return nullptr;
     }
     layer->SetReferentId(id);
     layer->SetVisibleRegion(aVisibleRect);
     nsIntPoint rootFrameOffset = GetRootFrameOffset(aFrame, aBuilder);
-    layer->SetTransform(
+    layer->SetBaseTransform(
       gfx3DMatrix::Translation(rootFrameOffset.x, rootFrameOffset.y, 0.0));
 
     return layer.forget();
@@ -616,8 +615,8 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
 
   ContainerLayer* shadowRoot = GetRootLayer();
   if (!shadowRoot) {
-    mContainer = nsnull;
-    return nsnull;
+    mContainer = nullptr;
+    return nullptr;
   }
 
   NS_ABORT_IF_FALSE(!shadowRoot || shadowRoot->Manager() == aManager,
@@ -630,12 +629,12 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
   NS_ABORT_IF_FALSE(!mContainer->GetFirstChild(),
                     "container of shadow tree shouldn't have a 'root' here");
 
-  mContainer->InsertAfter(shadowRoot, nsnull);
+  mContainer->InsertAfter(shadowRoot, nullptr);
 
   AssertInTopLevelChromeDoc(mContainer, aFrame);
   ViewTransform transform;
   TransformShadowTree(aBuilder, mFrameLoader, aFrame, shadowRoot, transform);
-  mContainer->SetClipRect(nsnull);
+  mContainer->SetClipRect(nullptr);
 
   if (mFrameLoader->AsyncScrollEnabled()) {
     const nsContentView* view = GetContentView(FrameMetrics::ROOT_SCROLL_ID);
@@ -694,9 +693,9 @@ RenderFrameParent::ActorDestroy(ActorDestroyReason why)
     // why==NormalShutdown, we'll definitely want to do something
     // better, especially as nothing guarantees another Update() from
     // the "next" remote layer tree.
-    mFrameLoader->SetCurrentRemoteFrame(nsnull);
+    mFrameLoader->SetCurrentRemoteFrame(nullptr);
   }
-  mFrameLoader = nsnull;
+  mFrameLoader = nullptr;
 }
 
 bool
@@ -710,7 +709,7 @@ PLayersParent*
 RenderFrameParent::AllocPLayers()
 {
   if (!mFrameLoader || mFrameLoaderDestroyed) {
-    return nsnull;
+    return nullptr;
   }
   nsRefPtr<LayerManager> lm = GetFrom(mFrameLoader);
   return new ShadowLayersParent(lm->AsShadowManager(), this, 0);
@@ -792,7 +791,7 @@ RenderFrameParent::GetShadowLayers() const
   NS_ABORT_IF_FALSE(shadowParents.Length() <= 1,
                     "can only support at most 1 ShadowLayersParent");
   return (shadowParents.Length() == 1) ?
-    static_cast<ShadowLayersParent*>(shadowParents[0]) : nsnull;
+    static_cast<ShadowLayersParent*>(shadowParents[0]) : nullptr;
 }
 
 uint64_t
@@ -805,7 +804,7 @@ ContainerLayer*
 RenderFrameParent::GetRootLayer() const
 {
   ShadowLayersParent* shadowLayers = GetShadowLayers();
-  return shadowLayers ? shadowLayers->GetRoot() : nsnull;
+  return shadowLayers ? shadowLayers->GetRoot() : nullptr;
 }
 
 NS_IMETHODIMP

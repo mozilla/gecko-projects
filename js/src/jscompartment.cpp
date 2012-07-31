@@ -233,7 +233,7 @@ JSCompartment::wrap(JSContext *cx, Value *vp)
         if (vp->isObject()) {
             RootedObject obj(cx, &vp->toObject());
             JS_ASSERT(obj->isCrossCompartmentWrapper());
-            if (global->getClass() != &dummy_class && obj->getParent() != global) {
+            if (obj->getParent() != global) {
                 do {
                     if (!JSObject::setParent(cx, obj, global))
                         return false;
@@ -287,9 +287,6 @@ JSCompartment::wrap(JSContext *cx, Value *vp)
     JS_ASSERT(Wrapper::wrappedObject(wrapper) == &key.get().toObject());
 
     vp->setObject(*wrapper);
-
-    if (wrapper->getProto() != proto && !SetProto(cx, wrapper, proto, false))
-        return false;
 
     if (!crossCompartmentWrappers.put(key, *vp))
         return false;
