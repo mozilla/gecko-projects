@@ -61,20 +61,28 @@ class nsObjectLoadingContent : public nsImageLoadingContent
       eType_Null           = TYPE_NULL
     };
     enum FallbackType {
-      eFallbackUnsupported,  // The content type is not supported (e.g. plugin 
-                             // not installed)
-      eFallbackAlternate,    // Showing alternate content
-      eFallbackDisabled,     // The plugin exists, but is disabled
-      eFallbackBlocklisted,  // The plugin is blocklisted and disabled
-      eFallbackOutdated,     // The plugin is considered outdated, but not
-                             // disabled
-      eFallbackCrashed,      // The plugin has crashed
-      eFallbackSuppressed,   // Suppressed by security policy
-      eFallbackUserDisabled, // Blocked by content policy
-      eFallbackClickToPlay,  // The plugin is disabled until the user clicks on
-                             // it
-      eFallbackVulnerableUpdatable, // The plugin is vulnerable (update avail)
-      eFallbackVulnerableNoUpdate  // The plugin is vulnerable (no update avail)
+      // The content type is not supported (e.g. plugin not installed)
+      eFallbackUnsupported = nsIObjectLoadingContent::PLUGIN_UNSUPPORTED,
+      // Showing alternate content
+      eFallbackAlternate = nsIObjectLoadingContent::PLUGIN_ALTERNATE,
+      // The plugin exists, but is disabled
+      eFallbackDisabled = nsIObjectLoadingContent::PLUGIN_DISABLED,
+      // The plugin is blocklisted and disabled
+      eFallbackBlocklisted = nsIObjectLoadingContent::PLUGIN_BLOCKLISTED,
+      // The plugin is considered outdated, but not disabled
+      eFallbackOutdated = nsIObjectLoadingContent::PLUGIN_OUTDATED,
+      // The plugin has crashed
+      eFallbackCrashed = nsIObjectLoadingContent::PLUGIN_CRASHED,
+      // Suppressed by security policy
+      eFallbackSuppressed = nsIObjectLoadingContent::PLUGIN_SUPPRESSED,
+      // Blocked by content policy
+      eFallbackUserDisabled = nsIObjectLoadingContent::PLUGIN_USER_DISABLED,
+      // The plugin is disabled until the user clicks on it
+      eFallbackClickToPlay = nsIObjectLoadingContent::PLUGIN_CLICK_TO_PLAY,
+      // The plugin is vulnerable (update available)
+      eFallbackVulnerableUpdatable = nsIObjectLoadingContent::PLUGIN_VULNERABLE_UPDATABLE,
+      // The plugin is vulnerable (no update available)
+      eFallbackVulnerableNoUpdate = nsIObjectLoadingContent::PLUGIN_VULNERABLE_NO_UPDATE
     };
 
     nsObjectLoadingContent();
@@ -267,10 +275,8 @@ class nsObjectLoadingContent : public nsImageLoadingContent
 
     /**
      * Opens the channel pointed to by mURI into mChannel.
-     *
-     * @param aPolicyType The value to be passed to channelPolicy->SetLoadType
      */
-    nsresult OpenChannel(PRInt32 aPolicyType);
+    nsresult OpenChannel();
 
     /**
      * Closes and releases references to mChannel and, if opened, mFinalListener
@@ -285,35 +291,23 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     bool ShouldPlay(FallbackType &aReason);
 
     /**
-     * Checks if a URI passes security checks and content policy, relative to
-     * the current document's principal
+     * Helper to check if our current URI passes policy
      *
-     * @param aURI                The URI to consider
-     * @param aContentPolicy      [in/out] A pointer to the initial content
-     *                            policy, that will be updated to contain the
-     *                            final determined policy
-     * @param aContentPolicyType  The 'contentType' parameter passed to
-     *                            NS_CheckContentLoadPolicy
+     * @param aContentPolicy [out] The result of the content policy decision
      *
-     * @return true if this URI is acceptable for loading
+     * @return true if call succeeded and NS_CP_ACCEPTED(*aContentPolicy)
      */
-    bool CheckURILoad(nsIURI *aURI,
-                      PRInt16 *aContentPolicy,
-                      PRInt32 aContentPolicyType);
+    bool CheckLoadPolicy(PRInt16 *aContentPolicy);
 
     /**
-     * Checks if the current mURI and mBaseURI pass content policy and security
-     * checks for loading
+     * Helper to check if the object passes process policy. Assumes we have a
+     * final determined type.
      *
-     * @param aContentPolicy     [in/out] A pointer to the initial content
-     *                           policy, that will be updated to contain the
-     *                           final determined policy if a URL is rejected
-     * @param aContentPolicyType The 'contentType' parameter passed to
-     *                           NS_CheckContentLoadPolicy
+     * @param aContentPolicy [out] The result of the content policy decision
      *
-     * @return true if the URIs are acceptable for loading
+     * @return true if call succeeded and NS_CP_ACCEPTED(*aContentPolicy)
      */
-    bool CheckObjectURIs(PRInt16 *aContentPolicy, PRInt32 aContentPolicyType);
+    bool CheckProcessPolicy(PRInt16 *aContentPolicy);
 
     /**
      * Checks whether the given type is a supported document type
@@ -361,16 +355,6 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      *      click-to-play or other content policy checks
      */
     ObjectType GetTypeOfContent(const nsCString& aMIMEType);
-
-    /**
-     * For a classid, returns the MIME type that can be used to instantiate
-     * a plugin for this ID.
-     *
-     * @param aClassID The class ID in question
-     * @param aType    [out] The corresponding type, if the call is successful
-     * @return NS_ERROR_NOT_AVAILABLE Unsupported class ID.
-     */
-    nsresult TypeForClassID(const nsAString& aClassID, nsACString& aType);
 
     /**
      * Gets the frame that's associated with this content node.
