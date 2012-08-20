@@ -2520,9 +2520,9 @@ nsEventStateManager::DispatchLegacyMouseScrollEvents(nsIFrame* aTargetFrame,
   //     default action handler (DoScrollText()) deals with it.
   //     If we implemented such strict computation, we would need additional
   //     accumulated delta values. It would made the code more complicated.
-  //     And also it would compute different delta values from the older
-  //     version.  It doesn't make sense to implement such code for legacy
-  //     events and rare cases.
+  //     And also it would computes different delta values from older version.
+  //     It doesn't make sense to implement such code for legacy events and
+  //     rare cases.
   PRInt32 scrollDeltaX, scrollDeltaY, pixelDeltaX, pixelDeltaY;
   switch (aEvent->deltaMode) {
     case nsIDOMWheelEvent::DOM_DELTA_PAGE:
