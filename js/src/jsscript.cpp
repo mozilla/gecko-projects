@@ -42,10 +42,8 @@
 #include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
-#include "frontend/TreeContext-inl.h"
+#include "frontend/SharedContext-inl.h"
 #include "vm/RegExpObject-inl.h"
-
-#include "frontend/TreeContext-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -520,7 +518,7 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         if (scriptBits & (1 << OwnSource)) {
             ss = cx->new_<ScriptSource>();
             if (!ss)
-                return NULL;
+                return false;
         } else {
             JS_ASSERT(enclosingScript);
             ss = enclosingScript->scriptSource();

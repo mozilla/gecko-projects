@@ -58,7 +58,6 @@
 #include "builtin/ParallelArray.h"
 #include "ds/LifoAlloc.h"
 #include "frontend/BytecodeCompiler.h"
-#include "frontend/TreeContext.h"
 #include "gc/Marking.h"
 #include "gc/Memory.h"
 #include "js/MemoryMetrics.h"
@@ -5720,7 +5719,7 @@ JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
     else
         chars = InflateString(cx, bytes, &length);
     if (!chars)
-        return NULL;
+        return false;
 
     bool ok = Evaluate(cx, obj, options, chars, length, rval);
     cx->free_(chars);
@@ -5735,7 +5734,7 @@ JS::Evaluate(JSContext *cx, HandleObject obj, CompileOptions options,
     {
         AutoFile file;
         if (!file.open(cx, filename) || !file.readAll(cx, buffer))
-            return NULL;
+            return false;
     }
 
     options = options.setFileAndLine(filename, 1);

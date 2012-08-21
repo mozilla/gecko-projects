@@ -33,10 +33,18 @@ let SocialUI = {
   observe: function SocialUI_observe(subject, topic, data) {
     switch (topic) {
       case "social:pref-changed":
-        this.updateToggleCommand();
-        SocialShareButton.updateButtonHiddenState();
-        SocialToolbar.updateButtonHiddenState();
-        SocialSidebar.updateSidebar();
+        // Exceptions here sometimes don't get reported properly, report them
+        // manually :(
+        try {
+          this.updateToggleCommand();
+          SocialShareButton.updateButtonHiddenState();
+          SocialToolbar.updateButtonHiddenState();
+          SocialSidebar.updateSidebar();
+          SocialChatBar.update();
+        } catch (e) {
+          Components.utils.reportError(e);
+          throw e;
+        }
         break;
       case "social:ambient-notification-changed":
         SocialToolbar.updateButton();
@@ -147,6 +155,27 @@ let SocialUI = {
   undoActivation: function SocialUI_undoActivation() {
     Social.active = false;
     this.notificationPanel.hidePopup();
+  }
+}
+
+let SocialChatBar = {
+  get chatbar() {
+    return document.getElementById("pinnedchats");
+  },
+  // Whether the chats can be shown for this window.
+  get canShow() {
+    let docElem = document.documentElement;
+    let chromeless = docElem.getAttribute("disablechrome") ||
+                     docElem.getAttribute("chromehidden").indexOf("extrachrome") >= 0;
+    return Social.uiVisible && !chromeless;
+  },
+  newChat: function(aProvider, aURL, aCallback) {
+    if (this.canShow)
+      this.chatbar.newChat(aProvider, aURL, aCallback);
+  },
+  update: function() {
+    if (!this.canShow)
+      this.chatbar.removeAll();
   }
 }
 
@@ -279,7 +308,7 @@ var SocialToolbar = {
 
   updateButtonHiddenState: function SocialToolbar_updateButtonHiddenState() {
     this.button.hidden = !Social.uiVisible;
-    if (!Social.provider.profile || !Social.provider.profile.userName) {
+    if (!Social.provider || !Social.provider.profile || !Social.provider.profile.userName) {
       ["social-notification-box",
        "social-status-iconbox"].forEach(function removeChildren(parentId) {
         let parent = document.getElementById(parentId);
@@ -468,6 +497,7 @@ var SocialSidebar = {
     command.setAttribute("checked", !hideSidebar);
 
     let sbrowser = document.getElementById("social-sidebar-browser");
+    sbrowser.docShell.isActive = !hideSidebar;
     if (hideSidebar) {
       this.dispatchEvent("sidebarhide");
       // If we're disabled, unload the sidebar content

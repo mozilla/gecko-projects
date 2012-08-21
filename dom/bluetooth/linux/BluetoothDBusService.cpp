@@ -77,7 +77,6 @@ static Properties sDeviceProperties[] = {
   {"Icon", DBUS_TYPE_STRING},
   {"Class", DBUS_TYPE_UINT32},
   {"UUIDs", DBUS_TYPE_ARRAY},
-  {"Services", DBUS_TYPE_ARRAY},
   {"Paired", DBUS_TYPE_BOOLEAN},
   {"Connected", DBUS_TYPE_BOOLEAN},
   {"Trusted", DBUS_TYPE_BOOLEAN},
@@ -88,7 +87,9 @@ static Properties sDeviceProperties[] = {
   {"LegacyPairing", DBUS_TYPE_BOOLEAN},
   {"RSSI", DBUS_TYPE_INT16},
   {"TX", DBUS_TYPE_UINT32},
-  {"Broadcaster", DBUS_TYPE_BOOLEAN}
+  {"Type", DBUS_TYPE_STRING},
+  {"Broadcaster", DBUS_TYPE_BOOLEAN},
+  {"Services", DBUS_TYPE_ARRAY}
 };
 
 static Properties sAdapterProperties[] = {
@@ -103,6 +104,7 @@ static Properties sAdapterProperties[] = {
   {"Discovering", DBUS_TYPE_BOOLEAN},
   {"Devices", DBUS_TYPE_ARRAY},
   {"UUIDs", DBUS_TYPE_ARRAY},
+  {"Type", DBUS_TYPE_STRING}
 };
 
 static Properties sManagerProperties[] = {
@@ -1268,12 +1270,11 @@ BluetoothDBusService::GetPairedDevicePropertiesInternal(const nsTArray<nsString>
     NS_ERROR("Bluetooth service not started yet!");
     return NS_ERROR_FAILURE;
   }
-  MOZ_ASSERT(!NS_IsMainThread());
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
 
   nsRefPtr<nsRunnable> func(new BluetoothPairedDevicePropertiesRunnable(runnable, aDeviceAddresses));
   if (NS_FAILED(mBluetoothCommandThread->Dispatch(func, NS_DISPATCH_NORMAL))) {
-    NS_WARNING("Cannot dispatch firmware loading task!");
+    NS_WARNING("Cannot dispatch task!");
     return NS_ERROR_FAILURE;
   }
 

@@ -40,7 +40,12 @@ struct PRLogModuleInfo;
 class gfxContext;
 class nsPaintEvent;
 
+extern PRUint8 gLayerManagerLayerBuilder;
+
 namespace mozilla {
+
+class FrameLayerBuilder;
+
 namespace gl {
 class GLContext;
 }
@@ -52,6 +57,7 @@ class ComputedTimingFunction;
 namespace layers {
 
 class Animation;
+class AnimationData;
 class CommonLayerAttributes;
 class Layer;
 class ThebesLayer;
@@ -79,6 +85,20 @@ class SpecificLayerAttributes;
 class THEBES_API LayerUserData {
 public:
   virtual ~LayerUserData() {}
+};
+
+class LayerManagerLayerBuilder : public LayerUserData {
+public:
+  LayerManagerLayerBuilder(FrameLayerBuilder* aBuilder, bool aDelete = true)
+    : mLayerBuilder(aBuilder)
+    , mDelete(aDelete)
+  {
+    MOZ_COUNT_CTOR(LayerManagerLayerBuilder);
+  }
+  ~LayerManagerLayerBuilder();
+
+  FrameLayerBuilder* mLayerBuilder;
+  bool mDelete;
 };
 
 /*
@@ -185,12 +205,17 @@ public:
    * EndTransaction returns.
    */
   virtual void BeginTransactionWithTarget(gfxContext* aTarget) = 0;
-  
+
   enum EndTransactionFlags {
     END_DEFAULT = 0,
     END_NO_IMMEDIATE_REDRAW = 1 << 0,  // Do not perform the drawing phase
     END_NO_COMPOSITE = 1 << 1 // Do not composite after drawing thebes layer contents.
   };
+
+  FrameLayerBuilder* GetLayerBuilder() {
+    LayerManagerLayerBuilder *data = static_cast<LayerManagerLayerBuilder*>(GetUserData(&gLayerManagerLayerBuilder));
+    return data ? data->mLayerBuilder : nullptr;
+  }
 
   /**
    * Attempts to end an "empty transaction". There must have been no
@@ -706,8 +731,11 @@ public:
    */
   void SetIsFixedPosition(bool aFixedPosition) { mIsFixedPosition = aFixedPosition; }
 
-  // Call AddAnimation to add an animation to this layer from layout code.
-  void AddAnimation(const Animation& aAnimation);
+  // Call AddAnimation to add a new animation to this layer from layout code.
+  // Caller must add segments to the returned animation.
+  Animation* AddAnimation(mozilla::TimeStamp aStart, mozilla::TimeDuration aDuration,
+                          float aIterations, int aDirection,
+                          nsCSSProperty aProperty, const AnimationData& aData);
   // ClearAnimations clears animations on this layer.
   void ClearAnimations();
   // This is only called when the layer tree is updated. Do not call this from
