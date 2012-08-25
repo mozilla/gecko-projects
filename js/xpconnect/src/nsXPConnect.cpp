@@ -553,6 +553,9 @@ public:
     {
         return NS_OK;
     }
+    static NS_METHOD_(void) UnmarkIfPurpleImpl(void *n)
+    {
+    }
     static NS_METHOD TraverseImpl(nsXPConnectParticipant *that, void *n,
                                   nsCycleCollectionTraversalCallback &cb);
 };
@@ -923,6 +926,9 @@ public:
     {
         return NS_OK;
     }
+    static NS_METHOD_(void) UnmarkIfPurpleImpl(void *n)
+    {
+    }
     static NS_METHOD TraverseImpl(JSContextParticipant *that, void *n,
                                   nsCycleCollectionTraversalCallback &cb)
     {
@@ -986,9 +992,7 @@ nsXPConnect::InitClasses(JSContext * aJSContext, JSObject * aGlobalJSObj)
     if (!ccx.IsValid())
         return UnexpectedFailure(NS_ERROR_FAILURE);
 
-    JSAutoEnterCompartment ac;
-    if (!ac.enter(ccx, aGlobalJSObj))
-        return UnexpectedFailure(NS_ERROR_FAILURE);
+    JSAutoCompartment ac(ccx, aGlobalJSObj);
 
     XPCWrappedNativeScope* scope =
         XPCWrappedNativeScope::GetNewOrUsed(ccx, aGlobalJSObj);
@@ -1176,9 +1180,7 @@ nsXPConnect::InitClassesWithNewWrappedGlobal(JSContext * aJSContext,
     // Grab a copy of the global and enter its compartment.
     JSObject *global = wrappedGlobal->GetFlatJSObject();
     MOZ_ASSERT(!js::GetObjectParent(global));
-    JSAutoEnterCompartment ac;
-    if (!ac.enter(ccx, global))
-        return NS_ERROR_UNEXPECTED;
+    JSAutoCompartment ac(ccx, global);
 
     // Apply the system flag, if requested.
     bool system = (aFlags & nsIXPConnect::FLAG_SYSTEM_GLOBAL_OBJECT) != 0;
@@ -1228,10 +1230,7 @@ NativeInterface2JSObject(XPCLazyCallContext & lccx,
                          jsval *aVal,
                          nsIXPConnectJSObjectHolder **aHolder)
 {
-    JSAutoEnterCompartment ac;
-    if (!ac.enter(lccx.GetJSContext(), aScope))
-        return NS_ERROR_OUT_OF_MEMORY;
-
+    JSAutoCompartment ac(lccx.GetJSContext(), aScope);
     lccx.SetScopeForNewJSObjects(aScope);
 
     nsresult rv;
@@ -1313,11 +1312,10 @@ nsXPConnect::WrapJS(JSContext * aJSContext,
     if (!ccx.IsValid())
         return UnexpectedFailure(NS_ERROR_FAILURE);
 
-    JSAutoEnterCompartment aec;
+    JSAutoCompartment ac(ccx, aJSObj);
 
     nsresult rv = NS_ERROR_UNEXPECTED;
-    if (!aec.enter(ccx, aJSObj) ||
-        !XPCConvert::JSObject2NativeInterface(ccx, result, aJSObj,
+    if (!XPCConvert::JSObject2NativeInterface(ccx, result, aJSObj,
                                               &aIID, nullptr, &rv))
         return rv;
     return NS_OK;
@@ -1953,9 +1951,7 @@ nsXPConnect::GetWrappedNativePrototype(JSContext * aJSContext,
     if (!ccx.IsValid())
         return UnexpectedFailure(NS_ERROR_FAILURE);
 
-    JSAutoEnterCompartment ac;
-    if (!ac.enter(aJSContext, aScope))
-        return UnexpectedFailure(NS_ERROR_FAILURE);
+    JSAutoCompartment ac(aJSContext, aScope);
 
     XPCWrappedNativeScope* scope =
         XPCWrappedNativeScope::FindInJSObjectScope(ccx, aScope);
@@ -2702,6 +2698,10 @@ public:
     static NS_METHOD UnrootImpl(void *p)
     {
         return NS_OK;
+    }
+
+    static NS_METHOD_(void) UnmarkIfPurpleImpl(void *n)
+    {
     }
 };
 

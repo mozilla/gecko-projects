@@ -72,12 +72,17 @@ class CGNativePropertyHooks(CGThing):
     def define(self):
         if self.descriptor.workers:
             return ""
+        if self.descriptor.concrete and self.descriptor.proxy:
+            resolveOwnProperty = "ResolveOwnProperty"
+            enumerateOwnProperties = "EnumerateOwnProperties"
+        else:
+            enumerateOwnProperties = resolveOwnProperty = "NULL"
         parent = self.descriptor.interface.parent
         parentHooks = ("&" + toBindingNamespace(parent.identifier.name) + "::NativeHooks"
                        if parent else 'NULL')
         return """
-const NativePropertyHooks NativeHooks = { ResolveProperty, EnumerateProperties, %s };
-""" % parentHooks
+const NativePropertyHooks NativeHooks = { %s, ResolveProperty, %s, EnumerateProperties, %s };
+""" % (resolveOwnProperty, enumerateOwnProperties, parentHooks)
 
 def DOMClass(descriptor):
         protoList = ['prototypes::id::' + proto for proto in descriptor.prototypeChain]
@@ -1381,13 +1386,7 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
     return NULL;
   }
 
-  JSAutoEnterCompartment ac;
-  if (js::GetGlobalForObjectCrossCompartment(parent) != aScope) {
-    if (!ac.enter(aCx, parent)) {
-      return NULL;
-    }
-  }
-
+  JSAutoCompartment ac(aCx, parent);
   JSObject* global = JS_GetGlobalForObject(aCx, parent);
 %s
   JSObject* proto = GetProtoObject(aCx, global, global);
@@ -1547,7 +1546,9 @@ def getJSToNativeConversionTemplate(type, descriptorProvider, failureCode=None,
                                     isMember=False,
                                     isOptional=False,
                                     invalidEnumValueFatal=True,
-                                    defaultValue=None):
+                                    defaultValue=None,
+                                    treatNullAs="Default",
+                                    treatUndefinedAs="Default"):
     """
     Get a template for converting a JS value to a native object based on the
     given type and descriptor.  If failureCode is given, then we're actually
@@ -2131,14 +2132,22 @@ for (uint32_t i = 0; i < length; ++i) {
         # XXXbz Need to figure out string behavior based on extended args?  Also, how to
         # detect them?
 
-        # For nullable strings that are not otherwise annotated, null
-        # and undefined become null strings.
+        treatAs = {
+            "Default": "eStringify",
+            "EmptyString": "eEmpty",
+            "Null": "eNull"
+        }
         if type.nullable():
-            nullBehavior = "eNull"
-            undefinedBehavior = "eNull"
-        else:
-            nullBehavior = "eStringify"
-            undefinedBehavior = "eStringify"
+            # For nullable strings null becomes a null string.
+            treatNullAs = "Null"
+            # For nullable strings undefined becomes a null string unless
+            # specified otherwise.
+            if treatUndefinedAs == "Default":
+                treatUndefinedAs = "Null"
+        nullBehavior = treatAs[treatNullAs]
+        if treatUndefinedAs == "Missing":
+            raise TypeError("We don't support [TreatUndefinedAs=Missing]")
+        undefinedBehavior = treatAs[treatUndefinedAs]
 
         def getConversionCode(varName):
             conversionCode = (
@@ -2486,7 +2495,9 @@ class CGArgumentConverter(CGThing):
                                             self.descriptorProvider,
                                             isOptional=(self.argcAndIndex is not None),
                                             invalidEnumValueFatal=self.invalidEnumValueFatal,
-                                            defaultValue=self.argument.defaultValue),
+                                            defaultValue=self.argument.defaultValue,
+                                            treatNullAs=self.argument.treatNullAs,
+                                            treatUndefinedAs=self.argument.treatUndefinedAs),
             self.replacementVariables,
             self.argcAndIndex).define()
 
@@ -3263,6 +3274,8 @@ class FakeArgument():
         self.optional = False
         self.variadic = False
         self.defaultValue = None
+        self.treatNullAs = "Default"
+        self.treatUndefinedAs = "Default"
 
 class CGSetterCall(CGPerSignatureCall):
     """
@@ -4208,6 +4221,37 @@ class CGClass(CGThing):
             result = result + memberString
         return result
 
+class CGResolveOwnProperty(CGAbstractMethod):
+    def __init__(self, descriptor):
+        args = [Argument('JSContext*', 'cx'), Argument('JSObject*', 'wrapper'),
+                Argument('jsid', 'id'), Argument('bool', 'set'),
+                Argument('JSPropertyDescriptor*', 'desc')]
+        CGAbstractMethod.__init__(self, descriptor, "ResolveOwnProperty", "bool", args)
+    def definition_body(self):
+        return """  JSObject* obj = wrapper;
+  if (xpc::WrapperFactory::IsXrayWrapper(obj)) {
+    obj = js::UnwrapObject(obj);
+  }
+  // We rely on getOwnPropertyDescriptor not shadowing prototype properties by named
+  // properties. If that changes we'll need to filter here.
+  return js::GetProxyHandler(obj)->getOwnPropertyDescriptor(cx, wrapper, id, set, desc);
+"""
+
+class CGEnumerateOwnProperties(CGAbstractMethod):
+    def __init__(self, descriptor):
+        args = [Argument('JSContext*', 'cx'), Argument('JSObject*', 'wrapper'),
+                Argument('JS::AutoIdVector&', 'props')]
+        CGAbstractMethod.__init__(self, descriptor, "EnumerateOwnProperties", "bool", args)
+    def definition_body(self):
+        return """  JSObject* obj = wrapper;
+  if (xpc::WrapperFactory::IsXrayWrapper(obj)) {
+    obj = js::UnwrapObject(obj);
+  }
+  // We rely on getOwnPropertyNames not shadowing prototype properties by named
+  // properties. If that changes we'll need to filter here.
+  return js::GetProxyHandler(obj)->getOwnPropertyNames(cx, wrapper, props);
+"""
+
 class CGXrayHelper(CGAbstractMethod):
     def __init__(self, descriptor, name, args, properties):
         CGAbstractMethod.__init__(self, descriptor, name, "bool", args)
@@ -4262,7 +4306,8 @@ class CGResolveProperty(CGXrayHelper):
 
 class CGEnumerateProperties(CGXrayHelper):
     def __init__(self, descriptor, properties):
-        args = [Argument('JS::AutoIdVector&', 'props')]
+        args = [Argument('JSContext*', 'cx'), Argument('JSObject*', 'wrapper'),
+                Argument('JS::AutoIdVector&', 'props')]
         CGXrayHelper.__init__(self, descriptor, "EnumerateProperties", args,
                               properties)
 
@@ -4327,7 +4372,9 @@ class CGProxySpecialOperation(CGPerSignatureCall):
         if operation.isSetter() or operation.isCreator():
             # arguments[0] is the index or name of the item that we're setting.
             argument = arguments[1]
-            template = getJSToNativeConversionTemplate(argument.type, descriptor)
+            template = getJSToNativeConversionTemplate(argument.type, descriptor,
+                                                       treatNullAs=argument.treatNullAs,
+                                                       treatUndefinedAs=argument.treatUndefinedAs)
             templateValues = {
                 "declName": argument.identifier.name,
                 "holderName": argument.identifier.name + "_holder",
@@ -4484,6 +4531,9 @@ class CGDOMJSProxyHandler_getOwnPropertyDescriptor(ClassMethod):
             fillDescriptor = "FillPropertyDescriptor(desc, proxy, %s);\nreturn true;" % readonly
             templateValues = {'jsvalRef': 'desc->value', 'jsvalPtr': '&desc->value',
                               'obj': 'proxy', 'successCode': fillDescriptor}
+            # Once we start supporting OverrideBuiltins we need to make
+            # ResolveOwnProperty or EnumerateOwnProperties filter out named
+            # properties that shadow prototype properties.
             namedGet = ("\n" +
                         "if (!set && JSID_IS_STRING(id) && !HasPropertyOnPrototype(cx, proxy, this, id)) {\n" +
                         "  JS::Value nameVal = STRING_TO_JSVAL(JSID_TO_STRING(id));\n" +
@@ -4893,6 +4943,9 @@ class CGDescriptor(CGThing):
         # it in workers.
         if (descriptor.interface.hasInterfacePrototypeObject() and
             not descriptor.workers):
+            if descriptor.concrete and descriptor.proxy:
+                cgThings.append(CGResolveOwnProperty(descriptor))
+                cgThings.append(CGEnumerateOwnProperties(descriptor))
             cgThings.append(CGResolveProperty(descriptor, properties))
             cgThings.append(CGEnumerateProperties(descriptor, properties))
 

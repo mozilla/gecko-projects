@@ -3318,55 +3318,13 @@ namespace js {
 class AutoCompartment;
 }
 
-class JS_PUBLIC_API(JSAutoEnterCompartment)
+class JS_PUBLIC_API(JSAutoCompartment)
 {
-    /*
-     * This is a poor man's Maybe<AutoCompartment>, because we don't have
-     * access to the AutoCompartment definition here.  We statically assert in
-     * jsapi.cpp that we have the right size here.
-     *
-     * In practice, 32-bit Windows and Android get 16-word |bytes|, while other
-     * platforms get 12-word |bytes|.
-     */
-    void* bytes[sizeof(void*) == 4 && MOZ_ALIGNOF(uint64_t) == 8 ? 16 : 12];
-
-  protected:
-    js::AutoCompartment *getAutoCompartment() {
-        JS_ASSERT(state == STATE_OTHER_COMPARTMENT);
-        return reinterpret_cast<js::AutoCompartment*>(bytes);
-    }
-
-    /*
-     * This object may be in one of three states.  If enter() or
-     * enterAndIgnoreErrors() hasn't been called, it's in STATE_UNENTERED.
-     * Otherwise, if we were asked to enter into the current compartment, our
-     * state is STATE_SAME_COMPARTMENT.  If we actually created an
-     * AutoCompartment and entered another compartment, our state is
-     * STATE_OTHER_COMPARTMENT.
-     */
-    enum State {
-        STATE_UNENTERED,
-        STATE_SAME_COMPARTMENT,
-        STATE_OTHER_COMPARTMENT
-    } state;
-
+    JSContext *cx_;
+    JSCompartment *oldCompartment_;
   public:
-    JSAutoEnterCompartment() : state(STATE_UNENTERED) {}
-
-    bool enter(JSContext *cx, JSRawObject target);
-
-    void enterAndIgnoreErrors(JSContext *cx, JSRawObject target);
-
-    bool entered() const { return state != STATE_UNENTERED; }
-
-    /*
-     * In general, consumers should try to avoid calling leave() explicitly,
-     * and defer to the destructor by scoping the JSAutoEnterCompartment
-     * appropriately. Sometimes, though, it's unavoidable.
-     */
-    void leave();
-
-    ~JSAutoEnterCompartment();
+    JSAutoCompartment(JSContext *cx, JSRawObject target);
+    ~JSAutoCompartment();
 };
 
 JS_BEGIN_EXTERN_C
