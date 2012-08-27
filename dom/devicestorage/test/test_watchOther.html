@@ -49,9 +49,18 @@ function onChange(e) {
   }
 }
 
+function onChangeFail(e) {
+  dump("onChangeFail: " + e.path + " " + e.reason + "\n");
+  ok(false, "We should never see any changes");
+}
+
 var storage = navigator.getDeviceStorage("testing");
 ok(storage, "Should have storage");
 storage.addEventListener("change", onChange);
+
+var storageOther = navigator.getDeviceStorage("testing-other");
+ok(storageOther, "Should have storage");
+storageOther.addEventListener("change", onChangeFail);
 
 request = storage.addNamed(createRandomBlob(), gFileName);
 ok(request, "Should have a non-null request");
