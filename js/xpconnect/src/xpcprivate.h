@@ -730,6 +730,7 @@ public:
         IDX_BASEURIOBJECT           ,
         IDX_NODEPRINCIPAL           ,
         IDX_DOCUMENTURIOBJECT       ,
+        IDX_MOZMATCHESSELECTOR      ,
         IDX_TOTAL_COUNT // just a count of the above
     };
 
@@ -1458,83 +1459,78 @@ XPC_WN_JSOp_TypeOf_Object(JSContext *cx, JSHandleObject obj);
 extern JSType
 XPC_WN_JSOp_TypeOf_Function(JSContext *cx, JSHandleObject obj);
 
-extern void
-XPC_WN_JSOp_Clear(JSContext *cx, JSHandleObject obj);
-
 extern JSObject*
 XPC_WN_JSOp_ThisObject(JSContext *cx, JSHandleObject obj);
 
 // Macros to initialize Object or Function like XPC_WN classes
 #define XPC_WN_WithCall_ObjectOps                                             \
     {                                                                         \
-        nullptr, /* lookupGeneric */                                           \
-        nullptr, /* lookupProperty */                                          \
-        nullptr, /* lookupElement */                                           \
-        nullptr, /* lookupSpecial */                                           \
-        nullptr, /* defineGeneric */                                           \
-        nullptr, /* defineProperty */                                          \
-        nullptr, /* defineElement */                                           \
-        nullptr, /* defineSpecial */                                           \
-        nullptr, /* getGeneric    */                                           \
-        nullptr, /* getProperty    */                                          \
-        nullptr, /* getElement    */                                           \
-        nullptr, /* getElementIfPresent */                                     \
-        nullptr, /* getSpecial    */                                           \
-        nullptr, /* setGeneric    */                                           \
-        nullptr, /* setProperty    */                                          \
-        nullptr, /* setElement    */                                           \
-        nullptr, /* setSpecial    */                                           \
-        nullptr, /* getGenericAttributes  */                                   \
-        nullptr, /* getAttributes  */                                          \
-        nullptr, /* getElementAttributes  */                                   \
-        nullptr, /* getSpecialAttributes  */                                   \
-        nullptr, /* setGenericAttributes  */                                   \
-        nullptr, /* setAttributes  */                                          \
-        nullptr, /* setElementAttributes  */                                   \
-        nullptr, /* setSpecialAttributes  */                                   \
-        nullptr, /* deleteProperty */                                          \
-        nullptr, /* deleteElement */                                           \
-        nullptr, /* deleteSpecial */                                           \
+        nullptr, /* lookupGeneric */                                          \
+        nullptr, /* lookupProperty */                                         \
+        nullptr, /* lookupElement */                                          \
+        nullptr, /* lookupSpecial */                                          \
+        nullptr, /* defineGeneric */                                          \
+        nullptr, /* defineProperty */                                         \
+        nullptr, /* defineElement */                                          \
+        nullptr, /* defineSpecial */                                          \
+        nullptr, /* getGeneric    */                                          \
+        nullptr, /* getProperty    */                                         \
+        nullptr, /* getElement    */                                          \
+        nullptr, /* getElementIfPresent */                                    \
+        nullptr, /* getSpecial    */                                          \
+        nullptr, /* setGeneric    */                                          \
+        nullptr, /* setProperty    */                                         \
+        nullptr, /* setElement    */                                          \
+        nullptr, /* setSpecial    */                                          \
+        nullptr, /* getGenericAttributes  */                                  \
+        nullptr, /* getAttributes  */                                         \
+        nullptr, /* getElementAttributes  */                                  \
+        nullptr, /* getSpecialAttributes  */                                  \
+        nullptr, /* setGenericAttributes  */                                  \
+        nullptr, /* setAttributes  */                                         \
+        nullptr, /* setElementAttributes  */                                  \
+        nullptr, /* setSpecialAttributes  */                                  \
+        nullptr, /* deleteProperty */                                         \
+        nullptr, /* deleteElement */                                          \
+        nullptr, /* deleteSpecial */                                          \
         XPC_WN_JSOp_Enumerate,                                                \
         XPC_WN_JSOp_TypeOf_Function,                                          \
         XPC_WN_JSOp_ThisObject,                                               \
-        XPC_WN_JSOp_Clear                                                     \
     }
 
 #define XPC_WN_NoCall_ObjectOps                                               \
     {                                                                         \
-        nullptr, /* lookupGeneric */                                           \
-        nullptr, /* lookupProperty */                                          \
-        nullptr, /* lookupElement */                                           \
-        nullptr, /* lookupSpecial */                                           \
-        nullptr, /* defineGeneric */                                           \
-        nullptr, /* defineProperty */                                          \
-        nullptr, /* defineElement */                                           \
-        nullptr, /* defineSpecial */                                           \
-        nullptr, /* getGeneric    */                                           \
-        nullptr, /* getProperty    */                                          \
-        nullptr, /* getElement    */                                           \
-        nullptr, /* getElementIfPresent */                                     \
-        nullptr, /* getSpecial    */                                           \
-        nullptr, /* setGeneric    */                                           \
-        nullptr, /* setProperty    */                                          \
-        nullptr, /* setElement    */                                           \
-        nullptr, /* setSpecial    */                                           \
-        nullptr, /* getGenericAttributes  */                                   \
-        nullptr, /* getAttributes  */                                          \
-        nullptr, /* getElementAttributes  */                                   \
-        nullptr, /* getSpecialAttributes  */                                   \
-        nullptr, /* setGenericAttributes  */                                   \
-        nullptr, /* setAttributes  */                                          \
-        nullptr, /* setElementAttributes  */                                   \
-        nullptr, /* setSpecialAttributes  */                                   \
-        nullptr, /* deleteProperty */                                          \
-        nullptr, /* deleteElement */                                           \
-        nullptr, /* deleteSpecial */                                           \
+        nullptr, /* lookupGeneric */                                          \
+        nullptr, /* lookupProperty */                                         \
+        nullptr, /* lookupElement */                                          \
+        nullptr, /* lookupSpecial */                                          \
+        nullptr, /* defineGeneric */                                          \
+        nullptr, /* defineProperty */                                         \
+        nullptr, /* defineElement */                                          \
+        nullptr, /* defineSpecial */                                          \
+        nullptr, /* getGeneric    */                                          \
+        nullptr, /* getProperty    */                                         \
+        nullptr, /* getElement    */                                          \
+        nullptr, /* getElementIfPresent */                                    \
+        nullptr, /* getSpecial    */                                          \
+        nullptr, /* setGeneric    */                                          \
+        nullptr, /* setProperty    */                                         \
+        nullptr, /* setElement    */                                          \
+        nullptr, /* setSpecial    */                                          \
+        nullptr, /* getGenericAttributes  */                                  \
+        nullptr, /* getAttributes  */                                         \
+        nullptr, /* getElementAttributes  */                                  \
+        nullptr, /* getSpecialAttributes  */                                  \
+        nullptr, /* setGenericAttributes  */                                  \
+        nullptr, /* setAttributes  */                                         \
+        nullptr, /* setElementAttributes  */                                  \
+        nullptr, /* setSpecialAttributes  */                                  \
+        nullptr, /* deleteProperty */                                         \
+        nullptr, /* deleteElement */                                          \
+        nullptr, /* deleteSpecial */                                          \
         XPC_WN_JSOp_Enumerate,                                                \
         XPC_WN_JSOp_TypeOf_Object,                                            \
         XPC_WN_JSOp_ThisObject,                                               \
-        XPC_WN_JSOp_Clear                                                     \
     }
 
 // Maybe this macro should check for class->enumerate ==
