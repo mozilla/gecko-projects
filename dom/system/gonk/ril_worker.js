@@ -1074,27 +1074,16 @@ let RIL = {
    * Read the MSISDN from the ICC.
    */
   getMSISDN: function getMSISDN() {
-    function callback() {
-      let length = Buf.readUint32();
-      // Each octet is encoded into two chars.
-      let recordLength = length / 2;
-      // Skip prefixed alpha identifier
-      Buf.seekIncoming((recordLength - MSISDN_FOOTER_SIZE_BYTES) *
-                        PDU_HEX_OCTET_SIZE);
-
-      // Dialling Number/SSC String
-      let len = GsmPDUHelper.readHexOctet();
-      if (len > MSISDN_MAX_NUMBER_SIZE_BYTES) {
-        debug("ICC_EF_MSISDN: invalid length of BCD number/SSC contents - " + len);
-        return;
-      }
-      this.iccInfo.msisdn = GsmPDUHelper.readDiallingNumber(len);
-      Buf.readStringDelimiter(length);
-
-      if (DEBUG) debug("MSISDN: " + this.iccInfo.msisdn);
-      if (this.iccInfo.msisdn) {
+    function callback(options) {
+      let parseCallback = function parseCallback(msisdn) {
+        if (this.iccInfo.msisdn === msisdn.number) {
+          return;
+        }
+        this.iccInfo.msisdn = msisdn.number;
+        if (DEBUG) debug("MSISDN: " + this.iccInfo.msisdn);
         this._handleICCInfoChange();
       }
+      this.parseDiallingNumber(options, parseCallback);
     }
 
     this.iccIO({
@@ -3097,26 +3086,6 @@ let RIL = {
 
     let param = StkCommandParamsFactory.createParam(cmdDetails, ctlvs);
     if (param) {
-      switch (cmdDetails.typeOfCommand) {
-        case STK_CMD_SET_UP_MENU:
-        case STK_CMD_SET_UP_IDLE_MODE_TEXT:
-          this.sendStkTerminalResponse({commandNumber: cmdDetails.commandNumber,
-                                        typeOfCommand: cmdDetails.typeOfCommand,
-                                        commandQualifier: cmdDetails.commandQualifier,
-                                        resultCode: STK_RESULT_OK});
-          break;
-        case STK_CMD_DISPLAY_TEXT:
-          if (!param.responseNeeded) {
-            this.sendStkTerminalResponse({commandNumber: cmdDetails.commandNumber,
-                                          typeOfCommand: cmdDetails.typeOfCommand,
-                                          commandQualifier: cmdDetails.commandQualifier,
-                                          resultCode: STK_RESULT_OK});
-          }
-          break;
-        default:
-          break;
-      }
-
       RIL.sendDOMMessage({rilMessageType: "stkcommand",
                           commandNumber: cmdDetails.commandNumber,
                           typeOfCommand: cmdDetails.typeOfCommand,
@@ -5492,7 +5461,7 @@ let StkCommandParamsFactory = {
         resultCode: STK_RESULT_REQUIRED_VALUES_MISSING});
       throw new Error("Stk Display Text: Required value missing : Text String");
     }
-    textMsg.text = ctlv.value.text;
+    textMsg.text = ctlv.value.textString;
 
     ctlv = StkProactiveCmdHelper.searchForTag(COMPREHENSIONTLV_TAG_IMMEDIATE_RESPONSE, ctlvs);
     if (ctlv) {
@@ -5524,7 +5493,7 @@ let StkCommandParamsFactory = {
         resultCode: STK_RESULT_REQUIRED_VALUES_MISSING});
       throw new Error("Stk Set Up Idle Text: Required value missing : Text String");
     }
-    textMsg.text = ctlv.value.text;
+    textMsg.text = ctlv.value.textString;
 
     return textMsg;
   },
@@ -5541,7 +5510,7 @@ let StkCommandParamsFactory = {
         resultCode: STK_RESULT_REQUIRED_VALUES_MISSING});
       throw new Error("Stk Get InKey: Required value missing : Text String");
     }
-    input.text = ctlv.value.text;
+    input.text = ctlv.value.textString;
 
     input.minLength = 1;
     input.maxLength = 1;
@@ -5582,7 +5551,7 @@ let StkCommandParamsFactory = {
         resultCode: STK_RESULT_REQUIRED_VALUES_MISSING});
       throw new Error("Stk Get Input: Required value missing : Text String");
     }
-    input.text = ctlv.value.text;
+    input.text = ctlv.value.textString;
 
     ctlv = StkProactiveCmdHelper.searchForTag(COMPREHENSIONTLV_TAG_RESPONSE_LENGTH, ctlvs);
     if (ctlv) {
@@ -5592,7 +5561,7 @@ let StkCommandParamsFactory = {
 
     ctlv = StkProactiveCmdHelper.searchForTag(COMPREHENSIONTLV_TAG_DEFAULT_TEXT, ctlvs);
     if (ctlv) {
-      input.defaultText = ctlv.value.text;
+      input.defaultText = ctlv.value.textString;
     }
 
     // Alphabet only
@@ -5886,7 +5855,7 @@ let StkProactiveCmdHelper = {
    * Same as Text String.
    */
   retrieveDefaultText: function retrieveDefaultText(length) {
-    return retrieveTextString(length);
+    return this.retrieveTextString(length);
   },
 
   /**
