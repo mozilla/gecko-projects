@@ -316,7 +316,7 @@ DeviceStorageFile::collectFilesInternal(nsTArray<nsRefPtr<DeviceStorageFile> > &
 
   while (NS_SUCCEEDED(files->GetNextFile(getter_AddRefs(f))) && f) {
 
-    int64_t msecs;
+    PRTime msecs;
     f->GetLastModifiedTime(&msecs);
 
     if (msecs < aSince) {
@@ -1426,11 +1426,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMDeviceStorage)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsDOMDeviceStorage, nsDOMEventTargetHelper)
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(change)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMDeviceStorage, nsDOMEventTargetHelper)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(change)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 DOMCI_DATA(DeviceStorage, nsDOMDeviceStorage)
