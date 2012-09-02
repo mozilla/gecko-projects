@@ -283,7 +283,7 @@ nsEventSource::Init(nsIPrincipal* aPrincipal,
   rv = nsContentUtils::GetUTFOrigin(srcURI, origin);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString spec;
+  nsAutoCString spec;
   rv = srcURI->GetSpec(spec);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -413,10 +413,10 @@ nsEventSource::Observe(nsISupports* aSubject,
   DebugOnly<nsresult> rv;
   if (strcmp(aTopic, DOM_WINDOW_FROZEN_TOPIC) == 0) {
     rv = Freeze();
-    NS_ASSERTION(rv, "Freeze() failed");
+    NS_ASSERTION(NS_SUCCEEDED(rv), "Freeze() failed");
   } else if (strcmp(aTopic, DOM_WINDOW_THAWED_TOPIC) == 0) {
     rv = Thaw();
-    NS_ASSERTION(rv, "Thaw() failed");
+    NS_ASSERTION(NS_SUCCEEDED(rv), "Thaw() failed");
   } else if (strcmp(aTopic, DOM_WINDOW_DESTROYED_TOPIC) == 0) {
     Close();
   }
@@ -442,7 +442,7 @@ nsEventSource::OnStartRequest(nsIRequest *aRequest,
   rv = httpChannel->GetRequestSucceeded(&requestSucceeded);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCAutoString contentType;
+  nsAutoCString contentType;
   rv = httpChannel->GetContentType(contentType);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1111,7 +1111,7 @@ nsEventSource::PrintErrorOnConsole(const char *aBundleURI,
 nsresult
 nsEventSource::ConsoleError()
 {
-  nsCAutoString targetSpec;
+  nsAutoCString targetSpec;
   nsresult rv = mSrc->GetSpec(targetSpec);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1234,7 +1234,7 @@ nsEventSource::CheckCanRequestSrc(nsIURI* aSrc)
                                  nsContentUtils::GetSecurityManager());
   isValidContentLoadPolicy = NS_SUCCEEDED(rv) && NS_CP_ACCEPTED(shouldLoad);
 
-  nsCAutoString targetURIScheme;
+  nsAutoCString targetURIScheme;
   rv = srcToTest->GetScheme(targetURIScheme);
   if (NS_SUCCEEDED(rv)) {
     // We only have the http support for now
