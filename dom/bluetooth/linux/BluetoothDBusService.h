@@ -47,12 +47,12 @@ public:
                 const nsAString& aDeviceAddress,
                 nsAString& aDevicePath);
 
-  virtual bool
+  static bool
   AddReservedServicesInternal(const nsAString& aAdapterPath,
                               const nsTArray<uint32_t>& aServices,
                               nsTArray<uint32_t>& aServiceHandlesContainer);
 
-  virtual bool
+  static bool
   RemoveReservedServicesInternal(const nsAString& aAdapterPath,
                                  const nsTArray<uint32_t>& aServiceHandles);
 
@@ -88,8 +88,6 @@ public:
 
   virtual bool 
   SetAuthorizationInternal(const nsAString& aDeviceAddress, bool aAllow);
-
-  virtual int IsEnabledInternal();
 
 private:
   nsresult SendGetPropertyMessage(const nsAString& aPath,

@@ -14,12 +14,14 @@ include $(topsrcdir)/config/config.mk
 TEST_DIRS += test
 
 EXTRA_JS_MODULES = \
+	AboutHomeUtils.jsm \
 	BrowserNewTabPreloader.jsm \
 	openLocationLastURL.jsm \
 	NetworkPrioritizer.jsm \
 	NewTabUtils.jsm \
 	offlineAppCache.jsm \
 	SignInToWebsite.jsm \
+	TabTitleAbridger.jsm \
 	TelemetryTimestamps.jsm \
 	Social.jsm \
 	webappsUI.jsm \
