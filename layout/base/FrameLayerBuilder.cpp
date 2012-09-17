@@ -269,7 +269,7 @@ protected:
                     const nsIntRect& aVisibleRect,
                     const nsIntRect& aDrawRect,
                     const FrameLayerBuilder::Clip& aClip);
-    nsIFrame* GetActiveScrolledRoot() { return mActiveScrolledRoot; }
+    const nsIFrame* GetActiveScrolledRoot() { return mActiveScrolledRoot; }
 
     /**
      * If this represents only a nsDisplayImage, and the image type
@@ -318,7 +318,7 @@ protected:
      * be non-null; all content in a ThebesLayer must have the same
      * active scrolled root.
      */
-    nsIFrame*    mActiveScrolledRoot;
+    const nsIFrame*    mActiveScrolledRoot;
     ThebesLayer* mLayer;
     /**
      * If mIsSolidColorInVisibleRegion is true, this is the color of the visible
@@ -379,7 +379,7 @@ protected:
    * a recycled ThebesLayer, and sets up the transform on the ThebesLayer
    * to account for scrolling.
    */
-  already_AddRefed<ThebesLayer> CreateOrRecycleThebesLayer(nsIFrame* aActiveScrolledRoot);
+  already_AddRefed<ThebesLayer> CreateOrRecycleThebesLayer(const nsIFrame* aActiveScrolledRoot, const nsIFrame *aReferenceFrame);
   /**
    * Grab the next recyclable ColorLayer, or create one if there are no
    * more recyclable ColorLayers.
@@ -441,7 +441,7 @@ protected:
                                                    const nsIntRect& aVisibleRect,
                                                    const nsIntRect& aDrawRect,
                                                    const FrameLayerBuilder::Clip& aClip,
-                                                   nsIFrame* aActiveScrolledRoot);
+                                                   const nsIFrame* aActiveScrolledRoot);
   ThebesLayerData* GetTopThebesLayerData()
   {
     return mThebesLayerDataStack.IsEmpty() ? nullptr
@@ -635,7 +635,7 @@ FrameLayerBuilder::Shutdown()
 void
 FrameLayerBuilder::Init(nsDisplayListBuilder* aBuilder, LayerManager* aManager)
 {
-  mRootPresContext = aBuilder->ReferenceFrame()->PresContext()->GetRootPresContext();
+  mRootPresContext = aBuilder->RootReferenceFrame()->PresContext()->GetRootPresContext();
   if (mRootPresContext) {
     mInitialDOMGeneration = mRootPresContext->GetDOMGeneration();
   }
@@ -1123,7 +1123,7 @@ RoundToMatchResidual(double aValue, double aOldResidual)
 }
 
 already_AddRefed<ThebesLayer>
-ContainerState::CreateOrRecycleThebesLayer(nsIFrame* aActiveScrolledRoot)
+ContainerState::CreateOrRecycleThebesLayer(const nsIFrame* aActiveScrolledRoot, const nsIFrame* aReferenceFrame)
 {
   // We need a new thebes layer
   nsRefPtr<ThebesLayer> layer;
@@ -1178,7 +1178,7 @@ ContainerState::CreateOrRecycleThebesLayer(nsIFrame* aActiveScrolledRoot)
 
   // Set up transform so that 0,0 in the Thebes layer corresponds to the
   // (pixel-snapped) top-left of the aActiveScrolledRoot.
-  nsPoint offset = mBuilder->ToReferenceFrame(aActiveScrolledRoot);
+  nsPoint offset = aActiveScrolledRoot->GetOffsetToCrossDoc(aReferenceFrame);
   nscoord appUnitsPerDevPixel = aActiveScrolledRoot->PresContext()->AppUnitsPerDevPixel();
   gfxPoint scaledOffset(
       NSAppUnitsToDoublePixels(offset.x, appUnitsPerDevPixel)*mParameters.mXScale,
@@ -1479,7 +1479,7 @@ SuppressComponentAlpha(nsDisplayListBuilder* aBuilder,
   // Suppress component alpha for items in the toplevel window that are over
   // the window translucent area
   nsIFrame* f = aItem->GetUnderlyingFrame();
-  nsIFrame* ref = aBuilder->ReferenceFrame();
+  nsIFrame* ref = aBuilder->RootReferenceFrame();
   if (f->PresContext() != ref->PresContext())
     return false;
 
@@ -1630,7 +1630,7 @@ ContainerState::FindThebesLayerFor(nsDisplayItem* aItem,
                                    const nsIntRect& aVisibleRect,
                                    const nsIntRect& aDrawRect,
                                    const FrameLayerBuilder::Clip& aClip,
-                                   nsIFrame* aActiveScrolledRoot)
+                                   const nsIFrame* aActiveScrolledRoot)
 {
   int32_t i;
   int32_t lowestUsableLayerWithScrolledRoot = -1;
@@ -1670,7 +1670,7 @@ ContainerState::FindThebesLayerFor(nsDisplayItem* aItem,
   nsRefPtr<ThebesLayer> layer;
   ThebesLayerData* thebesLayerData = nullptr;
   if (lowestUsableLayerWithScrolledRoot < 0) {
-    layer = CreateOrRecycleThebesLayer(aActiveScrolledRoot);
+    layer = CreateOrRecycleThebesLayer(aActiveScrolledRoot, aItem->ReferenceFrame());
 
     NS_ASSERTION(!mNewChildLayers.Contains(layer), "Layer already in list???");
     mNewChildLayers.AppendElement(layer);
@@ -1815,13 +1815,13 @@ ContainerState::ProcessDisplayItems(const nsDisplayList& aList,
 
     bool isFixed;
     bool forceInactive;
-    nsIFrame* activeScrolledRoot;
+    const nsIFrame* activeScrolledRoot;
     if (aFlags & NO_COMPONENT_ALPHA) {
       // When NO_COMPONENT_ALPHA is set, items will be flattened onto the
       // reference frame. In this case, force the active scrolled root to
       // that frame.
       forceInactive = true;
-      activeScrolledRoot = mBuilder->ReferenceFrame();
+      activeScrolledRoot = mBuilder->FindReferenceFrameFor(mContainerFrame);
       isFixed = mBuilder->IsFixedItem(item, nullptr, activeScrolledRoot);
     } else {
       forceInactive = false;

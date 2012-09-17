@@ -622,10 +622,10 @@ nsLayoutUtils::IsProperAncestorFrameCrossDoc(nsIFrame* aAncestorFrame, nsIFrame*
 
 // static
 bool
-nsLayoutUtils::IsAncestorFrameCrossDoc(nsIFrame* aAncestorFrame, nsIFrame* aFrame,
-                                       nsIFrame* aCommonAncestor)
+nsLayoutUtils::IsAncestorFrameCrossDoc(const nsIFrame* aAncestorFrame, const nsIFrame* aFrame,
+                                       const nsIFrame* aCommonAncestor)
 {
-  for (nsIFrame* f = aFrame; f != aCommonAncestor;
+  for (const nsIFrame* f = aFrame; f != aCommonAncestor;
        f = GetCrossDocParentFrame(f)) {
     if (f == aAncestorFrame)
       return true;
@@ -872,7 +872,7 @@ nsLayoutUtils::GetScrollableFrameFor(nsIFrame *aScrolledFrame)
 
 nsIFrame*
 nsLayoutUtils::GetActiveScrolledRootFor(nsIFrame* aFrame,
-                                        nsIFrame* aStopAtAncestor)
+                                        const nsIFrame* aStopAtAncestor)
 {
   nsIFrame* f = aFrame;
   while (f != aStopAtAncestor) {
@@ -912,14 +912,14 @@ nsLayoutUtils::GetActiveScrolledRootFor(nsDisplayItem* aItem,
     nsIFrame* viewportFrame =
       nsLayoutUtils::GetClosestFrameOfType(f, nsGkAtoms::viewportFrame);
     NS_ASSERTION(viewportFrame, "no viewport???");
-    return nsLayoutUtils::GetActiveScrolledRootFor(viewportFrame, aBuilder->ReferenceFrame());
+    return nsLayoutUtils::GetActiveScrolledRootFor(viewportFrame, aBuilder->FindReferenceFrameFor(viewportFrame));
   } else {
-    return nsLayoutUtils::GetActiveScrolledRootFor(f, aBuilder->ReferenceFrame());
+    return nsLayoutUtils::GetActiveScrolledRootFor(f, aItem->ReferenceFrame());
   }
 }
 
 bool
-nsLayoutUtils::IsScrolledByRootContentDocumentDisplayportScrolling(nsIFrame* aActiveScrolledRoot,
+nsLayoutUtils::IsScrolledByRootContentDocumentDisplayportScrolling(const nsIFrame* aActiveScrolledRoot,
                                                                    nsDisplayListBuilder* aBuilder)
 {
   nsPresContext* presContext = aActiveScrolledRoot->PresContext()->
@@ -1249,7 +1249,7 @@ nsLayoutUtils::MatrixTransformPoint(const nsPoint &aPoint,
 }
 
 gfx3DMatrix
-nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame, nsIFrame *aAncestor)
+nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame, const nsIFrame *aAncestor)
 {
   nsIFrame* parent;
   gfx3DMatrix ctm = aFrame->GetTransformMatrix(aAncestor, &parent);
@@ -1274,7 +1274,7 @@ TransformGfxPointFromAncestor(nsIFrame *aFrame,
 static gfxRect
 TransformGfxRectFromAncestor(nsIFrame *aFrame,
                              const gfxRect &aRect,
-                             nsIFrame *aAncestor)
+                             const nsIFrame *aAncestor)
 {
   gfx3DMatrix ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
   return ctm.Inverse().ProjectRectBounds(aRect);
@@ -1306,7 +1306,7 @@ nsLayoutUtils::TransformRootPointToFrame(nsIFrame *aFrame,
 nsRect 
 nsLayoutUtils::TransformAncestorRectToFrame(nsIFrame* aFrame,
                                             const nsRect &aRect,
-                                            nsIFrame* aAncestor)
+                                            const nsIFrame* aAncestor)
 {
     float factor = aFrame->PresContext()->AppUnitsPerDevPixel();
     gfxRect result(NSAppUnitsToFloatPixels(aRect.x, factor),
@@ -1530,7 +1530,7 @@ PruneDisplayListForExtraPage(nsDisplayListBuilder* aBuilder,
 {
   nsDisplayList newList;
   // The page which we're really constructing a display list for
-  nsIFrame* mainPage = aBuilder->ReferenceFrame();
+  nsIFrame* mainPage = aBuilder->RootReferenceFrame();
 
   while (true) {
     nsDisplayItem* i = aList->RemoveBottom();
