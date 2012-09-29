@@ -24,6 +24,7 @@
 #include "prnetdb.h"
 #include "prerror.h"
 #include "prerr.h"
+#include "NetworkActivityMonitor.h"
 
 #include "nsIServiceManager.h"
 #include "nsISocketProviderService.h"
@@ -881,7 +882,7 @@ nsSocketTransport::SendStatus(nsresult status)
         }
     }
     if (sink)
-        sink->OnTransportStatus(this, status, progress, LL_MAXUINT);
+        sink->OnTransportStatus(this, status, progress, UINT64_MAX);
 }
 
 nsresult
@@ -1094,6 +1095,9 @@ nsSocketTransport::InitiateSocket()
         SOCKET_LOG(("  BuildSocket failed [rv=%x]\n", rv));
         return rv;
     }
+
+    // Attach network activity monitor
+    mozilla::net::NetworkActivityMonitor::AttachIOLayer(fd);
 
     PRStatus status;
 
