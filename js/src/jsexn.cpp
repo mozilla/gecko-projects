@@ -50,10 +50,10 @@ static JSBool
 Exception(JSContext *cx, unsigned argc, Value *vp);
 
 static void
-exn_trace(JSTracer *trc, JSObject *obj);
+exn_trace(JSTracer *trc, RawObject obj);
 
 static void
-exn_finalize(FreeOp *fop, JSObject *obj);
+exn_finalize(FreeOp *fop, RawObject obj);
 
 static JSBool
 exn_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
@@ -348,7 +348,7 @@ GetExnPrivate(JSObject *obj)
 }
 
 static void
-exn_trace(JSTracer *trc, JSObject *obj)
+exn_trace(JSTracer *trc, RawObject obj)
 {
     if (JSExnPrivate *priv = GetExnPrivate(obj)) {
         if (priv->message)
@@ -380,7 +380,7 @@ SetExnPrivate(JSObject *exnObject, JSExnPrivate *priv)
 }
 
 static void
-exn_finalize(FreeOp *fop, JSObject *obj)
+exn_finalize(FreeOp *fop, RawObject obj)
 {
     if (JSExnPrivate *priv = GetExnPrivate(obj)) {
         if (JSErrorReport *report = priv->errorReport) {
@@ -908,24 +908,6 @@ static struct exnname { char *name; char *exception; } errortoexnname[] = {
 #undef MSG_DEF
 };
 #endif /* DEBUG */
-
-struct AutoSetGeneratingError
-{
-    JSContext *cx;
-
-    AutoSetGeneratingError(JSContext *cx)
-        : cx(cx)
-    {
-        JS_ASSERT(!cx->generatingError);
-        cx->generatingError = true;
-    }
-
-    ~AutoSetGeneratingError()
-    {
-        JS_ASSERT(cx->generatingError);
-        cx->generatingError = false;
-    }
-};
 
 JSBool
 js_ErrorToException(JSContext *cx, const char *message, JSErrorReport *reportp,
