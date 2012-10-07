@@ -1027,11 +1027,16 @@ class FastInvokeGuard
     }
 
     bool invoke(JSContext *cx) {
+        /* Disabled for now to fix bug 797131 fallout. */
+#if 0
 #ifdef JS_ION
         if (useIon_ && fun_) {
             JS_ASSERT(fun_->script() == script_);
 
-            if (script_->hasIonScript() && !script_->ion->bailoutExpected()) {
+            ion::MethodStatus status = ion::CanEnterUsingFastInvoke(cx, script_);
+            if (status == ion::Method_Error)
+                return false;
+            if (status == ion::Method_Compiled) {
                 ion::IonExecStatus result = ion::FastInvoke(cx, fun_, args_);
                 if (result == ion::IonExec_Error)
                     return false;
@@ -1040,12 +1045,15 @@ class FastInvokeGuard
                 return true;
             }
 
+            JS_ASSERT(status == ion::Method_Skipped);
+
             if (script_->canIonCompile()) {
                 // This script is not yet hot. Since calling into Ion is much
                 // faster here, bump the use count a bit to account for this.
                 script_->incUseCount(5);
             }
         }
+#endif
 #endif
 
         return Invoke(cx, args_);
