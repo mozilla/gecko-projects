@@ -42,7 +42,7 @@
 
 #include "nsIWindowWatcher.h"
 #include "nsIPrompt.h"
-#include "nsIPrincipal.h"
+#include "nsCertificatePrincipal.h"
 #include "nsReadableUtils.h"
 #include "nsIDateTimeFormat.h"
 #include "prtypes.h"
@@ -2053,7 +2053,7 @@ NS_IMETHODIMP
 nsNSSComponent::VerifySignature(const char* aRSABuf, uint32_t aRSABufLen,
                                 const char* aPlaintext, uint32_t aPlaintextLen,
                                 int32_t* aErrorCode,
-                                nsIPrincipal** aPrincipal)
+                                nsICertificatePrincipal** aPrincipal)
 {
   if (!aPrincipal || !aErrorCode) {
     return NS_ERROR_NULL_POINTER;
@@ -2152,16 +2152,12 @@ nsNSSComponent::VerifySignature(const char* aRSABuf, uint32_t aRSABufLen,
         break;
       }
     
-      nsCOMPtr<nsIPrincipal> certPrincipal;
-      rv2 = mScriptSecurityManager->
-        GetCertificatePrincipal(NS_ConvertUTF16toUTF8(fingerprint),
-                                NS_ConvertUTF16toUTF8(subjectName),
-                                NS_ConvertUTF16toUTF8(orgName),
-                                pCert, nullptr, getter_AddRefs(certPrincipal));
-      if (NS_FAILED(rv2) || !certPrincipal) {
-        break;
-      }
-      
+      nsCOMPtr<nsICertificatePrincipal> certPrincipal =
+        new nsCertificatePrincipal(NS_ConvertUTF16toUTF8(fingerprint),
+                                   NS_ConvertUTF16toUTF8(subjectName),
+                                   NS_ConvertUTF16toUTF8(orgName),
+                                   pCert);
+
       certPrincipal.swap(*aPrincipal);
     } while (0);
   }
@@ -3143,10 +3139,12 @@ PSMContentDownloader::OnStartRequest(nsIRequest* request, nsISupports* context)
   // Get the URI //
   channel->GetURI(getter_AddRefs(mURI));
 
-  int32_t contentLength;
+  int64_t contentLength;
   rv = channel->GetContentLength(&contentLength);
   if (NS_FAILED(rv) || contentLength <= 0)
     contentLength = kDefaultCertAllocLength;
+  if (contentLength > INT32_MAX)
+    return NS_ERROR_OUT_OF_MEMORY;
   
   mBufferOffset = 0;
   mBufferSize = 0;
@@ -3154,7 +3152,7 @@ PSMContentDownloader::OnStartRequest(nsIRequest* request, nsISupports* context)
   if (!mByteData)
     return NS_ERROR_OUT_OF_MEMORY;
   
-  mBufferSize = contentLength;
+  mBufferSize = int32_t(contentLength);
   return NS_OK;
 }
 

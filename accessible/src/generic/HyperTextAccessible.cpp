@@ -1898,7 +1898,9 @@ HyperTextAccessible::ScrollSubstringToPoint(int32_t aStartIndex,
   rv = HypertextOffsetsToDOMRange(aStartIndex, aEndIndex, range);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsPresContext *presContext = frame->PresContext();
+  nsPresContext* presContext = frame->PresContext();
+  nsPoint coordsInAppUnits =
+    coords.ToAppUnits(presContext->AppUnitsPerDevPixel());
 
   bool initialScrolled = false;
   nsIFrame *parentFrame = frame;
@@ -1908,12 +1910,9 @@ HyperTextAccessible::ScrollSubstringToPoint(int32_t aStartIndex,
       if (!initialScrolled) {
         // Scroll substring to the given point. Turn the point into percents
         // relative scrollable area to use nsCoreUtils::ScrollSubstringTo.
-        nsIntRect frameRect = parentFrame->GetScreenRectExternal();
-        int32_t devOffsetX = coords.x - frameRect.x;
-        int32_t devOffsetY = coords.y - frameRect.y;
-
-        nsPoint offsetPoint(presContext->DevPixelsToAppUnits(devOffsetX),
-                            presContext->DevPixelsToAppUnits(devOffsetY));
+        nsRect frameRect = parentFrame->GetScreenRectInAppUnits();
+        nscoord offsetPointX = coordsInAppUnits.x - frameRect.x;
+        nscoord offsetPointY = coordsInAppUnits.y - frameRect.y;
 
         nsSize size(parentFrame->GetSize());
 
@@ -1921,8 +1920,8 @@ HyperTextAccessible::ScrollSubstringToPoint(int32_t aStartIndex,
         size.width = size.width ? size.width : 1;
         size.height = size.height ? size.height : 1;
 
-        int16_t hPercent = offsetPoint.x * 100 / size.width;
-        int16_t vPercent = offsetPoint.y * 100 / size.height;
+        int16_t hPercent = offsetPointX * 100 / size.width;
+        int16_t vPercent = offsetPointY * 100 / size.height;
 
         rv = nsCoreUtils::ScrollSubstringTo(frame, range, vPercent, hPercent);
         NS_ENSURE_SUCCESS(rv, rv);
@@ -2222,59 +2221,49 @@ HyperTextAccessible::GetSpellTextAttribute(nsINode* aNode,
                                            int32_t* aHTEndOffset,
                                            nsIPersistentProperties* aAttributes)
 {
-  nsTArray<nsRange*> ranges;
-  GetSelectionDOMRanges(nsISelectionController::SELECTION_SPELLCHECK, &ranges);
-
-  uint32_t rangeCount = ranges.Length();
-  if (!rangeCount)
+  nsRefPtr<nsFrameSelection> fs = FrameSelection();
+  if (!fs)
     return NS_OK;
 
-  nsCOMPtr<nsIDOMNode> DOMNode = do_QueryInterface(aNode);
-  for (uint32_t index = 0; index < rangeCount; index++) {
-    nsRange* range = ranges[index];
+  Selection* domSel = fs->GetSelection(nsISelectionController::SELECTION_SPELLCHECK);
+  if (!domSel)
+    return NS_OK;
 
-    int16_t result;
-    nsresult rv = range->ComparePoint(DOMNode, aNodeOffset, &result);
-    NS_ENSURE_SUCCESS(rv, rv);
-    // ComparePoint checks boundary points, but we need to check that
-    // text at aNodeOffset is inside the range.
-    // See also bug 460690.
-    if (result == 0) {
-      if (aNode == range->GetEndParent() && aNodeOffset == range->EndOffset())
-        result = 1;
-    }
+  int32_t rangeCount = domSel->GetRangeCount();
+  if (rangeCount <= 0)
+    return NS_OK;
 
-    if (result == 1) { // range is before point
-      int32_t startHTOffset = 0;
-      nsresult rv = RangeBoundToHypertextOffset(range, false, true,
-                                                &startHTOffset);
+  int32_t startHTOffset = 0, endHTOffset = 0;
+  nsresult rv = NS_OK;
+  for (int32_t idx = 0; idx < rangeCount; idx++) {
+    nsRange* range = domSel->GetRangeAt(idx);
+    if (range->Collapsed())
+      continue;
+
+    // See if the point comes after the range in which case we must continue in
+    // case there is another range after this one.
+    nsINode* endNode = range->GetEndParent();
+    int32_t endOffset = range->EndOffset();
+    if (nsContentUtils::ComparePoints(aNode, aNodeOffset, endNode, endOffset) >= 0)
+      continue;
+
+    // At this point our point is either in this range or before it but after
+    // the previous range.  So we check to see if the range starts before the
+    // point in which case the point is in the missspelled range, otherwise it
+    // must be before the range and after the previous one if any.
+    nsINode* startNode = range->GetStartParent();
+    int32_t startOffset = range->StartOffset();
+    if (nsContentUtils::ComparePoints(startNode, startOffset, aNode,
+                                      aNodeOffset) <= 0) {
+      rv = RangeBoundToHypertextOffset(range, true, true, &startHTOffset);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      rv = RangeBoundToHypertextOffset(range, false, false, &endHTOffset);
       NS_ENSURE_SUCCESS(rv, rv);
 
       if (startHTOffset > *aHTStartOffset)
         *aHTStartOffset = startHTOffset;
 
-    } else if (result == -1) { // range is after point
-      int32_t endHTOffset = 0;
-      nsresult rv = RangeBoundToHypertextOffset(range, true, false,
-                                                &endHTOffset);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      if (endHTOffset < *aHTEndOffset)
-        *aHTEndOffset = endHTOffset;
-
-    } else { // point is in range
-      int32_t startHTOffset = 0;
-      nsresult rv = RangeBoundToHypertextOffset(range, true, true,
-                                                &startHTOffset);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      int32_t endHTOffset = 0;
-      rv = RangeBoundToHypertextOffset(range, false, false,
-                                       &endHTOffset);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      if (startHTOffset > *aHTStartOffset)
-        *aHTStartOffset = startHTOffset;
       if (endHTOffset < *aHTEndOffset)
         *aHTEndOffset = endHTOffset;
 
@@ -2285,7 +2274,36 @@ HyperTextAccessible::GetSpellTextAttribute(nsINode* aNode,
 
       return NS_OK;
     }
+
+    // This range came after the point.
+    rv = RangeBoundToHypertextOffset(range, true, false, &endHTOffset);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (idx > 0) {
+      rv = RangeBoundToHypertextOffset(domSel->GetRangeAt(idx - 1), false,
+                                       true, &startHTOffset);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+
+    if (startHTOffset > *aHTStartOffset)
+      *aHTStartOffset = startHTOffset;
+
+    if (endHTOffset < *aHTEndOffset)
+      *aHTEndOffset = endHTOffset;
+
+    return NS_OK;
   }
+
+  // We never found a range that ended after the point, therefore we know that
+  // the point is not in a range, that we do not need to compute an end offset,
+  // and that we should use the end offset of the last range to compute the
+  // start offset of the text attribute range.
+  rv = RangeBoundToHypertextOffset(domSel->GetRangeAt(rangeCount - 1), false,
+                                   true, &startHTOffset);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (startHTOffset > *aHTStartOffset)
+    *aHTStartOffset = startHTOffset;
 
   return NS_OK;
 }

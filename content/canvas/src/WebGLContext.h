@@ -93,6 +93,10 @@ class WebGLActiveInfo;
 class WebGLShaderPrecisionFormat;
 class WebGLExtensionBase;
 
+namespace dom {
+struct WebGLContextAttributes;
+}
+
 enum FakeBlackStatus { DoNotNeedFakeBlack, DoNeedFakeBlack, DontKnowIfNeedFakeBlack };
 
 struct VertexAttrib0Status {
@@ -642,7 +646,7 @@ public:
         return mHeight;
     }
         
-    JSObject *GetContextAttributes(ErrorResult &rv);
+    void GetContextAttributes(dom::WebGLContextAttributes& retval);
     bool IsContextLost() const { return !IsContextStable(); }
     void GetSupportedExtensions(JSContext *cx, dom::Nullable< nsTArray<nsString> > &retval);
     JSObject* GetExtension(JSContext* cx, const nsAString& aName, ErrorResult& rv);
@@ -1517,6 +1521,11 @@ struct WebGLVertexAttribData {
     GLuint actualStride() const {
         if (stride) return stride;
         return size * componentSize();
+    }
+
+    // for cycle collection
+    WebGLBuffer* get() {
+        return buf.get();
     }
 };
 
@@ -2639,6 +2648,8 @@ class WebGLFramebufferAttachment
     WebGLint mTextureLevel;
     WebGLenum mTextureCubeMapFace;
 
+    friend class WebGLFramebuffer;
+
 public:
     WebGLFramebufferAttachment(WebGLenum aAttachmentPoint)
         : mAttachmentPoint(aAttachmentPoint)
@@ -3101,7 +3112,9 @@ public:
 
     virtual JSObject* WrapObject(JSContext *cx, JSObject *scope);
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_CLASS(WebGLUniformLocation)
+
 protected:
     // nsRefPtr, not WebGLRefPtr, so that we don't prevent the program from being explicitly deleted.
     // we just want to avoid having a dangling pointer.

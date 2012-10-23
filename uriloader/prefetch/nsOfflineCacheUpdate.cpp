@@ -3,6 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#if defined(MOZ_LOGGING)
+#define FORCE_PR_LOG
+#endif
+
 #include "nsOfflineCacheUpdate.h"
 
 #include "nsCPrefetchService.h"
@@ -317,6 +321,14 @@ nsOfflineCacheUpdateItem::OpenChannel(nsOfflineCacheUpdate *aUpdate)
     }
 #endif
 
+    if (mUpdate) {
+        // Holding a reference to the update means this item is already
+        // in progress (has a channel, or is just in between OnStopRequest()
+        // and its Run() call.  We must never open channel on this item again.
+        LOG(("  %p is already running! ignoring", this));
+        return NS_ERROR_ALREADY_OPENED;
+    }
+
     nsresult rv = nsOfflineCacheUpdate::GetCacheKey(mURI, mCacheKey);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -544,7 +556,11 @@ NS_IMETHODIMP
 nsOfflineCacheUpdateItem::GetTotalSize(int32_t *aTotalSize)
 {
     if (mChannel) {
-        return mChannel->GetContentLength(aTotalSize);
+      int64_t size64;
+      nsresult rv = mChannel->GetContentLength(&size64);
+      NS_ENSURE_SUCCESS(rv, rv);
+      *aTotalSize = int32_t(size64); // XXX - loses precision
+      return NS_OK;
     }
 
     *aTotalSize = -1;
@@ -554,7 +570,7 @@ nsOfflineCacheUpdateItem::GetTotalSize(int32_t *aTotalSize)
 NS_IMETHODIMP
 nsOfflineCacheUpdateItem::GetLoadedSize(int32_t *aLoadedSize)
 {
-    *aLoadedSize = mBytesRead;
+    *aLoadedSize = int32_t(mBytesRead); // XXX - loses precision
     return NS_OK;
 }
 
@@ -1709,6 +1725,11 @@ nsOfflineCacheUpdate::ProcessNextURI()
 
     NS_ASSERTION(mState == STATE_DOWNLOADING,
                  "ProcessNextURI should only be called from the DOWNLOADING state");
+
+    if (mState != STATE_DOWNLOADING) {
+        LOG(("  should only be called from the DOWNLOADING state, ignoring"));
+        return NS_ERROR_UNEXPECTED;
+    }
 
     nsOfflineCacheUpdateItem * runItem = nullptr;
     uint32_t completedItems = 0;

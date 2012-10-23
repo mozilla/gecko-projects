@@ -34,23 +34,6 @@ struct ClassPolicy;
 class ClassInfoData;
 class DomainPolicy;
 
-#if defined(DEBUG_mstoltz) || defined(DEBUG_caillon)
-#define DEBUG_CAPS_HACKER
-#endif
-
-#ifdef DEBUG_CAPS_HACKER
-#define DEBUG_CAPS_CheckPropertyAccessImpl
-#define DEBUG_CAPS_LookupPolicy
-#define DEBUG_CAPS_CheckComponentPermissions
-#endif
-
-#if 0
-#define DEBUG_CAPS_CanCreateWrapper
-#define DEBUG_CAPS_CanCreateInstance
-#define DEBUG_CAPS_CanGetService
-#define DEBUG_CAPS_DomainPolicyLifeCycle
-#endif
-
 /////////////////////
 // PrincipalKey //
 /////////////////////
@@ -236,12 +219,6 @@ public:
                      mRefCount(0)
     {
         mGeneration = sGeneration;
-
-#ifdef DEBUG_CAPS_DomainPolicyLifeCycle
-        ++sObjects;
-        _printPopulationInfo();
-#endif
-
     }
 
     bool Init()
@@ -266,12 +243,6 @@ public:
     {
         PL_DHashTableFinish(this);
         NS_ASSERTION(mRefCount == 0, "Wrong refcount in DomainPolicy dtor");
-#ifdef DEBUG_CAPS_DomainPolicyLifeCycle
-        printf("DomainPolicy deleted with mRefCount = %d\n", mRefCount);
-        --sObjects;
-        _printPopulationInfo();
-#endif
-
     }
 
     void Hold()
@@ -301,12 +272,6 @@ private:
     uint32_t mRefCount;
     uint32_t mGeneration;
     static uint32_t sGeneration;
-    
-#ifdef DEBUG_CAPS_DomainPolicyLifeCycle
-    static uint32_t sObjects;
-    static void _printPopulationInfo();
-#endif
-
 };
 
 static void
@@ -389,6 +354,8 @@ private:
     nsScriptSecurityManager();
     virtual ~nsScriptSecurityManager();
 
+    bool SubjectIsPrivileged();
+
     static JSBool
     CheckObjectAccess(JSContext *cx, JSHandleObject obj,
                       JSHandleId id, JSAccessMode mode,
@@ -441,18 +408,6 @@ private:
     CreateCodebasePrincipal(nsIURI* aURI, uint32_t aAppId, bool aInMozBrowser,
                             nsIPrincipal** result);
 
-    // This is just like the API method, but it doesn't check that the subject
-    // name is non-empty or aCertificate is non-null, and it doesn't change the
-    // certificate in the table (if any) in any way if aModifyTable is false.
-    nsresult
-    DoGetCertificatePrincipal(const nsACString& aCertFingerprint,
-                              const nsACString& aSubjectName,
-                              const nsACString& aPrettyName,
-                              nsISupports* aCertificate,
-                              nsIURI* aURI,
-                              bool aModifyTable,
-                              nsIPrincipal **result);
-
     // Returns null if a principal cannot be found.  Note that rv can be NS_OK
     // when this happens -- this means that there was no script for the
     // context.  Callers MUST pass in a non-null rv here.
@@ -488,9 +443,6 @@ private:
     GetPrincipalAndFrame(JSContext *cx,
                          JSStackFrame** frameResult,
                          nsresult* rv);
-
-    static void
-    FormatCapabilityString(nsAString& aCapability);
 
     /**
      * Check capability levels for an |aObj| that implements
@@ -535,26 +487,12 @@ private:
     nsresult
     InitPrefs();
 
-    static nsresult 
-    GetPrincipalPrefNames(const char* prefBase,
-                          nsCString& grantedPref,
-                          nsCString& deniedPref,
-                          nsCString& subjectNamePref);
-
     nsresult
     InitPolicies();
 
     nsresult
     InitDomainPolicy(JSContext* cx, const char* aPolicyName,
                      DomainPolicy* aDomainPolicy);
-
-    nsresult
-    InitPrincipals(uint32_t prefCount, const char** prefNames);
-
-#ifdef DEBUG_CAPS_HACKER
-    void
-    PrintPolicyDB();
-#endif
 
     // JS strings we need to clean up on shutdown
     static jsid sEnabledID;
@@ -567,8 +505,6 @@ private:
     nsObjectHashtable* mCapabilities;
 
     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
-    nsCOMPtr<nsIPrincipal> mSystemCertificate;
-    nsInterfaceHashtable<PrincipalKey, nsIPrincipal> mPrincipals;
     bool mPrefInitialized;
     bool mIsJavaScriptEnabled;
     bool mIsWritingPrefs;

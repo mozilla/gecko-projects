@@ -402,6 +402,17 @@ CreateInterfaceObjects(JSContext* cx, JSObject* global, JSObject* receiver,
                        const NativeProperties* chromeProperties,
                        const char* name);
 
+inline bool
+MaybeWrapValue(JSContext* cx, JSObject* obj, JS::Value* vp)
+{
+  if (vp->isObject() &&
+      js::GetObjectCompartment(&vp->toObject()) != js::GetObjectCompartment(obj)) {
+    return JS_WrapValue(cx, vp);
+  }
+
+  return true;
+}
+
 template <class T>
 inline bool
 WrapNewBindingObject(JSContext* cx, JSObject* scope, T* value, JS::Value* vp)
@@ -1030,6 +1041,15 @@ protected:
   bool inited;
 #endif
 };
+
+// Helper for OwningNonNull
+template <class T>
+inline bool
+WrapNewBindingObject(JSContext* cx, JSObject* scope, OwningNonNull<T>& value,
+                     JS::Value* vp)
+{
+  return WrapNewBindingObject(cx, scope, &static_cast<T&>(value), vp);
+}
 
 // A struct that has the same layout as an nsDependentString but much
 // faster constructor and destructor behavior

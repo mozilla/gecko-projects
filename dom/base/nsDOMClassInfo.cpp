@@ -409,8 +409,6 @@
 #include "nsIDOMSVGZoomAndPan.h"
 #include "nsIDOMSVGZoomEvent.h"
 
-#include "nsICanvasRenderingContextInternal.h"
-
 #include "nsIImageDocument.h"
 
 // Storage includes
@@ -541,6 +539,8 @@ using mozilla::dom::indexedDB::IDBWrapperCache;
 #include "nsIOpenWindowEventDetail.h"
 #include "nsIDOMGlobalObjectConstructor.h"
 
+#include "nsIDOMCanvasRenderingContext2D.h"
+
 #include "DOMFileHandle.h"
 #include "FileRequest.h"
 #include "LockedFile.h"
@@ -552,7 +552,6 @@ using mozilla::dom::indexedDB::IDBWrapperCache;
 #include "nsIDOMDataChannel.h"
 #endif
 
-#include "nsICanvasRenderingContextInternal.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
 
@@ -718,9 +717,6 @@ public:
 };
 
 } // anonymous namespace
-
-typedef nsNewDOMBindingSH<nsICanvasRenderingContextInternal>
-  nsCanvasRenderingContextSH;
 
 
 // This list of NS_DEFINE_CLASSINFO_DATA macros is what gives the DOM
@@ -1340,16 +1336,11 @@ static nsDOMClassInfoData sClassInfoData[] = {
 
   NS_DEFINE_CLASSINFO_DATA(HTMLCanvasElement, nsElementSH,
                            ELEMENT_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(CanvasRenderingContext2D,
-                           nsCanvasRenderingContextSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(CanvasGradient, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(CanvasPattern, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(TextMetrics, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(ImageData, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(MozCanvasPrintState, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
@@ -3866,10 +3857,6 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_GENERIC_HTML_MAP_ENTRIES
   DOM_CLASSINFO_MAP_END
 
-  DOM_CLASSINFO_MAP_BEGIN(CanvasRenderingContext2D, nsIDOMCanvasRenderingContext2D)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMCanvasRenderingContext2D)
-  DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(CanvasGradient, nsIDOMCanvasGradient)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCanvasGradient)
   DOM_CLASSINFO_MAP_END
@@ -3880,10 +3867,6 @@ nsDOMClassInfo::Init()
 
   DOM_CLASSINFO_MAP_BEGIN(TextMetrics, nsIDOMTextMetrics)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMTextMetrics)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(ImageData, nsIDOMImageData)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMImageData)
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN(MozCanvasPrintState, nsIDOMMozCanvasPrintState)
@@ -7722,15 +7705,6 @@ nsNodeSH::PostCreatePrototype(JSContext * cx, JSObject * proto)
   return rv;
 }
 
-bool
-nsNodeSH::IsCapabilityEnabled(const char* aCapability)
-{
-  bool enabled;
-  return sSecMan &&
-    NS_SUCCEEDED(sSecMan->IsCapabilityEnabled(aCapability, &enabled)) &&
-    enabled;
-}
-
 NS_IMETHODIMP
 nsNodeSH::PreCreate(nsISupports *nativeObj, JSContext *cx, JSObject *globalObj,
                     JSObject **parentObj)
@@ -7766,7 +7740,7 @@ nsNodeSH::PreCreate(nsISupports *nativeObj, JSContext *cx, JSObject *globalObj,
   bool hasHadScriptHandlingObject = false;
   NS_ENSURE_STATE(doc->GetScriptHandlingObject(hasHadScriptHandlingObject) ||
                   hasHadScriptHandlingObject ||
-                  IsPrivilegedScript());
+                  nsContentUtils::IsCallerChrome());
 
   nsINode *native_parent;
 

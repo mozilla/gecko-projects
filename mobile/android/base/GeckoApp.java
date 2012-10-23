@@ -1357,15 +1357,15 @@ abstract public class GeckoApp
 
         // We need do do this on the next iteration in order to avoid
         // a deadlock, see comment below in FullScreenHolder
-        mMainHandler.post(new Runnable() { 
+        mMainHandler.post(new Runnable() {
             public void run() {
-                mLayerView.setVisibility(View.VISIBLE);
+                mLayerView.show();
             }
         });
 
         FrameLayout decor = (FrameLayout)getWindow().getDecorView();
         decor.removeView(mFullScreenPluginContainer);
-        
+
         mFullScreenPluginView = null;
 
         GeckoScreenOrientationListener.getInstance().unlockScreenOrientation();
@@ -1642,6 +1642,8 @@ abstract public class GeckoApp
             }
         }
 
+        Tabs.registerOnTabsChangedListener(this);
+
         initializeChrome(passedUri, isExternalURL);
 
         if (mRestoreMode == GeckoAppShell.RESTORE_NONE) {
@@ -1668,8 +1670,6 @@ abstract public class GeckoApp
             }, 1000 * 5 /* 5 seconds */);
             Log.i(LOGTAG, "Intent : ACTION_DEBUG - waiting 5s before launching");
         }
-
-        Tabs.registerOnTabsChangedListener(this);
 
         if (cameraView == null) {
             cameraView = new SurfaceView(this);
@@ -2651,7 +2651,7 @@ abstract public class GeckoApp
 
             mMainHandler.post(new Runnable() { 
                 public void run() {
-                    mLayerView.setVisibility(View.INVISIBLE);
+                    mLayerView.hide();
                 }
             });
         }

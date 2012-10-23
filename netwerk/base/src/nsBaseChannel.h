@@ -156,11 +156,6 @@ public:
     return mPump || mWaitingOnAsyncRedirect;
   }
 
-  // Set the content length that should be reported for this channel.  Pass -1
-  // to indicate an unspecified content length.
-  void SetContentLength64(int64_t len);
-  int64_t ContentLength64();
-
   // Helper function for querying the channel's notification callbacks.
   template <class T> void GetCallback(nsCOMPtr<T> &result) {
     GetInterface(NS_GET_TEMPLATE_IID(T), getter_AddRefs(result));
@@ -272,6 +267,7 @@ protected:
   nsresult                            mStatus;
   uint32_t                            mContentDispositionHint;
   nsAutoPtr<nsString>                 mContentDispositionFilename;
+  int64_t                             mContentLength;
 
   friend class mozilla::net::PrivateBrowsingChannel<nsBaseChannel>;
 };
