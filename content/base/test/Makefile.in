@@ -373,6 +373,8 @@ MOCHITEST_FILES_B = \
 		file_CSP_evalscript_main.js \
 		file_csp_bug768029.html \
 		file_csp_bug768029.sjs \
+		file_csp_bug773891.html \
+		file_csp_bug773891.sjs \
 		test_bug540854.html \
 		bug540854.sjs \
 		test_bug548463.html \
@@ -557,6 +559,15 @@ MOCHITEST_FILES_B = \
 		test_bug650386_redirect_307.html \
 		file_bug650386_content.sjs \
 		file_bug650386_report.sjs \
+		test_bug687859.html \
+		file_bug687859-bom.js \
+		file_bug687859-bom.js^headers^ \
+		file_bug687859-16.js \
+		file_bug687859-16.js^headers^ \
+		file_bug687859-http.js \
+		file_bug687859-http.js^headers^ \
+		file_bug687859-charset.js \
+		file_bug687859-inherit.js \
 		test_bug719533.html \
 		test_bug737087.html \
 		test_bug433662.html \
