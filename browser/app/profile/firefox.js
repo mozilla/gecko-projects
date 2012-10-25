@@ -329,6 +329,10 @@ pref("browser.download.useToolkitUI", false);
 // This controls retention behavior in the Downloads Panel only.
 pref("browser.download.panel.removeFinishedDownloads", false);
 
+// This records whether or not at least one session with the Downloads Panel
+// enabled has been completed already.
+pref("browser.download.panel.firstSessionCompleted", false);
+
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
 
@@ -1177,6 +1181,7 @@ pref("social.manifest.facebook", "{\"origin\":\"https://www.facebook.com\",\"nam
 // built-in social functionality.
 pref("social.activation.whitelist", "https://www.facebook.com");
 pref("social.sidebar.open", true);
+pref("social.sidebar.unload_timeout_ms", 10000);
 pref("social.active", false);
 pref("social.toast-notifications.enabled", true);
 

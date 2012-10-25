@@ -575,7 +575,7 @@ struct JSScript : public js::gc::Cell
 
     JSFlatString *sourceData(JSContext *cx);
 
-    bool loadSource(JSContext *cx, bool *worked);
+    static bool loadSource(JSContext *cx, js::HandleScript scr, bool *worked);
 
     js::ScriptSource *scriptSource() {
         return scriptSource_;
@@ -1145,7 +1145,7 @@ struct SourceCompressionToken
     ScriptSource *ss;
     const jschar *chars;
   public:
-    SourceCompressionToken(JSContext *cx)
+    explicit SourceCompressionToken(JSContext *cx)
       : cx(cx), ss(NULL), chars(NULL) {}
     ~SourceCompressionToken()
     {
