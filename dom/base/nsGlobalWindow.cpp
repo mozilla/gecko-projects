@@ -1245,6 +1245,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsGlobalWindow)
   NS_INTERFACE_MAP_ENTRY(nsIDOMWindowPerformance)
   NS_INTERFACE_MAP_ENTRY(nsITouchEventReceiver)
   NS_INTERFACE_MAP_ENTRY(nsIInlineEventHandlers)
+  NS_INTERFACE_MAP_ENTRY(nsIWindowCrypto)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Window)
   OUTER_WINDOW_ONLY
     NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -2042,11 +2043,11 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
         rv = SetOuterObject(cx, mJSObject);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        xpc::CompartmentPrivate *priv = xpc::GetCompartmentPrivate(mJSObject);
-        if (priv && priv->waiverWrapperMap) {
-          NS_ASSERTION(!JS_IsExceptionPending(cx),
-                       "We might overwrite a pending exception!");
-          priv->waiverWrapperMap->Reparent(cx, newInnerWindow->mJSObject);
+        NS_ASSERTION(!JS_IsExceptionPending(cx),
+                     "We might overwrite a pending exception!");
+        XPCWrappedNativeScope* scope = xpc::GetObjectScope(mJSObject);
+        if (scope->mWaiverWrapperMap) {
+          scope->mWaiverWrapperMap->Reparent(cx, newInnerWindow->mJSObject);
         }
       }
     }
