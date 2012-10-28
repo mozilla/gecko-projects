@@ -338,6 +338,7 @@ nsWindow::nsWindow() : nsBaseWidget()
   mOldExStyle           = 0;
   mPainting             = 0;
   mLastKeyboardLayout   = 0;
+  mBlurSuppressLevel    = 0;
   mLastPaintEndTime     = TimeStamp::Now();
 #ifdef MOZ_XUL
   mTransparentSurface   = nullptr;
@@ -590,6 +591,17 @@ nsWindow::Create(nsIWidget *aParent,
   }
 
   SubclassWindow(TRUE);
+
+  // NOTE: mNativeIMEContext may be null if IMM module isn't installed.
+  nsIMEContext IMEContext(mWnd);
+  mInputContext.mNativeIMEContext = static_cast<void*>(IMEContext.get());
+  MOZ_ASSERT(mInputContext.mNativeIMEContext ||
+             !nsIMM32Handler::IsIMEAvailable());
+  // If no IME context is available, we should set this widget's pointer since
+  // nullptr indicates there is only one context per process on the platform.
+  if (!mInputContext.mNativeIMEContext) {
+    mInputContext.mNativeIMEContext = this;
+  }
 
   // If the internal variable set by the config.trim_on_minimize pref has not
   // been initialized, and if this is the hidden window (conveniently created
@@ -3996,14 +4008,25 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, WPARAM wParam,
   return result;
 }
 
-HWND nsWindow::GetTopLevelForFocus(HWND aCurWnd)
+void nsWindow::DispatchFocusToTopLevelWindow(bool aIsActivate)
 {
-  // retrieve the toplevel window or dialog
-  HWND toplevelWnd = NULL;
-  while (aCurWnd) {
-    toplevelWnd = aCurWnd;
+  if (aIsActivate)
+    sJustGotActivate = false;
+  sJustGotDeactivate = false;
 
-    nsWindow *win = WinUtils::GetNSWindowPtr(aCurWnd);
+  if (!aIsActivate && BlurEventsSuppressed())
+    return;
+
+  if (!mWidgetListener)
+    return;
+
+  // retrive the toplevel window or dialog
+  HWND curWnd = mWnd;
+  HWND toplevelWnd = NULL;
+  while (curWnd) {
+    toplevelWnd = curWnd;
+
+    nsWindow *win = WinUtils::GetNSWindowPtr(curWnd);
     if (win) {
       nsWindowType wintype;
       win->GetWindowType(wintype);
@@ -4011,23 +4034,9 @@ HWND nsWindow::GetTopLevelForFocus(HWND aCurWnd)
         break;
     }
 
-    aCurWnd = ::GetParent(aCurWnd); // Parent or owner (if has no parent)
+    curWnd = ::GetParent(curWnd); // Parent or owner (if has no parent)
   }
 
-  return toplevelWnd;
-}
-
-void nsWindow::DispatchFocusToTopLevelWindow(bool aIsActivate)
-{
-  if (aIsActivate)
-    sJustGotActivate = false;
-  sJustGotDeactivate = false;
-  mLastKillFocusWindow = NULL;
-
-  if (!mWidgetListener)
-    return;
-
-  HWND toplevelWnd = GetTopLevelForFocus(mWnd);
   if (toplevelWnd) {
     nsWindow *win = WinUtils::GetNSWindowPtr(toplevelWnd);
     if (win) {
@@ -4055,6 +4064,36 @@ bool nsWindow::IsTopLevelMouseExit(HWND aWnd)
     return true;
 
   return WinUtils::GetTopLevelHWND(aWnd) != mouseTopLevel;
+}
+
+bool nsWindow::BlurEventsSuppressed()
+{
+  // are they suppressed in this window?
+  if (mBlurSuppressLevel > 0)
+    return true;
+
+  // are they suppressed by any container widget?
+  HWND parentWnd = ::GetParent(mWnd);
+  if (parentWnd) {
+    nsWindow *parent = WinUtils::GetNSWindowPtr(parentWnd);
+    if (parent)
+      return parent->BlurEventsSuppressed();
+  }
+  return false;
+}
+
+// In some circumstances (opening dependent windows) it makes more sense
+// (and fixes a crash bug) to not blur the parent window. Called from
+// nsFilePicker.
+void nsWindow::SuppressBlurEvents(bool aSuppress)
+{
+  if (aSuppress)
+    ++mBlurSuppressLevel; // for this widget
+  else {
+    NS_ASSERTION(mBlurSuppressLevel > 0, "unbalanced blur event suppression");
+    if (mBlurSuppressLevel > 0)
+      --mBlurSuppressLevel;
+  }
 }
 
 bool nsWindow::ConvertStatus(nsEventStatus aStatus)
@@ -4987,13 +5026,9 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
         int32_t fActive = LOWORD(wParam);
 
         if (WA_INACTIVE == fActive) {
-          // When minimizing a window, the deactivation and focus events will
+          // when minimizing a window, the deactivation and focus events will
           // be fired in the reverse order. Instead, just deactivate right away.
-          // This can also happen when a modal file dialog is opened, so check
-          // if the last window to receive the WM_KILLFOCUS message was this one
-          // or a child of this one.
-          if (HIWORD(wParam) ||
-              (mLastKillFocusWindow && (GetTopLevelForFocus(mLastKillFocusWindow) == mWnd)))
+          if (HIWORD(wParam))
             DispatchFocusToTopLevelWindow(false);
           else
             sJustGotDeactivate = true;
@@ -5068,9 +5103,6 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
     case WM_KILLFOCUS:
       if (sJustGotDeactivate) {
         DispatchFocusToTopLevelWindow(false);
-      }
-      else {
-        mLastKillFocusWindow = mWnd;
       }
       break;
 
@@ -7045,9 +7077,6 @@ void nsWindow::OnDestroy()
   mWidgetListener = nullptr;
   mAttachedWidgetListener = nullptr;
 
-  if (mWnd == mLastKillFocusWindow)
-    mLastKillFocusWindow = NULL;
-
   // Free our subclass and clear |this| stored in the window props. We will no longer
   // receive events from Windows after this point.
   SubclassWindow(FALSE);
@@ -7062,7 +7091,7 @@ void nsWindow::OnDestroy()
 
   // Release references to children, device context, toolkit, and app shell.
   nsBaseWidget::OnDestroy();
-
+  
   // Clear our native parent handle.
   // XXX Windows will take care of this in the proper order, and SetParent(nullptr)'s
   // remove child on the parent already took place in nsBaseWidget's Destroy call above.
@@ -7288,11 +7317,22 @@ nsWindow::SetInputContext(const InputContext& aContext,
   if (nsIMM32Handler::IsComposing()) {
     ResetInputState();
   }
+  void* nativeIMEContext = mInputContext.mNativeIMEContext;
   mInputContext = aContext;
+  mInputContext.mNativeIMEContext = nullptr;
   bool enable = (mInputContext.mIMEState.mEnabled == IMEState::ENABLED ||
                  mInputContext.mIMEState.mEnabled == IMEState::PLUGIN);
 
   AssociateDefaultIMC(enable);
+
+  if (enable) {
+    nsIMEContext IMEContext(mWnd);
+    mInputContext.mNativeIMEContext = static_cast<void*>(IMEContext.get());
+  }
+  // Restore the latest associated context when we cannot get actual context.
+  if (!mInputContext.mNativeIMEContext) {
+    mInputContext.mNativeIMEContext = nativeIMEContext;
+  }
 
   if (enable &&
       mInputContext.mIMEState.mOpen != IMEState::DONT_CHANGE_OPEN_STATE) {
