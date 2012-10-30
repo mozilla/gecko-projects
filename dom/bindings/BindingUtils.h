@@ -275,88 +275,53 @@ UnwrapObject(JSContext* cx, JSObject* obj, U& value)
            PrototypeIDMap<T>::PrototypeID), T>(cx, obj, value);
 }
 
-const size_t kProtoOrIfaceCacheCount =
+const size_t kProtoAndIfaceCacheCount =
   prototypes::id::_ID_Count + constructors::id::_ID_Count;
 
 inline void
-AllocateProtoOrIfaceCache(JSObject* obj)
+AllocateProtoAndIfaceCache(JSObject* obj)
 {
   MOZ_ASSERT(js::GetObjectClass(obj)->flags & JSCLASS_DOM_GLOBAL);
   MOZ_ASSERT(js::GetReservedSlot(obj, DOM_PROTOTYPE_SLOT).isUndefined());
 
   // Important: The () at the end ensure zero-initialization
-  JSObject** protoOrIfaceArray = new JSObject*[kProtoOrIfaceCacheCount]();
+  JSObject** protoAndIfaceArray = new JSObject*[kProtoAndIfaceCacheCount]();
 
   js::SetReservedSlot(obj, DOM_PROTOTYPE_SLOT,
-                      JS::PrivateValue(protoOrIfaceArray));
+                      JS::PrivateValue(protoAndIfaceArray));
 }
 
 inline void
-TraceProtoOrIfaceCache(JSTracer* trc, JSObject* obj)
+TraceProtoAndIfaceCache(JSTracer* trc, JSObject* obj)
 {
   MOZ_ASSERT(js::GetObjectClass(obj)->flags & JSCLASS_DOM_GLOBAL);
 
-  if (!HasProtoOrIfaceArray(obj))
+  if (!HasProtoAndIfaceArray(obj))
     return;
-  JSObject** protoOrIfaceArray = GetProtoOrIfaceArray(obj);
-  for (size_t i = 0; i < kProtoOrIfaceCacheCount; ++i) {
-    JSObject* proto = protoOrIfaceArray[i];
+  JSObject** protoAndIfaceArray = GetProtoAndIfaceArray(obj);
+  for (size_t i = 0; i < kProtoAndIfaceCacheCount; ++i) {
+    JSObject* proto = protoAndIfaceArray[i];
     if (proto) {
-      JS_CALL_OBJECT_TRACER(trc, proto, "protoOrIfaceArray[i]");
+      JS_CALL_OBJECT_TRACER(trc, proto, "protoAndIfaceArray[i]");
     }
   }
 }
 
 inline void
-DestroyProtoOrIfaceCache(JSObject* obj)
+DestroyProtoAndIfaceCache(JSObject* obj)
 {
   MOZ_ASSERT(js::GetObjectClass(obj)->flags & JSCLASS_DOM_GLOBAL);
 
-  JSObject** protoOrIfaceArray = GetProtoOrIfaceArray(obj);
+  JSObject** protoAndIfaceArray = GetProtoAndIfaceArray(obj);
 
-  delete [] protoOrIfaceArray;
+  delete [] protoAndIfaceArray;
 }
-
-struct ConstantSpec
-{
-  const char* name;
-  JS::Value value;
-};
 
 /**
  * Add constants to an object.
  */
 bool
 DefineConstants(JSContext* cx, JSObject* obj, ConstantSpec* cs);
-
-template<typename T>
-struct Prefable {
-  // A boolean indicating whether this set of specs is enabled
-  bool enabled;
-  // Array of specs, terminated in whatever way is customary for T.
-  // Null to indicate a end-of-array for Prefable, when such an
-  // indicator is needed.
-  T* specs;
-};
-
-struct NativeProperties
-{
-  Prefable<JSFunctionSpec>* staticMethods;
-  jsid* staticMethodIds;
-  JSFunctionSpec* staticMethodsSpecs;
-  Prefable<JSFunctionSpec>* methods;
-  jsid* methodIds;
-  JSFunctionSpec* methodsSpecs;
-  Prefable<JSPropertySpec>* attributes;
-  jsid* attributeIds;
-  JSPropertySpec* attributeSpecs;
-  Prefable<JSPropertySpec>* unforgeableAttributes;
-  jsid* unforgeableAttributeIds;
-  JSPropertySpec* unforgeableAttributeSpecs;
-  Prefable<ConstantSpec>* constants;
-  jsid* constantIds;
-  ConstantSpec* constantSpecs;
-};
 
 /*
  * Create a DOM interface object (if constructorClass is non-null) and/or a

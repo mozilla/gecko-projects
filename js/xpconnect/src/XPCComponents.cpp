@@ -39,7 +39,7 @@ using namespace mozilla;
 using namespace js;
 using namespace xpc;
 
-using mozilla::dom::DestroyProtoOrIfaceCache;
+using mozilla::dom::DestroyProtoAndIfaceCache;
 
 /***************************************************************************/
 // stuff used by all
@@ -2989,7 +2989,7 @@ sandbox_finalize(JSFreeOp *fop, JSObject *obj)
     nsIScriptObjectPrincipal *sop =
         (nsIScriptObjectPrincipal *)xpc_GetJSPrivate(obj);
     NS_IF_RELEASE(sop);
-    DestroyProtoOrIfaceCache(obj);
+    DestroyProtoAndIfaceCache(obj);
 }
 
 static JSBool
@@ -3057,9 +3057,9 @@ xpc::SandboxProxyHandler xpc::sandboxProxyHandler;
 // A proxy handler that lets us wrap callables and invoke them with
 // the correct this object, while forwarding all other operations down
 // to them directly.
-class SandboxCallableProxyHandler : public js::DirectWrapper {
+class SandboxCallableProxyHandler : public js::Wrapper {
 public:
-    SandboxCallableProxyHandler() : js::DirectWrapper(0)
+    SandboxCallableProxyHandler() : js::Wrapper(0)
     {
     }
 
@@ -3217,6 +3217,51 @@ xpc::SandboxProxyHandler::getOwnPropertyDescriptor(JSContext *cx,
         desc->obj = nullptr;
 
     return true;
+}
+
+/*
+ * Reuse the BaseProxyHandler versions of the derived traps that are implemented
+ * in terms of the fundamental traps.
+ */
+
+bool
+xpc::SandboxProxyHandler::has(JSContext *cx, JSObject *proxy, jsid id, bool *bp)
+{
+    return BaseProxyHandler::has(cx, proxy, id, bp);
+}
+bool
+xpc::SandboxProxyHandler::hasOwn(JSContext *cx, JSObject *proxy, jsid id,
+                                 bool *bp)
+{
+    return BaseProxyHandler::hasOwn(cx, proxy, id, bp);
+}
+
+bool
+xpc::SandboxProxyHandler::get(JSContext *cx, JSObject *proxy, JSObject *receiver,
+                              jsid id, Value *vp)
+{
+    return BaseProxyHandler::get(cx, proxy, receiver, id, vp);
+}
+
+bool
+xpc::SandboxProxyHandler::set(JSContext *cx, JSObject *proxy, JSObject *receiver,
+                              jsid id, bool strict, Value *vp)
+{
+    return BaseProxyHandler::set(cx, proxy, receiver, id, strict, vp);
+}
+
+bool
+xpc::SandboxProxyHandler::keys(JSContext *cx, JSObject *proxy,
+                               AutoIdVector &props)
+{
+    return BaseProxyHandler::keys(cx, proxy, props);
+}
+
+bool
+xpc::SandboxProxyHandler::iterate(JSContext *cx, JSObject *proxy, unsigned flags,
+                                  Value *vp)
+{
+    return BaseProxyHandler::iterate(cx, proxy, flags, vp);
 }
 
 nsresult
