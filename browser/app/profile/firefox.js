@@ -734,7 +734,7 @@ pref("urlclassifier.alternate_error_page", "blocked");
 pref("urlclassifier.gethashnoise", 4);
 
 // Randomize all UrlClassifier data with a per-client key.
-pref("urlclassifier.randomizeclient", true);
+pref("urlclassifier.randomizeclient", false);
 
 // The list of tables that use the gethash request to confirm partial results.
 pref("urlclassifier.gethashtables", "goog-phish-shavar,goog-malware-shavar");
@@ -1027,7 +1027,7 @@ pref("devtools.responsiveUI.enabled", true);
 
 // Enable the Debugger
 pref("devtools.debugger.enabled", true);
-pref("devtools.debugger.chrome-enabled", false);
+pref("devtools.debugger.chrome-enabled", true);
 pref("devtools.debugger.remote-host", "localhost");
 pref("devtools.debugger.remote-autoconnect", false);
 pref("devtools.debugger.remote-connection-retries", 3);
