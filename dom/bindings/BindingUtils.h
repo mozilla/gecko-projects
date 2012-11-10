@@ -398,9 +398,13 @@ bool
 DefineUnforgeableAttributes(JSContext* cx, JSObject* obj,
                             Prefable<JSPropertySpec>* props);
 
+// If *vp is an object and *vp and obj are not in the same compartment, wrap *vp
+// into the compartment of obj (typically by replacing it with an Xray or
+// cross-compartment wrapper around the original object).
 inline bool
 MaybeWrapValue(JSContext* cx, JSObject* obj, JS::Value* vp)
 {
+  MOZ_ASSERT(js::GetObjectCompartment(obj) == js::GetContextCompartment(cx));
   if (vp->isObject() &&
       js::GetObjectCompartment(&vp->toObject()) != js::GetObjectCompartment(obj)) {
     return JS_WrapValue(cx, vp);
@@ -467,6 +471,9 @@ public:
                             sizeof(Check<T>(nullptr)) == sizeof(yes);
 };
 
+// Create a JSObject wrapping "value", for cases when "value" is a
+// non-wrapper-cached object using WebIDL bindings.  "value" must implement a
+// WrapObject() method taking a JSContext and a scope.
 template <class T>
 inline bool
 WrapNewBindingObject(JSContext* cx, JSObject* scope, T* value, JS::Value* vp)
@@ -517,15 +524,11 @@ WrapNewBindingObject(JSContext* cx, JSObject* scope, T* value, JS::Value* vp)
   return JS_WrapValue(cx, vp);
 }
 
-// Helper for smart pointers (nsAutoPtr/nsRefPtr/nsCOMPtr).
-template <template <typename> class SmartPtr, class T>
-inline bool
-WrapNewBindingObject(JSContext* cx, JSObject* scope, const SmartPtr<T>& value,
-                     JS::Value* vp)
-{
-  return WrapNewBindingObject(cx, scope, value.get(), vp);
-}
-
+// Create a JSObject wrapping "value", if there isn't one already, and store it
+// in *vp.  "value" must be a concrete class that implements a GetWrapper()
+// which can return its existing wrapper, if any, and a WrapObject() which will
+// try to create a wrapper.  Typically, this is done by having "value" inherit
+// from nsWrapperCache.
 template <class T>
 inline bool
 WrapNewBindingNonWrapperCachedObject(JSContext* cx, JSObject* scope, T* value,
@@ -753,6 +756,10 @@ bool
 XPCOMObjectToJsval(JSContext* cx, JSObject* scope, xpcObjectHelper &helper,
                    const nsIID* iid, bool allowNativeWrapper, JS::Value* rval);
 
+// Wrap an object "p" which is not using WebIDL bindings yet.  This _will_
+// actually work on WebIDL binding objects that are wrappercached, but will be
+// much slower than WrapNewBindingObject.  "cache" must either be null or be the
+// nsWrapperCache for "p".
 template<class T>
 inline bool
 WrapObject(JSContext* cx, JSObject* scope, T* p, nsWrapperCache* cache,
@@ -764,6 +771,9 @@ WrapObject(JSContext* cx, JSObject* scope, T* p, nsWrapperCache* cache,
   return XPCOMObjectToJsval(cx, scope, helper, iid, true, vp);
 }
 
+// Wrap an object "p" which is not using WebIDL bindings yet.  Just like the
+// variant that takes an nsWrapperCache above, but will try to auto-derive the
+// nsWrapperCache* from "p".
 template<class T>
 inline bool
 WrapObject(JSContext* cx, JSObject* scope, T* p, const nsIID* iid,
@@ -772,6 +782,9 @@ WrapObject(JSContext* cx, JSObject* scope, T* p, const nsIID* iid,
   return WrapObject(cx, scope, p, GetWrapperCache(p), iid, vp);
 }
 
+// Just like the WrapObject above, but without requiring you to pick which
+// interface you're wrapping as.  This should only be used for objects that have
+// classinfo, for which it doesn't matter what IID is used to wrap.
 template<class T>
 inline bool
 WrapObject(JSContext* cx, JSObject* scope, T* p, JS::Value* vp)
@@ -779,36 +792,41 @@ WrapObject(JSContext* cx, JSObject* scope, T* p, JS::Value* vp)
   return WrapObject(cx, scope, p, NULL, vp);
 }
 
+// Helper to make it possible to wrap directly out of an nsCOMPtr
 template<class T>
 inline bool
-WrapObject(JSContext* cx, JSObject* scope, nsCOMPtr<T> &p, const nsIID* iid,
+WrapObject(JSContext* cx, JSObject* scope, const nsCOMPtr<T> &p, const nsIID* iid,
            JS::Value* vp)
 {
   return WrapObject(cx, scope, p.get(), iid, vp);
 }
 
+// Helper to make it possible to wrap directly out of an nsCOMPtr
 template<class T>
 inline bool
-WrapObject(JSContext* cx, JSObject* scope, nsCOMPtr<T> &p, JS::Value* vp)
+WrapObject(JSContext* cx, JSObject* scope, const nsCOMPtr<T> &p, JS::Value* vp)
 {
   return WrapObject(cx, scope, p, NULL, vp);
 }
 
+// Helper to make it possible to wrap directly out of an nsRefPtr
 template<class T>
 inline bool
-WrapObject(JSContext* cx, JSObject* scope, nsRefPtr<T> &p, const nsIID* iid,
+WrapObject(JSContext* cx, JSObject* scope, const nsRefPtr<T> &p, const nsIID* iid,
            JS::Value* vp)
 {
   return WrapObject(cx, scope, p.get(), iid, vp);
 }
 
+// Helper to make it possible to wrap directly out of an nsRefPtr
 template<class T>
 inline bool
-WrapObject(JSContext* cx, JSObject* scope, nsRefPtr<T> &p, JS::Value* vp)
+WrapObject(JSContext* cx, JSObject* scope, const nsRefPtr<T> &p, JS::Value* vp)
 {
   return WrapObject(cx, scope, p, NULL, vp);
 }
 
+// Specialization to make it easy to use WrapObject in codegen.
 template<>
 inline bool
 WrapObject<JSObject>(JSContext* cx, JSObject* scope, JSObject* p, JS::Value* vp)
@@ -821,6 +839,26 @@ bool
 WrapCallbackInterface(JSContext *cx, JSObject *scope, nsISupports* callback,
                       JS::Value* vp);
 
+static inline bool
+WrapCallbackInterface(JSContext *cx, JSObject *scope, nsISupports& callback,
+                      JS::Value* vp)
+{
+  return WrapCallbackInterface(cx, scope, &callback, vp);
+}
+
+// Helper for smart pointers (nsAutoPtr/nsRefPtr/nsCOMPtr).
+template <template <typename> class SmartPtr, class T>
+inline bool
+WrapCallbackInterface(JSContext* cx, JSObject* scope, const SmartPtr<T>& value,
+                      JS::Value* vp)
+{
+  return WrapCallbackInterface(cx, scope, value.get(), vp);
+}
+
+// Given an object "p" that inherits from nsISupports, wrap it and return the
+// result.  Null is returned on wrapping failure.  This is somewhat similar to
+// WrapObject() above, but does NOT allow Xrays around the result, since we
+// don't want those for our parent object.
 template<typename T>
 static inline JSObject*
 WrapNativeISupportsParent(JSContext* cx, JSObject* scope, T* p,
@@ -833,6 +871,8 @@ WrapNativeISupportsParent(JSContext* cx, JSObject* scope, T* p,
          nullptr;
 }
 
+
+// Fallback for when our parent is not a WebIDL binding object.
 template<typename T, bool isISupports=IsISupports<T>::Value >
 struct WrapNativeParentFallback
 {
@@ -845,6 +885,8 @@ struct WrapNativeParentFallback
   }
 };
 
+// Fallback for when our parent is not a WebIDL binding object but _is_ an
+// nsISupports object.
 template<typename T >
 struct WrapNativeParentFallback<T, true >
 {
@@ -855,6 +897,8 @@ struct WrapNativeParentFallback<T, true >
   }
 };
 
+// Wrapping of our native parent, for cases when it's a WebIDL object (though
+// possibly preffed off).
 template<typename T, bool hasWrapObject=HasWrapObject<T>::Value >
 struct WrapNativeParentHelper
 {
@@ -877,6 +921,8 @@ struct WrapNativeParentHelper
   }
 };
 
+// Wrapping of our native parent, for cases when it's not a WebIDL object.  In
+// this case it must be nsISupports.
 template<typename T>
 struct WrapNativeParentHelper<T, false >
 {
@@ -896,6 +942,7 @@ struct WrapNativeParentHelper<T, false >
   }
 };
 
+// Wrapping of our native parent.
 template<typename T>
 static inline JSObject*
 WrapNativeParent(JSContext* cx, JSObject* scope, T* p, nsWrapperCache* cache)
@@ -907,11 +954,64 @@ WrapNativeParent(JSContext* cx, JSObject* scope, T* p, nsWrapperCache* cache)
   return WrapNativeParentHelper<T>::Wrap(cx, scope, p, cache);
 }
 
+// Wrapping of our native parent, when we don't want to explicitly pass in
+// things like the nsWrapperCache for it.
 template<typename T>
 static inline JSObject*
 WrapNativeParent(JSContext* cx, JSObject* scope, const T& p)
 {
   return WrapNativeParent(cx, scope, GetParentPointer(p), GetWrapperCache(p));
+}
+
+template<typename T>
+static inline JSObject*
+WrapCallThisObject(JSContext* cx, JSObject* scope, const T& p)
+{
+  // WrapNativeParent is a bit of a Swiss army knife that will
+  // wrap anything for us.
+  JSObject* obj = WrapNativeParent(cx, scope, p);
+  if (!obj) {
+    return nullptr;
+  }
+
+  // But it won't necessarily put things in the compartment of cx.
+  if (!JS_WrapObject(cx, &obj)) {
+    return nullptr;
+  }
+
+  return obj;
+}
+
+// Helper for calling WrapNewBindingObject with smart pointers
+// (nsAutoPtr/nsRefPtr/nsCOMPtr) or references.
+HAS_MEMBER(get)
+
+template <class T, bool isSmartPtr=HasgetMember<T>::Value>
+struct WrapNewBindingObjectHelper
+{
+  static inline bool Wrap(JSContext* cx, JSObject* scope, const T& value,
+                          JS::Value* vp)
+  {
+    return WrapNewBindingObject(cx, scope, value.get(), vp);
+  }
+};
+
+template <class T>
+struct WrapNewBindingObjectHelper<T, false>
+{
+  static inline bool Wrap(JSContext* cx, JSObject* scope, T& value,
+                          JS::Value* vp)
+  {
+    return WrapNewBindingObject(cx, scope, &value, vp);
+  }
+};
+
+template<class T>
+inline bool
+WrapNewBindingObject(JSContext* cx, JSObject* scope, T& value,
+                     JS::Value* vp)
+{
+  return WrapNewBindingObjectHelper<T>::Wrap(cx, scope, value, vp);
 }
 
 static inline bool
@@ -1009,6 +1109,19 @@ public:
     return &ptr;
   }
 
+  T* Ptr() {
+    MOZ_ASSERT(inited);
+    MOZ_ASSERT(ptr, "NonNull<T> was set to null");
+    return ptr;
+  }
+
+  // Make us work with smart-ptr helpers that expect a get()
+  T* get() const {
+    MOZ_ASSERT(inited);
+    MOZ_ASSERT(ptr);
+    return ptr;
+  }
+
 protected:
   T* ptr;
 #ifdef DEBUG
@@ -1040,6 +1153,20 @@ public:
     init(t);
   }
 
+  already_AddRefed<T> forget() {
+#ifdef DEBUG
+    inited = false;
+#endif
+    return ptr.forget();
+  }
+
+  // Make us work with smart-ptr helpers that expect a get()
+  T* get() const {
+    MOZ_ASSERT(inited);
+    MOZ_ASSERT(ptr);
+    return ptr;
+  }
+
 protected:
   template<typename U>
   void init(U t) {
@@ -1055,15 +1182,6 @@ protected:
   bool inited;
 #endif
 };
-
-// Helper for OwningNonNull
-template <class T>
-inline bool
-WrapNewBindingObject(JSContext* cx, JSObject* scope, OwningNonNull<T>& value,
-                     JS::Value* vp)
-{
-  return WrapNewBindingObject(cx, scope, &static_cast<T&>(value), vp);
-}
 
 // A struct that has the same layout as an nsDependentString but much
 // faster constructor and destructor behavior

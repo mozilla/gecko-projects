@@ -1042,6 +1042,7 @@ class JS_PUBLIC_API(AutoGCRooter) {
     /* Implemented in jsgc.cpp. */
     inline void trace(JSTracer *trc);
     static void traceAll(JSTracer *trc);
+    static void traceAllWrappers(JSTracer *trc);
 
   protected:
     AutoGCRooter * const down;
@@ -1082,7 +1083,9 @@ class JS_PUBLIC_API(AutoGCRooter) {
         NAMEVECTOR =  -26, /* js::AutoNameVector */
         HASHABLEVALUE=-27,
         IONMASM =     -28, /* js::ion::MacroAssembler */
-        IONALLOC =    -29  /* js::ion::AutoTempAllocatorRooter */
+        IONALLOC =    -29, /* js::ion::AutoTempAllocatorRooter */
+        WRAPVECTOR =  -30, /* js::AutoWrapperVector */
+        WRAPPER =     -31  /* js::AutoWrapperRooter */
     };
 
   private:
@@ -1950,10 +1953,15 @@ typedef JSBool
 /*
  * Callback used to ask the embedding for the cross compartment wrapper handler
  * that implements the desired prolicy for this kind of object in the
- * destination compartment.
+ * destination compartment. |obj| is the object to be wrapped. If |existing| is
+ * non-NULL, it will point to an existing wrapper object that should be re-used
+ * if possible. |existing| is guaranteed to be a cross-compartment wrapper with
+ * a lazily-defined prototype and the correct global. It is guaranteed not to
+ * wrap a function.
  */
 typedef JSObject *
-(* JSWrapObjectCallback)(JSContext *cx, JSObject *obj, JSObject *proto, JSObject *parent,
+(* JSWrapObjectCallback)(JSContext *cx, JSObject *existing, JSObject *obj,
+                         JSObject *proto, JSObject *parent,
                          unsigned flags);
 
 /*
