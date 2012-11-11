@@ -73,9 +73,9 @@ TabParent *TabParent::mIMETabParent = nullptr;
 
 NS_IMPL_ISUPPORTS3(TabParent, nsITabParent, nsIAuthPromptProvider, nsISecureBrowserUI)
 
-TabParent::TabParent(mozIApplication* aApp, bool aIsBrowserElement)
-  : mFrameElement(NULL)
-  , mApp(aApp)
+TabParent::TabParent(const TabContext& aContext)
+  : TabContext(aContext)
+  , mFrameElement(NULL)
   , mIMESelectionAnchor(0)
   , mIMESelectionFocus(0)
   , mIMEComposing(false)
@@ -85,7 +85,6 @@ TabParent::TabParent(mozIApplication* aApp, bool aIsBrowserElement)
   , mEventCaptureDepth(0)
   , mDimensions(0, 0)
   , mDPI(0)
-  , mIsBrowserElement(aIsBrowserElement)
   , mShown(false)
 {
 }
@@ -188,7 +187,7 @@ TabParent::AnswerCreateWindow(PBrowserParent** retval)
     }
 
     // Only non-app, non-browser processes may call CreateWindow.
-    if (GetApp() || IsBrowserElement()) {
+    if (IsBrowserOrApp()) {
         return false;
     }
 
@@ -896,17 +895,23 @@ TabParent::RecvPIndexedDBConstructor(PIndexedDBParent* aActor,
 
   // XXXbent Need to make sure we have a whitelist for chrome databases!
 
-  // Verify the appID in the origin first.
-  if (mApp && !aASCIIOrigin.EqualsLiteral("chrome")) {
-    uint32_t appId;
-    rv = mApp->GetLocalId(&appId);
-    NS_ENSURE_SUCCESS(rv, false);
+  // Verify that the child is requesting to access a database it's allowed to
+  // see.  (aASCIIOrigin here specifies a TabContext + a website origin, and
+  // we're checking that the TabContext may access it.)
+  //
+  // We have to check IsBrowserOrApp() because TabContextMayAccessOrigin will
+  // fail if we're not a browser-or-app, since aASCIIOrigin will be a plain URI,
+  // but TabContextMayAccessOrigin will construct an extended origin using
+  // app-id 0.  Note that as written below, we allow a non browser-or-app child
+  // to read any database.  That's a security hole, but we don't ship a
+  // configuration which creates non browser-or-app children, so it's not a big
+  // deal.
+  if (!aASCIIOrigin.EqualsLiteral("chrome") && IsBrowserOrApp() &&
+      !IndexedDatabaseManager::TabContextMayAccessOrigin(*this, aASCIIOrigin)) {
 
-    if (!IndexedDatabaseManager::OriginMatchesApp(aASCIIOrigin, appId)) {
-      NS_WARNING("App attempted to open databases that it does not have "
-                 "permission to access!");
-      return false;
-    }
+    NS_WARNING("App attempted to open databases that it does not have "
+               "permission to access!");
+    return false;
   }
 
   nsCOMPtr<nsINode> node = do_QueryInterface(GetOwnerElement());
@@ -1164,28 +1169,13 @@ TabParent::GetWidget() const
 }
 
 bool
-TabParent::IsForMozBrowser()
-{
-  nsCOMPtr<nsIContent> content = do_QueryInterface(mFrameElement);
-  nsCOMPtr<nsIMozBrowserFrame> browserFrame = do_QueryInterface(content);
-  if (browserFrame) {
-    bool isBrowser = false;
-    browserFrame->GetReallyIsBrowser(&isBrowser);
-    return isBrowser;
-  }
-  return false;
-}
-
-bool
 TabParent::UseAsyncPanZoom()
 {
   bool usingOffMainThreadCompositing = !!CompositorParent::CompositorLoop();
   bool asyncPanZoomEnabled =
     Preferences::GetBool("layers.async-pan-zoom.enabled", false);
-  ContentParent* cp = static_cast<ContentParent*>(Manager());
   return (usingOffMainThreadCompositing &&
-          !cp->IsForApp() && IsForMozBrowser() &&
-          asyncPanZoomEnabled);
+          IsBrowserElement() && asyncPanZoomEnabled);
 }
 
 void
