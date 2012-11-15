@@ -19,7 +19,6 @@
 #endif
 
 #include "nsAString.h"
-#include "nsIStatefulFrame.h"
 #include "nsNodeInfoManager.h"
 #include "nsIXPCScriptable.h"
 #include "nsDataHashtable.h"
@@ -91,9 +90,6 @@ class nsIWidget;
 class nsIDragSession;
 class nsIPresShell;
 class nsIXPConnectJSObjectHolder;
-#ifdef MOZ_XTF
-class nsIXTFService;
-#endif
 #ifdef IBMBIDI
 class nsIBidiKeyboard;
 #endif
@@ -459,10 +455,6 @@ public:
     return sIOService;
   }
 
-#ifdef MOZ_XTF
-  static nsIXTFService* GetXTFService();
-#endif
-
 #ifdef IBMBIDI
   static nsIBidiKeyboard* GetBidiKeyboard();
 #endif
@@ -482,7 +474,6 @@ public:
 
   static nsresult GenerateStateKey(nsIContent* aContent,
                                    const nsIDocument* aDocument,
-                                   nsIStatefulFrame::SpecialStateID aID,
                                    nsACString& aKey);
 
   /**
@@ -2223,10 +2214,6 @@ private:
   static nsINameSpaceManager *sNameSpaceManager;
 
   static nsIIOService *sIOService;
-
-#ifdef MOZ_XTF
-  static nsIXTFService *sXTFService;
-#endif
 
   static bool sImgLoaderInitialized;
   static void InitImgLoader();
