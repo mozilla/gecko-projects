@@ -50,7 +50,6 @@ JSCompartment::JSCompartment(JSRuntime *rt)
 #ifdef JSGC_GENERATIONAL
     gcStoreBuffer(&gcNursery),
 #endif
-    needsBarrier_(false),
     ionUsingBarriers_(false),
     gcScheduled(false),
     gcState(NoGC),
@@ -196,6 +195,12 @@ JSCompartment::ensureIonCompartmentExists(JSContext *cx)
 
     if (!ionCompartment_)
         return false;
+
+    if (!ionCompartment_->initialize(cx)) {
+        js_delete(ionCompartment_);
+        ionCompartment_ = NULL;
+        return false;
+    }
 
     return true;
 }
