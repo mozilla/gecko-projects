@@ -435,6 +435,16 @@ class PerThreadData : public js::PerThreadDataFriendFields
     int                 gcAssertNoGCDepth;
 #endif
 
+    /*
+     * When this flag is non-zero, any attempt to GC will be skipped. It is used
+     * to suppress GC when reporting an OOM (see js_ReportOutOfMemory) and in
+     * debugging facilities that cannot tolerate a GC and would rather OOM
+     * immediately, such as utilities exposed to GDB. Setting this flag is
+     * extremely dangerous and should only be used when in an OOM situation or
+     * in non-exposed debugging facilities.
+     */
+    int32_t             suppressGC;
+
     PerThreadData(JSRuntime *runtime);
 
     bool associatedWith(const JSRuntime *rt) { return runtime_ == rt; }
@@ -1001,13 +1011,6 @@ struct JSRuntime : js::RuntimeFriendFields
     size_t              noGCOrAllocationCheck;
 #endif
 
-    /*
-     * To ensure that cx->malloc does not cause a GC, we set this flag during
-     * OOM reporting (in js_ReportOutOfMemory). If a GC is requested while
-     * reporting the OOM, we ignore it.
-     */
-    int32_t             inOOMReport;
-
     bool                jitHardening;
 
     // If Ion code is on the stack, and has called into C++, this will be
@@ -1176,13 +1179,32 @@ struct JSRuntime : js::RuntimeFriendFields
     size_t sizeOfExplicitNonHeap();
 
   private:
+
     JSUseHelperThreads useHelperThreads_;
+    int32_t requestedHelperThreadCount;
+
   public:
+
     bool useHelperThreads() const {
 #ifdef JS_THREADSAFE
         return useHelperThreads_ == JS_USE_HELPER_THREADS;
 #else
         return false;
+#endif
+    }
+
+    void requestHelperThreadCount(size_t count) {
+        requestedHelperThreadCount = count;
+    }
+
+    /* Number of helper threads which should be created for this runtime. */
+    size_t helperThreadCount() const {
+#ifdef JS_THREADSAFE
+        if (requestedHelperThreadCount < 0)
+            return js::GetCPUCount() - 1;
+        return requestedHelperThreadCount;
+#else
+        return 0;
 #endif
     }
 };
