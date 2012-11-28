@@ -224,6 +224,7 @@
 #include "nsSandboxFlags.h"
 #include "TimeChangeObserver.h"
 #include "nsPISocketTransportService.h"
+#include "mozilla/dom/AudioContext.h"
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -731,7 +732,10 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
   NS_ASSERTION(sWindowsById, "Windows hash table must be created!");
   NS_ASSERTION(!sWindowsById->Get(mWindowID),
                "This window shouldn't be in the hash table yet!");
-  sWindowsById->Put(mWindowID, this);
+  // We seem to see crashes in release builds because of null |sWindowsById|.
+  if (sWindowsById) {
+    sWindowsById->Put(mWindowID, this);
+  }
 
   mEventTargetObjects.Init();
 }
@@ -1120,6 +1124,11 @@ nsGlobalWindow::FreeInnerObjects()
   NotifyWindowIDDestroyed("inner-window-destroyed");
 
   CleanupCachedXBLHandlers(this);
+
+  for (uint32_t i = 0; i < mAudioContexts.Length(); ++i) {
+    mAudioContexts[i]->Shutdown();
+  }
+  mAudioContexts.Clear();
 
 #ifdef DEBUG
   nsCycleCollector_DEBUG_shouldBeFreed(static_cast<nsIScriptGlobalObject*>(this));
@@ -2798,6 +2807,12 @@ nsPIDOMWindow::MaybeCreateDoc()
     // has already called SetNewDocument().
     nsCOMPtr<nsIDocument> document = do_GetInterface(docShell);
   }
+}
+
+void
+nsPIDOMWindow::AddAudioContext(AudioContext* aAudioContext)
+{
+  mAudioContexts.AppendElement(aAudioContext);
 }
 
 NS_IMETHODIMP
