@@ -17,6 +17,7 @@ from tempfile import (
 
 from mozbuild.mozconfig import (
     MozconfigFindException,
+    MozconfigLoadException,
     MozconfigLoader,
 )
 
@@ -273,4 +274,41 @@ class TestMozconfigLoader(unittest.TestCase):
                 'multi': 'foo\nbar',
                 'single': '1'
             })
+
+    def test_read_topsrcdir_defined(self):
+        """Ensure $topsrcdir references work as expected."""
+        with NamedTemporaryFile(mode='w') as mozconfig:
+            mozconfig.write('TEST=$topsrcdir')
+            mozconfig.flush()
+
+            loader = self.get_loader()
+            result = loader.read_mozconfig(mozconfig.name)
+
+            self.assertEqual(result['env']['added']['TEST'], loader.topsrcdir)
+
+    def test_read_empty_variable_value(self):
+        """Ensure empty variable values are parsed properly."""
+        with NamedTemporaryFile(mode='w') as mozconfig:
+            mozconfig.write('EMPTY=\n')
+            mozconfig.flush()
+
+            result = self.get_loader().read_mozconfig(mozconfig.name)
+
+            self.assertIn('EMPTY', result['env']['added'])
+            self.assertEqual(result['env']['added']['EMPTY'], '')
+
+    def test_read_load_exception(self):
+        """Ensure non-0 exit codes in mozconfigs are handled properly."""
+        with NamedTemporaryFile(mode='w') as mozconfig:
+            mozconfig.write('echo "hello world"\n')
+            mozconfig.write('exit 1\n')
+            mozconfig.flush()
+
+            with self.assertRaises(MozconfigLoadException) as e:
+                self.get_loader().read_mozconfig(mozconfig.name)
+
+            self.assertTrue(e.exception.message.startswith(
+                'Evaluation of your mozconfig exited with an error'))
+            self.assertEquals(e.exception.path, mozconfig.name)
+            self.assertEquals(e.exception.output, ['hello world'])
 
