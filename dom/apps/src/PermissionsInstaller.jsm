@@ -47,7 +47,7 @@ this.PermissionsTable =  { geolocation: {
                            },
                            camera: {
                              app: DENY_ACTION,
-                             privileged: PROMPT_ACTION,
+                             privileged: DENY_ACTION,
                              certified: ALLOW_ACTION
                            },
                            alarms: {
@@ -235,6 +235,11 @@ this.PermissionsTable =  { geolocation: {
                              channels: ["normal", "content", "notification",
                                "alarm", "telephony", "ringer", "publicnotification"]
                            },
+                           "open-remote-window": {
+                             app: DENY_ACTION,
+                             privileged: DENY_ACTION,
+                             certified: ALLOW_ACTION
+                           },
                          };
 
 /**
@@ -358,6 +363,7 @@ for (let permName in PermissionsTable) {
     AllPossiblePermissions =
       AllPossiblePermissions.concat(expandPermissions(permName, READWRITE));
   } else if (PermissionsTable[permName].channels) {
+    AllPossiblePermissions =
       AllPossiblePermissions.concat(expandPermissions(permName, null, PermissionsTable[permName].channels));
   } else {
     AllPossiblePermissions =
