@@ -110,7 +110,6 @@ nsNSSCertificateDB::FindCertByDBKey(const char *aDBkey, nsISupports *aToken,
 {
   NS_ENSURE_ARG_POINTER(aDBkey);
   NS_ENSURE_ARG(aDBkey[0]);
-  NS_ENSURE_ARG_POINTER(aToken);
   NS_ENSURE_ARG_POINTER(_cert);
   *_cert = nullptr;
 
