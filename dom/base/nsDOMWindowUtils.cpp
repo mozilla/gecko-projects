@@ -378,7 +378,7 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
 
   nsIFrame* rootFrame = presShell->FrameManager()->GetRootFrame();
   if (rootFrame) {
-    rootFrame->InvalidateFrame();
+    rootFrame->SchedulePaint();
 
     // If we are hiding something that is a display root then send empty paint
     // transaction in order to release retained layers because it won't get
@@ -647,7 +647,7 @@ nsDOMWindowUtils::SendMouseEventCommon(const nsAString& aType,
   event.inputSource = aInputSourceArg;
   event.clickCount = aClickCount;
   event.time = PR_IntervalNow();
-  event.flags |= NS_EVENT_FLAG_SYNTHETIC_TEST_EVENT;
+  event.mFlags.mIsSynthesizedForTests = true;
 
   nsPresContext* presContext = GetPresContext();
   if (!presContext)
@@ -935,7 +935,7 @@ nsDOMWindowUtils::SendKeyEvent(const nsAString& aType,
   event.time = PR_IntervalNow();
 
   if (aAdditionalFlags & KEY_FLAG_PREVENT_DEFAULT) {
-    event.flags |= NS_EVENT_FLAG_NO_DEFAULT;
+    event.mFlags.mDefaultPrevented = true;
   }
 
   nsEventStatus status;
@@ -1654,7 +1654,7 @@ nsDOMWindowUtils::SendCompositionEvent(const nsAString& aType,
     compositionEvent.data = aData;
   }
 
-  compositionEvent.flags |= NS_EVENT_FLAG_SYNTHETIC_TEST_EVENT;
+  compositionEvent.mFlags.mIsSynthesizedForTests = true;
 
   nsEventStatus status;
   nsresult rv = widget->DispatchEvent(&compositionEvent, status);
@@ -1733,7 +1733,7 @@ nsDOMWindowUtils::SendTextEvent(const nsAString& aCompositionString,
   textEvent.rangeCount = textRanges.Length();
   textEvent.rangeArray = textRanges.Elements();
 
-  textEvent.flags |= NS_EVENT_FLAG_SYNTHETIC_TEST_EVENT;
+  textEvent.mFlags.mIsSynthesizedForTests = true;
 
   nsEventStatus status;
   nsresult rv = widget->DispatchEvent(&textEvent, status);

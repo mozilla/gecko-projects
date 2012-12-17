@@ -10,6 +10,9 @@
 /*
  * JS lexical scanner interface.
  */
+
+#include "mozilla/DebugOnly.h"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -420,9 +423,9 @@ struct CompileError {
     JSContext *cx;
     JSErrorReport report;
     char *message;
-    bool hasCharArgs;
+    ErrorArgumentsType argumentsType;
     CompileError(JSContext *cx)
-     : cx(cx), message(NULL), hasCharArgs(false)
+      : cx(cx), message(NULL), argumentsType(ArgumentsAreUnicode)
     {
         PodZero(&report);
     }

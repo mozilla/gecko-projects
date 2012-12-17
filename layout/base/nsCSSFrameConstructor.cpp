@@ -9,7 +9,7 @@
  * tree and updating of that tree in response to dynamic changes
  */
 
-#include "mozilla/Util.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/Likely.h"
 #include "mozilla/LinkedList.h"
 
@@ -7744,7 +7744,8 @@ DoApplyRenderingChangeToTree(nsIFrame* aFrame,
         if (aChange & nsChangeHint_UpdateEffects) {
           needInvalidatingPaint = true;
           // Invalidate and update our area:
-          nsSVGUtils::InvalidateAndScheduleReflowSVG(aFrame);
+          nsSVGUtils::InvalidateBounds(aFrame, false);
+          nsSVGUtils::ScheduleReflowSVG(aFrame);
         } else {
           needInvalidatingPaint = true;
           // Just invalidate our area:
@@ -9757,7 +9758,7 @@ nsCSSFrameConstructor::CreateNeededTablePseudos(nsFrameConstructorState& aState,
           eTypeColGroup : eTypeRowGroup;
         break;
       default:
-        NS_NOTREACHED("Colgroups should be suppresing non-col child items");
+        MOZ_NOT_REACHED("Colgroups should be suppresing non-col child items");
         break;
     }
 
