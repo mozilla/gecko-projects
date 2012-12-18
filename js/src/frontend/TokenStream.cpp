@@ -612,14 +612,13 @@ TokenStream::reportWarning(unsigned errorNumber, ...)
 }
 
 bool
-TokenStream::reportStrictWarning(unsigned errorNumber, ...)
+TokenStream::reportStrictWarningErrorNumberVA(ParseNode *pn, bool strictMode, unsigned errorNumber,
+                                              va_list args)
 {
-    va_list args;
-    va_start(args, errorNumber);
-    bool result = reportCompileErrorNumberVA(NULL, JSREPORT_STRICT | JSREPORT_WARNING,
-                                             errorNumber, args);
-    va_end(args);
-    return result;
+    if (!strictMode && !cx->hasStrictOption())
+        return true;
+
+    return reportCompileErrorNumberVA(NULL, JSREPORT_STRICT | JSREPORT_WARNING, errorNumber, args);
 }
 
 #if JS_HAS_XML_SUPPORT

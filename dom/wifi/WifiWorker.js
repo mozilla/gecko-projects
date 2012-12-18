@@ -925,6 +925,12 @@ var WifiManager = (function() {
       }
       return true;
     }
+    if (eventData.indexOf("CTRL-EVENT-EAP-FAILURE") === 0) {
+      if (event.indexOf("EAP authentication failed") !== -1) {
+        notify("passwordmaybeincorrect");
+      }
+      return true;
+    }
     if (eventData.indexOf("CTRL-EVENT-CONNECTED") === 0) {
       // Format: CTRL-EVENT-CONNECTED - Connection to 00:1e:58:ec:d5:6d completed (reauth) [id=1 id_str=]
       var bssid = event.split(" ")[4];
@@ -2030,6 +2036,10 @@ function WifiWorker() {
               bssid = match[1],
               signalLevel = match[3],
               flags = match[4];
+
+          // Skip ad-hoc networks which aren't supported (bug 811635).
+          if (flags.indexOf("[IBSS]") >= 0)
+            continue;
 
           // If this is the first time that we've seen this SSID in the scan
           // results, add it to the list along with any other information.
