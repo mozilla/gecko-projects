@@ -572,7 +572,7 @@ PeerConnectionImpl::NotifyDataChannel(mozilla::DataChannel *aChannel)
    nsCOMPtr<nsIDOMDataChannel> domchannel;
    nsresult rv = NS_NewDOMDataChannel(aChannel, mWindow,
                                       getter_AddRefs(domchannel));
-  NS_ENSURE_SUCCESS(rv,);
+  NS_ENSURE_SUCCESS_VOID(rv);
 
   RUN_ON_THREAD(mThread,
                 WrapRunnableNM(NotifyDataChannel_m,
@@ -914,7 +914,7 @@ NS_IMETHODIMP
 PeerConnectionImpl::Close(bool aIsSynchronous)
 {
   CSFLogDebugS(logTag, __FUNCTION__);
-  PC_AUTO_ENTER_API_CALL(false);
+  PC_AUTO_ENTER_API_CALL_NO_CHECK();
 
   return CloseInt(aIsSynchronous);
 }
