@@ -56,7 +56,7 @@
 #include "nsRange.h"
 #include "nsIDOMText.h"
 #include "nsIDOMComment.h"
-#include "nsDOMDocumentType.h"
+#include "DocumentType.h"
 #include "nsNodeIterator.h"
 #include "nsTreeWalker.h"
 
@@ -184,6 +184,9 @@
 #include "nsIAppsService.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "nsFrame.h" 
+#include "nsDOMCaretPosition.h"
+#include "nsIDOMHTMLTextAreaElement.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -4348,14 +4351,14 @@ nsDocument::StyleRuleRemoved(nsIStyleSheet* aStyleSheet,
 //
 // nsIDOMDocument interface
 //
-nsDOMDocumentType*
+DocumentType*
 nsIDocument::GetDoctype() const
 {
   for (nsIContent* child = GetFirstChild();
        child;
        child = child->GetNextSibling()) {
     if (child->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
-      return static_cast<nsDOMDocumentType*>(child);
+      return static_cast<DocumentType*>(child);
     }
   }
   return nullptr;
@@ -8818,6 +8821,64 @@ ResetFullScreen(nsIDocument* aDocument, void* aData)
     aDocument->EnumerateSubDocuments(ResetFullScreen, aData);
   }
   return true;
+}
+
+NS_IMETHODIMP
+nsDocument::CaretPositionFromPoint(float aX, float aY, nsISupports** aCaretPos)
+{
+  NS_ENSURE_ARG_POINTER(aCaretPos);
+  *aCaretPos = nullptr;
+
+  nscoord x = nsPresContext::CSSPixelsToAppUnits(aX);
+  nscoord y = nsPresContext::CSSPixelsToAppUnits(aY);
+  nsPoint pt(x, y);
+
+  nsIPresShell *ps = GetShell();
+  if (!ps) {
+    return NS_OK;
+  }
+
+  nsIFrame *rootFrame = ps->GetRootFrame();
+
+  // XUL docs, unlike HTML, have no frame tree until everything's done loading
+  if (!rootFrame) {
+    return NS_OK; // return null to premature XUL callers as a reminder to wait
+  }
+
+  nsIFrame *ptFrame = nsLayoutUtils::GetFrameForPoint(rootFrame, pt, true,
+                                                      false);
+  if (!ptFrame) {
+    return NS_OK;
+  }
+
+  // GetContentOffsetsFromPoint requires frame-relative coordinates, so we need
+  // to adjust to frame-relative coordinates before we can perform this call.
+  // It should also not take into account the padding of the frame.
+  nsPoint adjustedPoint = pt - ptFrame->GetOffsetTo(rootFrame);
+
+  nsFrame::ContentOffsets offsets =
+    ptFrame->GetContentOffsetsFromPoint(adjustedPoint);
+
+  nsCOMPtr<nsIContent> node = offsets.content;
+  uint32_t offset = offsets.offset;
+  if (node && node->IsInNativeAnonymousSubtree()) {
+    nsIContent* nonanon = node->FindFirstNonChromeOnlyAccessContent();
+    nsCOMPtr<nsIDOMHTMLInputElement> input = do_QueryInterface(nonanon);
+    nsCOMPtr<nsIDOMHTMLTextAreaElement> textArea = do_QueryInterface(nonanon);
+    bool isText;
+    if (textArea || (input &&
+                     NS_SUCCEEDED(input->MozIsTextField(false, &isText)) &&
+                     isText)) {
+      node = nonanon;
+    } else {
+      node = nullptr;
+      offset = 0;
+    }
+  }
+
+  *aCaretPos = new nsDOMCaretPosition(node, offset);
+  NS_ADDREF(*aCaretPos);
+  return NS_OK;
 }
 
 /* static */

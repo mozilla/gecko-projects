@@ -20,6 +20,7 @@ webidl_files = \
   BiquadFilterNode.webidl \
   Blob.webidl \
   CanvasRenderingContext2D.webidl \
+  CaretPosition.webidl \
   ClientRectList.webidl \
   CSS.webidl \
   CSSPrimitiveValue.webidl \
@@ -29,6 +30,7 @@ webidl_files = \
   DelayNode.webidl \
   Document.webidl \
   DocumentFragment.webidl \
+  DocumentType.webidl \
   DOMImplementation.webidl \
   DOMParser.webidl \
   DOMSettableTokenList.webidl \
