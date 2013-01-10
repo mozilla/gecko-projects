@@ -98,6 +98,7 @@ webidl_files = \
   Rect.webidl \
   RGBColor.webidl \
   Screen.webidl \
+  SVGAElement.webidl \
   SVGAltGlyphElement.webidl \
   SVGAngle.webidl \
   SVGAnimatedAngle.webidl \
@@ -140,6 +141,7 @@ webidl_files = \
   SVGSetElement.webidl \
   SVGStopElement.webidl \
   SVGStyleElement.webidl \
+  SVGSVGElement.webidl \
   SVGSwitchElement.webidl \
   SVGTests.webidl \
   SVGTextContentElement.webidl \

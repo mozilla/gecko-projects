@@ -224,6 +224,9 @@ this.DOMApplicationRegistry = {
     let baseDir;
     try {
       baseDir = FileUtils.getDir("coreAppsDir", ["webapps", aId], false);
+      if (!baseDir.exists()) {
+        return;
+      }
     } catch(e) {
       // In ENG builds, we don't have apps in coreAppsDir.
       return;
@@ -1381,8 +1384,7 @@ this.DOMApplicationRegistry = {
     // manifest doesn't ask for those.
     function checkAppStatus(aManifest) {
       let manifestStatus = aManifest.type || "web";
-      return (Services.prefs.getBoolPref("dom.mozApps.dev_mode") ||
-              manifestStatus === "web");
+      return manifestStatus === "web";
     }
 
     let app = aData.app;
@@ -1549,11 +1551,6 @@ this.DOMApplicationRegistry = {
 
     let appObject = AppsUtils.cloneAppObject(app);
     appObject.appStatus = app.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
-    // For hosted apps, allow application status override in dev mode.
-    if (!aData.isPackage &&
-        Services.prefs.getBoolPref("dom.mozApps.dev_mode")) {
-      appObject.appStatus = AppsUtils.getAppManifestStatus(app.manifest);
-    }
 
     appObject.installTime = app.installTime = Date.now();
     appObject.lastUpdateCheck = app.lastUpdateCheck = Date.now();
@@ -2011,10 +2008,8 @@ this.DOMApplicationRegistry = {
                 throw "INSTALL_FROM_DENIED";
               }
 
-              let isDevMode = Services.prefs.getBoolPref("dom.mozApps.dev_mode");
-              let maxStatus = isDevMode ? Ci.nsIPrincipal.APP_STATUS_CERTIFIED
-                            : isSigned  ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
-                                        : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
+              let maxStatus = isSigned ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
+                                       : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
               if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
                 throw "INVALID_SECURITY_LEVEL";
