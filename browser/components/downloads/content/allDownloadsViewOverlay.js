@@ -95,14 +95,17 @@ DownloadElementShell.prototype = {
    * without a dataItem are inactive, thus their UI is not updated.  They must
    * be activated when entering the visible area.  Session downloads are
    * always active since they always have a dataItem.
+   *
+   * @return whether the element was updated.
    */
   ensureActive: function DES_ensureActive() {
     if (this._active)
-      return;
+      return false;
     this._active = true;
     this._element.setAttribute("active", true);
     this._updateStatusUI();
     this._fetchTargetFileInfo();
+    return true;
   },
   get active() !!this._active,
 
@@ -112,23 +115,25 @@ DownloadElementShell.prototype = {
 
   set dataItem(aValue) {
     this._dataItem = aValue;
+    let shouldUpdate = false;
     if (this._dataItem) {
-      this._active = true;
-      this._wasDone = this._dataItem.done;
-      this._wasInProgress = this._dataItem.inProgress;
       this._targetFileInfoFetched = false;
-      this._fetchTargetFileInfo();
+      // The dataItem can be replaced, in such a case the shell is already
+      // active but must be updated regardless.
+      shouldUpdate = !this.ensureActive();
     }
     else if (this._placesNode) {
-      this._wasInProgress = false;
-      this._wasDone = this.getDownloadState(true) == nsIDM.DOWNLOAD_FINISHED;
       this._targetFileInfoFetched = false;
-      if (this.active)
-        this._fetchTargetFileInfo();
+      shouldUpdate = this.active;
+    }
+    else {
+      throw new Error("Should always have either a dataItem or a placesNode");
     }
 
-    it (this.active)
+    if (shouldUpdate) {
+      this._fetchTargetFileInfo();
       this._updateStatusUI();
+    }
     return aValue;
   },
 
@@ -145,9 +150,9 @@ DownloadElementShell.prototype = {
 
       // We don't need to update the UI if we had a data item, because
       // the places information isn't used in this case.
-      if (!this._dataItem && this._placesNode) {
-        this._wasInProgress = false;
-        this._wasDone = this.getDownloadState(true) == nsIDM.DOWNLOAD_FINISHED;
+      if (!this._dataItem) {
+        if (!this._placesNode)
+          throw new Error("Should always have either a dataItem or a placesNode");
         this._targetFileInfoFetched = false;
         if (this.active) {
           this._updateStatusUI();
@@ -471,8 +476,9 @@ DownloadElementShell.prototype = {
   },
 
   /* DownloadView */
-  onStateChange: function DES_onStateChange() {
-    if (!this._wasDone && this._dataItem.done) {
+  onStateChange: function DES_onStateChange(aOldState) {
+    if (aOldState != nsIDM.DOWNLOAD_FINISHED &&
+        aOldState != this.dataItem.state) {
       // See comment in DVI_onStateChange in downloads.js (the panel-view)
       this._element.setAttribute("image", this._icon + "&state=normal");
 
@@ -480,16 +486,6 @@ DownloadElementShell.prototype = {
       if (this.active)
         this._fetchTargetFileInfo();
     }
-
-    this._wasDone = this._dataItem.done;
-
-    // Update the end time using the current time if required.
-    if (this._wasInProgress && !this._dataItem.inProgress) {
-      this._endTime = Date.now();
-    }
-
-    this._wasDone = this._dataItem.done;
-    this._wasInProgress = this._dataItem.inProgress;
 
     this._updateDownloadStatusUI();
     if (this._element.selected)
@@ -919,7 +915,6 @@ DownloadsPlacesView.prototype = {
       shells.delete(shell);
       if (shells.size == 0)
         this._downloadElementsShellsForURI.delete(aDataItem.uri);
-      return;
     }
     else {
       shell.dataItem = null;
@@ -1062,8 +1057,20 @@ DownloadsPlacesView.prototype = {
       }
     }
 
-    this._richlistbox.appendChild(elementsToAppendFragment);
+    this._appendDownloadsFragment(elementsToAppendFragment);
     this._ensureVisibleElementsAreActive();
+  },
+
+  _appendDownloadsFragment: function DPV__appendDownloadsFragment(aDOMFragment) {
+    // Workaround multiple reflows hang by removing the richlistbox
+    // and adding it back when we're done.
+    let parentNode = this._richlistbox.parentNode;
+    let nextSibling = this._richlistbox.nextSibling;
+    this._richlistbox.controllers.removeController(this);
+    parentNode.removeChild(this._richlistbox);
+    this._richlistbox.appendChild(aDOMFragment);
+    parentNode.insertBefore(this._richlistbox, nextSibling);
+    this._richlistbox.controllers.appendController(this);
   },
 
   nodeInserted: function DPV_nodeInserted(aParent, aPlacesNode) {
