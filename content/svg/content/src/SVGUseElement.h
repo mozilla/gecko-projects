@@ -3,21 +3,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef __NS_SVGUSEELEMENT_H__
-#define __NS_SVGUSEELEMENT_H__
+#ifndef mozilla_dom_SVGUseElement_h
+#define mozilla_dom_SVGUseElement_h
 
 #include "mozilla/dom/FromParser.h"
 #include "nsIDOMSVGURIReference.h"
 #include "nsIDOMSVGUseElement.h"
 #include "nsReferencedElement.h"
 #include "nsStubMutationObserver.h"
-#include "SVGGraphicsElement.h"
+#include "mozilla/dom/SVGGraphicsElement.h"
 #include "nsSVGLength2.h"
 #include "nsSVGString.h"
 #include "nsTArray.h"
 
 class nsIContent;
 class nsINodeInfo;
+class nsSVGUseFrame;
 
 #define NS_SVG_USE_ELEMENT_IMPL_CID \
 { 0x55fb86fe, 0xd81f, 0x4ae4, \
@@ -27,28 +28,34 @@ nsresult
 NS_NewSVGSVGElement(nsIContent **aResult,
                     already_AddRefed<nsINodeInfo> aNodeInfo,
                     mozilla::dom::FromParser aFromParser);
+nsresult NS_NewSVGUseElement(nsIContent **aResult,
+                             already_AddRefed<nsINodeInfo> aNodeInfo);
 
-typedef mozilla::dom::SVGGraphicsElement nsSVGUseElementBase;
+namespace mozilla {
+namespace dom {
 
-class nsSVGUseElement : public nsSVGUseElementBase,
-                        public nsIDOMSVGUseElement,
-                        public nsIDOMSVGURIReference,
-                        public nsStubMutationObserver
+typedef SVGGraphicsElement SVGUseElementBase;
+
+class SVGUseElement MOZ_FINAL : public SVGUseElementBase,
+                                public nsIDOMSVGUseElement,
+                                public nsIDOMSVGURIReference,
+                                public nsStubMutationObserver
 {
-  friend class nsSVGUseFrame;
+  friend class ::nsSVGUseFrame;
 protected:
-  friend nsresult NS_NewSVGUseElement(nsIContent **aResult,
-                                      already_AddRefed<nsINodeInfo> aNodeInfo);
-  nsSVGUseElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual ~nsSVGUseElement();
-  
+  friend nsresult (::NS_NewSVGUseElement(nsIContent **aResult,
+                                         already_AddRefed<nsINodeInfo> aNodeInfo));
+  SVGUseElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  virtual ~SVGUseElement();
+  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope, bool *triedToWrap) MOZ_OVERRIDE;
+
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_SVG_USE_ELEMENT_IMPL_CID)
 
   // interfaces:
-  
+
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsSVGUseElement, nsSVGUseElementBase)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SVGUseElement, SVGUseElementBase)
   NS_DECL_NSIDOMSVGUSEELEMENT
   NS_DECL_NSIDOMSVGURIREFERENCE
 
@@ -62,7 +69,7 @@ public:
   // xxx I wish we could use virtual inheritance
   NS_FORWARD_NSIDOMNODE_TO_NSINODE
   NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGUseElementBase::)
+  NS_FORWARD_NSIDOMSVGELEMENT(SVGUseElementBase::)
 
   // for nsSVGUseFrame's nsIAnonymousContentCreator implementation.
   nsIContent* CreateAnonymousContent();
@@ -81,10 +88,18 @@ public:
   virtual nsXPCClassInfo* GetClassInfo();
 
   virtual nsIDOMNode* AsDOMNode() { return this; }
+
+  // WebIDL
+  already_AddRefed<nsIDOMSVGAnimatedString> Href();
+  already_AddRefed<nsIDOMSVGAnimatedLength> X();
+  already_AddRefed<nsIDOMSVGAnimatedLength> Y();
+  already_AddRefed<nsIDOMSVGAnimatedLength> Width();
+  already_AddRefed<nsIDOMSVGAnimatedLength> Height();
+
 protected:
   class SourceReference : public nsReferencedElement {
   public:
-    SourceReference(nsSVGUseElement* aContainer) : mContainer(aContainer) {}
+    SourceReference(SVGUseElement* aContainer) : mContainer(aContainer) {}
   protected:
     virtual void ElementChanged(Element* aFrom, Element* aTo) {
       nsReferencedElement::ElementChanged(aFrom, aTo);
@@ -94,7 +109,7 @@ protected:
       mContainer->TriggerReclone();
     }
   private:
-    nsSVGUseElement* mContainer;
+    SVGUseElement* mContainer;
   };
 
   virtual LengthAttributesInfo GetLengthInfo();
@@ -111,7 +126,7 @@ protected:
   void TriggerReclone();
   void UnlinkSource();
 
-  enum { X, Y, WIDTH, HEIGHT };
+  enum { ATTR_X, ATTR_Y, ATTR_WIDTH, ATTR_HEIGHT };
   nsSVGLength2 mLengthAttributes[4];
   static LengthInfo sLengthInfo[4];
 
@@ -124,6 +139,9 @@ protected:
   SourceReference      mSource;   // observed element
 };
 
-NS_DEFINE_STATIC_IID_ACCESSOR(nsSVGUseElement, NS_SVG_USE_ELEMENT_IMPL_CID)
+NS_DEFINE_STATIC_IID_ACCESSOR(SVGUseElement, NS_SVG_USE_ELEMENT_IMPL_CID)
 
-#endif
+} // namespace dom
+} // namespace mozilla
+
+#endif // mozilla_dom_SVGUseElement_h

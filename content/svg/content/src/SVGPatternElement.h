@@ -3,8 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef __NS_SVGPATTERNELEMENT_H__
-#define __NS_SVGPATTERNELEMENT_H__
+#ifndef mozilla_dom_SVGPatternElement_h
+#define mozilla_dom_SVGPatternElement_h
 
 #include "nsIDOMSVGFitToViewBox.h"
 #include "nsIDOMSVGPatternElement.h"
@@ -18,22 +18,31 @@
 #include "SVGAnimatedPreserveAspectRatio.h"
 #include "SVGAnimatedTransformList.h"
 
-//--------------------- Patterns ------------------------
+class nsSVGPatternFrame;
 
-typedef nsSVGElement nsSVGPatternElementBase;
+nsresult NS_NewSVGPatternElement(nsIContent **aResult,
+                                 already_AddRefed<nsINodeInfo> aNodeInfo);
 
-class nsSVGPatternElement : public nsSVGPatternElementBase,
-                            public nsIDOMSVGPatternElement,
-                            public nsIDOMSVGURIReference,
-                            public nsIDOMSVGFitToViewBox,
-                            public nsIDOMSVGUnitTypes
+namespace mozilla {
+class DOMSVGAnimatedTransformList;
+
+namespace dom {
+
+typedef nsSVGElement SVGPatternElementBase;
+
+class SVGPatternElement MOZ_FINAL : public SVGPatternElementBase,
+                                    public nsIDOMSVGPatternElement,
+                                    public nsIDOMSVGURIReference,
+                                    public nsIDOMSVGFitToViewBox,
+                                    public nsIDOMSVGUnitTypes
 {
-  friend class nsSVGPatternFrame;
+  friend class ::nsSVGPatternFrame;
 
 protected:
-  friend nsresult NS_NewSVGPatternElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo> aNodeInfo);
-  nsSVGPatternElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  friend nsresult (::NS_NewSVGPatternElement(nsIContent **aResult,
+                                             already_AddRefed<nsINodeInfo> aNodeInfo));
+  SVGPatternElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope, bool *triedToWrap) MOZ_OVERRIDE;
 
 public:
   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
@@ -71,6 +80,19 @@ public:
   virtual nsIAtom* GetTransformListAttrName() const {
     return nsGkAtoms::patternTransform;
   }
+
+  // WebIDL
+  already_AddRefed<nsIDOMSVGAnimatedRect> ViewBox();
+  already_AddRefed<DOMSVGAnimatedPreserveAspectRatio> PreserveAspectRatio();
+  already_AddRefed<nsIDOMSVGAnimatedEnumeration> PatternUnits();
+  already_AddRefed<nsIDOMSVGAnimatedEnumeration> PatternContentUnits();
+  already_AddRefed<DOMSVGAnimatedTransformList> PatternTransform();
+  already_AddRefed<nsIDOMSVGAnimatedLength> X();
+  already_AddRefed<nsIDOMSVGAnimatedLength> Y();
+  already_AddRefed<nsIDOMSVGAnimatedLength> Width();
+  already_AddRefed<nsIDOMSVGAnimatedLength> Height();
+  already_AddRefed<nsIDOMSVGAnimatedString> Href();
+
 protected:
 
   virtual LengthAttributesInfo GetLengthInfo();
@@ -80,7 +102,7 @@ protected:
   virtual StringAttributesInfo GetStringInfo();
 
   // nsIDOMSVGPatternElement values
-  enum { X, Y, WIDTH, HEIGHT };
+  enum { ATTR_X, ATTR_Y, ATTR_WIDTH, ATTR_HEIGHT };
   nsSVGLength2 mLengthAttributes[4];
   static LengthInfo sLengthInfo[4];
 
@@ -100,4 +122,7 @@ protected:
   SVGAnimatedPreserveAspectRatio mPreserveAspectRatio;
 };
 
-#endif
+} // namespace dom
+} // namespace mozilla
+
+#endif // mozilla_dom_SVGPatternElement_h
