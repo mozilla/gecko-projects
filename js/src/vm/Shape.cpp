@@ -22,16 +22,17 @@
 #include "jslock.h"
 #include "jsnum.h"
 #include "jsobj.h"
-#include "jsscope.h"
 #include "jsstr.h"
 
 #include "js/HashTable.h"
 #include "js/MemoryMetrics.h"
+#include "vm/Shape.h"
 
 #include "jsatominlines.h"
 #include "jscntxtinlines.h"
 #include "jsobjinlines.h"
-#include "jsscopeinlines.h"
+
+#include "vm/Shape-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -81,7 +82,7 @@ Shape::makeOwnBaseShape(JSContext *cx)
     JS_ASSERT(!base()->isOwned());
     assertSameCompartmentDebugOnly(cx, compartment());
 
-    UnrootedBaseShape nbase = js_NewGCBaseShape<DONT_ALLOW_GC>(cx);
+    UnrootedBaseShape nbase = js_NewGCBaseShape<NoGC>(cx);
     if (!nbase)
         return false;
 
@@ -1140,7 +1141,7 @@ BaseShape::getUnowned(JSContext *cx, const StackBaseShape &base)
 
     StackBaseShape::AutoRooter root(cx, &base);
 
-    UnrootedBaseShape nbase_ = js_NewGCBaseShape<ALLOW_GC>(cx);
+    UnrootedBaseShape nbase_ = js_NewGCBaseShape<CanGC>(cx);
     if (!nbase_)
         return NULL;
 

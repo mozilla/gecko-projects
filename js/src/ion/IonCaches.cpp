@@ -7,8 +7,6 @@
 
 #include "mozilla/DebugOnly.h"
 
-#include "jsscope.h"
-
 #include "CodeGenerator.h"
 #include "Ion.h"
 #include "IonCaches.h"
@@ -16,9 +14,10 @@
 #include "IonSpewer.h"
 #include "VMFunctions.h"
 
+#include "vm/Shape.h"
+
 #include "jsinterpinlines.h"
 
-#include "vm/Stack.h"
 #include "IonFrames-inl.h"
 
 using namespace js;
@@ -1712,7 +1711,7 @@ js::ion::GetElementCache(JSContext *cx, size_t cacheIndex, HandleObject obj, Han
     RootedValue lval(cx, ObjectValue(*obj));
 
     if (cache.isDisabled()) {
-        if (!GetElementOperation(cx, JSOp(*pc), lval, idval, res))
+        if (!GetElementOperation(cx, JSOp(*pc), &lval, idval, res))
             return false;
         types::TypeScript::Monitor(cx, script, pc, res);
         return true;
@@ -1747,7 +1746,7 @@ js::ion::GetElementCache(JSContext *cx, size_t cacheIndex, HandleObject obj, Han
         }
     }
 
-    if (!GetElementOperation(cx, JSOp(*pc), lval, idval, res))
+    if (!GetElementOperation(cx, JSOp(*pc), &lval, idval, res))
         return false;
 
     // If no new attach was done, and we've reached maximum number of stubs, then

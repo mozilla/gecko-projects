@@ -43,7 +43,6 @@
 #include "jsobj.h"
 #include "jsopcode.h"
 #include "jspubtd.h"
-#include "jsscope.h"
 #include "jsscript.h"
 #include "jsstr.h"
 #include "jsworkers.h"
@@ -61,6 +60,7 @@
 #include "js/MemoryMetrics.h"
 #include "frontend/TokenStream.h"
 #include "frontend/ParseMaps.h"
+#include "vm/Shape.h"
 #include "yarr/BumpPointerAllocator.h"
 
 #include "jsatominlines.h"
@@ -173,7 +173,7 @@ JSRuntime::triggerOperationCallback()
      * into a weird state where interrupt is stuck at 0 but ionStackLimit is
      * MAXADDR.
      */
-    ionStackLimit = -1;
+    mainThread.ionStackLimit = -1;
 
     /*
      * Use JS_ATOMIC_SET in the hope that it ensures the write will become
@@ -467,7 +467,7 @@ ReportError(JSContext *cx, const char *message, JSErrorReport *reportp,
          * the reporter triggers an over-recursion.
          */
         int stackDummy;
-        if (!JS_CHECK_STACK_SIZE(cx->runtime->nativeStackLimit, &stackDummy))
+        if (!JS_CHECK_STACK_SIZE(cx->mainThread().nativeStackLimit, &stackDummy))
             return;
 
         if (cx->errorReporter)
@@ -1343,7 +1343,7 @@ JSRuntime::setGCMaxMallocBytes(size_t value)
 }
 
 void
-JSRuntime::updateMallocCounter(JSContext *cx, size_t nbytes)
+JSRuntime::updateMallocCounter(JSCompartment *comp, size_t nbytes)
 {
     /* We tolerate any thread races when updating gcMallocBytes. */
     ptrdiff_t oldCount = gcMallocBytes;
@@ -1351,8 +1351,8 @@ JSRuntime::updateMallocCounter(JSContext *cx, size_t nbytes)
     gcMallocBytes = newCount;
     if (JS_UNLIKELY(newCount <= 0 && oldCount > 0))
         onTooMuchMalloc();
-    else if (cx && cx->compartment)
-        cx->compartment->updateMallocCounter(nbytes);
+    else if (comp)
+        comp->updateMallocCounter(nbytes);
 }
 
 JS_FRIEND_API(void)
