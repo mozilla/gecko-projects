@@ -226,6 +226,7 @@ function RadioInterfaceLayer() {
                      emergencyCallsOnly: false,
                      roaming: false,
                      network: null,
+                     lastKnownMcc: 0,
                      cell: null,
                      type: null,
                      signalStrength: null,
@@ -234,11 +235,16 @@ function RadioInterfaceLayer() {
                      emergencyCallsOnly: false,
                      roaming: false,
                      network: null,
+                     lastKnownMcc: 0,
                      cell: null,
                      type: null,
                      signalStrength: null,
                      relSignalStrength: null},
   };
+
+  try {
+    this.rilContext.voice.lastKnownMcc = Services.prefs.getIntPref("ril.lastKnownMcc");
+  } catch (e) {}
 
   this.voicemailInfo = {
     number: null,
@@ -332,7 +338,7 @@ function RadioInterfaceLayer() {
   this.worker.postMessage({rilMessageType: "setDebugEnabled",
                            enabled: debugPref});
 
-  gSystemWorkerManager.registerRilWorker(this.worker);
+  gSystemWorkerManager.registerRilWorker(0, this.worker);
 }
 RadioInterfaceLayer.prototype = {
 
@@ -787,22 +793,18 @@ RadioInterfaceLayer.prototype = {
       this.updateVoiceConnection(voiceMessage);
     }
 
-    let dataInfoChanged = false;
     if (dataMessage) {
       dataMessage.batch = true;
       this.updateDataConnection(dataMessage);
     }
 
+    if (operatorMessage) {
+      operatorMessage.batch = true;
+      this.handleOperatorChange(operatorMessage);
+    }
+
     let voice = this.rilContext.voice;
     let data = this.rilContext.data;
-    if (operatorMessage) {
-      if (this.networkChanged(operatorMessage, voice.network)) {
-        voice.network = operatorMessage;
-      }
-      if (this.networkChanged(operatorMessage, data.network)) {
-        data.network = operatorMessage;
-      }
-    }
 
     this.checkRoamingBetweenOperators(voice);
     this.checkRoamingBetweenOperators(data);
@@ -1012,13 +1014,29 @@ RadioInterfaceLayer.prototype = {
     let data = this.rilContext.data;
 
     if (this.networkChanged(message, voice.network)) {
+      // Update lastKnownMcc.
+      if (message.mcc) {
+        voice.lastKnownMcc = message.mcc;
+        // Update pref if mcc is changed.
+        // !voice.network is in case voice.network is still null.
+        if (!voice.network || voice.network.mcc != message.mcc) {
+          try {
+            Services.prefs.setIntPref("ril.lastKnownMcc", message.mcc);
+          } catch (e) {}
+        }
+      }
+
       voice.network = message;
-      this._sendTargetMessage("mobileconnection", "RIL:VoiceInfoChanged", voice);
+      if (!message.batch) {
+        this._sendTargetMessage("mobileconnection", "RIL:VoiceInfoChanged", voice);
+      }
     }
 
     if (this.networkChanged(message, data.network)) {
       data.network = message;
-      this._sendTargetMessage("mobileconnection", "RIL:DataInfoChanged", data);
+      if (!message.batch) {
+        this._sendTargetMessage("mobileconnection", "RIL:DataInfoChanged", data);
+      }
     }
   },
 
