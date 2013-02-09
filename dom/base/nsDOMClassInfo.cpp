@@ -480,11 +480,6 @@ using mozilla::dom::workers::ResolveWorkerClasses;
 #include "nsIDOMDataChannel.h"
 #endif
 
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-#include "nsIAudioChannelManager.h"
-#include "AudioChannelManager.h"
-#endif
-
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -508,13 +503,11 @@ static const char kDOMStringBundleURL[] =
   nsIXPCScriptable::WANT_FINALIZE |                                           \
   nsIXPCScriptable::WANT_ENUMERATE |                                          \
   nsIXPCScriptable::DONT_ENUM_QUERY_INTERFACE |                               \
-  nsIXPCScriptable::USE_STUB_EQUALITY_HOOK |                                  \
   nsIXPCScriptable::IS_GLOBAL_OBJECT |                                        \
   nsIXPCScriptable::WANT_OUTER_OBJECT)
 
 #define NODE_SCRIPTABLE_FLAGS                                                 \
  ((DOM_DEFAULT_SCRIPTABLE_FLAGS |                                             \
-   nsIXPCScriptable::USE_STUB_EQUALITY_HOOK |                                 \
    nsIXPCScriptable::WANT_ADDPROPERTY) &                                      \
   ~nsIXPCScriptable::USE_JSSTUB_FOR_ADDPROPERTY)
 
@@ -1456,11 +1449,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
 
 #ifdef MOZ_WEBRTC
   NS_DEFINE_CLASSINFO_DATA(DataChannel, nsEventTargetSH,
-                           EVENTTARGET_SCRIPTABLE_FLAGS)
-#endif
-
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-  NS_DEFINE_CLASSINFO_DATA(AudioChannelManager, nsEventTargetSH,
                            EVENTTARGET_SCRIPTABLE_FLAGS)
 #endif
 };
@@ -3730,13 +3718,6 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_END
 #endif
 
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-  DOM_CLASSINFO_MAP_BEGIN(AudioChannelManager, nsIAudioChannelManager)
-    DOM_CLASSINFO_MAP_ENTRY(nsIAudioChannelManager)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
-  DOM_CLASSINFO_MAP_END
-#endif
-
 #ifdef DEBUG
   {
     uint32_t i = ArrayLength(sClassInfoData);
@@ -4173,15 +4154,6 @@ nsDOMClassInfo::HasInstance(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                             bool *_retval)
 {
   NS_WARNING("nsDOMClassInfo::HasInstance Don't call me!");
-
-  return NS_ERROR_UNEXPECTED;
-}
-
-NS_IMETHODIMP
-nsDOMClassInfo::Equality(nsIXPConnectWrappedNative *wrapper, JSContext * cx,
-                         JSObject * obj, const jsval &val, bool *bp)
-{
-  NS_WARNING("nsDOMClassInfo::Equality Don't call me!");
 
   return NS_ERROR_UNEXPECTED;
 }

@@ -3,25 +3,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsHTMLFieldSetElement_h___
-#define nsHTMLFieldSetElement_h___
+#ifndef mozilla_dom_HTMLFieldSetElement_h
+#define mozilla_dom_HTMLFieldSetElement_h
 
 #include "nsGenericHTMLElement.h"
 #include "nsIDOMHTMLFieldSetElement.h"
 #include "nsIConstraintValidation.h"
+#include "nsHTMLFormElement.h"
+#include "mozilla/dom/ValidityState.h"
 
+namespace mozilla {
+namespace dom {
 
-class nsHTMLFieldSetElement : public nsGenericHTMLFormElement,
-                              public nsIDOMHTMLFieldSetElement,
-                              public nsIConstraintValidation
+class HTMLFieldSetElement : public nsGenericHTMLFormElement,
+                            public nsIDOMHTMLFieldSetElement,
+                            public nsIConstraintValidation
 {
 public:
+  using nsGenericHTMLFormElement::GetForm;
+  using nsIConstraintValidation::Validity;
+  using nsIConstraintValidation::CheckValidity;
   using nsIConstraintValidation::GetValidationMessage;
 
-  nsHTMLFieldSetElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual ~nsHTMLFieldSetElement();
+  HTMLFieldSetElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  virtual ~HTMLFieldSetElement();
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(nsHTMLFieldSetElement, fieldset)
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLFieldSetElement, fieldset)
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -66,8 +73,44 @@ public:
     mDependentElements.RemoveElement(aElement);
   }
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsHTMLFieldSetElement,
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLFieldSetElement,
                                            nsGenericHTMLFormElement)
+
+  // WebIDL
+  bool Disabled() const
+  {
+    return GetBoolAttr(nsGkAtoms::disabled);
+  }
+  void SetDisabled(bool aValue, ErrorResult& aRv)
+  {
+    SetHTMLBoolAttr(nsGkAtoms::disabled, aValue, aRv);
+  }
+
+  // XPCOM GetName is OK for us
+
+  void SetName(const nsAString& aValue, ErrorResult& aRv)
+  {
+    SetHTMLAttr(nsGkAtoms::name, aValue, aRv);
+  }
+
+  // XPCOM GetType is OK for us
+
+  nsIHTMLCollection* Elements();
+
+  // XPCOM WillValidate is OK for us
+
+  // XPCOM Validity is OK for us
+
+  // XPCOM GetValidationMessage is OK for us
+
+  // XPCOM CheckValidity is OK for us
+
+  // XPCOM SetCustomValidity is OK for us
+
+protected:
+  virtual JSObject* WrapNode(JSContext* aCx, JSObject* aScope,
+                             bool* aTriedToWrap) MOZ_OVERRIDE;
+
 private:
 
   /**
@@ -89,5 +132,8 @@ private:
   nsIContent* mFirstLegend;
 };
 
-#endif /* nsHTMLFieldSetElement_h___ */
+} // namespace dom
+} // namespace mozilla
+
+#endif /* mozilla_dom_HTMLFieldSetElement_h */
 

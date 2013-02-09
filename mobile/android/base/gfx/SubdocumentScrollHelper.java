@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-package org.mozilla.gecko.ui;
+package org.mozilla.gecko.gfx;
 
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
@@ -25,7 +25,6 @@ class SubdocumentScrollHelper implements GeckoEventListener {
     private static String MESSAGE_SCROLL = "Gesture:Scroll";
     private static String MESSAGE_SCROLL_ACK = "Gesture:ScrollAck";
 
-    private final PanZoomController mPanZoomController;
     private final Handler mUiHandler;
     private final EventDispatcher mEventDispatcher;
 
@@ -49,8 +48,7 @@ class SubdocumentScrollHelper implements GeckoEventListener {
      * the subdocument; we use this to decide when we have reached the end of the subdocument. */
     private boolean mScrollSucceeded;
 
-    SubdocumentScrollHelper(PanZoomController controller, EventDispatcher eventDispatcher) {
-        mPanZoomController = controller;
+    SubdocumentScrollHelper(EventDispatcher eventDispatcher) {
         // mUiHandler will be bound to the UI thread since that's where this constructor runs
         mUiHandler = new Handler();
         mPendingDisplacement = new PointF();
