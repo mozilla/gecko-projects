@@ -3324,7 +3324,7 @@ TypeCompartment::fixObjectType(JSContext *cx, HandleObject obj)
         return;
 
     ObjectTypeTable::AddPtr p = objectTypeTable->lookupForAdd(obj.get());
-    Shape *baseShape = obj->lastProperty();
+    RootedShape baseShape(cx, obj->lastProperty());
 
     if (p) {
         /* The lookup ensures the shape matches, now check that the types match. */
@@ -3488,7 +3488,7 @@ TypeObject::addProperty(JSContext *cx, RawId id, Property **pprop)
         RootedObject rSingleton(cx, singleton);
         if (JSID_IS_VOID(id)) {
             /* Go through all shapes on the object to get integer-valued properties. */
-            UnrootedShape shape = singleton->lastProperty();
+            RootedShape shape(cx, singleton->lastProperty());
             while (!shape->isEmptyShape()) {
                 if (JSID_IS_VOID(IdToTypeId(shape->propid())))
                     UpdatePropertyType(cx, &base->types, rSingleton, shape, true);
@@ -3855,8 +3855,6 @@ TypeObject::print()
             printf(" noLengthOverflow");
         if (hasAnyFlags(OBJECT_FLAG_UNINLINEABLE))
             printf(" uninlineable");
-        if (hasAnyFlags(OBJECT_FLAG_SPECIAL_EQUALITY))
-            printf(" specialEquality");
         if (hasAnyFlags(OBJECT_FLAG_EMULATES_UNDEFINED))
             printf(" emulatesUndefined");
         if (hasAnyFlags(OBJECT_FLAG_ITERATED))
@@ -4869,7 +4867,7 @@ AnalyzePoppedThis(JSContext *cx, Vector<SSAUseChain *> *pendingPoppedThis,
                   TypeObject *type, JSFunction *fun, NewScriptPropertiesState &state);
 
 static bool
-AnalyzeNewScriptProperties(JSContext *cx, TypeObject *type, JSFunction *fun,
+AnalyzeNewScriptProperties(JSContext *cx, TypeObject *type, HandleFunction fun,
                            NewScriptPropertiesState &state)
 {
     /*
@@ -5156,7 +5154,7 @@ AnalyzePoppedThis(JSContext *cx, Vector<SSAUseChain *> *pendingPoppedThis,
             StackTypeSet *scriptTypes = analysis->poppedTypes(pc, GET_ARGC(pc));
 
             /* Need to definitely be calling Function.call/apply on a specific script. */
-            JSFunction *function;
+            RootedFunction function(cx);
             {
                 RawObject funcallObj = funcallTypes->getSingleton();
                 RawObject scriptObj = scriptTypes->getSingleton();
@@ -6026,8 +6024,6 @@ JSObject::makeLazyType(JSContext *cx)
     if (self->lastProperty()->hasObjectFlag(BaseShape::ITERATED_SINGLETON))
         type->flags |= OBJECT_FLAG_ITERATED;
 
-    if (self->getClass()->ext.equality)
-        type->flags |= OBJECT_FLAG_SPECIAL_EQUALITY;
     if (self->getClass()->emulatesUndefined())
         type->flags |= OBJECT_FLAG_EMULATES_UNDEFINED;
 
@@ -6160,9 +6156,6 @@ JSCompartment::getNewType(JSContext *cx, Class *clasp, TaggedProto proto_, JSFun
     if (proto.isObject()) {
         RootedObject obj(cx, proto.toObject());
 
-        if (obj->hasSpecialEquality())
-            type->flags |= OBJECT_FLAG_SPECIAL_EQUALITY;
-
         if (fun)
             CheckNewScriptProperties(cx, type, fun);
 
@@ -6225,7 +6218,7 @@ JSCompartment::getLazyType(JSContext *cx, Class *clasp, TaggedProto proto)
     if (!type)
         return NULL;
 
-    if (!table.relookupOrAdd(p, TypeObjectSet::Lookup(clasp, proto), type))
+    if (!table.relookupOrAdd(p, TypeObjectSet::Lookup(clasp, protoRoot), type))
         return NULL;
 
     type->singleton = (JSObject *) TypeObject::LAZY_SINGLETON;
