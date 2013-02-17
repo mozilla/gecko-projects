@@ -66,7 +66,7 @@ nsFirstLetterFrame::Init(nsIContent*      aContent,
     // a style context like we would for a text node.
     nsStyleContext* parentStyleContext = mStyleContext->GetParent();
     if (parentStyleContext) {
-      newSC = mStyleContext->GetRuleNode()->GetPresContext()->StyleSet()->
+      newSC = PresContext()->StyleSet()->
         ResolveStyleForNonElement(parentStyleContext);
       if (newSC)
         SetStyleContextWithoutNotification(newSC);
@@ -194,12 +194,12 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
     // multiple paragraphs with different base direction
     uint8_t direction;
     nsIFrame* containerFrame = ll.GetLineContainerFrame();
-    if (containerFrame->GetStyleTextReset()->mUnicodeBidi &
+    if (containerFrame->StyleTextReset()->mUnicodeBidi &
         NS_STYLE_UNICODE_BIDI_PLAINTEXT) {
       FramePropertyTable *propTable = aPresContext->PropertyTable();
       direction = NS_PTR_TO_INT32(propTable->Get(kid, BaseLevelProperty())) & 1;
     } else {
-      direction = containerFrame->GetStyleVisibility()->mDirection;
+      direction = containerFrame->StyleVisibility()->mDirection;
     }
     ll.BeginLineReflow(bp.left, bp.top, availSize.width, NS_UNCONSTRAINEDSIZE,
                        false, true, direction);

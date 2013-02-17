@@ -123,7 +123,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Social",
   "resource:///modules/Social.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PageThumbs",
-  "resource:///modules/PageThumbs.jsm");
+  "resource://gre/modules/PageThumbs.jsm");
 
 #ifdef MOZ_SAFE_BROWSING
 XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
@@ -6889,7 +6889,8 @@ var gIdentityHandler = {
     } else if (state & nsIWebProgressListener.STATE_IS_SECURE) {
       this.setMode(this.IDENTITY_MODE_DOMAIN_VERIFIED);
     } else if (state & nsIWebProgressListener.STATE_IS_BROKEN) {
-      if (state & nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) {
+      if ((state & nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) &&
+          gPrefService.getBoolPref("security.mixed_content.block_active_content")) {
         this.setMode(this.IDENTITY_MODE_MIXED_ACTIVE_CONTENT);
       } else {
         this.setMode(this.IDENTITY_MODE_MIXED_CONTENT);

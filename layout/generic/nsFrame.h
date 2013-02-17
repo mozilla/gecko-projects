@@ -281,7 +281,7 @@ public:
    * override ComputeSize to enforce their width/height invariants.
    *
    * Implementations may optimize by returning a garbage width if
-   * GetStylePosition()->mWidth.GetUnit() != eStyleUnit_Auto, and
+   * StylePosition()->mWidth.GetUnit() != eStyleUnit_Auto, and
    * likewise for height, since in such cases the result is guaranteed
    * to be unused.
    */
@@ -405,7 +405,7 @@ public:
   void ConsiderChildOverflow(nsOverflowAreas& aOverflowAreas,
                              nsIFrame* aChildFrame);
 
-  virtual const void* GetStyleDataExternal(nsStyleStructID aSID) const;
+  virtual const void* StyleDataExternal(nsStyleStructID aSID) const;
 
 
   /**
@@ -413,7 +413,7 @@ public:
    */
   bool ShouldAvoidBreakInside(const nsHTMLReflowState& aReflowState) const {
     return !aReflowState.mFlags.mIsTopOfPage &&
-           NS_STYLE_PAGE_BREAK_AVOID == GetStyleDisplay()->mBreakInside &&
+           NS_STYLE_PAGE_BREAK_AVOID == StyleDisplay()->mBreakInside &&
            !GetPrevInFlow();
   }
 
