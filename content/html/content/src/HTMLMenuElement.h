@@ -3,19 +3,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef mozilla_dom_HTMLMenuElement_h
+#define mozilla_dom_HTMLMenuElement_h
+
 #include "nsIDOMHTMLMenuElement.h"
 #include "nsIHTMLMenu.h"
 #include "nsGenericHTMLElement.h"
 
-class nsHTMLMenuElement : public nsGenericHTMLElement,
-                          public nsIDOMHTMLMenuElement,
-                          public nsIHTMLMenu
+namespace mozilla {
+namespace dom {
+
+class HTMLMenuElement : public nsGenericHTMLElement,
+                        public nsIDOMHTMLMenuElement,
+                        public nsIHTMLMenu
 {
 public:
-  nsHTMLMenuElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual ~nsHTMLMenuElement();
+  HTMLMenuElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  virtual ~HTMLMenuElement();
 
-  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(nsHTMLMenuElement, menu)
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLMenuElement, menu)
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -48,6 +54,40 @@ public:
 
   uint8_t GetType() const { return mType; }
 
+  // WebIDL
+
+  // The XPCOM GetType is OK for us
+  void SetType(const nsAString& aType, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::type, aType, aError);
+  }
+
+  // The XPCOM GetLabel is OK for us
+  void SetLabel(const nsAString& aLabel, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::label, aLabel, aError);
+  }
+
+  bool Compact() const
+  {
+    return GetBoolAttr(nsGkAtoms::compact);
+  }
+  void SetCompact(bool aCompact, ErrorResult& aError)
+  {
+    SetHTMLBoolAttr(nsGkAtoms::compact, aCompact, aError);
+  }
+
+  // The XPCOM SendShowEvent is OK for us
+
+  already_AddRefed<nsIMenuBuilder> CreateBuilder();
+
+  // The XPCOM Build is OK for us
+
+protected:
+  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope,
+                             bool *aTriedToWrap) MOZ_OVERRIDE;
+
+
 protected:
   static bool CanLoadIcon(nsIContent* aContent, const nsAString& aIcon);
 
@@ -63,3 +103,8 @@ protected:
 
   uint8_t mType;
 };
+
+} // namespace dom
+} // namespace mozilla
+
+#endif // mozilla_dom_HTMLMenuElement_h
