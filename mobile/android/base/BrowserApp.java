@@ -236,7 +236,7 @@ abstract public class BrowserApp extends GeckoApp
         registerEventListener("Feedback:MaybeLater");
         registerEventListener("Telemetry:Gather");
 
-        Distribution.init(this);
+        Distribution.init(this, getPackageResourcePath());
         JavaAddonManager.getInstance().init(getApplicationContext());
     }
 
@@ -612,6 +612,7 @@ abstract public class BrowserApp extends GeckoApp
 
             mGeckoLayout.requestLayout();
         } else {
+            mTabsPanel.setVisibility(View.INVISIBLE);
             mBrowserToolbar.updateTabs(false);
             mBrowserToolbar.finishTabsAnimation();
             mTabsPanel.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
