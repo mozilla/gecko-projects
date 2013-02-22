@@ -2457,7 +2457,7 @@ class Debugger::ScriptQuery {
     bool prepareQuery() {
         /* Compute urlCString, if a url was given. */
         if (url.isString()) {
-            if (!urlCString.encode(cx, url.toString()))
+            if (!urlCString.encodeLatin1(cx, url.toString()))
                 return false;
         }
 
@@ -3806,7 +3806,9 @@ js::EvaluateInEnv(JSContext *cx, Handle<Env*> env, HandleValue thisv, AbstractFr
            .setCompileAndGo(true)
            .setNoScriptRval(false)
            .setFileAndLine(filename, lineno);
-    RootedScript script(cx, frontend::CompileScript(cx, env, frame, options, chars.get(), length,
+    RootedScript callerScript(cx, frame ? frame.script() : NULL);
+    RootedScript script(cx, frontend::CompileScript(cx, env, callerScript,
+                                                    options, chars.get(), length,
                                                     /* source = */ NULL,
                                                     /* staticLevel = */ frame ? 1 : 0));
     if (!script)

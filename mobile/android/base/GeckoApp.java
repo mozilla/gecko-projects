@@ -14,7 +14,7 @@ import org.mozilla.gecko.gfx.PanZoomController;
 import org.mozilla.gecko.gfx.PluginLayer;
 import org.mozilla.gecko.gfx.PointUtils;
 import org.mozilla.gecko.mozglue.GeckoLoader;
-import org.mozilla.gecko.util.GeckoAsyncTask;
+import org.mozilla.gecko.util.UiAsyncTask;
 import org.mozilla.gecko.util.GeckoBackgroundThread;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.GeckoEventResponder;
@@ -186,6 +186,9 @@ abstract public class GeckoApp
     private Telemetry.Timer mGeckoReadyStartupTimer;
 
     private String mPrivateBrowsingSession;
+
+    private static Boolean sIsLargeTablet = null;
+    private static Boolean sIsSmallTablet = null;
 
     abstract public int getLayout();
     abstract public boolean hasTabsSideBar();
@@ -623,7 +626,7 @@ abstract public class GeckoApp
     }
 
     void handleFaviconRequest(final String url) {
-        (new GeckoAsyncTask<Void, Void, String>(mAppContext, GeckoAppShell.getHandler()) {
+        (new UiAsyncTask<Void, Void, String>(mMainHandler, GeckoAppShell.getHandler()) {
             @Override
             public String doInBackground(Void... params) {
                 return Favicons.getInstance().getFaviconUrlForPageUrl(url);
@@ -1237,7 +1240,7 @@ abstract public class GeckoApp
         notification.setLatestEventInfo(mAppContext, fileName, progText, emptyIntent );
         notification.flags |= Notification.FLAG_ONGOING_EVENT;
         notification.show();
-        new GeckoAsyncTask<Void, Void, Boolean>(mAppContext, GeckoAppShell.getHandler()){
+        new UiAsyncTask<Void, Void, Boolean>(mMainHandler, GeckoAppShell.getHandler()){
 
             @Override
             protected Boolean doInBackground(Void... params) {
@@ -1446,10 +1449,27 @@ abstract public class GeckoApp
     }
 
     public boolean isTablet() {
-        int screenLayout = getResources().getConfiguration().screenLayout;
-        return (Build.VERSION.SDK_INT >= 11 &&
-                (((screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK) == Configuration.SCREENLAYOUT_SIZE_LARGE) || 
-                 ((screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK) == Configuration.SCREENLAYOUT_SIZE_XLARGE)));
+        return isLargeTablet() || isSmallTablet();
+    }
+
+    public boolean isLargeTablet() {
+        if (sIsLargeTablet == null) {
+            int screenLayout = getResources().getConfiguration().screenLayout;
+            sIsLargeTablet = (Build.VERSION.SDK_INT >= 11 &&
+                              ((screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK) == Configuration.SCREENLAYOUT_SIZE_XLARGE));
+        }
+
+        return sIsLargeTablet;
+    }
+
+    public boolean isSmallTablet() {
+        if (sIsSmallTablet == null) {
+            int screenLayout = getResources().getConfiguration().screenLayout;
+            return (Build.VERSION.SDK_INT >= 11 &&
+                    ((screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK) == Configuration.SCREENLAYOUT_SIZE_LARGE));
+        }
+
+        return sIsSmallTablet;
     }
 
     /** Called when the activity is first created. */

@@ -4,6 +4,8 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.widget.TwoWayView;
+
 import android.content.Context;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -54,7 +56,7 @@ public class RemoteTabs extends ExpandableListView
     @Override
     public void show() {
         setVisibility(View.VISIBLE);
-        TabsAccessor.getTabs(mContext, this);
+        TabsAccessor.getTabs(mContext, this, getHandler());
     }
 
     @Override
@@ -64,6 +66,11 @@ public class RemoteTabs extends ExpandableListView
 
     private void autoHidePanel() {
         mTabsPanel.autoHidePanel();
+    }
+
+    @Override
+    public boolean shouldExpand() {
+        return true;
     }
 
     @Override
