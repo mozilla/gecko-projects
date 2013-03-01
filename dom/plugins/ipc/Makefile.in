@@ -10,9 +10,7 @@ VPATH = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 MODULE = dom
-ifndef _MSC_VER
 FAIL_ON_WARNINGS := 1
-endif # !_MSC_VER
 
 EXPORTS_NAMESPACES = mozilla
 
@@ -108,10 +106,6 @@ EXPORTS_mozilla/plugins += \
 endif
 
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-DIRS += \
-    interpose \
-    $(NULL)
-
 CMMSRCS   += \
     PluginUtilsOSX.mm \
     PluginInterposeOSX.mm \

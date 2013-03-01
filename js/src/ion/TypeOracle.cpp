@@ -298,6 +298,9 @@ TypeInferenceOracle::elementReadIsDenseNative(RawScript script, jsbytecode *pc)
     if (idType != JSVAL_TYPE_INT32 && idType != JSVAL_TYPE_DOUBLE)
         return false;
 
+    if (obj->hasType(types::Type::StringType()))
+        return false;
+
     Class *clasp = obj->getKnownClass();
     return clasp && clasp->isNative();
 }
@@ -307,10 +310,13 @@ TypeInferenceOracle::elementReadIsTypedArray(RawScript script, jsbytecode *pc, i
 {
     // Check whether the object is a typed array and index is int32 or double.
     StackTypeSet *obj = script->analysis()->poppedTypes(pc, 1);
-    StackTypeSet *id = DropUnrooted(script)->analysis()->poppedTypes(pc, 0);
+    StackTypeSet *id = script->analysis()->poppedTypes(pc, 0);
 
     JSValueType idType = id->getKnownTypeTag();
     if (idType != JSVAL_TYPE_INT32 && idType != JSVAL_TYPE_DOUBLE)
+        return false;
+
+    if (obj->hasType(types::Type::StringType()))
         return false;
 
     *arrayType = obj->getTypedArrayType();
@@ -628,7 +634,8 @@ TypeInferenceOracle::canEnterInlinedFunction(RawScript caller, jsbytecode *pc, R
     if (targetScript->analysis()->usesScopeChain())
         return false;
 
-    if (target->getType(cx)->unknownProperties())
+    types::TypeObject *targetType = target->getType(cx);
+    if (!targetType || targetType->unknownProperties())
         return false;
 
     JSOp op = JSOp(*pc);
@@ -643,7 +650,7 @@ TypeInferenceOracle::canEnterInlinedFunction(RawScript caller, jsbytecode *pc, R
     }
 
     // TI calls ObjectStateChange to trigger invalidation of the caller.
-    HeapTypeSet::WatchObjectStateChange(cx, target->getType(cx));
+    HeapTypeSet::WatchObjectStateChange(cx, targetType);
     return true;
 }
 
@@ -679,7 +686,7 @@ HeapTypeSet *
 TypeInferenceOracle::globalPropertyTypeSet(UnrootedScript script, jsbytecode *pc, jsid id)
 {
     TypeObject *type = DropUnrooted(script)->global().getType(cx);
-    if (type->unknownProperties())
+    if (!type || type->unknownProperties())
         return NULL;
 
     return type->getProperty(cx, id, false);
