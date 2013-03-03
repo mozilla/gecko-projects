@@ -4,23 +4,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsTimeRanges_h__
-#define nsTimeRanges_h__
+#ifndef mozilla_dom_TimeRanges_h_
+#define mozilla_dom_TimeRanges_h_
 
 #include "nsIDOMTimeRanges.h"
 #include "nsISupports.h"
 #include "nsTArray.h"
+#include "nsWrapperCache.h"
+#include "mozilla/ErrorResult.h"
+#include "nsAutoPtr.h"
+
+namespace mozilla {
+namespace dom {
 
 // Implements media TimeRanges:
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/video.html#timeranges
-class nsTimeRanges MOZ_FINAL : public nsIDOMTimeRanges
+class TimeRanges MOZ_FINAL : public nsIDOMTimeRanges
 {
 public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMTIMERANGES
 
-  nsTimeRanges();
-  ~nsTimeRanges();
+  TimeRanges();
+  ~TimeRanges();
 
   void Add(double aStart, double aEnd);
 
@@ -29,6 +35,17 @@ public:
 
   // See http://www.whatwg.org/html/#normalized-timeranges-object
   void Normalize();
+
+  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope);
+
+  uint32_t Length() const
+  {
+    return mRanges.Length();
+  }
+
+  virtual double Start(uint32_t aIndex, ErrorResult& aRv);
+
+  virtual double End(uint32_t aIndex, ErrorResult& aRv);
 
 private:
 
@@ -56,4 +73,7 @@ private:
   nsAutoTArray<TimeRange,4> mRanges;
 };
 
-#endif // nsTimeRanges_h__
+} // namespace dom
+} // namespace mozilla
+
+#endif // mozilla_dom_TimeRanges_h_

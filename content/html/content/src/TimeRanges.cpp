@@ -4,58 +4,84 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsTimeRanges.h"
+#include "mozilla/dom/TimeRanges.h"
+#include "mozilla/dom/TimeRangesBinding.h"
+#include "nsHTMLMediaElement.h"
+#include "nsContentUtils.h"
 #include "nsDOMClassInfoID.h"
 #include "nsError.h"
 
-NS_IMPL_ADDREF(nsTimeRanges)
-NS_IMPL_RELEASE(nsTimeRanges)
+DOMCI_DATA(TimeRanges, mozilla::dom::TimeRanges)
 
-DOMCI_DATA(TimeRanges, nsTimeRanges)
+namespace mozilla {
+namespace dom {
 
-NS_INTERFACE_MAP_BEGIN(nsTimeRanges)
+NS_IMPL_ADDREF(TimeRanges)
+NS_IMPL_RELEASE(TimeRanges)
+
+NS_INTERFACE_MAP_BEGIN(TimeRanges)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_INTERFACE_MAP_ENTRY(nsIDOMTimeRanges)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(TimeRanges)
 NS_INTERFACE_MAP_END
 
-nsTimeRanges::nsTimeRanges()
+TimeRanges::TimeRanges()
 {
-  MOZ_COUNT_CTOR(nsTimeRanges);
+  MOZ_COUNT_CTOR(TimeRanges);
 }
 
-nsTimeRanges::~nsTimeRanges()
+TimeRanges::~TimeRanges()
 {
-  MOZ_COUNT_DTOR(nsTimeRanges);
-}
-
-NS_IMETHODIMP
-nsTimeRanges::GetLength(uint32_t* aLength)
-{
-  *aLength = mRanges.Length();
-  return NS_OK;
+  MOZ_COUNT_DTOR(TimeRanges);
 }
 
 NS_IMETHODIMP
-nsTimeRanges::Start(uint32_t aIndex, double* aTime)
+TimeRanges::GetLength(uint32_t* aLength)
 {
-  if (aIndex >= mRanges.Length())
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
-  *aTime = mRanges[aIndex].mStart;
+  *aLength = Length();
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsTimeRanges::End(uint32_t aIndex, double* aTime)
+double
+TimeRanges::Start(uint32_t aIndex, ErrorResult& aRv)
 {
-  if (aIndex >= mRanges.Length())
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
-  *aTime = mRanges[aIndex].mEnd;
-  return NS_OK;
+  if (aIndex >= mRanges.Length()) {
+    aRv = NS_ERROR_DOM_INDEX_SIZE_ERR;
+    return 0;
+  }
+
+  return mRanges[aIndex].mStart;
+}
+
+NS_IMETHODIMP
+TimeRanges::Start(uint32_t aIndex, double* aTime)
+{
+  ErrorResult rv;
+  *aTime = Start(aIndex, rv);
+  return rv.ErrorCode();
+}
+
+double
+TimeRanges::End(uint32_t aIndex, ErrorResult& aRv)
+{
+  if (aIndex >= mRanges.Length()) {
+    aRv = NS_ERROR_DOM_INDEX_SIZE_ERR;
+    return 0;
+  }
+
+  return mRanges[aIndex].mEnd;
+}
+
+NS_IMETHODIMP
+TimeRanges::End(uint32_t aIndex, double* aTime)
+{
+  ErrorResult rv;
+  *aTime = End(aIndex, rv);
+  return rv.ErrorCode();
 }
 
 void
-nsTimeRanges::Add(double aStart, double aEnd)
+TimeRanges::Add(double aStart, double aEnd)
 {
   if (aStart > aEnd) {
     NS_WARNING("Can't add a range if the end is older that the start.");
@@ -65,7 +91,7 @@ nsTimeRanges::Add(double aStart, double aEnd)
 }
 
 double
-nsTimeRanges::GetFinalEndTime()
+TimeRanges::GetFinalEndTime()
 {
   if (mRanges.IsEmpty()) {
     return -1.0;
@@ -75,7 +101,7 @@ nsTimeRanges::GetFinalEndTime()
 }
 
 void
-nsTimeRanges::Normalize()
+TimeRanges::Normalize()
 {
   if (mRanges.Length() >= 2) {
     nsAutoTArray<TimeRange,4> normalized;
@@ -102,3 +128,12 @@ nsTimeRanges::Normalize()
     mRanges = normalized;
   }
 }
+
+JSObject*
+TimeRanges::WrapObject(JSContext* aCx, JSObject* aScope)
+{
+  return TimeRangesBinding::Wrap(aCx, aScope, this);
+}
+
+} // namespace dom
+} // namespace mozilla
