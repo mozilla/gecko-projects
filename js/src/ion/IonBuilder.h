@@ -452,8 +452,6 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineNativeCall(CallInfo &callInfo, JSNative native);
 
     // Call functions
-    bool jsop_call_inline(HandleFunction callee, CallInfo &callInfo, MBasicBlock *bottom,
-                          Vector<MDefinition *, 8, IonAllocPolicy> &retvalDefns);
     bool inlineScriptedCalls(AutoObjectVector &targets, AutoObjectVector &originals,
                              CallInfo &callInfo);
     bool inlineScriptedCall(HandleFunction target, CallInfo &callInfo);
@@ -652,7 +650,7 @@ class CallInfo
     }
 
     void popFormals(MBasicBlock *current) {
-        current->popn(argc() + 2);
+        current->popn(numFormals());
     }
 
     void pushFormals(MBasicBlock *current) {
@@ -673,8 +671,11 @@ class CallInfo
         return types_;
     }
 
-    uint32_t argc() {
+    uint32_t argc() const {
         return args_.length();
+    }
+    uint32_t numFormals() const {
+        return argc() + 2;
     }
 
     void setArgs(Vector<MDefinition *> *args) {
