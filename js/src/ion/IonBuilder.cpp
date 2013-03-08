@@ -142,8 +142,6 @@ IonBuilder::CFGState::TableSwitch(jsbytecode *exitpc, MTableSwitch *ins)
 JSFunction *
 IonBuilder::getSingleCallTarget(types::StackTypeSet *calleeTypes)
 {
-    AutoAssertNoGC nogc;
-
     if (!calleeTypes)
         return NULL;
 
@@ -189,8 +187,6 @@ IonBuilder::getPolyCallTargets(types::StackTypeSet *calleeTypes,
 bool
 IonBuilder::canInlineTarget(JSFunction *target)
 {
-    AssertCanGC();
-
     if (!target->isInterpreted()) {
         IonSpew(IonSpew_Inlining, "Cannot inline due to non-interpreted");
         return false;
@@ -762,8 +758,6 @@ IonBuilder::snoopControlFlow(JSOp op)
 bool
 IonBuilder::inspectOpcode(JSOp op)
 {
-    AssertCanGC();
-
     // Don't compile fat opcodes, run the decomposed version instead.
     if (js_CodeSpec[op].format & JOF_DECOMPOSE)
         return true;
@@ -2909,7 +2903,6 @@ class AutoAccumulateExits
 bool
 IonBuilder::inlineScriptedCall(HandleFunction target, CallInfo &callInfo)
 {
-    AssertCanGC();
     JS_ASSERT(target->isInterpreted());
     JS_ASSERT(callInfo.hasCallType());
     JS_ASSERT(types::IsInlinableCall(pc));
@@ -3027,10 +3020,13 @@ IonBuilder::addTypeBarrier(uint32_t i, CallInfo &callinfo, types::StackTypeSet *
         callerObs = callinfo.getArgType(i - 1);
     }
 
+    bool needsBarrier = false;
+
     while (excluded) {
         if (excluded->target == calleeObs && callerObs->hasType(excluded->type)) {
             if (excluded->type == types::Type::DoubleType() &&
-                calleeObs->hasType(types::Type::Int32Type())) {
+                calleeObs->hasType(types::Type::Int32Type()))
+            {
                 // The double type also implies int32, so this implies that
                 // double should be coerced into int if possible, and other
                 // types should remain.
@@ -3040,7 +3036,6 @@ IonBuilder::addTypeBarrier(uint32_t i, CallInfo &callinfo, types::StackTypeSet *
                     MInstruction *bailType = MToInt32::New(ins);
                     current->add(bailType);
                     ins = bailType;
-                    break;
                 } else {
                     // We expect either an Int or a Value, this variant is not
                     // optimized and favor the int variant by filtering out all
@@ -3054,16 +3049,19 @@ IonBuilder::addTypeBarrier(uint32_t i, CallInfo &callinfo, types::StackTypeSet *
                     current->add(toInt);
                     ins = toInt;
                 }
-            } else {
-                JS_ASSERT(!calleeObs->hasType(excluded->type));
 
-                // Filter out unexpected type which are not yet added to the set
-                // observed type but which are infered by type inference.
-                MInstruction *bailType = MExcludeType::New(ins, excluded->type);
-                current->add(bailType);
+                needsBarrier = false;
+                break;
             }
+
+            needsBarrier = true;
         }
         excluded = excluded->next;
+    }
+
+    if (needsBarrier) {
+        MTypeBarrier *barrier = MTypeBarrier::New(ins, cloneTypeSet(calleeObs), Bailout_Normal);
+        current->add(barrier);
     }
 
     if (i == 0)
@@ -3128,8 +3126,6 @@ IonBuilder::patchInlinedReturns(CallInfo &callInfo, MIRGraphExits &exits, MBasic
 bool
 IonBuilder::makeInliningDecision(AutoObjectVector &targets)
 {
-    AssertCanGC();
-
     // For "small" functions, we should be more aggressive about inlining.
     // This is based on the following intuition:
     //  1. The call overhead for a small function will likely be a much
@@ -4084,8 +4080,6 @@ IonBuilder::jsop_funapplyarguments(uint32_t argc)
 bool
 IonBuilder::jsop_call(uint32_t argc, bool constructing)
 {
-    AssertCanGC();
-
     // Acquire known call target if existent.
     AutoObjectVector originals(cx);
     types::StackTypeSet *calleeTypes = oracle->getCallTarget(script(), argc, pc);
@@ -4123,8 +4117,17 @@ IonBuilder::jsop_call(uint32_t argc, bool constructing)
     // Inline native call.
     if (inliningEnabled() && targets.length() == 1 && targets[0]->toFunction()->isNative()) {
         InliningStatus status = inlineNativeCall(callInfo, targets[0]->toFunction()->native());
-        if (status != InliningStatus_NotInlined)
-            return status != InliningStatus_Error;
+        switch (status) {
+          case InliningStatus_Error:
+            return false;
+          case InliningStatus_Inlined:
+            callInfo.fun()->setFoldedUnchecked();
+            return true;
+          case InliningStatus_NotInlined:
+            break;
+          default:
+            JS_NOT_REACHED("Invalid status");
+        }
     }
 
     // Inline scriped call(s).
@@ -5146,8 +5149,6 @@ bool
 IonBuilder::pushTypeBarrier(MInstruction *ins, types::StackTypeSet *actual,
                             types::StackTypeSet *observed)
 {
-    AutoAssertNoGC nogc;
-
     // If the instruction has no side effects, we'll resume the entire operation.
     // The actual type barrier will occur in the interpreter. If the
     // instruction is effectful, even if it has a singleton type, there
@@ -6433,7 +6434,7 @@ IonBuilder::loadSlot(MDefinition *obj, HandleShape shape, MIRType rvalType)
 }
 
 bool
-IonBuilder::storeSlot(MDefinition *obj, UnrootedShape shape, MDefinition *value, bool needsBarrier)
+IonBuilder::storeSlot(MDefinition *obj, RawShape shape, MDefinition *value, bool needsBarrier)
 {
     JS_ASSERT(shape->hasDefaultSetter());
     JS_ASSERT(shape->writable());
@@ -6660,7 +6661,6 @@ bool
 IonBuilder::getPropTryMonomorphic(bool *emitted, HandleId id, types::StackTypeSet *barrier,
                                   TypeOracle::Unary unary, TypeOracle::UnaryTypes unaryTypes)
 {
-    AssertCanGC();
     JS_ASSERT(*emitted == false);
     bool accessGetter = oracle->propertyReadAccessGetter(script(), pc);
 
@@ -7235,7 +7235,7 @@ IonBuilder::addBoundsCheck(MDefinition *index, MDefinition *length)
 }
 
 MInstruction *
-IonBuilder::addShapeGuard(MDefinition *obj, const UnrootedShape shape, BailoutKind bailoutKind)
+IonBuilder::addShapeGuard(MDefinition *obj, const RawShape shape, BailoutKind bailoutKind)
 {
     MGuardShape *guard = MGuardShape::New(obj, shape, bailoutKind);
     current->add(guard);

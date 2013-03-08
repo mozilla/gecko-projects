@@ -51,7 +51,7 @@ using mozilla::DebugOnly;
 /*****************************************************************************/
 
 void
-StackFrame::initExecuteFrame(UnrootedScript script, StackFrame *prevLink, AbstractFramePtr prev,
+StackFrame::initExecuteFrame(RawScript script, StackFrame *prevLink, AbstractFramePtr prev,
                              FrameRegs *regs, const Value &thisv, JSObject &scopeChain,
                              ExecuteType type)
 {
@@ -721,12 +721,6 @@ StackSpace::markActiveCompartments()
 JS_FRIEND_API(bool)
 StackSpace::ensureSpaceSlow(JSContext *cx, MaybeReportError report, Value *from, ptrdiff_t nvals) const
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     assertInvariants();
 
     JSCompartment *dest = cx->compartment;
@@ -894,12 +888,6 @@ Value *
 ContextStack::ensureOnTop(JSContext *cx, MaybeReportError report, unsigned nvars,
                           MaybeExtend extend, bool *pushedSeg)
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     Value *firstUnused = space().firstUnused();
     FrameRegs *regs = cx->maybeRegs();
 
@@ -978,12 +966,6 @@ bool
 ContextStack::pushInvokeArgs(JSContext *cx, unsigned argc, InvokeArgsGuard *iag,
                              MaybeReportError report)
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     JS_ASSERT(argc <= StackSpace::ARGS_LENGTH_MAX);
 
     unsigned nvars = 2 + argc;
@@ -1022,12 +1004,6 @@ ContextStack::pushInvokeFrame(JSContext *cx, MaybeReportError report,
                               const CallArgs &args, JSFunction *funArg,
                               InitialFrameFlags initial, FrameGuard *fg)
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     JS_ASSERT(onTop());
     JS_ASSERT(space().firstUnused() == args.end());
 
@@ -1064,8 +1040,6 @@ ContextStack::pushExecuteFrame(JSContext *cx, HandleScript script, const Value &
                                HandleObject scopeChain, ExecuteType type,
                                AbstractFramePtr evalInFrame, ExecuteFrameGuard *efg)
 {
-    AssertCanGC();
-
     /*
      * Even though global code and indirect eval do not execute in the context
      * of the current frame, prev-link these to the current frame so that the
@@ -1178,7 +1152,6 @@ ContextStack::popFrame(const FrameGuard &fg)
 bool
 ContextStack::pushGeneratorFrame(JSContext *cx, JSGenerator *gen, GeneratorFrameGuard *gfg)
 {
-    AssertCanGC();
     HeapValue *genvp = gen->stackSnapshot;
     JS_ASSERT(genvp == HeapValueify(gen->fp->generatorArgsSnapshotBegin()));
     unsigned vplen = HeapValueify(gen->fp->generatorArgsSnapshotEnd()) - genvp;
@@ -1248,8 +1221,6 @@ ContextStack::popGeneratorFrame(const GeneratorFrameGuard &gfg)
 bool
 ContextStack::saveFrameChain()
 {
-    AssertCanGC();
-
     bool pushedSeg;
     if (!ensureOnTop(cx_, REPORT_ERROR, 0, CANT_EXTEND, &pushedSeg))
         return false;
@@ -1282,7 +1253,6 @@ StackIter::poisonRegs()
 void
 StackIter::popFrame()
 {
-    AutoAssertNoGC nogc;
     StackFrame *oldfp = data_.fp_;
     JS_ASSERT(data_.seg_->contains(oldfp));
     data_.fp_ = data_.fp_->prev();
@@ -1309,7 +1279,6 @@ StackIter::popCall()
 void
 StackIter::settleOnNewSegment()
 {
-    AutoAssertNoGC nogc;
     if (FrameRegs *regs = data_.seg_->maybeRegs())
         data_.pc_ = regs->pc;
     else
@@ -1347,8 +1316,6 @@ StackIter::startOnSegment(StackSegment *seg)
 void
 StackIter::settleOnNewState()
 {
-    AutoAssertNoGC nogc;
-
     /* Reset whether or we popped a call last time we settled. */
     data_.poppedCallDuringSettle_ = false;
 
@@ -1553,7 +1520,6 @@ StackIter::StackIter(const Data &data)
 void
 StackIter::popIonFrame()
 {
-    AutoAssertNoGC nogc;
     // Keep fp which describes all ion frames.
     poisonRegs();
     if (data_.ionFrames_.isScripted() && ionInlineFrames_.more()) {
@@ -2028,7 +1994,6 @@ StackIter::setReturnValue(const Value &v)
 size_t
 StackIter::numFrameSlots() const
 {
-    AutoAssertNoGC nogc;
     switch (data_.state_) {
       case DONE:
       case NATIVE:
@@ -2051,7 +2016,6 @@ StackIter::numFrameSlots() const
 Value
 StackIter::frameSlotValue(size_t index) const
 {
-    AutoAssertNoGC nogc;
     switch (data_.state_) {
       case DONE:
       case NATIVE:
