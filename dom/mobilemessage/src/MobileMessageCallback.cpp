@@ -35,8 +35,16 @@ MobileMessageCallback::~MobileMessageCallback()
 {
 }
 
-NS_IMETHODIMP
-MobileMessageCallback::NotifyMessageSent(nsISupports *aMessage)
+
+nsresult
+MobileMessageCallback::NotifySuccess(const jsval& aResult)
+{
+  nsCOMPtr<nsIDOMRequestService> rs = do_GetService(DOMREQUEST_SERVICE_CONTRACTID);
+  return rs ? rs->FireSuccess(mDOMRequest, aResult) : NS_ERROR_FAILURE;
+}
+
+nsresult
+MobileMessageCallback::NotifySuccess(nsISupports *aMessage)
 {
   nsresult rv;
   nsIScriptContext* scriptContext = mDOMRequest->GetContextForEventHandlers(&rv);
@@ -53,16 +61,11 @@ MobileMessageCallback::NotifyMessageSent(nsISupports *aMessage)
                                   &wrappedMessage);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDOMRequestService> rs = do_GetService(DOMREQUEST_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(rs, NS_ERROR_FAILURE);
-
-  rs->FireSuccess(mDOMRequest, wrappedMessage);
-
-  return NS_OK;
+  return NotifySuccess(wrappedMessage);
 }
 
-NS_IMETHODIMP
-MobileMessageCallback::NotifySendMessageFailed(int32_t aError)
+nsresult
+MobileMessageCallback::NotifyError(int32_t aError)
 {
   nsCOMPtr<nsIDOMRequestService> rs = do_GetService(DOMREQUEST_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(rs, NS_ERROR_FAILURE);
@@ -84,32 +87,44 @@ MobileMessageCallback::NotifySendMessageFailed(int32_t aError)
 }
 
 NS_IMETHODIMP
-MobileMessageCallback::NotifyMessageGot(nsIDOMMozSmsMessage *aMessage)
+MobileMessageCallback::NotifyMessageSent(nsISupports *aMessage)
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NotifySuccess(aMessage);
+}
+
+NS_IMETHODIMP
+MobileMessageCallback::NotifySendMessageFailed(int32_t aError)
+{
+  return NotifyError(aError);
+}
+
+NS_IMETHODIMP
+MobileMessageCallback::NotifyMessageGot(nsISupports *aMessage)
+{
+  return NotifySuccess(aMessage);
 }
 
 NS_IMETHODIMP
 MobileMessageCallback::NotifyGetMessageFailed(int32_t aError)
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NotifyError(aError);
 }
 
 NS_IMETHODIMP
 MobileMessageCallback::NotifyMessageDeleted(bool aDeleted)
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NotifySuccess(aDeleted ? JSVAL_TRUE : JSVAL_FALSE);
 }
 
 NS_IMETHODIMP
 MobileMessageCallback::NotifyDeleteMessageFailed(int32_t aError)
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NotifyError(aError);
 }
 
 NS_IMETHODIMP
 MobileMessageCallback::NotifyMessageListCreated(int32_t aListId,
-                                                nsIDOMMozSmsMessage *aMessage)
+                                                nsISupports *aMessage)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -121,7 +136,7 @@ MobileMessageCallback::NotifyReadMessageListFailed(int32_t aError)
 }
 
 NS_IMETHODIMP
-MobileMessageCallback::NotifyNextMessageInListGot(nsIDOMMozSmsMessage *aMessage)
+MobileMessageCallback::NotifyNextMessageInListGot(nsISupports *aMessage)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -135,13 +150,13 @@ MobileMessageCallback::NotifyNoMessageInList()
 NS_IMETHODIMP
 MobileMessageCallback::NotifyMessageMarkedRead(bool aRead)
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NotifySuccess(aRead ? JSVAL_TRUE : JSVAL_FALSE);
 }
 
 NS_IMETHODIMP
 MobileMessageCallback::NotifyMarkMessageReadFailed(int32_t aError)
 {
-  return NS_ERROR_NOT_IMPLEMENTED;
+  return NotifyError(aError);
 }
 
 NS_IMETHODIMP
