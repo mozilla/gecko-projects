@@ -134,6 +134,7 @@ webidl_files = \
   Location.webidl \
   MediaStream.webidl \
   MessageEvent.webidl \
+  MouseEvent.webidl \
   MozActivity.webidl \
   MutationEvent.webidl \
   MutationObserver.webidl \
@@ -181,7 +182,9 @@ webidl_files = \
   SVGFilterElement.webidl \
   SVGFilterPrimitiveStandardAttributes.webidl \
   SVGFEBlendElement.webidl \
+  SVGFEColorMatrixElement.webidl \
   SVGFEComponentTransferElement.webidl \
+  SVGFECompositeElement.webidl \
   SVGFEDistantLightElement.webidl \
   SVGFEFloodElement.webidl \
   SVGFEFuncAElement.webidl \
@@ -293,6 +296,7 @@ test_webidl_files := \
   TestCodeGen.webidl \
   TestDictionary.webidl \
   TestExampleGen.webidl \
+  TestJSImplGen.webidl \
   TestTypedef.webidl \
   $(NULL)
 else
