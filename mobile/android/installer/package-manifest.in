@@ -40,7 +40,6 @@
 @BINPATH@/@DLL_PREFIX@plds4@DLL_SUFFIX@
 @BINPATH@/@DLL_PREFIX@nspr4@DLL_SUFFIX@
 #endif
-@BINPATH@/@DLL_PREFIX@xpcom@DLL_SUFFIX@
 @BINPATH@/@DLL_PREFIX@mozalloc@DLL_SUFFIX@
 @BINPATH@/@DLL_PREFIX@mozglue@DLL_SUFFIX@
 @BINPATH@/@DLL_PREFIX@omxplugin@DLL_SUFFIX@
@@ -131,6 +130,7 @@
 @BINPATH@/components/dom_json.xpt
 @BINPATH@/components/dom_browserelement.xpt
 @BINPATH@/components/dom_power.xpt
+@BINPATH@/components/dom_quota.xpt
 @BINPATH@/components/dom_range.xpt
 @BINPATH@/components/dom_settings.xpt
 @BINPATH@/components/dom_sidebar.xpt
@@ -141,6 +141,9 @@
 @BINPATH@/components/dom_threads.xpt
 @BINPATH@/components/dom_traversal.xpt
 @BINPATH@/components/dom_views.xpt
+#ifdef MOZ_WEBSPEECH
+@BINPATH@/components/dom_webspeech.xpt
+#endif
 @BINPATH@/components/dom_xbl.xpt
 @BINPATH@/components/dom_xpath.xpt
 @BINPATH@/components/dom_xul.xpt
@@ -169,7 +172,6 @@
 @BINPATH@/components/jsdebugger.xpt
 @BINPATH@/components/jsinspector.xpt
 @BINPATH@/components/layout_base.xpt
-@BINPATH@/components/layout_forms.xpt
 #ifdef NS_PRINTING
 @BINPATH@/components/layout_printing.xpt
 #endif

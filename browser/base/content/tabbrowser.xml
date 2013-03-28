@@ -448,12 +448,28 @@
               return this.mTabBrowser._callProgressListeners.apply(this.mTabBrowser, arguments);
             },
 
+            _shouldShowProgress: function (aRequest) {
+              if (this.mBlank)
+                return false;
+
+              // Don't show progress indicators in tabs for about: URIs
+              // pointing to local resources.
+              try {
+                let channel = aRequest.QueryInterface(Ci.nsIChannel);
+                if (channel.originalURI.schemeIs("about") &&
+                    (channel.URI.schemeIs("jar") || channel.URI.schemeIs("file")))
+                  return false;
+              } catch (e) {}
+
+              return true;
+            },
+
             onProgressChange: function (aWebProgress, aRequest,
                                         aCurSelfProgress, aMaxSelfProgress,
                                         aCurTotalProgress, aMaxTotalProgress) {
               this.mTotalProgress = aMaxTotalProgress ? aCurTotalProgress / aMaxTotalProgress : 0;
 
-              if (this.mBlank)
+              if (!this._shouldShowProgress(aRequest))
                 return;
 
               if (this.mTotalProgress)
@@ -510,7 +526,7 @@
                 if (aWebProgress.DOMWindow == this.mBrowser.contentWindow)
                   this.mBrowser.userTypedClear += 2;
 
-                if (!this.mBlank) {
+                if (this._shouldShowProgress(aRequest)) {
                   if (!(aStateFlags & nsIWebProgressListener.STATE_RESTORING)) {
                     this.mTab.setAttribute("busy", "true");
                     if (!(this.mBrowser.docShell.loadType & Ci.nsIDocShell.LOAD_CMD_RELOAD))
@@ -694,9 +710,15 @@
                                                                this.mFaviconService.FAVICON_LOAD_NON_PRIVATE);
             }
 
-            if ((browser.mIconURL || "") != aTab.getAttribute("image")) {
-              if (browser.mIconURL)
-                aTab.setAttribute("image", browser.mIconURL);
+            let sizedIconUrl = browser.mIconURL || "";
+            if (sizedIconUrl) {
+              let size = Math.round(16 * window.devicePixelRatio);
+              sizedIconUrl += (sizedIconUrl.contains("#") ? "&" : "#") +
+                              "-moz-resolution=" + size + "," + size;
+            }
+            if (sizedIconUrl != aTab.getAttribute("image")) {
+              if (sizedIconUrl)
+                aTab.setAttribute("image", sizedIconUrl);
               else
                 aTab.removeAttribute("image");
               this._tabAttrModified(aTab);
@@ -1246,10 +1268,9 @@
               "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul",
                                              "tab");
 
-            var uriIsBlankPage = !aURI || isBlankPageURL(aURI);
-            var uriIsNotAboutBlank = aURI && aURI != "about:blank";
+            var uriIsAboutBlank = !aURI || aURI == "about:blank";
 
-            if (uriIsBlankPage)
+            if (!aURI || isBlankPageURL(aURI))
               t.setAttribute("label", this.mStringBundle.getString("tabs.emptyTabTitle"));
             else
               t.setAttribute("label", aURI);
@@ -1353,7 +1374,7 @@
 
             this.tabContainer.updateVisibility();
 
-            if (uriIsNotAboutBlank) {
+            if (!uriIsAboutBlank) {
               // Stop the existing about:blank load.  Otherwise, if aURI
               // doesn't stop in-progress loads on its own, we'll get into
               // trouble with multiple parallel loads running at once.
@@ -1361,7 +1382,7 @@
             }
 
             // wire up a progress listener for the new browser object.
-            var tabListener = this.mTabProgressListener(t, b, uriIsBlankPage);
+            var tabListener = this.mTabProgressListener(t, b, uriIsAboutBlank);
             const filter = Components.classes["@mozilla.org/appshell/component/browser-status-filter;1"]
                                      .createInstance(Components.interfaces.nsIWebProgress);
             filter.addProgressListener(tabListener, Components.interfaces.nsIWebProgress.NOTIFY_ALL);
@@ -1383,10 +1404,10 @@
             evt.initEvent("TabOpen", true, false);
             t.dispatchEvent(evt);
 
-            if (uriIsNotAboutBlank) {
+            if (!uriIsAboutBlank) {
               // pretend the user typed this so it'll be available till
               // the document successfully loads
-              if (!uriIsBlankPage)
+              if (aURI && gInitialPages.indexOf(aURI) == -1)
                 b.userTypedValue = aURI;
 
               let flags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
@@ -4009,8 +4030,7 @@
             url = browserDragAndDrop.drop(event, { }, true);
           } catch (ex) {}
 
-          // valid urls don't contain spaces ' '; if we have a space it isn't a valid url.
-          if (!url || url.contains(" "))
+          if (!url)
             return;
 
           let bgLoad = Services.prefs.getBoolPref("browser.tabs.loadInBackground");
@@ -4022,12 +4042,12 @@
           if (!tab || dropEffect == "copy") {
             // We're adding a new tab.
             let newIndex = this._getDropIndex(event);
-            let newTab = this.tabbrowser.loadOneTab(getShortcutOrURI(url), {inBackground: bgLoad});
+            let newTab = this.tabbrowser.loadOneTab(url, {inBackground: bgLoad, allowThirdPartyFixup: true});
             this.tabbrowser.moveTabTo(newTab, newIndex);
           } else {
             // Load in an existing tab.
             try {
-              this.tabbrowser.getBrowserForTab(tab).loadURI(getShortcutOrURI(url));
+              this.tabbrowser.getBrowserForTab(tab).loadURIWithFlags(url, Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP);
               if (!bgLoad)
                 this.selectedItem = tab;
             } catch(ex) {

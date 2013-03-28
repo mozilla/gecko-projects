@@ -1518,6 +1518,8 @@ JS_WrapObject(JSContext *cx, JSObject **objp)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
+    if (*objp)
+        JS::ExposeGCThingToActiveJS(*objp, JSTRACE_OBJECT);
     return cx->compartment->wrap(cx, objp);
 }
 
@@ -1526,6 +1528,8 @@ JS_WrapValue(JSContext *cx, jsval *vp)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
+    if (vp)
+        JS::ExposeValueToActiveJS(*vp);
     RootedValue value(cx, *vp);
     bool ok = cx->compartment->wrap(cx, &value);
     *vp = value.get();
@@ -1537,6 +1541,13 @@ JS_WrapId(JSContext *cx, jsid *idp)
 {
   AssertHeapIsIdle(cx);
   CHECK_REQUEST(cx);
+  if (idp) {
+      jsid id = *idp;
+      if (JSID_IS_STRING(id))
+          JS::ExposeGCThingToActiveJS(JSID_TO_STRING(id), JSTRACE_STRING);
+      else if (JSID_IS_OBJECT(id))
+          JS::ExposeGCThingToActiveJS(JSID_TO_OBJECT(id), JSTRACE_OBJECT);
+  }
   return cx->compartment->wrapId(cx, idp);
 }
 
@@ -4976,22 +4987,22 @@ JS_DefineFunctions(JSContext *cx, JSObject *objArg, JSFunctionSpec *fs)
         }
 
         /*
-         * During creation of the self-hosting global, we ignore all
-         * self-hosted functions, as that means we're currently setting up
-         * the global object that that the self-hosted code is then compiled
-         * in. Self-hosted functions can access each other via their names,
-         * but not via the builtin classes they get installed into.
-         */
-        if (fs->selfHostedName && cx->runtime->isSelfHostingGlobal(cx->global()))
-            return JS_TRUE;
-
-        /*
          * Delay cloning self-hosted functions until they are called. This is
          * achieved by passing DefineFunction a NULL JSNative which
          * produces an interpreted JSFunction where !hasScript. Interpreted
          * call paths then call InitializeLazyFunctionScript if !hasScript.
          */
         if (fs->selfHostedName) {
+            /*
+             * During creation of the self-hosting global, we ignore all
+             * self-hosted functions, as that means we're currently setting up
+             * the global object that the self-hosted code is then compiled
+             * in. Self-hosted functions can access each other via their names,
+             * but not via the builtin classes they get installed into.
+             */
+            if (cx->runtime->isSelfHostingGlobal(cx->global()))
+                continue;
+
             RootedFunction fun(cx, DefineFunction(cx, obj, id, /* native = */ NULL, fs->nargs, 0,
                                                   JSFunction::ExtendedFinalizeKind, SingletonObject));
             if (!fun)

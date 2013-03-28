@@ -90,8 +90,13 @@
 #include "mozilla/dom/EventSource.h"
 #include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
 #include "mozilla/dom/network/TCPSocketChild.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/OSFileConstants.h"
 #include "mozilla/Services.h"
+
+#ifdef MOZ_WEBSPEECH
+#include "mozilla/dom/FakeSpeechRecognitionService.h"
+#endif
 
 #ifdef MOZ_B2G_RIL
 #include "SystemWorkerManager.h"
@@ -248,6 +253,7 @@ using namespace mozilla::dom::mobilemessage;
 using mozilla::dom::alarm::AlarmHalService;
 using mozilla::dom::indexedDB::IndexedDatabaseManager;
 using mozilla::dom::power::PowerManagerService;
+using mozilla::dom::quota::QuotaManager;
 using mozilla::dom::TCPSocketChild;
 using mozilla::dom::time::TimeService;
 
@@ -280,6 +286,8 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(IndexedDatabaseManager,
                                          IndexedDatabaseManager::FactoryCreate)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(DOMRequestService,
                                          DOMRequestService::FactoryCreate)
+NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(QuotaManager,
+                                         QuotaManager::FactoryCreate)
 #ifdef MOZ_B2G_RIL
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(SystemWorkerManager,
                                          SystemWorkerManager::FactoryCreate)
@@ -666,6 +674,10 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsGeolocationService, nsGeolocationServ
 
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(AudioChannelService, AudioChannelService::GetAudioChannelService)
 
+#ifdef MOZ_WEBSPEECH
+NS_GENERIC_FACTORY_CONSTRUCTOR(FakeSpeechRecognitionService)
+#endif
+
 NS_GENERIC_FACTORY_CONSTRUCTOR(CSPService)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsMixedContentBlocker)
 
@@ -783,6 +795,7 @@ NS_DEFINE_NAMED_CID(NS_DOMJSON_CID);
 NS_DEFINE_NAMED_CID(NS_TEXTEDITOR_CID);
 NS_DEFINE_NAMED_CID(INDEXEDDB_MANAGER_CID);
 NS_DEFINE_NAMED_CID(DOMREQUEST_SERVICE_CID);
+NS_DEFINE_NAMED_CID(QUOTA_MANAGER_CID);
 #ifdef MOZ_B2G_RIL
 NS_DEFINE_NAMED_CID(SYSTEMWORKERMANAGER_CID);
 #endif
@@ -849,6 +862,9 @@ NS_DEFINE_NAMED_CID(GONK_GPS_GEOLOCATION_PROVIDER_CID);
 NS_DEFINE_NAMED_CID(NS_MEDIAMANAGERSERVICE_CID);
 #ifdef MOZ_GAMEPAD
 NS_DEFINE_NAMED_CID(NS_GAMEPAD_TEST_CID);
+#endif
+#ifdef MOZ_WEBSPEECH
+NS_DEFINE_NAMED_CID(NS_FAKE_SPEECH_RECOGNITION_SERVICE_CID);
 #endif
 
 static nsresult
@@ -1069,6 +1085,7 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kNS_TEXTEDITOR_CID, false, NULL, nsPlaintextEditorConstructor },
   { &kINDEXEDDB_MANAGER_CID, false, NULL, IndexedDatabaseManagerConstructor },
   { &kDOMREQUEST_SERVICE_CID, false, NULL, DOMRequestServiceConstructor },
+  { &kQUOTA_MANAGER_CID, false, NULL, QuotaManagerConstructor },
 #ifdef MOZ_B2G_RIL
   { &kSYSTEMWORKERMANAGER_CID, true, NULL, SystemWorkerManagerConstructor },
 #endif
@@ -1097,6 +1114,9 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kNS_GEOLOCATION_CID, false, NULL, nsGeolocationConstructor },
   { &kNS_AUDIOCHANNEL_SERVICE_CID, false, NULL, AudioChannelServiceConstructor },
   { &kNS_FOCUSMANAGER_CID, false, NULL, CreateFocusManager },
+#ifdef MOZ_WEBSPEECH
+  { &kNS_FAKE_SPEECH_RECOGNITION_SERVICE_CID, false, NULL, FakeSpeechRecognitionServiceConstructor },
+#endif
   { &kCSPSERVICE_CID, false, NULL, CSPServiceConstructor },
   { &kNS_MIXEDCONTENTBLOCKER_CID, false, NULL, nsMixedContentBlockerConstructor },
   { &kNS_EVENTLISTENERSERVICE_CID, false, NULL, CreateEventListenerService },
@@ -1216,6 +1236,7 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { "@mozilla.org/editor/texteditor;1", &kNS_TEXTEDITOR_CID },
   { INDEXEDDB_MANAGER_CONTRACTID, &kINDEXEDDB_MANAGER_CID },
   { DOMREQUEST_SERVICE_CONTRACTID, &kDOMREQUEST_SERVICE_CID },
+  { QUOTA_MANAGER_CONTRACTID, &kQUOTA_MANAGER_CID },
 #ifdef MOZ_B2G_RIL
   { SYSTEMWORKERMANAGER_CONTRACTID, &kSYSTEMWORKERMANAGER_CID },
 #endif
@@ -1242,6 +1263,9 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { "@mozilla.org/geolocation;1", &kNS_GEOLOCATION_CID },
   { "@mozilla.org/audiochannel/service;1", &kNS_AUDIOCHANNEL_SERVICE_CID },
   { "@mozilla.org/focus-manager;1", &kNS_FOCUSMANAGER_CID },
+#ifdef MOZ_WEBSPEECH
+  { NS_SPEECH_RECOGNITION_SERVICE_CONTRACTID_PREFIX "fake", &kNS_FAKE_SPEECH_RECOGNITION_SERVICE_CID },
+#endif
   { CSPSERVICE_CONTRACTID, &kCSPSERVICE_CID },
   { NS_MIXEDCONTENTBLOCKER_CONTRACTID, &kNS_MIXEDCONTENTBLOCKER_CID },
   { NS_EVENTLISTENERSERVICE_CONTRACTID, &kNS_EVENTLISTENERSERVICE_CID },
@@ -1294,7 +1318,7 @@ static const mozilla::Module::CategoryEntry kLayoutCategories[] = {
   { "net-channel-event-sinks", "CSPService", CSPSERVICE_CONTRACTID },
   { JAVASCRIPT_GLOBAL_STATIC_NAMESET_CATEGORY, "PrivilegeManager", NS_SECURITYNAMESET_CONTRACTID },
   { "app-startup", "Script Security Manager", "service," NS_SCRIPTSECURITYMANAGER_CONTRACTID },
-  { TOPIC_WEB_APP_CLEAR_DATA, "IndexedDatabaseManager", "service," INDEXEDDB_MANAGER_CONTRACTID },
+  { TOPIC_WEB_APP_CLEAR_DATA, "QuotaManager", "service," QUOTA_MANAGER_CONTRACTID },
 #ifdef MOZ_WIDGET_GONK
   { "app-startup", "Volume Service", "service," NS_VOLUMESERVICE_CONTRACTID },
 #endif

@@ -74,7 +74,7 @@ class Emulator(object):
         self.copy_userdata = self.dataImg is None
 
     def _check_for_b2g(self):
-        self.b2g = B2GInstance(homedir=self.homedir)
+        self.b2g = B2GInstance(homedir=self.homedir, emulator=True)
         self.adb = self.b2g.adb_path
         self.homedir = self.b2g.homedir
 
@@ -161,6 +161,9 @@ class Emulator(object):
                                     and self.proc.poll() is not None):
             return True
         return False
+
+    def check_for_minidumps(self, symbols_path):
+        return self.b2g.check_for_crashes(symbols_path)
 
     def create_sdcard(self, sdcard):
         self._tmp_sdcard = tempfile.mktemp(prefix='sdcard')
@@ -274,7 +277,7 @@ waitFor(
         marionette.delete_session()
 
     def connect(self):
-        self.adb = B2GInstance.check_adb(self.homedir)
+        self.adb = B2GInstance.check_adb(self.homedir, emulator=True)
         self.start_adb()
 
         online, offline = self._get_adb_devices()
