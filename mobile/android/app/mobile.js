@@ -444,7 +444,7 @@ pref("plugins.click_to_play", true);
 pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
 pref("app.support.baseURL", "http://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
 // Used to submit data to input from about:feedback
-pref("app.feedback.postURL", "http://m.input.mozilla.org/%LOCALE%/feedback");
+pref("app.feedback.postURL", "https://input.mozilla.org/%LOCALE%/feedback");
 pref("app.privacyURL", "http://www.mozilla.com/%LOCALE%/m/privacy.html");
 pref("app.creditsURL", "http://www.mozilla.org/credits/");
 pref("app.channelURL", "http://www.mozilla.org/%LOCALE%/firefox/channel/");
@@ -682,6 +682,20 @@ pref("browser.chrome.dynamictoolbar", true);
 // too long for some reason (bug 843738)
 pref("webgl.disabled", true);
 #endif
+
+// initial web feed readers list
+pref("browser.contentHandlers.types.0.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.0.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.0.type", "application/vnd.mozilla.maybe.feed");
+pref("browser.contentHandlers.types.1.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.1.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.1.type", "application/vnd.mozilla.maybe.feed");
+pref("browser.contentHandlers.types.2.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.2.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.2.type", "application/vnd.mozilla.maybe.feed");
+pref("browser.contentHandlers.types.3.title", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.3.uri", "chrome://browser/locale/region.properties");
+pref("browser.contentHandlers.types.3.type", "application/vnd.mozilla.maybe.feed");
 
 #ifndef RELEASE_BUILD
 // Enable Web Audio for Firefox for Android in Nightly and Aurora

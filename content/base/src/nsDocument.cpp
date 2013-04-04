@@ -140,6 +140,8 @@
 #include "nsIPrompt.h"
 #include "nsIPropertyBag2.h"
 #include "nsIDOMPageTransitionEvent.h"
+#include "nsIDOMStyleSheetAddedEvent.h"
+#include "nsIDOMStyleSheetRemovedEvent.h"
 #include "nsJSUtils.h"
 #include "nsFrameLoader.h"
 #include "nsEscape.h"
@@ -179,6 +181,7 @@
 #include "nsXULAppAPI.h"
 #include "nsDOMTouchEvent.h"
 #include "DictionaryHelpers.h"
+#include "GeneratedEvents.h"
 
 #include "mozilla/Preferences.h"
 
@@ -3658,6 +3661,53 @@ nsDocument::AddStyleSheetToStyleSets(nsIStyleSheet* aSheet)
   }
 }
 
+#define DO_STYLESHEET_NOTIFICATION(createFunc, initMethod, concreteInterface, type) \
+  do {                                                                  \
+    nsCOMPtr<nsIDOMEvent> event;                                        \
+    nsresult rv = createFunc(getter_AddRefs(event), this,               \
+                             mPresShell ?                               \
+                             mPresShell->GetPresContext() : nullptr,    \
+                             nullptr);                                  \
+    if (NS_FAILED(rv)) {                                                \
+      return;                                                           \
+    }                                                                   \
+    nsCOMPtr<nsIDOMCSSStyleSheet> cssSheet(do_QueryInterface(aSheet));  \
+    if (!cssSheet) {                                                    \
+      return;                                                           \
+    }                                                                   \
+    nsCOMPtr<concreteInterface> ssEvent(do_QueryInterface(event));      \
+    MOZ_ASSERT(ssEvent);                                                \
+    ssEvent->initMethod(NS_LITERAL_STRING(type), true, true,            \
+                        cssSheet, aDocumentSheet);                      \
+    event->SetTrusted(true);                                            \
+    event->SetTarget(this);                                             \
+    nsRefPtr<nsAsyncDOMEvent> asyncEvent = new nsAsyncDOMEvent(this, event); \
+    asyncEvent->mDispatchChromeOnly = true;                             \
+    asyncEvent->PostDOMEvent();                                         \
+  } while (0);
+
+void
+nsDocument::NotifyStyleSheetAdded(nsIStyleSheet* aSheet, bool aDocumentSheet)
+{
+  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetAdded, (this, aSheet, aDocumentSheet));
+  DO_STYLESHEET_NOTIFICATION(NS_NewDOMStyleSheetAddedEvent,
+                             InitStyleSheetAddedEvent,
+                             nsIDOMStyleSheetAddedEvent,
+                             "StyleSheetAdded");
+}
+
+void
+nsDocument::NotifyStyleSheetRemoved(nsIStyleSheet* aSheet, bool aDocumentSheet)
+{
+  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetRemoved, (this, aSheet, aDocumentSheet));
+  DO_STYLESHEET_NOTIFICATION(NS_NewDOMStyleSheetRemovedEvent,
+                             InitStyleSheetRemovedEvent,
+                             nsIDOMStyleSheetRemovedEvent,
+                             "StyleSheetRemoved");
+}
+
+#undef DO_STYLESHEET_NOTIFICATION
+
 void
 nsDocument::AddStyleSheet(nsIStyleSheet* aSheet)
 {
@@ -3669,7 +3719,7 @@ nsDocument::AddStyleSheet(nsIStyleSheet* aSheet)
     AddStyleSheetToStyleSets(aSheet);
   }
 
-  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetAdded, (this, aSheet, true));
+  NotifyStyleSheetAdded(aSheet, true);
 }
 
 void
@@ -3697,7 +3747,7 @@ nsDocument::RemoveStyleSheet(nsIStyleSheet* aSheet)
       RemoveStyleSheetFromStyleSets(aSheet);
     }
 
-    NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetRemoved, (this, aSheet, true));
+    NotifyStyleSheetRemoved(aSheet, true);
   }
 
   aSheet->SetOwningDocument(nullptr);
@@ -3733,7 +3783,7 @@ nsDocument::UpdateStyleSheets(nsCOMArray<nsIStyleSheet>& aOldSheets,
         AddStyleSheetToStyleSets(newSheet);
       }
 
-      NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetAdded, (this, newSheet, true));
+      NotifyStyleSheetAdded(newSheet, true);
     }
   }
 
@@ -3752,7 +3802,7 @@ nsDocument::InsertStyleSheetAt(nsIStyleSheet* aSheet, int32_t aIndex)
     AddStyleSheetToStyleSets(aSheet);
   }
 
-  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetAdded, (this, aSheet, true));
+  NotifyStyleSheetAdded(aSheet, true);
 }
 
 
@@ -3810,7 +3860,7 @@ nsDocument::AddCatalogStyleSheet(nsCSSStyleSheet* aSheet)
     }
   }
 
-  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetAdded, (this, aSheet, false));
+  NotifyStyleSheetAdded(aSheet, false);
 }
 
 void
@@ -3905,7 +3955,7 @@ nsDocument::LoadAdditionalStyleSheet(additionalSheetType aType, nsIURI* aSheetUR
 
   // Passing false, so documet.styleSheets.length will not be affected by
   // these additional sheets.
-  NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetAdded, (this, sheet, false));
+  NotifyStyleSheetAdded(sheet, false);
   EndUpdate(UPDATE_STYLE);
 
   return NS_OK;
@@ -3935,7 +3985,7 @@ nsDocument::RemoveAdditionalStyleSheet(additionalSheetType aType, nsIURI* aSheet
 
     // Passing false, so documet.styleSheets.length will not be affected by
     // these additional sheets.
-    NS_DOCUMENT_NOTIFY_OBSERVERS(StyleSheetRemoved, (this, sheetRef, false));
+    NotifyStyleSheetRemoved(sheetRef, false);
     EndUpdate(UPDATE_STYLE);
 
     sheetRef->SetOwningDocument(nullptr);
@@ -5005,7 +5055,7 @@ nsDocument::Register(JSContext* aCx, const nsAString& aName,
 
   JSObject* protoObject;
   if (!aOptions.mPrototype) {
-    protoObject = JS_NewObject(aCx, NULL, htmlProto, NULL);
+    protoObject = JS_NewObject(aCx, nullptr, htmlProto, nullptr);
     if (!protoObject) {
       rv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
@@ -11134,7 +11184,7 @@ nsDocument::DocSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
     0;
 
   aWindowSizes->mDOMOther +=
-    mStyledLinks.SizeOfExcludingThis(NULL, aWindowSizes->mMallocSizeOf);
+    mStyledLinks.SizeOfExcludingThis(nullptr, aWindowSizes->mMallocSizeOf);
 
   aWindowSizes->mDOMOther +=
     mIdentifierMap.SizeOfExcludingThis(nsIdentifierMapEntry::SizeOfExcludingThis,

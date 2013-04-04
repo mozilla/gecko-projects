@@ -204,11 +204,15 @@ public class BrowserToolbar implements ViewSwitcher.ViewFactory,
                         menu.findItem(R.id.share).setVisible(false);
                         menu.findItem(R.id.add_to_launcher).setVisible(false);
                     }
+                    if (!tab.getFeedsEnabled()) {
+                        menu.findItem(R.id.subscribe).setVisible(false);
+                    }
                 } else {
                     // if there is no tab, remove anything tab dependent
                     menu.findItem(R.id.copyurl).setVisible(false);
                     menu.findItem(R.id.share).setVisible(false);
                     menu.findItem(R.id.add_to_launcher).setVisible(false);
+                    menu.findItem(R.id.subscribe).setVisible(false);
                 }
             }
         });
@@ -887,6 +891,12 @@ public class BrowserToolbar implements ViewSwitcher.ViewFactory,
     }
 
     public void updateTabCountAndAnimate(int count) {
+        // Don't animate if the toolbar is hidden.
+        if (!isVisible()) {
+            updateTabCount(count);
+            return;
+        }
+
         if (mCount > count) {
             mTabsCount.setInAnimation(mSlideDownIn);
             mTabsCount.setOutAnimation(mSlideDownOut);
