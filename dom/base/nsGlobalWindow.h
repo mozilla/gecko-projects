@@ -981,8 +981,10 @@ protected:
 
   void UpdateCanvasFocus(bool aFocusChanged, nsIContent* aNewContent);
 
-  already_AddRefed<nsPIWindowRoot> GetTopWindowRoot();
+public:
+  virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() MOZ_OVERRIDE;
 
+protected:
   static void NotifyDOMWindowDestroyed(nsGlobalWindow* aWindow);
   void NotifyWindowIDDestroyed(const char* aTopic);
 
@@ -1111,7 +1113,6 @@ protected:
   nsRefPtr<nsDOMWindowUtils>    mWindowUtils;
   nsString                      mStatus;
   nsString                      mDefaultStatus;
-  // index 0->language_id 1, so index MAX-1 == language_id MAX
   nsGlobalWindowObserver*       mObserver;
   nsCOMPtr<nsIDOMCrypto>        mCrypto;
 
