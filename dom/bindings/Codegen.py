@@ -418,6 +418,14 @@ class CGIfWrapper(CGWrapper):
         CGWrapper.__init__(self, CGIndenter(child), pre=pre.define(),
                            post="\n}")
 
+class CGTemplatedType(CGWrapper):
+    def __init__(self, templateName, child, isConst=False, isReference=False):
+        const = "const " if isConst else ""
+        pre = "%s%s<" % (const, templateName)
+        ref = "&" if isReference else ""
+        post = " >%s" % ref
+        CGWrapper.__init__(self, child, pre=pre, post=post)
+
 class CGNamespace(CGWrapper):
     def __init__(self, namespace, child, declareOnly=False):
         pre = "namespace %s {\n" % namespace
@@ -478,7 +486,7 @@ class CGHeaders(CGWrapper):
     def __init__(self, descriptors, dictionaries, callbacks,
                  callbackDescriptors,
                  declareIncludes, defineIncludes, child,
-                 config=None, anyJSImplemented=False):
+                 config=None, jsImplementedDescriptors=[]):
         """
         Builds a set of includes to cover |descriptors|.
 
@@ -594,11 +602,19 @@ class CGHeaders(CGWrapper):
             # And we need BindingUtils.h so we can wrap "this" objects
             declareIncludes.add("mozilla/dom/BindingUtils.h")
 
-        if len(callbackDescriptors) != 0 or anyJSImplemented:
+        if len(callbackDescriptors) != 0 or len(jsImplementedDescriptors) != 0:
             # We need CallbackInterface to serve as our parent class
             declareIncludes.add("mozilla/dom/CallbackInterface.h")
             # And we need BindingUtils.h so we can wrap "this" objects
             declareIncludes.add("mozilla/dom/BindingUtils.h")
+
+        # Also need to include the headers for ancestors of
+        # JS-implemented interfaces.
+        for jsImplemented in jsImplementedDescriptors:
+            jsParent = jsImplemented.interface.parent
+            if jsParent:
+                parentDesc = jsImplemented.getDescriptor(jsParent.identifier.name)
+                declareIncludes.add(parentDesc.jsImplParentHeader)
 
         # Let the machinery do its thing.
         def _includeString(includes):
@@ -1105,13 +1121,16 @@ class CGClassHasInstanceHook(CGAbstractStaticMethod):
   const DOMClass* domClass = GetDOMClass(js::UnwrapObject(instance));
   *bp = false;
   """
-        for iface in self.descriptor.interface.interfacesImplementingSelf:
+        # Sort interaces implementing self by name so we get stable output.
+        for iface in sorted(self.descriptor.interface.interfacesImplementingSelf,
+                            key=lambda iface: iface.identifier.name):
             hasInstanceCode += """
   if (domClass->mInterfaceChain[PrototypeTraits<prototypes::id::%s>::Depth] == prototypes::id::%s) {
     *bp = true;
     return true;
-  }""" % (iface.identifier.name, iface.identifier.name)
-        hasInstanceCode += "return true;"
+  }
+""" % (iface.identifier.name, iface.identifier.name)
+        hasInstanceCode += "  return true;"
         return header + hasInstanceCode;
 
 def isChromeOnly(m):
@@ -2360,11 +2379,10 @@ def getJSToNativeConversionTemplate(type, descriptorProvider, failureCode=None,
         if elementHolderType is not None:
             raise TypeError("Shouldn't need holders for sequences")
 
-        typeName = CGWrapper(elementDeclType,
-                             pre=("%s< " % sequenceClass), post=" >")
+        typeName = CGTemplatedType(sequenceClass, elementDeclType)
         sequenceType = typeName.define()
         if nullable:
-            typeName = CGWrapper(typeName, pre="Nullable< ", post=" >")
+            typeName = CGTemplatedType("Nullable", typeName)
             arrayRef = "${declName}.Value()"
         else:
             arrayRef = "${declName}"
@@ -2462,9 +2480,7 @@ for (uint32_t i = 0; i < length; ++i) {
             memberType = arrayObjectMemberTypes[0]
             name = memberType.name
             arrayObject = CGGeneric("done = (failed = !%s.TrySetTo%s(cx, ${obj}, ${val}, ${valPtr}, tryNext)) || !tryNext;" % (unionArgumentObj, name))
-            arrayObject = CGWrapper(CGIndenter(arrayObject),
-                                    pre="if (IsArrayLike(cx, &argObj)) {\n",
-                                    post="}")
+            arrayObject = CGIfWrapper(arrayObject, "IsArrayLike(cx, &argObj)")
             names.append(name)
         else:
             arrayObject = None
@@ -2476,9 +2492,7 @@ for (uint32_t i = 0; i < length; ++i) {
             name = memberType.name
             dateObject = CGGeneric("%s.SetTo%s(cx, ${val}, ${valPtr});\n"
                                    "done = true;" % (unionArgumentObj, name))
-            dateObject = CGWrapper(CGIndenter(dateObject),
-                                   pre="if (JS_ObjectIsDate(cx, &argObj)) {\n",
-                                   post="\n}")
+            dateObject = CGIfWrapper(dateObject, "JS_ObjectIsDate(cx, &argObj)");
             names.append(name)
         else:
             dateObject = None
@@ -2525,8 +2539,7 @@ for (uint32_t i = 0; i < length; ++i) {
             if interfaceObject:
                 assert not object
                 if templateBody:
-                    templateBody = CGWrapper(CGIndenter(templateBody),
-                                             pre="if (!done) {\n", post=("\n}"))
+                    templateBody = CGIfWrapper(templateBody, "!done")
                 templateBody = CGList([interfaceObject, templateBody], "\n")
             else:
                 templateBody = CGList([templateBody, object], "\n")
@@ -2534,9 +2547,7 @@ for (uint32_t i = 0; i < length; ++i) {
             if any([arrayObject, dateObject, callbackObject, dictionaryObject,
                     object]):
                 templateBody.prepend(CGGeneric("JSObject& argObj = ${val}.toObject();"))
-            templateBody = CGWrapper(CGIndenter(templateBody),
-                                     pre="if (${val}.isObject()) {\n",
-                                     post="\n}")
+            templateBody = CGIfWrapper(templateBody, "${val}.isObject()")
         else:
             templateBody = CGGeneric()
 
@@ -2599,8 +2610,8 @@ for (uint32_t i = 0; i < length; ++i) {
         holderType = CGGeneric(argumentTypeName)
         if isOptional:
             mutableDecl = nonConstDecl + ".Value()"
-            declType = CGWrapper(declType, pre="const Optional<", post=" >")
-            holderType = CGWrapper(holderType, pre="Maybe<", post=" >")
+            declType = CGTemplatedType("Optional", declType, isConst=True)
+            holderType = CGTemplatedType("Maybe", holderType)
             constructDecl = CGGeneric(nonConstDecl + ".Construct();")
             if nullable:
                 constructHolder = CGGeneric("${holderName}.construct(%s.SetValue());" % mutableDecl)
@@ -2610,7 +2621,7 @@ for (uint32_t i = 0; i < length; ++i) {
             mutableDecl = nonConstDecl
             constructDecl = None
             if nullable:
-                holderType = CGWrapper(holderType, pre="Maybe<", post=" >")
+                holderType = CGTemplatedType("Maybe", holderType)
                 constructHolder = CGGeneric("${holderName}.construct(%s.SetValue());" % mutableDecl)
             else:
                 constructHolder = CGWrapper(holderType, post=" ${holderName}(${declName});")
@@ -3191,7 +3202,7 @@ def instantiateJSToNativeConversionTemplate(templateTuple, replacements,
             replacements["holderName"] = (
                 "const_cast< %s & >(%s.Value())" %
                 (holderType.define(), originalHolderName))
-            mutableHolderType = CGWrapper(holderType, pre="Optional< ", post=" >")
+            mutableHolderType = CGTemplatedType("Optional", holderType)
             holderType = CGWrapper(mutableHolderType, pre="const ")
         result.append(
             CGList([holderType, CGGeneric(" "),
@@ -3204,7 +3215,7 @@ def instantiateJSToNativeConversionTemplate(templateTuple, replacements,
             replacements["declName"] = (
                 "const_cast< %s & >(%s.Value())" %
                 (declType.define(), originalDeclName))
-            mutableDeclType = CGWrapper(declType, pre="Optional< ", post=" >")
+            mutableDeclType = CGTemplatedType("Optional", declType)
             declType = CGWrapper(mutableDeclType, pre="const ")
         result.append(
             CGList([declType, CGGeneric(" "),
@@ -3335,7 +3346,7 @@ class CGArgumentConverter(CGThing):
             raise TypeError("Shouldn't need holders for variadics")
 
         replacer = dict(self.argcAndIndex, **self.replacementVariables)
-        replacer["seqType"] = CGWrapper(elementDeclType, pre="AutoSequence< ", post=" >").define()
+        replacer["seqType"] = CGTemplatedType("AutoSequence", elementDeclType).define()
         replacer["elemType"] = elementDeclType.define()
 
         # NOTE: Keep this in sync with sequence conversions as needed
@@ -3715,7 +3726,7 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
     if returnType.isPrimitive() and returnType.tag() in builtinNames:
         result = CGGeneric(builtinNames[returnType.tag()])
         if returnType.nullable():
-            result = CGWrapper(result, pre="Nullable<", post=">")
+            result = CGTemplatedType("Nullable", result)
         return result, False
     if returnType.isString():
         if isMember:
@@ -3729,7 +3740,7 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
         result = CGGeneric(descriptorProvider.getDescriptor(
             returnType.unroll().inner.identifier.name).nativeType)
         if resultAlreadyAddRefed:
-            result = CGWrapper(result, pre="nsRefPtr<", post=">")
+            result = CGTemplatedType("nsRefPtr", result)
         else:
             result = CGWrapper(result, post="*")
         return result, False
@@ -3752,9 +3763,9 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
                                                   descriptorProvider,
                                                   resultAlreadyAddRefed,
                                                   isMember=True)
-        result = CGWrapper(result, pre="nsTArray< ", post=" >")
+        result = CGTemplatedType("nsTArray", result)
         if nullable:
-            result = CGWrapper(result, pre="Nullable< ", post=" >")
+            result = CGTemplatedType("Nullable", result)
         return result, True
     if returnType.isDictionary():
         nullable = returnType.nullable()
@@ -3763,7 +3774,7 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
                                             descriptorProvider.workers) +
             "Initializer")
         if nullable:
-            result = CGWrapper(result, pre="Nullable< ", post=" >")
+            result = CGTemplatedType("Nullable", result)
         return result, True
     if returnType.isUnion():
         raise TypeError("Need to sort out ownership model for union retvals");
@@ -3910,8 +3921,9 @@ if (global.Failed()) {
 """ % globalObjectType))
             argsPre.append("global")
 
-        needsCx = needCx(returnType, arguments, self.extendedAttributes,
-                         descriptor)
+        needsCx = (not descriptor.interface.isJSImplemented() and
+                   needCx(returnType, arguments, self.extendedAttributes,
+                          descriptor))
         if needsCx and not (static and descriptor.workers):
             argsPre.append("cx")
 
@@ -4971,16 +4983,16 @@ def getUnionAccessorSignatureType(type, descriptorProvider):
         (elementTemplate, elementDeclType,
          elementHolderType, dealWithOptional) = getJSToNativeConversionTemplate(
             type, descriptorProvider, isSequenceMember=True)
-        typeName = CGWrapper(elementDeclType, pre="Sequence< ", post=" >&")
+        typeName = CGTemplatedType("Sequence", elementDeclType, isReference=True)
         if nullable:
-            typeName = CGWrapper(typeName, pre="Nullable< ", post=" >&")
+            typeName = CGTemplatedType("Nullable", typeName, isReference=True)
 
         return typeName
 
     if type.isUnion():
         typeName = CGGeneric(type.name)
         if type.nullable():
-            typeName = CGWrapper(typeName, pre="Nullable< ", post=" >&")
+            typeName = CGTemplatedType("Nullable", typeName, isReference=True)
 
         return typeName
 
@@ -5039,7 +5051,7 @@ def getUnionAccessorSignatureType(type, descriptorProvider):
 
     typeName = CGGeneric(builtinNames[type.tag()])
     if type.nullable():
-        typeName = CGWrapper(typeName, pre="Nullable< ", post=" >&")
+        typeName = CGTemplatedType("Nullable", typeName, isReference=True)
     return typeName
 
 def getUnionTypeTemplateVars(type, descriptorProvider):
@@ -5465,11 +5477,11 @@ class ClassConstructor(ClassItem):
     baseConstructors is a list of strings containing calls to base constructors,
     defaults to None.
 
-    body contains a string with the code for the constructor, defaults to None.
+    body contains a string with the code for the constructor, defaults to empty.
     """
     def __init__(self, args, inline=False, bodyInHeader=False,
                  visibility="private", explicit=False, baseConstructors=None,
-                 body=None):
+                 body=""):
         self.args = args
         self.inline = inline or bodyInHeader
         self.bodyInHeader = bodyInHeader
@@ -5501,7 +5513,6 @@ class ClassConstructor(ClassItem):
         return ''
 
     def getBody(self):
-        assert self.body is not None
         return self.body
 
     def declare(self, cgClass):
@@ -5543,7 +5554,7 @@ ${className}::${className}(${args})${initializationList}
 
 class ClassDestructor(ClassItem):
     """
-    Used for adding a constructor to a CGClass.
+    Used for adding a destructor to a CGClass.
 
     inline should be True if the destructor should be marked inline.
 
@@ -5553,17 +5564,22 @@ class ClassDestructor(ClassItem):
     visibility determines the visibility of the destructor (public,
     protected, private), defaults to private.
 
-    body contains a string with the code for the destructor, defaults to None.
+    body contains a string with the code for the destructor, defaults to empty.
+
+    virtual determines whether the destructor is virtual, defaults to False.
     """
     def __init__(self, inline=False, bodyInHeader=False,
-                 visibility="private", body=None):
+                 visibility="private", body='', virtual=False):
         self.inline = inline or bodyInHeader
         self.bodyInHeader = bodyInHeader
         self.body = body
+        self.virtual = virtual
         ClassItem.__init__(self, None, visibility)
 
     def getDecorators(self, declaring):
         decorators = []
+        if self.virtual and declaring:
+            decorators.append('virtual')
         if self.inline and declaring:
             decorators.append('inline')
         if decorators:
@@ -5571,7 +5587,6 @@ class ClassDestructor(ClassItem):
         return ''
 
     def getBody(self):
-        assert self.body is not None
         return self.body
 
     def declare(self, cgClass):
@@ -6078,8 +6093,7 @@ const DOMClass Class = """ + DOMClass(self.descriptor) + """;
 class CGDOMJSProxyHandler_CGDOMJSProxyHandler(ClassConstructor):
     def __init__(self):
         ClassConstructor.__init__(self, [], inline=True, visibility="private",
-                                  baseConstructors=["mozilla::dom::DOMProxyHandler(Class)"],
-                                  body="")
+                                  baseConstructors=["mozilla::dom::DOMProxyHandler(Class)"])
 
 class CGDOMJSProxyHandler_getOwnPropertyDescriptor(ClassMethod):
     def __init__(self, descriptor):
@@ -6935,7 +6949,7 @@ class CGDictionary(CGThing):
         # We can't handle having a holderType here
         assert holderType is None
         if dealWithOptional:
-            declType = CGWrapper(declType, pre="Optional< ", post=" >")
+            declType = CGTemplatedType("Optional", declType)
         return declType.define()
 
     def getMemberConversion(self, memberInfo):
@@ -7112,6 +7126,37 @@ class CGRegisterProtos(CGAbstractMethod):
     def definition_body(self):
         return self._defineMacro() + self._registerProtos() + self._undefineMacro()
 
+def dependencySortObjects(objects, dependencyGetter, nameGetter):
+    """
+    Sort IDL objects with dependencies on each other such that if A
+    depends on B then B will come before A.  This is needed for
+    declaring C++ classes in the right order, for example.  Objects
+    that have no dependencies are just sorted by name.
+
+    objects should be something that can produce a set of objects
+    (e.g. a set, iterator, list, etc).
+
+    dependencyGetter is something that, given an object, should return
+    the set of objects it depends on.
+    """
+    # XXXbz this will fail if we have two webidl files F1 and F2 such that F1
+    # declares an object which depends on an object in F2, and F2 declares an
+    # object (possibly a different one!) that depends on an object in F1.  The
+    # good news is that I expect this to never happen.
+    sortedObjects = []
+    objects = set(objects)
+    while len(objects) != 0:
+        # Find the dictionaries that don't depend on anything else
+        # anymore and move them over.
+        toMove = [o for o in objects if
+                  len(dependencyGetter(o) & objects) == 0]
+        if len(toMove) == 0:
+            raise TypeError("Loop in dependency graph\n" +
+                            "\n".join(o.location for o in objects))
+        objects = objects - set(toMove)
+        sortedObjects.extend(sorted(toMove, key=nameGetter))
+    return sortedObjects
+
 class CGBindingRoot(CGThing):
     """
     Root codegen class for binding generation. Instantiate the class, and call
@@ -7156,7 +7201,7 @@ class CGBindingRoot(CGThing):
         for callback in workerCallbacks:
             workerIfaces.extend(getInterfacesFromCallback(callback))
 
-        for callbackDescriptor in callbackDescriptors:
+        for callbackDescriptor in callbackDescriptors + jsImplemented:
             callbackDescriptorIfaces = [
                 t.unroll().inner
                 for t in getTypesFromDescriptor(callbackDescriptor)
@@ -7214,6 +7259,13 @@ class CGBindingRoot(CGThing):
                 for t in getTypesFromDictionary(dictionary)
                 if t.unroll().isCallback())
 
+        # Forward declarations for callback functions used in interfaces
+        for desc in descriptors:
+            forwardDeclares.extend(
+                declareNativeType("mozilla::dom::" + str(t.unroll()))
+                for t in getTypesFromDescriptor(desc)
+                if t.unroll().isCallback())
+
         forwardDeclares = CGList(forwardDeclares)
 
         descriptorsWithPrototype = filter(lambda d: d.interface.hasInterfacePrototypeObject(),
@@ -7249,30 +7301,16 @@ class CGBindingRoot(CGThing):
         # here, because we have to generate these in order from least derived
         # to most derived so that class inheritance works out.  We also have to
         # generate members before the dictionary that contains them.
-        #
-        # XXXbz this will fail if we have two webidl files A and B such that A
-        # declares a dictionary which inherits from a dictionary in B and B
-        # declares a dictionary (possibly a different one!) that inherits from a
-        # dictionary in A.  The good news is that I expect this to never happen.
-        def sortDictionaries(dictionaries):
-            reSortedDictionaries = []
-            dictionaries = set(dictionaries)
-            while len(dictionaries) != 0:
-                # Find the dictionaries that don't depend on anything else
-                # anymore and move them over.
-                toMove = [d for d in dictionaries if
-                          len(CGDictionary.getDictionaryDependencies(d) &
-                              dictionaries) == 0]
-                if len(toMove) == 0:
-                    raise TypeError("Loop in dictionary dependency graph")
-                dictionaries = dictionaries - set(toMove)
-                reSortedDictionaries.extend(toMove)
-            return reSortedDictionaries
-
         cgthings.extend([CGDictionary(d, config.getDescriptorProvider(True))
-                         for d in sortDictionaries(workerDictionaries)])
+                         for d in
+                         dependencySortObjects(workerDictionaries,
+                                               CGDictionary.getDictionaryDependencies,
+                                               lambda d: d.identifier.name)])
         cgthings.extend([CGDictionary(d, config.getDescriptorProvider(False))
-                         for d in sortDictionaries(mainDictionaries)])
+                         for d in
+                         dependencySortObjects(mainDictionaries,
+                                               CGDictionary.getDictionaryDependencies,
+                                               lambda d: d.identifier.name)])
 
         # Do codegen for all the callbacks.  Only do non-worker codegen for now,
         # since we don't have a sane setup yet for invoking callbacks in workers
@@ -7287,7 +7325,12 @@ class CGBindingRoot(CGThing):
         cgthings.extend([CGCallbackInterface(x) for x in callbackDescriptors])
 
         # Do codegen for JS implemented classes
-        for x in jsImplemented:
+        def getParentDescriptor(desc):
+            if not desc.interface.parent:
+                return set()
+            return { desc.getDescriptor(desc.interface.parent.identifier.name) }
+        for x in dependencySortObjects(jsImplemented, getParentDescriptor,
+                                       lambda d: d.interface.identifier.name):
             cgthings.append(CGCallbackInterface(x))
             cgthings.append(CGJSImplClass(x))
 
@@ -7330,7 +7373,7 @@ class CGBindingRoot(CGThing):
                           ],
                          curr,
                          config,
-                         anyJSImplemented = len(jsImplemented) != 0)
+                         jsImplemented)
 
         # Add include guards.
         curr = CGIncludeGuard(prefix, curr)
@@ -7403,7 +7446,7 @@ class CGNativeMember(ClassMethod):
             result = CGGeneric(builtinNames[type.tag()])
             defaultReturnArg = "0"
             if type.nullable():
-                result = CGWrapper(result, pre="Nullable<", post=">")
+                result = CGTemplatedType("Nullable", result)
                 defaultReturnArg = ""
             return (result.define(),
                     "%s(%s)" % (result.define(), defaultReturnArg),
@@ -7514,9 +7557,9 @@ class CGNativeMember(ClassMethod):
                 returnType = returnType.inner
             # And now the actual underlying type
             elementDecl = self.getReturnType(returnType.inner, True)
-            type = CGWrapper(CGGeneric(elementDecl), pre="nsTArray< ", post=" >")
+            type = CGTemplatedType("nsTArray", CGGeneric(elementDecl))
             if nullable:
-                type = CGWrapper(type, pre="Nullable< ", post=" >")
+                type = CGTemplatedType("Nullable", type)
             args.append(Argument("%s&" % type.define(), "retval"))
         # And the ErrorResult
         if not 'infallible' in self.extendedAttrs:
@@ -7554,8 +7597,8 @@ class CGNativeMember(ClassMethod):
             if nullable:
                 type = type.inner
             elementType = type.inner
-            decl = CGWrapper(self.getArgType(elementType, False, False, True)[0],
-                             pre="Sequence< ", post=" >")
+            argType = self.getArgType(elementType, False, False, True)[0]
+            decl = CGTemplatedType("Sequence", argType)
             return decl.define(), True, True
 
         if type.isUnion():
@@ -7658,16 +7701,16 @@ class CGNativeMember(ClassMethod):
                                                         isMember or variadic)
         decl = CGGeneric(decl)
         if handleNullable and type.nullable():
-            decl = CGWrapper(decl, pre="Nullable< ", post=" >")
+            decl = CGTemplatedType("Nullable", decl)
             ref = True
         if variadic:
             arrayType = "Sequence" if self.variadicIsSequence else "nsTArray"
-            decl = CGWrapper(decl, pre="%s< " % arrayType, post=" >")
+            decl = CGTemplatedType(arrayType, decl)
             ref = True
         elif optional:
             # Note: All variadic args claim to be optional, but we can just use
             # empty arrays to represent them not being present.
-            decl = CGWrapper(decl, pre="Optional< ", post=" >")
+            decl = CGTemplatedType("Optional", decl)
             ref = True
         return (decl, ref)
 
@@ -7985,7 +8028,8 @@ class CGJSImplMethod(CGNativeMember):
                                 signature,
                                 descriptor.getExtendedAttributes(method),
                                 breakAfter=breakAfter,
-                                variadicIsSequence=True)
+                                variadicIsSequence=True,
+                                passCxAsNeeded=False)
         self.signature = signature
         if isConstructor:
             self.body = self.getConstructorImpl()
@@ -8028,17 +8072,9 @@ class CGJSImplMethod(CGNativeMember):
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
-  // Construct the callback interface object.
-  bool initOk;
-  nsRefPtr<${callbackClass}> cbImpl = new ${callbackClass}(cx, nullptr, jsImplObj, &initOk);
-  if (!initOk) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-  // Build the actual implementation.
-  nsRefPtr<${implClass}> impl = new ${implClass}(cbImpl, window);
+  // Build the C++ implementation.
+  nsRefPtr<${implClass}> impl = new ${implClass}(jsImplObj, window);
   return impl.forget();""").substitute({"implClass" : self.descriptor.name,
-                 "callbackClass" : jsImplName(self.descriptor.name),
                  "contractId" : self.descriptor.interface.getJSImplementation()
                  })
 
@@ -8056,7 +8092,8 @@ class CGJSImplGetter(CGNativeMember):
                                                                    attr),
                                 (attr.type, []),
                                 descriptor.getExtendedAttributes(attr,
-                                                                 getter=True))
+                                                                 getter=True),
+                                passCxAsNeeded=False)
         self.body = self.getImpl()
 
     def getImpl(self):
@@ -8071,7 +8108,8 @@ class CGJSImplSetter(CGNativeMember):
                                 (BuiltinTypes[IDLBuiltinType.Types.void],
                                  [FakeArgument(attr.type, attr)]),
                                 descriptor.getExtendedAttributes(attr,
-                                                                 setter=True))
+                                                                 setter=True),
+                                passCxAsNeeded=False)
         self.body = self.getImpl()
 
     def getImpl(self):
@@ -8083,36 +8121,84 @@ class CGJSImplClass(CGBindingImplClass):
     def __init__(self, descriptor):
         CGBindingImplClass.__init__(self, descriptor, CGJSImplMethod, CGJSImplGetter, CGJSImplSetter)
 
+        if descriptor.interface.parent:
+            parentClass = descriptor.getDescriptor(
+                descriptor.interface.parent.identifier.name).jsImplParent
+            baseClasses = [ClassBase(parentClass)]
+            isupportsDecl = "NS_DECL_ISUPPORTS_INHERITED"
+            ccDecl = ("NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(%s, %s)" %
+                      (descriptor.name, parentClass))
+            constructorBody = (
+                "// Make sure we're an nsWrapperCache already\n"
+                "MOZ_ASSERT(static_cast<nsWrapperCache*>(this));\n"
+                "// And that our ancestor has called SetIsDOMBinding()\n"
+                "MOZ_ASSERT(IsDOMBinding());")
+            extradefinitions= string.Template(
+                "NS_IMPL_CYCLE_COLLECTION_INHERITED_2(${ifaceName}, ${parentClass}, mImpl, mParent)\n"
+                "NS_IMPL_ADDREF_INHERITED(${ifaceName}, ${parentClass})\n"
+                "NS_IMPL_RELEASE_INHERITED(${ifaceName}, ${parentClass})\n"
+                "NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(${ifaceName})\n"
+                "NS_INTERFACE_MAP_END_INHERITING(${parentClass})\n").substitute(
+                { "ifaceName": self.descriptor.name,
+                  "parentClass": parentClass })
+        else:
+            baseClasses = [ClassBase("nsISupports"),
+                           ClassBase("nsWrapperCache")]
+            isupportsDecl = "NS_DECL_CYCLE_COLLECTING_ISUPPORTS"
+            ccDecl = ("NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(%s)" %
+                      descriptor.name)
+            constructorBody = "SetIsDOMBinding();"
+            extradefinitions= string.Template(
+                "NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(${ifaceName}, mImpl, mParent)\n"
+                "NS_IMPL_CYCLE_COLLECTING_ADDREF(${ifaceName})\n"
+                "NS_IMPL_CYCLE_COLLECTING_RELEASE(${ifaceName})\n"
+                "NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(${ifaceName})\n"
+                "  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY\n"
+                "  NS_INTERFACE_MAP_ENTRY(nsISupports)\n"
+                "NS_INTERFACE_MAP_END\n").substitute({ "ifaceName": self.descriptor.name })
+
         extradeclarations=(
             "public:\n"
-            "  NS_DECL_CYCLE_COLLECTING_ISUPPORTS\n"
-            "  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(%s)\n"
+            "  %s\n"
+            "  %s\n"
             "\n"
             "private:\n"
             "  nsRefPtr<%s> mImpl;\n"
             "  nsCOMPtr<nsISupports> mParent;\n"
-            "\n" % (descriptor.name, jsImplName(descriptor.name)))
+            "\n" % (isupportsDecl, ccDecl, jsImplName(descriptor.name)))
 
-        extradefinitions= string.Template(
-            "NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(${ifaceName}, mImpl, mParent)\n"
-            "NS_IMPL_CYCLE_COLLECTING_ADDREF(${ifaceName})\n"
-            "NS_IMPL_CYCLE_COLLECTING_RELEASE(${ifaceName})\n"
-            "NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(${ifaceName})\n"
-            "  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY\n"
-            "  NS_INTERFACE_MAP_ENTRY(nsISupports)\n"
-            "NS_INTERFACE_MAP_END\n").substitute({ "ifaceName": self.descriptor.name })
+        if descriptor.interface.hasChildInterfaces():
+            decorators = ""
+            # We need a public virtual destructor our subclasses can use
+            destructor = ClassDestructor(virtual=True, visibility="public")
+        else:
+            decorators = "MOZ_FINAL"
+            destructor = None
+
+        baseConstructors=["mImpl(new %s(aJSImplObject))" % jsImplName(descriptor.name),
+                          "mParent(aParent)"]
+        parentInterface = descriptor.interface.parent
+        while parentInterface:
+            if parentInterface.isJSImplemented():
+                baseConstructors = (
+                    [ "%s(aJSImplObject, aParent)" % parentClass ] +
+                    baseConstructors )
+                break
+            parentInterface = parentInterface.parent
+
+        constructor = ClassConstructor(
+            [Argument("JSObject*", "aJSImplObject"),
+             Argument("nsISupports*", "aParent")],
+            visibility="public",
+            baseConstructors=baseConstructors,
+            body=constructorBody)
 
         CGClass.__init__(self, descriptor.name,
-                         bases=[ClassBase("nsISupports"),
-                                ClassBase("nsWrapperCache")],
-                         constructors=[ClassConstructor([Argument(jsImplName(descriptor.name) + "*", "aImpl"),
-                                                         Argument("nsISupports*", "aParent")],
-                                                        visibility="public",
-                                                        baseConstructors=["mImpl(aImpl)",
-                                                                          "mParent(aParent)"],
-                                                        body="SetIsDOMBinding();")],
+                         bases=baseClasses,
+                         constructors=[constructor],
+                         destructor=destructor,
                          methods=self.methodDecls,
-                         decorators="MOZ_FINAL",
+                         decorators=decorators,
                          extradeclarations=extradeclarations,
                          extradefinitions=extradefinitions)
 
@@ -8162,8 +8248,7 @@ class CGCallback(CGClass):
             visibility="public",
             baseConstructors=[
                 "%s(cx, aOwner, aCallback, aInited)" % self.baseName
-                ],
-            body="")]
+                ])]
 
     def getMethodImpls(self, method):
         assert method.needThisHandling
@@ -8239,8 +8324,7 @@ class CGCallbackFunction(CGCallback):
             explicit=True,
             baseConstructors=[
                 "CallbackFunction(aOther)"
-                ],
-            body="")]
+                ])]
 
 class CGCallbackInterface(CGCallback):
     def __init__(self, descriptor):
@@ -8255,6 +8339,16 @@ class CGCallbackInterface(CGCallback):
                    for sig in m.signatures()]
         CGCallback.__init__(self, iface, descriptor, "CallbackInterface",
                             methods, getters=getters, setters=setters)
+
+    def getConstructors(self):
+        return CGCallback.getConstructors(self) + [
+            ClassConstructor(
+                [Argument("JSObject*", "aCallback")],
+                bodyInHeader=True,
+                visibility="public",
+                explicit=True,
+                baseConstructors=["CallbackInterface(aCallback)"])
+            ]
 
 class FakeMember():
     def __init__(self):
