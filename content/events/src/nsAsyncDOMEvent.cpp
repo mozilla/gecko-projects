@@ -5,11 +5,13 @@
 
 #include "nsAsyncDOMEvent.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMEventTarget.h"
 #include "nsContentUtils.h"
 #include "nsEventDispatcher.h"
 #include "nsGUIEvent.h"
 #include "nsDOMEvent.h"
+#include "mozilla/dom/EventTarget.h"
+
+using namespace mozilla::dom;
 
 nsAsyncDOMEvent::nsAsyncDOMEvent(nsINode *aEventNode, nsEvent &aEvent)
   : mEventNode(aEventNode), mDispatchChromeOnly(false)
@@ -34,14 +36,14 @@ NS_IMETHODIMP nsAsyncDOMEvent::Run()
         return NS_ERROR_INVALID_ARG;
       }
 
-      nsCOMPtr<nsIDOMEventTarget> target = window->GetParentTarget();
+      nsCOMPtr<EventTarget> target = window->GetParentTarget();
       if (!target) {
         return NS_ERROR_INVALID_ARG;
       }
       nsEventDispatcher::DispatchDOMEvent(target, nullptr, mEvent,
                                           nullptr, nullptr);
     } else {
-      nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(mEventNode);
+      nsCOMPtr<EventTarget> target = mEventNode.get();
       bool defaultActionEnabled; // This is not used because the caller is async
       target->DispatchEvent(mEvent, &defaultActionEnabled);
     }

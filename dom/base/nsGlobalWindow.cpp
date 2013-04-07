@@ -2590,7 +2590,7 @@ nsGlobalWindow::SetDocShell(nsIDocShell* aDocShell)
       mChromeEventHandler = piWindow->GetChromeEventHandler();
     }
     else {
-      NS_NewWindowRoot(this, getter_AddRefs(mChromeEventHandler));
+      mChromeEventHandler = NS_NewWindowRoot(this);
     }
   }
 
@@ -2711,7 +2711,7 @@ nsGlobalWindow::SetOpenerWindow(nsIDOMWindow* aOpener,
 }
 
 static
-already_AddRefed<nsIDOMEventTarget>
+already_AddRefed<EventTarget>
 TryGetTabChildGlobalAsEventTarget(nsISupports *aFrom)
 {
   nsCOMPtr<nsIFrameLoaderOwner> frameLoaderOwner = do_QueryInterface(aFrom);
@@ -2724,9 +2724,8 @@ TryGetTabChildGlobalAsEventTarget(nsISupports *aFrom)
     return NULL;
   }
 
-  nsCOMPtr<nsIDOMEventTarget> eventTarget =
-    frameLoader->GetTabChildGlobalAsEventTarget();
-  return eventTarget.forget();
+  nsCOMPtr<EventTarget> target = frameLoader->GetTabChildGlobalAsEventTarget();
+  return target.forget();
 }
 
 void
@@ -2738,7 +2737,7 @@ nsGlobalWindow::UpdateParentTarget()
   // handler itself.
 
   nsCOMPtr<nsIDOMElement> frameElement = GetFrameElementInternal();
-  nsCOMPtr<nsIDOMEventTarget> eventTarget =
+  nsCOMPtr<EventTarget> eventTarget =
     TryGetTabChildGlobalAsEventTarget(frameElement);
 
   if (!eventTarget) {
@@ -8254,7 +8253,7 @@ nsGlobalWindow::DisableGamepadUpdates()
 }
 
 void
-nsGlobalWindow::SetChromeEventHandler(nsIDOMEventTarget* aChromeEventHandler)
+nsGlobalWindow::SetChromeEventHandler(EventTarget* aChromeEventHandler)
 {
   SetChromeEventHandlerInternal(aChromeEventHandler);
   if (IsOuterWindow()) {
