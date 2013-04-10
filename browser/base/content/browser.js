@@ -1571,11 +1571,19 @@ var gBrowserInit = {
     }
 
     // Enable Chrome Debugger?
-    let enabled = gPrefService.getBoolPref("devtools.chrome.enabled") &&
-                  gPrefService.getBoolPref("devtools.debugger.chrome-enabled") &&
-                  gPrefService.getBoolPref("devtools.debugger.remote-enabled");
-    if (enabled) {
+    let chromeEnabled = gPrefService.getBoolPref("devtools.chrome.enabled");
+    let remoteEnabled = chromeEnabled &&
+                        gPrefService.getBoolPref("devtools.debugger.chrome-enabled") &&
+                        gPrefService.getBoolPref("devtools.debugger.remote-enabled");
+    if (remoteEnabled) {
       let cmd = document.getElementById("Tools:ChromeDebugger");
+      cmd.removeAttribute("disabled");
+      cmd.removeAttribute("hidden");
+    }
+
+    // Enable the Browser Console?
+    if (chromeEnabled) {
+      let cmd = document.getElementById("Tools:BrowserConsole");
       cmd.removeAttribute("disabled");
       cmd.removeAttribute("hidden");
     }
@@ -1583,7 +1591,7 @@ var gBrowserInit = {
     // Enable Error Console?
     // Temporarily enabled. See bug 798925.
     let consoleEnabled = true || gPrefService.getBoolPref("devtools.errorconsole.enabled") ||
-                         gPrefService.getBoolPref("devtools.chrome.enabled");
+                         chromeEnabled;
     if (consoleEnabled) {
       let cmd = document.getElementById("Tools:ErrorConsole");
       cmd.removeAttribute("disabled");
@@ -1806,6 +1814,10 @@ var gBrowserInit = {
     }
 
     SocialUI.nonBrowserWindowInit();
+
+    if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
+      document.getElementById("macDockMenuNewWindow").hidden = true;
+    }
 
     this._delayedStartupTimeoutId = setTimeout(this.nonBrowserWindowDelayedStartup.bind(this), 0);
   },
