@@ -677,6 +677,11 @@
     </hbox>
   </stack>
 
+  <html:div id="overlay-back" class="overlay-button"
+            observes="cmd_back" onclick="CommandUpdater.doCommand('cmd_back');"></html:div>
+  <html:div id="overlay-plus" class="overlay-button"
+            observes="cmd_back" onclick="CommandUpdater.doCommand('cmd_newTab');"></html:div>
+
   <svg:svg height="0">
     <svg:clipPath id="forward-button-clip-path" clipPathUnits="objectBoundingBox">
       <svg:path d="M 0,0 C 0.15,0.12 0.25,0.3 0.25,0.5 0.25,0.7 0.15,0.88 0,1 L 1,1 1,0 0,0 z"/>
