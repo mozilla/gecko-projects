@@ -36,6 +36,7 @@ webidl_files = \
   CommandEvent.webidl \
   Comment.webidl \
   CompositionEvent.webidl \
+  Coordinates.webidl \
   CSS.webidl \
   CSSPrimitiveValue.webidl \
   CSSStyleDeclaration.webidl \
@@ -71,6 +72,7 @@ webidl_files = \
   FormData.webidl \
   Function.webidl \
   GainNode.webidl \
+  Geolocation.webidl \
   HTMLAnchorElement.webidl \
   HTMLAppletElement.webidl \
   HTMLAreaElement.webidl \
@@ -163,6 +165,8 @@ webidl_files = \
   Performance.webidl \
   PerformanceNavigation.webidl \
   PerformanceTiming.webidl \
+  Position.webidl \
+  PositionError.webidl \
   ProcessingInstruction.webidl \
   Range.webidl \
   Rect.webidl \
