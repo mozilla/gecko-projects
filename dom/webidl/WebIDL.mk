@@ -155,14 +155,17 @@ webidl_files = \
   MediaStream.webidl \
   MessageEvent.webidl \
   MouseEvent.webidl \
+  MouseScrollEvent.webidl \
   MozActivity.webidl \
   MutationEvent.webidl \
   MutationObserver.webidl \
+  NetDashboard.webidl \
   Node.webidl \
   NodeFilter.webidl \
   NodeIterator.webidl \
   NodeList.webidl \
   Notification.webidl \
+  NotifyPaintEvent.webidl \
   PaintRequest.webidl \
   PaintRequestList.webidl \
   PannerNode.webidl \
@@ -282,6 +285,7 @@ webidl_files = \
   TextDecoder.webidl \
   TextEncoder.webidl \
   TimeRanges.webidl \
+  TouchEvent.webidl \
   TransitionEvent.webidl \
   TreeWalker.webidl \
   UIEvent.webidl \

@@ -639,7 +639,12 @@ public:
      * transaction where there is no possibility of redrawing the content, so the
      * implementation should be ready for that.
      */
-    CONTENT_MAY_CHANGE_TRANSFORM = 0x08
+    CONTENT_MAY_CHANGE_TRANSFORM = 0x08,
+    /**
+     * This indicates that the content does not want to be snapped to pixel
+     * boundaries, so the layers code should not do transform snapping.
+     */
+    CONTENT_DISABLE_TRANSFORM_SNAPPING = 0x10
   };
   /**
    * CONSTRUCTION PHASE ONLY
@@ -859,6 +864,9 @@ public:
    * will be mirrored here. This allows for asynchronous animation of the
    * margins by reconciling the difference between this value and a value that
    * is updated more frequently.
+   * If the left or top margins are negative, it means that the elements this
+   * layer represents are auto-positioned, and so fixed position margins should
+   * not have an effect on the corresponding axis.
    */
   void SetFixedPositionMargins(const gfx::Margin& aMargins)
   {
