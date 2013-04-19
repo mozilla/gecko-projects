@@ -106,7 +106,6 @@
 #include "nsThreadUtils.h"
 #include "nsEventStateManager.h"
 #include "nsIHttpProtocolHandler.h"
-#include "nsIJSContextStack.h"
 #include "nsIJSRuntimeService.h"
 #include "nsILoadContext.h"
 #include "nsIMarkupDocumentViewer.h"
@@ -1424,8 +1423,10 @@ nsGlobalWindow::FreeInnerObjects()
   NotifyDOMWindowDestroyed(this);
 
   // Kill all of the workers for this window.
+  // We push a cx so that exceptions get reported in the right DOM Window.
   nsIScriptContext *scx = GetContextInternal();
-  AutoPushJSContext cx(scx ? scx->GetNativeContext() : nullptr);
+  AutoPushJSContext cx(scx ? scx->GetNativeContext() : nsContentUtils::GetSafeJSContext());
+  JSAutoRequest ar(cx);
   mozilla::dom::workers::CancelWorkersForWindow(cx, this);
 
   // Close all offline storages for this window.
@@ -7097,15 +7098,7 @@ nsGlobalWindow::FinalClose()
   // Flag that we were closed.
   mIsClosed = true;
 
-  nsCOMPtr<nsIJSContextStack> stack =
-    do_GetService(sJSStackContractID);
-
-  JSContext *cx = nullptr;
-
-  if (stack) {
-    stack->Peek(&cx);
-  }
-
+  JSContext *cx = nsContentUtils::GetCurrentJSContext();
   if (cx) {
     nsIScriptContext *currentCX = nsJSUtils::GetDynamicScriptContext(cx);
 
@@ -7426,8 +7419,7 @@ public:
       JSObject* obj = currentInner->FastGetGlobalJSObject();
       // We only want to nuke wrappers for the chrome->content case
       if (obj && !js::IsSystemCompartment(js::GetObjectCompartment(obj))) {
-        JSContext* cx =
-          nsContentUtils::ThreadJSContextStack()->GetSafeJSContext();
+        JSContext* cx = nsContentUtils::GetSafeJSContext();
 
         JSAutoRequest ar(cx);
         js::NukeCrossCompartmentWrappers(cx, 
@@ -9930,27 +9922,22 @@ nsGlobalWindow::OpenInternal(const nsAString& aUrl, const nsAString& aName,
       // up.  We do NOT want this case looking at the JS context on the stack
       // when searching.  Compare comments on
       // nsIDOMWindow::OpenWindow and nsIWindowWatcher::OpenWindow.
-      nsCOMPtr<nsIJSContextStack> stack;
 
+      // Note: Because nsWindowWatcher is so broken, it's actually important
+      // that we don't push a null cx here, because that screws it up when it
+      // tries to compute the caller principal to associate with dialog
+      // arguments. That whole setup just really needs to be rewritten. :-(
+      nsCxPusher pusher;
       if (!aContentModal) {
-        stack = do_GetService(sJSStackContractID);
+        pusher.PushNull();
       }
 
-      if (stack) {
-        rv = stack->Push(nullptr);
-        NS_ENSURE_SUCCESS(rv, rv);
-      }
 
       rv = pwwatch->OpenWindow2(this, url.get(), name_ptr, options_ptr,
                                 /* aCalledFromScript = */ false,
                                 aDialog, aNavigate, aExtraArgument,
                                 getter_AddRefs(domReturn));
 
-      if (stack) {
-        JSContext* cx;
-        stack->Pop(&cx);
-        NS_ASSERTION(!cx, "Unexpected JSContext popped!");
-      }
     }
   }
 
@@ -10871,9 +10858,7 @@ nsGlobalWindow::BuildURIfromBase(const char *aURL, nsIURI **aBuiltURI,
     cx = scx->GetNativeContext();
   } else {
     // get the JSContext from the call stack
-    nsCOMPtr<nsIThreadJSContextStack> stack(do_GetService(sJSStackContractID));
-    if (stack)
-      stack->Peek(&cx);
+    cx = nsContentUtils::GetCurrentJSContext();
   }
 
   /* resolve the URI, which could be relative to the calling window
@@ -11035,8 +11020,10 @@ nsGlobalWindow::SuspendTimeouts(uint32_t aIncrease,
     DisableGamepadUpdates();
 
     // Suspend all of the workers for this window.
+  // We push a cx so that exceptions get reported in the right DOM Window.
     nsIScriptContext *scx = GetContextInternal();
-    AutoPushJSContext cx(scx ? scx->GetNativeContext() : nullptr);
+    AutoPushJSContext cx(scx ? scx->GetNativeContext() : nsContentUtils::GetSafeJSContext());
+    JSAutoRequest ar(cx);
     mozilla::dom::workers::SuspendWorkersForWindow(cx, this);
 
     TimeStamp now = TimeStamp::Now();
@@ -11126,8 +11113,10 @@ nsGlobalWindow::ResumeTimeouts(bool aThawChildren)
     }
 
     // Resume all of the workers for this window.
+    // We push a cx so that exceptions get reported in the right DOM Window.
     nsIScriptContext *scx = GetContextInternal();
-    AutoPushJSContext cx(scx ? scx->GetNativeContext() : nullptr);
+    AutoPushJSContext cx(scx ? scx->GetNativeContext() : nsContentUtils::GetSafeJSContext());
+    JSAutoRequest ar(cx);
     mozilla::dom::workers::ResumeWorkersForWindow(cx, this);
 
     // Restore all of the timeouts, using the stored time remaining

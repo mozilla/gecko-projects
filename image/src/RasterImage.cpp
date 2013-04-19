@@ -1669,7 +1669,9 @@ RasterImage::AddSourceData(const char *aBuffer, uint32_t aCount)
   // write the data directly to the decoder. (If we haven't gotten the size,
   // we'll queue up the data and write it out when we do.)
   if (!StoringSourceData() && mHasSize) {
+    mDecoder->SetSynchronous(true);
     rv = WriteToDecoder(aBuffer, aCount);
+    mDecoder->SetSynchronous(false);
     CONTAINER_ENSURE_SUCCESS(rv);
 
     // We're not storing source data, so this data is probably coming straight
@@ -3514,8 +3516,7 @@ RasterImage::DecodePool::Singleton()
 }
 
 RasterImage::DecodePool::DecodePool()
-  : mThreadPoolMutex("Thread Pool")
-  , mShuttingDown(false)
+ : mThreadPoolMutex("Thread Pool")
 {
   if (gMultithreadedDecoding) {
     mThreadPool = do_CreateInstance(NS_THREADPOOL_CONTRACTID);
@@ -3552,7 +3553,6 @@ RasterImage::DecodePool::Observe(nsISupports *subject, const char *topic,
     MutexAutoLock threadPoolLock(mThreadPoolMutex);
     threadPool = mThreadPool;
     mThreadPool = nullptr;
-    mShuttingDown = true;
   }
 
   if (threadPool) {
@@ -3584,10 +3584,9 @@ RasterImage::DecodePool::RequestDecode(RasterImage* aImg)
 
     aImg->mDecodeRequest->mRequestStatus = DecodeRequest::REQUEST_PENDING;
     nsRefPtr<DecodeJob> job = new DecodeJob(aImg->mDecodeRequest, aImg);
+
     MutexAutoLock threadPoolLock(mThreadPoolMutex);
-    if (mShuttingDown) {
-      // Just drop the job on the floor; we won't need it.
-    } else if (!gMultithreadedDecoding || !mThreadPool) {
+    if (!gMultithreadedDecoding || !mThreadPool) {
       NS_DispatchToMainThread(job);
     } else {
       mThreadPool->Dispatch(job, nsIEventTarget::DISPATCH_NORMAL);

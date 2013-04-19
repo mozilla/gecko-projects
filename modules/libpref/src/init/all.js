@@ -1683,11 +1683,12 @@ pref("layout.word_select.stop_at_punctuation", true);
 // controls caret style and word-delete during text selection
 // 0 = use platform default
 // 1 = caret moves and blinks as when there is no selection; word
-//     delete deselects the selection and then deletes word (Windows default)
+//     delete deselects the selection and then deletes word
 // 2 = caret moves to selection edge and is not visible during selection; 
-//     word delete deletes the selection (Mac default)
+//     word delete deletes the selection (Mac and Linux default)
 // 3 = caret moves and blinks as when there is no selection; word delete
-//     deletes the selection (Unix default)
+//     deletes the selection
+// Windows default is 1 for word delete behavior, the rest as for 2.
 pref("layout.selection.caret_style", 0);
 
 // pref to control whether or not to replace backslashes with Yen signs
@@ -4172,8 +4173,12 @@ pref("wap.UAProf.tagname", "x-wap-profile");
 // automatic-home: Automatic retrieval mode in home network.
 // never: Never retrieval mode.
 pref("dom.mms.retrieval_mode", "manual");
-pref("dom.mms.retrievalRetryCount", 3);
-pref("dom.mms.retrievalRetryInterval", 300000);
+
+pref("dom.mms.sendRetryCount", 3);
+pref("dom.mms.sendRetryInterval", 300000);
+
+pref("dom.mms.retrievalRetryCount", 4);
+pref("dom.mms.retrievalRetryIntervals", "60000,300000,600000,1800000");
 
 // If the user puts a finger down on an element and we think the user
 // might be executing a pan gesture, how long do we wait before
