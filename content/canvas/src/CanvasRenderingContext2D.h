@@ -18,10 +18,11 @@
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
-#include "mozilla/dom/CanvasPattern.h"
 
 #define NS_CANVASGRADIENTAZURE_PRIVATE_IID \
     {0x28425a6a, 0x90e0, 0x4d42, {0x9c, 0x75, 0xff, 0x60, 0x09, 0xb3, 0x10, 0xa8}}
+#define NS_CANVASPATTERNAZURE_PRIVATE_IID \
+    {0xc9bacc25, 0x28da, 0x421e, {0x9a, 0x4b, 0xbb, 0xd6, 0x93, 0x05, 0x12, 0xbc}}
 
 class nsXULElement;
 
@@ -83,6 +84,44 @@ protected:
   mozilla::RefPtr<mozilla::gfx::GradientStops> mStops;
   Type mType;
   virtual ~CanvasGradient() {}
+};
+
+/**
+ ** CanvasPattern
+ **/
+class CanvasPattern MOZ_FINAL : public nsIDOMCanvasPattern
+{
+public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_CANVASPATTERNAZURE_PRIVATE_IID)
+
+  enum RepeatMode
+  {
+    REPEAT,
+    REPEATX,
+    REPEATY,
+    NOREPEAT
+  };
+
+  CanvasPattern(mozilla::gfx::SourceSurface* aSurface,
+                RepeatMode aRepeat,
+                nsIPrincipal* principalForSecurityCheck,
+                bool forceWriteOnly,
+                bool CORSUsed)
+    : mSurface(aSurface)
+    , mRepeat(aRepeat)
+    , mPrincipal(principalForSecurityCheck)
+    , mForceWriteOnly(forceWriteOnly)
+    , mCORSUsed(CORSUsed)
+  {
+  }
+
+  NS_DECL_ISUPPORTS
+
+  mozilla::RefPtr<mozilla::gfx::SourceSurface> mSurface;
+  const RepeatMode mRepeat;
+  nsCOMPtr<nsIPrincipal> mPrincipal;
+  const bool mForceWriteOnly;
+  const bool mCORSUsed;
 };
 
 struct CanvasBidiProcessor;
@@ -158,7 +197,7 @@ public:
   already_AddRefed<nsIDOMCanvasGradient>
     CreateRadialGradient(double x0, double y0, double r0, double x1, double y1,
                          double r1, mozilla::ErrorResult& aError);
-  already_AddRefed<CanvasPattern>
+  already_AddRefed<nsIDOMCanvasPattern>
     CreatePattern(const HTMLImageOrCanvasOrVideoElement& element,
                   const nsAString& repeat, mozilla::ErrorResult& error);
 
