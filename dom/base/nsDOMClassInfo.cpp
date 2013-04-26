@@ -237,10 +237,7 @@
 #include "nsIDOMDataTransfer.h"
 
 // Geolocation
-#include "nsIDOMGeoGeolocation.h"
-#include "nsIDOMGeoPosition.h"
 #include "nsIDOMGeoPositionCoords.h"
-#include "nsIDOMGeoPositionError.h"
 
 // User media
 #ifdef MOZ_MEDIA_NAVIGATOR
@@ -783,16 +780,7 @@ static nsDOMClassInfoData sClassInfoData[] = {
   NS_DEFINE_CLASSINFO_DATA(DeviceStorage, nsEventTargetSH,
                            EVENTTARGET_SCRIPTABLE_FLAGS)
 
-  NS_DEFINE_CLASSINFO_DATA(GeoGeolocation, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-
-  NS_DEFINE_CLASSINFO_DATA(GeoPosition, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-
   NS_DEFINE_CLASSINFO_DATA(GeoPositionCoords, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-
-  NS_DEFINE_CLASSINFO_DATA(GeoPositionError, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
   NS_DEFINE_CLASSINFO_DATA(MozPowerManager, nsDOMGenericSH,
@@ -2086,20 +2074,8 @@ nsDOMClassInfo::Init()
      DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
   DOM_CLASSINFO_MAP_END
 
-  DOM_CLASSINFO_MAP_BEGIN(GeoGeolocation, nsIDOMGeoGeolocation)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMGeoGeolocation)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(GeoPosition, nsIDOMGeoPosition)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMGeoPosition)
-  DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(GeoPositionCoords, nsIDOMGeoPositionCoords)
      DOM_CLASSINFO_MAP_ENTRY(nsIDOMGeoPositionCoords)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(GeoPositionError, nsIDOMGeoPositionError)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMGeoPositionError)
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN(MozPowerManager, nsIDOMMozPowerManager)
@@ -3407,7 +3383,7 @@ NS_IMETHODIMP
 nsWindowSH::Enumerate(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                       JSObject *obj, bool *_retval)
 {
-  if (!ObjectIsNativeWrapper(cx, obj)) {
+  if (!xpc::WrapperFactory::IsXrayWrapper(obj)) {
     *_retval = JS_EnumerateStandardClasses(cx, obj);
     if (!*_retval) {
       return NS_OK;
@@ -4505,7 +4481,7 @@ nsWindowSH::GlobalResolve(nsGlobalWindow *aWin, JSContext *cx,
 
       Maybe<JSAutoCompartment> ac;
       JSObject* global;
-      bool defineOnXray = ObjectIsNativeWrapper(cx, obj);
+      bool defineOnXray = xpc::WrapperFactory::IsXrayWrapper(obj);
       if (defineOnXray) {
         global = js::CheckedUnwrap(obj, /* stopAtOuter = */ false);
         if (!global) {
@@ -4939,37 +4915,24 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
 
   nsIScriptContext *my_context = win->GetContextInternal();
 
-  // Resolve standard classes on my_context's JSContext (or on cx,
-  // if we don't have a my_context yet), in case the two contexts
-  // have different origins.  We want lazy standard class
-  // initialization to behave as if it were done eagerly, on each
-  // window's own context (not on some other window-caller's
-  // context).
-  if (!ObjectIsNativeWrapper(cx, obj)) {
+  // Don't resolve standard classes on XrayWrappers, only resolve them if we're
+  // resolving on the real global object.
+  if (!xpc::WrapperFactory::IsXrayWrapper(obj)) {
     JSBool did_resolve = JS_FALSE;
     JSBool ok = JS_TRUE;
     JS::Value exn = JSVAL_VOID;
 
     {
-      nsCxPusher pusher;
-      Maybe<JSAutoCompartment> ac;
+      // Resolve standard classes on my_context's JSContext (or on cx,
+      // if we don't have a my_context yet), in case the two contexts
+      // have different origins.  We want lazy standard class
+      // initialization to behave as if it were done eagerly, on each
+      // window's own context (not on some other window-caller's
+      // context).
+      AutoPushJSContext my_cx(my_context ? my_context->GetNativeContext() : cx);
+      JSAutoRequest ar(my_cx);
+      JSAutoCompartment ac(my_cx, obj);
 
-      JSContext* my_cx;
-      if (!my_context) {
-        my_cx = cx;
-      } else {
-        my_cx = my_context->GetNativeContext();
-
-        if (my_cx != cx) {
-          pusher.Push(my_cx);
-          ac.construct(my_cx, obj);
-        }
-      }
-
-      JSAutoRequest transfer(my_cx);
-
-      // Don't resolve standard classes on XPCNativeWrapper etc, only
-      // resolve them if we're resolving on the real global object.
       ok = JS_ResolveStandardClass(my_cx, obj, id, &did_resolve);
 
       if (!ok) {
