@@ -239,6 +239,17 @@ pref("gfx.downloadable_fonts.fallback_delay", 3000);
 
 pref("gfx.filter.nearest.force-enabled", false);
 
+// prefs controlling the font (name/cmap) loader that runs shortly after startup
+#ifdef XP_WIN
+pref("gfx.font_loader.families_per_slice", 3); // read in info 3 families at a time
+pref("gfx.font_loader.delay", 120000);         // 2 minutes after startup
+pref("gfx.font_loader.interval", 1000);        // every 1 second until complete
+#else
+pref("gfx.font_loader.families_per_slice", 3); // read in info 3 families at a time
+pref("gfx.font_loader.delay", 8000);           // 8 secs after startup
+pref("gfx.font_loader.interval", 50);          // run every 50 ms
+#endif
+
 // whether to always search all font cmaps during system font fallback
 pref("gfx.font_rendering.fallback.always_use_cmaps", false);
 
@@ -3920,6 +3931,10 @@ pref("image.multithreaded_decoding.enabled", true);
 // How many threads we'll use for multithreaded decoding. If < 0, will be
 // automatically determined based on the system's number of cores.
 pref("image.multithreaded_decoding.limit", -1);
+
+// Limit for the canvas image cache. 0 means we don't limit the size of the
+// cache.
+pref("canvas.image.cache.limit", 0);
 
 // WebGL prefs
 pref("gl.msaa-level", 2);
