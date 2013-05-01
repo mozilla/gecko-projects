@@ -387,10 +387,6 @@ inline void
 AutoGCRooter::trace(JSTracer *trc)
 {
     switch (tag_) {
-      case JSVAL:
-        MarkValueRoot(trc, &static_cast<AutoValueRooter *>(this)->val, "JS::AutoValueRooter.val");
-        return;
-
       case PARSER:
         static_cast<frontend::Parser<frontend::FullParseHandler> *>(this)->trace(trc);
         return;
@@ -519,7 +515,7 @@ AutoGCRooter::trace(JSTracer *trc)
       }
 
       case HASHABLEVALUE: {
-        HashableValue::AutoRooter *rooter = static_cast<HashableValue::AutoRooter *>(this);
+        AutoHashableValueRooter *rooter = static_cast<AutoHashableValueRooter *>(this);
         rooter->trace(trc);
         return;
       }
@@ -622,9 +618,9 @@ JS::CustomAutoRooter::traceValue(JSTracer *trc, JS::Value *thingp, const char *n
 }
 
 void
-HashableValue::AutoRooter::trace(JSTracer *trc)
+AutoHashableValueRooter::trace(JSTracer *trc)
 {
-    MarkValueRoot(trc, reinterpret_cast<Value*>(&v->value), "HashableValue::AutoRooter");
+    MarkValueRoot(trc, reinterpret_cast<Value*>(&value), "AutoHashableValueRooter");
 }
 
 void

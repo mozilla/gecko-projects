@@ -126,7 +126,7 @@ NPObjWrapper_newEnumerate(JSContext *cx, JSHandleObject obj, JSIterateOp enum_op
 
 static JSBool
 NPObjWrapper_NewResolve(JSContext *cx, JSHandleObject obj, JSHandleId id, unsigned flags,
-                        JSMutableHandleObject objp);
+                        JS::MutableHandle<JSObject*> objp);
 
 static JSBool
 NPObjWrapper_Convert(JSContext *cx, JSHandleObject obj, JSType type, JSMutableHandleValue vp);
@@ -787,12 +787,12 @@ nsJSObjWrapper::NP_SetProperty(NPObject *npobj, NPIdentifier id,
   AutoJSExceptionReporter reporter(cx);
   JSAutoCompartment ac(cx, npjsobj->mJSObj);
 
-  JS::Value v = NPVariantToJSVal(npp, cx, value);
-  JS::AutoValueRooter tvr(cx, v);
+  JS::Rooted<JS::Value> v(cx, NPVariantToJSVal(npp, cx, value));
 
   NS_ASSERTION(NPIdentifierIsInt(id) || NPIdentifierIsString(id),
                "id must be either string or int!\n");
-  ok = ::JS_SetPropertyById(cx, npjsobj->mJSObj, NPIdentifierToJSId(id), &v);
+  ok = ::JS_SetPropertyById(cx, npjsobj->mJSObj, NPIdentifierToJSId(id),
+                            v.address());
 
   // return ok == JS_TRUE to quiet down compiler warning, even if
   // return ok is what we really want.
@@ -1560,7 +1560,7 @@ NPObjWrapper_newEnumerate(JSContext *cx, JSHandleObject obj, JSIterateOp enum_op
 
 static JSBool
 NPObjWrapper_NewResolve(JSContext *cx, JSHandleObject obj, JSHandleId id, unsigned flags,
-                        JSMutableHandleObject objp)
+                        JS::MutableHandle<JSObject*> objp)
 {
   NPObject *npobj = GetNPObject(cx, obj);
 

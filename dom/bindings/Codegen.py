@@ -1083,6 +1083,55 @@ class CGClassConstructor(CGAbstractStaticMethod):
                                      self._ctor, isConstructor=True)
         return preamble + callGenerator.define();
 
+# Encapsulate the constructor in a helper method to share genConstructorBody with CGJSImplMethod.
+class CGConstructNavigatorObjectHelper(CGAbstractStaticMethod):
+    """
+    Construct a new JS-implemented WebIDL DOM object, for use on navigator.
+    """
+    def __init__(self, descriptor):
+        name = "ConstructNavigatorObjectHelper"
+        args = [Argument('GlobalObject&', 'global'), Argument('ErrorResult&', 'aRv')]
+        rtype = 'already_AddRefed<%s>' % descriptor.name
+        CGAbstractStaticMethod.__init__(self, descriptor, name, rtype, args)
+
+    def definition_body(self):
+        return genConstructorBody(self.descriptor)
+
+class CGConstructNavigatorObject(CGAbstractMethod):
+    """
+    Wrap a JS-implemented WebIDL object into a JS value, for use on navigator.
+    """
+    def __init__(self, descriptor):
+        name = 'ConstructNavigatorObject'
+        args = [Argument('JSContext*', 'aCx'), Argument('JS::Handle<JSObject*>', 'aObj')]
+        CGAbstractMethod.__init__(self, descriptor, name, 'JSObject*', args)
+
+    def definition_body(self):
+        if not self.descriptor.interface.isJSImplemented():
+            raise TypeError("Only JS-implemented classes are currently supported "
+                            "on navigator. See bug 856820.")
+        return string.Template("""  GlobalObject global(aCx, aObj);
+  if (global.Failed()) {
+    return nullptr;
+  }
+  ErrorResult rv;
+  nsRefPtr<mozilla::dom::${descriptorName}> result = ConstructNavigatorObjectHelper(global, rv);
+  rv.WouldReportJSException();
+  if (rv.Failed()) {
+    ThrowMethodFailedWithDetails<${mainThread}>(aCx, rv, "${descriptorName}", "navigatorConstructor");
+    return nullptr;
+  }
+  JS::Rooted<JS::Value> v(aCx);
+  if (!WrapNewBindingObject(aCx, aObj, result, v.address())) {
+    MOZ_ASSERT(JS_IsExceptionPending(aCx));
+    return nullptr;
+  }
+  return &v.toObject();""").substitute(
+    {
+        'descriptorName' : self.descriptor.name,
+        'mainThread' : toStringBool(not self.descriptor.workers),
+    })
+
 class CGClassConstructHookHolder(CGGeneric):
     def __init__(self, descriptor):
         if descriptor.interface.ctor():
@@ -4800,7 +4849,7 @@ class CGNewResolveHook(CGAbstractBindingMethod):
         self._needNewResolve = descriptor.interface.getExtendedAttribute("NeedNewResolve")
         args = [Argument('JSContext*', 'cx'), Argument('JSHandleObject', 'obj_'),
                 Argument('JSHandleId', 'id'), Argument('unsigned', 'flags'),
-                Argument('JSMutableHandleObject', 'objp')]
+                Argument('JS::MutableHandle<JSObject*>', 'objp')]
         # Our "self" is actually the callee in this case, not the thisval.
         CGAbstractBindingMethod.__init__(
             self, descriptor, NEWRESOLVE_HOOK_NAME,
@@ -6819,13 +6868,14 @@ if (expando) {
 vp.setUndefined();
 return true;""" % (getIndexedOrExpando, getNamed)
 
-class CGDOMJSProxyHandler_obj_toString(ClassMethod):
+class CGDOMJSProxyHandler_className(ClassMethod):
     def __init__(self, descriptor):
         args = [Argument('JSContext*', 'cx'), Argument('JS::Handle<JSObject*>', 'proxy')]
-        ClassMethod.__init__(self, "obj_toString", "JSString*", args)
+        ClassMethod.__init__(self, "className", "const char*", args,
+                             virtual=True, override=True)
         self.descriptor = descriptor
     def getBody(self):
-        return "return mozilla::dom::DOMProxyHandler::obj_toString(cx, \"%s\");" % self.descriptor.name
+        return 'return "%s";' % self.descriptor.name
 
 class CGDOMJSProxyHandler_finalizeInBackground(ClassMethod):
     def __init__(self, descriptor):
@@ -6925,7 +6975,7 @@ class CGDOMJSProxyHandler(CGClass):
         methods.extend([CGDOMJSProxyHandler_getOwnPropertyNames(descriptor),
                         CGDOMJSProxyHandler_hasOwn(descriptor),
                         CGDOMJSProxyHandler_get(descriptor),
-                        CGDOMJSProxyHandler_obj_toString(descriptor),
+                        CGDOMJSProxyHandler_className(descriptor),
                         CGDOMJSProxyHandler_finalizeInBackground(descriptor),
                         CGDOMJSProxyHandler_finalize(descriptor),
                         CGDOMJSProxyHandler_getElementIfPresent(descriptor),
@@ -7007,6 +7057,10 @@ class CGDescriptor(CGThing):
         if hasSetter: cgThings.append(CGGenericSetter(descriptor))
         if hasLenientSetter: cgThings.append(CGGenericSetter(descriptor,
                                                              lenientThis=True))
+
+        if descriptor.interface.getNavigatorProperty():
+            cgThings.append(CGConstructNavigatorObjectHelper(descriptor))
+            cgThings.append(CGConstructNavigatorObject(descriptor))
 
         if descriptor.concrete:
             if descriptor.nativeOwnership == 'owned' or descriptor.nativeOwnership == 'refcounted':
@@ -7475,12 +7529,15 @@ class CGRegisterProtos(CGAbstractMethod):
   aNameSpaceManager->RegisterDefineDOMInterface(NS_LITERAL_STRING(#_dom_class), _dom_class##Binding::DefineDOMInterface, _pref_check);
 #define REGISTER_CONSTRUCTOR(_dom_constructor, _dom_class, _pref_check) \\
   aNameSpaceManager->RegisterDefineDOMInterface(NS_LITERAL_STRING(#_dom_constructor), _dom_class##Binding::DefineDOMInterface, _pref_check);
+#define REGISTER_NAVIGATOR_CONSTRUCTOR(_prop, _dom_class, _pref_check) \\
+  aNameSpaceManager->RegisterNavigatorDOMConstructor(NS_LITERAL_STRING(_prop), _dom_class##Binding::ConstructNavigatorObject, _pref_check);
 
 """
     def _undefineMacro(self):
         return """
 #undef REGISTER_CONSTRUCTOR
-#undef REGISTER_PROTO"""
+#undef REGISTER_PROTO
+#undef REGISTER_NAVIGATOR_CONSTRUCTOR"""
     def _registerProtos(self):
         def getPrefCheck(desc):
             if (desc.interface.getExtendedAttribute("PrefControlled") is None and
@@ -7495,6 +7552,10 @@ class CGRegisterProtos(CGAbstractMethod):
             lines.append("REGISTER_PROTO(%s, %s);" % (desc.name, getPrefCheck(desc)))
             lines.extend("REGISTER_CONSTRUCTOR(%s, %s, %s);" % (n.identifier.name, desc.name, getPrefCheck(desc))
                          for n in desc.interface.namedConstructors)
+        for desc in self.config.getDescriptors(isNavigatorProperty=True, register=True):
+            propName = desc.interface.getNavigatorProperty()
+            assert propName
+            lines.append('REGISTER_NAVIGATOR_CONSTRUCTOR("%s", %s, %s);' % (propName, desc.name, getPrefCheck(desc)))
         return '\n'.join(lines) + '\n'
     def definition_body(self):
         return self._defineMacro() + self._registerProtos() + self._undefineMacro()
@@ -8446,7 +8507,9 @@ class CGJSImplMethod(CGNativeMember):
             raise TypeError("Named constructors are not supported for JS implemented WebIDL. See bug 851287.")
         if len(self.signature[1]) != 0:
             raise TypeError("Constructors with arguments are unsupported. See bug 851178.")
+        return genConstructorBody(self.descriptor)
 
+def genConstructorBody(descriptor):
         return string.Template(
 """  // Get the window to use as a parent and for initialization.
   nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(global.Get());
@@ -8487,8 +8550,8 @@ class CGJSImplMethod(CGNativeMember):
   }
   // Build the C++ implementation.
   nsRefPtr<${implClass}> impl = new ${implClass}(jsImplObj, window);
-  return impl.forget();""").substitute({"implClass" : self.descriptor.name,
-                 "contractId" : self.descriptor.interface.getJSImplementation()
+  return impl.forget();""").substitute({"implClass" : descriptor.name,
+                 "contractId" : descriptor.interface.getJSImplementation()
                  })
 
 # We're always fallible

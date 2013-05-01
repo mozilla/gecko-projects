@@ -1210,6 +1210,16 @@ JSObject::isSealedOrFrozen(JSContext *cx, HandleObject obj, ImmutabilityType it,
     return true;
 }
 
+/* static */
+const char *
+JSObject::className(JSContext *cx, HandleObject obj)
+{
+    if (obj->isProxy())
+        return Proxy::className(cx, obj);
+
+    return obj->getClass()->name;
+}
+
 /*
  * Get the GC kind to use for scripted 'new' on the given class.
  * FIXME bug 547327: estimate the size from the allocation site.
@@ -1277,7 +1287,7 @@ js::NewObjectWithGivenProto(JSContext *cx, js::Class *clasp,
     NewObjectCache &cache = cx->runtime->newObjectCache;
 
     NewObjectCache::EntryIndex entry = -1;
-    if (proto.isObject() && newKind != SingletonObject &&
+    if (proto.isObject() && newKind == GenericObject &&
         (!parent || parent == proto.toObject()->getParent()) && !proto.toObject()->isGlobal())
     {
         if (cache.lookupProto(clasp, proto.toObject(), allocKind, &entry)) {
@@ -1335,7 +1345,7 @@ js::NewObjectWithClassProtoCommon(JSContext *cx, js::Class *clasp, JSObject *pro
     NewObjectCache &cache = cx->runtime->newObjectCache;
 
     NewObjectCache::EntryIndex entry = -1;
-    if (parentArg->isGlobal() && protoKey != JSProto_Null && newKind != SingletonObject) {
+    if (parentArg->isGlobal() && protoKey != JSProto_Null && newKind == GenericObject) {
         if (cache.lookupGlobal(clasp, &parentArg->asGlobal(), allocKind, &entry)) {
             JSObject *obj = cache.newObjectFromHit(cx, entry, GetInitialHeap(newKind, clasp));
             if (obj)
@@ -1377,7 +1387,7 @@ js::NewObjectWithType(JSContext *cx, HandleTypeObject type, JSObject *parent, gc
     NewObjectCache &cache = cx->runtime->newObjectCache;
 
     NewObjectCache::EntryIndex entry = -1;
-    if (parent == type->proto->getParent() && newKind != SingletonObject) {
+    if (parent == type->proto->getParent() && newKind == GenericObject) {
         if (cache.lookupType(&ObjectClass, type, allocKind, &entry)) {
             JSObject *obj = cache.newObjectFromHit(cx, entry, GetInitialHeap(newKind, &ObjectClass));
             if (obj)
@@ -4655,7 +4665,7 @@ js::DefaultValue(JSContext *cx, HandleObject obj, JSType hint, MutableHandleValu
 
 JS_FRIEND_API(JSBool)
 JS_EnumerateState(JSContext *cx, JSHandleObject obj, JSIterateOp enum_op,
-                  JSMutableHandleValue statep, JSMutableHandleId idp)
+                  JSMutableHandleValue statep, JS::MutableHandleId idp)
 {
     /* If the class has a custom JSCLASS_NEW_ENUMERATE hook, call it. */
     Class *clasp = obj->getClass();
