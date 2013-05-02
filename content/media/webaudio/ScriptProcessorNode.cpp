@@ -359,7 +359,10 @@ ScriptProcessorNode::ScriptProcessorNode(AudioContext* aContext,
                                          uint32_t aBufferSize,
                                          uint32_t aNumberOfInputChannels,
                                          uint32_t aNumberOfOutputChannels)
-  : AudioNode(aContext)
+  : AudioNode(aContext,
+              aNumberOfInputChannels,
+              mozilla::dom::ChannelCountMode::Explicit,
+              mozilla::dom::ChannelInterpretation::Speakers)
   , mSharedBuffers(new SharedBuffers())
   , mBufferSize(aBufferSize ?
                   aBufferSize : // respect what the web developer requested
@@ -372,8 +375,7 @@ ScriptProcessorNode::ScriptProcessorNode(AudioContext* aContext,
                                   aContext->Destination(),
                                   BufferSize(),
                                   aNumberOfInputChannels);
-  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM,
-                                                     aNumberOfInputChannels);
+  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
   engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
 }
 

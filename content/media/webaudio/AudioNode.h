@@ -8,6 +8,7 @@
 #define AudioNode_h_
 
 #include "nsDOMEventTargetHelper.h"
+#include "mozilla/dom/AudioNodeBinding.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
 #include "EnableWebAudioCheck.h"
@@ -78,17 +79,13 @@ protected:
   virtual ~AudioNode();
 
 public:
-  explicit AudioNode(AudioContext* aContext);
+  AudioNode(AudioContext* aContext,
+            uint32_t aChannelCount,
+            ChannelCountMode aChannelCountMode,
+            ChannelInterpretation aChannelInterpretation);
 
   // This should be idempotent (safe to call multiple times).
   virtual void DestroyMediaStream();
-
-  // This method should be overridden to return true in nodes
-  // which support being hooked up to the Media Stream graph.
-  virtual bool SupportsMediaStreams() const
-  {
-    return false;
-  }
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioNode,
@@ -118,6 +115,31 @@ public:
   // constant for the lifetime of the node. Both default to 1.
   virtual uint32_t NumberOfInputs() const { return 1; }
   virtual uint32_t NumberOfOutputs() const { return 1; }
+
+  uint32_t ChannelCount() const { return mChannelCount; }
+  void SetChannelCount(uint32_t aChannelCount)
+  {
+    mChannelCount = aChannelCount;
+    SendChannelMixingParametersToStream();
+  }
+  ChannelCountMode ChannelCountModeValue() const
+  {
+    return mChannelCountMode;
+  }
+  void SetChannelCountModeValue(ChannelCountMode aMode)
+  {
+    mChannelCountMode = aMode;
+    SendChannelMixingParametersToStream();
+  }
+  ChannelInterpretation ChannelInterpretationValue() const
+  {
+    return mChannelInterpretation;
+  }
+  void SetChannelInterpretationValue(ChannelInterpretation aMode)
+  {
+    mChannelInterpretation = aMode;
+    SendChannelMixingParametersToStream();
+  }
 
   struct InputNode {
     ~InputNode()
@@ -154,6 +176,7 @@ protected:
   void SendDoubleParameterToStream(uint32_t aIndex, double aValue);
   void SendInt32ParameterToStream(uint32_t aIndex, int32_t aValue);
   void SendThreeDPointParameterToStream(uint32_t aIndex, const ThreeDPoint& aValue);
+  void SendChannelMixingParametersToStream();
   static void SendTimelineParameterToStream(AudioNode* aNode, uint32_t aIndex,
                                             const AudioParamTimeline& aValue);
 
@@ -174,6 +197,9 @@ private:
   // exact matching entry, since mOutputNodes doesn't include the port
   // identifiers and the same node could be connected on multiple ports.
   nsTArray<nsRefPtr<AudioNode> > mOutputNodes;
+  uint32_t mChannelCount;
+  ChannelCountMode mChannelCountMode;
+  ChannelInterpretation mChannelInterpretation;
 };
 
 }

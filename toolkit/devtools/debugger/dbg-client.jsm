@@ -348,45 +348,38 @@ DebuggerClient.prototype = {
       });
     }
 
-    let closeTransport = function _closeTransport() {
-      this._transport.close();
-      this._transport = null;
-    }.bind(this);
+    let self = this;
 
-    let detachTab = function _detachTab() {
-      if (this.activeTab) {
-        this.activeTab.detach(closeTransport);
-      } else {
-        closeTransport();
-      }
-    }.bind(this);
+    let continuation = function () {
+      self._consoleClients = {};
+      detachThread();
+    }
 
-    let detachThread = function _detachThread() {
-      if (this.activeThread) {
-        this.activeThread.detach(detachTab);
+    for each (let client in this._consoleClients) {
+      continuation = client.close.bind(client, continuation);
+    }
+
+    continuation();
+
+    function detachThread() {
+      if (self.activeThread) {
+        self.activeThread.detach(detachTab);
       } else {
         detachTab();
       }
-    }.bind(this);
-
-    let consolesClosed = 0;
-    let consolesToClose = 0;
-
-    let onConsoleClose = function _onConsoleClose() {
-      consolesClosed++;
-      if (consolesClosed >= consolesToClose) {
-        this._consoleClients = {};
-        detachThread();
-      }
-    }.bind(this);
-
-    for each (let client in this._consoleClients) {
-      consolesToClose++;
-      client.close(onConsoleClose);
     }
 
-    if (!consolesToClose) {
-      detachThread();
+    function detachTab() {
+      if (self.activeTab) {
+        self.activeTab.detach(closeTransport);
+      } else {
+        closeTransport();
+      }
+    }
+
+    function closeTransport() {
+      self._transport.close();
+      self._transport = null;
     }
   },
 

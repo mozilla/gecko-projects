@@ -177,7 +177,10 @@ private:
 };
 
 DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
-  : AudioNode(aContext)
+  : AudioNode(aContext,
+              DEFAULT_NUMBER_OF_CHANNELS,
+              ChannelCountMode::Explicit,
+              ChannelInterpretation::Speakers)
   , mThreshold(new AudioParam(this, SendThresholdToStream, -24.f))
   , mKnee(new AudioParam(this, SendKneeToStream, 30.f))
   , mRatio(new AudioParam(this, SendRatioToStream, 12.f))
@@ -186,8 +189,7 @@ DynamicsCompressorNode::DynamicsCompressorNode(AudioContext* aContext)
   , mRelease(new AudioParam(this, SendReleaseToStream, 0.25f))
 {
   DynamicsCompressorNodeEngine* engine = new DynamicsCompressorNodeEngine(this, aContext->Destination());
-  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM,
-                                                     DEFAULT_NUMBER_OF_CHANNELS);
+  mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
   engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
 }
 

@@ -311,9 +311,15 @@ nsHttpConnectionMgr::PruneDeadConnections()
 }
 
 nsresult
-nsHttpConnectionMgr::ClosePersistentConnections()
+nsHttpConnectionMgr::DoShiftReloadConnectionCleanup(nsHttpConnectionInfo *aCI)
 {
-    return PostEvent(&nsHttpConnectionMgr::OnMsgClosePersistentConnections);
+    nsRefPtr<nsHttpConnectionInfo> connInfo(aCI);
+
+    nsresult rv = PostEvent(&nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup,
+                            0, connInfo);
+    if (NS_SUCCEEDED(rv))
+        connInfo.forget();
+    return rv;
 }
 
 nsresult
@@ -446,6 +452,7 @@ nsHttpConnectionMgr::LookupConnectionEntry(nsHttpConnectionInfo *ci,
                                            nsHttpConnection *conn,
                                            nsHttpTransaction *trans)
 {
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     if (!ci)
         return nullptr;
 
@@ -574,6 +581,8 @@ void
 nsHttpConnectionMgr::ReportSpdyCWNDSetting(nsHttpConnectionInfo *ci,
                                            uint32_t cwndValue)
 {
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+
     if (!gHttpHandler->UseSpdyPersistentSettings())
         return;
 
@@ -600,6 +609,8 @@ nsHttpConnectionMgr::ReportSpdyCWNDSetting(nsHttpConnectionInfo *ci,
 uint32_t
 nsHttpConnectionMgr::GetSpdyCWNDSetting(nsHttpConnectionInfo *ci)
 {
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+
     if (!gHttpHandler->UseSpdyPersistentSettings())
         return 0;
 
@@ -886,6 +897,7 @@ nsHttpConnectionMgr::PruneDeadConnectionsCB(const nsACString &key,
                                             nsAutoPtr<nsConnectionEntry> &ent,
                                             void *closure)
 {
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     nsHttpConnectionMgr *self = (nsHttpConnectionMgr *) closure;
 
     LOG(("  pruning [ci=%s]\n", ent->mConnInfo->HashKey().get()));
@@ -2219,11 +2231,17 @@ nsHttpConnectionMgr::OnMsgPruneDeadConnections(int32_t, void *)
 }
 
 void
-nsHttpConnectionMgr::OnMsgClosePersistentConnections(int32_t, void *)
+nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup(int32_t, void *param)
 {
-    LOG(("nsHttpConnectionMgr::OnMsgClosePersistentConnections\n"));
+    LOG(("nsHttpConnectionMgr::OnMsgDoShiftReloadConnectionCleanup\n"));
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+
+    nsRefPtr<nsHttpConnectionInfo> ci =
+        dont_AddRef(static_cast<nsHttpConnectionInfo *>(param));
 
     mCT.Enumerate(ClosePersistentConnectionsCB, this);
+    if (ci)
+        ResetIPFamilyPreference(ci);
 }
 
 void
@@ -3385,8 +3403,9 @@ nsHttpConnectionMgr::GetConnectionData(nsTArray<mozilla::net::HttpRetParams> *aA
 }
 
 void
-nsHttpConnectionMgr::ResetIPFamillyPreference(nsHttpConnectionInfo *ci)
+nsHttpConnectionMgr::ResetIPFamilyPreference(nsHttpConnectionInfo *ci)
 {
+    MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     nsConnectionEntry *ent = LookupConnectionEntry(ci, nullptr, nullptr);
     if (ent)
         ent->ResetIPFamilyPreference();

@@ -33,13 +33,21 @@ CPPSRCS = \
         BasicLayerManager.cpp \
         BasicCanvasLayer.cpp \
         BasicColorLayer.cpp \
+        BasicCompositor.cpp \
         BasicContainerLayer.cpp \
         BasicImageLayer.cpp \
         BasicLayersImpl.cpp \
         BasicThebesLayer.cpp \
-        BasicTiledThebesLayer.cpp \
+        ClientCanvasLayer.cpp \
+        ClientColorLayer.cpp \
+        ClientContainerLayer.cpp \
+        ClientImageLayer.cpp \
+        ClientLayerManager.cpp \
+        ClientThebesLayer.cpp \
+        ClientTiledThebesLayer.cpp \
         CompositableHost.cpp \
         CompositableTransactionParent.cpp \
+		CopyableCanvasLayer.cpp \
         ImageContainer.cpp \
         Layers.cpp \
         LayersLogging.cpp \
