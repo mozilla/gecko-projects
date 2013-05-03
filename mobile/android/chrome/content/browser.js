@@ -5360,7 +5360,8 @@ var PopupBlockerObserver = {
         let popupName = pageReport[i].popupWindowName;
 
         let parent = BrowserApp.selectedTab;
-        BrowserApp.addTab(popupURIspec, { parentId: parent.id });
+        let isPrivate = PrivateBrowsingUtils.isWindowPrivate(parent.browser.contentWindow);
+        BrowserApp.addTab(popupURIspec, { parentId: parent.id, isPrivate: isPrivate });
       }
     }
   }
