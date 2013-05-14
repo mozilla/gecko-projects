@@ -230,6 +230,7 @@
            side="right"
            type="arrow"
            hidden="true"
+           flip="slide"
            rolluponmousewheel="true"
            consumeoutsideclicks="false"
            noautofocus="true"
@@ -952,7 +953,6 @@
                      ondrop="DownloadsIndicatorView.onDrop(event);"
                      ondragover="DownloadsIndicatorView.onDragOver(event);"
                      ondragenter="DownloadsIndicatorView.onDragOver(event);"
-                     ondragleave="DownloadsIndicatorView.onDragLeave(event);"
                      label="&downloads.label;"
                      tooltiptext="&downloads.tooltip;"/>
 
