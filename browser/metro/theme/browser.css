@@ -9,23 +9,26 @@
 %define forward_width 22px
 %define forward_spacing 12px
 
-/* Sliding Toolbar/Tab Tray ------------------------------------------------- */
+/* Progress meter ------------------------------------------------- */
 
-#tray {
-  transition: transform @metro_animation_duration@ @metro_animation_easing@;
-  transform: translateY(-@tabs_height@);
-  width: 100%;
-}
-
-#progress-control {
+#progress-container {
   display: block;
   position: absolute;
   top: -@progress_height@;
   height: @progress_height@;
-  max-height: @progress_height@;
-  background: linear-gradient(to right,  @progress_start_color@,  @progress_end_color@);
+  width: 100%;
+  background-color: hsla(210,5%,80%,1);
+  box-shadow: 0 1px 0 hsla(210,5%,50%,.1) inset;
   -moz-user-focus: ignore;
+}
+
+#progress-control {
+  display: block;
+  height: @progress_height@;
+  background-image: -moz-linear-gradient(left, hsla(200,100%,83%,.5), hsla(200,100%,83%,0)), -moz-linear-gradient(top, #1ab2ff, #0091ff);
+  border-right: 1px solid #0082e5;
   transition: width .3s ease-in;
+  -moz-user-focus: ignore;
 }
 
 #progress-control:-moz-dir(rtl) {
@@ -35,6 +38,14 @@
 #progress-control[fade] {
   opacity: 0;
   transition: width .3s ease-in, .5s opacity ease-in;
+}
+
+/* Sliding Toolbar/Tab Tray ------------------------------------------------- */
+
+#tray {
+  transition: transform @metro_animation_duration@ @metro_animation_easing@;
+  transform: translateY(-@tabs_height@);
+  width: 100%;
 }
 
 /* in non-tabsonly mode the navigation bar and tab tray float over content. In
@@ -366,12 +377,12 @@ documenttab[selected] .documenttab-selection {
   list-style-image: url(chrome://browser/skin/images/identity-icons-generic.png);
 }
 
-#identity-box[mode="verifiedDomain"] > #identity-icon[pageproxystate="valid"] {
-  list-style-image: url(chrome://browser/skin/images/identity-icons-https.png);
+#identity-box-inner.verifiedDomain > #identity-icon {
+  list-style-image: url(chrome://browser/skin/images/locked-hdpi.png);
 }
- 
-#identity-box[mode="verifiedIdentity"] > #identity-icon[pageproxystate="valid"] {
-  list-style-image: url(chrome://browser/skin/identity-icons-https-ev.png);
+
+#identity-box-inner.verifiedIdentity > #identity-icon {
+  list-style-image: url(chrome://browser/skin/images/locked-hdpi.png);
 }
 
 /* Main URL textbox */
@@ -394,25 +405,7 @@ documenttab[selected] .documenttab-selection {
 }
 
 #toolbar[mode="loading"] > #tool-reload,
-#toolbar:-moz-any([mode="edit"], [mode="view"]) > #tool-stop {
-  visibility: collapse;
-}
-
-/* Hide the tab toggle if we're showing classic tabs or we're snap-viewed. */
-#toolbar[viewstate="snapped"],
-#tray[tabsonly] #toolbar {
-  background: @panel_light_color@ @panel_light_background@;
-  -moz-padding-end: 0;
-}
-
-#toolbar[viewstate="snapped"] {
-  -moz-padding-end: 0;
-}
-
-#toolbar[viewstate="snapped"] > #urlbar-container {
-  -moz-margin-end: 0;
-}
-
+#toolbar:-moz-any([mode="edit"], [mode="view"]) > #tool-stop,
 #toolbar[viewstate="snapped"] > #tool-stop ~ toolbarbutton {
   visibility: collapse;
 }
@@ -424,7 +417,7 @@ appbar {
   position: fixed;
   bottom: 0;
   width: 100%;
-  transform: translateY(@toolbar_height@);
+  transform: translateY(100%);
   transition: transform @metro_animation_duration@ @metro_animation_easing@;
   font-size: 0;
 }
@@ -451,18 +444,18 @@ appbar > toolbar > toolbarbutton[disabled] {
 }
 
 #appbar[startpage],
-#appbar[visible] {
+appbar[visible] {
   transform: none;
 }
 
-#appbar > toolbar > toolbarbutton {
+appbar > toolbar > toolbarbutton {
   list-style-image: url(chrome://browser/skin/images/appbar-icons.png);
   -moz-image-region: rect(0px, 200px, 40px, 160px); /* Gear icon is default. */
 }
-#appbar > toolbar > toolbarbutton:hover {
+appbar > toolbar > toolbarbutton:hover {
   -moz-image-region: rect(40px, 200px, 80px, 160px);
 }
-#appbar > toolbar > toolbarbutton:active {
+appbar > toolbar > toolbarbutton:active {
   -moz-image-region: rect(80px, 200px, 120px, 160px);
 }
 
@@ -530,12 +523,6 @@ appbar > toolbar > toolbarbutton[disabled] {
 #star-button:active,
 #star-button[checked] {
   -moz-image-region: rect(80px, 360px, 120px, 320px) !important;
-}
-
-/* Tile-selection-Specific */
-#appbar[contextual] > #toolbar,
-#appbar:not([contextual]) > #contextualactions-tray {
-  visibility: collapse;
 }
 
 #contextualactions-tray {

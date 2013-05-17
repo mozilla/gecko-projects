@@ -306,7 +306,9 @@
 
     <!-- Windows 8 Appbar -->
     <appbar id="appbar" mousethrough="never" observes="bcast_windowState">
-      <hbox id="progress-control" layer="true"/>
+      <hbox id="progress-container" layer="true">
+        <hbox id="progress-control" />
+      </hbox>
 
       <!-- Main Toolbar -->
       <toolbar id="toolbar" observes="bcast_windowState" flex="1">
@@ -353,7 +355,9 @@
         <toolbarbutton id="pin-button" type="checkbox" oncommand="Appbar.onPinButton()"/>
         <toolbarbutton id="more-button" onclick="Appbar.onMoreButton(event)"/>
       </toolbar>
+    </appbar>
 
+    <appbar id="contextappbar">
       <toolbar id="contextualactions-tray" flex="1">
         <toolbarbutton id="delete-selected-button" hidden="true" fade="true" oncommand="Appbar.dispatchContextualAction('delete')"/>
         <toolbarbutton id="restore-selected-button" hidden="true" fade="true" oncommand="Appbar.dispatchContextualAction('restore')"/>
@@ -377,10 +381,10 @@
     </flyoutpanel>
 
     <flyoutpanel id="sync-flyoutpanel" headertext="&syncHeader.title;">
-      <description>&sync.setup.description;</description> 
-      <description id="sync-accountinfo" collapsed="true"></description> 
-      <description id="sync-lastsync" collapsed="true"></description> 
-      <description id="sync-errordescription" collapsed="true"></description> 
+      <description id="sync-description">&sync.setup.description;</description>
+      <description id="sync-accountinfo" collapsed="true"></description>
+      <description id="sync-lastsync" collapsed="true"></description>
+      <description id="sync-errordescription" collapsed="true"></description>
       <setting id="sync-connect" type="control" collapsed="true">
         <button label="&sync.setupbutton.label;" oncommand="Sync.tryConnect();" />
       </setting>
