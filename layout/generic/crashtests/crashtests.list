@@ -338,6 +338,8 @@ load 494300-1.xul
 load 494332-1.html
 load 495875-1.html
 load 495875-2.html
+load 496742.html
+load 499138.html
 load 499862-1.html
 load 499857-1.html
 asserts(10-90) asserts-if(winWidget,3-108) load 499885-1.xhtml # nscoord_MAX assertions (bug 575011), plus bug 570436 on some versions of windows
@@ -361,6 +363,7 @@ load 517968.html
 load 519031.xhtml
 load 520340.html
 load 522170-1.html
+load 526217.html
 load 533379-1.html
 load 533379-2.html
 load 534082-1.html
@@ -383,6 +386,7 @@ load 570160.html
 load 570289-1.html
 load 571618-1.svg
 asserts(1) load 571975-1.html # bug 574889
+asserts(7) load 571995.xhtml # 761848
 load 574958.xhtml
 asserts(0-4) load 578977.html # bug 757305
 load 580504-1.xhtml
@@ -405,6 +409,7 @@ load 604314-1.html
 load 604843.html
 load 605340.html
 load 606642.xhtml
+load 619021.html
 load 621424-1.html
 load 621841-1.html
 load 645072-1.html
