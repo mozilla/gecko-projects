@@ -28,7 +28,6 @@ DOMCI_CLASS(MouseScrollEvent)
 DOMCI_CLASS(WheelEvent)
 DOMCI_CLASS(DragEvent)
 DOMCI_CLASS(ClipboardEvent)
-DOMCI_CLASS(KeyboardEvent)
 DOMCI_CLASS(CompositionEvent)
 #define MOZ_GENERATED_EVENT_LIST
 #define MOZ_GENERATED_EVENT(_event_interface) DOMCI_CLASS(_event_interface)
@@ -232,8 +231,6 @@ DOMCI_CLASS(OpenWindowEventDetail)
 DOMCI_CLASS(AsyncScrollEventDetail)
 
 DOMCI_CLASS(LockedFile)
-
-DOMCI_CLASS(CSSFontFeatureValuesRule)
 
 #ifdef MOZ_TIME_MANAGER
 DOMCI_CLASS(MozTimeManager)

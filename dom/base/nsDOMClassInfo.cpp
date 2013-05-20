@@ -565,8 +565,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(ClipboardEvent, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(KeyboardEvent, nsEventSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(CompositionEvent, nsEventSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
@@ -899,8 +897,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
 
   NS_DEFINE_CLASSINFO_DATA(LockedFile, nsEventTargetSH,
                            EVENTTARGET_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(CSSFontFeatureValuesRule, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
 #ifdef MOZ_TIME_MANAGER
   NS_DEFINE_CLASSINFO_DATA(MozTimeManager, nsDOMGenericSH,
@@ -1713,11 +1709,6 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_UI_EVENT_MAP_ENTRIES
   DOM_CLASSINFO_MAP_END
 
-  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(KeyboardEvent, nsIDOMKeyEvent)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMKeyEvent)
-    DOM_CLASSINFO_UI_EVENT_MAP_ENTRIES
-  DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(CompositionEvent, nsIDOMCompositionEvent)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCompositionEvent)
     DOM_CLASSINFO_UI_EVENT_MAP_ENTRIES
@@ -2273,10 +2264,6 @@ nsDOMClassInfo::Init()
 
   DOM_CLASSINFO_MAP_BEGIN(LockedFile, nsIDOMLockedFile)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMLockedFile)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(CSSFontFeatureValuesRule, nsIDOMCSSFontFeatureValuesRule)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSFontFeatureValuesRule)
   DOM_CLASSINFO_MAP_END
 
 #ifdef MOZ_TIME_MANAGER

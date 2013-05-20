@@ -34,7 +34,6 @@ CPPSRCS	= \
 	gfxDrawable.cpp \
 	gfxImageSurface.cpp \
 	gfxFont.cpp \
-	gfxFontFeatures.cpp \
 	gfxFontMissingGlyphs.cpp \
 	gfxFontTest.cpp \
 	gfxFontUtils.cpp \
