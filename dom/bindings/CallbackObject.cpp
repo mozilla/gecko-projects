@@ -11,6 +11,7 @@
 #include "nsIScriptContext.h"
 #include "nsPIDOMWindow.h"
 #include "nsJSUtils.h"
+#include "nsCxPusher.h"
 #include "nsIScriptSecurityManager.h"
 #include "xpcprivate.h"
 
@@ -89,10 +90,7 @@ CallbackObject::CallSetup::CallSetup(JS::Handle<JSObject*> aCallback,
     cx = nsContentUtils::GetSafeJSContext();
   }
 
-  // Victory!  We have a JSContext.  Now do the things we need a JSContext for.
-  mAr.construct(cx);
-
-  // And go ahead and stick our callable in a Rooted, to make sure it can't go
+  // Go ahead and stick our callable in a Rooted, to make sure it can't go
   // gray again.  We can do this even though we're not in the right compartment
   // yet, because Rooted<> does not care about compartments.
   mRootedCallable.construct(cx, aCallback);

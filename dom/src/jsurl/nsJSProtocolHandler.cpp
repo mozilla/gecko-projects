@@ -36,6 +36,7 @@
 #include "nsIContentViewer.h"
 #include "nsIXPConnect.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsJSUtils.h"
 #include "nsThreadUtils.h"
 #include "nsIScriptChannel.h"
@@ -258,8 +259,6 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     JS::Rooted<JS::Value> v (cx, JS::UndefinedValue());
     // Finally, we have everything needed to evaluate the expression.
-
-    JSAutoRequest ar(cx);
     if (useSandbox) {
         // We were asked to use a sandbox, or the channel owner isn't allowed
         // to execute in this context.  Evaluate the javascript URL in a

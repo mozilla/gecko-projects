@@ -27,6 +27,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsDOMClassInfoID.h"
 #include "nsGlobalWindow.h"
 #include "nsHashKeys.h"
@@ -209,7 +210,6 @@ IDBFactory::Create(ContentParent* aContentParent,
   NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
 
   AutoSafeJSContext cx;
-  JSAutoRequest ar(cx);
 
   nsIXPConnect* xpc = nsContentUtils::XPConnect();
   NS_ASSERTION(xpc, "This should never be null!");

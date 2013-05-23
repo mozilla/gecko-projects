@@ -47,6 +47,7 @@
 #include "nsCURILoader.h"
 #include "nsContentPolicyUtils.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsDocShellCID.h"
 #include "nsGkAtoms.h"
 #include "nsThreadUtils.h"
@@ -2961,7 +2962,6 @@ nsObjectLoadingContent::SetupProtoChain(JSContext* aCx,
   // so make sure to enter the compartment of aObject.
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
 
-  JSAutoRequest ar(aCx);
   JSAutoCompartment ac(aCx, aObject);
 
   nsRefPtr<nsNPAPIPluginInstance> pi;
@@ -3071,8 +3071,6 @@ nsObjectLoadingContent::GetPluginJSObject(JSContext *cx,
   *plugin_obj = nullptr;
   *plugin_proto = nullptr;
 
-  JSAutoRequest ar(cx);
-
   // NB: We need an AutoEnterCompartment because we can be called from
   // nsObjectFrame when the plugin loads after the JS object for our content
   // node has been created.
@@ -3098,12 +3096,11 @@ nsObjectLoadingContent::TeardownProtoChain()
 
   // Use the safe JSContext here as we're not always able to find the
   // JSContext associated with the NPP any more.
-  JSContext *cx = nsContentUtils::GetSafeJSContext();
+  AutoSafeJSContext cx;
   JS::Rooted<JSObject*> obj(cx, thisContent->GetWrapper());
   NS_ENSURE_TRUE(obj, /* void */);
 
   JS::Rooted<JSObject*> proto(cx);
-  JSAutoRequest ar(cx);
   JSAutoCompartment ac(cx, obj);
 
   // Loop over the DOM element's JS object prototype chain and remove

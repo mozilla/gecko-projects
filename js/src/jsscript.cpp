@@ -533,18 +533,20 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         options.setVersion(version_)
                .setNoScriptRval(!!(scriptBits & (1 << NoScriptRval)))
                .setSelfHostingMode(!!(scriptBits & (1 << SelfHosted)));
-        ScriptSource *ss;
+        JS::RootedScriptSource sourceObject(cx);
         if (scriptBits & (1 << OwnSource)) {
-            ss = cx->new_<ScriptSource>();
+            ScriptSource *ss = cx->new_<ScriptSource>();
             if (!ss)
+                return false;
+            sourceObject = ScriptSourceObject::create(cx, ss);
+            if (!sourceObject)
                 return false;
         } else {
             JS_ASSERT(enclosingScript);
-            ss = enclosingScript->scriptSource();
+            sourceObject = enclosingScript->sourceObject();
         }
-        ScriptSourceHolder ssh(ss);
         script = JSScript::Create(cx, enclosingScope, !!(scriptBits & (1 << SavedCallerFun)),
-                                  options, /* staticLevel = */ 0, ss, 0, 0);
+                                  options, /* staticLevel = */ 0, sourceObject, 0, 0);
         if (!script)
             return false;
     }
@@ -893,6 +895,38 @@ JSScript::destroyScriptCounts(FreeOp *fop)
     }
 }
 
+void
+ScriptSourceObject::finalize(FreeOp *fop, JSObject *obj)
+{
+    // ScriptSource::setSource automatically takes care of the refcount
+    obj->asScriptSource().setSource(NULL);
+}
+
+Class js::ScriptSourceClass = {
+    "ScriptSource",
+    JSCLASS_HAS_RESERVED_SLOTS(1) | JSCLASS_IS_ANONYMOUS,
+    JS_PropertyStub,        /* addProperty */
+    JS_DeletePropertyStub,  /* delProperty */
+    JS_PropertyStub,        /* getProperty */
+    JS_StrictPropertyStub,  /* setProperty */
+    JS_EnumerateStub,
+    JS_ResolveStub,
+    JS_ConvertStub,
+    ScriptSourceObject::finalize
+};
+
+ScriptSourceObject *
+ScriptSourceObject::create(JSContext *cx, ScriptSource *source)
+{
+    RootedObject object(cx, NewObjectWithGivenProto(cx, &ScriptSourceClass, NULL, cx->global()));
+    if (!object)
+        return NULL;
+    JS::RootedScriptSource sourceObject(cx, &object->asScriptSource());
+    sourceObject->setSlot(SOURCE_SLOT, PrivateValue(source));
+    source->incref();
+    return sourceObject;
+}
+
 #ifdef JS_THREADSAFE
 void
 SourceCompressorThread::compressorThread(void *arg)
@@ -1115,19 +1149,17 @@ ScriptSource::adjustDataSize(size_t nbytes)
 }
 
 void
-JSScript::setScriptSource(ScriptSource *ss)
+JSScript::setSourceObject(js::ScriptSourceObject *sourceObject)
 {
-    JS_ASSERT(ss);
-    ss->incref();
-    scriptSource_ = ss;
+    sourceObject_ = sourceObject;
 }
 
 /* static */ bool
 JSScript::loadSource(JSContext *cx, HandleScript script, bool *worked)
 {
-    JS_ASSERT(!script->scriptSource_->hasSourceData());
+    JS_ASSERT(!script->scriptSource()->hasSourceData());
     *worked = false;
-    if (!cx->runtime->sourceHook || !script->scriptSource_->sourceRetrievable())
+    if (!cx->runtime->sourceHook || !script->scriptSource()->sourceRetrievable())
         return true;
     jschar *src = NULL;
     uint32_t length;
@@ -1144,8 +1176,8 @@ JSScript::loadSource(JSContext *cx, HandleScript script, bool *worked)
 JSFlatString *
 JSScript::sourceData(JSContext *cx)
 {
-    JS_ASSERT(scriptSource_->hasSourceData());
-    return scriptSource_->substring(cx, sourceStart, sourceEnd);
+    JS_ASSERT(scriptSource()->hasSourceData());
+    return scriptSource()->substring(cx, sourceStart, sourceEnd);
 }
 
 JSStableString *
@@ -1633,7 +1665,7 @@ ScriptDataSize(uint32_t nbindings, uint32_t nobjects, uint32_t nregexps,
 JSScript *
 JSScript::Create(JSContext *cx, HandleObject enclosingScope, bool savedCallerFun,
                  const CompileOptions &options, unsigned staticLevel,
-                 ScriptSource *ss, uint32_t bufStart, uint32_t bufEnd)
+                 JS::HandleScriptSource sourceObject, uint32_t bufStart, uint32_t bufEnd)
 {
     RootedScript script(cx, js_NewGCScript(cx));
     if (!script)
@@ -1674,7 +1706,7 @@ JSScript::Create(JSContext *cx, HandleObject enclosingScope, bool savedCallerFun
     }
     script->staticLevel = uint16_t(staticLevel);
 
-    script->setScriptSource(ss);
+    script->setSourceObject(sourceObject);
     script->sourceStart = bufStart;
     script->sourceEnd = bufEnd;
 
@@ -1985,7 +2017,6 @@ JSScript::finalize(FreeOp *fop)
 
     destroyScriptCounts(fop);
     destroyDebugScript(fop);
-    scriptSource_->decref();
 
     if (data) {
         JS_POISON(data, 0xdb, computedSizeOfData());
@@ -2308,9 +2339,15 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
            .setSelfHostingMode(src->selfHosted)
            .setNoScriptRval(src->noScriptRval)
            .setVersion(src->getVersion());
+
+    /* Make sure we clone the script source object with the script */
+    JS::RootedScriptSource sourceObject(cx, ScriptSourceObject::create(cx, src->scriptSource()));
+    if (!sourceObject)
+        return NULL;
+
     RootedScript dst(cx, JSScript::Create(cx, enclosingScope, src->savedCallerFun,
                                           options, src->staticLevel,
-                                          src->scriptSource(), src->sourceStart, src->sourceEnd));
+                                          sourceObject, src->sourceStart, src->sourceEnd));
     if (!dst) {
         js_free(data);
         return NULL;
@@ -2667,6 +2704,9 @@ JSScript::markChildren(JSTracer *trc)
         ConstArray *constarray = consts();
         MarkValueRange(trc, constarray->length, constarray->vector, "consts");
     }
+
+    if (sourceObject())
+        MarkObject(trc, &sourceObject_, "sourceObject");
 
     if (function())
         MarkObject(trc, &function_, "function");

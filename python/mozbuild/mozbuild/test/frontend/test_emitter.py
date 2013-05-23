@@ -126,6 +126,8 @@ class TestEmitterBasic(unittest.TestCase):
 
         wanted = dict(
             ASFILES=['fans.asm', 'tans.s'],
+            SIMPLE_PROGRAMS=['fans.x', 'tans.x'],
+            CSRCS=['fans.c', 'tans.c'],
             XPIDLSRCS=['bar.idl', 'biz.idl', 'foo.idl'],
             XPIDL_MODULE='module_name',
             XPIDL_FLAGS=['-Idir1', '-Idir2', '-Idir3'],

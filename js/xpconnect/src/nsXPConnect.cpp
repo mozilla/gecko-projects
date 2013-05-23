@@ -23,6 +23,7 @@
 #include "nsJSEnvironment.h"
 #include "nsThreadUtils.h"
 #include "nsDOMJSUtils.h"
+#include "nsContentUtils.h"
 
 #include "XrayWrapper.h"
 #include "WrapperFactory.h"
@@ -862,7 +863,7 @@ public:
         unsigned refCount = js::ContextHasOutstandingRequests(cx) ? 2 : 1;
 
         cb.DescribeRefCountedNode(refCount, "JSContext");
-        if (JSObject *global = JS_GetGlobalObject(cx)) {
+        if (JSObject *global = js::GetDefaultGlobalForContext(cx)) {
             NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "[global object]");
             cb.NoteJSChild(global);
         }
@@ -1893,7 +1894,7 @@ nsXPConnect::OnProcessNextEvent(nsIThreadInternal *aThread, bool aMayWait,
     // Push a null JSContext so that we don't see any script during
     // event processing.
     MOZ_ASSERT(NS_IsMainThread());
-    bool ok = xpc::danger::PushJSContext(nullptr);
+    bool ok = PushJSContext(nullptr);
     NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
     return NS_OK;
 }
@@ -1912,7 +1913,7 @@ nsXPConnect::AfterProcessNextEvent(nsIThreadInternal *aThread,
     nsJSContext::MaybePokeCC();
     nsDOMMutationObserver::HandleMutations();
 
-    xpc::danger::PopJSContext();
+    PopJSContext();
     return NS_OK;
 }
 
@@ -1986,17 +1987,26 @@ nsXPConnect::UnregisterGCCallback(JSGCCallback func)
 void
 nsXPConnect::CheckForDebugMode(JSRuntime *rt)
 {
-    JSContext *cx = NULL;
-
     if (gDebugMode == gDesiredDebugMode) {
         return;
     }
 
     // This can happen if a Worker is running, but we don't have the ability to
     // debug workers right now, so just return.
-    if (!NS_IsMainThread()) {
-        return;
-    }
+    if (!NS_IsMainThread())
+        MOZ_CRASH();
+
+    // We really want to use an AutoSafeJSContext here. Unfortunately, that
+    // pushes, and this function is called during the pushing procedure, so
+    // doing that would result in infinite recursion.
+    //
+    // The only thing we need this cx for is the call to
+    // JS_SetDebugModeForAllCompartments, and the worst _that_ function seems
+    // to do is to report an error in one case. So it's probably ok to just use
+    // the SafeJSContext without pushing for now, especially since both JSD and
+    // cx pushing are not long for this earth.
+    JSContext *unpushedCx = XPCJSRuntime::Get()->GetJSContextStack()
+                                               ->GetSafeJSContext();
 
     JS_SetRuntimeDebugMode(rt, gDesiredDebugMode);
 
@@ -2007,21 +2017,8 @@ nsXPConnect::CheckForDebugMode(JSRuntime *rt)
         goto fail;
     }
 
-    if (!(cx = JS_NewContext(rt, 256))) {
+    if (!JS_SetDebugModeForAllCompartments(unpushedCx, gDesiredDebugMode))
         goto fail;
-    }
-
-    {
-        struct AutoDestroyContext {
-            JSContext *cx;
-            AutoDestroyContext(JSContext *cx) : cx(cx) {}
-            ~AutoDestroyContext() { JS_DestroyContext(cx); }
-        } adc(cx);
-        JSAutoRequest ar(cx);
-
-        if (!JS_SetDebugModeForAllCompartments(cx, gDesiredDebugMode))
-            goto fail;
-    }
 
     if (gDesiredDebugMode) {
         rv = jsds->ActivateDebugger(rt);
@@ -2076,9 +2073,8 @@ nsXPConnect::GetSafeJSContext()
 }
 
 namespace xpc {
-namespace danger {
 
-NS_EXPORT_(bool)
+bool
 PushJSContext(JSContext *aCx)
 {
     // JSD mumbo jumbo.
@@ -2106,7 +2102,7 @@ PushJSContext(JSContext *aCx)
     return XPCJSRuntime::Get()->GetJSContextStack()->Push(aCx);
 }
 
-NS_EXPORT_(void)
+void
 PopJSContext()
 {
     XPCJSRuntime::Get()->GetJSContextStack()->Pop();
@@ -2118,8 +2114,7 @@ IsJSContextOnStack(JSContext *aCx)
   return XPCJSRuntime::Get()->GetJSContextStack()->HasJSContext(aCx);
 }
 
-} /* namespace danger */
-} /* namespace xpc */
+} // namespace xpc
 
 nsIPrincipal*
 nsXPConnect::GetPrincipal(JSObject* obj, bool allowShortCircuit) const
@@ -2480,7 +2475,6 @@ WriteScriptOrFunction(nsIObjectOutputStream *stream, JSContext *cx,
     uint32_t size;
     void* data;
     {
-        JSAutoRequest ar(cx);
         if (functionObj)
             data = JS_EncodeInterpretedFunction(cx, functionObj, &size);
         else
@@ -2539,7 +2533,6 @@ ReadScriptOrFunction(nsIObjectInputStream *stream, JSContext *cx,
         return rv;
 
     {
-        JSAutoRequest ar(cx);
         if (scriptp) {
             JSScript *script = JS_DecodeScript(cx, data, size, principal, originPrincipal);
             if (!script)

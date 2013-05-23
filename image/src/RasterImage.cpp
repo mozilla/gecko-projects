@@ -617,7 +617,8 @@ RasterImage::AdvanceFrame(TimeStamp aTime, nsIntRect* aDirtyRect)
       NS_WARNING("RasterImage::AdvanceFrame(): Compositing of frame failed");
       nextFrame->SetCompositingFailed(true);
       mAnim->currentAnimationFrameIndex = nextFrameIndex;
-      mAnim->currentAnimationFrameTime = aTime;
+      mAnim->currentAnimationFrameTime = mAnim->currentAnimationFrameTime +
+                                         TimeDuration::FromMilliseconds(timeout);
       return false;
     }
 
@@ -626,7 +627,8 @@ RasterImage::AdvanceFrame(TimeStamp aTime, nsIntRect* aDirtyRect)
 
   // Set currentAnimationFrameIndex at the last possible moment
   mAnim->currentAnimationFrameIndex = nextFrameIndex;
-  mAnim->currentAnimationFrameTime = aTime;
+  mAnim->currentAnimationFrameTime = mAnim->currentAnimationFrameTime +
+                                     TimeDuration::FromMilliseconds(timeout);
 
   return true;
 }
@@ -636,11 +638,12 @@ RasterImage::AdvanceFrame(TimeStamp aTime, nsIntRect* aDirtyRect)
 NS_IMETHODIMP_(void)
 RasterImage::RequestRefresh(const mozilla::TimeStamp& aTime)
 {
-  if (!mAnimating || !ShouldAnimate()) {
+  if (!ShouldAnimate()) {
     return;
   }
 
   EnsureAnimExists();
+  EvaluateAnimation();
 
   // only advance the frame if the current time is greater than or
   // equal to the current frame's end time.
@@ -664,7 +667,7 @@ RasterImage::RequestRefresh(const mozilla::TimeStamp& aTime)
     // if we didn't advance a frame, and our frame end time didn't change,
     // then we need to break out of this loop & wait for the frame(s)
     // to finish downloading
-    if (!frameAdvanced && (currentFrameEndTime == oldFrameEndTime)) {
+    if (!didAdvance && (currentFrameEndTime == oldFrameEndTime)) {
       break;
     }
   }
@@ -934,6 +937,21 @@ RasterImage::GetAnimated(bool *aAnimated)
   *aAnimated = false;
 
   return NS_OK;
+}
+
+//******************************************************************************
+/* [notxpcom] int32_t getFirstFrameDelay (); */
+NS_IMETHODIMP_(int32_t)
+RasterImage::GetFirstFrameDelay()
+{
+  if (mError)
+    return -1;
+
+  bool animated = false;
+  if (NS_FAILED(GetAnimated(&animated)) || !animated)
+    return -1;
+
+  return mFrames[0]->GetTimeout();
 }
 
 nsresult
@@ -1298,9 +1316,6 @@ RasterImage::InternalAddFrame(uint32_t framenum,
   rv = InternalAddFrameHelper(framenum, frame.forget(), imageData, imageLength,
                               paletteData, paletteLength, aRetFrame);
 
-  // We may be able to start animating, if we now have enough frames
-  EvaluateAnimation();
-
   return rv;
 }
 
@@ -1543,7 +1558,9 @@ RasterImage::StartAnimation()
 
     // We need to set the time that this initial frame was first displayed, as
     // this is used in AdvanceFrame().
-    mAnim->currentAnimationFrameTime = TimeStamp::Now();
+    if (mAnim->currentAnimationFrameTime.IsNull()) {
+      mAnim->currentAnimationFrameTime = TimeStamp::Now();
+    }
   }
 
   return NS_OK;
@@ -1600,6 +1617,17 @@ RasterImage::ResetAnimation()
   }
 
   return NS_OK;
+}
+
+//******************************************************************************
+// [notxpcom] void requestRefresh ([const] in TimeStamp aTime);
+NS_IMETHODIMP_(void)
+RasterImage::SetAnimationStartTime(const mozilla::TimeStamp& aTime)
+{
+  if (mError || mAnimating || !mAnim)
+    return;
+
+  mAnim->currentAnimationFrameTime = aTime;
 }
 
 NS_IMETHODIMP_(float)

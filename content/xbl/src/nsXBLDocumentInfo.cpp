@@ -24,6 +24,7 @@
 #include "nsJSPrincipals.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsDOMJSUtils.h"
 #include "mozilla/Services.h"
 #include "xpcpublic.h"
@@ -277,7 +278,6 @@ nsXBLDocGlobalObject::EnsureScriptEnvironment()
   mScriptContext = newCtx;
 
   AutoPushJSContext cx(mScriptContext->GetNativeContext());
-  JSAutoRequest ar(cx);
 
   // nsJSEnvironment set the error reporter to NS_ScriptErrorReporter so
   // we must apparently override that with our own (although it isn't clear 
@@ -342,13 +342,7 @@ nsXBLDocGlobalObject::GetGlobalJSObject()
   if (!mScriptContext)
     return nullptr;
 
-  JSContext* cx = mScriptContext->GetNativeContext();
-  if (!cx)
-    return nullptr;
-
-  JSObject *ret = ::JS_GetGlobalObject(cx);
-  NS_ASSERTION(mJSObject == ret, "How did this magic switch happen?");
-  return ret;
+  return mScriptContext->GetNativeGlobal();
 }
 
 void

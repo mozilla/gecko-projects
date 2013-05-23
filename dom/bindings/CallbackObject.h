@@ -25,7 +25,8 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Util.h"
-#include "nsContentUtils.h" // nsCxPusher
+#include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsWrapperCache.h"
 #include "nsJSEnvironment.h"
 #include "xpcpublic.h"
@@ -143,10 +144,6 @@ protected:
     // Put our nsAutoMicrotask first, so it gets destroyed after everything else
     // is gone
     nsAutoMicroTask mMt;
-
-    // Can't construct an XPCAutoRequest until we have a JSContext, so
-    // this needs to be a Maybe.
-    Maybe<XPCAutoRequest> mAr;
 
     // We construct our JS::Rooted right after our JSAutoRequest; let's just
     // hope that the change in ordering wrt the mCxPusher constructor here is

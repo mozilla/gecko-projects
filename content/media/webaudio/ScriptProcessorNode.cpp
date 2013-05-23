@@ -12,6 +12,7 @@
 #include "AudioNodeStream.h"
 #include "AudioProcessingEvent.h"
 #include "WebAudioUtils.h"
+#include "nsCxPusher.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/PodOperations.h"
 #include <deque>
@@ -312,7 +313,6 @@ private:
 
         AutoPushJSContext cx(node->Context()->GetJSContext());
         if (cx) {
-          JSAutoRequest ar(cx);
 
           // Create the input buffer
           nsRefPtr<AudioBuffer> inputBuffer;

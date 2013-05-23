@@ -24,6 +24,7 @@
 #include "nsJSUtils.h"
 #include "mozJSComponentLoader.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "jsfriendapi.h"
 #include "AccessCheck.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -595,6 +596,10 @@ nsXPCComponents_InterfacesByID::NewResolve(nsIXPConnectWrappedNative *wrapper,
 {
     RootedObject obj(cx, objArg);
     RootedId id(cx, idArg);
+
+    if (!JSID_IS_STRING(id))
+        return NS_OK;
+
     RootedString str(cx, JSID_TO_STRING(id));
     if (38 != JS_GetStringLength(str))
         return NS_OK;
@@ -2694,8 +2699,6 @@ nsXPCComponents_Utils::LookupMethod(const JS::Value& object,
                                     JSContext *cx,
                                     JS::Value *retval)
 {
-    JSAutoRequest ar(cx);
-
     // first param must be a JSObject
     if (!object.isObject())
         return NS_ERROR_XPC_BAD_CONVERT_JS;
@@ -2771,8 +2774,6 @@ nsXPCComponents_Utils::ReportError(const JS::Value &errorArg, JSContext *cx)
 
     if (!scripterr || !console)
         return NS_OK;
-
-    JSAutoRequest ar(cx);
 
     const uint64_t innerWindowID = nsJSUtils::GetCurrentlyRunningCodeInnerWindowID(cx);
 
@@ -3805,7 +3806,6 @@ ContextHolder::ContextHolder(JSContext *aOuterCx,
                                    IsSystemPrincipal(mPrincipal, &isChrome);
         MOZ_ASSERT(NS_SUCCEEDED(rv));
 
-        JSAutoRequest ar(mJSContext);
         JS_SetOptions(mJSContext,
                       JS_GetOptions(mJSContext) |
                       JSOPTION_DONT_REPORT_UNCAUGHT |
@@ -3910,7 +3910,6 @@ xpc_EvalInSandbox(JSContext *cx, HandleObject sandboxArg, const nsAString& sourc
                   JSVersion jsVersion, bool returnStringOnly, MutableHandleValue rval)
 {
     JS_AbortIfWrongThread(JS_GetRuntime(cx));
-    JSAutoRequest ar(cx);
     rval.set(UndefinedValue());
 
     bool waiveXray = xpc::WrapperFactory::HasWaiveXrayFlag(sandboxArg);
@@ -3949,8 +3948,6 @@ xpc_EvalInSandbox(JSContext *cx, HandleObject sandboxArg, const nsAString& sourc
         }
         nsCxPusher pusher;
         pusher.Push(sandcx);
-
-        JSAutoRequest req(sandcx);
         JSAutoCompartment ac(sandcx, sandbox);
 
         if (jsVersion != JSVERSION_DEFAULT)
