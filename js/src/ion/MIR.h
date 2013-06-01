@@ -371,6 +371,9 @@ class MDefinition : public MNode
     ValueNumberData *valueNumberData() {
         return valueNumber_;
     }
+    void clearValueNumberData() {
+        valueNumber_ = NULL;
+    }
     void setValueNumberData(ValueNumberData *vn) {
         JS_ASSERT(valueNumber_ == NULL);
         valueNumber_ = vn;
@@ -2272,6 +2275,23 @@ class MSetArgumentsObjectArg
 
     TypePolicy *typePolicy() {
         return this;
+    }
+};
+
+class MRunOncePrologue
+  : public MNullaryInstruction
+{
+  protected:
+    MRunOncePrologue()
+    {
+        setGuard();
+    }
+
+  public:
+    INSTRUCTION_HEADER(RunOncePrologue)
+
+    static MRunOncePrologue *New() {
+        return new MRunOncePrologue();
     }
 };
 
@@ -6586,9 +6606,9 @@ class MSetDOMProperty
   : public MAryInstruction<2>,
     public MixPolicy<ObjectPolicy<0>, BoxPolicy<1> >
 {
-    const JSJitPropertyOp func_;
+    const JSJitSetterOp func_;
 
-    MSetDOMProperty(const JSJitPropertyOp func, MDefinition *obj, MDefinition *val)
+    MSetDOMProperty(const JSJitSetterOp func, MDefinition *obj, MDefinition *val)
       : func_(func)
     {
         setOperand(0, obj);
@@ -6598,12 +6618,12 @@ class MSetDOMProperty
   public:
     INSTRUCTION_HEADER(SetDOMProperty)
 
-    static MSetDOMProperty *New(const JSJitPropertyOp func, MDefinition *obj, MDefinition *val)
+    static MSetDOMProperty *New(const JSJitSetterOp func, MDefinition *obj, MDefinition *val)
     {
         return new MSetDOMProperty(func, obj, val);
     }
 
-    const JSJitPropertyOp fun() {
+    const JSJitSetterOp fun() {
         return func_;
     }
 
@@ -6631,6 +6651,7 @@ class MGetDOMProperty
       : info_(jitinfo)
     {
         JS_ASSERT(jitinfo);
+        JS_ASSERT(jitinfo->type == JSJitInfo::Getter);
 
         setOperand(0, obj);
 
@@ -6657,8 +6678,8 @@ class MGetDOMProperty
         return new MGetDOMProperty(info, obj, guard);
     }
 
-    const JSJitPropertyOp fun() {
-        return info_->op;
+    const JSJitGetterOp fun() {
+        return info_->getter;
     }
     bool isInfallible() const {
         return info_->isInfallible;
@@ -7396,10 +7417,12 @@ class MNewDeclEnvObject : public MNullaryInstruction
 class MNewCallObject : public MUnaryInstruction
 {
     CompilerRootObject templateObj_;
+    bool needsSingletonType_;
 
-    MNewCallObject(HandleObject templateObj, MDefinition *slots)
+    MNewCallObject(HandleObject templateObj, bool needsSingletonType, MDefinition *slots)
       : MUnaryInstruction(slots),
-        templateObj_(templateObj)
+        templateObj_(templateObj),
+        needsSingletonType_(needsSingletonType)
     {
         setResultType(MIRType_Object);
     }
@@ -7407,8 +7430,8 @@ class MNewCallObject : public MUnaryInstruction
   public:
     INSTRUCTION_HEADER(NewCallObject)
 
-    static MNewCallObject *New(HandleObject templateObj, MDefinition *slots) {
-        return new MNewCallObject(templateObj, slots);
+    static MNewCallObject *New(HandleObject templateObj, bool needsSingletonType, MDefinition *slots) {
+        return new MNewCallObject(templateObj, needsSingletonType, slots);
     }
 
     MDefinition *slots() {
@@ -7416,6 +7439,9 @@ class MNewCallObject : public MUnaryInstruction
     }
     JSObject *templateObject() {
         return templateObj_;
+    }
+    bool needsSingletonType() {
+        return needsSingletonType_;
     }
     AliasSet getAliasSet() const {
         return AliasSet::None();
