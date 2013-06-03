@@ -1282,7 +1282,7 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
 
   switch (aCallState) {
     case nsITelephonyProvider::CALL_STATE_HELD:
-      if (!FindFirstCall(nsIRadioInterfaceLayer::CALL_STATE_CONNECTED)) {
+      if (!FindFirstCall(nsITelephonyProvider::CALL_STATE_CONNECTED)) {
         sCINDItems[CINDType::CALLHELD].value = CallHeldState::ONHOLD_NOACTIVE;
       } else {
         sCINDItems[CINDType::CALLHELD].value = CallHeldState::ONHOLD_ACTIVE;
@@ -1358,10 +1358,10 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
       // However we can't send callheld=0 at this time because we should
       // see c2 -> ACTIVE + c1 -> HELD as one operation. That's the reason
       // why I added the GetNumberOfCalls() condition check.
-      if (GetNumberOfCalls(nsIRadioInterfaceLayer::CALL_STATE_CONNECTED) == 1) {
-        if (FindFirstCall(nsIRadioInterfaceLayer::CALL_STATE_HELD)) {
+      if (GetNumberOfCalls(nsITelephonyProvider::CALL_STATE_CONNECTED) == 1) {
+        if (FindFirstCall(nsITelephonyProvider::CALL_STATE_HELD)) {
           UpdateCIND(CINDType::CALLHELD, CallHeldState::ONHOLD_ACTIVE, aSend);
-        } else if (currentCallState == nsIRadioInterfaceLayer::CALL_STATE_HELD) {
+        } else if (prevCallState == nsITelephonyProvider::CALL_STATE_HELD) {
           UpdateCIND(CINDType::CALLHELD, CallHeldState::NO_CALLHELD, aSend);
         }
       }
@@ -1389,9 +1389,9 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
       }
 
       // Handle held calls separately
-      if (!FindFirstCall(nsIRadioInterfaceLayer::CALL_STATE_HELD)) {
+      if (!FindFirstCall(nsITelephonyProvider::CALL_STATE_HELD)) {
         UpdateCIND(CINDType::CALLHELD, CallHeldState::NO_CALLHELD, aSend);
-      } else if (!FindFirstCall(nsIRadioInterfaceLayer::CALL_STATE_CONNECTED)) {
+      } else if (!FindFirstCall(nsITelephonyProvider::CALL_STATE_CONNECTED)) {
         UpdateCIND(CINDType::CALLHELD, CallHeldState::ONHOLD_NOACTIVE, aSend);
       } else {
         UpdateCIND(CINDType::CALLHELD, CallHeldState::ONHOLD_ACTIVE, aSend);
