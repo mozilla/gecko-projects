@@ -6,9 +6,9 @@
 #ifndef WEBGLEXTENSIONS_H_
 #define WEBGLEXTENSIONS_H_
 
-#include "WebGLContext.h"
-
 namespace mozilla {
+
+class WebGLContext;
 
 class WebGLExtensionBase
     : public nsISupports
@@ -136,6 +136,16 @@ class WebGLExtensionTextureFloat
 public:
     WebGLExtensionTextureFloat(WebGLContext*);
     virtual ~WebGLExtensionTextureFloat();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionTextureFloatLinear
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionTextureFloatLinear(WebGLContext*);
+    virtual ~WebGLExtensionTextureFloatLinear();
 
     DECL_WEBGL_EXTENSION_GOOP
 };

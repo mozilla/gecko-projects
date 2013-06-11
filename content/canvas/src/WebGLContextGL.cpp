@@ -5,6 +5,15 @@
 
 #include "WebGLContext.h"
 #include "WebGLContextUtils.h"
+#include "WebGLBuffer.h"
+#include "WebGLVertexAttribData.h"
+#include "WebGLShader.h"
+#include "WebGLProgram.h"
+#include "WebGLUniformLocation.h"
+#include "WebGLFramebuffer.h"
+#include "WebGLRenderbuffer.h"
+#include "WebGLShaderPrecisionFormat.h"
+#include "WebGLTexture.h"
 
 #include "nsString.h"
 #include "nsDebug.h"
@@ -45,6 +54,10 @@ static const int MAX_DRAW_CALLS_SINCE_FLUSH = 100;
 //  WebGL API
 //
 
+inline const WebGLRectangleObject *WebGLContext::FramebufferRectangleObject() const {
+    return mBoundFramebuffer ? mBoundFramebuffer->RectangleObject()
+                             : static_cast<const WebGLRectangleObject*>(this);
+}
 
 void
 WebGLContext::ActiveTexture(WebGLenum texture)
@@ -232,6 +245,7 @@ WebGLContext::BindTexture(WebGLenum target, WebGLTexture *tex)
         return ErrorInvalidEnumInfo("bindTexture: target", target);
     }
 
+    SetDontKnowIfNeedFakeBlack();
     MakeContextCurrent();
 
     if (tex)
@@ -1336,23 +1350,22 @@ WebGLContext::NeedFakeBlack()
     if (mFakeBlackStatus == DoNotNeedFakeBlack)
         return false;
 
-    if (mFakeBlackStatus == DontKnowIfNeedFakeBlack) {
-        for (int32_t i = 0; i < mGLMaxTextureUnits; ++i) {
-            if ((mBound2DTextures[i] && mBound2DTextures[i]->NeedFakeBlack()) ||
-                (mBoundCubeMapTextures[i] && mBoundCubeMapTextures[i]->NeedFakeBlack()))
-            {
-                mFakeBlackStatus = DoNeedFakeBlack;
-                break;
-            }
-        }
+    if (mFakeBlackStatus == DoNeedFakeBlack)
+        return true;
 
-        // we have exhausted all cases where we do need fakeblack, so if the status is still unknown,
-        // that means that we do NOT need it.
-        if (mFakeBlackStatus == DontKnowIfNeedFakeBlack)
-            mFakeBlackStatus = DoNotNeedFakeBlack;
+    for (int32_t i = 0; i < mGLMaxTextureUnits; ++i) {
+        if ((mBound2DTextures[i] && mBound2DTextures[i]->NeedFakeBlack()) ||
+            (mBoundCubeMapTextures[i] && mBoundCubeMapTextures[i]->NeedFakeBlack()))
+        {
+            mFakeBlackStatus = DoNeedFakeBlack;
+            return true;
+        }
     }
 
-    return mFakeBlackStatus == DoNeedFakeBlack;
+    // we have exhausted all cases where we do need fakeblack, so if the status is still unknown,
+    // that means that we do NOT need it.
+    mFakeBlackStatus = DoNotNeedFakeBlack;
+    return false;
 }
 
 void

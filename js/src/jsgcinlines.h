@@ -473,8 +473,8 @@ template <typename T, AllowGC allowGC>
 inline T *
 TryNewNurseryGCThing(JSContext *cx, size_t thingSize)
 {
-    JS_ASSERT(!IsAtomsCompartment(cx->compartment));
-    JSRuntime *rt = cx->runtime;
+    JS_ASSERT(!IsAtomsCompartment(cx->compartment()));
+    JSRuntime *rt = cx->runtime();
     Nursery &nursery = rt->gcNursery;
     T *t = static_cast<T *>(nursery.allocate(thingSize));
     if (t)
@@ -504,18 +504,18 @@ inline T *
 NewGCThing(JSContext *cx, AllocKind kind, size_t thingSize, InitialHeap heap)
 {
     JS_ASSERT(thingSize == js::gc::Arena::thingSize(kind));
-    JS_ASSERT_IF(cx->compartment == cx->runtime->atomsCompartment,
+    JS_ASSERT_IF(cx->compartment() == cx->runtime()->atomsCompartment,
                  kind == FINALIZE_STRING ||
                  kind == FINALIZE_SHORT_STRING ||
                  kind == FINALIZE_IONCODE);
-    JS_ASSERT(!cx->runtime->isHeapBusy());
-    JS_ASSERT(!cx->runtime->noGCOrAllocationCheck);
+    JS_ASSERT(!cx->runtime()->isHeapBusy());
+    JS_ASSERT(!cx->runtime()->noGCOrAllocationCheck);
 
     /* For testing out of memory conditions */
     JS_OOM_POSSIBLY_FAIL_REPORT(cx);
 
 #ifdef JS_GC_ZEAL
-    if (cx->runtime->needZealousGC() && allowGC)
+    if (cx->runtime()->needZealousGC() && allowGC)
         js::gc::RunDebugGC(cx);
 #endif
 
@@ -523,7 +523,7 @@ NewGCThing(JSContext *cx, AllocKind kind, size_t thingSize, InitialHeap heap)
         MaybeCheckStackRoots(cx);
 
 #if defined(JSGC_GENERATIONAL)
-    if (ShouldNurseryAllocate(cx->runtime->gcNursery, kind, heap)) {
+    if (ShouldNurseryAllocate(cx->runtime()->gcNursery, kind, heap)) {
         T *t = TryNewNurseryGCThing<T, allowGC>(cx, thingSize);
         if (t)
             return t;
@@ -539,11 +539,11 @@ NewGCThing(JSContext *cx, AllocKind kind, size_t thingSize, InitialHeap heap)
                  t->arenaHeader()->allocatedDuringIncremental);
 
 #if defined(JSGC_GENERATIONAL) && defined(JS_GC_ZEAL)
-    if (cx->runtime->gcVerifyPostData &&
-        ShouldNurseryAllocate(cx->runtime->gcVerifierNursery, kind, heap))
+    if (cx->runtime()->gcVerifyPostData &&
+        ShouldNurseryAllocate(cx->runtime()->gcVerifierNursery, kind, heap))
     {
-        JS_ASSERT(!IsAtomsCompartment(cx->compartment));
-        cx->runtime->gcVerifierNursery.insertPointer(t);
+        JS_ASSERT(!IsAtomsCompartment(cx->compartment()));
+        cx->runtime()->gcVerifierNursery.insertPointer(t);
     }
 #endif
 

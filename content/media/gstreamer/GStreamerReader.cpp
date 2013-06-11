@@ -14,6 +14,7 @@
 #include "VideoUtils.h"
 #include "mozilla/dom/TimeRanges.h"
 #include "mozilla/Preferences.h"
+#include "GStreamerLoader.h"
 
 namespace mozilla {
 
@@ -34,7 +35,7 @@ IsYV12Format(const VideoData::YCbCrBuffer::Plane& aYPlane,
              const VideoData::YCbCrBuffer::Plane& aCbPlane,
              const VideoData::YCbCrBuffer::Plane& aCrPlane);
 
-static const int MAX_CHANNELS = 4;
+static const unsigned int MAX_CHANNELS = 4;
 // Let the demuxer work in pull mode for short files
 static const int SHORT_FILE_SIZE = 1024 * 1024;
 // The default resource->Read() size when working in push mode
@@ -143,14 +144,14 @@ nsresult GStreamerReader::Init(MediaDecoderReader* aCloneDonor)
 
   mAudioSink = gst_parse_bin_from_description("capsfilter name=filter ! "
 #ifdef MOZ_SAMPLE_TYPE_FLOAT32
-        "appsink name=audiosink sync=true caps=audio/x-raw-float,"
+        "appsink name=audiosink max-buffers=2 sync=true caps=audio/x-raw-float,"
 #ifdef IS_LITTLE_ENDIAN
         "channels={1,2},width=32,endianness=1234", TRUE, nullptr);
 #else
         "channels={1,2},width=32,endianness=4321", TRUE, nullptr);
 #endif
 #else
-        "appsink name=audiosink sync=true caps=audio/x-raw-int,"
+        "appsink name=audiosink max-buffers=2 sync=true caps=audio/x-raw-int,"
 #ifdef IS_LITTLE_ENDIAN
         "channels={1,2},width=16,endianness=1234", TRUE, nullptr);
 #else
@@ -218,6 +219,14 @@ void GStreamerReader::PlayBinSourceSetup(GstAppSrc* aSource)
     LOG(PR_LOG_DEBUG, ("configuring push mode, len %lld", resourceLength));
     gst_app_src_set_stream_type(mSource, GST_APP_STREAM_TYPE_SEEKABLE);
   }
+
+  // Set the source MIME type to stop typefind trying every. single. format.
+  GstCaps *caps =
+    GStreamerFormatHelper::ConvertFormatsToCaps(mDecoder->GetResource()->GetContentType().get(),
+                                                nullptr);
+
+  gst_app_src_set_caps(aSource, caps);
+  gst_caps_unref(caps);
 }
 
 nsresult GStreamerReader::ReadMetadata(VideoInfo* aInfo,
@@ -325,6 +334,8 @@ nsresult GStreamerReader::ReadMetadata(VideoInfo* aInfo,
           GST_TIME_ARGS (duration)));
     duration = GST_TIME_AS_USECONDS (duration);
     mDecoder->SetMediaDuration(duration);
+  } else {
+    mDecoder->SetMediaSeekable(false);
   }
 
   int n_video = 0, n_audio = 0;
@@ -366,7 +377,7 @@ nsresult GStreamerReader::CheckSupportedFormats()
               /* check for demuxers but ignore elements like id3demux */
               if (strstr (klass, "Demuxer") && !strstr(klass, "Metadata"))
                 unsupported = !GStreamerFormatHelper::Instance()->CanHandleContainerCaps(caps);
-              else if (strstr (klass, "Decoder"))
+              else if (strstr (klass, "Decoder") && !strstr(klass, "Generic"))
                 unsupported = !GStreamerFormatHelper::Instance()->CanHandleCodecCaps(caps);
 
               gst_caps_unref(caps);
