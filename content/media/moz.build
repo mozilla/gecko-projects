@@ -34,6 +34,7 @@ PARALLEL_DIRS += ['webrtc']
 
 if CONFIG['MOZ_OMX_DECODER']:
     PARALLEL_DIRS += ['omx']
+    PARALLEL_DIRS += ['omx/mediaresourcemanager']
 
 if CONFIG['MOZ_WEBSPEECH']:
     PARALLEL_DIRS += ['webspeech']
@@ -111,4 +112,5 @@ CPP_SOURCES += [
     'VideoSegment.cpp',
     'VideoStreamTrack.cpp',
     'VideoUtils.cpp',
+    'WebVTTLoadListener.cpp',
 ]

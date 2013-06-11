@@ -41,7 +41,9 @@ this.AccessFu = {
     }
 
     this._activatePref = new PrefCache(
-      'accessibility.accessfu.activate', this._enableOrDisable.bind(this), true);
+      'accessibility.accessfu.activate', this._enableOrDisable.bind(this));
+
+    this._enableOrDisable();
   },
 
   /**
@@ -412,7 +414,7 @@ var Output = {
       {
         let highlightBox = this.highlightBox ? this.highlightBox.get() : null;
         if (highlightBox)
-          highlightBox.get().style.display = 'none';
+          highlightBox.style.display = 'none';
         break;
       }
       case 'showAnnouncement':
