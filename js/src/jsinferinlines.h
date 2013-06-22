@@ -521,7 +521,7 @@ GetTypeCallerInitObject(JSContext *cx, JSProtoKey key)
 {
     if (cx->typeInferenceEnabled()) {
         jsbytecode *pc;
-        RootedScript script(cx, cx->stack.currentScript(&pc));
+        RootedScript script(cx, cx->currentScript(&pc));
         if (script)
             return TypeScript::InitObject(cx, script, pc, key);
     }
@@ -551,8 +551,8 @@ void TypeMonitorCallSlow(JSContext *cx, JSObject *callee, const CallArgs &args,
 inline void
 TypeMonitorCall(JSContext *cx, const js::CallArgs &args, bool constructing)
 {
-    if (args.callee().isFunction()) {
-        JSFunction *fun = args.callee().toFunction();
+    if (args.callee().is<JSFunction>()) {
+        JSFunction *fun = &args.callee().as<JSFunction>();
         if (fun->isInterpreted() && fun->nonLazyScript()->types && cx->typeInferenceEnabled())
             TypeMonitorCallSlow(cx, &args.callee(), args, constructing);
     }
@@ -961,7 +961,7 @@ TypeScript::MonitorUnknown(JSContext *cx, JSScript *script, jsbytecode *pc)
 /* static */ inline void
 TypeScript::GetPcScript(JSContext *cx, JSScript **script, jsbytecode **pc)
 {
-    *script = cx->stack.currentScript(pc);
+    *script = cx->currentScript(pc);
 }
 
 /* static */ inline void

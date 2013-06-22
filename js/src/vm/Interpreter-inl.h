@@ -59,7 +59,7 @@ ComputeImplicitThis(JSContext *cx, HandleObject obj, MutableHandleValue vp)
 {
     vp.setUndefined();
 
-    if (obj->isGlobal())
+    if (obj->is<GlobalObject>())
         return true;
 
     if (IsCacheableNonGlobalScope(obj))
@@ -268,7 +268,7 @@ FetchNameNoGC(JSObject *pobj, Shape *shape, MutableHandleValue vp)
 inline bool
 GetIntrinsicOperation(JSContext *cx, jsbytecode *pc, MutableHandleValue vp)
 {
-    RootedPropertyName name(cx, cx->stack.currentScript()->getName(pc));
+    RootedPropertyName name(cx, cx->currentScript()->getName(pc));
     return cx->global()->getIntrinsicValue(cx, name, vp);
 }
 
@@ -277,45 +277,6 @@ SetIntrinsicOperation(JSContext *cx, JSScript *script, jsbytecode *pc, HandleVal
 {
     RootedPropertyName name(cx, script->getName(pc));
     return cx->global()->setIntrinsicValue(cx, name, val);
-}
-
-inline bool
-NameOperation(JSContext *cx, jsbytecode *pc, MutableHandleValue vp)
-{
-    JSObject *obj = cx->stack.currentScriptedScopeChain();
-    PropertyName *name = cx->stack.currentScript()->getName(pc);
-
-    /*
-     * Skip along the scope chain to the enclosing global object. This is
-     * used for GNAME opcodes where the bytecode emitter has determined a
-     * name access must be on the global. It also insulates us from bugs
-     * in the emitter: type inference will assume that GNAME opcodes are
-     * accessing the global object, and the inferred behavior should match
-     * the actual behavior even if the id could be found on the scope chain
-     * before the global object.
-     */
-    if (IsGlobalOp(JSOp(*pc)))
-        obj = &obj->global();
-
-    Shape *shape = NULL;
-    JSObject *scope = NULL, *pobj = NULL;
-    if (LookupNameNoGC(cx, name, obj, &scope, &pobj, &shape)) {
-        if (FetchNameNoGC(pobj, shape, vp))
-            return true;
-    }
-
-    RootedObject objRoot(cx, obj), scopeRoot(cx), pobjRoot(cx);
-    RootedPropertyName nameRoot(cx, name);
-    RootedShape shapeRoot(cx);
-
-    if (!LookupName(cx, nameRoot, objRoot, &scopeRoot, &pobjRoot, &shapeRoot))
-        return false;
-
-    /* Kludge to allow (typeof foo == "undefined") tests. */
-    JSOp op2 = JSOp(pc[JSOP_NAME_LENGTH]);
-    if (op2 == JSOP_TYPEOF)
-        return FetchName<true>(cx, scopeRoot, pobjRoot, nameRoot, shapeRoot, vp);
-    return FetchName<false>(cx, scopeRoot, pobjRoot, nameRoot, shapeRoot, vp);
 }
 
 inline bool
@@ -334,7 +295,7 @@ SetNameOperation(JSContext *cx, JSScript *script, jsbytecode *pc, HandleObject s
      * undeclared global variable. To do this, we call SetPropertyHelper
      * directly and pass DNP_UNQUALIFIED.
      */
-    if (scope->isGlobal()) {
+    if (scope->is<GlobalObject>()) {
         JS_ASSERT(!scope->getOps()->setProperty);
         RootedId id(cx, NameToId(name));
         return baseops::SetPropertyHelper(cx, scope, scope, id, DNP_UNQUALIFIED, &valCopy, strict);
@@ -354,7 +315,7 @@ DefVarOrConstOperation(JSContext *cx, HandleObject varobj, HandlePropertyName dn
         return false;
 
     /* Steps 8c, 8d. */
-    if (!prop || (obj2 != varobj && varobj->isGlobal())) {
+    if (!prop || (obj2 != varobj && varobj->is<GlobalObject>())) {
         RootedValue value(cx, UndefinedValue());
         if (!JSObject::defineProperty(cx, varobj, dn, value, JS_PropertyStub,
                                       JS_StrictPropertyStub, attrs)) {
@@ -940,8 +901,8 @@ UrshOperation(JSContext *cx, HandleScript script, jsbytecode *pc,
 inline JSFunction *
 ReportIfNotFunction(JSContext *cx, const Value &v, MaybeConstruct construct = NO_CONSTRUCT)
 {
-    if (v.isObject() && v.toObject().isFunction())
-        return v.toObject().toFunction();
+    if (v.isObject() && v.toObject().is<JSFunction>())
+        return &v.toObject().as<JSFunction>();
 
     ReportIsNotFunction(cx, v, -1, construct);
     return NULL;
@@ -955,7 +916,7 @@ ReportIfNotFunction(JSContext *cx, const Value &v, MaybeConstruct construct = NO
  */
 class FastInvokeGuard
 {
-    InvokeArgsGuard args_;
+    InvokeArgs args_;
     RootedFunction fun_;
     RootedScript script_;
 #ifdef JS_ION
@@ -967,7 +928,8 @@ class FastInvokeGuard
 
   public:
     FastInvokeGuard(JSContext *cx, const Value &fval)
-      : fun_(cx)
+      : args_(cx)
+      , fun_(cx)
       , script_(cx)
 #ifdef JS_ION
       , useIon_(ion::IsEnabled(cx))
@@ -978,14 +940,14 @@ class FastInvokeGuard
     }
 
     void initFunction(const Value &fval) {
-        if (fval.isObject() && fval.toObject().isFunction()) {
-            JSFunction *fun = fval.toObject().toFunction();
+        if (fval.isObject() && fval.toObject().is<JSFunction>()) {
+            JSFunction *fun = &fval.toObject().as<JSFunction>();
             if (fun->isInterpreted())
                 fun_ = fun;
         }
     }
 
-    InvokeArgsGuard &args() {
+    InvokeArgs &args() {
         return args_;
     }
 

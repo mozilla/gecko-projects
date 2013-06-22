@@ -355,6 +355,7 @@ js::ObjectImpl::tenuredSizeOfThis() const
 JS_ALWAYS_INLINE JS::Zone *
 js::ObjectImpl::zone() const
 {
+    JS_ASSERT(InSequentialOrExclusiveParallelSection());
     return shape_->zone();
 }
 
@@ -373,7 +374,7 @@ js::ObjectImpl::readBarrier(ObjectImpl *obj)
 #ifdef JSGC_INCREMENTAL
     Zone *zone = obj->zone();
     if (zone->needsBarrier()) {
-        MOZ_ASSERT(!zone->rt->isHeapBusy());
+        MOZ_ASSERT(!zone->rt->isHeapMajorCollecting());
         JSObject *tmp = obj->asObjectPtr();
         MarkObjectUnbarriered(zone->barrierTracer(), &tmp, "read barrier");
         MOZ_ASSERT(tmp == obj->asObjectPtr());
@@ -414,7 +415,7 @@ js::ObjectImpl::writeBarrierPre(ObjectImpl *obj)
 
     Zone *zone = obj->zone();
     if (zone->needsBarrier()) {
-        MOZ_ASSERT(!zone->rt->isHeapBusy());
+        MOZ_ASSERT(!zone->rt->isHeapMajorCollecting());
         JSObject *tmp = obj->asObjectPtr();
         MarkObjectUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
         MOZ_ASSERT(tmp == obj->asObjectPtr());

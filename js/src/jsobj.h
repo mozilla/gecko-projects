@@ -540,17 +540,8 @@ class JSObject : public js::ObjectImpl
     static const char *className(JSContext *cx, js::HandleObject obj);
 
     /* Accessors for elements. */
-
-    struct MaybeContext {
-        js::Allocator *allocator;
-        JSContext *context;
-
-        MaybeContext(JSContext *cx) : allocator(NULL), context(cx) {}
-        MaybeContext(js::Allocator *alloc) : allocator(alloc), context(NULL) {}
-    };
-
     inline bool ensureElements(JSContext *cx, uint32_t cap);
-    bool growElements(MaybeContext cx, uint32_t newcap);
+    bool growElements(js::ThreadSafeContext *tcx, uint32_t newcap);
     void shrinkElements(JSContext *cx, uint32_t cap);
     inline void setDynamicElements(js::ObjectElements *header);
 
@@ -586,10 +577,10 @@ class JSObject : public js::ObjectImpl
      */
     enum EnsureDenseResult { ED_OK, ED_FAILED, ED_SPARSE };
     inline EnsureDenseResult ensureDenseElements(JSContext *cx, uint32_t index, uint32_t extra);
-    inline EnsureDenseResult parExtendDenseElements(js::Allocator *alloc, js::Value *v,
+    inline EnsureDenseResult parExtendDenseElements(js::ThreadSafeContext *tcx, js::Value *v,
                                                     uint32_t extra);
-    template<typename MallocProviderType>
-    inline EnsureDenseResult extendDenseElements(MallocProviderType *cx,
+
+    inline EnsureDenseResult extendDenseElements(js::ThreadSafeContext *tcx,
                                                  uint32_t requiredCapacity, uint32_t extra);
 
     /* Convert a single dense element to a sparse property. */
@@ -653,15 +644,6 @@ class JSObject : public js::ObjectImpl
 
     inline const js::Value &getDateUTCTime() const;
     inline void setDateUTCTime(const js::Value &pthis);
-
-    /*
-     * Function-specific getters and setters.
-     */
-
-    friend class JSFunction;
-
-    inline JSFunction *toFunction();
-    inline const JSFunction *toFunction() const;
 
   public:
     /*
@@ -905,8 +887,8 @@ class JSObject : public js::ObjectImpl
      * specific types of objects may provide additional operations. To access,
      * these addition operations, callers should use the pattern:
      *
-     *   if (obj.isX()) {
-     *     XObject &x = obj.asX();
+     *   if (obj.is<XObject>()) {
+     *     XObject &x = obj.as<XObject>();
      *     x.foo();
      *   }
      *
@@ -922,7 +904,7 @@ class JSObject : public js::ObjectImpl
      * [[Class]] property of object defined by the spec (for this, see
      * js::ObjectClassIs).
      *
-     * SpiderMonkey has not been completely switched to the isX/asX/XObject
+     * SpiderMonkey has not been completely switched to the is/as/XObject
      * pattern so in some cases there is no XObject class and the engine
      * instead pokes directly at reserved slots and getPrivate. In such cases,
      * consider adding the missing XObject class.
@@ -947,8 +929,6 @@ class JSObject : public js::ObjectImpl
     inline bool isArray()            const { return hasClass(&js::ArrayClass); }
     inline bool isDate()             const { return hasClass(&js::DateClass); }
     inline bool isError()            const { return hasClass(&js::ErrorClass); }
-    inline bool isFunction()         const { return hasClass(&js::FunctionClass); }
-    inline bool isGlobal()           const;
     inline bool isObject()           const { return hasClass(&js::ObjectClass); }
     using js::ObjectImpl::isProxy;
     inline bool isRegExpStatics()    const { return hasClass(&js::RegExpStaticsClass); }
@@ -958,10 +938,6 @@ class JSObject : public js::ObjectImpl
     inline bool isWrapper()                 const;
     inline bool isFunctionProxy()           const { return hasClass(&js::FunctionProxyClass); }
     inline bool isCrossCompartmentWrapper() const;
-
-    inline js::GlobalObject &asGlobal();
-    inline js::MapObject &asMap();
-    inline js::SetObject &asSet();
 
     static inline js::ThingRootKind rootKind() { return js::THING_ROOT_OBJECT; }
 

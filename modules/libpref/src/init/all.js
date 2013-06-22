@@ -167,6 +167,7 @@ pref("media.wakelock_timeout", 2000);
 #ifdef MOZ_WMF
 pref("media.windows-media-foundation.enabled", true);
 pref("media.windows-media-foundation.use-dxva", true);
+pref("media.windows-media-foundation.play-stand-alone", true);
 #endif
 #ifdef MOZ_RAW
 pref("media.raw.enabled", true);
@@ -826,6 +827,7 @@ pref("javascript.options.mem.gc_low_frequency_heap_growth", 150);
 pref("javascript.options.mem.gc_dynamic_heap_growth", true);
 pref("javascript.options.mem.gc_dynamic_mark_slice", true);
 pref("javascript.options.mem.gc_allocation_threshold_mb", 30);
+pref("javascript.options.mem.gc_decommit_threshold_mb", 32);
 
 pref("javascript.options.mem.analysis_purge_mb", 100);
 
@@ -4015,7 +4017,11 @@ pref("layers.acceleration.draw-fps", false);
 
 pref("layers.draw-borders", false);
 
+#ifdef XP_MACOSX
+pref("layers.offmainthreadcomposition.enabled", true);
+#else
 pref("layers.offmainthreadcomposition.enabled", false);
+#endif
 // same effect as layers.offmainthreadcomposition.enabled, but specifically for
 // use with tests.
 pref("layers.offmainthreadcomposition.testing.enabled", false);

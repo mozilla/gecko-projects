@@ -180,7 +180,7 @@ class NodeBuilder
                 continue;
             }
 
-            if (!funv.isObject() || !funv.toObject().isFunction()) {
+            if (!funv.isObject() || !funv.toObject().is<JSFunction>()) {
                 js_ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_NOT_FUNCTION,
                                          JSDVG_SEARCH_STACK, funv, NullPtr(), NULL, NULL);
                 return false;
@@ -2201,7 +2201,7 @@ ASTSerializer::leftAssociate(ParseNode *pn, MutableHandleValue dst)
         if (!expression(next, &right))
             return false;
 
-        TokenPos subpos = {pn->pn_pos.begin, next->pn_pos.end};
+        TokenPos subpos(pn->pn_pos.begin, next->pn_pos.end);
 
         if (logop) {
             if (!builder.logicalExpression(lor, left, right, &subpos, &left))

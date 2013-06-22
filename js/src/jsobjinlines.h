@@ -281,7 +281,7 @@ JSObject::canRemoveLastProperty()
 inline const js::HeapSlot *
 JSObject::getRawSlots()
 {
-    JS_ASSERT(isGlobal());
+    JS_ASSERT(is<js::GlobalObject>());
     return slots;
 }
 
@@ -557,9 +557,8 @@ JSObject::ensureDenseInitializedLength(JSContext *cx, uint32_t index, uint32_t e
     }
 }
 
-template<typename MallocProviderType>
 JSObject::EnsureDenseResult
-JSObject::extendDenseElements(MallocProviderType *cx,
+JSObject::extendDenseElements(js::ThreadSafeContext *tcx,
                               uint32_t requiredCapacity, uint32_t extra)
 {
     /*
@@ -589,14 +588,14 @@ JSObject::extendDenseElements(MallocProviderType *cx,
         return ED_SPARSE;
     }
 
-    if (!growElements(cx, requiredCapacity))
+    if (!growElements(tcx, requiredCapacity))
         return ED_FAILED;
 
     return ED_OK;
 }
 
 inline JSObject::EnsureDenseResult
-JSObject::parExtendDenseElements(js::Allocator *alloc, js::Value *v, uint32_t extra)
+JSObject::parExtendDenseElements(js::ThreadSafeContext *tcx, js::Value *v, uint32_t extra)
 {
     JS_ASSERT(isNative());
     JS_ASSERT_IF(isArray(), arrayLengthIsWritable());
@@ -608,7 +607,7 @@ JSObject::parExtendDenseElements(js::Allocator *alloc, js::Value *v, uint32_t ex
         return ED_SPARSE; /* Overflow. */
 
     if (requiredCapacity > header->capacity) {
-        EnsureDenseResult edr = extendDenseElements(alloc, requiredCapacity, extra);
+        EnsureDenseResult edr = extendDenseElements(tcx, requiredCapacity, extra);
         if (edr != ED_OK)
             return edr;
     }
@@ -1251,14 +1250,14 @@ GetOuterObject(JSContext *cx, HandleObject obj)
 static JS_ALWAYS_INLINE bool
 IsFunctionObject(const js::Value &v)
 {
-    return v.isObject() && v.toObject().isFunction();
+    return v.isObject() && v.toObject().is<JSFunction>();
 }
 
 static JS_ALWAYS_INLINE bool
 IsFunctionObject(const js::Value &v, JSFunction **fun)
 {
-    if (v.isObject() && v.toObject().isFunction()) {
-        *fun = v.toObject().toFunction();
+    if (v.isObject() && v.toObject().is<JSFunction>()) {
+        *fun = &v.toObject().as<JSFunction>();
         return true;
     }
     return false;
@@ -1358,7 +1357,7 @@ ToPrimitive(JSContext *cx, JSType preferredType, MutableHandleValue vp)
 inline bool
 IsInternalFunctionObject(JSObject *funobj)
 {
-    JSFunction *fun = funobj->toFunction();
+    JSFunction *fun = &funobj->as<JSFunction>();
     return fun->isLambda() && !funobj->getParent();
 }
 

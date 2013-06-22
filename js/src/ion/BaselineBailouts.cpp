@@ -913,8 +913,8 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
     Value callee = *builder.valuePointerAtStackOffset(calleeOffset);
     IonSpew(IonSpew_BaselineBailouts, "      CalleeStackSlot=%d", (int) calleeStackSlot);
     IonSpew(IonSpew_BaselineBailouts, "      Callee = %016llx", *((uint64_t *) &callee));
-    JS_ASSERT(callee.isObject() && callee.toObject().isFunction());
-    JSFunction *calleeFun = callee.toObject().toFunction();
+    JS_ASSERT(callee.isObject() && callee.toObject().is<JSFunction>());
+    JSFunction *calleeFun = &callee.toObject().as<JSFunction>();
     if (!builder.writePtr(CalleeToToken(calleeFun), "CalleeToken"))
         return false;
     nextCallee.set(calleeFun);
@@ -1073,7 +1073,7 @@ ion::BailoutIonToBaseline(JSContext *cx, JitActivation *activation, IonBailoutIt
     RootedFunction callee(cx, iter.maybeCallee());
     if (callee) {
         IonSpew(IonSpew_BaselineBailouts, "  Callee function (%s:%u)",
-                callee->getExistingScript()->filename(), callee->getExistingScript()->lineno);
+                callee->existingScript()->filename(), callee->existingScript()->lineno);
     } else {
         IonSpew(IonSpew_BaselineBailouts, "  No callee!");
     }
@@ -1111,7 +1111,7 @@ ion::BailoutIonToBaseline(JSContext *cx, JitActivation *activation, IonBailoutIt
         caller = scr;
         callerPC = callPC;
         fun = nextCallee;
-        scr = fun->getExistingScript();
+        scr = fun->existingScript();
         snapIter.nextFrame();
 
         frameNo++;
@@ -1204,7 +1204,7 @@ ion::FinishBailoutToBaseline(BaselineBailoutInfo *bailoutInfo)
     // Check that we can get the current script's PC.
 #ifdef DEBUG
     jsbytecode *pc;
-    cx->stack.currentScript(&pc);
+    cx->currentScript(&pc);
     IonSpew(IonSpew_BaselineBailouts, "  Got pc=%p", pc);
 #endif
 

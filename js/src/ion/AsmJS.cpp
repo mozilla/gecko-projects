@@ -1400,10 +1400,8 @@ class MOZ_STACK_CLASS ModuleCompiler
         if (!module_->addHeapAccesses(gen.heapAccesses()))
             return false;
 #endif
-        for (unsigned i = 0; i < gen.globalAccesses().length(); i++) {
-            if (!globalAccesses_.append(gen.globalAccesses()[i]))
-                return false;
-        }
+        if (!globalAccesses_.append(gen.globalAccesses()))
+            return false;
         return true;
     }
     bool addGlobalAccess(AsmJSGlobalAccess access) {
@@ -6244,7 +6242,7 @@ IsMaybeWrappedNativeFunction(const Value &v, Native native)
     if (!obj)
         return false;
 
-    return obj->isFunction() && obj->toFunction()->maybeNative() == native;
+    return obj->is<JSFunction>() && obj->as<JSFunction>().maybeNative() == native;
 }
 
 JSBool
