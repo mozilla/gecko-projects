@@ -823,7 +823,6 @@ XPCConvert::NativeInterface2JSObject(jsval* d,
     if (cache) {
         flat = cache->GetWrapper();
         if (cache->IsDOMBinding()) {
-
             if (!flat) {
                 JS::Rooted<JSObject*> global(cx, xpcscope->GetGlobalJSObject());
                 flat = cache->WrapObject(cx, global);
@@ -831,12 +830,10 @@ XPCConvert::NativeInterface2JSObject(jsval* d,
                     return false;
             }
 
-            if (flat) {
-                if (allowNativeWrapper && !JS_WrapObject(cx, flat.address()))
-                    return false;
+            if (allowNativeWrapper && !JS_WrapObject(cx, flat.address()))
+                return false;
 
-                return CreateHolderIfNeeded(flat, d, dest);
-            }
+            return CreateHolderIfNeeded(flat, d, dest);
         }
     } else {
         flat = nullptr;
@@ -875,7 +872,7 @@ XPCConvert::NativeInterface2JSObject(jsval* d,
     } else {
         MOZ_ASSERT(IS_WN_REFLECTOR(flat));
 
-        wrapper = static_cast<XPCWrappedNative*>(xpc_GetJSPrivate(flat));
+        wrapper = XPCWrappedNative::Get(flat);
 
         // If asked to return the wrapper we'll return a strong reference,
         // otherwise we'll just return its JSObject in d (which should be

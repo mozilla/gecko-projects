@@ -938,12 +938,12 @@ class CGAddPropertyHook(CGAbstractClassHook):
     def generate_code(self):
         assert not self.descriptor.workers and self.descriptor.wrapperCache
         if self.descriptor.nativeOwnership == 'nsisupports':
-            preserveArgs = "reinterpret_cast<nsISupports*>(self), self"
+            preserveArgs = "reinterpret_cast<nsISupports*>(self)"
         else:
-            preserveArgs = "self, self, NS_CYCLE_COLLECTION_PARTICIPANT(%s)" % self.descriptor.nativeType
+            preserveArgs = "self, NS_CYCLE_COLLECTION_PARTICIPANT(%s)" % self.descriptor.nativeType
         return ("  // We don't want to preserve if we don't have a wrapper.\n"
                 "  if (self->GetWrapperPreserveColor()) {\n"
-                "    nsContentUtils::PreserveWrapper(%s);\n"
+                "    self->PreserveWrapper(%s);\n"
                 "  }\n"
                 "  return true;" % preserveArgs)
 
@@ -8362,11 +8362,7 @@ class CGBindingRoot(CGThing):
             return any(m.getExtendedAttribute("Pref") for m in iface.members + [iface]);
         requiresPreferences = any(descriptorRequiresPreferences(d) for d in descriptors)
         hasOwnedDescriptors = any(d.nativeOwnership == 'owned' for d in descriptors)
-        def descriptorRequiresContentUtils(desc):
-            return ((desc.concrete and not desc.proxy and
-                     not desc.workers and desc.wrapperCache) or
-                    desc.interface.hasInterfaceObject())
-        requiresContentUtils = any(descriptorRequiresContentUtils(d) for d in descriptors)
+        requiresContentUtils = any(d.interface.hasInterfaceObject() for d in descriptors)
         def descriptorHasChromeOnlyMembers(desc):
             return any(isChromeOnly(a) for a in desc.interface.members)
         hasChromeOnlyMembers = any(descriptorHasChromeOnlyMembers(d) for d in descriptors)
@@ -8485,7 +8481,7 @@ class CGBindingRoot(CGThing):
                             + (['mozilla/Preferences.h'] if requiresPreferences else [])
                             + (['mozilla/dom/NonRefcountedDOMObject.h'] if hasOwnedDescriptors else [])
                             + (['nsContentUtils.h'] if requiresContentUtils else [])
-                            + (['nsCxPusher.h'] if requiresContentUtils else [])
+                            + (['nsCxPusher.h'] if mainDictionaries else [])
                             + (['AccessCheck.h'] if hasChromeOnlyMembers else [])
                             + (['xpcprivate.h'] if isEventTarget else []),
                          curr,

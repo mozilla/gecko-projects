@@ -10,6 +10,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/Casting.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabChild.h"
@@ -809,7 +810,7 @@ nsDocShell::nsDocShell():
   ++gNumberOfDocShells;
   if (!PR_GetEnv("MOZ_QUIET")) {
       printf("++DOCSHELL %p == %ld [id = %llu]\n", (void*) this,
-             gNumberOfDocShells, mHistoryID);
+             gNumberOfDocShells, SafeCast<unsigned long long>(mHistoryID));
   }
 #endif
 }
@@ -838,7 +839,7 @@ nsDocShell::~nsDocShell()
     --gNumberOfDocShells;
     if (!PR_GetEnv("MOZ_QUIET")) {
         printf("--DOCSHELL %p == %ld [id = %llu]\n", (void*) this,
-               gNumberOfDocShells, mHistoryID);
+               gNumberOfDocShells, SafeCast<unsigned long long>(mHistoryID));
     }
 #endif
 }
@@ -1644,16 +1645,15 @@ nsDocShell::FirePageHideNotification(bool aIsUnload)
     return NS_OK;
 }
 
-nsresult
+void
 nsDocShell::MaybeInitTiming()
 {
     if (mTiming) {
-        return NS_OK;
+        return;
     }
 
     mTiming = new nsDOMNavigationTiming();
     mTiming->NotifyNavigationStart();
-    return NS_OK;
 }
 
 
@@ -6372,9 +6372,7 @@ nsDocShell::OnStateChange(nsIWebProgress * aProgress, nsIRequest * aRequest,
         // We don't update navigation timing for wyciwyg channels
         if (this == aProgress && !wcwgChannel){
             MaybeInitTiming();
-            if (mTiming) {
-                mTiming->NotifyFetchStart(uri, ConvertLoadTypeToNavigationType(mLoadType));
-            } 
+            mTiming->NotifyFetchStart(uri, ConvertLoadTypeToNavigationType(mLoadType));
         }
 
         // Was the wyciwyg document loaded on this docshell?
@@ -6983,10 +6981,8 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
 
     // Make sure timing is created. Unload gets fired first for
     // document loaded from the session history.
-    rv = MaybeInitTiming();
-    if (mTiming) {
-      mTiming->NotifyBeforeUnload();
-    }
+    MaybeInitTiming();
+    mTiming->NotifyBeforeUnload();
 
     bool okToUnload;
     rv = mContentViewer->PermitUnload(false, &okToUnload);
