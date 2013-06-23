@@ -494,25 +494,6 @@ var gMetadataTests = [
   },
 ];
 
-// The resources for test_too_many_elements.
-// We loads *lots* of these all at the same time.
-var gTooManyElementAudioTests = [
-  { name:"small-shot.ogg", type:"audio/ogg" },
-  { name:"r11025_s16_c1.wav", type:"audio/x-wav" },
-  { name:"detodos.opus", type:"audio/ogg; codecs=opus" },
-  { name:"bogus.duh", type:"bogus/duh" }
-];
-// Unfortunately the WMF backend on Windows 7 can't handle having lots of
-// decoders running concurrently, so we only include MPEG files when running on
-// Windows versions 8 and later, and non Windows systems.
-if (navigator.userAgent.indexOf("Windows") == -1 ||
-    IsWindows8OrLater()) {
-  gTooManyElementAudioTests = gTooManyElementAudioTests.concat([
-    { name:"small-shot.m4a", type:"audio/mp4" },
-    { name:"small-shot.mp3", type:"audio/mpeg" }
-  ]);
-}
-
 function checkMetadata(msg, e, test) {
   if (test.width) {
     is(e.videoWidth, test.width, msg + " video width");
@@ -695,19 +676,25 @@ function mediaTestCleanup() {
   var branch = prefService.getBranch("media.");
   var oldDefault = 2;
   var oldAuto = 3;
+  var oldGStreamer = undefined;
   var oldOpus = undefined;
-  try {
-    oldDefault = branch.getIntPref("preload.default");
-    oldAuto    = branch.getIntPref("preload.auto");
-    oldOpus    = branch.getBoolPref("opus.enabled");
-  } catch(ex) { }
+
+  try { oldGStreamer = branch.getBoolPref("gstreamer.enabled"); } catch(ex) { }
+  try { oldDefault   = branch.getIntPref("preload.default"); } catch(ex) { }
+  try { oldAuto      = branch.getIntPref("preload.auto"); } catch(ex) { }
+  try { oldOpus      = branch.getBoolPref("opus.enabled"); } catch(ex) { }
+
   branch.setIntPref("preload.default", 2); // preload_metadata
   branch.setIntPref("preload.auto", 3); // preload_enough
   // test opus playback iff the pref exists
   if (oldOpus !== undefined)
     branch.setBoolPref("opus.enabled", true);
+  if (oldGStreamer !== undefined)
+    branch.setBoolPref("gstreamer.enabled", true);
 
   window.addEventListener("unload", function() {
+    if (oldGStreamer !== undefined)
+      branch.setBoolPref("gstreamer.enabled", oldGStreamer);
     branch.setIntPref("preload.default", oldDefault);
     branch.setIntPref("preload.auto", oldAuto);
     if (oldOpus !== undefined)

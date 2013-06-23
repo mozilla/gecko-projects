@@ -4332,6 +4332,16 @@ fi
 AC_DEFINE_UNQUOTED(MOZ_UPDATE_CHANNEL, $MOZ_UPDATE_CHANNEL)
 AC_SUBST(MOZ_UPDATE_CHANNEL)
 
+# Allow to specify a Google API key file that contains the secret key to be
+# used for various Google API requests.
+MOZ_ARG_WITH_STRING(google-api-keyfile,
+[  --with-google-api-keyfile=file   Use the secret key contained in the given keyfile for Google API requests],
+  MOZ_GOOGLE_API_KEY=`cat $withval`)
+if test -z "$MOZ_GOOGLE_API_KEY"; then
+    MOZ_GOOGLE_API_KEY=no-google-api-key
+fi
+AC_DEFINE_UNQUOTED(MOZ_GOOGLE_API_KEY, $MOZ_GOOGLE_API_KEY)
+
 # Allow the application to influence configure with a confvars.sh script.
 AC_MSG_CHECKING([if app-specific confvars.sh exists])
 if test -f "${srcdir}/${MOZ_BUILD_APP}/confvars.sh" ; then
@@ -5756,6 +5766,10 @@ AC_SUBST(MOZ_PULSEAUDIO_LIBS)
 dnl ========================================================
 dnl = Enable GStreamer
 dnl ========================================================
+if test "$OS_TARGET" = "Linux"; then
+  MOZ_GSTREAMER=1
+fi
+
 MOZ_ARG_ENABLE_BOOL(gstreamer,
 [  --enable-gstreamer           Enable GStreamer support],
 MOZ_GSTREAMER=1,
@@ -5769,7 +5783,8 @@ if test "$MOZ_GSTREAMER"; then
     PKG_CHECK_MODULES(GSTREAMER,
                       gstreamer-$GST_API_VERSION >= $GST_VERSION
                       gstreamer-app-$GST_API_VERSION
-                      gstreamer-plugins-base-$GST_API_VERSION)
+                      gstreamer-plugins-base-$GST_API_VERSION, ,
+                      AC_MSG_ERROR([gstreamer and gstreamer-plugins-base development packages are needed to build gstreamer backend. Install them or disable gstreamer support with --disable-gstreamer]))
     if test -n "$GSTREAMER_LIBS"; then
        _SAVE_LDFLAGS=$LDFLAGS
        LDFLAGS="$LDFLAGS $GSTREAMER_LIBS -lgstvideo-$GST_API_VERSION"
@@ -5777,11 +5792,11 @@ if test "$MOZ_GSTREAMER"; then
        if test -n "$_HAVE_LIBGSTVIDEO" ; then
           GSTREAMER_LIBS="$GSTREAMER_LIBS -lgstvideo-$GST_API_VERSION"
        else
-          AC_MSG_ERROR([gstreamer video backend requires libgstvideo])
+          AC_MSG_ERROR([gstreamer-plugins-base found, but no libgstvideo. Something has gone terribly wrong. Try reinstalling gstreamer-plugins-base; failing that, disable the gstreamer backend with --disable-gstreamer.])
        fi
        LDFLAGS=$_SAVE_LDFLAGS
     else
-       AC_MSG_ERROR([gstreamer backend requires the gstreamer packages])
+       AC_MSG_ERROR([gstreamer and gstreamer-plugins-base development packages are needed to build gstreamer backend. Install them or disable gstreamer support with --disable-gstreamer])
     fi
 fi
 AC_SUBST(GSTREAMER_CFLAGS)

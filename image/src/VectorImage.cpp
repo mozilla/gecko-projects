@@ -39,9 +39,10 @@ class SVGRootRenderingObserver MOZ_FINAL : public nsSVGRenderingObserver {
 public:
   SVGRootRenderingObserver(SVGDocumentWrapper* aDocWrapper,
                            VectorImage*        aVectorImage)
-    : nsSVGRenderingObserver(),
-      mDocWrapper(aDocWrapper),
-      mVectorImage(aVectorImage)
+    : nsSVGRenderingObserver()
+    , mDocWrapper(aDocWrapper)
+    , mVectorImage(aVectorImage)
+    , mHonoringInvalidations(true)
   {
     MOZ_ASSERT(mDocWrapper, "Need a non-null SVG document wrapper");
     MOZ_ASSERT(mVectorImage, "Need a non-null VectorImage");
@@ -54,15 +55,14 @@ public:
     mInObserverList = true;
   }
 
-  void ResumeListening()
-  {
-    // GetReferencedElement adds us back to our target's observer list.
-    GetReferencedElement();
-  }
-
   virtual ~SVGRootRenderingObserver()
   {
     StopListening();
+  }
+
+  void ResumeHonoringInvalidations()
+  {
+    mHonoringInvalidations = true;
   }
 
 protected:
@@ -76,29 +76,31 @@ protected:
     Element* elem = GetTarget();
     MOZ_ASSERT(elem, "missing root SVG node");
 
-    if (!mDocWrapper->ShouldIgnoreInvalidation()) {
+    if (mHonoringInvalidations && !mDocWrapper->ShouldIgnoreInvalidation()) {
       nsIFrame* frame = elem->GetPrimaryFrame();
       if (!frame || frame->PresContext()->PresShell()->IsDestroying()) {
         // We're being destroyed. Bail out.
         return;
       }
 
-      mVectorImage->InvalidateObserver();
+      // Ignore further invalidations until we draw.
+      mHonoringInvalidations = false;
 
-      // We may have been removed from the observer list by our caller. Rather
-      // than add ourselves back here, we wait until Draw gets called, ensuring
-      // that we coalesce invalidations between Draw calls.
-    } else {
-      // Here we may also have been removed from the observer list, but since
-      // we're not sending an invalidation, Draw won't get called. We need to
-      // add ourselves back immediately.
-      ResumeListening();
+      mVectorImage->InvalidateObserver();
     }
+
+    // Our caller might've removed us from rendering-observer list.
+    // Add ourselves back!
+    if (!mInObserverList) {
+      nsSVGEffects::AddRenderingObserver(elem, this);
+      mInObserverList = true;
+    } 
   }
 
   // Private data
   const nsRefPtr<SVGDocumentWrapper> mDocWrapper;
   VectorImage* const mVectorImage;   // Raw pointer because it owns me.
+  bool mHonoringInvalidations;
 };
 
 class SVGParseCompleteListener MOZ_FINAL : public nsStubDocumentObserver {
@@ -738,9 +740,8 @@ VectorImage::Draw(gfxContext* aContext,
                              gfxASurface::ImageFormatARGB32, aFilter,
                              aFlags);
 
-  // Allow ourselves to fire FrameChanged and OnStopFrame again.
   MOZ_ASSERT(mRenderingObserver, "Should have a rendering observer by now");
-  mRenderingObserver->ResumeListening();
+  mRenderingObserver->ResumeHonoringInvalidations();
 
   return NS_OK;
 }
@@ -761,6 +762,11 @@ VectorImage::StartDecoding()
   return NS_OK;
 }
 
+bool
+VectorImage::IsDecoded()
+{
+  return mIsFullyLoaded || mError;
+}
 
 //******************************************************************************
 /* void lockImage() */

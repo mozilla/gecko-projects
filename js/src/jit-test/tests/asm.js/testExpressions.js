@@ -22,6 +22,11 @@ assertAsmTypeFail(USE_ASM + "function f() { var i=0,j=0; return (i<j)|0 } return
 assertAsmTypeFail(USE_ASM + "function f() { var i=0.0; return (-i)|0 } return f");
 assertAsmTypeFail(USE_ASM + "function f() { var i=0,j=0; return (-(i+j))|0 } return f");
 
+assertAsmTypeFail(USE_ASM + "function f() { var i=0,j=0,k=0; k = (i|0)/(k|0) } return f");
+assertAsmTypeFail(USE_ASM + "function f() { var i=0,j=0,k=0; k = (i>>>0)/(k>>>0) } return f");
+assertAsmTypeFail(USE_ASM + "function f() { var i=0,j=0,k=0; k = (i|0)%(k|0) } return f");
+assertAsmTypeFail(USE_ASM + "function f() { var i=0,j=0,k=0; k = (i>>>0)%(k>>>0) } return f");
+
 const UINT32_MAX = Math.pow(2,32)-1;
 const INT32_MIN = -Math.pow(2,31);
 const INT32_MAX = Math.pow(2,31)-1;
@@ -162,7 +167,7 @@ assertEq(f(INT32_MIN, INT32_MAX), 1);
 assertEq(f(INT32_MIN, UINT32_MAX), 0);
 assertEq(f(INT32_MIN, INT32_MIN), 1);
 
-var f = asmLink(asmCompile(USE_ASM + "function f(i,j) { i=i|0;j=j|0; var k = 0; k = (i|0)%(j|0); return k|0 } return f"));
+var f = asmLink(asmCompile(USE_ASM + "function f(i,j) { i=i|0;j=j|0; var k = 0; k = (i|0)%(j|0)|0; return k|0 } return f"));
 assertEq(f(4,2), 0);
 assertEq(f(3,2), 1);
 assertEq(f(3,-2), 1);
@@ -181,7 +186,7 @@ assertEq(f(INT32_MAX, INT32_MIN), INT32_MAX);
 assertEq(f(INT32_MIN, INT32_MAX), -1);
 assertEq(f(INT32_MIN, INT32_MIN), 0);
 
-var f = asmLink(asmCompile(USE_ASM + "function f(i,j) { i=i|0;j=j|0; var k = 0; k = (i|0)%4; return k|0 } return f"));
+var f = asmLink(asmCompile(USE_ASM + "function f(i,j) { i=i|0;j=j|0; var k = 0; k = (i|0)%4|0; return k|0 } return f"));
 assertEq(f(0), 0);
 assertEq(f(-1), -1);
 assertEq(f(-3), -3);
@@ -191,7 +196,7 @@ assertEq(f(3), 3);
 assertEq(f(4), 0);
 assertEq(f(INT32_MAX), 3);
 
-var f = asmLink(asmCompile(USE_ASM + "function f(i,j) { i=i|0;j=j|0; var k = 0; k = (i>>>0)%(j>>>0); return k|0 } return f"));
+var f = asmLink(asmCompile(USE_ASM + "function f(i,j) { i=i|0;j=j|0; var k = 0; k = (i>>>0)%(j>>>0)|0; return k|0 } return f"));
 assertEq(f(4,2), 0);
 assertEq(f(3,2), 1);
 assertEq(f(3,-2), 3);
@@ -275,7 +280,7 @@ assertEq(asmLink(asmCompile(USE_ASM + "function f() { return (4 | (!2))|0 } retu
 
 // get that order-of-operations right!
 var buf = new ArrayBuffer(4096);
-asmLink(asmCompile('glob','imp','buf', USE_ASM + "var i32=new glob.Int32Array(buf); var x=0; function a() { return x|0 } function b() { x=42; return 0 } function f() { i32[(b() & 0x3) >> 2] = a()|0 } return f"), this, null, buf)();
+asmLink(asmCompile('glob','imp','buf', USE_ASM + "var i32=new glob.Int32Array(buf); var x=0; function a() { return x|0 } function b() { x=42; return 0 } function f() { i32[((b()|0) & 0x3) >> 2] = a()|0 } return f"), this, null, buf)();
 assertEq(new Int32Array(buf)[0], 42);
 
 assertEq(asmLink(asmCompile(USE_ASM + "function f() { var a=0,i=0; for (; ~~i!=4; i=(i+1)|0) { a = (a*5)|0; if (+(a>>>0) != 0.0) return 1; } return 0; } return f"))(), 0)

@@ -476,11 +476,11 @@
 }
 
 .variable-or-property:not(:focus) > .title > .token-boolean {
-  color: #1c00cf;
+  color: #10c;
 }
 
 .variable-or-property:not(:focus) > .title > .token-number {
-  color: #c40a16;
+  color: #c00;
 }
 
 .variable-or-property:not(:focus) > .title > .token-string {
@@ -524,6 +524,11 @@
 .variable-or-property-sealed-label,
 .variable-or-property-non-extensible-label {
   -moz-padding-end: 4px;
+}
+
+.variable-or-property:not(:focus) > .title > .variable-or-property-frozen-label,
+.variable-or-property:not(:focus) > .title > .variable-or-property-sealed-label,
+.variable-or-property:not(:focus) > .title > .variable-or-property-non-extensible-label {
   color: #666;
 }
 
