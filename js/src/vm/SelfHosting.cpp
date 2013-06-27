@@ -796,8 +796,8 @@ CloneObject(JSContext *cx, HandleObject srcObj, CloneMemory &clonedObjects)
         RegExpObject &reobj = srcObj->as<RegExpObject>();
         RootedAtom source(cx, reobj.getSource());
         clone = RegExpObject::createNoStatics(cx, source, reobj.getFlags(), NULL);
-    } else if (srcObj->isDate()) {
-        clone = JS_NewDateObjectMsec(cx, srcObj->getDateUTCTime().toNumber());
+    } else if (srcObj->is<DateObject>()) {
+        clone = JS_NewDateObjectMsec(cx, srcObj->as<DateObject>().UTCTime().toNumber());
     } else if (srcObj->is<BooleanObject>()) {
         clone = BooleanObject::create(cx, srcObj->as<BooleanObject>().unbox());
     } else if (srcObj->is<NumberObject>()) {
@@ -810,7 +810,7 @@ CloneObject(JSContext *cx, HandleObject srcObj, CloneMemory &clonedObjects)
         if (!str)
             return NULL;
         clone = StringObject::create(cx, str);
-    } else if (srcObj->isArray()) {
+    } else if (srcObj->is<ArrayObject>()) {
         clone = NewDenseEmptyArray(cx, NULL, TenuredObject);
     } else {
         JS_ASSERT(srcObj->isNative());

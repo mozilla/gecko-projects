@@ -456,7 +456,7 @@ pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
 pref("app.support.baseURL", "http://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
 // Used to submit data to input from about:feedback
 pref("app.feedback.postURL", "https://input.mozilla.org/%LOCALE%/feedback");
-pref("app.privacyURL", "http://www.mozilla.org/%LOCALE%/privacy/");
+pref("app.privacyURL", "https://www.mozilla.org/legal/privacy/firefox.html");
 pref("app.creditsURL", "http://www.mozilla.org/credits/");
 pref("app.channelURL", "http://www.mozilla.org/%LOCALE%/firefox/channel/");
 #if MOZ_UPDATE_CHANNEL == aurora
@@ -751,3 +751,6 @@ pref("dom.payment.provider.0.requestMethod", "GET");
 
 // Make <audio> and <video> talk to the AudioChannelService.
 pref("media.useAudioChannelService", true);
+
+// Turn on the CSP 1.0 parser for Content Security Policy headers
+pref("security.csp.speccompliant", true);

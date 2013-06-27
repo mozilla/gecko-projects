@@ -937,6 +937,7 @@ ElementsHeader::asArrayBufferElements()
     return *static_cast<ArrayBufferElementsHeader *>(this);
 }
 
+class ArrayObject;
 class ArrayBufferObject;
 
 /*
@@ -948,8 +949,8 @@ class ArrayBufferObject;
  * to be thrown.
  */
 extern bool
-ArraySetLength(JSContext *cx, HandleObject obj, HandleId id, unsigned attrs, HandleValue value,
-               bool setterIsStrict);
+ArraySetLength(JSContext *cx, Handle<ArrayObject*> obj, HandleId id, unsigned attrs,
+               HandleValue value, bool setterIsStrict);
 
 /*
  * Elements header used for all native objects. The elements component of such
@@ -974,7 +975,7 @@ ArraySetLength(JSContext *cx, HandleObject obj, HandleId id, unsigned attrs, Han
  *
  * We track these pieces of metadata for dense elements:
  *  - The length property as a uint32_t, accessible for array objects with
- *    getArrayLength(), setArrayLength(). This is unused for non-arrays.
+ *    ArrayObject::{length,setLength}().  This is unused for non-arrays.
  *  - The number of element slots (capacity), gettable with
  *    getDenseElementsCapacity().
  *  - The array's initialized length, accessible with
@@ -1035,12 +1036,13 @@ class ObjectElements
   private:
     friend class ::JSObject;
     friend class ObjectImpl;
+    friend class ArrayObject;
     friend class ArrayBufferObject;
     friend class Nursery;
 
     friend bool
-    ArraySetLength(JSContext *cx, HandleObject obj, HandleId id, unsigned attrs, HandleValue value,
-                   bool setterIsStrict);
+    ArraySetLength(JSContext *cx, Handle<ArrayObject*> obj, HandleId id, unsigned attrs,
+                   HandleValue value, bool setterIsStrict);
 
     /* See Flags enum above. */
     uint32_t flags;
@@ -1201,8 +1203,8 @@ class ObjectImpl : public gc::Cell
     HeapSlot *elements;  /* Slots for object elements. */
 
     friend bool
-    ArraySetLength(JSContext *cx, HandleObject obj, HandleId id, unsigned attrs, HandleValue value,
-                   bool setterIsStrict);
+    ArraySetLength(JSContext *cx, Handle<ArrayObject*> obj, HandleId id, unsigned attrs,
+                   HandleValue value, bool setterIsStrict);
 
   private:
     static void staticAsserts() {
@@ -1245,24 +1247,24 @@ class ObjectImpl : public gc::Cell
     preventExtensions(JSContext *cx, Handle<ObjectImpl*> obj);
 
     HeapSlotArray getDenseElements() {
-        assertIsNative();
+        JS_ASSERT(isNativeSlow());
         return HeapSlotArray(elements);
     }
     const Value &getDenseElement(uint32_t idx) {
-        assertIsNative();
+        JS_ASSERT(isNativeSlow());
         MOZ_ASSERT(idx < getDenseInitializedLength());
         return elements[idx];
     }
     bool containsDenseElement(uint32_t idx) {
-        assertIsNative();
+        JS_ASSERT(isNativeSlow());
         return idx < getDenseInitializedLength() && !elements[idx].isMagic(JS_ELEMENTS_HOLE);
     }
     uint32_t getDenseInitializedLength() {
-        assertIsNative();
+        JS_ASSERT(isNativeSlow());
         return getElementsHeader()->initializedLength;
     }
     uint32_t getDenseCapacity() {
-        assertIsNative();
+        JS_ASSERT(isNativeSlow());
         return getElementsHeader()->capacity;
     }
 
@@ -1423,8 +1425,9 @@ class ObjectImpl : public gc::Cell
 
     inline JSCompartment *compartment() const;
 
+    // isNativeSlow() is equivalent to isNative(), but isn't inlined.
     inline bool isNative() const;
-    void assertIsNative() const;
+    bool isNativeSlow() const;
 
     types::TypeObject *type() const {
         MOZ_ASSERT(!hasLazyType());
@@ -1447,8 +1450,9 @@ class ObjectImpl : public gc::Cell
      */
     bool hasLazyType() const { return type_->lazy(); }
 
+    // slotSpanSlow() is the same as slotSpan(), but isn't inlined.
     inline uint32_t slotSpan() const;
-    void assertSlotIsWithinSpan(uint32_t slot) const;
+    uint32_t slotSpanSlow() const;
 
     /* Compute dynamicSlotsCount() for this object. */
     inline uint32_t numDynamicSlots() const;
@@ -1548,13 +1552,11 @@ class ObjectImpl : public gc::Cell
     }
 
     HeapSlot &nativeGetSlotRef(uint32_t slot) {
-        assertIsNative();
-        assertSlotIsWithinSpan(slot);
+        JS_ASSERT(isNativeSlow() && slot < slotSpanSlow());
         return getSlotRef(slot);
     }
     const Value &nativeGetSlot(uint32_t slot) const {
-        assertIsNative();
-        assertSlotIsWithinSpan(slot);
+        JS_ASSERT(isNativeSlow() && slot < slotSpanSlow());
         return getSlot(slot);
     }
 

@@ -580,7 +580,7 @@ MacroAssembler::initGCThing(const Register &obj, JSObject *templateObject)
     storePtr(ImmGCPtr(templateObject->type()), Address(obj, JSObject::offsetOfType()));
     storePtr(ImmWord((void *)NULL), Address(obj, JSObject::offsetOfSlots()));
 
-    if (templateObject->isArray()) {
+    if (templateObject->is<ArrayObject>()) {
         JS_ASSERT(!templateObject->getDenseInitializedLength());
 
         int elementsOffset = JSObject::offsetOfFixedElements();
@@ -594,7 +594,7 @@ MacroAssembler::initGCThing(const Register &obj, JSObject *templateObject)
                 Address(obj, elementsOffset + ObjectElements::offsetOfCapacity()));
         store32(Imm32(templateObject->getDenseInitializedLength()),
                 Address(obj, elementsOffset + ObjectElements::offsetOfInitializedLength()));
-        store32(Imm32(templateObject->getArrayLength()),
+        store32(Imm32(templateObject->as<ArrayObject>().length()),
                 Address(obj, elementsOffset + ObjectElements::offsetOfLength()));
         store32(Imm32(templateObject->shouldConvertDoubleElements()
                       ? ObjectElements::CONVERT_DOUBLE_ELEMENTS
@@ -1227,12 +1227,10 @@ MacroAssembler::popRooted(VMFunction::RootType rootType, Register cellReg,
       case VMFunction::RootPropertyName:
       case VMFunction::RootFunction:
       case VMFunction::RootCell:
-        loadPtr(Address(StackPointer, 0), cellReg);
-        freeStack(sizeof(void *));
+        Pop(cellReg);
         break;
       case VMFunction::RootValue:
-        loadValue(Address(StackPointer, 0), valueReg);
-        freeStack(sizeof(Value));
+        Pop(valueReg);
         break;
     }
 }

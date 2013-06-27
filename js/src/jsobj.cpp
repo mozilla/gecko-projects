@@ -37,6 +37,7 @@
 #include "ion/BaselineJIT.h"
 #include "js/MemoryMetrics.h"
 #include "vm/Interpreter.h"
+#include "vm/RegExpStaticsObject.h"
 #include "vm/Shape.h"
 
 #include "jsatominlines.h"
@@ -45,6 +46,7 @@
 #include "jscompartmentinlines.h"
 #include "jstypedarrayinlines.h"
 #include "builtin/Iterator-inl.h"
+#include "vm/ArrayObject-inl.h"
 #include "vm/BooleanObject-inl.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/RegExpStatics-inl.h"
@@ -910,11 +912,9 @@ DefinePropertyOnObject(JSContext *cx, HandleObject obj, HandleId id, const PropD
 
 /* ES6 20130308 draft 8.4.2.1 [[DefineOwnProperty]] */
 static JSBool
-DefinePropertyOnArray(JSContext *cx, HandleObject obj, HandleId id, const PropDesc &desc,
+DefinePropertyOnArray(JSContext *cx, Handle<ArrayObject*> arr, HandleId id, const PropDesc &desc,
                       bool throwError, bool *rval)
 {
-    JS_ASSERT(obj->isArray());
-
     /* Step 2. */
     if (id == NameToId(cx->names().length)) {
         // Canonicalize value, if necessary, before proceeding any further.  It
@@ -931,7 +931,7 @@ DefinePropertyOnArray(JSContext *cx, HandleObject obj, HandleId id, const PropDe
                 return false;
             v.setNumber(newLen);
         } else {
-            v.setNumber(obj->getArrayLength());
+            v.setNumber(arr->length());
         }
 
         if (desc.hasConfigurable() && desc.configurable())
@@ -942,8 +942,8 @@ DefinePropertyOnArray(JSContext *cx, HandleObject obj, HandleId id, const PropDe
         if (desc.isAccessorDescriptor())
             return Reject(cx, id, JSMSG_CANT_REDEFINE_PROP, throwError, rval);
 
-        unsigned attrs = obj->nativeLookup(cx, id)->attributes();
-        if (!obj->arrayLengthIsWritable()) {
+        unsigned attrs = arr->nativeLookup(cx, id)->attributes();
+        if (!arr->lengthIsWritable()) {
             if (desc.hasWritable() && desc.writable())
                 return Reject(cx, id, JSMSG_CANT_REDEFINE_PROP, throwError, rval);
         } else {
@@ -951,33 +951,35 @@ DefinePropertyOnArray(JSContext *cx, HandleObject obj, HandleId id, const PropDe
                 attrs = attrs | JSPROP_READONLY;
         }
 
-        return ArraySetLength(cx, obj, id, attrs, v, throwError);
+        return ArraySetLength(cx, arr, id, attrs, v, throwError);
     }
 
     /* Step 3. */
     uint32_t index;
     if (js_IdIsIndex(id, &index)) {
         /* Step 3b. */
-        uint32_t oldLen = obj->getArrayLength();
+        uint32_t oldLen = arr->length();
 
         /* Steps 3a, 3e. */
-        if (index >= oldLen && !obj->arrayLengthIsWritable())
-            return Reject(cx, obj, JSMSG_CANT_APPEND_TO_ARRAY, throwError, rval);
+        if (index >= oldLen && !arr->lengthIsWritable())
+            return Reject(cx, arr, JSMSG_CANT_APPEND_TO_ARRAY, throwError, rval);
 
         /* Steps 3f-j. */
-        return DefinePropertyOnObject(cx, obj, id, desc, throwError, rval);
+        return DefinePropertyOnObject(cx, arr, id, desc, throwError, rval);
     }
 
     /* Step 4. */
-    return DefinePropertyOnObject(cx, obj, id, desc, throwError, rval);
+    return DefinePropertyOnObject(cx, arr, id, desc, throwError, rval);
 }
 
 bool
 js::DefineProperty(JSContext *cx, HandleObject obj, HandleId id, const PropDesc &desc,
                    bool throwError, bool *rval)
 {
-    if (obj->isArray())
-        return DefinePropertyOnArray(cx, obj, id, desc, throwError, rval);
+    if (obj->is<ArrayObject>()) {
+        Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
+        return DefinePropertyOnArray(cx, arr, id, desc, throwError, rval);
+    }
 
     if (obj->getOps()->lookupGeneric) {
         /*
@@ -1170,7 +1172,7 @@ JSObject::sealOrFreeze(JSContext *cx, HandleObject obj, ImmutabilityType it)
     // arrays with non-writable length.  We don't need to do anything special
     // for that, because capacity was zeroed out by preventExtensions.  (See
     // the assertion before the if-else above.)
-    if (it == FREEZE && obj->isArray())
+    if (it == FREEZE && obj->is<ArrayObject>())
         obj->getElementsHeader()->setNonwritableArrayLength();
 
     return true;
@@ -1233,7 +1235,7 @@ JSObject::className(JSContext *cx, HandleObject obj)
 static inline gc::AllocKind
 NewObjectGCKind(js::Class *clasp)
 {
-    if (clasp == &ArrayClass)
+    if (clasp == &ArrayObject::class_)
         return gc::FINALIZE_OBJECT8;
     if (clasp == &JSFunction::class_)
         return gc::FINALIZE_OBJECT2;
@@ -1244,7 +1246,7 @@ static inline JSObject *
 NewObject(JSContext *cx, Class *clasp, types::TypeObject *type_, JSObject *parent,
           gc::AllocKind kind, NewObjectKind newKind)
 {
-    JS_ASSERT(clasp != &ArrayClass);
+    JS_ASSERT(clasp != &ArrayObject::class_);
     JS_ASSERT_IF(clasp == &JSFunction::class_,
                  kind == JSFunction::FinalizeKind || kind == JSFunction::ExtendedFinalizeKind);
     JS_ASSERT_IF(parent, &parent->global() == cx->compartment()->maybeGlobal());
@@ -1986,7 +1988,7 @@ JSObject::TradeGuts(JSContext *cx, JSObject *a, JSObject *b, TradeGutsReserved &
     JS_ASSERT(!a->is<RegExpObject>() && !b->is<RegExpObject>());
 
     /* Arrays can use their fixed storage for elements. */
-    JS_ASSERT(!a->isArray() && !b->isArray());
+    JS_ASSERT(!a->is<ArrayObject>() && !b->is<ArrayObject>());
 
     /*
      * Callers should not try to swap ArrayBuffer objects,
@@ -2804,8 +2806,6 @@ bool
 JSObject::growElements(ThreadSafeContext *tcx, uint32_t newcap)
 {
     JS_ASSERT(isExtensible());
-    JS_ASSERT_IF(isArray() && !arrayLengthIsWritable(),
-                 newcap <= getArrayLength());
 
     /*
      * When an object with CAPACITY_DOUBLING_MAX or fewer elements needs to
@@ -2825,7 +2825,8 @@ JSObject::growElements(ThreadSafeContext *tcx, uint32_t newcap)
                       : oldcap + (oldcap >> 3);
 
     uint32_t actualCapacity;
-    if (isArray() && !arrayLengthIsWritable()) {
+    if (is<ArrayObject>() && !as<ArrayObject>().lengthIsWritable()) {
+        JS_ASSERT(newcap <= as<ArrayObject>().length());
         // Preserve the |capacity <= length| invariant for arrays with
         // non-writable length.  See also js::ArraySetLength which initially
         // enforces this requirement.
@@ -3300,10 +3301,11 @@ CallAddPropertyHookDense(JSContext *cx, Class *clasp, HandleObject obj, uint32_t
                          HandleValue nominal)
 {
     /* Inline addProperty for array objects. */
-    if (obj->isArray()) {
-        uint32_t length = obj->getArrayLength();
+    if (obj->is<ArrayObject>()) {
+        Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
+        uint32_t length = arr->length();
         if (index >= length)
-            JSObject::setArrayLength(cx, obj, index + 1);
+            ArrayObject::setLength(cx, arr, index + 1);
         return true;
     }
 
@@ -3351,14 +3353,15 @@ DefinePropertyOrElement(JSContext *cx, HandleObject obj, HandleId id,
         }
     }
 
-    if (obj->isArray()) {
+    if (obj->is<ArrayObject>()) {
+        Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
         if (id == NameToId(cx->names().length))
-            return ArraySetLength(cx, obj, id, attrs, value, setterIsStrict);
+            return ArraySetLength(cx, arr, id, attrs, value, setterIsStrict);
 
         uint32_t index;
         if (js_IdIsIndex(id, &index)) {
             bool definesPast;
-            if (!WouldDefinePastNonwritableLength(cx, obj, index, setterIsStrict, &definesPast))
+            if (!WouldDefinePastNonwritableLength(cx, arr, index, setterIsStrict, &definesPast))
                 return false;
             if (definesPast)
                 return true;
@@ -4409,8 +4412,10 @@ baseops::SetPropertyHelper(JSContext *cx, HandleObject obj, HandleObject receive
         return true;
     }
 
-    if (obj->isArray() && id == NameToId(cx->names().length))
-        return ArraySetLength(cx, obj, id, attrs, vp, strict);
+    if (obj->is<ArrayObject>() && id == NameToId(cx->names().length)) {
+        Rooted<ArrayObject*> arr(cx, &obj->as<ArrayObject>());
+        return ArraySetLength(cx, arr, id, attrs, vp, strict);
+    }
 
     if (!shape) {
         if (!obj->isExtensible()) {
@@ -5123,6 +5128,12 @@ DumpProperty(JSObject *obj, Shape &shape)
     fprintf(stderr, "\n");
 }
 
+bool
+JSObject::isProxySlow() const
+{
+    return isProxy();
+}
+
 void
 JSObject::dump()
 {
@@ -5333,7 +5344,7 @@ JSObject::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::ObjectsExt
     // Note that sizes->private_ is measured elsewhere.
     if (is<ArgumentsObject>()) {
         sizes->argumentsData = as<ArgumentsObject>().sizeOfMisc(mallocSizeOf);
-    } else if (isRegExpStatics()) {
+    } else if (is<RegExpStaticsObject>()) {
         sizes->regExpStatics = js::SizeOfRegExpStaticsData(this, mallocSizeOf);
     } else if (is<PropertyIteratorObject>()) {
         sizes->propertyIteratorData = as<PropertyIteratorObject>().sizeOfMisc(mallocSizeOf);

@@ -1691,18 +1691,14 @@ NS_INTERFACE_MAP_BEGIN(FragmentOrElement)
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
-  NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMNodeSelector,
-                                 new nsNodeSelectorTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMXPathNSResolver,
                                  new nsNode3Tearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsITouchEventReceiver,
                                  new nsTouchEventReceiverTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIInlineEventHandlers,
                                  new nsInlineEventHandlersTearoff(this))
-  // nsNodeSH::PreCreate() depends on the identity pointer being the
-  // same as nsINode (which nsIContent inherits), so if you change the
-  // below line, make sure nsNodeSH::PreCreate() still does the right
-  // thing!
+  // DOM bindings depend on the identity pointer being the
+  // same as nsINode (which nsIContent inherits).
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContent)
 NS_INTERFACE_MAP_END
 

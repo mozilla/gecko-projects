@@ -1195,7 +1195,6 @@ Interpret(JSContext *cx, RunState &state)
     RootedScript rootScript0(cx);
     DebugOnly<uint32_t> blockDepth;
 
-#if JS_HAS_GENERATORS
     if (JS_UNLIKELY(regs.fp()->isGeneratorFrame())) {
         JS_ASSERT(size_t(regs.pc - script->code) <= script->length);
         JS_ASSERT(regs.stackDepth() <= script->nslots);
@@ -1209,7 +1208,6 @@ Interpret(JSContext *cx, RunState &state)
             goto error;
         }
     }
-#endif
 
     /* State communicated between non-local jumps: */
     bool interpReturnOK;
@@ -2019,7 +2017,7 @@ BEGIN_CASE(JSOP_NEG)
 END_CASE(JSOP_NEG)
 
 BEGIN_CASE(JSOP_POS)
-    if (!ToNumber(cx, &regs.sp[-1]))
+    if (!ToNumber(cx, MutableHandleValue::fromMarkedLocation(&regs.sp[-1])))
         goto error;
     if (!regs.sp[-1].isInt32())
         TypeScript::MonitorOverflow(cx, script, regs.pc);
@@ -2739,7 +2737,7 @@ BEGIN_CASE(JSOP_NEWINIT)
     RootedObject &obj = rootObject0;
     NewObjectKind newKind;
     if (i == JSProto_Array) {
-        newKind = UseNewTypeForInitializer(cx, script, regs.pc, &ArrayClass);
+        newKind = UseNewTypeForInitializer(cx, script, regs.pc, &ArrayObject::class_);
         obj = NewDenseEmptyArray(cx, NULL, newKind);
     } else {
         gc::AllocKind allocKind = GuessObjectGCKind(0);
@@ -2758,7 +2756,7 @@ BEGIN_CASE(JSOP_NEWARRAY)
 {
     unsigned count = GET_UINT24(regs.pc);
     RootedObject &obj = rootObject0;
-    NewObjectKind newKind = UseNewTypeForInitializer(cx, script, regs.pc, &ArrayClass);
+    NewObjectKind newKind = UseNewTypeForInitializer(cx, script, regs.pc, &ArrayObject::class_);
     obj = NewDenseAllocatedArray(cx, count, NULL, newKind);
     if (!obj || !SetInitializerObjectType(cx, script, regs.pc, obj, newKind))
         goto error;
@@ -2844,7 +2842,7 @@ BEGIN_CASE(JSOP_INITELEM_ARRAY)
     RootedObject &obj = rootObject0;
     obj = &regs.sp[-2].toObject();
 
-    JS_ASSERT(obj->isArray());
+    JS_ASSERT(obj->is<ArrayObject>());
 
     uint32_t index = GET_UINT24(regs.pc);
     if (!InitArrayElemOperation(cx, regs.pc, obj, index, val))
@@ -3050,7 +3048,6 @@ BEGIN_CASE(JSOP_LEAVEBLOCKEXPR)
 }
 END_CASE(JSOP_LEAVEBLOCK)
 
-#if JS_HAS_GENERATORS
 BEGIN_CASE(JSOP_GENERATOR)
 {
     JS_ASSERT(!cx->isExceptionPending());
@@ -3094,7 +3091,6 @@ BEGIN_CASE(JSOP_ARRAYPUSH)
     regs.sp--;
 }
 END_CASE(JSOP_ARRAYPUSH)
-#endif /* JS_HAS_GENERATORS */
 
           default:
           {
@@ -3149,11 +3145,9 @@ END_CASE(JSOP_ARRAYPUSH)
               case JSTRY_CATCH:
                   JS_ASSERT(*regs.pc == JSOP_ENTERBLOCK);
 
-#if JS_HAS_GENERATORS
                 /* Catch cannot intercept the closing of a generator. */
                   if (JS_UNLIKELY(cx->getPendingException().isMagic(JS_GENERATOR_CLOSING)))
                     break;
-#endif
 
                 /*
                  * Don't clear exceptions to save cx->exception from GC
@@ -3196,14 +3190,12 @@ END_CASE(JSOP_ARRAYPUSH)
          * is an asynchronous return from a generator.
          */
         interpReturnOK = false;
-#if JS_HAS_GENERATORS
         if (JS_UNLIKELY(cx->isExceptionPending() &&
                         cx->getPendingException().isMagic(JS_GENERATOR_CLOSING))) {
             cx->clearPendingException();
             interpReturnOK = true;
             regs.fp()->clearReturnValue();
         }
-#endif
     } else {
         UnwindForUncatchableException(cx, regs);
         interpReturnOK = false;

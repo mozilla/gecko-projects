@@ -22,7 +22,7 @@
 #include "builtin/Eval.h"
 #include "gc/Nursery.h"
 #include "vm/ForkJoin.h"
-#include "ParallelArrayAnalysis.h"
+#include "ParallelSafetyAnalysis.h"
 
 #include "vm/Interpreter-inl.h"
 #include "vm/StringObject-inl.h"
@@ -1125,8 +1125,7 @@ bool
 CodeGenerator::visitParDump(LParDump *lir)
 {
     ValueOperand value = ToValue(lir, 0);
-    masm.reserveStack(sizeof(Value));
-    masm.storeValue(value, Address(StackPointer, 0));
+    masm.Push(value);
     masm.movePtr(StackPointer, CallTempReg0);
     masm.setupUnalignedABICall(1, CallTempReg1);
     masm.passABIArg(CallTempReg0);

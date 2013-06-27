@@ -1180,7 +1180,7 @@ JSContext::JSContext(JSRuntime *rt)
     enterCompartmentDepth_(0),
     savedFrameChains_(),
     defaultCompartmentObject_(NULL),
-    cycleDetectorSet(thisDuringConstruction()),
+    cycleDetectorSet(MOZ_THIS_IN_INITIALIZER_LIST()),
     errorReporter(NULL),
     operationCallback(NULL),
     data(NULL),
@@ -1203,7 +1203,7 @@ JSContext::JSContext(JSRuntime *rt)
     JS_ASSERT(static_cast<ContextFriendFields*>(this) ==
               ContextFriendFields::get(this));
 
-#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
+#ifdef JSGC_TRACK_EXACT_ROOTS
     PodArrayZero(thingGCRooters);
 #endif
 #if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)

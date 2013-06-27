@@ -644,7 +644,7 @@ JSStructuredCloneWriter::traverseObject(HandleObject obj)
     checkStack();
 
     /* Write the header for obj. */
-    return out.writePair(obj->isArray() ? SCTAG_ARRAY_OBJECT : SCTAG_OBJECT_OBJECT, 0);
+    return out.writePair(obj->is<ArrayObject>() ? SCTAG_ARRAY_OBJECT : SCTAG_OBJECT_OBJECT, 0);
 }
 
 bool
@@ -685,14 +685,14 @@ JSStructuredCloneWriter::startWrite(const Value &v)
             RegExpObject &reobj = obj->as<RegExpObject>();
             return out.writePair(SCTAG_REGEXP_OBJECT, reobj.getFlags()) &&
                    writeString(SCTAG_STRING, reobj.getSource());
-        } else if (obj->isDate()) {
+        } else if (obj->is<DateObject>()) {
             double d = js_DateGetMsecSinceEpoch(obj);
             return out.writePair(SCTAG_DATE_OBJECT, 0) && out.writeDouble(d);
         } else if (obj->isTypedArray()) {
             return writeTypedArray(obj);
         } else if (obj->is<ArrayBufferObject>() && obj->as<ArrayBufferObject>().hasData()) {
             return writeArrayBuffer(obj);
-        } else if (obj->isObject() || obj->isArray()) {
+        } else if (obj->isObject() || obj->is<ArrayObject>()) {
             return traverseObject(obj);
         } else if (obj->is<BooleanObject>()) {
             return out.writePair(SCTAG_BOOLEAN_OBJECT, obj->as<BooleanObject>().unbox());
