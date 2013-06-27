@@ -107,8 +107,9 @@ VARIABLES = {
     'EXTRA_JS_MODULES': (StrictOrderingOnAppendList, list, [],
         """Additional JavaScript files to distribute.
 
-        This variable contains a list of files to copy into JS_MODULES_PATH,
-        which is $(FINAL_TARGET)/modules by default.
+        This variable contains a list of files to copy into
+        $(FINAL_TARGET)/$(JS_MODULES_PATH). JS_MODULES_PATH defaults to
+        "modules" if left undefined.
         """),
 
     'EXTRA_PP_COMPONENTS': (StrictOrderingOnAppendList, list, [],
@@ -116,6 +117,27 @@ VARIABLES = {
 
        This variable contains a list of files to preprocess.  Generated
        files will be installed in the /components directory of the distribution.
+        """),
+
+    'GTEST_C_SOURCES': (StrictOrderingOnAppendList, list, [],
+        """C code source files for GTest unit tests.
+
+        This variable contains a list of C GTEST unit test source files to
+        compile.
+        """),
+
+    'GTEST_CMM_SOURCES': (StrictOrderingOnAppendList, list, [],
+        """Sources for GTest unit tests to compile with the Objective C/C++ compiler.
+
+        This variable contains a list of objective-C++ GTest unit test sources
+        to compile.
+        """),
+
+    'GTEST_CPP_SOURCES': (list, list, [],
+        """C++ source files for GTest unit tests.
+
+        This is a list of C++ GTest unit test sources. Entries must be files
+        that exist. These generally have .cpp, .cc, or .cxx extensions.
         """),
 
     'HOST_CSRCS': (StrictOrderingOnAppendList, list, [],
@@ -138,10 +160,12 @@ VARIABLES = {
         """),
 
     'JS_MODULES_PATH': (unicode, unicode, "",
-        """Path to install EXTRA_JS_MODULES.
+        """Sub-directory of $(FINAL_TARGET) to install EXTRA_JS_MODULES.
 
-        EXTRA_JS_MODULES files are copied to this path, which defaults to
-        $(FINAL_TARGET)/modules if unspecified.
+        EXTRA_JS_MODULES files are copied to
+        $(FINAL_TARGET)/$(JS_MODULES_PATH). This variable does not
+        need to be defined if the desired destination directory is
+        $(FINAL_TARGET)/modules.
         """),
 
     'LIBRARY_NAME': (unicode, unicode, "",

@@ -1345,6 +1345,10 @@ abstract public class GeckoApp
     private void initialize() {
         mInitialized = true;
 
+        if (Build.VERSION.SDK_INT >= 11) {
+            // Create the panel and inflate the custom menu.
+            onCreatePanelMenu(Window.FEATURE_OPTIONS_PANEL, null);
+        }
         invalidateOptionsMenu();
 
         Intent intent = getIntent();
@@ -2335,10 +2339,12 @@ abstract public class GeckoApp
                     break;
                 }
                 String mcc_mnc = tm.getNetworkOperator();
-                mcc = mcc_mnc.substring(0, 3);
-                mnc = mcc_mnc.substring(3);
-                obj.put("mcc", mcc);
-                obj.put("mnc", mnc);
+                if (mcc_mnc.length() > 3) {
+                    mcc = mcc_mnc.substring(0, 3);
+                    mnc = mcc_mnc.substring(3);
+                    obj.put("mcc", mcc);
+                    obj.put("mnc", mnc);
+                }
                 obj.put("asu", mSignalStrenth);
             } catch(JSONException jsonex) {}
             cellInfo.put(obj);

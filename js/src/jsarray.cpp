@@ -1676,7 +1676,7 @@ SortNumerically(JSContext *cx, AutoValueVector *vec, size_t len, ComparatorMatch
             return false;
 
         double dv;
-        if (!ToNumber(cx, (*vec)[i], &dv))
+        if (!ToNumber(cx, vec->handleAt(i), &dv))
             return false;
 
         NumericElement el = { dv, i };
@@ -2726,6 +2726,10 @@ static const JSFunctionSpec array_methods[] = {
     JS_FN("filter",             array_filter,       1,JSFUN_GENERIC_NATIVE),
          {"some",               {NULL, NULL},       1,0, "ArraySome"},
          {"every",              {NULL, NULL},       1,0, "ArrayEvery"},
+
+    /* ES6 additions */
+         {"find",               {NULL, NULL},       1,0, "ArrayFind"},
+         {"findIndex",          {NULL, NULL},       1,0, "ArrayFindIndex"},
 
     JS_FN("iterator",           JS_ArrayIterator,   0,0),
     JS_FS_END

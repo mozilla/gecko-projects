@@ -13,6 +13,8 @@
 #include "MIRGraph.h"
 #include "IonBuilder.h"
 
+#include "jsscriptinlines.h"
+
 #include "vm/StringObject-inl.h"
 
 namespace js {
@@ -656,7 +658,8 @@ IonBuilder::inlineMathPow(CallInfo &callInfo)
     // Optimize some constant powers.
     if (callInfo.getArg(1)->isConstant()) {
         double pow;
-        if (!ToNumber(GetIonContext()->cx, callInfo.getArg(1)->toConstant()->value(), &pow))
+        RootedValue v(GetIonContext()->cx, callInfo.getArg(1)->toConstant()->value());
+        if (!ToNumber(GetIonContext()->cx, v, &pow))
             return InliningStatus_Error;
 
         // Math.pow(x, 0.5) is a sqrt with edge-case detection.
