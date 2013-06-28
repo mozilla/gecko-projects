@@ -6464,14 +6464,17 @@ let GsmPDUHelper = {
    */
   readDiallingNumber: function readDiallingNumber(len) {
     if (DEBUG) debug("PDU: Going to read Dialling number: " + len);
+    if (len === 0) {
+      return "";
+    }
 
     // TOA = TON + NPI
     let toa = this.readHexOctet();
 
-    let number = this.readSwappedNibbleBcdString(len - 1).toString();
+    let number = this.readSwappedNibbleBcdString(len - 1);
     if (number.length <= 0) {
-      if (DEBUG) debug("PDU error: no number provided");
-      return null;
+      if (DEBUG) debug("No number provided");
+      return "";
     }
     if ((toa >> 4) == (PDU_TOA_INTERNATIONAL >> 4)) {
       number = '+' + number;
@@ -11454,9 +11457,9 @@ let ICCUtilsHelper = {
       bitmask = 1 << ((usimService % 8) << 0);
     }
 
-    return (serviceTable &&
+    return (serviceTable !== null) &&
            (index < serviceTable.length) &&
-           (serviceTable[index] & bitmask)) !== 0;
+           ((serviceTable[index] & bitmask) !== 0);
   },
 
   /**
