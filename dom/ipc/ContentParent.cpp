@@ -2574,6 +2574,12 @@ ContentParent::CheckAppHasPermission(const nsAString& aPermission)
 }
 
 bool
+ContentParent::CheckAppHasStatus(unsigned short aStatus)
+{
+  return AssertAppHasStatus(this, aStatus);
+}
+
+bool
 ContentParent::RecvSystemMessageHandled()
 {
     SystemMessageHandledListener::OnSystemMessageHandled();
