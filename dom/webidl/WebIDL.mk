@@ -174,6 +174,7 @@ webidl_files = \
   LocalMediaStream.webidl \
   Location.webidl \
   MediaError.webidl \
+  MediaRecorder.webidl \
   MediaSource.webidl \
   MediaStream.webidl \
   MediaStreamAudioDestinationNode.webidl \
@@ -441,6 +442,7 @@ webidl_files += \
   DeviceStorageChangeEvent.webidl \
   PopupBlockedEvent.webidl \
   BlobEvent.webidl \
+  RecordErrorEvent.webidl \
   $(NULL)
 
 ifdef MOZ_B2G_BT
