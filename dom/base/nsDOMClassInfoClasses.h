@@ -52,9 +52,6 @@ DOMCI_CLASS(CRMFObject)
 #endif
 DOMCI_CLASS(Crypto)
 
-// Rect object used by getComputedStyle
-DOMCI_CLASS(CSSRect)
-
 // DOM Chrome Window class, almost identical to Window
 DOMCI_CLASS(ChromeWindow)
 
@@ -138,7 +135,6 @@ DOMCI_CLASS(IDBKeyRange)
 DOMCI_CLASS(IDBIndex)
 DOMCI_CLASS(IDBOpenDBRequest)
 
-DOMCI_CLASS(TouchList)
 
 DOMCI_CLASS(MozCSSKeyframeRule)
 DOMCI_CLASS(MozCSSKeyframesRule)
