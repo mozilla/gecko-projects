@@ -141,7 +141,7 @@ InspectorPanel.prototype = {
         this.highlighter.unlock();
       }
 
-      this.markup.expandNode(this.selection.node);
+      this.markup.expandNode(this.selection.nodeFront);
 
       this.emit("ready");
       deferred.resolve(this);
@@ -157,14 +157,24 @@ InspectorPanel.prototype = {
    * Return a promise that will resolve to the default node for selection.
    */
   _getDefaultNodeForSelection : function() {
+    if (this._defaultNode) {
+      return this._defaultNode;
+    }
+    let walker = this.walker;
     // if available set body node as default selected node
     // else set documentElement
-    return this.walker.querySelector(this.walker.rootNode, "body").then(front => {
+    return walker.querySelector(this.walker.rootNode, "body").then(front => {
       if (front) {
         return front;
       }
       return this.walker.documentElement(this.walker.rootNode);
-    });
+    }).then(node => {
+      if (walker !== this.walker) {
+        promise.reject(null);
+      }
+      this._defaultNode = node;
+      return node;
+    })
   },
 
   /**
@@ -276,6 +286,7 @@ InspectorPanel.prototype = {
     let newWindow = payload._navPayload || payload;
     this.walker.release().then(null, console.error);
     this.walker = null;
+    this._defaultNode = null;
     this.selection.setNodeFront(null);
     this.selection.setWalker(null);
     this._destroyMarkup();
@@ -297,7 +308,7 @@ InspectorPanel.prototype = {
 
         this._initMarkup();
         this.once("markuploaded", () => {
-          this.markup.expandNode(this.selection.node);
+          this.markup.expandNode(this.selection.nodeFront);
           this.setupSearchBox();
         });
       });
@@ -391,7 +402,7 @@ InspectorPanel.prototype = {
   onDetached: function InspectorPanel_onDetached(event, parentNode) {
     this.cancelLayoutChange();
     this.breadcrumbs.cutAfter(this.breadcrumbs.indexOf(parentNode));
-    this.selection.setNodeFront(parentNode, "detached");
+    this.selection.setNodeFront(parentNode ? parentNode : this._defaultNode, "detached");
   },
 
   /**
@@ -668,17 +679,14 @@ InspectorPanel.prototype = {
       return;
     }
 
-    let toDelete = this.selection.node;
-
-    let parent = this.selection.node.parentNode;
-
     // If the markup panel is active, use the markup panel to delete
     // the node, making this an undoable action.
     if (this.markup) {
-      this.markup.deleteNode(toDelete);
+      this.markup.deleteNode(this.selection.nodeFront);
     } else {
       // remove the node from content
-      parent.removeChild(toDelete);
+      let parent = this.selection.node.parentNode;
+      parent.removeChild(this.selection.node);
     }
   },
 
