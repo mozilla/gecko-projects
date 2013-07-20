@@ -261,8 +261,12 @@ AsmJSActivation::AsmJSActivation(JSContext *cx, AsmJSModule &module)
     resumePC_(NULL)
 {
     if (cx->runtime()->spsProfiler.enabled()) {
+        // Use a profiler string that matches jsMatch regex in
+        // browser/devtools/profiler/cleopatra/js/parserWorker.js.
+        // (For now use a single static string to avoid further slowing down
+        // calls into asm.js.)
         profiler_ = &cx->runtime()->spsProfiler;
-        profiler_->enterNative("asm.js code", this);
+        profiler_->enterNative("asm.js code :0", this);
     }
 
     prev_ = cx_->runtime()->mainThread.asmJSActivationStack_;
@@ -488,7 +492,7 @@ SendFunctionsToPerf(JSContext *cx, AsmJSModule &module)
     unsigned long base = (unsigned long) module.functionCode();
 
     const AsmJSModule::PostLinkFailureInfo &info = module.postLinkFailureInfo();
-    const char *filename = const_cast<char *>(info.scriptSource_->filename());
+    const char *filename = const_cast<char *>(info.scriptSource->filename());
 
     for (unsigned i = 0; i < module.numPerfFunctions(); i++) {
         const AsmJSModule::ProfiledFunction &func = module.perfProfiledFunction(i);
@@ -523,7 +527,7 @@ SendBlocksToPerf(JSContext *cx, AsmJSModule &module)
     unsigned long funcBaseAddress = (unsigned long) module.functionCode();
 
     const AsmJSModule::PostLinkFailureInfo &info = module.postLinkFailureInfo();
-    const char *filename = const_cast<char *>(info.scriptSource_->filename());
+    const char *filename = const_cast<char *>(info.scriptSource->filename());
 
     for (unsigned i = 0; i < module.numPerfBlocksFunctions(); i++) {
         const AsmJSModule::ProfiledBlocksFunction &func = module.perfProfiledBlocksFunction(i);

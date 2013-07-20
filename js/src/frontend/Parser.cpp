@@ -471,6 +471,9 @@ FunctionBox::FunctionBox(ExclusiveContext *cx, ObjectBox* traceListHead, JSFunct
     usesApply(false),
     funCxFlags()
 {
+    // Functions created at parse time may be set singleton after parsing and
+    // baked into JIT code, so they must be allocated tenured. They are held by
+    // the JSScript so cannot be collected during a minor GC anyway.
     JS_ASSERT(fun->isTenured());
 
     if (!outerpc) {
@@ -2219,6 +2222,8 @@ Parser<ParseHandler>::functionArgsAndBodyGeneric(Node pn, HandleFunction fun, Fu
     // Given a properly initialized parse context, try to parse an actual
     // function without concern for conversion to strict mode, use of lazy
     // parsing and such.
+
+    context->maybePause();
 
     Node prelude = null();
     bool hasRest;
