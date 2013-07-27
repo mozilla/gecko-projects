@@ -2251,18 +2251,13 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       }
     } else {
       nsRect clip = mScrollPort + aBuilder->ToReferenceFrame(mOuter);
+      nscoord radii[8];
+      bool haveRadii = mOuter->GetPaddingBoxBorderRadii(radii);
       // Our override of GetBorderRadii ensures we never have a radius at
       // the corners where we have a scrollbar.
       if (mClipAllDescendants) {
-#ifdef DEBUG
-        nscoord radii[8];
-#endif
-        NS_ASSERTION(!mOuter->GetPaddingBoxBorderRadii(radii),
-                     "Roots with radii not supported");
-        clipState.ClipContentDescendants(clip);
+        clipState.ClipContentDescendants(clip, haveRadii ? radii : nullptr);
       } else {
-        nscoord radii[8];
-        bool haveRadii = mOuter->GetPaddingBoxBorderRadii(radii);
         clipState.ClipContainingBlockDescendants(clip, haveRadii ? radii : nullptr);
       }
     }
@@ -2843,6 +2838,10 @@ nsGfxScrollFrameInner::CreateAnonymousContent(
                                 NS_LITERAL_STRING("horizontal"), false);
     mHScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::clickthrough,
                                 NS_LITERAL_STRING("always"), false);
+    if (mIsRoot) {
+      mHScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::root_,
+                                  NS_LITERAL_STRING("true"), false);
+    }
     if (!aElements.AppendElement(mHScrollbarContent))
       return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -2854,6 +2853,10 @@ nsGfxScrollFrameInner::CreateAnonymousContent(
                                 NS_LITERAL_STRING("vertical"), false);
     mVScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::clickthrough,
                                 NS_LITERAL_STRING("always"), false);
+    if (mIsRoot) {
+      mVScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::root_,
+                                  NS_LITERAL_STRING("true"), false);
+    }
     if (!aElements.AppendElement(mVScrollbarContent))
       return NS_ERROR_OUT_OF_MEMORY;
   }

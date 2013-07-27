@@ -4704,6 +4704,11 @@ CSSParserImpl::ParseDeclaration(css::Declaration* aDeclaration,
       REPORT_UNEXPECTED_TOKEN(PEParseDeclarationDeclExpected);
       REPORT_UNEXPECTED(PEDeclSkipped);
       OUTPUT_ERROR();
+
+      if (eCSSToken_AtKeyword == tk->mType) {
+        SkipAtRule(checkForBraces);
+        return true;  // Not a declaration, but don’t skip until ';'
+      }
     }
     // Not a declaration...
     UngetToken();
@@ -10076,15 +10081,19 @@ CSSParserImpl::ParseSingleFilter(nsCSSValue* aValue)
       // VARIANT_NONNEGATIVE_DIMENSION will already reject negative lengths.
       rejectNegativeArgument = false;
       break;
+    case eCSSKeyword_brightness:
+    case eCSSKeyword_contrast:
+    case eCSSKeyword_saturate:
+      break;
     case eCSSKeyword_grayscale:
     case eCSSKeyword_invert:
     case eCSSKeyword_sepia:
     case eCSSKeyword_opacity:
       clampArgumentToOne = true;
       break;
-    case eCSSKeyword_brightness:
-    case eCSSKeyword_contrast:
-    case eCSSKeyword_saturate:
+    case eCSSKeyword_hue_rotate:
+      variantMask = VARIANT_ANGLE;
+      rejectNegativeArgument = false;
       break;
     default:
       // Unrecognized filter function.

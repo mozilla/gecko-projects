@@ -1062,16 +1062,34 @@ MMod::computeRange()
     Range lhs(getOperand(0));
     Range rhs(getOperand(1));
 
-    // Infinite % x is NaN
-    if (lhs.isInfinite())
+    // If either operand is a NaN, the result is NaN. This also conservatively
+    // handles Infinity cases.
+    if (lhs.isInfinite() || rhs.isInfinite())
         return;
 
+    // Math.abs(lhs % rhs) == Math.abs(lhs) % Math.abs(rhs).
+    // First, the absolute value of the result will always be less than the
+    // absolute value of rhs. (And if rhs is zero, the result is NaN).
     int64_t a = Abs<int64_t>(rhs.lower());
     int64_t b = Abs<int64_t>(rhs.upper());
     if (a == 0 && b == 0)
         return;
-    int64_t bound = Max(1-a, b-1);
-    setRange(new Range(-bound, bound, lhs.isDecimal() || rhs.isDecimal()));
+    int64_t rhsAbsBound = Max(a-1, b-1);
+
+    // Next, the absolute value of the result will never be greater than the
+    // absolute value of lhs.
+    int64_t lhsAbsBound = Max(Abs<int64_t>(lhs.lower()), Abs<int64_t>(lhs.upper()));
+
+    // This gives us two upper bounds, so we can take the best one.
+    int64_t absBound = Min(lhsAbsBound, rhsAbsBound);
+
+    // Now consider the sign of the result.
+    // If lhs is non-negative, the result will be non-negative.
+    // If lhs is non-positive, the result will be non-positive.
+    int64_t lower = lhs.lower() >= 0 ? 0 : -absBound;
+    int64_t upper = lhs.upper() <= 0 ? 0 : absBound;
+
+    setRange(new Range(lower, upper, lhs.isDecimal() || rhs.isDecimal()));
 }
 
 void
@@ -1804,6 +1822,24 @@ MToDouble::isOperandTruncated(size_t index) const
     // The return type is used to flag that we are replacing this Double by a
     // Truncate of its operand if needed.
     return type() == MIRType_Int32;
+}
+
+bool
+MStoreTypedArrayElement::isOperandTruncated(size_t index) const
+{
+    return index == 2 && !isFloatArray();
+}
+
+bool
+MStoreTypedArrayElementHole::isOperandTruncated(size_t index) const
+{
+    return index == 3 && !isFloatArray();
+}
+
+bool
+MStoreTypedArrayElementStatic::isOperandTruncated(size_t index) const
+{
+    return index == 1 && !isFloatArray();
 }
 
 // Ensure that all observables uses can work with a truncated
