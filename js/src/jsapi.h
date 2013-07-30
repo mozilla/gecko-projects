@@ -1770,6 +1770,42 @@ typedef enum JSUseHelperThreads
     JS_USE_HELPER_THREADS
 } JSUseHelperThreads;
 
+/**
+ * Initialize SpiderMonkey, returning true only if initialization succeeded.
+ * Once this method has succeeded, it is safe to call JS_NewRuntime and other
+ * JSAPI methods.
+ *
+ * This method must be called before any other JSAPI method is used on any
+ * thread.  Once it has been used, it is safe to call any JSAPI method, and it
+ * remains safe to do so until JS_ShutDown is correctly called.
+ *
+ * It is currently not possible to initialize SpiderMonkey multiple times (that
+ * is, calling JS_Init/JSAPI methods/JS_ShutDown in that order, then doing so
+ * again).  This restriction may eventually be lifted.
+ */
+extern JS_PUBLIC_API(JSBool)
+JS_Init(void);
+
+/**
+ * Destroy free-standing resources allocated by SpiderMonkey, not associated
+ * with any runtime, context, or other structure.
+ *
+ * This method should be called after all other JSAPI data has been properly
+ * cleaned up: every new runtime must have been destroyed, every new context
+ * must have been destroyed, and so on.  Calling this method before all other
+ * resources have been destroyed has undefined behavior.
+ *
+ * Failure to call this method, at present, has no adverse effects other than
+ * leaking memory.  This may not always be the case; it's recommended that all
+ * embedders call this method when all other JSAPI operations have completed.
+ *
+ * It is currently not possible to initialize SpiderMonkey multiple times (that
+ * is, calling JS_Init/JSAPI methods/JS_ShutDown in that order, then doing so
+ * again).  This restriction may eventually be lifted.
+ */
+extern JS_PUBLIC_API(void)
+JS_ShutDown(void);
+
 extern JS_PUBLIC_API(JSRuntime *)
 JS_NewRuntime(uint32_t maxbytes, JSUseHelperThreads useHelperThreads);
 
@@ -1787,9 +1823,6 @@ typedef void (*JS_ICUFreeFn)(const void *, void *p);
 // Do not use it unless you know what you are doing!
 extern JS_PUBLIC_API(bool)
 JS_SetICUMemoryFunctions(JS_ICUAllocFn allocFn, JS_ICUReallocFn reallocFn, JS_ICUFreeFn freeFn);
-
-extern JS_PUBLIC_API(void)
-JS_ShutDown(void);
 
 JS_PUBLIC_API(void *)
 JS_GetRuntimePrivate(JSRuntime *rt);
@@ -3474,19 +3507,22 @@ extern JS_PUBLIC_API(JSBool)
 JS_GetOwnPropertyDescriptor(JSContext *cx, JSObject *obj, jsid id, jsval *vp);
 
 extern JS_PUBLIC_API(JSBool)
-JS_GetProperty(JSContext *cx, JSObject *obj, const char *name, jsval *vp);
+JS_GetProperty(JSContext *cx, JSObject *obj, const char *name, JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(JSBool)
-JS_GetPropertyDefault(JSContext *cx, JSObject *obj, const char *name, jsval def, jsval *vp);
+JS_GetPropertyDefault(JSContext *cx, JSObject *obj, const char *name, jsval def,
+                      JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(JSBool)
-JS_GetPropertyById(JSContext *cx, JSObject *obj, jsid id, jsval *vp);
+JS_GetPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(JSBool)
-JS_GetPropertyByIdDefault(JSContext *cx, JSObject *obj, jsid id, jsval def, jsval *vp);
+JS_GetPropertyByIdDefault(JSContext *cx, JSObject *obj, jsid id, jsval def,
+                          JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(JSBool)
-JS_ForwardGetPropertyTo(JSContext *cx, JSObject *obj, jsid id, JSObject *onBehalfOf, jsval *vp);
+JS_ForwardGetPropertyTo(JSContext *cx, JSObject *obj, jsid id, JSObject *onBehalfOf,
+                        JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(JSBool)
 JS_SetProperty(JSContext *cx, JSObject *obj, const char *name, JS::Handle<JS::Value> v);
@@ -3572,7 +3608,7 @@ JS_LookupUCProperty(JSContext *cx, JSObject *obj,
 extern JS_PUBLIC_API(JSBool)
 JS_GetUCProperty(JSContext *cx, JSObject *obj,
                  const jschar *name, size_t namelen,
-                 jsval *vp);
+                 JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(JSBool)
 JS_SetUCProperty(JSContext *cx, JSObject *obj,

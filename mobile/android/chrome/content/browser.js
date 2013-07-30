@@ -295,6 +295,7 @@ var BrowserApp = {
     Services.obs.addObserver(this, "FormHistory:Init", false);
     Services.obs.addObserver(this, "gather-telemetry", false);
     Services.obs.addObserver(this, "keyword-search", false);
+    Services.obs.addObserver(this, "SelectedText:Get", false);
 
     Services.obs.addObserver(this, "sessionstore-state-purge-complete", false);
 
@@ -1442,6 +1443,14 @@ var BrowserApp = {
         });
         break;
 
+      case "SelectedText:Get":
+        sendMessageToJava({
+          type: "SelectedText:Data",
+          requestId: aData,
+          text: SelectionHandler.getSelectedText()
+        });
+        break;
+
       case "Browser:Quit":
         this.quit();
         break;
@@ -2055,6 +2064,8 @@ var NativeWindow = {
 
       this.menuitems = [];
       let menuitemsSet = false;
+
+      Services.obs.notifyObservers(null, "before-build-contextmenu", "");
 
       // now walk up the tree and for each node look for any context menu items that apply
       let element = target;
@@ -5953,6 +5964,9 @@ var IndexedDB = {
 };
 
 var ClipboardHelper = {
+  // Recorded so search with option can be removed/replaced when default engine changed.
+  _searchMenuItem: -1,
+
   init: function() {
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.copy"), ClipboardHelper.getCopyContext(false), ClipboardHelper.copy.bind(ClipboardHelper));
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.copyAll"), ClipboardHelper.getCopyContext(true), ClipboardHelper.copy.bind(ClipboardHelper));
@@ -5961,6 +5975,26 @@ var ClipboardHelper = {
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.share"), ClipboardHelper.shareContext, ClipboardHelper.share.bind(ClipboardHelper));
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.paste"), ClipboardHelper.pasteContext, ClipboardHelper.paste.bind(ClipboardHelper));
     NativeWindow.contextmenus.add(Strings.browser.GetStringFromName("contextmenu.changeInputMethod"), NativeWindow.contextmenus.textContext, ClipboardHelper.inputMethod.bind(ClipboardHelper));
+
+    // We add this contextmenu item right before the menu is built to avoid having to initialise the search service early.
+    Services.obs.addObserver(this, "before-build-contextmenu", false);
+  },
+
+  uninit: function ch_uninit() {
+    Services.obs.removeObserver(this, "before-build-contextmenu");
+  },
+
+  observe: function observe(aSubject, aTopic) {
+    if (aTopic == "ContextMenu:Open") {
+      this._setSearchMenuItem();
+    }
+  },
+
+  _setSearchMenuItem: function setSearchMenuItem() {
+    if (this._searchMenuItem) {
+      NativeWindow.contextmenus.remove(this._searchMenuItem);
+    }
+    this._searchMenuItem = NativeWindow.contextmenus.add(Strings.browser.formatStringFromName("contextmenu.search", [Services.search.defaultEngine.name], 1), ClipboardHelper.searchWithContext, ClipboardHelper.searchWith.bind(ClipboardHelper));
   },
 
   get clipboardHelper() {
@@ -5995,6 +6029,10 @@ var ClipboardHelper = {
 
   selectAll: function(aElement, aX, aY) {
     SelectionHandler.selectAll(aElement, aX, aY);
+  },
+
+  searchWith: function(aElement) {
+    SelectionHandler.searchSelection(aElement);
   },
 
   share: function() {
@@ -6062,6 +6100,12 @@ var ClipboardHelper = {
 
   shareContext: {
     matches: function shareContextMatches(aElement, aX, aY) {
+      return SelectionHandler.shouldShowContextMenu(aX, aY);
+    }
+  },
+
+  searchWithContext: {
+    matches: function searchWithContextMatches(aElement, aX, aY) {
       return SelectionHandler.shouldShowContextMenu(aX, aY);
     }
   },
