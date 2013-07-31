@@ -98,6 +98,13 @@
 #include "nsIDOMDOMException.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMDOMStringList.h"
+#include "nsIDOMUserDataHandler.h"
+#include "nsIDOMGeoPositionError.h"
+#include "nsIDOMLoadStatus.h"
+#include "nsIDOMXPathNamespace.h"
+#include "nsIDOMXULButtonElement.h"
+#include "nsIDOMXULCheckboxElement.h"
+#include "nsIDOMXULPopupElement.h"
 
 // Event related includes
 #include "nsEventListenerManager.h"
@@ -198,7 +205,6 @@
 #include "mozilla/dom/indexedDB/IDBRequest.h"
 #include "mozilla/dom/indexedDB/IDBDatabase.h"
 #include "mozilla/dom/indexedDB/IDBObjectStore.h"
-#include "mozilla/dom/indexedDB/IDBTransaction.h"
 #include "mozilla/dom/indexedDB/IDBCursor.h"
 #include "mozilla/dom/indexedDB/IDBKeyRange.h"
 #include "mozilla/dom/indexedDB/IDBIndex.h"
@@ -326,6 +332,13 @@ DOMCI_DATA_NO_CLASS(ChromeMessageSender)
 
 DOMCI_DATA_NO_CLASS(DOMPrototype)
 DOMCI_DATA_NO_CLASS(DOMConstructor)
+
+DOMCI_DATA_NO_CLASS(UserDataHandler)
+DOMCI_DATA_NO_CLASS(LoadStatus)
+DOMCI_DATA_NO_CLASS(XPathNamespace)
+DOMCI_DATA_NO_CLASS(XULButtonElement)
+DOMCI_DATA_NO_CLASS(XULCheckboxElement)
+DOMCI_DATA_NO_CLASS(XULPopupElement)
 
 #define NS_DEFINE_CLASSINFO_DATA_WITH_NAME(_class, _name, _helper,            \
                                            _flags)                            \
@@ -628,8 +641,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            IDBEVENTTARGET_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(IDBObjectStore, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(IDBTransaction, IDBEventTargetSH,
-                           IDBEVENTTARGET_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(IDBCursor, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(IDBCursorWithValue, nsDOMGenericSH,
@@ -691,6 +702,21 @@ static nsDOMClassInfoData sClassInfoData[] = {
   NS_DEFINE_CLASSINFO_DATA(LockedFile, nsEventTargetSH,
                            EVENTTARGET_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(CSSFontFeatureValuesRule, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+
+  NS_DEFINE_CLASSINFO_DATA(UserDataHandler, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(GeoPositionError, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(LoadStatus, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(XPathNamespace, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(XULButtonElement, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(XULCheckboxElement, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(XULPopupElement, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 };
 
@@ -1194,9 +1220,9 @@ nsDOMClassInfo::Init()
 {
   /* Errors that can trigger early returns are done first,
      otherwise nsDOMClassInfo is left in a half inited state. */
-  MOZ_STATIC_ASSERT(sizeof(uintptr_t) == sizeof(void*),
-                    "BAD! You'll need to adjust the size of uintptr_t to the "
-                    "size of a pointer on your platform.");
+  static_assert(sizeof(uintptr_t) == sizeof(void*),
+                "BAD! You'll need to adjust the size of uintptr_t to the "
+                "size of a pointer on your platform.");
 
   NS_ENSURE_TRUE(!sIsInitialized, NS_ERROR_ALREADY_INITIALIZED);
 
@@ -1525,11 +1551,6 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_MAP_ENTRY(nsIIDBObjectStore)
   DOM_CLASSINFO_MAP_END
 
-  DOM_CLASSINFO_MAP_BEGIN(IDBTransaction, nsIIDBTransaction)
-    DOM_CLASSINFO_MAP_ENTRY(nsIIDBTransaction)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
-  DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(IDBCursor, nsIIDBCursor)
     DOM_CLASSINFO_MAP_ENTRY(nsIIDBCursor)
   DOM_CLASSINFO_MAP_END
@@ -1637,9 +1658,37 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSFontFeatureValuesRule)
   DOM_CLASSINFO_MAP_END
 
-  MOZ_STATIC_ASSERT(MOZ_ARRAY_LENGTH(sClassInfoData) == eDOMClassInfoIDCount,
-                    "The number of items in sClassInfoData doesn't match the "
-                    "number of nsIDOMClassInfo ID's, this is bad! Fix it!");
+  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(UserDataHandler, nsIDOMUserDataHandler)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMUserDataHandler)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN(GeoPositionError, nsIDOMGeoPositionError)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMGeoPositionError)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(LoadStatus, nsIDOMLoadStatus)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMLoadStatus)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(XPathNamespace, nsIDOMXPathNamespace)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMXPathNamespace)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(XULButtonElement, nsIDOMXULButtonElement)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMXULButtonElement)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(XULCheckboxElement, nsIDOMXULCheckboxElement)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMXULCheckboxElement)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(XULPopupElement, nsIDOMXULPopupElement)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMXULPopupElement)
+  DOM_CLASSINFO_MAP_END
+
+  static_assert(MOZ_ARRAY_LENGTH(sClassInfoData) == eDOMClassInfoIDCount,
+                "The number of items in sClassInfoData doesn't match the "
+                "number of nsIDOMClassInfo ID's, this is bad! Fix it!");
 
 #ifdef DEBUG
   for (size_t i = 0; i < eDOMClassInfoIDCount; i++) {
@@ -2403,7 +2452,7 @@ ChildWindowGetter(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
 
   // Wrap the child for JS.
   JS::Rooted<JS::Value> v(cx);
-  nsresult rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), child,
+  nsresult rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), child,
                            /* aAllowWrapping = */ true, v.address());
   NS_ENSURE_SUCCESS(rv, false);
   vp.set(v);
@@ -2837,7 +2886,7 @@ DefineInterfaceConstants(JSContext *cx, JS::Handle<JSObject*> obj, const nsIID *
 }
 
 // This code is temporary until we remove support for the constants defined
-// on IDBCursor/IDBRequest/IDBTransaction
+// on IDBCursor/IDBRequest
 
 struct IDBConstant
 {
@@ -2847,23 +2896,18 @@ struct IDBConstant
 
   static const char* IDBCursor;
   static const char* IDBRequest;
-  static const char* IDBTransaction;
 };
 
 const char* IDBConstant::IDBCursor = "IDBCursor";
 const char* IDBConstant::IDBRequest = "IDBRequest";
-const char* IDBConstant::IDBTransaction = "IDBTransaction";
 
 static const IDBConstant sIDBConstants[] = {
-  { IDBConstant::IDBCursor,      "NEXT",              "next" },
-  { IDBConstant::IDBCursor,      "NEXT_NO_DUPLICATE", "nextunique" },
-  { IDBConstant::IDBCursor,      "PREV",              "prev" },
-  { IDBConstant::IDBCursor,      "PREV_NO_DUPLICATE", "prevunique" },
-  { IDBConstant::IDBRequest,     "LOADING",           "pending" },
-  { IDBConstant::IDBRequest,     "DONE",              "done" },
-  { IDBConstant::IDBTransaction, "READ_ONLY",         "readonly" },
-  { IDBConstant::IDBTransaction, "READ_WRITE",        "readwrite" },
-  { IDBConstant::IDBTransaction, "VERSION_CHANGE",    "versionchange" },
+  { IDBConstant::IDBCursor,  "NEXT",              "next" },
+  { IDBConstant::IDBCursor,  "NEXT_NO_DUPLICATE", "nextunique" },
+  { IDBConstant::IDBCursor,  "PREV",              "prev" },
+  { IDBConstant::IDBCursor,  "PREV_NO_DUPLICATE", "prevunique" },
+  { IDBConstant::IDBRequest, "LOADING",           "pending" },
+  { IDBConstant::IDBRequest, "DONE",              "done" },
 };
 
 static JSBool
@@ -2956,9 +3000,6 @@ DefineIDBInterfaceConstants(JSContext *cx, JS::Handle<JSObject*> obj, const nsII
   }
   else if (aIID->Equals(NS_GET_IID(nsIIDBRequest))) {
     interface = IDBConstant::IDBRequest;
-  }
-  else if (aIID->Equals(NS_GET_IID(nsIIDBTransaction))) {
-    interface = IDBConstant::IDBTransaction;
   }
   else {
     MOZ_CRASH("unexpected IID");
@@ -3382,8 +3423,7 @@ nsDOMConstructor::ResolveInterfaceConstants(JSContext *cx, JS::Handle<JSObject*>
   // Special case a few IDB interfaces which for now are getting transitional
   // constants.
   if (class_iid->Equals(NS_GET_IID(nsIIDBCursor)) ||
-      class_iid->Equals(NS_GET_IID(nsIIDBRequest)) ||
-      class_iid->Equals(NS_GET_IID(nsIIDBTransaction))) {
+      class_iid->Equals(NS_GET_IID(nsIIDBRequest))) {
     rv = DefineIDBInterfaceConstants(cx, obj, class_iid);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -3521,8 +3561,7 @@ ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
     // Special case a few IDB interfaces which for now are getting transitional
     // constants.
     if (primary_iid->Equals(NS_GET_IID(nsIIDBCursor)) ||
-        primary_iid->Equals(NS_GET_IID(nsIIDBRequest)) ||
-        primary_iid->Equals(NS_GET_IID(nsIIDBTransaction))) {
+        primary_iid->Equals(NS_GET_IID(nsIIDBRequest))) {
       rv = DefineIDBInterfaceConstants(cx, class_obj, primary_iid);
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -3995,7 +4034,7 @@ LocationSetterGuts(JSContext *cx, JSObject *obj, jsval *vp)
   // We have to wrap location into vp before null-checking location, to
   // avoid assigning the wrong thing into the slot.
   nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-  rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), location,
+  rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), location,
                   &NS_GET_IID(nsIDOMLocation), true, vp,
                   getter_AddRefs(holder));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -4340,7 +4379,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
       nsCOMPtr<nsIDocument> document = win->GetDoc();
       JS::Rooted<JS::Value> v(cx);
       nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-      rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), document, document,
+      rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), document, document,
                       &NS_GET_IID(nsIDOMDocument), v.address(), getter_AddRefs(holder),
                       false);
       NS_ENSURE_SUCCESS(rv, rv);
@@ -4722,7 +4761,7 @@ nsArraySH::GetProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (array_item) {
-      rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), array_item, cache,
+      rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), array_item, cache,
                       true, vp);
       NS_ENSURE_SUCCESS(rv, rv);
 
@@ -4819,7 +4858,7 @@ nsHTMLDocumentSH::GetDocumentAllNodeList(JSContext *cx,
     }
 
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-    nsresult tmp = WrapNative(cx, JS_GetGlobalForScopeChain(cx),
+    nsresult tmp = WrapNative(cx, JS::CurrentGlobalOrNull(cx),
                               static_cast<nsINodeList*>(list), list, false,
                               collection.address(), getter_AddRefs(holder));
     if (NS_FAILED(tmp)) {
@@ -4925,7 +4964,7 @@ nsHTMLDocumentSH::DocumentAllGetProperty(JSContext *cx, JS::Handle<JSObject*> ob
   }
 
   if (result) {
-    rv = WrapNative(cx, JS_GetGlobalForScopeChain(cx), result, cache, true, vp.address());
+    rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), result, cache, true, vp.address());
     if (NS_FAILED(rv)) {
       xpc::Throw(cx, rv);
 

@@ -537,7 +537,7 @@ class ThreadLocalJSRuntime
     mGlobal = JS_NewGlobalObject(mContext, &sGlobalClass, NULL);
     NS_ENSURE_TRUE(mGlobal, NS_ERROR_OUT_OF_MEMORY);
 
-    JS_SetGlobalObject(mContext, mGlobal);
+    js::SetDefaultObjectForContext(mContext, mGlobal);
     return NS_OK;
   }
 
@@ -677,7 +677,7 @@ public:
       aData.name, aData.type, fileInfo.forget());
 
     JS::Rooted<JS::Value> wrappedFileHandle(aCx);
-    JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
     nsresult rv =
       nsContentUtils::WrapNative(aCx, global,
                                  static_cast<nsIDOMFileHandle*>(fileHandle),
@@ -738,7 +738,7 @@ public:
       }
 
       JS::Rooted<JS::Value> wrappedBlob(aCx);
-      JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+      JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
       rv = nsContentUtils::WrapNative(aCx, global, domBlob,
                                       &NS_GET_IID(nsIDOMBlob),
                                       wrappedBlob.address());
@@ -765,7 +765,7 @@ public:
     }
 
     JS::Rooted<JS::Value> wrappedFile(aCx);
-    JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
     rv = nsContentUtils::WrapNative(aCx, global, domFile,
                                     &NS_GET_IID(nsIDOMFile),
                                     wrappedFile.address());
@@ -1331,8 +1331,8 @@ bool
 IDBObjectStore::ReadFileHandle(JSStructuredCloneReader* aReader,
                                FileHandleData* aRetval)
 {
-  MOZ_STATIC_ASSERT(SCTAG_DOM_FILEHANDLE == 0xFFFF8004,
-                    "Update me!");
+  static_assert(SCTAG_DOM_FILEHANDLE == 0xFFFF8004,
+                "Update me!");
   MOZ_ASSERT(aReader && aRetval);
 
   nsCString type;
@@ -1356,10 +1356,10 @@ IDBObjectStore::ReadBlobOrFile(JSStructuredCloneReader* aReader,
                                uint32_t aTag,
                                BlobOrFileData* aRetval)
 {
-  MOZ_STATIC_ASSERT(SCTAG_DOM_BLOB == 0xFFFF8001 &&
-                    SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE == 0xFFFF8002 &&
-                    SCTAG_DOM_FILE == 0xFFFF8005,
-                    "Update me!");
+  static_assert(SCTAG_DOM_BLOB == 0xFFFF8001 &&
+                SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE == 0xFFFF8002 &&
+                SCTAG_DOM_FILE == 0xFFFF8005,
+                "Update me!");
   MOZ_ASSERT(aReader && aRetval);
   MOZ_ASSERT(aTag == SCTAG_DOM_FILE ||
              aTag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
@@ -1417,12 +1417,12 @@ IDBObjectStore::StructuredCloneReadCallback(JSContext* aCx,
 {
   // We need to statically assert that our tag values are what we expect
   // so that if people accidentally change them they notice.
-  MOZ_STATIC_ASSERT(SCTAG_DOM_BLOB == 0xFFFF8001 &&
-                    SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE == 0xFFFF8002 &&
-                    SCTAG_DOM_FILEHANDLE == 0xFFFF8004 &&
-                    SCTAG_DOM_FILE == 0xFFFF8005,
-                    "You changed our structured clone tag values and just ate "
-                    "everyone's IndexedDB data.  I hope you are happy.");
+  static_assert(SCTAG_DOM_BLOB == 0xFFFF8001 &&
+                SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE == 0xFFFF8002 &&
+                SCTAG_DOM_FILEHANDLE == 0xFFFF8004 &&
+                SCTAG_DOM_FILE == 0xFFFF8005,
+                "You changed our structured clone tag values and just ate "
+                "everyone's IndexedDB data.  I hope you are happy.");
 
   if (aTag == SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE ||
       aTag == SCTAG_DOM_FILEHANDLE ||
@@ -2405,11 +2405,11 @@ IDBObjectStore::GetKeyPath(JSContext* aCx,
 }
 
 NS_IMETHODIMP
-IDBObjectStore::GetTransaction(nsIIDBTransaction** aTransaction)
+IDBObjectStore::GetTransaction(nsISupports** aTransaction)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsCOMPtr<nsIIDBTransaction> transaction(mTransaction);
+  nsRefPtr<IDBWrapperCache> transaction(mTransaction);
   transaction.forget(aTransaction);
   return NS_OK;
 }
