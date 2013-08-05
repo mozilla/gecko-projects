@@ -9,6 +9,7 @@ generated_webidl_files = \
   $(NULL)
 
 preprocessed_webidl_files = \
+  Crypto.webidl \
   Navigator.webidl \
   $(NULL)
 
@@ -226,6 +227,7 @@ webidl_files = \
   PositionError.webidl \
   ProcessingInstruction.webidl \
   Promise.webidl \
+  PushManager.webidl \
   Range.webidl \
   Rect.webidl \
   RGBColor.webidl \
