@@ -37,7 +37,9 @@
 #include "jsfun.h"
 #include "jsgc.h"
 #include "jsiter.h"
+#ifdef JS_THREADSAFE
 #include "jslock.h"
+#endif
 #include "jsnum.h"
 #include "jsobj.h"
 #include "json.h"
@@ -67,6 +69,7 @@
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 
+#include "jsfuninlines.h"
 #include "jsinferinlines.h"
 #include "jsscriptinlines.h"
 
@@ -371,12 +374,6 @@ ShellOperationCallback(JSContext *cx)
     return result;
 }
 
-static void
-SetContextOptions(JSContext *cx)
-{
-    JS_SetOperationCallback(cx, ShellOperationCallback);
-}
-
 /*
  * Some UTF-8 files, notably those written using Notepad, have a Unicode
  * Byte-Order-Mark (BOM) as their first character. This is useless (byte-order
@@ -568,8 +565,6 @@ Process(JSContext *cx, JSObject *obj_, const char *filename, bool forceTTY)
         }
     }
     AutoCloseInputFile autoClose(file);
-
-    SetContextOptions(cx);
 
     if (!forceTTY && !isatty(fileno(file))) {
         // It's not interactive - just execute it.
@@ -4862,7 +4857,6 @@ NewContext(JSRuntime *rt)
 
     JS_SetContextPrivate(cx, data);
     JS_SetErrorReporter(cx, my_ErrorReporter);
-    SetContextOptions(cx);
     if (enableTypeInference)
         JS_ToggleOptions(cx, JSOPTION_TYPE_INFERENCE);
     if (enableIon)
@@ -5467,6 +5461,7 @@ main(int argc, char **argv, char **envp)
 
     JS_SetTrustedPrincipals(rt, &shellTrustedPrincipals);
     JS_SetSecurityCallbacks(rt, &securityCallbacks);
+    JS_SetOperationCallback(rt, ShellOperationCallback);
 
     JS_SetNativeStackQuota(rt, gMaxStackSize);
 
