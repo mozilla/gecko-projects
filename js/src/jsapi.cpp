@@ -1106,9 +1106,13 @@ JS_WrapObject(JSContext *cx, JSObject **objp)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    if (*objp)
-        JS::ExposeGCThingToActiveJS(*objp, JSTRACE_OBJECT);
-    return cx->compartment()->wrap(cx, objp);
+    RootedObject obj(cx, *objp);
+    if (obj)
+        JS::ExposeGCThingToActiveJS(obj, JSTRACE_OBJECT);
+    if (!cx->compartment()->wrap(cx, &obj))
+        return false;
+    *objp = obj;
+    return true;
 }
 
 JS_PUBLIC_API(bool)
@@ -4839,8 +4843,11 @@ JS::Compile(JSContext *cx, HandleObject obj, CompileOptions options, const char 
 JS_PUBLIC_API(bool)
 JS::CanCompileOffThread(JSContext *cx, const CompileOptions &options)
 {
-#if defined(JS_THREADSAFE) && defined(JS_ION)
+#ifdef JS_WORKER_THREADS
     if (!cx->runtime()->useHelperThreads() || !cx->runtime()->helperThreadCount())
+        return false;
+
+    if (!cx->runtime()->useHelperThreadsForParsing())
         return false;
 
     // Off thread compilation can't occur during incremental collections on the
@@ -4880,7 +4887,7 @@ JS::CompileOffThread(JSContext *cx, Handle<JSObject*> obj, CompileOptions option
                      const jschar *chars, size_t length,
                      OffThreadCompileCallback callback, void *callbackData)
 {
-#if defined(JS_THREADSAFE) && defined(JS_ION)
+#ifdef JS_WORKER_THREADS
     JS_ASSERT(CanCompileOffThread(cx, options));
     return StartOffThreadParseScript(cx, options, chars, length, obj, callback, callbackData);
 #else
@@ -4891,7 +4898,7 @@ JS::CompileOffThread(JSContext *cx, Handle<JSObject*> obj, CompileOptions option
 JS_PUBLIC_API(void)
 JS::FinishOffThreadScript(JSRuntime *rt, JSScript *script)
 {
-#if defined(JS_THREADSAFE) && defined(JS_ION)
+#ifdef JS_WORKER_THREADS
     JS_ASSERT(CurrentThreadCanAccessRuntime(rt));
     rt->workerThreadState->finishParseTaskForScript(rt, script);
 #else
@@ -6636,10 +6643,18 @@ JS_ScheduleGC(JSContext *cx, uint32_t count)
 #endif
 
 JS_PUBLIC_API(void)
-JS_SetParallelCompilationEnabled(JSContext *cx, bool enabled)
+JS_SetParallelParsingEnabled(JSContext *cx, bool enabled)
 {
 #ifdef JS_ION
-    ion::js_IonOptions.parallelCompilation = enabled;
+    cx->runtime()->setCanUseHelperThreadsForParsing(enabled);
+#endif
+}
+
+JS_PUBLIC_API(void)
+JS_SetParallelIonCompilationEnabled(JSContext *cx, bool enabled)
+{
+#ifdef JS_ION
+    cx->runtime()->setCanUseHelperThreadsForIonCompilation(enabled);
 #endif
 }
 
@@ -6660,11 +6675,6 @@ JS_SetGlobalCompilerOption(JSContext *cx, JSCompilerOption opt, uint32_t value)
             value = defaultValues.usesBeforeCompile;
         ion::js_IonOptions.usesBeforeCompile = value;
         ion::js_IonOptions.eagerCompilation = (value == 0);
-        break;
-      case JSCOMPILER_PJS_ENABLE:
-        if (value == uint32_t(-1))
-            value = uint32_t(defaultValues.parallelCompilation);
-        ion::js_IonOptions.parallelCompilation = bool(value);
         break;
     }
 #endif

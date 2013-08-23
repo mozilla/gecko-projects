@@ -36,7 +36,6 @@
 #include "nsIProperties.h"
 #include "nsIObserverService.h"
 #include "nsXULAppAPI.h"
-#include "jsdbgapi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -165,8 +164,10 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
       }
 
       // Create a unique temporary folder to use for this test.
+      // Note that runcppunittests.py will run tests with a temp
+      // directory as the cwd, so just put something under that.
       nsCOMPtr<nsIFile> profD;
-      nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR,
+      nsresult rv = NS_GetSpecialDirectory(NS_OS_CURRENT_PROCESS_DIR,
                                            getter_AddRefs(profD));
       NS_ENSURE_SUCCESS(rv, nullptr);
 
