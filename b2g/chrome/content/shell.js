@@ -6,9 +6,6 @@
 
 Cu.import('resource://gre/modules/ContactService.jsm');
 Cu.import('resource://gre/modules/SettingsChangeNotifier.jsm');
-#ifdef MOZ_B2G_FM
-Cu.import('resource://gre/modules/DOMFMRadioParent.jsm');
-#endif
 Cu.import('resource://gre/modules/AlarmService.jsm');
 Cu.import('resource://gre/modules/ActivitiesService.jsm');
 Cu.import('resource://gre/modules/PermissionPromptHelper.jsm');
@@ -462,35 +459,21 @@ var shell = {
         }
         break;
       case 'mozbrowserloadstart':
-        if (content.document.location == 'about:blank')
+        if (content.document.location == 'about:blank') {
+          this.contentBrowser.addEventListener('mozbrowserlocationchange', this, true);
           return;
+        }
 
-        this.contentBrowser.removeEventListener('mozbrowserloadstart', this, true);
-
-        this.reportCrash(true);
-
-        Cu.import('resource://gre/modules/Webapps.jsm');
-        DOMApplicationRegistry.allAppsLaunchable = true;
-
-        this.sendEvent(window, 'ContentStart');
-
-        content.addEventListener('load', function shell_homeLoaded() {
-          content.removeEventListener('load', shell_homeLoaded);
-          shell.isHomeLoaded = true;
-
-#ifdef MOZ_WIDGET_GONK
-          libcutils.property_set('sys.boot_completed', '1');
-#endif
-
-          Services.obs.notifyObservers(null, "browser-ui-startup-complete", "");
-
-          if ('pendingChromeEvents' in shell) {
-            shell.pendingChromeEvents.forEach((shell.sendChromeEvent).bind(shell));
-          }
-          delete shell.pendingChromeEvents;
-        });
-
+        this.notifyContentStart();
         break;
+      case 'mozbrowserlocationchange':
+        if (content.document.location == 'about:blank') {
+          return;
+        }
+
+        this.notifyContentStart();
+       break;
+
       case 'MozApplicationManifest':
         try {
           if (!Services.prefs.getBoolPref('browser.cache.offline.enable'))
@@ -592,6 +575,36 @@ var shell = {
         sender.sendAsyncMessage(activity.response, { success: false });
       }
     }
+  },
+
+  notifyContentStart: function shell_notifyContentStart() {
+    this.contentBrowser.removeEventListener('mozbrowserloadstart', this, true);
+    this.contentBrowser.removeEventListener('mozbrowserlocationchange', this, true);
+
+    let content = this.contentBrowser.contentWindow;
+
+    this.reportCrash(true);
+
+    Cu.import('resource://gre/modules/Webapps.jsm');
+    DOMApplicationRegistry.allAppsLaunchable = true;
+
+    this.sendEvent(window, 'ContentStart');
+
+    content.addEventListener('load', function shell_homeLoaded() {
+      content.removeEventListener('load', shell_homeLoaded);
+      shell.isHomeLoaded = true;
+
+#ifdef MOZ_WIDGET_GONK
+      libcutils.property_set('sys.boot_completed', '1');
+#endif
+
+      Services.obs.notifyObservers(null, "browser-ui-startup-complete", "");
+
+      if ('pendingChromeEvents' in shell) {
+        shell.pendingChromeEvents.forEach((shell.sendChromeEvent).bind(shell));
+      }
+      delete shell.pendingChromeEvents;
+    });
   }
 };
 
@@ -743,7 +756,7 @@ var AlertsHelper = {
     this._listeners[uid] = listener;
 
     let app = DOMApplicationRegistry.getAppByManifestURL(listener.manifestURL);
-    DOMApplicationRegistry.getManifestFor(app.origin, function(manifest) {
+    DOMApplicationRegistry.getManifestFor(app.manifestURL, function(manifest) {
       let helper = new ManifestHelper(manifest, app.origin);
       let getNotificationURLFor = function(messages) {
         if (!messages)
@@ -800,7 +813,7 @@ var AlertsHelper = {
     // If we have a manifest URL, get the icon and title from the manifest
     // to prevent spoofing.
     let app = DOMApplicationRegistry.getAppByManifestURL(manifestUrl);
-    DOMApplicationRegistry.getManifestFor(app.origin, function(aManifest) {
+    DOMApplicationRegistry.getManifestFor(manifestUrl, function(aManifest) {
       let helper = new ManifestHelper(aManifest, app.origin);
       send(helper.name, helper.iconURLForSize(128));
     });
@@ -893,7 +906,7 @@ var WebappsHelper = {
 
     switch(topic) {
       case "webapps-launch":
-        DOMApplicationRegistry.getManifestFor(json.origin, function(aManifest) {
+        DOMApplicationRegistry.getManifestFor(json.manifestURL, function(aManifest) {
           if (!aManifest)
             return;
 

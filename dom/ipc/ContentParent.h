@@ -25,7 +25,6 @@
 #include "nsNetUtil.h"
 #include "nsIPermissionManager.h"
 #include "nsIDOMGeoPositionCallback.h"
-#include "nsIMemoryReporter.h"
 #include "nsCOMArray.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
@@ -36,6 +35,7 @@
 class mozIApplication;
 class nsConsoleService;
 class nsIDOMBlob;
+class nsIMemoryReporter;
 
 namespace mozilla {
 
@@ -327,6 +327,9 @@ private:
     virtual PBluetoothParent* AllocPBluetoothParent();
     virtual bool DeallocPBluetoothParent(PBluetoothParent* aActor);
     virtual bool RecvPBluetoothConstructor(PBluetoothParent* aActor);
+
+    virtual PFMRadioParent* AllocPFMRadioParent();
+    virtual bool DeallocPFMRadioParent(PFMRadioParent* aActor);
 
     virtual PSpeechSynthesisParent* AllocPSpeechSynthesisParent();
     virtual bool DeallocPSpeechSynthesisParent(PSpeechSynthesisParent* aActor);

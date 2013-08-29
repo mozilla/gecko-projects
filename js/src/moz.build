@@ -24,6 +24,11 @@ TEST_DIRS += ['tests', 'gdb']
 
 MODULE = 'js'
 
+if CONFIG['JS_STANDALONE']:
+    LIBRARY_NAME = 'mozjs-%s.%s%s' % (CONFIG['MOZJS_MAJOR_VERSION'], CONFIG['MOZJS_MINOR_VERSION'], CONFIG['MOZJS_ALPHA'])
+else:
+    LIBRARY_NAME = 'mozjs'
+
 CONFIGURE_SUBST_FILES += ['devtools/rootAnalysis/Makefile']
 
 # Changes to internal header files, used externally, massively slow down
@@ -59,6 +64,7 @@ if CONFIG['HAVE_DTRACE']:
 EXPORTS.js += [
     '../public/Anchor.h',
     '../public/CallArgs.h',
+    '../public/CallNonGenericMethod.h',
     '../public/CharacterEncoding.h',
     '../public/Class.h',
     '../public/Date.h',
@@ -85,6 +91,7 @@ CPP_SOURCES += [
     'BinaryData.cpp',
     'BytecodeCompiler.cpp',
     'BytecodeEmitter.cpp',
+    'CallNonGenericMethod.cpp',
     'CharacterEncoding.cpp',
     'DateTime.cpp',
     'Debugger.cpp',
@@ -135,6 +142,7 @@ CPP_SOURCES += [
     'TestingFunctions.cpp',
     'ThreadPool.cpp',
     'TokenStream.cpp',
+    'TypeRepresentation.cpp',
     'TypedArrayObject.cpp',
     'Unicode.cpp',
     'Value.cpp',

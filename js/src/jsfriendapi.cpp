@@ -14,6 +14,7 @@
 #include "jscompartment.h"
 #include "jsgc.h"
 #include "jsobj.h"
+#include "jsproxy.h"
 #include "jswatchpoint.h"
 #include "jsweakmap.h"
 #include "jswrapper.h"
@@ -36,8 +37,8 @@ JS_STATIC_ASSERT(offsetof(JSRuntime, mainThread) ==
                  PerThreadDataFriendFields::RuntimeMainThreadOffset);
 
 PerThreadDataFriendFields::PerThreadDataFriendFields()
-  : nativeStackLimit(0)
 {
+    PodArrayZero(nativeStackLimit);
 #if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
     PodArrayZero(thingGCRooters);
 #endif
@@ -402,6 +403,12 @@ js::IsObjectInContextCompartment(JSObject *obj, const JSContext *cx)
 }
 
 JS_FRIEND_API(bool)
+js::RunningWithTrustedPrincipals(JSContext *cx)
+{
+    return cx->runningWithTrustedPrincipals();
+}
+
+JS_FRIEND_API(bool)
 js::IsOriginalScriptFunction(JSFunction *fun)
 {
     return fun->nonLazyScript()->function() == fun;
@@ -506,6 +513,21 @@ js::SetFunctionNativeReserved(JSObject *fun, size_t which, const Value &val)
 {
     JS_ASSERT(fun->as<JSFunction>().isNative());
     fun->as<JSFunction>().setExtendedSlot(which, val);
+}
+
+JS_FRIEND_API(bool)
+js::GetObjectProto(JSContext *cx, JS::Handle<JSObject*> obj, JS::MutableHandle<JSObject*> proto)
+{
+    js::Class *clasp = GetObjectClass(obj);
+    if (clasp == js::ObjectProxyClassPtr ||
+        clasp == js::OuterWindowProxyClassPtr ||
+        clasp == js::FunctionProxyClassPtr)
+    {
+        return JS_GetPrototype(cx, obj, proto);
+    }
+
+    proto.set(reinterpret_cast<const shadow::Object*>(obj.get())->type->proto);
+    return true;
 }
 
 JS_FRIEND_API(void)
@@ -1032,6 +1054,12 @@ DOMProxyShadowsCheck
 js::GetDOMProxyShadowsCheck()
 {
     return gDOMProxyShadowsCheck;
+}
+
+bool
+js::detail::IdMatchesAtom(jsid id, JSAtom *atom)
+{
+    return id == INTERNED_STRING_TO_JSID(NULL, atom);
 }
 
 JS_FRIEND_API(void)
