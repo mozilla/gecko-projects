@@ -578,7 +578,8 @@ class XPCShellTestThread(Thread):
             if testTimer:
                 testTimer.cancel()
 
-            self.parse_output(stdout)
+            if stdout:
+                self.parse_output(stdout)
             result = not (self.has_failure_output or
                           (self.getReturnCode(proc) != 0))
 
@@ -1530,10 +1531,6 @@ def main():
     if options.interactive and not options.testPath:
         print >>sys.stderr, "Error: You must specify a test filename in interactive mode!"
         sys.exit(1)
-
-    # running sequentially for safety reasons for now (in automation)
-    # mach will run tests in parallel by default
-    options.sequential = True
 
     if not xpcsh.runTests(args[0], testdirs=args[1:], **options.__dict__):
         sys.exit(1)
