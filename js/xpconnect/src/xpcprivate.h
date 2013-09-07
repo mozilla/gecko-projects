@@ -97,7 +97,6 @@
 #include "nsXPCOM.h"
 #include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
 #include "nsDebug.h"
 #include "nsISupports.h"
 #include "nsIServiceManager.h"
@@ -160,6 +159,7 @@
 #include "SandboxPrivate.h"
 #include "BackstagePass.h"
 #include "nsCxPusher.h"
+#include "nsAXPCNativeCallContext.h"
 
 #ifdef XP_WIN
 // Nasty MS defines
@@ -1024,7 +1024,7 @@ public:
                    JSContext* cx           = GetDefaultJSContext(),
                    JS::HandleObject obj    = JS::NullPtr(),
                    JS::HandleObject funobj = JS::NullPtr(),
-                   JS::HandleId id         = JS::JSID_VOIDHANDLE,
+                   JS::HandleId id         = JSID_VOIDHANDLE,
                    unsigned argc           = NO_ARGS,
                    jsval *argv             = nullptr,
                    jsval *rval             = nullptr);
@@ -1203,13 +1203,7 @@ XPC_WN_JSOp_ThisObject(JSContext *cx, JS::HandleObject obj);
         nullptr, /* setElement    */                                          \
         nullptr, /* setSpecial    */                                          \
         nullptr, /* getGenericAttributes  */                                  \
-        nullptr, /* getAttributes  */                                         \
-        nullptr, /* getElementAttributes  */                                  \
-        nullptr, /* getSpecialAttributes  */                                  \
         nullptr, /* setGenericAttributes  */                                  \
-        nullptr, /* setAttributes  */                                         \
-        nullptr, /* setElementAttributes  */                                  \
-        nullptr, /* setSpecialAttributes  */                                  \
         nullptr, /* deleteProperty */                                         \
         nullptr, /* deleteElement */                                          \
         nullptr, /* deleteSpecial */                                          \
@@ -1237,13 +1231,7 @@ XPC_WN_JSOp_ThisObject(JSContext *cx, JS::HandleObject obj);
         nullptr, /* setElement    */                                          \
         nullptr, /* setSpecial    */                                          \
         nullptr, /* getGenericAttributes  */                                  \
-        nullptr, /* getAttributes  */                                         \
-        nullptr, /* getElementAttributes  */                                  \
-        nullptr, /* getSpecialAttributes  */                                  \
         nullptr, /* setGenericAttributes  */                                  \
-        nullptr, /* setAttributes  */                                         \
-        nullptr, /* setElementAttributes  */                                  \
-        nullptr, /* setSpecialAttributes  */                                  \
         nullptr, /* deleteProperty */                                         \
         nullptr, /* deleteElement */                                          \
         nullptr, /* deleteSpecial */                                          \
@@ -1413,7 +1401,7 @@ public:
     nsAutoPtr<JSObject2JSObjectMap> mWaiverWrapperMap;
 
     bool IsXBLScope() { return mIsXBLScope; }
-    bool AllowXBLScope() { return mAllowXBLScope; }
+    bool AllowXBLScope();
 
 protected:
     virtual ~XPCWrappedNativeScope();
@@ -1449,20 +1437,17 @@ private:
 
     bool mIsXBLScope;
 
-    // There are certain cases where we explicitly disallow XBL scopes: they
-    // can be prefed off, or we might be running in a remote XUL domain where
-    // we want to run all XBL in content to maintain compat. We separately
+    // For remote XUL domains, we run all XBL in the content scope for compat
+    // reasons (though we sometimes pref this off for automation). We separately
     // track the result of this decision (mAllowXBLScope), from the decision
     // of whether to actually _use_ an XBL scope (mUseXBLScope), which depends
     // on the type of global and whether the compartment is system principal
     // or not.
     //
-    // This distinction is useful primarily because it tells us whether we
-    // can infer the XBL-ness of a caller by checking that the caller is
-    // running in an XBL scope, or whether we need to check the XBL bit on the
-    // script. The XBL bit is nasty, so we want to consult it only if we
-    // absolutely have to, which should generally happen only in unsupported
-    // pref configurations.
+    // This distinction is useful primarily because, if true, we know that we
+    // have no way of distinguishing XBL script from content script for the
+    // given scope. In these (unsupported) situations, we just always claim to
+    // be XBL.
     bool mAllowXBLScope;
     bool mUseXBLScope;
 };
@@ -3871,6 +3856,8 @@ GetObjectScope(JSObject *obj)
 
 extern bool gDebugMode;
 extern bool gDesiredDebugMode;
+
+extern JSClass SafeJSContextGlobalClass;
 
 JSObject* NewOutObject(JSContext* cx, JSObject* scope);
 bool IsOutObject(JSContext* cx, JSObject* obj);

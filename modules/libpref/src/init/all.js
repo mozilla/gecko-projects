@@ -1795,6 +1795,9 @@ pref("layout.css.filters.enabled", false);
 // Is support for CSS Flexbox enabled?
 pref("layout.css.flexbox.enabled", true);
 
+// Is support for CSS sticky positioning enabled?
+pref("layout.css.sticky.enabled", false);
+
 // Is support for the CSS4 image-orientation property enabled?
 pref("layout.css.image-orientation.enabled", true);
 
@@ -4096,7 +4099,7 @@ pref("layers.offmainthreadcomposition.enabled", true);
 pref("layers.use-deprecated-textures", false);
 #else
 #ifdef MOZ_WIDGET_GONK
-pref("layers.use-deprecated-textures", true);
+pref("layers.use-deprecated-textures", false);
 #else
 pref("layers.offmainthreadcomposition.enabled", false);
 pref("layers.use-deprecated-textures", true);

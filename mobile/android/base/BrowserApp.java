@@ -13,6 +13,7 @@ import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PanZoomController;
+import org.mozilla.gecko.health.BrowserHealthRecorder;
 import org.mozilla.gecko.health.BrowserHealthReporter;
 import org.mozilla.gecko.home.BrowserSearch;
 import org.mozilla.gecko.home.HomePager;
@@ -1382,8 +1383,13 @@ abstract public class BrowserApp extends GeckoApp
         tab.setFaviconLoadId(Favicons.NOT_LOADING);
     }
 
+    /**
+     * Enters editing mode with the current tab's URL. There might be no
+     * tabs loaded by the time the user enters editing mode e.g. just after
+     * the app starts. In this case, we simply fallback to an empty URL.
+     */
     private void enterEditingMode() {
-        String url = null;
+        String url = "";
 
         final Tab tab = Tabs.getInstance().getSelectedTab();
         if (tab != null) {
@@ -1398,8 +1404,8 @@ abstract public class BrowserApp extends GeckoApp
     }
 
     /**
-     * Enters editing mode for the current tab. This method will
-     * always open the VISITED page on about:home.
+     * Enters editing mode with the specified URL. This method will
+     * always open the HISTORY page on about:home.
      */
     private void enterEditingMode(String url) {
         if (url == null) {
@@ -1459,11 +1465,35 @@ abstract public class BrowserApp extends GeckoApp
                     return;
                 }
 
+                recordSearch(null, "barkeyword");
+
                 // Otherwise, construct a search query from the bookmark keyword.
                 final String searchUrl = keywordUrl.replace("%s", URLEncoder.encode(keywordSearch));
                 Tabs.getInstance().loadUrl(searchUrl, Tabs.LOADURL_USER_ENTERED);
             }
         });
+    }
+
+    /**
+     * Record in Health Report that a search has occurred.
+     *
+     * @param identifier
+     *        a search identifier, such as "partnername". Can be null.
+     * @param where
+     *        where the search was initialized; one of the values in
+     *        {@link BrowserHealthRecorder#SEARCH_LOCATIONS}.
+     */
+    private static void recordSearch(String identifier, String where) {
+        Log.i(LOGTAG, "Recording search: " + identifier + ", " + where);
+        try {
+            JSONObject message = new JSONObject();
+            message.put("type", BrowserHealthRecorder.EVENT_SEARCH);
+            message.put("location", where);
+            message.put("identifier", identifier);
+            GeckoAppShell.getEventDispatcher().dispatchEvent(message);
+        } catch (Exception e) {
+            Log.w(LOGTAG, "Error recording search.", e);
+        }
     }
 
     boolean dismissEditingMode() {
@@ -1472,6 +1502,10 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         mBrowserToolbar.cancelEdit();
+
+        // Resetting the visibility of HomePager, which might have been hidden
+        // by the filterEditingMode().
+        mHomePager.setVisibility(View.VISIBLE);
         animateHideHomePager();
         hideBrowserSearch();
 
@@ -1508,7 +1542,7 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         if (mHomePager == null) {
-            final ViewStub homePagerStub = (ViewStub) findViewById(R.id.home_pager);
+            final ViewStub homePagerStub = (ViewStub) findViewById(R.id.home_pager_stub);
             mHomePager = (HomePager) homePagerStub.inflate();
         }
         mHomePager.show(getSupportFragmentManager(), page, animator);
@@ -2200,6 +2234,7 @@ abstract public class BrowserApp extends GeckoApp
     // BrowserSearch.OnSearchListener
     @Override
     public void onSearch(String engineId, String text) {
+        recordSearch(engineId, "barsuggest");
         openUrl(text, engineId);
     }
 

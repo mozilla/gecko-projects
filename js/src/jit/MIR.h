@@ -8158,18 +8158,31 @@ class MAsmJSUMod : public MBinaryInstruction
     }
 };
 
-class MAsmJSLoadHeap : public MUnaryInstruction
+class MAsmJSHeapAccess
+{
+    ArrayBufferView::ViewType viewType_;
+    bool skipBoundsCheck_;
+
+  public:
+    MAsmJSHeapAccess(ArrayBufferView::ViewType vt, bool s)
+      : viewType_(vt), skipBoundsCheck_(s)
+    {}
+
+    ArrayBufferView::ViewType viewType() const { return viewType_; }
+    bool skipBoundsCheck() const { return skipBoundsCheck_; }
+    void setSkipBoundsCheck(bool v) { skipBoundsCheck_ = v; }
+};
+
+class MAsmJSLoadHeap : public MUnaryInstruction, public MAsmJSHeapAccess
 {
     MAsmJSLoadHeap(ArrayBufferView::ViewType vt, MDefinition *ptr)
-      : MUnaryInstruction(ptr), viewType_(vt)
+      : MUnaryInstruction(ptr), MAsmJSHeapAccess(vt, false)
     {
         if (vt == ArrayBufferView::TYPE_FLOAT32 || vt == ArrayBufferView::TYPE_FLOAT64)
             setResultType(MIRType_Double);
         else
             setResultType(MIRType_Int32);
     }
-
-    ArrayBufferView::ViewType viewType_;
 
   public:
     INSTRUCTION_HEADER(AsmJSLoadHeap);
@@ -8178,17 +8191,14 @@ class MAsmJSLoadHeap : public MUnaryInstruction
         return new MAsmJSLoadHeap(vt, ptr);
     }
 
-    ArrayBufferView::ViewType viewType() const { return viewType_; }
     MDefinition *ptr() const { return getOperand(0); }
 };
 
-class MAsmJSStoreHeap : public MBinaryInstruction
+class MAsmJSStoreHeap : public MBinaryInstruction, public MAsmJSHeapAccess
 {
     MAsmJSStoreHeap(ArrayBufferView::ViewType vt, MDefinition *ptr, MDefinition *v)
-      : MBinaryInstruction(ptr, v), viewType_(vt)
+      : MBinaryInstruction(ptr, v) , MAsmJSHeapAccess(vt, false)
     {}
-
-    ArrayBufferView::ViewType viewType_;
 
   public:
     INSTRUCTION_HEADER(AsmJSStoreHeap);
@@ -8197,7 +8207,6 @@ class MAsmJSStoreHeap : public MBinaryInstruction
         return new MAsmJSStoreHeap(vt, ptr, v);
     }
 
-    ArrayBufferView::ViewType viewType() const { return viewType_; }
     MDefinition *ptr() const { return getOperand(0); }
     MDefinition *value() const { return getOperand(1); }
 };
@@ -8501,17 +8510,17 @@ bool ElementAccessIsTypedArray(MDefinition *obj, MDefinition *id,
                                ScalarTypeRepresentation::Type *arrayType);
 bool ElementAccessIsPacked(JSContext *cx, MDefinition *obj);
 bool ElementAccessHasExtraIndexedProperty(JSContext *cx, MDefinition *obj);
-MIRType DenseNativeElementType(JSContext *cx, MDefinition *obj);
+bool DenseNativeElementType(JSContext *cx, MDefinition *obj, MIRType *result);
 bool PropertyReadNeedsTypeBarrier(JSContext *cx, types::TypeObject *object, PropertyName *name,
-                                  types::StackTypeSet *observed, bool updateObserved = true);
+                                  types::StackTypeSet *observed, bool updateObserved, bool *result);
 bool PropertyReadNeedsTypeBarrier(JSContext *cx, MDefinition *obj, PropertyName *name,
-                                  types::StackTypeSet *observed);
-bool PropertyReadIsIdempotent(JSContext *cx, MDefinition *obj, PropertyName *name);
-void AddObjectsForPropertyRead(JSContext *cx, MDefinition *obj, PropertyName *name,
+                                  types::StackTypeSet *observed, bool *result);
+bool PropertyReadIsIdempotent(JSContext *cx, MDefinition *obj, PropertyName *name, bool *result);
+bool AddObjectsForPropertyRead(JSContext *cx, MDefinition *obj, PropertyName *name,
                                types::StackTypeSet *observed);
 bool PropertyWriteNeedsTypeBarrier(JSContext *cx, MBasicBlock *current, MDefinition **pobj,
                                    PropertyName *name, MDefinition **pvalue,
-                                   bool canModify = true);
+                                   bool canModify, bool *result);
 
 } // namespace jit
 } // namespace js

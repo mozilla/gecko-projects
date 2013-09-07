@@ -48,12 +48,12 @@
 #if ENABLE_YARR_JIT
 #include "assembler/jit/ExecutableAllocator.h"
 #endif
-#include "builtin/BinaryData.h"
 #include "builtin/Eval.h"
 #include "builtin/Intl.h"
 #include "builtin/MapObject.h"
 #include "builtin/ParallelArray.h"
 #include "builtin/RegExp.h"
+#include "builtin/TypedObject.h"
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"  // for JS_BufferIsCompileableUnit
 #include "frontend/Parser.h" // for JS_BufferIsCompileableUnit
@@ -106,11 +106,6 @@ using js::frontend::Parser;
 #else
 #define JS_ADDRESSOF_VA_LIST(ap) (&(ap))
 #endif
-
-const jsid voidIdValue = JSID_VOID;
-const jsid emptyIdValue = JSID_EMPTY;
-const HandleId JS::JSID_VOIDHANDLE = HandleId::fromMarkedLocation(&voidIdValue);
-const HandleId JS::JSID_EMPTYHANDLE = HandleId::fromMarkedLocation(&emptyIdValue);
 
 /* Make sure that jschar is two bytes unsigned integer */
 JS_STATIC_ASSERT((jschar)-1 > 0);
@@ -1371,7 +1366,7 @@ static const JSStdName standard_class_atoms[] = {
     {js_InitIntlClass,                  EAGER_ATOM_AND_CLASP(Intl)},
 #endif
 #ifdef ENABLE_BINARYDATA
-    {js_InitBinaryDataClasses,          EAGER_ATOM_AND_CLASP(Type)},
+    {js_InitTypedObjectClasses,         EAGER_ATOM_AND_CLASP(Type)},
 #endif
     {NULL,                              0, NULL}
 };
@@ -1431,14 +1426,14 @@ static const JSStdName standard_class_names[] = {
 
     /* Binary Data */
 #ifdef ENABLE_BINARYDATA
-    {js_InitBinaryDataClasses,          EAGER_ATOM_AND_CLASP(Type)},
-    {js_InitBinaryDataClasses,          EAGER_ATOM_AND_CLASP(Data)},
+    {js_InitTypedObjectClasses,   EAGER_ATOM_AND_CLASP(Type)},
+    {js_InitTypedObjectClasses,   EAGER_ATOM_AND_CLASP(Data)},
 #define BINARYDATA_NUMERIC_NAMES(constant_, type_, name_) \
-    {js_InitBinaryDataClasses,          EAGER_CLASS_ATOM(name_),      &NumericTypeClasses[constant_]},
+    {js_InitTypedObjectClasses,   EAGER_CLASS_ATOM(name_),      &NumericTypeClasses[constant_]},
     JS_FOR_EACH_SCALAR_TYPE_REPR(BINARYDATA_NUMERIC_NAMES)
 #undef BINARYDATA_NUMERIC_NAMES
-    {js_InitBinaryDataClasses,          EAGER_CLASS_ATOM(ArrayType),  &js::ArrayType::class_},
-    {js_InitBinaryDataClasses,          EAGER_CLASS_ATOM(StructType), &js::StructType::class_},
+    {js_InitTypedObjectClasses,   EAGER_CLASS_ATOM(ArrayType),  &js::ArrayType::class_},
+    {js_InitTypedObjectClasses,   EAGER_CLASS_ATOM(StructType), &js::StructType::class_},
 #endif
     {NULL,                      0, NULL}
 };
@@ -3639,6 +3634,27 @@ GetPropertyDescriptorById(JSContext *cx, HandleObject obj, HandleId id, unsigned
 }
 
 JS_PUBLIC_API(bool)
+JS_GetOwnPropertyDescriptorById(JSContext *cx, JSObject *objArg, jsid idArg, unsigned flags,
+                                MutableHandle<JSPropertyDescriptor> desc)
+{
+    RootedObject obj(cx, objArg);
+    RootedId id(cx, idArg);
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+
+    return GetPropertyDescriptorById(cx, obj, id, flags, true, desc);
+}
+
+JS_PUBLIC_API(bool)
+JS_GetOwnPropertyDescriptor(JSContext *cx, JSObject *objArg, const char *name, unsigned flags,
+                            MutableHandle<JSPropertyDescriptor> desc)
+{
+    RootedObject obj(cx, objArg);
+    JSAtom *atom = Atomize(cx, name, strlen(name));
+    return atom && JS_GetOwnPropertyDescriptorById(cx, obj, AtomToId(atom), flags, desc);
+}
+
+JS_PUBLIC_API(bool)
 JS_GetPropertyDescriptorById(JSContext *cx, JSObject *objArg, jsid idArg, unsigned flags,
                              MutableHandle<JSPropertyDescriptor> desc)
 {
@@ -3648,117 +3664,12 @@ JS_GetPropertyDescriptorById(JSContext *cx, JSObject *objArg, jsid idArg, unsign
 }
 
 JS_PUBLIC_API(bool)
-JS_GetPropertyAttrsGetterAndSetterById(JSContext *cx, JSObject *objArg, jsid idArg,
-                                       unsigned *attrsp, bool *foundp,
-                                       JSPropertyOp *getterp, JSStrictPropertyOp *setterp)
-{
-    RootedObject obj(cx, objArg);
-    RootedId id(cx, idArg);
-    Rooted<PropertyDescriptor> desc(cx);
-    if (!GetPropertyDescriptorById(cx, obj, id, 0, false, &desc))
-        return false;
-
-    *attrsp = desc.attributes();
-    *foundp = !!desc.object();
-    if (getterp)
-        *getterp = desc.getter();
-    if (setterp)
-        *setterp = desc.setter();
-    return true;
-}
-
-JS_PUBLIC_API(bool)
-JS_GetPropertyAttributes(JSContext *cx, JSObject *objArg, const char *name,
-                         unsigned *attrsp, bool *foundp)
+JS_GetPropertyDescriptor(JSContext *cx, JSObject *objArg, const char *name, unsigned flags,
+                         MutableHandle<JSPropertyDescriptor> desc)
 {
     RootedObject obj(cx, objArg);
     JSAtom *atom = Atomize(cx, name, strlen(name));
-    return atom && JS_GetPropertyAttrsGetterAndSetterById(cx, obj, AtomToId(atom),
-                                                          attrsp, foundp, NULL, NULL);
-}
-
-JS_PUBLIC_API(bool)
-JS_GetUCPropertyAttributes(JSContext *cx, JSObject *objArg, const jschar *name, size_t namelen,
-                           unsigned *attrsp, bool *foundp)
-{
-    RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
-    return atom && JS_GetPropertyAttrsGetterAndSetterById(cx, obj, AtomToId(atom),
-                                                          attrsp, foundp, NULL, NULL);
-}
-
-JS_PUBLIC_API(bool)
-JS_GetPropertyAttrsGetterAndSetter(JSContext *cx, JSObject *objArg, const char *name,
-                                   unsigned *attrsp, bool *foundp,
-                                   JSPropertyOp *getterp, JSStrictPropertyOp *setterp)
-{
-    RootedObject obj(cx, objArg);
-    JSAtom *atom = Atomize(cx, name, strlen(name));
-    return atom && JS_GetPropertyAttrsGetterAndSetterById(cx, obj, AtomToId(atom),
-                                                          attrsp, foundp, getterp, setterp);
-}
-
-JS_PUBLIC_API(bool)
-JS_GetUCPropertyAttrsGetterAndSetter(JSContext *cx, JSObject *objArg,
-                                     const jschar *name, size_t namelen,
-                                     unsigned *attrsp, bool *foundp,
-                                     JSPropertyOp *getterp, JSStrictPropertyOp *setterp)
-{
-    RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
-    return atom && JS_GetPropertyAttrsGetterAndSetterById(cx, obj, AtomToId(atom),
-                                                          attrsp, foundp, getterp, setterp);
-}
-
-JS_PUBLIC_API(bool)
-JS_GetOwnPropertyDescriptor(JSContext *cx, JSObject *objArg, jsid idArg, MutableHandleValue vp)
-{
-    RootedObject obj(cx, objArg);
-    RootedId id(cx, idArg);
-    AssertHeapIsIdle(cx);
-    CHECK_REQUEST(cx);
-
-    return GetOwnPropertyDescriptor(cx, obj, id, vp);
-}
-
-static bool
-SetPropertyAttributesById(JSContext *cx, HandleObject obj, HandleId id, unsigned attrs, bool *foundp)
-{
-    RootedObject obj2(cx);
-    RootedShape shape(cx);
-
-    if (!LookupPropertyById(cx, obj, id, 0, &obj2, &shape))
-        return false;
-    if (!shape || obj != obj2) {
-        *foundp = false;
-        return true;
-    }
-    bool ok = obj->isNative()
-                ? JSObject::changePropertyAttributes(cx, obj, shape, attrs)
-                : JSObject::setGenericAttributes(cx, obj, id, &attrs);
-    if (ok)
-        *foundp = true;
-    return ok;
-}
-
-JS_PUBLIC_API(bool)
-JS_SetPropertyAttributes(JSContext *cx, JSObject *objArg, const char *name,
-                         unsigned attrs, bool *foundp)
-{
-    RootedObject obj(cx, objArg);
-    JSAtom *atom = Atomize(cx, name, strlen(name));
-    RootedId id(cx, AtomToId(atom));
-    return atom && SetPropertyAttributesById(cx, obj, id, attrs, foundp);
-}
-
-JS_PUBLIC_API(bool)
-JS_SetUCPropertyAttributes(JSContext *cx, JSObject *objArg, const jschar *name, size_t namelen,
-                           unsigned attrs, bool *foundp)
-{
-    RootedObject obj(cx, objArg);
-    JSAtom *atom = AtomizeChars<CanGC>(cx, name, AUTO_NAMELEN(name, namelen));
-    RootedId id(cx, AtomToId(atom));
-    return atom && SetPropertyAttributesById(cx, obj, id, attrs, foundp);
+    return atom && JS_GetPropertyDescriptorById(cx, obj, AtomToId(atom), flags, desc);
 }
 
 JS_PUBLIC_API(bool)
@@ -6669,4 +6580,3 @@ JS_PreventExtensions(JSContext *cx, JS::HandleObject obj)
         return true;
     return JSObject::preventExtensions(cx, obj);
 }
-

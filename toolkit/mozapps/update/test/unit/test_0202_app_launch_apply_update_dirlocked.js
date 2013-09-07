@@ -24,95 +24,12 @@ const TEST_ID = "0202";
 // launching a post update executable.
 const FILE_UPDATER_INI_BAK = "updater.ini.bak";
 
-// Number of milliseconds for each do_timeout call.
-const CHECK_TIMEOUT_MILLI = 1000;
-
-let gActiveUpdate;
-
-// Override getUpdatesRootDir on Mac because we need to apply the update
-// inside the bundle directory.
-function symlinkUpdateFilesIntoBundleDirectory() {
-  if (!shouldAdjustPathsOnMac()) {
-    return;
-  }
-  // Symlink active-update.xml and updates/ inside the dist/bin directory
-  // to point to the bundle directory.
-  // This is necessary because in order to test the code which actually ships
-  // with Firefox, we need to perform the update inside the bundle directory,
-  // whereas xpcshell runs from dist/bin/, and the updater service code looks
-  // at the current process directory to find things like these two files.
-
-  Components.utils.import("resource://gre/modules/ctypes.jsm");
-  let libc = ctypes.open("/usr/lib/libc.dylib");
-  // We need these two low level APIs because their functionality is not
-  // provided in nsIFile APIs.
-  let symlink = libc.declare("symlink", ctypes.default_abi, ctypes.int,
-                             ctypes.char.ptr, ctypes.char.ptr);
-  let unlink = libc.declare("unlink", ctypes.default_abi, ctypes.int,
-                            ctypes.char.ptr);
-
-  // Symlink active-update.xml
-  let dest = getAppDir();
-  dest.append("active-update.xml");
-  if (!dest.exists()) {
-    dest.create(dest.NORMAL_FILE_TYPE, 0644);
-  }
-  do_check_true(dest.exists());
-  let source = getUpdatesRootDir();
-  source.append("active-update.xml");
-  unlink(source.path);
-  let ret = symlink(dest.path, source.path);
-  do_check_eq(ret, 0);
-  do_check_true(source.exists());
-
-  // Symlink updates/
-  let dest2 = getAppDir();
-  dest2.append("updates");
-  if (dest2.exists()) {
-    dest2.remove(true);
-  }
-  dest2.create(dest.DIRECTORY_TYPE, 0755);
-  do_check_true(dest2.exists());
-  let source2 = getUpdatesRootDir();
-  source2.append("updates");
-  if (source2.exists()) {
-    source2.remove(true);
-  }
-  ret = symlink(dest2.path, source2.path);
-  do_check_eq(ret, 0);
-  do_check_true(source2.exists());
-
-  // Cleanup the symlinks when the test is finished.
-  do_register_cleanup(function AUFIBD_cleanup() {
-    logTestInfo("start - unlinking symlinks");
-    let ret = unlink(source.path);
-    do_check_false(source.exists());
-    let ret = unlink(source2.path);
-    do_check_false(source2.exists());
-    logTestInfo("finish - unlinking symlinks");
-  });
-
-  // Now, make sure that getUpdatesRootDir returns the application bundle
-  // directory, to make the various stuff in the test framework to work
-  // correctly.
-  getUpdatesRootDir = getAppDir;
-}
+let gTimeoutRuns = 0;
 
 function run_test() {
   if (APP_BIN_NAME == "xulrunner") {
     logTestInfo("Unable to run this test on xulrunner");
     return;
-  }
-
-  if (IS_WIN) {
-    var version = AUS_Cc["@mozilla.org/system-info;1"]
-                  .getService(AUS_Ci.nsIPropertyBag2)
-                  .getProperty("version");
-    var isVistaOrHigher = (parseFloat(version) >= 6.0);
-    if (!isVistaOrHigher) {
-      logTestInfo("Disabled on Windows XP due to bug 909489");
-      return;
-    }
   }
 
   do_test_pending();
@@ -178,10 +95,6 @@ function run_test() {
   let mar = do_get_file("data/simple.mar");
   mar.copyTo(updatesPatchDir, FILE_UPDATE_ARCHIVE);
 
-  reloadUpdateManagerData();
-  gActiveUpdate = gUpdateManager.activeUpdate;
-  do_check_true(!!gActiveUpdate);
-
   // Backup the updater.ini file if it exists by moving it. This prevents the
   // post update executable from being launched if it is specified.
   let updaterIni = processDir.clone();
@@ -200,28 +113,27 @@ function run_test() {
   updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
   writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
 
+  reloadUpdateManagerData();
+  do_check_true(!!gUpdateManager.activeUpdate);
+
+  Services.obs.addObserver(gUpdateStagedObserver, "update-staged", false);
+
+  setEnvironment();
+
   // Initiate a background update.
   logTestInfo("update preparation completed - calling processUpdate");
   AUS_Cc["@mozilla.org/updates/update-processor;1"].
     createInstance(AUS_Ci.nsIUpdateProcessor).
-    processUpdate(gActiveUpdate);
+    processUpdate(gUpdateManager.activeUpdate);
 
-  logTestInfo("processUpdate completed - calling checkUpdateApplied");
-  checkUpdateApplied();
+  resetEnvironment();
+
+  logTestInfo("processUpdate completed - waiting for update-staged notification");
 }
 
 function end_test() {
   logTestInfo("start - test cleanup");
-  // Remove the files added by the update.
-  let updateTestDir = getUpdateTestDir();
-  try {
-    logTestInfo("removing update test directory " + updateTestDir.path);
-    removeDirRecursive(updateTestDir);
-  }
-  catch (e) {
-    logTestInfo("unable to remove directory - path: " + updateTestDir.path +
-                ", exception: " + e);
-  }
+  resetEnvironment();
 
   let processDir = getAppDir();
   // Restore the backup of the updater.ini if it exists.
@@ -236,6 +148,17 @@ function end_test() {
   updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI_BAK);
   if (updateSettingsIni.exists()) {
     updateSettingsIni.moveTo(processDir, FILE_UPDATE_SETTINGS_INI);
+  }
+
+  // Remove the files added by the update.
+  let updateTestDir = getUpdateTestDir();
+  try {
+    logTestInfo("removing update test directory " + updateTestDir.path);
+    removeDirRecursive(updateTestDir);
+  }
+  catch (e) {
+    logTestInfo("unable to remove directory - path: " + updateTestDir.path +
+                ", exception: " + e);
   }
 
   if (IS_UNIX) {
@@ -276,12 +199,17 @@ function getUpdateTestDir() {
 function checkUpdateApplied() {
   // Don't proceed until the update has failed, and reset to pending.
   if (gUpdateManager.activeUpdate.state != STATE_PENDING) {
-    do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateApplied);
+    if (++gTimeoutRuns > MAX_TIMEOUT_RUNS)
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whist waiting for pending state to finish");
+    else
+      do_timeout(TEST_CHECK_TIMEOUT, checkUpdateApplied);
     return;
   }
 
-  logTestInfo("update state equals " + gUpdateManager.activeUpdate.state);
+  do_timeout(TEST_CHECK_TIMEOUT, finishTest);
+}
 
+function finishTest() {
   // Don't proceed until the update status is pending.
   let status = readStatusFile();
   do_check_eq(status, STATE_PENDING);
