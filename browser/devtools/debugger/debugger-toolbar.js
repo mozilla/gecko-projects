@@ -38,10 +38,10 @@ ToolbarView.prototype = {
     this._stepOutButton = document.getElementById("step-out");
     this._chromeGlobals = document.getElementById("chrome-globals");
 
-    let resumeKey = LayoutHelpers.prettyKey(document.getElementById("resumeKey"), true);
-    let stepOverKey = LayoutHelpers.prettyKey(document.getElementById("stepOverKey"), true);
-    let stepInKey = LayoutHelpers.prettyKey(document.getElementById("stepInKey"), true);
-    let stepOutKey = LayoutHelpers.prettyKey(document.getElementById("stepOutKey"), true);
+    let resumeKey = DevtoolsHelpers.prettyKey(document.getElementById("resumeKey"), true);
+    let stepOverKey = DevtoolsHelpers.prettyKey(document.getElementById("stepOverKey"), true);
+    let stepInKey = DevtoolsHelpers.prettyKey(document.getElementById("stepInKey"), true);
+    let stepOutKey = DevtoolsHelpers.prettyKey(document.getElementById("stepOutKey"), true);
     this._resumeTooltip = L10N.getFormatStr("resumeButtonTooltip", resumeKey);
     this._pauseTooltip = L10N.getFormatStr("pauseButtonTooltip", resumeKey);
     this._stepOverTooltip = L10N.getFormatStr("stepOverTooltip", stepOverKey);
@@ -190,6 +190,7 @@ function OptionsView() {
   dumpn("OptionsView was instantiated");
 
   this._togglePauseOnExceptions = this._togglePauseOnExceptions.bind(this);
+  this._toggleIgnoreCaughtExceptions = this._toggleIgnoreCaughtExceptions.bind(this);
   this._toggleShowPanesOnStartup = this._toggleShowPanesOnStartup.bind(this);
   this._toggleShowVariablesOnlyEnum = this._toggleShowVariablesOnlyEnum.bind(this);
   this._toggleShowVariablesFilterBox = this._toggleShowVariablesFilterBox.bind(this);
@@ -205,12 +206,14 @@ OptionsView.prototype = {
 
     this._button = document.getElementById("debugger-options");
     this._pauseOnExceptionsItem = document.getElementById("pause-on-exceptions");
+    this._ignoreCaughtExceptionsItem = document.getElementById("ignore-caught-exceptions");
     this._showPanesOnStartupItem = document.getElementById("show-panes-on-startup");
     this._showVariablesOnlyEnumItem = document.getElementById("show-vars-only-enum");
     this._showVariablesFilterBoxItem = document.getElementById("show-vars-filter-box");
     this._showOriginalSourceItem = document.getElementById("show-original-source");
 
     this._pauseOnExceptionsItem.setAttribute("checked", Prefs.pauseOnExceptions);
+    this._ignoreCaughtExceptionsItem.setAttribute("checked", Prefs.ignoreCaughtExceptions);
     this._showPanesOnStartupItem.setAttribute("checked", Prefs.panesVisibleOnStartup);
     this._showVariablesOnlyEnumItem.setAttribute("checked", Prefs.variablesOnlyEnumVisible);
     this._showVariablesFilterBoxItem.setAttribute("checked", Prefs.variablesSearchboxVisible);
@@ -250,10 +253,21 @@ OptionsView.prototype = {
    * Listener handling the 'pause on exceptions' menuitem command.
    */
   _togglePauseOnExceptions: function() {
-    let pref = Prefs.pauseOnExceptions =
+    Prefs.pauseOnExceptions =
       this._pauseOnExceptionsItem.getAttribute("checked") == "true";
 
-    DebuggerController.activeThread.pauseOnExceptions(pref);
+    DebuggerController.activeThread.pauseOnExceptions(
+      Prefs.pauseOnExceptions,
+      Prefs.ignoreCaughtExceptions);
+  },
+
+  _toggleIgnoreCaughtExceptions: function() {
+    Prefs.ignoreCaughtExceptions =
+      this._ignoreCaughtExceptionsItem.getAttribute("checked") == "true";
+
+    DebuggerController.activeThread.pauseOnExceptions(
+      Prefs.pauseOnExceptions,
+      Prefs.ignoreCaughtExceptions);
   },
 
   /**
@@ -729,12 +743,12 @@ FilterView.prototype = {
     this._variableOperatorButton = document.getElementById("variable-operator-button");
     this._variableOperatorLabel = document.getElementById("variable-operator-label");
 
-    this._fileSearchKey = LayoutHelpers.prettyKey(document.getElementById("fileSearchKey"), true);
-    this._globalSearchKey = LayoutHelpers.prettyKey(document.getElementById("globalSearchKey"), true);
-    this._filteredFunctionsKey = LayoutHelpers.prettyKey(document.getElementById("functionSearchKey"), true);
-    this._tokenSearchKey = LayoutHelpers.prettyKey(document.getElementById("tokenSearchKey"), true);
-    this._lineSearchKey = LayoutHelpers.prettyKey(document.getElementById("lineSearchKey"), true);
-    this._variableSearchKey = LayoutHelpers.prettyKey(document.getElementById("variableSearchKey"), true);
+    this._fileSearchKey = DevtoolsHelpers.prettyKey(document.getElementById("fileSearchKey"), true);
+    this._globalSearchKey = DevtoolsHelpers.prettyKey(document.getElementById("globalSearchKey"), true);
+    this._filteredFunctionsKey = DevtoolsHelpers.prettyKey(document.getElementById("functionSearchKey"), true);
+    this._tokenSearchKey = DevtoolsHelpers.prettyKey(document.getElementById("tokenSearchKey"), true);
+    this._lineSearchKey = DevtoolsHelpers.prettyKey(document.getElementById("lineSearchKey"), true);
+    this._variableSearchKey = DevtoolsHelpers.prettyKey(document.getElementById("variableSearchKey"), true);
 
     this._searchbox.addEventListener("click", this._onClick, false);
     this._searchbox.addEventListener("select", this._onSearch, false);

@@ -19,7 +19,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
 let promise = Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js").Promise;
 Cu.import("resource:///modules/source-editor.jsm");
-Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource:///modules/devtools/BreadcrumbsWidget.jsm");
 Cu.import("resource:///modules/devtools/SideMenuWidget.jsm");
 Cu.import("resource:///modules/devtools/VariablesView.jsm");
@@ -40,6 +39,13 @@ Object.defineProperty(this, "NetworkHelper", {
   enumerable: true
 });
 
+Object.defineProperty(this, "DevtoolsHelpers", {
+  get: function() {
+    return devtools.require("devtools/shared/helpers");
+  },
+  configurable: true,
+  enumerable: true
+});
 
 /**
  * Object defining the debugger controller components.
@@ -384,7 +390,8 @@ ThreadState.prototype = {
     dumpn("ThreadState is connecting...");
     this.activeThread.addListener("paused", this._update);
     this.activeThread.addListener("resumed", this._update);
-    this.activeThread.pauseOnExceptions(Prefs.pauseOnExceptions);
+    this.activeThread.pauseOnExceptions(Prefs.pauseOnExceptions,
+                                        Prefs.ignoreCaughtExceptions);
     this._handleTabNavigation();
   },
 
@@ -1557,6 +1564,7 @@ let Prefs = new ViewHelpers.Prefs("devtools.debugger", {
   variablesOnlyEnumVisible: ["Bool", "ui.variables-only-enum-visible"],
   variablesSearchboxVisible: ["Bool", "ui.variables-searchbox-visible"],
   pauseOnExceptions: ["Bool", "pause-on-exceptions"],
+  ignoreCaughtExceptions: ["Bool", "ignore-caught-exceptions"],
   sourceMapsEnabled: ["Bool", "source-maps-enabled"]
 });
 
