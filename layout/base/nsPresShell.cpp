@@ -4978,7 +4978,7 @@ void PresShell::UpdateCanvasBackground()
     mCanvasBackgroundColor = GetDefaultBackgroundColorToDraw();
   }
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    if (TabChild* tabChild = GetTabChildFrom(this)) {
+    if (TabChild* tabChild = TabChild::GetFrom(this)) {
       tabChild->SetBackgroundColor(mCanvasBackgroundColor);
     }
   }
@@ -5471,7 +5471,7 @@ public:
         !mFrame || !mShell) {
       return;
     }
-    TabChild* tabChild = GetTabChildFrom(mShell);
+    TabChild* tabChild = TabChild::GetFrom(mShell);
     if (!tabChild || !tabChild->GetUpdateHitRegion()) {
       return;
     }
@@ -8221,8 +8221,8 @@ nsIPresShell::AddRefreshObserverInternal(nsARefreshObserver* aObserver,
                                          mozFlushType aFlushType)
 {
   nsPresContext* presContext = GetPresContext();
-  return presContext ? presContext->RefreshDriver()->
-    AddRefreshObserver(aObserver, aFlushType) : false;
+  return presContext &&
+      presContext->RefreshDriver()->AddRefreshObserver(aObserver, aFlushType);
 }
 
 /* virtual */ bool
@@ -8237,8 +8237,8 @@ nsIPresShell::RemoveRefreshObserverInternal(nsARefreshObserver* aObserver,
                                             mozFlushType aFlushType)
 {
   nsPresContext* presContext = GetPresContext();
-  return presContext ? presContext->RefreshDriver()->
-    RemoveRefreshObserver(aObserver, aFlushType) : false;
+  return presContext &&
+      presContext->RefreshDriver()->RemoveRefreshObserver(aObserver, aFlushType);
 }
 
 /* virtual */ bool
@@ -8246,6 +8246,28 @@ nsIPresShell::RemoveRefreshObserverExternal(nsARefreshObserver* aObserver,
                                             mozFlushType aFlushType)
 {
   return RemoveRefreshObserverInternal(aObserver, aFlushType);
+}
+
+/* virtual */ bool
+nsIPresShell::AddPostRefreshObserver(nsAPostRefreshObserver* aObserver)
+{
+  nsPresContext* presContext = GetPresContext();
+  if (!presContext) {
+    return false;
+  }
+  presContext->RefreshDriver()->AddPostRefreshObserver(aObserver);
+  return true;
+}
+
+/* virtual */ bool
+nsIPresShell::RemovePostRefreshObserver(nsAPostRefreshObserver* aObserver)
+{
+  nsPresContext* presContext = GetPresContext();
+  if (!presContext) {
+    return false;
+  }
+  presContext->RefreshDriver()->RemovePostRefreshObserver(aObserver);
+  return true;
 }
 
 //------------------------------------------------------
@@ -9420,7 +9442,7 @@ PresShell::SetIsActive(bool aIsActive)
   // and (ii) has easy access to the TabChild.  So we use this
   // notification to signal the TabChild to drop its layer tree and
   // stop trying to repaint.
-  if (TabChild* tab = GetTabChildFrom(this)) {
+  if (TabChild* tab = TabChild::GetFrom(this)) {
     if (aIsActive) {
       tab->MakeVisible();
       if (!mIsZombie) {
@@ -9561,7 +9583,7 @@ nsIPresShell::RecomputeFontSizeInflationEnabled()
 
   // Force-enabling font inflation always trumps the heuristics here.
   if (!FontSizeInflationForceEnabled()) {
-    if (TabChild* tab = GetTabChildFrom(this)) {
+    if (TabChild* tab = TabChild::GetFrom(this)) {
       // We're in a child process.  Cancel inflation if we're not
       // async-pan zoomed.
       if (!tab->IsAsyncPanZoomEnabled()) {

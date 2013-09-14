@@ -620,22 +620,38 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     first.startedMillis > second.startedMillis,
 
   _byStatus: function({ attachment: first }, { attachment: second })
-    first.status > second.status,
+    first.status == second.status
+      ? first.startedMillis > second.startedMillis
+      : first.status > second.status,
 
   _byMethod: function({ attachment: first }, { attachment: second })
-    first.method > second.method,
+    first.method == second.method
+      ? first.startedMillis > second.startedMillis
+      : first.method > second.method,
 
-  _byFile: function({ attachment: first }, { attachment: second })
-    this._getUriNameWithQuery(first.url).toLowerCase() >
-    this._getUriNameWithQuery(second.url).toLowerCase(),
+  _byFile: function({ attachment: first }, { attachment: second }) {
+    let firstUrl = this._getUriNameWithQuery(first.url).toLowerCase();
+    let secondUrl = this._getUriNameWithQuery(second.url).toLowerCase();
+    return firstUrl == secondUrl
+      ? first.startedMillis > second.startedMillis
+      : firstUrl > secondUrl;
+  },
 
-  _byDomain: function({ attachment: first }, { attachment: second })
-    this._getUriHostPort(first.url).toLowerCase() >
-    this._getUriHostPort(second.url).toLowerCase(),
+  _byDomain: function({ attachment: first }, { attachment: second }) {
+    let firstDomain = this._getUriHostPort(first.url).toLowerCase();
+    let secondDomain = this._getUriHostPort(second.url).toLowerCase();
+    return firstDomain == secondDomain
+      ? first.startedMillis > second.startedMillis
+      : firstDomain > secondDomain;
+  },
 
-  _byType: function({ attachment: first }, { attachment: second })
-    this._getAbbreviatedMimeType(first.mimeType).toLowerCase() >
-    this._getAbbreviatedMimeType(second.mimeType).toLowerCase(),
+  _byType: function({ attachment: first }, { attachment: second }) {
+    let firstType = this._getAbbreviatedMimeType(first.mimeType).toLowerCase();
+    let secondType = this._getAbbreviatedMimeType(second.mimeType).toLowerCase();
+    return firstType == secondType
+      ? first.startedMillis > second.startedMillis
+      : firstType > secondType;
+  },
 
   _bySize: function({ attachment: first }, { attachment: second })
     first.contentSize > second.contentSize,
@@ -670,7 +686,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    * Adds odd/even attributes to all the visible items in this container.
    */
   refreshZebra: function() {
-    let visibleItems = this.orderedVisibleItems;
+    let visibleItems = this.visibleItems;
 
     for (let i = 0, len = visibleItems.length; i < len; i++) {
       let requestItem = visibleItems[i];
@@ -707,7 +723,8 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       return void this._flushRequests();
     }
     // Allow requests to settle down first.
-    drain("update-requests", REQUESTS_REFRESH_RATE, () => this._flushRequests());
+    setNamedTimeout(
+      "update-requests", REQUESTS_REFRESH_RATE, () => this._flushRequests());
   },
 
   /**
@@ -1178,7 +1195,8 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    */
   _onResize: function(e) {
     // Allow requests to settle down first.
-    drain("resize-events", RESIZE_REFRESH_RATE, () => this._flushWaterfallViews(true));
+    setNamedTimeout(
+      "resize-events", RESIZE_REFRESH_RATE, () => this._flushWaterfallViews(true));
   },
 
   /**
@@ -2136,16 +2154,6 @@ function writeQueryText(aParams) {
 function writeQueryString(aParams) {
   return [(name + "=" + value) for ({name, value} of aParams)].join("&");
 }
-
-/**
- * Helper for draining a rapid succession of events and invoking a callback
- * once everything settles down.
- */
-function drain(aId, aWait, aCallback, aStore = drain.store) {
-  window.clearTimeout(aStore.get(aId));
-  aStore.set(aId, window.setTimeout(aCallback, aWait));
-}
-drain.store = new Map();
 
 /**
  * Preliminary setup for the NetMonitorView object.

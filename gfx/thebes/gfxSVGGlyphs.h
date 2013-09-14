@@ -17,6 +17,9 @@
 #include "gfxPattern.h"
 #include "gfxFont.h"
 #include "mozilla/gfx/UserData.h"
+#include "nsRefreshDriver.h"
+ 
+class gfxSVGGlyphs;
 
 
 /**
@@ -27,21 +30,20 @@
  * Finds and looks up elements contained in the SVG document which have glyph
  *   mappings to be drawn by gfxSVGGlyphs
  */
-class gfxSVGGlyphsDocument
+class gfxSVGGlyphsDocument MOZ_FINAL : public nsAPostRefreshObserver
 {
     typedef mozilla::dom::Element Element;
     typedef gfxFont::DrawMode DrawMode;
 
 public:
-    gfxSVGGlyphsDocument(const uint8_t *aBuffer, uint32_t aBufLen);
+    gfxSVGGlyphsDocument(const uint8_t *aBuffer, uint32_t aBufLen,
+                         gfxSVGGlyphs *aSVGGlyphs);
 
     Element *GetGlyphElement(uint32_t aGlyphId);
 
-    ~gfxSVGGlyphsDocument() {
-        if (mViewer) {
-            mViewer->Destroy();
-        }
-    }
+    ~gfxSVGGlyphsDocument();
+
+    virtual void DidRefresh() MOZ_OVERRIDE;
 
 private:
     nsresult ParseDocument(const uint8_t *aBuffer, uint32_t aBufLen);
@@ -52,6 +54,8 @@ private:
 
     void InsertGlyphId(Element *aGlyphElement);
 
+    // Weak so as not to create a cycle. mOwner owns us so this can't dangle.
+    gfxSVGGlyphs* mOwner;
     nsCOMPtr<nsIDocument> mDocument;
     nsCOMPtr<nsIContentViewer> mViewer;
     nsCOMPtr<nsIPresShell> mPresShell;
@@ -83,12 +87,17 @@ public:
      * that are passed in, and will hb_blob_destroy() them when finished;
      * the caller should -not- destroy these references.
      */
-    gfxSVGGlyphs(hb_blob_t *aSVGTable);
+    gfxSVGGlyphs(hb_blob_t *aSVGTable, gfxFontEntry *aFontEntry);
 
     /**
-     * Releases our references to the SVG table.
+     * Releases our references to the SVG table and cleans up everything else.
      */
     ~gfxSVGGlyphs();
+
+    /**
+     * This is called when the refresh driver has ticked.
+     */
+    void DidRefresh();
 
     /**
      * Find the |gfxSVGGlyphsDocument| containing an SVG glyph for |aGlyphId|.
@@ -105,11 +114,11 @@ public:
     /**
      * Render the SVG glyph for |aGlyphId|
      * @param aDrawMode Whether to fill or stroke or both; see gfxFont::DrawMode
-     * @param aObjectPaint Information on outer text object paints.
-     *   See |gfxTextObjectPaint|.
+     * @param aContextPaint Information on text context paints.
+     *   See |gfxTextContextPaint|.
      */
     bool RenderGlyph(gfxContext *aContext, uint32_t aGlyphId, DrawMode aDrawMode,
-                     gfxTextObjectPaint *aObjectPaint);
+                     gfxTextContextPaint *aContextPaint);
 
     /**
      * Get the extents for the SVG glyph associated with |aGlyphId|
@@ -126,6 +135,7 @@ private:
     nsBaseHashtable<nsUint32HashKey, Element*, Element*> mGlyphIdMap;
 
     hb_blob_t *mSVGData;
+    gfxFontEntry *mFontEntry;
 
     const struct Header {
         mozilla::AutoSwap_PRUint16 mVersion;
@@ -150,18 +160,17 @@ private:
 
 /**
  * Used for trickling down paint information through to SVG glyphs.
- * Will be extended in later patch.
  */
-class gfxTextObjectPaint
+class gfxTextContextPaint
 {
 protected:
-    gfxTextObjectPaint() { }
+    gfxTextContextPaint() { }
 
 public:
     static mozilla::gfx::UserDataKey sUserDataKey;
 
     /*
-     * Get outer text object pattern with the specified opacity value.
+     * Get text context pattern with the specified opacity value.
      * This lets us inherit paints and paint opacities (i.e. fill/stroke and
      * fill-opacity/stroke-opacity) separately.
      */
@@ -196,7 +205,7 @@ public:
         return GetStrokePattern(GetStrokeOpacity(), aCTM);
     }
 
-    virtual ~gfxTextObjectPaint() { }
+    virtual ~gfxTextContextPaint() { }
 
 private:
     FallibleTArray<gfxFloat> mDashes;
@@ -205,10 +214,10 @@ private:
 };
 
 /**
- * For passing in patterns where the outer text object has no separate pattern
+ * For passing in patterns where the text context has no separate pattern
  * opacity value.
  */
-class SimpleTextObjectPaint : public gfxTextObjectPaint
+class SimpleTextContextPaint : public gfxTextContextPaint
 {
 private:
     static const gfxRGBA sZero;
@@ -225,7 +234,7 @@ public:
         return deviceToUser * aPattern->GetMatrix();
     }
 
-    SimpleTextObjectPaint(gfxPattern *aFillPattern, gfxPattern *aStrokePattern,
+    SimpleTextContextPaint(gfxPattern *aFillPattern, gfxPattern *aStrokePattern,
                           const gfxMatrix& aCTM) :
         mFillPattern(aFillPattern ? aFillPattern : new gfxPattern(sZero)),
         mStrokePattern(aStrokePattern ? aStrokePattern : new gfxPattern(sZero))
