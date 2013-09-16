@@ -19,11 +19,16 @@ XPIDL_MODULE = 'dom_media'
 
 MODULE = 'dom'
 
+EXPORTS.mozilla.dom += [
+    'GetUserMediaRequest.h',
+]
+
 EXPORTS.mozilla += [
     'MediaManager.h',
 ]
 
 CPP_SOURCES += [
+    'GetUserMediaRequest.cpp',
     'MediaManager.cpp',
 ]
 
@@ -31,6 +36,14 @@ EXTRA_COMPONENTS += [
     'PeerConnection.js',
     'PeerConnection.manifest',
 ]
+
+if CONFIG['MOZ_B2G']:
+    EXPORTS.mozilla += [
+        'MediaPermissionGonk.h',
+    ]
+    CPP_SOURCES += [
+        'MediaPermissionGonk.cpp',
+    ]
 
 FAIL_ON_WARNINGS = True
 
