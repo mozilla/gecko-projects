@@ -275,7 +275,7 @@ let tests = [
   // appear - how long should the watcher be active before assuming it's not
   // going to appear?)
   function noAuthPrompt() {
-    let url = "http://mochi.test:8888/browser/browser/base/content/test/authenticate.sjs?user=anyone";
+    let url = "http://mochi.test:8888/browser/browser/base/content/test/general/authenticate.sjs?user=anyone";
     let file = fileForURL(url);
     ok(!file.exists(), "Thumbnail file should not already exist.");
 
@@ -287,7 +287,7 @@ let tests = [
   },
 
   function noAlert() {
-    let url = "data:text/html,<script>alert('yo!');</script>";
+    let url = "data:text/html,<script>try { alert('yo!'); } catch (e) {}</script>";
     let file = fileForURL(url);
     ok(!file.exists(), "Thumbnail file should not already exist.");
 

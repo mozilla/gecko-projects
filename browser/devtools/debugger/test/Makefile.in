@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MOCHITEST_BROWSER_TESTS = \
+MOCHITEST_BROWSER_FILES = \
 	browser_dbg_aaa_run_first_leaktest.js \
 	browser_dbg_bfcache.js \
 	browser_dbg_blackboxing-01.js \
@@ -50,6 +50,10 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_pause-exceptions-02.js \
 	browser_dbg_pause-resume.js \
 	browser_dbg_pause-warning.js \
+	browser_dbg_pretty-print-01.js \
+	browser_dbg_pretty-print-02.js \
+	browser_dbg_pretty-print-03.js \
+	browser_dbg_pretty-print-04.js \
 	browser_dbg_progress-listener-bug.js \
 	browser_dbg_reload-preferred-script-01.js \
 	browser_dbg_reload-preferred-script-02.js \
@@ -121,9 +125,6 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_watch-expressions-01.js \
 	browser_dbg_watch-expressions-02.js \
 	head.js \
-	$(NULL)
-
-MOCHITEST_BROWSER_PAGES = \
 	doc_binary_search.html \
 	doc_blackboxing.html \
 	doc_cmd-break.html \
@@ -143,6 +144,7 @@ MOCHITEST_BROWSER_PAGES = \
 	doc_large-array-buffer.html \
 	doc_minified.html \
 	doc_pause-exceptions.html \
+	doc_pretty-print.html \
 	doc_recursion-stack.html \
 	doc_script-switching-01.html \
 	doc_script-switching-02.html \
@@ -166,6 +168,7 @@ MOCHITEST_BROWSER_PAGES = \
 	code_script-switching-01.js \
 	code_script-switching-02.js \
 	code_test-editor-mode \
+	code_ugly.js \
 	testactors.js \
 	addon1.xpi \
 	addon2.xpi \
@@ -176,7 +179,7 @@ MOCHITEST_BROWSER_PAGES = \
 # Bug 847558:
 #   Disable browser_dbg_chrome-create.js to fix Ubuntu hangs
 ifneq (Linux,$(OS_ARCH))
-MOCHITEST_BROWSER_TESTS += \
+MOCHITEST_BROWSER_FILES += \
 	browser_dbg_chrome-create.js \
 	browser_dbg_on-pause-raise.js \
 	$(NULL)
@@ -185,10 +188,8 @@ endif
 # Bug 895426:
 #   Disable browser_dbg_break-on-dom-event.js due to frequent failures
 ifneq (Darwin,$(OS_ARCH))
-MOCHITEST_BROWSER_TESTS += \
+MOCHITEST_BROWSER_FILES += \
 	browser_dbg_break-on-dom-event.js \
 	browser_dbg_event-listeners.js \
 	$(NULL)
 endif
-
-MOCHITEST_BROWSER_FILES_PARTS = MOCHITEST_BROWSER_TESTS MOCHITEST_BROWSER_PAGES
