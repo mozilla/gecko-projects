@@ -10,13 +10,11 @@
 #include "nsHttp.h"
 #include "nsHttpChannel.h"
 #include "nsHttpHandler.h"
-#include "nsStandardURL.h"
 #include "nsIApplicationCacheService.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsICacheStorageService.h"
 #include "nsICacheStorage.h"
 #include "nsICacheEntry.h"
-#include "nsIAuthInformation.h"
 #include "nsICryptoHash.h"
 #include "nsIStringBundle.h"
 #include "nsIStreamListenerTee.h"
@@ -39,7 +37,6 @@
 #include "nsAlgorithm.h"
 #include "GeckoProfiler.h"
 #include "nsIConsoleService.h"
-#include "NullHttpTransaction.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/VisualEventTracer.h"
 #include "nsISSLSocketControl.h"
@@ -47,21 +44,28 @@
 #include "nsContentUtils.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
-#include "nsISecurityConsoleMessage.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISSLStatus.h"
 #include "nsISSLStatusProvider.h"
-#include "nsIDOMWindow.h"
 #include "LoadContextInfo.h"
+#include "netCore.h"
+#include "nsHttpTransaction.h"
+#include "nsICacheEntryDescriptor.h"
+#include "nsICancelable.h"
+#include "nsIHttpChannelAuthProvider.h"
+#include "nsIHttpEventSink.h"
+#include "nsIPrompt.h"
+#include "nsInputStreamPump.h"
+#include "nsURLHelper.h"
+#include "nsISocketTransport.h"
+#include "nsICacheSession.h"
+#include "nsIStreamConverterService.h"
+#include "nsISiteSecurityService.h"
+#include "nsCRT.h"
 
 namespace mozilla { namespace net {
 
 namespace {
-
-// Device IDs for various cache types
-const char kDiskDeviceID[] = "disk";
-const char kMemoryDeviceID[] = "memory";
-const char kOfflineDeviceID[] = "offline";
 
 // True if the local cache should be bypassed when processing a request.
 #define BYPASS_LOCAL_CACHE(loadFlags) \
