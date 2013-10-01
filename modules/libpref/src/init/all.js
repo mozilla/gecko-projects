@@ -483,6 +483,9 @@ pref("toolkit.telemetry.debugSlowSql", false);
 pref("toolkit.identity.enabled", false);
 pref("toolkit.identity.debug", false);
 
+// AsyncShutdown delay before crashing in case of shutdown freeze
+pref("toolkit.asyncshutdown.timeout.crash", 60000);
+
 // Enable deprecation warnings.
 pref("devtools.errorconsole.deprecation_warnings", true);
 
@@ -4398,9 +4401,6 @@ pref("dom.mms.retrievalRetryIntervals", "60000,300000,600000,1800000");
 
 // Debug enabler for MMS.
 pref("mms.debugging.enabled", false);
-
-// Number of RadioInterface instances to create.
-pref("ril.numRadioInterfaces", 1);
 
 // If the user puts a finger down on an element and we think the user
 // might be executing a pan gesture, how long do we wait before
