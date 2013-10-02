@@ -563,7 +563,7 @@ protected:
     nsDelayedInputEvent()
     : nsDelayedEvent(), mEvent(nullptr) {}
 
-    nsInputEvent* mEvent;
+    mozilla::WidgetInputEvent* mEvent;
   };
 
   class nsDelayedMouseEvent : public nsDelayedInputEvent
@@ -588,17 +588,19 @@ protected:
   class nsDelayedKeyEvent : public nsDelayedInputEvent
   {
   public:
-    nsDelayedKeyEvent(nsKeyEvent* aEvent) : nsDelayedInputEvent()
+    nsDelayedKeyEvent(mozilla::WidgetKeyboardEvent* aEvent) :
+      nsDelayedInputEvent()
     {
-      mEvent = new nsKeyEvent(aEvent->mFlags.mIsTrusted,
-                              aEvent->message,
-                              aEvent->widget);
-      static_cast<nsKeyEvent*>(mEvent)->AssignKeyEventData(*aEvent, false);
+      mEvent = new mozilla::WidgetKeyboardEvent(aEvent->mFlags.mIsTrusted,
+                                                aEvent->message,
+                                                aEvent->widget);
+      static_cast<mozilla::WidgetKeyboardEvent*>(mEvent)->
+        AssignKeyEventData(*aEvent, false);
     }
 
     virtual ~nsDelayedKeyEvent()
     {
-      delete static_cast<nsKeyEvent*>(mEvent);
+      delete static_cast<mozilla::WidgetKeyboardEvent*>(mEvent);
     }
   };
 
@@ -707,6 +709,9 @@ protected:
   virtual void SysColorChanged() MOZ_OVERRIDE { mPresContext->SysColorChanged(); }
   virtual void ThemeChanged() MOZ_OVERRIDE { mPresContext->ThemeChanged(); }
   virtual void BackingScaleFactorChanged() MOZ_OVERRIDE { mPresContext->UIResolutionChanged(); }
+
+  virtual void FreezePainting() MOZ_OVERRIDE;
+  virtual void ThawPainting() MOZ_OVERRIDE;
 
   void UpdateImageVisibility();
 

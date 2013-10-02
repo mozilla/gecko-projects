@@ -1859,9 +1859,9 @@ TabChild::RecvRealTouchMoveEvent(const WidgetTouchEvent& aEvent)
 }
 
 bool
-TabChild::RecvRealKeyEvent(const nsKeyEvent& event)
+TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event)
 {
-  nsKeyEvent localEvent(event);
+  WidgetKeyboardEvent localEvent(event);
   DispatchWidgetEvent(localEvent);
   return true;
 }
@@ -1882,26 +1882,26 @@ TabChild::RecvKeyEvent(const nsString& aType,
 }
 
 bool
-TabChild::RecvCompositionEvent(const nsCompositionEvent& event)
+TabChild::RecvCompositionEvent(const WidgetCompositionEvent& event)
 {
-  nsCompositionEvent localEvent(event);
+  WidgetCompositionEvent localEvent(event);
   DispatchWidgetEvent(localEvent);
   return true;
 }
 
 bool
-TabChild::RecvTextEvent(const nsTextEvent& event)
+TabChild::RecvTextEvent(const WidgetTextEvent& event)
 {
-  nsTextEvent localEvent(event);
+  WidgetTextEvent localEvent(event);
   DispatchWidgetEvent(localEvent);
-  IPC::ParamTraits<nsTextEvent>::Free(event);
+  IPC::ParamTraits<WidgetTextEvent>::Free(event);
   return true;
 }
 
 bool
-TabChild::RecvSelectionEvent(const nsSelectionEvent& event)
+TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
 {
-  nsSelectionEvent localEvent(event);
+  WidgetSelectionEvent localEvent(event);
   DispatchWidgetEvent(localEvent);
   return true;
 }
@@ -2382,11 +2382,12 @@ TabChild::DeallocPIndexedDBChild(PIndexedDBChild* aActor)
 }
 
 bool
-TabChild::DoSendSyncMessage(JSContext* aCx,
-                            const nsAString& aMessage,
-                            const StructuredCloneData& aData,
-                            JS::Handle<JSObject *> aCpows,
-                            InfallibleTArray<nsString>* aJSONRetVal)
+TabChild::DoSendBlockingMessage(JSContext* aCx,
+                                const nsAString& aMessage,
+                                const StructuredCloneData& aData,
+                                JS::Handle<JSObject *> aCpows,
+                                InfallibleTArray<nsString>* aJSONRetVal,
+                                bool aIsSync)
 {
   ContentChild* cc = Manager();
   ClonedMessageData data;
@@ -2399,7 +2400,9 @@ TabChild::DoSendSyncMessage(JSContext* aCx,
       return false;
     }
   }
-  return SendSyncMessage(nsString(aMessage), data, cpows, aJSONRetVal);
+  if (aIsSync)
+    return SendSyncMessage(nsString(aMessage), data, cpows, aJSONRetVal);
+  return CallRpcMessage(nsString(aMessage), data, cpows, aJSONRetVal);
 }
 
 bool

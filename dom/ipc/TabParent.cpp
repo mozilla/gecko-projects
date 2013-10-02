@@ -660,12 +660,12 @@ bool TabParent::SendMouseWheelEvent(WheelEvent& event)
   return PBrowserParent::SendMouseWheelEvent(event);
 }
 
-bool TabParent::SendRealKeyEvent(nsKeyEvent& event)
+bool TabParent::SendRealKeyEvent(WidgetKeyboardEvent& event)
 {
   if (mIsDestroyed) {
     return false;
   }
-  nsKeyEvent e(event);
+  WidgetKeyboardEvent e(event);
   MaybeForwardEventToRenderFrame(event, &e);
   if (!MapEventCoordinatesForChildProcess(&e)) {
     return false;
@@ -760,6 +760,17 @@ TabParent::RecvSyncMessage(const nsString& aMessage,
                            const ClonedMessageData& aData,
                            const InfallibleTArray<CpowEntry>& aCpows,
                            InfallibleTArray<nsString>* aJSONRetVal)
+{
+  StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
+  CpowIdHolder cpows(static_cast<ContentParent*>(Manager())->GetCPOWManager(), aCpows);
+  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aJSONRetVal);
+}
+
+bool
+TabParent::AnswerRpcMessage(const nsString& aMessage,
+                            const ClonedMessageData& aData,
+                            const InfallibleTArray<CpowEntry>& aCpows,
+                            InfallibleTArray<nsString>* aJSONRetVal)
 {
   StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
   CpowIdHolder cpows(static_cast<ContentParent*>(Manager())->GetCPOWManager(), aCpows);
@@ -932,7 +943,7 @@ TabParent::RecvRequestFocus(const bool& aCanRaise)
  *  the returned offset/length are different from the queried offset/length.
  */
 bool
-TabParent::HandleQueryContentEvent(nsQueryContentEvent& aEvent)
+TabParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent)
 {
   aEvent.mSucceeded = false;
   aEvent.mWasAsync = false;
@@ -985,7 +996,7 @@ TabParent::HandleQueryContentEvent(nsQueryContentEvent& aEvent)
 }
 
 bool
-TabParent::SendCompositionEvent(nsCompositionEvent& event)
+TabParent::SendCompositionEvent(WidgetCompositionEvent& event)
 {
   if (mIsDestroyed) {
     return false;
@@ -1007,7 +1018,7 @@ TabParent::SendCompositionEvent(nsCompositionEvent& event)
  * here and pass the text as the EndIMEComposition return value
  */
 bool
-TabParent::SendTextEvent(nsTextEvent& event)
+TabParent::SendTextEvent(WidgetTextEvent& event)
 {
   if (mIsDestroyed) {
     return false;
@@ -1030,7 +1041,7 @@ TabParent::SendTextEvent(nsTextEvent& event)
 }
 
 bool
-TabParent::SendSelectionEvent(nsSelectionEvent& event)
+TabParent::SendSelectionEvent(WidgetSelectionEvent& event)
 {
   if (mIsDestroyed) {
     return false;
@@ -1532,8 +1543,8 @@ TabParent::UseAsyncPanZoom()
 }
 
 void
-TabParent::MaybeForwardEventToRenderFrame(const nsInputEvent& aEvent,
-                                          nsInputEvent* aOutEvent)
+TabParent::MaybeForwardEventToRenderFrame(const WidgetInputEvent& aEvent,
+                                          WidgetInputEvent* aOutEvent)
 {
   if (RenderFrameParent* rfp = GetRenderFrame()) {
     rfp->NotifyInputEvent(aEvent, aOutEvent);

@@ -77,6 +77,7 @@
 #include "nsFontInflationData.h"
 #include "gfxASurface.h"
 #include "nsRegion.h"
+#include "nsIFrameInlines.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
@@ -2586,9 +2587,8 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
   //weaaak. only the editor can display frame selection not just text and images
   isEditor = isEditor == nsISelectionDisplay::DISPLAY_ALL;
 
-  nsInputEvent* keyEvent = (nsInputEvent*)aEvent;
+  WidgetInputEvent* keyEvent = static_cast<WidgetInputEvent*>(aEvent);
   if (!keyEvent->IsAlt()) {
-    
     for (nsIContent* content = mContent; content;
          content = content->GetParent()) {
       if (nsContentUtils::ContentIsDraggable(content) &&
@@ -8216,6 +8216,39 @@ void
 nsIFrame::DestroyRegion(void* aPropertyValue)
 {
   delete static_cast<nsRegion*>(aPropertyValue);
+}
+
+bool
+nsIFrame::IsPseudoStackingContextFromStyle() {
+  const nsStyleDisplay* disp = StyleDisplay();
+  return disp->mOpacity != 1.0f ||
+         disp->IsPositioned(this) ||
+         disp->IsFloating(this);
+}
+
+nsIFrame::ContentOffsets::ContentOffsets()
+{
+}
+
+nsIFrame::ContentOffsets::ContentOffsets(const ContentOffsets& rhs)
+  : content(rhs.content),
+    offset(rhs.offset),
+    secondaryOffset(rhs.secondaryOffset),
+    associateWithNext(rhs.associateWithNext)
+{
+}
+
+nsIFrame::ContentOffsets::~ContentOffsets()
+{
+}
+
+nsIFrame::CaretPosition::CaretPosition()
+  : mContentOffset(0)
+{
+}
+
+nsIFrame::CaretPosition::~CaretPosition()
+{
 }
 
 // Box layout debugging
