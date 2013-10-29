@@ -639,7 +639,7 @@ CodeGeneratorShared::callVM(const VMFunction &fun, LInstruction *ins, const Regi
 #endif
 
     // Get the wrapper of the VM function.
-    IonCode *wrapper = gen->ionRuntime()->getVMWrapper(fun);
+    IonCode *wrapper = gen->jitRuntime()->getVMWrapper(fun);
     if (!wrapper)
         return false;
 
@@ -752,10 +752,10 @@ CodeGeneratorShared::visitOutOfLineTruncateSlow(OutOfLineTruncateSlow *ool)
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, js::ToInt32));
     masm.storeCallResult(dest);
 
-    restoreVolatile(dest);
-
     if (ool->needFloat32Conversion())
         masm.pop(src);
+
+    restoreVolatile(dest);
 
     masm.jump(ool->rejoin());
     return true;

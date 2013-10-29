@@ -1849,7 +1849,7 @@ loser:
 static nsISupports *
 GetISupportsFromContext(JSContext *cx)
 {
-    if (JS_GetOptions(cx) & JSOPTION_PRIVATE_IS_NSISUPPORTS)
+    if (JS::ContextOptionsRef(cx).privateIsNSISupports())
         return static_cast<nsISupports *>(JS_GetContextPrivate(cx));
 
     return nullptr;
@@ -2307,8 +2307,8 @@ nsCrypto::ImportUserCertificates(const nsAString& aNickname,
     //certificates.  Let's keep an array of them around which
     //we pass along to the nsP12Runnable to use.
     certArr = new nsIX509Cert*[numResponses];
-    // If this is NULL, chances are we're gonna fail really soon,
-    // but let's try to keep going just in case.
+    // If this is nullptr, chances are we're gonna fail really
+    // soon, but let's try to keep going just in case.
     if (!certArr)
       aDoForcedBackup = false;
 

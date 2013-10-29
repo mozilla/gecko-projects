@@ -676,7 +676,7 @@ nsOuterWindowProxy::preventExtensions(JSContext *cx,
                                       JS::Handle<JSObject*> proxy)
 {
   // See above.
-  JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
+  JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr,
                        JSMSG_CANT_CHANGE_EXTENSIBILITY);
   return false;
 }
@@ -1222,7 +1222,7 @@ nsGlobalWindow::~nsGlobalWindow()
   if (IsOuterWindow()) {
     JSObject *proxy = GetWrapperPreserveColor();
     if (proxy) {
-      js::SetProxyExtra(proxy, 0, js::PrivateValue(NULL));
+      js::SetProxyExtra(proxy, 0, js::PrivateValue(nullptr));
     }
 
     // An outer window is destroyed with inner windows still possibly
@@ -2115,7 +2115,7 @@ CreateNativeGlobalForInner(JSContext* aCx,
   MOZ_ASSERT(aPrincipal);
   MOZ_ASSERT(aHolder);
 
-  nsGlobalWindow *top = NULL;
+  nsGlobalWindow *top = nullptr;
   if (aNewInner->GetOuterWindow()) {
     top = aNewInner->GetTop();
   }
@@ -2396,7 +2396,7 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
         return NS_ERROR_FAILURE;
       }
 
-      js::SetProxyExtra(mJSObject, 0, js::PrivateValue(NULL));
+      js::SetProxyExtra(mJSObject, 0, js::PrivateValue(nullptr));
 
       JS::Rooted<JSObject*> obj(cx, mJSObject);
       outerObject = xpc::TransplantObject(cx, obj, outerObject);
@@ -3133,7 +3133,7 @@ void
 nsGlobalWindow::OnFinalize(JSObject* aObject)
 {
   if (aObject == mJSObject) {
-    mJSObject = NULL;
+    mJSObject = nullptr;
   }
 }
 
@@ -5618,7 +5618,7 @@ nsGlobalWindow::SetFullScreenInternal(bool aFullScreen, bool aRequireTrust)
     pmService->NewWakeLock(NS_LITERAL_STRING("DOM_Fullscreen"), this, getter_AddRefs(mWakeLock));
   } else if (mWakeLock && !mFullScreen) {
     mWakeLock->Unlock();
-    mWakeLock = NULL;
+    mWakeLock = nullptr;
   }
 
   return NS_OK;
@@ -10441,7 +10441,7 @@ nsGlobalWindow::ShowSlowScriptDialog()
     }
   }
 
-  // GetStringFromName can return NS_OK and still give NULL string
+  // GetStringFromName can return NS_OK and still give nullptr string
   if (NS_FAILED(rv) || !title || !msg || !stopButton || !waitButton ||
       (!debugButton && debugPossible) || !neverShowDlg) {
     NS_ERROR("Failed to get localized strings.");
@@ -10956,7 +10956,7 @@ nsGlobalWindow::GetParentInternal()
     return parent;
   }
 
-  return NULL;
+  return nullptr;
 }
 
 void
@@ -12563,27 +12563,39 @@ nsGlobalWindow::DisableTimeChangeNotifications()
   nsSystemTimeChangeObserver::RemoveWindowListener(this);
 }
 
-static size_t
-SizeOfEventTargetObjectsEntryExcludingThisFun(
+static PLDHashOperator
+CollectSizeAndListenerCount(
   nsPtrHashKey<nsDOMEventTargetHelper> *aEntry,
-  MallocSizeOf aMallocSizeOf,
   void *arg)
 {
-  nsISupports *supports = aEntry->GetKey();
-  nsCOMPtr<nsISizeOfEventTarget> iface = do_QueryInterface(supports);
-  return iface ? iface->SizeOfEventTargetIncludingThis(aMallocSizeOf) : 0;
+  nsWindowSizes* windowSizes = static_cast<nsWindowSizes*>(arg);
+
+  nsDOMEventTargetHelper* et = aEntry->GetKey();
+
+  if (nsCOMPtr<nsISizeOfEventTarget> iSizeOf = do_QueryObject(et)) {
+    windowSizes->mDOMEventTargetsSize +=
+      iSizeOf->SizeOfEventTargetIncludingThis(windowSizes->mMallocSizeOf);
+  }
+
+  if (nsEventListenerManager* elm = et->GetExistingListenerManager()) {
+    windowSizes->mDOMEventListenersCount += elm->ListenerCount();
+  }
+
+  return PL_DHASH_NEXT;
 }
 
 void
 nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
 {
-  aWindowSizes->mDOMOther += aWindowSizes->mMallocSizeOf(this);
+  aWindowSizes->mDOMOtherSize += aWindowSizes->mMallocSizeOf(this);
 
   if (IsInnerWindow()) {
     nsEventListenerManager* elm = GetExistingListenerManager();
     if (elm) {
-      aWindowSizes->mDOMOther +=
+      aWindowSizes->mDOMOtherSize +=
         elm->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+      aWindowSizes->mDOMEventListenersCount +=
+        elm->ListenerCount();
     }
     if (mDoc) {
       mDoc->DocAddSizeOfIncludingThis(aWindowSizes);
@@ -12591,14 +12603,19 @@ nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
   }
 
   if (mNavigator) {
-    aWindowSizes->mDOMOther +=
+    aWindowSizes->mDOMOtherSize +=
       mNavigator->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
   }
 
-  aWindowSizes->mDOMEventTargets +=
-    mEventTargetObjects.SizeOfExcludingThis(
-      SizeOfEventTargetObjectsEntryExcludingThisFun,
-      aWindowSizes->mMallocSizeOf);
+  // The things pointed to by the entries will be measured below, so we
+  // use nullptr for the callback here.
+  aWindowSizes->mDOMEventTargetsSize +=
+    mEventTargetObjects.SizeOfExcludingThis(nullptr,
+                                            aWindowSizes->mMallocSizeOf);
+  aWindowSizes->mDOMEventTargetsCount +=
+    const_cast<nsTHashtable<nsPtrHashKey<nsDOMEventTargetHelper> >*>
+      (&mEventTargetObjects)->EnumerateEntries(CollectSizeAndListenerCount,
+                                               aWindowSizes);
 }
 
 
@@ -12680,7 +12697,7 @@ nsGlobalWindow::SyncGamepadState()
 {
   FORWARD_TO_INNER_VOID(SyncGamepadState, ());
   if (mHasSeenGamepadInput) {
-    mGamepads.EnumerateRead(EnumGamepadsForSync, NULL);
+    mGamepads.EnumerateRead(EnumGamepadsForSync, nullptr);
   }
 }
 #endif
