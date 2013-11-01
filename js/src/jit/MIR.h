@@ -3664,6 +3664,8 @@ class MRandom : public MNullaryInstruction
     bool possiblyCalls() const {
         return true;
     }
+
+    void computeRange();
 };
 
 class MMathFunction
@@ -3751,6 +3753,7 @@ class MMathFunction
                || function_ == ASin || function_ == ACos || function_ == Floor;
     }
     void trySpecializeFloat32();
+    void computeRange();
 };
 
 class MAdd : public MBinaryArithInstruction
@@ -5258,6 +5261,7 @@ class MBoundsCheck
     virtual AliasSet getAliasSet() const {
         return AliasSet::None();
     }
+    void computeRange();
 };
 
 // Bailout if index < minimum.
@@ -5615,6 +5619,7 @@ class MArrayPush
     AliasSet getAliasSet() const {
         return AliasSet::Store(AliasSet::Element | AliasSet::ObjectFields);
     }
+    void computeRange();
 };
 
 // Array.prototype.concat on two dense arrays.
@@ -9130,15 +9135,15 @@ bool ElementAccessIsPacked(types::CompilerConstraintList *constraints, MDefiniti
 bool ElementAccessHasExtraIndexedProperty(types::CompilerConstraintList *constraints,
                                           MDefinition *obj);
 MIRType DenseNativeElementType(types::CompilerConstraintList *constraints, MDefinition *obj);
-bool PropertyReadNeedsTypeBarrier(JSContext *cx, JSContext *propertycx,
+bool PropertyReadNeedsTypeBarrier(JSContext *propertycx,
                                   types::CompilerConstraintList *constraints,
                                   types::TypeObjectKey *object, PropertyName *name,
                                   types::TemporaryTypeSet *observed, bool updateObserved);
-bool PropertyReadNeedsTypeBarrier(JSContext *cx, JSContext *propertycx,
+bool PropertyReadNeedsTypeBarrier(JSContext *propertycx,
                                   types::CompilerConstraintList *constraints,
                                   MDefinition *obj, PropertyName *name,
                                   types::TemporaryTypeSet *observed);
-bool PropertyReadOnPrototypeNeedsTypeBarrier(JSContext *cx, types::CompilerConstraintList *constraints,
+bool PropertyReadOnPrototypeNeedsTypeBarrier(types::CompilerConstraintList *constraints,
                                              MDefinition *obj, PropertyName *name,
                                              types::TemporaryTypeSet *observed);
 bool PropertyReadIsIdempotent(types::CompilerConstraintList *constraints,
