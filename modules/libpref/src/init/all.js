@@ -349,13 +349,17 @@ pref("gfx.font_rendering.graphite.enabled", true);
 //  SHAPING_THAI      = 0x0040
 // (see http://mxr.mozilla.org/mozilla-central/ident?i=ShapingType)
 // Scripts not listed are grouped in the default category.
-// Set the pref to -1 to have all text shaped via the harfbuzz backend.
+// Set the pref to 255 to have all text shaped via the harfbuzz backend.
 #ifdef XP_WIN
-// use harfbuzz for default (0x01) + arabic (0x02) + hebrew (0x04)
-pref("gfx.font_rendering.harfbuzz.scripts", 7);
+// Use harfbuzz for everything except Hangul (0x08). Harfbuzz doesn't yet
+// have a Hangul shaper, which means that the marks U+302E/302F would not
+// reorder properly in Malgun Gothic or similar fonts.
+pref("gfx.font_rendering.harfbuzz.scripts", 247);
 #else
-// use harfbuzz for all scripts (except when using AAT fonts on OS X)
-pref("gfx.font_rendering.harfbuzz.scripts", -1);
+// Use harfbuzz for all scripts (except when using AAT fonts on OS X).
+// AFAICT, Core Text doesn't support full OpenType Hangul shaping anyway,
+// so there's no benefit to excluding it here.
+pref("gfx.font_rendering.harfbuzz.scripts", 255);
 #endif
 
 #ifdef XP_WIN
@@ -370,13 +374,10 @@ pref("gfx.font_rendering.opentype_svg.enabled", true);
 // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.content.azure.backends", "direct2d,cairo");
-pref("gfx.content.azure.enabled", true);
 #else
-pref("gfx.content.azure.enabled", false);
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "cg");
 pref("gfx.canvas.azure.backends", "cg");
-pref("gfx.content.azure.enabled", true);
 // Accelerated cg canvas where available (10.7+)
 pref("gfx.canvas.azure.accelerated", false);
 #else
@@ -386,13 +387,11 @@ pref("gfx.content.azure.backends", "cairo");
 #endif
 
 #ifdef MOZ_WIDGET_GTK2
-pref("gfx.content.azure.enabled", true);
 pref("gfx.content.azure.backends", "cairo");
 #endif
 #ifdef ANDROID
 pref("gfx.textures.poweroftwo.force-enabled", false);
 pref("gfx.content.azure.backends", "cairo");
-pref("gfx.content.azure.enabled", true);
 #endif
 
 pref("gfx.work-around-driver-bugs", true);
