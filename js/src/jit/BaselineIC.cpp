@@ -1460,7 +1460,7 @@ DoTypeUpdateFallback(JSContext *cx, BaselineFrame *frame, ICUpdatedStub *stub, H
         JS_ASSERT(obj->isNative());
         jsbytecode *pc = stub->getChainFallback()->icEntry()->pc(script);
         if (*pc == JSOP_SETALIASEDVAR)
-            id = NameToId(ScopeCoordinateName(cx, script, pc));
+            id = NameToId(ScopeCoordinateName(script, pc));
         else
             id = NameToId(script->getName(pc));
         types::AddTypePropertyId(cx, obj, id, value);
@@ -6843,7 +6843,7 @@ DoSetPropFallback(JSContext *cx, BaselineFrame *frame, ICSetProp_Fallback *stub,
 
     RootedPropertyName name(cx);
     if (op == JSOP_SETALIASEDVAR)
-        name = ScopeCoordinateName(cx, script, pc);
+        name = ScopeCoordinateName(script, pc);
     else
         name = script->getName(pc);
     RootedId id(cx, NameToId(name));
@@ -7456,6 +7456,19 @@ GetTemplateObjectForNative(JSContext *cx, HandleScript script, jsbytecode *pc,
         res.set(StringObject::create(cx, emptyString, TenuredObject));
         if (!res)
             return false;
+        return true;
+    }
+
+    if (native == intrinsic_NewParallelArray || native == ParallelArrayObject::construct) {
+        res.set(ParallelArrayObject::newInstance(cx, TenuredObject));
+        if (!res)
+            return false;
+
+        types::TypeObject *type =
+            types::TypeScript::InitObject(cx, script, pc, JSProto_ParallelArray);
+        if (!type)
+            return false;
+        res->setType(type);
         return true;
     }
 

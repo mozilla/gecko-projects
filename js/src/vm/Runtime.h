@@ -950,6 +950,12 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Compartment destroy callback. */
     JSDestroyCompartmentCallback destroyCompartmentCallback;
 
+    /* Zone destroy callback. */
+    JSZoneCallback destroyZoneCallback;
+
+    /* Zone sweep callback. */
+    JSZoneCallback sweepZoneCallback;
+
     /* Call this to get the name of a compartment. */
     JSCompartmentNameCallback compartmentNameCallback;
 
@@ -1378,6 +1384,9 @@ struct JSRuntime : public JS::shadow::Runtime,
   public:
     js::MathCache *getMathCache(JSContext *cx) {
         return mathCache_ ? mathCache_ : createMathCache(cx);
+    }
+    js::MathCache *maybeGetMathCache() {
+        return mathCache_;
     }
 
     js::GSNCache        gsnCache;

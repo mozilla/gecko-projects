@@ -242,7 +242,7 @@ JS_ConvertArgumentsVA(JSContext *cx, unsigned argc, jsval *argv, const char *for
         RootedValue arg(cx, *sp);
         switch (c) {
           case 'b':
-            *va_arg(ap, bool *) = ToBoolean(*sp);
+            *va_arg(ap, bool *) = ToBoolean(arg);
             break;
           case 'c':
             if (!ToUint16(cx, arg, va_arg(ap, uint16_t *)))
@@ -442,16 +442,6 @@ JS_PUBLIC_API(uint32_t)
 JS_DoubleToUint32(double d)
 {
     return ToUint32(d);
-}
-
-JS_PUBLIC_API(bool)
-JS_ValueToBoolean(JSContext *cx, jsval value, bool *bp)
-{
-    AssertHeapIsIdle(cx);
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, value);
-    *bp = ToBoolean(value);
-    return true;
 }
 
 JS_PUBLIC_API(JSType)
@@ -919,6 +909,18 @@ JS_SetDestroyCompartmentCallback(JSRuntime *rt, JSDestroyCompartmentCallback cal
 }
 
 JS_PUBLIC_API(void)
+JS_SetDestroyZoneCallback(JSRuntime *rt, JSZoneCallback callback)
+{
+    rt->destroyZoneCallback = callback;
+}
+
+JS_PUBLIC_API(void)
+JS_SetSweepZoneCallback(JSRuntime *rt, JSZoneCallback callback)
+{
+    rt->sweepZoneCallback = callback;
+}
+
+JS_PUBLIC_API(void)
 JS_SetCompartmentNameCallback(JSRuntime *rt, JSCompartmentNameCallback callback)
 {
     rt->compartmentNameCallback = callback;
@@ -996,6 +998,18 @@ JS_PUBLIC_API(void *)
 JS_GetCompartmentPrivate(JSCompartment *compartment)
 {
     return compartment->data;
+}
+
+JS_PUBLIC_API(void)
+JS_SetZoneUserData(JS::Zone *zone, void *data)
+{
+    zone->data = data;
+}
+
+JS_PUBLIC_API(void *)
+JS_GetZoneUserData(JS::Zone *zone)
+{
+    return zone->data;
 }
 
 JS_PUBLIC_API(bool)
