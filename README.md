@@ -1,14 +1,14 @@
-integration-gecko-projects
-==========================
+gecko-projects
+==============
 
 This repository is synced from hg.mozilla.org and should be read-only.
-It is intended to be used with integration-gecko-dev.  For instance, to add the 'alder' branch to your local repository:
+It is intended to be used with gecko-dev.  For instance, to add the 'alder' branch to your local repository:
 
-    git clone https://github.com/mozilla/integration-gecko-dev.git
-    cd integration-gecko-dev
+    git clone https://github.com/mozilla/gecko-dev.git
+    cd gecko-dev
     # Add a new 'projects' remote
-    git remote add projects https://github.com/mozilla/integration-gecko-projects.git
-    # Add a new branch from integration-gecko-projects.  For this example, let's say 'alder'.
+    git remote add projects https://github.com/mozilla/gecko-projects.git
+    # Add a new branch from gecko-projects.  For this example, let's say 'alder'.
     BRANCH=alder
     # Set the list of branches we care about; this will discard any previous branches
     git remote set-branches projects $BRANCH
