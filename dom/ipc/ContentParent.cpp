@@ -26,6 +26,7 @@
 #include "IndexedDatabaseManager.h"
 #include "mozIApplication.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ExternalHelperAppParent.h"
 #include "mozilla/dom/PMemoryReportRequestParent.h"
@@ -2448,6 +2449,22 @@ ContentParent::DeallocPFMRadioParent(PFMRadioParent* aActor)
 #endif
 }
 
+asmjscache::PAsmJSCacheEntryParent*
+ContentParent::AllocPAsmJSCacheEntryParent(
+                                          const asmjscache::OpenMode& aOpenMode,
+                                          const int64_t& aSizeToWrite,
+                                          const IPC::Principal& aPrincipal)
+{
+  return asmjscache::AllocEntryParent(aOpenMode, aSizeToWrite, aPrincipal);
+}
+
+bool
+ContentParent::DeallocPAsmJSCacheEntryParent(PAsmJSCacheEntryParent* aActor)
+{
+  asmjscache::DeallocEntryParent(aActor);
+  return true;
+}
+
 PSpeechSynthesisParent*
 ContentParent::AllocPSpeechSynthesisParent()
 {
@@ -2843,51 +2860,14 @@ ContentParent::RecvAddGeolocationListener(const IPC::Principal& aPrincipal,
                                           const bool& aHighAccuracy)
 {
 #ifdef MOZ_CHILD_PERMISSIONS
-  if (Preferences::GetBool("geo.testing.ignore_ipc_principal", false) == false) {
-    nsIPrincipal* principal = aPrincipal;
-    if (principal == nullptr) {
-      KillHard();
-      return true;
-    }
-
-    uint32_t principalAppId;
-    nsresult rv = principal->GetAppId(&principalAppId);
-    if (NS_FAILED(rv)) {
-      return true;
-    }
-
-    bool found = false;
-    const InfallibleTArray<PBrowserParent*>& browsers = ManagedPBrowserParent();
-    for (uint32_t i = 0; i < browsers.Length(); ++i) {
-      TabParent* tab = static_cast<TabParent*>(browsers[i]);
-      nsCOMPtr<mozIApplication> app = tab->GetOwnOrContainingApp();
-      uint32_t appId;
-      app->GetLocalId(&appId);
-      if (appId == principalAppId) {
-        found = true;
-        break;
-      }
-    }
-
-    if (!found) {
-      return true;
-    }
-
-    // We need to ensure that this permission has been set.
-    // If it hasn't, just noop
-    nsCOMPtr<nsIPermissionManager> pm = do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-    if (!pm) {
-      return false;
-    }
-
-    uint32_t permission = nsIPermissionManager::UNKNOWN_ACTION;
-    rv = pm->TestPermissionFromPrincipal(principal, "geolocation", &permission);
-    if (NS_FAILED(rv) || permission != nsIPermissionManager::ALLOW_ACTION) {
-      KillHard();
+  if (!Preferences::GetBool("geo.testing.ignore_ipc_principal", false)) {
+    uint32_t permission = mozilla::CheckPermission(this, aPrincipal,
+                                                   "geolocation");
+    if (permission != nsIPermissionManager::ALLOW_ACTION) {
       return true;
     }
   }
-#endif
+#endif /* MOZ_CHILD_PERMISSIONS */
 
   // To ensure no geolocation updates are skipped, we always force the
   // creation of a new listener.
