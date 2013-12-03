@@ -335,6 +335,24 @@ private:
   BluetoothSignal mSignal;
 };
 
+class TryFiringAdapterAddedTask : public nsRunnable
+{
+public:
+  NS_IMETHOD
+  Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    BluetoothService* bs = BluetoothService::Get();
+    NS_ENSURE_TRUE(bs, NS_ERROR_FAILURE);
+
+    bs->AdapterAddedReceived();
+    bs->TryFiringAdapterAdded();
+
+    return NS_OK;
+  }
+};
+
 static bool
 IsDBusMessageError(DBusMessage* aMsg, DBusError* aErr, nsAString& aErrorStr)
 {
@@ -709,11 +727,7 @@ GetProperty(DBusMessageIter aIter, Properties* aPropertyTypes,
     // Notify BluetoothManager whenever adapter name is ready.
     if (!propertyValue.get_nsString().IsEmpty()) {
       sAdapterNameIsReady = true;
-      BluetoothSignal signal(NS_LITERAL_STRING("AdapterAdded"),
-                             NS_LITERAL_STRING(KEY_MANAGER), sAdapterPath);
-      nsRefPtr<DistributeBluetoothSignalTask> task =
-        new DistributeBluetoothSignalTask(signal);
-      NS_DispatchToMainThread(task);
+      NS_DispatchToMainThread(new TryFiringAdapterAddedTask());
     }
   }
 
@@ -1498,6 +1512,20 @@ EventFilter(DBusConnection* aConn, DBusMessage* aMsg, void* aData)
                         errorStr,
                         sAdapterProperties,
                         ArrayLength(sAdapterProperties));
+
+    BluetoothNamedValue& property = v.get_ArrayOfBluetoothNamedValue()[0];
+    if (property.name().EqualsLiteral("Discovering")) {
+      bool isDiscovering = property.value();
+      BluetoothSignal signal(NS_LITERAL_STRING(DISCOVERY_STATE_CHANGED_ID),
+                             NS_LITERAL_STRING(KEY_ADAPTER),
+                             isDiscovering);
+
+      nsRefPtr<DistributeBluetoothSignalTask>
+        t = new DistributeBluetoothSignalTask(signal);
+      if (NS_FAILED(NS_DispatchToMainThread(t))) {
+        BT_WARNING("Failed to dispatch to main thread!");
+      }
+    }
   } else if (dbus_message_is_signal(aMsg, DBUS_DEVICE_IFACE,
                                     "PropertyChanged")) {
     ParsePropertyChange(aMsg,
@@ -2943,10 +2971,8 @@ BluetoothDBusService::SendFile(const nsAString& aDeviceAddress,
   // has been determined when calling 'Connect()'. Nevertheless, keep
   // it for future use.
   BluetoothOppManager* opp = BluetoothOppManager::Get();
-  NS_ENSURE_TRUE_VOID(opp);
-
   nsAutoString errorStr;
-  if (!opp->SendFile(aDeviceAddress, aBlobParent)) {
+  if (!opp || !opp->SendFile(aDeviceAddress, aBlobParent)) {
     errorStr.AssignLiteral("Calling SendFile() failed");
   }
 
@@ -2964,10 +2990,8 @@ BluetoothDBusService::StopSendingFile(const nsAString& aDeviceAddress,
   // has been determined when calling 'Connect()'. Nevertheless, keep
   // it for future use.
   BluetoothOppManager* opp = BluetoothOppManager::Get();
-  NS_ENSURE_TRUE_VOID(opp);
-
   nsAutoString errorStr;
-  if (!opp->StopSendingFile()) {
+  if (!opp || !opp->StopSendingFile()) {
     errorStr.AssignLiteral("Calling StopSendingFile() failed");
   }
 
@@ -2979,17 +3003,15 @@ BluetoothDBusService::ConfirmReceivingFile(const nsAString& aDeviceAddress,
                                            bool aConfirm,
                                            BluetoothReplyRunnable* aRunnable)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
+  MOZ_ASSERT(NS_IsMainThread(), "Must be called from main thread!");
 
   // Currently we only support one device sending one file at a time,
   // so we don't need aDeviceAddress here because the target device
   // has been determined when calling 'Connect()'. Nevertheless, keep
   // it for future use.
   BluetoothOppManager* opp = BluetoothOppManager::Get();
-  NS_ENSURE_TRUE_VOID(opp);
-
   nsAutoString errorStr;
-  if (!opp->ConfirmReceivingFile(aConfirm)) {
+  if (!opp || !opp->ConfirmReceivingFile(aConfirm)) {
     errorStr.AssignLiteral("Calling ConfirmReceivingFile() failed");
   }
 

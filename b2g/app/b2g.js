@@ -439,6 +439,11 @@ pref("dom.mozNetworkStats.enabled", true);
 pref("dom.webapps.firstRunWithSIM", true);
 #endif
 
+#ifdef MOZ_B2G_RIL
+// SingleVariant
+pref("dom.mozApps.single_variant_sourcedir", "/persist/svoperapps");
+#endif
+
 // WebSettings
 pref("dom.mozSettings.enabled", true);
 pref("dom.navigator-property.disable.mozSettings", false);
@@ -838,3 +843,7 @@ pref("b2g.neterror.url", "app://system.gaiamobile.org/net_error.html");
 
 // Enable Web Speech synthesis API
 pref("media.webspeech.synth.enabled", true);
+
+// Downloads API
+pref("dom.mozDownloads.enabled", true);
+pref("dom.downloads.max_retention_days", 7);

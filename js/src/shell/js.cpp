@@ -4798,8 +4798,8 @@ static const JSJitInfo dom_x_getterinfo = {
     0,        /* depth */
     JSJitInfo::Getter,
     true,     /* isInfallible. False in setters. */
-    true,     /* isConstant. Only relevant for getters. */
-    true,     /* isPure */
+    true,     /* isMovable */
+    JSJitInfo::AliasNone, /* aliasSet */
     false,    /* isInSlot */
     0,        /* slotIndex */
     JSVAL_TYPE_UNKNOWN, /* returnType */
@@ -4813,8 +4813,8 @@ static const JSJitInfo dom_x_setterinfo = {
     0,        /* depth */
     JSJitInfo::Setter,
     false,    /* isInfallible. False in setters. */
-    false,    /* isConstant. Only relevant for getters. */
-    false,    /* isPure */
+    false,    /* isMovable. */
+    JSJitInfo::AliasEverything, /* aliasSet */
     false,    /* isInSlot */
     0,        /* slotIndex */
     JSVAL_TYPE_UNKNOWN, /* returnType */
@@ -4828,8 +4828,8 @@ static const JSJitInfo doFoo_methodinfo = {
     0,        /* depth */
     JSJitInfo::Method,
     false,    /* isInfallible. False in setters. */
-    false,    /* isConstant. Only relevant for getters. */
-    false,    /* isPure */
+    false,    /* isMovable */
+    JSJitInfo::AliasEverything, /* aliasSet */
     false,    /* isInSlot */
     0,        /* slotIndex */
     JSVAL_TYPE_UNKNOWN, /* returnType */
@@ -5408,7 +5408,7 @@ ProcessArgs(JSContext *cx, JSObject *obj_, OptionParser *op)
 #ifdef JS_THREADSAFE
     int32_t threadCount = op->getIntOption("thread-count");
     if (threadCount >= 0)
-        cx->runtime()->requestHelperThreadCount(threadCount);
+        cx->runtime()->setFakeCPUCount(threadCount);
 #endif /* JS_THREADSAFE */
 
 #if defined(JS_ION)
@@ -5529,7 +5529,7 @@ ProcessArgs(JSContext *cx, JSObject *obj_, OptionParser *op)
     bool parallelCompilation = false;
     if (const char *str = op->getStringOption("ion-parallel-compile")) {
         if (strcmp(str, "on") == 0) {
-            if (cx->runtime()->helperThreadCount() == 0) {
+            if (cx->runtime()->workerThreadCount() == 0) {
                 fprintf(stderr, "Parallel compilation not available without helper threads");
                 return EXIT_FAILURE;
             }
@@ -5542,7 +5542,7 @@ ProcessArgs(JSContext *cx, JSObject *obj_, OptionParser *op)
      * Note: In shell builds, parallel compilation is only enabled with an
      * explicit option.
      */
-    cx->runtime()->setCanUseHelperThreadsForIonCompilation(parallelCompilation);
+    cx->runtime()->setParallelIonCompilationEnabled(parallelCompilation);
 #endif /* JS_THREADSAFE */
 
 #endif /* JS_ION */

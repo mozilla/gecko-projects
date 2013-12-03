@@ -3197,7 +3197,7 @@ GenerateDOMProxyChecks(JSContext *cx, MacroAssembler &masm, Register object,
 
         masm.load32(*generationAddr, scratch);
         masm.branch32(Assembler::NotEqual,
-                      Address(tempVal.scratchReg(), offsetof(ExpandoAndGeneration, expando)),
+                      Address(tempVal.scratchReg(), offsetof(ExpandoAndGeneration, generation)),
                       scratch, &failDOMProxyCheck);
 
         masm.loadValue(Address(tempVal.scratchReg(), 0), tempVal);
@@ -8001,7 +8001,7 @@ DoCallFallback(JSContext *cx, BaselineFrame *frame, ICCall_Fallback *stub, uint3
     if (op == JSOP_NEW) {
         if (!InvokeConstructor(cx, callee, argc, args, res.address()))
             return false;
-    } else if (op == JSOP_EVAL && IsBuiltinEvalForScope(frame->scopeChain(), callee)) {
+    } else if (op == JSOP_EVAL && frame->scopeChain()->global().valueIsEval(callee)) {
         if (!DirectEval(cx, CallArgsFromVp(argc, vp)))
             return false;
         res.set(vp[0]);

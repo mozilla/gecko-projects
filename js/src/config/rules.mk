@@ -117,7 +117,7 @@ CPPSRCS += $(CPP_UNIT_TESTS)
 CPP_UNIT_TEST_BINS := $(CPP_UNIT_TESTS:.cpp=$(BIN_SUFFIX))
 SIMPLE_PROGRAMS += $(CPP_UNIT_TEST_BINS)
 INCLUDES += -I$(DIST)/include/testing
-LIBS += $(XPCOM_GLUE_LDOPTS) $(NSPR_LIBS) $(if $(JS_SHARED_LIBRARY),,$(MOZ_ZLIB_LIBS))
+LIBS += $(XPCOM_GLUE_LDOPTS) $(NSPR_LIBS)
 
 ifndef MOZ_PROFILE_GENERATE
 libs:: $(CPP_UNIT_TEST_BINS) $(call mkdir_deps,$(DIST)/cppunittests)
@@ -364,7 +364,7 @@ ifdef MOZ_UPDATE_XTERM
 # Its good not to have a newline at the end of the titlebar string because it
 # makes the make -s output easier to read.  Echo -n does not work on all
 # platforms, but we can trick printf into doing it.
-UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(shell $(BUILD_TOOLS)/print-depth-path.sh)/$(2) ;
+UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(relativesrcdir)/$(2) ;
 endif
 
 ifdef MACH

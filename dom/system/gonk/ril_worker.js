@@ -79,7 +79,6 @@ let RILQUIRKS_CALLSTATE_EXTRA_UINT32 = libcutils.property_get("ro.moz.ril.callst
 // number via the UNSOLICITED_RIL_CONNECTED parcel.
 let RILQUIRKS_V5_LEGACY = libcutils.property_get("ro.moz.ril.v5_legacy", "true") === "true";
 let RILQUIRKS_REQUEST_USE_DIAL_EMERGENCY_CALL = libcutils.property_get("ro.moz.ril.dial_emergency_call", "false") === "true";
-let RILQUIRKS_MODEM_DEFAULTS_TO_EMERGENCY_MODE = libcutils.property_get("ro.moz.ril.emergency_by_default", "false") === "true";
 let RILQUIRKS_SIM_APP_STATE_EXTRA_FIELDS = libcutils.property_get("ro.moz.ril.simstate_extra_field", "false") === "true";
 // Needed for call-waiting on Peak device
 let RILQUIRKS_EXTRA_UINT32_2ND_CALL = libcutils.property_get("ro.moz.ril.extra_int_2nd_call", "false") == "true";
@@ -363,11 +362,6 @@ let RIL = {
     this._pendingNetworkInfo = {rilMessageType: "networkinfochanged"};
 
     /**
-     * Mute or unmute the radio.
-     */
-    this._muted = true;
-
-    /**
      * USSD session flag.
      * Only one USSD session may exist at a time, and the session is assumed
      * to exist until:
@@ -390,17 +384,6 @@ let RIL = {
       MMI: cbmmi || null
     };
     this.mergedCellBroadcastConfig = null;
-  },
-
-  get muted() {
-    return this._muted;
-  },
-  set muted(val) {
-    val = Boolean(val);
-    if (this._muted != val) {
-      this.setMute(val);
-      this._muted = val;
-    }
   },
 
   /**
@@ -903,6 +886,9 @@ let RIL = {
    */
   updateICCContact: function updateICCContact(options) {
     let onsuccess = function onsuccess() {
+      let recordIndex =
+        contact.pbrIndex * ICC_MAX_LINEAR_FIXED_RECORDS + contact.recordId;
+      contact.contactId = this.iccInfo.iccid + recordIndex;
       // Reuse 'options' to get 'requestId' and 'contactType'.
       RIL.sendChromeMessage(options);
     }.bind(this);
@@ -919,14 +905,14 @@ let RIL = {
 
     let contact = options.contact;
     let iccid = RIL.iccInfo.iccid;
+    let isValidRecordId = false;
     if (typeof contact.contactId === "string" &&
         contact.contactId.startsWith(iccid)) {
       let recordIndex = contact.contactId.substring(iccid.length);
       contact.pbrIndex = Math.floor(recordIndex / ICC_MAX_LINEAR_FIXED_RECORDS);
       contact.recordId = recordIndex % ICC_MAX_LINEAR_FIXED_RECORDS;
+      isValidRecordId = contact.recordId > 0 && contact.recordId < 0xff;
     }
-
-    let isValidRecordId = contact.recordId > 0 && contact.recordId < 0xff;
 
     if (DEBUG) {
       debug("Update ICC Contact " + JSON.stringify(contact));
@@ -1464,10 +1450,10 @@ let RIL = {
    * @param mute
    *        Boolean to indicate whether to mute or unmute the radio.
    */
-  setMute: function setMute(mute) {
+  setMute: function setMute(options) {
     Buf.newParcel(REQUEST_SET_MUTE);
     Buf.writeInt32(1);
-    Buf.writeInt32(mute ? 1 : 0);
+    Buf.writeInt32(options.muted ? 1 : 0);
     Buf.sendParcel();
   },
 
@@ -3295,12 +3281,7 @@ let RIL = {
       curState.connected = regState == NETWORK_CREG_STATE_REGISTERED_HOME ||
                            regState == NETWORK_CREG_STATE_REGISTERED_ROAMING;
       curState.roaming = regState == NETWORK_CREG_STATE_REGISTERED_ROAMING;
-      curState.emergencyCallsOnly =
-        (regState >= NETWORK_CREG_STATE_NOT_SEARCHING_EMERGENCY_CALLS) &&
-        (regState <= NETWORK_CREG_STATE_UNKNOWN_EMERGENCY_CALLS);
-      if (RILQUIRKS_MODEM_DEFAULTS_TO_EMERGENCY_MODE) {
-        curState.emergencyCallsOnly = !curState.connected;
-      }
+      curState.emergencyCallsOnly = !curState.connected;
     }
 
     if (!curState.cell) {
@@ -3620,10 +3601,6 @@ let RIL = {
     if (conferenceChanged) {
       this._ensureConference();
     }
-
-    // Update our mute status. If there is anything in our currentCalls map then
-    // we know it's a voice call and we should leave audio on.
-    this.muted = (Object.getOwnPropertyNames(this.currentCalls).length === 0);
   },
 
   _ensureConference: function _ensureConference() {
@@ -9732,6 +9709,11 @@ let StkCommandParamsFactory = {
       menu.isHelpAvailable = true;
     }
 
+    ctlv = StkProactiveCmdHelper.searchForTag(COMPREHENSIONTLV_TAG_NEXT_ACTION_IND, ctlvs);
+    if (ctlv) {
+      menu.nextActionList = ctlv.value;
+    }
+
     return menu;
   },
 
@@ -10422,6 +10404,23 @@ let StkProactiveCmdHelper = {
     return {url: s};
   },
 
+  /**
+   * Next Action Indicator List.
+   *
+   * | Byte  | Description      | Length |
+   * |  1    | Next Action tag  |   1    |
+   * |  1    | Length(X)        |   1    |
+   * |  3~   | Next Action List |   X    |
+   * | 3+X-1 |                  |        |
+   */
+  retrieveNextActionList: function retrieveNextActionList(length) {
+    let nextActionList = [];
+    for (let i = 0; i < length; i++) {
+      nextActionList.push(GsmPDUHelper.readHexOctet());
+    }
+    return nextActionList;
+  },
+
   searchForTag: function searchForTag(tag, ctlvs) {
     let iter = Iterator(ctlvs);
     return this.searchForNextTag(tag, iter);
@@ -10486,6 +10485,9 @@ StkProactiveCmdHelper[COMPREHENSIONTLV_TAG_IMMEDIATE_RESPONSE] = function COMPRE
 };
 StkProactiveCmdHelper[COMPREHENSIONTLV_TAG_URL] = function COMPREHENSIONTLV_TAG_URL(length) {
   return this.retrieveUrl(length);
+};
+StkProactiveCmdHelper[COMPREHENSIONTLV_TAG_NEXT_ACTION_IND] = function COMPREHENSIONTLV_TAG_NEXT_ACTION_IND(length) {
+  return this.retrieveNextActionList(length);
 };
 
 let ComprehensionTlvHelper = {
@@ -11553,9 +11555,15 @@ let ICCRecordHelper = {
         ICCIOHelper.loadNextRecord(options);
       } else {
         if (onsuccess) {
+          RIL.iccInfoPrivate.pbrs = pbrs;
           onsuccess(pbrs);
         }
       }
+    }
+
+    if (RIL.iccInfoPrivate.pbrs) {
+      onsuccess(RIL.iccInfoPrivate.pbrs);
+      return;
     }
 
     let pbrs = [];
