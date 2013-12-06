@@ -179,7 +179,11 @@ private:
 
         MOZ_ASSERT(mFD);
 
-        PR_Close(mFD);
+        PRStatus prrc;
+        prrc = PR_Close(mFD);
+        if (prrc != PR_SUCCESS) {
+          NS_ERROR("PR_Close() failed.");
+        }
         mFD = nullptr;
     }
 };
@@ -656,6 +660,52 @@ bool TabParent::SendRealMouseEvent(WidgetMouseEvent& event)
     return false;
   }
   return PBrowserParent::SendRealMouseEvent(e);
+}
+
+CSSIntPoint TabParent::AdjustTapToChildWidget(const CSSIntPoint& aPoint)
+{
+  nsCOMPtr<nsIContent> content = do_QueryInterface(mFrameElement);
+
+  if (!content || !content->OwnerDoc()) {
+    return aPoint;
+  }
+
+  nsIDocument* doc = content->OwnerDoc();
+  if (!doc || !doc->GetShell()) {
+    return aPoint;
+  }
+  nsPresContext* presContext = doc->GetShell()->GetPresContext();
+
+  return CSSIntPoint(
+    aPoint.x + presContext->DevPixelsToIntCSSPixels(mChildProcessOffsetAtTouchStart.x),
+    aPoint.y + presContext->DevPixelsToIntCSSPixels(mChildProcessOffsetAtTouchStart.y));
+}
+
+bool TabParent::SendHandleSingleTap(const CSSIntPoint& aPoint)
+{
+  if (mIsDestroyed) {
+    return false;
+  }
+
+  return PBrowserParent::SendHandleSingleTap(AdjustTapToChildWidget(aPoint));
+}
+
+bool TabParent::SendHandleLongTap(const CSSIntPoint& aPoint)
+{
+  if (mIsDestroyed) {
+    return false;
+  }
+
+  return PBrowserParent::SendHandleLongTap(AdjustTapToChildWidget(aPoint));
+}
+
+bool TabParent::SendHandleDoubleTap(const CSSIntPoint& aPoint)
+{
+  if (mIsDestroyed) {
+    return false;
+  }
+
+  return PBrowserParent::SendHandleDoubleTap(AdjustTapToChildWidget(aPoint));
 }
 
 bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)

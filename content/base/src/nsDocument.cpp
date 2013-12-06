@@ -4653,6 +4653,15 @@ nsDocument::DispatchContentLoadedEvents()
     mTiming->NotifyDOMContentLoadedStart(nsIDocument::GetDocumentURI());
   }
 
+  // Dispatch observer notification to notify observers document is interactive.
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  nsIPrincipal *principal = GetPrincipal();
+  os->NotifyObservers(static_cast<nsIDocument*>(this),
+                      nsContentUtils::IsSystemPrincipal(principal) ?
+                        "chrome-document-interactive" :
+                        "content-document-interactive",
+                      nullptr);
+
   // Fire a DOM event notifying listeners that this document has been
   // loaded (excluding images and other loads initiated by this
   // document).
@@ -8127,6 +8136,17 @@ nsDocument::OnPageShow(bool aPersisted,
   if (!target) {
     target = do_QueryInterface(GetWindow());
   }
+
+  // Dispatch observer notification to notify observers page is shown.
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  nsIPrincipal *principal = GetPrincipal();
+  os->NotifyObservers(static_cast<nsIDocument*>(this),
+                      nsContentUtils::IsSystemPrincipal(principal) ?
+                        "chrome-page-shown" :
+                        "content-page-shown",
+                      nullptr);
+
+
   DispatchPageTransition(target, NS_LITERAL_STRING("pageshow"), aPersisted);
 }
 
@@ -8189,6 +8209,16 @@ nsDocument::OnPageHide(bool aPersisted,
   if (!target) {
     target = do_QueryInterface(GetWindow());
   }
+
+  // Dispatch observer notification to notify observers page is hidden.
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  nsIPrincipal *principal = GetPrincipal();
+  os->NotifyObservers(static_cast<nsIDocument*>(this),
+                      nsContentUtils::IsSystemPrincipal(principal) ?
+                        "chrome-page-hidden" :
+                        "content-page-hidden",
+                      nullptr);
+
   DispatchPageTransition(target, NS_LITERAL_STRING("pagehide"), aPersisted);
 
   mVisible = false;
@@ -8511,11 +8541,17 @@ FireOrClearDelayedEvents(nsTArray<nsCOMPtr<nsIDocument> >& aDocuments,
     return;
 
   for (uint32_t i = 0; i < aDocuments.Length(); ++i) {
+    // NB: Don't bother trying to fire delayed events on documents that were
+    // closed before this event ran.
     if (!aDocuments[i]->EventHandlingSuppressed()) {
       fm->FireDelayedEvents(aDocuments[i]);
       nsCOMPtr<nsIPresShell> shell = aDocuments[i]->GetShell();
       if (shell) {
-        shell->FireOrClearDelayedEvents(aFireEvents);
+        // Only fire events for active documents.
+        bool fire = aFireEvents &&
+                    aDocuments[i]->GetInnerWindow() &&
+                    aDocuments[i]->GetInnerWindow()->IsCurrentInnerWindow();
+        shell->FireOrClearDelayedEvents(fire);
       }
     }
   }

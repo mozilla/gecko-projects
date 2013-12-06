@@ -201,7 +201,7 @@ CodeGeneratorARM::bailoutIf(Assembler::Condition condition, LSnapshot *snapshot)
     // We could not use a jump table, either because all bailout IDs were
     // reserved, or a jump table is not optimal for this frame size or
     // platform. Whatever, we will generate a lazy bailout.
-    OutOfLineBailout *ool = new OutOfLineBailout(snapshot, masm.framePushed());
+    OutOfLineBailout *ool = new(alloc()) OutOfLineBailout(snapshot, masm.framePushed());
     if (!addOutOfLineCode(ool))
         return false;
 
@@ -259,7 +259,7 @@ CodeGeneratorARM::bailoutFrom(Label *label, LSnapshot *snapshot)
     // We could not use a jump table, either because all bailout IDs were
     // reserved, or a jump table is not optimal for this frame size or
     // platform. Whatever, we will generate a lazy bailout.
-    OutOfLineBailout *ool = new OutOfLineBailout(snapshot, masm.framePushed());
+    OutOfLineBailout *ool = new(alloc()) OutOfLineBailout(snapshot, masm.framePushed());
     if (!addOutOfLineCode(ool)) {
         return false;
     }
@@ -654,18 +654,23 @@ CodeGeneratorARM::visitDivPowTwoI(LDivPowTwoI *ins)
     int32_t shift = ins->shift();
 
     if (shift != 0) {
-        if (!ins->mir()->isTruncated()) {
+        MDiv *mir = ins->mir();
+        if (!mir->isTruncated()) {
             // If the remainder is != 0, bailout since this must be a double.
             masm.as_mov(ScratchRegister, lsl(lhs, 32 - shift), SetCond);
             if (!bailoutIf(Assembler::NonZero, ins->snapshot()))
                 return false;
         }
 
+        if (!mir->canBeNegativeDividend()) {
+            // Numerator is unsigned, so needs no adjusting. Do the shift.
+            masm.as_mov(output, asr(lhs, shift));
+            return true;
+        }
+
         // Adjust the value so that shifting produces a correctly rounded result
         // when the numerator is negative. See 10-1 "Signed Division by a Known
         // Power of 2" in Henry S. Warren, Jr.'s Hacker's Delight.
-        // Note that we wouldn't need to do this adjustment if we could use
-        // Range Analysis to find cases when the value is never negative.
         if (shift > 1) {
             masm.as_mov(ScratchRegister, asr(lhs, 31));
             masm.as_add(ScratchRegister, lhs, lsr(ScratchRegister, 32 - shift));
@@ -1127,7 +1132,7 @@ CodeGeneratorARM::emitTableSwitchDispatch(MTableSwitch *mir, const Register &ind
     // To fill in the CodeLabels for the case entries, we need to first
     // generate the case entries (we don't yet know their offsets in the
     // instruction stream).
-    OutOfLineTableSwitch *ool = new OutOfLineTableSwitch(alloc(), mir);
+    OutOfLineTableSwitch *ool = new(alloc()) OutOfLineTableSwitch(alloc(), mir);
     for (int32_t i = 0; i < cases; i++) {
         CodeLabel cl;
         masm.writeCodePointer(cl.dest());

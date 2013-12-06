@@ -210,6 +210,7 @@
 #include "mozilla/dom/WindowBinding.h"
 #include "nsITabChild.h"
 #include "nsIDOMMediaQueryList.h"
+#include "mozilla/dom/DOMJSClass.h"
 
 #ifdef MOZ_WEBSPEECH
 #include "mozilla/dom/SpeechSynthesis.h"
@@ -8189,10 +8190,8 @@ nsGlobalWindow::EnterModalState()
     NS_ASSERTION(!mSuspendedDoc, "Shouldn't have mSuspendedDoc here!");
 
     mSuspendedDoc = topWin->GetExtantDoc();
-    if (mSuspendedDoc && mSuspendedDoc->EventHandlingSuppressed()) {
+    if (mSuspendedDoc) {
       mSuspendedDoc->SuppressEventHandling();
-    } else {
-      mSuspendedDoc = nullptr;
     }
   }
   topWin->mModalStateDepth++;
@@ -12701,6 +12700,13 @@ nsGlobalWindow::AddSizeOfIncludingThis(nsWindowSizes* aWindowSizes) const
     const_cast<nsTHashtable<nsPtrHashKey<nsDOMEventTargetHelper> >*>
       (&mEventTargetObjects)->EnumerateEntries(CollectSizeAndListenerCount,
                                                aWindowSizes);
+
+  JSObject* global = FastGetGlobalJSObject();
+  if (IsInnerWindow() && global) {
+    ProtoAndIfaceArray* cache = GetProtoAndIfaceArray(global);
+    aWindowSizes->mProtoIfaceCacheSize +=
+      cache->SizeOfIncludingThis(aWindowSizes->mMallocSizeOf);
+  }
 }
 
 
