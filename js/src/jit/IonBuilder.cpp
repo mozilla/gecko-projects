@@ -3435,8 +3435,7 @@ IonBuilder::jsop_try()
         return abort("Has try-finally");
 
     // Try-catch within inline frames is not yet supported.
-    if (isInlineBuilder())
-        return abort("try-catch within inline frame");
+    JS_ASSERT(script()->uninlineable && !isInlineBuilder());
 
     graph().setHasTryBlock();
 
@@ -4792,9 +4791,11 @@ IonBuilder::jsop_funcall(uint32_t argc)
     // Shimmy the slots down to remove the native 'call' function.
     current->shimmySlots(funcDepth - 1);
 
+    bool zeroArguments = (argc == 0);
+
     // If no |this| argument was provided, explicitly pass Undefined.
     // Pushing is safe here, since one stack slot has been removed.
-    if (argc == 0) {
+    if (zeroArguments) {
         MConstant *undef = MConstant::New(alloc(), UndefinedValue());
         current->add(undef);
         MPassArg *pass = MPassArg::New(alloc(), undef);
@@ -4810,7 +4811,7 @@ IonBuilder::jsop_funcall(uint32_t argc)
         return false;
 
     // Try to inline the call.
-    if (argc > 0) {
+    if (!zeroArguments) {
         InliningDecision decision = makeInliningDecision(target, callInfo);
         switch (decision) {
           case InliningDecision_Error:
@@ -6593,6 +6594,10 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
     TypeRepresentationSet elemTypeReprs;
     if (!objTypeReprs.arrayElementType(*this, &elemTypeReprs))
         return false;
+    if (elemTypeReprs.empty())
+        return true;
+
+    JS_ASSERT(TypeRepresentation::isSized(elemTypeReprs.kind()));
 
     size_t elemSize;
     if (!elemTypeReprs.allHaveSameSize(&elemSize))
@@ -6604,7 +6609,7 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
         return true;
 
       case TypeRepresentation::Struct:
-      case TypeRepresentation::Array:
+      case TypeRepresentation::SizedArray:
         return getElemTryComplexElemOfTypedObject(emitted,
                                                   obj,
                                                   index,
@@ -6621,6 +6626,9 @@ IonBuilder::getElemTryTypedObject(bool *emitted, MDefinition *obj, MDefinition *
 
       case TypeRepresentation::Reference:
         return true;
+
+      case TypeRepresentation::UnsizedArray:
+        MOZ_ASSUME_UNREACHABLE("Unsized arrays cannot be element types");
     }
 
     MOZ_ASSUME_UNREACHABLE("Bad kind");
@@ -6631,6 +6639,47 @@ MIRTypeForTypedArrayRead(ScalarTypeRepresentation::Type arrayType,
                          bool observedDouble);
 
 bool
+IonBuilder::checkTypedObjectIndexInBounds(size_t elemSize,
+                                          MDefinition *obj,
+                                          MDefinition *index,
+                                          MDefinition **indexAsByteOffset,
+                                          TypeRepresentationSet objTypeReprs)
+{
+    // Ensure index is an integer.
+    MInstruction *idInt32 = MToInt32::New(alloc(), index);
+    current->add(idInt32);
+
+    // If we know the length statically from the type, just embed it.
+    // Otherwise, load it from the appropriate reserved slot on the
+    // typed object.  We know it's an int32, so we can convert from
+    // Value to int32 using truncation.
+    size_t lenOfAll;
+    MDefinition *length;
+    if (objTypeReprs.hasKnownArrayLength(&lenOfAll)) {
+        length = constantInt(lenOfAll);
+    } else {
+        MInstruction *lengthValue = MLoadFixedSlot::New(alloc(), obj, JS_DATUM_SLOT_LENGTH);
+        current->add(lengthValue);
+
+        MInstruction *length32 = MTruncateToInt32::New(alloc(), lengthValue);
+        current->add(length32);
+
+        length = length32;
+    }
+
+    index = addBoundsCheck(idInt32, length);
+
+    // Since we passed the bounds check, it is impossible for the
+    // result of multiplication to overflow; so enable imul path.
+    MMul *mul = MMul::New(alloc(), index, constantInt(elemSize),
+                          MIRType_Int32, MMul::Integer);
+    current->add(mul);
+
+    *indexAsByteOffset = mul;
+    return true;
+}
+
+bool
 IonBuilder::getElemTryScalarElemOfTypedObject(bool *emitted,
                                               MDefinition *obj,
                                               MDefinition *index,
@@ -6638,40 +6687,21 @@ IonBuilder::getElemTryScalarElemOfTypedObject(bool *emitted,
                                               TypeRepresentationSet elemTypeReprs,
                                               size_t elemSize)
 {
-    JS_ASSERT(objTypeReprs.allOfArrayKind());
+    JS_ASSERT(objTypeReprs.kind() == TypeRepresentation::SizedArray);
 
     // Must always be loading the same scalar type
     if (!elemTypeReprs.singleton())
         return true;
     ScalarTypeRepresentation *elemTypeRepr = elemTypeReprs.getTypeRepresentation()->asScalar();
+    JS_ASSERT(elemSize == elemTypeRepr->alignment());
 
-    // Get the length.
-    size_t lenOfAll = objTypeReprs.arrayLength();
-    if (lenOfAll >= size_t(INT_MAX)) // int32 max is bound
-        return true;
-    MInstruction *length = MConstant::New(alloc(), Int32Value(int32_t(lenOfAll)));
-
-    *emitted = true;
-    current->add(length);
-
-    // Ensure index is an integer.
-    MInstruction *idInt32 = MToInt32::New(alloc(), index);
-    current->add(idInt32);
-    index = idInt32;
-
-    // Typed-object accesses usually in bounds (bail out otherwise).
-    index = addBoundsCheck(index, length);
-
-    // Since we passed the bounds check, it is impossible for the
-    // result of multiplication to overflow; so enable imul path.
-    const int32_t alignment = elemTypeRepr->alignment();
-    MMul *indexAsByteOffset = MMul::New(alloc(), index, constantInt(alignment),
-                                        MIRType_Int32, MMul::Integer);
-    current->add(indexAsByteOffset);
+    MDefinition *indexAsByteOffset;
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, &indexAsByteOffset, objTypeReprs))
+        return false;
 
     // Find location within the owner object.
     MDefinition *elements, *scaledOffset;
-    loadTypedObjectElements(obj, indexAsByteOffset, alignment, &elements, &scaledOffset);
+    loadTypedObjectElements(obj, indexAsByteOffset, elemSize, &elements, &scaledOffset);
 
     // Load the element.
     MLoadTypedArrayElement *load = MLoadTypedArrayElement::New(alloc(), elements, scaledOffset, elemTypeRepr->type());
@@ -6690,6 +6720,7 @@ IonBuilder::getElemTryScalarElemOfTypedObject(bool *emitted,
     load->setResultType(knownType);
     load->setResultTypeSet(resultTypes);
 
+    *emitted = true;
     return true;
 }
 
@@ -6706,32 +6737,9 @@ IonBuilder::getElemTryComplexElemOfTypedObject(bool *emitted,
     MDefinition *type = loadTypedObjectType(obj);
     MDefinition *elemType = typeObjectForElementFromArrayStructType(type);
 
-    // Get the length.
-    size_t lenOfAll = objTypeReprs.arrayLength();
-    if (lenOfAll >= size_t(INT_MAX)) // int32 max is bound
-        return true;
-    MInstruction *length = MConstant::New(alloc(), Int32Value(int32_t(lenOfAll)));
-
-    *emitted = true;
-    current->add(length);
-
-    // Ensure index is an integer.
-    MInstruction *idInt32 = MToInt32::New(alloc(), index);
-    current->add(idInt32);
-    index = idInt32;
-
-    // Typed-object accesses usually in bounds (bail out otherwise).
-    index = addBoundsCheck(index, length);
-
-    // Convert array index to element data offset.
-    MConstant *alignment = MConstant::New(alloc(), Int32Value(elemSize));
-    current->add(alignment);
-
-    // Since we passed the bounds check, it is impossible for the
-    // result of multiplication to overflow; so enable imul path.
-    MMul *indexAsByteOffset = MMul::New(alloc(), index, alignment, MIRType_Int32,
-                                        MMul::Integer);
-    current->add(indexAsByteOffset);
+    MDefinition *indexAsByteOffset;
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, &indexAsByteOffset, objTypeReprs))
+        return false;
 
     // Find location within the owner object.
     MDefinition *owner, *ownerOffset;
@@ -6748,7 +6756,7 @@ IonBuilder::getElemTryComplexElemOfTypedObject(bool *emitted,
     derived->setResultTypeSet(resultTypes);
     current->add(derived);
     current->push(derived);
-
+    *emitted = true;
     return true;
 }
 
@@ -8294,7 +8302,7 @@ IonBuilder::getPropTryTypedObject(bool *emitted, PropertyName *name,
         return true;
 
       case TypeRepresentation::Struct:
-      case TypeRepresentation::Array:
+      case TypeRepresentation::SizedArray:
         return getPropTryComplexPropOfTypedObject(emitted,
                                                   fieldOffset,
                                                   fieldTypeReprs,
@@ -8306,6 +8314,9 @@ IonBuilder::getPropTryTypedObject(bool *emitted, PropertyName *name,
                                                  fieldOffset,
                                                  fieldTypeReprs,
                                                  resultTypes);
+
+      case TypeRepresentation::UnsizedArray:
+        MOZ_ASSUME_UNREACHABLE("Field of unsized array type");
     }
 
     MOZ_ASSUME_UNREACHABLE("Bad kind");
@@ -8861,7 +8872,8 @@ IonBuilder::setPropTryTypedObject(bool *emitted, MDefinition *obj,
 
       case TypeRepresentation::Reference:
       case TypeRepresentation::Struct:
-      case TypeRepresentation::Array:
+      case TypeRepresentation::SizedArray:
+      case TypeRepresentation::UnsizedArray:
         // For now, only optimize storing scalars.
         return true;
 
@@ -9137,9 +9149,8 @@ IonBuilder::jsop_setarg(uint32_t arg)
     // required, then it means that any aliased argument set can never be observed, and
     // the frame does not actually need to be updated with the new arg value.
     if (info().argumentsAliasesFormals()) {
-        // Try-catch within inline frames is not yet supported.
-        if (isInlineBuilder())
-            return abort("JSOP_SETARG with magic arguments in inlined function.");
+        // JSOP_SETARG with magic arguments within inline frames is not yet supported.
+        JS_ASSERT(script()->uninlineable && !isInlineBuilder());
 
         MSetFrameArgument *store = MSetFrameArgument::New(alloc(), arg, val);
         current->add(store);
@@ -9675,8 +9686,17 @@ IonBuilder::lookupTypeRepresentationSet(MDefinition *typedObj,
         return true;
     }
 
-    // Extract TypeRepresentationSet directly if we can
     types::TemporaryTypeSet *types = typedObj->resultTypeSet();
+    return typeSetToTypeRepresentationSet(types, out,
+                                          types::TypeTypedObject::Datum);
+}
+
+bool
+IonBuilder::typeSetToTypeRepresentationSet(types::TemporaryTypeSet *types,
+                                           TypeRepresentationSet *out,
+                                           types::TypeTypedObject::Kind kind)
+{
+    // Extract TypeRepresentationSet directly if we can
     if (!types || types->getKnownTypeTag() != JSVAL_TYPE_OBJECT)
         return true;
 
@@ -9691,6 +9711,9 @@ IonBuilder::lookupTypeRepresentationSet(MDefinition *typedObj,
             return true;
 
         if (!type->hasTypedObject())
+            return true;
+
+        if (type->typedObject()->kind != kind)
             return true;
 
         TypeRepresentation *typeRepr = type->typedObject()->typeRepr;

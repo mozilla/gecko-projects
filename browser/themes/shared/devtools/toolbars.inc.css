@@ -260,9 +260,13 @@
 }
 
 .devtools-sidebar-tabs > tabs > tab {
-  background-size: calc(100% - 2px) 100%, 1px 100%;
+  background-size: calc(100% - 1px) 100%, 1px 100%;
   background-repeat: no-repeat;
   background-position: 1px, 0;
+}
+
+.devtools-sidebar-tabs > tabs > tab:not(:last-of-type) {
+  background-size: calc(100% - 2px) 100%, 1px 100%;
 }
 
 .devtools-sidebar-tabs:-moz-locale-dir(rtl) > tabs > tab {
@@ -435,6 +439,23 @@
 
 #command-button-scratchpad:hover:active {
   -moz-image-region: rect(0px, 48px, 16px, 32px);
+}
+
+#command-button-splitconsole {
+  list-style-image: url("chrome://browser/skin/devtools/command-console.png");
+  -moz-image-region: rect(0px, 16px, 16px, 0px);
+}
+
+#command-button-splitconsole:hover {
+  -moz-image-region: rect(0px, 32px, 16px, 16px);
+}
+
+#command-button-splitconsole:hover:active {
+  -moz-image-region: rect(0px, 48px, 16px, 32px);
+}
+
+#command-button-splitconsole[checked=true] {
+  -moz-image-region: rect(0px, 64px, 16px, 48px);
 }
 
 /* Tabs */

@@ -1999,9 +1999,6 @@ ia64*-hpux*)
     	CFLAGS="$CFLAGS -mieee"
     	CXXFLAGS="$CXXFLAGS -mieee"
     ;;
-    i*86)
-    	USE_ELF_DYNSTR_GC=1
-    ;;
     esac
 
     if test -z "$MC"; then
@@ -3896,6 +3893,17 @@ if test -n "$MOZ_NATIVE_FFI"; then
     MOZ_JS_STATIC_LIBS="$MOZ_JS_STATIC_LIBS $MOZ_FFI_LIBS"
 fi
 
+# split JS out by default to avoid VS2005 PGO crash (bug 591836).
+if test "$OS_ARCH" = "WINNT"; then
+  JS_SHARED_LIBRARY=1
+fi
+
+MOZ_ARG_ENABLE_BOOL(shared-js,
+[  --enable-shared-js
+                          Create a shared JavaScript library.],
+    JS_SHARED_LIBRARY=1,
+    JS_SHARED_LIBRARY=)
+
 dnl ========================================================
 dnl System ICU Support
 dnl ========================================================
@@ -3961,7 +3969,7 @@ MOZ_MEDIA_NAVIGATOR=
 MOZ_OMX_PLUGIN=
 MOZ_VP8=
 MOZ_VP8_ERROR_CONCEALMENT=
-MOZ_VP8_ENCODER=
+MOZ_VP8_ENCODER=1
 MOZ_WEBSPEECH=1
 VPX_AS=
 VPX_ASFLAGS=
@@ -4338,7 +4346,6 @@ cairo-qt)
     fi
 
     MOZ_WEBGL=1
-    USE_ELF_DYNSTR_GC=
     USE_FC_FREETYPE=1
     TK_CFLAGS='$(MOZ_QT_CFLAGS)'
     TK_LIBS='$(MOZ_QT_LIBS)'
@@ -5127,7 +5134,6 @@ if test -n "$MOZ_WEBRTC"; then
     AC_DEFINE(MOZ_WEBRTC_ASSERT_ALWAYS)
     MOZ_RAW=1
     MOZ_VP8=1
-    MOZ_VP8_ENCODER=1
     MOZ_VP8_ERROR_CONCEALMENT=1
 
 dnl enable once Signaling lands
@@ -5391,7 +5397,7 @@ if test -n "$MOZ_VP8"; then
         dnl === libvpx Version check ===
         dnl ============================
         dnl Check to see if we have a system libvpx package.
-        PKG_CHECK_MODULES(MOZ_LIBVPX, vpx >= 1.0.0)
+        PKG_CHECK_MODULES(MOZ_LIBVPX, vpx >= 1.3.0)
 
         MOZ_CHECK_HEADER([vpx/vpx_decoder.h], [], 
          [AC_MSG_ERROR([Couldn't find vpx/vpx_decoder.h which is required for build with system libvpx. Use --without-system-libvpx to build with in-tree libvpx.])])
@@ -5464,7 +5470,7 @@ if test -n "$MOZ_VP8" -a -z "$MOZ_NATIVE_LIBVPX"; then
     ;;
     *:x86)
       if $CC -E -dM -</dev/null | grep -q __ELF__; then
-        VPX_ASFLAGS="-f elf32 -rnasm -pnasm"
+        VPX_ASFLAGS="-f elf32 -rnasm -pnasm -DPIC"
         VPX_X86_ASM=1
       fi
     ;;
@@ -6769,7 +6775,6 @@ MOZ_ARG_ENABLE_BOOL(trace-malloc,
 if test "$NS_TRACE_MALLOC"; then
   # Please, Mr. Linker Man, don't take away our symbol names
   MOZ_COMPONENTS_VERSION_SCRIPT_LDFLAGS=
-  USE_ELF_DYNSTR_GC=
   AC_DEFINE(NS_TRACE_MALLOC)
 fi
 AC_SUBST(NS_TRACE_MALLOC)
@@ -6789,7 +6794,6 @@ if test "$NS_TRACE_MALLOC" -a "$MOZ_DMD"; then
 fi
 
 if test "$MOZ_DMD"; then
-    USE_ELF_DYNSTR_GC=
     AC_DEFINE(MOZ_DMD)
 
     if test "${CPU_ARCH}" = "arm"; then
@@ -7157,14 +7161,6 @@ MOZ_ARG_ENABLE_BOOL(install-strip,
 [  --enable-install-strip  Enable stripping of libs & executables when packaging ],
     PKG_SKIP_STRIP= ,
     PKG_SKIP_STRIP=1)
-
-dnl ========================================================
-dnl = --enable-elf-dynstr-gc
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(elf-dynstr-gc,
-[  --enable-elf-dynstr-gc  Enable elf dynstr garbage collector (opt builds only)],
-    USE_ELF_DYNSTR_GC=1,
-    USE_ELF_DYNSTR_GC= )
 
 dnl ========================================================
 dnl = --disable-elf-hack
@@ -7727,19 +7723,7 @@ dnl =
 dnl ========================================================
 MOZ_ARG_HEADER(Static build options)
 
-# split JS out by default to avoid VS2005 PGO crash (bug 591836).
-if test "$OS_ARCH" = "WINNT"; then
-  ENABLE_SHARED_JS=1
-fi
-
-MOZ_ARG_ENABLE_BOOL(shared-js,
-[  --enable-shared-js
-                          Create a shared JavaScript library.],
-    ENABLE_SHARED_JS=1,
-    ENABLE_SHARED_JS=)
-
-if test -n "$ENABLE_SHARED_JS"; then
-  JS_SHARED_LIBRARY=1
+if test -n "$JS_SHARED_LIBRARY"; then
   MOZ_JS_LIBS="$MOZ_JS_SHARED_LIBS"
 else
   MOZ_JS_LIBS="$MOZ_JS_STATIC_LIBS"
@@ -7776,7 +7760,7 @@ dnl ========================================================
 
 if test -z "$SKIP_PATH_CHECKS"; then
 if test -z "${GLIB_CFLAGS}" -o -z "${GLIB_LIBS}" ; then
-    if test "$MOZ_ENABLE_GTK2" -o "$USE_ELF_DYNSTR_GC" ; then
+    if test "$MOZ_ENABLE_GTK2" ; then
         PKG_CHECK_MODULES(GLIB, glib-2.0 >= 1.3.7 gobject-2.0)
     fi
 fi
@@ -8342,7 +8326,6 @@ AC_SUBST(MOZ_DISABLE_GECKOVIEW)
 AC_SUBST(ENABLE_STRIP)
 AC_SUBST(PKG_SKIP_STRIP)
 AC_SUBST(STRIP_FLAGS)
-AC_SUBST(USE_ELF_DYNSTR_GC)
 AC_SUBST(USE_ELF_HACK)
 AC_SUBST(INCREMENTAL_LINKER)
 AC_SUBST(MOZ_COMPONENTS_VERSION_SCRIPT_LDFLAGS)
@@ -8788,6 +8771,81 @@ HAVE_SYS_MOUNT_H
 
 AC_SUBST(STLPORT_LIBS)
 
+MOZ_ARG_WITH_STRING(intl-api,
+[  --with-intl-api, --with-intl-api=build, --without-intl-api
+    Determine the status of the ECMAScript Internationalization API.  The first
+    (or lack of any of these) builds and exposes the API.  The second builds it
+    but doesn't use ICU or expose the API to script.  The third doesn't build
+    ICU at all.],
+    _INTL_API=$withval,
+    _INTL_API=yes)
+
+WITH_INTL="--with-intl-api=$_INTL_API"
+ENABLE_INTL_API=
+case "$_INTL_API" in
+no)
+    ;;
+build)
+    ENABLE_INTL_API=1
+    ;;
+yes)
+    ENABLE_INTL_API=1
+    ;;
+*)
+    AC_MSG_ERROR([Invalid value passed to --with-intl-api: $_INTL_API])
+    ;;
+esac
+
+if test -n "$ENABLE_INTL_API"; then
+if test "$MOZ_BUILD_APP" = "browser"; then
+    WITH_INTL="--with-intl-api"
+else
+    # Internationalization isn't built or exposed by default in non-desktop
+    # builds.  Bugs to enable:
+    #
+    #   Android:  bug 864843
+    #   B2G:      bug 866301
+    WITH_INTL="--without-intl-api"
+    ENABLE_INTL_API=
+fi
+fi
+
+dnl Settings for the implementation of the ECMAScript Internationalization API
+if test -n "$ENABLE_INTL_API"; then
+    AC_DEFINE(ENABLE_INTL_API)
+
+    MOZ_CONFIG_ICU()
+
+    dnl Build ICU as a shared library for shared js builds.
+    if test -z "$MOZ_NATIVE_ICU" -a -n "$JS_SHARED_LIBRARY"; then
+        case "$OS_TARGET" in
+            WINNT)
+                ICU_LIB_NAMES="icuin icuuc icudt"
+                DBG_SUFFIX=
+                if test -n "$MOZ_DEBUG"; then
+                    DBG_SUFFIX=d
+                fi
+                MOZ_ICU_LIBS='$(foreach lib,$(ICU_LIB_NAMES),$(DEPTH)/js/src/intl/icu/target/lib/$(LIB_PREFIX)$(lib)$(DBG_SUFFIX).$(LIB_SUFFIX))'
+                ;;
+            Darwin)
+                ICU_LIB_NAMES="icui18n icuuc icudata"
+                MOZ_ICU_LIBS='$(foreach lib,$(ICU_LIB_NAMES),$(DEPTH)/js/src/intl/icu/target/lib/$(DLL_PREFIX)$(lib).$(MOZ_ICU_VERSION)$(DLL_SUFFIX))'
+                ;;
+            Linux|DragonFly|FreeBSD|NetBSD|OpenBSD)
+                ICU_LIB_NAMES="icui18n icuuc icudata"
+                MOZ_ICU_LIBS='$(foreach lib,$(ICU_LIB_NAMES),$(DEPTH)/js/src/intl/icu/target/lib/$(DLL_PREFIX)$(lib)$(DLL_SUFFIX).$(MOZ_ICU_VERSION))'
+                ;;
+            *)
+                AC_MSG_ERROR([ECMAScript Internationalization API is not yet supported on this platform])
+        esac
+    fi
+fi
+
+AC_SUBST(DBG_SUFFIX)
+AC_SUBST(ENABLE_INTL_API)
+AC_SUBST(ICU_LIB_NAMES)
+AC_SUBST(MOZ_ICU_LIBS)
+
 export WRITE_MOZINFO=1
 AC_OUTPUT()
 unset WRITE_MOZINFO
@@ -8966,7 +9024,7 @@ fi
 # Run jemalloc configure script
 
 if test -z "$MOZ_NATIVE_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC3" -o -n "$MOZ_REPLACE_MALLOC"; then
-  ac_configure_args="$_SUBDIR_CONFIG_ARGS --build=$build --host=$target --enable-stats --with-jemalloc-prefix=je_"
+  ac_configure_args="--build=$build --host=$target --enable-stats --with-jemalloc-prefix=je_"
   if test -n "$MOZ_REPLACE_MALLOC"; then
     # When using replace_malloc, we always want memalign and valloc exported from jemalloc.
     ac_configure_args="$ac_configure_args ac_cv_func_memalign=yes"
@@ -9161,26 +9219,6 @@ dist=$MOZ_BUILD_ROOT/dist
 ac_configure_args="$_SUBDIR_CONFIG_ARGS"
 ac_configure_args="$ac_configure_args --enable-threadsafe"
 
-MOZ_ARG_WITH_STRING(intl-api,
-[  --with-intl-api, --with-intl-api=build, --without-intl-api
-    Determine the status of the ECMAScript Internationalization API.  The first
-    (or lack of any of these) builds and exposes the API.  The second builds it
-    but doesn't use ICU or expose the API to script.  The third doesn't build
-    ICU at all.],
-    WITH_INTL="--with-intl-api=$withval"
-)
-if test -z "$WITH_INTL"; then
-if test "$MOZ_BUILD_APP" = "browser"; then
-    WITH_INTL="--with-intl-api"
-else
-    # Internationalization isn't built or exposed by default in non-desktop
-    # builds.  Bugs to enable:
-    #
-    #   Android:  bug 864843
-    #   B2G:      bug 866301
-    WITH_INTL="--without-intl-api"
-fi
-fi
 ac_configure_args="$ac_configure_args $WITH_INTL"
 
 if test "$BUILD_CTYPES"; then
