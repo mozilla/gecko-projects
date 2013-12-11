@@ -40,6 +40,8 @@ jit::SplitCriticalEdges(MIRGraph &graph)
 
             // Create a new block inheriting from the predecessor.
             MBasicBlock *split = MBasicBlock::NewSplitEdge(graph, block->info(), *block);
+            if (!split)
+                return false;
             split->setLoopDepth(block->loopDepth());
             graph.insertBlockAfter(*block, split);
             split->end(MGoto::New(graph.alloc(), target));
@@ -88,7 +90,7 @@ jit::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
             // parameter passing might be live. Rewriting uses of these terms
             // in resume points may affect the interpreter's behavior. Rather
             // than doing a more sophisticated analysis, just ignore these.
-            if (ins->isUnbox() || ins->isParameter() || ins->isTypeBarrier())
+            if (ins->isUnbox() || ins->isParameter() || ins->isTypeBarrier() || ins->isComputeThis())
                 continue;
 
             // If the instruction's behavior has been constant folded into a
@@ -434,13 +436,17 @@ class TypeAnalyzer
 
 // Try to specialize this phi based on its non-cyclic inputs.
 static MIRType
-GuessPhiType(MPhi *phi)
+GuessPhiType(MPhi *phi, bool *hasInputsWithEmptyTypes)
 {
+    *hasInputsWithEmptyTypes = false;
+
     MIRType type = MIRType_None;
     bool convertibleToFloat32 = false;
+    bool hasPhiInputs = false;
     for (size_t i = 0, e = phi->numOperands(); i < e; i++) {
         MDefinition *in = phi->getOperand(i);
         if (in->isPhi()) {
+            hasPhiInputs = true;
             if (!in->toPhi()->triedToSpecialize())
                 continue;
             if (in->type() == MIRType_None) {
@@ -450,6 +456,13 @@ GuessPhiType(MPhi *phi)
                 continue;
             }
         }
+
+        // Ignore operands which we've never observed.
+        if (in->resultTypeSet() && in->resultTypeSet()->empty()) {
+            *hasInputsWithEmptyTypes = true;
+            continue;
+        }
+
         if (type == MIRType_None) {
             type = in->type();
             if (in->canProduceFloat32())
@@ -457,10 +470,6 @@ GuessPhiType(MPhi *phi)
             continue;
         }
         if (type != in->type()) {
-            // Ignore operands which we've never observed.
-            if (in->resultTypeSet() && in->resultTypeSet()->empty())
-                continue;
-
             if (convertibleToFloat32 && in->type() == MIRType_Float32) {
                 // If we only saw definitions that can be converted into Float32 before and
                 // encounter a Float32 value, promote previous values to Float32
@@ -474,6 +483,14 @@ GuessPhiType(MPhi *phi)
             }
         }
     }
+
+    if (type == MIRType_None && !hasPhiInputs) {
+        // All inputs are non-phis with empty typesets. Use MIRType_Value
+        // in this case, as it's impossible to get better type information.
+        JS_ASSERT(*hasInputsWithEmptyTypes);
+        type = MIRType_Value;
+    }
+
     return type;
 }
 
@@ -535,18 +552,28 @@ TypeAnalyzer::propagateSpecialization(MPhi *phi)
 bool
 TypeAnalyzer::specializePhis()
 {
+    Vector<MPhi *, 0, SystemAllocPolicy> phisWithEmptyInputTypes;
+
     for (PostorderIterator block(graph.poBegin()); block != graph.poEnd(); block++) {
         if (mir->shouldCancel("Specialize Phis (main loop)"))
             return false;
 
         for (MPhiIterator phi(block->phisBegin()); phi != block->phisEnd(); phi++) {
-            MIRType type = GuessPhiType(*phi);
+            bool hasInputsWithEmptyTypes;
+            MIRType type = GuessPhiType(*phi, &hasInputsWithEmptyTypes);
             phi->specialize(type);
             if (type == MIRType_None) {
                 // We tried to guess the type but failed because all operands are
                 // phis we still have to visit. Set the triedToSpecialize flag but
                 // don't propagate the type to other phis, propagateSpecialization
                 // will do that once we know the type of one of the operands.
+
+                // Edge case: when this phi has a non-phi input with an empty
+                // typeset, it's possible for two phis to have a cyclic
+                // dependency and they will both have MIRType_None. Specialize
+                // such phis to MIRType_Value later on.
+                if (hasInputsWithEmptyTypes && !phisWithEmptyInputTypes.append(*phi))
+                    return false;
                 continue;
             }
             if (!propagateSpecialization(*phi))
@@ -554,14 +581,31 @@ TypeAnalyzer::specializePhis()
         }
     }
 
-    while (!phiWorklist_.empty()) {
-        if (mir->shouldCancel("Specialize Phis (worklist)"))
-            return false;
+    do {
+        while (!phiWorklist_.empty()) {
+            if (mir->shouldCancel("Specialize Phis (worklist)"))
+                return false;
 
-        MPhi *phi = popPhi();
-        if (!propagateSpecialization(phi))
-            return false;
-    }
+            MPhi *phi = popPhi();
+            if (!propagateSpecialization(phi))
+                return false;
+        }
+
+        // When two phis have a cyclic dependency and inputs that have an empty
+        // typeset (which are ignored by GuessPhiType), we may still have to
+        // specialize these to MIRType_Value.
+        while (!phisWithEmptyInputTypes.empty()) {
+            if (mir->shouldCancel("Specialize Phis (phisWithEmptyInputTypes)"))
+                return false;
+
+            MPhi *phi = phisWithEmptyInputTypes.popCopy();
+            if (phi->type() == MIRType_None) {
+                phi->specialize(MIRType_Value);
+                if (!propagateSpecialization(phi))
+                    return false;
+            }
+        }
+    } while (!phiWorklist_.empty());
 
     return true;
 }
@@ -570,6 +614,7 @@ void
 TypeAnalyzer::adjustPhiInputs(MPhi *phi)
 {
     MIRType phiType = phi->type();
+    JS_ASSERT(phiType != MIRType_None);
 
     // If we specialized a type that's not Value, there are 3 cases:
     // 1. Every input is of that type.

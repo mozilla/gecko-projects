@@ -35,6 +35,7 @@ jfieldID AndroidGeckoEvent::jNativeWindowField = 0;
 jfieldID AndroidGeckoEvent::jCharactersField = 0;
 jfieldID AndroidGeckoEvent::jCharactersExtraField = 0;
 jfieldID AndroidGeckoEvent::jDataField = 0;
+jfieldID AndroidGeckoEvent::jDOMPrintableKeyValueField = 0;
 jfieldID AndroidGeckoEvent::jKeyCodeField = 0;
 jfieldID AndroidGeckoEvent::jMetaStateField = 0;
 jfieldID AndroidGeckoEvent::jDomKeyLocationField = 0;
@@ -146,6 +147,7 @@ AndroidGeckoEvent::InitGeckoEventClass(JNIEnv *jEnv)
     jFlagsField = getField("mFlags", "I");
     jUnicodeCharField = getField("mUnicodeChar", "I");
     jBaseUnicodeCharField = getField("mBaseUnicodeChar", "I");
+    jDOMPrintableKeyValueField = getField("mDOMPrintableKeyValue", "I");
     jRepeatCountField = getField("mRepeatCount", "I");
     jCountField = getField("mCount", "I");
     jStartField = getField("mStart", "I");
@@ -424,6 +426,8 @@ AndroidGeckoEvent::Init(JNIEnv *jenv, jobject jobj)
             mKeyCode = jenv->GetIntField(jobj, jKeyCodeField);
             mUnicodeChar = jenv->GetIntField(jobj, jUnicodeCharField);
             mBaseUnicodeChar = jenv->GetIntField(jobj, jBaseUnicodeCharField);
+            mDOMPrintableKeyValue =
+                jenv->GetIntField(jobj, jDOMPrintableKeyValueField);
             mRepeatCount = jenv->GetIntField(jobj, jRepeatCountField);
             ReadCharactersField(jenv);
             break;
@@ -561,6 +565,27 @@ AndroidGeckoEvent::Init(JNIEnv *jenv, jobject jobj)
         case TELEMETRY_HISTOGRAM_ADD: {
             ReadCharactersField(jenv);
             mCount = jenv->GetIntField(jobj, jCountField);
+            break;
+        }
+
+        case TELEMETRY_UI_SESSION_START: {
+            ReadCharactersField(jenv);
+            mTime = jenv->GetLongField(jobj, jTimeField);
+            break;
+        }
+
+        case TELEMETRY_UI_SESSION_STOP: {
+            ReadCharactersField(jenv);
+            ReadCharactersExtraField(jenv);
+            mTime = jenv->GetLongField(jobj, jTimeField);
+            break;
+        }
+
+        case TELEMETRY_UI_EVENT: {
+            ReadCharactersField(jenv);
+            ReadCharactersExtraField(jenv);
+            ReadDataField(jenv);
+            mTime = jenv->GetLongField(jobj, jTimeField);
             break;
         }
 

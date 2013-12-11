@@ -54,7 +54,7 @@ FallbackICSpew(JSContext *cx, ICFallbackStub *stub, const char *fmt, ...)
         IonSpew(IonSpew_BaselineICFallback,
                 "Fallback hit for (%s:%d) (pc=%d,line=%d,uses=%d,stubs=%d): %s",
                 script->filename(),
-                script->lineno,
+                script->lineno(),
                 (int) script->pcToOffset(pc),
                 PCToLineNumber(script, pc),
                 script->getUseCount(),
@@ -79,7 +79,7 @@ TypeFallbackICSpew(JSContext *cx, ICTypeMonitor_Fallback *stub, const char *fmt,
         IonSpew(IonSpew_BaselineICFallback,
                 "Type monitor fallback hit for (%s:%d) (pc=%d,line=%d,uses=%d,stubs=%d): %s",
                 script->filename(),
-                script->lineno,
+                script->lineno(),
                 (int) script->pcToOffset(pc),
                 PCToLineNumber(script, pc),
                 script->getUseCount(),
@@ -496,10 +496,8 @@ ICTypeMonitor_Fallback::resetMonitorStubChain(Zone *zone)
         // We are removing edges from monitored stubs to gcthings (IonCode).
         // Perform one final trace of all monitor stubs for incremental GC,
         // as it must know about those edges.
-        if (hasFallbackStub_) {
-            for (ICStub *s = firstMonitorStub_; !s->isTypeMonitor_Fallback(); s = s->next())
-                s->trace(zone->barrierTracer());
-        }
+        for (ICStub *s = firstMonitorStub_; !s->isTypeMonitor_Fallback(); s = s->next())
+            s->trace(zone->barrierTracer());
     }
 
     firstMonitorStub_ = this;
@@ -926,7 +924,7 @@ DoUseCountFallback(JSContext *cx, ICUseCount_Fallback *stub, BaselineFrame *fram
     // Ensure that Ion-compiled code is available.
     IonSpew(IonSpew_BaselineOSR,
             "UseCount for %s:%d reached %d at pc %p, trying to switch to Ion!",
-            script->filename(), script->lineno, (int) script->getUseCount(), (void *) pc);
+            script->filename(), script->lineno(), (int) script->getUseCount(), (void *) pc);
     void *jitcode = nullptr;
     if (!EnsureCanEnterIon(cx, stub, frame, script, pc, &jitcode))
         return false;
@@ -1056,7 +1054,7 @@ DoProfilerFallback(JSContext *cx, BaselineFrame *frame, ICProfiler_Fallback *stu
         return false;
 
     IonSpew(IonSpew_BaselineIC, "  Generating Profiler_PushFunction stub for %s:%d",
-            script->filename(), script->lineno);
+            script->filename(), script->lineno());
 
     // Create a new optimized stub.
     ICProfiler_PushFunction::Compiler compiler(cx, string, script);
@@ -1095,7 +1093,7 @@ ICProfiler_PushFunction::Compiler::generateStubCode(MacroAssembler &masm)
     Label spsEnabled;
     uint32_t *enabledAddr = cx->runtime()->spsProfiler.addressOfEnabled();
     masm.branch32(Assembler::NotEqual, AbsoluteAddress(enabledAddr), Imm32(0), &spsEnabled);
-    masm.assume_unreachable("Profiling should have been enabled.");
+    masm.assumeUnreachable("Profiling should have been enabled.");
     masm.bind(&spsEnabled);
 #endif
 
@@ -1817,7 +1815,7 @@ DoCompareFallback(JSContext *cx, BaselineFrame *frame, ICCompare_Fallback *stub,
                     rhs.isUndefined() ? "Undefined" : "Number");
         ICCompare_NumberWithUndefined::Compiler compiler(cx, op, lhs.isUndefined());
         ICStub *doubleStub = compiler.getStub(compiler.getStubSpace(script));
-        if (!stub)
+        if (!doubleStub)
             return false;
 
         stub->addNewStub(doubleStub);
@@ -3053,11 +3051,9 @@ DoUnaryArithFallback(JSContext *cx, BaselineFrame *frame, ICUnaryArith_Fallback 
         return true;
     }
 
-    if (val.isNumber() && res.isNumber() &&
-        op == JSOP_NEG &&
-        cx->runtime()->jitSupportsFloatingPoint)
-    {
+    if (val.isNumber() && res.isNumber() && cx->runtime()->jitSupportsFloatingPoint) {
         IonSpew(IonSpew_BaselineIC, "  Generating %s(Number => Number) stub", js_CodeName[op]);
+
         // Unlink int32 stubs, the double stub handles both cases and TI specializes for both.
         stub->unlinkStubsWithKind(cx, ICStub::UnaryArith_Int32);
 
@@ -3105,9 +3101,30 @@ ICUnaryArith_Double::Compiler::generateStubCode(MacroAssembler &masm)
     Label failure;
     masm.ensureDouble(R0, FloatReg0, &failure);
 
-    JS_ASSERT(op == JSOP_NEG);
-    masm.negateDouble(FloatReg0);
-    masm.boxDouble(FloatReg0, R0);
+    JS_ASSERT(op == JSOP_NEG || op == JSOP_BITNOT);
+
+    if (op == JSOP_NEG) {
+        masm.negateDouble(FloatReg0);
+        masm.boxDouble(FloatReg0, R0);
+    } else {
+        // Truncate the double to an int32.
+        Register scratchReg = R1.scratchReg();
+
+        Label doneTruncate;
+        Label truncateABICall;
+        masm.branchTruncateDouble(FloatReg0, scratchReg, &truncateABICall);
+        masm.jump(&doneTruncate);
+
+        masm.bind(&truncateABICall);
+        masm.setupUnalignedABICall(1, scratchReg);
+        masm.passABIArg(FloatReg0);
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, js::ToInt32));
+        masm.storeCallResult(scratchReg);
+
+        masm.bind(&doneTruncate);
+        masm.not32(scratchReg);
+        masm.tagValue(JSVAL_TYPE_INT32, scratchReg, R0);
+    }
 
     EmitReturnFromIC(masm);
 
@@ -3760,7 +3777,7 @@ static bool TryAttachNativeGetElemStub(JSContext *cx, HandleScript script, jsbyt
                     "(obj=%p, shape=%p, holder=%p, holderShape=%p)",
                         (obj == holder) ? "direct" : "prototype",
                         needsAtomize ? " atomizing" : "",
-                        getter->nonLazyScript()->filename(), getter->nonLazyScript()->lineno,
+                        getter->nonLazyScript()->filename(), getter->nonLazyScript()->lineno(),
                         obj.get(), obj->lastProperty(), holder.get(), holder->lastProperty());
         } else {
             IonSpew(IonSpew_BaselineIC,
@@ -4279,12 +4296,20 @@ ICGetElemNativeCompiler::generateStubCode(MacroAssembler &masm)
             masm.branchTestUndefined(Assembler::NotEqual, valAddr, &skipNoSuchMethod);
 
             GeneralRegisterSet regs = availableGeneralRegs(0);
-            regs.takeUnchecked(objReg);
             regs.take(R1);
-            Register scratch = regs.takeAnyExcluding(BaselineTailCallReg);
+            regs.take(R0);
+            regs.takeUnchecked(objReg);
             if (popR1)
                 masm.pop(R1.scratchReg());
-            enterStubFrame(masm, scratch);
+
+            // Box and push obj and key onto baseline frame stack for decompiler.
+            masm.tagValue(JSVAL_TYPE_OBJECT, objReg, R0);
+            EmitStowICValues(masm, 2);
+
+            regs.add(R0);
+            regs.takeUnchecked(objReg);
+
+            enterStubFrame(masm, regs.getAnyExcluding(BaselineTailCallReg));
 
             masm.pushValue(R1);
             masm.push(objReg);
@@ -4292,6 +4317,10 @@ ICGetElemNativeCompiler::generateStubCode(MacroAssembler &masm)
                 return false;
 
             leaveStubFrame(masm);
+
+            // Pop pushed obj and key from baseline stack.
+            EmitUnstowICValues(masm, 2, /* discard = */ true);
+
             // Result is already in R0
             masm.jump(&afterNoSuchMethod);
             masm.bind(&skipNoSuchMethod);
@@ -4455,10 +4484,20 @@ ICGetElem_Dense::Compiler::generateStubCode(MacroAssembler &masm)
         regs = availableGeneralRegs(0);
         regs.takeUnchecked(obj);
         regs.takeUnchecked(key);
+        regs.takeUnchecked(BaselineTailCallReg);
         ValueOperand val = regs.takeValueOperand();
 
         masm.loadValue(element, val);
         masm.branchTestUndefined(Assembler::NotEqual, val, &skipNoSuchMethod);
+
+        // Box and push obj and key onto baseline frame stack for decompiler.
+        EmitRestoreTailCallReg(masm);
+        masm.tagValue(JSVAL_TYPE_OBJECT, obj, val);
+        masm.pushValue(val);
+        masm.tagValue(JSVAL_TYPE_INT32, key, val);
+        masm.pushValue(val);
+        EmitRepushTailCallReg(masm);
+
         regs.add(val);
 
         // Call __noSuchMethod__ checker.  Object pointer is in objReg.
@@ -4473,6 +4512,10 @@ ICGetElem_Dense::Compiler::generateStubCode(MacroAssembler &masm)
             return false;
 
         leaveStubFrame(masm);
+
+        // Pop pushed obj and key from baseline stack.
+        EmitUnstowICValues(masm, 2, /* discard = */ true);
+
         // Result is already in R0
         masm.jump(&afterNoSuchMethod);
         masm.bind(&skipNoSuchMethod);
@@ -4686,19 +4729,33 @@ ICGetElem_Arguments::Compiler::generateStubCode(MacroAssembler &masm)
 
         // Call __noSuchMethod__ checker.  Object pointer is in objReg.
         regs = availableGeneralRegs(0);
-        // R1 and objReg are guaranteed not to overlap.
         regs.takeUnchecked(objReg);
-        regs.take(R1);
-        masm.tagValue(JSVAL_TYPE_INT32, idxReg, R1);
-        scratchReg = regs.takeAnyExcluding(BaselineTailCallReg);
-        enterStubFrame(masm, scratchReg);
+        regs.takeUnchecked(idxReg);
+        regs.takeUnchecked(BaselineTailCallReg);
+        ValueOperand val = regs.takeValueOperand();
 
-        masm.pushValue(R1);
+        // Box and push obj and key onto baseline frame stack for decompiler.
+        EmitRestoreTailCallReg(masm);
+        masm.tagValue(JSVAL_TYPE_OBJECT, objReg, val);
+        masm.pushValue(val);
+        masm.tagValue(JSVAL_TYPE_INT32, idxReg, val);
+        masm.pushValue(val);
+        EmitRepushTailCallReg(masm);
+
+        regs.add(val);
+        enterStubFrame(masm, regs.getAnyExcluding(BaselineTailCallReg));
+        regs.take(val);
+
+        masm.pushValue(val);
         masm.push(objReg);
         if (!callVM(LookupNoSuchMethodHandlerInfo, masm))
             return false;
 
         leaveStubFrame(masm);
+
+        // Pop pushed obj and key from baseline stack.
+        EmitUnstowICValues(masm, 2, /* discard = */ true);
+
         // Result is already in R0
         masm.jump(&afterNoSuchMethod);
         masm.bind(&skipNoSuchMethod);
@@ -5133,7 +5190,7 @@ ICSetElem_Dense::Compiler::generateStubCode(MacroAssembler &masm)
     if (cx->runtime()->jitSupportsFloatingPoint)
         masm.convertInt32ValueToDouble(valueAddr, regs.getAny(), &dontConvertDoubles);
     else
-        masm.assume_unreachable("There shouldn't be double arrays when there is no FP support.");
+        masm.assumeUnreachable("There shouldn't be double arrays when there is no FP support.");
     masm.bind(&dontConvertDoubles);
 
     // Don't overwrite R0 becuase |obj| might overlap with it, and it's needed
@@ -5321,7 +5378,7 @@ ICSetElemDenseAddCompiler::generateStubCode(MacroAssembler &masm)
     if (cx->runtime()->jitSupportsFloatingPoint)
         masm.convertInt32ValueToDouble(valueAddr, regs.getAny(), &dontConvertDoubles);
     else
-        masm.assume_unreachable("There shouldn't be double arrays when there is no FP support.");
+        masm.assumeUnreachable("There shouldn't be double arrays when there is no FP support.");
     masm.bind(&dontConvertDoubles);
 
     // Write the value.  No need for pre-barrier since we're not overwriting an old value.
@@ -6072,7 +6129,7 @@ TryAttachNativeGetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc,
         JS_ASSERT(callee->hasScript());
 
         IonSpew(IonSpew_BaselineIC, "  Generating GetProp(NativeObj/ScriptedGetter %s:%d) stub",
-                    callee->nonLazyScript()->filename(), callee->nonLazyScript()->lineno);
+                    callee->nonLazyScript()->filename(), callee->nonLazyScript()->lineno());
 
         ICGetProp_CallScripted::Compiler compiler(cx, monitorStub, obj, holder, callee,
                                                   script->pcToOffset(pc));
@@ -6516,16 +6573,33 @@ ICGetPropNativeCompiler::generateStubCode(MacroAssembler &masm)
         masm.branchTestUndefined(Assembler::NotEqual, R0, &skipNoSuchMethod);
 
         masm.pop(objReg);
-        enterStubFrame(masm, scratch);
 
-        masm.movePtr(ImmGCPtr(propName_.get()), R1.scratchReg());
-        masm.tagValue(JSVAL_TYPE_STRING, R1.scratchReg(), R1);
-        masm.pushValue(R1);
+        // Call __noSuchMethod__ checker.  Object pointer is in objReg.
+        regs = availableGeneralRegs(0);
+        regs.takeUnchecked(objReg);
+        regs.takeUnchecked(BaselineTailCallReg);
+        ValueOperand val = regs.takeValueOperand();
+
+        // Box and push obj onto baseline frame stack for decompiler.
+        EmitRestoreTailCallReg(masm);
+        masm.tagValue(JSVAL_TYPE_OBJECT, objReg, val);
+        masm.pushValue(val);
+        EmitRepushTailCallReg(masm);
+
+        enterStubFrame(masm, regs.getAnyExcluding(BaselineTailCallReg));
+
+        masm.movePtr(ImmGCPtr(propName_.get()), val.scratchReg());
+        masm.tagValue(JSVAL_TYPE_STRING, val.scratchReg(), val);
+        masm.pushValue(val);
         masm.push(objReg);
         if (!callVM(LookupNoSuchMethodHandlerInfo, masm))
             return false;
 
         leaveStubFrame(masm);
+
+        // Pop pushed obj from baseline stack.
+        EmitUnstowICValues(masm, 1, /* discard = */ true);
+
         masm.jump(&afterNoSuchMethod);
         masm.bind(&skipNoSuchMethod);
 
@@ -7091,7 +7165,7 @@ TryAttachSetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc, ICSetPr
         JS_ASSERT(callee->hasScript());
 
         IonSpew(IonSpew_BaselineIC, "  Generating SetProp(NativeObj/ScriptedSetter %s:%d) stub",
-                    callee->nonLazyScript()->filename(), callee->nonLazyScript()->lineno);
+                    callee->nonLazyScript()->filename(), callee->nonLazyScript()->lineno());
 
         ICSetProp_CallScripted::Compiler compiler(cx, obj, holder, callee, script->pcToOffset(pc));
         ICStub *newStub = compiler.getStub(compiler.getStubSpace(script));
@@ -7881,7 +7955,7 @@ TryAttachCallStub(JSContext *cx, ICCall_Fallback *stub, HandleScript script, jsb
 
         IonSpew(IonSpew_BaselineIC,
                 "  Generating Call_Scripted stub (fun=%p, %s:%d, cons=%s)",
-                fun.get(), fun->nonLazyScript()->filename(), fun->nonLazyScript()->lineno,
+                fun.get(), fun->nonLazyScript()->filename(), fun->nonLazyScript()->lineno(),
                 constructing ? "yes" : "no");
         ICCallScriptedCompiler compiler(cx, stub->fallbackMonitorStub()->firstMonitorStub(),
                                         calleeScript, templateObject,
@@ -8284,7 +8358,7 @@ ICCall_Fallback::Compiler::generateStubCode(MacroAssembler &masm)
     masm.moveValue(R1, R0);
 #ifdef DEBUG
     masm.branchTestObject(Assembler::Equal, JSReturnOperand, &skipThisReplace);
-    masm.assume_unreachable("Failed to return object in constructing call.");
+    masm.assumeUnreachable("Failed to return object in constructing call.");
 #endif
     masm.bind(&skipThisReplace);
 
@@ -8393,7 +8467,7 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler &masm)
 #ifdef DEBUG
         Label createdThisIsObject;
         masm.branchTestObject(Assembler::Equal, JSReturnOperand, &createdThisIsObject);
-        masm.assume_unreachable("The return of CreateThis must be an object.");
+        masm.assumeUnreachable("The return of CreateThis must be an object.");
         masm.bind(&createdThisIsObject);
 #endif
 
@@ -8534,7 +8608,7 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler &masm)
         masm.loadValue(reloadThisSlot, JSReturnOperand);
 #ifdef DEBUG
         masm.branchTestObject(Assembler::Equal, JSReturnOperand, &skipThisReplace);
-        masm.assume_unreachable("Return of constructing call should be an object.");
+        masm.assumeUnreachable("Return of constructing call should be an object.");
 #endif
         masm.bind(&skipThisReplace);
     }

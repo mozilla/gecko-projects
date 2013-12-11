@@ -89,9 +89,9 @@ jit::NewBaselineFrameInspector(TempAllocator *temp, BaselineFrame *frame)
         }
     }
 
-    if (!inspector->varTypes.reserve(frame->script()->nfixed))
+    if (!inspector->varTypes.reserve(frame->script()->nfixed()))
         return nullptr;
-    for (size_t i = 0; i < frame->script()->nfixed; i++) {
+    for (size_t i = 0; i < frame->script()->nfixed(); i++) {
         if (script->varIsAliased(i))
             inspector->varTypes.infallibleAppend(types::Type::UndefinedType());
         else
@@ -316,7 +316,7 @@ IonBuilder::DontInline(JSScript *targetScript, const char *reason)
 {
     if (targetScript) {
         IonSpew(IonSpew_Inlining, "Cannot inline %s:%u: %s",
-                targetScript->filename(), targetScript->lineno, reason);
+                targetScript->filename(), targetScript->lineno(), reason);
     } else {
         IonSpew(IonSpew_Inlining, "Cannot inline: %s", reason);
     }
@@ -604,7 +604,7 @@ IonBuilder::build()
         return false;
 
     IonSpew(IonSpew_Scripts, "Analyzing script %s:%d (%p) (usecount=%d)",
-            script()->filename(), script()->lineno, (void *)script(), (int)script()->getUseCount());
+            script()->filename(), script()->lineno(), (void *)script(), (int)script()->getUseCount());
 
     if (!initParameters())
         return false;
@@ -749,7 +749,7 @@ IonBuilder::buildInline(IonBuilder *callerBuilder, MResumePoint *callerResumePoi
     inlineCallInfo_ = &callInfo;
 
     IonSpew(IonSpew_Scripts, "Inlining script %s:%d (%p)",
-            script()->filename(), script()->lineno, (void *)script());
+            script()->filename(), script()->lineno(), (void *)script());
 
     callerBuilder_ = callerBuilder;
     callerResumePoint_ = callerResumePoint;
@@ -984,7 +984,7 @@ bool
 IonBuilder::initArgumentsObject()
 {
     IonSpew(IonSpew_MIR, "%s:%d - Emitting code to initialize arguments object! block=%p",
-                              script()->filename(), script()->lineno, current);
+                              script()->filename(), script()->lineno(), current);
     JS_ASSERT(info().needsArgsObj());
     MCreateArgumentsObject *argsObj = MCreateArgumentsObject::New(alloc(), current->scopeChain());
     current->add(argsObj);
@@ -3846,7 +3846,6 @@ IonBuilder::inlineScriptedCall(CallInfo &callInfo, JSFunction *target)
     AutoAccumulateReturns aar(graph(), returns);
 
     // Build the graph.
-    JS_ASSERT_IF(analysisContext, !analysisContext->isExceptionPending());
     IonBuilder inlineBuilder(analysisContext, compartment,
                              &alloc(), &graph(), constraints(), &inspector, info, nullptr,
                              inliningDepth_ + 1, loopDepth_);
@@ -6003,7 +6002,7 @@ ClassHasResolveHook(CompileCompartment *comp, const Class *clasp, PropertyName *
     // properties are not reflected in type information, so pretend there is a
     // resolve hook for this property.
     if (clasp == &ArrayObject::class_)
-        return name = comp->runtime()->names().length;
+        return name == comp->runtime()->names().length;
 
     if (clasp->resolve == JS_ResolveStub)
         return false;

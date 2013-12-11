@@ -497,19 +497,12 @@ ContentChild::RecvPMemoryReportRequestConstructor(
     GetProcessName(process);
     AppendProcessId(process);
 
-    // Run each reporter.  The callback will turn each measurement into a
+    // Run the reporters.  The callback will turn each measurement into a
     // MemoryReport.
-    nsCOMPtr<nsISimpleEnumerator> e;
-    mgr->EnumerateReporters(getter_AddRefs(e));
     nsRefPtr<MemoryReportsWrapper> wrappedReports =
         new MemoryReportsWrapper(&reports);
     nsRefPtr<MemoryReportCallback> cb = new MemoryReportCallback(process);
-    bool more;
-    while (NS_SUCCEEDED(e->HasMoreElements(&more)) && more) {
-      nsCOMPtr<nsIMemoryReporter> r;
-      e->GetNext(getter_AddRefs(r));
-      r->CollectReports(cb, wrappedReports);
-    }
+    mgr->GetReportsForThisProcess(cb, wrappedReports);
 
     child->Send__delete__(child, generation, reports);
     return true;
@@ -1348,17 +1341,6 @@ PreloadSlowThings()
 
     TabChild::PreloadSlowThings();
 
-#ifdef MOZ_NUWA_PROCESS
-    // After preload of slow things, start freezing threads.
-    if (IsNuwaProcess()) {
-        // Perform GC before freezing the Nuwa process to reduce memory usage.
-        ContentChild::GetSingleton()->RecvGarbageCollect();
-
-        MessageLoop::current()->
-                PostTask(FROM_HERE,
-                         NewRunnableFunction(OnFinishNuwaPreparation));
-    }
-#endif
 }
 
 bool
@@ -1369,15 +1351,32 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
     mAppInfo.buildID.Assign(buildID);
     mAppInfo.name.Assign(name);
     mAppInfo.UAName.Assign(UAName);
+
+    if (!Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false)) {
+        return true;
+    }
+
     // If we're part of the mozbrowser machinery, go ahead and start
     // preloading things.  We can only do this for mozbrowser because
     // PreloadSlowThings() may set the docshell of the first TabChild
     // inactive, and we can only safely restore it to active from
     // BrowserElementChild.js.
-    if ((mIsForApp || mIsForBrowser) &&
-        Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false)) {
+    if ((mIsForApp || mIsForBrowser)
+#ifdef MOZ_NUWA_PROCESS
+        && !IsNuwaProcess()
+#endif
+       ) {
         PreloadSlowThings();
     }
+
+#ifdef MOZ_NUWA_PROCESS
+    if (IsNuwaProcess()) {
+        ContentChild::GetSingleton()->RecvGarbageCollect();
+        MessageLoop::current()->PostTask(
+            FROM_HERE, NewRunnableFunction(OnFinishNuwaPreparation));
+    }
+#endif
+
     return true;
 }
 
