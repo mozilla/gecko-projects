@@ -40,6 +40,7 @@ from mozbuild.util import (
 
 from mozbuild.backend.configenvironment import ConfigEnvironment
 
+from mozpack.files import FileFinder
 import mozpack.path as mozpath
 
 from .data import (
@@ -57,7 +58,6 @@ from .sandbox_symbols import (
     FUNCTIONS,
     VARIABLES,
 )
-
 
 if sys.version_info.major == 2:
     text_type = unicode
@@ -514,7 +514,7 @@ class BuildReaderError(Exception):
 
     def _print_keyerror(self, inner, s):
         if inner.args[0] not in ('global_ns', 'local_ns'):
-            self._print_exception(unner, s)
+            self._print_exception(inner, s)
             return
 
         if inner.args[0] == 'global_ns':
@@ -597,23 +597,53 @@ class BuildReader(object):
     def __init__(self, config):
         self.config = config
         self.topsrcdir = config.topsrcdir
+        self.topobjdir = config.topobjdir
 
         self._log = logging.getLogger(__name__)
         self._read_files = set()
         self._execution_stack = []
 
     def read_topsrcdir(self):
-        """Read the tree of mozconfig files into a data structure.
+        """Read the tree of linked moz.build files.
 
-        This starts with the tree's top-most mozbuild file and descends into
-        all linked mozbuild files until all relevant files have been evaluated.
+        This starts with the tree's top-most moz.build file and descends into
+        all linked moz.build files until all relevant files have been evaluated.
 
-        This is a generator of Sandbox instances. As each mozbuild file is
-        read, a new Sandbox is created. Each created Sandbox is returned.
+        This is a generator of Sandbox instances. As each moz.build file is
+        read, a new Sandbox is created and emitted.
         """
         path = mozpath.join(self.topsrcdir, 'moz.build')
         return self.read_mozbuild(path, read_tiers=True,
             filesystem_absolute=True, metadata={'tier': None})
+
+    def walk_topsrcdir(self):
+        """Read all moz.build files in the source tree.
+
+        This is different from read_topsrcdir() in that this version performs a
+        filesystem walk to discover every moz.build file rather than relying on
+        data from executed moz.build files to drive traversal.
+
+        This is a generator of Sandbox instances.
+        """
+        # In the future, we may traverse moz.build files by looking
+        # for DIRS references in the AST, even if a directory is added behind
+        # a conditional. For now, just walk the filesystem.
+        ignore = {
+            # Ignore fake moz.build files used for testing moz.build.
+            'python/mozbuild/mozbuild/test',
+
+            # Ignore object directories.
+            'obj*',
+        }
+
+        finder = FileFinder(self.topsrcdir, find_executables=False,
+            ignore=ignore)
+
+        for path, f in finder.find('**/moz.build'):
+            path = os.path.join(self.topsrcdir, path)
+            for s in self.read_mozbuild(path, descend=False,
+                filesystem_absolute=True, read_tiers=True):
+                yield s
 
     def read_mozbuild(self, path, read_tiers=False, filesystem_absolute=False,
             descend=True, metadata={}):
@@ -703,25 +733,58 @@ class BuildReader(object):
                        ' and '.join(', '.join(matches).rsplit(', ', 1)),
                        's are' if len(matches) > 1 else ' is'))
 
-        yield sandbox
-
-        # Traverse into referenced files.
-
         # We first collect directories populated in variables.
         dir_vars = ['DIRS', 'PARALLEL_DIRS', 'TOOL_DIRS']
 
         if self.config.substs.get('ENABLE_TESTS', False) == '1':
             dir_vars.extend(['TEST_DIRS', 'TEST_TOOL_DIRS'])
 
+        dirs = [(v, sandbox[v]) for v in dir_vars if v in sandbox]
+
+        curdir = mozpath.dirname(path)
+
+        gyp_sandboxes = []
+        for target_dir in sandbox['GYP_DIRS']:
+            gyp_dir = sandbox['GYP_DIRS'][target_dir]
+            for v in ('input', 'variables'):
+                if not getattr(gyp_dir, v):
+                    raise Exception('Missing value for GYP_DIRS["%s"].%s' %
+                        (target_dir, v))
+
+            # The make backend assumes sandboxes for sub-directories are
+            # emitted after their parent, so accumulate the gyp sandboxes.
+            # We could emit the parent sandbox before processing gyp
+            # configuration, but we need to add the gyp objdirs to that sandbox
+            # first.
+            from .gyp_reader import read_from_gyp
+            gyp_sandboxes.extend(read_from_gyp(self.config,
+                                               mozpath.join(curdir, gyp_dir.input),
+                                               mozpath.join(sandbox['OBJDIR'],
+                                                            target_dir),
+                                               gyp_dir.variables))
+
+        # Add the gyp subdirectories to DIRS. We don't care about trying to
+        # place some of them in PARALLEL_DIRS because they're only going to be
+        # relevant for the compile and libs tiers. The compile tier is already
+        # parallelized, and the libs tier is always serialized, and will remain
+        # so until the library linking operations are moved out of it, at which
+        # point PARALLEL_DIRS will be irrelevant anyways.
+        for gyp_sandbox in gyp_sandboxes:
+            sandbox['DIRS'].append(mozpath.relpath(gyp_sandbox['OBJDIR'], sandbox['OBJDIR']))
+
+        yield sandbox
+
+        for gyp_sandbox in gyp_sandboxes:
+            yield gyp_sandbox
+
+        # Traverse into referenced files.
+
         # It's very tempting to use a set here. Unfortunately, the recursive
         # make backend needs order preserved. Once we autogenerate all backend
         # files, we should be able to convert this to a set.
         recurse_info = OrderedDict()
-        for var in dir_vars:
-            if not var in sandbox:
-                continue
-
-            for d in sandbox[var]:
+        for var, var_dirs in dirs:
+            for d in var_dirs:
                 if d in recurse_info:
                     raise SandboxValidationError(
                         'Directory (%s) registered multiple times in %s' % (
@@ -752,7 +815,6 @@ class BuildReader(object):
                                        'parent': sandbox['RELATIVEDIR'],
                                        'var': 'DIRS'}
 
-        curdir = mozpath.dirname(path)
         for relpath, child_metadata in recurse_info.items():
             child_path = mozpath.join(curdir, relpath, 'moz.build')
 

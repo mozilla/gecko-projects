@@ -68,10 +68,11 @@ VARIABLES = {
         file.
         """, 'export'),
 
-    'ANDROID_RESFILES': (StrictOrderingOnAppendList, list,
-        """Android resource files.
+    'ANDROID_RES_DIRS': (list, list,
+        """Android resource directories.
 
-        This variable contains a list of files to package into a 'res'
+        This variable contains a list of directories, each relative to
+        the srcdir, containing static files to package into a 'res'
         directory and merge into an APK file.
         """, 'export'),
 
@@ -383,18 +384,6 @@ VARIABLES = {
         populated by calling add_tier_dir().
         """, None),
 
-    'EXTERNAL_MAKE_DIRS': (list, list,
-        """Directories that build with make but don't use moz.build files.
-
-        This is like ``DIRS`` except it implies that ``make`` is used to build the
-        directory and that the directory does not define itself with moz.build
-        files.
-        """, None),
-
-    'PARALLEL_EXTERNAL_MAKE_DIRS': (list, list,
-        """Parallel version of ``EXTERNAL_MAKE_DIRS``.
-        """, None),
-
     'CONFIGURE_SUBST_FILES': (StrictOrderingOnAppendList, list,
         """Output files that will be generated using configure-like substitution.
 
@@ -571,6 +560,43 @@ VARIABLES = {
         result is dist/xpi-stage/$(XPI_NAME). If DIST_SUBDIR is present, then
         the $(DIST_SUBDIR) directory of the otherwise default value is used.
         """, 'libs'),
+
+    'GYP_DIRS': (StrictOrderingOnAppendListWithFlagsFactory({
+            'variables': dict,
+            'input': unicode,
+        }), list,
+        """Defines a list of object directories handled by gyp configurations.
+
+        Elements of this list give the relative object directory. For each
+        element of the list, GYP_DIRS may be accessed as a dictionary
+        (GYP_DIRS[foo]). The object this returns has attributes that need to be
+        set to further specify gyp processing:
+            - input, gives the path to the root gyp configuration file for that
+              object directory.
+            - variables, a dictionary containing variables and values to pass
+              to the gyp processor.
+
+        Typical use looks like:
+            GYP_DIRS += ['foo', 'bar']
+            GYP_DIRS['foo'].input = 'foo/foo.gyp'
+            GYP_DIRS['foo'].variables = {
+                'foo': 'bar',
+                (...)
+            }
+            (...)
+        """, None),
+
+    'SPHINX_TREES': (dict, dict,
+        """Describes what the Sphinx documentation tree will look like.
+
+        Keys are relative directories inside the final Sphinx documentation
+        tree to install files into. Values are directories (relative to this
+        file) whose content to copy into the Sphinx documentation tree.
+        """, None),
+
+    'SPHINX_PYTHON_PACKAGE_DIRS': (StrictOrderingOnAppendList, list,
+        """Directories containing Python packages that Sphinx documents.
+        """, None),
 }
 
 # The set of functions exposed to the sandbox.

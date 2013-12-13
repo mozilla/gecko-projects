@@ -187,15 +187,6 @@ abstract public class BrowserApp extends GeckoApp
     // race by determining if the web content should be hidden at the animation's end.
     private boolean mHideWebContentOnAnimationEnd = false;
 
-    private SiteIdentityPopup mSiteIdentityPopup;
-
-    public SiteIdentityPopup getSiteIdentityPopup() {
-        if (mSiteIdentityPopup == null)
-            mSiteIdentityPopup = new SiteIdentityPopup(this);
-
-        return mSiteIdentityPopup;
-    }
-
     @Override
     public void onTabChanged(Tab tab, Tabs.TabEvents msg, Object data) {
         if (tab == null) {
@@ -217,9 +208,6 @@ abstract public class BrowserApp extends GeckoApp
             case SELECTED:
                 if (Tabs.getInstance().isSelectedTab(tab)) {
                     updateHomePagerForTab(tab);
-
-                    if (mSiteIdentityPopup != null)
-                        mSiteIdentityPopup.dismiss();
 
                     final TabsPanel.Panel panel = tab.isPrivate()
                                                 ? TabsPanel.Panel.PRIVATE_TABS
@@ -617,8 +605,7 @@ abstract public class BrowserApp extends GeckoApp
             return;
         }
 
-        if (mSiteIdentityPopup != null && mSiteIdentityPopup.isShowing()) {
-            mSiteIdentityPopup.dismiss();
+        if (mBrowserToolbar.onBackPressed()) {
             return;
         }
 
@@ -1047,9 +1034,7 @@ abstract public class BrowserApp extends GeckoApp
         invalidateOptionsMenu();
         updateSideBarState();
         mTabsPanel.refresh();
-        if (mSiteIdentityPopup != null) {
-            mSiteIdentityPopup.dismiss();
-        }
+        mBrowserToolbar.refresh();
     }
 
     @Override
@@ -1482,7 +1467,7 @@ abstract public class BrowserApp extends GeckoApp
         animator.setUseHardwareLayer(false);
 
         mBrowserToolbar.startEditing(url, animator);
-        showHomePagerWithAnimator(HomePager.Page.TOP_SITES, animator);
+        showHomePagerWithAnimator(animator);
 
         animator.start();
     }
@@ -1633,22 +1618,28 @@ abstract public class BrowserApp extends GeckoApp
         }
     }
 
-    private void showHomePager(HomePager.Page page) {
-        showHomePagerWithAnimator(page, null);
-    }
-
     @Override
     public void onLocaleReady(final String locale) {
         super.onLocaleReady(locale);
-        if (mHomePager != null) {
+        if (isHomePagerVisible()) {
             // Blow it away and rebuild it with the right strings.
-            mHomePager.redisplay(getSupportFragmentManager());
+            mHomePager.redisplay(getSupportLoaderManager(), getSupportFragmentManager());
         }
 
         if (mMenu != null) {
             mMenu.clear();
             onCreateOptionsMenu(mMenu);
         }
+    }
+
+    private void showHomePager(HomePager.Page page) {
+        showHomePagerWithAnimator(page, null);
+    }
+
+    private void showHomePagerWithAnimator(PropertyAnimator animator) {
+        // Passing null here means the default page will be defined
+        // by the HomePager's configuration.
+        showHomePagerWithAnimator(null, animator);
     }
 
     private void showHomePagerWithAnimator(HomePager.Page page, PropertyAnimator animator) {
@@ -1670,7 +1661,9 @@ abstract public class BrowserApp extends GeckoApp
             mHomePager = (HomePager) homePagerStub.inflate();
         }
 
-        mHomePager.show(getSupportFragmentManager(), page, animator);
+        mHomePager.show(getSupportLoaderManager(),
+                        getSupportFragmentManager(),
+                        page, animator);
 
         // Hide the web content so it cannot be focused by screen readers.
         hideWebContentOnPropertyAnimationEnd(animator);

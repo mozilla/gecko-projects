@@ -3277,7 +3277,7 @@ for (uint32_t i = 0; i < length; ++i) {
                                  exceptionCodeIndented.define()))
         templateBody = CGWrapper(CGIndenter(CGList([templateBody, throw], "\n")), pre="{\n", post="\n}")
 
-        typeName = ("Owning" if isMember else "") + type.name
+        typeName = CGUnionStruct.unionTypeDecl(type, isMember)
         argumentTypeName = typeName + "Argument"
         if nullable:
             typeName = "Nullable<" + typeName + " >"
@@ -3396,7 +3396,10 @@ for (uint32_t i = 0; i < length; ++i) {
             else:
                 declType = CGGeneric("OwningNonNull<%s>" % name)
             conversion = (
-                "${declName} = new %s(&${val}.toObject());\n" % name)
+                "{ // Scope for tempRoot\n"
+                "  JS::Rooted<JSObject*> tempRoot(cx, &${val}.toObject());\n"
+                "  ${declName} = new %s(tempRoot, mozilla::dom::GetIncumbentGlobal());\n"
+                "}" % name)
 
             template = wrapObjectTemplate(conversion, type,
                                           "${declName} = nullptr",
@@ -3729,7 +3732,10 @@ for (uint32_t i = 0; i < length; ++i) {
         else:
             declType = CGGeneric("OwningNonNull<%s>" % name)
         conversion = (
-            "  ${declName} = new %s(&${val}.toObject());\n" % name)
+            "{ // Scope for tempRoot\n"
+            "  JS::Rooted<JSObject*> tempRoot(cx, &${val}.toObject());\n"
+            "  ${declName} = new %s(tempRoot, mozilla::dom::GetIncumbentGlobal());\n"
+            "}\n" % name)
 
         if allowTreatNonCallableAsNull and type.treatNonCallableAsNull():
             haveCallable = "JS_ObjectIsCallable(cx, &${val}.toObject())"
@@ -3839,7 +3845,7 @@ for (uint32_t i = 0; i < length; ++i) {
         if not isMember and isCallbackReturnValue:
             # Go ahead and just convert directly into our actual return value
             declType = CGWrapper(declType, post="&")
-            declArgs = "retval"
+            declArgs = "aRetVal"
         elif not isMember and typeNeedsRooting(type):
             declType = CGTemplatedType("RootedDictionary", declType);
             declArgs = "cx"
@@ -4696,7 +4702,7 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
             resultArgs = None
         return result, True, None, resultArgs
     if returnType.isUnion():
-        result = CGGeneric("Owning" + returnType.unroll().name)
+        result = CGGeneric(CGUnionStruct.unionTypeName(returnType.unroll(), True))
         if not isMember and typeNeedsRooting(returnType):
             if returnType.nullable():
                 result = CGTemplatedType("NullableRootedUnion", result)
@@ -6885,7 +6891,7 @@ class CGUnionStruct(CGThing):
                          default=CGGeneric("return false;")).define(), const=True))
 
         constructors = [ctor]
-        selfName = ("Owning" if self.ownsMembers else "") + str(self.type)
+        selfName = CGUnionStruct.unionTypeName(self.type, self.ownsMembers)
         if self.ownsMembers:
             if len(traceCases):
                 traceBody = CGSwitch("mType", traceCases,
@@ -6943,6 +6949,28 @@ class CGUnionStruct(CGThing):
     @staticmethod
     def isUnionCopyConstructible(type):
         return all(isTypeCopyConstructible(t) for t in type.flatMemberTypes)
+
+    @staticmethod
+    def unionTypeName(type, ownsMembers):
+        """
+        Returns a string name for this known union type.
+        """
+        assert type.isUnion() and not type.nullable()
+        return ("Owning" if ownsMembers else "") + type.name
+
+    @staticmethod
+    def unionTypeDecl(type, ownsMembers):
+        """
+        Returns a string for declaring this possibly-nullable union type.
+        """
+        assert type.isUnion()
+        nullable = type.nullable()
+        if nullable:
+            type = type.inner
+        decl = CGGeneric(CGUnionStruct.unionTypeName(type, ownsMembers))
+        if nullable:
+            decl = CGTemplatedType("Nullable", decl)
+        return decl.define()
 
 class CGUnionConversionStruct(CGThing):
     def __init__(self, type, descriptorProvider):
@@ -9478,7 +9506,10 @@ class CGForwardDeclarations(CGWrapper):
             elif t.isCallbackInterface():
                 builder.addInMozillaDom(t.inner.identifier.name)
             elif t.isUnion():
-                builder.addInMozillaDom(str(t))
+                # Forward declare both the owning and non-owning version,
+                # since we don't know which one we might want
+                builder.addInMozillaDom(CGUnionStruct.unionTypeName(t, False))
+                builder.addInMozillaDom(CGUnionStruct.unionTypeName(t, True))
             # Don't need to do anything for void, primitive, string, any or object.
             # There may be some other cases we are missing.
 
@@ -9761,13 +9792,13 @@ class CGNativeMember(ClassMethod):
                 # No need for a third element in the isMember case
                 return "nsString", None, None
             # Outparam
-            return "void", "", "retval = ${declName};"
+            return "void", "", "aRetVal = ${declName};"
         if type.isByteString():
             if isMember:
                 # No need for a third element in the isMember case
                 return "nsCString", None, None
             # Outparam
-            return "void", "", "retval = ${declName};"
+            return "void", "", "aRetVal = ${declName};"
         if type.isEnum():
             enumName = type.unroll().inner.identifier.name
             if type.nullable():
@@ -9827,12 +9858,12 @@ class CGNativeMember(ClassMethod):
             # Outparam.
             if type.nullable():
                 returnCode = ("if (${declName}.IsNull()) {\n"
-                              "  retval.SetNull();\n"
+                              "  aRetVal.SetNull();\n"
                               "} else {\n"
-                              "  retval.SetValue().SwapElements(${declName}.Value());\n"
+                              "  aRetVal.SetValue().SwapElements(${declName}.Value());\n"
                               "}")
             else:
-                returnCode = "retval.SwapElements(${declName});"
+                returnCode = "aRetVal.SwapElements(${declName});"
             return "void", "", returnCode
         if type.isDate():
             result = CGGeneric("Date")
@@ -9848,6 +9879,14 @@ class CGNativeMember(ClassMethod):
                 return CGDictionary.makeDictionaryName(type.inner), None, None
             # In this case we convert directly into our outparam to start with
             return "void", "", ""
+        if type.isUnion():
+            if isMember:
+                # Only the first member of the tuple matters here, but return
+                # bogus values for the others in case someone decides to use
+                # them.
+                return CGUnionStruct.unionTypeDecl(type, True), None, None
+            # In this case we convert directly into our outparam to start with
+            return "void", "", ""
 
         raise TypeError("Don't know how to declare return value for %s" %
                         type)
@@ -9856,9 +9895,9 @@ class CGNativeMember(ClassMethod):
         args = [self.getArg(arg) for arg in argList]
         # Now the outparams
         if returnType.isDOMString():
-            args.append(Argument("nsString&", "retval"))
+            args.append(Argument("nsString&", "aRetVal"))
         elif returnType.isByteString():
-            args.append(Argument("nsCString&", "retval"))
+            args.append(Argument("nsCString&", "aRetVal"))
         elif returnType.isSequence():
             nullable = returnType.nullable()
             if nullable:
@@ -9868,7 +9907,7 @@ class CGNativeMember(ClassMethod):
             type = CGTemplatedType("nsTArray", CGGeneric(elementDecl))
             if nullable:
                 type = CGTemplatedType("Nullable", type)
-            args.append(Argument("%s&" % type.define(), "retval"))
+            args.append(Argument("%s&" % type.define(), "aRetVal"))
         elif returnType.isDictionary():
             nullable = returnType.nullable()
             if nullable:
@@ -9876,7 +9915,11 @@ class CGNativeMember(ClassMethod):
             dictType = CGGeneric(CGDictionary.makeDictionaryName(returnType.inner))
             if nullable:
                 dictType = CGTemplatedType("Nullable", dictType)
-            args.append(Argument("%s&" % dictType.define(), "retval"))
+            args.append(Argument("%s&" % dictType.define(), "aRetVal"))
+        elif returnType.isUnion():
+            args.append(Argument("%s&" %
+                                 CGUnionStruct.unionTypeDecl(returnType, True),
+                                 "aRetVal"))
         # And the ErrorResult
         if not 'infallible' in self.extendedAttrs:
             # Use aRv so it won't conflict with local vars named "rv"
@@ -9921,9 +9964,9 @@ class CGNativeMember(ClassMethod):
             return decl.define(), True, True
 
         if type.isUnion():
-            if type.nullable():
-                type = type.inner
-            return str(type), True, True
+            # unionTypeDecl will handle nullable types, so return False for
+            # auto-wrapping in Nullable
+            return CGUnionStruct.unionTypeDecl(type, isMember), True, False
 
         if type.isGeckoInterface() and not type.isCallbackInterface():
             iface = type.unroll().inner
@@ -10549,7 +10592,7 @@ class CGJSImplClass(CGBindingImplClass):
             decorators = "MOZ_FINAL"
             destructor = None
 
-        baseConstructors=["mImpl(new %s(aJSImplObject))" % jsImplName(descriptor.name),
+        baseConstructors=["mImpl(new %s(aJSImplObject, /* aIncumbentGlobal = */ nullptr))" % jsImplName(descriptor.name),
                           "mParent(aParent)"]
         parentInterface = descriptor.interface.parent
         while parentInterface:
@@ -10676,12 +10719,12 @@ class CGCallback(CGClass):
 
     def getConstructors(self):
         return [ClassConstructor(
-            [Argument("JSObject*", "aCallback")],
+            [Argument("JS::Handle<JSObject*>", "aCallback"), Argument("nsIGlobalObject*", "aIncumbentGlobal")],
             bodyInHeader=True,
             visibility="public",
             explicit=True,
             baseConstructors=[
-                "%s(aCallback)" % self.baseName
+                "%s(aCallback, aIncumbentGlobal)" % self.baseName,
                 ])]
 
     def getMethodImpls(self, method):
@@ -10706,7 +10749,7 @@ class CGCallback(CGClass):
         argsWithoutThis = list(args)
         args.insert(0, Argument("const T&",  "thisObj"))
 
-        setupCall = ("CallSetup s(CallbackPreserveColor(), aRv, aExceptionHandling);\n"
+        setupCall = ("CallSetup s(this, aRv, aExceptionHandling);\n"
                      "if (!s.GetContext()) {\n"
                      "  aRv.Throw(NS_ERROR_UNEXPECTED);\n"
                      "  return${errorReturn};\n"
@@ -10996,7 +11039,7 @@ class CallbackMember(CGNativeMember):
         if self.needThisHandling:
             # It's been done for us already
             return ""
-        callSetup = "CallSetup s(CallbackPreserveColor(), aRv"
+        callSetup = "CallSetup s(this, aRv"
         if self.rethrowContentException:
             # getArgs doesn't add the aExceptionHandling argument but does add
             # aCompartment for us.
@@ -11429,72 +11472,36 @@ class CGEventGetter(CGNativeMember):
                                                                    attr),
                                 (attr.type, []),
                                 ea)
-
-    def retval(self, type):
-        if type.isPrimitive() and type.tag() in builtinNames:
-            result = CGGeneric(builtinNames[type.tag()])
-            if type.nullable():
-                result = CGTemplatedType("Nullable", result)
-            return result.define()
-        if type.isDOMString():
-            return "void"
-        if type.isByteString():
-            return "void"
-        if type.isEnum():
-            enumName = type.unroll().inner.identifier.name
-            if type.nullable():
-                enumName = CGTemplatedType("Nullable",
-                                           CGGeneric(enumName)).define()
-            return enumName
-        if type.isGeckoInterface():
-            iface = type.unroll().inner;
-            nativeType = self.descriptorProvider.getDescriptor(
-                iface.identifier.name).nativeType
-            # Now trim off unnecessary namespaces
-            nativeType = nativeType.split("::")
-            if nativeType[0] == "mozilla":
-                nativeType.pop(0)
-                if nativeType[0] == "dom":
-                    nativeType.pop(0)
-            return CGWrapper(CGGeneric("::".join(nativeType)), post="*").define()
-        if type.isAny():
-            return "JS::Value"
-        if type.isObject():
-            return "JSObject*"
-        if type.isSpiderMonkeyInterface():
-            return "JSObject*"
-        raise TypeError("Don't know how to declare return value for %s" %
-                        type)
+        self.body = self.getMethodBody()
 
     def getArgs(self, returnType, argList):
-        args = [self.getArg(arg) for arg in argList]
-        if returnType.isDOMString():
-            args.append(Argument("nsString&", "aRetVal"))
-        elif returnType.isByteString():
-            args.append(Argument("nsCString&", "aRetVal"))
-        if needCx(returnType, argList, self.extendedAttrs, True):
-            args.insert(0, Argument("JSContext*", "aCx"))
         if not 'infallible' in self.extendedAttrs:
             raise TypeError("Event code generator does not support [Throws]!")
-        return args
+        if not self.member.isAttr():
+            raise TypeError("Event code generator does not support methods")
+        if self.member.isStatic():
+            raise TypeError("Event code generators does not support static attributes")
+        return CGNativeMember.getArgs(self, returnType, argList)
 
     def getMethodBody(self):
         type = self.member.type
         memberName = CGDictionary.makeMemberName(self.member.identifier.name)
         if (type.isPrimitive() and type.tag() in builtinNames) or type.isEnum() or type.isGeckoInterface():
-            return "  return " + memberName + ";"
+            return "return " + memberName + ";"
         if type.isDOMString() or type.isByteString():
-            return "  aRetVal = " + memberName + ";";
+            return "aRetVal = " + memberName + ";";
         if type.isSpiderMonkeyInterface() or type.isObject():
-            ret =  "  if (%s) {\n" % memberName
-            ret += "    JS::ExposeObjectToActiveJS(%s);\n" % memberName
-            ret += "  }\n"
-            ret += "  return " + memberName + ";"
+            ret =  "if (%s) {\n" % memberName
+            ret += "  JS::ExposeObjectToActiveJS(%s);\n" % memberName
+            ret += "}\n"
+            ret += "return " + memberName + ";"
             return ret;
         if type.isAny():
-            ret =  "  JS::ExposeValueToActiveJS("+ memberName + ");\n"
-            ret += "  return " + memberName + ";"
+            ret =  "JS::ExposeValueToActiveJS("+ memberName + ");\n"
+            ret += "return " + memberName + ";"
             return ret;
+        if type.isUnion():
+            return "aRetVal = " + memberName + ";"
         raise TypeError("Event code generator does not support this type!")
 
     def declare(self, cgClass):
@@ -11507,11 +11514,7 @@ class CGEventGetter(CGNativeMember):
         if getattr(self.member, "originatingInterface",
                    cgClass.descriptor.interface) != cgClass.descriptor.interface:
             return ""
-        ret = self.retval(self.member.type);
-        methodName = self.descriptorProvider.name + '::' + self.name
-        args = (', '.join([a.declare() for a in self.args]))
-        body = self.getMethodBody()
-        return ret + "\n" + methodName + '(' + args + ') const\n{\n' + body + "\n}\n"
+        return CGNativeMember.define(self, cgClass)
 
 class CGEventSetter(CGNativeMember):
     def __init__(self):
@@ -11648,6 +11651,11 @@ class CGEventClass(CGBindingImplClass):
                     nativeType = "JS::Heap<JS::Value>"
                 elif m.type.isObject() or m.type.isSpiderMonkeyInterface():
                     nativeType = "JS::Heap<JSObject*>"
+                elif m.type.isUnion():
+                    nativeType = CGUnionStruct.unionTypeDecl(m.type, True)
+                else:
+                    raise TypeError("Don't know how to declare member of type %s" %
+                                    m.type)
                 members.append(ClassMember(CGDictionary.makeMemberName(m.identifier.name),
                                nativeType,
                                visibility="private",
@@ -11709,6 +11717,9 @@ class CGEventClass(CGBindingImplClass):
                     retVal += "  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(" + name + ")\n"
                 elif m.type.isObject() or m.type.isSpiderMonkeyInterface():
                     retVal += "  NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(" + name + ")\n"
+                elif typeNeedsRooting(m.type):
+                    raise TypeError("Need to implement tracing for event "
+                                    "member of type %s" % m.type)
         return retVal
 
     def define(self):

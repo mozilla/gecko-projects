@@ -40,7 +40,7 @@
 #endif
 #include "GeckoProfiler.h"
 
-struct nsCSSValueList;
+struct nsCSSValueSharedList;
 
 using namespace mozilla::dom;
 
@@ -348,7 +348,8 @@ SampleValue(float aPortion, Animation& aAnimation, nsStyleAnimation::Value& aSta
     return;
   }
 
-  nsCSSValueList* interpolatedList = interpolatedValue.GetCSSValueListValue();
+  nsCSSValueSharedList* interpolatedList =
+    interpolatedValue.GetCSSValueSharedListValue();
 
   TransformData& data = aAnimation.data().get_TransformData();
   nsPoint origin = data.origin();
@@ -524,7 +525,7 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(TimeStamp aCurrentFram
     appliedTransform = true;
   }
 
-  if (container->GetIsScrollbar()) {
+  if (container->GetScrollbarDirection() != Layer::NONE) {
     ApplyAsyncTransformToScrollbar(container);
   }
   return appliedTransform;

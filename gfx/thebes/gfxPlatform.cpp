@@ -85,6 +85,7 @@
 #include "mozilla/Mutex.h"
 
 #include "nsIGfxInfo.h"
+#include "nsIXULRuntime.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -717,6 +718,14 @@ gfxPlatform::GetSourceSurfaceForSurface(DrawTarget *aTarget, gfxASurface *aSurfa
 {
   if (!aSurface->CairoSurface() || aSurface->CairoStatus()) {
     return nullptr;
+  }
+
+  if (!aTarget) {
+    if (ScreenReferenceDrawTarget()) {
+      aTarget = ScreenReferenceDrawTarget();
+    } else {
+      return nullptr;
+    }
   }
 
   void *userData = aSurface->GetData(&kSourceSurface);
@@ -2067,7 +2076,7 @@ InitLayersAccelerationPrefs()
     sPrefLayoutFrameRate = Preferences::GetInt("layout.frame_rate", -1);
     sBufferRotationEnabled = Preferences::GetBool("layers.bufferrotation.enabled", true);
     sComponentAlphaEnabled = Preferences::GetBool("layers.componentalpha.enabled", true);
-    sPrefBrowserTabsRemote = Preferences::GetBool("browser.tabs.remote", false);
+    sPrefBrowserTabsRemote = BrowserTabsRemote();
 
 #ifdef XP_WIN
     if (sPrefLayersAccelerationForceEnabled) {
