@@ -121,6 +121,15 @@ static PRLogModuleInfo* gJSDiagnostics;
 
 #define NS_CC_SKIPPABLE_DELAY       400 // ms
 
+// Maximum amount of time that should elapse between incremental CC slices
+static const int64_t kICCIntersliceDelay = 32; // ms
+
+// Time budget for an incremental CC slice
+static const int64_t kICCSliceBudget = 10; // ms
+
+// Maximum total duration for an ICC
+static const uint32_t kMaxICCDuration = 2000; // ms
+
 // Force a CC after this long if there's more than NS_CC_FORCED_PURPLE_LIMIT
 // objects in the purple buffer.
 #define NS_CC_FORCED                (2 * 60 * PR_USEC_PER_SEC) // 2 min
@@ -144,10 +153,11 @@ static PRLogModuleInfo* gJSDiagnostics;
 static nsITimer *sGCTimer;
 static nsITimer *sShrinkGCBuffersTimer;
 static nsITimer *sCCTimer;
+static nsITimer *sICCTimer;
 static nsITimer *sFullGCTimer;
 static nsITimer *sInterSliceGCTimer;
 
-static PRTime sLastCCEndTime;
+static TimeStamp sLastCCEndTime;
 
 static bool sCCLockedOut;
 static PRTime sCCLockedOutTime;
@@ -180,6 +190,7 @@ static uint32_t sCleanupsSinceLastGC = UINT32_MAX;
 static bool sNeedsFullCC = false;
 static bool sNeedsGCAfterCC = false;
 static nsJSContext *sContextList = nullptr;
+static bool sIncrementalCC = false;
 
 static nsScriptNameSpaceManager *gNameSpaceManager;
 
@@ -222,6 +233,7 @@ KillTimers()
   nsJSContext::KillGCTimer();
   nsJSContext::KillShrinkGCBuffersTimer();
   nsJSContext::KillCCTimer();
+  nsJSContext::KillICCTimer();
   nsJSContext::KillFullGCTimer();
   nsJSContext::KillInterSliceGCTimer();
 }
@@ -1969,30 +1981,52 @@ FireForgetSkippable(uint32_t aSuspected, bool aRemoveChildless)
 
 MOZ_ALWAYS_INLINE
 static uint32_t
-TimeBetween(PRTime start, PRTime end)
+TimeBetween(TimeStamp start, TimeStamp end)
 {
   MOZ_ASSERT(end >= start);
-  return (uint32_t)(end - start) / PR_USEC_PER_MSEC;
+  return (uint32_t) ((end - start).ToMilliseconds());
+}
+
+static uint32_t
+TimeUntilNow(TimeStamp start)
+{
+  if (start.IsNull()) {
+    return 0;
+  }
+  return TimeBetween(start, TimeStamp::Now());
 }
 
 struct CycleCollectorStats
 {
   void Clear()
   {
-    mBeginSliceTime = 0;
-    mBeginTime = 0;
+    mBeginSliceTime = TimeStamp();
+    mBeginTime = TimeStamp();
     mMaxGCDuration = 0;
     mRanSyncForgetSkippable = false;
     mSuspected = 0;
     mMaxSkippableDuration = 0;
+    mMaxSliceTime = 0;
     mAnyLockedOut = false;
+    mExtraForgetSkippableCalls = 0;
   }
 
+  void PrepareForCycleCollectionSlice(int32_t aExtraForgetSkippableCalls = 0);
+
+  void FinishCycleCollectionSlice()
+  {
+    uint32_t sliceTime = TimeUntilNow(mBeginSliceTime);
+    mMaxSliceTime = std::max(mMaxSliceTime, sliceTime);
+    MOZ_ASSERT(mExtraForgetSkippableCalls == 0, "Forget to reset extra forget skippable calls?");
+  }
+
+  void RunForgetSkippable();
+
   // Time the current slice began, including any GC finishing.
-  PRTime mBeginSliceTime;
+  TimeStamp mBeginSliceTime;
 
   // Time the current cycle collection began.
-  PRTime mBeginTime;
+  TimeStamp mBeginTime;
 
   // The longest GC finishing duration for any slice of the current CC.
   uint32_t mMaxGCDuration;
@@ -2004,54 +2038,82 @@ struct CycleCollectorStats
   uint32_t mSuspected;
 
   // The longest duration spent on sync forget skippable in any slice of the
-  // current CC
+  // current CC.
   uint32_t mMaxSkippableDuration;
+
+  // The longest pause of any slice in the current CC.
+  uint32_t mMaxSliceTime;
 
   // True if we were locked out by the GC in any slice of the current CC.
   bool mAnyLockedOut;
+
+  int32_t mExtraForgetSkippableCalls;
 };
 
 CycleCollectorStats gCCStats;
 
-
-static void
-PrepareForCycleCollection(int32_t aExtraForgetSkippableCalls = 0)
+static int64_t
+ICCSliceTime()
 {
-  gCCStats.mBeginSliceTime = PR_Now();
-
-  // Before we begin the cycle collection, make sure there is no active GC.
-  PRTime endGCTime;
-  if (sCCLockedOut) {
-    gCCStats.mAnyLockedOut = true;
-    FinishAnyIncrementalGC();
-    endGCTime = PR_Now();
-    uint32_t gcTime = TimeBetween(gCCStats.mBeginSliceTime, endGCTime);
-    gCCStats.mMaxGCDuration = std::max(gCCStats.mMaxGCDuration, gcTime);
-  } else {
-    endGCTime = gCCStats.mBeginSliceTime;
+  // If CC is not incremental, use an unlimited budget.
+  if (!sIncrementalCC) {
+    return -1;
   }
 
+  // If an ICC is in progress and is taking too long, finish it off.
+  if (TimeUntilNow(gCCStats.mBeginTime) >= kMaxICCDuration) {
+    return -1;
+  }
+
+  return kICCSliceBudget;
+}
+
+void
+CycleCollectorStats::PrepareForCycleCollectionSlice(int32_t aExtraForgetSkippableCalls)
+{
+  mBeginSliceTime = TimeStamp::Now();
+
+  // Before we begin the cycle collection, make sure there is no active GC.
+  TimeStamp endGCTime;
+  if (sCCLockedOut) {
+    mAnyLockedOut = true;
+    FinishAnyIncrementalGC();
+    endGCTime = TimeStamp::Now();
+    uint32_t gcTime = TimeBetween(mBeginSliceTime, endGCTime);
+    mMaxGCDuration = std::max(mMaxGCDuration, gcTime);
+  } else {
+    endGCTime = mBeginSliceTime;
+  }
+
+  mExtraForgetSkippableCalls = aExtraForgetSkippableCalls;
+}
+
+void
+CycleCollectorStats::RunForgetSkippable()
+{
   // Run forgetSkippable synchronously to reduce the size of the CC graph. This
   // is particularly useful if we recently finished a GC.
-  if (aExtraForgetSkippableCalls >= 0) {
+  if (mExtraForgetSkippableCalls >= 0) {
+    TimeStamp beginForgetSkippable = TimeStamp::Now();
     bool ranSyncForgetSkippable = false;
     while (sCleanupsSinceLastGC < NS_MAJOR_FORGET_SKIPPABLE_CALLS) {
       FireForgetSkippable(nsCycleCollector_suspectedCount(), false);
       ranSyncForgetSkippable = true;
     }
 
-    for (int32_t i = 0; i < aExtraForgetSkippableCalls; ++i) {
+    for (int32_t i = 0; i < mExtraForgetSkippableCalls; ++i) {
       FireForgetSkippable(nsCycleCollector_suspectedCount(), false);
       ranSyncForgetSkippable = true;
     }
 
     if (ranSyncForgetSkippable) {
-      gCCStats.mMaxSkippableDuration =
-        std::max(gCCStats.mMaxSkippableDuration, TimeBetween(endGCTime, PR_Now()));
-      gCCStats.mRanSyncForgetSkippable = true;
+      mMaxSkippableDuration =
+        std::max(mMaxSkippableDuration, TimeUntilNow(beginForgetSkippable));
+      mRanSyncForgetSkippable = true;
     }
 
   }
+  mExtraForgetSkippableCalls = 0;
 }
 
 //static
@@ -2064,21 +2126,50 @@ nsJSContext::CycleCollectNow(nsICycleCollectorListener *aListener,
   }
 
   PROFILER_LABEL("CC", "CycleCollectNow");
-  PrepareForCycleCollection(aExtraForgetSkippableCalls);
+  gCCStats.PrepareForCycleCollectionSlice(aExtraForgetSkippableCalls);
   nsCycleCollector_collect(aListener);
+  gCCStats.FinishCycleCollectionSlice();
 }
 
 //static
 void
-nsJSContext::ScheduledCycleCollectNow()
+nsJSContext::RunCycleCollectorSlice(int64_t aSliceTime)
 {
   if (!NS_IsMainThread()) {
     return;
   }
 
-  PROFILER_LABEL("CC", "ScheduledCycleCollectNow");
-  PrepareForCycleCollection();
-  nsCycleCollector_scheduledCollect();
+  PROFILER_LABEL("CC", "RunCycleCollectorSlice");
+
+  // Ideally, the slice time would be decreased by the amount of
+  // time spent on PrepareForCycleCollection().
+  gCCStats.PrepareForCycleCollectionSlice();
+  nsCycleCollector_collectSlice(aSliceTime);
+  gCCStats.FinishCycleCollectionSlice();
+}
+
+static void
+ICCTimerFired(nsITimer* aTimer, void* aClosure)
+{
+  if (sDidShutdown) {
+    return;
+  }
+
+  // Ignore ICC timer fires during IGC. Running ICC during an IGC will cause us
+  // to synchronously finish the GC, which is bad.
+
+  if (sCCLockedOut) {
+    PRTime now = PR_Now();
+    if (sCCLockedOutTime == 0) {
+      sCCLockedOutTime = now;
+      return;
+    }
+    if (now - sCCLockedOutTime < NS_MAX_CC_LOCKEDOUT_TIME) {
+      return;
+    }
+  }
+
+  nsJSContext::RunCycleCollectorSlice(ICCSliceTime());
 }
 
 //static
@@ -2087,10 +2178,26 @@ nsJSContext::BeginCycleCollectionCallback()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  gCCStats.mBeginTime = gCCStats.mBeginSliceTime ? gCCStats.mBeginSliceTime : PR_Now();
+  gCCStats.mBeginTime = gCCStats.mBeginSliceTime.IsNull() ? TimeStamp::Now() : gCCStats.mBeginSliceTime;
   gCCStats.mSuspected = nsCycleCollector_suspectedCount();
 
   KillCCTimer();
+
+  gCCStats.RunForgetSkippable();
+
+  MOZ_ASSERT(!sICCTimer, "Tried to create a new ICC timer when one already existed.");
+
+  if (!sIncrementalCC) {
+    return;
+  }
+
+  CallCreateInstance("@mozilla.org/timer;1", &sICCTimer);
+  if (sICCTimer) {
+    sICCTimer->InitWithFuncCallback(ICCTimerFired,
+                                    nullptr,
+                                    kICCIntersliceDelay,
+                                    nsITimer::TYPE_REPEATING_SLACK);
+  }
 }
 
 //static
@@ -2098,6 +2205,11 @@ void
 nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  nsJSContext::KillICCTimer();
+
+  // Update timing information for the current slice before we log it.
+  gCCStats.FinishCycleCollectionSlice();
 
   sCCollectedWaitingForGC += aResults.mFreedRefCounted + aResults.mFreedGCed;
 
@@ -2109,15 +2221,16 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
     PokeGC(JS::gcreason::CC_WAITING);
   }
 
-  PRTime endCCTime = PR_Now();
+  TimeStamp endCCTime = TimeStamp::Now();
 
   // Log information about the CC via telemetry, JSON and the console.
   uint32_t ccNowDuration = TimeBetween(gCCStats.mBeginTime, endCCTime);
   Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_FINISH_IGC, gCCStats.mAnyLockedOut);
   Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_SYNC_SKIPPABLE, gCCStats.mRanSyncForgetSkippable);
   Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_FULL, ccNowDuration);
+  Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_MAX_PAUSE, gCCStats.mMaxSliceTime);
 
-  if (sLastCCEndTime) {
+  if (!sLastCCEndTime.IsNull()) {
     uint32_t timeBetween = TimeBetween(sLastCCEndTime, gCCStats.mBeginTime);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_TIME_BETWEEN, timeBetween);
   }
@@ -2144,11 +2257,11 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
     }
 
     NS_NAMED_MULTILINE_LITERAL_STRING(kFmt,
-      MOZ_UTF16("CC(T+%.1f) duration: %lums, suspected: %lu, visited: %lu RCed and %lu%s GCed, collected: %lu RCed and %lu GCed (%lu|%lu waiting for GC)%s\n")
+      MOZ_UTF16("CC(T+%.1f) max pause: %lums, total time: %lums, suspected: %lu, visited: %lu RCed and %lu%s GCed, collected: %lu RCed and %lu GCed (%lu|%lu waiting for GC)%s\n")
       MOZ_UTF16("ForgetSkippable %lu times before CC, min: %lu ms, max: %lu ms, avg: %lu ms, total: %lu ms, max sync: %lu ms, removed: %lu"));
     nsString msg;
     msg.Adopt(nsTextFormatter::smprintf(kFmt.get(), double(delta) / PR_USEC_PER_SEC,
-                                        ccNowDuration, gCCStats.mSuspected,
+                                        gCCStats.mMaxSliceTime, ccNowDuration, gCCStats.mSuspected,
                                         aResults.mVisitedRefCounted, aResults.mVisitedGCed, mergeMsg.get(),
                                         aResults.mFreedRefCounted, aResults.mFreedGCed,
                                         sCCollectedWaitingForGC, sLikelyShortLivingObjectsNeedingGC,
@@ -2171,6 +2284,7 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
     NS_NAMED_MULTILINE_LITERAL_STRING(kJSONFmt,
        MOZ_UTF16("{ \"timestamp\": %llu, ")
          MOZ_UTF16("\"duration\": %llu, ")
+         MOZ_UTF16("\"max_slice_pause\": %llu, ")
          MOZ_UTF16("\"max_finish_gc_duration\": %llu, ")
          MOZ_UTF16("\"max_sync_skippable_duration\": %llu, ")
          MOZ_UTF16("\"suspected\": %lu, ")
@@ -2192,8 +2306,8 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
              MOZ_UTF16("\"removed\": %lu } ")
        MOZ_UTF16("}"));
     nsString json;
-    json.Adopt(nsTextFormatter::smprintf(kJSONFmt.get(), endCCTime,
-                                         ccNowDuration, gCCStats.mMaxGCDuration,
+    json.Adopt(nsTextFormatter::smprintf(kJSONFmt.get(), endCCTime, ccNowDuration,
+                                         gCCStats.mMaxSliceTime, gCCStats.mMaxGCDuration,
                                          gCCStats.mMaxSkippableDuration,
                                          gCCStats.mSuspected,
                                          aResults.mVisitedRefCounted, aResults.mVisitedGCed,
@@ -2263,8 +2377,19 @@ ShouldTriggerCC(uint32_t aSuspected)
   return sNeedsFullCC ||
          aSuspected > NS_CC_PURPLE_LIMIT ||
          (aSuspected > NS_CC_FORCED_PURPLE_LIMIT &&
-          sLastCCEndTime + NS_CC_FORCED < PR_Now());
+          TimeUntilNow(sLastCCEndTime) > NS_CC_FORCED);
 }
+
+static uint32_t
+TimeToNextCC()
+{
+  if (sIncrementalCC) {
+    return NS_CC_DELAY - kMaxICCDuration;
+  }
+  return NS_CC_DELAY;
+}
+
+static_assert(NS_CC_DELAY > kMaxICCDuration, "ICC shouldn't reduce CC delay to 0");
 
 static void
 CCTimerFired(nsITimer *aTimer, void *aClosure)
@@ -2275,7 +2400,7 @@ CCTimerFired(nsITimer *aTimer, void *aClosure)
 
   static uint32_t ccDelay = NS_CC_DELAY;
   if (sCCLockedOut) {
-    ccDelay = NS_CC_DELAY / 3;
+    ccDelay = TimeToNextCC() / 3;
 
     PRTime now = PR_Now();
     if (sCCLockedOutTime == 0) {
@@ -2297,8 +2422,8 @@ CCTimerFired(nsITimer *aTimer, void *aClosure)
 
   // During early timer fires, we only run forgetSkippable. During the first
   // late timer fire, we decide if we are going to have a second and final
-  // late timer fire, where we may run the CC.
-  const uint32_t numEarlyTimerFires = ccDelay / NS_CC_SKIPPABLE_DELAY - 2;
+  // late timer fire, where we may begin to run the CC.
+  uint32_t numEarlyTimerFires = ccDelay / NS_CC_SKIPPABLE_DELAY - 2;
   bool isLateTimerFire = sCCTimerFireCount > numEarlyTimerFires;
   uint32_t suspected = nsCycleCollector_suspectedCount();
   if (isLateTimerFire && ShouldTriggerCC(suspected)) {
@@ -2311,9 +2436,9 @@ CCTimerFired(nsITimer *aTimer, void *aClosure)
       }
     } else {
       // We are in the final timer fire and still meet the conditions for
-      // triggering a CC. Let CycleCollectNow finish the current IGC, if any,
-      // because that will allow us to include the GC time in the CC pause.
-      nsJSContext::ScheduledCycleCollectNow();
+      // triggering a CC. Let RunCycleCollectorSlice finish the current IGC, if
+      // any because that will allow us to include the GC time in the CC pause.
+      nsJSContext::RunCycleCollectorSlice(ICCSliceTime());
     }
   } else if ((sPreviousSuspectedCount + 100) <= suspected) {
       // Only do a forget skippable if there are more than a few new objects.
@@ -2321,7 +2446,7 @@ CCTimerFired(nsITimer *aTimer, void *aClosure)
   }
 
   if (isLateTimerFire) {
-    ccDelay = NS_CC_DELAY;
+    ccDelay = TimeToNextCC();
 
     // We have either just run the CC or decided we don't want to run the CC
     // next time, so kill the timer.
@@ -2425,7 +2550,7 @@ nsJSContext::PokeShrinkGCBuffers()
 void
 nsJSContext::MaybePokeCC()
 {
-  if (sCCTimer || sShuttingDown || !sHasRunGC) {
+  if (sCCTimer || sICCTimer || sShuttingDown || !sHasRunGC) {
     return;
   }
 
@@ -2494,6 +2619,19 @@ nsJSContext::KillCCTimer()
     sCCTimer->Cancel();
 
     NS_RELEASE(sCCTimer);
+  }
+}
+
+//static
+void
+nsJSContext::KillICCTimer()
+{
+  sCCLockedOutTime = 0;
+
+  if (sICCTimer) {
+    sICCTimer->Cancel();
+
+    NS_RELEASE(sICCTimer);
   }
 }
 
@@ -2658,10 +2796,10 @@ void
 mozilla::dom::StartupJSEnvironment()
 {
   // initialize all our statics, so that we can restart XPCOM
-  sGCTimer = sFullGCTimer = sCCTimer = nullptr;
+  sGCTimer = sFullGCTimer = sCCTimer = sICCTimer = nullptr;
   sCCLockedOut = false;
   sCCLockedOutTime = 0;
-  sLastCCEndTime = 0;
+  sLastCCEndTime = TimeStamp();
   sHasRunGC = false;
   sPendingLoadCount = 0;
   sLoadingInProgress = false;
@@ -2752,6 +2890,13 @@ SetMemoryGCDynamicMarkSlicePrefChangedCallback(const char* aPrefName, void* aClo
 {
   bool pref = Preferences::GetBool(aPrefName);
   JS_SetGCParameter(sRuntime, JSGC_DYNAMIC_MARK_SLICE, pref);
+}
+
+static void
+SetIncrementalCCPrefChangedCallback(const char* aPrefName, void* aClosure)
+{
+  bool pref = Preferences::GetBool(aPrefName);
+  sIncrementalCC = pref;
 }
 
 JSObject*
@@ -2959,6 +3104,9 @@ nsJSContext::EnsureStatics()
   Preferences::RegisterCallbackAndCall(SetMemoryGCPrefChangedCallback,
                                        "javascript.options.mem.gc_decommit_threshold_mb",
                                        (void *)JSGC_DECOMMIT_THRESHOLD);
+
+  Preferences::RegisterCallbackAndCall(SetIncrementalCCPrefChangedCallback,
+                                       "dom.cycle_collector.incremental");
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (!obs) {

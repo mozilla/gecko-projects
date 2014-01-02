@@ -44,8 +44,8 @@ this.Keyboard = {
   },
 
   init: function keyboardInit() {
-    Services.obs.addObserver(this, 'inprocess-browser-shown', false);
-    Services.obs.addObserver(this, 'remote-browser-shown', false);
+    Services.obs.addObserver(this, 'in-process-browser-or-app-frame-shown', false);
+    Services.obs.addObserver(this, 'remote-browser-frame-shown', false);
     Services.obs.addObserver(this, 'oop-frameloader-crashed', false);
 
     for (let name of this._messageNames)
@@ -63,10 +63,6 @@ this.Keyboard = {
         ppmm.broadcastAsyncMessage('Keyboard:FocusChange', { 'type': 'blur' });
       }
     } else {
-      // Ignore notifications that aren't from a BrowserOrApp
-      if (!frameLoader.ownerIsBrowserOrAppFrame) {
-        return;
-      }
       this.initFormsFrameScript(mm);
     }
   },
@@ -107,7 +103,12 @@ this.Keyboard = {
         return;
       }
 
-      if (!mm.assertPermission("input")) {
+      let testing = false;
+      try {
+        testing = Services.prefs.getBoolPref("dom.mozInputMethod.testing");
+      } catch (e) {
+      }
+      if (!testing && !mm.assertPermission("input")) {
         dump("Keyboard message " + msg.name +
         " from a content process with no 'input' privileges.");
         return;
@@ -184,11 +185,9 @@ this.Keyboard = {
   handleFocusChange: function keyboardHandleFocusChange(msg) {
     this.forwardEvent('Keyboard:FocusChange', msg);
 
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-
     // Chrome event, used also to render value selectors; that's why we need
     // the info about choices / min / max here as well...
-    browser.shell.sendChromeEvent({
+    this.sendChromeEvent({
       type: 'inputmethod-contextchange',
       inputType: msg.data.type,
       value: msg.data.value,
@@ -223,15 +222,13 @@ this.Keyboard = {
   },
 
   showInputMethodPicker: function keyboardShowInputMethodPicker() {
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-    browser.shell.sendChromeEvent({
+    this.sendChromeEvent({
       type: "inputmethod-showall"
     });
   },
 
   switchToNextInputMethod: function keyboardSwitchToNextInputMethod() {
-    let browser = Services.wm.getMostRecentWindow("navigator:browser");
-    browser.shell.sendChromeEvent({
+    this.sendChromeEvent({
       type: "inputmethod-next"
     });
   },
@@ -271,6 +268,13 @@ this.Keyboard = {
     this._layouts = layouts;
 
     ppmm.broadcastAsyncMessage('Keyboard:LayoutsChange', layouts);
+  },
+
+  sendChromeEvent: function(event) {
+    let browser = Services.wm.getMostRecentWindow("navigator:browser");
+    if (browser && browser.shell) {
+      browser.shell.sendChromeEvent(event);;
+    }
   }
 };
 

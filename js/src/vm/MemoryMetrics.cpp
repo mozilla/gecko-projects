@@ -215,7 +215,6 @@ StatsCompartmentCallback(JSRuntime *rt, void *data, JSCompartment *compartment)
 
     // Measure the compartment object itself, and things hanging off it.
     compartment->addSizeOfIncludingThis(rtStats->mallocSizeOf_,
-                                        &cStats.typeInferencePendingArrays,
                                         &cStats.typeInferenceAllocationSiteTables,
                                         &cStats.typeInferenceArrayTypeTables,
                                         &cStats.typeInferenceObjectTypeTables,
@@ -376,9 +375,9 @@ StatsCellCallback(JSRuntime *rt, void *data, void *thing, JSGCTraceKind traceKin
         break;
       }
 
-      case JSTRACE_IONCODE: {
+      case JSTRACE_JITCODE: {
 #ifdef JS_ION
-        zStats->ionCodesGCHeap += thingSize;
+        zStats->jitCodesGCHeap += thingSize;
         // The code for a script is counted in ExecutableAllocator::sizeOfCode().
 #endif
         break;

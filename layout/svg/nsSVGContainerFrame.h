@@ -7,7 +7,6 @@
 #define NS_SVGCONTAINERFRAME_H
 
 #include "mozilla/Attributes.h"
-#include "gfxMatrix.h"
 #include "nsContainerFrame.h"
 #include "nsFrame.h"
 #include "nsIFrame.h"
@@ -69,7 +68,7 @@ public:
    * due to a root-<svg> having its currentScale/currentTransform properties
    * set. If aTransform is non-null, then it will be set to the transform.
    */
-  virtual bool HasChildrenOnlyTransform(gfxMatrix *aTransform) const {
+  virtual bool HasChildrenOnlyTransform(Matrix *aTransform) const {
     return false;
   }
 
@@ -96,7 +95,7 @@ public:
 
 protected:
   /**
-   * Traverses a frame tree, marking any nsSVGTextFrame2 frames as dirty
+   * Traverses a frame tree, marking any SVGTextFrame frames as dirty
    * and calling InvalidateRenderingObservers() on it.
    */
   static void ReflowSVGNonDisplayText(nsIFrame* aContainer);
@@ -142,8 +141,8 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  virtual bool IsSVGTransformed(gfxMatrix *aOwnTransform = nullptr,
-                                gfxMatrix *aFromParentTransform = nullptr) const MOZ_OVERRIDE;
+  virtual bool IsSVGTransformed(Matrix *aOwnTransform = nullptr,
+                                Matrix *aFromParentTransform = nullptr) const MOZ_OVERRIDE;
 
   // nsISVGChildFrame interface:
   NS_IMETHOD PaintSVG(nsRenderingContext* aContext,
@@ -153,7 +152,7 @@ public:
   NS_IMETHOD_(nsRect) GetCoveredRegion() MOZ_OVERRIDE;
   virtual void ReflowSVG() MOZ_OVERRIDE;
   virtual void NotifySVGChanged(uint32_t aFlags) MOZ_OVERRIDE;
-  virtual SVGBBox GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
+  virtual SVGBBox GetBBoxContribution(const Matrix &aToBBoxUserspace,
                                       uint32_t aFlags) MOZ_OVERRIDE;
   NS_IMETHOD_(bool) IsDisplayContainer() MOZ_OVERRIDE { return true; }
 };

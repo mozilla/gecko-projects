@@ -12,6 +12,9 @@ load 345576-1.html
 load 345629-1.html
 load 348462-1.html
 load 348462-2.html
+load 358732-1.xhtml
+load 358732-2.svg
+load 358732-3.html
 load 366643.html
 load 369688-1.html
 load 369947-1.html
@@ -101,3 +104,7 @@ asserts-if(winWidget,0-1) skip-if(B2G) load 815489.html
 load 836225-1.html
 load 839745-1.html
 load 856784-1.html
+load 893572-1.html
+load 893572-2.html
+load 893572-3.html
+load 893572-4.html

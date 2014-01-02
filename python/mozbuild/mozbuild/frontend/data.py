@@ -289,6 +289,20 @@ class GeneratedWebIDLFile(SandboxDerived):
 
         self.basename = path
 
+
+class ExampleWebIDLInterface(SandboxDerived):
+    """An individual WebIDL interface to generate."""
+
+    __slots__ = (
+        'name',
+    )
+
+    def __init__(self, sandbox, name):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.name = name
+
+
 class BaseProgram(SandboxDerived):
     """Sandbox container object for programs, which is a unicode string.
 
@@ -423,6 +437,23 @@ class LocalInclude(SandboxDerived):
 class GeneratedInclude(SandboxDerived):
     """Describes an individual generated include path."""
 
+    __slots__ = (
+        'path',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.path = path
+
+
+class JARManifest(SandboxDerived):
+    """Describes an individual JAR manifest file and how to process it.
+
+    This class isn't very useful for optimizing backends yet because we don't
+    capture defines. We can't capture defines safely until all of them are
+    defined in moz.build and not Makefile.in files.
+    """
     __slots__ = (
         'path',
     )

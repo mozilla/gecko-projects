@@ -76,7 +76,7 @@ LIRGeneratorShared::defineFixed(LInstructionHelper<1, X, Y> *lir, MDefinition *m
     if (!define(lir, mir, def))
         return false;
 
-    if (js_IonOptions.registerAllocator == RegisterAllocator_LSRA) {
+    if (gen->optimizationInfo().registerAllocator() == RegisterAllocator_LSRA) {
         if (!add(new(alloc()) LNop))
             return false;
     }
@@ -149,12 +149,14 @@ LIRGeneratorShared::defineReturn(LInstruction *lir, MDefinition *mir)
 #endif
         break;
       case MIRType_Float32:
+        lir->setDef(0, LDefinition(vreg, LDefinition::FLOAT32, LFloatReg(ReturnFloatReg)));
+        break;
       case MIRType_Double:
         lir->setDef(0, LDefinition(vreg, LDefinition::DOUBLE, LFloatReg(ReturnFloatReg)));
         break;
       default:
         LDefinition::Type type = LDefinition::TypeFrom(mir->type());
-        JS_ASSERT(type != LDefinition::DOUBLE);
+        JS_ASSERT(type != LDefinition::DOUBLE && type != LDefinition::FLOAT32);
         lir->setDef(0, LDefinition(vreg, type, LGeneralReg(ReturnReg)));
         break;
     }
@@ -163,7 +165,7 @@ LIRGeneratorShared::defineReturn(LInstruction *lir, MDefinition *mir)
     if (!add(lir))
         return false;
 
-    if (js_IonOptions.registerAllocator == RegisterAllocator_LSRA) {
+    if (gen->optimizationInfo().registerAllocator() == RegisterAllocator_LSRA) {
         if (!add(new(alloc()) LNop))
             return false;
     }
@@ -421,7 +423,13 @@ LIRGeneratorShared::tempFixed(Register reg)
 }
 
 LDefinition
-LIRGeneratorShared::tempFloat()
+LIRGeneratorShared::tempFloat32()
+{
+    return temp(LDefinition::FLOAT32);
+}
+
+LDefinition
+LIRGeneratorShared::tempDouble()
 {
     return temp(LDefinition::DOUBLE);
 }

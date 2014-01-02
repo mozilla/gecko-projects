@@ -73,8 +73,8 @@ StoreBuffer::WholeCellEdges::mark(JSTracer *trc)
         return;
     }
 #ifdef JS_ION
-    JS_ASSERT(kind == JSTRACE_IONCODE);
-    static_cast<jit::IonCode *>(tenured)->trace(trc);
+    JS_ASSERT(kind == JSTRACE_JITCODE);
+    static_cast<jit::JitCode *>(tenured)->trace(trc);
 #else
     MOZ_ASSUME_UNREACHABLE("Only objects can be in the wholeCellBuffer if IonMonkey is disabled.");
 #endif
@@ -143,14 +143,14 @@ StoreBuffer::RelocatableMonoTypeBuffer<T>::compactMoved(StoreBuffer *owner)
     LifoAlloc &storage = *this->storage_;
     EdgeSet invalidated;
     if (!invalidated.init())
-        MOZ_CRASH("RelocatableMonoTypeBuffer::compactMoved: Failed to init table.");
+        CrashAtUnhandlableOOM("RelocatableMonoTypeBuffer::compactMoved: Failed to init table.");
 
     /* Collect the set of entries which are currently invalid. */
     for (LifoAlloc::Enum e(storage); !e.empty(); e.popFront<T>()) {
         T *edge = e.get<T>();
         if (edge->isTagged()) {
             if (!invalidated.put(edge->location()))
-                MOZ_CRASH("RelocatableMonoTypeBuffer::compactMoved: Failed to put removal.");
+                CrashAtUnhandlableOOM("RelocatableMonoTypeBuffer::compactMoved: Failed to put removal.");
         } else {
             invalidated.remove(edge->location());
         }

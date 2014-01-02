@@ -14,10 +14,12 @@
 #include "FrameMetrics.h"               // for FrameMetrics, etc
 #include "GestureEventListener.h"       // for GestureEventListener
 #include "InputData.h"                  // for MultiTouchInput, etc
+#include "LayerTransactionParent.h"     // for LayerTransactionParent
 #include "Units.h"                      // for CSSRect, CSSPoint, etc
 #include "base/message_loop.h"          // for MessageLoop
 #include "base/task.h"                  // for NewRunnableMethod, etc
 #include "base/tracked.h"               // for FROM_HERE
+#include "gfxPlatform.h"                // for gfxPlatform::UseProgressiveTilePainting
 #include "gfxTypes.h"                   // for gfxFloat
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/BasicEvents.h"        // for Modifiers, MODIFIER_*
@@ -38,8 +40,10 @@
 #include "mozilla/layers/AsyncCompositionManager.h"  // for ViewTransform
 #include "mozilla/layers/Axis.h"        // for AxisX, AxisY, Axis, etc
 #include "mozilla/layers/GeckoContentController.h"
+#include "mozilla/layers/PCompositorParent.h" // for PCompositorParent
 #include "mozilla/layers/TaskThrottler.h"  // for TaskThrottler
 #include "mozilla/mozalloc.h"           // for operator new, etc
+#include "mozilla/unused.h"             // for unused
 #include "nsAlgorithm.h"                // for clamped
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -53,6 +57,7 @@
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
 #include "nsThreadUtils.h"              // for NS_IsMainThread
 #include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "SharedMemoryBasic.h"          // for SharedMemoryBasic
 
 // #define APZC_ENABLE_RENDERTRACE
 
@@ -61,7 +66,7 @@
 #define APZC_LOG_FM(fm, prefix, ...) \
   APZC_LOG(prefix ":" \
            " i=(%ld %lld) cb=(%d %d %d %d) dp=(%.3f %.3f %.3f %.3f) v=(%.3f %.3f %.3f %.3f) " \
-           "s=(%.3f %.3f) sr=(%.3f %.3f %.3f %.3f) z=(%.3f %.3f %.3f %.3f)\n", \
+           "s=(%.3f %.3f) sr=(%.3f %.3f %.3f %.3f) z=(%.3f %.3f %.3f %.3f) %d\n", \
            __VA_ARGS__, \
            fm.mPresShellId, fm.mScrollId, \
            fm.mCompositionBounds.x, fm.mCompositionBounds.y, fm.mCompositionBounds.width, fm.mCompositionBounds.height, \
@@ -69,7 +74,8 @@
            fm.mViewport.x, fm.mViewport.y, fm.mViewport.width, fm.mViewport.height, \
            fm.mScrollOffset.x, fm.mScrollOffset.y, \
            fm.mScrollableRect.x, fm.mScrollableRect.y, fm.mScrollableRect.width, fm.mScrollableRect.height, \
-           fm.mDevPixelsPerCSSPixel.scale, fm.mResolution.scale, fm.mCumulativeResolution.scale, fm.mZoom.scale); \
+           fm.mDevPixelsPerCSSPixel.scale, fm.mResolution.scale, fm.mCumulativeResolution.scale, fm.mZoom.scale, \
+           fm.mUpdateScrollOffset); \
 
 // Static helper functions
 namespace {
@@ -242,6 +248,11 @@ static bool gAsyncZoomDisabled = false;
 static bool gCrossSlideEnabled = false;
 
 /**
+ * Pref that enables progressive tile painting
+ */
+static bool gUseProgressiveTilePainting = false;
+
+/**
  * Is aAngle within the given threshold of the horizontal axis?
  * @param aAngle an angle in radians in the range [0, pi]
  * @param aThreshold an angle in radians in the range [0, pi/2]
@@ -257,18 +268,22 @@ static bool IsCloseToVertical(float aAngle, float aThreshold)
   return (fabs(aAngle - (M_PI / 2)) < aThreshold);
 }
 
-static inline void LogRendertraceRect(const char* aDesc, const char* aColor, const CSSRect& aRect)
+static inline void LogRendertraceRect(const ScrollableLayerGuid& aGuid, const char* aDesc, const char* aColor, const CSSRect& aRect)
 {
 #ifdef APZC_ENABLE_RENDERTRACE
   static const TimeStamp sRenderStart = TimeStamp::Now();
   TimeDuration delta = TimeStamp::Now() - sRenderStart;
-  printf_stderr("%s RENDERTRACE %f rect %s %f %f %f %f\n",
+  printf_stderr("(%llu,%lu,%llu)%s RENDERTRACE %f rect %s %f %f %f %f\n",
+    aGuid.mLayersId, aGuid.mPresShellId, aGuid.mScrollId,
     aDesc, delta.ToMilliseconds(), aColor,
     aRect.x, aRect.y, aRect.width, aRect.height);
 #endif
 }
 
 static TimeStamp sFrameTime;
+
+// Counter used to give each APZC a unique id
+static uint32_t sAsyncPanZoomControllerCount = 0;
 
 static TimeStamp
 GetFrameTime() {
@@ -280,7 +295,7 @@ GetFrameTime() {
 
 class FlingAnimation: public AsyncPanZoomAnimation {
 public:
-  FlingAnimation(AxisX aX, AxisY aY)
+  FlingAnimation(AxisX& aX, AxisY& aY)
     : AsyncPanZoomAnimation(TimeDuration::FromMilliseconds(gFlingRepaintInterval))
     , mX(aX)
     , mY(aY)
@@ -295,8 +310,8 @@ public:
                       const TimeDuration& aDelta);
 
 private:
-  AxisX mX;
-  AxisY mY;
+  AxisX& mX;
+  AxisY& mY;
 };
 
 class ZoomAnimation: public AsyncPanZoomAnimation {
@@ -359,6 +374,7 @@ AsyncPanZoomController::InitializeGlobalState()
   Preferences::AddBoolVarCache(&gAsyncZoomDisabled, "apz.asynczoom.disabled", gAsyncZoomDisabled);
   Preferences::AddBoolVarCache(&gCrossSlideEnabled, "apz.cross_slide.enabled", gCrossSlideEnabled);
   Preferences::AddIntVarCache(&gAxisLockMode, "apz.axis_lock_mode", gAxisLockMode);
+  gUseProgressiveTilePainting = gfxPlatform::UseProgressiveTilePainting();
 
   gComputedTimingFunction = new ComputedTimingFunction();
   gComputedTimingFunction->Init(
@@ -371,6 +387,7 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
                                                GeckoContentController* aGeckoContentController,
                                                GestureBehavior aGestures)
   :  mLayersId(aLayersId),
+     mCrossProcessCompositorParent(nullptr),
      mPaintThrottler(GetFrameTime()),
      mGeckoContentController(aGeckoContentController),
      mRefPtrMonitor("RefPtrMonitor"),
@@ -388,7 +405,10 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
      mCurrentAsyncScrollOffset(0, 0),
      mAsyncScrollTimeoutTask(nullptr),
      mHandlingTouchQueue(false),
-     mTreeManager(aTreeManager)
+     mTreeManager(aTreeManager),
+     mAPZCId(sAsyncPanZoomControllerCount++),
+     mSharedFrameMetricsBuffer(nullptr),
+     mSharedLock(nullptr)
 {
   MOZ_COUNT_CTOR(AsyncPanZoomController);
 
@@ -401,6 +421,18 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
 }
 
 AsyncPanZoomController::~AsyncPanZoomController() {
+
+  PCompositorParent* compositor =
+    (mCrossProcessCompositorParent ? mCrossProcessCompositorParent : mCompositorParent.get());
+
+  // Only send the release message if the SharedFrameMetrics has been created.
+  if (compositor && mSharedFrameMetricsBuffer) {
+    unused << compositor->SendReleaseSharedCompositorFrameMetrics(mFrameMetrics.mScrollId, mAPZCId);
+  }
+
+  delete mSharedFrameMetricsBuffer;
+  delete mSharedLock;
+
   MOZ_COUNT_DTOR(AsyncPanZoomController);
 }
 
@@ -546,6 +578,7 @@ nsEventStatus AsyncPanZoomController::OnTouchStart(const MultiTouchInput& aEvent
         ReentrantMonitorAutoEnter lock(mMonitor);
         RequestContentRepaint();
         ScheduleComposite();
+        UpdateSharedCompositorFrameMetrics();
       }
       // Fall through.
     case FLING:
@@ -650,6 +683,7 @@ nsEventStatus AsyncPanZoomController::OnTouchEnd(const MultiTouchInput& aEvent) 
     {
       ReentrantMonitorAutoEnter lock(mMonitor);
       RequestContentRepaint();
+      UpdateSharedCompositorFrameMetrics();
     }
     mX.EndTouch();
     mY.EndTouch();
@@ -758,6 +792,7 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
       ScheduleComposite();
       // We don't want to redraw on every scale, so don't use
       // RequestContentRepaint()
+      UpdateSharedCompositorFrameMetrics();
     }
 
     mLastZoomFocus = focusPoint;
@@ -776,11 +811,15 @@ nsEventStatus AsyncPanZoomController::OnScaleEnd(const PinchGestureInput& aEvent
     SetState(PANNING);
     mX.StartTouch(aEvent.mFocusPoint.x);
     mY.StartTouch(aEvent.mFocusPoint.y);
+  } else {
+    SetState(NOTHING);
   }
+
   {
     ReentrantMonitorAutoEnter lock(mMonitor);
     ScheduleComposite();
     RequestContentRepaint();
+    UpdateSharedCompositorFrameMetrics();
   }
 
   return nsEventStatus_eConsumeNoDefault;
@@ -994,6 +1033,7 @@ void AsyncPanZoomController::AttemptScroll(const ScreenPoint& aStartPoint,
       if (timePaintDelta.ToMilliseconds() > gPanRepaintInterval) {
         RequestContentRepaint();
       }
+      UpdateSharedCompositorFrameMetrics();
     }
   }
 
@@ -1094,12 +1134,17 @@ void AsyncPanZoomController::StartAnimation(AsyncPanZoomAnimation* aAnimation)
 }
 
 void AsyncPanZoomController::CancelAnimation() {
+  ReentrantMonitorAutoEnter lock(mMonitor);
   SetState(NOTHING);
   mAnimation = nullptr;
 }
 
 void AsyncPanZoomController::SetCompositorParent(CompositorParent* aCompositorParent) {
   mCompositorParent = aCompositorParent;
+}
+
+void AsyncPanZoomController::SetCrossProcessCompositorParent(PCompositorParent* aCrossProcessCompositorParent) {
+  mCrossProcessCompositorParent = aCrossProcessCompositorParent;
 }
 
 void AsyncPanZoomController::ScrollBy(const CSSPoint& aOffset) {
@@ -1212,21 +1257,6 @@ const CSSRect AsyncPanZoomController::CalculatePendingDisplayPort(
     scrollOffset.y = scrollableRect.y;
   }
 
-  // FIXME/bug 936500: Make sure the displayport contains the composition
-  // bounds. This is to work around a layout bug that means if a display item's
-  // corresponding displayport doesn't contain its frame's bounds, it may get
-  // optimised out and the layer won't get created.
-  if (displayPort.x + displayPort.width < compositionBounds.width) {
-    displayPort.x = -(displayPort.width - compositionBounds.width);
-  } else if (displayPort.x > 0) {
-    displayPort.x = 0;
-  }
-  if (displayPort.y + displayPort.height < compositionBounds.height) {
-    displayPort.y = -(displayPort.height - compositionBounds.height);
-  } else if (displayPort.y > 0) {
-    displayPort.y = 0;
-  }
-
   CSSRect shiftedDisplayPort = displayPort + scrollOffset;
   return scrollableRect.ClampRect(shiftedDisplayPort) - scrollOffset;
 }
@@ -1278,7 +1308,7 @@ AsyncPanZoomController::ScheduleContentRepaint(FrameMetrics &aFrameMetrics) {
   if (controller) {
     APZC_LOG_FM(aFrameMetrics, "%p requesting content repaint", this);
 
-    LogRendertraceRect("requested displayport", "yellow",
+    LogRendertraceRect(GetGuid(), "requested displayport", "yellow",
         aFrameMetrics.mDisplayPort + aFrameMetrics.mScrollOffset);
 
     mPaintThrottler.PostTask(
@@ -1345,6 +1375,7 @@ bool AsyncPanZoomController::UpdateAnimation(const TimeStamp& aSampleTime)
       SendAsyncScrollEvent();
       RequestContentRepaint();
     }
+    UpdateSharedCompositorFrameMetrics();
     mLastSampleTime = aSampleTime;
     return true;
   }
@@ -1369,7 +1400,7 @@ bool AsyncPanZoomController::SampleContentTransformForFrame(const TimeStamp& aSa
     aScrollOffset = mFrameMetrics.mScrollOffset * mFrameMetrics.mZoom;
     *aNewTransform = GetCurrentAsyncTransform();
 
-    LogRendertraceRect("viewport", "red",
+    LogRendertraceRect(GetGuid(), "viewport", "red",
       CSSRect(mFrameMetrics.mScrollOffset,
               ScreenSize(mFrameMetrics.mCompositionBounds.Size()) / mFrameMetrics.mZoom));
 
@@ -1438,8 +1469,8 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
   mFrameMetrics.mMayHaveTouchListeners = aLayerMetrics.mMayHaveTouchListeners;
   APZC_LOG_FM(aLayerMetrics, "%p got a NotifyLayersUpdated with aIsFirstPaint=%d", this, aIsFirstPaint);
 
-  LogRendertraceRect("page", "brown", aLayerMetrics.mScrollableRect);
-  LogRendertraceRect("painted displayport", "green",
+  LogRendertraceRect(GetGuid(), "page", "brown", aLayerMetrics.mScrollableRect);
+  LogRendertraceRect(GetGuid(), "painted displayport", "green",
     aLayerMetrics.mDisplayPort + aLayerMetrics.mScrollOffset);
 
   mPaintThrottler.TaskComplete(GetFrameTime());
@@ -1463,6 +1494,7 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
     mY.CancelTouch();
 
     mFrameMetrics = aLayerMetrics;
+    ShareCompositorFrameMetrics();
     SetState(NOTHING);
   } else {
     // If we're not taking the aLayerMetrics wholesale we still need to pull
@@ -1475,38 +1507,27 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
     mFrameMetrics.mZoom.scale *= parentResolutionChange;
     mFrameMetrics.mResolution = aLayerMetrics.mResolution;
     mFrameMetrics.mCumulativeResolution = aLayerMetrics.mCumulativeResolution;
+
+    // If the layers update was not triggered by our own repaint request, then
+    // we want to take the new scroll offset.
+    if (aLayerMetrics.mUpdateScrollOffset) {
+      APZC_LOG("Updating scroll offset from (%f, %f) to (%f, %f)\n",
+        mFrameMetrics.mScrollOffset.x, mFrameMetrics.mScrollOffset.y,
+        aLayerMetrics.mScrollOffset.x, aLayerMetrics.mScrollOffset.y);
+
+      mFrameMetrics.mScrollOffset = aLayerMetrics.mScrollOffset;
+    }
   }
 
   if (needContentRepaint) {
     RequestContentRepaint();
   }
+  UpdateSharedCompositorFrameMetrics();
 }
 
 const FrameMetrics& AsyncPanZoomController::GetFrameMetrics() {
   mMonitor.AssertCurrentThreadIn();
   return mFrameMetrics;
-}
-
-void AsyncPanZoomController::UpdateCompositionBounds(const ScreenIntRect& aCompositionBounds) {
-  ReentrantMonitorAutoEnter lock(mMonitor);
-
-  ScreenIntRect oldCompositionBounds = mFrameMetrics.mCompositionBounds;
-  mFrameMetrics.mCompositionBounds = aCompositionBounds;
-
-  // If the window had 0 dimensions before, or does now, we don't want to
-  // repaint or update the zoom since we'll run into rendering issues and/or
-  // divide-by-zero. This manifests itself as the screen flashing. If the page
-  // has gone out of view, the buffer will be cleared elsewhere anyways.
-  if (aCompositionBounds.width && aCompositionBounds.height &&
-      oldCompositionBounds.width && oldCompositionBounds.height) {
-    float adjustmentFactor = float(aCompositionBounds.width) / float(oldCompositionBounds.width);
-    mFrameMetrics.mZoom.scale =
-      clamped(mFrameMetrics.mZoom.scale * adjustmentFactor,
-              mMinZoom.scale, mMaxZoom.scale);
-
-    // Repaint on a rotation so that our new resolution gets properly updated.
-    RequestContentRepaint();
-  }
 }
 
 void AsyncPanZoomController::ZoomToRect(CSSRect aRect) {
@@ -1717,29 +1738,80 @@ void AsyncPanZoomController::SendAsyncScrollEvent() {
   controller->SendAsyncScrollDOMEvent(isRoot, contentRect, scrollableSize);
 }
 
-void AsyncPanZoomController::UpdateScrollOffset(const CSSPoint& aScrollOffset)
-{
-  APZC_LOG("Updating scroll offset from (%f, %f) to (%f, %f)\n",
-    mFrameMetrics.mScrollOffset.x, mFrameMetrics.mScrollOffset.y,
-    aScrollOffset.x, aScrollOffset.y);
-
-  ReentrantMonitorAutoEnter lock(mMonitor);
-  mFrameMetrics.mScrollOffset = aScrollOffset;
-}
-
 bool AsyncPanZoomController::Matches(const ScrollableLayerGuid& aGuid)
 {
-  return aGuid == ScrollableLayerGuid(mLayersId, mFrameMetrics);
+  return aGuid == GetGuid();
 }
 
 void AsyncPanZoomController::GetGuid(ScrollableLayerGuid* aGuidOut)
 {
-  if (!aGuidOut) {
-    return;
+  if (aGuidOut) {
+    *aGuidOut = GetGuid();
   }
-  aGuidOut->mLayersId = mLayersId;
-  aGuidOut->mScrollId = mFrameMetrics.mScrollId;
-  aGuidOut->mPresShellId = mFrameMetrics.mPresShellId;
+}
+
+ScrollableLayerGuid AsyncPanZoomController::GetGuid()
+{
+  return ScrollableLayerGuid(mLayersId, mFrameMetrics);
+}
+
+void AsyncPanZoomController::UpdateSharedCompositorFrameMetrics()
+{
+  mMonitor.AssertCurrentThreadIn();
+
+  FrameMetrics* frame = mSharedFrameMetricsBuffer ?
+      static_cast<FrameMetrics*>(mSharedFrameMetricsBuffer->memory()) : nullptr;
+
+  if (gUseProgressiveTilePainting && frame && mSharedLock) {
+    mSharedLock->Lock();
+    *frame = mFrameMetrics;
+    mSharedLock->Unlock();
+  }
+}
+
+void AsyncPanZoomController::ShareCompositorFrameMetrics() {
+
+  PCompositorParent* compositor =
+    (mCrossProcessCompositorParent ? mCrossProcessCompositorParent : mCompositorParent.get());
+
+  // Only create the shared memory buffer if it hasn't already been created,
+  // we are using progressive tile painting, and we have a
+  // compositor to pass the shared memory back to the content process/thread.
+  if (!mSharedFrameMetricsBuffer && gUseProgressiveTilePainting && compositor) {
+
+    // Create shared memory and initialize it with the current FrameMetrics value
+    mSharedFrameMetricsBuffer = new ipc::SharedMemoryBasic;
+    FrameMetrics* frame = nullptr;
+    mSharedFrameMetricsBuffer->Create(sizeof(FrameMetrics));
+    mSharedFrameMetricsBuffer->Map(sizeof(FrameMetrics));
+    frame = static_cast<FrameMetrics*>(mSharedFrameMetricsBuffer->memory());
+
+    if (frame) {
+
+      { // scope the monitor, only needed to copy the FrameMetrics.
+        ReentrantMonitorAutoEnter lock(mMonitor);
+        *frame = mFrameMetrics;
+      }
+
+      // Get the process id of the content process
+      base::ProcessHandle processHandle = compositor->OtherProcess();
+      ipc::SharedMemoryBasic::Handle mem = ipc::SharedMemoryBasic::NULLHandle();
+
+      // Get the shared memory handle to share with the content process
+      mSharedFrameMetricsBuffer->ShareToProcess(processHandle, &mem);
+
+      // Get the cross process mutex handle to share with the content process
+      mSharedLock = new CrossProcessMutex("AsyncPanZoomControlLock");
+      CrossProcessMutexHandle handle = mSharedLock->ShareToProcess(processHandle);
+
+      // Send the shared memory handle and cross process handle to the content
+      // process by an asynchronous ipc call. Include the APZC unique ID
+      // so the content process know which APZC sent this shared FrameMetrics.
+      if (!compositor->SendSharedCompositorFrameMetrics(mem, handle, mAPZCId)) {
+        APZC_LOG("Failed to share FrameMetrics with content process.");
+      }
+    }
+  }
 }
 
 }

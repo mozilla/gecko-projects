@@ -24,8 +24,6 @@ struct DOMPoint {
   int32_t idx;
 };
 
-enum EGetTextType { eGetBefore=-1, eGetAt=0, eGetAfter=1 };
-
 // This character marks where in the text returned via nsIAccessibleText(),
 // that embedded object characters exist
 const PRUnichar kEmbeddedObjectChar = 0xfffc;
@@ -170,46 +168,44 @@ public:
   /**
    * Get a character at the given offset (don't support magic offsets).
    */
-  bool CharAt(int32_t aOffset, nsAString& aChar)
+  bool CharAt(int32_t aOffset, nsAString& aChar,
+              int32_t* aStartOffset = nullptr, int32_t* aEndOffset = nullptr)
   {
+    NS_ASSERTION(!aStartOffset == !aEndOffset,
+                 "Offsets should be both defined or both undefined!");
+
     int32_t childIdx = GetChildIndexAtOffset(aOffset);
     if (childIdx == -1)
       return false;
 
     Accessible* child = GetChildAt(childIdx);
     child->AppendTextTo(aChar, aOffset - GetChildOffset(childIdx), 1);
+
+    if (aStartOffset && aEndOffset) {
+      *aStartOffset = aOffset;
+      *aEndOffset = aOffset + aChar.Length();
+    }
     return true;
+  }
+
+  PRUnichar CharAt(int32_t aOffset)
+  {
+    nsAutoString charAtOffset;
+    CharAt(aOffset, charAtOffset);
+    return charAtOffset.CharAt(0);
   }
 
   /**
    * Return true if char at the given offset equals to given char.
    */
-  bool IsCharAt(int32_t aOffset, char aChar)
-  {
-    nsAutoString charAtOffset;
-    CharAt(aOffset, charAtOffset);
-    return charAtOffset.CharAt(0) == aChar;
-  }
+  bool IsCharAt(int32_t aOffset, PRUnichar aChar)
+    { return CharAt(aOffset) == aChar; }
 
   /**
    * Return true if terminal char is at the given offset.
    */
   bool IsLineEndCharAt(int32_t aOffset)
     { return IsCharAt(aOffset, '\n'); }
-
-  /**
-   * Get a character before/at/after the given offset.
-   *
-   * @param aOffset       [in] the given offset
-   * @param aShift        [in] specifies whether to get a char before/at/after
-   *                        offset
-   * @param aChar         [out] the character
-   * @param aStartOffset  [out, optional] the start offset of the character
-   * @param aEndOffset    [out, optional] the end offset of the character
-   * @return               false if offset at the given shift is out of range
-   */
-  bool GetCharAt(int32_t aOffset, EGetTextType aShift, nsAString& aChar,
-                 int32_t* aStartOffset = nullptr, int32_t* aEndOffset = nullptr);
 
   /**
    * Return text between given offsets.
@@ -402,6 +398,11 @@ protected:
   int32_t AdjustCaretOffset(int32_t aOffset) const;
 
   /**
+   * Return true if caret is at end of line.
+   */
+  bool IsCaretAtEndOfLine() const;
+
+  /**
    * Return true if the given offset points to terminal empty line if any.
    */
   bool IsEmptyLastLineOffset(int32_t aOffset)
@@ -447,35 +448,6 @@ protected:
   virtual int32_t FindOffset(int32_t aOffset, nsDirection aDirection,
                              nsSelectionAmount aAmount,
                              EWordMovementType aWordMovementType = eDefaultBehavior);
-
-  /**
-    * Provides information for substring that is defined by the given start
-    * and end offsets for this hyper text.
-    *
-    * @param  aStartOffset  [inout] the start offset into the hyper text. This
-    *                       is also an out parameter used to return the offset
-    *                       into the start frame's rendered text content
-    *                       (start frame is the @return)
-    *
-    * @param  aEndOffset    [inout] the end offset into the hyper text. This is
-    *                       also an out parameter used to return
-    *                       the offset into the end frame's rendered
-    *                       text content.
-    *
-    * @param  aText         [out, optional] return the substring's text
-    * @param  aEndFrame     [out, optional] return the end frame for this
-    *                       substring
-    * @param  aStartAcc     [out, optional] return the start accessible for this
-    *                       substring
-    * @param  aEndAcc       [out, optional] return the end accessible for this
-    *                       substring
-    * @return               the start frame for this substring
-    */
-  nsIFrame* GetPosAndText(int32_t& aStartOffset, int32_t& aEndOffset,
-                          nsAString *aText = nullptr,
-                          nsIFrame **aEndFrame = nullptr,
-                          Accessible** aStartAcc = nullptr,
-                          Accessible** aEndAcc = nullptr);
 
   /**
    * Return the boundaries of the substring in case of textual frame or

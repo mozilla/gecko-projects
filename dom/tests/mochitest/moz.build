@@ -11,15 +11,12 @@ DIRS += [
     'chrome',
     'crypto',
     'general',
-    'whatwg',
     'geolocation',
     'localstorage',
     'orientation',
     'sessionstorage',
     'storageevent',
-    'pointerlock',
     'notification',
-    'webapps',
     'webcomponents',
 ]
 
@@ -30,4 +27,17 @@ MOCHITEST_MANIFESTS += [
     'dom-level1-core/mochitest.ini',
     'dom-level2-core/mochitest.ini',
     'dom-level2-html/mochitest.ini',
+    'webapps/mochitest.ini',
+    'whatwg/mochitest.ini',
 ]
+
+MOCHITEST_CHROME_MANIFESTS += [
+    'webapps/chrome.ini',
+    'whatwg/chrome.ini',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gtk2':
+    # Bug 788164.
+    MOCHITEST_MANIFESTS += [
+        'pointerlock/mochitest.ini',
+    ]

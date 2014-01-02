@@ -43,9 +43,7 @@
 //
 // (Wow, our logging story is a huge mess.)
 
-#ifndef HAVE_64BIT_OS
-#define ENABLE_LOGGING 1
-#endif
+// #define ENABLE_LOGGING 1
 
 #if defined(ANDROID) && defined(ENABLE_LOGGING)
 #  include <android/log.h>
@@ -602,7 +600,7 @@ ParticularProcessPriorityManager::Init()
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   if (os) {
     os->AddObserver(this, "audio-channel-process-changed", /* ownsWeak */ true);
-    os->AddObserver(this, "remote-browser-shown", /* ownsWeak */ true);
+    os->AddObserver(this, "remote-browser-frame-shown", /* ownsWeak */ true);
     os->AddObserver(this, "ipc:browser-destroyed", /* ownsWeak */ true);
     os->AddObserver(this, "frameloader-visible-changed", /* ownsWeak */ true);
   }
@@ -674,7 +672,7 @@ ParticularProcessPriorityManager::Observe(nsISupports* aSubject,
 
   if (topic.EqualsLiteral("audio-channel-process-changed")) {
     OnAudioChannelProcessChanged(aSubject);
-  } else if (topic.EqualsLiteral("remote-browser-shown")) {
+  } else if (topic.EqualsLiteral("remote-browser-frame-shown")) {
     OnRemoteBrowserFrameShown(aSubject);
   } else if (topic.EqualsLiteral("ipc:browser-destroyed")) {
     OnTabParentDestroyed(aSubject);
@@ -746,13 +744,6 @@ ParticularProcessPriorityManager::OnRemoteBrowserFrameShown(nsISupports* aSubjec
 {
   nsCOMPtr<nsIFrameLoader> fl = do_QueryInterface(aSubject);
   NS_ENSURE_TRUE_VOID(fl);
-
-  // Ignore notifications that aren't from a BrowserOrApp
-  bool isBrowserOrApp;
-  fl->GetOwnerIsBrowserOrAppFrame(&isBrowserOrApp);
-  if (!isBrowserOrApp) {
-    return;
-  }
 
   nsCOMPtr<nsITabParent> tp;
   fl->GetTabParent(getter_AddRefs(tp));

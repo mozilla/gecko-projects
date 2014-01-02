@@ -25,6 +25,7 @@
 #include "vm/ProxyObject.h"
 
 #include "jscntxtinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace JS;
@@ -113,14 +114,6 @@ GetBuildConfiguration(JSContext *cx, unsigned argc, jsval *vp)
     value = BooleanValue(false);
 #endif
     if (!JS_SetProperty(cx, info, "threadsafe", value))
-        return false;
-
-#ifdef JS_WORKER_THREADS
-    value = BooleanValue(true);
-#else
-    value = BooleanValue(false);
-#endif
-    if (!JS_SetProperty(cx, info, "worker-threads", value))
         return false;
 
 #ifdef JS_MORE_DETERMINISTIC
@@ -956,7 +949,7 @@ static bool
 EnableOsiPointRegisterChecks(JSContext *, unsigned, jsval *vp)
 {
 #if defined(JS_ION) && defined(CHECK_OSIPOINT_REGISTERS)
-    jit::js_IonOptions.checkOsiPointRegisters = true;
+    jit::js_JitOptions.checkOsiPointRegisters = true;
 #endif
     JS_SET_RVAL(cx, vp, JSVAL_VOID);
     return true;
@@ -988,22 +981,45 @@ js::testingFunc_inParallelSection(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-static const char *ObjectMetadataPropertyName = "__objectMetadataFunction__";
-
 static bool
 ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
 {
-    RootedValue fun(cx);
-    if (!JS_GetProperty(cx, cx->global(), ObjectMetadataPropertyName, &fun))
+    RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
+    if (!obj)
         return false;
 
-    RootedValue rval(cx);
-    if (!Invoke(cx, UndefinedValue(), fun, 0, nullptr, &rval))
+    RootedObject stack(cx, NewDenseEmptyArray(cx));
+    if (!stack)
         return false;
 
-    if (rval.isObject())
-        *pmetadata = &rval.toObject();
+    static int createdIndex = 0;
+    createdIndex++;
 
+    if (!JS_DefineProperty(cx, obj, "index", Int32Value(createdIndex),
+                           JS_PropertyStub, JS_StrictPropertyStub, 0))
+    {
+        return false;
+    }
+
+    if (!JS_DefineProperty(cx, obj, "stack", ObjectValue(*stack),
+                           JS_PropertyStub, JS_StrictPropertyStub, 0))
+    {
+        return false;
+    }
+
+    int stackIndex = 0;
+    for (NonBuiltinScriptFrameIter iter(cx); !iter.done(); ++iter) {
+        if (iter.isFunctionFrame()) {
+            if (!JS_DefinePropertyById(cx, stack, INT_TO_JSID(stackIndex), ObjectValue(*iter.callee()),
+                                       JS_PropertyStub, JS_StrictPropertyStub, 0))
+            {
+                return false;
+            }
+            stackIndex++;
+        }
+    }
+
+    *pmetadata = obj;
     return true;
 }
 
@@ -1012,19 +1028,10 @@ SetObjectMetadataCallback(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
+    bool enabled = argc ? ToBoolean(args[0]) : false;
+    SetObjectMetadataCallback(cx, enabled ? ShellObjectMetadataCallback : nullptr);
+
     args.rval().setUndefined();
-
-    if (argc == 0 || !args[0].isObject() || !args[0].toObject().is<JSFunction>()) {
-        if (!JS_DeleteProperty(cx, cx->global(), ObjectMetadataPropertyName))
-            return false;
-        js::SetObjectMetadataCallback(cx, nullptr);
-        return true;
-    }
-
-    if (!JS_DefineProperty(cx, cx->global(), ObjectMetadataPropertyName, args[0], nullptr, nullptr, 0))
-        return false;
-
-    js::SetObjectMetadataCallback(cx, ShellObjectMetadataCallback);
     return true;
 }
 
@@ -1116,7 +1123,7 @@ SetJitCompilerOption(JSContext *cx, unsigned argc, jsval *vp)
 
     JS_SetGlobalJitCompilerOption(cx, opt, uint32_t(number));
 
-    args.rval().setBoolean(true);
+    args.rval().setUndefined();
     return true;
 }
 
@@ -1125,7 +1132,7 @@ SetIonCheckGraphCoherency(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef JS_ION
-    jit::js_IonOptions.checkGraphConsistency = ToBoolean(args.get(0));
+    jit::js_JitOptions.checkGraphConsistency = ToBoolean(args.get(0));
 #endif
     args.rval().setUndefined();
     return true;
@@ -1545,7 +1552,7 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  validated according to the asm.js spec."),
 
     JS_FN_HELP("isAsmJSModuleLoadedFromCache", IsAsmJSModuleLoadedFromCache, 1, 0,
-"isAsmJSModule(fn)",
+"isAsmJSModuleLoadedFromCache(fn)",
 "  Return whether the given asm.js module function has been loaded directly\n"
 "  from the cache. This function throws an error if fn is not a validated asm.js\n"
 "  module."),

@@ -251,7 +251,15 @@ function UpdateBackForwardCommands(aWebNavigation) {
       backBroadcaster.setAttribute("disabled", true);
   }
 
-  if (forwardDisabled == aWebNavigation.canGoForward) {
+  let canGoForward = aWebNavigation.canGoForward;
+  if (forwardDisabled) {
+    // Force the button to either be hidden (if we are already disabled,
+    // and should be), or to show if we're about to un-disable it:
+    // otherwise no transition will occur and it'll never show:
+    CombinedBackForward.setForwardButtonOcclusion(!canGoForward);
+  }
+
+  if (forwardDisabled == canGoForward) {
     if (forwardDisabled)
       forwardBroadcaster.removeAttribute("disabled");
     else
@@ -904,6 +912,7 @@ var gBrowserInit = {
 
     // Misc. inits.
     CombinedStopReload.init();
+    CombinedBackForward.init();
     gPrivateBrowsingUI.init();
     TabsInTitlebar.init();
 
@@ -1221,6 +1230,7 @@ var gBrowserInit = {
     // uninit methods don't depend on the services having been initialized).
 
     CombinedStopReload.uninit();
+    CombinedBackForward.uninit();
 
     gGestureSupport.init(false);
 
@@ -1351,8 +1361,6 @@ var gBrowserInit = {
         }
       }
     }
-
-    SocialUI.nonBrowserWindowInit();
 
     if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
       document.getElementById("macDockMenuNewWindow").hidden = true;
@@ -2466,8 +2474,15 @@ function _checkDefaultAndSwitchToMetro() {
     getService(Components.interfaces.nsIAppStartup);
 
     Services.prefs.setBoolPref('browser.sessionstore.resume_session_once', true);
-    appStartup.quit(Components.interfaces.nsIAppStartup.eAttemptQuit |
-                    Components.interfaces.nsIAppStartup.eRestartTouchEnvironment);
+
+    let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
+                     .createInstance(Ci.nsISupportsPRBool);
+    Services.obs.notifyObservers(cancelQuit, "quit-application-requested", "restart");
+
+    if (!cancelQuit.data) {
+      appStartup.quit(Components.interfaces.nsIAppStartup.eAttemptQuit |
+                      Components.interfaces.nsIAppStartup.eRestartTouchEnvironment);
+    }
     return true;
   }
   return false;
@@ -2942,13 +2957,11 @@ const BrowserSearch = {
       openSearchPageIfFieldIsNotActive(searchBar);
     };
     if (placement && placement.area == CustomizableUI.AREA_PANEL) {
-      PanelUI.show().then(() => {
-        // The panel is not constructed until the first time it is shown.
-        focusSearchBar();
-      });
+      // The panel is not constructed until the first time it is shown.
+      PanelUI.show().then(focusSearchBar);
       return;
     }
-    if (placement.area == CustomizableUI.AREA_NAVBAR && searchBar &&
+    if (placement && placement.area == CustomizableUI.AREA_NAVBAR && searchBar &&
         searchBar.parentNode.classList.contains("overflowedItem")) {
       let navBar = document.getElementById(CustomizableUI.AREA_NAVBAR);
       navBar.overflowable.show().then(() => {
@@ -3777,6 +3790,7 @@ var XULBrowserWindow = {
   onUpdateCurrentBrowser: function XWB_onUpdateCurrentBrowser(aStateFlags, aStatus, aMessage, aTotalProgress) {
     if (FullZoom.updateBackgroundTabs)
       FullZoom.onLocationChange(gBrowser.currentURI, true);
+    CombinedBackForward.setForwardButtonOcclusion(!gBrowser.webProgress.canGoForward);
     var nsIWebProgressListener = Components.interfaces.nsIWebProgressListener;
     var loadingDone = aStateFlags & nsIWebProgressListener.STATE_STOP;
     // use a pseudo-object instead of a (potentially nonexistent) channel for getting
@@ -3850,6 +3864,43 @@ var LinkTargetDisplay = {
     XULBrowserWindow.updateStatusField();
   }
 };
+
+let CombinedBackForward = {
+  init: function() {
+    this.forwardButton = document.getElementById("forward-button");
+    // Add a transition listener to the url bar to hide the forward button
+    // when necessary
+    if (gURLBar)
+      gURLBar.addEventListener("transitionend", this);
+    // On startup, or if the user customizes, our listener isn't attached,
+    // and no transitions fire anyway, so we need to make sure we've hidden the
+    // button if necessary:
+    if (this.forwardButton && this.forwardButton.hasAttribute("disabled")) {
+      this.setForwardButtonOcclusion(true);
+    }
+  },
+  uninit: function() {
+    if (gURLBar)
+      gURLBar.removeEventListener("transitionend", this);
+  },
+  handleEvent: function(aEvent) {
+    if (aEvent.type == "transitionend" &&
+        (aEvent.propertyName == "margin-left" || aEvent.propertyName == "margin-right") &&
+        this.forwardButton.hasAttribute("disabled")) {
+      this.setForwardButtonOcclusion(true);
+    }
+  },
+  setForwardButtonOcclusion: function(shouldBeOccluded) {
+    if (!this.forwardButton)
+      return;
+
+    let hasAttribute = this.forwardButton.hasAttribute("occluded-by-urlbar");
+    if (shouldBeOccluded && !hasAttribute)
+      this.forwardButton.setAttribute("occluded-by-urlbar", "true");
+    else if (!shouldBeOccluded && hasAttribute)
+      this.forwardButton.removeAttribute("occluded-by-urlbar");
+  }
+}
 
 var CombinedStopReload = {
   init: function () {
@@ -4213,10 +4264,10 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
   }
 
 
-  let addToPanel = popup.querySelector(".customize-context-addToPanel");
+  let moveToPanel = popup.querySelector(".customize-context-moveToPanel");
   let removeFromToolbar = popup.querySelector(".customize-context-removeFromToolbar");
-  // View -> Toolbars menu doesn't have the addToPanel or removeFromToolbar items.
-  if (!addToPanel || !removeFromToolbar) {
+  // View -> Toolbars menu doesn't have the moveToPanel or removeFromToolbar items.
+  if (!moveToPanel || !removeFromToolbar) {
     return;
   }
 
@@ -4243,10 +4294,10 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
   let movable = toolbarItem && toolbarItem.parentNode &&
                 CustomizableUI.isWidgetRemovable(toolbarItem);
   if (movable) {
-    addToPanel.removeAttribute("disabled");
+    moveToPanel.removeAttribute("disabled");
     removeFromToolbar.removeAttribute("disabled");
   } else {
-    addToPanel.setAttribute("disabled", true);
+    moveToPanel.setAttribute("disabled", true);
     removeFromToolbar.setAttribute("disabled", true);
   }
 }
@@ -6101,33 +6152,16 @@ function undoCloseTab(aIndex) {
   if (gBrowser.tabs.length == 1 && isTabEmpty(gBrowser.selectedTab))
     blankTabToRemove = gBrowser.selectedTab;
 
-  let numberOfTabsToUndoClose = 0;
-  let index = Number(aIndex);
-
-
-  if (isNaN(index)) {
-    index = 0;
-    numberOfTabsToUndoClose = SessionStore.getNumberOfTabsClosedLast(window);
-  } else {
-    if (0 > index || index >= SessionStore.getClosedTabCount(window))
-      return null;
-    numberOfTabsToUndoClose = 1;
-  }
-
-  let tab = null;
-  while (numberOfTabsToUndoClose > 0 &&
-         numberOfTabsToUndoClose--) {
+  var tab = null;
+  if (SessionStore.getClosedTabCount(window) > (aIndex || 0)) {
     TabView.prepareUndoCloseTab(blankTabToRemove);
-    tab = SessionStore.undoCloseTab(window, index);
+    tab = SessionStore.undoCloseTab(window, aIndex || 0);
     TabView.afterUndoCloseTab();
-    if (blankTabToRemove) {
+
+    if (blankTabToRemove)
       gBrowser.removeTab(blankTabToRemove);
-      blankTabToRemove = null;
-    }
   }
 
-  // Reset the number of tabs closed last time to the default.
-  SessionStore.setNumberOfTabsClosedLast(window, 1);
   return tab;
 }
 
@@ -6428,9 +6462,6 @@ var gIdentityHandler = {
     // If we've already got an active notification, bail out to avoid showing it repeatedly.
     if (PopupNotifications.getNotification("mixed-content-blocked", gBrowser.selectedBrowser))
       return;
-
-    let helplink = document.getElementById("mixed-content-blocked-helplink");
-    helplink.setAttribute("onclick", "openHelpLink('mixed-content');");
 
     let brandBundle = document.getElementById("bundle_brand");
     let brandShortName = brandBundle.getString("brandShortName");
@@ -6950,13 +6981,8 @@ var TabContextMenu = {
       menuItem.disabled = disabled;
 
     // Session store
-    let undoCloseTabElement = document.getElementById("context_undoCloseTab");
-    let closedTabCount = SessionStore.getNumberOfTabsClosedLast(window);
-    undoCloseTabElement.disabled = closedTabCount == 0;
-    // Change the label of "Undo Close Tab" to specify if it will undo a batch-close
-    // or a single close.
-    let visibleLabel = closedTabCount <= 1 ? "singletablabel" : "multipletablabel";
-    undoCloseTabElement.setAttribute("label", undoCloseTabElement.getAttribute(visibleLabel));
+    document.getElementById("context_undoCloseTab").disabled =
+      SessionStore.getClosedTabCount(window) == 0;
 
     // Only one of pin/unpin should be visible
     document.getElementById("context_pinTab").hidden = this.contextTab.pinned;

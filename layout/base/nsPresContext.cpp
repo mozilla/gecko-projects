@@ -45,7 +45,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsIMessageManager.h"
-#include "nsDOMMediaQueryList.h"
+#include "mozilla/dom/MediaQueryList.h"
 #include "nsSMILAnimationController.h"
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/dom/TabChild.h"
@@ -69,6 +69,19 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::layers;
+
+// BEGIN temporary diagnostic stuff for bug 946929
+struct PCLink;
+static PCLink* sTopPCLink;
+struct PCLink {
+  PCLink(const char* w, nsPresContext* aPC)
+    : prev(sTopPCLink), pc(aPC), where(w) { sTopPCLink = this; }
+  ~PCLink() { sTopPCLink = prev; }
+  PCLink* prev;
+  nsPresContext* pc;
+  const char* where;
+};
+// END temporary diagnostic stuff for bug 946929
 
 uint8_t gNotifySubDocInvalidationData;
 
@@ -123,11 +136,63 @@ nsPresContext::MakeColorPref(const nsString& aColor)
     : NS_RGB(0, 0, 0);
 }
 
+static void DumpPresContextState(nsPresContext* aPC)
+{
+  printf_stderr("PresContext(%p) %s", aPC, aPC->IsRoot()?"ROOT ":"");
+  nsIURI* uri = aPC->Document()->GetDocumentURI();
+  if (uri) {
+    nsAutoCString uriSpec;
+    nsresult rv = uri->GetSpec(uriSpec);
+    if (NS_SUCCEEDED(rv)) {
+      printf_stderr("%s ", uriSpec.get());
+    }
+  }
+  nsIPresShell* shell = aPC->GetPresShell();
+  if (shell) {
+    printf_stderr("PresShell - IsDestroying(%i) IsFrozen(%i) IsActive(%i) IsVisible(%i) IsNeverPainting(%i) GetRootFrame(%p)",
+                  shell->IsDestroying(),
+                  shell->IsFrozen(),
+                  shell->IsActive(),
+                  shell->IsVisible(),
+                  shell->IsNeverPainting(),
+                  shell->GetRootFrame());
+  }
+  printf_stderr("\n");
+}
+
 bool
 nsPresContext::IsDOMPaintEventPending() 
 {
   if (mFireAfterPaintEvents) {
     return true;
+  }
+  if (!GetDisplayRootPresContext() ||
+      !GetDisplayRootPresContext()->GetRootPresContext()) {
+    printf_stderr("Failed to find root pres context, dumping pres context and ancestors\n");
+    for (PCLink* p = sTopPCLink; p; p = p->prev) {
+      printf_stderr("%s %p ", p->where, p->pc);
+    }
+    if (sTopPCLink) printf_stderr("\n");
+    nsPresContext* pc = this;
+    for (;;) {
+      DumpPresContextState(pc);
+      nsPresContext* parent = pc->GetParentPresContext();
+      if (!parent) {
+        nsIDocument* doc = pc->Document();
+        if (doc) {
+          doc = doc->GetParentDocument();
+          if (doc) {
+            nsIPresShell* shell = doc->GetShell();
+            if (shell) {
+              parent = shell->GetPresContext();
+            }
+          }
+        }
+      }
+      if (!parent || parent == pc)
+        break;
+      pc = parent;
+    }
   }
   if (GetDisplayRootPresContext()->GetRootPresContext()->mRefreshDriver->ViewManagerFlushIsPending()) {
     // Since we're promising that there will be a MozAfterPaint event
@@ -245,6 +310,9 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
 
 nsPresContext::~nsPresContext()
 {
+  if (sTopPCLink) {
+    printf_stderr("~nsPresContext %p %p\n", this, mShell);
+  }
   NS_PRECONDITION(!mShell, "Presshell forgot to clear our mShell pointer");
   SetShell(nullptr);
 
@@ -345,7 +413,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
   // methods.
   for (PRCList *l = PR_LIST_HEAD(&tmp->mDOMMediaQueryLists);
        l != &tmp->mDOMMediaQueryLists; l = PR_NEXT_LINK(l)) {
-    nsDOMMediaQueryList *mql = static_cast<nsDOMMediaQueryList*>(l);
+    MediaQueryList *mql = static_cast<MediaQueryList*>(l);
     if (mql->HasListeners()) {
       NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mDOMMediaQueryLists item");
       cb.NoteXPCOMChild(mql);
@@ -374,7 +442,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsPresContext)
   for (PRCList *l = PR_LIST_HEAD(&tmp->mDOMMediaQueryLists);
        l != &tmp->mDOMMediaQueryLists; ) {
     PRCList *next = PR_NEXT_LINK(l);
-    nsDOMMediaQueryList *mql = static_cast<nsDOMMediaQueryList*>(l);
+    MediaQueryList *mql = static_cast<MediaQueryList*>(l);
     mql->RemoveAllListeners();
     l = next;
   }
@@ -1842,10 +1910,10 @@ nsPresContext::MediaFeatureValuesChanged(StyleRebuildType aShouldRebuild,
     // Note that we intentionally send the notifications to media query
     // list in the order they were created and, for each list, to the
     // listeners in the order added.
-    nsDOMMediaQueryList::NotifyList notifyList;
+    MediaQueryList::NotifyList notifyList;
     for (PRCList *l = PR_LIST_HEAD(&mDOMMediaQueryLists);
          l != &mDOMMediaQueryLists; l = PR_NEXT_LINK(l)) {
-      nsDOMMediaQueryList *mql = static_cast<nsDOMMediaQueryList*>(l);
+      MediaQueryList *mql = static_cast<MediaQueryList*>(l);
       mql->MediumFeaturesChanged(notifyList);
     }
 
@@ -1857,8 +1925,9 @@ nsPresContext::MediaFeatureValuesChanged(StyleRebuildType aShouldRebuild,
       for (uint32_t i = 0, i_end = notifyList.Length(); i != i_end; ++i) {
         if (pusher.RePush(et)) {
           nsAutoMicroTask mt;
-          nsDOMMediaQueryList::HandleChangeData &d = notifyList[i];
-          d.listener->HandleChange(d.mql);
+          MediaQueryList::HandleChangeData &d = notifyList[i];
+          ErrorResult result;
+          d.callback->Call(*d.mql, result);
         }
       }
     }
@@ -1893,11 +1962,10 @@ nsPresContext::HandleMediaFeatureValuesChangedEvent()
   }
 }
 
-already_AddRefed<nsIDOMMediaQueryList>
+already_AddRefed<MediaQueryList>
 nsPresContext::MatchMedia(const nsAString& aMediaQueryList)
 {
-  nsRefPtr<nsDOMMediaQueryList> result =
-    new nsDOMMediaQueryList(this, aMediaQueryList);
+  nsRefPtr<MediaQueryList> result = new MediaQueryList(this, aMediaQueryList);
 
   // Insert the new item at the end of the linked list.
   PR_INSERT_BEFORE(result, &mDOMMediaQueryLists);
@@ -2368,6 +2436,7 @@ NotifyDidPaintSubdocumentCallback(nsIDocument* aDocument, void* aData)
   if (shell) {
     nsPresContext* pc = shell->GetPresContext();
     if (pc) {
+      PCLink pcl("NotifyDidPaintSubdocumentCallback", pc);
       pc->NotifyDidPaintForSubtree(closure->mFlags);
       if (pc->IsDOMPaintEventPending()) {
         closure->mNeedsAnotherDidPaintNotification = true;
@@ -2950,6 +3019,7 @@ NotifyDidPaintForSubtreeCallback(nsITimer *aTimer, void *aClosure)
   nsAutoScriptBlocker blockScripts;
   // This is a fallback if we don't get paint events for some reason
   // so we'll just pretend both layer painting and compositing happened.
+  PCLink pcl("NotifyDidPaintForSubtreeCallback", presContext);
   presContext->NotifyDidPaintForSubtree(
       nsIPresShell::PAINT_LAYERS | nsIPresShell::PAINT_COMPOSITE);
 }

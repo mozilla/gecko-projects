@@ -159,7 +159,7 @@ public class testDistribution extends ContentProviderTest {
 
     private void checkSearchPlugin() {
         Actions.RepeatedEventExpecter eventExpecter = mActions.expectGeckoEvent("SearchEngines:Data");
-        mActions.sendGeckoEvent("SearchEngines:Get", null);
+        mActions.sendGeckoEvent("SearchEngines:GetVisible", null);
 
         try {
             JSONObject data = new JSONObject(eventExpecter.blockForEventData());
@@ -303,7 +303,7 @@ public class testDistribution extends ContentProviderTest {
     @Override
     public void setUp() throws Exception {
         // TODO: Set up the content provider after setting the distribution.
-        super.setUp("org.mozilla.gecko.db.BrowserProvider", "AUTHORITY");
+        super.setUp("org.mozilla.gecko.db.BrowserProvider", "AUTHORITY", "browser.db");
     }
 
     private void delete(File file) throws Exception {

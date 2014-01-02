@@ -51,7 +51,7 @@ nsLeafFrame::Reflow(nsPresContext* aPresContext,
   DO_GLOBAL_REFLOW_COUNT("nsLeafFrame");
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                  ("enter nsLeafFrame::Reflow: aMaxSize=%d,%d",
-                  aReflowState.availableWidth, aReflowState.availableHeight));
+                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
@@ -74,15 +74,15 @@ nsLeafFrame::DoReflow(nsPresContext* aPresContext,
                "Shouldn't have unconstrained stuff here "
                "thanks to ComputeAutoSize");  
 
-  aMetrics.width = aReflowState.ComputedWidth();
-  aMetrics.height = aReflowState.ComputedHeight();
+  aMetrics.Width() = aReflowState.ComputedWidth();
+  aMetrics.Height() = aReflowState.ComputedHeight();
   
   AddBordersAndPadding(aReflowState, aMetrics);
   aStatus = NS_FRAME_COMPLETE;
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                  ("exit nsLeafFrame::DoReflow: size=%d,%d",
-                  aMetrics.width, aMetrics.height));
+                  aMetrics.Width(), aMetrics.Height()));
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 
   aMetrics.SetOverflowAreasToDesiredBounds();
@@ -103,16 +103,16 @@ void
 nsLeafFrame::AddBordersAndPadding(const nsHTMLReflowState& aReflowState,
                                   nsHTMLReflowMetrics& aMetrics)
 {
-  aMetrics.width += aReflowState.mComputedBorderPadding.LeftRight();
-  aMetrics.height += aReflowState.mComputedBorderPadding.TopBottom();
+  aMetrics.Width() += aReflowState.ComputedPhysicalBorderPadding().LeftRight();
+  aMetrics.Height() += aReflowState.ComputedPhysicalBorderPadding().TopBottom();
 }
 
 void
 nsLeafFrame::SizeToAvailSize(const nsHTMLReflowState& aReflowState,
                              nsHTMLReflowMetrics& aDesiredSize)
 {
-  aDesiredSize.width  = aReflowState.availableWidth; // FRAME
-  aDesiredSize.height = aReflowState.availableHeight;
+  aDesiredSize.Width() = aReflowState.AvailableWidth(); // FRAME
+  aDesiredSize.Height() = aReflowState.AvailableHeight();
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   FinishAndStoreOverflow(&aDesiredSize);  
 }

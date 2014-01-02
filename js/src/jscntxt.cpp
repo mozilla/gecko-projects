@@ -116,6 +116,7 @@ js::ExistingCloneFunctionAtCallsite(const CallsiteCloneTable &table, JSFunction 
     JS_ASSERT(fun->nonLazyScript()->shouldCloneAtCallsite());
     JS_ASSERT(!fun->nonLazyScript()->enclosingStaticScope());
     JS_ASSERT(types::UseNewTypeForClone(fun));
+    JS_ASSERT(CurrentThreadCanReadCompilationData());
 
     /*
      * If we start allocating function objects in the nursery, then the callsite
@@ -126,7 +127,7 @@ js::ExistingCloneFunctionAtCallsite(const CallsiteCloneTable &table, JSFunction 
     if (!table.initialized())
         return nullptr;
 
-    CallsiteCloneTable::Ptr p = table.lookup(CallsiteCloneKey(fun, script, script->pcToOffset(pc)));
+    CallsiteCloneTable::Ptr p = table.readonlyThreadsafeLookup(CallsiteCloneKey(fun, script, script->pcToOffset(pc)));
     if (p)
         return p->value();
 
@@ -152,6 +153,8 @@ js::CloneFunctionAtCallsite(JSContext *cx, HandleFunction fun, HandleScript scri
 
     typedef CallsiteCloneKey Key;
     typedef CallsiteCloneTable Table;
+
+    AutoLockForCompilation lock(cx);
 
     Table &table = cx->compartment()->callsiteClones;
     if (!table.initialized() && !table.init())
@@ -290,7 +293,9 @@ ReportError(JSContext *cx, const char *message, JSErrorReport *reportp,
     JS_ASSERT(reportp);
     if ((!callback || callback == js_GetErrorMessage) &&
         reportp->errorNumber == JSMSG_UNCAUGHT_EXCEPTION)
+    {
         reportp->flags |= JSREPORT_EXCEPTION;
+    }
 
     /*
      * Call the error reporter only if an exception wasn't raised.
@@ -300,9 +305,9 @@ ReportError(JSContext *cx, const char *message, JSErrorReport *reportp,
      * propagates out of scope.  This is needed for compatibility
      * with the old scheme.
      */
-    if (!JS_IsRunning(cx) ||
-        !js_ErrorToException(cx, message, reportp, callback, userRef)) {
-        js_ReportErrorAgain(cx, message, reportp);
+    if (!JS_IsRunning(cx) || !js_ErrorToException(cx, message, reportp, callback, userRef)) {
+        if (message)
+            CallErrorReporter(cx, message, reportp);
     } else if (JSDebugErrorHook hook = cx->runtime()->debugHooks.debugErrorHook) {
         /*
          * If we've already chewed up all the C stack, don't call into the
@@ -875,26 +880,21 @@ js_ReportErrorNumberUCArray(JSContext *cx, unsigned flags, JSErrorCallback callb
     return warning;
 }
 
-JS_FRIEND_API(void)
-js_ReportErrorAgain(JSContext *cx, const char *message, JSErrorReport *reportp)
+void
+js::CallErrorReporter(JSContext *cx, const char *message, JSErrorReport *reportp)
 {
-    JSErrorReporter onError;
+    JS_ASSERT(message);
+    JS_ASSERT(reportp);
 
-    if (!message)
-        return;
-
-    onError = cx->errorReporter;
-
-    /*
-     * If debugErrorHook is present then we give it a chance to veto
-     * sending the error on to the regular ErrorReporter.
-     */
-    if (onError) {
+    // If debugErrorHook is present, give it a chance to veto sending the error
+    // on to the regular ErrorReporter.
+    if (cx->errorReporter) {
         JSDebugErrorHook hook = cx->runtime()->debugHooks.debugErrorHook;
         if (hook && !hook(cx, message, reportp, cx->runtime()->debugHooks.debugErrorHookData))
-            onError = nullptr;
+            return;
     }
-    if (onError)
+
+    if (JSErrorReporter onError = cx->errorReporter)
         onError(cx, message, reportp);
 }
 
@@ -1052,7 +1052,7 @@ js::ThreadSafeContext::ThreadSafeContext(JSRuntime *rt, PerThreadData *pt, Conte
     perThreadData(pt),
     allocator_(nullptr)
 {
-#ifdef JS_WORKER_THREADS
+#ifdef JS_THREADSAFE
     JS_ASSERT_IF(kind == Context_Exclusive, rt->workerThreadState != nullptr);
 #endif
 }
@@ -1073,7 +1073,7 @@ ThreadSafeContext::asForkJoinSlice()
 JSContext::JSContext(JSRuntime *rt)
   : ExclusiveContext(rt, &rt->mainThread, Context_JS),
     throwing(false),
-    exception(UndefinedValue()),
+    unwrappedException_(UndefinedValue()),
     options_(),
     reportGranularity(JS_DEFAULT_JITREPORT_GRANULARITY),
     resolvingList(nullptr),
@@ -1109,20 +1109,20 @@ JSContext::~JSContext()
     JS_ASSERT(!resolvingList);
 }
 
-/*
- * Since this function is only called in the context of a pending exception,
- * the caller must subsequently take an error path. If wrapping fails, it will
- * set a new (uncatchable) exception to be used in place of the original.
- */
-void
-JSContext::wrapPendingException()
+bool
+JSContext::getPendingException(MutableHandleValue rval)
 {
-    RootedValue value(this, getPendingException());
+    JS_ASSERT(throwing);
+    rval.set(unwrappedException_);
+    if (IsAtomsCompartment(compartment()))
+        return true;
     clearPendingException();
-    if (!IsAtomsCompartment(compartment()) && compartment()->wrap(this, &value))
-        setPendingException(value);
+    if (!compartment()->wrap(this, rval))
+        return false;
+    assertSameCompartment(this, rval);
+    setPendingException(rval);
+    return true;
 }
-
 
 void
 JSContext::enterGenerator(JSGenerator *gen)
@@ -1171,9 +1171,6 @@ JSContext::restoreFrameChain()
 
     if (Activation *act = mainThread().activation())
         act->restoreFrameChain();
-
-    if (isExceptionPending())
-        wrapPendingException();
 }
 
 bool
@@ -1287,7 +1284,7 @@ JSContext::mark(JSTracer *trc)
     if (defaultCompartmentObject_)
         MarkObjectRoot(trc, &defaultCompartmentObject_, "default compartment object");
     if (isExceptionPending())
-        MarkValueRoot(trc, &exception, "exception");
+        MarkValueRoot(trc, &unwrappedException_, "unwrapped exception");
 
     TraceCycleDetectionSet(trc, cycleDetectorSet);
 

@@ -115,6 +115,9 @@ var BrowserUI = {
     SettingsCharm.init();
     NavButtonSlider.init();
     SelectionHelperUI.init();
+#ifdef NIGHTLY_BUILD
+    ShumwayUtils.init();
+#endif
 
     // We can delay some initialization until after startup.  We wait until
     // the first page is shown, then dispatch a UIReadyDelayed event.
@@ -151,6 +154,7 @@ var BrowserUI = {
         DialogUI.init();
         FormHelperUI.init();
         FindHelperUI.init();
+        PdfJs.init();
       } catch(ex) {
         Util.dumpLn("Exception in delay load module:", ex.message);
       }
@@ -308,7 +312,7 @@ var BrowserUI = {
 
   isStartURI: function isStartURI(aURI) {
     aURI = aURI || Browser.selectedBrowser.currentURI.spec;
-    return aURI == kStartURI || aURI == "about:start" || aURI == "about:home";
+    return aURI.startsWith(kStartURI) || aURI == "about:start" || aURI == "about:home";
   },
 
   updateStartURIAttributes: function (aURI) {

@@ -97,6 +97,7 @@ UNIFIED_SOURCES += [
     'builtin/MapObject.cpp',
     'builtin/Object.cpp',
     'builtin/Profilers.cpp',
+    'builtin/SIMD.cpp',
     'builtin/TestingFunctions.cpp',
     'builtin/TypedObject.cpp',
     'builtin/TypeRepresentation.cpp',
@@ -256,7 +257,9 @@ if CONFIG['ENABLE_ION']:
         'jit/IonCaches.cpp',
         'jit/IonFrames.cpp',
         'jit/IonMacroAssembler.cpp',
+        'jit/IonOptimizationLevels.cpp',
         'jit/IonSpewer.cpp',
+        'jit/JitOptions.cpp',
         'jit/JSONSpewer.cpp',
         'jit/LICM.cpp',
         'jit/LinearScan.cpp',
@@ -290,7 +293,6 @@ if CONFIG['ENABLE_ION']:
             'jit/shared/BaselineCompiler-x86-shared.cpp',
             'jit/shared/BaselineIC-x86-shared.cpp',
             'jit/shared/CodeGenerator-x86-shared.cpp',
-            'jit/shared/IonFrames-x86-shared.cpp',
             'jit/shared/Lowering-x86-shared.cpp',
             'jit/shared/MoveEmitter-x86-shared.cpp',
         ]
@@ -324,7 +326,6 @@ if CONFIG['ENABLE_ION']:
             'jit/arm/BaselineCompiler-arm.cpp',
             'jit/arm/BaselineIC-arm.cpp',
             'jit/arm/CodeGenerator-arm.cpp',
-            'jit/arm/IonFrames-arm.cpp',
             'jit/arm/Lowering-arm.cpp',
             'jit/arm/MacroAssembler-arm.cpp',
             'jit/arm/MoveEmitter-arm.cpp',
@@ -428,5 +429,5 @@ if CONFIG['MOZ_LINKER']:
 if CONFIG['_MSC_VER']:
     if CONFIG['CPU_ARCH'] == 'x86':
         SOURCES['builtin/RegExp.cpp'].no_pgo = True # Bug 772303
-    elif CONFIG['CPU_ARCH'] == 'x86_64':
+    elif CONFIG['CPU_ARCH'] == 'x86_64' and CONFIG['JS_HAS_CTYPES']:
         SOURCES['ctypes/CTypes.cpp'].no_pgo = True # Bug 810661

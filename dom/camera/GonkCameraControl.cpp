@@ -47,6 +47,7 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::layers;
 using namespace android;
+using mozilla::gfx::IntSize;
 
 /**
  * See bug 783682.  Most camera implementations, despite claiming they
@@ -1158,7 +1159,7 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
 
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    obs->NotifyObservers(mFile, "file-watcher-notify", NS_LITERAL_STRING("modified").get());
+    obs->NotifyObservers(mFile, "file-watcher-notify", MOZ_UTF16("modified"));
     return NS_OK;
   }
 
@@ -1693,7 +1694,7 @@ GonkFrameBuilder(Image* aImage, void* aBuffer, uint32_t aWidth, uint32_t aHeight
   GrallocImage* videoImage = static_cast<GrallocImage*>(aImage);
   GrallocImage::GrallocData data;
   data.mGraphicBuffer = static_cast<layers::GraphicBufferLocked*>(aBuffer);
-  data.mPicSize = gfxIntSize(aWidth, aHeight);
+  data.mPicSize = IntSize(aWidth, aHeight);
   videoImage->SetData(data);
 }
 

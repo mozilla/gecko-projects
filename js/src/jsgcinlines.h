@@ -426,7 +426,7 @@ NewGCThing(ThreadSafeContext *cx, AllocKind kind, size_t thingSize, InitialHeap 
         JS_ASSERT_IF(rt->isAtomsCompartment(ncx->compartment()),
                      kind == FINALIZE_STRING ||
                      kind == FINALIZE_SHORT_STRING ||
-                     kind == FINALIZE_IONCODE);
+                     kind == FINALIZE_JITCODE);
         JS_ASSERT(!rt->isHeapBusy());
         JS_ASSERT(!rt->noGCOrAllocationCheck);
 
@@ -434,7 +434,7 @@ NewGCThing(ThreadSafeContext *cx, AllocKind kind, size_t thingSize, InitialHeap 
         JS_OOM_POSSIBLY_FAIL_REPORT(ncx);
 
 #ifdef JS_GC_ZEAL
-        if (rt->needZealousGC() && allowGC)
+        if (allowGC && rt->needZealousGC())
             js::gc::RunDebugGC(ncx);
 #endif
 

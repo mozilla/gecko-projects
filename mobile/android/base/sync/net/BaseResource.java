@@ -91,7 +91,10 @@ public class BaseResource implements Resource {
   }
 
   public BaseResource(URI uri, boolean rewrite) {
-    if (rewrite && uri.getHost().equals("localhost")) {
+    if (uri == null) {
+      throw new IllegalArgumentException("uri must not be null");
+    }
+    if (rewrite && "localhost".equals(uri.getHost())) {
       // Rewrite localhost URIs to refer to the special Android emulator loopback passthrough interface.
       Logger.debug(LOG_TAG, "Rewriting " + uri + " to point to " + ANDROID_LOOPBACK_IP + ".");
       try {
@@ -443,5 +446,9 @@ public class BaseResource implements Resource {
 
   public void post(ExtendedJSONObject o) throws UnsupportedEncodingException {
     post(jsonEntity(o));
+  }
+
+  public void post(JSONObject jsonObject) throws UnsupportedEncodingException {
+    post(jsonEntity(jsonObject));
   }
 }

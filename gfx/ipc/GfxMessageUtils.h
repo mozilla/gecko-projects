@@ -15,7 +15,7 @@
 
 #include "gfx3DMatrix.h"
 #include "gfxColor.h"
-#include "gfxMatrix.h"
+#include "mozilla/gfx/Matrix.h"
 #include "GraphicsFilter.h"
 #include "gfxPoint.h"
 #include "gfxRect.h"
@@ -46,28 +46,28 @@ typedef GraphicsFilter::Enum GraphicsFilterType;
 namespace IPC {
 
 template<>
-struct ParamTraits<gfxMatrix>
+struct ParamTraits<mozilla::gfx::Matrix>
 {
-  typedef gfxMatrix paramType;
+  typedef mozilla::gfx::Matrix paramType;
 
   static void Write(Message* aMsg, const paramType& aParam)
   {
-    WriteParam(aMsg, aParam.xx);
-    WriteParam(aMsg, aParam.xy);
-    WriteParam(aMsg, aParam.yx);
-    WriteParam(aMsg, aParam.yy);
-    WriteParam(aMsg, aParam.x0);
-    WriteParam(aMsg, aParam.y0);
+    WriteParam(aMsg, aParam._11);
+    WriteParam(aMsg, aParam._12);
+    WriteParam(aMsg, aParam._21);
+    WriteParam(aMsg, aParam._22);
+    WriteParam(aMsg, aParam._31);
+    WriteParam(aMsg, aParam._32);
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    if (ReadParam(aMsg, aIter, &aResult->xx) &&
-        ReadParam(aMsg, aIter, &aResult->xy) &&
-        ReadParam(aMsg, aIter, &aResult->yx) &&
-        ReadParam(aMsg, aIter, &aResult->yy) &&
-        ReadParam(aMsg, aIter, &aResult->x0) &&
-        ReadParam(aMsg, aIter, &aResult->y0))
+    if (ReadParam(aMsg, aIter, &aResult->_11) &&
+        ReadParam(aMsg, aIter, &aResult->_12) &&
+        ReadParam(aMsg, aIter, &aResult->_21) &&
+        ReadParam(aMsg, aIter, &aResult->_22) &&
+        ReadParam(aMsg, aIter, &aResult->_31) &&
+        ReadParam(aMsg, aIter, &aResult->_32))
       return true;
 
     return false;
@@ -75,8 +75,8 @@ struct ParamTraits<gfxMatrix>
 
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
-    aLog->append(StringPrintf(L"[[%g %g] [%g %g] [%g %g]]", aParam.xx, aParam.xy, aParam.yx, aParam.yy,
-	  						    aParam.x0, aParam.y0));
+    aLog->append(StringPrintf(L"[[%g %g] [%g %g] [%g %g]]", aParam._11, aParam._12, aParam._21, aParam._22,
+                                                            aParam._31, aParam._32));
   }
 };
 
@@ -585,6 +585,7 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
     WriteParam(aMsg, aParam.mPresShellId);
     WriteParam(aMsg, aParam.mIsRoot);
     WriteParam(aMsg, aParam.mHasScrollgrab);
+    WriteParam(aMsg, aParam.mUpdateScrollOffset);
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
@@ -603,7 +604,8 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
             ReadParam(aMsg, aIter, &aResult->mMayHaveTouchListeners) &&
             ReadParam(aMsg, aIter, &aResult->mPresShellId) &&
             ReadParam(aMsg, aIter, &aResult->mIsRoot) &&
-            ReadParam(aMsg, aIter, &aResult->mHasScrollgrab));
+            ReadParam(aMsg, aIter, &aResult->mHasScrollgrab) &&
+            ReadParam(aMsg, aIter, &aResult->mUpdateScrollOffset));
   }
 };
 
@@ -680,6 +682,24 @@ struct ParamTraits<mozilla::layers::ScrollableLayerGuid>
     return (ReadParam(aMsg, aIter, &aResult->mLayersId) &&
             ReadParam(aMsg, aIter, &aResult->mPresShellId) &&
             ReadParam(aMsg, aIter, &aResult->mScrollId));
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::layers::EventRegions>
+{
+  typedef mozilla::layers::EventRegions paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam)
+  {
+    WriteParam(aMsg, aParam.mHitRegion);
+    WriteParam(aMsg, aParam.mDispatchToContentHitRegion);
+  }
+
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  {
+    return (ReadParam(aMsg, aIter, &aResult->mHitRegion) &&
+            ReadParam(aMsg, aIter, &aResult->mDispatchToContentHitRegion));
   }
 };
 

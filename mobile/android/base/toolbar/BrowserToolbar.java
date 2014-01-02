@@ -365,10 +365,7 @@ public class BrowserToolbar extends GeckoRelativeLayout
                         menu.findItem(R.id.add_to_launcher).setVisible(false);
                     }
 
-                    if (!tab.hasFeeds()) {
-                        menu.findItem(R.id.subscribe).setVisible(false);
-                    }
-
+                    menu.findItem(R.id.subscribe).setVisible(tab.hasFeeds());
                     menu.findItem(R.id.add_search_engine).setVisible(tab.hasOpenSearch());
                 } else {
                     // if there is no tab, remove anything tab dependent
@@ -960,6 +957,11 @@ public class BrowserToolbar extends GeckoRelativeLayout
         }
 
         setTitle(title);
+    }
+
+    public void showDefaultFavicon() {
+        mFavicon.setImageResource(R.drawable.favicon);
+        mLastFavicon = null;
     }
 
     private void setFavicon(Bitmap image) {

@@ -126,6 +126,10 @@ interface TestInterface {
   void passVariadicByte(byte... arg);
   [StoreInSlot, Pure]
   readonly attribute byte cachedByte;
+  [StoreInSlot, Constant]
+  readonly attribute byte cachedConstantByte;
+  [StoreInSlot, Pure]
+  attribute byte cachedWritableByte;
 
   readonly attribute short readonlyShort;
   attribute short writableShort;
@@ -299,6 +303,12 @@ interface TestInterface {
   readonly attribute sequence<long> readonlySequence;
   [Cached, Pure]
   readonly attribute sequence<Dict> readonlySequenceOfDictionaries;
+  [Cached, Pure]
+  readonly attribute sequence<Dict>? readonlyNullableSequenceOfDictionaries;
+  [Cached, Pure, Frozen]
+  readonly attribute sequence<Dict> readonlyFrozenSequence;
+  [Cached, Pure, Frozen]
+  readonly attribute sequence<Dict>? readonlyFrozenNullableSequence;
   sequence<long> receiveSequence();
   sequence<long>? receiveNullableSequence();
   sequence<long?> receiveSequenceOfNullableInts();
@@ -507,6 +517,9 @@ interface TestInterface {
 
   void passSequenceOfUnions(sequence<(CanvasPattern or CanvasGradient)> arg);
   void passVariadicUnion((CanvasPattern or CanvasGradient)... arg);
+
+  void passSequenceOfNullableUnions(sequence<(CanvasPattern or CanvasGradient)?> arg);
+  void passVariadicNullableUnion((CanvasPattern or CanvasGradient)?... arg);
 
   (CanvasPattern or CanvasGradient) receiveUnion();
   (object or long) receiveUnion2();
@@ -777,8 +790,11 @@ dictionary Dict : ParentDict {
   (object or long) objectOrLong;
 #ifdef DEBUG
   (EventInit or long) eventInitOrLong;
+  (EventInit or long)? nullableEventInitOrLong;
+  (Node or long)? nullableNodeOrLong;
   // CustomEventInit is useful to test because it needs rooting.
   (CustomEventInit or long) eventInitOrLong2;
+  (CustomEventInit or long)? nullableEventInitOrLong2;
   (EventInit or long) eventInitOrLongWithDefaultValue = null;
   (CustomEventInit or long) eventInitOrLongWithDefaultValue2 = null;
   (EventInit or long) eventInitOrLongWithDefaultValue3 = 5;

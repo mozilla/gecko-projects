@@ -96,6 +96,7 @@ class nsStringHashKey;
 class nsTextFragment;
 class nsViewportInfo;
 class nsWrapperCache;
+class nsAttrValue;
 
 struct JSPropertyDescriptor;
 struct JSRuntime;
@@ -506,13 +507,14 @@ public:
                                             nsIURI* aBaseURI);
 
   /**
-   * Convert aInput (in charset aCharset) to UTF16 in aOutput.
+   * Convert aInput (in encoding aEncoding) to UTF16 in aOutput.
    *
-   * @param aCharset the name of the charset; if empty, we assume UTF8
+   * @param aEncoding the Gecko-canonical name of the encoding or the empty
+   *                  string (meaning UTF-8)
    */
-  static nsresult ConvertStringFromCharset(const nsACString& aCharset,
-                                           const nsACString& aInput,
-                                           nsAString& aOutput);
+  static nsresult ConvertStringFromEncoding(const nsACString& aEncoding,
+                                            const nsACString& aInput,
+                                            nsAString& aOutput);
 
   /**
    * Determine whether a buffer begins with a BOM for UTF-8, UTF-16LE,
@@ -525,9 +527,6 @@ public:
    */
   static bool CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
                           nsACString& aCharset);
-
-  static nsresult GuessCharset(const char *aData, uint32_t aDataLen,
-                               nsACString &aCharset);
 
   static nsresult CheckQName(const nsAString& aQualifiedName,
                              bool aNamespaceAware = true,
@@ -834,10 +833,10 @@ public:
    * A helper function that parses a sandbox attribute (of an <iframe> or
    * a CSP directive) and converts it to the set of flags used internally.
    *
-   * @param aAttribute 	the value of the sandbox attribute
-   * @return 			the set of flags
+   * @param sandboxAttr   the sandbox attribute
+   * @return              the set of flags (0 if sandboxAttr is null)
    */
-  static uint32_t ParseSandboxAttributeToFlags(const nsAString& aSandboxAttr);
+  static uint32_t ParseSandboxAttributeToFlags(const nsAttrValue* sandboxAttr);
 
 
   /**
@@ -1462,7 +1461,7 @@ public:
    * If offline-apps.allow_by_default is true, we set offline-app permission
    * for the principal and return true.  Otherwise false.
    */
-  static bool MaybeAllowOfflineAppByDefault(nsIPrincipal *aPrincipal);
+  static bool MaybeAllowOfflineAppByDefault(nsIPrincipal *aPrincipal, nsIDOMWindow *aWindow);
 
   /**
    * Increases the count of blockers preventing scripts from running.
@@ -2276,6 +2275,22 @@ public:
     nsContentUtils::LeaveMicroTask();
   }
 };
+
+namespace mozilla {
+namespace dom {
+
+class TreeOrderComparator {
+public:
+  bool Equals(nsINode* aElem1, nsINode* aElem2) const {
+    return aElem1 == aElem2;
+  }
+  bool LessThan(nsINode* aElem1, nsINode* aElem2) const {
+    return nsContentUtils::PositionIsBefore(aElem1, aElem2);
+  }
+};
+
+} // namespace dom
+} // namespace mozilla
 
 #define NS_INTERFACE_MAP_ENTRY_TEAROFF(_interface, _allocator)                \
   if (aIID.Equals(NS_GET_IID(_interface))) {                                  \

@@ -65,7 +65,6 @@ nsIntRect gScreenBounds;
 static uint32_t sScreenRotation;
 static uint32_t sPhysicalScreenRotation;
 static nsIntRect sVirtualBounds;
-static gfxMatrix sRotationMatrix;
 
 static nsRefPtr<GLContext> sGLContext;
 static nsTArray<nsWindow *> sTopWindows;
@@ -105,7 +104,7 @@ public:
         if (observerService) {
           observerService->NotifyObservers(
             nullptr, "screen-state-changed",
-            mIsOn ? NS_LITERAL_STRING("on").get() : NS_LITERAL_STRING("off").get()
+            mIsOn ? MOZ_UTF16("on") : MOZ_UTF16("off")
           );
         }
 
@@ -147,19 +146,6 @@ nsWindow::nsWindow()
         property_get("ro.sf.hwrotation", propValue, "0");
         sPhysicalScreenRotation = atoi(propValue) / 90;
 
-        // Unlike nsScreenGonk::SetRotation(), only support 0 and 180 as there
-        // are no known screens that are mounted at 90 or 270 at the moment.
-        switch (sPhysicalScreenRotation) {
-        case nsIScreen::ROTATION_0_DEG:
-            break;
-        case nsIScreen::ROTATION_180_DEG:
-            sRotationMatrix.Translate(gfxPoint(gScreenBounds.width,
-                                               gScreenBounds.height));
-            sRotationMatrix.Rotate(M_PI);
-            break;
-        default:
-            MOZ_CRASH("Unknown rotation");
-        }
         sVirtualBounds = gScreenBounds;
 
         sScreenInitialized = true;
@@ -176,8 +162,9 @@ nsWindow::nsWindow()
         sUsingOMTC = ShouldUseOffMainThreadCompositing();
 
         property_get("ro.display.colorfill", propValue, "0");
-        sUsingHwc = Preferences::GetBool("layers.composer2d.enabled",
-                                         atoi(propValue) == 1);
+
+        //Update sUsingHwc whenever layers.composer2d.enabled changes
+        Preferences::AddBoolVarCache(&sUsingHwc, "layers.composer2d.enabled");
 
         if (sUsingOMTC) {
           sOMTCSurface = new gfxImageSurface(gfxIntSize(1, 1),
@@ -768,9 +755,6 @@ nsScreenGonk::SetRotation(uint32_t aRotation)
         return NS_OK;
 
     sScreenRotation = aRotation;
-    sRotationMatrix =
-        ComputeTransformForRotation(gScreenBounds,
-                                    ScreenRotation(EffectiveScreenRotation()));
     uint32_t rotation = EffectiveScreenRotation();
     if (rotation == nsIScreen::ROTATION_90_DEG ||
         rotation == nsIScreen::ROTATION_270_DEG) {

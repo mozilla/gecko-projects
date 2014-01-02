@@ -24,7 +24,6 @@ namespace jit {
 #define OPCODE_LIST(_)         \
     _(JSOP_NOP)                \
     _(JSOP_LABEL)              \
-    _(JSOP_NOTEARG)            \
     _(JSOP_POP)                \
     _(JSOP_POPN)               \
     _(JSOP_POPNV)              \
@@ -98,7 +97,6 @@ namespace jit {
     _(JSOP_GETELEM)            \
     _(JSOP_SETELEM)            \
     _(JSOP_CALLELEM)           \
-    _(JSOP_ENUMELEM)           \
     _(JSOP_DELELEM)            \
     _(JSOP_IN)                 \
     _(JSOP_GETGNAME)           \

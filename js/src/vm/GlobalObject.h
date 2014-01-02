@@ -26,9 +26,6 @@ js_InitFunctionClass(JSContext *cx, js::HandleObject obj);
 extern JSObject *
 js_InitTypedArrayClasses(JSContext *cx, js::HandleObject obj);
 
-extern JSObject *
-js_InitTypedObjectModuleObject(JSContext *cx, js::HandleObject obj);
-
 namespace js {
 
 class Debugger;
@@ -111,9 +108,11 @@ class GlobalObject : public JSObject
     static const unsigned RUNTIME_CODEGEN_ENABLED = WARNED_WATCH_DEPRECATED + 1;
     static const unsigned DEBUGGERS               = RUNTIME_CODEGEN_ENABLED + 1;
     static const unsigned INTRINSICS              = DEBUGGERS + 1;
+    static const unsigned FLOAT32X4_TYPE_OBJECT   = INTRINSICS + 1;
+    static const unsigned INT32X4_TYPE_OBJECT     = FLOAT32X4_TYPE_OBJECT + 1;
 
     /* Total reserved-slot count for global objects. */
-    static const unsigned RESERVED_SLOTS = INTRINSICS + 1;
+    static const unsigned RESERVED_SLOTS = INT32X4_TYPE_OBJECT + 1;
 
     /*
      * The slot count must be in the public API for JSCLASS_GLOBAL_FLAGS, and
@@ -155,7 +154,7 @@ class GlobalObject : public JSObject
   public:
     Value getConstructor(JSProtoKey key) const {
         JS_ASSERT(key <= JSProto_LIMIT);
-        return getSlotRefForCompilation(APPLICATION_SLOTS + key);
+        return getSlotForCompilation(APPLICATION_SLOTS + key);
     }
 
     void setConstructor(JSProtoKey key, const Value &v) {
@@ -165,7 +164,7 @@ class GlobalObject : public JSObject
 
     Value getPrototype(JSProtoKey key) const {
         JS_ASSERT(key <= JSProto_LIMIT);
-        return getSlotRefForCompilation(APPLICATION_SLOTS + JSProto_LIMIT + key);
+        return getSlotForCompilation(APPLICATION_SLOTS + JSProto_LIMIT + key);
     }
 
     void setPrototype(JSProtoKey key, const Value &value) {
@@ -416,6 +415,26 @@ class GlobalObject : public JSObject
         return getOrCreateObject(cx, APPLICATION_SLOTS + JSProto_TypedObject, initTypedObjectModule);
     }
 
+    void setFloat32x4TypeObject(JSObject &obj) {
+        JS_ASSERT(getSlotRef(FLOAT32X4_TYPE_OBJECT).isUndefined());
+        setSlot(FLOAT32X4_TYPE_OBJECT, ObjectValue(obj));
+    }
+
+    JSObject &float32x4TypeObject() {
+        JS_ASSERT(getSlotRef(FLOAT32X4_TYPE_OBJECT).isObject());
+        return getSlotRef(FLOAT32X4_TYPE_OBJECT).toObject();
+    }
+
+    void setInt32x4TypeObject(JSObject &obj) {
+        JS_ASSERT(getSlotRef(INT32X4_TYPE_OBJECT).isUndefined());
+        setSlot(INT32X4_TYPE_OBJECT, ObjectValue(obj));
+    }
+
+    JSObject &int32x4TypeObject() {
+        JS_ASSERT(getSlotRef(INT32X4_TYPE_OBJECT).isObject());
+        return getSlotRef(INT32X4_TYPE_OBJECT).toObject();
+    }
+
     TypedObjectModuleObject &getTypedObjectModule() const;
 
     JSObject *getIteratorPrototype() {
@@ -447,13 +466,14 @@ class GlobalObject : public JSObject
         return &self->getSlot(slot).toObject();
     }
 
-    const HeapSlot &getSlotRefForCompilation(uint32_t slot) const {
+    Value getSlotForCompilation(uint32_t slot) const {
         // This method should only be used for slots that are either eagerly
         // initialized on creation of the global or only change under the
         // compilation lock. Note that the dynamic slots pointer for global
         // objects can only change under the compilation lock.
         JS_ASSERT(slot < JSCLASS_RESERVED_SLOTS(getClass()));
         uint32_t fixed = numFixedSlotsForCompilation();
+        AutoThreadSafeAccess ts(this);
         if (slot < fixed)
             return fixedSlots()[slot];
         return slots[slot - fixed];
@@ -509,29 +529,40 @@ class GlobalObject : public JSObject
     }
 
     JSObject *intrinsicsHolder() {
-        JS_ASSERT(!getSlotRefForCompilation(INTRINSICS).isUndefined());
-        return &getSlotRefForCompilation(INTRINSICS).toObject();
+        JS_ASSERT(!getSlotForCompilation(INTRINSICS).isUndefined());
+        return &getSlotForCompilation(INTRINSICS).toObject();
     }
 
-    bool maybeGetIntrinsicValue(PropertyName *name, Value *vp) {
+    bool maybeGetIntrinsicValue(jsid id, Value *vp) {
+        JS_ASSERT(CurrentThreadCanReadCompilationData());
         JSObject *holder = intrinsicsHolder();
-        if (Shape *shape = holder->nativeLookupPure(name)) {
+
+        AutoThreadSafeAccess ts0(holder);
+        AutoThreadSafeAccess ts1(holder->lastProperty());
+        AutoThreadSafeAccess ts2(holder->lastProperty()->base());
+
+        if (Shape *shape = holder->nativeLookupPure(id)) {
             *vp = holder->getSlot(shape->slot());
             return true;
         }
         return false;
     }
+    bool maybeGetIntrinsicValue(PropertyName *name, Value *vp) {
+        return maybeGetIntrinsicValue(NameToId(name), vp);
+    }
 
-    bool getIntrinsicValue(JSContext *cx, HandlePropertyName name, MutableHandleValue value) {
-        if (maybeGetIntrinsicValue(name, value.address()))
+    static bool getIntrinsicValue(JSContext *cx, Handle<GlobalObject*> global,
+                                  HandlePropertyName name, MutableHandleValue value)
+    {
+        if (global->maybeGetIntrinsicValue(name, value.address()))
             return true;
-        Rooted<GlobalObject*> self(cx, this);
         if (!cx->runtime()->cloneSelfHostedValue(cx, name, value))
             return false;
-        RootedObject holder(cx, self->intrinsicsHolder());
         RootedId id(cx, NameToId(name));
-        return JS_DefinePropertyById(cx, holder, id, value, nullptr, nullptr, 0);
+        return global->addIntrinsicValue(cx, id, value);
     }
+
+    bool addIntrinsicValue(JSContext *cx, HandleId id, HandleValue value);
 
     bool setIntrinsicValue(JSContext *cx, PropertyName *name, HandleValue value) {
 #ifdef DEBUG
@@ -547,7 +578,8 @@ class GlobalObject : public JSObject
                                unsigned nargs, MutableHandleValue funVal);
 
     RegExpStatics *getRegExpStatics() const {
-        JSObject &resObj = getSlotRefForCompilation(REGEXP_STATICS).toObject();
+        JSObject &resObj = getSlotForCompilation(REGEXP_STATICS).toObject();
+        AutoThreadSafeAccess ts(&resObj);
         return static_cast<RegExpStatics *>(resObj.getPrivate(/* nfixed = */ 1));
     }
 

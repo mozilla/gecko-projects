@@ -23,6 +23,24 @@
     "extended_statistics_ok": true,
     "description": "time spent updating accessibility (ms)"
   },
+  "APPLICATION_REPUTATION_SHOULD_BLOCK": {
+    "kind": "boolean",
+    "description": "Application reputation verdict (shouldBlock=false is OK)"
+  },
+  "APPLICATION_REPUTATION_LOCAL": {
+    "kind": "enumerated",
+    "n_values": 3,
+    "description": "Application reputation local results (0=ALLOW, 1=BLOCK, 2=NONE)"
+  },
+  "APPLICATION_REPUTATION_SERVER": {
+    "kind": "enumerated",
+    "n_values": 3,
+    "description": "Application reputation remote status (0 = OK, 1 = FAIL, 2 = INVALID)"
+  },
+  "APPLICATION_REPUTATION_COUNT": {
+    "kind": "flag",
+    "description": "Application reputation query count (both local and remote)"
+  },
   "BACKGROUNDFILESAVER_THREAD_COUNT": {
     "kind": "enumerated",
     "n_values": 21,
@@ -58,6 +76,12 @@
     "high": "10000",
     "n_buckets": 50,
     "description": "Full pause time for one cycle collection, including preparation (ms)"
+  },
+  "CYCLE_COLLECTOR_MAX_PAUSE": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": 50,
+    "description": "Longest pause for an individual slice of one cycle collection, including preparation (ms)"
   },
   "CYCLE_COLLECTOR_FINISH_IGC": {
     "kind": "boolean",
@@ -2835,6 +2859,13 @@
     "extended_statistics_ok": true,
     "description": "Session restore: Duration of the longest uninterruptible operation while collecting all window and tab data (ms)"
   },
+  "FX_SESSION_RESTORE_CONTENT_COLLECT_DATA_LONGEST_OP_MS": {
+    "kind": "exponential",
+    "high": "30000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Session restore: Duration of the longest uninterruptible operation while collecting data in the content process (ms)"
+  },
   "FX_SESSION_RESTORE_SERIALIZE_DATA_MS": {
     "kind": "exponential",
     "high": "1000",
@@ -2968,6 +2999,10 @@
     "kind": "flag",
     "description": "Whether the decoder for IBM862 has been instantiated in this session."
   },
+  "DECODER_INSTANTIATED_IBM866": {
+    "kind": "flag",
+    "description": "Whether the decoder for IBM866 has been instantiated in this session."
+  },
   "DECODER_INSTANTIATED_MACGREEK": {
     "kind": "flag",
     "description": "Whether the decoder for MACGREEK has been instantiated in this session."
@@ -2995,6 +3030,10 @@
   "DECODER_INSTANTIATED_MACCROATIAN": {
     "kind": "flag",
     "description": "Whether the decoder for MACCROATIAN has been instantiated in this session."
+  },
+  "DECODER_INSTANTIATED_MACCYRILLIC": {
+    "kind": "flag",
+    "description": "Whether the decoder for MACCYRILLIC has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACROMANIAN": {
     "kind": "flag",
@@ -3035,6 +3074,18 @@
   "DECODER_INSTANTIATED_VIETVPS": {
     "kind": "flag",
     "description": "Whether the decoder for VIETVPS has been instantiated in this session."
+  },
+  "DECODER_INSTANTIATED_KOI8R": {
+    "kind": "flag",
+    "description": "Whether the decoder for KOI8R has been instantiated in this session."
+  },
+  "DECODER_INSTANTIATED_KOI8U": {
+    "kind": "flag",
+    "description": "Whether the decoder for KOI8U has been instantiated in this session."
+  },
+  "DECODER_INSTANTIATED_ISO_8859_5": {
+    "kind": "flag",
+    "description": "Whether the decoder for ISO-8859-5 has been instantiated in this session."
   },
   "XUL_FOREGROUND_REFLOW_MS": {
     "kind": "exponential",
@@ -4675,5 +4726,10 @@
     "kind": "enumerated",
     "n_values": 8,
     "description": "Type of handshake (1=resumption, 2=false started, 3=chose not to false start, 4=not allowed to false start)"
+  },
+  "SSL_OCSP_STAPLING": {
+    "kind": "enumerated",
+    "n_values": 8,
+    "description": "Status of OCSP stapling on this handshake (1=present, good; 2=none; 3=present, expired; 4=present, other error)"
   }
 }

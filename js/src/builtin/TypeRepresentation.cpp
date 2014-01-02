@@ -367,15 +367,13 @@ TypeRepresentation::addToTableOrFree(JSContext *cx,
     Rooted<GlobalObject*> global(cx, cx->global());
     JSCompartment *comp = cx->compartment();
 
-    // First, try to create the typed object to associate with this
+    // First, try to create the TI type object to associate with this
     // type representation. Since nothing is in the table yet, if this
     // fails we can just return and pretend this whole endeavor was
     // just a bad dream.
     RootedObject proto(cx);
     const Class *clasp;
-    if (!global->getTypedObjectModule().getSuitableClaspAndProto(cx, kind(),
-                                                                 &clasp, &proto))
-    {
+    if (!TypedObjectModuleObject::getSuitableClaspAndProto(cx, kind(), &clasp, &proto)) {
         return nullptr;
     }
     RootedTypeObject typeObject(cx, comp->types.newTypeObject(cx, clasp, proto));
@@ -455,8 +453,11 @@ class TypeRepresentationHelper {
     static JSObject *CreateSimple(JSContext *cx, typename T::Type type) {
         JSCompartment *comp = cx->compartment();
 
-        T sample(type);
-        TypeRepresentationHash::AddPtr p = comp->typeReprs.lookupForAdd(&sample);
+        TypeRepresentationHash::AddPtr p;
+        {
+            T sample(type);
+            p = comp->typeReprs.lookupForAdd(&sample);
+        }
         if (p)
             return (*p)->ownerObject();
 
@@ -494,8 +495,11 @@ ReferenceTypeRepresentation::Create(JSContext *cx,
 {
     JSCompartment *comp = cx->compartment();
 
-    ReferenceTypeRepresentation sample(type);
-    TypeRepresentationHash::AddPtr p = comp->typeReprs.lookupForAdd(&sample);
+    TypeRepresentationHash::AddPtr p;
+    {
+        ReferenceTypeRepresentation sample(type);
+        p = comp->typeReprs.lookupForAdd(&sample);
+    }
     if (p)
         return (*p)->ownerObject();
 
@@ -528,8 +532,11 @@ SizedArrayTypeRepresentation::Create(JSContext *cx,
         return nullptr;
     }
 
-    SizedArrayTypeRepresentation sample(element, length);
-    TypeRepresentationHash::AddPtr p = comp->typeReprs.lookupForAdd(&sample);
+    TypeRepresentationHash::AddPtr p;
+    {
+        SizedArrayTypeRepresentation sample(element, length);
+        p = comp->typeReprs.lookupForAdd(&sample);
+    }
     if (p)
         return (*p)->ownerObject();
 
@@ -552,8 +559,11 @@ UnsizedArrayTypeRepresentation::Create(JSContext *cx,
 {
     JSCompartment *comp = cx->compartment();
 
-    UnsizedArrayTypeRepresentation sample(element);
-    TypeRepresentationHash::AddPtr p = comp->typeReprs.lookupForAdd(&sample);
+    TypeRepresentationHash::AddPtr p;
+    {
+        UnsizedArrayTypeRepresentation sample(element);
+        p = comp->typeReprs.lookupForAdd(&sample);
+    }
     if (p)
         return (*p)->ownerObject();
 
@@ -1026,6 +1036,8 @@ StructTypeRepresentation::fieldNamed(jsid id) const
 
     uint32_t unused;
     JSAtom *atom = JSID_TO_ATOM(id);
+    AutoThreadSafeAccess ts(atom);
+
     if (atom->isIndex(&unused))
         return nullptr;
 

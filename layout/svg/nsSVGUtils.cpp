@@ -151,12 +151,14 @@ NS_SVGDisplayListPaintingEnabled()
 static mozilla::gfx::UserDataKey sSVGAutoRenderStateKey;
 
 SVGAutoRenderState::SVGAutoRenderState(nsRenderingContext *aContext,
-                                       RenderMode aMode)
+                                       RenderMode aMode
+                                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
   : mContext(aContext)
   , mOriginalRenderState(nullptr)
   , mMode(aMode)
   , mPaintingToWindow(false)
 {
+  MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   mOriginalRenderState = aContext->RemoveUserData(&sSVGAutoRenderStateKey);
   // We always remove ourselves from aContext before it dies, so
   // passing nullptr as the destroy function is okay.
@@ -761,11 +763,11 @@ nsSVGUtils::PaintFrameWithEffects(nsRenderingContext *aContext,
     int32_t appUnitsPerDevPx = aFrame->PresContext()->AppUnitsPerDevPixel();
     gfxMatrix tm = GetCanvasTM(aFrame, nsISVGChildFrame::FOR_PAINTING, aTransformRoot);
     if (aFrame->IsFrameOfType(nsIFrame::eSVG | nsIFrame::eSVGContainer)) {
-      gfxMatrix childrenOnlyTM;
+      gfx::Matrix childrenOnlyTM;
       if (static_cast<nsSVGContainerFrame*>(aFrame)->
             HasChildrenOnlyTransform(&childrenOnlyTM)) {
         // Undo the children-only transform:
-        tm = childrenOnlyTM.Invert() * tm;
+        tm = ThebesMatrix(childrenOnlyTM).Invert() * tm;
       }
     }
     nsIntRect bounds = TransformFrameRectToOuterSVG(overflowRect,
@@ -1031,17 +1033,17 @@ nsSVGUtils::ConvertToSurfaceSize(const gfxSize& aSize,
 }
 
 bool
-nsSVGUtils::HitTestRect(const gfxMatrix &aMatrix,
+nsSVGUtils::HitTestRect(const gfx::Matrix &aMatrix,
                         float aRX, float aRY, float aRWidth, float aRHeight,
                         float aX, float aY)
 {
-  gfxRect rect(aRX, aRY, aRWidth, aRHeight);
+  gfx::Rect rect(aRX, aRY, aRWidth, aRHeight);
   if (rect.IsEmpty() || aMatrix.IsSingular()) {
     return false;
   }
-  gfxMatrix toRectSpace = aMatrix;
+  gfx::Matrix toRectSpace = aMatrix;
   toRectSpace.Invert();
-  gfxPoint p = toRectSpace.Transform(gfxPoint(aX, aY));
+  gfx::Point p = toRectSpace * gfx::Point(aX, aY);
   return rect.x <= p.x && p.x <= rect.XMost() &&
          rect.y <= p.y && p.y <= rect.YMost();
 }
@@ -1174,7 +1176,7 @@ nsSVGUtils::GetBBox(nsIFrame *aFrame, uint32_t aFlags)
     if (aFrame->IsSVGText()) {
       nsIFrame* ancestor = GetFirstNonAAncestorFrame(aFrame);
       if (ancestor && ancestor->IsSVGText()) {
-        while (ancestor->GetType() != nsGkAtoms::svgTextFrame2) {
+        while (ancestor->GetType() != nsGkAtoms::svgTextFrame) {
           ancestor = ancestor->GetParent();
         }
       }
@@ -1195,7 +1197,7 @@ nsSVGUtils::GetBBox(nsIFrame *aFrame, uint32_t aFlags)
       matrix = element->PrependLocalTransformsTo(matrix,
                           nsSVGElement::eChildToUserSpace);
     }
-    return svg->GetBBoxContribution(matrix, aFlags).ToThebesRect();
+    return svg->GetBBoxContribution(ToMatrix(matrix), aFlags).ToThebesRect();
   }
   return nsSVGIntegrationUtils::GetSVGBBoxForNonSVGFrame(aFrame);
 }
@@ -1291,10 +1293,11 @@ nsSVGUtils::GetStrokeTransform(nsIFrame *aFrame)
     // space rather so we need to invert the transform
     // to the screen co-ordinate space to get there.
     // See http://www.w3.org/TR/SVGTiny12/painting.html#NonScalingStroke
-    gfxMatrix transform = SVGContentUtils::GetCTM(
-                            static_cast<nsSVGElement*>(content), true);
+    gfx::Matrix transform = SVGContentUtils::GetCTM(
+                              static_cast<nsSVGElement*>(content), true);
     if (!transform.IsSingular()) {
-      return transform.Invert();
+      transform.Invert();
+      return ThebesMatrix(transform);
     }
   }
   return gfxMatrix();
@@ -1804,7 +1807,7 @@ nsSVGUtils::GetSVGGlyphExtents(Element* aElement,
                   PrependLocalTransformsTo(aSVGToAppSpace);
   }
 
-  *aResult = svgFrame->GetBBoxContribution(transform,
+  *aResult = svgFrame->GetBBoxContribution(gfx::ToMatrix(transform),
     nsSVGUtils::eBBoxIncludeFill | nsSVGUtils::eBBoxIncludeFillGeometry |
     nsSVGUtils::eBBoxIncludeStroke | nsSVGUtils::eBBoxIncludeStrokeGeometry |
     nsSVGUtils::eBBoxIncludeMarkers).ToThebesRect();

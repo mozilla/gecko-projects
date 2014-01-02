@@ -30,6 +30,7 @@
 #include "FramePropertyTable.h"
 #include "mozilla/TypedEnum.h"
 #include "nsDirection.h"
+#include "WritingModes.h"
 #include <algorithm>
 #include "nsITheme.h"
 #include "gfx3DMatrix.h"
@@ -91,6 +92,10 @@ struct CharacterDataChangeInfo;
 namespace mozilla {
 namespace layers {
 class Layer;
+}
+
+namespace gfx {
+class Matrix;
 }
 }
 
@@ -302,7 +307,7 @@ typedef uint64_t nsFrameState;
 // the frames for future reference.
 #define NS_FRAME_NO_COMPONENT_ALPHA                 NS_FRAME_STATE_BIT(45)
 
-// The frame is a descendant of nsSVGTextFrame2 and is thus used for SVG
+// The frame is a descendant of SVGTextFrame and is thus used for SVG
 // text layout.
 #define NS_FRAME_IS_SVG_TEXT                        NS_FRAME_STATE_BIT(47)
 
@@ -613,6 +618,7 @@ public:
   typedef mozilla::layout::FrameChildListIDs ChildListIDs;
   typedef mozilla::layout::FrameChildListIterator ChildListIterator;
   typedef mozilla::layout::FrameChildListArrayIterator ChildListArrayIterator;
+  typedef mozilla::gfx::Matrix Matrix;
 
   NS_DECL_QUERYFRAME_TARGET(nsIFrame)
 
@@ -872,6 +878,13 @@ public:
    * must also be called.
    */
   virtual void SetParent(nsIFrame* aParent) = 0;
+
+  /**
+   * The frame's writing-mode, used for logical layout computations.
+   */
+  mozilla::WritingMode GetWritingMode() const {
+    return mozilla::WritingMode(StyleVisibility());
+  }
 
   /**
    * Bounding rect of the frame. The values are in app units, and the origin is
@@ -1329,8 +1342,8 @@ public:
    * is non-null and the frame has an SVG parent with children-only transforms,
    * then aFromParentTransforms will be set to these transforms.
    */
-  virtual bool IsSVGTransformed(gfxMatrix *aOwnTransforms = nullptr,
-                                gfxMatrix *aFromParentTransforms = nullptr) const;
+  virtual bool IsSVGTransformed(Matrix *aOwnTransforms = nullptr,
+                                Matrix *aFromParentTransforms = nullptr) const;
 
   /**
    * Returns whether this frame will attempt to preserve the 3d transforms of its
@@ -2431,7 +2444,7 @@ public:
 
   bool FinishAndStoreOverflow(nsHTMLReflowMetrics* aMetrics) {
     return FinishAndStoreOverflow(aMetrics->mOverflowAreas,
-                                  nsSize(aMetrics->width, aMetrics->height));
+                                  nsSize(aMetrics->Width(), aMetrics->Height()));
   }
 
   /**
@@ -2933,7 +2946,7 @@ NS_PTR_TO_INT32(frame->Properties().Get(nsIFrame::ParagraphDepthProperty()))
    * distance beats a closer y distance.
    *
    * Normally, this function will only check the distance between this
-   * frame's rectangle and the specified point.  nsSVGTextFrame2 overrides
+   * frame's rectangle and the specified point.  SVGTextFrame overrides
    * this so that it can manage all of its descendant frames and take
    * into account any SVG text layout.
    *

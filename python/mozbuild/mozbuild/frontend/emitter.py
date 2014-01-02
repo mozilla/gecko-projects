@@ -24,11 +24,13 @@ from .data import (
     GeneratedEventWebIDLFile,
     GeneratedInclude,
     GeneratedWebIDLFile,
+    ExampleWebIDLInterface,
     HeaderFileSubstitution,
     HostProgram,
     HostSimpleProgram,
     InstallationTarget,
     IPDLFile,
+    JARManifest,
     LibraryDefinition,
     LocalInclude,
     PreprocessedTestWebIDLFile,
@@ -182,6 +184,10 @@ class TreeMetadataEmitter(LoggingMixin):
             raise SandboxValidationError('XPIDL_MODULE must be defined if '
                 'XPIDL_SOURCES is defined.')
 
+        if xpidl_module and not sandbox['XPIDL_SOURCES']:
+            raise SandboxValidationError('XPIDL_MODULE cannot be defined '
+                'unless there are XPIDL_SOURCES: %s' % sandbox['RELATIVEDIR'])
+
         if sandbox['XPIDL_SOURCES'] and sandbox['NO_DIST_INSTALL']:
             self.log(logging.WARN, 'mozbuild_warning', dict(
                 path=sandbox.main_path),
@@ -205,37 +211,36 @@ class TreeMetadataEmitter(LoggingMixin):
         # them. We should aim to keep this set small because it violates the
         # desired abstraction of the build definition away from makefiles.
         passthru = VariablePassthru(sandbox)
-        varmap = dict(
-            # Makefile.in : moz.build
-            ANDROID_GENERATED_RESFILES='ANDROID_GENERATED_RESFILES',
-            ANDROID_RES_DIRS='ANDROID_RES_DIRS',
-            CPP_UNIT_TESTS='CPP_UNIT_TESTS',
-            EXPORT_LIBRARY='EXPORT_LIBRARY',
-            EXTRA_ASSEMBLER_FLAGS='EXTRA_ASSEMBLER_FLAGS',
-            EXTRA_COMPILE_FLAGS='EXTRA_COMPILE_FLAGS',
-            EXTRA_COMPONENTS='EXTRA_COMPONENTS',
-            EXTRA_JS_MODULES='EXTRA_JS_MODULES',
-            EXTRA_PP_COMPONENTS='EXTRA_PP_COMPONENTS',
-            EXTRA_PP_JS_MODULES='EXTRA_PP_JS_MODULES',
-            FAIL_ON_WARNINGS='FAIL_ON_WARNINGS',
-            FILES_PER_UNIFIED_FILE='FILES_PER_UNIFIED_FILE',
-            FORCE_SHARED_LIB='FORCE_SHARED_LIB',
-            FORCE_STATIC_LIB='FORCE_STATIC_LIB',
-            GENERATED_FILES='GENERATED_FILES',
-            HOST_LIBRARY_NAME='HOST_LIBRARY_NAME',
-            IS_COMPONENT='IS_COMPONENT',
-            IS_GYP_DIR='IS_GYP_DIR',
-            JS_MODULES_PATH='JS_MODULES_PATH',
-            LIBS='LIBS',
-            LIBXUL_LIBRARY='LIBXUL_LIBRARY',
-            MSVC_ENABLE_PGO='MSVC_ENABLE_PGO',
-            NO_DIST_INSTALL='NO_DIST_INSTALL',
-            OS_LIBS='OS_LIBS',
-            SDK_LIBRARY='SDK_LIBRARY',
-        )
-        for mak, moz in varmap.items():
-            if moz in sandbox and sandbox[moz]:
-                passthru.variables[mak] = sandbox[moz]
+        varlist = [
+            'ANDROID_GENERATED_RESFILES',
+            'ANDROID_RES_DIRS',
+            'CPP_UNIT_TESTS',
+            'EXPORT_LIBRARY',
+            'EXTRA_ASSEMBLER_FLAGS',
+            'EXTRA_COMPILE_FLAGS',
+            'EXTRA_COMPONENTS',
+            'EXTRA_JS_MODULES',
+            'EXTRA_PP_COMPONENTS',
+            'EXTRA_PP_JS_MODULES',
+            'FAIL_ON_WARNINGS',
+            'FILES_PER_UNIFIED_FILE',
+            'FORCE_SHARED_LIB',
+            'FORCE_STATIC_LIB',
+            'GENERATED_FILES',
+            'HOST_LIBRARY_NAME',
+            'IS_COMPONENT',
+            'IS_GYP_DIR',
+            'JS_MODULES_PATH',
+            'LIBS',
+            'LIBXUL_LIBRARY',
+            'MSVC_ENABLE_PGO',
+            'NO_DIST_INSTALL',
+            'OS_LIBS',
+            'SDK_LIBRARY',
+        ]
+        for v in varlist:
+            if v in sandbox and sandbox[v]:
+                passthru.variables[v] = sandbox[v]
 
         # NO_VISIBILITY_FLAGS is slightly different
         if sandbox['NO_VISIBILITY_FLAGS']:
@@ -321,6 +326,7 @@ class TreeMetadataEmitter(LoggingMixin):
             ('PREPROCESSED_WEBIDL_FILES', PreprocessedWebIDLFile),
             ('TEST_WEBIDL_FILES', TestWebIDLFile),
             ('WEBIDL_FILES', WebIDLFile),
+            ('WEBIDL_EXAMPLE_INTERFACES', ExampleWebIDLInterface),
         ]
         for sandbox_var, klass in simple_lists:
             for name in sandbox.get(sandbox_var, []):
@@ -340,7 +346,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 LibraryDefinition(sandbox, libname)
 
         if final_lib:
-            if sandbox.get('FORCE_STATIC_LIB'):
+            if isinstance(sandbox, MozbuildSandbox) and sandbox.get('FORCE_STATIC_LIB'):
                 raise SandboxValidationError('FINAL_LIBRARY implies FORCE_STATIC_LIB')
             self._final_libs.append((sandbox['OBJDIR'], libname, final_lib))
             passthru.variables['FORCE_STATIC_LIB'] = True
@@ -379,6 +385,25 @@ class TreeMetadataEmitter(LoggingMixin):
             for path in sandbox.get('%s_MANIFESTS' % prefix, []):
                 for obj in self._process_test_manifest(sandbox, info, path):
                     yield obj
+
+        jar_manifests = sandbox.get('JAR_MANIFESTS', [])
+        if len(jar_manifests) > 1:
+            raise SandboxValidationError('While JAR_MANIFESTS is a list, '
+                'it is currently limited to one value.')
+
+        for path in jar_manifests:
+            yield JARManifest(sandbox, mozpath.join(sandbox['SRCDIR'], path))
+
+        # Temporary test to look for jar.mn files that creep in without using
+        # the new declaration. Before, we didn't require jar.mn files to
+        # declared anywhere (they were discovered). This will detect people
+        # relying on the old behavior.
+        if os.path.exists(os.path.join(sandbox['SRCDIR'], 'jar.mn')):
+            if 'jar.mn' not in jar_manifests:
+                raise SandboxValidationError('A jar.mn exists in %s but it '
+                    'is not referenced in the corresponding moz.build file. '
+                    'Please define JAR_MANIFESTS in the moz.build file.' %
+                    sandbox['SRCDIR'])
 
         for name, jar in sandbox.get('JAVA_JAR_TARGETS', {}).items():
             yield SandboxWrapped(sandbox, jar)

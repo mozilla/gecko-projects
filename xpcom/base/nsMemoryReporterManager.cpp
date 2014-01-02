@@ -17,6 +17,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsIObserverService.h"
 #include "nsIGlobalObject.h"
+#include "nsIXPConnect.h"
 #if defined(XP_LINUX) || defined(__FreeBSD__)
 #include "nsMemoryInfoDumper.h"
 #endif
@@ -1281,6 +1282,16 @@ nsMemoryReporterManager::RegisterReporterHelper(
         CrashIfRefcountIsZero(aReporter);
     } else {
         CrashIfRefcountIsZero(aReporter);
+        nsCOMPtr<nsIXPConnectWrappedJS> jsComponent =
+            do_QueryInterface(aReporter);
+        if (jsComponent) {
+            // We cannot allow non-native reporters (WrappedJS), since we'll be
+            // holding onto a raw pointer, which would point to the wrapper,
+            // and that wrapper is likely to go away as soon as this register
+            // call finishes.  This would then lead to subsequent crashes in
+            // CollectReports().
+            return NS_ERROR_XPC_BAD_CONVERT_JS;
+        }
         mWeakReporters->PutEntry(aReporter);
     }
 
@@ -1307,6 +1318,22 @@ nsMemoryReporterManager::RegisterStrongReporterEvenIfBlocked(
 {
     return RegisterReporterHelper(aReporter, /* force = */ true,
                                   /* strong = */ true);
+}
+
+NS_IMETHODIMP
+nsMemoryReporterManager::UnregisterStrongReporter(nsIMemoryReporter* aReporter)
+{
+    // This method is thread-safe.
+    mozilla::MutexAutoLock autoLock(mMutex);
+
+    MOZ_ASSERT(!mWeakReporters->Contains(aReporter));
+
+    if (mStrongReporters->Contains(aReporter)) {
+        mStrongReporters->RemoveEntry(aReporter);
+        return NS_OK;
+    }
+
+    return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -1628,7 +1655,7 @@ public:
 
     if (mRemainingIters == 0) {
       os->NotifyObservers(nullptr, "after-minimize-memory-usage",
-                          NS_LITERAL_STRING("MinimizeMemoryUsageRunnable").get());
+                          MOZ_UTF16("MinimizeMemoryUsageRunnable"));
       if (mCallback) {
         mCallback->Run();
       }
@@ -1636,7 +1663,7 @@ public:
     }
 
     os->NotifyObservers(nullptr, "memory-pressure",
-                        NS_LITERAL_STRING("heap-minimize").get());
+                        MOZ_UTF16("heap-minimize"));
     mRemainingIters--;
     NS_DispatchToMainThread(this);
 

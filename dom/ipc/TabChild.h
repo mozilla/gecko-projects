@@ -247,21 +247,21 @@ public:
     virtual bool RecvTextEvent(const mozilla::WidgetTextEvent& event);
     virtual bool RecvSelectionEvent(const mozilla::WidgetSelectionEvent& event);
     virtual bool RecvActivateFrameEvent(const nsString& aType, const bool& capture);
-    virtual bool RecvLoadRemoteScript(const nsString& aURL);
+    virtual bool RecvLoadRemoteScript(const nsString& aURL, const bool& aRunInGlobalScope);
     virtual bool RecvAsyncMessage(const nsString& aMessage,
                                   const ClonedMessageData& aData,
                                   const InfallibleTArray<CpowEntry>& aCpows,
                                   const IPC::Principal& aPrincipal) MOZ_OVERRIDE;
 
     virtual PDocumentRendererChild*
-    AllocPDocumentRendererChild(const nsRect& documentRect, const gfxMatrix& transform,
+    AllocPDocumentRendererChild(const nsRect& documentRect, const gfx::Matrix& transform,
                                 const nsString& bgcolor,
                                 const uint32_t& renderFlags, const bool& flushLayout,
                                 const nsIntSize& renderSize);
     virtual bool DeallocPDocumentRendererChild(PDocumentRendererChild* actor);
     virtual bool RecvPDocumentRendererConstructor(PDocumentRendererChild* actor,
                                                   const nsRect& documentRect,
-                                                  const gfxMatrix& transform,
+                                                  const gfx::Matrix& transform,
                                                   const nsString& bgcolor,
                                                   const uint32_t& renderFlags,
                                                   const bool& flushLayout,
@@ -469,7 +469,6 @@ private:
     nsCOMPtr<nsIWidget> mWidget;
     nsCOMPtr<nsIURI> mLastURI;
     FrameMetrics mLastRootMetrics;
-    FrameMetrics mLastSubFrameMetrics;
     RenderFrameChild* mRemoteFrame;
     nsRefPtr<ContentChild> mManager;
     nsRefPtr<TabChildGlobal> mTabChildGlobal;
@@ -500,6 +499,7 @@ private:
     ScreenOrientation mOrientation;
     bool mUpdateHitRegion;
     bool mContextMenuHandled;
+    bool mWaitingTouchListeners;
 
     DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

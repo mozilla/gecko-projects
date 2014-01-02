@@ -212,7 +212,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // This constructor should only be used when there is no IonContext active
     // (for example, Trampoline-$(ARCH).cpp and IonCaches.cpp).
-    MacroAssembler(JSContext *cx)
+    MacroAssembler(JSContext *cx, IonScript *ion = nullptr)
       : enoughMemory_(true),
         embedsNurseryPointers_(false),
         sps_(nullptr)
@@ -225,6 +225,8 @@ class MacroAssembler : public MacroAssemblerSpecific
         initWithAllocator();
         m_buffer.id = GetIonContext()->getNextAssemblerId();
 #endif
+        if (ion)
+            setFramePushed(ion->frameSize());
     }
 
     // asm.js compilation handles its own IonContet-pushing
@@ -292,12 +294,12 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
     void loadObjClass(Register objReg, Register dest) {
         loadPtr(Address(objReg, JSObject::offsetOfType()), dest);
-        loadPtr(Address(dest, offsetof(types::TypeObject, clasp)), dest);
+        loadPtr(Address(dest, types::TypeObject::offsetOfClasp()), dest);
     }
     void branchTestObjClass(Condition cond, Register obj, Register scratch, const js::Class *clasp,
                             Label *label) {
         loadPtr(Address(obj, JSObject::offsetOfType()), scratch);
-        branchPtr(cond, Address(scratch, offsetof(types::TypeObject, clasp)), ImmPtr(clasp), label);
+        branchPtr(cond, Address(scratch, types::TypeObject::offsetOfClasp()), ImmPtr(clasp), label);
     }
     void branchTestObjShape(Condition cond, Register obj, const Shape *shape, Label *label) {
         branchPtr(cond, Address(obj, JSObject::offsetOfShape()), ImmGCPtr(shape), label);
@@ -353,7 +355,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void loadObjProto(Register obj, Register dest) {
         loadPtr(Address(obj, JSObject::offsetOfType()), dest);
-        loadPtr(Address(dest, offsetof(types::TypeObject, proto)), dest);
+        loadPtr(Address(dest, types::TypeObject::offsetOfProto()), dest);
     }
 
     void loadStringLength(Register str, Register dest) {
@@ -397,7 +399,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         } else if (IsFloatingPointType(src.type())) {
             FloatRegister reg = src.typedReg().fpu();
             if (src.type() == MIRType_Float32) {
-                convertFloatToDouble(reg, ScratchFloatReg);
+                convertFloat32ToDouble(reg, ScratchFloatReg);
                 reg = ScratchFloatReg;
             }
             storeDouble(reg, dest);
@@ -490,20 +492,20 @@ class MacroAssembler : public MacroAssemblerSpecific
     void branchIfFunctionHasNoScript(Register fun, Label *label) {
         // 16-bit loads are slow and unaligned 32-bit loads may be too so
         // perform an aligned 32-bit load and adjust the bitmask accordingly.
-        JS_STATIC_ASSERT(offsetof(JSFunction, nargs) % sizeof(uint32_t) == 0);
-        JS_STATIC_ASSERT(offsetof(JSFunction, flags) == offsetof(JSFunction, nargs) + 2);
+        JS_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
+        JS_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
         JS_STATIC_ASSERT(IS_LITTLE_ENDIAN);
-        Address address(fun, offsetof(JSFunction, nargs));
+        Address address(fun, JSFunction::offsetOfNargs());
         uint32_t bit = JSFunction::INTERPRETED << 16;
         branchTest32(Assembler::Zero, address, Imm32(bit), label);
     }
     void branchIfInterpreted(Register fun, Label *label) {
         // 16-bit loads are slow and unaligned 32-bit loads may be too so
         // perform an aligned 32-bit load and adjust the bitmask accordingly.
-        JS_STATIC_ASSERT(offsetof(JSFunction, nargs) % sizeof(uint32_t) == 0);
-        JS_STATIC_ASSERT(offsetof(JSFunction, flags) == offsetof(JSFunction, nargs) + 2);
+        JS_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
+        JS_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
         JS_STATIC_ASSERT(IS_LITTLE_ENDIAN);
-        Address address(fun, offsetof(JSFunction, nargs));
+        Address address(fun, JSFunction::offsetOfNargs());
         uint32_t bit = JSFunction::INTERPRETED << 16;
         branchTest32(Assembler::NonZero, address, Imm32(bit), label);
     }
@@ -545,7 +547,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         } else if (IsFloatingPointType(v.type())) {
             FloatRegister reg = v.typedReg().fpu();
             if (v.type() == MIRType_Float32) {
-                convertFloatToDouble(reg, ScratchFloatReg);
+                convertFloat32ToDouble(reg, ScratchFloatReg);
                 reg = ScratchFloatReg;
             }
             Push(reg);
@@ -637,7 +639,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         computeEffectiveAddress(address, PreBarrierReg);
 
         const JitRuntime *rt = GetIonContext()->runtime->jitRuntime();
-        IonCode *preBarrier = (type == MIRType_Shape)
+        JitCode *preBarrier = (type == MIRType_Shape)
                               ? rt->shapePreBarrier()
                               : rt->valuePreBarrier();
 
@@ -797,9 +799,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     // abort.  Branches to fail in that case.
     void checkInterruptFlagsPar(const Register &tempReg, Label *fail);
 
-    // If the IonCode that created this assembler needs to transition into the VM,
-    // we want to store the IonCode on the stack in order to mark it during a GC.
-    // This is a reference to a patch location where the IonCode* will be written.
+    // If the JitCode that created this assembler needs to transition into the VM,
+    // we want to store the JitCode on the stack in order to mark it during a GC.
+    // This is a reference to a patch location where the JitCode* will be written.
   private:
     CodeOffsetLabel exitCodePatch_;
 
@@ -811,7 +813,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         // Push VMFunction pointer, to mark arguments.
         Push(ImmPtr(f));
     }
-    void enterFakeExitFrame(IonCode *codeVal = nullptr) {
+    void enterFakeExitFrame(JitCode *codeVal = nullptr) {
         linkExitFrame();
         Push(ImmPtr(codeVal));
         Push(ImmPtr(nullptr));
@@ -827,11 +829,11 @@ class MacroAssembler : public MacroAssemblerSpecific
                                       ExecutionMode executionMode);
 
     void enterFakeParallelExitFrame(Register slice, Register scratch,
-                                    IonCode *codeVal = nullptr);
+                                    JitCode *codeVal = nullptr);
 
     void enterFakeExitFrame(Register cxReg, Register scratch,
                             ExecutionMode executionMode,
-                            IonCode *codeVal = nullptr);
+                            JitCode *codeVal = nullptr);
 
     void leaveExitFrame() {
         freeStack(IonExitFooterFrame::Size());
@@ -841,11 +843,11 @@ class MacroAssembler : public MacroAssemblerSpecific
         return exitCodePatch_.offset() != 0;
     }
 
-    void link(IonCode *code) {
+    void link(JitCode *code) {
         JS_ASSERT(!oom());
         // If this code can transition to C++ code and witness a GC, then we need to store
-        // the IonCode onto the stack in order to GC it correctly.  exitCodePatch should
-        // be unset if the code never needed to push its IonCode*.
+        // the JitCode onto the stack in order to GC it correctly.  exitCodePatch should
+        // be unset if the code never needed to push its JitCode*.
         if (hasEnteredExitFrame()) {
             patchDataWithValueCheck(CodeLocationLabel(code, exitCodePatch_),
                                     ImmPtr(code),
@@ -865,12 +867,12 @@ class MacroAssembler : public MacroAssemblerSpecific
     // been made so that a safepoint can be made at that location.
 
     template <typename T>
-    void callWithABINoProfiling(const T &fun, Result result = GENERAL) {
+    void callWithABINoProfiling(const T &fun, MoveOp::Type result = MoveOp::GENERAL) {
         MacroAssemblerSpecific::callWithABI(fun, result);
     }
 
     template <typename T>
-    void callWithABI(const T &fun, Result result = GENERAL) {
+    void callWithABI(const T &fun, MoveOp::Type result = MoveOp::GENERAL) {
         leaveSPSFrame();
         callWithABINoProfiling(fun, result);
         reenterSPSFrame();
@@ -886,7 +888,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     // see above comment for what is returned
-    uint32_t callWithExitFrame(IonCode *target) {
+    uint32_t callWithExitFrame(JitCode *target) {
         leaveSPSFrame();
         MacroAssemblerSpecific::callWithExitFrame(target);
         uint32_t ret = currentOffset();
@@ -895,7 +897,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     // see above comment for what is returned
-    uint32_t callWithExitFrame(IonCode *target, Register dynStack) {
+    uint32_t callWithExitFrame(JitCode *target, Register dynStack) {
         leaveSPSFrame();
         MacroAssemblerSpecific::callWithExitFrame(target, dynStack);
         uint32_t ret = currentOffset();
@@ -1319,13 +1321,21 @@ class MacroAssembler : public MacroAssemblerSpecific
   public:
     class AfterICSaveLive {
         friend class MacroAssembler;
-        AfterICSaveLive()
+        AfterICSaveLive(uint32_t initialStack)
+#ifdef JS_DEBUG
+          : initialStack(initialStack)
+#endif
         {}
+
+#ifdef JS_DEBUG
+      public:
+        uint32_t initialStack;
+#endif
     };
 
     AfterICSaveLive icSaveLive(RegisterSet &liveRegs) {
         PushRegsInMask(liveRegs);
-        return AfterICSaveLive();
+        return AfterICSaveLive(framePushed());
     }
 
     bool icBuildOOLFakeExitFrame(void *fakeReturnAddr, AfterICSaveLive &aic) {
@@ -1333,6 +1343,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     void icRestoreLive(RegisterSet &liveRegs, AfterICSaveLive &aic) {
+        JS_ASSERT(framePushed() == aic.initialStack);
         PopRegsInMask(liveRegs);
     }
 };

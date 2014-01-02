@@ -7,16 +7,12 @@
 
 /* Sources and breakpoints pane */
 
-#sources-pane {
-  min-width: 50px;
-}
-
 #sources-pane > tabs {
   -moz-border-end: 1px solid #222426; /* Match the sources list's dark margin. */
 }
 
-#sources-and-editor-splitter {
-  -moz-border-start-color: transparent;
+#sources-pane[selectedIndex="0"] + #sources-and-editor-splitter {
+  border-color: transparent;
 }
 
 /* Sources toolbar */
@@ -74,7 +70,8 @@
 #black-boxed-message,
 #source-progress-container {
   background: url(background-noise-toolbar.png) rgb(61,69,76);
-  /* Prevent the container deck from aquiring the height from this message. */
+  /* Prevent the container deck from aquiring the size from this message. */
+  min-width: 1px;
   min-height: 1px;
   color: white;
 }
@@ -93,6 +90,120 @@
 #black-boxed-message-button {
   margin-top: 1em;
   padding: .25em;
+}
+
+/* Tracer */
+
+#trace {
+  list-style-image: url(tracer-icon.png);
+  -moz-image-region: rect(0px,16px,16px,0px);
+}
+
+#trace[checked] {
+  -moz-image-region: rect(0px,32px,16px,16px);
+}
+
+#start-tracing {
+  padding: 4px;
+  margin: 4px;
+}
+
+#clear-tracer {
+  /* Make this button as narrow as the text inside it. */
+  min-width: 1px;
+}
+
+#tracer-message {
+  /* Prevent the container deck from aquiring the height from this message. */
+  min-height: 1px;
+}
+
+.trace-name {
+  -moz-padding-start: 4px !important;
+}
+
+#tracer-traces > scrollbox {
+  overflow: scroll;
+  /* Hack to enable hardware acceleration */
+  transform: translateZ(0);
+}
+
+/* Tracer dark theme */
+
+.theme-dark #tracer-message {
+  color: #f5f7fa; /* Light foreground text */
+}
+
+.theme-dark .trace-item {
+  color: #f5f7fa; /* Light foreground text */
+}
+
+.theme-dark .trace-item.selected-matching {
+  background-color: rgba(29, 79, 115, .4); /* Select highlight blue at 40% alpha */
+}
+
+.theme-dark .selected > .trace-item {
+  background-color: rgba(29, 79, 115, .75); /* Select highlight blue at 75% alpha */
+}
+
+.theme-dark .trace-call {
+  color: #46afe3; /* highlight blue */
+}
+
+.theme-dark .trace-return,
+.theme-dark .trace-yield {
+  color: #70bf53; /* highlight green */
+}
+
+.theme-dark .trace-throw {
+  color: #eb5368; /* highlight red */
+}
+
+.theme-dark .trace-param {
+  color: #b8c8d9; /* Content text light */
+}
+
+.theme-dark .trace-syntax {
+  color: #8fa1b2; /* Content text grey */
+}
+
+/* Tracer light theme */
+
+.theme-light #tracer-message {
+  color: #292e33; /* Dark foreground text */
+}
+
+.theme-light .trace-item {
+  color: #292e33; /* Dark foreground text */
+}
+
+.theme-light .trace-item.selected-matching {
+  background-color: rgba(76, 158, 217, .4); /* Select highlight blue at 40% alpha */
+}
+
+.theme-light .selected > .trace-item {
+  background-color: rgba(76, 158, 217, .75); /* Select highlight blue at 75% alpha */
+}
+
+.theme-light .trace-call {
+  color: #0088cc; /* highlight blue */
+}
+
+.theme-light .trace-return,
+.theme-light .trace-yield {
+  color: #2cbb0f; /* highlight green */
+}
+
+.theme-light .trace-throw {
+  color: #ed2655; /* highlight red */
+}
+
+.theme-light .trace-param {
+  color: #667380; /* Content text dark grey  */
+}
+
+.theme-light .trace-syntax {
+  color: #8fa1b2; /* Content text grey */
 }
 
 /* ListWidget items */
@@ -227,11 +338,6 @@
 }
 
 /* Instruments pane (watch expressions, variables, event listeners...) */
-
-#instruments-pane > tabs > tab {
-  min-height: 1em !important;
-  padding: 0 !important;
-}
 
 #instruments-pane .side-menu-widget-container,
 #instruments-pane .side-menu-widget-empty-notice-container {
@@ -379,7 +485,7 @@
 }
 
 #globalsearch + .devtools-horizontal-splitter {
-  -moz-border-top-colors: #bfbfbf;
+  border-color: #bfbfbf;
 }
 
 .dbg-source-results {

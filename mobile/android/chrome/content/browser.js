@@ -178,10 +178,20 @@ function doChangeMaxLineBoxWidth(aWidth) {
     range = BrowserApp.selectedTab._mReflozPoint.range;
   }
 
-  docViewer.changeMaxLineBoxWidth(aWidth);
+  try {
+    docViewer.pausePainting();
+    docViewer.changeMaxLineBoxWidth(aWidth);
 
-  if (range) {
-    BrowserEventHandler._zoomInAndSnapToRange(range);
+    if (range) {
+      BrowserEventHandler._zoomInAndSnapToRange(range);
+    } else {
+      // In this case, we actually didn't zoom into a specific range. It
+      // probably happened from a page load reflow-on-zoom event, so we
+      // need to make sure painting is re-enabled.
+      BrowserApp.selectedTab.clearReflowOnZoomPendingActions();
+    }
+  } finally {
+    docViewer.resumePainting();
   }
 }
 
@@ -798,7 +808,6 @@ var BrowserApp = {
 
     let tab = this.getTabForBrowser(aBrowser);
     if (tab) {
-      if (!tab.aboutHomePage) tab.aboutHomePage = ("aboutHomePage" in aParams) ? aParams.aboutHomePage : "";
       if ("userSearch" in aParams) tab.userSearch = aParams.userSearch;
     }
 
@@ -1392,7 +1401,6 @@ var BrowserApp = {
           flags: flags,
           tabID: data.tabID,
           isPrivate: (data.isPrivate === true),
-          aboutHomePage: ("aboutHomePage" in data) ? data.aboutHomePage : "",
           pinned: (data.pinned === true),
           delayLoad: (delayLoad === true),
           desktopMode: (data.desktopMode === true)
@@ -1513,6 +1521,10 @@ var BrowserApp = {
         break;
 
       case "Locale:Changed":
+        // The value provided to Locale:Changed should be a BCP47 language tag
+        // understood by Gecko -- for example, "es-ES" or "de".
+        console.log("Locale:Changed: " + aData);
+
         // TODO: do we need to be more nuanced here -- e.g., checking for the
         // OS locale -- or should it always be false on Fennec?
         Services.prefs.setBoolPref("intl.locale.matchOS", false);
@@ -2126,7 +2138,11 @@ var NativeWindow = {
         BrowserEventHandler._cancelTapHighlight();
 
         if (SelectionHandler.canSelect(target)) {
-          if (!SelectionHandler.startSelection(target, aX, aY)) {
+          if (!SelectionHandler.startSelection(target, {
+              mode: SelectionHandler.SELECT_AT_POINT,
+              x: aX,
+              y: aY
+            })) {
             SelectionHandler.attachCaret(target);
           }
         }
@@ -2625,7 +2641,6 @@ function Tab(aURL, aParams) {
   this.clickToPlayPluginsActivated = false;
   this.desktopMode = false;
   this.originalURI = null;
-  this.aboutHomePage = null;
   this.savedArticle = null;
   this.hasTouchListener = false;
   this.browserWidth = 0;
@@ -2743,6 +2758,7 @@ Tab.prototype = {
     this.browser.addEventListener("MozApplicationManifest", this, true);
 
     Services.obs.addObserver(this, "before-first-paint", false);
+    Services.obs.addObserver(this, "after-viewport-change", false);
     Services.prefs.addObserver("browser.ui.zoom.force-user-scalable", this, false);
 
     if (aParams.delayLoad) {
@@ -2802,21 +2818,58 @@ Tab.prototype = {
     return minFontSize / this.getInflatedFontSizeFor(aElement);
   },
 
+  clearReflowOnZoomPendingActions: function() {
+    // Reflow was completed, so now re-enable painting.
+    let webNav = BrowserApp.selectedTab.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+    let docShell = webNav.QueryInterface(Ci.nsIDocShell);
+    let docViewer = docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
+    docViewer.resumePainting();
+
+    BrowserApp.selectedTab._mReflozPositioned = false;
+  },
+
+  /**
+   * Reflow on zoom consists of a few different sub-operations:
+   *
+   * 1. When a double-tap event is seen, we verify that the correct preferences
+   *    are enabled and perform the pre-position handling calculation. We also
+   *    signal that reflow-on-zoom should be performed at this time, and pause
+   *    painting.
+   * 2. During the next call to setViewport(), which is in the Tab prototype,
+   *    we detect that a call to changeMaxLineBoxWidth should be performed. If
+   *    we're zooming out, then the max line box width should be reset at this
+   *    time. Otherwise, we call performReflowOnZoom.
+   *   2a. PerformReflowOnZoom() and resetMaxLineBoxWidth() schedule a call to
+   *       doChangeMaxLineBoxWidth, based on a timeout specified in preferences.
+   * 3. doChangeMaxLineBoxWidth changes the line box width (which also
+   *    schedules a reflow event), and then calls _zoomInAndSnapToRange.
+   * 4. _zoomInAndSnapToRange performs the positioning of reflow-on-zoom and
+   *    then re-enables painting.
+   *
+   * Some of the events happen synchronously, while others happen asynchronously.
+   * The following is a rough sketch of the progression of events:
+   *
+   * double tap event seen -> onDoubleTap() -> ... asynchronous ...
+   *   -> setViewport() -> performReflowOnZoom() -> ... asynchronous ...
+   *   -> doChangeMaxLineBoxWidth() -> _zoomInAndSnapToRange()
+   *   -> ... asynchronous ... -> setViewport() -> Observe('after-viewport-change')
+   *   -> resumePainting()
+   */
   performReflowOnZoom: function(aViewport) {
-      let zoom = this._drawZoom ? this._drawZoom : aViewport.zoom;
+    let zoom = this._drawZoom ? this._drawZoom : aViewport.zoom;
 
-      let viewportWidth = gScreenWidth / zoom;
-      let reflozTimeout = Services.prefs.getIntPref("browser.zoom.reflowZoom.reflowTimeout");
+    let viewportWidth = gScreenWidth / zoom;
+    let reflozTimeout = Services.prefs.getIntPref("browser.zoom.reflowZoom.reflowTimeout");
 
-      if (gReflowPending) {
-        clearTimeout(gReflowPending);
-      }
+    if (gReflowPending) {
+      clearTimeout(gReflowPending);
+    }
 
-      // We add in a bit of fudge just so that the end characters
-      // don't accidentally get clipped. 15px is an arbitrary choice.
-      gReflowPending = setTimeout(doChangeMaxLineBoxWidth,
-                                  reflozTimeout,
-                                  viewportWidth - 15);
+    // We add in a bit of fudge just so that the end characters
+    // don't accidentally get clipped. 15px is an arbitrary choice.
+    gReflowPending = setTimeout(doChangeMaxLineBoxWidth,
+                                reflozTimeout,
+                                viewportWidth - 15);
   },
 
   /** 
@@ -2888,6 +2941,7 @@ Tab.prototype = {
     this.browser.removeEventListener("MozApplicationManifest", this, true);
 
     Services.obs.removeObserver(this, "before-first-paint");
+    Services.obs.removeObserver(this, "after-viewport-change");
     Services.prefs.removeObserver("browser.ui.zoom.force-user-scalable", this);
 
     // Make sure the previously selected panel remains selected. The selected panel of a deck is
@@ -3131,29 +3185,20 @@ Tab.prototype = {
     let screenWidth = gScreenWidth;
     let screenHeight = gScreenHeight;
 
-    let [pageWidth, pageHeight] = this.getPageSize(this.browser.contentDocument,
-                                                   viewportWidth, viewportHeight);
-
-    // Check if the page would fit into either of the viewport dimensions minus
-    // the margins and shrink the screen size accordingly so that the aspect
-    // ratio calculation below works correctly in these situations.
-    // We take away the margin size over two to account for rounding errors,
-    // as the browser size set in updateViewportSize doesn't allow for any
-    // size between these two values (and thus anything between them is
-    // attributable to rounding error).
-    if ((pageHeight * zoom) < gScreenHeight - (gViewportMargins.top + gViewportMargins.bottom) / 2) {
+    // Shrink the viewport appropriately if the margins are excluded
+    if (this.viewportExcludesVerticalMargins) {
       screenHeight = gScreenHeight - gViewportMargins.top - gViewportMargins.bottom;
       viewportHeight = screenHeight / zoom;
     }
-    if ((pageWidth * zoom) < gScreenWidth - (gViewportMargins.left + gViewportMargins.right) / 2) {
+    if (this.viewportExcludesHorizontalMargins) {
       screenWidth = gScreenWidth - gViewportMargins.left - gViewportMargins.right;
       viewportWidth = screenWidth / zoom;
     }
 
     // Make sure the aspect ratio of the screen is maintained when setting
     // the clamping scroll-port size.
-    let factor = Math.min(viewportWidth / screenWidth, pageWidth / screenWidth,
-                          viewportHeight / screenHeight, pageHeight / screenHeight);
+    let factor = Math.min(viewportWidth / screenWidth,
+                          viewportHeight / screenHeight);
     let scrollPortWidth = screenWidth * factor;
     let scrollPortHeight = screenHeight * factor;
 
@@ -3183,13 +3228,21 @@ Tab.prototype = {
       // In this case, the user pinch-zoomed in, so we don't want to
       // preserve position as we would with reflow-on-zoom.
       BrowserApp.selectedTab.probablyNeedRefloz = false;
+      BrowserApp.selectedTab.clearReflowOnZoomPendingActions();
       BrowserApp.selectedTab._mReflozPoint = null;
     }
+
+    let docViewer = null;
 
     if (isZooming &&
         BrowserEventHandler.mReflozPref &&
         BrowserApp.selectedTab._mReflozPoint &&
         BrowserApp.selectedTab.probablyNeedRefloz) {
+      let webNav = BrowserApp.selectedTab.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+      let docShell = webNav.QueryInterface(Ci.nsIDocShell);
+      docViewer = docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
+      docViewer.pausePainting();
+
       BrowserApp.selectedTab.performReflowOnZoom(aViewport);
       BrowserApp.selectedTab.probablyNeedRefloz = false;
     }
@@ -3218,6 +3271,9 @@ Tab.prototype = {
       aViewport.fixedMarginLeft / aViewport.zoom);
 
     Services.obs.notifyObservers(null, "after-viewport-change", "");
+    if (docViewer) {
+        docViewer.resumePainting();
+    }
   },
 
   setResolution: function(aZoom, aForce) {
@@ -3376,8 +3432,6 @@ Tab.prototype = {
     switch (aEvent.type) {
       case "DOMContentLoaded": {
         let target = aEvent.originalTarget;
-
-        LoginManagerContent.onContentLoaded(aEvent);
 
         // ignore on frames and other documents
         if (target != this.browser.contentDocument)
@@ -3727,18 +3781,8 @@ Tab.prototype = {
 
       // Clear page-specific opensearch engines and feeds for a new request.
       if (aStateFlags & Ci.nsIWebProgressListener.STATE_START && aRequest && aWebProgress.isTopLevel) {
-          this.browser.engines = null;
-
-          // Send message to clear search engine option in context menu.
-          let newEngineMessage = {
-            type: "Link:OpenSearch",
-            tabID: this.id,
-            visible: false
-          };
-
-          sendMessageToJava(newEngineMessage);
-
-          this.browser.feeds = null;
+        this.browser.engines = null;
+        this.browser.feeds = null;
       }
 
       // true if the page loaded successfully (i.e., no 404s or other errors)
@@ -3827,7 +3871,6 @@ Tab.prototype = {
       uri: fixedURI.spec,
       userSearch: this.userSearch || "",
       baseDomain: baseDomain,
-      aboutHomePage: this.aboutHomePage || "",
       contentType: (contentType ? contentType : ""),
       sameDocument: sameDocument
     };
@@ -3971,8 +4014,6 @@ Tab.prototype = {
     let screenW = gScreenWidth - gViewportMargins.left - gViewportMargins.right;
     let screenH = gScreenHeight - gViewportMargins.top - gViewportMargins.bottom;
     let viewportW, viewportH;
-    this.viewportExcludesHorizontalMargins = true;
-    this.viewportExcludesVerticalMargins = true;
 
     let metadata = this.metadata;
     if (metadata.autoSize) {
@@ -4006,6 +4047,23 @@ Tab.prototype = {
     let oldBrowserWidth = this.browserWidth;
     this.setBrowserSize(viewportW, viewportH);
 
+    // This change to the zoom accounts for all types of changes I can conceive:
+    // 1. screen size changes, CSS viewport does not (pages with no meta viewport
+    //    or a fixed size viewport)
+    // 2. screen size changes, CSS viewport also does (pages with a device-width
+    //    viewport)
+    // 3. screen size remains constant, but CSS viewport changes (meta viewport
+    //    tag is added or removed)
+    // 4. neither screen size nor CSS viewport changes
+    //
+    // In all of these cases, we maintain how much actual content is visible
+    // within the screen width. Note that "actual content" may be different
+    // with respect to CSS pixels because of the CSS viewport size changing.
+    let zoomScale = (screenW * oldBrowserWidth) / (aOldScreenWidth * viewportW);
+    let zoom = (aInitialLoad && metadata.defaultZoom) ? metadata.defaultZoom : this.clampZoom(this._zoom * zoomScale);
+    this.setResolution(zoom, false);
+    this.setScrollClampingSize(zoom);
+
     // if this page has not been painted yet, then this must be getting run
     // because a meta-viewport element was added (via the DOMMetaAdded handler).
     // in this case, we should not do anything that forces a reflow (see bug 759678)
@@ -4018,6 +4076,8 @@ Tab.prototype = {
       return;
     }
 
+    this.viewportExcludesHorizontalMargins = true;
+    this.viewportExcludesVerticalMargins = true;
     let minScale = 1.0;
     if (this.browser.contentDocument) {
       // this may get run during a Viewport:Change message while the document
@@ -4040,29 +4100,20 @@ Tab.prototype = {
     }
     minScale = this.clampZoom(minScale);
     viewportH = Math.max(viewportH, screenH / minScale);
+
+    // In general we want to keep calls to setBrowserSize and setScrollClampingSize
+    // together because setBrowserSize could mark the viewport size as dirty, creating
+    // a pending resize event for content. If that resize gets dispatched (which happens
+    // on the next reflow) without setScrollClampingSize having being called, then
+    // content might be exposed to incorrect innerWidth/innerHeight values.
     this.setBrowserSize(viewportW, viewportH);
+    this.setScrollClampingSize(zoom);
 
     // Avoid having the scroll position jump around after device rotation.
     let win = this.browser.contentWindow;
     this.userScrollPos.x = win.scrollX;
     this.userScrollPos.y = win.scrollY;
 
-    // This change to the zoom accounts for all types of changes I can conceive:
-    // 1. screen size changes, CSS viewport does not (pages with no meta viewport
-    //    or a fixed size viewport)
-    // 2. screen size changes, CSS viewport also does (pages with a device-width
-    //    viewport)
-    // 3. screen size remains constant, but CSS viewport changes (meta viewport
-    //    tag is added or removed)
-    // 4. neither screen size nor CSS viewport changes
-    //
-    // In all of these cases, we maintain how much actual content is visible
-    // within the screen width. Note that "actual content" may be different
-    // with respect to CSS pixels because of the CSS viewport size changing.
-    let zoomScale = (screenW * oldBrowserWidth) / (aOldScreenWidth * viewportW);
-    let zoom = (aInitialLoad && metadata.defaultZoom) ? metadata.defaultZoom : this.clampZoom(this._zoom * zoomScale);
-    this.setResolution(zoom, false);
-    this.setScrollClampingSize(zoom);
     this.sendViewportUpdate();
 
     // Store the page size that was used to calculate the viewport so that we
@@ -4167,6 +4218,11 @@ Tab.prototype = {
           // accordingly.
           let vp = BrowserApp.selectedTab.getViewport();
           BrowserApp.selectedTab.performReflowOnZoom(vp);
+        }
+        break;
+      case "after-viewport-change":
+        if (BrowserApp.selectedTab._mReflozPositioned) {
+          BrowserApp.selectedTab.clearReflowOnZoomPendingActions();
         }
         break;
       case "nsPref:changed":
@@ -4487,13 +4543,23 @@ var BrowserEventHandler = {
     if (BrowserEventHandler.mReflozPref &&
        !BrowserApp.selectedTab._mReflozPoint &&
        !this._shouldSuppressReflowOnZoom(element)) {
-     let data = JSON.parse(aData);
-     let zoomPointX = data.x;
-     let zoomPointY = data.y;
 
-     BrowserApp.selectedTab._mReflozPoint = { x: zoomPointX, y: zoomPointY,
-       range: BrowserApp.selectedBrowser.contentDocument.caretPositionFromPoint(zoomPointX, zoomPointY) };
-       BrowserApp.selectedTab.probablyNeedRefloz = true;
+      // See comment above performReflowOnZoom() for a detailed description of
+      // the events happening in the reflow-on-zoom operation.
+      let data = JSON.parse(aData);
+      let zoomPointX = data.x;
+      let zoomPointY = data.y;
+
+      BrowserApp.selectedTab._mReflozPoint = { x: zoomPointX, y: zoomPointY,
+        range: BrowserApp.selectedBrowser.contentDocument.caretPositionFromPoint(zoomPointX, zoomPointY) };
+
+      // Before we perform a reflow on zoom, let's disable painting.
+      let webNav = BrowserApp.selectedTab.window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
+      let docShell = webNav.QueryInterface(Ci.nsIDocShell);
+      let docViewer = docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
+      docViewer.pausePainting();
+
+      BrowserApp.selectedTab.probablyNeedRefloz = true;
     }
 
     if (!element) {
@@ -4593,11 +4659,7 @@ var BrowserEventHandler = {
   },
 
   _zoomInAndSnapToRange: function(aRange) {
-    if (!aRange) {
-      Cu.reportError("aRange is null in zoomInAndSnapToRange. Unable to maintain position.");
-      return;
-    }
-
+    // aRange is always non-null here, since a check happened previously.
     let viewport = BrowserApp.selectedTab.getViewport();
     let fudge = 15; // Add a bit of fudge.
     let boundingElement = aRange.offsetNode;
@@ -4620,30 +4682,33 @@ var BrowserEventHandler = {
     let leftAdjustment = parseInt(boundingStyle.paddingLeft) +
                          parseInt(boundingStyle.borderLeftWidth);
 
+    BrowserApp.selectedTab._mReflozPositioned = true;
+
     rect.type = "Browser:ZoomToRect";
     rect.x = Math.max(viewport.cssPageLeft, rect.x  - fudge + leftAdjustment);
     rect.y = Math.max(topPos, viewport.cssPageTop);
     rect.w = viewport.cssWidth;
     rect.h = viewport.cssHeight;
+    rect.animate = false;
 
     sendMessageToJava(rect);
     BrowserApp.selectedTab._mReflozPoint = null;
-   },
+  },
 
-   onPinchFinish: function(aData) {
-     let data = {};
-     try {
-       data = JSON.parse(aData);
-     } catch(ex) {
-       console.log(ex);
-       return;
-     }
+  onPinchFinish: function(aData) {
+    let data = {};
+    try {
+      data = JSON.parse(aData);
+    } catch(ex) {
+      console.log(ex);
+      return;
+    }
 
-     if (BrowserEventHandler.mReflozPref &&
-         data.zoomDelta < 0.0) {
-       BrowserEventHandler.resetMaxLineBoxWidth();
-     }
-   },
+    if (BrowserEventHandler.mReflozPref &&
+        data.zoomDelta < 0.0) {
+      BrowserEventHandler.resetMaxLineBoxWidth();
+    }
+  },
 
   _shouldZoomToElement: function(aElement) {
     let win = aElement.ownerDocument.defaultView;
@@ -6229,22 +6294,6 @@ var ClipboardHelper = {
     }
   },
 
-  selectWord: function(aElement, aX, aY) {
-    SelectionHandler.startSelection(aElement, aX, aY);
-  },
-
-  selectAll: function(aElement, aX, aY) {
-    SelectionHandler.selectAll(aElement, aX, aY);
-  },
-
-  searchWith: function(aElement) {
-    SelectionHandler.searchSelection(aElement);
-  },
-
-  share: function() {
-    SelectionHandler.shareSelection();
-  },
-
   paste: function(aElement) {
     if (!aElement || !(aElement instanceof Ci.nsIDOMNSEditableElement))
       return;
@@ -6280,15 +6329,6 @@ var ClipboardHelper = {
         }
         return false;
       }
-    }
-  },
-
-  selectWordContext: {
-    matches: function selectWordContextMatches(aElement) {
-      if (NativeWindow.contextmenus.textContext.matches(aElement))
-        return aElement.textLength > 0;
-
-      return false;
     }
   },
 
@@ -6636,10 +6676,10 @@ var SearchEngines = {
 
   init: function init() {
     Services.obs.addObserver(this, "SearchEngines:Add", false);
-    Services.obs.addObserver(this, "SearchEngines:Get", false);
     Services.obs.addObserver(this, "SearchEngines:GetVisible", false);
-    Services.obs.addObserver(this, "SearchEngines:SetDefault", false);
     Services.obs.addObserver(this, "SearchEngines:Remove", false);
+    Services.obs.addObserver(this, "SearchEngines:RestoreDefaults", false);
+    Services.obs.addObserver(this, "SearchEngines:SetDefault", false);
 
     let filter = {
       matches: function (aElement) {
@@ -6666,50 +6706,41 @@ var SearchEngines = {
                (form.enctype != "text/plain") && (form.enctype != "multipart/form-data");
       }
     };
-    SelectionHandler.actions.SEARCH_ADD = {
-      id: "add_search_action",
+    SelectionHandler.addAction({
+      id: "search_add_action",
       label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine"),
       icon: "drawable://ic_url_bar_search",
       selector: filter,
       action: function(aElement) {
         SearchEngines.addEngine(aElement);
       }
-    }
+    });
   },
 
   uninit: function uninit() {
     Services.obs.removeObserver(this, "SearchEngines:Add");
-    Services.obs.removeObserver(this, "SearchEngines:Get");
     Services.obs.removeObserver(this, "SearchEngines:GetVisible");
-    Services.obs.removeObserver(this, "SearchEngines:SetDefault");
     Services.obs.removeObserver(this, "SearchEngines:Remove");
+    Services.obs.removeObserver(this, "SearchEngines:RestoreDefaults");
+    Services.obs.removeObserver(this, "SearchEngines:SetDefault");
     if (this._contextMenuId != null)
       NativeWindow.contextmenus.remove(this._contextMenuId);
   },
 
   // Fetch list of search engines. all ? All engines : Visible engines only.
-  _handleSearchEnginesGet: function _handleSearchEnginesGet(rv, all) {
+  _handleSearchEnginesGetVisible: function _handleSearchEnginesGetVisible(rv, all) {
     if (!Components.isSuccessCode(rv)) {
       Cu.reportError("Could not initialize search service, bailing out.");
       return;
     }
-    let engineData;
-    if (all) {
-      engineData = Services.search.getEngines({});
-    } else {
-      engineData = Services.search.getVisibleEngines({});
-    }
 
-    // These engines are the bundled ones - they may not be uninstalled.
-    let immutableEngines = Services.search.getDefaultEngines();
-
+    let engineData = Services.search.getVisibleEngines({});
     let searchEngines = engineData.map(function (engine) {
       return {
         name: engine.name,
         identifier: engine.identifier,
         iconURI: (engine.iconURI ? engine.iconURI.spec : null),
-        hidden: engine.hidden,
-        immutable: immutableEngines.indexOf(engine) != -1
+        hidden: engine.hidden
       };
     });
 
@@ -6746,13 +6777,6 @@ var SearchEngines = {
     } catch (e) {}
   },
 
-  _handleSearchEnginesGetAll: function _handleSearchEnginesGetAll(rv) {
-    this._handleSearchEnginesGet(rv, true);
-  },
-  _handleSearchEnginesGetVisible: function _handleSearchEnginesGetVisible(rv) {
-    this._handleSearchEnginesGet(rv, false)
-  },
-
   // Helper method to extract the engine name from a JSON. Simplifies the observe function.
   _extractEngineFromJSON: function _extractEngineFromJSON(aData) {
     let data = JSON.parse(aData);
@@ -6768,16 +6792,6 @@ var SearchEngines = {
       case "SearchEngines:GetVisible":
         Services.search.init(this._handleSearchEnginesGetVisible.bind(this));
         break;
-      case "SearchEngines:Get":
-        // Return a list of all engines, including "Hidden" ones.
-        Services.search.init(this._handleSearchEnginesGetAll.bind(this));
-        break;
-      case "SearchEngines:SetDefault":
-        engine = this._extractEngineFromJSON(aData);
-        // Move the new default search engine to the top of the search engine list.
-        Services.search.moveEngine(engine, 0);
-        Services.search.defaultEngine = engine;
-        break;
       case "SearchEngines:Remove":
         // Make sure the engine isn't hidden before removing it, to make sure it's
         // visible if the user later re-adds it (works around bug 341833)
@@ -6785,6 +6799,17 @@ var SearchEngines = {
         engine.hidden = false;
         Services.search.removeEngine(engine);
         break;
+      case "SearchEngines:RestoreDefaults":
+        // Un-hides all default engines.
+        Services.search.restoreDefaultEngines();
+        break;
+      case "SearchEngines:SetDefault":
+        engine = this._extractEngineFromJSON(aData);
+        // Move the new default search engine to the top of the search engine list.
+        Services.search.moveEngine(engine, 0);
+        Services.search.defaultEngine = engine;
+        break;
+
       default:
         dump("Unexpected message type observed: " + aTopic);
         break;

@@ -22,9 +22,11 @@ this.DevToolsUtils = {
   safeErrorString: safeErrorString,
   reportException: reportException,
   makeInfallible: makeInfallible,
+  zip: zip,
   yieldingEach: yieldingEach,
   reportingDisabled: false , // Used by tests.
   defineLazyPrototypeGetter: defineLazyPrototypeGetter,
   getProperty: getProperty,
   hasSafeGetter: hasSafeGetter,
+  isSafeJSObject: isSafeJSObject,
 };

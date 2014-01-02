@@ -204,7 +204,8 @@ public:
     CLIP_MASK 
   };
 
-  SVGAutoRenderState(nsRenderingContext *aContext, RenderMode aMode);
+  SVGAutoRenderState(nsRenderingContext *aContext, RenderMode aMode
+                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
   ~SVGAutoRenderState();
 
   void SetPaintingToWindow(bool aPaintingToWindow);
@@ -217,6 +218,7 @@ private:
   void *mOriginalRenderState;
   RenderMode mMode;
   bool mPaintingToWindow;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 
@@ -460,7 +462,7 @@ public:
    * Hit test a given rectangle/matrix.
    */
   static bool
-  HitTestRect(const gfxMatrix &aMatrix,
+  HitTestRect(const mozilla::gfx::Matrix &aMatrix,
               float aRX, float aRY, float aRWidth, float aRHeight,
               float aX, float aY);
 

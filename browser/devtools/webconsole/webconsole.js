@@ -1183,10 +1183,6 @@ WebConsoleFrame.prototype = {
         let clipboardArray = [];
         args.forEach((aValue) => {
           clipboardArray.push(VariablesView.getString(aValue));
-          if (aValue && typeof aValue == "object" &&
-              aValue.type == "longString") {
-            clipboardArray.push(l10n.getStr("longStringEllipsis"));
-          }
         });
         clipboardText = clipboardArray.join(" ");
         break;
@@ -3103,7 +3099,7 @@ JSTerm.prototype = {
             aAfterMessage._objectActors.add(helperResult.object.actor);
           }
           this.openVariablesView({
-            label: VariablesView.getString(helperResult.object),
+            label: VariablesView.getString(helperResult.object, { concise: true }),
             objectActor: helperResult.object,
           });
           break;
@@ -3431,7 +3427,6 @@ JSTerm.prototype = {
     view.emptyText = l10n.getStr("emptyPropertiesList");
     view.searchEnabled = !aOptions.hideFilterInput;
     view.lazyEmpty = this._lazyVariablesView;
-    view.lazyAppend = this._lazyVariablesView;
 
     VariablesViewController.attach(view, {
       getEnvironmentClient: aGrip => {
@@ -4266,6 +4261,7 @@ JSTerm.prototype = {
       popup.selectNextItem();
     }
 
+    this.emit("autocomplete-updated");
     aCallback && aCallback(this);
   },
 

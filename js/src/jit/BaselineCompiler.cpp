@@ -108,7 +108,7 @@ BaselineCompiler::compile()
         return Method_Error;
 
     Linker linker(masm);
-    IonCode *code = linker.newCode<CanGC>(cx, JSC::BASELINE_CODE);
+    JitCode *code = linker.newCode<CanGC>(cx, JSC::BASELINE_CODE);
     if (!code)
         return Method_Error;
 
@@ -186,10 +186,8 @@ BaselineCompiler::compile()
     baselineScript->setMethod(code);
     baselineScript->setTemplateScope(templateScope);
 
-    script->setBaselineScript(baselineScript);
-
     IonSpew(IonSpew_BaselineScripts, "Created BaselineScript %p (raw %p) for %s:%d",
-            (void *) script->baselineScript(), (void *) code->raw(),
+            (void *) baselineScript, (void *) code->raw(),
             script->filename(), script->lineno());
 
 #ifdef JS_ION_PERF
@@ -253,6 +251,8 @@ BaselineCompiler::compile()
 
     if (script->compartment()->debugMode())
         baselineScript->setDebugMode();
+
+    script->setBaselineScript(cx, baselineScript);
 
     return Method_Compiled;
 }
@@ -638,7 +638,8 @@ BaselineCompiler::emitUseCountIncrement()
 
     Label skipCall;
 
-    uint32_t minUses = UsesBeforeIonRecompile(script, pc);
+    const OptimizationInfo *info = js_IonOptimizations.get(js_IonOptimizations.firstLevel());
+    uint32_t minUses = info->usesBeforeCompile(script, pc);
     masm.branch32(Assembler::LessThan, countReg, Imm32(minUses), &skipCall);
 
     masm.branchPtr(Assembler::Equal,
@@ -668,7 +669,7 @@ BaselineCompiler::emitArgumentTypeChecks()
     if (!emitNonOpIC(compiler.getStub(&stubSpace_)))
         return false;
 
-    for (size_t i = 0; i < function()->nargs; i++) {
+    for (size_t i = 0; i < function()->nargs(); i++) {
         frame.pushArg(i);
         frame.popRegsAndSync(1);
 
@@ -689,12 +690,12 @@ BaselineCompiler::emitDebugTrap()
     bool enabled = script->stepModeEnabled() || script->hasBreakpointsAt(pc);
 
     // Emit patchable call to debug trap handler.
-    IonCode *handler = cx->runtime()->jitRuntime()->debugTrapHandler(cx);
+    JitCode *handler = cx->runtime()->jitRuntime()->debugTrapHandler(cx);
     mozilla::DebugOnly<CodeOffsetLabel> offset = masm.toggledCall(handler, enabled);
 
 #ifdef DEBUG
     // Patchable call offset has to match the pc mapping offset.
-    PCMappingEntry &entry = pcMappingEntries_[pcMappingEntries_.length() - 1];
+    PCMappingEntry &entry = pcMappingEntries_.back();
     JS_ASSERT((&offset)->offset() == entry.nativeOffset);
 #endif
 
@@ -834,12 +835,6 @@ BaselineCompiler::emit_JSOP_NOP()
 
 bool
 BaselineCompiler::emit_JSOP_LABEL()
-{
-    return true;
-}
-
-bool
-BaselineCompiler::emit_JSOP_NOTEARG()
 {
     return true;
 }
@@ -1724,25 +1719,6 @@ BaselineCompiler::emit_JSOP_SETELEM()
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
-    return true;
-}
-
-bool
-BaselineCompiler::emit_JSOP_ENUMELEM()
-{
-    // ENUMELEM is a SETELEM with a different stack arrangement.
-    // Instead of:   OBJ ID RHS
-    // The stack is: RHS OBJ ID
-
-    // Keep object and index in R0 and R1, and keep RHS on the stack.
-    frame.popRegsAndSync(2);
-
-    // Call IC.
-    ICSetElem_Fallback::Compiler stubCompiler(cx);
-    if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
-        return false;
-
-    frame.pop();
     return true;
 }
 

@@ -161,7 +161,7 @@ BacktrackingAllocator::tryGroupRegisters(uint32_t vreg0, uint32_t vreg1)
     // already grouped with reg0 or reg1.
     BacktrackingVirtualRegister *reg0 = &vregs[vreg0], *reg1 = &vregs[vreg1];
 
-    if (reg0->isDouble() != reg1->isDouble())
+    if (reg0->isFloatReg() != reg1->isFloatReg())
         return true;
 
     VirtualRegisterGroup *group0 = reg0->group(), *group1 = reg1->group();
@@ -636,7 +636,7 @@ BacktrackingAllocator::tryAllocateGroupRegister(PhysicalRegister &r, VirtualRegi
     if (!r.allocatable)
         return true;
 
-    if (r.reg.isFloat() != vregs[group->registers[0]].isDouble())
+    if (r.reg.isFloat() != vregs[group->registers[0]].isFloatReg())
         return true;
 
     bool allocatable = true;
@@ -686,7 +686,7 @@ BacktrackingAllocator::tryAllocateRegister(PhysicalRegister &r, LiveInterval *in
         return true;
 
     BacktrackingVirtualRegister *reg = &vregs[interval->vreg()];
-    if (reg->isDouble() != r.reg.isFloat())
+    if (reg->isFloatReg() != r.reg.isFloat())
         return true;
 
     JS_ASSERT_IF(interval->requirement()->kind() == Requirement::FIXED,
@@ -862,14 +862,10 @@ BacktrackingAllocator::spill(LiveInterval *interval)
         }
     }
 
-    uint32_t stackSlot;
-    if (reg->isDouble())
-        stackSlot = stackSlotAllocator.allocateDoubleSlot();
-    else
-        stackSlot = stackSlotAllocator.allocateSlot();
+    uint32_t stackSlot = stackSlotAllocator.allocateSlot(reg->type());
     JS_ASSERT(stackSlot <= stackSlotAllocator.stackHeight());
 
-    LStackSlot alloc(stackSlot, reg->isDouble());
+    LStackSlot alloc(stackSlot);
     interval->setAllocation(alloc);
 
     IonSpew(IonSpew_RegAlloc, "  Allocating spill location %s", alloc.toString());
@@ -918,10 +914,10 @@ BacktrackingAllocator::resolveControlFlow()
 
                 LiveInterval *prevInterval = reg->intervalFor(start.previous());
                 if (start.subpos() == CodePosition::INPUT) {
-                    if (!moveInput(inputOf(data->ins()), prevInterval, interval))
+                    if (!moveInput(inputOf(data->ins()), prevInterval, interval, reg->type()))
                         return false;
                 } else {
-                    if (!moveAfter(outputOf(data->ins()), prevInterval, interval))
+                    if (!moveAfter(outputOf(data->ins()), prevInterval, interval, reg->type()))
                         return false;
                 }
             }
@@ -941,7 +937,8 @@ BacktrackingAllocator::resolveControlFlow()
         for (size_t j = 0; j < successor->numPhis(); j++) {
             LPhi *phi = successor->getPhi(j);
             JS_ASSERT(phi->numDefs() == 1);
-            VirtualRegister *vreg = &vregs[phi->getDef(0)];
+            LDefinition *def = phi->getDef(0);
+            VirtualRegister *vreg = &vregs[def];
             LiveInterval *to = vreg->intervalFor(inputOf(successor->firstId()));
             JS_ASSERT(to);
 
@@ -953,7 +950,7 @@ BacktrackingAllocator::resolveControlFlow()
                 LiveInterval *from = vregs[input].intervalFor(outputOf(predecessor->lastId()));
                 JS_ASSERT(from);
 
-                if (!moveAtExit(predecessor, from, to))
+                if (!moveAtExit(predecessor, from, to, def->type()))
                     return false;
             }
         }
@@ -978,10 +975,10 @@ BacktrackingAllocator::resolveControlFlow()
 
                     if (mSuccessor->numPredecessors() > 1) {
                         JS_ASSERT(predecessor->mir()->numSuccessors() == 1);
-                        if (!moveAtExit(predecessor, from, to))
+                        if (!moveAtExit(predecessor, from, to, reg.type()))
                             return false;
                     } else {
-                        if (!moveAtEntry(successor, from, to))
+                        if (!moveAtEntry(successor, from, to, reg.type()))
                             return false;
                     }
                 }
@@ -1077,7 +1074,7 @@ BacktrackingAllocator::reifyAllocations()
 
                     if (*res != *alloc) {
                         LMoveGroup *group = getInputMoveGroup(inputOf(ins));
-                        if (!group->addAfter(sourceAlloc, res))
+                        if (!group->addAfter(sourceAlloc, res, def->type()))
                             return false;
                         *alloc = *res;
                     }
@@ -1128,7 +1125,10 @@ BacktrackingAllocator::populateSafepoints()
             if (ins == reg->ins() && !reg->isTemp()) {
                 DebugOnly<LDefinition*> def = reg->def();
                 JS_ASSERT_IF(def->policy() == LDefinition::MUST_REUSE_INPUT,
-                             def->type() == LDefinition::GENERAL || def->type() == LDefinition::DOUBLE);
+                             def->type() == LDefinition::GENERAL ||
+                             def->type() == LDefinition::INT32 ||
+                             def->type() == LDefinition::FLOAT32 ||
+                             def->type() == LDefinition::DOUBLE);
                 continue;
             }
 

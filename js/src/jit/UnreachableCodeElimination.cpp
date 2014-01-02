@@ -82,8 +82,8 @@ UnreachableCodeElimination::removeUnmarkedBlocksAndCleanup()
 
     // Pass 5: It's important for optimizations to re-run GVN (and in
     // turn alias analysis) after UCE if we eliminated branches.
-    if (rerunAliasAnalysis_ && js_IonOptions.gvn) {
-        ValueNumberer gvn(mir_, graph_, js_IonOptions.gvnIsOptimistic);
+    if (rerunAliasAnalysis_ && mir_->optimizationInfo().gvnEnabled()) {
+        ValueNumberer gvn(mir_, graph_, mir_->optimizationInfo().gvnKind() == GVN_Optimistic);
         if (!gvn.clear() || !gvn.analyze())
             return false;
         IonSpewPass("GVN-after-UCE");
@@ -284,22 +284,6 @@ UnreachableCodeElimination::removeUnmarkedBlocksAndClearDominators()
                                 break;
                             }
                         }
-                    }
-                }
-            }
-
-            // When we remove a call, we can't leave the corresponding MPassArg
-            // in the graph. Since lowering will fail. Replace it with the
-            // argument for the exceptional case when it is kept alive in a
-            // ResumePoint. DCE will remove the unused MPassArg instruction.
-            for (MInstructionIterator iter(block->begin()); iter != block->end(); iter++) {
-                if (iter->isCall()) {
-                    MCall *call = iter->toCall();
-                    for (size_t i = 0; i < call->numStackArgs(); i++) {
-                        JS_ASSERT(call->getArg(i)->isPassArg());
-                        JS_ASSERT(call->getArg(i)->hasOneDefUse());
-                        MPassArg *arg = call->getArg(i)->toPassArg();
-                        arg->replaceAllUsesWith(arg->getArgument());
                     }
                 }
             }

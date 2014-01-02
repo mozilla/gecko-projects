@@ -194,9 +194,9 @@ OPDEF(JSOP_UINT16,    88, "uint16",     NULL,         3,  0,  1,  JOF_UINT16)
  * shape, which can be set at the start and slots then filled in directly.
  * NEWINIT has an extra byte so it can be exchanged with NEWOBJECT during emit.
  */
-OPDEF(JSOP_NEWINIT,   89, "newinit",    NULL,         5,  0,  1, JOF_UINT8|JOF_TYPESET)
-OPDEF(JSOP_NEWARRAY,  90, "newarray",   NULL,         4,  0,  1, JOF_UINT24|JOF_TYPESET)
-OPDEF(JSOP_NEWOBJECT, 91, "newobject",  NULL,         5,  0,  1, JOF_OBJECT|JOF_TYPESET)
+OPDEF(JSOP_NEWINIT,   89, "newinit",    NULL,         5,  0,  1, JOF_UINT8)
+OPDEF(JSOP_NEWARRAY,  90, "newarray",   NULL,         4,  0,  1, JOF_UINT24)
+OPDEF(JSOP_NEWOBJECT, 91, "newobject",  NULL,         5,  0,  1, JOF_OBJECT)
 OPDEF(JSOP_ENDINIT,   92, "endinit",    NULL,         1,  0,  0, JOF_BYTE)
 OPDEF(JSOP_INITPROP,  93, "initprop",   NULL,         5,  2,  1, JOF_ATOM|JOF_PROP|JOF_SET|JOF_DETECTING)
 
@@ -273,11 +273,7 @@ OPDEF(JSOP_DEFAULT,   122,"default",    NULL,         5,  1,  0,  JOF_JUMP)
  */
 OPDEF(JSOP_EVAL,      123,"eval",       NULL,         3, -1,  1, JOF_UINT16|JOF_INVOKE|JOF_TYPESET)
 
-/*
- * ECMA-compliant helper for 'for (x[i] in o)' loops.
- */
-OPDEF(JSOP_ENUMELEM,  124,"enumelem",   NULL,         1,  3,  0,  JOF_BYTE |JOF_SET|JOF_TMPSLOT)
-
+OPDEF(JSOP_UNUSED124,  124, "unused124", NULL,      1,  0,  0,  JOF_BYTE)
 OPDEF(JSOP_UNUSED125,  125, "unused125", NULL,      1,  0,  0,  JOF_BYTE)
 OPDEF(JSOP_UNUSED126,  126, "unused126", NULL,      1,  0,  0,  JOF_BYTE)
 
@@ -445,15 +441,8 @@ OPDEF(JSOP_GENERATOR,     202,"generator",   NULL,    1,  0,  0,  JOF_BYTE)
 OPDEF(JSOP_YIELD,         203,"yield",       NULL,    1,  1,  1,  JOF_BYTE)
 OPDEF(JSOP_ARRAYPUSH,     204,"arraypush",   NULL,    3,  1,  0,  JOF_LOCAL)
 
-/*
- * Get the built-in function::foo namespace and push it.
- */
-OPDEF(JSOP_GETFUNNS,      205,"getfunns",   NULL,     1,  0,  1,  JOF_BYTE)
-
-/*
- * Variant of JSOP_ENUMELEM for destructuring const (const [a, b] = ...).
- */
-OPDEF(JSOP_ENUMCONSTELEM, 206,"enumconstelem",NULL,   1,  3,  0,  JOF_BYTE|JOF_SET)
+OPDEF(JSOP_UNUSED205,     205, "unused205",    NULL,  1,  0,  0,  JOF_BYTE)
+OPDEF(JSOP_UNUSED206,     206, "unused206",    NULL,  1,  0,  0,  JOF_BYTE)
 
 OPDEF(JSOP_UNUSED207,     207, "unused207",    NULL,  1,  0,  0,  JOF_BYTE)
 OPDEF(JSOP_UNUSED208,     208, "unused208",    NULL,  1,  0,  0,  JOF_BYTE)
@@ -504,14 +493,12 @@ OPDEF(JSOP_IMPLICITTHIS,  226, "implicitthis", "",    5,  0,  1,  JOF_ATOM)
  */
 OPDEF(JSOP_LOOPENTRY,     227, "loopentry",    NULL,  2,  0,  0,  JOF_UINT8)
 
-/* Notes the point at which a value is pushed as an argument. */
-OPDEF(JSOP_NOTEARG,       228, "notearg",      NULL,  1,  0,  0,  JOF_BYTE)
-
 /*
  * Pad out the unused opcode space to the nearest power-of-two boundary. The
  * interpreter uses this to construct a table which is a power-of-two size.
  */
 #ifdef OPPAD
+OPPAD(228)
 OPPAD(229)
 OPPAD(230)
 OPPAD(231)

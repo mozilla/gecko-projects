@@ -2289,8 +2289,7 @@ nsWindow::UpdateAlpha(gfxPattern* aPattern, nsIntRect aBoundsRect)
       UpdateTranslucentWindowAlphaInternal(aBoundsRect, imageBuffer, stride);
   } else {
       nsRefPtr<gfxImageSurface> img =
-          new gfxImageSurface(ThebesIntSize(aBoundsRect.Size()),
-                              gfxImageFormatA8);
+          new gfxImageSurface(aBoundsRect.Size(), gfxImageFormatA8);
       if (img && !img->CairoStatus()) {
           img->SetDeviceOffset(-aBoundsRect.TopLeft());
 
@@ -3317,7 +3316,7 @@ GetBrandName(nsXPIDLString& brandName)
 
     if (bundle)
         bundle->GetStringFromName(
-            NS_LITERAL_STRING("brandShortName").get(),
+            MOZ_UTF16("brandShortName"),
             getter_Copies(brandName));
 
     if (brandName.IsEmpty())

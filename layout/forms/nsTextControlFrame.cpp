@@ -488,10 +488,10 @@ nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
   }
 
   // set values of reflow's out parameters
-  aDesiredSize.width = aReflowState.ComputedWidth() +
-                       aReflowState.mComputedBorderPadding.LeftRight();
-  aDesiredSize.height = aReflowState.ComputedHeight() +
-                        aReflowState.mComputedBorderPadding.TopBottom();
+  aDesiredSize.Width() = aReflowState.ComputedWidth() +
+                       aReflowState.ComputedPhysicalBorderPadding().LeftRight();
+  aDesiredSize.Height() = aReflowState.ComputedHeight() +
+                        aReflowState.ComputedPhysicalBorderPadding().TopBottom();
 
   // computation of the ascent wrt the input height
   nscoord lineHeight = aReflowState.ComputedHeight();
@@ -506,9 +506,9 @@ nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
                                                       inflation);
   NS_ENSURE_SUCCESS(rv, rv);
   // now adjust for our borders and padding
-  aDesiredSize.ascent = 
+  aDesiredSize.SetTopAscent( 
         nsLayoutUtils::GetCenteredFontBaseline(fontMet, lineHeight) 
-        + aReflowState.mComputedBorderPadding.top;
+        + aReflowState.ComputedPhysicalBorderPadding().top);
 
   // overflow handling
   aDesiredSize.SetOverflowAreasToDesiredBounds();
@@ -545,25 +545,25 @@ nsTextControlFrame::ReflowTextControlChild(nsIFrame*                aKid,
 
   // Set computed width and computed height for the child
   nscoord width = availSize.width;
-  width -= kidReflowState.mComputedMargin.LeftRight() +
-              kidReflowState.mComputedBorderPadding.LeftRight();
+  width -= kidReflowState.ComputedPhysicalMargin().LeftRight() +
+              kidReflowState.ComputedPhysicalBorderPadding().LeftRight();
   width = std::max(width, 0);
   kidReflowState.SetComputedWidth(width);
 
   nscoord height = availSize.height;
-  height -= kidReflowState.mComputedMargin.TopBottom() +
-              kidReflowState.mComputedBorderPadding.TopBottom();
+  height -= kidReflowState.ComputedPhysicalMargin().TopBottom() +
+              kidReflowState.ComputedPhysicalBorderPadding().TopBottom();
   height = std::max(height, 0);       
   kidReflowState.SetComputedHeight(height); 
 
   // compute the offsets
-  nscoord xOffset = aReflowState.mComputedBorderPadding.left
-                      + kidReflowState.mComputedMargin.left;
-  nscoord yOffset = aReflowState.mComputedBorderPadding.top
-                      + kidReflowState.mComputedMargin.top;
+  nscoord xOffset = aReflowState.ComputedPhysicalBorderPadding().left
+                      + kidReflowState.ComputedPhysicalMargin().left;
+  nscoord yOffset = aReflowState.ComputedPhysicalBorderPadding().top
+                      + kidReflowState.ComputedPhysicalMargin().top;
 
   // reflow the child
-  nsHTMLReflowMetrics desiredSize;  
+  nsHTMLReflowMetrics desiredSize(aReflowState.GetWritingMode());
   ReflowChild(aKid, aPresContext, desiredSize, kidReflowState, 
               xOffset, yOffset, 0, aStatus);
 

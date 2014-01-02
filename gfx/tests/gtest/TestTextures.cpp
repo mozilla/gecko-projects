@@ -150,8 +150,8 @@ void TestTextureClientYCbCr(TextureClient* client, PlanarYCbCrData& ycbcrData) {
   // client allocation
   ASSERT_TRUE(client->AsTextureClientYCbCr() != nullptr);
   TextureClientYCbCr* texture = client->AsTextureClientYCbCr();
-  texture->AllocateForYCbCr(ToIntSize(ycbcrData.mYSize),
-                            ToIntSize(ycbcrData.mCbCrSize),
+  texture->AllocateForYCbCr(ycbcrData.mYSize,
+                            ycbcrData.mCbCrSize,
                             ycbcrData.mStereoMode);
   ASSERT_TRUE(client->IsAllocated());
 
@@ -242,9 +242,9 @@ TEST(Layers, TextureYCbCrSerialization) {
   clientData.mYChannel = ySurface->Data();
   clientData.mCbChannel = cbSurface->Data();
   clientData.mCrChannel = crSurface->Data();
-  clientData.mYSize = ySurface->GetSize();
-  clientData.mPicSize = ySurface->GetSize();
-  clientData.mCbCrSize = cbSurface->GetSize();
+  clientData.mYSize = ySurface->GetSize().ToIntSize();
+  clientData.mPicSize = ySurface->GetSize().ToIntSize();
+  clientData.mCbCrSize = cbSurface->GetSize().ToIntSize();
   clientData.mYStride = ySurface->Stride();
   clientData.mCbCrStride = cbSurface->Stride();
   clientData.mStereoMode = STEREO_MODE_MONO;

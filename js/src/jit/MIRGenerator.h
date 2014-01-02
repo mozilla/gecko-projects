@@ -29,11 +29,13 @@ namespace jit {
 class MBasicBlock;
 class MIRGraph;
 class MStart;
+class OptimizationInfo;
 
 class MIRGenerator
 {
   public:
-    MIRGenerator(CompileCompartment *compartment, TempAllocator *alloc, MIRGraph *graph, CompileInfo *info);
+    MIRGenerator(CompileCompartment *compartment, TempAllocator *alloc, MIRGraph *graph,
+                 CompileInfo *info, const OptimizationInfo *optimizationInfo);
 
     TempAllocator &alloc() {
         return *alloc_;
@@ -50,9 +52,14 @@ class MIRGenerator
     CompileInfo &info() {
         return *info_;
     }
+    const OptimizationInfo &optimizationInfo() const {
+        return *optimizationInfo_;
+    }
 
     template <typename T>
     T * allocate(size_t count = 1) {
+        if (count & mozilla::tl::MulOverflowMask<sizeof(T)>::value)
+            return nullptr;
         return reinterpret_cast<T *>(alloc().allocate(sizeof(T) * count));
     }
 
@@ -122,11 +129,16 @@ class MIRGenerator
         return asmJSGlobalAccesses_;
     }
 
+    bool modifiesFrameArguments() const {
+        return modifiesFrameArguments_;
+    }
+
   public:
     CompileCompartment *compartment;
 
   protected:
     CompileInfo *info_;
+    const OptimizationInfo *optimizationInfo_;
     TempAllocator *alloc_;
     JSFunction *fun_;
     uint32_t nslots_;
@@ -139,6 +151,11 @@ class MIRGenerator
     AsmJSHeapAccessVector asmJSHeapAccesses_;
     AsmJSGlobalAccessVector asmJSGlobalAccesses_;
     uint32_t minAsmJSHeapLength_;
+
+    // Keep track of whether frame arguments are modified during execution.
+    // RegAlloc needs to know this as spilling values back to their register
+    // slots is not compatible with that.
+    bool modifiesFrameArguments_;
 
 #if defined(JS_ION_PERF)
     AsmJSPerfSpewer asmJSPerfSpewer_;

@@ -22,8 +22,8 @@ class Proxy;
 class XMLHttpRequestUpload;
 class WorkerPrivate;
 
-class XMLHttpRequest : public nsXHREventTarget,
-                       public WorkerFeature
+class XMLHttpRequest MOZ_FINAL: public nsXHREventTarget,
+                                public WorkerFeature
 {
 public:
   struct StateData
@@ -60,10 +60,6 @@ private:
 
   bool mMozAnon;
   bool mMozSystem;
-
-protected:
-  XMLHttpRequest(WorkerPrivate* aWorkerPrivate);
-  virtual ~XMLHttpRequest();
 
 public:
   virtual JSObject*
@@ -164,23 +160,13 @@ public:
   Send(const nsAString& aBody, ErrorResult& aRv);
 
   void
-  Send(JSObject* aBody, ErrorResult& aRv);
+  Send(JS::Handle<JSObject*> aBody, ErrorResult& aRv);
 
   void
-  Send(JSObject& aBody, ErrorResult& aRv)
-  {
-    Send(&aBody, aRv);
-  }
+  Send(const ArrayBuffer& aBody, ErrorResult& aRv);
 
   void
-  Send(const ArrayBuffer& aBody, ErrorResult& aRv) {
-    return Send(aBody.Obj(), aRv);
-  }
-
-  void
-  Send(const ArrayBufferView& aBody, ErrorResult& aRv) {
-    return Send(aBody.Obj(), aRv);
-  }
+  Send(const ArrayBufferView& aBody, ErrorResult& aRv);
 
   void
   SendAsBinary(const nsAString& aBody, ErrorResult& aRv);
@@ -272,6 +258,9 @@ public:
   }
 
 private:
+  XMLHttpRequest(WorkerPrivate* aWorkerPrivate);
+  ~XMLHttpRequest();
+
   enum ReleaseType { Default, XHRIsGoingAway, WorkerIsGoingAway };
 
   void

@@ -32,6 +32,7 @@ from ..frontend.data import (
     HostSimpleProgram,
     InstallationTarget,
     IPDLFile,
+    JARManifest,
     JavaJarData,
     LibraryDefinition,
     LocalInclude,
@@ -372,11 +373,18 @@ class RecursiveMakeBackend(CommonBackend):
             for k, v in sorted(obj.variables.items()):
                 if k in unified_suffixes:
                     if do_unify:
+                        # On Windows, path names have a maximum length of 255 characters,
+                        # so avoid creating extremely long path names.
+                        unified_prefix = backend_file.relobjdir
+                        if len(unified_prefix) > 39:
+                            unified_prefix = unified_prefix[-39:].split('/', 1)[-1]
+                        unified_prefix = unified_prefix.replace('/', '_')
+
                         self._add_unified_build_rules(backend_file, v,
                             backend_file.objdir,
                             unified_prefix='Unified_%s_%s' % (
                                 unified_suffixes[k],
-                                backend_file.relobjdir.replace('/', '_')),
+                                unified_prefix),
                             unified_suffix=unified_suffixes[k],
                             unified_files_makefile_variable=k,
                             include_curdir_build_rules=False,
@@ -404,6 +412,9 @@ class RecursiveMakeBackend(CommonBackend):
 
         elif isinstance(obj, Exports):
             self._process_exports(obj, obj.exports, backend_file)
+
+        elif isinstance(obj, JARManifest):
+            backend_file.write('JAR_MANIFEST := %s\n' % obj.path)
 
         elif isinstance(obj, IPDLFile):
             self._ipdl_sources.add(mozpath.join(obj.srcdir, obj.basename))
@@ -682,11 +693,6 @@ class RecursiveMakeBackend(CommonBackend):
                 else:
                     self.log(logging.DEBUG, 'stub_makefile',
                         {'path': makefile}, 'Creating stub Makefile: {path}')
-
-                # Can't skip directories with a jar.mn for the 'libs' tier.
-                if bf.relobjdir in self._may_skip['libs'] and \
-                        os.path.exists(mozpath.join(srcdir, 'jar.mn')):
-                    self._may_skip['libs'].remove(bf.relobjdir)
 
                 obj = self.Substitution()
                 obj.output_path = makefile
@@ -1135,6 +1141,7 @@ class RecursiveMakeBackend(CommonBackend):
             webidls=sorted(all_inputs),
             generated_events_stems=sorted(generated_events_stems),
             exported_stems=sorted(exported_stems),
+            example_interfaces=sorted(webidls.example_interfaces),
         )
 
         file_lists = mozpath.join(bindings_dir, 'file-lists.json')

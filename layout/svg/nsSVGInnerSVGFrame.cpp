@@ -240,7 +240,7 @@ nsSVGInnerSVGFrame::GetFrameForPoint(const nsPoint &aPoint)
     float clipX, clipY, clipWidth, clipHeight;
     content->GetAnimatedLengthValues(&clipX, &clipY, &clipWidth, &clipHeight, nullptr);
 
-    if (!nsSVGUtils::HitTestRect(parent->GetCanvasTM(FOR_HIT_TESTING),
+    if (!nsSVGUtils::HitTestRect(gfx::ToMatrix(parent->GetCanvasTM(FOR_HIT_TESTING)),
                                  clipX, clipY, clipWidth, clipHeight,
                                  PresContext()->AppUnitsToDevPixels(aPoint.x),
                                  PresContext()->AppUnitsToDevPixels(aPoint.y))) {
@@ -293,7 +293,7 @@ nsSVGInnerSVGFrame::GetCanvasTM(uint32_t aFor, nsIFrame* aTransformRoot)
 }
 
 bool
-nsSVGInnerSVGFrame::HasChildrenOnlyTransform(gfxMatrix *aTransform) const
+nsSVGInnerSVGFrame::HasChildrenOnlyTransform(gfx::Matrix *aTransform) const
 {
   SVGSVGElement *content = static_cast<SVGSVGElement*>(mContent);
 

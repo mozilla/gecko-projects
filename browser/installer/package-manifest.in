@@ -62,6 +62,9 @@
 #ifndef MOZ_STATIC_JS
 @BINPATH@/@DLL_PREFIX@mozjs@DLL_SUFFIX@
 #endif
+#ifdef MOZ_DMD
+@BINPATH@/@DLL_PREFIX@dmd@DLL_SUFFIX@
+#endif
 #ifndef MOZ_NATIVE_NSPR
 #ifndef MOZ_FOLD_LIBS
 @BINPATH@/@DLL_PREFIX@nspr4@DLL_SUFFIX@
@@ -180,6 +183,9 @@
 @BINPATH@/components/content_canvas.xpt
 @BINPATH@/components/content_htmldoc.xpt
 @BINPATH@/components/content_html.xpt
+#ifdef MOZ_WEBRTC
+@BINPATH@/components/content_webrtc.xpt
+#endif
 @BINPATH@/components/content_xslt.xpt
 @BINPATH@/components/cookie.xpt
 @BINPATH@/components/directory.xpt
@@ -376,6 +382,8 @@
 @BINPATH@/components/Downloads.manifest
 @BINPATH@/components/DownloadLegacy.js
 @BINPATH@/components/BrowserPageThumbs.manifest
+@BINPATH@/components/crashmonitor.manifest
+@BINPATH@/components/nsCrashMonitor.js
 @BINPATH@/components/SiteSpecificUserAgent.js
 @BINPATH@/components/SiteSpecificUserAgent.manifest
 @BINPATH@/components/toolkitsearch.manifest
@@ -826,6 +834,10 @@ bin/libfreebl_32int64_3.so
 @BINPATH@/metro/chrome/chrome.manifest
 @BINPATH@/metro/chrome/@AB_CD@@JAREXT@
 @BINPATH@/metro/chrome/@AB_CD@.manifest
+#ifdef NIGHTLY_BUILD
+@BINPATH@/metro/chrome/shumway.manifest
+@BINPATH@/metro/chrome/shumway/*
+#endif
 @BINPATH@/metro/chrome/pdfjs.manifest
 @BINPATH@/metro/chrome/pdfjs/*
 @BINPATH@/metro/components

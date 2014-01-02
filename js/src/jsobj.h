@@ -288,6 +288,10 @@ class JSObject : public js::ObjectImpl
     }
 
     bool isBoundFunction() const {
+        // Note: This function can race when it is called during off thread compilation.
+        js::AutoThreadSafeAccess ts0(this);
+        js::AutoThreadSafeAccess ts1(lastProperty());
+        js::AutoThreadSafeAccess ts2(lastProperty()->base());
         return lastProperty()->hasObjectFlag(js::BaseShape::BOUND_FUNCTION);
     }
 
@@ -412,7 +416,7 @@ class JSObject : public js::ObjectImpl
             elements[i].js::HeapSlot::~HeapSlot();
     }
 
-    void rollbackProperties(js::ExclusiveContext *cx, uint32_t slotSpan);
+    bool rollbackProperties(js::ExclusiveContext *cx, uint32_t slotSpan);
 
     void nativeSetSlot(uint32_t slot, const js::Value &value) {
         JS_ASSERT(isNative());
@@ -474,10 +478,13 @@ class JSObject : public js::ObjectImpl
     bool uninlinedIsProxy() const;
     JSObject *getProto() const {
         JS_ASSERT(!uninlinedIsProxy());
-        return js::ObjectImpl::getProto();
+        return getTaggedProto().toObjectOrNull();
     }
     static inline bool getProto(JSContext *cx, js::HandleObject obj,
                                 js::MutableHandleObject protop);
+    // Returns false on error, success of operation in outparam.
+    static inline bool setProto(JSContext *cx, JS::HandleObject obj,
+                                JS::HandleObject proto, bool *succeeded);
 
     // uninlinedSetType() is the same as setType(), but not inlined.
     inline void setType(js::types::TypeObject *newType);
@@ -1323,15 +1330,6 @@ bool
 js_FindClassObject(js::ExclusiveContext *cx, JSProtoKey protoKey, js::MutableHandleValue vp,
                    const js::Class *clasp = nullptr);
 
-/*
- * Find or create a property named by id in obj's scope, with the given getter
- * and setter, slot, attributes, and other members.
- */
-extern js::Shape *
-js_AddNativeProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
-                     JSPropertyOp getter, JSStrictPropertyOp setter, uint32_t slot,
-                     unsigned attrs, unsigned flags, int shortid);
-
 namespace js {
 
 extern bool
@@ -1600,7 +1598,7 @@ GetClassPrototypePure(GlobalObject *global, JSProtoKey protoKey);
 
 extern bool
 SetClassAndProto(JSContext *cx, HandleObject obj,
-                 const Class *clasp, Handle<TaggedProto> proto, bool checkForCycles);
+                 const Class *clasp, Handle<TaggedProto> proto, bool *succeeded);
 
 extern JSObject *
 NonNullObject(JSContext *cx, const Value &v);

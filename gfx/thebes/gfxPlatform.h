@@ -507,6 +507,7 @@ public:
     static int  GetPrefLayoutFrameRate();
     static bool GetPrefLayersDump();
     static bool GetPrefLayersScrollGraph();
+    static bool GetPrefLayersEnableTiles();
 
     static bool OffMainThreadCompositionRequired();
 
@@ -517,6 +518,10 @@ public:
     static void DisableBufferRotation();
 
     static bool ComponentAlphaEnabled();
+
+    // Async video is enabled on this platform.
+    // Must only be called from the main thread.
+    static bool AsyncVideoEnabled();
 
     /**
      * Are we going to try color management?

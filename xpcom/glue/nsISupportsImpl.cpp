@@ -5,10 +5,10 @@
 #include "nsISupportsImpl.h"
 
 nsresult NS_FASTCALL
-NS_TableDrivenQI(void* aThis, const QITableEntry* entries,
-                 REFNSIID aIID, void **aInstancePtr)
+NS_TableDrivenQI(void* aThis, REFNSIID aIID, void **aInstancePtr,
+                 const QITableEntry* entries)
 {
-  while (entries->iid) {
+  do {
     if (aIID.Equals(*entries->iid)) {
       nsISupports* r =
         reinterpret_cast<nsISupports*>
@@ -19,7 +19,7 @@ NS_TableDrivenQI(void* aThis, const QITableEntry* entries,
     }
 
     ++entries;
-  }
+  } while (entries->iid);
 
   *aInstancePtr = nullptr;
   return NS_ERROR_NO_INTERFACE;

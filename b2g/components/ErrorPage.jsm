@@ -150,22 +150,18 @@ let ErrorPage = {
   },
 
   init: function errorPageInit() {
-    Services.obs.addObserver(this, 'inprocess-browser-shown', false);
-    Services.obs.addObserver(this, 'remote-browser-shown', false);
+    Services.obs.addObserver(this, 'in-process-browser-or-app-frame-shown', false);
+    Services.obs.addObserver(this, 'remote-browser-frame-shown', false);
   },
 
   observe: function errorPageObserve(aSubject, aTopic, aData) {
     let frameLoader = aSubject.QueryInterface(Ci.nsIFrameLoader);
-    // Ignore notifications that aren't from a BrowserOrApp
-    if (!frameLoader.ownerIsBrowserOrAppFrame) {
-      return;
-    }
     let mm = frameLoader.messageManager;
 
     // This won't happen from dom/ipc/preload.js in non-OOP builds.
     try {
       if (Services.prefs.getBoolPref("dom.ipc.tabs.disabled") === true) {
-        mm.loadFrameScript(kErrorPageFrameScript, true);
+        mm.loadFrameScript(kErrorPageFrameScript, true, true);
       }
     } catch (e) {
       dump('Error loading ' + kErrorPageFrameScript + ' as frame script: ' + e + '\n');

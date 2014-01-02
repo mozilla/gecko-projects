@@ -225,7 +225,8 @@ nsXPCWrappedJS::AddRef(void)
         MOZ_CRASH();
 
     MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");
-    nsrefcnt cnt = mRefCnt.incr();
+    nsISupports *base = NS_CYCLE_COLLECTION_CLASSNAME(nsXPCWrappedJS)::Upcast(this);
+    nsrefcnt cnt = mRefCnt.incr(base);
     NS_LOG_ADDREF(this, cnt, "nsXPCWrappedJS", sizeof(*this));
 
     if (2 == cnt && IsValid()) {
@@ -254,7 +255,7 @@ nsXPCWrappedJS::Release(void)
             mRefCnt.stabilizeForDeletion();
             DeleteCycleCollectable();
         } else {
-            mRefCnt.incr();
+            mRefCnt.incr(base);
             Destroy();
             mRefCnt.decr(base);
         }
@@ -319,7 +320,6 @@ nsXPCWrappedJS::GetJSObject()
 nsresult
 nsXPCWrappedJS::GetNewOrUsed(JS::HandleObject jsObj,
                              REFNSIID aIID,
-                             nsISupports* aOuter,
                              nsXPCWrappedJS** wrapperResult)
 {
     // Do a release-mode assert against accessing nsXPCWrappedJS off-main-thread.
@@ -363,8 +363,7 @@ nsXPCWrappedJS::GetNewOrUsed(JS::HandleObject jsObj,
         // build the root wrapper
         if (rootJSObj == jsObj) {
             // the root will do double duty as the interface wrapper
-            wrapper = root = new nsXPCWrappedJS(cx, jsObj, clazz, nullptr,
-                                                aOuter);
+            wrapper = root = new nsXPCWrappedJS(cx, jsObj, clazz, nullptr);
             if (!root)
                 goto return_wrapper;
 
@@ -379,7 +378,7 @@ nsXPCWrappedJS::GetNewOrUsed(JS::HandleObject jsObj,
             if (!rootClazz)
                 goto return_wrapper;
 
-            root = new nsXPCWrappedJS(cx, rootJSObj, rootClazz, nullptr, aOuter);
+            root = new nsXPCWrappedJS(cx, rootJSObj, rootClazz, nullptr);
             NS_RELEASE(rootClazz);
 
             if (!root)
@@ -396,7 +395,7 @@ nsXPCWrappedJS::GetNewOrUsed(JS::HandleObject jsObj,
     MOZ_ASSERT(clazz,"bad clazz");
 
     if (!wrapper) {
-        wrapper = new nsXPCWrappedJS(cx, jsObj, clazz, root, aOuter);
+        wrapper = new nsXPCWrappedJS(cx, jsObj, clazz, root);
         if (!wrapper)
             goto return_wrapper;
     }
@@ -421,13 +420,12 @@ return_wrapper:
 nsXPCWrappedJS::nsXPCWrappedJS(JSContext* cx,
                                JSObject* aJSObj,
                                nsXPCWrappedJSClass* aClass,
-                               nsXPCWrappedJS* root,
-                               nsISupports* aOuter)
+                               nsXPCWrappedJS* root)
     : mJSObj(aJSObj),
       mClass(aClass),
       mRoot(root ? root : MOZ_THIS_IN_INITIALIZER_LIST()),
       mNext(nullptr),
-      mOuter(root ? nullptr : aOuter)
+      mOuter(nullptr)
 {
     InitStub(GetClass()->GetIID());
 
@@ -438,7 +436,6 @@ nsXPCWrappedJS::nsXPCWrappedJS(JSContext* cx,
     NS_ADDREF_THIS();
 
     NS_ADDREF(aClass);
-    NS_IF_ADDREF(mOuter);
 
     if (!IsRootWrapper())
         NS_ADDREF(mRoot);

@@ -462,6 +462,12 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
 
         bool parseSuccess = ParseGLVersion(this, &version);
 
+#ifdef DEBUG
+        printf_stderr("OpenGL version detected: %u\n", version);
+        printf_stderr("OpenGL vendor: %s\n", fGetString(LOCAL_GL_VENDOR));
+        printf_stderr("OpenGL renderer: %s\n", fGetString(LOCAL_GL_RENDERER));
+#endif
+
         if (version >= mVersion) {
             mVersion = version;
         } else if (parseSuccess) {
@@ -1045,21 +1051,17 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
                 mMaxRenderbufferSize   = std::min(mMaxRenderbufferSize,   4096);
                 mNeedsTextureSizeChecks = true;
             } else if (mVendor == VendorNVIDIA) {
-                SInt32 major, minor;
-                OSErr err1 = ::Gestalt(gestaltSystemVersionMajor, &major);
-                OSErr err2 = ::Gestalt(gestaltSystemVersionMinor, &minor);
-
-                if (err1 != noErr || err2 != noErr ||
-                    major < 10 || (major == 10 && minor < 8)) {
-                    // See bug 877949.
-                    mMaxTextureSize = std::min(mMaxTextureSize, 4096);
-                    mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 4096);
-                }
-                else {
+                if (nsCocoaFeatures::OnMountainLionOrLater()) {
                     // See bug 879656.  8192 fails, 8191 works.
                     mMaxTextureSize = std::min(mMaxTextureSize, 8191);
                     mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 8191);
                 }
+                else {
+                    // See bug 877949.
+                    mMaxTextureSize = std::min(mMaxTextureSize, 4096);
+                    mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 4096);
+                }
+                
                 // Part of the bug 879656, but it also doesn't hurt the 877949
                 mNeedsTextureSizeChecks = true;
             }
@@ -2157,19 +2159,19 @@ GLContext::ReadPixelsIntoImageSurface(gfxImageSurface* dest)
         if (DebugMode()) {
             NS_WARNING("Needing intermediary surface for ReadPixels. This will be slow!");
         }
-        ImageFormat readFormatGFX;
+        SurfaceFormat readFormatGFX;
 
         switch (readFormat) {
             case LOCAL_GL_RGBA:
             case LOCAL_GL_BGRA: {
-                readFormatGFX = hasAlpha ? gfxImageFormatARGB32
-                                         : gfxImageFormatRGB24;
+                readFormatGFX = hasAlpha ? FORMAT_B8G8R8A8
+                                         : FORMAT_B8G8R8X8;
                 break;
             }
             case LOCAL_GL_RGB: {
                 MOZ_ASSERT(readPixelSize == 2);
                 MOZ_ASSERT(readType == LOCAL_GL_UNSIGNED_SHORT_5_6_5_REV);
-                readFormatGFX = gfxImageFormatRGB16_565;
+                readFormatGFX = FORMAT_R5G6B5;
                 break;
             }
             default: {
@@ -2198,7 +2200,9 @@ GLContext::ReadPixelsIntoImageSurface(gfxImageSurface* dest)
             }
         }
 
-        tempSurf = new gfxImageSurface(dest->GetSize(), readFormatGFX, false);
+        tempSurf = new gfxImageSurface(dest->GetSize(),
+                                       SurfaceFormatToImageFormat(readFormatGFX),
+                                       false);
         readSurf = tempSurf;
     } else {
         readPixelSize = destPixelSize;
@@ -2457,7 +2461,7 @@ GLContext::GuaranteeResolve()
     fFinish();
 }
 
-const gfxIntSize&
+const gfx::IntSize&
 GLContext::OffscreenSize() const
 {
     MOZ_ASSERT(IsOffscreen());
@@ -2465,7 +2469,7 @@ GLContext::OffscreenSize() const
 }
 
 bool
-GLContext::CreateScreenBufferImpl(const gfxIntSize& size, const SurfaceCaps& caps)
+GLContext::CreateScreenBufferImpl(const IntSize& size, const SurfaceCaps& caps)
 {
     GLScreenBuffer* newScreen = GLScreenBuffer::Create(this, size, caps);
     if (!newScreen)
@@ -2488,7 +2492,7 @@ GLContext::CreateScreenBufferImpl(const gfxIntSize& size, const SurfaceCaps& cap
 }
 
 bool
-GLContext::ResizeScreenBuffer(const gfxIntSize& size)
+GLContext::ResizeScreenBuffer(const IntSize& size)
 {
     if (!IsOffscreenSizeAllowed(size))
         return false;
@@ -2531,7 +2535,7 @@ GLContext::EmptyTexGarbageBin()
 }
 
 bool
-GLContext::IsOffscreenSizeAllowed(const gfxIntSize& aSize) const {
+GLContext::IsOffscreenSizeAllowed(const IntSize& aSize) const {
   int32_t biggerDimension = std::max(aSize.width, aSize.height);
   int32_t maxAllowed = std::min(mMaxRenderbufferSize, mMaxTextureSize);
   return biggerDimension <= maxAllowed;

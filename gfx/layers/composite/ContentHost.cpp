@@ -6,7 +6,7 @@
 #include "mozilla/layers/ContentHost.h"
 #include "LayersLogging.h"              // for AppendToString
 #include "gfx2DGlue.h"                  // for ContentForFormat
-#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/gfx/Point.h"          // for IntSize
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/layers/Compositor.h"  // for Compositor
@@ -40,32 +40,6 @@ ContentHostBase::GetAsTextureHost()
   return mTextureHost;
 }
 
-class MOZ_STACK_CLASS AutoLockTextureHost
-{
-public:
-  AutoLockTextureHost(TextureHost* aHost)
-    : mHost(aHost)
-  {
-    mLockSuccess = mHost ? mHost->Lock() : true;
-  }
-
-  ~AutoLockTextureHost()
-  {
-    if (mHost) {
-      mHost->Unlock();
-    }
-  }
-
-  bool IsValid()
-  {
-    return mLockSuccess;
-  }
-
-private:
-  TextureHost* mHost;
-  bool mLockSuccess;
-};
-
 void
 ContentHostBase::Composite(EffectChain& aEffectChain,
                            float aOpacity,
@@ -77,12 +51,15 @@ ContentHostBase::Composite(EffectChain& aEffectChain,
 {
   NS_ASSERTION(aVisibleRegion, "Requires a visible region");
 
+  if (!mTextureHost) {
+    NS_WARNING("Missing TextureHost");
+    return;
+  }
+
   AutoLockTextureHost lock(mTextureHost);
   AutoLockTextureHost lockOnWhite(mTextureHostOnWhite);
 
-  if (!mTextureHost ||
-      !lock.IsValid() ||
-      !lockOnWhite.IsValid()) {
+  if (lock.Failed() || lockOnWhite.Failed()) {
     return;
   }
 
@@ -242,9 +219,11 @@ ContentHostBase::UseTextureHost(TextureHost* aTexture)
   if (aTexture->GetFlags() & TEXTURE_ON_WHITE) {
     mTextureHost = nullptr;
     mTextureHostOnWhite = aTexture;
+    mTextureHostOnWhite->SetCompositor(GetCompositor());
   } else {
     mTextureHostOnWhite = nullptr;
     mTextureHost = aTexture;
+    mTextureHost->SetCompositor(GetCompositor());
   }
 }
 
@@ -544,7 +523,7 @@ ContentHostSingleBuffered::UpdateThebes(const ThebesBufferData& aData,
   // Correct for rotation
   destRegion.MoveBy(aData.rotation());
 
-  gfxIntSize size = aData.rect().Size();
+  IntSize size = aData.rect().Size().ToIntSize();
   nsIntRect destBounds = destRegion.GetBounds();
   destRegion.MoveBy((destBounds.x >= size.width) ? -size.width : 0,
                     (destBounds.y >= size.height) ? -size.height : 0);
@@ -641,7 +620,7 @@ DeprecatedContentHostSingleBuffered::UpdateThebes(const ThebesBufferData& aData,
   // Correct for rotation
   destRegion.MoveBy(aData.rotation());
 
-  gfxIntSize size = aData.rect().Size();
+  IntSize size = aData.rect().Size().ToIntSize();
   nsIntRect destBounds = destRegion.GetBounds();
   destRegion.MoveBy((destBounds.x >= size.width) ? -size.width : 0,
                     (destBounds.y >= size.height) ? -size.height : 0);

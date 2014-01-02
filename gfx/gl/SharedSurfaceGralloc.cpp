@@ -17,6 +17,8 @@
 #include "../layers/ipc/ShadowLayers.h"
 #include "ScopedGLHelpers.h"
 
+#include "gfx2DGlue.h"
+
 #define DEBUG_GRALLOC
 #ifdef DEBUG_GRALLOC
 #define DEBUG_PRINT(...) do { printf_stderr(__VA_ARGS__); } while (0)
@@ -50,7 +52,7 @@ SurfaceFactory_Gralloc::SurfaceFactory_Gralloc(GLContext* prodGL,
 SharedSurface_Gralloc*
 SharedSurface_Gralloc::Create(GLContext* prodGL,
                               const GLFormats& formats,
-                              const gfxIntSize& size,
+                              const gfx::IntSize& size,
                               bool hasAlpha,
                               ISurfaceAllocator* allocator)
 {

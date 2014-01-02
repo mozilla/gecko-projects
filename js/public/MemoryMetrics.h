@@ -108,7 +108,7 @@ struct ZoneStatsPod
     macro(Other,   NotLiveGCThing, unusedGCThings) \
     macro(Other,   IsLiveGCThing,  lazyScriptsGCHeap) \
     macro(Other,   NotLiveGCThing, lazyScriptsMallocHeap) \
-    macro(Other,   IsLiveGCThing,  ionCodesGCHeap) \
+    macro(Other,   IsLiveGCThing,  jitCodesGCHeap) \
     macro(Other,   IsLiveGCThing,  typeObjectsGCHeap) \
     macro(Other,   NotLiveGCThing, typeObjectsMallocHeap) \
     macro(Other,   NotLiveGCThing, typePool) \
@@ -393,7 +393,6 @@ struct CompartmentStats
     macro(Other,   NotLiveGCThing, baselineStubsOptimized) \
     macro(Other,   NotLiveGCThing, ionData) \
     macro(Other,   NotLiveGCThing, typeInferenceTypeScripts) \
-    macro(Other,   NotLiveGCThing, typeInferencePendingArrays) \
     macro(Other,   NotLiveGCThing, typeInferenceAllocationSiteTables) \
     macro(Other,   NotLiveGCThing, typeInferenceArrayTypeTables) \
     macro(Other,   NotLiveGCThing, typeInferenceObjectTypeTables) \

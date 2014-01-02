@@ -484,10 +484,6 @@ TabParent::UpdateDimensions(const nsRect& rect, const nsIntSize& size)
     mOrientation = orientation;
 
     unused << SendUpdateDimensions(mRect, mDimensions, mOrientation);
-    if (RenderFrameParent* rfp = GetRenderFrame()) {
-      rfp->NotifyDimensionsChanged(ScreenIntSize::FromUnknownSize(
-        gfx::IntSize(mDimensions.width, mDimensions.height)));
-    }
   }
 }
 
@@ -583,7 +579,7 @@ TabParent::SetDocShell(nsIDocShell *aDocShell)
 
 PDocumentRendererParent*
 TabParent::AllocPDocumentRendererParent(const nsRect& documentRect,
-                                        const gfxMatrix& transform,
+                                        const gfx::Matrix& transform,
                                         const nsString& bgcolor,
                                         const uint32_t& renderFlags,
                                         const bool& flushLayout,
@@ -1563,8 +1559,12 @@ TabParent::AllocPOfflineCacheUpdateParent(const URIParams& aManifestURI,
                                                     IsBrowserElement());
 
   nsresult rv = update->Schedule(aManifestURI, aDocumentURI, stickDocument);
-  if (NS_FAILED(rv))
-    return nullptr;
+  if (NS_FAILED(rv)) {
+    // Must dispatch since the parent is not at this moment ready yet.
+    nsRefPtr<nsRunnableMethod<mozilla::docshell::OfflineCacheUpdateParent> > event =
+      NS_NewRunnableMethod(update, &mozilla::docshell::OfflineCacheUpdateParent::Kill);
+    NS_DispatchToCurrentThread(event);
+  }
 
   POfflineCacheUpdateParent* result = update.get();
   update.forget();
@@ -1578,6 +1578,14 @@ TabParent::DeallocPOfflineCacheUpdateParent(mozilla::docshell::POfflineCacheUpda
     static_cast<mozilla::docshell::OfflineCacheUpdateParent*>(actor);
 
   update->Release();
+  return true;
+}
+
+bool
+TabParent::RecvSetOfflinePermission(const IPC::Principal& aPrincipal)
+{
+  nsIPrincipal* principal = aPrincipal;
+  nsContentUtils::MaybeAllowOfflineAppByDefault(principal, nullptr);
   return true;
 }
 
@@ -1687,12 +1695,6 @@ TabParent::RecvPRenderFrameConstructor(PRenderFrameParent* actor,
                                        TextureFactoryIdentifier* factoryIdentifier,
                                        uint64_t* layersId)
 {
-  RenderFrameParent* rfp = GetRenderFrame();
-  if (mDimensions != nsIntSize() && rfp) {
-    rfp->NotifyDimensionsChanged(ScreenIntSize::FromUnknownSize(
-      gfx::IntSize(mDimensions.width, mDimensions.height)));
-  }
-
   return true;
 }
 
@@ -1717,17 +1719,6 @@ TabParent::RecvUpdateZoomConstraints(const uint32_t& aPresShellId,
 {
   if (RenderFrameParent* rfp = GetRenderFrame()) {
     rfp->UpdateZoomConstraints(aPresShellId, aViewId, aIsRoot, aAllowZoom, aMinZoom, aMaxZoom);
-  }
-  return true;
-}
-
-bool
-TabParent::RecvUpdateScrollOffset(const uint32_t& aPresShellId,
-                                  const ViewID& aViewId,
-                                  const CSSIntPoint& aScrollOffset)
-{
-  if (RenderFrameParent* rfp = GetRenderFrame()) {
-    rfp->UpdateScrollOffset(aPresShellId, aViewId, aScrollOffset);
   }
   return true;
 }

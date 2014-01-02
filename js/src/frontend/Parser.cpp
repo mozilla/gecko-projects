@@ -847,7 +847,7 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun, const AutoN
                                          generatorKind);
     if (!funbox)
         return null();
-    funbox->length = fun->nargs - fun->hasRest();
+    funbox->length = fun->nargs() - fun->hasRest();
     handler.setFunctionBox(fn, funbox);
 
     ParseContext<FullParseHandler> funpc(this, pc, fn, funbox, newDirectives,
@@ -2212,7 +2212,7 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, unsigned st
                                          generatorKind);
     if (!funbox)
         return null();
-    funbox->length = fun->nargs - fun->hasRest();
+    funbox->length = fun->nargs() - fun->hasRest();
 
     Directives newDirectives = directives;
     ParseContext<FullParseHandler> funpc(this, /* parent = */ nullptr, pn, funbox,
@@ -2265,11 +2265,11 @@ Parser<ParseHandler>::functionArgsAndBodyGeneric(Node pn, HandleFunction fun, Fu
     if (hasRest)
         fun->setHasRest();
 
-    if (type == Getter && fun->nargs > 0) {
+    if (type == Getter && fun->nargs() > 0) {
         report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "getter", "no", "s");
         return false;
     }
-    if (type == Setter && fun->nargs != 1) {
+    if (type == Setter && fun->nargs() != 1) {
         report(ParseError, false, null(), JSMSG_ACCESSOR_WRONG_ARGS, "setter", "one", "");
         return false;
     }
@@ -2853,17 +2853,18 @@ Parser<ParseHandler>::bindVarOrConst(BindData<ParseHandler> *data,
         if (pc->sc->isFunctionBox()) {
             FunctionBox *funbox = pc->sc->asFunctionBox();
             funbox->setMightAliasLocals();
-
-            /*
-             * This definition isn't being added to the parse context's
-             * declarations, so make sure to indicate the need to deoptimize
-             * the script's arguments object. Mark the function as if it
-             * contained a debugger statement, which will deoptimize arguments
-             * as much as possible.
-             */
-            if (name == cx->names().arguments)
-                funbox->setHasDebuggerStatement();
         }
+
+        /*
+         * This definition isn't being added to the parse context's
+         * declarations, so make sure to indicate the need to deoptimize
+         * the script's arguments object. Mark the function as if it
+         * contained a debugger statement, which will deoptimize arguments
+         * as much as possible.
+         */
+        if (name == cx->names().arguments)
+            pc->sc->setHasDebuggerStatement();
+
         return true;
     }
 

@@ -26,7 +26,7 @@
 #include "nsStyleContext.h"
 #include "nsStyleStruct.h"
 #include "nsStyleStructInlines.h"
-#include "nsSVGTextFrame2.h"
+#include "SVGTextFrame.h"
 #include "nsCoord.h"
 #include "nsRenderingContext.h"
 #include "nsIPresShell.h"
@@ -124,19 +124,45 @@ void
 TabWidthStore::ApplySpacing(gfxTextRun::PropertyProvider::Spacing *aSpacing,
                             uint32_t aOffset, uint32_t aLength)
 {
-  // We could binary-search for the first record that falls within the range,
-  // but as the number of tabs is normally small and we usually process them
-  // sequentially from the beginning of the line, it doesn't seem worth doing
-  // at this point.
-  for (uint32_t i = 0; i < mWidths.Length(); ++i) {
-    TabWidth& tw = mWidths[i];
-    if (tw.mOffset < aOffset) {
-      continue;
+  uint32_t i = 0, len = mWidths.Length();
+
+  // If aOffset is non-zero, do a binary search to find where to start
+  // processing the tab widths, in case the list is really long. (See bug
+  // 953247.)
+  // We need to start from the first entry where mOffset >= aOffset.
+  if (aOffset > 0) {
+    uint32_t lo = 0, hi = len;
+    while (lo < hi) {
+      i = (lo + hi) / 2;
+      const TabWidth& tw = mWidths[i];
+      if (tw.mOffset < aOffset) {
+        // mWidths[i] precedes the target range; new search range
+        // will be [i+1, hi)
+        lo = ++i;
+        continue;
+      }
+      if (tw.mOffset > aOffset) {
+        // mWidths[i] is within (or beyond) the target range;
+        // new search range is [lo, i). If it turns out that
+        // mWidths[i] was the first entry within the range,
+        // we'll never move hi any further, and end up exiting
+        // when i == lo == this value of hi.
+        hi = i;
+        continue;
+      }
+      // Found an exact match for aOffset, so end search now
+      break;
     }
-    if (tw.mOffset - aOffset >= aLength) {
+  }
+
+  uint32_t limit = aOffset + aLength;
+  while (i < len) {
+    const TabWidth& tw = mWidths[i];
+    if (tw.mOffset >= limit) {
       break;
     }
     aSpacing[tw.mOffset - aOffset].mAfter += tw.mWidth;
+    i++;
   }
 }
 
@@ -2716,9 +2742,9 @@ static bool IsJustifiableCharacter(const nsTextFragment* aFrag, int32_t aPos,
 void
 nsTextFrame::ClearMetrics(nsHTMLReflowMetrics& aMetrics)
 {
-  aMetrics.width = 0;
-  aMetrics.height = 0;
-  aMetrics.ascent = 0;
+  aMetrics.Width() = 0;
+  aMetrics.Height() = 0;
+  aMetrics.SetTopAscent(0);
   mAscent = 0;
 }
 
@@ -2751,8 +2777,8 @@ static bool IsChineseOrJapanese(nsIFrame* aFrame)
     return false;
   }
   const PRUnichar *lang = language->GetUTF16String();
-  return (!nsCRT::strncmp(lang, NS_LITERAL_STRING("ja").get(), 2) ||
-          !nsCRT::strncmp(lang, NS_LITERAL_STRING("zh").get(), 2)) &&
+  return (!nsCRT::strncmp(lang, MOZ_UTF16("ja"), 2) ||
+          !nsCRT::strncmp(lang, MOZ_UTF16("zh"), 2)) &&
          (language->GetLength() == 2 || lang[2] == '-');
 }
 
@@ -4251,7 +4277,7 @@ nsTextFrame::InvalidateFrame(uint32_t aDisplayItemKey)
   if (IsSVGText()) {
     nsIFrame* svgTextFrame =
       nsLayoutUtils::GetClosestFrameOfType(GetParent(),
-                                           nsGkAtoms::svgTextFrame2);
+                                           nsGkAtoms::svgTextFrame);
     svgTextFrame->InvalidateFrame();
     return;
   }
@@ -4264,7 +4290,7 @@ nsTextFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemK
   if (IsSVGText()) {
     nsIFrame* svgTextFrame =
       nsLayoutUtils::GetClosestFrameOfType(GetParent(),
-                                           nsGkAtoms::svgTextFrame2);
+                                           nsGkAtoms::svgTextFrame);
     svgTextFrame->InvalidateFrame();
     return;
   }
@@ -4769,12 +4795,12 @@ GetInflationForTextDecorations(nsIFrame* aFrame, nscoord aInflationMinFontSize)
 {
   if (aFrame->IsSVGText()) {
     const nsIFrame* container = aFrame;
-    while (container->GetType() != nsGkAtoms::svgTextFrame2) {
+    while (container->GetType() != nsGkAtoms::svgTextFrame) {
       container = container->GetParent();
     }
-    NS_ASSERTION(container, "expected to find an ancestor nsSVGTextFrame2");
+    NS_ASSERTION(container, "expected to find an ancestor SVGTextFrame");
     return
-      static_cast<const nsSVGTextFrame2*>(container)->GetFontSizeScaleFactor();
+      static_cast<const SVGTextFrame*>(container)->GetFontSizeScaleFactor();
   }
   return nsLayoutUtils::FontSizeInflationInner(aFrame, aInflationMinFontSize);
 }
@@ -7592,7 +7618,7 @@ nsTextFrame::Reflow(nsPresContext*           aPresContext,
     return NS_OK;
   }
 
-  ReflowText(*aReflowState.mLineLayout, aReflowState.availableWidth,
+  ReflowText(*aReflowState.mLineLayout, aReflowState.AvailableWidth(),
              aReflowState.rendContext, aMetrics, aStatus);
 
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
@@ -7996,15 +8022,15 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
 
   // Setup metrics for caller
   // Disallow negative widths
-  aMetrics.width = NSToCoordCeil(std::max(gfxFloat(0.0), textMetrics.mAdvanceWidth));
+  aMetrics.Width() = NSToCoordCeil(std::max(gfxFloat(0.0), textMetrics.mAdvanceWidth));
 
   if (transformedCharsFit == 0 && !usedHyphenation) {
-    aMetrics.ascent = 0;
-    aMetrics.height = 0;
+    aMetrics.SetTopAscent(0);
+    aMetrics.Height() = 0;
   } else if (boundingBoxType != gfxFont::LOOSE_INK_EXTENTS) {
     // Use actual text metrics for floating first letter frame.
-    aMetrics.ascent = NSToCoordCeil(textMetrics.mAscent);
-    aMetrics.height = aMetrics.ascent + NSToCoordCeil(textMetrics.mDescent);
+    aMetrics.SetTopAscent(NSToCoordCeil(textMetrics.mAscent));
+    aMetrics.Height() = aMetrics.TopAscent() + NSToCoordCeil(textMetrics.mDescent);
   } else {
     // Otherwise, ascent should contain the overline drawable area.
     // And also descent should contain the underline drawable area.
@@ -8012,15 +8038,15 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
     nsFontMetrics* fm = provider.GetFontMetrics();
     nscoord fontAscent = fm->MaxAscent();
     nscoord fontDescent = fm->MaxDescent();
-    aMetrics.ascent = std::max(NSToCoordCeil(textMetrics.mAscent), fontAscent);
+    aMetrics.SetTopAscent(std::max(NSToCoordCeil(textMetrics.mAscent), fontAscent));
     nscoord descent = std::max(NSToCoordCeil(textMetrics.mDescent), fontDescent);
-    aMetrics.height = aMetrics.ascent + descent;
+    aMetrics.Height() = aMetrics.TopAscent() + descent;
   }
 
-  NS_ASSERTION(aMetrics.ascent >= 0, "Negative ascent???");
-  NS_ASSERTION(aMetrics.height - aMetrics.ascent >= 0, "Negative descent???");
+  NS_ASSERTION(aMetrics.TopAscent() >= 0, "Negative ascent???");
+  NS_ASSERTION(aMetrics.Height() - aMetrics.TopAscent() >= 0, "Negative descent???");
 
-  mAscent = aMetrics.ascent;
+  mAscent = aMetrics.TopAscent();
 
   // Handle text that runs outside its normal bounds.
   nsRect boundingBox = RoundOut(textMetrics.mBoundingBox) + nsPoint(0, mAscent);
@@ -8139,7 +8165,7 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
 #ifdef NOISY_REFLOW
   ListTag(stdout);
   printf(": desiredSize=%d,%d(b=%d) status=%x\n",
-         aMetrics.width, aMetrics.height, aMetrics.ascent,
+         aMetrics.Width(), aMetrics.Height(), aMetrics.TopAscent(),
          aStatus);
 #endif
 }

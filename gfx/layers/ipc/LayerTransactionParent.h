@@ -11,7 +11,6 @@
 #include <stddef.h>                     // for size_t
 #include <stdint.h>                     // for uint64_t, uint32_t
 #include "CompositableTransactionParent.h"
-#include "gfxPoint.h"                   // for gfxIntSize
 #include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
 #include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
 #include "mozilla/layers/PLayerTransactionParent.h"
@@ -81,11 +80,13 @@ protected:
   virtual bool RecvUpdate(const EditArray& cset,
                           const TargetConfig& targetConfig,
                           const bool& isFirstPaint,
+                          const bool& scheduleComposite,
                           EditReplyArray* reply) MOZ_OVERRIDE;
 
   virtual bool RecvUpdateNoSwap(const EditArray& cset,
                                 const TargetConfig& targetConfig,
-                                const bool& isFirstPaint) MOZ_OVERRIDE;
+                                const bool& isFirstPaint,
+                                const bool& scheduleComposite) MOZ_OVERRIDE;
 
   virtual bool RecvClearCachedResources() MOZ_OVERRIDE;
   virtual bool RecvGetOpacity(PLayerParent* aParent,
@@ -94,9 +95,9 @@ protected:
                                 gfx3DMatrix* aTransform) MOZ_OVERRIDE;
 
   virtual PGrallocBufferParent*
-  AllocPGrallocBufferParent(const gfxIntSize& aSize,
-                      const uint32_t& aFormat, const uint32_t& aUsage,
-                      MaybeMagicGrallocBufferHandle* aOutHandle) MOZ_OVERRIDE;
+  AllocPGrallocBufferParent(const IntSize& aSize,
+                            const uint32_t& aFormat, const uint32_t& aUsage,
+                            MaybeMagicGrallocBufferHandle* aOutHandle) MOZ_OVERRIDE;
   virtual bool
   DeallocPGrallocBufferParent(PGrallocBufferParent* actor) MOZ_OVERRIDE;
 

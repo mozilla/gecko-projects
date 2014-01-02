@@ -8,7 +8,6 @@
 
 // Keep others in (case-insensitive) order:
 #include "gfxContext.h"
-#include "gfxMatrix.h"
 #include "nsGkAtoms.h"
 #include "nsINameSpaceManager.h"
 #include "nsLayoutUtils.h"
@@ -145,8 +144,8 @@ nsSVGForeignObjectFrame::Reflow(nsPresContext*           aPresContext,
 
   DoReflow();
 
-  aDesiredSize.width = aReflowState.ComputedWidth();
-  aDesiredSize.height = aReflowState.ComputedHeight();
+  aDesiredSize.Width() = aReflowState.ComputedWidth();
+  aDesiredSize.Height() = aReflowState.ComputedHeight();
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   aStatus = NS_FRAME_COMPLETE;
 
@@ -165,8 +164,8 @@ nsSVGForeignObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 bool
-nsSVGForeignObjectFrame::IsSVGTransformed(gfxMatrix *aOwnTransform,
-                                          gfxMatrix *aFromParentTransform) const
+nsSVGForeignObjectFrame::IsSVGTransformed(Matrix *aOwnTransform,
+                                          Matrix *aFromParentTransform) const
 {
   bool foundTransform = false;
 
@@ -184,8 +183,8 @@ nsSVGForeignObjectFrame::IsSVGTransformed(gfxMatrix *aOwnTransform,
   if ((transformList && transformList->HasTransform()) ||
       content->GetAnimateMotionTransform()) {
     if (aOwnTransform) {
-      *aOwnTransform = content->PrependLocalTransformsTo(gfxMatrix(),
-                                  nsSVGElement::eUserSpaceToParent);
+      *aOwnTransform = gfx::ToMatrix(content->PrependLocalTransformsTo(gfxMatrix(),
+                                  nsSVGElement::eUserSpaceToParent));
     }
     foundTransform = true;
   }
@@ -465,7 +464,7 @@ nsSVGForeignObjectFrame::NotifySVGChanged(uint32_t aFlags)
 }
 
 SVGBBox
-nsSVGForeignObjectFrame::GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
+nsSVGForeignObjectFrame::GetBBoxContribution(const Matrix &aToBBoxUserspace,
                                              uint32_t aFlags)
 {
   SVGForeignObjectElement *content =
@@ -481,7 +480,7 @@ nsSVGForeignObjectFrame::GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
     // XXX ReportToConsole
     return SVGBBox();
   }
-  return aToBBoxUserspace.TransformBounds(gfxRect(0.0, 0.0, w, h));
+  return aToBBoxUserspace.TransformBounds(gfx::Rect(0.0, 0.0, w, h));
 }
 
 //----------------------------------------------------------------------
@@ -553,13 +552,13 @@ nsSVGForeignObjectFrame::DoReflow()
   nsHTMLReflowState reflowState(presContext, kid,
                                 renderingContext,
                                 nsSize(mRect.width, NS_UNCONSTRAINEDSIZE));
-  nsHTMLReflowMetrics desiredSize;
+  nsHTMLReflowMetrics desiredSize(reflowState.GetWritingMode());
   nsReflowStatus status;
 
   // We don't use mRect.height above because that tells the child to do
   // page/column breaking at that height.
-  NS_ASSERTION(reflowState.mComputedBorderPadding == nsMargin(0, 0, 0, 0) &&
-               reflowState.mComputedMargin == nsMargin(0, 0, 0, 0),
+  NS_ASSERTION(reflowState.ComputedPhysicalBorderPadding() == nsMargin(0, 0, 0, 0) &&
+               reflowState.ComputedPhysicalMargin() == nsMargin(0, 0, 0, 0),
                "style system should ensure that :-moz-svg-foreign-content "
                "does not get styled");
   NS_ASSERTION(reflowState.ComputedWidth() == mRect.width,
@@ -568,8 +567,8 @@ nsSVGForeignObjectFrame::DoReflow()
 
   ReflowChild(kid, presContext, desiredSize, reflowState, 0, 0,
               NS_FRAME_NO_MOVE_FRAME, status);
-  NS_ASSERTION(mRect.width == desiredSize.width &&
-               mRect.height == desiredSize.height, "unexpected size");
+  NS_ASSERTION(mRect.width == desiredSize.Width() &&
+               mRect.height == desiredSize.Height(), "unexpected size");
   FinishReflowChild(kid, presContext, &reflowState, desiredSize, 0, 0,
                     NS_FRAME_NO_MOVE_FRAME);
   

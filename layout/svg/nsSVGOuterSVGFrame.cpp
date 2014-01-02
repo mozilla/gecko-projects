@@ -7,14 +7,12 @@
 #include "nsSVGOuterSVGFrame.h"
 
 // Keep others in (case-insensitive) order:
-#include "gfxMatrix.h"
 #include "nsDisplayList.h"
 #include "nsIDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIObjectLoadingContent.h"
 #include "nsRenderingContext.h"
-#include "nsStubMutationObserver.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGForeignObjectFrame.h"
 #include "mozilla/dom/SVGSVGElement.h"
@@ -23,53 +21,6 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-
-class nsSVGMutationObserver : public nsStubMutationObserver
-{
-public:
-  // nsIMutationObserver interface
-  NS_DECL_NSIMUTATIONOBSERVER_ATTRIBUTECHANGED
-
-  // nsISupports interface:
-  NS_IMETHOD QueryInterface(const nsIID& aIID, void** aInstancePtr);
-private:
-  NS_IMETHOD_(nsrefcnt) AddRef() { return 1; }
-  NS_IMETHOD_(nsrefcnt) Release() { return 1; }
-
-  static void UpdateTextFragmentTrees(nsIFrame *aFrame);
-};
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_INTERFACE_MAP_BEGIN(nsSVGMutationObserver)
-  NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
-NS_INTERFACE_MAP_END
-
-static nsSVGMutationObserver sSVGMutationObserver;
-
-//----------------------------------------------------------------------
-// nsIMutationObserver methods
-
-void
-nsSVGMutationObserver::AttributeChanged(nsIDocument* aDocument,
-                                        Element* aElement,
-                                        int32_t aNameSpaceID,
-                                        nsIAtom* aAttribute,
-                                        int32_t aModType)
-{
-  if (aNameSpaceID != kNameSpaceID_XML || aAttribute != nsGkAtoms::space) {
-    return;
-  }
-
-  nsIFrame* frame = aElement->GetPrimaryFrame();
-  if (!frame) {
-    return;
-  }
-
-  // if not, are there text elements amongst its descendents
-  UpdateTextFragmentTrees(frame);
-}
 
 //----------------------------------------------------------------------
 // Implementation helpers
@@ -99,16 +50,6 @@ nsSVGOuterSVGFrame::UnregisterForeignObject(nsSVGForeignObjectFrame* aFrame)
   NS_ASSERTION(mForeignObjectHash && mForeignObjectHash->GetEntry(aFrame),
                "nsSVGForeignObjectFrame not in registry!");
   return mForeignObjectHash->RemoveEntry(aFrame);
-}
-
-void
-nsSVGMutationObserver::UpdateTextFragmentTrees(nsIFrame *aFrame)
-{
-  nsIFrame* kid = aFrame->GetFirstPrincipalChild();
-  while (kid) {
-    UpdateTextFragmentTrees(kid);
-    kid = kid->GetNextSibling();
-  }
 }
 
 //----------------------------------------------------------------------
@@ -165,9 +106,6 @@ nsSVGOuterSVGFrame::Init(nsIContent* aContent,
     if (doc->GetRootElement() == mContent) {
       mIsRootContent = true;
     }
-    // sSVGMutationObserver has the same lifetime as the document so does
-    // not need to be removed
-    doc->AddMutationObserverUnlessExists(&sSVGMutationObserver);
   }
 }
 
@@ -377,16 +315,16 @@ nsSVGOuterSVGFrame::Reflow(nsPresContext*           aPresContext,
   DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("enter nsSVGOuterSVGFrame::Reflow: availSize=%d,%d",
-                  aReflowState.availableWidth, aReflowState.availableHeight));
+                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   aStatus = NS_FRAME_COMPLETE;
 
-  aDesiredSize.width  = aReflowState.ComputedWidth() +
-                          aReflowState.mComputedBorderPadding.LeftRight();
-  aDesiredSize.height = aReflowState.ComputedHeight() +
-                          aReflowState.mComputedBorderPadding.TopBottom();
+  aDesiredSize.Width()  = aReflowState.ComputedWidth() +
+                          aReflowState.ComputedPhysicalBorderPadding().LeftRight();
+  aDesiredSize.Height() = aReflowState.ComputedHeight() +
+                          aReflowState.ComputedPhysicalBorderPadding().TopBottom();
 
   NS_ASSERTION(!GetPrevInFlow(), "SVG can't currently be broken across pages.");
 
@@ -509,7 +447,7 @@ nsSVGOuterSVGFrame::Reflow(nsPresContext*           aPresContext,
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("exit nsSVGOuterSVGFrame::Reflow: size=%d,%d",
-                  aDesiredSize.width, aDesiredSize.height));
+                  aDesiredSize.Width(), aDesiredSize.Height()));
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
   return NS_OK;
 }
@@ -866,7 +804,7 @@ nsSVGOuterSVGFrame::PaintSVG(nsRenderingContext* aContext,
 }
 
 SVGBBox
-nsSVGOuterSVGFrame::GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
+nsSVGOuterSVGFrame::GetBBoxContribution(const gfx::Matrix &aToBBoxUserspace,
                                         uint32_t aFlags)
 {
   NS_ASSERTION(GetFirstPrincipalChild()->GetType() ==
@@ -993,7 +931,7 @@ nsSVGOuterSVGAnonChildFrame::GetType() const
 }
 
 bool
-nsSVGOuterSVGAnonChildFrame::HasChildrenOnlyTransform(gfxMatrix *aTransform) const
+nsSVGOuterSVGAnonChildFrame::HasChildrenOnlyTransform(gfx::Matrix *aTransform) const
 {
   // We must claim our nsSVGOuterSVGFrame's children-only transforms as our own
   // so that the children we are used to wrap are transformed properly.
@@ -1005,9 +943,9 @@ nsSVGOuterSVGAnonChildFrame::HasChildrenOnlyTransform(gfxMatrix *aTransform) con
   if (hasTransform && aTransform) {
     // Outer-<svg> doesn't use x/y, so we can pass eChildToUserSpace here.
     gfxMatrix identity;
-    *aTransform =
+    *aTransform = gfx::ToMatrix(
       content->PrependLocalTransformsTo(identity,
-                                        nsSVGElement::eChildToUserSpace);
+                                        nsSVGElement::eChildToUserSpace));
   }
 
   return hasTransform;

@@ -85,8 +85,6 @@
 #include "nsICategoryManager.h"
 #include "nsIChannelEventSink.h"
 #include "nsIChannelPolicy.h"
-#include "nsICharsetDetectionObserver.h"
-#include "nsICharsetDetector.h"
 #include "nsIChromeRegistry.h"
 #include "nsIConsoleService.h"
 #include "nsIContent.h"
@@ -134,7 +132,6 @@
 #include "nsIParser.h"
 #include "nsIParserService.h"
 #include "nsIPermissionManager.h"
-#include "nsIPlatformCharset.h"
 #include "nsIPluginHost.h"
 #include "nsIRunnable.h"
 #include "nsIScriptContext.h"
@@ -531,12 +528,12 @@ nsContentUtils::InitializeModifierStrings()
   nsXPIDLString modifierSeparator;
   if (bundle) {
     //macs use symbols for each modifier key, so fetch each from the bundle, which also covers i18n
-    bundle->GetStringFromName(NS_LITERAL_STRING("VK_SHIFT").get(), getter_Copies(shiftModifier));
-    bundle->GetStringFromName(NS_LITERAL_STRING("VK_META").get(), getter_Copies(metaModifier));
-    bundle->GetStringFromName(NS_LITERAL_STRING("VK_WIN").get(), getter_Copies(osModifier));
-    bundle->GetStringFromName(NS_LITERAL_STRING("VK_ALT").get(), getter_Copies(altModifier));
-    bundle->GetStringFromName(NS_LITERAL_STRING("VK_CONTROL").get(), getter_Copies(controlModifier));
-    bundle->GetStringFromName(NS_LITERAL_STRING("MODIFIER_SEPARATOR").get(), getter_Copies(modifierSeparator));
+    bundle->GetStringFromName(MOZ_UTF16("VK_SHIFT"), getter_Copies(shiftModifier));
+    bundle->GetStringFromName(MOZ_UTF16("VK_META"), getter_Copies(metaModifier));
+    bundle->GetStringFromName(MOZ_UTF16("VK_WIN"), getter_Copies(osModifier));
+    bundle->GetStringFromName(MOZ_UTF16("VK_ALT"), getter_Copies(altModifier));
+    bundle->GetStringFromName(MOZ_UTF16("VK_CONTROL"), getter_Copies(controlModifier));
+    bundle->GetStringFromName(MOZ_UTF16("MODIFIER_SEPARATOR"), getter_Copies(modifierSeparator));
   }
   //if any of these don't exist, we get  an empty string
   sShiftText = new nsString(shiftModifier);
@@ -932,53 +929,40 @@ nsContentUtils::GetParserService()
  * A helper function that parses a sandbox attribute (of an <iframe> or
  * a CSP directive) and converts it to the set of flags used internally.
  *
- * @param aAttribute    the value of the sandbox attribute
- * @return              the set of flags
+ * @param sandboxAttr   the sandbox attribute
+ * @return              the set of flags (0 if sandboxAttr is null)
  */
 uint32_t
-nsContentUtils::ParseSandboxAttributeToFlags(const nsAString& aSandboxAttrValue)
+nsContentUtils::ParseSandboxAttributeToFlags(const nsAttrValue* sandboxAttr)
 {
-  // If there's a sandbox attribute at all (and there is if this is being
-  // called), start off by setting all the restriction flags.
-  uint32_t out = SANDBOXED_NAVIGATION |
-                 SANDBOXED_AUXILIARY_NAVIGATION |
-                 SANDBOXED_TOPLEVEL_NAVIGATION |
-                 SANDBOXED_PLUGINS |
-                 SANDBOXED_ORIGIN |
-                 SANDBOXED_FORMS |
-                 SANDBOXED_SCRIPTS |
-                 SANDBOXED_AUTOMATIC_FEATURES |
-                 SANDBOXED_POINTER_LOCK |
-                 SANDBOXED_DOMAIN;
+  // No sandbox attribute, no sandbox flags.
+  if (!sandboxAttr) { return 0; }
 
-  if (!aSandboxAttrValue.IsEmpty()) {
-    // The separator optional flag is used because the HTML5 spec says any
-    // whitespace is ok as a separator, which is what this does.
-    HTMLSplitOnSpacesTokenizer tokenizer(aSandboxAttrValue, ' ',
-      nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>::SEPARATOR_OPTIONAL);
+  //  Start off by setting all the restriction flags.
+  uint32_t out = SANDBOXED_NAVIGATION
+               | SANDBOXED_AUXILIARY_NAVIGATION
+               | SANDBOXED_TOPLEVEL_NAVIGATION
+               | SANDBOXED_PLUGINS
+               | SANDBOXED_ORIGIN
+               | SANDBOXED_FORMS
+               | SANDBOXED_SCRIPTS
+               | SANDBOXED_AUTOMATIC_FEATURES
+               | SANDBOXED_POINTER_LOCK
+               | SANDBOXED_DOMAIN;
 
-    while (tokenizer.hasMoreTokens()) {
-      nsDependentSubstring token = tokenizer.nextToken();
-      if (token.LowerCaseEqualsLiteral("allow-same-origin")) {
-        out &= ~SANDBOXED_ORIGIN;
-      } else if (token.LowerCaseEqualsLiteral("allow-forms")) {
-        out &= ~SANDBOXED_FORMS;
-      } else if (token.LowerCaseEqualsLiteral("allow-scripts")) {
-        // allow-scripts removes both SANDBOXED_SCRIPTS and
-        // SANDBOXED_AUTOMATIC_FEATURES.
-        out &= ~SANDBOXED_SCRIPTS;
-        out &= ~SANDBOXED_AUTOMATIC_FEATURES;
-      } else if (token.LowerCaseEqualsLiteral("allow-top-navigation")) {
-        out &= ~SANDBOXED_TOPLEVEL_NAVIGATION;
-      } else if (token.LowerCaseEqualsLiteral("allow-pointer-lock")) {
-        out &= ~SANDBOXED_POINTER_LOCK;
-      } else if (token.LowerCaseEqualsLiteral("allow-popups")) {
-        out &= ~SANDBOXED_AUXILIARY_NAVIGATION;
-      }
-    }
-  }
+// Macro for updating the flag according to the keywords
+#define IF_KEYWORD(atom, flags) \
+  if (sandboxAttr->Contains(nsGkAtoms::atom, eIgnoreCase)) { out &= ~(flags); }
+
+  IF_KEYWORD(allowsameorigin, SANDBOXED_ORIGIN)
+  IF_KEYWORD(allowforms,  SANDBOXED_FORMS)
+  IF_KEYWORD(allowscripts, SANDBOXED_SCRIPTS | SANDBOXED_AUTOMATIC_FEATURES)
+  IF_KEYWORD(allowtopnavigation, SANDBOXED_TOPLEVEL_NAVIGATION)
+  IF_KEYWORD(allowpointerlock, SANDBOXED_POINTER_LOCK)
+  IF_KEYWORD(allowpopups, SANDBOXED_AUXILIARY_NAVIGATION)
 
   return out;
+#undef IF_KEYWORD
 }
 
 #ifdef IBMBIDI
@@ -1431,7 +1415,8 @@ nsContentUtils::OfflineAppAllowed(nsIPrincipal *aPrincipal)
 }
 
 bool
-nsContentUtils::MaybeAllowOfflineAppByDefault(nsIPrincipal *aPrincipal)
+nsContentUtils::MaybeAllowOfflineAppByDefault(nsIPrincipal *aPrincipal,
+                                              nsIDOMWindow *aWindow)
 {
   if (!Preferences::GetRootBranch())
     return false;
@@ -1447,19 +1432,14 @@ nsContentUtils::MaybeAllowOfflineAppByDefault(nsIPrincipal *aPrincipal)
   if (!allowedByDefault)
     return false;
 
-  nsCOMPtr<nsIPermissionManager> permissionManager =
-      do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-  if (!permissionManager)
+  nsCOMPtr<nsIOfflineCacheUpdateService> updateService =
+    do_GetService(NS_OFFLINECACHEUPDATESERVICE_CONTRACTID);
+  if (!updateService) {
     return false;
+  }
 
-  rv = permissionManager->AddFromPrincipal(
-    aPrincipal, "offline-app", nsIPermissionManager::ALLOW_ACTION,
-    nsIPermissionManager::EXPIRE_NEVER, 0);
-  if (NS_FAILED(rv))
-    return false;
-
-  // We have added the permission
-  return true;
+  rv = updateService->AllowOfflineApp(aWindow, aPrincipal);
+  return NS_SUCCEEDED(rv);
 }
 
 // static
@@ -3458,26 +3438,23 @@ nsContentUtils::MatchElementId(nsIContent *aContent, const nsAString& aId)
   return MatchElementId(aContent, id);
 }
 
-// Convert the string from the given charset to Unicode.
+// Convert the string from the given encoding to Unicode.
 /* static */
 nsresult
-nsContentUtils::ConvertStringFromCharset(const nsACString& aCharset,
-                                         const nsACString& aInput,
-                                         nsAString& aOutput)
+nsContentUtils::ConvertStringFromEncoding(const nsACString& aEncoding,
+                                          const nsACString& aInput,
+                                          nsAString& aOutput)
 {
-  if (aCharset.IsEmpty()) {
-    // Treat the string as UTF8
-    CopyUTF8toUTF16(aInput, aOutput);
-    return NS_OK;
+  nsAutoCString encoding;
+  if (aEncoding.IsEmpty()) {
+    encoding.AssignLiteral("UTF-8");
+  } else {
+    encoding.Assign(aEncoding);
   }
 
   ErrorResult rv;
   nsAutoPtr<TextDecoder> decoder(new TextDecoder());
-  decoder->Init(NS_ConvertUTF8toUTF16(aCharset), false, rv);
-  if (rv.Failed()) {
-    rv.ClearMessage();
-    return rv.ErrorCode();
-  }
+  decoder->InitWithEncoding(encoding, false);
 
   decoder->Decode(aInput.BeginReading(), aInput.Length(), false,
                   aOutput, rv);
@@ -3509,80 +3486,6 @@ nsContentUtils::CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
   }
 
   return found;
-}
-
-NS_IMPL_ISUPPORTS1(CharsetDetectionObserver,
-                   nsICharsetDetectionObserver)
-
-/* static */
-nsresult
-nsContentUtils::GuessCharset(const char *aData, uint32_t aDataLen,
-                             nsACString &aCharset)
-{
-  // First try the universal charset detector
-  nsCOMPtr<nsICharsetDetector> detector =
-    do_CreateInstance(NS_CHARSET_DETECTOR_CONTRACTID_BASE
-                      "universal_charset_detector");
-  if (!detector) {
-    // No universal charset detector, try the default charset detector
-    const nsAdoptingCString& detectorName =
-      Preferences::GetLocalizedCString("intl.charset.detector");
-    if (!detectorName.IsEmpty()) {
-      nsAutoCString detectorContractID;
-      detectorContractID.AssignLiteral(NS_CHARSET_DETECTOR_CONTRACTID_BASE);
-      detectorContractID += detectorName;
-      detector = do_CreateInstance(detectorContractID.get());
-    }
-  }
-
-  nsresult rv;
-
-  // The charset detector doesn't work for empty (null) aData. Testing
-  // aDataLen instead of aData so that we catch potential errors.
-  if (detector && aDataLen) {
-    nsRefPtr<CharsetDetectionObserver> observer =
-      new CharsetDetectionObserver();
-
-    rv = detector->Init(observer);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    bool dummy;
-    rv = detector->DoIt(aData, aDataLen, &dummy);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = detector->Done();
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    aCharset = observer->GetResult();
-  } else {
-    // no charset detector available, check the BOM
-    unsigned char sniffBuf[3];
-    uint32_t numRead =
-      (aDataLen >= sizeof(sniffBuf) ? sizeof(sniffBuf) : aDataLen);
-    memcpy(sniffBuf, aData, numRead);
-
-    CheckForBOM(sniffBuf, numRead, aCharset);
-  }
-
-  if (aCharset.IsEmpty()) {
-    // no charset detected, default to the system charset
-    nsCOMPtr<nsIPlatformCharset> platformCharset =
-      do_GetService(NS_PLATFORMCHARSET_CONTRACTID, &rv);
-    if (NS_SUCCEEDED(rv)) {
-      rv = platformCharset->GetCharset(kPlatformCharsetSel_PlainTextInFile,
-                                       aCharset);
-      if (NS_FAILED(rv)) {
-        NS_WARNING("Failed to get the system charset!");
-      }
-    }
-  }
-
-  if (aCharset.IsEmpty()) {
-    // no sniffed or default charset, assume UTF-8
-    aCharset.AssignLiteral("UTF-8");
-  }
-
-  return NS_OK;
 }
 
 /* static */
@@ -6006,12 +5909,12 @@ nsContentUtils::PlatformToDOMLineBreaks(nsString &aString)
 {
   if (aString.FindChar(PRUnichar('\r')) != -1) {
     // Windows linebreaks: Map CRLF to LF:
-    aString.ReplaceSubstring(NS_LITERAL_STRING("\r\n").get(),
-                             NS_LITERAL_STRING("\n").get());
+    aString.ReplaceSubstring(MOZ_UTF16("\r\n"),
+                             MOZ_UTF16("\n"));
 
     // Mac linebreaks: Map any remaining CR to LF:
-    aString.ReplaceSubstring(NS_LITERAL_STRING("\r").get(),
-                             NS_LITERAL_STRING("\n").get());
+    aString.ReplaceSubstring(MOZ_UTF16("\r"),
+                             MOZ_UTF16("\n"));
   }
 }
 
@@ -6540,9 +6443,9 @@ nsContentUtils::GetSelectionInTextControl(Selection* aSelection,
   }
 
   nsCOMPtr<nsINode> anchorNode = aSelection->GetAnchorNode();
-  int32_t anchorOffset = aSelection->GetAnchorOffset();
+  uint32_t anchorOffset = aSelection->AnchorOffset();
   nsCOMPtr<nsINode> focusNode = aSelection->GetFocusNode();
-  int32_t focusOffset = aSelection->GetFocusOffset();
+  uint32_t focusOffset = aSelection->FocusOffset();
 
   // We have at most two children, consisting of an optional text node followed
   // by an optional <br>.

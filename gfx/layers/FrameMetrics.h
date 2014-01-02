@@ -55,6 +55,7 @@ public:
     , mPresShellId(-1)
     , mIsRoot(false)
     , mHasScrollgrab(false)
+    , mUpdateScrollOffset(false)
   {}
 
   // Default copy ctor and operator= are fine
@@ -73,7 +74,8 @@ public:
            mDevPixelsPerCSSPixel == aOther.mDevPixelsPerCSSPixel &&
            mMayHaveTouchListeners == aOther.mMayHaveTouchListeners &&
            mPresShellId == aOther.mPresShellId &&
-           mIsRoot == aOther.mIsRoot;
+           mIsRoot == aOther.mIsRoot &&
+           mUpdateScrollOffset == aOther.mUpdateScrollOffset;
   }
   bool operator!=(const FrameMetrics& aOther) const
   {
@@ -122,16 +124,17 @@ public:
   CSSRect GetExpandedScrollableRect() const
   {
     CSSRect scrollableRect = mScrollableRect;
-    if (scrollableRect.width < mCompositionBounds.width) {
+    CSSRect compBounds = CalculateCompositedRectInCssPixels();
+    if (scrollableRect.width < compBounds.width) {
       scrollableRect.x = std::max(0.f,
-                                  scrollableRect.x - (mCompositionBounds.width - scrollableRect.width));
-      scrollableRect.width = mCompositionBounds.width;
+                                  scrollableRect.x - (compBounds.width - scrollableRect.width));
+      scrollableRect.width = compBounds.width;
     }
 
-    if (scrollableRect.height < mCompositionBounds.height) {
+    if (scrollableRect.height < compBounds.height) {
       scrollableRect.y = std::max(0.f,
-                                  scrollableRect.y - (mCompositionBounds.height - scrollableRect.height));
-      scrollableRect.height = mCompositionBounds.height;
+                                  scrollableRect.y - (compBounds.height - scrollableRect.height));
+      scrollableRect.height = compBounds.height;
     }
 
     return scrollableRect;
@@ -284,6 +287,10 @@ public:
 
   // Whether or not this frame is for an element marked 'scrollgrab'.
   bool mHasScrollgrab;
+
+  // Whether mScrollOffset was updated by something other than the APZ code, and
+  // if the APZC receiving this metrics should update its local copy.
+  bool mUpdateScrollOffset;
 };
 
 /**

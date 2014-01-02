@@ -181,6 +181,7 @@ class ScopeObject : public JSObject
      * enclosing scope of a ScopeObject is necessarily non-null.
      */
     inline JSObject &enclosingScope() const {
+        AutoThreadSafeAccess ts(this);
         return getFixedSlot(SCOPE_CHAIN_SLOT).toObject();
     }
 
@@ -232,6 +233,7 @@ class CallObject : public ScopeObject
 
     /* True if this is for a strict mode eval frame. */
     bool isForEval() const {
+        AutoThreadSafeAccess ts(this);
         JS_ASSERT(getFixedSlot(CALLEE_SLOT).isObjectOrNull());
         JS_ASSERT_IF(getFixedSlot(CALLEE_SLOT).isObject(),
                      getFixedSlot(CALLEE_SLOT).toObject().is<JSFunction>());
@@ -243,6 +245,7 @@ class CallObject : public ScopeObject
      * only be called if !isForEval.)
      */
     JSFunction &callee() const {
+        AutoThreadSafeAccess ts(this);
         return getFixedSlot(CALLEE_SLOT).toObject().as<JSFunction>();
     }
 
@@ -368,6 +371,7 @@ class StaticBlockObject : public BlockObject
 
     /* See StaticScopeIter comment. */
     JSObject *enclosingStaticScope() const {
+        AutoThreadSafeAccess ts(this);
         return getFixedSlot(SCOPE_CHAIN_SLOT).toObjectOrNull();
     }
 
@@ -400,6 +404,7 @@ class StaticBlockObject : public BlockObject
     bool needsClone() {
         // The first variable slot will always indicate whether the object has
         // any aliased vars. Bypass slotValue() to allow testing this off thread.
+        AutoThreadSafeAccess ts(this);
         return !getFixedSlot(RESERVED_SLOTS).isFalse();
     }
 
@@ -597,23 +602,35 @@ class ScopeIterKey
     StaticBlockObject *block() const { return block_; }
     ScopeIter::Type type() const { return type_; }
     bool hasScopeObject() const { return hasScopeObject_; }
+    JSObject *enclosingScope() const { return cur_; }
+    JSObject *&enclosingScope() { return cur_; }
 
     /* For use as hash policy */
     typedef ScopeIterKey Lookup;
     static HashNumber hash(ScopeIterKey si);
     static bool match(ScopeIterKey si1, ScopeIterKey si2);
+    bool operator!=(const ScopeIterKey &other) const {
+        return frame_ != other.frame_ ||
+               cur_ != other.cur_ ||
+               block_ != other.block_ ||
+               type_ != other.type_;
+    }
+    static void rekey(ScopeIterKey &k, const ScopeIterKey& newKey) {
+        k = newKey;
+    }
 };
 
 class ScopeIterVal
 {
     friend class ScopeIter;
+    friend class DebugScopes;
 
     AbstractFramePtr frame_;
     RelocatablePtr<JSObject> cur_;
     RelocatablePtr<StaticBlockObject> block_;
     ScopeIter::Type type_;
     bool hasScopeObject_;
-    
+
     static void staticAsserts();
 
   public:
@@ -704,6 +721,9 @@ class DebugScopes
                     ScopeIterKey,
                     RuntimeAllocPolicy> MissingScopeMap;
     MissingScopeMap missingScopes;
+    class MissingScopesRef;
+    static JS_ALWAYS_INLINE void missingScopesPostWriteBarrier(JSRuntime *rt, MissingScopeMap *map,
+                                                               const ScopeIterKey &key);
 
     /*
      * The map from scope objects of live frames to the live frame. This map
@@ -732,6 +752,9 @@ class DebugScopes
   public:
     void mark(JSTracer *trc);
     void sweep(JSRuntime *rt);
+#if defined(DEBUG) && defined(JSGC_GENERATIONAL)
+    void checkHashTablesAfterMovingGC(JSRuntime *rt);
+#endif
 
     static DebugScopeObject *hasDebugScope(JSContext *cx, ScopeObject &scope);
     static bool addDebugScope(JSContext *cx, ScopeObject &scope, DebugScopeObject &debugScope);

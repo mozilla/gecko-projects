@@ -99,7 +99,7 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
     JS_ASSERT(jit::IsBaselineEnabled(cx));
     JS_ASSERT_IF(data.osrFrame, CheckFrame(data.osrFrame));
 
-    EnterIonCode enter = cx->runtime()->jitRuntime()->enterBaseline();
+    EnterJitCode enter = cx->runtime()->jitRuntime()->enterBaseline();
 
     // Caller must construct |this| before invoking the Ion function.
     JS_ASSERT_IF(data.constructing, data.maxArgv[0].isObject());
@@ -237,7 +237,7 @@ jit::BaselineCompile(JSContext *cx, HandleScript script)
     JS_ASSERT_IF(status != Method_Compiled, !script->hasBaselineScript());
 
     if (status == Method_CantCompile)
-        script->setBaselineScript(BASELINE_DISABLED_SCRIPT);
+        script->setBaselineScript(cx, BASELINE_DISABLED_SCRIPT);
 
     return status;
 }
@@ -276,7 +276,7 @@ CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
     if (IsJSDEnabled(cx) || cx->runtime()->parallelWarmup > 0) {
         if (osr)
             return Method_Skipped;
-    } else if (script->incUseCount() <= js_IonOptions.baselineUsesBeforeCompile) {
+    } else if (script->incUseCount() <= js_JitOptions.baselineUsesBeforeCompile) {
         return Method_Skipped;
     }
 
@@ -410,7 +410,7 @@ BaselineScript::New(JSContext *cx, uint32_t prologueOffset,
 void
 BaselineScript::trace(JSTracer *trc)
 {
-    MarkIonCode(trc, &method_, "baseline-method");
+    MarkJitCode(trc, &method_, "baseline-method");
     if (templateScope_)
         MarkObject(trc, &templateScope_, "baseline-template-scope");
 
@@ -650,7 +650,7 @@ BaselineScript::copyPCMappingIndexEntries(const PCMappingIndexEntry *entries)
 uint8_t *
 BaselineScript::nativeCodeForPC(JSScript *script, jsbytecode *pc, PCMappingSlotInfo *slotInfo)
 {
-    JS_ASSERT(script->baselineScript() == this);
+    JS_ASSERT_IF(script->hasBaselineScript(), script->baselineScript() == this);
 
     uint32_t pcOffset = script->pcToOffset(pc);
 
@@ -892,7 +892,7 @@ jit::FinishDiscardBaselineScript(FreeOp *fop, JSScript *script)
     }
 
     BaselineScript *baseline = script->baselineScript();
-    script->setBaselineScript(nullptr);
+    script->setBaselineScript(nullptr, nullptr);
     BaselineScript::Destroy(fop, baseline);
 }
 
@@ -900,7 +900,7 @@ void
 jit::JitCompartment::toggleBaselineStubBarriers(bool enabled)
 {
     for (ICStubCodeMap::Enum e(*stubCodes_); !e.empty(); e.popFront()) {
-        IonCode *code = *e.front().value().unsafeGet();
+        JitCode *code = *e.front().value().unsafeGet();
         code->togglePreBarriers(enabled);
     }
 }

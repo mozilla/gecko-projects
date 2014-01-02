@@ -6,6 +6,7 @@
 
 /* General utilities used throughout devtools. */
 
+let Cu = Components.utils;
 let { Promise: promise } = Components.utils.import("resource://gre/modules/commonjs/sdk/core/promise.js", {});
 let { Services } = Components.utils.import("resource://gre/modules/Services.jsm", {});
 
@@ -83,11 +84,37 @@ this.makeInfallible = function makeInfallible(aHandler, aName) {
   }
 }
 
+/**
+ * Interleaves two arrays element by element, returning the combined array, like
+ * a zip. In the case of arrays with different sizes, undefined values will be
+ * interleaved at the end along with the extra values of the larger array.
+ *
+ * @param Array a
+ * @param Array b
+ * @returns Array
+ *          The combined array, in the form [a1, b1, a2, b2, ...]
+ */
+this.zip = function zip(a, b) {
+  if (!b) {
+    return a;
+  }
+  if (!a) {
+    return b;
+  }
+  const pairs = [];
+  for (let i = 0, aLength = a.length, bLength = b.length;
+       i < aLength || i < bLength;
+       i++) {
+    pairs.push([a[i], b[i]]);
+  }
+  return pairs;
+};
+
 const executeSoon = aFn => {
   Services.tm.mainThread.dispatch({
     run: this.makeInfallible(aFn)
   }, Components.interfaces.nsIThread.DISPATCH_NORMAL);
-}
+};
 
 /**
  * Like Array.prototype.forEach, but doesn't cause jankiness when iterating over
@@ -209,5 +236,26 @@ this.getProperty = function getProperty(aObj, aKey) {
 this.hasSafeGetter = function hasSafeGetter(aDesc) {
   let fn = aDesc.get;
   return fn && fn.callable && fn.class == "Function" && fn.script === undefined;
+};
+
+/**
+ * Check if it is safe to read properties and execute methods from the given JS
+ * object. Safety is defined as being protected from unintended code execution
+ * from content scripts (or cross-compartment code).
+ *
+ * See bugs 945920 and 946752 for discussion.
+ *
+ * @type Object aObj
+ *       The object to check.
+ * @return Boolean
+ *         True if it is safe to read properties from aObj, or false otherwise.
+ */
+this.isSafeJSObject = function isSafeJSObject(aObj) {
+  if (Cu.getGlobalForObject(aObj) ==
+      Cu.getGlobalForObject(isSafeJSObject)) {
+    return true; // aObj is not a cross-compartment wrapper.
+  }
+
+  return Cu.isXrayWrapper(aObj);
 };
 

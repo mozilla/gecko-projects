@@ -326,8 +326,8 @@ CodeGeneratorX86Shared::generateOutOfLineCode()
         // Push the frame size, so the handler can recover the IonScript.
         masm.push(Imm32(frameSize()));
 
-        IonCode *handler = gen->jitRuntime()->getGenericBailoutHandler();
-        masm.jmp(ImmPtr(handler->raw()), Relocation::IONCODE);
+        JitCode *handler = gen->jitRuntime()->getGenericBailoutHandler();
+        masm.jmp(ImmPtr(handler->raw()), Relocation::JITCODE);
     }
 
     return true;
@@ -1329,8 +1329,6 @@ CodeGeneratorX86Shared::visitUrshD(LUrshD *ins)
     return true;
 }
 
-typedef MoveResolver::MoveOperand MoveOperand;
-
 MoveOperand
 CodeGeneratorX86Shared::toMoveOperand(const LAllocation *a) const
 {
@@ -1727,7 +1725,7 @@ CodeGeneratorX86Shared::visitGuardClass(LGuardClass *guard)
     Register tmp = ToRegister(guard->tempInt());
 
     masm.loadPtr(Address(obj, JSObject::offsetOfType()), tmp);
-    masm.cmpPtr(Operand(tmp, offsetof(types::TypeObject, clasp)), ImmPtr(guard->mir()->getClass()));
+    masm.cmpPtr(Operand(tmp, types::TypeObject::offsetOfClasp()), ImmPtr(guard->mir()->getClass()));
     if (!bailoutIf(Assembler::NotEqual, guard->snapshot()))
         return false;
     return true;
@@ -1765,7 +1763,7 @@ CodeGeneratorX86Shared::generateInvalidateEpilogue()
 
     // Push the Ion script onto the stack (when we determine what that pointer is).
     invalidateEpilogueData_ = masm.pushWithPatch(ImmWord(uintptr_t(-1)));
-    IonCode *thunk = gen->jitRuntime()->getInvalidationThunk();
+    JitCode *thunk = gen->jitRuntime()->getInvalidationThunk();
 
     masm.call(thunk);
 

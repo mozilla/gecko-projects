@@ -40,9 +40,18 @@ let CustomizationHandler = {
     }
 
     CombinedStopReload.uninit();
+    CombinedBackForward.uninit();
     PlacesToolbarHelper.customizeStart();
     BookmarkingUI.customizeStart();
     DownloadsButton.customizeStart();
+
+    // The additional padding on the sides of the browser
+    // can cause the customize tab to get clipped.
+    let tabContainer = gBrowser.tabContainer;
+    if (tabContainer.getAttribute("overflow") == "true") {
+      let tabstrip = tabContainer.mTabstrip;
+      tabstrip.ensureElementIsVisible(gBrowser.selectedTab, true);
+    }
   },
 
   _customizationEnding: function(aDetails) {
@@ -76,6 +85,7 @@ let CustomizationHandler = {
     // The url bar splitter state is dependent on whether stop/reload
     // and the location bar are combined, so we need this ordering
     CombinedStopReload.init();
+    CombinedBackForward.init();
     UpdateUrlbarSearchSplitterState();
 
     // Update the urlbar

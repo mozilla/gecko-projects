@@ -287,9 +287,7 @@ NewInitArray(JSContext *cx, uint32_t count, types::TypeObject *typeArg)
     if (!obj)
         return nullptr;
 
-    if (!type)
-        types::TypeScript::Monitor(cx, ObjectValue(*obj));
-    else
+    if (type)
         obj->setType(type);
 
     return obj;
@@ -306,9 +304,7 @@ NewInitObject(JSContext *cx, HandleObject templateObject)
     if (!obj)
         return nullptr;
 
-    if (templateObject->hasSingletonType())
-        types::TypeScript::Monitor(cx, ObjectValue(*obj));
-    else
+    if (!templateObject->hasSingletonType())
         obj->setType(templateObject->type());
 
     return obj;
@@ -556,7 +552,7 @@ OperatorInI(JSContext *cx, uint32_t index, HandleObject obj, bool *out)
 bool
 GetIntrinsicValue(JSContext *cx, HandlePropertyName name, MutableHandleValue rval)
 {
-    if (!cx->global()->getIntrinsicValue(cx, name, rval))
+    if (!GlobalObject::getIntrinsicValue(cx, cx->global(), name, rval))
         return false;
 
     // This function is called when we try to compile a cold getintrinsic
@@ -931,14 +927,72 @@ Recompile(JSContext *cx)
     RootedScript script(cx, iter.script());
     JS_ASSERT(script->hasIonScript());
 
+    if (!IsIonEnabled(cx))
+        return true;
+
     MethodStatus status = Recompile(cx, script, nullptr, nullptr, isConstructing);
     if (status == Method_Error)
         return false;
 
-    JS_ASSERT(script->hasIonScript());
-
     return true;
 }
+
+#ifdef DEBUG
+void
+AssertValidObjectPtr(JSContext *cx, JSObject *obj)
+{
+    // Check what we can, so that we'll hopefully assert/crash if we get a
+    // bogus object (pointer).
+    JS_ASSERT(obj->compartment() == cx->compartment());
+    JS_ASSERT(obj->runtimeFromMainThread() == cx->runtime());
+
+    JS_ASSERT_IF(!obj->hasLazyType(),
+                 obj->type()->clasp() == obj->lastProperty()->getObjectClass());
+
+    if (obj->isTenured()) {
+        JS_ASSERT(obj->isAligned());
+        gc::AllocKind kind = obj->tenuredGetAllocKind();
+        JS_ASSERT(kind >= js::gc::FINALIZE_OBJECT0 && kind <= js::gc::FINALIZE_OBJECT_LAST);
+        JS_ASSERT(obj->tenuredZone() == cx->zone());
+    }
+}
+
+void
+AssertValidStringPtr(JSContext *cx, JSString *str)
+{
+    if (str->isAtom())
+        JS_ASSERT(cx->runtime()->isAtomsZone(str->tenuredZone()));
+    else
+        JS_ASSERT(str->tenuredZone() == cx->zone());
+
+    JS_ASSERT(str->runtimeFromMainThread() == cx->runtime());
+    JS_ASSERT(str->isAligned());
+    JS_ASSERT(str->length() <= JSString::MAX_LENGTH);
+
+    gc::AllocKind kind = str->tenuredGetAllocKind();
+    if (str->isShort())
+        JS_ASSERT(kind == gc::FINALIZE_SHORT_STRING);
+    else if (str->isExternal())
+        JS_ASSERT(kind == gc::FINALIZE_EXTERNAL_STRING);
+    else if (str->isAtom() || str->isFlat())
+        JS_ASSERT(kind == gc::FINALIZE_STRING || kind == gc::FINALIZE_SHORT_STRING);
+    else
+        JS_ASSERT(kind == gc::FINALIZE_STRING);
+}
+
+void
+AssertValidValue(JSContext *cx, Value *v)
+{
+    if (v->isObject()) {
+        AssertValidObjectPtr(cx, &v->toObject());
+        return;
+    }
+    if (v->isString()) {
+        AssertValidStringPtr(cx, v->toString());
+        return;
+    }
+}
+#endif
 
 } // namespace jit
 } // namespace js

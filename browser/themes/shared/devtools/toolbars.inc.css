@@ -51,7 +51,7 @@
   display: none;
 }
 
-.devtools-toolbarbutton:not([checked=true]):hover:active {
+.devtools-toolbarbutton:not([checked]):hover:active {
   border-color: hsla(210,8%,5%,.6);
   background: linear-gradient(hsla(220,6%,10%,.3), hsla(212,7%,57%,.15) 65%, hsla(212,7%,57%,.3));
   box-shadow: 0 0 3px hsla(210,8%,5%,.25) inset, 0 1px 3px hsla(210,8%,5%,.25) inset, 0 1px 0 hsla(210,16%,76%,.15);
@@ -132,50 +132,38 @@
 .devtools-searchinput {
   -moz-appearance: none;
   margin: 0 3px;
-  min-height: 22px;
-  border: 1px solid hsla(210,8%,5%,.6);
+  border: 1px solid rgb(88, 94, 101);
 %ifdef XP_MACOSX
   border-radius: 20px;
 %else
   border-radius: 2px;
 %endif
-  background-color: transparent;
-  background-image: linear-gradient(hsla(210,16%,76%,.15), hsla(210,16%,76%,.35));
-  padding: 3px;
-  box-shadow: 0 1px 1px hsla(210,8%,5%,.3) inset,
-              0 0 0 1px hsla(210,16%,76%,.1) inset,
-              0 1px 0 hsla(210,16%,76%,.15);
-  color: inherit;
+  background-color: rgba(24, 29, 32, 1);
+  padding: 4px 6px;
+  color: rgba(184, 200, 217, 1);
 }
 
 .devtools-searchinput {
-  padding-top: 0;
-  padding-bottom: 0;
-  -moz-padding-start: 18px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  -moz-padding-start: 22px;
   -moz-padding-end: 12px;
-  background-image: url(magnifying-glass.png), linear-gradient(hsla(210,16%,76%,.15), hsla(210,16%,76%,.35));
-  background-position: 4px center, top left, top left;
+  background-image: url(magnifying-glass.png);
+  background-position: 8px center;
   background-repeat: no-repeat;
   font-size: inherit;
 }
 
 .devtools-searchinput:-moz-locale-dir(rtl) {
-  background-position: calc(100% - 4px) center, top left, top left;
+  background-position: calc(100% - 8px) center;
 }
 
 .devtools-searchinput > .textbox-input-box > .textbox-search-icons {
   display: none;
 }
 
-.devtools-searchinput > .textbox-input-box > .textbox-input::-moz-placeholder {
-  color: hsl(208,10%,66%);
-  opacity: 1.0;
-}
-
 .devtools-no-search-result {
-  box-shadow: inset 0 0 0 1px hsla(0,68%,6%,.35);
-  border-color: hsl(10,70%,40%) hsl(10,75%,37%) hsl(10,80%,35%) !important;
-  background-image: url(magnifying-glass.png), linear-gradient(hsla(1,16%,76%,.45), hsla(1,16%,76%,.75));
+  border-color: #eb5368 !important;
 }
 
 /* Close button */
@@ -294,28 +282,28 @@
   background-image: linear-gradient(hsla(206,37%,4%,.4), hsla(206,37%,4%,.4)), @smallSeparator@;
 }
 
-.devtools-sidebar-tabs > tabs > tab[selected=true] + tab {
+.devtools-sidebar-tabs > tabs > tab[selected] + tab {
   background-image: linear-gradient(transparent, transparent), @solidSeparator@;
 }
 
-.devtools-sidebar-tabs > tabs > tab[selected=true] + tab:hover {
+.devtools-sidebar-tabs > tabs > tab[selected] + tab:hover {
   background-image: linear-gradient(hsla(206,37%,4%,.2), hsla(206,37%,4%,.2)), @solidSeparator@;
 }
 
-.devtools-sidebar-tabs > tabs > tab[selected=true] + tab:hover:active {
+.devtools-sidebar-tabs > tabs > tab[selected] + tab:hover:active {
   background-image: linear-gradient(hsla(206,37%,4%,.4), hsla(206,37%,4%,.4)), @solidSeparator@;
 }
 
-.devtools-sidebar-tabs > tabs > tab[selected=true] {
+.devtools-sidebar-tabs > tabs > tab[selected] {
   color: #f5f7fa;
   background-image: linear-gradient(#1d4f73, #1d4f73), @solidSeparator@;
 }
 
-.devtools-sidebar-tabs > tabs > tab[selected=true]:hover {
+.devtools-sidebar-tabs > tabs > tab[selected]:hover {
   background-image: linear-gradient(#274f64, #274f64), @solidSeparator@;
 }
 
-.devtools-sidebar-tabs > tabs > tab[selected=true]:hover:active {
+.devtools-sidebar-tabs > tabs > tab[selected]:hover:active {
   background-image: linear-gradient(#1f3e4f, #1f3e4f), @solidSeparator@;
 }
 
@@ -473,10 +461,9 @@
 .devtools-tabbar {
   -moz-appearance: none;
   background: #252c33;
-  border-color: #434a51;
-  border-style: solid;
-  border-width: 1px 0;
-  box-shadow: 0 -2px 0 rgba(0,0,0,.25) inset;
+  border: 0px solid #000;
+  border-bottom-width: 1px;
+  box-shadow: 0 -2px 0 rgba(0,0,0,.1) inset;
   min-height: 32px;
   padding: 0;
 }
@@ -532,7 +519,7 @@
 }
 
 .devtools-tab:active > image,
-.devtools-tab[selected=true] > image {
+.devtools-tab[selected] > image {
   opacity: 1;
 }
 
@@ -546,37 +533,40 @@
   color: #f5f7fa;
 }
 
-#toolbox-tabs .devtools-tab[selected=true] {
+#toolbox-tabs .devtools-tab[selected] {
   color: #f5f7fa;
   background-color: #1a4666;
-  border-width: 0;
   box-shadow: 0 2px 0 #d7f1ff inset,
               0 8px 3px -5px #2b82bf inset,
               0 -2px 0 rgba(0,0,0,.2) inset;
 }
 
-.devtools-tab[selected=true]:not(:first-child) {
+.devtools-tab[selected]:not(:first-child),
+.devtools-tab[highlighted]:not(:first-child) {
+  border-width: 0;
   -moz-padding-start: 1px;
 }
 
-.devtools-tab[selected=true]:last-child {
+.devtools-tab[selected]:last-child,
+.devtools-tab[highlighted]:last-child {
   -moz-padding-end: 1px;
 }
 
-.devtools-tab[selected=true] + .devtools-tab {
+.devtools-tab[selected] + .devtools-tab,
+.devtools-tab[highlighted] + .devtools-tab {
   -moz-border-start-width: 0;
   -moz-padding-start: 1px;
 }
 
-.devtools-tab:not([selected=true]).highlighted {
+.devtools-tab:not([selected])[highlighted] {
   color: #f5f7fa;
   background-color: hsla(99,100%,14%,.2);
   box-shadow: 0 2px 0 #7bc107 inset;
 }
 
-.devtools-tab:not(.highlighted) > .highlighted-icon,
-.devtools-tab[selected=true] > .highlighted-icon,
-.devtools-tab:not([selected=true]).highlighted > .default-icon {
+.devtools-tab:not([highlighted]) > .highlighted-icon,
+.devtools-tab[selected] > .highlighted-icon,
+.devtools-tab:not([selected])[highlighted] > .default-icon {
   visibility: collapse;
 }
 

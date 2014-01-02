@@ -440,6 +440,14 @@ VARIABLES = {
         distributed/shipped with the produced build.
         """, None),
 
+    'JAR_MANIFESTS': (StrictOrderingOnAppendList, list,
+        """JAR manifest files that should be processed as part of the build.
+
+        JAR manifests are files in the tree that define how to package files
+        into JARs and how chrome registration is performed. For more info,
+        see :ref:`jar_manifests`.
+        """, 'libs'),
+
     # IDL Generation.
     'XPIDL_SOURCES': (StrictOrderingOnAppendList, list,
         """XPCOM Interface Definition Files (xpidl).
@@ -501,6 +509,14 @@ VARIABLES = {
 
          These will be preprocessed before being parsed and converted.
          """, 'export'),
+
+    'WEBIDL_EXAMPLE_INTERFACES': (StrictOrderingOnAppendList, list,
+        """Names of example WebIDL interfaces to build as part of the build.
+
+        Names in this list correspond to WebIDL interface names defined in
+        WebIDL files included in the build from one of the \*WEBIDL_FILES
+        variables.
+        """, 'export'),
 
     # Test declaration.
     'A11Y_MANIFESTS': (StrictOrderingOnAppendList, list,
@@ -564,6 +580,8 @@ VARIABLES = {
     'GYP_DIRS': (StrictOrderingOnAppendListWithFlagsFactory({
             'variables': dict,
             'input': unicode,
+            'sandbox_vars': dict,
+            'non_unified_sources': StrictOrderingOnAppendList,
         }), list,
         """Defines a list of object directories handled by gyp configurations.
 
@@ -575,6 +593,12 @@ VARIABLES = {
               object directory.
             - variables, a dictionary containing variables and values to pass
               to the gyp processor.
+            - sandbox_vars, a dictionary containing variables and values to
+              pass to the mozbuild processor on top of those derived from gyp
+              configuration.
+            - non_unified_sources, a list containing sources files, relative to
+              the current moz.build, that should be excluded from source file
+              unification.
 
         Typical use looks like:
             GYP_DIRS += ['foo', 'bar']

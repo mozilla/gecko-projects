@@ -302,7 +302,7 @@ js::fun_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
             if (fun->isInterpretedLazy() && !fun->getOrCreateScript(cx))
                 return false;
             uint16_t length = fun->hasScript() ? fun->nonLazyScript()->funLength() :
-                fun->nargs - fun->hasRest();
+                fun->nargs() - fun->hasRest();
             v.setInt32(length);
         } else {
             v.setString(fun->atom() == nullptr ? cx->runtime()->emptyString : fun->atom());
@@ -379,22 +379,21 @@ js::XDRInterpretedFunction(XDRState<mode> *xdr, HandleObject enclosingScope, Han
             }
             return false;
         }
-        if (fun->atom())
+        if (fun->atom() || fun->hasGuessedAtom())
             firstword |= HasAtom;
         if (fun->isStarGenerator())
             firstword |= IsStarGenerator;
         script = fun->getOrCreateScript(cx);
         if (!script)
             return false;
-        atom = fun->atom();
-        flagsword = (fun->nargs << 16) | fun->flags;
+        atom = fun->displayAtom();
+        flagsword = (fun->nargs() << 16) | fun->flags();
+    }
 
-        if (!xdr->codeUint32(&firstword))
-            return false;
-    } else {
-        if (!xdr->codeUint32(&firstword))
-            return false;
+    if (!xdr->codeUint32(&firstword))
+        return false;
 
+    if (mode == XDR_DECODE) {
         JSObject *proto = nullptr;
         if (firstword & IsStarGenerator) {
             proto = cx->global()->getOrCreateStarGeneratorFunctionPrototype(cx);
@@ -419,16 +418,14 @@ js::XDRInterpretedFunction(XDRState<mode> *xdr, HandleObject enclosingScope, Han
         return false;
 
     if (mode == XDR_DECODE) {
-        fun->nargs = flagsword >> 16;
-        fun->flags = uint16_t(flagsword);
+        fun->setArgCount(flagsword >> 16);
+        fun->setFlags(uint16_t(flagsword));
         fun->initAtom(atom);
         fun->initScript(script);
         script->setFunction(fun);
         if (!JSFunction::setTypeForScriptedFunction(cx, fun))
             return false;
-        JS_ASSERT(fun->nargs == fun->nonLazyScript()->bindings.numArgs());
-        RootedScript script(cx, fun->nonLazyScript());
-        CallNewScriptHook(cx, script, fun);
+        JS_ASSERT(fun->nargs() == fun->nonLazyScript()->bindings.numArgs());
         objp.set(fun);
     }
 
@@ -463,8 +460,8 @@ js::CloneFunctionAndScript(JSContext *cx, HandleObject enclosingScope, HandleFun
     if (!clonedScript)
         return nullptr;
 
-    clone->nargs = srcFun->nargs;
-    clone->flags = srcFun->flags;
+    clone->setArgCount(srcFun->nargs());
+    clone->setFlags(srcFun->flags());
     clone->initAtom(srcFun->displayAtom());
     clone->initScript(clonedScript);
     clonedScript->setFunction(clone);
@@ -717,9 +714,9 @@ js::FunctionToString(JSContext *cx, HandleFunction fun, bool bodyOnly, bool lamb
             ScopedJSDeletePtr<BindingVector> freeNames(localNames);
             if (!FillBindingVector(script, localNames))
                 return nullptr;
-            for (unsigned i = 0; i < fun->nargs; i++) {
+            for (unsigned i = 0; i < fun->nargs(); i++) {
                 if ((i && !out.append(", ")) ||
-                    (i == unsigned(fun->nargs - 1) && fun->hasRest() && !out.append("...")) ||
+                    (i == unsigned(fun->nargs() - 1) && fun->hasRest() && !out.append("...")) ||
                     !out.append((*localNames)[i].name())) {
                     return nullptr;
                 }
@@ -1113,7 +1110,7 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext *cx, HandleFuncti
 {
     JS_ASSERT(fun->isInterpretedLazy());
 
-    LazyScript *lazy = fun->lazyScriptOrNull();
+    Rooted<LazyScript*> lazy(cx, fun->lazyScriptOrNull());
     if (lazy) {
         // Trigger a pre barrier on the lazy script being overwritten.
         if (cx->zone()->needsBarrier())
@@ -1124,25 +1121,21 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext *cx, HandleFuncti
         // THING_ROOT_LAZY_SCRIPT).
         AutoSuppressGC suppressGC(cx);
 
-        fun->flags &= ~INTERPRETED_LAZY;
-        fun->flags |= INTERPRETED;
-
         RootedScript script(cx, lazy->maybeScript());
 
         if (script) {
-            fun->initScript(script);
+            AutoLockForCompilation lock(cx);
+            fun->setUnlazifiedScript(script);
             return true;
         }
 
-        fun->initScript(nullptr);
-
         if (fun != lazy->function()) {
             script = lazy->function()->getOrCreateScript(cx);
-            if (!script) {
-                fun->initLazyScript(lazy);
+            if (!script)
                 return false;
-            }
-            fun->initScript(script);
+
+            AutoLockForCompilation lock(cx);
+            fun->setUnlazifiedScript(script);
             return true;
         }
 
@@ -1162,16 +1155,18 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext *cx, HandleFuncti
         if (script) {
             RootedObject enclosingScope(cx, lazy->enclosingScope());
             RootedScript clonedScript(cx, CloneScript(cx, enclosingScope, fun, script));
-            if (!clonedScript) {
-                fun->initLazyScript(lazy);
+            if (!clonedScript)
                 return false;
-            }
 
             clonedScript->setSourceObject(lazy->sourceObject());
 
             fun->initAtom(script->function()->displayAtom());
-            fun->initScript(clonedScript);
             clonedScript->setFunction(fun);
+
+            {
+                AutoLockForCompilation lock(cx);
+                fun->setUnlazifiedScript(clonedScript);
+            }
 
             CallNewScriptHook(cx, clonedScript, fun);
 
@@ -1184,18 +1179,14 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext *cx, HandleFuncti
         // Parse and compile the script from source.
         SourceDataCache::AutoSuppressPurge asp(cx);
         const jschar *chars = lazy->source()->chars(cx, asp);
-        if (!chars) {
-            fun->initLazyScript(lazy);
+        if (!chars)
             return false;
-        }
 
         const jschar *lazyStart = chars + lazy->begin();
         size_t lazyLength = lazy->end() - lazy->begin();
 
-        if (!frontend::CompileLazyFunction(cx, lazy, lazyStart, lazyLength)) {
-            fun->initLazyScript(lazy);
+        if (!frontend::CompileLazyFunction(cx, lazy, lazyStart, lazyLength))
             return false;
-        }
 
         script = fun->nonLazyScript();
 
@@ -1333,7 +1324,7 @@ js_fun_bind(JSContext *cx, HandleObject target, HandleValue thisArg,
     /* Steps 15-16. */
     unsigned length = 0;
     if (target->is<JSFunction>()) {
-        unsigned nargs = target->as<JSFunction>().nargs;
+        unsigned nargs = target->as<JSFunction>().nargs();
         if (nargs > argslen)
             length = nargs - argslen;
     }
@@ -1662,9 +1653,12 @@ js::NewFunctionWithProto(ExclusiveContext *cx, HandleObject funobjArg, Native na
     }
     RootedFunction fun(cx, &funobj->as<JSFunction>());
 
+    if (allocKind == JSFunction::ExtendedFinalizeKind)
+        flags = JSFunction::Flags(flags | JSFunction::EXTENDED);
+
     /* Initialize all function members. */
-    fun->nargs = uint16_t(nargs);
-    fun->flags = flags;
+    fun->setArgCount(uint16_t(nargs));
+    fun->setFlags(flags);
     if (fun->isInterpreted()) {
         JS_ASSERT(!native);
         fun->mutableScript().init(nullptr);
@@ -1674,10 +1668,8 @@ js::NewFunctionWithProto(ExclusiveContext *cx, HandleObject funobjArg, Native na
         JS_ASSERT(native);
         fun->initNative(native, nullptr);
     }
-    if (allocKind == JSFunction::ExtendedFinalizeKind) {
-        fun->flags |= JSFunction::EXTENDED;
+    if (allocKind == JSFunction::ExtendedFinalizeKind)
         fun->initializeExtended();
-    }
     fun->initAtom(atom);
 
     return fun;
@@ -1710,8 +1702,12 @@ js::CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent, 
         return nullptr;
     RootedFunction clone(cx, &cloneobj->as<JSFunction>());
 
-    clone->nargs = fun->nargs;
-    clone->flags = fun->flags & ~JSFunction::EXTENDED;
+    uint16_t flags = fun->flags() & ~JSFunction::EXTENDED;
+    if (allocKind == JSFunction::ExtendedFinalizeKind)
+        flags |= JSFunction::EXTENDED;
+
+    clone->setArgCount(fun->nargs());
+    clone->setFlags(flags);
     if (fun->hasScript()) {
         clone->initScript(fun->nonLazyScript());
         clone->initEnvironment(parent);
@@ -1725,7 +1721,6 @@ js::CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent, 
     clone->initAtom(fun->displayAtom());
 
     if (allocKind == JSFunction::ExtendedFinalizeKind) {
-        clone->flags |= JSFunction::EXTENDED;
         if (fun->isExtended() && fun->compartment() == cx->compartment()) {
             for (unsigned i = 0; i < FunctionExtended::NUM_EXTENDED_SLOTS; i++)
                 clone->initExtendedSlot(i, fun->getExtendedSlot(i));

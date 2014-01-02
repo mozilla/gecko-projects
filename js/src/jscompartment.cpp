@@ -22,6 +22,7 @@
 #include "jit/JitCompartment.h"
 #endif
 #include "js/RootingAPI.h"
+#include "vm/SelfHosting.h"
 #include "vm/StopIterationObject.h"
 #include "vm/WrapperObject.h"
 
@@ -48,7 +49,6 @@ JSCompartment::JSCompartment(Zone *zone, const JS::CompartmentOptions &options =
 #endif
     global_(nullptr),
     enterCompartmentDepth(0),
-    lastCodeRelease(0),
     data(nullptr),
     objectMetadataCallback(nullptr),
     lastAnimationTime(0),
@@ -183,14 +183,13 @@ JSCompartment::ensureJitCompartmentExists(JSContext *cx)
 #endif
 
 static bool
-WrapForSameCompartment(JSContext *cx, MutableHandleObject obj)
+WrapForSameCompartment(JSContext *cx, MutableHandleObject obj, const JSWrapObjectCallbacks *cb)
 {
     JS_ASSERT(cx->compartment() == obj->compartment());
-    if (!cx->runtime()->sameCompartmentWrapObjectCallback)
+    if (!cb->sameCompartmentWrap)
         return true;
 
-    RootedObject wrapped(cx);
-    wrapped = cx->runtime()->sameCompartmentWrapObjectCallback(cx, obj);
+    RootedObject wrapped(cx, cb->sameCompartmentWrap(cx, obj));
     if (!wrapped)
         return false;
     obj.set(wrapped);
@@ -290,17 +289,26 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
      * This loses us some transparency, and is generally very cheesy.
      */
     HandleObject global = cx->global();
+    RootedObject objGlobal(cx, &obj->global());
     JS_ASSERT(global);
+    JS_ASSERT(objGlobal);
+
+    const JSWrapObjectCallbacks *cb;
+
+    if (cx->runtime()->isSelfHostingGlobal(global) || cx->runtime()->isSelfHostingGlobal(objGlobal))
+        cb = &SelfHostingWrapObjectCallbacks;
+    else
+        cb = cx->runtime()->wrapObjectCallbacks;
 
     if (obj->compartment() == this)
-        return WrapForSameCompartment(cx, obj);
+        return WrapForSameCompartment(cx, obj, cb);
 
     /* Unwrap the object, but don't unwrap outer windows. */
     unsigned flags = 0;
     obj.set(UncheckedUnwrap(obj, /* stopAtOuter = */ true, &flags));
 
     if (obj->compartment() == this)
-        return WrapForSameCompartment(cx, obj);
+        return WrapForSameCompartment(cx, obj, cb);
 
     /* Translate StopIteration singleton. */
     if (obj->is<StopIterationObject>()) {
@@ -314,14 +322,14 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
     /* Invoke the prewrap callback. We're a bit worried about infinite
      * recursion here, so we do a check - see bug 809295. */
     JS_CHECK_CHROME_RECURSION(cx, return false);
-    if (cx->runtime()->preWrapObjectCallback) {
-        obj.set(cx->runtime()->preWrapObjectCallback(cx, global, obj, flags));
+    if (cb->preWrap) {
+        obj.set(cb->preWrap(cx, global, obj, flags));
         if (!obj)
             return false;
     }
 
     if (obj->compartment() == this)
-        return WrapForSameCompartment(cx, obj);
+        return WrapForSameCompartment(cx, obj, cb);
 
 #ifdef DEBUG
     {
@@ -339,7 +347,7 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
         return true;
     }
 
-    RootedObject proto(cx, Proxy::LazyProto);
+    RootedObject proto(cx, TaggedProto::LazyProto);
     RootedObject existing(cx, existingArg);
     if (existing) {
         /* Is it possible to reuse |existing|? */
@@ -353,12 +361,7 @@ JSCompartment::wrap(JSContext *cx, MutableHandleObject obj, HandleObject existin
         }
     }
 
-    /*
-     * We hand in the original wrapped object into the wrap hook to allow
-     * the wrap hook to reason over what wrappers are currently applied
-     * to the object.
-     */
-    obj.set(cx->runtime()->wrapObjectCallback(cx, existing, obj, proto, global, flags));
+    obj.set(cb->wrap(cx, existing, obj, proto, global, flags));
     if (!obj)
         return false;
 
@@ -543,13 +546,6 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
 
         /* Finalize unreachable (key,value) pairs in all weak maps. */
         WeakMapBase::sweepCompartment(this);
-    }
-
-    if (zone()->isPreservingCode()) {
-        gcstats::AutoPhase ap2(rt->gcStats, gcstats::PHASE_DISCARD_ANALYSIS);
-        types.sweepShapes(fop);
-    } else {
-        JS_ASSERT(!types.constrainedOutputs);
     }
 
     NativeIterator *ni = enumerators->next();
@@ -856,7 +852,6 @@ JSCompartment::clearTraps(FreeOp *fop)
 
 void
 JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
-                                      size_t *tiPendingArrays,
                                       size_t *tiAllocationSiteTables,
                                       size_t *tiArrayTypeTables,
                                       size_t *tiObjectTypeTables,
@@ -868,7 +863,7 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                       size_t *baselineStubsOptimized)
 {
     *compartmentObject += mallocSizeOf(this);
-    types.addSizeOfExcludingThis(mallocSizeOf, tiPendingArrays, tiAllocationSiteTables,
+    types.addSizeOfExcludingThis(mallocSizeOf, tiAllocationSiteTables,
                                  tiArrayTypeTables, tiObjectTypeTables);
     *shapesCompartmentTables += baseShapes.sizeOfExcludingThis(mallocSizeOf)
                               + initialShapes.sizeOfExcludingThis(mallocSizeOf)

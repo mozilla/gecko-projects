@@ -26,6 +26,7 @@ public class MenuItemDefault extends TextView
     private boolean mCheckable = false;
     private boolean mChecked = false;
     private boolean mHasSubMenu = false;
+    private boolean mShowIcon = false;
 
     public MenuItemDefault(Context context) {
         this(context, null);
@@ -85,6 +86,10 @@ public class MenuItemDefault extends TextView
         setSubMenuIndicator(item.hasSubMenu());
     }
 
+    private void refreshIcon() {
+        setCompoundDrawables(mShowIcon ? mIcon : null, null, mState, null);
+    }
+
     void setIcon(Drawable icon) {
         mIcon = icon;
 
@@ -93,16 +98,11 @@ public class MenuItemDefault extends TextView
             mIcon.setAlpha(isEnabled() ? 255 : 99);
         }
 
-        setCompoundDrawables(mIcon, null, mState, null);
+        refreshIcon();
     }
 
     void setIcon(int icon) {
-        Drawable drawable = null;
-
-        if (icon != 0)
-            drawable = getResources().getDrawable(icon);
-         
-        setIcon(drawable);
+        setIcon((icon == 0) ? null : getResources().getDrawable(icon));
     }
 
     void setTitle(CharSequence title) {
@@ -131,6 +131,14 @@ public class MenuItemDefault extends TextView
         if (mChecked != checked) {
             mChecked = checked;
             refreshDrawableState();
+        }
+    }
+
+    @Override
+    public void setShowIcon(boolean show) {
+        if (mShowIcon != show) {
+            mShowIcon = show;
+            refreshIcon();
         }
     }
 

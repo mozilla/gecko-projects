@@ -1736,7 +1736,7 @@ class MOZ_STACK_CLASS ModuleCompiler
         if (!module_->allocateAndCopyCode(cx_, masm_))
             return false;
 
-        // c.f. IonCode::copyFrom
+        // c.f. JitCode::copyFrom
         JS_ASSERT(masm_.jumpRelocationTableBytes() == 0);
         JS_ASSERT(masm_.dataRelocationTableBytes() == 0);
         JS_ASSERT(masm_.preBarrierTableBytes() == 0);
@@ -1997,7 +1997,9 @@ class FunctionCompiler
 
         graph_  = lifo_.new_<MIRGraph>(alloc_);
         info_   = lifo_.new_<CompileInfo>(locals_.count(), SequentialExecution);
-        mirGen_ = lifo_.new_<MIRGenerator>(CompileCompartment::get(cx()->compartment()), alloc_, graph_, info_);
+        const OptimizationInfo *optimizationInfo = js_IonOptimizations.get(Optimization_AsmJS);
+        mirGen_ = lifo_.new_<MIRGenerator>(CompileCompartment::get(cx()->compartment()), alloc_,
+                                           graph_, info_, optimizationInfo);
 
         if (!newBlock(/* pred = */ nullptr, &curBlock_, fn_))
             return false;
@@ -2537,9 +2539,8 @@ class FunctionCompiler
   private:
     ParseNode *popLoop()
     {
-        ParseNode *pn = loopStack_.back();
+        ParseNode *pn = loopStack_.popCopy();
         JS_ASSERT(!unlabeledContinues_.has(pn));
-        loopStack_.popBack();
         breakableStack_.popBack();
         return pn;
     }
@@ -5331,7 +5332,7 @@ GenerateCode(ModuleCompiler &m, ModuleCompiler::Func &func, MIRGenerator &mir, L
     if (!m.maybeReportCompileTime(func))
         return false;
 
-    // Unlike regular IonMonkey which links and generates a new IonCode for
+    // Unlike regular IonMonkey which links and generates a new JitCode for
     // every function, we accumulate all the functions in the module in a
     // single MacroAssembler and link at end. Linking asm.js doesn't require a
     // CodeGenerator so we can destroy it now.
@@ -5392,7 +5393,7 @@ CheckFunctionsSequential(ModuleCompiler &m)
     return true;
 }
 
-#ifdef JS_WORKER_THREADS
+#ifdef JS_THREADSAFE
 
 // Currently, only one asm.js parallel compilation is allowed at a time.
 // This RAII class attempts to claim this parallel compilation using atomic ops
@@ -5632,7 +5633,7 @@ CheckFunctionsParallel(ModuleCompiler &m)
     }
     return true;
 }
-#endif // JS_WORKER_THREADS
+#endif // JS_THREADSAFE
 
 static bool
 CheckFuncPtrTable(ModuleCompiler &m, ParseNode *var)
@@ -5839,7 +5840,7 @@ StackDecrementForCall(MacroAssembler &masm, const VectorT &argTypes, unsigned ex
     return AlignBytes(alreadyPushed + extraBytes + argBytes, StackAlignment) - alreadyPushed;
 }
 
-static const unsigned FramePushedAfterSave = NonVolatileRegs.gprs().size() * STACK_SLOT_SIZE +
+static const unsigned FramePushedAfterSave = NonVolatileRegs.gprs().size() * sizeof(intptr_t) +
                                              NonVolatileRegs.fpus().size() * sizeof(double);
 
 static bool
@@ -5936,7 +5937,7 @@ GenerateEntry(ModuleCompiler &m, const AsmJSModule::ExportedFunction &exportedFu
         masm.storeValue(JSVAL_TYPE_INT32, ReturnReg, Address(argv, 0));
         break;
       case RetType::Float:
-        masm.convertFloatToDouble(ReturnFloatReg, ReturnFloatReg);
+        masm.convertFloat32ToDouble(ReturnFloatReg, ReturnFloatReg);
         // Fall through as ReturnFloatReg now contains a Double
       case RetType::Double:
         masm.canonicalizeDouble(ReturnFloatReg);
@@ -5967,14 +5968,14 @@ TryEnablingIon(JSContext *cx, AsmJSModule &module, HandleFunction fun, uint32_t 
         return true;
 
     // Currently we can't rectify arguments. Therefore disabling if argc is too low.
-    if (fun->nargs > argc)
+    if (fun->nargs() > size_t(argc))
         return true;
 
     // Normally the types should corresond, since we just ran with those types,
     // but there are reports this is asserting. Therefore doing it as a check, instead of DEBUG only.
     if (!types::TypeScript::ThisTypes(script)->hasType(types::Type::UndefinedType()))
         return true;
-    for(uint32_t i = 0; i < fun->nargs; i++) {
+    for(uint32_t i = 0; i < fun->nargs(); i++) {
         types::StackTypeSet *typeset = types::TypeScript::ArgTypes(script, i);
         types::Type type = types::Type::DoubleType();
         if (!argv[i].isDouble())
@@ -6739,7 +6740,7 @@ CheckModule(ExclusiveContext *cx, AsmJSParser &parser, ParseNode *stmtList,
     if (!CheckModuleGlobals(m))
         return false;
 
-#ifdef JS_WORKER_THREADS
+#ifdef JS_THREADSAFE
     if (!CheckFunctionsParallel(m))
         return false;
 #else
@@ -6803,7 +6804,7 @@ EstablishPreconditions(ExclusiveContext *cx, AsmJSParser &parser)
     if (parser.pc->isGenerator())
         return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Disabled by generator context");
 
-#ifdef JS_WORKER_THREADS
+#ifdef JS_THREADSAFE
     if (ParallelCompilationEnabled(cx)) {
         if (!EnsureWorkerThreadsInitialized(cx))
             return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Failed compilation thread initialization");
@@ -6855,7 +6856,8 @@ js::IsAsmJSCompilationAvailable(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // See EstablishPreconditions.
-    bool available = JSC::MacroAssembler::supportsFloatingPoint() &&
+    bool available = cx->jitSupportsFloatingPoint() &&
+                     cx->signalHandlersInstalled() &&
                      cx->gcSystemPageSize() == AsmJSPageSize &&
                      !cx->compartment()->debugMode() &&
                      cx->compartment()->options().asmJS(cx);

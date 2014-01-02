@@ -15,6 +15,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "CrashReporter",
   "@mozilla.org/xre/app-info;1", "nsICrashReporter");
 #endif
 
+XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
+  "@mozilla.org/uuid-generator;1", "nsIUUIDGenerator");
+
 XPCOMUtils.defineLazyGetter(this, "NetUtil", function() {
   Cu.import("resource://gre/modules/NetUtil.jsm");
   return NetUtil;
@@ -39,6 +42,8 @@ SessionStore.prototype = {
                                          Ci.nsISupportsWeakReference]),
 
   _windows: {},
+  _selectedWindow: 1,
+  _orderedWindows: [],
   _lastSaveTime: 0,
   _lastSessionTime: 0,
   _interval: 10000,
@@ -57,24 +62,64 @@ SessionStore.prototype = {
     this._loadState = STATE_STOPPED;
 
     try {
+      let shutdownWasUnclean = false;
+
       if (this._sessionFileBackup.exists()) {
-        this._shouldRestore = true;
         this._sessionFileBackup.remove(false);
+        shutdownWasUnclean = true;
       }
 
       if (this._sessionFile.exists()) {
-        // Disable crash recovery if we have exceeded the timeout
-        this._lastSessionTime = this._sessionFile.lastModifiedTime;
-        let delta = Date.now() - this._lastSessionTime;
-        let timeout = Services.prefs.getIntPref("browser.sessionstore.resume_from_crash_timeout");
-        if (delta > (timeout * 60000))
-          this._shouldRestore = false;
-
         this._sessionFile.copyTo(null, this._sessionFileBackup.leafName);
+
+        switch(Services.metro.previousExecutionState) {
+          // 0 == NotRunning
+          case 0:
+            // Disable crash recovery if we have exceeded the timeout
+            this._lastSessionTime = this._sessionFile.lastModifiedTime;
+            let delta = Date.now() - this._lastSessionTime;
+            let timeout =
+              Services.prefs.getIntPref(
+                  "browser.sessionstore.resume_from_crash_timeout");
+            this._shouldRestore = shutdownWasUnclean
+                                && (delta < (timeout * 60000));
+            break;
+          // 1 == Running
+          case 1:
+            // We should never encounter this situation
+            Components.utils.reportError("SessionRestore.init called with "
+                                       + "previous execution state 'Running'");
+            this._shouldRestore = true;
+            break;
+          // 2 == Suspended
+          case 2:
+            // We should never encounter this situation
+            Components.utils.reportError("SessionRestore.init called with "
+                                       + "previous execution state 'Suspended'");
+            this._shouldRestore = true;
+            break;
+          // 3 == Terminated
+          case 3:
+            // Terminated means that Windows terminated our already-suspended
+            // process to get back some resources. When we re-launch, we want
+            // to provide the illusion that our process was suspended the
+            // whole time, and never terminated.
+            this._shouldRestore = true;
+            break;
+          // 4 == ClosedByUser
+          case 4:
+            // ClosedByUser indicates that the user performed a "close" gesture
+            // on our tile. We should act as if the browser closed normally,
+            // even if we were closed from a suspended state (in which case
+            // we'll have determined that it was an unclean shtudown)
+            this._shouldRestore = false;
+            break;
+        }
       }
 
-      if (!this._sessionCache.exists() || !this._sessionCache.isDirectory())
+      if (!this._sessionCache.exists() || !this._sessionCache.isDirectory()) {
         this._sessionCache.create(Ci.nsIFile.DIRECTORY_TYPE, 0700);
+      }
     } catch (ex) {
       Cu.reportError(ex); // file was write-locked?
     }
@@ -284,8 +329,8 @@ SessionStore.prototype = {
     if (aWindow.document.documentElement.getAttribute("windowtype") != "navigator:browser" || this._loadState == STATE_QUITTING)
       return;
 
-    // Assign it a unique identifier (timestamp) and create its data object
-    aWindow.__SSID = "window" + Date.now();
+    // Assign it a unique identifier and create its data object
+    aWindow.__SSID = "window" + gUUIDGenerator.generateUUID().toString();
     this._windows[aWindow.__SSID] = { tabs: [], selected: 0, _closedTabs: [] };
 
     // Perform additional initialization when the first window is loading
@@ -472,9 +517,9 @@ SessionStore.prototype = {
     });
 
     let data = { windows: [] };
-    let index;
-    for (index in this._windows)
-      data.windows.push(this._windows[index]);
+    for (let i = 0; i < this._orderedWindows.length; i++)
+      data.windows.push(this._windows[this._orderedWindows[i]]);
+    data.selectedWindow = this._selectedWindow;
     return data;
   },
 
@@ -724,11 +769,24 @@ SessionStore.prototype = {
 
         let window = Services.wm.getMostRecentWindow("navigator:browser");
 
-        let tabs = data.windows[0].tabs;
-        let selected = data.windows[0].selected;
+        this._selectedWindow = data.selectedWindow;
+        let windowIndex = this._selectedWindow - 1;
+        let tabs = data.windows[windowIndex].tabs;
+        let selected = data.windows[windowIndex].selected;
 
-        if (data.windows[0]._closedTabs)
-          this._windows[window.__SSID]._closedTabs = data.windows[0]._closedTabs;
+        // Move all window data from sessionstore.js to this._windows.
+        for (let i = 0; i < data.windows.length; i++) {
+          let SSID;
+          if (i != windowIndex) {
+            SSID = "window" + gUUIDGenerator.generateUUID().toString();
+            this._windows[SSID] = data.windows[i];
+          } else {
+            SSID = window.__SSID;
+            this._windows[SSID]._closedTabs =
+              this._windows[SSID]._closedTabs.concat(data.windows[windowIndex]._closedTabs);
+          }
+          this._orderedWindows.push(SSID);
+        }
 
         if (selected > tabs.length) // Clamp the selected index if it's bogus
           selected = 1;

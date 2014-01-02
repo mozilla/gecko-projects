@@ -91,18 +91,18 @@
 #include "mozilla/dom/TextMetrics.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "nsGlobalWindow.h"
+#include "GLContext.h"
+#include "GLContextProvider.h"
 
 #ifdef USE_SKIA_GPU
 #undef free // apparently defined by some windows header, clashing with a free()
             // method in SkTypes.h
-#include "GLContext.h"
-#include "GLContextProvider.h"
 #include "GLContextSkia.h"
 #include "SurfaceTypes.h"
 #include "nsIGfxInfo.h"
+#endif
 using mozilla::gl::GLContext;
 using mozilla::gl::GLContextProvider;
-#endif
 
 #ifdef XP_WIN
 #include "gfxWindowsPlatform.h"
@@ -1053,6 +1053,26 @@ CanvasRenderingContext2D::Render(gfxContext *ctx, GraphicsFilter aFilter, uint32
   }
 
   return rv;
+}
+
+NS_IMETHODIMP
+CanvasRenderingContext2D::SetContextOptions(JSContext* aCx, JS::Handle<JS::Value> aOptions)
+{
+  if (aOptions.isNullOrUndefined()) {
+    return NS_OK;
+  }
+
+  ContextAttributes2D attributes;
+  NS_ENSURE_TRUE(attributes.Init(aCx, aOptions), NS_ERROR_UNEXPECTED);
+
+#ifdef USE_SKIA_GPU
+  if (Preferences::GetBool("gfx.canvas.willReadFrequently.enable", false)) {
+    // Use software when there is going to be a lot of readback
+    mForceSoftware = attributes.mWillReadFrequently;
+  }
+#endif
+
+  return NS_OK;
 }
 
 void
@@ -2620,6 +2640,10 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   gfxFontGroup* currentFontStyle = GetCurrentFontStyle();
   NS_ASSERTION(currentFontStyle, "font group is null");
 
+  // ensure user font set is up to date
+  currentFontStyle->
+    SetUserFontSet(presShell->GetPresContext()->GetUserFontSet());
+
   if (currentFontStyle->GetStyle()->size == 0.0F) {
     if (aWidth) {
       *aWidth = 0;
@@ -4056,7 +4080,7 @@ CanvasRenderingContext2D::MarkContextClean()
 bool
 CanvasRenderingContext2D::ShouldForceInactiveLayer(LayerManager *aManager)
 {
-  return !aManager->CanUseCanvasLayerForSize(gfxIntSize(mWidth, mHeight));
+  return !aManager->CanUseCanvasLayerForSize(IntSize(mWidth, mHeight));
 }
 
 }

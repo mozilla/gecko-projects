@@ -21,7 +21,6 @@ class nsLineLayout;
 class nsIPercentHeightObserver;
 struct nsHypotheticalBox;
 
-
 /**
  * @return aValue clamped to [aMinValue, aMaxValue].
  *
@@ -99,11 +98,40 @@ typedef uint32_t  nsCSSFrameType;
 // border, and margin, since those values are needed more often.
 struct nsCSSOffsetState {
 public:
+  typedef mozilla::WritingMode WritingMode;
+  typedef mozilla::LogicalMargin LogicalMargin;
+
   // the frame being reflowed
   nsIFrame*           frame;
 
   // rendering context to use for measurement
   nsRenderingContext* rendContext;
+
+  const nsMargin& ComputedPhysicalMargin() const { return mComputedMargin; }
+  const nsMargin& ComputedPhysicalBorderPadding() const { return mComputedBorderPadding; }
+  const nsMargin& ComputedPhysicalPadding() const { return mComputedPadding; }
+
+  // We may need to eliminate the (few) users of these writable-reference accessors
+  // as part of migrating to logical coordinates.
+  nsMargin& ComputedPhysicalMargin() { return mComputedMargin; }
+  nsMargin& ComputedPhysicalBorderPadding() { return mComputedBorderPadding; }
+  nsMargin& ComputedPhysicalPadding() { return mComputedPadding; }
+
+  LogicalMargin ComputedLogicalMargin() const
+    { return LogicalMargin(mWritingMode, mComputedMargin); }
+  LogicalMargin ComputedLogicalBorderPadding() const
+    { return LogicalMargin(mWritingMode, mComputedBorderPadding); }
+  LogicalMargin ComputedLogicalPadding() const
+    { return LogicalMargin(mWritingMode, mComputedPadding); }
+
+  WritingMode GetWritingMode() const { return mWritingMode; }
+
+protected:
+  // cached copy of the frame's writing-mode, for logical coordinates
+  WritingMode      mWritingMode;
+
+  // These are PHYSICAL coordinates (for now).
+  // Will probably become logical in due course.
 
   // Computed margin values
   nsMargin         mComputedMargin;
@@ -114,10 +142,12 @@ public:
   // Computed padding values
   nsMargin         mComputedPadding;
 
+public:
   // Callers using this constructor must call InitOffsets on their own.
   nsCSSOffsetState(nsIFrame *aFrame, nsRenderingContext *aRenderingContext)
     : frame(aFrame)
     , rendContext(aRenderingContext)
+    , mWritingMode(aFrame->GetWritingMode())
   {
   }
 
@@ -129,6 +159,7 @@ public:
                    nscoord aContainingBlockWidth)
     : frame(aFrame)
     , rendContext(aRenderingContext)
+    , mWritingMode(aFrame->GetWritingMode())
   {
     MOZ_ASSERT(!aFrame->IsFlexItem(),
                "We're about to resolve vertical percent margin & padding "
@@ -234,22 +265,6 @@ struct nsHTMLReflowState : public nsCSSOffsetState {
   // percentage widths, etc.) of this reflow state's frame.
   const nsHTMLReflowState *mCBReflowState;
 
-  // the available width in which to reflow the frame. The space
-  // represents the amount of room for the frame's margin, border,
-  // padding, and content area. The frame size you choose should fit
-  // within the available width.
-  nscoord              availableWidth;
-
-  // A value of NS_UNCONSTRAINEDSIZE for the available height means
-  // you can choose whatever size you want. In galley mode the
-  // available height is always NS_UNCONSTRAINEDSIZE, and only page
-  // mode or multi-column layout involves a constrained height. The
-  // element's the top border and padding, and content, must fit. If the
-  // element is complete after reflow then its bottom border, padding
-  // and margin (and similar for its complete ancestors) will need to
-  // fit in this height.
-  nscoord              availableHeight;
-
   // The type of frame, from css's perspective. This value is
   // initialized by the Init method below.
   nsCSSFrameType   mFrameType;
@@ -264,7 +279,92 @@ struct nsHTMLReflowState : public nsCSSOffsetState {
   // This takes on an arbitrary value the first time a block is reflowed
   nscoord mBlockDelta;
 
+  // Accessors for the private fields below. Forcing all callers to use these
+  // will allow us to introduce logical-coordinate versions and gradually
+  // change clients from physical to logical as needed; and potentially switch
+  // the internal fields from physical to logical coordinates in due course,
+  // while maintaining compatibility with not-yet-updated code.
+  nscoord AvailableWidth() const { return mAvailableWidth; }
+  nscoord AvailableHeight() const { return mAvailableHeight; }
+  nscoord ComputedWidth() const { return mComputedWidth; }
+  nscoord ComputedHeight() const { return mComputedHeight; }
+  nscoord ComputedMinWidth() const { return mComputedMinWidth; }
+  nscoord ComputedMaxWidth() const { return mComputedMaxWidth; }
+  nscoord ComputedMinHeight() const { return mComputedMinHeight; }
+  nscoord ComputedMaxHeight() const { return mComputedMaxHeight; }
+
+  nscoord& AvailableWidth() { return mAvailableWidth; }
+  nscoord& AvailableHeight() { return mAvailableHeight; }
+  nscoord& ComputedWidth() { return mComputedWidth; }
+  nscoord& ComputedHeight() { return mComputedHeight; }
+  nscoord& ComputedMinWidth() { return mComputedMinWidth; }
+  nscoord& ComputedMaxWidth() { return mComputedMaxWidth; }
+  nscoord& ComputedMinHeight() { return mComputedMinHeight; }
+  nscoord& ComputedMaxHeight() { return mComputedMaxHeight; }
+
+  // ISize and BSize are logical-coordinate dimensions:
+  // ISize is the size in the writing mode's inline direction (which equates to
+  // width in horizontal writing modes, height in vertical ones), and BSize is
+  // the size in the block-progression direction.
+  nscoord AvailableISize() const
+    { return mWritingMode.IsVertical() ? mAvailableHeight : mAvailableWidth; }
+  nscoord AvailableBSize() const
+    { return mWritingMode.IsVertical() ? mAvailableWidth : mAvailableHeight; }
+  nscoord ComputedISize() const
+    { return mWritingMode.IsVertical() ? mComputedHeight : mComputedWidth; }
+  nscoord ComputedBSize() const
+    { return mWritingMode.IsVertical() ? mComputedWidth : mComputedHeight; }
+  nscoord ComputedMinISize() const
+    { return mWritingMode.IsVertical() ? mComputedMinHeight : mComputedMinWidth; }
+  nscoord ComputedMaxISize() const
+    { return mWritingMode.IsVertical() ? mComputedMaxHeight : mComputedMaxWidth; }
+  nscoord ComputedMinBSize() const
+    { return mWritingMode.IsVertical() ? mComputedMinWidth : mComputedMinHeight; }
+  nscoord ComputedMaxBSize() const
+    { return mWritingMode.IsVertical() ? mComputedMaxWidth : mComputedMaxHeight; }
+
+  nscoord& AvailableISize()
+    { return mWritingMode.IsVertical() ? mAvailableHeight : mAvailableWidth; }
+  nscoord& AvailableBSize()
+    { return mWritingMode.IsVertical() ? mAvailableWidth : mAvailableHeight; }
+  nscoord& ComputedISize()
+    { return mWritingMode.IsVertical() ? mComputedHeight : mComputedWidth; }
+  nscoord& ComputedBSize()
+    { return mWritingMode.IsVertical() ? mComputedWidth : mComputedHeight; }
+  nscoord& ComputedMinISize()
+    { return mWritingMode.IsVertical() ? mComputedMinHeight : mComputedMinWidth; }
+  nscoord& ComputedMaxISize()
+    { return mWritingMode.IsVertical() ? mComputedMaxHeight : mComputedMaxWidth; }
+  nscoord& ComputedMinBSize()
+    { return mWritingMode.IsVertical() ? mComputedMinWidth : mComputedMinHeight; }
+  nscoord& ComputedMaxBSize()
+    { return mWritingMode.IsVertical() ? mComputedMaxWidth : mComputedMaxHeight; }
+
+  // XXX this will need to change when we make mComputedOffsets logical;
+  // we won't be able to return a reference for the physical offsets
+  const nsMargin& ComputedPhysicalOffsets() const { return mComputedOffsets; }
+  nsMargin& ComputedPhysicalOffsets() { return mComputedOffsets; }
+
+  LogicalMargin ComputedLogicalOffsets() const
+    { return LogicalMargin(mWritingMode, mComputedOffsets); }
+
 private:
+  // the available width in which to reflow the frame. The space
+  // represents the amount of room for the frame's margin, border,
+  // padding, and content area. The frame size you choose should fit
+  // within the available width.
+  nscoord              mAvailableWidth;
+
+  // A value of NS_UNCONSTRAINEDSIZE for the available height means
+  // you can choose whatever size you want. In galley mode the
+  // available height is always NS_UNCONSTRAINEDSIZE, and only page
+  // mode or multi-column layout involves a constrained height. The
+  // element's the top border and padding, and content, must fit. If the
+  // element is complete after reflow then its bottom border, padding
+  // and margin (and similar for its complete ancestors) will need to
+  // fit in this height.
+  nscoord              mAvailableHeight;
+
   // The computed width specifies the frame's content area width, and it does
   // not apply to inline non-replaced elements
   //
@@ -290,9 +390,8 @@ private:
   // means you use your intrinsic height as the computed height
   nscoord          mComputedHeight;
 
-public:
   // Computed values for 'left/top/right/bottom' offsets. Only applies to
-  // 'positioned' elements
+  // 'positioned' elements. These are PHYSICAL coordinates (for now).
   nsMargin         mComputedOffsets;
 
   // Computed values for 'min-width/max-width' and 'min-height/max-height'
@@ -301,6 +400,7 @@ public:
   nscoord          mComputedMinWidth, mComputedMaxWidth;
   nscoord          mComputedMinHeight, mComputedMaxHeight;
 
+public:
   // Cached pointers to the various style structs used during intialization
   const nsStyleDisplay*    mStyleDisplay;
   const nsStyleVisibility* mStyleVisibility;
@@ -476,10 +576,10 @@ public:
    * size computed so far.
    */
   nscoord ApplyMinMaxWidth(nscoord aWidth) const {
-    if (NS_UNCONSTRAINEDSIZE != mComputedMaxWidth) {
-      aWidth = std::min(aWidth, mComputedMaxWidth);
+    if (NS_UNCONSTRAINEDSIZE != ComputedMaxWidth()) {
+      aWidth = std::min(aWidth, ComputedMaxWidth());
     }
-    return std::max(aWidth, mComputedMinWidth);
+    return std::max(aWidth, ComputedMinWidth());
   }
 
   /**
@@ -494,12 +594,12 @@ public:
   nscoord ApplyMinMaxHeight(nscoord aHeight, nscoord aConsumed = 0) const {
     aHeight += aConsumed;
 
-    if (NS_UNCONSTRAINEDSIZE != mComputedMaxHeight) {
-      aHeight = std::min(aHeight, mComputedMaxHeight);
+    if (NS_UNCONSTRAINEDSIZE != ComputedMaxHeight()) {
+      aHeight = std::min(aHeight, ComputedMaxHeight());
     }
 
-    if (NS_UNCONSTRAINEDSIZE != mComputedMinHeight) {
-      aHeight = std::max(aHeight, mComputedMinHeight);
+    if (NS_UNCONSTRAINEDSIZE != ComputedMinHeight()) {
+      aHeight = std::max(aHeight, ComputedMinHeight());
     }
 
     return aHeight - aConsumed;
@@ -518,11 +618,9 @@ public:
             (frame->GetStateBits() & NS_FRAME_CONTAINS_RELATIVE_HEIGHT));
   }
 
-  nscoord ComputedWidth() const { return mComputedWidth; }
   // This method doesn't apply min/max computed widths to the value passed in.
   void SetComputedWidth(nscoord aComputedWidth);
 
-  nscoord ComputedHeight() const { return mComputedHeight; }
   // This method doesn't apply min/max computed heights to the value passed in.
   void SetComputedHeight(nscoord aComputedHeight);
 
@@ -531,7 +629,7 @@ public:
     // state when reflowing fixed-pos kids.  In that case we actually don't
     // want to mess with the resize flags, because comparing the frame's rect
     // to the munged computed width is pointless.
-    mComputedHeight = aComputedHeight;
+    ComputedHeight() = aComputedHeight;
   }
 
   void SetTruncated(const nsHTMLReflowMetrics& aMetrics, nsReflowStatus* aStatus) const;
@@ -553,7 +651,7 @@ public:
                                        nsPoint* aPosition);
 
   void ApplyRelativePositioning(nsPoint* aPosition) const {
-    ApplyRelativePositioning(frame, mComputedOffsets, aPosition);
+    ApplyRelativePositioning(frame, ComputedPhysicalOffsets(), aPosition);
   }
 
 #ifdef DEBUG

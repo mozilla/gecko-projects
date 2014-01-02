@@ -511,6 +511,9 @@ var shell = {
           Services.perms.addFromPrincipal(principal, 'offline-app',
                                           Ci.nsIPermissionManager.ALLOW_ACTION);
 
+          let documentURI = Services.io.newURI(contentWindow.document.documentURI,
+                                               null,
+                                               null);
           let manifestURI = Services.io.newURI(manifest, null, documentURI);
           let updateService = Cc['@mozilla.org/offlinecacheupdate-service;1']
                               .getService(Ci.nsIOfflineCacheUpdateService);
@@ -1065,13 +1068,14 @@ let RemoteDebugger = {
         if ("nsIProfiler" in Ci) {
           DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/profiler.js");
         }
-        DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/styleeditor.js");
+        DebuggerServer.registerModule("devtools/server/actors/inspector");
+        DebuggerServer.registerModule("devtools/server/actors/styleeditor");
+        DebuggerServer.registerModule("devtools/server/actors/stylesheets");
         DebuggerServer.enableWebappsContentActor = true;
       }
       DebuggerServer.addActors('chrome://browser/content/dbg-browser-actors.js');
       DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/webapps.js");
       DebuggerServer.registerModule("devtools/server/actors/device");
-      DebuggerServer.registerModule("devtools/server/actors/inspector")
 
 #ifdef MOZ_WIDGET_GONK
       DebuggerServer.onConnectionChange = function(what) {

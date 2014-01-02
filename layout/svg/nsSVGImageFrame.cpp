@@ -5,7 +5,6 @@
 
 // Keep in (case-insensitive) order:
 #include "gfxContext.h"
-#include "gfxMatrix.h"
 #include "gfxPlatform.h"
 #include "imgIContainer.h"
 #include "nsIImageLoadingContent.h"
@@ -94,12 +93,12 @@ public:
   virtual void ReflowCallbackCanceled() MOZ_OVERRIDE;
 
 private:
-  gfxMatrix GetRasterImageTransform(int32_t aNativeWidth,
-                                    int32_t aNativeHeight,
-                                    uint32_t aFor,
-                                    nsIFrame* aTransformRoot = nullptr);
-  gfxMatrix GetVectorImageTransform(uint32_t aFor,
-                                    nsIFrame* aTransformRoot = nullptr);
+  gfx::Matrix GetRasterImageTransform(int32_t aNativeWidth,
+                                      int32_t aNativeHeight,
+                                      uint32_t aFor,
+                                      nsIFrame* aTransformRoot = nullptr);
+  gfx::Matrix GetVectorImageTransform(uint32_t aFor,
+                                      nsIFrame* aTransformRoot = nullptr);
   bool TransformContextForPainting(gfxContext* aGfxContext,
                                    nsIFrame* aTransformRoot);
 
@@ -223,7 +222,7 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
                                                aAttribute, aModType);
 }
 
-gfxMatrix
+gfx::Matrix
 nsSVGImageFrame::GetRasterImageTransform(int32_t aNativeWidth,
                                          int32_t aNativeHeight,
                                          uint32_t aFor,
@@ -233,17 +232,17 @@ nsSVGImageFrame::GetRasterImageTransform(int32_t aNativeWidth,
   SVGImageElement *element = static_cast<SVGImageElement*>(mContent);
   element->GetAnimatedLengthValues(&x, &y, &width, &height, nullptr);
 
-  gfxMatrix viewBoxTM =
+  Matrix viewBoxTM =
     SVGContentUtils::GetViewBoxTransform(width, height,
                                          0, 0, aNativeWidth, aNativeHeight,
                                          element->mPreserveAspectRatio);
 
   return viewBoxTM *
-         gfxMatrix().Translate(gfxPoint(x, y)) *
-         GetCanvasTM(aFor, aTransformRoot);
+         gfx::Matrix().Translate(x, y) *
+         gfx::ToMatrix(GetCanvasTM(aFor, aTransformRoot));
 }
 
-gfxMatrix
+gfx::Matrix
 nsSVGImageFrame::GetVectorImageTransform(uint32_t aFor,
                                          nsIFrame* aTransformRoot)
 {
@@ -255,15 +254,15 @@ nsSVGImageFrame::GetVectorImageTransform(uint32_t aFor,
   // "native size" that the SVG image has, and it will handle viewBox and
   // preserveAspectRatio on its own once we give it a region to draw into.
 
-  return gfxMatrix().Translate(gfxPoint(x, y)) *
-         GetCanvasTM(aFor, aTransformRoot);
+  return gfx::Matrix().Translate(x, y) *
+         gfx::ToMatrix(GetCanvasTM(aFor, aTransformRoot));
 }
 
 bool
 nsSVGImageFrame::TransformContextForPainting(gfxContext* aGfxContext,
                                              nsIFrame* aTransformRoot)
 {
-  gfxMatrix imageTransform;
+  gfx::Matrix imageTransform;
   if (mImageContainer->GetType() == imgIContainer::TYPE_VECTOR) {
     imageTransform = GetVectorImageTransform(FOR_PAINTING, aTransformRoot);
   } else {
@@ -289,7 +288,7 @@ nsSVGImageFrame::TransformContextForPainting(gfxContext* aGfxContext,
     return false;
   }
 
-  aGfxContext->Multiply(imageTransform);
+  aGfxContext->Multiply(ThebesMatrix(imageTransform));
   return true;
 }
 
@@ -484,7 +483,7 @@ nsSVGImageFrame::ReflowSVG()
   gfxSize scaleFactors = GetCanvasTM(FOR_OUTERSVG_TM).ScaleFactors(true);
   bool applyScaling = fabs(scaleFactors.width) >= 1e-6 &&
                       fabs(scaleFactors.height) >= 1e-6;
-  gfxMatrix scaling;
+  Matrix scaling;
   if (applyScaling) {
     scaling.Scale(scaleFactors.width, scaleFactors.height);
   }
