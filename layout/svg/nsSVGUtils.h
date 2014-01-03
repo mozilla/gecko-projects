@@ -42,7 +42,6 @@ class nsStyleCoord;
 class nsSVGDisplayContainerFrame;
 class nsSVGElement;
 class nsSVGEnum;
-class nsSVGGeometryFrame;
 class nsSVGLength2;
 class nsSVGOuterSVGFrame;
 class nsSVGPathGeometryFrame;
@@ -110,21 +109,6 @@ class SourceSurface;
 #define NS_STATE_SVG_POSITIONING_MAY_USE_PERCENTAGES NS_FRAME_STATE_BIT(23)
 
 #define NS_STATE_SVG_TEXT_IN_REFLOW              NS_FRAME_STATE_BIT(24)
-
-/**
- * Byte offsets of channels in a native packed gfxColor or cairo image surface.
- */
-#ifdef IS_BIG_ENDIAN
-#define GFX_ARGB32_OFFSET_A 0
-#define GFX_ARGB32_OFFSET_R 1
-#define GFX_ARGB32_OFFSET_G 2
-#define GFX_ARGB32_OFFSET_B 3
-#else
-#define GFX_ARGB32_OFFSET_A 3
-#define GFX_ARGB32_OFFSET_R 2
-#define GFX_ARGB32_OFFSET_G 1
-#define GFX_ARGB32_OFFSET_B 0
-#endif
 
 // maximum dimension of an offscreen surface - choose so that
 // the surface size doesn't overflow a 32-bit signed int using
@@ -246,55 +230,6 @@ public:
   typedef mozilla::dom::Element Element;
 
   static void Init();
-
-  /*
-   * Converts image data from premultipled to unpremultiplied alpha
-   */
-  static void UnPremultiplyImageDataAlpha(uint8_t *data, 
-                                          int32_t stride, 
-                                          const nsIntRect &rect);
-  /*
-   * Converts image data from unpremultipled to premultiplied alpha
-   */
-  static void PremultiplyImageDataAlpha(uint8_t *data, 
-                                        int32_t stride, 
-                                        const nsIntRect &rect);
-  /*
-   * Converts image data from premultiplied sRGB to Linear RGB
-   */
-  static void ConvertImageDataToLinearRGB(uint8_t *data, 
-                                          int32_t stride, 
-                                          const nsIntRect &rect);
-  /*
-   * Converts image data from LinearRGB to premultiplied sRGB
-   */
-  static void ConvertImageDataFromLinearRGB(uint8_t *data, 
-                                            int32_t stride, 
-                                            const nsIntRect &rect);
-
-  /*
-   * Converts image data from sRGB to luminance
-   */
-  static void ComputesRGBLuminanceMask(uint8_t *aData,
-                                       int32_t aStride,
-                                       const nsIntRect &aRect,
-                                       float aOpacity);
-
-  /*
-   * Converts image data from sRGB to luminance assuming
-   * Linear RGB Interpolation
-   */
-  static void ComputeLinearRGBLuminanceMask(uint8_t *aData,
-                                            int32_t aStride,
-                                            const nsIntRect &aRect,
-                                            float aOpacity);
-  /*
-   * Converts image data to luminance using the value of alpha as luminance
-   */
-  static void ComputeAlphaMask(uint8_t *aData,
-                               int32_t aStride,
-                               const nsIntRect &aRect,
-                               float aOpacity);
 
   /**
    * Gets the nearest nsSVGInnerSVGFrame or nsSVGOuterSVGFrame frame. aFrame
@@ -489,18 +424,9 @@ public:
                                      const gfxPoint &aSurfaceOffset,
                                      const gfxMatrix &aCTM);
 
-  static void CompositePatternMatrix(gfxContext *aContext,
-                                     gfxPattern *aPattern,
-                                     const gfxMatrix &aCTM, float aWidth, float aHeight, float aOpacity);
-
   static void SetClipRect(gfxContext *aContext,
                           const gfxMatrix &aCTM,
                           const gfxRect &aRect);
-
-  /**
-   * Restricts aRect to pixels that intersect aGfxRect.
-   */
-  static void ClipToGfxRect(nsIntRect* aRect, const gfxRect& aGfxRect);
 
   /* Using group opacity instead of fill or stroke opacity on a
    * geometry object seems to be a common authoring mistake.  If we're
@@ -580,9 +506,6 @@ public:
    *
    * This should die once bug 478152 is fixed.
    */
-  static gfxRect PathExtentsToMaxStrokeExtents(const gfxRect& aPathExtents,
-                                               nsSVGGeometryFrame* aFrame,
-                                               const gfxMatrix& aMatrix);
   static gfxRect PathExtentsToMaxStrokeExtents(const gfxRect& aPathExtents,
                                                nsTextFrame* aFrame,
                                                const gfxMatrix& aMatrix);

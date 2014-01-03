@@ -24,6 +24,7 @@
 
 using namespace xpc;
 using namespace JS;
+using namespace mozilla;
 
 NS_IMPL_ISUPPORTS1(nsXPCWrappedJSClass, nsIXPCWrappedJSClass)
 
@@ -473,28 +474,22 @@ nsXPCWrappedJSClass::IsWrappedJS(nsISupports* aPtr)
 static JSContext *
 GetContextFromObjectOrDefault(nsXPCWrappedJS* wrapper)
 {
-    // Don't stomp over a running context.
+    // First, try the cx stack.
     XPCJSContextStack* stack = XPCJSRuntime::Get()->GetJSContextStack();
-    if (stack && stack->Peek())
+    if (stack->Peek())
         return stack->Peek();
 
-    // In order to get a context, we need a context.
-    XPCCallContext ccx(NATIVE_CALLER);
-    if (!ccx.IsValid())
-        return nullptr;
-
-    RootedObject obj(ccx, wrapper->GetJSObject());
-    JSAutoCompartment ac(ccx, obj);
-    XPCWrappedNativeScope* scope = GetObjectScope(obj);
-    XPCContext *xpcc = scope->GetContext();
-
+    // If the cx stack is empty, try the wrapper's JSObject.
+    JSCompartment *c = js::GetObjectCompartment(wrapper->GetJSObject());
+    XPCContext *xpcc = EnsureCompartmentPrivate(c)->scope->GetContext();
     if (xpcc) {
         JSContext *cx = xpcc->GetJSContext();
         JS_AbortIfWrongThread(JS_GetRuntime(cx));
         return cx;
     }
 
-    return XPCCallContext::GetDefaultJSContext();
+    // Fall back to the safe JSContext.
+    return stack->GetSafeJSContext();
 }
 
 class SameOriginCheckedComponent MOZ_FINAL : public nsISecurityCheckedComponent
@@ -594,7 +589,7 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
         return NS_NOINTERFACE;
     }
 
-    JSContext *context = GetContextFromObjectOrDefault(self);
+    AutoPushJSContext context(GetContextFromObjectOrDefault(self));
     XPCCallContext ccx(NATIVE_CALLER, context);
     if (!ccx.IsValid()) {
         *aInstancePtr = nullptr;
@@ -619,19 +614,11 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
         return NS_OK;
     }
 
-    nsXPCWrappedJS* sibling;
-
     // Checks for any existing wrapper explicitly constructed for this iid.
     // This includes the current 'self' wrapper. This also deals with the
     // nsISupports case (for which it returns mRoot).
-    if (nullptr != (sibling = self->Find(aIID))) {
-        NS_ADDREF(sibling);
-        *aInstancePtr = sibling->GetXPTCStub();
-        return NS_OK;
-    }
-
-    // Check if asking for an interface from which one of our wrappers inherits.
-    if (nullptr != (sibling = self->FindInherited(aIID))) {
+    // Also check if asking for an interface from which one of our wrappers inherits.
+    if (nsXPCWrappedJS* sibling = self->FindOrFindInherited(aIID)) {
         NS_ADDREF(sibling);
         *aInstancePtr = sibling->GetXPTCStub();
         return NS_OK;
@@ -1117,7 +1104,7 @@ nsXPCWrappedJSClass::CallMethod(nsXPCWrappedJS* wrapper, uint16_t methodIndex,
     // the whole nsIXPCFunctionThisTranslator bit.  That code uses ccx to
     // convert natives to JSObjects, but we do NOT plan to pass those JSObjects
     // to our real callee.
-    JSContext *context = GetContextFromObjectOrDefault(wrapper);
+    AutoPushJSContext context(GetContextFromObjectOrDefault(wrapper));
     XPCCallContext ccx(NATIVE_CALLER, context);
     if (!ccx.IsValid())
         return retval;
