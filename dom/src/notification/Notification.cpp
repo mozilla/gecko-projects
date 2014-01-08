@@ -388,7 +388,7 @@ NS_IMPL_ISUPPORTS1(NotificationObserver, nsIObserver)
 
 NS_IMETHODIMP
 NotificationObserver::Observe(nsISupports* aSubject, const char* aTopic,
-                              const PRUnichar* aData)
+                              const char16_t* aData)
 {
   if (!strcmp("alertclickcallback", aTopic)) {
     mNotification->DispatchTrustedEvent(NS_LITERAL_STRING("click"));
@@ -404,11 +404,12 @@ NotificationObserver::Observe(nsISupports* aSubject, const char* aTopic,
 
 Notification::Notification(const nsAString& aID, const nsAString& aTitle, const nsAString& aBody,
                            NotificationDirection aDir, const nsAString& aLang,
-                           const nsAString& aTag, const nsAString& aIconUrl)
-  : mID(aID), mTitle(aTitle), mBody(aBody), mDir(aDir), mLang(aLang),
+                           const nsAString& aTag, const nsAString& aIconUrl,
+			   nsPIDOMWindow* aWindow)
+  : nsDOMEventTargetHelper(aWindow),
+    mID(aID), mTitle(aTitle), mBody(aBody), mDir(aDir), mLang(aLang),
     mTag(aTag), mIconUrl(aIconUrl), mIsClosed(false)
 {
-  SetIsDOMBinding();
 }
 
 // static
@@ -492,9 +493,8 @@ Notification::CreateInternal(nsPIDOMWindow* aWindow,
                                                          aOptions.mDir,
                                                          aOptions.mLang,
                                                          aOptions.mTag,
-                                                         aOptions.mIcon);
-
-  notification->BindToOwner(aWindow);
+                                                         aOptions.mIcon,
+							 aWindow);
   return notification.forget();
 }
 

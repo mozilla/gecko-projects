@@ -13,7 +13,7 @@ import org.mozilla.gecko.FennecNativeActions;
 import org.mozilla.gecko.FennecNativeDriver;
 import org.mozilla.gecko.FennecTalosAssert;
 import org.mozilla.gecko.tests.components.*;
-import org.mozilla.gecko.tests.helpers.*;
+import org.mozilla.gecko.tests.helpers.HelperInitializer;
 
 import com.jayway.android.robotium.solo.Solo;
 
@@ -121,13 +121,7 @@ abstract class UITest extends ActivityInstrumentationTestCase2<Activity>
     }
 
     private void initHelpers() {
-        // Other helpers make assertions so init AssertionHelper first.
-        AssertionHelper.init(this);
-
-        DeviceHelper.init(this);
-        GeckoHelper.init(this);
-        NavigationHelper.init(this);
-        WaitHelper.init(this);
+        HelperInitializer.init(this);
     }
 
     @Override
@@ -151,13 +145,13 @@ abstract class UITest extends ActivityInstrumentationTestCase2<Activity>
     }
 
     @Override
-    public void dumpLog(final String message) {
-        mAsserter.dumpLog(message);
+    public void dumpLog(final String logtag, final String message) {
+        mAsserter.dumpLog(logtag + ": " + message);
     }
 
     @Override
-    public void dumpLog(final String message, final Throwable t) {
-        mAsserter.dumpLog(message, t);
+    public void dumpLog(final String logtag, final String message, final Throwable t) {
+        mAsserter.dumpLog(logtag + ": " + message, t);
     }
 
     @Override

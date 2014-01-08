@@ -19,9 +19,27 @@ public class ClientRecord extends Record {
   public static final long CLIENTS_TTL = 21 * 24 * 60 * 60; // 21 days in seconds.
   public static final String DEFAULT_CLIENT_NAME = "Default Name";
 
+  public static final String PROTOCOL_LEGACY_SYNC = "1.1";
+  // public static final String PROTOCOL_FXA_SYNC = "1.5";
+
+  /**
+   * Each of these fields is 'owned' by the client it represents. For example,
+   * the "version" field is the Firefox version of that client; some time after
+   * that client upgrades, it'll upload a new record with its new version.
+   *
+   * The only exception is for commands. When a command is sent to a client, the
+   * sender will download its current record, append the command to the
+   * "commands" array, and reupload the record. After processing, the recipient
+   * will reupload its record with an empty commands array.
+   *
+   * Note that the version, then, will remain the version of the recipient, as
+   * with the other descriptive fields.
+   */
   public String name = ClientRecord.DEFAULT_CLIENT_NAME;
   public String type = ClientRecord.CLIENT_TYPE;
+  public String version = null;                      // Free-form string, optional.
   public JSONArray commands;
+  public JSONArray protocols;
 
   public ClientRecord(String guid, String collection, long lastModified, boolean deleted) {
     super(guid, collection, lastModified, deleted);
@@ -48,12 +66,24 @@ public class ClientRecord extends Record {
   protected void initFromPayload(ExtendedJSONObject payload) {
     this.name = (String) payload.get("name");
     this.type = (String) payload.get("type");
+    try {
+      this.version = (String) payload.get("version");
+    } catch (Exception e) {
+      // Oh well.
+    }
 
     try {
       commands = payload.getArray("commands");
     } catch (NonArrayJSONException e) {
       Logger.debug(LOG_TAG, "Got non-array commands in client record " + guid, e);
       commands = null;
+    }
+
+    try {
+      protocols = payload.getArray("protocols");
+    } catch (NonArrayJSONException e) {
+      Logger.debug(LOG_TAG, "Got non-array protocols in client record " + guid, e);
+      protocols = null;
     }
   }
 
@@ -62,8 +92,14 @@ public class ClientRecord extends Record {
     putPayload(payload, "id",   this.guid);
     putPayload(payload, "name", this.name);
     putPayload(payload, "type", this.type);
+    putPayload(payload, "version", this.version);
+
     if (this.commands != null) {
       payload.put("commands",  this.commands);
+    }
+
+    if (this.protocols != null) {
+      payload.put("protocols",  this.protocols);
     }
   }
 
@@ -82,6 +118,8 @@ public class ClientRecord extends Record {
       return false;
     }
 
+    // Don't compare versions or protocols, no matter how much we might want to.
+    // They're not required by the spec.
     ClientRecord other = (ClientRecord) o;
     if (!RepoUtils.stringsEqual(other.name, this.name) ||
         !RepoUtils.stringsEqual(other.type, this.type)) {
@@ -99,6 +137,8 @@ public class ClientRecord extends Record {
 
     out.name = this.name;
     out.type = this.type;
+    out.version = this.version;
+    out.protocols = this.protocols;
     return out;
   }
 

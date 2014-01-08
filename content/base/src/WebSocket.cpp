@@ -49,7 +49,7 @@
 namespace mozilla {
 namespace dom {
 
-#define UTF_8_REPLACEMENT_CHAR    static_cast<PRUnichar>(0xFFFD)
+#define UTF_8_REPLACEMENT_CHAR    static_cast<char16_t>(0xFFFD)
 
 class CallDispatchConnectionCloseEvents: public nsRunnable
 {
@@ -74,8 +74,8 @@ private:
 
 nsresult
 WebSocket::PrintErrorOnConsole(const char *aBundleURI,
-                               const PRUnichar *aError,
-                               const PRUnichar **aFormatStrings,
+                               const char16_t *aError,
+                               const char16_t **aFormatStrings,
                                uint32_t aFormatStringsLen)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(), "Not running on main thread");
@@ -172,7 +172,7 @@ WebSocket::ConsoleError()
     NS_WARNING("Failed to get targetSpec");
   } else {
     NS_ConvertUTF8toUTF16 specUTF16(targetSpec);
-    const PRUnichar* formatStrings[] = { specUTF16.get() };
+    const char16_t* formatStrings[] = { specUTF16.get() };
 
     if (mReadyState < WebSocket::OPEN) {
       PrintErrorOnConsole("chrome://global/locale/appstrings.properties",
@@ -442,8 +442,9 @@ WebSocket::GetInterface(const nsIID& aIID, void** aResult)
 // WebSocket
 ////////////////////////////////////////////////////////////////////////////////
 
-WebSocket::WebSocket()
-: mKeepingAlive(false),
+WebSocket::WebSocket(nsPIDOMWindow* aOwnerWindow)
+: nsDOMEventTargetHelper(aOwnerWindow),
+  mKeepingAlive(false),
   mCheckMustKeepAlive(true),
   mOnCloseScheduled(false),
   mFailed(false),
@@ -457,8 +458,8 @@ WebSocket::WebSocket()
   mInnerWindowID(0)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(), "Not running on main thread");
-
-  SetIsDOMBinding();
+  MOZ_ASSERT(aOwnerWindow);
+  MOZ_ASSERT(aOwnerWindow->IsInnerWindow());
 }
 
 WebSocket::~WebSocket()
@@ -560,8 +561,8 @@ WebSocket::Constructor(const GlobalObject& aGlobal,
     protocolArray.AppendElement(protocolElement);
   }
 
-  nsRefPtr<WebSocket> webSocket = new WebSocket();
-  nsresult rv = webSocket->Init(aGlobal.GetContext(), principal, ownerWindow,
+  nsRefPtr<WebSocket> webSocket = new WebSocket(ownerWindow);
+  nsresult rv = webSocket->Init(aGlobal.GetContext(), principal,
                                 aUrl, protocolArray);
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
@@ -640,21 +641,17 @@ WebSocket::DisconnectFromOwner()
 nsresult
 WebSocket::Init(JSContext* aCx,
                 nsIPrincipal* aPrincipal,
-                nsPIDOMWindow* aOwnerWindow,
                 const nsAString& aURL,
                 nsTArray<nsString>& aProtocolArray)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(), "Not running on main thread");
   MOZ_ASSERT(aPrincipal);
-  MOZ_ASSERT(aOwnerWindow);
-  MOZ_ASSERT(aOwnerWindow->IsInnerWindow());
 
   if (!PrefEnabled()) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
   mPrincipal = aPrincipal;
-  BindToOwner(aOwnerWindow);
 
   // Attempt to kill "ghost" websocket: but usually too early for check to fail
   nsresult rv = CheckInnerWindowCorrectness();
@@ -703,8 +700,8 @@ WebSocket::Init(JSContext* aCx,
   // Assign the sub protocol list and scan it for illegal values
   for (uint32_t index = 0; index < aProtocolArray.Length(); ++index) {
     for (uint32_t i = 0; i < aProtocolArray[index].Length(); ++i) {
-      if (aProtocolArray[index][i] < static_cast<PRUnichar>(0x0021) ||
-          aProtocolArray[index][i] > static_cast<PRUnichar>(0x007E))
+      if (aProtocolArray[index][i] < static_cast<char16_t>(0x0021) ||
+          aProtocolArray[index][i] > static_cast<char16_t>(0x007E))
         return NS_ERROR_DOM_SYNTAX_ERR;
     }
 
@@ -1030,8 +1027,8 @@ WebSocket::ParseURL(const nsString& aURL)
   uint32_t length = mResource.Length();
   uint32_t i;
   for (i = 0; i < length; ++i) {
-    if (mResource[i] < static_cast<PRUnichar>(0x0021) ||
-        mResource[i] > static_cast<PRUnichar>(0x007E)) {
+    if (mResource[i] < static_cast<char16_t>(0x0021) ||
+        mResource[i] > static_cast<char16_t>(0x007E)) {
       return NS_ERROR_DOM_SYNTAX_ERR;
     }
   }
@@ -1332,7 +1329,7 @@ WebSocket::Close(const Optional<uint16_t>& aCode,
 NS_IMETHODIMP
 WebSocket::Observe(nsISupports* aSubject,
                    const char* aTopic,
-                   const PRUnichar* aData)
+                   const char16_t* aData)
 {
   if ((mReadyState == WebSocket::CLOSING) ||
       (mReadyState == WebSocket::CLOSED)) {

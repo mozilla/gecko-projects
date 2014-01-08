@@ -249,7 +249,7 @@ NS_IMPL_ISUPPORTS1(nsJSEnvironmentObserver, nsIObserver)
 
 NS_IMETHODIMP
 nsJSEnvironmentObserver::Observe(nsISupports* aSubject, const char* aTopic,
-                                 const PRUnichar* aData)
+                                 const char16_t* aData)
 {
   if (sGCOnMemoryPressure && !nsCRT::strcmp(aTopic, "memory-pressure")) {
     if(StringBeginsWith(nsDependentString(aData),
@@ -353,7 +353,7 @@ AsyncErrorReporter::AsyncErrorReporter(JSRuntime* aRuntime,
                                        const char* aFallbackMessage,
                                        bool aIsChromeError,
                                        nsPIDOMWindow* aWindow)
-  : mSourceLine(static_cast<const PRUnichar*>(aErrorReport->uclinebuf))
+  : mSourceLine(static_cast<const char16_t*>(aErrorReport->uclinebuf))
   , mLineNumber(aErrorReport->lineno)
   , mColumn(aErrorReport->uctokenptr - aErrorReport->uclinebuf)
   , mFlags(aErrorReport->flags)
@@ -364,9 +364,9 @@ AsyncErrorReporter::AsyncErrorReporter(JSRuntime* aRuntime,
     mFileName.AssignWithConversion(aErrorReport->filename);
   }
 
-  const PRUnichar* m = static_cast<const PRUnichar*>(aErrorReport->ucmessage);
+  const char16_t* m = static_cast<const char16_t*>(aErrorReport->ucmessage);
   if (m) {
-    const PRUnichar* n = static_cast<const PRUnichar*>
+    const char16_t* n = static_cast<const char16_t*>
       (js::GetErrorTypeName(aRuntime, aErrorReport->exnType));
     if (n) {
       mErrorMsg.Assign(n);
@@ -598,7 +598,7 @@ NS_ScriptErrorReporter(JSContext *cx,
     error.AppendInt(report->lineno, 10);
     error.Append(": ");
     if (report->ucmessage) {
-      AppendUTF16toUTF8(reinterpret_cast<const PRUnichar*>(report->ucmessage),
+      AppendUTF16toUTF8(reinterpret_cast<const char16_t*>(report->ucmessage),
                         error);
     } else {
       error.Append(message);
@@ -973,10 +973,10 @@ nsJSContext::EvaluateString(const nsAString& aScript,
 bool
 AtomIsEventHandlerName(nsIAtom *aName)
 {
-  const PRUnichar *name = aName->GetUTF16String();
+  const char16_t *name = aName->GetUTF16String();
 
-  const PRUnichar *cp;
-  PRUnichar c;
+  const char16_t *cp;
+  char16_t c;
   for (cp = name; *cp != '\0'; ++cp)
   {
     c = *cp;
@@ -1272,10 +1272,8 @@ nsJSContext::ConvertSupportsTojsvals(nsISupports *aArgs,
           NS_ASSERTION(prim == nullptr,
                        "Don't pass nsISupportsPrimitives - use nsIVariant!");
 #endif
-          nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
           JS::Rooted<JS::Value> v(cx);
-          rv = nsContentUtils::WrapNative(cx, aScope, arg, &v,
-                                          getter_AddRefs(wrapper));
+          rv = nsContentUtils::WrapNative(cx, aScope, arg, &v);
           if (NS_SUCCEEDED(rv)) {
             *thisval = v;
           }
@@ -1470,12 +1468,10 @@ nsJSContext::AddSupportsPrimitiveTojsvals(nsISupports *aArg, JS::Value *aArgv)
 
       AutoFree iidGuard(iid); // Free iid upon destruction.
 
-      nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
       JS::Rooted<JSObject*> global(cx, GetWindowProxy());
       JS::Rooted<JS::Value> v(cx);
       nsresult rv = nsContentUtils::WrapNative(cx, global,
-                                               data, iid, &v,
-                                               getter_AddRefs(wrapper));
+                                               data, iid, &v);
       NS_ENSURE_SUCCESS(rv, rv);
 
       *aArgv = v;
@@ -2007,6 +2003,7 @@ struct CycleCollectorStats
     mSuspected = 0;
     mMaxSkippableDuration = 0;
     mMaxSliceTime = 0;
+    mTotalSliceTime = 0;
     mAnyLockedOut = false;
     mExtraForgetSkippableCalls = 0;
   }
@@ -2017,6 +2014,7 @@ struct CycleCollectorStats
   {
     uint32_t sliceTime = TimeUntilNow(mBeginSliceTime);
     mMaxSliceTime = std::max(mMaxSliceTime, sliceTime);
+    mTotalSliceTime += sliceTime;
     MOZ_ASSERT(mExtraForgetSkippableCalls == 0, "Forget to reset extra forget skippable calls?");
   }
 
@@ -2043,6 +2041,9 @@ struct CycleCollectorStats
 
   // The longest pause of any slice in the current CC.
   uint32_t mMaxSliceTime;
+
+  // The total amount of time spent actually running the current CC.
+  uint32_t mTotalSliceTime;
 
   // True if we were locked out by the GC in any slice of the current CC.
   bool mAnyLockedOut;
@@ -2261,7 +2262,8 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
       MOZ_UTF16("ForgetSkippable %lu times before CC, min: %lu ms, max: %lu ms, avg: %lu ms, total: %lu ms, max sync: %lu ms, removed: %lu"));
     nsString msg;
     msg.Adopt(nsTextFormatter::smprintf(kFmt.get(), double(delta) / PR_USEC_PER_SEC,
-                                        gCCStats.mMaxSliceTime, ccNowDuration, gCCStats.mSuspected,
+                                        gCCStats.mMaxSliceTime, gCCStats.mTotalSliceTime,
+                                        gCCStats.mSuspected,
                                         aResults.mVisitedRefCounted, aResults.mVisitedGCed, mergeMsg.get(),
                                         aResults.mFreedRefCounted, aResults.mFreedGCed,
                                         sCCollectedWaitingForGC, sLikelyShortLivingObjectsNeedingGC,
@@ -2285,6 +2287,7 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
        MOZ_UTF16("{ \"timestamp\": %llu, ")
          MOZ_UTF16("\"duration\": %llu, ")
          MOZ_UTF16("\"max_slice_pause\": %llu, ")
+         MOZ_UTF16("\"total_slice_pause\": %llu, ")
          MOZ_UTF16("\"max_finish_gc_duration\": %llu, ")
          MOZ_UTF16("\"max_sync_skippable_duration\": %llu, ")
          MOZ_UTF16("\"suspected\": %lu, ")
@@ -2307,7 +2310,9 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
        MOZ_UTF16("}"));
     nsString json;
     json.Adopt(nsTextFormatter::smprintf(kJSONFmt.get(), endCCTime, ccNowDuration,
-                                         gCCStats.mMaxSliceTime, gCCStats.mMaxGCDuration,
+                                         gCCStats.mMaxSliceTime,
+                                         gCCStats.mTotalSliceTime,
+                                         gCCStats.mMaxGCDuration,
                                          gCCStats.mMaxSkippableDuration,
                                          gCCStats.mSuspected,
                                          aResults.mVisitedRefCounted, aResults.mVisitedGCed,

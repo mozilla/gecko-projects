@@ -230,22 +230,30 @@ NS_IMPL_ISUPPORTS5(nsAppStartup,
 NS_IMETHODIMP
 nsAppStartup::CreateHiddenWindow()
 {
+#ifdef MOZ_WIDGET_GONK
+  return NS_OK;
+#else
   nsCOMPtr<nsIAppShellService> appShellService
     (do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
   NS_ENSURE_TRUE(appShellService, NS_ERROR_FAILURE);
 
   return appShellService->CreateHiddenWindow();
+#endif
 }
 
 
 NS_IMETHODIMP
 nsAppStartup::DestroyHiddenWindow()
 {
+#ifdef MOZ_WIDGET_GONK
+  return NS_OK;
+#else
   nsCOMPtr<nsIAppShellService> appShellService
     (do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
   NS_ENSURE_TRUE(appShellService, NS_ERROR_FAILURE);
 
   return appShellService->DestroyHiddenWindow();
+#endif
 }
 
 NS_IMETHODIMP
@@ -669,7 +677,7 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
 
 NS_IMETHODIMP
 nsAppStartup::Observe(nsISupports *aSubject,
-                      const char *aTopic, const PRUnichar *aData)
+                      const char *aTopic, const char16_t *aData)
 {
   NS_ASSERTION(mAppShell, "appshell service notified before appshell built");
   if (!strcmp(aTopic, "quit-application-forced")) {

@@ -121,7 +121,7 @@ Dump(JSContext *cx, unsigned argc, Value *vp)
     if (!chars)
         return false;
 
-    NS_ConvertUTF16toUTF8 utf8str(reinterpret_cast<const PRUnichar*>(chars));
+    NS_ConvertUTF16toUTF8 utf8str(reinterpret_cast<const char16_t*>(chars));
 #ifdef ANDROID
     __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", utf8str.get());
 #endif
@@ -177,7 +177,7 @@ File(JSContext *cx, unsigned argc, Value *vp)
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     rv = xpc->WrapNativeToJSVal(cx, glob, native, nullptr,
                                 &NS_GET_IID(nsISupports),
-                                true, args.rval().address(), nullptr);
+                                true, args.rval().address());
     if (NS_FAILED(rv)) {
         XPCThrower::Throw(rv, cx);
         return false;
@@ -212,7 +212,7 @@ Blob(JSContext *cx, unsigned argc, Value *vp)
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     rv = xpc->WrapNativeToJSVal(cx, glob, native, nullptr,
                                 &NS_GET_IID(nsISupports),
-                                true, args.rval().address(), nullptr);
+                                true, args.rval().address());
     if (NS_FAILED(rv)) {
         XPCThrower::Throw(rv, cx);
         return false;
@@ -1385,7 +1385,7 @@ mozJSComponentLoader::Unload(const nsACString & aLocation)
 
 NS_IMETHODIMP
 mozJSComponentLoader::Observe(nsISupports *subject, const char *topic,
-                              const PRUnichar *data)
+                              const char16_t *data)
 {
     if (!strcmp(topic, "xpcom-shutdown-loaders")) {
         UnloadModules();

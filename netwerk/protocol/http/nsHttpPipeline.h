@@ -14,6 +14,8 @@
 class nsIInputStream;
 class nsIOutputStream;
 
+namespace mozilla { namespace net {
+
 class nsHttpPipeline : public nsAHttpConnection
                      , public nsAHttpTransaction
                      , public nsAHttpSegmentReader
@@ -26,6 +28,10 @@ public:
 
     nsHttpPipeline();
     virtual ~nsHttpPipeline();
+
+  bool ResponseTimeoutEnabled() const MOZ_OVERRIDE MOZ_FINAL {
+    return true;
+  }
 
 private:
     nsresult FillSendBuf();
@@ -91,5 +97,7 @@ private:
     uint64_t  mSendingToProgress;
     bool      mSuppressSendEvents;
 };
+
+}} // namespace mozilla::net
 
 #endif // nsHttpPipeline_h__

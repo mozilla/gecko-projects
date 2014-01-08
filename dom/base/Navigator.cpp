@@ -26,8 +26,8 @@
 #include "mozilla/Telemetry.h"
 #include "BatteryManager.h"
 #include "mozilla/dom/PowerManager.h"
-#include "nsIDOMWakeLock.h"
-#include "nsIPowerManagerService.h"
+#include "mozilla/dom/WakeLock.h"
+#include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/MobileMessageManager.h"
 #include "mozilla/dom/Telephony.h"
 #include "mozilla/Hal.h"
@@ -356,8 +356,8 @@ Navigator::GetLanguage(nsAString& aLanguage)
 
   // Checks and fixups:
   // replace "_" with "-" to avoid POSIX/Windows "en_US" notation.
-  if (aLanguage.Length() > 2 && aLanguage[2] == PRUnichar('_')) {
-    aLanguage.Replace(2, 1, PRUnichar('-')); // TODO replace all
+  if (aLanguage.Length() > 2 && aLanguage[2] == char16_t('_')) {
+    aLanguage.Replace(2, 1, char16_t('-')); // TODO replace all
   }
 
   // Use uppercase for country part, e.g. "en-US", not "en-us", see BCP47
@@ -1084,8 +1084,8 @@ Navigator::GetBattery(ErrorResult& aRv)
     }
     NS_ENSURE_TRUE(mWindow->GetDocShell(), nullptr);
 
-    mBatteryManager = new battery::BatteryManager();
-    mBatteryManager->Init(mWindow);
+    mBatteryManager = new battery::BatteryManager(mWindow);
+    mBatteryManager->Init();
   }
 
   return mBatteryManager;
@@ -1131,7 +1131,7 @@ Navigator::GetMozPower(ErrorResult& aRv)
   return mPowerManager;
 }
 
-already_AddRefed<nsIDOMMozWakeLock>
+already_AddRefed<WakeLock>
 Navigator::RequestWakeLock(const nsAString &aTopic, ErrorResult& aRv)
 {
   if (!mWindow) {
@@ -1139,15 +1139,14 @@ Navigator::RequestWakeLock(const nsAString &aTopic, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsCOMPtr<nsIPowerManagerService> pmService =
-    do_GetService(POWERMANAGERSERVICE_CONTRACTID);
+  nsRefPtr<power::PowerManagerService> pmService =
+    power::PowerManagerService::GetInstance();
   // Maybe it went away for some reason... Or maybe we're just called
   // from our XPCOM method.
   NS_ENSURE_TRUE(pmService, nullptr);
 
-  nsCOMPtr<nsIDOMMozWakeLock> wakelock;
-  aRv = pmService->NewWakeLock(aTopic, mWindow, getter_AddRefs(wakelock));
-  return wakelock.forget();
+  ErrorResult rv;
+  return pmService->NewWakeLock(aTopic, mWindow, rv);
 }
 
 nsIDOMMozMobileMessageManager*
@@ -1586,9 +1585,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
   }
 
   if (JSVAL_IS_PRIMITIVE(prop_val) && !JSVAL_IS_NULL(prop_val)) {
-    nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-    rv = nsContentUtils::WrapNative(aCx, aObject, native, &prop_val,
-                                    getter_AddRefs(holder), true);
+    rv = nsContentUtils::WrapNative(aCx, aObject, native, &prop_val, true);
 
     if (NS_FAILED(rv)) {
       return Throw(aCx, rv);
@@ -1997,7 +1994,7 @@ NS_GetNavigatorAppVersion(nsAString& aAppVersion)
   NS_ENSURE_SUCCESS(rv, rv);
 
   AppendASCIItoUTF16(str, aAppVersion);
-  aAppVersion.Append(PRUnichar(')'));
+  aAppVersion.Append(char16_t(')'));
 
   return rv;
 }

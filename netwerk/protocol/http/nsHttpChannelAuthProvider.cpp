@@ -23,6 +23,9 @@
 #include "nsIHttpAuthenticableChannel.h"
 #include "nsIURI.h"
 
+namespace mozilla {
+namespace net {
+
 static void
 GetAppIdAndBrowserStatus(nsIChannel* aChan, uint32_t* aAppId, bool* aInBrowserElem)
 {
@@ -254,11 +257,11 @@ nsHttpChannelAuthProvider::Disconnect(nsresult status)
 
 // buf contains "domain\user"
 static void
-ParseUserDomain(PRUnichar *buf,
-                const PRUnichar **user,
-                const PRUnichar **domain)
+ParseUserDomain(char16_t *buf,
+                const char16_t **user,
+                const char16_t **domain)
 {
-    PRUnichar *p = buf;
+    char16_t *p = buf;
     while (*p && *p != '\\') ++p;
     if (!*p)
         return;
@@ -271,11 +274,11 @@ ParseUserDomain(PRUnichar *buf,
 static void
 SetIdent(nsHttpAuthIdentity &ident,
          uint32_t authFlags,
-         PRUnichar *userBuf,
-         PRUnichar *passBuf)
+         char16_t *userBuf,
+         char16_t *passBuf)
 {
-    const PRUnichar *user = userBuf;
-    const PRUnichar *domain = nullptr;
+    const char16_t *user = userBuf;
+    const char16_t *domain = nullptr;
 
     if (authFlags & nsIHttpAuthenticator::IDENTITY_INCLUDES_DOMAIN)
         ParseUserDomain(userBuf, &user, &domain);
@@ -832,8 +835,8 @@ nsHttpChannelAuthProvider::GetIdentityFromURI(uint32_t            authFlags,
     }
 
     if (!userBuf.IsEmpty()) {
-        SetIdent(ident, authFlags, (PRUnichar *) userBuf.get(),
-                 (PRUnichar *) passBuf.get());
+        SetIdent(ident, authFlags, (char16_t *) userBuf.get(),
+                 (char16_t *) passBuf.get());
     }
 }
 
@@ -1170,7 +1173,7 @@ nsHttpChannelAuthProvider::ConfirmAuth(const nsString &bundleKey,
         return true;
 
     NS_ConvertUTF8toUTF16 ucsHost(host), ucsUser(user);
-    const PRUnichar *strs[2] = { ucsHost.get(), ucsUser.get() };
+    const char16_t *strs[2] = { ucsHost.get(), ucsUser.get() };
 
     nsXPIDLString msg;
     bundle->FormatStringFromName(bundleKey.get(), strs, 2, getter_Copies(msg));
@@ -1336,3 +1339,6 @@ nsHttpChannelAuthProvider::GetCurrentPath(nsACString &path)
 
 NS_IMPL_ISUPPORTS3(nsHttpChannelAuthProvider, nsICancelable,
                    nsIHttpChannelAuthProvider, nsIAuthPromptCallback)
+
+} // namespace mozilla::net
+} // namespace mozilla

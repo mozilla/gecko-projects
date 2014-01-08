@@ -38,7 +38,6 @@
 #include "nsSVGFilterFrame.h"
 #include "nsSVGFilterPaintCallback.h"
 #include "nsSVGForeignObjectFrame.h"
-#include "nsSVGGeometryFrame.h"
 #include "gfxSVGGlyphs.h"
 #include "nsSVGInnerSVGFrame.h"
 #include "nsSVGIntegrationUtils.h"
@@ -386,7 +385,7 @@ nsSVGUtils::GetCanvasTM(nsIFrame *aFrame, uint32_t aFor,
     return containerFrame->GetCanvasTM(aFor, aTransformRoot);
   }
 
-  return static_cast<nsSVGGeometryFrame*>(aFrame)->
+  return static_cast<nsSVGPathGeometryFrame*>(aFrame)->
       GetCanvasTM(aFor, aTransformRoot);
 }
 
@@ -840,37 +839,6 @@ nsSVGUtils::GetClipRectForFrame(nsIFrame *aFrame,
     return clipRect;
   }
   return gfxRect(aX, aY, aWidth, aHeight);
-}
-
-void
-nsSVGUtils::CompositeSurfaceMatrix(gfxContext *aContext,
-                                   gfxASurface *aSurface,
-                                   SourceSurface *aSourceSurface,
-                                   const gfxPoint &aSurfaceOffset,
-                                   const gfxMatrix &aCTM)
-{
-  if (aCTM.IsSingular())
-    return;
-
-  if (aSurface) {
-    aContext->Save();
-    aContext->Multiply(aCTM);
-    aContext->Translate(aSurfaceOffset);
-    aContext->SetSource(aSurface);
-    aContext->Paint();
-    aContext->Restore();
-  } else {
-    DrawTarget *destDT = aContext->GetDrawTarget();
-    Matrix oldMat = destDT->GetTransform();
-    destDT->SetTransform(ToMatrix(aCTM) * oldMat);
-
-    IntSize size = aSourceSurface->GetSize();
-    Rect sourceRect(Point(0, 0), Size(size.width, size.height));
-    Rect drawRect = sourceRect + ToPoint(aSurfaceOffset);
-    destDT->DrawSurface(aSourceSurface, drawRect, sourceRect);
-
-    destDT->SetTransform(oldMat);
-  }
 }
 
 void

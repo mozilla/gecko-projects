@@ -10,6 +10,9 @@
 #include "plbase64.h"
 #include "nsString.h"
 
+namespace mozilla {
+namespace net {
+
 //-----------------------------------------------------------------------------
 // nsHttpBasicAuth <public>
 //-----------------------------------------------------------------------------
@@ -50,9 +53,9 @@ NS_IMETHODIMP
 nsHttpBasicAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChannel,
                                      const char *challenge,
                                      bool isProxyAuth,
-                                     const PRUnichar *domain,
-                                     const PRUnichar *user,
-                                     const PRUnichar *password,
+                                     const char16_t *domain,
+                                     const char16_t *user,
+                                     const char16_t *password,
                                      nsISupports **sessionState,
                                      nsISupports **continuationState,
                                      uint32_t *aFlags,
@@ -93,3 +96,6 @@ nsHttpBasicAuth::GetAuthFlags(uint32_t *flags)
     *flags = REQUEST_BASED | REUSABLE_CREDENTIALS | REUSABLE_CHALLENGE;
     return NS_OK;
 }
+
+} // namespace mozilla::net
+} // namespace mozilla

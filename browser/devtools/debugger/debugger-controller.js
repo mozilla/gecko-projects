@@ -88,6 +88,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
 Cu.import("resource:///modules/devtools/shared/event-emitter.js");
+Cu.import("resource:///modules/devtools/SimpleListWidget.jsm");
 Cu.import("resource:///modules/devtools/BreadcrumbsWidget.jsm");
 Cu.import("resource:///modules/devtools/SideMenuWidget.jsm");
 Cu.import("resource:///modules/devtools/VariablesView.jsm");
@@ -840,7 +841,6 @@ StackFrames.prototype = {
 
     // Start recording any added variables or properties in any scope and
     // clear existing scopes to create each one dynamically.
-    DebuggerView.Variables.createHierarchy();
     DebuggerView.Variables.empty();
 
     // If watch expressions evaluation results are available, create a scope
@@ -887,11 +887,8 @@ StackFrames.prototype = {
       }
     } while ((environment = environment.parent));
 
-    // Signal that scope environments have been shown and commit the current
-    // variables view hierarchy to briefly flash items that changed between the
-    // previous and current scope/variables/properties.
+    // Signal that scope environments have been shown.
     window.emit(EVENTS.FETCHED_SCOPES);
-    DebuggerView.Variables.commitHierarchy();
   },
 
   /**
@@ -1005,11 +1002,8 @@ StackFrames.prototype = {
         expRef.separatorStr = L10N.getStr("variablesSeparatorLabel");
       }
 
-      // Signal that watch expressions have been fetched and commit the
-      // current variables view hierarchy to briefly flash items that changed
-      // between the previous and current scope/variables/properties.
+      // Signal that watch expressions have been fetched.
       window.emit(EVENTS.FETCHED_WATCH_EXPRESSIONS);
-      DebuggerView.Variables.commitHierarchy();
     });
   },
 
@@ -1545,6 +1539,7 @@ Tracer.prototype = {
       location: location,
       id: this._idCounter++
     };
+
     this._stack.push(item);
     DebuggerView.Tracer.addTrace({
       type: "call",
@@ -1603,7 +1598,7 @@ Tracer.prototype = {
       getOwnPropertyNames: (callback) => {
         callback({
           ownPropertyNames: aObject.ownProperties
-            ?  Object.keys(aObject.ownProperties)
+            ? Object.keys(aObject.ownProperties)
             : []
         });
       },

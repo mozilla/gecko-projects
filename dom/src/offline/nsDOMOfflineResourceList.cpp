@@ -79,7 +79,8 @@ NS_IMPL_EVENT_HANDLER(nsDOMOfflineResourceList, obsolete)
 nsDOMOfflineResourceList::nsDOMOfflineResourceList(nsIURI *aManifestURI,
                                                    nsIURI *aDocumentURI,
                                                    nsPIDOMWindow *aWindow)
-  : mInitialized(false)
+  : nsDOMEventTargetHelper(aWindow)
+  , mInitialized(false)
   , mManifestURI(aManifestURI)
   , mDocumentURI(aDocumentURI)
   , mExposeCacheUpdateStatus(true)
@@ -87,8 +88,6 @@ nsDOMOfflineResourceList::nsDOMOfflineResourceList(nsIURI *aManifestURI,
   , mCachedKeys(nullptr)
   , mCachedKeysCount(0)
 {
-  BindToOwner(aWindow);
-  SetIsDOMBinding();
 }
 
 nsDOMOfflineResourceList::~nsDOMOfflineResourceList()
@@ -566,7 +565,7 @@ nsDOMOfflineResourceList::SendEvent(const nsAString &aEventName)
 NS_IMETHODIMP
 nsDOMOfflineResourceList::Observe(nsISupports *aSubject,
                                     const char *aTopic,
-                                    const PRUnichar *aData)
+                                    const char16_t *aData)
 {
   if (!strcmp(aTopic, "offline-cache-update-added")) {
     nsCOMPtr<nsIOfflineCacheUpdate> update = do_QueryInterface(aSubject);

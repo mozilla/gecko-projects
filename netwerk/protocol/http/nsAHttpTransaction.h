@@ -8,16 +8,19 @@
 #include "nsISupports.h"
 #include "nsTArray.h"
 
-class nsAHttpConnection;
-class nsAHttpSegmentReader;
-class nsAHttpSegmentWriter;
 class nsIInterfaceRequestor;
 class nsIEventTarget;
 class nsITransport;
-class nsHttpRequestHead;
-class nsHttpPipeline;
-class nsHttpTransaction;
 class nsILoadGroupConnectionInfo;
+
+namespace mozilla { namespace net {
+
+class nsAHttpConnection;
+class nsAHttpSegmentReader;
+class nsAHttpSegmentWriter;
+class nsHttpTransaction;
+class nsHttpPipeline;
+class nsHttpRequestHead;
 
 //----------------------------------------------------------------------------
 // Abstract base class for a HTTP transaction:
@@ -124,6 +127,8 @@ public:
     // return the load group connection information associated with the transaction
     virtual nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() { return nullptr; }
 
+    virtual bool ResponseTimeoutEnabled() const { return false; }
+
     // Every transaction is classified into one of the types below. When using
     // HTTP pipelines, only transactions with the same type appear on the same
     // pipeline.
@@ -217,5 +222,7 @@ public:
 
 #define NS_DECL_NSAHTTPSEGMENTWRITER \
     nsresult OnWriteSegment(char *, uint32_t, uint32_t *);
+
+}} // namespace mozilla::net
 
 #endif // nsAHttpTransaction_h__

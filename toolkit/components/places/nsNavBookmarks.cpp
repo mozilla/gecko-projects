@@ -209,6 +209,7 @@ nsNavBookmarks::nsNavBookmarks()
   , mCacheObservers("bookmark-observers")
   , mBatching(false)
   , mBookmarkToKeywordHash(BOOKMARKS_TO_KEYWORDS_INITIAL_CACHE_SIZE)
+  , mBookmarkToKeywordHashInitialized(false)
   , mRecentBookmarksCache(RECENT_BOOKMARKS_INITIAL_CACHE_SIZE)
   , mUncachableBookmarks(RECENT_BOOKMARKS_INITIAL_CACHE_SIZE)
 {
@@ -2628,6 +2629,11 @@ nsNavBookmarks::GetURIForKeyword(const nsAString& aUserCasedKeyword,
 
 nsresult
 nsNavBookmarks::EnsureKeywordsHash() {
+  if (mBookmarkToKeywordHashInitialized) {
+    return NS_OK;
+  }
+  mBookmarkToKeywordHashInitialized = true;
+
   nsCOMPtr<mozIStorageStatement> stmt;
   nsresult rv = mDB->MainConn()->CreateStatement(NS_LITERAL_CSTRING(
     "SELECT b.id, k.keyword "
@@ -2727,7 +2733,7 @@ nsNavBookmarks::NotifyItemChanged(const ItemChangeData& aData)
 
 NS_IMETHODIMP
 nsNavBookmarks::Observe(nsISupports *aSubject, const char *aTopic,
-                        const PRUnichar *aData)
+                        const char16_t *aData)
 {
   NS_ASSERTION(NS_IsMainThread(), "This can only be called on the main thread");
 

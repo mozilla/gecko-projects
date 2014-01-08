@@ -90,7 +90,9 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitDoubleToString(LDoubleToString *lir);
     bool visitInteger(LInteger *lir);
     bool visitRegExp(LRegExp *lir);
+    bool visitRegExpExec(LRegExpExec *lir);
     bool visitRegExpTest(LRegExpTest *lir);
+    bool visitRegExpReplace(LRegExpReplace *lir);
     bool visitLambda(LLambda *lir);
     bool visitLambdaForSingleton(LLambdaForSingleton *lir);
     bool visitLambdaPar(LLambdaPar *lir);
@@ -345,7 +347,8 @@ class CodeGenerator : public CodeGeneratorSpecific
                              PropertyName *name, TypedOrValueRegister output,
                              bool allowGetters);
     bool addGetElementCache(LInstruction *ins, Register obj, ConstantOrRegister index,
-                            TypedOrValueRegister output, bool monitoredResult);
+                            TypedOrValueRegister output, bool monitoredResult,
+                            bool allowDoubleResult);
     bool addSetPropertyCache(LInstruction *ins, RegisterSet liveRegs, Register objReg,
                              PropertyName *name, ConstantOrRegister value, bool strict,
                              bool needsTypeBarrier);

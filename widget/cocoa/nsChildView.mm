@@ -60,8 +60,9 @@
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "GLTextureImage.h"
 #include "GLContextProvider.h"
-#include "GLContext.h"
+#include "GLContextCGL.h"
 #include "GLUploadHelpers.h"
+#include "ScopedGLHelpers.h"
 #include "mozilla/layers/GLManager.h"
 #include "mozilla/layers/CompositorOGL.h"
 #include "mozilla/layers/BasicCompositor.h"
@@ -353,8 +354,7 @@ public:
 
   NSOpenGLContext* GetNSOpenGLContext()
   {
-    return static_cast<NSOpenGLContext*>(
-      mGLContext->GetNativeData(GLContext::NativeGLContext));
+    return GLContextCGL::Cast(mGLContext)->GetNSOpenGLContext();
   }
 
 protected:
@@ -762,6 +762,29 @@ static void HideChildPluginViews(NSView* aView)
   }
 }
 
+// Some NSView methods (e.g. setFrame and setHidden) invalidate the view's
+// bounds in our window. However, we don't want these invalidations because
+// they are unnecessary and because they actually slow us down since we
+// block on the compositor inside drawRect.
+// When we actually need something invalidated, there will be an explicit call
+// to Invalidate from Gecko, so turning these automatic invalidations off
+// won't hurt us in the non-OMTC case.
+// The invalidations inside these NSView methods happen via a call to the
+// private method -[NSWindow _setNeedsDisplayInRect:]. Our BaseWindow
+// implementation of that method is augmented to let us ignore those calls
+// using -[BaseWindow disable/enableSetNeedsDisplay].
+static void
+ManipulateViewWithoutNeedingDisplay(NSView* aView, void (^aCallback)())
+{
+  BaseWindow* win = nil;
+  if ([[aView window] isKindOfClass:[BaseWindow class]]) {
+    win = (BaseWindow*)[aView window];
+  }
+  [win disableSetNeedsDisplay];
+  aCallback();
+  [win enableSetNeedsDisplay];
+}
+
 // Hide or show this component
 NS_IMETHODIMP nsChildView::Show(bool aState)
 {
@@ -773,7 +796,10 @@ NS_IMETHODIMP nsChildView::Show(bool aState)
     // no pool in place.
     nsAutoreleasePool localPool;
 
-    [mView setHidden:!aState];
+    ManipulateViewWithoutNeedingDisplay(mView, ^{
+      [mView setHidden:!aState];
+    });
+
     mVisible = aState;
     if (!mVisible && IsPluginView())
       HidePlugin();
@@ -1023,10 +1049,9 @@ NS_IMETHODIMP nsChildView::Move(double aX, double aY)
   mBounds.x = x;
   mBounds.y = y;
 
-  [mView setFrame:DevPixelsToCocoaPoints(mBounds)];
-
-  if (mVisible)
-    [mView setNeedsDisplay:YES];
+  ManipulateViewWithoutNeedingDisplay(mView, ^{
+    [mView setFrame:DevPixelsToCocoaPoints(mBounds)];
+  });
 
   NotifyRollupGeometryChange();
   ReportMoveEvent();
@@ -1049,7 +1074,9 @@ NS_IMETHODIMP nsChildView::Resize(double aWidth, double aHeight, bool aRepaint)
   mBounds.width  = width;
   mBounds.height = height;
 
-  [mView setFrame:DevPixelsToCocoaPoints(mBounds)];
+  ManipulateViewWithoutNeedingDisplay(mView, ^{
+    [mView setFrame:DevPixelsToCocoaPoints(mBounds)];
+  });
 
   if (mVisible && aRepaint)
     [mView setNeedsDisplay:YES];
@@ -1086,7 +1113,9 @@ NS_IMETHODIMP nsChildView::Resize(double aX, double aY,
     mBounds.height = height;
   }
 
-  [mView setFrame:DevPixelsToCocoaPoints(mBounds)];
+  ManipulateViewWithoutNeedingDisplay(mView, ^{
+    [mView setFrame:DevPixelsToCocoaPoints(mBounds)];
+  });
 
   if (mVisible && aRepaint)
     [mView setNeedsDisplay:YES];
@@ -2057,7 +2086,7 @@ nsChildView::PreRender(LayerManagerComposite* aManager)
   // composition is done, thus keeping the GL context locked forever.
   mViewTearDownLock.Lock();
 
-  NSOpenGLContext *glContext = (NSOpenGLContext *)manager->gl()->GetNativeData(GLContext::NativeGLContext);
+  NSOpenGLContext *glContext = GLContextCGL::Cast(manager->gl())->GetNSOpenGLContext();
 
   if (![(ChildView*)mView preRender:glContext]) {
     mViewTearDownLock.Unlock();
@@ -2073,7 +2102,7 @@ nsChildView::PostRender(LayerManagerComposite* aManager)
   if (!manager) {
     return;
   }
-  NSOpenGLContext *glContext = (NSOpenGLContext *)manager->gl()->GetNativeData(GLContext::NativeGLContext);
+  NSOpenGLContext *glContext = GLContextCGL::Cast(manager->gl())->GetNSOpenGLContext();
   [(ChildView*)mView postRender:glContext];
   mViewTearDownLock.Unlock();
 }
@@ -2090,6 +2119,10 @@ nsChildView::DrawWindowOverlay(LayerManagerComposite* aManager, nsIntRect aRect)
 void
 nsChildView::DrawWindowOverlay(GLManager* aManager, nsIntRect aRect)
 {
+  GLContext* gl = aManager->gl();
+  ScopedGLState scopedScissorTestState(gl, LOCAL_GL_SCISSOR_TEST);
+  ScopedScissorRect scopedScissorRectState(gl);
+
   MaybeDrawTitlebar(aManager, aRect);
   MaybeDrawResizeIndicator(aManager, aRect);
   MaybeDrawRoundedCorners(aManager, aRect);
@@ -2733,7 +2766,6 @@ RectTextureImage::Draw(GLManager* aManager,
 GLPresenter::GLPresenter(GLContext* aContext)
  : mGLContext(aContext)
 {
-  mGLContext->SetFlipped(true);
   mGLContext->MakeCurrent();
   mRGBARectProgram = new ShaderProgramOGL(mGLContext,
     ProgramProfileOGL::GetProfileFor(RGBARectLayerProgramType, MaskNone));

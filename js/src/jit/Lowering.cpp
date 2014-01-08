@@ -408,7 +408,7 @@ LIRGenerator::visitCall(MCall *call)
     JSFunction *target = call->getSingleTarget();
 
     // Call DOM functions.
-    if (call->isDOMFunction()) {
+    if (call->isCallDOMNative()) {
         JS_ASSERT(target && target->isNative());
         Register cxReg, objReg, privReg, argsReg;
         GetTempRegForIntArg(0, 0, &cxReg);
@@ -1917,6 +1917,17 @@ LIRGenerator::visitRegExp(MRegExp *ins)
 }
 
 bool
+LIRGenerator::visitRegExpExec(MRegExpExec *ins)
+{
+    JS_ASSERT(ins->regexp()->type() == MIRType_Object);
+    JS_ASSERT(ins->string()->type() == MIRType_String);
+
+    LRegExpExec *lir = new(alloc()) LRegExpExec(useRegisterAtStart(ins->regexp()),
+                                                useRegisterAtStart(ins->string()));
+    return defineReturn(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
 LIRGenerator::visitRegExpTest(MRegExpTest *ins)
 {
     JS_ASSERT(ins->regexp()->type() == MIRType_Object);
@@ -1924,6 +1935,19 @@ LIRGenerator::visitRegExpTest(MRegExpTest *ins)
 
     LRegExpTest *lir = new(alloc()) LRegExpTest(useRegisterAtStart(ins->regexp()),
                                                 useRegisterAtStart(ins->string()));
+    return defineReturn(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
+LIRGenerator::visitRegExpReplace(MRegExpReplace *ins)
+{
+    JS_ASSERT(ins->regexp()->type() == MIRType_Object);
+    JS_ASSERT(ins->string()->type() == MIRType_String);
+    JS_ASSERT(ins->replacement()->type() == MIRType_String);
+
+    LRegExpReplace *lir = new(alloc()) LRegExpReplace(useRegisterOrConstantAtStart(ins->string()),
+                                                      useRegisterAtStart(ins->regexp()),
+                                                      useRegisterOrConstantAtStart(ins->replacement()));
     return defineReturn(lir, ins) && assignSafepoint(lir, ins);
 }
 

@@ -764,6 +764,11 @@ nsIOService::AllowPort(int32_t inPort, const char *scheme, bool *_retval)
         *_retval = true;
         return NS_OK;
     }
+
+    if (port == 0) {
+        *_retval = false;
+        return NS_OK;
+    }
         
     // first check to see if the port is in our blacklist:
     int32_t badPortListCnt = mRestrictedPortList.Length();
@@ -900,7 +905,7 @@ nsIOService::GetPrefBranch(nsIPrefBranch **result)
 NS_IMETHODIMP
 nsIOService::Observe(nsISupports *subject,
                      const char *topic,
-                     const PRUnichar *data)
+                     const char16_t *data)
 {
     if (!strcmp(topic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
         nsCOMPtr<nsIPrefBranch> prefBranch = do_QueryInterface(subject);

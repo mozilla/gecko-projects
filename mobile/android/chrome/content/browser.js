@@ -3217,20 +3217,6 @@ Tab.prototype = {
     // Adjust the max line box width to be no more than the viewport width, but
     // only if the reflow-on-zoom preference is enabled.
     let isZooming = !fuzzyEquals(aViewport.zoom, this._zoom);
-    if (BrowserApp.selectedTab.reflozPinchSeen &&
-        isZooming && aViewport.zoom < 1.0) {
-      // In this case, we want to restore the max line box width,
-      // because we are pinch-zooming to zoom out.
-      BrowserEventHandler.resetMaxLineBoxWidth();
-      BrowserApp.selectedTab.reflozPinchSeen = false;
-    } else if (BrowserApp.selectedTab.reflozPinchSeen &&
-               isZooming) {
-      // In this case, the user pinch-zoomed in, so we don't want to
-      // preserve position as we would with reflow-on-zoom.
-      BrowserApp.selectedTab.probablyNeedRefloz = false;
-      BrowserApp.selectedTab.clearReflowOnZoomPendingActions();
-      BrowserApp.selectedTab._mReflozPoint = null;
-    }
 
     let docViewer = null;
 
@@ -3786,7 +3772,7 @@ Tab.prototype = {
       }
 
       // true if the page loaded successfully (i.e., no 404s or other errors)
-      let success = false; 
+      let success = false;
       let uri = "";
       try {
         // Remember original URI for UA changes on redirected pages
@@ -3797,7 +3783,11 @@ Tab.prototype = {
       } catch (e) { }
       try {
         success = aRequest.QueryInterface(Components.interfaces.nsIHttpChannel).requestSucceeded;
-      } catch (e) { }
+      } catch (e) {
+        // If the request does not handle the nsIHttpChannel interface, use nsIRequest's success
+        // status. Used for local files. See bug 948849.
+        success = aRequest.status == 0;
+      }
 
       // Check to see if we restoring the content from a previous presentation (session)
       // since there should be no real network activity

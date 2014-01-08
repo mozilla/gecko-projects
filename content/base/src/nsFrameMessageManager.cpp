@@ -397,6 +397,9 @@ nsFrameMessageManager::LoadFrameScript(const nsAString& aURL,
                                        bool aAllowDelayedLoad,
                                        bool aRunInGlobalScope)
 {
+  // FIXME: Bug 673569 is currently disabled.
+  aRunInGlobalScope = true;
+
   if (aAllowDelayedLoad) {
     if (IsGlobal() || IsWindowLevel()) {
       // Cache for future windows or frames
@@ -484,7 +487,7 @@ static bool
 JSONCreator(const jschar* aBuf, uint32_t aLen, void* aData)
 {
   nsAString* result = static_cast<nsAString*>(aData);
-  result->Append(static_cast<const PRUnichar*>(aBuf),
+  result->Append(static_cast<const char16_t*>(aBuf),
                  static_cast<uint32_t>(aLen));
   return true;
 }
@@ -926,8 +929,8 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
 
       JS::Rooted<JS::Value> targetv(ctx);
       JS::Rooted<JSObject*> global(ctx, JS_GetGlobalForObject(ctx, object));
-      nsContentUtils::WrapNative(ctx, global, aTarget, &targetv,
-                                 nullptr, true);
+      nsresult rv = nsContentUtils::WrapNative(ctx, global, aTarget, &targetv, true);
+      NS_ENSURE_SUCCESS(rv, rv);
 
       JS::Rooted<JSObject*> cpows(ctx);
       if (aCpows) {
@@ -1017,8 +1020,8 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
           defaultThisValue = aTarget;
         }
         JS::Rooted<JSObject*> global(ctx, JS_GetGlobalForObject(ctx, object));
-        nsContentUtils::WrapNative(ctx, global, defaultThisValue,
-                                   &thisValue, nullptr, true);
+        nsresult rv = nsContentUtils::WrapNative(ctx, global, defaultThisValue, &thisValue, true);
+        NS_ENSURE_SUCCESS(rv, rv);
       } else {
         // If the listener is a JS object which has receiveMessage function:
         if (!JS_GetProperty(ctx, object, "receiveMessage", &funval) ||

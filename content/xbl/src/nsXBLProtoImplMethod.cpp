@@ -23,7 +23,7 @@
 
 using namespace mozilla;
 
-nsXBLProtoImplMethod::nsXBLProtoImplMethod(const PRUnichar* aName) :
+nsXBLProtoImplMethod::nsXBLProtoImplMethod(const char16_t* aName) :
   nsXBLProtoImplMember(aName),
   mMethod()
 {
@@ -176,7 +176,7 @@ nsXBLProtoImplMethod::CompileMember(const nsCString& aClassStr,
 
   // Get the body
   nsDependentString body;
-  PRUnichar *bodyText = uncompiledMethod->mBodyText.GetText();
+  char16_t *bodyText = uncompiledMethod->mBodyText.GetText();
   if (bodyText)
     body.Rebind(bodyText);
 
@@ -295,11 +295,9 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement)
 
   JS::Rooted<JSObject*> globalObject(cx, global->GetGlobalJSObject());
 
-  nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
   JS::Rooted<JS::Value> v(cx);
-  nsresult rv =
-    nsContentUtils::WrapNative(cx, globalObject, aBoundElement, &v,
-                               getter_AddRefs(wrapper));
+  nsresult rv = nsContentUtils::WrapNative(cx, globalObject, aBoundElement, &v);
+
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Use nsCxPusher to make sure we call ScriptEvaluated when we're done.

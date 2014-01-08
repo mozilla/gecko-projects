@@ -368,9 +368,9 @@ ForEachPing(nsIContent *content, ForEachPingCallback callback, void *closure)
   nsIDocument *doc = content->OwnerDoc();
 
   // value contains relative URIs split on spaces (U+0020)
-  const PRUnichar *start = value.BeginReading();
-  const PRUnichar *end   = value.EndReading();
-  const PRUnichar *iter  = start;
+  const char16_t *start = value.BeginReading();
+  const char16_t *end   = value.EndReading();
+  const char16_t *iter  = start;
   for (;;) {
     if (iter < end && *iter != ' ') {
       ++iter;
@@ -2841,7 +2841,7 @@ nsDocShell::SetName(const nsAString& aName)
 }
 
 NS_IMETHODIMP
-nsDocShell::NameEquals(const PRUnichar *aName, bool *_retval)
+nsDocShell::NameEquals(const char16_t *aName, bool *_retval)
 {
     NS_ENSURE_ARG_POINTER(aName);
     NS_ENSURE_ARG_POINTER(_retval);
@@ -3228,7 +3228,7 @@ ItemIsActive(nsIDocShellTreeItem *aItem)
 }
 
 NS_IMETHODIMP
-nsDocShell::FindItemWithName(const PRUnichar * aName,
+nsDocShell::FindItemWithName(const char16_t * aName,
                              nsISupports * aRequestor,
                              nsIDocShellTreeItem * aOriginalRequestor,
                              nsIDocShellTreeItem ** _retval)
@@ -3326,7 +3326,7 @@ nsDocShell::FindItemWithName(const PRUnichar * aName,
 }
 
 nsresult
-nsDocShell::DoFindItemWithName(const PRUnichar* aName,
+nsDocShell::DoFindItemWithName(const char16_t* aName,
                                nsISupports* aRequestor,
                                nsIDocShellTreeItem* aOriginalRequestor,
                                nsIDocShellTreeItem** _retval)
@@ -3769,7 +3769,7 @@ nsDocShell::GetChildAt(int32_t aIndex, nsIDocShellTreeItem ** aChild)
 }
 
 NS_IMETHODIMP
-nsDocShell::FindChildWithName(const PRUnichar * aName,
+nsDocShell::FindChildWithName(const char16_t * aName,
                               bool aRecurse, bool aSameType,
                               nsIDocShellTreeItem * aRequestor,
                               nsIDocShellTreeItem * aOriginalRequestor,
@@ -4237,7 +4237,7 @@ NS_IMETHODIMP nsDocShell::GotoIndex(int32_t aIndex)
 }
 
 NS_IMETHODIMP
-nsDocShell::LoadURI(const PRUnichar * aURI,
+nsDocShell::LoadURI(const char16_t * aURI,
                     uint32_t aLoadFlags,
                     nsIURI * aReferringURI,
                     nsIInputStream * aPostStream,
@@ -4344,7 +4344,7 @@ nsDocShell::LoadURI(const PRUnichar * aURI,
 
 NS_IMETHODIMP
 nsDocShell::DisplayLoadError(nsresult aError, nsIURI *aURI,
-                             const PRUnichar *aURL,
+                             const char16_t *aURL,
                              nsIChannel* aFailedChannel)
 {
     // Get prompt and string bundle servcies
@@ -4651,7 +4651,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI *aURI,
         rv = NS_OK;
         ++formatStrCount;
 
-        const PRUnichar *strs[kMaxFormatStrArgs];
+        const char16_t *strs[kMaxFormatStrArgs];
         for (uint32_t i = 0; i < formatStrCount; i++) {
             strs[i] = formatStrs[i].get();
         }
@@ -4689,10 +4689,10 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI *aURI,
 
 
 NS_IMETHODIMP
-nsDocShell::LoadErrorPage(nsIURI *aURI, const PRUnichar *aURL,
+nsDocShell::LoadErrorPage(nsIURI *aURI, const char16_t *aURL,
                           const char *aErrorPage,
-                          const PRUnichar *aErrorType,
-                          const PRUnichar *aDescription,
+                          const char16_t *aErrorType,
+                          const char16_t *aDescription,
                           const char *aCSSClass,
                           nsIChannel* aFailedChannel)
 {
@@ -5749,7 +5749,7 @@ nsDocShell::GetMainWidget(nsIWidget ** aMainWidget)
 }
 
 NS_IMETHODIMP
-nsDocShell::GetTitle(PRUnichar ** aTitle)
+nsDocShell::GetTitle(char16_t ** aTitle)
 {
     NS_ENSURE_ARG_POINTER(aTitle);
 
@@ -5758,7 +5758,7 @@ nsDocShell::GetTitle(PRUnichar ** aTitle)
 }
 
 NS_IMETHODIMP
-nsDocShell::SetTitle(const PRUnichar * aTitle)
+nsDocShell::SetTitle(const char16_t * aTitle)
 {
     // Store local title
     mTitle = aTitle;
@@ -5796,11 +5796,7 @@ nsDocShell::SetTitle(const PRUnichar * aTitle)
     return NS_OK;
 }
 
-//*****************************************************************************
-// nsDocShell::nsIScrollable
-//*****************************************************************************   
-
-NS_IMETHODIMP
+nsresult
 nsDocShell::GetCurScrollPos(int32_t scrollOrientation, int32_t * curPos)
 {
     NS_ENSURE_ARG_POINTER(curPos);
@@ -5824,32 +5820,7 @@ nsDocShell::GetCurScrollPos(int32_t scrollOrientation, int32_t * curPos)
     }
 }
 
-NS_IMETHODIMP
-nsDocShell::SetCurScrollPos(int32_t scrollOrientation, int32_t curPos)
-{
-    nsIScrollableFrame* sf = GetRootScrollFrame();
-    NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
-
-    nsPoint pt = sf->GetScrollPosition();
-
-    switch (scrollOrientation) {
-    case ScrollOrientation_X:
-        pt.x = curPos;
-        break;
-
-    case ScrollOrientation_Y:
-        pt.y = curPos;
-        break;
-
-    default:
-        NS_ENSURE_TRUE(false, NS_ERROR_INVALID_ARG);
-    }
-
-    sf->ScrollTo(pt, nsIScrollableFrame::INSTANT);
-    return NS_OK;
-}
-
-NS_IMETHODIMP
+nsresult
 nsDocShell::SetCurScrollPosEx(int32_t curHorizontalPos, int32_t curVerticalPos)
 {
     nsIScrollableFrame* sf = GetRootScrollFrame();
@@ -5860,69 +5831,10 @@ nsDocShell::SetCurScrollPosEx(int32_t curHorizontalPos, int32_t curVerticalPos)
     return NS_OK;
 }
 
-// XXX This is wrong
-NS_IMETHODIMP
-nsDocShell::GetScrollRange(int32_t scrollOrientation,
-                           int32_t * minPos, int32_t * maxPos)
-{
-    NS_ENSURE_ARG_POINTER(minPos && maxPos);
+//*****************************************************************************
+// nsDocShell::nsIScrollable
+//*****************************************************************************   
 
-    nsIScrollableFrame* sf = GetRootScrollFrame();
-    NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
-
-    nsSize portSize = sf->GetScrollPortRect().Size();
-    nsRect range = sf->GetScrollRange();
-
-    switch (scrollOrientation) {
-    case ScrollOrientation_X:
-        *minPos = range.x;
-        *maxPos = range.XMost() + portSize.width;
-        return NS_OK;
-
-    case ScrollOrientation_Y:
-        *minPos = range.y;
-        *maxPos = range.YMost() + portSize.height;
-        return NS_OK;
-
-    default:
-        NS_ENSURE_TRUE(false, NS_ERROR_INVALID_ARG);
-    }
-}
-
-NS_IMETHODIMP
-nsDocShell::SetScrollRange(int32_t scrollOrientation,
-                           int32_t minPos, int32_t maxPos)
-{
-    //XXX First Check
-    /*
-       Retrieves or Sets the valid ranges for the thumb.  When maxPos is set to 
-       something less than the current thumb position, curPos is set = to maxPos.
-
-       @return NS_OK - Setting or Getting completed successfully.
-       NS_ERROR_INVALID_ARG - returned when curPos is not within the
-       minPos and maxPos.
-     */
-    return NS_ERROR_FAILURE;
-}
-
-NS_IMETHODIMP
-nsDocShell::SetScrollRangeEx(int32_t minHorizontalPos,
-                             int32_t maxHorizontalPos, int32_t minVerticalPos,
-                             int32_t maxVerticalPos)
-{
-    //XXX First Check
-    /*
-       Retrieves or Sets the valid ranges for the thumb.  When maxPos is set to 
-       something less than the current thumb position, curPos is set = to maxPos.
-
-       @return NS_OK - Setting or Getting completed successfully.
-       NS_ERROR_INVALID_ARG - returned when curPos is not within the
-       minPos and maxPos.
-     */
-    return NS_ERROR_FAILURE;
-}
-
-// This returns setting for all documents in this docshell
 NS_IMETHODIMP
 nsDocShell::GetDefaultScrollbarPreferences(int32_t scrollOrientation,
                                            int32_t * scrollbarPref)
@@ -5943,15 +5855,6 @@ nsDocShell::GetDefaultScrollbarPreferences(int32_t scrollOrientation,
     return NS_ERROR_FAILURE;
 }
 
-// Set scrolling preference for all documents in this shell
-//
-// There are three possible values stored in the shell:
-//  1) nsIScrollable::Scrollbar_Never = no scrollbar
-//  2) nsIScrollable::Scrollbar_Auto = scrollbar appears if the document
-//     being displayed would normally have scrollbar
-//  3) nsIScrollable::Scrollbar_Always = scrollbar always appears
-//
-// One important client is nsHTMLFrameInnerFrame::CreateWebShell()
 NS_IMETHODIMP
 nsDocShell::SetDefaultScrollbarPreferences(int32_t scrollOrientation,
                                            int32_t scrollbarPref)
@@ -6888,7 +6791,7 @@ nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
 NS_IMETHODIMP
 nsDocShell::OnStatusChange(nsIWebProgress * aWebProgress,
                            nsIRequest * aRequest,
-                           nsresult aStatus, const PRUnichar * aMessage)
+                           nsresult aStatus, const char16_t * aMessage)
 {
     NS_NOTREACHED("notification excluded in AddProgressListener(...)");
     return NS_OK;
@@ -8829,7 +8732,7 @@ nsDocShell::InternalLoad(nsIURI * aURI,
                          nsIURI * aReferrer,
                          nsISupports * aOwner,
                          uint32_t aFlags,
-                         const PRUnichar *aWindowTarget,
+                         const char16_t *aWindowTarget,
                          const char* aTypeHint,
                          const nsAString& aFileName,
                          nsIInputStream * aPostData,
@@ -11780,7 +11683,7 @@ nsDocShell::ConfirmRepost(bool * aRepost)
   else {
     // Brand available - if the app has an override file with formatting, the app name will
     // be included. Without an override, the prompt will look like the generic version.
-    const PRUnichar *formatStrings[] = { brandName.get() };
+    const char16_t *formatStrings[] = { brandName.get() };
     rv = appBundle->FormatStringFromName(MOZ_UTF16("confirmRepostPrompt"),
                                          formatStrings, ArrayLength(formatStrings),
                                          getter_Copies(msgString));
@@ -12392,7 +12295,7 @@ class OnLinkClickEvent : public nsRunnable {
 public:
   OnLinkClickEvent(nsDocShell* aHandler, nsIContent* aContent,
                    nsIURI* aURI,
-                   const PRUnichar* aTargetSpec,
+                   const char16_t* aTargetSpec,
                    const nsAString& aFileName,
                    nsIInputStream* aPostDataStream,
                    nsIInputStream* aHeadersDataStream,
@@ -12426,7 +12329,7 @@ private:
 OnLinkClickEvent::OnLinkClickEvent(nsDocShell* aHandler,
                                    nsIContent *aContent,
                                    nsIURI* aURI,
-                                   const PRUnichar* aTargetSpec,
+                                   const char16_t* aTargetSpec,
                                    const nsAString& aFileName,
                                    nsIInputStream* aPostDataStream,
                                    nsIInputStream* aHeadersDataStream,
@@ -12448,7 +12351,7 @@ OnLinkClickEvent::OnLinkClickEvent(nsDocShell* aHandler,
 NS_IMETHODIMP
 nsDocShell::OnLinkClick(nsIContent* aContent,
                         nsIURI* aURI,
-                        const PRUnichar* aTargetSpec,
+                        const char16_t* aTargetSpec,
                         const nsAString& aFileName,
                         nsIInputStream* aPostDataStream,
                         nsIInputStream* aHeadersDataStream,
@@ -12497,7 +12400,7 @@ nsDocShell::OnLinkClick(nsIContent* aContent,
 NS_IMETHODIMP
 nsDocShell::OnLinkClickSync(nsIContent *aContent,
                             nsIURI* aURI,
-                            const PRUnichar* aTargetSpec,
+                            const char16_t* aTargetSpec,
                             const nsAString& aFileName,
                             nsIInputStream* aPostDataStream,
                             nsIInputStream* aHeadersDataStream,
@@ -12617,7 +12520,7 @@ nsDocShell::OnLinkClickSync(nsIContent *aContent,
 NS_IMETHODIMP
 nsDocShell::OnOverLink(nsIContent* aContent,
                        nsIURI* aURI,
-                       const PRUnichar* aTargetSpec)
+                       const char16_t* aTargetSpec)
 {
   if (aContent->IsEditable()) {
     return NS_OK;

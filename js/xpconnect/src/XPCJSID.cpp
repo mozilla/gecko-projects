@@ -572,7 +572,7 @@ nsJSIID::CanCreateWrapper(const nsIID * iid, char **_retval)
 
 /* string canCallMethod (in nsIIDPtr iid, in wstring methodName); */
 NS_IMETHODIMP
-nsJSIID::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, char **_retval)
+nsJSIID::CanCallMethod(const nsIID * iid, const char16_t *methodName, char **_retval)
 {
     static const char* const allowed[] = {"equals", "toString", nullptr};
 
@@ -582,7 +582,7 @@ nsJSIID::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, char **_r
 
 /* string canGetProperty (in nsIIDPtr iid, in wstring propertyName); */
 NS_IMETHODIMP
-nsJSIID::CanGetProperty(const nsIID * iid, const PRUnichar *propertyName, char **_retval)
+nsJSIID::CanGetProperty(const nsIID * iid, const char16_t *propertyName, char **_retval)
 {
     static const char* const allowed[] = {"name", "number", "valid", nullptr};
     *_retval = xpc::CheckAccessList(propertyName, allowed);
@@ -591,7 +591,7 @@ nsJSIID::CanGetProperty(const nsIID * iid, const PRUnichar *propertyName, char *
 
 /* string canSetProperty (in nsIIDPtr iid, in wstring propertyName); */
 NS_IMETHODIMP
-nsJSIID::CanSetProperty(const nsIID * iid, const PRUnichar *propertyName, char **_retval)
+nsJSIID::CanSetProperty(const nsIID * iid, const char16_t *propertyName, char **_retval)
 {
     // If you have to ask, then the answer is NO
     *_retval = nullptr;
@@ -756,7 +756,7 @@ nsJSCID::CreateInstance(const JS::Value& iidval, JSContext* cx,
     if (NS_FAILED(rv) || !inst)
         return NS_ERROR_XPC_CI_RETURNED_FAILURE;
 
-    rv = nsXPConnect::XPConnect()->WrapNativeToJSVal(cx, obj, inst, nullptr, iid, true, retval, nullptr);
+    rv = nsXPConnect::XPConnect()->WrapNativeToJSVal(cx, obj, inst, nullptr, iid, true, retval);
     if (NS_FAILED(rv) || JSVAL_IS_PRIMITIVE(*retval))
         return NS_ERROR_XPC_CANT_CREATE_WN;
     return NS_OK;

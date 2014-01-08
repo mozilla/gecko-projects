@@ -36,6 +36,8 @@ Cu.import("resource://gre/modules/osfile/_PromiseWorker.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/AsyncShutdown.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "console",
+  "resource://gre/modules/devtools/Console.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
   "resource://gre/modules/TelemetryStopwatch.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
@@ -90,39 +92,6 @@ Object.freeze(SessionFile);
 /**
  * Utilities for dealing with promises and Task.jsm
  */
-const TaskUtils = {
-  /**
-   * Add logging to a promise.
-   *
-   * @param {Promise} promise
-   * @return {Promise} A promise behaving as |promise|, but with additional
-   * logging in case of uncaught error.
-   */
-  captureErrors: function captureErrors(promise) {
-    return promise.then(
-      null,
-      function onError(reason) {
-        Cu.reportError("Uncaught asynchronous error: " + reason + " at\n" + reason.stack);
-        throw reason;
-      }
-    );
-  },
-  /**
-   * Spawn a new Task from a generator.
-   *
-   * This function behaves as |Task.spawn|, with the exception that it
-   * adds logging in case of uncaught error. For more information, see
-   * the documentation of |Task.jsm|.
-   *
-   * @param {generator} gen Some generator.
-   * @return {Promise} A promise built from |gen|, with the same semantics
-   * as |Task.spawn(gen)|.
-   */
-  spawn: function spawn(gen) {
-    return this.captureErrors(Task.spawn(gen));
-  }
-};
-
 let SessionFileInternal = {
   /**
    * The path to sessionstore.js
@@ -166,7 +135,7 @@ let SessionFileInternal = {
       isFinalWrite = this._isClosed = true;
     }
 
-    return this._latestWrite = TaskUtils.spawn(function task() {
+    return this._latestWrite = Task.spawn(function task() {
       TelemetryStopwatch.start("FX_SESSION_RESTORE_WRITE_FILE_LONGEST_OP_MS", refObj);
 
       try {
@@ -179,8 +148,7 @@ let SessionFileInternal = {
         this._recordTelemetry(msg.telemetry);
       } catch (ex) {
         TelemetryStopwatch.cancel("FX_SESSION_RESTORE_WRITE_FILE_LONGEST_OP_MS", refObj);
-        Cu.reportError("Could not write session state file " + this.path
-                       + ": " + ex);
+        console.error("Could not write session state file ", this.path, ex);
       }
 
       if (isFinalWrite) {
@@ -193,7 +161,7 @@ let SessionFileInternal = {
     SessionWorker.post("writeLoadStateOnceAfterStartup", [aLoadState]).then(msg => {
       this._recordTelemetry(msg.telemetry);
       return msg;
-    }, Cu.reportError);
+    }, console.error);
   },
 
   createBackupCopy: function (ext) {

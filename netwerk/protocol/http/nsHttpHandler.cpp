@@ -73,8 +73,6 @@
 #endif
 
 //-----------------------------------------------------------------------------
-using namespace mozilla;
-using namespace mozilla::net;
 #include "mozilla/net/HttpChannelChild.h"
 
 
@@ -108,6 +106,9 @@ extern PRThread *gSocketThread;
 #define NS_HTTP_PROTOCOL_FLAGS (URI_STD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP | URI_LOADABLE_BY_ANYONE)
 
 //-----------------------------------------------------------------------------
+
+namespace mozilla {
+namespace net {
 
 static nsresult
 NewURI(const nsACString &aSpec,
@@ -151,6 +152,7 @@ nsHttpHandler::nsHttpHandler()
     , mProxyPipelining(true)
     , mIdleTimeout(PR_SecondsToInterval(10))
     , mSpdyTimeout(PR_SecondsToInterval(180))
+    , mResponseTimeout(PR_SecondsToInterval(600))
     , mMaxRequestAttempts(10)
     , mMaxRequestDelay(10)
     , mIdleSynTimeout(250)
@@ -372,8 +374,8 @@ nsHttpHandler::MakeNewRequestTokenBucket()
     if (!mConnMgr)
         return;
 
-    nsRefPtr<mozilla::net::EventTokenBucket> tokenBucket =
-        new mozilla::net::EventTokenBucket(RequestTokenBucketHz(),
+    nsRefPtr<EventTokenBucket> tokenBucket =
+        new EventTokenBucket(RequestTokenBucketHz(),
                                            RequestTokenBucketBurst());
     mConnMgr->UpdateRequestTokenBucket(tokenBucket);
 }
@@ -860,6 +862,12 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
                 mConnMgr->UpdateParam(nsHttpConnectionMgr::MAX_REQUEST_DELAY,
                                       mMaxRequestDelay);
         }
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("response.timeout"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("response.timeout"), &val);
+        if (NS_SUCCEEDED(rv))
+            mResponseTimeout = PR_SecondsToInterval(clamped(val, 0, 0xffff));
     }
 
     if (PREF_CHANGED(HTTP_PREF("max-connections"))) {
@@ -1396,8 +1404,8 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
     }
     if (requestTokenBucketUpdated) {
         mRequestTokenBucket =
-            new mozilla::net::EventTokenBucket(RequestTokenBucketHz(),
-                                               RequestTokenBucketBurst());
+            new EventTokenBucket(RequestTokenBucketHz(),
+                                 RequestTokenBucketBurst());
     }
 
 #undef PREF_CHANGED
@@ -1575,7 +1583,7 @@ nsHttpHandler::NewURI(const nsACString &aSpec,
                       nsIURI *aBaseURI,
                       nsIURI **aURI)
 {
-    return ::NewURI(aSpec, aCharset, aBaseURI, NS_HTTP_DEFAULT_PORT, aURI);
+    return mozilla::net::NewURI(aSpec, aCharset, aBaseURI, NS_HTTP_DEFAULT_PORT, aURI);
 }
 
 NS_IMETHODIMP
@@ -1747,7 +1755,7 @@ nsHttpHandler::GetCacheSessionNameForStoragePolicy(
 NS_IMETHODIMP
 nsHttpHandler::Observe(nsISupports *subject,
                        const char *topic,
-                       const PRUnichar *data)
+                       const char16_t *data)
 {
     LOG(("nsHttpHandler::Observe [topic=\"%s\"]\n", topic));
 
@@ -2161,7 +2169,7 @@ nsHttpsHandler::NewURI(const nsACString &aSpec,
                        nsIURI *aBaseURI,
                        nsIURI **_retval)
 {
-    return ::NewURI(aSpec, aOriginCharset, aBaseURI, NS_HTTPS_DEFAULT_PORT, _retval);
+    return mozilla::net::NewURI(aSpec, aOriginCharset, aBaseURI, NS_HTTPS_DEFAULT_PORT, _retval);
 }
 
 NS_IMETHODIMP
@@ -2180,3 +2188,6 @@ nsHttpsHandler::AllowPort(int32_t aPort, const char *aScheme, bool *_retval)
     *_retval = false;
     return NS_OK;
 }
+
+} // namespace mozilla::net
+} // namespace mozilla

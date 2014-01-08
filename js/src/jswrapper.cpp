@@ -665,7 +665,7 @@ bool
 SecurityWrapper<Base>::setPrototypeOf(JSContext *cx, HandleObject wrapper,
                                       HandleObject proto, bool *bp)
 {
-    JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_UNWRAP_DENIED);
+    JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_UNWRAP_DENIED);
     return false;
 }
 
@@ -1007,7 +1007,7 @@ js::RemapWrapper(JSContext *cx, JSObject *wobjArg, JSObject *newTargetArg)
     // Update the entry in the compartment's wrapper map to point to the old
     // wrapper, which has now been updated (via reuse or swap).
     JS_ASSERT(wobj->is<WrapperObject>());
-    wcompartment->putWrapper(ObjectValue(*newTarget), ObjectValue(*wobj));
+    wcompartment->putWrapper(cx, ObjectValue(*newTarget), ObjectValue(*wobj));
     return true;
 }
 

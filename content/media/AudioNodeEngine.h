@@ -8,6 +8,7 @@
 
 #include "AudioSegment.h"
 #include "mozilla/dom/AudioNode.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
 
 namespace mozilla {
@@ -72,6 +73,11 @@ public:
    * Put this object into an error state where there are no channels.
    */
   void Clear() { mContents.Clear(); }
+
+  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  {
+    return mContents.SizeOfExcludingThis(aMallocSizeOf);
+  }
 
 private:
   AutoFallibleTArray<Storage,2> mContents;
@@ -143,15 +149,14 @@ float AudioBufferPeakValue(const float* aInput, uint32_t aSize);
 /**
  * In place gain. aScale == 1.0f should be optimized.
  */
-void AudioBufferInPlaceScale(float aBlock[WEBAUDIO_BLOCK_SIZE],
-                             uint32_t aChannelCount,
-                             float aScale);
+void AudioBlockInPlaceScale(float aBlock[WEBAUDIO_BLOCK_SIZE],
+                            uint32_t aChannelCount,
+                            float aScale);
 
 /**
  * In place gain. aScale == 1.0f should be optimized.
  */
 void AudioBufferInPlaceScale(float* aBlock,
-                             uint32_t aChannelCount,
                              float aScale,
                              uint32_t aSize);
 

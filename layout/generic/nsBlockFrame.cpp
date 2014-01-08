@@ -55,9 +55,9 @@
 
 static const int MIN_LINES_NEEDING_CURSOR = 20;
 
-static const PRUnichar kDiscCharacter = 0x2022;
-static const PRUnichar kCircleCharacter = 0x25e6;
-static const PRUnichar kSquareCharacter = 0x25aa;
+static const char16_t kDiscCharacter = 0x2022;
+static const char16_t kCircleCharacter = 0x25e6;
+static const char16_t kSquareCharacter = 0x25aa;
 
 #define DISABLE_FLOAT_BREAKING_IN_COLUMNS
 
@@ -326,7 +326,7 @@ nsBlockFrame::GetSplittableType() const
   return NS_FRAME_SPLITTABLE_NON_RECTANGULAR;
 }
 
-#ifdef DEBUG
+#ifdef DEBUG_FRAME_DUMP
 void
 nsBlockFrame::List(FILE* out, int32_t aIndent, uint32_t aFlags) const
 {
@@ -383,18 +383,20 @@ nsBlockFrame::List(FILE* out, int32_t aIndent, uint32_t aFlags) const
   fputs(">\n", out);
 }
 
+NS_IMETHODIMP
+nsBlockFrame::GetFrameName(nsAString& aResult) const
+{
+  return MakeFrameName(NS_LITERAL_STRING("Block"), aResult);
+}
+#endif
+
+#ifdef DEBUG
 NS_IMETHODIMP_(nsFrameState)
 nsBlockFrame::GetDebugStateBits() const
 {
   // We don't want to include our cursor flag in the bits the
   // regression tester looks at
   return nsBlockFrameSuper::GetDebugStateBits() & ~NS_BLOCK_HAS_LINE_CURSOR;
-}
-
-NS_IMETHODIMP
-nsBlockFrame::GetFrameName(nsAString& aResult) const
-{
-  return MakeFrameName(NS_LITERAL_STRING("Block"), aResult);
 }
 #endif
 

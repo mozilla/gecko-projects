@@ -25,7 +25,7 @@ public final class WaitHelper {
     // assertion from waitFor)?
     private static final int DEFAULT_MAX_WAIT_MS = 5000;
     private static final int PAGE_LOAD_WAIT_MS = 10000;
-    private static final int CHANGE_WAIT_MS = 5000;
+    private static final int CHANGE_WAIT_MS = 10000;
 
     // TODO: via lucasr - Add ThrobberVisibilityChangeVerifier?
     private static final ChangeVerifier[] PAGE_LOAD_VERIFIERS = new ChangeVerifier[] {
@@ -40,7 +40,7 @@ public final class WaitHelper {
 
     private WaitHelper() { /* To disallow instantiation. */ }
 
-    public static void init(final UITestContext context) {
+    protected static void init(final UITestContext context) {
         sContext = context;
         sSolo = context.getSolo();
         sActions = context.getActions();
@@ -105,7 +105,7 @@ public final class WaitHelper {
                 }
             }, CHANGE_WAIT_MS);
 
-            sContext.dumpLog(verifier.getLogTag() +
+            sContext.dumpLog(verifier.getLogTag(),
                     (hasTimedOut ? "timed out." : "was satisfied."));
         }
     }
@@ -129,8 +129,7 @@ public final class WaitHelper {
     }
 
     private static class ToolbarTitleTextChangeVerifier implements ChangeVerifier {
-        private static final String LOGTAG =
-                ToolbarTitleTextChangeVerifier.class.getSimpleName() + ": ";
+        private static final String LOGTAG = ToolbarTitleTextChangeVerifier.class.getSimpleName();
 
         // A regex that matches the page title that shows up while the page is loading.
         private static final Pattern LOADING_PREFIX = Pattern.compile("[A-Za-z]{3,9}://");
@@ -145,7 +144,7 @@ public final class WaitHelper {
         @Override
         public void storeState() {
             mOldTitleText = sToolbar.getPotentiallyInconsistentTitle();
-            sContext.dumpLog(LOGTAG + "stored title, \"" + mOldTitleText + "\".");
+            sContext.dumpLog(LOGTAG, "stored title, \"" + mOldTitleText + "\".");
         }
 
         @Override
@@ -163,7 +162,7 @@ public final class WaitHelper {
             final boolean hasStateChanged = !isLoading && !mOldTitleText.equals(title);
 
             if (hasStateChanged) {
-                sContext.dumpLog(LOGTAG + "state changed to title, \"" + title + "\".");
+                sContext.dumpLog(LOGTAG, "state changed to title, \"" + title + "\".");
             }
             return hasStateChanged;
         }

@@ -73,11 +73,14 @@ const CM_MAPPING = [
   "setSelection",
   "getSelection",
   "replaceSelection",
+  "extendSelection",
   "undo",
   "redo",
   "clearHistory",
   "openDialog",
-  "refresh"
+  "refresh",
+  "getOption",
+  "setOption"
 ];
 
 const { cssProperties, cssValues, cssColors } = getCSSKeywords();
@@ -145,8 +148,10 @@ function Editor(config) {
 
   // Overwrite default config with user-provided, if needed.
   Object.keys(config).forEach((k) => {
-    if (k != "extraKeys")
-      return this.config[k] = config[k];
+    if (k != "extraKeys") {
+      this.config[k] = config[k];
+      return;
+    }
 
     if (!config.extraKeys)
       return;
@@ -161,11 +166,15 @@ function Editor(config) {
   // indenting with tabs, insert one tab. Otherwise insert N
   // whitespaces where N == indentUnit option.
   this.config.extraKeys.Tab = (cm) => {
-    if (cm.somethingSelected())
-      return void cm.indentSelection("add");
+    if (cm.somethingSelected()) {
+      cm.indentSelection("add");
+      return;
+    }
 
-    if (this.config.indentWithTabs)
-      return void cm.replaceSelection("\t", "end", "+input");
+    if (this.config.indentWithTabs) {
+      cm.replaceSelection("\t", "end", "+input");
+      return;
+    }
 
     var num = cm.getOption("indentUnit");
     if (cm.getCursor().ch !== 0) num -= 1;
@@ -250,8 +259,10 @@ Editor.prototype = {
         let tail = { line: line, ch: this.getText(line).length };
 
         // Shift-click on a gutter selects the whole line.
-        if (ev.shiftKey)
-          return void cm.setSelection(head, tail);
+        if (ev.shiftKey) {
+          cm.setSelection(head, tail);
+          return;
+        }
 
         this.emit("gutterClick", line);
       });
@@ -280,8 +291,7 @@ Editor.prototype = {
    * See Editor.modes for the list of all suppoert modes.
    */
   getMode: function () {
-    let cm = editors.get(this);
-    return cm.getOption("mode");
+    return this.getOption("mode");
   },
 
   /**
@@ -289,8 +299,7 @@ Editor.prototype = {
    * See Editor.modes for the list of all suppoert modes.
    */
   setMode: function (value) {
-    let cm = editors.get(this);
-    cm.setOption("mode", value);
+    this.setOption("mode", value);
   },
 
   /**
@@ -325,12 +334,15 @@ Editor.prototype = {
   replaceText: function (value, from, to) {
     let cm = editors.get(this);
 
-    if (!from)
-      return void this.setText(value);
+    if (!from) {
+      this.setText(value);
+      return;
+    }
 
     if (!to) {
       let text = cm.getRange({ line: 0, ch: 0 }, from);
-      return void this.setText(text + value);
+      this.setText(text + value);
+      return;
     }
 
     cm.replaceRange(value, from, to);
@@ -353,18 +365,6 @@ Editor.prototype = {
       return;
 
     this.setCursor(this.getCursor());
-  },
-
-  /**
-   * Extends the current selection to the position specified
-   * by the provided {line, ch} object.
-   */
-  extendSelection: function (pos) {
-    let cm = editors.get(this);
-    let cursor = cm.indexFromPos(cm.getCursor());
-    let anchor = cm.posFromIndex(cursor + pos.start);
-    let head   = cm.posFromIndex(cursor + pos.start + pos.length);
-    cm.setSelection(anchor, head);
   },
 
   /**
@@ -550,8 +550,16 @@ Editor.prototype = {
    */
   markText: function(from, to, className = "marked-text") {
     let cm = editors.get(this);
-    let mark = cm.markText(from, to, { className: className });
-    return { clear: () => mark.clear() };
+    let text = cm.getRange(from, to);
+    let span = cm.getWrapperElement().ownerDocument.createElement("span");
+    span.className = className;
+    span.textContent = text;
+
+    let mark = cm.markText(from, to, { replacedWith: span });
+    return {
+      anchor: span,
+      clear: () => mark.clear()
+    };
   },
 
   /**
@@ -638,8 +646,7 @@ Editor.prototype = {
    * True if the editor is in the read-only mode, false otherwise.
    */
   isReadOnly: function () {
-    let cm = editors.get(this);
-    return cm.getOption("readOnly");
+    return this.getOption("readOnly");
   },
 
   /**
@@ -757,8 +764,10 @@ Editor.prototype = {
       let cm  = editors.get(this);
       let ctx = { ed: this, cm: cm };
 
-      if (name === "initialize")
-        return void funcs[name](ctx);
+      if (name === "initialize") {
+        funcs[name](ctx);
+        return;
+      }
 
       this[name] = funcs[name].bind(null, ctx);
     });
@@ -901,8 +910,10 @@ function controller(ed) {
         "cmd_findAgain": "findNext"
       };
 
-      if (map[cmd])
-        return void cm.execCommand(map[cmd]);
+      if (map[cmd]) {
+        cm.execCommand(map[cmd]);
+        return;
+      }
 
       if (cmd == "cmd_gotoLine")
         ed.jumpToLine(cm);

@@ -52,6 +52,8 @@
  *  Mihai Sucan (Mozilla Corp.)
  */
 
+"use strict";
+
 const {components, Cc, Ci, Cu} = require("chrome");
 loader.lazyImporter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 
@@ -243,7 +245,7 @@ let NetworkHelper = {
       Ci.nsICachingChannel.LOAD_ONLY_FROM_CACHE |
       Ci.nsICachingChannel.LOAD_BYPASS_LOCAL_CACHE_IF_BUSY;
 
-    NetUtil.asyncFetch(channel, function (aInputStream, aStatusCode, aRequest) {
+    NetUtil.asyncFetch(channel, (aInputStream, aStatusCode, aRequest) => {
       if (!components.isSuccessCode(aStatusCode)) {
         aCallback(null);
         return;
@@ -424,11 +426,12 @@ let NetworkHelper = {
     // standard "application/xml" and "application/json", we also look for
     // variants like "application/x-bigcorp-xml" by checking for either string
     // after any word boundary.
-    if (/^application\/[a-z-]+\b(xml|json)/.test(aMimeType)) {
+    if (/^application\/(\w+[\.-]?)+\+(xml|json)/.test(aMimeType)) {
       return true;
     }
 
-    switch (this.mimeCategoryMap[aMimeType]) {
+    let category = this.mimeCategoryMap[aMimeType] || null;
+    switch (category) {
       case "txt":
       case "js":
       case "json":

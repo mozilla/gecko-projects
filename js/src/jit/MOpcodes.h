@@ -98,7 +98,9 @@ namespace jit {
     _(OsrEntry)                                                             \
     _(Nop)                                                                  \
     _(RegExp)                                                               \
+    _(RegExpExec)                                                           \
     _(RegExpTest)                                                           \
+    _(RegExpReplace)                                                        \
     _(Lambda)                                                               \
     _(ImplicitThis)                                                         \
     _(Slots)                                                                \

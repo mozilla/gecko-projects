@@ -287,7 +287,7 @@ void SystemMessageHandledObserver::Init()
 NS_IMETHODIMP
 SystemMessageHandledObserver::Observe(nsISupports* aSubject,
                                       const char* aTopic,
-                                      const PRUnichar* aData)
+                                      const char16_t* aData)
 {
     if (ContentChild::GetSingleton()) {
         ContentChild::GetSingleton()->SendSystemMessageHandled();
@@ -863,9 +863,10 @@ ContentChild::DeallocPIndexedDBChild(PIndexedDBChild* aActor)
 }
 
 asmjscache::PAsmJSCacheEntryChild*
-ContentChild::AllocPAsmJSCacheEntryChild(const asmjscache::OpenMode& aOpenMode,
-                                         const int64_t& aSizeToWrite,
-                                         const IPC::Principal& aPrincipal)
+ContentChild::AllocPAsmJSCacheEntryChild(
+                                    const asmjscache::OpenMode& aOpenMode,
+                                    const asmjscache::WriteParams& aWriteParams,
+                                    const IPC::Principal& aPrincipal)
 {
   NS_NOTREACHED("Should never get here!");
   return nullptr;

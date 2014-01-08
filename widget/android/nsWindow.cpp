@@ -47,6 +47,8 @@ using mozilla::unused;
 #include "mozilla/layers/APZCTreeManager.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
+#include "ScopedGLHelpers.h"
+#include "mozilla/layers/CompositorOGL.h"
 
 #include "nsTArray.h"
 
@@ -88,7 +90,7 @@ class ContentCreationNotifier MOZ_FINAL : public nsIObserver
 
     NS_IMETHOD Observe(nsISupports* aSubject,
                        const char* aTopic,
-                       const PRUnichar* aData)
+                       const char16_t* aData)
     {
         if (!strcmp(aTopic, "ipc:content-created")) {
             nsCOMPtr<nsIObserver> cpo = do_QueryInterface(aSubject);
@@ -1575,7 +1577,7 @@ nsWindow::InitKeyEvent(WidgetKeyboardEvent& event, AndroidGeckoEvent& key,
     if (event.mKeyNameIndex == KEY_NAME_INDEX_USE_STRING) {
         int keyValue = key.DOMPrintableKeyValue();
         if (keyValue) {
-            event.mKeyValue = static_cast<PRUnichar>(keyValue);
+            event.mKeyValue = static_cast<char16_t>(keyValue);
         }
     }
     uint32_t domKeyCode = ConvertAndroidKeyCodeToDOMKeyCode(key.KeyCode());
@@ -2380,6 +2382,10 @@ nsWindow::DrawWindowUnderlay(LayerManagerComposite* aManager, nsIntRect aRect)
         return;
     }
 
+    gl::GLContext* gl = static_cast<CompositorOGL*>(aManager->GetCompositor())->gl();
+    gl::ScopedGLState scopedScissorTestState(gl, LOCAL_GL_SCISSOR_TEST);
+    gl::ScopedScissorRect scopedScissorRectState(gl);
+
     client->ActivateProgram();
     if (!mLayerRendererFrame.BeginDrawing(&jniFrame)) return;
     if (!mLayerRendererFrame.DrawBackground(&jniFrame)) return;
@@ -2401,6 +2407,10 @@ nsWindow::DrawWindowOverlay(LayerManagerComposite* aManager, nsIntRect aRect)
                       "Frame should have been created in DrawWindowUnderlay()!");
 
     GeckoLayerClient* client = AndroidBridge::Bridge()->GetLayerClient();
+
+    gl::GLContext* gl = static_cast<CompositorOGL*>(aManager->GetCompositor())->gl();
+    gl::ScopedGLState scopedScissorTestState(gl, LOCAL_GL_SCISSOR_TEST);
+    gl::ScopedScissorRect scopedScissorRectState(gl);
 
     client->ActivateProgram();
     if (!mLayerRendererFrame.DrawForeground(&jniFrame)) return;

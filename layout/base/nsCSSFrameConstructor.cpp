@@ -2653,16 +2653,6 @@ nsCSSFrameConstructor::SetUpDocElementContainingBlock(nsIContent* aDocElement)
   // will act as the scrolling mechanism for the viewport. 
   // XXX Do we even need a viewport when printing to a printer?
 
-  // As long as the docshell doesn't prohibit it, and the device supports
-  // it, create a scroll frame that will act as the scolling mechanism for
-  // the viewport.
-  //
-  // Threre are three possible values stored in the docshell:
-  //  1) nsIScrollable::Scrollbar_Never = no scrollbars
-  //  2) nsIScrollable::Scrollbar_Auto = scrollbars appear if needed
-  //  3) nsIScrollable::Scrollbar_Always = scrollbars always
-  // Only need to create a scroll frame/view for cases 2 and 3.
-
   bool isHTML = aDocElement->IsHTML();
   bool isXUL = false;
 
@@ -9414,7 +9404,7 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
     if (!aFrame->IsGeneratedContentFrame()) {
       nsIContent *badKid = AnyKidsNeedBlockParent(aFrameItems.FirstChild());
       nsDependentAtomString parentTag(aContent->Tag()), kidTag(badKid->Tag());
-      const PRUnichar* params[] = { parentTag.get(), kidTag.get() };
+      const char16_t* params[] = { parentTag.get(), kidTag.get() };
       const nsStyleDisplay *display = frameStyleContext->StyleDisplay();
       const char *message =
         (display->mDisplay == NS_STYLE_DISPLAY_INLINE_BOX)
@@ -9710,7 +9700,7 @@ FirstLetterCount(const nsTextFragment* aFragment)
 
   int32_t i, n = aFragment->GetLength();
   for (i = 0; i < n; i++) {
-    PRUnichar ch = aFragment->CharAt(i);
+    char16_t ch = aFragment->CharAt(i);
     // FIXME: take content language into account when deciding whitespace.
     if (dom::IsSpaceCharacter(ch)) {
       if (firstLetterLength) {

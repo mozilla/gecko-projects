@@ -279,6 +279,8 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     UNSAFE_OP(Pow)
     UNSAFE_OP(PowHalf)
     UNSAFE_OP(RegExpTest)
+    UNSAFE_OP(RegExpExec)
+    UNSAFE_OP(RegExpReplace)
     UNSAFE_OP(CallInstanceOf)
     UNSAFE_OP(FunctionBoundary)
     UNSAFE_OP(GuardString)
@@ -697,7 +699,7 @@ bool
 ParallelSafetyVisitor::visitCall(MCall *ins)
 {
     // DOM? Scary.
-    if (ins->isDOMFunction()) {
+    if (ins->isCallDOMNative()) {
         SpewMIR(ins, "call to dom function");
         return markUnsafe();
     }

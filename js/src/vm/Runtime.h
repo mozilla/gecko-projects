@@ -340,10 +340,8 @@ class NewObjectCache
     inline bool lookupGlobal(const Class *clasp, js::GlobalObject *global, gc::AllocKind kind,
                              EntryIndex *pentry);
 
-    bool lookupType(const Class *clasp, js::types::TypeObject *type, gc::AllocKind kind,
-                    EntryIndex *pentry)
-    {
-        return lookup(clasp, type, kind, pentry);
+    bool lookupType(js::types::TypeObject *type, gc::AllocKind kind, EntryIndex *pentry) {
+        return lookup(type->clasp(), type, kind, pentry);
     }
 
     /*
@@ -359,11 +357,11 @@ class NewObjectCache
     inline void fillGlobal(EntryIndex entry, const Class *clasp, js::GlobalObject *global,
                            gc::AllocKind kind, JSObject *obj);
 
-    void fillType(EntryIndex entry, const Class *clasp, js::types::TypeObject *type, gc::AllocKind kind,
+    void fillType(EntryIndex entry, js::types::TypeObject *type, gc::AllocKind kind,
                   JSObject *obj)
     {
         JS_ASSERT(obj->type() == type);
-        return fill(entry, clasp, type, kind, obj);
+        return fill(entry, type->clasp(), type, kind, obj);
     }
 
     /* Invalidate any entries which might produce an object with shape/proto. */
@@ -1290,6 +1288,10 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     int gcZeal() { return gcZeal_; }
 
+    bool upcomingZealousGC() {
+        return gcNextScheduled == 1;
+    }
+
     bool needZealousGC() {
         if (gcNextScheduled > 0 && --gcNextScheduled == 0) {
             if (gcZeal() == js::gc::ZealAllocValue ||
@@ -1305,6 +1307,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     }
 #else
     int gcZeal() { return 0; }
+    bool upcomingZealousGC() { return false; }
     bool needZealousGC() { return false; }
 #endif
 

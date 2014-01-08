@@ -140,13 +140,12 @@ public: // WebIDL interface:
             ErrorResult& aRv);
 
 private: // constructor && distructor
-  WebSocket();
+  WebSocket(nsPIDOMWindow* aOwnerWindow);
   virtual ~WebSocket();
 
 protected:
   nsresult Init(JSContext* aCx,
                 nsIPrincipal* aPrincipal,
-                nsPIDOMWindow* aOwnerWindow,
                 const nsAString& aURL,
                 nsTArray<nsString>& aProtocolArray);
 
@@ -168,8 +167,8 @@ protected:
 
   nsresult ConsoleError();
   nsresult PrintErrorOnConsole(const char* aBundleURI,
-                               const PRUnichar* aError,
-                               const PRUnichar** aFormatStrings,
+                               const char16_t* aError,
+                               const char16_t** aFormatStrings,
                                uint32_t aFormatStringsLen);
 
   nsresult DoOnMessageAvailable(const nsACString& aMsg,

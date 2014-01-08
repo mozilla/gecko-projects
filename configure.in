@@ -71,7 +71,7 @@ GCONF_VERSION=1.2.1
 GIO_VERSION=2.20
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.8.1
+SQLITE_VERSION=3.8.2
 
 MSMANIFEST_TOOL=
 
@@ -1523,6 +1523,17 @@ MOZ_ARG_ENABLE_BOOL(profiling,
 [  --enable-profiling      Set compile flags necessary for using sampling profilers (e.g. shark, perf)],
     MOZ_PROFILING=1,
     MOZ_PROFILING= )
+
+dnl ========================================================
+dnl = Turn on systrace for android/b2g.
+dnl ========================================================
+MOZ_ARG_ENABLE_BOOL(systrace,
+[  --enable-systrace       Set compile flags necessary for using sampling profilers (e.g. shark, perf)],
+    MOZ_USE_SYSTRACE=1,
+    MOZ_USE_SYSTRACE= )
+if test -n "$MOZ_USE_SYSTRACE"; then
+    AC_DEFINE(MOZ_USE_SYSTRACE)
+fi
 
 # For profiling builds keep the symbol information
 if test "$MOZ_PROFILING" -a -z "$STRIP_FLAGS"; then
@@ -7704,6 +7715,12 @@ else
     rm -f dummy-hello.c
   fi
 fi
+
+dnl Make sure that the build system can handle non-ASCII characters
+dnl in environment variables to prevent it from breking silently on
+dnl non-English systems.
+NONASCII=$'\241\241'
+AC_SUBST(NONASCII)
 
 dnl ========================================================
 dnl =

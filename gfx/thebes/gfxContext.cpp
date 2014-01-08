@@ -53,7 +53,7 @@ public:
       Matrix transform = state.surfTransform;
 
       if (state.patternTransformChanged) {
-        Matrix mat = mContext->mTransform;
+        Matrix mat = mContext->GetDTTransform();
         mat.Invert();
 
         transform = transform * state.patternTransform * mat;
@@ -113,6 +113,15 @@ gfxContext::gfxContext(DrawTarget *aTarget)
   mStateStack.SetLength(1);
   CurrentState().drawTarget = mDT;
   mDT->SetTransform(Matrix());
+}
+
+/* static */ already_AddRefed<gfxContext>
+gfxContext::ContextForDrawTarget(DrawTarget* aTarget)
+{
+  Matrix transform = aTarget->GetTransform();
+  nsRefPtr<gfxContext> result = new gfxContext(aTarget);
+  result->SetMatrix(ThebesMatrix(transform));
+  return result.forget();
 }
 
 gfxContext::~gfxContext()
