@@ -289,14 +289,14 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
         switch (readFormat) {
             case LOCAL_GL_RGBA:
             case LOCAL_GL_BGRA: {
-                readFormatGFX = hasAlpha ? FORMAT_B8G8R8A8
-                                         : FORMAT_B8G8R8X8;
+                readFormatGFX = hasAlpha ? SurfaceFormat::B8G8R8A8
+                                         : SurfaceFormat::B8G8R8X8;
                 break;
             }
             case LOCAL_GL_RGB: {
                 MOZ_ASSERT(readPixelSize == 2);
                 MOZ_ASSERT(readType == LOCAL_GL_UNSIGNED_SHORT_5_6_5_REV);
-                readFormatGFX = FORMAT_R5G6B5;
+                readFormatGFX = SurfaceFormat::R5G6B5;
                 break;
             }
             default: {
@@ -378,7 +378,7 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
     // RGBA reads to RGBA images from no-alpha buffers.
 #ifdef XP_MACOSX
     if (gl->WorkAroundDriverBugs() &&
-        gl->Vendor() == gl::GLContext::VendorNVIDIA &&
+        gl->Vendor() == gl::GLVendor::NVIDIA &&
         dest->Format() == gfxImageFormatARGB32 &&
         width && height)
     {
@@ -411,7 +411,7 @@ static TemporaryRef<DataSourceSurface> YInvertImageSurface(DataSourceSurface* aS
                                                aSurf->GetFormat(),
                                                aSurf->Stride());
   RefPtr<DrawTarget> dt =
-    Factory::CreateDrawTargetForData(BACKEND_CAIRO,
+    Factory::CreateDrawTargetForData(BackendType::CAIRO,
                                      temp->GetData(),
                                      temp->GetSize(),
                                      temp->Stride(),
@@ -444,8 +444,8 @@ ReadBackSurface(GLContext* gl, GLuint aTexture, bool aYInvert, SurfaceFormat aFo
     gl->fGetTexLevelParameteriv(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_TEXTURE_HEIGHT, &size.height);
 
     RefPtr<DataSourceSurface> surf =
-      Factory::CreateDataSourceSurfaceWithStride(size, FORMAT_B8G8R8A8,
-                                                 GetAlignedStride<4>(size.width * BytesPerPixel(FORMAT_B8G8R8A8)));
+      Factory::CreateDataSourceSurfaceWithStride(size, SurfaceFormat::B8G8R8A8,
+                                                 GetAlignedStride<4>(size.width * BytesPerPixel(SurfaceFormat::B8G8R8A8)));
 
     if (!surf) {
         return nullptr;
@@ -461,7 +461,7 @@ ReadBackSurface(GLContext* gl, GLuint aTexture, bool aYInvert, SurfaceFormat aFo
         gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, currentPackAlignment);
     }
 
-    if (aFormat == FORMAT_R8G8B8A8 || aFormat == FORMAT_R8G8B8X8) {
+    if (aFormat == SurfaceFormat::R8G8B8A8 || aFormat == SurfaceFormat::R8G8B8X8) {
       SwapRAndBComponents(surf);
     }
 
@@ -508,15 +508,10 @@ GLReadTexImageHelper::ReadTexImage(GLuint aTextureId,
         return nullptr;
     }
 
-    realGLboolean oldBlend, oldScissor;
     GLint oldrb, oldfb, oldprog, oldTexUnit, oldTex;
     GLuint rb, fb;
 
     do {
-        /* Save current GL state */
-        oldBlend = mGL->fIsEnabled(LOCAL_GL_BLEND);
-        oldScissor = mGL->fIsEnabled(LOCAL_GL_SCISSOR_TEST);
-
         mGL->fGetIntegerv(LOCAL_GL_RENDERBUFFER_BINDING, &oldrb);
         mGL->fGetIntegerv(LOCAL_GL_FRAMEBUFFER_BINDING, &oldfb);
         mGL->fGetIntegerv(LOCAL_GL_CURRENT_PROGRAM, &oldprog);
@@ -536,9 +531,8 @@ GLReadTexImageHelper::ReadTexImage(GLuint aTextureId,
             break;
         }
 
-        /* Set required GL state */
-        mGL->fDisable(LOCAL_GL_BLEND);
-        mGL->fDisable(LOCAL_GL_SCISSOR_TEST);
+        ScopedGLState scopedScissorTestState(mGL, LOCAL_GL_SCISSOR_TEST, false);
+        ScopedGLState scopedBlendState(mGL, LOCAL_GL_BLEND, false);
 
         ScopedViewportRect(mGL, 0, 0, aSize.width, aSize.height);
 
@@ -631,12 +625,6 @@ GLReadTexImageHelper::ReadTexImage(GLuint aTextureId,
     // note that deleting 0 has no effect in any of these calls
     mGL->fDeleteRenderbuffers(1, &rb);
     mGL->fDeleteFramebuffers(1, &fb);
-
-    if (oldBlend)
-        mGL->fEnable(LOCAL_GL_BLEND);
-
-    if (oldScissor)
-        mGL->fEnable(LOCAL_GL_SCISSOR_TEST);
 
     if (aTextureId)
         mGL->fBindTexture(aTextureTarget, oldTex);
