@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ContentHelper.h"
 #include "LayerManagerD3D10.h"
 #include "MetroWidget.h"
 #include "MetroApp.h"
@@ -686,7 +687,7 @@ MetroWidget::DeliverNextKeyboardEvent()
     delete event;
     return;
   }
-  
+
   if (DispatchWindowEvent(event) && event->message == NS_KEY_DOWN) {
     // keydown events may be followed by multiple keypress events which
     // shouldn't be sent if preventDefault is called on keydown.
@@ -738,6 +739,11 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
 
   MSGResult msgResult(&processResult);
   MouseScrollHandler::ProcessMessage(this, aMsg, aWParam, aLParam, msgResult);
+  if (msgResult.mConsumed) {
+    return processResult;
+  }
+
+  nsTextStore::ProcessMessage(this, aMsg, aWParam, aLParam, msgResult);
   if (msgResult.mConsumed) {
     return processResult;
   }
@@ -862,9 +868,6 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
 
     default:
     {
-      if (aWParam == WM_USER_TSF_TEXTCHANGE) {
-        nsTextStore::OnTextChangeMsg();
-      }
       break;
     }
   }
@@ -1015,6 +1018,31 @@ CompositorParent* MetroWidget::NewCompositorParent(int aSurfaceWidth, int aSurfa
   }
 
   return compositor;
+}
+
+MetroWidget::TouchBehaviorFlags
+MetroWidget::ContentGetAllowedTouchBehavior(const nsIntPoint& aPoint)
+{
+  return ContentHelper::GetAllowedTouchBehavior(this, aPoint);
+}
+
+void
+MetroWidget::ApzcGetAllowedTouchBehavior(WidgetInputEvent* aTransformedEvent,
+                                         nsTArray<TouchBehaviorFlags>& aOutBehaviors)
+{
+  LogFunction();
+  return APZController::sAPZC->GetAllowedTouchBehavior(aTransformedEvent, aOutBehaviors);
+}
+
+void
+MetroWidget::ApzcSetAllowedTouchBehavior(const ScrollableLayerGuid& aGuid,
+                                         nsTArray<TouchBehaviorFlags>& aBehaviors)
+{
+  LogFunction();
+  if (!APZController::sAPZC) {
+    return;
+  }
+  APZController::sAPZC->SetAllowedTouchBehavior(aGuid, aBehaviors);
 }
 
 void

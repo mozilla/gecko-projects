@@ -1623,8 +1623,9 @@ TabChild::RecvHandleLongTap(const CSSIntPoint& aPoint)
     return true;
   }
 
-  DispatchMouseEvent(NS_LITERAL_STRING("contextmenu"), aPoint, 2, 1, 0, false,
-                     nsIDOMMouseEvent::MOZ_SOURCE_TOUCH);
+  mContextMenuHandled =
+      DispatchMouseEvent(NS_LITERAL_STRING("contextmenu"), aPoint, 2, 1, 0, false,
+                         nsIDOMMouseEvent::MOZ_SOURCE_TOUCH);
 
   return true;
 }
@@ -1761,6 +1762,10 @@ TabChild::UpdateTapState(const WidgetTouchEvent& aEvent, nsEventStatus aStatus)
                                 "ui.dragThresholdY", 25);
     Preferences::AddIntVarCache(&sContextMenuDelayMs,
                                 "ui.click_hold_context_menus.delay", 500);
+  }
+
+  if (aEvent.touches.Length() == 0) {
+    return;
   }
 
   bool currentlyTrackingTouch = (mActivePointerId >= 0);
@@ -2382,7 +2387,7 @@ TabChild::DispatchMouseEvent(const nsString&       aType,
   
   bool defaultPrevented = false;
   utils->SendMouseEvent(aType, aPoint.x, aPoint.y, aButton, aClickCount, aModifiers,
-                        aIgnoreRootScrollFrame, 0, aInputSourceArg, &defaultPrevented);
+                        aIgnoreRootScrollFrame, 0, aInputSourceArg, false, 4, &defaultPrevented);
   return defaultPrevented;
 }
 

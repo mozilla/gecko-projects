@@ -18,7 +18,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "RecentWindow",
 XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
   "resource:///modules/CustomizableUI.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "DEFAULT_TOOLBAR_PLACEMENTS", function() {
+XPCOMUtils.defineLazyGetter(this, "DEFAULT_AREA_PLACEMENTS", function() {
   let result = {
     "PanelUI-contents": [
       "edit-controls",
@@ -32,6 +32,7 @@ XPCOMUtils.defineLazyGetter(this, "DEFAULT_TOOLBAR_PLACEMENTS", function() {
       "find-button",
       "preferences-button",
       "add-ons-button",
+      "developer-button",
     ],
     "nav-bar": [
       "urlbar-container",
@@ -74,6 +75,10 @@ XPCOMUtils.defineLazyGetter(this, "DEFAULT_TOOLBAR_PLACEMENTS", function() {
   return result;
 });
 
+XPCOMUtils.defineLazyGetter(this, "DEFAULT_AREAS", function() {
+  return Object.keys(DEFAULT_AREA_PLACEMENTS);
+});
+
 XPCOMUtils.defineLazyGetter(this, "PALETTE_ITEMS", function() {
   let result = [
     "open-file-button",
@@ -84,7 +89,7 @@ XPCOMUtils.defineLazyGetter(this, "PALETTE_ITEMS", function() {
     "tabview-button",
   ];
 
-  let panelPlacements = DEFAULT_TOOLBAR_PLACEMENTS["PanelUI-contents"];
+  let panelPlacements = DEFAULT_AREA_PLACEMENTS["PanelUI-contents"];
   if (panelPlacements.indexOf("characterencoding-button") == -1) {
     result.push("characterencoding-button");
   }
@@ -94,7 +99,7 @@ XPCOMUtils.defineLazyGetter(this, "PALETTE_ITEMS", function() {
 
 XPCOMUtils.defineLazyGetter(this, "DEFAULT_ITEMS", function() {
   let result = [];
-  for (let [, buttons] of Iterator(DEFAULT_TOOLBAR_PLACEMENTS)) {
+  for (let [, buttons] of Iterator(DEFAULT_AREA_PLACEMENTS)) {
     result = result.concat(buttons);
   }
   return result;
@@ -126,12 +131,20 @@ const OTHER_MOUSEUP_MONITORED_ITEMS = [
   "PlacesToolbarItems",
 ];
 
+// Weakly maps browser windows to objects whose keys are relative
+// timestamps for when some kind of session started. For example,
+// when a customization session started. That way, when the window
+// exits customization mode, we can determine how long the session
+// lasted.
+const WINDOW_DURATION_MAP = new WeakMap();
+
 this.BrowserUITelemetry = {
   init: function() {
     UITelemetry.addSimpleMeasureFunction("toolbars",
                                          this.getToolbarMeasures.bind(this));
     Services.obs.addObserver(this, "sessionstore-windows-restored", false);
     Services.obs.addObserver(this, "browser-delayed-startup-finished", false);
+    CustomizableUI.addListener(this);
   },
 
   observe: function(aSubject, aTopic, aData) {
@@ -195,13 +208,17 @@ this.BrowserUITelemetry = {
   },
 
   _countableEvents: {},
+  _countEvent: function(aKeyArray) {
+    let countObject = this._ensureObjectChain(aKeyArray, 0);
+    let lastItemKey = aKeyArray[aKeyArray.length - 1];
+    countObject[lastItemKey]++;
+  },
+
   _countMouseUpEvent: function(aCategory, aAction, aButton) {
     const BUTTONS = ["left", "middle", "right"];
     let buttonKey = BUTTONS[aButton];
     if (buttonKey) {
-      let countObject =
-        this._ensureObjectChain([aCategory, aAction, buttonKey], 0);
-      countObject[buttonKey]++;
+      this._countEvent([aCategory, aAction, buttonKey]);
     }
   },
 
@@ -239,6 +256,8 @@ this.BrowserUITelemetry = {
         item.addEventListener("mouseup", this);
       }
     }
+
+    WINDOW_DURATION_MAP.set(aWindow, {});
   },
 
   _unregisterWindow: function(aWindow) {
@@ -382,10 +401,10 @@ this.BrowserUITelemetry = {
         if (DEFAULT_ITEMS.indexOf(item) != -1) {
           // Ok, it's a default item - but is it in its default
           // toolbar? We use Array.isArray instead of checking for
-          // toolbarID in DEFAULT_TOOLBAR_PLACEMENTS because an add-on might
+          // toolbarID in DEFAULT_AREA_PLACEMENTS because an add-on might
           // be clever and give itself the id of "toString" or something.
-          if (Array.isArray(DEFAULT_TOOLBAR_PLACEMENTS[areaID]) &&
-              DEFAULT_TOOLBAR_PLACEMENTS[areaID].indexOf(item) != -1) {
+          if (Array.isArray(DEFAULT_AREA_PLACEMENTS[areaID]) &&
+              DEFAULT_AREA_PLACEMENTS[areaID].indexOf(item) != -1) {
             // The item is in its default toolbar
             defaultKept.push(item);
           } else {
@@ -411,13 +430,66 @@ this.BrowserUITelemetry = {
     result.nondefaultAdded = nondefaultAdded;
     result.defaultRemoved = defaultRemoved;
 
+    // Next, determine how many add-on provided toolbars exist.
+    let addonToolbars = 0;
+    let toolbars = document.querySelectorAll("toolbar[customizable=true]");
+    for (let toolbar of toolbars) {
+      if (DEFAULT_AREAS.indexOf(toolbar.id) == -1) {
+        addonToolbars++;
+      }
+    }
+    result.addonToolbars = addonToolbars;
+
+    // Find out how many open tabs we have in each window
+    let winEnumerator = Services.wm.getEnumerator("navigator:browser");
+    let visibleTabs = [];
+    let hiddenTabs = [];
+    while (winEnumerator.hasMoreElements()) {
+      let someWin = winEnumerator.getNext();
+      if (someWin.gBrowser) {
+        let visibleTabsNum = someWin.gBrowser.visibleTabs.length;
+        visibleTabs.push(visibleTabsNum);
+        hiddenTabs.push(someWin.gBrowser.tabs.length - visibleTabsNum);
+      }
+    }
+    result.visibleTabs = visibleTabs;
+    result.hiddenTabs = hiddenTabs;
+
     return result;
   },
 
   getToolbarMeasures: function() {
     let result = this._firstWindowMeasurements || {};
     result.countableEvents = this._countableEvents;
+    result.durations = this._durations;
     return result;
+  },
+
+  countCustomizationEvent: function(aEventType) {
+    this._countEvent(["customize", aEventType]);
+  },
+
+  _durations: {
+    customization: [],
+  },
+
+  onCustomizeStart: function(aWindow) {
+    this._countEvent(["customize", "start"]);
+    let durationMap = WINDOW_DURATION_MAP.get(aWindow);
+    if (!durationMap) {
+      durationMap = {};
+      WINDOW_DURATION_MAP.set(aWindow, durationMap);
+    }
+    durationMap.customization = aWindow.performance.now();
+  },
+
+  onCustomizeEnd: function(aWindow) {
+    let durationMap = WINDOW_DURATION_MAP.get(aWindow);
+    if (durationMap && "customization" in durationMap) {
+      let duration = aWindow.performance.now() - durationMap.customization;
+      this._durations.customization.push(duration);
+      delete durationMap.customization;
+    }
   },
 };
 

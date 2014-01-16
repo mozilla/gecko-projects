@@ -77,10 +77,19 @@
     "dom/imptests/html/dom/ranges/test_Range-surroundContents.html":"",
     "dom/imptests/html/dom/ranges/test_Range-mutations.html":"Test timed out.",
     "dom/encoding/test/test_stringencoding.html":"Test timed out on b2g board",
-
-    "content/events/test/test_bug615597.html":"bug 900969, 5 tests",
-    "content/events/test/test_bug667919-1.html":"bug 900969, 5 tests",
-    "content/events/test/test_bug667919-2.html":"bug 900969, 5 tests",
+    "dom/events/test/test_bug615597.html":"bug 900969, 5 tests",
+    "dom/events/test/test_bug667919-1.html":"bug 900969, 5 tests",
+    "dom/events/test/test_bug667919-2.html":"bug 900969, 5 tests",
+    "dom/events/test/test_continuous_wheel_events.html":"5535 passed, 108 failed - more tests running than desktop",
+    "dom/events/test/test_bug422132.html":"2 failures out of 8, mousewheel test",
+    "dom/events/test/test_bug659071.html":"1 failure out of 2, mousewheel zoom test",
+    "dom/events/test/test_dom_wheel_event.html":"456 failed out of 19873, mousewheel test",
+    "dom/events/test/test_bug426082.html":"1 failure out of 6, Moving the mouse down from the label should have unpressed the button",
+    "dom/events/test/test_bug534833.html":"4 failures out of 6, bug 901564,click not fired, also disabled on Android",
+    "dom/events/test/test_bug603008.html":"1 failure out of 615, bug 901533, Six move events fired - got 7, expected 6, also disabled on Android, touchmove",
+    "dom/events/test/test_bug508479.html":"drag event, also fails on Android",
+    "dom/events/test/test_dragstart.html":"drag event, also fails on Android",
+    "dom/events/test/test_bug864040.html":"failing when the test gets moved around, and on debug",
 
     "content/html/content/test/test_bug561636.html":"observerservice not working",
     "content/base/test/test_bug548193.html":"observerservice issue",
@@ -88,7 +97,6 @@
 
     "content/base/test/test_XHRSendData.html":"seems to stall",
     "content/base/test/test_XHR_parameters.html":"86 total, 4 failing - testing mozAnon - got false, expected true",
-    "content/base/test/test_XHR_system.html":"12 total, 2 failing - .mozSystem == true - got false, expected true + ",
 
     "content/base/test/test_bug431701.html":"xmlhttprequest causes crash, bug 902271",
     "content/base/test/test_bug422537.html":"xmlhttprequest causes crash, bug 902271",
@@ -155,20 +163,6 @@
     "dom/tests/mochitest/bugs/test_bug504862.html":"showmodaldialog",
     "dom/tests/mochitest/bugs/test_bug61098.html":"showmodaldialog",
 
-    "content/events/test/test_continuous_wheel_events.html":"5535 passed, 108 failed - more tests running than desktop",
-    "content/events/test/test_bug422132.html":"2 failures out of 8, mousewheel test",
-    "content/events/test/test_bug659071.html":"1 failure out of 2, mousewheel zoom test",
-    "content/events/test/test_dom_wheel_event.html":"456 failed out of 19873, mousewheel test",
-
-    "content/events/test/test_bug426082.html":"1 failure out of 6, Moving the mouse down from the label should have unpressed the button",
-    "content/events/test/test_bug534833.html":"4 failures out of 6, bug 901564,click not fired, also disabled on Android",
-    "content/events/test/test_bug603008.html":"1 failure out of 615, bug 901533, Six move events fired - got 7, expected 6, also disabled on Android, touchmove",
-
-    "content/events/test/test_bug508479.html":"drag event, also fails on Android",
-    "content/events/test/test_dragstart.html":"drag event, also fails on Android",
-
-    "content/events/test/test_bug864040.html":"failing when the test gets moved around, and on debug",
-
     "content/html/content/test/forms/test_input_file_picker.html":"5 failures out of 139 and timing out, bug 901581",
     "content/html/content/test/forms/test_validation.html":"374 total, bug 901848, no keygen support",
 
@@ -232,14 +226,7 @@
     "content/base/test/websocket_hybi/test_send-arraybuffer.html":"",
     "content/base/test/websocket_hybi/test_send-blob.html":"",
     "content/canvas/test/webgl/test_webgl_conformance_test_suite.html":"",
-    "content/events/test/test_bug226361.xhtml":"",
-    "content/events/test/test_bug238987.html":"",
-    "content/events/test/test_bug409604.html":"",
-    "content/events/test/test_bug457672.html":"",
-    "content/events/test/test_bug574663.html":"",
-    "content/events/test/test_bug607464.html":"",
-    "content/events/test/test_wheel_default_action.html":"",
-    "content/base/test/test_bug682592.html":"",
+    "content/base/test/test_bug682592.html":"",	
     "content/html/document/test/test_bug369370.html":"",
     "content/svg/content/test/test_text_selection.html":"Mouse selection not workin on b2g",
     "content/svg/content/test/test_SVGAnimatedImageSMILDisabled.html":"",
@@ -250,18 +237,13 @@
     "content/base/test/test_bug424359-2.html":"",
     "content/base/test/test_mixed_content_blocker_bug803225.html":"",
     "content/html/document/test/test_non-ascii-cookie.html":"",
-    "content/html/document/test/test_document.watch.html":"expects document.cookie setting to work",
 
     "docshell/test/navigation/test_bug13871.html":"",
     "docshell/test/navigation/test_bug270414.html":"",
-    "docshell/test/navigation/test_bug344861.html":"",
-    "docshell/test/navigation/test_bug386782.html":"",
     "docshell/test/navigation/test_not-opener.html":"",
-    "docshell/test/navigation/test_reserved.html":"",
     "docshell/test/test_bug413310.html":"",
 
     "dom/imptests/html/webgl":"",
-    "dom/battery/test/test_battery_basics.html":"",
 
     "dom/browser-element/mochitest/test_browserElement_inproc_Alert.html":"",
     "dom/browser-element/mochitest/test_browserElement_inproc_AppFramePermission.html":"",
@@ -296,6 +278,13 @@
     "dom/browser-element/mochitest/test_browserElement_oop_OpenWindowRejected.html":"",
     "dom/browser-element/mochitest/test_browserElement_oop_SecurityChange.html":"",
     "dom/browser-element/mochitest/test_browserElement_oop_TargetBlank.html":"",
+    "dom/events/test/test_bug226361.xhtml":"",
+    "dom/events/test/test_bug238987.html":"",
+    "dom/events/test/test_bug409604.html":"",
+    "dom/events/test/test_bug457672.html":"",
+    "dom/events/test/test_bug574663.html":"",
+    "dom/events/test/test_bug607464.html":"",
+    "dom/events/test/test_wheel_default_action.html":"",
 
     "dom/file/test/test_progress_events.html":"All of these fail fairly regularly with: UnknownError: The operation failed for reasons unrelated to the database itself and not covered by any other error code. at http://mochi.test:8888/tests/dom/file/test/helpers.js:126",
     "dom/file/test/test_request_readyState.html":"",
@@ -346,16 +335,10 @@
     "dom/media/tests/mochitest/test_peerConnection_throwInCallbacks.html":"",
     "dom/media/tests/ipc/test_ipc.html":"nested ipc not working",
 
-    "dom/network/tests/test_networkstats_basics.html":"Will be fixed in bug 858005",
     "dom/permission/tests/test_permission_basics.html":"https not working, bug 907770",
 
-    "dom/tests/mochitest/bugs/test_bug335976.xhtml":"",
-    "dom/tests/mochitest/bugs/test_bug369306.html":"test timed out, can't focus back from popup window to opener?",
-    "dom/tests/mochitest/bugs/test_bug396843.html":"",
     "dom/tests/mochitest/bugs/test_bug406375.html":"",
-
     "dom/tests/mochitest/bugs/test_bug427744.html":"",
-    "dom/tests/mochitest/bugs/test_bug641552.html":"",
     "dom/tests/mochitest/bugs/test_sizetocontent_clamp.html": "Windows can't change size on B2G",
     "dom/tests/mochitest/bugs/test_resize_move_windows.html": "Windows can't change size and position on B2G",
     "dom/tests/mochitest/bugs/test_window_bar.html":"",
@@ -403,12 +386,10 @@
 
     "dom/tests/mochitest/pointerlock/test_pointerlock-api.html":"window.open focus issues (using fullscreen)",
     "dom/tests/mochitest/webapps/test_bug_779982.html":"",
-    "dom/tests/mochitest/whatwg/test_postMessage_closed.html":"bug 894914 - wrong data - got FAIL, expected message",
 
     "dom/workers/test/test_suspend.html":"test timed out, might need more time",
     "dom/workers/test/test_xhr_parameters.html":"",
     "dom/workers/test/test_xhr_system.html":"",
-    "dom/workers/test/test_closeOnGC.html": "times out",
     "dom/workers/test/test_errorPropagation.html":"times out",
     "dom/workers/test/test_errorwarning.html":"Failed to load script: errorwarning_worker.js",
     "dom/workers/test/test_fibonacci.html":"Failed to load script: fibonacci_worker.js",
@@ -420,22 +401,16 @@
     "layout/base/tests/test_mozPaintCount.html":"depends on plugins support",
     "layout/forms/test/test_bug348236.html":"select form control popup",
     "layout/forms/test/test_bug446663.html":"needs copy support",
-    "layout/forms/test/test_bug564115.html":"times out on window.open and focus event",
     "layout/forms/test/test_bug571352.html":"shift-click multi-select not working?",
     "layout/forms/test/test_textarea_resize.html":"resizing textarea not available in b2g",
     "layout/forms/test/test_bug903715.html":"select elements don't use an in-page popup in B2G",
-    "layout/forms/test/test_listcontrol_search.html" : "select elements don't use an in-page popup in B2G",
     "layout/generic/test/test_bug392746.html":"ctrl mouse select not working in b2g",
-    "layout/generic/test/test_bug470212.html":"shift mouse select not working in b2g",
-    "layout/generic/test/test_bug514732.html":"times out, also on Android",
     "layout/generic/test/test_bug791616.html":"Target should not have scrolled - got 114.10000610351562, expected 115.39999389648438",
     "layout/generic/test/test_invalidate_during_plugin_paint.html":"plugins not supported",
-    "layout/generic/test/test_page_scroll_with_fixed_pos.html":"opened window too small?",
     "layout/generic/test/test_plugin_focus.html":"plugins not supported",
     "layout/generic/test/test_plugin_mouse_coords.html":"plugins not supported",
     "layout/generic/test/test_selection_expanding.html":"mouse selection not working",
 
-    "layout/style/test/test_rule_insertion.html":"monospace and serif text have sufficiently different widths",
     "layout/style/test/test_transitions_per_property.html":"times out, needs more time + various failures",
 
     "content/html/content/test/test_bug209275.xhtml":"timed out, 47 tests, bug 870262, :visited support",
@@ -449,6 +424,7 @@
     "Harness_sanity/test_sanityEventUtils.html": "bug 688052",
     "Harness_sanity/test_sanitySimpletest.html": "bug 688052",
 
-    "content/base/test/csp/test_CSP_evalscript_getCRMFRequest.html":"no window.crypto support in multiprocess"
+    "content/base/test/csp/test_CSP_evalscript_getCRMFRequest.html":"no window.crypto support in multiprocess",
+    "content/base/test/csp/test_hash_source.html":"can't use nsICryptoHash in CSPUtils.jsm (child process)"
   }
 }

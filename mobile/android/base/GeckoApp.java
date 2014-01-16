@@ -499,7 +499,7 @@ public abstract class GeckoApp
         (new UiAsyncTask<Void, Void, String>(ThreadUtils.getBackgroundHandler()) {
             @Override
             public String doInBackground(Void... params) {
-                return Favicons.getFaviconUrlForPageUrl(url);
+                return Favicons.getFaviconURLForPageURL(url);
             }
 
             @Override
@@ -1180,7 +1180,7 @@ public abstract class GeckoApp
                     if (profileName == null) {
                         profileName = getDefaultProfileName();
                         if (profileName == null)
-                            profileName = "default";
+                            profileName = GeckoProfile.DEFAULT_PROFILE;
                     }
                     GeckoProfile.sIsUsingCustomProfile = true;
                 }
@@ -2087,7 +2087,6 @@ public abstract class GeckoApp
         unregisterEventListener("ToggleChrome:Show");
         unregisterEventListener("ToggleChrome:Focus");
         unregisterEventListener("Permissions:Data");
-        unregisterEventListener("Tab:ViewportMetadata");
         unregisterEventListener("Session:StatePurged");
         unregisterEventListener("Bookmark:Insert");
         unregisterEventListener("Accessibility:Event");
@@ -2109,6 +2108,7 @@ public abstract class GeckoApp
         unregisterEventListener("Contact:Add");
         unregisterEventListener("Intent:Open");
         unregisterEventListener("Intent:GetHandlers");
+        unregisterEventListener("Locale:Set");
 
         deleteTempFiles();
 

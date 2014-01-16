@@ -8,6 +8,7 @@
 
 #UITourHighlightContainer {
   -moz-appearance: none;
+  border: none;
   background-color: transparent;
   /* This is a buffer to compensate for the movement in the "wobble" effect */
   padding: 4px;
@@ -22,8 +23,10 @@
   min-width: 32px;
 }
 
-#UITourTooltip {
-  max-width: 20em;
+#UITourTooltipIcon {
+  width: 48px;
+  height: 48px;
+  padding: 8px;
 }
 
 #UITourTooltipTitle {
@@ -34,4 +37,14 @@
 
 #UITourTooltipDescription {
   max-width: 20em;
+}
+
+#UITourTooltipButtons {
+  height: 5em;
+}
+
+#UITourTooltipButtons > button[image] > .button-box > .button-icon {
+  width: 16px;
+  height: 16px;
+  -moz-margin-end: 5px;
 }

@@ -82,9 +82,9 @@ class JS_PUBLIC_API(AutoCheckRequestDepth)
  * Also check that GC would be safe at this point.
  */
 JS_PUBLIC_API(void)
-AssertArgumentsAreSane(JSContext *cx, JS::Handle<JS::Value> v);
+AssertArgumentsAreSane(JSContext *cx, JS::HandleValue v);
 #else
-inline void AssertArgumentsAreSane(JSContext *cx, JS::Handle<JS::Value> v) {
+inline void AssertArgumentsAreSane(JSContext *cx, JS::HandleValue v) {
     /* Do nothing */
 }
 #endif /* JS_DEBUG */
@@ -205,15 +205,15 @@ class AutoArrayRooter : private AutoGCRooter {
 
     Value *array;
 
-    MutableHandle<Value> handleAt(size_t i)
+    MutableHandleValue handleAt(size_t i)
     {
         JS_ASSERT(i < size_t(tag_));
-        return MutableHandle<Value>::fromMarkedLocation(&array[i]);
+        return MutableHandleValue::fromMarkedLocation(&array[i]);
     }
-    Handle<Value> handleAt(size_t i) const
+    HandleValue handleAt(size_t i) const
     {
         JS_ASSERT(i < size_t(tag_));
-        return Handle<Value>::fromMarkedLocation(&array[i]);
+        return HandleValue::fromMarkedLocation(&array[i]);
     }
 
     friend void AutoGCRooter::trace(JSTracer *trc);
@@ -777,19 +777,17 @@ typedef const JSErrorFormatString *
                     const unsigned errorNumber);
 
 typedef bool
-(* JSLocaleToUpperCase)(JSContext *cx, JS::Handle<JSString*> src,
-                        JS::MutableHandle<JS::Value> rval);
+(* JSLocaleToUpperCase)(JSContext *cx, JS::HandleString src, JS::MutableHandleValue rval);
 
 typedef bool
-(* JSLocaleToLowerCase)(JSContext *cx, JS::Handle<JSString*> src,
-                        JS::MutableHandle<JS::Value> rval);
+(* JSLocaleToLowerCase)(JSContext *cx, JS::HandleString src, JS::MutableHandleValue rval);
 
 typedef bool
-(* JSLocaleCompare)(JSContext *cx, JS::Handle<JSString*> src1, JS::Handle<JSString*> src2,
-                    JS::MutableHandle<JS::Value> rval);
+(* JSLocaleCompare)(JSContext *cx, JS::HandleString src1, JS::HandleString src2,
+                    JS::MutableHandleValue rval);
 
 typedef bool
-(* JSLocaleToUnicode)(JSContext *cx, const char *src, JS::MutableHandle<JS::Value> rval);
+(* JSLocaleToUnicode)(JSContext *cx, const char *src, JS::MutableHandleValue rval);
 
 /*
  * Security protocol types.
@@ -815,8 +813,8 @@ typedef bool
  * guaranteed not to wrap a function.
  */
 typedef JSObject *
-(* JSWrapObjectCallback)(JSContext *cx, JS::Handle<JSObject*> existing, JS::Handle<JSObject*> obj,
-                         JS::Handle<JSObject*> proto, JS::Handle<JSObject*> parent,
+(* JSWrapObjectCallback)(JSContext *cx, JS::HandleObject existing, JS::HandleObject obj,
+                         JS::HandleObject proto, JS::HandleObject parent,
                          unsigned flags);
 
 /*
@@ -825,7 +823,7 @@ typedef JSObject *
  * or even finding a more suitable object for the new compartment.
  */
 typedef JSObject *
-(* JSPreWrapCallback)(JSContext *cx, JS::Handle<JSObject*> scope, JS::Handle<JSObject*> obj,
+(* JSPreWrapCallback)(JSContext *cx, JS::HandleObject scope, JS::HandleObject obj,
                       unsigned flags);
 
 /*
@@ -839,7 +837,7 @@ typedef JSObject *
  * compartment wrapper that gets passed to wrap.
  */
 typedef JSObject *
-(* JSSameCompartmentWrapObjectCallback)(JSContext *cx, JS::Handle<JSObject*> obj);
+(* JSSameCompartmentWrapObjectCallback)(JSContext *cx, JS::HandleObject obj);
 
 struct JSWrapObjectCallbacks
 {
@@ -1079,7 +1077,7 @@ namespace JS {
 
 /* ES5 9.3 ToNumber. */
 JS_ALWAYS_INLINE bool
-ToNumber(JSContext *cx, Handle<Value> v, double *out)
+ToNumber(JSContext *cx, HandleValue v, double *out)
 {
     AssertArgumentsAreSane(cx, v);
     {
@@ -1135,29 +1133,29 @@ JS_DoubleToUint32(double d);
 namespace js {
 /* DO NOT CALL THIS. Use JS::ToUint16. */
 extern JS_PUBLIC_API(bool)
-ToUint16Slow(JSContext *cx, JS::Handle<JS::Value> v, uint16_t *out);
+ToUint16Slow(JSContext *cx, JS::HandleValue v, uint16_t *out);
 
 /* DO NOT CALL THIS. Use JS::ToInt32. */
 extern JS_PUBLIC_API(bool)
-ToInt32Slow(JSContext *cx, JS::Handle<JS::Value> v, int32_t *out);
+ToInt32Slow(JSContext *cx, JS::HandleValue v, int32_t *out);
 
 /* DO NOT CALL THIS. Use JS::ToUint32. */
 extern JS_PUBLIC_API(bool)
-ToUint32Slow(JSContext *cx, JS::Handle<JS::Value> v, uint32_t *out);
+ToUint32Slow(JSContext *cx, JS::HandleValue v, uint32_t *out);
 
 /* DO NOT CALL THIS. Use JS::ToInt64. */
 extern JS_PUBLIC_API(bool)
-ToInt64Slow(JSContext *cx, JS::Handle<JS::Value> v, int64_t *out);
+ToInt64Slow(JSContext *cx, JS::HandleValue v, int64_t *out);
 
 /* DO NOT CALL THIS. Use JS::ToUint64. */
 extern JS_PUBLIC_API(bool)
-ToUint64Slow(JSContext *cx, JS::Handle<JS::Value> v, uint64_t *out);
+ToUint64Slow(JSContext *cx, JS::HandleValue v, uint64_t *out);
 } /* namespace js */
 
 namespace JS {
 
 JS_ALWAYS_INLINE bool
-ToUint16(JSContext *cx, JS::Handle<JS::Value> v, uint16_t *out)
+ToUint16(JSContext *cx, JS::HandleValue v, uint16_t *out)
 {
     AssertArgumentsAreSane(cx, v);
     js::MaybeCheckStackRoots(cx);
@@ -1170,7 +1168,7 @@ ToUint16(JSContext *cx, JS::Handle<JS::Value> v, uint16_t *out)
 }
 
 JS_ALWAYS_INLINE bool
-ToInt32(JSContext *cx, JS::Handle<JS::Value> v, int32_t *out)
+ToInt32(JSContext *cx, JS::HandleValue v, int32_t *out)
 {
     AssertArgumentsAreSane(cx, v);
     js::MaybeCheckStackRoots(cx);
@@ -1183,7 +1181,7 @@ ToInt32(JSContext *cx, JS::Handle<JS::Value> v, int32_t *out)
 }
 
 JS_ALWAYS_INLINE bool
-ToUint32(JSContext *cx, JS::Handle<JS::Value> v, uint32_t *out)
+ToUint32(JSContext *cx, JS::HandleValue v, uint32_t *out)
 {
     AssertArgumentsAreSane(cx, v);
     js::MaybeCheckStackRoots(cx);
@@ -1196,7 +1194,7 @@ ToUint32(JSContext *cx, JS::Handle<JS::Value> v, uint32_t *out)
 }
 
 JS_ALWAYS_INLINE bool
-ToInt64(JSContext *cx, JS::Handle<JS::Value> v, int64_t *out)
+ToInt64(JSContext *cx, JS::HandleValue v, int64_t *out)
 {
     AssertArgumentsAreSane(cx, v);
     js::MaybeCheckStackRoots(cx);
@@ -1210,7 +1208,7 @@ ToInt64(JSContext *cx, JS::Handle<JS::Value> v, int64_t *out)
 }
 
 JS_ALWAYS_INLINE bool
-ToUint64(JSContext *cx, JS::Handle<JS::Value> v, uint64_t *out)
+ToUint64(JSContext *cx, JS::HandleValue v, uint64_t *out)
 {
     AssertArgumentsAreSane(cx, v);
     js::MaybeCheckStackRoots(cx);
@@ -1669,7 +1667,7 @@ extern JS_PUBLIC_API(bool)
 JS_WrapId(JSContext *cx, jsid *idp);
 
 extern JS_PUBLIC_API(JSObject *)
-JS_TransplantObject(JSContext *cx, JS::Handle<JSObject*> origobj, JS::Handle<JSObject*> target);
+JS_TransplantObject(JSContext *cx, JS::HandleObject origobj, JS::HandleObject target);
 
 extern JS_PUBLIC_API(bool)
 JS_RefreshCrossCompartmentWrappers(JSContext *cx, JSObject *ob);
@@ -1761,11 +1759,11 @@ JS_InitStandardClasses(JSContext *cx, JSObject *obj);
  * loops any classes not yet resolved lazily.
  */
 extern JS_PUBLIC_API(bool)
-JS_ResolveStandardClass(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+JS_ResolveStandardClass(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                         bool *resolved);
 
 extern JS_PUBLIC_API(bool)
-JS_EnumerateStandardClasses(JSContext *cx, JS::Handle<JSObject*> obj);
+JS_EnumerateStandardClasses(JSContext *cx, JS::HandleObject obj);
 
 extern JS_PUBLIC_API(bool)
 JS_GetClassObject(JSContext *cx, JSObject *obj, JSProtoKey key, JSObject **objp);
@@ -2333,26 +2331,26 @@ extern JS_PUBLIC_API(bool)
 JS_DefaultValue(JSContext *cx, JSObject *obj, JSType hint, jsval *vp);
 
 extern JS_PUBLIC_API(bool)
-JS_PropertyStub(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
-                JS::MutableHandle<JS::Value> vp);
+JS_PropertyStub(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
+                JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_StrictPropertyStub(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id, bool strict,
-                      JS::MutableHandle<JS::Value> vp);
+JS_StrictPropertyStub(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool strict,
+                      JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_DeletePropertyStub(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+JS_DeletePropertyStub(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                       bool *succeeded);
 
 extern JS_PUBLIC_API(bool)
-JS_EnumerateStub(JSContext *cx, JS::Handle<JSObject*> obj);
+JS_EnumerateStub(JSContext *cx, JS::HandleObject obj);
 
 extern JS_PUBLIC_API(bool)
-JS_ResolveStub(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id);
+JS_ResolveStub(JSContext *cx, JS::HandleObject obj, JS::HandleId id);
 
 extern JS_PUBLIC_API(bool)
-JS_ConvertStub(JSContext *cx, JS::Handle<JSObject*> obj, JSType type,
-               JS::MutableHandle<JS::Value> vp);
+JS_ConvertStub(JSContext *cx, JS::HandleObject obj, JSType type,
+               JS::MutableHandleValue vp);
 
 struct JSConstDoubleSpec {
     double          dval;
@@ -2390,7 +2388,7 @@ typedef struct JSNativeWrapper {
  * Macro static initializers which make it easy to pass no JSJitInfo as part of a
  * JSPropertySpec or JSFunctionSpec.
  */
-#define JSOP_WRAPPER(op) {op, nullptr}
+#define JSOP_WRAPPER(op) { {op, nullptr} }
 #define JSOP_NULLWRAPPER JSOP_WRAPPER(nullptr)
 
 /*
@@ -2399,13 +2397,30 @@ typedef struct JSNativeWrapper {
  * JSPROP_INDEX bit in flags.
  */
 struct JSPropertySpec {
+    struct SelfHostedWrapper {
+        void       *unused;
+        const char *funname;
+    };
+
     const char                  *name;
     int8_t                      tinyid;
     uint8_t                     flags;
-    JSPropertyOpWrapper         getter;
-    JSStrictPropertyOpWrapper   setter;
-    const char                 *selfHostedGetter;
-    const char                 *selfHostedSetter;
+    union {
+        JSPropertyOpWrapper propertyOp;
+        SelfHostedWrapper   selfHosted;
+    } getter;
+    union {
+        JSStrictPropertyOpWrapper propertyOp;
+        SelfHostedWrapper         selfHosted;
+    } setter;
+
+private:
+    void StaticAsserts() {
+        JS_STATIC_ASSERT(sizeof(SelfHostedWrapper) == sizeof(JSPropertyOpWrapper));
+        JS_STATIC_ASSERT(sizeof(SelfHostedWrapper) == sizeof(JSStrictPropertyOpWrapper));
+        JS_STATIC_ASSERT(offsetof(SelfHostedWrapper, funname) ==
+                         offsetof(JSPropertyOpWrapper, info));
+    }
 };
 
 namespace JS {
@@ -2414,12 +2429,21 @@ namespace detail {
 /* NEVER DEFINED, DON'T USE.  For use by JS_CAST_NATIVE_TO only. */
 inline int CheckIsNative(JSNative native);
 
+/* NEVER DEFINED, DON'T USE.  For use by JS_CAST_STRING_TO only. */
+template<size_t N>
+inline int
+CheckIsCharacterLiteral(const char (&arr)[N]);
+
 } // namespace detail
 } // namespace JS
 
 #define JS_CAST_NATIVE_TO(v, To) \
   (static_cast<void>(sizeof(JS::detail::CheckIsNative(v))), \
    reinterpret_cast<To>(v))
+
+#define JS_CAST_STRING_TO(s, To) \
+  (static_cast<void>(sizeof(JS::detail::CheckIsCharacterLiteral(s))), \
+   reinterpret_cast<To>(s))
 
 #define JS_CHECK_ACCESSOR_FLAGS(flags) \
   (static_cast<mozilla::EnableIf<!((flags) & (JSPROP_READONLY | JSPROP_SHARED | JSPROP_NATIVE_ACCESSORS))>::Type>(0), \
@@ -2436,23 +2460,23 @@ inline int CheckIsNative(JSNative native);
     {name, 0, \
      uint8_t(JS_CHECK_ACCESSOR_FLAGS(flags) | JSPROP_SHARED | JSPROP_NATIVE_ACCESSORS), \
      JSOP_WRAPPER(JS_CAST_NATIVE_TO(getter, JSPropertyOp)), \
-     JSOP_NULLWRAPPER, nullptr, nullptr}
+     JSOP_NULLWRAPPER}
 #define JS_PSGS(name, getter, setter, flags) \
     {name, 0, \
      uint8_t(JS_CHECK_ACCESSOR_FLAGS(flags) | JSPROP_SHARED | JSPROP_NATIVE_ACCESSORS), \
      JSOP_WRAPPER(JS_CAST_NATIVE_TO(getter, JSPropertyOp)), \
-     JSOP_WRAPPER(JS_CAST_NATIVE_TO(setter, JSStrictPropertyOp)), \
-     nullptr, nullptr}
+     JSOP_WRAPPER(JS_CAST_NATIVE_TO(setter, JSStrictPropertyOp))}
 #define JS_SELF_HOSTED_GET(name, getterName, flags) \
     {name, 0, \
      uint8_t(JS_CHECK_ACCESSOR_FLAGS(flags) | JSPROP_SHARED | JSPROP_GETTER), \
-     JSOP_NULLWRAPPER, JSOP_NULLWRAPPER, getterName, nullptr}
+     { nullptr, JS_CAST_STRING_TO(getterName, const JSJitInfo *) }, \
+     JSOP_NULLWRAPPER }
 #define JS_SELF_HOSTED_GETSET(name, getterName, setterName, flags) \
     {name, 0, \
      uint8_t(JS_CHECK_ACCESSOR_FLAGS(flags) | JSPROP_SHARED | JSPROP_GETTER | JSPROP_SETTER), \
-     JSOP_NULLWRAPPER, JSOP_NULLWRAPPER, getterName, setterName}
-#define JS_PS_END {0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER, \
-                   nullptr, nullptr}
+     { nullptr, JS_CAST_STRING_TO(getterName, const JSJitInfo *) },  \
+     { nullptr, JS_CAST_STRING_TO(setterName, const JSJitInfo *) } }
+#define JS_PS_END {0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
 
 /*
  * To define a native function, set call to a JSNativeWrapper. To define a
@@ -2524,10 +2548,10 @@ JS_GetInstancePrivate(JSContext *cx, JSObject *obj, const JSClass *clasp,
                       jsval *argv);
 
 extern JS_PUBLIC_API(bool)
-JS_GetPrototype(JSContext *cx, JS::Handle<JSObject*> obj, JS::MutableHandle<JSObject*> protop);
+JS_GetPrototype(JSContext *cx, JS::HandleObject obj, JS::MutableHandleObject protop);
 
 extern JS_PUBLIC_API(bool)
-JS_SetPrototype(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<JSObject*> proto);
+JS_SetPrototype(JSContext *cx, JS::HandleObject obj, JS::HandleObject proto);
 
 extern JS_PUBLIC_API(JSObject *)
 JS_GetParent(JSObject *obj);
@@ -2699,7 +2723,7 @@ JS_NewObject(JSContext *cx, const JSClass *clasp, JSObject *proto, JSObject *par
 
 /* Queries the [[Extensible]] property of the object. */
 extern JS_PUBLIC_API(bool)
-JS_IsExtensible(JSContext *cx, JS::Handle<JSObject*> obj, bool *extensible);
+JS_IsExtensible(JSContext *cx, JS::HandleObject obj, bool *extensible);
 
 extern JS_PUBLIC_API(bool)
 JS_IsNative(JSObject *obj);
@@ -2730,7 +2754,7 @@ extern JS_PUBLIC_API(bool)
 JS_FreezeObject(JSContext *cx, JSObject *obj);
 
 extern JS_PUBLIC_API(bool)
-JS_PreventExtensions(JSContext *cx, JS::Handle<JSObject*> obj);
+JS_PreventExtensions(JSContext *cx, JS::HandleObject obj);
 
 extern JS_PUBLIC_API(JSObject *)
 JS_New(JSContext *cx, JSObject *ctor, unsigned argc, jsval *argv);
@@ -2777,18 +2801,18 @@ extern JS_PUBLIC_API(bool)
 JS_HasPropertyById(JSContext *cx, JSObject *obj, jsid id, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
-JS_LookupProperty(JSContext *cx, JSObject *obj, const char *name, JS::MutableHandle<JS::Value> vp);
+JS_LookupProperty(JSContext *cx, JSObject *obj, const char *name, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_LookupPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::MutableHandle<JS::Value> vp);
+JS_LookupPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
 JS_LookupPropertyWithFlags(JSContext *cx, JSObject *obj, const char *name,
-                           unsigned flags, JS::MutableHandle<JS::Value> vp);
+                           unsigned flags, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
 JS_LookupPropertyWithFlagsById(JSContext *cx, JSObject *obj, jsid id,
-                               unsigned flags, JSObject **objp, JS::MutableHandle<JS::Value> vp);
+                               unsigned flags, JSObject **objp, JS::MutableHandleValue vp);
 
 struct JSPropertyDescriptor {
     JSObject           *obj;
@@ -2825,25 +2849,25 @@ class PropertyDescriptorOperations
     bool hasShortId() const { return desc()->attrs & JSPROP_SHORTID; }
     bool hasAttributes(unsigned attrs) const { return desc()->attrs & attrs; }
 
-    JS::Handle<JSObject*> object() const {
-        return JS::Handle<JSObject*>::fromMarkedLocation(&desc()->obj);
+    JS::HandleObject object() const {
+        return JS::HandleObject::fromMarkedLocation(&desc()->obj);
     }
     unsigned attributes() const { return desc()->attrs; }
     unsigned shortid() const { return desc()->shortid; }
     JSPropertyOp getter() const { return desc()->getter; }
     JSStrictPropertyOp setter() const { return desc()->setter; }
-    JS::Handle<JSObject*> getterObject() const {
+    JS::HandleObject getterObject() const {
         MOZ_ASSERT(hasGetterObject());
-        return JS::Handle<JSObject*>::fromMarkedLocation(
+        return JS::HandleObject::fromMarkedLocation(
                 reinterpret_cast<JSObject *const *>(&desc()->getter));
     }
-    JS::Handle<JSObject*> setterObject() const {
+    JS::HandleObject setterObject() const {
         MOZ_ASSERT(hasSetterObject());
-        return JS::Handle<JSObject*>::fromMarkedLocation(
+        return JS::HandleObject::fromMarkedLocation(
                 reinterpret_cast<JSObject *const *>(&desc()->setter));
     }
-    JS::Handle<Value> value() const {
-        return JS::Handle<Value>::fromMarkedLocation(&desc()->value);
+    JS::HandleValue value() const {
+        return JS::HandleValue::fromMarkedLocation(&desc()->value);
     }
 };
 
@@ -2863,14 +2887,14 @@ class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<
         value().setUndefined();
     }
 
-    JS::MutableHandle<JSObject*> object() {
-        return JS::MutableHandle<JSObject*>::fromMarkedLocation(&desc()->obj);
+    JS::MutableHandleObject object() {
+        return JS::MutableHandleObject::fromMarkedLocation(&desc()->obj);
     }
     unsigned &attributesRef() { return desc()->attrs; }
     JSPropertyOp &getter() { return desc()->getter; }
     JSStrictPropertyOp &setter() { return desc()->setter; }
-    JS::MutableHandle<Value> value() {
-        return JS::MutableHandle<Value>::fromMarkedLocation(&desc()->value);
+    JS::MutableHandleValue value() {
+        return JS::MutableHandleValue::fromMarkedLocation(&desc()->value);
     }
 
     void setEnumerable() { desc()->attrs |= JSPROP_ENUMERATE; }
@@ -2961,20 +2985,20 @@ JS_GetPropertyDescriptor(JSContext *cx, JSObject *obj, const char *name, unsigne
                          JS::MutableHandle<JSPropertyDescriptor> desc);
 
 extern JS_PUBLIC_API(bool)
-JS_GetProperty(JSContext *cx, JSObject *obj, const char *name, JS::MutableHandle<JS::Value> vp);
+JS_GetProperty(JSContext *cx, JSObject *obj, const char *name, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_GetPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::MutableHandle<JS::Value> vp);
+JS_GetPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
 JS_ForwardGetPropertyTo(JSContext *cx, JSObject *obj, jsid id, JSObject *onBehalfOf,
-                        JS::MutableHandle<JS::Value> vp);
+                        JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_SetProperty(JSContext *cx, JSObject *obj, const char *name, JS::Handle<JS::Value> v);
+JS_SetProperty(JSContext *cx, JSObject *obj, const char *name, JS::HandleValue v);
 
 extern JS_PUBLIC_API(bool)
-JS_SetPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::Handle<JS::Value> v);
+JS_SetPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::HandleValue v);
 
 extern JS_PUBLIC_API(bool)
 JS_DeleteProperty(JSContext *cx, JSObject *obj, const char *name);
@@ -3013,17 +3037,17 @@ JS_HasUCProperty(JSContext *cx, JSObject *obj,
 extern JS_PUBLIC_API(bool)
 JS_LookupUCProperty(JSContext *cx, JSObject *obj,
                     const jschar *name, size_t namelen,
-                    JS::MutableHandle<JS::Value> vp);
+                    JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
 JS_GetUCProperty(JSContext *cx, JSObject *obj,
                  const jschar *name, size_t namelen,
-                 JS::MutableHandle<JS::Value> vp);
+                 JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
 JS_SetUCProperty(JSContext *cx, JSObject *obj,
                  const jschar *name, size_t namelen,
-                 JS::Handle<JS::Value> v);
+                 JS::HandleValue v);
 
 extern JS_PUBLIC_API(bool)
 JS_DeleteUCProperty2(JSContext *cx, JSObject *obj, const jschar *name, size_t namelen,
@@ -3052,17 +3076,17 @@ extern JS_PUBLIC_API(bool)
 JS_HasElement(JSContext *cx, JSObject *obj, uint32_t index, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
-JS_LookupElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandle<JS::Value> vp);
+JS_LookupElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_GetElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandle<JS::Value> vp);
+JS_GetElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
 JS_ForwardGetElementTo(JSContext *cx, JSObject *obj, uint32_t index, JSObject *onBehalfOf,
-                       JS::MutableHandle<JS::Value> vp);
+                       JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_SetElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandle<JS::Value> vp);
+JS_SetElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
 JS_DeleteElement(JSContext *cx, JSObject *obj, uint32_t index);
@@ -3409,7 +3433,7 @@ namespace JS {
  * is protected anyway); instead, create instances only of the derived classes:
  * CompileOptions and OwningCompileOptions.
  */
-class JS_PUBLIC_API(ReadOnlyCompileOptions)
+class JS_FRIEND_API(ReadOnlyCompileOptions)
 {
   protected:
     JSPrincipals *principals_;
@@ -3496,7 +3520,7 @@ class JS_PUBLIC_API(ReadOnlyCompileOptions)
  * comes to refer to the object that owns this, then the whole cycle, and
  * anything else it entrains, will never be freed.
  */
-class JS_PUBLIC_API(OwningCompileOptions) : public ReadOnlyCompileOptions
+class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
 {
     JSRuntime *runtime;
     PersistentRootedObject elementRoot;
@@ -3557,7 +3581,7 @@ class JS_PUBLIC_API(OwningCompileOptions) : public ReadOnlyCompileOptions
  * create an instance of this type, it's up to you to guarantee that
  * everything you store in it will outlive it.
  */
-class MOZ_STACK_CLASS JS_PUBLIC_API(CompileOptions) : public ReadOnlyCompileOptions
+class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOptions
 {
     RootedObject elementRoot;
     RootedString elementPropertyRoot;
@@ -3607,18 +3631,18 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(CompileOptions) : public ReadOnlyCompileOpti
 };
 
 extern JS_PUBLIC_API(JSScript *)
-Compile(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+Compile(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
         const char *bytes, size_t length);
 
 extern JS_PUBLIC_API(JSScript *)
-Compile(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+Compile(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
         const jschar *chars, size_t length);
 
 extern JS_PUBLIC_API(JSScript *)
-Compile(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options, FILE *file);
+Compile(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options, FILE *file);
 
 extern JS_PUBLIC_API(JSScript *)
-Compile(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options, const char *filename);
+Compile(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options, const char *filename);
 
 extern JS_PUBLIC_API(bool)
 CanCompileOffThread(JSContext *cx, const ReadOnlyCompileOptions &options);
@@ -3640,7 +3664,7 @@ CanCompileOffThread(JSContext *cx, const ReadOnlyCompileOptions &options);
  */
 
 extern JS_PUBLIC_API(bool)
-CompileOffThread(JSContext *cx, Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+CompileOffThread(JSContext *cx, HandleObject obj, const ReadOnlyCompileOptions &options,
                  const jschar *chars, size_t length,
                  OffThreadCompileCallback callback, void *callbackData);
 
@@ -3648,12 +3672,12 @@ extern JS_PUBLIC_API(JSScript *)
 FinishOffThreadScript(JSContext *maybecx, JSRuntime *rt, void *token);
 
 extern JS_PUBLIC_API(JSFunction *)
-CompileFunction(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+CompileFunction(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
                 const char *name, unsigned nargs, const char *const *argnames,
                 const char *bytes, size_t length);
 
 extern JS_PUBLIC_API(JSFunction *)
-CompileFunction(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+CompileFunction(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
                 const char *name, unsigned nargs, const char *const *argnames,
                 const jschar *chars, size_t length);
 
@@ -3779,15 +3803,15 @@ JS_EvaluateUCScriptForPrincipalsVersionOrigin(JSContext *cx, JSObject *obj,
 namespace JS {
 
 extern JS_PUBLIC_API(bool)
-Evaluate(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
          const jschar *chars, size_t length, jsval *rval);
 
 extern JS_PUBLIC_API(bool)
-Evaluate(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
          const char *bytes, size_t length, jsval *rval);
 
 extern JS_PUBLIC_API(bool)
-Evaluate(JSContext *cx, JS::Handle<JSObject*> obj, const ReadOnlyCompileOptions &options,
+Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
          const char *filename, jsval *rval);
 
 } /* namespace JS */
@@ -3808,31 +3832,31 @@ namespace JS {
 
 static inline bool
 Call(JSContext *cx, JSObject *thisObj, JSFunction *fun, unsigned argc, jsval *argv,
-     MutableHandle<Value> rval)
+     MutableHandleValue rval)
 {
     return !!JS_CallFunction(cx, thisObj, fun, argc, argv, rval.address());
 }
 
 static inline bool
 Call(JSContext *cx, JSObject *thisObj, const char *name, unsigned argc, jsval *argv,
-     MutableHandle<Value> rval)
+     MutableHandleValue rval)
 {
     return !!JS_CallFunctionName(cx, thisObj, name, argc, argv, rval.address());
 }
 
 static inline bool
 Call(JSContext *cx, JSObject *thisObj, jsval fun, unsigned argc, jsval *argv,
-     MutableHandle<Value> rval)
+     MutableHandleValue rval)
 {
     return !!JS_CallFunctionValue(cx, thisObj, fun, argc, argv, rval.address());
 }
 
 extern JS_PUBLIC_API(bool)
-Call(JSContext *cx, jsval thisv, jsval fun, unsigned argc, jsval *argv, MutableHandle<Value> rval);
+Call(JSContext *cx, jsval thisv, jsval fun, unsigned argc, jsval *argv, MutableHandleValue rval);
 
 static inline bool
 Call(JSContext *cx, jsval thisv, JSObject *funObj, unsigned argc, jsval *argv,
-     MutableHandle<Value> rval)
+     MutableHandleValue rval)
 {
     return Call(cx, thisv, OBJECT_TO_JSVAL(funObj), argc, argv, rval);
 }

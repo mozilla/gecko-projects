@@ -7,9 +7,9 @@
 
 #main-window:not([chromehidden~="toolbar"]) {
 %ifdef XP_MACOSX
-  min-width: 425px;
+  min-width: 335px;
 %else
-  min-width: 390px;
+  min-width: 300px;
 %endif
 }
 
@@ -284,7 +284,7 @@ toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
 }
 
 #urlbar-container {
-  min-width: 50ch;
+  min-width: 30ch;
 }
 
 #search-container {
@@ -937,8 +937,9 @@ toolbarpaletteitem[dragover] {
 }
 
 toolbarpaletteitem[place="palette"] {
-  width: 110px;
-  height: 94px;
+  width: 10em;
+  height: calc(40px + 2em);
+  margin-bottom: 5px;
   overflow: hidden;
   display: inline-block;
 }
@@ -950,8 +951,8 @@ toolbarpaletteitem[place="palette"][hidden] {
 #customization-palette .toolbarpaletteitem-box {
   -moz-box-pack: center;
   -moz-box-flex: 1;
-  width: 110px;
-  max-width: 110px;
+  width: 10em;
+  max-width: 10em;
 }
 
 /* UI Tour */

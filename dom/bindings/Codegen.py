@@ -1649,7 +1649,7 @@ class AttrDefiner(PropertyDefiner):
                 else:
                     accessor = "genericGetter"
                 jitinfo = "&%s_getterinfo" % attr.identifier.name
-            return "{ JS_CAST_NATIVE_TO(%s, JSPropertyOp), %s }" % \
+            return "{ { JS_CAST_NATIVE_TO(%s, JSPropertyOp), %s } }" % \
                    (accessor, jitinfo)
 
         def setter(attr):
@@ -1668,7 +1668,7 @@ class AttrDefiner(PropertyDefiner):
                 else:
                     accessor = "genericSetter"
                 jitinfo = "&%s_setterinfo" % attr.identifier.name
-            return "{ JS_CAST_NATIVE_TO(%s, JSStrictPropertyOp), %s }" % \
+            return "{ { JS_CAST_NATIVE_TO(%s, JSStrictPropertyOp), %s } }" % \
                    (accessor, jitinfo)
 
         def specData(attr):
@@ -2841,8 +2841,9 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
     If lenientFloatCode is not None, it should be used in cases when
     we're a non-finite float that's not unrestricted.
 
-    If allowTreatNonCallableAsNull is true, then [TreatNonCallableAsNull]
-    extended attributes on nullable callback functions will be honored.
+    If allowTreatNonCallableAsNull is true, then [TreatNonCallableAsNull] and
+    [TreatNonObjectAsNull] extended attributes on nullable callback functions
+    will be honored.
 
     If isCallbackReturnValue is "JSImpl" or "Callback", then the declType may be
     adjusted to make it easier to return from a callback.  Since that type is
@@ -3737,6 +3738,8 @@ for (uint32_t i = 0; i < length; ++i) {
     if type.isCallback():
         assert not isEnforceRange and not isClamp
         assert not type.treatNonCallableAsNull() or type.nullable()
+        assert not type.treatNonObjectAsNull() or type.nullable()
+        assert not type.treatNonObjectAsNull() or not type.treatNonCallableAsNull()
 
         name = type.unroll().identifier.name
         if type.nullable():
@@ -3758,6 +3761,17 @@ for (uint32_t i = 0; i < length; ++i) {
                 "} else {\n"
                 "  ${declName} = nullptr;\n"
                 "}")
+        elif allowTreatNonCallableAsNull and type.treatNonObjectAsNull():
+            if not isDefinitelyObject:
+                haveObject = "${val}.isObject()"
+                if defaultValue is not None:
+                    assert(isinstance(defaultValue, IDLNullValue))
+                    haveObject = "${haveValue} && " + haveObject
+                template = CGIfElseWrapper(haveObject,
+                                           CGGeneric(conversion),
+                                           CGGeneric("${declName} = nullptr;")).define()
+            else:
+                template = conversion
         else:
             template = wrapObjectTemplate(
                 "if (JS_ObjectIsCallable(cx, &${val}.toObject())) {\n" +
@@ -4065,7 +4079,7 @@ def instantiateJSToNativeConversion(info, replacements, checkForValue=False):
 
 def convertConstIDLValueToJSVal(value):
     if isinstance(value, IDLNullValue):
-        return "JSVAL_NULL"
+        return "JS::NullValue()"
     tag = value.type.tag()
     if tag in [IDLType.Tags.int8, IDLType.Tags.uint8, IDLType.Tags.int16,
                IDLType.Tags.uint16, IDLType.Tags.int32]:
@@ -4251,7 +4265,34 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
     # if body.
     exceptionCodeIndented = CGIndenter(CGGeneric(exceptionCode))
 
-    def setValue(value, wrapAsType=None):
+    def setUndefined():
+        return _setValue("", setter="setUndefined")
+
+    def setNull():
+        return _setValue("", setter="setNull")
+
+    def setInt32(value):
+        return _setValue(value, setter="setInt32")
+
+    def setString(value):
+        return _setValue(value, setter="setString")
+
+    def setObject(value, wrapAsType=None):
+        return _setValue(value, wrapAsType=wrapAsType, setter="setObject")
+
+    def setObjectOrNull(value, wrapAsType=None):
+        return _setValue(value, wrapAsType=wrapAsType, setter="setObjectOrNull")
+
+    def setUint32(value):
+        return _setValue(value, setter="setNumber")
+
+    def setDouble(value):
+        return _setValue("JS_NumberValue(%s)" % value)
+
+    def setBoolean(value):
+        return _setValue(value, setter="setBoolean")
+
+    def _setValue(value, wrapAsType=None, setter="set"):
         """
         Returns the code to set the jsval to value.
 
@@ -4267,8 +4308,8 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
                                exceptionCodeIndented.define())) +
                     "}\n" +
                     successCode)
-        return ("${jsvalRef}.set(%s);\n" +
-                tail) % (value)
+        return ("${jsvalRef}.%s(%s);\n" +
+                tail) % (setter, value)
 
     def wrapAndSetPtr(wrapCall, failureCode=None):
         """
@@ -4284,7 +4325,7 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
         return str
 
     if type is None or type.isVoid():
-        return (setValue("JSVAL_VOID"), True)
+        return (setUndefined(), True)
 
     if type.isArray():
         raise TypeError("Can't handle array return values yet")
@@ -4300,7 +4341,7 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
 if (%s.IsNull()) {
 %s
 }
-%s""" % (result, CGIndenter(CGGeneric(setValue("JSVAL_NULL"))).define(), recTemplate), recInfall)
+%s""" % (result, CGIndenter(CGGeneric(setNull())).define(), recTemplate), recInfall)
 
         # Now do non-nullable sequences.  Our success code is just to break to
         # where we set the element in the array.  Note that we bump the
@@ -4347,13 +4388,13 @@ if (!returnArray) {
           index, index, index,
           innerTemplate, index,
           CGIndenter(exceptionCodeIndented, 4).define())) +
-                setValue("JS::ObjectValue(*returnArray)"), False)
+                setObject("*returnArray"), False)
 
     if type.isGeckoInterface() and not type.isCallbackInterface():
         descriptor = descriptorProvider.getDescriptor(type.unroll().inner.identifier.name)
         if type.nullable():
             wrappingCode = ("if (!%s) {\n" % (result) +
-                            CGIndenter(CGGeneric(setValue("JSVAL_NULL"))).define() + "\n" +
+                            CGIndenter(CGGeneric(setNull())).define() + "\n" +
                             "}\n")
         else:
             wrappingCode = ""
@@ -4420,26 +4461,26 @@ if (!returnArray) {
 """ % { "result" : resultLoc,
         "strings" : type.unroll().inner.identifier.name + "Values::" + ENUM_ENTRY_VARIABLE_NAME,
         "exceptionCode" : CGIndenter(exceptionCodeIndented).define() } +
-        CGIndenter(CGGeneric(setValue("JS::StringValue(resultStr)"))).define() +
+        CGIndenter(CGGeneric(setString("resultStr"))).define() +
                       "\n}")
 
         if type.nullable():
             conversion = CGIfElseWrapper(
                 "%s.IsNull()" % result,
-                CGGeneric(setValue("JS::NullValue()")),
+                CGGeneric(setNull()),
                 CGGeneric(conversion)).define()
         return conversion, False
 
     if type.isCallback() or type.isCallbackInterface():
-        wrapCode = setValue(
-            "JS::ObjectValue(*GetCallbackFromCallbackObject(%(result)s))",
+        wrapCode = setObject(
+            "*GetCallbackFromCallbackObject(%(result)s)",
             wrapAsType=type)
         if type.nullable():
             wrapCode = (
                 "if (%(result)s) {\n" +
                 CGIndenter(CGGeneric(wrapCode)).define() + "\n"
                 "} else {\n" +
-                CGIndenter(CGGeneric(setValue("JS::NullValue()"))).define() + "\n"
+                CGIndenter(CGGeneric(setNull())).define() + "\n"
                 "}")
         wrapCode = wrapCode % { "result": result }
         return wrapCode, False
@@ -4447,19 +4488,21 @@ if (!returnArray) {
     if type.isAny():
         # See comments in WrapNewBindingObject explaining why we need
         # to wrap here.
-        # NB: setValue(..., type-that-is-any) calls JS_WrapValue(), so is fallible
-        return (setValue(result, wrapAsType=type), False)
+        # NB: _setValue(..., type-that-is-any) calls JS_WrapValue(), so is fallible
+        return (_setValue(result, wrapAsType=type), False)
 
     if (type.isObject() or (type.isSpiderMonkeyInterface() and
                             not typedArraysAreStructs)):
         # See comments in WrapNewBindingObject explaining why we need
         # to wrap here.
         if type.nullable():
-            toValue = "JS::ObjectOrNullValue(%s)"
+            toValue = "%s"
+            setter = setObjectOrNull
         else:
-            toValue = "JS::ObjectValue(*%s)"
-        # NB: setValue(..., some-object-type) calls JS_WrapValue(), so is fallible
-        return (setValue(toValue % result, wrapAsType=type), False)
+            toValue = "*%s"
+            setter = setObject
+        # NB: setObject{,OrNull}(..., some-object-type) calls JS_WrapValue(), so is fallible
+        return (setter(toValue % result, wrapAsType=type), False)
 
     if not (type.isUnion() or type.isPrimitive() or type.isDictionary() or
             type.isDate() or
@@ -4472,16 +4515,16 @@ if (!returnArray) {
                                                          returnsNewObject, exceptionCode,
                                                          typedArraysAreStructs)
         return ("if (%s.IsNull()) {\n" % result +
-                CGIndenter(CGGeneric(setValue("JSVAL_NULL"))).define() + "\n" +
+                CGIndenter(CGGeneric(setNull())).define() + "\n" +
                 "}\n" + recTemplate, recInfal)
 
     if type.isSpiderMonkeyInterface():
         assert typedArraysAreStructs
         # See comments in WrapNewBindingObject explaining why we need
         # to wrap here.
-        # NB: setValue(..., some-object-type) calls JS_WrapValue(), so is fallible
-        return (setValue("JS::ObjectValue(*%s.Obj())" % result,
-                         wrapAsType=type), False)
+        # NB: setObject(..., some-object-type) calls JS_WrapValue(), so is fallible
+        return (setObject("*%s.Obj()" % result,
+                          wrapAsType=type), False)
 
     if type.isUnion():
         return (wrapAndSetPtr("%s.ToJSVal(cx, ${obj}, ${jsvalHandle})" % result),
@@ -4499,20 +4542,20 @@ if (!returnArray) {
 
     if tag in [IDLType.Tags.int8, IDLType.Tags.uint8, IDLType.Tags.int16,
                IDLType.Tags.uint16, IDLType.Tags.int32]:
-        return (setValue("INT_TO_JSVAL(int32_t(%s))" % result), True)
+        return (setInt32("int32_t(%s)" % result), True)
 
     elif tag in [IDLType.Tags.int64, IDLType.Tags.uint64,
                  IDLType.Tags.unrestricted_float, IDLType.Tags.float,
                  IDLType.Tags.unrestricted_double, IDLType.Tags.double]:
         # XXXbz will cast to double do the "even significand" thing that webidl
         # calls for for 64-bit ints?  Do we care?
-        return (setValue("JS_NumberValue(double(%s))" % result), True)
+        return (setDouble("double(%s)" % result), True)
 
     elif tag == IDLType.Tags.uint32:
-        return (setValue("UINT_TO_JSVAL(%s)" % result), True)
+        return (setUint32(result), True)
 
     elif tag == IDLType.Tags.bool:
-        return (setValue("BOOLEAN_TO_JSVAL(%s)" % result), True)
+        return (setBoolean(result), True)
 
     else:
         raise TypeError("Need to learn to wrap primitive: %s" % type)
@@ -5028,7 +5071,7 @@ class CGPerSignatureCall(CGThing):
             if setter:
                 lenientFloatCode = "return true;"
             elif idlNode.isMethod():
-                lenientFloatCode = ("args.rval().set(JSVAL_VOID);\n"
+                lenientFloatCode = ("args.rval().setUndefined();\n"
                                     "return true;")
 
         argsPre = []
@@ -8646,6 +8689,10 @@ class CGDescriptor(CGThing):
                     else:
                         hasMethod = True
             elif m.isAttr():
+                if m.stringifier:
+                    raise TypeError("Stringifier attributes not supported yet. "
+                                    "See bug 824857.\n"
+                                    "%s" % m.location);
                 if m.isStatic():
                     assert descriptor.interface.hasInterfaceObject
                     cgThings.append(CGStaticGetter(descriptor, m))
@@ -8658,6 +8705,12 @@ class CGDescriptor(CGThing):
                     else:
                         hasGetter = True
                 if not m.readonly:
+                    for extAttr in ["PutForwards", "Replaceable"]:
+                        if m.getExtendedAttribute(extAttr):
+                            raise TypeError("Writable attributes should not "
+                                            "have %s specified.\n"
+                                            "%s" %
+                                            (extAttr, m.location))
                     if m.isStatic():
                         assert descriptor.interface.hasInterfaceObject
                         cgThings.append(CGStaticSetter(descriptor, m))
@@ -10774,6 +10827,7 @@ class CGCallback(CGClass):
                  getters=[], setters=[]):
         self.baseName = baseName
         self._deps = idlObject.getDeps()
+        self.idlObject = idlObject
         name = idlObject.identifier.name
         if isJSImplementedDescriptor(descriptorProvider):
             name = jsImplName(name)
@@ -10801,6 +10855,13 @@ class CGCallback(CGClass):
                          methods=realMethods+getters+setters)
 
     def getConstructors(self):
+        if (not self.idlObject.isInterface() and
+            not self.idlObject._treatNonObjectAsNull):
+            body = "MOZ_ASSERT(JS_ObjectIsCallable(nullptr, mCallback));"
+        else:
+            # Not much we can assert about it, other than not being null, and
+            # CallbackObject does that already.
+            body = ""
         return [ClassConstructor(
             [Argument("JS::Handle<JSObject*>", "aCallback"), Argument("nsIGlobalObject*", "aIncumbentGlobal")],
             bodyInHeader=True,
@@ -10808,7 +10869,8 @@ class CGCallback(CGClass):
             explicit=True,
             baseConstructors=[
                 "%s(aCallback, aIncumbentGlobal)" % self.baseName,
-                ])]
+                ],
+            body=body)]
 
     def getMethodImpls(self, method):
         assert method.needThisHandling
@@ -10816,13 +10878,13 @@ class CGCallback(CGClass):
         # Strip out the JSContext*/JSObject* args
         # that got added.
         assert args[0].name == "cx" and args[0].argType == "JSContext*"
-        assert args[1].name == "aThisObj" and args[1].argType == "JS::Handle<JSObject*>"
+        assert args[1].name == "aThisVal" and args[1].argType == "JS::Handle<JS::Value>"
         args = args[2:]
         # Record the names of all the arguments, so we can use them when we call
         # the private method.
         argnames = [arg.name for arg in args]
-        argnamesWithThis = ["s.GetContext()", "thisObjJS"] + argnames
-        argnamesWithoutThis = ["s.GetContext()", "JS::NullPtr()"] + argnames
+        argnamesWithThis = ["s.GetContext()", "thisValJS"] + argnames
+        argnamesWithoutThis = ["s.GetContext()", "JS::UndefinedHandleValue"] + argnames
         # Now that we've recorded the argnames for our call to our private
         # method, insert our optional argument for deciding whether the
         # CallSetup should re-throw exceptions on aRv.
@@ -10846,6 +10908,8 @@ class CGCallback(CGClass):
             "  aRv.Throw(NS_ERROR_FAILURE);\n"
             "  return${errorReturn};\n"
             "}\n"
+            "JS::Rooted<JS::Value> thisValJS(s.GetContext(),\n"
+            "                                JS::ObjectValue(*thisObjJS));\n"
             "return ${methodName}(${callArgs});").substitute({
                 "errorReturn" : method.getDefaultRetval(),
                 "callArgs" : ", ".join(argnamesWithThis),
@@ -10872,6 +10936,7 @@ class CGCallback(CGClass):
 
 class CGCallbackFunction(CGCallback):
     def __init__(self, callback, descriptorProvider):
+        self.callback = callback
         CGCallback.__init__(self, callback, descriptorProvider,
                             "CallbackFunction",
                             methods=[CallCallback(callback, descriptorProvider)])
@@ -11119,10 +11184,10 @@ class CallbackMember(CGNativeMember):
                 args.append(Argument("ExceptionHandling", "aExceptionHandling",
                                      "eReportExceptions"))
             return args
-        # We want to allow the caller to pass in a "this" object, as
+        # We want to allow the caller to pass in a "this" value, as
         # well as a JSContext.
         return [Argument("JSContext*", "cx"),
-                Argument("JS::Handle<JSObject*>", "aThisObj")] + args
+                Argument("JS::Handle<JS::Value>", "aThisVal")] + args
 
     def getCallSetup(self):
         if self.needThisHandling:
@@ -11175,8 +11240,9 @@ class CallbackMethod(CallbackMember):
     def getCall(self):
         replacements = {
             "errorReturn" : self.getDefaultRetval(),
-            "thisObj": self.getThisObj(),
-            "getCallable": self.getCallableDecl()
+            "thisVal": self.getThisVal(),
+            "getCallable": self.getCallableDecl(),
+            "callGuard": self.getCallGuard()
             }
         if self.argCount > 0:
             replacements["argv"] = "argv.begin()"
@@ -11185,8 +11251,8 @@ class CallbackMethod(CallbackMember):
             replacements["argv"] = "nullptr"
             replacements["argc"] = "0"
         return string.Template("${getCallable}"
-                "if (!JS_CallFunctionValue(cx, ${thisObj}, callable,\n"
-                "                          ${argc}, ${argv}, rval.address())) {\n"
+                "if (${callGuard}!JS::Call(cx, ${thisVal}, callable,\n"
+                "              ${argc}, ${argv}, &rval)) {\n"
                 "  aRv.Throw(NS_ERROR_UNEXPECTED);\n"
                 "  return${errorReturn};\n"
                 "}\n").substitute(replacements)
@@ -11197,14 +11263,19 @@ class CallCallback(CallbackMethod):
         CallbackMethod.__init__(self, callback.signatures()[0], "Call",
                                 descriptorProvider, needThisHandling=True)
 
-    def getThisObj(self):
-        return "aThisObj"
+    def getThisVal(self):
+        return "aThisVal"
 
     def getCallableDecl(self):
         return "JS::Rooted<JS::Value> callable(cx, JS::ObjectValue(*mCallback));\n"
 
     def getPrettyName(self):
         return self.callback.identifier.name
+
+    def getCallGuard(self):
+        if self.callback._treatNonObjectAsNull:
+            return "JS_ObjectIsCallable(cx, mCallback) && "
+        return ""
 
 class CallbackOperationBase(CallbackMethod):
     """
@@ -11215,13 +11286,13 @@ class CallbackOperationBase(CallbackMethod):
         self.methodName = descriptor.binaryNames.get(jsName, jsName)
         CallbackMethod.__init__(self, signature, nativeName, descriptor, singleOperation, rethrowContentException)
 
-    def getThisObj(self):
+    def getThisVal(self):
         if not self.singleOperation:
-            return "mCallback"
+            return "JS::ObjectValue(*mCallback)"
         # This relies on getCallableDecl declaring a boolean
         # isCallable in the case when we're a single-operation
         # interface.
-        return "isCallable ? aThisObj.get() : mCallback"
+        return "isCallable ? aThisVal.get() : JS::ObjectValue(*mCallback)"
 
     def getCallableDecl(self):
         replacements = {
@@ -11243,6 +11314,9 @@ class CallbackOperationBase(CallbackMethod):
             '} else {\n'
             '%s'
             '}\n' % CGIndenter(CGGeneric(getCallableFromProp)).define())
+
+    def getCallGuard(self):
+        return ""
 
 class CallbackOperation(CallbackOperationBase):
     """
