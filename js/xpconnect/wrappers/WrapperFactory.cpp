@@ -178,7 +178,7 @@ WrapperFactory::PrepareForWrapping(JSContext *cx, HandleObject scope,
         }
         if (key != JSProto_Null) {
             RootedObject homeProto(cx);
-            if (!JS_GetClassPrototype(cx, key, homeProto.address()))
+            if (!JS_GetClassPrototype(cx, key, &homeProto))
                 return nullptr;
             MOZ_ASSERT(homeProto);
             // No need to double-wrap here. We should never have waivers to
@@ -282,8 +282,7 @@ WrapperFactory::PrepareForWrapping(JSContext *cx, HandleObject scope,
     RootedValue v(cx);
     nsresult rv =
         nsXPConnect::XPConnect()->WrapNativeToJSVal(cx, wrapScope, wn->Native(), nullptr,
-                                                    &NS_GET_IID(nsISupports), false,
-                                                    v.address());
+                                                    &NS_GET_IID(nsISupports), false, &v);
     NS_ENSURE_SUCCESS(rv, nullptr);
 
     obj = JSVAL_TO_OBJECT(v);

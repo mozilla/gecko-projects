@@ -1623,7 +1623,7 @@ HTMLMediaElement::MozGetMetadata(JSContext* cx, ErrorResult& aRv)
     return nullptr;
   }
 
-  JS::Rooted<JSObject*> tags(cx, JS_NewObject(cx, nullptr, nullptr, nullptr));
+  JS::Rooted<JSObject*> tags(cx, JS_NewObject(cx, nullptr, JS::NullPtr(), JS::NullPtr()));
   if (!tags) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -1642,14 +1642,14 @@ HTMLMediaElement::MozGetMetadata(JSContext* cx, ErrorResult& aRv)
 }
 
 NS_IMETHODIMP
-HTMLMediaElement::MozGetMetadata(JSContext* cx, JS::Value* aValue)
+HTMLMediaElement::MozGetMetadata(JSContext* cx, JS::MutableHandle<JS::Value> aValue)
 {
   ErrorResult rv;
 
   JSObject* obj = MozGetMetadata(cx, rv);
   if (!rv.Failed()) {
     MOZ_ASSERT(obj);
-    *aValue = JS::ObjectValue(*obj);
+    aValue.setObject(*obj);
   }
 
   return rv.ErrorCode();

@@ -97,7 +97,7 @@ StackFrame::initVarsToUndefined()
 }
 
 inline Value &
-StackFrame::unaliasedVar(unsigned i, MaybeCheckAliasing checkAliasing)
+StackFrame::unaliasedVar(uint32_t i, MaybeCheckAliasing checkAliasing)
 {
     JS_ASSERT_IF(checkAliasing, !script()->varIsAliased(i));
     JS_ASSERT(i < script()->nfixed());
@@ -105,7 +105,7 @@ StackFrame::unaliasedVar(unsigned i, MaybeCheckAliasing checkAliasing)
 }
 
 inline Value &
-StackFrame::unaliasedLocal(unsigned i, MaybeCheckAliasing checkAliasing)
+StackFrame::unaliasedLocal(uint32_t i, MaybeCheckAliasing checkAliasing)
 {
 #ifdef DEBUG
     CheckLocalUnaliased(checkAliasing, script(), i);
@@ -177,7 +177,7 @@ inline ScopeObject &
 StackFrame::aliasedVarScope(ScopeCoordinate sc) const
 {
     JSObject *scope = &scopeChain()->as<ScopeObject>();
-    for (unsigned i = sc.hops; i; i--)
+    for (unsigned i = sc.hops(); i; i--)
         scope = &scope->as<ScopeObject>().enclosingScope();
     return scope->as<ScopeObject>();
 }
@@ -363,13 +363,13 @@ AbstractFramePtr::setHookData(void *data) const
 #endif
 }
 
-inline Value
+inline HandleValue
 AbstractFramePtr::returnValue() const
 {
     if (isStackFrame())
         return asStackFrame()->returnValue();
 #ifdef JS_ION
-    return *asBaselineFrame()->returnValue();
+    return asBaselineFrame()->returnValue();
 #else
     MOZ_ASSUME_UNREACHABLE("Invalid frame");
 #endif
@@ -469,7 +469,7 @@ AbstractFramePtr::numFormalArgs() const
 }
 
 inline Value &
-AbstractFramePtr::unaliasedVar(unsigned i, MaybeCheckAliasing checkAliasing)
+AbstractFramePtr::unaliasedVar(uint32_t i, MaybeCheckAliasing checkAliasing)
 {
     if (isStackFrame())
         return asStackFrame()->unaliasedVar(i, checkAliasing);
@@ -481,7 +481,7 @@ AbstractFramePtr::unaliasedVar(unsigned i, MaybeCheckAliasing checkAliasing)
 }
 
 inline Value &
-AbstractFramePtr::unaliasedLocal(unsigned i, MaybeCheckAliasing checkAliasing)
+AbstractFramePtr::unaliasedLocal(uint32_t i, MaybeCheckAliasing checkAliasing)
 {
     if (isStackFrame())
         return asStackFrame()->unaliasedLocal(i, checkAliasing);

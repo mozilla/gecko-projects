@@ -48,7 +48,7 @@ public:
   {
     JS_ASSERT(SameCOMIdentity(static_cast<nsISupports*>(aBlob), aBlob));
 
-    JSObject* obj = JS_NewObject(aCx, &sClass, nullptr, nullptr);
+    JSObject* obj = JS_NewObject(aCx, &sClass, JS::NullPtr(), JS::NullPtr());
     if (obj) {
       JS_SetPrivate(obj, aBlob);
       NS_ADDREF(aBlob);
@@ -248,7 +248,7 @@ public:
   {
     JS_ASSERT(SameCOMIdentity(static_cast<nsISupports*>(aFile), aFile));
 
-    JSObject* obj = JS_NewObject(aCx, &sClass, nullptr, nullptr);
+    JSObject* obj = JS_NewObject(aCx, &sClass, JS::NullPtr(), JS::NullPtr());
     if (obj) {
       JS_SetPrivate(obj, aFile);
       NS_ADDREF(aFile);
@@ -410,12 +410,9 @@ private:
     nsIDOMFile* file = GetInstancePrivate(aCx, obj, "lastModifiedDate");
     MOZ_ASSERT(file);
 
-    JS::Rooted<JS::Value> value(aCx);
-    if (NS_FAILED(file->GetLastModifiedDate(aCx, value.address()))) {
+    if (NS_FAILED(file->GetLastModifiedDate(aCx, aArgs.rval()))) {
       return false;
     }
-
-    aArgs.rval().set(value);
     return true;
   }
 
