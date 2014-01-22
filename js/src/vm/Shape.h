@@ -960,8 +960,6 @@ class Shape : public gc::BarrieredCell<Shape>
         insertIntoDictionary(dictp);
     }
 
-    Shape *getChildBinding(ExclusiveContext *cx, const StackShape &child);
-
     /* Replace the base shape of the last shape in a non-dictionary lineage with base. */
     static Shape *replaceLastProperty(ExclusiveContext *cx, const StackBaseShape &base,
                                       TaggedProto proto, HandleShape shape);
@@ -1148,8 +1146,8 @@ class Shape : public gc::BarrieredCell<Shape>
 
     bool matches(const Shape *other) const {
         return propid_.get() == other->propid_.get() &&
-               matchesParamsAfterId(other->base(), other->maybeSlot(), other->attrs,
-                                    other->flags, other->shortid_);
+               matchesParamsAfterId(other->base(), other->maybeSlot(), other->attrs, other->flags,
+                                    other->shortid_);
     }
 
     inline bool matches(const StackShape &other) const;
@@ -1508,7 +1506,7 @@ struct StackShape
     int16_t          shortid;
 
     explicit StackShape(UnownedBaseShape *base, jsid propid, uint32_t slot,
-                        uint32_t nfixed, unsigned attrs, unsigned flags, int shortid)
+                        unsigned attrs, unsigned flags, int shortid)
       : base(base),
         propid(propid),
         slot_(slot),
@@ -1524,7 +1522,7 @@ struct StackShape
     StackShape(Shape *shape)
       : base(shape->base()->unowned()),
         propid(shape->propidRef()),
-        slot_(shape->slotInfo & Shape::SLOT_MASK),
+        slot_(shape->maybeSlot()),
         attrs(shape->attrs),
         flags(shape->flags),
         shortid(shape->shortid_)

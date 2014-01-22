@@ -9,7 +9,6 @@
 dump("############################### browserElementPanning.js loaded\n");
 
 let { classes: Cc, interfaces: Ci, results: Cr, utils: Cu }  = Components;
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Geometry.jsm");
 
@@ -544,8 +543,7 @@ const ContentPanning = {
         rect.y = cssTapY - (rect.h / 2);
       }
 
-      var os = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
-      os.notifyObservers(docShell, 'browser-zoom-to-rect', JSON.stringify(rect));
+      Services.obs.notifyObservers(docShell, 'browser-zoom-to-rect', JSON.stringify(rect));
     }
   },
 
@@ -569,8 +567,7 @@ const ContentPanning = {
 
   _zoomOut: function() {
     let rect = new Rect(0, 0, 0, 0);
-    var os = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
-    os.notifyObservers(docShell, 'browser-zoom-to-rect', JSON.stringify(rect));
+    Services.obs.notifyObservers(docShell, 'browser-zoom-to-rect', JSON.stringify(rect));
   },
 
   _isRectZoomedIn: function(aRect, aViewport) {

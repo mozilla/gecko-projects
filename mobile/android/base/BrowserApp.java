@@ -156,6 +156,7 @@ abstract public class BrowserApp extends GeckoApp
     };
 
     private FindInPageBar mFindInPageBar;
+    private MediaCastingBar mMediaCastingBar;
 
     private boolean mAccessibilityEnabled = false;
 
@@ -487,7 +488,7 @@ abstract public class BrowserApp extends GeckoApp
 
         mBrowserToolbar.setOnDismissListener(new BrowserToolbar.OnDismissListener() {
             public void onDismiss() {
-                dismissEditingMode();
+                mBrowserToolbar.cancelEdit();
             }
         });
 
@@ -530,6 +531,7 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         mFindInPageBar = (FindInPageBar) findViewById(R.id.find_in_page);
+        mMediaCastingBar = (MediaCastingBar) findViewById(R.id.media_casting);
 
         registerEventListener("CharEncoding:Data");
         registerEventListener("CharEncoding:State");
@@ -605,10 +607,6 @@ abstract public class BrowserApp extends GeckoApp
     public void onBackPressed() {
         if (getSupportFragmentManager().getBackStackEntryCount() > 0) {
             super.onBackPressed();
-            return;
-        }
-
-        if (dismissEditingMode()) {
             return;
         }
 
@@ -828,6 +826,11 @@ abstract public class BrowserApp extends GeckoApp
         if (mFindInPageBar != null) {
             mFindInPageBar.onDestroy();
             mFindInPageBar = null;
+        }
+
+        if (mMediaCastingBar != null) {
+            mMediaCastingBar.onDestroy();
+            mMediaCastingBar = null;
         }
 
         if (mSharedPreferencesHelper != null) {
@@ -1565,16 +1568,6 @@ abstract public class BrowserApp extends GeckoApp
         } catch (Exception e) {
             Log.w(LOGTAG, "Error recording search.", e);
         }
-    }
-
-    private boolean dismissEditingMode() {
-        if (!mBrowserToolbar.isEditing()) {
-            return false;
-        }
-
-        mBrowserToolbar.cancelEdit();
-
-        return true;
     }
 
     void filterEditingMode(String searchTerm, AutocompleteHandler handler) {
@@ -2393,7 +2386,7 @@ abstract public class BrowserApp extends GeckoApp
 
         // Dismiss editing mode if the user is loading a URL from an external app.
         if (Intent.ACTION_VIEW.equals(action)) {
-            dismissEditingMode();
+            mBrowserToolbar.cancelEdit();
             return;
         }
 
