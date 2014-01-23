@@ -265,7 +265,6 @@ toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
   display: -moz-box;
 }
 
-#wrapper-urlbar-container > #urlbar-container > #urlbar-wrapper > #urlbar > toolbarbutton,
 #urlbar-reload-button:not([displaystop]) + #urlbar-stop-button,
 #urlbar-reload-button[displaystop] {
   visibility: collapse;
@@ -745,6 +744,14 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
 toolbarpaletteitem[place="palette"] > toolbarbutton[type="badged"] > .toolbarbutton-badge-container > .toolbarbutton-icon {
   max-width: 32px;
   max-height: 32px;
+}
+
+toolbarbutton[sdk-button="true"] > .toolbarbutton-icon {
+  max-height: 32px;
+}
+
+toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
+  max-height: 18px;
 }
 
 panelview > .social-panel-frame {

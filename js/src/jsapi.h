@@ -2787,18 +2787,18 @@ JS_DefinePropertyWithTinyId(JSContext *cx, JSObject *obj, const char *name,
                             unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
-JS_AlreadyHasOwnProperty(JSContext *cx, JSObject *obj, const char *name,
+JS_AlreadyHasOwnProperty(JSContext *cx, JS::HandleObject obj, const char *name,
                          bool *foundp);
 
 extern JS_PUBLIC_API(bool)
-JS_AlreadyHasOwnPropertyById(JSContext *cx, JSObject *obj, jsid id,
+JS_AlreadyHasOwnPropertyById(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                              bool *foundp);
 
 extern JS_PUBLIC_API(bool)
-JS_HasProperty(JSContext *cx, JSObject *obj, const char *name, bool *foundp);
+JS_HasProperty(JSContext *cx, JS::HandleObject obj, const char *name, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
-JS_HasPropertyById(JSContext *cx, JSObject *obj, jsid id, bool *foundp);
+JS_HasPropertyById(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
 JS_LookupProperty(JSContext *cx, JSObject *obj, const char *name, JS::MutableHandleValue vp);
@@ -3001,16 +3001,16 @@ extern JS_PUBLIC_API(bool)
 JS_SetPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::HandleValue v);
 
 extern JS_PUBLIC_API(bool)
-JS_DeleteProperty(JSContext *cx, JSObject *obj, const char *name);
+JS_DeleteProperty(JSContext *cx, JS::HandleObject obj, const char *name);
 
 extern JS_PUBLIC_API(bool)
-JS_DeleteProperty2(JSContext *cx, JSObject *obj, const char *name, bool *succeeded);
+JS_DeleteProperty2(JSContext *cx, JS::HandleObject obj, const char *name, bool *succeeded);
 
 extern JS_PUBLIC_API(bool)
-JS_DeletePropertyById(JSContext *cx, JSObject *obj, jsid id);
+JS_DeletePropertyById(JSContext *cx, JS::HandleObject obj, jsid id);
 
 extern JS_PUBLIC_API(bool)
-JS_DeletePropertyById2(JSContext *cx, JSObject *obj, jsid id, bool *succeeded);
+JS_DeletePropertyById2(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *succeeded);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext *cx, JSObject *obj,
@@ -3026,11 +3026,11 @@ JS_DefineUCPropertyWithTinyId(JSContext *cx, JSObject *obj,
                               unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
-JS_AlreadyHasOwnUCProperty(JSContext *cx, JSObject *obj, const jschar *name,
+JS_AlreadyHasOwnUCProperty(JSContext *cx, JS::HandleObject obj, const jschar *name,
                            size_t namelen, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
-JS_HasUCProperty(JSContext *cx, JSObject *obj,
+JS_HasUCProperty(JSContext *cx, JS::HandleObject obj,
                  const jschar *name, size_t namelen,
                  bool *vp);
 
@@ -3070,10 +3070,10 @@ JS_DefineElement(JSContext *cx, JSObject *obj, uint32_t index, jsval value,
                  JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
-JS_AlreadyHasOwnElement(JSContext *cx, JSObject *obj, uint32_t index, bool *foundp);
+JS_AlreadyHasOwnElement(JSContext *cx, JS::HandleObject obj, uint32_t index, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
-JS_HasElement(JSContext *cx, JSObject *obj, uint32_t index, bool *foundp);
+JS_HasElement(JSContext *cx, JS::HandleObject obj, uint32_t index, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
 JS_LookupElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandleValue vp);
@@ -3089,10 +3089,10 @@ extern JS_PUBLIC_API(bool)
 JS_SetElement(JSContext *cx, JSObject *obj, uint32_t index, JS::MutableHandleValue vp);
 
 extern JS_PUBLIC_API(bool)
-JS_DeleteElement(JSContext *cx, JSObject *obj, uint32_t index);
+JS_DeleteElement(JSContext *cx, JS::HandleObject obj, uint32_t index);
 
 extern JS_PUBLIC_API(bool)
-JS_DeleteElement2(JSContext *cx, JSObject *obj, uint32_t index, bool *succeeded);
+JS_DeleteElement2(JSContext *cx, JS::HandleObject obj, uint32_t index, bool *succeeded);
 
 /*
  * Remove all configurable properties from the given (non-global) object and
@@ -3482,7 +3482,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     const char *filename() const { return filename_; }
     const jschar *sourceMapURL() const { return sourceMapURL_; }
     virtual JSObject *element() const = 0;
-    virtual JSString *elementProperty() const = 0;
+    virtual JSString *elementAttributeName() const = 0;
 
     // POD options.
     JSVersion version;
@@ -3506,6 +3506,10 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
         SAVE_SOURCE
     } sourcePolicy;
 
+    // Wrap any compilation option values that need it as appropriate for
+    // use from |compartment|.
+    virtual bool wrap(JSContext *cx, JSCompartment *compartment) = 0;
+
   private:
     static JSObject * const nullObjectPtr;
     void operator=(const ReadOnlyCompileOptions &) MOZ_DELETE;
@@ -3528,7 +3532,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
 {
     JSRuntime *runtime;
     PersistentRootedObject elementRoot;
-    PersistentRootedString elementPropertyRoot;
+    PersistentRootedString elementAttributeNameRoot;
 
   public:
     // A minimal constructor, for use with OwningCompileOptions::copy. This
@@ -3539,18 +3543,26 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     ~OwningCompileOptions();
 
     JSObject *element() const MOZ_OVERRIDE { return elementRoot; }
-    JSString *elementProperty() const MOZ_OVERRIDE { return elementPropertyRoot; }
+    JSString *elementAttributeName() const MOZ_OVERRIDE { return elementAttributeNameRoot; }
 
     // Set this to a copy of |rhs|. Return false on OOM.
     bool copy(JSContext *cx, const ReadOnlyCompileOptions &rhs);
 
     /* These setters make copies of their string arguments, and are fallible. */
+    bool setFile(JSContext *cx, const char *f);
     bool setFileAndLine(JSContext *cx, const char *f, unsigned l);
     bool setSourceMapURL(JSContext *cx, const jschar *s);
 
     /* These setters are infallible, and can be chained. */
-    OwningCompileOptions &setElement(JSObject *e)         { elementRoot = e;         return *this; }
-    OwningCompileOptions &setElementProperty(JSString *p) { elementPropertyRoot = p; return *this; }
+    OwningCompileOptions &setLine(unsigned l)             { lineno = l;              return *this; }
+    OwningCompileOptions &setElement(JSObject *e) {
+        elementRoot = e;
+        return *this;
+    }
+    OwningCompileOptions &setElementAttributeName(JSString *p) {
+        elementAttributeNameRoot = p;
+        return *this;
+    }
     OwningCompileOptions &setPrincipals(JSPrincipals *p) {
         if (p) JS_HoldPrincipals(p);
         if (principals_) JS_DropPrincipals(runtime, principals_);
@@ -3576,6 +3588,8 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     OwningCompileOptions &setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     OwningCompileOptions &setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     OwningCompileOptions &setSourcePolicy(SourcePolicy sp) { sourcePolicy = sp; return *this; }
+
+    virtual bool wrap(JSContext *cx, JSCompartment *compartment) MOZ_OVERRIDE;
 };
 
 /*
@@ -3588,12 +3602,12 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
 class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOptions
 {
     RootedObject elementRoot;
-    RootedString elementPropertyRoot;
+    RootedString elementAttributeNameRoot;
 
   public:
     explicit CompileOptions(JSContext *cx, JSVersion version = JSVERSION_UNKNOWN);
     CompileOptions(js::ContextFriendFields *cx, const ReadOnlyCompileOptions &rhs)
-      : ReadOnlyCompileOptions(), elementRoot(cx), elementPropertyRoot(cx)
+      : ReadOnlyCompileOptions(), elementRoot(cx), elementAttributeNameRoot(cx)
     {
         copyPODOptions(rhs);
 
@@ -3602,19 +3616,27 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
         filename_ = rhs.filename();
         sourceMapURL_ = rhs.sourceMapURL();
         elementRoot = rhs.element();
-        elementPropertyRoot = rhs.elementProperty();
+        elementAttributeNameRoot = rhs.elementAttributeName();
     }
 
     JSObject *element() const MOZ_OVERRIDE { return elementRoot; }
-    JSString *elementProperty() const MOZ_OVERRIDE { return elementPropertyRoot; }
+    JSString *elementAttributeName() const MOZ_OVERRIDE { return elementAttributeNameRoot; }
 
+    CompileOptions &setFile(const char *f) { filename_ = f; return *this; }
+    CompileOptions &setLine(unsigned l) { lineno = l; return *this; }
     CompileOptions &setFileAndLine(const char *f, unsigned l) {
         filename_ = f; lineno = l; return *this;
     }
     CompileOptions &setSourceMapURL(const jschar *s) { sourceMapURL_ = s;       return *this; }
     CompileOptions &setElement(JSObject *e)          { elementRoot = e;         return *this; }
-    CompileOptions &setElementProperty(JSString *p)  { elementPropertyRoot = p; return *this; }
-    CompileOptions &setPrincipals(JSPrincipals *p)   { principals_ = p;         return *this; }
+    CompileOptions &setElementAttributeName(JSString *p) {
+        elementAttributeNameRoot = p;
+        return *this;
+    }
+    CompileOptions &setPrincipals(JSPrincipals *p) {
+        principals_ = p;
+        return *this;
+    }
     CompileOptions &setOriginPrincipals(JSPrincipals *p) {
         originPrincipals_ = p;
         return *this;
@@ -3632,6 +3654,8 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
     CompileOptions &setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     CompileOptions &setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     CompileOptions &setSourcePolicy(SourcePolicy sp) { sourcePolicy = sp; return *this; }
+
+    virtual bool wrap(JSContext *cx, JSCompartment *compartment) MOZ_OVERRIDE;
 };
 
 extern JS_PUBLIC_API(JSScript *)
