@@ -140,7 +140,7 @@ static bool gTouchActionPropertyEnabled = false;
  * accidentally processing taps as touch moves, and from very short/accidental
  * touches moving the screen.
  */
-static float gTouchStartTolerance = 1.0f/2.0f;
+static float gTouchStartTolerance = 1.0f/4.5f;
 
 /**
  * Default touch behavior (is used when not touch behavior is set).
@@ -1228,7 +1228,7 @@ bool FlingAnimation::Sample(FrameMetrics& aFrameMetrics,
     mX.AdjustDisplacement(cssOffset.x, overscroll.x,
                           aFrameMetrics.GetDisableScrollingX()),
     mY.AdjustDisplacement(cssOffset.y, overscroll.y,
-                          aFrameMetrics.GetDisableScrollingX())
+                          aFrameMetrics.GetDisableScrollingY())
   ));
 
   return true;
@@ -1323,8 +1323,8 @@ const CSSRect AsyncPanZoomController::CalculatePendingDisplayPort(
   displayPort = displayPort.ForceInside(scrollableRect) - scrollOffset;
 
   APZC_LOG_FM(aFrameMetrics,
-    "%p calculated displayport as (%f %f %f %f) from velocity (%f %f) acceleration (%f %f) paint time %f metrics",
-    this, displayPort.x, displayPort.y, displayPort.width, displayPort.height,
+    "Calculated displayport as (%f %f %f %f) from velocity (%f %f) acceleration (%f %f) paint time %f metrics",
+    displayPort.x, displayPort.y, displayPort.width, displayPort.height,
     aVelocity.x, aVelocity.y, aAcceleration.x, aAcceleration.y,
     (float)estimatedPaintDurationMillis);
 
