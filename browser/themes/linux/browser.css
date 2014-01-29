@@ -680,7 +680,6 @@ menuitem:not([type]):not(.menuitem-tooltip):not(.menuitem-iconic-tooltip) {
 
 /* Location bar */
 #urlbar {
-  width: 7em;
   -moz-appearance: textfield;
   padding: 0;
 }
@@ -1679,6 +1678,35 @@ toolbarbutton.chevron > .toolbarbutton-icon {
   color: ButtonText;
   padding: 0 3px;
   margin-top: 10px;
+}
+
+/* Sync Panel */
+
+.sync-panel {
+  padding: 10px;
+}
+
+.sync-panel-icon {
+  width: 32px;
+  background: url("chrome://browser/content/abouthome/sync.png") top left no-repeat;
+}
+
+.sync-panel-inner {
+  width: 0;
+  padding-left: 10px;
+}
+
+.sync-panel-button-box {
+  margin-top: 1em;
+}
+
+#sync-error-panel-title {
+  font-weight: bold;
+}
+
+#sync-start-panel-subtitle,
+#sync-error-panel-subtitle {
+  margin: 0;
 }
 
 /* Status panel */

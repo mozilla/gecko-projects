@@ -682,12 +682,12 @@ bool TabParent::SendRealMouseEvent(WidgetMouseEvent& event)
   if (mIsDestroyed) {
     return false;
   }
-  WidgetMouseEvent e(event);
-  MaybeForwardEventToRenderFrame(event, nullptr, &e);
-  if (!MapEventCoordinatesForChildProcess(&e)) {
+  WidgetMouseEvent outEvent(event);
+  MaybeForwardEventToRenderFrame(event, nullptr, &outEvent);
+  if (!MapEventCoordinatesForChildProcess(&outEvent)) {
     return false;
   }
-  return PBrowserParent::SendRealMouseEvent(e);
+  return PBrowserParent::SendRealMouseEvent(outEvent);
 }
 
 CSSIntPoint TabParent::AdjustTapToChildWidget(const CSSIntPoint& aPoint)
@@ -750,12 +750,12 @@ bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)
   if (mIsDestroyed) {
     return false;
   }
-  WidgetWheelEvent e(event);
-  MaybeForwardEventToRenderFrame(event, nullptr, &e);
-  if (!MapEventCoordinatesForChildProcess(&e)) {
+  WidgetWheelEvent outEvent(event);
+  MaybeForwardEventToRenderFrame(event, nullptr, &outEvent);
+  if (!MapEventCoordinatesForChildProcess(&outEvent)) {
     return false;
   }
-  return PBrowserParent::SendMouseWheelEvent(event);
+  return PBrowserParent::SendMouseWheelEvent(outEvent);
 }
 
 bool TabParent::SendRealKeyEvent(WidgetKeyboardEvent& event)
@@ -763,12 +763,12 @@ bool TabParent::SendRealKeyEvent(WidgetKeyboardEvent& event)
   if (mIsDestroyed) {
     return false;
   }
-  WidgetKeyboardEvent e(event);
-  MaybeForwardEventToRenderFrame(event, nullptr, &e);
-  if (!MapEventCoordinatesForChildProcess(&e)) {
+  WidgetKeyboardEvent outEvent(event);
+  MaybeForwardEventToRenderFrame(event, nullptr, &outEvent);
+  if (!MapEventCoordinatesForChildProcess(&outEvent)) {
     return false;
   }
-  return PBrowserParent::SendRealKeyEvent(e);
+  return PBrowserParent::SendRealKeyEvent(outEvent);
 }
 
 bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
@@ -797,30 +797,36 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
     ++mEventCaptureDepth;
   }
 
-  WidgetTouchEvent e(event);
-  // PresShell::HandleEventInternal adds touches on touch end/cancel.
-  // This confuses remote content into thinking that the added touches
-  // are part of the touchend/cancel, when actually they're not.
+  // PresShell::HandleEventInternal adds touches on touch end/cancel.  This
+  // confuses remote content and the panning and zooming logic into thinking
+  // that the added touches are part of the touchend/cancel, when actually
+  // they're not.
   if (event.message == NS_TOUCH_END || event.message == NS_TOUCH_CANCEL) {
-    for (int i = e.touches.Length() - 1; i >= 0; i--) {
-      if (!e.touches[i]->mChanged) {
-        e.touches.RemoveElementAt(i);
+    for (int i = event.touches.Length() - 1; i >= 0; i--) {
+      if (!event.touches[i]->mChanged) {
+        event.touches.RemoveElementAt(i);
       }
     }
   }
 
+  // Create an out event for remote content that is identical to the event that
+  // we send to the render frame. The out event will be transformed in such a
+  // way that its async transform in the compositor is unapplied. The event that
+  // it is created from does not get mutated.
+  WidgetTouchEvent outEvent(event);
+
   ScrollableLayerGuid guid;
-  MaybeForwardEventToRenderFrame(event, &guid, &e);
+  MaybeForwardEventToRenderFrame(event, &guid, &outEvent);
 
   if (mIsDestroyed) {
     return false;
   }
 
-  MapEventCoordinatesForChildProcess(mChildProcessOffsetAtTouchStart, &e);
+  MapEventCoordinatesForChildProcess(mChildProcessOffsetAtTouchStart, &outEvent);
 
-  return (e.message == NS_TOUCH_MOVE) ?
-    PBrowserParent::SendRealTouchMoveEvent(e, guid) :
-    PBrowserParent::SendRealTouchEvent(e, guid);
+  return (outEvent.message == NS_TOUCH_MOVE) ?
+    PBrowserParent::SendRealTouchMoveEvent(outEvent, guid) :
+    PBrowserParent::SendRealTouchEvent(outEvent, guid);
 }
 
 /*static*/ TabParent*
@@ -1013,7 +1019,6 @@ TabParent::RecvNotifyIMEFocus(const bool& aFocus,
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) {
     aPreference->mWantUpdates = nsIMEUpdatePreference::NOTIFY_NOTHING;
-    aPreference->mWantHints = false;
     return true;
   }
 
@@ -1039,6 +1044,9 @@ TabParent::RecvNotifyIMETextChange(const uint32_t& aStart,
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget)
     return true;
+
+  NS_ASSERTION(widget->GetIMEUpdatePreference().WantTextChange(),
+               "Don't call Send/RecvNotifyIMETextChange without NOTIFY_TEXT_CHANGE");
 
   widget->NotifyIMEOfTextChange(aStart, aEnd, aNewEnd);
   return true;
@@ -1074,7 +1082,9 @@ TabParent::RecvNotifyIMESelection(const uint32_t& aSeqno,
   if (aSeqno == mIMESeqno) {
     mIMESelectionAnchor = aAnchor;
     mIMESelectionFocus = aFocus;
-    widget->NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE);
+    if (widget->GetIMEUpdatePreference().WantSelectionChange()) {
+      widget->NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE);
+    }
   }
   return true;
 }
@@ -1895,6 +1905,60 @@ TabParent::GetLoadContext()
     mLoadContext = loadContext;
   }
   return loadContext.forget();
+}
+
+NS_IMETHODIMP
+TabParent::InjectTouchEvent(const nsAString& aType,
+                            uint32_t* aIdentifiers,
+                            int32_t* aXs,
+                            int32_t* aYs,
+                            uint32_t* aRxs,
+                            uint32_t* aRys,
+                            float* aRotationAngles,
+                            float* aForces,
+                            uint32_t aCount,
+                            int32_t aModifiers)
+{
+  uint32_t msg;
+  nsContentUtils::GetEventIdAndAtom(aType, NS_TOUCH_EVENT, &msg);
+  if (msg != NS_TOUCH_START && msg != NS_TOUCH_MOVE &&
+      msg != NS_TOUCH_END && msg != NS_TOUCH_CANCEL) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+
+  WidgetTouchEvent event(true, msg, widget);
+  event.modifiers = aModifiers;
+  event.time = PR_IntervalNow();
+
+  event.touches.SetCapacity(aCount);
+  for (uint32_t i = 0; i < aCount; ++i) {
+    nsRefPtr<Touch> t = new Touch(aIdentifiers[i],
+                                  nsIntPoint(aXs[i], aYs[i]),
+                                  nsIntPoint(aRxs[i], aRys[i]),
+                                  aRotationAngles[i],
+                                  aForces[i]);
+
+    // Consider all injected touch events as changedTouches. For more details
+    // about the meaning of changedTouches for each event, see
+    // https://developer.mozilla.org/docs/Web/API/TouchEvent.changedTouches
+    t->mChanged = true;
+    event.touches.AppendElement(t);
+  }
+
+  SendRealTouchEvent(event);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::GetUseAsyncPanZoom(bool* useAsyncPanZoom)
+{
+  *useAsyncPanZoom = UseAsyncPanZoom();
+  return NS_OK;
 }
 
 } // namespace tabs

@@ -3657,8 +3657,8 @@ let RIL = {
 
   _sendCallError: function(callIndex, errorMsg) {
     this.sendChromeMessage({rilMessageType: "callError",
-                           callIndex: callIndex,
-                           errorMsg: errorMsg});
+                            callIndex: callIndex,
+                            errorMsg: errorMsg});
   },
 
   _sendDataCallError: function(message, errorCode) {
@@ -5095,8 +5095,7 @@ RIL[REQUEST_DIAL] = function REQUEST_DIAL(length, options) {
   if (options.rilRequestError) {
     // The connection is not established yet.
     options.callIndex = -1;
-    this._sendCallError(options.callIndex,
-                        RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError]);
+    this.getFailCauseCode(options);
   }
 };
 RIL[REQUEST_GET_IMSI] = function REQUEST_GET_IMSI(length, options) {
@@ -9666,6 +9665,13 @@ let ICCPDUHelper = {
   writeNumberWithLength: function(number) {
     if (number) {
       let numStart = number[0] == "+" ? 1 : 0;
+      number = number.substring(0, numStart) +
+               number.substring(numStart)
+                     .replace(/[^0-9*#,]/g, "")
+                     .replace(/\*/g, "a")
+                     .replace(/\#/g, "b")
+                     .replace(/\,/g, "c");
+
       let numDigits = number.length - numStart;
       if (numDigits > ADN_MAX_NUMBER_DIGITS) {
         number = number.substring(0, ADN_MAX_NUMBER_DIGITS + numStart);
@@ -13735,15 +13741,6 @@ let ICCContactHelper = {
         return;
       }
 
-      // Check if contact has additional properties (email, anr, ...etc) that
-      // need to be updated as well.
-      if ((field === USIM_PBR_EMAIL && !contact.email) ||
-          (field === USIM_PBR_ANR0 && (!Array.isArray(contact.anr) ||
-                                       !contact.anr[0]))) {
-        updateField();
-        return;
-      }
-
       ICCContactHelper.updateContactField(pbr, contact, field, updateField, onerror);
     })();
   },
@@ -13783,7 +13780,8 @@ let ICCContactHelper = {
     if (field === USIM_PBR_EMAIL) {
       ICCRecordHelper.updateEmail(pbr, contact.recordId, contact.email, null, onsuccess, onerror);
     } else if (field === USIM_PBR_ANR0) {
-      ICCRecordHelper.updateANR(pbr, contact.recordId, contact.anr[0], null, onsuccess, onerror);
+      let anr = Array.isArray(contact.anr) ? contact.anr[0] : null;
+      ICCRecordHelper.updateANR(pbr, contact.recordId, anr, null, onsuccess, onerror);
     } else {
      if (DEBUG) {
        debug("Unsupported field :" + field);
@@ -13813,8 +13811,16 @@ let ICCContactHelper = {
     let gotIapCb = function gotIapCb(iap) {
       let recordId = iap[pbr[field].indexInIAP];
       if (recordId === 0xff) {
-        // Case 1.
-        this.addContactFieldType2(pbr, contact, field, onsuccess, onerror);
+        // If the value in IAP[index] is 0xff, which means the contact stored on
+        // the SIM doesn't have the additional attribute (email or anr).
+        // So if the contact to be updated doesn't have the attribute either,
+        // we don't have to update it.
+        if ((field === USIM_PBR_EMAIL && contact.email) ||
+            (field === USIM_PBR_ANR0 &&
+             (Array.isArray(contact.anr) && contact.anr[0]))) {
+          // Case 1.
+          this.addContactFieldType2(pbr, contact, field, onsuccess, onerror);
+        }
         return;
       }
 
@@ -13822,7 +13828,8 @@ let ICCContactHelper = {
       if (field === USIM_PBR_EMAIL) {
         ICCRecordHelper.updateEmail(pbr, recordId, contact.email, contact.recordId, onsuccess, onerror);
       } else if (field === USIM_PBR_ANR0) {
-        ICCRecordHelper.updateANR(pbr, recordId, contact.anr[0], contact.recordId, onsuccess, onerror);
+        let anr = Array.isArray(contact.anr) ? contact.anr[0] : null;
+        ICCRecordHelper.updateANR(pbr, recordId, anr, contact.recordId, onsuccess, onerror);
       } else {
         if (DEBUG) {
           debug("Unsupported field :" + field);

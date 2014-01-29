@@ -571,7 +571,6 @@ const Class JSFunction::class_ = {
     (JSResolveOp)js::fun_resolve,
     JS_ConvertStub,
     nullptr,                 /* finalize    */
-    nullptr,                 /* checkAccess */
     nullptr,                 /* call        */
     fun_hasInstance,
     nullptr,                 /* construct   */
@@ -1055,6 +1054,12 @@ js_fun_apply(JSContext *cx, unsigned argc, Value *vp)
         args.setCallee(fval);
         args.setThis(vp[2]);
 
+        // Make sure the function is delazified before querying its arguments.
+        if (args.callee().is<JSFunction>()) {
+            JSFunction *fun = &args.callee().as<JSFunction>();
+            if (fun->isInterpreted() && !fun->getOrCreateScript(cx))
+                return false;
+        }
         /* Steps 7-8. */
         if (!GetElements(cx, aobj, length, args.array()))
             return false;

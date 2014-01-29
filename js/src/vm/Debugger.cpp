@@ -342,6 +342,7 @@ BreakpointSite::hasBreakpoint(Breakpoint *bp)
 Breakpoint::Breakpoint(Debugger *debugger, BreakpointSite *site, JSObject *handler)
     : debugger(debugger), site(site), handler(handler)
 {
+    JS_ASSERT(handler->compartment() == debugger->object->compartment());
     JS_APPEND_LINK(&debuggerLinks, &debugger->breakpoints);
     JS_APPEND_LINK(&siteLinks, &site->breakpoints);
 }
@@ -1700,7 +1701,6 @@ const Class Debugger::jsclass = {
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUG_COUNT),
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, Debugger::finalize,
-    nullptr,              /* checkAccess */
     nullptr,              /* call        */
     nullptr,              /* hasInstance */
     nullptr,              /* construct   */
@@ -2305,6 +2305,15 @@ Debugger::removeDebuggeeGlobal(FreeOp *fop, GlobalObject *global,
     else
         debuggees.remove(global);
 
+    /* Remove all breakpoints for the debuggee. */
+    Breakpoint *nextbp;
+    for (Breakpoint *bp = firstBreakpoint(); bp; bp = nextbp) {
+        nextbp = bp->nextInDebugger();
+        if (bp->site->script->compartment() == global->compartment())
+            bp->destroy(fop);
+    }
+    JS_ASSERT_IF(debuggees.empty(), !firstBreakpoint());
+
     /*
      * The debuggee needs to be removed from the compartment last, as this can
      * trigger GCs if the compartment's debug mode is being changed, and the
@@ -2818,7 +2827,6 @@ const Class DebuggerScript_class = {
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGSCRIPT_COUNT),
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
-    nullptr,              /* checkAccess */
     nullptr,              /* call        */
     nullptr,              /* hasInstance */
     nullptr,              /* construct   */
@@ -3726,7 +3734,6 @@ const Class DebuggerSource_class = {
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGSOURCE_COUNT),
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
-    nullptr,              /* checkAccess */
     nullptr,              /* call        */
     nullptr,              /* hasInstance */
     nullptr,              /* construct   */
@@ -4620,7 +4627,6 @@ const Class DebuggerObject_class = {
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGOBJECT_COUNT),
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
-    nullptr,              /* checkAccess */
     nullptr,              /* call        */
     nullptr,              /* hasInstance */
     nullptr,              /* construct   */
@@ -5461,7 +5467,6 @@ const Class DebuggerEnv_class = {
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGENV_COUNT),
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
-    nullptr,              /* checkAccess */
     nullptr,              /* call        */
     nullptr,              /* hasInstance */
     nullptr,              /* construct   */

@@ -10,18 +10,19 @@ import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PanZoomController;
-import org.mozilla.gecko.mozglue.JNITarget;
+import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.mozglue.generatorannotations.OptionalGeneratedParameter;
 import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
-import org.mozilla.gecko.prompts.PromptService;
-import org.mozilla.gecko.mozglue.GeckoLoader;
+import org.mozilla.gecko.mozglue.JNITarget;
 import org.mozilla.gecko.mozglue.RobocopTarget;
+import org.mozilla.gecko.prompts.PromptService;
 import org.mozilla.gecko.util.ActivityResultHandler;
 import org.mozilla.gecko.util.EventDispatcher;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.ProxySelector;
 import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.webapp.Allocator;
 import org.mozilla.gecko.webapp.InstallListener;
 
 import org.json.JSONException;
@@ -392,7 +393,7 @@ public class GeckoAppShell
      *  The Gecko-side API: API methods that Gecko calls
      */
 
-    @WrapElementForJNI(generateStatic = true, noThrow = true)
+    @WrapElementForJNI(allowMultithread = true, generateStatic = true, noThrow = true)
     public static void handleUncaughtException(Thread thread, Throwable e) {
         if (thread == null) {
             thread = Thread.currentThread();
@@ -718,34 +719,11 @@ public class GeckoAppShell
         gRestartScheduled = true;
     }
 
-    // The old implementation of preInstallWebApp.  Not used by MOZ_ANDROID_SYNTHAPKS.
-    public static File preInstallWebApp(String aTitle, String aURI, String aOrigin) {
-        int index = WebAppAllocator.getInstance(getContext()).findAndAllocateIndex(aOrigin, aTitle, (String) null);
-        GeckoProfile profile = GeckoProfile.get(getContext(), "webapp" + index);
-        return profile.getDir();
-    }
-
-    // The old implementation of postInstallWebApp.  Not used by MOZ_ANDROID_SYNTHAPKS.
-    public static void postInstallWebApp(String aTitle, String aURI, String aOrigin, String aIconURL, String aOriginalOrigin) {
-        WebAppAllocator allocator = WebAppAllocator.getInstance(getContext());
-        int index = allocator.getIndexForApp(aOriginalOrigin);
-        assert index != -1 && aIconURL != null;
-        allocator.updateAppAllocation(aOrigin, index, BitmapUtils.getBitmapFromDataURI(aIconURL));
-        createShortcut(aTitle, aURI, aOrigin, aIconURL, "webapp");
-    }
-
-    // The new implementation of postInstallWebApp.  Used by MOZ_ANDROID_SYNTHAPKS.
-    public static void postInstallWebApp(String aPackageName, String aOrigin) {
-        org.mozilla.gecko.webapp.WebAppAllocator allocator = org.mozilla.gecko.webapp.WebAppAllocator.getInstance(getContext());
-        int index = allocator.findOrAllocatePackage(aPackageName);
-        allocator.putOrigin(index, aOrigin);
-    }
-
     public static Intent getWebAppIntent(String aURI, String aOrigin, String aTitle, Bitmap aIcon) {
         Intent intent;
 
         if (AppConstants.MOZ_ANDROID_SYNTHAPKS) {
-            org.mozilla.gecko.webapp.WebAppAllocator slots = org.mozilla.gecko.webapp.WebAppAllocator.getInstance(getContext());
+            Allocator slots = Allocator.getInstance(getContext());
             int index = slots.getIndexForOrigin(aOrigin);
 
             if (index == -1) {
@@ -869,45 +847,6 @@ public class GeckoAppShell
 
                 intent.setAction("com.android.launcher.action.UNINSTALL_SHORTCUT");
                 getContext().sendBroadcast(intent);
-            }
-        });
-    }
-
-    public static void uninstallWebApp(final String uniqueURI) {
-        // On uninstall, we need to do a couple of things:
-        //   1. nuke the running app process.
-        //   2. nuke the profile that was assigned to that webapp
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                int index;
-                if (AppConstants.MOZ_ANDROID_SYNTHAPKS) {
-                    index = org.mozilla.gecko.webapp.WebAppAllocator.getInstance(getContext()).releaseIndexForApp(uniqueURI);
-                } else {
-                    index = WebAppAllocator.getInstance(getContext()).releaseIndexForApp(uniqueURI);
-                }
-
-                // if -1, nothing to do; we didn't think it was installed anyway
-                if (index == -1)
-                    return;
-
-                // kill the app if it's running
-                String targetProcessName = getContext().getPackageName();
-                targetProcessName = targetProcessName + ":" + targetProcessName + ".WebApp" + index;
-
-                ActivityManager am = (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
-                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
-                if (procs != null) {
-                    for (ActivityManager.RunningAppProcessInfo proc : procs) {
-                        if (proc.processName.equals(targetProcessName)) {
-                            android.os.Process.killProcess(proc.pid);
-                            break;
-                        }
-                    }
-                }
-
-                // then nuke the profile
-                GeckoProfile.removeProfile(getContext(), "webapp" + index);
             }
         });
     }
@@ -1958,7 +1897,8 @@ public class GeckoAppShell
     static String[] getPluginDirectories() {
 
         // An awful hack to detect Tegra devices. Easiest way to do it without spinning up a EGL context.
-        boolean isTegra = (new File("/system/lib/hw/gralloc.tegra.so")).exists();
+        boolean isTegra = (new File("/system/lib/hw/gralloc.tegra.so")).exists() ||
+                          (new File("/system/lib/hw/gralloc.tegra3.so")).exists();
         if (isTegra) {
             // disable Flash on Tegra ICS with CM9 and other custom firmware (bug 736421)
             File vfile = new File("/proc/version");
@@ -1985,6 +1925,12 @@ public class GeckoAppShell
                 } catch (IOException ex) {
                     // nothing
                 }
+            }
+
+            // disable on KitKat (bug 957694)
+            if (Build.VERSION.SDK_INT >= 19) {
+                Log.w(LOGTAG, "Blocking plugins because of Tegra (bug 957694)");
+                return null;
             }
         }
 
@@ -2732,54 +2678,4 @@ public class GeckoAppShell
         return "DIRECT";
     }
 
-    public static void installApk(final Activity context, String filePath, String data) {
-        // This is the data that mozApps.install sent to Webapps.jsm.
-        JSONObject argsObj = null;
-
-        // We get the manifest url out of javascript here so we can use it as a checksum
-        // in a minute, when a package has been installed.
-        String manifestUrl = null;
-        try {
-            argsObj = new JSONObject(data);
-            manifestUrl = argsObj.getJSONObject("app").getString("manifestURL");
-        } catch (JSONException e) {
-            Log.e(LOGTAG, "can't get manifest URL from JSON data", e);
-            // TODO: propagate the error back to the mozApps.install caller.
-            return;
-        }
-
-        // We will check the manifestUrl from the one in the APK.
-        // Thus, we can have a one-to-one mapping of apk to receiver.
-        final InstallListener receiver = new InstallListener(manifestUrl, argsObj);
-
-        // Listen for packages being installed.
-        IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
-        filter.addDataScheme("package");
-        context.registerReceiver(receiver, filter);
-
-        // Now call the package installer.
-        File file = new File(filePath);
-        Intent intent = new Intent(Intent.ACTION_VIEW);
-        intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
-
-        sActivityHelper.startIntentForActivity(context, intent, new ActivityResultHandler() {
-            @Override
-            public void onActivityResult(int resultCode, Intent data) {
-                // The InstallListener will catch the case where the user pressed install.
-                // Now deal with if the user pressed cancel.
-                if (resultCode == Activity.RESULT_CANCELED) {
-                    try {
-                        context.unregisterReceiver(receiver);
-                        receiver.cleanup();
-                    } catch (java.lang.IllegalArgumentException e) {
-                        // IllegalArgumentException happens because resultCode is RESULT_CANCELED
-                        // when the user presses the Done button in the install confirmation dialog,
-                        // even though the install has been successful (and InstallListener already
-                        // unregistered the receiver).
-                        Log.e(LOGTAG, "error unregistering install receiver: ", e);
-                    }
-                }
-            }
-        });
-    }
 }

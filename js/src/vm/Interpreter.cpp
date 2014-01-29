@@ -18,7 +18,6 @@
 
 #include "jsarray.h"
 #include "jsatom.h"
-#include "jsautooplen.h"
 #include "jscntxt.h"
 #include "jsfun.h"
 #include "jsgc.h"
@@ -39,6 +38,7 @@
 #include "jit/Ion.h"
 #include "js/OldDebugAPI.h"
 #include "vm/Debugger.h"
+#include "vm/Opcodes.h"
 #include "vm/Shape.h"
 
 #include "jsatominlines.h"
@@ -59,15 +59,16 @@ using namespace js::types;
 using mozilla::DebugOnly;
 using mozilla::DoubleEqualsInt32;
 using mozilla::PodCopy;
+using JS::ForOfIterator;
 
 /*
  * Note: when Clang 3.2 (32-bit) inlines the two functions below in Interpret,
  * the conservative stack scanner leaks a ton of memory and this negatively
- * influences performance. The JS_NEVER_INLINE is a temporary workaround until
+ * influences performance. The MOZ_NEVER_INLINE is a temporary workaround until
  * we can remove the conservative scanner. See bug 849526 for more info.
  */
 #if defined(__clang__) && defined(JS_CPU_X86)
-static JS_NEVER_INLINE bool
+static MOZ_NEVER_INLINE bool
 #else
 static bool
 #endif
@@ -78,7 +79,7 @@ ToBooleanOp(const FrameRegs &regs)
 
 template <bool Eq>
 #if defined(__clang__) && defined(JS_CPU_X86)
-static JS_NEVER_INLINE bool
+static MOZ_NEVER_INLINE bool
 #else
 static bool
 #endif
@@ -266,7 +267,7 @@ GetPropertyOperation(JSContext *cx, StackFrame *fp, HandleScript script, jsbytec
 
 #if JS_HAS_NO_SUCH_METHOD
     if (op == JSOP_CALLPROP &&
-        JS_UNLIKELY(vp.isUndefined()) &&
+        MOZ_UNLIKELY(vp.isUndefined()) &&
         wasObject)
     {
         if (!OnUnknownMethod(cx, obj, IdToValue(id), vp))
@@ -329,7 +330,7 @@ SetPropertyOperation(JSContext *cx, HandleScript script, jsbytecode *pc, HandleV
     RootedValue rref(cx, rval);
 
     RootedId id(cx, NameToId(script->getName(pc)));
-    if (JS_LIKELY(!obj->getOps()->setProperty)) {
+    if (MOZ_LIKELY(!obj->getOps()->setProperty)) {
         if (!baseops::SetPropertyHelper<SequentialExecution>(cx, obj, obj, id, 0,
                                                              &rref, script->strict()))
         {
@@ -366,7 +367,7 @@ js::ValueToCallable(JSContext *cx, HandleValue v, int numToSkip, MaybeConstruct 
     return nullptr;
 }
 
-static JS_NEVER_INLINE bool
+static MOZ_NEVER_INLINE bool
 Interpret(JSContext *cx, RunState &state);
 
 StackFrame *
@@ -446,9 +447,9 @@ js::Invoke(JSContext *cx, CallArgs args, MaybeConstruct construct)
     const Class *clasp = callee.getClass();
 
     /* Invoke non-functions. */
-    if (JS_UNLIKELY(clasp != &JSFunction::class_)) {
+    if (MOZ_UNLIKELY(clasp != &JSFunction::class_)) {
 #if JS_HAS_NO_SUCH_METHOD
-        if (JS_UNLIKELY(clasp == &js_NoSuchMethodClass))
+        if (MOZ_UNLIKELY(clasp == &js_NoSuchMethodClass))
             return NoSuchMethod(cx, args.length(), args.base());
 #endif
         JS_ASSERT_IF(construct, !clasp->construct);
@@ -981,7 +982,7 @@ HandleError(JSContext *cx, FrameRegs &regs)
   again:
     if (cx->isExceptionPending()) {
         /* Call debugger throw hooks. */
-        if (JS_UNLIKELY(cx->compartment()->debugMode())) {
+        if (MOZ_UNLIKELY(cx->compartment()->debugMode())) {
             JSTrapStatus status = DebugExceptionUnwind(cx, regs.fp(), regs.pc);
             switch (status) {
               case JSTRAP_ERROR:
@@ -1186,13 +1187,13 @@ ComputeImplicitThis(JSContext *cx, HandleObject obj, MutableHandleValue vp)
     return true;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 AddOperation(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, Value *res)
 {
     if (lhs.isInt32() && rhs.isInt32()) {
         int32_t l = lhs.toInt32(), r = rhs.toInt32();
         int32_t t;
-        if (JS_LIKELY(SafeAdd(l, r, &t))) {
+        if (MOZ_LIKELY(SafeAdd(l, r, &t))) {
             res->setInt32(t);
             return true;
         }
@@ -1241,7 +1242,7 @@ AddOperation(JSContext *cx, MutableHandleValue lhs, MutableHandleValue rhs, Valu
     return true;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 SubOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
 {
     double d1, d2;
@@ -1251,7 +1252,7 @@ SubOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
     return true;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 MulOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
 {
     double d1, d2;
@@ -1261,7 +1262,7 @@ MulOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
     return true;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 DivOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
 {
     double d1, d2;
@@ -1271,7 +1272,7 @@ DivOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
     return true;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 ModOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
 {
     int32_t l, r;
@@ -1290,7 +1291,7 @@ ModOperation(JSContext *cx, HandleValue lhs, HandleValue rhs, Value *res)
     return true;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 SetObjectElementOperation(JSContext *cx, Handle<JSObject*> obj, HandleId id, const Value &value,
                           bool strict, JSScript *script = nullptr, jsbytecode *pc = nullptr)
 {
@@ -1315,7 +1316,7 @@ SetObjectElementOperation(JSContext *cx, Handle<JSObject*> obj, HandleId id, con
     return JSObject::setGeneric(cx, obj, obj, id, &tmp, strict);
 }
 
-static JS_NEVER_INLINE bool
+static MOZ_NEVER_INLINE bool
 Interpret(JSContext *cx, RunState &state)
 {
 /*
@@ -1341,14 +1342,15 @@ Interpret(JSContext *cx, RunState &state)
     // Use addresses instead of offsets to optimize for runtime speed over
     // load-time relocation overhead.
     static const void *const addresses[EnableInterruptsPseudoOpcode + 1] = {
-# define OPDEF(op,v,n,t,l,u,d,f)  LABEL(op),
-# define OPPAD(v)                                                             \
+# define OPCODE_LABEL(op, ...)  LABEL(op),
+        FOR_EACH_OPCODE(OPCODE_LABEL)
+# undef OPCODE_LABEL
+# define TRAILING_LABEL(v)                                                    \
     ((v) == EnableInterruptsPseudoOpcode                                      \
      ? LABEL(EnableInterruptsPseudoOpcode)                                    \
      : LABEL(default)),
-# include "jsopcode.tbl"
-# undef OPDEF
-# undef OPPAD
+        FOR_EACH_TRAILING_UNUSED_OPCODE(TRAILING_LABEL)
+# undef TRAILING_LABEL
     };
 #else
 // Portable switch-based dispatch.
@@ -1471,7 +1473,7 @@ Interpret(JSContext *cx, RunState &state)
     RootedScript rootScript0(cx);
     DebugOnly<uint32_t> blockDepth;
 
-    if (JS_UNLIKELY(REGS.fp()->isGeneratorFrame())) {
+    if (MOZ_UNLIKELY(REGS.fp()->isGeneratorFrame())) {
         JS_ASSERT(script->containsPC(REGS.pc));
         JS_ASSERT(REGS.stackDepth() <= script->nslots());
 
@@ -1494,7 +1496,7 @@ Interpret(JSContext *cx, RunState &state)
     } else {
         probes::EnterScript(cx, script, script->functionNonDelazifying(), activation.entryFrame());
     }
-    if (JS_UNLIKELY(cx->compartment()->debugMode())) {
+    if (MOZ_UNLIKELY(cx->compartment()->debugMode())) {
         JSTrapStatus status = ScriptDebugPrologue(cx, activation.entryFrame(), REGS.pc);
         switch (status) {
           case JSTRAP_CONTINUE:
@@ -1796,7 +1798,7 @@ CASE(JSOP_RETRVAL)
         TraceLogging::defaultLogger()->log(TraceLogging::SCRIPT_STOP);
 #endif
 
-        if (JS_UNLIKELY(cx->compartment()->debugMode()))
+        if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
             interpReturnOK = ScriptDebugEpilogue(cx, REGS.fp(), REGS.pc, interpReturnOK);
 
         if (!REGS.fp()->isYielding())
@@ -1819,7 +1821,7 @@ CASE(JSOP_RETRVAL)
         JS_ASSERT(js_CodeSpec[*REGS.pc].format & JOF_INVOKE);
 
         /* Resume execution in the calling frame. */
-        if (JS_LIKELY(interpReturnOK)) {
+        if (MOZ_LIKELY(interpReturnOK)) {
             TypeScript::Monitor(cx, script, REGS.pc, REGS.sp[-1]);
 
             ADVANCE_AND_DISPATCH(JSOP_CALL_LENGTH);
@@ -2669,7 +2671,7 @@ CASE(JSOP_FUNCALL)
 
     if (!REGS.fp()->prologue(cx))
         goto error;
-    if (JS_UNLIKELY(cx->compartment()->debugMode())) {
+    if (MOZ_UNLIKELY(cx->compartment()->debugMode())) {
         switch (ScriptDebugPrologue(cx, REGS.fp(), REGS.pc)) {
           case JSTRAP_CONTINUE:
             break;
@@ -3385,7 +3387,7 @@ CASE(JSOP_DEBUGLEAVEBLOCK)
     // FIXME: This opcode should not be necessary.  The debugger shouldn't need
     // help from bytecode to do its job.  See bug 927782.
 
-    if (JS_UNLIKELY(cx->compartment()->debugMode()))
+    if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
         DebugScopes::onPopBlock(cx, REGS.fp(), REGS.pc);
 }
 END_CASE(JSOP_DEBUGLEAVEBLOCK)
@@ -3474,7 +3476,7 @@ DEFAULT()
     MOZ_ASSUME_UNREACHABLE("Invalid HandleError continuation");
 
   exit:
-    if (JS_UNLIKELY(cx->compartment()->debugMode()))
+    if (MOZ_UNLIKELY(cx->compartment()->debugMode()))
         interpReturnOK = ScriptDebugEpilogue(cx, REGS.fp(), REGS.pc, interpReturnOK);
     if (!REGS.fp()->isYielding())
         REGS.fp()->epilogue(cx);
@@ -3532,7 +3534,7 @@ js::CallProperty(JSContext *cx, HandleValue v, HandlePropertyName name, MutableH
         return false;
 
 #if JS_HAS_NO_SUCH_METHOD
-    if (JS_UNLIKELY(vp.isUndefined()) && v.isObject())
+    if (MOZ_UNLIKELY(vp.isUndefined()) && v.isObject())
     {
         RootedObject obj(cx, &v.toObject());
         if (!OnUnknownMethod(cx, obj, StringValue(name), vp))
@@ -3916,19 +3918,9 @@ js::InitGetterSetterOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, H
                               HandleObject val)
 {
     JS_ASSERT(val->isCallable());
-
-    /*
-     * Getters and setters are just like watchpoints from an access control
-     * point of view.
-     */
-    RootedValue scratch(cx, UndefinedValue());
-    unsigned attrs = 0;
-    if (!CheckAccess(cx, obj, id, JSACC_WATCH, &scratch, &attrs))
-        return false;
-
     PropertyOp getter;
     StrictPropertyOp setter;
-    attrs = JSPROP_ENUMERATE | JSPROP_SHARED;
+    unsigned attrs = JSPROP_ENUMERATE | JSPROP_SHARED;
 
     JSOp op = JSOp(*pc);
 
@@ -3943,7 +3935,7 @@ js::InitGetterSetterOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, H
         attrs |= JSPROP_SETTER;
     }
 
-    scratch.setUndefined();
+    RootedValue scratch(cx);
     return JSObject::defineGeneric(cx, obj, id, scratch, getter, setter, attrs);
 }
 

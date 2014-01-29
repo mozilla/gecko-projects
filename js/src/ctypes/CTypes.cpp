@@ -485,7 +485,7 @@ static const JSClass sCTypeProtoClass = {
   JSCLASS_HAS_RESERVED_SLOTS(CTYPEPROTO_SLOTS),
   JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
-  nullptr, ConstructAbstract, nullptr, ConstructAbstract
+  ConstructAbstract, nullptr, ConstructAbstract
 };
 
 // Class representing ctypes.CData.prototype and the 'prototype' properties
@@ -502,7 +502,7 @@ static const JSClass sCTypeClass = {
   JSCLASS_IMPLEMENTS_BARRIERS | JSCLASS_HAS_RESERVED_SLOTS(CTYPE_SLOTS),
   JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, CType::Finalize,
-  nullptr, CType::ConstructData, CType::HasInstance, CType::ConstructData,
+  CType::ConstructData, CType::HasInstance, CType::ConstructData,
   CType::Trace
 };
 
@@ -511,7 +511,7 @@ static const JSClass sCDataClass = {
   JSCLASS_HAS_RESERVED_SLOTS(CDATA_SLOTS),
   JS_PropertyStub, JS_DeletePropertyStub, ArrayType::Getter, ArrayType::Setter,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, CData::Finalize,
-  nullptr, FunctionType::Call, nullptr, FunctionType::Call
+  FunctionType::Call, nullptr, FunctionType::Call
 };
 
 static const JSClass sCClosureClass = {
@@ -519,7 +519,7 @@ static const JSClass sCClosureClass = {
   JSCLASS_IMPLEMENTS_BARRIERS | JSCLASS_HAS_RESERVED_SLOTS(CCLOSURE_SLOTS),
   JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, CClosure::Finalize,
-  nullptr, nullptr, nullptr, nullptr, CClosure::Trace
+  nullptr, nullptr, nullptr, CClosure::Trace
 };
 
 /*
@@ -791,7 +791,7 @@ static const JSFunctionSpec sModuleFunctions[] = {
   JS_FS_END
 };
 
-static JS_ALWAYS_INLINE JSString*
+static MOZ_ALWAYS_INLINE JSString*
 NewUCString(JSContext* cx, const AutoString& from)
 {
   return JS_NewUCStringCopyN(cx, from.begin(), from.length());
@@ -802,7 +802,7 @@ NewUCString(JSContext* cx, const AutoString& from)
  *
  * Note: |align| must be a power of 2.
  */
-static JS_ALWAYS_INLINE size_t
+static MOZ_ALWAYS_INLINE size_t
 Align(size_t val, size_t align)
 {
   // Ensure that align is a power of two.
@@ -1053,7 +1053,7 @@ InitInt64Class(JSContext* cx,
                const JSFunctionSpec* static_fs)
 {
   // Init type class and constructor
-  RootedObject prototype(cx, JS_InitClass(cx, parent, nullptr, clasp, construct,
+  RootedObject prototype(cx, JS_InitClass(cx, parent, js::NullPtr(), clasp, construct,
                                           0, nullptr, fs, nullptr, static_fs));
   if (!prototype)
     return nullptr;
@@ -1318,10 +1318,8 @@ using namespace js;
 using namespace js::ctypes;
 
 JS_PUBLIC_API(bool)
-JS_InitCTypesClass(JSContext* cx, JSObject *globalArg)
+JS_InitCTypesClass(JSContext* cx, HandleObject global)
 {
-  RootedObject global(cx, globalArg);
-
   // attach ctypes property to global object
   RootedObject ctypes(cx, JS_NewObject(cx, &sCTypesGlobalClass, NullPtr(), NullPtr()));
   if (!ctypes)
@@ -1425,7 +1423,7 @@ JS_STATIC_ASSERT(NumericLimits<double>::is_signed);
 // where the trivial POD constructor will do.
 template<class TargetType, class FromType>
 struct ConvertImpl {
-  static JS_ALWAYS_INLINE TargetType Convert(FromType d) {
+  static MOZ_ALWAYS_INLINE TargetType Convert(FromType d) {
     return TargetType(d);
   }
 };
@@ -1435,7 +1433,7 @@ struct ConvertImpl {
 // double is greater than 2^63 - 1. Help it along a little.
 template<>
 struct ConvertImpl<uint64_t, double> {
-  static JS_ALWAYS_INLINE uint64_t Convert(double d) {
+  static MOZ_ALWAYS_INLINE uint64_t Convert(double d) {
     return d > 0x7fffffffffffffffui64 ?
            uint64_t(d - 0x8000000000000000ui64) + 0x8000000000000000ui64 :
            uint64_t(d);
@@ -1451,7 +1449,7 @@ struct ConvertImpl<uint64_t, double> {
 // Simulate x86 overflow behavior
 template<>
 struct ConvertImpl<uint64_t, double> {
-  static JS_ALWAYS_INLINE uint64_t Convert(double d) {
+  static MOZ_ALWAYS_INLINE uint64_t Convert(double d) {
     return d >= 0xffffffffffffffff ?
            0x8000000000000000 : uint64_t(d);
   }
@@ -1459,7 +1457,7 @@ struct ConvertImpl<uint64_t, double> {
 
 template<>
 struct ConvertImpl<int64_t, double> {
-  static JS_ALWAYS_INLINE int64_t Convert(double d) {
+  static MOZ_ALWAYS_INLINE int64_t Convert(double d) {
     return d >= 0x7fffffffffffffff ?
            0x8000000000000000 : int64_t(d);
   }
@@ -1467,13 +1465,13 @@ struct ConvertImpl<int64_t, double> {
 #endif
 
 template<class TargetType, class FromType>
-static JS_ALWAYS_INLINE TargetType Convert(FromType d)
+static MOZ_ALWAYS_INLINE TargetType Convert(FromType d)
 {
   return ConvertImpl<TargetType, FromType>::Convert(d);
 }
 
 template<class TargetType, class FromType>
-static JS_ALWAYS_INLINE bool IsAlwaysExact()
+static MOZ_ALWAYS_INLINE bool IsAlwaysExact()
 {
   // Return 'true' if TargetType can always exactly represent FromType.
   // This means that:
@@ -1502,7 +1500,7 @@ static JS_ALWAYS_INLINE bool IsAlwaysExact()
 // TargetType 'j'. Default case where both types are the same signedness.
 template<class TargetType, class FromType, bool TargetSigned, bool FromSigned>
 struct IsExactImpl {
-  static JS_ALWAYS_INLINE bool Test(FromType i, TargetType j) {
+  static MOZ_ALWAYS_INLINE bool Test(FromType i, TargetType j) {
     JS_STATIC_ASSERT(NumericLimits<TargetType>::is_exact);
     return FromType(j) == i;
   }
@@ -1511,7 +1509,7 @@ struct IsExactImpl {
 // Specialization where TargetType is unsigned, FromType is signed.
 template<class TargetType, class FromType>
 struct IsExactImpl<TargetType, FromType, false, true> {
-  static JS_ALWAYS_INLINE bool Test(FromType i, TargetType j) {
+  static MOZ_ALWAYS_INLINE bool Test(FromType i, TargetType j) {
     JS_STATIC_ASSERT(NumericLimits<TargetType>::is_exact);
     return i >= 0 && FromType(j) == i;
   }
@@ -1520,7 +1518,7 @@ struct IsExactImpl<TargetType, FromType, false, true> {
 // Specialization where TargetType is signed, FromType is unsigned.
 template<class TargetType, class FromType>
 struct IsExactImpl<TargetType, FromType, true, false> {
-  static JS_ALWAYS_INLINE bool Test(FromType i, TargetType j) {
+  static MOZ_ALWAYS_INLINE bool Test(FromType i, TargetType j) {
     JS_STATIC_ASSERT(NumericLimits<TargetType>::is_exact);
     return TargetType(i) >= 0 && FromType(j) == i;
   }
@@ -1529,7 +1527,7 @@ struct IsExactImpl<TargetType, FromType, true, false> {
 // Convert FromType 'i' to TargetType 'result', returning true iff 'result'
 // is an exact representation of 'i'.
 template<class TargetType, class FromType>
-static JS_ALWAYS_INLINE bool ConvertExact(FromType i, TargetType* result)
+static MOZ_ALWAYS_INLINE bool ConvertExact(FromType i, TargetType* result)
 {
   // Require that TargetType is integral, to simplify conversion.
   JS_STATIC_ASSERT(NumericLimits<TargetType>::is_exact);
@@ -1551,7 +1549,7 @@ static JS_ALWAYS_INLINE bool ConvertExact(FromType i, TargetType* result)
 // where IntegerType is unsigned.
 template<class Type, bool IsSigned>
 struct IsNegativeImpl {
-  static JS_ALWAYS_INLINE bool Test(Type i) {
+  static MOZ_ALWAYS_INLINE bool Test(Type i) {
     return false;
   }
 };
@@ -1559,14 +1557,14 @@ struct IsNegativeImpl {
 // Specialization where Type is signed.
 template<class Type>
 struct IsNegativeImpl<Type, true> {
-  static JS_ALWAYS_INLINE bool Test(Type i) {
+  static MOZ_ALWAYS_INLINE bool Test(Type i) {
     return i < 0;
   }
 };
 
 // Determine whether Type 'i' is negative.
 template<class Type>
-static JS_ALWAYS_INLINE bool IsNegative(Type i)
+static MOZ_ALWAYS_INLINE bool IsNegative(Type i)
 {
   return IsNegativeImpl<Type, NumericLimits<Type>::is_signed>::Test(i);
 }
@@ -5184,7 +5182,7 @@ StructType::FieldsArrayGetter(JSContext* cx, JS::CallArgs args)
   }
 
   MOZ_ASSERT(args.rval().isObject());
-  MOZ_ASSERT(JS_IsArrayObject(cx, &args.rval().toObject()));
+  MOZ_ASSERT(JS_IsArrayObject(cx, args.rval()));
   return true;
 }
 
@@ -5407,7 +5405,7 @@ PrepareReturnType(JSContext* cx, jsval type)
   return result;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 IsEllipsis(JSContext* cx, jsval v, bool* isEllipsis)
 {
   *isEllipsis = false;

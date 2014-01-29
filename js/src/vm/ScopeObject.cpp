@@ -539,7 +539,6 @@ const Class WithObject::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr,                 /* finalize */
-    nullptr,                 /* checkAccess */
     nullptr,                 /* call        */
     nullptr,                 /* hasInstance */
     nullptr,                 /* construct   */
@@ -1546,7 +1545,7 @@ js_IsDebugScopeSlow(ProxyObject *proxy)
 
 /*****************************************************************************/
 
-/* static */ JS_ALWAYS_INLINE void
+/* static */ MOZ_ALWAYS_INLINE void
 DebugScopes::proxiedScopesPostWriteBarrier(JSRuntime *rt, ObjectWeakMap *map,
                                            const EncapsulatedPtr<JSObject> &key)
 {
@@ -1592,7 +1591,7 @@ class DebugScopes::MissingScopesRef : public gc::BufferableRef
 };
 #endif
 
-/* static */ JS_ALWAYS_INLINE void
+/* static */ MOZ_ALWAYS_INLINE void
 DebugScopes::missingScopesPostWriteBarrier(JSRuntime *rt, MissingScopeMap *map,
                                            const ScopeIterKey &key)
 {
@@ -1602,7 +1601,7 @@ DebugScopes::missingScopesPostWriteBarrier(JSRuntime *rt, MissingScopeMap *map,
 #endif
 }
 
-/* static */ JS_ALWAYS_INLINE void
+/* static */ MOZ_ALWAYS_INLINE void
 DebugScopes::liveScopesPostWriteBarrier(JSRuntime *rt, LiveScopeMap *map, ScopeObject *key)
 {
 #ifdef JSGC_GENERATIONAL

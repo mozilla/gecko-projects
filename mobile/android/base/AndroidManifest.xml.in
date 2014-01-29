@@ -159,7 +159,7 @@
         </activity>
 
 #ifdef MOZ_ANDROID_SYNTHAPKS
-        <activity android:name="org.mozilla.gecko.webapp.WebAppDispatcher"
+        <activity android:name="org.mozilla.gecko.webapp.Dispatcher"
             android:noHistory="true" >
             <intent-filter>
                 <!-- catch links from synthetic apks -->
@@ -300,8 +300,8 @@
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.tabs"
                   android:permission="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"/>
 
-        <provider android:name="org.mozilla.gecko.db.HomeListsProvider"
-                  android:authorities="@ANDROID_PACKAGE_NAME@.db.homelists"
+        <provider android:name="org.mozilla.gecko.db.HomeProvider"
+                  android:authorities="@ANDROID_PACKAGE_NAME@.db.home"
                   android:permission="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"/>
 
         <service

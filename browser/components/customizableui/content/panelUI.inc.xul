@@ -15,38 +15,46 @@
       </vbox>
 
       <footer id="PanelUI-footer">
-        <!-- The parentNode is used so that the footer is presented as the anchor
-             instead of just the button being the anchor. -->
-        <toolbarbutton id="PanelUI-customize" label="&appMenuCustomize.label;"
-                       exitLabel="&appMenuCustomizeExit.label;" tabindex="0"
-                       oncommand="gCustomizeMode.toggle();"/>
-        <toolbarseparator/>
-        <toolbarbutton id="PanelUI-help" label="&helpMenu.label;" tabindex="0"
-                       tooltiptext="&helpMenu.label;"
-                       oncommand="PanelUI.showHelpView(this.parentNode);"/>
-        <toolbarseparator/>
-        <toolbarbutton id="PanelUI-quit" tabindex="0"
+        <toolbarbutton id="PanelUI-fxa-status" label="&fxaSignIn.label;"
+                       oncommand="gFxAccounts.toggle(event);"
+                       hidden="true"/>
+
+        <hbox id="PanelUI-footer-inner">
+          <toolbarbutton id="PanelUI-customize" label="&appMenuCustomize.label;"
+                         exitLabel="&appMenuCustomizeExit.label;"
+                         tooltiptext="&appMenuCustomize.tooltip;"
+                         exitTooltiptext="&appMenuCustomizeExit.tooltip;"
+                         oncommand="gCustomizeMode.toggle();"/>
+          <toolbarseparator/>
+          <toolbarbutton id="PanelUI-help" label="&helpMenu.label;"
+                         tooltiptext="&appMenuHelp.tooltip;"
+                         oncommand="PanelUI.showHelpView(this.parentNode);"/>
+          <toolbarseparator/>
+          <toolbarbutton id="PanelUI-quit"
 #ifdef XP_WIN
-                       label="&quitApplicationCmdWin.label;"
-                       tooltiptext="&quitApplicationCmdWin.label;"
+                         label="&quitApplicationCmdWin.label;"
 #else
-                       label="&quitApplicationCmd.label;"
-                       tooltiptext="&quitApplicationCmd.label;"
+#ifdef XP_MACOSX
+                         label="&quitApplicationCmdMac.label;"
+#else
+                         label="&quitApplicationCmd.label;"
 #endif
-                       command="cmd_quitApplication"/>
+#endif
+                         command="cmd_quitApplication"/>
+        </hbox>
       </footer>
     </panelview>
 
     <panelview id="PanelUI-history" flex="1">
       <label value="&appMenuHistory.label;" class="panel-subview-header"/>
-      <toolbarbutton id="appMenuViewHistorySidebar" tabindex="0"
+      <toolbarbutton id="appMenuViewHistorySidebar"
                      label="&appMenuHistory.viewSidebar.label;"
                      type="checkbox"
                      class="subviewbutton"
                      oncommand="toggleSidebar('viewHistorySidebar'); PanelUI.hide();">
         <observes element="viewHistorySidebar" attribute="checked"/>
       </toolbarbutton>
-      <toolbarbutton id="appMenuClearRecentHistory" tabindex="0"
+      <toolbarbutton id="appMenuClearRecentHistory"
                      label="&appMenuHistory.clearRecent.label;"
                      class="subviewbutton"
                      command="Tools:Sanitize"/>
@@ -57,7 +65,7 @@
                      oncommand="BrowserOpenSyncTabs();"
                      disabled="true"/>
 #endif
-      <toolbarbutton id="appMenuRestoreLastSession" tabindex="0"
+      <toolbarbutton id="appMenuRestoreLastSession"
                      label="&appMenuHistory.restoreSession.label;"
                      class="subviewbutton"
                      command="Browser:RestoreLastSession"/>
@@ -67,7 +75,7 @@
       <vbox id="PanelUI-recentlyClosedWindows" tooltip="bhTooltip"/>
       <menuseparator id="PanelUI-historyItems-separator"/>
       <vbox id="PanelUI-historyItems" tooltip="bhTooltip"/>
-      <toolbarbutton id="PanelUI-historyMore" tabindex="0"
+      <toolbarbutton id="PanelUI-historyMore"
                      class="panel-subview-footer subviewbutton"
                      label="&appMenuHistory.showAll.label;"
                      oncommand="PlacesCommandHook.showPlacesOrganizer('History'); CustomizableUI.hidePanelForNode(this);"/>
@@ -81,11 +89,6 @@
                      command="Browser:AddBookmarkAs"
                      onclick="PanelUI.hide();"/>
       <toolbarseparator/>
-      <toolbarbutton id="panelMenu_showAllBookmarks"
-                     label="&showAllBookmarks2.label;"
-                     class="subviewbutton"
-                     command="Browser:ShowAllBookmarks"
-                     onclick="PanelUI.hide();"/>
       <toolbarbutton id="panelMenu_viewBookmarksSidebar"
                      label="&viewBookmarksSidebar2.label;"
                      class="subviewbutton"
@@ -116,9 +119,13 @@
                    oncommand="BookmarkingUI.onPanelMenuViewCommand(event, this._placesView);"
                    flatList="true"
                    tooltip="bhTooltip">
-        <!-- bookmarks menu items -->
+        <!-- bookmarks menu items will go here -->
       </toolbaritem>
-
+      <toolbarbutton id="panelMenu_showAllBookmarks"
+                     label="&showAllBookmarks2.label;"
+                     class="subviewbutton panel-subview-footer"
+                     command="Browser:ShowAllBookmarks"
+                     onclick="PanelUI.hide();"/>
     </panelview>
 
     <panelview id="PanelUI-socialapi" flex="1"/>
@@ -127,7 +134,7 @@
       <label value="&feedsMenu.label;" class="panel-subview-header"/>
     </panelview>
 
-    <panelview id="PanelUI-helpView" flex="1">
+    <panelview id="PanelUI-helpView" flex="1" class="PanelUI-subView">
       <label value="&helpMenu.label;" class="panel-subview-header"/>
       <vbox id="PanelUI-helpItems"/>
     </panelview>

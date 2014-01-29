@@ -1049,13 +1049,13 @@ class ICStubCompiler
     inline GeneralRegisterSet availableGeneralRegs(size_t numInputs) const {
         GeneralRegisterSet regs(GeneralRegisterSet::All());
         JS_ASSERT(!regs.has(BaselineStackReg));
-#ifdef JS_CPU_ARM
+#ifdef JS_CODEGEN_ARM
         JS_ASSERT(!regs.has(BaselineTailCallReg));
         regs.take(BaselineSecondScratchReg);
 #endif
         regs.take(BaselineFrameReg);
         regs.take(BaselineStubReg);
-#ifdef JS_CPU_X64
+#ifdef JS_CODEGEN_X64
         regs.take(ExtractTemp0);
         regs.take(ExtractTemp1);
 #endif
@@ -5414,6 +5414,10 @@ class ICCall_Native : public ICMonitoredStub
     HeapPtrObject templateObject_;
     uint32_t pcOffset_;
 
+#ifdef JS_ARM_SIMULATOR
+    void *native_;
+#endif
+
     ICCall_Native(JitCode *stubCode, ICStub *firstMonitorStub,
                   HandleFunction callee, HandleObject templateObject,
                   uint32_t pcOffset);
@@ -5442,6 +5446,12 @@ class ICCall_Native : public ICMonitoredStub
     static size_t offsetOfPCOffset() {
         return offsetof(ICCall_Native, pcOffset_);
     }
+
+#ifdef JS_ARM_SIMULATOR
+    static size_t offsetOfNative() {
+        return offsetof(ICCall_Native, native_);
+    }
+#endif
 
     // Compiler for this stub kind.
     class Compiler : public ICCallStubCompiler {

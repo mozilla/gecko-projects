@@ -871,8 +871,6 @@ pref("browser.sessionstore.restore_pinned_tabs_on_demand", false);
 pref("browser.sessionstore.upgradeBackup.latestBuildID", "");
 // End-users should not run sessionstore in debug mode
 pref("browser.sessionstore.debug", false);
-// Enable asynchronous data collection by default.
-pref("browser.sessionstore.async", true);
 
 // allow META refresh by default
 pref("accessibility.blockautorefresh", false);
@@ -1160,6 +1158,7 @@ pref("devtools.scratchpad.enableCodeFolding", true);
 // Enable the Style Editor.
 pref("devtools.styleeditor.enabled", true);
 pref("devtools.styleeditor.source-maps-enabled", false);
+pref("devtools.styleeditor.autocompletion-enabled", true);
 
 // Enable the Shader Editor.
 pref("devtools.shadereditor.enabled", false);
@@ -1337,7 +1336,12 @@ pref("browser.uiCustomization.debug", false);
 
 // The URL where remote content that composes the UI for Firefox Accounts should
 // be fetched. Must use HTTPS.
-pref("identity.fxaccounts.remote.uri", "https://accounts.dev.lcip.org/?service=sync");
+pref("identity.fxaccounts.remote.uri", "https://accounts.firefox.com/?service=sync&context=fx_desktop_v1");
+
+// The URL we take the user to when they opt to "manage" their Firefox Account.
+// Note that this will always need to be in the same TLD as the
+// "identity.fxaccounts.remote.uri" pref.
+pref("identity.fxaccounts.settings.uri", "https://accounts.firefox.com/settings");
 
 // The URL of the Firefox Accounts auth server backend
-pref("identity.fxaccounts.auth.uri", "https://api-accounts.dev.lcip.org/v1");
+pref("identity.fxaccounts.auth.uri", "https://api.accounts.firefox.com/v1");

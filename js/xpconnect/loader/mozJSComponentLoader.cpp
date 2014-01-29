@@ -121,7 +121,8 @@ Dump(JSContext *cx, unsigned argc, Value *vp)
     if (!chars)
         return false;
 
-    NS_ConvertUTF16toUTF8 utf8str(reinterpret_cast<const char16_t*>(chars));
+    NS_ConvertUTF16toUTF8 utf8str(reinterpret_cast<const char16_t*>(chars),
+                                  length);
 #ifdef ANDROID
     __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", utf8str.get());
 #endif
@@ -1270,8 +1271,7 @@ mozJSComponentLoader::ImportInto(const nsACString &aLocation,
                                   PromiseFlatCString(aLocation).get());
         }
 
-        if (!symbols.isObject() ||
-            !JS_IsArrayObject(mContext, &symbols.toObject())) {
+        if (!JS_IsArrayObject(mContext, symbols)) {
             return ReportOnCaller(cxhelper, ERROR_NOT_AN_ARRAY,
                                   PromiseFlatCString(aLocation).get());
         }

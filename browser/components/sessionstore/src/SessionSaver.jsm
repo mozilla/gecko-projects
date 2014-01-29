@@ -234,29 +234,15 @@ let SessionSaverInternal = {
     // Allow scheduling delayed saves again.
     this._timeoutID = null;
 
-    // Check whether asynchronous data collection is disabled.
-    if (!Services.prefs.getBoolPref("browser.sessionstore.async")) {
-      this._saveState();
-      return;
-    }
-
-    // Update the last save time to make sure we wait at least another interval
-    // length until we call _saveStateAsync() again.
-    this.updateLastSaveTime();
-
-    // Save state synchronously after all tab caches have been filled. The data
-    // for the tab caches is collected asynchronously. We will reuse this
-    // cached data if the tab hasn't been invalidated in the meantime. In that
-    // case we will just fall back to synchronous data collection for single
-    // tabs.
-    SessionStore.fillTabCachesAsynchronously().then(() => this._saveState());
+    // Write to disk.
+    this._saveState();
   },
 
   /**
    * Write the given state object to disk.
    */
   _writeState: function (state) {
-    stopWatchStart("SERIALIZE_DATA_MS", "SERIALIZE_DATA_LONGEST_OP_MS");
+    stopWatchStart("SERIALIZE_DATA_MS", "SERIALIZE_DATA_LONGEST_OP_MS", "WRITE_STATE_LONGEST_OP_MS");
     let data = JSON.stringify(state);
     stopWatchFinish("SERIALIZE_DATA_MS", "SERIALIZE_DATA_LONGEST_OP_MS");
 
@@ -265,6 +251,7 @@ let SessionSaverInternal = {
 
     // Don't touch the file if an observer has deleted all state data.
     if (!data) {
+      stopWatchCancel("WRITE_STATE_LONGEST_OP_MS");
       return Promise.resolve();
     }
 
@@ -277,10 +264,16 @@ let SessionSaverInternal = {
     // Write (atomically) to a session file, using a tmp file. Once the session
     // file is successfully updated, save the time stamp of the last save and
     // notify the observers.
-    return SessionFile.write(data).then(() => {
+    stopWatchStart("SEND_SERIALIZED_STATE_LONGEST_OP_MS");
+    let promise = SessionFile.write(data);
+    stopWatchFinish("WRITE_STATE_LONGEST_OP_MS",
+                    "SEND_SERIALIZED_STATE_LONGEST_OP_MS");
+    promise = promise.then(() => {
       this.updateLastSaveTime();
       notify(null, "sessionstore-state-write-complete");
     }, console.error);
+
+    return promise;
   },
 
   /**

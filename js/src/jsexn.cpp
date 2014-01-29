@@ -56,7 +56,6 @@ const Class ErrorObject::class_ = {
     JS_ResolveStub,
     JS_ConvertStub,
     exn_finalize,
-    nullptr,                 /* checkAccess */
     nullptr,                 /* call        */
     nullptr,                 /* hasInstance */
     nullptr                  /* construct   */
@@ -207,23 +206,18 @@ struct SuppressErrorsGuard
 static JSString *
 ComputeStackString(JSContext *cx)
 {
-    JSCheckAccessOp checkAccess = cx->runtime()->securityCallbacks->checkObjectAccess;
-
     StringBuffer sb(cx);
 
     {
         RootedAtom atom(cx);
         SuppressErrorsGuard seg(cx);
-        for (NonBuiltinScriptFrameIter i(cx); !i.done(); ++i) {
-            // Cut off the stack if this callee crosses a trust boundary.
-            if (checkAccess && i.isNonEvalFunctionFrame()) {
-                RootedValue v(cx);
-                RootedId callerid(cx, NameToId(cx->names().caller));
-                RootedObject obj(cx, i.callee());
-                if (!checkAccess(cx, obj, callerid, JSACC_READ, &v))
-                    break;
-            }
-
+        // We should get rid of the CURRENT_CONTEXT and STOP_AT_SAVED here.
+        // See bug 960820.
+        for (NonBuiltinScriptFrameIter i(cx, ScriptFrameIter::CURRENT_CONTEXT,
+                                         ScriptFrameIter::STOP_AT_SAVED,
+                                         cx->compartment()->principals);
+            !i.done(); ++i)
+        {
             /* First append the function name, if any. */
             atom = nullptr;
             if (i.isNonEvalFunctionFrame() && i.callee()->displayAtom())
@@ -873,4 +867,24 @@ js_CopyErrorObject(JSContext *cx, Handle<ErrorObject*> err, HandleObject scope)
     // Create the Error object.
     return ErrorObject::create(cx, errorType, stack, fileName,
                                lineNumber, columnNumber, &copyReport, message);
+}
+
+JS_PUBLIC_API(bool)
+JS::CreateTypeError(JSContext *cx, HandleString stack, HandleString fileName,
+                    uint32_t lineNumber, uint32_t columnNumber, JSErrorReport *report,
+                    HandleString message, MutableHandleValue rval)
+{
+    assertSameCompartment(cx, stack, fileName, message);
+    js::ScopedJSFreePtr<JSErrorReport> rep;
+    if (report)
+        rep = CopyErrorReport(cx, report);
+
+    RootedObject obj(cx,
+        js::ErrorObject::create(cx, JSEXN_TYPEERR, stack, fileName,
+                                lineNumber, columnNumber, &rep, message));
+    if (!obj)
+        return false;
+
+    rval.setObject(*obj);
+    return true;
 }

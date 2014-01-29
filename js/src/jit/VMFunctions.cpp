@@ -8,6 +8,7 @@
 
 #include "builtin/TypedObject.h"
 #include "frontend/BytecodeCompiler.h"
+#include "jit/arm/Simulator-arm.h"
 #include "jit/BaselineIC.h"
 #include "jit/IonFrames.h"
 #include "jit/JitCompartment.h"
@@ -119,7 +120,11 @@ CheckOverRecursed(JSContext *cx)
     // has not yet been set to 1. That's okay; it will be set to 1 very shortly,
     // and in the interim we might just fire a few useless calls to
     // CheckOverRecursed.
+#ifdef JS_ARM_SIMULATOR
+    JS_CHECK_SIMULATOR_RECURSION_WITH_EXTRA(cx, 0, return false);
+#else
     JS_CHECK_RECURSION(cx, return false);
+#endif
 
     if (cx->runtime()->interrupt)
         return InterruptCheck(cx);
@@ -148,7 +153,12 @@ CheckOverRecursedWithExtra(JSContext *cx, BaselineFrame *frame,
     uint8_t spDummy;
     uint8_t *checkSp = (&spDummy) - extra;
     if (earlyCheck) {
+#ifdef JS_ARM_SIMULATOR
+        (void)checkSp;
+        JS_CHECK_SIMULATOR_RECURSION_WITH_EXTRA(cx, extra, frame->setOverRecursed());
+#else
         JS_CHECK_RECURSION_WITH_SP(cx, checkSp, frame->setOverRecursed());
+#endif
         return true;
     }
 
@@ -157,7 +167,11 @@ CheckOverRecursedWithExtra(JSContext *cx, BaselineFrame *frame,
     if (frame->overRecursed())
         return false;
 
+#ifdef JS_ARM_SIMULATOR
+    JS_CHECK_SIMULATOR_RECURSION_WITH_EXTRA(cx, extra, return false);
+#else
     JS_CHECK_RECURSION_WITH_SP(cx, checkSp, return false);
+#endif
 
     if (cx->runtime()->interrupt)
         return InterruptCheck(cx);
@@ -456,7 +470,7 @@ SetProperty(JSContext *cx, HandleObject obj, HandlePropertyName name, HandleValu
         return true;
     }
 
-    if (JS_LIKELY(!obj->getOps()->setProperty)) {
+    if (MOZ_LIKELY(!obj->getOps()->setProperty)) {
         unsigned defineHow = (op == JSOP_SETNAME || op == JSOP_SETGNAME) ? DNP_UNQUALIFIED : 0;
         return baseops::SetPropertyHelper<SequentialExecution>(cx, obj, obj, id, defineHow, &v,
                                                                strict);
@@ -526,13 +540,13 @@ NewStringObject(JSContext *cx, HandleString str)
 bool
 SPSEnter(JSContext *cx, HandleScript script)
 {
-    return cx->runtime()->spsProfiler.enter(cx, script, script->functionNonDelazifying());
+    return cx->runtime()->spsProfiler.enter(script, script->functionNonDelazifying());
 }
 
 bool
 SPSExit(JSContext *cx, HandleScript script)
 {
-    cx->runtime()->spsProfiler.exit(cx, script, script->functionNonDelazifying());
+    cx->runtime()->spsProfiler.exit(script, script->functionNonDelazifying());
     return true;
 }
 
@@ -732,7 +746,7 @@ DebugEpilogue(JSContext *cx, BaselineFrame *frame, jsbytecode *pc, bool ok)
 
     // If the frame has a pushed SPS frame, make sure to pop it.
     if (frame->hasPushedSPSFrame()) {
-        cx->runtime()->spsProfiler.exit(cx, frame->script(), frame->maybeFun());
+        cx->runtime()->spsProfiler.exit(frame->script(), frame->maybeFun());
         // Unset the pushedSPSFrame flag because DebugEpilogue may get called before
         // probes::ExitScript in baseline during exception handling, and we don't
         // want to double-pop SPS frames.

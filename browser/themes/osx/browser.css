@@ -1070,6 +1070,15 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
     list-style-image: url(chrome://browser/skin/menuPanel-small@2x.png);
   }
 
+  /* Wide items like the Cut/Copy/Paste and Zoom controls are special in that their icons
+     are 16x16 when in the panel, but 18x18 when in a toolbar. */
+  #edit-controls@inAnyPanel@ > toolbarbutton > .toolbarbutton-icon,
+  #zoom-controls@inAnyPanel@ > toolbarbutton > .toolbarbutton-icon,
+  toolbarpaletteitem[place="palette"] > #edit-controls > toolbarbutton > .toolbarbutton-icon,
+  toolbarpaletteitem[place="palette"] > #zoom-controls > toolbarbutton > .toolbarbutton-icon {
+    width: 16px;
+  }
+
   #edit-controls@inAnyPanel@ > #cut-button,
   toolbarpaletteitem[place="palette"] > #edit-controls > #cut-button {
     -moz-image-region: rect(0px, 64px, 32px, 32px);
@@ -1102,8 +1111,8 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
   }
 }
 
-.toolbarbutton-1:not([type="menu-button"]),
-.toolbarbutton-1 > .toolbarbutton-menubutton-button,
+toolbar .toolbarbutton-1:not([type="menu-button"]),
+toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-button,
 #restore-button {
   min-width: 28px;
 }
@@ -1471,7 +1480,6 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
 #urlbar,
 .searchbar-textbox {
   font: icon;
-  width: 7em;
   -moz-appearance: none;
   box-shadow: 0 1px rgba(255, 255, 255, 0.2), inset 0 1px hsla(0,0%,0%,.05);
   margin: 0 4px;
@@ -3586,6 +3594,57 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
 
 #ctrlTab-showAll {
   margin-top: .5em;
+}
+
+/* Sync Panels */
+
+.sync-panel {
+  padding: 10px;
+}
+
+.sync-panel-icon {
+  width: 32px;
+  background: url("chrome://browser/content/abouthome/sync.png") top left no-repeat;
+}
+
+@media (min-resolution: 2dppx) {
+  .sync-panel-icon {
+    background: url("chrome://browser/content/abouthome/sync@2x.png") top left no-repeat;
+    background-size: 32px 32px;
+  }
+}
+
+.sync-panel-inner {
+  width: 0;
+  padding-left: 10px;
+}
+
+.sync-panel-button-box {
+  margin-top: 1em;
+}
+
+.sync-panel-button {
+  @hudButton@
+  margin: 0;
+  min-width: 72px;
+  min-height: 22px;
+}
+
+.sync-panel-button:hover:active {
+  @hudButtonPressed@
+}
+
+.sync-panel-button:-moz-focusring {
+  @hudButtonFocused@
+}
+
+#sync-error-panel-title {
+  font-weight: bold;
+}
+
+#sync-start-panel-subtitle,
+#sync-error-panel-subtitle {
+  margin: 0;
 }
 
 /* Status panel */

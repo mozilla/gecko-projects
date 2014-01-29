@@ -55,6 +55,7 @@
 #include "mozilla/FileUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PoisonIOInterposer.h"
+#include "mozilla/StartupTimeline.h"
 #if defined(MOZ_ENABLE_PROFILER_SPS)
 #include "shared-libraries.h"
 #endif
@@ -202,18 +203,33 @@ CombinedStacks::SizeOfExcludingThis() const {
 class HangReports {
 public:
   size_t SizeOfExcludingThis() const;
-  void AddHang(const Telemetry::ProcessedStack& aStack, uint32_t aDuration);
+  void AddHang(const Telemetry::ProcessedStack& aStack, uint32_t aDuration,
+               int32_t aSystemUptime, int32_t aFirefoxUptime);
   uint32_t GetDuration(unsigned aIndex) const;
+  int32_t GetSystemUptime(unsigned aIndex) const;
+  int32_t GetFirefoxUptime(unsigned aIndex) const;
   const CombinedStacks& GetStacks() const;
 private:
+  struct HangInfo {
+    // Hang duration (in seconds)
+    uint32_t mDuration;
+    // System uptime (in minutes) at the time of the hang
+    int32_t mSystemUptime;
+    // Firefox uptime (in minutes) at the time of the hang
+    int32_t mFirefoxUptime;
+  };
+  std::vector<HangInfo> mHangInfo;
   CombinedStacks mStacks;
-  std::vector<uint32_t> mDurations;
 };
 
 void
-HangReports::AddHang(const Telemetry::ProcessedStack& aStack, uint32_t aDuration) {
+HangReports::AddHang(const Telemetry::ProcessedStack& aStack,
+                     uint32_t aDuration,
+                     int32_t aSystemUptime,
+                     int32_t aFirefoxUptime) {
+  HangInfo info = { aDuration, aSystemUptime, aFirefoxUptime };
+  mHangInfo.push_back(info);
   mStacks.AddStack(aStack);
-  mDurations.push_back(aDuration);
 }
 
 size_t
@@ -222,7 +238,7 @@ HangReports::SizeOfExcludingThis() const {
   n += mStacks.SizeOfExcludingThis();
   // This is a crude approximation. See comment on
   // CombinedStacks::SizeOfExcludingThis.
-  n += mDurations.capacity() * sizeof(uint32_t);
+  n += mHangInfo.capacity() * sizeof(HangInfo);
   return n;
 }
 
@@ -233,7 +249,17 @@ HangReports::GetStacks() const {
 
 uint32_t
 HangReports::GetDuration(unsigned aIndex) const {
-  return mDurations[aIndex];
+  return mHangInfo[aIndex].mDuration;
+}
+
+int32_t
+HangReports::GetSystemUptime(unsigned aIndex) const {
+  return mHangInfo[aIndex].mSystemUptime;
+}
+
+int32_t
+HangReports::GetFirefoxUptime(unsigned aIndex) const {
+  return mHangInfo[aIndex].mFirefoxUptime;
 }
 
 class TelemetryImpl MOZ_FINAL
@@ -255,8 +281,10 @@ public:
   static void RecordSlowStatement(const nsACString &sql, const nsACString &dbName,
                                   uint32_t delay);
 #if defined(MOZ_ENABLE_PROFILER_SPS)
-  static void RecordChromeHang(uint32_t duration,
-                               Telemetry::ProcessedStack &aStack);
+  static void RecordChromeHang(uint32_t aDuration,
+                               Telemetry::ProcessedStack &aStack,
+                               int32_t aSystemUptime,
+                               int32_t aFirefoxUptime);
 #endif
   static void RecordThreadHangStats(Telemetry::ThreadHangStats& aStats);
   static nsresult GetHistogramEnumId(const char *name, Telemetry::ID *id);
@@ -1003,15 +1031,13 @@ TelemetryImpl::ReflectSQL(const SlowSQLEntryType *entry,
     return true;
 
   const nsACString &sql = entry->GetKey();
-  JS::Rooted<JS::Value> hitCount(cx, UINT_TO_JSVAL(stat->hitCount));
-  JS::Rooted<JS::Value> totalTime(cx, UINT_TO_JSVAL(stat->totalTime));
 
   JS::Rooted<JSObject*> arrayObj(cx, JS_NewArrayObject(cx, 0, nullptr));
   if (!arrayObj) {
     return false;
   }
-  return (JS_SetElement(cx, arrayObj, 0, &hitCount)
-          && JS_SetElement(cx, arrayObj, 1, &totalTime)
+  return (JS_SetElement(cx, arrayObj, 0, stat->hitCount)
+          && JS_SetElement(cx, arrayObj, 1, stat->totalTime)
           && JS_DefineProperty(cx, obj,
                                sql.BeginReading(),
                                OBJECT_TO_JSVAL(arrayObj),
@@ -1501,9 +1527,12 @@ TelemetryImpl::GetChromeHangs(JSContext *cx, JS::MutableHandle<JS::Value> ret)
   ret.setObject(*fullReportObj);
 
   JS::Rooted<JSObject*> durationArray(cx, JS_NewArrayObject(cx, 0, nullptr));
-  if (!durationArray) {
+  JS::Rooted<JSObject*> systemUptimeArray(cx, JS_NewArrayObject(cx, 0, nullptr));
+  JS::Rooted<JSObject*> firefoxUptimeArray(cx, JS_NewArrayObject(cx, 0, nullptr));
+  if (!durationArray || !systemUptimeArray || !firefoxUptimeArray) {
     return NS_ERROR_FAILURE;
   }
+
   bool ok = JS_DefineProperty(cx, fullReportObj, "durations",
                               OBJECT_TO_JSVAL(durationArray),
                               nullptr, nullptr, JSPROP_ENUMERATE);
@@ -1511,10 +1540,29 @@ TelemetryImpl::GetChromeHangs(JSContext *cx, JS::MutableHandle<JS::Value> ret)
     return NS_ERROR_FAILURE;
   }
 
+  ok = JS_DefineProperty(cx, fullReportObj, "systemUptime",
+                         OBJECT_TO_JSVAL(systemUptimeArray),
+                         nullptr, nullptr, JSPROP_ENUMERATE);
+  if (!ok) {
+    return NS_ERROR_FAILURE;
+  }
+
+  ok = JS_DefineProperty(cx, fullReportObj, "firefoxUptime",
+                         OBJECT_TO_JSVAL(firefoxUptimeArray),
+                         nullptr, nullptr, JSPROP_ENUMERATE);
+  if (!ok) {
+    return NS_ERROR_FAILURE;
+  }
+
   const size_t length = stacks.GetStackCount();
   for (size_t i = 0; i < length; ++i) {
-    JS::Rooted<JS::Value> duration(cx, INT_TO_JSVAL(mHangReports.GetDuration(i)));
-    if (!JS_SetElement(cx, durationArray, i, &duration)) {
+    if (!JS_SetElement(cx, durationArray, i, mHangReports.GetDuration(i))) {
+      return NS_ERROR_FAILURE;
+    }
+    if (!JS_SetElement(cx, systemUptimeArray, i, mHangReports.GetSystemUptime(i))) {
+      return NS_ERROR_FAILURE;
+    }
+    if (!JS_SetElement(cx, firefoxUptimeArray, i, mHangReports.GetFirefoxUptime(i))) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -1550,30 +1598,27 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     if (!moduleInfoArray) {
       return nullptr;
     }
-    JS::Rooted<JS::Value> val(cx, OBJECT_TO_JSVAL(moduleInfoArray));
-    if (!JS_SetElement(cx, moduleArray, moduleIndex, &val)) {
+    if (!JS_SetElement(cx, moduleArray, moduleIndex, moduleInfoArray)) {
       return nullptr;
     }
 
     unsigned index = 0;
 
     // Module name
-    JSString *str = JS_NewStringCopyZ(cx, module.mName.c_str());
+    JS::Rooted<JSString*> str(cx, JS_NewStringCopyZ(cx, module.mName.c_str()));
     if (!str) {
       return nullptr;
     }
-    val = STRING_TO_JSVAL(str);
-    if (!JS_SetElement(cx, moduleInfoArray, index++, &val)) {
+    if (!JS_SetElement(cx, moduleInfoArray, index++, str)) {
       return nullptr;
     }
 
     // Module breakpad identifier
-    JSString *id = JS_NewStringCopyZ(cx, module.mBreakpadId.c_str());
+    JS::Rooted<JSString*> id(cx, JS_NewStringCopyZ(cx, module.mBreakpadId.c_str()));
     if (!id) {
       return nullptr;
     }
-    val = STRING_TO_JSVAL(id);
-    if (!JS_SetElement(cx, moduleInfoArray, index++, &val)) {
+    if (!JS_SetElement(cx, moduleInfoArray, index++, id)) {
       return nullptr;
     }
   }
@@ -1597,8 +1642,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
       return nullptr;
     }
 
-    JS::Rooted<JS::Value> pcArrayVal(cx, OBJECT_TO_JSVAL(pcArray));
-    if (!JS_SetElement(cx, reportArray, i, &pcArrayVal)) {
+    if (!JS_SetElement(cx, reportArray, i, pcArray)) {
       return nullptr;
     }
 
@@ -1612,16 +1656,13 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
       }
       int modIndex = (std::numeric_limits<uint16_t>::max() == frame.mModIndex) ?
         -1 : frame.mModIndex;
-      JS::Rooted<JS::Value> modIndexVal(cx, INT_TO_JSVAL(modIndex));
-      if (!JS_SetElement(cx, framePair, 0, &modIndexVal)) {
+      if (!JS_SetElement(cx, framePair, 0, modIndex)) {
         return nullptr;
       }
-      JS::Rooted<JS::Value> mOffsetVal(cx, INT_TO_JSVAL(frame.mOffset));
-      if (!JS_SetElement(cx, framePair, 1, &mOffsetVal)) {
+      if (!JS_SetElement(cx, framePair, 1, static_cast<double>(frame.mOffset))) {
         return nullptr;
       }
-      JS::Rooted<JS::Value> framePairVal(cx, OBJECT_TO_JSVAL(framePair));
-      if (!JS_SetElement(cx, pcArray, pcIndex, &framePairVal)) {
+      if (!JS_SetElement(cx, pcArray, pcIndex, framePair)) {
         return nullptr;
       }
     }
@@ -1759,17 +1800,13 @@ CreateJSTimeHistogram(JSContext* cx, const Telemetry::TimeHistogram& time)
   }
   /* In a Chromium-style histogram, the first bucket is an "under" bucket
      that represents all values below the histogram's range. */
-  JS::RootedValue underRange(cx, INT_TO_JSVAL(time.GetBucketMin(0)));
-  JS::RootedValue underCount(cx, INT_TO_JSVAL(0));
-  if (!JS_SetElement(cx, ranges, 0, &underRange) ||
-      !JS_SetElement(cx, counts, 0, &underCount)) {
+  if (!JS_SetElement(cx, ranges, 0, time.GetBucketMin(0)) ||
+      !JS_SetElement(cx, counts, 0, 0)) {
     return nullptr;
   }
   for (size_t i = 0; i < ArrayLength(time); i++) {
-    JS::RootedValue range(cx, UINT_TO_JSVAL(time.GetBucketMax(i)));
-    JS::RootedValue count(cx, UINT_TO_JSVAL(time[i]));
-    if (!JS_SetElement(cx, ranges, i + 1, &range) ||
-        !JS_SetElement(cx, counts, i + 1, &count)) {
+    if (!JS_SetElement(cx, ranges, i + 1, time.GetBucketMax(i)) ||
+        !JS_SetElement(cx, counts, i + 1, time[i])) {
       return nullptr;
     }
   }
@@ -1798,8 +1835,7 @@ CreateJSHangHistogram(JSContext* cx, const Telemetry::HangHistogram& hang)
   }
   for (size_t i = 0; i < hangStack.length(); i++) {
     JS::RootedString string(cx, JS_NewStringCopyZ(cx, hangStack[i]));
-    JS::RootedValue frame(cx, STRING_TO_JSVAL(string));
-    if (!JS_SetElement(cx, stack, i, &frame)) {
+    if (!JS_SetElement(cx, stack, i, string)) {
       return nullptr;
     }
   }
@@ -1842,8 +1878,7 @@ CreateJSThreadHangStats(JSContext* cx, const Telemetry::ThreadHangStats& thread)
   }
   for (size_t i = 0; i < thread.mHangs.length(); i++) {
     JS::RootedObject obj(cx, CreateJSHangHistogram(cx, thread.mHangs[i]));
-    JS::RootedValue hang(cx, OBJECT_TO_JSVAL(obj));
-    if (!JS_SetElement(cx, hangs, i, &hang)) {
+    if (!JS_SetElement(cx, hangs, i, obj)) {
       return nullptr;
     }
   }
@@ -1872,8 +1907,7 @@ TelemetryImpl::GetThreadHangStats(JSContext* cx, JS::MutableHandle<JS::Value> re
        histogram; histogram = iter.GetNext()) {
     JS::RootedObject obj(cx,
       CreateJSThreadHangStats(cx, *histogram));
-    JS::RootedValue thread(cx, JS::ObjectValue(*obj));
-    if (!JS_SetElement(cx, retObj, threadIndex++, &thread)) {
+    if (!JS_SetElement(cx, retObj, threadIndex++, obj)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -1883,8 +1917,7 @@ TelemetryImpl::GetThreadHangStats(JSContext* cx, JS::MutableHandle<JS::Value> re
   for (size_t i = 0; i < mThreadHangStats.length(); i++) {
     JS::RootedObject obj(cx,
       CreateJSThreadHangStats(cx, mThreadHangStats[i]));
-    JS::RootedValue thread(cx, JS::ObjectValue(*obj));
-    if (!JS_SetElement(cx, retObj, threadIndex++, &thread)) {
+    if (!JS_SetElement(cx, retObj, threadIndex++, obj)) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -2237,15 +2270,18 @@ TelemetryImpl::RecordSlowStatement(const nsACString &sql,
 
 #if defined(MOZ_ENABLE_PROFILER_SPS)
 void
-TelemetryImpl::RecordChromeHang(uint32_t duration,
-                                Telemetry::ProcessedStack &aStack)
+TelemetryImpl::RecordChromeHang(uint32_t aDuration,
+                                Telemetry::ProcessedStack &aStack,
+                                int32_t aSystemUptime,
+                                int32_t aFirefoxUptime)
 {
   if (!sTelemetry || !sTelemetry->mCanRecord)
     return;
 
   MutexAutoLock hangReportMutex(sTelemetry->mHangReportsMutex);
 
-  sTelemetry->mHangReports.AddHang(aStack, duration);
+  sTelemetry->mHangReports.AddHang(aStack, aDuration,
+                                   aSystemUptime, aFirefoxUptime);
 }
 #endif
 
@@ -2419,9 +2455,12 @@ void Init()
 
 #if defined(MOZ_ENABLE_PROFILER_SPS)
 void RecordChromeHang(uint32_t duration,
-                      ProcessedStack &aStack)
+                      ProcessedStack &aStack,
+                      int32_t aSystemUptime,
+                      int32_t aFirefoxUptime)
 {
-  TelemetryImpl::RecordChromeHang(duration, aStack);
+  TelemetryImpl::RecordChromeHang(duration, aStack,
+                                  aSystemUptime, aFirefoxUptime);
 }
 #endif
 

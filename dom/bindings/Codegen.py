@@ -201,7 +201,6 @@ static const DOMJSClass Class = {
     %s, /* resolve */
     JS_ConvertStub,
     %s, /* finalize */
-    nullptr,               /* checkAccess */
     %s, /* call */
     nullptr,               /* hasInstance */
     nullptr,               /* construct */
@@ -292,7 +291,6 @@ class CGPrototypeJSClass(CGThing):
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr,               /* finalize */
-    nullptr,               /* checkAccess */
     nullptr,               /* call */
     nullptr,               /* hasInstance */
     nullptr,               /* construct */
@@ -350,7 +348,6 @@ static DOMIfaceAndProtoJSClass InterfaceObjectClass = {
     JS_ResolveStub,
     JS_ConvertStub,
     nullptr,               /* finalize */
-    nullptr,               /* checkAccess */
     %s, /* call */
     %s, /* hasInstance */
     %s, /* construct */
@@ -6060,7 +6057,7 @@ class CppKeywords():
     A class for checking if method names declared in webidl
     are not in conflict with C++ keywords.
     """
-    keywords = frozenset(['alignas', 'alignof', 'and', 'and_eq', 'asm', 'auto', 'bitand', 'bitor', 'bool',
+    keywords = frozenset(['alignas', 'alignof', 'and', 'and_eq', 'asm', 'assert', 'auto', 'bitand', 'bitor', 'bool',
     'break', 'case', 'catch', 'char', 'char16_t', 'char32_t', 'class', 'compl', 'const', 'constexpr',
     'const_cast', 'continue', 'decltype', 'default', 'delete', 'do', 'double', 'dynamic_cast', 'else', 'enum',
     'explicit', 'export', 'extern', 'false', 'final', 'float', 'for', 'friend', 'goto', 'if', 'inline',
@@ -6072,8 +6069,10 @@ class CppKeywords():
 
     @staticmethod
     def checkMethodName(name):
+        # Double '_' because 'assert' and '_assert' cannot be used in MS2013 compiler.
+        # Bug 964892 and bug 963560.
         if name in CppKeywords.keywords:
-          name = '_' + name
+          name = '_' + name + '_'
         return name
 
 class CGStaticMethod(CGAbstractStaticBindingMethod):
@@ -6312,7 +6311,8 @@ if (!v.isObject()) {
   return ThrowErrorMessage(cx, MSG_NOT_OBJECT, "%s.%s");
 }
 
-return JS_SetProperty(cx, &v.toObject(), "%s", args[0]);""" % (attrName, self.descriptor.interface.identifier.name, attrName, forwardToAttrName))).define()
+JS::Rooted<JSObject*> targetObj(cx, &v.toObject());
+return JS_SetProperty(cx, targetObj, "%s", args[0]);""" % (attrName, self.descriptor.interface.identifier.name, attrName, forwardToAttrName))).define()
 
 class CGSpecializedReplaceableSetter(CGSpecializedSetter):
     """
@@ -11409,7 +11409,7 @@ class CallbackSetter(CallbackAccessor):
             }
         return string.Template(
             'MOZ_ASSERT(argv.length() == 1);\n'
-            'if (!JS_SetProperty(cx, mCallback, "${attrName}", ${argv})) {\n'
+            'if (!JS_SetProperty(cx, CallbackPreserveColor(), "${attrName}", ${argv})) {\n'
             '  aRv.Throw(NS_ERROR_UNEXPECTED);\n'
             '  return${errorReturn};\n'
             '}\n').substitute(replacements)

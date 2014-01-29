@@ -50,6 +50,10 @@
 
 #customization-panel-container {
   padding: 15px 25px 25px;
+  background-image: linear-gradient(to bottom, #3e86ce, #3878ba);
+}
+
+#main-window[customize-entered] #customization-panel-container {
   background-image: url("chrome://browser/skin/customizableui/customizeMode-separatorHorizontal.png"),
                     url("chrome://browser/skin/customizableui/customizeMode-separatorVertical.png"),
                     url("chrome://browser/skin/customizableui/customizeMode-gridTexture.png"),
@@ -75,6 +79,7 @@ toolbarpaletteitem[place="panel"] {
   transition: transform .3s ease-in-out;
 }
 
+toolbarpaletteitem[notransition].panel-customization-placeholder,
 toolbarpaletteitem[notransition][place="palette"],
 toolbarpaletteitem[notransition][place="panel"] {
   transition: none;
@@ -104,7 +109,7 @@ toolbarpaletteitem[place="toolbar"] {
 #wrapper-edit-controls[place="palette"] > #edit-controls > separator,
 #wrapper-zoom-controls[place="palette"] > #zoom-controls > toolbarbutton,
 #wrapper-zoom-controls[place="palette"] > #zoom-controls > separator {
-  margin-top: 24px;
+  margin-top: 20px;
 }
 
 #wrapper-edit-controls[place="palette"] > #edit-controls > toolbarbutton,
@@ -130,6 +135,10 @@ toolbarpaletteitem[place="toolbar"] {
 #wrapper-zoom-controls[place="palette"] > #zoom-controls > #zoom-reset-button,
 #wrapper-zoom-controls[place="palette"] > #zoom-controls > #zoom-reset-button + separator {
   display: none;
+}
+
+#wrapper-personal-bookmarks:not([place="toolbar"]) > #personal-bookmarks {
+  -moz-box-pack: center;
 }
 
 #customization-palette > toolbarpaletteitem > label {

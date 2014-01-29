@@ -1571,8 +1571,8 @@ XPCWrappedNative::InitTearOffJSObject(XPCWrappedNativeTearOff* to)
 {
     AutoJSContext cx;
 
-    RootedObject proto(cx, JS_GetObjectPrototype(cx, mFlatJSObject));
     RootedObject parent(cx, mFlatJSObject);
+    RootedObject proto(cx, JS_GetObjectPrototype(cx, parent));
     JSObject* obj = JS_NewObject(cx, Jsvalify(&XPC_WN_Tearoff_JSClass),
                                  proto, parent);
     if (!obj)
@@ -1593,7 +1593,7 @@ static bool Throw(nsresult errNum, XPCCallContext& ccx)
 
 /***************************************************************************/
 
-class CallMethodHelper
+class MOZ_STACK_CLASS CallMethodHelper
 {
     XPCCallContext& mCallContext;
     // We wait to call SetLastResult(mInvokeResult) until ~CallMethodHelper(),
@@ -1604,7 +1604,7 @@ class CallMethodHelper
     const nsXPTMethodInfo* mMethodInfo;
     nsISupports* const mCallee;
     const uint16_t mVTableIndex;
-    const jsid mIdxValueId;
+    HandleId mIdxValueId;
 
     nsAutoTArray<nsXPTCVariant, 8> mDispatchParams;
     uint8_t mJSContextIndex; // TODO make const
@@ -1613,21 +1613,21 @@ class CallMethodHelper
     jsval* const mArgv;
     const uint32_t mArgc;
 
-    JS_ALWAYS_INLINE bool
+    MOZ_ALWAYS_INLINE bool
     GetArraySizeFromParam(uint8_t paramIndex, uint32_t* result) const;
 
-    JS_ALWAYS_INLINE bool
+    MOZ_ALWAYS_INLINE bool
     GetInterfaceTypeFromParam(uint8_t paramIndex,
                               const nsXPTType& datum_type,
                               nsID* result) const;
 
-    JS_ALWAYS_INLINE bool
+    MOZ_ALWAYS_INLINE bool
     GetOutParamSource(uint8_t paramIndex, MutableHandleValue srcp) const;
 
-    JS_ALWAYS_INLINE bool
+    MOZ_ALWAYS_INLINE bool
     GatherAndConvertResults();
 
-    JS_ALWAYS_INLINE bool
+    MOZ_ALWAYS_INLINE bool
     QueryInterfaceFastPath();
 
     nsXPTCVariant*
@@ -1645,19 +1645,19 @@ class CallMethodHelper
         return const_cast<CallMethodHelper*>(this)->GetDispatchParam(paramIndex);
     }
 
-    JS_ALWAYS_INLINE bool InitializeDispatchParams();
+    MOZ_ALWAYS_INLINE bool InitializeDispatchParams();
 
-    JS_ALWAYS_INLINE bool ConvertIndependentParams(bool* foundDependentParam);
-    JS_ALWAYS_INLINE bool ConvertIndependentParam(uint8_t i);
-    JS_ALWAYS_INLINE bool ConvertDependentParams();
-    JS_ALWAYS_INLINE bool ConvertDependentParam(uint8_t i);
+    MOZ_ALWAYS_INLINE bool ConvertIndependentParams(bool* foundDependentParam);
+    MOZ_ALWAYS_INLINE bool ConvertIndependentParam(uint8_t i);
+    MOZ_ALWAYS_INLINE bool ConvertDependentParams();
+    MOZ_ALWAYS_INLINE bool ConvertDependentParam(uint8_t i);
 
-    JS_ALWAYS_INLINE void CleanupParam(nsXPTCMiniVariant& param, nsXPTType& type);
+    MOZ_ALWAYS_INLINE void CleanupParam(nsXPTCMiniVariant& param, nsXPTType& type);
 
-    JS_ALWAYS_INLINE bool HandleDipperParam(nsXPTCVariant* dp,
-                                              const nsXPTParamInfo& paramInfo);
+    MOZ_ALWAYS_INLINE bool HandleDipperParam(nsXPTCVariant* dp,
+                                             const nsXPTParamInfo& paramInfo);
 
-    JS_ALWAYS_INLINE nsresult Invoke();
+    MOZ_ALWAYS_INLINE nsresult Invoke();
 
 public:
 
@@ -1681,7 +1681,7 @@ public:
 
     ~CallMethodHelper();
 
-    JS_ALWAYS_INLINE bool Call();
+    MOZ_ALWAYS_INLINE bool Call();
 
 };
 
@@ -1696,35 +1696,6 @@ XPCWrappedNative::CallMethod(XPCCallContext& ccx,
     nsresult rv = ccx.CanCallNow();
     if (NS_FAILED(rv)) {
         return Throw(rv, ccx);
-    }
-
-    // set up the method index and do the security check if needed
-
-    uint32_t secAction;
-
-    switch (mode) {
-        case CALL_METHOD:
-            secAction = nsIXPCSecurityManager::ACCESS_CALL_METHOD;
-            break;
-        case CALL_GETTER:
-            secAction = nsIXPCSecurityManager::ACCESS_GET_PROPERTY;
-            break;
-        case CALL_SETTER:
-            secAction = nsIXPCSecurityManager::ACCESS_SET_PROPERTY;
-            break;
-        default:
-            NS_ERROR("bad value");
-            return false;
-    }
-
-    nsIXPCSecurityManager* sm = nsXPConnect::XPConnect()->GetDefaultSecurityManager();
-    if (sm && NS_FAILED(sm->CanAccess(secAction, &ccx, ccx,
-                                      ccx.GetFlattenedJSObject(),
-                                      ccx.GetWrapper()->GetIdentityObject(),
-                                      ccx.GetWrapper()->GetClassInfo(),
-                                      ccx.GetMember()->GetName()))) {
-        // the security manager vetoed. It should have set an exception.
-        return false;
     }
 
     return CallMethodHelper(ccx).Call();
@@ -1971,9 +1942,8 @@ CallMethodHelper::GatherAndConvertResults()
         } else if (i < mArgc) {
             // we actually assured this before doing the invoke
             MOZ_ASSERT(mArgv[i].isObject(), "out var is not object");
-            if (!JS_SetPropertyById(mCallContext,
-                                    &mArgv[i].toObject(),
-                                    mIdxValueId, v)) {
+            RootedObject obj(mCallContext, &mArgv[i].toObject());
+            if (!JS_SetPropertyById(mCallContext, obj, mIdxValueId, v)) {
                 ThrowBadParam(NS_ERROR_XPC_CANT_SET_OUT_VAL, i, mCallContext);
                 return false;
             }

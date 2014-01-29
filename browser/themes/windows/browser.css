@@ -725,8 +725,11 @@ menuitem.bookmark-item {
   list-style-image: url("chrome://browser/skin/Toolbar-inverted.png");
 }
 
-#sync-button[status="active"] {
-  list-style-image: url("chrome://browser/skin/sync-throbber.png");
+#sync-button[cui-areatype="toolbar"][status="active"] {
+  /* !important because we need to override the glass selectors that trigger
+   * use of the Toolbar-inverted image. Those use a list of all primary toolbar
+   * buttons, so we can't easily fix those selectors. */
+  list-style-image: url("chrome://browser/skin/sync-throbber.png") !important;
   -moz-image-region: rect(0, 18px, 18px, 0);
 }
 
@@ -810,7 +813,6 @@ menuitem.bookmark-item {
 }
 
 #urlbar {
-  width: 7em;
   -moz-padding-end: 2px;
 }
 
@@ -2138,6 +2140,35 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
 
 #ctrlTab-showAll {
   margin-top: .5em;
+}
+
+/* Sync Panel */
+
+.sync-panel {
+  padding: 10px;
+}
+
+.sync-panel-icon {
+  width: 32px;
+  background: url("chrome://browser/content/abouthome/sync.png") top left no-repeat;
+}
+
+.sync-panel-inner {
+  width: 0;
+  padding-left: 10px;
+}
+
+.sync-panel-button-box {
+  margin-top: 1em;
+}
+
+#sync-error-panel-title {
+  font-weight: bold;
+}
+
+#sync-start-panel-subtitle,
+#sync-error-panel-subtitle {
+  margin: 0;
 }
 
 /* Status panel */

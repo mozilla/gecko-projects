@@ -18,7 +18,6 @@
 
 #include "jsapi.h"
 #include "jsatom.h"
-#include "jsautooplen.h"
 #include "jscntxt.h"
 #include "jsfun.h"
 #include "jsgc.h"
@@ -37,6 +36,7 @@
 #include "vm/ArgumentsObject.h"
 #include "vm/Compression.h"
 #include "vm/Debugger.h"
+#include "vm/Opcodes.h"
 #include "vm/Shape.h"
 #include "vm/Xdr.h"
 
@@ -163,7 +163,8 @@ Bindings::switchToScriptStorage(Binding *newBindingArray)
     JS_ASSERT(bindingArrayUsingTemporaryStorage());
     JS_ASSERT(!(uintptr_t(newBindingArray) & TEMPORARY_STORAGE_BIT));
 
-    PodCopy(newBindingArray, bindingArray(), count());
+    if (count() > 0)
+        PodCopy(newBindingArray, bindingArray(), count());
     bindingArrayAndFlag_ = uintptr_t(newBindingArray);
     return reinterpret_cast<uint8_t *>(newBindingArray + count());
 }
@@ -1207,6 +1208,20 @@ SourceDataCache::purge()
     map_ = nullptr;
 }
 
+size_t
+SourceDataCache::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
+{
+    size_t n = 0;
+    if (map_ && !map_->empty()) {
+        n += map_->sizeOfIncludingThis(mallocSizeOf);
+        for (Map::Range r = map_->all(); !r.empty(); r.popFront()) {
+            const jschar *v = r.front().value();
+            n += mallocSizeOf(v);
+        }
+    }
+    return n;
+}
+
 const jschar *
 ScriptSource::chars(JSContext *cx, const SourceDataCache::AutoSuppressPurge &asp)
 {
@@ -1933,9 +1948,13 @@ JSScript::partiallyInit(ExclusiveContext *cx, HandleScript script, uint32_t ncon
 {
     size_t size = ScriptDataSize(script->bindings.count(), nconsts, nobjects, nregexps, ntrynotes,
                                  nblockscopes);
-    script->data = AllocScriptData(cx, size);
-    if (!script->data)
-        return false;
+    if (size > 0) {
+        script->data = AllocScriptData(cx, size);
+        if (!script->data)
+            return false;
+    } else {
+        script->data = nullptr;
+    }
     script->dataSize_ = size;
 
     JS_ASSERT(nTypeSets <= UINT16_MAX);

@@ -12,12 +12,12 @@
     <copyfile dest="Makefile" src="core/root.mk"/>
   </project>
   <project name="fake-dalvik" path="dalvik" remote="b2g" revision="ca1f327d5acc198bb4be62fa51db2c039032c9ce"/>
-  <project name="gaia.git" path="gaia" remote="mozillaorg" revision="48637bedf20a7d1b8cc3f1638e72eeb44728f467"/>
+  <project name="gaia.git" path="gaia" remote="mozillaorg" revision="0bc0e703df197d46dfffb9ac65cb85d2e3e10c4a"/>
   <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="e9b6626eddbc85873eaa2a9174a9bd5101e5c05f"/>
   <project name="rilproxy" path="rilproxy" remote="b2g" revision="827214fcf38d6569aeb5c6d6f31cb296d1f09272"/>
   <project name="platform_hardware_ril" path="hardware/ril" remote="b2g" revision="eda08beb3ba9a159843c70ffde0f9660ec351eb9"/>
   <project name="platform_external_qemu" path="external/qemu" remote="b2g" revision="87aa8679560ce09f6445621d6f370d9de722cdba"/>
-  <project name="moztt" path="external/moztt" remote="b2g" revision="96d2d00165f4561fbde62d1062706eab74b3a01f"/>
+  <project name="moztt" path="external/moztt" remote="b2g" revision="e33ea242b4328fb0d1824c951f379332b5021512"/>
   <project name="apitrace" path="external/apitrace" remote="apitrace" revision="a887bfabaed83c4588b40c845535c0388c8da0f3"/>
   <!-- Stock Android things -->
   <project name="platform/abi/cpp" path="abi/cpp" revision="dd924f92906085b831bf1cbbc7484d3c043d613c"/>
@@ -96,6 +96,6 @@
   <project name="platform/prebuilts/gcc/linux-x86/host/i686-linux-glibc2.7-4.6" path="prebuilts/gcc/linux-x86/host/i686-linux-glibc2.7-4.6" revision="d2685281e2e54ca14d1df304867aa82c37b27162"/>
   <project name="platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.7-4.6" path="prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.7-4.6" revision="627f9b20fc518937b93747a7ff1ed4f5ed46e06f"/>
   <project name="platform/prebuilts/tools" path="prebuilts/tools" revision="a3daa50e9b5db558696951ae724f913e4e5c7489"/>
-  <project name="platform_prebuilts_qemu-kernel" path="prebuilts/qemu-kernel" remote="b2g" revision="83dbccadb19d0d3c07828c2bb0e5c2be12c0f980"/>
+  <project name="platform_prebuilts_qemu-kernel" path="prebuilts/qemu-kernel" remote="b2g" revision="11663426672fcc46e2a0f29239afa736b90635ba"/>
   <project name="android-sdk" path="sdk" remote="b2g" revision="5701d3cb45c2e848cc57003cda2e1141288ecae4"/>
 </manifest>

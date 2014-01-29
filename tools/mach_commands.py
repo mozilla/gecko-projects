@@ -301,7 +301,13 @@ class ReviewboardToolsProvider(MachCommandBase):
             args = ['help']
 
         self._activate_virtualenv()
-        self.virtualenv_manager.install_pip_package('RBTools')
+        # We install RBTools from source control because the currently released
+        # version doesn't have patches that make Mercurial usable in many
+        # scenarios.
+        commit = '416a728292dff3f279e5d695f48a29749b51b77a'
+        self.virtualenv_manager.install_pip_package(
+            'git+https://github.com/reviewboard/rbtools.git@%s#egg=RBTools' %
+            commit)
 
         from rbtools.commands.main import main
 
@@ -319,24 +325,24 @@ class FormatProvider(MachCommandBase):
         if not args:
             args = ['help']
 
-        fmt = "clang-format-3.5"
+        plat = platform.system()
+        fmt = plat.lower() + "/clang-format-3.5"
         fmt_diff = "clang-format-diff-3.5"
 
         # We are currently using a modified verion of clang-format hosted on people.mozilla.org.
         # This is a temporary work around until we upstream the necessary changes and we can use
         # a system version of clang-format. See bug 961541.
-        self.prompt = 1
-        plat = platform.system()
         if plat == "Windows":
             fmt += ".exe"
         else:
             arch = os.uname()[4]
-            if plat != "Linux" or arch != 'x86_64':
+            if (plat != "Linux" and plat != "Darwin") or arch != 'x86_64':
                 print("Unsupported platform " + plat + "/" + arch +
-                      ". Supported platforms are Windows/* and Linux/x86_64")
+                      ". Supported platforms are Windows/*, Linux/x86_64 and Darwin/x86_64")
                 return 1
 
         os.chdir(self.topsrcdir)
+        self.prompt = True
 
         try:
             if not self.locate_or_fetch(fmt):
@@ -356,13 +362,13 @@ class FormatProvider(MachCommandBase):
         return p2.communicate()[0]
 
     def locate_or_fetch(self, root):
-        target = os.path.join(self._mach_context.state_dir, root)
+        target = os.path.join(self._mach_context.state_dir, os.path.basename(root))
         if not os.path.exists(target):
-            site = "http://people.mozilla.org/~ajones/clang-format/"
+            site = "https://people.mozilla.org/~ajones/clang-format/"
             if self.prompt and raw_input("Download clang-format executables from {0} (yN)? ".format(site)).lower() != 'y':
                 print("Download aborted.")
                 return 1
-            self.prompt = 0
+            self.prompt = False
 
             u = site + root
             print("Downloading {0} to {1}".format(u, target))

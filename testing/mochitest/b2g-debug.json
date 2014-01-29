@@ -11,6 +11,7 @@
 "excludetests": {
     "content/xul":"tests that use xul",
     "layout/xul" : "",
+    "dom/datastore/tests/test_changes.html":"intermittent failures, bug 961021",
     "dom/tests/mochitest/general/test_focusrings.xul":"",
     "layout/base/tests/test_bug465448.xul":"",
 
@@ -305,6 +306,7 @@
     "dom/media/tests/mochitest/test_dataChannel_basicAudioVideo.html":"Bug 960442, video support for WebRTC is disabled on b2g",
     "dom/media/tests/mochitest/test_dataChannel_basicAudioVideoCombined.html":"Bug 960442, video support for WebRTC is disabled on b2g",
     "dom/media/tests/mochitest/test_dataChannel_basicVideo.html":"Bug 960442, video support for WebRTC is disabled on b2g",
+    "dom/media/tests/mochitest/test_peerConnection_basicAudio.html":"Bug 962984, test fail on b2g debug build",
     "dom/media/tests/mochitest/test_peerConnection_basicAudioVideo.html":"Bug 960442, video support for WebRTC is disabled on b2g",
     "dom/media/tests/mochitest/test_peerConnection_basicAudioVideoCombined.html":"Bug 960442, video support for WebRTC is disabled on b2g",
     "dom/media/tests/mochitest/test_peerConnection_basicVideo.html":"Bug 960442, video support for WebRTC is disabled on b2g",

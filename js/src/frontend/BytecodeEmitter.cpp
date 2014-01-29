@@ -18,7 +18,6 @@
 
 #include "jsapi.h"
 #include "jsatom.h"
-#include "jsautooplen.h"
 #include "jscntxt.h"
 #include "jsfun.h"
 #include "jsnum.h"
@@ -4824,7 +4823,7 @@ EmitFor(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, ptrdiff_t top
     return EmitNormalFor(cx, bce, pn, top);
 }
 
-static JS_NEVER_INLINE bool
+static MOZ_NEVER_INLINE bool
 EmitFunc(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 {
     FunctionBox *funbox = pn->pn_funbox;

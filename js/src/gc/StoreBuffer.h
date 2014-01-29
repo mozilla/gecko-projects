@@ -20,6 +20,7 @@
 
 #include "ds/LifoAlloc.h"
 #include "gc/Nursery.h"
+#include "js/MemoryMetrics.h"
 #include "js/Tracer.h"
 
 namespace js {
@@ -90,8 +91,9 @@ class StoreBuffer
     struct MonoTypeBuffer
     {
         LifoAlloc *storage_;
+        size_t usedAtLastCompact_;
 
-        explicit MonoTypeBuffer() : storage_(nullptr) {}
+        explicit MonoTypeBuffer() : storage_(nullptr), usedAtLastCompact_(0) {}
         ~MonoTypeBuffer() { js_delete(storage_); }
 
         bool init() {
@@ -106,6 +108,7 @@ class StoreBuffer
                 return;
 
             storage_->used() ? storage_->releaseAll() : storage_->freeAll();
+            usedAtLastCompact_ = 0;
         }
 
         bool isAboutToOverflow() const {
@@ -120,6 +123,9 @@ class StoreBuffer
          * entries.
          */
         virtual void compact(StoreBuffer *owner);
+
+        /* Compacts if any entries have been added since the last compaction. */
+        void maybeCompact(StoreBuffer *owner);
 
         /* Add one item to the buffer. */
         void put(StoreBuffer *owner, const T &t) {
@@ -138,6 +144,10 @@ class StoreBuffer
 
         /* Mark the source of all edges in the store buffer. */
         void mark(StoreBuffer *owner, JSTracer *trc);
+
+        size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
+            return storage_ ? storage_->sizeOfIncludingThis(mallocSizeOf) : 0;
+        }
 
       private:
         MonoTypeBuffer &operator=(const MonoTypeBuffer& other) MOZ_DELETE;
@@ -207,6 +217,10 @@ class StoreBuffer
 
             if (isAboutToOverflow())
                 owner->setAboutToOverflow();
+        }
+
+        size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
+            return storage_ ? storage_->sizeOfIncludingThis(mallocSizeOf) : 0;
         }
 
       private:
@@ -282,12 +296,12 @@ class StoreBuffer
             return object != other.object || offset != other.offset || kind != other.kind;
         }
 
-        JS_ALWAYS_INLINE HeapSlot *slotLocation() const;
+        MOZ_ALWAYS_INLINE HeapSlot *slotLocation() const;
 
-        JS_ALWAYS_INLINE void *deref() const;
-        JS_ALWAYS_INLINE void *location() const;
+        MOZ_ALWAYS_INLINE void *deref() const;
+        MOZ_ALWAYS_INLINE void *location() const;
         bool inRememberedSet(const Nursery &nursery) const;
-        JS_ALWAYS_INLINE bool isNullEdge() const;
+        MOZ_ALWAYS_INLINE bool isNullEdge() const;
 
         void mark(JSTracer *trc);
     };
@@ -428,15 +442,23 @@ class StoreBuffer
         put(bufferGeneric, CallbackRef<Key>(callback, key, data));
     }
 
-    /* Mark the source of all edges in the store buffer. */
-    void mark(JSTracer *trc);
+    /* Methods to mark the source of all edges in the store buffer. */
+    void markAll(JSTracer *trc);
+    void markValues(JSTracer *trc)            { bufferVal.mark(this, trc); }
+    void markCells(JSTracer *trc)             { bufferCell.mark(this, trc); }
+    void markSlots(JSTracer *trc)             { bufferSlot.mark(this, trc); }
+    void markWholeCells(JSTracer *trc)        { bufferWholeCell.mark(this, trc); }
+    void markRelocatableValues(JSTracer *trc) { bufferRelocVal.mark(this, trc); }
+    void markRelocatableCells(JSTracer *trc)  { bufferRelocCell.mark(this, trc); }
+    void markGenericEntries(JSTracer *trc)    { bufferGeneric.mark(this, trc); }
 
     /* We cannot call InParallelSection directly because of a circular dependency. */
     bool inParallelSection() const;
 
     /* For use by our owned buffers and for testing. */
     void setAboutToOverflow();
-    void setOverflowed();
+
+    void addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::GCSizes *sizes);
 };
 
 } /* namespace gc */

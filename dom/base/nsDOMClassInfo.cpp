@@ -110,9 +110,6 @@
 #include "nsIDOMCSSStyleRule.h"
 #include "nsIDOMCSSStyleSheet.h"
 #include "nsIDOMXULCommandDispatcher.h"
-#ifndef MOZ_DISABLE_CRYPTOLEGACY
-#include "nsIDOMCRMFObject.h"
-#endif
 #include "nsIControllers.h"
 #include "nsIBoxObject.h"
 #ifdef MOZ_XUL
@@ -227,10 +224,6 @@ static NS_DEFINE_CID(kDOMSOF_CID, NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
 #define DOMCI_DATA_NO_CLASS(_dom_class)                                       \
 const uint32_t kDOMClassInfo_##_dom_class##_interfaces =                      \
   0;
-
-#ifndef MOZ_DISABLE_CRYPTOLEGACY
-DOMCI_DATA_NO_CLASS(CRMFObject)
-#endif
 
 DOMCI_DATA_NO_CLASS(ContentFrameMessageManager)
 DOMCI_DATA_NO_CLASS(ChromeMessageBroadcaster)
@@ -352,12 +345,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
                                       DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CHROME_XBL_CLASSINFO_DATA(TreeContentView, nsDOMGenericSH,
                                       DEFAULT_SCRIPTABLE_FLAGS)
-#endif
-
-  // Crypto classes
-#ifndef MOZ_DISABLE_CRYPTOLEGACY
-  NS_DEFINE_CLASSINFO_DATA(CRMFObject, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
 #endif
 
   // DOM Chrome Window class.
@@ -1016,12 +1003,6 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_END
 #endif
 
-#ifndef MOZ_DISABLE_CRYPTOLEGACY
-   DOM_CLASSINFO_MAP_BEGIN(CRMFObject, nsIDOMCRMFObject)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCRMFObject)
-   DOM_CLASSINFO_MAP_END
-#endif
-
   DOM_CLASSINFO_MAP_BEGIN_NO_CLASS_IF(ChromeWindow, nsIDOMWindow)
     DOM_CLASSINFO_WINDOW_MAP_ENTRIES
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMChromeWindow)
@@ -1497,21 +1478,6 @@ NS_IMETHODIMP
 nsDOMClassInfo::Enumerate(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                           JSObject *obj, bool *_retval)
 {
-#ifdef DEBUG
-  if (!sSecMan) {
-    NS_ERROR("No security manager!!!");
-    return NS_OK;
-  }
-
-  // Ask the security manager if it's OK to enumerate
-  nsresult rv =
-    sSecMan->CheckPropertyAccess(cx, obj, mData->mName, sEnumerate_id,
-                                 nsIXPCSecurityManager::ACCESS_GET_PROPERTY);
-
-  NS_ASSERTION(NS_SUCCEEDED(rv),
-               "XOWs should have stopped us from getting here!!!");
-#endif
-
   return NS_OK;
 }
 
@@ -1583,38 +1549,6 @@ nsDOMClassInfo::Finalize(nsIXPConnectWrappedNative *wrapper, JSFreeOp *fop,
   NS_WARNING("nsDOMClassInfo::Finalize Don't call me!");
 
   return NS_ERROR_UNEXPECTED;
-}
-
-NS_IMETHODIMP
-nsDOMClassInfo::CheckAccess(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                            JSObject *obj, jsid aId, uint32_t mode,
-                            jsval *vp, bool *_retval)
-{
-  JS::Rooted<jsid> id(cx, aId);
-  uint32_t mode_type = mode & JSACC_TYPEMASK;
-
-  if ((mode_type == JSACC_WATCH || mode_type == JSACC_PROTO) && sSecMan) {
-    nsresult rv;
-    JS::Rooted<JSObject*> real_obj(cx);
-    if (wrapper) {
-      real_obj = wrapper->GetJSObject();
-      NS_ENSURE_STATE(real_obj);
-    }
-    else {
-      real_obj = obj;
-    }
-
-    rv =
-      sSecMan->CheckPropertyAccess(cx, real_obj, mData->mName, id,
-                                   nsIXPCSecurityManager::ACCESS_GET_PROPERTY);
-
-    if (NS_FAILED(rv)) {
-      // Let XPConnect know that the access was not granted.
-      *_retval = false;
-    }
-  }
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2781,7 +2715,8 @@ ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
       }
 
       if (val.isObject()) {
-        if (!JS_LookupProperty(cx, &val.toObject(), "prototype", &val)) {
+        JS::Rooted<JSObject*> obj(cx, &val.toObject());
+        if (!JS_LookupProperty(cx, obj, "prototype", &val)) {
           return NS_ERROR_UNEXPECTED;
         }
 
@@ -3507,25 +3442,6 @@ nsWindowSH::OuterObject(nsIXPConnectWrappedNative *wrapper, JSContext * cx,
   return NS_OK;
 }
 
-// DOM Location helper
-
-NS_IMETHODIMP
-nsLocationSH::CheckAccess(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                          JSObject *obj, jsid id, uint32_t mode,
-                          jsval *vp, bool *_retval)
-{
-  if ((mode & JSACC_TYPEMASK) == JSACC_PROTO && (mode & JSACC_WRITE)) {
-    // No setting location.__proto__, ever!
-
-    // Let XPConnect know that the access was not granted.
-    *_retval = false;
-
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
-
-  return nsDOMGenericSH::CheckAccess(wrapper, cx, obj, id, mode, vp, _retval);
-}
-
 NS_IMETHODIMP
 nsLocationSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
                         JSObject *globalObj, JSObject **parentObj)
@@ -3788,7 +3704,6 @@ const JSClass sHTMLDocumentAllClass = {
   (JSResolveOp)nsHTMLDocumentSH::DocumentAllNewResolve,
   JS_ConvertStub,
   nsHTMLDocumentSH::ReleaseDocument,
-  nullptr,                                                  /* checkAccess */
   nsHTMLDocumentSH::CallToGetPropMapper
 };
 

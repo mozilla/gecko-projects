@@ -334,7 +334,8 @@ var BrowserApp = {
     Services.obs.addObserver(this, "gather-telemetry", false);
     Services.obs.addObserver(this, "keyword-search", false);
 #ifdef MOZ_ANDROID_SYNTHAPKS
-    Services.obs.addObserver(this, "webapps-download-apk", false);
+    Services.obs.addObserver(this, "webapps-runtime-install", false);
+    Services.obs.addObserver(this, "webapps-runtime-install-package", false);
     Services.obs.addObserver(this, "webapps-ask-install", false);
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-uninstall", false);
@@ -380,9 +381,6 @@ var BrowserApp = {
     // TODO: replace with Android implementation of WebappOSUtils.isLaunchable.
     Cu.import("resource://gre/modules/Webapps.jsm");
     DOMApplicationRegistry.allAppsLaunchable = true;
-
-    // TODO: figure out why this is needed here.
-    Cu.import("resource://gre/modules/AppsUtils.jsm");
 #else
     WebappsUI.init();
 #endif
@@ -777,7 +775,6 @@ var BrowserApp = {
       return;
 
     if (this._selectedTab) {
-      Tabs.touch(this._selectedTab);
       this._selectedTab.setActive(false);
     }
 
@@ -785,7 +782,6 @@ var BrowserApp = {
     if (!aTab)
       return;
 
-    Tabs.touch(aTab);
     aTab.setActive(true);
     aTab.setResolution(aTab._zoom, true);
     this.contentDocumentChanged();
@@ -895,8 +891,6 @@ var BrowserApp = {
     let evt = document.createEvent("UIEvents");
     evt.initUIEvent("TabOpen", true, false, window, null);
     newTab.browser.dispatchEvent(evt);
-
-    Tabs.expireLruTab();
 
     return newTab;
   },
@@ -1583,8 +1577,12 @@ var BrowserApp = {
         break;
 
 #ifdef MOZ_ANDROID_SYNTHAPKS
-      case "webapps-download-apk":
-        WebappManager.downloadApk(JSON.parse(aData));
+      case "webapps-runtime-install":
+        WebappManager.install(JSON.parse(aData), aSubject);
+        break;
+
+      case "webapps-runtime-install-package":
+        WebappManager.installPackage(JSON.parse(aData), aSubject);
         break;
 
       case "webapps-ask-install":
@@ -3052,6 +3050,8 @@ Tab.prototype = {
   setActive: function setActive(aActive) {
     if (!this.browser || !this.browser.docShell)
       return;
+
+    this.lastTouchedAt = Date.now();
 
     if (aActive) {
       this.browser.setAttribute("type", "content-primary");
@@ -8240,6 +8240,7 @@ var Tabs = {
     Services.obs.addObserver(this, "Session:Prefetch", false);
 
     BrowserApp.deck.addEventListener("pageshow", this, false);
+    BrowserApp.deck.addEventListener("TabOpen", this, false);
   },
 
   uninit: function() {
@@ -8252,14 +8253,20 @@ var Tabs = {
     Services.obs.removeObserver(this, "Session:Prefetch");
 
     BrowserApp.deck.removeEventListener("pageshow", this);
+    BrowserApp.deck.removeEventListener("TabOpen", this);
   },
 
   observe: function(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "memory-pressure":
         if (aData != "heap-minimize") {
+          // We received a low-memory related notification. This will enable
+          // expirations.
           this._enableTabExpiration = true;
           Services.obs.removeObserver(this, "memory-pressure");
+        } else {
+          // Use "heap-minimize" as a trigger to expire the most stale tab.
+          this.expireLruTab();
         }
         break;
       case "Session:Prefetch":
@@ -8282,11 +8289,11 @@ var Tabs = {
         // Clear the domain cache whenever a page get loaded into any browser.
         this._domains.clear();
         break;
+      case "TabOpen":
+        // Use opening a new tab as a trigger to expire the most stale tab.
+        this.expireLruTab();
+        break;
     }
-  },
-
-  touch: function(aTab) {
-    aTab.lastTouchedAt = Date.now();
   },
 
   // Manage the most-recently-used list of tabs. Each tab has a timestamp

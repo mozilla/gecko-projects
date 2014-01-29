@@ -89,9 +89,8 @@ const Class JSObject::class_ = {
 const Class* const js::ObjectClassPtr = &JSObject::class_;
 
 JS_FRIEND_API(JSObject *)
-JS_ObjectToInnerObject(JSContext *cx, JSObject *objArg)
+JS_ObjectToInnerObject(JSContext *cx, HandleObject obj)
 {
-    RootedObject obj(cx, objArg);
     if (!obj) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INACTIVE);
         return nullptr;
@@ -100,9 +99,8 @@ JS_ObjectToInnerObject(JSContext *cx, JSObject *objArg)
 }
 
 JS_FRIEND_API(JSObject *)
-JS_ObjectToOuterObject(JSContext *cx, JSObject *obj_)
+JS_ObjectToOuterObject(JSContext *cx, HandleObject obj)
 {
-    Rooted<JSObject*> obj(cx, obj_);
     assertSameCompartment(cx, obj);
     return GetOuterObject(cx, obj);
 }
@@ -583,15 +581,6 @@ DefinePropertyOnObject(JSContext *cx, HandleObject obj, HandleId id, const PropD
 
         JS_ASSERT(desc.isAccessorDescriptor());
 
-        /*
-         * Getters and setters are just like watchpoints from an access
-         * control point of view.
-         */
-        RootedValue dummy(cx);
-        unsigned dummyAttrs;
-        if (!CheckAccess(cx, obj, id, JSACC_WATCH, &dummy, &dummyAttrs))
-            return false;
-
         RootedValue tmp(cx, UndefinedValue());
         return baseops::DefineGeneric(cx, obj, id, tmp,
                                       desc.getter(), desc.setter(), desc.attributes());
@@ -814,14 +803,6 @@ DefinePropertyOnObject(JSContext *cx, HandleObject obj, HandleId id, const PropD
         setter = JS_StrictPropertyStub;
     } else {
         JS_ASSERT(desc.isAccessorDescriptor());
-
-        /*
-         * Getters and setters are just like watchpoints from an access
-         * control point of view.
-         */
-        RootedValue dummy(cx);
-        if (!CheckAccess(cx, obj2, id, JSACC_WATCH, &dummy, &attrs))
-             return false;
 
         /* 8.12.9 step 12. */
         unsigned changed = 0;
@@ -1674,7 +1655,7 @@ js_InferFlags(JSContext *cx, unsigned defaultFlags)
 JSObject::nonNativeSetProperty(JSContext *cx, HandleObject obj,
                                HandleId id, MutableHandleValue vp, bool strict)
 {
-    if (JS_UNLIKELY(obj->watched())) {
+    if (MOZ_UNLIKELY(obj->watched())) {
         WatchpointMap *wpmap = cx->compartment()->watchpointMap;
         if (wpmap && !wpmap->triggerWatchpoint(cx, obj, id, vp))
             return false;
@@ -1686,7 +1667,7 @@ JSObject::nonNativeSetProperty(JSContext *cx, HandleObject obj,
 JSObject::nonNativeSetElement(JSContext *cx, HandleObject obj,
                               uint32_t index, MutableHandleValue vp, bool strict)
 {
-    if (JS_UNLIKELY(obj->watched())) {
+    if (MOZ_UNLIKELY(obj->watched())) {
         RootedId id(cx);
         if (!IndexToId(cx, index, &id))
             return false;
@@ -3933,7 +3914,7 @@ js::DefineNativeProperty(ExclusiveContext *cx, HandleObject obj, HandleId id, Ha
  *   - Otherwise no property was resolved. Set *propp = nullptr and
  *     *recursedp = false and return true.
  */
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 CallResolveOp(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
               MutableHandleObject objp, MutableHandleShape propp, bool *recursedp)
 {
@@ -4005,7 +3986,7 @@ CallResolveOp(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
 }
 
 template <AllowGC allowGC>
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 LookupOwnPropertyWithFlagsInline(ExclusiveContext *cx,
                                  typename MaybeRooted<JSObject*, allowGC>::HandleType obj,
                                  typename MaybeRooted<jsid, allowGC>::HandleType id,
@@ -4079,7 +4060,7 @@ NativeLookupOwnProperty(ExclusiveContext *cx, HandleObject obj, HandleId id, uns
 }
 
 template <AllowGC allowGC>
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 LookupPropertyWithFlagsInline(ExclusiveContext *cx,
                               typename MaybeRooted<JSObject*, allowGC>::HandleType obj,
                               typename MaybeRooted<jsid, allowGC>::HandleType id,
@@ -4314,7 +4295,7 @@ js::HasOwnProperty<NoGC>(JSContext *cx, LookupGenericOp lookup,
                          FakeMutableHandle<JSObject*> objp, FakeMutableHandle<Shape*> propp);
 
 template <AllowGC allowGC>
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 NativeGetInline(JSContext *cx,
                 typename MaybeRooted<JSObject*, allowGC>::HandleType obj,
                 typename MaybeRooted<JSObject*, allowGC>::HandleType receiver,
@@ -4430,7 +4411,7 @@ js::NativeSet(typename ExecutionModeTraits<mode>::ContextType cxArg,
      * unless the setter deleted the shape.
      */
     if (shape->hasSlot() &&
-        (JS_LIKELY(cx->runtime()->propertyRemovals == sample) ||
+        (MOZ_LIKELY(cx->runtime()->propertyRemovals == sample) ||
          obj->nativeContains(cx, shape)))
     {
         obj->setSlot(shape->slot(), vp);
@@ -4449,7 +4430,7 @@ js::NativeSet<ParallelExecution>(ForkJoinSlice *slice,
                                  HandleShape shape, bool strict, MutableHandleValue vp);
 
 template <AllowGC allowGC>
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 GetPropertyHelperInline(JSContext *cx,
                         typename MaybeRooted<JSObject*, allowGC>::HandleType obj,
                         typename MaybeRooted<JSObject*, allowGC>::HandleType receiver,
@@ -4575,7 +4556,7 @@ baseops::GetPropertyNoGC(JSContext *cx, JSObject *obj, JSObject *receiver, jsid 
     return GetPropertyHelperInline<NoGC>(cx, obj, receiver, id, vp);
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 LookupPropertyPureInline(JSObject *obj, jsid id, JSObject **objp, Shape **propp)
 {
     if (!obj->isNative())
@@ -4617,7 +4598,7 @@ LookupPropertyPureInline(JSObject *obj, jsid id, JSObject **objp, Shape **propp)
     return true;
 }
 
-static JS_ALWAYS_INLINE bool
+static MOZ_ALWAYS_INLINE bool
 NativeGetPureInline(JSObject *pobj, Shape *shape, Value *vp)
 {
     JS_ASSERT(pobj->isNative());
@@ -4714,7 +4695,7 @@ js::GetPropertyPure(ThreadSafeContext *cx, JSObject *obj, jsid id, Value *vp)
 }
 
 static bool
-JS_ALWAYS_INLINE
+MOZ_ALWAYS_INLINE
 GetElementPure(ThreadSafeContext *cx, JSObject *obj, uint32_t index, Value *vp)
 {
     if (index <= JSID_INT_MAX)
@@ -4891,7 +4872,7 @@ baseops::SetPropertyHelper(typename ExecutionModeTraits<mode>::ContextType cxArg
     JS_ASSERT(cxArg->isThreadLocal(obj));
     JS_ASSERT((defineHow & ~DNP_UNQUALIFIED) == 0);
 
-    if (JS_UNLIKELY(obj->watched())) {
+    if (MOZ_UNLIKELY(obj->watched())) {
         if (mode == ParallelExecution)
             return false;
 
@@ -5253,15 +5234,6 @@ bool
 js::WatchGuts(JSContext *cx, JS::HandleObject origObj, JS::HandleId id, JS::HandleObject callable)
 {
     RootedObject obj(cx, GetInnerObject(cx, origObj));
-    if (origObj != obj) {
-        // If by unwrapping and innerizing, we changed the object, check again
-        // to make sure that we're allowed to set a watch point.
-        RootedValue v(cx);
-        unsigned attrs;
-        if (!CheckAccess(cx, obj, id, JSACC_WATCH, &v, &attrs))
-            return false;
-    }
-
     if (obj->isNative()) {
         // Use sparse indexes for watched objects, as dense elements can be
         // written to without checking the watchpoint map.
@@ -5448,83 +5420,6 @@ JS_EnumerateState(JSContext *cx, HandleObject obj, JSIterateOp enum_op,
     JS_ASSERT(enum_op == JSENUMERATE_INIT || enum_op == JSENUMERATE_INIT_ALL);
     statep.setMagic(JS_NATIVE_ENUMERATE);
     return true;
-}
-
-bool
-js::CheckAccess(JSContext *cx, JSObject *obj_, HandleId id, JSAccessMode mode,
-                MutableHandleValue vp, unsigned *attrsp)
-{
-    bool writing;
-    RootedObject obj(cx, obj_), pobj(cx);
-
-    while (JS_UNLIKELY(obj->is<WithObject>()))
-        obj = obj->getProto();
-
-    writing = (mode & JSACC_WRITE) != 0;
-    switch (mode & JSACC_TYPEMASK) {
-      case JSACC_PROTO:
-        pobj = obj;
-        if (!writing) {
-            RootedObject proto(cx);
-            if (!JSObject::getProto(cx, obj, &proto))
-                return false;
-            vp.setObjectOrNull(proto);
-        }
-        *attrsp = JSPROP_PERMANENT;
-        break;
-
-      default:
-        RootedShape shape(cx);
-        if (!JSObject::lookupGeneric(cx, obj, id, &pobj, &shape))
-            return false;
-        if (!shape) {
-            if (!writing)
-                vp.setUndefined();
-            *attrsp = 0;
-            pobj = obj;
-            break;
-        }
-
-        if (!pobj->isNative()) {
-            if (!writing) {
-                    vp.setUndefined();
-                *attrsp = 0;
-            }
-            break;
-        }
-
-        *attrsp = GetShapeAttributes(shape);
-
-        if (!writing) {
-            if (IsImplicitDenseElement(shape)) {
-                vp.set(pobj->getDenseElement(JSID_TO_INT(id)));
-            } else {
-                if (shape->hasSlot())
-                    vp.set(pobj->nativeGetSlot(shape->slot()));
-                else
-                    vp.setUndefined();
-            }
-        }
-    }
-
-    JS_ASSERT_IF(*attrsp & JSPROP_READONLY, !(*attrsp & (JSPROP_GETTER | JSPROP_SETTER)));
-
-    /*
-     * If obj's class has a stub (null) checkAccess hook, use the per-runtime
-     * checkObjectAccess callback, if configured.
-     *
-     * We don't want to require all classes to supply a checkAccess hook; we
-     * need that hook only for certain classes used when precompiling scripts
-     * and functions ("brutal sharing").  But for general safety of built-in
-     * magic properties like __proto__, we route all access checks, even for
-     * classes that stub out checkAccess, through the global checkObjectAccess
-     * hook.  This covers precompilation-based sharing and (possibly
-     * unintended) runtime sharing across trust boundaries.
-     */
-    JSCheckAccessOp check = pobj->getClass()->checkAccess;
-    if (!check)
-        check = cx->runtime()->securityCallbacks->checkObjectAccess;
-    return !check || check(cx, pobj, id, mode, vp);
 }
 
 bool
@@ -6027,7 +5922,7 @@ JSObject::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::Objects
 
     if (hasDynamicElements()) {
         js::ObjectElements *elements = getElementsHeader();
-        if (JS_UNLIKELY(elements->isAsmJSArrayBuffer())) {
+        if (MOZ_UNLIKELY(elements->isAsmJSArrayBuffer())) {
 #if defined (JS_CPU_X64)
             // On x64, ArrayBufferObject::prepareForAsmJS switches the
             // ArrayBufferObject to use mmap'd storage.

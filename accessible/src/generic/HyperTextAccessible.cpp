@@ -29,6 +29,7 @@
 #include "nsIServiceManager.h"
 #include "nsITextControlElement.h"
 #include "nsTextFragment.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/Selection.h"
 #include "mozilla/MathAlgorithms.h"
 #include "gfxSkipChars.h"
@@ -103,19 +104,7 @@ HyperTextAccessible::NativeState()
 {
   uint64_t states = AccessibleWrap::NativeState();
 
-  nsCOMPtr<nsITextControlElement> textControl = do_QueryInterface(mContent);
-  bool editable = !!textControl;
-  Accessible* hyperText = this;
-  while (!editable && hyperText) {
-    if (hyperText->IsHyperText())
-      editable = hyperText->GetNode()->IsEditable();
-    if (hyperText->IsDoc())
-      break;
-
-    hyperText = hyperText->Parent();
-  }
-
-  if (editable) {
+  if (mContent->AsElement()->State().HasState(NS_EVENT_STATE_MOZ_READWRITE)) {
     states |= states::EDITABLE;
 
   } else if (mContent->Tag() == nsGkAtoms::article) {
@@ -1669,7 +1658,7 @@ HyperTextAccessible::RenderedToContentOffset(nsIFrame* aFrame, uint32_t aRendere
 
 int32_t
 HyperTextAccessible::GetChildOffset(uint32_t aChildIndex,
-                                    bool aInvalidateAfter)
+                                    bool aInvalidateAfter) const
 {
   if (aChildIndex == 0) {
     if (aInvalidateAfter)
@@ -1699,7 +1688,7 @@ HyperTextAccessible::GetChildOffset(uint32_t aChildIndex,
 }
 
 int32_t
-HyperTextAccessible::GetChildIndexAtOffset(uint32_t aOffset)
+HyperTextAccessible::GetChildIndexAtOffset(uint32_t aOffset) const
 {
   uint32_t lastOffset = 0;
   uint32_t offsetCount = mOffsets.Length();

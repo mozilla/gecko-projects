@@ -5,7 +5,7 @@
 <hbox id="customization-container" flex="1" hidden="true">
   <vbox flex="1" id="customization-palette-container">
     <label id="customization-header">
-      &customizeMode.menuAndToolbars.header;
+      &customizeMode.menuAndToolbars.header2;
     </label>
     <hbox id="customization-empty" hidden="true">
       <label>&customizeMode.menuAndToolbars.empty;</label>
@@ -16,7 +16,7 @@
         &customizeMode.menuAndToolbars.emptyLink;
       </label>
     </hbox>
-    <vbox id="customization-palette" flex="1"/>
+    <vbox id="customization-palette" class="customization-palette" flex="1"/>
     <spacer id="customization-spacer" flex="1"/>
     <hbox>
       <button id="customization-toolbar-visibility-button" label="&customizeMode.toolbars;" class="customizationmode-button" type="menu">
