@@ -18,7 +18,7 @@
         <toolbarbutton id="PanelUI-fxa-status"
                        defaultlabel="&fxaSignIn.label;"
                        errorlabel="&fxaSignInError.label;"
-                       oncommand="gFxAccounts.toggle(event);"
+                       oncommand="gFxAccounts.onMenuPanelCommand(event);"
                        hidden="true"/>
 
         <hbox id="PanelUI-footer-inner">
@@ -26,9 +26,11 @@
                          exitLabel="&appMenuCustomizeExit.label;"
                          tooltiptext="&appMenuCustomize.tooltip;"
                          exitTooltiptext="&appMenuCustomizeExit.tooltip;"
+                         closemenu="none"
                          oncommand="gCustomizeMode.toggle();"/>
           <toolbarseparator/>
           <toolbarbutton id="PanelUI-help" label="&helpMenu.label;"
+                         closemenu="none"
                          tooltiptext="&appMenuHelp.tooltip;"
                          oncommand="PanelUI.showHelpView(this.parentNode);"/>
           <toolbarseparator/>
@@ -86,8 +88,8 @@
     <panelview id="PanelUI-bookmarks" flex="1" class="PanelUI-subView">
       <label value="&bookmarksMenu.label;" class="panel-subview-header"/>
       <toolbarbutton id="panelMenuBookmarkThisPage"
-                     label="&bookmarkThisPageCmd.label;"
                      class="subviewbutton"
+                     observes="bookmarkThisPageBroadcaster"
                      command="Browser:AddBookmarkAs"
                      onclick="PanelUI.hide();"/>
       <toolbarseparator/>

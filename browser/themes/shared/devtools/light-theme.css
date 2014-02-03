@@ -147,8 +147,13 @@
 .cm-s-mozilla .cm-quote,
 .cm-s-mozilla .cm-error,
 .variable-or-property .token-boolean,
+.variable-or-property .token-domnode,
 .variable-or-property[exception] > .title > .name { /* Red */
   color: #bf5656;
+}
+
+.variable-or-property .token-domnode {
+  font-weight: bold;
 }
 
 .theme-fg-contrast { /* To be used for text on theme-bg-contrast */
@@ -305,6 +310,14 @@ div.CodeMirror span.eval-text {
 
 .theme-tooltip-panel .devtools-tooltip-simple-text:last-child {
   border-bottom: 0;
+}
+
+.devtools-horizontal-splitter {
+  border-bottom: 1px solid #aaa;
+}
+
+.devtools-side-splitter {
+  -moz-border-end: 1px solid #aaa;
 }
 
 %include toolbars.inc.css

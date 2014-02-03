@@ -1118,7 +1118,7 @@ pref("devtools.debugger.pause-on-exceptions", false);
 pref("devtools.debugger.ignore-caught-exceptions", true);
 pref("devtools.debugger.source-maps-enabled", true);
 pref("devtools.debugger.pretty-print-enabled", true);
-pref("devtools.debugger.auto-pretty-print", true);
+pref("devtools.debugger.auto-pretty-print", false);
 pref("devtools.debugger.tracer", false);
 
 // The default Debugger UI settings
@@ -1141,6 +1141,7 @@ pref("devtools.netmonitor.enabled", true);
 // The default Network Monitor UI settings
 pref("devtools.netmonitor.panes-network-details-width", 450);
 pref("devtools.netmonitor.panes-network-details-height", 450);
+pref("devtools.netmonitor.statistics", true);
 
 // Enable the Tilt inspector
 pref("devtools.tilt.enabled", true);
@@ -1342,6 +1343,10 @@ pref("browser.uiCustomization.debug", false);
 // The URL where remote content that composes the UI for Firefox Accounts should
 // be fetched. Must use HTTPS.
 pref("identity.fxaccounts.remote.uri", "https://accounts.firefox.com/?service=sync&context=fx_desktop_v1");
+
+// The URL where remote content that forces re-authentication for Firefox Accounts
+// should be fetched.  Must use HTTPS.
+pref("identity.fxaccounts.remote.force_auth.uri", "https://accounts.firefox.com/force_auth?service=sync&context=fx_desktop_v1");
 
 // The URL we take the user to when they opt to "manage" their Firefox Account.
 // Note that this will always need to be in the same TLD as the

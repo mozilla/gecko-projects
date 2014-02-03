@@ -68,7 +68,8 @@ public class HomePager extends ViewPager {
 
     public interface OnUrlOpenListener {
         public enum Flags {
-            ALLOW_SWITCH_TO_TAB
+            ALLOW_SWITCH_TO_TAB,
+            OPEN_WITH_INTENT
         }
 
         public void onUrlOpen(String url, EnumSet<Flags> flags);
@@ -288,9 +289,9 @@ public class HomePager extends ViewPager {
         }
         if (mHomeBanner != null) {
             if (item == mDefaultPanelIndex) {
-                mHomeBanner.showBanner();
+                mHomeBanner.show();
             } else {
-                mHomeBanner.hideBanner();
+                mHomeBanner.hide();
             }
         }
     }
@@ -313,6 +314,14 @@ public class HomePager extends ViewPager {
         }
 
         return super.dispatchTouchEvent(event);
+    }
+
+    public void onToolbarFocusChange(boolean hasFocus) {
+        if (hasFocus) {
+            mHomeBanner.hide();
+        } else if (mDefaultPanelIndex == getCurrentItem() || getAdapter().getCount() == 0) {
+            mHomeBanner.show();
+        }
     }
 
     private void updateUiFromPanelConfigs(List<PanelConfig> panelConfigs) {
@@ -396,9 +405,9 @@ public class HomePager extends ViewPager {
 
             if (mHomeBanner != null) {
                 if (position == mDefaultPanelIndex) {
-                    mHomeBanner.showBanner();
+                    mHomeBanner.show();
                 } else {
-                    mHomeBanner.hideBanner();
+                    mHomeBanner.hide();
                 }
             }
         }

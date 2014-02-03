@@ -1479,7 +1479,7 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
   padding: 0;
 }
 
-#TabsToolbar:not(:-moz-lwtheme) {
+#main-window:not([customizing]) #TabsToolbar:not(:-moz-lwtheme) {
   background-image: linear-gradient(to top, @toolbarShadowColor@ 2px, rgba(0,0,0,.05) 2px, transparent 50%);
 }
 
@@ -2144,10 +2144,6 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
 
 /* Sync Panel */
 
-.sync-panel {
-  padding: 10px;
-}
-
 .sync-panel-icon {
   width: 32px;
   background: url("chrome://browser/content/abouthome/sync.png") top left no-repeat;
@@ -2162,7 +2158,8 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
   margin-top: 1em;
 }
 
-#sync-error-panel-title {
+#sync-error-panel-title,
+#sync-start-panel-title {
   font-weight: bold;
 }
 
@@ -2441,14 +2438,15 @@ chatbox {
   background-attachment: fixed;
 }
 
-#main-window:-moz-any([customize-entering],[customize-entered]) #tab-view-deck {
-  padding: 0 2em 2em;
-}
-
 #customization-container {
   border-left: 1px solid @toolbarShadowColor@;
   border-right: 1px solid @toolbarShadowColor@;
   background-clip: padding-box;
+}
+
+#main-window[customizing] #navigator-toolbox::after {
+  margin-left: 2em;
+  margin-right: 2em;
 }
 
 /* End customization mode */

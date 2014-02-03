@@ -635,33 +635,33 @@ let CustomizableUIInternal = {
     return [null, null];
   },
 
-  registerMenuPanel: function(aPanel) {
+  registerMenuPanel: function(aPanelContents) {
     if (gBuildAreas.has(CustomizableUI.AREA_PANEL) &&
-        gBuildAreas.get(CustomizableUI.AREA_PANEL).has(aPanel)) {
+        gBuildAreas.get(CustomizableUI.AREA_PANEL).has(aPanelContents)) {
       return;
     }
 
-    let document = aPanel.ownerDocument;
+    let document = aPanelContents.ownerDocument;
 
-    aPanel.toolbox = document.getElementById("navigator-toolbox");
-    aPanel.customizationTarget = aPanel;
+    aPanelContents.toolbox = document.getElementById("navigator-toolbox");
+    aPanelContents.customizationTarget = aPanelContents;
 
-    this.addPanelCloseListeners(aPanel);
+    this.addPanelCloseListeners(this._getPanelForNode(aPanelContents));
 
     let placements = gPlacements.get(CustomizableUI.AREA_PANEL);
-    this.buildArea(CustomizableUI.AREA_PANEL, placements, aPanel);
-    for (let child of aPanel.children) {
+    this.buildArea(CustomizableUI.AREA_PANEL, placements, aPanelContents);
+    for (let child of aPanelContents.children) {
       if (child.localName != "toolbarbutton") {
         if (child.localName == "toolbaritem") {
-          this.ensureButtonContextMenu(child, aPanel);
+          this.ensureButtonContextMenu(child, aPanelContents);
         }
         continue;
       }
-      this.ensureButtonContextMenu(child, aPanel);
+      this.ensureButtonContextMenu(child, aPanelContents);
       child.setAttribute("wrap", "true");
     }
 
-    this.registerBuildArea(CustomizableUI.AREA_PANEL, aPanel);
+    this.registerBuildArea(CustomizableUI.AREA_PANEL, aPanelContents);
   },
 
   onWidgetAdded: function(aWidgetId, aArea, aPosition) {
@@ -1314,9 +1314,34 @@ let CustomizableUIInternal = {
       }
     }
 
-    if (aEvent.target.getAttribute("closemenu") == "none" ||
-        aEvent.target.getAttribute("widget-type") == "view") {
+    // We can't use event.target because we might have passed a panelview
+    // anonymous content boundary as well, and so target points to the
+    // panelmultiview in that case. Unfortunately, this means we get
+    // anonymous child nodes instead of the real ones, so looking for the 
+    // 'stoooop, don't close me' attributes is more involved.
+    let target = aEvent.originalTarget;
+    let closemenu = "auto";
+    let widgetType = "button";
+    while (target.localName != "panel") {
+      closemenu = target.getAttribute("closemenu");
+      widgetType = target.getAttribute("widget-type");
+      if (closemenu == "none" || closemenu == "single" ||
+          widgetType == "view") {
+        break;
+      }
+      target = target.parentNode;
+    }
+    if (closemenu == "none" || widgetType == "view") {
       return;
+    }
+
+    if (closemenu == "single") {
+      let panel = this._getPanelForNode(target);
+      let multiview = panel.querySelector("panelmultiview");
+      if (multiview.showingSubView) {
+        multiview.showMainView();
+        return;
+      }
     }
 
     // If we get here, we can actually hide the popup:

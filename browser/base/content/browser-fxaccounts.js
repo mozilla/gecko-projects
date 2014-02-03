@@ -48,6 +48,14 @@ let gFxAccounts = {
   },
 
   get loginFailed() {
+    // Referencing Weave.Service will implicitly initialize sync, and we don't
+    // want to force that - so first check if it is ready.
+    let service = Cc["@mozilla.org/weave/service;1"]
+                  .getService(Components.interfaces.nsISupports)
+                  .wrappedJSObject;
+    if (!service.ready) {
+      return false;
+    }
     return Weave.Service.identity.readyToAuthenticate &&
            Weave.Status.login != Weave.LOGIN_SUCCEEDED;
   },
@@ -186,11 +194,11 @@ let gFxAccounts = {
     });
   },
 
-  toggle: function (event) {
+  onMenuPanelCommand: function (event) {
     if (event.originalTarget.hasAttribute("signedin")) {
       this.openPreferences();
     } else {
-      this.openSignInPage();
+      this.openAccountsPage();
     }
 
     PanelUI.hide();
@@ -200,7 +208,12 @@ let gFxAccounts = {
     openPreferences("paneSync");
   },
 
-  openSignInPage: function () {
+  openAccountsPage: function () {
     switchToTabHavingURI("about:accounts", true);
+  },
+
+  openSignInAgainPage: function () {
+    // FIXME: This should actually show the pre-filled username version of about:accounts?
+    switchToTabHavingURI("about:accounts?signin=true", true);
   }
 };

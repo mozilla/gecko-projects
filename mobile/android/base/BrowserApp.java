@@ -520,6 +520,15 @@ abstract public class BrowserApp extends GeckoApp
             }
         });
 
+        mBrowserToolbar.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (isHomePagerVisible()) {
+                    mHomePager.onToolbarFocusChange(hasFocus);
+                }
+            }
+        });
+
         // Intercept key events for gamepad shortcuts
         mBrowserToolbar.setOnKeyListener(this);
 
@@ -2473,7 +2482,11 @@ abstract public class BrowserApp extends GeckoApp
     // HomePager.OnUrlOpenListener
     @Override
     public void onUrlOpen(String url, EnumSet<OnUrlOpenListener.Flags> flags) {
-        if (!maybeSwitchToTab(url, flags)) {
+        if (flags.contains(OnUrlOpenListener.Flags.OPEN_WITH_INTENT)) {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse(url));
+            startActivity(intent);
+        } else if (!maybeSwitchToTab(url, flags)) {
             openUrlAndStopEditing(url);
         }
     }

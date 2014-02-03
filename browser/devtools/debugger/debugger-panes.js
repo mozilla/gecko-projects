@@ -1730,7 +1730,6 @@ function VariableBubbleView() {
 
   this._onMouseMove = this._onMouseMove.bind(this);
   this._onMouseLeave = this._onMouseLeave.bind(this);
-  this._onMouseScroll = this._onMouseScroll.bind(this);
   this._onPopupHiding = this._onPopupHiding.bind(this);
 }
 
@@ -1741,16 +1740,23 @@ VariableBubbleView.prototype = {
   initialize: function() {
     dumpn("Initializing the VariableBubbleView");
 
-    this._tooltip = new Tooltip(document);
     this._editorContainer = document.getElementById("editor");
-
-    this._tooltip.defaultPosition = EDITOR_VARIABLE_POPUP_POSITION;
-    this._tooltip.defaultShowDelay = EDITOR_VARIABLE_HOVER_DELAY;
-
-    this._tooltip.panel.addEventListener("popuphiding", this._onPopupHiding);
     this._editorContainer.addEventListener("mousemove", this._onMouseMove, false);
     this._editorContainer.addEventListener("mouseleave", this._onMouseLeave, false);
-    this._editorContainer.addEventListener("scroll", this._onMouseScroll, true);
+
+    this._tooltip = new Tooltip(document, {
+      closeOnEvents: [{
+        emitter: DebuggerController._toolbox,
+        event: "select"
+      }, {
+        emitter: this._editorContainer,
+        event: "scroll",
+        useCapture: true
+      }]
+    });
+    this._tooltip.defaultPosition = EDITOR_VARIABLE_POPUP_POSITION;
+    this._tooltip.defaultShowDelay = EDITOR_VARIABLE_HOVER_DELAY;
+    this._tooltip.panel.addEventListener("popuphiding", this._onPopupHiding);
   },
 
   /**
@@ -1762,7 +1768,6 @@ VariableBubbleView.prototype = {
     this._tooltip.panel.removeEventListener("popuphiding", this._onPopupHiding);
     this._editorContainer.removeEventListener("mousemove", this._onMouseMove, false);
     this._editorContainer.removeEventListener("mouseleave", this._onMouseLeave, false);
-    this._editorContainer.removeEventListener("scroll", this._onMouseScroll, true);
   },
 
   /**
@@ -1872,7 +1877,14 @@ VariableBubbleView.prototype = {
         messages: [textContent],
         messagesClass: className,
         containerClass: "plain"
-      });
+      }, [{
+        label: L10N.getStr('addWatchExpressionButton'),
+        className: "dbg-expression-button",
+        command: () => {
+          DebuggerView.VariableBubble.hideContents();
+          DebuggerView.WatchExpressions.addExpression(evalPrefix, true);
+        }
+      }]);
     } else {
       this._tooltip.setVariableContent(objectActor, {
         searchPlaceholder: L10N.getStr("emptyPropertiesFilterText"),
@@ -1894,7 +1906,14 @@ VariableBubbleView.prototype = {
             window.emit(EVENTS.FETCHED_BUBBLE_PROPERTIES);
           }
         }
-      });
+      }, [{
+        label: L10N.getStr("addWatchExpressionButton"),
+        className: "dbg-expression-button",
+        command: () => {
+          DebuggerView.VariableBubble.hideContents();
+          DebuggerView.WatchExpressions.addExpression(evalPrefix, true);
+        }
+      }], DebuggerController._toolbox);
     }
 
     this._tooltip.show(this._markedText.anchor);
@@ -1961,13 +1980,6 @@ VariableBubbleView.prototype = {
   },
 
   /**
-   * The mousescroll listener for the source editor container node.
-   */
-  _onMouseScroll: function() {
-    this.hideContents();
-  },
-
-  /**
    * Listener handling the popup hiding event.
    */
   _onPopupHiding: function({ target }) {
@@ -2031,8 +2043,11 @@ WatchExpressionsView.prototype = Heritage.extend(WidgetMethods, {
    *
    * @param string aExpression [optional]
    *        An optional initial watch expression text.
+   * @param boolean aSkipUserInput [optional]
+   *        Pass true to avoid waiting for additional user input
+   *        on the watch expression.
    */
-  addExpression: function(aExpression = "") {
+  addExpression: function(aExpression = "", aSkipUserInput = false) {
     // Watch expressions are UI elements which benefit from visible panes.
     DebuggerView.showInstrumentsPane();
 
@@ -2049,10 +2064,18 @@ WatchExpressionsView.prototype = Heritage.extend(WidgetMethods, {
       }
     });
 
-    // Automatically focus the new watch expression input.
-    expressionItem.attachment.view.inputNode.select();
-    expressionItem.attachment.view.inputNode.focus();
-    DebuggerView.Variables.parentNode.scrollTop = 0;
+    // Automatically focus the new watch expression input
+    // if additional user input is desired.
+    if (!aSkipUserInput) {
+      expressionItem.attachment.view.inputNode.select();
+      expressionItem.attachment.view.inputNode.focus();
+      DebuggerView.Variables.parentNode.scrollTop = 0;
+    }
+    // Otherwise, add and evaluate the new watch expression immediately.
+    else {
+      this.toggleContents(false);
+      this._onBlur({ target: expressionItem.attachment.view.inputNode });
+    }
   },
 
   /**
