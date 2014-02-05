@@ -59,7 +59,7 @@
   }
 }
 
-#main-window[chromehidden~="toolbar"] > #titlebar {
+#main-window[chromehidden~="toolbar"]:not(:-moz-lwtheme) > #titlebar {
   padding-top: 22px;
 }
 
@@ -1024,9 +1024,17 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
     -moz-image-region: rect(0px, 320px, 64px, 256px);
   }
 
+  #bookmarks-menu-button[cui-areatype="menu-panel"].panel-multiview-anchor {
+    -moz-image-region: rect(64px, 320px, 128px, 256px);
+  }
+
   #history-panelmenu[cui-areatype="menu-panel"],
   toolbarpaletteitem[place="palette"] > #history-panelmenu {
     -moz-image-region: rect(0px, 448px, 64px, 384px);
+  }
+
+  #history-panelmenu[cui-areatype="menu-panel"].panel-multiview-anchor {
+    -moz-image-region: rect(64px, 448px, 128px, 384px);
   }
 
   #downloads-button[cui-areatype="menu-panel"],
@@ -1069,6 +1077,10 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
     -moz-image-region: rect(0, 960px, 64px, 896px);
   }
 
+  #characterencoding-button[cui-areatype="menu-panel"].panel-multiview-anchor {
+    -moz-image-region: rect(64px, 960px, 128px, 896px);
+  }
+
   #new-window-button[cui-areatype="menu-panel"],
   toolbarpaletteitem[place="palette"] > #new-window-button {
     -moz-image-region: rect(0px, 1024px, 64px, 960px);
@@ -1107,6 +1119,10 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
   #developer-button[cui-areatype="menu-panel"],
   toolbarpaletteitem[place="palette"] > #developer-button {
     -moz-image-region: rect(0px, 1472px, 64px, 1408px);
+  }
+
+  #developer-button[cui-areatype="menu-panel"].panel-multiview-anchor {
+    -moz-image-region: rect(64px, 1472px, 128px, 1408px);
   }
 
   #preferences-button[cui-areatype="menu-panel"],
@@ -2559,11 +2575,22 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
       url(chrome://browser/skin/tabbrowser/tab-background-start@2x.png);
   }
 
-  .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]),
   .tabs-newtab-button:hover {
     background-image: url(chrome://browser/skin/tabbrowser/tab-background-start@2x.png),
                       url(chrome://browser/skin/tabbrowser/tab-background-middle@2x.png),
                       url(chrome://browser/skin/tabbrowser/tab-background-end@2x.png);
+  }
+
+  .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-background-middle:not([selected=true]) {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-background-middle@2x.png);
+  }
+
+  .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-background-start:not([selected=true]) {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-background-start@2x.png);
+  }
+
+  .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-background-end:not([selected=true]) {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-background-end@2x.png);
   }
 
   .tab-background-middle[selected=true] {
@@ -2642,7 +2669,7 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   box-shadow: @focusRingShadow@;
 }
 
-#titlebar {
+#main-window:not(:-moz-lwtheme) > #titlebar {
   padding-top: @spaceAboveTabbar@;
   min-height: @tabHeight@;
 }
@@ -4077,13 +4104,26 @@ window > chatbox {
 
 %include ../shared/customizableui/customizeMode.inc.css
 
-#main-window[customize-entered] #titlebar {
+#main-window[customize-entered] > #titlebar {
   padding-top: 0;
 }
 
-#main-window[tabsintitlebar][customize-entered] #titlebar-content {
-  margin-bottom: 0px !important;
-  margin-top: 11px !important;
+#main-window[tabsintitlebar]:not([customizing]):not(:-moz-lwtheme) > #titlebar > #titlebar-content,
+#main-window[tabsintitlebar][customize-entering] > #titlebar > #titlebar-content,
+#main-window[tabsintitlebar][customize-exiting] > #titlebar > #titlebar-content {
+  margin-top: 2px;
+  margin-bottom: 11px;
+}
+
+#main-window[tabsintitlebar][customize-entered] > #titlebar > #titlebar-content,
+#main-window:not([tabsintitlebar]):not(:-moz-lwtheme) > #titlebar > #titlebar-content {
+  margin-top: 11px;
+  margin-bottom: 0px;
+}
+
+#main-window[tabsintitlebar]:-moz-lwtheme > #titlebar > #titlebar-content {
+  margin-top: 11px;
+  margin-bottom: 11px;
 }
 
 #main-window[customize-entered] #tab-view-deck {
@@ -4108,8 +4148,11 @@ window > chatbox {
   border-bottom-width: 0;
 }
 
-#main-window[customize-entered] #TabsToolbar {
+#main-window[tabsintitlebar][customize-entered] #TabsToolbar {
   margin-top: 9px;
+}
+
+#main-window[customize-entered] #TabsToolbar {
   background-clip: padding-box;
   border-right: 3px solid transparent;
   border-left: 3px solid transparent;
