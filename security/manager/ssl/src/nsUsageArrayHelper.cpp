@@ -132,7 +132,6 @@ nsUsageArrayHelper::check(uint32_t previousCheckResult,
 
   PRErrorCode error = PR_GetError();
 
-  const char * errorString = PR_ErrorToName(error);
   uint32_t result = nsIX509Cert::NOT_VERIFIED_UNKNOWN;
   verifyFailed(&result, error);
 
@@ -145,7 +144,7 @@ nsUsageArrayHelper::check(uint32_t previousCheckResult,
 
   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
           ("error validating certificate for usage %s: %s (%d) -> %ud \n",
-          typestr.get(), errorString, (int) error, (int) result));
+          typestr.get(), PR_ErrorToName(error), (int) error, (int) result));
 
   return result;
 }
@@ -202,20 +201,6 @@ nsUsageArrayHelper::GetUsagesArray(const char *suffix,
   RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
   NS_ENSURE_TRUE(certVerifier, NS_ERROR_UNEXPECTED);
 
-  // Bug 860076, this disabling ocsp for all NSS is incorrect.
-  const bool localOSCPDisable
-    = certVerifier->mImplementation == CertVerifier::classic;
-  if (localOSCPDisable) {
-    nsresult rv;
-    nssComponent = do_GetService(kNSSComponentCID, &rv);
-    if (NS_FAILED(rv))
-      return rv;
-    
-    if (nssComponent) {
-      nssComponent->SkipOcsp();
-    }
-  }
-
   uint32_t &count = *_count;
   count = 0;
 
@@ -254,11 +239,6 @@ nsUsageArrayHelper::GetUsagesArray(const char *suffix,
   result = check(result, suffix, certVerifier,
                  certificateUsageAnyCA, now, flags, count, outUsages);
 #endif
-
-  // Bug 860076, this disabling ocsp for all NSS is incorrect
-  if (localOSCPDisable) {
-     nssComponent->SkipOcspOff();
-  }
 
   if (isFatalError(result) || count == 0) {
     MOZ_ASSERT(result != nsIX509Cert::VERIFIED_OK);

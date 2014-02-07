@@ -2092,13 +2092,13 @@ typename WorkerPrivateParent<Derived>::cycleCollection
 
 template <class Derived>
 WorkerPrivateParent<Derived>::WorkerPrivateParent(
-                                             JSContext* aCx,
-                                             WorkerPrivate* aParent,
-                                             const nsAString& aScriptURL,
-                                             bool aIsChromeWorker,
-                                             WorkerType aWorkerType,
-                                             const nsAString& aSharedWorkerName,
-                                             LoadInfo& aLoadInfo)
+                                           JSContext* aCx,
+                                           WorkerPrivate* aParent,
+                                           const nsAString& aScriptURL,
+                                           bool aIsChromeWorker,
+                                           WorkerType aWorkerType,
+                                           const nsACString& aSharedWorkerName,
+                                           LoadInfo& aLoadInfo)
 : mMutex("WorkerPrivateParent Mutex"),
   mCondVar(mMutex, "WorkerPrivateParent CondVar"),
   mMemoryReportCondVar(mMutex, "WorkerPrivateParent Memory Report CondVar"),
@@ -3396,6 +3396,11 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal)
 
   mLoadInfo.mPrincipal = aPrincipal;
   mLoadInfo.mPrincipalIsSystem = nsContentUtils::IsSystemPrincipal(aPrincipal);
+  uint16_t appStatus = aPrincipal->GetAppStatus();
+  mLoadInfo.mIsInPrivilegedApp =
+    (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
+     appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED);
+  mLoadInfo.mIsInCertifiedApp = (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED);
 }
 
 template <class Derived>
@@ -3518,7 +3523,7 @@ WorkerPrivate::WorkerPrivate(JSContext* aCx,
                              WorkerPrivate* aParent,
                              const nsAString& aScriptURL,
                              bool aIsChromeWorker, WorkerType aWorkerType,
-                             const nsAString& aSharedWorkerName,
+                             const nsACString& aSharedWorkerName,
                              LoadInfo& aLoadInfo)
 : WorkerPrivateParent<WorkerPrivate>(aCx, aParent, aScriptURL,
                                      aIsChromeWorker, aWorkerType,
@@ -3558,8 +3563,9 @@ WorkerPrivate::Constructor(const GlobalObject& aGlobal,
                            const nsAString& aScriptURL,
                            ErrorResult& aRv)
 {
-  return WorkerPrivate::Constructor(aGlobal, aScriptURL, false, WorkerTypeDedicated,
-                                    EmptyString(), nullptr, aRv);
+  return WorkerPrivate::Constructor(aGlobal, aScriptURL, false,
+                                    WorkerTypeDedicated, EmptyCString(),
+                                    nullptr, aRv);
 }
 
 // static
@@ -3586,8 +3592,10 @@ ChromeWorkerPrivate::Constructor(const GlobalObject& aGlobal,
                                  const nsAString& aScriptURL,
                                  ErrorResult& aRv)
 {
-  return WorkerPrivate::Constructor(aGlobal, aScriptURL, true, WorkerTypeDedicated,
-                                    EmptyString(), nullptr, aRv).downcast<ChromeWorkerPrivate>();
+  return WorkerPrivate::Constructor(aGlobal, aScriptURL, true,
+                                    WorkerTypeDedicated, EmptyCString(),
+                                    nullptr, aRv)
+                                    .downcast<ChromeWorkerPrivate>();
 }
 
 // static
@@ -3604,7 +3612,7 @@ already_AddRefed<WorkerPrivate>
 WorkerPrivate::Constructor(const GlobalObject& aGlobal,
                            const nsAString& aScriptURL,
                            bool aIsChromeWorker, WorkerType aWorkerType,
-                           const nsAString& aSharedWorkerName,
+                           const nsACString& aSharedWorkerName,
                            LoadInfo* aLoadInfo, ErrorResult& aRv)
 {
   WorkerPrivate* parent = NS_IsMainThread() ?

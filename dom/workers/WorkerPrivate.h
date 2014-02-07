@@ -151,10 +151,13 @@ public:
     bool mReportCSPViolations;
     bool mXHRParamsAllowed;
     bool mPrincipalIsSystem;
+    bool mIsInPrivilegedApp;
+    bool mIsInCertifiedApp;
 
     LoadInfo()
     : mEvalAllowed(false), mReportCSPViolations(false),
-      mXHRParamsAllowed(false), mPrincipalIsSystem(false)
+      mXHRParamsAllowed(false), mPrincipalIsSystem(false),
+      mIsInPrivilegedApp(false), mIsInCertifiedApp(false)
     { }
 
     void
@@ -186,6 +189,8 @@ public:
       mReportCSPViolations = aOther.mReportCSPViolations;
       mXHRParamsAllowed = aOther.mXHRParamsAllowed;
       mPrincipalIsSystem = aOther.mPrincipalIsSystem;
+      mIsInPrivilegedApp = aOther.mIsInPrivilegedApp;
+      mIsInCertifiedApp = aOther.mIsInCertifiedApp;
     }
   };
 
@@ -209,7 +214,7 @@ protected:
 private:
   WorkerPrivate* mParent;
   nsString mScriptURL;
-  nsString mSharedWorkerName;
+  nsCString mSharedWorkerName;
   LocationInfo mLocationInfo;
   // The lifetime of these objects within LoadInfo is managed explicitly;
   // they do not need to be cycle collected.
@@ -246,7 +251,8 @@ protected:
   WorkerPrivateParent(JSContext* aCx, WorkerPrivate* aParent,
                       const nsAString& aScriptURL, bool aIsChromeWorker,
                       WorkerType aWorkerType,
-                      const nsAString& aSharedWorkerName, LoadInfo& aLoadInfo);
+                      const nsACString& aSharedWorkerName,
+                      LoadInfo& aLoadInfo);
 
   ~WorkerPrivateParent();
 
@@ -525,6 +531,18 @@ public:
     return mLoadInfo.mPrincipalIsSystem;
   }
 
+  bool
+  IsInPrivilegedApp() const
+  {
+    return mLoadInfo.mIsInPrivilegedApp;
+  }
+
+  bool
+  IsInCertifiedApp() const
+  {
+    return mLoadInfo.mIsInCertifiedApp;
+  }
+
   already_AddRefed<nsIChannel>
   ForgetWorkerChannel()
   {
@@ -631,7 +649,7 @@ public:
     return mWorkerType == WorkerTypeShared;
   }
 
-  const nsString&
+  const nsCString&
   SharedWorkerName() const
   {
     return mSharedWorkerName;
@@ -771,7 +789,7 @@ public:
   static already_AddRefed<WorkerPrivate>
   Constructor(const GlobalObject& aGlobal, const nsAString& aScriptURL,
               bool aIsChromeWorker, WorkerType aWorkerType,
-              const nsAString& aSharedWorkerName,
+              const nsACString& aSharedWorkerName,
               LoadInfo* aLoadInfo, ErrorResult& aRv);
 
   static bool
@@ -1025,7 +1043,7 @@ public:
 private:
   WorkerPrivate(JSContext* aCx, WorkerPrivate* aParent,
                 const nsAString& aScriptURL, bool aIsChromeWorker,
-                WorkerType aWorkerType, const nsAString& aSharedWorkerName,
+                WorkerType aWorkerType, const nsACString& aSharedWorkerName,
                 LoadInfo& aLoadInfo);
 
   void
