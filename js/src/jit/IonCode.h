@@ -7,6 +7,7 @@
 #ifndef jit_IonCode_h
 #define jit_IonCode_h
 
+#include "mozilla/Atomics.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 
@@ -26,14 +27,6 @@ namespace js {
 class AsmJSModule;
 
 namespace jit {
-
-// The maximum size of any buffer associated with an assembler or code object.
-// This is chosen to not overflow a signed integer, leaving room for an extra
-// bit on offsets.
-static const uint32_t MAX_BUFFER_SIZE = (1 << 30) - 1;
-
-// Maximum number of scripted arg slots.
-static const uint32_t SNAPSHOT_MAX_NARGS = 127;
 
 class MacroAssembler;
 class CodeOffsetLabel;
@@ -196,7 +189,7 @@ struct IonScript
     // Flag set when it is likely that one of our (transitive) call
     // targets is not compiled.  Used in ForkJoin.cpp to decide when
     // we should add call targets to the worklist.
-    bool hasUncompiledCallTarget_;
+    mozilla::Atomic<bool, mozilla::Relaxed> hasUncompiledCallTarget_;
 
     // Flag set if IonScript was compiled with SPS profiling enabled.
     bool hasSPSInstrumentation_;

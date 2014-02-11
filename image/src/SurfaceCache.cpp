@@ -15,6 +15,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticPtr.h"
+#include "gfx2DGlue.h"
 #include "gfxASurface.h"
 #include "gfxPattern.h"  // Workaround for flaw in bug 921753 part 2.
 #include "gfxDrawable.h"
@@ -30,7 +31,7 @@
 
 using std::max;
 using std::min;
-using mozilla::gfx::DrawTarget;
+using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace image {
@@ -58,7 +59,7 @@ static StaticRefPtr<SurfaceCacheImpl> sInstance;
  */
 typedef size_t Cost;
 
-static Cost ComputeCost(const nsIntSize aSize)
+static Cost ComputeCost(const IntSize& aSize)
 {
   return aSize.width * aSize.height * 4;  // width * height * 4 bytes (32bpp)
 }
@@ -112,7 +113,7 @@ class CachedSurface : public RefCounted<CachedSurface>
 {
 public:
   CachedSurface(DrawTarget*       aTarget,
-                const nsIntSize   aTargetSize,
+                const IntSize     aTargetSize,
                 const Cost        aCost,
                 const ImageKey    aImageKey,
                 const SurfaceKey& aSurfaceKey)
@@ -128,7 +129,8 @@ public:
 
   already_AddRefed<gfxDrawable> Drawable() const
   {
-    nsRefPtr<gfxDrawable> drawable = new gfxSurfaceDrawable(mTarget, mTargetSize);
+    nsRefPtr<gfxDrawable> drawable =
+      new gfxSurfaceDrawable(mTarget, ThebesIntSize(mTargetSize));
     return drawable.forget();
   }
 
@@ -140,7 +142,7 @@ public:
 private:
   nsExpirationState       mExpirationState;
   nsRefPtr<DrawTarget>    mTarget;
-  const nsIntSize         mTargetSize;
+  const IntSize           mTargetSize;
   const Cost              mCost;
   const ImageKey          mImageKey;
   const SurfaceKey        mSurfaceKey;
@@ -229,7 +231,7 @@ public:
   }
 
   void Insert(DrawTarget*       aTarget,
-              nsIntSize         aTargetSize,
+              IntSize           aTargetSize,
               const Cost        aCost,
               const ImageKey    aImageKey,
               const SurfaceKey& aSurfaceKey)
@@ -502,11 +504,12 @@ SurfaceCache::Insert(DrawTarget*       aTarget,
   MOZ_ASSERT(NS_IsMainThread());
 
   Cost cost = ComputeCost(aSurfaceKey.Size());
-  return sInstance->Insert(aTarget, aSurfaceKey.Size(), cost, aImageKey, aSurfaceKey);
+  return sInstance->Insert(aTarget, aSurfaceKey.Size(), cost, aImageKey,
+                           aSurfaceKey);
 }
 
 /* static */ bool
-SurfaceCache::CanHold(const nsIntSize& aSize)
+SurfaceCache::CanHold(const IntSize& aSize)
 {
   MOZ_ASSERT(sInstance, "Should be initialized");
   MOZ_ASSERT(NS_IsMainThread());
@@ -522,6 +525,15 @@ SurfaceCache::Discard(Image* aImageKey)
   MOZ_ASSERT(NS_IsMainThread());
 
   return sInstance->Discard(aImageKey);
+}
+
+/* static */ void
+SurfaceCache::DiscardAll()
+{
+  MOZ_ASSERT(sInstance, "Should be initialized");
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return sInstance->DiscardAll();
 }
 
 } // namespace image
