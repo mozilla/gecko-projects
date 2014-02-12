@@ -2050,8 +2050,7 @@ AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
         }
 
         DebugOnly<unsigned> slotSpan = baseobj->slotSpan();
-        RootedValue value(cx, UndefinedValue());
-        if (!DefineNativeProperty(cx, baseobj, id, value, nullptr, nullptr,
+        if (!DefineNativeProperty(cx, baseobj, id, UndefinedHandleValue, nullptr, nullptr,
                                   JSPROP_ENUMERATE, 0, 0))
         {
             return false;
@@ -2148,8 +2147,11 @@ jit::AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
     if (!script)
         return false;
 
-    if (!script->compileAndGo() || !script->canBaselineCompile())
+    if (!jit::IsIonEnabled(cx) || !jit::IsBaselineEnabled(cx) ||
+        !script->compileAndGo() || !script->canBaselineCompile())
+    {
         return true;
+    }
 
     static const uint32_t MAX_SCRIPT_SIZE = 2000;
     if (script->length() > MAX_SCRIPT_SIZE)

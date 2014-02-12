@@ -81,6 +81,8 @@ class SandboxDerived(TreeMetadata):
         self.srcdir = sandbox['SRCDIR']
         self.objdir = sandbox['OBJDIR']
 
+        self.config = sandbox.config
+
 
 class DirectoryTraversal(SandboxDerived):
     """Describes how directory traversal for building should work.
@@ -201,6 +203,24 @@ class Exports(SandboxDerived):
         SandboxDerived.__init__(self, sandbox)
         self.exports = exports
         self.dist_install = dist_install
+
+class Resources(SandboxDerived):
+    """Sandbox container object for RESOURCE_FILES, which is a HierarchicalStringList,
+    with an extra ``.preprocess`` property on each entry.
+
+    The local defines plus anything in ACDEFINES are stored in ``defines`` as a
+    dictionary, for any files that need preprocessing.
+    """
+    __slots__ = ('resources', 'defines')
+
+    def __init__(self, sandbox, resources, defines=None):
+        SandboxDerived.__init__(self, sandbox)
+        self.resources = resources
+        defs = {}
+        defs.update(sandbox.config.defines)
+        if defines:
+            defs.update(defines)
+        self.defines = defs
 
 
 class IPDLFile(SandboxDerived):

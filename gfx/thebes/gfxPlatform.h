@@ -22,10 +22,6 @@
 
 #include "mozilla/layers/CompositorTypes.h"
 
-#ifdef XP_OS2
-#undef OS2EMX_PLAIN_CHAR
-#endif
-
 class gfxASurface;
 class gfxImageSurface;
 class gfxFont;
@@ -517,6 +513,7 @@ public:
     static bool GetPrefLayersDump();
     static bool GetPrefLayersScrollGraph();
     static bool GetPrefLayersEnableTiles();
+    static bool GetPrefLayersDrawFPS();
 
     static bool OffMainThreadCompositionRequired();
 

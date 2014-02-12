@@ -2102,6 +2102,7 @@ public:
     static nsresult
     WrapNewGlobal(xpcObjectHelper &nativeHelper,
                   nsIPrincipal *principal, bool initStandardClasses,
+                  bool fireOnNewGlobalHook,
                   JS::CompartmentOptions& aOptions,
                   XPCWrappedNative **wrappedGlobal);
 
@@ -2299,10 +2300,9 @@ class nsXPCWrappedJSClass : public nsIXPCWrappedJSClass
     NS_IMETHOD DebugDump(int16_t depth);
 public:
 
-    static nsresult
+    static already_AddRefed<nsXPCWrappedJSClass>
     GetNewOrUsed(JSContext* cx,
-                 REFNSIID aIID,
-                 nsXPCWrappedJSClass** clazz);
+                 REFNSIID aIID);
 
     REFNSIID GetIID() const {return mIID;}
     XPCJSRuntime* GetRuntime() const {return mRuntime;}

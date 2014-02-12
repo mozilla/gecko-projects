@@ -2055,6 +2055,7 @@ let CustomizableUIInternal = {
     // Reset placements to make restoring default placements possible.
     gPlacements = new Map();
     gDirtyAreaCache = new Set();
+    gSeenWidgets = new Set();
     // Clear the saved state to ensure that defaults will be used.
     gSavedState = null;
     // Restore the state for each area to its defaults
@@ -3138,7 +3139,7 @@ function WidgetSingleWrapper(aWidget, aNode) {
   this.__defineGetter__("anchor", function() {
     let anchorId;
     // First check for an anchor for the area:
-    let placement = CustomizableUIInternal.getPlacementOfWidget(aWidgetId);
+    let placement = CustomizableUIInternal.getPlacementOfWidget(aWidget.id);
     if (placement) {
       anchorId = gAreas.get(placement.area).get("anchor");
     }

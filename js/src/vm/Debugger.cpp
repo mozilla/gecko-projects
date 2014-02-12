@@ -521,9 +521,11 @@ Debugger::slowPathOnEnterFrame(JSContext *cx, AbstractFramePtr frame, MutableHan
     if (GlobalObject::DebuggerVector *debuggers = global->getDebuggers()) {
         for (Debugger **p = debuggers->begin(); p != debuggers->end(); p++) {
             Debugger *dbg = *p;
-            JS_ASSERT(dbg->observesFrame(frame));
-            if (dbg->observesEnterFrame() && !triggered.append(ObjectValue(*dbg->toJSObject())))
+            if (dbg->observesFrame(frame) && dbg->observesEnterFrame() &&
+                !triggered.append(ObjectValue(*dbg->toJSObject())))
+            {
                 return JSTRAP_ERROR;
+            }
         }
     }
 
@@ -997,15 +999,16 @@ Debugger::fireExceptionUnwind(JSContext *cx, MutableHandleValue vp)
     Maybe<AutoCompartment> ac;
     ac.construct(cx, object);
 
-    Value argvData[] = { JSVAL_VOID, exc };
-    AutoValueArray argv(cx, argvData, 2);
-    ScriptFrameIter iter(cx);
+    JS::AutoValueArray<2> argv(cx);
+    argv[0].setUndefined();
+    argv[1].set(exc);
 
-    if (!getScriptFrame(cx, iter, argv.handleAt(0)) || !wrapDebuggeeValue(cx, argv.handleAt(1)))
+    ScriptFrameIter iter(cx);
+    if (!getScriptFrame(cx, iter, argv[0]) || !wrapDebuggeeValue(cx, argv[1]))
         return handleUncaughtException(ac, false);
 
     RootedValue rv(cx);
-    bool ok = Invoke(cx, ObjectValue(*object), ObjectValue(*hook), 2, argv.start(), &rv);
+    bool ok = Invoke(cx, ObjectValue(*object), ObjectValue(*hook), 2, argv.begin(), &rv);
     JSTrapStatus st = parseResumptionValue(ac, ok, rv, vp);
     if (st == JSTRAP_CONTINUE)
         cx->setPendingException(exc);
@@ -1096,13 +1099,14 @@ Debugger::dispatchHook(JSContext *cx, MutableHandleValue vp, Hook which)
 }
 
 static bool
-AddNewScriptRecipients(GlobalObject::DebuggerVector *src, AutoValueVector *dest)
+AddNewScriptRecipients(GlobalObject::DebuggerVector *src, HandleScript script,
+                       AutoValueVector *dest)
 {
     bool wasEmpty = dest->length() == 0;
     for (Debugger **p = src->begin(); p != src->end(); p++) {
         Debugger *dbg = *p;
         Value v = ObjectValue(*dbg->toJSObject());
-        if (dbg->observesNewScript() &&
+        if (dbg->observesScript(script) && dbg->observesNewScript() &&
             (wasEmpty || Find(dest->begin(), dest->end(), v) == dest->end()) &&
             !dest->append(v))
         {
@@ -1115,9 +1119,6 @@ AddNewScriptRecipients(GlobalObject::DebuggerVector *src, AutoValueVector *dest)
 void
 Debugger::slowPathOnNewScript(JSContext *cx, HandleScript script, GlobalObject *compileAndGoGlobal_)
 {
-    if (script->selfHosted())
-        return;
-
     Rooted<GlobalObject*> compileAndGoGlobal(cx, compileAndGoGlobal_);
 
     JS_ASSERT(script->compileAndGo() == !!compileAndGoGlobal);
@@ -1131,13 +1132,13 @@ Debugger::slowPathOnNewScript(JSContext *cx, HandleScript script, GlobalObject *
     AutoValueVector triggered(cx);
     if (script->compileAndGo()) {
         if (GlobalObject::DebuggerVector *debuggers = compileAndGoGlobal->getDebuggers()) {
-            if (!AddNewScriptRecipients(debuggers, &triggered))
+            if (!AddNewScriptRecipients(debuggers, script, &triggered))
                 return;
         }
     } else {
         GlobalObjectSet &debuggees = script->compartment()->getDebuggees();
         for (GlobalObjectSet::Range r = debuggees.all(); !r.empty(); r.popFront()) {
-            if (!AddNewScriptRecipients(r.front()->getDebuggers(), &triggered))
+            if (!AddNewScriptRecipients(r.front()->getDebuggers(), script, &triggered))
                 return;
         }
     }
@@ -3512,7 +3513,7 @@ DebuggerScript_getLineOffsets(JSContext *cx, unsigned argc, Value *vp)
 bool
 Debugger::observesFrame(AbstractFramePtr frame) const
 {
-    return observesGlobal(&frame.script()->global());
+    return observesScript(frame.script());
 }
 
 bool
@@ -3520,7 +3521,8 @@ Debugger::observesScript(JSScript *script) const
 {
     if (!enabled)
         return false;
-    return observesGlobal(&script->global()) && !script->selfHosted();
+    return observesGlobal(&script->global()) && (!script->selfHosted() ||
+                                                 SelfHostedFramesVisible());
 }
 
 /* static */ bool
@@ -4272,7 +4274,6 @@ DebuggerFrame_getArguments(JSContext *cx, unsigned argc, Value *vp)
         }
 
         Rooted<jsid> id(cx);
-        RootedValue undefinedValue(cx, UndefinedValue());
         for (unsigned i = 0; i < fargc; i++) {
             RootedFunction getobj(cx);
             getobj = NewFunction(cx, js::NullPtr(), DebuggerArguments_getArg, 0,
@@ -4282,7 +4283,7 @@ DebuggerFrame_getArguments(JSContext *cx, unsigned argc, Value *vp)
                 return false;
             id = INT_TO_JSID(i);
             if (!getobj ||
-                !DefineNativeProperty(cx, argsobj, id, undefinedValue,
+                !DefineNativeProperty(cx, argsobj, id, UndefinedHandleValue,
                                       JS_DATA_TO_FUNC_PTR(PropertyOp, getobj.get()), nullptr,
                                       JSPROP_ENUMERATE | JSPROP_SHARED | JSPROP_GETTER, 0, 0))
             {

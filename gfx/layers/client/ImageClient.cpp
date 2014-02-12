@@ -103,7 +103,7 @@ void
 ImageClientSingle::FlushAllImages(bool aExceptFront)
 {
   if (!aExceptFront && mFrontBuffer) {
-    GetForwarder()->HoldUntilTransaction(mFrontBuffer);
+    GetForwarder()->RemoveTextureFromCompositable(this, mFrontBuffer);
     mFrontBuffer = nullptr;
   }
 }
@@ -112,11 +112,11 @@ void
 ImageClientBuffered::FlushAllImages(bool aExceptFront)
 {
   if (!aExceptFront && mFrontBuffer) {
-    GetForwarder()->HoldUntilTransaction(mFrontBuffer);
+    GetForwarder()->RemoveTextureFromCompositable(this, mFrontBuffer);
     mFrontBuffer = nullptr;
   }
   if (mBackBuffer) {
-    GetForwarder()->HoldUntilTransaction(mBackBuffer);
+    GetForwarder()->RemoveTextureFromCompositable(this, mBackBuffer);
     mBackBuffer = nullptr;
   }
 }
@@ -142,7 +142,7 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
 
 
     if (mFrontBuffer) {
-      GetForwarder()->HoldUntilTransaction(mFrontBuffer);
+      GetForwarder()->RemoveTextureFromCompositable(this, mFrontBuffer);
     }
     mFrontBuffer = texture;
     if (!AddTextureClient(texture)) {
@@ -159,7 +159,7 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
     }
 
     if (mFrontBuffer && mFrontBuffer->IsImmutable()) {
-      GetForwarder()->HoldUntilTransaction(mFrontBuffer);
+      GetForwarder()->RemoveTextureFromCompositable(this, mFrontBuffer);
       mFrontBuffer = nullptr;
     }
 
@@ -202,7 +202,7 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
     gfx::IntSize size = gfx::IntSize(image->GetSize().width, image->GetSize().height);
 
     if (mFrontBuffer) {
-      GetForwarder()->HoldUntilTransaction(mFrontBuffer);
+      GetForwarder()->RemoveTextureFromCompositable(this, mFrontBuffer);
       mFrontBuffer = nullptr;
     }
 
@@ -216,21 +216,21 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
 
     GetForwarder()->UseTexture(this, mFrontBuffer);
   } else {
-    nsRefPtr<gfxASurface> surface = image->DeprecatedGetAsSurface();
+    RefPtr<gfx::SourceSurface> surface = image->GetAsSourceSurface();
     MOZ_ASSERT(surface);
 
-    gfx::IntSize size = gfx::IntSize(image->GetSize().width, image->GetSize().height);
+    gfx::IntSize size = image->GetSize();
 
     if (mFrontBuffer &&
         (mFrontBuffer->IsImmutable() || mFrontBuffer->GetSize() != size)) {
-      GetForwarder()->HoldUntilTransaction(mFrontBuffer);
+      GetForwarder()->RemoveTextureFromCompositable(this, mFrontBuffer);
       mFrontBuffer = nullptr;
     }
 
     bool bufferCreated = false;
     if (!mFrontBuffer) {
       gfxImageFormat format
-        = gfxPlatform::GetPlatform()->OptimalFormatForContent(surface->GetContentType());
+        = gfxPlatform::GetPlatform()->OptimalFormatForContent(gfx::ContentForFormat(surface->GetFormat()));
       mFrontBuffer = CreateTextureClientForDrawing(gfx::ImageFormatToSurfaceFormat(format),
                                                    mTextureFlags);
       MOZ_ASSERT(mFrontBuffer->AsTextureClientDrawTarget());
@@ -249,9 +249,8 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
     {
       // We must not keep a reference to the DrawTarget after it has been unlocked.
       RefPtr<DrawTarget> dt = mFrontBuffer->AsTextureClientDrawTarget()->GetAsDrawTarget();
-      RefPtr<SourceSurface> source = gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(dt, surface);
-      MOZ_ASSERT(source.get());
-      dt->CopySurface(source, IntRect(IntPoint(), source->GetSize()), IntPoint());
+      MOZ_ASSERT(surface.get());
+      dt->CopySurface(surface, IntRect(IntPoint(), surface->GetSize()), IntPoint());
     }
 
     mFrontBuffer->Unlock();

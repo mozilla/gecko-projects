@@ -640,10 +640,12 @@ tabmodalprompt:not([promptType="promptUserAndPass"]) .infoContainer {
 
 .meta {
   background-color: @panel_light_color@;
+  /* bug 969354
   background-image: url("chrome://browser/skin/images/firefox-watermark.png");
   background-repeat: no-repeat;
   background-position: center center;
   background-attachment: fixed;
+  */
 }
 
 /* needs to observe the viewstate */
@@ -682,12 +684,8 @@ tabmodalprompt:not([promptType="promptUserAndPass"]) .infoContainer {
   margin-bottom: calc(40px - @tile_side_margin@);
 }
 
-.meta-section:not([expanded]) > .meta-section-title.narrow-title:-moz-locale-dir(ltr):after {
+.meta-section:not([expanded]) > .meta-section-title.narrow-title:after {
   content: ">";
-}
-
-.meta-section:not([expanded]) > .meta-section-title.narrow-title:-moz-locale-dir(rtl):before {
-  content: "<";
 }
 
 .meta-section-container:not([viewstate="snapped"]) .meta-section-title.narrow-title,

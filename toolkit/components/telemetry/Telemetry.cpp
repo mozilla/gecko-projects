@@ -288,6 +288,20 @@ class TelemetryIOInterposeObserver : public IOInterposeObserver
     double    totalTime;    /** Accumulated duration of all operations */
   };
   typedef nsBaseHashtableET<nsStringHashKey, FileStats> FileIOEntryType;
+
+  struct SafeDir {
+    SafeDir(const nsAString& aPath, const nsAString& aSubstName)
+      : mPath(aPath)
+      , mSubstName(aSubstName)
+    {}
+    size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
+      return mPath.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
+             mSubstName.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    }
+    nsString  mPath;        /** Path to the directory */
+    nsString  mSubstName;   /** Name to substitute with */
+  };
+
 public:
   TelemetryIOInterposeObserver(nsIFile* aXreDir);
 
@@ -302,7 +316,12 @@ public:
    */
   bool ReflectIntoJS(JSContext *cx, JS::Handle<JSObject*> rootObj);
 
-  void AddPath(const nsAString& aPath);
+  /**
+   * Adds a path for inclusion in main thread I/O report.
+   * @param aPath Directory path
+   * @param aSubstName Name to substitute for aPath for privacy reasons
+   */
+  void AddPath(const nsAString& aPath, const nsAString& aSubstName);
 
   /**
    * Get size of hash table with file stats
@@ -318,7 +337,7 @@ public:
            mSafeDirs.SizeOfExcludingThis(aMallocSizeOf);
     uint32_t safeDirsLen = mSafeDirs.Length();
     for (uint32_t i = 0; i < safeDirsLen; ++i) {
-      size += mSafeDirs[i].SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+      size += mSafeDirs[i].SizeOfExcludingThis(aMallocSizeOf);
     }
     return size;
   }
@@ -327,7 +346,7 @@ private:
   // Statistics for each filename
   AutoHashtable<FileIOEntryType> mFileStats;
   // Container for whitelisted directories
-  nsTArray<nsString> mSafeDirs;
+  nsTArray<SafeDir> mSafeDirs;
 
   /**
    * Reflect a FileIOEntryType object to a Javascript property on obj with
@@ -350,13 +369,14 @@ TelemetryIOInterposeObserver::TelemetryIOInterposeObserver(nsIFile* aXreDir)
   nsAutoString xreDirPath;
   nsresult rv = aXreDir->GetPath(xreDirPath);
   if (NS_SUCCEEDED(rv)) {
-    AddPath(xreDirPath);
+    AddPath(xreDirPath, NS_LITERAL_STRING("{xre}"));
   }
 }
 
-void TelemetryIOInterposeObserver::AddPath(const nsAString& aPath)
+void TelemetryIOInterposeObserver::AddPath(const nsAString& aPath,
+                                           const nsAString& aSubstName)
 {
-  mSafeDirs.AppendElement(aPath);
+  mSafeDirs.AppendElement(SafeDir(aPath, aSubstName));
 }
  
 void TelemetryIOInterposeObserver::Observe(Observation& aOb)
@@ -374,40 +394,33 @@ void TelemetryIOInterposeObserver::Observe(Observation& aOb)
     return;
   }
 
-  bool report = false;
+  nsAutoString      processedName;
   nsDependentString filenameStr(filename);
   uint32_t filenameStrLen = filenameStr.Length();
   uint32_t safeDirsLen = mSafeDirs.Length();
   for (uint32_t i = 0; i < safeDirsLen; ++i) {
-    uint32_t curSafeDirLen = mSafeDirs[i].Length();
+    uint32_t curSafeDirLen = mSafeDirs[i].mPath.Length();
     if (curSafeDirLen <= filenameStrLen) {
 #if defined(_MSC_VER)
-      if (!_wcsnicmp(filename, mSafeDirs[i].get(), curSafeDirLen)) {
+      if (!_wcsnicmp(filename, mSafeDirs[i].mPath.get(), curSafeDirLen)) {
 #else
-      if (!std::char_traits<char16_t>::compare(filename, mSafeDirs[i].get(),
+      if (!std::char_traits<char16_t>::compare(filename,
+                                               mSafeDirs[i].mPath.get(),
                                                curSafeDirLen)) {
 #endif
-        report = true;
+        processedName = mSafeDirs[i].mSubstName;
+        processedName += Substring(filenameStr, curSafeDirLen);
         break;
       }
     }
   }
 
-  if (!report) {
+  if (processedName.IsEmpty()) {
     return;
   }
 
-  const char16_t* leaf = filename + filenameStrLen;
-  while (filename < leaf) {
-    char16_t c = *(leaf - 1);
-    if (c == MOZ_UTF16('\\') || c == MOZ_UTF16('/')) {
-      break;
-    }
-    --leaf;
-  }
-
   // Create a new entry or retrieve the existing one
-  FileIOEntryType* entry = mFileStats.PutEntry(nsDependentString(leaf));
+  FileIOEntryType* entry = mFileStats.PutEntry(processedName);
   if (entry) {
     // Update the statistics
     entry->mData.totalTime += (double) aOb.Duration().ToMilliseconds();
@@ -445,17 +458,16 @@ bool TelemetryIOInterposeObserver::ReflectFileStats(FileIOEntryType* entry,
   }
 
   // Array we want to report
-  jsval stats[] = {
-    JS_NumberValue(entry->mData.totalTime),
-    UINT_TO_JSVAL(entry->mData.creates),
-    UINT_TO_JSVAL(entry->mData.reads),
-    UINT_TO_JSVAL(entry->mData.writes),
-    UINT_TO_JSVAL(entry->mData.fsyncs),
-    UINT_TO_JSVAL(entry->mData.stats)
-  };
+  JS::AutoValueArray<6> stats(cx);
+  stats[0].setNumber(entry->mData.totalTime);
+  stats[1].setNumber(entry->mData.creates);
+  stats[2].setNumber(entry->mData.reads);
+  stats[3].setNumber(entry->mData.writes);
+  stats[4].setNumber(entry->mData.fsyncs);
+  stats[5].setNumber(entry->mData.stats);
 
   // Create jsEntry as array of elements above
-  JS::RootedObject jsEntry(cx, JS_NewArrayObject(cx, ArrayLength(stats), stats));
+  JS::RootedObject jsEntry(cx, JS_NewArrayObject(cx, stats));
   if (!jsEntry) {
     return false;
   }
@@ -791,7 +803,7 @@ ReflectHistogramAndSamples(JSContext *cx, JS::Handle<JSObject*> obj, Histogram *
   }
 
   const size_t count = h->bucket_count();
-  JS::Rooted<JSObject*> rarray(cx, JS_NewArrayObject(cx, count, nullptr));
+  JS::Rooted<JSObject*> rarray(cx, JS_NewArrayObject(cx, count));
   if (!rarray) {
     return REFLECT_FAILURE;
   }
@@ -801,7 +813,7 @@ ReflectHistogramAndSamples(JSContext *cx, JS::Handle<JSObject*> obj, Histogram *
     return REFLECT_FAILURE;
   }
 
-  JS::Rooted<JSObject*> counts_array(cx, JS_NewArrayObject(cx, count, nullptr));
+  JS::Rooted<JSObject*> counts_array(cx, JS_NewArrayObject(cx, count));
   if (!counts_array) {
     return REFLECT_FAILURE;
   }
@@ -1232,7 +1244,7 @@ TelemetryImpl::ReflectSQL(const SlowSQLEntryType *entry,
 
   const nsACString &sql = entry->GetKey();
 
-  JS::Rooted<JSObject*> arrayObj(cx, JS_NewArrayObject(cx, 0, nullptr));
+  JS::Rooted<JSObject*> arrayObj(cx, JS_NewArrayObject(cx, 0));
   if (!arrayObj) {
     return false;
   }
@@ -1726,9 +1738,9 @@ TelemetryImpl::GetChromeHangs(JSContext *cx, JS::MutableHandle<JS::Value> ret)
 
   ret.setObject(*fullReportObj);
 
-  JS::Rooted<JSObject*> durationArray(cx, JS_NewArrayObject(cx, 0, nullptr));
-  JS::Rooted<JSObject*> systemUptimeArray(cx, JS_NewArrayObject(cx, 0, nullptr));
-  JS::Rooted<JSObject*> firefoxUptimeArray(cx, JS_NewArrayObject(cx, 0, nullptr));
+  JS::Rooted<JSObject*> durationArray(cx, JS_NewArrayObject(cx, 0));
+  JS::Rooted<JSObject*> systemUptimeArray(cx, JS_NewArrayObject(cx, 0));
+  JS::Rooted<JSObject*> firefoxUptimeArray(cx, JS_NewArrayObject(cx, 0));
   if (!durationArray || !systemUptimeArray || !firefoxUptimeArray) {
     return NS_ERROR_FAILURE;
   }
@@ -1777,7 +1789,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     return nullptr;
   }
 
-  JS::Rooted<JSObject*> moduleArray(cx, JS_NewArrayObject(cx, 0, nullptr));
+  JS::Rooted<JSObject*> moduleArray(cx, JS_NewArrayObject(cx, 0));
   if (!moduleArray) {
     return nullptr;
   }
@@ -1794,7 +1806,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     const Telemetry::ProcessedStack::Module& module =
       stacks.GetModule(moduleIndex);
 
-    JS::Rooted<JSObject*> moduleInfoArray(cx, JS_NewArrayObject(cx, 0, nullptr));
+    JS::Rooted<JSObject*> moduleInfoArray(cx, JS_NewArrayObject(cx, 0));
     if (!moduleInfoArray) {
       return nullptr;
     }
@@ -1823,7 +1835,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     }
   }
 
-  JS::Rooted<JSObject*> reportArray(cx, JS_NewArrayObject(cx, 0, nullptr));
+  JS::Rooted<JSObject*> reportArray(cx, JS_NewArrayObject(cx, 0));
   if (!reportArray) {
     return nullptr;
   }
@@ -1837,7 +1849,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
   const size_t length = stacks.GetStackCount();
   for (size_t i = 0; i < length; ++i) {
     // Represent call stack PCs as (module index, offset) pairs.
-    JS::Rooted<JSObject*> pcArray(cx, JS_NewArrayObject(cx, 0, nullptr));
+    JS::Rooted<JSObject*> pcArray(cx, JS_NewArrayObject(cx, 0));
     if (!pcArray) {
       return nullptr;
     }
@@ -1850,7 +1862,7 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
     const uint32_t pcCount = stack.size();
     for (size_t pcIndex = 0; pcIndex < pcCount; ++pcIndex) {
       const Telemetry::ProcessedStack::Frame& frame = stack[pcIndex];
-      JS::Rooted<JSObject*> framePair(cx, JS_NewArrayObject(cx, 0, nullptr));
+      JS::Rooted<JSObject*> framePair(cx, JS_NewArrayObject(cx, 0));
       if (!framePair) {
         return nullptr;
       }
@@ -1992,9 +2004,9 @@ CreateJSTimeHistogram(JSContext* cx, const Telemetry::TimeHistogram& time)
   }
 
   JS::RootedObject ranges(
-    cx, JS_NewArrayObject(cx, ArrayLength(time) + 1, nullptr));
+    cx, JS_NewArrayObject(cx, ArrayLength(time) + 1));
   JS::RootedObject counts(
-    cx, JS_NewArrayObject(cx, ArrayLength(time) + 1, nullptr));
+    cx, JS_NewArrayObject(cx, ArrayLength(time) + 1));
   if (!ranges || !counts) {
     return nullptr;
   }
@@ -2029,7 +2041,7 @@ CreateJSHangHistogram(JSContext* cx, const Telemetry::HangHistogram& hang)
 
   const Telemetry::HangHistogram::Stack& hangStack = hang.GetStack();
   JS::RootedObject stack(cx,
-    JS_NewArrayObject(cx, hangStack.length(), nullptr));
+    JS_NewArrayObject(cx, hangStack.length()));
   if (!ret) {
     return nullptr;
   }
@@ -2072,7 +2084,7 @@ CreateJSThreadHangStats(JSContext* cx, const Telemetry::ThreadHangStats& thread)
     return nullptr;
   }
 
-  JS::RootedObject hangs(cx, JS_NewArrayObject(cx, 0, nullptr));
+  JS::RootedObject hangs(cx, JS_NewArrayObject(cx, 0));
   if (!hangs) {
     return nullptr;
   }
@@ -2092,12 +2104,13 @@ CreateJSThreadHangStats(JSContext* cx, const Telemetry::ThreadHangStats& thread)
 NS_IMETHODIMP
 TelemetryImpl::GetThreadHangStats(JSContext* cx, JS::MutableHandle<JS::Value> ret)
 {
-  JS::RootedObject retObj(cx, JS_NewArrayObject(cx, 0, nullptr));
+  JS::RootedObject retObj(cx, JS_NewArrayObject(cx, 0));
   if (!retObj) {
     return NS_ERROR_FAILURE;
   }
   size_t threadIndex = 0;
 
+#ifdef MOZ_ENABLE_BACKGROUND_HANG_MONITOR
   /* First add active threads; we need to hold |iter| (and its lock)
      throughout this method to avoid a race condition where a thread can
      be recorded twice if the thread is destroyed while this method is
@@ -2111,6 +2124,7 @@ TelemetryImpl::GetThreadHangStats(JSContext* cx, JS::MutableHandle<JS::Value> re
       return NS_ERROR_FAILURE;
     }
   }
+#endif
 
   // Add saved threads next
   MutexAutoLock autoLock(mThreadHangStatsMutex);
@@ -2962,7 +2976,7 @@ SetProfileDir(nsIFile* aProfD)
   if (NS_FAILED(rv)) {
     return;
   }
-  sTelemetryIOObserver->AddPath(profDirPath);
+  sTelemetryIOObserver->AddPath(profDirPath, NS_LITERAL_STRING("{profile}"));
 }
 
 void

@@ -978,7 +978,16 @@ pref("dom.ipc.plugins.enabled.x86_64", true);
 pref("dom.ipc.plugins.enabled", true);
 #endif
 
+#if defined(NIGHTLY_BUILD) && defined(XP_MACOSX)
+// In Nightly, browser.tabs.remote is enabled on platforms that
+// support OMTC. However, users won't actually get remote tabs unless
+// they enable browser.tabs.remote.autostart or they use the "New OOP
+// Window" menu option.
+pref("browser.tabs.remote", true);
+#else
 pref("browser.tabs.remote", false);
+#endif
+pref("browser.tabs.remote.autostart", false);
 
 // This pref governs whether we attempt to work around problems caused by
 // plugins using OS calls to manipulate the cursor while running out-of-
@@ -1152,6 +1161,7 @@ pref("devtools.netmonitor.enabled", true);
 pref("devtools.netmonitor.panes-network-details-width", 450);
 pref("devtools.netmonitor.panes-network-details-height", 450);
 pref("devtools.netmonitor.statistics", true);
+pref("devtools.netmonitor.filters", "[\"all\"]");
 
 // Enable the Tilt inspector
 pref("devtools.tilt.enabled", true);

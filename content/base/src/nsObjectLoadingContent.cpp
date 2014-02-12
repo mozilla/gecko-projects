@@ -2622,7 +2622,7 @@ nsObjectLoadingContent::ScriptRequestPluginInstance(JSContext* aCx,
       NS_NOTREACHED("failed to dispatch PluginScripted event");
     }
     mScriptRequested = true;
-  } else if (mType == eType_Plugin && !mInstanceOwner &&
+  } else if (callerIsContentJS && mType == eType_Plugin && !mInstanceOwner &&
              nsContentUtils::IsSafeToRunScript() &&
              InActiveDocument(thisContent)) {
     // If we're configured as a plugin in an active document and it's safe to
@@ -3178,10 +3178,14 @@ nsObjectLoadingContent::LegacyCall(JSContext* aCx,
   obj = thisContent->GetWrapper();
   // Now wrap things up into the compartment of "obj"
   JSAutoCompartment ac(aCx, obj);
-  nsTArray<JS::Value> args(aArguments);
-  JS::AutoArrayRooter rooter(aCx, args.Length(), args.Elements());
-  for (size_t i = 0; i < args.Length(); i++) {
-    if (!JS_WrapValue(aCx, rooter.handleAt(i))) {
+  JS::AutoValueVector args(aCx);
+  if (!args.append(aArguments.Elements(), aArguments.Length())) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return JS::UndefinedValue();
+  }
+
+  for (size_t i = 0; i < args.length(); i++) {
+    if (!JS_WrapValue(aCx, args.handleAt(i))) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return JS::UndefinedValue();
     }
@@ -3221,8 +3225,7 @@ nsObjectLoadingContent::LegacyCall(JSContext* aCx,
   }
 
   JS::Rooted<JS::Value> retval(aCx);
-  bool ok = JS::Call(aCx, thisVal, pi_obj, rooter.length(), rooter.start(),
-                     &retval);
+  bool ok = JS::Call(aCx, thisVal, pi_obj, args, &retval);
   if (!ok) {
     aRv.Throw(NS_ERROR_FAILURE);
     return JS::UndefinedValue();
@@ -3431,7 +3434,8 @@ nsObjectLoadingContent::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObje
                                      JS::Handle<jsid> aId,
                                      JS::MutableHandle<JSPropertyDescriptor> aDesc)
 {
-  // We don't resolve anything; we just try to make sure we're instantiated
+  // We don't resolve anything; we just try to make sure we're instantiated.
+  // This purposefully does not fire for chrome/xray resolves, see bug 967694
 
   nsRefPtr<nsNPAPIPluginInstance> pi;
   nsresult rv = ScriptRequestPluginInstance(aCx, getter_AddRefs(pi));
@@ -3447,8 +3451,8 @@ nsObjectLoadingContent::GetOwnPropertyNames(JSContext* aCx,
                                             ErrorResult& aRv)
 {
   // Just like DoNewResolve, just make sure we're instantiated.  That will do
-  // the work our Enumerate hook needs to do, and we don't want to return these
-  // property names from Xrays anyway.
+  // the work our Enumerate hook needs to do.  This purposefully does not fire
+  // for xray resolves, see bug 967694
   nsRefPtr<nsNPAPIPluginInstance> pi;
   aRv = ScriptRequestPluginInstance(aCx, getter_AddRefs(pi));
 }

@@ -138,7 +138,9 @@ FinishCreate(XPCWrappedNativeScope* Scope,
 // case the logic and do some things in a different order.
 nsresult
 XPCWrappedNative::WrapNewGlobal(xpcObjectHelper &nativeHelper,
-                                nsIPrincipal *principal, bool initStandardClasses,
+                                nsIPrincipal *principal,
+                                bool initStandardClasses,
+                                bool fireOnNewGlobalHook,
                                 JS::CompartmentOptions& aOptions,
                                 XPCWrappedNative **wrappedGlobal)
 {
@@ -266,7 +268,8 @@ XPCWrappedNative::WrapNewGlobal(xpcObjectHelper &nativeHelper,
                                wrapper, wrappedGlobal);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    JS_FireOnNewGlobalObject(cx, global);
+    if (fireOnNewGlobalHook)
+        JS_FireOnNewGlobalObject(cx, global);
     return NS_OK;
 }
 
@@ -1522,17 +1525,16 @@ XPCWrappedNative::InitTearOff(XPCWrappedNativeTearOff* aTearOff,
         // when asked for nsIPropertyBag. It need not actually *implement*
         // nsIPropertyBag - xpconnect will do that work.
 
-        nsXPCWrappedJSClass* clazz;
-        if (iid->Equals(NS_GET_IID(nsIPropertyBag)) && jso &&
-            NS_SUCCEEDED(nsXPCWrappedJSClass::GetNewOrUsed(cx,*iid,&clazz))&&
-            clazz) {
-            RootedObject answer(cx,
-                                clazz->CallQueryInterfaceOnJSObject(cx, jso, *iid));
-            NS_RELEASE(clazz);
-            if (!answer) {
-                NS_RELEASE(obj);
-                aTearOff->SetInterface(nullptr);
-                return NS_ERROR_NO_INTERFACE;
+        if (iid->Equals(NS_GET_IID(nsIPropertyBag)) && jso) {
+            nsRefPtr<nsXPCWrappedJSClass> clasp = nsXPCWrappedJSClass::GetNewOrUsed(cx, *iid);
+            if (clasp) {
+                RootedObject answer(cx, clasp->CallQueryInterfaceOnJSObject(cx, jso, *iid));
+
+                if (!answer) {
+                    NS_RELEASE(obj);
+                    aTearOff->SetInterface(nullptr);
+                    return NS_ERROR_NO_INTERFACE;
+                }
             }
         }
     }

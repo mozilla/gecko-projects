@@ -352,6 +352,7 @@ public:
         IMG_read_format,
         EXT_read_format_bgra,
         APPLE_client_storage,
+        APPLE_texture_range,
         ARB_texture_non_power_of_two,
         ARB_pixel_buffer_object,
         ARB_ES2_compatibility,
@@ -406,6 +407,7 @@ public:
         ARB_framebuffer_sRGB,
         EXT_framebuffer_sRGB,
         KHR_debug,
+        ARB_half_float_pixel,
         Extensions_Max,
         Extensions_End
     };
@@ -1340,6 +1342,12 @@ public:
     void fPixelStorei(GLenum pname, GLint param) {
         BEFORE_GL_CALL;
         mSymbols.fPixelStorei(pname, param);
+        AFTER_GL_CALL;
+    }
+
+    void fTextureRangeAPPLE(GLenum target, GLsizei length, GLvoid *pointer) {
+        BEFORE_GL_CALL;
+        mSymbols.fTextureRangeAPPLE(target, length, pointer);
         AFTER_GL_CALL;
     }
 

@@ -205,7 +205,8 @@ StyleEditorUI.prototype = {
     // remember saved file locations
     for (let editor of this.editors) {
       if (editor.savedFile) {
-        this.savedLocations[editor.styleSheet.href] = editor.savedFile;
+        let identifier = this.getStyleSheetIdentifier(editor.styleSheet);
+        this.savedLocations[identifier] = editor.savedFile;
       }
     }
 
@@ -257,7 +258,8 @@ StyleEditorUI.prototype = {
    */
   _addStyleSheetEditor: function(styleSheet, file, isNew) {
     // recall location of saved file for this sheet after page reload
-    let savedFile = this.savedLocations[styleSheet.href];
+    let identifier = this.getStyleSheetIdentifier(styleSheet);
+    let savedFile = this.savedLocations[identifier];
     if (savedFile && !file) {
       file = savedFile;
     }
@@ -527,6 +529,18 @@ StyleEditorUI.prototype = {
   },
 
   /**
+   * Returns an identifier for the given style sheet.
+   *
+   * @param {StyleSheet} aStyleSheet
+   *        The style sheet to be identified.
+   */
+  getStyleSheetIdentifier: function (aStyleSheet) {
+    // Identify inline style sheets by their host page URI and index at the page.
+    return aStyleSheet.href ? aStyleSheet.href :
+            "inline-" + aStyleSheet.styleSheetIndex + "-at-" + aStyleSheet.nodeHref;
+  },
+
+  /**
    * selects a stylesheet and optionally moves the cursor to a selected line
    *
    * @param {string} [href]
@@ -578,7 +592,7 @@ StyleEditorUI.prototype = {
     }
 
     let ruleCount = editor.styleSheet.ruleCount;
-    if (editor.styleSheet.relatedStyleSheet) {
+    if (editor.styleSheet.relatedStyleSheet && editor.linkedCSSFile) {
       ruleCount = editor.styleSheet.relatedStyleSheet.ruleCount;
     }
     if (ruleCount === undefined) {

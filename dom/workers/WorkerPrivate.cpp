@@ -2707,9 +2707,15 @@ WorkerPrivateParent<Derived>::PostMessageInternal(
   JS::Rooted<JS::Value> transferable(aCx, JS::UndefinedValue());
   if (aTransferable.WasPassed()) {
     const Sequence<JS::Value>& realTransferable = aTransferable.Value();
+
+    // The input sequence only comes from the generated bindings code, which
+    // ensures it is rooted.
+    JS::HandleValueArray elements =
+      JS::HandleValueArray::fromMarkedLocation(realTransferable.Length(),
+                                               realTransferable.Elements());
+
     JSObject* array =
-      JS_NewArrayObject(aCx, realTransferable.Length(),
-                        const_cast<JS::Value*>(realTransferable.Elements()));
+      JS_NewArrayObject(aCx, elements);
     if (!array) {
       aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
@@ -4923,9 +4929,14 @@ WorkerPrivate::PostMessageToParentInternal(
   JS::Rooted<JS::Value> transferable(aCx, JS::UndefinedValue());
   if (aTransferable.WasPassed()) {
     const Sequence<JS::Value>& realTransferable = aTransferable.Value();
-    JSObject* array =
-      JS_NewArrayObject(aCx, realTransferable.Length(),
-                        const_cast<jsval*>(realTransferable.Elements()));
+
+    // The input sequence only comes from the generated bindings code, which
+    // ensures it is rooted.
+    JS::HandleValueArray elements =
+      JS::HandleValueArray::fromMarkedLocation(realTransferable.Length(),
+                                               realTransferable.Elements());
+
+    JSObject* array = JS_NewArrayObject(aCx, elements);
     if (!array) {
       aRv = NS_ERROR_OUT_OF_MEMORY;
       return;
@@ -5388,10 +5399,10 @@ WorkerPrivate::RunExpiredTimeouts(JSContext* aCx)
        * unsafeGet() is needed below because the argument is a not a const
        * pointer, even though values are not modified.
        */
-      if (!JS_CallFunctionValue(aCx, global, info->mTimeoutCallable,
-                                info->mExtraArgVals.Length(),
-                                info->mExtraArgVals.Elements()->unsafeGet(),
-                                rval.address()) &&
+      JS::HandleValueArray args =
+        JS::HandleValueArray::fromMarkedLocation(info->mExtraArgVals.Length(),
+                                                 info->mExtraArgVals.Elements()->unsafeGet());
+      if (!JS_CallFunctionValue(aCx, global, info->mTimeoutCallable, args, rval.address()) &&
           !JS_ReportPendingException(aCx)) {
         retval = false;
         break;

@@ -19,10 +19,6 @@ endif
 
 CPPSRCS += $(EXTRACPPSRCS)
 
-ifeq ($(OS_ARCH),WINNT)
-LOCAL_INCLUDES	+= -I$(topsrcdir)/config/os2
-endif
-
 include $(topsrcdir)/config/config.mk
 
 LIBS		+= \
@@ -64,6 +60,3 @@ include $(topsrcdir)/config/rules.mk
 # install rules.txt along with spacetrace executable
 libs:: rules.txt
 	$(INSTALL) $< $(DIST)/bin
-
-libs:: spacetrace.css
-	$(INSTALL) $< $(DIST)/bin/res

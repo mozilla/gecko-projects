@@ -10,7 +10,7 @@ include $(topsrcdir)/config/config.mk
 
 ifneq (1_1,$(MOZ_MEMORY)_$(or $(MOZ_NATIVE_JEMALLOC),$(FORCE_SHARED_LIB)))
 
-ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
+ifneq (,$(filter WINNT,$(OS_ARCH)))
 SDK_LIBRARY = $(IMPORT_LIBRARY)
 else
 ifdef FORCE_SHARED_LIB
@@ -35,8 +35,6 @@ endif
 endif
 
 ifeq (WINNT,$(OS_TARGET))
-DEFFILE = mozglue.def
-
 mozglue.def: mozglue.def.in
 	$(call py_action,preprocessor,$(if $(MOZ_REPLACE_MALLOC),-DMOZ_REPLACE_MALLOC) $(ACDEFINES) $< -o $@)
 

@@ -28,10 +28,6 @@ elif toolkit == 'android':
     UNIFIED_SOURCES += [
         relative_path + '/nptest_droid.cpp',
     ]
-elif toolkit == 'os2':
-    UNIFIED_SOURCES += [
-        relative_path + '/nptest_os2.cpp',
-    ]
 elif toolkit == 'qt':
     UNIFIED_SOURCES += [
         relative_path + '/nptest_qt.cpp',
@@ -43,6 +39,10 @@ elif toolkit == 'windows':
 
 FORCE_SHARED_LIB = True
 
+# must link statically with the CRT; nptest isn't Gecko code
+USE_STATIC_LIBS = True
+
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     RCFILE  = 'nptest.rc'
     RESFILE = 'nptest.res'
+    DEFFILE = SRCDIR + '/nptest.def'

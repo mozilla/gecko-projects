@@ -49,8 +49,9 @@ using mozilla::Move;
 /*
  * A JSTracer that produces a map of the heap with edges reversed.
  *
- * HeapReversers must be allocated in a stack frame. (They contain an AutoArrayRooter,
- * and those must be allocated and destroyed in a stack-like order.)
+ * HeapReversers must be allocated in a stack frame. (They are derived from
+ * CustomAutoRooter, and those must be allocated and destroyed in a stack-like
+ * order.)
  *
  * HeapReversers keep all the roots they find in their traversal alive until
  * they are destroyed. So you don't need to worry about nodes going away while
@@ -510,7 +511,7 @@ ReferenceFinder::addReferrer(jsval referrerArg, Path *path)
         return false;
     if (v.isUndefined()) {
         /* Create an array to accumulate referents under this path. */
-        JSObject *array = JS_NewArrayObject(context, 1, referrer.address());
+        JSObject *array = JS_NewArrayObject(context, referrer);
         if (!array)
             return false;
         v.setObject(*array);

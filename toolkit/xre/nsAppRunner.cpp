@@ -3,11 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if defined(XP_OS2) && defined(MOZ_OS2_HIGH_MEMORY)
-// os2safe.h has to be included before os2.h, needed for high mem
-#include <os2safe.h>
-#endif
-
 #if defined(MOZ_WIDGET_QT)
 #include <QApplication>
 #include <QStringList>
@@ -47,9 +42,6 @@
 #include <sys/sysctl.h>
 #endif
 
-#ifdef XP_OS2
-#include "private/pprthred.h"
-#endif
 #include "prmem.h"
 #include "prnetdb.h"
 #include "prprf.h"
@@ -138,11 +130,6 @@
 #include "mozilla/LateWriteChecks.h"
 
 #include <stdlib.h>
-
-// for old system jemalloc version check
-#if !defined(MOZ_MEMORY) && defined(__NetBSD__)
-#include <sys/param.h>
-#endif
 
 #ifdef XP_UNIX
 #include <sys/stat.h>
@@ -433,7 +420,7 @@ static void RemoveArg(char **argv)
 /**
  * Check for a commandline flag. If the flag takes a parameter, the
  * parameter is returned in aParam. Flags may be in the form -arg or
- * --arg (or /arg on win32/OS2).
+ * --arg (or /arg on win32).
  *
  * @param aArg the parameter to check. Must be lowercase.
  * @param aCheckOSInt if true returns ARG_BAD if the osint argument is present
@@ -454,7 +441,7 @@ CheckArg(const char* aArg, bool aCheckOSInt = false, const char **aParam = nullp
     char *arg = curarg[0];
 
     if (arg[0] == '-'
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
         || *arg == '/'
 #endif
         ) {
@@ -472,7 +459,7 @@ CheckArg(const char* aArg, bool aCheckOSInt = false, const char **aParam = nullp
 
         if (*curarg) {
           if (**curarg == '-'
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
               || **curarg == '/'
 #endif
               )
@@ -1378,7 +1365,7 @@ DumpHelp()
          "  -UILocale <locale> Start with <locale> resources as UI Locale.\n"
          "  -safe-mode         Disables extensions and themes for this session.\n", gAppData->name);
 
-#if defined(XP_WIN) || defined(XP_OS2)
+#if defined(XP_WIN)
   printf("  -console           Start %s with a debugging console.\n", gAppData->name);
 #endif
 
@@ -1564,92 +1551,6 @@ XRE_GetBinaryPath(const char* argv0, nsIFile* *aResult)
 typedef BOOL (WINAPI* SetProcessDEPPolicyFunc)(DWORD dwFlags);
 #endif
 
-#if defined(XP_OS2) && (__KLIBC__ == 0 && __KLIBC_MINOR__ >= 6) // broken kLibc
-// Copy the environment maintained by the C library into an ASCIIZ array
-// that can be used to pass it on to the OS/2 Dos* APIs (which otherwise
-// don't know anything about the stuff set by PR_SetEnv() or setenv()).
-char *createEnv()
-{
-  // just allocate the maximum amount (24 kB = 0x60000 bytes), to be able to
-  // copy the existing environment
-  char *env = (char *)calloc(0x6000, sizeof(char));
-  if (!env) {
-    return nullptr;
-  }
-
-  // walk along the environ string array of the C library and copy
-  // everything (that fits) into the output environment array, leaving
-  // null bytes between the entries
-  char *penv = env; // movable pointer to result environment ASCIIZ array
-  int i = 0, space = 0x6000;
-  while (environ[i] && environ[i][0]) {
-    int len = strlen(environ[i]);
-    if (space - len <= 0) {
-      break;
-    }
-    strcpy(penv, environ[i]);
-    i++; // next environment variable
-    penv += len + 1; // jump to after next null byte
-    space -= len - 1; // subtract consumed length from usable space
-  }
-
-  return env;
-}
-
-// OS2LaunchChild() is there to replace _execv() which is broken in the C
-// runtime library that comes with GCC 3.3.5 on OS/2. It uses createEnv()
-// to copy the process environment and add necessary variables
-//
-// returns -1 on failure and 0 on success
-int OS2LaunchChild(const char *aExePath, int aArgc, char **aArgv)
-{
-  // find total length of aArgv
-  int len = 0;
-  for (int i = 0; i < aArgc; i++) {
-    len += strlen(aArgv[i]) + 1; // plus space in between
-  }
-  len++; // leave space for null byte at end
-  // allocate enough space for all strings and nulls,
-  // calloc helpfully initializes to null
-  char *args = (char *)calloc(len, sizeof(char));
-  if (!args) {
-    return -1;
-  }
-  char *pargs = args; // extra pointer to after the last argument
-  // build argument list in the format the DosStartSession() wants,
-  // adding spaces between the arguments
-  for (int i = 0; i < aArgc; i++, *pargs++ = ' ') {
-    strcpy(pargs, aArgv[i]);
-    pargs += strlen(aArgv[i]);
-  }
-  if (aArgc > 1) {
-    *(pargs-1) = '\0'; // replace last space
-  }
-  *pargs = '\0';
-  // make sure that the program is separated by null byte
-  pargs = strchr(args, ' ');
-  if (pargs) {
-    *pargs = '\0';
-  }
-
-  char *env = createEnv();
-
-  char error[CCHMAXPATH] = { 0 };
-  RESULTCODES crc = { 0 };
-  ULONG rc = DosExecPgm(error, sizeof(error), EXEC_ASYNC, args, env,
-                        &crc, (PSZ)aExePath);
-  free(args); // done with the arguments
-  if (env) {
-    free(env);
-  }
-  if (rc != NO_ERROR) {
-    return -1;
-  }
-
-  return 0;
-}
-#endif
-
 // If aBlankCommandLine is true, then the application will be launched with a
 // blank command line instead of being launched with the same command line that
 // it was initially started with.
@@ -1708,14 +1609,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
   if (NS_FAILED(rv))
     return rv;
 
-#if defined(XP_OS2) && (__KLIBC__ == 0 && __KLIBC_MINOR__ >= 6)
-  // implementation of _execv() is broken with kLibc 0.6.x and later
-  if (OS2LaunchChild(exePath.get(), gRestartArgc, gRestartArgv) == -1)
-    return NS_ERROR_FAILURE;
-#elif defined(XP_OS2)
-  if (_execv(exePath.get(), gRestartArgv) == -1)
-    return NS_ERROR_FAILURE;
-#elif defined(XP_UNIX)
+#if defined(XP_UNIX)
   if (execv(exePath.get(), gRestartArgv) == -1)
     return NS_ERROR_FAILURE;
 #else
@@ -1727,7 +1621,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
   PRStatus failed = PR_WaitProcess(process, &exitCode);
   if (failed || exitCode)
     return NS_ERROR_FAILURE;
-#endif // XP_OS2 series
+#endif // XP_UNIX
 #endif // WP_WIN
 #endif // WP_MACOSX
 #endif // MOZ_WIDGET_ANDROID
@@ -2560,7 +2454,7 @@ RemoveComponentRegistries(nsIFile* aProfileDir, nsIFile* aLocalProfileDir,
 
 #if defined(XP_UNIX) || defined(XP_BEOS)
 #define PLATFORM_FASL_SUFFIX ".mfasl"
-#elif defined(XP_WIN) || defined(XP_OS2)
+#elif defined(XP_WIN)
 #define PLATFORM_FASL_SUFFIX ".mfl"
 #endif
 
@@ -2630,18 +2524,6 @@ static void MakeOrSetMinidumpPath(nsIFile* profD)
 #endif
 
 const nsXREAppData* gAppData = nullptr;
-
-#if defined(XP_OS2)
-// because we use early returns, we use a stack-based helper to un-set the OS2 FP handler
-class ScopedFPHandler {
-private:
-  EXCEPTIONREGISTRATIONRECORD excpreg;
-
-public:
-  ScopedFPHandler() { PR_OS2_SetFloatExcpHandler(&excpreg); }
-  ~ScopedFPHandler() { PR_OS2_UnsetFloatExcpHandler(&excpreg); }
-};
-#endif
 
 #ifdef MOZ_WIDGET_GTK
 #include "prlink.h"
@@ -3192,13 +3074,6 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 
   gRestartArgv[gRestartArgc] = nullptr;
   
-
-#if defined(XP_OS2)
-  bool StartOS2App(int aArgc, char **aArgv);
-  if (!StartOS2App(gArgc, gArgv))
-    return 1;
-  ScopedFPHandler handler;
-#endif /* XP_OS2 */
 
   if (EnvHasValue("MOZ_SAFE_MODE_RESTART")) {
     gSafeMode = true;
@@ -3971,11 +3846,6 @@ XREMain::XRE_mainRun()
   mDirProvider.DoStartup();
 
 #ifdef MOZ_CRASHREPORTER
-  if (BrowserTabsRemote()) {
-    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("DOMIPCEnabled"),
-                                       NS_LITERAL_CSTRING("1"));
-  }
-
   nsCString userAgentLocale;
   if (NS_SUCCEEDED(Preferences::GetCString("general.useragent.locale", &userAgentLocale))) {
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("useragent_locale"), userAgentLocale);
@@ -4123,8 +3993,7 @@ XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
   ScopedLogging log;
 
 #if defined(MOZ_WIDGET_GTK)
-#if defined(MOZ_MEMORY) || defined(__FreeBSD__) \
-  || defined(__NetBSD__) && __NetBSD_Version__ >= 500000000
+#if defined(MOZ_MEMORY) || defined(__FreeBSD__) || defined(__NetBSD__)
   // Disable the slice allocator, since jemalloc already uses similar layout
   // algorithms, and using a sub-allocator tends to increase fragmentation.
   // This must be done before g_thread_init() is called.
@@ -4544,9 +4413,7 @@ SetupErrorHandling(const char* progname)
   _CrtSetReportHook(MSCRTReportHook);
 #endif
 
-#ifndef XP_OS2
   InstallSignalHandlers(progname);
-#endif
 
   // Unbuffer stdout, needed for tinderbox tests.
   setbuf(stdout, 0);

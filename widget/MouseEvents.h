@@ -536,6 +536,7 @@ public:
     , tiltY(0)
     , isPrimary(true)
   {
+    UpdateFlags();
   }
 
   WidgetPointerEvent(const WidgetMouseEvent& aEvent)
@@ -548,20 +549,19 @@ public:
     , isPrimary(true)
   {
     eventStructType = NS_POINTER_EVENT;
+    UpdateFlags();
   }
 
-  WidgetPointerEvent(bool aIsTrusted, uint32_t aMsg, nsIWidget* w,
-                     uint32_t aPointerId,
-                     uint32_t aWidth, uint32_t aHeight,
-                     uint32_t aTiltX, uint32_t aTiltY, bool aIsPrimary)
-    : WidgetMouseEvent(aIsTrusted, aMsg, w, NS_POINTER_EVENT, eReal)
-    , pointerId(aPointerId)
-    , width(aWidth)
-    , height(aHeight)
-    , tiltX(aTiltX)
-    , tiltY(aTiltY)
-    , isPrimary(aIsPrimary)
+  void UpdateFlags()
   {
+    switch (message) {
+      case NS_POINTER_ENTER:
+      case NS_POINTER_LEAVE:
+        mFlags.mBubbles = false;
+        break;
+      default:
+        break;
+    }
   }
 
   virtual WidgetEvent* Duplicate() const MOZ_OVERRIDE

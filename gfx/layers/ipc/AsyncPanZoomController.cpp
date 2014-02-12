@@ -963,7 +963,15 @@ nsEventStatus AsyncPanZoomController::OnSingleTapUp(const TapGestureInput& aEven
     int32_t modifiers = WidgetModifiersToDOMModifiers(aEvent.modifiers);
     CSSIntPoint geckoScreenPoint;
     if (ConvertToGecko(aEvent.mPoint, &geckoScreenPoint)) {
-      controller->HandleSingleTap(geckoScreenPoint, modifiers, GetGuid());
+      // Because this may be being running as part of APZCTreeManager::ReceiveInputEvent,
+      // calling controller->HandleSingleTap directly might mean that content receives
+      // the single tap message before the corresponding touch-up. To avoid that we
+      // schedule the singletap message to run on the next spin of the event loop.
+      // See bug 965381 for the issue this was causing.
+      controller->PostDelayedTask(
+        NewRunnableMethod(controller.get(), &GeckoContentController::HandleSingleTap,
+                          geckoScreenPoint, modifiers, GetGuid()),
+        0);
       return nsEventStatus_eConsumeNoDefault;
     }
   }
@@ -977,7 +985,11 @@ nsEventStatus AsyncPanZoomController::OnSingleTapConfirmed(const TapGestureInput
     int32_t modifiers = WidgetModifiersToDOMModifiers(aEvent.modifiers);
     CSSIntPoint geckoScreenPoint;
     if (ConvertToGecko(aEvent.mPoint, &geckoScreenPoint)) {
-      controller->HandleSingleTap(geckoScreenPoint, modifiers, GetGuid());
+      // See comment in OnSingleTapUp as to why we do this in PostDelayedTask.
+      controller->PostDelayedTask(
+        NewRunnableMethod(controller.get(), &GeckoContentController::HandleSingleTap,
+                          geckoScreenPoint, modifiers, GetGuid()),
+        0);
       return nsEventStatus_eConsumeNoDefault;
     }
   }
@@ -1693,6 +1705,12 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
       // scroll offset updates from APZ until we acknowledge the update it sent.
       // This prevents APZ updates from clobbering scroll updates from other
       // more "legitimate" sources like content scripts.
+      // Furthermore, any inflight paint requests we have already dispatched are
+      // going to be ignored by layout, and so mLastDispatchedPaintMetrics
+      // becomes incorrect for the purposes of calculating the LD transform. To
+      // correct this we need to update mLastDispatchedPaintMetrics to be the
+      // last thing we know was painted by Gecko.
+      mLastDispatchedPaintMetrics = aLayerMetrics;
       nsRefPtr<GeckoContentController> controller = GetGeckoContentController();
       if (controller) {
         controller->AcknowledgeScrollUpdate(aLayerMetrics.mScrollId,
