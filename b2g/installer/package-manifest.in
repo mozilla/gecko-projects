@@ -167,7 +167,6 @@
 #ifdef MOZ_B2G_BT
 @BINPATH@/components/dom_bluetooth.xpt
 #endif
-@BINPATH@/components/dom_camera.xpt
 @BINPATH@/components/dom_canvas.xpt
 @BINPATH@/components/dom_contacts.xpt
 @BINPATH@/components/dom_alarm.xpt
@@ -564,6 +563,11 @@
 ; InputMethod API
 @BINPATH@/components/MozKeyboard.js
 @BINPATH@/components/InputMethod.manifest
+
+#ifdef MOZ_DEBUG
+@BINPATH@/components/TestInterfaceJS.js
+@BINPATH@/components/TestInterfaceJS.manifest
+#endif
 
 ; Modules
 @BINPATH@/modules/*

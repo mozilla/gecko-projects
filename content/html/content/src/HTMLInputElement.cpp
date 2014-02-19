@@ -1023,6 +1023,12 @@ UploadLastDir::FetchDirectoryAndDisplayPicker(nsIDocument* aDoc,
   nsCOMPtr<nsIContentPrefCallback2> prefCallback = 
     new UploadLastDir::ContentPrefCallback(aFilePicker, aFpCallback);
 
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    // FIXME (bug 949666): Run this code in the parent process.
+    prefCallback->HandleCompletion(nsIContentPrefCallback2::COMPLETE_ERROR);
+    return NS_OK;
+  }
+
   // Attempt to get the CPS, if it's not present we'll fallback to use the Desktop folder
   nsCOMPtr<nsIContentPrefService2> contentPrefService =
     do_GetService(NS_CONTENT_PREF_SERVICE_CONTRACTID);
@@ -1044,6 +1050,11 @@ UploadLastDir::StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir)
 {
   NS_PRECONDITION(aDoc, "aDoc is null");
   if (!aDir) {
+    return NS_OK;
+  }
+
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    // FIXME (bug 949666): Run this code in the parent process.
     return NS_OK;
   }
 
@@ -2782,15 +2793,16 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
         if (aSetValueChanged) {
           SetValueChanged(true);
         }
-        OnValueChanged(!mParserCreating);
-
         if (mType == NS_FORM_INPUT_NUMBER) {
+          // This has to happen before OnValueChanged is called because that
+          // method needs the new value of our frame's anon text control.
           nsNumberControlFrame* numberControlFrame =
             do_QueryFrame(GetPrimaryFrame());
           if (numberControlFrame) {
             numberControlFrame->SetValueOfAnonTextControl(value);
           }
         }
+        OnValueChanged(!mParserCreating);
       }
 
       // Call parent's SetAttr for color input so its control frame is notified
@@ -3622,6 +3634,20 @@ HTMLInputElement::StopNumberControlSpinnerSpin()
 void
 HTMLInputElement::StepNumberControlForUserEvent(int32_t aDirection)
 {
+  if (!IsValid()) {
+    // If the user has typed a value into the control and inadvertently made a
+    // mistake (e.g. put a thousand separator at the wrong point) we do not
+    // want to wipe out what they typed if they try to increment/decrement the
+    // value. Better is to highlight the value as being invalid so that they
+    // can correct what they typed.
+    // We pass 'true' for UpdateValidityUIBits' aIsFocused argument regardless
+    // because we need the UI to update _now_ or the user will wonder why the
+    // step behavior isn't functioning.
+    UpdateValidityUIBits(true);
+    UpdateState(true);
+    return;
+  }
+
   Decimal newValue = Decimal::nan(); // unchanged if value will not change
 
   nsresult rv = GetValueIfStepped(aDirection, CALLED_FOR_USER_EVENT, &newValue);
@@ -3760,8 +3786,11 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
     WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
     if (mouseEvent && mouseEvent->IsLeftClickEvent() &&
         !ShouldPreventDOMActivateDispatch(aVisitor.mEvent->originalTarget)) {
+      // XXX Activating actually occurs even if it's caused by untrusted event.
+      //     Therefore, shouldn't this be always trusted event?
       InternalUIEvent actEvent(aVisitor.mEvent->mFlags.mIsTrusted,
-                               NS_UI_ACTIVATE, 1);
+                               NS_UI_ACTIVATE);
+      actEvent.detail = 1;
 
       nsCOMPtr<nsIPresShell> shell = aVisitor.mPresContext->GetPresShell();
       if (shell) {
@@ -3993,8 +4022,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
            */
 
           if (aVisitor.mEvent->message == NS_KEY_PRESS &&
-              (keyEvent->keyCode == NS_VK_RETURN ||
-               keyEvent->keyCode == NS_VK_ENTER) &&
+              keyEvent->keyCode == NS_VK_RETURN &&
                (IsSingleLineTextControl(false, mType) ||
                 mType == NS_FORM_INPUT_NUMBER ||
                 IsExperimentalMobileType(mType))) {
@@ -6909,17 +6937,12 @@ HTMLInputElement::IsValidEmailAddress(const nsAString& aValue)
 
   uint32_t atPos;
   nsAutoCString value;
+  // This call also checks whether aValue contains a correctly-placed '@' sign.
   if (!PunycodeEncodeEmailAddress(aValue, value, &atPos)) {
     return false;
   }
 
   uint32_t length = value.Length();
-
-  // Email addresses must contain a '@', but can't begin or end with it.
-  if (atPos == (uint32_t)kNotFound || atPos == 0 || atPos == length - 1) {
-    return false;
-  }
-
   uint32_t i = 0;
 
   // Parsing the username.

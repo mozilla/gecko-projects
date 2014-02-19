@@ -167,7 +167,7 @@ DispatchNFCEvent::RunTask(JSContext* aCx)
 
     memcpy(JS_GetArrayBufferViewData(array), mMessage->mData, mMessage->mSize);
     JS::Rooted<JS::Value> rval(aCx);
-    return JS_CallFunctionName(aCx, obj, "onNfcMessage", arrayVal, rval.address());
+    return JS_CallFunctionName(aCx, obj, "onNfcMessage", arrayVal, &rval);
 }
 
 class NfcConnector : public mozilla::ipc::UnixSocketConnector
@@ -344,7 +344,8 @@ NfcConsumer::OnDisconnect()
 {
     CHROMIUM_LOG("NFC: %s\n", __FUNCTION__);
     if (!mShutdown) {
-        ConnectSocket(new NfcConnector(), mAddress.get(), 1000);
+        ConnectSocket(new NfcConnector(), mAddress.get(),
+                      GetSuggestedConnectDelayMs());
     }
 }
 

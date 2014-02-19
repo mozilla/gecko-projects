@@ -14,6 +14,7 @@ import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.util.HardwareUtils;
 
 import android.content.Context;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
@@ -50,6 +51,9 @@ public class HomePager extends ViewPager {
 
     // Whether or not we need to restart the loader when we show the HomePager.
     private boolean mRestartLoader;
+
+    // Cached original ViewPager background.
+    private final Drawable mOriginalBackground;
 
     // This is mostly used by UI tests to easily fetch
     // specific list views at runtime.
@@ -122,6 +126,8 @@ public class HomePager extends ViewPager {
         //  ensure there is always a focusable view. This would ordinarily be done via an XML
         //  attribute, but it is not working properly.
         setFocusableInTouchMode(true);
+
+        mOriginalBackground = getBackground();
     }
 
     @Override
@@ -310,18 +316,28 @@ public class HomePager extends ViewPager {
         // Update the adapter with the new panel configs
         adapter.update(enabledPanels);
 
-        // Hide the tab strip if the new configuration contains no panels.
         final int count = enabledPanels.size();
-        mTabStrip.setVisibility(count > 0 ? View.VISIBLE : View.INVISIBLE);
+        if (count == 0) {
+            // Set firefox watermark as background.
+            setBackgroundResource(R.drawable.home_pager_empty_state);
+            // Hide the tab strip as there are no panels.
+            mTabStrip.setVisibility(View.INVISIBLE);
+        } else {
+            mTabStrip.setVisibility(View.VISIBLE);
+            // Restore original background.
+            setBackgroundDrawable(mOriginalBackground);
+        }
+
         // Re-install the adapter with the final state
         // in the pager.
         setAdapter(adapter);
 
         // Use the default panel as defined in the HomePager's configuration
-        // if the initial panel wasn't explicitly set by the show() caller.
-        if (mInitialPanelId != null) {
-            // XXX: Handle the case where the desired panel isn't currently in the adapter (bug 949178)
-            setCurrentItem(adapter.getItemPosition(mInitialPanelId), false);
+        // if the initial panel wasn't explicitly set by the show() caller,
+        // or if the initial panel is not found in the adapter.
+        final int itemPosition = (mInitialPanelId == null) ? -1 : adapter.getItemPosition(mInitialPanelId);
+        if (itemPosition > -1) {
+            setCurrentItem(itemPosition, false);
             mInitialPanelId = null;
         } else {
             for (int i = 0; i < count; i++) {

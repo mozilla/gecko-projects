@@ -35,9 +35,12 @@ void ProfilerIOInterposeObserver::Observe(Observation& aObservation)
       return;
   }
   ProfilerBacktrace* stack = profiler_get_backtrace();
-  IOMarkerPayload* markerPayload = new IOMarkerPayload(aObservation.Reference(),
-                                                       aObservation.Start(),
-                                                       aObservation.End(),
-                                                       stack);
+
+  IOMarkerPayload* markerPayload = new IOMarkerPayload(
+                           aObservation.Reference(),
+                           NS_ConvertUTF16toUTF8(aObservation.Filename()).get(),
+                           aObservation.Start(),
+                           aObservation.End(),
+                           stack);
   PROFILER_MARKER_PAYLOAD(str, markerPayload);
 }

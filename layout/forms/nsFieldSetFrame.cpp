@@ -44,7 +44,7 @@ nsFieldSetFrame::GetType() const
 }
 
 #ifdef DEBUG
-NS_IMETHODIMP
+nsresult
 nsFieldSetFrame::SetInitialChildList(ChildListID    aListID,
                                      nsFrameList&   aChildList)
 {
@@ -338,7 +338,7 @@ nsFieldSetFrame::ComputeSize(nsRenderingContext *aRenderingContext,
   return result;
 }
 
-NS_IMETHODIMP 
+nsresult 
 nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
                         nsHTMLReflowMetrics&     aDesiredSize,
                         const nsHTMLReflowState& aReflowState,
@@ -534,18 +534,9 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
     nsContainerFrame::PositionChildViews(legend);
   }
 
-  // Return our size and our result
-  if (aReflowState.ComputedHeight() == NS_INTRINSICSIZE) {
-    aDesiredSize.Height() = mLegendSpace + 
-                          border.TopBottom() +
+  // Return our size and our result.
+  aDesiredSize.Height() = mLegendSpace + border.TopBottom() +
                           (inner ? inner->GetRect().height : 0);
-  } else {
-    nscoord min = border.TopBottom() + mLegendRect.height;
-    aDesiredSize.Height() =
-      aReflowState.ComputedHeight() + aReflowState.ComputedPhysicalBorderPadding().TopBottom();
-    if (aDesiredSize.Height() < min)
-      aDesiredSize.Height() = min;
-  }
   aDesiredSize.Width() = contentRect.width + border.LeftRight();
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   if (legend)
@@ -565,7 +556,7 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsFieldSetFrame::AppendFrames(ChildListID    aListID,
                               nsFrameList&   aFrameList)
 {
@@ -573,7 +564,7 @@ nsFieldSetFrame::AppendFrames(ChildListID    aListID,
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP
+nsresult
 nsFieldSetFrame::InsertFrames(ChildListID    aListID,
                               nsIFrame*      aPrevFrame,
                               nsFrameList&   aFrameList)
@@ -582,7 +573,7 @@ nsFieldSetFrame::InsertFrames(ChildListID    aListID,
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-NS_IMETHODIMP
+nsresult
 nsFieldSetFrame::RemoveFrame(ChildListID    aListID,
                              nsIFrame*      aOldFrame)
 {

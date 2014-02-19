@@ -32,10 +32,10 @@ public:
    */
   virtual nsRect VisualBorderRectRelativeToSelf() const MOZ_OVERRIDE;
 
-  NS_IMETHOD Reflow(nsPresContext*           aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus);
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus);
                                
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
@@ -44,13 +44,13 @@ public:
   void PaintBorderBackground(nsRenderingContext& aRenderingContext,
     nsPoint aPt, const nsRect& aDirtyRect, uint32_t aBGFlags);
 
-  NS_IMETHOD AppendFrames(ChildListID    aListID,
-                          nsFrameList&   aFrameList);
-  NS_IMETHOD InsertFrames(ChildListID    aListID,
-                          nsIFrame*      aPrevFrame,
-                          nsFrameList&   aFrameList);
-  NS_IMETHOD RemoveFrame(ChildListID    aListID,
-                         nsIFrame*      aOldFrame);
+  virtual nsresult AppendFrames(ChildListID    aListID,
+                                nsFrameList&   aFrameList);
+  virtual nsresult InsertFrames(ChildListID    aListID,
+                                nsIFrame*      aPrevFrame,
+                                nsFrameList&   aFrameList);
+  virtual nsresult RemoveFrame(ChildListID    aListID,
+                               nsIFrame*      aOldFrame);
 
   virtual nsIAtom* GetType() const;
   virtual bool IsFrameOfType(uint32_t aFlags) const
@@ -68,12 +68,12 @@ public:
 #endif
 
 #ifdef DEBUG
-  NS_IMETHOD SetInitialChildList(ChildListID    aListID,
-                                 nsFrameList&   aChildList);
+  virtual nsresult SetInitialChildList(ChildListID    aListID,
+                                       nsFrameList&   aChildList);
 #endif
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const {
+  virtual nsresult GetFrameName(nsAString& aResult) const {
     return MakeFrameName(NS_LITERAL_STRING("FieldSet"), aResult);
   }
 #endif

@@ -53,9 +53,9 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE {}
 
-  NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
-                              nsIAtom*        aAttribute,
-                              int32_t         aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
+                                    nsIAtom*        aAttribute,
+                                    int32_t         aModType) MOZ_OVERRIDE;
 
 #ifdef DEBUG
   virtual void Init(nsIContent*      aContent,

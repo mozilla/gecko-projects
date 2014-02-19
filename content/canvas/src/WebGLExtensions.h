@@ -108,6 +108,18 @@ public:
     DECL_WEBGL_EXTENSION_GOOP
 };
 
+class WebGLExtensionFragDepth
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionFragDepth(WebGLContext*);
+    virtual ~WebGLExtensionFragDepth();
+
+    static bool IsSupported(const WebGLContext* context);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
 class WebGLExtensionLoseContext
     : public WebGLExtensionBase
 {
@@ -179,6 +191,16 @@ class WebGLExtensionTextureHalfFloat
 public:
     WebGLExtensionTextureHalfFloat(WebGLContext*);
     virtual ~WebGLExtensionTextureHalfFloat();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionTextureHalfFloatLinear
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionTextureHalfFloatLinear(WebGLContext*);
+    virtual ~WebGLExtensionTextureHalfFloatLinear();
 
     DECL_WEBGL_EXTENSION_GOOP
 };

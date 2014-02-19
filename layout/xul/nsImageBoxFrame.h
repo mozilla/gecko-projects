@@ -57,9 +57,9 @@ public:
                     nsIFrame*        aParent,
                     nsIFrame*        asPrevInFlow) MOZ_OVERRIDE;
 
-  NS_IMETHOD AttributeChanged(int32_t aNameSpaceID,
-                              nsIAtom* aAttribute,
-                              int32_t aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t aNameSpaceID,
+                                    nsIAtom* aAttribute,
+                                    int32_t aModType) MOZ_OVERRIDE;
 
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
@@ -67,7 +67,7 @@ public:
 
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   /** 

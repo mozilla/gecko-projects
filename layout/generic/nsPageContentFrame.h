@@ -20,10 +20,10 @@ public:
   friend class nsPageFrame;
 
   // nsIFrame
-  NS_IMETHOD  Reflow(nsPresContext*      aPresContext,
-                     nsHTMLReflowMetrics& aDesiredSize,
-                     const nsHTMLReflowState& aMaxSize,
-                     nsReflowStatus&      aStatus) MOZ_OVERRIDE;
+  virtual nsresult  Reflow(nsPresContext*      aPresContext,
+                           nsHTMLReflowMetrics& aDesiredSize,
+                           const nsHTMLReflowState& aMaxSize,
+                           nsReflowStatus&      aStatus) MOZ_OVERRIDE;
 
   virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
@@ -44,7 +44,7 @@ public:
   
 #ifdef DEBUG_FRAME_DUMP
   // Debugging
-  NS_IMETHOD  GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult  GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
 protected:

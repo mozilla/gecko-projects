@@ -11,6 +11,8 @@ const SOURCE_SYNTAX_HIGHLIGHT_MAX_FILE_SIZE = 102400; // 100 KB in bytes
 const RESIZE_REFRESH_RATE = 50; // ms
 const REQUESTS_REFRESH_RATE = 50; // ms
 const REQUESTS_HEADERS_SAFE_BOUNDS = 30; // px
+const REQUESTS_TOOLTIP_POSITION = "topcenter bottomleft";
+const REQUESTS_TOOLTIP_IMAGE_MAX_DIM = 400; // px
 const REQUESTS_WATERFALL_SAFE_BOUNDS = 90; // px
 const REQUESTS_WATERFALL_HEADER_TICKS_MULTIPLE = 5; // ms
 const REQUESTS_WATERFALL_HEADER_TICKS_SPACING_MIN = 60; // px
@@ -55,8 +57,7 @@ const GENERIC_VARIABLES_VIEW_SETTINGS = {
   editableNameTooltip: "",
   preventDisableOnChange: true,
   preventDescriptorModifiers: true,
-  eval: () => {},
-  switch: () => {}
+  eval: () => {}
 };
 const NETWORK_ANALYSIS_PIE_CHART_DIAMETER = 200; // px
 
@@ -319,7 +320,9 @@ function RequestsMenuView() {
   dumpn("RequestsMenuView was instantiated");
 
   this._flushRequests = this._flushRequests.bind(this);
+  this._onHover = this._onHover.bind(this);
   this._onSelect = this._onSelect.bind(this);
+  this._onSwap = this._onSwap.bind(this);
   this._onResize = this._onResize.bind(this);
   this._byFile = this._byFile.bind(this);
   this._byDomain = this._byDomain.bind(this);
@@ -346,6 +349,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this.widget.autoscrollWithAppendedItems = true;
 
     this.widget.addEventListener("select", this._onSelect, false);
+    this.widget.addEventListener("swap", this._onSwap, false);
     this._splitter.addEventListener("mousemove", this._onResize, false);
     window.addEventListener("resize", this._onResize, false);
 
@@ -391,6 +395,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     Prefs.filters = this._activeFilters;
 
     this.widget.removeEventListener("select", this._onSelect, false);
+    this.widget.removeEventListener("swap", this._onSwap, false);
     this._splitter.removeEventListener("mousemove", this._onResize, false);
     window.removeEventListener("resize", this._onResize, false);
 
@@ -464,11 +469,21 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       }
     });
 
+    // Create a tooltip for the newly appended network request item.
+    let requestTooltip = requestItem.attachment.tooltip = new Tooltip(document, {
+      closeOnEvents: [{
+        emitter: $("#requests-menu-contents"),
+        event: "scroll",
+        useCapture: true
+      }]
+    });
+
     $("#details-pane-toggle").disabled = false;
     $("#requests-menu-empty-notice").hidden = true;
 
     this.refreshSummary();
     this.refreshZebra();
+    this.refreshTooltip(requestItem);
 
     if (aId == this._preferredItemId) {
       this.selectedItem = requestItem;
@@ -498,6 +513,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   copyImageAsDataUri: function() {
     let selected = this.selectedItem.attachment;
     let { mimeType, text, encoding } = selected.responseContent.content;
+
     gNetwork.getString(text).then(aString => {
       let data = "data:" + mimeType + ";" + encoding + "," + aString;
       clipboardHelper.copyString(data, document);
@@ -924,6 +940,19 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   /**
+   * Refreshes the toggling anchor for the specified item's tooltip.
+   *
+   * @param object aItem
+   *        The network request item in this container.
+   */
+  refreshTooltip: function(aItem) {
+    let tooltip = aItem.attachment.tooltip;
+    tooltip.hide();
+    tooltip.startTogglingOnHover(aItem.target, this._onHover);
+    tooltip.defaultPosition = REQUESTS_TOOLTIP_POSITION;
+  },
+
+  /**
    * Schedules adding additional information to a network request.
    *
    * @param string aId
@@ -1011,13 +1040,14 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
             this.updateMenuView(requestItem, key, value);
             break;
           case "responseContent":
-            requestItem.attachment.responseContent = value;
             // If there's no mime type available when the response content
             // is received, assume text/plain as a fallback.
             if (!requestItem.attachment.mimeType) {
               requestItem.attachment.mimeType = "text/plain";
               this.updateMenuView(requestItem, "mimeType", "text/plain");
             }
+            requestItem.attachment.responseContent = value;
+            this.updateMenuView(requestItem, key, value);
             break;
           case "totalTime":
             requestItem.attachment.totalTime = value;
@@ -1051,6 +1081,9 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this.filterContents();
     this.refreshSummary();
     this.refreshZebra();
+
+    // Rescale all the waterfalls so that everything is visible at once.
+    this._flushWaterfallViews();
   },
 
   /**
@@ -1110,9 +1143,9 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
         let nameWithQuery = this._getUriNameWithQuery(uri);
         let hostPort = this._getUriHostPort(uri);
 
-        let node = $(".requests-menu-file", target);
-        node.setAttribute("value", nameWithQuery);
-        node.setAttribute("tooltiptext", nameWithQuery);
+        let file = $(".requests-menu-file", target);
+        file.setAttribute("value", nameWithQuery);
+        file.setAttribute("tooltiptext", nameWithQuery);
 
         let domain = $(".requests-menu-domain", target);
         domain.setAttribute("value", hostPort);
@@ -1144,6 +1177,21 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
         let text = CONTENT_MIME_TYPE_ABBREVIATIONS[type] || type;
         node.setAttribute("value", text);
         node.setAttribute("tooltiptext", aValue);
+        break;
+      }
+      case "responseContent": {
+        let { mimeType } = aItem.attachment;
+        let { text, encoding } = aValue.content;
+
+        if (mimeType.contains("image/")) {
+          gNetwork.getString(text).then(aString => {
+            let node = $(".requests-menu-icon", aItem.target);
+            node.src = "data:" + mimeType + ";" + encoding + "," + aString;
+            node.setAttribute("type", "thumbnail");
+            node.removeAttribute("hidden");
+            window.emit(EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
+          });
+        }
         break;
       }
       case "totalTime": {
@@ -1185,14 +1233,6 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
         timingsNode.insertBefore(timingBox, timingsTotal);
       }
     }
-
-    // Don't paint things while the waterfall view isn't even visible.
-    if (NetMonitorView.currentFrontendMode != "network-inspector-view") {
-      return;
-    }
-
-    // Rescale all the waterfalls so that everything is visible at once.
-    this._flushWaterfallViews();
   },
 
   /**
@@ -1202,6 +1242,12 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    *        True if this container's width was changed.
    */
   _flushWaterfallViews: function(aReset) {
+    // Don't paint things while the waterfall view isn't even visible,
+    // or there are no items added to this container.
+    if (NetMonitorView.currentFrontendMode != "network-inspector-view" || !this.itemCount) {
+      return;
+    }
+
     // To avoid expensive operations like getBoundingClientRect() and
     // rebuilding the waterfall background each time a new request comes in,
     // stuff is cached. However, in certain scenarios like when the window
@@ -1426,14 +1472,52 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   /**
-   * The resize listener for this container's window.
+   * The swap listener for this container.
+   * Called when two items switch places, when the contents are sorted.
    */
-  _onResize: function(e) {
-    // Don't paint things while the waterfall view isn't even visible.
-    if (NetMonitorView.currentFrontendMode != "network-inspector-view") {
+  _onSwap: function({ detail: [firstItem, secondItem] }) {
+    // Sorting will create new anchor nodes for all the swapped request items
+    // in this container, so it's necessary to refresh the Tooltip instances.
+    this.refreshTooltip(firstItem);
+    this.refreshTooltip(secondItem);
+  },
+
+  /**
+   * The predicate used when deciding whether a popup should be shown
+   * over a request item or not.
+   *
+   * @param nsIDOMNode aTarget
+   *        The element node currently being hovered.
+   * @param object aTooltip
+   *        The current tooltip instance.
+   */
+  _onHover: function(aTarget, aTooltip) {
+    let requestItem = this.getItemForElement(aTarget);
+    if (!requestItem || !requestItem.attachment.responseContent) {
       return;
     }
 
+    let hovered = requestItem.attachment;
+    let { url } = hovered;
+    let { mimeType, text, encoding } = hovered.responseContent.content;
+
+    if (mimeType && mimeType.contains("image/") && (
+      aTarget.classList.contains("requests-menu-icon") ||
+      aTarget.classList.contains("requests-menu-file")))
+    {
+      return gNetwork.getString(text).then(aString => {
+        let anchor = $(".requests-menu-icon", requestItem.target);
+        let src = "data:" + mimeType + ";" + encoding + "," + aString;
+        aTooltip.setImageContent(src, { maxDim: REQUESTS_TOOLTIP_IMAGE_MAX_DIM });
+        return anchor;
+      });
+    }
+  },
+
+  /**
+   * The resize listener for this container's window.
+   */
+  _onResize: function(e) {
     // Allow requests to settle down first.
     setNamedTimeout(
       "resize-events", RESIZE_REFRESH_RATE, () => this._flushWaterfallViews(true));
@@ -1631,16 +1715,9 @@ SidebarView.prototype = {
       NetMonitorView.NetworkDetails;
 
     return view.populate(aData).then(() => {
-      $("#details-pane").selectedIndex = isCustom ? 0 : 1
+      $("#details-pane").selectedIndex = isCustom ? 0 : 1;
       window.emit(EVENTS.SIDEBAR_POPULATED);
     });
-  },
-
-  /**
-   * Hides this container.
-   */
-  reset: function() {
-    this.toggle(false);
   }
 }
 
@@ -1838,13 +1915,6 @@ NetworkDetailsView.prototype = {
   },
 
   /**
-   * Resets this container (removes all the networking information).
-   */
-  reset: function() {
-    this._dataSrc = null;
-  },
-
-  /**
    * Populates this view with the specified data.
    *
    * @param object aData
@@ -1860,6 +1930,18 @@ NetworkDetailsView.prototype = {
     $("#response-content-json-box").hidden = true;
     $("#response-content-textarea-box").hidden = true;
     $("#response-content-image-box").hidden = true;
+
+    let isHtml = RequestsMenuView.prototype.isHtml({ attachment: aData });
+
+    // Show the "Preview" tabpanel only for plain HTML responses.
+    $("#preview-tab").hidden = !isHtml;
+    $("#preview-tabpanel").hidden = !isHtml;
+
+    // Switch to the "Headers" tabpanel if the "Preview" previously selected
+    // and this is not an HTML response.
+    if (!isHtml && this.widget.selectedIndex == 5) {
+      this.widget.selectedIndex = 0;
+    }
 
     this._headers.empty();
     this._cookies.empty();
@@ -1907,9 +1989,13 @@ NetworkDetailsView.prototype = {
         case 4: // "Timings"
           yield view._setTimingsInformation(src.eventTimings);
           break;
+        case 5: // "Preview"
+          yield view._setHtmlPreview(src.responseContent);
+          break;
       }
       populated[tab] = true;
       window.emit(EVENTS.TAB_UPDATED);
+      NetMonitorView.RequestsMenu.ensureSelectedItemIsVisible();
     });
   },
 
@@ -2104,32 +2190,45 @@ NetworkDetailsView.prototype = {
     if (!aHeadersResponse || !aPostDataResponse) {
       return promise.resolve();
     }
-    return gNetwork.getString(aPostDataResponse.postData.text).then(aString => {
-      // Handle query strings (poor man's forms, e.g. "?foo=bar&baz=42").
-      let cType = aHeadersResponse.headers.filter(({ name }) => name == "Content-Type")[0];
-      let cString = cType ? cType.value : "";
-      if (cString.contains("x-www-form-urlencoded") ||
-          aString.contains("x-www-form-urlencoded")) {
-        let formDataGroups = aString.split(/\r\n|\n|\r/);
-        for (let group of formDataGroups) {
-          this._addParams(this._paramsFormData, group);
-        }
-      }
-      // Handle actual forms ("multipart/form-data" content type).
-      else {
-        // This is really awkward, but hey, it works. Let's show an empty
-        // scope in the params view and place the source editor containing
-        // the raw post data directly underneath.
-        $("#request-params-box").removeAttribute("flex");
-        let paramsScope = this._params.addScope(this._paramsPostPayload);
-        paramsScope.expanded = true;
-        paramsScope.locked = true;
+    return gNetwork.getString(aPostDataResponse.postData.text).then(aPostData => {
+      let contentTypeHeader = aHeadersResponse.headers.filter(({ name }) => name == "Content-Type")[0];
+      let contentTypeLongString = contentTypeHeader ? contentTypeHeader.value : "";
 
-        $("#request-post-data-textarea-box").hidden = false;
-        return NetMonitorView.editor("#request-post-data-textarea").then(aEditor => {
-          aEditor.setText(aString);
-        });
-      }
+      return gNetwork.getString(contentTypeLongString).then(aContentType => {
+        let urlencoded = "x-www-form-urlencoded";
+
+        // Handle query strings (poor man's forms, e.g. "?foo=bar&baz=42").
+        if (aContentType.contains(urlencoded)) {
+          let formDataGroups = aPostData.split(/\r\n|\r|\n/);
+          for (let group of formDataGroups) {
+            this._addParams(this._paramsFormData, group);
+          }
+        }
+        // Handle actual forms ("multipart/form-data" content type).
+        else {
+          // This is really awkward, but hey, it works. Let's show an empty
+          // scope in the params view and place the source editor containing
+          // the raw post data directly underneath.
+          $("#request-params-box").removeAttribute("flex");
+          let paramsScope = this._params.addScope(this._paramsPostPayload);
+          paramsScope.expanded = true;
+          paramsScope.locked = true;
+
+          $("#request-post-data-textarea-box").hidden = false;
+          return NetMonitorView.editor("#request-post-data-textarea").then(aEditor => {
+            // Most POST bodies are usually JSON, so they can be neatly
+            // syntax highlighted as JS. Otheriwse, fall back to plain text.
+            try {
+              JSON.parse(aPostData);
+              aEditor.setMode(Editor.modes.js);
+            } catch (e) {
+              aEditor.setMode(Editor.modes.text);
+            } finally {
+              aEditor.setText(aPostData);
+            }
+          });
+        }
+      });
     }).then(() => window.emit(EVENTS.REQUEST_POST_PARAMS_DISPLAYED));
   },
 
@@ -2150,8 +2249,8 @@ NetworkDetailsView.prototype = {
     paramsScope.expanded = true;
 
     for (let param of paramsArray) {
-      let headerVar = paramsScope.addItem(param.name, {}, true);
-      headerVar.setGrip(param.value);
+      let paramVar = paramsScope.addItem(param.name, {}, true);
+      paramVar.setGrip(param.value);
     }
   },
 
@@ -2343,6 +2442,30 @@ NetworkDetailsView.prototype = {
       .style.transform = "translateX(" + (scale * (blocked + dns + connect + send)) + "px)";
     $("#timings-summary-receive .requests-menu-timings-total")
       .style.transform = "translateX(" + (scale * (blocked + dns + connect + send + wait)) + "px)";
+  },
+
+  /**
+   * Sets the preview for HTML responses shown in this view.
+   *
+   * @param object aResponse
+   *        The message received from the server.
+   * @return object
+   *        A promise that is resolved when the response body is set
+   */
+  _setHtmlPreview: function(aResponse) {
+    if (!aResponse) {
+      return promise.resolve();
+    }
+    let { text } = aResponse.content;
+    let iframe = $("#response-preview");
+
+    return gNetwork.getString(text).then(aString => {
+      // Always disable JS when previewing HTML responses.
+      iframe.contentDocument.docShell.allowJavascript = false;
+      iframe.contentDocument.documentElement.innerHTML = aString;
+
+      window.emit(EVENTS.RESPONSE_HTML_PREVIEW_DISPLAYED);
+    });
   },
 
   _dataSrc: null,
@@ -2570,14 +2693,16 @@ nsIURL.store = new Map();
  */
 function parseQueryString(aQueryString) {
   // Make sure there's at least one param available.
-  if (!aQueryString || !aQueryString.contains("=")) {
+  // Be careful here, params don't necessarily need to have values, so
+  // no need to verify the existence of a "=".
+  if (!aQueryString) {
     return;
   }
   // Turn the params string into an array containing { name: value } tuples.
   let paramsArray = aQueryString.replace(/^[?&]/, "").split("&").map(e =>
     let (param = e.split("=")) {
-      name: NetworkHelper.convertToUnicode(unescape(param[0])),
-      value: NetworkHelper.convertToUnicode(unescape(param[1]))
+      name: param[0] ? NetworkHelper.convertToUnicode(unescape(param[0])) : "",
+      value: param[1] ? NetworkHelper.convertToUnicode(unescape(param[1])) : ""
     });
   return paramsArray;
 }

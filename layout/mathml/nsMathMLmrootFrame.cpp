@@ -145,7 +145,7 @@ GetRadicalXOffsets(nscoord aIndexWidth, nscoord aSqrWidth,
     *aSqrOffset = dxSqr;
 }
 
-NS_IMETHODIMP
+nsresult
 nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
                            nsHTMLReflowMetrics&     aDesiredSize,
                            const nsHTMLReflowState& aReflowState,
@@ -375,8 +375,9 @@ nsMathMLmrootFrame::GetIntrinsicWidthMetrics(nsRenderingContext* aRenderingConte
   nscoord sqrWidth = mSqrChar.GetMaxWidth(PresContext(), *aRenderingContext);
 
   nscoord dxSqr;
-  GetRadicalXOffsets(indexWidth, sqrWidth, aRenderingContext->FontMetrics(),
-                     nullptr, &dxSqr);
+  nsRefPtr<nsFontMetrics> fm;
+  nsLayoutUtils::GetFontMetricsForFrame(this, getter_AddRefs(fm));
+  GetRadicalXOffsets(indexWidth, sqrWidth, fm, nullptr, &dxSqr);
 
   nscoord width = dxSqr + sqrWidth + baseWidth;
 

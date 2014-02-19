@@ -92,6 +92,9 @@ GrallocImage::SetData(const Data& aData)
                                        GraphicBuffer::USAGE_SW_WRITE_OFTEN |
                                        GraphicBuffer::USAGE_HW_TEXTURE,
                                        &desc);
+    if (desc.type() == SurfaceDescriptor::T__None) {
+      return;
+    }
     mBufferAllocated = true;
     mGraphicBufferLocked = new GraphicBufferLocked(desc);
   }
@@ -380,7 +383,7 @@ GrallocImage::GetAsSourceSurface()
 
 
 TextureClient*
-GrallocImage::GetTextureClient()
+GrallocImage::GetTextureClient(CompositableClient* aClient)
 {
   if (!mTextureClient) {
     const SurfaceDescriptor& sd = GetSurfaceDescriptor();

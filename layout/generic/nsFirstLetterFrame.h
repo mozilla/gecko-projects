@@ -26,10 +26,10 @@ public:
   virtual void Init(nsIContent*      aContent,
                     nsIFrame*        aParent,
                     nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
-  NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
@@ -53,20 +53,20 @@ public:
                              nsSize aCBSize, nscoord aAvailableWidth,
                              nsSize aMargin, nsSize aBorder, nsSize aPadding,
                              uint32_t aFlags) MOZ_OVERRIDE;
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   virtual bool CanContinueTextRun() const MOZ_OVERRIDE;
   virtual nscoord GetBaseline() const MOZ_OVERRIDE;
   virtual int GetSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const MOZ_OVERRIDE;
 
 //override of nsFrame method
-  NS_IMETHOD GetChildFrameContainingOffset(int32_t inContentOffset,
-                                           bool inHint,
-                                           int32_t* outFrameContentOffset,
-                                           nsIFrame **outChildFrame) MOZ_OVERRIDE;
+  virtual nsresult GetChildFrameContainingOffset(int32_t inContentOffset,
+                                                 bool inHint,
+                                                 int32_t* outFrameContentOffset,
+                                                 nsIFrame** outChildFrame) MOZ_OVERRIDE;
 
   nscoord GetFirstLetterBaseline() const { return mBaseline; }
 

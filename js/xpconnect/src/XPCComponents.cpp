@@ -2157,7 +2157,7 @@ nsXPCConstructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,JSContext *
 
     JS::Rooted<JS::Value> arg(cx, ObjectValue(*iidObj));
     RootedValue rval(cx);
-    if (!JS_CallFunctionName(cx, cidObj, "createInstance", arg, rval.address()) ||
+    if (!JS_CallFunctionName(cx, cidObj, "createInstance", arg, &rval) ||
         rval.isPrimitive()) {
         // createInstance will have thrown an exception
         *_retval = false;
@@ -2177,7 +2177,7 @@ nsXPCConstructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,JSContext *
         }
 
         RootedValue dummy(cx);
-        if (!JS_CallFunctionValue(cx, newObj, fun, args, dummy.address())) {
+        if (!JS_CallFunctionValue(cx, newObj, fun, args, &dummy)) {
             // function should have thrown an exception
             *_retval = false;
             return NS_OK;
@@ -3382,7 +3382,7 @@ nsXPCComponents_Utils::GetIncumbentGlobal(HandleValue aCallback,
     // Invoke the callback, if passed.
     if (aCallback.isObject()) {
         RootedValue ignored(aCx);
-        if (!JS_CallFunctionValue(aCx, nullptr, aCallback, globalVal, ignored.address()))
+        if (!JS_CallFunctionValue(aCx, JS::NullPtr(), aCallback, globalVal, &ignored))
             return NS_ERROR_FAILURE;
     }
 
@@ -3623,6 +3623,19 @@ nsXPCComponents_Utils::CloneInto(HandleValue aValue, HandleValue aScope,
     if (!JS_WrapValue(aCx, aCloned))
         return NS_ERROR_FAILURE;
 
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::GetWebIDLCallerPrincipal(nsIPrincipal **aResult)
+{
+    // This API may only be when the Entry Settings Object corresponds to a
+    // JS-implemented WebIDL call. In all other cases, the value will be null,
+    // and we throw.
+    nsCOMPtr<nsIPrincipal> callerPrin = mozilla::dom::GetWebIDLCallerPrincipal();
+    if (!callerPrin)
+        return NS_ERROR_NOT_AVAILABLE;
+    callerPrin.forget(aResult);
     return NS_OK;
 }
 

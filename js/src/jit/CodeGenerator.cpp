@@ -3568,7 +3568,6 @@ CodeGenerator::visitNewCallObject(LNewCallObject *lir)
     Register obj = ToRegister(lir->output());
 
     JSObject *templateObj = lir->mir()->templateObject();
-    AutoThreadSafeAccess ts(templateObj);
 
     // If we have a template object, we can inline call object creation.
     OutOfLineCode *ool;
@@ -6570,11 +6569,11 @@ CodeGenerator::visitNameIC(OutOfLineUpdateCache *ool, DataPtr<NameIC> &ic)
 bool
 CodeGenerator::addGetPropertyCache(LInstruction *ins, RegisterSet liveRegs, Register objReg,
                                    PropertyName *name, TypedOrValueRegister output,
-                                   bool allowGetters, bool monitoredResult)
+                                   bool monitoredResult)
 {
     switch (gen->info().executionMode()) {
       case SequentialExecution: {
-        GetPropertyIC cache(liveRegs, objReg, name, output, allowGetters, monitoredResult);
+        GetPropertyIC cache(liveRegs, objReg, name, output, monitoredResult);
         return addCache(ins, allocateCache(cache));
       }
       case ParallelExecution: {
@@ -6632,11 +6631,10 @@ CodeGenerator::visitGetPropertyCacheV(LGetPropertyCacheV *ins)
     RegisterSet liveRegs = ins->safepoint()->liveRegs();
     Register objReg = ToRegister(ins->getOperand(0));
     PropertyName *name = ins->mir()->name();
-    bool allowGetters = ins->mir()->allowGetters();
     bool monitoredResult = ins->mir()->monitoredResult();
     TypedOrValueRegister output = TypedOrValueRegister(GetValueOutput(ins));
 
-    return addGetPropertyCache(ins, liveRegs, objReg, name, output, allowGetters, monitoredResult);
+    return addGetPropertyCache(ins, liveRegs, objReg, name, output, monitoredResult);
 }
 
 bool
@@ -6645,11 +6643,10 @@ CodeGenerator::visitGetPropertyCacheT(LGetPropertyCacheT *ins)
     RegisterSet liveRegs = ins->safepoint()->liveRegs();
     Register objReg = ToRegister(ins->getOperand(0));
     PropertyName *name = ins->mir()->name();
-    bool allowGetters = ins->mir()->allowGetters();
     bool monitoredResult = ins->mir()->monitoredResult();
     TypedOrValueRegister output(ins->mir()->type(), ToAnyRegister(ins->getDef(0)));
 
-    return addGetPropertyCache(ins, liveRegs, objReg, name, output, allowGetters, monitoredResult);
+    return addGetPropertyCache(ins, liveRegs, objReg, name, output, monitoredResult);
 }
 
 typedef bool (*GetPropertyICFn)(JSContext *, size_t, HandleObject, MutableHandleValue);
@@ -8006,8 +8003,8 @@ CodeGenerator::visitAsmJSCall(LAsmJSCall *ins)
 {
     MAsmJSCall *mir = ins->mir();
 
-#if defined(JS_CODEGEN_ARM) && !defined(JS_CODEGEN_ARM_HARDFP)
-    if (mir->callee().which() == MAsmJSCall::Callee::Builtin) {
+#if defined(JS_CODEGEN_ARM)
+    if (!useHardFpABI() && mir->callee().which() == MAsmJSCall::Callee::Builtin) {
         for (unsigned i = 0, e = ins->numOperands(); i < e; i++) {
             LAllocation *a = ins->getOperand(i);
             if (a->isFloatReg()) {

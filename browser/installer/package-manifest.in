@@ -92,15 +92,9 @@
 #elif MOZ_MSVC_REDIST == 1700
 @BINPATH@/msvcp110.dll
 @BINPATH@/msvcr110.dll
-#ifdef MOZ_METRO
-@BINPATH@/vccorlib110.dll
-#endif
 #elif MOZ_MSVC_REDIST == 1800
 @BINPATH@/msvcp120.dll
 @BINPATH@/msvcr120.dll
-#ifdef MOZ_METRO
-@BINPATH@/vccorlib120.dll
-#endif
 #endif
 #endif
 #endif
@@ -197,7 +191,6 @@
 #ifdef MOZ_B2G_BT
 @BINPATH@/components/dom_bluetooth.xpt
 #endif
-@BINPATH@/components/dom_camera.xpt
 @BINPATH@/components/dom_canvas.xpt
 @BINPATH@/components/dom_alarm.xpt
 @BINPATH@/components/dom_core.xpt
@@ -583,6 +576,11 @@
 ; InputMethod API
 @BINPATH@/components/MozKeyboard.js
 @BINPATH@/components/InputMethod.manifest
+
+#ifdef MOZ_DEBUG
+@BINPATH@/components/TestInterfaceJS.js
+@BINPATH@/components/TestInterfaceJS.manifest
+#endif
 
 ; Modules
 @BINPATH@/browser/modules/*

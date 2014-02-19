@@ -5,15 +5,15 @@
 
 package org.mozilla.gecko.webapp;
 
+import org.mozilla.gecko.ActivityHandlerHelper;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.favicons.decoders.FaviconDecoder;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.ActivityResultHandler;
-import org.mozilla.gecko.util.EventDispatcher;
+import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.util.GeckoEventListener;
-import org.mozilla.gecko.util.GeckoEventResponder;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.WebappAllocator;
 
@@ -38,14 +38,13 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-public class EventListener implements GeckoEventListener, GeckoEventResponder {
+public class EventListener implements GeckoEventListener {
 
     private static final String LOGTAG = "GeckoWebappEventListener";
 
     private EventListener() { }
 
     private static EventListener mEventListener;
-    private String mCurrentResponse = "";
 
     private static EventListener getEventListener() {
         if (mEventListener == null) {
@@ -110,21 +109,18 @@ public class EventListener implements GeckoEventListener, GeckoEventResponder {
                 String manifestURL = message.getString("manifestURL");
                 String origin = message.getString("origin");
 
-                // preInstallWebapp will return a File object pointing to the profile directory of the webapp
-                mCurrentResponse = preInstallWebapp(name, manifestURL, origin).toString();
+                JSONObject obj = new JSONObject();
+                obj.put("profile", preInstallWebapp(name, manifestURL, origin).toString());
+                EventDispatcher.sendResponse(message, obj);
             } else if (event.equals("WebApps:GetApkVersions")) {
-                mCurrentResponse = getApkVersions(GeckoAppShell.getGeckoInterface().getActivity(),
-                                                  message.getJSONArray("packageNames")).toString();
+                JSONObject obj = new JSONObject();
+                obj.put("versions", getApkVersions(GeckoAppShell.getGeckoInterface().getActivity(),
+                                                   message.getJSONArray("packageNames")).toString());
+                EventDispatcher.sendResponse(message, obj);
             }
         } catch (Exception e) {
             Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
         }
-    }
-
-    public String getResponse(JSONObject origMessage) {
-        String res = mCurrentResponse;
-        mCurrentResponse = "";
-        return res;
     }
 
     // Not used by MOZ_ANDROID_SYNTHAPKS.
@@ -228,7 +224,7 @@ public class EventListener implements GeckoEventListener, GeckoEventResponder {
         intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
 
         // Now call the package installer.
-        GeckoAppShell.sActivityHelper.startIntentForActivity(context, intent, new ActivityResultHandler() {
+        ActivityHandlerHelper.startIntentForActivity(context, intent, new ActivityResultHandler() {
             @Override
             public void onActivityResult(int resultCode, Intent data) {
                 // The InstallListener will catch the case where the user pressed install.

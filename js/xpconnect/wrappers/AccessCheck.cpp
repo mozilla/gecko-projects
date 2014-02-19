@@ -42,18 +42,7 @@ AccessCheck::subsumes(JSCompartment *a, JSCompartment *b)
 {
     nsIPrincipal *aprin = GetCompartmentPrincipal(a);
     nsIPrincipal *bprin = GetCompartmentPrincipal(b);
-
-    // If either a or b doesn't have principals, we don't have enough
-    // information to tell. Seeing as how this is Gecko, we are default-unsafe
-    // in this case.
-    if (!aprin || !bprin)
-        return true;
-
-    bool subsumes;
-    nsresult rv = aprin->Subsumes(bprin, &subsumes);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    return subsumes;
+    return aprin->Subsumes(bprin);
 }
 
 bool
@@ -62,21 +51,13 @@ AccessCheck::subsumes(JSObject *a, JSObject *b)
     return subsumes(js::GetObjectCompartment(a), js::GetObjectCompartment(b));
 }
 
-// Same as above, but ignoring document.domain.
+// Same as above, but considering document.domain.
 bool
-AccessCheck::subsumesIgnoringDomain(JSCompartment *a, JSCompartment *b)
+AccessCheck::subsumesConsideringDomain(JSCompartment *a, JSCompartment *b)
 {
     nsIPrincipal *aprin = GetCompartmentPrincipal(a);
     nsIPrincipal *bprin = GetCompartmentPrincipal(b);
-
-    if (!aprin || !bprin)
-        return false;
-
-    bool subsumes;
-    nsresult rv = aprin->SubsumesIgnoringDomain(bprin, &subsumes);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    return subsumes;
+    return aprin->SubsumesConsideringDomain(bprin);
 }
 
 // Does the compartment of the wrapper subsumes the compartment of the wrappee?
@@ -217,12 +198,9 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, j
     RootedObject wrapper(cx, wrapperArg);
     RootedObject obj(cx, Wrapper::wrappedObject(wrapper));
 
-    // Enumerate-like operations pass JSID_VOID to |enter|, since there isn't
-    // another sane value to pass. For XOWs, we generally want to deny such
-    // operations but fail silently (see CrossOriginAccessiblePropertiesOnly::
-    // deny). We could just fall through here and rely on the fact that none
-    // of the whitelisted properties below will match JSID_VOID, but EIBTI.
-    if (id == JSID_VOID)
+    // For XOWs, we generally want to deny enumerate-like operations, but fail
+    // silently (see CrossOriginAccessiblePropertiesOnly::deny).
+    if (act == Wrapper::ENUMERATE)
         return false;
 
     const char *name;

@@ -82,13 +82,12 @@ readTextureImageFS_TEXTURE_RECTANGLE[] =
     "void main() { gl_FragColor = texture2DRect(uTexture, vTexCoord).bgra; }";
 
 GLuint
-GLReadTexImageHelper::TextureImageProgramFor(GLenum aTextureTarget, int aShader) {
+GLReadTexImageHelper::TextureImageProgramFor(GLenum aTextureTarget, int aConfig) {
     int variant = 0;
     const GLchar* readTextureImageFS = nullptr;
     if (aTextureTarget == LOCAL_GL_TEXTURE_2D)
     {
-        if (aShader == layers::BGRALayerProgramType ||
-            aShader == layers::BGRXLayerProgramType)
+        if (aConfig & mozilla::layers::ENABLE_TEXTURE_RB_SWAP)
         {   // Need to swizzle R/B.
             readTextureImageFS = readTextureImageFS_TEXTURE_2D_BGRA;
             variant = 1;
@@ -156,7 +155,8 @@ GLReadTexImageHelper::DidGLErrorOccur(const char* str)
 }
 
 static bool
-GetActualReadFormats(GLContext* gl, GLenum destFormat, GLenum destType,
+GetActualReadFormats(GLContext* gl,
+                     GLenum destFormat, GLenum destType,
                      GLenum& readFormat, GLenum& readType)
 {
     if (destFormat == LOCAL_GL_RGBA &&
@@ -231,16 +231,43 @@ static void SwapRAndBComponents(DataSourceSurface* surf)
   }
 }
 
+static int
+CalcStride(int width, int pixelSize, int alignment)
+{
+    MOZ_ASSERT(alignment);
+
+    int stride = width * pixelSize;
+    if (stride % alignment) { // Extra at the end of the line?
+        int alignmentCount = stride / alignment;
+        stride = (alignmentCount+1) * alignment;
+    }
+    return stride;
+}
+
+static int
+GuessAlignment(int width, int pixelSize, int stride)
+{
+    int alignment = 8; // Max GLES allows.
+    while (CalcStride(width, pixelSize, alignment) != stride) {
+        alignment /= 2;
+        if (!alignment) {
+            MOZ_ASSERT(alignment);
+            return 1;
+        }
+    }
+    return alignment;
+}
+
 void
 ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
     gl->MakeCurrent();
     MOZ_ASSERT(dest->GetSize() != gfxIntSize(0, 0));
 
     /* gfxImageFormat::ARGB32:
-     * RGBA+UByte: be[RGBA], le[ABGR]
-     * RGBA+UInt: le[RGBA]
-     * BGRA+UInt: le[BGRA]
-     * BGRA+UIntRev: le[ARGB]
+     * RGBA+UByte:   be[RGBA], le[ABGR]
+     * RGBA+UInt:    be[ABGR], le[RGBA]
+     * BGRA+UInt:    be[ARGB], le[BGRA]
+     * BGRA+UIntRev: be[BGRA], le[ARGB]
      *
      * gfxImageFormat::RGB16_565:
      * RGB+UShort: le[rrrrrggg,gggbbbbb]
@@ -269,7 +296,7 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
         default:
             MOZ_CRASH("Bad format.");
     }
-    MOZ_ASSERT(dest->Stride() == dest->Width() * destPixelSize);
+    MOZ_ASSERT(dest->Width() * destPixelSize <= dest->Stride());
 
     GLenum readFormat = destFormat;
     GLenum readType = destType;
@@ -279,7 +306,7 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
 
     nsAutoPtr<gfxImageSurface> tempSurf;
     gfxImageSurface* readSurf = nullptr;
-    int readPixelSize = 0;
+    int readAlignment = 0;
     if (needsTempSurf) {
         if (gl->DebugMode()) {
             NS_WARNING("Needing intermediary surface for ReadPixels. This will be slow!");
@@ -294,7 +321,7 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
                 break;
             }
             case LOCAL_GL_RGB: {
-                MOZ_ASSERT(readPixelSize == 2);
+                MOZ_ASSERT(destPixelSize == 2);
                 MOZ_ASSERT(readType == LOCAL_GL_UNSIGNED_SHORT_5_6_5_REV);
                 readFormatGFX = SurfaceFormat::R5G6B5;
                 break;
@@ -307,17 +334,17 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
         switch (readType) {
             case LOCAL_GL_UNSIGNED_BYTE: {
                 MOZ_ASSERT(readFormat == LOCAL_GL_RGBA);
-                readPixelSize = 4;
+                readAlignment = 1;
                 break;
             }
             case LOCAL_GL_UNSIGNED_INT_8_8_8_8_REV: {
                 MOZ_ASSERT(readFormat == LOCAL_GL_BGRA);
-                readPixelSize = 4;
+                readAlignment = 4;
                 break;
             }
             case LOCAL_GL_UNSIGNED_SHORT_5_6_5_REV: {
                 MOZ_ASSERT(readFormat == LOCAL_GL_RGB);
-                readPixelSize = 2;
+                readAlignment = 2;
                 break;
             }
             default: {
@@ -330,16 +357,20 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
                                        false);
         readSurf = tempSurf;
     } else {
-        readPixelSize = destPixelSize;
+        // Figure out alignment. We don't need to know why, we just need it
+        // to be valid.
+        readAlignment = GuessAlignment(dest->Width(),
+                                       destPixelSize,
+                                       dest->Stride());
         readSurf = dest;
     }
-    MOZ_ASSERT(readPixelSize);
+    MOZ_ASSERT(readAlignment);
 
     GLint currentPackAlignment = 0;
     gl->fGetIntegerv(LOCAL_GL_PACK_ALIGNMENT, &currentPackAlignment);
 
-    if (currentPackAlignment != readPixelSize)
-        gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, readPixelSize);
+    if (currentPackAlignment != readAlignment)
+        gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, readAlignment);
 
     GLsizei width = dest->Width();
     GLsizei height = dest->Height();
@@ -351,7 +382,7 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
                     readSurf->Data());
     readSurf->MarkDirty();
 
-    if (currentPackAlignment != readPixelSize)
+    if (currentPackAlignment != readAlignment)
         gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, currentPackAlignment);
 
     if (readSurf != dest) {
@@ -386,6 +417,8 @@ ReadPixelsIntoImageSurface(GLContext* gl, gfxImageSurface* dest) {
         gl->fGetIntegerv(LOCAL_GL_ALPHA_BITS, &alphaBits);
         if (!alphaBits) {
             const uint32_t alphaMask = gfxPackedPixelNoPreMultiply(0xff,0,0,0);
+
+            MOZ_ASSERT(dest->Width() * destPixelSize == dest->Stride());
 
             dest->Flush();
             uint32_t* itr = (uint32_t*)dest->Data();
@@ -490,12 +523,9 @@ already_AddRefed<gfxImageSurface>
 GLReadTexImageHelper::ReadTexImage(GLuint aTextureId,
                                    GLenum aTextureTarget,
                                    const gfxIntSize& aSize,
-           /* ShaderProgramType */ int aShaderProgram,
+    /* ShaderConfigOGL.mFeature */ int aConfig,
                                    bool aYInvert)
 {
-    // Check aShaderProgram is in bounds for a layers::ShaderProgramType
-    MOZ_ASSERT(0 <= aShaderProgram && aShaderProgram < layers::NumProgramTypes);
-
     MOZ_ASSERT(aTextureTarget == LOCAL_GL_TEXTURE_2D ||
                aTextureTarget == LOCAL_GL_TEXTURE_EXTERNAL ||
                aTextureTarget == LOCAL_GL_TEXTURE_RECTANGLE_ARB);
@@ -556,8 +586,7 @@ GLReadTexImageHelper::ReadTexImage(GLuint aTextureId,
         MOZ_ASSERT(mGL->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER) == LOCAL_GL_FRAMEBUFFER_COMPLETE);
 
         /* Setup vertex and fragment shader */
-        layers::ShaderProgramType shaderProgram = (layers::ShaderProgramType) aShaderProgram;
-        GLuint program = TextureImageProgramFor(aTextureTarget, shaderProgram);
+        GLuint program = TextureImageProgramFor(aTextureTarget, aConfig);
         MOZ_ASSERT(program);
 
         mGL->fUseProgram(program);

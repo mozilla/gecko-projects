@@ -11289,7 +11289,8 @@ class CallbackMember(CGNativeMember):
         if self.rethrowContentException:
             # getArgs doesn't add the aExceptionHandling argument but does add
             # aCompartment for us.
-            callSetup += ", eRethrowContentExceptions, aCompartment"
+            callSetup += ", eRethrowContentExceptions, aCompartment, /* aIsJSImplementedWebIDL = */ "
+            callSetup += toStringBool(isJSImplementedDescriptor(self.descriptorProvider))
         else:
             callSetup += ", aExceptionHandling"
         callSetup += ");"
@@ -11332,15 +11333,16 @@ class CallbackMethod(CallbackMember):
     def getCall(self):
         replacements = {
             "errorReturn" : self.getDefaultRetval(),
+            "declThis": self.getThisDecl(),
             "thisVal": self.getThisVal(),
-            "getCallable": self.getCallableDecl(),
+            "declCallable": self.getCallableDecl(),
             "callGuard": self.getCallGuard()
             }
         if self.argCount > 0:
             replacements["args"] = "JS::HandleValueArray::subarray(argv, 0, argc)"
         else:
             replacements["args"] = "JS::EmptyValueArray"
-        return string.Template("${getCallable}"
+        return string.Template("${declCallable}${declThis}"
                 "if (${callGuard}!JS::Call(cx, ${thisVal}, callable,\n"
                 "              ${args}, &rval)) {\n"
                 "  aRv.Throw(NS_ERROR_UNEXPECTED);\n"
@@ -11352,6 +11354,9 @@ class CallCallback(CallbackMethod):
         self.callback = callback
         CallbackMethod.__init__(self, callback.signatures()[0], "Call",
                                 descriptorProvider, needThisHandling=True)
+
+    def getThisDecl(self):
+        return ""
 
     def getThisVal(self):
         return "aThisVal"
@@ -11376,13 +11381,18 @@ class CallbackOperationBase(CallbackMethod):
         self.methodName = descriptor.binaryNames.get(jsName, jsName)
         CallbackMethod.__init__(self, signature, nativeName, descriptor, singleOperation, rethrowContentException)
 
-    def getThisVal(self):
+    def getThisDecl(self):
         if not self.singleOperation:
-            return "JS::ObjectValue(*mCallback)"
+            return "JS::Rooted<JS::Value> thisValue(cx, JS::ObjectValue(*mCallback));\n"
         # This relies on getCallableDecl declaring a boolean
         # isCallable in the case when we're a single-operation
         # interface.
-        return "isCallable ? aThisVal.get() : JS::ObjectValue(*mCallback)"
+        return (
+            'JS::Rooted<JS::Value> thisValue(cx, isCallable ? aThisVal.get()\n'
+            '                                               : JS::ObjectValue(*mCallback));\n')
+
+    def getThisVal(self):
+        return "thisValue"
 
     def getCallableDecl(self):
         replacements = {

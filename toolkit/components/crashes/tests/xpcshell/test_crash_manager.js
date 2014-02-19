@@ -5,7 +5,7 @@
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/CrashManager.jsm", this);
+let bsp = Cu.import("resource://gre/modules/CrashManager.jsm", this);
 Cu.import("resource://gre/modules/Promise.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://gre/modules/osfile.jsm", this);
@@ -41,8 +41,6 @@ add_task(function* test_get_manager() {
 
   yield m.createDummyDump(true);
   yield m.createDummyDump(false);
-
-  run_next_test();
 });
 
 // Unsubmitted dump files on disk are detected properly.
@@ -257,4 +255,25 @@ add_task(function* test_plugin_hang_event_file() {
 
   count = yield m.aggregateEventsFiles();
   Assert.equal(count, 0);
+});
+
+// Excessive amounts of files should be processed properly.
+add_task(function* test_high_water_mark() {
+  let m = yield getManager();
+
+  let store = yield m._getStore();
+
+  for (let i = 0; i < store.HIGH_WATER_DAILY_THRESHOLD + 1; i++) {
+    yield m.createEventsFile("m" + i, "crash.main.1", DUMMY_DATE, "m" + i);
+    yield m.createEventsFile("pc" + i, "crash.plugin.1", DUMMY_DATE, "pc" + i);
+    yield m.createEventsFile("ph" + i, "hang.plugin.1", DUMMY_DATE, "ph" + i);
+  }
+
+  let count = yield m.aggregateEventsFiles();
+  Assert.equal(count, 3 * bsp.CrashStore.prototype.HIGH_WATER_DAILY_THRESHOLD + 3);
+
+  // Need to fetch again in case the first one was garbage collected.
+  store = yield m._getStore();
+  // +1 is for preserved main process crash.
+  Assert.equal(store.crashesCount, 3 * store.HIGH_WATER_DAILY_THRESHOLD + 1);
 });

@@ -507,6 +507,13 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
   -moz-margin-start: 10px;
 }
 
+#nav-bar #PanelUI-menu-button {
+  margin-top: 0;
+  margin-bottom: 0;
+  -moz-margin-start: 9px;
+  -moz-margin-end: 7px;
+}
+
 @media not all and (min-resolution: 2dppx) {
 %include ../shared/toolbarbuttons.inc.css
 %include ../shared/menupanel.inc.css
@@ -1169,6 +1176,7 @@ toolbar .toolbarbutton-1:not([type="menu-button"]),
     -moz-image-region: rect(0px, 192px, 32px, 160px);
   }
 
+  #PanelUI-fxa-status > .toolbarbutton-icon,
   #PanelUI-quit > .toolbarbutton-icon,
   #PanelUI-customize > .toolbarbutton-icon,
   #PanelUI-help > .toolbarbutton-icon {
@@ -1270,6 +1278,10 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
 
 .toolbarbutton-1 > menupopup {
   margin-top: 1px;
+}
+
+.toolbarbutton-1 > menupopup.cui-widget-panel {
+  margin-top: -5px;
 }
 
 /* Common back and forward button styles */
@@ -2423,11 +2435,11 @@ richlistitem[type~="action"][actiontype="switchtab"][selected="true"] > .ac-url-
 .panel-promo-box {
   margin: 8px -16px -16px -16px;
   padding: 8px 16px;
-  background: #e5e5e5;
-  border-top: 1px solid hsla(0,0%,0%,.1);
+  background-color: hsla(210,4%,10%,.07);
+  border-top: 1px solid hsla(210,4%,10%,.12);
   border-radius: 0 0 5px 5px;
   box-shadow: 0 -1px hsla(0,0%,100%,.5) inset, 0 1px 1px hsla(0,0%,0%,.03) inset;
-  color: #808080;
+  color: hsl(0,0%,30%);
 }
 
 .panel-promo-icon {
@@ -3203,6 +3215,10 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   }
 }
 
+#identity-popup {
+  margin-top: 1px;
+}
+
 #identity-popup > .panel-arrowcontainer > .panel-arrowcontent {
   padding: 0;
 }
@@ -3212,7 +3228,8 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
 }
 
 #identity-popup-button-container {
-  background: linear-gradient(to bottom, rgba(0,0,0,0.04) 60%, transparent);
+  background-color: hsla(210,4%,10%,.07);
+  border-top: 1px solid hsla(210,4%,10%,.12);
   padding: 16px;
   margin-top: 5px;
 }
@@ -4011,7 +4028,6 @@ toolbar[mode="icons"] > *|* > .toolbarbutton-badge[badge]:not([badge=""]):-moz-l
 }
 
 #social-share-panel {
-  margin-top: 3px;
   max-height: 600px;
   min-height: 100px;
   max-width: 800px;

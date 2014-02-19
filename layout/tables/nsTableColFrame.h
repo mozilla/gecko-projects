@@ -48,10 +48,10 @@ public:
 
   nsTableColFrame* GetNextCol() const;
 
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*          aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   /**
    * Table columns never paint anything, nor receive events.
@@ -68,7 +68,7 @@ public:
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
   
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   virtual nsSplittableType GetSplittableType() const MOZ_OVERRIDE;

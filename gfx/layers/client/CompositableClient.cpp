@@ -19,6 +19,13 @@
 #endif
 #ifdef MOZ_X11
 #include "mozilla/layers/TextureClientX11.h"
+#ifdef GL_PROVIDER_GLX
+#include "GLXLibrary.h"
+#endif
+#endif
+#ifdef MOZ_WIDGET_GONK
+#include <cutils/properties.h>
+#include "mozilla/layers/GrallocTextureClient.h"
 #endif
 
 using namespace mozilla::gfx;
@@ -192,6 +199,39 @@ CompositableClient::CreateBufferTextureClient(SurfaceFormat aFormat,
   return result.forget();
 }
 
+#ifdef MOZ_WIDGET_GONK
+static bool
+DisableGralloc(SurfaceFormat aFormat)
+{
+  if (aFormat == gfx::SurfaceFormat::A8) {
+    return true;
+  }
+#if ANDROID_VERSION <= 15
+  static bool checkedDevice = false;
+  static bool disableGralloc = false;
+
+  if (!checkedDevice) {
+    char propValue[PROPERTY_VALUE_MAX];
+    property_get("ro.product.device", propValue, "None");
+
+    if (strcmp("crespo",propValue) == 0) {
+      NS_WARNING("Nexus S has issues with gralloc, falling back to shmem");
+      disableGralloc = true;
+    }
+
+    checkedDevice = true;
+  }
+
+  if (disableGralloc) {
+    return true;
+  }
+  return false;
+#else
+  return false;
+#endif
+}
+#endif
+
 TemporaryRef<TextureClient>
 CompositableClient::CreateTextureClientForDrawing(SurfaceFormat aFormat,
                                                   TextureFlags aTextureFlags)
@@ -217,11 +257,30 @@ CompositableClient::CreateTextureClientForDrawing(SurfaceFormat aFormat,
 
 #ifdef MOZ_X11
   LayersBackend parentBackend = GetForwarder()->GetCompositorBackendType();
+  gfxSurfaceType type =
+    gfxPlatform::GetPlatform()->ScreenReferenceSurface()->GetType();
+
   if (parentBackend == LayersBackend::LAYERS_BASIC &&
-      gfxPlatform::GetPlatform()->ScreenReferenceSurface()->GetType() == gfxSurfaceType::Xlib &&
+      type == gfxSurfaceType::Xlib &&
       !(aTextureFlags & TEXTURE_ALLOC_FALLBACK))
   {
     result = new TextureClientX11(aFormat, aTextureFlags);
+  }
+#ifdef GL_PROVIDER_GLX
+  if (parentBackend == LayersBackend::LAYERS_OPENGL &&
+      type == gfxSurfaceType::Xlib &&
+      !(aTextureFlags & TEXTURE_ALLOC_FALLBACK) &&
+      aFormat != SurfaceFormat::A8 &&
+      gl::sGLXLibrary.UseTextureFromPixmap())
+  {
+    result = new TextureClientX11(aFormat, aTextureFlags);
+  }
+#endif
+#endif
+
+#ifdef MOZ_WIDGET_GONK
+  if (!DisableGralloc(aFormat)) {
+    result = new GrallocTextureClientOGL(this, aFormat, aTextureFlags);
   }
 #endif
 

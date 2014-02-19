@@ -57,7 +57,13 @@ const EVENTS = {
   // When the response body is displayed in the UI.
   RESPONSE_BODY_DISPLAYED: "NetMonitor:ResponseBodyAvailable",
 
-  // When `onTabSelect` is fired and subsequently rendered.
+  // When the html response preview is displayed in the UI.
+  RESPONSE_HTML_PREVIEW_DISPLAYED: "NetMonitor:ResponseHtmlPreviewAvailable",
+
+  // When the image response thumbnail is displayed in the UI.
+  RESPONSE_IMAGE_THUMBNAIL_DISPLAYED: "NetMonitor:ResponseImageThumbnailAvailable",
+
+  // When a tab is selected in the NetworkDetailsView and subsequently rendered.
   TAB_UPDATED: "NetMonitor:TabUpdated",
 
   // Fired when Sidebar has finished being populated.
@@ -102,6 +108,7 @@ const require = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devt
 const promise = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
 const EventEmitter = require("devtools/shared/event-emitter");
 const Editor = require("devtools/sourceeditor/editor");
+const {Tooltip} = require("devtools/shared/widgets/Tooltip");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Chart",
   "resource:///modules/devtools/Chart.jsm");
@@ -412,8 +419,7 @@ TargetEventsHandler.prototype = {
       case "will-navigate": {
         // Reset UI.
         NetMonitorView.RequestsMenu.reset();
-        NetMonitorView.Sidebar.reset();
-        NetMonitorView.NetworkDetails.reset();
+        NetMonitorView.Sidebar.toggle(false);
 
         // Switch to the default network traffic inspector view.
         if (NetMonitorController.getCurrentActivity() == ACTIVITY_TYPE.NONE) {

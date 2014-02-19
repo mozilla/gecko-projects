@@ -1666,6 +1666,11 @@ ContainerState::FindFixedPosFrameForLayerData(const nsIFrame* aAnimatedGeometryR
                                               nsIntRegion* aVisibleRegion,
                                               bool* aIsSolidColorInVisibleRegion)
 {
+  if (!mManager->IsWidgetLayerManager()) {
+    // Never attach any fixed-pos metadata to inactive layers, it's pointless!
+    return nullptr;
+  }
+
   nsPresContext* presContext = mContainerFrame->PresContext();
   nsIFrame* viewport = presContext->PresShell()->GetRootFrame();
   const nsIFrame* result = nullptr;
@@ -1684,6 +1689,10 @@ ContainerState::FindFixedPosFrameForLayerData(const nsIFrame* aAnimatedGeometryR
       if (nsLayoutUtils::IsFixedPosFrameInDisplayPort(f, &displayPort)) {
         result = f;
         break;
+      }
+      if (f == mContainerReferenceFrame) {
+        // The metadata will go on an ancestor layer if necessary.
+        return nullptr;
       }
     }
     if (!result) {
@@ -2985,12 +2994,12 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
   gfxSize scale;
   // XXX Should we do something for 3D transforms?
   if (canDraw2D) {
-//     // If the container's transform is animated off main thread, then use the
-    // maximum scale.
+    // If the container's transform is animated off main thread, fix a suitable scale size
+    // for animation
     if (aContainerFrame->GetContent() &&
         nsLayoutUtils::HasAnimationsForCompositor(
           aContainerFrame->GetContent(), eCSSProperty_transform)) {
-      scale = nsLayoutUtils::GetMaximumAnimatedScale(aContainerFrame->GetContent());
+      scale = nsLayoutUtils::ComputeSuitableScaleForAnimation(aContainerFrame->GetContent());
     } else {
       // Scale factors are normalized to a power of 2 to reduce the number of resolution changes
       scale = RoundToFloatPrecision(transform2d.ScaleFactors(true));

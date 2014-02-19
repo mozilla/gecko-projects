@@ -4965,28 +4965,22 @@ JS_EvaluateScript(JSContext *cx, JSObject *objArg, const char *bytes, unsigned n
 }
 
 JS_PUBLIC_API(bool)
-JS_CallFunction(JSContext *cx, JSObject *objArg, JSFunction *fun, const JS::HandleValueArray& args,
-                jsval *rval)
+JS_CallFunction(JSContext *cx, HandleObject obj, HandleFunction fun, const HandleValueArray& args,
+                MutableHandleValue rval)
 {
-    RootedObject obj(cx, objArg);
     JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, fun, args);
     AutoLastFrameCheck lfc(cx);
 
-    RootedValue rv(cx);
-    if (!Invoke(cx, ObjectOrNullValue(obj), ObjectValue(*fun), args.length(), args.begin(), &rv))
-        return false;
-    *rval = rv;
-    return true;
+    return Invoke(cx, ObjectOrNullValue(obj), ObjectValue(*fun), args.length(), args.begin(), rval);
 }
 
 JS_PUBLIC_API(bool)
-JS_CallFunctionName(JSContext *cx, JSObject *objArg, const char *name,
-                    const JS::HandleValueArray& args, jsval *rval)
+JS_CallFunctionName(JSContext *cx, HandleObject obj, const char *name, const HandleValueArray& args,
+                    MutableHandleValue rval)
 {
-    RootedObject obj(cx, objArg);
     JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
@@ -5002,33 +4996,24 @@ JS_CallFunctionName(JSContext *cx, JSObject *objArg, const char *name,
     if (!JSObject::getGeneric(cx, obj, obj, id, &v))
         return false;
 
-    RootedValue rv(cx);
-    if (!Invoke(cx, ObjectOrNullValue(obj), v, args.length(), args.begin(), &rv))
-        return false;
-    *rval = rv;
-    return true;
+    return Invoke(cx, ObjectOrNullValue(obj), v, args.length(), args.begin(), rval);
 }
 
 JS_PUBLIC_API(bool)
-JS_CallFunctionValue(JSContext *cx, JSObject *objArg, jsval fval, const JS::HandleValueArray& args,
-                     jsval *rval)
+JS_CallFunctionValue(JSContext *cx, HandleObject obj, HandleValue fval, const HandleValueArray& args,
+                     MutableHandleValue rval)
 {
-    RootedObject obj(cx, objArg);
     JS_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj, fval, args);
     AutoLastFrameCheck lfc(cx);
 
-    RootedValue rv(cx);
-    if (!Invoke(cx, ObjectOrNullValue(obj), fval, args.length(), args.begin(), &rv))
-        return false;
-    *rval = rv;
-    return true;
+    return Invoke(cx, ObjectOrNullValue(obj), fval, args.length(), args.begin(), rval);
 }
 
 JS_PUBLIC_API(bool)
-JS::Call(JSContext *cx, jsval thisv, jsval fval, const JS::HandleValueArray& args,
+JS::Call(JSContext *cx, HandleValue thisv, HandleValue fval, const JS::HandleValueArray& args,
          MutableHandleValue rval)
 {
     AssertHeapIsIdle(cx);
@@ -5141,6 +5126,8 @@ JS_NewStringCopyN(JSContext *cx, const char *s, size_t n)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
+    if (!n)
+        return cx->names().empty;
     return js_NewStringCopyN<CanGC>(cx, s, n);
 }
 
@@ -5225,6 +5212,8 @@ JS_NewUCStringCopyN(JSContext *cx, const jschar *s, size_t n)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
+    if (!n)
+        return cx->names().empty;
     return js_NewStringCopyN<CanGC>(cx, s, n);
 }
 
@@ -6276,15 +6265,6 @@ JS_DecodeInterpretedFunction(JSContext *cx, const void *data, uint32_t length,
     return funobj;
 }
 
-JS_PUBLIC_API(JSObject *)
-JS_GetScriptedGlobal(JSContext *cx)
-{
-    ScriptFrameIter i(cx);
-    if (i.done())
-        return cx->global();
-    return &i.scopeChain()->global();
-}
-
 JS_PUBLIC_API(bool)
 JS_PreventExtensions(JSContext *cx, JS::HandleObject obj)
 {
@@ -6311,4 +6291,10 @@ JSAutoByteString::encodeLatin1(ExclusiveContext *cx, JSString *str)
 
     mBytes = LossyTwoByteCharsToNewLatin1CharsZ(cx, linear->range()).c_str();
     return mBytes;
+}
+
+JS_PUBLIC_API(void)
+JS::SetLargeAllocationFailureCallback(JSRuntime *rt, JS::LargeAllocationFailureCallback lafc)
+{
+    rt->largeAllocationFailureCallback = lafc;
 }

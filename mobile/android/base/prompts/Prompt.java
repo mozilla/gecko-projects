@@ -5,7 +5,6 @@
 
 package org.mozilla.gecko.prompts;
 
-import org.mozilla.gecko.util.GeckoEventResponder;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.widget.DateTimePicker;
@@ -54,7 +53,6 @@ import android.widget.TimePicker;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 public class Prompt implements OnClickListener, OnCancelListener, OnItemClickListener {
@@ -66,7 +64,6 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
     private AlertDialog mDialog;
 
     private final LayoutInflater mInflater;
-    private ConcurrentLinkedQueue<String> mPromptQueue;
     private final Context mContext;
     private PromptCallback mCallback;
     private String mGuid;
@@ -80,16 +77,9 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
     private static int mInputPaddingSize;
     private static int mMinRowSize;
 
-    public Prompt(Context context, ConcurrentLinkedQueue<String> queue) {
-        this(context);
-        mCallback = null;
-        mPromptQueue = queue;
-    }
-
     public Prompt(Context context, PromptCallback callback) {
         this(context);
         mCallback = callback;
-        mPromptQueue = null;
     }
 
     private Prompt(Context context) {
@@ -170,18 +160,25 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
 
     /* Adds to a result value from the lists that can be shown in dialogs.
      *  Will set the selected value(s) to the button attribute of the
-     *  object that's passed in. If this is a multi-select dialog, can set
-     *  the button attribute to an array.
+     *  object that's passed in. If this is a multi-select dialog, sets a
+     *  selected attribute to an array of booleans.
      */
     private void addListResult(final JSONObject result, int which) {
         try {
             if (mSelected != null) {
                 JSONArray selected = new JSONArray();
                 for (int i = 0; i < mSelected.length; i++) {
-                    selected.put(mSelected[i]);
+                    if (mSelected[i]) {
+                        selected.put(i);
+                    }
                 }
-                result.put("button", selected);
+                result.put("list", selected);
             } else {
+                // Mirror the selected array from multi choice for consistency.
+                JSONArray selected = new JSONArray();
+                selected.put(which);
+                result.put("list", selected);
+                // Make the button be the index of the select item.
                 result.put("button", which);
             }
         } catch(JSONException ex) { }
@@ -222,12 +219,12 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
         JSONObject ret = new JSONObject();
         try {
             ListView list = mDialog.getListView();
+            addButtonResult(ret, which);
+            addInputValues(ret);
+
             if (list != null || mSelected != null) {
                 addListResult(ret, which);
-            } else {
-                addButtonResult(ret, which);
             }
-            addInputValues(ret);
         } catch(Exception ex) {
             Log.i(LOGTAG, "Error building return: " + ex);
         }
@@ -414,10 +411,6 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
         try {
             aReturn.put("guid", mGuid);
         } catch(JSONException ex) { }
-
-        if (mPromptQueue != null) {
-            mPromptQueue.offer(aReturn.toString());
-        }
 
         // poke the Gecko thread in case it's waiting for new events
         GeckoAppShell.sendEventToGecko(GeckoEvent.createNoOpEvent());

@@ -16,6 +16,8 @@
 #include "mozilla/MiscEvents.h"
 #include "mozilla/TextEvents.h"
 
+using namespace mozilla::widget;
+
 namespace mozilla {
 
 /******************************************************************************
@@ -108,12 +110,12 @@ TextComposition::NotityUpdateComposition(WidgetGUIEvent* aEvent)
     }
   }
 
-  NotifyIME(widget::NotificationToIME::NOTIFY_IME_OF_COMPOSITION_UPDATE);
+  NotifyIME(NOTIFY_IME_OF_COMPOSITION_UPDATE);
 }
 
 void
-TextComposition::DispatchCompsotionEventRunnable(uint32_t aEventMessage,
-                                                 const nsAString& aData)
+TextComposition::DispatchCompositionEventRunnable(uint32_t aEventMessage,
+                                                  const nsAString& aData)
 {
   nsContentUtils::AddScriptRunner(
     new CompositionEventDispatcher(mPresContext, mNode,
@@ -126,17 +128,17 @@ TextComposition::SynthesizeCommit(bool aDiscard)
   nsRefPtr<TextComposition> kungFuDeathGrip(this);
   nsAutoString data(aDiscard ? EmptyString() : mLastData);
   if (mLastData != data) {
-    DispatchCompsotionEventRunnable(NS_COMPOSITION_UPDATE, data);
-    DispatchCompsotionEventRunnable(NS_TEXT_TEXT, data);
+    DispatchCompositionEventRunnable(NS_COMPOSITION_UPDATE, data);
+    DispatchCompositionEventRunnable(NS_TEXT_TEXT, data);
   }
-  DispatchCompsotionEventRunnable(NS_COMPOSITION_END, data);
+  DispatchCompositionEventRunnable(NS_COMPOSITION_END, data);
 }
 
 nsresult
-TextComposition::NotifyIME(widget::NotificationToIME aNotification)
+TextComposition::NotifyIME(IMEMessage aMessage)
 {
   NS_ENSURE_TRUE(mPresContext, NS_ERROR_NOT_AVAILABLE);
-  return nsIMEStateManager::NotifyIME(aNotification, mPresContext);
+  return nsIMEStateManager::NotifyIME(aMessage, mPresContext);
 }
 
 void

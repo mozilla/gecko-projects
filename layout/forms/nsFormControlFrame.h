@@ -41,9 +41,9 @@ public:
     * Respond to a gui event
     * @see nsIFrame::HandleEvent
     */
-  NS_IMETHOD HandleEvent(nsPresContext* aPresContext, 
-                         mozilla::WidgetGUIEvent* aEvent,
-                         nsEventStatus* aEventStatus) MOZ_OVERRIDE;
+  virtual nsresult HandleEvent(nsPresContext* aPresContext, 
+                               mozilla::WidgetGUIEvent* aEvent,
+                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
 
   virtual nscoord GetBaseline() const MOZ_OVERRIDE;
 
@@ -51,10 +51,10 @@ public:
     * Respond to the request to resize and/or reflow
     * @see nsIFrame::Reflow
     */
-  NS_IMETHOD Reflow(nsPresContext*      aCX,
-                    nsHTMLReflowMetrics& aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&      aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*      aCX,
+                          nsHTMLReflowMetrics& aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&      aStatus) MOZ_OVERRIDE;
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 

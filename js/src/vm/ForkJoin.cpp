@@ -25,12 +25,15 @@
 # include "vm/Monitor.h"
 #endif
 
-#if defined(DEBUG) && defined(JS_THREADSAFE) && defined(JS_ION)
-# include "jit/Ion.h"
-# include "jit/JitCompartment.h"
-# include "jit/MIR.h"
-# include "jit/MIRGraph.h"
-#endif // DEBUG && THREADSAFE && ION
+#if defined(JS_THREADSAFE) && defined(JS_ION)
+# include "jit/JitCommon.h"
+# ifdef DEBUG
+#  include "jit/Ion.h"
+#  include "jit/JitCompartment.h"
+#  include "jit/MIR.h"
+#  include "jit/MIRGraph.h"
+# endif
+#endif // THREADSAFE && ION
 
 #include "vm/Interpreter-inl.h"
 
@@ -1175,8 +1178,6 @@ ForkJoinOperation::parallelExecution(ExecutionStatus *status)
     // functions such as ForkJoin().
     JS_ASSERT(ForkJoinContext::current() == nullptr);
 
-    ForkJoinActivation activation(cx_);
-
     uint16_t from, to;
     if (!computeBounds(&from, &to)) {
         *status = ExecutionFatal;
@@ -1189,6 +1190,7 @@ ForkJoinOperation::parallelExecution(ExecutionStatus *status)
         return RedLight;
     }
 
+    ForkJoinActivation activation(cx_);
     ThreadPool *threadPool = &cx_->runtime()->threadPool;
     ForkJoinShared shared(cx_, threadPool, fun_, from, to, &bailoutRecords_[0]);
     if (!shared.init()) {

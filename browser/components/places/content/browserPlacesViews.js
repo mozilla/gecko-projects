@@ -293,6 +293,7 @@ PlacesViewBase.prototype = {
     let type = aPlacesNode.type;
     if (type == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR) {
       element = document.createElement("menuseparator");
+      element.setAttribute("class", "small-separator");
     }
     else {
       let itemId = aPlacesNode.itemId;
@@ -720,8 +721,16 @@ PlacesViewBase.prototype = {
 
     if (this._controller) {
       this._controller.terminate();
-      this._viewElt.controllers.removeController(this._controller);
-      this._controller = null;
+      // Removing the controller will fail if it is already no longer there.
+      // This can happen if the view element was removed/reinserted without
+      // our knowledge. There is no way to check for that having happened
+      // without the possibility of an exception. :-(
+      try {
+        this._viewElt.controllers.removeController(this._controller);
+      } catch (ex) {
+      } finally {
+        this._controller = null;
+      }
     }
 
     delete this._viewElt._placesView;
@@ -1808,6 +1817,7 @@ PlacesPanelMenuView.prototype = {
     let button;
     if (type == Ci.nsINavHistoryResultNode.RESULT_TYPE_SEPARATOR) {
       button = document.createElement("toolbarseparator");
+      button.setAttribute("class", "small-separator");
     }
     else {
       button = document.createElement("toolbarbutton");

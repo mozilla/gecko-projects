@@ -2392,68 +2392,72 @@ nsCSSFrameConstructor::ConstructDocElementFrame(Element*                 aDocEle
   else
 #endif
   if (aDocElement->IsSVG()) {
-    if (aDocElement->Tag() == nsGkAtoms::svg) {
-      // We're going to call the right function ourselves, so no need to give a
-      // function to this FrameConstructionData.
-
-      // XXXbz on the other hand, if we converted this whole function to
-      // FrameConstructionData/Item, then we'd need the right function
-      // here... but would probably be able to get away with less code in this
-      // function in general.
-      // Use a null PendingBinding, since our binding is not in fact pending.
-      static const FrameConstructionData rootSVGData = FCDATA_DECL(0, nullptr);
-      nsRefPtr<nsStyleContext> extraRef(styleContext);
-      FrameConstructionItem item(&rootSVGData, aDocElement,
-                                 aDocElement->Tag(), kNameSpaceID_SVG,
-                                 nullptr, extraRef.forget(), true, nullptr);
-
-      nsFrameItems frameItems;
-      contentFrame = ConstructOuterSVG(state, item, mDocElementContainingBlock,
-                                       styleContext->StyleDisplay(),
-                                       frameItems);
-      newFrame = frameItems.FirstChild();
-      NS_ASSERTION(frameItems.OnlyChild(), "multiple root element frames");
-    } else {
+    if (aDocElement->Tag() != nsGkAtoms::svg) {
       return nullptr;
     }
+    // We're going to call the right function ourselves, so no need to give a
+    // function to this FrameConstructionData.
+
+    // XXXbz on the other hand, if we converted this whole function to
+    // FrameConstructionData/Item, then we'd need the right function
+    // here... but would probably be able to get away with less code in this
+    // function in general.
+    // Use a null PendingBinding, since our binding is not in fact pending.
+    static const FrameConstructionData rootSVGData = FCDATA_DECL(0, nullptr);
+    nsRefPtr<nsStyleContext> extraRef(styleContext);
+    FrameConstructionItem item(&rootSVGData, aDocElement,
+                               aDocElement->Tag(), kNameSpaceID_SVG,
+                               nullptr, extraRef.forget(), true, nullptr);
+
+    nsFrameItems frameItems;
+    contentFrame = ConstructOuterSVG(state, item, mDocElementContainingBlock,
+                                     styleContext->StyleDisplay(),
+                                     frameItems);
+    newFrame = frameItems.FirstChild();
+    NS_ASSERTION(frameItems.OnlyChild(), "multiple root element frames");
+  } else if (display->mDisplay == NS_STYLE_DISPLAY_FLEX) {
+    contentFrame = NS_NewFlexContainerFrame(mPresShell, styleContext);
+    InitAndRestoreFrame(state, aDocElement, mDocElementContainingBlock,
+                        contentFrame);
+    newFrame = contentFrame;
+    processChildren = true;
+  } else if (display->mDisplay == NS_STYLE_DISPLAY_TABLE) {
+    // We're going to call the right function ourselves, so no need to give a
+    // function to this FrameConstructionData.
+
+    // XXXbz on the other hand, if we converted this whole function to
+    // FrameConstructionData/Item, then we'd need the right function
+    // here... but would probably be able to get away with less code in this
+    // function in general.
+    // Use a null PendingBinding, since our binding is not in fact pending.
+    static const FrameConstructionData rootTableData = FCDATA_DECL(0, nullptr);
+    nsRefPtr<nsStyleContext> extraRef(styleContext);
+    FrameConstructionItem item(&rootTableData, aDocElement,
+                               aDocElement->Tag(), kNameSpaceID_None,
+                               nullptr, extraRef.forget(), true, nullptr);
+
+    nsFrameItems frameItems;
+    // if the document is a table then just populate it.
+    contentFrame = ConstructTable(state, item, mDocElementContainingBlock,
+                                  styleContext->StyleDisplay(),
+                                  frameItems);
+    newFrame = frameItems.FirstChild();
+    NS_ASSERTION(frameItems.OnlyChild(), "multiple root element frames");
   } else {
-    bool docElemIsTable = (display->mDisplay == NS_STYLE_DISPLAY_TABLE);
-    if (docElemIsTable) {
-      // We're going to call the right function ourselves, so no need to give a
-      // function to this FrameConstructionData.
-
-      // XXXbz on the other hand, if we converted this whole function to
-      // FrameConstructionData/Item, then we'd need the right function
-      // here... but would probably be able to get away with less code in this
-      // function in general.
-      // Use a null PendingBinding, since our binding is not in fact pending.
-      static const FrameConstructionData rootTableData = FCDATA_DECL(0, nullptr);
-      nsRefPtr<nsStyleContext> extraRef(styleContext);
-      FrameConstructionItem item(&rootTableData, aDocElement,
-                                 aDocElement->Tag(), kNameSpaceID_None,
-                                 nullptr, extraRef.forget(), true, nullptr);
-
-      nsFrameItems frameItems;
-      // if the document is a table then just populate it.
-      contentFrame = ConstructTable(state, item, mDocElementContainingBlock,
-                                    styleContext->StyleDisplay(),
-                                    frameItems);
-      newFrame = frameItems.FirstChild();
-      NS_ASSERTION(frameItems.OnlyChild(), "multiple root element frames");
-    } else {
-      contentFrame = NS_NewBlockFormattingContext(mPresShell, styleContext);
-      nsFrameItems frameItems;
-      // Use a null PendingBinding, since our binding is not in fact pending.
-      ConstructBlock(state, display, aDocElement,
-                     state.GetGeometricParent(display,
-                                              mDocElementContainingBlock),
-                     mDocElementContainingBlock, styleContext,
-                     &contentFrame, frameItems,
-                     display->IsPositioned(contentFrame) ? contentFrame : nullptr,
-                     nullptr);
-      newFrame = frameItems.FirstChild();
-      NS_ASSERTION(frameItems.OnlyChild(), "multiple root element frames");
-    }
+    MOZ_ASSERT(display->mDisplay == NS_STYLE_DISPLAY_BLOCK,
+               "Unhandled display type for root element");
+    contentFrame = NS_NewBlockFormattingContext(mPresShell, styleContext);
+    nsFrameItems frameItems;
+    // Use a null PendingBinding, since our binding is not in fact pending.
+    ConstructBlock(state, display, aDocElement,
+                   state.GetGeometricParent(display,
+                                            mDocElementContainingBlock),
+                   mDocElementContainingBlock, styleContext,
+                   &contentFrame, frameItems,
+                   display->IsPositioned(contentFrame) ? contentFrame : nullptr,
+                   nullptr);
+    newFrame = frameItems.FirstChild();
+    NS_ASSERTION(frameItems.OnlyChild(), "multiple root element frames");
   }
 
   MOZ_ASSERT(newFrame);
@@ -10098,13 +10102,19 @@ nsCSSFrameConstructor::RemoveFloatingFirstLetterFrames(
   textContent->SetPrimaryFrame(newTextFrame);
 
   // Wallpaper bug 822910.
-  if (prevSibling && prevSibling->GetType() == nsGkAtoms::textFrame) {
-    prevSibling->AddStateBits(NS_FRAME_IS_DIRTY);
+  bool offsetsNeedFixing =
+    prevSibling && prevSibling->GetType() == nsGkAtoms::textFrame;
+  if (offsetsNeedFixing) {
+    prevSibling->AddStateBits(TEXT_OFFSETS_NEED_FIXING);
   }
 
   // Insert text frame in its place
   nsFrameList textList(newTextFrame, newTextFrame);
   InsertFrames(parentFrame, kPrincipalList, prevSibling, textList);
+
+  if (offsetsNeedFixing) {
+    prevSibling->RemoveStateBits(TEXT_OFFSETS_NEED_FIXING);
+  }
 
   return NS_OK;
 }
@@ -10149,13 +10159,19 @@ nsCSSFrameConstructor::RemoveFirstLetterFrames(nsPresContext* aPresContext,
       textContent->SetPrimaryFrame(textFrame);
 
       // Wallpaper bug 822910.
-      if (prevSibling && prevSibling->GetType() == nsGkAtoms::textFrame) {
-        prevSibling->AddStateBits(NS_FRAME_IS_DIRTY);
+      bool offsetsNeedFixing =
+        prevSibling && prevSibling->GetType() == nsGkAtoms::textFrame;
+      if (offsetsNeedFixing) {
+        prevSibling->AddStateBits(TEXT_OFFSETS_NEED_FIXING);
       }
 
       // Insert text frame in its place
       nsFrameList textList(textFrame, textFrame);
       InsertFrames(aFrame, kPrincipalList, prevSibling, textList);
+
+      if (offsetsNeedFixing) {
+        prevSibling->RemoveStateBits(TEXT_OFFSETS_NEED_FIXING);
+      }
 
       *aStopLooking = true;
       NS_ASSERTION(!aBlockFrame->GetPrevContinuation(),

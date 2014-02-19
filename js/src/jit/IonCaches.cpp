@@ -1213,7 +1213,7 @@ GetPropertyIC::tryAttachNative(JSContext *cx, IonScript *ion, HandleObject obj,
 
     *emitted = true;
 
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     SkipRoot skip(cx, &masm);
 
     RepatchStubAppender attacher(*this);
@@ -1363,14 +1363,16 @@ GetPropertyIC::tryAttachDOMProxyShadowed(JSContext *cx, IonScript *ion,
     JS_ASSERT(canAttachStub());
     JS_ASSERT(!*emitted);
     JS_ASSERT(IsCacheableDOMProxy(obj));
+    JS_ASSERT(monitoredResult());
+    JS_ASSERT(output().hasValue());
 
-    if (idempotent() || !output().hasValue())
+    if (idempotent())
         return true;
 
     *emitted = true;
 
     Label failures;
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     RepatchStubAppender attacher(*this);
 
     // Guard on the shape of the object.
@@ -1407,6 +1409,8 @@ GetPropertyIC::tryAttachDOMProxyUnshadowed(JSContext *cx, IonScript *ion, Handle
     JS_ASSERT(canAttachStub());
     JS_ASSERT(!*emitted);
     JS_ASSERT(IsCacheableDOMProxy(obj));
+    JS_ASSERT(monitoredResult());
+    JS_ASSERT(output().hasValue());
 
     RootedObject checkObj(cx, obj->getTaggedProto().toObjectOrNull());
     RootedObject holder(cx);
@@ -1421,7 +1425,7 @@ GetPropertyIC::tryAttachDOMProxyUnshadowed(JSContext *cx, IonScript *ion, Handle
         return true;
 
     // Make sure we observe our invariants if we're gonna deoptimize.
-    if (!holder && (idempotent() || !output().hasValue()))
+    if (!holder && idempotent())
         return true;
 
     *emitted = true;
@@ -1437,7 +1441,7 @@ GetPropertyIC::tryAttachDOMProxyUnshadowed(JSContext *cx, IonScript *ion, Handle
     }
 
     Label failures;
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     RepatchStubAppender attacher(*this);
 
     // Guard on the shape of the object.
@@ -1508,6 +1512,11 @@ GetPropertyIC::tryAttachProxy(JSContext *cx, IonScript *ion, HandleObject obj,
     if (!obj->is<ProxyObject>())
         return true;
 
+    // TI can't be sure about our properties, so make sure anything
+    // we return can be monitored directly.
+    if (!monitoredResult())
+        return true;
+
     // Skim off DOM proxies.
     if (IsCacheableDOMProxy(obj)) {
         RootedId id(cx, NameToId(name));
@@ -1542,17 +1551,19 @@ GetPropertyIC::tryAttachGenericProxy(JSContext *cx, IonScript *ion, HandleObject
     JS_ASSERT(canAttachStub());
     JS_ASSERT(!*emitted);
     JS_ASSERT(obj->is<ProxyObject>());
+    JS_ASSERT(monitoredResult());
+    JS_ASSERT(output().hasValue());
 
     if (hasGenericProxyStub())
         return true;
 
-    if (idempotent() || !output().hasValue())
+    if (idempotent())
         return true;
 
     *emitted = true;
 
     Label failures;
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     RepatchStubAppender attacher(*this);
 
     Register scratchReg = output().valueReg().scratchReg();
@@ -2120,7 +2131,7 @@ SetPropertyIC::attachGenericProxy(JSContext *cx, IonScript *ion, void *returnAdd
 {
     JS_ASSERT(!hasGenericProxyStub());
 
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     RepatchStubAppender attacher(*this);
 
     Label failures;
@@ -2177,7 +2188,7 @@ SetPropertyIC::attachDOMProxyShadowed(JSContext *cx, IonScript *ion, HandleObjec
     JS_ASSERT(IsCacheableDOMProxy(obj));
 
     Label failures;
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     RepatchStubAppender attacher(*this);
 
     // Guard on the shape of the object.
@@ -2407,7 +2418,7 @@ SetPropertyIC::attachDOMProxyUnshadowed(JSContext *cx, IonScript *ion, HandleObj
     JS_ASSERT(IsCacheableDOMProxy(obj));
 
     Label failures;
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     RepatchStubAppender attacher(*this);
 
     // Guard on the shape of the object.
@@ -2462,7 +2473,7 @@ SetPropertyIC::attachCallSetter(JSContext *cx, IonScript *ion,
 {
     JS_ASSERT(obj->isNative());
 
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
     RepatchStubAppender attacher(*this);
 
     Label failure;
@@ -4243,7 +4254,7 @@ bool
 NameIC::attachCallGetter(JSContext *cx, IonScript *ion, JSObject *obj, JSObject *holder,
                          HandleShape shape, void *returnAddr)
 {
-    MacroAssembler masm(cx, ion);
+    MacroAssembler masm(cx, ion, script_, pc_);
 
     RepatchStubAppender attacher(*this);
     if (!GenerateCallGetter(cx, ion, masm, attacher, obj, name(), holder, shape, liveRegs_,

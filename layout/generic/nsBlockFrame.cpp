@@ -384,7 +384,7 @@ nsBlockFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
   fprintf_stderr(out, "%s>\n", aPrefix);
 }
 
-NS_IMETHODIMP
+nsresult
 nsBlockFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Block"), aResult);
@@ -392,7 +392,7 @@ nsBlockFrame::GetFrameName(nsAString& aResult) const
 #endif
 
 #ifdef DEBUG
-NS_IMETHODIMP_(nsFrameState)
+nsFrameState
 nsBlockFrame::GetDebugStateBits() const
 {
   // We don't want to include our cursor flag in the bits the
@@ -891,11 +891,13 @@ CalculateContainingBlockSizeForAbsolutes(const nsHTMLReflowState& aReflowState,
     // frame and not always sticking them in block frames.
 
     // First, find the reflow state for the outermost frame for this
-    // content.
+    // content, except for fieldsets where the inner anonymous frame has
+    // the correct padding area with the legend taken into account.
     const nsHTMLReflowState* aLastRS = &aReflowState;
     const nsHTMLReflowState* lastButOneRS = &aReflowState;
     while (aLastRS->parentReflowState &&
-           aLastRS->parentReflowState->frame->GetContent() == frame->GetContent()) {
+           aLastRS->parentReflowState->frame->GetContent() == frame->GetContent() &&
+           aLastRS->parentReflowState->frame->GetType() != nsGkAtoms::fieldSetFrame) {
       lastButOneRS = aLastRS;
       aLastRS = aLastRS->parentReflowState;
     }
@@ -931,7 +933,7 @@ CalculateContainingBlockSizeForAbsolutes(const nsHTMLReflowState& aReflowState,
   return cbSize;
 }
 
-NS_IMETHODIMP
+nsresult
 nsBlockFrame::Reflow(nsPresContext*           aPresContext,
                      nsHTMLReflowMetrics&     aMetrics,
                      const nsHTMLReflowState& aReflowState,
@@ -2662,7 +2664,7 @@ nsBlockFrame::SlideLine(nsBlockReflowState& aState,
   }
 }
 
-NS_IMETHODIMP 
+nsresult 
 nsBlockFrame::AttributeChanged(int32_t         aNameSpaceID,
                                nsIAtom*        aAttribute,
                                int32_t         aModType)
@@ -4676,7 +4678,7 @@ nsBlockFrame::RemovePushedFloats()
 //////////////////////////////////////////////////////////////////////
 // Frame list manipulation routines
 
-NS_IMETHODIMP
+nsresult
 nsBlockFrame::AppendFrames(ChildListID  aListID,
                            nsFrameList& aFrameList)
 {
@@ -4721,7 +4723,7 @@ nsBlockFrame::AppendFrames(ChildListID  aListID,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 nsBlockFrame::InsertFrames(ChildListID aListID,
                            nsIFrame* aPrevFrame,
                            nsFrameList& aFrameList)
@@ -4775,9 +4777,9 @@ ShouldPutNextSiblingOnNewLine(nsIFrame* aLastFrame)
   if (type == nsGkAtoms::brFrame) {
     return true;
   }
-  // XXX the IS_DIRTY check is a wallpaper for bug 822910.
+  // XXX the TEXT_OFFSETS_NEED_FIXING check is a wallpaper for bug 822910.
   if (type == nsGkAtoms::textFrame &&
-      !(aLastFrame->GetStateBits() & NS_FRAME_IS_DIRTY)) {
+      !(aLastFrame->GetStateBits() & TEXT_OFFSETS_NEED_FIXING)) {
     return aLastFrame->HasSignificantTerminalNewline();
   }
   return false;
@@ -5007,7 +5009,7 @@ static bool BlockHasAnyFloats(nsIFrame* aFrame)
   return false;
 }
 
-NS_IMETHODIMP
+nsresult
 nsBlockFrame::RemoveFrame(ChildListID aListID,
                           nsIFrame* aOldFrame)
 {
@@ -6467,7 +6469,7 @@ nsBlockFrame::Init(nsIContent*      aContent,
   }
 }
 
-NS_IMETHODIMP
+nsresult
 nsBlockFrame::SetInitialChildList(ChildListID     aListID,
                                   nsFrameList&    aChildList)
 {

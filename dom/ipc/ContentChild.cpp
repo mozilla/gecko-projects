@@ -30,9 +30,16 @@
 #include "mozilla/layers/PCompositorChild.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/Preferences.h"
-#if defined(MOZ_CONTENT_SANDBOX) && defined(XP_UNIX) && !defined(XP_MACOSX)
+
+#if defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_WIN)
+#define TARGET_SANDBOX_EXPORTS
+#include "mozilla/sandboxTarget.h"
+#elif defined(XP_UNIX) && !defined(XP_MACOSX)
 #include "mozilla/Sandbox.h"
 #endif
+#endif
+
 #include "mozilla/unused.h"
 
 #include "nsIConsoleListener.h"
@@ -127,6 +134,7 @@
 #include "AudioChannelService.h"
 #include "JavaScriptChild.h"
 #include "mozilla/dom/telephony/PTelephonyChild.h"
+#include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 
 using namespace base;
@@ -304,6 +312,15 @@ NS_IMPL_ISUPPORTS1(SystemMessageHandledObserver, nsIObserver)
 
 ContentChild* ContentChild::sSingleton;
 
+// Performs initialization that is not fork-safe, i.e. that must be done after
+// forking from the Nuwa process.
+static void
+InitOnContentProcessCreated()
+{
+    // This will register cross-process observer.
+    mozilla::dom::time::InitializeDateCacheCleaner();
+}
+
 ContentChild::ContentChild()
  : mID(uint64_t(-1))
 #ifdef ANDROID
@@ -455,6 +472,10 @@ ContentChild::InitXPCOM()
     nsRefPtr<SystemMessageHandledObserver> sysMsgObserver =
         new SystemMessageHandledObserver();
     sysMsgObserver->Init();
+
+#ifndef MOZ_NUWA_PROCESS
+    InitOnContentProcessCreated();
+#endif
 }
 
 PMemoryReportRequestChild*
@@ -593,12 +614,17 @@ ContentChild::RecvSetProcessPrivileges(const ChildPrivileges& aPrivs)
                           aPrivs;
   // If this fails, we die.
   SetCurrentProcessPrivileges(privs);
-#if defined(MOZ_CONTENT_SANDBOX) && defined(XP_UNIX) && !defined(XP_MACOSX)
+
+#if defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_WIN)
+  mozilla::SandboxTarget::Instance()->StartSandbox();
+#else if defined(XP_UNIX) && !defined(XP_MACOSX)
   // SetCurrentProcessSandbox should be moved close to process initialization
   // time if/when possible. SetCurrentProcessPrivileges should probably be
   // moved as well. Right now this is set ONLY if we receive the
   // RecvSetProcessPrivileges message. See bug 880808.
   SetCurrentProcessSandbox();
+#endif
 #endif
   return true;
 }
@@ -959,6 +985,8 @@ PExternalHelperAppChild*
 ContentChild::AllocPExternalHelperAppChild(const OptionalURIParams& uri,
                                            const nsCString& aMimeContentType,
                                            const nsCString& aContentDisposition,
+                                           const uint32_t& aContentDispositionHint,
+                                           const nsString& aContentDispositionFilename,
                                            const bool& aForceSave,
                                            const int64_t& aContentLength,
                                            const OptionalURIParams& aReferrer,
@@ -1609,6 +1637,10 @@ public:
 
             toplevel = toplevel->getNext();
         }
+
+        // Perform other after-fork initializations.
+        InitOnContentProcessCreated();
+
         return NS_OK;
     }
 };

@@ -22,9 +22,9 @@ public:
                                            const nsRect&           aDirtyRect,
                                            const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  NS_IMETHOD HandleEvent(nsPresContext* aPresContext,
-                         mozilla::WidgetGUIEvent* aEvent,
-                         nsEventStatus* aEventStatus) MOZ_OVERRIDE;
+  virtual nsresult HandleEvent(nsPresContext* aPresContext,
+                               mozilla::WidgetGUIEvent* aEvent,
+                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
 
   virtual void MouseClicked(nsPresContext* aPresContext,
                             mozilla::WidgetMouseEvent* aEvent);

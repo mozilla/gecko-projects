@@ -42,13 +42,13 @@ public:
                         const nsRect&           aDirtyRect,
                         const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  NS_IMETHOD Reflow(nsPresContext*           aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
     return MakeFrameName(NS_LITERAL_STRING("Range"), aResult);
   }
 #endif
@@ -64,9 +64,9 @@ public:
   virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
                                         uint32_t aFilter) MOZ_OVERRIDE;
 
-  NS_IMETHOD AttributeChanged(int32_t  aNameSpaceID,
-                              nsIAtom* aAttribute,
-                              int32_t  aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t  aNameSpaceID,
+                                    nsIAtom* aAttribute,
+                                    int32_t  aModType) MOZ_OVERRIDE;
 
   virtual nsSize ComputeAutoSize(nsRenderingContext *aRenderingContext,
                                  nsSize aCBSize, nscoord aAvailableWidth,

@@ -12,6 +12,8 @@
 #include <algorithm>
 #include "MacIOSurface.h"
 #include "FilterNodeSoftware.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/FloatingPoint.h"
 
 using namespace std;
 
@@ -412,6 +414,8 @@ UpdateLinearParametersToIncludePoint(double *min_t, double *max_t,
                                      double dx, double dy,
                                      double x, double y)
 {
+  MOZ_ASSERT(IsFinite(x) && IsFinite(y));
+
   /**
    * Compute a parameter t such that a line perpendicular to the (dx,dy)
    * vector, passing through (start->x + dx*t, start->y + dy*t), also
@@ -452,8 +456,8 @@ static void
 CalculateRepeatingGradientParams(CGPoint *aStart, CGPoint *aEnd,
                                  CGRect aExtents, int *aRepeatCount)
 {
-  double t_min = 0.;
-  double t_max = 0.;
+  double t_min = INFINITY;
+  double t_max = -INFINITY;
   double dx = aEnd->x - aStart->x;
   double dy = aEnd->y - aStart->y;
 
@@ -470,6 +474,9 @@ CalculateRepeatingGradientParams(CGPoint *aStart, CGPoint *aEnd,
                                        bounds_x2, bounds_y2);
   UpdateLinearParametersToIncludePoint(&t_min, &t_max, aStart, dx, dy,
                                        bounds_x1, bounds_y2);
+
+  MOZ_ASSERT(!isinf(t_min) && !isinf(t_max),
+             "The first call to UpdateLinearParametersToIncludePoint should have made t_min and t_max non-infinite.");
 
   // Move t_min and t_max to the nearest usable integer to try to avoid
   // subtle variations due to numerical instability, especially accidentally
@@ -605,6 +612,10 @@ DrawRadialRepeatingGradient(CGContextRef cg, const RadialGradientPattern &aPatte
 static void
 DrawGradient(CGContextRef cg, const Pattern &aPattern, const CGRect &aExtents)
 {
+  if (CGRectIsEmpty(aExtents)) {
+    return;
+  }
+
   if (aPattern.GetType() == PatternType::LINEAR_GRADIENT) {
     const LinearGradientPattern& pat = static_cast<const LinearGradientPattern&>(aPattern);
     GradientStopsCG *stops = static_cast<GradientStopsCG*>(pat.mStops.get());
@@ -842,7 +853,8 @@ DrawTargetCG::FillRect(const Rect &aRect,
 
   if (isGradient(aPattern)) {
     CGContextClipToRect(cg, RectToCGRect(aRect));
-    DrawGradient(cg, aPattern, RectToCGRect(aRect));
+    CGRect clipBounds = CGContextGetClipBoundingBox(cg);
+    DrawGradient(cg, aPattern, clipBounds);
   } else {
     if (aPattern.GetType() == PatternType::SURFACE && static_cast<const SurfacePattern&>(aPattern).mExtendMode != ExtendMode::REPEAT) {
       // SetFillFromPattern can handle this case but using CGContextDrawImage
@@ -1122,8 +1134,7 @@ DrawTargetCG::FillGlyphs(ScaledFont *aFont, const GlyphBuffer &aBuffer, const Pa
   positions.resize(aBuffer.mNumGlyphs);
 
   // Handle the flip
-  CGAffineTransform matrix = CGAffineTransformMakeScale(1, -1);
-  CGContextConcatCTM(cg, matrix);
+  CGContextScaleCTM(cg, 1, -1);
   // CGContextSetTextMatrix works differently with kCGTextClip && kCGTextFill
   // It seems that it transforms the positions with TextFill and not with TextClip
   // Therefore we'll avoid it. See also:
@@ -1159,6 +1170,7 @@ DrawTargetCG::FillGlyphs(ScaledFont *aFont, const GlyphBuffer &aBuffer, const Pa
                                      aBuffer.mNumGlyphs);
       delete bboxes;
     }
+    CGContextScaleCTM(cg, 1, -1);
     DrawGradient(cg, aPattern, extents);
   } else {
     //XXX: with CoreGraphics we can stroke text directly instead of going

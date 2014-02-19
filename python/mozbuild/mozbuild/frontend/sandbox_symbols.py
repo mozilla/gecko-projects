@@ -77,6 +77,13 @@ VARIABLES = {
         directory and merge into an APK file.
         """, 'export'),
 
+    'ANDROID_ECLIPSE_PROJECT_TARGETS': (dict, dict,
+        """Defines Android Eclipse project targets.
+
+        This variable should not be populated directly. Instead, it should
+        populated by calling add_android_eclipse{_library}_project().
+        """, 'export'),
+
     'SOURCES': (StrictOrderingOnAppendListWithFlagsFactory({'no_pgo': bool}), list,
         """Source code files.
 
@@ -305,7 +312,8 @@ VARIABLES = {
     'LIBXUL_LIBRARY': (bool, bool,
         """Whether the library in this directory is linked into libxul.
 
-        Implies ``MOZILLA_INTERNAL_API`` and ``FORCE_STATIC_LIB``.
+        Implies ``FORCE_STATIC_LIB`` and the ``MOZILLA_INTERNAL_API``
+        preprocessor macro.
         """, None),
 
     'LOCAL_INCLUDES': (StrictOrderingOnAppendList, list,
@@ -675,6 +683,33 @@ VARIABLES = {
     'SPHINX_PYTHON_PACKAGE_DIRS': (StrictOrderingOnAppendList, list,
         """Directories containing Python packages that Sphinx documents.
         """, None),
+
+    'CFLAGS': (list, list,
+        """Flags passed to the C compiler for all of the C source files
+           declared in this directory.
+
+           Note that the ordering of flags matter here, these flags will be
+           added to the compiler's command line in the same order as they
+           appear in the moz.build file.
+        """, 'binaries'),
+
+    'CXXFLAGS': (list, list,
+        """Flags passed to the C++ compiler for all of the C++ source files
+           declared in this directory.
+
+           Note that the ordering of flags matter here, these flags will be
+           added to the compiler's command line in the same order as they
+           appear in the moz.build file.
+        """, 'binaries'),
+
+    'LDFLAGS': (list, list,
+        """Flags passed to the linker when linking all of the libraries and
+           executables declared in this directory.
+
+           Note that the ordering of flags matter here, these flags will be
+           added to the linker's command line in the same order as they
+           appear in the moz.build file.
+        """, 'libs'),
 }
 
 # The set of functions exposed to the sandbox.
@@ -724,6 +759,33 @@ FUNCTIONS = {
 
         This returns a rich Java JAR type, described at
         :py:class:`mozbuild.frontend.data.JavaJarData`.
+        """),
+
+    'add_android_eclipse_project': ('_add_android_eclipse_project', (str, str),
+        """Declare an Android Eclipse project.
+
+        This is one of the supported ways to populate the
+        ANDROID_ECLIPSE_PROJECT_TARGETS variable.
+
+        The parameters are:
+        * name - project name.
+        * manifest - path to AndroidManifest.xml.
+
+        This returns a rich Android Eclipse project type, described at
+        :py:class:`mozbuild.frontend.data.AndroidEclipseProjectData`.
+        """),
+
+    'add_android_eclipse_library_project': ('_add_android_eclipse_library_project', (str,),
+        """Declare an Android Eclipse library project.
+
+        This is one of the supported ways to populate the
+        ANDROID_ECLIPSE_PROJECT_TARGETS variable.
+
+        The parameters are:
+        * name - project name.
+
+        This returns a rich Android Eclipse project type, described at
+        :py:class:`mozbuild.frontend.data.AndroidEclipseProjectData`.
         """),
 
     'add_tier_dir': ('_add_tier_directory', (str, [str, list], bool, bool),

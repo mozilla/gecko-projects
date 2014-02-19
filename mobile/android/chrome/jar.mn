@@ -34,7 +34,6 @@ chrome.jar:
 * content/browser.js                   (content/browser.js)
   content/bindings/checkbox.xml        (content/bindings/checkbox.xml)
   content/bindings/settings.xml        (content/bindings/settings.xml)
-  content/exceptions.js                (content/exceptions.js)
   content/downloads.js                 (content/downloads.js)
   content/netError.xhtml               (content/netError.xhtml)
   content/SelectHelper.js              (content/SelectHelper.js)
@@ -53,6 +52,7 @@ chrome.jar:
   content/FeedHandler.js               (content/FeedHandler.js)
   content/Feedback.js                  (content/Feedback.js)
   content/Linkify.js                   (content/Linkify.js)
+  content/ZoomHelper.js                (content/ZoomHelper.js)
   content/CastingApps.js               (content/CastingApps.js)
 #ifdef MOZ_SERVICES_HEALTHREPORT
   content/aboutHealthReport.xhtml      (content/aboutHealthReport.xhtml)

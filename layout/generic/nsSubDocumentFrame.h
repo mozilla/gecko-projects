@@ -25,7 +25,7 @@ public:
 
 #ifdef DEBUG_FRAME_DUMP
   void List(FILE* out = stderr, const char* aPrefix = "", uint32_t aFlags = 0) const MOZ_OVERRIDE;
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   NS_DECL_QUERYFRAME
@@ -61,18 +61,18 @@ public:
                              nsSize aMargin, nsSize aBorder, nsSize aPadding,
                              uint32_t aFlags) MOZ_OVERRIDE;
 
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*          aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  NS_IMETHOD AttributeChanged(int32_t aNameSpaceID,
-                              nsIAtom* aAttribute,
-                              int32_t aModType) MOZ_OVERRIDE;
+  virtual nsresult AttributeChanged(int32_t aNameSpaceID,
+                                    nsIAtom* aAttribute,
+                                    int32_t aModType) MOZ_OVERRIDE;
 
   // if the content is "visibility:hidden", then just hide the view
   // and all our contents. We don't extend "visibility:hidden" to

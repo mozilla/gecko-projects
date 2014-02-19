@@ -85,6 +85,7 @@ static const char *sExtensionNames[] = {
     "GL_OES_texture_float_linear",
     "GL_ARB_texture_float",
     "GL_OES_texture_half_float",
+    "GL_OES_texture_half_float_linear",
     "GL_NV_half_float",
     "GL_EXT_unpack_subimage",
     "GL_OES_standard_derivatives",
@@ -132,6 +133,7 @@ static const char *sExtensionNames[] = {
     "GL_EXT_framebuffer_sRGB",
     "GL_KHR_debug",
     "GL_ARB_half_float_pixel",
+    "GL_EXT_frag_depth",
     nullptr
 };
 
@@ -497,6 +499,19 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
                 { (PRFuncPtr*) &mSymbols.fUnmapBuffer, { "UnmapBuffer", nullptr } },
                 { (PRFuncPtr*) &mSymbols.fPointParameterf, { "PointParameterf", nullptr } },
                 { (PRFuncPtr*) &mSymbols.fDrawBuffer, { "DrawBuffer", nullptr } },
+                    // These functions are only used by Skia/GL in desktop mode.
+                    // Other parts of Gecko should avoid using these
+                    { (PRFuncPtr*) &mSymbols.fDrawBuffers, { "DrawBuffers", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fClientActiveTexture, { "ClientActiveTexture", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fDisableClientState, { "DisableClientState", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fEnableClientState, { "EnableClientState", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fLoadIdentity, { "LoadIdentity", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fLoadMatrixf, { "LoadMatrixf", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fMatrixMode, { "MatrixMode", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fTexGeni, { "TexGeni", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fTexGenf, { "TexGenf", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fTexGenfv, { "TexGenfv", nullptr } },
+                    { (PRFuncPtr*) &mSymbols.fVertexPointer, { "VertexPointer", nullptr } },
                 { nullptr, { nullptr } },
             };
 

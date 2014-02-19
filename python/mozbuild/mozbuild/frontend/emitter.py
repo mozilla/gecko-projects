@@ -242,6 +242,9 @@ class TreeMetadataEmitter(LoggingMixin):
             'RESFILE',
             'DEFFILE',
             'SDK_LIBRARY',
+            'CFLAGS',
+            'CXXFLAGS',
+            'LDFLAGS',
         ]
         for v in varlist:
             if v in sandbox and sandbox[v]:
@@ -421,6 +424,9 @@ class TreeMetadataEmitter(LoggingMixin):
         for name, jar in sandbox.get('JAVA_JAR_TARGETS', {}).items():
             yield SandboxWrapped(sandbox, jar)
 
+        for name, data in sandbox.get('ANDROID_ECLIPSE_PROJECT_TARGETS', {}).items():
+            yield SandboxWrapped(sandbox, data)
+
         if passthru.variables:
             yield passthru
 
@@ -487,28 +493,47 @@ class TreeMetadataEmitter(LoggingMixin):
                         else:
                             full = mozpath.normpath(mozpath.join(manifest_dir,
                                 pattern))
-                            # Only install paths in our directory. This
-                            # rule is somewhat arbitrary and could be lifted.
-                            if not full.startswith(manifest_dir):
-                                continue
 
-                            obj.installs[full] = mozpath.join(out_dir, pattern)
+                            dest_path = mozpath.join(out_dir, pattern)
+
+                            # If the path resolves to a different directory
+                            # tree, we take special behavior depending on the
+                            # entry type.
+                            if not full.startswith(manifest_dir):
+                                # If it's a support file, we install the file
+                                # into the current destination directory.
+                                # This implementation makes installing things
+                                # with custom prefixes impossible. If this is
+                                # needed, we can add support for that via a
+                                # special syntax later.
+                                if thing == 'support-files':
+                                    dest_path = mozpath.join(out_dir,
+                                        os.path.basename(pattern))
+                                # If it's not a support file, we ignore it.
+                                # This preserves old behavior so things like
+                                # head files doesn't get installed multiple
+                                # times.
+                                else:
+                                    continue
+
+                            obj.installs[full] = (mozpath.normpath(dest_path),
+                                False)
 
             for test in filtered:
                 obj.tests.append(test)
 
                 obj.installs[mozpath.normpath(test['path'])] = \
-                    mozpath.join(out_dir, test['relpath'])
+                    (mozpath.join(out_dir, test['relpath']), True)
 
                 process_support_files(test)
 
-            if not m.tests:
+            if not filtered:
                 # If there are no tests, look for support-files under DEFAULT.
                 process_support_files(defaults)
 
             # We also copy the manifest into the output directory.
             out_path = mozpath.join(out_dir, mozpath.basename(manifest_path))
-            obj.installs[path] = out_path
+            obj.installs[path] = (out_path, False)
 
             # Some manifests reference files that are auto generated as
             # part of the build or shouldn't be installed for some

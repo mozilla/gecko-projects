@@ -391,7 +391,9 @@ class TestManifest(SandboxDerived):
         'flavor',
 
         # Maps source filename to destination filename. The destination
-        # path is relative from the tests root directory.
+        # path is relative from the tests root directory. Values are 2-tuples
+        # of (destpath, is_test_file) where the 2nd item is True if this
+        # item represents a test file (versus a support file).
         'installs',
 
         # A list of pattern matching installs to perform. Entries are
@@ -557,3 +559,64 @@ class InstallationTarget(SandboxDerived):
         return FinalTargetValue(dict(
             XPI_NAME=self.xpiname,
             DIST_SUBDIR=self.subdir)) == self.target
+
+
+class ClassPathEntry(object):
+    """Represents a classpathentry in an Android Eclipse project."""
+
+    __slots__ = (
+        'dstdir',
+        'srcdir',
+        'path',
+        'exclude_patterns',
+        'ignore_warnings',
+    )
+
+    def __init__(self):
+        self.dstdir = None
+        self.srcdir = None
+        self.path = None
+        self.exclude_patterns = []
+        self.ignore_warnings = False
+
+
+class AndroidEclipseProjectData(object):
+    """Represents an Android Eclipse project."""
+
+    __slots__ = (
+        'name',
+        'package_name',
+        'is_library',
+        'res',
+        'assets',
+        'libs',
+        'manifest',
+        'recursive_make_targets',
+        'extra_jars',
+        'included_projects',
+        'referenced_projects',
+        '_classpathentries',
+    )
+
+    def __init__(self, name):
+        self.name = name
+        self.is_library = False
+        self.manifest = None
+        self.res = None
+        self.assets = None
+        self.libs = []
+        self.recursive_make_targets = []
+        self.extra_jars = []
+        self.included_projects = []
+        self.referenced_projects = []
+        self._classpathentries = []
+
+    def add_classpathentry(self, path, srcdir, dstdir, exclude_patterns=[], ignore_warnings=False):
+        cpe = ClassPathEntry()
+        cpe.srcdir = srcdir
+        cpe.dstdir = dstdir
+        cpe.path = path
+        cpe.exclude_patterns = list(exclude_patterns)
+        cpe.ignore_warnings = ignore_warnings
+        self._classpathentries.append(cpe)
+        return cpe

@@ -40,7 +40,7 @@ public:
 #endif
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
@@ -72,10 +72,10 @@ public:
                              nsSize aMargin, nsSize aBorder, nsSize aPadding,
                              uint32_t aFlags) MOZ_OVERRIDE;
   virtual nsRect ComputeTightBounds(gfxContext* aContext) const MOZ_OVERRIDE;
-  NS_IMETHOD Reflow(nsPresContext* aPresContext,
-                    nsHTMLReflowMetrics& aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus& aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext* aPresContext,
+                          nsHTMLReflowMetrics& aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus& aStatus) MOZ_OVERRIDE;
 
   virtual bool CanContinueTextRun() const MOZ_OVERRIDE;
 
@@ -190,13 +190,13 @@ public:
   friend nsIFrame* NS_NewFirstLineFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
-  NS_IMETHOD Reflow(nsPresContext* aPresContext,
-                    nsHTMLReflowMetrics& aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus& aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext* aPresContext,
+                          nsHTMLReflowMetrics& aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus& aStatus) MOZ_OVERRIDE;
 
   virtual void Init(nsIContent* aContent, nsIFrame* aParent,
                     nsIFrame* aPrevInFlow) MOZ_OVERRIDE;

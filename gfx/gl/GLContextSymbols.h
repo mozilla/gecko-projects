@@ -139,7 +139,7 @@ struct GLContextSymbols
     PFNGLGETQUERYOBJECTUIVPROC fGetQueryObjectuiv;
     typedef void (GLAPIENTRY * PFNGLTEXPARAMETERIPROC) (GLenum target, GLenum pname, GLint param);
     PFNGLTEXPARAMETERIPROC fTexParameteri;
-    typedef void (GLAPIENTRY * PFNGLTEXPARAMETERIVPROC) (GLenum target, GLenum pname, GLint* param);
+    typedef void (GLAPIENTRY * PFNGLTEXPARAMETERIVPROC) (GLenum target, GLenum pname, const GLint* param);
     PFNGLTEXPARAMETERIVPROC fTexParameteriv;
     typedef void (GLAPIENTRY * PFNGLTEXPARAMETERFPROC) (GLenum target, GLenum pname, GLfloat param);
     PFNGLTEXPARAMETERFPROC fTexParameterf;
@@ -149,9 +149,9 @@ struct GLContextSymbols
     PFNGLGETTEXIMAGEPROC fGetTexImage;
     typedef void (GLAPIENTRY * PFNGLGETTEXLEVELPARAMETERIVPROC) (GLenum target, GLint level, GLenum pname, GLint *params);
     PFNGLGETTEXLEVELPARAMETERIVPROC fGetTexLevelParameteriv;
-    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERFVPROC) (GLenum target, GLenum pname, const GLfloat *params);
+    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERFVPROC) (GLenum target, GLenum pname, GLfloat *params);
     PFNGLGETTEXPARAMETERFVPROC fGetTexParameterfv;
-    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERIVPROC) (GLenum target, GLenum pname, const GLint *params);
+    typedef void (GLAPIENTRY * PFNGLGETTEXPARAMETERIVPROC) (GLenum target, GLenum pname, GLint *params);
     PFNGLGETTEXPARAMETERIVPROC fGetTexParameteriv;
     typedef void (GLAPIENTRY * PFNGLGETUNIFORMFVPROC) (GLuint program, GLint location, GLfloat* params);
     PFNGLGETUNIFORMFVPROC fGetUniformfv;
@@ -313,6 +313,31 @@ struct GLContextSymbols
     typedef void (GLAPIENTRY * PFNGLRENDERBUFFERSTORAGE) (GLenum target, GLenum internalFormat, GLsizei width, GLsizei height);
     PFNGLRENDERBUFFERSTORAGE fRenderbufferStorage;
 
+        // These functions are only used by Skia/GL in desktop mode.
+        // Other parts of Gecko should avoid using these
+        typedef void (GLAPIENTRY * PFNGLCLIENTACTIVETEXTURE) (GLenum texture);
+        PFNGLCLIENTACTIVETEXTURE fClientActiveTexture;
+        typedef void (GLAPIENTRY * PFNDISABLECLIENTSTATE) (GLenum capability);
+        PFNDISABLECLIENTSTATE fDisableClientState;
+        typedef void (GLAPIENTRY * PFNENABLECLIENTSTATE) (GLenum capability);
+        PFNENABLECLIENTSTATE fEnableClientState;
+        typedef void (GLAPIENTRY * PFNLOADIDENTITY) (void);
+        PFNLOADIDENTITY fLoadIdentity;
+        typedef void (GLAPIENTRY * PFNLOADMATRIXD) (const GLdouble* matrix);
+        PFNLOADMATRIXD fLoadMatrixd;
+        typedef void (GLAPIENTRY * PFNLOADMATRIXF) (const GLfloat* matrix);
+        PFNLOADMATRIXF fLoadMatrixf;
+        typedef void (GLAPIENTRY * PFNMATRIXMODE) (GLenum mode);
+        PFNMATRIXMODE fMatrixMode;
+        typedef void (GLAPIENTRY * PFNTEXGENI) (GLenum coord, GLenum pname, GLint param);
+        PFNTEXGENI fTexGeni;
+        typedef void (GLAPIENTRY * PFNTEXGENF) (GLenum coord, GLenum pname, GLfloat param);
+        PFNTEXGENF fTexGenf;
+        typedef void (GLAPIENTRY * PFNTEXGENFV) (GLenum coord, GLenum pname, const GLfloat* param);
+        PFNTEXGENFV fTexGenfv;
+        typedef void (GLAPIENTRY * PFNVERTEXPOINTER) (GLint size, GLenum type, GLsizei stride, const GLvoid* pointer);
+        PFNVERTEXPOINTER fVertexPointer;
+
     typedef void (GLAPIENTRY * PFNGLBLITFRAMEBUFFER) (GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
     PFNGLBLITFRAMEBUFFER fBlitFramebuffer;
     typedef void (GLAPIENTRY * PFNGLRENDERBUFFERSTORAGEMULTISAMPLE) (GLenum target, GLsizei samples, GLenum internalFormat, GLsizei width, GLsizei height);
@@ -464,9 +489,9 @@ struct GLContextSymbols
     PFNGLOBJECTLABEL fObjectLabel;
     typedef void (GLAPIENTRY * PFNGLGETOBJECTLABEL) (GLenum identifier, GLuint name, GLsizei bufSize, GLsizei* length, GLchar* label);
     PFNGLGETOBJECTLABEL fGetObjectLabel;
-    typedef void (GLAPIENTRY * PFNGLOBJECTPTRLABEL) (GLvoid* ptr, GLsizei length, const GLchar* label);
+    typedef void (GLAPIENTRY * PFNGLOBJECTPTRLABEL) (const GLvoid* ptr, GLsizei length, const GLchar* label);
     PFNGLOBJECTPTRLABEL fObjectPtrLabel;
-    typedef void (GLAPIENTRY * PFNGLGETOBJECTPTRLABEL) (GLvoid* ptr, GLsizei bufSize, GLsizei* length, GLchar* label);
+    typedef void (GLAPIENTRY * PFNGLGETOBJECTPTRLABEL) (const GLvoid* ptr, GLsizei bufSize, GLsizei* length, GLchar* label);
     PFNGLGETOBJECTPTRLABEL fGetObjectPtrLabel;
 };
 

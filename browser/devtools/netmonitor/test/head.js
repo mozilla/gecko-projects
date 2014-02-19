@@ -22,6 +22,7 @@ const CYRILLIC_URL = EXAMPLE_URL + "html_cyrillic-test-page.html";
 const STATUS_CODES_URL = EXAMPLE_URL + "html_status-codes-test-page.html";
 const POST_DATA_URL = EXAMPLE_URL + "html_post-data-test-page.html";
 const POST_RAW_URL = EXAMPLE_URL + "html_post-raw-test-page.html";
+const PARAMS_URL = EXAMPLE_URL + "html_params-test-page.html";
 const JSONP_URL = EXAMPLE_URL + "html_jsonp-test-page.html";
 const JSON_LONG_URL = EXAMPLE_URL + "html_json-long-test-page.html";
 const JSON_MALFORMED_URL = EXAMPLE_URL + "html_json-malformed-test-page.html";
@@ -39,6 +40,7 @@ const STATUS_CODES_SJS = EXAMPLE_URL + "sjs_status-codes-test-server.sjs";
 const SORTING_SJS = EXAMPLE_URL + "sjs_sorting-test-server.sjs";
 
 const TEST_IMAGE = EXAMPLE_URL + "test-image.png";
+const TEST_IMAGE_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABGdBTUEAAK/INwWK6QAAABl0RVh0U29mdHdhcmUAQWRvYmUgSW1hZ2VSZWFkeXHJZTwAAAHWSURBVHjaYvz//z8DJQAggJiQOe/fv2fv7Oz8rays/N+VkfG/iYnJfyD/1+rVq7ffu3dPFpsBAAHEAHIBCJ85c8bN2Nj4vwsDw/8zQLwKiO8CcRoQu0DxqlWrdsHUwzBAAIGJmTNnPgYa9j8UqhFElwPxf2MIDeIrKSn9FwSJoRkAEEAM0DD4DzMAyPi/G+QKY4hh5WAXGf8PDQ0FGwJ22d27CjADAAIIrLmjo+MXA9R2kAHvGBA2wwx6B8W7od6CeQcggKCmCEL8bgwxYCbUIGTDVkHDBia+CuotgACCueD3TDQN75D4xmAvCoK9ARMHBzAw0AECiBHkAlC0Mdy7x9ABNA3obAZXIAa6iKEcGlMVQHwWyjYuL2d4v2cPg8vZswx7gHyAAAK7AOif7SAbOqCmn4Ha3AHFsIDtgPq/vLz8P4MSkJ2W9h8ggBjevXvHDo4FQUQg/kdypqCg4H8lUIACnQ/SOBMYI8bAsAJFPcj1AAEEjwVQqLpAbXmH5BJjqI0gi9DTAAgDBBCcAVLkgmQ7yKCZxpCQxqUZhAECCJ4XgMl493ug21ZD+aDAXH0WLM4A9MZPXJkJIIAwTAR5pQMalaCABQUULttBGCCAGCnNzgABBgAMJ5THwGvJLAAAAABJRU5ErkJggg==";
 
 // All tests are asynchronous.
 waitForExplicitFinish();

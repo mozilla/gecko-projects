@@ -136,6 +136,10 @@ public:
   virtual const char* Name() const MOZ_OVERRIDE { return "Direct3D 11"; }
 #endif
 
+  virtual LayersBackend GetBackendType() const MOZ_OVERRIDE {
+    return LayersBackend::LAYERS_D3D11;
+  }
+
   virtual nsIWidget* GetWidget() const MOZ_OVERRIDE { return mWidget; }
 
   ID3D11Device* GetDevice() { return mDevice; }
@@ -148,7 +152,7 @@ private:
   bool CreateShaders();
   void UpdateConstantBuffers();
   void SetSamplerForFilter(gfx::Filter aFilter);
-  void SetPSForEffect(Effect *aEffect, MaskType aMaskType);
+  void SetPSForEffect(Effect *aEffect, MaskType aMaskType, gfx::SurfaceFormat aFormat);
   void PaintToTarget();
 
   RefPtr<ID3D11DeviceContext> mContext;

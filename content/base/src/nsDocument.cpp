@@ -5665,10 +5665,6 @@ already_AddRefed<nsINode>
 nsIDocument::ImportNode(nsINode& aNode, bool aDeep, ErrorResult& rv) const
 {
   nsINode* imported = &aNode;
-  rv = nsContentUtils::CheckSameOrigin(this, imported);
-  if (rv.Failed()) {
-    return nullptr;
-  }
 
   switch (imported->NodeType()) {
     case nsIDOMNode::ATTRIBUTE_NODE:
@@ -5925,12 +5921,6 @@ nsIDocument::CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
                                 ErrorResult& rv) const
 {
   nsINode* root = &aRoot;
-  nsresult res = nsContentUtils::CheckSameOrigin(this, root);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-    return nullptr;
-  }
-
   nsRefPtr<NodeIterator> iterator = new NodeIterator(root, aWhatToShow,
                                                      aFilter);
   return iterator.forget();
@@ -5974,12 +5964,6 @@ nsIDocument::CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
                               ErrorResult& rv) const
 {
   nsINode* root = &aRoot;
-  nsresult res = nsContentUtils::CheckSameOrigin(this, root);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-    return nullptr;
-  }
-
   nsRefPtr<TreeWalker> walker = new TreeWalker(root, aWhatToShow, aFilter);
   return walker.forget();
 }
@@ -6688,10 +6672,6 @@ nsINode*
 nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
 {
   nsINode* adoptedNode = &aAdoptedNode;
-  rv = nsContentUtils::CheckSameOrigin(this, adoptedNode);
-  if (rv.Failed()) {
-    return nullptr;
-  }
 
   // Scope firing mutation events so that we don't carry any state that
   // might be stale
@@ -11113,14 +11093,10 @@ nsIDocument::GetMozPointerLockElement()
     return nullptr;
   }
 
-  // Make sure pointer locked element is in the same document and domain.
+  // Make sure pointer locked element is in the same document.
   nsCOMPtr<nsIDocument> pointerLockedDoc =
     do_QueryReferent(nsEventStateManager::sPointerLockedDoc);
   if (pointerLockedDoc != this) {
-    return nullptr;
-  }
-  nsresult rv = nsContentUtils::CheckSameOrigin(this, pointerLockedElement);
-  if (NS_FAILED(rv)) {
     return nullptr;
   }
 
@@ -11447,7 +11423,7 @@ nsDocument::Evaluate(const nsAString& aExpression, nsIDOMNode* aContextNode,
 {
   return XPathEvaluator()->Evaluate(aExpression, aContextNode, aResolver, aType,
                                     aInResult, aResult);
-} 
+}
 
 // This is just a hack around the fact that window.document is not
 // [Unforgeable] yet.
@@ -11477,12 +11453,14 @@ nsIDocument::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
   JS::Rooted<JS::Value> winVal(aCx);
   nsresult rv = nsContentUtils::WrapNative(aCx, obj, win,
                                            &NS_GET_IID(nsIDOMWindow),
-                                           &winVal,
-                                           false);
+                                           &winVal);
   if (NS_FAILED(rv)) {
     Throw(aCx, rv);
     return nullptr;
   }
+
+  MOZ_ASSERT(&winVal.toObject() == js::UncheckedUnwrap(&winVal.toObject()),
+             "WrapNative shouldn't create a cross-compartment wrapper");
 
   NS_NAMED_LITERAL_STRING(doc_str, "document");
 

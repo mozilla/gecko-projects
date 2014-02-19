@@ -15,6 +15,7 @@
 #include "prlog.h"
 
 #include "gfxPlatform.h"
+#include "gfxPrefs.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -112,16 +113,6 @@ static bool sDrawFrameCounter = false;
 
 #include "mozilla/gfx/2D.h"
 using namespace mozilla::gfx;
-
-// logs shared across gfx
-#ifdef PR_LOGGING
-static PRLogModuleInfo *sFontlistLog = nullptr;
-static PRLogModuleInfo *sFontInitLog = nullptr;
-static PRLogModuleInfo *sTextrunLog = nullptr;
-static PRLogModuleInfo *sTextrunuiLog = nullptr;
-static PRLogModuleInfo *sCmapDataLog = nullptr;
-static PRLogModuleInfo *sTextPerfLog = nullptr;
-#endif
 
 /* Class to listen for pref changes so that chrome code can dynamically
    force sRGB as an output profile. See Bug #452125. */
@@ -372,14 +363,12 @@ gfxPlatform::Init()
     }
     gEverInitialized = true;
 
-#ifdef PR_LOGGING
-    sFontlistLog = PR_NewLogModule("fontlist");
-    sFontInitLog = PR_NewLogModule("fontinit");
-    sTextrunLog = PR_NewLogModule("textrun");
-    sTextrunuiLog = PR_NewLogModule("textrunui");
-    sCmapDataLog = PR_NewLogModule("cmapdata");
-    sTextPerfLog = PR_NewLogModule("textperf");
-#endif
+    /* Pref migration hook. */
+    MigratePrefs();
+
+    // Initialize the preferences by creating the singleton.  This should
+    // be done after the preference migration using MigratePrefs().
+    gfxPrefs::One();
 
     gGfxPlatformPrefsLock = new Mutex("gfxPlatform::gGfxPlatformPrefsLock");
 
@@ -455,9 +444,6 @@ gfxPlatform::Init()
     if (NS_FAILED(rv)) {
         NS_RUNTIMEABORT("Could not initialize gfxFontCache");
     }
-
-    /* Pref migration hook. */
-    MigratePrefs();
 
     /* Create and register our CMS Override observer. */
     gPlatform->mSRGBOverrideObserver = new SRGBOverrideObserver();
@@ -572,6 +558,8 @@ gfxPlatform::Shutdown()
     CompositorParent::ShutDown();
 
     delete gGfxPlatformPrefsLock;
+
+    gfxPrefs::Destroy();
 
     delete gPlatform;
     gPlatform = nullptr;
@@ -1880,7 +1868,10 @@ static void ShutdownCMS()
 static void MigratePrefs()
 {
     /* Migrate from the boolean color_management.enabled pref - we now use
-       color_management.mode. */
+       color_management.mode.  These calls should be made before gfxPrefs
+       is initialized, otherwise we may not pick up the correct values
+       with the gfxPrefs functions.
+    */
     if (Preferences::HasUserValue(GFX_PREF_CMS_ENABLED_OBSOLETE)) {
         if (Preferences::GetBool(GFX_PREF_CMS_ENABLED_OBSOLETE, false)) {
             Preferences::SetInt(GFX_PREF_CMS_MODE, static_cast<int32_t>(eCMSMode_All));
@@ -1958,7 +1949,25 @@ gfxPlatform::FontsPrefsChanged(const char *aPref)
 PRLogModuleInfo*
 gfxPlatform::GetLog(eGfxLog aWhichLog)
 {
+    // logs shared across gfx
 #ifdef PR_LOGGING
+    static PRLogModuleInfo *sFontlistLog = nullptr;
+    static PRLogModuleInfo *sFontInitLog = nullptr;
+    static PRLogModuleInfo *sTextrunLog = nullptr;
+    static PRLogModuleInfo *sTextrunuiLog = nullptr;
+    static PRLogModuleInfo *sCmapDataLog = nullptr;
+    static PRLogModuleInfo *sTextPerfLog = nullptr;
+
+    // Assume that if one is initialized, all are initialized
+    if (!sFontlistLog) {
+        sFontlistLog = PR_NewLogModule("fontlist");
+        sFontInitLog = PR_NewLogModule("fontinit");
+        sTextrunLog = PR_NewLogModule("textrun");
+        sTextrunuiLog = PR_NewLogModule("textrunui");
+        sCmapDataLog = PR_NewLogModule("cmapdata");
+        sTextPerfLog = PR_NewLogModule("textperf");
+    }
+
     switch (aWhichLog) {
     case eGfxLog_fontlist:
         return sFontlistLog;

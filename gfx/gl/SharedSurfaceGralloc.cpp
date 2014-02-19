@@ -80,7 +80,7 @@ SharedSurface_Gralloc::Create(GLContext* prodGL,
     gfxImageFormat format
       = gfxPlatform::GetPlatform()->OptimalFormatForContent(type);
 
-    GrallocTextureClientOGL* grallocTC =
+    RefPtr<GrallocTextureClientOGL> grallocTC =
       new GrallocTextureClientOGL(
           allocator,
           gfx::ImageFormatToSurfaceFormat(format),
@@ -102,7 +102,6 @@ SharedSurface_Gralloc::Create(GLContext* prodGL,
                                        LOCAL_EGL_NATIVE_BUFFER_ANDROID,
                                        clientBuffer, attrs);
     if (!image) {
-        grallocTC->DropTextureData()->DeallocateSharedData(allocator);
         return nullptr;
     }
 
@@ -141,7 +140,7 @@ SharedSurface_Gralloc::~SharedSurface_Gralloc()
     DEBUG_PRINT("[SharedSurface_Gralloc %p] destroyed\n", this);
 
     mGL->MakeCurrent();
-    mGL->fDeleteTextures(1, (GLuint*)&mProdTex);
+    mGL->fDeleteTextures(1, &mProdTex);
 }
 
 void

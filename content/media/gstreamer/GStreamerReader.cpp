@@ -81,7 +81,8 @@ GStreamerReader::GStreamerReader(AbstractMediaDecoder* aDecoder)
   mVideoSinkBufferCount(0),
   mAudioSinkBufferCount(0),
   mGstThreadsMonitor("media.gst.threads"),
-  mReachedEos(false),
+  mReachedAudioEos(false),
+  mReachedVideoEos(false),
 #if GST_VERSION_MAJOR >= 1
   mConfigureAlignment(true),
 #endif
@@ -225,15 +226,6 @@ void GStreamerReader::PlayBinSourceSetup(GstAppSrc* aSource)
   gst_app_src_set_callbacks(mSource, &mSrcCallbacks, (gpointer) this, nullptr);
   MediaResource* resource = mDecoder->GetResource();
 
-  /* do a short read to trigger a network request so that GetLength() below
-   * returns something meaningful and not -1
-   */
-  char buf[512];
-  unsigned int size = 0;
-  resource->Read(buf, sizeof(buf), &size);
-  resource->Seek(SEEK_SET, 0);
-
-  /* now we should have a length */
   int64_t resourceLength = resource->GetLength();
   gst_app_src_set_size(mSource, resourceLength);
   if (resource->IsDataCachedToEndOfResource(0) ||
@@ -336,30 +328,40 @@ nsresult GStreamerReader::ReadMetadata(MediaInfo* aInfo,
     }
 
     LOG(PR_LOG_DEBUG, ("starting metadata pipeline"));
-    gst_element_set_state(mPlayBin, GST_STATE_PAUSED);
+    if (gst_element_set_state(mPlayBin, GST_STATE_PAUSED) == GST_STATE_CHANGE_FAILURE) {
+      LOG(PR_LOG_DEBUG, ("metadata pipeline state change failed"));
+      ret = NS_ERROR_FAILURE;
+      continue;
+    }
 
     /* Wait for ASYNC_DONE, which is emitted when the pipeline is built,
      * prerolled and ready to play. Also watch for errors.
      */
     message = gst_bus_timed_pop_filtered(mBus, GST_CLOCK_TIME_NONE,
-                 (GstMessageType)(GST_MESSAGE_ASYNC_DONE | GST_MESSAGE_ERROR));
-    if (GST_MESSAGE_TYPE(message) == GST_MESSAGE_ERROR) {
-      GError* error;
-      gchar* debug;
-
-      gst_message_parse_error(message, &error, &debug);
-      LOG(PR_LOG_ERROR, ("read metadata error: %s: %s", error->message,
-                         debug));
-      g_error_free(error);
-      g_free(debug);
-      gst_element_set_state(mPlayBin, GST_STATE_NULL);
-      gst_message_unref(message);
-      ret = NS_ERROR_FAILURE;
-    } else {
+                 (GstMessageType)(GST_MESSAGE_ASYNC_DONE | GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
+    if (GST_MESSAGE_TYPE(message) == GST_MESSAGE_ASYNC_DONE) {
       LOG(PR_LOG_DEBUG, ("read metadata pipeline prerolled"));
       gst_message_unref(message);
       ret = NS_OK;
       break;
+    } else {
+      LOG(PR_LOG_DEBUG, ("read metadata pipeline failed to preroll: %s",
+            gst_message_type_get_name (GST_MESSAGE_TYPE (message))));
+
+      if (GST_MESSAGE_TYPE(message) == GST_MESSAGE_ERROR) {
+        GError* error;
+        gchar* debug;
+        gst_message_parse_error(message, &error, &debug);
+        LOG(PR_LOG_ERROR, ("read metadata error: %s: %s", error->message,
+                           debug));
+        g_error_free(error);
+        g_free(debug);
+      }
+      /* Unexpected stream close/EOS or other error. We'll give up if all
+       * streams are in error/eos. */
+      gst_element_set_state(mPlayBin, GST_STATE_NULL);
+      gst_message_unref(message);
+      ret = NS_ERROR_FAILURE;
     }
   }
 
@@ -378,12 +380,15 @@ nsresult GStreamerReader::ReadMetadata(MediaInfo* aInfo,
     /* after a seek we need to wait again for ASYNC_DONE */
     message = gst_bus_timed_pop_filtered(mBus, 5 * GST_SECOND,
        (GstMessageType)(GST_MESSAGE_ASYNC_DONE | GST_MESSAGE_ERROR));
-    LOG(PR_LOG_DEBUG, ("matroskademux seek hack done"));
-    if (GST_MESSAGE_TYPE(message) != GST_MESSAGE_ASYNC_DONE) {
+    if (message == NULL || GST_MESSAGE_TYPE(message) != GST_MESSAGE_ASYNC_DONE) {
+      LOG(PR_LOG_DEBUG, ("matroskademux seek hack failed: %p", message));
       gst_element_set_state(mPlayBin, GST_STATE_NULL);
-      gst_message_unref(message);
+      if (message) {
+        gst_message_unref(message);
+      }
       return NS_ERROR_FAILURE;
     }
+    LOG(PR_LOG_DEBUG, ("matroskademux seek hack completed"));
   } else {
     LOG(PR_LOG_DEBUG, ("matroskademux seek hack failed (non fatal)"));
   }
@@ -534,7 +539,8 @@ nsresult GStreamerReader::ResetDecode()
 
   mVideoSinkBufferCount = 0;
   mAudioSinkBufferCount = 0;
-  mReachedEos = false;
+  mReachedAudioEos = false;
+  mReachedVideoEos = false;
 #if GST_VERSION_MAJOR >= 1
   mConfigureAlignment = true;
 #endif
@@ -553,7 +559,7 @@ bool GStreamerReader::DecodeAudioData()
   {
     ReentrantMonitorAutoEnter mon(mGstThreadsMonitor);
 
-    if (mReachedEos) {
+    if (mReachedAudioEos && !mAudioSinkBufferCount) {
       return false;
     }
 
@@ -637,7 +643,7 @@ bool GStreamerReader::DecodeVideoFrame(bool &aKeyFrameSkip,
   {
     ReentrantMonitorAutoEnter mon(mGstThreadsMonitor);
 
-    if (mReachedEos) {
+    if (mReachedVideoEos && !mVideoSinkBufferCount) {
       return false;
     }
 
@@ -691,7 +697,7 @@ bool GStreamerReader::DecodeVideoFrame(bool &aKeyFrameSkip,
                "frame has invalid timestamp");
 
   timestamp = GST_TIME_AS_USECONDS(timestamp);
-  int64_t duration;
+  int64_t duration = 0;
   if (GST_CLOCK_TIME_IS_VALID(GST_BUFFER_DURATION(buffer)))
     duration = GST_TIME_AS_USECONDS(GST_BUFFER_DURATION(buffer));
   else if (fpsNum && fpsDen)
@@ -709,7 +715,7 @@ bool GStreamerReader::DecodeVideoFrame(bool &aKeyFrameSkip,
 
   if (!buffer)
     /* no more frames */
-    return false;
+    return true;
 
 #if GST_VERSION_MAJOR >= 1
   if (mConfigureAlignment && buffer->pool) {
@@ -1060,16 +1066,24 @@ void GStreamerReader::NewAudioBuffer()
 void GStreamerReader::EosCb(GstAppSink* aSink, gpointer aUserData)
 {
   GStreamerReader* reader = reinterpret_cast<GStreamerReader*>(aUserData);
-  reader->Eos();
+  reader->Eos(aSink);
 }
 
-void GStreamerReader::Eos()
+void GStreamerReader::Eos(GstAppSink* aSink)
 {
   /* We reached the end of the stream */
   {
     ReentrantMonitorAutoEnter mon(mGstThreadsMonitor);
     /* Potentially unblock DecodeVideoFrame and DecodeAudioData */
-    mReachedEos = true;
+    if (aSink == mVideoAppSink) {
+      mReachedVideoEos = true;
+    } else if (aSink == mAudioAppSink) {
+      mReachedAudioEos = true;
+    } else {
+      // Assume this is an error causing an EOS.
+      mReachedAudioEos = true;
+      mReachedVideoEos = true;
+    }
     mon.NotifyAll();
   }
 

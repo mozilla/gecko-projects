@@ -24,6 +24,7 @@
 #include "builtin/RegExp.h"
 #include "builtin/SIMD.h"
 #include "builtin/TypedObject.h"
+#include "vm/PIC.h"
 #include "vm/RegExpStatics.h"
 #include "vm/StopIterationObject.h"
 #include "vm/WeakMapObject.h"
@@ -553,14 +554,14 @@ GlobalObject::getOrCreateEval(JSContext *cx, Handle<GlobalObject*> global,
 {
     if (!global->getOrCreateObjectPrototype(cx))
         return false;
-    eval.set(&global->getSlotForCompilation(EVAL).toObject());
+    eval.set(&global->getSlot(EVAL).toObject());
     return true;
 }
 
 bool
 GlobalObject::valueIsEval(Value val)
 {
-    Value eval = getSlotForCompilation(EVAL);
+    Value eval = getSlot(EVAL);
     return eval.isObject() && eval == val;
 }
 
@@ -741,6 +742,21 @@ GlobalObject::addDebugger(JSContext *cx, Handle<GlobalObject*> global, Debugger 
     return true;
 }
 
+/* static */ JSObject *
+GlobalObject::getOrCreateForOfPICObject(JSContext *cx, Handle<GlobalObject *> global)
+{
+    assertSameCompartment(cx, global);
+    JSObject *forOfPIC = global->getForOfPICObject();
+    if (forOfPIC)
+        return forOfPIC;
+
+    forOfPIC = ForOfPIC::createForOfPICObject(cx, global);
+    if (!forOfPIC)
+        return nullptr;
+    global->setReservedSlot(FOR_OF_PIC_CHAIN, ObjectValue(*forOfPIC));
+    return forOfPIC;
+}
+
 bool
 GlobalObject::getSelfHostedFunction(JSContext *cx, HandleAtom selfHostedName, HandleAtom name,
                                     unsigned nargs, MutableHandleValue funVal)
@@ -772,10 +788,6 @@ GlobalObject::addIntrinsicValue(JSContext *cx, HandleId id, HandleValue value)
 {
     RootedObject holder(cx, intrinsicsHolder());
 
-    // Work directly with the shape machinery underlying the object, so that we
-    // don't take the compilation lock until we are ready to update the object
-    // without triggering a GC.
-
     uint32_t slot = holder->slotSpan();
     RootedShape last(cx, holder->lastProperty());
     Rooted<UnownedBaseShape*> base(cx, last->base()->unowned());
@@ -785,7 +797,6 @@ GlobalObject::addIntrinsicValue(JSContext *cx, HandleId id, HandleValue value)
     if (!shape)
         return false;
 
-    AutoLockForCompilation lock(cx);
     if (!JSObject::setLastProperty(cx, holder, shape))
         return false;
 

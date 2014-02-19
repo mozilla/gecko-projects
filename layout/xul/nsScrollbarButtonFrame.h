@@ -33,9 +33,9 @@ public:
 
   friend nsIFrame* NS_NewScrollbarButtonFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  NS_IMETHOD HandleEvent(nsPresContext* aPresContext,
-                         mozilla::WidgetGUIEvent* aEvent,
-                         nsEventStatus* aEventStatus) MOZ_OVERRIDE;
+  virtual nsresult HandleEvent(nsPresContext* aPresContext,
+                               mozilla::WidgetGUIEvent* aEvent,
+                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
 
   static nsresult GetChildWithTag(nsPresContext* aPresContext,
                                   nsIAtom* atom, nsIFrame* start, nsIFrame*& result);

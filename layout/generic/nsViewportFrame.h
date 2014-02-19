@@ -38,18 +38,18 @@ public:
                     nsIFrame*        aParent,
                     nsIFrame*        asPrevInFlow) MOZ_OVERRIDE;
 
-  NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 
-  NS_IMETHOD AppendFrames(ChildListID     aListID,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult AppendFrames(ChildListID     aListID,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
 
-  NS_IMETHOD InsertFrames(ChildListID     aListID,
-                          nsIFrame*       aPrevFrame,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult InsertFrames(ChildListID     aListID,
+                                nsIFrame*       aPrevFrame,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
 
-  NS_IMETHOD RemoveFrame(ChildListID     aListID,
-                         nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual nsresult RemoveFrame(ChildListID     aListID,
+                               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
@@ -57,10 +57,10 @@ public:
 
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
-  NS_IMETHOD Reflow(nsPresContext*          aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*          aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   /**
    * Get the "type" of the frame
@@ -78,7 +78,7 @@ public:
   nsRect AdjustReflowStateAsContainingBlock(nsHTMLReflowState* aReflowState) const;
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
 private:

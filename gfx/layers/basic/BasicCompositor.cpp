@@ -227,7 +227,7 @@ BasicCompositor::BasicCompositor(nsIWidget *aWidget)
   : mWidget(aWidget)
 {
   MOZ_COUNT_CTOR(BasicCompositor);
-  sBackend = LayersBackend::LAYERS_BASIC;
+  SetBackend(LayersBackend::LAYERS_BASIC);
 }
 
 BasicCompositor::~BasicCompositor()
@@ -482,10 +482,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
                      DrawOptions(aOpacity));
       break;
     }
-    case EFFECT_BGRA:
-    case EFFECT_BGRX:
-    case EFFECT_RGBA:
-    case EFFECT_RGBX: {
+    case EFFECT_RGB: {
       TexturedEffect* texturedEffect =
           static_cast<TexturedEffect*>(aEffectChain.mPrimaryEffect.get());
       TextureSourceBasic* source = texturedEffect->mTexture->AsSourceBasic();

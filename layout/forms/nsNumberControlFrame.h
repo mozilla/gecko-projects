@@ -50,14 +50,18 @@ public:
   virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
-  NS_IMETHOD Reflow(nsPresContext*           aPresContext,
-                    nsHTMLReflowMetrics&     aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nscoord GetMinWidth(nsRenderingContext* aRenderingContext) MOZ_OVERRIDE;
 
-  NS_IMETHOD AttributeChanged(int32_t  aNameSpaceID,
-                              nsIAtom* aAttribute,
-                              int32_t  aModType) MOZ_OVERRIDE;
+  virtual nscoord GetPrefWidth(nsRenderingContext* aRenderingContext) MOZ_OVERRIDE;
+
+  virtual nsresult Reflow(nsPresContext*           aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+
+  virtual nsresult AttributeChanged(int32_t  aNameSpaceID,
+                                    nsIAtom* aAttribute,
+                                    int32_t  aModType) MOZ_OVERRIDE;
 
   // nsIAnonymousContentCreator
   virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
@@ -65,7 +69,7 @@ public:
                                         uint32_t aFilter) MOZ_OVERRIDE;
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
     return MakeFrameName(NS_LITERAL_STRING("NumberControl"), aResult);
   }
 #endif
@@ -158,11 +162,6 @@ private:
                                 nsIAtom* aTagName,
                                 nsCSSPseudoElements::Type aPseudoType,
                                 nsStyleContext* aParentContext);
-
-  nsresult ReflowAnonymousContent(nsPresContext* aPresContext,
-                                  nsHTMLReflowMetrics& aWrappersDesiredSize,
-                                  const nsHTMLReflowState& aReflowState,
-                                  nsIFrame* aOuterWrapperFrame);
 
   class SyncDisabledStateEvent;
   friend class SyncDisabledStateEvent;

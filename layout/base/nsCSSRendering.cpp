@@ -575,10 +575,8 @@ GetOutlineInnerRect(nsIFrame* aFrame)
     (aFrame->Properties().Get(nsIFrame::OutlineInnerRectProperty()));
   if (savedOutlineInnerRect)
     return *savedOutlineInnerRect;
-  // FIXME (bug 599652): We probably want something narrower than either
-  // overflow rect here, but for now use the visual overflow in order to
-  // be consistent with ComputeOutlineAndEffectsRect in nsFrame.cpp.
-  return aFrame->GetVisualOverflowRect();
+  NS_NOTREACHED("we should have saved a frame property");
+  return nsRect(nsPoint(0, 0), aFrame->GetSize());
 }
 
 void
@@ -608,38 +606,18 @@ nsCSSRendering::PaintOutline(nsPresContext* aPresContext,
   nscolor bgColor =
     bgContext->GetVisitedDependentColor(eCSSProperty_background_color);
 
-  // When the outline property is set on :-moz-anonymous-block or
-  // :-moz-anonyomus-positioned-block pseudo-elements, it inherited that
-  // outline from the inline that was broken because it contained a
-  // block.  In that case, we don't want a really wide outline if the
-  // block inside the inline is narrow, so union the actual contents of
-  // the anonymous blocks.
-  nsIFrame *frameForArea = aForFrame;
-  do {
-    nsIAtom *pseudoType = frameForArea->StyleContext()->GetPseudo();
-    if (pseudoType != nsCSSAnonBoxes::mozAnonymousBlock &&
-        pseudoType != nsCSSAnonBoxes::mozAnonymousPositionedBlock)
-      break;
-    // If we're done, we really want it and all its later siblings.
-    frameForArea = frameForArea->GetFirstPrincipalChild();
-    NS_ASSERTION(frameForArea, "anonymous block with no children?");
-  } while (frameForArea);
-  nsRect innerRect; // relative to aBorderArea.TopLeft()
-  if (frameForArea == aForFrame) {
-    innerRect = GetOutlineInnerRect(aForFrame);
+  nsRect innerRect;
+  if (
+#ifdef MOZ_XUL
+      aStyleContext->GetPseudoType() == nsCSSPseudoElements::ePseudo_XULTree
+#else
+      false
+#endif
+     ) {
+    innerRect = aBorderArea;
   } else {
-    for (; frameForArea; frameForArea = frameForArea->GetNextSibling()) {
-      // The outline has already been included in aForFrame's overflow
-      // area, but not in those of its descendants, so we have to
-      // include it.  Otherwise we'll end up drawing the outline inside
-      // the border.
-      nsRect r(GetOutlineInnerRect(frameForArea) +
-               frameForArea->GetOffsetTo(aForFrame));
-      innerRect.UnionRect(innerRect, r);
-    }
+    innerRect = GetOutlineInnerRect(aForFrame) + aBorderArea.TopLeft();
   }
-
-  innerRect += aBorderArea.TopLeft();
   nscoord offset = ourOutline->mOutlineOffset;
   innerRect.Inflate(offset, offset);
   // If the dirty rect is completely inside the border area (e.g., only the

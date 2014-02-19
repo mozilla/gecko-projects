@@ -11,7 +11,7 @@
 #include "nsPageContentFrame.h"
 #include "nsDisplayList.h"
 #include "nsLayoutUtils.h" // for function BinarySearchForPosition
-#include "nsSimplePageSequence.h" // for nsSharedPageData
+#include "nsSimplePageSequenceFrame.h" // for nsSharedPageData
 #include "nsTextFormatter.h" // for page number localization formatting
 #ifdef IBMBIDI
 #include "nsBidiUtils.h"
@@ -45,7 +45,7 @@ nsPageFrame::~nsPageFrame()
 {
 }
 
-NS_IMETHODIMP nsPageFrame::Reflow(nsPresContext*           aPresContext,
+nsresult nsPageFrame::Reflow(nsPresContext*           aPresContext,
                                   nsHTMLReflowMetrics&     aDesiredSize,
                                   const nsHTMLReflowState& aReflowState,
                                   nsReflowStatus&          aStatus)
@@ -169,7 +169,7 @@ nsPageFrame::GetType() const
 }
 
 #ifdef DEBUG_FRAME_DUMP
-NS_IMETHODIMP
+nsresult
 nsPageFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Page"), aResult);
@@ -682,7 +682,7 @@ nsPageBreakFrame::GetType() const
 }
 
 #ifdef DEBUG_FRAME_DUMP
-NS_IMETHODIMP
+nsresult
 nsPageBreakFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("PageBreak"), aResult);

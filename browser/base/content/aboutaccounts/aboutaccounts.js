@@ -226,8 +226,16 @@ let wrapper = {
 
 // Button onclick handlers
 function handleOldSync() {
-  // we just want to navigate the current tab to the new location...
-  window.location = Services.urlFormatter.formatURLPref("app.support.baseURL") + "old-sync";
+  let chromeWin = window
+    .QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIWebNavigation)
+    .QueryInterface(Ci.nsIDocShellTreeItem)
+    .rootTreeItem
+    .QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIDOMWindow)
+    .QueryInterface(Ci.nsIDOMChromeWindow);
+  let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "old-sync";
+  chromeWin.switchToTabHavingURI(url, true);
 }
 
 function getStarted() {
@@ -242,6 +250,9 @@ function openPrefs() {
 
 function init() {
   if (window.location.href.contains("action=signin")) {
+    show("remote");
+    wrapper.init(fxAccounts.getAccountsSignInURI());
+  } else if (window.location.href.contains("action=signup")) {
     show("remote");
     wrapper.init();
   } else if (window.location.href.contains("action=reauth")) {

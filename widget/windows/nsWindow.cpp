@@ -3343,11 +3343,6 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
 
 gfxASurface *nsWindow::GetThebesSurface()
 {
-#ifdef CAIRO_HAS_D2D_SURFACE
-  if (mD2DWindowSurface) {
-    return mD2DWindowSurface;
-  }
-#endif
   if (mPaintDC)
     return (new gfxWindowsSurface(mPaintDC));
 
@@ -6136,7 +6131,7 @@ bool nsWindow::OnGesture(WPARAM wParam, LPARAM lParam)
   }
 
   // Other gestures translate into simple gesture events:
-  WidgetSimpleGestureEvent event(true, 0, this, 0, 0.0);
+  WidgetSimpleGestureEvent event(true, 0, this);
   if ( !mGesture.ProcessGestureMessage(mWnd, wParam, lParam, event) ) {
     return false; // fall through to DefWndProc
   }
@@ -6442,13 +6437,6 @@ void nsWindow::OnDestroy()
 // Send a resize message to the listener
 bool nsWindow::OnResize(nsIntRect &aWindowRect)
 {
-#ifdef CAIRO_HAS_D2D_SURFACE
-  if (mD2DWindowSurface) {
-    mD2DWindowSurface = nullptr;
-    Invalidate();
-  }
-#endif
-
   bool result = mWidgetListener ?
                 mWidgetListener->WindowResized(this, aWindowRect.width, aWindowRect.height) : false;
 
@@ -6519,6 +6507,19 @@ nsWindow::StartAllowingD3D9(bool aReinitialize)
   } else {
     EnumAllWindows(AllowD3D9Callback);
   }
+}
+
+bool
+nsWindow::ShouldUseOffMainThreadCompositing()
+{
+  // We don't currently support using an accelerated layer manager with
+  // transparent windows so don't even try. I'm also not sure if we even
+  // want to support this case. See bug 593471
+  if (mTransparencyMode == eTransparencyTransparent) {
+    return false;
+  }
+
+  return nsBaseWidget::ShouldUseOffMainThreadCompositing();
 }
 
 void
@@ -6613,9 +6614,9 @@ nsWindow::OnSysColorChanged()
  **************************************************************/
 
 NS_IMETHODIMP
-nsWindow::NotifyIME(NotificationToIME aNotification)
+nsWindow::NotifyIME(const IMENotification& aIMENotification)
 {
-  return IMEHandler::NotifyIME(this, aNotification);
+  return IMEHandler::NotifyIME(this, aIMENotification);
 }
 
 NS_IMETHODIMP_(void)
@@ -6648,14 +6649,6 @@ nsWindow::GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState)
   NS_ENSURE_ARG_POINTER(aLEDState);
   *aLEDState = (::GetKeyState(aKeyCode) & 1) != 0;
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindow::NotifyIMEOfTextChange(uint32_t aStart,
-                                uint32_t aOldEnd,
-                                uint32_t aNewEnd)
-{
-  return IMEHandler::NotifyIMEOfTextChange(aStart, aOldEnd, aNewEnd);
 }
 
 nsIMEUpdatePreference
@@ -6835,14 +6828,6 @@ nsresult nsWindow::UpdateTranslucentWindow()
   bool updateSuccesful = 
     ::UpdateLayeredWindow(hWnd, nullptr, (POINT*)&winRect, &winSize, mMemoryDC,
                           &srcPos, 0, &bf, ULW_ALPHA);
-
-#ifdef CAIRO_HAS_D2D_SURFACE
-  if (gfxWindowsPlatform::GetPlatform()->GetRenderMode() ==
-      gfxWindowsPlatform::RENDER_DIRECT2D) {
-    nsIntRect r(0, 0, 0, 0);
-    static_cast<gfxD2DSurface*>(mTransparentSurface.get())->ReleaseDC(&r);
-  }
-#endif
 
   if (!updateSuccesful) {
     return NS_ERROR_FAILURE;
@@ -7091,9 +7076,6 @@ BOOL CALLBACK nsWindow::ClearResourcesCallback(HWND aWnd, LPARAM aMsg)
 void
 nsWindow::ClearCachedResources()
 {
-#ifdef CAIRO_HAS_D2D_SURFACE
-    mD2DWindowSurface = nullptr;
-#endif
     if (mLayerManager &&
         mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC) {
       mLayerManager->ClearCachedResources();

@@ -445,7 +445,7 @@ pref("browser.ui.touch.bottom", 16);
 pref("browser.ui.touch.weight.visited", 120); // percentage
 
 // The percentage of the screen that needs to be scrolled before margins are exposed.
-pref("browser.ui.show-margins-threshold", 20);
+pref("browser.ui.show-margins-threshold", 10);
 
 // Maximum distance from the point where the user pressed where we still
 // look for text to select
@@ -817,7 +817,7 @@ pref("browser.snippets.geoUrl", "https://geo.mozilla.org/country.json");
 pref("browser.snippets.statsUrl", "https://snippets-stats.mozilla.org/mobile");
 
 // These prefs require a restart to take effect.
-pref("browser.snippets.enabled", false);
+pref("browser.snippets.enabled", true);
 pref("browser.snippets.syncPromo.enabled", false);
 
 #ifdef MOZ_ANDROID_SYNTHAPKS

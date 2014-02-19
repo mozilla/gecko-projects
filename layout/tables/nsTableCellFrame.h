@@ -51,9 +51,9 @@ public:
   virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
-  NS_IMETHOD  AttributeChanged(int32_t         aNameSpaceID,
-                               nsIAtom*        aAttribute,
-                               int32_t         aModType) MOZ_OVERRIDE;
+  virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
+                                     nsIAtom*        aAttribute,
+                                     int32_t         aModType) MOZ_OVERRIDE;
 
   /** @see nsIFrame::DidSetStyleContext */
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
@@ -61,13 +61,13 @@ public:
   // table cells contain a block frame which does most of the work, and
   // so these functions should never be called. They assert and return
   // NS_ERROR_NOT_IMPLEMENTED
-  NS_IMETHOD AppendFrames(ChildListID     aListID,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD InsertFrames(ChildListID     aListID,
-                          nsIFrame*       aPrevFrame,
-                          nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  NS_IMETHOD RemoveFrame(ChildListID     aListID,
-                         nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual nsresult AppendFrames(ChildListID     aListID,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult InsertFrames(ChildListID     aListID,
+                                nsIFrame*       aPrevFrame,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult RemoveFrame(ChildListID     aListID,
+                               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
 
   virtual nsIFrame* GetContentInsertionFrame() MOZ_OVERRIDE {
     return GetFirstPrincipalChild()->GetContentInsertionFrame();
@@ -104,10 +104,10 @@ public:
   virtual IntrinsicWidthOffsetData
     IntrinsicWidthOffsets(nsRenderingContext* aRenderingContext) MOZ_OVERRIDE;
 
-  NS_IMETHOD Reflow(nsPresContext*      aPresContext,
-                    nsHTMLReflowMetrics& aDesiredSize,
-                    const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&      aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*      aPresContext,
+                          nsHTMLReflowMetrics& aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&      aStatus) MOZ_OVERRIDE;
 
   /**
    * Get the "type" of the frame
@@ -117,7 +117,7 @@ public:
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   void VerticallyAlignChild(nscoord aMaxAscent);
@@ -310,7 +310,7 @@ public:
   virtual nsMargin GetBorderOverflow() MOZ_OVERRIDE;
 
 #ifdef DEBUG_FRAME_DUMP
-  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
   virtual void PaintBackground(nsRenderingContext& aRenderingContext,

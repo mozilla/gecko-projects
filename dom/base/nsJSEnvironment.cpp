@@ -2196,10 +2196,15 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
     PokeGC(JS::gcreason::CC_WAITING);
   }
 
-  TimeStamp endCCTime = TimeStamp::Now();
+  TimeStamp endCCTimeStamp = TimeStamp::Now();
+
+  PRTime endCCTime;
+  if (sPostGCEventsToObserver) {
+    endCCTime = PR_Now();
+  }
 
   // Log information about the CC via telemetry, JSON and the console.
-  uint32_t ccNowDuration = TimeBetween(gCCStats.mBeginTime, endCCTime);
+  uint32_t ccNowDuration = TimeBetween(gCCStats.mBeginTime, endCCTimeStamp);
   Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_FINISH_IGC, gCCStats.mAnyLockedOut);
   Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_SYNC_SKIPPABLE, gCCStats.mRanSyncForgetSkippable);
   Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_FULL, ccNowDuration);
@@ -2209,7 +2214,7 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
     uint32_t timeBetween = TimeBetween(sLastCCEndTime, gCCStats.mBeginTime);
     Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_TIME_BETWEEN, timeBetween);
   }
-  sLastCCEndTime = endCCTime;
+  sLastCCEndTime = endCCTimeStamp;
 
   Telemetry::Accumulate(Telemetry::FORGET_SKIPPABLE_MAX,
                         sMaxForgetSkippableTime / PR_USEC_PER_MSEC);
@@ -2259,11 +2264,11 @@ nsJSContext::EndCycleCollectionCallback(CycleCollectorResults &aResults)
   if (sPostGCEventsToObserver) {
     NS_NAMED_MULTILINE_LITERAL_STRING(kJSONFmt,
        MOZ_UTF16("{ \"timestamp\": %llu, ")
-         MOZ_UTF16("\"duration\": %llu, ")
-         MOZ_UTF16("\"max_slice_pause\": %llu, ")
-         MOZ_UTF16("\"total_slice_pause\": %llu, ")
-         MOZ_UTF16("\"max_finish_gc_duration\": %llu, ")
-         MOZ_UTF16("\"max_sync_skippable_duration\": %llu, ")
+         MOZ_UTF16("\"duration\": %lu, ")
+         MOZ_UTF16("\"max_slice_pause\": %lu, ")
+         MOZ_UTF16("\"total_slice_pause\": %lu, ")
+         MOZ_UTF16("\"max_finish_gc_duration\": %lu, ")
+         MOZ_UTF16("\"max_sync_skippable_duration\": %lu, ")
          MOZ_UTF16("\"suspected\": %lu, ")
          MOZ_UTF16("\"visited\": { ")
              MOZ_UTF16("\"RCed\": %lu, ")
@@ -2971,6 +2976,16 @@ AsmJSCacheOpenEntryForWrite(JS::Handle<JSObject*> aGlobal,
                                        aHandle);
 }
 
+static void
+OnLargeAllocationFailure()
+{
+  nsCOMPtr<nsIObserverService> os =
+    mozilla::services::GetObserverService();
+  if (os) {
+    os->NotifyObservers(nullptr, "memory-pressure", MOZ_UTF16("heap-minimize"));
+  }
+}
+
 static NS_DEFINE_CID(kDOMScriptObjectFactoryCID, NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
 
 void
@@ -3026,6 +3041,8 @@ nsJSContext::EnsureStatics()
     asmjscache::GetBuildId
   };
   JS::SetAsmJSCacheOps(sRuntime, &asmJSCacheOps);
+
+  JS::SetLargeAllocationFailureCallback(sRuntime, OnLargeAllocationFailure);
 
   // Set these global xpconnect options...
   Preferences::RegisterCallbackAndCall(ReportAllJSExceptionsPrefChangedCallback,

@@ -305,6 +305,11 @@ public:
     virtual bool
     DeallocPContentPermissionRequestChild(PContentPermissionRequestChild* actor) MOZ_OVERRIDE;
 
+    virtual PFilePickerChild*
+    AllocPFilePickerChild(const nsString& aTitle, const int16_t& aMode) MOZ_OVERRIDE;
+    virtual bool
+    DeallocPFilePickerChild(PFilePickerChild* actor) MOZ_OVERRIDE;
+
     virtual POfflineCacheUpdateChild* AllocPOfflineCacheUpdateChild(
             const URIParams& manifestURI,
             const URIParams& documentURI,
@@ -511,6 +516,7 @@ private:
     bool mUpdateHitRegion;
     bool mContextMenuHandled;
     bool mWaitingTouchListeners;
+    void FireSingleTapEvent(LayoutDevicePoint aPoint);
 
     DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

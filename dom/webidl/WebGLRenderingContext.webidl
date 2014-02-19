@@ -823,6 +823,11 @@ interface WebGLExtensionElementIndexUint
 };
 
 [NoInterfaceObject]
+interface WebGLExtensionFragDepth
+{
+};
+
+[NoInterfaceObject]
 interface WebGLExtensionLoseContext {
     void loseContext();
     void restoreContext();
@@ -905,6 +910,11 @@ interface WebGLExtensionTextureFloatLinear
 interface WebGLExtensionTextureHalfFloat
 {
     const GLenum HALF_FLOAT_OES = 0x8D61;
+};
+
+[NoInterfaceObject]
+interface WebGLExtensionTextureHalfFloatLinear
+{
 };
 
 [NoInterfaceObject]

@@ -132,6 +132,13 @@ this.PlacesBackups = {
       let backupFolderPath = yield this.getBackupFolder();
       let iterator = new OS.File.DirectoryIterator(backupFolderPath);
       yield iterator.forEach(function(aEntry) {
+        // Since this is a lazy getter and OS.File I/O is serialized, we can
+        // safely remove .tmp files without risking to remove ongoing backups.
+        if (aEntry.name.endsWith(".tmp")) {
+          OS.File.remove(aEntry.path);
+          return;
+        }
+
         let matches = aEntry.name.match(this._filenamesRegex);
         if (matches) {
           // Remove bogus backups in future dates.
@@ -309,27 +316,25 @@ this.PlacesBackups = {
       let mostRecentBackupFile = yield this.getMostRecentBackup();
 
       if (!aForceBackup) {
-        let numberOfBackupsToDelete = 0;
-        if (aMaxBackups !== undefined && aMaxBackups > -1) {
-          let backupFiles = yield this.getBackupFiles();
-          numberOfBackupsToDelete = backupFiles.length - aMaxBackups;
+        let backupFiles = yield this.getBackupFiles();
+        // If there are backups, limit them to aMaxBackups, if requested.
+        if (backupFiles.length > 0 && typeof aMaxBackups == "number" &&
+            aMaxBackups > -1 && backupFiles.length >= aMaxBackups) {
+          let numberOfBackupsToDelete = backupFiles.length - aMaxBackups;
 
           // If we don't have today's backup, remove one more so that
           // the total backups after this operation does not exceed the
           // number specified in the pref.
-          if (!mostRecentBackupFile ||
-              !this._isFilenameWithSameDate(OS.Path.basename(mostRecentBackupFile),
-                                            newBackupFilename))
+          if (!this._isFilenameWithSameDate(OS.Path.basename(mostRecentBackupFile),
+                                            newBackupFilename)) {
             numberOfBackupsToDelete++;
-        }
-
-        while (numberOfBackupsToDelete--) {
-          this._entries.pop();
-          if (!this._backupFiles) {
-            yield this.getBackupFiles();
           }
-          let oldestBackup = this._backupFiles.pop();
-          yield OS.File.remove(oldestBackup);
+
+          while (numberOfBackupsToDelete--) {
+            this._entries.pop();
+            let oldestBackup = this._backupFiles.pop();
+            yield OS.File.remove(oldestBackup);
+          }
         }
 
         // Do nothing if we already have this backup or we don't want backups.

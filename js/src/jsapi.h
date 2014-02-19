@@ -1816,18 +1816,6 @@ CurrentGlobalOrNull(JSContext *cx);
 }
 
 /*
- * This method returns the global corresponding to the most recent scripted
- * frame, which may not match the cx's current compartment. This is extremely
- * dangerous, because it can bypass compartment security invariants in subtle
- * ways. To use it safely, the caller must perform a subsequent security
- * check. There is currently only one consumer of this function in Gecko, and
- * it should probably stay that way. If you'd like to use it, please consult
- * the XPConnect module owner first.
- */
-extern JS_PUBLIC_API(JSObject *)
-JS_GetScriptedGlobal(JSContext *cx);
-
-/*
  * Initialize the 'Reflect' object on a global object.
  */
 extern JS_PUBLIC_API(JSObject *)
@@ -3173,9 +3161,9 @@ JS_StealArrayBufferContents(JSContext *cx, JS::HandleObject obj, void **contents
  * the number of payload bytes required. The pointer to pass to
  * JS_NewArrayBufferWithContents is returned in |contents|. The pointer to the
  * |nbytes| of usable memory is returned in |data|. (*|contents| will contain a
- * header before |data|.) The only legal operations on *|contents| is to free
- * it, or pass it to JS_NewArrayBufferWithContents or
- * JS_ReallocateArrayBufferContents.
+ * header before |data|.) The only legal operations on *|contents| are to pass
+ * it to either JS_NewArrayBufferWithContents or
+ * JS_ReallocateArrayBufferContents, or free it with js_free or JS_free.
  */
 extern JS_PUBLIC_API(bool)
 JS_AllocateArrayBufferContents(JSContext *maybecx, uint32_t nbytes, void **contents, uint8_t **data);
@@ -3916,49 +3904,51 @@ Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &opti
 } /* namespace JS */
 
 extern JS_PUBLIC_API(bool)
-JS_CallFunction(JSContext *cx, JSObject *obj, JSFunction *fun, const JS::HandleValueArray& args,
-                jsval *rval);
+JS_CallFunction(JSContext *cx, JS::HandleObject obj, JS::HandleFunction fun,
+                const JS::HandleValueArray& args, JS::MutableHandleValue rval);
 
 extern JS_PUBLIC_API(bool)
-JS_CallFunctionName(JSContext *cx, JSObject *obj, const char *name, const JS::HandleValueArray& args,
-                    jsval *rval);
+JS_CallFunctionName(JSContext *cx, JS::HandleObject obj, const char *name,
+                    const JS::HandleValueArray& args, JS::MutableHandleValue rval);
 
 extern JS_PUBLIC_API(bool)
-JS_CallFunctionValue(JSContext *cx, JSObject *obj, jsval fval, const JS::HandleValueArray& args,
-                     jsval *rval);
+JS_CallFunctionValue(JSContext *cx, JS::HandleObject obj, JS::HandleValue fval,
+                     const JS::HandleValueArray& args, JS::MutableHandleValue rval);
 
 namespace JS {
 
 static inline bool
-Call(JSContext *cx, JSObject *thisObj, JSFunction *fun, const JS::HandleValueArray &args,
-     MutableHandleValue rval)
+Call(JSContext *cx, JS::HandleObject thisObj, JS::HandleFunction fun,
+     const JS::HandleValueArray &args, MutableHandleValue rval)
 {
-    return !!JS_CallFunction(cx, thisObj, fun, args, rval.address());
+    return !!JS_CallFunction(cx, thisObj, fun, args, rval);
 }
 
 static inline bool
-Call(JSContext *cx, JSObject *thisObj, const char *name, const JS::HandleValueArray& args,
+Call(JSContext *cx, JS::HandleObject thisObj, const char *name, const JS::HandleValueArray& args,
      MutableHandleValue rval)
 {
-    return !!JS_CallFunctionName(cx, thisObj, name, args, rval.address());
+    return !!JS_CallFunctionName(cx, thisObj, name, args, rval);
 }
 
 static inline bool
-Call(JSContext *cx, JSObject *thisObj, jsval fun, const JS::HandleValueArray& args,
+Call(JSContext *cx, JS::HandleObject thisObj, JS::HandleValue fun, const JS::HandleValueArray& args,
      MutableHandleValue rval)
 {
-    return !!JS_CallFunctionValue(cx, thisObj, fun, args, rval.address());
+    return !!JS_CallFunctionValue(cx, thisObj, fun, args, rval);
 }
 
 extern JS_PUBLIC_API(bool)
-Call(JSContext *cx, jsval thisv, jsval fun, const JS::HandleValueArray& args,
+Call(JSContext *cx, JS::HandleValue thisv, JS::HandleValue fun, const JS::HandleValueArray& args,
      MutableHandleValue rval);
 
 static inline bool
-Call(JSContext *cx, jsval thisv, JSObject *funObj, const JS::HandleValueArray& args,
+Call(JSContext *cx, JS::HandleValue thisv, JS::HandleObject funObj, const JS::HandleValueArray& args,
      MutableHandleValue rval)
 {
-    return Call(cx, thisv, OBJECT_TO_JSVAL(funObj), args, rval);
+    JS_ASSERT(funObj);
+    JS::RootedValue fun(cx, JS::ObjectValue(*funObj));
+    return Call(cx, thisv, fun, args, rval);
 }
 
 } /* namespace JS */
@@ -4859,13 +4849,30 @@ SetAsmJSCacheOps(JSRuntime *rt, const AsmJSCacheOps *callbacks);
 class MOZ_STACK_CLASS JS_PUBLIC_API(ForOfIterator) {
   protected:
     JSContext *cx_;
+    /*
+     * Use the ForOfPIC on the global object (see vm/GlobalObject.h) to try
+     * to optimize iteration across arrays.
+     *
+     *  Case 1: Regular Iteration
+     *      iterator - pointer to the iterator object.
+     *      index - fixed to NOT_ARRAY (== UINT32_MAX)
+     *
+     *  Case 2: Optimized Array Iteration
+     *      iterator - pointer to the array object.
+     *      index - current position in array.
+     *
+     * The cases are distinguished by whether or not |index| is equal to NOT_ARRAY.
+     */
     JS::RootedObject iterator;
+    uint32_t index;
+
+    static const uint32_t NOT_ARRAY = UINT32_MAX;
 
     ForOfIterator(const ForOfIterator &) MOZ_DELETE;
     ForOfIterator &operator=(const ForOfIterator &) MOZ_DELETE;
 
   public:
-    ForOfIterator(JSContext *cx) : cx_(cx), iterator(cx) { }
+    ForOfIterator(JSContext *cx) : cx_(cx), iterator(cx_), index(NOT_ARRAY) { }
 
     enum NonIterableBehavior {
         ThrowOnNonIterable,
@@ -4894,7 +4901,25 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(ForOfIterator) {
     bool valueIsIterable() const {
         return iterator;
     }
+
+  private:
+    inline bool nextFromOptimizedArray(MutableHandleValue val, bool *done);
+    bool materializeArrayIterator();
 };
+
+
+/*
+ * If a large allocation fails, the JS engine may call the large-allocation-
+ * failure callback, if set, to allow the embedding to flush caches, possibly
+ * perform shrinking GCs, etc. to make some room so that the allocation will
+ * succeed if retried.
+ */
+
+typedef void
+(* LargeAllocationFailureCallback)();
+
+extern JS_PUBLIC_API(void)
+SetLargeAllocationFailureCallback(JSRuntime *rt, LargeAllocationFailureCallback afc);
 
 } /* namespace JS */
 

@@ -257,13 +257,10 @@ IonBuilder::inlineArray(CallInfo &callInfo)
 
     types::TemporaryTypeSet::DoubleConversion conversion =
         getInlineReturnTypeSet()->convertDoubleElements(constraints());
-    {
-        AutoThreadSafeAccess ts(templateObject);
-        if (conversion == types::TemporaryTypeSet::AlwaysConvertToDoubles)
-            templateObject->setShouldConvertDoubleElements();
-        else
-            templateObject->clearShouldConvertDoubleElements();
-    }
+    if (conversion == types::TemporaryTypeSet::AlwaysConvertToDoubles)
+        templateObject->setShouldConvertDoubleElements();
+    else
+        templateObject->clearShouldConvertDoubleElements();
 
     MNewArray *ins = MNewArray::New(alloc(), constraints(), initLength, templateObject,
                                     templateObject->type()->initialHeap(constraints()),
@@ -620,6 +617,21 @@ IonBuilder::inlineMathCeil(CallInfo &callInfo)
     if (argType == MIRType_Int32 && returnType == MIRType_Int32) {
         callInfo.setImplicitlyUsedUnchecked();
         current->push(callInfo.getArg(0));
+        return InliningStatus_Inlined;
+    }
+
+    if (IsFloatingPointType(argType) && returnType == MIRType_Int32) {
+        // Math.ceil(x) == -Math.floor(-x)
+        callInfo.setImplicitlyUsedUnchecked();
+        MConstant *minusOne = MConstant::New(alloc(), DoubleValue(-1.0));
+        current->add(minusOne);
+        MMul *mul = MMul::New(alloc(), callInfo.getArg(0), minusOne, argType);
+        current->add(mul);
+        MFloor *floor = MFloor::New(alloc(), mul);
+        current->add(floor);
+        MMul *result = MMul::New(alloc(), floor, minusOne, MIRType_Int32);
+        current->add(result);
+        current->push(result);
         return InliningStatus_Inlined;
     }
 

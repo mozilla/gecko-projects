@@ -1681,11 +1681,20 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
     // If we're not taking the aLayerMetrics wholesale we still need to pull
     // in some things into our local mFrameMetrics because these things are
     // determined by Gecko and our copy in mFrameMetrics may be stale.
+
+    if (mFrameMetrics.mCompositionBounds.width == aLayerMetrics.mCompositionBounds.width &&
+        mFrameMetrics.mDevPixelsPerCSSPixel == aLayerMetrics.mDevPixelsPerCSSPixel) {
+      float parentResolutionChange = aLayerMetrics.GetParentResolution().scale
+                                   / mFrameMetrics.GetParentResolution().scale;
+      mFrameMetrics.mZoom.scale *= parentResolutionChange;
+    } else {
+      // Take the new zoom as either device scale or composition width or both
+      // got changed (e.g. due to orientation change).
+      mFrameMetrics.mZoom.scale = aLayerMetrics.mZoom.scale;
+      mFrameMetrics.mDevPixelsPerCSSPixel.scale = aLayerMetrics.mDevPixelsPerCSSPixel.scale;
+    }
     mFrameMetrics.mScrollableRect = aLayerMetrics.mScrollableRect;
     mFrameMetrics.mCompositionBounds = aLayerMetrics.mCompositionBounds;
-    float parentResolutionChange = aLayerMetrics.GetParentResolution().scale
-                                 / mFrameMetrics.GetParentResolution().scale;
-    mFrameMetrics.mZoom.scale *= parentResolutionChange;
     mFrameMetrics.mResolution = aLayerMetrics.mResolution;
     mFrameMetrics.mCumulativeResolution = aLayerMetrics.mCumulativeResolution;
     mFrameMetrics.mHasScrollgrab = aLayerMetrics.mHasScrollgrab;
@@ -1701,21 +1710,24 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
 
       mFrameMetrics.mScrollOffset = aLayerMetrics.mScrollOffset;
 
-      // Once layout issues a scroll offset update, it becomes impervious to
-      // scroll offset updates from APZ until we acknowledge the update it sent.
-      // This prevents APZ updates from clobbering scroll updates from other
-      // more "legitimate" sources like content scripts.
-      // Furthermore, any inflight paint requests we have already dispatched are
+      // Because of the scroll offset update, any inflight paint requests are
       // going to be ignored by layout, and so mLastDispatchedPaintMetrics
       // becomes incorrect for the purposes of calculating the LD transform. To
       // correct this we need to update mLastDispatchedPaintMetrics to be the
       // last thing we know was painted by Gecko.
       mLastDispatchedPaintMetrics = aLayerMetrics;
-      nsRefPtr<GeckoContentController> controller = GetGeckoContentController();
-      if (controller) {
-        controller->AcknowledgeScrollUpdate(aLayerMetrics.mScrollId,
-                                            aLayerMetrics.GetScrollGeneration());
-      }
+    }
+  }
+
+  if (aLayerMetrics.GetScrollOffsetUpdated()) {
+    // Once layout issues a scroll offset update, it becomes impervious to
+    // scroll offset updates from APZ until we acknowledge the update it sent.
+    // This prevents APZ updates from clobbering scroll updates from other
+    // more "legitimate" sources like content scripts.
+    nsRefPtr<GeckoContentController> controller = GetGeckoContentController();
+    if (controller) {
+      controller->AcknowledgeScrollUpdate(aLayerMetrics.mScrollId,
+                                          aLayerMetrics.GetScrollGeneration());
     }
   }
 
