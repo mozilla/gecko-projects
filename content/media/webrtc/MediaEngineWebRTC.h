@@ -92,6 +92,7 @@ public:
   MediaEngineWebRTCVideoSource(int aIndex)
     : mCameraControl(nullptr)
     , mCallbackMonitor("WebRTCCamera.CallbackMonitor")
+    , mSensorAngle(0)
     , mCaptureIndex(aIndex)
     , mMonitor("WebRTCCamera.Monitor")
     , mWidth(0)
@@ -154,12 +155,16 @@ public:
     return false;
   }
 
+#ifndef MOZ_B2G_CAMERA
   NS_DECL_THREADSAFE_ISUPPORTS
-#ifdef MOZ_B2G_CAMERA
+#else
+  // We are subclassed from CameraControlListener, which implements a
+  // threadsafe reference-count for us.
+  NS_DECL_ISUPPORTS_INHERITED
+
   void OnHardwareStateChange(HardwareState aState);
-  void OnConfigurationChange(const CameraListenerConfiguration& aConfiguration);
   bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
-  void OnError(CameraErrorContext aContext, const nsACString& aError);
+  void OnError(CameraErrorContext aContext, CameraError aError);
   void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType);
 
   void AllocImpl();
@@ -167,6 +172,7 @@ public:
   void StartImpl(webrtc::CaptureCapability aCapability);
   void StopImpl();
   void SnapshotImpl();
+  void RotateImage(layers::Image* aImage);
 #endif
 
   // This runnable is for creating a temporary file on the main thread.
@@ -201,6 +207,7 @@ private:
   nsRefPtr<ICameraControl> mCameraControl;
   mozilla::ReentrantMonitor mCallbackMonitor; // Monitor for camera callback handling
   nsRefPtr<nsIDOMFile> mLastCapture;
+  int mSensorAngle;
 #else
   webrtc::VideoEngine* mVideoEngine; // Weak reference, don't free.
   webrtc::ViEBase* mViEBase;

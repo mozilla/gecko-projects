@@ -109,22 +109,22 @@
         <item name="android:ellipsize">middle</item>
     </style>
 
-    <style name="Widget.TwoLineRow" />
+    <style name="Widget.TwoLinePageRow" />
 
-    <style name="Widget.TwoLineRow.Title">
+    <style name="Widget.TwoLinePageRow.Title">
         <item name="android:textAppearance">@style/TextAppearance.Widget.Home.ItemTitle</item>
         <item name="android:singleLine">true</item>
         <item name="android:ellipsize">none</item>
     </style>
 
-    <style name="Widget.TwoLineRow.Description">
+    <style name="Widget.TwoLinePageRow.Url">
         <item name="android:textAppearance">@style/TextAppearance.Widget.Home.ItemDescription</item>
         <item name="android:includeFontPadding">false</item>
         <item name="android:singleLine">true</item>
         <item name="android:ellipsize">middle</item>
     </style>
 
-    <style name="Widget.BookmarkFolderView" parent="Widget.TwoLineRow.Title">
+    <style name="Widget.BookmarkFolderView" parent="Widget.TwoLinePageRow.Title">
         <item name="android:paddingLeft">10dip</item>
         <item name="android:drawablePadding">10dip</item>
         <item name="android:drawableLeft">@drawable/bookmark_folder</item>
@@ -145,13 +145,11 @@
         <item name="android:ellipsize">end</item>
     </style>
 
-    <style name="Widget.HomeGridView" parent="Widget.GridView">
+    <style name="Widget.TopSitesGridView" parent="Widget.GridView">
         <item name="android:padding">7dp</item>
         <item name="android:horizontalSpacing">0dp</item>
         <item name="android:verticalSpacing">7dp</item>
     </style>
-
-    <style name="Widget.TopSitesGridView" parent="Widget.HomeGridView" />
 
     <style name="Widget.TopSitesGridItemView">
       <item name="android:layout_width">fill_parent</item>
@@ -169,9 +167,10 @@
         <item name="android:columnWidth">@dimen/panel_grid_view_column_width</item>
         <item name="android:horizontalSpacing">2dp</item>
         <item name="android:verticalSpacing">2dp</item>
+        <item name="android:drawSelectorOnTop">true</item>
     </style>
 
-    <style name="Widget.BookmarkItemView" parent="Widget.TwoLineRow"/>
+    <style name="Widget.BookmarkItemView" parent="Widget.TwoLinePageRow"/>
 
     <style name="Widget.BookmarksListView" parent="Widget.HomeListView"/>
 
