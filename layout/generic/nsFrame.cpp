@@ -1351,7 +1351,7 @@ public:
 #endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx);
+                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
   NS_DISPLAY_DECL_NAME("SelectionOverlay", TYPE_SELECTION_OVERLAY)
 private:
   int16_t mSelectionValue;
@@ -1609,11 +1609,20 @@ ApplyOverflowClipping(nsDisplayListBuilder* aBuilder,
   if (!nsFrame::ShouldApplyOverflowClipping(aFrame, aDisp)) {
     return;
   }
-  nsRect rect = aFrame->GetPaddingRectRelativeToSelf() +
-      aBuilder->ToReferenceFrame(aFrame);
+  nsRect clipRect;
+  bool haveRadii = false;
   nscoord radii[8];
-  bool haveRadii = aFrame->GetPaddingBoxBorderRadii(radii);
-  aClipState.ClipContainingBlockDescendantsExtra(rect, haveRadii ? radii : nullptr);
+  if (aFrame->StyleDisplay()->mOverflowClipBox ==
+        NS_STYLE_OVERFLOW_CLIP_BOX_PADDING_BOX) {
+    clipRect = aFrame->GetPaddingRectRelativeToSelf() +
+      aBuilder->ToReferenceFrame(aFrame);
+    haveRadii = aFrame->GetPaddingBoxBorderRadii(radii);
+  } else {
+    clipRect = aFrame->GetContentRectRelativeToSelf() +
+      aBuilder->ToReferenceFrame(aFrame);
+    // XXX border-radius
+  }
+  aClipState.ClipContainingBlockDescendantsExtra(clipRect, haveRadii ? radii : nullptr);
 }
 
 #ifdef DEBUG
@@ -4889,8 +4898,11 @@ nsIFrame::SchedulePaint(PaintType aType)
   if (!pres || (pres->Document() && pres->Document()->IsResourceDoc())) {
     return;
   }
-  
-  MOZ_ASSERT(pres->GetContainerWeak(), "SchedulePaint in a detached pres context");
+  if (!pres->GetContainerWeak()) {
+    NS_WARNING("Shouldn't call SchedulePaint in a detached pres context");
+    return;
+  }
+
   pres->PresShell()->ScheduleViewManagerFlush(aType == PAINT_DELAYED_COMPRESS ?
                                               nsIPresShell::PAINT_DELAYED_COMPRESS :
                                               nsIPresShell::PAINT_DEFAULT);

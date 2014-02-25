@@ -12,6 +12,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/RefCountType.h"
 #include "mozilla/TypeTraits.h"
 
 namespace mozilla {
@@ -42,10 +43,14 @@ template<typename T> OutParamRef<T> byRef(RefPtr<T>&);
  * state is represented in DEBUG builds by refcount==0xffffdead.  This
  * state distinguishes use-before-ref (refcount==0) from
  * use-after-destroy (refcount==0xffffdead).
+ *
+ * Note that when deriving from RefCounted or AtomicRefCounted, you
+ * should add MOZ_DECLARE_REFCOUNTED_TYPENAME(ClassName) to the public
+ * section of your class, where ClassName is the name of your class.
  */
 namespace detail {
 #ifdef DEBUG
-static const int DEAD = 0xffffdead;
+static const MozRefCountType DEAD = 0xffffdead;
 #endif
 
 // This is used WeakPtr.h as well as this file.
@@ -69,12 +74,12 @@ class RefCounted
   public:
     // Compatibility with nsRefPtr.
     void AddRef() const {
-      MOZ_ASSERT(refCnt >= 0);
+      MOZ_ASSERT(int32_t(refCnt) >= 0);
       ++refCnt;
     }
 
     void Release() const {
-      MOZ_ASSERT(refCnt > 0);
+      MOZ_ASSERT(int32_t(refCnt) > 0);
       if (0 == --refCnt) {
 #ifdef DEBUG
         refCnt = detail::DEAD;
@@ -86,15 +91,21 @@ class RefCounted
     // Compatibility with wtf::RefPtr.
     void ref() { AddRef(); }
     void deref() { Release(); }
-    int refCount() const { return refCnt; }
+    MozRefCountType refCount() const { return refCnt; }
     bool hasOneRef() const {
       MOZ_ASSERT(refCnt > 0);
       return refCnt == 1;
     }
 
   private:
-    mutable typename Conditional<Atomicity == AtomicRefCount, Atomic<int>, int>::Type refCnt;
+    mutable typename Conditional<Atomicity == AtomicRefCount, Atomic<MozRefCountType>, MozRefCountType>::Type refCnt;
 };
+
+#define MOZ_DECLARE_REFCOUNTED_TYPENAME(T) \
+  const char* typeName() const { return #T; }
+
+#define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T) \
+  virtual const char* typeName() const { return #T; }
 
 }
 
@@ -301,6 +312,7 @@ using namespace mozilla;
 
 struct Foo : public RefCounted<Foo>
 {
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(Foo)
   Foo() : dead(false) { }
   ~Foo() {
     MOZ_ASSERT(!dead);

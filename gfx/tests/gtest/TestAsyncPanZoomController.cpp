@@ -85,10 +85,10 @@ class TestAPZCContainerLayer : public ContainerLayer {
     TestAPZCContainerLayer()
       : ContainerLayer(nullptr, nullptr)
     {}
-  void RemoveChild(Layer* aChild) {}
-  void InsertAfter(Layer* aChild, Layer* aAfter) {}
+  bool RemoveChild(Layer* aChild) { return true; }
+  bool InsertAfter(Layer* aChild, Layer* aAfter) { return true; }
   void ComputeEffectiveTransforms(const Matrix4x4& aTransformToSurface) {}
-  void RepositionChild(Layer* aChild, Layer* aAfter) {}
+  bool RepositionChild(Layer* aChild, Layer* aAfter) { return true; }
 };
 
 class TestAsyncPanZoomController : public AsyncPanZoomController {
@@ -713,7 +713,8 @@ TEST(AsyncPanZoomController, MediumPress) {
   apzc->Destroy();
 }
 
-TEST(AsyncPanZoomController, LongPress) {
+void
+DoLongPressTest(bool aShouldUseTouchAction, uint32_t aBehavior) {
   nsRefPtr<MockContentControllerDelayed> mcc = new MockContentControllerDelayed();
   nsRefPtr<TestAPZCTreeManager> tm = new TestAPZCTreeManager();
   nsRefPtr<TestAsyncPanZoomController> apzc = new TestAsyncPanZoomController(
@@ -722,6 +723,11 @@ TEST(AsyncPanZoomController, LongPress) {
   apzc->SetFrameMetrics(TestFrameMetrics());
   apzc->NotifyLayersUpdated(TestFrameMetrics(), true);
   apzc->UpdateZoomConstraints(ZoomConstraints(false, CSSToScreenScale(1.0), CSSToScreenScale(1.0)));
+
+  nsTArray<uint32_t> values;
+  values.AppendElement(aBehavior);
+  apzc->SetTouchActionEnabled(aShouldUseTouchAction);
+  apzc->SetAllowedTouchBehavior(values);
 
   int time = 0;
 
@@ -838,6 +844,17 @@ TEST(AsyncPanZoomController, LongPressPreventDefault) {
 
   apzc->Destroy();
 }
+
+TEST(AsyncPanZoomController, LongPress) {
+  DoLongPressTest(false, mozilla::layers::AllowedTouchBehavior::NONE);
+}
+
+TEST(AsyncPanZoomController, LongPressPanAndZoom) {
+  DoLongPressTest(true, mozilla::layers::AllowedTouchBehavior::HORIZONTAL_PAN
+                      | mozilla::layers::AllowedTouchBehavior::VERTICAL_PAN
+                      | mozilla::layers::AllowedTouchBehavior::ZOOM);
+}
+
 
 // Layer tree for HitTesting1
 static already_AddRefed<mozilla::layers::Layer>

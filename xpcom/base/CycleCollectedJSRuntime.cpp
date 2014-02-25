@@ -549,7 +549,8 @@ CycleCollectedJSRuntime::DescribeGCThing(bool aIsMarked, void* aThing,
       "BaseShape",
       "TypeObject",
     };
-    JS_STATIC_ASSERT(MOZ_ARRAY_LENGTH(trace_types) == JSTRACE_LAST + 1);
+    static_assert(MOZ_ARRAY_LENGTH(trace_types) == JSTRACE_LAST + 1,
+                  "JSTRACE_LAST enum must match trace_types count.");
     JS_snprintf(name, sizeof(name), "JS %s", trace_types[aTraceKind]);
   }
 
@@ -876,15 +877,7 @@ CycleCollectedJSRuntime::ZoneParticipant()
 nsresult
 CycleCollectedJSRuntime::TraverseRoots(nsCycleCollectionNoteRootCallback &aCb)
 {
-  static bool gcHasRun = false;
-  if (!gcHasRun) {
-    uint32_t gcNumber = JS_GetGCParameter(mJSRuntime, JSGC_NUMBER);
-    if (!gcNumber) {
-      // Cannot cycle collect if GC has not run first!
-      MOZ_CRASH();
-    }
-    gcHasRun = true;
-  }
+  MOZ_ASSERT(!NeedCollect(), "Cannot cycle collect if GC has not run first!");
 
   TraverseNativeRoots(aCb);
 

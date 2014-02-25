@@ -448,7 +448,7 @@ class MOZ_STACK_CLASS nsPresShellEventCB : public nsDispatchingCallback
 public:
   nsPresShellEventCB(PresShell* aPresShell) : mPresShell(aPresShell) {}
 
-  virtual void HandleEvent(nsEventChainPostVisitor& aVisitor)
+  virtual void HandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE
   {
     if (aVisitor.mPresContext && aVisitor.mEvent->eventStructType != NS_EVENT) {
       if (aVisitor.mEvent->message == NS_MOUSE_BUTTON_DOWN ||
@@ -501,7 +501,7 @@ public:
 
   // Fires the "before-first-paint" event so that interested parties (right now, the
   // mobile browser) are aware of it.
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() MOZ_OVERRIDE
   {
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
@@ -622,6 +622,15 @@ nsIPresShell::InvalidatePresShellIfHidden()
     mPresContext->NotifyInvalidation(0);
   }
   mHiddenInvalidationObserverRefreshDriver = nullptr;
+}
+
+void
+nsIPresShell::CancelInvalidatePresShellIfHidden()
+{
+  if (mHiddenInvalidationObserverRefreshDriver) {
+    mHiddenInvalidationObserverRefreshDriver->RemovePresShellToInvalidateIfHidden(this);
+    mHiddenInvalidationObserverRefreshDriver = nullptr;
+  }
 }
 
 void
@@ -2855,6 +2864,12 @@ nsIPresShell::RestyleForAnimation(Element* aElement, nsRestyleHint aHint)
 }
 
 void
+nsIPresShell::SetForwardingContainer(const WeakPtr<nsDocShell> &aContainer)
+{
+  mForwardingContainer = aContainer;
+}
+
+void
 PresShell::ClearFrameRefs(nsIFrame* aFrame)
 {
   mPresContext->EventStateManager()->ClearFrameRefs(aFrame);
@@ -3471,7 +3486,13 @@ PresShell::ScrollFrameRectIntoView(nsIFrame*                aFrame,
     nsIScrollableFrame* sf = do_QueryFrame(container);
     if (sf) {
       nsPoint oldPosition = sf->GetScrollPosition();
-      ScrollToShowRect(container, sf, rect - sf->GetScrolledFrame()->GetPosition(),
+      nsRect targetRect = rect;
+      if (container->StyleDisplay()->mOverflowClipBox ==
+            NS_STYLE_OVERFLOW_CLIP_BOX_CONTENT_BOX) {
+        nsMargin padding = container->GetUsedPadding();
+        targetRect.Inflate(padding);
+      }
+      ScrollToShowRect(container, sf, targetRect - sf->GetScrolledFrame()->GetPosition(),
                        aVertical, aHorizontal, aFlags);
       nsPoint newPosition = sf->GetScrollPosition();
       // If the scroll position increased, that means our content moved up,

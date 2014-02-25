@@ -697,16 +697,22 @@ ICStubCompiler::guardProfilingEnabled(MacroAssembler &masm, Register scratch, La
 
 #ifdef JSGC_GENERATIONAL
 inline bool
-ICStubCompiler::emitPostWriteBarrierSlot(MacroAssembler &masm, Register obj, Register scratch,
-                                         GeneralRegisterSet saveRegs)
+ICStubCompiler::emitPostWriteBarrierSlot(MacroAssembler &masm, Register obj, ValueOperand val,
+                                         Register scratch, GeneralRegisterSet saveRegs)
 {
     Nursery &nursery = cx->runtime()->gcNursery;
 
     Label skipBarrier;
+    masm.branchTestObject(Assembler::NotEqual, val, &skipBarrier);
+
     Label isTenured;
     masm.branchPtr(Assembler::Below, obj, ImmWord(nursery.start()), &isTenured);
     masm.branchPtr(Assembler::Below, obj, ImmWord(nursery.heapEnd()), &skipBarrier);
     masm.bind(&isTenured);
+
+    Register valReg = masm.extractObject(val, scratch);
+    masm.branchPtr(Assembler::Below, valReg, ImmWord(nursery.start()), &skipBarrier);
+    masm.branchPtr(Assembler::AboveOrEqual, valReg, ImmWord(nursery.heapEnd()), &skipBarrier);
 
     // void PostWriteBarrier(JSRuntime *rt, JSObject *obj);
 #ifdef JS_CODEGEN_ARM
@@ -2475,23 +2481,23 @@ DoBinaryArithFallback(JSContext *cx, BaselineFrame *frame, ICBinaryArith_Fallbac
     switch(op) {
       case JSOP_ADD:
         // Do an add.
-        if (!AddValues(cx, &lhsCopy, &rhsCopy, ret.address()))
+        if (!AddValues(cx, &lhsCopy, &rhsCopy, ret))
             return false;
         break;
       case JSOP_SUB:
-        if (!SubValues(cx, &lhsCopy, &rhsCopy, ret.address()))
+        if (!SubValues(cx, &lhsCopy, &rhsCopy, ret))
             return false;
         break;
       case JSOP_MUL:
-        if (!MulValues(cx, &lhsCopy, &rhsCopy, ret.address()))
+        if (!MulValues(cx, &lhsCopy, &rhsCopy, ret))
             return false;
         break;
       case JSOP_DIV:
-        if (!DivValues(cx, &lhsCopy, &rhsCopy, ret.address()))
+        if (!DivValues(cx, &lhsCopy, &rhsCopy, ret))
             return false;
         break;
       case JSOP_MOD:
-        if (!ModValues(cx, &lhsCopy, &rhsCopy, ret.address()))
+        if (!ModValues(cx, &lhsCopy, &rhsCopy, ret))
             return false;
         break;
       case JSOP_BITOR: {
@@ -2530,7 +2536,7 @@ DoBinaryArithFallback(JSContext *cx, BaselineFrame *frame, ICBinaryArith_Fallbac
         break;
       }
       case JSOP_URSH: {
-        if (!UrshOperation(cx, lhs, rhs, ret.address()))
+        if (!UrshOperation(cx, lhs, rhs, ret))
             return false;
         break;
       }
@@ -5215,17 +5221,13 @@ ICSetElem_Dense::Compiler::generateStubCode(MacroAssembler &masm)
     EmitPreBarrier(masm, element, MIRType_Value);
     masm.storeValue(tmpVal, element);
     regs.add(key);
-    regs.add(tmpVal);
 #ifdef JSGC_GENERATIONAL
-    Label skipBarrier;
-    masm.branchTestObject(Assembler::NotEqual, tmpVal, &skipBarrier);
     {
         Register r = regs.takeAny();
         GeneralRegisterSet saveRegs;
-        emitPostWriteBarrierSlot(masm, obj, r, saveRegs);
+        emitPostWriteBarrierSlot(masm, obj, tmpVal, r, saveRegs);
         regs.add(r);
     }
-    masm.bind(&skipBarrier);
 #endif
     EmitReturnFromIC(masm);
 
@@ -5402,17 +5404,13 @@ ICSetElemDenseAddCompiler::generateStubCode(MacroAssembler &masm)
     masm.loadValue(valueAddr, tmpVal);
     masm.storeValue(tmpVal, element);
     regs.add(key);
-    regs.add(tmpVal);
 #ifdef JSGC_GENERATIONAL
-    Label skipBarrier;
-    masm.branchTestObject(Assembler::NotEqual, tmpVal, &skipBarrier);
     {
         Register r = regs.takeAny();
         GeneralRegisterSet saveRegs;
-        emitPostWriteBarrierSlot(masm, obj, r, saveRegs);
+        emitPostWriteBarrierSlot(masm, obj, tmpVal, r, saveRegs);
         regs.add(r);
     }
-    masm.bind(&skipBarrier);
 #endif
     EmitReturnFromIC(masm);
 
@@ -7251,7 +7249,7 @@ DoSetPropFallback(JSContext *cx, BaselineFrame *frame, ICSetProp_Fallback *stub,
     if (op == JSOP_INITPROP) {
         MOZ_ASSERT(name != cx->names().proto, "should have used JSOP_MUTATEPROTO");
         MOZ_ASSERT(obj->is<JSObject>());
-        if (!DefineNativeProperty(cx, obj, id, rhs, nullptr, nullptr, JSPROP_ENUMERATE, 0, 0, 0))
+        if (!DefineNativeProperty(cx, obj, id, rhs, nullptr, nullptr, JSPROP_ENUMERATE, 0))
             return false;
     } else if (op == JSOP_SETNAME || op == JSOP_SETGNAME) {
         if (!SetNameOperation(cx, script, pc, obj, rhs))
@@ -7397,16 +7395,13 @@ ICSetProp_Native::Compiler::generateStubCode(MacroAssembler &masm)
     if (holderReg != objReg)
         regs.add(holderReg);
 #ifdef JSGC_GENERATIONAL
-    Label skipBarrier;
-    masm.branchTestObject(Assembler::NotEqual, R1, &skipBarrier);
     {
         Register scr = regs.takeAny();
         GeneralRegisterSet saveRegs;
         saveRegs.add(R1);
-        emitPostWriteBarrierSlot(masm, objReg, scr, saveRegs);
+        emitPostWriteBarrierSlot(masm, objReg, R1, scr, saveRegs);
         regs.add(scr);
     }
-    masm.bind(&skipBarrier);
 #endif
 
     // The RHS has to be in R0.
@@ -7522,15 +7517,12 @@ ICSetPropNativeAddCompiler::generateStubCode(MacroAssembler &masm)
         regs.add(holderReg);
 
 #ifdef JSGC_GENERATIONAL
-    Label skipBarrier;
-    masm.branchTestObject(Assembler::NotEqual, R1, &skipBarrier);
     {
         Register scr = regs.takeAny();
         GeneralRegisterSet saveRegs;
         saveRegs.add(R1);
-        emitPostWriteBarrierSlot(masm, objReg, scr, saveRegs);
+        emitPostWriteBarrierSlot(masm, objReg, R1, scr, saveRegs);
     }
-    masm.bind(&skipBarrier);
 #endif
 
     // The RHS has to be in R0.

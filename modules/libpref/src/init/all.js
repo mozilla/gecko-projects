@@ -1830,6 +1830,9 @@ pref("layout.css.variables.enabled", false);
 pref("layout.css.variables.enabled", true);
 #endif
 
+// Is support for CSS overflow-clip-box enabled for non-UA sheets?
+pref("layout.css.overflow-clip-box.enabled", false);
+
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
 // 1 = end-side in document/content direction
@@ -3651,8 +3654,6 @@ pref("ui.panel.default_level_parent", true);
 
 pref("mousewheel.system_scroll_override_on_root_content.enabled", false);
 
-pref("ui.key.menuAccessKeyFocuses", true);
-
 #if MOZ_WIDGET_GTK == 2
 pref("intl.ime.use_simple_context_on_password_field", true);
 #else
@@ -4130,6 +4131,9 @@ pref("memory.free_dirty_pages", false);
 #ifdef XP_LINUX
 pref("memory.system_memory_reporter", false);
 #endif
+
+// Don't dump memory reports on OOM, by default.
+pref("memory.dump_reports_on_oom", false);
 
 // Number of stack frames to capture in createObjectURL for about:memory.
 pref("memory.blob_report.stack_frames", 0);

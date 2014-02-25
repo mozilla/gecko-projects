@@ -872,7 +872,7 @@ Debugger::newCompletionValue(JSContext *cx, JSTrapStatus status, Value value_,
     if (!obj ||
         !wrapDebuggeeValue(cx, &value) ||
         !DefineNativeProperty(cx, obj, key, value, JS_PropertyStub, JS_StrictPropertyStub,
-                              JSPROP_ENUMERATE, 0, 0))
+                              JSPROP_ENUMERATE, 0))
     {
         return false;
     }
@@ -4268,7 +4268,7 @@ DebuggerFrame_getArguments(JSContext *cx, unsigned argc, Value *vp)
         RootedValue fargcVal(cx, Int32Value(fargc));
         if (!DefineNativeProperty(cx, argsobj, cx->names().length,
                                   fargcVal, nullptr, nullptr,
-                                  JSPROP_PERMANENT | JSPROP_READONLY, 0, 0))
+                                  JSPROP_PERMANENT | JSPROP_READONLY, 0))
         {
             return false;
         }
@@ -4285,7 +4285,7 @@ DebuggerFrame_getArguments(JSContext *cx, unsigned argc, Value *vp)
             if (!getobj ||
                 !DefineNativeProperty(cx, argsobj, id, UndefinedHandleValue,
                                       JS_DATA_TO_FUNC_PTR(PropertyOp, getobj.get()), nullptr,
-                                      JSPROP_ENUMERATE | JSPROP_SHARED | JSPROP_GETTER, 0, 0))
+                                      JSPROP_ENUMERATE | JSPROP_SHARED | JSPROP_GETTER, 0))
             {
                 return false;
             }
@@ -4514,6 +4514,7 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
     }
 
     /* Set options from object if provided. */
+    JSAutoByteString url_bytes;
     char *url = nullptr;
     unsigned lineNumber = 1;
 
@@ -4527,7 +4528,9 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
             RootedString url_str(cx, ToString<CanGC>(cx, v));
             if (!url_str)
                 return false;
-            url = JS_EncodeString(cx, url_str);
+            url = url_bytes.encodeLatin1(cx, url_str);
+            if (!url)
+                return false;
         }
 
         if (!JS_GetProperty(cx, opts, "lineNumber", &v))
@@ -4580,7 +4583,7 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
             id = keys[i];
             MutableHandleValue val = values.handleAt(i);
             if (!cx->compartment()->wrap(cx, val) ||
-                !DefineNativeProperty(cx, env, id, val, nullptr, nullptr, 0, 0, 0))
+                !DefineNativeProperty(cx, env, id, val, nullptr, nullptr, 0, 0))
             {
                 return false;
             }
@@ -4594,8 +4597,6 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
     bool ok = EvaluateInEnv(cx, env, thisv, frame,
                             ConstTwoByteChars(flat->chars(), flat->length()),
                             flat->length(), url ? url : "debugger eval code", lineNumber, &rval);
-    if (url)
-        JS_free(cx, url);
     return dbg->receiveCompletionValue(ac, ok, rval, vp);
 }
 

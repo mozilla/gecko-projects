@@ -5,19 +5,21 @@
 
 package org.mozilla.gecko.home;
 
-import org.mozilla.gecko.R;
+import static org.mozilla.gecko.home.HomeConfig.createBuiltinPanelConfig;
+
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.mozilla.gecko.home.HomeConfig.HomeConfigBackend;
 import org.mozilla.gecko.home.HomeConfig.OnChangeListener;
 import org.mozilla.gecko.home.HomeConfig.PanelConfig;
 import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.util.HardwareUtils;
-import org.mozilla.gecko.util.ThreadUtils;
-
-import static org.mozilla.gecko.home.HomeConfig.createBuiltinPanelConfig;
-
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -26,14 +28,11 @@ import android.preference.PreferenceManager;
 import android.text.TextUtils;
 import android.util.Log;
 
-import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.List;
-
 class HomeConfigPrefsBackend implements HomeConfigBackend {
     private static final String LOGTAG = "GeckoHomeConfigBackend";
 
-    private static final String PREFS_KEY = "home_panels";
+    private static final String PREFS_CONFIG_KEY = "home_panels";
+    private static final String PREFS_LOCALE_KEY = "home_locale";
 
     private final Context mContext;
     private PrefsListener mPrefsListener;
@@ -104,7 +103,7 @@ class HomeConfigPrefsBackend implements HomeConfigBackend {
     @Override
     public List<PanelConfig> load() {
         final SharedPreferences prefs = getSharedPreferences();
-        final String jsonString = prefs.getString(PREFS_KEY, null);
+        final String jsonString = prefs.getString(PREFS_CONFIG_KEY, null);
 
         final List<PanelConfig> panelConfigs;
         if (TextUtils.isEmpty(jsonString)) {
@@ -135,8 +134,34 @@ class HomeConfigPrefsBackend implements HomeConfigBackend {
         final SharedPreferences.Editor editor = prefs.edit();
 
         final String jsonString = jsonPanelConfigs.toString();
-        editor.putString(PREFS_KEY, jsonString);
+        editor.putString(PREFS_CONFIG_KEY, jsonString);
+        editor.putString(PREFS_LOCALE_KEY, Locale.getDefault().toString());
         editor.commit();
+    }
+
+    @Override
+    public String getLocale() {
+        final SharedPreferences prefs = getSharedPreferences();
+
+        String locale = prefs.getString(PREFS_LOCALE_KEY, null);
+        if (locale == null) {
+            // Initialize config with the current locale
+            final String currentLocale = Locale.getDefault().toString();
+
+            final SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(PREFS_LOCALE_KEY, currentLocale);
+            editor.commit();
+
+            // If the user has saved HomeConfig before, return null this
+            // one time to trigger a refresh and ensure we use the
+            // correct locale for the saved state. For more context,
+            // see HomeConfigInvalidator.onLocaleReady().
+            if (!prefs.contains(PREFS_CONFIG_KEY)) {
+                locale = currentLocale;
+            }
+        }
+
+        return locale;
     }
 
     @Override
@@ -159,7 +184,7 @@ class HomeConfigPrefsBackend implements HomeConfigBackend {
     private class PrefsListener implements OnSharedPreferenceChangeListener {
         @Override
         public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-            if (TextUtils.equals(key, PREFS_KEY)) {
+            if (TextUtils.equals(key, PREFS_CONFIG_KEY)) {
                 mChangeListener.onChange();
             }
         }

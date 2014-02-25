@@ -930,8 +930,6 @@ class AutoIdRooter : private AutoGCRooter
                                            object that delegates to a prototype
                                            containing this property */
 #define JSPROP_INDEX            0x80    /* name is actually (int) index */
-#define JSPROP_SHORTID         0x100    /* set in JS_DefineProperty attrs
-                                           if getters/setters use a shortid */
 
 #define JSFUN_STUB_GSOPS       0x200    /* use JS_PropertyStub getter/setter
                                            instead of defaulting to class gsops
@@ -1772,8 +1770,23 @@ JS_GetClassObject(JSContext *cx, JSProtoKey key, JS::MutableHandle<JSObject*> ob
 extern JS_PUBLIC_API(bool)
 JS_GetClassPrototype(JSContext *cx, JSProtoKey key, JS::MutableHandle<JSObject*> objp);
 
+namespace JS {
+
+/*
+ * Determine if the given object is an instance or prototype for a standard
+ * class. If so, return the associated JSProtoKey. If not, return JSProto_Null.
+ */
+
 extern JS_PUBLIC_API(JSProtoKey)
-JS_IdentifyClassPrototype(JSObject *obj);
+IdentifyStandardInstance(JSObject *obj);
+
+extern JS_PUBLIC_API(JSProtoKey)
+IdentifyStandardPrototype(JSObject *obj);
+
+extern JS_PUBLIC_API(JSProtoKey)
+IdentifyStandardInstanceOrPrototype(JSObject *obj);
+
+} /* namespace JS */
 
 extern JS_PUBLIC_API(JSProtoKey)
 JS_IdToProtoKey(JSContext *cx, JS::HandleId id);
@@ -2557,7 +2570,7 @@ JS_GetConstructor(JSContext *cx, JS::Handle<JSObject*> proto);
  * and true with *idp containing the unique id on success.
  */
 extern JS_PUBLIC_API(bool)
-JS_GetObjectId(JSContext *cx, JSObject *obj, jsid *idp);
+JS_GetObjectId(JSContext *cx, JS::HandleObject obj, JS::MutableHandleId idp);
 
 namespace JS {
 
@@ -2788,12 +2801,6 @@ extern JS_PUBLIC_API(bool)
 JS_DefineOwnProperty(JSContext *cx, JSObject *obj, jsid id, jsval descriptor, bool *bp);
 
 extern JS_PUBLIC_API(bool)
-JS_DefinePropertyWithTinyId(JSContext *cx, JSObject *obj, const char *name,
-                            int8_t tinyid, jsval value,
-                            JSPropertyOp getter, JSStrictPropertyOp setter,
-                            unsigned attrs);
-
-extern JS_PUBLIC_API(bool)
 JS_AlreadyHasOwnProperty(JSContext *cx, JS::HandleObject obj, const char *name,
                          bool *foundp);
 
@@ -2825,13 +2832,12 @@ JS_LookupPropertyWithFlagsById(JSContext *cx, JS::HandleObject obj, JS::HandleId
 struct JSPropertyDescriptor {
     JSObject           *obj;
     unsigned           attrs;
-    unsigned           shortid;
     JSPropertyOp       getter;
     JSStrictPropertyOp setter;
     JS::Value          value;
 
-    JSPropertyDescriptor() : obj(nullptr), attrs(0), shortid(0), getter(nullptr),
-                             setter(nullptr), value(JSVAL_VOID)
+    JSPropertyDescriptor()
+      : obj(nullptr), attrs(0), getter(nullptr), setter(nullptr), value(JSVAL_VOID)
     {}
 
     void trace(JSTracer *trc);
@@ -2854,14 +2860,12 @@ class PropertyDescriptorOperations
     bool hasGetterOrSetterObject() const { return desc()->attrs & (JSPROP_GETTER | JSPROP_SETTER); }
     bool isShared() const { return desc()->attrs & JSPROP_SHARED; }
     bool isIndex() const { return desc()->attrs & JSPROP_INDEX; }
-    bool hasShortId() const { return desc()->attrs & JSPROP_SHORTID; }
     bool hasAttributes(unsigned attrs) const { return desc()->attrs & attrs; }
 
     JS::HandleObject object() const {
         return JS::HandleObject::fromMarkedLocation(&desc()->obj);
     }
     unsigned attributes() const { return desc()->attrs; }
-    unsigned shortid() const { return desc()->shortid; }
     JSPropertyOp getter() const { return desc()->getter; }
     JSStrictPropertyOp setter() const { return desc()->setter; }
     JS::HandleObject getterObject() const {
@@ -2889,7 +2893,6 @@ class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<
     void clear() {
         object().set(nullptr);
         setAttributes(0);
-        setShortId(0);
         setGetter(nullptr);
         setSetter(nullptr);
         value().setUndefined();
@@ -2908,7 +2911,6 @@ class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<
     void setEnumerable() { desc()->attrs |= JSPROP_ENUMERATE; }
     void setAttributes(unsigned attrs) { desc()->attrs = attrs; }
 
-    void setShortId(unsigned id) { desc()->shortid = id; }
     void setGetter(JSPropertyOp op) { desc()->getter = op; }
     void setSetter(JSStrictPropertyOp op) { desc()->setter = op; }
     void setGetterObject(JSObject *obj) { desc()->getter = reinterpret_cast<JSPropertyOp>(obj); }
@@ -3025,13 +3027,6 @@ JS_DefineUCProperty(JSContext *cx, JSObject *obj,
                     const jschar *name, size_t namelen, jsval value,
                     JSPropertyOp getter, JSStrictPropertyOp setter,
                     unsigned attrs);
-
-extern JS_PUBLIC_API(bool)
-JS_DefineUCPropertyWithTinyId(JSContext *cx, JSObject *obj,
-                              const jschar *name, size_t namelen,
-                              int8_t tinyid, jsval value,
-                              JSPropertyOp getter, JSStrictPropertyOp setter,
-                              unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_AlreadyHasOwnUCProperty(JSContext *cx, JS::HandleObject obj, const jschar *name,
@@ -4916,7 +4911,8 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(ForOfIterator) {
  * If a large allocation fails, the JS engine may call the large-allocation-
  * failure callback, if set, to allow the embedding to flush caches, possibly
  * perform shrinking GCs, etc. to make some room so that the allocation will
- * succeed if retried.
+ * succeed if retried. After the callback returns, the JS engine will try to
+ * allocate again and may be succesful.
  */
 
 typedef void
@@ -4924,6 +4920,23 @@ typedef void
 
 extern JS_PUBLIC_API(void)
 SetLargeAllocationFailureCallback(JSRuntime *rt, LargeAllocationFailureCallback afc);
+
+/*
+ * Unlike the error reporter, which is only called if the exception for an OOM
+ * bubbles up and is not caught, the OutOfMemoryCallback is called immediately
+ * at the OOM site to allow the embedding to capture the current state of heap
+ * allocation before anything is freed. If the large-allocation-failure callback
+ * is called at all (not all allocation sites call the large-allocation-failure
+ * callback on failure), it is called before the out-of-memory callback; the
+ * out-of-memory callback is only called if the allocation still fails after the
+ * large-allocation-failure callback has returned.
+ */
+
+typedef void
+(* OutOfMemoryCallback)(JSContext *cx);
+
+extern JS_PUBLIC_API(void)
+SetOutOfMemoryCallback(JSRuntime *rt, OutOfMemoryCallback cb);
 
 } /* namespace JS */
 

@@ -841,6 +841,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     WTF::BumpPointerAllocator *bumpAlloc_;
     js::jit::JitRuntime *jitRuntime_;
 
+    /*
+     * Self-hosting state cloned on demand into other compartments. Shared with the parent
+     * runtime if there is one.
+     */
     JSObject *selfHostingGlobal_;
 
     /* Space for interpreter frames. */
@@ -884,15 +888,14 @@ struct JSRuntime : public JS::shadow::Runtime,
     bool initSelfHosting(JSContext *cx);
     void finishSelfHosting();
     void markSelfHostingGlobal(JSTracer *trc);
-    bool isSelfHostingGlobal(js::HandleObject global) {
+    bool isSelfHostingGlobal(JSObject *global) {
         return global == selfHostingGlobal_;
     }
+    bool isSelfHostingCompartment(JSCompartment *comp);
     bool cloneSelfHostedFunctionScript(JSContext *cx, js::Handle<js::PropertyName*> name,
                                        js::Handle<JSFunction*> targetFun);
     bool cloneSelfHostedValue(JSContext *cx, js::Handle<js::PropertyName*> name,
                               js::MutableHandleValue vp);
-    bool maybeWrappedSelfHostedFunction(JSContext *cx, js::HandleId name,
-                                        js::MutableHandleValue funVal);
 
     //-------------------------------------------------------------------------
     // Locale information
@@ -1731,11 +1734,15 @@ struct JSRuntime : public JS::shadow::Runtime,
     js::AutoEnterPolicy *enteredPolicy;
 #endif
 
+    /* See comment for JS::SetLargeAllocationFailureCallback in jsapi.h. */
+    JS::LargeAllocationFailureCallback largeAllocationFailureCallback;
+    /* See comment for JS::SetOutOfMemoryCallback in jsapi.h. */
+    JS::OutOfMemoryCallback oomCallback;
+
     /*
      * These variations of malloc/calloc/realloc will call the
      * large-allocation-failure callback on OOM and retry the allocation.
      */
-    JS::LargeAllocationFailureCallback largeAllocationFailureCallback;
 
     static const unsigned LARGE_ALLOCATION = 25 * 1024 * 1024;
 

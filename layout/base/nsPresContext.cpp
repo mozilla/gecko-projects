@@ -1579,6 +1579,9 @@ nsPresContext::Detach()
 {
   SetContainer(nullptr);
   SetLinkHandler(nullptr);
+  if (mShell) {
+    mShell->CancelInvalidatePresShellIfHidden();
+  }
 }
 
 bool
@@ -2459,7 +2462,7 @@ public:
                "DOMPaintEvent requested for a detached pres context");
     mList.TakeFrom(aList);
   }
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() MOZ_OVERRIDE
   {
     // The pres context might have been detached during the delay -
     // that's fine, just don't fire the event.

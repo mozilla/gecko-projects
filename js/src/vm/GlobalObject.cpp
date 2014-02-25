@@ -767,11 +767,6 @@ GlobalObject::getSelfHostedFunction(JSContext *cx, HandleAtom selfHostedName, Ha
     if (cx->global()->maybeGetIntrinsicValue(shId, funVal.address()))
         return true;
 
-    if (!cx->runtime()->maybeWrappedSelfHostedFunction(cx, shId, funVal))
-        return false;
-    if (!funVal.isUndefined())
-        return true;
-
     JSFunction *fun = NewFunction(cx, NullPtr(), nullptr, nargs, JSFunction::INTERPRETED_LAZY,
                                   holder, name, JSFunction::ExtendedFinalizeKind, SingletonObject);
     if (!fun)
@@ -792,7 +787,7 @@ GlobalObject::addIntrinsicValue(JSContext *cx, HandleId id, HandleValue value)
     RootedShape last(cx, holder->lastProperty());
     Rooted<UnownedBaseShape*> base(cx, last->base()->unowned());
 
-    StackShape child(base, id, slot, 0, 0, 0);
+    StackShape child(base, id, slot, 0, 0);
     RootedShape shape(cx, cx->compartment()->propertyTree.getChild(cx, last, child));
     if (!shape)
         return false;

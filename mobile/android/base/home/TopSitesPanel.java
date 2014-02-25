@@ -5,19 +5,21 @@
 
 package org.mozilla.gecko.home;
 
-import org.mozilla.gecko.favicons.Favicons;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.Tabs;
-import org.mozilla.gecko.animation.PropertyAnimator;
-import org.mozilla.gecko.animation.PropertyAnimator.Property;
-import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserContract.Thumbnails;
 import org.mozilla.gecko.db.BrowserDB;
-import org.mozilla.gecko.db.BrowserDB.URLColumns;
 import org.mozilla.gecko.db.BrowserDB.TopSitesCursorWrapper;
+import org.mozilla.gecko.db.BrowserDB.URLColumns;
+import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
-import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.PinSiteDialog.OnSiteSelectedListener;
@@ -46,18 +48,11 @@ import android.view.ContextMenu.ContextMenuInfo;
 import android.view.LayoutInflater;
 import android.view.MenuInflater;
 import android.view.MenuItem;
-import android.view.MotionEvent;
 import android.view.View;
-import android.view.View.OnTouchListener;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ListView;
 import android.widget.Toast;
-
-import java.util.EnumSet;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Fragment that displays frecency search results in a ListView.
@@ -86,15 +81,6 @@ public class TopSitesPanel extends HomeFragment {
 
     // Grid of top sites
     private TopSitesGridView mGrid;
-
-    // Banner to show snippets.
-    private HomeBanner mBanner;
-
-    // Raw Y value of the last event that happened on the list view.
-    private float mListTouchY = -1;
-
-    // Scrolling direction of the banner.
-    private boolean mSnapBannerToTop;
 
     // Callbacks used for the search and favicon cursor loaders
     private CursorLoaderCallbacks mCursorLoaderCallbacks;
@@ -226,15 +212,6 @@ public class TopSitesPanel extends HomeFragment {
 
         registerForContextMenu(mList);
         registerForContextMenu(mGrid);
-
-        mBanner = (HomeBanner) view.findViewById(R.id.home_banner);
-        mList.setOnTouchListener(new OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                TopSitesPanel.this.handleListTouchEvent(event);
-                return false;
-            }
-        });
     }
 
     @Override
@@ -470,60 +447,6 @@ public class TopSitesPanel extends HomeFragment {
                     BrowserDB.pinSite(context.getContentResolver(), url, title, position);
                 }
             });
-        }
-    }
-
-    private void handleListTouchEvent(MotionEvent event) {
-        // Ignore the event if the banner is hidden for this session.
-        if (mBanner.isDismissed()) {
-            return;
-        }
-
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN: {
-                mListTouchY = event.getRawY();
-                break;
-            }
-
-            case MotionEvent.ACTION_MOVE: {
-                // There is a chance that we won't receive ACTION_DOWN, if the touch event
-                // actually started on the Grid instead of the List. Treat this as first event.
-                if (mListTouchY == -1) {
-                    mListTouchY = event.getRawY();
-                    return;
-                }
-
-                final float curY = event.getRawY();
-                final float delta = mListTouchY - curY;
-                mSnapBannerToTop = (delta > 0.0f) ? false : true;
-
-                final float height = mBanner.getHeight();
-                float newTranslationY = ViewHelper.getTranslationY(mBanner) + delta;
-
-                // Clamp the values to be between 0 and height.
-                if (newTranslationY < 0.0f) {
-                    newTranslationY = 0.0f;
-                } else if (newTranslationY > height) {
-                    newTranslationY = height;
-                }
-
-                ViewHelper.setTranslationY(mBanner, newTranslationY);
-                mListTouchY = curY;
-                break;
-            }
-
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL: {
-                mListTouchY = -1;
-                final float y = ViewHelper.getTranslationY(mBanner);
-                final float height = mBanner.getHeight();
-                if (y > 0.0f && y < height) {
-                    final PropertyAnimator animator = new PropertyAnimator(100);
-                    animator.attach(mBanner, Property.TRANSLATION_Y, mSnapBannerToTop ? 0 : height);
-                    animator.start();
-                }
-                break;
-            }
         }
     }
 

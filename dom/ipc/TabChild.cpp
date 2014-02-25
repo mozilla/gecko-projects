@@ -75,6 +75,8 @@
 #include "ipc/nsGUIEventIPC.h"
 #include "mozilla/gfx/Matrix.h"
 
+#include "nsColorPickerProxy.h"
+
 #ifdef DEBUG
 #include "PCOMContentPermissionRequestChild.h"
 #endif /* DEBUG */
@@ -316,6 +318,32 @@ TabChild::HandleEvent(nsIDOMEvent* aEvent)
   return NS_OK;
 }
 
+void
+TabChild::InitializeRootMetrics()
+{
+  // Calculate a really simple resolution that we probably won't
+  // be keeping, as well as putting the scroll offset back to
+  // the top-left of the page.
+  mLastRootMetrics.mViewport = CSSRect(CSSPoint(), kDefaultViewportSize);
+  mLastRootMetrics.mCompositionBounds = ScreenIntRect(ScreenIntPoint(), mInnerSize);
+  mLastRootMetrics.mZoom = mLastRootMetrics.CalculateIntrinsicScale();
+  mLastRootMetrics.mDevPixelsPerCSSPixel = mWidget->GetDefaultScale();
+  // We use ScreenToLayerScale(1) below in order to turn the
+  // async zoom amount into the gecko zoom amount.
+  mLastRootMetrics.mCumulativeResolution =
+    mLastRootMetrics.mZoom / mLastRootMetrics.mDevPixelsPerCSSPixel * ScreenToLayerScale(1);
+  // This is the root layer, so the cumulative resolution is the same
+  // as the resolution.
+  mLastRootMetrics.mResolution = mLastRootMetrics.mCumulativeResolution / LayoutDeviceToParentLayerScale(1);
+  mLastRootMetrics.mScrollOffset = CSSPoint(0, 0);
+}
+
+bool
+TabChild::HasValidInnerSize()
+{
+  return (mInnerSize.width != 0) && (mInnerSize.height != 0);
+}
+
 NS_IMETHODIMP
 TabChild::Observe(nsISupports *aSubject,
                   const char *aTopic,
@@ -352,26 +380,16 @@ TabChild::Observe(nsISupports *aSubject,
         // page.
         SetCSSViewport(kDefaultViewportSize);
 
-        // Calculate a really simple resolution that we probably won't
-        // be keeping, as well as putting the scroll offset back to
-        // the top-left of the page.
-        mLastRootMetrics.mViewport = CSSRect(CSSPoint(), kDefaultViewportSize);
-        mLastRootMetrics.mCompositionBounds = ScreenIntRect(ScreenIntPoint(), mInnerSize);
-        mLastRootMetrics.mZoom = mLastRootMetrics.CalculateIntrinsicScale();
-        mLastRootMetrics.mDevPixelsPerCSSPixel = mWidget->GetDefaultScale();
-        // We use ScreenToLayerScale(1) below in order to turn the
-        // async zoom amount into the gecko zoom amount.
-        mLastRootMetrics.mCumulativeResolution =
-          mLastRootMetrics.mZoom / mLastRootMetrics.mDevPixelsPerCSSPixel * ScreenToLayerScale(1);
-        // This is the root layer, so the cumulative resolution is the same
-        // as the resolution.
-        mLastRootMetrics.mResolution = mLastRootMetrics.mCumulativeResolution / LayoutDeviceToParentLayerScale(1);
-        mLastRootMetrics.mScrollOffset = CSSPoint(0, 0);
-
-        utils->SetResolution(mLastRootMetrics.mResolution.scale,
-                             mLastRootMetrics.mResolution.scale);
-
-        HandlePossibleViewportChange();
+        // In some cases before-first-paint gets called before
+        // RecvUpdateDimensions is called and therefore before we have an
+        // mInnerSize value set. In such cases defer initializing the viewport
+        // until we we get an inner size.
+        if (HasValidInnerSize()) {
+          InitializeRootMetrics();
+          utils->SetResolution(mLastRootMetrics.mResolution.scale,
+                               mLastRootMetrics.mResolution.scale);
+          HandlePossibleViewportChange();
+        }
       }
     }
   }
@@ -1458,6 +1476,9 @@ TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const 
     mOuterRect.width = rect.width;
     mOuterRect.height = rect.height;
 
+    bool initialSizing = !HasValidInnerSize()
+                      && (size.width != 0 && size.height != 0);
+
     mOrientation = orientation;
     mInnerSize = ScreenIntSize::FromUnknownSize(
       gfx::IntSize(size.width, size.height));
@@ -1467,6 +1488,14 @@ TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const 
     nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(mWebNav);
     baseWin->SetPositionAndSize(0, 0, size.width, size.height,
                                 true);
+
+    if (initialSizing && mContentDocumentIsDisplayed) {
+      // If this is the first time we're getting a valid mInnerSize, and the
+      // before-first-paint event has already been handled, then we need to set
+      // up our default viewport here. See the corresponding call to
+      // InitializeRootMetrics in the before-first-paint handler.
+      InitializeRootMetrics();
+    }
 
     HandlePossibleViewportChange();
 
@@ -2064,6 +2093,21 @@ TabChild::RecvPDocumentRendererConstructor(PDocumentRendererChild* actor,
         return true; // silently ignore
 
     return PDocumentRendererChild::Send__delete__(actor, renderSize, data);
+}
+
+PColorPickerChild*
+TabChild::AllocPColorPickerChild(const nsString&, const nsString&)
+{
+  NS_RUNTIMEABORT("unused");
+  return nullptr;
+}
+
+bool
+TabChild::DeallocPColorPickerChild(PColorPickerChild* aColorPicker)
+{
+  nsColorPickerProxy* picker = static_cast<nsColorPickerProxy*>(aColorPicker);
+  NS_RELEASE(picker);
+  return true;
 }
 
 PContentDialogChild*

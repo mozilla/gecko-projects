@@ -5,16 +5,25 @@
 
 package org.mozilla.gecko;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.net.URLEncoder;
+import java.util.EnumSet;
+import java.util.Vector;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.animation.ViewHelper;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.favicons.Favicons;
-import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.LoadFaviconTask;
+import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.decoders.IconDirectoryEntry;
-import org.mozilla.gecko.fxa.activities.FxAccountGetStartedActivity;
 import org.mozilla.gecko.fxa.FirefoxAccounts;
+import org.mozilla.gecko.fxa.activities.FxAccountGetStartedActivity;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
@@ -24,6 +33,8 @@ import org.mozilla.gecko.health.BrowserHealthReporter;
 import org.mozilla.gecko.health.HealthRecorder;
 import org.mozilla.gecko.health.SessionInformation;
 import org.mozilla.gecko.home.BrowserSearch;
+import org.mozilla.gecko.home.HomeBanner;
+import org.mozilla.gecko.home.HomeConfigInvalidator;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.SearchEngine;
@@ -34,19 +45,14 @@ import org.mozilla.gecko.sync.setup.SyncAccounts;
 import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.toolbar.BrowserToolbar;
 import org.mozilla.gecko.util.Clipboard;
-import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.MenuUtils;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.UiAsyncTask;
-import org.mozilla.gecko.widget.GeckoActionProvider;
 import org.mozilla.gecko.widget.ButtonToast;
-
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import org.mozilla.gecko.widget.GeckoActionProvider;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -84,16 +90,9 @@ import android.view.ViewStub;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.animation.Interpolator;
-import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
 import android.widget.ViewFlipper;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.net.URLEncoder;
-import java.util.EnumSet;
-import java.util.Vector;
 
 abstract public class BrowserApp extends GeckoApp
                                  implements TabsPanel.TabsLayoutChangeListener,
@@ -643,42 +642,6 @@ abstract public class BrowserApp extends GeckoApp
         registerEventListener("Prompt:ShowTop");
     }
 
-    private void showBookmarkDialog() {
-        final Tab tab = Tabs.getInstance().getSelectedTab();
-        final Prompt ps = new Prompt(this, new Prompt.PromptCallback() {
-            @Override
-            public void onPromptFinished(String result) {
-                int itemId = -1;
-                try {
-                  itemId = new JSONObject(result).getInt("button");
-                } catch(JSONException ex) {
-                    Log.e(LOGTAG, "Exception reading bookmark prompt result", ex);
-                }
-
-                if (tab == null)
-                    return;
-
-                if (itemId == 0) {
-                    new EditBookmarkDialog(BrowserApp.this).show(tab.getURL());
-                } else if (itemId == 1) {
-                    String url = tab.getURL();
-                    String title = tab.getDisplayTitle();
-                    Bitmap favicon = tab.getFavicon();
-                    if (url != null && title != null) {
-                        GeckoAppShell.createShortcut(title, url, url, favicon, "");
-                    }
-                }
-            }
-        });
-
-        final Prompt.PromptListItem[] items = new Prompt.PromptListItem[2];
-        Resources res = getResources();
-        items[0] = new Prompt.PromptListItem(res.getString(R.string.contextmenu_edit_bookmark));
-        items[1] = new Prompt.PromptListItem(res.getString(R.string.contextmenu_add_to_launcher));
-
-        ps.show("", "", items, false);
-    }
-
     private void setDynamicToolbarEnabled(boolean enabled) {
         if (enabled) {
             if (mLayerView != null) {
@@ -745,16 +708,7 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         if (itemId == R.id.subscribe) {
-            Tab tab = Tabs.getInstance().getSelectedTab();
-            if (tab != null && tab.hasFeeds()) {
-                JSONObject args = new JSONObject();
-                try {
-                    args.put("tabId", tab.getId());
-                } catch (JSONException e) {
-                    Log.e(LOGTAG, "error building json arguments");
-                }
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Feeds:Subscribe", args.toString()));
-            }
+            subscribeToFeeds(Tabs.getInstance().getSelectedTab());
             return true;
         }
 
@@ -781,27 +735,6 @@ abstract public class BrowserApp extends GeckoApp
                     Clipboard.setText(url);
                 }
             }
-            return true;
-        }
-
-        if (itemId == R.id.add_to_launcher) {
-            Tab tab = Tabs.getInstance().getSelectedTab();
-            if (tab == null) {
-                return true;
-            }
-
-            final String url = tab.getURL();
-            final String title = tab.getDisplayTitle();
-            if (url == null || title == null) {
-                return true;
-            }
-
-            final OnFaviconLoadedListener listener = new GeckoAppShell.CreateShortcutFaviconLoadedListener(url, title);
-            Favicons.getSizedFavicon(url,
-                    tab.getFaviconURL(),
-                    Integer.MAX_VALUE,
-                    LoadFaviconTask.FLAG_PERSIST,
-                    listener);
             return true;
         }
 
@@ -1078,7 +1011,7 @@ abstract public class BrowserApp extends GeckoApp
         if (mMainLayoutAnimator != null)
             mMainLayoutAnimator.stop();
 
-        boolean isSideBar = (HardwareUtils.isTablet() && mOrientation == Configuration.ORIENTATION_LANDSCAPE);
+        boolean isSideBar = (HardwareUtils.isTablet() && getOrientation() == Configuration.ORIENTATION_LANDSCAPE);
         final int sidebarWidth = getResources().getDimensionPixelSize(R.dimen.tabs_sidebar_width);
 
         ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) mTabsPanel.getLayoutParams();
@@ -1487,7 +1420,8 @@ abstract public class BrowserApp extends GeckoApp
     }
 
     private boolean isHomePagerVisible() {
-        return (mHomePager != null && mHomePager.isVisible());
+        return (mHomePager != null && mHomePager.isLoaded()
+            && mHomePagerContainer != null && mHomePagerContainer.getVisibility() == View.VISIBLE);
     }
 
     /* Favicon stuff. */
@@ -1707,9 +1641,7 @@ abstract public class BrowserApp extends GeckoApp
     public void onLocaleReady(final String locale) {
         super.onLocaleReady(locale);
 
-        if (mHomePager != null) {
-            mHomePager.invalidate(getSupportLoaderManager(), getSupportFragmentManager());
-        }
+        HomeConfigInvalidator.getInstance().onLocaleReady(locale);
 
         if (mMenu != null) {
             mMenu.clear();
@@ -1744,9 +1676,13 @@ abstract public class BrowserApp extends GeckoApp
         if (mHomePager == null) {
             final ViewStub homePagerStub = (ViewStub) findViewById(R.id.home_pager_stub);
             mHomePager = (HomePager) homePagerStub.inflate();
+
+            HomeBanner homeBanner = (HomeBanner) findViewById(R.id.home_banner);
+            mHomePager.setBanner(homeBanner);
         }
 
-        mHomePager.show(getSupportLoaderManager(),
+        mHomePagerContainer.setVisibility(View.VISIBLE);
+        mHomePager.load(getSupportLoaderManager(),
                         getSupportFragmentManager(),
                         pageId, animator);
 
@@ -1806,9 +1742,10 @@ abstract public class BrowserApp extends GeckoApp
 
         // Display the previously hidden web content (which prevented screen reader access).
         mLayerView.setVisibility(View.VISIBLE);
+        mHomePagerContainer.setVisibility(View.GONE);
 
         if (mHomePager != null) {
-            mHomePager.hide();
+            mHomePager.unload();
         }
 
         mBrowserToolbar.setNextFocusDownId(R.id.layer_view);
@@ -2155,6 +2092,9 @@ abstract public class BrowserApp extends GeckoApp
         MenuItem desktopMode = aMenu.findItem(R.id.desktop_mode);
         MenuItem enterGuestMode = aMenu.findItem(R.id.new_guest_session);
         MenuItem exitGuestMode = aMenu.findItem(R.id.exit_guest_session);
+        MenuItem subscribe = aMenu.findItem(R.id.subscribe);
+        MenuItem addToReadingList = aMenu.findItem(R.id.reading_list_add);
+        MenuItem save = aMenu.findItem(R.id.save);
 
         // Only show the "Quit" menu item on pre-ICS or television devices.
         // In ICS+, it's easy to kill an app through the task switcher.
@@ -2179,11 +2119,10 @@ abstract public class BrowserApp extends GeckoApp
             return true;
         }
 
+        save.setVisible(!GeckoProfile.get(this).inGuestMode());
+
         bookmark.setEnabled(!AboutPages.isAboutReader(tab.getURL()));
-        bookmark.setVisible(!GeckoProfile.get(this).inGuestMode());
-        bookmark.setCheckable(true);
         bookmark.setChecked(tab.isBookmark());
-        bookmark.setIcon(tab.isBookmark() ? R.drawable.ic_menu_bookmark_remove : R.drawable.ic_menu_bookmark_add);
 
         back.setEnabled(tab.canDoBack());
         forward.setEnabled(tab.canDoForward());
@@ -2273,18 +2212,22 @@ abstract public class BrowserApp extends GeckoApp
         else
             enterGuestMode.setVisible(true);
 
+        addToReadingList.setChecked(tab.isReadingListItem());
+        addToReadingList.setEnabled(tab.getReaderEnabled());
+
+        subscribe.setEnabled(tab.hasFeeds());
+
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        Tab tab = null;
+        final Tab tab = Tabs.getInstance().getSelectedTab();
         Intent intent = null;
 
         final int itemId = item.getItemId();
 
         if (itemId == R.id.bookmark) {
-            tab = Tabs.getInstance().getSelectedTab();
             if (tab != null) {
                 if (item.isChecked()) {
                     tab.removeBookmark();
@@ -2294,12 +2237,12 @@ abstract public class BrowserApp extends GeckoApp
                     tab.addBookmark();
                     getButtonToast().show(false,
                         getResources().getString(R.string.bookmark_added),
-                        getResources().getString(R.string.bookmark_options),
+                        getResources().getString(R.string.contextmenu_edit_bookmark),
                         null,
                         new ButtonToast.ToastListener() {
                             @Override
                             public void onButtonClicked() {
-                                showBookmarkDialog();
+                                new EditBookmarkDialog(BrowserApp.this).show(tab.getURL());
                             }
 
                             @Override
@@ -2317,21 +2260,18 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         if (itemId == R.id.reload) {
-            tab = Tabs.getInstance().getSelectedTab();
             if (tab != null)
                 tab.doReload();
             return true;
         }
 
         if (itemId == R.id.back) {
-            tab = Tabs.getInstance().getSelectedTab();
             if (tab != null)
                 tab.doBack();
             return true;
         }
 
         if (itemId == R.id.forward) {
-            tab = Tabs.getInstance().getSelectedTab();
             if (tab != null)
                 tab.doForward();
             return true;
@@ -2374,13 +2314,12 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         if (itemId == R.id.desktop_mode) {
-            Tab selectedTab = Tabs.getInstance().getSelectedTab();
-            if (selectedTab == null)
+            if (tab == null)
                 return true;
             JSONObject args = new JSONObject();
             try {
                 args.put("desktopMode", !item.isChecked());
-                args.put("tabId", selectedTab.getId());
+                args.put("tabId", tab.getId());
             } catch (JSONException e) {
                 Log.e(LOGTAG, "error building json arguments");
             }
@@ -2412,6 +2351,25 @@ abstract public class BrowserApp extends GeckoApp
         // we have not already handled the item, give the context menu handler
         // a chance.
         if (onContextItemSelected(item)) {
+            return true;
+        }
+
+        if (itemId == R.id.launcher_add) {
+            addToLauncher(tab.getURL(), tab.getTitle(), tab.getFaviconURL());
+            return true;
+        }
+
+        if (itemId == R.id.reading_list_add) {
+            if (item.isChecked()) {
+                ReaderModeUtils.removeFromReadingList(tab.getURL());
+            } else {
+                ReaderModeUtils.addToReadingList(tab);
+            }
+            return true;
+        }
+
+        if (itemId == R.id.subscribe) {
+            subscribeToFeeds(tab);
             return true;
         }
 
@@ -2457,6 +2415,33 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         ps.show(res.getString(titleString), res.getString(msgString), null, false);
+    }
+
+    public void subscribeToFeeds(Tab tab) {
+        if (!tab.hasFeeds()) {
+            return;
+        }
+
+        JSONObject args = new JSONObject();
+        try {
+            args.put("tabId", tab.getId());
+        } catch (JSONException e) {
+            Log.e(LOGTAG, "JSON error", e);
+        }
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Feeds:Subscribe", args.toString()));
+    }
+
+    private void addToLauncher(String url, String title, String faviconUrl) {
+        if (url == null || title == null) {
+            return;
+        }
+
+        final OnFaviconLoadedListener listener = new GeckoAppShell.CreateShortcutFaviconLoadedListener(url, title);
+        Favicons.getSizedFavicon(url,
+                faviconUrl,
+                Integer.MAX_VALUE,
+                LoadFaviconTask.FLAG_PERSIST,
+                listener);
     }
 
     /**
