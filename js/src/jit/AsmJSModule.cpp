@@ -248,28 +248,16 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
         return RedirectCall(FuncCast(NumberMod), Args_Double_DoubleDouble);
       case AsmJSImm_SinD:
         return RedirectCall(FuncCast<double (double)>(sin), Args_Double_Double);
-      case AsmJSImm_SinF:
-        return RedirectCall(FuncCast<float (float)>(sinf), Args_Float32_Float32);
       case AsmJSImm_CosD:
         return RedirectCall(FuncCast<double (double)>(cos), Args_Double_Double);
-      case AsmJSImm_CosF:
-        return RedirectCall(FuncCast<float (float)>(cosf), Args_Float32_Float32);
       case AsmJSImm_TanD:
         return RedirectCall(FuncCast<double (double)>(tan), Args_Double_Double);
-      case AsmJSImm_TanF:
-        return RedirectCall(FuncCast<float (float)>(tanf), Args_Float32_Float32);
       case AsmJSImm_ASinD:
         return RedirectCall(FuncCast<double (double)>(asin), Args_Double_Double);
-      case AsmJSImm_ASinF:
-        return RedirectCall(FuncCast<float (float)>(asinf), Args_Float32_Float32);
       case AsmJSImm_ACosD:
         return RedirectCall(FuncCast<double (double)>(acos), Args_Double_Double);
-      case AsmJSImm_ACosF:
-        return RedirectCall(FuncCast<float (float)>(acosf), Args_Float32_Float32);
       case AsmJSImm_ATanD:
         return RedirectCall(FuncCast<double (double)>(atan), Args_Double_Double);
-      case AsmJSImm_ATanF:
-        return RedirectCall(FuncCast<float (float)>(atanf), Args_Float32_Float32);
       case AsmJSImm_CeilD:
         return RedirectCall(FuncCast<double (double)>(ceil), Args_Double_Double);
       case AsmJSImm_CeilF:
@@ -280,12 +268,8 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
         return RedirectCall(FuncCast<float (float)>(floorf), Args_Float32_Float32);
       case AsmJSImm_ExpD:
         return RedirectCall(FuncCast<double (double)>(exp), Args_Double_Double);
-      case AsmJSImm_ExpF:
-        return RedirectCall(FuncCast<float (float)>(expf), Args_Float32_Float32);
       case AsmJSImm_LogD:
         return RedirectCall(FuncCast<double (double)>(log), Args_Double_Double);
-      case AsmJSImm_LogF:
-        return RedirectCall(FuncCast<float (float)>(logf), Args_Float32_Float32);
       case AsmJSImm_PowD:
         return RedirectCall(FuncCast(ecmaPow), Args_Double_DoubleDouble);
       case AsmJSImm_ATan2D:
@@ -907,6 +891,11 @@ AsmJSModule::protectCode(JSRuntime *rt) const
 {
     JS_ASSERT(rt->currentThreadOwnsOperationCallbackLock());
 
+    codeIsProtected_ = true;
+
+    if (!pod.functionBytes_)
+        return;
+
     // Technically, we should be able to only take away the execute permissions,
     // however this seems to break our emulators which don't always check
     // execute permissions while executing code.
@@ -918,13 +907,18 @@ AsmJSModule::protectCode(JSRuntime *rt) const
     if (mprotect(codeBase(), functionBytes(), PROT_NONE))
         MOZ_CRASH();
 #endif
-
-    codeIsProtected_ = true;
 }
 
 void
 AsmJSModule::unprotectCode(JSRuntime *rt) const
 {
+    JS_ASSERT(rt->currentThreadOwnsOperationCallbackLock());
+
+    codeIsProtected_ = false;
+
+    if (!pod.functionBytes_)
+        return;
+
 #if defined(XP_WIN)
     DWORD oldProtect;
     if (!VirtualProtect(codeBase(), functionBytes(), PAGE_EXECUTE_READWRITE, &oldProtect))
@@ -933,8 +927,6 @@ AsmJSModule::unprotectCode(JSRuntime *rt) const
     if (mprotect(codeBase(), functionBytes(), PROT_READ | PROT_WRITE | PROT_EXEC))
         MOZ_CRASH();
 #endif
-
-    codeIsProtected_ = false;
 }
 
 bool

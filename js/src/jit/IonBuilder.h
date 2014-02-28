@@ -30,7 +30,7 @@ class BaselineFrameInspector;
 // Records information about a baseline frame for compilation that is stable
 // when later used off thread.
 BaselineFrameInspector *
-NewBaselineFrameInspector(TempAllocator *temp, BaselineFrame *frame);
+NewBaselineFrameInspector(TempAllocator *temp, BaselineFrame *frame, CompileInfo *info);
 
 class IonBuilder : public MIRGenerator
 {
@@ -674,11 +674,15 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineUnsafeSetReservedSlot(CallInfo &callInfo);
     InliningStatus inlineUnsafeGetReservedSlot(CallInfo &callInfo);
 
+    // ForkJoin intrinsics
+    InliningStatus inlineForkJoinGetSlice(CallInfo &callInfo);
+
     // Utility intrinsics.
     InliningStatus inlineIsCallable(CallInfo &callInfo);
     InliningStatus inlineHaveSameClass(CallInfo &callInfo);
     InliningStatus inlineToObject(CallInfo &callInfo);
     InliningStatus inlineDump(CallInfo &callInfo);
+    InliningStatus inlineHasClass(CallInfo &callInfo, const Class *clasp);
 
     // Testing functions.
     InliningStatus inlineForceSequentialOrInParallelSection(CallInfo &callInfo);

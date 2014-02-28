@@ -146,6 +146,8 @@ IonBuilder::inlineNativeCall(CallInfo &callInfo, JSNative native)
     if (native == intrinsic_ShouldForceSequential ||
         native == intrinsic_InParallelSection)
         return inlineForceSequentialOrInParallelSection(callInfo);
+    if (native == intrinsic_ForkJoinGetSlice)
+        return inlineForkJoinGetSlice(callInfo);
 
     // Utility intrinsics.
     if (native == intrinsic_IsCallable)
@@ -154,6 +156,12 @@ IonBuilder::inlineNativeCall(CallInfo &callInfo, JSNative native)
         return inlineHaveSameClass(callInfo);
     if (native == intrinsic_ToObject)
         return inlineToObject(callInfo);
+
+    // TypedObject intrinsics.
+    if (native == intrinsic_ObjectIsTransparentTypedObject)
+        return inlineHasClass(callInfo, &TransparentTypedObject::class_);
+    if (native == intrinsic_ObjectIsOpaqueTypedObject)
+        return inlineHasClass(callInfo, &OpaqueTypedObject::class_);
 
     // Testing Functions
     if (native == testingFunc_inParallelSection)
@@ -1384,6 +1392,40 @@ IonBuilder::inlineForceSequentialOrInParallelSection(CallInfo &callInfo)
 }
 
 IonBuilder::InliningStatus
+IonBuilder::inlineForkJoinGetSlice(CallInfo &callInfo)
+{
+    if (info().executionMode() != ParallelExecution)
+        return InliningStatus_NotInlined;
+
+    // Assert the way the function is used instead of testing, as it is a
+    // self-hosted function which must be used in a particular fashion.
+    MOZ_ASSERT(callInfo.argc() == 1 && !callInfo.constructing());
+    MOZ_ASSERT(callInfo.getArg(0)->type() == MIRType_Int32);
+    MOZ_ASSERT(getInlineReturnType() == MIRType_Int32);
+
+    callInfo.setImplicitlyUsedUnchecked();
+
+    switch (info().executionMode()) {
+      case SequentialExecution:
+      case DefinitePropertiesAnalysis:
+        // ForkJoinGetSlice acts as identity for sequential execution.
+        current->push(callInfo.getArg(0));
+        return InliningStatus_Inlined;
+      case ParallelExecution:
+        if (LIRGenerator::allowInlineForkJoinGetSlice()) {
+            MForkJoinGetSlice *getSlice = MForkJoinGetSlice::New(alloc(),
+                                                                 graph().forkJoinContext());
+            current->add(getSlice);
+            current->push(getSlice);
+            return InliningStatus_Inlined;
+        }
+        return InliningStatus_NotInlined;
+    }
+
+    MOZ_ASSUME_UNREACHABLE("Invalid execution mode");
+}
+
+IonBuilder::InliningStatus
 IonBuilder::inlineNewDenseArray(CallInfo &callInfo)
 {
     if (callInfo.constructing() || callInfo.argc() != 1)
@@ -1438,6 +1480,31 @@ IonBuilder::inlineNewDenseArrayForParallelExecution(CallInfo &callInfo)
     current->add(newObject);
     current->push(newObject);
 
+    return InliningStatus_Inlined;
+}
+
+IonBuilder::InliningStatus
+IonBuilder::inlineHasClass(CallInfo &callInfo, const Class *clasp)
+{
+    if (callInfo.constructing() || callInfo.argc() != 1)
+        return InliningStatus_NotInlined;
+
+    if (callInfo.getArg(0)->type() != MIRType_Object)
+        return InliningStatus_NotInlined;
+    if (getInlineReturnType() != MIRType_Boolean)
+        return InliningStatus_NotInlined;
+
+    types::TemporaryTypeSet *types = callInfo.getArg(0)->resultTypeSet();
+    const Class *knownClass = types ? types->getKnownClass() : nullptr;
+    if (knownClass) {
+        pushConstant(BooleanValue(knownClass == clasp));
+    } else {
+        MHasClass *hasClass = MHasClass::New(alloc(), callInfo.getArg(0), clasp);
+        current->add(hasClass);
+        current->push(hasClass);
+    }
+
+    callInfo.setImplicitlyUsedUnchecked();
     return InliningStatus_Inlined;
 }
 

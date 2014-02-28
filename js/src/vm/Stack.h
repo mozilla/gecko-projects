@@ -939,7 +939,7 @@ class StackFrame
 
   public:
     void mark(JSTracer *trc);
-    void markValues(JSTracer *trc, Value *sp);
+    void markValues(JSTracer *trc, Value *sp, jsbytecode *pc);
 
     // Entered Baseline/Ion from the interpreter.
     bool runningInJit() const {
@@ -1139,7 +1139,7 @@ class Activation
 
     // Counter incremented by JS::HideScriptedCaller and decremented by
     // JS::UnhideScriptedCaller. If > 0 for the top activation,
-    // JS_DescribeScriptedCaller will return null instead of querying that
+    // DescribeScriptedCaller will return null instead of querying that
     // activation, which should prompt the caller to consult embedding-specific
     // data structures instead.
     size_t hideScriptedCallerCount_;
@@ -1305,7 +1305,7 @@ namespace jit {
 class JitActivation : public Activation
 {
     uint8_t *prevIonTop_;
-    JSContext *prevIonJSContext_;
+    JSContext *prevJitJSContext_;
     bool firstFrameIsConstructing_;
     bool active_;
 

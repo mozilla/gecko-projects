@@ -23,7 +23,6 @@ XPIDL_SOURCES += [
     'nsIProgrammingLanguage.idl',
     'nsISecurityConsoleMessage.idl',
     'nsISupports.idl',
-    'nsITraceRefcnt.idl',
     'nsIUUIDGenerator.idl',
     'nsIVersionComparator.idl',
     'nsIVisualEventTracer.idl',
@@ -57,7 +56,7 @@ EXPORTS += [
     'nsISupportsObsolete.h',
     'nsObjCExceptions.h',
     'nsStackWalk.h',
-    'nsTraceRefcntImpl.h',
+    'nsTraceRefcnt.h',
     'nsWeakPtr.h',
 ]
 
@@ -111,7 +110,7 @@ UNIFIED_SOURCES += [
     'nsMessageLoop.cpp',
     'nsSecurityConsoleMessage.cpp',
     'nsSystemInfo.cpp',
-    'nsTraceRefcntImpl.cpp',
+    'nsTraceRefcnt.cpp',
     'nsUUIDGenerator.cpp',
     'nsVersionComparatorImpl.cpp',
     'VisualEventTracer.cpp',

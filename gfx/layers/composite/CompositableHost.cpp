@@ -14,7 +14,7 @@
 #include "mozilla/layers/TextureHost.h"  // for TextureHost, etc
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_WARNING
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "gfxPlatform.h"                // for gfxPlatform
 
 namespace mozilla {
@@ -36,6 +36,9 @@ CompositableHost::CompositableHost(const TextureInfo& aTextureInfo)
 CompositableHost::~CompositableHost()
 {
   MOZ_COUNT_DTOR(CompositableHost);
+  if (mBackendData) {
+    mBackendData->ClearData();
+  }
 }
 
 void
@@ -62,6 +65,8 @@ CompositableHost::UseComponentAlphaTextures(TextureHost* aTextureOnBlack,
 void
 CompositableHost::RemoveTextureHost(TextureHost* aTexture)
 {
+  // Clear strong refrence to CompositableBackendSpecificData
+  aTexture->SetCompositableBackendSpecificData(nullptr);
 }
 
 void

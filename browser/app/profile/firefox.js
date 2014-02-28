@@ -657,6 +657,8 @@ pref("plugins.update.notifyUser", false);
 
 pref("plugins.click_to_play", true);
 
+pref("plugins.hideMissingPluginsNotification", false);
+
 #ifdef RELEASE_BUILD
 // For now, plugins other than Java and Flash are enabled in beta/release
 // and click-to-activate in earlier channels.
@@ -802,9 +804,7 @@ pref("browser.safebrowsing.reportMalwareURL", "http://%LOCALE%.malware-report.mo
 pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%");
 
 pref("browser.safebrowsing.malware.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
-#ifndef MOZILLA_OFFICIAL
-pref("browser.safebrowsing.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download&key=%GOOGLE_API_KEY%");
-#endif
+pref("browser.safebrowsing.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
 
 #ifdef MOZILLA_OFFICIAL
 // Normally the "client ID" sent in updates is appinfo.name, but for
@@ -825,7 +825,12 @@ pref("urlclassifier.gethashnoise", 4);
 pref("urlclassifier.max-complete-age", 2700);
 // Tables for application reputation.
 pref("urlclassifier.download_block_table", "goog-badbinurl-shavar");
+#ifdef XP_WIN
+// Only download the whitelist on Windows, since the whitelist is
+// only useful for suppressing remote lookups for signed binaries which we can
+// only verify on Windows (Bug 974579).
 pref("urlclassifier.download_allow_table", "goog-downloadwhite-digest256");
+#endif
 #endif
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
@@ -951,6 +956,9 @@ pref("toolkit.crashreporter.infoURL",
 
 // base URL for web-based support pages
 pref("app.support.baseURL", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/");
+
+// base url for web-based feedback pages
+pref("app.feedback.baseURL", "https://input.mozilla.org/%LOCALE%/feedback/%APP%/%VERSION%/");
 
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
@@ -1089,7 +1097,6 @@ pref("devtools.errorconsole.enabled", false);
 // Developer toolbar and GCLI preferences
 pref("devtools.toolbar.enabled", true);
 pref("devtools.toolbar.visible", false);
-pref("devtools.gcli.allowSet", false);
 pref("devtools.commands.dir", "");
 
 // Enable the app manager
@@ -1378,14 +1385,11 @@ pref("identity.fxaccounts.remote.signin.uri", "https://accounts.firefox.com/sign
 // "identity.fxaccounts.remote.uri" pref.
 pref("identity.fxaccounts.settings.uri", "https://accounts.firefox.com/settings");
 
-// The URL of the Firefox Accounts auth server backend
-pref("identity.fxaccounts.auth.uri", "https://api.accounts.firefox.com/v1");
-
 // On GTK, we now default to showing the menubar only when alt is pressed:
 #ifdef MOZ_WIDGET_GTK
 pref("ui.key.menuAccessKeyFocuses", true);
 #endif
 
 
-// Temporarily turn the new http cache v2 on for Desktop Firefox only
-pref("browser.cache.use_new_backend_temp", true);
+// Delete HTTP cache v2 data of users that didn't opt-in manually
+pref("browser.cache.auto_delete_cache_version", 1);

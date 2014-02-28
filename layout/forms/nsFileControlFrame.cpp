@@ -10,14 +10,14 @@
 #include "nsIDocument.h"
 #include "nsINodeInfo.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/HTMLButtonElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
 #include "nsEventStates.h"
-#include "nsIDOMDataTransfer.h"
-#include "nsIDOMDOMStringList.h"
+#include "mozilla/dom/DOMStringList.h"
 #include "nsIDOMDragEvent.h"
 #include "nsIDOMFileList.h"
 #include "nsContentList.h"
@@ -222,18 +222,14 @@ nsFileControlFrame::DnDListener::HandleEvent(nsIDOMEvent* aEvent)
 /* static */ bool
 nsFileControlFrame::DnDListener::IsValidDropData(nsIDOMDragEvent* aEvent)
 {
-  nsCOMPtr<nsIDOMDataTransfer> dataTransfer;
-  aEvent->GetDataTransfer(getter_AddRefs(dataTransfer));
+  nsCOMPtr<nsIDOMDataTransfer> domDataTransfer;
+  aEvent->GetDataTransfer(getter_AddRefs(domDataTransfer));
+  nsCOMPtr<DataTransfer> dataTransfer = do_QueryInterface(domDataTransfer);
   NS_ENSURE_TRUE(dataTransfer, false);
 
-  nsCOMPtr<nsIDOMDOMStringList> types;
-  dataTransfer->GetTypes(getter_AddRefs(types));
-  NS_ENSURE_TRUE(types, false);
-
   // We only support dropping files onto a file upload control
-  bool typeSupported;
-  types->Contains(NS_LITERAL_STRING("Files"), &typeSupported);
-  return typeSupported;
+  nsRefPtr<DOMStringList> types = dataTransfer->Types();
+  return types->Contains(NS_LITERAL_STRING("Files"));
 }
 
 nscoord

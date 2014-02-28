@@ -29,7 +29,7 @@
 
 #include "nsMemoryImpl.h"
 #include "nsDebugImpl.h"
-#include "nsTraceRefcntImpl.h"
+#include "nsTraceRefcnt.h"
 #include "nsErrorService.h"
 
 #include "nsSupportsArray.h"
@@ -74,7 +74,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports *, REFNSIID, void **)
 
 #include "nsAtomService.h"
 #include "nsAtomTable.h"
-#include "nsTraceRefcnt.h"
+#include "nsISupportsImpl.h"
 
 #include "nsHashPropertyBag.h"
 
@@ -321,14 +321,6 @@ NS_GetDebug(nsIDebug** result)
     return nsDebugImpl::Create(nullptr,
                                NS_GET_IID(nsIDebug),
                                (void**) result);
-}
-
-EXPORT_XPCOM_API(nsresult)
-NS_GetTraceRefcnt(nsITraceRefcnt** result)
-{
-    return nsTraceRefcntImpl::Create(nullptr,
-                                     NS_GET_IID(nsITraceRefcnt),
-                                     (void**) result);
 }
 
 EXPORT_XPCOM_API(nsresult)

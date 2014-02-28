@@ -32,63 +32,91 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
-    'MutationEvent.h',
+    'InternalMutationEvent.h',
 ]
 
 EXPORTS.mozilla.dom += [
+    'AnimationEvent.h',
+    'BeforeUnloadEvent.h',
+    'ClipboardEvent.h',
+    'CommandEvent.h',
+    'CompositionEvent.h',
+    'DataContainerEvent.h',
+    'DataTransfer.h',
+    'DeviceMotionEvent.h',
+    'DragEvent.h',
     'EventTarget.h',
+    'FocusEvent.h',
+    'KeyboardEvent.h',
+    'MessageEvent.h',
+    'MouseEvent.h',
+    'MouseScrollEvent.h',
+    'MutationEvent.h',
     'PointerEvent.h',
+    'SimpleGestureEvent.h',
     'Touch.h',
+    'WheelEvent.h',
 ]
 
 if CONFIG['MOZ_WEBSPEECH']:
     EXPORTS.mozilla.dom += ['SpeechRecognitionError.h']
 
 UNIFIED_SOURCES += [
-    'DOMWheelEvent.cpp',
+    'AnimationEvent.cpp',
+    'BeforeUnloadEvent.cpp',
+    'ClipboardEvent.cpp',
+    'CommandEvent.cpp',
+    'CompositionEvent.cpp',
+    'DataContainerEvent.cpp',
+    'DataTransfer.cpp',
+    'DeviceMotionEvent.cpp',
+    'DragEvent.cpp',
     'EventTarget.cpp',
+    'FocusEvent.cpp',
+    'KeyboardEvent.cpp',
+    'MessageEvent.cpp',
+    'MouseEvent.cpp',
+    'MouseScrollEvent.cpp',
+    'MutationEvent.cpp',
     'nsAsyncDOMEvent.cpp',
     'nsContentEventHandler.cpp',
-    'nsDOMAnimationEvent.cpp',
-    'nsDOMBeforeUnloadEvent.cpp',
-    'nsDOMClipboardEvent.cpp',
-    'nsDOMCommandEvent.cpp',
-    'nsDOMCompositionEvent.cpp',
-    'nsDOMDataContainerEvent.cpp',
-    'nsDOMDataTransfer.cpp',
-    'nsDOMDeviceMotionEvent.cpp',
-    'nsDOMDragEvent.cpp',
-    'nsDOMEvent.cpp',
     'nsDOMEventTargetHelper.cpp',
-    'nsDOMFocusEvent.cpp',
-    'nsDOMKeyboardEvent.cpp',
-    'nsDOMMessageEvent.cpp',
-    'nsDOMMouseEvent.cpp',
-    'nsDOMMouseScrollEvent.cpp',
-    'nsDOMMutationEvent.cpp',
     'nsDOMNotifyAudioAvailableEvent.cpp',
-    'nsDOMNotifyPaintEvent.cpp',
-    'nsDOMScrollAreaEvent.cpp',
-    'nsDOMSimpleGestureEvent.cpp',
     'nsDOMTextEvent.cpp',
     'nsDOMTouchEvent.cpp',
     'nsDOMTransitionEvent.cpp',
-    'nsDOMUIEvent.cpp',
     'nsDOMXULCommandEvent.cpp',
     'nsEventDispatcher.cpp',
-    'nsEventListenerManager.cpp',
     'nsEventListenerService.cpp',
     'nsIMEStateManager.cpp',
     'nsJSEventListener.cpp',
     'nsPaintRequest.cpp',
     'nsPrivateTextRange.cpp',
     'PointerEvent.cpp',
+    'SimpleGestureEvent.cpp',
     'TextComposition.cpp',
     'Touch.cpp',
+    'WheelEvent.cpp',
 ]
 
-# nsEventStateManager.cpp should be built separately because of Mac OS X headers.
 SOURCES += [
+    # nsDOMEvent.cpp should be built separately because it includes
+    # ipc/IPCMessageUtils.h, which on Windows includes windows.h.
+    'nsDOMEvent.cpp',
+    # nsDOMEvent.cpp should be built separately because it includes
+    # ipc/IPCMessageUtils.h, which on Windows includes windows.h.
+    'nsDOMNotifyPaintEvent.cpp',
+    # nsDOMEvent.cpp should be built separately because it includes
+    # ipc/IPCMessageUtils.h, which on Windows includes windows.h.
+    'nsDOMScrollAreaEvent.cpp',
+    # nsDOMEvent.cpp should be built separately because it includes
+    # ipc/IPCMessageUtils.h, which on Windows includes windows.h.
+    'nsDOMUIEvent.cpp',
+    # nsDOMEvent.cpp should be built separately because it includes
+    # mozilla/HalSensor.h, which includes ipc/IPCMessageUtils.h, which
+    # on Windows includes windows.h.
+    'nsEventListenerManager.cpp',
+    # nsEventStateManager.cpp should be built separately because of Mac OS X headers.
     'nsEventStateManager.cpp',
 ]
 

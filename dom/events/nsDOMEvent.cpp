@@ -16,9 +16,9 @@
 #include "nsIPresShell.h"
 #include "nsIDocument.h"
 #include "mozilla/ContentEvents.h"
+#include "mozilla/InternalMutationEvent.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/MutationEvent.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "nsContentUtils.h"
@@ -762,15 +762,6 @@ nsDOMEvent::GetEventPopupControlState(WidgetEvent* aEvent)
           abuse = openControlled;
         break;
       }
-    }
-    break;
-  case NS_SCRIPT_ERROR_EVENT :
-    switch(aEvent->message) {
-    case NS_LOAD_ERROR :
-      // Any error event will allow popups, if enabled in the pref.
-      if (::PopupAllowedForEvent("error"))
-        abuse = openControlled;
-      break;
     }
     break;
   case NS_FORM_EVENT :

@@ -185,10 +185,11 @@ class Defines(SandboxDerived):
     def get_defines(self):
         for define, value in self.defines.iteritems():
             if value is True:
-                defstr = define
+                yield('-D%s' % define)
+            elif value is False:
+                yield('-U%s' % define)
             else:
-                defstr = '%s=%s' % (define, shell_quote(value))
-            yield('-D%s' % defstr)
+                yield('-D%s=%s' % (define, shell_quote(value)))
 
 class Exports(SandboxDerived):
     """Sandbox container object for EXPORTS, which is a HierarchicalStringList.
@@ -596,6 +597,7 @@ class AndroidEclipseProjectData(object):
         'included_projects',
         'referenced_projects',
         '_classpathentries',
+        'filtered_resources',
     )
 
     def __init__(self, name):
@@ -610,6 +612,7 @@ class AndroidEclipseProjectData(object):
         self.included_projects = []
         self.referenced_projects = []
         self._classpathentries = []
+        self.filtered_resources = []
 
     def add_classpathentry(self, path, srcdir, dstdir, exclude_patterns=[], ignore_warnings=False):
         cpe = ClassPathEntry()

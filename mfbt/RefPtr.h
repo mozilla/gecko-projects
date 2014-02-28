@@ -50,7 +50,7 @@ template<typename T> OutParamRef<T> byRef(RefPtr<T>&);
  */
 namespace detail {
 #ifdef DEBUG
-static const MozRefCountType DEAD = 0xffffdead;
+const MozRefCountType DEAD = 0xffffdead;
 #endif
 
 // This is used WeakPtr.h as well as this file.
@@ -101,11 +101,18 @@ class RefCounted
     mutable typename Conditional<Atomicity == AtomicRefCount, Atomic<MozRefCountType>, MozRefCountType>::Type refCnt;
 };
 
+#if defined(MOZILLA_INTERNAL_API) && (defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING))
 #define MOZ_DECLARE_REFCOUNTED_TYPENAME(T) \
-  const char* typeName() const { return #T; }
+  const char* typeName() const { return #T; } \
+  size_t typeSize() const { return sizeof(*this); }
 
 #define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T) \
-  virtual const char* typeName() const { return #T; }
+  virtual const char* typeName() const { return #T; } \
+  virtual size_t typeSize() const { return sizeof(*this); }
+#else
+#define MOZ_DECLARE_REFCOUNTED_TYPENAME(T)
+#define MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(T)
+#endif
 
 }
 

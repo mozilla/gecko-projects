@@ -24,7 +24,7 @@ TelephonyChild::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 PTelephonyRequestChild*
-TelephonyChild::AllocPTelephonyRequestChild()
+TelephonyChild::AllocPTelephonyRequestChild(const IPCTelephonyRequest& aRequest)
 {
   MOZ_CRASH("Caller is supposed to manually construct a request!");
 }
@@ -60,7 +60,9 @@ TelephonyChild::RecvNotifyCallStateChanged(const uint32_t& aClientId,
                               aData.isActive(),
                               aData.isOutGoing(),
                               aData.isEmergency(),
-                              aData.isConference());
+                              aData.isConference(),
+                              aData.isSwitchable(),
+                              aData.isMergeable());
   return true;
 }
 
@@ -109,24 +111,33 @@ TelephonyChild::RecvNotifySupplementaryService(const uint32_t& aClientId,
  * TelephonyRequestChild
  ******************************************************************************/
 
-TelephonyRequestChild::TelephonyRequestChild(nsITelephonyListener* aListener)
-  : mListener(aListener)
+TelephonyRequestChild::TelephonyRequestChild(nsITelephonyListener* aListener,
+                                             nsITelephonyCallback* aCallback)
+  : mListener(aListener), mCallback(aCallback)
 {
-  MOZ_ASSERT(aListener);
 }
 
 void
 TelephonyRequestChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   mListener = nullptr;
+  mCallback = nullptr;
 }
 
 bool
-TelephonyRequestChild::Recv__delete__()
+TelephonyRequestChild::Recv__delete__(const IPCTelephonyResponse& aResponse)
 {
-  MOZ_ASSERT(mListener);
+  switch (aResponse.type()) {
+    case IPCTelephonyResponse::TEnumerateCallsResponse:
+      mListener->EnumerateCallStateComplete();
+      break;
+    case IPCTelephonyResponse::TDialResponse:
+      // Do nothing.
+      break;
+    default:
+      MOZ_CRASH("Unknown type!");
+  }
 
-  mListener->EnumerateCallStateComplete();
   return true;
 }
 
@@ -143,6 +154,26 @@ TelephonyRequestChild::RecvNotifyEnumerateCallState(const uint32_t& aClientId,
                                 aData.isActive(),
                                 aData.isOutGoing(),
                                 aData.isEmergency(),
-                                aData.isConference());
+                                aData.isConference(),
+                                aData.isSwitchable(),
+                                aData.isMergeable());
+  return true;
+}
+
+bool
+TelephonyRequestChild::RecvNotifyDialError(const nsString& aError)
+{
+  MOZ_ASSERT(mCallback);
+
+  mCallback->NotifyDialError(aError);
+  return true;
+}
+
+bool
+TelephonyRequestChild::RecvNotifyDialSuccess()
+{
+  MOZ_ASSERT(mCallback);
+
+  mCallback->NotifyDialSuccess();
   return true;
 }

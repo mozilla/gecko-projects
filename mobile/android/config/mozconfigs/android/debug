@@ -2,7 +2,6 @@
 
 # Global options
 ac_add_options --enable-debug
-ac_add_options --disable-unified-compilation
 
 # Build Fennec
 ac_add_options --enable-application=mobile/android
@@ -32,6 +31,6 @@ ac_add_options --with-branding=mobile/android/branding/nightly
 ac_add_options --enable-warnings-as-errors
 
 # Use ccache
-ac_add_options --with-ccache=/usr/bin/ccache
+. "$topsrcdir/build/mozconfig.cache"
 
 . "$topsrcdir/mobile/android/config/mozconfigs/common.override"

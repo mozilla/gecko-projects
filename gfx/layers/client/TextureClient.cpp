@@ -20,9 +20,8 @@
 #include "mozilla/layers/ShadowLayers.h"  // for ShadowLayerForwarder
 #include "mozilla/layers/SharedPlanarYCbCrImage.h"
 #include "mozilla/layers/YCbCrImageDataSerializer.h"
-#include "mozilla/layers/PTextureChild.h"
 #include "nsDebug.h"                    // for NS_ASSERTION, NS_WARNING, etc
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "ImageContainer.h"             // for PlanarYCbCrImage, etc
 #include "mozilla/gfx/2D.h"
 
@@ -109,7 +108,7 @@ private:
     Release();
   }
 
-  CompositableForwarder* mForwarder;
+  RefPtr<CompositableForwarder> mForwarder;
   TextureClientData* mTextureData;
   TextureClient* mTextureClient;
   bool mIPCOpen;
@@ -157,6 +156,13 @@ TextureClient::DestroyIPDLActor(PTextureChild* actor)
 {
   static_cast<TextureChild*>(actor)->ReleaseIPDLReference();
   return true;
+}
+
+// static
+TextureClient*
+TextureClient::AsTextureClient(PTextureChild* actor)
+{
+  return actor? static_cast<TextureChild*>(actor)->mTextureClient : nullptr;
 }
 
 bool
@@ -299,8 +305,9 @@ TextureClient::Finalize()
 
   if (actor) {
     // this will call ForceRemove in the right thread, using a sync proxy if needed
-    actor->GetForwarder()->RemoveTexture(this);
-
+    if (actor->GetForwarder()) {
+      actor->GetForwarder()->RemoveTexture(this);
+    }
     // The actor has a raw pointer to us, actor->mTextureClient. Null it before we die.
     actor->mTextureClient = nullptr;
   }

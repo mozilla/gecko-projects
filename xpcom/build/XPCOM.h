@@ -22,7 +22,6 @@
 #include "nsError.h"
 #include "nsDebug.h"
 #include "nsMemory.h"
-#include "nsTraceRefcnt.h"
 
 #include "nsID.h"
 
@@ -104,7 +103,6 @@
 #include "nsISupportsPriority.h"
 #include "nsIThreadManager.h"
 #include "nsITimer.h"
-#include "nsITraceRefcnt.h"
 #include "nsIUUIDGenerator.h"
 #include "nsIUnicharInputStream.h"
 #include "nsIUnicharOutputStream.h"

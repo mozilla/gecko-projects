@@ -43,6 +43,7 @@
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/ImageDataBinding.h"
+#include "mozilla/dom/MessageEvent.h"
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/MessagePortList.h"
 #include "mozilla/dom/WorkerBinding.h"
@@ -52,7 +53,6 @@
 #include "nsCxPusher.h"
 #include "nsError.h"
 #include "nsEventDispatcher.h"
-#include "nsDOMMessageEvent.h"
 #include "nsDOMJSUtils.h"
 #include "nsHostObjectProtocolHandler.h"
 #include "nsJSEnvironment.h"
@@ -981,8 +981,7 @@ public:
       return false;
     }
 
-    nsRefPtr<nsDOMMessageEvent> event =
-      new nsDOMMessageEvent(aTarget, nullptr, nullptr);
+    nsRefPtr<MessageEvent> event = new MessageEvent(aTarget, nullptr, nullptr);
     nsresult rv =
       event->InitMessageEvent(NS_LITERAL_STRING("message"),
                               false /* non-bubbling */,
@@ -1186,16 +1185,16 @@ public:
     // they show up in the error console.
     if (!JSREPORT_IS_WARNING(aFlags)) {
       // First fire an ErrorEvent at the worker.
-      if (aTarget) {
-        ErrorEventInit init;
-        init.mMessage = aMessage;
-        init.mFilename = aFilename;
-        init.mLineno = aLineNumber;
-        init.mCancelable = true;
+      ErrorEventInit init;
+      init.mMessage = aMessage;
+      init.mFilename = aFilename;
+      init.mLineno = aLineNumber;
+      init.mCancelable = true;
+      init.mBubbles = true;
 
+      if (aTarget) {
         nsRefPtr<ErrorEvent> event =
           ErrorEvent::Constructor(aTarget, NS_LITERAL_STRING("error"), init);
-
         event->SetTrusted(true);
 
         nsEventStatus status = nsEventStatus_eIgnore;
@@ -1219,30 +1218,22 @@ public:
           WorkerGlobalScope* globalTarget = aWorkerPrivate->GlobalScope();
           MOZ_ASSERT(target == globalTarget->GetWrapperPreserveColor());
 
-          // Icky, we have to fire an InternalScriptErrorEvent...
-          MOZ_ASSERT(!NS_IsMainThread());
-          InternalScriptErrorEvent event(true, NS_USER_DEFINED_EVENT);
-          event.lineNr = aLineNumber;
-          event.errorMsg = aMessage.get();
-          event.fileName = aFilename.get();
-          event.typeString = NS_LITERAL_STRING("error");
+          nsRefPtr<ErrorEvent> event =
+            ErrorEvent::Constructor(aTarget, NS_LITERAL_STRING("error"), init);
+          event->SetTrusted(true);
 
           nsIDOMEventTarget* target = static_cast<nsIDOMEventTarget*>(globalTarget);
-          if (NS_FAILED(nsEventDispatcher::Dispatch(target, nullptr, &event,
-                                                    nullptr, &status))) {
+          if (NS_FAILED(nsEventDispatcher::DispatchDOMEvent(target, nullptr,
+                                                            event, nullptr,
+                                                            &status))) {
             NS_WARNING("Failed to dispatch worker thread error event!");
             status = nsEventStatus_eIgnore;
           }
         }
         else if ((sgo = nsJSUtils::GetStaticScriptGlobal(target))) {
-          // Icky, we have to fire an InternalScriptErrorEvent...
           MOZ_ASSERT(NS_IsMainThread());
-          InternalScriptErrorEvent event(true, NS_LOAD_ERROR);
-          event.lineNr = aLineNumber;
-          event.errorMsg = aMessage.get();
-          event.fileName = aFilename.get();
 
-          if (NS_FAILED(sgo->HandleScriptError(&event, &status))) {
+          if (NS_FAILED(sgo->HandleScriptError(init, &status))) {
             NS_WARNING("Failed to dispatch main thread error event!");
             status = nsEventStatus_eIgnore;
           }
@@ -2801,9 +2792,7 @@ WorkerPrivateParent<Derived>::DispatchMessageEventToMessagePort(
 
   buffer.clear();
 
-  nsRefPtr<nsDOMMessageEvent> event =
-    new nsDOMMessageEvent(port, nullptr, nullptr);
-
+  nsRefPtr<MessageEvent> event = new MessageEvent(port, nullptr, nullptr);
   nsresult rv =
     event->InitMessageEvent(NS_LITERAL_STRING("message"), false, false, data,
                             EmptyString(), EmptyString(), nullptr);
@@ -3193,13 +3182,15 @@ WorkerPrivateParent<Derived>::BroadcastErrorToSharedWorkers(
     MOZ_ASSERT(sgo);
 
     MOZ_ASSERT(NS_IsMainThread());
-    InternalScriptErrorEvent event(true, NS_LOAD_ERROR);
-    event.lineNr = aLineNumber;
-    event.errorMsg = aMessage.BeginReading();
-    event.fileName = aFilename.BeginReading();
+    ErrorEventInit init;
+    init.mLineno = aLineNumber;
+    init.mFilename = aFilename;
+    init.mMessage = aMessage;
+    init.mCancelable = true;
+    init.mBubbles = true;
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    rv = sgo->HandleScriptError(&event, &status);
+    rv = sgo->HandleScriptError(init, &status);
     if (NS_FAILED(rv)) {
       Throw(cx, rv);
       JS_ReportPendingException(cx);
@@ -3859,10 +3850,8 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
 
       // We're being created outside of a window. Need to figure out the script
       // that is creating us in order for us to use relative URIs later on.
-      JS::Rooted<JSScript*> script(aCx);
-      if (JS_DescribeScriptedCaller(aCx, &script, nullptr)) {
-        const char* fileName = JS_GetScriptFilename(aCx, script);
-
+      JS::AutoFilename fileName;
+      if (JS::DescribeScriptedCaller(aCx, &fileName)) {
         // In most cases, fileName is URI. In a few other cases
         // (e.g. xpcshell), fileName is a file path. Ideally, we would
         // prefer testing whether fileName parses as an URI and fallback
@@ -3877,7 +3866,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
           return rv;
         }
 
-        rv = scriptFile->InitWithPath(NS_ConvertUTF8toUTF16(fileName));
+        rv = scriptFile->InitWithPath(NS_ConvertUTF8toUTF16(fileName.get()));
         if (NS_SUCCEEDED(rv)) {
           rv = NS_NewFileURI(getter_AddRefs(loadInfo.mBaseURI),
                              scriptFile);
@@ -3886,7 +3875,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
           // As expected, fileName is not a path, so proceed with
           // a uri.
           rv = NS_NewURI(getter_AddRefs(loadInfo.mBaseURI),
-                         fileName);
+                         fileName.get());
         }
         if (NS_FAILED(rv)) {
           return rv;
@@ -5746,9 +5735,9 @@ WorkerPrivate::ConnectMessagePort(JSContext* aCx, uint64_t aMessagePortSerial)
 
   ErrorResult rv;
 
-  nsRefPtr<nsDOMMessageEvent> event =
-    nsDOMMessageEvent::Constructor(globalObject, aCx,
-                                   NS_LITERAL_STRING("connect"), init, rv);
+  nsRefPtr<MessageEvent> event =
+    MessageEvent::Constructor(globalObject, aCx,
+                              NS_LITERAL_STRING("connect"), init, rv);
 
   event->SetTrusted(true);
 

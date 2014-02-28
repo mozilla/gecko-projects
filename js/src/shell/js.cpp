@@ -86,7 +86,7 @@ using namespace js;
 using namespace js::cli;
 
 using mozilla::ArrayLength;
-using mozilla::DoubleEqualsInt32;
+using mozilla::NumberEqualsInt32;
 using mozilla::Maybe;
 using mozilla::PodCopy;
 
@@ -320,10 +320,9 @@ ShellOperationCallback(JSContext *cx)
     if (!gTimedOut)
         return true;
 
-    JS_ClearPendingException(cx);
-
     bool result;
     if (!gTimeoutFunc.isNull()) {
+        JS::AutoSaveExceptionState savedExc(cx);
         JSAutoCompartment ac(cx, &gTimeoutFunc.toObject());
         RootedValue rval(cx);
         HandleValue timeoutFunc = HandleValue::fromMarkedLocation(&gTimeoutFunc);
@@ -392,7 +391,8 @@ RunFile(JSContext *cx, Handle<JSObject*> obj, const char *filename, FILE *file, 
         JS::ContextOptionsRef(cx).setNoScriptRval(true);
 
         CompileOptions options(cx);
-        options.setUTF8(true)
+        options.setIntroductionType("js shell file")
+               .setUTF8(true)
                .setFileAndLine(filename, 1)
                .setCompileAndGo(true);
 
@@ -422,7 +422,8 @@ EvalAndPrint(JSContext *cx, Handle<JSObject*> global, const char *bytes, size_t 
 {
     // Eval.
     JS::CompileOptions options(cx);
-    options.setUTF8(true)
+    options.setIntroductionType("js shell interactive")
+           .setUTF8(true)
            .setCompileAndGo(true)
            .setFileAndLine("typein", lineno);
     RootedScript script(cx);
@@ -562,7 +563,7 @@ Version(JSContext *cx, unsigned argc, jsval *vp)
         } else if (args[0].isDouble()) {
             double fv = args[0].toDouble();
             int32_t fvi;
-            if (DoubleEqualsInt32(fv, &fvi))
+            if (NumberEqualsInt32(fv, &fvi))
                 v = fvi;
         }
         if (v < 0 || v > JSVERSION_LATEST) {
@@ -573,14 +574,6 @@ Version(JSContext *cx, unsigned argc, jsval *vp)
         args.rval().setInt32(origVersion);
     }
     return true;
-}
-
-static JSScript *
-GetTopScript(JSContext *cx)
-{
-    RootedScript script(cx);
-    JS_DescribeScriptedCaller(cx, &script, nullptr);
-    return script;
 }
 
 /*
@@ -615,19 +608,23 @@ ResolvePath(JSContext *cx, HandleString filenameStr, bool scriptRelative)
 #endif
 
     /* Get the currently executing script's name. */
-    RootedScript script(cx, GetTopScript(cx));
-    if (!script->filename())
+    JS::AutoFilename scriptFilename;
+    if (!DescribeScriptedCaller(cx, &scriptFilename))
         return nullptr;
-    if (strcmp(script->filename(), "-e") == 0 || strcmp(script->filename(), "typein") == 0)
+
+    if (!scriptFilename.get())
+        return nullptr;
+
+    if (strcmp(scriptFilename.get(), "-e") == 0 || strcmp(scriptFilename.get(), "typein") == 0)
         scriptRelative = false;
 
     static char buffer[PATH_MAX+1];
     if (scriptRelative) {
 #ifdef XP_WIN
         // The docs say it can return EINVAL, but the compiler says it's void
-        _splitpath(script->filename(), nullptr, buffer, nullptr, nullptr);
+        _splitpath(scriptFilename.get(), nullptr, buffer, nullptr, nullptr);
 #else
-        strncpy(buffer, script->filename(), PATH_MAX+1);
+        strncpy(buffer, scriptFilename.get(), PATH_MAX+1);
         if (buffer[PATH_MAX] != '\0')
             return nullptr;
 
@@ -747,7 +744,10 @@ LoadScript(JSContext *cx, unsigned argc, jsval *vp, bool scriptRelative)
             return false;
         errno = 0;
         CompileOptions opts(cx);
-        opts.setUTF8(true).setCompileAndGo(true).setNoScriptRval(true);
+        opts.setIntroductionType("js shell load")
+            .setUTF8(true)
+            .setCompileAndGo(true)
+            .setNoScriptRval(true);
         if ((compileOnly && !Compile(cx, thisobj, opts, filename.ptr())) ||
             !Evaluate(cx, thisobj, opts, filename.ptr(), nullptr))
         {
@@ -1045,7 +1045,8 @@ Evaluate(JSContext *cx, unsigned argc, jsval *vp)
     bool assertEqBytecode = false;
     RootedObject callerGlobal(cx, cx->global());
 
-    options.setFileAndLine("@evaluate", 1);
+    options.setIntroductionType("js shell evaluate")
+           .setFileAndLine("@evaluate", 1);
 
     global = JS_GetGlobalForObject(cx, &args.callee());
     if (!global)
@@ -1363,7 +1364,8 @@ Run(JSContext *cx, unsigned argc, jsval *vp)
         JS::ContextOptionsRef(cx).setNoScriptRval(true);
 
         JS::CompileOptions options(cx);
-        options.setFileAndLine(filename.ptr(), 1)
+        options.setIntroductionType("js shell run")
+               .setFileAndLine(filename.ptr(), 1)
                .setCompileAndGo(true);
         script = JS_CompileUCScript(cx, thisobj, ucbuf, buflen, options);
         if (!script)
@@ -1648,6 +1650,13 @@ SetDebug(JSContext *cx, unsigned argc, jsval *vp)
     if (ok)
         args.rval().setBoolean(true);
     return ok;
+}
+
+static JSScript *
+GetTopScript(JSContext *cx)
+{
+    NonBuiltinScriptFrameIter iter(cx);
+    return iter.done() ? nullptr : iter.script();
 }
 
 static bool
@@ -2202,7 +2211,8 @@ DisassFile(JSContext *cx, unsigned argc, jsval *vp)
         JS::ContextOptionsRef(cx).setNoScriptRval(true);
 
         CompileOptions options(cx);
-        options.setUTF8(true)
+        options.setIntroductionType("js shell disFile")
+               .setUTF8(true)
                .setFileAndLine(filename.ptr(), 1)
                .setCompileAndGo(true);
 
@@ -2687,10 +2697,10 @@ EvalInContext(JSContext *cx, unsigned argc, jsval *vp)
         return true;
     }
 
-    RootedScript script(cx);
+    JS::AutoFilename filename;
     unsigned lineno;
 
-    JS_DescribeScriptedCaller(cx, &script, &lineno);
+    DescribeScriptedCaller(cx, &filename, &lineno);
     {
         Maybe<JSAutoCompartment> ac;
         unsigned flags;
@@ -2708,7 +2718,7 @@ EvalInContext(JSContext *cx, unsigned argc, jsval *vp)
             return false;
         }
         if (!JS_EvaluateUCScript(cx, sobj, src, srclen,
-                                 script->filename(),
+                                 filename.get(),
                                  lineno,
                                  args.rval())) {
             return false;
@@ -3382,7 +3392,8 @@ Compile(JSContext *cx, unsigned argc, jsval *vp)
     JS::AutoSaveContextOptions asco(cx);
     JS::ContextOptionsRef(cx).setNoScriptRval(true);
     JS::CompileOptions options(cx);
-    options.setFileAndLine("<string>", 1)
+    options.setIntroductionType("js shell compile")
+           .setFileAndLine("<string>", 1)
            .setCompileAndGo(true);
     bool ok = JS_CompileUCScript(cx, global, JS_GetStringCharsZ(cx, scriptContents),
                                  JS_GetStringLength(scriptContents), options);
@@ -3410,7 +3421,8 @@ Parse(JSContext *cx, unsigned argc, jsval *vp)
 
     JSString *scriptContents = args[0].toString();
     CompileOptions options(cx);
-    options.setFileAndLine("<string>", 1)
+    options.setIntroductionType("js shell parse")
+           .setFileAndLine("<string>", 1)
            .setCompileAndGo(false);
     Parser<FullParseHandler> parser(cx, &cx->tempLifoAlloc(), options,
                                     JS_GetStringCharsZ(cx, scriptContents),
@@ -3448,7 +3460,8 @@ SyntaxParse(JSContext *cx, unsigned argc, jsval *vp)
 
     JSString *scriptContents = args[0].toString();
     CompileOptions options(cx);
-    options.setFileAndLine("<string>", 1)
+    options.setIntroductionType("js shell syntaxParse")
+           .setFileAndLine("<string>", 1)
            .setCompileAndGo(false);
 
     const jschar *chars = JS_GetStringCharsZ(cx, scriptContents);
@@ -3578,7 +3591,8 @@ OffThreadCompileScript(JSContext *cx, unsigned argc, jsval *vp)
 
     JSAutoByteString fileNameBytes;
     CompileOptions options(cx);
-    options.setFileAndLine("<string>", 1);
+    options.setIntroductionType("js shell offThreadCompileScript")
+           .setFileAndLine("<string>", 1);
 
     if (args.length() >= 2) {
         if (args[1].isPrimitive()) {
@@ -4002,17 +4016,21 @@ static bool
 DecompileThisScript(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    RootedScript script (cx);
-    if (!JS_DescribeScriptedCaller(cx, &script, nullptr)) {
+
+    NonBuiltinScriptFrameIter iter(cx);
+    if (iter.done()) {
         args.rval().setString(cx->runtime()->emptyString);
         return true;
     }
 
     {
-        JSAutoCompartment ac(cx, script);
+        JSAutoCompartment ac(cx, iter.script());
+
+        RootedScript script(cx, iter.script());
         JSString *result = JS_DecompileScript(cx, script, "test", 0);
         if (!result)
             return false;
+
         args.rval().setString(result);
     }
 
@@ -4023,15 +4041,18 @@ static bool
 ThisFilename(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    RootedScript script (cx);
-    if (!JS_DescribeScriptedCaller(cx, &script, nullptr) || !script->filename()) {
+
+    JS::AutoFilename filename;
+    if (!DescribeScriptedCaller(cx, &filename) || !filename.get()) {
         args.rval().setString(cx->runtime()->emptyString);
         return true;
     }
-    JSString *filename = JS_NewStringCopyZ(cx, script->filename());
-    if (!filename)
+
+    JSString *str = JS_NewStringCopyZ(cx, filename.get());
+    if (!str)
         return false;
-    args.rval().setString(filename);
+
+    args.rval().setString(str);
     return true;
 }
 
@@ -4811,74 +4832,6 @@ my_ErrorReporter(JSContext *cx, const char *message, JSErrorReport *report)
     }
 }
 
-#if defined(SHELL_HACK) && defined(DEBUG) && defined(XP_UNIX)
-static bool
-Exec(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    JSFunction *fun;
-    const char *name, **nargv;
-    unsigned i, nargc;
-    JSString *str;
-    bool ok;
-    pid_t pid;
-    int status;
-
-    JS_SET_RVAL(cx, vp, UndefinedValue());
-
-    RootedValue arg(cx, vp[0]);
-    fun = JS_ValueToFunction(cx, arg);
-    if (!fun)
-        return false;
-    if (!fun->atom)
-        return true;
-
-    nargc = 1 + argc;
-
-    /* nargc + 1 accounts for the terminating nullptr. */
-    nargv = new (char *)[nargc + 1];
-    if (!nargv)
-        return false;
-    memset(nargv, 0, sizeof(nargv[0]) * (nargc + 1));
-    nargv[0] = name;
-    jsval *argv = JS_ARGV(cx, vp);
-    for (i = 0; i < nargc; i++) {
-        str = (i == 0) ? fun->atom : JS::ToString(cx, args[i-1]);
-        if (!str) {
-            ok = false;
-            goto done;
-        }
-        nargv[i] = JSStringToUTF8(cx, str);
-        if (!nargv[i]) {
-            ok = false;
-            goto done;
-        }
-    }
-    pid = fork();
-    switch (pid) {
-      case -1:
-        perror("js");
-        break;
-      case 0:
-        (void) execvp(name, (char **)nargv);
-        perror("js");
-        exit(127);
-      default:
-        while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
-            continue;
-        break;
-    }
-    ok = true;
-
-  done:
-    for (i = 0; i < nargc; i++)
-        JS_free(cx, nargv[i]);
-    delete[] nargv;
-    return ok;
-}
-#endif
-
 static bool
 global_enumerate(JSContext *cx, HandleObject obj)
 {
@@ -4904,56 +4857,7 @@ global_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
     }
 #endif
 
-#if defined(SHELL_HACK) && defined(DEBUG) && defined(XP_UNIX)
-    /*
-     * Do this expensive hack only for unoptimized Unix builds, which are
-     * not used for benchmarking.
-     */
-    char *path, *comp, *full;
-    const char *name;
-    bool ok, found;
-    JSFunction *fun;
-
-    if (!JSVAL_IS_STRING(id))
-        return true;
-    path = getenv("PATH");
-    if (!path)
-        return true;
-    path = JS_strdup(cx, path);
-    if (!path)
-        return false;
-    JSAutoByteString name(cx, JSVAL_TO_STRING(id));
-    if (!name)
-        return false;
-    ok = true;
-    for (comp = strtok(path, ":"); comp; comp = strtok(nullptr, ":")) {
-        if (*comp != '\0') {
-            full = JS_smprintf("%s/%s", comp, name.ptr());
-            if (!full) {
-                JS_ReportOutOfMemory(cx);
-                ok = false;
-                break;
-            }
-        } else {
-            full = (char *)name;
-        }
-        found = (access(full, X_OK) == 0);
-        if (*comp != '\0')
-            free(full);
-        if (found) {
-            fun = JS_DefineFunction(cx, obj, name, Exec, 0,
-                                    JSPROP_ENUMERATE);
-            ok = (fun != nullptr);
-            if (ok)
-                objp.set(obj);
-            break;
-        }
-    }
-    JS_free(cx, path);
-    return ok;
-#else
     return true;
-#endif
 }
 
 static const JSClass global_class = {
@@ -6191,8 +6095,9 @@ main(int argc, char **argv, char **envp)
 
     JS_SetGCParameter(rt, JSGC_MAX_BYTES, 0xffffffff);
 #ifdef JSGC_GENERATIONAL
+    Maybe<JS::AutoDisableGenerationalGC> noggc;
     if (op.getBoolOption("no-ggc"))
-        JS::DisableGenerationalGC(rt);
+        noggc.construct(rt);
 #endif
 
     size_t availMem = op.getIntOption("available-memory");

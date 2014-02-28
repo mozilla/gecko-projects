@@ -45,6 +45,7 @@ public:
     // WARNING: mPresContext may be destroying, so, be careful if you touch it.
   }
 
+  bool Destroyed() const { return !mPresContext; }
   nsPresContext* GetPresContext() const { return mPresContext; }
   nsINode* GetEventTargetNode() const { return mNode; }
   // The latest CompositionEvent.data value except compositionstart event.
@@ -61,6 +62,11 @@ public:
   bool IsSynthesizedForTests() const { return mIsSynthesizedForTests; }
 
   bool MatchesNativeContext(nsIWidget* aWidget) const;
+
+  /**
+   * This is called when nsIMEStateManager stops managing the instance.
+   */
+  void Destroy();
 
   /**
    * SynthesizeCommit() dispatches compositionupdate, text and compositionend
@@ -86,6 +92,15 @@ public:
    * Otherwise, false.
    */
   bool IsComposing() const { return mIsComposing; }
+
+  /**
+   * Returns true while editor is handling an event which is modifying the
+   * composition string.
+   */
+  bool IsEditorHandlingEvent() const
+  {
+    return mIsEditorHandlingEvent;
+  }
 
   /**
    * StartHandlingComposition() and EndHandlingComposition() are called by
@@ -154,6 +169,10 @@ private:
 
   // See the comment for IsComposing().
   bool mIsComposing;
+
+  // mIsEditorHandlingEvent is true while editor is modifying the composition
+  // string.
+  bool mIsEditorHandlingEvent;
 
   // Hide the default constructor and copy constructor.
   TextComposition() {}

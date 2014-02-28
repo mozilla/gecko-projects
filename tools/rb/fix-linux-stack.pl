@@ -10,8 +10,8 @@
 # nsTraceRefcnt's Linux stack walking code.  This is useful for two
 # things:
 #  (1) Getting line number information out of
-#      |nsTraceRefcntImpl::WalkTheStack|'s output in debug builds.
-#  (2) Getting function names out of |nsTraceRefcntImpl::WalkTheStack|'s
+#      |nsTraceRefcnt::WalkTheStack|'s output in debug builds.
+#  (2) Getting function names out of |nsTraceRefcnt::WalkTheStack|'s
 #      output on optimized builds (where it mostly prints UNKNOWN
 #      because only a handful of symbols are exported from component
 #      libraries).
@@ -223,7 +223,7 @@ $SIG{PIPE} = 'IGNORE';
 select STDOUT; $| = 1; # make STDOUT unbuffered
 while (<>) {
     my $line = $_;
-    if ($line =~ /^([ \|0-9-]*)(.*) ?\[([^ ]*) \+(0x[0-9A-Fa-f]{1,8})\](.*)$/) {
+    if ($line =~ /^([ \|0-9-]*)(.*) ?\[([^ ]*) \+(0x[0-9A-F]{1,8})\](.*)$/) {
         my $before = $1; # allow preservation of balance trees
         my $badsymbol = $2;
         my $file = $3;

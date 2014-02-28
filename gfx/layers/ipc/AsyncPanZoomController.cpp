@@ -19,7 +19,7 @@
 #include "base/message_loop.h"          // for MessageLoop
 #include "base/task.h"                  // for NewRunnableMethod, etc
 #include "base/tracked.h"               // for FROM_HERE
-#include "gfxPlatform.h"                // for gfxPlatform::UseProgressiveTilePainting
+#include "gfxPrefs.h"                   // for gfxPrefs::UseProgressiveTilePainting
 #include "gfxTypes.h"                   // for gfxFloat
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/BasicEvents.h"        // for Modifiers, MODIFIER_*
@@ -49,14 +49,13 @@
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_WARNING
 #include "nsIDOMWindowUtils.h"          // for nsIDOMWindowUtils
-#include "nsISupportsImpl.h"
+#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsMathUtils.h"                // for NS_hypot
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsStyleConsts.h"
 #include "nsStyleStruct.h"              // for nsTimingFunction
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
 #include "nsThreadUtils.h"              // for NS_IsMainThread
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 #include "SharedMemoryBasic.h"          // for SharedMemoryBasic
 
 // #define APZC_ENABLE_RENDERTRACE
@@ -289,11 +288,6 @@ static bool gCrossSlideEnabled = false;
 static bool gAllowCheckerboarding = true;
 
 /**
- * Pref that enables progressive tile painting
- */
-static bool gUseProgressiveTilePainting = false;
-
-/**
  * Pref that enables enlarging of the displayport along one axis when its
  * opposite's scrollable rect is within the composition bounds. That is, we
  * don't need to pad the opposite axis.
@@ -425,7 +419,6 @@ AsyncPanZoomController::InitializeGlobalState()
   Preferences::AddBoolVarCache(&gCrossSlideEnabled, "apz.cross_slide.enabled", gCrossSlideEnabled);
   Preferences::AddIntVarCache(&gAxisLockMode, "apz.axis_lock_mode", gAxisLockMode);
   Preferences::AddBoolVarCache(&gAllowCheckerboarding, "apz.allow-checkerboarding", gAllowCheckerboarding);
-  gUseProgressiveTilePainting = gfxPlatform::UseProgressiveTilePainting();
   Preferences::AddBoolVarCache(&gEnlargeDisplayPortWhenOnlyScrollable, "apz.enlarge_displayport_when_only_scrollable",
     gEnlargeDisplayPortWhenOnlyScrollable);
 
@@ -450,7 +443,7 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
      mX(MOZ_THIS_IN_INITIALIZER_LIST()),
      mY(MOZ_THIS_IN_INITIALIZER_LIST()),
      mPanDirRestricted(false),
-     mZoomConstraints(false, MIN_ZOOM, MAX_ZOOM),
+     mZoomConstraints(false, false, MIN_ZOOM, MAX_ZOOM),
      mLastSampleTime(GetFrameTime()),
      mState(NOTHING),
      mLastAsyncScrollTime(GetFrameTime()),
@@ -957,9 +950,9 @@ nsEventStatus AsyncPanZoomController::OnLongPressUp(const TapGestureInput& aEven
 nsEventStatus AsyncPanZoomController::OnSingleTapUp(const TapGestureInput& aEvent) {
   APZC_LOG("%p got a single-tap-up in state %d\n", this, mState);
   nsRefPtr<GeckoContentController> controller = GetGeckoContentController();
-  // If mZoomConstraints.mAllowZoom is true we wait for a call to OnSingleTapConfirmed before
+  // If mZoomConstraints.mAllowDoubleTapZoom is true we wait for a call to OnSingleTapConfirmed before
   // sending event to content
-  if (controller && !AllowZoom()) {
+  if (controller && !AllowDoubleTapZoom()) {
     int32_t modifiers = WidgetModifiersToDOMModifiers(aEvent.modifiers);
     CSSIntPoint geckoScreenPoint;
     if (ConvertToGecko(aEvent.mPoint, &geckoScreenPoint)) {
@@ -1000,7 +993,7 @@ nsEventStatus AsyncPanZoomController::OnDoubleTap(const TapGestureInput& aEvent)
   APZC_LOG("%p got a double-tap in state %d\n", this, mState);
   nsRefPtr<GeckoContentController> controller = GetGeckoContentController();
   if (controller) {
-    if (AllowZoom()) {
+    if (AllowDoubleTapZoom()) {
       int32_t modifiers = WidgetModifiersToDOMModifiers(aEvent.modifiers);
       CSSIntPoint geckoScreenPoint;
       if (ConvertToGecko(aEvent.mPoint, &geckoScreenPoint)) {
@@ -1961,6 +1954,11 @@ bool AsyncPanZoomController::AllowZoom() {
       && !(mFrameMetrics.GetDisableScrollingX() || mFrameMetrics.GetDisableScrollingY());
 }
 
+bool AsyncPanZoomController::AllowDoubleTapZoom() {
+  ReentrantMonitorAutoEnter lock(mMonitor);
+  return mZoomConstraints.mAllowDoubleTapZoom && AllowZoom();
+}
+
 void AsyncPanZoomController::SetContentResponseTimer() {
   if (!mContentResponseTimeoutTask) {
     mContentResponseTimeoutTask =
@@ -1976,14 +1974,15 @@ void AsyncPanZoomController::TimeoutContentResponse() {
 }
 
 void AsyncPanZoomController::UpdateZoomConstraints(const ZoomConstraints& aConstraints) {
-  APZC_LOG("%p updating zoom constraints to %d %f %f\n", this, aConstraints.mAllowZoom,
-    aConstraints.mMinZoom.scale, aConstraints.mMaxZoom.scale);
-  if (IsFloatNaN(aConstraints.mMinZoom.scale) || IsFloatNaN(aConstraints.mMaxZoom.scale)) {
+  APZC_LOG("%p updating zoom constraints to %d %d %f %f\n", this, aConstraints.mAllowZoom,
+    aConstraints.mAllowDoubleTapZoom, aConstraints.mMinZoom.scale, aConstraints.mMaxZoom.scale);
+  if (IsNaN(aConstraints.mMinZoom.scale) || IsNaN(aConstraints.mMaxZoom.scale)) {
     NS_WARNING("APZC received zoom constraints with NaN values; dropping...\n");
     return;
   }
   // inf float values and other bad cases should be sanitized by the code below.
   mZoomConstraints.mAllowZoom = aConstraints.mAllowZoom;
+  mZoomConstraints.mAllowDoubleTapZoom = aConstraints.mAllowDoubleTapZoom;
   mZoomConstraints.mMinZoom = (MIN_ZOOM > aConstraints.mMinZoom ? MIN_ZOOM : aConstraints.mMinZoom);
   mZoomConstraints.mMaxZoom = (MAX_ZOOM > aConstraints.mMaxZoom ? aConstraints.mMaxZoom : MAX_ZOOM);
   if (mZoomConstraints.mMaxZoom < mZoomConstraints.mMinZoom) {
@@ -2050,7 +2049,7 @@ void AsyncPanZoomController::UpdateSharedCompositorFrameMetrics()
   FrameMetrics* frame = mSharedFrameMetricsBuffer ?
       static_cast<FrameMetrics*>(mSharedFrameMetricsBuffer->memory()) : nullptr;
 
-  if (gUseProgressiveTilePainting && frame && mSharedLock) {
+  if (frame && mSharedLock && gfxPrefs::UseProgressiveTilePainting()) {
     mSharedLock->Lock();
     *frame = mFrameMetrics;
     mSharedLock->Unlock();
@@ -2065,7 +2064,7 @@ void AsyncPanZoomController::ShareCompositorFrameMetrics() {
   // Only create the shared memory buffer if it hasn't already been created,
   // we are using progressive tile painting, and we have a
   // compositor to pass the shared memory back to the content process/thread.
-  if (!mSharedFrameMetricsBuffer && gUseProgressiveTilePainting && compositor) {
+  if (!mSharedFrameMetricsBuffer && compositor && gfxPrefs::UseProgressiveTilePainting()) {
 
     // Create shared memory and initialize it with the current FrameMetrics value
     mSharedFrameMetricsBuffer = new ipc::SharedMemoryBasic;

@@ -46,7 +46,6 @@
 
 #include "nsIDOMStyleSheet.h"
 #include "mozilla/dom/Attr.h"
-#include "nsIDOMDOMStringList.h"
 #include "nsIDOMDOMImplementation.h"
 #include "nsIDOMDocumentXBL.h"
 #include "mozilla/dom/Element.h"
@@ -121,7 +120,7 @@
 #include "nsDateTimeFormatCID.h"
 #include "nsIDateTimeFormat.h"
 #include "nsEventDispatcher.h"
-#include "mozilla/MutationEvent.h"
+#include "mozilla/InternalMutationEvent.h"
 #include "nsDOMCID.h"
 
 #include "jsapi.h"
@@ -221,6 +220,7 @@
 #include "nsIStructuredCloneContainer.h"
 #include "nsIMutableArray.h"
 #include "nsContentPermissionHelper.h"
+#include "mozilla/dom/DOMStringList.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1307,15 +1307,11 @@ nsExternalResourceMap::ExternalResource::~ExternalResource()
 // ==================================================================
 
 // If we ever have an nsIDocumentObserver notification for stylesheet title
-// changes, we could make this inherit from nsDOMStringList instead of
-// reimplementing nsIDOMDOMStringList.
-class nsDOMStyleSheetSetList MOZ_FINAL : public nsIDOMDOMStringList
+// changes we should update the list from that instead of overriding
+// EnsureFresh.
+class nsDOMStyleSheetSetList MOZ_FINAL : public DOMStringList
 {
 public:
-  NS_DECL_ISUPPORTS
-
-  NS_DECL_NSIDOMDOMSTRINGLIST
-
   nsDOMStyleSheetSetList(nsIDocument* aDocument);
 
   void Disconnect()
@@ -1323,21 +1319,12 @@ public:
     mDocument = nullptr;
   }
 
-protected:
-  // Rebuild our list of style sets
-  nsresult GetSets(nsTArray<nsString>& aStyleSets);
+  virtual void EnsureFresh() MOZ_OVERRIDE;
 
+protected:
   nsIDocument* mDocument;  // Our document; weak ref.  It'll let us know if it
                            // dies.
 };
-
-NS_IMPL_ADDREF(nsDOMStyleSheetSetList)
-NS_IMPL_RELEASE(nsDOMStyleSheetSetList)
-NS_INTERFACE_TABLE_HEAD(nsDOMStyleSheetSetList)
-  NS_INTERFACE_TABLE1(nsDOMStyleSheetSetList, nsIDOMDOMStringList)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DOMStringList)
-NS_INTERFACE_MAP_END
 
 nsDOMStyleSheetSetList::nsDOMStyleSheetSetList(nsIDocument* aDocument)
   : mDocument(aDocument)
@@ -1345,52 +1332,14 @@ nsDOMStyleSheetSetList::nsDOMStyleSheetSetList(nsIDocument* aDocument)
   NS_ASSERTION(mDocument, "Must have document!");
 }
 
-NS_IMETHODIMP
-nsDOMStyleSheetSetList::Item(uint32_t aIndex, nsAString& aResult)
+void
+nsDOMStyleSheetSetList::EnsureFresh()
 {
-  nsTArray<nsString> styleSets;
-  nsresult rv = GetSets(styleSets);
-  NS_ENSURE_SUCCESS(rv, rv);
+  mNames.Clear();
 
-  if (aIndex >= styleSets.Length()) {
-    SetDOMStringToNull(aResult);
-  } else {
-    aResult = styleSets[aIndex];
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMStyleSheetSetList::GetLength(uint32_t *aLength)
-{
-  nsTArray<nsString> styleSets;
-  nsresult rv = GetSets(styleSets);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  *aLength = styleSets.Length();
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMStyleSheetSetList::Contains(const nsAString& aString, bool *aResult)
-{
-  nsTArray<nsString> styleSets;
-  nsresult rv = GetSets(styleSets);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  *aResult = styleSets.Contains(aString);
-
-  return NS_OK;
-}
-
-nsresult
-nsDOMStyleSheetSetList::GetSets(nsTArray<nsString>& aStyleSets)
-{
   if (!mDocument) {
-    return NS_OK; // Spec says "no exceptions", and we have no style sets if we
-                  // have no document, for sure
+    return; // Spec says "no exceptions", and we have no style sets if we have
+            // no document, for sure
   }
 
   int32_t count = mDocument->GetNumberOfStyleSheets();
@@ -1399,13 +1348,10 @@ nsDOMStyleSheetSetList::GetSets(nsTArray<nsString>& aStyleSets)
     nsIStyleSheet* sheet = mDocument->GetStyleSheetAt(index);
     NS_ASSERTION(sheet, "Null sheet in sheet list!");
     sheet->GetTitle(title);
-    if (!title.IsEmpty() && !aStyleSets.Contains(title) &&
-        !aStyleSets.AppendElement(title)) {
-      return NS_ERROR_OUT_OF_MEMORY;
+    if (!title.IsEmpty() && !mNames.Contains(title) && !Add(title)) {
+      return;
     }
   }
-
-  return NS_OK;
 }
 
 // ==================================================================
@@ -6173,13 +6119,13 @@ nsIDocument::GetPreferredStyleSheetSet(nsAString& aSheetSet)
 }
 
 NS_IMETHODIMP
-nsDocument::GetStyleSheetSets(nsIDOMDOMStringList** aList)
+nsDocument::GetStyleSheetSets(nsISupports** aList)
 {
   NS_ADDREF(*aList = StyleSheetSets());
   return NS_OK;
 }
 
-nsIDOMDOMStringList*
+DOMStringList*
 nsDocument::StyleSheetSets()
 {
   if (!mStyleSheetSetList) {
@@ -7453,11 +7399,15 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
 nsViewportInfo
 nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
 {
+  // In cases where the width of the CSS viewport is less than or equal to the width
+  // of the display (i.e. width <= device-width) then we disable double-tap-to-zoom
+  // behaviour. See bug 941995 for details.
+
   switch (mViewportType) {
   case DisplayWidthHeight:
     return nsViewportInfo(aDisplaySize);
   case DisplayWidthHeightNoZoom:
-    return nsViewportInfo(aDisplaySize, /* allowZoom */ false);
+    return nsViewportInfo(aDisplaySize, /*allowZoom*/ false, /*allowDoubleTapZoom*/ false);
   case Unknown:
   {
     nsAutoString viewport;
@@ -7477,7 +7427,7 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
           {
             // We're making an assumption that the docType can't change here
             mViewportType = DisplayWidthHeight;
-            return nsViewportInfo(aDisplaySize);
+            return nsViewportInfo(aDisplaySize, /*allowZoom*/true, /*allowDoubleTapZoom*/false);
           }
         }
       }
@@ -7486,7 +7436,7 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
       GetHeaderData(nsGkAtoms::handheldFriendly, handheldFriendly);
       if (handheldFriendly.EqualsLiteral("true")) {
         mViewportType = DisplayWidthHeight;
-        return nsViewportInfo(aDisplaySize);
+        return nsViewportInfo(aDisplaySize, /*allowZoom*/true, /*allowDoubleTapZoom*/false);
       }
 
       // Bug 940036. This is bad. When FirefoxOS was built, apps installed
@@ -7509,7 +7459,7 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
                                           "ImplicitMetaViewportTagFallback");
         }
         mViewportType = DisplayWidthHeightNoZoom;
-        return nsViewportInfo(aDisplaySize, /* allowZoom */ false);
+        return nsViewportInfo(aDisplaySize, /*allowZoom*/false, /*allowDoubleTapZoom*/false);
       }
     }
 
@@ -7583,6 +7533,7 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
         (userScalable.EqualsLiteral("false"))) {
       mAllowZoom = false;
     }
+    mAllowDoubleTapZoom = mAllowZoom;
 
     mScaleStrEmpty = scaleStr.IsEmpty();
     mWidthStrEmpty = widthStr.IsEmpty();
@@ -7649,7 +7600,7 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
     }
 
     return nsViewportInfo(scaleFloat, scaleMinFloat, scaleMaxFloat, size,
-                          mAutoSize, mAllowZoom);
+                          mAutoSize, mAllowZoom, mAllowDoubleTapZoom);
   }
 }
 
@@ -9140,22 +9091,41 @@ nsIDocument::GetReadyState(nsAString& aReadyState) const
   }
 }
 
+namespace {
+
+struct SuppressArgs
+{
+  nsIDocument::SuppressionType mWhat;
+  uint32_t mIncrease;
+};
+
+}
+
 static bool
 SuppressEventHandlingInDocument(nsIDocument* aDocument, void* aData)
 {
-  aDocument->SuppressEventHandling(*static_cast<uint32_t*>(aData));
+  SuppressArgs* args = static_cast<SuppressArgs*>(aData);
+  aDocument->SuppressEventHandling(args->mWhat, args->mIncrease);
   return true;
 }
 
 void
-nsDocument::SuppressEventHandling(uint32_t aIncrease)
+nsDocument::SuppressEventHandling(nsIDocument::SuppressionType aWhat,
+                                  uint32_t aIncrease)
 {
-  if (mEventsSuppressed == 0 && aIncrease != 0 && mPresShell &&
-      mScriptGlobalObject) {
+  if (mEventsSuppressed == 0 && mAnimationsPaused == 0 &&
+      aIncrease != 0 && mPresShell && mScriptGlobalObject) {
     RevokeAnimationFrameNotifications();
   }
-  mEventsSuppressed += aIncrease;
-  EnumerateSubDocuments(SuppressEventHandlingInDocument, &aIncrease);
+
+  if (aWhat == eAnimationsOnly) {
+    mAnimationsPaused += aIncrease;
+  } else {
+    mEventsSuppressed += aIncrease;
+  }
+
+  SuppressArgs args = { aWhat, aIncrease };
+  EnumerateSubDocuments(SuppressEventHandlingInDocument, &args);
 }
 
 static void
@@ -9309,30 +9279,59 @@ private:
   nsTArray<nsCOMPtr<nsIDocument> > mDocuments;
 };
 
-static bool
-GetAndUnsuppressSubDocuments(nsIDocument* aDocument, void* aData)
+namespace {
+
+struct UnsuppressArgs
 {
-  uint32_t suppression = aDocument->EventHandlingSuppressed();
-  if (suppression > 0) {
-    static_cast<nsDocument*>(aDocument)->DecreaseEventSuppression();
+  UnsuppressArgs(nsIDocument::SuppressionType aWhat)
+    : mWhat(aWhat)
+  {
   }
-  nsTArray<nsCOMPtr<nsIDocument> >* docs =
-    static_cast<nsTArray<nsCOMPtr<nsIDocument> >* >(aData);
-  docs->AppendElement(aDocument);
-  aDocument->EnumerateSubDocuments(GetAndUnsuppressSubDocuments, docs);
+
+  nsIDocument::SuppressionType mWhat;
+  nsTArray<nsCOMPtr<nsIDocument>> mDocs;
+};
+
+}
+
+static bool
+GetAndUnsuppressSubDocuments(nsIDocument* aDocument,
+                             void* aData)
+{
+  UnsuppressArgs* args = static_cast<UnsuppressArgs*>(aData);
+  if (args->mWhat != nsIDocument::eAnimationsOnly &&
+      aDocument->EventHandlingSuppressed() > 0) {
+    static_cast<nsDocument*>(aDocument)->DecreaseEventSuppression();
+  } else if (args->mWhat == nsIDocument::eAnimationsOnly &&
+             aDocument->AnimationsPaused()) {
+    static_cast<nsDocument*>(aDocument)->ResumeAnimations();
+  }
+
+  if (args->mWhat != nsIDocument::eAnimationsOnly) {
+    // No need to remember documents if we only care about animation frames.
+    args->mDocs.AppendElement(aDocument);
+  }
+
+  aDocument->EnumerateSubDocuments(GetAndUnsuppressSubDocuments, aData);
   return true;
 }
 
 void
-nsDocument::UnsuppressEventHandlingAndFireEvents(bool aFireEvents)
+nsDocument::UnsuppressEventHandlingAndFireEvents(nsIDocument::SuppressionType aWhat,
+                                                 bool aFireEvents)
 {
-  nsTArray<nsCOMPtr<nsIDocument> > documents;
-  GetAndUnsuppressSubDocuments(this, &documents);
+  UnsuppressArgs args(aWhat);
+  GetAndUnsuppressSubDocuments(this, &args);
+
+  if (aWhat == nsIDocument::eAnimationsOnly) {
+    // No need to fire events if we only care about animations here.
+    return;
+  }
 
   if (aFireEvents) {
-    NS_DispatchToCurrentThread(new nsDelayedEventDispatcher(documents));
+    NS_DispatchToCurrentThread(new nsDelayedEventDispatcher(args.mDocs));
   } else {
-    FireOrClearDelayedEvents(documents, false);
+    FireOrClearDelayedEvents(args.mDocs, false);
   }
 }
 
@@ -11318,7 +11317,7 @@ public:
     }
 
     if (doc->mIsApprovedForFullscreen || doc->mAllowRelocking) {
-      Allow();
+      Allow(JS::UndefinedHandleValue);
       return NS_OK;
     }
 
@@ -11363,8 +11362,10 @@ NS_IMPL_ISUPPORTS_INHERITED1(nsPointerLockPermissionRequest,
 NS_IMETHODIMP
 nsPointerLockPermissionRequest::GetTypes(nsIArray** aTypes)
 {
+  nsTArray<nsString> emptyOptions;
   return CreatePermissionArray(NS_LITERAL_CSTRING("pointerLock"),
                                NS_LITERAL_CSTRING("unused"),
+                               emptyOptions,
                                aTypes);
 }
 
@@ -11409,8 +11410,10 @@ nsPointerLockPermissionRequest::Cancel()
 }
 
 NS_IMETHODIMP
-nsPointerLockPermissionRequest::Allow()
+nsPointerLockPermissionRequest::Allow(JS::HandleValue aChoices)
 {
+  MOZ_ASSERT(aChoices.isUndefined());
+
   nsCOMPtr<Element> e = do_QueryReferent(mElement);
   nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocument);
   nsDocument* d = static_cast<nsDocument*>(doc.get());

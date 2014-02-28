@@ -1712,6 +1712,10 @@ let SessionStoreInternal = {
   },
 
   setWindowValue: function ssi_setWindowValue(aWindow, aKey, aStringValue) {
+    if (typeof aStringValue != "string") {
+      throw new TypeError("setWindowValue only accepts string values");
+    }
+
     if (!("__SSi" in aWindow)) {
       throw Components.Exception("Window is not tracked", Cr.NS_ERROR_INVALID_ARG);
     }
@@ -1742,6 +1746,10 @@ let SessionStoreInternal = {
   },
 
   setTabValue: function ssi_setTabValue(aTab, aKey, aStringValue) {
+    if (typeof aStringValue != "string") {
+      throw new TypeError("setTabValue only accepts string values");
+    }
+
     // If the tab hasn't been restored, then set the data there, otherwise we
     // could lose newly added data.
     let saveTo;
@@ -1783,6 +1791,10 @@ let SessionStoreInternal = {
   },
 
   setGlobalValue: function ssi_setGlobalValue(aKey, aStringValue) {
+    if (typeof aStringValue != "string") {
+      throw new TypeError("setGlobalValue only accepts string values");
+    }
+
     this._globalState.set(aKey, aStringValue);
     this.saveStateDelayed();
   },
@@ -3128,12 +3140,8 @@ let SessionStoreInternal = {
    */
   _prepDataForDeferredRestore: function ssi_prepDataForDeferredRestore(state) {
     // Make sure that we don't modify the global state as provided by
-    // nsSessionStartup.state. Converting the object to a JSON string and
-    // parsing it again is the easiest way to do that, although not the most
-    // efficient one. Deferred sessions that don't have automatic session
-    // restore enabled tend to be a lot smaller though so that this shouldn't
-    // be a big perf hit.
-    state = JSON.parse(JSON.stringify(state));
+    // nsSessionStartup.state.
+    state = Cu.cloneInto(state, {});
 
     let defaultState = { windows: [], selectedWindow: 1 };
 

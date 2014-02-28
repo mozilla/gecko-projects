@@ -296,7 +296,9 @@ var WifiManager = (function() {
         if (ok)
           debugEnabled = wanted;
       });
-      p2pManager.setDebug(DEBUG);
+      if (p2pSupported && p2pManager) {
+        p2pManager.setDebug(DEBUG);
+      }
     }
   }
 
@@ -1519,7 +1521,7 @@ let WifiNetworkInterface = {
 
   ip: null,
 
-  netmask: null,
+  prefixLength: 0,
 
   broadcast: null,
 
@@ -1930,7 +1932,7 @@ function WifiWorker() {
         WifiNetworkInterface.state =
           Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
         WifiNetworkInterface.ip = null;
-        WifiNetworkInterface.netmask = null;
+        WifiNetworkInterface.prefixLength = 0;
         WifiNetworkInterface.broadcast = null;
         WifiNetworkInterface.gateway = null;
         WifiNetworkInterface.dns1 = null;
@@ -1964,10 +1966,12 @@ function WifiWorker() {
       return;
     }
 
+    let maskLength =
+      netHelpers.getMaskLength(netHelpers.stringToIP(this.info.mask_str));
     WifiNetworkInterface.state =
       Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED;
     WifiNetworkInterface.ip = this.info.ipaddr_str;
-    WifiNetworkInterface.netmask = this.info.mask_str;
+    WifiNetworkInterface.prefixLength = maskLength;
     WifiNetworkInterface.broadcast = this.info.broadcast_str;
     WifiNetworkInterface.gateway = this.info.gateway_str;
     WifiNetworkInterface.dns1 = this.info.dns1_str;
@@ -2500,6 +2504,79 @@ WifiWorker.prototype = {
       sent = true;
       this._sendMessage(message, false, "ScanFailed", msg);
     }).bind(this));
+  },
+
+  getWifiScanResults: function(callback) {
+    var count = 0;
+    var timer = null;
+    var self = this;
+
+    self.waitForScan(waitForScanCallback);
+    doScan();
+    function doScan() {
+      WifiManager.scan(true, function (ok) {
+        if (!ok) {
+          if (!timer) {
+            count = 0;
+            timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+          }
+
+          if (count++ >= 3) {
+            timer = null;
+            this.wantScanResults.splice(this.wantScanResults.indexOf(waitForScanCallback), 1);
+            callback.onfailure();
+            return;
+          }
+
+          // Else it's still running, continue waiting.
+          timer.initWithCallback(doScan, 10000, Ci.nsITimer.TYPE_ONE_SHOT);
+          return;
+        }
+      });
+    }
+
+    function waitForScanCallback(networks) {
+      if (networks === null) {
+        callback.onfailure();
+        return;
+      }
+
+      var wifiScanResults = new Array();
+      var net;
+      for (let net in networks) {
+        let value = networks[net];
+        wifiScanResults.push(transformResult(value));
+      }
+      callback.onready(wifiScanResults.length, wifiScanResults);
+    }
+
+    function transformResult(element) {
+      var result = new WifiScanResult();
+      result.connected = false;
+      for (let id in element) {
+        if (id === "__exposedProps__") {
+          continue;
+        }
+        if (id === "security") {
+          result[id] = 0;
+          var security = element[id];
+          for (let j = 0; j < security.length; j++) {
+            if (security[j] === "WPA-PSK") {
+              result[id] |= Ci.nsIWifiScanResult.WPA_PSK;
+            } else if (security[j] === "WPA-EAP") {
+              result[id] |= Ci.nsIWifiScanResult.WPA_EAP;
+            } else if (security[j] === "WEP") {
+              result[id] |= Ci.nsIWifiScanResult.WEP;
+            } else {
+             result[id] = 0;
+            }
+          }
+        } else {
+          result[id] = element[id];
+        }
+      }
+      return result;
+    }
   },
 
   getKnownNetworks: function(msg) {

@@ -115,6 +115,9 @@ user_pref("datareporting.healthreport.documentServerURI", "http://%(server)s/hea
 // Make sure CSS error reporting is enabled for tests
 user_pref("layout.css.report_errors", true);
 
+// Enable CSS Grid for testing
+user_pref("layout.css.grid.enabled", true);
+
 // Enable mozContacts
 user_pref("dom.mozContacts.enabled", true);
 user_pref("dom.navigator-property.disable.mozContacts", false);
@@ -153,6 +156,9 @@ user_pref("browser.download.panel.shown", true);
 // prefs for firefox metro.
 // Disable first-tun tab
 user_pref("browser.firstrun.count", 0);
+
+// Tell the PBackground infrastructure to run a test at startup.
+user_pref("pbackground.testing", true);
 
 // Enable webapps testing mode, which bypasses native installation.
 user_pref("browser.webapps.testing", true);

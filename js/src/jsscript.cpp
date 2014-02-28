@@ -74,18 +74,21 @@ Bindings::argumentsVarIndex(ExclusiveContext *cx, InternalBindingsHandle binding
 bool
 Bindings::initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle self,
                                    unsigned numArgs, uint32_t numVars,
-                                   Binding *bindingArray)
+                                   Binding *bindingArray, uint32_t numBlockScoped)
 {
     JS_ASSERT(!self->callObjShape_);
     JS_ASSERT(self->bindingArrayAndFlag_ == TEMPORARY_STORAGE_BIT);
     JS_ASSERT(!(uintptr_t(bindingArray) & TEMPORARY_STORAGE_BIT));
     JS_ASSERT(numArgs <= ARGC_LIMIT);
     JS_ASSERT(numVars <= LOCALNO_LIMIT);
-    JS_ASSERT(UINT32_MAX - numArgs >= numVars);
+    JS_ASSERT(numBlockScoped <= LOCALNO_LIMIT);
+    JS_ASSERT(numVars <= LOCALNO_LIMIT - numBlockScoped);
+    JS_ASSERT(UINT32_MAX - numArgs >= numVars + numBlockScoped);
 
     self->bindingArrayAndFlag_ = uintptr_t(bindingArray) | TEMPORARY_STORAGE_BIT;
     self->numArgs_ = numArgs;
     self->numVars_ = numVars;
+    self->numBlockScoped_ = numBlockScoped;
 
     // Get the initial shape to use when creating CallObjects for this script.
     // After creation, a CallObject's shape may change completely (via direct eval() or
@@ -144,7 +147,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext *cx, InternalBindingsHandle 
 
         unsigned attrs = JSPROP_PERMANENT |
                          JSPROP_ENUMERATE |
-                         (bi->kind() == CONSTANT ? JSPROP_READONLY : 0);
+                         (bi->kind() == Binding::CONSTANT ? JSPROP_READONLY : 0);
         StackShape child(base, NameToId(bi->name()), slot, attrs, 0);
 
         shape = cx->compartment()->propertyTree.getChild(cx, shape, child);
@@ -188,7 +191,8 @@ Bindings::clone(JSContext *cx, InternalBindingsHandle self,
      * Since atoms are shareable throughout the runtime, we can simply copy
      * the source's bindingArray directly.
      */
-    if (!initWithTemporaryStorage(cx, self, src.numArgs(), src.numVars(), src.bindingArray()))
+    if (!initWithTemporaryStorage(cx, self, src.numArgs(), src.numVars(), src.bindingArray(),
+                                  src.numBlockScoped()))
         return false;
     self->switchToScriptStorage(dstPackedBindings);
     return true;
@@ -203,7 +207,7 @@ GCMethods<Bindings>::initial()
 template<XDRMode mode>
 static bool
 XDRScriptBindings(XDRState<mode> *xdr, LifoAllocScope &las, unsigned numArgs, uint32_t numVars,
-                  HandleScript script)
+                  HandleScript script, unsigned numBlockScoped)
 {
     JSContext *cx = xdr->cx();
 
@@ -241,14 +245,15 @@ XDRScriptBindings(XDRState<mode> *xdr, LifoAllocScope &las, unsigned numArgs, ui
                 return false;
 
             PropertyName *name = atoms[i].toString()->asAtom().asPropertyName();
-            BindingKind kind = BindingKind(u8 >> 1);
+            Binding::Kind kind = Binding::Kind(u8 >> 1);
             bool aliased = bool(u8 & 1);
 
             bindingArray[i] = Binding(name, kind, aliased);
         }
 
         InternalBindingsHandle bindings(script, &script->bindings);
-        if (!Bindings::initWithTemporaryStorage(cx, bindings, numArgs, numVars, bindingArray))
+        if (!Bindings::initWithTemporaryStorage(cx, bindings, numArgs, numVars, bindingArray,
+                                                numBlockScoped))
             return false;
     }
 
@@ -538,7 +543,7 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         HasLazyScript
     };
 
-    uint32_t length, lineno, column, nslots;
+    uint32_t length, lineno, column, nslots, staticLevel;
     uint32_t natoms, nsrcnotes, i;
     uint32_t nconsts, nobjects, nregexps, ntrynotes, nblockscopes;
     uint32_t prologLength, version;
@@ -553,15 +558,19 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
 
     /* XDR arguments and vars. */
     uint16_t nargs = 0;
+    uint16_t nblocklocals = 0;
     uint32_t nvars = 0;
     if (mode == XDR_ENCODE) {
         script = scriptp.get();
         JS_ASSERT_IF(enclosingScript, enclosingScript->compartment() == script->compartment());
 
         nargs = script->bindings.numArgs();
+        nblocklocals = script->bindings.numBlockScoped();
         nvars = script->bindings.numVars();
     }
     if (!xdr->codeUint16(&nargs))
+        return false;
+    if (!xdr->codeUint16(&nblocklocals))
         return false;
     if (!xdr->codeUint32(&nvars))
         return false;
@@ -577,8 +586,8 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         version = script->getVersion();
         lineno = script->lineno();
         column = script->column();
-        nslots = (uint32_t)script->nslots();
-        nslots = (uint32_t)((script->staticLevel() << 16) | script->nslots());
+        nslots = script->nslots();
+        staticLevel = script->staticLevel();
         natoms = script->natoms();
 
         nsrcnotes = script->numNotes();
@@ -675,9 +684,11 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
                .setSelfHostingMode(!!(scriptBits & (1 << SelfHosted)));
         RootedScriptSource sourceObject(cx);
         if (scriptBits & (1 << OwnSource)) {
-            ScriptSource *ss = cx->new_<ScriptSource>(xdr->originPrincipals());
+            ScriptSource *ss = cx->new_<ScriptSource>();
             if (!ss)
                 return false;
+            ScriptSourceHolder ssHolder(ss);
+
             /*
              * We use this CompileOptions only to initialize the
              * ScriptSourceObject. Most CompileOptions fields aren't used by
@@ -685,6 +696,8 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
              * aren't preserved by XDR. So this can be simple.
              */
             CompileOptions options(cx);
+            options.setOriginPrincipals(xdr->originPrincipals());
+            ss->initFromOptions(cx, options);
             sourceObject = ScriptSourceObject::create(cx, ss, options);
             if (!sourceObject)
                 return false;
@@ -704,7 +717,7 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
 
     /* JSScript::partiallyInit assumes script->bindings is fully initialized. */
     LifoAllocScope las(&cx->tempLifoAlloc());
-    if (!XDRScriptBindings(xdr, las, nargs, nvars, script))
+    if (!XDRScriptBindings(xdr, las, nargs, nvars, script, nblocklocals))
         return false;
 
     if (mode == XDR_DECODE) {
@@ -765,8 +778,10 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
     if (!xdr->codeUint32(&script->sourceEnd_))
         return false;
 
-    if (!xdr->codeUint32(&lineno) || !xdr->codeUint32(&column) ||
-        !xdr->codeUint32(&nslots))
+    if (!xdr->codeUint32(&lineno) ||
+        !xdr->codeUint32(&column) ||
+        !xdr->codeUint32(&nslots) ||
+        !xdr->codeUint32(&staticLevel))
     {
         return false;
     }
@@ -774,8 +789,8 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
     if (mode == XDR_DECODE) {
         script->lineno_ = lineno;
         script->column_ = column;
-        script->nslots_ = uint16_t(nslots);
-        script->staticLevel_ = uint16_t(nslots >> 16);
+        script->nslots_ = nslots;
+        script->staticLevel_ = staticLevel;
     }
 
     jsbytecode *code = script->code();
@@ -908,8 +923,11 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
                 if (ssi.done() || ssi.type() == StaticScopeIter<NoGC>::FUNCTION) {
                     JS_ASSERT(ssi.done() == !fun);
                     funEnclosingScopeIndex = UINT32_MAX;
-                } else {
+                } else if (ssi.type() == StaticScopeIter<NoGC>::BLOCK) {
                     funEnclosingScopeIndex = FindScopeObjectIndex(script, ssi.block());
+                    JS_ASSERT(funEnclosingScopeIndex < i);
+                } else {
+                    funEnclosingScopeIndex = FindScopeObjectIndex(script, ssi.staticWith());
                     JS_ASSERT(funEnclosingScopeIndex < i);
                 }
             }
@@ -944,7 +962,7 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
           }
 
           default: {
-            MOZ_ASSUME_UNREACHABLE("Unknown class kind.");
+            MOZ_ASSERT(false, "Unknown class kind.");
             return false;
           }
         }
@@ -1730,6 +1748,78 @@ ScriptSource::performXDR(XDRState<mode> *xdr)
     return true;
 }
 
+// Format and return a cx->malloc_'ed URL for a generated script like:
+//   {filename} line {lineno} > {introducer}
+// For example:
+//   foo.js line 7 > eval
+// indicating code compiled by the call to 'eval' on line 7 of foo.js.
+static char *
+FormatIntroducedFilename(ExclusiveContext *cx, const char *filename, unsigned lineno,
+                         const char *introducer)
+{
+    // Compute the length of the string in advance, so we can allocate a
+    // buffer of the right size on the first shot.
+    //
+    // (JS_smprintf would be perfect, as that allocates the result
+    // dynamically as it formats the string, but it won't allocate from cx,
+    // and wants us to use a special free function.)
+    char linenoBuf[15];
+    size_t filenameLen = strlen(filename);
+    size_t linenoLen = JS_snprintf(linenoBuf, 15, "%u", lineno);
+    size_t introducerLen = strlen(introducer);
+    size_t len = filenameLen                    +
+                 6 /* == strlen(" line ") */    +
+                 linenoLen                      +
+                 3 /* == strlen(" > ") */       +
+                 introducerLen                  +
+                 1 /* \0 */;
+    char *formatted = cx->pod_malloc<char>(len);
+    if (!formatted)
+        return nullptr;
+    mozilla::DebugOnly<size_t> checkLen = JS_snprintf(formatted, len, "%s line %s > %s",
+                                                      filename, linenoBuf, introducer);
+    JS_ASSERT(checkLen == len - 1);
+
+    return formatted;
+}
+
+bool
+ScriptSource::initFromOptions(ExclusiveContext *cx, const ReadOnlyCompileOptions &options)
+{
+    JS_ASSERT(!filename_);
+    JS_ASSERT(!introducerFilename_);
+
+    originPrincipals_ = options.originPrincipals();
+    if (originPrincipals_)
+        JS_HoldPrincipals(originPrincipals_);
+
+    introductionType_ = options.introductionType;
+    introductionOffset_ = options.introductionOffset;
+
+    if (options.hasIntroductionInfo) {
+        JS_ASSERT(options.introductionType != nullptr);
+        const char *filename = options.filename() ? options.filename() : "<unknown>";
+        char *formatted = FormatIntroducedFilename(cx, filename, options.introductionLineno,
+                                                   options.introductionType);
+        if (!formatted)
+            return false;
+        filename_ = formatted;
+    } else if (options.filename()) {
+        if (!setFilename(cx, options.filename()))
+            return false;
+    }
+
+    if (options.introducerFilename()) {
+        introducerFilename_ = js_strdup(cx, options.introducerFilename());
+        if (!introducerFilename_)
+            return false;
+    } else {
+        introducerFilename_ = filename_;
+    }
+
+    return true;
+}
+
 bool
 ScriptSource::setFilename(ExclusiveContext *cx, const char *filename)
 {
@@ -1768,48 +1858,6 @@ ScriptSource::displayURL()
 {
     JS_ASSERT(hasDisplayURL());
     return displayURL_;
-}
-
-bool
-ScriptSource::setIntroducedFilename(ExclusiveContext *cx,
-                                    const char *callerFilename, unsigned callerLineno,
-                                    const char *introductionType, const char *introducerFilename)
-{
-    JS_ASSERT(!filename_);
-    JS_ASSERT(!introducerFilename_);
-
-    introductionType_ = introductionType;
-
-    if (introducerFilename) {
-        introducerFilename_ = js_strdup(cx, introducerFilename);
-        if (!introducerFilename_)
-            return false;
-    }
-
-    // Final format:  "{callerFilename} line {callerLineno} > {introductionType}"
-    // Len = strlen(callerFilename) + strlen(" line ") +
-    //       strlen(toStr(callerLineno)) + strlen(" > ") + strlen(introductionType);
-    char linenoBuf[15];
-    size_t filenameLen = strlen(callerFilename);
-    size_t linenoLen = JS_snprintf(linenoBuf, 15, "%u", callerLineno);
-    size_t introductionTypeLen = strlen(introductionType);
-    size_t len = filenameLen                    +
-                 6 /* == strlen(" line ") */    +
-                 linenoLen                      +
-                 3 /* == strlen(" > ") */       +
-                 introductionTypeLen            +
-                 1 /* \0 */;
-    filename_ = cx->pod_malloc<char>(len);
-    if (!filename_)
-        return false;
-    mozilla::DebugOnly<size_t> checkLen = JS_snprintf(filename_, len, "%s line %s > %s",
-                                                      callerFilename, linenoBuf, introductionType);
-    JS_ASSERT(checkLen == len - 1);
-
-    if (!introducerFilename_)
-        introducerFilename_ = filename_;
-
-    return true;
 }
 
 bool
@@ -2754,10 +2802,12 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
                     RootedObject staticScope(cx, innerFun->nonLazyScript()->enclosingStaticScope());
                     StaticScopeIter<CanGC> ssi(cx, staticScope);
                     RootedObject enclosingScope(cx);
-                    if (!ssi.done() && ssi.type() == StaticScopeIter<CanGC>::BLOCK)
+                    if (ssi.done() || ssi.type() == StaticScopeIter<CanGC>::FUNCTION)
+                        enclosingScope = fun;
+                    else if (ssi.type() == StaticScopeIter<CanGC>::BLOCK)
                         enclosingScope = objects[FindScopeObjectIndex(src, ssi.block())];
                     else
-                        enclosingScope = fun;
+                        enclosingScope = objects[FindScopeObjectIndex(src, ssi.staticWith())];
 
                     clone = CloneFunctionAndScript(cx, enclosingScope, innerFun);
                 }

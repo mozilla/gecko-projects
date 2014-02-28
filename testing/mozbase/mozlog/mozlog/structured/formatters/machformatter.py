@@ -29,7 +29,7 @@ class BaseMachFormatter(base.BaseFormatter):
             return "%s %s\n" % (self.generic_formatter(data), s)
 
     def _get_test_id(self, data):
-        test_id = data["test"]
+        test_id = data.get("test")
         if isinstance(test_id, list):
             test_id = tuple(test_id)
         return test_id
@@ -62,12 +62,13 @@ class BaseMachFormatter(base.BaseFormatter):
     def test_status(self, data):
         test = self._get_test_id(data)
         if test not in self.status_buffer:
-            self.buffer[test] = {"count": 0, "unexpected": 0, "pass": 0}
-        self.buffer[test]["count"] += 1
+            self.status_buffer[test] = {"count": 0, "unexpected": 0, "pass": 0}
+        self.status_buffer[test]["count"] += 1
+
         if "expected" in data:
-            self.buffer[test]["unexpected"] += 1
+            self.status_buffer[test]["unexpected"] += 1
         if data["status"] == "PASS":
-            self.buffer[test]["pass"] += 1
+            self.status_buffer[test]["pass"] += 1
 
     def process_output(self, data):
         return '"%s" (pid:%s command:%s)' % (data["data"],
@@ -93,6 +94,16 @@ class BaseMachFormatter(base.BaseFormatter):
 
 
 class MachFormatter(BaseMachFormatter):
+    """Formatter designed for producing human-redable output
+    when tests are running. This is principally intended for integration with
+    the ``mach`` command dispatch framework.
+
+    :param start_time: time.time() at which the testrun started
+    :param write_interval: bool indicating whether to include the interval since the
+                           last message
+    :param write_times: bool indicating whether to include the time since the testrun
+                        started.
+    """
     def __call__(self, data):
         s = BaseMachFormatter.__call__(self, data)
         if s is not None:
@@ -100,6 +111,17 @@ class MachFormatter(BaseMachFormatter):
 
 
 class MachTerminalFormatter(BaseMachFormatter):
+    """Formatter designed to produce coloured output in a terminal when tests are
+    running. This is principally intended for integration with
+    the ``mach`` command dispatch framework.
+
+    :param start_time: time.time() at which the testrun started
+    :param write_interval: bool indicating whether to include the interval since the
+                           last message
+    :param write_times: bool indicating whether to include the time since the testrun
+                        started.
+    :param terminal: Terminal object from mach.
+    """
     def __init__(self, start_time=None, write_interval=False, write_times=True,
                  terminal=None):
         self.terminal = terminal
@@ -111,9 +133,9 @@ class MachTerminalFormatter(BaseMachFormatter):
     def __call__(self, data):
         s = BaseMachFormatter.__call__(self, data)
         if s is not None:
-            t = self.terminal.blue(format_seconds(self._time(entry)))
+            t = self.terminal.blue(format_seconds(self._time(data)))
 
-            return '%s %s' % (t, self._colorize(entry, s))
+            return '%s %s' % (t, self._colorize(data, s))
 
     def _colorize(self, data, s):
         if self.terminal is None:
@@ -134,6 +156,8 @@ class MachTerminalFormatter(BaseMachFormatter):
 
         if color is not None:
             result = color(s[:len_action]) + s[len_action:]
+        else:
+            result = s
 
         return result
 

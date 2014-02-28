@@ -30,6 +30,7 @@ public:
   NetworkParams(const NetworkParams& aOther) {
     mIp = aOther.mIp;
     mCmd = aOther.mCmd;
+    mDomain = aOther.mDomain;
     mDns1_str = aOther.mDns1_str;
     mDns2_str = aOther.mDns2_str;
     mGateway = aOther.mGateway;
@@ -37,7 +38,7 @@ public:
     mHostnames = aOther.mHostnames;
     mId = aOther.mId;
     mIfname = aOther.mIfname;
-    mNetmask = aOther.mNetmask;
+    mPrefixLength = aOther.mPrefixLength;
     mOldIfname = aOther.mOldIfname;
     mMode = aOther.mMode;
     mReport = aOther.mReport;
@@ -106,6 +107,7 @@ public:
 
     COPY_FIELD(mId)
     COPY_FIELD(mCmd)
+    COPY_OPT_STRING_FIELD(mDomain, EmptyString())
     COPY_OPT_STRING_FIELD(mDns1_str, EmptyString())
     COPY_OPT_STRING_FIELD(mDns2_str, EmptyString())
     COPY_OPT_STRING_FIELD(mGateway, EmptyString())
@@ -113,7 +115,7 @@ public:
     COPY_SEQUENCE_FIELD(mHostnames, nsString)
     COPY_OPT_STRING_FIELD(mIfname, EmptyString())
     COPY_OPT_STRING_FIELD(mIp, EmptyString())
-    COPY_OPT_STRING_FIELD(mNetmask, EmptyString())
+    COPY_OPT_FIELD(mPrefixLength, 0)
     COPY_OPT_STRING_FIELD(mOldIfname, EmptyString())
     COPY_OPT_STRING_FIELD(mMode, EmptyString())
     COPY_OPT_FIELD(mReport, false)
@@ -156,6 +158,7 @@ public:
 
   int32_t mId;
   nsString mCmd;
+  nsString mDomain;
   nsString mDns1_str;
   nsString mDns2_str;
   nsString mGateway;
@@ -163,7 +166,7 @@ public:
   nsTArray<nsString> mHostnames;
   nsString mIfname;
   nsString mIp;
-  nsString mNetmask;
+  uint32_t mPrefixLength;
   nsString mOldIfname;
   nsString mMode;
   bool mReport;
@@ -299,6 +302,7 @@ private:
   static CommandFunc sNetworkInterfaceEnableAlarmChain[];
   static CommandFunc sNetworkInterfaceDisableAlarmChain[];
   static CommandFunc sNetworkInterfaceSetAlarmChain[];
+  static CommandFunc sSetDnsChain[];
 
   /**
    * Individual netd command stored in command chain.
@@ -331,6 +335,8 @@ private:
   static void setDnsForwarders(PARAMS);
   static void enableNat(PARAMS);
   static void disableNat(PARAMS);
+  static void setDefaultInterface(PARAMS);
+  static void setInterfaceDns(PARAMS);
   static void wifiTetheringSuccess(PARAMS);
   static void usbTetheringSuccess(PARAMS);
   static void networkInterfaceStatsSuccess(PARAMS);
@@ -351,6 +357,7 @@ private:
   static void setDhcpServerFail(PARAMS);
   static void networkInterfaceStatsFail(PARAMS);
   static void networkInterfaceAlarmFail(PARAMS);
+  static void setDnsFail(PARAMS);
 #undef PARAMS
 
   /**

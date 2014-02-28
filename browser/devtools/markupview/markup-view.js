@@ -22,7 +22,7 @@ const {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
 const {HTMLEditor} = require("devtools/markupview/html-editor");
 const promise = require("sdk/core/promise");
 const {Tooltip} = require("devtools/shared/widgets/Tooltip");
-const EventEmitter = require("devtools/shared/event-emitter");
+const EventEmitter = require("devtools/toolkit/event-emitter");
 
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/devtools/Templater.jsm");
@@ -166,6 +166,9 @@ MarkupView.prototype = {
 
   _onMouseLeave: function() {
     this._hideBoxModel();
+    if (this._hoveredNode) {
+      this._containers.get(this._hoveredNode).hovered = false;
+    }
     this._hoveredNode = null;
   },
 

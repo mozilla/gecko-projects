@@ -980,12 +980,21 @@ public:
 
   void SetImagesNeedAnimating(bool aAnimating) MOZ_OVERRIDE;
 
-  virtual void SuppressEventHandling(uint32_t aIncrease) MOZ_OVERRIDE;
+  virtual void SuppressEventHandling(SuppressionType aWhat,
+                                     uint32_t aIncrease) MOZ_OVERRIDE;
 
-  virtual void UnsuppressEventHandlingAndFireEvents(bool aFireEvents) MOZ_OVERRIDE;
-  
+  virtual void UnsuppressEventHandlingAndFireEvents(SuppressionType aWhat,
+                                                    bool aFireEvents) MOZ_OVERRIDE;
+
   void DecreaseEventSuppression() {
+    MOZ_ASSERT(mEventsSuppressed);
     --mEventsSuppressed;
+    MaybeRescheduleAnimationFrameNotifications();
+  }
+
+  void ResumeAnimations() {
+    MOZ_ASSERT(mAnimationsPaused);
+    --mAnimationsPaused;
     MaybeRescheduleAnimationFrameNotifications();
   }
 
@@ -1186,7 +1195,7 @@ public:
   virtual nsIDOMStyleSheetList* StyleSheets() MOZ_OVERRIDE;
   virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet) MOZ_OVERRIDE;
   virtual void GetLastStyleSheetSet(nsString& aSheetSet) MOZ_OVERRIDE;
-  virtual nsIDOMDOMStringList* StyleSheetSets() MOZ_OVERRIDE;
+  virtual mozilla::dom::DOMStringList* StyleSheetSets() MOZ_OVERRIDE;
   virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet) MOZ_OVERRIDE;
   using nsIDocument::CreateElement;
   using nsIDocument::CreateElementNS;
@@ -1632,7 +1641,7 @@ private:
   mozilla::LayoutDeviceToScreenScale mScaleMaxFloat;
   mozilla::LayoutDeviceToScreenScale mScaleFloat;
   mozilla::CSSToLayoutDeviceScale mPixelRatio;
-  bool mAutoSize, mAllowZoom, mValidScaleFloat, mValidMaxScale, mScaleStrEmpty, mWidthStrEmpty;
+  bool mAutoSize, mAllowZoom, mAllowDoubleTapZoom, mValidScaleFloat, mValidMaxScale, mScaleStrEmpty, mWidthStrEmpty;
   mozilla::CSSIntSize mViewportSize;
 
   nsrefcnt mStackRefCnt;

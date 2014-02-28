@@ -137,6 +137,7 @@ public class BrowserToolbar extends GeckoRelativeLayout
     private OnCommitListener mCommitListener;
     private OnDismissListener mDismissListener;
     private OnFilterListener mFilterListener;
+    private OnFocusChangeListener mFocusChangeListener;
     private OnStartEditingListener mStartEditingListener;
     private OnStopEditingListener mStopEditingListener;
 
@@ -315,6 +316,9 @@ public class BrowserToolbar extends GeckoRelativeLayout
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 setSelected(hasFocus);
+                if (mFocusChangeListener != null) {
+                    mFocusChangeListener.onFocusChange(v, hasFocus);
+                }
             }
         });
 
@@ -466,8 +470,9 @@ public class BrowserToolbar extends GeckoRelativeLayout
             // Progress-related handling
             switch (msg) {
                 case START:
-                    updateProgressVisibility(tab, 0);
+                    updateProgressVisibility(tab, Tab.LOAD_PROGRESS_INIT);
                     // Fall through.
+                case ADDED:
                 case LOCATION_CHANGE:
                 case LOAD_ERROR:
                 case LOADED:
@@ -783,6 +788,10 @@ public class BrowserToolbar extends GeckoRelativeLayout
     public void setOnFilterListener(OnFilterListener listener) {
         mFilterListener = listener;
         mUrlEditLayout.setOnFilterListener(listener);
+    }
+
+    public void setOnFocusChangeListener(OnFocusChangeListener listener) {
+        mFocusChangeListener = listener;
     }
 
     public void setOnStartEditingListener(OnStartEditingListener listener) {

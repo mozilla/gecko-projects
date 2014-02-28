@@ -64,6 +64,7 @@ var Browser = {
       messageManager.loadFrameScript("chrome://browser/content/contenthandlers/SelectionHandler.js", true);
       messageManager.loadFrameScript("chrome://browser/content/contenthandlers/ContextMenuHandler.js", true);
       messageManager.loadFrameScript("chrome://browser/content/contenthandlers/ConsoleAPIObserver.js", true);
+      messageManager.loadFrameScript("chrome://browser/content/contenthandlers/PluginHelper.js", true);
     } catch (e) {
       // XXX whatever is calling startup needs to dump errors!
       dump("###########" + e + "\n");
@@ -163,7 +164,6 @@ var Browser = {
     messageManager.addMessageListener("scroll", this);
     messageManager.addMessageListener("Browser:CertException", this);
     messageManager.addMessageListener("Browser:BlockedSite", this);
-    messageManager.addMessageListener("Browser:TapOnSelection", this);
 
     Task.spawn(function() {
       // Activation URIs come from protocol activations, secondary tiles, and file activations
@@ -236,7 +236,6 @@ var Browser = {
     messageManager.removeMessageListener("scroll", this);
     messageManager.removeMessageListener("Browser:CertException", this);
     messageManager.removeMessageListener("Browser:BlockedSite", this);
-    messageManager.removeMessageListener("Browser:TapOnSelection", this);
 
     Services.obs.removeObserver(SessionHistoryObserver, "browser:purge-session-history");
 
@@ -865,16 +864,6 @@ var Browser = {
         break;
       case "Browser:BlockedSite":
         this._handleBlockedSite(aMessage);
-        break;
-      case "Browser:TapOnSelection":
-        if (!InputSourceHelper.isPrecise) {
-          if (SelectionHelperUI.isActive) {
-            SelectionHelperUI.shutdown();
-          }
-          if (SelectionHelperUI.canHandle(aMessage)) {
-            SelectionHelperUI.openEditSession(aMessage);
-          }
-        }
         break;
     }
   },

@@ -3370,7 +3370,7 @@ DebuggerScript_getAllOffsets(JSContext *cx, unsigned argc, Value *vp)
             RootedId id(cx, INT_TO_JSID(lineno));
 
             bool found;
-            if (!JSObject::hasProperty(cx, result, id, &found))
+            if (!js::HasOwnProperty(cx, result, id, &found))
                 return false;
             if (found && !JSObject::getGeneric(cx, result, result, id, &offsetsv))
                 return false;
@@ -4452,7 +4452,8 @@ js::EvaluateInEnv(JSContext *cx, Handle<Env*> env, HandleValue thisv, AbstractFr
            .setForEval(true)
            .setNoScriptRval(false)
            .setFileAndLine(filename, lineno)
-           .setCanLazilyParse(false);
+           .setCanLazilyParse(false)
+           .setIntroductionType("debugger eval");
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
     RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, callerScript,
                                                     options, chars.get(), length,

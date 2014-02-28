@@ -18,7 +18,6 @@
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for gfxContext::Release, etc
 #include "nsRegion.h"                   // for nsIntRegion
-#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 namespace mozilla {
 namespace layers {
@@ -94,6 +93,21 @@ FillWithMask(gfxContext* aContext, float aOpacity, Layer* aMaskLayer);
 
 BasicImplData*
 ToData(Layer* aLayer);
+
+/**
+ * Returns the operator to be used when blending and compositing this layer.
+ * Currently there is no way to specify both a blending and a compositing
+ * operator other than normal and source over respectively.
+ *
+ * If the layer has
+ * an effective blend mode operator other than normal, as returned by
+ * GetEffectiveMixBlendMode, this operator is used for blending, and source
+ * over is used for compositing.
+ * If the blend mode for this layer is normal, the compositing operator
+ * returned by GetOperator is used.
+ */
+gfx::CompositionOp
+GetEffectiveOperator(Layer* aLayer);
 
 }
 }

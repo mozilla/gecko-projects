@@ -299,7 +299,7 @@ static bool
 intrinsic_ForkJoinNumWorkers(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setInt32(cx->runtime()->threadPool.numWorkers() + 1);
+    args.rval().setInt32(cx->runtime()->threadPool.numWorkers());
     return true;
 }
 
@@ -619,6 +619,22 @@ intrinsic_InParallelSectionPar(ForkJoinContext *cx, unsigned argc, Value *vp)
 JS_JITINFO_NATIVE_PARALLEL(intrinsic_InParallelSection_jitInfo,
                            intrinsic_InParallelSectionPar);
 
+/* These wrappers are needed in order to recognize the function
+ * pointers within the JIT, and the raw js:: functions can't be used
+ * directly because they take a ThreadSafeContext* argument.
+ */
+bool
+js::intrinsic_ObjectIsTransparentTypedObject(JSContext *cx, unsigned argc, Value *vp)
+{
+    return js::ObjectIsTransparentTypedObject(cx, argc, vp);
+}
+
+bool
+js::intrinsic_ObjectIsOpaqueTypedObject(JSContext *cx, unsigned argc, Value *vp)
+{
+    return js::ObjectIsOpaqueTypedObject(cx, argc, vp);
+}
+
 /**
  * Returns the default locale as a well-formed, but not necessarily canonicalized,
  * BCP-47 language tag.
@@ -692,17 +708,20 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FNINFO("AttachTypedObject",
               JSNativeThreadSafeWrapper<js::AttachTypedObject>,
               &js::AttachTypedObjectJitInfo, 5, 0),
+    JS_FNINFO("SetTypedObjectOffset",
+              JSNativeThreadSafeWrapper<js::SetTypedObjectOffset>,
+              &js::SetTypedObjectOffsetJitInfo, 2, 0),
     JS_FNINFO("ObjectIsTypeDescr",
               JSNativeThreadSafeWrapper<js::ObjectIsTypeDescr>,
               &js::ObjectIsTypeDescrJitInfo, 5, 0),
     JS_FNINFO("ObjectIsTransparentTypedObject",
-              JSNativeThreadSafeWrapper<js::ObjectIsTransparentTypedObject>,
+              intrinsic_ObjectIsTransparentTypedObject,
               &js::ObjectIsTransparentTypedObjectJitInfo, 5, 0),
     JS_FNINFO("TypedObjectIsAttached",
               JSNativeThreadSafeWrapper<js::TypedObjectIsAttached>,
               &js::TypedObjectIsAttachedJitInfo, 1, 0),
     JS_FNINFO("ObjectIsOpaqueTypedObject",
-              JSNativeThreadSafeWrapper<js::ObjectIsOpaqueTypedObject>,
+              intrinsic_ObjectIsOpaqueTypedObject,
               &js::ObjectIsOpaqueTypedObjectJitInfo, 5, 0),
     JS_FNINFO("ClampToUint8",
               JSNativeThreadSafeWrapper<js::ClampToUint8>,
@@ -781,6 +800,7 @@ js::FillSelfHostingCompileOptions(CompileOptions &options)
      * is supported, for which bytecode is emitted that invokes |fun| with
      * |receiver| as the this-object and ...args as the arguments.
      */
+    options.setIntroductionType("self-hosted");
     options.setFileAndLine("self-hosted", 1);
     options.setSelfHostingMode(true);
     options.setCanLazilyParse(false);

@@ -15,7 +15,7 @@ loader.lazyServiceGetter(this, "clipboardHelper",
                          "nsIClipboardHelper");
 loader.lazyImporter(this, "Services", "resource://gre/modules/Services.jsm");
 loader.lazyImporter(this, "promise", "resource://gre/modules/Promise.jsm", "Promise");
-loader.lazyGetter(this, "EventEmitter", () => require("devtools/shared/event-emitter"));
+loader.lazyGetter(this, "EventEmitter", () => require("devtools/toolkit/event-emitter"));
 loader.lazyGetter(this, "AutocompletePopup",
                   () => require("devtools/shared/autocomplete-popup").AutocompletePopup);
 loader.lazyGetter(this, "ToolSidebar",
@@ -537,12 +537,12 @@ WebConsoleFrame.prototype = {
     }
 
     let saveBodies = doc.getElementById("saveBodies");
-    saveBodies.addEventListener("click", reverseSaveBodiesPref);
+    saveBodies.addEventListener("command", reverseSaveBodiesPref);
     saveBodies.disabled = !this.getFilterState("networkinfo") &&
                           !this.getFilterState("network");
 
     let saveBodiesContextMenu = doc.getElementById("saveBodiesContextMenu");
-    saveBodiesContextMenu.addEventListener("click", reverseSaveBodiesPref);
+    saveBodiesContextMenu.addEventListener("command", reverseSaveBodiesPref);
     saveBodiesContextMenu.disabled = !this.getFilterState("networkinfo") &&
                                      !this.getFilterState("network");
 
@@ -2676,12 +2676,12 @@ WebConsoleFrame.prototype = {
       let mousedown = this._mousedown;
       this._mousedown = false;
 
+      aEvent.preventDefault();
+
       // Do not allow middle/right-click or 2+ clicks.
       if (aEvent.detail != 1 || aEvent.button != 0) {
         return;
       }
-
-      aEvent.preventDefault();
 
       // If this event started with a mousedown event and it ends at a different
       // location, we consider this text selection.

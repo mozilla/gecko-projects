@@ -479,11 +479,6 @@ DebuggerClient.prototype = {
    */
   attachConsole:
   function (aConsoleActor, aListeners, aOnResponse) {
-    if (this._consoleClients.has(aConsoleActor)) {
-      setTimeout(() => aOnResponse({}, this._consoleClients.get(aConsoleActor)), 0);
-      return;
-    }
-
     let packet = {
       to: aConsoleActor,
       type: "startListeners",
@@ -493,8 +488,12 @@ DebuggerClient.prototype = {
     this.request(packet, (aResponse) => {
       let consoleClient;
       if (!aResponse.error) {
-        consoleClient = new WebConsoleClient(this, aConsoleActor);
-        this._consoleClients.set(aConsoleActor, consoleClient);
+        if (this._consoleClients.has(aConsoleActor)) {
+          consoleClient = this._consoleClients.get(aConsoleActor);
+        } else {
+          consoleClient = new WebConsoleClient(this, aConsoleActor);
+          this._consoleClients.set(aConsoleActor, consoleClient);
+        }
       }
       aOnResponse(aResponse, consoleClient);
     });
@@ -1577,10 +1576,11 @@ ThreadClient.prototype = {
    *
    * @param aTotal number
    *        The minimum number of stack frames to be included.
-   *
+   * @param aCallback function
+   *        Optional callback function called when frames have been loaded
    * @returns true if a framesadded notification should be expected.
    */
-  fillFrames: function (aTotal) {
+  fillFrames: function (aTotal, aCallback=noop) {
     this._assertPaused("fillFrames");
 
     if (this._frameCache.length >= aTotal) {
@@ -1590,14 +1590,22 @@ ThreadClient.prototype = {
     let numFrames = this._frameCache.length;
 
     this.getFrames(numFrames, aTotal - numFrames, (aResponse) => {
+      if (aResponse.error) {
+        aCallback(aResponse);
+        return;
+      }
+
       for each (let frame in aResponse.frames) {
         this._frameCache[frame.depth] = frame;
       }
+
       // If we got as many frames as we asked for, there might be more
       // frames available.
-
       this.notify("framesadded");
+
+      aCallback(aResponse);
     });
+
     return true;
   },
 
@@ -2278,3 +2286,4 @@ this.debuggerSocketConnect = function (aHost, aPort)
 function pair(aItemOne, aItemTwo) {
   return [aItemOne, aItemTwo];
 }
+function noop() {}

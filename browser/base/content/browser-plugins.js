@@ -5,6 +5,7 @@
 
 var gPluginHandler = {
   PREF_NOTIFY_MISSING_FLASH: "plugins.notifyMissingFlash",
+  PREF_HIDE_MISSING_PLUGINS_NOTIFICATION: "plugins.hideMissingPluginsNotification",
   PREF_SESSION_PERSIST_MINUTES: "plugin.sessionPermissionNow.intervalInMinutes",
   PREF_PERSISTENT_DAYS: "plugin.persistentPermissionAlways.intervalInDays",
 
@@ -32,14 +33,9 @@ var gPluginHandler = {
     let fallbackType = null;
     let blocklistState = null;
 
-    if (pluginElement instanceof HTMLAppletElement) {
-      tagMimetype = "application/x-java-vm";
-    } else {
-      tagMimetype = pluginElement.actualType;
-
-      if (tagMimetype == "") {
-        tagMimetype = pluginElement.type;
-      }
+    tagMimetype = pluginElement.actualType;
+    if (tagMimetype == "") {
+      tagMimetype = pluginElement.type;
     }
 
     if (gPluginHandler.isKnownPlugin(pluginElement)) {
@@ -134,8 +130,12 @@ var gPluginHandler = {
       return false;
     }
 
+    let contentWindow = plugin.ownerDocument.defaultView.top;
+    let cwu = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                           .getInterface(Ci.nsIDOMWindowUtils);
+
     for (let [x, y] of points) {
-      let el = plugin.ownerDocument.elementFromPoint(x, y);
+      let el = cwu.elementFromPoint(x, y, true, true);
       if (el !== plugin) {
         return false;
       }
@@ -384,6 +384,14 @@ var gPluginHandler = {
       }
     }
 
+    let closeIcon = this.getPluginUI(plugin, "closeIcon");
+    if (closeIcon) {
+      closeIcon.addEventListener("click", function(aEvent) {
+        if (aEvent.button == 0 && aEvent.isTrusted)
+          gPluginHandler.hideClickToPlayOverlay(plugin);
+      }, true);
+    }
+
     if (shouldShowNotification) {
       this._showClickToPlayNotification(browser, plugin, false);
     }
@@ -504,6 +512,12 @@ var gPluginHandler = {
   },
 
   showInstallNotification: function (aPlugin) {
+    let hideMissingPluginsNotification =
+      Services.prefs.getBoolPref(this.PREF_HIDE_MISSING_PLUGINS_NOTIFICATION);
+    if (hideMissingPluginsNotification) {
+      return false;
+    }
+
     let browser = gBrowser.getBrowserForDocument(aPlugin.ownerDocument
                                                         .defaultView.top.document);
     if (!browser.missingPlugins)
@@ -584,11 +598,6 @@ var gPluginHandler = {
 
     if (overlay) {
       overlay.addEventListener("click", gPluginHandler._overlayClickListener, true);
-      let closeIcon = this.getPluginUI(aPlugin, "closeIcon");
-      closeIcon.addEventListener("click", function(aEvent) {
-        if (aEvent.button == 0 && aEvent.isTrusted)
-          gPluginHandler.hideClickToPlayOverlay(aPlugin);
-      }, true);
     }
   },
 

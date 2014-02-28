@@ -40,12 +40,12 @@
 #include "nsContentUtils.h"
 #include "nsCycleCollector.h"
 #include "nsDOMJSUtils.h"
+#include "nsISupportsImpl.h"
 #include "nsLayoutStatics.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThread.h"
 #include "nsThreadUtils.h"
-#include "nsTraceRefcnt.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMPrivate.h"
 #include "OSFileConstants.h"
@@ -663,11 +663,9 @@ ContentSecurityPolicyAllows(JSContext* aCx)
     nsString fileName;
     uint32_t lineNum = 0;
 
-    JS::Rooted<JSScript*> script(aCx);
-    const char* file;
-    if (JS_DescribeScriptedCaller(aCx, &script, &lineNum) &&
-        (file = JS_GetScriptFilename(aCx, script))) {
-      fileName = NS_ConvertUTF8toUTF16(file);
+    JS::AutoFilename file;
+    if (JS::DescribeScriptedCaller(aCx, &file, &lineNum) && file.get()) {
+      fileName = NS_ConvertUTF8toUTF16(file.get());
     } else {
       JS_ReportPendingException(aCx);
     }

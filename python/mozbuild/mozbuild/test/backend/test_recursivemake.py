@@ -340,17 +340,17 @@ class TestRecursiveMakeBackend(BackendTester):
             'USE_STATIC_LIBS': [
                 'USE_STATIC_LIBS := 1',
             ],
-            'CFLAGS': [
-                'CFLAGS += -fno-exceptions',
-                'CFLAGS += -w',
+            'MOZBUILD_CFLAGS': [
+                'MOZBUILD_CFLAGS += -fno-exceptions',
+                'MOZBUILD_CFLAGS += -w',
             ],
-            'CXXFLAGS': [
-                'CXXFLAGS += -fcxx-exceptions',
-                'CXXFLAGS += -include foo.h',
+            'MOZBUILD_CXXFLAGS': [
+                'MOZBUILD_CXXFLAGS += -fcxx-exceptions',
+                'MOZBUILD_CXXFLAGS += -include foo.h',
             ],
-            'LDFLAGS': [
-                'LDFLAGS += -framework Foo',
-                'LDFLAGS += -x',
+            'MOZBUILD_LDFLAGS': [
+                'MOZBUILD_LDFLAGS += -framework Foo',
+                'MOZBUILD_LDFLAGS += -x',
             ],
             'WIN32_EXE_LDFLAGS': [
                 'WIN32_EXE_LDFLAGS += -subsystem:console',
@@ -524,7 +524,7 @@ class TestRecursiveMakeBackend(BackendTester):
         var = 'DEFINES'
         defines = [val for val in lines if val.startswith(var)]
 
-        expected = ['DEFINES += -DFOO -DBAZ=\'"ab\'\\\'\'cd"\' -DBAR=7 -DVALUE=\'xyz\'']
+        expected = ['DEFINES += -DFOO -DBAZ=\'"ab\'\\\'\'cd"\' -UQUX -DBAR=7 -DVALUE=\'xyz\'']
         self.assertEqual(defines, expected)
 
     def test_local_includes(self):

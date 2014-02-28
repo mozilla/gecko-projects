@@ -26,6 +26,7 @@
 #include "nsICookieService.h"
 #include "nsIStreamConverterService.h"
 #include "nsCRT.h"
+#include "nsIObserverService.h"
 
 #include <algorithm>
 
@@ -1313,6 +1314,33 @@ HttpBaseChannel::GetResponseVersion(uint32_t *major, uint32_t *minor)
   return NS_OK;
 }
 
+namespace {
+
+class CookieNotifierRunnable : public nsRunnable
+{
+public:
+  CookieNotifierRunnable(HttpBaseChannel* aChannel, char const * aCookie)
+    : mChannel(aChannel), mCookie(aCookie)
+  { }
+
+  NS_IMETHOD Run()
+  {
+    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+    if (obs) {
+      obs->NotifyObservers(static_cast<nsIChannel*>(mChannel.get()),
+                           "http-on-response-set-cookie",
+                           mCookie.get());
+    }
+    return NS_OK;
+  }
+
+private:
+  nsRefPtr<HttpBaseChannel> mChannel;
+  NS_ConvertASCIItoUTF16 mCookie;
+};
+
+} // anonymous namespace
+
 NS_IMETHODIMP
 HttpBaseChannel::SetCookie(const char *aCookieHeader)
 {
@@ -1326,9 +1354,15 @@ HttpBaseChannel::SetCookie(const char *aCookieHeader)
   nsICookieService *cs = gHttpHandler->GetCookieService();
   NS_ENSURE_TRUE(cs, NS_ERROR_FAILURE);
 
-  return cs->SetCookieStringFromHttp(mURI, nullptr, nullptr, aCookieHeader,
-                                     mResponseHead->PeekHeader(nsHttp::Date),
-                                     this);
+  nsresult rv =
+    cs->SetCookieStringFromHttp(mURI, nullptr, nullptr, aCookieHeader,
+                                mResponseHead->PeekHeader(nsHttp::Date), this);
+  if (NS_SUCCEEDED(rv)) {
+    nsRefPtr<CookieNotifierRunnable> r =
+      new CookieNotifierRunnable(this, aCookieHeader);
+    NS_DispatchToMainThread(r);
+  }
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -1809,6 +1843,17 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   httpChannel->SetAllowPipelining(mAllowPipelining);
   // convey the new redirection limit
   httpChannel->SetRedirectionLimit(mRedirectionLimit - 1);
+
+  // convey the Accept header value
+  {
+    nsAutoCString oldAcceptValue;
+    nsresult hasHeader = mRequestHead.GetHeader(nsHttp::Accept, oldAcceptValue);
+    if (NS_SUCCEEDED(hasHeader)) {
+      httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
+                                    oldAcceptValue,
+                                    false);
+    }
+  }
 
   nsCOMPtr<nsIHttpChannelInternal> httpInternal = do_QueryInterface(newChannel);
   if (httpInternal) {

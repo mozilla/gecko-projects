@@ -22,7 +22,7 @@
 
 #define _DEBUG 0
 
-#define WARN(args...)   __android_log_print(ANDROID_LOG_WARN,  "NetworlUtils", ## args)
+#define WARN(args...)   __android_log_print(ANDROID_LOG_WARN,  "NetworkUtils", ## args)
 #define ERROR(args...)  __android_log_print(ANDROID_LOG_ERROR,  "NetworkUtils", ## args)
 
 #if _DEBUG
@@ -65,7 +65,7 @@ static const uint32_t NETD_COMMAND_UNSOLICITED  = 600;
 static const uint32_t NETD_COMMAND_INTERFACE_CHANGE     = 600;
 static const uint32_t NETD_COMMAND_BANDWIDTH_CONTROLLER = 601;
 
-static const char* INTERFACE_DELIMIT = "\0";
+static const char* INTERFACE_DELIMIT = ",";
 static const char* USB_CONFIG_DELIMIT = ",";
 static const char* NETD_MESSAGE_DELIMIT = " ";
 
@@ -205,18 +205,21 @@ CommandFunc NetworkUtils::sNetworkInterfaceSetAlarmChain[] = {
   NetworkUtils::networkInterfaceAlarmSuccess
 };
 
+CommandFunc NetworkUtils::sSetDnsChain[] = {
+  NetworkUtils::setDefaultInterface,
+  NetworkUtils::setInterfaceDns
+};
+
 /**
- * Helper function to get the bit length from given mask.
+ * Helper function to get the mask from given prefix length.
  */
-static uint32_t getMaskLength(const uint32_t mask)
+static uint32_t makeMask(const uint32_t prefixLength)
 {
-  uint32_t netmask = ntohl(mask);
-  uint32_t len = 0;
-  while (netmask & 0x80000000) {
-    len++;
-    netmask = netmask << 1;
+  uint32_t mask = 0;
+  for (uint32_t i = 0; i < prefixLength; ++i) {
+    mask |= (0x80000000 >> i);
   }
-  return len;
+  return ntohl(mask);
 }
 
 /**
@@ -438,13 +441,28 @@ void NetworkUtils::stopAccessPointDriver(CommandChain* aChain,
  *     argv[3] - SSID
  *     argv[4] - Security
  *     argv[5] - Key
+ *
+ * Command format for sdk version >= 18
+ *   Arguments:
+ *      argv[2] - wlan interface
+ *      argv[3] - SSID
+ *      argv[4] - Broadcast/Hidden
+ *      argv[5] - Channel
+ *      argv[6] - Security
+ *      argv[7] - Key
  */
 void NetworkUtils::setAccessPoint(CommandChain* aChain,
                                   CommandCallback aCallback,
                                   NetworkResultOptions& aResult)
 {
   char command[MAX_COMMAND_SIZE];
-  if (SDK_VERSION >= 16) {
+  if (SDK_VERSION >= 19) {
+    snprintf(command, MAX_COMMAND_SIZE - 1, "softap set %s \"%s\" broadcast 6 %s \"%s\"",
+                     GET_CHAR(mIfname),
+                     GET_CHAR(mSsid),
+                     GET_CHAR(mSecurity),
+                     GET_CHAR(mKey));
+  } else if (SDK_VERSION >= 16) {
     snprintf(command, MAX_COMMAND_SIZE - 1, "softap set %s \"%s\" %s \"%s\"",
                      GET_CHAR(mIfname),
                      GET_CHAR(mSsid),
@@ -738,6 +756,26 @@ void NetworkUtils::disableNat(CommandChain* aChain,
   doCommand(command, aChain, aCallback);
 }
 
+void NetworkUtils::setDefaultInterface(CommandChain* aChain,
+                                       CommandCallback aCallback,
+                                       NetworkResultOptions& aResult)
+{
+  char command[MAX_COMMAND_SIZE];
+  snprintf(command, MAX_COMMAND_SIZE - 1, "resolver setdefaultif %s", GET_CHAR(mIfname));
+
+  doCommand(command, aChain, aCallback);
+}
+
+void NetworkUtils::setInterfaceDns(CommandChain* aChain,
+                                   CommandCallback aCallback,
+                                   NetworkResultOptions& aResult)
+{
+  char command[MAX_COMMAND_SIZE];
+  snprintf(command, MAX_COMMAND_SIZE - 1, "resolver setifdns %s %s %s %s", GET_CHAR(mIfname), GET_CHAR(mDomain), GET_CHAR(mDns1_str), GET_CHAR(mDns2_str));
+
+  doCommand(command, aChain, aCallback);
+}
+
 #undef GET_CHAR
 #undef GET_FIELD
 
@@ -868,6 +906,11 @@ void NetworkUtils::wifiOperationModeSuccess(CommandChain* aChain,
   postMessage(aChain->getParams(), aResult);
 }
 
+void NetworkUtils::setDnsFail(NetworkParams& aOptions, NetworkResultOptions& aResult)
+{
+  postMessage(aOptions, aResult);
+}
+
 #undef ASSIGN_FIELD
 #undef ASSIGN_FIELD_VALUE
 
@@ -888,6 +931,7 @@ NetworkUtils::~NetworkUtils()
 }
 
 #define GET_CHAR(prop) NS_ConvertUTF16toUTF8(aOptions.prop).get()
+#define GET_FIELD(prop) aOptions.prop
 
 void NetworkUtils::ExecuteCommand(NetworkParams aOptions)
 {
@@ -996,7 +1040,6 @@ void NetworkUtils::onNetdMessage(NetdCommand* aCommand)
     NetworkResultOptions result;
     result.mResultCode = code;
     result.mResultReason = NS_ConvertUTF8toUTF16(buf);
-    join(gReason, INTERFACE_DELIMIT, BUF_SIZE, buf);
     (*gCurrentCommand.callback)(gCurrentCommand.chain, isError(code), result);
     gReason.Clear();
   }
@@ -1053,6 +1096,11 @@ bool NetworkUtils::setDNS(NetworkParams& aOptions)
   char num[PROPERTY_VALUE_MAX];
   snprintf(num, PROPERTY_VALUE_MAX - 1, "%d", atoi(dnschange) + 1);
   property_set("net.dnschange", num);
+
+  // DNS needs to be set through netd since JellyBean (4.3).
+  if (SDK_VERSION >= 18) {
+    RUN_CHAIN(aOptions, sSetDnsChain, setDnsFail)
+  }
 
   return true;
 }
@@ -1124,9 +1172,9 @@ bool NetworkUtils::removeHostRoutes(NetworkParams& aOptions)
 bool NetworkUtils::removeNetworkRoute(NetworkParams& aOptions)
 {
   uint32_t ip = inet_addr(GET_CHAR(mIp));
-  uint32_t netmask = inet_addr(GET_CHAR(mNetmask));
+  uint32_t prefixLength = GET_FIELD(mPrefixLength);
+  uint32_t netmask = makeMask(prefixLength);
   uint32_t subnet = ip & netmask;
-  uint32_t prefixLength = getMaskLength(netmask);
   const char* gateway = "0.0.0.0";
   struct in_addr addr;
   addr.s_addr = subnet;
@@ -1440,3 +1488,4 @@ void NetworkUtils::dumpParams(NetworkParams& aOptions, const char* aType)
 }
 
 #undef GET_CHAR
+#undef GET_FIELD
