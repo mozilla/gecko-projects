@@ -218,7 +218,9 @@
         </vbox>
       </hbox>
     </panel>
+    <!-- type="default" forces frames to be created so that the panel's size can be determined --> 
     <panel id="UITourHighlightContainer"
+           type="default"
            hidden="true"
            noautofocus="true"
            noautohide="true"
@@ -689,6 +691,8 @@
                 <image id="mixed-content-blocked-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="webRTC-shareDevices-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="webRTC-sharingDevices-notification-icon" class="notification-anchor-icon" role="button"/>
+                <image id="webRTC-shareMicrophone-notification-icon" class="notification-anchor-icon" role="button"/>
+                <image id="webRTC-sharingMicrophone-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="pointerLock-notification-icon" class="notification-anchor-icon" role="button"/>
                 <image id="servicesInstall-notification-icon" class="notification-anchor-icon" role="button"/>
               </box>
@@ -944,7 +948,7 @@
               tooltip="bhTooltip"
               popupsinherittooltip="true">
           <hbox flex="1">
-            <hbox align="center">
+            <hbox id="PlacesToolbarDropIndicatorHolder" align="center">
               <image id="PlacesToolbarDropIndicator"
                      mousethrough="always"
                      collapsed="true"/>
@@ -971,7 +975,8 @@
     </toolbar>
 
     <!-- This is a shim which will go away ASAP. See bug 749804 for details -->
-    <toolbar id="addon-bar" toolbar-delegate="nav-bar" mode="icons" iconsize="small">
+    <toolbar id="addon-bar" toolbar-delegate="nav-bar" mode="icons" iconsize="small"
+             customizable="true">
       <hbox id="addonbar-closebutton"/>
       <statusbar id="status-bar"/>
     </toolbar>

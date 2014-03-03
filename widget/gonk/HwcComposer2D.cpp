@@ -69,7 +69,7 @@ HwcComposer2D::HwcComposer2D()
     , mHwc(nullptr)
     , mColorFill(false)
     , mRBSwapSupport(false)
-#if ANDROID_VERSION >= 18
+#if ANDROID_VERSION >= 17
     , mPrevRetireFence(Fence::NO_FENCE)
     , mPrevDisplayFence(Fence::NO_FENCE)
 #endif
@@ -547,7 +547,10 @@ HwcComposer2D::TryHwComposition()
                         // Clear visible rect on FB with transparent pixels.
                         // Never clear the 1st layer since we're guaranteed
                         // that FB is already cleared.
-                        mHwcLayerMap[k]->SetClearFB(true);
+                        hwc_rect_t r = mList->hwLayers[k].displayFrame;
+                        mHwcLayerMap[k]->SetClearRect(nsIntRect(r.left, r.top,
+                                                                r.right - r.left,
+                                                                r.bottom - r.top));
                     }
                     break;
                 default:

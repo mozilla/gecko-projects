@@ -40,6 +40,7 @@ public class HomePager extends ViewPager {
     private HomeBanner mHomeBanner;
     private int mDefaultPageIndex = -1;
 
+    private final ViewPager.OnPageChangeListener mPageChangeListener;
     private final OnAddPanelListener mAddPanelListener;
 
     private final HomeConfig mConfig;
@@ -123,7 +124,8 @@ public class HomePager extends ViewPager {
         setFocusableInTouchMode(true);
 
         mOriginalBackground = getBackground();
-        setOnPageChangeListener(new PageChangeListener());
+        mPageChangeListener = new PageChangeListener();
+        setOnPageChangeListener(mPageChangeListener);
     }
 
     @Override
@@ -216,8 +218,9 @@ public class HomePager extends ViewPager {
     public void setCurrentItem(int item, boolean smoothScroll) {
         super.setCurrentItem(item, smoothScroll);
 
-        if (mDecor != null) {
-            mDecor.onPageSelected(item);
+        // Android doesn't call this when there is only one item
+        if (getAdapter().getCount() == 1 && mPageChangeListener != null) {
+            mPageChangeListener.onPageSelected(0);
         }
     }
 
@@ -245,9 +248,9 @@ public class HomePager extends ViewPager {
     }
 
     public void onToolbarFocusChange(boolean hasFocus) {
-        // We should only enable the banner if the toolbar is not focused and we are on the default page
-        final boolean enabled = !hasFocus && getCurrentItem() == mDefaultPageIndex;
-        mHomeBanner.setEnabled(enabled);
+        // We should only make the banner active if the toolbar is not focused and we are on the default page
+        final boolean active = !hasFocus && getCurrentItem() == mDefaultPageIndex;
+        mHomeBanner.setActive(active);
     }
 
     private void updateUiFromPanelConfigs(List<PanelConfig> panelConfigs) {
@@ -259,6 +262,10 @@ public class HomePager extends ViewPager {
 
         if (mDecor != null) {
             mDecor.removeAllPagerViews();
+        }
+
+        if (mHomeBanner != null) {
+            mHomeBanner.setActive(false);
         }
 
         final HomeAdapter adapter = (HomeAdapter) getAdapter();
@@ -338,7 +345,7 @@ public class HomePager extends ViewPager {
             }
 
             if (mHomeBanner != null) {
-                mHomeBanner.setEnabled(position == mDefaultPageIndex);
+                mHomeBanner.setActive(position == mDefaultPageIndex);
             }
         }
 

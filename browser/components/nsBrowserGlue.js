@@ -50,6 +50,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "NewTabUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserNewTabPreloader",
                                   "resource:///modules/BrowserNewTabPreloader.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "CustomizationTabPreloader",
+                                  "resource:///modules/CustomizationTabPreloader.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "PdfJs",
                                   "resource://pdf.js/PdfJs.jsm");
 
@@ -469,6 +472,7 @@ BrowserGlue.prototype = {
     PageThumbs.init();
     NewTabUtils.init();
     BrowserNewTabPreloader.init();
+    CustomizationTabPreloader.init();
     SignInToWebsiteUX.init();
     PdfJs.init();
 #ifdef NIGHTLY_BUILD
@@ -650,6 +654,7 @@ BrowserGlue.prototype = {
     }
 
     BrowserNewTabPreloader.uninit();
+    CustomizationTabPreloader.uninit();
     webappsUI.uninit();
     SignInToWebsiteUX.uninit();
     webrtcUI.uninit();
@@ -1692,7 +1697,7 @@ BrowserGlue.prototype = {
           },
         };
 
-        if (Services.sysinfo.getProperty("hasWindowsTouchInterface")) {
+        if (Services.metro && Services.metro.supported) {
           smartBookmarks.Windows8Touch = {
             title: bundle.GetStringFromName("windows8TouchTitle"),
             uri: NetUtil.newURI("place:folder=" +
