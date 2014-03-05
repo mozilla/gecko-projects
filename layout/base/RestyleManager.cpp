@@ -34,12 +34,15 @@
 #include "nsContentUtils.h"
 #include "nsIFrameInlines.h"
 #include "ActiveLayerTracker.h"
+#include "nsDisplayList.h"
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
 #endif
 
 namespace mozilla {
+
+using namespace layers;
 
 RestyleManager::RestyleManager(nsPresContext* aPresContext)
   : mPresContext(aPresContext)
@@ -237,7 +240,16 @@ DoApplyRenderingChangeToTree(nsIFrame* aFrame,
       // layer for this frame, and not scheduling an invalidating
       // paint.
       if (!needInvalidatingPaint) {
-        needInvalidatingPaint |= !aFrame->TryUpdateTransformOnly();
+        Layer* layer;
+        needInvalidatingPaint |= !aFrame->TryUpdateTransformOnly(&layer);
+
+        if (!needInvalidatingPaint) {
+          // Since we're not going to paint, we need to resend animation
+          // data to the layer.
+          MOZ_ASSERT(layer, "this can't happen if there's no layer");
+          nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(layer,
+            nullptr, nullptr, aFrame, eCSSProperty_transform);
+        }
       }
     }
     if (aChange & nsChangeHint_ChildrenOnlyTransform) {
@@ -308,6 +320,12 @@ RestyleManager::RecomputePosition(nsIFrame* aFrame)
     return true;
   }
 
+  const nsStyleDisplay* display = aFrame->StyleDisplay();
+  // Changes to the offsets of a non-positioned element can safely be ignored.
+  if (display->mPosition == NS_STYLE_POSITION_STATIC) {
+    return true;
+  }
+
   // Don't process position changes on frames which have views or the ones which
   // have a view somewhere in their descendants, because the corresponding view
   // needs to be repositioned properly as well.
@@ -315,12 +333,6 @@ RestyleManager::RecomputePosition(nsIFrame* aFrame)
       (aFrame->GetStateBits() & NS_FRAME_HAS_CHILD_WITH_VIEW)) {
     StyleChangeReflow(aFrame, nsChangeHint_NeedReflow);
     return false;
-  }
-
-  const nsStyleDisplay* display = aFrame->StyleDisplay();
-  // Changes to the offsets of a non-positioned element can safely be ignored.
-  if (display->mPosition == NS_STYLE_POSITION_STATIC) {
-    return true;
   }
 
   aFrame->SchedulePaint();

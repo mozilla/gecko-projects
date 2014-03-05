@@ -2336,9 +2336,6 @@ void MediaDecoderStateMachine::AdvanceFrame()
     }
     MediaDecoder::FrameStatistics& frameStats = mDecoder->GetFrameStatistics();
     frameStats.NotifyPresentedFrame();
-    double frameDelay = double(clock_time - currentFrame->mTime) / USECS_PER_S;
-    NS_ASSERTION(frameDelay >= 0.0, "Frame should never be displayed early.");
-    frameStats.NotifyFrameDelay(frameDelay);
     remainingTime = currentFrame->GetEndTime() - clock_time;
     currentFrame = nullptr;
   }
@@ -2448,6 +2445,15 @@ bool MediaDecoderStateMachine::JustExitedQuickBuffering()
 void MediaDecoderStateMachine::StartBuffering()
 {
   AssertCurrentThreadInMonitor();
+
+  if (mState != DECODER_STATE_DECODING) {
+    // We only move into BUFFERING state if we're actually decoding.
+    // If we're currently doing something else, we don't need to buffer,
+    // and more importantly, we shouldn't overwrite mState to interrupt
+    // the current operation, as that could leave us in an inconsistent
+    // state!
+    return;
+  }
 
   if (IsPlaying()) {
     StopPlayback();

@@ -1515,32 +1515,25 @@ private:
   }
 };
 
-class UpdateRuntimeAndContextOptionsRunnable MOZ_FINAL : public WorkerControlRunnable
+class UpdateJSContextOptionsRunnable MOZ_FINAL : public WorkerControlRunnable
 {
-  JS::RuntimeOptions mRuntimeOptions;
-  JS::ContextOptions mContentCxOptions;
-  JS::ContextOptions mChromeCxOptions;
+  JS::ContextOptions mContentOptions;
+  JS::ContextOptions mChromeOptions;
 
 public:
-  UpdateRuntimeAndContextOptionsRunnable(
-                                    WorkerPrivate* aWorkerPrivate,
-                                    const JS::RuntimeOptions& aRuntimeOptions,
-                                    const JS::ContextOptions& aContentCxOptions,
-                                    const JS::ContextOptions& aChromeCxOptions)
+  UpdateJSContextOptionsRunnable(WorkerPrivate* aWorkerPrivate,
+                                 const JS::ContextOptions& aContentOptions,
+                                 const JS::ContextOptions& aChromeOptions)
   : WorkerControlRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount),
-    mRuntimeOptions(aRuntimeOptions),
-    mContentCxOptions(aContentCxOptions),
-    mChromeCxOptions(aChromeCxOptions)
+    mContentOptions(aContentOptions), mChromeOptions(aChromeOptions)
   { }
 
 private:
   virtual bool
   WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) MOZ_OVERRIDE
   {
-    aWorkerPrivate->UpdateRuntimeAndContextOptionsInternal(aCx,
-                                                           mRuntimeOptions,
-                                                           mContentCxOptions,
-                                                           mChromeCxOptions);
+    aWorkerPrivate->UpdateJSContextOptionsInternal(aCx, mContentOptions,
+                                                   mChromeOptions);
     return true;
   }
 };
@@ -2356,7 +2349,7 @@ WorkerPrivateParent<Derived>::NotifyPrivate(JSContext* aCx, Status aStatus)
 #endif
 
     // Worker never got a chance to run, go ahead and delete it.
-    self->ScheduleDeletion();
+    self->ScheduleDeletion(WorkerPrivate::WorkerNeverRan);
     return true;
   }
 
@@ -2842,26 +2835,22 @@ WorkerPrivateParent<Derived>::GetInnerWindowId()
 
 template <class Derived>
 void
-WorkerPrivateParent<Derived>::UpdateRuntimeAndContextOptions(
-                                    JSContext* aCx,
-                                    const JS::RuntimeOptions& aRuntimeOptions,
-                                    const JS::ContextOptions& aContentCxOptions,
-                                    const JS::ContextOptions& aChromeCxOptions)
+WorkerPrivateParent<Derived>::UpdateJSContextOptions(
+                                      JSContext* aCx,
+                                      const JS::ContextOptions& aContentOptions,
+                                      const JS::ContextOptions& aChromeOptions)
 {
   AssertIsOnParentThread();
 
   {
     MutexAutoLock lock(mMutex);
-    mJSSettings.runtimeOptions = aRuntimeOptions;
-    mJSSettings.content.contextOptions = aContentCxOptions;
-    mJSSettings.chrome.contextOptions = aChromeCxOptions;
+    mJSSettings.content.contextOptions = aContentOptions;
+    mJSSettings.chrome.contextOptions = aChromeOptions;
   }
 
-  nsRefPtr<UpdateRuntimeAndContextOptionsRunnable> runnable =
-    new UpdateRuntimeAndContextOptionsRunnable(ParentAsWorkerPrivate(),
-                                               aRuntimeOptions,
-                                               aContentCxOptions,
-                                               aChromeCxOptions);
+  nsRefPtr<UpdateJSContextOptionsRunnable> runnable =
+    new UpdateJSContextOptionsRunnable(ParentAsWorkerPrivate(), aContentOptions,
+                                       aChromeOptions);
   if (!runnable->Dispatch(aCx)) {
     NS_WARNING("Failed to update worker context options!");
     JS_ClearPendingException(aCx);
@@ -4262,13 +4251,13 @@ WorkerPrivate::IsOnCurrentThread(bool* aIsOnCurrentThread)
 }
 
 void
-WorkerPrivate::ScheduleDeletion()
+WorkerPrivate::ScheduleDeletion(WorkerRanOrNot aRanOrNot)
 {
   AssertIsOnWorkerThread();
   MOZ_ASSERT(mChildWorkers.IsEmpty());
   MOZ_ASSERT(mSyncLoopStack.IsEmpty());
 
-  ClearMainEventQueue();
+  ClearMainEventQueue(aRanOrNot);
 
   if (WorkerPrivate* parent = GetParent()) {
     nsRefPtr<WorkerFinishedRunnable> runnable =
@@ -4485,18 +4474,27 @@ WorkerPrivate::ProcessAllControlRunnablesLocked()
 }
 
 void
-WorkerPrivate::ClearMainEventQueue()
+WorkerPrivate::ClearMainEventQueue(WorkerRanOrNot aRanOrNot)
 {
   AssertIsOnWorkerThread();
-
-  nsIThread* currentThread = NS_GetCurrentThread();
-  MOZ_ASSERT(currentThread);
 
   MOZ_ASSERT(!mCancelAllPendingRunnables);
   mCancelAllPendingRunnables = true;
 
-  NS_ProcessPendingEvents(currentThread);
-  MOZ_ASSERT(!NS_HasPendingEvents(currentThread));
+  if (WorkerNeverRan == aRanOrNot) {
+    for (uint32_t count = mPreStartRunnables.Length(), index = 0;
+         index < count;
+         index++) {
+      nsRefPtr<WorkerRunnable> runnable = mPreStartRunnables[index].forget();
+      static_cast<nsIRunnable*>(runnable.get())->Run();
+    }
+  } else {
+    nsIThread* currentThread = NS_GetCurrentThread();
+    MOZ_ASSERT(currentThread);
+
+    NS_ProcessPendingEvents(currentThread);
+    MOZ_ASSERT(!NS_HasPendingEvents(currentThread));
+  }
 
   MOZ_ASSERT(mCancelAllPendingRunnables);
   mCancelAllPendingRunnables = false;
@@ -5042,7 +5040,7 @@ WorkerPrivate::NotifyInternal(JSContext* aCx, Status aStatus)
   // If this is the first time our status has changed then we need to clear the
   // main event queue.
   if (previousStatus == Running) {
-    ClearMainEventQueue();
+    ClearMainEventQueue(WorkerRan);
   }
 
   // If we've run the close handler, we don't need to do anything else.
@@ -5499,21 +5497,17 @@ WorkerPrivate::RescheduleTimeoutTimer(JSContext* aCx)
 }
 
 void
-WorkerPrivate::UpdateRuntimeAndContextOptionsInternal(
-                                    JSContext* aCx,
-                                    const JS::RuntimeOptions& aRuntimeOptions,
-                                    const JS::ContextOptions& aContentCxOptions,
-                                    const JS::ContextOptions& aChromeCxOptions)
+WorkerPrivate::UpdateJSContextOptionsInternal(JSContext* aCx,
+                                              const JS::ContextOptions& aContentOptions,
+                                              const JS::ContextOptions& aChromeOptions)
 {
   AssertIsOnWorkerThread();
 
-  JS::RuntimeOptionsRef(aCx) = aRuntimeOptions;
-  JS::ContextOptionsRef(aCx) = IsChromeWorker() ? aChromeCxOptions : aContentCxOptions;
+  JS::ContextOptionsRef(aCx) = IsChromeWorker() ? aChromeOptions : aContentOptions;
 
   for (uint32_t index = 0; index < mChildWorkers.Length(); index++) {
-    mChildWorkers[index]->UpdateRuntimeAndContextOptions(aCx, aRuntimeOptions,
-                                                         aContentCxOptions,
-                                                         aChromeCxOptions);
+    mChildWorkers[index]->UpdateJSContextOptions(aCx, aContentOptions,
+                                                 aChromeOptions);
   }
 }
 

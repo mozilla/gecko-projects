@@ -23,6 +23,7 @@
 #include "nsIXULRuntime.h"
 #include "nsIScriptError.h"
 #include "nsIConsoleService.h"
+#include "nsIMemoryReporter.h"
 #include "nsIProtocolHandler.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIJSRuntimeService.h"
@@ -703,12 +704,12 @@ nsFrameMessageManager::BroadcastAsyncMessage(const nsAString& aMessageName,
 NS_IMETHODIMP
 nsFrameMessageManager::GetChildCount(uint32_t* aChildCount)
 {
-  *aChildCount = static_cast<uint32_t>(mChildManagers.Count()); 
+  *aChildCount = static_cast<uint32_t>(mChildManagers.Count());
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsFrameMessageManager::GetChildAt(uint32_t aIndex, 
+nsFrameMessageManager::GetChildAt(uint32_t aIndex,
                                   nsIMessageListenerManager** aMM)
 {
   *aMM = nullptr;
@@ -1429,7 +1430,8 @@ nsFrameScriptExecutor::LoadFrameScriptInternal(const nsAString& aURL,
       }
       JS::Rooted<JS::Value> rval(cx);
       JS::Rooted<JS::Value> methodVal(cx, JS::ObjectValue(*method));
-      ok = JS_CallFunctionValue(cx, global, methodVal, JS::EmptyValueArray, &rval);
+      ok = JS_CallFunctionValue(cx, global, methodVal,
+                                JS::HandleValueArray::empty(), &rval);
     } else if (script) {
       ok = JS_ExecuteScript(cx, global, script, nullptr);
     }

@@ -11,8 +11,7 @@ Cu.import("resource:///modules/CustomizableUI.jsm", tmp);
 let {Promise, CustomizableUI} = tmp;
 
 let ChromeUtils = {};
-let scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"].getService(Ci.mozIJSSubScriptLoader);
-scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
+Services.scriptloader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
 
 Services.prefs.setBoolPref("browser.uiCustomization.skipSourceNodeCheck", true);
 registerCleanupFunction(() => Services.prefs.clearUserPref("browser.uiCustomization.skipSourceNodeCheck"));
@@ -33,7 +32,7 @@ function createDummyXULButton(id, label) {
 
 let gAddedToolbars = new Set();
 
-function createToolbarWithPlacements(id, placements) {
+function createToolbarWithPlacements(id, placements = []) {
   gAddedToolbars.add(id);
   let tb = document.createElementNS(kNSXUL, "toolbar");
   tb.id = id;
@@ -53,6 +52,10 @@ function removeCustomToolbars() {
     document.getElementById(toolbarId).remove();
   }
   gAddedToolbars.clear();
+}
+
+function getToolboxCustomToolbarId(toolbarName) {
+  return "__customToolbar_" + toolbarName.replace(" ", "_");
 }
 
 function resetCustomization() {

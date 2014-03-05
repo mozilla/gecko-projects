@@ -662,7 +662,7 @@ XPCShellOperationCallback(JSContext *cx)
     JSAutoCompartment ac(cx, &sScriptedOperationCallback.toObject());
     RootedValue rv(cx);
     RootedValue callback(cx, sScriptedOperationCallback);
-    if (!JS_CallFunctionValue(cx, JS::NullPtr(), callback, JS::EmptyValueArray, &rv) ||
+    if (!JS_CallFunctionValue(cx, JS::NullPtr(), callback, JS::HandleValueArray::empty(), &rv) ||
         !rv.isBoolean())
     {
         NS_WARNING("Scripted operation callback failed! Terminating script.");
@@ -1039,11 +1039,11 @@ ProcessArgsForCompartment(JSContext *cx, char **argv, int argc)
             ContextOptionsRef(cx).toggleExtraWarnings();
             break;
         case 'I':
-            RuntimeOptionsRef(cx).toggleIon()
+            ContextOptionsRef(cx).toggleIon()
                                  .toggleAsmJS();
             break;
         case 'n':
-            RuntimeOptionsRef(cx).toggleTypeInference();
+            ContextOptionsRef(cx).toggleTypeInference();
             break;
         }
     }
@@ -1282,7 +1282,7 @@ XPCShellErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep)
         gExitCode = EXITCODE_RUNTIME_ERROR;
 
     // Delegate to the system error reporter for heavy lifting.
-    xpc::SystemErrorReporterExternal(cx, message, rep);
+    xpc::SystemErrorReporter(cx, message, rep);
 }
 
 static bool
@@ -1486,6 +1486,9 @@ XRE_XPCShellMain(int argc, char **argv, char **envp)
             printf("JS_NewContext failed!\n");
             return 1;
         }
+
+        // Ion not enabled yet here because of bug 931861.
+        JS::ContextOptionsRef(cx).setBaseline(true);
 
         argc--;
         argv++;

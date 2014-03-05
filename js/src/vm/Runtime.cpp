@@ -161,6 +161,9 @@ JSRuntime::JSRuntime(JSRuntime *parentRuntime, JSUseHelperThreads useHelperThrea
     checkRequestDepth(0),
 # endif
 #endif
+#ifdef DEBUG
+    activeContext(nullptr),
+#endif
     gcInitialized(false),
     gcSystemAvailableChunkListHead(nullptr),
     gcUserAvailableChunkListHead(nullptr),
@@ -870,7 +873,7 @@ JSRuntime::clearUsedByExclusiveThread(Zone *zone)
 bool
 js::CurrentThreadCanAccessRuntime(JSRuntime *rt)
 {
-    return rt->ownerThread_ == PR_GetCurrentThread() || InExclusiveParallelSection();
+    return rt->ownerThread_ == PR_GetCurrentThread() && !InParallelSection();
 }
 
 bool

@@ -610,7 +610,7 @@ nsEventDispatcher::Dispatch(nsISupports* aTarget,
   aEvent->mFlags.mDispatchedAtLeastOnce = true;
 
   if (!externalDOMEvent && preVisitor.mDOMEvent) {
-    // An nsDOMEvent was created while dispatching the event.
+    // An dom::Event was created while dispatching the event.
     // Duplicate private data if someone holds a pointer to it.
     nsrefcnt rc = 0;
     NS_RELEASE2(preVisitor.mDOMEvent, rc);
@@ -708,8 +708,8 @@ nsEventDispatcher::CreateEvent(mozilla::dom::EventTarget* aOwner,
       return NS_NewDOMDragEvent(aDOMEvent, aOwner, aPresContext,
                                 aEvent->AsDragEvent());
     case NS_TEXT_EVENT:
-      return NS_NewDOMTextEvent(aDOMEvent, aOwner, aPresContext,
-                                aEvent->AsTextEvent());
+      return NS_NewDOMUIEvent(aDOMEvent, aOwner, aPresContext,
+                              aEvent->AsTextEvent());
     case NS_CLIPBOARD_EVENT:
       return NS_NewDOMClipboardEvent(aDOMEvent, aOwner, aPresContext,
                                      aEvent->AsClipboardEvent());
@@ -764,7 +764,7 @@ nsEventDispatcher::CreateEvent(mozilla::dom::EventTarget* aOwner,
     return NS_NewDOMMutationEvent(aDOMEvent, aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("textevent") ||
       aEventType.LowerCaseEqualsLiteral("textevents"))
-    return NS_NewDOMTextEvent(aDOMEvent, aOwner, aPresContext, nullptr);
+    return NS_NewDOMUIEvent(aDOMEvent, aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("popupblockedevents"))
     return NS_NewDOMPopupBlockedEvent(aDOMEvent, aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("deviceorientationevent"))

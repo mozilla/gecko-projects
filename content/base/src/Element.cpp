@@ -719,23 +719,29 @@ void
 Element::RemoveFromIdTable()
 {
   if (HasID()) {
-    if (HasFlag(NODE_IS_IN_SHADOW_TREE)) {
-      ShadowRoot* containingShadow = GetContainingShadow();
-      // Check for containingShadow because it may have
-      // been deleted during unlinking.
-      if (containingShadow) {
-        containingShadow->RemoveFromIdTable(this, DoGetID());
-      }
-    } else {
-      nsIDocument* doc = GetCurrentDoc();
-      if (doc) {
-        nsIAtom* id = DoGetID();
-        // id can be null during mutation events evilness. Also, XUL elements
-        // loose their proto attributes during cc-unlink, so this can happen
-        // during cc-unlink too.
-        if (id) {
-          doc->RemoveFromIdTable(this, DoGetID());
-        }
+    RemoveFromIdTable(DoGetID());
+  }
+}
+
+void
+Element::RemoveFromIdTable(nsIAtom* aId)
+{
+  NS_ASSERTION(HasID(), "Node doesn't have an ID?");
+  if (HasFlag(NODE_IS_IN_SHADOW_TREE)) {
+    ShadowRoot* containingShadow = GetContainingShadow();
+    // Check for containingShadow because it may have
+    // been deleted during unlinking.
+    if (containingShadow) {
+      containingShadow->RemoveFromIdTable(this, aId);
+    }
+  } else {
+    nsIDocument* doc = GetCurrentDoc();
+    if (doc && (!IsInAnonymousSubtree() || doc->IsXUL())) {
+      // id can be null during mutation events evilness. Also, XUL elements
+      // loose their proto attributes during cc-unlink, so this can happen
+      // during cc-unlink too.
+      if (aId) {
+        doc->RemoveFromIdTable(this, aId);
       }
     }
   }
@@ -1158,8 +1164,8 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     SetInDocument();
 
     if (GetCustomElementData()) {
-      // Enqueue an enteredView callback for the custom element.
-      aDocument->EnqueueLifecycleCallback(nsIDocument::eEnteredView, this);
+      // Enqueue an attached callback for the custom element.
+      aDocument->EnqueueLifecycleCallback(nsIDocument::eAttached, this);
     }
 
     // Unset this flag since we now really are in a document.
@@ -1321,8 +1327,8 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     document->ClearBoxObjectFor(this);
 
     if (GetCustomElementData()) {
-      // Enqueue a leftView callback for the custom element.
-      document->EnqueueLifecycleCallback(nsIDocument::eLeftView, this);
+      // Enqueue a detached callback for the custom element.
+      document->EnqueueLifecycleCallback(nsIDocument::eDetached, this);
     }
   }
 
@@ -2132,30 +2138,35 @@ Element::GetAttrCount() const
   return mAttrsAndChildren.AttrCount();
 }
 
+void
+Element::DescribeAttribute(uint32_t index, nsAString& aOutDescription) const
+{
+  // name
+  mAttrsAndChildren.AttrNameAt(index)->GetQualifiedName(aOutDescription);
+
+  // value
+  aOutDescription.AppendLiteral("=\"");
+  nsAutoString value;
+  mAttrsAndChildren.AttrAt(index)->ToString(value);
+  for (int i = value.Length(); i >= 0; --i) {
+    if (value[i] == char16_t('"'))
+      value.Insert(char16_t('\\'), uint32_t(i));
+  }
+  aOutDescription.Append(value);
+  aOutDescription.AppendLiteral("\"");
+}
+
 #ifdef DEBUG
 void
 Element::ListAttributes(FILE* out) const
 {
   uint32_t index, count = mAttrsAndChildren.AttrCount();
   for (index = 0; index < count; index++) {
-    nsAutoString buffer;
-
-    // name
-    mAttrsAndChildren.AttrNameAt(index)->GetQualifiedName(buffer);
-
-    // value
-    buffer.AppendLiteral("=\"");
-    nsAutoString value;
-    mAttrsAndChildren.AttrAt(index)->ToString(value);
-    for (int i = value.Length(); i >= 0; --i) {
-      if (value[i] == char16_t('"'))
-        value.Insert(char16_t('\\'), uint32_t(i));
-    }
-    buffer.Append(value);
-    buffer.AppendLiteral("\"");
+    nsAutoString attributeDescription;
+    DescribeAttribute(index, attributeDescription);
 
     fputs(" ", out);
-    fputs(NS_LossyConvertUTF16toASCII(buffer).get(), out);
+    fputs(NS_LossyConvertUTF16toASCII(attributeDescription).get(), out);
   }
 }
 
@@ -2278,6 +2289,21 @@ Element::DumpContent(FILE* out, int32_t aIndent,
   if(aIndent) fputs("\n", out);
 }
 #endif
+
+void
+Element::Describe(nsAString& aOutDescription) const
+{
+  aOutDescription.Append(mNodeInfo->QualifiedName());
+  aOutDescription.AppendPrintf("@%p", (void *)this);
+
+  uint32_t index, count = mAttrsAndChildren.AttrCount();
+  for (index = 0; index < count; index++) {
+    aOutDescription.Append(' ');
+    nsAutoString attributeDescription;
+    DescribeAttribute(index, attributeDescription);
+    aOutDescription.Append(attributeDescription);
+  }
+}
 
 bool
 Element::CheckHandleEventForLinksPrecondition(nsEventChainVisitor& aVisitor,

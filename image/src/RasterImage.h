@@ -276,6 +276,16 @@ public:
   nsIntSize GetRequestedResolution() {
     return mRequestedResolution;
   }
+  /* Provide a hint for the requested dimension of the resulting image. */
+  void SetRequestedSampleSize(int requestedSampleSize) {
+    mRequestedSampleSize = requestedSampleSize;
+  }
+
+  int GetRequestedSampleSize() {
+    return mRequestedSampleSize;
+  }
+
+
 
  nsCString GetURIString() {
     nsCString spec;
@@ -580,7 +590,7 @@ private:
 
   nsresult DoImageDataComplete();
 
-  bool ApplyDecodeFlags(uint32_t aNewFlags);
+  bool ApplyDecodeFlags(uint32_t aNewFlags, uint32_t aWhichFrame);
 
   already_AddRefed<layers::Image> GetCurrentImage();
   void UpdateImageContainer();
@@ -642,6 +652,9 @@ private: // data
 
   // If the image contains multiple resolutions, a hint as to which one should be used
   nsIntSize                  mRequestedResolution;
+
+  // A hint for image decoder that directly scale the image to smaller buffer
+  int                        mRequestedSampleSize;
 
   // Cached value for GetImageContainer.
   nsRefPtr<mozilla::layers::ImageContainer> mImageContainer;

@@ -223,6 +223,7 @@ static char **gQtOnlyArgv;
 #include <gdk/gdkx.h>
 #endif /* MOZ_X11 */
 #include "nsGTKToolkit.h"
+#include <fontconfig/fontconfig.h>
 #endif
 #include "BinaryPath.h"
 
@@ -2582,6 +2583,7 @@ static PRFuncPtr FindFunction(const char* aName)
 
 static void MOZ_gdk_display_close(GdkDisplay *display)
 {
+#if CLEANUP_MEMORY
   // XXX wallpaper for bug 417163: don't close the Display if we're using the
   // Qt theme because we crash (in Qt code) when using jemalloc.
   bool theme_is_qt = false;
@@ -2596,12 +2598,10 @@ static void MOZ_gdk_display_close(GdkDisplay *display)
     g_free(theme_name);
   }
 
-#if CLEANUP_MEMORY
   // Get a (new) Pango context that holds a reference to the fontmap that
   // GTK has been using.  gdk_pango_context_get() must be called while GTK
   // has a default display.
   PangoContext *pangoContext = gdk_pango_context_get();
-#endif
 
   bool buggyCairoShutdown = cairo_version() < CAIRO_VERSION_ENCODE(1, 4, 0);
 
@@ -2614,7 +2614,16 @@ static void MOZ_gdk_display_close(GdkDisplay *display)
       gdk_display_close(display);
   }
 
-#if CLEANUP_MEMORY
+  // Clean up PangoCairo's default fontmap.
+  // This pango_fc_font_map_shutdown call (and the associated code to
+  // get the font map) really shouldn't be needed anymore, except that
+  // it's needed to avoid having cairo_debug_reset_static_data fatally
+  // assert if we've leaked other things that hold on to the fontmap,
+  // which is something that currently happens in mochitest-plugins.
+  // Even if it didn't happen in mochitest-plugins, we probably want to
+  // avoid the crash-on-leak problem since it makes it harder to use
+  // many of our leak tools to debug leaks.
+
   // This doesn't take a reference.
   PangoFontMap *fontmap = pango_context_get_font_map(pangoContext);
   // Do some shutdown of the fontmap, which releases the fonts, clearing a
@@ -2624,12 +2633,9 @@ static void MOZ_gdk_display_close(GdkDisplay *display)
   if (PANGO_IS_FC_FONT_MAP(fontmap))
       pango_fc_font_map_shutdown(PANGO_FC_FONT_MAP(fontmap));
   g_object_unref(pangoContext);
-  // PangoCairo still holds a reference to the fontmap.
-  // Now that we have finished with GTK and Pango, we could unref fontmap,
-  // which would allow us to call FcFini, but removing what is really
-  // Pango's ref feels a bit evil.  Pango-1.22 will have support for
-  // pango_cairo_font_map_set_default(nullptr), which would release the
-  // reference on the old fontmap.
+
+  // Tell PangoCairo to release its default fontmap.
+  pango_cairo_font_map_set_default(nullptr);
 
   // cairo_debug_reset_static_data() is prototyped through cairo.h included
   // by gtk.h.
@@ -2637,12 +2643,18 @@ static void MOZ_gdk_display_close(GdkDisplay *display)
 #error "Looks like we're including Mozilla's cairo instead of system cairo"
 #endif
   cairo_debug_reset_static_data();
-#endif // CLEANUP_MEMORY
+  // FIXME: Do we need to call this in non-GTK2 cases as well?
+  FcFini();
 
   if (buggyCairoShutdown) {
     if (!theme_is_qt)
       gdk_display_close(display);
   }
+#else // not CLEANUP_MEMORY
+  // Don't do anything to avoid running into driver bugs under XCloseDisplay().
+  // See bug 973192.
+  (void) display;
+#endif
 }
 #endif // MOZ_WIDGET_GTK2
 

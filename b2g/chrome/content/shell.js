@@ -560,18 +560,18 @@ var shell = {
     }
   },
 
-  sendEvent: function shell_sendEvent(content, type, details) {
-    let event = content.document.createEvent('CustomEvent');
+  // Send an event to a specific window, document or element.
+  sendEvent: function shell_sendEvent(target, type, details) {
+    let doc = target.document || target.ownerDocument || target;
+    let event = doc.createEvent('CustomEvent');
     event.initCustomEvent(type, true, true, details ? details : {});
-    content.dispatchEvent(event);
+    target.dispatchEvent(event);
   },
 
   sendCustomEvent: function shell_sendCustomEvent(type, details) {
-    let content = getContentWindow();
-    let event = content.document.createEvent('CustomEvent');
-    let payload = details ? Cu.cloneInto(details, content) : {};
-    event.initCustomEvent(type, true, true, payload);
-    content.dispatchEvent(event);
+    let target = getContentWindow();
+    let payload = details ? Cu.cloneInto(details, target) : {};
+    this.sendEvent(target, type, payload);
   },
 
   sendChromeEvent: function shell_sendChromeEvent(details) {
@@ -1112,11 +1112,47 @@ let RemoteDebugger = {
       // Ask for remote connections.
       DebuggerServer.init(this.prompt.bind(this));
 
+      // /!\ Be careful when adding a new actor, especially global actors.
+      // Any new global actor will be exposed and returned by the root actor.
+
       // Add Firefox-specific actors, but prevent tab actors to be loaded in
       // the parent process, unless we enable certified apps debugging.
       let restrictPrivileges = Services.prefs.getBoolPref("devtools.debugger.forbid-certified-apps");
       DebuggerServer.addBrowserActors("navigator:browser", restrictPrivileges);
-      DebuggerServer.addActors('chrome://b2g/content/dbg-browser-actors.js');
+
+      /**
+       * Construct a root actor appropriate for use in a server running in B2G.
+       * The returned root actor respects the factories registered with
+       * DebuggerServer.addGlobalActor only if certified apps debugging is on,
+       * otherwise we used an explicit limited list of global actors
+       *
+       * * @param connection DebuggerServerConnection
+       *        The conection to the client.
+       */
+      DebuggerServer.createRootActor = function createRootActor(connection)
+      {
+        let promise = Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js", {}).Promise;
+        let parameters = {
+          // We do not expose browser tab actors yet,
+          // but we still have to define tabList.getList(),
+          // otherwise, client won't be able to fetch global actors
+          // from listTabs request!
+          tabList: {
+            getList: function() {
+              return promise.resolve([]);
+            }
+          },
+          // Use an explicit global actor list to prevent exposing
+          // unexpected actors
+          globalActorFactories: restrictPrivileges ? {
+            webappsActor: DebuggerServer.globalActorFactories.webappsActor,
+            deviceActor: DebuggerServer.globalActorFactories.deviceActor
+          } : DebuggerServer.globalActorFactories
+        };
+        let root = new DebuggerServer.RootActor(connection, parameters);
+        root.applicationType = "operating-system";
+        return root;
+      };
 
 #ifdef MOZ_WIDGET_GONK
       DebuggerServer.onConnectionChange = function(what) {

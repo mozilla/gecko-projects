@@ -52,7 +52,6 @@ enum BailoutKind
 static const uint32_t BAILOUT_KIND_BITS = 3;
 static const uint32_t BAILOUT_RESUME_BITS = 1;
 
-#ifdef DEBUG
 inline const char *
 BailoutKindString(BailoutKind kind)
 {
@@ -71,7 +70,6 @@ BailoutKindString(BailoutKind kind)
         MOZ_ASSUME_UNREACHABLE("Invalid BailoutKind");
     }
 }
-#endif
 
 static const uint32_t ELEMENT_TYPE_BITS = 4;
 static const uint32_t ELEMENT_TYPE_SHIFT = 0;
@@ -166,6 +164,9 @@ ValueTypeFromMIRType(MIRType type)
       return JSVAL_TYPE_STRING;
     case MIRType_Magic:
       return JSVAL_TYPE_MAGIC;
+    case MIRType_Float32x4:
+    case MIRType_Int32x4:
+      return JSVAL_TYPE_OBJECT;
     default:
       JS_ASSERT(type == MIRType_Object);
       return JSVAL_TYPE_OBJECT;
@@ -196,6 +197,10 @@ StringFromMIRType(MIRType type)
       return "Float32";
     case MIRType_String:
       return "String";
+    case MIRType_Float32x4:
+      return "Float32x4";
+    case MIRType_Int32x4:
+      return "Int32x4";
     case MIRType_Object:
       return "Object";
     case MIRType_Magic:

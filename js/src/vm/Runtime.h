@@ -966,6 +966,16 @@ struct JSRuntime : public JS::shadow::Runtime,
 # endif
 #endif
 
+#ifdef DEBUG
+    /*
+     * To help embedders enforce their invariants, we allow them to specify in
+     * advance which JSContext should be passed to JSAPI calls. If this is set
+     * to a non-null value, the assertSameCompartment machinery does double-
+     * duty (in debug builds) to verify that it matches the cx being used.
+     */
+    JSContext          *activeContext;
+#endif
+
     /* Garbage collector state, used by jsgc.c. */
 
     /* Garbase collector state has been sucessfully initialized. */
@@ -1694,7 +1704,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::RuntimeSizes *runtime);
 
   private:
-    JS::RuntimeOptions options_;
 
     JSUseHelperThreads useHelperThreads_;
 
@@ -1740,13 +1749,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     }
     bool isWorkerRuntime() const {
         return isWorkerRuntime_;
-    }
-
-    const JS::RuntimeOptions &options() const {
-        return options_;
-    }
-    JS::RuntimeOptions &options() {
-        return options_;
     }
 
 #ifdef DEBUG

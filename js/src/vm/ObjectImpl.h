@@ -684,7 +684,8 @@ ArraySetLength(typename ExecutionModeTraits<mode>::ContextType cx,
                unsigned attrs, HandleValue value, bool setterIsStrict);
 
 /*
- * Elements header used for all native objects. The elements component of such
+ * Elements header used for all objects other than non-native objects (except
+ * for ArrayBufferObjects!!!) and typed arrays. The elements component of such
  * objects offers an efficient representation for all or some of the indexed
  * properties of the object, using a flat array of Values rather than a shape
  * hierarchy stored in the object's slots. This structure is immediately
@@ -1325,11 +1326,16 @@ class ObjectImpl : public gc::BarrieredCell<ObjectImpl>
         return slots[slot - fixed];
     }
 
-    HeapSlot *getSlotAddressUnchecked(uint32_t slot) {
+    const HeapSlot *getSlotAddressUnchecked(uint32_t slot) const {
         uint32_t fixed = numFixedSlots();
         if (slot < fixed)
             return fixedSlots() + slot;
         return slots + (slot - fixed);
+    }
+
+    HeapSlot *getSlotAddressUnchecked(uint32_t slot) {
+        const ObjectImpl *obj = static_cast<const ObjectImpl*>(this);
+        return const_cast<HeapSlot*>(obj->getSlotAddressUnchecked(slot));
     }
 
     HeapSlot *getSlotAddress(uint32_t slot) {
@@ -1342,7 +1348,22 @@ class ObjectImpl : public gc::BarrieredCell<ObjectImpl>
         return getSlotAddressUnchecked(slot);
     }
 
+    const HeapSlot *getSlotAddress(uint32_t slot) const {
+        /*
+         * This can be used to get the address of the end of the slots for the
+         * object, which may be necessary when fetching zero-length arrays of
+         * slots (e.g. for callObjVarArray).
+         */
+        MOZ_ASSERT(slotInRange(slot, SENTINEL_ALLOWED));
+        return getSlotAddressUnchecked(slot);
+    }
+
     HeapSlot &getSlotRef(uint32_t slot) {
+        MOZ_ASSERT(slotInRange(slot));
+        return *getSlotAddress(slot);
+    }
+
+    const HeapSlot &getSlotRef(uint32_t slot) const {
         MOZ_ASSERT(slotInRange(slot));
         return *getSlotAddress(slot);
     }
@@ -1437,7 +1458,14 @@ class ObjectImpl : public gc::BarrieredCell<ObjectImpl>
         return &fixedSlots()[2];
     }
 
-    void setFixedElements() { this->elements = fixedElements(); }
+#ifdef DEBUG
+    bool canHaveNonEmptyElements();
+#endif
+
+    void setFixedElements() {
+        JS_ASSERT(canHaveNonEmptyElements());
+        this->elements = fixedElements();
+    }
 
     inline bool hasDynamicElements() const {
         /*

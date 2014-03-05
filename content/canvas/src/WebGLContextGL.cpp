@@ -477,9 +477,6 @@ WebGLContext::CopyTexSubImage2D_base(GLenum target,
 
         gl->fCopyTexSubImage2D(target, level, actual_xoffset, actual_yoffset, actual_x, actual_y, actual_width, actual_height);
     }
-
-    if (!sub)
-        ReattachTextureToAnyFramebufferToWorkAroundBugs(tex, level);
 }
 
 void
@@ -508,8 +505,16 @@ WebGLContext::CopyTexImage2D(GLenum target,
         return;
     }
 
-    if (mBoundFramebuffer && !mBoundFramebuffer->CheckAndInitializeAttachments())
-        return ErrorInvalidFramebufferOperation("copyTexImage2D: incomplete framebuffer");
+    if (mBoundFramebuffer) {
+        if (!mBoundFramebuffer->CheckAndInitializeAttachments())
+            return ErrorInvalidFramebufferOperation("copyTexImage2D: incomplete framebuffer");
+
+        GLenum readPlaneBits = LOCAL_GL_COLOR_BUFFER_BIT;
+        if (!mBoundFramebuffer->HasCompletePlanes(readPlaneBits)) {
+            return ErrorInvalidOperation("copyTexImage2D: Read source attachment doesn't have the"
+                                         " correct color/depth/stencil type.");
+        }
+    }
 
     bool texFormatRequiresAlpha = internalformat == LOCAL_GL_RGBA ||
                                   internalformat == LOCAL_GL_ALPHA ||
@@ -613,9 +618,16 @@ WebGLContext::CopyTexSubImage2D(GLenum target,
         return ErrorInvalidOperation("copyTexSubImage2D: a base internal format of DEPTH_COMPONENT or DEPTH_STENCIL isn't supported");
     }
 
-    if (mBoundFramebuffer)
+    if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeAttachments())
             return ErrorInvalidFramebufferOperation("copyTexSubImage2D: incomplete framebuffer");
+
+        GLenum readPlaneBits = LOCAL_GL_COLOR_BUFFER_BIT;
+        if (!mBoundFramebuffer->HasCompletePlanes(readPlaneBits)) {
+            return ErrorInvalidOperation("copyTexSubImage2D: Read source attachment doesn't have the"
+                                         " correct color/depth/stencil type.");
+        }
+    }
 
     bool texFormatRequiresAlpha = (internalFormat == LOCAL_GL_RGBA ||
                                    internalFormat == LOCAL_GL_ALPHA ||
@@ -2307,6 +2319,12 @@ WebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
         // prevent readback of arbitrary video memory through uninitialized renderbuffers!
         if (!mBoundFramebuffer->CheckAndInitializeAttachments())
             return ErrorInvalidFramebufferOperation("readPixels: incomplete framebuffer");
+
+        GLenum readPlaneBits = LOCAL_GL_COLOR_BUFFER_BIT;
+        if (!mBoundFramebuffer->HasCompletePlanes(readPlaneBits)) {
+            return ErrorInvalidOperation("readPixels: Read source attachment doesn't have the"
+                                         " correct color/depth/stencil type.");
+        }
     }
     // Now that the errors are out of the way, on to actually reading
 
@@ -3354,8 +3372,6 @@ WebGLContext::CompressedTexImage2D(GLenum target, GLint level, GLenum internalfo
     MOZ_ASSERT(tex);
     tex->SetImageInfo(target, level, width, height, internalformat, LOCAL_GL_UNSIGNED_BYTE,
                       WebGLImageDataStatus::InitializedImageData);
-
-    ReattachTextureToAnyFramebufferToWorkAroundBugs(tex, level);
 }
 
 void
@@ -3763,8 +3779,6 @@ WebGLContext::TexImage2D_base(GLenum target, GLint level, GLenum internalformat,
     MOZ_ASSERT(imageInfoStatusIfSuccess != WebGLImageDataStatus::NoImageData);
 
     tex->SetImageInfo(target, level, width, height, internalformat, type, imageInfoStatusIfSuccess);
-
-    ReattachTextureToAnyFramebufferToWorkAroundBugs(tex, level);
 }
 
 void
@@ -4197,58 +4211,6 @@ InternalFormatForFormatAndType(GLenum format, GLenum type, bool isGLES2)
 
     NS_ASSERTION(false, "Coding mistake -- bad format/type passed?");
     return 0;
-}
-
-void
-WebGLContext::ReattachTextureToAnyFramebufferToWorkAroundBugs(WebGLTexture *tex,
-                                                              GLint level)
-{
-    MOZ_ASSERT(tex);
-
-    if (!gl->WorkAroundDriverBugs())
-        return;
-
-    if (!mIsMesa)
-        return;
-
-    MakeContextCurrent();
-    WebGLFramebuffer* curFB = mBoundFramebuffer;
-
-    for(WebGLFramebuffer *framebuffer = mFramebuffers.getFirst();
-        framebuffer;
-        framebuffer = framebuffer->getNext())
-    {
-        size_t colorAttachmentCount = framebuffer->mColorAttachments.Length();
-        for (size_t i = 0; i < colorAttachmentCount; i++)
-        {
-            if (framebuffer->ColorAttachment(i).Texture() == tex) {
-                BindFramebuffer(LOCAL_GL_FRAMEBUFFER, framebuffer);
-                framebuffer->FramebufferTexture2D(
-                  LOCAL_GL_FRAMEBUFFER, LOCAL_GL_COLOR_ATTACHMENT0 + i,
-                  tex->Target(), tex, level);
-            }
-        }
-        if (framebuffer->DepthAttachment().Texture() == tex) {
-            BindFramebuffer(LOCAL_GL_FRAMEBUFFER, framebuffer);
-            framebuffer->FramebufferTexture2D(
-              LOCAL_GL_FRAMEBUFFER, LOCAL_GL_DEPTH_ATTACHMENT,
-              tex->Target(), tex, level);
-        }
-        if (framebuffer->StencilAttachment().Texture() == tex) {
-            BindFramebuffer(LOCAL_GL_FRAMEBUFFER, framebuffer);
-            framebuffer->FramebufferTexture2D(
-              LOCAL_GL_FRAMEBUFFER, LOCAL_GL_STENCIL_ATTACHMENT,
-              tex->Target(), tex, level);
-        }
-        if (framebuffer->DepthStencilAttachment().Texture() == tex) {
-            BindFramebuffer(LOCAL_GL_FRAMEBUFFER, framebuffer);
-            framebuffer->FramebufferTexture2D(
-              LOCAL_GL_FRAMEBUFFER, LOCAL_GL_DEPTH_STENCIL_ATTACHMENT,
-              tex->Target(), tex, level);
-        }
-    }
-
-    BindFramebuffer(LOCAL_GL_FRAMEBUFFER, curFB);
 }
 
 void

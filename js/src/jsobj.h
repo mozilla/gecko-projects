@@ -427,7 +427,12 @@ class JSObject : public js::ObjectImpl
         return getSlot(index);
     }
 
-    inline js::HeapSlot &getReservedSlotRef(uint32_t index) {
+    const js::HeapSlot &getReservedSlotRef(uint32_t index) const {
+        JS_ASSERT(index < JSSLOT_FREE(getClass()));
+        return getSlotRef(index);
+    }
+
+    js::HeapSlot &getReservedSlotRef(uint32_t index) {
         JS_ASSERT(index < JSSLOT_FREE(getClass()));
         return getSlotRef(index);
     }
@@ -666,6 +671,12 @@ class JSObject : public js::ObjectImpl
     inline void setDenseElementHole(js::ExclusiveContext *cx, uint32_t index);
     static inline void removeDenseElementForSparseIndex(js::ExclusiveContext *cx,
                                                         js::HandleObject obj, uint32_t index);
+
+    inline js::Value getDenseOrTypedArrayElement(uint32_t idx);
+    inline bool setDenseOrTypedArrayElementIfHasType(js::ThreadSafeContext *cx, uint32_t index,
+                                                     const js::Value &val);
+    inline bool setDenseOrTypedArrayElementWithType(js::ExclusiveContext *cx, uint32_t index,
+                                                    const js::Value &val);
 
     void copyDenseElements(uint32_t dstStart, const js::Value *src, uint32_t count) {
         JS_ASSERT(dstStart + count <= getDenseCapacity());

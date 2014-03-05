@@ -107,7 +107,6 @@ static eCMSMode gCMSMode = eCMSMode_Off;
 static int gCMSIntent = -2;
 
 static void ShutdownCMS();
-static void MigratePrefs();
 
 #include "mozilla/gfx/2D.h"
 using namespace mozilla::gfx;
@@ -324,12 +323,8 @@ gfxPlatform::Init()
     }
     gEverInitialized = true;
 
-    /* Pref migration hook. */
-    MigratePrefs();
-
-    // Initialize the preferences by creating the singleton.  This should
-    // be done after the preference migration using MigratePrefs().
-    gfxPrefs::One();
+    // Initialize the preferences by creating the singleton.
+    gfxPrefs::GetSingleton();
 
     gGfxPlatformPrefsLock = new Mutex("gfxPlatform::gGfxPlatformPrefsLock");
 
@@ -506,7 +501,7 @@ gfxPlatform::Shutdown()
 
     delete gGfxPlatformPrefsLock;
 
-    gfxPrefs::Destroy();
+    gfxPrefs::DestroySingleton();
 
     delete gPlatform;
     gPlatform = nullptr;
@@ -533,14 +528,6 @@ gfxPlatform::~gfxPlatform()
 #if MOZ_TREE_CAIRO
     cairo_debug_reset_static_data();
 #endif
-#endif
-
-#if 0
-    // It would be nice to do this (although it might need to be after
-    // the cairo shutdown that happens in ~gfxPlatform).  It even looks
-    // idempotent.  But it has fatal assertions that fire if stuff is
-    // leaked, and we hit them.
-    FcFini();
 #endif
 }
 
@@ -1755,21 +1742,6 @@ static void ShutdownCMS()
     gCMSIntent = -2;
     gCMSMode = eCMSMode_Off;
     gCMSInitialized = false;
-}
-
-static void MigratePrefs()
-{
-    /* Migrate from the boolean color_management.enabled pref - we now use
-       color_management.mode.  These calls should be made before gfxPrefs
-       is initialized, otherwise we may not pick up the correct values
-       with the gfxPrefs functions.
-    */
-    if (Preferences::HasUserValue(GFX_PREF_CMS_ENABLED_OBSOLETE)) {
-        if (Preferences::GetBool(GFX_PREF_CMS_ENABLED_OBSOLETE, false)) {
-            Preferences::SetInt(GFX_PREF_CMS_MODE, static_cast<int32_t>(eCMSMode_All));
-        }
-        Preferences::ClearUser(GFX_PREF_CMS_ENABLED_OBSOLETE);
-    }
 }
 
 // default SetupClusterBoundaries, based on Unicode properties;

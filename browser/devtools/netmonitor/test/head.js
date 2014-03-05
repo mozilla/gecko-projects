@@ -22,6 +22,7 @@ const CYRILLIC_URL = EXAMPLE_URL + "html_cyrillic-test-page.html";
 const STATUS_CODES_URL = EXAMPLE_URL + "html_status-codes-test-page.html";
 const POST_DATA_URL = EXAMPLE_URL + "html_post-data-test-page.html";
 const POST_RAW_URL = EXAMPLE_URL + "html_post-raw-test-page.html";
+const POST_RAW_WITH_HEADERS_URL = EXAMPLE_URL + "html_post-raw-with-headers-test-page.html";
 const PARAMS_URL = EXAMPLE_URL + "html_params-test-page.html";
 const JSONP_URL = EXAMPLE_URL + "html_jsonp-test-page.html";
 const JSON_LONG_URL = EXAMPLE_URL + "html_json-long-test-page.html";
@@ -247,10 +248,13 @@ function verifyRequestItemTarget(aRequestItem, aMethod, aUrl, aData = {}) {
 
   if (status !== undefined) {
     let value = target.querySelector(".requests-menu-status").getAttribute("code");
+    let codeValue = target.querySelector(".requests-menu-status-code").getAttribute("value");
     let tooltip = target.querySelector(".requests-menu-status-and-method").getAttribute("tooltiptext");
     info("Displayed status: " + value);
+    info("Displayed code: " + codeValue);
     info("Tooltip status: " + tooltip);
     is(value, status, "The displayed status is incorrect.");
+    is(codeValue, status, "The displayed status code is incorrect.");
     is(tooltip, status + " " + statusText, "The tooltip status is incorrect.");
   }
   if (type !== undefined) {

@@ -84,7 +84,7 @@ VARIABLES = {
         populated by calling add_android_eclipse{_library}_project().
         """, 'export'),
 
-    'SOURCES': (StrictOrderingOnAppendListWithFlagsFactory({'no_pgo': bool}), list,
+    'SOURCES': (StrictOrderingOnAppendListWithFlagsFactory({'no_pgo': bool, 'flags': list}), list,
         """Source code files.
 
         This variable contains a list of source code files to compile.
@@ -177,6 +177,11 @@ VARIABLES = {
         above or below. Use ``..`` for parent directories and ``/`` for path
         delimiters.
         """, None),
+
+    'DISABLE_STL_WRAPPING': (bool, bool,
+        """Disable the wrappers for STL which allow it to work with C++ exceptions
+        disabled.
+        """, 'binaries'),
 
     'EXPORT_LIBRARY': (bool, bool,
         """Install the library to the static libraries folder.
@@ -345,6 +350,12 @@ VARIABLES = {
 
     'RESFILE': (unicode, unicode,
         """The program .res file.
+
+        This variable can only be used on Windows.
+        """, None),
+
+    'RCINCLUDE': (unicode, unicode,
+        """The resource script file to be included in the default .res file.
 
         This variable can only be used on Windows.
         """, None),

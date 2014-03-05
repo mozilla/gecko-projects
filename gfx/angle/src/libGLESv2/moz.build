@@ -172,6 +172,9 @@ SOURCES += ['renderer/' + src for src in [
     'VertexDeclarationCache.cpp',
 ]]
 
+if CONFIG['GNU_CC']:
+    SOURCES['renderer/ImageSSE2.cpp'].flags += ['-msse2']
+
 # On Windows, we don't automatically get "lib" prepended, but we need it.
 LIBRARY_NAME = 'libGLESv2'
 
@@ -196,3 +199,6 @@ DEFINES['ANGLE_COMPILE_OPTIMIZATION_LEVEL'] = 'D3DCOMPILE_OPTIMIZATION_LEVEL1'
 
 RCFILE = SRCDIR + '/libGLESv2.rc'
 DEFFILE = SRCDIR + '/libGLESv2.def'
+
+# ANGLE uses the STL, so we can't use our derpy STL wrappers.
+DISABLE_STL_WRAPPING = True

@@ -1177,11 +1177,18 @@ class CGClassConstructor(CGAbstractStaticMethod):
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
   JS::Rooted<JSObject*> obj(cx, &args.callee());
 """
+        # [ChromeOnly] interfaces may only be constructed by chrome.
+        # Additionally, we want to throw if a non-chrome caller does a bareword invocation of a
+        # constructor without |new|. We don't enforce this for chrome to avoid the addon compat
+        # fallout of making that change. See bug 916644.
         if isChromeOnly(self._ctor):
-            preamble += """  if (!nsContentUtils::ThreadsafeIsCallerChrome()) {
+            mayInvokeCtor = "nsContentUtils::ThreadsafeIsCallerChrome()"
+        else:
+            mayInvokeCtor = "(args.isConstructing() || nsContentUtils::ThreadsafeIsCallerChrome())"
+        preamble += """  if (!%s) {
     return ThrowingConstructor(cx, argc, vp);
   }
-"""
+""" % mayInvokeCtor
         name = self._ctor.identifier.name
         nativeName = MakeNativeName(self.descriptor.binaryNames.get(name, name))
         callGenerator = CGMethodCall(nativeName, True, self.descriptor,
@@ -11351,7 +11358,7 @@ class CallbackMethod(CallbackMember):
         if self.argCount > 0:
             replacements["args"] = "JS::HandleValueArray::subarray(argv, 0, argc)"
         else:
-            replacements["args"] = "JS::EmptyValueArray"
+            replacements["args"] = "JS::HandleValueArray::empty()"
         return string.Template("${declCallable}${declThis}"
                 "if (${callGuard}!JS::Call(cx, ${thisVal}, callable,\n"
                 "              ${args}, &rval)) {\n"
@@ -12065,7 +12072,7 @@ class CGEventClass(CGBindingImplClass):
             dropJS += "  mozilla::DropJSObjects(this);\n"
         # Just override CGClass and do our own thing
         nativeType = self.descriptor.nativeType.split('::')[-1]
-        ctorParams = ("aOwner, nullptr, nullptr" if self.parentType == "nsDOMEvent"
+        ctorParams = ("aOwner, nullptr, nullptr" if self.parentType == "Event"
                  else "aOwner")
         classImpl = """
 NS_IMPL_CYCLE_COLLECTION_CLASS(${nativeType})

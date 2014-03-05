@@ -27,6 +27,9 @@ public class BrowserContract {
     public static final String HOME_AUTHORITY = AppConstants.ANDROID_PACKAGE_NAME + ".db.home";
     public static final Uri HOME_AUTHORITY_URI = Uri.parse("content://" + HOME_AUTHORITY);
 
+    public static final String READING_LIST_AUTHORITY = AppConstants.ANDROID_PACKAGE_NAME + ".db.readinglist";
+    public static final Uri READING_LIST_AUTHORITY_URI = Uri.parse("content://" + READING_LIST_AUTHORITY);
+
     public static final String PARAM_PROFILE = "profile";
     public static final String PARAM_PROFILE_PATH = "profilePath";
     public static final String PARAM_LIMIT = "limit";
@@ -369,13 +372,31 @@ public class BrowserContract {
         }
 
         static final String TABLE_BOOKMARKS_JOIN_IMAGES = Bookmarks.TABLE_NAME + " LEFT OUTER JOIN " +
-                Obsolete.TABLE_IMAGES + " ON " + DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, Bookmarks.URL) + " = " +
-                DBUtils.qualifyColumn(Obsolete.TABLE_IMAGES, Obsolete.Images.URL);
+                Obsolete.TABLE_IMAGES + " ON " + Bookmarks.TABLE_NAME + "." + Bookmarks.URL + " = " +
+                Obsolete.TABLE_IMAGES + "." + Obsolete.Images.URL;
 
         static final String TABLE_HISTORY_JOIN_IMAGES = History.TABLE_NAME + " LEFT OUTER JOIN " +
-                Obsolete.TABLE_IMAGES + " ON " + DBUtils.qualifyColumn(Bookmarks.TABLE_NAME, History.URL) + " = " +
-                DBUtils.qualifyColumn(Obsolete.TABLE_IMAGES, Obsolete.Images.URL);
+                Obsolete.TABLE_IMAGES + " ON " + Bookmarks.TABLE_NAME + "." + History.URL + " = " +
+                Obsolete.TABLE_IMAGES + "." + Obsolete.Images.URL;
 
         static final String FAVICON_DB = "favicon_urls.db";
     }
+
+    @RobocopTarget
+    public static final class ReadingListItems implements CommonColumns, URLColumns, SyncColumns {
+        private ReadingListItems() {}
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(READING_LIST_AUTHORITY_URI, "items");
+
+        public static final String CONTENT_TYPE = "vnd.android.cursor.dir/readinglistitem";
+        public static final String CONTENT_ITEM_TYPE = "vnd.android.cursor.item/readinglistitem";
+
+        public static final String EXCERPT = "excerpt";
+        public static final String READ = "read";
+        public static final String LENGTH = "length";
+        public static final String DEFAULT_SORT_ORDER = _ID + " DESC";
+        public static final String[] DEFAULT_PROJECTION = new String[] { _ID, URL, TITLE, EXCERPT, LENGTH };
+
+        public static final String TABLE_NAME = "reading_list";
+    }
+
 }

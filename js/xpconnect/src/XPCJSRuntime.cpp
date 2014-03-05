@@ -46,7 +46,6 @@
 #include "nsAboutProtocolUtils.h"
 
 #include "GeckoProfiler.h"
-#include "nsIXULRuntime.h"
 #include "nsJSPrincipals.h"
 
 #ifdef MOZ_CRASHREPORTER
@@ -1305,7 +1304,7 @@ XPCJSRuntime::GetWatchdogTimestamp(WatchdogTimestampCategory aCategory)
     return mWatchdogManager->GetTimestamp(aCategory);
 }
 
-NS_EXPORT_(void)
+void
 xpc::SimulateActivityCallback(bool aActive)
 {
     XPCJSRuntime::ActivityCallback(XPCJSRuntime::Get(), aActive);
@@ -1413,8 +1412,7 @@ XPCJSRuntime::OutOfMemoryCallback(JSContext *cx)
 
     // If this fails, it fails silently.
     dumper->DumpMemoryInfoToTempDir(NS_LITERAL_STRING("due-to-JS-OOM"),
-                                    /* minimizeMemoryUsage = */ false,
-                                    /* dumpChildProcesses = */ false);
+                                    /* minimizeMemoryUsage = */ false);
 }
 
 size_t
@@ -1497,45 +1495,6 @@ void XPCJSRuntime::SystemIsBeingShutDown()
     if (mDetachedWrappedNativeProtoMap)
         mDetachedWrappedNativeProtoMap->
             Enumerate(DetachedWrappedNativeProtoShutdownMarker, nullptr);
-}
-
-#define JS_OPTIONS_DOT_STR "javascript.options."
-
-static void
-ReloadPrefsCallback(const char *pref, void *data)
-{
-    XPCJSRuntime *runtime = reinterpret_cast<XPCJSRuntime *>(data);
-    JSRuntime *rt = runtime->Runtime();
-
-    bool safeMode = false;
-    nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
-    if (xr) {
-        xr->GetInSafeMode(&safeMode);
-    }
-
-    bool useBaseline = Preferences::GetBool(JS_OPTIONS_DOT_STR "baselinejit") && !safeMode;
-    bool useTypeInference = Preferences::GetBool(JS_OPTIONS_DOT_STR "typeinference") && !safeMode;
-    bool useIon = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion") && !safeMode;
-    bool useAsmJS = Preferences::GetBool(JS_OPTIONS_DOT_STR "asmjs") && !safeMode;
-
-    bool parallelParsing = Preferences::GetBool(JS_OPTIONS_DOT_STR "parallel_parsing");
-    bool parallelIonCompilation = Preferences::GetBool(JS_OPTIONS_DOT_STR
-                                                       "ion.parallel_compilation");
-    bool useBaselineEager = Preferences::GetBool(JS_OPTIONS_DOT_STR
-                                                 "baselinejit.unsafe_eager_compilation");
-    bool useIonEager = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion.unsafe_eager_compilation");
-
-    JS::RuntimeOptionsRef(rt).setBaseline(useBaseline)
-                             .setTypeInference(useTypeInference)
-                             .setIon(useIon)
-                           .  setAsmJS(useAsmJS);
-
-    JS_SetParallelParsingEnabled(rt, parallelParsing);
-    JS_SetParallelIonCompilationEnabled(rt, parallelIonCompilation);
-    JS_SetGlobalJitCompilerOption(rt, JSJITCOMPILER_BASELINE_USECOUNT_TRIGGER,
-                                  useBaselineEager ? 0 : -1);
-    JS_SetGlobalJitCompilerOption(rt, JSJITCOMPILER_ION_USECOUNT_TRIGGER,
-                                  useIonEager ? 0 : -1);
 }
 
 XPCJSRuntime::~XPCJSRuntime()
@@ -1623,8 +1582,6 @@ XPCJSRuntime::~XPCJSRuntime()
         MOZ_ASSERT(mScratchStrings[i].empty(), "Short lived string still in use");
     }
 #endif
-
-    Preferences::UnregisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
 }
 
 static void
@@ -2998,7 +2955,7 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
 
 XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
    : CycleCollectedJSRuntime(nullptr, 32L * 1024L * 1024L, JS_USE_HELPER_THREADS),
-   mJSContextStack(new XPCJSContextStack()),
+   mJSContextStack(new XPCJSContextStack(MOZ_THIS_IN_INITIALIZER_LIST())),
    mCallContext(nullptr),
    mAutoRoots(nullptr),
    mResolveName(JSID_VOID),
@@ -3178,10 +3135,6 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     if (!JS_GetGlobalDebugHooks(runtime)->debuggerHandler)
         xpc_InstallJSDebuggerKeywordHandler(runtime);
 #endif
-
-    // Watch for the JS boolean options.
-    ReloadPrefsCallback(nullptr, this);
-    Preferences::RegisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
 }
 
 // static

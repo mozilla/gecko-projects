@@ -1862,7 +1862,7 @@ void
 TypeZone::init(JSContext *cx)
 {
     if (!cx ||
-        !cx->runtime()->options().typeInference() ||
+        !cx->options().typeInference() ||
         !cx->runtime()->jitSupportsFloatingPoint)
     {
         return;
@@ -2134,7 +2134,10 @@ static inline bool
 ClassCanHaveExtraProperties(const Class *clasp)
 {
     JS_ASSERT(clasp->resolve);
-    return clasp->resolve != JS_ResolveStub || clasp->ops.lookupGeneric || clasp->ops.getGeneric;
+    return clasp->resolve != JS_ResolveStub
+        || clasp->ops.lookupGeneric
+        || clasp->ops.getGeneric
+        || IsTypedArrayClass(clasp);
 }
 
 static inline bool

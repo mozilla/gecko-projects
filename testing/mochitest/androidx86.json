@@ -1,6 +1,7 @@
 {
 "runtests": {},
 "excludetests": {
+  "content/media/test/test_mediarecorder_record_gum_video_timeslice.html": "mimetype check, bug 969289",
   "dom/tests/mochitest/dom-level0": "bug 910229",
   "dom/imptests/html/webgl": "WebGL",
   "content/base/test/test_copypaste.xul": "bug 904183",
@@ -118,6 +119,7 @@
  "dom/datastore/tests/test_sync.html": "x86 only bug 936226",
  "image/test/mochitest/test_bug490949.html": "x86 only",
  "image/test/mochitest/test_bug497665.html": "x86 only",
+ "image/test/mochitest/test_bug601470.html": "x86 only",
  "image/test/mochitest/test_bug671906.html": "x86 only",
  "image/test/mochitest/test_bug89419-1.html": "x86 only",
  "image/test/mochitest/test_bug89419-2.html": "x86 only",
