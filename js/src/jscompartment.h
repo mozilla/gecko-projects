@@ -521,7 +521,7 @@ namespace js {
 inline bool
 ExclusiveContext::typeInferenceEnabled() const
 {
-    return compartment_->options().typeInference(this);
+    return zone()->types.inferenceEnabled;
 }
 
 inline js::Handle<js::GlobalObject*>
@@ -533,7 +533,6 @@ ExclusiveContext::global() const
      * barrier on it. Once the compartment is popped, the handle is no longer
      * safe to use.
      */
-    MOZ_ASSERT(compartment_, "Caller needs to enter a compartment first");
     return Handle<GlobalObject*>::fromMarkedLocation(compartment_->global_.unsafeGet());
 }
 

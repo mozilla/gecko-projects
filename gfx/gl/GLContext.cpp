@@ -23,6 +23,7 @@
 #include "prenv.h"
 #include "prlink.h"
 #include "ScopedGLHelpers.h"
+#include "SharedSurfaceGL.h"
 #include "SurfaceStream.h"
 #include "GfxTexturesReporter.h"
 #include "TextureGarbageBin.h"
@@ -86,6 +87,9 @@ static const char *sExtensionNames[] = {
     "GL_OES_texture_half_float",
     "GL_OES_texture_half_float_linear",
     "GL_NV_half_float",
+    "GL_EXT_color_buffer_float",
+    "GL_EXT_color_buffer_half_float",
+    "GL_ARB_color_buffer_float",
     "GL_EXT_unpack_subimage",
     "GL_OES_standard_derivatives",
     "GL_EXT_texture_filter_anisotropic",
@@ -133,6 +137,7 @@ static const char *sExtensionNames[] = {
     "GL_KHR_debug",
     "GL_ARB_half_float_pixel",
     "GL_EXT_frag_depth",
+    "GL_OES_compressed_ETC1_RGB8_texture",
     nullptr
 };
 
@@ -1560,12 +1565,16 @@ GLContext::PublishFrame()
     return true;
 }
 
-SharedSurface*
+SharedSurface_GL*
 GLContext::RequestFrame()
 {
     MOZ_ASSERT(mScreen);
 
-    return mScreen->Stream()->SwapConsumer();
+    SharedSurface* ret = mScreen->Stream()->SwapConsumer();
+    if (!ret)
+        return nullptr;
+
+    return SharedSurface_GL::Cast(ret);
 }
 
 

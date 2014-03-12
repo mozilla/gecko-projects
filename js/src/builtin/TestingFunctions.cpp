@@ -271,7 +271,7 @@ static const struct ParamPair {
 
 // Keep this in sync with above params.
 #define GC_PARAMETER_ARGS_LIST "maxBytes, maxMallocBytes, gcBytes, gcNumber, sliceTimeBudget, or markStackLimit"
- 
+
 static bool
 GCParameter(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -317,6 +317,11 @@ GCParameter(JSContext *cx, unsigned argc, Value *vp)
     if (!value) {
         JS_ReportError(cx, "the second argument must be convertable to uint32_t "
                            "with non-zero value");
+        return false;
+    }
+
+    if (param == JSGC_MARK_STACK_LIMIT && IsIncrementalGCInProgress(cx->runtime())) {
+        JS_ReportError(cx, "attempt to set markStackLimit while a GC is in progress");
         return false;
     }
 
@@ -1160,7 +1165,7 @@ SetJitCompilerOption(JSContext *cx, unsigned argc, jsval *vp)
     if (number < 0)
         number = -1;
 
-    JS_SetGlobalJitCompilerOption(cx, opt, uint32_t(number));
+    JS_SetGlobalJitCompilerOption(cx->runtime(), opt, uint32_t(number));
 
     args.rval().setUndefined();
     return true;
@@ -1175,10 +1180,10 @@ GetJitCompilerOptions(JSContext *cx, unsigned argc, jsval *vp)
 
     RootedValue value(cx);
 
-#define JIT_COMPILER_MATCH(key, string)                         \
-    opt = JSJITCOMPILER_ ## key;                                \
-    value.setInt32(JS_GetGlobalJitCompilerOption(cx, opt));     \
-    if (!JS_SetProperty(cx, info, string, value))               \
+#define JIT_COMPILER_MATCH(key, string)                                \
+    opt = JSJITCOMPILER_ ## key;                                       \
+    value.setInt32(JS_GetGlobalJitCompilerOption(cx->runtime(), opt)); \
+    if (!JS_SetProperty(cx, info, string, value))                      \
         return false;
 
     JSJitCompilerOption opt = JSJITCOMPILER_NOT_AN_OPTION;

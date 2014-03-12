@@ -68,6 +68,7 @@
 <!ENTITY pref_category_advanced "Advanced">
 <!ENTITY pref_category_customize "Customize">
 <!ENTITY pref_category_search3 "Search">
+<!ENTITY pref_category_search_summary "Customize your search providers">
 <!ENTITY pref_category_display "Display">
 <!ENTITY pref_category_privacy_short "Privacy">
 <!ENTITY pref_category_vendor "&vendorShortName;">
@@ -89,10 +90,19 @@
 <!ENTITY pref_remember_signons "Remember passwords">
 
 <!ENTITY pref_category_home "Home">
+<!ENTITY pref_category_home_summary "Customize your homepage">
 <!ENTITY pref_category_home_panels "Panels">
 <!ENTITY pref_home_add_panel "Add panel">
 <!ENTITY home_add_panel_title "Add new panel">
 <!ENTITY home_add_panel_empty "Sorry, we couldn\'t find any panels for you to add.">
+<!-- Localization note (home_add_panel_installed):
+     The &formatS; will be replaced with the name of the new panel the user just
+     selected to be added to the home page. -->
+<!ENTITY home_add_panel_installed "\'&formatS;\' added to homepage">
+<!ENTITY pref_category_home_content_settings "Content settings">
+<!ENTITY pref_home_updates "Automatic updates">
+<!ENTITY pref_home_updates_enabled "Enabled">
+<!ENTITY pref_home_updates_wifi "Only over Wi-Fi">
 
 <!-- Localization note: These are shown in the left sidebar on tablets -->
 <!ENTITY pref_header_customize "Customize">

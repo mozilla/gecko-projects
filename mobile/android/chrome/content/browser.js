@@ -1187,6 +1187,7 @@ var BrowserApp = {
         case "browser.chrome.titlebarMode":
         case "network.cookie.cookieBehavior":
         case "font.size.inflation.minTwips":
+        case "home.sync.updateMode":
           pref.type = "string";
           pref.value = pref.value.toString();
           break;
@@ -1258,6 +1259,7 @@ var BrowserApp = {
       case "browser.chrome.titlebarMode":
       case "network.cookie.cookieBehavior":
       case "font.size.inflation.minTwips":
+      case "home.sync.updateMode":
         json.type = "int";
         json.value = parseInt(json.value);
         break;
@@ -3121,14 +3123,14 @@ Tab.prototype = {
                                     pageRect.left - geckoScrollX), pageXMost - dpW);
         let dpY = Math.min(Math.max(displayPort.y - displayPort.height * 1.5,
                                     pageRect.top - geckoScrollY), pageYMost - dpH);
-        cwu.setDisplayPortForElement(dpX, dpY, dpW, dpH, element);
+        cwu.setDisplayPortForElement(dpX, dpY, dpW, dpH, element, 0);
         cwu.setCriticalDisplayPortForElement(displayPort.x, displayPort.y,
                                              displayPort.width, displayPort.height,
                                              element);
       } else {
         cwu.setDisplayPortForElement(displayPort.x, displayPort.y,
                                      displayPort.width, displayPort.height,
-                                     element);
+                                     element, 0);
       }
     }
 
@@ -7098,7 +7100,7 @@ var WebappsUI = {
             );
           }
         );
-      }
+      });
     } else {
       DOMApplicationRegistry.denyInstall(aData);
     }
@@ -7951,7 +7953,7 @@ var ExternalApps = {
               Strings.browser.GetStringFromName("openInApp.ok"),
               Strings.browser.GetStringFromName("openInApp.cancel")
             ]
-          }, function(result) {
+          }, (result) => {
             if (result.button != 0) {
               return;
             }

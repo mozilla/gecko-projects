@@ -16,6 +16,7 @@ let { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
 let { Promise: promise } = Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js", {});
 let { gDevTools } = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
 let { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+let { require } = devtools;
 let { DevToolsUtils } = Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm", {});
 let { BrowserToolboxProcess } = Cu.import("resource:///modules/devtools/ToolboxProcess.jsm", {});
 let { DebuggerServer } = Cu.import("resource://gre/modules/devtools/dbg-server.jsm", {});
@@ -153,6 +154,7 @@ function getTabActorForUrl(aClient, aUrl) {
 }
 
 function getAddonActorForUrl(aClient, aUrl) {
+  info("Get addon actor for URL: " + aUrl);
   let deferred = promise.defer();
 
   aClient.listAddons(aResponse => {
@@ -603,6 +605,41 @@ function openVarPopup(aPanel, aCoords, aWaitForFetchedProperties) {
   return promise.all([popupShown, fetchedProperties]).then(waitForTick);
 }
 
+// Simulates the mouse hovering a variable in the debugger
+// Takes in account the position of the cursor in the text, if the text is
+// selected and if a button is currently pushed (aButtonPushed > 0).
+// The function returns a promise which returns true if the popup opened or
+// false if it didn't
+function intendOpenVarPopup(aPanel, aPosition, aButtonPushed) {
+  let bubble = aPanel.panelWin.DebuggerView.VariableBubble;
+  let editor = aPanel.panelWin.DebuggerView.editor;
+  let tooltip = bubble._tooltip;
+
+  let { left, top } = editor.getCoordsFromPosition(aPosition);
+
+  const eventDescriptor = {
+    clientX: left,
+    clientY: top,
+    buttons: aButtonPushed
+  };
+
+  bubble._onMouseMove(eventDescriptor);
+
+  const deferred = promise.defer();
+  window.setTimeout(
+    function() {
+      if(tooltip.isEmpty()) {
+        deferred.resolve(false);
+      } else {
+        deferred.resolve(true);
+      }
+    },
+    tooltip.defaultShowDelay + 1000
+  );
+
+  return deferred.promise;
+}
+
 function hideVarPopup(aPanel) {
   let bubble = aPanel.panelWin.DebuggerView.VariableBubble;
   let tooltip = bubble._tooltip.panel;
@@ -659,4 +696,14 @@ function filterTraces(aPanel, f) {
     .children;
   return Array.filter(traces, f);
 }
+function attachAddonActorForUrl(aClient, aUrl) {
+  let deferred = promise.defer();
 
+  getAddonActorForUrl(aClient, aUrl).then(aGrip => {
+    aClient.attachAddon(aGrip.actor, aResponse => {
+      deferred.resolve([aGrip, aResponse]);
+    });
+  });
+
+  return deferred.promise;
+}

@@ -46,6 +46,7 @@
 #include "nsAboutProtocolUtils.h"
 
 #include "GeckoProfiler.h"
+#include "nsIXULRuntime.h"
 #include "nsJSPrincipals.h"
 
 #ifdef MOZ_CRASHREPORTER
@@ -586,12 +587,6 @@ GetJunkScopeGlobal()
     return GetNativeForGlobal(junkScope);
 }
 
-JSObject *
-GetSafeJSContextGlobal()
-{
-    return XPCJSRuntime::Get()->GetJSContextStack()->GetSafeJSContextGlobal();
-}
-
 nsGlobalWindow*
 WindowGlobalOrNull(JSObject *aObj)
 {
@@ -728,6 +723,11 @@ void
 XPCJSRuntime::EndCycleCollectionCallback(CycleCollectorResults &aResults)
 {
     nsJSContext::EndCycleCollectionCallback(aResults);
+
+    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+    if (obs) {
+        obs->NotifyObservers(nullptr, "cycle-collector-end", nullptr);
+    }
 }
 
 void
@@ -1285,7 +1285,7 @@ WatchdogMain(void *arg)
         // Rise and shine.
         manager->RecordTimestamp(TimestampWatchdogWakeup);
 
-        // Don't trigger the operation callback if activity started less than one second ago.
+        // Don't request an interrupt callback if activity started less than one second ago.
         // The callback is only used for detecting long running scripts, and triggering the
         // callback from off the main thread can be expensive.
         if (manager->IsRuntimeActive() &&
@@ -1296,7 +1296,7 @@ WatchdogMain(void *arg)
             if (dbg)
                 dbg->GetIsDebuggerAttached(&debuggerAttached);
             if (!debuggerAttached)
-                JS_TriggerOperationCallback(manager->Runtime()->Runtime());
+                JS_RequestInterruptCallback(manager->Runtime()->Runtime());
         }
     }
 
@@ -1350,18 +1350,18 @@ XPCJSRuntime::CTypesActivityCallback(JSContext *cx, js::CTypesActivityType type)
 
 // static
 bool
-XPCJSRuntime::OperationCallback(JSContext *cx)
+XPCJSRuntime::InterruptCallback(JSContext *cx)
 {
     XPCJSRuntime *self = XPCJSRuntime::Get();
 
-    // If this is the first time the operation callback has fired since we last
+    // If this is the first time the interrupt callback has fired since we last
     // returned to the event loop, mark the checkpoint.
     if (self->mSlowScriptCheckpoint.IsNull()) {
         self->mSlowScriptCheckpoint = TimeStamp::NowLoRes();
         return true;
     }
 
-    // This is at least the second operation callback we've received since
+    // This is at least the second interrupt callback we've received since
     // returning to the event loop. See how long it's been, and what the limit
     // is.
     TimeDuration duration = TimeStamp::NowLoRes() - self->mSlowScriptCheckpoint;
@@ -1503,6 +1503,45 @@ void XPCJSRuntime::SystemIsBeingShutDown()
             Enumerate(DetachedWrappedNativeProtoShutdownMarker, nullptr);
 }
 
+#define JS_OPTIONS_DOT_STR "javascript.options."
+
+static void
+ReloadPrefsCallback(const char *pref, void *data)
+{
+    XPCJSRuntime *runtime = reinterpret_cast<XPCJSRuntime *>(data);
+    JSRuntime *rt = runtime->Runtime();
+
+    bool safeMode = false;
+    nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
+    if (xr) {
+        xr->GetInSafeMode(&safeMode);
+    }
+
+    bool useBaseline = Preferences::GetBool(JS_OPTIONS_DOT_STR "baselinejit") && !safeMode;
+    bool useTypeInference = Preferences::GetBool(JS_OPTIONS_DOT_STR "typeinference") && !safeMode;
+    bool useIon = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion") && !safeMode;
+    bool useAsmJS = Preferences::GetBool(JS_OPTIONS_DOT_STR "asmjs") && !safeMode;
+
+    bool parallelParsing = Preferences::GetBool(JS_OPTIONS_DOT_STR "parallel_parsing");
+    bool parallelIonCompilation = Preferences::GetBool(JS_OPTIONS_DOT_STR
+                                                       "ion.parallel_compilation");
+    bool useBaselineEager = Preferences::GetBool(JS_OPTIONS_DOT_STR
+                                                 "baselinejit.unsafe_eager_compilation");
+    bool useIonEager = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion.unsafe_eager_compilation");
+
+    JS::RuntimeOptionsRef(rt).setBaseline(useBaseline)
+                             .setTypeInference(useTypeInference)
+                             .setIon(useIon)
+                           .  setAsmJS(useAsmJS);
+
+    JS_SetParallelParsingEnabled(rt, parallelParsing);
+    JS_SetParallelIonCompilationEnabled(rt, parallelIonCompilation);
+    JS_SetGlobalJitCompilerOption(rt, JSJITCOMPILER_BASELINE_USECOUNT_TRIGGER,
+                                  useBaselineEager ? 0 : -1);
+    JS_SetGlobalJitCompilerOption(rt, JSJITCOMPILER_ION_USECOUNT_TRIGGER,
+                                  useIonEager ? 0 : -1);
+}
+
 XPCJSRuntime::~XPCJSRuntime()
 {
     // This destructor runs before ~CycleCollectedJSRuntime, which does the
@@ -1588,6 +1627,8 @@ XPCJSRuntime::~XPCJSRuntime()
         MOZ_ASSERT(mScratchStrings[i].empty(), "Short lived string still in use");
     }
 #endif
+
+    Preferences::UnregisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
 }
 
 static void
@@ -3083,7 +3124,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     js::SetDefaultJSContextCallback(runtime, DefaultJSContextCallback);
     js::SetActivityCallback(runtime, ActivityCallback, this);
     js::SetCTypesActivityCallback(runtime, CTypesActivityCallback);
-    JS_SetOperationCallback(runtime, OperationCallback);
+    JS_SetInterruptCallback(runtime, InterruptCallback);
     JS::SetOutOfMemoryCallback(runtime, OutOfMemoryCallback);
 
     // The JS engine needs to keep the source code around in order to implement
@@ -3124,6 +3165,10 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     if (!JS_GetGlobalDebugHooks(runtime)->debuggerHandler)
         xpc_InstallJSDebuggerKeywordHandler(runtime);
 #endif
+
+    // Watch for the JS boolean options.
+    ReloadPrefsCallback(nullptr, this);
+    Preferences::RegisterCallback(ReloadPrefsCallback, JS_OPTIONS_DOT_STR, this);
 }
 
 // static
@@ -3154,9 +3199,6 @@ XPCJSRuntime::newXPCJSRuntime(nsXPConnect* aXPConnect)
     return nullptr;
 }
 
-// InternStaticDictionaryJSVals is automatically generated.
-bool InternStaticDictionaryJSVals(JSContext* aCx);
-
 bool
 XPCJSRuntime::OnJSContextNew(JSContext *cx)
 {
@@ -3178,8 +3220,7 @@ XPCJSRuntime::OnJSContextNew(JSContext *cx)
             mStrJSVals[i] = STRING_TO_JSVAL(str);
         }
 
-        if (!mozilla::dom::DefineStaticJSVals(cx) ||
-            !InternStaticDictionaryJSVals(cx)) {
+        if (!mozilla::dom::DefineStaticJSVals(cx)) {
             return false;
         }
     }

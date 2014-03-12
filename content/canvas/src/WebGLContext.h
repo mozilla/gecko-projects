@@ -122,15 +122,16 @@ class WebGLContext :
     public nsWrapperCache
 {
     friend class WebGLContextUserData;
-    friend class WebGLMemoryPressureObserver;
-    friend class WebGLMemoryTracker;
-    friend class WebGLExtensionLoseContext;
-    friend class WebGLExtensionCompressedTextureS3TC;
     friend class WebGLExtensionCompressedTextureATC;
+    friend class WebGLExtensionCompressedTextureETC1;
     friend class WebGLExtensionCompressedTexturePVRTC;
+    friend class WebGLExtensionCompressedTextureS3TC;
     friend class WebGLExtensionDepthTexture;
     friend class WebGLExtensionDrawBuffers;
+    friend class WebGLExtensionLoseContext;
     friend class WebGLExtensionVertexArray;
+    friend class WebGLMemoryPressureObserver;
+    friend class WebGLMemoryTracker;
 
     enum {
         UNPACK_FLIP_Y_WEBGL = 0x9240,
@@ -243,10 +244,6 @@ public:
 
     // Calls ForceClearFramebufferWithDefaultValues() for the Context's 'screen'.
     void ClearScreen();
-
-    // checks for GL errors, clears any pending GL error, stores the current GL error in currentGLError (if not nullptr),
-    // and copies it into mWebGLError if it doesn't already have an error set
-    void UpdateWebGLErrorAndClearGLError(GLenum *currentGLError = nullptr);
 
     bool MinCapabilityMode() const { return mMinCapability; }
 
@@ -852,7 +849,12 @@ protected:
     void DeleteWebGLObjectsArray(nsTArray<WebGLObjectType>& array);
 
     GLuint mActiveTexture;
+
+    // glGetError sources:
+    bool mEmitContextLostErrorOnce;
     GLenum mWebGLError;
+    GLenum mUnderlyingGLError;
+    GLenum GetAndFlushUnderlyingGLErrors();
 
     // whether shader validation is supported
     bool mShaderValidation;
@@ -895,6 +897,7 @@ protected:
     // -------------------------------------------------------------------------
     // WebGL extensions (implemented in WebGLContextExtensions.cpp)
     enum WebGLExtensionID {
+        EXT_color_buffer_half_float,
         EXT_frag_depth,
         EXT_sRGB,
         EXT_texture_filter_anisotropic,
@@ -905,7 +908,9 @@ protected:
         OES_texture_half_float,
         OES_texture_half_float_linear,
         OES_vertex_array_object,
+        WEBGL_color_buffer_float,
         WEBGL_compressed_texture_atc,
+        WEBGL_compressed_texture_etc1,
         WEBGL_compressed_texture_pvrtc,
         WEBGL_compressed_texture_s3tc,
         WEBGL_debug_renderer_info,
@@ -932,7 +937,6 @@ protected:
     static const char* GetExtensionString(WebGLExtensionID ext);
 
     nsTArray<GLenum> mCompressedTextureFormats;
-
 
     // -------------------------------------------------------------------------
     // WebGL 2 specifics (implemented in WebGL2Context.cpp)

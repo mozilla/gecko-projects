@@ -619,11 +619,10 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
     WriteParam(aMsg, aParam.mPresShellId);
     WriteParam(aMsg, aParam.mIsRoot);
     WriteParam(aMsg, aParam.mHasScrollgrab);
-    WriteParam(aMsg, aParam.mDisableScrollingX);
-    WriteParam(aMsg, aParam.mDisableScrollingY);
     WriteParam(aMsg, aParam.mUpdateScrollOffset);
     WriteParam(aMsg, aParam.mScrollGeneration);
     WriteParam(aMsg, aParam.mContentDescription);
+    WriteParam(aMsg, aParam.mTransformScale);
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
@@ -643,11 +642,10 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
             ReadParam(aMsg, aIter, &aResult->mPresShellId) &&
             ReadParam(aMsg, aIter, &aResult->mIsRoot) &&
             ReadParam(aMsg, aIter, &aResult->mHasScrollgrab) &&
-            ReadParam(aMsg, aIter, &aResult->mDisableScrollingX) &&
-            ReadParam(aMsg, aIter, &aResult->mDisableScrollingY) &&
             ReadParam(aMsg, aIter, &aResult->mUpdateScrollOffset) &&
             ReadParam(aMsg, aIter, &aResult->mScrollGeneration) &&
-            ReadParam(aMsg, aIter, &aResult->mContentDescription));
+            ReadParam(aMsg, aIter, &aResult->mContentDescription) &&
+            ReadParam(aMsg, aIter, &aResult->mTransformScale));
   }
 };
 

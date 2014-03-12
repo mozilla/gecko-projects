@@ -160,6 +160,7 @@ CompositableHost::Create(const TextureInfo& aTextureInfo)
     result = new ContentHostIncremental(aTextureInfo);
     break;
   case BUFFER_TILED:
+  case BUFFER_SIMPLE_TILED:
     result = new TiledContentHost(aTextureInfo);
     break;
   case COMPOSITABLE_IMAGE:
@@ -174,7 +175,9 @@ CompositableHost::Create(const TextureInfo& aTextureInfo)
   default:
     MOZ_CRASH("Unknown CompositableType");
   }
-  if (result) {
+  // We know that Tiled buffers don't use the compositable backend-specific
+  // data, so don't bother creating it.
+  if (result && aTextureInfo.mCompositableType != BUFFER_TILED) {
     RefPtr<CompositableBackendSpecificData> data = CreateCompositableBackendSpecificDataOGL();
     result->SetCompositableBackendSpecificData(data);
   }

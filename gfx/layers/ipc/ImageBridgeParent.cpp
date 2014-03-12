@@ -58,6 +58,12 @@ ImageBridgeParent::~ImageBridgeParent()
   }
 }
 
+LayersBackend
+ImageBridgeParent::GetCompositorBackendType() const
+{
+  return Compositor::GetBackend();
+}
+
 void
 ImageBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
 {
@@ -80,7 +86,9 @@ ImageBridgeParent::RecvUpdate(const EditArray& aEdits, EditReplyArray* aReply)
 
   EditReplyVector replyv;
   for (EditArray::index_type i = 0; i < aEdits.Length(); ++i) {
-    ReceiveCompositableUpdate(aEdits[i], replyv);
+    if (!ReceiveCompositableUpdate(aEdits[i], replyv)) {
+      return false;
+    }
   }
 
   aReply->SetCapacity(replyv.size());

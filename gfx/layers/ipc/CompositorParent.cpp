@@ -51,7 +51,6 @@
 #endif
 #include "GeckoProfiler.h"
 #include "mozilla/ipc/ProtocolTypes.h"
-#include "mozilla/unused.h"
 
 using namespace base;
 using namespace mozilla;
@@ -190,7 +189,6 @@ CompositorParent::CompositorParent(nsIWidget* aWidget,
   , mResumeCompositionMonitor("ResumeCompositionMonitor")
   , mOverrideComposeReadiness(false)
   , mForceCompositionTask(nullptr)
-  , mWantDidCompositeEvent(false)
 {
   NS_ABORT_IF_FALSE(sCompositorThread != nullptr || sCompositorThreadID,
                     "The compositor thread must be Initialized before instanciating a COmpositorParent.");
@@ -332,8 +330,7 @@ CompositorParent::RecvFlushRendering()
   // If we're waiting to do a composite, then cancel it
   // and do it immediately instead.
   if (mCurrentCompositeTask) {
-    mCurrentCompositeTask->Cancel();
-    mCurrentCompositeTask = nullptr;
+    CancelCurrentCompositeTask();
     ForceComposeToTarget(nullptr);
   }
   return true;
@@ -378,9 +375,15 @@ CompositorParent::RecvSetTestSampleTime(const TimeStamp& aTime)
 
   mIsTesting = true;
   mTestTime = aTime;
-  if (mCompositionManager) {
-    mCompositionManager->TransformShadowTree(aTime);
+
+  // Update but only if we were already scheduled to animate
+  if (mCompositionManager && mCurrentCompositeTask) {
+    bool requestNextFrame = mCompositionManager->TransformShadowTree(aTime);
+    if (!requestNextFrame) {
+      CancelCurrentCompositeTask();
+    }
   }
+
   return true;
 }
 
@@ -467,6 +470,15 @@ CompositorParent::ForceComposition()
 }
 
 void
+CompositorParent::CancelCurrentCompositeTask()
+{
+  if (mCurrentCompositeTask) {
+    mCurrentCompositeTask->Cancel();
+    mCurrentCompositeTask = nullptr;
+  }
+}
+
+void
 CompositorParent::SetEGLSurfaceSize(int width, int height)
 {
   NS_ASSERTION(mUseExternalSurfaceSize, "Compositor created without UseExternalSurfaceSize provided");
@@ -539,8 +551,6 @@ CompositorParent::NotifyShadowTreeTransaction(uint64_t aId, bool aIsFirstPaint, 
   if (aScheduleComposite) {
     ScheduleComposition();
   }
-
-  mWantDidCompositeEvent = true;
 }
 
 // Used when layout.frame_rate is -1. Needs to be kept in sync with
@@ -667,11 +677,6 @@ CompositorParent::CompositeToTarget(DrawTarget* aTarget)
   mLayerManager->SetDebugOverlayWantsNextFrame(false);
   mLayerManager->EndEmptyTransaction();
 
-  if (!aTarget && mWantDidCompositeEvent) {
-    DidComposite();
-    mWantDidCompositeEvent = false;
-  }
-
   if (mLayerManager->DebugOverlayWantsNextFrame()) {
     ScheduleComposition();
   }
@@ -696,20 +701,6 @@ CompositorParent::CompositeToTarget(DrawTarget* aTarget)
   }
 
   profiler_tracing("Paint", "Composite", TRACING_INTERVAL_END);
-}
-
-void
-CompositorParent::DidComposite()
-{
-  unused << SendDidComposite(0);
-
-  for (LayerTreeMap::iterator it = sIndirectLayerTrees.begin();
-       it != sIndirectLayerTrees.end(); it++) {
-    LayerTreeState* lts = &it->second;
-    if (lts->mParent == this && lts->mCrossProcessParent) {
-      unused << lts->mCrossProcessParent->SendDidComposite(it->first);
-    }
-  }
 }
 
 void
@@ -780,15 +771,24 @@ CompositorParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
 
   if (root) {
     SetShadowProperties(root);
-    if (mIsTesting) {
-      mCompositionManager->TransformShadowTree(mTestTime);
-    }
   }
   if (aScheduleComposite) {
     ScheduleComposition();
+    // When testing we synchronously update the shadow tree with the animated
+    // values to avoid race conditions when calling GetAnimationTransform etc.
+    // (since the above SetShadowProperties will remove animation effects).
+    // However, we only do this update when a composite operation is already
+    // scheduled in order to better match the behavior under regular sampling
+    // conditions.
+    if (mIsTesting && root && mCurrentCompositeTask) {
+      bool requestNextFrame =
+        mCompositionManager->TransformShadowTree(mTestTime);
+      if (!requestNextFrame) {
+        CancelCurrentCompositeTask();
+      }
+    }
   }
   mLayerManager->NotifyShadowTreeTransaction();
-  mWantDidCompositeEvent = true;
 }
 
 void

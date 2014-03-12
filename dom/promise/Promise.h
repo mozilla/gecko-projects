@@ -13,6 +13,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/dom/PromiseBinding.h"
+#include "mozilla/dom/TypedArray.h"
 #include "nsWrapperCache.h"
 #include "nsAutoPtr.h"
 #include "js/TypeDecls.h"
@@ -201,20 +202,22 @@ private:
     return WrapNewBindingObject(aCx, scope, aArgument, aValue);
   }
 
-  // Accept objects that inherit from nsISupports but not nsWrapperCache (e.g.
-  // nsIDOMFile).
-  template <class T>
-  typename EnableIf<!IsBaseOf<nsWrapperCache, T>::value &&
-                    IsBaseOf<nsISupports, T>::value, bool>::Type
-  ArgumentToJSValue(T& aArgument,
+  // Accept typed arrays built from appropriate nsTArray values
+  template<typename T>
+  typename EnableIf<IsBaseOf<AllTypedArraysBase, T>::value, bool>::Type
+  ArgumentToJSValue(const TypedArrayCreator<T>& aArgument,
                     JSContext* aCx,
                     JSObject* aScope,
                     JS::MutableHandle<JS::Value> aValue)
   {
-    JS::Rooted<JSObject*> scope(aCx, aScope);
+    JS::RootedObject scope(aCx, aScope);
 
-    nsresult rv = nsContentUtils::WrapNative(aCx, scope, &aArgument, aValue);
-    return NS_SUCCEEDED(rv);
+    JSObject* abv = aArgument.Create(aCx, scope);
+    if (!abv) {
+      return false;
+    }
+    aValue.setObject(*abv);
+    return true;
   }
 
   template <template <typename> class SmartPtr, typename T>

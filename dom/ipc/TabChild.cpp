@@ -15,7 +15,6 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/IntentionalCrash.h"
 #include "mozilla/docshell/OfflineCacheUpdateChild.h"
-#include "mozilla/dom/PContentDialogChild.h"
 #include "mozilla/ipc/DocumentRendererChild.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/layers/AsyncPanZoomController.h"
@@ -42,7 +41,6 @@
 #include "mozilla/dom/Element.h"
 #include "nsIBaseWindow.h"
 #include "nsICachedFileDescriptorListener.h"
-#include "nsIDialogParamBlock.h"
 #include "nsIDocumentInlines.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDOMEvent.h"
@@ -74,7 +72,7 @@
 #include "nsILoadContext.h"
 #include "ipc/nsGUIEventIPC.h"
 #include "mozilla/gfx/Matrix.h"
-#include "ClientLayerManager.h"
+#include "UnitTransforms.h"
 
 #include "nsColorPickerProxy.h"
 
@@ -107,9 +105,6 @@ static bool sCpowsEnabled = false;
 static int32_t sActiveDurationMs = 10;
 static bool sActiveDurationMsSet = false;
 
-typedef nsDataHashtable<nsUint64HashKey, TabChild*> TabChildMap;
-static TabChildMap* sTabChildren;
-
 NS_IMETHODIMP
 ContentListener::HandleEvent(nsIDOMEvent* aEvent)
 {
@@ -119,13 +114,6 @@ ContentListener::HandleEvent(nsIDOMEvent* aEvent)
   mTabChild->SendEvent(remoteEvent);
   return NS_OK;
 }
-
-class ContentDialogChild : public PContentDialogChild
-{
-public:
-  virtual bool Recv__delete__(const InfallibleTArray<int>& aIntParams,
-                              const InfallibleTArray<nsString>& aStringParams);
-};
 
 class TabChild::CachedFileDescriptorInfo
 {
@@ -284,7 +272,6 @@ TabChild::TabChild(ContentChild* aManager, const TabContext& aContext, uint32_t 
   , mManager(aManager)
   , mTabChildGlobal(nullptr)
   , mChromeFlags(aChromeFlags)
-  , mLayersId(0)
   , mOuterRect(0, 0, 0, 0)
   , mInnerSize(0, 0)
   , mActivePointerId(-1)
@@ -300,6 +287,7 @@ TabChild::TabChild(ContentChild* aManager, const TabContext& aContext, uint32_t 
   , mUpdateHitRegion(false)
   , mContextMenuHandled(false)
   , mWaitingTouchListeners(false)
+  , mIgnoreKeyPressEvent(false)
 {
   if (!sActiveDurationMsSet) {
     Preferences::AddIntVarCache(&sActiveDurationMs,
@@ -330,7 +318,9 @@ TabChild::InitializeRootMetrics()
   // be keeping, as well as putting the scroll offset back to
   // the top-left of the page.
   mLastRootMetrics.mViewport = CSSRect(CSSPoint(), kDefaultViewportSize);
-  mLastRootMetrics.mCompositionBounds = ScreenIntRect(ScreenIntPoint(), mInnerSize);
+  mLastRootMetrics.mCompositionBounds = ParentLayerIntRect(
+      ParentLayerIntPoint(),
+      ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot));
   mLastRootMetrics.mZoom = mLastRootMetrics.CalculateIntrinsicScale();
   mLastRootMetrics.mDevPixelsPerCSSPixel = mWidget->GetDefaultScale();
   // We use ScreenToLayerScale(1) below in order to turn the
@@ -602,7 +592,9 @@ TabChild::HandlePossibleViewportChange()
 
   FrameMetrics metrics(mLastRootMetrics);
   metrics.mViewport = CSSRect(CSSPoint(), viewport);
-  metrics.mCompositionBounds = ScreenIntRect(ScreenIntPoint(), mInnerSize);
+  metrics.mCompositionBounds = ParentLayerIntRect(
+      ParentLayerIntPoint(),
+      ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot));
 
   // This change to the zoom accounts for all types of changes I can conceive:
   // 1. screen size changes, CSS viewport does not (pages with no meta viewport
@@ -645,7 +637,7 @@ TabChild::HandlePossibleViewportChange()
   metrics.mResolution = metrics.mCumulativeResolution / LayoutDeviceToParentLayerScale(1);
   utils->SetResolution(metrics.mResolution.scale, metrics.mResolution.scale);
 
-  CSSSize scrollPort = metrics.CalculateCompositedRectInCssPixels().Size();
+  CSSSize scrollPort = CSSSize(metrics.CalculateCompositedRectInCssPixels().Size());
   utils->SetScrollPositionClampingScrollPortSize(scrollPort.width, scrollPort.height);
 
   // The call to GetPageSize forces a resize event to content, so we need to
@@ -789,7 +781,6 @@ NS_INTERFACE_MAP_BEGIN(TabChild)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventListener)
   NS_INTERFACE_MAP_ENTRY(nsIWebProgressListener)
   NS_INTERFACE_MAP_ENTRY(nsITabChild)
-  NS_INTERFACE_MAP_ENTRY(nsIDialogCreator)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_INTERFACE_MAP_ENTRY(nsSupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsITooltipListener)
@@ -1104,84 +1095,6 @@ TabChild::GetDocument()
   return doc.forget();
 }
 
-static nsInterfaceHashtable<nsPtrHashKey<PContentDialogChild>, nsIDialogParamBlock>* gActiveDialogs;
-
-NS_IMETHODIMP
-TabChild::OpenDialog(uint32_t aType, const nsACString& aName,
-                     const nsACString& aFeatures,
-                     nsIDialogParamBlock* aArguments,
-                     nsIDOMElement* aFrameElement)
-{
-  if (!gActiveDialogs) {
-    gActiveDialogs = new nsInterfaceHashtable<nsPtrHashKey<PContentDialogChild>, nsIDialogParamBlock>;
-  }
-  InfallibleTArray<int32_t> intParams;
-  InfallibleTArray<nsString> stringParams;
-  ParamsToArrays(aArguments, intParams, stringParams);
-  PContentDialogChild* dialog =
-    SendPContentDialogConstructor(aType, nsCString(aName),
-                                  nsCString(aFeatures), intParams, stringParams);
-  gActiveDialogs->Put(dialog, aArguments);
-  nsIThread *thread = NS_GetCurrentThread();
-  while (gActiveDialogs && gActiveDialogs->GetWeak(dialog)) {
-    if (!NS_ProcessNextEvent(thread)) {
-      break;
-    }
-  }
-  return NS_OK;
-}
-
-bool
-ContentDialogChild::Recv__delete__(const InfallibleTArray<int>& aIntParams,
-                                   const InfallibleTArray<nsString>& aStringParams)
-{
-  nsCOMPtr<nsIDialogParamBlock> params;
-  if (gActiveDialogs && gActiveDialogs->Get(this, getter_AddRefs(params))) {
-    TabChild::ArraysToParams(aIntParams, aStringParams, params);
-    gActiveDialogs->Remove(this);
-    if (gActiveDialogs->Count() == 0) {
-      delete gActiveDialogs;
-      gActiveDialogs = nullptr;
-    }
-  }
-  return true;
-}
-
-void
-TabChild::ParamsToArrays(nsIDialogParamBlock* aParams,
-                         InfallibleTArray<int>& aIntParams,
-                         InfallibleTArray<nsString>& aStringParams)
-{
-  if (aParams) {
-    for (int32_t i = 0; i < 8; ++i) {
-      int32_t val = 0;
-      aParams->GetInt(i, &val);
-      aIntParams.AppendElement(val);
-    }
-    int32_t j = 0;
-    nsXPIDLString strVal;
-    while (NS_SUCCEEDED(aParams->GetString(j, getter_Copies(strVal)))) {
-      aStringParams.AppendElement(strVal);
-      ++j;
-    }
-  }
-}
-
-void
-TabChild::ArraysToParams(const InfallibleTArray<int>& aIntParams,
-                         const InfallibleTArray<nsString>& aStringParams,
-                         nsIDialogParamBlock* aParams)
-{
-  if (aParams) {
-    for (int32_t i = 0; uint32_t(i) < aIntParams.Length(); ++i) {
-      aParams->SetInt(i, aIntParams[i]);
-    }
-    for (int32_t j = 0; uint32_t(j) < aStringParams.Length(); ++j) {
-      aParams->SetString(j, aStringParams[j].get());
-    }
-  }
-}
-
 #ifdef DEBUG
 PContentPermissionRequestChild*
 TabChild:: SendPContentPermissionRequestConstructor(PContentPermissionRequestChild* aActor,
@@ -1212,17 +1125,6 @@ TabChild::DestroyWindow()
     if (mRemoteFrame) {
         mRemoteFrame->Destroy();
         mRemoteFrame = nullptr;
-    }
-
-
-    if (mLayersId != 0) {
-      MOZ_ASSERT(sTabChildren);
-      sTabChildren->Remove(mLayersId);
-      if (!sTabChildren->Count()) {
-        delete sTabChildren;
-        sTabChildren = nullptr;
-      }
-      mLayersId = 0;
     }
 }
 
@@ -1615,7 +1517,7 @@ TabChild::ProcessUpdateFrame(const FrameMetrics& aFrameMetrics)
     FrameMetrics newMetrics = aFrameMetrics;
     APZCCallbackHelper::UpdateRootFrame(utils, newMetrics);
 
-    CSSRect cssCompositedRect = newMetrics.CalculateCompositedRectInCssPixels();
+    CSSRect cssCompositedRect = CSSRect(newMetrics.CalculateCompositedRectInCssPixels());
     // The BrowserElementScrolling helper must know about these updated metrics
     // for other functions it performs, such as double tap handling.
     // Note, %f must not be used because it is locale specific!
@@ -1627,22 +1529,6 @@ TabChild::ProcessUpdateFrame(const FrameMetrics& aFrameMetrics)
         data.AppendFloat(newMetrics.mViewport.width);
         data.AppendLiteral(", \"height\" : ");
         data.AppendFloat(newMetrics.mViewport.height);
-        data.AppendLiteral(" }");
-    data.AppendLiteral(", \"displayPort\" : ");
-        data.AppendLiteral("{ \"x\" : ");
-        data.AppendFloat(newMetrics.mDisplayPort.x);
-        data.AppendLiteral(", \"y\" : ");
-        data.AppendFloat(newMetrics.mDisplayPort.y);
-        data.AppendLiteral(", \"width\" : ");
-        data.AppendFloat(newMetrics.mDisplayPort.width);
-        data.AppendLiteral(", \"height\" : ");
-        data.AppendFloat(newMetrics.mDisplayPort.height);
-        data.AppendLiteral(" }");
-    data.AppendLiteral(", \"compositionBounds\" : ");
-        data.AppendPrintf("{ \"x\" : %d", newMetrics.mCompositionBounds.x);
-        data.AppendPrintf(", \"y\" : %d", newMetrics.mCompositionBounds.y);
-        data.AppendPrintf(", \"width\" : %d", newMetrics.mCompositionBounds.width);
-        data.AppendPrintf(", \"height\" : %d", newMetrics.mCompositionBounds.height);
         data.AppendLiteral(" }");
     data.AppendLiteral(", \"cssPageRect\" : ");
         data.AppendLiteral("{ \"x\" : ");
@@ -2025,8 +1911,19 @@ TabChild::RecvRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
 bool
 TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event)
 {
+  // If content code called preventDefault() on a keydown event, then we don't
+  // want to process any following keypress events.
+  if (event.message == NS_KEY_PRESS && mIgnoreKeyPressEvent) {
+    return true;
+  }
+
   WidgetKeyboardEvent localEvent(event);
-  DispatchWidgetEvent(localEvent);
+  nsEventStatus status = DispatchWidgetEvent(localEvent);
+
+  if (event.message == NS_KEY_DOWN) {
+    mIgnoreKeyPressEvent = status == nsEventStatus_eConsumeNoDefault;
+  }
+
   return true;
 }
 
@@ -2145,23 +2042,6 @@ TabChild::DeallocPColorPickerChild(PColorPickerChild* aColorPicker)
 {
   nsColorPickerProxy* picker = static_cast<nsColorPickerProxy*>(aColorPicker);
   NS_RELEASE(picker);
-  return true;
-}
-
-PContentDialogChild*
-TabChild::AllocPContentDialogChild(const uint32_t&,
-                                   const nsCString&,
-                                   const nsCString&,
-                                   const InfallibleTArray<int>&,
-                                   const InfallibleTArray<nsString>&)
-{
-  return new ContentDialogChild();
-}
-
-bool
-TabChild::DeallocPContentDialogChild(PContentDialogChild* aDialog)
-{
-  delete aDialog;
   return true;
 }
 
@@ -2443,13 +2323,6 @@ TabChild::InitRenderingState()
     ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
 
     mRemoteFrame = remoteFrame;
-    if (id != 0) {
-      if (!sTabChildren) {
-        sTabChildren = new TabChildMap;
-      }
-      sTabChildren->Put(id, this);
-      mLayersId = id;
-    }
 
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
@@ -2650,26 +2523,6 @@ TabChild::GetFrom(nsIPresShell* aPresShell)
   }
   nsCOMPtr<nsIDocShell> docShell(doc->GetDocShell());
   return GetFrom(docShell);
-}
-
-TabChild*
-TabChild::GetFrom(uint64_t aLayersId)
-{
-  if (!sTabChildren) {
-    return nullptr;
-  }
-  return sTabChildren->Get(aLayersId);
-}
-
-void
-TabChild::DidComposite()
-{
-  MOZ_ASSERT(mWidget);
-  MOZ_ASSERT(mWidget->GetLayerManager());
-  MOZ_ASSERT(mWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT);
-
-  ClientLayerManager *manager = static_cast<ClientLayerManager*>(mWidget->GetLayerManager());
-  manager->DidComposite();
 }
 
 NS_IMETHODIMP

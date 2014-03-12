@@ -222,6 +222,7 @@ class TreeMetadataEmitter(LoggingMixin):
             'EXTRA_ASSEMBLER_FLAGS',
             'EXTRA_COMPILE_FLAGS',
             'EXTRA_COMPONENTS',
+            'EXTRA_DSO_LDOPTS',
             'EXTRA_JS_MODULES',
             'EXTRA_PP_COMPONENTS',
             'EXTRA_PP_JS_MODULES',
@@ -488,6 +489,13 @@ class TreeMetadataEmitter(LoggingMixin):
                         path, ', '.join(missing)))
 
             out_dir = mozpath.join(install_prefix, manifest_reldir)
+            if 'install-to-subdir' in defaults:
+                # This is terrible, but what are you going to do?
+                out_dir = mozpath.join(out_dir, defaults['install-to-subdir'])
+                obj.manifest_obj_relpath = mozpath.join(manifest_reldir,
+                                                        defaults['install-to-subdir'],
+                                                        mozpath.basename(path))
+
 
             # "head" and "tail" lists.
             # All manifests support support-files.

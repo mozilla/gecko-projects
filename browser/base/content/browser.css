@@ -288,7 +288,7 @@ toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
 }
 
 #urlbar-container {
-  min-width: 28ch;
+  min-width: 50ch;
 }
 
 #search-container {
@@ -390,18 +390,35 @@ panel[noactions] > richlistbox > richlistitem[type~="action"] > .ac-url-box > .a
   max-width: 18em;
 }
 @media (max-width: 700px) {
+  #urlbar-container {
+    min-width: 45ch;
+  }
   #identity-icon-labels {
     max-width: 70px;
   }
 }
 @media (max-width: 600px) {
+  #urlbar-container {
+    min-width: 40ch;
+  }
   #identity-icon-labels {
     max-width: 60px;
   }
 }
 @media (max-width: 500px) {
+  #urlbar-container {
+    min-width: 35ch;
+  }
   #identity-icon-labels {
     max-width: 50px;
+  }
+}
+@media (max-width: 400px) {
+  #urlbar-container {
+    min-width: 28ch;
+  }
+  #identity-icon-labels {
+    max-width: 40px;
   }
 }
 
@@ -751,10 +768,6 @@ toolbarbutton[type="badged"] {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#toolbarbutton-badged");
 }
 
-toolbarpaletteitem[place="palette"] > toolbarbutton[type="badged"] > .toolbarbutton-badge-container {
-  padding: 5px;
-}
-
 toolbarbutton[type="socialmark"] {
   -moz-binding: url("chrome://browser/content/socialmarks.xml#toolbarbutton-marks");
 }
@@ -762,11 +775,9 @@ toolbarbutton[type="socialmark"] {
 toolbarbutton[type="badged"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
 toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
   max-width: 16px;
-  max-height: 16px;
 }
 toolbarpaletteitem[place="palette"] > toolbarbutton[type="badged"] > .toolbarbutton-badge-container > .toolbarbutton-icon {
   max-width: 32px;
-  max-height: 32px;
 }
 
 panelview > .social-panel-frame {

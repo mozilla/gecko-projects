@@ -404,18 +404,10 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-p
   animation-timing-function: ease, ease, ease;
 }
 
-#bookmarked-notification-anchor[notification="finish"][in-bookmarks-toolbar=true] > #bookmarked-notification {
-  animation: animation-bookmarkAdded 800ms;
-}
-
 @media (min-resolution: 2dppx) {
   #bookmarked-notification-anchor[notification="finish"] > #bookmarked-notification {
     background-image: url("chrome://browser/skin/places/bookmarks-notification-finish@2x.png");
   }
-}
-
-#bookmarks-menu-button[notification="finish"] {
-  pointer-events: none;
 }
 
 #bookmarks-menu-button[notification="finish"] > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
@@ -724,6 +716,10 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-ic
     -moz-image-region: rect(18px, 666px, 36px, 648px);
   }
 
+  #sidebar-button@toolbarButtonPressed@ {
+    -moz-image-region: rect(18px, 684px, 36px, 666px);
+  }
+
   /**
    * OSX has a unique set of icons when fullscreen is in the checked state.
    */
@@ -1027,6 +1023,14 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-ic
     -moz-image-region: rect(36px, 1332px, 72px, 1296px);
   }
 
+  #sidebar-button[cui-areatype="toolbar"] {
+    -moz-image-region: rect(0, 1368px, 36px, 1332px);
+  }
+
+  #sidebar-button[cui-areatype="toolbar"]:hover:active:not([disabled="true"]) {
+    -moz-image-region: rect(36px, 1368px, 72px, 1332px);
+  }
+
   :-moz-any(@primaryToolbarButtons@) > .toolbarbutton-icon,
   :-moz-any(@primaryToolbarButtons@) > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
     width: 18px;
@@ -1158,6 +1162,11 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-ic
   #email-link-button[cui-areatype="menu-panel"],
   toolbarpaletteitem[place="palette"] > #email-link-button {
     -moz-image-region: rect(0px, 1600px, 64px, 1536px);
+  }
+
+  #sidebar-button[cui-areatype="menu-panel"],
+  toolbarpaletteitem[place="palette"] > #sidebar-button {
+    -moz-image-region: rect(0px, 1728px, 64px, 1664px);
   }
 
   /* Footer and wide panel control icons */
@@ -3979,7 +3988,7 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   position: relative;
 }
 .toolbarbutton-badge-container > .toolbarbutton-icon {
-  margin: 7px 2px;
+  margin: 4px 2px;
 }
 
 .toolbarbutton-badge[badge]:not([badge=""]) {

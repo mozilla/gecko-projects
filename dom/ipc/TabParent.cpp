@@ -38,7 +38,6 @@
 #include "nsIDOMElement.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMWindow.h"
-#include "nsIDialogCreator.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIPromptFactory.h"
 #include "nsIURI.h"
@@ -715,12 +714,11 @@ bool TabParent::SendRealMouseEvent(WidgetMouseEvent& event)
   if (mIsDestroyed) {
     return false;
   }
-  WidgetMouseEvent outEvent(event);
-  MaybeForwardEventToRenderFrame(event, nullptr, &outEvent);
-  if (!MapEventCoordinatesForChildProcess(&outEvent)) {
+  MaybeForwardEventToRenderFrame(event, nullptr);
+  if (!MapEventCoordinatesForChildProcess(&event)) {
     return false;
   }
-  return PBrowserParent::SendRealMouseEvent(outEvent);
+  return PBrowserParent::SendRealMouseEvent(event);
 }
 
 CSSIntPoint TabParent::AdjustTapToChildWidget(const CSSIntPoint& aPoint)
@@ -783,12 +781,11 @@ bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)
   if (mIsDestroyed) {
     return false;
   }
-  WidgetWheelEvent outEvent(event);
-  MaybeForwardEventToRenderFrame(event, nullptr, &outEvent);
-  if (!MapEventCoordinatesForChildProcess(&outEvent)) {
+  MaybeForwardEventToRenderFrame(event, nullptr);
+  if (!MapEventCoordinatesForChildProcess(&event)) {
     return false;
   }
-  return PBrowserParent::SendMouseWheelEvent(outEvent);
+  return PBrowserParent::SendMouseWheelEvent(event);
 }
 
 bool TabParent::SendRealKeyEvent(WidgetKeyboardEvent& event)
@@ -796,12 +793,11 @@ bool TabParent::SendRealKeyEvent(WidgetKeyboardEvent& event)
   if (mIsDestroyed) {
     return false;
   }
-  WidgetKeyboardEvent outEvent(event);
-  MaybeForwardEventToRenderFrame(event, nullptr, &outEvent);
-  if (!MapEventCoordinatesForChildProcess(&outEvent)) {
+  MaybeForwardEventToRenderFrame(event, nullptr);
+  if (!MapEventCoordinatesForChildProcess(&event)) {
     return false;
   }
-  return PBrowserParent::SendRealKeyEvent(outEvent);
+  return PBrowserParent::SendRealKeyEvent(event);
 }
 
 bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
@@ -842,24 +838,18 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
     }
   }
 
-  // Create an out event for remote content that is identical to the event that
-  // we send to the render frame. The out event will be transformed in such a
-  // way that its async transform in the compositor is unapplied. The event that
-  // it is created from does not get mutated.
-  WidgetTouchEvent outEvent(event);
-
   ScrollableLayerGuid guid;
-  MaybeForwardEventToRenderFrame(event, &guid, &outEvent);
+  MaybeForwardEventToRenderFrame(event, &guid);
 
   if (mIsDestroyed) {
     return false;
   }
 
-  MapEventCoordinatesForChildProcess(mChildProcessOffsetAtTouchStart, &outEvent);
+  MapEventCoordinatesForChildProcess(mChildProcessOffsetAtTouchStart, &event);
 
-  return (outEvent.message == NS_TOUCH_MOVE) ?
-    PBrowserParent::SendRealTouchMoveEvent(outEvent, guid) :
-    PBrowserParent::SendRealTouchEvent(outEvent, guid);
+  return (event.message == NS_TOUCH_MOVE) ?
+    PBrowserParent::SendRealTouchMoveEvent(event, guid) :
+    PBrowserParent::SendRealTouchEvent(event, guid);
 }
 
 /*static*/ TabParent*
@@ -1656,80 +1646,6 @@ TabParent::DeallocPColorPickerParent(PColorPickerParent* actor)
   return true;
 }
 
-PContentDialogParent*
-TabParent::AllocPContentDialogParent(const uint32_t& aType,
-                                     const nsCString& aName,
-                                     const nsCString& aFeatures,
-                                     const InfallibleTArray<int>& aIntParams,
-                                     const InfallibleTArray<nsString>& aStringParams)
-{
-  ContentDialogParent* parent = new ContentDialogParent();
-  nsCOMPtr<nsIDialogParamBlock> params =
-    do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);
-  TabChild::ArraysToParams(aIntParams, aStringParams, params);
-  mDelayedDialogs.AppendElement(new DelayedDialogData(parent, aType, aName,
-                                                      aFeatures, params));
-  nsRefPtr<nsIRunnable> ev =
-    NS_NewRunnableMethod(this, &TabParent::HandleDelayedDialogs);
-  NS_DispatchToCurrentThread(ev);
-  return parent;
-}
-
-void
-TabParent::HandleDelayedDialogs()
-{
-  nsCOMPtr<nsIWindowWatcher> ww = do_GetService(NS_WINDOWWATCHER_CONTRACTID);
-  nsCOMPtr<nsIDOMWindow> window;
-  if (mFrameElement) {
-    window = do_QueryInterface(mFrameElement->OwnerDoc()->GetWindow());
-  }
-  nsCOMPtr<nsIDialogCreator> dialogCreator = do_QueryInterface(mBrowserDOMWindow);
-  while (!ShouldDelayDialogs() && mDelayedDialogs.Length()) {
-    uint32_t index = mDelayedDialogs.Length() - 1;
-    DelayedDialogData* data = mDelayedDialogs[index];
-    mDelayedDialogs.RemoveElementAt(index);
-    nsCOMPtr<nsIDialogParamBlock> params;
-    params.swap(data->mParams);
-    PContentDialogParent* dialog = data->mDialog;
-    if (dialogCreator) {
-      nsCOMPtr<nsIDOMElement> frame = do_QueryInterface(mFrameElement);
-      dialogCreator->OpenDialog(data->mType,
-                                data->mName, data->mFeatures,
-                                params, frame);
-    } else if (ww) {
-      nsAutoCString url;
-      if (data->mType) {
-        if (data->mType == nsIDialogCreator::SELECT_DIALOG) {
-          url.Assign("chrome://global/content/selectDialog.xul");
-        } else if (data->mType == nsIDialogCreator::GENERIC_DIALOG) {
-          url.Assign("chrome://global/content/commonDialog.xul");
-        }
-
-        nsCOMPtr<nsISupports> arguments(do_QueryInterface(params));
-        nsCOMPtr<nsIDOMWindow> dialog;
-        ww->OpenWindow(window, url.get(), data->mName.get(),
-                       data->mFeatures.get(), arguments, getter_AddRefs(dialog));
-      } else {
-        NS_WARNING("unknown dialog types aren't automatically supported in E10s yet!");
-      }
-    }
-
-    delete data;
-    if (dialog) {
-      InfallibleTArray<int32_t> intParams;
-      InfallibleTArray<nsString> stringParams;
-      TabChild::ParamsToArrays(params, intParams, stringParams);
-      unused << PContentDialogParent::Send__delete__(dialog,
-                                                     intParams, stringParams);
-    }
-  }
-  if (ShouldDelayDialogs() && mDelayedDialogs.Length()) {
-    nsContentUtils::DispatchTrustedEvent(mFrameElement->OwnerDoc(), mFrameElement,
-                                         NS_LITERAL_STRING("MozDelayedModalDialog"),
-                                         true, true);
-  }
-}
-
 bool
 TabParent::RecvInitRenderFrame(PRenderFrameParent* aFrame,
                                ScrollingBehavior* aScrolling,
@@ -1820,16 +1736,6 @@ TabParent::RecvSetOfflinePermission(const IPC::Principal& aPrincipal)
 }
 
 bool
-TabParent::ShouldDelayDialogs()
-{
-  nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
-  NS_ENSURE_TRUE(frameLoader, true);
-  bool delay = false;
-  frameLoader->GetDelayRemoteDialogs(&delay);
-  return delay;
-}
-
-bool
 TabParent::AllowContentIME()
 {
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
@@ -1896,12 +1802,11 @@ TabParent::UseAsyncPanZoom()
 }
 
 void
-TabParent::MaybeForwardEventToRenderFrame(const WidgetInputEvent& aEvent,
-                                          ScrollableLayerGuid* aOutTargetGuid,
-                                          WidgetInputEvent* aOutEvent)
+TabParent::MaybeForwardEventToRenderFrame(WidgetInputEvent& aEvent,
+                                          ScrollableLayerGuid* aOutTargetGuid)
 {
   if (RenderFrameParent* rfp = GetRenderFrame()) {
-    rfp->NotifyInputEvent(aEvent, aOutTargetGuid, aOutEvent);
+    rfp->NotifyInputEvent(aEvent, aOutTargetGuid);
   }
 }
 

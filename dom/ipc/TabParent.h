@@ -9,13 +9,11 @@
 
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/PBrowserParent.h"
-#include "mozilla/dom/PContentDialogParent.h"
 #include "mozilla/dom/PFilePickerParent.h"
 #include "mozilla/dom/TabContext.h"
 #include "nsCOMPtr.h"
 #include "nsIAuthPromptProvider.h"
 #include "nsIBrowserDOMWindow.h"
-#include "nsIDialogParamBlock.h"
 #include "nsISecureBrowserUI.h"
 #include "nsITabParent.h"
 #include "nsIXULBrowserWindow.h"
@@ -47,8 +45,6 @@ class ClonedMessageData;
 class ContentParent;
 class Element;
 struct StructuredCloneData;
-
-class ContentDialogParent : public PContentDialogParent {};
 
 class TabParent : public PBrowserParent 
                 , public nsITabParent 
@@ -194,19 +190,6 @@ public:
     AllocPColorPickerParent(const nsString& aTitle, const nsString& aInitialColor) MOZ_OVERRIDE;
     virtual bool DeallocPColorPickerParent(PColorPickerParent* aColorPicker) MOZ_OVERRIDE;
 
-    virtual PContentDialogParent*
-    AllocPContentDialogParent(const uint32_t& aType,
-                              const nsCString& aName,
-                              const nsCString& aFeatures,
-                              const InfallibleTArray<int>& aIntParams,
-                              const InfallibleTArray<nsString>& aStringParams) MOZ_OVERRIDE;
-    virtual bool DeallocPContentDialogParent(PContentDialogParent* aDialog) MOZ_OVERRIDE
-    {
-      delete aDialog;
-      return true;
-    }
-
-
     void LoadURL(nsIURI* aURI);
     // XXX/cjones: it's not clear what we gain by hiding these
     // message-sending functions under a layer of indirection and
@@ -291,8 +274,6 @@ public:
     NS_DECL_NSIAUTHPROMPTPROVIDER
     NS_DECL_NSISECUREBROWSERUI
 
-    void HandleDelayedDialogs();
-
     static TabParent *GetIMETabParent() { return mIMETabParent; }
     bool HandleQueryContentEvent(mozilla::WidgetQueryContentEvent& aEvent);
     bool SendCompositionEvent(mozilla::WidgetCompositionEvent& event);
@@ -338,24 +319,6 @@ protected:
     Element* mFrameElement;
     nsCOMPtr<nsIBrowserDOMWindow> mBrowserDOMWindow;
 
-    struct DelayedDialogData
-    {
-      DelayedDialogData(PContentDialogParent* aDialog, uint32_t aType,
-                        const nsCString& aName,
-                        const nsCString& aFeatures,
-                        nsIDialogParamBlock* aParams)
-      : mDialog(aDialog), mType(aType), mName(aName), mFeatures(aFeatures),
-        mParams(aParams) {}
-
-      PContentDialogParent* mDialog;
-      uint32_t mType;
-      nsCString mName;
-      nsCString mFeatures;
-      nsCOMPtr<nsIDialogParamBlock> mParams;
-    };
-    InfallibleTArray<DelayedDialogData*> mDelayedDialogs;
-
-    bool ShouldDelayDialogs();
     bool AllowContentIME();
     nsIntPoint GetChildProcessOffset();
 
@@ -404,13 +367,13 @@ private:
     bool UseAsyncPanZoom();
     // If we have a render frame currently, notify it that we're about
     // to dispatch |aEvent| to our child.  If there's a relevant
-    // transform in place, |aOutEvent| is the transformed |aEvent| to
-    // dispatch to content. |aOutTargetGuid| will contain the identifier
+    // transform in place, |aEvent| will be transformed in-place so that
+    // it is ready to be dispatched to content.
+    // |aOutTargetGuid| will contain the identifier
     // of the APZC instance that handled the event. aOutTargetGuid may be
-    // null but aOutEvent must not be.
-    void MaybeForwardEventToRenderFrame(const WidgetInputEvent& aEvent,
-                                        ScrollableLayerGuid* aOutTargetGuid,
-                                        WidgetInputEvent* aOutEvent);
+    // null.
+    void MaybeForwardEventToRenderFrame(WidgetInputEvent& aEvent,
+                                        ScrollableLayerGuid* aOutTargetGuid);
     // The offset for the child process which is sampled at touch start. This
     // means that the touch events are relative to where the frame was at the
     // start of the touch. We need to look for a better solution to this

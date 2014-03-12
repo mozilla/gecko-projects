@@ -109,7 +109,7 @@ HTTP(..) == variation-selector-unsupported-1.html variation-selector-unsupported
 == wordbreak-1.html wordbreak-1-ref.html
 == wordbreak-2.html wordbreak-2-ref.html
 == wordbreak-3.html wordbreak-3-ref.html
-skip-if(Android&&AndroidVersion==17) == wordbreak-4a.html wordbreak-4a-ref.html
+skip-if((Android&&AndroidVersion==17)||(B2G&&browserIsRemote)) == wordbreak-4a.html wordbreak-4a-ref.html
 == wordbreak-4b.html wordbreak-4b-ref.html
 == wordbreak-5.html wordbreak-5-ref.html
 == wordbreak-6.html wordbreak-6-ref.html
@@ -295,3 +295,6 @@ pref(layout.css.text-align-true-value.enabled,true) == text-align-true.html text
 != control-chars-02.html control-chars-02-notref.html
 == control-chars-03a.html control-chars-03-ref.html
 == control-chars-03b.html control-chars-03-ref.html
+
+# font fallback for <space> when not supported in the primary font family - bug 970891
+HTTP(..) == space-font-1.html space-font-1-ref.html

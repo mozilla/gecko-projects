@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Attributes.h"
+#include "mozilla/IMEStateManager.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MouseEvents.h"
@@ -14,11 +15,11 @@
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/dom/UIEvent.h"
 
+#include "ContentEventHandler.h"
+
 #include "nsCOMPtr.h"
 #include "nsEventStateManager.h"
 #include "nsFocusManager.h"
-#include "nsIMEStateManager.h"
-#include "nsContentEventHandler.h"
 #include "nsIContent.h"
 #include "nsINodeInfo.h"
 #include "nsIDocument.h"
@@ -1216,9 +1217,10 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     break;
   case NS_QUERY_TEXT_CONTENT:
     {
-      if (RemoteQueryContentEvent(aEvent))
+      if (RemoteQueryContentEvent(aEvent)) {
         break;
-      nsContentEventHandler handler(mPresContext);
+      }
+      ContentEventHandler handler(mPresContext);
       handler.OnQueryTextContent(aEvent->AsQueryContentEvent());
     }
     break;
@@ -1227,7 +1229,7 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       if (RemoteQueryContentEvent(aEvent)) {
         break;
       }
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnQueryCaretRect(aEvent->AsQueryContentEvent());
     }
     break;
@@ -1236,42 +1238,42 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       if (RemoteQueryContentEvent(aEvent)) {
         break;
       }
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnQueryTextRect(aEvent->AsQueryContentEvent());
     }
     break;
   case NS_QUERY_EDITOR_RECT:
     {
       // XXX remote event
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnQueryEditorRect(aEvent->AsQueryContentEvent());
     }
     break;
   case NS_QUERY_CONTENT_STATE:
     {
       // XXX remote event
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnQueryContentState(aEvent->AsQueryContentEvent());
     }
     break;
   case NS_QUERY_SELECTION_AS_TRANSFERABLE:
     {
       // XXX remote event
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnQuerySelectionAsTransferable(aEvent->AsQueryContentEvent());
     }
     break;
   case NS_QUERY_CHARACTER_AT_POINT:
     {
       // XXX remote event
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnQueryCharacterAtPoint(aEvent->AsQueryContentEvent());
     }
     break;
   case NS_QUERY_DOM_WIDGET_HITTEST:
     {
       // XXX remote event
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnQueryDOMWidgetHittest(aEvent->AsQueryContentEvent());
     }
     break;
@@ -1280,11 +1282,12 @@ nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       WidgetSelectionEvent* selectionEvent = aEvent->AsSelectionEvent();
       if (IsTargetCrossProcess(selectionEvent)) {
         // Will not be handled locally, remote the event
-        if (GetCrossProcessTarget()->SendSelectionEvent(*selectionEvent))
+        if (GetCrossProcessTarget()->SendSelectionEvent(*selectionEvent)) {
           selectionEvent->mSucceeded = true;
+        }
         break;
       }
-      nsContentEventHandler handler(mPresContext);
+      ContentEventHandler handler(mPresContext);
       handler.OnSelectionEvent(selectionEvent);
     }
     break;
@@ -3765,7 +3768,7 @@ nsEventStateManager::IsTargetCrossProcess(WidgetGUIEvent* aEvent)
 void
 nsEventStateManager::NotifyDestroyPresContext(nsPresContext* aPresContext)
 {
-  nsIMEStateManager::OnDestroyPresContext(aPresContext);
+  IMEStateManager::OnDestroyPresContext(aPresContext);
   if (mHoverContent) {
     // Bug 70855: Presentation is going away, possibly for a reframe.
     // Reset the hover state so that if we're recreating the presentation,
@@ -5176,7 +5179,7 @@ nsEventStateManager::ContentRemoved(nsIDocument* aDocument, nsIContent* aContent
     element->LeaveLink(element->GetPresContext());
   }
 
-  nsIMEStateManager::OnRemoveContent(mPresContext, aContent);
+  IMEStateManager::OnRemoveContent(mPresContext, aContent);
 
   // inform the focus manager that the content is being removed. If this
   // content is focused, the focus will be removed without firing events.
@@ -5427,7 +5430,7 @@ nsEventStateManager::DoQuerySelectedText(WidgetQueryContentEvent* aEvent)
   if (RemoteQueryContentEvent(aEvent)) {
     return;
   }
-  nsContentEventHandler handler(mPresContext);
+  ContentEventHandler handler(mPresContext);
   handler.OnQuerySelectedText(aEvent);
 }
 

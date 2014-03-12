@@ -574,6 +574,14 @@ pref("dom.indexedDB.warningQuota", 5);
 pref("media.preload.default", 1); // default to preload none
 pref("media.preload.auto", 2);    // preload metadata if preload=auto
 
+// Number of video frames we buffer while decoding video.
+// On Android this is decided by a similar value which varies for
+// each OMX decoder |OMX_PARAM_PORTDEFINITIONTYPE::nBufferCountMin|. This
+// number must be less than the OMX equivalent or gecko will think it is
+// chronically starved of video frames. All decoders seen so far have a value
+// of at least 4.
+pref("media.video-queue.default-size", 3);
+
 // optimize images memory usage
 pref("image.mem.decodeondraw", true);
 pref("image.mem.min_discard_timeout_ms", 10000);
@@ -833,8 +841,10 @@ pref("browser.webapps.updateCheckUrl", "http://dapk.net/app_updates");
 
 #endif
 
-// Whether or not to only sync home provider data when the user is on wifi.
-pref("home.sync.wifiOnly", false);
+// The mode of home provider syncing.
+// 0: Sync always
+// 1: Sync only when on wifi
+pref("home.sync.updateMode", 0);
 
 // How frequently to check if we should sync home provider data.
 pref("home.sync.checkIntervalSecs", 3600);

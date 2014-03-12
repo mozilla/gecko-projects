@@ -88,18 +88,64 @@ let gSyncUI = {
   _wasDelayed: false,
 
   _needsSetup: function SUI__needsSetup() {
+    // We want to treat "account needs verification" as "needs setup". We don't
+    // know what the user's verified state is until Sync is initialized, though,
+    // and we need to get an answer here synchronously (can't wait for
+    // getSignedInUser). So "reach in" to Weave.Service.identity to get the
+    // answer here, and we'll just have to deal with this not having an answer
+    // before Sync is initialized.
+
+    // Referencing Weave.Service will implicitly initialize sync, and we don't
+    // want to force that - so first check if it is ready.
+    let service = Cc["@mozilla.org/weave/service;1"]
+                  .getService(Components.interfaces.nsISupports)
+                  .wrappedJSObject;
+    if (service.ready && Weave.Service.identity._signedInUser) {
+      // If we have a signed in user already, and that user is not verified,
+      // revert to the "needs setup" state.
+      if (!Weave.Service.identity._signedInUser.verified) {
+        return true;
+      }
+    }
+
     let firstSync = "";
     try {
       firstSync = Services.prefs.getCharPref("services.sync.firstSync");
     } catch (e) { }
+
     return Weave.Status.checkSetup() == Weave.CLIENT_NOT_CONFIGURED ||
            firstSync == "notReady";
   },
 
+  _loginFailed: function () {
+    // Referencing Weave.Status will import a bunch of modules, and we don't
+    // want to force that - so first check if it is ready.
+    let service = Cc["@mozilla.org/weave/service;1"]
+                  .getService(Components.interfaces.nsISupports)
+                  .wrappedJSObject;
+    if (!service.ready) {
+      return false;
+    }
+
+    return Weave.Status.login == Weave.LOGIN_FAILED_LOGIN_REJECTED;
+  },
+
   updateUI: function SUI_updateUI() {
     let needsSetup = this._needsSetup();
-    document.getElementById("sync-setup-state").hidden = !needsSetup;
-    document.getElementById("sync-syncnow-state").hidden = needsSetup;
+    let loginFailed = this._loginFailed();
+
+    // Start off with a clean slate
+    document.getElementById("sync-reauth-state").hidden = true;
+    document.getElementById("sync-setup-state").hidden = true;
+    document.getElementById("sync-syncnow-state").hidden = true;
+
+    if (loginFailed) {
+      document.getElementById("sync-reauth-state").hidden = false;
+    } else if (needsSetup) {
+      document.getElementById("sync-setup-state").hidden = false;
+    } else {
+      document.getElementById("sync-syncnow-state").hidden = false;
+    }
 
     if (!gBrowser)
       return;
@@ -338,6 +384,9 @@ let gSyncUI = {
     openPreferences("paneSync");
   },
 
+  openSignInAgainPage: function () {
+    switchToTabHavingURI("about:accounts?action=reauth", true);
+  },
 
   // Helpers
   _updateLastSyncTime: function SUI__updateLastSyncTime() {

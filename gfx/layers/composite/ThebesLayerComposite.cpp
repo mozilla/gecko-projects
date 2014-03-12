@@ -26,6 +26,7 @@
 #include "nsRect.h"                     // for nsIntRect
 #include "nsSize.h"                     // for nsIntSize
 #include "nsString.h"                   // for nsAutoCString
+#include "TextRenderer.h"
 #include "GeckoProfiler.h"
 
 namespace mozilla {
@@ -126,7 +127,7 @@ ThebesLayerComposite::RenderLayer(const nsIntRect& aClipRect)
   }
 #endif
 
-  EffectChain effectChain;
+  EffectChain effectChain(this);
   LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(mMaskLayer, effectChain);
 
   nsIntRegion visibleRegion = GetEffectiveVisibleRegion();

@@ -756,15 +756,12 @@ pref("javascript.options.strict",           false);
 #ifdef DEBUG
 pref("javascript.options.strict.debug",     true);
 #endif
-pref("javascript.options.baselinejit.content", true);
-pref("javascript.options.baselinejit.chrome",  true);
-pref("javascript.options.ion.content",      true);
-pref("javascript.options.ion.chrome",       true);
+pref("javascript.options.baselinejit",      true);
+pref("javascript.options.ion",              true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.parallel_parsing", true);
 pref("javascript.options.ion.parallel_compilation", true);
-pref("javascript.options.typeinference.content", true);
-pref("javascript.options.typeinference.chrome", true);
+pref("javascript.options.typeinference",    true);
 // This preference limits the memory usage of javascript.
 // If you want to change these values for your device,
 // please find Bug 417052 comment 17 and Bug 456721
@@ -1252,10 +1249,15 @@ pref("network.dns.ipv4OnlyDomains", "");
 // This preference can be used to turn off IPv6 name lookups. See bug 68796.
 pref("network.dns.disableIPv6", false);
 
+// This is the number of dns cache entries allowed
+pref("network.dnsCacheEntries", 400);
+
+// In the absence of OS TTLs, the DNS cache TTL value
+pref("network.dnsCacheExpiration", 60);
+
 // The grace period allows the DNS cache to use expired entries, while kicking off
-// a revalidation in the background. In seconds, but rounded to minutes in gecko.
-// Default to 30 days. (basically forever)
-pref("network.dnsCacheExpirationGracePeriod", 2592000);
+// a revalidation in the background.
+pref("network.dnsCacheExpirationGracePeriod", 60);
 
 // This preference can be used to turn off DNS prefetch.
 pref("network.dns.disablePrefetch", false);
@@ -4162,7 +4164,6 @@ pref("memory.dump_reports_on_oom", false);
 // Number of stack frames to capture in createObjectURL for about:memory.
 pref("memory.blob_report.stack_frames", 0);
 
-pref("social.enabled", false);
 // comma separated list of domain origins (e.g. https://domain.com) for
 // providers that can install from their own website without user warnings.
 // entries are

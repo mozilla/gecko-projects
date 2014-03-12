@@ -6,9 +6,17 @@
 #ifndef WEBGLEXTENSIONS_H_
 #define WEBGLEXTENSIONS_H_
 
+#include "jsapi.h"
+#include "mozilla/Attributes.h"
+#include "nsWrapperCache.h"
+#include "WebGLObjectModel.h"
+#include "WebGLTypes.h"
+
 namespace mozilla {
 
 class WebGLContext;
+class WebGLShader;
+class WebGLVertexArray;
 
 class WebGLExtensionBase
     : public nsWrapperCache
@@ -42,6 +50,16 @@ class WebGLExtensionCompressedTextureATC
 public:
     WebGLExtensionCompressedTextureATC(WebGLContext*);
     virtual ~WebGLExtensionCompressedTextureATC();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionCompressedTextureETC1
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionCompressedTextureETC1(WebGLContext*);
+    virtual ~WebGLExtensionCompressedTextureETC1();
 
     DECL_WEBGL_EXTENSION_GOOP
 };
@@ -201,6 +219,30 @@ class WebGLExtensionTextureHalfFloatLinear
 public:
     WebGLExtensionTextureHalfFloatLinear(WebGLContext*);
     virtual ~WebGLExtensionTextureHalfFloatLinear();
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionColorBufferFloat
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionColorBufferFloat(WebGLContext*);
+    virtual ~WebGLExtensionColorBufferFloat();
+
+    static bool IsSupported(const WebGLContext*);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionColorBufferHalfFloat
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionColorBufferHalfFloat(WebGLContext*);
+    virtual ~WebGLExtensionColorBufferHalfFloat();
+
+    static bool IsSupported(const WebGLContext*);
 
     DECL_WEBGL_EXTENSION_GOOP
 };

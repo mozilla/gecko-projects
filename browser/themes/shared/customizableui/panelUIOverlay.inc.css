@@ -12,10 +12,10 @@
 % we don't support nested calc(): https://bugzilla.mozilla.org/show_bug.cgi?id=968761
 %define menuPanelButtonWidth (@menuPanelWidth@ / 3 - 0.1px)
 %define exitSubviewGutterWidth 38px
-%define buttonStateHover :not(:-moz-any([disabled],[open],[checked="true"],:active)):hover
-%define menuStateHover :not(:-moz-any([disabled],[checked="true"],:active))[_moz-menuactive]
-%define buttonStateActive :not([disabled]):-moz-any([open],[checked="true"],:hover:active)
-%define menuStateActive :not([disabled]):-moz-any([checked="true"],[_moz-menuactive]:active)
+%define buttonStateHover :not(:-moz-any([disabled],[open],:active)):hover
+%define menuStateHover :not(:-moz-any([disabled],:active))[_moz-menuactive]
+%define buttonStateActive :not([disabled]):-moz-any([open],:hover:active)
+%define menuStateActive :not([disabled])[_moz-menuactive]:active
 
 %include ../browser.inc
 
@@ -53,10 +53,6 @@
 
 .panel-viewstack:not([viewtype="main"]) > .panel-mainview > #PanelUI-mainView {
   -moz-box-flex: 1;
-}
-
-.subviewbutton:not(:-moz-any([image],[targetURI],.cui-withicon)) > .toolbarbutton-text {
-  -moz-margin-start: 0;
 }
 
 .panel-subview-body {
@@ -122,15 +118,17 @@
   padding: 0;
 }
 
-.panelUI-grid .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text,
+.panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text,
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-multiline-text {
   -moz-hyphens: auto;
-  min-height: 3.5em;
+  line-height: 1.1;
+  max-height: 2.2em;
 }
 
-.panelUI-grid:not([customize-transitioning]) .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text,
+.panelUI-grid:not([customize-transitioning]) .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text,
 .panelUI-grid:not([customize-transitioning]) .toolbarbutton-1 > .toolbarbutton-multiline-text {
-  mask: url(chrome://browser/content/browser.xul#menuPanelButtonTextFadeOutMask);
+  position: absolute;
+  clip: rect(auto, auto, 2.2em, auto);
 }
 
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-text,
@@ -139,7 +137,7 @@
   margin: 2px 0 0;
 }
 
-.panelUI-grid .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text {
+.panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text {
   text-align: center;
   margin: -1px 0 0;
 }
@@ -199,7 +197,7 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
   -moz-appearance: none;
   -moz-box-orient: vertical;
   width: calc(@menuPanelButtonWidth@);
-  height: calc(40px + 4em);
+  height: calc(51px + 2.2em);
 }
 
 /* Help SDK buttons fit in. */
@@ -218,17 +216,9 @@ toolbarbutton[sdk-button="true"][cui-areatype="menu-panel"] > .toolbarbutton-ico
   -moz-appearance: none;
   -moz-box-orient: vertical;
   width: calc(@menuPanelButtonWidth@ - 2px);
-  height: calc(38px + 4em);
+  height: calc(49px + 2.2em);
   margin-top: 3px; /* Hack needed to get type=menu-button to properly align vertically. */
   border: 0;
-}
-
-toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-item),
-.panelUI-grid .toolbarbutton-1:not([type="menu-button"]),
-.panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button,
-.customization-palette .toolbarbutton-1,
-.panel-customization-placeholder-child {
-  overflow: hidden;
 }
 
 .panel-customization-placeholder-child {
@@ -255,8 +245,8 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
   -moz-box-align: center;
   width: 16px;
   -moz-margin-start: -16px;
-  height: 40px;
-  margin-bottom: 4em;
+  height: 51px;
+  margin-bottom: 2.2em;
   padding: 0;
 }
 
@@ -305,6 +295,7 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
 
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-icon,
+.panelUI-grid .toolbarbutton-1 > .toolbarbutton-badge-container,
 .customization-palette .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 .customization-palette .toolbarbutton-1 > .toolbarbutton-icon,
 .panelUI-grid #bookmarks-toolbar-placeholder > .toolbarbutton-icon,
@@ -325,6 +316,16 @@ toolbaritem[cui-areatype="menu-panel"][sdkstylewidget="true"]:not(.panel-wide-it
        which means each horizontal margin should be the half the button's width - (46/2) px.
   */
   margin: 4px calc(@menuPanelButtonWidth@ / 2 - 23px);
+}
+
+/* above we treat the container as the icon for the margins, that is so the
+/* badge itself is positioned correctly. Here we make sure that the icon itself
+/* has the minum size we want, but no padding/margin. */
+.panelUI-grid .toolbarbutton-1 > .toolbarbutton-badge-container > .toolbarbutton-icon {
+  min-width: 32px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
 }
 
 toolbarpaletteitem[place="palette"] > toolbaritem > toolbarbutton {
@@ -689,10 +690,6 @@ menuitem.subviewbutton@menuStateActive@,
   list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.png");
 }
 
-.restoreallitem.subviewbutton > .toolbarbutton-icon {
-  display: none;
-}
-
 #PanelUI-recentlyClosedWindows > toolbarbutton > .toolbarbutton-icon,
 #PanelUI-recentlyClosedTabs > toolbarbutton > .toolbarbutton-icon,
 #PanelUI-historyItems > toolbarbutton > .toolbarbutton-icon {
@@ -820,14 +817,9 @@ toolbarpaletteitem[place="palette"] > #search-container {
 }
 
 .toolbaritem-combined-buttons@inAnyPanel@ > separator {
-  /**
-   * The calculation below is a layout hack. Without it, when hovering over
-   * a .toolbaritem-combined-buttons element in the menu panel, the disappearance
-   * of the separator margins causes things in the menu panel to shift by a few
-   * pixels on Linux. See bug 978767.
-   */
-  margin: calc(0.5em - 1px) 0;
+  margin: .5em 0;
   width: 1px;
+  height: auto;
   background: hsla(210,4%,10%,.15);
   transition-property: margin;
   transition-duration: 10ms;
@@ -899,22 +891,16 @@ toolbaritem[overflowedItem=true],
   box-shadow: 0 0 0 1px hsla(0,0%,100%,.2);
 }
 
-.PanelUI-subView toolbarbutton[checked="true"] {
-  -moz-padding-start: 4px;
+.subviewbutton[checked="true"] {
+  background: url("chrome://global/skin/menu/shared-menu-check.png") top 7px left 7px / 11px 11px no-repeat transparent;
 }
 
-.PanelUI-subView toolbarbutton[checked="true"] > .toolbarbutton-text {
-  -moz-padding-start: 0px;
+.PanelUI-subView > menu > .menu-iconic-left,
+.PanelUI-subView > menuitem > .menu-iconic-left {
+  -moz-appearance: none;
+  -moz-margin-end: 3px;
 }
 
-.PanelUI-subView menuitem[checked="true"]::before,
-.PanelUI-subView toolbarbutton[checked="true"]::before {
-  content: "✓";
-  display: -moz-box;
-  width: 12px;
-  margin: 0 2px;
-}
-
-#BMB_bookmarksPopup > menuitem[checked="true"] > .menu-iconic-left {
-  display: none;
+.PanelUI-subView > menuitem[checked="true"] > .menu-iconic-left {
+  visibility: hidden;
 }

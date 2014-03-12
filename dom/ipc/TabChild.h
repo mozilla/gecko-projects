@@ -24,7 +24,6 @@
 #include "nsFrameMessageManager.h"
 #include "nsIWebProgressListener.h"
 #include "nsDOMEventTargetHelper.h"
-#include "nsIDialogCreator.h"
 #include "nsIPresShell.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsWeakReference.h"
@@ -46,7 +45,6 @@ class RenderFrameChild;
 namespace dom {
 
 class TabChild;
-class PContentDialogChild;
 class ClonedMessageData;
 
 class TabChildGlobal : public nsDOMEventTargetHelper,
@@ -154,7 +152,6 @@ class TabChild : public PBrowserChild,
                  public nsIDOMEventListener,
                  public nsIWebProgressListener,
                  public nsSupportsWeakReference,
-                 public nsIDialogCreator,
                  public nsITabChild,
                  public nsIObserver,
                  public ipc::MessageManagerCallback,
@@ -190,7 +187,6 @@ public:
     NS_DECL_NSIWINDOWPROVIDER
     NS_DECL_NSIDOMEVENTLISTENER
     NS_DECL_NSIWEBPROGRESSLISTENER
-    NS_DECL_NSIDIALOGCREATOR
     NS_DECL_NSITABCHILD
     NS_DECL_NSIOBSERVER
     NS_DECL_NSITOOLTIPLISTENER
@@ -282,22 +278,6 @@ public:
     AllocPColorPickerChild(const nsString& title, const nsString& initialColor) MOZ_OVERRIDE;
     virtual bool DeallocPColorPickerChild(PColorPickerChild* actor) MOZ_OVERRIDE;
 
-
-    virtual PContentDialogChild* AllocPContentDialogChild(const uint32_t&,
-                                                          const nsCString&,
-                                                          const nsCString&,
-                                                          const InfallibleTArray<int>&,
-                                                          const InfallibleTArray<nsString>&)
-                                                          MOZ_OVERRIDE;
-    virtual bool DeallocPContentDialogChild(PContentDialogChild* aDialog) MOZ_OVERRIDE;
-
-    static void ParamsToArrays(nsIDialogParamBlock* aParams,
-                               InfallibleTArray<int>& aIntParams,
-                               InfallibleTArray<nsString>& aStringParams);
-    static void ArraysToParams(const InfallibleTArray<int>& aIntParams,
-                               const InfallibleTArray<nsString>& aStringParams,
-                               nsIDialogParamBlock* aParams);
-
 #ifdef DEBUG
     virtual PContentPermissionRequestChild*
     SendPContentPermissionRequestConstructor(PContentPermissionRequestChild* aActor,
@@ -381,9 +361,6 @@ public:
     }
 
     static TabChild* GetFrom(nsIPresShell* aPresShell);
-    static TabChild* GetFrom(uint64_t aLayersId);
-
-    void DidComposite();
 
     static inline TabChild*
     GetFrom(nsIDOMWindow* aWindow)
@@ -502,7 +479,6 @@ private:
     nsRefPtr<ContentChild> mManager;
     nsRefPtr<TabChildGlobal> mTabChildGlobal;
     uint32_t mChromeFlags;
-    uint64_t mLayersId;
     nsIntRect mOuterRect;
     ScreenIntSize mInnerSize;
     // When we're tracking a possible tap gesture, this is the "down"
@@ -531,6 +507,8 @@ private:
     bool mContextMenuHandled;
     bool mWaitingTouchListeners;
     void FireSingleTapEvent(LayoutDevicePoint aPoint);
+
+    bool mIgnoreKeyPressEvent;
 
     DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

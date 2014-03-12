@@ -88,7 +88,7 @@ pref("mozilla.widget.force-24bpp", true);
 pref("mozilla.widget.use-buffer-pixmap", true);
 pref("mozilla.widget.disable-native-theme", true);
 pref("layout.reflow.synthMouseMove", false);
-pref("layers.enable-tiles", false);
+pref("layers.enable-tiles", true);
 /*
    Cross Process Mutex is not supported on Mac OS X so progressive
    paint can not be enabled for B2G on Mac OS X desktop
@@ -873,6 +873,14 @@ pref("apz.pan_repaint_interval", 16);
 // Maximum fling velocity in px/ms.  Slower devices may need to reduce this
 // to avoid checkerboarding.  Note, float value must be set as a string.
 pref("apz.max_velocity_pixels_per_ms", "6.0");
+
+// Tweak default displayport values to reduce the risk of running out of
+// memory when zooming in
+pref("apz.x_skate_size_multiplier", "1.25");
+pref("apz.y_skate_size_multiplier", "1.5");
+pref("apz.x_stationary_size_multiplier", "1.5");
+pref("apz.y_stationary_size_multiplier", "1.8");
+pref("apz.enlarge_displayport_when_clipped", true);
 
 // This preference allows FirefoxOS apps (and content, I think) to force
 // the use of software (instead of hardware accelerated) 2D canvases by

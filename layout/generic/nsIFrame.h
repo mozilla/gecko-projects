@@ -673,6 +673,15 @@ public:
   }
 
   /**
+   * Get the writing mode of this frame, but if it is styled with
+   * unicode-bidi: plaintext, reset the direction to the resolved paragraph
+   * level of the given subframe (typically the first frame on the line),
+   * not this frame's writing mode, because the container frame could be split
+   * by hard line breaks into multiple paragraphs with different base direction.
+   */
+  mozilla::WritingMode GetWritingMode(nsIFrame* aSubFrame) const;
+
+  /**
    * Bounding rect of the frame. The values are in app units, and the origin is
    * relative to the upper-left of the geometric parent. The size includes the
    * content area, borders, and padding.
@@ -1372,12 +1381,18 @@ public:
   /**
    * Checks if the current frame-state includes all of the listed bits
    */
-  bool HasAllStateBits(nsFrameState aBits) { return (mState & aBits) == aBits; }
+  bool HasAllStateBits(nsFrameState aBits) const
+  {
+    return (mState & aBits) == aBits;
+  }
   
   /**
    * Checks if the current frame-state includes any of the listed bits
    */
-  bool HasAnyStateBits(nsFrameState aBits) { return mState & aBits; }
+  bool HasAnyStateBits(nsFrameState aBits) const
+  {
+    return mState & aBits;
+  }
 
   /**
    * This call is invoked on the primary frame for a character data content
@@ -2275,6 +2290,15 @@ public:
   nsOverflowAreas GetOverflowAreas() const;
 
   /**
+   * Same as GetOverflowAreas, except in this frame's coordinate
+   * system (before transforms are applied).
+   *
+   * @return the overflow areas relative to this frame, before any CSS transforms have
+   * been applied, i.e. in this frame's coordinate system
+   */
+  nsOverflowAreas GetOverflowAreasRelativeToSelf() const;
+
+  /**
    * Same as GetScrollableOverflowRect, except relative to the parent
    * frame.
    *
@@ -2282,6 +2306,15 @@ public:
    * coordinate system
    */
   nsRect GetScrollableOverflowRectRelativeToParent() const;
+
+  /**
+   * Same as GetScrollableOverflowRect, except in this frame's coordinate
+   * system (before transforms are applied).
+   *
+   * @return the rect relative to this frame, before any CSS transforms have
+   * been applied, i.e. in this frame's coordinate system
+   */
+  nsRect GetScrollableOverflowRectRelativeToSelf() const;
 
   /**
    * Like GetVisualOverflowRect, except in this frame's
