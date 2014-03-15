@@ -1121,10 +1121,13 @@ public class GeckoAppShell
     /**
      * Given the inputs to <code>getOpenURIIntent</code>, plus an optional
      * package name and class name, create and fire an intent to open the
-     * provided URI.
+     * provided URI. If a class name is specified but a package name is not,
+     * we will default to using the current fennec package.
      *
      * @param targetURI the string spec of the URI to open.
      * @param mimeType an optional MIME type string.
+     * @param packageName an optional app package name.
+     * @param className an optional intent class name.
      * @param action an Android action specifier, such as
      *               <code>Intent.ACTION_SEND</code>.
      * @param title the title to use in <code>ACTION_SEND</code> intents.
@@ -1145,8 +1148,13 @@ public class GeckoAppShell
             return false;
         }
 
-        if (packageName.length() > 0 && className.length() > 0) {
-            intent.setClassName(packageName, className);
+        if (!TextUtils.isEmpty(className)) {
+            if (!TextUtils.isEmpty(packageName)) {
+                intent.setClassName(packageName, className);
+            } else {
+                // Default to using the fennec app context.
+                intent.setClassName(context, className);
+            }
         }
 
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -1189,10 +1197,10 @@ public class GeckoAppShell
      * @return an <code>Intent</code>, or <code>null</code> if none could be
      *         produced.
      */
-    static Intent getShareIntent(final Context context,
-                                 final String targetURI,
-                                 final String mimeType,
-                                 final String title) {
+    public static Intent getShareIntent(final Context context,
+                                        final String targetURI,
+                                        final String mimeType,
+                                        final String title) {
         Intent shareIntent = getIntentForActionString(Intent.ACTION_SEND);
         shareIntent.putExtra(Intent.EXTRA_TEXT, targetURI);
         shareIntent.putExtra(Intent.EXTRA_SUBJECT, title);

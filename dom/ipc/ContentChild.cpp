@@ -32,12 +32,13 @@
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/Preferences.h"
 
-#if defined(MOZ_CONTENT_SANDBOX) && defined(XP_WIN)
+#if defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_WIN)
 #define TARGET_SANDBOX_EXPORTS
 #include "mozilla/sandboxTarget.h"
-#endif
-#if defined(XP_LINUX)
+#elif defined(XP_LINUX)
 #include "mozilla/Sandbox.h"
+#endif
 #endif
 
 #include "mozilla/unused.h"
@@ -116,6 +117,8 @@
 #include "mozilla/dom/indexedDB/PIndexedDBChild.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
+#include "mozilla/dom/PFileSystemRequestChild.h"
+#include "mozilla/dom/FileSystemTaskBase.h"
 #include "mozilla/dom/bluetooth/PBluetoothChild.h"
 #include "mozilla/dom/PFMRadioChild.h"
 #include "mozilla/ipc/InputStreamUtils.h"
@@ -684,23 +687,16 @@ ContentChild::AllocPBackgroundChild(Transport* aTransport,
 }
 
 bool
-ContentChild::RecvSetProcessPrivileges(const ChildPrivileges& aPrivs)
+ContentChild::RecvSetProcessSandbox()
 {
-  ChildPrivileges privs = (aPrivs == PRIVILEGES_DEFAULT) ?
-                          GeckoChildProcessHost::DefaultChildPrivileges() :
-                          aPrivs;
-#if defined(XP_LINUX)
-  // SetCurrentProcessSandbox includes SetCurrentProcessPrivileges.
-  // But we may want to move the sandbox initialization somewhere else
+  // We may want to move the sandbox initialization somewhere else
   // at some point; see bug 880808.
-  SetCurrentProcessSandbox(privs);
-#else
-  // If this fails, we die.
-  SetCurrentProcessPrivileges(privs);
-#endif
-
-#if defined(MOZ_CONTENT_SANDBOX) && defined(XP_WIN)
+#if defined(MOZ_CONTENT_SANDBOX)
+#if defined(XP_LINUX)
+  SetCurrentProcessSandbox();
+#elif defined(XP_WIN)
   mozilla::SandboxTarget::Instance()->StartSandbox();
+#endif
 #endif
   return true;
 }
@@ -1041,6 +1037,24 @@ bool
 ContentChild::DeallocPDeviceStorageRequestChild(PDeviceStorageRequestChild* aDeviceStorage)
 {
     delete aDeviceStorage;
+    return true;
+}
+
+PFileSystemRequestChild*
+ContentChild::AllocPFileSystemRequestChild(const FileSystemParams& aParams)
+{
+    NS_NOTREACHED("Should never get here!");
+    return nullptr;
+}
+
+bool
+ContentChild::DeallocPFileSystemRequestChild(PFileSystemRequestChild* aFileSystem)
+{
+    mozilla::dom::FileSystemTaskBase* child =
+      static_cast<mozilla::dom::FileSystemTaskBase*>(aFileSystem);
+    // The reference is increased in FileSystemTaskBase::Start of
+    // FileSystemTaskBase.cpp. We should decrease it after IPC.
+    NS_RELEASE(child);
     return true;
 }
 
@@ -1855,6 +1869,13 @@ OnNuwaProcessReady()
         mozilla::dom::ContentChild::GetSingleton();
     content->SendNuwaReady();
 }
+
+NS_EXPORT void
+AfterNuwaFork()
+{
+    SetCurrentProcessPrivileges(base::PRIVILEGES_DEFAULT);
+}
+
 #endif // MOZ_NUWA_PROCESS
 
 }

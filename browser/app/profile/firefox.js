@@ -1095,9 +1095,6 @@ pref("services.sync.prefs.sync.spellchecker.dictionary", true);
 pref("services.sync.prefs.sync.xpinstall.whitelist.required", true);
 #endif
 
-// Used for devtools debugging
-pref("devtools.dump.emit", false);
-
 // Disable the error console
 pref("devtools.errorconsole.enabled", false);
 
@@ -1212,7 +1209,7 @@ pref("devtools.shadereditor.enabled", false);
 pref("devtools.chrome.enabled", false);
 
 // Default theme ("dark" or "light")
-pref("devtools.theme", "dark");
+pref("devtools.theme", "light");
 
 // Display the introductory text
 pref("devtools.gcli.hideIntro", false);

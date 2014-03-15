@@ -164,12 +164,11 @@ JSCompartment::ensureJitCompartmentExists(JSContext *cx)
     if (jitCompartment_)
         return true;
 
-    JitRuntime *jitRuntime = cx->runtime()->getJitRuntime(cx);
-    if (!jitRuntime)
+    if (!zone()->getJitZone(cx))
         return false;
 
     /* Set the compartment early, so linking works. */
-    jitCompartment_ = cx->new_<JitCompartment>(jitRuntime);
+    jitCompartment_ = cx->new_<JitCompartment>();
 
     if (!jitCompartment_)
         return false;
@@ -720,14 +719,17 @@ CreateLazyScriptsForCompartment(JSContext *cx)
     AutoObjectVector lazyFunctions(cx);
 
     // Find all live lazy scripts in the compartment, and via them all root
-    // lazy functions in the compartment: those which have not been compiled
-    // and which have a source object, indicating that their parent has been
-    // compiled.
+    // lazy functions in the compartment: those which have not been compiled,
+    // which have a source object, indicating that they have a parent, and
+    // which do not have an uncompiled enclosing script. The last condition is
+    // so that we don't compile lazy scripts whose enclosing scripts failed to
+    // compile, indicating that the lazy script did not escape the script.
     for (gc::CellIter i(cx->zone(), gc::FINALIZE_LAZY_SCRIPT); !i.done(); i.next()) {
         LazyScript *lazy = i.get<LazyScript>();
         JSFunction *fun = lazy->functionNonDelazifying();
         if (fun->compartment() == cx->compartment() &&
-            lazy->sourceObject() && !lazy->maybeScript())
+            lazy->sourceObject() && !lazy->maybeScript() &&
+            !lazy->hasUncompiledEnclosingScript())
         {
             MOZ_ASSERT(fun->isInterpretedLazy());
             MOZ_ASSERT(lazy == fun->lazyScriptOrNull());
@@ -913,8 +915,7 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                       size_t *shapesCompartmentTables,
                                       size_t *crossCompartmentWrappersArg,
                                       size_t *regexpCompartment,
-                                      size_t *debuggeesSet,
-                                      size_t *baselineStubsOptimized)
+                                      size_t *debuggeesSet)
 {
     *compartmentObject += mallocSizeOf(this);
     types.addSizeOfExcludingThis(mallocSizeOf, tiAllocationSiteTables,
@@ -926,12 +927,6 @@ JSCompartment::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
     *crossCompartmentWrappersArg += crossCompartmentWrappers.sizeOfExcludingThis(mallocSizeOf);
     *regexpCompartment += regExps.sizeOfExcludingThis(mallocSizeOf);
     *debuggeesSet += debuggees.sizeOfExcludingThis(mallocSizeOf);
-#ifdef JS_ION
-    if (jitCompartment()) {
-        *baselineStubsOptimized +=
-            jitCompartment()->optimizedStubSpace()->sizeOfExcludingThis(mallocSizeOf);
-    }
-#endif
 }
 
 void

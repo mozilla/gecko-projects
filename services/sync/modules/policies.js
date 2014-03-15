@@ -38,7 +38,14 @@ SyncScheduler.prototype = {
   setDefaults: function setDefaults() {
     this._log.trace("Setting SyncScheduler policy values to defaults.");
 
-    this.singleDeviceInterval = Svc.Prefs.get("scheduler.singleDeviceInterval") * 1000;
+    let service = Cc["@mozilla.org/weave/service;1"]
+                    .getService(Ci.nsISupports)
+                    .wrappedJSObject;
+
+    let part = service.fxAccountsEnabled ? "fxa" : "sync11";
+    let prefSDInterval = "scheduler." + part + ".singleDeviceInterval";
+    this.singleDeviceInterval = Svc.Prefs.get(prefSDInterval) * 1000;
+
     this.idleInterval         = Svc.Prefs.get("scheduler.idleInterval")         * 1000;
     this.activeInterval       = Svc.Prefs.get("scheduler.activeInterval")       * 1000;
     this.immediateInterval    = Svc.Prefs.get("scheduler.immediateInterval")    * 1000;
@@ -85,6 +92,7 @@ SyncScheduler.prototype = {
     Svc.Obs.add("weave:engine:sync:applied", this);
     Svc.Obs.add("weave:service:setup-complete", this);
     Svc.Obs.add("weave:service:start-over", this);
+    Svc.Obs.add("tokenserver:backoff:interval", this);
 
     if (Status.checkSetup() == STATUS_OK) {
       Svc.Idle.addIdleObserver(this, Svc.Prefs.get("scheduler.idleTime"));
@@ -174,6 +182,7 @@ SyncScheduler.prototype = {
         this.nextSync = 0;
         this.handleSyncError();
         break;
+      case "tokenserver:backoff:interval":
       case "weave:service:backoff:interval":
         let requested_interval = subject * 1000;
         this._log.debug("Got backoff notification: " + requested_interval + "ms");

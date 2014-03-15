@@ -49,6 +49,7 @@ BuiltinProvider.prototype = {
   load: function() {
     this.loader = new loader.Loader({
       modules: {
+        "Services": Object.create(Services),
         "toolkit/loader": loader,
         "source-map": SourceMap,
       },
@@ -118,11 +119,12 @@ SrcdirProvider.prototype = {
     let clientURI = this.fileURI(OS.Path.join(toolkitDir, "client"));
     let prettyFastURI = this.fileURI(OS.Path.join(toolkitDir), "pretty-fast.js");
     let asyncUtilsURI = this.fileURI(OS.Path.join(toolkitDir), "async-utils.js");
-    let gcliURI = this.fileURI(OS.Path.join(toolkitDir, "gcli"));
+    let gcliURI = this.fileURI(OS.Path.join(toolkitDir, "gcli", "source", "lib", "gcli"));
     let acornURI = this.fileURI(OS.Path.join(toolkitDir, "acorn"));
     let acornWalkURI = OS.Path.join(acornURI, "walk.js");
     this.loader = new loader.Loader({
       modules: {
+        "Services": Object.create(Services),
         "toolkit/loader": loader,
         "source-map": SourceMap,
       },

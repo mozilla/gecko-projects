@@ -135,7 +135,7 @@ this.BrowserIDManager.prototype = {
     }
 
     // If we are already happy then there is nothing more to do.
-    if (Weave.Status.login == LOGIN_SUCCEEDED) {
+    if (this._syncKeyBundle) {
       return Promise.resolve();
     }
 
@@ -160,6 +160,19 @@ this.BrowserIDManager.prototype = {
     this.resetCredentials();
     this._signedInUser = null;
     return Promise.resolve();
+  },
+
+  offerSyncOptions: function () {
+    // If the user chose to "Customize sync options" when signing
+    // up with Firefox Accounts, ask them to choose what to sync.
+    const url = "chrome://browser/content/sync/customize.xul";
+    const features = "centerscreen,chrome,modal,dialog,resizable=no";
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+
+    let data = {accepted: false};
+    win.openDialog(url, "_blank", features, data);
+
+    return data;
   },
 
   initializeWithCurrentIdentity: function(isInitialSync=false) {
@@ -193,17 +206,12 @@ this.BrowserIDManager.prototype = {
         this._updateSignedInUser(accountData);
         this._log.info("Starting fetch for key bundle.");
         if (this.needsCustomization) {
-          // If the user chose to "Customize sync options" when signing
-          // up with Firefox Accounts, ask them to choose what to sync.
-          const url = "chrome://browser/content/sync/customize.xul";
-          const features = "centerscreen,chrome,modal,dialog,resizable=no";
-          let win = Services.wm.getMostRecentWindow("navigator:browser");
-
-          let data = {accepted: false};
-          win.openDialog(url, "_blank", features, data);
-
+          let data = this.offerSyncOptions();
           if (data.accepted) {
             Services.prefs.clearUserPref(PREF_SYNC_SHOW_CUSTOMIZATION);
+
+            // Mark any non-selected engines as declined.
+            Weave.Service.engineManager.declineDisabled();
           } else {
             // Log out if the user canceled the dialog.
             return this._fxaService.signOut();
@@ -513,7 +521,6 @@ this.BrowserIDManager.prototype = {
         // This will arrange for us to be in the right 'currentAuthState'
         // such that UI will show the right error.
         this._shouldHaveSyncKeyBundle = true;
-        this._syncKeyBundle = null;
         Weave.Status.login = this._authFailureReason;
         Services.obs.notifyObservers(null, "weave:service:login:error", null);
         throw err;

@@ -422,8 +422,8 @@ BuildViewMap(ViewMap& oldContentViews, ViewMap& newContentViews,
       // The default scale is 1, so no need to propagate scale down.
       ViewConfig config;
       config.mScrollOffset = nsPoint(
-        NSIntPixelsToAppUnits(metrics.mScrollOffset.x, auPerCSSPixel) * aXScale,
-        NSIntPixelsToAppUnits(metrics.mScrollOffset.y, auPerCSSPixel) * aYScale);
+        NSIntPixelsToAppUnits(metrics.GetScrollOffset().x, auPerCSSPixel) * aXScale,
+        NSIntPixelsToAppUnits(metrics.GetScrollOffset().y, auPerCSSPixel) * aYScale);
       view = new nsContentView(aFrameLoader, scrollId, metrics.mIsRoot, config);
       view->mParentScaleX = aAccConfigXScale;
       view->mParentScaleY = aAccConfigYScale;
@@ -539,7 +539,7 @@ public:
     }
   }
 
-  virtual void HandleDoubleTap(const CSSIntPoint& aPoint,
+  virtual void HandleDoubleTap(const CSSPoint& aPoint,
                                int32_t aModifiers,
                                const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE
   {
@@ -558,7 +558,7 @@ public:
     }
   }
 
-  virtual void HandleSingleTap(const CSSIntPoint& aPoint,
+  virtual void HandleSingleTap(const CSSPoint& aPoint,
                                int32_t aModifiers,
                                const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE
   {
@@ -577,7 +577,7 @@ public:
     }
   }
 
-  virtual void HandleLongTap(const CSSIntPoint& aPoint,
+  virtual void HandleLongTap(const CSSPoint& aPoint,
                              int32_t aModifiers,
                              const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE
   {
@@ -596,7 +596,7 @@ public:
     }
   }
 
-  virtual void HandleLongTapUp(const CSSIntPoint& aPoint,
+  virtual void HandleLongTapUp(const CSSPoint& aPoint,
                                int32_t aModifiers,
                                const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE
   {

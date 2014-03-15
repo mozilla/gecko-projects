@@ -10,7 +10,6 @@
 #include "mozilla/dom/TextTrackCue.h"
 #include "mozilla/dom/TextTrackCueList.h"
 #include "mozilla/dom/TextTrackRegion.h"
-#include "mozilla/dom/TextTrackRegionList.h"
 #include "mozilla/dom/HTMLMediaElement.h"
 #include "mozilla/dom/HTMLTrackElement.h"
 
@@ -22,16 +21,17 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED_5(TextTrack,
                                      mParent,
                                      mCueList,
                                      mActiveCueList,
-                                     mRegionList,
-                                     mTextTrackList)
+                                     mTextTrackList,
+                                     mTrackElement)
 
 NS_IMPL_ADDREF_INHERITED(TextTrack, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(TextTrack, nsDOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TextTrack)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
-TextTrack::TextTrack(nsISupports* aParent)
+TextTrack::TextTrack(nsISupports* aParent, TextTrackSource aTextTrackSource)
   : mParent(aParent)
+  , mTextTrackSource(aTextTrackSource)
 {
   SetDefaultSettings();
   SetIsDOMBinding();
@@ -40,8 +40,10 @@ TextTrack::TextTrack(nsISupports* aParent)
 TextTrack::TextTrack(nsISupports* aParent,
                      TextTrackKind aKind,
                      const nsAString& aLabel,
-                     const nsAString& aLanguage)
+                     const nsAString& aLanguage,
+                     TextTrackSource aTextTrackSource)
   : mParent(aParent)
+  , mTextTrackSource(aTextTrackSource)
 {
   SetDefaultSettings();
   mKind = aKind;
@@ -54,9 +56,11 @@ TextTrack::TextTrack(nsISupports* aParent,
                      TextTrackList* aTextTrackList,
                      TextTrackKind aKind,
                      const nsAString& aLabel,
-                     const nsAString& aLanguage)
+                     const nsAString& aLanguage,
+                     TextTrackSource aTextTrackSource)
   : mParent(aParent)
   , mTextTrackList(aTextTrackList)
+  , mTextTrackSource(aTextTrackSource)
 {
   SetDefaultSettings();
   mKind = aKind;
@@ -72,7 +76,6 @@ TextTrack::SetDefaultSettings()
   mMode = TextTrackMode::Hidden;
   mCueList = new TextTrackCueList(mParent);
   mActiveCueList = new TextTrackCueList(mParent);
-  mRegionList = new TextTrackRegionList(mParent);
   mCuePos = 0;
   mDirty = false;
   mReadyState = HTMLTrackElement::READY_STATE_NONE;
@@ -119,30 +122,6 @@ void
 TextTrack::CueChanged(TextTrackCue& aCue)
 {
   //XXX: Implement Cue changed. Bug 867823.
-}
-
-void
-TextTrack::AddRegion(TextTrackRegion& aRegion)
-{
-  TextTrackRegion* region = mRegionList->GetRegionById(aRegion.Id());
-  if (!region) {
-    aRegion.SetTextTrack(this);
-    mRegionList->AddTextTrackRegion(&aRegion);
-    return;
-  }
-
-  region->CopyValues(aRegion);
-}
-
-void
-TextTrack::RemoveRegion(const TextTrackRegion& aRegion, ErrorResult& aRv)
-{
-  if (!mRegionList->GetRegionById(aRegion.Id())) {
-    aRv.Throw(NS_ERROR_DOM_NOT_FOUND_ERR);
-    return;
-  }
-
-  mRegionList->RemoveTextTrackRegion(aRegion);
 }
 
 void
@@ -236,6 +215,16 @@ void
 TextTrack::SetTextTrackList(TextTrackList* aTextTrackList)
 {
   mTextTrackList = aTextTrackList;
+}
+
+HTMLTrackElement*
+TextTrack::GetTrackElement() {
+  return mTrackElement;
+}
+
+void
+TextTrack::SetTrackElement(HTMLTrackElement* aTrackElement) {
+  mTrackElement = aTrackElement;
 }
 
 } // namespace dom

@@ -255,8 +255,14 @@ struct OpRaiseToTopChild  { PLayer container; PLayer childLayer; };
 
 struct OpSetDiagnosticTypes { DiagnosticTypes diagnostics; };
 
+struct ShmemSection {
+  Shmem shmem;
+  uint32_t offset;
+  size_t size;
+};
+
 union TileLock {
-  Shmem;
+  ShmemSection;
   uintptr_t;
 };
 
@@ -280,6 +286,7 @@ struct SurfaceDescriptorTiles {
   int         retainedWidth;
   int         retainedHeight;
   float       resolution;
+  float       frameResolution;
 };
 
 struct OpUseTiledLayerBuffer {

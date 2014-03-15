@@ -14,6 +14,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/IOInterposer.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Poison.h"
 #include "mozilla/Preferences.h"
@@ -2851,10 +2852,10 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   // error handling. indeed, this process is expected to be crashy, and we
   // don't want the user to see its crashes. That's the whole reason for
   // doing this in a separate process.
-  if (fire_glxtest_process()) {
-    *aExitFlag = true;
-    return 0;
-  }
+  //
+  // This call will cause a fork and the fork will terminate itself separately
+  // from the usual shutdown sequence
+  fire_glxtest_process();
 #endif
 
 #if defined(XP_WIN) && defined(MOZ_METRO)
@@ -4025,6 +4026,8 @@ XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
   GeckoProfilerInitRAII profilerGuard(&aLocal);
   PROFILER_LABEL("Startup", "XRE_Main");
 
+  mozilla::IOInterposerInit ioInterposerGuard;
+
   nsresult rv = NS_OK;
 
   gArgc = argc;
@@ -4227,6 +4230,8 @@ XRE_mainMetro(int argc, char* argv[], const nsXREAppData* aAppData)
   char aLocal;
   GeckoProfilerInitRAII profilerGuard(&aLocal);
   PROFILER_LABEL("Startup", "XRE_Main");
+
+  mozilla::IOInterposerInit ioInterposerGuard;
 
   nsresult rv = NS_OK;
 

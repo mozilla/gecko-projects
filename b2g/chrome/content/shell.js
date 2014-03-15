@@ -199,7 +199,7 @@ var shell = {
 
         Services.obs.removeObserver(observer, topic);
       }
-    }, "network-interface-state-changed", false);
+    }, "network-connection-state-changed", false);
   },
 
   get contentBrowser() {
@@ -1146,7 +1146,8 @@ let RemoteDebugger = {
           // unexpected actors
           globalActorFactories: restrictPrivileges ? {
             webappsActor: DebuggerServer.globalActorFactories.webappsActor,
-            deviceActor: DebuggerServer.globalActorFactories.deviceActor
+            deviceActor: DebuggerServer.globalActorFactories.deviceActor,
+            preferenceActor: DebuggerServer.globalActorFactories.preferenceActor,
           } : DebuggerServer.globalActorFactories
         };
         let root = new DebuggerServer.RootActor(connection, parameters);

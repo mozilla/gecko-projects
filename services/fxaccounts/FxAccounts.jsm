@@ -398,7 +398,7 @@ FxAccountsInternal.prototype = {
   getAssertion: function getAssertion(audience) {
     log.debug("enter getAssertion()");
     let currentState = this.currentAccountState;
-    let mustBeValidUntil = this.now() + ASSERTION_LIFETIME;
+    let mustBeValidUntil = this.now() + ASSERTION_USE_PERIOD;
     return currentState.getUserAccountData().then(data => {
       if (!data) {
         // No signed-in user
@@ -487,6 +487,12 @@ FxAccountsInternal.prototype = {
       if (!currentState.whenKeysReadyDeferred) {
         currentState.whenKeysReadyDeferred = Promise.defer();
         this.fetchAndUnwrapKeys(data.keyFetchToken).then(data => {
+          if (!data.kA || !data.kB) {
+            currentState.whenKeysReadyDeferred.reject(
+              new Error("user data missing kA or kB")
+            );
+            return;
+          }
           currentState.whenKeysReadyDeferred.resolve(data);
         });
       }
@@ -540,6 +546,7 @@ FxAccountsInternal.prototype = {
     let payload = {};
     let d = Promise.defer();
     let options = {
+      duration: ASSERTION_LIFETIME,
       localtimeOffsetMsec: this.localtimeOffsetMsec,
       now: this.now()
     };

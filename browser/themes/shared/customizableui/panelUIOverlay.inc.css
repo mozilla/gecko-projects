@@ -19,6 +19,44 @@
 
 %include ../browser.inc
 
+#PanelUI-popup #PanelUI-contents:empty {
+    height: 128px;
+}
+
+#PanelUI-popup #PanelUI-contents:empty::before {
+  content: "";
+  background-image: url(chrome://browser/skin/customizableui/whimsy-bw.png);
+  display: block;
+  width: 64px;
+  height: 64px;
+  position: absolute;
+  animation: moveX 3.05s linear 0s infinite alternate,
+             moveY 3.4s linear 0s infinite alternate;
+}
+
+#PanelUI-popup #PanelUI-contents:empty:hover::before {
+  background-image: url(chrome://browser/skin/customizableui/whimsy.png);
+}
+
+@media (min-resolution: 2dppx) {
+  #PanelUI-popup #PanelUI-contents:empty::before {
+    background-image: url(chrome://browser/skin/customizableui/whimsy-bw@2x.png);
+    background-size: 64px 64px;
+  }
+  #PanelUI-popup #PanelUI-contents:empty:hover::before {
+    background-image: url(chrome://browser/skin/customizableui/whimsy@2x.png);
+  }
+}
+
+@keyframes moveX {
+  /* These values are adjusted for the padding on the panel. */
+  from { margin-left: -15px; } to { margin-left: calc(100% - 49px); }
+}
+@keyframes moveY {
+  /* These values are adjusted for the padding and height of the panel. */
+  from { margin-top: -6px; } to { margin-top: 58px; }
+}
+
 #PanelUI-button {
   background-image: linear-gradient(to bottom, hsla(0,0%,100%,0), hsla(0,0%,100%,.3) 30%, hsla(0,0%,100%,.3) 70%, hsla(0,0%,100%,0)),
                     linear-gradient(to bottom, hsla(210,54%,20%,0), hsla(210,54%,20%,.3) 30%, hsla(210,54%,20%,.3) 70%, hsla(210,54%,20%,0)),
@@ -134,7 +172,8 @@
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-text,
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-multiline-text {
   text-align: center;
-  margin: 2px 0 0;
+  /* Need to override toolkit theming which sets margin: 0 !important; */
+  margin: 2px 0 0 !important;
 }
 
 .panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text {
@@ -217,8 +256,12 @@ toolbarbutton[sdk-button="true"][cui-areatype="menu-panel"] > .toolbarbutton-ico
   -moz-box-orient: vertical;
   width: calc(@menuPanelButtonWidth@ - 2px);
   height: calc(49px + 2.2em);
-  margin-top: 3px; /* Hack needed to get type=menu-button to properly align vertically. */
   border: 0;
+}
+
+.panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-text,
+.panelUI-grid .toolbarbutton-1 > .toolbarbutton-menubutton-button > .toolbarbutton-multiline-text {
+  margin-top: 2px; /* Hack needed to get the label of type=menu-button aligned with other buttons */
 }
 
 .panel-customization-placeholder-child {
@@ -636,20 +679,34 @@ menuitem.subviewbutton@menuStateActive@,
   box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
 }
 
-#BMB_bookmarksPopup > .subviewbutton {
+#BMB_bookmarksPopup .subviewbutton {
   font: inherit;
   font-weight: normal;
 }
 
-#BMB_bookmarksPopup > .subviewbutton:not([disabled="true"]) {
+#BMB_bookmarksPopup .subviewbutton:not([disabled="true"]) {
   color: inherit;
 }
 
-#BMB_bookmarksPopup > .panel-arrowcontainer > .panel-arrowcontent > .popup-internal-box > .autorepeatbutton-up,
-#BMB_bookmarksPopup > .panel-arrowcontainer > .panel-arrowcontent > .popup-internal-box > .autorepeatbutton-down {
+#BMB_bookmarksPopup .panel-arrowcontainer > .panel-arrowcontent > .popup-internal-box > .autorepeatbutton-up,
+#BMB_bookmarksPopup .panel-arrowcontainer > .panel-arrowcontent > .popup-internal-box > .autorepeatbutton-down {
   -moz-appearance: none;
   margin-top: 0;
   margin-bottom: 0;
+}
+
+/* Remove padding on xul:arrowscrollbox to avoid extra padding on footer */
+#BMB_bookmarksPopup arrowscrollbox {
+  padding-bottom: 0px;
+}
+
+#BMB_bookmarksPopup menupopup {
+  padding-top: 2px;
+}
+
+#BMB_bookmarksPopup menupopup > .bookmarks-actions-menuseparator {
+  /* Hide bottom separator as the styled footer includes a top border serving the same purpose */
+  display: none;
 }
 
 .PanelUI-subView menuseparator,
@@ -895,12 +952,11 @@ toolbaritem[overflowedItem=true],
   background: url("chrome://global/skin/menu/shared-menu-check.png") top 7px left 7px / 11px 11px no-repeat transparent;
 }
 
-.PanelUI-subView > menu > .menu-iconic-left,
-.PanelUI-subView > menuitem > .menu-iconic-left {
+.PanelUI-subView .menu-iconic-left {
   -moz-appearance: none;
   -moz-margin-end: 3px;
 }
 
-.PanelUI-subView > menuitem[checked="true"] > .menu-iconic-left {
+.PanelUI-subView menuitem[checked="true"] > .menu-iconic-left {
   visibility: hidden;
 }

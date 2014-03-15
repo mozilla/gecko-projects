@@ -3786,10 +3786,15 @@ Tab.prototype = {
           this._linkifier.linkifyNumbers(this.browser.contentWindow.document);
         }
 
-        // Show page actions for helper apps.
+        // Update page actions for helper apps.
         let uri = this.browser.currentURI;
-        if (BrowserApp.selectedTab == this && ExternalApps.shouldCheckUri(uri))
-          ExternalApps.updatePageAction(uri);
+        if (BrowserApp.selectedTab == this) {
+          if (ExternalApps.shouldCheckUri(uri)) {
+            ExternalApps.updatePageAction(uri);
+          } else {
+            ExternalApps.clearPageAction();
+          }
+        }
 
         if (!Reader.isEnabledForParseOnLoad)
           return;
@@ -4194,7 +4199,7 @@ Tab.prototype = {
       // If the CSS viewport is narrower than the screen (i.e. width <= device-width)
       // then we disable double-tap-to-zoom behaviour.
       var oldAllowDoubleTapZoom = metadata.allowDoubleTapZoom;
-      var newAllowDoubleTapZoom = (viewportW > screenW / window.devicePixelRatio);
+      var newAllowDoubleTapZoom = (!metadata.isSpecified) || (viewportW > screenW / window.devicePixelRatio);
       if (oldAllowDoubleTapZoom !== newAllowDoubleTapZoom) {
         metadata.allowDoubleTapZoom = newAllowDoubleTapZoom;
         this.sendViewportMetadata();
@@ -6026,6 +6031,19 @@ ViewportMetadata.prototype = {
   allowDoubleTapZoom: null,
   isSpecified: null,
   isRTL: null,
+
+  toString: function() {
+    return "width=" + this.width
+         + "; height=" + this.height
+         + "; defaultZoom=" + this.defaultZoom
+         + "; minZoom=" + this.minZoom
+         + "; maxZoom=" + this.maxZoom
+         + "; autoSize=" + this.autoSize
+         + "; allowZoom=" + this.allowZoom
+         + "; allowDoubleTapZoom=" + this.allowDoubleTapZoom
+         + "; isSpecified=" + this.isSpecified
+         + "; isRTL=" + this.isRTL;
+  }
 };
 
 
@@ -7415,33 +7433,36 @@ let Reader = {
           throw new Error("Reader:Add requires a tabID or an URL as argument");
         }
 
-        let sendResult = function(result, title) {
-          this.log("Reader:Add success=" + result + ", url=" + url + ", title=" + title);
+        let sendResult = function(result, article) {
+          article = article || {};
+          this.log("Reader:Add success=" + result + ", url=" + url + ", title=" + article.title + ", excerpt=" + article.excerpt);
 
           sendMessageToJava({
             type: "Reader:Added",
             result: result,
-            title: title,
+            title: article.title,
             url: url,
+            length: article.length,
+            excerpt: article.excerpt
           });
         }.bind(this);
 
         let handleArticle = function(article) {
           if (!article) {
-            sendResult(this.READER_ADD_FAILED, "");
+            sendResult(this.READER_ADD_FAILED, null);
             return;
           }
 
           this.storeArticleInCache(article, function(success) {
             let result = (success ? this.READER_ADD_SUCCESS : this.READER_ADD_FAILED);
-            sendResult(result, article.title);
+            sendResult(result, article);
           }.bind(this));
         }.bind(this);
 
         this.getArticleFromCache(urlWithoutRef, function (article) {
           // If the article is already in reading list, bail
           if (article) {
-            sendResult(this.READER_ADD_DUPLICATE, "");
+            sendResult(this.READER_ADD_DUPLICATE, null);
             return;
           }
 
@@ -7455,13 +7476,14 @@ let Reader = {
       }
 
       case "Reader:Remove": {
-        this.removeArticleFromCache(aData, function(success) {
-          this.log("Reader:Remove success=" + success + ", url=" + aData);
+        let url = aData;
+        this.removeArticleFromCache(url, function(success) {
+          this.log("Reader:Remove success=" + success + ", url=" + url);
 
           if (success) {
             sendMessageToJava({
               type: "Reader:Removed",
-              url: aData
+              url: url
             });
           }
         }.bind(this));
@@ -7922,10 +7944,9 @@ var ExternalApps = {
 
   updatePageAction: function updatePageAction(uri) {
     HelperApps.getAppsForUri(uri, { filterHttp: true }, (apps) => {
+      this.clearPageAction();
       if (apps.length > 0)
         this._setUriForPageAction(uri, apps);
-      else
-        this._removePageAction();
     });
   },
 
@@ -7966,7 +7987,7 @@ var ExternalApps = {
     });
   },
 
-  _removePageAction: function removePageAction() {
+  clearPageAction: function clearPageAction() {
     if(!this._pageActionId)
       return;
 

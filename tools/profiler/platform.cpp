@@ -7,8 +7,6 @@
 #include <sstream>
 #include <errno.h>
 
-#include "IOInterposer.h"
-#include "NSPRInterposer.h"
 #include "ProfilerIOInterposeObserver.h"
 #include "platform.h"
 #include "PlatformMacros.h"
@@ -478,13 +476,8 @@ void mozilla_sampler_init(void* stackTop)
   // from MOZ_PROFILER_STACK_SCAN.
   read_profiler_env_vars();
 
-  // Allow the profiler to be started using signals
-  OS::RegisterStartHandler();
-
-  // Initialize I/O interposing
-  mozilla::IOInterposer::Init();
-  // Initialize NSPR I/O Interposing
-  mozilla::InitNSPRIOInterposing();
+  // platform specific initialization
+  OS::Startup();
 
   // We can't open pref so we use an environment variable
   // to know if we should trigger the profiler on startup
@@ -532,16 +525,6 @@ void mozilla_sampler_shutdown()
   }
 
   profiler_stop();
-
-  // Unregister IO interpose observer
-  mozilla::IOInterposer::Unregister(mozilla::IOInterposeObserver::OpAll,
-                                    sInterposeObserver);
-  // mozilla_sampler_shutdown is only called at shutdown, and late-write checks
-  // might need the IO interposer, so we don't clear it. Don't worry it's
-  // designed not to report leaks.
-  // mozilla::IOInterposer::Clear();
-  mozilla::ClearNSPRIOInterposing();
-  sInterposeObserver = nullptr;
 
   Sampler::Shutdown();
 
@@ -741,6 +724,7 @@ void mozilla_sampler_stop()
 
   mozilla::IOInterposer::Unregister(mozilla::IOInterposeObserver::OpAll,
                                     sInterposeObserver);
+  sInterposeObserver = nullptr;
 
   sIsProfiling = false;
 

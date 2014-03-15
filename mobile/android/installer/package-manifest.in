@@ -246,6 +246,7 @@
 @BINPATH@/components/storage.xpt
 @BINPATH@/components/telemetry.xpt
 @BINPATH@/components/toolkit_finalizationwitness.xpt
+@BINPATH@/components/toolkit_osfile.xpt
 @BINPATH@/components/toolkitprofile.xpt
 #ifdef MOZ_ENABLE_XREMOTE
 @BINPATH@/components/toolkitremote.xpt
@@ -382,6 +383,7 @@
 @BINPATH@/components/nsINIProcessor.js
 @BINPATH@/components/nsPrompter.manifest
 @BINPATH@/components/nsPrompter.js
+@BINPATH@/components/servicesComponents.manifest
 @BINPATH@/components/TelemetryStartup.js
 @BINPATH@/components/TelemetryStartup.manifest
 @BINPATH@/components/Webapps.js

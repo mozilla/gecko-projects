@@ -55,6 +55,7 @@ public:
   virtual int32_t ReadLock() = 0;
   virtual int32_t ReadUnlock() = 0;
   virtual int32_t GetReadCount() = 0;
+  virtual bool IsValid() const = 0;
 
   enum gfxSharedReadLockType {
     TYPE_MEMORY,
@@ -80,6 +81,8 @@ public:
 
   virtual gfxSharedReadLockType GetType() MOZ_OVERRIDE { return TYPE_MEMORY; }
 
+  virtual bool IsValid() const MOZ_OVERRIDE { return true; };
+
 private:
   int32_t mReadCount;
 };
@@ -101,21 +104,24 @@ public:
 
   virtual int32_t GetReadCount() MOZ_OVERRIDE;
 
+  virtual bool IsValid() const MOZ_OVERRIDE { return mAllocSuccess; };
+
   virtual gfxSharedReadLockType GetType() MOZ_OVERRIDE { return TYPE_SHMEM; }
 
-  mozilla::ipc::Shmem& GetShmem() { return mShmem; }
+  mozilla::layers::ShmemSection& GetShmemSection() { return mShmemSection; }
 
   static already_AddRefed<gfxShmSharedReadLock>
-  Open(mozilla::layers::ISurfaceAllocator* aAllocator, const mozilla::ipc::Shmem& aShmem)
+  Open(mozilla::layers::ISurfaceAllocator* aAllocator, const mozilla::layers::ShmemSection& aShmemSection)
   {
-    nsRefPtr<gfxShmSharedReadLock> readLock = new gfxShmSharedReadLock(aAllocator, aShmem);
+    nsRefPtr<gfxShmSharedReadLock> readLock = new gfxShmSharedReadLock(aAllocator, aShmemSection);
     return readLock.forget();
   }
 
 private:
-  gfxShmSharedReadLock(ISurfaceAllocator* aAllocator, const mozilla::ipc::Shmem& aShmem)
+  gfxShmSharedReadLock(ISurfaceAllocator* aAllocator, const mozilla::layers::ShmemSection& aShmemSection)
     : mAllocator(aAllocator)
-    , mShmem(aShmem)
+    , mShmemSection(aShmemSection)
+    , mAllocSuccess(true)
   {
     MOZ_COUNT_CTOR(gfxShmSharedReadLock);
   }
@@ -123,11 +129,12 @@ private:
   ShmReadLockInfo* GetShmReadLockInfoPtr()
   {
     return reinterpret_cast<ShmReadLockInfo*>
-      (mShmem.get<char>() + mShmem.Size<char>() - sizeof(ShmReadLockInfo));
+      (mShmemSection.shmem().get<char>() + mShmemSection.offset());
   }
 
   RefPtr<ISurfaceAllocator> mAllocator;
-  mozilla::ipc::Shmem mShmem;
+  mozilla::layers::ShmemSection mShmemSection;
+  bool mAllocSuccess;
 };
 
 /**
@@ -170,14 +177,18 @@ struct TileClient
 
   void ReadUnlock()
   {
-    NS_ASSERTION(mFrontLock != nullptr, "ReadUnlock with no gfxSharedReadLock");
-    mFrontLock->ReadUnlock();
+    MOZ_ASSERT(mFrontLock, "ReadLock with no gfxSharedReadLock");
+    if (mFrontLock) {
+      mFrontLock->ReadUnlock();
+    }
   }
 
   void ReadLock()
   {
-    NS_ASSERTION(mFrontLock != nullptr, "ReadLock with no gfxSharedReadLock");
-    mFrontLock->ReadLock();
+    MOZ_ASSERT(mFrontLock, "ReadLock with no gfxSharedReadLock");
+    if (mFrontLock) {
+      mFrontLock->ReadLock();
+    }
   }
 
   void Release()

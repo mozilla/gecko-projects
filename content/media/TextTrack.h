@@ -20,7 +20,13 @@ class TextTrackList;
 class TextTrackCue;
 class TextTrackCueList;
 class TextTrackRegion;
-class TextTrackRegionList;
+class HTMLTrackElement;
+
+enum TextTrackSource {
+  Track,
+  AddTextTrack,
+  MediaResourceSpecific
+};
 
 class TextTrack MOZ_FINAL : public nsDOMEventTargetHelper
 {
@@ -28,16 +34,19 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrack, nsDOMEventTargetHelper)
 
-  TextTrack(nsISupports* aParent);
+  TextTrack(nsISupports* aParent,
+            TextTrackSource aTextTrackSource);
   TextTrack(nsISupports* aParent,
             TextTrackKind aKind,
             const nsAString& aLabel,
-            const nsAString& aLanguage);
+            const nsAString& aLanguage,
+            TextTrackSource aTextTrackSource);
   TextTrack(nsISupports* aParent,
             TextTrackList* aTextTrackList,
             TextTrackKind aKind,
             const nsAString& aLabel,
-            const nsAString& aLanguage);
+            const nsAString& aLanguage,
+            TextTrackSource aTextTrackSource);
 
   void SetDefaultSettings();
 
@@ -87,19 +96,8 @@ public:
   TextTrackCueList* GetActiveCues();
   void GetActiveCueArray(nsTArray<nsRefPtr<TextTrackCue> >& aCues);
 
-  TextTrackRegionList* GetRegions() const
-  {
-    if (mMode != TextTrackMode::Disabled) {
-      return mRegionList;
-    }
-    return nullptr;
-  }
-
   uint16_t ReadyState() const;
   void SetReadyState(uint16_t aState);
-
-  void AddRegion(TextTrackRegion& aRegion);
-  void RemoveRegion(const TextTrackRegion& aRegion, ErrorResult& aRv);
 
   void AddCue(TextTrackCue& aCue);
   void RemoveCue(TextTrackCue& aCue, ErrorResult& aRv);
@@ -110,6 +108,13 @@ public:
   void SetTextTrackList(TextTrackList* aTextTrackList);
 
   IMPL_EVENT_HANDLER(cuechange)
+
+  HTMLTrackElement* GetTrackElement();
+  void SetTrackElement(HTMLTrackElement* aTrackElement);
+
+  TextTrackSource GetTextTrackSource() {
+    return mTextTrackSource;
+  }
 
 private:
   void UpdateActiveCueList();
@@ -126,11 +131,14 @@ private:
 
   nsRefPtr<TextTrackCueList> mCueList;
   nsRefPtr<TextTrackCueList> mActiveCueList;
-  nsRefPtr<TextTrackRegionList> mRegionList;
+  nsRefPtr<HTMLTrackElement> mTrackElement;
 
   uint32_t mCuePos;
   uint16_t mReadyState;
   bool mDirty;
+
+  // An enum that represents where the track was sourced from.
+  TextTrackSource mTextTrackSource;
 };
 
 } // namespace dom

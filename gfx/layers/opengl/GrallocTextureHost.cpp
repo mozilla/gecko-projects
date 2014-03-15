@@ -105,7 +105,7 @@ GrallocTextureSourceOGL::~GrallocTextureSourceOGL()
 }
 
 void
-GrallocTextureSourceOGL::BindTexture(GLenum aTextureUnit)
+GrallocTextureSourceOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
 {
   /*
    * The job of this function is to ensure that the texture is tied to the
@@ -138,7 +138,7 @@ GrallocTextureSourceOGL::BindTexture(GLenum aTextureUnit)
     gl()->fEGLImageTargetTexture2D(textureTarget, mEGLImage);
   }
 
-  gl()->fActiveTexture(LOCAL_GL_TEXTURE0);
+  ApplyFilterToBoundTexture(gl(), aFilter, textureTarget);
 }
 
 void GrallocTextureSourceOGL::Lock()

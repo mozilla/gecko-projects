@@ -270,6 +270,7 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
                                      FlagsToGLFlags(mFlags),
                                      SurfaceFormatToImageFormat(aSurface->GetFormat()));
     }
+    ClearCachedFilter();
   }
 
   mTexImage->UpdateFromDataSource(aSurface, aDestRegion, aSrcOffset);
@@ -317,11 +318,12 @@ nsIntRect TextureImageTextureSourceOGL::GetTileRect()
 }
 
 void
-TextureImageTextureSourceOGL::BindTexture(GLenum aTextureUnit)
+TextureImageTextureSourceOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
 {
   MOZ_ASSERT(mTexImage,
     "Trying to bind a TextureSource that does not have an underlying GL texture.");
   mTexImage->BindTexture(aTextureUnit);
+  SetFilter(mGL, aFilter);
 }
 
 SharedTextureSourceOGL::SharedTextureSourceOGL(CompositorOGL* aCompositor,
@@ -341,7 +343,7 @@ SharedTextureSourceOGL::SharedTextureSourceOGL(CompositorOGL* aCompositor,
 {}
 
 void
-SharedTextureSourceOGL::BindTexture(GLenum aTextureUnit)
+SharedTextureSourceOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
 {
   if (!gl()) {
     NS_WARNING("Trying to bind a texture without a GLContext");
@@ -355,7 +357,7 @@ SharedTextureSourceOGL::BindTexture(GLenum aTextureUnit)
     NS_ERROR("Failed to bind shared texture handle");
     return;
   }
-  gl()->fActiveTexture(LOCAL_GL_TEXTURE0);
+  ApplyFilterToBoundTexture(gl(), aFilter, mTextureTarget);
 }
 
 void
@@ -477,11 +479,12 @@ SharedTextureHostOGL::GetFormat() const
 }
 
 void
-StreamTextureSourceOGL::BindTexture(GLenum activetex)
+StreamTextureSourceOGL::BindTexture(GLenum activetex, gfx::Filter aFilter)
 {
   MOZ_ASSERT(gl());
   gl()->fActiveTexture(activetex);
   gl()->fBindTexture(mTextureTarget, mTextureHandle);
+  SetFilter(gl(), aFilter);
 }
 
 bool
@@ -562,6 +565,8 @@ StreamTextureSourceOGL::RetrieveTextureFromStream()
   gl()->fTexParameteri(mTextureTarget,
                       LOCAL_GL_TEXTURE_WRAP_T,
                       LOCAL_GL_CLAMP_TO_EDGE);
+
+  ClearCachedFilter();
 
   return true;
 }
@@ -808,10 +813,11 @@ TiledDeprecatedTextureHostOGL::~TiledDeprecatedTextureHostOGL()
 }
 
 void
-TiledDeprecatedTextureHostOGL::BindTexture(GLenum aTextureUnit)
+TiledDeprecatedTextureHostOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
 {
   mGL->fActiveTexture(aTextureUnit);
   mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
+  SetFilter(mGL, aFilter);
 }
 
 static void
@@ -873,10 +879,9 @@ TiledDeprecatedTextureHostOGL::Update(gfxReusableSurfaceWrapper* aReusableSurfac
     SetFlags(aFlags);
     mGL->fGenTextures(1, &mTextureHandle);
     mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
-    mGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MIN_FILTER, LOCAL_GL_LINEAR);
-    mGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MAG_FILTER, LOCAL_GL_LINEAR);
     mGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
     mGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
+    ClearCachedFilter();
   } else {
     mGL->fBindTexture(LOCAL_GL_TEXTURE_2D, mTextureHandle);
     // We're re-using a texture, but the format may change. Update the memory
@@ -1090,7 +1095,7 @@ GrallocDeprecatedTextureHostOGL::gl() const
   return mCompositor ? mCompositor->gl() : nullptr;
 }
 
-void GrallocDeprecatedTextureHostOGL::BindTexture(GLenum aTextureUnit)
+void GrallocDeprecatedTextureHostOGL::BindTexture(GLenum aTextureUnit, gfx::Filter aFilter)
 {
   PROFILER_LABEL("Gralloc", "BindTexture");
   /*
@@ -1113,7 +1118,7 @@ void GrallocDeprecatedTextureHostOGL::BindTexture(GLenum aTextureUnit)
 
   gl()->fActiveTexture(aTextureUnit);
   gl()->fBindTexture(mTextureTarget, tex);
-  gl()->fActiveTexture(LOCAL_GL_TEXTURE0);
+  ApplyFilterToBoundTexture(gl(), aFilter, mTextureTarget);
 }
 
 bool

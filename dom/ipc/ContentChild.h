@@ -86,7 +86,7 @@ public:
     AllocPImageBridgeChild(mozilla::ipc::Transport* aTransport,
                            base::ProcessId aOtherProcess) MOZ_OVERRIDE;
 
-    virtual bool RecvSetProcessPrivileges(const ChildPrivileges& aPrivs) MOZ_OVERRIDE;
+    virtual bool RecvSetProcessSandbox() MOZ_OVERRIDE;
 
     PBackgroundChild*
     AllocPBackgroundChild(Transport* aTransport, ProcessId aOtherProcess)
@@ -98,6 +98,9 @@ public:
 
     virtual PDeviceStorageRequestChild* AllocPDeviceStorageRequestChild(const DeviceStorageParams&);
     virtual bool DeallocPDeviceStorageRequestChild(PDeviceStorageRequestChild*);
+
+    virtual PFileSystemRequestChild* AllocPFileSystemRequestChild(const FileSystemParams&);
+    virtual bool DeallocPFileSystemRequestChild(PFileSystemRequestChild*);
 
     virtual PBlobChild* AllocPBlobChild(const BlobConstructorParams& aParams);
     virtual bool DeallocPBlobChild(PBlobChild*);

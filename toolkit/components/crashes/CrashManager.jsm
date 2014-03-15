@@ -516,6 +516,14 @@ this.CrashManager.prototype = Object.freeze({
       return store.crashes;
     }.bind(this));
   },
+
+  getCrashCountsByDay: function () {
+    return Task.spawn(function* () {
+      let store = yield this._getStore();
+
+      return store._countsByDay;
+    }.bind(this));
+  },
 });
 
 let gCrashManager;
@@ -595,7 +603,7 @@ CrashStore.prototype = Object.freeze({
 
       try {
         let decoder = new TextDecoder();
-        let data = yield OS.File.read(this._storePath, null, {compression: "lz4"});
+        let data = yield OS.File.read(this._storePath, {compression: "lz4"});
         data = JSON.parse(decoder.decode(data));
 
         if (data.corruptDate) {

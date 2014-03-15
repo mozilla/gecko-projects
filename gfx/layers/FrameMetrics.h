@@ -71,18 +71,18 @@ public:
     , mDisplayPort(0, 0, 0, 0)
     , mCriticalDisplayPort(0, 0, 0, 0)
     , mViewport(0, 0, 0, 0)
-    , mScrollOffset(0, 0)
     , mScrollId(NULL_SCROLL_ID)
     , mScrollableRect(0, 0, 0, 0)
     , mResolution(1)
     , mCumulativeResolution(1)
-    , mZoom(1)
     , mTransformScale(1)
     , mDevPixelsPerCSSPixel(1)
     , mPresShellId(-1)
     , mMayHaveTouchListeners(false)
     , mIsRoot(false)
     , mHasScrollgrab(false)
+    , mScrollOffset(0, 0)
+    , mZoom(1)
     , mUpdateScrollOffset(false)
     , mScrollGeneration(0)
   {}
@@ -97,7 +97,6 @@ public:
            mDisplayPort.IsEqualEdges(aOther.mDisplayPort) &&
            mCriticalDisplayPort.IsEqualEdges(aOther.mCriticalDisplayPort) &&
            mViewport.IsEqualEdges(aOther.mViewport) &&
-           mScrollOffset == aOther.mScrollOffset &&
            mScrollId == aOther.mScrollId &&
            mScrollableRect.IsEqualEdges(aOther.mScrollableRect) &&
            mResolution == aOther.mResolution &&
@@ -106,6 +105,7 @@ public:
            mMayHaveTouchListeners == aOther.mMayHaveTouchListeners &&
            mPresShellId == aOther.mPresShellId &&
            mIsRoot == aOther.mIsRoot &&
+           mScrollOffset == aOther.mScrollOffset &&
            mHasScrollgrab == aOther.mHasScrollgrab &&
            mUpdateScrollOffset == aOther.mUpdateScrollOffset;
   }
@@ -139,7 +139,7 @@ public:
 
   LayerPoint GetScrollOffsetInLayerPixels() const
   {
-    return mScrollOffset * LayersPixelsPerCSSPixel();
+    return GetScrollOffset() * LayersPixelsPerCSSPixel();
   }
 
   LayoutDeviceToParentLayerScale GetParentResolution() const
@@ -194,6 +194,22 @@ public:
     return gfx::RoundedIn(mCompositionBounds / GetZoomToParent());
   }
 
+  void ScrollBy(const CSSPoint& aPoint)
+  {
+    mScrollOffset += aPoint;
+  }
+
+  void ZoomBy(float aFactor)
+  {
+    mZoom.scale *= aFactor;
+  }
+
+  void CopyScrollInfoFrom(const FrameMetrics& aOther)
+  {
+    mScrollOffset = aOther.mScrollOffset;
+    mScrollGeneration = aOther.mScrollGeneration;
+  }
+
   // ---------------------------------------------------------------------------
   // The following metrics are all in widget space/device pixels.
   //
@@ -234,9 +250,6 @@ public:
   // To pre-render a margin of 100 CSS pixels around the window,
   // { x = -100, y = - 100,
   //   width = window.innerWidth + 200, height = window.innerHeight + 200 }
-  //
-  // This is only valid on the root layer. Nested iframes do not have a
-  // displayport set on them. See bug 775452.
   CSSRect mDisplayPort;
 
   // If non-empty, the area of a frame's contents that is considered critical
@@ -257,23 +270,6 @@ public:
   // iframe. For layers that don't correspond to a document, this metric is
   // meaningless and invalid.
   CSSRect mViewport;
-
-  // The position of the top-left of the CSS viewport, relative to the document
-  // (or the document relative to the viewport, if that helps understand it).
-  //
-  // Thus it is relative to the document. It is in the same coordinate space as
-  // |mScrollableRect|, but a different coordinate space than |mViewport| and
-  // |mDisplayPort|.
-  //
-  // It is required that the rect:
-  // { x = mScrollOffset.x, y = mScrollOffset.y,
-  //   width = mCompositionBounds.x / mResolution.scale,
-  //   height = mCompositionBounds.y / mResolution.scale }
-  // Be within |mScrollableRect|.
-  //
-  // This is valid for any layer, but is always relative to this frame and
-  // not any parents, regardless of parent transforms.
-  CSSPoint mScrollOffset;
 
   // A unique ID assigned to each scrollable frame.
   ViewID mScrollId;
@@ -305,12 +301,6 @@ public:
   // This information is provided by Gecko at layout/paint time.
   LayoutDeviceToLayerScale mCumulativeResolution;
 
-  // The "user zoom". Content is painted by gecko at mResolution * mDevPixelsPerCSSPixel,
-  // but will be drawn to the screen at mZoom. In the steady state, the
-  // two will be the same, but during an async zoom action the two may
-  // diverge. This information is initialized in Gecko but updated in the APZC.
-  CSSToScreenScale mZoom;
-
   // The conversion factor between local screen pixels (the coordinate
   // system in which APZCs receive input events) and our parent layer's
   // layer pixels (the coordinate system of mCompositionBounds).
@@ -340,6 +330,26 @@ public:
   bool mHasScrollgrab;
 
 public:
+  void SetScrollOffset(const CSSPoint& aScrollOffset)
+  {
+    mScrollOffset = aScrollOffset;
+  }
+
+  const CSSPoint& GetScrollOffset() const
+  {
+    return mScrollOffset;
+  }
+
+  void SetZoom(const CSSToScreenScale& aZoom)
+  {
+    mZoom = aZoom;
+  }
+
+  CSSToScreenScale GetZoom() const
+  {
+    return mZoom;
+  }
+
   void SetScrollOffsetUpdated(uint32_t aScrollGeneration)
   {
     mUpdateScrollOffset = true;
@@ -369,6 +379,29 @@ public:
 private:
   // New fields from now on should be made private and old fields should
   // be refactored to be private.
+
+  // The position of the top-left of the CSS viewport, relative to the document
+  // (or the document relative to the viewport, if that helps understand it).
+  //
+  // Thus it is relative to the document. It is in the same coordinate space as
+  // |mScrollableRect|, but a different coordinate space than |mViewport| and
+  // |mDisplayPort|.
+  //
+  // It is required that the rect:
+  // { x = mScrollOffset.x, y = mScrollOffset.y,
+  //   width = mCompositionBounds.x / mResolution.scale,
+  //   height = mCompositionBounds.y / mResolution.scale }
+  // Be within |mScrollableRect|.
+  //
+  // This is valid for any layer, but is always relative to this frame and
+  // not any parents, regardless of parent transforms.
+  CSSPoint mScrollOffset;
+
+  // The "user zoom". Content is painted by gecko at mResolution * mDevPixelsPerCSSPixel,
+  // but will be drawn to the screen at mZoom. In the steady state, the
+  // two will be the same, but during an async zoom action the two may
+  // diverge. This information is initialized in Gecko but updated in the APZC.
+  CSSToScreenScale mZoom;
 
   // Whether mScrollOffset was updated by something other than the APZ code, and
   // if the APZC receiving this metrics should update its local copy.

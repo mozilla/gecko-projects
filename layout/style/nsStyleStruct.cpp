@@ -2303,7 +2303,7 @@ void nsTransition::SetInitialValues()
 void nsTransition::SetUnknownProperty(const nsAString& aUnknownProperty)
 {
   NS_ASSERTION(nsCSSProps::LookupProperty(aUnknownProperty,
-                                          nsCSSProps::eEnabled) ==
+                                          nsCSSProps::eEnabledForAllContent) ==
                  eCSSProperty_UNKNOWN,
                "should be unknown property");
   mProperty = eCSSProperty_UNKNOWN;
@@ -2493,7 +2493,15 @@ nsChangeHint nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
                                        nsChangeHint_RepaintFrame));
 
   if (mOpacity != aOther.mOpacity) {
-    NS_UpdateHint(hint, nsChangeHint_UpdateOpacityLayer);
+    // If we're going from the optimized >=0.99 opacity value to 1.0 or back, then
+    // repaint the frame because DLBI will not catch the invalidation.  Otherwise,
+    // just update the opacity layer.
+    if ((mOpacity >= 0.99f && mOpacity < 1.0f && aOther.mOpacity == 1.0f) ||
+        (aOther.mOpacity >= 0.99f && aOther.mOpacity < 1.0f && mOpacity == 1.0f)) {
+      NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
+    } else {
+      NS_UpdateHint(hint, nsChangeHint_UpdateOpacityLayer);
+    }
   }
 
   /* If we've added or removed the transform property, we need to reconstruct the frame to add

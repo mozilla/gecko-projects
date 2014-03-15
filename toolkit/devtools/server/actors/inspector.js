@@ -51,7 +51,7 @@
  */
 
 const {Cc, Ci, Cu, Cr} = require("chrome");
-
+const Services = require("Services");
 const protocol = require("devtools/server/protocol");
 const {Arg, Option, method, RetVal, types} = protocol;
 const {LongStringActor, ShortLongString} = require("devtools/server/actors/string");
@@ -103,7 +103,6 @@ const PSEUDO_SELECTORS = [
 let HELPER_SHEET = ".__fx-devtools-hide-shortcut__ { visibility: hidden !important } ";
 HELPER_SHEET += ":-moz-devtools-highlighted { outline: 2px dashed #F06!important; outline-offset: -2px!important } ";
 
-Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 
 loader.lazyGetter(this, "DOMParser", function() {
@@ -849,6 +848,12 @@ var WalkerActor = protocol.ActorClass({
     "picker-node-hovered" : {
       type: "pickerNodeHovered",
       node: Arg(0, "disconnectedNode")
+    },
+    "highlighter-ready" : {
+      type: "highlighter-ready"
+    },
+    "highlighter-hide" : {
+      type: "highlighter-hide"
     }
   },
 
@@ -1194,7 +1199,7 @@ var WalkerActor = protocol.ActorClass({
     // make it easier.
     let filteredWalker = (node) => {
       return documentWalker(node, this.rootWin, options.whatToShow);
-    }
+    };
 
     // Need to know the first and last child.
     let rawNode = node.rawNode;
@@ -1385,7 +1390,15 @@ var WalkerActor = protocol.ActorClass({
    * @param string selector
    */
   querySelectorAll: method(function(baseNode, selector) {
-    return new NodeListActor(this, baseNode.rawNode.querySelectorAll(selector));
+    let nodeList = null;
+
+    try {
+      nodeList = baseNode.rawNode.querySelectorAll(selector);
+    } catch(e) {
+      // Bad selector. Do nothing as the selector can come from a searchbox.
+    }
+
+    return new NodeListActor(this, nodeList);
   }, {
     request: {
       node: Arg(0, "domnode"),
@@ -2538,17 +2551,17 @@ var InspectorActor = protocol.ActorClass({
     }
   }),
 
-  getHighlighter: method(function () {
+  getHighlighter: method(function (autohide) {
     if (this._highlighterPromise) {
       return this._highlighterPromise;
     }
 
     this._highlighterPromise = this.getWalker().then(walker => {
-      return HighlighterActor(this);
+      return HighlighterActor(this, autohide);
     });
     return this._highlighterPromise;
   }, {
-    request: {},
+    request: { autohide: Arg(0, "boolean") },
     response: {
       highligter: RetVal("highlighter")
     }
