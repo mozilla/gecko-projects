@@ -66,9 +66,6 @@ using namespace js;
 using namespace js::gc;
 using namespace js::types;
 
-using js::frontend::IsIdentifier;
-using mozilla::ArrayLength;
-using mozilla::DebugOnly;
 using mozilla::Maybe;
 using mozilla::RoundUpPow2;
 
@@ -1256,8 +1253,20 @@ NewObject(ExclusiveContext *cx, types::TypeObject *type_, JSObject *parent, gc::
     if (!NewObjectMetadata(cx, &metadata))
         return nullptr;
 
+    // Normally, the number of fixed slots given an object is the maximum
+    // permitted for its size class. For array buffers we only use enough to
+    // cover the class reservd slots, so that the remaining space in the
+    // object's allocation is available for the buffer's data.
+    size_t nfixed;
+    if (clasp == &ArrayBufferObject::class_) {
+        JS_STATIC_ASSERT(ArrayBufferObject::RESERVED_SLOTS == 4);
+        nfixed = ArrayBufferObject::RESERVED_SLOTS;
+    } else {
+        nfixed = GetGCKindSlots(kind, clasp);
+    }
+
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, clasp, type->proto(),
-                                                      parent, metadata, kind));
+                                                      parent, metadata, nfixed));
     if (!shape)
         return nullptr;
 
@@ -1563,7 +1572,7 @@ js::CreateThisForFunctionWithProto(JSContext *cx, HandleObject callee, JSObject 
         res = NewObjectWithClassProto(cx, &JSObject::class_, proto, callee->getParent(), allocKind, newKind);
     }
 
-    if (res && cx->typeInferenceEnabled()) {
+    if (res) {
         JSScript *script = callee->as<JSFunction>().getOrCreateScript(cx);
         if (!script)
             return nullptr;
@@ -5804,7 +5813,7 @@ MaybeDumpValue(const char *name, const Value &v)
 }
 
 JS_FRIEND_API(void)
-js_DumpStackFrame(JSContext *cx, StackFrame *start)
+js_DumpInterpreterFrame(JSContext *cx, InterpreterFrame *start)
 {
     /* This should only called during live debugging. */
     ScriptFrameIter i(cx, ScriptFrameIter::GO_THROUGH_SAVED);
@@ -5828,7 +5837,7 @@ js_DumpStackFrame(JSContext *cx, StackFrame *start)
         if (i.isJit())
             fprintf(stderr, "JIT frame\n");
         else
-            fprintf(stderr, "StackFrame at %p\n", (void *) i.interpFrame());
+            fprintf(stderr, "InterpreterFrame at %p\n", (void *) i.interpFrame());
 
         if (i.isFunctionFrame()) {
             fprintf(stderr, "callee fun: ");

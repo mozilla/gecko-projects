@@ -373,9 +373,6 @@ JSObject::setDenseOrTypedArrayElementWithType(js::ExclusiveContext *cx, uint32_t
 /* static */ inline bool
 JSObject::setSingletonType(js::ExclusiveContext *cx, js::HandleObject obj)
 {
-    if (!cx->typeInferenceEnabled())
-        return true;
-
     JS_ASSERT_IF(cx->isJSContext(),
                  !IsInsideNursery(cx->asJSContext()->runtime(), obj.get()));
 
@@ -507,7 +504,8 @@ JSObject::create(js::ExclusiveContext *cx, js::gc::AllocKind kind, js::gc::Initi
     JS_ASSERT(shape && type);
     JS_ASSERT(type->clasp() == shape->getObjectClass());
     JS_ASSERT(type->clasp() != &js::ArrayObject::class_);
-    JS_ASSERT(js::gc::GetGCKindSlots(kind, type->clasp()) == shape->numFixedSlots());
+    JS_ASSERT_IF(type->clasp() != &js::ArrayBufferObject::class_,
+                 js::gc::GetGCKindSlots(kind, type->clasp()) == shape->numFixedSlots());
     JS_ASSERT_IF(type->clasp()->flags & JSCLASS_BACKGROUND_FINALIZE, IsBackgroundFinalized(kind));
     JS_ASSERT_IF(type->clasp()->finalize, heap == js::gc::TenuredHeap);
 

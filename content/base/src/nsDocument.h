@@ -98,6 +98,7 @@ class nsPointerLockPermissionRequest;
 class nsISecurityConsoleMessage;
 
 namespace mozilla {
+class EventChainPreVisitor;
 namespace dom {
 class UndoManager;
 class LifecycleCallbacks;
@@ -902,7 +903,8 @@ public:
   NS_DECL_NSIDOMDOCUMENTXBL
 
   // nsIDOMEventTarget
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(
+                     mozilla::EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
   virtual mozilla::EventListenerManager*
     GetOrCreateListenerManager() MOZ_OVERRIDE;
   virtual mozilla::EventListenerManager*
@@ -1418,6 +1420,8 @@ public:
                                     const nsAString& aTypeExtension,
                                     uint32_t aNamespaceID,
                                     mozilla::ErrorResult& rv);
+
+  static bool IsRegisterElementEnabled(JSContext* aCx, JSObject* aObject);
 
   // The "registry" from the web components spec.
   nsRefPtr<Registry> mRegistry;

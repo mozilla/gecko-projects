@@ -335,6 +335,7 @@
 @BINPATH@/components/amContentHandler.js
 @BINPATH@/components/amWebInstallListener.js
 @BINPATH@/components/nsBlocklistService.js
+@BINPATH@/components/TabSource.js
 @BINPATH@/components/webvtt.xpt
 @BINPATH@/components/WebVTT.manifest
 @BINPATH@/components/WebVTTParserWrapper.js
@@ -601,6 +602,10 @@ bin/components/@DLL_PREFIX@nkgnomevfs@DLL_SUFFIX@
 @BINPATH@/chrome/marionette.manifest
 @BINPATH@/components/MarionetteComponents.manifest
 @BINPATH@/components/marionettecomponent.js
+#endif
+
+#ifdef MOZ_ANDROID_SYNTHAPKS
+@BINPATH@/components/WebappsUpdateTimer.js
 #endif
 
 @BINPATH@/components/DataStore.manifest

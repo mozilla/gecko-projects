@@ -91,12 +91,15 @@ CodeGeneratorShared::generateOutOfLineCode()
             return false;
         masm.setFramePushed(outOfLineCode_[i]->framePushed());
         lastPC_ = outOfLineCode_[i]->pc();
+        if (!sps_.prepareForOOL())
+            return false;
         sps_.setPushed(outOfLineCode_[i]->script());
         outOfLineCode_[i]->bind(&masm);
 
         oolIns = outOfLineCode_[i];
         if (!outOfLineCode_[i]->generate(this))
             return false;
+        sps_.finishOOL();
     }
     oolIns = nullptr;
 
@@ -180,17 +183,10 @@ CodeGeneratorShared::encodeAllocations(LSnapshot *snapshot, MResumePoint *resume
                     alloc = RValueAllocation::Double(reg);
             } else {
                 MConstant *constant = mir->toConstant();
-                const Value &v = constant->value();
-
-                // Don't bother with the constant pool for smallish integers.
-                if (v.isInt32() && v.toInt32() >= -32 && v.toInt32() <= 32) {
-                    alloc = RValueAllocation::Int32(v.toInt32());
-                } else {
-                    uint32_t index;
-                    if (!graph.addConstantToPool(constant->value(), &index))
-                        return false;
-                    alloc = RValueAllocation::ConstantPool(index);
-                }
+                uint32_t index;
+                if (!graph.addConstantToPool(constant->value(), &index))
+                    return false;
+                alloc = RValueAllocation::ConstantPool(index);
             }
             break;
           }

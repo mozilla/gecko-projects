@@ -608,6 +608,8 @@ ArrayMetaTypeDescr::create(JSContext *cx,
     if (!prototypeObj)
         return nullptr;
 
+    obj->initReservedSlot(JS_DESCR_SLOT_PROTO, ObjectValue(*prototypeObj));
+
     if (!LinkConstructorAndPrototype(cx, obj, prototypeObj))
         return nullptr;
 
@@ -978,6 +980,8 @@ StructMetaTypeDescr::create(JSContext *cx,
         cx, CreatePrototypeObjectForComplexTypeInstance(cx, structTypePrototype));
     if (!prototypeObj)
         return nullptr;
+
+    descr->initReservedSlot(JS_DESCR_SLOT_PROTO, ObjectValue(*prototypeObj));
 
     if (!LinkConstructorAndPrototype(cx, descr, prototypeObj))
         return nullptr;
@@ -1411,8 +1415,7 @@ TypedObject::createUnattachedWithClass(JSContext *cx,
 
     // Tag the type object for this instance with the type
     // representation, if that has not been done already.
-    if (cx->typeInferenceEnabled() && !type->is<SimpleTypeDescr>()) {
-        // FIXME Bug 929651           ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if (!type->is<SimpleTypeDescr>()) { // FIXME Bug 929651
         RootedTypeObject typeObj(cx, obj->getType(cx));
         if (typeObj) {
             if (!typeObj->addTypedObjectAddendum(cx, type))

@@ -25,7 +25,7 @@ namespace jit {
 
 enum FrameType
 {
-    // A JS frame is analagous to a js::StackFrame, representing one scripted
+    // A JS frame is analagous to a js::InterpreterFrame, representing one scripted
     // functon activation. OptimizedJS frames are used by the optimizing compiler.
     IonFrame_OptimizedJS,
 
@@ -63,7 +63,7 @@ enum FrameType
 
     // An OSR frame is added when performing OSR from within a bailout. It
     // looks like a JS frame, but does not push scripted arguments, as OSR
-    // reads arguments from a js::StackFrame.
+    // reads arguments from a BaselineFrame.
     IonFrame_Osr
 };
 
@@ -259,12 +259,25 @@ class SnapshotIterator : public SnapshotReader
 
   private:
     // Read a spilled register from the machine state.
-    bool hasRegister(const Location &loc);
-    uintptr_t fromRegister(const Location &loc);
+    bool hasRegister(Register reg) const {
+        return machine_.has(reg);
+    }
+    uintptr_t fromRegister(Register reg) const {
+        return machine_.read(reg);
+    }
+
+    bool hasRegister(FloatRegister reg) const {
+        return machine_.has(reg);
+    }
+    double fromRegister(FloatRegister reg) const {
+        return machine_.read(reg);
+    }
 
     // Read an uintptr_t from the stack.
-    bool hasStack(const Location &loc);
-    uintptr_t fromStack(const Location &loc);
+    bool hasStack(int32_t offset) const {
+        return true;
+    }
+    uintptr_t fromStack(int32_t offset) const;
 
     Value allocationValue(const RValueAllocation &a);
     bool allocationReadable(const RValueAllocation &a);

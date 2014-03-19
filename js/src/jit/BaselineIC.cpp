@@ -947,7 +947,7 @@ DoUseCountFallback(JSContext *cx, ICUseCount_Fallback *stub, BaselineFrame *fram
     if (!jitcode)
         return true;
 
-    // Prepare the temporary heap copy of the fake StackFrame and actual args list.
+    // Prepare the temporary heap copy of the fake InterpreterFrame and actual args list.
     IonSpew(IonSpew_BaselineOSR, "Got jitcode.  Preparing for OSR into ion.");
     IonOsrTempData *info = PrepareOsrTempData(cx, stub, frame, script, pc, jitcode);
     if (!info)
@@ -8070,9 +8070,6 @@ MaybeCloneFunctionAtCallsite(JSContext *cx, MutableHandleValue callee, HandleScr
     if (!fun->hasScript() || !fun->nonLazyScript()->shouldCloneAtCallsite())
         return true;
 
-    if (!cx->typeInferenceEnabled())
-        return true;
-
     fun = CloneFunctionAtCallsite(cx, fun, script, pc);
     if (!fun)
         return false;
@@ -8108,9 +8105,7 @@ DoCallFallback(JSContext *cx, BaselineFrame *frame, ICCall_Fallback *stub, uint3
 
     // Compute construcing and useNewType flags.
     bool constructing = (op == JSOP_NEW);
-    bool newType = false;
-    if (cx->typeInferenceEnabled())
-        newType = types::UseNewType(cx, script, pc);
+    bool newType = types::UseNewType(cx, script, pc);
 
     // Try attaching a call stub.
     if (!TryAttachCallStub(cx, stub, script, pc, op, argc, vp, constructing, newType))
