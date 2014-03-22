@@ -196,6 +196,7 @@ pref("media.directshow.enabled", true);
 #endif
 #ifdef MOZ_FMP4
 pref("media.fragmented-mp4.enabled", true);
+pref("media.fragmented-mp4.ffmpeg.enabled", false);
 // Denotes that the fragmented MP4 parser can be created by <video> elements.
 // This is for testing, since the parser can't yet handle non-fragmented MP4,
 // so it will fail to play most MP4 files.
@@ -1810,6 +1811,26 @@ pref("layout.css.sticky.enabled", true);
 // Is support for CSS "will-change" enabled?
 pref("layout.css.will-change.enabled", false);
 
+// Is support for DOMPoint enabled?
+pref("layout.css.DOMPoint.enabled", true);
+
+// Is support for DOMQuad enabled?
+pref("layout.css.DOMQuad.enabled", true);
+
+// Is support for GeometryUtils.getBoxQuads enabled?
+#ifdef RELEASE_BUILD
+pref("layout.css.getBoxQuads.enabled", false);
+#else
+pref("layout.css.getBoxQuads.enabled", true);
+#endif
+
+// Is support for GeometryUtils.getBoxQuads enabled?
+#ifdef RELEASE_BUILD
+pref("layout.css.convertFromNode.enabled", false);
+#else
+pref("layout.css.convertFromNode.enabled", true);
+#endif
+
 // Is support for CSS "text-align: true X" enabled?
 pref("layout.css.text-align-true-value.enabled", false);
 
@@ -2010,11 +2031,7 @@ pref("svg.display-lists.hit-testing.enabled", true);
 pref("svg.display-lists.painting.enabled", true);
 
 // Is support for the SVG 2 paint-order property enabled?
-#ifdef RELEASE_BUILD
-pref("svg.paint-order.enabled", false);
-#else
 pref("svg.paint-order.enabled", true);
-#endif
 
 // Is support for the new marker features from SVG 2 enabled?  Currently
 // this just includes <marker orient="auto-start-reverse">.
@@ -3055,6 +3072,28 @@ pref("font.single-face-list", "Osaka-Mono");
 // optimization hint for fonts with localized names to be read in at startup, otherwise read in at lookup miss
 // names are canonical family names (typically English names)
 pref("font.preload-names-list", "Hiragino Kaku Gothic Pro,Hiragino Mincho Pro,STSong");
+
+// Override font-weight values for some problematic families Apple ships
+// (see bug 931426).
+// The name here is the font's PostScript name, which can be checked in
+// the Font Book utility or other tools.
+pref("font.weight-override.AppleSDGothicNeo-Thin", 100); // Ensure Thin < UltraLight < Light
+pref("font.weight-override.AppleSDGothicNeo-UltraLight", 200);
+pref("font.weight-override.AppleSDGothicNeo-Light", 300);
+pref("font.weight-override.AppleSDGothicNeo-Heavy", 900); // Ensure Heavy > ExtraBold (800)
+
+pref("font.weight-override.Avenir-Book", 300); // Ensure Book < Roman (400)
+pref("font.weight-override.Avenir-BookOblique", 300);
+pref("font.weight-override.Avenir-MediumOblique", 500); // Harmonize MediumOblique with Medium
+pref("font.weight-override.Avenir-Black", 900); // Ensure Black > Heavy (800)
+pref("font.weight-override.Avenir-BlackOblique", 900);
+
+pref("font.weight-override.AvenirNext-MediumItalic", 500); // Harmonize MediumItalic with Medium
+pref("font.weight-override.AvenirNextCondensed-MediumItalic", 500);
+
+pref("font.weight-override.HelveticaNeue-Light", 300); // Ensure Light > Thin (200)
+pref("font.weight-override.HelveticaNeue-LightItalic", 300);
+pref("font.weight-override.HelveticaNeue-MediumItalic", 500); // Harmonize MediumItalic with Medium
 
 // Override the Windows settings: no menu key, meta accelerator key. ctrl for general access key in HTML/XUL
 // Use 17 for Ctrl, 18 for Option, 224 for Cmd, 0 for none

@@ -104,6 +104,7 @@ public:
   }
 
   TextTrackCueList* GetActiveCues();
+  void UpdateActiveCueList();
   void GetActiveCueArray(nsTArray<nsRefPtr<TextTrackCue> >& aCues);
 
   TextTrackReadyState ReadyState() const;
@@ -111,7 +112,6 @@ public:
 
   void AddCue(TextTrackCue& aCue);
   void RemoveCue(TextTrackCue& aCue, ErrorResult& aRv);
-  void CueChanged(TextTrackCue& aCue);
   void SetDirty() { mDirty = true; }
 
   TextTrackList* GetTextTrackList();
@@ -127,8 +127,6 @@ public:
   }
 
 private:
-  void UpdateActiveCueList();
-
   nsCOMPtr<nsISupports> mParent;
   nsRefPtr<TextTrackList> mTextTrackList;
 

@@ -745,7 +745,7 @@ class MBinaryInstruction : public MAryInstruction<2>
         replaceOperand(1, temp);
     }
 
-    bool congruentTo(MDefinition *ins) const
+    bool binaryCongruentTo(MDefinition *ins) const
     {
         if (op() != ins->op())
             return false;
@@ -804,30 +804,6 @@ class MTernaryInstruction : public MAryInstruction<3>
 
         return op() ^ first->valueNumber() ^ second->valueNumber() ^ third->valueNumber();
     }
-
-    bool congruentTo(MDefinition *ins) const
-    {
-        if (op() != ins->op())
-            return false;
-
-        if (type() != ins->type())
-            return false;
-
-        if (isEffectful() || ins->isEffectful())
-            return false;
-
-        MTernaryInstruction *ter = static_cast<MTernaryInstruction *>(ins);
-        MDefinition *first = getOperand(0);
-        MDefinition *second = getOperand(1);
-        MDefinition *third = getOperand(2);
-        MDefinition *insFirst = ter->getOperand(0);
-        MDefinition *insSecond = ter->getOperand(1);
-        MDefinition *insThird = ter->getOperand(2);
-
-        return first->valueNumber() == insFirst->valueNumber() &&
-               second->valueNumber() == insSecond->valueNumber() &&
-               third->valueNumber() == insThird->valueNumber();
-    }
 };
 
 class MQuaternaryInstruction : public MAryInstruction<4>
@@ -852,33 +828,6 @@ class MQuaternaryInstruction : public MAryInstruction<4>
 
         return op() ^ first->valueNumber() ^ second->valueNumber() ^
                       third->valueNumber() ^ fourth->valueNumber();
-    }
-
-    bool congruentTo(MDefinition *ins) const
-    {
-        if (op() != ins->op())
-            return false;
-
-        if (type() != ins->type())
-            return false;
-
-        if (isEffectful() || ins->isEffectful())
-            return false;
-
-        MQuaternaryInstruction *qua = static_cast<MQuaternaryInstruction *>(ins);
-        MDefinition *first = getOperand(0);
-        MDefinition *second = getOperand(1);
-        MDefinition *third = getOperand(2);
-        MDefinition *fourth = getOperand(3);
-        MDefinition *insFirst = qua->getOperand(0);
-        MDefinition *insSecond = qua->getOperand(1);
-        MDefinition *insThird = qua->getOperand(2);
-        MDefinition *insFourth = qua->getOperand(3);
-
-        return first->valueNumber() == insFirst->valueNumber() &&
-               second->valueNumber() == insSecond->valueNumber() &&
-               third->valueNumber() == insThird->valueNumber() &&
-               fourth->valueNumber() == insFourth->valueNumber();
     }
 };
 
@@ -2348,7 +2297,7 @@ class MCompare
 
   protected:
     bool congruentTo(MDefinition *ins) const {
-        if (!MBinaryInstruction::congruentTo(ins))
+        if (!binaryCongruentTo(ins))
             return false;
         return compareType() == ins->toCompare()->compareType() &&
                jsop() == ins->toCompare()->jsop();
@@ -3271,7 +3220,7 @@ class MBinaryBitwiseInstruction
         setMovable();
     }
 
-    void specializeForAsmJS();
+    void specializeAsInt32();
 
   public:
     TypePolicy *typePolicy() {
@@ -3286,7 +3235,7 @@ class MBinaryBitwiseInstruction
     virtual void infer(BaselineInspector *inspector, jsbytecode *pc);
 
     bool congruentTo(MDefinition *ins) const {
-        return congruentIfOperandsEqual(ins);
+        return binaryCongruentTo(ins);
     }
     AliasSet getAliasSet() const {
         if (specialization_ >= MIRType_Object)
@@ -3502,7 +3451,7 @@ class MBinaryArithInstruction
     virtual void trySpecializeFloat32(TempAllocator &alloc);
 
     bool congruentTo(MDefinition *ins) const {
-        return MBinaryInstruction::congruentTo(ins);
+        return binaryCongruentTo(ins);
     }
     AliasSet getAliasSet() const {
         if (specialization_ >= MIRType_Object)
@@ -4080,7 +4029,7 @@ class MMul : public MBinaryArithInstruction
         if (mode_ != mul->mode())
             return false;
 
-        return MBinaryInstruction::congruentTo(ins);
+        return binaryCongruentTo(ins);
     }
 
     bool canOverflow() const;
@@ -4335,6 +4284,10 @@ class MCharCodeAt
         return this;
     }
 
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
+
     virtual AliasSet getAliasSet() const {
         // Strings are immutable, so there is no implicit dependency.
         return AliasSet::None();
@@ -4556,17 +4509,7 @@ class MPhi MOZ_FINAL : public MDefinition, public InlineForwardListNode<MPhi>
     }
     void computeRange(TempAllocator &alloc);
 
-    MDefinition *operandIfRedundant() {
-        // If this phi is redundant (e.g., phi(a,a) or b=phi(a,this)),
-        // returns the operand that it will always be equal to (a, in
-        // those two cases).
-        MDefinition *first = getOperand(0);
-        for (size_t i = 1, e = numOperands(); i < e; i++) {
-            if (getOperand(i) != first && getOperand(i) != this)
-                return nullptr;
-        }
-        return first;
-    }
+    MDefinition *operandIfRedundant();
 
     bool canProduceFloat32() const {
         return canProduceFloat32_;
@@ -5037,6 +4980,9 @@ class MStringReplace
         return new(alloc) MStringReplace(string, pattern, replacement);
     }
 
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
@@ -5820,6 +5766,16 @@ class MLoadElement
     bool fallible() const {
         return needsHoleCheck();
     }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadElement())
+            return false;
+        MLoadElement *other = ins->toLoadElement();
+        if (needsHoleCheck() != other->needsHoleCheck())
+            return false;
+        if (loadDoubles() != other->loadDoubles())
+            return false;
+        return congruentIfOperandsEqual(other);
+    }
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::Element);
     }
@@ -5872,6 +5828,16 @@ class MLoadElementHole
     }
     bool needsHoleCheck() const {
         return needsHoleCheck_;
+    }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadElementHole())
+            return false;
+        MLoadElementHole *other = ins->toLoadElementHole();
+        if (needsHoleCheck() != other->needsHoleCheck())
+            return false;
+        if (needsNegativeIntCheck() != other->needsNegativeIntCheck())
+            return false;
+        return congruentIfOperandsEqual(other);
     }
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::Element);
@@ -6182,6 +6148,15 @@ class MLoadTypedArrayElement
         return AliasSet::Load(AliasSet::TypedArrayElement);
     }
 
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadTypedArrayElement())
+            return false;
+        MLoadTypedArrayElement *other = ins->toLoadTypedArrayElement();
+        if (arrayType_ != other->arrayType_)
+            return false;
+        return congruentIfOperandsEqual(other);
+    }
+
     void printOpcode(FILE *fp) const;
 
     void computeRange(TempAllocator &alloc);
@@ -6233,6 +6208,16 @@ class MLoadTypedArrayElementHole
     }
     MDefinition *index() const {
         return getOperand(1);
+    }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isLoadTypedArrayElementHole())
+            return false;
+        MLoadTypedArrayElementHole *other = ins->toLoadTypedArrayElementHole();
+        if (arrayType() != other->arrayType())
+            return false;
+        if (allowDouble() != other->allowDouble())
+            return false;
+        return congruentIfOperandsEqual(other);
     }
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::TypedArrayElement);
@@ -8509,6 +8494,16 @@ class MInArray
     AliasSet getAliasSet() const {
         return AliasSet::Load(AliasSet::Element);
     }
+    bool congruentTo(MDefinition *ins) const {
+        if (!ins->isInArray())
+            return false;
+        MInArray *other = ins->toInArray();
+        if (needsHoleCheck() != other->needsHoleCheck())
+            return false;
+        if (needsNegativeIntCheck() != other->needsNegativeIntCheck())
+            return false;
+        return congruentIfOperandsEqual(other);
+    }
     TypePolicy *typePolicy() {
         return this;
     }
@@ -8801,6 +8796,9 @@ class MGuardThreadExclusive
     }
     BailoutKind bailoutKind() const {
         return Bailout_Normal;
+    }
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
         return AliasSet::None();
@@ -9415,6 +9413,9 @@ class MHaveSameClass
 
     TypePolicy *typePolicy() {
         return this;
+    }
+    bool congruentTo(MDefinition *ins) const {
+        return congruentIfOperandsEqual(ins);
     }
     AliasSet getAliasSet() const {
         return AliasSet::None();

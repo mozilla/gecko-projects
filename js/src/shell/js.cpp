@@ -699,7 +699,6 @@ Options(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    JS::RuntimeOptions oldRuntimeOptions = JS::RuntimeOptionsRef(cx);
     JS::ContextOptions oldContextOptions = JS::ContextOptionsRef(cx);
     for (unsigned i = 0; i < args.length(); i++) {
         JSString *str = JS::ToString(cx, args[i]);
@@ -1785,7 +1784,8 @@ Trap(JSContext *cx, unsigned argc, jsval *vp)
     if (!GetScriptAndPCArgs(cx, argc, args.array(), &script, &i))
         return false;
     args.rval().setUndefined();
-    return JS_SetTrap(cx, script, script->offsetToPC(i), TrapHandler, STRING_TO_JSVAL(str));
+    RootedValue strValue(cx, StringValue(str));
+    return JS_SetTrap(cx, script, script->offsetToPC(i), TrapHandler, strValue);
 }
 
 static bool
@@ -5158,7 +5158,7 @@ static const JSJitInfo doFoo_methodinfo = {
 };
 
 static const JSPropertySpec dom_props[] = {
-    {"x", 0,
+    {"x",
      JSPROP_SHARED | JSPROP_ENUMERATE | JSPROP_NATIVE_ACCESSORS,
      { { (JSPropertyOp)dom_genericGetter, &dom_x_getterinfo } },
      { { (JSStrictPropertyOp)dom_genericSetter, &dom_x_setterinfo } }
