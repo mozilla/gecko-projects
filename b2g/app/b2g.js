@@ -187,7 +187,8 @@ pref("privacy.item.syncAccount", true);
 
 // base url for the wifi geolocation network provider
 pref("geo.provider.use_mls", false);
-pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
+pref("geo.cell.scan", true);
+pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZ_MOZILLA_API_KEY%");
 
 // enable geo
 pref("geo.enabled", true);
@@ -417,6 +418,7 @@ pref("dom.global-constructor.disable.mozContact", false);
 pref("dom.phonenumber.substringmatching.BR", 8);
 pref("dom.phonenumber.substringmatching.CO", 10);
 pref("dom.phonenumber.substringmatching.VE", 7);
+pref("dom.phonenumber.substringmatching.CL", 8);
 
 // WebAlarms
 pref("dom.mozAlarms.enabled", true);

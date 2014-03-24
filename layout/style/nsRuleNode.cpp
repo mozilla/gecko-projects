@@ -7234,8 +7234,8 @@ SetGridTrackList(const nsCSSValue& aValue,
 
 static void
 SetGridTemplateAreas(const nsCSSValue& aValue,
-                     nsCSSValueGridTemplateAreas& aResult,
-                     const nsCSSValueGridTemplateAreas& aParentValue,
+                     nsRefPtr<css::GridTemplateAreasValue>* aResult,
+                     css::GridTemplateAreasValue* aParentValue,
                      bool& aCanStoreInRuleTree)
 {
   switch (aValue.GetUnit()) {
@@ -7244,17 +7244,17 @@ SetGridTemplateAreas(const nsCSSValue& aValue,
 
   case eCSSUnit_Inherit:
     aCanStoreInRuleTree = false;
-    aResult = aParentValue;
+    *aResult = aParentValue;
     break;
 
   case eCSSUnit_Initial:
   case eCSSUnit_Unset:
   case eCSSUnit_None:
-    aResult.Reset();
+    *aResult = nullptr;
     break;
 
   default:
-    aResult = aValue.GetGridTemplateAreas();
+    *aResult = aValue.GetGridTemplateAreas();
   }
 }
 
@@ -7484,7 +7484,6 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
       break;
     case eCSSUnit_Initial:
     case eCSSUnit_Unset:
-    case eCSSUnit_None:
       pos->mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_NONE;
       break;
     default:
@@ -7521,7 +7520,8 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
 
   // grid-tempate-areas
   SetGridTemplateAreas(*aRuleData->ValueForGridTemplateAreas(),
-                       pos->mGridTemplateAreas, parentPos->mGridTemplateAreas,
+                       &pos->mGridTemplateAreas,
+                       parentPos->mGridTemplateAreas,
                        canStoreInRuleTree);
 
   // grid-auto-position

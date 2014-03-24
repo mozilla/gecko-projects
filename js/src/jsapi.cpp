@@ -3977,7 +3977,7 @@ js_generic_native_method_dispatcher(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     const JSFunctionSpec *fs = (JSFunctionSpec *)
-        vp->toObject().as<JSFunction>().getExtendedSlot(0).toPrivate();
+        args.callee().as<JSFunction>().getExtendedSlot(0).toPrivate();
     JS_ASSERT((fs->flags & JSFUN_GENERIC_NATIVE) != 0);
 
     if (argc < 1) {
@@ -4622,7 +4622,7 @@ JS::CompileFunction(JSContext *cx, HandleObject obj, const ReadOnlyCompileOption
     if (!frontend::CompileFunctionBody(cx, &fun, options, formals, chars, length))
         return nullptr;
 
-    if (obj && funAtom) {
+    if (obj && funAtom && options.defineOnScope) {
         Rooted<jsid> id(cx, AtomToId(funAtom));
         RootedValue value(cx, ObjectValue(*fun));
         if (!JSObject::defineGeneric(cx, obj, id, value, nullptr, nullptr, JSPROP_ENUMERATE))
