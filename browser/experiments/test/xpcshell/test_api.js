@@ -75,6 +75,7 @@ add_task(function* test_setup() {
   gReporter = yield getReporter("json_payload_simple");
   yield gReporter.collectMeasurements();
   let payload = yield gReporter.getJSONPayload(true);
+  do_register_cleanup(() => gReporter._shutdown());
 
   gPolicy = new Experiments.Policy();
   patchPolicy(gPolicy, {
@@ -1262,6 +1263,7 @@ add_task(function* test_unexpectedUninstall() {
   // the experiments API.
 
   let success = yield uninstallAddon(EXPERIMENT1_ID);
+  yield experiments._mainTask;
   Assert.ok(success, "Addon should have been uninstalled.");
 
   yield experiments.notify();
@@ -1275,11 +1277,5 @@ add_task(function* test_unexpectedUninstall() {
 
   Services.obs.removeObserver(observer, OBSERVER_TOPIC);
   yield experiments.uninit();
-  yield removeCacheFile();
-});
-
-
-add_task(function* shutdown() {
-  yield gReporter._shutdown();
   yield removeCacheFile();
 });

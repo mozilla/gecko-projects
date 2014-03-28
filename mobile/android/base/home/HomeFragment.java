@@ -21,6 +21,7 @@ import org.mozilla.gecko.util.UiAsyncTask;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.util.Log;
@@ -199,6 +200,12 @@ abstract class HomeFragment extends Fragment {
         loadIfVisible();
     }
 
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        mIsLoaded = false;
+    }
+
     void setCanLoadHint(boolean canLoadHint) {
         if (mCanLoadHint == canLoadHint) {
             return;
@@ -214,15 +221,17 @@ abstract class HomeFragment extends Fragment {
 
     protected abstract void load();
 
+    protected boolean canLoad() {
+        return (mCanLoadHint && isVisible() && getUserVisibleHint());
+    }
+
     protected void loadIfVisible() {
-        if (!mCanLoadHint || !isVisible() || !getUserVisibleHint()) {
+        if (!canLoad() || mIsLoaded) {
             return;
         }
 
-        if (!mIsLoaded) {
-            load();
-            mIsLoaded = true;
-        }
+        load();
+        mIsLoaded = true;
     }
 
     private static class RemoveBookmarkTask extends UiAsyncTask<Void, Void, Void> {

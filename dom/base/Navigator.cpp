@@ -91,6 +91,8 @@
 
 #include "nsIUploadChannel2.h"
 #include "nsFormData.h"
+#include "nsIPrivateBrowsingChannel.h"
+#include "nsIDocShell.h"
 
 namespace mozilla {
 namespace dom {
@@ -1138,6 +1140,18 @@ Navigator::SendBeacon(const nsAString& aUrl,
     return false;
   }
 
+  nsCOMPtr<nsIPrivateBrowsingChannel> pbChannel = do_QueryInterface(channel);
+  if (pbChannel) {
+    nsIDocShell* docShell = mWindow->GetDocShell();
+    nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
+    if (loadContext) {
+      rv = pbChannel->SetPrivate(loadContext->UsePrivateBrowsing());
+      if (NS_FAILED(rv)) {
+        NS_WARNING("Setting the privacy status on the beacon channel failed");
+      }
+    }
+  }
+
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(channel);
   if (!httpChannel) {
     // Beacon spec only supports HTTP requests at this time
@@ -1573,18 +1587,21 @@ Navigator::GetGamepads(nsTArray<nsRefPtr<Gamepad> >& aGamepads,
 //*****************************************************************************
 
 NS_IMETHODIMP
-Navigator::GetMozConnection(nsISupports** aConnection)
+Navigator::GetProperties(nsINetworkProperties** aProperties)
 {
-  nsCOMPtr<nsINetworkProperties> properties = GetMozConnection();
-  properties.forget(aConnection);
+  ErrorResult rv;
+  NS_IF_ADDREF(*aProperties = GetConnection(rv));
   return NS_OK;
 }
 
 network::Connection*
-Navigator::GetMozConnection()
+Navigator::GetConnection(ErrorResult& aRv)
 {
   if (!mConnection) {
-    NS_ENSURE_TRUE(mWindow, nullptr);
+    if (!mWindow) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
     NS_ENSURE_TRUE(mWindow->GetDocShell(), nullptr);
 
     mConnection = new network::Connection();

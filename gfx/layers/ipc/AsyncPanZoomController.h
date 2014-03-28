@@ -238,7 +238,7 @@ public:
    * checkerboard immediately. This includes a bunch of logic, including
    * algorithms to bias painting in the direction of the velocity.
    */
-  static const CSSRect CalculatePendingDisplayPort(
+  static const LayerMargin CalculatePendingDisplayPort(
     const FrameMetrics& aFrameMetrics,
     const ScreenPoint& aVelocity,
     double aEstimatedPaintDuration);
@@ -254,6 +254,15 @@ public:
    * Does the work for ReceiveInputEvent().
    */
   nsEventStatus HandleInputEvent(const InputData& aEvent);
+
+  /**
+   * Handler for gesture events.
+   * Currently some gestures are detected in GestureEventListener that calls
+   * APZC back through this handler in order to avoid recursive calls to
+   * APZC::HandleInputEvent() which is supposed to do the work for
+   * ReceiveInputEvent().
+   */
+  nsEventStatus HandleGestureEvent(const InputData& aEvent);
 
   /**
    * Populates the provided object (if non-null) with the scrollable guid of this apzc.

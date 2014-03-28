@@ -191,13 +191,15 @@ let DebuggerController = {
     this._connection = startedDebugging.promise;
 
     let target = this._target;
-    let { client, form: { chromeDebugger, traceActor } } = target;
+    let { client, form: { chromeDebugger, traceActor, addonActor } } = target;
     target.on("close", this._onTabDetached);
     target.on("navigate", this._onTabNavigated);
     target.on("will-navigate", this._onTabNavigated);
     this.client = client;
 
-    if (target.chrome) {
+    if (addonActor) {
+      this._startAddonDebugging(addonActor, startedDebugging.resolve);
+    } else if (target.chrome) {
       this._startChromeDebugging(chromeDebugger, startedDebugging.resolve);
     } else {
       this._startDebuggingTab(startedDebugging.resolve);
@@ -306,6 +308,20 @@ let DebuggerController = {
       if (aCallback) {
         aCallback();
       }
+    });
+  },
+
+  /**
+   * Sets up an addon debugging session.
+   *
+   * @param object aAddonActor
+   *        The actor for the addon that is being debugged.
+   * @param function aCallback
+   *        A function to invoke once the client attaches to the active thread.
+   */
+  _startAddonDebugging: function(aAddonActor, aCallback) {
+    this.client.attachAddon(aAddonActor, (aResponse) => {
+      return this._startChromeDebugging(aResponse.threadActor, aCallback);
     });
   },
 

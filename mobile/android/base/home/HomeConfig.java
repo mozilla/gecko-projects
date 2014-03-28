@@ -22,8 +22,9 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 public final class HomeConfig {
     /**
@@ -99,6 +100,7 @@ public final class HomeConfig {
         private final String mId;
         private final LayoutType mLayoutType;
         private final List<ViewConfig> mViews;
+        private final AuthConfig mAuthConfig;
         private final EnumSet<Flags> mFlags;
 
         private static final String JSON_KEY_TYPE = "type";
@@ -106,6 +108,7 @@ public final class HomeConfig {
         private static final String JSON_KEY_ID = "id";
         private static final String JSON_KEY_LAYOUT = "layout";
         private static final String JSON_KEY_VIEWS = "views";
+        private static final String JSON_KEY_AUTH_CONFIG = "authConfig";
         private static final String JSON_KEY_DEFAULT = "default";
         private static final String JSON_KEY_DISABLED = "disabled";
 
@@ -146,6 +149,13 @@ public final class HomeConfig {
                 mViews = null;
             }
 
+            final JSONObject jsonAuthConfig = json.optJSONObject(JSON_KEY_AUTH_CONFIG);
+            if (jsonAuthConfig != null) {
+                mAuthConfig = new AuthConfig(jsonAuthConfig);
+            } else {
+                mAuthConfig = null;
+            }
+
             mFlags = EnumSet.noneOf(Flags.class);
 
             if (json.optBoolean(JSON_KEY_DEFAULT, false)) {
@@ -169,6 +179,8 @@ public final class HomeConfig {
             mViews = new ArrayList<ViewConfig>();
             in.readTypedList(mViews, ViewConfig.CREATOR);
 
+            mAuthConfig = (AuthConfig) in.readParcelable(getClass().getClassLoader());
+
             mFlags = (EnumSet<Flags>) in.readSerializable();
 
             validate();
@@ -187,6 +199,8 @@ public final class HomeConfig {
                     mViews.add(new ViewConfig(viewConfig));
                 }
             }
+
+            mAuthConfig = panelConfig.mAuthConfig;
             mFlags = panelConfig.mFlags.clone();
 
             validate();
@@ -197,16 +211,17 @@ public final class HomeConfig {
         }
 
         public PanelConfig(PanelType type, String title, String id, EnumSet<Flags> flags) {
-            this(type, title, id, null, null, flags);
+            this(type, title, id, null, null, null, flags);
         }
 
         public PanelConfig(PanelType type, String title, String id, LayoutType layoutType,
-                List<ViewConfig> views, EnumSet<Flags> flags) {
+                List<ViewConfig> views, AuthConfig authConfig, EnumSet<Flags> flags) {
             mType = type;
             mTitle = title;
             mId = id;
             mLayoutType = layoutType;
             mViews = views;
+            mAuthConfig = authConfig;
             mFlags = flags;
 
             validate();
@@ -290,6 +305,10 @@ public final class HomeConfig {
             }
         }
 
+        public AuthConfig getAuthConfig() {
+            return mAuthConfig;
+        }
+
         public JSONObject toJSON() throws JSONException {
             final JSONObject json = new JSONObject();
 
@@ -312,6 +331,10 @@ public final class HomeConfig {
                 }
 
                 json.put(JSON_KEY_VIEWS, jsonViews);
+            }
+
+            if (mAuthConfig != null) {
+                json.put(JSON_KEY_AUTH_CONFIG, mAuthConfig.toJSON());
             }
 
             if (mFlags.contains(Flags.DEFAULT_PANEL)) {
@@ -355,6 +378,7 @@ public final class HomeConfig {
             dest.writeString(mId);
             dest.writeParcelable(mLayoutType, 0);
             dest.writeTypedList(mViews);
+            dest.writeParcelable(mAuthConfig, 0);
             dest.writeSerializable(mFlags);
         }
 
@@ -713,7 +737,103 @@ public final class HomeConfig {
         };
     }
 
-    /**
+    public static class AuthConfig implements Parcelable {
+        private final String mMessageText;
+        private final String mButtonText;
+        private final String mImageUrl;
+
+        private static final String JSON_KEY_MESSAGE_TEXT = "messageText";
+        private static final String JSON_KEY_BUTTON_TEXT = "buttonText";
+        private static final String JSON_KEY_IMAGE_URL = "imageUrl";
+
+        public AuthConfig(JSONObject json) throws JSONException, IllegalArgumentException {
+            mMessageText = json.optString(JSON_KEY_MESSAGE_TEXT);
+            mButtonText = json.optString(JSON_KEY_BUTTON_TEXT);
+            mImageUrl = json.optString(JSON_KEY_IMAGE_URL, null);
+        }
+
+        @SuppressWarnings("unchecked")
+        public AuthConfig(Parcel in) {
+            mMessageText = in.readString();
+            mButtonText = in.readString();
+            mImageUrl = in.readString();
+
+            validate();
+        }
+
+        public AuthConfig(AuthConfig authConfig) {
+            mMessageText = authConfig.mMessageText;
+            mButtonText = authConfig.mButtonText;
+            mImageUrl = authConfig.mImageUrl;
+
+            validate();
+        }
+
+        public AuthConfig(String messageText, String buttonText, String imageUrl) {
+            mMessageText = messageText;
+            mButtonText = buttonText;
+            mImageUrl = imageUrl;
+
+            validate();
+        }
+
+        private void validate() {
+            if (mMessageText == null) {
+                throw new IllegalArgumentException("Can't create AuthConfig with null message text");
+            }
+
+            if (mButtonText == null) {
+                throw new IllegalArgumentException("Can't create AuthConfig with null button text");
+            }
+        }
+
+        public String getMessageText() {
+            return mMessageText;
+        }
+
+        public String getButtonText() {
+            return mButtonText;
+        }
+
+        public String getImageUrl() {
+            return mImageUrl;
+        }
+
+        public JSONObject toJSON() throws JSONException {
+            final JSONObject json = new JSONObject();
+
+            json.put(JSON_KEY_MESSAGE_TEXT, mMessageText);
+            json.put(JSON_KEY_BUTTON_TEXT, mButtonText);
+            json.put(JSON_KEY_IMAGE_URL, mImageUrl);
+
+            return json;
+        }
+
+        @Override
+        public int describeContents() {
+            return 0;
+        }
+
+        @Override
+        public void writeToParcel(Parcel dest, int flags) {
+            dest.writeString(mMessageText);
+            dest.writeString(mButtonText);
+            dest.writeString(mImageUrl);
+        }
+
+        public static final Creator<AuthConfig> CREATOR = new Creator<AuthConfig>() {
+            @Override
+            public AuthConfig createFromParcel(final Parcel in) {
+                return new AuthConfig(in);
+            }
+
+            @Override
+            public AuthConfig[] newArray(final int size) {
+                return new AuthConfig[size];
+            }
+        };
+    }
+   /**
      * Immutable representation of the current state of {@code HomeConfig}.
      * This is what HomeConfig returns from a load() call and takes as
      * input to save a new state.
@@ -767,7 +887,8 @@ public final class HomeConfig {
      */
     public static class Editor implements Iterable<PanelConfig> {
         private final HomeConfig mHomeConfig;
-        private final HashMap<String, PanelConfig> mConfigMap;
+        private final Map<String, PanelConfig> mConfigMap;
+        private final List<String> mConfigOrder;
         private final Thread mOriginalThread;
 
         private PanelConfig mDefaultPanel;
@@ -776,7 +897,8 @@ public final class HomeConfig {
         private Editor(HomeConfig homeConfig, State configState) {
             mHomeConfig = homeConfig;
             mOriginalThread = Thread.currentThread();
-            mConfigMap = new LinkedHashMap<String, PanelConfig>();
+            mConfigMap = new HashMap<String, PanelConfig>();
+            mConfigOrder = new LinkedList<String>();
             mEnabledCount = 0;
 
             initFromState(configState);
@@ -784,11 +906,11 @@ public final class HomeConfig {
 
         /**
          * Initialize the initial state of the editor from the given
-         * {@sode State}. A LinkedHashMap is used to represent the list of
-         * panels as it provides fast access to specific panels from IDs
-         * while also being order-aware. We keep a reference to the
-         * default panel and the number of enabled panels to avoid iterating
-         * through the map every time we need those.
+         * {@sode State}. A HashMap is used to represent the list of
+         * panels as it provides fast access, and a LinkedList is used to
+         * keep track of order. We keep a reference to the default panel
+         * and the number of enabled panels to avoid iterating through the
+         * map every time we need those.
          *
          * @param configState The source State to load the editor from.
          */
@@ -808,7 +930,9 @@ public final class HomeConfig {
                     }
                 }
 
-                mConfigMap.put(panelConfig.getId(), panelCopy);
+                final String panelId = panelConfig.getId();
+                mConfigOrder.add(panelId);
+                mConfigMap.put(panelId, panelCopy);
             }
 
             // We should always have a defined default panel if there's
@@ -848,10 +972,21 @@ public final class HomeConfig {
             mDefaultPanel = null;
         }
 
-        private List<PanelConfig> makeDeepCopy() {
-            List<PanelConfig> copiedList = new ArrayList<PanelConfig>();
-            for (PanelConfig panelConfig : mConfigMap.values()) {
-                copiedList.add(new PanelConfig(panelConfig));
+        /**
+         * Makes an ordered list of PanelConfigs that can be references
+         * or deep copied objects.
+         *
+         * @param deepCopy true to make deep-copied objects
+         * @return ordered List of PanelConfigs
+         */
+        private List<PanelConfig> makeOrderedCopy(boolean deepCopy) {
+            final List<PanelConfig> copiedList = new ArrayList<PanelConfig>(mConfigOrder.size());
+            for (String panelId : mConfigOrder) {
+                PanelConfig panelConfig = mConfigMap.get(panelId);
+                if (deepCopy) {
+                    panelConfig = new PanelConfig(panelConfig);
+                }
+                copiedList.add(panelConfig);
             }
 
             return copiedList;
@@ -955,6 +1090,7 @@ public final class HomeConfig {
             final String id = panelConfig.getId();
             if (!mConfigMap.containsKey(id)) {
                 mConfigMap.put(id, panelConfig);
+                mConfigOrder.add(id);
 
                 mEnabledCount++;
                 if (mEnabledCount == 1 || panelConfig.isDefault()) {
@@ -985,6 +1121,7 @@ public final class HomeConfig {
             }
 
             mConfigMap.remove(panelId);
+            mConfigOrder.remove(panelId);
 
             if (!panelConfig.isDisabled()) {
                 mEnabledCount--;
@@ -994,6 +1131,25 @@ public final class HomeConfig {
                 findNewDefault();
             }
 
+            return true;
+        }
+
+        /**
+         * Moves panel associated with panelId to the specified position.
+         *
+         * @param panelId Id of panel
+         * @param destIndex Destination position
+         * @return true if move succeeded
+         */
+        public boolean moveTo(String panelId, int destIndex) {
+            ThreadUtils.assertOnThread(mOriginalThread);
+
+            if (!mConfigOrder.contains(panelId)) {
+                return false;
+            }
+
+            mConfigOrder.remove(panelId);
+            mConfigOrder.add(destIndex, panelId);
             return true;
         }
 
@@ -1038,7 +1194,7 @@ public final class HomeConfig {
             // We're about to save the current state in the background thread
             // so we should use a deep copy of the PanelConfig instances to
             // avoid saving corrupted state.
-            final State newConfigState = new State(mHomeConfig, makeDeepCopy());
+            final State newConfigState = new State(mHomeConfig, makeOrderedCopy(true));
 
             ThreadUtils.getBackgroundHandler().post(new Runnable() {
                 @Override
@@ -1059,8 +1215,7 @@ public final class HomeConfig {
         public State commit() {
             ThreadUtils.assertOnThread(mOriginalThread);
 
-            final State newConfigState =
-                    new State(mHomeConfig, new ArrayList<PanelConfig>(mConfigMap.values()));
+            final State newConfigState = new State(mHomeConfig, makeOrderedCopy(false));
 
             // This is a synchronous blocking operation, hence no
             // need to deep copy the current PanelConfig instances.
@@ -1073,11 +1228,35 @@ public final class HomeConfig {
             return mConfigMap.isEmpty();
         }
 
+        private class EditorIterator implements Iterator<PanelConfig> {
+            private final Iterator<String> mOrderIterator;
+
+            public EditorIterator() {
+                mOrderIterator = mConfigOrder.iterator();
+            }
+
+            @Override
+            public boolean hasNext() {
+                return mOrderIterator.hasNext();
+            }
+
+            @Override
+            public PanelConfig next() {
+                final String panelId = mOrderIterator.next();
+                return mConfigMap.get(panelId);
+            }
+
+            @Override
+            public void remove() {
+                throw new UnsupportedOperationException("Can't 'remove' from on Editor iterator.");
+            }
+        }
+
         @Override
         public Iterator<PanelConfig> iterator() {
             ThreadUtils.assertOnThread(mOriginalThread);
 
-            return mConfigMap.values().iterator();
+            return new EditorIterator();
         }
     }
 

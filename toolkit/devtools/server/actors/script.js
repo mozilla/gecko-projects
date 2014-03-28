@@ -448,10 +448,7 @@ function ThreadActor(aHooks, aGlobal)
   this._state = "detached";
   this._frameActors = [];
   this._hooks = aHooks;
-  this.global = this.globalSafe = aGlobal;
-  if (aGlobal && aGlobal.wrappedJSObject) {
-    this.global = aGlobal.wrappedJSObject;
-  }
+  this.global = aGlobal;
   // A map of actorID -> actor for breakpoints created and managed by the server.
   this._hiddenBreakpoints = new Map();
 
@@ -1818,7 +1815,7 @@ ThreadActor.prototype = {
     // Clear DOM event breakpoints.
     // XPCShell tests don't use actual DOM windows for globals and cause
     // removeListenerForAllEvents to throw.
-    if (this.globalSafe && !this.globalSafe.toString().contains("Sandbox")) {
+    if (this.global && !this.global.toString().contains("Sandbox")) {
       let els = Cc["@mozilla.org/eventlistenerservice;1"]
                 .getService(Ci.nsIEventListenerService);
       els.removeListenerForAllEvents(this.global, this._allEventsListener, true);
@@ -3704,10 +3701,12 @@ DebuggerServer.ObjectActorPreviewers.Object = [
     }
 
     let url;
-    if (aRawObj instanceof Ci.nsIDOMWindow) {
+    if (aRawObj instanceof Ci.nsIDOMWindow && aRawObj.location) {
       url = aRawObj.location.href;
-    } else {
+    } else if (aRawObj.href) {
       url = aRawObj.href;
+    } else {
+      return false;
     }
 
     aGrip.preview = {
@@ -3790,7 +3789,7 @@ DebuggerServer.ObjectActorPreviewers.Object = [
       nodeName: aRawObj.nodeName,
     };
 
-    if (aRawObj instanceof Ci.nsIDOMDocument) {
+    if (aRawObj instanceof Ci.nsIDOMDocument && aRawObj.location) {
       preview.location = threadActor.createValueGrip(aRawObj.location.href);
     } else if (aRawObj instanceof Ci.nsIDOMDocumentFragment) {
       preview.childNodesLength = aRawObj.childNodes.length;
@@ -4638,6 +4637,8 @@ update(ChromeDebuggerActor.prototype, {
 
 function AddonThreadActor(aConnect, aHooks, aAddonID) {
   this.addonID = aAddonID;
+  this.addonManager = Cc["@mozilla.org/addons/integration;1"].
+                      getService(Ci.amIAddonManager);
   ThreadActor.call(this, aHooks);
 }
 
@@ -4654,7 +4655,17 @@ update(AddonThreadActor.prototype, {
    * sure every script and source with a URL is stored when debugging
    * add-ons.
    */
-  _allowSource: (aSourceURL) => !!aSourceURL,
+  _allowSource: function(aSourceURL) {
+    // Hide eval scripts
+    if (!aSourceURL)
+      return false;
+
+    // XPIProvider.jsm evals some code in every add-on's bootstrap.js. Hide it
+    if (aSourceURL == "resource://gre/modules/addons/XPIProvider.jsm")
+      return false;
+
+    return true;
+  },
 
   /**
    * An object that will be used by ThreadActors to tailor their
@@ -4698,14 +4709,30 @@ update(AddonThreadActor.prototype, {
    * @param aGlobal Debugger.Object
    */
   _checkGlobal: function ADA_checkGlobal(aGlobal) {
-    let metadata;
     try {
       // This will fail for non-Sandbox objects, hence the try-catch block.
-      metadata = Cu.getSandboxMetadata(aGlobal.unsafeDereference());
+      let metadata = Cu.getSandboxMetadata(aGlobal.unsafeDereference());
+      if (metadata)
+        return metadata.addonID === this.addonID;
     } catch (e) {
     }
 
-    return metadata && metadata.addonID === this.addonID;
+    // Check the global for a __URI__ property and then try to map that to an
+    // add-on
+    let uridescriptor = aGlobal.getOwnPropertyDescriptor("__URI__");
+    if (uridescriptor && "value" in uridescriptor) {
+      try {
+        let uri = Services.io.newURI(uridescriptor.value, null, null);
+        let id = {};
+        if (this.addonManager.mapURIToAddonID(uri, id))
+          return id.value === this.addonID;
+      }
+      catch (e) {
+        DevToolsUtils.reportException("AddonThreadActor.prototype._checkGlobal", e);
+      }
+    }
+
+    return false;
   }
 });
 
