@@ -111,11 +111,17 @@ var WifiManager = (function() {
       schedScanRecovery: libcutils.property_get("ro.moz.wifi.sched_scan_recover") === "false" ? false : true,
       driverDelay: libcutils.property_get("ro.moz.wifi.driverDelay"),
       p2pSupported: libcutils.property_get("ro.moz.wifi.p2p_supported") === "1",
+      eapSimSupported: libcutils.property_get("ro.moz.wifi.eapsim_supported") === "1",
       ifname: libcutils.property_get("wifi.interface")
     };
   }
 
-  let {sdkVersion, unloadDriverEnabled, schedScanRecovery, driverDelay, p2pSupported, ifname} = getStartupPrefs();
+  let {sdkVersion, unloadDriverEnabled, schedScanRecovery,
+       driverDelay, p2pSupported, eapSimSupported, ifname} = getStartupPrefs();
+
+  let capabilities = {
+    eapSim: eapSimSupported
+  };
 
   let wifiListener = {
     onWaitEvent: function(event, iface) {
@@ -894,12 +900,10 @@ var WifiManager = (function() {
         WifiNetworkInterface.registered = true;
       }
       WifiNetworkInterface.state = Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
-      WifiNetworkInterface.ip = null;
-      WifiNetworkInterface.netmask = null;
-      WifiNetworkInterface.broadcast = null;
-      WifiNetworkInterface.gateway = null;
-      WifiNetworkInterface.dns1 = null;
-      WifiNetworkInterface.dns2 = null;
+      WifiNetworkInterface.ips = [];
+      WifiNetworkInterface.prefixLengths = [];
+      WifiNetworkInterface.gateways = [];
+      WifiNetworkInterface.dnses = [];
       Services.obs.notifyObservers(WifiNetworkInterface,
                                    kNetworkInterfaceStateChangedTopic,
                                    null);
@@ -1305,6 +1309,10 @@ var WifiManager = (function() {
     });
   };
 
+  manager.getCapabilities = function() {
+    return capabilities;
+  }
+
   return manager;
 })();
 
@@ -1519,20 +1527,38 @@ let WifiNetworkInterface = {
 
   name: null,
 
-  ip: null,
+  ips: [],
 
-  prefixLength: 0,
+  prefixLengths: [],
 
-  broadcast: null,
+  dnses: [],
 
-  dns1: null,
-
-  dns2: null,
+  gateways: [],
 
   httpProxyHost: null,
 
   httpProxyPort: null,
 
+  getAddresses: function (ips, prefixLengths) {
+    ips.value = this.ips.slice();
+    prefixLengths.value = this.prefixLengths.slice();
+
+    return this.ips.length;
+  },
+
+  getGateways: function (count) {
+    if (count) {
+      count.value = this.gateways.length;
+    }
+    return this.gateways.slice();
+  },
+
+  getDnses: function (count) {
+    if (count) {
+      count.value = this.dnses.length;
+    }
+    return this.dnses.slice();
+  }
 };
 
 function WifiScanResult() {}
@@ -1751,7 +1777,7 @@ function WifiWorker() {
     });
 
     try {
-      self._allowWpaEap = Services.prefs.getBoolPref("b2g.wifi.allow_unsafe_wpa_eap");
+      self._allowWpaEap = WifiManager.getCapabilities().eapSim;
     } catch (e) {
       self._allowWpaEap = false;
     }
@@ -1931,12 +1957,10 @@ function WifiWorker() {
 
         WifiNetworkInterface.state =
           Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
-        WifiNetworkInterface.ip = null;
-        WifiNetworkInterface.prefixLength = 0;
-        WifiNetworkInterface.broadcast = null;
-        WifiNetworkInterface.gateway = null;
-        WifiNetworkInterface.dns1 = null;
-        WifiNetworkInterface.dns2 = null;
+        WifiNetworkInterface.ips = [];
+        WifiNetworkInterface.prefixLengths = [];
+        WifiNetworkInterface.gateways = [];
+        WifiNetworkInterface.dnses = [];
         Services.obs.notifyObservers(WifiNetworkInterface,
                                      kNetworkInterfaceStateChangedTopic,
                                      null);
@@ -1961,21 +1985,29 @@ function WifiWorker() {
   };
 
   WifiManager.onnetworkconnected = function() {
-    if (!this.info) {
+    if (!this.info || !this.info.ipaddr_str) {
       debug("Network information is invalid.");
       return;
     }
 
     let maskLength =
       netHelpers.getMaskLength(netHelpers.stringToIP(this.info.mask_str));
+    if (!maskLength) {
+      maskLength = 32; // max prefix for IPv4.
+    }
     WifiNetworkInterface.state =
       Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED;
-    WifiNetworkInterface.ip = this.info.ipaddr_str;
-    WifiNetworkInterface.prefixLength = maskLength;
-    WifiNetworkInterface.broadcast = this.info.broadcast_str;
-    WifiNetworkInterface.gateway = this.info.gateway_str;
-    WifiNetworkInterface.dns1 = this.info.dns1_str;
-    WifiNetworkInterface.dns2 = this.info.dns2_str;
+    WifiNetworkInterface.ips = [this.info.ipaddr_str];
+    WifiNetworkInterface.prefixLengths = [maskLength];
+    WifiNetworkInterface.gateways = [this.info.gateway_str];
+    if (typeof this.info.dns1_str == "string" &&
+        this.info.dns1_str.length) {
+      WifiNetworkInterface.dnses.push(this.info.dns1_str);
+    }
+    if (typeof this.info.dns2_str == "string" &&
+        this.info.dns2_str.length) {
+      WifiNetworkInterface.dnses.push(this.info.dns2_str);
+    }
     Services.obs.notifyObservers(WifiNetworkInterface,
                                  kNetworkInterfaceStateChangedTopic,
                                  null);

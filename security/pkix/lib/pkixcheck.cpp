@@ -118,6 +118,14 @@ CheckCertificatePolicies(BackCert& cert, EndEntityOrCA endEntityOrCA,
     return FatalError;
   }
 
+  // Bug 989051. Until we handle inhibitAnyPolicy we will fail close when
+  // inhibitAnyPolicy extension is present and we need to evaluate certificate
+  // policies.
+  if (cert.encodedInhibitAnyPolicy) {
+    PR_SetError(SEC_ERROR_POLICY_VALIDATION_FAILED, 0);
+    return RecoverableError;
+  }
+
   // The root CA certificate may omit the policies that it has been
   // trusted for, so we cannot require the policies to be present in those
   // certificates. Instead, the determination of which roots are trusted for
@@ -141,6 +149,11 @@ CheckCertificatePolicies(BackCert& cert, EndEntityOrCA endEntityOrCA,
   for (const CERTPolicyInfo* const* policyInfos = policies->policyInfos;
        *policyInfos; ++policyInfos) {
     if ((*policyInfos)->oid == requiredPolicy) {
+      return Success;
+    }
+    // Intermediate certs are allowed to have the anyPolicy OID
+    if (endEntityOrCA == MustBeCA &&
+        (*policyInfos)->oid == SEC_OID_X509_ANY_POLICY) {
       return Success;
     }
   }
@@ -377,6 +390,16 @@ CheckExtendedKeyUsage(EndEntityOrCA endEntityOrCA, const SECItem* encodedEKUs,
       SECOidTag oidTag = SECOID_FindOIDTag(*oids);
       if (requiredEKU != SEC_OID_UNKNOWN && oidTag == requiredEKU) {
         found = true;
+      } else {
+        // Treat CA certs with step-up OID as also having SSL server type.
+        // COMODO has issued certificates that require this behavior
+        // that don't expire until June 2020!
+        // TODO 982932: Limit this expection to old certificates
+        if (endEntityOrCA == MustBeCA &&
+            requiredEKU == SEC_OID_EXT_KEY_USAGE_SERVER_AUTH &&
+            oidTag == SEC_OID_NS_KEY_USAGE_GOVT_APPROVED) {
+          found = true;
+        }
       }
       if (oidTag == SEC_OID_OCSP_RESPONDER) {
         foundOCSPSigning = true;
