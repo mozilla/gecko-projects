@@ -1208,9 +1208,6 @@ pref("devtools.shadereditor.enabled", false);
 // Enable the Canvas Debugger.
 pref("devtools.canvasdebugger.enabled", false);
 
-// Enable tools for Chrome development.
-pref("devtools.chrome.enabled", false);
-
 // Default theme ("dark" or "light")
 pref("devtools.theme", "light");
 
@@ -1364,6 +1361,8 @@ pref("security.csp.speccompliant", true);
 
 // Block insecure active content on https pages
 pref("security.mixed_content.block_active_content", true);
+
+pref("security.use_mozillapkix_verification", true);
 
 // Override the Gecko-default value of false for Firefox.
 pref("plain_text.wrap_long_lines", true);
