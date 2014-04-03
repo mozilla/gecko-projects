@@ -31,9 +31,13 @@ const CSS_TYPE_SHORTHAND_AND_LONGHAND = 2;
 //	 XXX Should have a third field for values whose computed value may or
 //	   may not be the same as for the property's initial value.
 //	 invalid_values: Things that are not values for the property and
-//	   should be rejected.
+//	   should be rejected, but which are balanced and should not absorb
+//	   what follows
 //	 quirks_values: Values that should be accepted in quirks mode only,
 //	   mapped to the values they are equivalent to.
+//	 unbalanced_values: Things that are not values for the property and
+//	   should be rejected, and which also contain unbalanced constructs
+//	   that should absorb what follows
 
 // Helper functions used to construct gCSSProperties.
 
@@ -318,13 +322,13 @@ var validGradientAndElementValues = [
 	"-moz-radial-gradient(left calc(100px + -25%), red, blue)",
 	"-moz-radial-gradient(calc(100px + -25px) top, red, blue)",
 	"-moz-radial-gradient(left calc(100px + -25px), red, blue)"
-]
+];
 var invalidGradientAndElementValues = [
 	"-moz-element(#a:1)",
 	"-moz-element(a#a)",
 	"-moz-element(#a a)",
 	"-moz-element(#a+a)",
-	"-moz-element(#a()",
+	"-moz-element(#a())",
 	/* no quirks mode colors */
 	"linear-gradient(red, ff00ff)",
 	/* no quirks mode colors */
@@ -555,7 +559,10 @@ var invalidGradientAndElementValues = [
 	"-moz-radial-gradient(30% 40% at top left, red, blue)",
 	"-moz-radial-gradient(50px 60px at 15% 20%, red, blue)",
 	"-moz-radial-gradient(7em 8em at 45px, red, blue)"
-]
+];
+var unbalancedGradientAndElementValues = [
+	"-moz-element(#a()",
+];
 
 var gCSSProperties = {
 	"animation": {
@@ -565,7 +572,7 @@ var gCSSProperties = {
 		subproperties: [ "animation-name", "animation-duration", "animation-timing-function", "animation-delay", "animation-direction", "animation-fill-mode", "animation-iteration-count" ],
 		initial_values: [ "none none 0s 0s ease normal 1.0", "none", "0s", "ease", "normal", "1.0" ],
 		other_values: [ "bounce 1s linear 2s", "bounce 1s 2s linear", "bounce linear 1s 2s", "linear bounce 1s 2s", "linear 1s bounce 2s", "linear 1s 2s bounce", "1s bounce linear 2s", "1s bounce 2s linear", "1s 2s bounce linear", "1s linear bounce 2s", "1s linear 2s bounce", "1s 2s linear bounce", "bounce linear 1s", "bounce 1s linear", "linear bounce 1s", "linear 1s bounce", "1s bounce linear", "1s linear bounce", "1s 2s bounce", "1s bounce 2s", "bounce 1s 2s", "1s 2s linear", "1s linear 2s", "linear 1s 2s", "bounce 1s", "1s bounce", "linear 1s", "1s linear", "1s 2s", "2s 1s", "bounce", "linear", "1s", "height", "2s", "ease-in-out", "2s ease-in", "opacity linear", "ease-out 2s", "2s color, 1s bounce, 500ms height linear, 1s opacity 4s cubic-bezier(0.0, 0.1, 1.0, 1.0)", "1s \\32bounce linear 2s", "1s -bounce linear 2s", "1s -\\32bounce linear 2s", "1s \\32 0bounce linear 2s", "1s -\\32 0bounce linear 2s", "1s \\2bounce linear 2s", "1s -\\2bounce linear 2s", "2s, 1s bounce", "1s bounce, 2s", "2s all, 1s bounce", "1s bounce, 2s all", "1s bounce, 2s none", "2s none, 1s bounce", "2s bounce, 1s all", "2s all, 1s bounce" ],
-		invalid_values: [  "2s inherit", "inherit 2s", "2s bounce, 1s inherit", "2s inherit, 1s bounce", "2s initial" ]
+		invalid_values: [  "2s inherit", "inherit 2s", "2s bounce, 1s inherit", "2s inherit, 1s bounce", "2s initial", "2s all,, 1s bounce", "2s all, , 1s bounce" ]
 	},
 	"animation-delay": {
 		domProp: "animationDelay",
@@ -758,7 +765,9 @@ var gCSSProperties = {
 		].concat(validGradientAndElementValues),
 		invalid_values: [
 			"url('border.png') url('border.png')",
-		].concat(invalidGradientAndElementValues)
+		].concat(invalidGradientAndElementValues),
+		unbalanced_values: [
+		].concat(unbalancedGradientAndElementValues)
 	},
 	"border-image-slice": {
 		domProp: "borderImageSlice",
@@ -1925,12 +1934,9 @@ var gCSSProperties = {
 		"url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==), url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==)",
 		].concat(validGradientAndElementValues),
 		invalid_values: [
-			"-moz-element(#a:1)",
-			"-moz-element(a#a)",
-			"-moz-element(#a a)",
-			"-moz-element(#a+a)",
-			"-moz-element(#a()",
-		].concat(invalidGradientAndElementValues)
+		].concat(invalidGradientAndElementValues),
+		unbalanced_values: [
+		].concat(unbalancedGradientAndElementValues)
 	},
 	"background-origin": {
 		domProp: "backgroundOrigin",
@@ -2357,7 +2363,8 @@ var gCSSProperties = {
 		type: CSS_TYPE_LONGHAND,
 		initial_values: [ "none" ],
 		other_values: [ "foo 1", "bar", "foo 3 bar baz 2", "\\32  1", "-\\32  1", "-c 1", "\\32 1", "-\\32 1", "\\2  1", "-\\2  1", "-c 1", "\\2 1", "-\\2 1", "-\\7f \\9e 1" ],
-		invalid_values: [ "none foo", "none foo 3", "foo none", "foo 3 none" ]
+		invalid_values: [ "none foo", "none foo 3", "foo none", "foo 3 none" ],
+		unbalanced_values: [ "foo 1 (" ]
 	},
 	"counter-reset": {
 		domProp: "counterReset",
@@ -3266,7 +3273,7 @@ var gCSSProperties = {
 		subproperties: [ "transition-property", "transition-duration", "transition-timing-function", "transition-delay" ],
 		initial_values: [ "all 0s ease 0s", "all", "0s", "0s 0s", "ease" ],
 		other_values: [ "width 1s linear 2s", "width 1s 2s linear", "width linear 1s 2s", "linear width 1s 2s", "linear 1s width 2s", "linear 1s 2s width", "1s width linear 2s", "1s width 2s linear", "1s 2s width linear", "1s linear width 2s", "1s linear 2s width", "1s 2s linear width", "width linear 1s", "width 1s linear", "linear width 1s", "linear 1s width", "1s width linear", "1s linear width", "1s 2s width", "1s width 2s", "width 1s 2s", "1s 2s linear", "1s linear 2s", "linear 1s 2s", "width 1s", "1s width", "linear 1s", "1s linear", "1s 2s", "2s 1s", "width", "linear", "1s", "height", "2s", "ease-in-out", "2s ease-in", "opacity linear", "ease-out 2s", "2s color, 1s width, 500ms height linear, 1s opacity 4s cubic-bezier(0.0, 0.1, 1.0, 1.0)", "1s \\32width linear 2s", "1s -width linear 2s", "1s -\\32width linear 2s", "1s \\32 0width linear 2s", "1s -\\32 0width linear 2s", "1s \\2width linear 2s", "1s -\\2width linear 2s", "2s, 1s width", "1s width, 2s", "2s all, 1s width", "1s width, 2s all", "2s all, 1s width", "2s width, 1s all" ],
-		invalid_values: [ "1s width, 2s none", "2s none, 1s width", "2s inherit", "inherit 2s", "2s width, 1s inherit", "2s inherit, 1s width", "2s initial" ]
+		invalid_values: [ "1s width, 2s none", "2s none, 1s width", "2s inherit", "inherit 2s", "2s width, 1s inherit", "2s inherit, 1s width", "2s initial", "1s width,,2s color", "1s width, ,2s color" ]
 	},
 	"transition-delay": {
 		domProp: "transitionDelay",
@@ -4910,7 +4917,6 @@ if (SpecialPowers.getBoolPref("layout.css.grid.enabled")) {
 			"(5th) 40px",
 			"(foo() bar) 40px",
 			"(foo)) 40px",
-			"(foo] 40px",
 			"[foo] 40px",
 			"(foo) (bar) 40px",
 			"40px (foo) (bar)",
@@ -4944,6 +4950,9 @@ if (SpecialPowers.getBoolPref("layout.css.grid.enabled")) {
 			"subgrid repeat(1, )",
 			"subgrid repeat(2, (40px))",
 			"subgrid repeat(2, foo)",
+		],
+		unbalanced_values: [
+			"(foo] 40px",
 		]
 	};
 	gCSSProperties["grid-template-rows"] = {

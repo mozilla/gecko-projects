@@ -145,12 +145,10 @@ WrapMode(gl::GLContext *aGl, bool aAllowRepeat)
 }
 
 CompositableDataGonkOGL::CompositableDataGonkOGL()
- : mTexture(0)
 {
 }
 CompositableDataGonkOGL::~CompositableDataGonkOGL()
 {
-  DeleteTextureIfPresent();
 }
 
 gl::GLContext*
@@ -167,28 +165,6 @@ void CompositableDataGonkOGL::SetCompositor(Compositor* aCompositor)
 void CompositableDataGonkOGL::ClearData()
 {
   CompositableBackendSpecificData::ClearData();
-  DeleteTextureIfPresent();
-}
-
-GLuint CompositableDataGonkOGL::GetTexture()
-{
-  if (!mTexture) {
-    if (gl()->MakeCurrent()) {
-      gl()->fGenTextures(1, &mTexture);
-    }
-  }
-  return mTexture;
-}
-
-void
-CompositableDataGonkOGL::DeleteTextureIfPresent()
-{
-  if (mTexture) {
-    if (gl()->MakeCurrent()) {
-      gl()->fDeleteTextures(1, &mTexture);
-    }
-    mTexture = 0;
-  }
 }
 
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
@@ -244,7 +220,7 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
 
   IntSize size = aSurface->GetSize();
   if (!mTexImage ||
-      mTexImage->GetSize() != size ||
+      (mTexImage->GetSize() != size && !aSrcOffset) ||
       mTexImage->GetContentType() != gfx::ContentForFormat(aSurface->GetFormat())) {
     if (mFlags & TEXTURE_DISALLOW_BIGIMAGE) {
       mTexImage = CreateBasicTextureImage(mGL, size,
@@ -273,6 +249,37 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
     mTexImage->EndUpdate();
   }
   return true;
+}
+
+void
+TextureImageTextureSourceOGL::EnsureBuffer(const nsIntSize& aSize,
+                                           gfxContentType aContentType)
+{
+  if (!mTexImage ||
+      mTexImage->GetSize() != aSize.ToIntSize() ||
+      mTexImage->GetContentType() != aContentType) {
+    mTexImage = CreateTextureImage(mGL,
+                                   aSize.ToIntSize(),
+                                   aContentType,
+                                   WrapMode(mGL, mFlags & TEXTURE_ALLOW_REPEAT),
+                                   FlagsToGLFlags(mFlags));
+  }
+  mTexImage->Resize(aSize.ToIntSize());
+}
+
+void
+TextureImageTextureSourceOGL::CopyTo(const nsIntRect& aSourceRect,
+                                     DataTextureSource *aDest,
+                                     const nsIntRect& aDestRect)
+{
+  MOZ_ASSERT(aDest->AsSourceOGL(), "Incompatible destination type!");
+  TextureImageTextureSourceOGL *dest =
+    aDest->AsSourceOGL()->AsTextureImageTextureSource();
+  MOZ_ASSERT(dest, "Incompatible destination type!");
+
+  mGL->BlitTextureImageHelper()->BlitTextureImage(mTexImage, aSourceRect,
+                                                  dest->mTexImage, aDestRect);
+  dest->mTexImage->MarkValid();
 }
 
 void
@@ -729,19 +736,6 @@ TextureImageDeprecatedTextureHostOGL::UpdateImpl(const SurfaceDescriptor& aImage
     NS_WARNING("trying to update TextureImageDeprecatedTextureHostOGL without a compositor?");
     return;
   }
-
-#ifdef MOZ_WIDGET_GONK
-  if (mCompositableBackendData) {
-    // on gonk, this class is used as a fallback from gralloc buffer.
-    // There is a case this class is used with GrallocDeprecatedTextureHostOGL
-    // under same CompositableHost. if it happens, a gralloc buffer of
-    // GrallocDeprecatedTextureHostOGL needs to be unbounded from a texture,
-    // when the gralloc buffer is not rendered.
-    // Establish the unbound by deleting the texture.
-    // See Bug 916264.
-    static_cast<CompositableDataGonkOGL*>(mCompositableBackendData.get())->DeleteTextureIfPresent();
-  }
-#endif
 
   AutoOpenSurface surf(OPEN_READ_ONLY, aImage);
   gfx::IntSize size = surf.Size();

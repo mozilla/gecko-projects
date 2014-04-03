@@ -54,6 +54,7 @@ namespace layers {
 class Compositor;
 class CompositorOGL;
 class TextureImageDeprecatedTextureHostOGL;
+class TextureImageTextureSourceOGL;
 
 /**
  * CompositableBackendSpecificData implementation for the Gonk OpenGL backend.
@@ -72,12 +73,9 @@ public:
 
   virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
   virtual void ClearData() MOZ_OVERRIDE;
-  GLuint GetTexture();
-  void DeleteTextureIfPresent();
   gl::GLContext* gl() const;
 protected:
   RefPtr<CompositorOGL> mCompositor;
-  GLuint mTexture;
 };
 
 inline void ApplyFilterToBoundTexture(gl::GLContext* aGL,
@@ -132,6 +130,7 @@ public:
   virtual gfx::Matrix4x4 GetTextureTransform() { return gfx::Matrix4x4(); }
 
   virtual TextureImageDeprecatedTextureHostOGL* AsTextureImageDeprecatedTextureHost() { return nullptr; }
+  virtual TextureImageTextureSourceOGL* AsTextureImageTextureSource() { return nullptr; }
 
   void SetFilter(gl::GLContext* aGL, gfx::Filter aFilter)
   {
@@ -208,6 +207,15 @@ public:
   virtual bool Update(gfx::DataSourceSurface* aSurface,
                       nsIntRegion* aDestRegion = nullptr,
                       gfx::IntPoint* aSrcOffset = nullptr) MOZ_OVERRIDE;
+
+  void EnsureBuffer(const nsIntSize& aSize,
+                            gfxContentType aContentType);
+
+  void CopyTo(const nsIntRect& aSourceRect,
+                      DataTextureSource* aDest,
+                      const nsIntRect& aDestRect);
+
+  virtual TextureImageTextureSourceOGL* AsTextureImageTextureSource() { return this; }
 
   // TextureSource
 
