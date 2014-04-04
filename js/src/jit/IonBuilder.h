@@ -157,7 +157,7 @@ class IonBuilder : public MIRGenerator
                 // MIR instruction
                 MTableSwitch *ins;
 
-                // The number of current successor that get mapped into a block. 
+                // The number of current successor that get mapped into a block.
                 uint32_t currentBlock;
 
             } tableswitch;
@@ -533,6 +533,8 @@ class IonBuilder : public MIRGenerator
     // Typed array helpers.
     MInstruction *getTypedArrayLength(MDefinition *obj);
     MInstruction *getTypedArrayElements(MDefinition *obj);
+
+    MDefinition *getCallee();
 
     bool jsop_add(MDefinition *left, MDefinition *right);
     bool jsop_bitnot();
