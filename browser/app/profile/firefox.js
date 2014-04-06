@@ -1228,7 +1228,7 @@ pref("devtools.webconsole.filter.csserror", true);
 pref("devtools.webconsole.filter.cssparser", false);
 pref("devtools.webconsole.filter.csslog", false);
 pref("devtools.webconsole.filter.exception", true);
-pref("devtools.webconsole.filter.jswarn", false);
+pref("devtools.webconsole.filter.jswarn", true);
 pref("devtools.webconsole.filter.jslog", false);
 pref("devtools.webconsole.filter.error", true);
 pref("devtools.webconsole.filter.warn", true);
@@ -1415,6 +1415,10 @@ pref("ui.key.menuAccessKeyFocuses", true);
 
 // Delete HTTP cache v2 data of users that didn't opt-in manually
 pref("browser.cache.auto_delete_cache_version", 1);
+// Play with different values of the decay time and get telemetry,
+// 0 means to randomize (and persist) the experiment value in users' profiles,
+// -1 means no experiment is run and we use the preferred value for frecency (6h)
+pref("browser.cache.frecency_experiment", 0);
 
 // Telemetry experiments settings.
 pref("experiments.enabled", false);
