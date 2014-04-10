@@ -53,8 +53,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS(nsChildContentList)
 
   // nsWrapperCache
-  virtual JSObject* WrapObject(JSContext *cx,
-                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
 
   // nsIDOMNodeList interface
   NS_DECL_NSIDOMNODELIST
@@ -200,6 +199,7 @@ public:
   virtual nsresult AppendText(const char16_t* aBuffer, uint32_t aLength,
                               bool aNotify) MOZ_OVERRIDE;
   virtual bool TextIsOnlyWhitespace() MOZ_OVERRIDE;
+  virtual bool HasTextForTranslation() MOZ_OVERRIDE;
   virtual void AppendTextTo(nsAString& aResult) MOZ_OVERRIDE;
   virtual bool AppendTextTo(nsAString& aResult,
                             const mozilla::fallible_t&) MOZ_OVERRIDE NS_WARN_UNUSED_RESULT; 

@@ -1253,17 +1253,12 @@ NewObject(ExclusiveContext *cx, types::TypeObject *type_, JSObject *parent, gc::
     if (!NewObjectMetadata(cx, &metadata))
         return nullptr;
 
-    // Normally, the number of fixed slots given an object is the maximum
-    // permitted for its size class. For array buffers we only use enough to
-    // cover the class reservd slots, so that the remaining space in the
-    // object's allocation is available for the buffer's data.
-    size_t nfixed;
-    if (clasp == &ArrayBufferObject::class_) {
-        JS_STATIC_ASSERT(ArrayBufferObject::RESERVED_SLOTS == 4);
-        nfixed = ArrayBufferObject::RESERVED_SLOTS;
-    } else {
-        nfixed = GetGCKindSlots(kind, clasp);
-    }
+    // For objects which can have fixed data following the object, only use
+    // enough fixed slots to cover the number of reserved slots in the object,
+    // regardless of the allocation kind specified.
+    size_t nfixed = ClassCanHaveFixedData(clasp)
+                    ? GetGCKindSlots(gc::GetGCObjectKind(clasp), clasp)
+                    : GetGCKindSlots(kind, clasp);
 
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, clasp, type->proto(),
                                                       parent, metadata, nfixed));
@@ -3060,8 +3055,9 @@ ReallocateElements(ThreadSafeContext *cx, JSObject *obj, ObjectElements *oldHead
 {
 #ifdef JSGC_GENERATIONAL
     if (cx->isJSContext()) {
-        return cx->asJSContext()->runtime()-> gcNursery.reallocateElements(cx->asJSContext(), obj, oldHeader,
-                                                                           oldCount, newCount);
+        return cx->asJSContext()->runtime()->gcNursery.reallocateElements(cx->asJSContext(), obj,
+                                                                          oldHeader, oldCount,
+                                                                          newCount);
     }
 #endif
 
@@ -3145,7 +3141,7 @@ JSObject::shrinkElements(ThreadSafeContext *cx, uint32_t newcap)
     uint32_t oldcap = getDenseCapacity();
     JS_ASSERT(newcap <= oldcap);
 
-    /* Don't shrink elements below the minimum capacity. */
+    // Don't shrink elements below the minimum capacity.
     if (oldcap <= SLOT_CAPACITY_MIN || !hasDynamicElements())
         return;
 
@@ -3156,8 +3152,10 @@ JSObject::shrinkElements(ThreadSafeContext *cx, uint32_t newcap)
 
     ObjectElements *newheader = ReallocateElements(cx, this, getElementsHeader(),
                                                    oldAllocated, newAllocated);
-    if (!newheader)
-        return;  /* Leave elements at its old size. */
+    if (!newheader) {
+        cx->recoverFromOutOfMemory();
+        return;  // Leave elements at its old size.
+    }
 
     newheader->capacity = newcap;
     elements = newheader->elements();

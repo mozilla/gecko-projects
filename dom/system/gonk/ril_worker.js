@@ -1832,8 +1832,19 @@ RilObject.prototype = {
   },
 
   setCellBroadcastSearchList: function(options) {
+    let getSearchListStr = function(aSearchList) {
+      if (typeof aSearchList === "string" || aSearchList instanceof String) {
+        return aSearchList;
+      }
+
+      // TODO: Set search list for CDMA/GSM individually. Bug 990926
+      let prop = this._isCdma ? "cdma" : "gsm";
+
+      return aSearchList && aSearchList[prop];
+    }.bind(this);
+
     try {
-      let str = options.searchListStr;
+      let str = getSearchListStr(options.searchList);
       this.cellBroadcastConfigs.MMI = this._convertCellBroadcastSearchList(str);
       options.success = true;
     } catch (e) {
@@ -3144,6 +3155,14 @@ RilObject.prototype = {
    * Process ICC status.
    */
   _processICCStatus: function(iccStatus) {
+    // If |_waitingRadioTech| is true, we should not get app information because
+    // the |_isCdma| flag is not ready yet. Otherwise we may use wrong index to
+    // get app information, especially for the case that icc card has both cdma
+    // and gsm subscription.
+    if (this._waitingRadioTech) {
+      return;
+    }
+
     this.iccStatus = iccStatus;
     let newCardState;
     let index = this._isCdma ? iccStatus.cdmaSubscriptionAppIndex :
@@ -4284,7 +4303,7 @@ RilObject.prototype = {
         this.getIMEI();
         this.getIMEISV();
       }
-       this.getICCStatus();
+      this.getICCStatus();
     }
   },
 
@@ -6216,7 +6235,7 @@ RilObject.prototype[REQUEST_CDMA_SUBSCRIPTION] = function REQUEST_CDMA_SUBSCRIPT
   // The result[1] is Home SID. (Already be handled in readCDMAHome())
   // The result[2] is Home NID. (Already be handled in readCDMAHome())
   // The result[3] is MIN.
-  // The result[4] is PRL version.
+  this.iccInfo.prlVersion = parseInt(result[4], 10);
 
   this.context.ICCUtilsHelper.handleICCInfoChange();
 };
@@ -6611,6 +6630,14 @@ RilObject.prototype[UNSOLICITED_CDMA_INFO_REC] = function UNSOLICITED_CDMA_INFO_
 RilObject.prototype[UNSOLICITED_OEM_HOOK_RAW] = null;
 RilObject.prototype[UNSOLICITED_RINGBACK_TONE] = null;
 RilObject.prototype[UNSOLICITED_RESEND_INCALL_MUTE] = null;
+RilObject.prototype[UNSOLICITED_CDMA_SUBSCRIPTION_SOURCE_CHANGED] = null;
+RilObject.prototype[UNSOLICITED_CDMA_PRL_CHANGED] = function UNSOLICITED_CDMA_PRL_CHANGED(length) {
+  let version = this.context.Buf.readInt32List()[0];
+  if (version !== this.iccInfo.prlVersion) {
+    this.iccInfo.prlVersion = version;
+    this.context.ICCUtilsHelper.handleICCInfoChange();
+  }
+};
 RilObject.prototype[UNSOLICITED_EXIT_EMERGENCY_CALLBACK_MODE] = function UNSOLICITED_EXIT_EMERGENCY_CALLBACK_MODE() {
   this._handleChangedEmergencyCbMode(false);
 };

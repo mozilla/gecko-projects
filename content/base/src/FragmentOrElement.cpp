@@ -269,11 +269,11 @@ nsIContent::LookupNamespaceURIInternal(const nsAString& aNamespacePrefix,
 }
 
 already_AddRefed<nsIURI>
-nsIContent::GetBaseURI() const
+nsIContent::GetBaseURI(bool aTryUseXHRDocBaseURI) const
 {
   nsIDocument* doc = OwnerDoc();
   // Start with document base
-  nsCOMPtr<nsIURI> base = doc->GetDocBaseURI();
+  nsCOMPtr<nsIURI> base = doc->GetBaseURI(aTryUseXHRDocBaseURI);
 
   // Collect array of xml:base attribute values up the parent chain. This
   // is slightly slower for the case when there are xml:base attributes, but
@@ -380,9 +380,9 @@ NS_INTERFACE_TABLE_HEAD(nsChildContentList)
 NS_INTERFACE_MAP_END
 
 JSObject*
-nsChildContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
+nsChildContentList::WrapObject(JSContext *cx)
 {
-  return NodeListBinding::Wrap(cx, scope, this);
+  return NodeListBinding::Wrap(cx, this);
 }
 
 NS_IMETHODIMP
@@ -1915,6 +1915,12 @@ FragmentOrElement::AppendText(const char16_t* aBuffer, uint32_t aLength,
 
 bool
 FragmentOrElement::TextIsOnlyWhitespace()
+{
+  return false;
+}
+
+bool
+FragmentOrElement::HasTextForTranslation()
 {
   return false;
 }

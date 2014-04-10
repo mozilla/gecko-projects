@@ -63,8 +63,8 @@ pref("browser.cache.disk_cache_ssl",        true);
 // 0 = once-per-session, 1 = each-time, 2 = never, 3 = when-appropriate/automatically
 pref("browser.cache.check_doc_frequency",   3);
 
-// Limit for how much memory the cache can consume, for any data, in Kb
-pref("browser.cache.memory_limit", 51200); // 50 MB
+// Limit of recent metadata we keep in memory for faster access, in Kb
+pref("browser.cache.disk.metadata_memory_limit", 250); // 0.25 MB
 
 pref("browser.cache.offline.enable",           true);
 // enable offline apps by default, disable prompt
@@ -4024,6 +4024,11 @@ pref("layers.async-video.enabled",false);
 #ifdef MOZ_X11
 // OMTC off by default on Linux, but if activated, use new textures and async-video.
 pref("layers.async-video.enabled", true);
+#endif
+
+#ifdef MOZ_WIDGET_QT
+pref("layers.offmainthreadcomposition.enabled", true);
+pref("layers.async-video.enabled",true);
 #endif
 
 #ifdef XP_MACOSX

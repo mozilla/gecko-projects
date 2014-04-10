@@ -368,11 +368,7 @@ struct WorkerStructuredCloneCallbacks
       nsRefPtr<ImageData> imageData = new ImageData(width, height,
                                                     dataArray.toObject());
       // Wrap it in a JS::Value.
-      JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-      if (!global) {
-        return nullptr;
-      }
-      return imageData->WrapObject(aCx, global);
+      return imageData->WrapObject(aCx);
     }
 
     Error(aCx, 0);
@@ -447,7 +443,10 @@ struct WorkerStructuredCloneCallbacks
 JSStructuredCloneCallbacks gWorkerStructuredCloneCallbacks = {
   WorkerStructuredCloneCallbacks::Read,
   WorkerStructuredCloneCallbacks::Write,
-  WorkerStructuredCloneCallbacks::Error
+  WorkerStructuredCloneCallbacks::Error,
+  nullptr,
+  nullptr,
+  nullptr
 };
 
 struct MainThreadWorkerStructuredCloneCallbacks
@@ -606,7 +605,10 @@ struct MainThreadWorkerStructuredCloneCallbacks
 JSStructuredCloneCallbacks gMainThreadWorkerStructuredCloneCallbacks = {
   MainThreadWorkerStructuredCloneCallbacks::Read,
   MainThreadWorkerStructuredCloneCallbacks::Write,
-  MainThreadWorkerStructuredCloneCallbacks::Error
+  MainThreadWorkerStructuredCloneCallbacks::Error,
+  nullptr,
+  nullptr,
+  nullptr
 };
 
 struct ChromeWorkerStructuredCloneCallbacks
@@ -636,7 +638,10 @@ struct ChromeWorkerStructuredCloneCallbacks
 JSStructuredCloneCallbacks gChromeWorkerStructuredCloneCallbacks = {
   ChromeWorkerStructuredCloneCallbacks::Read,
   ChromeWorkerStructuredCloneCallbacks::Write,
-  ChromeWorkerStructuredCloneCallbacks::Error
+  ChromeWorkerStructuredCloneCallbacks::Error,
+  nullptr,
+  nullptr,
+  nullptr
 };
 
 struct MainThreadChromeWorkerStructuredCloneCallbacks
@@ -694,7 +699,10 @@ struct MainThreadChromeWorkerStructuredCloneCallbacks
 JSStructuredCloneCallbacks gMainThreadChromeWorkerStructuredCloneCallbacks = {
   MainThreadChromeWorkerStructuredCloneCallbacks::Read,
   MainThreadChromeWorkerStructuredCloneCallbacks::Write,
-  MainThreadChromeWorkerStructuredCloneCallbacks::Error
+  MainThreadChromeWorkerStructuredCloneCallbacks::Error,
+  nullptr,
+  nullptr,
+  nullptr
 };
 
 class MainThreadReleaseRunnable MOZ_FINAL : public nsRunnable
@@ -2142,8 +2150,7 @@ WorkerPrivateParent<Derived>::~WorkerPrivateParent()
 
 template <class Derived>
 JSObject*
-WorkerPrivateParent<Derived>::WrapObject(JSContext* aCx,
-                                         JS::Handle<JSObject*> aScope)
+WorkerPrivateParent<Derived>::WrapObject(JSContext* aCx)
 {
   MOZ_ASSERT(!IsSharedWorker(),
              "We should never wrap a WorkerPrivate for a SharedWorker");
@@ -2153,7 +2160,7 @@ WorkerPrivateParent<Derived>::WrapObject(JSContext* aCx,
   // XXXkhuey this should not need to be rooted, the analysis is dumb.
   // See bug 980181.
   JS::Rooted<JSObject*> wrapper(aCx,
-    WorkerBinding::Wrap(aCx, aScope, ParentAsWorkerPrivate()));
+    WorkerBinding::Wrap(aCx, ParentAsWorkerPrivate()));
   if (wrapper) {
     MOZ_ALWAYS_TRUE(TryPreserveWrapper(wrapper));
   }

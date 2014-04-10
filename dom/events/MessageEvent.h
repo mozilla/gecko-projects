@@ -9,6 +9,7 @@
 #include "mozilla/dom/Event.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIDOMMessageEvent.h"
+#include "mozilla/dom/MessagePortList.h"
 
 namespace mozilla {
 namespace dom {
@@ -43,8 +44,7 @@ public:
   // Forward to base class
   NS_FORWARD_TO_EVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx,
-                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   JS::Value GetData(JSContext* aCx, ErrorResult& aRv);
 
@@ -56,6 +56,17 @@ public:
   }
 
   void SetPorts(MessagePortList* aPorts);
+
+  // Non WebIDL methods
+  void SetSource(mozilla::dom::MessagePort* aPort)
+  {
+    mPortSource = aPort;
+  }
+
+  void SetSource(nsPIDOMWindow* aWindow)
+  {
+    mWindowSource = aWindow;
+  }
 
   static already_AddRefed<MessageEvent>
   Constructor(const GlobalObject& aGlobal, JSContext* aCx,

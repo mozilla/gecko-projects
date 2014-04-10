@@ -698,6 +698,7 @@ NativeInterface2JSObjectAndThrowIfFailed(JSContext* aCx,
                                          const nsIID* aIID,
                                          bool aAllowNativeWrapper)
 {
+  js::AssertSameCompartment(aCx, aScope);
   nsresult rv;
   // Inline some logic from XPCConvert::NativeInterfaceToJSObject that we need
   // on all threads.
@@ -706,7 +707,7 @@ NativeInterface2JSObjectAndThrowIfFailed(JSContext* aCx,
   if (cache && cache->IsDOMBinding()) {
       JS::Rooted<JSObject*> obj(aCx, cache->GetWrapper());
       if (!obj) {
-          obj = cache->WrapObject(aCx, aScope);
+          obj = cache->WrapObject(aCx);
       }
 
       if (obj && aAllowNativeWrapper && !JS_WrapObject(aCx, &obj)) {
@@ -815,13 +816,20 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
   // Get the object. It might be a security wrapper, in which case we do a checked
   // unwrap.
   JS::Rooted<JSObject*> origObj(cx, &thisv.toObject());
-  JSObject* obj = js::CheckedUnwrap(origObj);
+  JSObject* obj = js::CheckedUnwrap(origObj, /* stopAtOuter = */ false);
   if (!obj) {
       JS_ReportError(cx, "Permission denied to access object");
       return false;
   }
 
-  nsISupports* native = UnwrapDOMObjectToISupports(obj);
+  // Switch this to UnwrapDOMObjectToISupports once our global objects are
+  // using new bindings.
+  JS::Rooted<JS::Value> val(cx, JS::ObjectValue(*obj));
+  nsISupports* native = nullptr;
+  nsCOMPtr<nsISupports> nativeRef;
+  xpc_qsUnwrapArg<nsISupports>(cx, val, &native,
+                               static_cast<nsISupports**>(getter_AddRefs(nativeRef)),
+                               &val);
   if (!native) {
     return Throw(cx, NS_ERROR_FAILURE);
   }
@@ -860,6 +868,28 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
 
   *vp = thisv;
   return true;
+}
+
+JS::Value
+GetInterfaceImpl(JSContext* aCx, nsIInterfaceRequestor* aRequestor,
+                 nsWrapperCache* aCache, nsIJSID* aIID, ErrorResult& aError)
+{
+  const nsID* iid = aIID->GetID();
+
+  nsRefPtr<nsISupports> result;
+  aError = aRequestor->GetInterface(*iid, getter_AddRefs(result));
+  if (aError.Failed()) {
+    return JS::NullValue();
+  }
+
+  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
+  JS::Rooted<JS::Value> v(aCx, JSVAL_NULL);
+  if (!WrapObject(aCx, global, result, iid, &v)) {
+    aError.Throw(NS_ERROR_FAILURE);
+    return JS::NullValue();
+  }
+
+  return v;
 }
 
 bool
@@ -1639,6 +1669,8 @@ private:
 nsresult
 ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg)
 {
+  js::AssertSameCompartment(aCx, aObjArg);
+
   // Check if we're near the stack limit before we get anywhere near the
   // transplanting code.
   JS_CHECK_RECURSION(aCx, return NS_ERROR_FAILURE);
@@ -2358,8 +2390,7 @@ ConvertExceptionToPromise(JSContext* cx,
     return false;
   }
 
-  JS::Rooted<JSObject*> wrapScope(cx, JS::CurrentGlobalOrNull(cx));
-  return WrapNewBindingObject(cx, wrapScope, promise, rval);
+  return WrapNewBindingObject(cx, promise, rval);
 }
 
 } // namespace dom

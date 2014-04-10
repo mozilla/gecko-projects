@@ -87,9 +87,8 @@ input::-moz-placeholder {
 
   /* Make sure that the location bar's alignment in RTL mode changes according
      to the input box direction if the user switches the text direction using
-     cmd_switchTextDirection (which applies a dir attribute to the input box's
-     anonymous div). */
-  input.uri-element-right-align:-moz-locale-dir(rtl) > .anonymous-div[dir=ltr] {
+     cmd_switchTextDirection (which applies a dir attribute to the <input>). */
+  input.uri-element-right-align[dir=ltr]:-moz-locale-dir(rtl) {
     text-align: left !important;
   }
 }
@@ -211,6 +210,7 @@ select {
   /* No text-decoration reaching inside, by default */
   display: inline-block;
   page-break-inside: avoid;
+  overflow-clip-box: padding-box !important; /* bug 992447 */
 }
 
 /* Need the "select[size][multiple]" selector to override the settings on

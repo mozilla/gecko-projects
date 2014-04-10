@@ -12,8 +12,6 @@
 
 #include "DOMRequest.h"
 
-class nsIDOMLockedFile;
-
 namespace mozilla {
 class EventChainPreVisitor;
 } // namespace mozilla
@@ -48,7 +46,7 @@ public:
 
   // nsWrapperCache
   virtual JSObject*
-  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
 
   // WebIDL
   LockedFile*

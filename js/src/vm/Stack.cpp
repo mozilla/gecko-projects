@@ -239,14 +239,11 @@ InterpreterFrame::prologue(JSContext *cx)
             pushOnScopeChain(*callobj);
             flags_ |= HAS_CALL_OBJ;
         }
-        probes::EnterScript(cx, script, nullptr, this);
-        return true;
+        return probes::EnterScript(cx, script, nullptr, this);
     }
 
-    if (isGlobalFrame()) {
-        probes::EnterScript(cx, script, nullptr, this);
-        return true;
-    }
+    if (isGlobalFrame())
+        return probes::EnterScript(cx, script, nullptr, this);
 
     JS_ASSERT(isNonEvalFunctionFrame());
     AssertDynamicScopeMatchesStaticScope(cx, script, scopeChain());
@@ -263,8 +260,7 @@ InterpreterFrame::prologue(JSContext *cx)
         functionThis() = ObjectValue(*obj);
     }
 
-    probes::EnterScript(cx, script, script->functionNonDelazifying(), this);
-    return true;
+    return probes::EnterScript(cx, script, script->functionNonDelazifying(), this);
 }
 
 void
@@ -1376,7 +1372,7 @@ FrameIter::numFrameSlots() const
       case JIT: {
 #ifdef JS_ION
         if (data_.ionFrames_.isIonJS()) {
-            return ionInlineFrames_.snapshotIterator().allocations() -
+            return ionInlineFrames_.snapshotIterator().numAllocations() -
                 ionInlineFrames_.script()->nfixed();
         }
         jit::BaselineFrame *frame = data_.ionFrames_.baselineFrame();

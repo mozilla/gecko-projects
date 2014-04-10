@@ -82,9 +82,9 @@ AudioBuffer::InitializeBuffers(uint32_t aNumberOfChannels, JSContext* aJSContext
 }
 
 JSObject*
-AudioBuffer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+AudioBuffer::WrapObject(JSContext* aCx)
 {
-  return AudioBufferBinding::Wrap(aCx, aScope, this);
+  return AudioBufferBinding::Wrap(aCx, this);
 }
 
 bool
@@ -197,7 +197,7 @@ StealJSArrayDataIntoThreadSharedFloatArrayBufferList(JSContext* aJSContext,
     new ThreadSharedFloatArrayBufferList(aJSArrays.Length());
   for (uint32_t i = 0; i < aJSArrays.Length(); ++i) {
     JS::Rooted<JSObject*> arrayBuffer(aJSContext,
-                                      JS_GetArrayBufferViewBuffer(aJSArrays[i]));
+                                      JS_GetArrayBufferViewBuffer(aJSContext, aJSArrays[i]));
     uint8_t* stolenData = arrayBuffer
                           ? (uint8_t*) JS_StealArrayBufferContents(aJSContext, arrayBuffer)
                           : nullptr;

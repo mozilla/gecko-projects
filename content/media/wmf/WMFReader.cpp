@@ -103,8 +103,10 @@ WMFReader::InitializeDXVA()
     nsContentUtils::LayerManagerForDocument(element->OwnerDoc());
   NS_ENSURE_TRUE(layerManager, false);
 
-  if (layerManager->GetBackendType() != LayersBackend::LAYERS_D3D9 &&
-      layerManager->GetBackendType() != LayersBackend::LAYERS_D3D10) {
+  LayersBackend backend = layerManager->GetCompositorBackendType();
+  if (backend != LayersBackend::LAYERS_D3D9 &&
+      backend != LayersBackend::LAYERS_D3D10 &&
+      backend != LayersBackend::LAYERS_D3D11) {
     return false;
   }
 
@@ -505,8 +507,7 @@ WMFReader::ReadMetadata(MediaInfo* aInfo,
   HRESULT hr;
 
   const bool triedToInitDXVA = mUseHwAccel;
-  hr = CreateSourceReader();
-  if (FAILED(hr)) {
+  if (FAILED(CreateSourceReader())) {
     mSourceReader = nullptr;
     if (triedToInitDXVA && !mUseHwAccel) {
       // We tried to initialize DXVA and failed. Try again to create the
@@ -515,13 +516,15 @@ WMFReader::ReadMetadata(MediaInfo* aInfo,
       // (AMD Radeon 3000) we cannot successfully reconfigure an existing
       // reader to not use DXVA after we've failed to configure DXVA.
       // See bug 987127.
-      hr = CreateSourceReader();
-      if (FAILED(hr)) {
-        NS_WARNING("Failed to create IMFSourceReader");
+      if (FAILED(CreateSourceReader())) {
         mSourceReader = nullptr;
-        return NS_ERROR_FAILURE;
       }
     }
+  }
+
+  if (!mSourceReader) {
+    NS_WARNING("Failed to create IMFSourceReader");
+    return NS_ERROR_FAILURE;
   }
 
   if (mInfo.HasVideo()) {

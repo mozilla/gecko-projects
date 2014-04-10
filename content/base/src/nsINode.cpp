@@ -609,6 +609,23 @@ nsINode::GetBaseURI(nsAString &aURI) const
 }
 
 void
+nsINode::GetBaseURIFromJS(nsAString& aURI) const
+{
+  nsCOMPtr<nsIURI> baseURI = GetBaseURI(nsContentUtils::IsCallerChrome());
+  nsAutoCString spec;
+  if (baseURI) {
+    baseURI->GetSpec(spec);
+  }
+  CopyUTF8toUTF16(spec, aURI);
+}
+
+already_AddRefed<nsIURI>
+nsINode::GetBaseURIObject() const
+{
+  return GetBaseURI(true);
+}
+
+void
 nsINode::LookupPrefix(const nsAString& aNamespaceURI, nsAString& aPrefix)
 {
   Element *element = GetNameSpaceElement();
@@ -1411,6 +1428,7 @@ CheckForOutdatedParent(nsINode* aParent, nsINode* aNode)
 
     if (js::GetGlobalForObjectCrossCompartment(existingObj) !=
         global->GetGlobalJSObject()) {
+      JSAutoCompartment ac(cx, existingObj);
       nsresult rv = ReparentWrapper(cx, existingObj);
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -2609,7 +2627,7 @@ nsINode::GetElementById(const nsAString& aId)
 }
 
 JSObject*
-nsINode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
+nsINode::WrapObject(JSContext *aCx)
 {
   MOZ_ASSERT(IsDOMBinding());
 
@@ -2630,7 +2648,7 @@ nsINode::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aScope)
     return nullptr;
   }
 
-  JS::Rooted<JSObject*> obj(aCx, WrapNode(aCx, aScope));
+  JS::Rooted<JSObject*> obj(aCx, WrapNode(aCx));
   MOZ_ASSERT_IF(ChromeOnlyAccess(),
                 xpc::IsInXBLScope(obj) || !xpc::UseXBLScope(js::GetObjectCompartment(obj)));
   return obj;
