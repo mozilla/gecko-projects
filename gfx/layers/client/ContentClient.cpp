@@ -89,6 +89,23 @@ ContentClient::CreateContentClient(CompositableForwarder* aForwarder)
   return new ContentClientSingleBuffered(aForwarder);
 }
 
+void
+ContentClient::EndPaint()
+{
+  // It is very important that this is called after any overridden EndPaint behaviour,
+  // because destroying textures is a three stage process:
+  // 1. We are done with the buffer and move it to ContentClient::mOldTextures,
+  // that happens in DestroyBuffers which is may be called indirectly from
+  // PaintThebes.
+  // 2. The content client calls RemoveTextureClient on the texture clients in
+  // mOldTextures and forgets them. They then become invalid. The compositable
+  // client keeps a record of IDs. This happens in EndPaint.
+  // 3. An IPC message is sent to destroy the corresponding texture host. That
+  // happens from OnTransaction.
+  // It is important that these steps happen in order.
+  OnTransaction();
+}
+
 // We pass a null pointer for the ContentClient Forwarder argument, which means
 // this client will not have a ContentHost on the other side.
 ContentClientBasic::ContentClientBasic()
@@ -156,12 +173,13 @@ ContentClientRemoteBuffer::EndPaint()
   }
   mOldTextures.Clear();
 
-  if (mTextureClient) {
+  if (mTextureClient && mTextureClient->IsLocked()) {
     mTextureClient->Unlock();
   }
-  if (mTextureClientOnWhite) {
+  if (mTextureClientOnWhite && mTextureClientOnWhite->IsLocked()) {
     mTextureClientOnWhite->Unlock();
   }
+  ContentClientRemote::EndPaint();
 }
 
 bool
@@ -177,7 +195,7 @@ ContentClientRemoteBuffer::CreateAndAllocateTextureClient(RefPtr<TextureClient>&
     return false;
   }
 
-  if (!aClient->AsTextureClientDrawTarget()->AllocateForSurface(mSize, ALLOC_CLEAR_BUFFER)) {
+  if (!aClient->AllocateForSurface(mSize, ALLOC_CLEAR_BUFFER)) {
     aClient = CreateTextureClientForDrawing(mSurfaceFormat,
                 mTextureInfo.mTextureFlags | TEXTURE_ALLOC_FALLBACK | aFlags,
                 gfx::BackendType::NONE,
@@ -185,7 +203,7 @@ ContentClientRemoteBuffer::CreateAndAllocateTextureClient(RefPtr<TextureClient>&
     if (!aClient) {
       return false;
     }
-    if (!aClient->AsTextureClientDrawTarget()->AllocateForSurface(mSize, ALLOC_CLEAR_BUFFER)) {
+    if (!aClient->AllocateForSurface(mSize, ALLOC_CLEAR_BUFFER)) {
       NS_WARNING("Could not allocate texture client");
       aClient = nullptr;
       return false;
@@ -253,12 +271,12 @@ ContentClientRemoteBuffer::CreateBuffer(ContentType aType,
   DebugOnly<bool> locked = mTextureClient->Lock(OPEN_READ_WRITE);
   MOZ_ASSERT(locked, "Could not lock the TextureClient");
 
-  *aBlackDT = mTextureClient->AsTextureClientDrawTarget()->GetAsDrawTarget();
+  *aBlackDT = mTextureClient->GetAsDrawTarget();
   if (aFlags & BUFFER_COMPONENT_ALPHA) {
     locked = mTextureClientOnWhite->Lock(OPEN_READ_WRITE);
     MOZ_ASSERT(locked, "Could not lock the second TextureClient for component alpha");
 
-    *aWhiteDT = mTextureClientOnWhite->AsTextureClientDrawTarget()->GetAsDrawTarget();
+    *aWhiteDT = mTextureClientOnWhite->GetAsDrawTarget();
   }
 }
 
@@ -378,18 +396,11 @@ ContentClientDoubleBuffered::SwapBuffers(const nsIntRegion& aFrontUpdatedRegion)
 }
 
 void
-ContentClientDoubleBuffered::PrepareFrame()
+ContentClientDoubleBuffered::BeginPaint()
 {
-  mIsNewBuffer = false;
+  ContentClientRemoteBuffer::BeginPaint();
 
-  if (mTextureClient) {
-    DebugOnly<bool> locked = mTextureClient->Lock(OPEN_READ_WRITE);
-    MOZ_ASSERT(locked);
-  }
-  if (mTextureClientOnWhite) {
-    DebugOnly<bool> locked = mTextureClientOnWhite->Lock(OPEN_READ_WRITE);
-    MOZ_ASSERT(locked);
-  }
+  mIsNewBuffer = false;
 
   if (!mFrontAndBackBufferDiffer) {
     return;
@@ -415,6 +426,15 @@ ContentClientDoubleBuffered::PrepareFrame()
 void
 ContentClientDoubleBuffered::FinalizeFrame(const nsIntRegion& aRegionToDraw)
 {
+  if (mTextureClient) {
+    DebugOnly<bool> locked = mTextureClient->Lock(OPEN_READ_WRITE);
+    MOZ_ASSERT(locked);
+  }
+  if (mTextureClientOnWhite) {
+    DebugOnly<bool> locked = mTextureClientOnWhite->Lock(OPEN_READ_WRITE);
+    MOZ_ASSERT(locked);
+  }
+
   if (!mFrontAndBackBufferDiffer) {
     MOZ_ASSERT(!mDidSelfCopy, "If we have to copy the world, then our buffers are different, right?");
     return;
@@ -457,10 +477,9 @@ ContentClientDoubleBuffered::FinalizeFrame(const nsIntRegion& aRegionToDraw)
     // Restrict the DrawTargets and frontBuffer to a scope to make
     // sure there is no more external references to the DrawTargets
     // when we Unlock the TextureClients.
-    RefPtr<DrawTarget> dt =
-      mFrontClient->AsTextureClientDrawTarget()->GetAsDrawTarget();
+    RefPtr<DrawTarget> dt = mFrontClient->GetAsDrawTarget();
     RefPtr<DrawTarget> dtOnWhite = mFrontClientOnWhite
-      ? mFrontClientOnWhite->AsTextureClientDrawTarget()->GetAsDrawTarget()
+      ? mFrontClientOnWhite->GetAsDrawTarget()
       : nullptr;
     RotatedBuffer frontBuffer(dt,
                               dtOnWhite,
@@ -479,39 +498,15 @@ void
 ContentClientDoubleBuffered::UpdateDestinationFrom(const RotatedBuffer& aSource,
                                                    const nsIntRegion& aUpdateRegion)
 {
-  DrawTarget* destDT =
-    BorrowDrawTargetForQuadrantUpdate(aUpdateRegion.GetBounds(), BUFFER_BLACK);
-  if (!destDT) {
-    return;
-  }
-
-  bool isClippingCheap = IsClippingCheap(destDT, aUpdateRegion);
-  if (isClippingCheap) {
-    gfxUtils::ClipToRegion(destDT, aUpdateRegion);
-  }
-
-  aSource.DrawBufferWithRotation(destDT, BUFFER_BLACK, 1.0, CompositionOp::OP_SOURCE);
-  if (isClippingCheap) {
-    destDT->PopClip();
-  }
-  // Flush the destination before the sources become inaccessible (Unlock).
-  destDT->Flush();
-  ReturnDrawTargetToBuffer(destDT);
-
-  if (aSource.HaveBufferOnWhite()) {
-    MOZ_ASSERT(HaveBufferOnWhite());
-    DrawTarget* destDT =
-      BorrowDrawTargetForQuadrantUpdate(aUpdateRegion.GetBounds(), BUFFER_WHITE);
-    if (!destDT) {
-      return;
-    }
-
-    bool isClippingCheap = IsClippingCheap(destDT, aUpdateRegion);
+  DrawIterator iter;
+  while (DrawTarget* destDT =
+    BorrowDrawTargetForQuadrantUpdate(aUpdateRegion.GetBounds(), BUFFER_BLACK, &iter)) {
+    bool isClippingCheap = IsClippingCheap(destDT, iter.mDrawRegion);
     if (isClippingCheap) {
-      gfxUtils::ClipToRegion(destDT, aUpdateRegion);
+      gfxUtils::ClipToRegion(destDT, iter.mDrawRegion);
     }
 
-    aSource.DrawBufferWithRotation(destDT, BUFFER_WHITE, 1.0, CompositionOp::OP_SOURCE);
+    aSource.DrawBufferWithRotation(destDT, BUFFER_BLACK, 1.0, CompositionOp::OP_SOURCE);
     if (isClippingCheap) {
       destDT->PopClip();
     }
@@ -519,46 +514,39 @@ ContentClientDoubleBuffered::UpdateDestinationFrom(const RotatedBuffer& aSource,
     destDT->Flush();
     ReturnDrawTargetToBuffer(destDT);
   }
+
+  if (aSource.HaveBufferOnWhite()) {
+    MOZ_ASSERT(HaveBufferOnWhite());
+    DrawIterator whiteIter;
+    while (DrawTarget* destDT =
+      BorrowDrawTargetForQuadrantUpdate(aUpdateRegion.GetBounds(), BUFFER_WHITE, &whiteIter)) {
+      bool isClippingCheap = IsClippingCheap(destDT, whiteIter.mDrawRegion);
+      if (isClippingCheap) {
+        gfxUtils::ClipToRegion(destDT, whiteIter.mDrawRegion);
+      }
+
+      aSource.DrawBufferWithRotation(destDT, BUFFER_WHITE, 1.0, CompositionOp::OP_SOURCE);
+      if (isClippingCheap) {
+        destDT->PopClip();
+      }
+      // Flush the destination before the sources become inaccessible (Unlock).
+      destDT->Flush();
+      ReturnDrawTargetToBuffer(destDT);
+    }
+  }
 }
 
 void
-ContentClientSingleBuffered::PrepareFrame()
+ContentClientSingleBuffered::FinalizeFrame(const nsIntRegion& aRegionToDraw)
 {
-  if (!mFrontAndBackBufferDiffer) {
-    if (mTextureClient) {
-      DebugOnly<bool> locked = mTextureClient->Lock(OPEN_READ_WRITE);
-      MOZ_ASSERT(locked);
-    }
-    if (mTextureClientOnWhite) {
-      DebugOnly<bool> locked = mTextureClientOnWhite->Lock(OPEN_READ_WRITE);
-      MOZ_ASSERT(locked);
-    }
-    return;
-  }
-
-  RefPtr<DrawTarget> backBuffer = GetDTBuffer();
-  if (!backBuffer && mTextureClient) {
+  if (mTextureClient) {
     DebugOnly<bool> locked = mTextureClient->Lock(OPEN_READ_WRITE);
     MOZ_ASSERT(locked);
-    backBuffer = mTextureClient->AsTextureClientDrawTarget()->GetAsDrawTarget();
   }
-
-  RefPtr<DrawTarget> oldBuffer;
-  oldBuffer = SetDTBuffer(backBuffer,
-                          mBufferRect,
-                          mBufferRotation);
-
-  backBuffer = GetDTBufferOnWhite();
-  if (!backBuffer && mTextureClientOnWhite) {
+  if (mTextureClientOnWhite) {
     DebugOnly<bool> locked = mTextureClientOnWhite->Lock(OPEN_READ_WRITE);
     MOZ_ASSERT(locked);
-    backBuffer = mTextureClientOnWhite->AsTextureClientDrawTarget()->GetAsDrawTarget();
   }
-
-  oldBuffer = SetDTBufferOnWhite(backBuffer);
-
-  mIsNewBuffer = false;
-  mFrontAndBackBufferDiffer = false;
 }
 
 static void
@@ -785,11 +773,18 @@ ContentClientIncremental::BeginPaintBuffer(ThebesLayer* aLayer,
 }
 
 DrawTarget*
-ContentClientIncremental::BorrowDrawTargetForPainting(ThebesLayer* aLayer,
-                                                      const PaintState& aPaintState)
+ContentClientIncremental::BorrowDrawTargetForPainting(const PaintState& aPaintState,
+                                                      RotatedContentBuffer::DrawIterator* aIter)
 {
   if (aPaintState.mMode == SurfaceMode::SURFACE_NONE) {
     return nullptr;
+  }
+
+  if (aIter) {
+    if (aIter->mCount++ > 0) {
+      return nullptr;
+    }
+    aIter->mDrawRegion = aPaintState.mRegionToDraw;
   }
 
   DrawTarget* result = nullptr;

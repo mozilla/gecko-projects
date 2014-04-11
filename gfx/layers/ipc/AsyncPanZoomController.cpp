@@ -1457,15 +1457,12 @@ void AsyncPanZoomController::RequestContentRepaint(FrameMetrics& aFrameMetrics) 
 
   // If we're trying to paint what we already think is painted, discard this
   // request since it's a pointless paint.
-  CSSRect oldDisplayPort = mLastPaintRequestMetrics.mDisplayPort
-                         + mLastPaintRequestMetrics.GetScrollOffset();
-  CSSRect newDisplayPort = aFrameMetrics.mDisplayPort
-                         + aFrameMetrics.GetScrollOffset();
-
-  if (fabsf(oldDisplayPort.x - newDisplayPort.x) < EPSILON &&
-      fabsf(oldDisplayPort.y - newDisplayPort.y) < EPSILON &&
-      fabsf(oldDisplayPort.width - newDisplayPort.width) < EPSILON &&
-      fabsf(oldDisplayPort.height - newDisplayPort.height) < EPSILON &&
+  LayerMargin marginDelta = mLastPaintRequestMetrics.GetDisplayPortMargins()
+                          - aFrameMetrics.GetDisplayPortMargins();
+  if (fabsf(marginDelta.left) < EPSILON &&
+      fabsf(marginDelta.top) < EPSILON &&
+      fabsf(marginDelta.right) < EPSILON &&
+      fabsf(marginDelta.bottom) < EPSILON &&
       fabsf(mLastPaintRequestMetrics.GetScrollOffset().x -
             aFrameMetrics.GetScrollOffset().x) < EPSILON &&
       fabsf(mLastPaintRequestMetrics.GetScrollOffset().y -
@@ -1488,14 +1485,26 @@ void AsyncPanZoomController::RequestContentRepaint(FrameMetrics& aFrameMetrics) 
   mLastPaintRequestMetrics = aFrameMetrics;
 }
 
+/*static*/ CSSRect
+GetDisplayPortRect(const FrameMetrics& aFrameMetrics)
+{
+  // This computation is based on what happens in CalculatePendingDisplayPort. If that
+  // changes then this might need to change too
+  CSSRect baseRect(aFrameMetrics.GetScrollOffset(),
+                   CSSSize(std::min(aFrameMetrics.CalculateCompositedSizeInCssPixels().width,
+                                    aFrameMetrics.GetRootCompositionSize().width),
+                           std::min(aFrameMetrics.CalculateCompositedSizeInCssPixels().height,
+                                    aFrameMetrics.GetRootCompositionSize().height)));
+  baseRect.Inflate(aFrameMetrics.GetDisplayPortMargins() / aFrameMetrics.LayersPixelsPerCSSPixel());
+  return baseRect;
+}
+
 void
 AsyncPanZoomController::DispatchRepaintRequest(const FrameMetrics& aFrameMetrics) {
   nsRefPtr<GeckoContentController> controller = GetGeckoContentController();
   if (controller) {
     APZC_LOG_FM(aFrameMetrics, "%p requesting content repaint", this);
-
-    LogRendertraceRect(GetGuid(), "requested displayport", "yellow",
-        aFrameMetrics.mDisplayPort + aFrameMetrics.GetScrollOffset());
+    LogRendertraceRect(GetGuid(), "requested displayport", "yellow", GetDisplayPortRect(aFrameMetrics));
 
     controller->RequestContentRepaint(aFrameMetrics);
     mLastDispatchedPaintMetrics = aFrameMetrics;

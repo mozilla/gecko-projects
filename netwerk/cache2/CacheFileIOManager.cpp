@@ -14,6 +14,7 @@
 #include "CacheFile.h"
 #include "CacheObserver.h"
 #include "nsIFile.h"
+#include "CacheFileContextEvictor.h"
 #include "nsITimer.h"
 #include "nsISimpleEnumerator.h"
 #include "nsIDirectoryEnumerator.h"
@@ -593,7 +594,7 @@ public:
             mRV = mIOMan->OpenSpecialFileInternal(mKey, mFlags,
                                                   getter_AddRefs(mHandle));
           } else {
-            mRV = mIOMan->OpenFileInternal(&mHash, mFlags,
+            mRV = mIOMan->OpenFileInternal(&mHash, mKey, mFlags,
                                            getter_AddRefs(mHandle));
           }
           mIOMan = nullptr;
@@ -1213,6 +1214,10 @@ CacheFileIOManager::Shutdown()
 
   CacheIndex::Shutdown();
 
+  if (CacheObserver::ClearCacheOnShutdown()) {
+    gInstance->SyncRemoveAllCacheFiles();
+  }
+
   nsRefPtr<CacheFileIOManager> ioMan;
   ioMan.swap(gInstance);
 
@@ -1544,11 +1549,13 @@ CacheFileIOManager::OpenFile(const nsACString &aKey,
 
 nsresult
 CacheFileIOManager::OpenFileInternal(const SHA1Sum::Hash *aHash,
+                                     const nsACString &aKey,
                                      uint32_t aFlags,
                                      CacheFileHandle **_retval)
 {
   LOG(("CacheFileIOManager::OpenFileInternal() [hash=%08x%08x%08x%08x%08x, "
-       "flags=%d]", LOGSHA1(aHash), aFlags));
+       "key=%s, flags=%d]", LOGSHA1(aHash), PromiseFlatCString(aKey).get(),
+       aFlags));
 
   MOZ_ASSERT(CacheFileIOManager::IsOnIOThread());
 
@@ -1610,6 +1617,22 @@ CacheFileIOManager::OpenFileInternal(const SHA1Sum::Hash *aHash,
   bool exists;
   rv = file->Exists(&exists);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (exists && mContextEvictor) {
+    if (mContextEvictor->ContextsCount() == 0) {
+      mContextEvictor = nullptr;
+    } else {
+      bool wasEvicted = false;
+      mContextEvictor->WasEvicted(aKey, file, &wasEvicted);
+      if (wasEvicted) {
+        LOG(("CacheFileIOManager::OpenFileInternal() - Removing file since the "
+             "entry was evicted by EvictByContext()"));
+        exists = false;
+        file->Remove(false);
+        CacheIndex::RemoveEntry(aHash);
+      }
+    }
+  }
 
   if (!exists && (aFlags & (OPEN | CREATE | CREATE_NEW)) == OPEN) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -2560,7 +2583,8 @@ CacheFileIOManager::EvictAllInternal()
   for (uint32_t i = 0; i < handles.Length(); ++i) {
     rv = DoomFileInternal(handles[i]);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+      LOG(("CacheFileIOManager::EvictAllInternal() - Cannot doom handle "
+           "[handle=%p]", handles[i].get()));
     }
   }
 
@@ -2592,6 +2616,144 @@ CacheFileIOManager::EvictAllInternal()
 
   CacheIndex::RemoveAll();
 
+  return NS_OK;
+}
+
+// static
+nsresult
+CacheFileIOManager::EvictByContext(nsILoadContextInfo *aLoadContextInfo)
+{
+  LOG(("CacheFileIOManager::EvictByContext() [loadContextInfo=%p]",
+       aLoadContextInfo));
+
+  nsresult rv;
+  nsRefPtr<CacheFileIOManager> ioMan = gInstance;
+
+  if (!ioMan) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  nsCOMPtr<nsIRunnable> ev;
+  ev = NS_NewRunnableMethodWithArg<nsCOMPtr<nsILoadContextInfo> >
+         (ioMan, &CacheFileIOManager::EvictByContextInternal, aLoadContextInfo);
+
+  rv = ioMan->mIOThread->DispatchAfterPendingOpens(ev);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+CacheFileIOManager::EvictByContextInternal(nsILoadContextInfo *aLoadContextInfo)
+{
+  LOG(("CacheFileIOManager::EvictByContextInternal() [loadContextInfo=%p, "
+       "anonymous=%u, inBrowser=%u, appId=%u]", aLoadContextInfo,
+       aLoadContextInfo->IsAnonymous(), aLoadContextInfo->IsInBrowserElement(),
+       aLoadContextInfo->AppId()));
+
+  nsresult rv;
+
+  MOZ_ASSERT(mIOThread->IsCurrentThread());
+
+  MOZ_ASSERT(!aLoadContextInfo->IsPrivate());
+  if (aLoadContextInfo->IsPrivate()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  if (!mCacheDirectory) {
+    return NS_ERROR_FILE_INVALID_PATH;
+  }
+
+  if (mShuttingDown) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  if (!mTreeCreated) {
+    rv = CreateCacheTree();
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+  }
+
+  // Doom all active handles that matches the load context
+  nsTArray<nsRefPtr<CacheFileHandle> > handles;
+  mHandles.GetActiveHandles(&handles);
+
+  for (uint32_t i = 0; i < handles.Length(); ++i) {
+    bool equals;
+    rv = CacheFileUtils::KeyMatchesLoadContextInfo(handles[i]->Key(),
+                                                   aLoadContextInfo,
+                                                   &equals);
+    if (NS_FAILED(rv)) {
+      LOG(("CacheFileIOManager::EvictByContextInternal() - Cannot parse key in "
+           "handle! [handle=%p, key=%s]", handles[i].get(),
+           handles[i]->Key().get()));
+      MOZ_CRASH("Unexpected error!");
+    }
+
+    if (equals) {
+      rv = DoomFileInternal(handles[i]);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        LOG(("CacheFileIOManager::EvictByContextInternal() - Cannot doom handle"
+             " [handle=%p]", handles[i].get()));
+      }
+    }
+  }
+
+  if (!mContextEvictor) {
+    mContextEvictor = new CacheFileContextEvictor();
+    mContextEvictor->Init(mCacheDirectory);
+  }
+
+  mContextEvictor->AddContext(aLoadContextInfo);
+
+  return NS_OK;
+}
+
+// static
+nsresult
+CacheFileIOManager::CacheIndexStateChanged()
+{
+  LOG(("CacheFileIOManager::CacheIndexStateChanged()"));
+
+  nsresult rv;
+
+  // CacheFileIOManager lives longer than CacheIndex so gInstance must be
+  // non-null here.
+  MOZ_ASSERT(gInstance);
+
+  // We have to re-distatch even if we are on IO thread to prevent reentering
+  // the lock in CacheIndex
+  nsCOMPtr<nsIRunnable> ev;
+  ev = NS_NewRunnableMethod(
+    gInstance, &CacheFileIOManager::CacheIndexStateChangedInternal);
+
+  nsCOMPtr<nsIEventTarget> ioTarget = IOTarget();
+  MOZ_ASSERT(ioTarget);
+
+  rv = ioTarget->Dispatch(ev, nsIEventTarget::DISPATCH_NORMAL);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult
+CacheFileIOManager::CacheIndexStateChangedInternal()
+{
+  if (mShuttingDown) {
+    // ignore notification during shutdown
+    return NS_OK;
+  }
+
+  if (!mContextEvictor) {
+    return NS_OK;
+  }
+
+  mContextEvictor->CacheIndexStateChanged();
   return NS_OK;
 }
 
@@ -2854,7 +3016,9 @@ CacheFileIOManager::FindTrashDirToRemove()
 
   nsresult rv;
 
-  MOZ_ASSERT(mIOThread->IsCurrentThread());
+  // We call this method on the main thread during shutdown when user wants to
+  // remove all cache files.
+  MOZ_ASSERT(mIOThread->IsCurrentThread() || mShuttingDown);
 
   nsCOMPtr<nsISimpleEnumerator> iter;
   rv = mCacheDirectory->GetDirectoryEntries(getter_AddRefs(iter));
@@ -3225,6 +3389,18 @@ CacheFileIOManager::CreateCacheTree()
 
   mTreeCreated = true;
 
+  if (!mContextEvictor) {
+    nsRefPtr<CacheFileContextEvictor> contextEvictor;
+    contextEvictor = new CacheFileContextEvictor();
+
+    // Init() method will try to load unfinished contexts from the disk. Store
+    // the evictor as a member only when there is some unfinished job.
+    contextEvictor->Init(mCacheDirectory);
+    if (contextEvictor->ContextsCount()) {
+      contextEvictor.swap(mContextEvictor);
+    }
+  }
+
   StartRemovingTrash();
 
   return NS_OK;
@@ -3279,6 +3455,81 @@ CacheFileIOManager::NSPRHandleUsed(CacheFileHandle *aHandle)
   MOZ_ASSERT(found);
 
   mHandlesByLastUsed.AppendElement(aHandle);
+}
+
+nsresult
+CacheFileIOManager::SyncRemoveDir(nsIFile *aFile, const char *aDir)
+{
+  nsresult rv;
+  nsCOMPtr<nsIFile> file;
+
+  if (!aDir) {
+    file = aFile;
+  } else {
+    rv = aFile->Clone(getter_AddRefs(file));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    rv = file->AppendNative(nsDependentCString(aDir));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+  }
+
+#ifdef PR_LOGGING
+  nsAutoCString path;
+  file->GetNativePath(path);
+#endif
+
+  LOG(("CacheFileIOManager::SyncRemoveDir() - Removing directory %s",
+       path.get()));
+
+  rv = file->Remove(true);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    LOG(("CacheFileIOManager::SyncRemoveDir() - Removing failed! [rv=0x%08x]",
+         rv));
+  }
+
+  return rv;
+}
+
+void
+CacheFileIOManager::SyncRemoveAllCacheFiles()
+{
+  LOG(("CacheFileIOManager::SyncRemoveAllCacheFiles()"));
+
+  nsresult rv;
+
+  SyncRemoveDir(mCacheDirectory, kEntriesDir);
+  SyncRemoveDir(mCacheDirectory, kDoomedDir);
+
+  // Clear any intermediate state of trash dir enumeration.
+  mFailedTrashDirs.Clear();
+  mTrashDir = nullptr;
+
+  while (true) {
+    // FindTrashDirToRemove() fills mTrashDir if there is any trash directory.
+    rv = FindTrashDirToRemove();
+    if (rv == NS_ERROR_NOT_AVAILABLE) {
+      LOG(("CacheFileIOManager::SyncRemoveAllCacheFiles() - No trash directory "
+           "found."));
+      break;
+    }
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      LOG(("CacheFileIOManager::SyncRemoveAllCacheFiles() - "
+           "FindTrashDirToRemove() returned an unexpected error. [rv=0x%08x]",
+           rv));
+      break;
+    }
+
+    rv = SyncRemoveDir(mTrashDir, nullptr);
+    if (NS_FAILED(rv)) {
+      nsAutoCString leafName;
+      mTrashDir->GetNativeLeafName(leafName);
+      mFailedTrashDirs.AppendElement(leafName);
+    }
+  }
 }
 
 // Memory reporting

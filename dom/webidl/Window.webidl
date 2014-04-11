@@ -31,7 +31,7 @@ typedef any Transferable;
    CrossOriginReadable] readonly attribute WindowProxy window;
   [Replaceable, Throws,
    CrossOriginReadable] readonly attribute WindowProxy self;
-  //[Unforgeable] readonly attribute Document? document;
+  [Unforgeable, StoreInSlot, Pure, Func="nsGlobalWindow::WindowOnWebIDL"] readonly attribute Document? document;
   [Throws] attribute DOMString name; 
   [PutForwards=href, Unforgeable, Throws,
    CrossOriginReadable, CrossOriginWritable] readonly attribute Location? location;
@@ -372,7 +372,8 @@ partial interface Window {
 };
 #endif
 
-[ChromeOnly] interface ChromeWindow {
+[Func="IsChromeOrXBL"]
+interface ChromeWindow {
   [Func="nsGlobalWindow::IsChromeWindow"]
   const unsigned short STATE_MAXIMIZED = 1;
   [Func="nsGlobalWindow::IsChromeWindow"]

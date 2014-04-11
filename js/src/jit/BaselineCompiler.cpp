@@ -16,6 +16,7 @@
 # include "jit/PerfSpewer.h"
 #endif
 #include "jit/VMFunctions.h"
+#include "vm/TraceLogging.h"
 
 #include "jsscriptinlines.h"
 
@@ -344,9 +345,14 @@ BaselineCompiler::emitPrologue()
     if (needsEarlyStackCheck())
         masm.bind(&earlyStackCheckFailed);
 
-#if JS_TRACE_LOGGING
-    masm.tracelogStart(script.get());
-    masm.tracelogLog(TraceLogging::INFO_ENGINE_BASELINE);
+#ifdef JS_TRACE_LOGGING
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    Register loggerReg = RegisterSet::Volatile().takeGeneral();
+    masm.Push(loggerReg);
+    masm.movePtr(ImmPtr(logger), loggerReg);
+    masm.tracelogStart(loggerReg, TraceLogCreateTextId(logger, script.get()));
+    masm.tracelogStart(loggerReg, TraceLogger::Baseline);
+    masm.Pop(loggerReg);
 #endif
 
     // Record the offset of the prologue, because Ion can bailout before
@@ -381,8 +387,16 @@ BaselineCompiler::emitEpilogue()
 {
     masm.bind(&return_);
 
-#if JS_TRACE_LOGGING
-    masm.tracelogStop();
+#ifdef JS_TRACE_LOGGING
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    Register loggerReg = RegisterSet::Volatile().takeGeneral();
+    masm.Push(loggerReg);
+    masm.movePtr(ImmPtr(logger), loggerReg);
+    masm.tracelogStop(loggerReg, TraceLogger::Baseline);
+    // Stop the script. Using a stop without checking the textId, since we
+    // we didn't save the textId for the script.
+    masm.tracelogStop(loggerReg);
+    masm.Pop(loggerReg);
 #endif
 
     // Pop SPS frame if necessary

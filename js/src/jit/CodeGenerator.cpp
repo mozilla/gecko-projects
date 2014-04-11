@@ -31,6 +31,7 @@
 #include "jit/ParallelSafetyAnalysis.h"
 #include "jit/RangeAnalysis.h"
 #include "vm/ForkJoin.h"
+#include "vm/TraceLogging.h"
 
 #include "jsboolinlines.h"
 
@@ -941,8 +942,7 @@ CodeGenerator::visitStringReplace(LStringReplace *lir)
 
 
 typedef JSObject *(*LambdaFn)(JSContext *, HandleFunction, HandleObject);
-static const VMFunction LambdaInfo =
-    FunctionInfo<LambdaFn>(js::Lambda);
+static const VMFunction LambdaInfo = FunctionInfo<LambdaFn>(js::Lambda);
 
 bool
 CodeGenerator::visitLambdaForSingleton(LLambdaForSingleton *lir)
@@ -976,10 +976,53 @@ CodeGenerator::visitLambda(LLambda *lir)
     return true;
 }
 
+typedef JSObject *(*LambdaArrowFn)(JSContext *, HandleFunction, HandleObject, HandleValue);
+static const VMFunction LambdaArrowInfo = FunctionInfo<LambdaArrowFn>(js::LambdaArrow);
+
+bool
+CodeGenerator::visitLambdaArrow(LLambdaArrow *lir)
+{
+    Register scopeChain = ToRegister(lir->scopeChain());
+    ValueOperand thisv = ToValue(lir, LLambdaArrow::ThisValue);
+    Register output = ToRegister(lir->output());
+    Register tempReg = ToRegister(lir->temp());
+    const LambdaFunctionInfo &info = lir->mir()->info();
+
+    OutOfLineCode *ool = oolCallVM(LambdaArrowInfo, lir,
+                                   (ArgList(), ImmGCPtr(info.fun), scopeChain, thisv),
+                                   StoreRegisterTo(output));
+    if (!ool)
+        return false;
+
+    MOZ_ASSERT(!info.useNewTypeForClone);
+
+    if (info.singletonType) {
+        // If the function has a singleton type, this instruction will only be
+        // executed once so we don't bother inlining it.
+        masm.jump(ool->entry());
+        masm.bind(ool->rejoin());
+        return true;
+    }
+
+    masm.newGCThing(output, tempReg, info.fun, ool->entry(), gc::DefaultHeap);
+    masm.initGCThing(output, tempReg, info.fun);
+
+    emitLambdaInit(output, scopeChain, info);
+
+    // Store the lexical |this| value.
+    MOZ_ASSERT(info.flags & JSFunction::EXTENDED);
+    masm.storeValue(thisv, Address(output, FunctionExtended::offsetOfArrowThisSlot()));
+
+    masm.bind(ool->rejoin());
+    return true;
+}
+
 void
 CodeGenerator::emitLambdaInit(Register output, Register scopeChain,
                               const LambdaFunctionInfo &info)
 {
+    MOZ_ASSERT(!!(info.flags & JSFunction::ARROW) == !!(info.flags & JSFunction::EXTENDED));
+
     // Initialize nargs and flags. We do this with a single uint32 to avoid
     // 16-bit writes.
     union {
@@ -990,7 +1033,7 @@ CodeGenerator::emitLambdaInit(Register output, Register scopeChain,
         uint32_t word;
     } u;
     u.s.nargs = info.fun->nargs();
-    u.s.flags = info.flags & ~JSFunction::EXTENDED;
+    u.s.flags = info.flags;
 
     JS_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
     masm.store32(Imm32(u.word), Address(output, JSFunction::offsetOfNargs()));
@@ -1245,8 +1288,13 @@ CodeGenerator::visitOsrEntry(LOsrEntry *lir)
     masm.flushBuffer();
     setOsrEntryOffset(masm.size());
 
-#if JS_TRACE_LOGGING
-    masm.tracelogLog(TraceLogging::INFO_ENGINE_IONMONKEY);
+#ifdef JS_TRACE_LOGGING
+    if (gen->info().executionMode() == SequentialExecution) {
+        if (!emitTracelogStopEvent(TraceLogger::Baseline))
+            return false;
+        if (!emitTracelogStartEvent(TraceLogger::IonMonkey))
+            return false;
+    }
 #endif
 
     // Allocate the full frame for this function.
@@ -4306,13 +4354,6 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD *ins)
 
     const MathCache *mathCache = ins->mir()->cache();
 
-    masm.setupUnalignedABICall(mathCache ? 2 : 1, temp);
-    if (mathCache) {
-        masm.movePtr(ImmPtr(mathCache), temp);
-        masm.passABIArg(temp);
-    }
-    masm.passABIArg(input, MoveOp::DOUBLE);
-
 #   define MAYBE_CACHED(fcn) (mathCache ? (void*)fcn ## _impl : (void*)fcn ## _uncached)
 
     void *funptr = nullptr;
@@ -4321,10 +4362,12 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD *ins)
         funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_log));
         break;
       case MMathFunction::Sin:
-        funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_sin));
+        funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_sin_impl);
+        mathCache = nullptr;
         break;
       case MMathFunction::Cos:
-        funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_cos));
+        funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_cos_impl);
+        mathCache = nullptr;
         break;
       case MMathFunction::Exp:
         funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_exp));
@@ -4382,18 +4425,28 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD *ins)
         break;
       case MMathFunction::Floor:
         funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_floor_impl);
+        mathCache = nullptr;
         break;
       case MMathFunction::Ceil:
         funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_ceil_impl);
+        mathCache = nullptr;
         break;
       case MMathFunction::Round:
         funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_round_impl);
+        mathCache = nullptr;
         break;
       default:
         MOZ_ASSUME_UNREACHABLE("Unknown math function");
     }
 
 #   undef MAYBE_CACHED
+
+    masm.setupUnalignedABICall(mathCache ? 2 : 1, temp);
+    if (mathCache) {
+        masm.movePtr(ImmPtr(mathCache), temp);
+        masm.passABIArg(temp);
+    }
+    masm.passABIArg(input, MoveOp::DOUBLE);
 
     masm.callWithABI(funptr, MoveOp::DOUBLE);
     return true;
@@ -6206,9 +6259,13 @@ CodeGenerator::generate()
     if (!safepoints_.init(gen->alloc(), graph.totalSlotCount()))
         return false;
 
-#if JS_TRACE_LOGGING
-    masm.tracelogStart(gen->info().script());
-    masm.tracelogLog(TraceLogging::INFO_ENGINE_IONMONKEY);
+#ifdef JS_TRACE_LOGGING
+    if (!gen->compilingAsmJS() && gen->info().executionMode() == SequentialExecution) {
+        if (!emitTracelogScriptStart())
+            return false;
+        if (!emitTracelogStartEvent(TraceLogger::IonMonkey))
+            return false;
+    }
 #endif
 
     // Before generating any code, we generate type checks for all parameters.
@@ -6223,7 +6280,7 @@ CodeGenerator::generate()
             return false;
     }
 
-#if JS_TRACE_LOGGING
+#ifdef JS_TRACE_LOGGING
     Label skip;
     masm.jump(&skip);
 #endif
@@ -6232,9 +6289,13 @@ CodeGenerator::generate()
     masm.flushBuffer();
     setSkipArgCheckEntryOffset(masm.size());
 
-#if JS_TRACE_LOGGING
-    masm.tracelogStart(gen->info().script());
-    masm.tracelogLog(TraceLogging::INFO_ENGINE_IONMONKEY);
+#ifdef JS_TRACE_LOGGING
+    if (!gen->compilingAsmJS() && gen->info().executionMode() == SequentialExecution) {
+        if (!emitTracelogScriptStart())
+            return false;
+        if (!emitTracelogStartEvent(TraceLogger::IonMonkey))
+            return false;
+    }
     masm.bind(&skip);
 #endif
 
@@ -6426,6 +6487,23 @@ CodeGenerator::link(JSContext *cx, types::CompilerConstraintList *constraints)
         ionScript->copyCallTargetEntries(callTargets.begin());
     if (patchableBackedges_.length() > 0)
         ionScript->copyPatchableBackedges(cx, code, patchableBackedges_.begin());
+
+#ifdef JS_TRACE_LOGGING
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    for (uint32_t i = 0; i < patchableTraceLoggers_.length(); i++) {
+        patchableTraceLoggers_[i].fixup(&masm);
+        Assembler::patchDataWithValueCheck(CodeLocationLabel(code, patchableTraceLoggers_[i]),
+                                           ImmPtr(logger),
+                                           ImmPtr(nullptr));
+    }
+    uint32_t scriptId = TraceLogCreateTextId(logger, script);
+    for (uint32_t i = 0; i < patchableTLScripts_.length(); i++) {
+        patchableTLScripts_[i].fixup(&masm);
+        Assembler::patchDataWithValueCheck(CodeLocationLabel(code, patchableTLScripts_[i]),
+                                           ImmPtr((void *)scriptId),
+                                           ImmPtr((void *)0));
+    }
+#endif
 
     switch (executionMode) {
       case SequentialExecution:

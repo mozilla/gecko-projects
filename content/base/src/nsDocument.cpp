@@ -5509,8 +5509,7 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
     return true;
   }
 
-  rv = nsContentUtils::WrapNative(aCx, global, newElement, newElement,
-                                  args.rval());
+  rv = nsContentUtils::WrapNative(aCx, newElement, newElement, args.rval());
   NS_ENSURE_SUCCESS(rv, true);
 
   return true;
@@ -7428,14 +7427,13 @@ nsIDocument::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv)
   if (!sameDocument) {
     newScope = GetWrapper();
     if (!newScope && GetScopeObject() && GetScopeObject()->GetGlobalJSObject()) {
-      // We need to pass some sort of scope object to WrapNative. It's kind of
-      // irrelevant, given that we're passing aAllowWrapping = false, and
-      // documents should always insist on being wrapped in an canonical
-      // scope. But we try to pass something sane anyway.
-      JS::Rooted<JSObject*> global(cx, GetScopeObject()->GetGlobalJSObject());
-
+      // Make sure cx is in a semi-sane compartment before we call WrapNative.
+      // It's kind of irrelevant, given that we're passing aAllowWrapping =
+      // false, and documents should always insist on being wrapped in an
+      // canonical scope. But we try to pass something sane anyway.
+      JSAutoCompartment ac(cx, GetScopeObject()->GetGlobalJSObject());
       JS::Rooted<JS::Value> v(cx);
-      rv = nsContentUtils::WrapNative(cx, global, this, this, &v,
+      rv = nsContentUtils::WrapNative(cx, this, this, &v,
                                       /* aAllowWrapping = */ false);
       if (rv.Failed())
         return nullptr;
@@ -12152,16 +12150,13 @@ nsIDocument::WrapObject(JSContext *aCx)
   JSAutoCompartment ac(aCx, obj);
 
   JS::Rooted<JS::Value> winVal(aCx);
-  nsresult rv = nsContentUtils::WrapNative(aCx, obj, win,
-                                           &NS_GET_IID(nsIDOMWindow),
-                                           &winVal);
+  nsresult rv = nsContentUtils::WrapNative(aCx, win, &NS_GET_IID(nsIDOMWindow),
+                                           &winVal,
+                                           false);
   if (NS_FAILED(rv)) {
     Throw(aCx, rv);
     return nullptr;
   }
-
-  MOZ_ASSERT(&winVal.toObject() == js::UncheckedUnwrap(&winVal.toObject()),
-             "WrapNative shouldn't create a cross-compartment wrapper");
 
   NS_NAMED_LITERAL_STRING(doc_str, "document");
 

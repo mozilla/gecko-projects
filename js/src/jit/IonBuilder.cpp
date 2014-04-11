@@ -1711,6 +1711,9 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_LAMBDA:
         return jsop_lambda(info().getFunction(pc));
 
+      case JSOP_LAMBDA_ARROW:
+        return jsop_lambda_arrow(info().getFunction(pc));
+
       case JSOP_ITER:
         return jsop_iter(GET_INT8(pc));
 
@@ -9399,21 +9402,6 @@ IonBuilder::jsop_regexp(RegExpObject *reobj)
     current->add(regexp);
     current->push(regexp);
 
-    regexp->setMovable();
-
-    // The MRegExp is set to be movable.
-    // That would be incorrect for global/sticky, because lastIndex could be wrong.
-    // Therefore setting the lastIndex to 0. That is faster than removing the movable flag.
-    if (reobj->sticky() || reobj->global()) {
-        JS_ASSERT(mustClone);
-        MConstant *zero = MConstant::New(alloc(), Int32Value(0));
-        current->add(zero);
-
-        MStoreFixedSlot *lastIndex =
-            MStoreFixedSlot::New(alloc(), regexp, RegExpObject::lastIndexSlot(), zero);
-        current->add(lastIndex);
-    }
-
     return true;
 }
 
@@ -9435,13 +9423,30 @@ IonBuilder::jsop_object(JSObject *obj)
 bool
 IonBuilder::jsop_lambda(JSFunction *fun)
 {
-    JS_ASSERT(analysis().usesScopeChain());
-    if (fun->isArrow())
-        return abort("bound arrow function");
+    MOZ_ASSERT(analysis().usesScopeChain());
+    MOZ_ASSERT(!fun->isArrow());
+
     if (fun->isNative() && IsAsmJSModuleNative(fun->native()))
         return abort("asm.js module function");
 
     MLambda *ins = MLambda::New(alloc(), constraints(), current->scopeChain(), fun);
+    current->add(ins);
+    current->push(ins);
+
+    return resumeAfter(ins);
+}
+
+bool
+IonBuilder::jsop_lambda_arrow(JSFunction *fun)
+{
+    MOZ_ASSERT(analysis().usesScopeChain());
+    MOZ_ASSERT(fun->isArrow());
+    MOZ_ASSERT(!fun->isNative());
+
+    MDefinition *thisDef = current->pop();
+
+    MLambdaArrow *ins = MLambdaArrow::New(alloc(), constraints(), current->scopeChain(),
+                                          thisDef, fun);
     current->add(ins);
     current->push(ins);
 

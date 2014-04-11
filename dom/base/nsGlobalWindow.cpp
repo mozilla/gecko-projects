@@ -1485,7 +1485,6 @@ nsGlobalWindow::CleanUp()
     }
   }
 
-  mInnerWindowHolder = nullptr;
   mArguments = nullptr;
   mDialogArguments = nullptr;
 
@@ -1721,7 +1720,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSpeechSynthesis)
 #endif
 
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInnerWindowHolder)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOuterWindow)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListenerManager)
@@ -1780,7 +1778,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindow)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSpeechSynthesis)
 #endif
 
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mInnerWindowHolder)
   if (tmp->mOuterWindow) {
     static_cast<nsGlobalWindow*>(tmp->mOuterWindow.get())->MaybeClearInnerWindow(tmp);
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mOuterWindow)
@@ -2117,38 +2114,32 @@ public:
   NS_DECLARE_STATIC_IID_ACCESSOR(WINDOWSTATEHOLDER_IID)
   NS_DECL_ISUPPORTS
 
-  WindowStateHolder(nsGlobalWindow *aWindow,
-                    nsIXPConnectJSObjectHolder *aHolder);
+  WindowStateHolder(nsGlobalWindow *aWindow);
 
   nsGlobalWindow* GetInnerWindow() { return mInnerWindow; }
-  nsIXPConnectJSObjectHolder *GetInnerWindowHolder()
-  { return mInnerWindowHolder; }
 
   void DidRestoreWindow()
   {
     mInnerWindow = nullptr;
-    mInnerWindowHolder = nullptr;
   }
 
 protected:
   ~WindowStateHolder();
 
-  nsGlobalWindow *mInnerWindow;
-  // We hold onto this to make sure the inner window doesn't go away. The outer
-  // window ends up recalculating it anyway.
-  nsCOMPtr<nsIXPConnectJSObjectHolder> mInnerWindowHolder;
+  nsRefPtr<nsGlobalWindow> mInnerWindow;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(WindowStateHolder, WINDOWSTATEHOLDER_IID)
 
-WindowStateHolder::WindowStateHolder(nsGlobalWindow *aWindow,
-                                     nsIXPConnectJSObjectHolder *aHolder)
+WindowStateHolder::WindowStateHolder(nsGlobalWindow* aWindow)
   : mInnerWindow(aWindow)
 {
   NS_PRECONDITION(aWindow, "null window");
   NS_PRECONDITION(aWindow->IsInnerWindow(), "Saving an outer window");
 
-  mInnerWindowHolder = aHolder;
+  // We hold onto this to make sure the inner window doesn't go away. The outer
+  // window ends up recalculating it anyway.
+  mInnerWindow->PreserveWrapper(ToSupports(mInnerWindow));
 
   aWindow->SuspendTimeouts();
 
@@ -2191,13 +2182,17 @@ CreateNativeGlobalForInner(JSContext* aCx,
                            nsGlobalWindow* aNewInner,
                            nsIURI* aURI,
                            nsIPrincipal* aPrincipal,
-                           nsIXPConnectJSObjectHolder** aHolder)
+                           JS::MutableHandle<JSObject*> aGlobal)
 {
   MOZ_ASSERT(aCx);
   MOZ_ASSERT(aNewInner);
   MOZ_ASSERT(aNewInner->IsInnerWindow());
   MOZ_ASSERT(aPrincipal);
-  MOZ_ASSERT(aHolder);
+
+  // DOMWindow with nsEP is not supported, we have to make sure
+  // no one creates one accidentally.
+  nsCOMPtr<nsIExpandedPrincipal> nsEP = do_QueryInterface(aPrincipal);
+  MOZ_RELEASE_ASSERT(!nsEP, "DOMWindow with nsEP is not supported");
 
   nsGlobalWindow *top = nullptr;
   if (aNewInner->GetOuterWindow()) {
@@ -2218,15 +2213,19 @@ CreateNativeGlobalForInner(JSContext* aCx,
   uint32_t flags = needComponents ? 0 : nsIXPConnect::OMIT_COMPONENTS_OBJECT;
   flags |= nsIXPConnect::DONT_FIRE_ONNEWGLOBALHOOK;
 
+  nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
   nsresult rv = xpc->InitClassesWithNewWrappedGlobal(
     aCx, ToSupports(aNewInner),
-    aPrincipal, flags, options, aHolder);
+    aPrincipal, flags, options, getter_AddRefs(holder));
   NS_ENSURE_SUCCESS(rv, rv);
+
+  aGlobal.set(holder->GetJSObject());
 
   // Set the location information for the new global, so that tools like
   // about:memory may use that information
-  MOZ_ASSERT(aNewInner->GetWrapperPreserveColor());
-  xpc::SetLocationForGlobal(aNewInner->GetWrapperPreserveColor(), aURI);
+  MOZ_ASSERT(aGlobal);
+  MOZ_ASSERT(aNewInner->GetWrapperPreserveColor() == aGlobal);
+  xpc::SetLocationForGlobal(aGlobal, aURI);
 
   return NS_OK;
 }
@@ -2324,6 +2323,9 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   // having to *always* reach into the inner window to find the
   // document.
   mDoc = aDocument;
+  if (IsInnerWindow() && IsDOMBinding()) {
+    WindowBinding::ClearCachedDocumentValue(cx, this);
+  }
 
   // Take this opportunity to clear mSuspendedDoc. Our old inner window is now
   // responsible for unsuspending it.
@@ -2396,7 +2398,6 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
     if (aState) {
       newInnerWindow = wsh->GetInnerWindow();
       newInnerGlobal = newInnerWindow->GetWrapperPreserveColor();
-      mInnerWindowHolder = wsh->GetInnerWindowHolder();
     } else {
       if (thisChrome) {
         newInnerWindow = new nsGlobalChromeWindow(this);
@@ -2425,8 +2426,7 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
       rv = CreateNativeGlobalForInner(cx, newInnerWindow,
                                       aDocument->GetDocumentURI(),
                                       aDocument->NodePrincipal(),
-                                      getter_AddRefs(mInnerWindowHolder));
-      newInnerGlobal = mInnerWindowHolder->GetJSObject();
+                                      &newInnerGlobal);
       NS_ASSERTION(NS_SUCCEEDED(rv) && newInnerGlobal &&
                    newInnerWindow->GetWrapperPreserveColor() == newInnerGlobal,
                    "Failed to get script global");
@@ -2590,16 +2590,20 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
       if (newInnerWindow->mDoc != aDocument) {
         newInnerWindow->mDoc = aDocument;
 
-        // We're reusing the inner window for a new document. In this
-        // case we don't clear the inner window's scope, but we must
-        // make sure the cached document property gets updated.
+        if (newInnerWindow->IsDOMBinding()) {
+          WindowBinding::ClearCachedDocumentValue(cx, newInnerWindow);
+        } else {
+          // We're reusing the inner window for a new document. In this
+          // case we don't clear the inner window's scope, but we must
+          // make sure the cached document property gets updated.
 
-        // XXXmarkh - tell other languages about this?
-        JS::Rooted<JSObject*> obj(cx, currentInner->GetWrapperPreserveColor());
-        ::JS_DeleteProperty(cx, obj, "document");
+          JS::Rooted<JSObject*> obj(cx,
+                                    currentInner->GetWrapperPreserveColor());
+          ::JS_DeleteProperty(cx, obj, "document");
+        }
       }
     } else {
-      newInnerWindow->InnerSetNewDocument(aDocument);
+      newInnerWindow->InnerSetNewDocument(cx, aDocument);
 
       // Initialize DOM classes etc on the inner window.
       JS::Rooted<JSObject*> obj(cx, newInnerGlobal);
@@ -2715,7 +2719,7 @@ nsGlobalWindow::ClearStatus()
 }
 
 void
-nsGlobalWindow::InnerSetNewDocument(nsIDocument* aDocument)
+nsGlobalWindow::InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument)
 {
   NS_PRECONDITION(IsInnerWindow(), "Must only be called on inner windows");
   MOZ_ASSERT(aDocument);
@@ -2731,6 +2735,9 @@ nsGlobalWindow::InnerSetNewDocument(nsIDocument* aDocument)
 #endif
 
   mDoc = aDocument;
+  if (IsDOMBinding()) {
+    WindowBinding::ClearCachedDocumentValue(aCx, this);
+  }
   mFocusedNode = nullptr;
   mLocalStorage = nullptr;
   mSessionStorage = nullptr;
@@ -3837,14 +3844,8 @@ nsGlobalWindow::GetContent(JSContext* aCx, ErrorResult& aError)
   }
 
   if (content) {
-    JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
-    if (!global) {
-      aError.Throw(NS_ERROR_FAILURE);
-      return nullptr;
-    }
-
     JS::Rooted<JS::Value> val(aCx);
-    aError = nsContentUtils::WrapNative(aCx, global, content, &val);
+    aError = nsContentUtils::WrapNative(aCx, content, &val);
     if (aError.Failed()) {
       return nullptr;
     }
@@ -4182,11 +4183,42 @@ nsGlobalWindow::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObj,
   return true;
 }
 
-static PLDHashOperator
-EnumerateGlobalName(const nsAString& aName, void* aClosure)
+struct GlobalNameEnumeratorClosure
 {
-  nsTArray<nsString>* arr = static_cast<nsTArray<nsString>*>(aClosure);
-  arr->AppendElement(aName);
+  GlobalNameEnumeratorClosure(JSContext* aCx, nsGlobalWindow* aWindow,
+                              nsTArray<nsString>& aNames)
+    : mCx(aCx),
+      mWindow(aWindow),
+      mWrapper(aCx, aWindow->GetWrapper()),
+      mNames(aNames)
+  {
+  }
+
+  JSContext* mCx;
+  nsGlobalWindow* mWindow;
+  JS::Rooted<JSObject*> mWrapper;
+  nsTArray<nsString>& mNames;
+};
+
+static PLDHashOperator
+EnumerateGlobalName(const nsAString& aName,
+                    const nsGlobalNameStruct& aNameStruct,
+                    void* aClosure)
+{
+  GlobalNameEnumeratorClosure* closure =
+    static_cast<GlobalNameEnumeratorClosure*>(aClosure);
+
+  if (aNameStruct.mType == nsGlobalNameStruct::eTypeStaticNameSet) {
+    // We have no idea what names this might install.
+    return PL_DHASH_NEXT;
+  }
+
+  if (nsWindowSH::NameStructEnabled(closure->mCx, closure->mWindow, aName,
+                                    aNameStruct) &&
+      (!aNameStruct.mConstructorEnabled ||
+       aNameStruct.mConstructorEnabled(closure->mCx, closure->mWrapper))) {
+    closure->mNames.AppendElement(aName);
+  }
   return PL_DHASH_NEXT;
 }
 
@@ -4194,9 +4226,13 @@ void
 nsGlobalWindow::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
                                     ErrorResult& aRv)
 {
+  // "Components" is marked as enumerable but only resolved on demand :-/.
+  //aNames.AppendElement(NS_LITERAL_STRING("Components"));
+
   nsScriptNameSpaceManager* nameSpaceManager = GetNameSpaceManager();
   if (nameSpaceManager) {
-    nameSpaceManager->EnumerateGlobalNames(EnumerateGlobalName, &aNames);
+    GlobalNameEnumeratorClosure closure(aCx, this, aNames);
+    nameSpaceManager->EnumerateGlobalNames(EnumerateGlobalName, &closure);
   }
 }
 
@@ -7664,13 +7700,9 @@ PostMessageReadStructuredClone(JSContext* cx,
 
     nsISupports* supports;
     if (JS_ReadBytes(reader, &supports, sizeof(supports))) {
-      JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
-      if (global) {
-        JS::Rooted<JS::Value> val(cx);
-        if (NS_SUCCEEDED(nsContentUtils::WrapNative(cx, global, supports,
-                                                    &val))) {
-          return val.toObjectOrNull();
-        }
+      JS::Rooted<JS::Value> val(cx);
+      if (NS_SUCCEEDED(nsContentUtils::WrapNative(cx, supports, &val))) {
+        return val.toObjectOrNull();
       }
     }
   }
@@ -12558,8 +12590,7 @@ nsGlobalWindow::SaveWindowState()
   // to the page.
   inner->Freeze();
 
-  nsCOMPtr<nsISupports> state = new WindowStateHolder(inner,
-                                                      mInnerWindowHolder);
+  nsCOMPtr<nsISupports> state = new WindowStateHolder(inner);
 
 #ifdef DEBUG_PAGE_CACHE
   printf("saving window state, state = %p\n", (void*)state);
@@ -13636,6 +13667,17 @@ nsGlobalWindow::GetSidebar(OwningExternalOrWindowProxy& aResult,
 #else
   aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
 #endif
+}
+
+/* static */
+bool
+nsGlobalWindow::WindowOnWebIDL(JSContext* aCx, JSObject* aObj)
+{
+  DebugOnly<nsGlobalWindow*> win;
+  MOZ_ASSERT_IF(IsDOMObject(aObj),
+                NS_SUCCEEDED(UNWRAP_OBJECT(Window, aObj, win)));
+
+  return IsDOMObject(aObj);
 }
 
 #ifdef MOZ_B2G

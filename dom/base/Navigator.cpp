@@ -1602,8 +1602,6 @@ Navigator::GetConnection(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    NS_ENSURE_TRUE(mWindow->GetDocShell(), nullptr);
-
     mConnection = new network::Connection();
     mConnection->Init(mWindow);
   }
@@ -1879,7 +1877,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
         // ahead and WrapObject() them.  We can't use WrapNewBindingObject,
         // because we don't have the concrete type.
         JS::Rooted<JS::Value> wrapped(aCx);
-        if (!dom::WrapObject(aCx, naviObj, existingObject, &wrapped)) {
+        if (!dom::WrapObject(aCx, existingObject, &wrapped)) {
           return false;
         }
         domObject = &wrapped.toObject();
@@ -1942,7 +1940,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
     // of naviObj, especially since we plan to cache that object.
     JSAutoCompartment ac(aCx, naviObj);
 
-    rv = nsContentUtils::WrapNative(aCx, naviObj, native, &prop_val);
+    rv = nsContentUtils::WrapNative(aCx, native, &prop_val);
 
     if (NS_FAILED(rv)) {
       return Throw(aCx, rv);
@@ -1963,11 +1961,32 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
   return true;
 }
 
-static PLDHashOperator
-SaveNavigatorName(const nsAString& aName, void* aClosure)
+struct NavigatorNameEnumeratorClosure
 {
-  nsTArray<nsString>* arr = static_cast<nsTArray<nsString>*>(aClosure);
-  arr->AppendElement(aName);
+  NavigatorNameEnumeratorClosure(JSContext* aCx, JSObject* aWrapper,
+                                 nsTArray<nsString>& aNames)
+    : mCx(aCx),
+      mWrapper(aCx, aWrapper),
+      mNames(aNames)
+  {
+  }
+
+  JSContext* mCx;
+  JS::Rooted<JSObject*> mWrapper;
+  nsTArray<nsString>& mNames;
+};
+
+static PLDHashOperator
+SaveNavigatorName(const nsAString& aName,
+                  const nsGlobalNameStruct& aNameStruct,
+                  void* aClosure)
+{
+  NavigatorNameEnumeratorClosure* closure =
+    static_cast<NavigatorNameEnumeratorClosure*>(aClosure);
+  if (!aNameStruct.mConstructorEnabled ||
+      aNameStruct.mConstructorEnabled(closure->mCx, closure->mWrapper)) {
+    closure->mNames.AppendElement(aName);
+  }
   return PL_DHASH_NEXT;
 }
 
@@ -1982,7 +2001,8 @@ Navigator::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
     return;
   }
 
-  nameSpaceManager->EnumerateNavigatorNames(SaveNavigatorName, &aNames);
+  NavigatorNameEnumeratorClosure closure(aCx, GetWrapper(), aNames);
+  nameSpaceManager->EnumerateNavigatorNames(SaveNavigatorName, &closure);
 }
 
 JSObject*

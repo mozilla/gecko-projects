@@ -308,7 +308,10 @@ class MochitestUtilsMixin(object):
     # allow relative paths for logFile
     if options.logFile:
       options.logFile = self.getLogFilePath(options.logFile)
-    if options.browserChrome or options.chrome or options.a11y or options.webapprtChrome:
+
+    # Note that all tests under options.subsuite need to be browser chrome tests.
+    if options.browserChrome or options.chrome or options.subsuite or \
+       options.a11y or options.webapprtChrome:
       self.makeTestConfig(options)
     else:
       if options.autorun:
@@ -463,9 +466,11 @@ class MochitestUtilsMixin(object):
         info[k] = v
 
       # Bug 883858 - return all tests including disabled tests
+#      tests = manifest.active_tests(disabled=True, options=options, **info)
       tests = manifest.active_tests(disabled=True, **info)
       paths = []
       testPath = self.getTestPath(options)
+
       for test in tests:
         pathAbs = os.path.abspath(test['path'])
         assert pathAbs.startswith(testRootAbs)
@@ -1508,6 +1513,11 @@ def main():
   if options is None:
     # parsing error
     sys.exit(1)
+
+  if options.subsuite:
+    print "INFO | terminating test run as subsuite is not fully supported yet"
+    print "INFO TEST-START | Shutdown"
+    return 0
 
   options.utilityPath = mochitest.getFullPath(options.utilityPath)
   options.certPath = mochitest.getFullPath(options.certPath)
