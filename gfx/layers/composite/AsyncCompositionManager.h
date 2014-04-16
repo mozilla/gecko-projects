@@ -61,22 +61,21 @@ struct ViewTransform {
  * short circuit that stuff to directly affect layers as they are composited,
  * for example, off-main thread animation, async video, async pan/zoom.
  */
-class AsyncCompositionManager MOZ_FINAL : public RefCounted<AsyncCompositionManager>
+class AsyncCompositionManager MOZ_FINAL
 {
   friend class AutoResolveRefLayers;
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(AsyncCompositionManager)
+  NS_INLINE_DECL_REFCOUNTING(AsyncCompositionManager)
+
   AsyncCompositionManager(LayerManagerComposite* aManager)
     : mLayerManager(aManager)
     , mIsFirstPaint(false)
     , mLayersUpdated(false)
     , mReadyForCompose(true)
   {
-    MOZ_COUNT_CTOR(AsyncCompositionManager);
   }
   ~AsyncCompositionManager()
   {
-    MOZ_COUNT_DTOR(AsyncCompositionManager);
   }
 
   /**
@@ -124,10 +123,10 @@ private:
   bool ApplyAsyncContentTransformToTree(TimeStamp aCurrentFrame, Layer* aLayer,
                                         bool* aWantNextFrame);
   /**
-   * Update the shadow trasnform for aLayer assuming that is a scrollbar,
+   * Update the shadow transform for aLayer assuming that is a scrollbar,
    * so that it stays in sync with the content that is being scrolled by APZ.
    */
-  void ApplyAsyncTransformToScrollbar(ContainerLayer* aLayer);
+  void ApplyAsyncTransformToScrollbar(TimeStamp aCurrentFrame, ContainerLayer* aLayer);
 
   void SetFirstPaintViewport(const LayerIntPoint& aOffset,
                              const CSSToLayerScale& aZoom,

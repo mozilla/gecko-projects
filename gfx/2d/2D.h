@@ -416,7 +416,7 @@ public:
    */
   virtual TemporaryRef<DataSourceSurface> GetDataSurface();
 
-  DebugOnly<bool> mIsMapped;
+  bool mIsMapped;
 };
 
 /* This is an abstract object that accepts path segments. */
@@ -1032,7 +1032,7 @@ public:
    */
   static bool CheckSurfaceSize(const IntSize &sz, int32_t limit = 0);
 
-  static TemporaryRef<DrawTarget> CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSize& aSize);
+  static TemporaryRef<DrawTarget> CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSize& aSize, SurfaceFormat* aFormat = nullptr);
 
   static TemporaryRef<SourceSurface>
     CreateSourceSurfaceForCairoSurface(cairo_surface_t* aSurface,

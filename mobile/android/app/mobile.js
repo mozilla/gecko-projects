@@ -412,10 +412,10 @@ pref("javascript.options.gc_on_memory_pressure", false);
 #ifdef MOZ_PKG_SPECIAL
 // low memory devices
 pref("javascript.options.mem.gc_high_frequency_heap_growth_max", 120);
-pref("javascript.options.mem.gc_high_frequency_heap_growth_min", 101);
+pref("javascript.options.mem.gc_high_frequency_heap_growth_min", 120);
 pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 40);
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 10);
-pref("javascript.options.mem.gc_low_frequency_heap_growth", 105);
+pref("javascript.options.mem.gc_low_frequency_heap_growth", 120);
 pref("javascript.options.mem.high_water_mark", 16);
 pref("javascript.options.mem.gc_allocation_threshold_mb", 3);
 pref("javascript.options.mem.gc_decommit_threshold_mb", 1);
@@ -832,6 +832,19 @@ pref("browser.webapps.apkFactoryUrl", "https://controller.apk.firefox.com/applic
 
 // How frequently to check for webapp updates, in seconds (86400 is daily).
 pref("browser.webapps.updateInterval", 86400);
+
+// Whether or not to check for updates.  Enabled by default, but the runtime
+// disables it for webapp profiles on firstrun, so only the main Fennec process
+// checks for updates (to avoid duplicate update notifications).
+//
+// In the future, we might want to make each webapp process check for updates
+// for its own webapp, in which case we'll need to have a third state for this
+// preference.  Thus it's an integer rather than a boolean.
+//
+// Possible values:
+//   0: don't check for updates
+//   1: do check for updates
+pref("browser.webapps.checkForUpdates", 1);
 
 // The URL of the service that checks for updates.
 // To test updates, set this to http://apk-update-checker.paas.allizom.org,

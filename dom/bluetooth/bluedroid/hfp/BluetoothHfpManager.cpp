@@ -643,19 +643,17 @@ void BluetoothHfpManager::ProcessDialCall(char *aNumber)
 void
 BluetoothHfpManager::ProcessAtCnum()
 {
-  NS_ENSURE_TRUE_VOID(!mMsisdn.IsEmpty());
-  NS_ENSURE_TRUE_VOID(sBluetoothHfpInterface);
+  if (!mMsisdn.IsEmpty()) {
+    nsAutoCString message("+CNUM: ,\"");
+    message.Append(NS_ConvertUTF16toUTF8(mMsisdn).get());
+    message.AppendLiteral("\",");
+    message.AppendInt(BTHF_CALL_ADDRTYPE_UNKNOWN);
+    message.AppendLiteral(",,4");
 
-  nsAutoCString message("+CNUM: ,\"");
-  message.Append(NS_ConvertUTF16toUTF8(mMsisdn).get());
-  message.AppendLiteral("\",");
-  message.AppendInt(BTHF_CALL_ADDRTYPE_UNKNOWN);
-  message.AppendLiteral(",,4");
+    SendLine(message.get());
+  }
 
-  NS_ENSURE_TRUE_VOID(BT_STATUS_SUCCESS ==
-    sBluetoothHfpInterface->formatted_at_response(message.get()));
-  NS_ENSURE_TRUE_VOID(BT_STATUS_SUCCESS ==
-    sBluetoothHfpInterface->at_response(BTHF_AT_RESPONSE_OK, 0));
+  SendResponse(BTHF_AT_RESPONSE_OK);
 }
 
 void
@@ -813,18 +811,12 @@ BluetoothHfpManager::NotifyConnectionStateChanged(const nsAString& aType)
 void
 BluetoothHfpManager::NotifyDialer(const nsAString& aCommand)
 {
-  BluetoothValue v;
+  NS_NAMED_LITERAL_STRING(type, "bluetooth-dialer-command");
   InfallibleTArray<BluetoothNamedValue> parameters;
 
-  NS_NAMED_LITERAL_STRING(type, "bluetooth-dialer-command");
-  NS_NAMED_LITERAL_STRING(name, "command");
+  BT_APPEND_NAMED_VALUE(parameters, "command", nsString(aCommand));
 
-  v = nsString(aCommand);
-  parameters.AppendElement(BluetoothNamedValue(name, v));
-
-  if (!BroadcastSystemMessage(type, parameters)) {
-    BT_WARNING("Failed to broadcast system message to dialer");
-  }
+  BT_ENSURE_TRUE_VOID_BROADCAST_SYSMSG(type, parameters);
 }
 
 void

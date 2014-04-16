@@ -295,22 +295,6 @@ public:
   void CancelAnimation();
 
   /**
-   * Attempt to scroll in response to a touch-move from |aStartPoint| to
-   * |aEndPoint|, which are in our (transformed) screen coordinates.
-   * Due to overscroll handling, there may not actually have been a touch-move
-   * at these points, but this function will scroll as if there had been.
-   * If this attempt causes overscroll (i.e. the layer cannot be scrolled
-   * by the entire amount requested), the overscroll is passed back to the
-   * tree manager via APZCTreeManager::DispatchScroll().
-   * |aOverscrollHandoffChainIndex| is used by the tree manager to keep track
-   * of which APZC to hand off the overscroll to; this function increments it
-   * and passes it on to APZCTreeManager::DispatchScroll() in the event of
-   * overscroll.
-   */
-  void AttemptScroll(const ScreenPoint& aStartPoint, const ScreenPoint& aEndPoint,
-                     uint32_t aOverscrollHandoffChainIndex = 0);
-
-  /**
    * Take over a fling with the given velocity from another APZC. Used for
    * during overscroll handoff for a fling.
    */
@@ -331,24 +315,16 @@ public:
    * Sets allowed touch behavior for current touch session.
    * This method is invoked by the APZCTreeManager which in its turn invoked by
    * the widget after performing touch-action values retrieving.
+   * Must be called after receiving the TOUCH_START even that started the
+   * touch session.
    */
   void SetAllowedTouchBehavior(const nsTArray<TouchBehaviorFlags>& aBehaviors);
-
-  /**
-   * A helper function for calling APZCTreeManager::DispatchScroll().
-   * Guards against the case where the APZC is being concurrently destroyed
-   * (and thus mTreeManager is being nulled out).
-   */
-  void CallDispatchScroll(const ScreenPoint& aStartPoint, const ScreenPoint& aEndPoint,
-                          uint32_t aOverscrollHandoffChainIndex);
 
   /**
    * Returns whether this APZC is for an element marked with the 'scrollgrab'
    * attribute.
    */
   bool HasScrollgrab() const { return mFrameMetrics.mHasScrollgrab; }
-
-  void FlushRepaintForOverscrollHandoff();
 
   /**
    * Set an extra offset for testing async scrolling.
@@ -357,6 +333,11 @@ public:
   {
     mTestAsyncScrollOffset = aPoint;
   }
+
+  /**
+   * Returns whether this APZC has room to be panned (in any direction).
+   */
+  bool IsPannable() const;
 
 protected:
   // Protected destructor, to discourage deletion outside of Release():
@@ -583,6 +564,36 @@ private:
                                  was not set yet. we still need to abort animations. */
   };
 
+  // State related to a single touch block. Does not persist across touch blocks.
+  struct TouchBlockState {
+
+    TouchBlockState()
+      :  mAllowedTouchBehaviorSet(false),
+         mPreventDefault(false),
+         mPreventDefaultSet(false),
+         mSingleTapOccurred(false)
+    {}
+
+    // Values of allowed touch behavior for touch points of this touch block.
+    // Since there are maybe a few current active touch points per time (multitouch case)
+    // and each touch point should have its own value of allowed touch behavior- we're
+    // keeping an array of allowed touch behavior values, not the single value.
+    nsTArray<TouchBehaviorFlags> mAllowedTouchBehaviors;
+
+    // Specifies whether mAllowedTouchBehaviors is set for this touch events block.
+    bool mAllowedTouchBehaviorSet;
+
+    // Flag used to specify that content prevented the default behavior of this
+    // touch events block.
+    bool mPreventDefault;
+
+    // Specifies whether mPreventDefault property is set for this touch events block.
+    bool mPreventDefaultSet;
+
+    // Specifies whether a single tap event was generated during this touch block.
+    bool mSingleTapOccurred;
+  };
+
   /*
    * Returns whether current touch behavior values allow zooming.
    */
@@ -643,6 +654,12 @@ private:
   // changes, as it corresponds to the scale portion of those transforms.
   void UpdateTransformScale();
 
+  // Helper function for OnSingleTapUp() and OnSingleTapConfirmed().
+  nsEventStatus GenerateSingleTap(const ScreenIntPoint& aPoint, mozilla::Modifiers aModifiers);
+
+  // Common processing at the end of a touch block.
+  void OnTouchEndOrCancel();
+
   uint64_t mLayersId;
   nsRefPtr<CompositorParent> mCompositorParent;
   PCompositorParent* mCrossProcessCompositorParent;
@@ -669,7 +686,9 @@ protected:
   // monitor should be held. When setting |mState|, either the SetState()
   // function can be used, or the monitor can be held and then |mState| updated.
   // IMPORTANT: See the note about lock ordering at the top of APZCTreeManager.h.
-  ReentrantMonitor mMonitor;
+  // This is mutable to allow entering it from 'const' methods; doing otherwise
+  // would significantly limit what methods could be 'const'.
+  mutable ReentrantMonitor mMonitor;
 
   // Specifies whether we should use touch-action css property. Initialized from
   // the preferences. This property (in comparison with the global one) simplifies
@@ -744,21 +763,8 @@ private:
   // and we don't want to queue the events back up again.
   bool mHandlingTouchQueue;
 
-  // Values of allowed touch behavior for current touch points.
-  // Since there are maybe a few current active touch points per time (multitouch case)
-  // and each touch point should have its own value of allowed touch behavior- we're
-  // keeping an array of allowed touch behavior values, not the single value.
-  nsTArray<TouchBehaviorFlags> mAllowedTouchBehaviors;
-
-  // Specifies whether mAllowedTouchBehaviors is set for current touch events block.
-  bool mAllowedTouchBehaviorSet;
-
-  // Flag used to specify that content prevented the default behavior of the current
-  // touch events block.
-  bool mPreventDefault;
-
-  // Specifies whether mPreventDefault property is set for current touch events block.
-  bool mPreventDefaultSet;
+  // Stores information about the current touch block.
+  TouchBlockState mTouchBlockState;
 
   // Extra offset to add in SampleContentTransformForFrame for testing
   CSSPoint mTestAsyncScrollOffset;
@@ -769,7 +775,8 @@ private:
   friend class FlingAnimation;
 
 
-  /* The functions and members in this section are used to build a tree
+  /* ===================================================================
+   * The functions and members in this section are used to build a tree
    * structure out of APZC instances. This tree can only be walked or
    * manipulated while holding the lock in the associated APZCTreeManager
    * instance.
@@ -817,7 +824,52 @@ private:
   nsRefPtr<AsyncPanZoomController> mParent;
 
 
-  /* The functions and members in this section are used to maintain the
+  /* ===================================================================
+   * The functions and members in this section are used in building the
+   * scroll handoff chain, so that we can have seamless scrolling continue
+   * across APZC instances.
+   */
+public:
+  void SetScrollHandoffParentId(FrameMetrics::ViewID aScrollParentId) {
+    mScrollParentId = aScrollParentId;
+  }
+
+  FrameMetrics::ViewID GetScrollHandoffParentId() const {
+    return mScrollParentId;
+  }
+
+  /**
+   * Attempt to scroll in response to a touch-move from |aStartPoint| to
+   * |aEndPoint|, which are in our (transformed) screen coordinates.
+   * Due to overscroll handling, there may not actually have been a touch-move
+   * at these points, but this function will scroll as if there had been.
+   * If this attempt causes overscroll (i.e. the layer cannot be scrolled
+   * by the entire amount requested), the overscroll is passed back to the
+   * tree manager via APZCTreeManager::DispatchScroll().
+   * |aOverscrollHandoffChainIndex| is used by the tree manager to keep track
+   * of which APZC to hand off the overscroll to; this function increments it
+   * and passes it on to APZCTreeManager::DispatchScroll() in the event of
+   * overscroll.
+   */
+  void AttemptScroll(const ScreenPoint& aStartPoint, const ScreenPoint& aEndPoint,
+                     uint32_t aOverscrollHandoffChainIndex = 0);
+
+  void FlushRepaintForOverscrollHandoff();
+
+private:
+  FrameMetrics::ViewID mScrollParentId;
+
+  /**
+   * A helper function for calling APZCTreeManager::DispatchScroll().
+   * Guards against the case where the APZC is being concurrently destroyed
+   * (and thus mTreeManager is being nulled out).
+   */
+  void CallDispatchScroll(const ScreenPoint& aStartPoint, const ScreenPoint& aEndPoint,
+                          uint32_t aOverscrollHandoffChainIndex);
+
+
+  /* ===================================================================
+   * The functions and members in this section are used to maintain the
    * area that this APZC instance is responsible for. This is used when
    * hit-testing to see which APZC instance should handle touch events.
    */
@@ -854,7 +906,8 @@ private:
   gfx3DMatrix mCSSTransform;
 
 
-  /* The functions and members in this section are used for sharing the
+  /* ===================================================================
+   * The functions and members in this section are used for sharing the
    * FrameMetrics across processes for the progressive tiling code.
    */
 private:

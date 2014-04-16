@@ -109,11 +109,23 @@
 %endif
 
 /* Make the menu inherit the toolbar's color. On non-compositor (Aero Basic, XP modern, classic)
- * this is defined above. Otherwise (Aero Glass, Windows 8 inactive windows), this is hardcoded
- * to black in browser-aero.css. */
-#main-menubar > menu:not(:-moz-lwtheme) {
-  color: inherit;
+ * this is defined above, but only for tabsintitlebar. Otherwise (Aero Glass, Windows 8),
+ * this is hardcoded to black in browser-aero.css, even without tabsintitlebar. */
+%ifdef WINDOWS_AERO
+@media not all and (-moz-windows-compositor) {
+%endif
+  #main-window[tabsintitlebar] #main-menubar > menu:not(:-moz-lwtheme) {
+    color: inherit;
+  }
+%ifdef WINDOWS_AERO
 }
+
+@media (-moz-windows-compositor) {
+  #main-menubar > menu:not(:-moz-lwtheme) {
+    color: inherit;
+  }
+}
+%endif
 
 /**
  * In the classic themes, the titlebar has a horizontal gradient, which is
@@ -591,7 +603,6 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker:-moz-lwtheme-bri
 #nav-bar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
   padding: 8px 2px;
   -moz-box-pack: center;
-  -moz-box-align: stretch;
 }
 
 #nav-bar #PanelUI-menu-button {
@@ -1049,6 +1060,16 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
 
 #menu_tabview[groups="3"] {
   -moz-image-region: rect(1px, 71px, 17px, 55px);
+}
+
+/* zoom control text (reset) button special case: */
+
+#nav-bar #zoom-reset-button > .toolbarbutton-text {
+  /* To make this line up with the icons, it needs the same height (18px) +
+   * padding (2 * 2px) + border (2 * 1px), but as a minimum because otherwise
+   * increase in text sizes would break things...
+   */
+  min-height: 24px;
 }
 
 /* ::::: fullscreen window controls ::::: */
@@ -1809,6 +1830,39 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
 
 %include ../shared/tabs.inc.css
 
+@media (min-resolution: 1.25dppx) {
+  /* image preloading hack from shared/tabs.inc.css */
+  #tabbrowser-tabs::before {
+    background-image:
+      url(chrome://browser/skin/tabbrowser/tab-background-end@2x.png),
+      url(chrome://browser/skin/tabbrowser/tab-background-middle@2x.png),
+      url(chrome://browser/skin/tabbrowser/tab-background-start@2x.png);
+  }
+
+  .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]),
+  .tabs-newtab-button:hover {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-background-start@2x.png),
+                      url(chrome://browser/skin/tabbrowser/tab-background-middle@2x.png),
+                      url(chrome://browser/skin/tabbrowser/tab-background-end@2x.png);
+  }
+
+  .tab-background-middle[selected=true] {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-active-middle@2x.png),
+                      @fgTabTexture@,
+                      none;
+  }
+
+  .tab-background-start[selected=true]:-moz-locale-dir(ltr)::after,
+  .tab-background-end[selected=true]:-moz-locale-dir(rtl)::after {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-stroke-start@2x.png);
+  }
+
+  .tab-background-end[selected=true]:-moz-locale-dir(ltr)::after,
+  .tab-background-start[selected=true]:-moz-locale-dir(rtl)::after {
+    background-image: url(chrome://browser/skin/tabbrowser/tab-stroke-end@2x.png);
+  }
+}
+
 %ifndef WINDOWS_AERO
 /* Use lighter colors of buttons and text in the titlebar on luna-blue */
 @media (-moz-windows-theme: luna-blue) {
@@ -1846,6 +1900,16 @@ toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
 /* tabbrowser-tab focus ring */
 .tabbrowser-tab:focus > .tab-stack > .tab-content > .tab-label {
   outline: 1px dotted;
+}
+
+/* Background tabs:
+ *
+ * Decrease the height of the hoverable region of background tabs whenever the tabs are at the top
+ * of the window (e.g. no menubar, tabs in titlebar, etc.) to make it easier to drag the window by
+ * the titlebar. We don't need this in fullscreen since window dragging is not an issue there.
+ */
+#main-window[tabsintitlebar][sizemode=normal] #toolbar-menubar[autohide="true"][inactive] + #TabsToolbar .tab-background-middle:not([selected=true]) {
+  clip-path: url(chrome://browser/content/browser.xul#tab-hover-clip-path);
 }
 
 /* Tab DnD indicator */

@@ -5,6 +5,7 @@
 
 #include "MediaStreamGraphImpl.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/unused.h"
 
 #include "AudioSegment.h"
@@ -18,7 +19,7 @@
 #include "mozilla/Attributes.h"
 #include "TrackUnionStream.h"
 #include "ImageContainer.h"
-#include "AudioChannelCommon.h"
+#include "AudioChannelService.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "AudioNodeExternalInputStream.h"
@@ -830,9 +831,7 @@ MediaStreamGraphImpl::CreateOrDestroyAudioStreams(GraphTime aAudioOutputStartTim
           continue;
         }
 
-        // XXX allocating a AudioStream could be slow so we're going to have to do
-        // something here ... preallocation, async allocation, multiplexing onto a single
-        // stream ...
+        // Allocating a AudioStream would be slow, so we finish the Init async
         MediaStream::AudioOutputStream* audioOutputStream =
           aStream->mAudioOutputStreams.AppendElement();
         audioOutputStream->mAudioPlaybackStartTime = aAudioOutputStartTime;
@@ -841,7 +840,10 @@ MediaStreamGraphImpl::CreateOrDestroyAudioStreams(GraphTime aAudioOutputStartTim
         audioOutputStream->mStream = new AudioStream();
         // XXX for now, allocate stereo output. But we need to fix this to
         // match the system's ideal channel configuration.
-        audioOutputStream->mStream->Init(2, IdealAudioRate(), AUDIO_CHANNEL_NORMAL, AudioStream::LowLatency);
+        // NOTE: we presume this is either fast or async-under-the-covers
+        audioOutputStream->mStream->Init(2, IdealAudioRate(),
+                                         AudioChannel::Normal,
+                                         AudioStream::LowLatency);
         audioOutputStream->mTrackID = tracks->GetID();
 
         LogLatency(AsyncLatencyLogger::AudioStreamCreate,
@@ -901,7 +903,7 @@ MediaStreamGraphImpl::PlayAudio(MediaStream* aStream,
     if (audioOutput.mLastTickWritten != offset) {
       // If there is a global underrun of the MSG, this property won't hold, and
       // we reset the sample count tracking.
-      if (std::abs(audioOutput.mLastTickWritten - offset) != 1) {
+      if (mozilla::Abs(audioOutput.mLastTickWritten - offset) != 1) {
         audioOutput.mLastTickWritten = offset;
       } else {
         offset = audioOutput.mLastTickWritten;

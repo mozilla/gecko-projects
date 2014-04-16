@@ -763,7 +763,7 @@ void MediaDecoderStateMachine::AudioLoop()
   bool setPlaybackRate;
   bool preservesPitch;
   bool setPreservesPitch;
-  AudioChannelType audioChannelType;
+  AudioChannel audioChannel;
 
   {
     ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
@@ -773,7 +773,7 @@ void MediaDecoderStateMachine::AudioLoop()
     channels = mInfo.mAudio.mChannels;
     rate = mInfo.mAudio.mRate;
 
-    audioChannelType = mDecoder->GetAudioChannelType();
+    audioChannel = mDecoder->GetAudioChannel();
     volume = mVolume;
     preservesPitch = mPreservesPitch;
     playbackRate = mPlaybackRate;
@@ -783,8 +783,8 @@ void MediaDecoderStateMachine::AudioLoop()
     // AudioStream initialization can block for extended periods in unusual
     // circumstances, so we take care to drop the decoder monitor while
     // initializing.
-    nsAutoPtr<AudioStream> audioStream(new AudioStream());
-    audioStream->Init(channels, rate, audioChannelType, AudioStream::HighLatency);
+    RefPtr<AudioStream> audioStream(new AudioStream());
+    audioStream->Init(channels, rate, audioChannel, AudioStream::HighLatency);
     audioStream->SetVolume(volume);
     if (audioStream->SetPreservesPitch(preservesPitch) != NS_OK) {
       NS_WARNING("Setting the pitch preservation failed at AudioLoop start.");
@@ -799,7 +799,7 @@ void MediaDecoderStateMachine::AudioLoop()
 
     {
       ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-      mAudioStream = audioStream;
+      mAudioStream = audioStream.forget();
     }
   }
 
@@ -1556,6 +1556,7 @@ MediaDecoderStateMachine::DispatchDecodeTasksIfNeeded()
              (!needToDecodeAudio && !needToDecodeVideo));
 
   bool needIdle = !mDecoder->IsLogicallyPlaying() &&
+                  mState != DECODER_STATE_SEEKING &&
                   !needToDecodeAudio &&
                   !needToDecodeVideo &&
                   !IsPlaying();

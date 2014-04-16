@@ -505,6 +505,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mCachedOffset(0, 0),
       mGlassDisplayItem(nullptr),
       mMode(aMode),
+      mCurrentScrollParentId(FrameMetrics::NULL_SCROLL_ID),
       mBuildCaret(aBuildCaret),
       mIgnoreSuppression(false),
       mHadToIgnoreSuppression(false),
@@ -522,7 +523,8 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mIsCompositingCheap(false),
       mContainsPluginItem(false),
       mContainsBlendMode(false),
-      mAncestorHasTouchEventHandler(false)
+      mAncestorHasTouchEventHandler(false),
+      mHaveScrollableDisplayPort(false)
 {
   MOZ_COUNT_CTOR(nsDisplayListBuilder);
   PL_InitArenaPool(&mPool, "displayListArena", 1024,
@@ -620,83 +622,6 @@ static bool GetApzcTreePrintPref() {
     initialized = true;
   }
   return gPrintApzcTree;
-}
-
-static CSSSize
-CalculateRootCompositionSize(FrameMetrics& aMetrics,
-                             bool aIsRootContentDocRootScrollFrame,
-                             nsPresContext* aPresContext,
-                             nsIFrame* aForFrame, nsIFrame* aScrollFrame)
-{
-
-  if (aIsRootContentDocRootScrollFrame) {
-    return ViewAs<LayerPixel>(ParentLayerSize(aMetrics.mCompositionBounds.Size()),
-                              PixelCastJustification::ParentLayerToLayerForRootComposition)
-           / aMetrics.LayersPixelsPerCSSPixel();
-  }
-  LayerSize rootCompositionSize;
-  nsPresContext* rootPresContext =
-    aPresContext->GetToplevelContentDocumentPresContext();
-  if (!rootPresContext) {
-    rootPresContext = aPresContext->GetRootPresContext();
-  }
-  nsIPresShell* rootPresShell = nullptr;
-  if (rootPresContext) {
-    // See the comments in the code that calculates the root
-    // composition bounds in RecordFrameMetrics.
-    // TODO: Reuse that code here.
-    nsIPresShell* rootPresShell = rootPresContext->PresShell();
-    if (nsIFrame* rootFrame = rootPresShell->GetRootFrame()) {
-      if (nsView* view = rootFrame->GetView()) {
-        LayoutDeviceToParentLayerScale parentResolution(
-          rootPresShell->GetCumulativeResolution().width
-          / rootPresShell->GetResolution().width);
-        int32_t rootAUPerDevPixel = rootPresContext->AppUnitsPerDevPixel();
-        nsRect viewBounds = view->GetBounds();
-        LayerSize viewSize = ViewAs<LayerPixel>(
-          (LayoutDeviceRect::FromAppUnits(viewBounds, rootAUPerDevPixel)
-           * parentResolution).Size(), PixelCastJustification::ParentLayerToLayerForRootComposition);
-        nsIWidget* widget =
-#ifdef MOZ_WIDGET_ANDROID
-            rootFrame->GetNearestWidget();
-#else
-            view->GetWidget();
-#endif
-        if (widget) {
-          nsIntRect widgetBounds;
-          widget->GetBounds(widgetBounds);
-          rootCompositionSize = LayerSize(ViewAs<LayerPixel>(widgetBounds.Size()));
-#ifdef MOZ_WIDGET_ANDROID
-          if (viewSize.height < rootCompositionSize.height) {
-            rootCompositionSize.height = viewSize.height;
-          }
-#endif
-        } else {
-          rootCompositionSize = viewSize;
-        }
-      }
-    }
-  } else {
-    nsIWidget* widget = (aScrollFrame ? aScrollFrame : aForFrame)->GetNearestWidget();
-    nsIntRect bounds;
-    widget->GetBounds(bounds);
-    rootCompositionSize = LayerSize(ViewAs<LayerPixel>(bounds.Size()));
-  }
-
-  // Adjust composition size for the size of scroll bars.
-  nsIFrame* rootRootScrollFrame = rootPresShell ? rootPresShell->GetRootScrollFrame() : nullptr;
-  nsIScrollableFrame* rootScrollableFrame = nullptr;
-  if (rootRootScrollFrame) {
-    rootScrollableFrame = aScrollFrame->GetScrollTargetFrame();
-  }
-  if (rootScrollableFrame && !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars)) {
-    CSSMargin margins = CSSMargin::FromAppUnits(rootScrollableFrame->GetActualScrollbarSizes());
-    // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
-    rootCompositionSize.width -= margins.LeftRight();
-    rootCompositionSize.height -= margins.TopBottom();
-  }
-
-  return rootCompositionSize / aMetrics.LayersPixelsPerCSSPixel();
 }
 
 static void RecordFrameMetrics(nsIFrame* aForFrame,
@@ -858,8 +783,8 @@ static void RecordFrameMetrics(nsIFrame* aForFrame,
   }
 
   metrics.SetRootCompositionSize(
-    CalculateRootCompositionSize(metrics, isRootContentDocRootScrollFrame,
-                                 presContext, aForFrame, aScrollFrame));
+    nsLayoutUtils::CalculateRootCompositionSize(aScrollFrame ? aScrollFrame : aForFrame,
+                                                isRootContentDocRootScrollFrame, metrics));
 
   if (GetApzcTreePrintPref()) {
     if (nsIContent* content = frameForCompositionBoundsCalculation->GetContent()) {
@@ -3173,18 +3098,23 @@ void nsDisplayWrapList::Paint(nsDisplayListBuilder* aBuilder,
   NS_ERROR("nsDisplayWrapList should have been flattened away for painting");
 }
 
+/**
+ * Returns true if all descendant display items can be placed in the same
+ * ThebesLayer --- GetLayerState returns LAYER_INACTIVE or LAYER_NONE,
+ * and they all have the expected animated geometry root.
+ */
 static LayerState
-RequiredLayerStateForChildrenInternal(nsDisplayListBuilder* aBuilder,
-                                      LayerManager* aManager,
-                                      const ContainerLayerParameters& aParameters,
-                                      const nsDisplayList& aList,
-                                      nsIFrame* aAnimatedGeometryRoot)
+RequiredLayerStateForChildren(nsDisplayListBuilder* aBuilder,
+                              LayerManager* aManager,
+                              const ContainerLayerParameters& aParameters,
+                              const nsDisplayList& aList,
+                              nsIFrame* aExpectedAnimatedGeometryRootForChildren)
 {
   LayerState result = LAYER_INACTIVE;
   for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
-    nsIFrame* f = i->Frame();
     if (result == LAYER_INACTIVE &&
-        nsLayoutUtils::GetAnimatedGeometryRootFor(f) != aAnimatedGeometryRoot) {
+        nsLayoutUtils::GetAnimatedGeometryRootFor(i, aBuilder) !=
+          aExpectedAnimatedGeometryRootForChildren) {
       result = LAYER_ACTIVE;
     }
 
@@ -3200,8 +3130,8 @@ RequiredLayerStateForChildrenInternal(nsDisplayListBuilder* aBuilder,
       nsDisplayList* list = i->GetSameCoordinateSystemChildren();
       if (list) {
         LayerState childState =
-          RequiredLayerStateForChildrenInternal(aBuilder, aManager, aParameters, *list,
-              aAnimatedGeometryRoot);
+          RequiredLayerStateForChildren(aBuilder, aManager, aParameters, *list,
+              aExpectedAnimatedGeometryRootForChildren);
         if (childState > result) {
           result = childState;
         }
@@ -3209,18 +3139,6 @@ RequiredLayerStateForChildrenInternal(nsDisplayListBuilder* aBuilder,
     }
   }
   return result;
-}
-
-LayerState
-nsDisplayWrapList::RequiredLayerStateForChildren(nsDisplayListBuilder* aBuilder,
-                                                 LayerManager* aManager,
-                                                 const ContainerLayerParameters& aParameters,
-                                                 const nsDisplayList& aList,
-                                                 nsIFrame* aItemFrame)
-{
-  return RequiredLayerStateForChildrenInternal(
-      aBuilder, aManager, aParameters, aList,
-      nsLayoutUtils::GetAnimatedGeometryRootFor(aItemFrame));
 }
 
 nsRect nsDisplayWrapList::GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder)
@@ -3399,7 +3317,8 @@ nsDisplayOpacity::GetLayerState(nsDisplayListBuilder* aBuilder,
   if (NeedsActiveLayer())
     return LAYER_ACTIVE;
 
-  return RequiredLayerStateForChildren(aBuilder, aManager, aParameters, mList, mFrame);
+  return RequiredLayerStateForChildren(aBuilder, aManager, aParameters, mList,
+    nsLayoutUtils::GetAnimatedGeometryRootFor(this, aBuilder));
 }
 
 bool
@@ -3600,7 +3519,9 @@ nsDisplayOwnLayer::BuildLayer(nsDisplayListBuilder* aBuilder,
 nsDisplaySubDocument::nsDisplaySubDocument(nsDisplayListBuilder* aBuilder,
                                            nsIFrame* aFrame, nsDisplayList* aList,
                                            uint32_t aFlags)
-    : nsDisplayOwnLayer(aBuilder, aFrame, aList, aFlags) {
+    : nsDisplayOwnLayer(aBuilder, aFrame, aList, aFlags)
+    , mScrollParentId(aBuilder->GetCurrentScrollParentId())
+{
   MOZ_COUNT_CTOR(nsDisplaySubDocument);
 }
 
@@ -3650,6 +3571,7 @@ nsDisplaySubDocument::BuildLayer(nsDisplayListBuilder* aBuilder,
                       mFrame->GetPosition() +
                       mFrame->GetOffsetToCrossDoc(ReferenceFrame());
 
+    container->SetScrollHandoffParentId(mScrollParentId);
     RecordFrameMetrics(mFrame, rootScrollFrame, ReferenceFrame(),
                        container, mList.GetVisibleRect(), viewport,
                        (usingDisplayport ? &displayport : nullptr),
@@ -3855,6 +3777,7 @@ nsDisplayScrollLayer::nsDisplayScrollLayer(nsDisplayListBuilder* aBuilder,
   : nsDisplayWrapList(aBuilder, aForFrame, aList)
   , mScrollFrame(aScrollFrame)
   , mScrolledFrame(aScrolledFrame)
+  , mScrollParentId(aBuilder->GetCurrentScrollParentId())
 {
 #ifdef NS_BUILD_REFCNT_LOGGING
   MOZ_COUNT_CTOR(nsDisplayScrollLayer);
@@ -3872,6 +3795,7 @@ nsDisplayScrollLayer::nsDisplayScrollLayer(nsDisplayListBuilder* aBuilder,
   : nsDisplayWrapList(aBuilder, aForFrame, aItem)
   , mScrollFrame(aScrollFrame)
   , mScrolledFrame(aScrolledFrame)
+  , mScrollParentId(aBuilder->GetCurrentScrollParentId())
 {
 #ifdef NS_BUILD_REFCNT_LOGGING
   MOZ_COUNT_CTOR(nsDisplayScrollLayer);
@@ -3888,6 +3812,7 @@ nsDisplayScrollLayer::nsDisplayScrollLayer(nsDisplayListBuilder* aBuilder,
   : nsDisplayWrapList(aBuilder, aForFrame)
   , mScrollFrame(aScrollFrame)
   , mScrolledFrame(aScrolledFrame)
+  , mScrollParentId(aBuilder->GetCurrentScrollParentId())
 {
 #ifdef NS_BUILD_REFCNT_LOGGING
   MOZ_COUNT_CTOR(nsDisplayScrollLayer);
@@ -3940,6 +3865,7 @@ nsDisplayScrollLayer::BuildLayer(nsDisplayListBuilder* aBuilder,
     usingCriticalDisplayport =
       nsLayoutUtils::GetCriticalDisplayPort(content, &criticalDisplayport);
   }
+  layer->SetScrollHandoffParentId(mScrollParentId);
   RecordFrameMetrics(mScrolledFrame, mScrollFrame, ReferenceFrame(), layer,
                      mList.GetVisibleRect(), viewport,
                      (usingDisplayport ? &displayport : nullptr),
@@ -4861,11 +4787,12 @@ nsDisplayTransform::GetLayerState(nsDisplayListBuilder* aBuilder,
     return LAYER_ACTIVE;
   }
 
-  return mStoredList.RequiredLayerStateForChildren(aBuilder,
-                                                   aManager,
-                                                   aParameters,
-                                                   *mStoredList.GetChildren(),
-                                                   mFrame);
+  // Expect the child display items to have this frame as their animated
+  // geometry root (since it will be their reference frame). If they have a
+  // different animated geometry root, we'll make this an active layer so the
+  // animation can be accelerated.
+  return RequiredLayerStateForChildren(aBuilder, aManager, aParameters,
+    *mStoredList.GetChildren(), Frame());
 }
 
 bool nsDisplayTransform::ComputeVisibility(nsDisplayListBuilder *aBuilder,

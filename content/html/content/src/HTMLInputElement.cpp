@@ -3919,7 +3919,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
       // the editor's handling of up/down keypress events. For that reason we
       // just ignore aVisitor.mEventStatus here and go ahead and handle the
       // event to increase/decrease the value of the number control.
-      if (!aVisitor.mEvent->mFlags.mDefaultPreventedByContent) {
+      if (!aVisitor.mEvent->mFlags.mDefaultPreventedByContent && IsMutable()) {
         StepNumberControlForUserEvent(keyEvent->keyCode == NS_VK_UP ? 1 : -1);
         aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
       }
@@ -4145,7 +4145,8 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
               nsNumberControlFrame* numberControlFrame =
                 do_QueryFrame(GetPrimaryFrame());
               if (numberControlFrame) {
-                if (aVisitor.mEvent->message == NS_MOUSE_BUTTON_DOWN) {
+                if (aVisitor.mEvent->message == NS_MOUSE_BUTTON_DOWN && 
+                    IsMutable()) {
                   switch (numberControlFrame->GetSpinButtonForPointerEvent(
                             aVisitor.mEvent->AsMouseEvent())) {
                   case nsNumberControlFrame::eSpinButtonUp:
@@ -4673,24 +4674,15 @@ HTMLInputElement::GetValueAsDate(const nsAString& aValue,
     return false;
   }
 
-  uint32_t endOfYearOffset = 0;
-  for (; NS_IsAsciiDigit(aValue[endOfYearOffset]); ++endOfYearOffset);
-
-  // The year must be at least 4 digits long.
-  if (aValue[endOfYearOffset] != '-' || endOfYearOffset < 4) {
+  uint32_t endOfYearOffset = aValue.Length() - 6;
+  
+  if (aValue[endOfYearOffset]     != '-' ||
+      aValue[endOfYearOffset + 3] != '-') {
     return false;
   }
 
-  // Now, we know where is the next '-' and what should be the size of the
-  // string.
-  if (aValue[endOfYearOffset + 3] != '-' ||
-      aValue.Length() != 10 + (endOfYearOffset - 4)) {
-    return false;
-  }
-
-  nsresult ec;
-  *aYear = PromiseFlatString(StringHead(aValue, endOfYearOffset)).ToInteger(&ec);
-  if (NS_FAILED(ec) || *aYear == 0) {
+  if (!DigitSubStringToNumber(aValue, 0, endOfYearOffset, aYear) ||
+      *aYear < 1) {
     return false;
   }
 

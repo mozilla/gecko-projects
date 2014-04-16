@@ -23,7 +23,6 @@
 #include "jit/CodeGenerator.h"
 #include "jit/EdgeCaseAnalysis.h"
 #include "jit/EffectiveAddressAnalysis.h"
-#include "jit/ExecutionModeInlines.h"
 #include "jit/IonAnalysis.h"
 #include "jit/IonBuilder.h"
 #include "jit/IonOptimizationLevels.h"
@@ -47,6 +46,8 @@
 #include "jsgcinlines.h"
 #include "jsinferinlines.h"
 #include "jsobjinlines.h"
+
+#include "jit/ExecutionMode-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -1257,7 +1258,7 @@ OptimizeMIR(MIRGenerator *mir)
     if (GetIonContext()->runtime->onMainThread())
         logger = TraceLoggerForMainThread(GetIonContext()->runtime);
     else
-        logger = TraceLoggerForThread(PR_GetCurrentThread());
+        logger = TraceLoggerForCurrentThread();
 
     if (!mir->compilingAsmJS()) {
         if (!MakeMRegExpHoistable(graph))
@@ -2803,7 +2804,11 @@ static void
 FinishInvalidationOf(FreeOp *fop, JSScript *script, IonScript *ionScript)
 {
     types::TypeZone &types = script->zone()->types;
-    ionScript->recompileInfo().compilerOutput(types)->invalidate();
+
+    // Note: If the script is about to be swept, the compiler output may have
+    // already been destroyed.
+    if (types::CompilerOutput *output = ionScript->recompileInfo().compilerOutput(types))
+        output->invalidate();
 
     // If this script has Ion code on the stack, invalidated() will return
     // true. In this case we have to wait until destroying it.
@@ -3011,9 +3016,6 @@ AutoDebugModeInvalidation::~AutoDebugModeInvalidation()
     if (needInvalidation_ == NoNeed)
         return;
 
-    // Invalidate the stack if any compartments toggled from on->off, because
-    // we allow scripts to be on stack when turning off debug mode.
-    bool invalidateStack = needInvalidation_ == ToggledOff;
     Zone *zone = zone_ ? zone_ : comp_->zone();
     JSRuntime *rt = zone->runtimeFromMainThread();
     FreeOp *fop = rt->defaultFreeOp();
@@ -3025,31 +3027,24 @@ AutoDebugModeInvalidation::~AutoDebugModeInvalidation()
             StopAllOffThreadCompilations(comp);
     }
 
-    if (invalidateStack) {
-        jit::MarkActiveBaselineScripts(zone);
+    jit::MarkActiveBaselineScripts(zone);
 
-        for (JitActivationIterator iter(rt); !iter.done(); ++iter) {
-            JSCompartment *comp = iter.activation()->compartment();
-            if ((comp_ && comp_ == comp) ||
-                (zone_ && zone_ == comp->zone() && comp->principals))
-            {
-                IonContext ictx(CompileRuntime::get(rt));
-                AutoFlushCache afc("AutoDebugModeInvalidation", rt->jitRuntime());
-                IonSpew(IonSpew_Invalidate, "Invalidating frames for debug mode toggle");
-                InvalidateActivation(fop, iter.jitTop(), true);
-            }
+    for (JitActivationIterator iter(rt); !iter.done(); ++iter) {
+        JSCompartment *comp = iter.activation()->compartment();
+        if ((comp_ && comp_ == comp) || (zone_ && zone_ == comp->zone())) {
+            IonContext ictx(CompileRuntime::get(rt));
+            AutoFlushCache afc("AutoDebugModeInvalidation", rt->jitRuntime());
+            IonSpew(IonSpew_Invalidate, "Invalidating frames for debug mode toggle");
+            InvalidateActivation(fop, iter.jitTop(), true);
         }
     }
 
     for (gc::CellIter i(zone, gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
         JSScript *script = i.get<JSScript>();
-        if ((comp_ && script->compartment() == comp_) ||
-            (zone_ && script->compartment()->principals))
-        {
+        if ((comp_ && script->compartment() == comp_) || zone_) {
             FinishInvalidation<SequentialExecution>(fop, script);
             FinishInvalidation<ParallelExecution>(fop, script);
             FinishDiscardBaselineScript(fop, script);
-            // script->clearAnalysis();
             script->resetUseCount();
         } else if (script->hasBaselineScript()) {
             script->baselineScript()->resetActive();

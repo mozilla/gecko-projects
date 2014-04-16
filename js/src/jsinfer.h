@@ -607,7 +607,7 @@ class ConstraintTypeSet : public TypeSet
     /* Add a new constraint to this set. */
     bool addConstraint(JSContext *cx, TypeConstraint *constraint, bool callExisting = true);
 
-    inline void sweep(JS::Zone *zone);
+    inline void sweep(JS::Zone *zone, bool *oom);
 };
 
 class StackTypeSet : public ConstraintTypeSet
@@ -622,6 +622,7 @@ class HeapTypeSet : public ConstraintTypeSet
   public:
     /* Mark this type set as representing a non-data property. */
     inline void setNonDataProperty(ExclusiveContext *cx);
+    inline void setNonDataPropertyIgnoringConstraints(); // Variant for use during GC.
 
     /* Mark this type set as representing a non-writable property. */
     inline void setNonWritableProperty(ExclusiveContext *cx);
@@ -1122,13 +1123,14 @@ struct TypeObject : gc::BarrieredCell<TypeObject>
     void clearAddendum(ExclusiveContext *cx);
     void clearNewScriptAddendum(ExclusiveContext *cx);
     void clearTypedObjectAddendum(ExclusiveContext *cx);
+    void maybeClearNewScriptAddendumOnOOM();
     bool isPropertyNonData(jsid id);
     bool isPropertyNonWritable(jsid id);
 
     void print();
 
     inline void clearProperties();
-    inline void sweep(FreeOp *fop);
+    inline void sweep(FreeOp *fop, bool *oom);
 
     size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
@@ -1284,7 +1286,7 @@ class TypeScript
 
     static void Purge(JSContext *cx, HandleScript script);
 
-    static void Sweep(FreeOp *fop, JSScript *script);
+    static void Sweep(FreeOp *fop, JSScript *script, bool *oom);
     void destroy();
 
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
@@ -1431,12 +1433,16 @@ class CompilerOutput
     uint32_t sweepIndex_ : 29;
 
   public:
+    static const uint32_t INVALID_SWEEP_INDEX = (1 << 29) - 1;
+
     CompilerOutput()
-      : script_(nullptr), mode_(SequentialExecution), pendingInvalidation_(false)
+      : script_(nullptr), mode_(SequentialExecution),
+        pendingInvalidation_(false), sweepIndex_(INVALID_SWEEP_INDEX)
     {}
 
     CompilerOutput(JSScript *script, ExecutionMode mode)
-      : script_(script), mode_(mode), pendingInvalidation_(false)
+      : script_(script), mode_(mode),
+        pendingInvalidation_(false), sweepIndex_(INVALID_SWEEP_INDEX)
     {}
 
     JSScript *script() const { return script_; }
@@ -1459,11 +1465,15 @@ class CompilerOutput
     }
 
     void setSweepIndex(uint32_t index) {
-        if (index >= 1 << 29)
+        if (index >= INVALID_SWEEP_INDEX)
             MOZ_CRASH();
         sweepIndex_ = index;
     }
+    void invalidateSweepIndex() {
+        sweepIndex_ = INVALID_SWEEP_INDEX;
+    }
     uint32_t sweepIndex() {
+        JS_ASSERT(sweepIndex_ != INVALID_SWEEP_INDEX);
         return sweepIndex_;
     }
 };
@@ -1568,7 +1578,8 @@ struct TypeZone
 
     JS::Zone *zone() const { return zone_; }
 
-    void sweep(FreeOp *fop, bool releaseTypes);
+    void sweep(FreeOp *fop, bool releaseTypes, bool *oom);
+    void clearAllNewScriptAddendumsOnOOM();
 
     /* Mark a script as needing recompilation once inference has finished. */
     void addPendingRecompile(JSContext *cx, const RecompileInfo &info);

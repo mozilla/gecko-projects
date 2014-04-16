@@ -491,7 +491,7 @@ Arena::finalize(FreeOp *fop, AllocKind thingKind, size_t thingSize)
         JS_ASSERT(newListTail == &newListHead);
         JS_ASSERT(!newFreeSpanStart ||
                   newFreeSpanStart == thingsStart(thingKind));
-        JS_POISON(data, JS_SWEPT_TENURED_PATTERN, sizeof(data));
+        JS_EXTRA_POISON(data, JS_SWEPT_TENURED_PATTERN, sizeof(data));
         return true;
     }
 
@@ -2556,7 +2556,7 @@ GCHelperThread::threadLoop()
 {
     AutoLockGC lock(rt);
 
-    TraceLogger *logger = TraceLoggerForThread(PR_GetCurrentThread());
+    TraceLogger *logger = TraceLoggerForCurrentThread();
 
     /*
      * Even on the first iteration the state can be SHUTDOWN or SWEEPING if
@@ -3978,7 +3978,22 @@ BeginSweepingZoneGroup(JSRuntime *rt)
 
         for (GCZoneGroupIter zone(rt); !zone.done(); zone.next()) {
             gcstats::AutoSCC scc(rt->gcStats, rt->gcZoneGroupIndex);
-            zone->sweep(&fop, releaseTypes && !zone->isPreservingCode());
+
+            // If there is an OOM while sweeping types, the type information
+            // will be deoptimized so that it is still correct (i.e.
+            // overapproximates the possible types in the zone), but the
+            // constraints might not have been triggered on the deoptimization
+            // or even copied over completely. In this case, destroy all JIT
+            // code and new script addendums in the zone, the only things whose
+            // correctness depends on the type constraints.
+            bool oom = false;
+            zone->sweep(&fop, releaseTypes && !zone->isPreservingCode(), &oom);
+
+            if (oom) {
+                zone->setPreservingCode(false);
+                zone->discardJitCode(&fop);
+                zone->types.clearAllNewScriptAddendumsOnOOM();
+            }
         }
     }
 

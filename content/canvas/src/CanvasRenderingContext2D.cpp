@@ -100,9 +100,11 @@
 
 #undef free // apparently defined by some windows header, clashing with a free()
             // method in SkTypes.h
+#ifdef USE_SKIA
 #include "SkiaGLGlue.h"
 #include "SurfaceStream.h"
 #include "SurfaceTypes.h"
+#endif
 
 using mozilla::gl::GLContext;
 using mozilla::gl::SkiaGLGlue;
@@ -900,6 +902,7 @@ CanvasRenderingContext2D::EnsureTarget()
 
         SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
 
+#if USE_SKIA
         if (glue && glue->GetGrContext() && glue->GetGLContext()) {
           mTarget = Factory::CreateDrawTargetSkiaWithGrContext(glue->GetGrContext(), size, format);
           if (mTarget) {
@@ -909,6 +912,7 @@ CanvasRenderingContext2D::EnsureTarget()
             printf_stderr("Failed to create a SkiaGL DrawTarget, falling back to software\n");
           }
         }
+#endif
         if (!mTarget) {
           mTarget = layerManager->CreateDrawTarget(size, format);
         }
@@ -3635,7 +3639,6 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& window, double x,
     return;
   }
   nsRefPtr<gfxContext> thebes;
-  nsRefPtr<gfxASurface> drawSurf;
   RefPtr<DrawTarget> drawDT;
   if (gfxPlatform::GetPlatform()->SupportsAzureContentForDrawTarget(mTarget)) {
     thebes = new gfxContext(mTarget);
@@ -3656,34 +3659,15 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& window, double x,
 
   nsCOMPtr<nsIPresShell> shell = presContext->PresShell();
   unused << shell->RenderDocument(r, renderDocFlags, backgroundColor, thebes);
-  if (drawSurf || drawDT) {
-    RefPtr<SourceSurface> source;
+  if (drawDT) {
+    RefPtr<SourceSurface> snapshot = drawDT->Snapshot();
+    RefPtr<DataSourceSurface> data = snapshot->GetDataSurface();
 
-    if (drawSurf) {
-      gfxIntSize size = drawSurf->GetSize();
-
-      drawSurf->SetDeviceOffset(gfxPoint(0, 0));
-      nsRefPtr<gfxImageSurface> img = drawSurf->GetAsReadableARGB32ImageSurface();
-      if (!img || !img->Data()) {
-        error.Throw(NS_ERROR_FAILURE);
-        return;
-      }
-
-      source =
-        mTarget->CreateSourceSurfaceFromData(img->Data(),
-                                             IntSize(size.width, size.height),
-                                             img->Stride(),
-                                             SurfaceFormat::B8G8R8A8);
-    } else {
-      RefPtr<SourceSurface> snapshot = drawDT->Snapshot();
-      RefPtr<DataSourceSurface> data = snapshot->GetDataSurface();
-
-      source =
-        mTarget->CreateSourceSurfaceFromData(data->GetData(),
-                                             data->GetSize(),
-                                             data->Stride(),
-                                             data->GetFormat());
-    }
+    RefPtr<SourceSurface> source =
+      mTarget->CreateSourceSurfaceFromData(data->GetData(),
+                                           data->GetSize(),
+                                           data->Stride(),
+                                           data->GetFormat());
 
     if (!source) {
       error.Throw(NS_ERROR_FAILURE);
@@ -3694,7 +3678,8 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& window, double x,
     mgfx::Rect sourceRect(0, 0, sw, sh);
     mTarget->DrawSurface(source, destRect, sourceRect,
                          DrawSurfaceOptions(mgfx::Filter::POINT),
-                         DrawOptions(1.0f, CompositionOp::OP_SOURCE, AntialiasMode::NONE));
+                         DrawOptions(1.0f, CompositionOp::OP_OVER,
+                                     AntialiasMode::NONE));
     mTarget->Flush();
   } else {
     mTarget->SetTransform(matrix);
@@ -4263,12 +4248,14 @@ CanvasRenderingContext2D::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
 
     CanvasLayer::Data data;
     if (mStream) {
+#ifdef USE_SKIA
       SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
 
       if (glue) {
         data.mGLContext = glue->GetGLContext();
         data.mStream = mStream.get();
       }
+#endif
     } else {
       data.mDrawTarget = mTarget;
     }
@@ -4311,7 +4298,9 @@ CanvasRenderingContext2D::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
     if (glue) {
       canvasLayer->SetPreTransactionCallback(
               CanvasRenderingContext2DUserData::PreTransactionCallback, userData);
+#if USE_SKIA
       data.mGLContext = glue->GetGLContext();
+#endif
       data.mStream = mStream.get();
       data.mTexID = (uint32_t)((uintptr_t)mTarget->GetNativeSurface(NativeSurfaceType::OPENGL_TEXTURE));
     }

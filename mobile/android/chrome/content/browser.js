@@ -131,7 +131,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "CharsetMenu",
 
 // Lazily-loaded JS modules that use observer notifications
 [
-  ["Home", ["HomePanels:Get", "HomePanels:Authenticate",
+  ["Home", ["HomeBanner:Get", "HomePanels:Get", "HomePanels:Authenticate",
             "HomePanels:Installed", "HomePanels:Uninstalled"], "resource://gre/modules/Home.jsm"],
 ].forEach(module => {
   let [name, notifications, resource] = module;
@@ -1306,16 +1306,6 @@ var BrowserApp = {
 
       try {
         switch (key) {
-          case "history_downloads":
-            Sanitizer.clearItem("history");
-
-            // If we're also removing downloaded files, don't clear the
-            // download history yet since it will be handled when the files are
-            // removed.
-            if (!json["downloadFiles"]) {
-              Sanitizer.clearItem("downloads");
-            }
-            break;
           case "cookies_sessions":
             Sanitizer.clearItem("cookies");
             Sanitizer.clearItem("sessions");

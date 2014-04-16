@@ -603,16 +603,6 @@ class VarType
         }
         MOZ_ASSUME_UNREACHABLE("VarType can only be Int, Double or Float");
     }
-    static VarType FromMIRType(MIRType type) {
-        JS_ASSERT(type == MIRType_Int32 || type == MIRType_Double || type == MIRType_Float32);
-        switch(type) {
-          case MIRType_Int32:   return Int;
-          case MIRType_Float32: return Float;
-          case MIRType_Double:  return Double;
-          default:;
-        }
-        MOZ_ASSUME_UNREACHABLE("FromMIRType MIR type not handled");
-    }
     static VarType FromCheckedType(Type type) {
         JS_ASSERT(type.isInt() || type.isMaybeDouble() || type.isFloatish());
         if (type.isMaybeDouble())
@@ -7011,10 +7001,8 @@ EstablishPreconditions(ExclusiveContext *cx, AsmJSParser &parser)
         return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Disabled by arrow function context");
 
 #ifdef JS_THREADSAFE
-    if (ParallelCompilationEnabled(cx)) {
-        if (!EnsureWorkerThreadsInitialized(cx))
-            return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Failed compilation thread initialization");
-    }
+    if (ParallelCompilationEnabled(cx))
+        EnsureWorkerThreadsInitialized(cx);
 #endif
 
     return true;
