@@ -109,6 +109,13 @@ toolbarseparator {
   background: url(chrome://browser/skin/Toolbar-background-noise.png) hsl(0,0%,83%);
 }
 
+#TabsToolbar:not([collapsed="true"]) + #nav-bar {
+  margin-top: -@tabToolbarNavbarOverlap@; /* Move up into the TabsToolbar */
+  /* Position the toolbar above the bottom of background tabs */
+  position: relative;
+  z-index: 1;
+}
+
 #nav-bar {
   -moz-appearance: none;
   background: url(chrome://browser/skin/Toolbar-background-noise.png),
@@ -124,10 +131,6 @@ toolbarseparator {
   background-position: 0 1px, 0 0;
 
   box-shadow: inset 0 1px 0 hsla(0,0%,100%,.4);
-  margin-top: -@tabToolbarNavbarOverlap@;
-  /* Position the toolbar above the bottom of background tabs */
-  position: relative;
-  z-index: 1;
 }
 
 @media (min-resolution: 2dppx) {
@@ -142,6 +145,8 @@ toolbarseparator {
 
 #PersonalToolbar {
   padding: 0 4px 4px;
+  /* 4px padding ^  plus 19px personal-bookmarks (see below) */
+  min-height: 23px;
 }
 
 #navigator-toolbox > toolbar:not(#TabsToolbar):-moz-lwtheme {
@@ -157,7 +162,7 @@ toolbarseparator {
 /* ----- BOOKMARK TOOLBAR ----- */
 
 #personal-bookmarks {
-  min-height: 17px; /* 16px button height + 1px margin-bottom */
+  min-height: 19px; /* 16px button height + 2px padding + 1px margin-bottom */
 }
 
 toolbarbutton.chevron {
@@ -510,6 +515,7 @@ toolbar .toolbarbutton-1:not(:-moz-any([type="menu-button"],#back-button,#forwar
 }
 
 toolbar .toolbarbutton-1:not(:-moz-any([type="menu-button"],[disabled],[open],#back-button,#forward-button)):hover,
+toolbar .toolbarbutton-1[type="menu-button"]:not([disabled]) > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker,
 toolbar .toolbarbutton-1[type="menu-button"]:not([disabled]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-button,
 toolbar .toolbarbutton-1[type="menu-button"]:not([disabled]):-moz-any(:hover,[open]) > .toolbarbutton-menubutton-dropmarker,
 toolbar .toolbaritem-combined-buttons:hover > .toolbarbutton-combined {
@@ -525,6 +531,7 @@ toolbar .toolbarbutton-1[type="menu-button"]:not(:-moz-any([disabled],[open],[bu
 }
 
 toolbar .toolbarbutton-1:not(:-moz-any([type="menu-button"],[disabled],#back-button,#forward-button)):-moz-any(:hover:active,[open],[checked]),
+toolbar .toolbarbutton-1[type="menu-button"]:not([disabled]) > .toolbarbutton-menubutton-button[open],
 toolbar .toolbarbutton-1[type="menu-button"]:not(:-moz-any([disabled],[open]))[buttonover]:active > .toolbarbutton-menubutton-button,
 toolbar .toolbarbutton-1[type="menu-button"]:not(:-moz-any([disabled],[open],[buttonover])):hover:active > .toolbarbutton-menubutton-dropmarker,
 toolbar .toolbarbutton-1[type="menu-button"][open]:not([disabled]) > .toolbarbutton-menubutton-dropmarker {

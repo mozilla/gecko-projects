@@ -376,19 +376,6 @@ XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
 
         if (parent != plannedParent) {
             XPCWrappedNativeScope* betterScope = GetObjectScope(parent);
-            if (MOZ_UNLIKELY(!betterScope)) {
-                printf_stderr("Uh oh, hit an object without a scope! Crashing shortly.\n");
-                printf_stderr("IsMainThread: %u\n", (uint32_t) NS_IsMainThread());
-                char* className = nullptr;
-                sciWrapper.GetCallback()->GetClassName(&className);
-                printf_stderr("SH Class Name: %s\n", className);
-                nsMemory::Free(className);
-                printf_stderr("plannedParent object class: %s\n", js::GetObjectClass(plannedParent)->name);
-                printf_stderr("plannedParent Global class: %s\n", js::GetObjectClass(js::GetGlobalForObjectCrossCompartment(plannedParent))->name);
-                printf_stderr("parent Object class: %s\n", js::GetObjectClass(parent)->name);
-                printf_stderr("parent Global class: %s\n", js::GetObjectClass(js::GetGlobalForObjectCrossCompartment(parent))->name);
-                MOZ_CRASH();
-            }
             if (betterScope != Scope)
                 return GetNewOrUsed(helper, betterScope, Interface, resultWrapper);
 
@@ -2119,7 +2106,7 @@ CallMethodHelper::ConvertIndependentParam(uint8_t i)
     if (type_tag == nsXPTType::T_JSVAL) {
         // Root the value.
         dp->val.j = JSVAL_VOID;
-        if (!JS_AddValueRoot(mCallContext, &dp->val.j))
+        if (!js::AddRawValueRoot(mCallContext, &dp->val.j, "XPCWrappedNative::CallMethod param"))
             return false;
     }
 
@@ -2313,7 +2300,7 @@ CallMethodHelper::CleanupParam(nsXPTCMiniVariant& param, nsXPTType& type)
 
     switch (type.TagPart()) {
         case nsXPTType::T_JSVAL:
-            JS_RemoveValueRoot(mCallContext, (jsval*)&param.val);
+            js::RemoveRawValueRoot(mCallContext, (jsval*)&param.val);
             break;
         case nsXPTType::T_INTERFACE:
         case nsXPTType::T_INTERFACE_IS:
@@ -2690,7 +2677,7 @@ XPCJSObjectHolder::~XPCJSObjectHolder()
 void
 XPCJSObjectHolder::TraceJS(JSTracer *trc)
 {
-    JS_SET_TRACING_DETAILS(trc, GetTraceName, this, 0);
+    trc->setTracingDetails(GetTraceName, this, 0);
     JS_CallHeapObjectTracer(trc, &mJSObj, "XPCJSObjectHolder::mJSObj");
 }
 
@@ -2699,7 +2686,7 @@ void
 XPCJSObjectHolder::GetTraceName(JSTracer* trc, char *buf, size_t bufsize)
 {
     JS_snprintf(buf, bufsize, "XPCJSObjectHolder[0x%p].mJSObj",
-                trc->debugPrintArg);
+                trc->debugPrintArg());
 }
 
 // static

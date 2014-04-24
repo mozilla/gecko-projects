@@ -45,6 +45,11 @@ struct PatchableBackedgeInfo
     {}
 };
 
+struct ReciprocalMulConstants {
+    int32_t multiplier;
+    int32_t shiftAmount;
+};
+
 class CodeGeneratorShared : public LInstructionVisitor
 {
     js::Vector<OutOfLineCode *, 0, SystemAllocPolicy> outOfLineCode_;
@@ -254,6 +259,8 @@ class CodeGeneratorShared : public LInstructionVisitor
     template <typename T>
     inline size_t allocateCache(const T &cache) {
         size_t index = allocateCache(cache, sizeof(mozilla::AlignedStorage2<T>));
+        if (masm.oom())
+            return SIZE_MAX;
         // Use the copy constructor on the allocated space.
         JS_ASSERT(index == cacheList_.back());
         new (&runtimeData_[index]) T(cache);
@@ -302,7 +309,7 @@ class CodeGeneratorShared : public LInstructionVisitor
     void emitPreBarrier(Address address, MIRType type);
 
     inline bool isNextBlock(LBlock *block) {
-        return (current->mir()->id() + 1 == block->mir()->id());
+        return current->mir()->id() + 1 == block->mir()->id();
     }
 
   public:
@@ -400,6 +407,7 @@ class CodeGeneratorShared : public LInstructionVisitor
 
     bool addCache(LInstruction *lir, size_t cacheIndex);
     size_t addCacheLocations(const CacheLocationList &locs, size_t *numLocs);
+    ReciprocalMulConstants computeDivisionConstants(int d);
 
   protected:
     bool addOutOfLineCode(OutOfLineCode *code);
@@ -465,13 +473,8 @@ class CodeGeneratorShared : public LInstructionVisitor
         return emitTracelogTree(/* isStart =*/ true, textId);
     }
     bool emitTracelogStopEvent(uint32_t textId) {
-#ifdef DEBUG
         return emitTracelogTree(/* isStart =*/ false, textId);
-#else
-        return emitTracelogScript(/* isStart =*/ false);
-#endif
     }
-    bool emitTracelogStopEvent();
 #endif
 };
 

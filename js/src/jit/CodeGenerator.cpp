@@ -105,6 +105,9 @@ class OutOfLineUpdateCache :
 bool
 CodeGeneratorShared::addCache(LInstruction *lir, size_t cacheIndex)
 {
+    if (cacheIndex == SIZE_MAX)
+        return false;
+
     DataPtr<IonCache> cache(this, cacheIndex);
     MInstruction *mir = lir->mirRaw()->toInstruction();
     if (mir->resumePoint())
@@ -1009,9 +1012,12 @@ CodeGenerator::visitLambdaArrow(LLambdaArrow *lir)
 
     emitLambdaInit(output, scopeChain, info);
 
-    // Store the lexical |this| value.
+    // Initialize extended slots. Lexical |this| is stored in the first one.
     MOZ_ASSERT(info.flags & JSFunction::EXTENDED);
-    masm.storeValue(thisv, Address(output, FunctionExtended::offsetOfArrowThisSlot()));
+    static_assert(FunctionExtended::NUM_EXTENDED_SLOTS == 2, "All slots must be initialized");
+    static_assert(FunctionExtended::ARROW_THIS_SLOT == 0, "|this| must be stored in first slot");
+    masm.storeValue(thisv, Address(output, FunctionExtended::offsetOfExtendedSlot(0)));
+    masm.storeValue(UndefinedValue(), Address(output, FunctionExtended::offsetOfExtendedSlot(1)));
 
     masm.bind(ool->rejoin());
     return true;
@@ -1825,22 +1831,16 @@ CodeGenerator::visitPostWriteBarrierO(LPostWriteBarrierO *lir)
     if (!addOutOfLineCode(ool))
         return false;
 
-    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
-    Register temp = ToRegister(lir->temp());
+    Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
+        const Nursery &nursery = GetIonContext()->runtime->gcNursery();
         JS_ASSERT(!nursery.isInside(&lir->object()->toConstant()->toObject()));
     } else {
-        Register objreg = ToRegister(lir->object());
-        masm.movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
-        masm.addPtr(objreg, temp);
-        masm.branchPtr(Assembler::Below, temp, Imm32(Nursery::NurserySize), ool->rejoin());
+        masm.branchPtrInNurseryRange(ToRegister(lir->object()), temp, ool->rejoin());
     }
 
-    Register valuereg = ToRegister(lir->value());
-    masm.movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
-    masm.addPtr(valuereg, temp);
-    masm.branchPtr(Assembler::Below, temp, Imm32(Nursery::NurserySize), ool->entry());
+    masm.branchPtrInNurseryRange(ToRegister(lir->value()), temp, ool->entry());
 
     masm.bind(ool->rejoin());
 #endif
@@ -1855,27 +1855,17 @@ CodeGenerator::visitPostWriteBarrierV(LPostWriteBarrierV *lir)
     if (!addOutOfLineCode(ool))
         return false;
 
-    ValueOperand value = ToValue(lir, LPostWriteBarrierV::Input);
-    masm.branchTestObject(Assembler::NotEqual, value, ool->rejoin());
-
-    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
+    Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
+        const Nursery &nursery = GetIonContext()->runtime->gcNursery();
         JS_ASSERT(!nursery.isInside(&lir->object()->toConstant()->toObject()));
     } else {
-        Register temp = ToRegister(lir->temp());
-        Register objreg = ToRegister(lir->object());
-        masm.movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
-        masm.addPtr(objreg, temp);
-        masm.branchPtr(Assembler::Below, temp, Imm32(Nursery::NurserySize), ool->rejoin());
+        masm.branchPtrInNurseryRange(ToRegister(lir->object()), temp, ool->rejoin());
     }
 
-    // This section is a little different because we mustn't trash the temp
-    // register before we use its contents.
-    Register temp = ToRegister(lir->temp());
-    masm.unboxObject(value, temp);
-    masm.addPtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
-    masm.branchPtr(Assembler::Below, temp, Imm32(Nursery::NurserySize), ool->entry());
+    ValueOperand value = ToValue(lir, LPostWriteBarrierV::Input);
+    masm.branchValueIsNurseryObject(value, temp, ool->entry());
 
     masm.bind(ool->rejoin());
 #endif
@@ -4044,7 +4034,7 @@ CodeGenerator::visitGetArgumentsObjectArg(LGetArgumentsObjectArg *lir)
 #ifdef DEBUG
     Label success;
     masm.branchTestMagic(Assembler::NotEqual, out, &success);
-    masm.assumeUnreachable("Result from ArgumentObject shouldn't be MIRType_Magic.");
+    masm.assumeUnreachable("Result from ArgumentObject shouldn't be JSVAL_TYPE_MAGIC.");
     masm.bind(&success);
 #endif
     return true;
@@ -4063,7 +4053,7 @@ CodeGenerator::visitSetArgumentsObjectArg(LSetArgumentsObjectArg *lir)
 #ifdef DEBUG
     Label success;
     masm.branchTestMagic(Assembler::NotEqual, argAddr, &success);
-    masm.assumeUnreachable("Result in ArgumentObject shouldn't be MIRType_Magic.");
+    masm.assumeUnreachable("Result in ArgumentObject shouldn't be JSVAL_TYPE_MAGIC.");
     masm.bind(&success);
 #endif
     masm.storeValue(value, argAddr);
@@ -5512,12 +5502,12 @@ CodeGenerator::visitStoreElementHoleV(LStoreElementHoleV *lir)
     return true;
 }
 
-typedef bool (*SetObjectElementFn)(JSContext *, HandleObject, HandleValue, HandleValue,
-                                   bool strict);
-typedef bool (*SetElementParFn)(ForkJoinContext *, HandleObject, HandleValue, HandleValue, bool);
-static const VMFunctionsModal SetObjectElementInfo = VMFunctionsModal(
-    FunctionInfo<SetObjectElementFn>(SetObjectElement),
-    FunctionInfo<SetElementParFn>(SetElementPar));
+typedef bool (*SetDenseElementFn)(JSContext *, HandleObject, int32_t, HandleValue,
+                                  bool strict);
+typedef bool (*SetDenseElementParFn)(ForkJoinContext *, HandleObject, int32_t, HandleValue, bool);
+static const VMFunctionsModal SetDenseElementInfo = VMFunctionsModal(
+    FunctionInfo<SetDenseElementFn>(SetDenseElement),
+    FunctionInfo<SetDenseElementParFn>(SetDenseElementPar));
 
 bool
 CodeGenerator::visitOutOfLineStoreElementHole(OutOfLineStoreElementHole *ool)
@@ -5597,11 +5587,11 @@ CodeGenerator::visitOutOfLineStoreElementHole(OutOfLineStoreElementHole *ool)
     pushArg(Imm32(current->mir()->strict()));
     pushArg(value);
     if (index->isConstant())
-        pushArg(*index->toConstant());
+        pushArg(Imm32(ToInt32(index)));
     else
-        pushArg(TypedOrValueRegister(MIRType_Int32, ToAnyRegister(index)));
+        pushArg(ToRegister(index));
     pushArg(object);
-    if (!callVM(SetObjectElementInfo, ins))
+    if (!callVM(SetDenseElementInfo, ins))
         return false;
 
     restoreLive(ins);
@@ -6619,6 +6609,13 @@ CodeGenerator::visitCallGetElement(LCallGetElement *lir)
         return callVM(CallElementInfo, lir);
     }
 }
+
+typedef bool (*SetObjectElementFn)(JSContext *, HandleObject, HandleValue, HandleValue,
+                                   bool strict);
+typedef bool (*SetElementParFn)(ForkJoinContext *, HandleObject, HandleValue, HandleValue, bool);
+static const VMFunctionsModal SetObjectElementInfo = VMFunctionsModal(
+    FunctionInfo<SetObjectElementFn>(SetObjectElement),
+    FunctionInfo<SetElementParFn>(SetElementPar));
 
 bool
 CodeGenerator::visitCallSetElement(LCallSetElement *lir)

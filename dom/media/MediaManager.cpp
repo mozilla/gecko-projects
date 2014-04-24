@@ -397,9 +397,15 @@ public:
     mEchoOn(true),
     mAgcOn(false),
     mNoiseOn(true),
+#ifdef MOZ_WEBRTC
     mEcho(webrtc::kEcDefault),
     mAgc(webrtc::kAgcDefault),
     mNoise(webrtc::kNsDefault),
+#else
+    mEcho(0),
+    mAgc(0),
+    mNoise(0),
+#endif
     mPlayoutDelay(20)
   {}
 
@@ -557,9 +563,13 @@ public:
   NS_IMETHOD
   Run()
   {
+#ifdef MOZ_WEBRTC
     int32_t aec = (int32_t) webrtc::kEcUnchanged;
     int32_t agc = (int32_t) webrtc::kAgcUnchanged;
     int32_t noise = (int32_t) webrtc::kNsUnchanged;
+#else
+    int32_t aec = 0, agc = 0, noise = 0;
+#endif
     bool aec_on = false, agc_on = false, noise_on = false;
     int32_t playout_delay = 0;
 
@@ -637,12 +647,10 @@ public:
     TracksAvailableCallback* tracksAvailableCallback =
       new TracksAvailableCallback(mManager, mSuccess, mWindowID, trackunion);
 
-#ifdef MOZ_WEBRTC
     mListener->AudioConfig(aec_on, (uint32_t) aec,
                            agc_on, (uint32_t) agc,
                            noise_on, (uint32_t) noise,
                            playout_delay);
-#endif
 
     // Dispatch to the media thread to ask it to start the sources,
     // because that can take a while.
@@ -1459,6 +1467,12 @@ MediaManager::GetUserMedia(JSContext* aCx, bool aPrivileged,
       (c.mFake && !Preferences::GetBool("media.navigator.permission.fake"))) {
     mMediaThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
   } else {
+    bool isHTTPS = false;
+    nsIURI* docURI = aWindow->GetDocumentURI();
+    if (docURI) {
+      docURI->SchemeIs("https", &isHTTPS);
+    }
+
     // Check if this site has persistent permissions.
     nsresult rv;
     nsCOMPtr<nsIPermissionManager> permManager =
@@ -1473,6 +1487,11 @@ MediaManager::GetUserMedia(JSContext* aCx, bool aPrivileged,
       if (audioPerm == nsIPermissionManager::PROMPT_ACTION) {
         audioPerm = nsIPermissionManager::UNKNOWN_ACTION;
       }
+      if (audioPerm == nsIPermissionManager::ALLOW_ACTION) {
+        if (!isHTTPS) {
+          audioPerm = nsIPermissionManager::UNKNOWN_ACTION;
+        }
+      }
     }
 
     uint32_t videoPerm = nsIPermissionManager::UNKNOWN_ACTION;
@@ -1483,9 +1502,15 @@ MediaManager::GetUserMedia(JSContext* aCx, bool aPrivileged,
       if (videoPerm == nsIPermissionManager::PROMPT_ACTION) {
         videoPerm = nsIPermissionManager::UNKNOWN_ACTION;
       }
+      if (videoPerm == nsIPermissionManager::ALLOW_ACTION) {
+        if (!isHTTPS) {
+          videoPerm = nsIPermissionManager::UNKNOWN_ACTION;
+        }
+      }
     }
 
-    if ((!IsOn(c.mAudio) || audioPerm) && (!IsOn(c.mVideo) || videoPerm)) {
+    if ((!IsOn(c.mAudio) || audioPerm != nsIPermissionManager::UNKNOWN_ACTION) &&
+        (!IsOn(c.mVideo) || videoPerm != nsIPermissionManager::UNKNOWN_ACTION)) {
       // All permissions we were about to request already have a saved value.
       if (IsOn(c.mAudio) && audioPerm == nsIPermissionManager::DENY_ACTION) {
         c.mAudio.SetAsBoolean() = false;
@@ -1533,7 +1558,7 @@ MediaManager::GetUserMedia(JSContext* aCx, bool aPrivileged,
     }
     nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
     nsRefPtr<GetUserMediaRequest> req = new GetUserMediaRequest(aWindow,
-                                                                callID, c);
+                                                                callID, c, isHTTPS);
     obs->NotifyObservers(req, "getUserMedia:request", nullptr);
   }
 

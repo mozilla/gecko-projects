@@ -783,10 +783,6 @@ var CustomEventManager = {
       case 'inputmethod-update-layouts':
         KeyboardHelper.handleEvent(detail);
         break;
-      case 'nfc-hardware-state-change':
-        Services.obs.notifyObservers(null, 'nfc-hardware-state-change',
-          JSON.stringify({ nfcHardwareState: detail.nfcHardwareState }));
-        break;
     }
   }
 }
@@ -1167,9 +1163,9 @@ let RemoteDebugger = {
       };
 
 #ifdef MOZ_WIDGET_GONK
-      DebuggerServer.onConnectionChange = function(what) {
+      DebuggerServer.on("connectionchange", function() {
         AdbController.updateState();
-      }
+      });
 #endif
     }
 

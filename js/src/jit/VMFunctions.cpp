@@ -1018,7 +1018,7 @@ Recompile(JSContext *cx)
 {
     JS_ASSERT(cx->currentlyRunningInJit());
     JitActivationIterator activations(cx->runtime());
-    IonFrameIterator iter(activations);
+    JitFrameIterator iter(activations);
 
     JS_ASSERT(iter.type() == JitFrame_Exit);
     ++iter;
@@ -1035,6 +1035,45 @@ Recompile(JSContext *cx)
         return false;
 
     return true;
+}
+
+bool
+SetDenseElement(JSContext *cx, HandleObject obj, int32_t index, HandleValue value,
+                bool strict)
+{
+    // This function is called from Ion code for StoreElementHole's OOL path.
+    // In this case we know the object is native, has no indexed properties
+    // and we can use setDenseElement instead of setDenseElementWithType.
+
+    MOZ_ASSERT(obj->isNative());
+    MOZ_ASSERT(!obj->isIndexed());
+
+    JSObject::EnsureDenseResult result = JSObject::ED_SPARSE;
+    do {
+        if (index < 0)
+            break;
+        bool isArray = obj->is<ArrayObject>();
+        if (isArray && !obj->as<ArrayObject>().lengthIsWritable())
+            break;
+        uint32_t idx = uint32_t(index);
+        result = obj->ensureDenseElements(cx, idx, 1);
+        if (result != JSObject::ED_OK)
+            break;
+        if (isArray) {
+            ArrayObject &arr = obj->as<ArrayObject>();
+            if (idx >= arr.length())
+                arr.setLengthInt32(idx + 1);
+        }
+        obj->setDenseElement(idx, value);
+        return true;
+    } while (false);
+
+    if (result == JSObject::ED_FAILED)
+        return false;
+    MOZ_ASSERT(result == JSObject::ED_SPARSE);
+
+    RootedValue indexVal(cx, Int32Value(index));
+    return SetObjectElement(cx, obj, indexVal, value, strict);
 }
 
 #ifdef DEBUG

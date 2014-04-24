@@ -38,7 +38,7 @@ import org.mozilla.gecko.health.HealthRecorder;
 import org.mozilla.gecko.health.SessionInformation;
 import org.mozilla.gecko.home.BrowserSearch;
 import org.mozilla.gecko.home.HomeBanner;
-import org.mozilla.gecko.home.HomeConfigInvalidator;
+import org.mozilla.gecko.home.HomePanelsManager;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.SearchEngine;
@@ -356,16 +356,6 @@ abstract public class BrowserApp extends GeckoApp
         return super.onKeyDown(keyCode, event);
     }
 
-    void handleReaderListCountRequest() {
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                final int count = BrowserDB.getReadingListCount(getContentResolver());
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Reader:ListCountReturn", Integer.toString(count)));
-            }
-        });
-    }
-
     void handleReaderListStatusRequest(final String url) {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
@@ -402,9 +392,6 @@ abstract public class BrowserApp extends GeckoApp
             public void run() {
                 BrowserDB.addReadingListItem(getContentResolver(), values);
                 showToast(R.string.reading_list_added, Toast.LENGTH_SHORT);
-
-                final int count = BrowserDB.getReadingListCount(getContentResolver());
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Reader:ListCountUpdated", Integer.toString(count)));
             }
         });
     }
@@ -491,65 +478,7 @@ abstract public class BrowserApp extends GeckoApp
             mBrowserSearch.setUserVisibleHint(false);
         }
 
-        mBrowserToolbar.setOnActivateListener(new BrowserToolbar.OnActivateListener() {
-            public void onActivate() {
-                enterEditingMode();
-            }
-        });
-
-        mBrowserToolbar.setOnCommitListener(new BrowserToolbar.OnCommitListener() {
-            public void onCommit() {
-                commitEditingMode();
-            }
-        });
-
-        mBrowserToolbar.setOnDismissListener(new BrowserToolbar.OnDismissListener() {
-            public void onDismiss() {
-                mBrowserToolbar.cancelEdit();
-            }
-        });
-
-        mBrowserToolbar.setOnFilterListener(new BrowserToolbar.OnFilterListener() {
-            public void onFilter(String searchText, AutocompleteHandler handler) {
-                filterEditingMode(searchText, handler);
-            }
-        });
-
-        mBrowserToolbar.setOnFocusChangeListener(new View.OnFocusChangeListener() {
-            @Override
-            public void onFocusChange(View v, boolean hasFocus) {
-                if (isHomePagerVisible()) {
-                    mHomePager.onToolbarFocusChange(hasFocus);
-                }
-            }
-        });
-
-        mBrowserToolbar.setOnStartEditingListener(new BrowserToolbar.OnStartEditingListener() {
-            public void onStartEditing() {
-                // Temporarily disable doorhanger notifications.
-                mDoorHangerPopup.disable();
-            }
-        });
-
-        mBrowserToolbar.setOnStopEditingListener(new BrowserToolbar.OnStopEditingListener() {
-            public void onStopEditing() {
-                selectTargetTabForEditingMode();
-
-                // Since the underlying LayerView is set visible in hideHomePager, we would
-                // ordinarily want to call it first. However, hideBrowserSearch changes the
-                // visibility of the HomePager and hideHomePager will take no action if the
-                // HomePager is hidden, so we want to call hideBrowserSearch to restore the
-                // HomePager visibility first.
-                hideBrowserSearch();
-                hideHomePager();
-
-                // Re-enable doorhanger notifications. They may trigger on the selected tab above.
-                mDoorHangerPopup.enable();
-            }
-        });
-
-        // Intercept key events for gamepad shortcuts
-        mBrowserToolbar.setOnKeyListener(this);
+        setBrowserToolbarListeners();
 
         mFindInPageBar = (FindInPageBar) findViewById(R.id.find_in_page);
         mMediaCastingBar = (MediaCastingBar) findViewById(R.id.media_casting);
@@ -637,6 +566,68 @@ abstract public class BrowserApp extends GeckoApp
         super.onPause();
         // Register for Prompt:ShowTop so we can foreground this activity even if it's hidden.
         registerEventListener("Prompt:ShowTop");
+    }
+
+    private void setBrowserToolbarListeners() {
+        mBrowserToolbar.setOnActivateListener(new BrowserToolbar.OnActivateListener() {
+            public void onActivate() {
+                enterEditingMode();
+            }
+        });
+
+        mBrowserToolbar.setOnCommitListener(new BrowserToolbar.OnCommitListener() {
+            public void onCommit() {
+                commitEditingMode();
+            }
+        });
+
+        mBrowserToolbar.setOnDismissListener(new BrowserToolbar.OnDismissListener() {
+            public void onDismiss() {
+                mBrowserToolbar.cancelEdit();
+            }
+        });
+
+        mBrowserToolbar.setOnFilterListener(new BrowserToolbar.OnFilterListener() {
+            public void onFilter(String searchText, AutocompleteHandler handler) {
+                filterEditingMode(searchText, handler);
+            }
+        });
+
+        mBrowserToolbar.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                if (isHomePagerVisible()) {
+                    mHomePager.onToolbarFocusChange(hasFocus);
+                }
+            }
+        });
+
+        mBrowserToolbar.setOnStartEditingListener(new BrowserToolbar.OnStartEditingListener() {
+            public void onStartEditing() {
+                // Temporarily disable doorhanger notifications.
+                mDoorHangerPopup.disable();
+            }
+        });
+
+        mBrowserToolbar.setOnStopEditingListener(new BrowserToolbar.OnStopEditingListener() {
+            public void onStopEditing() {
+                selectTargetTabForEditingMode();
+
+                // Since the underlying LayerView is set visible in hideHomePager, we would
+                // ordinarily want to call it first. However, hideBrowserSearch changes the
+                // visibility of the HomePager and hideHomePager will take no action if the
+                // HomePager is hidden, so we want to call hideBrowserSearch to restore the
+                // HomePager visibility first.
+                hideBrowserSearch();
+                hideHomePager();
+
+                // Re-enable doorhanger notifications. They may trigger on the selected tab above.
+                mDoorHangerPopup.enable();
+            }
+        });
+
+        // Intercept key events for gamepad shortcuts
+        mBrowserToolbar.setOnKeyListener(this);
     }
 
     private void showBookmarkDialog() {
@@ -1202,8 +1193,6 @@ abstract public class BrowserApp extends GeckoApp
                 Telemetry.HistogramAdd("PLACES_BOOKMARKS_COUNT", BrowserDB.getCount(getContentResolver(), "bookmarks"));
                 Telemetry.HistogramAdd("FENNEC_FAVICONS_COUNT", BrowserDB.getCount(getContentResolver(), "favicons"));
                 Telemetry.HistogramAdd("FENNEC_THUMBNAILS_COUNT", BrowserDB.getCount(getContentResolver(), "thumbnails"));
-            } else if (event.equals("Reader:ListCountRequest")) {
-                handleReaderListCountRequest();
             } else if (event.equals("Reader:ListStatusRequest")) {
                 handleReaderListStatusRequest(message.getString("url"));
             } else if (event.equals("Reader:Added")) {
@@ -1286,16 +1275,10 @@ abstract public class BrowserApp extends GeckoApp
     public void showPrivateTabs() {
         showTabs(TabsPanel.Panel.PRIVATE_TABS);
     }
-
-    @Override
-    public void showRemoteTabs() {
-        showTabs(TabsPanel.Panel.REMOTE_TABS);
-    }
-
     /**
-     * Ensure the TabsPanel view is properly inflated and returns
-     * true when the view has been inflated, false otherwise.
-     */
+    * Ensure the TabsPanel view is properly inflated and returns
+    * true when the view has been inflated, false otherwise.
+    */
     private boolean ensureTabsPanelExists() {
         if (mTabsPanel != null) {
             return false;
@@ -1695,7 +1678,7 @@ abstract public class BrowserApp extends GeckoApp
     public void onLocaleReady(final String locale) {
         super.onLocaleReady(locale);
 
-        HomeConfigInvalidator.getInstance().onLocaleReady(locale);
+        HomePanelsManager.getInstance().onLocaleReady(locale);
 
         if (mMenu != null) {
             mMenu.clear();

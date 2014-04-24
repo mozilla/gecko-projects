@@ -113,10 +113,8 @@ MacroAssemblerX86::addConstantFloat32(float f, const FloatRegister &dest)
 void
 MacroAssemblerX86::finish()
 {
-    if (doubles_.empty() && floats_.empty())
-        return;
-
-    masm.align(sizeof(double));
+    if (!doubles_.empty())
+        masm.align(sizeof(double));
     for (size_t i = 0; i < doubles_.length(); i++) {
         CodeLabel cl(doubles_[i].uses);
         writeDoubleConstant(doubles_[i].value, cl.src());
@@ -124,6 +122,9 @@ MacroAssemblerX86::finish()
         if (!enoughMemory_)
             return;
     }
+
+    if (!floats_.empty())
+        masm.align(sizeof(float));
     for (size_t i = 0; i < floats_.length(); i++) {
         CodeLabel cl(floats_[i].uses);
         writeFloatConstant(floats_[i].value, cl.src());
@@ -386,32 +387,29 @@ MacroAssemblerX86::branchTestValue(Condition cond, const ValueOperand &value, co
     }
 }
 
-Assembler::Condition
-MacroAssemblerX86::testNegativeZero(const FloatRegister &reg, const Register &scratch)
+#ifdef JSGC_GENERATIONAL
+
+void
+MacroAssemblerX86::branchPtrInNurseryRange(Register ptr, Register temp, Label *label)
 {
-    // Determines whether the single double contained in the XMM register reg
-    // is equal to double-precision -0.
+    JS_ASSERT(ptr != temp);
+    JS_ASSERT(temp != InvalidReg);  // A temp register is required for x86.
 
-    Label nonZero;
-
-    // Compare to zero. Lets through {0, -0}.
-    xorpd(ScratchFloatReg, ScratchFloatReg);
-    // If reg is non-zero, then a test of Zero is false.
-    branchDouble(DoubleNotEqual, reg, ScratchFloatReg, &nonZero);
-
-    // Input register is either zero or negative zero. Test sign bit.
-    movmskpd(reg, scratch);
-    // If reg is -0, then a test of Zero is true.
-    cmpl(scratch, Imm32(1));
-
-    bind(&nonZero);
-    return Zero;
+    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
+    movePtr(ImmWord(-ptrdiff_t(nursery.start())), temp);
+    addPtr(ptr, temp);
+    branchPtr(Assembler::Below, temp, Imm32(Nursery::NurserySize), label);
 }
 
-Assembler::Condition
-MacroAssemblerX86::testNegativeZeroFloat32(const FloatRegister &reg, const Register &scratch)
+void
+MacroAssemblerX86::branchValueIsNurseryObject(ValueOperand value, Register temp, Label *label)
 {
-    movd(reg, scratch);
-    cmpl(scratch, Imm32(1));
-    return Overflow;
+    Label done;
+
+    branchTestObject(Assembler::NotEqual, value, &done);
+    branchPtrInNurseryRange(value.payloadReg(), temp, label);
+
+    bind(&done);
 }
+
+#endif

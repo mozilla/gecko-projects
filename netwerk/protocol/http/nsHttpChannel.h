@@ -17,7 +17,6 @@
 #include "nsIProtocolProxyCallback.h"
 #include "nsIHttpAuthenticableChannel.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
-#include "nsITimedChannel.h"
 #include "nsIThreadRetargetableRequest.h"
 #include "nsIThreadRetargetableStreamListener.h"
 #include "nsWeakReference.h"
@@ -30,6 +29,7 @@ class nsICacheEntryDescriptor;
 class nsICancelable;
 class nsIHttpChannelAuthProvider;
 class nsInputStreamPump;
+class nsPerformance;
 
 namespace mozilla { namespace net {
 
@@ -47,7 +47,6 @@ class nsHttpChannel : public HttpBaseChannel
                     , public nsIHttpAuthenticableChannel
                     , public nsIApplicationCacheChannel
                     , public nsIAsyncVerifyRedirectCallback
-                    , public nsITimedChannel
                     , public nsIThreadRetargetableRequest
                     , public nsIThreadRetargetableStreamListener
                     , public nsIDNSListener
@@ -67,7 +66,6 @@ public:
     NS_DECL_NSIAPPLICATIONCACHECONTAINER
     NS_DECL_NSIAPPLICATIONCACHECHANNEL
     NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
-    NS_DECL_NSITIMEDCHANNEL
     NS_DECL_NSITHREADRETARGETABLEREQUEST
     NS_DECL_NSIDNSLISTENER
 
@@ -118,6 +116,14 @@ public:
 
     NS_IMETHOD SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks);
     NS_IMETHOD SetLoadGroup(nsILoadGroup *aLoadGroup);
+    // nsITimedChannel
+    NS_IMETHOD GetDomainLookupStart(mozilla::TimeStamp *aDomainLookupStart);
+    NS_IMETHOD GetDomainLookupEnd(mozilla::TimeStamp *aDomainLookupEnd);
+    NS_IMETHOD GetConnectStart(mozilla::TimeStamp *aConnectStart);
+    NS_IMETHOD GetConnectEnd(mozilla::TimeStamp *aConnectEnd);
+    NS_IMETHOD GetRequestStart(mozilla::TimeStamp *aRequestStart);
+    NS_IMETHOD GetResponseStart(mozilla::TimeStamp *aResponseStart);
+    NS_IMETHOD GetResponseEnd(mozilla::TimeStamp *aResponseEnd);
 
 public: /* internal necko use only */
 
@@ -403,14 +409,6 @@ private:
 
     nsTArray<nsContinueRedirectionFunc> mRedirectFuncStack;
 
-    PRTime                            mChannelCreationTime;
-    TimeStamp                         mChannelCreationTimestamp;
-    TimeStamp                         mAsyncOpenTime;
-    TimeStamp                         mCacheReadStart;
-    TimeStamp                         mCacheReadEnd;
-    // copied from the transaction before we null out mTransaction
-    // so that the timing can still be queried from OnStopRequest
-    TimingStruct                      mTransactionTimings;
     // Needed for accurate DNS timing
     nsRefPtr<nsDNSPrefetch>           mDNSPrefetch;
 
@@ -420,6 +418,7 @@ private:
 
 protected:
     virtual void DoNotifyListenerCleanup();
+    nsPerformance* GetPerformance();
 
 private: // cache telemetry
     bool mDidReval;

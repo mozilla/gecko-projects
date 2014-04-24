@@ -37,33 +37,31 @@ static void print_usage() {
   printf("usage:\n");
   printf("Create a MAR file:\n");
   printf("  mar [-H MARChannelID] [-V ProductVersion] [-C workingDir] "
-         "{-c|-x|-t|-T} archive.mar [files...]\n");
+         "-c archive.mar [files...]\n");
+
+  printf("Extract a MAR file:\n");
+  printf("  mar [-C workingDir] -x archive.mar\n");
 #ifndef NO_SIGN_VERIFY
   printf("Sign a MAR file:\n");
   printf("  mar [-C workingDir] -d NSSConfigDir -n certname -s "
          "archive.mar out_signed_archive.mar\n");
+
   printf("Strip a MAR signature:\n");
   printf("  mar [-C workingDir] -r "
          "signed_input_archive.mar output_archive.mar\n");
+
   printf("Extract a MAR signature:\n");
   printf("  mar [-C workingDir] -n(i) -X "
          "signed_input_archive.mar base_64_encoded_signature_file\n");
+
   printf("Import a MAR signature:\n");
   printf("  mar [-C workingDir] -n(i) -I "
          "signed_input_archive.mar base_64_encoded_signature_file "
          "changed_signed_output.mar\n");
   printf("(i) is the index of the certificate to extract\n");
-#if defined(XP_WIN) && !defined(MAR_NSS)
+#if defined(XP_MACOSX) || (defined(XP_WIN) && !defined(MAR_NSS))
   printf("Verify a MAR file:\n");
   printf("  mar [-C workingDir] -D DERFilePath -v signed_archive.mar\n");
-  printf("At most %d signature certificate DER files are specified by "
-         "-D0 DERFilePath1 -D1 DERFilePath2, ...\n", MAX_SIGNATURES);
-#elif defined(XP_MACOSX)
-  printf("Verify a MAR file:\n");
-  printf("  mar [-C workingDir] -d NSSConfigDir -n certname "
-         "-v signed_archive.mar -D DERFilePath\n");
-  printf("At most %d signature certificate names are specified by "
-         "-n0 certName -n1 certName2, ...\n", MAX_SIGNATURES);
   printf("At most %d signature certificate DER files are specified by "
          "-D0 DERFilePath1 -D1 DERFilePath2, ...\n", MAX_SIGNATURES);
 #else
@@ -77,8 +75,15 @@ static void print_usage() {
          "-n0 certName -n1 certName2, ...\n", MAX_SIGNATURES);
 #endif
   printf("Print information on a MAR file:\n");
+  printf("  mar -t archive.mar\n");
+
+  printf("Print detailed information on a MAR file including signatures:\n");
+  printf("  mar -T archive.mar\n");
+
+  printf("Refresh the product information block of a MAR file:\n");
   printf("  mar [-H MARChannelID] [-V ProductVersion] [-C workingDir] "
          "-i unsigned_archive_to_refresh.mar\n");
+
   printf("Print executable version:\n");
   printf("  mar --version\n");
   printf("This program does not handle unicode file paths properly\n");
@@ -113,9 +118,7 @@ int main(int argc, char **argv) {
   uint32_t i, k;
   int rv = -1;
   uint32_t certCount = 0;
-  uint32_t derCount = 0;
   int32_t sigIndex = -1;
-  char* DERFilePaths[MAX_SIGNATURES];
 
 #if defined(XP_WIN) && !defined(MAR_NSS) && !defined(NO_SIGN_VERIFY)
   HANDLE certFile;
@@ -123,6 +126,7 @@ int main(int argc, char **argv) {
 #endif
 #if !defined(NO_SIGN_VERIFY) && ((!defined(MAR_NSS) && defined(XP_WIN)) || \
                                  defined(XP_MACOSX))
+  char* DERFilePaths[MAX_SIGNATURES];
   uint32_t fileSizes[MAX_SIGNATURES];
   uint32_t read;
 #endif
@@ -133,9 +137,9 @@ int main(int argc, char **argv) {
 #endif
 #if !defined(NO_SIGN_VERIFY) && ((!defined(MAR_NSS) && defined(XP_WIN)) || \
                                  defined(XP_MACOSX))
+  memset(DERFilePaths, 0, sizeof(DERFilePaths));
   memset(fileSizes, 0, sizeof(fileSizes));
 #endif
-  memset(DERFilePaths, 0, sizeof(DERFilePaths));
 
   if (argc > 1 && 0 == strcmp(argv[1], "--version")) {
     print_version();
@@ -168,12 +172,12 @@ int main(int argc, char **argv) {
        with the import and export command line arguments. */
     else if (argv[1][0] == '-' &&
              argv[1][1] == 'D' &&
-             (argv[1][2] == (char)('0' + derCount) || argv[1][2] == '\0')) {
-      if (derCount >= MAX_SIGNATURES) {
+             (argv[1][2] == (char)('0' + certCount) || argv[1][2] == '\0')) {
+      if (certCount >= MAX_SIGNATURES) {
         print_usage();
         return -1;
       }
-      DERFilePaths[derCount++] = argv[2];
+      DERFilePaths[certCount++] = argv[2];
       argv += 2;
       argc -= 2;
     }
@@ -188,7 +192,7 @@ int main(int argc, char **argv) {
         with the import and export command line arguments. */
     } else if (argv[1][0] == '-' &&
                argv[1][1] == 'n' &&
-               (argv[1][2] == '0' + certCount ||
+               (argv[1][2] == (char)('0' + certCount) ||
                 argv[1][2] == '\0' ||
                 !strcmp(argv[2], "-X") ||
                 !strcmp(argv[2], "-I"))) {
@@ -317,12 +321,12 @@ int main(int argc, char **argv) {
   case 'v':
 
 #if defined(XP_WIN) && !defined(MAR_NSS)
-    if (derCount == 0) {
+    if (certCount == 0) {
       print_usage();
       return -1;
     }
 
-    for (k = 0; k < derCount; ++k) {
+    for (k = 0; k < certCount; ++k) {
       /* If the mar program was built using CryptoAPI, then read in the buffer
         containing the cert from disk. */
       certFile = CreateFileA(DERFilePaths[k], GENERIC_READ,
@@ -349,8 +353,8 @@ int main(int argc, char **argv) {
     }
 
     rv = mar_verify_signatures(argv[2], certBuffers, fileSizes,
-                               NULL, derCount);
-    for (k = 0; k < derCount; ++k) {
+                               NULL, certCount);
+    for (k = 0; k < certCount; ++k) {
       free(certBuffers[k]);
     }
     if (rv) {
@@ -368,6 +372,9 @@ int main(int argc, char **argv) {
 
     return 0;
 
+#elif defined(XP_MACOSX)
+    return mar_verify_signatures(argv[2], (const uint8_t* const*)DERFilePaths,
+                                 0, NULL, certCount);
 #else
     if (!NSSConfigDir || certCount == 0) {
       print_usage();
@@ -379,8 +386,7 @@ int main(int argc, char **argv) {
       return -1;
     }
 
-    return mar_verify_signatures(argv[2], (const uint8_t* const*)DERFilePaths,
-                                 0, certNames, certCount);
+    return mar_verify_signatures(argv[2], NULL, 0, certNames, certCount);
 
 #endif /* defined(XP_WIN) && !defined(MAR_NSS) */
   case 's':

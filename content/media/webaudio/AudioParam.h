@@ -109,10 +109,6 @@ public:
     AudioParamTimeline::SetTargetAtTime(aTarget, DOMTimeToStreamTime(aStartTime), aTimeConstant, aRv);
     mCallback(mNode);
   }
-  void SetTargetValueAtTime(float aTarget, double aStartTime, double aTimeConstant, ErrorResult& aRv)
-  {
-    SetTargetAtTime(aTarget, aStartTime, aTimeConstant, aRv);
-  }
   void CancelScheduledValues(double aStartTime, ErrorResult& aRv)
   {
     if (!WebAudioUtils::IsTimeValid(aStartTime)) {
@@ -152,6 +148,27 @@ public:
 
   // May create the stream if it doesn't exist
   MediaStream* Stream();
+
+  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    size_t amount = AudioParamTimeline::SizeOfExcludingThis(aMallocSizeOf);
+    // Not owned:
+    // - mNode
+
+    // Just count the array, actual nodes are counted in mNode.
+    amount += mInputNodes.SizeOfExcludingThis(aMallocSizeOf);
+
+    if (mNodeStreamPort) {
+      amount += mNodeStreamPort->SizeOfIncludingThis(aMallocSizeOf);
+    }
+
+    return amount;
+  }
+
+  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
+  {
+    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  }
 
 protected:
   nsCycleCollectingAutoRefCnt mRefCnt;

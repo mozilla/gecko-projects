@@ -938,6 +938,7 @@ void
 nsDisplayListBuilder::MarkFramesForDisplayList(nsIFrame* aDirtyFrame,
                                                const nsFrameList& aFrames,
                                                const nsRect& aDirtyRect) {
+  mFramesMarkedForDisplay.SetCapacity(mFramesMarkedForDisplay.Length() + aFrames.GetLength());
   for (nsFrameList::Enumerator e(aFrames); !e.AtEnd(); e.Next()) {
     mFramesMarkedForDisplay.AppendElement(e.get());
     MarkOutOfFlowFrameForDisplay(aDirtyFrame, e.get(), aDirtyRect);
@@ -5095,6 +5096,36 @@ nsRect nsDisplayTransform::TransformRectOut(const nsRect &aUntransformedBounds,
     (aUntransformedBounds,
      GetResultingTransformMatrix(aFrame, aOrigin, factor, aBoundsOverride),
      factor);
+}
+
+bool nsDisplayTransform::UntransformRect(const nsRect &aTransformedBounds,
+                                         const nsRect &aChildBounds,
+                                         const nsIFrame* aFrame,
+                                         const nsPoint &aOrigin,
+                                         nsRect *aOutRect)
+{
+  NS_PRECONDITION(aFrame, "Can't take the transform based on a null frame!");
+
+  float factor = aFrame->PresContext()->AppUnitsPerDevPixel();
+
+  gfx3DMatrix transform = GetResultingTransformMatrix(aFrame, aOrigin, factor, nullptr);
+  if (transform.IsSingular()) {
+    return false;
+  }
+
+  gfxRect result(NSAppUnitsToFloatPixels(aTransformedBounds.x, factor),
+                 NSAppUnitsToFloatPixels(aTransformedBounds.y, factor),
+                 NSAppUnitsToFloatPixels(aTransformedBounds.width, factor),
+                 NSAppUnitsToFloatPixels(aTransformedBounds.height, factor));
+
+  gfxRect childGfxBounds(NSAppUnitsToFloatPixels(aChildBounds.x, factor),
+                         NSAppUnitsToFloatPixels(aChildBounds.y, factor),
+                         NSAppUnitsToFloatPixels(aChildBounds.width, factor),
+                         NSAppUnitsToFloatPixels(aChildBounds.height, factor));
+
+  result = transform.UntransformBounds(result, childGfxBounds);
+  *aOutRect = nsLayoutUtils::RoundGfxRectToAppRect(result, factor);
+  return true;
 }
 
 bool nsDisplayTransform::UntransformVisibleRect(nsDisplayListBuilder* aBuilder,

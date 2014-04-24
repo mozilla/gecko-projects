@@ -70,17 +70,16 @@ SVGMotionSMILAnimationFunction::SetAttr(nsIAtom* aAttribute,
     if (aParseResult) {
       *aParseResult = rv;
     }
-  } else if (aAttribute == nsGkAtoms::path) {
-    aResult.SetTo(aValue);
-    if (aParseResult) {
-      *aParseResult = NS_OK;
-    }
-    MarkStaleIfAttributeAffectsPath(aAttribute);
-  } else if (aAttribute == nsGkAtoms::by ||
+  } else if (aAttribute == nsGkAtoms::path ||
+             aAttribute == nsGkAtoms::by ||
              aAttribute == nsGkAtoms::from ||
              aAttribute == nsGkAtoms::to ||
              aAttribute == nsGkAtoms::values) {
+    aResult.SetTo(aValue);
     MarkStaleIfAttributeAffectsPath(aAttribute);
+    if (aParseResult) {
+      *aParseResult = NS_OK;
+    }
   } else {
     // Defer to superclass method
     return nsSMILAnimationFunction::SetAttr(aAttribute, aValue,
@@ -378,8 +377,8 @@ SVGMotionSMILAnimationFunction::CheckKeyPoints()
     SetKeyPointsErrorFlag(false);
   }
 
-  if (mKeyPoints.IsEmpty()) {
-    // keyPoints attr is set, but array is empty => it failed preliminary checks
+  if (mKeyPoints.Length() != mKeyTimes.Length()) {
+    // there must be exactly as many keyPoints as keyTimes
     SetKeyPointsErrorFlag(true);
     return;
   }
@@ -388,10 +387,6 @@ SVGMotionSMILAnimationFunction::CheckKeyPoints()
   // -  Formatting & range issues will be caught in SetKeyPoints, and will
   //  result in an empty mKeyPoints array, which will drop us into the error
   //  case above.
-  // -  Number-of-entries issues will be caught in CheckKeyTimes (and flagged
-  //  as a problem with |keyTimes|), since we use our keyPoints entries to
-  //  populate the "values" list, and that list's count gets passed to
-  //  CheckKeyTimes.
 }
 
 nsresult

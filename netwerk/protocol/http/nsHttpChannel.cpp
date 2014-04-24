@@ -62,6 +62,8 @@
 #include "nsIStreamConverterService.h"
 #include "nsISiteSecurityService.h"
 #include "nsCRT.h"
+#include "nsPIDOMWindow.h"
+#include "nsPerformance.h"
 #include "CacheObserver.h"
 #include "mozilla/Telemetry.h"
 
@@ -4366,7 +4368,6 @@ NS_INTERFACE_MAP_BEGIN(nsHttpChannel)
     NS_INTERFACE_MAP_ENTRY(nsIApplicationCacheContainer)
     NS_INTERFACE_MAP_ENTRY(nsIApplicationCacheChannel)
     NS_INTERFACE_MAP_ENTRY(nsIAsyncVerifyRedirectCallback)
-    NS_INTERFACE_MAP_ENTRY(nsITimedChannel)
     NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableRequest)
     NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableStreamListener)
     NS_INTERFACE_MAP_ENTRY(nsIDNSListener)
@@ -4751,30 +4752,6 @@ nsHttpChannel::GetProxyInfo(nsIProxyInfo **result)
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsHttpChannel::SetTimingEnabled(bool enabled) {
-    mTimingEnabled = enabled;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsHttpChannel::GetTimingEnabled(bool* _retval) {
-    *_retval = mTimingEnabled;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsHttpChannel::GetChannelCreation(TimeStamp* _retval) {
-    *_retval = mChannelCreationTimestamp;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsHttpChannel::GetAsyncOpen(TimeStamp* _retval) {
-    *_retval = mAsyncOpenTime;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
 nsHttpChannel::GetDomainLookupStart(TimeStamp* _retval) {
     if (mDNSPrefetch && mDNSPrefetch->TimingsValid())
         *_retval = mDNSPrefetch->StartTimestamp();
@@ -4840,46 +4817,6 @@ nsHttpChannel::GetResponseEnd(TimeStamp* _retval) {
         *_retval = mTransactionTimings.responseEnd;
     return NS_OK;
 }
-
-NS_IMETHODIMP
-nsHttpChannel::GetCacheReadStart(TimeStamp* _retval) {
-    *_retval = mCacheReadStart;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsHttpChannel::GetCacheReadEnd(TimeStamp* _retval) {
-    *_retval = mCacheReadEnd;
-    return NS_OK;
-}
-
-#define IMPL_TIMING_ATTR(name)                                 \
-NS_IMETHODIMP                                                  \
-nsHttpChannel::Get##name##Time(PRTime* _retval) {              \
-    TimeStamp stamp;                                  \
-    Get##name(&stamp);                                         \
-    if (stamp.IsNull()) {                                      \
-        *_retval = 0;                                          \
-        return NS_OK;                                          \
-    }                                                          \
-    *_retval = mChannelCreationTime +                          \
-        (PRTime) ((stamp - mChannelCreationTimestamp).ToSeconds() * 1e6); \
-    return NS_OK;                                              \
-}
-
-IMPL_TIMING_ATTR(ChannelCreation)
-IMPL_TIMING_ATTR(AsyncOpen)
-IMPL_TIMING_ATTR(DomainLookupStart)
-IMPL_TIMING_ATTR(DomainLookupEnd)
-IMPL_TIMING_ATTR(ConnectStart)
-IMPL_TIMING_ATTR(ConnectEnd)
-IMPL_TIMING_ATTR(RequestStart)
-IMPL_TIMING_ATTR(ResponseStart)
-IMPL_TIMING_ATTR(ResponseEnd)
-IMPL_TIMING_ATTR(CacheReadStart)
-IMPL_TIMING_ATTR(CacheReadEnd)
-
-#undef IMPL_TIMING_ATTR
 
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsIHttpAuthenticableChannel
@@ -5238,6 +5175,12 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
         if (writeAccess) {
             FinalizeCacheEntry();
         }
+    }
+
+    // Register entry to the Performance resource timing
+    nsPerformance* documentPerformance = GetPerformance();
+    if (documentPerformance) {
+        documentPerformance->AddEntry(this, this);
     }
 
     if (mListener) {
@@ -6216,6 +6159,46 @@ nsHttpChannel::SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks)
         UpdateAggregateCallbacks();
     }
     return rv;
+}
+
+nsPerformance*
+nsHttpChannel::GetPerformance()
+{
+    // If performance timing is disabled, there is no need for the nsPerformance
+    // object anymore.
+    if (!mTimingEnabled) {
+        return nullptr;
+    }
+    nsCOMPtr<nsILoadContext> loadContext;
+    NS_QueryNotificationCallbacks(this, loadContext);
+    if (!loadContext) {
+        return nullptr;
+    }
+    nsCOMPtr<nsIDOMWindow> domWindow;
+    loadContext->GetAssociatedWindow(getter_AddRefs(domWindow));
+    if (!domWindow) {
+        return nullptr;
+    }
+    nsCOMPtr<nsPIDOMWindow> pDomWindow = do_QueryInterface(domWindow);
+    if (!pDomWindow) {
+        return nullptr;
+    }
+    if (!pDomWindow->IsInnerWindow()) {
+        pDomWindow = pDomWindow->GetCurrentInnerWindow();
+        if (!pDomWindow) {
+            return nullptr;
+        }
+    }
+
+    nsPerformance* docPerformance = pDomWindow->GetPerformance();
+    if (!docPerformance) {
+      return nullptr;
+    }
+    // iframes should be added to the parent's entries list.
+    if (mLoadFlags & LOAD_DOCUMENT_URI) {
+      return docPerformance->GetParentPerformance();
+    }
+    return docPerformance;
 }
 
 void

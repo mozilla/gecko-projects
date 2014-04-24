@@ -35,6 +35,11 @@
              moveY 3.4s linear 0s infinite alternate;
 }
 
+#PanelUI-popup #PanelUI-contents:-moz-locale-dir(rtl):empty::before {
+  animation: moveXRTL 3.05s linear 0s infinite alternate,
+             moveY 3.4s linear 0s infinite alternate;
+}
+
 #PanelUI-popup #PanelUI-contents:empty:hover::before {
   background-image: url(chrome://browser/skin/customizableui/whimsy.png);
 }
@@ -53,9 +58,15 @@
   /* These values are adjusted for the padding on the panel. */
   from { margin-left: -15px; } to { margin-left: calc(100% - 49px); }
 }
+
+@keyframes moveXRTL {
+  /* These values are adjusted for the padding on the panel. */
+  from { margin-right: -15px; } to { margin-right: calc(100% - 49px); }
+}
+
 @keyframes moveY {
   /* These values are adjusted for the padding and height of the panel. */
-  from { margin-top: -6px; } to { margin-top: 58px; }
+  from { margin-top: -.5em; } to { margin-top: calc(64px - .5em); }
 }
 
 #PanelUI-button {
@@ -1055,6 +1066,10 @@ toolbaritem[overflowedItem=true],
 
 .subviewbutton[checked="true"] {
   background: url("chrome://global/skin/menu/shared-menu-check.png") center left 7px / 11px 11px no-repeat transparent;
+}
+
+.subviewbutton[checked="true"]:-moz-locale-dir(rtl) {
+  background-position: center right 7px;
 }
 
 .subviewbutton > .menu-iconic-left {

@@ -51,15 +51,18 @@
   padding-bottom: 1px;
 }
 
-#nav-bar {
-  background-image: linear-gradient(@toolbarHighlight@, rgba(255,255,255,0));
-  box-shadow: 0 1px 0 @toolbarHighlight@ inset;
+#TabsToolbar:not([collapsed="true"]) + #nav-bar {
   margin-top: -@tabToolbarNavbarOverlap@; /* Move up into the TabsToolbar */
-  padding-top: 2px;
-  padding-bottom: 2px;
   /* Position the toolbar above the bottom of background tabs */
   position: relative;
   z-index: 1;
+}
+
+#nav-bar {
+  background-image: linear-gradient(@toolbarHighlight@, rgba(255,255,255,0));
+  box-shadow: 0 1px 0 @toolbarHighlight@ inset;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 #nav-bar-overflow-button {
@@ -613,6 +616,7 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
   -moz-padding-end: 5px;
 }
 
+:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not([disabled=true]) > .toolbarbutton-menubutton-button[open] + .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not([disabled=true]):hover > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not([disabled=true]):hover > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not([disabled=true]):hover > .toolbarbutton-badge-container > .toolbarbutton-icon,
@@ -631,7 +635,7 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
   margin-bottom: 4px;
 }
 
-:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button:not([disabled=true]):hover:active > .toolbarbutton-icon,
+:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button:not([disabled=true]):-moz-any(:hover:active, [open="true"]) > .toolbarbutton-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1[open="true"] > .toolbarbutton-menubutton-dropmarker:not([disabled=true]) > .dropmarker-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active) > .toolbarbutton-badge-container > .toolbarbutton-icon,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not([disabled=true]):-moz-any([open],[checked],:hover:active) > .toolbarbutton-icon {
@@ -648,6 +652,7 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
   transition: background-color 150ms;
 }
 
+:-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button[open],
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button:hover:active,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:hover:active {
   padding: 3px;

@@ -39,7 +39,13 @@ public:
   {
     static_assert(LEN <= 15,
                   "Thread name must be no more than 15 characters");
-    return Dispatch(nsDependentCString(taskThreadName));
+    // Can't add 'this' as the event to run, since mThread may not be set yet
+    nsresult rv = NS_NewNamedThread(taskThreadName, getter_AddRefs(mThread));
+    if (NS_SUCCEEDED(rv)) {
+      // Note: event must not null out mThread!
+      rv = mThread->Dispatch(this, NS_DISPATCH_NORMAL);
+    }
+    return rv;
   }
 
 protected:
@@ -76,10 +82,10 @@ private:
   NS_IMETHOD Run() MOZ_OVERRIDE MOZ_FINAL;
   virtual void virtualDestroyNSSReference() MOZ_OVERRIDE MOZ_FINAL;
 
-  nsresult Dispatch(const nsACString & taskThreadName);
-
   nsresult mRv;
   bool mReleasedNSSResources;
+
+  nsCOMPtr<nsIThread> mThread;
 };
 
 } // namespace mozilla

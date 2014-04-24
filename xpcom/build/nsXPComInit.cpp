@@ -16,6 +16,9 @@
 
 #include "prlink.h"
 
+#include "mozilla/layers/ImageBridgeChild.h"
+#include "mozilla/layers/CompositorParent.h"
+
 #include "nsCycleCollector.h"
 #include "nsObserverList.h"
 #include "nsObserverService.h"
@@ -131,8 +134,11 @@ extern nsresult nsStringInputStreamConstructor(nsISupports *, REFNSIID, void **)
 #endif
 
 #include "ogg/ogg.h"
-#ifdef MOZ_VPX
+#if defined(MOZ_VPX) && !defined(MOZ_VPX_NO_MEM_REPORTING)
 #include "vpx_mem/vpx_mem.h"
+#endif
+#ifdef MOZ_WEBM
+#include "nestegg/nestegg.h"
 #endif
 
 #include "GeckoProfiler.h"
@@ -415,6 +421,28 @@ NS_IMPL_ISUPPORTS1(VPXReporter, nsIMemoryReporter)
 /* static */ template<> Atomic<size_t> CountingAllocatorBase<VPXReporter>::sAmount(0);
 #endif /* MOZ_VPX */
 
+#ifdef MOZ_WEBM
+class NesteggReporter MOZ_FINAL : public nsIMemoryReporter
+                                , public CountingAllocatorBase<NesteggReporter>
+{
+public:
+    NS_DECL_ISUPPORTS
+
+private:
+    NS_IMETHODIMP
+    CollectReports(nsIHandleReportCallback* aHandleReport, nsISupports* aData)
+    {
+        return MOZ_COLLECT_REPORT(
+            "explicit/media/libnestegg", KIND_HEAP, UNITS_BYTES, MemoryAllocated(),
+            "Memory allocated through libnestegg for WebM media files.");
+    }
+};
+
+NS_IMPL_ISUPPORTS1(NesteggReporter, nsIMemoryReporter)
+
+/* static */ template<> Atomic<size_t> CountingAllocatorBase<NesteggReporter>::sAmount(0);
+#endif /* MOZ_WEBM */
+
 EXPORT_XPCOM_API(nsresult)
 NS_InitXPCOM2(nsIServiceManager* *result,
               nsIFile* binDirectory,
@@ -574,7 +602,7 @@ NS_InitXPCOM2(nsIServiceManager* *result,
                           OggReporter::CountingRealloc,
                           OggReporter::CountingFree);
 
-#ifdef MOZ_VPX
+#if defined(MOZ_VPX) && !defined(MOZ_VPX_NO_MEM_REPORTING)
     // And for VPX.
     vpx_mem_set_functions(VPXReporter::CountingMalloc,
                           VPXReporter::CountingCalloc,
@@ -583,6 +611,11 @@ NS_InitXPCOM2(nsIServiceManager* *result,
                           memcpy,
                           memset,
                           memmove);
+#endif
+
+#ifdef MOZ_WEBM
+    // And for libnestegg.
+    nestegg_set_halloc_func(NesteggReporter::CountingRealloc);
 #endif
 
     // Initialize the JS engine.
@@ -637,6 +670,9 @@ NS_InitXPCOM2(nsIServiceManager* *result,
     RegisterStrongMemoryReporter(new OggReporter());
 #ifdef MOZ_VPX
     RegisterStrongMemoryReporter(new VPXReporter());
+#endif
+#ifdef MOZ_WEBM
+    RegisterStrongMemoryReporter(new NesteggReporter());
 #endif
 
     mozilla::Telemetry::Init();

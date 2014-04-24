@@ -92,9 +92,8 @@ nsXBLProtoImpl::InstallImplementation(nsXBLPrototypeBinding* aPrototypeBinding,
     // Define it as a property on the scopeObject, using the same name used on
     // the content side.
     bool ok = JS_DefineProperty(cx, scopeObject, aPrototypeBinding->ClassName().get(),
-                                JS::ObjectValue(*propertyHolder), JS_PropertyStub,
-                                JS_StrictPropertyStub,
-                                JSPROP_PERMANENT | JSPROP_READONLY);
+                                propertyHolder, JSPROP_PERMANENT | JSPROP_READONLY,
+                                JS_PropertyStub, JS_StrictPropertyStub);
     NS_ENSURE_TRUE(ok, NS_ERROR_UNEXPECTED);
   } else {
     propertyHolder = targetClassObject;
@@ -202,7 +201,7 @@ nsXBLProtoImpl::CompilePrototypeMembers(nsXBLPrototypeBinding* aBinding)
   // bind the prototype to a real xbl instance, we'll clone the pre-compiled JS into the real instance's 
   // context.
   AutoSafeJSContext cx;
-  JS::Rooted<JSObject*> compilationGlobal(cx, aBinding->XBLDocumentInfo()->GetCompilationGlobal());
+  JS::Rooted<JSObject*> compilationGlobal(cx, xpc::GetCompilationScope());
   NS_ENSURE_TRUE(compilationGlobal, NS_ERROR_UNEXPECTED);
   JSAutoCompartment ac(cx, compilationGlobal);
 

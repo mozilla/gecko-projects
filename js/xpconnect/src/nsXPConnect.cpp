@@ -88,7 +88,7 @@ nsXPConnect::nsXPConnect()
 
 nsXPConnect::~nsXPConnect()
 {
-    mRuntime->DeleteJunkScope();
+    mRuntime->DeleteSingletonScopes();
     mRuntime->DestroyJSContextStack();
 
     // In order to clean up everything properly, we need to GC twice: once now,
@@ -323,18 +323,21 @@ nsXPConnect::InitClasses(JSContext * aJSContext, JSObject * aGlobalJSObj)
 }
 
 #ifdef DEBUG
-struct VerifyTraceXPCGlobalCalledTracer
-{
-    JSTracer base;
-    bool ok;
-};
-
 static void
 VerifyTraceXPCGlobalCalled(JSTracer *trc, void **thingp, JSGCTraceKind kind)
 {
     // We don't do anything here, we only want to verify that TraceXPCGlobal
     // was called.
 }
+
+struct VerifyTraceXPCGlobalCalledTracer : public JSTracer
+{
+    bool ok;
+
+    VerifyTraceXPCGlobalCalledTracer(JSRuntime *rt)
+      : JSTracer(rt, VerifyTraceXPCGlobalCalled), ok(false)
+    {}
+};
 #endif
 
 void
@@ -379,10 +382,8 @@ CreateGlobalObject(JSContext *cx, const JSClass *clasp, nsIPrincipal *principal,
     // more complicated. Manual inspection shows that they do the right thing.
     if (!((const js::Class*)clasp)->ext.isWrappedNative)
     {
-        VerifyTraceXPCGlobalCalledTracer trc;
-        JS_TracerInit(&trc.base, JS_GetRuntime(cx), VerifyTraceXPCGlobalCalled);
-        trc.ok = false;
-        JS_TraceChildren(&trc.base, global, JSTRACE_OBJECT);
+        VerifyTraceXPCGlobalCalledTracer trc(JS_GetRuntime(cx));
+        JS_TraceChildren(&trc, global, JSTRACE_OBJECT);
         MOZ_ASSERT(trc.ok, "Trace hook on global needs to call TraceXPCGlobal for XPConnect compartments.");
     }
 #endif
@@ -411,6 +412,17 @@ InitGlobalObject(JSContext* aJSContext, JS::Handle<JSObject*> aGlobal, uint32_t 
             !XPCNativeWrapper::AttachNewConstructorObject(aJSContext, aGlobal)) {
             return UnexpectedFailure(false);
         }
+    }
+
+    if (ShouldDiscardSystemSource()) {
+        nsIPrincipal *prin = GetObjectPrincipal(aGlobal);
+        bool isSystem = nsContentUtils::IsSystemPrincipal(prin);
+        if (!isSystem) {
+            short status = prin->GetAppStatus();
+            isSystem = status == nsIPrincipal::APP_STATUS_PRIVILEGED ||
+                       status == nsIPrincipal::APP_STATUS_CERTIFIED;
+        }
+        JS::CompartmentOptionsRef(aGlobal).setDiscardSource(isSystem);
     }
 
     // Stuff coming through this path always ends up as a DOM global.
@@ -1359,7 +1371,8 @@ nsXPConnect::NotifyDidPaint()
     return NS_OK;
 }
 
-static const uint8_t HAS_PRINCIPALS_FLAG               = 1;
+// Note - We used to have HAS_PRINCIPALS_FLAG = 1 here, so reusing that flag
+// will require bumping the XDR version number.
 static const uint8_t HAS_ORIGIN_PRINCIPALS_FLAG        = 2;
 
 static nsresult
@@ -1381,8 +1394,6 @@ WriteScriptOrFunction(nsIObjectOutputStream *stream, JSContext *cx,
         nsJSPrincipals::get(JS_GetScriptOriginPrincipals(script));
 
     uint8_t flags = 0;
-    if (principal)
-        flags |= HAS_PRINCIPALS_FLAG;
 
     // Optimize for the common case when originPrincipals == principals. As
     // originPrincipals is set to principals when the former is null we can
@@ -1393,12 +1404,6 @@ WriteScriptOrFunction(nsIObjectOutputStream *stream, JSContext *cx,
     nsresult rv = stream->Write8(flags);
     if (NS_FAILED(rv))
         return rv;
-
-    if (flags & HAS_PRINCIPALS_FLAG) {
-        rv = stream->WriteObject(principal, true);
-        if (NS_FAILED(rv))
-            return rv;
-    }
 
     if (flags & HAS_ORIGIN_PRINCIPALS_FLAG) {
         rv = stream->WriteObject(originPrincipal, true);
@@ -1438,17 +1443,6 @@ ReadScriptOrFunction(nsIObjectInputStream *stream, JSContext *cx,
     if (NS_FAILED(rv))
         return rv;
 
-    nsJSPrincipals* principal = nullptr;
-    nsCOMPtr<nsIPrincipal> readPrincipal;
-    if (flags & HAS_PRINCIPALS_FLAG) {
-        nsCOMPtr<nsISupports> supports;
-        rv = stream->ReadObject(true, getter_AddRefs(supports));
-        if (NS_FAILED(rv))
-            return rv;
-        readPrincipal = do_QueryInterface(supports);
-        principal = nsJSPrincipals::get(readPrincipal);
-    }
-
     nsJSPrincipals* originPrincipal = nullptr;
     nsCOMPtr<nsIPrincipal> readOriginPrincipal;
     if (flags & HAS_ORIGIN_PRINCIPALS_FLAG) {
@@ -1472,14 +1466,14 @@ ReadScriptOrFunction(nsIObjectInputStream *stream, JSContext *cx,
 
     {
         if (scriptp) {
-            JSScript *script = JS_DecodeScript(cx, data, size, principal, originPrincipal);
+            JSScript *script = JS_DecodeScript(cx, data, size, originPrincipal);
             if (!script)
                 rv = NS_ERROR_OUT_OF_MEMORY;
             else
                 *scriptp = script;
         } else {
             JSObject *funobj = JS_DecodeInterpretedFunction(cx, data, size,
-                                                            principal, originPrincipal);
+                                                            originPrincipal);
             if (!funobj)
                 rv = NS_ERROR_OUT_OF_MEMORY;
             else

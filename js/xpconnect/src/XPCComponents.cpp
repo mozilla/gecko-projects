@@ -3257,7 +3257,7 @@ nsXPCComponents_Utils::BlockScriptForGlobal(HandleValue globalArg,
     RootedObject global(cx, UncheckedUnwrap(&globalArg.toObject(),
                                             /* stopAtOuter = */ false));
     NS_ENSURE_TRUE(JS_IsGlobalObject(global), NS_ERROR_INVALID_ARG);
-    if (nsContentUtils::IsSystemPrincipal(GetObjectPrincipal(global))) {
+    if (nsContentUtils::IsSystemPrincipal(xpc::GetObjectPrincipal(global))) {
         JS_ReportError(cx, "Script may not be disabled for system globals");
         return NS_ERROR_FAILURE;
     }
@@ -3273,7 +3273,7 @@ nsXPCComponents_Utils::UnblockScriptForGlobal(HandleValue globalArg,
     RootedObject global(cx, UncheckedUnwrap(&globalArg.toObject(),
                                             /* stopAtOuter = */ false));
     NS_ENSURE_TRUE(JS_IsGlobalObject(global), NS_ERROR_INVALID_ARG);
-    if (nsContentUtils::IsSystemPrincipal(GetObjectPrincipal(global))) {
+    if (nsContentUtils::IsSystemPrincipal(xpc::GetObjectPrincipal(global))) {
         JS_ReportError(cx, "Script may not be disabled for system globals");
         return NS_ERROR_FAILURE;
     }
@@ -3431,12 +3431,12 @@ nsXPCComponents_Utils::GetJSEngineTelemetryValue(JSContext *cx, MutableHandleVal
 
     size_t i = JS_SetProtoCalled(cx);
     RootedValue v(cx, DoubleValue(i));
-    if (!JS_DefineProperty(cx, obj, "setProto", v, nullptr, nullptr, attrs))
+    if (!JS_DefineProperty(cx, obj, "setProto", v, attrs))
         return NS_ERROR_OUT_OF_MEMORY;
 
     i = JS_GetCustomIteratorCount(cx);
     v.setDouble(i);
-    if (!JS_DefineProperty(cx, obj, "customIter", v, nullptr, nullptr, attrs))
+    if (!JS_DefineProperty(cx, obj, "customIter", v, attrs))
         return NS_ERROR_OUT_OF_MEMORY;
 
     rval.setObject(*obj);
@@ -3613,6 +3613,21 @@ nsXPCComponents_Utils::GetWebIDLCallerPrincipal(nsIPrincipal **aResult)
     if (!callerPrin)
         return NS_ERROR_NOT_AVAILABLE;
     callerPrin.forget(aResult);
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::GetObjectPrincipal(HandleValue val, JSContext *cx,
+                                          nsIPrincipal **result)
+{
+    if (!val.isObject())
+        return NS_ERROR_INVALID_ARG;
+    RootedObject obj(cx, &val.toObject());
+    obj = js::CheckedUnwrap(obj);
+    MOZ_ASSERT(obj);
+
+    nsCOMPtr<nsIPrincipal> prin = nsContentUtils::GetObjectPrincipal(obj);
+    prin.forget(result);
     return NS_OK;
 }
 

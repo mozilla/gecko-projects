@@ -424,7 +424,7 @@ add_task(function* test_disableExperiment() {
 
   now = futureDate(now, 1 * MS_IN_ONE_DAY);
   defineNow(gPolicy, now);
-  yield experiments.disableExperiment();
+  yield experiments.disableExperiment("foo");
 
   list = yield experiments.getExperiments();
   Assert.equal(list.length, 1, "Experiment list should have 1 entry.");
@@ -749,7 +749,7 @@ add_task(function* test_userDisabledAndUpdated() {
 
   now = futureDate(now, 20 * MS_IN_ONE_DAY);
   defineNow(gPolicy, now);
-  yield experiments.disableExperiment();
+  yield experiments.disableExperiment("foo");
   Assert.equal(observerFireCount, ++expectedObserverFireCount,
                "Experiments observer should have been called.");
 
@@ -1366,9 +1366,9 @@ add_task(function* testUnknownExperimentsUninstalled() {
   Assert.equal(addons.length, 0, "Precondition: No experiment add-ons are present.");
 
   // Simulate us not listening.
-  experiments._stopWatchingAddons();
+  experiments._unregisterWithAddonManager();
   yield AddonTestUtils.installXPIFromURL(gDataRoot + EXPERIMENT1_XPI_NAME, EXPERIMENT1_XPI_SHA1);
-  experiments._startWatchingAddons();
+  experiments._registerWithAddonManager();
 
   addons = yield getExperimentAddons();
   Assert.equal(addons.length, 1, "Experiment 1 installed via AddonManager");
@@ -1405,7 +1405,7 @@ add_task(function* testForeignExperimentInstall() {
   let addons = yield getExperimentAddons();
   Assert.equal(addons.length, 0, "Precondition: No experiment add-ons present.");
 
-  let failed;
+  let failed = false;
   try {
     yield AddonTestUtils.installXPIFromURL(gDataRoot + EXPERIMENT1_XPI_NAME, EXPERIMENT1_XPI_SHA1);
   } catch (ex) {
@@ -1452,9 +1452,9 @@ add_task(function* testEnabledAfterRestart() {
   Assert.ok(addons[0].isActive, "That experiment is active.");
 
   dump("Restarting Addon Manager\n");
-  experiments._stopWatchingAddons();
+  experiments._unregisterWithAddonManager();
   restartManager();
-  experiments._startWatchingAddons();
+  experiments._registerWithAddonManager();
 
   addons = yield getExperimentAddons();
   Assert.equal(addons.length, 1, "The experiment is still there after restart.");

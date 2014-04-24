@@ -169,6 +169,13 @@ public:
     return mCount;
   }
 
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
+  {
+    size_t amount = 0;
+    amount += mBuffer.SizeOfExcludingThis(aMallocSizeOf);
+    return amount;
+  }
+
 private:
   nsAutoArrayPtr<uint8_t> mBuffer;
   uint32_t mCapacity;
@@ -279,6 +286,8 @@ public:
   nsresult SetPlaybackRate(double aPlaybackRate);
   // Switch between resampling (if false) and time stretching (if true, default).
   nsresult SetPreservesPitch(bool aPreservesPitch);
+
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
 private:
   friend class AudioInitTask;
@@ -433,7 +442,13 @@ public:
 
   nsresult Dispatch()
   {
-    return NS_NewNamedThread("CubebInit", getter_AddRefs(mThread), this);
+    // Can't add 'this' as the event to run, since mThread may not be set yet
+    nsresult rv = NS_NewNamedThread("CubebInit", getter_AddRefs(mThread));
+    if (NS_SUCCEEDED(rv)) {
+      // Note: event must not null out mThread!
+      rv = mThread->Dispatch(this, NS_DISPATCH_NORMAL);
+    }
+    return rv;
   }
 
 protected:

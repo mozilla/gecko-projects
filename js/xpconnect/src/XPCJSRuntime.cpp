@@ -40,6 +40,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/WindowBinding.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "AccessCheck.h"
 #include "nsGlobalWindow.h"
@@ -84,11 +85,10 @@ const char* const XPCJSRuntime::mStrings[] = {
 
 /***************************************************************************/
 
-struct CX_AND_XPCRT_Data
-{
-    JSContext* cx;
-    XPCJSRuntime* rt;
-};
+static mozilla::Atomic<bool> sDiscardSystemSource(false);
+
+bool
+xpc::ShouldDiscardSystemSource() { return sDiscardSystemSource; }
 
 static void * const UNMARK_ONLY = nullptr;
 static void * const UNMARK_AND_SWEEP = (void *)1;
@@ -585,6 +585,14 @@ GetJunkScopeGlobal()
     if (!junkScope)
         return nullptr;
     return GetNativeForGlobal(junkScope);
+}
+
+JSObject *
+GetCompilationScope()
+{
+    XPCJSRuntime *self = nsXPConnect::GetRuntimeInstance();
+    NS_ENSURE_TRUE(self, nullptr);
+    return self->GetCompilationScope();
 }
 
 JSObject *
@@ -1552,6 +1560,8 @@ ReloadPrefsCallback(const char *pref, void *data)
                                                  "baselinejit.unsafe_eager_compilation");
     bool useIonEager = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion.unsafe_eager_compilation");
 
+    sDiscardSystemSource = Preferences::GetBool(JS_OPTIONS_DOT_STR "discardSystemSource");
+
     JS::RuntimeOptionsRef(rt).setBaseline(useBaseline)
                              .setIon(useIon)
                            .  setAsmJS(useAsmJS);
@@ -2159,6 +2169,12 @@ ReportCompartmentStats(const JS::CompartmentStats &cStats,
             KIND_NONHEAP, nonHeapElementsAsmJS,
             "asm.js array buffer elements outside both the malloc heap and "
             "the GC heap.");
+    }
+
+    if (cStats.objectsExtra.nonHeapElementsMapped > 0) {
+        REPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("objects/non-heap/elements/mapped"),
+            KIND_NONHEAP, cStats.objectsExtra.nonHeapElementsMapped,
+            "Memory-mapped array buffer elements.");
     }
 
     REPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("objects/non-heap/code/asm.js"),
@@ -3038,7 +3054,8 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
    mWrappedJSRoots(nullptr),
    mObjectHolderRoots(nullptr),
    mWatchdogManager(new WatchdogManager(MOZ_THIS_IN_INITIALIZER_LIST())),
-   mJunkScope(nullptr),
+   mJunkScope(MOZ_THIS_IN_INITIALIZER_LIST()->Runtime(), nullptr),
+   mCompilationScope(MOZ_THIS_IN_INITIALIZER_LIST()->Runtime(), nullptr),
    mAsyncSnowWhiteFreer(new AsyncFreeSnowWhite())
 {
     DOM_InitInterfaces();
@@ -3470,24 +3487,38 @@ XPCJSRuntime::GetJunkScope()
     if (!mJunkScope) {
         AutoSafeJSContext cx;
         SandboxOptions options;
-        options.sandboxName.AssignASCII("XPConnect Junk Compartment");
+        options.sandboxName.AssignLiteral("XPConnect Junk Compartment");
         RootedValue v(cx);
         nsresult rv = CreateSandboxObject(cx, &v, nsContentUtils::GetSystemPrincipal(), options);
         NS_ENSURE_SUCCESS(rv, nullptr);
 
         mJunkScope = js::UncheckedUnwrap(&v.toObject());
-        JS_AddNamedObjectRoot(cx, &mJunkScope, "XPConnect Junk Compartment");
     }
     return mJunkScope;
 }
 
-void
-XPCJSRuntime::DeleteJunkScope()
+JSObject *
+XPCJSRuntime::GetCompilationScope()
 {
-    if(!mJunkScope)
-        return;
+    if (!mCompilationScope) {
+        AutoSafeJSContext cx;
+        SandboxOptions options;
+        options.sandboxName.AssignLiteral("XPConnect Compilation Compartment");
+        options.invisibleToDebugger = true;
+        options.discardSource = ShouldDiscardSystemSource();
+        RootedValue v(cx);
+        nsresult rv = CreateSandboxObject(cx, &v, /* principal = */ nullptr, options);
+        NS_ENSURE_SUCCESS(rv, nullptr);
 
-    AutoSafeJSContext cx;
-    JS_RemoveObjectRoot(cx, &mJunkScope);
+        mCompilationScope = js::UncheckedUnwrap(&v.toObject());
+    }
+    return mCompilationScope;
+}
+
+
+void
+XPCJSRuntime::DeleteSingletonScopes()
+{
     mJunkScope = nullptr;
+    mCompilationScope = nullptr;
 }

@@ -19,9 +19,10 @@ let gPage = {
     // Listen for 'unload' to unregister this page.
     addEventListener("unload", this, false);
 
-    // Listen for toggle button clicks.
-    let button = document.getElementById("newtab-toggle");
-    button.addEventListener("click", this, false);
+    // XXX bug 991111 - Not all click events are correctly triggered when
+    // listening from xhtml nodes -- in particular middle clicks on sites, so
+    // listen from the xul window and filter then delegate
+    addEventListener("click", this, false);
 
     // Initialize sponsored panel
     this._sponsoredPanel = document.getElementById("sponsored-panel");
@@ -144,19 +145,17 @@ let gPage = {
       attributeFilter: ["allow-background-captures"],
     });
 
-    gLinks.populateCache(function () {
-      // Initialize and render the grid.
-      gGrid.init();
+    // Initialize and render the grid.
+    gGrid.init();
 
-      // Initialize the drop target shim.
-      gDropTargetShim.init();
+    // Initialize the drop target shim.
+    gDropTargetShim.init();
 
 #ifdef XP_MACOSX
-      // Workaround to prevent a delay on MacOSX due to a slow drop animation.
-      document.addEventListener("dragover", this, false);
-      document.addEventListener("drop", this, false);
+    // Workaround to prevent a delay on MacOSX due to a slow drop animation.
+    document.addEventListener("dragover", this, false);
+    document.addEventListener("drop", this, false);
 #endif
-    }.bind(this));
   },
 
   /**
@@ -198,7 +197,22 @@ let gPage = {
         gAllPages.unregister(this);
         break;
       case "click":
-        gAllPages.enabled = !gAllPages.enabled;
+        let {button, target} = aEvent;
+        if (target.id == "newtab-toggle") {
+          if (button == 0) {
+            gAllPages.enabled = !gAllPages.enabled;
+          }
+          break;
+        }
+
+        // Go up ancestors until we find a Site or not
+        while (target) {
+          if (target.hasOwnProperty("_newtabSite")) {
+            target._newtabSite.onClick(aEvent);
+            break;
+          }
+          target = target.parentNode;
+        }
         break;
       case "dragover":
         if (gDrag.isValid(aEvent) && gDrag.draggedSite)

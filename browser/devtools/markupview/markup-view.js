@@ -20,7 +20,7 @@ const {UndoStack} = require("devtools/shared/undo");
 const {editableField, InplaceEditor} = require("devtools/shared/inplace-editor");
 const {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
 const {HTMLEditor} = require("devtools/markupview/html-editor");
-const promise = require("sdk/core/promise");
+const promise = require("devtools/toolkit/deprecated-sync-thenables");
 const {Tooltip} = require("devtools/shared/widgets/Tooltip");
 const EventEmitter = require("devtools/toolkit/event-emitter");
 
@@ -822,11 +822,17 @@ MarkupView.prototype = {
 
   /**
    * Mark the given node expanded.
-   * @param aNode The NodeFront to mark as expanded.
+   * @param {NodeFront} aNode The NodeFront to mark as expanded.
+   * @param {Boolean} aExpanded Whether the expand or collapse.
+   * @param {Boolean} aExpandDescendants Whether to expand all descendants too
    */
-  setNodeExpanded: function(aNode, aExpanded) {
+  setNodeExpanded: function(aNode, aExpanded, aExpandDescendants) {
     if (aExpanded) {
-      this.expandNode(aNode);
+      if (aExpandDescendants) {
+        this.expandAll(aNode);
+      } else {
+        this.expandNode(aNode);
+      }
     } else {
       this.collapseNode(aNode);
     }
@@ -1413,7 +1419,7 @@ MarkupContainer.prototype = {
   _onToggle: function(event) {
     this.markup.navigate(this);
     if(this.hasChildren) {
-      this.markup.setNodeExpanded(this.node, !this.expanded);
+      this.markup.setNodeExpanded(this.node, !this.expanded, event.altKey);
     }
     event.stopPropagation();
   },

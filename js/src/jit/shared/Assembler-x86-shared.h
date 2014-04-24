@@ -781,14 +781,16 @@ class AssemblerX86Shared
         masm.int3();
     }
 
+#ifdef DEBUG
     static bool HasSSE2() {
-        return JSC::MacroAssembler::getSSEState() >= JSC::MacroAssembler::HasSSE2;
+        return JSC::MacroAssembler::isSSE2Present();
     }
+#endif
     static bool HasSSE3() {
-        return JSC::MacroAssembler::getSSEState() >= JSC::MacroAssembler::HasSSE3;
+        return JSC::MacroAssembler::isSSE3Present();
     }
     static bool HasSSE41() {
-        return JSC::MacroAssembler::getSSEState() >= JSC::MacroAssembler::HasSSE4_1;
+        return JSC::MacroAssembler::isSSE41Present();
     }
 
     // The below cmpl methods switch the lhs and rhs when it invokes the
@@ -1062,11 +1064,17 @@ class AssemblerX86Shared
             MOZ_ASSUME_UNREACHABLE("unexpected operand kind");
         }
     }
+    void imull(const Register &multiplier) {
+        masm.imull_r(multiplier.code());
+    }
     void imull(Imm32 imm, const Register &dest) {
         masm.imull_i32r(dest.code(), imm.value, dest.code());
     }
     void imull(const Register &src, const Register &dest) {
         masm.imull_rr(src.code(), dest.code());
+    }
+    void imull(Imm32 imm, const Register &src, const Register &dest) {
+        masm.imull_i32r(src.code(), imm.value, dest.code());
     }
     void imull(const Operand &src, const Register &dest) {
         switch (src.kind()) {

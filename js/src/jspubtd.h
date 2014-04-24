@@ -97,7 +97,7 @@ enum JSIterateOp {
     JSENUMERATE_DESTROY
 };
 
-/* See JSVAL_TRACE_KIND and JSTraceCallback in jsapi.h. */
+/* See Value::gcKind() and JSTraceCallback in Tracer.h. */
 enum JSGCTraceKind {
     JSTRACE_OBJECT,
     JSTRACE_STRING,
@@ -135,9 +135,9 @@ struct JSSecurityCallbacks;
 struct JSStructuredCloneCallbacks;
 struct JSStructuredCloneReader;
 struct JSStructuredCloneWriter;
-struct JSTracer;
+class JS_PUBLIC_API(JSTracer);
 
-class                                       JSFlatString;
+class JSFlatString;
 
 #ifdef JS_THREADSAFE
 typedef struct PRCallOnceType   JSCallOnceType;

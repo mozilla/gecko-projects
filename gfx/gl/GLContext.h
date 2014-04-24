@@ -27,7 +27,6 @@
 
 #include "GLDefs.h"
 #include "GLLibraryLoader.h"
-#include "gfxImageSurface.h"
 #include "gfx3DMatrix.h"
 #include "nsISupportsImpl.h"
 #include "plstr.h"
@@ -433,7 +432,7 @@ public:
     template<size_t N>
     static void InitializeExtensionsBitSet(std::bitset<N>& extensionsBitset, const char* extStr, const char** extList, bool verbose = false)
     {
-        char* exts = strdup(extStr);
+        char* exts = ::strdup(extStr);
 
         if (verbose)
             printf_stderr("Extensions: %s\n", exts);
@@ -2523,6 +2522,8 @@ public:
 #endif
         return MakeCurrentImpl(aForce);
     }
+
+    virtual bool Init() = 0;
 
     virtual bool SetupLookupFunction() = 0;
 

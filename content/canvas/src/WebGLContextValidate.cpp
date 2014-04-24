@@ -929,10 +929,24 @@ WebGLContext::ValidateTexImageSize(GLenum target, GLint level,
 {
     MOZ_ASSERT(level >= 0, "level should already be validated");
 
+    /* Bug 966630: maxTextureSize >> level runs into "undefined"
+     * behaviour depending on ISA. For example, on Intel shifts
+     * amounts are mod 64 (in 64-bit mode on 64-bit dest) and mod 32
+     * otherwise. This means 16384 >> 0x10000001 == 8192 which isn't
+     * what would be expected. Make the required behaviour explicit by
+     * clamping to a shift of 31 bits if level is greater than that
+     * ammount. This will give 0 that if (!maxAllowedSize) is
+     * expecting.
+     */
+
+    if (level > 31)
+        level = 31;
+
     const GLuint maxTexImageSize = MaxTextureSizeForTarget(target) >> level;
     const bool isCubemapTarget = IsTexImageCubemapTarget(target);
+    const bool isSub = IsSubFunc(func);
 
-    if (isCubemapTarget && width != height) {
+    if (!isSub && isCubemapTarget && (width != height)) {
         /* GL ES Version 2.0.25 - 3.7.1 Texture Image Specification
          *   "When the target parameter to TexImage2D is one of the
          *   six cube map two-dimensional image targets, the error
@@ -1613,6 +1627,27 @@ WebGLContext::InitAndValidateGL()
       mDisableFragHighP = true;
     }
 
+    // These are the default values, see 6.2 State tables in the
+    // OpenGL ES 2.0.25 spec.
+    mColorWriteMask[0] = 1;
+    mColorWriteMask[1] = 1;
+    mColorWriteMask[2] = 1;
+    mColorWriteMask[3] = 1;
+    mDepthWriteMask = 1;
+    mColorClearValue[0] = 0.f;
+    mColorClearValue[1] = 0.f;
+    mColorClearValue[2] = 0.f;
+    mColorClearValue[3] = 0.f;
+    mDepthClearValue = 1.f;
+    mStencilClearValue = 0;
+    mStencilRefFront = 0;
+    mStencilRefBack = 0;
+    mStencilValueMaskFront = 0xffffffff;
+    mStencilValueMaskBack  = 0xffffffff;
+    mStencilWriteMaskFront = 0xffffffff;
+    mStencilWriteMaskBack  = 0xffffffff;
+
+    // Bindings, etc.
     mActiveTexture = 0;
     mEmitContextLostErrorOnce = true;
     mWebGLError = LOCAL_GL_NO_ERROR;

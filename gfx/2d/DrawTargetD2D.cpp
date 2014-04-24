@@ -6,6 +6,9 @@
 #include <initguid.h>
 #include "DrawTargetD2D.h"
 #include "SourceSurfaceD2D.h"
+#ifdef USE_D2D1_1
+#include "SourceSurfaceD2D1.h"
+#endif
 #include "SourceSurfaceD2DTarget.h"
 #include "ShadersD2D.h"
 #include "PathD2D.h"
@@ -317,6 +320,24 @@ DrawTargetD2D::GetBitmapForSurface(SourceSurface *aSurface,
 
   return bitmap;
 }
+
+#ifdef USE_D2D1_1
+TemporaryRef<ID2D1Image>
+DrawTargetD2D::GetImageForSurface(SourceSurface *aSurface)
+{
+  RefPtr<ID2D1Image> image;
+
+  if (aSurface->GetType() == SurfaceType::D2D1_1_IMAGE) {
+    image = static_cast<SourceSurfaceD2D1*>(aSurface)->GetImage();
+    static_cast<SourceSurfaceD2D1*>(aSurface)->EnsureIndependent();
+  } else {
+    Rect r(Point(), Size(aSurface->GetSize()));
+    image = GetBitmapForSurface(aSurface, r);
+  }
+
+  return image;
+}
+#endif
 
 void
 DrawTargetD2D::DrawSurface(SourceSurface *aSurface,
@@ -1183,8 +1204,27 @@ DrawTargetD2D::CreateSourceSurfaceFromData(unsigned char *aData,
 TemporaryRef<SourceSurface> 
 DrawTargetD2D::OptimizeSourceSurface(SourceSurface *aSurface) const
 {
-  // Unsupported!
-  return nullptr;
+  if (aSurface->GetType() == SurfaceType::D2D1_BITMAP ||
+      aSurface->GetType() == SurfaceType::D2D1_DRAWTARGET) {
+    return aSurface;
+  }
+
+  RefPtr<DataSourceSurface> data = aSurface->GetDataSurface();
+
+  DataSourceSurface::MappedSurface map;
+  if (!data->Map(DataSourceSurface::MapType::READ, &map)) {
+    return nullptr;
+  }
+
+  RefPtr<SourceSurfaceD2D> newSurf = new SourceSurfaceD2D();
+  bool success = newSurf->InitFromData(map.mData, data->GetSize(), map.mStride, data->GetFormat(), mRT);
+
+  data->Unmap();
+
+  if (!success) {
+    return nullptr;
+  }
+  return newSurf;
 }
 
 TemporaryRef<SourceSurface>

@@ -24,6 +24,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
                                   "resource://gre/modules/UpdateChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate",
+                                  "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryPing",
                                   "resource://gre/modules/TelemetryPing.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryLog",
@@ -42,11 +44,9 @@ XPCOMUtils.defineLazyGetter(this, "CertUtils",
     return mod;
   });
 
-#ifdef MOZ_CRASHREPORTER
 XPCOMUtils.defineLazyServiceGetter(this, "gCrashReporter",
                                    "@mozilla.org/xre/app-info;1",
                                    "nsICrashReporter");
-#endif
 
 const FILE_CACHE                = "experiments.json";
 const OBSERVER_TOPIC            = "experiments-changed";
@@ -72,30 +72,43 @@ const PREF_HEALTHREPORT_ENABLED = "datareporting.healthreport.service.enabled";
 const PREF_BRANCH_TELEMETRY     = "toolkit.telemetry.";
 const PREF_TELEMETRY_ENABLED    = "enabled";
 
+const URI_EXTENSION_STRINGS     = "chrome://mozapps/locale/extensions/extensions.properties";
+const STRING_TYPE_NAME          = "type.%ID%.name";
+
 const TELEMETRY_LOG = {
   // log(key, [kind, experimentId, details])
   ACTIVATION_KEY: "EXPERIMENT_ACTIVATION",
   ACTIVATION: {
-    ACTIVATED: "ACTIVATED",             // successfully activated
-    INSTALL_FAILURE: "INSTALL_FAILURE", // failed to install the extension
-    REJECTED: "REJECTED",               // experiment was rejected because of it's conditions,
-                                        // provides details on which
+    // Successfully activated.
+    ACTIVATED: "ACTIVATED",
+    // Failed to install the add-on.
+    INSTALL_FAILURE: "INSTALL_FAILURE",
+    // Experiment does not meet activation requirements. Details will
+    // be provided.
+    REJECTED: "REJECTED",
   },
 
   // log(key, [kind, experimentId, optionalDetails...])
   TERMINATION_KEY: "EXPERIMENT_TERMINATION",
   TERMINATION: {
-    USERDISABLED: "USERDISABLED", // the user disabled this experiment
-    FROM_API: "FROM_API",         // the experiment disabled itself
-    EXPIRED: "EXPIRED",           // experiment expired e.g. by exceeding the end-date
-    RECHECK: "RECHECK",           // disabled after re-evaluating conditions,
-                                  // provides details on which
+    // The Experiments service was disabled.
+    SERVICE_DISABLED: "SERVICE_DISABLED",
+    // Add-on uninstalled.
+    ADDON_UNINSTALLED: "ADDON_UNINSTALLED",
+    // The experiment disabled itself.
+    FROM_API: "FROM_API",
+    // The experiment expired (e.g. by exceeding the end date).
+    EXPIRED: "EXPIRED",
+    // Disabled after re-evaluating conditions. If this is specified,
+    // details will be provided.
+    RECHECK: "RECHECK",
   },
 };
 
 const gPrefs = new Preferences(PREF_BRANCH);
 const gPrefsTelemetry = new Preferences(PREF_BRANCH_TELEMETRY);
 let gExperimentsEnabled = false;
+let gAddonProvider = null;
 let gExperiments = null;
 let gLogAppenderDump = null;
 let gPolicyCounter = 0;
@@ -105,6 +118,10 @@ let gExperimentEntryCounter = 0;
 // Tracks active AddonInstall we know about so we can deny external
 // installs.
 let gActiveInstallURLs = new Set();
+
+// Tracks add-on IDs that are being uninstalled by us. This allows us
+// to differentiate between expected uninstalled and user-driven uninstalls.
+let gActiveUninstallAddonIDs = new Set();
 
 let gLogger;
 let gLogDumping = false;
@@ -189,8 +206,9 @@ function addonInstallForURL(url, hash) {
 // experiment addons.
 function installedExperimentAddons() {
   let deferred = Promise.defer();
-  AddonManager.getAddonsByTypes(["experiment"],
-                                addons => deferred.resolve(addons));
+  AddonManager.getAddonsByTypes(["experiment"], (addons) => {
+    deferred.resolve([a for (a of addons) if (!a.appDisabled)]);
+  });
   return deferred.promise;
 }
 
@@ -252,6 +270,10 @@ Experiments.Policy = function () {
   this._log = Log.repository.getLoggerWithMessagePrefix(
     "Browser.Experiments.Policy",
     "Policy #" + gPolicyCounter++ + "::");
+
+  // Set to true to ignore hash verification on downloaded XPIs. This should
+  // not be used outside of testing.
+  this.ignoreHashes = false;
 };
 
 Experiments.Policy.prototype = {
@@ -312,6 +334,14 @@ Experiments.Policy.prototype = {
   },
 };
 
+function AlreadyShutdownError(message="already shut down") {
+  this.name = "AlreadyShutdownError";
+  this.message = message;
+}
+
+AlreadyShutdownError.prototype = new Error();
+AlreadyShutdownError.prototype.constructor = AlreadyShutdownError;
+
 /**
  * Manages the experiments and provides an interface to control them.
  */
@@ -320,6 +350,7 @@ Experiments.Experiments = function (policy=new Experiments.Policy()) {
   this._log = Log.repository.getLoggerWithMessagePrefix(
     "Browser.Experiments.Experiments",
     "Experiments #" + gExperimentsCounter++ + "::");
+  this._log.trace("constructor");
 
   this._policy = policy;
 
@@ -335,9 +366,6 @@ Experiments.Experiments = function (policy=new Experiments.Policy()) {
 
   // Loading the cache happens once asynchronously on startup
   this._loadTask = null;
-
-  // Ignore addon-manager notifications for addons that we are uninstalling ourself
-  this._pendingUninstall = null;
 
   // The _main task handles all other actions:
   // * refreshing the manifest off the network (if _refresh)
@@ -372,19 +400,24 @@ Experiments.Experiments.prototype = {
     AsyncShutdown.profileBeforeChange.addBlocker("Experiments.jsm shutdown",
       this.uninit.bind(this));
 
-    this._startWatchingAddons();
+    this._registerWithAddonManager();
 
-    this._loadTask = Task.spawn(this._loadFromCache.bind(this));
+    let deferred = Promise.defer();
+
+    this._loadTask = this._loadFromCache();
     this._loadTask.then(
       () => {
         this._log.trace("_loadTask finished ok");
         this._loadTask = null;
-        this._run();
+        this._run().then(deferred.resolve, deferred.reject);
       },
       (e) => {
         this._log.error("_loadFromCache caught error: " + e);
+        deferred.reject(e);
       }
     );
+
+    return deferred.promise;
   },
 
   /**
@@ -399,10 +432,13 @@ Experiments.Experiments.prototype = {
    *         The promise is fulfilled when all pending tasks are finished.
    */
   uninit: Task.async(function* () {
+    this._log.trace("uninit: started");
     yield this._loadTask;
+    this._log.trace("uninit: finished with _loadTask");
 
     if (!this._shutdown) {
-      this._stopWatchingAddons();
+      this._log.trace("uninit: no previous shutdown");
+      this._unregisterWithAddonManager();
 
       gPrefs.ignore(PREF_LOGGING, configureLogging);
       gPrefs.ignore(PREF_MANIFEST_URI, this.updateManifest, this);
@@ -417,18 +453,49 @@ Experiments.Experiments.prototype = {
 
     this._shutdown = true;
     if (this._mainTask) {
-      yield this._mainTask;
+      try {
+        this._log.trace("uninit: waiting on _mainTask");
+        yield this._mainTask;
+      } catch (e if e instanceof AlreadyShutdownError) {
+        // We error out of tasks after shutdown via that exception.
+      }
     }
 
     this._log.info("Completed uninitialization.");
   }),
 
-  _startWatchingAddons: function () {
+  _registerWithAddonManager: function () {
+    this._log.trace("Registering instance with Addon Manager.");
+
     AddonManager.addAddonListener(this);
     AddonManager.addInstallListener(this);
+
+    if (!gAddonProvider) {
+      // The properties of this AddonType should be kept in sync with the
+      // experiment AddonType registered in XPIProvider.
+      this._log.trace("Registering previous experiment add-on provider.");
+      gAddonProvider = new Experiments.PreviousExperimentProvider(this, [
+          new AddonManagerPrivate.AddonType("experiment",
+                                            URI_EXTENSION_STRINGS,
+                                            STRING_TYPE_NAME,
+                                            AddonManager.VIEW_TYPE_LIST,
+                                            11000,
+                                            AddonManager.TYPE_UI_HIDE_EMPTY),
+        ]);
+      AddonManagerPrivate.registerProvider(gAddonProvider);
+    }
+
   },
 
-  _stopWatchingAddons: function () {
+  _unregisterWithAddonManager: function () {
+    this._log.trace("Unregistering instance with Addon Manager.");
+
+    if (gAddonProvider) {
+      this._log.trace("Unregistering previous experiment add-on provider.");
+      AddonManagerPrivate.unregisterProvider(gAddonProvider);
+      gAddonProvider = null;
+    }
+
     AddonManager.removeInstallListener(this);
     AddonManager.removeAddonListener(this);
   },
@@ -438,7 +505,7 @@ Experiments.Experiments.prototype = {
    */
   _checkForShutdown: function() {
     if (this._shutdown) {
-      throw Error("uninit() already called");
+      throw new AlreadyShutdownError("uninit() already called");
     }
   },
 
@@ -457,7 +524,7 @@ Experiments.Experiments.prototype = {
     gPrefs.set(PREF_ENABLED, enabled);
   },
 
-  _toggleExperimentsEnabled: function (enabled) {
+  _toggleExperimentsEnabled: Task.async(function* (enabled) {
     this._log.trace("_toggleExperimentsEnabled(" + enabled + ")");
     let wasEnabled = gExperimentsEnabled;
     gExperimentsEnabled = enabled && telemetryEnabled();
@@ -467,14 +534,14 @@ Experiments.Experiments.prototype = {
     }
 
     if (gExperimentsEnabled) {
-      this.updateManifest();
+      yield this.updateManifest();
     } else {
-      this.disableExperiment();
+      yield this.disableExperiment(TELEMETRY_LOG.TERMINATION.SERVICE_DISABLED);
       if (this._timer) {
         this._timer.clear();
       }
     }
-  },
+  }),
 
   _telemetryStatusChanged: function () {
     this._toggleExperimentsEnabled(gExperimentsEnabled);
@@ -523,6 +590,28 @@ Experiments.Experiments.prototype = {
       list.sort((a, b) => b.endDate - a.endDate);
       return list;
     }.bind(this));
+  },
+
+  /**
+   * Returns the ExperimentInfo for the active experiment, or null
+   * if there is none.
+   */
+  getActiveExperiment: function () {
+    let experiment = this._getActiveExperiment();
+    if (!experiment) {
+      return null;
+    }
+
+    let info = {
+      id: experiment.id,
+      name: experiment._name,
+      description: experiment._description,
+      active: experiment.enabled,
+      endDate: experiment.endDate.getTime(),
+      detailURL: experiment._homepageURL,
+    };
+
+    return info;
   },
 
   /**
@@ -656,21 +745,9 @@ Experiments.Experiments.prototype = {
 
   // START OF ADD-ON LISTENERS
 
-  onDisabled: function (addon) {
-    this._log.trace("onDisabled() - addon id: " + addon.id);
-    if (addon.id == this._pendingUninstall) {
-      return;
-    }
-    let activeExperiment = this._getActiveExperiment();
-    if (!activeExperiment || activeExperiment._addonId != addon.id) {
-      return;
-    }
-    this.disableExperiment();
-  },
-
   onUninstalled: function (addon) {
     this._log.trace("onUninstalled() - addon id: " + addon.id);
-    if (addon.id == this._pendingUninstall) {
+    if (gActiveUninstallAddonIDs.has(addon.id)) {
       this._log.trace("matches pending uninstall");
       return;
     }
@@ -678,11 +755,18 @@ Experiments.Experiments.prototype = {
     if (!activeExperiment || activeExperiment._addonId != addon.id) {
       return;
     }
-    this.disableExperiment();
+
+    this.disableExperiment(TELEMETRY_LOG.TERMINATION.ADDON_UNINSTALLED);
   },
 
   onInstallStarted: function (install) {
     if (install.addon.type != "experiment") {
+      return;
+    }
+
+    this._log.trace("onInstallStarted() - " + install.addon.id);
+    if (install.addon.appDisabled) {
+      // This is a PreviousExperiment
       return;
     }
 
@@ -812,7 +896,7 @@ Experiments.Experiments.prototype = {
   /*
    * Task function, load the cached experiments manifest file from disk.
    */
-  _loadFromCache: function*() {
+  _loadFromCache: Task.async(function* () {
     this._log.trace("_loadFromCache");
     let path = this._cacheFilePath;
     try {
@@ -822,7 +906,7 @@ Experiments.Experiments.prototype = {
       // No cached manifest yet.
       this._experiments = new Map();
     }
-  },
+  }),
 
   _populateFromCache: function (data) {
     this._log.trace("populateFromCache() - data: " + JSON.stringify(data));
@@ -916,15 +1000,17 @@ Experiments.Experiments.prototype = {
   },
 
   /**
-   * Disable an experiment by id.
-   * @param experimentId The id of the experiment.
-   * @param userDisabled (optional) Whether this is disabled as a result of a user action.
+   * Disables all active experiments.
+   *
    * @return Promise<> Promise that will get resolved once the task is done or failed.
    */
-  disableExperiment: function (userDisabled=true) {
-    this._log.trace("disableExperiment()");
+  disableExperiment: function (reason) {
+    if (!reason) {
+      throw new Error("Must specify a termination reason.");
+    }
 
-    this._terminateReason = userDisabled ? TELEMETRY_LOG.TERMINATION.USERDISABLED : TELEMETRY_LOG.TERMINATION.FROM_API;
+    this._log.trace("disableExperiment()");
+    this._terminateReason = reason;
     return this._run();
   },
 
@@ -981,44 +1067,43 @@ Experiments.Experiments.prototype = {
       gPrefs.set(PREF_ACTIVE_EXPERIMENT, false);
     }
 
+    // Ensure the active experiment is in the proper state. This may install,
+    // uninstall, upgrade, or enable the experiment add-on. What exactly is
+    // abstracted away from us by design.
     if (activeExperiment) {
-      this._pendingUninstall = activeExperiment._addonId;
-      try {
-        let wasStopped;
-        if (this._terminateReason) {
-          yield activeExperiment.stop(this._terminateReason);
-          wasStopped = true;
+      let changes;
+      let shouldStopResult = yield activeExperiment.shouldStop();
+      if (shouldStopResult.shouldStop) {
+        let expireReasons = ["endTime", "maxActiveSeconds"];
+        let kind, reason;
+
+        if (expireReasons.indexOf(shouldStopResult.reason[0]) != -1) {
+          kind = TELEMETRY_LOG.TERMINATION.EXPIRED;
+          reason = null;
         } else {
-          wasStopped = yield activeExperiment.maybeStop();
+          kind = TELEMETRY_LOG.TERMINATION.RECHECK;
+          reason = shouldStopResult.reason;
         }
-        if (wasStopped) {
-          this._dirty = true;
-          this._log.debug("evaluateExperiments() - stopped experiment "
-                        + activeExperiment.id);
-          activeExperiment = null;
-          activeChanged = true;
-        } else if (!gExperimentsEnabled) {
-          // No further actions if the feature is disabled.
-        } else if (activeExperiment.needsUpdate) {
-          this._log.debug("evaluateExperiments() - updating experiment "
-                        + activeExperiment.id);
-          try {
-            yield activeExperiment.stop();
-            yield activeExperiment.start();
-          } catch (e) {
-            this._log.error(e);
-            // On failure try the next experiment.
-            activeExperiment = null;
-          }
-          this._dirty = true;
-          activeChanged = true;
-        } else {
-          yield activeExperiment.ensureActive();
-        }
-      } finally {
-        this._pendingUninstall = null;
+        changes = yield activeExperiment.stop(kind, reason);
+      }
+      else if (this._terminateReason) {
+        changes = yield activeExperiment.stop(this._terminateReason);
+      }
+      else {
+        changes = yield activeExperiment.reconcileAddonState();
+      }
+
+      if (changes) {
+        this._dirty = true;
+        activeChanged = true;
+      }
+
+      if (!activeExperiment._enabled) {
+        activeExperiment = null;
+        activeChanged = true;
       }
     }
+
     this._terminateReason = null;
 
     if (!activeExperiment && gExperimentsEnabled) {
@@ -1041,30 +1126,35 @@ Experiments.Experiments.prototype = {
           TelemetryLog.log(TELEMETRY_LOG.ACTIVATION_KEY, data);
         }
 
-        if (applicable) {
-          this._log.debug("evaluateExperiments() - activating experiment " + id);
-          try {
-            yield experiment.start();
-            activeChanged = true;
-            activeExperiment = experiment;
-            this._dirty = true;
-            break;
-          } catch (e) {
-            // On failure try the next experiment.
-          }
+        if (!applicable) {
+          continue;
+        }
+
+        this._log.debug("evaluateExperiments() - activating experiment " + id);
+        try {
+          yield experiment.start();
+          activeChanged = true;
+          activeExperiment = experiment;
+          this._dirty = true;
+          break;
+        } catch (e) {
+          // On failure, clean up the best we can and try the next experiment.
+          this._log.error("evaluateExperiments() - Unable to start experiment: " + e.message);
+          experiment._enabled = false;
+          yield experiment.reconcileAddonState();
         }
       }
     }
+
+    gPrefs.set(PREF_ACTIVE_EXPERIMENT, activeExperiment != null);
 
     if (activeChanged) {
       Services.obs.notifyObservers(null, OBSERVER_TOPIC, null);
     }
 
-#ifdef MOZ_CRASHREPORTER
-    if (activeExperiment) {
+    if ("@mozilla.org/toolkit/crash-reporter;1" in Cc && activeExperiment) {
       gCrashReporter.annotateCrashReport("ActiveExperiment", activeExperiment.id);
     }
-#endif
   },
 
   /*
@@ -1116,7 +1206,7 @@ Experiments.ExperimentEntry = function (policy) {
     "Browser.Experiments.Experiments",
     "ExperimentEntry #" + gExperimentEntryCounter++ + "::");
 
-  // Is this experiment running?
+  // Is the experiment supposed to be running.
   this._enabled = false;
   // When this experiment was started, if ever.
   this._startDate = null;
@@ -1186,6 +1276,11 @@ Experiments.ExperimentEntry.prototype = {
     "_startDate",
     "_endDate",
   ]),
+
+  ADDON_CHANGE_NONE: 0,
+  ADDON_CHANGE_INSTALL: 1,
+  ADDON_CHANGE_UNINSTALL: 2,
+  ADDON_CHANGE_ENABLE: 4,
 
   /*
    * Initialize entry from the manifest.
@@ -1476,30 +1571,23 @@ Experiments.ExperimentEntry.prototype = {
 
   /*
    * Start running the experiment.
+   *
    * @return Promise<> Resolved when the operation is complete.
    */
-  start: function () {
+  start: Task.async(function* () {
     this._log.trace("start() for " + this.id);
 
-    return Task.spawn(function* ExperimentEntry_start_task() {
-      let addons = yield installedExperimentAddons();
-      if (addons.length > 0) {
-        this._log.error("start() - there are already "
-                        + addons.length + " experiment addons installed");
-        yield uninstallAddons(addons);
-      }
-
-      yield this._installAddon();
-      gPrefs.set(PREF_ACTIVE_EXPERIMENT, true);
-    }.bind(this));
-  },
+    this._enabled = true;
+    return yield this.reconcileAddonState();
+  }),
 
   // Async install of the addon for this experiment, part of the start task above.
-  _installAddon: function* () {
+  _installAddon: Task.async(function* () {
     let deferred = Promise.defer();
 
-    let install = yield addonInstallForURL(this._manifestData.xpiURL,
-                                           this._manifestData.xpiHash);
+    let hash = this._policy.ignoreHashes ? null : this._manifestData.xpiHash;
+
+    let install = yield addonInstallForURL(this._manifestData.xpiURL, hash);
     gActiveInstallURLs.add(install.sourceURI.spec);
 
     let failureHandler = (install, handler) => {
@@ -1593,75 +1681,105 @@ Experiments.ExperimentEntry.prototype = {
     install.addListener(listener);
     install.install();
 
-    return deferred.promise;
-  },
+    return yield deferred.promise;
+  }),
 
-  /*
+  /**
    * Stop running the experiment if it is active.
-   * @param terminationKind (optional) The termination kind, e.g. USERDISABLED or EXPIRED.
-   * @param terminationReason (optional) The termination reason details for
-   *                          termination kind RECHECK.
+   *
+   * @param terminationKind (optional)
+   *        The termination kind, e.g. ADDON_UNINSTALLED or EXPIRED.
+   * @param terminationReason (optional)
+   *        The termination reason details for termination kind RECHECK.
    * @return Promise<> Resolved when the operation is complete.
    */
-  stop: function (terminationKind, terminationReason) {
+  stop: Task.async(function* (terminationKind, terminationReason) {
     this._log.trace("stop() - id=" + this.id + ", terminationKind=" + terminationKind);
     if (!this._enabled) {
-      this._log.warning("stop() - experiment not enabled: " + id);
-      return Promise.reject();
+      throw new Error("Must not call stop() on an inactive experiment.");
     }
 
     this._enabled = false;
-    gPrefs.set(PREF_ACTIVE_EXPERIMENT, false);
 
-    let deferred = Promise.defer();
-    let updateDates = () => {
-      let now = this._policy.now();
-      this._lastChangedDate = now;
-      this._endDate = now;
-    };
+    let changes = yield this.reconcileAddonState();
+    let now = this._policy.now();
+    this._lastChangedDate = now;
+    this._endDate = now;
+    this._logTermination(terminationKind, terminationReason);
 
-    this._getAddon().then((addon) => {
-      if (!addon) {
-        let message = "could not get Addon for " + this.id;
-        this._log.warn("stop() - " + message);
-        updateDates();
-        deferred.resolve();
-        return;
-      }
-
-      updateDates();
-      this._logTermination(terminationKind, terminationReason);
-      deferred.resolve(uninstallAddons([addon]));
-    });
-
-    return deferred.promise;
-  },
+    return changes;
+  }),
 
   /**
-   * Try to ensure this experiment is active.
+   * Reconcile the state of the add-on against what it's supposed to be.
    *
-   * The returned promise will be resolved if the experiment is active
-   * in the Addon Manager or rejected if it isn't.
+   * If we are active, ensure the add-on is enabled and up to date.
    *
-   * @return Promise<>
+   * If we are inactive, ensure the add-on is not installed.
    */
-  ensureActive: Task.async(function* () {
-    this._log.trace("ensureActive() for " + this.id);
+  reconcileAddonState: Task.async(function* () {
+    this._log.trace("reconcileAddonState()");
+
+    if (!this._enabled) {
+      if (!this._addonId) {
+        this._log.trace("reconcileAddonState() - Experiment is not enabled and " +
+                        "has no add-on. Doing nothing.");
+        return this.ADDON_CHANGE_NONE;
+      }
+
+      let addon = yield this._getAddon();
+      if (!addon) {
+        this._log.trace("reconcileAddonState() - Inactive experiment has no " +
+                        "add-on. Doing nothing.");
+        return this.ADDON_CHANGE_NONE;
+      }
+
+      this._log.info("reconcileAddonState() - Uninstalling add-on for inactive " +
+                     "experiment: " + addon.id);
+      gActiveUninstallAddonIDs.add(addon.id);
+      yield uninstallAddons([addon]);
+      gActiveUninstallAddonIDs.delete(addon.id);
+      return this.ADDON_CHANGE_UNINSTALL;
+    }
+
+    // If we get here, we're supposed to be active.
+
+    let changes = 0;
+
+    // That requires an add-on.
+    let currentAddon = yield this._getAddon();
+
+    // If we have an add-on but it isn't up to date, uninstall it
+    // (to prepare for reinstall).
+    if (currentAddon && this._needsUpdate) {
+      this._log.info("reconcileAddonState() - Uninstalling add-on because update " +
+                     "needed: " + currentAddon.id);
+      gActiveUninstallAddonIDs.add(currentAddon.id);
+      yield uninstallAddons([currentAddon]);
+      gActiveUninstallAddonIDs.delete(currentAddon.id);
+      changes |= this.ADDON_CHANGE_UNINSTALL;
+    }
+
+    if (!currentAddon || this._needsUpdate) {
+      this._log.info("reconcileAddonState() - Installing add-on.");
+      yield this._installAddon();
+      changes |= this.ADDON_CHANGE_INSTALL;
+    }
 
     let addon = yield this._getAddon();
     if (!addon) {
-      this._log.warn("Experiment is not installed: " + this._addonId);
-      throw new Error("Experiment is not installed: " + this._addonId);
+      throw new Error("Could not obtain add-on for experiment that should be " +
+                      "enabled.");
     }
 
-    // User disabled likely means the experiment is disabled at startup,
-    // since the permissions don't allow it to be disabled by the user.
+    // If we have the add-on and it is enabled, we are done.
     if (!addon.userDisabled) {
-      return;
+      return changes;
     }
 
     let deferred = Promise.defer();
 
+    // Else we need to enable it.
     let listener = {
       onEnabled: enabledAddon => {
         if (enabledAddon.id != addon.id) {
@@ -1677,7 +1795,11 @@ Experiments.ExperimentEntry.prototype = {
     AddonManager.addAddonListener(listener);
     addon.userDisabled = false;
     yield deferred.promise;
-  }),
+    changes |= this.ADDON_CHANGE_ENABLE;
+
+    this._log.info("Add-on has been enabled: " + addon.id);
+    return changes;
+   }),
 
   /**
    * Obtain the underlying Addon from the Addon Manager.
@@ -1685,9 +1807,20 @@ Experiments.ExperimentEntry.prototype = {
    * @return Promise<Addon|null>
    */
   _getAddon: function () {
+    if (!this._addonId) {
+      return Promise.resolve(null);
+    }
+
     let deferred = Promise.defer();
 
-    AddonManager.getAddonByID(this._addonId, deferred.resolve);
+    AddonManager.getAddonByID(this._addonId, (addon) => {
+      if (addon && addon.appDisabled) {
+        // Don't return PreviousExperiments.
+        addon = null;
+      }
+
+      deferred.resolve(addon);
+    });
 
     return deferred.promise;
   },
@@ -1710,42 +1843,17 @@ Experiments.ExperimentEntry.prototype = {
     TelemetryLog.log(TELEMETRY_LOG.TERMINATION_KEY, data);
   },
 
-  /*
-   * Stop if experiment stop criteria are met.
-   * @return Promise<boolean> Resolved when done stopping or checking,
-   *                          the value indicates whether it was stopped.
+  /**
+   * Determine whether an active experiment should be stopped.
    */
-  maybeStop: function () {
-    this._log.trace("maybeStop()");
-    return Task.spawn(function* ExperimentEntry_maybeStop_task() {
-      if (!gExperimentsEnabled) {
-        this._log.warn("maybeStop() - should not get here");
-        yield this.stop(TELEMETRY_LOG.TERMINATION.FROM_API);
-        return true;
-      }
+  shouldStop: function () {
+    if (!this._enabled) {
+      throw new Error("shouldStop must not be called on disabled experiments.");
+    }
 
-      let result = yield this._shouldStop();
-      if (result.shouldStop) {
-        let expireReasons = ["endTime", "maxActiveSeconds"];
-        if (expireReasons.indexOf(result.reason[0]) != -1) {
-          yield this.stop(TELEMETRY_LOG.TERMINATION.EXPIRED);
-        } else {
-          yield this.stop(TELEMETRY_LOG.TERMINATION.RECHECK, result.reason);
-        }
-      }
-
-      return result.shouldStop;
-    }.bind(this));
-  },
-
-  _shouldStop: function () {
     let data = this._manifestData;
     let now = this._policy.now() / 1000; // The manifest times are in seconds.
     let maxActiveSec = data.maxActiveSeconds || 0;
-
-    if (!this._enabled) {
-      return Promise.resolve({shouldStop: false});
-    }
 
     let deferred = Promise.defer();
     this.isApplicable().then(
@@ -1914,4 +2022,171 @@ ExperimentsProvider.prototype = Object.freeze({
       }.bind(this));
     });
   },
+});
+
+/**
+ * An Add-ons Manager provider that knows about old experiments.
+ *
+ * This provider exposes read-only add-ons corresponding to previously-active
+ * experiments. The existence of this provider (and the add-ons it knows about)
+ * facilitates the display of old experiments in the Add-ons Manager UI with
+ * very little custom code in that component.
+ */
+this.Experiments.PreviousExperimentProvider = function (experiments) {
+  this._experiments = experiments;
+}
+
+this.Experiments.PreviousExperimentProvider.prototype = Object.freeze({
+  startup: function () {},
+  shutdown: function () {},
+
+  getAddonByID: function (id, cb) {
+    this._getPreviousExperiments().then((experiments) => {
+      for (let experiment of experiments) {
+        if (experiment.id == id) {
+          cb(new PreviousExperimentAddon(experiment));
+          return;
+        }
+      }
+
+      cb(null);
+    },
+    (error) => {
+      cb(null);
+    });
+  },
+
+  getAddonsByTypes: function (types, cb) {
+    if (types && types.length > 0 && types.indexOf("experiment") == -1) {
+      cb([]);
+      return;
+    }
+
+    this._getPreviousExperiments().then((experiments) => {
+      cb([new PreviousExperimentAddon(e) for (e of experiments)]);
+    },
+    (error) => {
+      cb([]);
+    });
+  },
+
+  _getPreviousExperiments: function () {
+    return this._experiments.getExperiments().then((experiments) => {
+      return Promise.resolve([e for (e of experiments) if (!e.active)]);
+    });
+  },
+});
+
+/**
+ * An add-on that represents a previously-installed experiment.
+ */
+function PreviousExperimentAddon(experiment) {
+  this._id = experiment.id;
+  this._name = experiment.name;
+  this._endDate = experiment.endDate;
+  this._description = experiment.description;
+}
+
+PreviousExperimentAddon.prototype = Object.freeze({
+  // BEGIN REQUIRED ADDON PROPERTIES
+
+  get appDisabled() {
+    return true;
+  },
+
+  get blocklistState() {
+    Ci.nsIBlocklistService.STATE_NOT_BLOCKED
+  },
+
+  get creator() {
+    return new AddonManagerPrivate.AddonAuthor("");
+  },
+
+  get foreignInstall() {
+    return false;
+  },
+
+  get id() {
+    return this._id;
+  },
+
+  get isActive() {
+    return false;
+  },
+
+  get isCompatible() {
+    return true;
+  },
+
+  get isPlatformCompatible() {
+    return true;
+  },
+
+  get name() {
+    return this._name;
+  },
+
+  get pendingOperations() {
+    return AddonManager.PENDING_NONE;
+  },
+
+  get permissions() {
+    return 0;
+  },
+
+  get providesUpdatesSecurely() {
+    return true;
+  },
+
+  get scope() {
+    return AddonManager.SCOPE_PROFILE;
+  },
+
+  get type() {
+    return "experiment";
+  },
+
+  get userDisabled() {
+    return true;
+  },
+
+  get version() {
+    return null;
+  },
+
+  // END REQUIRED PROPERTIES
+
+  // BEGIN OPTIONAL PROPERTIES
+
+  get description() {
+    return this._description;
+  },
+
+  get updateDate() {
+    return new Date(this._endDate);
+  },
+
+  // END OPTIONAL PROPERTIES
+
+  // BEGIN REQUIRED METHODS
+
+  isCompatibleWith: function (appVersion, platformVersion) {
+    return true;
+  },
+
+  findUpdates: function (listener, reason, appVersion, platformVersion) {
+    AddonManagerPrivate.callNoUpdateListeners(this, listener, reason,
+                                              appVersion, platformVersion);
+  },
+
+  // END REQUIRED METHODS
+
+  /**
+   * The end-date of the experiment, required for the Addon Manager UI.
+   */
+
+   get endDate() {
+     return this._endDate;
+   },
+
 });

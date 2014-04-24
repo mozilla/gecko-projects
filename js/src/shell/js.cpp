@@ -113,7 +113,7 @@ static size_t gMaxStackSize = 128 * sizeof(size_t) * 1024;
 static double MAX_TIMEOUT_INTERVAL = 1800.0;
 static double gTimeoutInterval = -1.0;
 static volatile bool gTimedOut = false;
-static JS::Value gTimeoutFunc;
+static Maybe<JS::PersistentRootedValue> gTimeoutFunc;
 
 static bool enableDisassemblyDumps = false;
 
@@ -362,11 +362,11 @@ ShellInterruptCallback(JSContext *cx)
         return true;
 
     bool result;
-    if (!gTimeoutFunc.isNull()) {
+    RootedValue timeoutFunc(cx, gTimeoutFunc.ref());
+    if (!timeoutFunc.isNull()) {
         JS::AutoSaveExceptionState savedExc(cx);
-        JSAutoCompartment ac(cx, &gTimeoutFunc.toObject());
+        JSAutoCompartment ac(cx, &timeoutFunc.toObject());
         RootedValue rval(cx);
-        HandleValue timeoutFunc = HandleValue::fromMarkedLocation(&gTimeoutFunc);
         if (!JS_CallFunctionValue(cx, JS::NullPtr(), timeoutFunc,
                                   JS::HandleValueArray::empty(), &rval))
         {
@@ -866,28 +866,10 @@ ParseCompileOptions(JSContext *cx, CompileOptions &options, HandleObject opts,
         options.setLine(u);
     }
 
-    if (!JS_GetProperty(cx, opts, "sourcePolicy", &v))
+    if (!JS_GetProperty(cx, opts, "sourceIsLazy", &v))
         return false;
-    if (!v.isUndefined()) {
-        RootedString s(cx, ToString(cx, v));
-        if (!s)
-            return false;
-
-        JSAutoByteString bytes;
-        char *policy = bytes.encodeUtf8(cx, s);
-        if (!policy)
-            return false;
-        if (strcmp(policy, "NO_SOURCE") == 0) {
-            options.setSourcePolicy(CompileOptions::NO_SOURCE);
-        } else if (strcmp(policy, "LAZY_SOURCE") == 0) {
-            options.setSourcePolicy(CompileOptions::LAZY_SOURCE);
-        } else if (strcmp(policy, "SAVE_SOURCE") == 0) {
-            options.setSourcePolicy(CompileOptions::SAVE_SOURCE);
-        } else {
-            JS_ReportError(cx, "bad 'sourcePolicy' option: '%s'", policy);
-            return false;
-        }
-    }
+    if (v.isBoolean())
+        options.setSourceIsLazy(v.toBoolean());
 
     return true;
 }
@@ -1215,8 +1197,7 @@ Evaluate(JSContext *cx, unsigned argc, jsval *vp)
             }
 
             if (loadBytecode) {
-                script = JS_DecodeScript(cx, loadBuffer, loadLength, cx->compartment()->principals,
-                                         options.originPrincipals(cx));
+                script = JS_DecodeScript(cx, loadBuffer, loadLength, options.originPrincipals(cx));
             } else {
                 script = JS::Compile(cx, global, options, codeChars, codeLength);
             }
@@ -3303,7 +3284,7 @@ CancelExecution(JSRuntime *rt)
     gTimedOut = true;
     JS_RequestInterruptCallback(rt);
 
-    if (!gTimeoutFunc.isNull()) {
+    if (!gTimeoutFunc.ref().get().isNull()) {
         static const char msg[] = "Script runs for too long, terminating.\n";
 #if defined(XP_UNIX) && !defined(JS_THREADSAFE)
         /* It is not safe to call fputs from signals. */
@@ -3357,7 +3338,7 @@ Timeout(JSContext *cx, unsigned argc, Value *vp)
             JS_ReportError(cx, "Second argument must be a timeout function");
             return false;
         }
-        gTimeoutFunc = value;
+        gTimeoutFunc.ref() = value;
     }
 
     args.rval().setUndefined();
@@ -3538,11 +3519,8 @@ class OffThreadState {
             return false;
 
         JS_ASSERT(!token);
-        JS_ASSERT(!source);
 
-        source = newSource;
-        if (!JS_AddStringRoot(cx, &source))
-            return false;
+        source.construct(cx, newSource);
 
         state = COMPILING;
         return true;
@@ -3552,10 +3530,9 @@ class OffThreadState {
         AutoLockMonitor alm(monitor);
         JS_ASSERT(state == COMPILING);
         JS_ASSERT(!token);
-        JS_ASSERT(source);
+        JS_ASSERT(source.ref());
 
-        JS_RemoveStringRoot(cx, &source);
-        source = nullptr;
+        source.destroy();
 
         state = IDLE;
     }
@@ -3564,7 +3541,7 @@ class OffThreadState {
         AutoLockMonitor alm(monitor);
         JS_ASSERT(state == COMPILING);
         JS_ASSERT(!token);
-        JS_ASSERT(source);
+        JS_ASSERT(source.ref());
         JS_ASSERT(newToken);
 
         token = newToken;
@@ -3582,9 +3559,8 @@ class OffThreadState {
                 alm.wait();
         }
 
-        JS_ASSERT(source);
-        JS_RemoveStringRoot(cx, &source);
-        source = nullptr;
+        JS_ASSERT(source.ref());
+        source.destroy();
 
         JS_ASSERT(token);
         void *holdToken = token;
@@ -3597,7 +3573,7 @@ class OffThreadState {
     Monitor monitor;
     State state;
     void *token;
-    JSString *source;
+    Maybe<PersistentRootedString> source;
 };
 
 static OffThreadState offThreadState;
@@ -3642,7 +3618,7 @@ OffThreadCompileScript(JSContext *cx, unsigned argc, jsval *vp)
 
     // These option settings must override whatever the caller requested.
     options.setCompileAndGo(true)
-           .setSourcePolicy(CompileOptions::SAVE_SOURCE);
+           .setSourceIsLazy(false);
 
     // We assume the caller wants caching if at all possible, ignoring
     // heuristics that make sense for a real browser.
@@ -4395,9 +4371,9 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "         provide that as the code's source map URL. If omitted, attach no\n"
 "         source map URL to the code (although the code may provide one itself,\n"
 "         via a //#sourceMappingURL comment).\n"
-"      sourcePolicy: if present, the value converted to a string must be either\n"
-"         'NO_SOURCE', 'LAZY_SOURCE', or 'SAVE_SOURCE'; use the given source\n"
-"         retention policy for this compilation.\n"
+"      sourceIsLazy: if present and true, indicates that, after compilation, \n"
+          "script source should not be cached by the JS engine and should be \n"
+          "lazily loaded from the embedding as-needed.\n"
 "      loadBytecode: if true, and if the source is a CacheEntryObject,\n"
 "         the bytecode would be loaded and decoded from the cache entry instead\n"
 "         of being parsed, then it would be executed as usual.\n"
@@ -5021,7 +4997,7 @@ env_enumerate(JSContext *cx, HandleObject obj)
 {
     static bool reflected;
     char **evp, *name, *value;
-    JSString *valstr;
+    RootedString valstr(cx);
     bool ok;
 
     if (reflected)
@@ -5033,8 +5009,7 @@ env_enumerate(JSContext *cx, HandleObject obj)
             continue;
         *value++ = '\0';
         valstr = JS_NewStringCopyZ(cx, value);
-        ok = valstr && JS_DefineProperty(cx, obj, name, STRING_TO_JSVAL(valstr),
-                                         nullptr, nullptr, JSPROP_ENUMERATE);
+        ok = valstr && JS_DefineProperty(cx, obj, name, valstr, JSPROP_ENUMERATE);
         value[-1] = '=';
         if (!ok)
             return false;
@@ -5060,10 +5035,8 @@ env_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
         RootedString valstr(cx, JS_NewStringCopyZ(cx, value));
         if (!valstr)
             return false;
-        if (!JS_DefineProperty(cx, obj, name, STRING_TO_JSVAL(valstr),
-                               nullptr, nullptr, JSPROP_ENUMERATE)) {
+        if (!JS_DefineProperty(cx, obj, name, valstr, JSPROP_ENUMERATE))
             return false;
-        }
         objp.set(obj);
     }
     return true;
@@ -5664,8 +5637,7 @@ BindScriptArgs(JSContext *cx, JSObject *obj_, OptionParser *op)
     if (!scriptArgs)
         return false;
 
-    if (!JS_DefineProperty(cx, obj, "scriptArgs", OBJECT_TO_JSVAL(scriptArgs),
-                           nullptr, nullptr, 0))
+    if (!JS_DefineProperty(cx, obj, "scriptArgs", scriptArgs, 0))
         return false;
 
     for (size_t i = 0; !msr.empty(); msr.popFront(), ++i) {
@@ -6162,9 +6134,7 @@ main(int argc, char **argv, char **envp)
     if (!SetRuntimeOptions(rt, op))
         return 1;
 
-    gTimeoutFunc = NullValue();
-    if (!JS_AddNamedValueRootRT(rt, &gTimeoutFunc, "gTimeoutFunc"))
-        return 1;
+    gTimeoutFunc.construct(rt, NullValue());
 
     JS_SetGCParameter(rt, JSGC_MAX_BYTES, 0xffffffff);
 #ifdef JSGC_GENERATIONAL
@@ -6210,12 +6180,11 @@ main(int argc, char **argv, char **envp)
         printf("OOM max count: %u\n", OOM_counter);
 #endif
 
-    gTimeoutFunc = NullValue();
-    JS_RemoveValueRootRT(rt, &gTimeoutFunc);
-
     DestroyContext(cx, true);
 
     KillWatchdog();
+
+    gTimeoutFunc.destroy();
 
 #ifdef JS_THREADSAFE
     for (size_t i = 0; i < workerThreads.length(); i++)

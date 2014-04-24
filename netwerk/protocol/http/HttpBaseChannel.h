@@ -34,6 +34,7 @@
 #include "nsThreadUtils.h"
 #include "PrivateBrowsingChannel.h"
 #include "mozilla/net/DNS.h"
+#include "nsITimedChannel.h"
 #include "nsISecurityConsoleMessage.h"
 
 extern PRLogModuleInfo *gHttpLog;
@@ -58,12 +59,14 @@ class HttpBaseChannel : public nsHashPropertyBag
                       , public nsIResumableChannel
                       , public nsITraceableChannel
                       , public PrivateBrowsingChannel<HttpBaseChannel>
+                      , public nsITimedChannel
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIUPLOADCHANNEL
   NS_DECL_NSIUPLOADCHANNEL2
   NS_DECL_NSITRACEABLECHANNEL
+  NS_DECL_NSITIMEDCHANNEL
 
   HttpBaseChannel();
   virtual ~HttpBaseChannel();
@@ -243,6 +246,10 @@ protected:
                                   getter_AddRefs(aResult));
   }
 
+  // Redirect tracking
+  // Checks whether or not aURI and mOriginalURI share the same domain.
+  bool SameOriginWithOriginalUri(nsIURI *aURI);
+
   friend class PrivateBrowsingChannel<HttpBaseChannel>;
 
   nsCOMPtr<nsIURI>                  mURI;
@@ -306,6 +313,8 @@ protected:
   uint32_t                          mLoadAsBlocking             : 1;
   uint32_t                          mLoadUnblocked              : 1;
   uint32_t                          mResponseTimeoutEnabled     : 1;
+  // A flag that should be false only if a cross-domain redirect occurred
+  uint32_t                          mAllRedirectsSameOrigin     : 1;
 
   // Current suspension depth for this channel object
   uint32_t                          mSuspendCount;
@@ -320,6 +329,28 @@ protected:
   nsAutoPtr<nsString>               mContentDispositionFilename;
 
   nsRefPtr<nsHttpHandler>           mHttpHandler;  // keep gHttpHandler alive
+
+  // Performance tracking
+  // The initiator type (for this resource) - how was the resource referenced in
+  // the HTML file.
+  nsString                          mInitiatorType;
+  // Number of redirects that has occurred.
+  int16_t                           mRedirectCount;
+  // A time value equal to the starting time of the fetch that initiates the
+  // redirect.
+  mozilla::TimeStamp                mRedirectStartTimeStamp;
+  // A time value equal to the time immediately after receiving the last byte of
+  // the response of the last redirect.
+  mozilla::TimeStamp                mRedirectEndTimeStamp;
+
+  PRTime                            mChannelCreationTime;
+  TimeStamp                         mChannelCreationTimestamp;
+  TimeStamp                         mAsyncOpenTime;
+  TimeStamp                         mCacheReadStart;
+  TimeStamp                         mCacheReadEnd;
+  // copied from the transaction before we null out mTransaction
+  // so that the timing can still be queried from OnStopRequest
+  TimingStruct                      mTransactionTimings;
 };
 
 // Share some code while working around C++'s absurd inability to handle casting

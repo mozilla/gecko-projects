@@ -6411,6 +6411,9 @@ DispatchPointerFromMouseOrTouch(PresShell* aShell,
     WidgetPointerEvent event(*mouseEvent);
     event.message = pointerMessage;
     event.button = button;
+    event.pressure = event.buttons ?
+                     mouseEvent->pressure ? mouseEvent->pressure : 0.5f :
+                     0.0f;
     event.convertToPointer = mouseEvent->convertToPointer = false;
     aShell->HandleEvent(aFrame, &event, aDontRetargetEvents, aStatus);
   } else if (aEvent->eventStructType == NS_TOUCH_EVENT) {
@@ -8905,6 +8908,7 @@ PresShell::DelayedKeyEvent::DelayedKeyEvent(WidgetKeyboardEvent* aEvent) :
                             aEvent->message,
                             aEvent->widget);
   keyEvent->AssignKeyEventData(*aEvent, false);
+  keyEvent->mFlags.mIsSynthesizedForTests = aEvent->mFlags.mIsSynthesizedForTests;
   mEvent = keyEvent;
 }
 

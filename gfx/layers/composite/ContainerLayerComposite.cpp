@@ -9,7 +9,6 @@
 #include "Units.h"                      // for LayerRect, LayerPixel, etc
 #include "gfx2DGlue.h"                  // for ToMatrix4x4
 #include "gfx3DMatrix.h"                // for gfx3DMatrix
-#include "gfxImageSurface.h"            // for gfxImageSurface
 #include "gfxPrefs.h"                   // for gfxPrefs
 #include "gfxUtils.h"                   // for gfxUtils, etc
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
@@ -36,17 +35,6 @@
 
 namespace mozilla {
 namespace layers {
-
-// HasOpaqueAncestorLayer and ContainerRender are shared between RefLayer and ContainerLayer
-static bool
-HasOpaqueAncestorLayer(Layer* aLayer)
-{
-  for (Layer* l = aLayer->GetParent(); l; l = l->GetParent()) {
-    if (l->GetContentFlags() & Layer::CONTENT_OPAQUE)
-      return true;
-  }
-  return false;
-}
 
 /**
  * Returns a rectangle of content painted opaquely by aLayer. Very consertative;
@@ -247,6 +235,7 @@ static void DrawVelGraph(const nsIntRect& aClipRect,
                         opacity, transform);
 }
 
+// ContainerRender is shared between RefLayer and ContainerLayer
 template<class ContainerT> void
 ContainerRender(ContainerT* aContainer,
                 LayerManagerComposite* aManager,
@@ -296,7 +285,7 @@ ContainerRender(ContainerT* aContainer,
       // all the pixels we draw into are either opaque already or will be
       // covered by something opaque. Otherwise copying up the background is
       // not safe.
-      if (HasOpaqueAncestorLayer(aContainer) &&
+      if (ContainerLayer::HasOpaqueAncestorLayer(aContainer) &&
           transform3D.Is2D(&transform) && !ThebesMatrix(transform).HasNonIntegerTranslation()) {
         surfaceCopyNeeded = gfxPrefs::ComponentAlphaEnabled();
         sourcePoint.x += transform._31;

@@ -154,7 +154,6 @@ public abstract class GeckoApp
     public static final String EXTRA_STATE_BUNDLE          = "stateBundle";
 
     public static final String PREFS_ALLOW_STATE_BUNDLE    = "allowStateBundle";
-    public static final String PREFS_CRASHED               = "crashed";
     public static final String PREFS_OOM_EXCEPTION         = "OOMException";
     public static final String PREFS_VERSION_CODE          = "versionCode";
     public static final String PREFS_WAS_STOPPED           = "wasStopped";
@@ -532,10 +531,6 @@ public abstract class GeckoApp
     public void showNormalTabs() { }
 
     public void showPrivateTabs() { }
-
-    public void showRemoteTabs() { }
-
-    private void showTabs(TabsPanel.Panel panel) { }
 
     public void hideTabs() { }
 
@@ -1394,6 +1389,13 @@ public abstract class GeckoApp
      * aware of the locale.
      *
      * Now we can display strings!
+     *
+     * You can think of this as being something like a second phase of onCreate,
+     * where you can do string-related operations. Use this in place of embedding
+     * strings in view XML.
+     *
+     * By contrast, onConfigurationChanged does some locale operations, but is in
+     * response to device changes.
      */
     @Override
     public void onLocaleReady(final String locale) {
@@ -1403,11 +1405,12 @@ public abstract class GeckoApp
 
         // The URL bar hint needs to be populated.
         TextView urlBar = (TextView) findViewById(R.id.url_bar_title);
-        if (urlBar == null) {
-            return;
+        if (urlBar != null) {
+            final String hint = getResources().getString(R.string.url_bar_default_text);
+            urlBar.setHint(hint);
+        } else {
+            Log.d(LOGTAG, "No URL bar in GeckoApp. Not loading localized hint string.");
         }
-        final String hint = getResources().getString(R.string.url_bar_default_text);
-        urlBar.setHint(hint);
 
         // Allow onConfigurationChanged to take care of the rest.
         onConfigurationChanged(getResources().getConfiguration());
@@ -1569,7 +1572,6 @@ public abstract class GeckoApp
 
         //register for events
         registerEventListener("log");
-        registerEventListener("Reader:ListCountRequest");
         registerEventListener("Reader:ListStatusRequest");
         registerEventListener("Reader:Added");
         registerEventListener("Reader:Removed");
@@ -1768,9 +1770,12 @@ public abstract class GeckoApp
             });
 
             shouldRestore = true;
-        } else if (savedInstanceState != null || getSessionRestorePreference().equals("always") || getRestartFromIntent()) {
+        } else if (savedInstanceState != null ||
+                   getSessionRestorePreference().equals("always") ||
+                   getRestartFromIntent() ||
+                   prefs.getBoolean(GeckoApp.PREFS_WAS_STOPPED, false)) {
             // We're coming back from a background kill by the OS, the user
-            // has chosen to always restore, or we just restarted.
+            // has chosen to always restore, we restarted, or we crashed.
             shouldRestore = true;
         }
 
@@ -2101,7 +2106,6 @@ public abstract class GeckoApp
     public void onDestroy()
     {
         unregisterEventListener("log");
-        unregisterEventListener("Reader:ListCountRequest");
         unregisterEventListener("Reader:ListStatusRequest");
         unregisterEventListener("Reader:Added");
         unregisterEventListener("Reader:Removed");

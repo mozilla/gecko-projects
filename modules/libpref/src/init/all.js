@@ -105,6 +105,9 @@ pref("dom.workers.sharedWorkers.enabled", true);
 // Whether nonzero values can be returned from performance.timing.*
 pref("dom.enable_performance", true);
 
+// Whether resource timing will be gathered and returned by performance.GetEntries*
+pref("dom.enable_resource_timing", false);
+
 // Whether the Gamepad API is enabled
 pref("dom.gamepad.enabled", true);
 #ifdef RELEASE_BUILD
@@ -242,6 +245,7 @@ pref("media.peerconnection.enabled", true);
 pref("media.peerconnection.video.enabled", true);
 pref("media.navigator.video.max_fs", 1200); // 640x480 == 1200mb
 pref("media.navigator.video.max_fr", 30);
+pref("media.peerconnection.video.h264_enabled", false);
 #else
 pref("media.navigator.video.default_width",640);
 pref("media.navigator.video.default_height",480);
@@ -781,6 +785,11 @@ pref("javascript.options.ion",              true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.parallel_parsing", true);
 pref("javascript.options.ion.parallel_compilation", true);
+// This preference instructs the JS engine to discard the
+// source of any privileged JS after compilation. This saves
+// memory, but makes things like Function.prototype.toSource()
+// fail.
+pref("javascript.options.discardSystemSource", false);
 // This preference limits the memory usage of javascript.
 // If you want to change these values for your device,
 // please find Bug 417052 comment 17 and Bug 456721
@@ -1517,7 +1526,7 @@ pref("intl.hyphenation-alias.no-*", "nb");
 pref("intl.hyphenation-alias.nb-*", "nb");
 pref("intl.hyphenation-alias.nn-*", "nn");
 
-pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIXSize1, STIXGeneral, Asana Math, Standard Symbols L, DejaVu Sans, Cambria Math");
+pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIXGeneral, Asana Math, Standard Symbols L, DejaVu Sans, Cambria Math");
 
 // Some CJK fonts have bad underline offset, their CJK character glyphs are overlapped (or adjoined)  to its underline.
 // These fonts are ignored the underline offset, instead of it, the underline is lowered to bottom of its em descent.
@@ -2314,11 +2323,12 @@ pref("font.name-list.serif.zh-HK", "MingLiu_HKSCS, Ming(for ISO10646), MingLiU, 
 pref("font.name-list.sans-serif.zh-HK", "MingLiU_HKSCS, Ming(for ISO10646), MingLiU, MingLiU_HKSCS-ExtB");
 pref("font.name-list.monospace.zh-HK", "MingLiU_HKSCS, Ming(for ISO10646), MingLiU, MingLiU_HKSCS-ExtB");
 
-pref("font.name.serif.x-devanagari", "Mangal");
-pref("font.name.sans-serif.x-devanagari", "Raghindi");
+pref("font.name.serif.x-devanagari", "Kokila");
+pref("font.name.sans-serif.x-devanagari", "Nirmala UI");
 pref("font.name.monospace.x-devanagari", "Mangal");
-pref("font.name-list.serif.x-devanagari", "Mangal, Raghindi");
-pref("font.name-list.monospace.x-devanagari", "Mangal, Raghindi");
+pref("font.name-list.serif.x-devanagari", "Kokila, Raghindi");
+pref("font.name-list.sans-serif.x-devanagari", "Nirmala UI, Mangal");
+pref("font.name-list.monospace.x-devanagari", "Mangal, Nirmala UI");
 
 pref("font.name.serif.x-tamil", "Latha");
 pref("font.name.sans-serif.x-tamil", "Code2000");
@@ -2461,7 +2471,7 @@ pref("font.default.x-cyrillic", "serif");
 pref("font.size.variable.x-cyrillic", 16);
 pref("font.size.fixed.x-cyrillic", 13);
 
-pref("font.default.x-devanagari", "serif");
+pref("font.default.x-devanagari", "sans-serif");
 pref("font.size.variable.x-devanagari", 16);
 pref("font.size.fixed.x-devanagari", 13);
 
@@ -2546,7 +2556,7 @@ pref("font.size.variable.zh-HK", 16);
 pref("font.size.fixed.zh-HK", 16);
 
 // We have special support for Monotype Symbol on Windows.
-pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIXSize1, STIXGeneral, Asana Math, Symbol, DejaVu Sans, Cambria Math");
+pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIXGeneral, Asana Math, Symbol, DejaVu Sans, Cambria Math");
 
 // cleartype settings - false implies default system settings
 
@@ -3078,7 +3088,7 @@ pref("font.size.variable.zh-HK", 15);
 pref("font.size.fixed.zh-HK", 16);
 
 // Apple's Symbol is Unicode so use it
-pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIXSize1, STIXGeneral, Asana Math, Symbol, DejaVu Sans, Cambria Math");
+pref("font.mathfont-family", "MathJax_Main, STIXNonUnicode, STIXSizeOneSym, STIXGeneral, Asana Math, Symbol, DejaVu Sans, Cambria Math");
 
 // individual font faces to be treated as independent families
 // names are Postscript names of each face
@@ -3914,6 +3924,10 @@ pref("image.mem.max_ms_before_yield", 5);
 // The maximum amount of decoded image data we'll willingly keep around (we
 // might keep around more than this, but we'll try to get down to this value).
 pref("image.mem.max_decoded_image_kb", 51200);
+
+// Hard limit for the amount of decoded image data, 0 means we don't have the
+// hard limit for it.
+pref("image.mem.hard_limit_decoded_image_kb", 0);
 
 // Minimum timeout for expiring unused images from the surface cache, in
 // milliseconds. This controls how long we store cached temporary surfaces.

@@ -51,10 +51,12 @@ user_pref("toolkit.telemetry.notifiedOptOut", 999);
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
 
-// AddonManager tests require that the experiments feature be enabled.
-user_pref("experiments.enabled", true);
+// AddonManager tests require that the experiments provider be present.
 user_pref("experiments.supported", true);
 user_pref("experiments.logging.level", "Trace");
+// Point the manifest at something local so we don't risk it hitting production
+// data and installing experiments that may vary over time.
+user_pref("experiments.manifest.uri", "http://%(server)s/experiments-dummy/manifest");
 
 // Only load extensions from the application and user profile
 // AddonManager.SCOPE_PROFILE + AddonManager.SCOPE_APPLICATION
@@ -142,9 +144,6 @@ user_pref("dom.gamepad.enabled", true);
 user_pref("dom.gamepad.non_standard_events.enabled", true);
 
 // Enable Web Audio legacy APIs
-user_pref("media.webaudio.legacy.AudioBufferSourceNode", true);
-user_pref("media.webaudio.legacy.AudioContext", true);
-user_pref("media.webaudio.legacy.AudioParam", true);
 user_pref("media.webaudio.legacy.BiquadFilterNode", true);
 user_pref("media.webaudio.legacy.PannerNode", true);
 user_pref("media.webaudio.legacy.OscillatorNode", true);
@@ -177,3 +176,15 @@ user_pref("browser.snippets.syncPromo.enabled", false);
 
 // Do not turn HTTP cache v2 for our infra tests (some tests are failing)
 user_pref("browser.cache.use_new_backend_temp", false);
+
+// Don't connect to Yahoo! for RSS feed tests.
+// en-US only uses .types.0.uri, but set all of them just to be sure.
+user_pref('browser.contentHandlers.types.0.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.1.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.2.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.3.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.4.uri', 'http://test1.example.org/rss?url=%%s')
+user_pref('browser.contentHandlers.types.5.uri', 'http://test1.example.org/rss?url=%%s')
+
+// We want to collect telemetry, but we don't want to send in the results.
+user_pref('toolkit.telemetry.server', 'https://%(server)s/telemetry-dummy/');

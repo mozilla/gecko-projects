@@ -1154,13 +1154,81 @@ AppendDeviceName(BluetoothSignal& aSignal)
 
   bool success = sDBusConnection->SendWithReply(
     AppendDeviceNameReplyHandler::Callback, handler.get(), 1000,
-    NS_ConvertUTF16toUTF8(devicePath).get(), DBUS_DEVICE_IFACE,
-    "GetProperties", DBUS_TYPE_INVALID);
+    BLUEZ_DBUS_BASE_IFC, NS_ConvertUTF16toUTF8(devicePath).get(),
+    DBUS_DEVICE_IFACE, "GetProperties", DBUS_TYPE_INVALID);
 
   NS_ENSURE_TRUE_VOID(success);
 
   unused << handler.forget(); // picked up by callback handler
 }
+
+class SetPairingConfirmationTask : public Task
+{
+public:
+  SetPairingConfirmationTask(const nsAString& aDeviceAddress,
+                             bool aConfirm,
+                             BluetoothReplyRunnable* aRunnable)
+    : mDeviceAddress(aDeviceAddress)
+    , mConfirm(aConfirm)
+    , mRunnable(aRunnable)
+  {
+    MOZ_ASSERT(!mDeviceAddress.IsEmpty());
+  }
+
+  void Run() MOZ_OVERRIDE
+  {
+    MOZ_ASSERT(!NS_IsMainThread()); // I/O thread
+    MOZ_ASSERT(sDBusConnection);
+
+    nsAutoString errorStr;
+    BluetoothValue v = true;
+    DBusMessage *msg;
+
+    if (!sPairingReqTable->Get(mDeviceAddress, &msg) && mRunnable) {
+      BT_WARNING("%s: Couldn't get original request message.", __FUNCTION__);
+      errorStr.AssignLiteral("Couldn't get original request message.");
+      DispatchBluetoothReply(mRunnable, v, errorStr);
+
+      return;
+    }
+
+    DBusMessage *reply;
+
+    if (mConfirm) {
+      reply = dbus_message_new_method_return(msg);
+    } else {
+      reply = dbus_message_new_error(msg, "org.bluez.Error.Rejected",
+                                     "User rejected confirmation");
+    }
+
+    if (!reply) {
+      BT_WARNING("%s: Memory can't be allocated for the message.", __FUNCTION__);
+      dbus_message_unref(msg);
+      errorStr.AssignLiteral("Memory can't be allocated for the message.");
+      if (mRunnable) {
+        DispatchBluetoothReply(mRunnable, v, errorStr);
+      }
+      return;
+    }
+
+    bool result = sDBusConnection->Send(reply);
+    if (!result) {
+      errorStr.AssignLiteral("Can't send message!");
+    }
+
+    dbus_message_unref(msg);
+    dbus_message_unref(reply);
+    sPairingReqTable->Remove(mDeviceAddress);
+    if (mRunnable) {
+      DispatchBluetoothReply(mRunnable, v, errorStr);
+    }
+  }
+
+private:
+  nsString mDeviceAddress;
+  bool mConfirm;
+  nsRefPtr<BluetoothReplyRunnable> mRunnable;
+};
 
 static DBusHandlerResult
 AgentEventFilter(DBusConnection *conn, DBusMessage *msg, void *data)
@@ -1331,7 +1399,25 @@ AgentEventFilter(DBusConnection *conn, DBusMessage *msg, void *data)
     dbus_connection_send(conn, reply, nullptr);
     dbus_message_unref(reply);
 
-    // Do not send an notification to upper layer, too annoying.
+    // Do not send a notification to upper layer, too annoying.
+    return DBUS_HANDLER_RESULT_HANDLED;
+  } else if (dbus_message_is_method_call(msg, DBUS_AGENT_IFACE, "RequestPairingConsent")) {
+    // Directly SetPairingconfirmation for RequestPairingConsent here
+    if (!dbus_message_get_args(msg, nullptr,
+                               DBUS_TYPE_OBJECT_PATH, &objectPath,
+                               DBUS_TYPE_INVALID)) {
+      errorStr.AssignLiteral("Invalid arguments: RequestPairingConsent()");
+      goto handle_error;
+    }
+
+    nsString address = GetAddressFromObjectPath(NS_ConvertUTF8toUTF16(objectPath));
+    sPairingReqTable->Put(address, msg);
+    Task* task = new SetPairingConfirmationTask(address, true, nullptr);
+    DispatchToDBusThread(task);
+    // Increase dbus message reference counts, it will be decreased in
+    // SetPairingConfirmationTask
+    dbus_message_ref(msg);
+    // Do not send a notification to upper layer
     return DBUS_HANDLER_RESULT_HANDLED;
   } else {
 #ifdef DEBUG
@@ -1488,6 +1574,7 @@ private:
 
     bool success = sDBusConnection->SendWithReply(
       RegisterAgentReplyHandler::Callback, handler.get(), -1,
+      BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(sAdapterPath).get(),
       DBUS_ADAPTER_IFACE, "RegisterAgent",
       DBUS_TYPE_OBJECT_PATH, &agentPath,
@@ -1527,6 +1614,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       DBusReplyHandler::Callback, handler.get(), -1,
+      BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(sAdapterPath).get(),
       DBUS_ADAPTER_IFACE, "AddReservedServiceRecords",
       DBUS_TYPE_ARRAY, DBUS_TYPE_UINT32,
@@ -1939,7 +2027,7 @@ public:
      */
     if (sAdapterPath.IsEmpty()) {
       bool success = sDBusConnection->SendWithReply(OnDefaultAdapterReply, nullptr,
-                                                    1000, "/",
+                                                    1000, BLUEZ_DBUS_BASE_IFC, "/",
                                                     DBUS_MANAGER_IFACE,
                                                     "DefaultAdapter",
                                                     DBUS_TYPE_INVALID);
@@ -2211,6 +2299,7 @@ protected:
 
     bool success = sDBusConnection->SendWithReply(
       DefaultAdapterPathReplyHandler::Callback, handler.get(), 1000,
+      BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(mAdapterPath).get(),
       DBUS_ADAPTER_IFACE, "GetProperties", DBUS_TYPE_INVALID);
 
@@ -2274,7 +2363,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       DefaultAdapterPathReplyHandler::Callback,
-      handler.get(), 1000,
+      handler.get(), 1000, BLUEZ_DBUS_BASE_IFC,
       "/", DBUS_MANAGER_IFACE, "DefaultAdapter",
       DBUS_TYPE_INVALID);
     NS_ENSURE_TRUE_VOID(success);
@@ -2342,6 +2431,7 @@ public:
     bool success = sDBusConnection->SendWithReply(
       OnSendDiscoveryMessageReply,
       static_cast<void*>(mRunnable.get()), -1,
+      BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(sAdapterPath).get(),
       DBUS_ADAPTER_IFACE, mMessageName.get(),
       DBUS_TYPE_INVALID);
@@ -2420,8 +2510,8 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       mCallback, static_cast<void*>(mServiceClass), -1,
-      mObjectPath.get(), mInterface.get(), mMessage.get(),
-      DBUS_TYPE_INVALID);
+      BLUEZ_DBUS_BASE_IFC, mObjectPath.get(), mInterface.get(),
+      mMessage.get(), DBUS_TYPE_INVALID);
     NS_ENSURE_TRUE_VOID(success);
 
     mServiceClass.forget();
@@ -2607,7 +2697,7 @@ protected:
 
     bool success = sDBusConnection->SendWithReply(
       BluetoothArrayOfDevicePropertiesReplyHandler::Callback,
-      handler.get(), 1000,
+      handler.get(), 1000, BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(mObjectPath).get(),
       DBUS_DEVICE_IFACE, "GetProperties",
       DBUS_TYPE_INVALID);
@@ -2735,7 +2825,7 @@ public:
     MOZ_ASSERT(!sAdapterPath.IsEmpty());
 
     DBusMessage* msg =
-      dbus_message_new_method_call("org.bluez",
+      dbus_message_new_method_call(BLUEZ_DBUS_BASE_IFC,
                                    NS_ConvertUTF16toUTF8(sAdapterPath).get(),
                                    sBluetoothDBusIfaces[mType],
                                    "SetProperty");
@@ -2905,6 +2995,7 @@ public:
     // unregister it after pairing process is over
     bool success = sDBusConnection->SendWithReply(
       GetObjectPathCallback, static_cast<void*>(mRunnable), mTimeout,
+      BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(sAdapterPath).get(),
       DBUS_ADAPTER_IFACE,
       "CreatePairedDevice",
@@ -2976,6 +3067,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       OnRemoveDeviceReply, static_cast<void*>(mRunnable.get()), -1,
+      BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(sAdapterPath).get(),
       DBUS_ADAPTER_IFACE, "RemoveDevice",
       DBUS_TYPE_OBJECT_PATH, &cstrDeviceObjectPath,
@@ -3176,68 +3268,6 @@ BluetoothDBusService::SetPasskeyInternal(const nsAString& aDeviceAddress,
   return true;
 }
 
-class SetPairingConfirmationTask : public Task
-{
-public:
-  SetPairingConfirmationTask(const nsAString& aDeviceAddress,
-                             bool aConfirm,
-                             BluetoothReplyRunnable* aRunnable)
-    : mDeviceAddress(aDeviceAddress)
-    , mConfirm(aConfirm)
-    , mRunnable(aRunnable)
-  {
-    MOZ_ASSERT(!mDeviceAddress.IsEmpty());
-    MOZ_ASSERT(mRunnable);
-  }
-
-  void Run() MOZ_OVERRIDE
-  {
-    MOZ_ASSERT(!NS_IsMainThread()); // I/O thread
-    MOZ_ASSERT(sDBusConnection);
-
-    nsAutoString errorStr;
-    BluetoothValue v = true;
-    DBusMessage *msg;
-    if (!sPairingReqTable->Get(mDeviceAddress, &msg)) {
-      BT_WARNING("%s: Couldn't get original request message.", __FUNCTION__);
-      errorStr.AssignLiteral("Couldn't get original request message.");
-      DispatchBluetoothReply(mRunnable, v, errorStr);
-      return;
-    }
-
-    DBusMessage *reply;
-
-    if (mConfirm) {
-      reply = dbus_message_new_method_return(msg);
-    } else {
-      reply = dbus_message_new_error(msg, "org.bluez.Error.Rejected",
-                                     "User rejected confirmation");
-    }
-
-    if (!reply) {
-      BT_WARNING("%s: Memory can't be allocated for the message.", __FUNCTION__);
-      dbus_message_unref(msg);
-      errorStr.AssignLiteral("Memory can't be allocated for the message.");
-      DispatchBluetoothReply(mRunnable, v, errorStr);
-      return;
-    }
-
-    bool result = sDBusConnection->Send(reply);
-    if (!result) {
-      errorStr.AssignLiteral("Can't send message!");
-    }
-    dbus_message_unref(msg);
-    dbus_message_unref(reply);
-
-    sPairingReqTable->Remove(mDeviceAddress);
-    DispatchBluetoothReply(mRunnable, v, errorStr);
-  }
-
-private:
-  nsString mDeviceAddress;
-  bool mConfirm;
-  nsRefPtr<BluetoothReplyRunnable> mRunnable;
-};
 
 bool
 BluetoothDBusService::SetPairingConfirmationInternal(
@@ -3498,6 +3528,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       OnGetServiceChannelReplyHandler::Callback, handler, -1,
+      BLUEZ_DBUS_BASE_IFC,
       NS_ConvertUTF16toUTF8(objectPath).get(),
       DBUS_DEVICE_IFACE, "GetServiceAttributeValue",
       DBUS_TYPE_STRING, &cstrServiceUUID,
@@ -3578,6 +3609,7 @@ public:
 
     sDBusConnection->SendWithReply(DiscoverServicesCallback,
                                    (void*)callbackRunnable, -1,
+                                   BLUEZ_DBUS_BASE_IFC,
                                    NS_ConvertUTF16toUTF8(objectPath).get(),
                                    DBUS_DEVICE_IFACE,
                                    "DiscoverServices",
@@ -3796,6 +3828,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       GetVoidCallback, static_cast<void*>(mRunnable.get()), -1,
+      BLUEZ_DBUS_BASE_IFC,
       objectPath.get(),
       DBUS_CTL_IFACE, "UpdateMetaData",
       DBUS_TYPE_STRING, &title,
@@ -3932,6 +3965,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       GetVoidCallback, static_cast<void*>(mRunnable.get()), -1,
+      BLUEZ_DBUS_BASE_IFC,
       objectPath.get(),
       DBUS_CTL_IFACE, "UpdatePlayStatus",
       DBUS_TYPE_UINT32, &mDuration,
@@ -4055,6 +4089,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       ControlCallback, nullptr, -1,
+      BLUEZ_DBUS_BASE_IFC,
       objectPath.get(),
       DBUS_CTL_IFACE, "UpdatePlayStatus",
       DBUS_TYPE_UINT32, &mDuration,
@@ -4121,6 +4156,7 @@ public:
 
     bool success = sDBusConnection->SendWithReply(
       ControlCallback, nullptr, -1,
+      BLUEZ_DBUS_BASE_IFC,
       objectPath.get(),
       DBUS_CTL_IFACE, "UpdateNotification",
       DBUS_TYPE_UINT16, &eventId,

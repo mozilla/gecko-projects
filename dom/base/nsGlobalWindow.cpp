@@ -2014,18 +2014,15 @@ nsGlobalWindow::SetInitialPrincipalToSubject()
 {
   FORWARD_TO_OUTER_VOID(SetInitialPrincipalToSubject, ());
 
-  // First, grab the subject principal. These methods never fail.
-  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-  nsCOMPtr<nsIPrincipal> newWindowPrincipal, systemPrincipal;
-  ssm->GetSubjectPrincipal(getter_AddRefs(newWindowPrincipal));
-  ssm->GetSystemPrincipal(getter_AddRefs(systemPrincipal));
+  // First, grab the subject principal.
+  nsCOMPtr<nsIPrincipal> newWindowPrincipal = nsContentUtils::GetSubjectPrincipal();
   if (!newWindowPrincipal) {
-    newWindowPrincipal = systemPrincipal;
+    newWindowPrincipal = nsContentUtils::GetSystemPrincipal();
   }
 
-  // Now, if we're about to use the system principal, make sure we're not using
-  // it for a content docshell.
-  if (newWindowPrincipal == systemPrincipal &&
+  // Now, if we're about to use the system principal or an nsExpandedPrincipal,
+  // make sure we're not using it for a content docshell.
+  if (nsContentUtils::IsSystemOrExpandedPrincipal(newWindowPrincipal) &&
       GetDocShell()->ItemType() != nsIDocShellTreeItem::typeChrome) {
     newWindowPrincipal = nullptr;
   }
@@ -2457,7 +2454,8 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
           newInnerWindow->mPerformance =
             new nsPerformance(newInnerWindow,
                               currentInner->mPerformance->GetDOMTiming(),
-                              currentInner->mPerformance->GetChannel());
+                              currentInner->mPerformance->GetChannel(),
+                              currentInner->mPerformance->GetParentPerformance());
         }
       }
 
@@ -2543,10 +2541,10 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
     }
 
     if (!aState) {
-      if (!JS_DefineProperty(cx, newInnerGlobal, "window",
-                             OBJECT_TO_JSVAL(GetWrapperPreserveColor()),
-                             JS_PropertyStub, JS_StrictPropertyStub,
-                             JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)) {
+      JS::Rooted<JSObject*> rootedWrapper(cx, GetWrapperPreserveColor());
+      if (!JS_DefineProperty(cx, newInnerGlobal, "window", rootedWrapper,
+                             JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT,
+                             JS_PropertyStub, JS_StrictPropertyStub)) {
         NS_ERROR("can't create the 'window' property");
         return NS_ERROR_FAILURE;
       }
@@ -3280,11 +3278,10 @@ nsGlobalWindow::DefineArgumentsProperty(nsIArray *aArguments)
   MOZ_ASSERT(!mIsModalContentWindow); // Handled separately.
   nsIScriptContext *ctx = GetOuterWindowInternal()->mContext;
   NS_ENSURE_TRUE(aArguments && ctx, NS_ERROR_NOT_INITIALIZED);
-  AutoPushJSContext cx(ctx->GetNativeContext());
-  NS_ENSURE_TRUE(cx, NS_ERROR_NOT_INITIALIZED);
+  AutoJSContext cx;
 
   JS::Rooted<JSObject*> obj(cx, GetWrapperPreserveColor());
-  return GetContextInternal()->SetProperty(obj, "arguments", aArguments);
+  return ctx->SetProperty(obj, "arguments", aArguments);
 }
 
 //*****************************************************************************
@@ -3570,7 +3567,22 @@ nsPIDOMWindow::CreatePerformanceObjectIfNeeded()
     timedChannel = nullptr;
   }
   if (timing) {
-    mPerformance = new nsPerformance(this, timing, timedChannel);
+    // If we are dealing with an iframe, we will need the parent's performance
+    // object (so we can add the iframe as a resource of that page).
+    nsPerformance* parentPerformance = nullptr;
+    nsCOMPtr<nsIDOMWindow> parentWindow;
+    GetScriptableParent(getter_AddRefs(parentWindow));
+    nsCOMPtr<nsPIDOMWindow> parentPWindow = do_GetInterface(parentWindow);
+    if (GetOuterWindow() != parentPWindow) {
+      if (parentPWindow && !parentPWindow->IsInnerWindow()) {
+        parentPWindow = parentPWindow->GetCurrentInnerWindow();
+      }
+      if (parentPWindow) {
+        parentPerformance = parentPWindow->GetPerformance();
+      }
+    }
+    mPerformance =
+      new nsPerformance(this, timing, timedChannel, parentPerformance);
   }
 }
 
@@ -4460,9 +4472,8 @@ nsGlobalWindow::SetOpener(nsIDOMWindow* aOpener, ErrorResult& aError)
 
     if (!JS_WrapObject(cx, &otherObj) ||
         !JS_WrapObject(cx, &thisObj) ||
-        !JS_DefineProperty(cx, thisObj, "opener", JS::ObjectValue(*otherObj),
-                           JS_PropertyStub, JS_StrictPropertyStub,
-                           JSPROP_ENUMERATE)) {
+        !JS_DefineProperty(cx, thisObj, "opener", otherObj, JSPROP_ENUMERATE,
+                           JS_PropertyStub, JS_StrictPropertyStub)) {
       aError.Throw(NS_ERROR_FAILURE);
     }
 
@@ -7864,11 +7875,8 @@ PostMessageEvent::Run()
   NS_ABORT_IF_FALSE(!mSource || mSource->IsOuterWindow(),
                     "should have been passed an outer window!");
 
-  // Get the JSContext for the target window
-  nsIScriptContext* scriptContext = mTargetWindow->GetContext();
-  AutoPushJSContext cx(scriptContext ? scriptContext->GetNativeContext()
-                                     : nsContentUtils::GetSafeJSContext());
-  MOZ_ASSERT(cx);
+  AutoJSAPI jsapi;
+  JSContext* cx = jsapi.cx();
 
   // If we bailed before this point we're going to leak mMessage, but
   // that's probably better than crashing.
@@ -7881,6 +7889,7 @@ PostMessageEvent::Run()
 
   NS_ABORT_IF_FALSE(targetWindow->IsInnerWindow(),
                     "we ordered an inner window!");
+  JSAutoCompartment ac(cx, targetWindow->GetWrapperPreserveColor());
 
   // Ensure that any origin which might have been provided is the origin of this
   // window's document.  Note that we do this *now* instead of when postMessage
@@ -12463,81 +12472,37 @@ nsGlobalWindow::GetScrollFrame()
 }
 
 nsresult
-nsGlobalWindow::BuildURIfromBase(const char *aURL, nsIURI **aBuiltURI,
-                                 JSContext **aCXused)
+nsGlobalWindow::SecurityCheckURL(const char *aURL)
 {
-  nsIScriptContext *scx = GetContextInternal();
-  JSContext *cx = nullptr;
-
-  *aBuiltURI = nullptr;
-  if (aCXused)
-    *aCXused = nullptr;
-
-  // get JSContext
-  NS_ASSERTION(scx, "opening window missing its context");
-  NS_ASSERTION(mDoc, "opening window missing its document");
-  if (!scx || !mDoc)
-    return NS_ERROR_FAILURE;
-
-  nsCOMPtr<nsIDOMChromeWindow> chrome_win = do_QueryObject(this);
-
-  if (nsContentUtils::IsCallerChrome() && !chrome_win) {
-    // If open() is called from chrome on a non-chrome window, we'll
-    // use the context from the window on which open() is being called
-    // to prevent giving chrome priveleges to new windows opened in
-    // such a way. This also makes us get the appropriate base URI for
-    // the below URI resolution code.
-
-    cx = scx->GetNativeContext();
-  } else {
-    // get the JSContext from the call stack
-    cx = nsContentUtils::GetCurrentJSContext();
-  }
-
-  /* resolve the URI, which could be relative to the calling window
-     (note the algorithm to get the base URI should match the one
-     used to actually kick off the load in nsWindowWatcher.cpp). */
-  nsAutoCString charset(NS_LITERAL_CSTRING("UTF-8")); // default to utf-8
-  nsIURI* baseURI = nullptr;
-  nsCOMPtr<nsIURI> uriToLoad;
   nsCOMPtr<nsPIDOMWindow> sourceWindow;
-
-  if (cx) {
-    nsIScriptContext *scriptcx = nsJSUtils::GetDynamicScriptContext(cx);
-    if (scriptcx)
-      sourceWindow = do_QueryInterface(scriptcx->GetGlobalObject());
+  JSContext* topCx = nsContentUtils::GetCurrentJSContext();
+  if (topCx) {
+    sourceWindow = do_QueryInterface(nsJSUtils::GetDynamicScriptGlobal(topCx));
   }
-
   if (!sourceWindow) {
     sourceWindow = this;
   }
+  AutoJSContext cx;
+  nsGlobalWindow* sourceWin = static_cast<nsGlobalWindow*>(sourceWindow.get());
+  JSAutoCompartment ac(cx, sourceWin->GetGlobalJSObject());
 
+  // Resolve the baseURI, which could be relative to the calling window.
+  //
+  // Note the algorithm to get the base URI should match the one
+  // used to actually kick off the load in nsWindowWatcher.cpp.
   nsCOMPtr<nsIDocument> doc = sourceWindow->GetDoc();
+  nsIURI* baseURI = nullptr;
+  nsAutoCString charset(NS_LITERAL_CSTRING("UTF-8")); // default to utf-8
   if (doc) {
     baseURI = doc->GetDocBaseURI();
     charset = doc->GetDocumentCharacterSet();
   }
-
-  if (aCXused)
-    *aCXused = cx;
-  return NS_NewURI(aBuiltURI, nsDependentCString(aURL), charset.get(), baseURI);
-}
-
-nsresult
-nsGlobalWindow::SecurityCheckURL(const char *aURL)
-{
-  JSContext       *cxUsed;
   nsCOMPtr<nsIURI> uri;
-
-  if (NS_FAILED(BuildURIfromBase(aURL, getter_AddRefs(uri), &cxUsed))) {
-    return NS_ERROR_FAILURE;
+  nsresult rv = NS_NewURI(getter_AddRefs(uri), nsDependentCString(aURL),
+                          charset.get(), baseURI);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
-
-  if (!cxUsed) {
-    return NS_OK;
-  }
-
-  AutoPushJSContext cx(cxUsed);
 
   if (NS_FAILED(nsContentUtils::GetSecurityManager()->
         CheckLoadURIFromScript(cx, uri))) {
@@ -13433,15 +13398,11 @@ nsGlobalWindow::GetMessageManager(ErrorResult& aError)
   nsGlobalChromeWindow* myself = static_cast<nsGlobalChromeWindow*>(this);
   if (!myself->mMessageManager) {
     nsIScriptContext* scx = GetContextInternal();
-    if (NS_WARN_IF(!scx)) {
+    if (NS_WARN_IF(!scx || !(scx->GetNativeContext()))) {
       aError.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    AutoPushJSContext cx(scx->GetNativeContext());
-    if (NS_WARN_IF(!cx)) {
-      aError.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
+
     nsCOMPtr<nsIMessageBroadcaster> globalMM =
       do_GetService("@mozilla.org/globalmessagemanager;1");
     myself->mMessageManager =
@@ -13601,8 +13562,8 @@ nsGlobalWindow::SetConsole(JSContext* aCx, JS::Handle<JS::Value> aValue)
 
   if (!JS_WrapObject(aCx, &thisObj) ||
       !JS_DefineProperty(aCx, thisObj, "console", aValue,
-                         JS_PropertyStub, JS_StrictPropertyStub,
-                         JSPROP_ENUMERATE)) {
+                         JSPROP_ENUMERATE, JS_PropertyStub,
+                         JS_StrictPropertyStub)) {
     return NS_ERROR_FAILURE;
   }
 

@@ -102,7 +102,8 @@ add_task(function* test_startStop() {
   Assert.equal(result.applicable, true, "Experiment should now be applicable.");
   Assert.equal(experiment.enabled, false, "Experiment should not be enabled.");
 
-  yield experiment.start();
+  let changes = yield experiment.start();
+  Assert.equal(changes, experiment.ADDON_CHANGE_INSTALL, "Add-on was installed.");
   addons = yield getExperimentAddons();
   Assert.equal(experiment.enabled, true, "Experiment should now be enabled.");
   Assert.equal(addons.length, 1, "1 experiment add-on is installed.");
@@ -110,12 +111,14 @@ add_task(function* test_startStop() {
   Assert.equal(addons[0].userDisabled, false, "The add-on is not userDisabled.");
   Assert.ok(addons[0].isActive, "The add-on is active.");
 
-  yield experiment.stop();
+  changes = yield experiment.stop();
+  Assert.equal(changes, experiment.ADDON_CHANGE_UNINSTALL, "Add-on was uninstalled.");
   addons = yield getExperimentAddons();
   Assert.equal(experiment.enabled, false, "Experiment should not be enabled.");
   Assert.equal(addons.length, 0, "Experiment should be uninstalled from the Addon Manager.");
 
-  yield experiment.start();
+  changes = yield experiment.start();
+  Assert.equal(changes, experiment.ADDON_CHANGE_INSTALL, "Add-on was installed.");
   addons = yield getExperimentAddons();
   Assert.equal(experiment.enabled, true, "Experiment should now be enabled.");
   Assert.equal(addons.length, 1, "1 experiment add-on is installed.");
@@ -123,21 +126,38 @@ add_task(function* test_startStop() {
   Assert.equal(addons[0].userDisabled, false, "The add-on is not userDisabled.");
   Assert.ok(addons[0].isActive, "The add-on is active.");
 
-  let result = yield experiment._shouldStop();
+  let result = yield experiment.shouldStop();
   Assert.equal(result.shouldStop, false, "shouldStop should be false.");
-  let maybeStop = yield experiment.maybeStop();
-  Assert.equal(maybeStop, false, "Experiment should not have been stopped.");
   Assert.equal(experiment.enabled, true, "Experiment should be enabled.");
   addons = yield getExperimentAddons();
   Assert.equal(addons.length, 1, "Experiment still in add-ons manager.");
   Assert.ok(addons[0].isActive, "The add-on is still active.");
 
   defineNow(gPolicy, futureDate(endDate, MS_IN_ONE_DAY));
-  result = yield experiment._shouldStop();
+  result = yield experiment.shouldStop();
   Assert.equal(result.shouldStop, true, "shouldStop should now be true.");
-  maybeStop = yield experiment.maybeStop();
-  Assert.equal(maybeStop, true, "Experiment should have been stopped.");
+  changes = yield experiment.stop();
+  Assert.equal(changes, experiment.ADDON_CHANGE_UNINSTALL, "Add-on should be uninstalled.");
   Assert.equal(experiment.enabled, false, "Experiment should be disabled.");
   addons = yield getExperimentAddons();
   Assert.equal(addons.length, 0, "Experiment add-on is uninstalled.");
+
+  // Ensure hash validation works.
+  // We set an incorrect hash and expect the install to fail.
+  experiment._manifestData.xpiHash = "sha1:41014dcc66b4dcedcd973491a1530a32f0517d8a";
+  let errored = false;
+  try {
+    yield experiment.start();
+  } catch (ex) {
+    errored = true;
+  }
+  Assert.ok(experiment._failedStart, "Experiment failed to start.");
+  Assert.ok(errored, "start() threw an exception.");
+
+  // Make sure "ignore hashes" mode works.
+  gPolicy.ignoreHashes = true;
+  let changes = yield experiment.start();
+  Assert.equal(changes, experiment.ADDON_CHANGE_INSTALL);
+  yield experiment.stop();
+  gPolicy.ignoreHashes = false;
 });

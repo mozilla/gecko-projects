@@ -202,7 +202,7 @@ MIRType
 IonBuilder::getInlineReturnType()
 {
     types::TemporaryTypeSet *returnTypes = getInlineReturnTypeSet();
-    return MIRTypeFromValueType(returnTypes->getKnownTypeTag());
+    return returnTypes->getKnownMIRType();
 }
 
 IonBuilder::InliningStatus
@@ -585,13 +585,6 @@ IonBuilder::inlineMathAbs(CallInfo &callInfo)
     MIRType absType = (argType == MIRType_Float32) ? MIRType_Double : argType;
     MInstruction *ins = MAbs::New(alloc(), callInfo.getArg(0), absType);
     current->add(ins);
-
-    if (IsFloatingPointType(argType) && returnType == MIRType_Int32) {
-        MToInt32 *toInt = MToInt32::New(alloc(), ins);
-        toInt->setCanBeNegativeZero(false);
-        current->add(toInt);
-        ins = toInt;
-    }
 
     current->push(ins);
     return InliningStatus_Inlined;
@@ -1544,7 +1537,7 @@ IonBuilder::inlineNewDenseArrayForParallelExecution(CallInfo &callInfo)
     // constructed type objects, so we can only perform the inlining if we
     // already have one of these type objects.
     types::TemporaryTypeSet *returnTypes = getInlineReturnTypeSet();
-    if (returnTypes->getKnownTypeTag() != JSVAL_TYPE_OBJECT)
+    if (returnTypes->getKnownMIRType() != MIRType_Object)
         return InliningStatus_NotInlined;
     if (returnTypes->unknownObject() || returnTypes->getObjectCount() != 1)
         return InliningStatus_NotInlined;

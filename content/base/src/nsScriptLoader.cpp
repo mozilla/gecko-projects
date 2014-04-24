@@ -28,6 +28,7 @@
 #include "nsContentPolicyUtils.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
+#include "nsITimedChannel.h"
 #include "nsIScriptElement.h"
 #include "nsIDOMHTMLScriptElement.h"
 #include "nsIDocShell.h"
@@ -53,6 +54,7 @@
 
 #include "mozilla/CORSMode.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/unused.h"
 
 #ifdef PR_LOGGING
 static PRLogModuleInfo* gCspPRLog;
@@ -336,6 +338,12 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest, const nsAString &aType,
   nsCOMPtr<nsILoadContext> loadContext(do_QueryInterface(docshell));
   mozilla::net::SeerLearn(aRequest->mURI, mDocument->GetDocumentURI(),
       nsINetworkSeer::LEARN_LOAD_SUBRESOURCE, loadContext);
+
+  // Set the initiator type
+  nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChannel));
+  if (timedChannel) {
+    timedChannel->SetInitiatorType(NS_LITERAL_STRING("script"));
+  }
 
   nsCOMPtr<nsIStreamLoader> loader;
   rv = NS_NewStreamLoader(getter_AddRefs(loader), this);
@@ -814,11 +822,10 @@ NotifyOffThreadScriptLoadCompletedRunnable::Run()
 static void
 OffThreadScriptLoaderCallback(void *aToken, void *aCallbackData)
 {
-  NotifyOffThreadScriptLoadCompletedRunnable* aRunnable =
-    static_cast<NotifyOffThreadScriptLoadCompletedRunnable*>(aCallbackData);
+  nsRefPtr<NotifyOffThreadScriptLoadCompletedRunnable> aRunnable =
+    dont_AddRef(static_cast<NotifyOffThreadScriptLoadCompletedRunnable*>(aCallbackData));
   aRunnable->SetToken(aToken);
   NS_DispatchToMainThread(aRunnable);
-  NS_RELEASE(aRunnable);
 }
 
 nsresult
@@ -848,11 +855,8 @@ nsScriptLoader::AttemptAsyncScriptParse(nsScriptLoadRequest* aRequest)
     return NS_ERROR_FAILURE;
   }
 
-  NotifyOffThreadScriptLoadCompletedRunnable* runnable =
+  nsRefPtr<NotifyOffThreadScriptLoadCompletedRunnable> runnable =
     new NotifyOffThreadScriptLoadCompletedRunnable(aRequest, this);
-
-  // This reference will be consumed by OffThreadScriptLoaderCallback.
-  NS_ADDREF(runnable);
 
   if (!JS::CompileOffThread(cx, options,
                             aRequest->mScriptText.get(), aRequest->mScriptText.Length(),
@@ -863,6 +867,7 @@ nsScriptLoader::AttemptAsyncScriptParse(nsScriptLoadRequest* aRequest)
 
   mDocument->BlockOnload();
 
+  unused << runnable.forget();
   return NS_OK;
 }
 

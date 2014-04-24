@@ -3125,18 +3125,18 @@ nsComputedDOMStyle::DoGetTextAlignLast()
 }
 
 CSSValue*
-nsComputedDOMStyle::DoGetTextCombineHorizontal()
+nsComputedDOMStyle::DoGetTextCombineUpright()
 {
   nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
-  uint8_t tch = StyleText()->mTextCombineHorizontal;
+  uint8_t tch = StyleText()->mTextCombineUpright;
 
-  if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_ALL) {
+  if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL) {
     val->SetIdent(
       nsCSSProps::ValueToKeywordEnum(tch,
-                                     nsCSSProps::kTextCombineHorizontalKTable));
-  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_2) {
+                                     nsCSSProps::kTextCombineUprightKTable));
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_2) {
     val->SetString(NS_LITERAL_STRING("digits 2"));
-  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_3) {
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_UPRIGHT_DIGITS_3) {
     val->SetString(NS_LITERAL_STRING("digits 3"));
   } else {
     val->SetString(NS_LITERAL_STRING("digits 4"));
@@ -4063,20 +4063,14 @@ nsComputedDOMStyle::DoGetTouchAction()
 
   int32_t intValue = StyleDisplay()->mTouchAction;
 
-  // None and Auto values aren't allowed to be in conjunction with
-  // other values.
-  if (NS_STYLE_TOUCH_ACTION_AUTO == intValue) {
-    val->SetIdent(eCSSKeyword_auto);
-  } else if (NS_STYLE_TOUCH_ACTION_NONE == intValue) {
-    val->SetIdent(eCSSKeyword_none);
-  } else {
-    nsAutoString valueStr;
-    nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_touch_action,
-      intValue, NS_STYLE_TOUCH_ACTION_PAN_X,
-      NS_STYLE_TOUCH_ACTION_PAN_Y, valueStr);
-    val->SetString(valueStr);
-  }
-
+  // None and Auto and Manipulation values aren't allowed
+  // to be in conjunction with other values.
+  // But there are all checks in CSSParserImpl::ParseTouchAction
+  nsAutoString valueStr;
+  nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_touch_action, intValue,
+    NS_STYLE_TOUCH_ACTION_NONE, NS_STYLE_TOUCH_ACTION_MANIPULATION,
+    valueStr);
+  val->SetString(valueStr);
   return val;
 }
 

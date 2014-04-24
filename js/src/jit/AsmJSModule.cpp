@@ -149,24 +149,6 @@ CoerceInPlace_ToNumber(JSContext *cx, MutableHandleValue val)
     return true;
 }
 
-static void
-EnableActivationFromAsmJS(AsmJSActivation *activation)
-{
-    JSContext *cx = activation->cx();
-    Activation *act = cx->mainThread().activation();
-    JS_ASSERT(act->isJit());
-    act->asJit()->setActive(cx);
-}
-
-static void
-DisableActivationFromAsmJS(AsmJSActivation *activation)
-{
-    JSContext *cx = activation->cx();
-    Activation *act = cx->mainThread().activation();
-    JS_ASSERT(act->isJit());
-    act->asJit()->setActive(cx, false);
-}
-
 namespace js {
 
 // Defined in AsmJS.cpp:
@@ -242,10 +224,6 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext *cx)
         return RedirectCall(FuncCast(CoerceInPlace_ToNumber), Args_General2);
       case AsmJSImm_ToInt32:
         return RedirectCall(FuncCast<int32_t (double)>(js::ToInt32), Args_Int_Double);
-      case AsmJSImm_EnableActivationFromAsmJS:
-        return RedirectCall(FuncCast(EnableActivationFromAsmJS), Args_General1);
-      case AsmJSImm_DisableActivationFromAsmJS:
-        return RedirectCall(FuncCast(DisableActivationFromAsmJS), Args_General1);
 #if defined(JS_CODEGEN_ARM)
       case AsmJSImm_aeabi_idivmod:
         return RedirectCall(FuncCast(__aeabi_idivmod), Args_General2);
@@ -350,7 +328,8 @@ AsmJSModule::staticallyLink(ExclusiveContext *cx)
     }
 }
 
-AsmJSModule::AsmJSModule(ScriptSource *scriptSource, uint32_t funcStart, uint32_t offsetToEndOfUseAsm)
+AsmJSModule::AsmJSModule(ScriptSource *scriptSource, uint32_t funcStart,
+                         uint32_t offsetToEndOfUseAsm, bool strict)
   : globalArgumentName_(nullptr),
     importArgumentName_(nullptr),
     bufferArgumentName_(nullptr),
@@ -366,6 +345,7 @@ AsmJSModule::AsmJSModule(ScriptSource *scriptSource, uint32_t funcStart, uint32_
     mozilla::PodZero(&pod);
     scriptSource_->incref();
     pod.minHeapLength_ = AsmJSAllocationGranularity;
+    pod.strict_ = strict;
 }
 
 AsmJSModule::~AsmJSModule()
@@ -898,7 +878,7 @@ AsmJSModule::clone(JSContext *cx, ScopedJSDeletePtr<AsmJSModule> *moduleOut) con
 {
     AutoUnprotectCodeForClone cloneGuard(cx, *this);
 
-    *moduleOut = cx->new_<AsmJSModule>(scriptSource_, funcStart_, offsetToEndOfUseAsm_);
+    *moduleOut = cx->new_<AsmJSModule>(scriptSource_, funcStart_, offsetToEndOfUseAsm_, pod.strict_);
     if (!*moduleOut)
         return false;
 
@@ -1335,8 +1315,9 @@ js::LookupAsmJSModuleInCache(ExclusiveContext *cx,
 
     uint32_t funcStart = parser.pc->maybeFunction->pn_body->pn_pos.begin;
     uint32_t offsetToEndOfUseAsm = parser.tokenStream.currentToken().pos.end;
+    bool strict = parser.pc->sc->strict && !parser.pc->sc->hasExplicitUseStrict();
     ScopedJSDeletePtr<AsmJSModule> module(
-        cx->new_<AsmJSModule>(parser.ss, funcStart, offsetToEndOfUseAsm));
+        cx->new_<AsmJSModule>(parser.ss, funcStart, offsetToEndOfUseAsm, strict));
     if (!module)
         return false;
     cursor = module->deserialize(cx, cursor);

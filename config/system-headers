@@ -1047,8 +1047,6 @@ X11/Xlibint.h
 X11/Xlocale.h
 X11/Xos.h
 X11/Xutil.h
-xpt_struct.h
-xpt_xdr.h
 zmouse.h
 speex/speex_resampler.h
 soundtouch/SoundTouch.h
@@ -1103,6 +1101,7 @@ vpx/vpx_decoder.h
 vpx/vpx_encoder.h
 vpx/vp8cx.h
 vpx/vp8dx.h
+vpx_mem/vpx_mem.h
 #endif
 #ifdef GKMEDIAS_SHARED_LIBRARY
 vpx/vpx_codec.h
@@ -1110,6 +1109,7 @@ vpx/vpx_decoder.h
 vpx/vpx_encoder.h
 vpx/vp8cx.h
 vpx/vp8dx.h
+vpx_mem/vpx_mem.h
 vorbis/codec.h
 theora/theoradec.h
 tremor/ivorbiscodec.h

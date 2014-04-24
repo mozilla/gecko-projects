@@ -152,11 +152,15 @@ js_ObjectClassIs(JSContext *cx, JS::HandleObject obj, js::ESClassValue classValu
 JS_FRIEND_API(const char *)
 js_ObjectClassName(JSContext *cx, JS::HandleObject obj);
 
+namespace js {
+
 JS_FRIEND_API(bool)
-js_AddObjectRoot(JSRuntime *rt, JSObject **objp);
+AddRawValueRoot(JSContext *cx, JS::Value *vp, const char *name);
 
 JS_FRIEND_API(void)
-js_RemoveObjectRoot(JSRuntime *rt, JSObject **objp);
+RemoveRawValueRoot(JSContext *cx, JS::Value *vp);
+
+} /* namespace js */
 
 #ifdef JS_DEBUG
 
@@ -379,13 +383,13 @@ proxy_Slice(JSContext *cx, JS::HandleObject proxy, uint32_t begin, uint32_t end,
 /*
  * A class of objects that return source code on demand.
  *
- * When code is compiled with CompileOptions::LAZY_SOURCE, SpiderMonkey
- * doesn't retain the source code (and doesn't do lazy bytecode
- * generation). If we ever need the source code, say, in response to a call
- * to Function.prototype.toSource or Debugger.Source.prototype.text, then
- * we call the 'load' member function of the instance of this class that
- * has hopefully been registered with the runtime, passing the code's URL,
- * and hope that it will be able to find the source.
+ * When code is compiled with setSourceIsLazy(true), SpiderMonkey doesn't
+ * retain the source code (and doesn't do lazy bytecode generation). If we ever
+ * need the source code, say, in response to a call to Function.prototype.
+ * toSource or Debugger.Source.prototype.text, then we call the 'load' member
+ * function of the instance of this class that has hopefully been registered
+ * with the runtime, passing the code's URL, and hope that it will be able to
+ * find the source.
  */
 class SourceHook {
   public:
@@ -400,7 +404,7 @@ class SourceHook {
 };
 
 /*
- * Have |rt| use |hook| to retrieve LAZY_SOURCE source code. See the
+ * Have |rt| use |hook| to retrieve lazily-retrieved source code. See the
  * comments for SourceHook. The runtime takes ownership of the hook, and
  * will delete it when the runtime itself is deleted, or when a new hook is
  * set.
@@ -1333,6 +1337,14 @@ JS_IsArrayBufferObject(JSObject *obj);
  */
 extern JS_FRIEND_API(uint32_t)
 JS_GetArrayBufferByteLength(JSObject *obj);
+
+/*
+ * Check whether the obj is ArrayBufferObject and memory mapped. Note that this
+ * may return false if a security wrapper is encountered that denies the
+ * unwrapping.
+ */
+extern JS_FRIEND_API(bool)
+JS_IsMappedArrayBufferObject(JSObject *obj);
 
 /*
  * Return the number of elements in a typed array.

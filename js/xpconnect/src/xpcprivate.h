@@ -90,7 +90,7 @@
 #include <string.h>
 
 #include "xpcpublic.h"
-#include "js/Tracer.h"
+#include "js/TracingAPI.h"
 #include "js/WeakMapPtr.h"
 #include "pldhash.h"
 #include "nscore.h"
@@ -557,7 +557,8 @@ public:
     AutoMarkingPtr**  GetAutoRootsAdr() {return &mAutoRoots;}
 
     JSObject* GetJunkScope();
-    void DeleteJunkScope();
+    JSObject* GetCompilationScope();
+    void DeleteSingletonScopes();
 
     PRTime GetWatchdogTimestamp(WatchdogTimestampCategory aCategory);
     void OnAfterProcessNextEvent() { mSlowScriptCheckpoint = mozilla::TimeStamp(); }
@@ -597,7 +598,8 @@ private:
     nsTArray<xpcContextCallback> extraContextCallbacks;
     nsRefPtr<WatchdogManager> mWatchdogManager;
     JS::GCSliceCallback mPrevGCSliceCallback;
-    JSObject* mJunkScope;
+    JS::PersistentRootedObject mJunkScope;
+    JS::PersistentRootedObject mCompilationScope;
     nsRefPtr<AsyncFreeSnowWhite> mAsyncSnowWhiteFreer;
 
     mozilla::TimeStamp mSlowScriptCheckpoint;
@@ -2768,7 +2770,7 @@ public:
     XPCJSContextStack(XPCJSRuntime *aRuntime)
       : mRuntime(aRuntime)
       , mSafeJSContext(nullptr)
-      , mSafeJSContextGlobal(nullptr)
+      , mSafeJSContextGlobal(aRuntime->Runtime(), nullptr)
     { }
 
     virtual ~XPCJSContextStack();
@@ -2804,7 +2806,7 @@ private:
     AutoInfallibleTArray<XPCJSContextInfo, 16> mStack;
     XPCJSRuntime* mRuntime;
     JSContext*  mSafeJSContext;
-    JSObject* mSafeJSContextGlobal;
+    JS::PersistentRootedObject mSafeJSContextGlobal;
 };
 
 /***************************************************************************/
@@ -3347,6 +3349,7 @@ public:
         , proto(cx)
         , sameZoneAs(cx)
         , invisibleToDebugger(false)
+        , discardSource(false)
         , globalProperties(true)
         , metadata(cx)
     { }
@@ -3360,6 +3363,7 @@ public:
     nsCString sandboxName;
     JS::RootedObject sameZoneAs;
     bool invisibleToDebugger;
+    bool discardSource;
     GlobalProperties globalProperties;
     JS::RootedValue metadata;
 

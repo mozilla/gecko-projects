@@ -169,7 +169,6 @@ Site.prototype = {
     this._node.addEventListener("dragstart", this, false);
     this._node.addEventListener("dragend", this, false);
     this._node.addEventListener("mouseover", this, false);
-    this._node.addEventListener("click", this, false);
 
     // Specially treat the sponsored icon to prevent regular hover effects
     let sponsored = this._querySelector(".newtab-control-sponsored");
@@ -215,11 +214,19 @@ Site.prototype = {
   /**
    * Handles site click events.
    */
-  _onClick: function Site_onClick(aEvent) {
-    let target = aEvent.target;
+  onClick: function Site_onClick(aEvent) {
+    let {button, target} = aEvent;
     if (target.classList.contains("newtab-link") ||
         target.parentElement.classList.contains("newtab-link")) {
-      this._recordSiteClicked(this.cell.index);
+      // Record for primary and middle clicks
+      if (button == 0 || button == 1) {
+        this._recordSiteClicked(this.cell.index);
+      }
+      return;
+    }
+
+    // Only handle primary clicks for the remaining targets
+    if (button != 0) {
       return;
     }
 
@@ -239,9 +246,6 @@ Site.prototype = {
    */
   handleEvent: function Site_handleEvent(aEvent) {
     switch (aEvent.type) {
-      case "click":
-        this._onClick(aEvent);
-        break;
       case "mouseover":
         this._node.removeEventListener("mouseover", this, false);
         this._speculativeConnect();

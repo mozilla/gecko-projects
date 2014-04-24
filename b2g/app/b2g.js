@@ -49,7 +49,7 @@ pref("network.protocol-handler.warn-external.vnd.youtube", false);
 // By default, all protocol handlers are exposed. This means that the browser
 // will response to openURL commands for all URL types. It will also try to open
 // link clicks inside the browser before failing over to the system handlers.
-pref("network.protocol-handler.expose.rtsp", false);
+pref("network.protocol-handler.expose.rtsp", true);
 
 /* http prefs */
 pref("network.http.pipelining", true);
@@ -305,6 +305,8 @@ pref("image.mem.decodeondraw", true);
 pref("image.mem.allow_locking_in_content_processes", false); /* don't allow image locking */
 pref("image.mem.min_discard_timeout_ms", 86400000); /* 24h, we rely on the out of memory hook */
 pref("image.mem.max_decoded_image_kb", 30000); /* 30MB seems reasonable */
+// 65MB seems reasonable and layout/reftests/bugs/370629-1.html requires more than 62MB
+pref("image.mem.hard_limit_decoded_image_kb", 66560);
 pref("image.onload.decode.limit", 24); /* don't decode more than 24 images eagerly */
 
 // XXX this isn't a good check for "are touch events supported", but
@@ -598,6 +600,12 @@ pref("dom.forms.color", false);
 
 // Turns on gralloc-based direct texturing for Gonk
 pref("gfx.gralloc.enabled", false);
+
+// This preference instructs the JS engine to discard the
+// source of any privileged JS after compilation. This saves
+// memory, but makes things like Function.prototype.toSource()
+// fail.
+pref("javascript.options.discardSystemSource", true);
 
 // XXXX REMOVE FOR PRODUCTION. Turns on GC and CC logging
 pref("javascript.options.mem.log", false);

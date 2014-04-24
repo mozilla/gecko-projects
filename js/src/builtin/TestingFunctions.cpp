@@ -23,6 +23,7 @@
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/ProxyObject.h"
+#include "vm/TraceLogging.h"
 
 #include "jscntxtinlines.h"
 #include "jsobjinlines.h"
@@ -86,6 +87,14 @@ GetBuildConfiguration(JSContext *cx, unsigned argc, jsval *vp)
     value = BooleanValue(false);
 #endif
     if (!JS_SetProperty(cx, info, "x64", value))
+        return false;
+
+#ifdef JS_ARM_SIMULATOR
+    value = BooleanValue(true);
+#else
+    value = BooleanValue(false);
+#endif
+    if (!JS_SetProperty(cx, info, "arm-simulator", value))
         return false;
 
 #ifdef MOZ_ASAN
@@ -683,20 +692,24 @@ struct JSCountHeapNode {
 
 typedef HashSet<void *, PointerHasher<void *, 3>, SystemAllocPolicy> VisitedSet;
 
-typedef struct JSCountHeapTracer {
+class CountHeapTracer
+{
+  public:
+    CountHeapTracer(JSRuntime *rt, JSTraceCallback callback) : base(rt, callback) {}
+
     JSTracer            base;
     VisitedSet          visited;
     JSCountHeapNode     *traceList;
     JSCountHeapNode     *recycleList;
     bool                ok;
-} JSCountHeapTracer;
+};
 
 static void
 CountHeapNotify(JSTracer *trc, void **thingp, JSGCTraceKind kind)
 {
     JS_ASSERT(trc->callback == CountHeapNotify);
 
-    JSCountHeapTracer *countTracer = (JSCountHeapTracer *)trc;
+    CountHeapTracer *countTracer = (CountHeapTracer *)trc;
     void *thing = *thingp;
 
     if (!countTracer->ok)
@@ -744,9 +757,9 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
     RootedValue startValue(cx, UndefinedValue());
     if (args.length() > 0) {
         jsval v = args[0];
-        if (JSVAL_IS_TRACEABLE(v)) {
+        if (v.isMarkable()) {
             startValue = v;
-        } else if (!JSVAL_IS_NULL(v)) {
+        } else if (!v.isNull()) {
             JS_ReportError(cx,
                            "the first argument is not null or a heap-allocated "
                            "thing");
@@ -771,11 +784,11 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
                 return false;
             }
             traceValue = args[2];
-            if (!JSVAL_IS_TRACEABLE(traceValue)){
+            if (!traceValue.isMarkable()){
                 JS_ReportError(cx, "cannot trace this kind of value");
                 return false;
             }
-            traceThing = JSVAL_TO_TRACEABLE(traceValue);
+            traceThing = traceValue.toGCThing();
         } else {
             for (size_t i = 0; ;) {
                 if (JS_FlatStringEqualsAscii(flatStr, traceKindNames[i].name)) {
@@ -792,8 +805,7 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
         }
     }
 
-    JSCountHeapTracer countTracer;
-    JS_TracerInit(&countTracer.base, JS_GetRuntime(cx), CountHeapNotify);
+    CountHeapTracer countTracer(JS_GetRuntime(cx), CountHeapNotify);
     if (!countTracer.visited.init()) {
         JS_ReportOutOfMemory(cx);
         return false;
@@ -1055,14 +1067,14 @@ ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
     static int createdIndex = 0;
     createdIndex++;
 
-    if (!JS_DefineProperty(cx, obj, "index", Int32Value(createdIndex),
-                           JS_PropertyStub, JS_StrictPropertyStub, 0))
+    if (!JS_DefineProperty(cx, obj, "index", createdIndex, 0,
+                           JS_PropertyStub, JS_StrictPropertyStub))
     {
         return false;
     }
 
-    if (!JS_DefineProperty(cx, obj, "stack", ObjectValue(*stack),
-                           JS_PropertyStub, JS_StrictPropertyStub, 0))
+    if (!JS_DefineProperty(cx, obj, "stack", stack, 0,
+                           JS_PropertyStub, JS_StrictPropertyStub))
     {
         return false;
     }
@@ -1488,6 +1500,26 @@ TimesAccessed(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
+static bool
+EnableTraceLogger(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    args.rval().setBoolean(TraceLoggerEnable(logger));
+
+    return true;
+}
+
+static bool
+DisableTraceLogger(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
+    args.rval().setBoolean(TraceLoggerDisable(logger));
+
+    return true;
+}
+
 static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
 "gc([obj] | 'compartment')",
@@ -1723,6 +1755,15 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "workerThreadCount()",
 "  Returns the number of worker threads available for off-main-thread tasks."),
 
+    JS_FN_HELP("startTraceLogger", EnableTraceLogger, 0, 0,
+"startTraceLogger()",
+"  Start logging the mainThread.\n"
+"  Note: tracelogging starts automatically. Disable it by setting environment variable\n"
+"  TLOPTIONS=disableMainThread"),
+
+    JS_FN_HELP("stopTraceLogger", DisableTraceLogger, 0, 0,
+"startTraceLogger()",
+"  Stop logging the mainThread."),
     JS_FS_HELP_END
 };
 

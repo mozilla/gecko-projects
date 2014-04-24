@@ -11,8 +11,10 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/PluralForm.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
+                                  "resource://gre/modules/PluralForm.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "MediaManagerService",
                                    "@mozilla.org/mediaManagerService;1",
@@ -66,13 +68,14 @@ function getBrowserForWindow(aContentWindow) {
 
 function handleRequest(aSubject, aTopic, aData) {
   let constraints = aSubject.getConstraints();
+  let secure = aSubject.isSecure;
   let contentWindow = Services.wm.getOuterWindowWithId(aSubject.windowID);
 
   contentWindow.navigator.mozGetUserMediaDevices(
     constraints,
     function (devices) {
       prompt(contentWindow, aSubject.callID, constraints.audio,
-             constraints.video || constraints.picture, devices);
+             constraints.video || constraints.picture, devices, secure);
     },
     function (error) {
       // bug 827146 -- In the future, the UI should catch NO_DEVICES_FOUND
@@ -91,7 +94,7 @@ function denyRequest(aCallID, aError) {
   Services.obs.notifyObservers(msg, "getUserMedia:response:deny", aCallID);
 }
 
-function prompt(aContentWindow, aCallID, aAudioRequested, aVideoRequested, aDevices) {
+function prompt(aContentWindow, aCallID, aAudioRequested, aVideoRequested, aDevices, aSecure) {
   let audioDevices = [];
   let videoDevices = [];
   for (let device of aDevices) {
@@ -140,13 +143,6 @@ function prompt(aContentWindow, aCallID, aAudioRequested, aVideoRequested, aDevi
 
   let secondaryActions = [
     {
-      label: stringBundle.getString("getUserMedia.always.label"),
-      accessKey: stringBundle.getString("getUserMedia.always.accesskey"),
-      callback: function () {
-        mainAction.callback(true);
-      }
-    },
-    {
       label: stringBundle.getString("getUserMedia.denyRequest.label"),
       accessKey: stringBundle.getString("getUserMedia.denyRequest.accesskey"),
       callback: function () {
@@ -158,6 +154,8 @@ function prompt(aContentWindow, aCallID, aAudioRequested, aVideoRequested, aDevi
       accessKey: stringBundle.getString("getUserMedia.never.accesskey"),
       callback: function () {
         denyRequest(aCallID);
+        // Let someone save "Never" for http sites so that they can be stopped from
+        // bothering you with doorhangers.
         let perms = Services.perms;
         if (audioDevices.length)
           perms.add(uri, "microphone", perms.DENY_ACTION);
@@ -166,6 +164,17 @@ function prompt(aContentWindow, aCallID, aAudioRequested, aVideoRequested, aDevi
       }
     }
   ];
+
+  if (aSecure) {
+    // Don't show the 'Always' action if the connection isn't secure.
+    secondaryActions.unshift({
+      label: stringBundle.getString("getUserMedia.always.label"),
+      accessKey: stringBundle.getString("getUserMedia.always.accesskey"),
+      callback: function () {
+        mainAction.callback(true);
+      }
+    });
+  }
 
   let options = {
     eventCallback: function(aTopic, aNewBrowser) {

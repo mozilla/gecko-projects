@@ -42,8 +42,12 @@ namespace layout {
 class RenderFrameChild;
 }
 
-namespace widget {
+namespace layers {
 class ActiveElementManager;
+}
+
+namespace widget {
+struct AutoCacheNativeKeyCommands;
 }
 
 namespace dom {
@@ -134,7 +138,7 @@ public:
   virtual JSObject* GetGlobalJSObject() MOZ_OVERRIDE;
 
   nsCOMPtr<nsIContentFrameMessageManager> mMessageManager;
-  TabChildBase* mTabChild;
+  nsRefPtr<TabChildBase> mTabChild;
 };
 
 class ContentListener MOZ_FINAL : public nsIDOMEventListener
@@ -151,11 +155,14 @@ protected:
 // between b2g/android FF/embedlite clients implementation.
 // It make sense to place in this class all helper functions, and functionality which could be shared between
 // Cross-process/Cross-thread implmentations.
-class TabChildBase : public nsFrameScriptExecutor,
+class TabChildBase : public nsISupports,
+                     public nsFrameScriptExecutor,
                      public ipc::MessageManagerCallback
 {
 public:
     TabChildBase();
+    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_CLASS(TabChildBase)
 
     virtual nsIWebNavigation* WebNavigation() = 0;
     virtual nsIWidget* WebWidget() = 0;
@@ -232,7 +239,7 @@ class TabChild : public PBrowserChild,
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
     typedef mozilla::layout::RenderFrameChild RenderFrameChild;
     typedef mozilla::layout::ScrollingBehavior ScrollingBehavior;
-    typedef mozilla::widget::ActiveElementManager ActiveElementManager;
+    typedef mozilla::layers::ActiveElementManager ActiveElementManager;
 
 public:
     /** 
@@ -393,6 +400,8 @@ public:
 
     void NotifyPainted();
 
+    void RequestNativeKeyBindings(mozilla::widget::AutoCacheNativeKeyCommands* aAutoCache,
+                                  WidgetKeyboardEvent* aEvent);
 
     /** Return a boolean indicating if the page has called preventDefault on
      *  the event.

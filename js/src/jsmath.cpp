@@ -365,18 +365,18 @@ js::math_clz32(JSContext *cx, unsigned argc, Value *vp)
 
 static double polevl_sin(double z, double zz)
 {
-    // Constants taken from fdlibm k_sin.c
-    double ans = 1.58969099521155010221e-10;
+    // Constants generated using Mathematica's GeneralMiniMaxApproximation
+    double ans = 1.59046813973877163292e-10; // 6152825598094877 / exp2(85)
     ans *= zz;
-    ans += -2.50507602534068634195e-08;
+    ans += -2.50509001624159785668e-08; // -7571170002733246 / exp2(78)
     ans *= zz;
-    ans +=  2.75573137070700676789e-06;
+    ans +=  2.75573146431678644161e-06; //  6506786951439440 / exp2(71)
     ans *= zz;
-    ans += -1.98412698298579493134e-04;
+    ans += -1.98412698327005105692e-04; // -7320136534024805 / exp2(65)
     ans *= zz;
-    ans +=  8.33333333332248946124e-03;
+    ans +=  8.33333333332626768897e-03; //  4803839602524456 / exp2(59)
     ans *= zz;
-    ans += -1.66666666666666324348e-01;
+    ans += -1.66666666666666490881e-01; // -6004799503160655 / exp2(55)
     ans *= zz * z;
     ans += z;
     return ans;
@@ -384,20 +384,20 @@ static double polevl_sin(double z, double zz)
 
 static double polevl_cos(double zz)
 {
-    // Constants taken from fdlibm k_cos.c
-    double ans = -1.13596475577881948265e-11;
+    // Constants generated using Mathematica's GeneralMiniMaxApproximation.
+    // This set uses one less coefficient than usual implementations to
+    // increase performance, raising the maximum approximation error to 2 bits.
+    double ans = 2.06467337476762997948e-9;
     ans *= zz;
-    ans += 2.08757232129817482790e-09;
+    ans += -2.75555495413759160741e-7;
     ans *= zz;
-    ans += -2.75573143513906633035e-07;
+    ans +=  2.48015808595638122085e-5;
     ans *= zz;
-    ans += 2.48015872894767294178e-05;
+    ans += -1.38888888779622760722e-3;
     ans *= zz;
-    ans += -1.38888888888741095749e-03;
+    ans +=  4.16666666665987187046e-2;
     ans *= zz;
-    ans += 4.16666666666666019037e-02;
-    ans *= zz;
-    ans += -0.5;
+    ans += -4.99999999999999888978e-1;
     ans *= zz;
     ans += 1.0;
     return ans;
@@ -1600,8 +1600,9 @@ js_InitMathClass(JSContext *cx, HandleObject obj)
     if (!Math)
         return nullptr;
 
-    if (!JS_DefineProperty(cx, obj, js_Math_str, OBJECT_TO_JSVAL(Math),
-                           JS_PropertyStub, JS_StrictPropertyStub, 0)) {
+    if (!JS_DefineProperty(cx, obj, js_Math_str, Math, 0,
+                           JS_PropertyStub, JS_StrictPropertyStub))
+    {
         return nullptr;
     }
 

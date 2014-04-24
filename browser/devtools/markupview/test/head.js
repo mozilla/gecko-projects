@@ -6,7 +6,7 @@ const Cu = Components.utils;
 let {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 let TargetFactory = devtools.TargetFactory;
 let {console} = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
-let promise = devtools.require("sdk/core/promise");
+let promise = devtools.require("devtools/toolkit/deprecated-sync-thenables");
 let {getInplaceEditorForSpan: inplaceEditor} = devtools.require("devtools/shared/inplace-editor");
 
 // All test are asynchronous
@@ -164,6 +164,23 @@ function getContainerForRawNode(nodeOrSelector, {markup}) {
   let container = markup.getContainer(front);
   info("Markup-container object for " + nodeOrSelector + " " + container);
   return container;
+}
+
+/**
+ * Using the markupview's _waitForChildren function, wait for all queued
+ * children updates to be handled.
+ * @param {InspectorPanel} inspector The instance of InspectorPanel currently
+ * loaded in the toolbox
+ * @return a promise that resolves when all queued children updates have been
+ * handled
+ */
+function waitForChildrenUpdated({markup}) {
+  info("Waiting for queued children updates to be handled");
+  let def = promise.defer();
+  markup._waitForChildren().then(() => {
+    executeSoon(def.resolve);
+  });
+  return def.promise;
 }
 
 /**
@@ -351,4 +368,16 @@ function searchUsingSelectorSearch(selector, inspector) {
   field.focus();
   field.value = selector;
   EventUtils.sendKey("return", inspector.panelWin);
+}
+
+/**
+ * This shouldn't be used in the tests, but is useful when writing new tests or
+ * debugging existing tests in order to introduce delays in the test steps
+ * @param {Number} ms The time to wait
+ * @return A promise that resolves when the time is passed
+ */
+function wait(ms) {
+  let def = promise.defer();
+  content.setTimeout(def.resolve, ms);
+  return def.promise;
 }

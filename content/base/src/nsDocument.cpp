@@ -7750,7 +7750,13 @@ nsIDocument::CreateEvent(const nsAString& aEventType, ErrorResult& rv) const
   rv = EventDispatcher::CreateEvent(const_cast<nsIDocument*>(this),
                                     presContext, nullptr, aEventType,
                                     getter_AddRefs(ev));
-  return ev ? dont_AddRef(ev.forget().take()->InternalDOMEvent()) : nullptr;
+  if (!ev) {
+    return nullptr;
+  }
+  WidgetEvent* e = ev->GetInternalNSEvent();
+  e->mFlags.mBubbles = false;
+  e->mFlags.mCancelable = false;
+  return dont_AddRef(ev.forget().take()->InternalDOMEvent());
 }
 
 void
@@ -9274,6 +9280,7 @@ nsDocument::MaybePreLoadImage(nsIURI* uri, const nsAString &aCrossOriginAttr)
                               mDocumentURI, // uri of document used as referrer
                               nullptr,       // no observer
                               loadFlags,
+                              NS_LITERAL_STRING("img"),
                               getter_AddRefs(request));
 
   // Pin image-reference to avoid evicting it from the img-cache before
