@@ -15,7 +15,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "jsanalyze.h"
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
@@ -284,19 +283,6 @@ js_DumpPCCounts(JSContext *cx, HandleScript script, js::Sprinter *sp)
 // Bytecode Parser
 /////////////////////////////////////////////////////////////////////
 
-// Ensure that script analysis reports the same stack depth.
-static void
-AssertStackDepth(JSScript *script, uint32_t offset, uint32_t stackDepth) {
-    /*
-     * If this assertion fails, run the failing test case under gdb and use the
-     * following gdb command to understand the execution path of this function.
-     *
-     *     call js_DumpScriptDepth(cx, script, pc)
-     */
-    if (script->hasAnalysis())
-        script->analysis()->assertMatchingStackDepthAtOffset(offset, stackDepth);
-}
-
 namespace {
 
 class BytecodeParser
@@ -500,7 +486,6 @@ BytecodeParser::addJump(uint32_t offset, uint32_t *currentOffset,
         code = alloc().new_<Bytecode>();
         if (!code)
             return false;
-        AssertStackDepth(script_, offset, stackDepth);
         if (!code->captureOffsetStack(alloc(), offsetStack, stackDepth)) {
             reportOOM();
             return false;
@@ -653,7 +638,6 @@ BytecodeParser::parse()
                     reportOOM();
                     return false;
                 }
-                AssertStackDepth(script_, successorOffset, stackDepth);
                 if (!nextcode->captureOffsetStack(alloc(), offsetStack, stackDepth)) {
                     reportOOM();
                     return false;
@@ -816,11 +800,11 @@ QuoteString(Sprinter *sp, JSString *str, uint32_t quote);
 static bool
 ToDisassemblySource(JSContext *cx, HandleValue v, JSAutoByteString *bytes)
 {
-    if (JSVAL_IS_STRING(v)) {
+    if (v.isString()) {
         Sprinter sprinter(cx);
         if (!sprinter.init())
             return false;
-        char *nbytes = QuoteString(&sprinter, JSVAL_TO_STRING(v), '"');
+        char *nbytes = QuoteString(&sprinter, v.toString(), '"');
         if (!nbytes)
             return false;
         nbytes = JS_sprintf_append(nullptr, "%s", nbytes);
@@ -838,10 +822,10 @@ ToDisassemblySource(JSContext *cx, HandleValue v, JSAutoByteString *bytes)
         return true;
     }
 
-    if (!JSVAL_IS_PRIMITIVE(v)) {
-        JSObject *obj = JSVAL_TO_OBJECT(v);
-        if (obj->is<StaticBlockObject>()) {
-            Rooted<StaticBlockObject*> block(cx, &obj->as<StaticBlockObject>());
+    if (v.isObject()) {
+        JSObject &obj = v.toObject();
+        if (obj.is<StaticBlockObject>()) {
+            Rooted<StaticBlockObject*> block(cx, &obj.as<StaticBlockObject>());
             char *source = JS_sprintf_append(nullptr, "depth %d {", block->localOffset());
             if (!source)
                 return false;
@@ -874,16 +858,16 @@ ToDisassemblySource(JSContext *cx, HandleValue v, JSAutoByteString *bytes)
             return true;
         }
 
-        if (obj->is<JSFunction>()) {
-            RootedFunction fun(cx, &obj->as<JSFunction>());
+        if (obj.is<JSFunction>()) {
+            RootedFunction fun(cx, &obj.as<JSFunction>());
             JSString *str = JS_DecompileFunction(cx, fun, JS_DONT_PRETTY_PRINT);
             if (!str)
                 return false;
             return bytes->encodeLatin1(cx, str);
         }
 
-        if (obj->is<RegExpObject>()) {
-            JSString *source = obj->as<RegExpObject>().toString(cx);
+        if (obj.is<RegExpObject>()) {
+            JSString *source = obj.as<RegExpObject>().toString(cx);
             if (!source)
                 return false;
             JS::Anchor<JSString *> anchor(source);

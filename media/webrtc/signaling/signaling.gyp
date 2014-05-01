@@ -66,6 +66,7 @@
         '../../../netwerk/srtp/src/include',
         '../../../netwerk/srtp/src/crypto/include',
         '../../../ipc/chromium/src',
+        '../../mtransport/third_party/nrappkit/src/util/libekr',
       ],
 
       #
@@ -93,6 +94,7 @@
         './src/common/NullDeleter.h',
         './src/common/Wrapper.h',
         './src/common/NullTransport.h',
+        './src/common/YuvStamper.cpp',
         # Browser Logging
         './src/common/browser_logging/CSFLog.cpp',
         './src/common/browser_logging/CSFLog.h',
@@ -192,7 +194,7 @@
       # Conditionals
       #
       'conditions': [
-        ['moz_omx_encoder==1', {
+        ['moz_webrtc_omx==1', {
           'sources': [
             './src/media-conduit/WebrtcOMXH264VideoCodec.cpp',
             './src/media-conduit/OMXVideoCodec.cpp',
@@ -209,7 +211,7 @@
             '-I$(ANDROID_SOURCE)/frameworks/native/opengl/include',
           ],
           'defines' : [
-            'MOZ_OMX_ENCODER'
+            'MOZ_WEBRTC_OMX'
           ],
         }],
         ['build_for_test==0', {

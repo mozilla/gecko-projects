@@ -352,7 +352,7 @@ InterfaceObjectToString(JSContext* cx, unsigned argc, JS::Value *vp)
   const JSClass* clasp = static_cast<const JSClass*>(v.toPrivate());
 
   v = js::GetFunctionNativeReserved(callee, TOSTRING_NAME_RESERVED_SLOT);
-  JSString* jsname = static_cast<JSString*>(JSVAL_TO_STRING(v));
+  JSString* jsname = static_cast<JSString*>(v.toString());
   size_t length;
   const jschar* name = JS_GetInternedStringCharsAndLength(jsname, &length);
 
@@ -950,7 +950,7 @@ XrayResolveNativeProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
 bool
 XrayResolveOwnProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
                        JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
-                       JS::MutableHandle<JSPropertyDescriptor> desc, unsigned flags)
+                       JS::MutableHandle<JSPropertyDescriptor> desc)
 {
   DOMObjectType type;
   const NativePropertyHooks *nativePropertyHooks =
@@ -982,7 +982,7 @@ XrayResolveOwnProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
   }
 
   return !nativePropertyHooks->mResolveOwnProperty ||
-         nativePropertyHooks->mResolveOwnProperty(cx, wrapper, obj, id, desc, flags);
+         nativePropertyHooks->mResolveOwnProperty(cx, wrapper, obj, id, desc);
 }
 
 static bool
@@ -2194,8 +2194,7 @@ FinalizeGlobal(JSFreeOp* aFreeOp, JSObject* aObj)
 
 bool
 ResolveGlobal(JSContext* aCx, JS::Handle<JSObject*> aObj,
-              JS::Handle<jsid> aId, unsigned aFlags,
-              JS::MutableHandle<JSObject*> aObjp)
+              JS::Handle<jsid> aId, JS::MutableHandle<JSObject*> aObjp)
 {
   bool resolved;
   if (!JS_ResolveStandardClass(aCx, aObj, aId, &resolved)) {

@@ -177,11 +177,9 @@ NS_INTERFACE_MAP_BEGIN(nsNavHistory)
 NS_INTERFACE_MAP_END
 
 // We don't care about flattening everything
-NS_IMPL_CI_INTERFACE_GETTER2(
-  nsNavHistory
-, nsINavHistoryService
-, nsIBrowserHistory
-)
+NS_IMPL_CI_INTERFACE_GETTER(nsNavHistory,
+                            nsINavHistoryService,
+                            nsIBrowserHistory)
 
 namespace {
 
@@ -454,20 +452,7 @@ void
 nsNavHistory::LoadPrefs()
 {
   // History preferences.
-  // Check the old preference and migrate disabled state.
-  int32_t oldDaysPref = Preferences::GetInt("browser.history_expire_days", -1);
-  if (oldDaysPref >= 0) {
-    if (oldDaysPref == 0) {
-      // Preserve history disabled state, for privacy reasons.
-      Preferences::SetBool(PREF_HISTORY_ENABLED, false);
-      mHistoryEnabled = false;
-    }
-    // Clear the old pref, otherwise we will keep using it.
-    Preferences::ClearUser("browser.history_expire_days");
-  }
-  else {
-    mHistoryEnabled = Preferences::GetBool(PREF_HISTORY_ENABLED, true);
-  }
+  mHistoryEnabled = Preferences::GetBool(PREF_HISTORY_ENABLED, true);
 
   // Frecency preferences.
 #define FRECENCY_PREF(_prop, _pref) \

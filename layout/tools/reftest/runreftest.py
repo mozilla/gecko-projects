@@ -161,7 +161,13 @@ class RefTest(object):
       prefs['reftest.ignoreWindowSize'] = True
     if options.filter:
       prefs['reftest.filter'] = options.filter
+    if options.shuffle:
+      prefs['reftest.shuffle'] = True
     prefs['reftest.focusFilterMode'] = options.focusFilterMode
+
+    # Ensure that telemetry is disabled, so we don't connect to the telemetry
+    # server in the middle of the tests.
+    prefs['toolkit.telemetry.enabled'] = False
 
     if options.e10s:
       prefs['browser.tabs.remote.autostart'] = True
@@ -440,6 +446,11 @@ class ReftestOptions(OptionParser):
                            "RegExp constructor) to test against URLs in the reftest manifest; "
                            "only test items that have a matching test URL will be run.")
     defaults["filter"] = None
+
+    self.add_option("--shuffle",
+                    action = "store_true", dest = "shuffle",
+                    help = "run reftests in random order")
+    defaults["shuffle"] = False
 
     self.add_option("--focus-filter-mode",
                     action = "store", type = "string", dest = "focusFilterMode",

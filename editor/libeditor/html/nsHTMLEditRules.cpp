@@ -9,7 +9,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/mozalloc.h"
 #include "nsAString.h"
@@ -61,6 +61,7 @@ class nsISupports;
 class nsRulesInfo;
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 //const static char* kMOZEditorBogusNodeAttr="MOZ_EDITOR_BOGUS_NODE";
 //const static char* kMOZEditorBogusNodeValue="TRUE";
@@ -219,7 +220,7 @@ nsHTMLEditRules::~nsHTMLEditRules()
 
 NS_IMPL_ADDREF_INHERITED(nsHTMLEditRules, nsTextEditRules)
 NS_IMPL_RELEASE_INHERITED(nsHTMLEditRules, nsTextEditRules)
-NS_IMPL_QUERY_INTERFACE_INHERITED1(nsHTMLEditRules, nsTextEditRules, nsIEditActionListener)
+NS_IMPL_QUERY_INTERFACE_INHERITED(nsHTMLEditRules, nsTextEditRules, nsIEditActionListener)
 
 
 /********************************************************

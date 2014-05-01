@@ -10,6 +10,7 @@ if (Cc === undefined) {
 }
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Task.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
   "resource://gre/modules/Services.jsm");
@@ -88,7 +89,7 @@ function Tester(aTests, aDumper, aCallback) {
   this._scriptLoader.loadSubScript("chrome://mochikit/content/chrome-harness.js", simpleTestScope);
   this.SimpleTest = simpleTestScope.SimpleTest;
   this.MemoryStats = simpleTestScope.MemoryStats;
-  this.Task = Components.utils.import("resource://gre/modules/Task.jsm", null).Task;
+  this.Task = Task;
   this.Promise = Components.utils.import("resource://gre/modules/Promise.jsm", null).Promise;
   this.Assert = Components.utils.import("resource://testing-common/Assert.jsm", null).Assert;
 
@@ -314,7 +315,7 @@ Tester.prototype = {
     }
   },
 
-  nextTest: function Tester_nextTest() {
+  nextTest: Task.async(function*() {
     if (this.currentTest) {
       // Run cleanup functions for the current test before moving on to the
       // next one.
@@ -322,7 +323,7 @@ Tester.prototype = {
       while (testScope.__cleanupFunctions.length > 0) {
         let func = testScope.__cleanupFunctions.shift();
         try {
-          func.apply(testScope);
+          yield func.apply(testScope);
         }
         catch (ex) {
           this.currentTest.addResult(new testResult(false, "Cleanup function threw an exception", ex, false));
@@ -531,7 +532,7 @@ Tester.prototype = {
       this.currentTestIndex++;
       this.execTest();
     }).bind(this));
-  },
+  }),
 
   execTest: function Tester_execTest() {
     this.dumper.dump("TEST-START | " + this.currentTest.path + "\n");

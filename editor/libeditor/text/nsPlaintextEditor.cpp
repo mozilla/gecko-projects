@@ -6,7 +6,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
@@ -64,6 +64,7 @@ class nsISupports;
 class nsISupportsArray;
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 nsPlaintextEditor::nsPlaintextEditor()
 : nsEditor()
@@ -115,7 +116,8 @@ NS_INTERFACE_MAP_END_INHERITING(nsEditor)
 NS_IMETHODIMP nsPlaintextEditor::Init(nsIDOMDocument *aDoc, 
                                       nsIContent *aRoot,
                                       nsISelectionController *aSelCon,
-                                      uint32_t aFlags)
+                                      uint32_t aFlags,
+                                      const nsAString& aInitialValue)
 {
   NS_PRECONDITION(aDoc, "bad arg");
   NS_ENSURE_TRUE(aDoc, NS_ERROR_NULL_POINTER);
@@ -126,13 +128,12 @@ NS_IMETHODIMP nsPlaintextEditor::Init(nsIDOMDocument *aDoc,
     mRules = nullptr;
   }
   
-  if (1)
   {
     // block to scope nsAutoEditInitRulesTrigger
     nsAutoEditInitRulesTrigger rulesTrigger(this, rulesRes);
   
     // Init the base editor
-    res = nsEditor::Init(aDoc, aRoot, aSelCon, aFlags);
+    res = nsEditor::Init(aDoc, aRoot, aSelCon, aFlags, aInitialValue);
   }
 
   // check the "single line editor newline handling"
@@ -140,6 +141,13 @@ NS_IMETHODIMP nsPlaintextEditor::Init(nsIDOMDocument *aDoc,
   GetDefaultEditorPrefs(mNewlineHandling, mCaretStyle);
 
   NS_ENSURE_SUCCESS(rulesRes, rulesRes);
+
+  // mRules may not have been initialized yet, when this is called via
+  // nsHTMLEditor::Init.
+  if (mRules) {
+    mRules->SetInitialValue(aInitialValue);
+  }
+
   return res;
 }
 

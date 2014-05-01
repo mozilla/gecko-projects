@@ -1969,7 +1969,7 @@ GenerateSetSlot(JSContext *cx, MacroAssembler &masm, IonCache::StubAttacher &att
             Register scratchReg = object;
             masm.push(scratchReg);
 
-            masm.guardTypeSet(valReg, propTypes, scratchReg, &barrierFailure);
+            masm.guardTypeSet(valReg, propTypes, BarrierKind::TypeSet, scratchReg, &barrierFailure);
             masm.pop(object);
         }
     }
@@ -2521,7 +2521,7 @@ GenerateAddSlot(JSContext *cx, MacroAssembler &masm, IonCache::StubAttacher &att
         JS_ASSERT(!propTypes->unknown());
 
         Register scratchReg = object;
-        masm.guardTypeSet(valReg, propTypes, scratchReg, &failuresPopObject);
+        masm.guardTypeSet(valReg, propTypes, BarrierKind::TypeSet, scratchReg, &failuresPopObject);
         masm.loadPtr(Address(StackPointer, 0), object);
     }
 
@@ -2856,8 +2856,8 @@ SetPropertyParIC::update(ForkJoinContext *cx, size_t cacheIndex, HandleObject ob
 
     // Avoid unnecessary locking if cannot attach stubs.
     if (!cache.canAttachStub()) {
-        return baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, 0,
-                                                             &v, cache.strict());
+        return baseops::SetPropertyHelper<ParallelExecution>(
+            cx, obj, obj, id, baseops::Qualified, &v, cache.strict());
     }
 
     SetPropertyIC::NativeSetPropCacheability canCache = SetPropertyIC::CanAttachNone;
@@ -2873,8 +2873,8 @@ SetPropertyParIC::update(ForkJoinContext *cx, size_t cacheIndex, HandleObject ob
             if (!cache.hasOrAddStubbedShape(ncx, obj->lastProperty(), &alreadyStubbed))
                 return cx->setPendingAbortFatal(ParallelBailoutFailedIC);
             if (alreadyStubbed) {
-                return baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, 0,
-                                                                     &v, cache.strict());
+                return baseops::SetPropertyHelper<ParallelExecution>(
+                    cx, obj, obj, id, baseops::Qualified, &v, cache.strict());
             }
 
             // If the object has a lazy type, we need to de-lazify it, but
@@ -2901,8 +2901,11 @@ SetPropertyParIC::update(ForkJoinContext *cx, size_t cacheIndex, HandleObject ob
     uint32_t oldSlots = obj->numDynamicSlots();
     RootedShape oldShape(cx, obj->lastProperty());
 
-    if (!baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, 0, &v, cache.strict()))
+    if (!baseops::SetPropertyHelper<ParallelExecution>(cx, obj, obj, id, baseops::Qualified, &v,
+                                                       cache.strict()))
+    {
         return false;
+    }
 
     bool checkTypeset;
     if (!attachedStub && canCache == SetPropertyIC::MaybeCanAttachAddSlot &&

@@ -70,6 +70,7 @@ gujar.sources += [
     'util/StringUtils.java',
     'util/ThreadUtils.java',
     'util/UiAsyncTask.java',
+    'util/WebActivityMapper.java',
 ]
 gujar.extra_jars = [
     'gecko-mozglue.jar'
@@ -116,6 +117,7 @@ gbjar.sources += [
     'animation/ViewHelper.java',
     'ANRReporter.java',
     'AppNotificationClient.java',
+    'Assert.java',
     'BaseGeckoInterface.java',
     'BrowserApp.java',
     'BrowserLocaleManager.java',
@@ -279,12 +281,14 @@ gbjar.sources += [
     'home/SimpleCursorLoader.java',
     'home/SuggestClient.java',
     'home/TabMenuStrip.java',
+    'home/TabMenuStripLayout.java',
     'home/TopSitesGridItemView.java',
     'home/TopSitesGridView.java',
     'home/TopSitesPanel.java',
     'home/TopSitesThumbnailView.java',
     'home/TwoLinePageRow.java',
     'InputMethods.java',
+    'IntentHelper.java',
     'JavaAddonManager.java',
     'LightweightTheme.java',
     'LightweightThemeDrawable.java',
@@ -338,8 +342,6 @@ gbjar.sources += [
     'prompts/TabInput.java',
     'ReaderModeUtils.java',
     'ReferrerReceiver.java',
-    'RemoteTabsContainer.java',
-    'RemoteTabsList.java',
     'Restarter.java',
     'ScrollAnimator.java',
     'ServiceNotificationClient.java',
@@ -355,8 +357,10 @@ gbjar.sources += [
     'Tab.java',
     'Tabs.java',
     'TabsAccessor.java',
-    'TabsPanel.java',
-    'TabsTray.java',
+    'tabspanel/RemoteTabsContainer.java',
+    'tabspanel/RemoteTabsList.java',
+    'tabspanel/TabsPanel.java',
+    'tabspanel/TabsTray.java',
     'Telemetry.java',
     'TelemetryContract.java',
     'TextSelection.java',
@@ -555,8 +559,8 @@ main.recursive_make_targets += [OBJDIR + '/generated/' + f for f in gbjar.genera
 main.included_projects += ['../' + generated.name, '../' + branding.name]
 main.referenced_projects += [generated.name, branding.name]
 main.extra_jars += [CONFIG['ANDROID_COMPAT_LIB']]
-main.assets = TOPOBJDIR + '/dist/fennec/assets'
-main.libs = TOPOBJDIR + '/dist/fennec/lib'
+main.assets = TOPOBJDIR + '/dist/' + CONFIG['MOZ_APP_NAME'] + '/assets'
+main.libs = TOPOBJDIR + '/dist/' + CONFIG['MOZ_APP_NAME'] + '/lib'
 main.res = None
 
 cpe = main.add_classpathentry('src', SRCDIR,

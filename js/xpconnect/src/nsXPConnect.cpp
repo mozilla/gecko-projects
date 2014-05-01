@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sts=4 et sw=4 tw=80:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -47,11 +46,11 @@ using namespace mozilla::dom;
 using namespace xpc;
 using namespace JS;
 
-NS_IMPL_ISUPPORTS4(nsXPConnect,
-                   nsIXPConnect,
-                   nsISupportsWeakReference,
-                   nsIThreadObserver,
-                   nsIJSRuntimeService)
+NS_IMPL_ISUPPORTS(nsXPConnect,
+                  nsIXPConnect,
+                  nsISupportsWeakReference,
+                  nsIThreadObserver,
+                  nsIJSRuntimeService)
 
 nsXPConnect* nsXPConnect::gSelf = nullptr;
 bool         nsXPConnect::gOnceAliveNowDead = false;
@@ -832,11 +831,11 @@ nsXPConnect::CreateSandbox(JSContext *cx, nsIPrincipal *principal,
     RootedValue rval(cx);
     SandboxOptions options;
     nsresult rv = CreateSandboxObject(cx, &rval, principal, options);
-    MOZ_ASSERT(NS_FAILED(rv) || !JSVAL_IS_PRIMITIVE(rval),
+    MOZ_ASSERT(NS_FAILED(rv) || !rval.isPrimitive(),
                "Bad return value from xpc_CreateSandboxObject()!");
 
-    if (NS_SUCCEEDED(rv) && !JSVAL_IS_PRIMITIVE(rval)) {
-        *_retval = XPCJSObjectHolder::newHolder(JSVAL_TO_OBJECT(rval));
+    if (NS_SUCCEEDED(rv) && !rval.isPrimitive()) {
+        *_retval = XPCJSObjectHolder::newHolder(rval.toObjectOrNull());
         NS_ENSURE_TRUE(*_retval, NS_ERROR_OUT_OF_MEMORY);
 
         NS_ADDREF(*_retval);

@@ -13,7 +13,7 @@
 #include "nsIObserverService.h"
 #include "mozilla/ClearOnShutdown.h"
 
-#if defined(XP_LINUX) || defined(__FreeBSD__) // {
+#if defined(XP_LINUX) || defined(__FreeBSD__) || defined(XP_MACOSX) // {
 #include "mozilla/Preferences.h"
 #include <fcntl.h>
 #include <unistd.h>
@@ -48,6 +48,9 @@ using namespace mozilla;
 // specific signal occurs.
 static Atomic<int> sDumpPipeWriteFd(-1);
 
+const char* const FifoWatcher::kPrefName =
+    "memory_info_dumper.watch_fifo.enabled";
+
 static void
 DumpSignalHandler(int aSignum)
 {
@@ -60,7 +63,7 @@ DumpSignalHandler(int aSignum)
   }
 }
 
-NS_IMPL_ISUPPORTS1(FdWatcher, nsIObserver);
+NS_IMPL_ISUPPORTS(FdWatcher, nsIObserver);
 
 void FdWatcher::Init()
 {
@@ -259,7 +262,7 @@ FifoWatcher::MaybeCreate()
     return false;
   }
 
-  if (!Preferences::GetBool("memory_info_dumper.watch_fifo.enabled", false)) {
+  if (!Preferences::GetBool(kPrefName, false)) {
     LOG("Fifo watcher disabled via pref.");
     return false;
   }

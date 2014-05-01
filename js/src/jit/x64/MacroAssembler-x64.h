@@ -110,6 +110,14 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         call(rax);
     }
 
+    void call(const CallSiteDesc &desc, AsmJSImmPtr target) {
+        call(target);
+        appendCallSite(desc);
+    }
+    void callExit(AsmJSImmPtr target, uint32_t stackArgBytes) {
+        call(CallSiteDesc::Exit(), target);
+    }
+
     // Refers to the upper 32 bits of a 64-bit Value operand.
     // On x86_64, the upper 32 bits do not necessarily only contain the type.
     Operand ToUpper32(Operand base) {
@@ -1227,6 +1235,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
             mov(ImmPtr(dest.addr), ScratchReg);
             addPtr(Imm32(1), Address(ScratchReg, 0));
         }
+    }
+
+    void incrementInt32Value(const Address &addr) {
+        addPtr(Imm32(1), addr);
     }
 
     // If source is a double, load it into dest. If source is int32,

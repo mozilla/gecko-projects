@@ -75,7 +75,7 @@ inline int32_t CompareIntegers(uint32_t a, uint32_t b)
 using namespace mozilla;
 using namespace mozilla::places;
 
-NS_IMPL_CYCLE_COLLECTION_1(nsNavHistoryResultNode, mParent)
+NS_IMPL_CYCLE_COLLECTION(nsNavHistoryResultNode, mParent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsNavHistoryResultNode)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsINavHistoryResultNode)
@@ -308,9 +308,9 @@ nsNavHistoryResultNode::GetGeneratingOptions()
   return nullptr;
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_2(nsNavHistoryContainerResultNode, nsNavHistoryResultNode,
-                                     mResult,
-                                     mChildren)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsNavHistoryContainerResultNode, nsNavHistoryResultNode,
+                                   mResult,
+                                   mChildren)
 
 NS_IMPL_ADDREF_INHERITED(nsNavHistoryContainerResultNode, nsNavHistoryResultNode)
 NS_IMPL_RELEASE_INHERITED(nsNavHistoryContainerResultNode, nsNavHistoryResultNode)
@@ -1761,9 +1761,9 @@ nsNavHistoryContainerResultNode::GetChildrenReadOnly(bool *aChildrenReadOnly)
  * a message without doing a requery.  For complex changes or complex queries,
  * we give up and requery.
  */
-NS_IMPL_ISUPPORTS_INHERITED1(nsNavHistoryQueryResultNode,
-                             nsNavHistoryContainerResultNode,
-                             nsINavHistoryQueryResultNode)
+NS_IMPL_ISUPPORTS_INHERITED(nsNavHistoryQueryResultNode,
+                            nsNavHistoryContainerResultNode,
+                            nsINavHistoryQueryResultNode)
 
 nsNavHistoryQueryResultNode::nsNavHistoryQueryResultNode(
     const nsACString& aTitle, const nsACString& aIconURI,
@@ -2998,9 +2998,9 @@ nsNavHistoryQueryResultNode::OnItemMoved(int64_t aFolder,
  * an up-to-date list for the entire bookmark menu structure in every place
  * it is used.
  */
-NS_IMPL_ISUPPORTS_INHERITED1(nsNavHistoryFolderResultNode,
-                             nsNavHistoryContainerResultNode,
-                             nsINavHistoryQueryResultNode)
+NS_IMPL_ISUPPORTS_INHERITED(nsNavHistoryFolderResultNode,
+                            nsNavHistoryContainerResultNode,
+                            nsINavHistoryQueryResultNode)
 
 nsNavHistoryFolderResultNode::nsNavHistoryFolderResultNode(
     const nsACString& aTitle, nsNavHistoryQueryOptions* aOptions,

@@ -177,11 +177,11 @@ NS_IMPL_RELEASE_INHERITED(HTMLFormElement, Element)
 
 // QueryInterface implementation for HTMLFormElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLFormElement)
-  NS_INTERFACE_TABLE_INHERITED4(HTMLFormElement,
-                                nsIDOMHTMLFormElement,
-                                nsIForm,
-                                nsIWebProgressListener,
-                                nsIRadioGroupContainer)
+  NS_INTERFACE_TABLE_INHERITED(HTMLFormElement,
+                               nsIDOMHTMLFormElement,
+                               nsIForm,
+                               nsIWebProgressListener,
+                               nsIRadioGroupContainer)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 
@@ -2045,6 +2045,7 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
   radioGroup->GetLength(&numRadios);
   nsRefPtr<HTMLInputElement> radio;
 
+  bool isRadio = false;
   do {
     if (aPrevious) {
       if (--index < 0) {
@@ -2058,10 +2059,11 @@ HTMLFormElement::GetNextRadioButton(const nsAString& aName,
     if (!radio)
       continue;
 
-    if (radio->GetType() != NS_FORM_INPUT_RADIO)
+    isRadio = radio->GetType() == NS_FORM_INPUT_RADIO;
+    if (!isRadio)
       continue;
 
-  } while (radio->Disabled() && radio != currentRadio);
+  } while ((radio->Disabled() && radio != currentRadio) || !isRadio);
 
   NS_IF_ADDREF(*aRadioOut = radio);
   return NS_OK;

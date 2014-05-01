@@ -7,6 +7,7 @@
 #include "ContentEventHandler.h"
 #include "IMEContentObserver.h"
 #include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/EventStateManager.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/dom/Element.h"
@@ -33,14 +34,24 @@ namespace mozilla {
 
 using namespace widget;
 
-NS_IMPL_ISUPPORTS5(IMEContentObserver,
-                   nsIMutationObserver,
-                   nsISelectionListener,
-                   nsIReflowObserver,
-                   nsIScrollObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_CYCLE_COLLECTION(IMEContentObserver,
+                         mWidget, mSelection,
+                         mRootContent, mEditableNode, mDocShell)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IMEContentObserver)
+ NS_INTERFACE_MAP_ENTRY(nsISelectionListener)
+ NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
+ NS_INTERFACE_MAP_ENTRY(nsIReflowObserver)
+ NS_INTERFACE_MAP_ENTRY(nsIScrollObserver)
+ NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+ NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsISelectionListener)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(IMEContentObserver)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(IMEContentObserver)
 
 IMEContentObserver::IMEContentObserver()
+  : mESM(nullptr)
 {
 }
 
@@ -49,6 +60,9 @@ IMEContentObserver::Init(nsIWidget* aWidget,
                          nsPresContext* aPresContext,
                          nsIContent* aContent)
 {
+  mESM = aPresContext->EventStateManager();
+  mESM->OnStartToObserveContent(this);
+
   mWidget = aWidget;
   mEditableNode = IMEStateManager::GetRootEditableNode(aPresContext, aContent);
   if (!mEditableNode) {
@@ -174,6 +188,17 @@ IMEContentObserver::Destroy()
   mEditableNode = nullptr;
   mDocShell = nullptr;
   mUpdatePreference.mWantUpdates = nsIMEUpdatePreference::NOTIFY_NOTHING;
+
+  if (mESM) {
+    mESM->OnStopObservingContent(this);
+    mESM = nullptr;
+  }
+}
+
+void
+IMEContentObserver::DisconnectFromEventStateManager()
+{
+  mESM = nullptr;
 }
 
 bool
@@ -372,7 +397,8 @@ IMEContentObserver::CharacterDataChanged(nsIDocument* aDocument,
   nsresult rv =
     ContentEventHandler::GetFlatTextOffsetOfRange(mRootContent, aContent,
                                                   aInfo->mChangeStart,
-                                                  &offset);
+                                                  &offset,
+                                                  LINE_BREAK_TYPE_NATIVE);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   uint32_t oldEnd = offset + aInfo->mChangeEnd - aInfo->mChangeStart;
@@ -396,14 +422,16 @@ IMEContentObserver::NotifyContentAdded(nsINode* aContainer,
   uint32_t offset = 0;
   nsresult rv =
     ContentEventHandler::GetFlatTextOffsetOfRange(mRootContent, aContainer,
-                                                  aStartIndex, &offset);
+                                                  aStartIndex, &offset,
+                                                  LINE_BREAK_TYPE_NATIVE);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   // get offset at the end of the last added node
   nsIContent* childAtStart = aContainer->GetChildAt(aStartIndex);
   uint32_t addingLength = 0;
   rv = ContentEventHandler::GetFlatTextOffsetOfRange(childAtStart, aContainer,
-                                                     aEndIndex, &addingLength);
+                                                     aEndIndex, &addingLength,
+                                                     LINE_BREAK_TYPE_NATIVE);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   if (!addingLength) {
@@ -453,7 +481,8 @@ IMEContentObserver::ContentRemoved(nsIDocument* aDocument,
     ContentEventHandler::GetFlatTextOffsetOfRange(mRootContent,
                                                   NODE_FROM(aContainer,
                                                             aDocument),
-                                                  aIndexInContainer, &offset);
+                                                  aIndexInContainer, &offset,
+                                                  LINE_BREAK_TYPE_NATIVE);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   // get offset at the end of the deleted node
@@ -464,7 +493,8 @@ IMEContentObserver::ContentRemoved(nsIDocument* aDocument,
   MOZ_ASSERT(nodeLength >= 0, "The node length is out of range");
   uint32_t textLength = 0;
   rv = ContentEventHandler::GetFlatTextOffsetOfRange(aChild, aChild,
-                                                     nodeLength, &textLength);
+                                                     nodeLength, &textLength,
+                                                     LINE_BREAK_TYPE_NATIVE);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   if (!textLength) {
@@ -524,7 +554,8 @@ IMEContentObserver::AttributeChanged(nsIDocument* aDocument,
   uint32_t start;
   nsresult rv =
     ContentEventHandler::GetFlatTextOffsetOfRange(mRootContent, content,
-                                                  0, &start);
+                                                  0, &start,
+                                                  LINE_BREAK_TYPE_NATIVE);
   NS_ENSURE_SUCCESS_VOID(rv);
 
   nsContentUtils::AddScriptRunner(

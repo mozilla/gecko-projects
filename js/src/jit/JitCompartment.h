@@ -192,6 +192,10 @@ class JitRuntime
     // Stub used to inline the ForkJoinGetSlice intrinsic.
     JitCode *forkJoinGetSliceStub_;
 
+    // Thunk used to fix up on-stack recompile of baseline scripts.
+    JitCode *baselineDebugModeOSRHandler_;
+    void *baselineDebugModeOSRHandlerNoFrameRegPopAddr_;
+
     // Map VMFunction addresses to the JitCode of the wrapper.
     typedef WeakCache<const VMFunction *, JitCode *> VMWrapperMap;
     VMWrapperMap *functionWrappers_;
@@ -223,6 +227,7 @@ class JitRuntime
     JitCode *generatePreBarrier(JSContext *cx, MIRType type);
     JitCode *generateDebugTrapHandler(JSContext *cx);
     JitCode *generateForkJoinGetSliceStub(JSContext *cx);
+    JitCode *generateBaselineDebugModeOSRHandler(JSContext *cx, uint32_t *noFrameRegPopOffsetOut);
     JitCode *generateVMWrapper(JSContext *cx, const VMFunction &f);
 
     JSC::ExecutableAllocator *createIonAlloc(JSContext *cx);
@@ -283,6 +288,8 @@ class JitRuntime
 
     JitCode *getVMWrapper(const VMFunction &f) const;
     JitCode *debugTrapHandler(JSContext *cx);
+    JitCode *getBaselineDebugModeOSRHandler(JSContext *cx);
+    void *getBaselineDebugModeOSRHandlerAddress(JSContext *cx, bool popFrameReg);
 
     JitCode *getGenericBailoutHandler() const {
         return bailoutHandler_;
@@ -352,7 +359,7 @@ class JitCompartment
     friend class JitActivation;
 
     // Map ICStub keys to ICStub shared code objects.
-    typedef WeakValueCache<uint32_t, ReadBarriered<JitCode> > ICStubCodeMap;
+    typedef WeakValueCache<uint32_t, ReadBarrieredJitCode> ICStubCodeMap;
     ICStubCodeMap *stubCodes_;
 
     // Keep track of offset into various baseline stubs' code at return
@@ -365,13 +372,13 @@ class JitCompartment
     // stored in JitRuntime because masm.newGCString bakes in zone-specific
     // pointers. This has to be a weak pointer to avoid keeping the whole
     // compartment alive.
-    ReadBarriered<JitCode> stringConcatStub_;
-    ReadBarriered<JitCode> parallelStringConcatStub_;
+    ReadBarrieredJitCode stringConcatStub_;
+    ReadBarrieredJitCode parallelStringConcatStub_;
 
     // Set of JSScripts invoked by ForkJoin (i.e. the entry script). These
     // scripts are marked if their respective parallel IonScripts' age is less
     // than a certain amount. See IonScript::parallelAge_.
-    typedef HashSet<EncapsulatedPtrScript> ScriptSet;
+    typedef HashSet<PreBarrieredScript> ScriptSet;
     ScriptSet *activeParallelEntryScripts_;
 
     JitCode *generateStringConcatStub(JSContext *cx, ExecutionMode mode);

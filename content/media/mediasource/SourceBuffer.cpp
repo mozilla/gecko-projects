@@ -67,33 +67,45 @@ SubBufferDecoder::GetResource() const
 }
 
 void
+SubBufferDecoder::NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded)
+{
+  return mParentDecoder->NotifyDecodedFrames(aParsed, aDecoded);
+}
+
+void
 SubBufferDecoder::SetMediaDuration(int64_t aDuration)
 {
-  mParentDecoder->SetMediaDuration(aDuration);
+  mMediaDuration = aDuration;
 }
 
 void
 SubBufferDecoder::UpdateEstimatedMediaDuration(int64_t aDuration)
 {
-  mParentDecoder->UpdateEstimatedMediaDuration(aDuration);
+  //mParentDecoder->UpdateEstimatedMediaDuration(aDuration);
 }
 
 void
 SubBufferDecoder::SetMediaSeekable(bool aMediaSeekable)
 {
-  mParentDecoder->SetMediaSeekable(aMediaSeekable);
+  //mParentDecoder->SetMediaSeekable(aMediaSeekable);
 }
 
 void
 SubBufferDecoder::SetTransportSeekable(bool aTransportSeekable)
 {
-  mParentDecoder->SetTransportSeekable(aTransportSeekable);
+  //mParentDecoder->SetTransportSeekable(aTransportSeekable);
 }
 
 layers::ImageContainer*
 SubBufferDecoder::GetImageContainer()
 {
   return mParentDecoder->GetImageContainer();
+}
+
+MediaDecoderOwner*
+SubBufferDecoder::GetOwner()
+{
+  return mParentDecoder->GetOwner();
 }
 
 int64_t
@@ -103,15 +115,46 @@ SubBufferDecoder::ConvertToByteOffset(double aTime)
   // purposes of eviction this should be adequate since we have the
   // byte threshold as well to ensure data actually gets evicted and
   // we ensure we don't evict before the current playable point.
-  double duration = mParentDecoder->GetMediaSourceDuration();
-  if (duration <= 0.0 || IsNaN(duration)) {
+  if (mMediaDuration == -1) {
     return -1;
   }
   int64_t length = GetResource()->GetLength();
   MOZ_ASSERT(length > 0);
-  int64_t offset = (aTime / duration) * length;
+  int64_t offset = (aTime / (double(mMediaDuration) / USECS_PER_S)) * length;
   return offset;
 }
+
+class ContainerParser {
+public:
+  virtual ~ContainerParser() {}
+
+  virtual bool IsInitSegmentPresent(const uint8_t* aData, uint32_t aLength)
+  {
+    return false;
+  }
+};
+
+class WebMContainerParser : public ContainerParser {
+public:
+  bool IsInitSegmentPresent(const uint8_t* aData, uint32_t aLength)
+  {
+    // XXX: This is overly primitive, needs to collect data as it's appended
+    // to the SB and handle, rather than assuming everything is present in a
+    // single aData segment.
+    // 0x1a45dfa3 // EBML
+    // ...
+    // DocType == "webm"
+    // ...
+    // 0x18538067 // Segment (must be "unknown" size)
+    // 0x1549a966 // -> Segment Info
+    // 0x1654ae6b // -> One or more Tracks
+    if (aLength >= 4 &&
+        aData[0] == 0x1a && aData[1] == 0x45 && aData[2] == 0xdf && aData[3] == 0xa3) {
+      return true;
+    }
+    return false;
+  }
+};
 
 namespace dom {
 
@@ -155,7 +198,10 @@ SourceBuffer::GetBuffered(ErrorResult& aRv)
     return nullptr;
   }
   nsRefPtr<TimeRanges> ranges = new TimeRanges();
-  mDecoder->GetBuffered(ranges);
+  if (mDecoder) {
+    mDecoder->GetBuffered(ranges);
+  }
+  ranges->Normalize();
   return ranges.forget();
 }
 
@@ -203,6 +249,7 @@ SourceBuffer::AppendBuffer(const ArrayBufferView& aData, ErrorResult& aRv)
 void
 SourceBuffer::Abort(ErrorResult& aRv)
 {
+  MSE_DEBUG("%p Abort()", this);
   if (!IsAttached()) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
@@ -218,11 +265,18 @@ SourceBuffer::Abort(ErrorResult& aRv)
   // TODO: Run reset parser algorithm.
   mAppendWindowStart = 0;
   mAppendWindowEnd = PositiveInfinity<double>();
+
+  MSE_DEBUG("%p Abort: Discarding decoder.", this);
+  if (mDecoder) {
+    mDecoder->GetResource()->Ended();
+    mDecoder = nullptr;
+  }
 }
 
 void
 SourceBuffer::Remove(double aStart, double aEnd, ErrorResult& aRv)
 {
+  MSE_DEBUG("%p Remove(Start=%f End=%f)", this, aStart, aEnd);
   if (!IsAttached() || mUpdating ||
       mMediaSource->ReadyState() != MediaSourceReadyState::Open) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
@@ -249,22 +303,38 @@ SourceBuffer::Detach()
 void
 SourceBuffer::Ended()
 {
-  mDecoder->GetResource()->Ended();
+  if (mDecoder) {
+    mDecoder->GetResource()->Ended();
+  }
 }
 
 SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
   : DOMEventTargetHelper(aMediaSource->GetParentObject())
   , mMediaSource(aMediaSource)
+  , mType(aType)
   , mAppendWindowStart(0)
   , mAppendWindowEnd(PositiveInfinity<double>())
   , mTimestampOffset(0)
   , mAppendMode(SourceBufferAppendMode::Segments)
   , mUpdating(false)
+  , mDecoderInit(false)
 {
   MOZ_ASSERT(aMediaSource);
-  MediaSourceDecoder* parentDecoder = aMediaSource->GetDecoder();
-  mDecoder = parentDecoder->CreateSubDecoder(aType);
-  MOZ_ASSERT(mDecoder);
+  if (mType.EqualsIgnoreCase("video/webm") || mType.EqualsIgnoreCase("audio/webm")) {
+    mParser = new WebMContainerParser();
+  } else {
+    // XXX: Plug in parsers for MPEG4, etc. here.
+    mParser = new ContainerParser();
+  }
+  MSE_DEBUG("%p SourceBuffer: Creating initial decoder.", this);
+  InitNewDecoder();
+}
+
+already_AddRefed<SourceBuffer>
+SourceBuffer::Create(MediaSource* aMediaSource, const nsACString& aType)
+{
+  nsRefPtr<SourceBuffer> sourceBuffer = new SourceBuffer(aMediaSource, aType);
+  return sourceBuffer.forget();
 }
 
 SourceBuffer::~SourceBuffer()
@@ -301,6 +371,18 @@ SourceBuffer::QueueAsyncSimpleEvent(const char* aName)
   NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
 }
 
+bool
+SourceBuffer::InitNewDecoder()
+{
+  MediaSourceDecoder* parentDecoder = mMediaSource->GetDecoder();
+  nsRefPtr<SubBufferDecoder> decoder = parentDecoder->CreateSubDecoder(mType);
+  if (!decoder) {
+    return false;
+  }
+  mDecoder = decoder;
+  return true;
+}
+
 void
 SourceBuffer::StartUpdating()
 {
@@ -330,6 +412,7 @@ SourceBuffer::AbortUpdating()
 void
 SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aRv)
 {
+  MSE_DEBUG("%p AppendBuffer(Data=%u bytes)", this, aLength);
   if (!IsAttached() || mUpdating) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
@@ -339,13 +422,25 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
   }
   // TODO: Run coded frame eviction algorithm.
   // TODO: Test buffer full flag.
-  MSE_DEBUG("%p Append(ArrayBuffer=%u)", this, aLength);
   StartUpdating();
+  // TODO: Run buffer append algorithm asynchronously (would call StopUpdating()).
+  if (!mDecoder || mParser->IsInitSegmentPresent(aData, aLength)) {
+    if (!mDecoder || mDecoderInit) {
+      MSE_DEBUG("%p AppendBuffer: New initialization segment, creating decoder.", this);
+      mDecoder->GetResource()->Ended();
+
+      if (!InitNewDecoder()) {
+        aRv.Throw(NS_ERROR_FAILURE); // XXX: Review error handling.
+        return;
+      }
+    }
+    MSE_DEBUG("%p AppendBuffer: Decoder marked as initialized.", this);
+    mDecoderInit = true;
+  }
   // XXX: For future reference: NDA call must run on the main thread.
   mDecoder->NotifyDataArrived(reinterpret_cast<const char*>(aData),
                               aLength,
                               mDecoder->GetResource()->GetLength());
-  // TODO: Run buffer append algorithm asynchronously (would call StopUpdating()).
   mDecoder->GetResource()->AppendData(aData, aLength);
 
   // Eviction uses a byte threshold. If the buffer is greater than the
@@ -374,33 +469,50 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
 void
 SourceBuffer::GetBufferedStartEndTime(double* aStart, double* aEnd)
 {
-  nsRefPtr<TimeRanges> ranges = new TimeRanges();
-  mDecoder->GetBuffered(ranges);
-  ranges->Normalize();
-  int length = ranges->Length();
-  ErrorResult rv;
-
-  if (aStart) {
-    *aStart = length > 0 ? ranges->Start(0, rv) : 0.0;
+  ErrorResult dummy;
+  nsRefPtr<TimeRanges> ranges = GetBuffered(dummy);
+  if (!ranges || ranges->Length() == 0) {
+    *aStart = *aEnd = 0.0;
+    return;
   }
-
-  if (aEnd) {
-    *aEnd = length > 0 ? ranges->End(length - 1, rv) : 0.0;
-  }
+  *aStart = ranges->Start(0, dummy);
+  *aEnd = ranges->End(ranges->Length() - 1, dummy);
 }
 
 void
 SourceBuffer::Evict(double aStart, double aEnd)
 {
+  if (!mDecoder) {
+    return;
+  }
   // Need to map time to byte offset then evict
   int64_t end = mDecoder->ConvertToByteOffset(aEnd);
   if (end > 0) {
     mDecoder->GetResource()->EvictBefore(end);
+  } else {
+    NS_WARNING("SourceBuffer::Evict failed");
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(SourceBuffer, DOMEventTargetHelper,
-                                     mMediaSource)
+bool
+SourceBuffer::ContainsTime(double aTime)
+{
+  ErrorResult dummy;
+  nsRefPtr<TimeRanges> ranges = GetBuffered(dummy);
+  if (!ranges || ranges->Length() == 0) {
+    return false;
+  }
+  for (uint32_t i = 0; i < ranges->Length(); ++i) {
+    if (aTime >= ranges->Start(i, dummy) &&
+        aTime <= ranges->End(i, dummy)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+NS_IMPL_CYCLE_COLLECTION_INHERITED(SourceBuffer, DOMEventTargetHelper,
+                                   mMediaSource)
 
 NS_IMPL_ADDREF_INHERITED(SourceBuffer, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(SourceBuffer, DOMEventTargetHelper)

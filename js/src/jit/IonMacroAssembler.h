@@ -17,6 +17,10 @@
 # include "jit/x64/MacroAssembler-x64.h"
 #elif defined(JS_CODEGEN_ARM)
 # include "jit/arm/MacroAssembler-arm.h"
+#elif defined(JS_CODEGEN_MIPS)
+# include "jit/mips/MacroAssembler-mips.h"
+#else
+# error "Unknown architecture!"
 #endif
 #include "jit/IonInstrumentation.h"
 #include "jit/JitCompartment.h"
@@ -296,7 +300,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Emits a test of a value against all types in a TypeSet. A scratch
     // register is required.
     template <typename Source, typename TypeSet>
-    void guardTypeSet(const Source &address, const TypeSet *types, Register scratch, Label *miss);
+    void guardTypeSet(const Source &address, const TypeSet *types, BarrierKind kind, Register scratch, Label *miss);
     template <typename TypeSet>
     void guardObjectType(Register obj, const TypeSet *types, Register scratch, Label *miss);
     template <typename Source>

@@ -43,8 +43,8 @@ public:
 
   NS_IMETHOD Handle(const nsAString& aName, JS::Handle<JS::Value> aResult)
   {
-    if (JSVAL_IS_INT(aResult)) {
-      int32_t mode = JSVAL_TO_INT(aResult);
+    if (aResult.isInt32()) {
+      int32_t mode = aResult.toInt32();
       SetAutoMounterMode(mode);
     }
     return NS_OK;
@@ -57,7 +57,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(SettingsServiceCallback, nsISettingsServiceCallback)
+NS_IMPL_ISUPPORTS(SettingsServiceCallback, nsISettingsServiceCallback)
 
 class CheckVolumeSettingsCallback MOZ_FINAL : public nsISettingsServiceCallback
 {
@@ -69,8 +69,8 @@ public:
 
   NS_IMETHOD Handle(const nsAString& aName, JS::Handle<JS::Value> aResult)
   {
-    if (JSVAL_IS_BOOLEAN(aResult)) {
-      bool isSharingEnabled = JSVAL_TO_BOOLEAN(aResult);
+    if (aResult.isBoolean()) {
+      bool isSharingEnabled = aResult.toBoolean();
       SetAutoMounterSharingMode(mVolumeName, isSharingEnabled);
     }
     return NS_OK;
@@ -85,7 +85,7 @@ private:
   nsCString mVolumeName;
 };
 
-NS_IMPL_ISUPPORTS1(CheckVolumeSettingsCallback, nsISettingsServiceCallback)
+NS_IMPL_ISUPPORTS(CheckVolumeSettingsCallback, nsISettingsServiceCallback)
 
 AutoMounterSetting::AutoMounterSetting()
   : mStatus(AUTOMOUNTER_STATUS_DISABLED)
@@ -136,7 +136,7 @@ AutoMounterSetting::~AutoMounterSetting()
   }
 }
 
-NS_IMPL_ISUPPORTS1(AutoMounterSetting, nsIObserver)
+NS_IMPL_ISUPPORTS(AutoMounterSetting, nsIObserver)
 
 const char *
 AutoMounterSetting::StatusStr(int32_t aStatus)

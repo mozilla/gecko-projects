@@ -262,9 +262,9 @@ private:
   uint32_t mLoadID;
 };
 
-NS_IMPL_ISUPPORTS5(HTMLMediaElement::MediaLoadListener, nsIRequestObserver,
-                   nsIStreamListener, nsIChannelEventSink,
-                   nsIInterfaceRequestor, nsIObserver)
+NS_IMPL_ISUPPORTS(HTMLMediaElement::MediaLoadListener, nsIRequestObserver,
+                  nsIStreamListener, nsIChannelEventSink,
+                  nsIInterfaceRequestor, nsIObserver)
 
 NS_IMETHODIMP
 HTMLMediaElement::MediaLoadListener::Observe(nsISupports* aSubject,
@@ -1132,7 +1132,7 @@ nsresult HTMLMediaElement::LoadResource()
       return NS_ERROR_FAILURE;
     }
     mMediaSource = source.forget();
-    nsRefPtr<MediaResource> resource = new MediaSourceResource();
+    nsRefPtr<MediaResource> resource = MediaSourceDecoder::CreateResource();
     return FinishDecoderSetup(decoder, resource, nullptr, nullptr);
   }
 
@@ -3847,6 +3847,11 @@ void HTMLMediaElement::UpdateAudioChannelPlayingState()
       }
       mAudioChannelAgent->SetVisibilityState(!OwnerDoc()->Hidden());
     }
+
+    // This is needed to pass nsContentUtils::IsCallerChrome().
+    // AudioChannel API should not called from content but it can happen that
+    // this method has some content JS in its stack.
+    AutoNoJSAPI nojsapi;
 
     if (mPlayingThroughTheAudioChannel) {
       int32_t canPlay;

@@ -119,25 +119,27 @@ GetElement(JSContext *cx, HandleObject obj, uint32_t index, MutableHandleValue v
     return GetElement(cx, obj, obj, index, vp);
 }
 
+/*
+ * Indicates whether an assignment operation is qualified (`x.y = 0`) or
+ * unqualified (`y = 0`). In strict mode, the latter is an error if no such
+ * variable already exists.
+ *
+ * Used as an argument to baseops::SetPropertyHelper.
+ */
+enum QualifiedBool {
+    Unqualified = 0,
+    Qualified = 1
+};
+
 template <ExecutionMode mode>
 extern bool
 SetPropertyHelper(typename ExecutionModeTraits<mode>::ContextType cx, HandleObject obj,
-                  HandleObject receiver, HandleId id, unsigned defineHow,
+                  HandleObject receiver, HandleId id, QualifiedBool qualified,
                   MutableHandleValue vp, bool strict);
-
-template <ExecutionMode mode>
-inline bool
-SetPropertyHelper(typename ExecutionModeTraits<mode>::ContextType cx, HandleObject obj,
-                  HandleObject receiver, PropertyName *name, unsigned defineHow,
-                  MutableHandleValue vp, bool strict)
-{
-    Rooted<jsid> id(cx, NameToId(name));
-    return SetPropertyHelper<mode>(cx, obj, receiver, id, defineHow, vp, strict);
-}
 
 extern bool
 SetElementHelper(JSContext *cx, HandleObject obj, HandleObject Receiver, uint32_t index,
-                 unsigned defineHow, MutableHandleValue vp, bool strict);
+                 MutableHandleValue vp, bool strict);
 
 extern bool
 GetAttributes(JSContext *cx, HandleObject obj, HandleId id, unsigned *attrsp);
@@ -436,7 +438,7 @@ class JSObject : public js::ObjectImpl
     inline js::types::TypeObject* getType(JSContext *cx);
     js::types::TypeObject* uninlinedGetType(JSContext *cx);
 
-    const js::HeapPtr<js::types::TypeObject> &typeFromGC() const {
+    const js::HeapPtrTypeObject &typeFromGC() const {
         /* Direct field access for use by GC. */
         return type_;
     }
@@ -817,7 +819,7 @@ class JSObject : public js::ObjectImpl
     MOZ_ALWAYS_INLINE void finalize(js::FreeOp *fop);
 
     static inline bool hasProperty(JSContext *cx, js::HandleObject obj,
-                                   js::HandleId id, bool *foundp, unsigned flags = 0);
+                                   js::HandleId id, bool *foundp);
 
     /*
      * Allocate and free an object slot.
@@ -1018,8 +1020,8 @@ class JSObject : public js::ObjectImpl
     {
         if (obj->getOps()->setGeneric)
             return nonNativeSetProperty(cx, obj, id, vp, strict);
-        return js::baseops::SetPropertyHelper<js::SequentialExecution>(cx, obj, receiver, id, 0,
-                                                                       vp, strict);
+        return js::baseops::SetPropertyHelper<js::SequentialExecution>(
+            cx, obj, receiver, id, js::baseops::Qualified, vp, strict);
     }
 
     static bool setProperty(JSContext *cx, js::HandleObject obj, js::HandleObject receiver,
@@ -1035,7 +1037,7 @@ class JSObject : public js::ObjectImpl
     {
         if (obj->getOps()->setElement)
             return nonNativeSetElement(cx, obj, index, vp, strict);
-        return js::baseops::SetElementHelper(cx, obj, receiver, index, 0, vp, strict);
+        return js::baseops::SetElementHelper(cx, obj, receiver, index, vp, strict);
     }
 
     static bool nonNativeSetProperty(JSContext *cx, js::HandleObject obj,
@@ -1365,27 +1367,15 @@ extern JSObject *
 DeepCloneObjectLiteral(JSContext *cx, HandleObject obj, NewObjectKind newKind = GenericObject);
 
 /*
- * Flags for the defineHow parameter of DefineNativeProperty.
- */
-const unsigned DNP_DONT_PURGE   = 1;   /* suppress js_PurgeScopeChain */
-const unsigned DNP_UNQUALIFIED  = 2;   /* Unqualified property set.  Only used in
-                                       the defineHow argument of
-                                       js_SetPropertyHelper. */
-
-/*
  * Return successfully added or changed shape or nullptr on error.
  */
 extern bool
 DefineNativeProperty(ExclusiveContext *cx, HandleObject obj, HandleId id, HandleValue value,
-                     PropertyOp getter, StrictPropertyOp setter, unsigned attrs,
-                     unsigned flags, unsigned defineHow = 0);
+                     PropertyOp getter, StrictPropertyOp setter, unsigned attrs);
 
-/*
- * Specialized subroutine that allows caller to preset JSRESOLVE_* flags.
- */
 extern bool
-LookupPropertyWithFlags(ExclusiveContext *cx, HandleObject obj, HandleId id, unsigned flags,
-                        js::MutableHandleObject objp, js::MutableHandleShape propp);
+LookupNativeProperty(ExclusiveContext *cx, HandleObject obj, HandleId id,
+                     js::MutableHandleObject objp, js::MutableHandleShape propp);
 
 /*
  * Call the [[DefineOwnProperty]] internal method of obj.
@@ -1410,12 +1400,6 @@ DefineProperties(JSContext *cx, HandleObject obj, HandleObject props);
 extern bool
 ReadPropertyDescriptors(JSContext *cx, HandleObject props, bool checkAccessors,
                         AutoIdVector *ids, AutoPropDescArrayRooter *descs);
-
-/*
- * Constant to pass to js_LookupPropertyWithFlags to infer bits from current
- * bytecode.
- */
-static const unsigned RESOLVE_INFER = 0xffff;
 
 /* Read the name using a dynamic lookup on the scopeChain. */
 extern bool
@@ -1549,9 +1533,6 @@ js_GetObjectSlotName(JSTracer *trc, char *buf, size_t bufsize);
 
 extern bool
 js_ReportGetterOnlyAssignment(JSContext *cx, bool strict);
-
-extern unsigned
-js_InferFlags(JSContext *cx, unsigned defaultFlags);
 
 
 namespace js {

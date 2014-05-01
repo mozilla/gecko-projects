@@ -380,10 +380,10 @@ namespace image {
 static nsCOMPtr<nsIThread> sScaleWorkerThread = nullptr;
 
 #ifndef DEBUG
-NS_IMPL_ISUPPORTS2(RasterImage, imgIContainer, nsIProperties)
+NS_IMPL_ISUPPORTS(RasterImage, imgIContainer, nsIProperties)
 #else
-NS_IMPL_ISUPPORTS3(RasterImage, imgIContainer, nsIProperties,
-                              imgIContainerDebug)
+NS_IMPL_ISUPPORTS(RasterImage, imgIContainer, nsIProperties,
+                  imgIContainerDebug)
 #endif
 
 //******************************************************************************
@@ -1127,7 +1127,7 @@ RasterImage::EnsureAnimExists()
   if (!mAnim) {
 
     // Create the animation context
-    mAnim = new FrameAnimator(mFrameBlender);
+    mAnim = new FrameAnimator(mFrameBlender, mAnimationMode);
 
     // We don't support discarding animated images (See bug 414259).
     // Lock the image and throw away the key.
@@ -3167,8 +3167,8 @@ RasterImage::FinishedSomeDecoding(eShutdownIntent aIntent /* = eShutdownIntent_D
   return RequestDecodeIfNeeded(rv, aIntent, done, wasSize);
 }
 
-NS_IMPL_ISUPPORTS1(RasterImage::DecodePool,
-                              nsIObserver)
+NS_IMPL_ISUPPORTS(RasterImage::DecodePool,
+                  nsIObserver)
 
 /* static */ RasterImage::DecodePool*
 RasterImage::DecodePool::Singleton()
@@ -3201,7 +3201,7 @@ public:
     ~RIDThreadPoolListener() {}
 };
 
-NS_IMPL_ISUPPORTS1(RIDThreadPoolListener, nsIThreadPoolListener)
+NS_IMPL_ISUPPORTS(RIDThreadPoolListener, nsIThreadPoolListener)
 
 NS_IMETHODIMP
 RIDThreadPoolListener::OnThreadCreated()

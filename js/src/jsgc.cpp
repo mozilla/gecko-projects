@@ -796,6 +796,7 @@ Chunk::init(JSRuntime *rt)
 
     /* Initialize the chunk info. */
     info.age = 0;
+    info.trailer.location = ChunkLocationTenuredHeap;
     info.trailer.runtime = rt;
 
     /* The rest of info fields are initialized in PickChunk. */
@@ -2769,6 +2770,13 @@ BeginMarkPhase(JSRuntime *rt)
             c->zone()->setPreservingCode(true);
     }
 
+    if (!rt->gcShouldCleanUpEverything) {
+#ifdef JS_ION
+        if (JSCompartment *comp = jit::TopmostJitActivationCompartment(rt))
+            comp->zone()->setPreservingCode(true);
+#endif
+    }
+
     /*
      * Atoms are not in the cross-compartment map. So if there are any
      * zones that are not being collected, we are not allowed to collect
@@ -4277,7 +4285,7 @@ AutoGCSlice::AutoGCSlice(JSRuntime *rt)
      * set it at the start of every phase.
      */
     for (ActivationIterator iter(rt); !iter.done(); ++iter)
-        iter.activation()->compartment()->zone()->active = true;
+        iter->compartment()->zone()->active = true;
 
     for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
         /*

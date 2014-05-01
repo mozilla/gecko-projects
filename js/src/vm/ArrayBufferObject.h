@@ -124,6 +124,7 @@ class ArrayBufferObject : public JSObject
 
     void addView(ArrayBufferViewObject *view);
 
+    void setNewOwnedData(FreeOp* fop, void *newData);
     void changeContents(JSContext *cx, void *newData);
 
     /*
@@ -160,7 +161,7 @@ class ArrayBufferObject : public JSObject
 
     static void finalize(FreeOp *fop, JSObject *obj);
 
-    static void *createMappedArrayBuffer(int fd, size_t offset, size_t length);
+    static void *createMappedContents(int fd, size_t offset, size_t length);
 
     static size_t flagsOffset() {
         return getFixedSlotOffset(FLAGS_SLOT);

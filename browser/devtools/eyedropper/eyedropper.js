@@ -49,6 +49,40 @@ const HEX_BOX_WIDTH = CANVAS_WIDTH + CANVAS_OFFSET * 2;
 const HSL_BOX_WIDTH = 158;
 
 /**
+ * Manage instances of eyedroppers for windows. Registering here isn't
+ * necessary for creating an eyedropper, but can be used for testing.
+ */
+let EyedropperManager = {
+  _instances: new WeakMap(),
+
+  getInstance: function(chromeWindow) {
+    return this._instances.get(chromeWindow);
+  },
+
+  createInstance: function(chromeWindow) {
+    let dropper = this.getInstance(chromeWindow);
+    if (dropper) {
+      return dropper;
+    }
+
+    dropper = new Eyedropper(chromeWindow);
+    this._instances.set(chromeWindow, dropper);
+
+    dropper.on("destroy", () => {
+      this.deleteInstance(chromeWindow);
+    });
+
+    return dropper;
+  },
+
+  deleteInstance: function(chromeWindow) {
+    this._instances.delete(chromeWindow);
+  }
+}
+
+exports.EyedropperManager = EyedropperManager;
+
+/**
  * Eyedropper widget. Once opened, shows zoomed area above current pixel and
  * displays the color value of the center pixel. Clicking on the window will
  * close the widget and fire a 'select' event. If 'copyOnSelect' is true, the color
@@ -80,6 +114,8 @@ function Eyedropper(chromeWindow, opts = { copyOnSelect: true }) {
 
   this._dragging = true;
   this.loaded = false;
+
+  this._mouseMoveCounter = 0;
 
   this.format = Services.prefs.getCharPref(FORMAT_PREF); // color value format
   this.zoom = Services.prefs.getIntPref(ZOOM_PREF);      // zoom level - integer
@@ -341,6 +377,11 @@ Eyedropper.prototype = {
    */
   _onMouseMove: function(event) {
     if (!this._dragging || !this._panel || !this._canvas) {
+      return;
+    }
+
+    if (this._OS == "Linux" && ++this._mouseMoveCounter % 2 == 0) {
+      // skip every other mousemove to preserve performance.
       return;
     }
 

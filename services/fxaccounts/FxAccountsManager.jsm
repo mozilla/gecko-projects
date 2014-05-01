@@ -44,6 +44,10 @@ this.FxAccountsManager = {
   // session tokens and are only required to handle the email.
   _activeSession: null,
 
+  // Are we refreshing our authentication? If so, allow attempts to sign in
+  // while we are already signed in.
+  _refreshing: false,
+
   // We only expose the email and the verified status so far.
   get _user() {
     if (!this._activeSession || !this._activeSession.email) {
@@ -51,7 +55,7 @@ this.FxAccountsManager = {
     }
 
     return {
-      accountId: this._activeSession.email,
+      email: this._activeSession.email,
       verified: this._activeSession.verified
     }
   },
@@ -89,13 +93,13 @@ this.FxAccountsManager = {
     return this._fxAccounts.getAccountsClient();
   },
 
-  _signInSignUp: function(aMethod, aAccountId, aPassword) {
+  _signInSignUp: function(aMethod, aEmail, aPassword) {
     if (Services.io.offline) {
       return this._error(ERROR_OFFLINE);
     }
 
-    if (!aAccountId) {
-      return this._error(ERROR_INVALID_ACCOUNTID);
+    if (!aEmail) {
+      return this._error(ERROR_INVALID_EMAIL);
     }
 
     if (!aPassword) {
@@ -103,7 +107,7 @@ this.FxAccountsManager = {
     }
 
     // Check that there is no signed in account first.
-    if (this._activeSession) {
+    if ((!this._refreshing) && this._activeSession) {
       return this._error(ERROR_ALREADY_SIGNED_IN_USER, {
         user: this._user
       });
@@ -112,12 +116,12 @@ this.FxAccountsManager = {
     let client = this._getFxAccountsClient();
     return this._fxAccounts.getSignedInUser().then(
       user => {
-        if (user) {
+        if ((!this._refreshing) && user) {
           return this._error(ERROR_ALREADY_SIGNED_IN_USER, {
             user: this._user
           });
         }
-        return client[aMethod](aAccountId, aPassword);
+        return client[aMethod](aEmail, aPassword);
       }
     ).then(
       user => {
@@ -131,7 +135,7 @@ this.FxAccountsManager = {
         // If the user object includes an email field, it may differ in
         // capitalization from what we sent down.  This is the server's
         // canonical capitalization and should be used instead.
-        user.email = user.email || aAccountId;
+        user.email = user.email || aEmail;
         return this._fxAccounts.setSignedInUser(user).then(
           () => {
             this._activeSession = user;
@@ -222,12 +226,12 @@ this.FxAccountsManager = {
 
   // -- API --
 
-  signIn: function(aAccountId, aPassword) {
-    return this._signInSignUp("signIn", aAccountId, aPassword);
+  signIn: function(aEmail, aPassword) {
+    return this._signInSignUp("signIn", aEmail, aPassword);
   },
 
-  signUp: function(aAccountId, aPassword) {
-    return this._signInSignUp("signUp", aAccountId, aPassword);
+  signUp: function(aEmail, aPassword) {
+    return this._signInSignUp("signUp", aEmail, aPassword);
   },
 
   signOut: function() {
@@ -282,20 +286,20 @@ this.FxAccountsManager = {
     );
   },
 
-  queryAccount: function(aAccountId) {
-    log.debug("queryAccount " + aAccountId);
+  queryAccount: function(aEmail) {
+    log.debug("queryAccount " + aEmail);
     if (Services.io.offline) {
       return this._error(ERROR_OFFLINE);
     }
 
     let deferred = Promise.defer();
 
-    if (!aAccountId) {
-      return this._error(ERROR_INVALID_ACCOUNTID);
+    if (!aEmail) {
+      return this._error(ERROR_INVALID_EMAIL);
     }
 
     let client = this._getFxAccountsClient();
-    return client.accountExists(aAccountId).then(
+    return client.accountExists(aEmail).then(
       result => {
         log.debug("Account " + result ? "" : "does not" + " exists");
         let error = this._getError(result);
@@ -378,23 +382,34 @@ this.FxAccountsManager = {
 
           // RPs might require an authentication refresh.
           if (aOptions &&
-              aOptions.refreshAuthentication) {
+              (typeof(aOptions.refreshAuthentication) != "undefined")) {
             let gracePeriod = aOptions.refreshAuthentication;
-            if (typeof gracePeriod != 'number' || isNaN(gracePeriod)) {
+            if (typeof(gracePeriod) !== "number" || isNaN(gracePeriod)) {
               return this._error(ERROR_INVALID_REFRESH_AUTH_VALUE);
             }
-
+            // Forcing refreshAuth to silent is a contradiction in terms,
+            // though it will sometimes succeed silently.
+            if (aOptions.silent) {
+              return this._error(ERROR_NO_SILENT_REFRESH_AUTH);
+            }
             if ((Date.now() / 1000) - this._activeSession.authAt > gracePeriod) {
               // Grace period expired, so we sign out and request the user to
               // authenticate herself again. If the authentication succeeds, we
               // will return the assertion. Otherwise, we will return an error.
-              return this._signOut().then(
-                () => {
-                  if (aOptions.silent) {
-                    return Promise.resolve(null);
-                  }
-                  return this._uiRequest(UI_REQUEST_REFRESH_AUTH,
-                                         aAudience, user.accountId);
+              this._refreshing = true;
+              return this._uiRequest(UI_REQUEST_REFRESH_AUTH,
+                                     aAudience, user.email).then(
+                (assertion) => {
+                  this._refreshing = false;
+                  return assertion;
+                },
+                (reason) => {
+                  this._refreshing = false;
+                  return this._signOut().then(
+                    () => {
+                      return this._error(reason);
+                    }
+                  );
                 }
               );
             }

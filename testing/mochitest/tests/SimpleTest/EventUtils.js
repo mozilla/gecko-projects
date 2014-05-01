@@ -971,6 +971,14 @@ function synthesizeText(aEvent, aWindow)
   compositionString.dispatchEvent();
 }
 
+// Must be synchronized with nsIDOMWindowUtils.
+const QUERY_CONTENT_FLAG_USE_NATIVE_LINE_BREAK          = 0x0000;
+const QUERY_CONTENT_FLAG_USE_XP_LINE_BREAK              = 0x0001;
+
+const SELECTION_SET_FLAG_USE_NATIVE_LINE_BREAK          = 0x0000;
+const SELECTION_SET_FLAG_USE_XP_LINE_BREAK              = 0x0001;
+const SELECTION_SET_FLAG_REVERSE                        = 0x0002;
+
 /**
  * Synthesize a query selected text event.
  *
@@ -985,7 +993,28 @@ function synthesizeQuerySelectedText(aWindow)
     return null;
   }
 
-  return utils.sendQueryContentEvent(utils.QUERY_SELECTED_TEXT, 0, 0, 0, 0);
+  return utils.sendQueryContentEvent(utils.QUERY_SELECTED_TEXT, 0, 0, 0, 0,
+                                     QUERY_CONTENT_FLAG_USE_NATIVE_LINE_BREAK);
+}
+
+/**
+ * Synthesize a query caret rect event.
+ *
+ * @param aOffset  The caret offset.  0 means left side of the first character
+ *                 in the selection root.
+ * @param aWindow  Optional (If null, current |window| will be used)
+ * @return         An nsIQueryContentEventResult object.  If this failed,
+ *                 the result might be null.
+ */
+function synthesizeQueryCaretRect(aOffset, aWindow)
+{
+  var utils = _getDOMWindowUtils(aWindow);
+  if (!utils) {
+    return null;
+  }
+  return utils.sendQueryContentEvent(utils.QUERY_CARET_RECT,
+                                     aOffset, 0, 0, 0,
+                                     QUERY_CONTENT_FLAG_USE_NATIVE_LINE_BREAK);
 }
 
 /**
@@ -1006,5 +1035,6 @@ function synthesizeSelectionSet(aOffset, aLength, aReverse, aWindow)
   if (!utils) {
     return false;
   }
-  return utils.sendSelectionSetEvent(aOffset, aLength, aReverse);
+  var flags = aReverse ? SELECTION_SET_FLAG_REVERSE : 0;
+  return utils.sendSelectionSetEvent(aOffset, aLength, flags);
 }

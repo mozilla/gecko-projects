@@ -9,18 +9,11 @@
 
 const BROWSER_SEARCH_PREF = "browser.search.";
 
-let runtime = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
-// Custom search parameters
-const PC_PARAM_VALUE = runtime.isOfficialBranding ? "MOZI" : null;
-
 function test() {
   let engine = Services.search.getEngineByName("Bing");
   ok(engine, "Bing");
 
-  let base = "http://www.bing.com/search?q=foo";
-  if (typeof(PC_PARAM_VALUE) == "string")
-    base += "&pc=" + PC_PARAM_VALUE;
-
+  let base = "http://www.bing.com/search?q=foo&pc=MOZI";
   let url;
 
   // Test search URLs (including purposes).
@@ -34,6 +27,8 @@ function test() {
   is(url, base + "&form=MOZSBR", "Check search bar search URL for 'foo'");
   url = engine.getSubmission("foo", null, "homepage").uri.spec;
   is(url, base + "&form=MOZSPG", "Check homepage search URL for 'foo'");
+  url = engine.getSubmission("foo", null, "newtab").uri.spec;
+  is(url, base + "&form=MOZTSB", "Check newtab search URL for 'foo'");
 
   // Check search suggestion URL.
   url = engine.getSubmission("foo", "application/x-suggestions+json").uri.spec;
@@ -84,6 +79,11 @@ function test() {
               purpose: undefined,
             },
             {
+              name: "pc",
+              value: "MOZI",
+              purpose: undefined,
+            },
+            {
               name: "form",
               value: "MOZCON",
               purpose: "contextmenu",
@@ -102,6 +102,11 @@ function test() {
               name: "form",
               value: "MOZLBR",
               purpose:"keyword",
+            },
+            {
+              name: "form",
+              value: "MOZTSB",
+              purpose: "newtab",
             },
           ],
           mozparams: {},

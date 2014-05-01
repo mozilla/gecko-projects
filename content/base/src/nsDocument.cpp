@@ -723,9 +723,9 @@ nsDOMStyleSheetList::~nsDOMStyleSheetList()
   }
 }
 
-NS_IMPL_ISUPPORTS_INHERITED2(nsDOMStyleSheetList, StyleSheetList,
-                             nsIDocumentObserver,
-                             nsIMutationObserver)
+NS_IMPL_ISUPPORTS_INHERITED(nsDOMStyleSheetList, StyleSheetList,
+                            nsIDocumentObserver,
+                            nsIMutationObserver)
 
 uint32_t
 nsDOMStyleSheetList::Length()
@@ -800,7 +800,7 @@ nsDOMStyleSheetList::StyleSheetRemoved(nsIDocument *aDocument,
 }
 
 // nsOnloadBlocker implementation
-NS_IMPL_ISUPPORTS1(nsOnloadBlocker, nsIRequest)
+NS_IMPL_ISUPPORTS(nsOnloadBlocker, nsIRequest)
 
 NS_IMETHODIMP
 nsOnloadBlocker::GetName(nsACString &aResult)
@@ -1120,9 +1120,9 @@ nsExternalResourceMap::AddExternalResource(nsIURI* aURI,
   return rv;
 }
 
-NS_IMPL_ISUPPORTS2(nsExternalResourceMap::PendingLoad,
-                   nsIStreamListener,
-                   nsIRequestObserver)
+NS_IMPL_ISUPPORTS(nsExternalResourceMap::PendingLoad,
+                  nsIStreamListener,
+                  nsIRequestObserver)
 
 NS_IMETHODIMP
 nsExternalResourceMap::PendingLoad::OnStartRequest(nsIRequest *aRequest,
@@ -1317,11 +1317,11 @@ nsExternalResourceMap::PendingLoad::StartLoad(nsIURI* aURI,
   return channel->AsyncOpen(this, nullptr);
 }
 
-NS_IMPL_ISUPPORTS1(nsExternalResourceMap::LoadgroupCallbacks,
-                   nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(nsExternalResourceMap::LoadgroupCallbacks,
+                  nsIInterfaceRequestor)
 
 #define IMPL_SHIM(_i) \
-  NS_IMPL_ISUPPORTS1(nsExternalResourceMap::LoadgroupCallbacks::_i##Shim, _i)
+  NS_IMPL_ISUPPORTS(nsExternalResourceMap::LoadgroupCallbacks::_i##Shim, _i)
 
 IMPL_SHIM(nsILoadContext)
 IMPL_SHIM(nsIProgressEventSink)
@@ -5565,7 +5565,7 @@ class ProcessStackRunner MOZ_FINAL : public nsIRunnable
   bool mIsBaseQueue;
 };
 
-NS_IMPL_ISUPPORTS1(ProcessStackRunner, nsIRunnable);
+NS_IMPL_ISUPPORTS(ProcessStackRunner, nsIRunnable);
 
 } // anonymous namespace
 
@@ -5850,7 +5850,7 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
 
     JS::Rooted<JSPropertyDescriptor> descRoot(aCx);
     JS::MutableHandle<JSPropertyDescriptor> desc(&descRoot);
-    if(!JS_GetPropertyDescriptor(aCx, protoObject, "constructor", 0, desc)) {
+    if (!JS_GetPropertyDescriptor(aCx, protoObject, "constructor", desc)) {
       rv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
@@ -9326,7 +9326,7 @@ public:
   }
   NS_DECL_ISUPPORTS
 };
-NS_IMPL_ISUPPORTS1(StubCSSLoaderObserver, nsICSSLoaderObserver)
+NS_IMPL_ISUPPORTS(StubCSSLoaderObserver, nsICSSLoaderObserver)
 
 }
 
@@ -11437,9 +11437,9 @@ public:
   bool mUserInputOrChromeCaller;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsPointerLockPermissionRequest,
-                             nsRunnable,
-                             nsIContentPermissionRequest)
+NS_IMPL_ISUPPORTS_INHERITED(nsPointerLockPermissionRequest,
+                            nsRunnable,
+                            nsIContentPermissionRequest)
 
 NS_IMETHODIMP
 nsPointerLockPermissionRequest::GetTypes(nsIArray** aTypes)
@@ -12155,7 +12155,7 @@ nsIDocument::WrapObject(JSContext *aCx)
 
   NS_NAMED_LITERAL_STRING(doc_str, "document");
 
-  if (!JS_DefineUCProperty(aCx, JSVAL_TO_OBJECT(winVal), doc_str.get(),
+  if (!JS_DefineUCProperty(aCx, winVal.toObjectOrNull(), doc_str.get(),
                            doc_str.Length(), JS::ObjectValue(*obj),
                            JS_PropertyStub, JS_StrictPropertyStub,
                            JSPROP_READONLY | JSPROP_ENUMERATE)) {

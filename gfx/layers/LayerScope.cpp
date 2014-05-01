@@ -269,7 +269,7 @@ private:
     SocketStateType mState;
 };
 
-NS_IMPL_ISUPPORTS1(LayerScopeWebSocketHandler, nsIInputStreamCallback);
+NS_IMPL_ISUPPORTS(LayerScopeWebSocketHandler, nsIInputStreamCallback);
 
 class LayerScopeWebSocketManager {
 public:
@@ -575,7 +575,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(DebugListener, nsIServerSocketListener);
+NS_IMPL_ISUPPORTS(DebugListener, nsIServerSocketListener);
 
 
 class DebugDataSender : public nsIRunnable
@@ -635,7 +635,7 @@ protected:
     LinkedList<DebugGLData> *mList;
 };
 
-NS_IMPL_ISUPPORTS1(DebugDataSender, nsIRunnable);
+NS_IMPL_ISUPPORTS(DebugDataSender, nsIRunnable);
 
 void
 LayerScope::CreateServerSocket()
@@ -778,20 +778,20 @@ LayerScope::SendEffectChain(GLContext* aGLContext,
 
     const Effect* primaryEffect = aEffectChain.mPrimaryEffect;
     switch (primaryEffect->mType) {
-    case EFFECT_RGB:
+    case EffectTypes::RGB:
     {
         const TexturedEffect* texturedEffect =
             static_cast<const TexturedEffect*>(primaryEffect);
         SendTexturedEffect(aGLContext, aEffectChain.mLayerRef, texturedEffect);
     }
     break;
-    case EFFECT_YCBCR:
+    case EffectTypes::YCBCR:
     {
         const EffectYCbCr* yCbCrEffect =
             static_cast<const EffectYCbCr*>(primaryEffect);
         SendYCbCrEffect(aGLContext, aEffectChain.mLayerRef, yCbCrEffect);
     }
-    case EFFECT_SOLID_COLOR:
+    case EffectTypes::SOLID_COLOR:
     {
         const EffectSolidColor* solidColorEffect =
             static_cast<const EffectSolidColor*>(primaryEffect);
@@ -802,13 +802,13 @@ LayerScope::SendEffectChain(GLContext* aGLContext,
         SendColor(aEffectChain.mLayerRef, color, aWidth, aHeight);
     }
     break;
-    case EFFECT_COMPONENT_ALPHA:
-    case EFFECT_RENDER_TARGET:
+    case EffectTypes::COMPONENT_ALPHA:
+    case EffectTypes::RENDER_TARGET:
     default:
         break;
     }
 
-    //const Effect* secondaryEffect = aEffectChain.mSecondaryEffects[EFFECT_MASK];
+    //const Effect* secondaryEffect = aEffectChain.mSecondaryEffects[EffectTypes::MASK];
     // TODO:
 }
 

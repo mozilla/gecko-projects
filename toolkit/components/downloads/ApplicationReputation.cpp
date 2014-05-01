@@ -29,6 +29,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/LoadContext.h"
 
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
@@ -218,8 +219,8 @@ private:
   nsresult LookupSpecInternal(const nsACString& aSpec);
 };
 
-NS_IMPL_ISUPPORTS1(PendingDBLookup,
-                   nsIUrlClassifierCallback)
+NS_IMPL_ISUPPORTS(PendingDBLookup,
+                  nsIUrlClassifierCallback)
 
 PendingDBLookup::PendingDBLookup(PendingLookup* aPendingLookup) :
   mAllowlistOnly(false),
@@ -317,9 +318,9 @@ PendingDBLookup::HandleEvent(const nsACString& tables)
   return mPendingLookup->LookupNext();
 }
 
-NS_IMPL_ISUPPORTS2(PendingLookup,
-                   nsIStreamListener,
-                   nsIRequestObserver)
+NS_IMPL_ISUPPORTS(PendingLookup,
+                  nsIStreamListener,
+                  nsIRequestObserver)
 
 PendingLookup::PendingLookup(nsIApplicationReputationQuery* aQuery,
                              nsIApplicationReputationCallback* aCallback) :
@@ -767,6 +768,13 @@ PendingLookup::SendRemoteQueryInternal()
     NS_LITERAL_CSTRING("POST"), false);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // Set the Safebrowsing cookie jar, so that the regular Google cookie is not
+  // sent with this request. See bug 897516.
+  nsCOMPtr<nsIInterfaceRequestor> loadContext =
+    new mozilla::LoadContext(NECKO_SAFEBROWSING_APP_ID);
+  rv = channel->SetNotificationCallbacks(loadContext);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   rv = channel->AsyncOpen(this, nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -871,8 +879,8 @@ PendingLookup::OnStopRequestInternal(nsIRequest *aRequest,
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(ApplicationReputationService,
-                   nsIApplicationReputationService)
+NS_IMPL_ISUPPORTS(ApplicationReputationService,
+                  nsIApplicationReputationService)
 
 ApplicationReputationService*
   ApplicationReputationService::gApplicationReputationService = nullptr;

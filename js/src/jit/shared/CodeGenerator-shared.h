@@ -272,7 +272,7 @@ class CodeGeneratorShared : public LInstructionVisitor
     // false on failure.
     bool encode(LRecoverInfo *recover);
     bool encode(LSnapshot *snapshot);
-    bool encodeAllocations(LSnapshot *snapshot, MResumePoint *resumePoint, uint32_t *startIndex);
+    bool encodeAllocation(LSnapshot *snapshot, MDefinition *def, uint32_t *startIndex);
 
     // Attempts to assign a BailoutId to a snapshot, if one isn't already set.
     // If the bailout table is full, this returns false, which is not a fatal
@@ -434,6 +434,8 @@ class CodeGeneratorShared : public LInstructionVisitor
     bool visitOutOfLineCallVM(OutOfLineCallVM<ArgSeq, StoreOutputTo> *ool);
 
     bool visitOutOfLineTruncateSlow(OutOfLineTruncateSlow *ool);
+
+    bool omitOverRecursedCheck() const;
 
   public:
     bool callTraceLIR(uint32_t blockIndex, LInstruction *lir, const char *bailoutName = nullptr);

@@ -139,6 +139,7 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     UNSAFE_OP(LoadArrowThis)
     CUSTOM_OP(Call)
     UNSAFE_OP(ApplyArgs)
+    UNSAFE_OP(ArraySplice)
     UNSAFE_OP(Bail)
     UNSAFE_OP(AssertFloat32)
     UNSAFE_OP(GetDynamicName)
@@ -215,6 +216,7 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     WRITE_GUARDED_OP(SetElementCache, object)
     UNSAFE_OP(BindNameCache)
     SAFE_OP(GuardShape)
+    SAFE_OP(GuardShapePolymorphic)
     SAFE_OP(GuardObjectType)
     SAFE_OP(GuardObjectIdentity)
     SAFE_OP(GuardClass)
@@ -320,7 +322,6 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     UNSAFE_OP(AsmJSPassStackArg)
     UNSAFE_OP(AsmJSParameter)
     UNSAFE_OP(AsmJSCall)
-    UNSAFE_OP(AsmJSCheckOverRecursed)
     DROP_OP(RecompileCheck)
 
     // It looks like this could easily be made safe:
@@ -489,8 +490,9 @@ ParallelSafetyVisitor::convertToBailout(MBasicBlock *block, MInstruction *ins)
 
         // create bailout block to insert on this edge
         MBasicBlock *bailBlock = MBasicBlock::NewAbortPar(graph_, block->info(), pred,
-                                                               block->pc(),
-                                                               block->entryResumePoint());
+                                                          BytecodeSite(block->trackedTree(),
+                                                                       block->pc()),
+                                                          block->entryResumePoint());
         if (!bailBlock)
             return false;
 

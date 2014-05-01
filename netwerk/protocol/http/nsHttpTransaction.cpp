@@ -1066,7 +1066,10 @@ nsHttpTransaction::Restart()
 
     // clear old connection state...
     mSecurityInfo = 0;
-    NS_IF_RELEASE(mConnection);
+    if (mConnection) {
+        mConnection->DontReuse();
+        NS_RELEASE(mConnection);
+    }
 
     // disable pipelining for the next attempt in case pipelining caused the
     // reset.  this is being overly cautious since we don't know if pipelining
@@ -1807,9 +1810,9 @@ nsHttpTransaction::Release()
     return count;
 }
 
-NS_IMPL_QUERY_INTERFACE2(nsHttpTransaction,
-                         nsIInputStreamCallback,
-                         nsIOutputStreamCallback)
+NS_IMPL_QUERY_INTERFACE(nsHttpTransaction,
+                        nsIInputStreamCallback,
+                        nsIOutputStreamCallback)
 
 //-----------------------------------------------------------------------------
 // nsHttpTransaction::nsIInputStreamCallback

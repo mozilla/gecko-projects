@@ -12,7 +12,7 @@
 #include "States.h"
 
 #include "mozilla/EventStateManager.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -41,7 +41,7 @@ AccEvent::AccEvent(uint32_t aEventType, Accessible* aAccessible,
 ////////////////////////////////////////////////////////////////////////////////
 // AccEvent cycle collection
 
-NS_IMPL_CYCLE_COLLECTION_1(AccEvent, mAccessible)
+NS_IMPL_CYCLE_COLLECTION(AccEvent, mAccessible)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(AccEvent, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(AccEvent, Release)
@@ -127,7 +127,7 @@ AccShowEvent::
 ////////////////////////////////////////////////////////////////////////////////
 
 AccTextSelChangeEvent::AccTextSelChangeEvent(HyperTextAccessible* aTarget,
-                                             Selection* aSelection,
+                                             dom::Selection* aSelection,
                                              int32_t aReason) :
   AccEvent(nsIAccessibleEvent::EVENT_TEXT_SELECTION_CHANGED, aTarget,
            eAutoDetect, eCoalesceTextSelChange),

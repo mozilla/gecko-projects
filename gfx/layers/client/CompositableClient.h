@@ -14,7 +14,6 @@
 #include "mozilla/gfx/Types.h"          // for SurfaceFormat
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/LayersTypes.h"  // for LayersBackend
-#include "mozilla/layers/PCompositableChild.h"  // for PCompositableChild
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 
 namespace mozilla {
@@ -28,7 +27,7 @@ class CompositableForwarder;
 class CompositableChild;
 class SurfaceDescriptor;
 class TextureClientData;
-
+class PCompositableChild;
 /**
  * CompositableClient manages the texture-specific logic for composite layers,
  * independently of the layer. It is the content side of a CompositableClient/
@@ -75,7 +74,7 @@ protected:
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CompositableClient)
 
-  CompositableClient(CompositableForwarder* aForwarder, TextureFlags aFlags = 0);
+  CompositableClient(CompositableForwarder* aForwarder, TextureFlags aFlags = TextureFlags::NO_FLAGS);
 
   virtual TextureInfo GetTextureInfo() const = 0;
 
@@ -83,7 +82,7 @@ public:
 
   TemporaryRef<BufferTextureClient>
   CreateBufferTextureClient(gfx::SurfaceFormat aFormat,
-                            TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT,
+                            TextureFlags aFlags = TextureFlags::DEFAULT,
                             gfx::BackendType aMoz2dBackend = gfx::BackendType::NONE);
 
   TemporaryRef<TextureClient>
@@ -105,7 +104,7 @@ public:
 
   void Destroy();
 
-  CompositableChild* GetIPDLActor() const;
+  PCompositableChild* GetIPDLActor() const;
 
   // should only be called by a CompositableForwarder
   virtual void SetIPDLActor(CompositableChild* aChild);
@@ -146,6 +145,22 @@ public:
    */
   virtual void ClearCachedResources() {}
 
+  static CompositableClient* FromIPDLActor(PCompositableChild* aActor);
+
+  /**
+   * Allocate and deallocate a CompositableChild actor.
+   *
+   * CompositableChild is an implementation detail of CompositableClient that is not
+   * exposed to the rest of the code base. CreateIPDLActor and DestroyIPDLActor
+   * are for use with the managing IPDL protocols only (so that they can
+   * implement AllocCompositableChild and DeallocPCompositableChild).
+   */
+  static PCompositableChild* CreateIPDLActor();
+
+  static bool DestroyIPDLActor(PCompositableChild* actor);
+
+  void InitIPDLActor(PCompositableChild* aActor, uint64_t aAsyncID = 0);
+
 protected:
   CompositableChild* mCompositableChild;
   CompositableForwarder* mForwarder;
@@ -154,53 +169,6 @@ protected:
   TextureFlags mTextureFlags;
 
   friend class CompositableChild;
-};
-
-/**
- * IPDL actor used by CompositableClient to match with its corresponding
- * CompositableHost on the compositor side.
- *
- * CompositableChild is owned by a CompositableClient.
- */
-class CompositableChild : public PCompositableChild
-{
-public:
-  CompositableChild()
-  : mCompositableClient(nullptr), mID(0)
-  {
-    MOZ_COUNT_CTOR(CompositableChild);
-  }
-  ~CompositableChild()
-  {
-    MOZ_COUNT_DTOR(CompositableChild);
-  }
-
-  void Destroy();
-
-  void SetClient(CompositableClient* aClient)
-  {
-    mCompositableClient = aClient;
-  }
-
-  CompositableClient* GetCompositableClient() const
-  {
-    return mCompositableClient;
-  }
-
-  virtual void ActorDestroy(ActorDestroyReason) MOZ_OVERRIDE {
-    if (mCompositableClient) {
-      mCompositableClient->mCompositableChild = nullptr;
-    }
-  }
-
-  void SetAsyncID(uint64_t aID) { mID = aID; }
-  uint64_t GetAsyncID() const
-  {
-    return mID;
-  }
-private:
-  CompositableClient* mCompositableClient;
-  uint64_t mID;
 };
 
 } // namespace

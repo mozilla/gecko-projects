@@ -395,7 +395,7 @@ private:
   nsCOMPtr<nsIObjectLoadingContent> mContent;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsStopPluginRunnable, nsRunnable, nsITimerCallback)
+NS_IMPL_ISUPPORTS_INHERITED(nsStopPluginRunnable, nsRunnable, nsITimerCallback)
 
 NS_IMETHODIMP
 nsStopPluginRunnable::Notify(nsITimer *aTimer)
@@ -1157,7 +1157,7 @@ protected:
   nsCOMPtr<nsIObjectLoadingContent> mContent;
 };
 
-NS_IMPL_CYCLE_COLLECTION_1(ObjectInterfaceRequestorShim, mContent)
+NS_IMPL_CYCLE_COLLECTION(ObjectInterfaceRequestorShim, mContent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ObjectInterfaceRequestorShim)
   NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
@@ -3209,7 +3209,7 @@ nsObjectLoadingContent::LegacyCall(JSContext* aCx,
   }
 
   for (size_t i = 0; i < args.length(); i++) {
-    if (!JS_WrapValue(aCx, args.handleAt(i))) {
+    if (!JS_WrapValue(aCx, args[i])) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return JS::UndefinedValue();
     }
@@ -3514,5 +3514,5 @@ nsObjectLoadingContent::SetupProtoChainRunner::Run()
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS1(nsObjectLoadingContent::SetupProtoChainRunner, nsIRunnable)
+NS_IMPL_ISUPPORTS(nsObjectLoadingContent::SetupProtoChainRunner, nsIRunnable)
 

@@ -101,7 +101,7 @@ DOMRequest::FireSuccess(JS::Handle<JS::Value> aResult)
   NS_ASSERTION(mResult == JSVAL_VOID, "mResult shouldn't have been set!");
 
   mDone = true;
-  if (JSVAL_IS_GCTHING(aResult)) {
+  if (aResult.isGCThing()) {
     RootResultVal();
   }
   mResult = aResult;
@@ -175,7 +175,7 @@ DOMRequest::RootResultVal()
   mozilla::HoldJSObjects(this);
 }
 
-NS_IMPL_ISUPPORTS1(DOMRequestService, nsIDOMRequestService)
+NS_IMPL_ISUPPORTS(DOMRequestService, nsIDOMRequestService)
 
 NS_IMETHODIMP
 DOMRequestService::CreateRequest(nsIDOMWindow* aWindow,

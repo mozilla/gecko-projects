@@ -75,11 +75,11 @@ HTMLTextAreaElement::HTMLTextAreaElement(already_AddRefed<nsINodeInfo>& aNodeInf
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_3(HTMLTextAreaElement,
-                                     nsGenericHTMLFormElementWithState,
-                                     mValidity,
-                                     mControllers,
-                                     mState)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLTextAreaElement,
+                                   nsGenericHTMLFormElementWithState,
+                                   mValidity,
+                                   mControllers,
+                                   mState)
 
 NS_IMPL_ADDREF_INHERITED(HTMLTextAreaElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLTextAreaElement, Element)
@@ -87,12 +87,12 @@ NS_IMPL_RELEASE_INHERITED(HTMLTextAreaElement, Element)
 
 // QueryInterface implementation for HTMLTextAreaElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLTextAreaElement)
-  NS_INTERFACE_TABLE_INHERITED5(HTMLTextAreaElement,
-                                nsIDOMHTMLTextAreaElement,
-                                nsITextControlElement,
-                                nsIDOMNSEditableElement,
-                                nsIMutationObserver,
-                                nsIConstraintValidation)
+  NS_INTERFACE_TABLE_INHERITED(HTMLTextAreaElement,
+                               nsIDOMHTMLTextAreaElement,
+                               nsITextControlElement,
+                               nsIDOMNSEditableElement,
+                               nsIMutationObserver,
+                               nsIConstraintValidation)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLFormElementWithState)
 
 

@@ -45,7 +45,7 @@ namespace power {
 
 using namespace hal;
 
-NS_IMPL_ISUPPORTS1(PowerManagerService, nsIPowerManagerService)
+NS_IMPL_ISUPPORTS(PowerManagerService, nsIPowerManagerService)
 
 /* static */ StaticRefPtr<PowerManagerService> PowerManagerService::sSingleton;
 
@@ -71,7 +71,7 @@ PowerManagerService::Init()
   // absent, in case the profile might be damaged and we need to
   // restart to repair it.
   mWatchdogTimeoutSecs =
-    Preferences::GetInt("shutdown.watchdog.timeoutSecs", 5);
+    Preferences::GetInt("shutdown.watchdog.timeoutSecs", 10);
 }
 
 PowerManagerService::~PowerManagerService()

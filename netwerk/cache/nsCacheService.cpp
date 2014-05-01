@@ -201,7 +201,7 @@ private:
     bool                    mClearCacheOnShutdown;
 };
 
-NS_IMPL_ISUPPORTS1(nsCacheProfilePrefObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(nsCacheProfilePrefObserver, nsIObserver)
 
 class nsSetDiskSmartSizeCallback MOZ_FINAL : public nsITimerCallback
 {
@@ -218,7 +218,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(nsSetDiskSmartSizeCallback, nsITimerCallback)
+NS_IMPL_ISUPPORTS(nsSetDiskSmartSizeCallback, nsITimerCallback)
 
 // Runnable sent to main thread after the cache IO thread calculates available
 // disk space, so that there is no race in setting mDiskCacheCapacity.
@@ -1072,8 +1072,8 @@ private:
  *****************************************************************************/
 nsCacheService *   nsCacheService::gService = nullptr;
 
-NS_IMPL_ISUPPORTS3(nsCacheService, nsICacheService, nsICacheServiceInternal,
-                   nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(nsCacheService, nsICacheService, nsICacheServiceInternal,
+                  nsIMemoryReporter)
 
 nsCacheService::nsCacheService()
     : mObserver(nullptr),
@@ -3055,20 +3055,48 @@ nsCacheService::GetClearingEntries()
 }
 
 // static
-void nsCacheService::GetDiskCacheDirectory(nsIFile ** result) {
+void nsCacheService::GetCacheBaseDirectoty(nsIFile ** result)
+{
     *result = nullptr;
-    if (gService && gService->mObserver) {
-        nsCOMPtr<nsIFile> directory =
-            gService->mObserver->DiskCacheParentDirectory();
-        if (!directory)
-            return;
+    if (!gService || !gService->mObserver)
+        return;
 
-        nsresult rv = directory->AppendNative(NS_LITERAL_CSTRING("Cache"));
-        if (NS_FAILED(rv))
-            return;
+    nsCOMPtr<nsIFile> directory =
+        gService->mObserver->DiskCacheParentDirectory();
+    if (!directory)
+        return;
 
-        directory.forget(result);
-    }
+    directory->Clone(result);
+}
+
+// static
+void nsCacheService::GetDiskCacheDirectory(nsIFile ** result)
+{
+    nsCOMPtr<nsIFile> directory;
+    GetCacheBaseDirectoty(getter_AddRefs(directory));
+    if (!directory)
+        return;
+
+    nsresult rv = directory->AppendNative(NS_LITERAL_CSTRING("Cache"));
+    if (NS_FAILED(rv))
+        return;
+
+    directory.forget(result);
+}
+
+// static
+void nsCacheService::GetAppCacheDirectory(nsIFile ** result)
+{
+    nsCOMPtr<nsIFile> directory;
+    GetCacheBaseDirectoty(getter_AddRefs(directory));
+    if (!directory)
+        return;
+
+    nsresult rv = directory->AppendNative(NS_LITERAL_CSTRING("OfflineCache"));
+    if (NS_FAILED(rv))
+        return;
+
+    directory.forget(result);
 }
 
 

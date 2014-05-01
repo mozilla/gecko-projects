@@ -29,7 +29,7 @@
 #include "nsTextFragment.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include <algorithm>
 
 // The bidi indicator hangs off the caret to one side, to show which
@@ -37,10 +37,8 @@
 // an insignificant dot
 static const int32_t kMinBidiIndicatorPixels = 2;
 
-#ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
 #include "nsContentUtils.h"
-#endif //IBMBIDI
 
 using namespace mozilla;
 
@@ -120,10 +118,8 @@ nsCaret::nsCaret()
 , mReadOnly(false)
 , mShowDuringSelection(false)
 , mIgnoreUserModify(true)
-#ifdef IBMBIDI
 , mKeyboardRTL(false)
 , mLastBidiLevel(0)
-#endif
 , mLastContentOffset(0)
 , mLastHint(nsFrameSelection::HINTLEFT)
 {
@@ -180,9 +176,7 @@ nsresult nsCaret::Init(nsIPresShell *inPresShell)
   {
     StartBlinking();
   }
-#ifdef IBMBIDI
   mBidiUI = Preferences::GetBool("bidi.browser.ui");
-#endif
 
   return NS_OK;
 }
@@ -242,7 +236,7 @@ void nsCaret::Terminate()
 }
 
 //-----------------------------------------------------------------------------
-NS_IMPL_ISUPPORTS1(nsCaret, nsISelectionListener)
+NS_IMPL_ISUPPORTS(nsCaret, nsISelectionListener)
 
 //-----------------------------------------------------------------------------
 nsISelection* nsCaret::GetCaretDOMSelection()
@@ -1050,7 +1044,6 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
   if (NS_STYLE_DIRECTION_RTL == vis->mDirection)
     mCaretRect.x -= mCaretRect.width;
 
-#ifdef IBMBIDI
   mHookRect.SetEmpty();
 
   // Simon -- make a hook to draw to the left or right of the caret to show keyboard language direction
@@ -1086,7 +1079,6 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
                       bidiIndicatorSize,
                       mCaretRect.width);
   }
-#endif //IBMBIDI
   return true;
 }
 
@@ -1109,7 +1101,7 @@ nsCaret::GetFrameSelection()
   if (!sel)
     return nullptr;
 
-  return static_cast<Selection*>(sel.get())->GetFrameSelection();
+  return static_cast<dom::Selection*>(sel.get())->GetFrameSelection();
 }
 
 void

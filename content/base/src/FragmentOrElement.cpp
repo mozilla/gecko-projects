@@ -375,7 +375,7 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
 NS_INTERFACE_TABLE_HEAD(nsChildContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE2(nsChildContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE(nsChildContentList, nsINodeList, nsIDOMNodeList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsChildContentList)
 NS_INTERFACE_MAP_END
 
@@ -428,7 +428,7 @@ nsChildContentList::IndexOf(nsIContent* aContent)
 
 //----------------------------------------------------------------------
 
-NS_IMPL_CYCLE_COLLECTION_1(nsNode3Tearoff, mNode)
+NS_IMPL_CYCLE_COLLECTION(nsNode3Tearoff, mNode)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsNode3Tearoff)
   NS_INTERFACE_MAP_ENTRY(nsIDOMXPathNSResolver)
@@ -463,8 +463,8 @@ FragmentOrElement::Children()
 //----------------------------------------------------------------------
 
 
-NS_IMPL_ISUPPORTS1(nsNodeWeakReference,
-                   nsIWeakReference)
+NS_IMPL_ISUPPORTS(nsNodeWeakReference,
+                  nsIWeakReference)
 
 nsNodeWeakReference::~nsNodeWeakReference()
 {
@@ -483,7 +483,7 @@ nsNodeWeakReference::QueryReferent(const nsIID& aIID, void** aInstancePtr)
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_1(nsNodeSupportsWeakRefTearoff, mNode)
+NS_IMPL_CYCLE_COLLECTION(nsNodeSupportsWeakRefTearoff, mNode)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsNodeSupportsWeakRefTearoff)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -954,13 +954,16 @@ FragmentOrElement::SetXBLBinding(nsXBLBinding* aBinding,
     bindingManager->RemoveFromAttachedQueue(oldBinding);
   }
 
-  nsDOMSlots *slots = DOMSlots();
   if (aBinding) {
     SetFlags(NODE_MAY_BE_IN_BINDING_MNGR);
+    nsDOMSlots *slots = DOMSlots();
     slots->mXBLBinding = aBinding;
     bindingManager->AddBoundContent(this);
   } else {
-    slots->mXBLBinding = nullptr;
+    nsDOMSlots *slots = GetExistingDOMSlots();
+    if (slots) {
+      slots->mXBLBinding = nullptr;
+    }
     bindingManager->RemoveBoundContent(this);
     if (oldBinding) {
       oldBinding->SetBoundElement(nullptr);
@@ -1011,11 +1014,16 @@ FragmentOrElement::SetShadowRoot(ShadowRoot* aShadowRoot)
 void
 FragmentOrElement::SetXBLInsertionParent(nsIContent* aContent)
 {
-  nsDOMSlots *slots = DOMSlots();
   if (aContent) {
+    nsDOMSlots *slots = DOMSlots();
     SetFlags(NODE_MAY_BE_IN_BINDING_MNGR);
+    slots->mXBLInsertionParent = aContent;
+  } else {
+    nsDOMSlots *slots = GetExistingDOMSlots();
+    if (slots) {
+      slots->mXBLInsertionParent = nullptr;
+    }
   }
-  slots->mXBLInsertionParent = aContent;
 }
 
 CustomElementData*
@@ -1241,6 +1249,9 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(FragmentOrElement)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(FragmentOrElement)
   nsINode::Unlink(tmp);
+
+  // The XBL binding is removed by RemoveFromBindingManagerRunnable
+  // which is dispatched in UnbindFromTree.
 
   if (tmp->HasProperties()) {
     if (tmp->IsHTML()) {

@@ -76,6 +76,10 @@ namespace {
         (loadFlags & (nsIRequest::LOAD_BYPASS_CACHE | \
                       nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE))
 
+#define CACHE_FILE_GONE(result) \
+        ((result) == NS_ERROR_FILE_NOT_FOUND || \
+         (result) == NS_ERROR_FILE_CORRUPTED)
+
 static NS_DEFINE_CID(kStreamListenerTeeCID, NS_STREAMLISTENERTEE_CID);
 static NS_DEFINE_CID(kStreamTransportServiceCID,
                      NS_STREAMTRANSPORTSERVICE_CID);
@@ -1615,7 +1619,8 @@ nsHttpChannel::StartRedirectChannelToHttps()
     else
         upgradedURI->SetPort(oldPort);
 
-    return StartRedirectChannelToURI(upgradedURI);
+    return StartRedirectChannelToURI(upgradedURI,
+                                     nsIChannelEventSink::REDIRECT_PERMANENT);
 }
 
 void
@@ -1630,7 +1635,8 @@ nsHttpChannel::HandleAsyncAPIRedirect()
         return;
     }
 
-    nsresult rv = StartRedirectChannelToURI(mAPIRedirectToURI);
+    nsresult rv = StartRedirectChannelToURI(mAPIRedirectToURI,
+                                            nsIChannelEventSink::REDIRECT_PERMANENT);
     if (NS_FAILED(rv))
         ContinueAsyncRedirectChannelToURI(rv);
 
@@ -1638,7 +1644,7 @@ nsHttpChannel::HandleAsyncAPIRedirect()
 }
 
 nsresult
-nsHttpChannel::StartRedirectChannelToURI(nsIURI *upgradedURI)
+nsHttpChannel::StartRedirectChannelToURI(nsIURI *upgradedURI, uint32_t flags)
 {
     nsresult rv = NS_OK;
     LOG(("nsHttpChannel::StartRedirectChannelToURI()\n"));
@@ -1657,7 +1663,6 @@ nsHttpChannel::StartRedirectChannelToURI(nsIURI *upgradedURI)
 
     // Inform consumers about this fake redirect
     mRedirectChannel = newChannel;
-    uint32_t flags = nsIChannelEventSink::REDIRECT_PERMANENT;
 
     PushRedirectAsyncFunc(
         &nsHttpChannel::ContinueAsyncRedirectChannelToURI);
@@ -4528,6 +4533,7 @@ nsHttpChannel::BeginConnect()
     // Construct connection info object
     nsAutoCString host;
     int32_t port = -1;
+    nsAutoCString username;
     bool usingSSL = false;
 
     rv = mURI->SchemeIs("https", &usingSSL);
@@ -4535,6 +4541,8 @@ nsHttpChannel::BeginConnect()
         rv = mURI->GetAsciiHost(host);
     if (NS_SUCCEEDED(rv))
         rv = mURI->GetPort(&port);
+    if (NS_SUCCEEDED(rv))
+        mURI->GetUsername(username);
     if (NS_SUCCEEDED(rv))
         rv = mURI->GetAsciiSpec(mSpec);
     if (NS_FAILED(rv))
@@ -4550,7 +4558,7 @@ nsHttpChannel::BeginConnect()
     if (mProxyInfo)
         proxyInfo = do_QueryInterface(mProxyInfo);
 
-    mConnectionInfo = new nsHttpConnectionInfo(host, port, proxyInfo, usingSSL);
+    mConnectionInfo = new nsHttpConnectionInfo(host, port, username, proxyInfo, usingSSL);
 
     mAuthProvider =
         do_CreateInstance("@mozilla.org/network/http-channel-auth-provider;1",
@@ -4949,6 +4957,15 @@ nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
             return ProcessResponse();
 
         NS_WARNING("No response head in OnStartRequest");
+    }
+
+    // cache file could be deleted on our behalf, reload from network here.
+    if (mCacheEntry && mCachePump && CACHE_FILE_GONE(mStatus)) {
+        LOG(("  cache file gone, reloading from server"));
+        mCacheEntry->AsyncDoom(nullptr);
+        nsresult rv = StartRedirectChannelToURI(mURI, nsIChannelEventSink::REDIRECT_INTERNAL);
+        if (NS_SUCCEEDED(rv))
+            return NS_OK;
     }
 
     // avoid crashing if mListener happens to be null...

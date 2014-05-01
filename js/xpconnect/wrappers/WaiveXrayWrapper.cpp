@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99 ft=cpp:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -42,19 +41,17 @@ WaiveXrayWrapper::~WaiveXrayWrapper()
 
 bool
 WaiveXrayWrapper::getPropertyDescriptor(JSContext *cx, HandleObject wrapper,
-                                        HandleId id, JS::MutableHandle<JSPropertyDescriptor> desc,
-                                        unsigned flags)
+                                        HandleId id, JS::MutableHandle<JSPropertyDescriptor> desc)
 {
-    return CrossCompartmentWrapper::getPropertyDescriptor(cx, wrapper, id, desc, flags) &&
+    return CrossCompartmentWrapper::getPropertyDescriptor(cx, wrapper, id, desc) &&
            WrapperFactory::WaiveXrayAndWrap(cx, desc.value()) && WaiveAccessors(cx, desc);
 }
 
 bool
 WaiveXrayWrapper::getOwnPropertyDescriptor(JSContext *cx, HandleObject wrapper,
-                                           HandleId id, JS::MutableHandle<JSPropertyDescriptor> desc,
-                                           unsigned flags)
+                                           HandleId id, JS::MutableHandle<JSPropertyDescriptor> desc)
 {
-    return CrossCompartmentWrapper::getOwnPropertyDescriptor(cx, wrapper, id, desc, flags) &&
+    return CrossCompartmentWrapper::getOwnPropertyDescriptor(cx, wrapper, id, desc) &&
            WrapperFactory::WaiveXrayAndWrap(cx, desc.value()) && WaiveAccessors(cx, desc);
 }
 

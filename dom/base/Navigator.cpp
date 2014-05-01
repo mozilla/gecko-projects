@@ -658,7 +658,7 @@ private:
   nsWeakPtr mDocument;
 };
 
-NS_IMPL_ISUPPORTS1(VibrateWindowListener, nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(VibrateWindowListener, nsIDOMEventListener)
 
 StaticRefPtr<VibrateWindowListener> gVibrateWindowListener;
 
@@ -1017,9 +1017,9 @@ class BeaconStreamListener MOZ_FINAL : public nsIStreamListener
     NS_DECL_NSIREQUESTOBSERVER
 };
 
-NS_IMPL_ISUPPORTS2(BeaconStreamListener,
-                   nsIStreamListener,
-                   nsIRequestObserver)
+NS_IMPL_ISUPPORTS(BeaconStreamListener,
+                  nsIStreamListener,
+                  nsIRequestObserver)
 
 
 NS_IMETHODIMP
@@ -1294,8 +1294,7 @@ Navigator::SendBeacon(const nsAString& aUrl,
 
 #ifdef MOZ_MEDIA_NAVIGATOR
 void
-Navigator::MozGetUserMedia(JSContext* aCx,
-                           const MediaStreamConstraints& aConstraints,
+Navigator::MozGetUserMedia(const MediaStreamConstraints& aConstraints,
                            NavigatorUserMediaSuccessCallback& aOnSuccess,
                            NavigatorUserMediaErrorCallback& aOnError,
                            ErrorResult& aRv)
@@ -1318,12 +1317,12 @@ Navigator::MozGetUserMedia(JSContext* aCx,
   bool privileged = nsContentUtils::IsChromeDoc(mWindow->GetExtantDoc());
 
   MediaManager* manager = MediaManager::Get();
-  aRv = manager->GetUserMedia(aCx, privileged, mWindow, aConstraints,
+  aRv = manager->GetUserMedia(privileged, mWindow, aConstraints,
                               onsuccess, onerror);
 }
 
 void
-Navigator::MozGetUserMediaDevices(const MediaStreamConstraintsInternal& aConstraints,
+Navigator::MozGetUserMediaDevices(const MediaStreamConstraints& aConstraints,
                                   MozGetUserMediaDevicesSuccessCallback& aOnSuccess,
                                   NavigatorUserMediaErrorCallback& aOnError,
                                   uint64_t aInnerWindowID,
@@ -2210,7 +2209,7 @@ Navigator::HasFMRadioSupport(JSContext* /* unused */, JSObject* aGlobal)
 #ifdef MOZ_NFC
 /* static */
 bool
-Navigator::HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal)
+Navigator::HasNFCSupport(JSContext* /* unused */, JSObject* aGlobal)
 {
   // Do not support NFC if NFC content helper does not exist.
   nsCOMPtr<nsISupports> contentHelper = do_GetService("@mozilla.org/nfc/content-helper;1");
@@ -2225,7 +2224,7 @@ Navigator::HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal)
 
 /* static */
 bool
-Navigator::HasNfcPeerSupport(JSContext* /* unused */, JSObject* aGlobal)
+Navigator::HasNFCPeerSupport(JSContext* /* unused */, JSObject* aGlobal)
 {
   nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
   return win && CheckPermission(win, "nfc-write");
@@ -2233,7 +2232,7 @@ Navigator::HasNfcPeerSupport(JSContext* /* unused */, JSObject* aGlobal)
 
 /* static */
 bool
-Navigator::HasNfcManagerSupport(JSContext* /* unused */, JSObject* aGlobal)
+Navigator::HasNFCManagerSupport(JSContext* /* unused */, JSObject* aGlobal)
 {
   nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
   return win && CheckPermission(win, "nfc-manager");

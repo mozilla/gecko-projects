@@ -18,8 +18,10 @@
 # include "jit/x64/CodeGenerator-x64.h"
 #elif defined(JS_CODEGEN_ARM)
 # include "jit/arm/CodeGenerator-arm.h"
+#elif defined(JS_CODEGEN_MIPS)
+# include "jit/mips/CodeGenerator-mips.h"
 #else
-#error "CPU Not Supported"
+#error "Unknown architecture!"
 #endif
 
 namespace js {
@@ -51,7 +53,7 @@ class CodeGenerator : public CodeGeneratorSpecific
 
   public:
     bool generate();
-    bool generateAsmJS();
+    bool generateAsmJS(Label *stackOverflowLabel);
     bool link(JSContext *cx, types::CompilerConstraintList *constraints);
 
     bool visitLabel(LLabel *lir);
@@ -109,6 +111,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitConvertElementsToDoubles(LConvertElementsToDoubles *lir);
     bool visitMaybeToDoubleElement(LMaybeToDoubleElement *lir);
     bool visitGuardObjectIdentity(LGuardObjectIdentity *guard);
+    bool visitGuardShapePolymorphic(LGuardShapePolymorphic *lir);
     bool visitTypeBarrierV(LTypeBarrierV *lir);
     bool visitTypeBarrierO(LTypeBarrierO *lir);
     bool visitMonitorTypes(LMonitorTypes *lir);
@@ -188,6 +191,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool emitSetPropertyPolymorphic(LInstruction *lir, Register obj,
                                     Register scratch, const ConstantOrRegister &value);
     bool visitSetPropertyPolymorphicV(LSetPropertyPolymorphicV *ins);
+    bool visitArraySplice(LArraySplice *splice);
     bool visitSetPropertyPolymorphicT(LSetPropertyPolymorphicT *ins);
     bool visitAbsI(LAbsI *lir);
     bool visitAtan2D(LAtan2D *lir);
@@ -291,7 +295,6 @@ class CodeGenerator : public CodeGeneratorSpecific
 
     bool visitCheckOverRecursed(LCheckOverRecursed *lir);
     bool visitCheckOverRecursedFailure(CheckOverRecursedFailure *ool);
-    bool visitAsmJSCheckOverRecursed(LAsmJSCheckOverRecursed *lir);
 
     bool visitCheckOverRecursedPar(LCheckOverRecursedPar *lir);
     bool visitCheckOverRecursedFailurePar(CheckOverRecursedFailurePar *ool);
@@ -346,12 +349,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitAssertRangeV(LAssertRangeV *ins);
 
     bool visitRecompileCheck(LRecompileCheck *ins);
-
-    IonScriptCounts *extractUnassociatedScriptCounts() {
-        IonScriptCounts *counts = unassociatedScriptCounts_;
-        unassociatedScriptCounts_ = nullptr;  // prevent delete in dtor
-        return counts;
-    }
 
   private:
     bool addGetPropertyCache(LInstruction *ins, RegisterSet liveRegs, Register objReg,
@@ -444,8 +441,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool emitAssertRangeI(const Range *r, Register input);
     bool emitAssertRangeD(const Range *r, FloatRegister input, FloatRegister temp);
 
-    bool omitOverRecursedCheck() const;
-
     Vector<CodeOffsetLabel, 0, IonAllocPolicy> ionScriptLabels_;
 #ifdef DEBUG
     bool branchIfInvalidated(Register temp, Label *invalidated);
@@ -454,9 +449,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool emitObjectOrStringResultChecks(LInstruction *lir, MDefinition *mir);
     bool emitValueResultChecks(LInstruction *lir, MDefinition *mir);
 #endif
-
-    // Script counts created when compiling code with no associated JSScript.
-    IonScriptCounts *unassociatedScriptCounts_;
 
 #if defined(JS_ION_PERF)
     PerfSpewer perfSpewer_;

@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=4 sw=4 et tw=99 ft=cpp: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -35,7 +35,7 @@ Filter(JSContext *cx, HandleObject wrapper, AutoIdVector &props)
     for (size_t n = 0; n < props.length(); ++n) {
         id = props[n];
         if (Policy::check(cx, wrapper, id, Wrapper::GET))
-            props[w++] = id;
+            props[w++].set(id);
         else if (JS_IsExceptionPending(cx))
             return false;
     }
@@ -60,11 +60,10 @@ template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, HandleObject wrapper,
                                                       HandleId id,
-                                                      JS::MutableHandle<JSPropertyDescriptor> desc,
-                                                      unsigned flags)
+                                                      JS::MutableHandle<JSPropertyDescriptor> desc)
 {
     assertEnteredPolicy(cx, wrapper, id, BaseProxyHandler::GET | BaseProxyHandler::SET);
-    if (!Base::getPropertyDescriptor(cx, wrapper, id, desc, flags))
+    if (!Base::getPropertyDescriptor(cx, wrapper, id, desc))
         return false;
     return FilterSetter<Policy>(cx, wrapper, id, desc);
 }
@@ -73,11 +72,10 @@ template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::getOwnPropertyDescriptor(JSContext *cx, HandleObject wrapper,
                                                          HandleId id,
-                                                         JS::MutableHandle<JSPropertyDescriptor> desc,
-                                                         unsigned flags)
+                                                         JS::MutableHandle<JSPropertyDescriptor> desc)
 {
     assertEnteredPolicy(cx, wrapper, id, BaseProxyHandler::GET | BaseProxyHandler::SET);
-    if (!Base::getOwnPropertyDescriptor(cx, wrapper, id, desc, flags))
+    if (!Base::getOwnPropertyDescriptor(cx, wrapper, id, desc))
         return false;
     return FilterSetter<Policy>(cx, wrapper, id, desc);
 }

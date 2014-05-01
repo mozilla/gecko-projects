@@ -46,6 +46,8 @@ MIRType MIRTypeFromValue(const js::Value &vp)
         switch (vp.whyMagic()) {
           case JS_OPTIMIZED_ARGUMENTS:
             return MIRType_MagicOptimizedArguments;
+          case JS_OPTIMIZED_OUT:
+            return MIRType_MagicOptimizedOut;
           case JS_ELEMENTS_HOLE:
             return MIRType_MagicHole;
           case JS_IS_CONSTRUCTING:
@@ -87,7 +89,14 @@ MIRType MIRTypeFromValue(const js::Value &vp)
      * Truncate Doubles. So every time removeUse is called, UseRemoved needs
      * to get set.
      */                                                                         \
-    _(UseRemoved)
+    _(UseRemoved)                                                               \
+                                                                                \
+    /* Marks if the current instruction should go to the bailout paths instead
+     * of producing code as part of the control flow.  This flag can only be set
+     * on instructions which are only used by ResumePoint or by other flagged
+     * instructions.
+     */                                                                         \
+    _(RecoveredOnBailout)
 
 class MDefinition;
 class MInstruction;
@@ -206,6 +215,8 @@ class MNode : public TempObject
     inline MDefinition *toDefinition();
     inline MResumePoint *toResumePoint();
 
+    virtual bool writeRecoverData(CompactBufferWriter &writer) const;
+
   protected:
     // Sets an unset operand, updating use information.
     virtual void setOperand(size_t index, MDefinition *operand) = 0;
@@ -306,7 +317,7 @@ class MDefinition : public MNode
 
     // Track bailouts by storing the current pc in MIR instruction. Also used
     // for profiling and keeping track of what the last known pc was.
-    jsbytecode *trackedPc_;
+    BytecodeSite trackedSite_;
 
   private:
     enum Flag {
@@ -341,7 +352,7 @@ class MDefinition : public MNode
         resultTypeSet_(nullptr),
         flags_(0),
         dependency_(nullptr),
-        trackedPc_(nullptr)
+        trackedSite_()
     { }
 
     virtual Opcode op() const = 0;
@@ -361,12 +372,17 @@ class MDefinition : public MNode
     // be worthwhile.
     virtual bool possiblyCalls() const { return false; }
 
-    void setTrackedPc(jsbytecode *pc) {
-        trackedPc_ = pc;
+    void setTrackedSite(const BytecodeSite &site) {
+        trackedSite_ = site;
     }
-
+    const BytecodeSite &trackedSite() const {
+        return trackedSite_;
+    }
     jsbytecode *trackedPc() {
-        return trackedPc_;
+        return trackedSite_.pc();
+    }
+    InlineScriptTree *trackedTree() {
+        return trackedSite_.tree();
     }
 
     // Return the range of this value, *before* any bailout checks. Contrast
@@ -529,6 +545,10 @@ class MDefinition : public MNode
     // (only counting MDefinitions, ignoring MResumePoints)
     bool hasDefUses() const;
 
+    // Test whether this MDefinition has at least one non-recovered use.
+    // (only counting MDefinitions, ignoring MResumePoints)
+    bool hasLiveDefUses() const;
+
     bool hasUses() const {
         return !uses_.empty();
     }
@@ -603,6 +623,10 @@ class MDefinition : public MNode
         JS_ASSERT(!isEffectful() && store->isEffectful());
         JS_ASSERT(getAliasSet().flags() & store->getAliasSet().flags());
         return true;
+    }
+
+    virtual bool canRecoverOnBailout() const {
+        return false;
     }
 };
 
@@ -1939,6 +1963,46 @@ class MCallDOMNative : public MCall
     }
 
     virtual void computeMovable() MOZ_OVERRIDE;
+};
+
+// arr.splice(start, deleteCount) with unused return value.
+class MArraySplice
+  : public MTernaryInstruction,
+    public Mix3Policy<ObjectPolicy<0>, IntPolicy<1>, IntPolicy<2> >
+{
+  private:
+
+    MArraySplice(MDefinition *object, MDefinition *start, MDefinition *deleteCount)
+      : MTernaryInstruction(object, start, deleteCount)
+    { }
+
+  public:
+    INSTRUCTION_HEADER(ArraySplice)
+    static MArraySplice *New(TempAllocator &alloc, MDefinition *object,
+                             MDefinition *start, MDefinition *deleteCount)
+    {
+        return new(alloc) MArraySplice(object, start, deleteCount);
+    }
+
+    MDefinition *object() const {
+        return getOperand(0);
+    }
+
+    MDefinition *start() const {
+        return getOperand(1);
+    }
+
+    MDefinition *deleteCount() const {
+        return getOperand(2);
+    }
+
+    bool possiblyCalls() const {
+        return true;
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
 };
 
 // fun.apply(self, arguments)
@@ -3958,6 +4022,11 @@ class MAdd : public MBinaryArithInstruction
     void computeRange(TempAllocator &alloc);
     bool truncate();
     bool isOperandTruncated(size_t index) const;
+
+    bool writeRecoverData(CompactBufferWriter &writer) const;
+    bool canRecoverOnBailout() const {
+        return specialization_ < MIRType_Object;
+    }
 };
 
 class MSub : public MBinaryArithInstruction
@@ -7404,6 +7473,52 @@ class MGuardShape
     }
 };
 
+// Bail if the object's shape is not one of the shapes in shapes_.
+class MGuardShapePolymorphic
+  : public MUnaryInstruction,
+    public SingleObjectPolicy
+{
+    Vector<Shape *, 4, IonAllocPolicy> shapes_;
+
+    MGuardShapePolymorphic(TempAllocator &alloc, MDefinition *obj)
+      : MUnaryInstruction(obj),
+        shapes_(alloc)
+    {
+        setGuard();
+        setMovable();
+        setResultType(MIRType_Object);
+    }
+
+  public:
+    INSTRUCTION_HEADER(GuardShapePolymorphic)
+
+    static MGuardShapePolymorphic *New(TempAllocator &alloc, MDefinition *obj) {
+        return new(alloc) MGuardShapePolymorphic(alloc, obj);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
+    MDefinition *obj() const {
+        return getOperand(0);
+    }
+    bool addShape(Shape *shape) {
+        return shapes_.append(shape);
+    }
+    size_t numShapes() const {
+        return shapes_.length();
+    }
+    Shape *getShape(size_t i) const {
+        return shapes_[i];
+    }
+
+    bool congruentTo(const MDefinition *ins) const;
+
+    AliasSet getAliasSet() const {
+        return AliasSet::Load(AliasSet::ObjectFields);
+    }
+};
+
 // Guard on an object's type, inclusively or exclusively.
 class MGuardObjectType
   : public MUnaryInstruction,
@@ -9028,10 +9143,15 @@ class MTypeBarrier
   : public MUnaryInstruction,
     public TypeBarrierPolicy
 {
-    MTypeBarrier(MDefinition *def, types::TemporaryTypeSet *types)
-      : MUnaryInstruction(def)
+    BarrierKind barrierKind_;
+
+    MTypeBarrier(MDefinition *def, types::TemporaryTypeSet *types, BarrierKind kind)
+      : MUnaryInstruction(def),
+        barrierKind_(kind)
     {
-        JS_ASSERT(!types->unknown());
+        MOZ_ASSERT(kind == BarrierKind::TypeTagOnly || kind == BarrierKind::TypeSet);
+
+        MOZ_ASSERT(!types->unknown());
         setResultType(types->getKnownMIRType());
         setResultTypeSet(types);
 
@@ -9042,8 +9162,9 @@ class MTypeBarrier
   public:
     INSTRUCTION_HEADER(TypeBarrier)
 
-    static MTypeBarrier *New(TempAllocator &alloc, MDefinition *def, types::TemporaryTypeSet *types) {
-        return new(alloc) MTypeBarrier(def, types);
+    static MTypeBarrier *New(TempAllocator &alloc, MDefinition *def, types::TemporaryTypeSet *types,
+                             BarrierKind kind = BarrierKind::TypeSet) {
+        return new(alloc) MTypeBarrier(def, types, kind);
     }
 
     void printOpcode(FILE *fp) const;
@@ -9060,6 +9181,9 @@ class MTypeBarrier
     }
     virtual bool neverHoist() const {
         return resultTypeSet()->empty();
+    }
+    BarrierKind barrierKind() const {
+        return barrierKind_;
     }
 
     bool alwaysBails() const {
@@ -9080,20 +9204,25 @@ class MTypeBarrier
 class MMonitorTypes : public MUnaryInstruction, public BoxInputsPolicy
 {
     const types::TemporaryTypeSet *typeSet_;
+    BarrierKind barrierKind_;
 
-    MMonitorTypes(MDefinition *def, const types::TemporaryTypeSet *types)
+    MMonitorTypes(MDefinition *def, const types::TemporaryTypeSet *types, BarrierKind kind)
       : MUnaryInstruction(def),
-        typeSet_(types)
+        typeSet_(types),
+        barrierKind_(kind)
     {
+        MOZ_ASSERT(kind == BarrierKind::TypeTagOnly || kind == BarrierKind::TypeSet);
+
         setGuard();
-        JS_ASSERT(!types->unknown());
+        MOZ_ASSERT(!types->unknown());
     }
 
   public:
     INSTRUCTION_HEADER(MonitorTypes)
 
-    static MMonitorTypes *New(TempAllocator &alloc, MDefinition *def, const types::TemporaryTypeSet *types) {
-        return new(alloc) MMonitorTypes(def, types);
+    static MMonitorTypes *New(TempAllocator &alloc, MDefinition *def, const types::TemporaryTypeSet *types,
+                              BarrierKind kind) {
+        return new(alloc) MMonitorTypes(def, types, kind);
     }
 
     TypePolicy *typePolicy() {
@@ -9103,6 +9232,10 @@ class MMonitorTypes : public MUnaryInstruction, public BoxInputsPolicy
     const types::TemporaryTypeSet *typeSet() const {
         return typeSet_;
     }
+    BarrierKind barrierKind() const {
+        return barrierKind_;
+    }
+
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
@@ -9940,10 +10073,15 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
         MUse use;
     };
 
+    CallSiteDesc desc_;
     Callee callee_;
     FixedList<MUse> operands_;
     FixedList<AnyRegister> argRegs_;
     size_t spIncrement_;
+
+    MAsmJSCall(const CallSiteDesc &desc, Callee callee, size_t spIncrement)
+     : desc_(desc), callee_(callee), spIncrement_(spIncrement)
+    { }
 
   protected:
     void setOperand(size_t index, MDefinition *operand) {
@@ -9964,8 +10102,8 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
     };
     typedef Vector<Arg, 8> Args;
 
-    static MAsmJSCall *New(TempAllocator &alloc, Callee callee, const Args &args,
-                           MIRType resultType, size_t spIncrement);
+    static MAsmJSCall *New(TempAllocator &alloc, const CallSiteDesc &desc, Callee callee,
+                           const Args &args, MIRType resultType, size_t spIncrement);
 
     size_t numOperands() const {
         return operands_.length();
@@ -9980,6 +10118,9 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
     AnyRegister registerForArg(size_t index) const {
         JS_ASSERT(index < numArgs());
         return argRegs_[index];
+    }
+    const CallSiteDesc &desc() const {
+        return desc_;
     }
     Callee callee() const {
         return callee_;
@@ -9996,20 +10137,6 @@ class MAsmJSCall MOZ_FINAL : public MInstruction
     bool possiblyCalls() const {
         return true;
     }
-};
-
-// The asm.js version doesn't use the bail mechanism: instead it throws and
-// exception by jumping to the given label.
-class MAsmJSCheckOverRecursed : public MNullaryInstruction
-{
-    Label *onError_;
-    MAsmJSCheckOverRecursed(Label *onError) : onError_(onError) {}
-  public:
-    INSTRUCTION_HEADER(AsmJSCheckOverRecursed);
-    static MAsmJSCheckOverRecursed *New(TempAllocator &alloc, Label *onError) {
-        return new(alloc) MAsmJSCheckOverRecursed(onError);
-    }
-    Label *onError() const { return onError_; }
 };
 
 #undef INSTRUCTION_HEADER
@@ -10058,17 +10185,17 @@ bool ElementAccessIsPacked(types::CompilerConstraintList *constraints, MDefiniti
 bool ElementAccessHasExtraIndexedProperty(types::CompilerConstraintList *constraints,
                                           MDefinition *obj);
 MIRType DenseNativeElementType(types::CompilerConstraintList *constraints, MDefinition *obj);
-bool PropertyReadNeedsTypeBarrier(JSContext *propertycx,
-                                  types::CompilerConstraintList *constraints,
-                                  types::TypeObjectKey *object, PropertyName *name,
-                                  types::TemporaryTypeSet *observed, bool updateObserved);
-bool PropertyReadNeedsTypeBarrier(JSContext *propertycx,
-                                  types::CompilerConstraintList *constraints,
-                                  MDefinition *obj, PropertyName *name,
-                                  types::TemporaryTypeSet *observed);
-bool PropertyReadOnPrototypeNeedsTypeBarrier(types::CompilerConstraintList *constraints,
-                                             MDefinition *obj, PropertyName *name,
-                                             types::TemporaryTypeSet *observed);
+BarrierKind PropertyReadNeedsTypeBarrier(JSContext *propertycx,
+                                         types::CompilerConstraintList *constraints,
+                                         types::TypeObjectKey *object, PropertyName *name,
+                                         types::TemporaryTypeSet *observed, bool updateObserved);
+BarrierKind PropertyReadNeedsTypeBarrier(JSContext *propertycx,
+                                         types::CompilerConstraintList *constraints,
+                                         MDefinition *obj, PropertyName *name,
+                                         types::TemporaryTypeSet *observed);
+BarrierKind PropertyReadOnPrototypeNeedsTypeBarrier(types::CompilerConstraintList *constraints,
+                                                    MDefinition *obj, PropertyName *name,
+                                                    types::TemporaryTypeSet *observed);
 bool PropertyReadIsIdempotent(types::CompilerConstraintList *constraints,
                               MDefinition *obj, PropertyName *name);
 void AddObjectsForPropertyRead(MDefinition *obj, PropertyName *name,

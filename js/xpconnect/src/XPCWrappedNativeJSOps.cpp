@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -122,8 +121,8 @@ GetDoubleWrappedJSObject(XPCCallContext& ccx, XPCWrappedNative* wrapper)
 
             RootedValue val(ccx);
             if (JS_GetPropertyById(ccx, mainObj, id, &val) &&
-                !JSVAL_IS_PRIMITIVE(val)) {
-                obj = JSVAL_TO_OBJECT(val);
+                !val.isPrimitive()) {
+                obj = val.toObjectOrNull();
             }
         }
     }
@@ -382,7 +381,7 @@ DefinePropertyIfFound(XPCCallContext& ccx,
     MOZ_ASSERT(member->IsAttribute(), "way broken!");
 
     propFlags |= JSPROP_GETTER | JSPROP_SHARED;
-    JSObject* funobj = JSVAL_TO_OBJECT(funval);
+    JSObject* funobj = funval.toObjectOrNull();
     JSPropertyOp getter = JS_DATA_TO_FUNC_PTR(JSPropertyOp, funobj);
     JSStrictPropertyOp setter;
     if (member->IsWritableAttribute()) {
@@ -488,7 +487,7 @@ XPC_WN_Shared_Convert(JSContext *cx, HandleObject obj, JSType type, MutableHandl
                 if (!XPCWrappedNative::CallMethod(ccx))
                     return false;
 
-                if (JSVAL_IS_PRIMITIVE(vp))
+                if (vp.isPrimitive())
                     return true;
             }
 
@@ -873,7 +872,7 @@ XPC_WN_Helper_Finalize(js::FreeOp *fop, JSObject *obj)
 }
 
 static bool
-XPC_WN_Helper_NewResolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
+XPC_WN_Helper_NewResolve(JSContext *cx, HandleObject obj, HandleId id,
                          MutableHandleObject objp)
 {
     nsresult rv = NS_OK;
@@ -893,7 +892,7 @@ XPC_WN_Helper_NewResolve(JSContext *cx, HandleObject obj, HandleId id, unsigned 
         if (allowPropMods)
             oldResolvingWrapper = ccx.SetResolvingWrapper(wrapper);
 
-        rv = si->GetCallback()->NewResolve(wrapper, cx, obj, id, flags,
+        rv = si->GetCallback()->NewResolve(wrapper, cx, obj, id,
                                            obj2FromScriptable.address(), &retval);
 
         if (allowPropMods)

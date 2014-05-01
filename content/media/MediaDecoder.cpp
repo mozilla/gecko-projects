@@ -105,9 +105,9 @@ public:
 
 StaticRefPtr<MediaMemoryTracker> MediaMemoryTracker::sUniqueInstance;
 
-NS_IMPL_ISUPPORTS1(MediaMemoryTracker, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(MediaMemoryTracker, nsIMemoryReporter)
 
-NS_IMPL_ISUPPORTS1(MediaDecoder, nsIObserver)
+NS_IMPL_ISUPPORTS(MediaDecoder, nsIObserver)
 
 void MediaDecoder::SetDormantIfNecessary(bool aDormant)
 {
@@ -581,9 +581,7 @@ nsresult MediaDecoder::ScheduleStateMachineThread()
   if (mShuttingDown)
     return NS_OK;
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  MediaDecoderStateMachine* m =
-    static_cast<MediaDecoderStateMachine*>(mDecoderStateMachine.get());
-  return m->ScheduleStateMachine();
+  return mDecoderStateMachine->ScheduleStateMachine();
 }
 
 nsresult MediaDecoder::Play()

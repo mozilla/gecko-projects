@@ -53,6 +53,11 @@ let gGrid = {
     });
     addEventListener("load", this);
     addEventListener("resize", this);
+
+    // The document may already be loaded if the user is toggling the page
+    if (document.readyState == "complete") {
+      this.handleEvent({type: "load"});
+    }
   },
 
   /**
@@ -197,12 +202,18 @@ let gGrid = {
     }
 
     let availSpace = document.documentElement.clientHeight - this._cellMargin -
-                     document.querySelector("#newtab-margin-undo-container").offsetHeight;
+                     document.querySelector("#newtab-margin-undo-container").offsetHeight -
+                     document.querySelector("#newtab-search-container").offsetHeight;
     let visibleRows = Math.floor(availSpace / this._cellHeight);
     this._node.style.height = this._computeHeight() + "px";
     this._node.style.maxHeight = this._computeHeight(visibleRows) + "px";
     this._node.style.maxWidth = gGridPrefs.gridColumns * this._cellWidth +
                                 GRID_WIDTH_EXTRA + "px";
+
+    // Resize the search bar.
+    let width = parseFloat(window.getComputedStyle(this._node).width);
+    let visibleCols = Math.floor(width / this._cellWidth);
+    gSearch.setWidth(visibleCols * this._cellWidth - this._cellMargin);
   },
 
   _shouldRenderGrid : function Grid_shouldRenderGrid() {

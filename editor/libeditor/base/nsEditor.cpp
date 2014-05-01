@@ -26,7 +26,7 @@
 #include "mozInlineSpellChecker.h"      // for mozInlineSpellChecker
 #include "mozilla/IMEStateManager.h"    // for IMEStateManager
 #include "mozilla/Preferences.h"        // for Preferences
-#include "mozilla/Selection.h"          // for Selection, etc
+#include "mozilla/dom/Selection.h"      // for Selection, etc
 #include "mozilla/Services.h"           // for GetObserverService
 #include "mozilla/TextComposition.h"    // for TextComposition
 #include "mozilla/TextEvents.h"
@@ -204,7 +204,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsEditor)
 
 
 NS_IMETHODIMP
-nsEditor::Init(nsIDOMDocument *aDoc, nsIContent *aRoot, nsISelectionController *aSelCon, uint32_t aFlags)
+nsEditor::Init(nsIDOMDocument *aDoc, nsIContent *aRoot,
+               nsISelectionController *aSelCon, uint32_t aFlags,
+               const nsAString& aValue)
 {
   NS_PRECONDITION(aDoc, "bad arg");
   if (!aDoc)

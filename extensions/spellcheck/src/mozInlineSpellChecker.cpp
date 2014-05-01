@@ -508,7 +508,7 @@ public:
 private:
   nsRefPtr<mozInlineSpellChecker> mSpellChecker;
 };
-NS_IMPL_ISUPPORTS1(InitEditorSpellCheckCallback, nsIEditorSpellCheckCallback)
+NS_IMPL_ISUPPORTS(InitEditorSpellCheckCallback, nsIEditorSpellCheckCallback)
 
 
 NS_INTERFACE_MAP_BEGIN(mozInlineSpellChecker)
@@ -523,10 +523,10 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(mozInlineSpellChecker)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(mozInlineSpellChecker)
 
-NS_IMPL_CYCLE_COLLECTION_3(mozInlineSpellChecker,
-                           mSpellCheck,
-                           mTreeWalker,
-                           mCurrentSelectionAnchorNode)
+NS_IMPL_CYCLE_COLLECTION(mozInlineSpellChecker,
+                         mSpellCheck,
+                         mTreeWalker,
+                         mCurrentSelectionAnchorNode)
 
 mozInlineSpellChecker::SpellCheckingState
   mozInlineSpellChecker::gCanEnableSpellChecking =
@@ -2004,7 +2004,7 @@ private:
   nsRefPtr<mozInlineSpellChecker> mSpellChecker;
   uint32_t mDisabledAsyncToken;
 };
-NS_IMPL_ISUPPORTS1(UpdateCurrentDictionaryCallback, nsIEditorSpellCheckCallback)
+NS_IMPL_ISUPPORTS(UpdateCurrentDictionaryCallback, nsIEditorSpellCheckCallback)
 
 NS_IMETHODIMP mozInlineSpellChecker::UpdateCurrentDictionary()
 {

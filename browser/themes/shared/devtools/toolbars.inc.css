@@ -119,14 +119,14 @@
 
 .devtools-option-toolbarbutton {
   -moz-appearance: none;
-  list-style-image: url("chrome://browser/skin/devtools/option-icon.png");
-  -moz-image-region: rect(0px 16px 16px 0px);
+  list-style-image: url("chrome://browser/skin/devtools/tool-options.svg");
   background: none;
+  opacity: .8;
   border: none;
 }
 
 .devtools-option-toolbarbutton[open=true] {
-  -moz-image-region: rect(0px 32px 16px 16px);
+  opacity: 1;
 }
 
 .devtools-menulist > .menulist-label-box {
@@ -580,6 +580,9 @@
   background-image: url("chrome://browser/skin/devtools/command-console.png");
 }
 
+#command-button-eyedropper > image {
+  background-image: url("chrome://browser/skin/devtools/command-eyedropper.png");
+}
 
 @media (min-resolution: 2dppx) {
   #command-button-paintflashing > image {
@@ -604,6 +607,10 @@
 
   #command-button-splitconsole > image {
     background-image: url("chrome://browser/skin/devtools/command-console@2x.png");
+  }
+
+  #command-button-eyedropper > image {
+    background-image: url("chrome://browser/skin/devtools/command-eyedropper@2x.png");
   }
 }
 
@@ -785,7 +792,6 @@
 .theme-light .command-button-invertable[checked=true]:not(:active) > image,
 .theme-light .devtools-tab[icon-invertable][selected] > image,
 .theme-light .devtools-tab[icon-invertable][highlighted] > image,
-.theme-light .devtools-option-toolbarbutton[open] > image,
 .theme-light #resume[checked] > image {
   filter: none !important;
 }

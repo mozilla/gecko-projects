@@ -1080,6 +1080,8 @@ enum nc_slot {
     NC_NEGATIVE_INFINITY,
     NC_MAX_VALUE,
     NC_MIN_VALUE,
+    NC_MAX_SAFE_INTEGER,
+    NC_MIN_SAFE_INTEGER,
     NC_EPSILON,
     NC_LIMIT
 };
@@ -1095,6 +1097,10 @@ static JSConstDoubleSpec number_constants[] = {
     {0,                         "NEGATIVE_INFINITY", 0,{0,0,0}},
     {1.7976931348623157E+308,   "MAX_VALUE",         0,{0,0,0}},
     {0,                         "MIN_VALUE",         0,{0,0,0}},
+    /* ES6 (April 2014 draft) 20.1.2.6 */
+    {9007199254740991,          "MAX_SAFE_INTEGER",  0,{0,0,0}},
+    /* ES6 (April 2014 draft) 20.1.2.10 */
+    {-9007199254740991,         "MIN_SAFE_INTEGER",  0,{0,0,0}},
     /* ES6 (May 2013 draft) 15.7.3.7 */
     {2.2204460492503130808472633361816e-16, "EPSILON", 0,{0,0,0}},
     {0,0,0,{0,0,0}}
@@ -1243,10 +1249,10 @@ js_InitNumberClass(JSContext *cx, HandleObject obj)
     /* ES5 15.1.1.1, 15.1.1.2 */
     if (!DefineNativeProperty(cx, global, cx->names().NaN, valueNaN,
                               JS_PropertyStub, JS_StrictPropertyStub,
-                              JSPROP_PERMANENT | JSPROP_READONLY, 0) ||
+                              JSPROP_PERMANENT | JSPROP_READONLY) ||
         !DefineNativeProperty(cx, global, cx->names().Infinity, valueInfinity,
                               JS_PropertyStub, JS_StrictPropertyStub,
-                              JSPROP_PERMANENT | JSPROP_READONLY, 0))
+                              JSPROP_PERMANENT | JSPROP_READONLY))
     {
         return nullptr;
     }

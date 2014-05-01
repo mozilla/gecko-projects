@@ -930,7 +930,7 @@ StructMetaTypeDescr::create(JSContext *cx,
 
         // userFieldTypes[id] = typeObj
         if (!JSObject::defineGeneric(cx, userFieldTypes, id,
-                                     fieldTypeObjs.handleAt(i), nullptr, nullptr,
+                                     fieldTypeObjs[i], nullptr, nullptr,
                                      JSPROP_READONLY | JSPROP_PERMANENT))
             return nullptr;
 
@@ -1300,7 +1300,7 @@ DefineMetaTypeDescr(JSContext *cx,
     RootedObject protoProto(cx);
     protoProto = NewObjectWithProto<JSObject>(cx, objProto,
                                               global, SingletonObject);
-    if (!proto)
+    if (!protoProto)
         return nullptr;
 
     RootedValue protoProtoValue(cx, ObjectValue(*protoProto));

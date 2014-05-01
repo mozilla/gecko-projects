@@ -14,7 +14,6 @@
 #include "secasn1.h"
 #include "pk11pqg.h"
 #include "nsKeygenHandler.h"
-#include "nsVoidArray.h"
 #include "nsIServiceManager.h"
 #include "nsIDOMHTMLSelectElement.h"
 #include "nsIContent.h"
@@ -257,7 +256,7 @@ decode_ec_params(const char *curve)
     return ecparams;
 }
 
-NS_IMPL_ISUPPORTS1(nsKeygenFormProcessor, nsIFormProcessor)
+NS_IMPL_ISUPPORTS(nsKeygenFormProcessor, nsIFormProcessor)
 
 nsKeygenFormProcessor::nsKeygenFormProcessor()
 { 

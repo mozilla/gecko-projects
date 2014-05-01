@@ -9,6 +9,7 @@
 #include "mozilla/layers/GrallocTextureClient.h"
 #include "nsMemory.h"
 #include "mtransport/runnable_utils.h"
+#include "MediaTrackConstraints.h"
 
 #ifdef MOZ_B2G_CAMERA
 #include "GrallocImages.h"
@@ -20,6 +21,9 @@ using namespace mozilla::dom;
 namespace mozilla {
 
 using namespace mozilla::gfx;
+using dom::ConstrainLongRange;
+using dom::ConstrainDoubleRange;
+using dom::MediaTrackConstraintSet;
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* GetMediaManagerLog();
@@ -34,9 +38,9 @@ extern PRLogModuleInfo* GetMediaManagerLog();
  * Webrtc video source.
  */
 #ifndef MOZ_B2G_CAMERA
-NS_IMPL_ISUPPORTS1(MediaEngineWebRTCVideoSource, nsIRunnable)
+NS_IMPL_ISUPPORTS(MediaEngineWebRTCVideoSource, nsIRunnable)
 #else
-NS_IMPL_QUERY_INTERFACE1(MediaEngineWebRTCVideoSource, nsIRunnable)
+NS_IMPL_QUERY_INTERFACE(MediaEngineWebRTCVideoSource, nsIRunnable)
 NS_IMPL_ADDREF_INHERITED(MediaEngineWebRTCVideoSource, CameraControlListener)
 NS_IMPL_RELEASE_INHERITED(MediaEngineWebRTCVideoSource, CameraControlListener)
 #endif
@@ -166,36 +170,123 @@ MediaEngineWebRTCVideoSource::NotifyPull(MediaStreamGraph* aGraph,
   }
 }
 
+static bool IsWithin(int32_t n, const ConstrainLongRange& aRange) {
+  return aRange.mMin <= n && n <= aRange.mMax;
+}
+
+static bool IsWithin(double n, const ConstrainDoubleRange& aRange) {
+  return aRange.mMin <= n && n <= aRange.mMax;
+}
+
+static int32_t Clamp(int32_t n, const ConstrainLongRange& aRange) {
+  return std::max(aRange.mMin, std::min(n, aRange.mMax));
+}
+
+static bool
+AreIntersecting(const ConstrainLongRange& aA, const ConstrainLongRange& aB) {
+  return aA.mMax >= aB.mMin && aA.mMin <= aB.mMax;
+}
+
+static bool
+Intersect(ConstrainLongRange& aA, const ConstrainLongRange& aB) {
+  MOZ_ASSERT(AreIntersecting(aA, aB));
+  aA.mMin = std::max(aA.mMin, aB.mMin);
+  aA.mMax = std::min(aA.mMax, aB.mMax);
+  return true;
+}
+
+static bool SatisfyConstraintSet(const MediaTrackConstraintSet &aConstraints,
+                                 const webrtc::CaptureCapability& aCandidate) {
+  if (!IsWithin(aCandidate.width, aConstraints.mWidth) ||
+      !IsWithin(aCandidate.height, aConstraints.mHeight)) {
+    return false;
+  }
+  if (!IsWithin(aCandidate.maxFPS, aConstraints.mFrameRate)) {
+    return false;
+  }
+  return true;
+}
+
 void
-MediaEngineWebRTCVideoSource::ChooseCapability(const MediaEnginePrefs &aPrefs)
+MediaEngineWebRTCVideoSource::ChooseCapability(
+    const VideoTrackConstraintsN &aConstraints,
+    const MediaEnginePrefs &aPrefs)
 {
 #ifdef MOZ_B2G_CAMERA
-  mCapability.width  = aPrefs.mWidth;
-  mCapability.height = aPrefs.mHeight;
+  return GuessCapability(aConstraints, aPrefs);
 #else
-  int num = mViECapture->NumberOfCapabilities(NS_ConvertUTF16toUTF8(mUniqueId).get(),
-                                              KMaxUniqueIdLength);
-
-  LOG(("ChooseCapability: prefs: %dx%d @%d-%dfps", aPrefs.mWidth, aPrefs.mHeight, aPrefs.mFPS, aPrefs.mMinFPS));
-
+  NS_ConvertUTF16toUTF8 uniqueId(mUniqueId);
+  int num = mViECapture->NumberOfCapabilities(uniqueId.get(), KMaxUniqueIdLength);
   if (num <= 0) {
-    // Set to default values
-    mCapability.width  = aPrefs.mWidth;
-    mCapability.height = aPrefs.mHeight;
-    mCapability.maxFPS = MediaEngine::DEFAULT_VIDEO_FPS;
-
     // Mac doesn't support capabilities.
-    return;
+    return GuessCapability(aConstraints, aPrefs);
   }
+
+  // The rest is the full algorithm for cameras that can list their capabilities.
+
+  LOG(("ChooseCapability: prefs: %dx%d @%d-%dfps",
+       aPrefs.mWidth, aPrefs.mHeight, aPrefs.mFPS, aPrefs.mMinFPS));
+
+  typedef nsTArray<uint8_t> SourceSet;
+
+  SourceSet candidateSet;
+  for (int i = 0; i < num; i++) {
+    candidateSet.AppendElement(i);
+  }
+
+  // Pick among capabilities: First apply required constraints.
+
+  for (uint32_t i = 0; i < candidateSet.Length();) {
+    webrtc::CaptureCapability cap;
+    mViECapture->GetCaptureCapability(uniqueId.get(), KMaxUniqueIdLength,
+                                      candidateSet[i], cap);
+    if (!SatisfyConstraintSet(aConstraints.mRequired, cap)) {
+      candidateSet.RemoveElementAt(i);
+    } else {
+      ++i;
+    }
+  }
+
+  SourceSet tailSet;
+
+  // Then apply advanced (formerly known as optional) constraints.
+
+  if (aConstraints.mAdvanced.WasPassed()) {
+    auto &array = aConstraints.mAdvanced.Value();
+
+    for (uint32_t i = 0; i < array.Length(); i++) {
+      SourceSet rejects;
+      for (uint32_t j = 0; j < candidateSet.Length();) {
+        webrtc::CaptureCapability cap;
+        mViECapture->GetCaptureCapability(uniqueId.get(), KMaxUniqueIdLength,
+                                          candidateSet[j], cap);
+        if (!SatisfyConstraintSet(array[i], cap)) {
+          rejects.AppendElement(candidateSet[j]);
+          candidateSet.RemoveElementAt(j);
+        } else {
+          ++j;
+        }
+      }
+      (candidateSet.Length()? tailSet : candidateSet).MoveElementsFrom(rejects);
+    }
+  }
+
+  if (!candidateSet.Length()) {
+    candidateSet.AppendElement(0);
+  }
+
+  int prefWidth = aPrefs.GetWidth();
+  int prefHeight = aPrefs.GetHeight();
 
   // Default is closest to available capability but equal to or below;
   // otherwise closest above.  Since we handle the num=0 case above and
   // take the first entry always, we can never exit uninitialized.
+
   webrtc::CaptureCapability cap;
   bool higher = true;
-  for (int i = 0; i < num; i++) {
+  for (uint32_t i = 0; i < candidateSet.Length(); i++) {
     mViECapture->GetCaptureCapability(NS_ConvertUTF16toUTF8(mUniqueId).get(),
-                                      KMaxUniqueIdLength, i, cap);
+                                      KMaxUniqueIdLength, candidateSet[i], cap);
     if (higher) {
       if (i == 0 ||
           (mCapability.width > cap.width && mCapability.height > cap.height)) {
@@ -203,11 +294,11 @@ MediaEngineWebRTCVideoSource::ChooseCapability(const MediaEnginePrefs &aPrefs)
         mCapability = cap;
         // FIXME: expose expected capture delay?
       }
-      if (cap.width <= (uint32_t) aPrefs.mWidth && cap.height <= (uint32_t) aPrefs.mHeight) {
+      if (cap.width <= (uint32_t) prefWidth && cap.height <= (uint32_t) prefHeight) {
         higher = false;
       }
     } else {
-      if (cap.width > (uint32_t) aPrefs.mWidth || cap.height > (uint32_t) aPrefs.mHeight ||
+      if (cap.width > (uint32_t) prefWidth || cap.height > (uint32_t) prefHeight ||
           cap.maxFPS < (uint32_t) aPrefs.mMinFPS) {
         continue;
       }
@@ -217,8 +308,90 @@ MediaEngineWebRTCVideoSource::ChooseCapability(const MediaEnginePrefs &aPrefs)
       }
     }
   }
-  LOG(("chose cap %dx%d @%dfps", mCapability.width, mCapability.height, mCapability.maxFPS));
+  LOG(("chose cap %dx%d @%dfps",
+       mCapability.width, mCapability.height, mCapability.maxFPS));
 #endif
+}
+
+// A special version of the algorithm for cameras that don't list capabilities.
+
+void
+MediaEngineWebRTCVideoSource::GuessCapability(
+    const VideoTrackConstraintsN &aConstraints,
+    const MediaEnginePrefs &aPrefs)
+{
+  LOG(("GuessCapability: prefs: %dx%d @%d-%dfps",
+       aPrefs.mWidth, aPrefs.mHeight, aPrefs.mFPS, aPrefs.mMinFPS));
+
+  // In short: compound constraint-ranges and use pref as ideal.
+
+  ConstrainLongRange cWidth(aConstraints.mRequired.mWidth);
+  ConstrainLongRange cHeight(aConstraints.mRequired.mHeight);
+
+  if (aConstraints.mAdvanced.WasPassed()) {
+    const auto& advanced = aConstraints.mAdvanced.Value();
+    for (uint32_t i = 0; i < advanced.Length(); i++) {
+      if (AreIntersecting(cWidth, advanced[i].mWidth) &&
+          AreIntersecting(cHeight, advanced[i].mHeight)) {
+        Intersect(cWidth, advanced[i].mWidth);
+        Intersect(cHeight, advanced[i].mHeight);
+      }
+    }
+  }
+  // Detect Mac HD cams and give them some love in the form of a dynamic default
+  // since that hardware switches between 4:3 at low res and 16:9 at higher res.
+  //
+  // Logic is: if we're relying on defaults in aPrefs, then
+  // only use HD pref when non-HD pref is too small and HD pref isn't too big.
+
+  bool macHD = ((!aPrefs.mWidth || !aPrefs.mHeight) &&
+                mDeviceName.EqualsASCII("FaceTime HD Camera (Built-in)") &&
+                (aPrefs.GetWidth() < cWidth.mMin ||
+                 aPrefs.GetHeight() < cHeight.mMin) &&
+                !(aPrefs.GetWidth(true) > cWidth.mMax ||
+                  aPrefs.GetHeight(true) > cHeight.mMax));
+  int prefWidth = aPrefs.GetWidth(macHD);
+  int prefHeight = aPrefs.GetHeight(macHD);
+
+  // Clamp width and height without distorting inherent aspect too much.
+
+  if (IsWithin(prefWidth, cWidth) == IsWithin(prefHeight, cHeight)) {
+    // If both are within, we get the default (pref) aspect.
+    // If neither are within, we get the aspect of the enclosing constraint.
+    // Either are presumably reasonable (presuming constraints are sane).
+    mCapability.width = Clamp(prefWidth, cWidth);
+    mCapability.height = Clamp(prefHeight, cHeight);
+  } else {
+    // But if only one clips (e.g. width), the resulting skew is undesirable:
+    //       .------------.
+    //       | constraint |
+    //  .----+------------+----.
+    //  |    |            |    |
+    //  |pref|  result    |    |   prefAspect != resultAspect
+    //  |    |            |    |
+    //  '----+------------+----'
+    //       '------------'
+    //  So in this case, preserve prefAspect instead:
+    //  .------------.
+    //  | constraint |
+    //  .------------.
+    //  |pref        |             prefAspect is unchanged
+    //  '------------'
+    //  |            |
+    //  '------------'
+    if (IsWithin(prefWidth, cWidth)) {
+      mCapability.height = Clamp(prefHeight, cHeight);
+      mCapability.width = Clamp((mCapability.height * prefWidth) /
+                                prefHeight, cWidth);
+    } else {
+      mCapability.width = Clamp(prefWidth, cWidth);
+      mCapability.height = Clamp((mCapability.width * prefHeight) /
+                                 prefWidth, cHeight);
+    }
+  }
+  mCapability.maxFPS = MediaEngine::DEFAULT_VIDEO_FPS;
+  LOG(("chose cap %dx%d @%dfps",
+       mCapability.width, mCapability.height, mCapability.maxFPS));
 }
 
 void
@@ -234,13 +407,14 @@ MediaEngineWebRTCVideoSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineWebRTCVideoSource::Allocate(const MediaEnginePrefs &aPrefs)
+MediaEngineWebRTCVideoSource::Allocate(const VideoTrackConstraintsN &aConstraints,
+                                       const MediaEnginePrefs &aPrefs)
 {
   LOG((__FUNCTION__));
 #ifdef MOZ_B2G_CAMERA
   ReentrantMonitorAutoEnter sync(mCallbackMonitor);
   if (mState == kReleased && mInitDone) {
-    ChooseCapability(aPrefs);
+    ChooseCapability(aConstraints, aPrefs);
     NS_DispatchToMainThread(WrapRunnable(this,
                                          &MediaEngineWebRTCVideoSource::AllocImpl));
     mCallbackMonitor.Wait();
@@ -253,7 +427,7 @@ MediaEngineWebRTCVideoSource::Allocate(const MediaEnginePrefs &aPrefs)
     // Note: if shared, we don't allow a later opener to affect the resolution.
     // (This may change depending on spec changes for Constraints/settings)
 
-    ChooseCapability(aPrefs);
+    ChooseCapability(aConstraints, aPrefs);
 
     if (mViECapture->AllocateCaptureDevice(NS_ConvertUTF16toUTF8(mUniqueId).get(),
                                            KMaxUniqueIdLength, mCaptureIndex)) {
@@ -504,6 +678,7 @@ MediaEngineWebRTCVideoSource::Shutdown()
 void
 MediaEngineWebRTCVideoSource::AllocImpl() {
   MOZ_ASSERT(NS_IsMainThread());
+  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
 
   mCameraControl = ICameraControl::Create(mCaptureIndex);
   if (mCameraControl) {
@@ -635,7 +810,7 @@ MediaEngineWebRTCVideoSource::OnHardwareStateChange(HardwareState aState)
 }
 
 void
-MediaEngineWebRTCVideoSource::OnError(CameraErrorContext aContext, CameraError aError)
+MediaEngineWebRTCVideoSource::OnUserError(UserContext aContext, nsresult aError)
 {
   ReentrantMonitorAutoEnter sync(mCallbackMonitor);
   mCallbackMonitor.Notify();
@@ -644,6 +819,7 @@ MediaEngineWebRTCVideoSource::OnError(CameraErrorContext aContext, CameraError a
 void
 MediaEngineWebRTCVideoSource::OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType)
 {
+  ReentrantMonitorAutoEnter sync(mCallbackMonitor);
   mLastCapture =
     static_cast<nsIDOMFile*>(new nsDOMMemoryFile(static_cast<void*>(aData),
                                                  static_cast<uint64_t>(aLength),

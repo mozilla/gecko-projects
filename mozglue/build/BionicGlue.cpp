@@ -97,8 +97,6 @@ WRAP(pthread_atfork)(void (*prepare)(void), void (*parent)(void), void (*child)(
   return 0;
 }
 
-extern "C" pid_t __fork(void);
-
 extern "C" NS_EXPORT pid_t
 WRAP(fork)(void)
 {
@@ -108,7 +106,7 @@ WRAP(fork)(void)
     if (it->prepare)
       it->prepare();
 
-  switch ((pid = __fork())) {
+  switch ((pid = syscall(__NR_clone, SIGCHLD, NULL, NULL, NULL, NULL))) {
   case 0:
     cpuacct_add(getuid());
     for (auto it = atfork.begin();
@@ -198,7 +196,6 @@ extern "C" NS_EXPORT void* __real_memcpy(void * a0, const void * a1, size_t a2);
 extern "C" NS_EXPORT void* __real_memmove(void * a0, const void * a1, size_t a2);
 extern "C" NS_EXPORT void* __real_memset(void * a0, int a1, size_t a2);
 extern "C" NS_EXPORT void* __real_memmem(const void * a0, size_t a1, const void * a2, size_t a3);
-extern "C" NS_EXPORT void __real_memswap(void * a0, void * a1, size_t a2);
 extern "C" NS_EXPORT char* __real_index(const char * a0, int a1);
 extern "C" NS_EXPORT char* __real_strchr(const char * a0, int a1);
 extern "C" NS_EXPORT char* __real_strrchr(const char * a0, int a1);
@@ -235,7 +232,6 @@ extern "C" NS_EXPORT void* __wrap_memcpy(void * a0, const void * a1, size_t a2) 
 extern "C" NS_EXPORT void* __wrap_memmove(void * a0, const void * a1, size_t a2) { return __real_memmove(a0, a1, a2); }
 extern "C" NS_EXPORT void* __wrap_memset(void * a0, int a1, size_t a2) { return __real_memset(a0, a1, a2); }
 extern "C" NS_EXPORT void* __wrap_memmem(const void * a0, size_t a1, const void * a2, size_t a3) { return __real_memmem(a0, a1, a2, a3); }
-extern "C" NS_EXPORT void __wrap_memswap(void * a0, void * a1, size_t a2) { __real_memswap(a0, a1, a2); }
 extern "C" NS_EXPORT char* __wrap_index(const char * a0, int a1) { return __real_index(a0, a1); }
 extern "C" NS_EXPORT char* __wrap_strchr(const char * a0, int a1) { return __real_strchr(a0, a1); }
 extern "C" NS_EXPORT char* __wrap_strrchr(const char * a0, int a1) { return __real_strrchr(a0, a1); }

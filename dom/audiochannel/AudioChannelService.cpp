@@ -84,11 +84,11 @@ AudioChannelService::Shutdown()
   }
 }
 
-NS_IMPL_ISUPPORTS2(AudioChannelService, nsIObserver, nsITimerCallback)
+NS_IMPL_ISUPPORTS(AudioChannelService, nsIObserver, nsITimerCallback)
 
 AudioChannelService::AudioChannelService()
-: mCurrentHigherChannel(INT32_MAX)
-, mCurrentVisibleHigherChannel(INT32_MAX)
+: mCurrentHigherChannel(-1)
+, mCurrentVisibleHigherChannel(-1)
 , mPlayableHiddenContentChildID(CONTENT_PROCESS_ID_UNKNOWN)
 , mDisabled(false)
 , mDefChannelChildID(CONTENT_PROCESS_ID_UNKNOWN)

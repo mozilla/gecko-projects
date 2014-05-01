@@ -8,7 +8,6 @@
 #include "nsCSSStyleSheet.h"
 #include "nsIComponentManager.h"
 #include "nsIServiceManager.h"
-#include "nsVoidArray.h"
 #include "nsReadableUtils.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMStyleSheetList.h"
@@ -47,7 +46,7 @@ inCSSValueSearch::~inCSSValueSearch()
   nsCSSProps::ReleaseTable();
 }
 
-NS_IMPL_ISUPPORTS2(inCSSValueSearch, inISearchProcess, inICSSValueSearch)
+NS_IMPL_ISUPPORTS(inCSSValueSearch, inISearchProcess, inICSSValueSearch)
 
 ///////////////////////////////////////////////////////////////////////////////
 // inISearchProcess

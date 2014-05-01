@@ -166,10 +166,9 @@ bool
 BaseDOMProxyHandler::getPropertyDescriptor(JSContext* cx,
                                            JS::Handle<JSObject*> proxy,
                                            JS::Handle<jsid> id,
-                                           MutableHandle<JSPropertyDescriptor> desc,
-                                           unsigned flags)
+                                           MutableHandle<JSPropertyDescriptor> desc)
 {
-  if (!getOwnPropertyDescriptor(cx, proxy, id, desc, flags)) {
+  if (!getOwnPropertyDescriptor(cx, proxy, id, desc)) {
     return false;
   }
   if (desc.object()) {
@@ -185,7 +184,7 @@ BaseDOMProxyHandler::getPropertyDescriptor(JSContext* cx,
     return true;
   }
 
-  return JS_GetPropertyDescriptorById(cx, proto, id, 0, desc);
+  return JS_GetPropertyDescriptorById(cx, proto, id, desc);
 }
 
 bool
@@ -211,6 +210,22 @@ DOMProxyHandler::defineProperty(JSContext* cx, JS::Handle<JSObject*> proxy, JS::
 
   bool dummy;
   return js_DefineOwnProperty(cx, expando, id, desc, &dummy);
+}
+
+bool
+DOMProxyHandler::set(JSContext *cx, Handle<JSObject*> proxy, Handle<JSObject*> receiver,
+                     Handle<jsid> id, bool strict, MutableHandle<JS::Value> vp)
+{
+  MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy),
+             "Should not have a XrayWrapper here");
+  bool done;
+  if (!setCustom(cx, proxy, id, vp, &done)) {
+    return false;
+  }
+  if (done) {
+    return true;
+  }
+  return mozilla::dom::BaseDOMProxyHandler::set(cx, proxy, receiver, id, strict, vp);
 }
 
 bool
@@ -309,6 +324,14 @@ IdToInt32(JSContext* cx, JS::Handle<jsid> id)
   }
 
   return i;
+}
+
+bool
+DOMProxyHandler::setCustom(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                           JS::MutableHandle<JS::Value> vp, bool *done)
+{
+  *done = false;
+  return true;
 }
 
 } // namespace dom

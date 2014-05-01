@@ -38,7 +38,7 @@
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "nsISelectionPrivate.h"
 #include "nsITransferable.h" // for kUnicodeMime
 #include "nsContentUtils.h"
@@ -182,8 +182,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocumentEncoder)
    NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_5(nsDocumentEncoder,
-                           mDocument, mSelection, mRange, mNode, mCommonParent)
+NS_IMPL_CYCLE_COLLECTION(nsDocumentEncoder,
+                         mDocument, mSelection, mRange, mNode, mCommonParent)
 
 nsDocumentEncoder::nsDocumentEncoder() : mCachedBuffer(nullptr)
 {

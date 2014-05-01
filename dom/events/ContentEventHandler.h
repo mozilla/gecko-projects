@@ -17,6 +17,12 @@ struct nsRect;
 
 namespace mozilla {
 
+enum LineBreakType
+{
+  LINE_BREAK_TYPE_NATIVE,
+  LINE_BREAK_TYPE_XP
+};
+
 /*
  * Query Content Event Handler
  *   ContentEventHandler is a helper class for EventStateManager.
@@ -73,14 +79,22 @@ public:
   static nsresult GetFlatTextOffsetOfRange(nsIContent* aRootContent,
                                            nsINode* aNode,
                                            int32_t aNodeOffset,
-                                           uint32_t* aOffset);
+                                           uint32_t* aOffset,
+                                           LineBreakType aLineBreakType);
   static nsresult GetFlatTextOffsetOfRange(nsIContent* aRootContent,
                                            nsRange* aRange,
-                                           uint32_t* aOffset);
+                                           uint32_t* aOffset,
+                                           LineBreakType aLineBreakType);
   // Get the native text length of a content node excluding any children
   static uint32_t GetNativeTextLength(nsIContent* aContent,
                                       uint32_t aMaxLength = UINT32_MAX);
 protected:
+  static uint32_t GetTextLength(nsIContent* aContent,
+                                LineBreakType aLineBreakType,
+                                uint32_t aMaxLength = UINT32_MAX);
+  static LineBreakType GetLineBreakType(WidgetQueryContentEvent* aEvent);
+  static LineBreakType GetLineBreakType(WidgetSelectionEvent* aEvent);
+  static LineBreakType GetLineBreakType(bool aUseNativeLineBreak);
   // Returns focused content (including its descendant documents).
   nsIContent* GetFocusedContent();
   // Returns true if the content is a plugin host.
@@ -92,10 +106,11 @@ protected:
   // If aExpandToClusterBoundaries is true, the start offset and the end one are
   // expanded to nearest cluster boundaries.
   nsresult SetRangeFromFlatTextOffset(nsRange* aRange,
-                                      uint32_t aNativeOffset,
-                                      uint32_t aNativeLength,
+                                      uint32_t aOffset,
+                                      uint32_t aLength,
+                                      LineBreakType aLineBreakType,
                                       bool aExpandToClusterBoundaries,
-                                      uint32_t* aNewNativeOffset = nullptr);
+                                      uint32_t* aNewOffset = nullptr);
   // Find the first textframe for the range, and get the start offset in
   // the frame.
   nsresult GetStartFrameAndOffset(nsRange* aRange,

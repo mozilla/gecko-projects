@@ -26,7 +26,7 @@ StatementParams::StatementParams(mozIStorageStatement *aStatement) :
   (void)mStatement->GetParameterCount(&mParamCount);
 }
 
-NS_IMPL_ISUPPORTS2(
+NS_IMPL_ISUPPORTS(
   StatementParams,
   mozIStorageStatementParams,
   nsIXPCScriptable
@@ -111,7 +111,7 @@ StatementParams::NewEnumerate(nsIXPConnectWrappedNative *aWrapper,
       NS_ASSERTION(*_statep != JSVAL_NULL, "Internal state is null!");
 
       // Make sure we are in range first.
-      uint32_t index = static_cast<uint32_t>(JSVAL_TO_INT(*_statep));
+      uint32_t index = static_cast<uint32_t>(_statep->toInt32());
       if (index >= mParamCount) {
         *_statep = JSVAL_NULL;
         return NS_OK;
@@ -157,7 +157,6 @@ StatementParams::NewResolve(nsIXPConnectWrappedNative *aWrapper,
                             JSContext *aCtx,
                             JSObject *aScopeObj,
                             jsid aId,
-                            uint32_t aFlags,
                             JSObject **_objp,
                             bool *_retval)
 {

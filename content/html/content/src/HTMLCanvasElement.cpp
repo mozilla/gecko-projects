@@ -123,15 +123,15 @@ HTMLCanvasElement::~HTMLCanvasElement()
   ResetPrintCallback();
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_4(HTMLCanvasElement, nsGenericHTMLElement,
-                                     mCurrentContext, mPrintCallback,
-                                     mPrintState, mOriginalCanvas)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLCanvasElement, nsGenericHTMLElement,
+                                   mCurrentContext, mPrintCallback,
+                                   mPrintState, mOriginalCanvas)
 
 NS_IMPL_ADDREF_INHERITED(HTMLCanvasElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLCanvasElement, Element)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLCanvasElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLCanvasElement, nsIDOMHTMLCanvasElement)
+  NS_INTERFACE_TABLE_INHERITED(HTMLCanvasElement, nsIDOMHTMLCanvasElement)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLCanvasElement)

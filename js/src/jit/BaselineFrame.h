@@ -15,6 +15,8 @@
 namespace js {
 namespace jit {
 
+struct BaselineDebugModeOSRInfo;
+
 // The stack looks like this, fp is the frame pointer:
 //
 // fp+y   arguments
@@ -57,7 +59,20 @@ class BaselineFrame
         HAS_PUSHED_SPS_FRAME = 1 << 8,
 
         // Frame has over-recursed on an early check.
-        OVER_RECURSED    = 1 << 9
+        OVER_RECURSED    = 1 << 9,
+
+        // Frame has a BaselineRecompileInfo stashed in the scratch value
+        // slot. See PatchBaselineFramesForDebugMOde.
+        HAS_DEBUG_MODE_OSR_INFO = 1 << 10,
+
+        // Frame has had its scope chain unwound to a pc during exception
+        // handling that is different from its current pc.
+        //
+        // This flag is intended for use in the DebugEpilogue. Once it is set,
+        // the only way to clear it is to pop the frame. Do *not* set this if
+        // we will resume execution on the frame, such as in a catch or
+        // finally block.
+        HAS_UNWOUND_SCOPE_OVERRIDE_PC = 1 << 11
     };
 
   protected: // Silence Clang warning about unused private fields.
@@ -65,17 +80,15 @@ class BaselineFrame
     // compiler may add some padding between the fields.
     uint32_t loScratchValue_;
     uint32_t hiScratchValue_;
-    uint32_t loReturnValue_;        // If HAS_RVAL, the frame's return value.
+    uint32_t loReturnValue_;              // If HAS_RVAL, the frame's return value.
     uint32_t hiReturnValue_;
     uint32_t frameSize_;
-    JSObject *scopeChain_;          // Scope chain (always initialized).
-    JSScript *evalScript_;          // If isEvalFrame(), the current eval script.
-    ArgumentsObject *argsObj_;      // If HAS_ARGS_OBJ, the arguments object.
-    void *hookData_;                // If HAS_HOOK_DATA, debugger call hook data.
+    JSObject *scopeChain_;                // Scope chain (always initialized).
+    JSScript *evalScript_;                // If isEvalFrame(), the current eval script.
+    ArgumentsObject *argsObj_;            // If HAS_ARGS_OBJ, the arguments object.
+    void *hookData_;                      // If HAS_HOOK_DATA, debugger call hook data.
+    uint32_t unwoundScopeOverrideOffset_; // If HAS_UNWOUND_SCOPE_OVERRIDE_PC.
     uint32_t flags_;
-#if JS_BITS_PER_WORD == 32
-    uint32_t padding_;              // Pad to 8-byte alignment.
-#endif
 
   public:
     // Distance between the frame pointer and the frame header (return address).
@@ -294,6 +307,40 @@ class BaselineFrame
 
     void setOverRecursed() {
         flags_ |= OVER_RECURSED;
+    }
+
+    BaselineDebugModeOSRInfo *debugModeOSRInfo() {
+        MOZ_ASSERT(flags_ & HAS_DEBUG_MODE_OSR_INFO);
+        return *reinterpret_cast<BaselineDebugModeOSRInfo **>(&loScratchValue_);
+    }
+
+    BaselineDebugModeOSRInfo *getDebugModeOSRInfo() {
+        if (flags_ & HAS_DEBUG_MODE_OSR_INFO)
+            return debugModeOSRInfo();
+        return nullptr;
+    }
+
+    void setDebugModeOSRInfo(BaselineDebugModeOSRInfo *info) {
+        flags_ |= HAS_DEBUG_MODE_OSR_INFO;
+        *reinterpret_cast<BaselineDebugModeOSRInfo **>(&loScratchValue_) = info;
+    }
+
+    void deleteDebugModeOSRInfo();
+
+    jsbytecode *unwoundScopeOverridePc() {
+        MOZ_ASSERT(flags_ & HAS_UNWOUND_SCOPE_OVERRIDE_PC);
+        return script()->offsetToPC(unwoundScopeOverrideOffset_);
+    }
+
+    jsbytecode *getUnwoundScopeOverridePc() {
+        if (flags_ & HAS_UNWOUND_SCOPE_OVERRIDE_PC)
+            return unwoundScopeOverridePc();
+        return nullptr;
+    }
+
+    void setUnwoundScopeOverridePc(jsbytecode *pc) {
+        flags_ |= HAS_UNWOUND_SCOPE_OVERRIDE_PC;
+        unwoundScopeOverrideOffset_ = script()->pcToOffset(pc);
     }
 
     void trace(JSTracer *trc, JitFrameIterator &frame);

@@ -28,6 +28,12 @@ let gPage = {
     this._sponsoredPanel = document.getElementById("sponsored-panel");
     let link = this._sponsoredPanel.querySelector(".text-link");
     link.addEventListener("click", () => this._sponsoredPanel.hidePopup());
+    if (UpdateChannel.get().startsWith("release")) {
+      document.getElementById("sponsored-panel-trial-descr").style.display = "none";
+    }
+    else {
+      document.getElementById("sponsored-panel-release-descr").style.display = "none";
+    }
 
     // Check if the new tab feature is enabled.
     let enabled = gAllPages.enabled;
@@ -111,6 +117,8 @@ let gPage = {
 
     this._initialized = true;
 
+    gSearch.init();
+
     this._mutationObserver = new MutationObserver(() => {
       if (this.allowBackgroundCaptures) {
         Services.telemetry.getHistogramById("NEWTAB_PAGE_SHOWN").add(true);
@@ -138,6 +146,10 @@ let gPage = {
           let shownCount = Math.min(10, count);
           Services.telemetry.getHistogramById(shownId).add(shownCount);
         }
+
+        // content.js isn't loaded for the page while it's in the preloader,
+        // which is why this is necessary.
+        gSearch.setUpInitialState();
       }
     });
     this._mutationObserver.observe(document.documentElement, {
@@ -164,7 +176,7 @@ let gPage = {
    */
   _updateAttributes: function Page_updateAttributes(aValue) {
     // Set the nodes' states.
-    let nodeSelector = "#newtab-scrollbox, #newtab-toggle, #newtab-grid";
+    let nodeSelector = "#newtab-scrollbox, #newtab-toggle, #newtab-grid, #newtab-search-container";
     for (let node of document.querySelectorAll(nodeSelector)) {
       if (aValue)
         node.removeAttribute("page-disabled");

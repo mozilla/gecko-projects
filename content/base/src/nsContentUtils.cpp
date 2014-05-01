@@ -50,7 +50,7 @@
 #include "mozilla/Likely.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/TextEvents.h"
 #include "nsAString.h"
 #include "nsAttrName.h"
@@ -177,9 +177,7 @@
 #include "HTMLSplitOnSpacesTokenizer.h"
 #include "nsContentTypeParser.h"
 
-#ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
-#endif
 
 extern "C" int MOZ_XMLTranslateEntity(const char* ptr, const char* end,
                                       const char** next, char16_t* result);
@@ -210,9 +208,7 @@ nsIContentPolicy *nsContentUtils::sContentPolicyService;
 bool nsContentUtils::sTriedToGetContentPolicy = false;
 nsILineBreaker *nsContentUtils::sLineBreaker;
 nsIWordBreaker *nsContentUtils::sWordBreaker;
-#ifdef IBMBIDI
 nsIBidiKeyboard *nsContentUtils::sBidiKeyboard = nullptr;
-#endif
 uint32_t nsContentUtils::sScriptBlockerCount = 0;
 #ifdef DEBUG
 uint32_t nsContentUtils::sDOMNodeRemovedSuppressCount = 0;
@@ -282,7 +278,7 @@ public:
   }
 };
 
-NS_IMPL_ISUPPORTS1(DOMEventListenerManagersHashReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(DOMEventListenerManagersHashReporter, nsIMemoryReporter)
 
 class EventListenerManagerMapEntry : public PLDHashEntryHdr
 {
@@ -947,7 +943,6 @@ nsContentUtils::ParseSandboxAttributeToFlags(const nsAttrValue* sandboxAttr)
 #undef IF_KEYWORD
 }
 
-#ifdef IBMBIDI
 nsIBidiKeyboard*
 nsContentUtils::GetBidiKeyboard()
 {
@@ -959,7 +954,6 @@ nsContentUtils::GetBidiKeyboard()
   }
   return sBidiKeyboard;
 }
-#endif
 
 template <class OutputIterator>
 struct NormalizeNewlinesCharTraits {
@@ -1444,9 +1438,7 @@ nsContentUtils::Shutdown()
   NS_IF_RELEASE(sIOService);
   NS_IF_RELEASE(sLineBreaker);
   NS_IF_RELEASE(sWordBreaker);
-#ifdef IBMBIDI
   NS_IF_RELEASE(sBidiKeyboard);
-#endif
 
   delete sAtomEventTable;
   sAtomEventTable = nullptr;
@@ -5398,9 +5390,9 @@ nsContentUtils::CheckSameOrigin(nsIChannel *aOldChannel, nsIChannel *aNewChannel
   return rv;
 }
 
-NS_IMPL_ISUPPORTS2(SameOriginChecker,
-                   nsIChannelEventSink,
-                   nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS(SameOriginChecker,
+                  nsIChannelEventSink,
+                  nsIInterfaceRequestor)
 
 NS_IMETHODIMP
 SameOriginChecker::AsyncOnChannelRedirect(nsIChannel *aOldChannel,

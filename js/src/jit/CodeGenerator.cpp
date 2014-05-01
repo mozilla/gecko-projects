@@ -150,14 +150,12 @@ MNewStringObject::templateObj() const {
 CodeGenerator::CodeGenerator(MIRGenerator *gen, LIRGraph *graph, MacroAssembler *masm)
   : CodeGeneratorSpecific(gen, graph, masm)
   , ionScriptLabels_(gen->alloc())
-  , unassociatedScriptCounts_(nullptr)
 {
 }
 
 CodeGenerator::~CodeGenerator()
 {
     JS_ASSERT_IF(!gen->compilingAsmJS(), masm.numAsmJSAbsoluteLinks() == 0);
-    js_delete(unassociatedScriptCounts_);
 }
 
 typedef bool (*StringToNumberFn)(ThreadSafeContext *, JSString *, double *);
@@ -1506,7 +1504,15 @@ CodeGenerator::emitGetPropertyPolymorphic(LInstruction *ins, Register obj, Regis
     Label done;
     for (size_t i = 0; i < mir->numShapes(); i++) {
         Label next;
-        masm.branchPtr(Assembler::NotEqual, scratch, ImmGCPtr(mir->objShape(i)), &next);
+        if (i == mir->numShapes() - 1) {
+            if (!bailoutCmpPtr(Assembler::NotEqual, scratch, ImmGCPtr(mir->objShape(i)),
+                               ins->snapshot()))
+            {
+                return false;
+            }
+        } else {
+            masm.branchPtr(Assembler::NotEqual, scratch, ImmGCPtr(mir->objShape(i)), &next);
+        }
 
         Shape *shape = mir->shape(i);
         if (shape->slot() < shape->numFixedSlots()) {
@@ -1520,13 +1526,10 @@ CodeGenerator::emitGetPropertyPolymorphic(LInstruction *ins, Register obj, Regis
             masm.loadTypedOrValue(Address(scratch, offset), output);
         }
 
-        masm.jump(&done);
+        if (i != mir->numShapes() - 1)
+            masm.jump(&done);
         masm.bind(&next);
     }
-
-    // Bailout if no shape matches.
-    if (!bailout(ins->snapshot()))
-        return false;
 
     masm.bind(&done);
     return true;
@@ -1563,7 +1566,15 @@ CodeGenerator::emitSetPropertyPolymorphic(LInstruction *ins, Register obj, Regis
     Label done;
     for (size_t i = 0; i < mir->numShapes(); i++) {
         Label next;
-        masm.branchPtr(Assembler::NotEqual, scratch, ImmGCPtr(mir->objShape(i)), &next);
+        if (i == mir->numShapes() - 1) {
+            if (!bailoutCmpPtr(Assembler::NotEqual, scratch, ImmGCPtr(mir->objShape(i)),
+                               ins->snapshot()))
+            {
+                return false;
+            }
+        } else {
+            masm.branchPtr(Assembler::NotEqual, scratch, ImmGCPtr(mir->objShape(i)), &next);
+        }
 
         Shape *shape = mir->shape(i);
         if (shape->slot() < shape->numFixedSlots()) {
@@ -1581,13 +1592,10 @@ CodeGenerator::emitSetPropertyPolymorphic(LInstruction *ins, Register obj, Regis
             masm.storeConstantOrRegister(value, addr);
         }
 
-        masm.jump(&done);
+        if (i != mir->numShapes() - 1)
+            masm.jump(&done);
         masm.bind(&next);
     }
-
-    // Bailout if no shape matches.
-    if (!bailout(ins->snapshot()))
-        return false;
 
     masm.bind(&done);
     return true;
@@ -1724,13 +1732,39 @@ CodeGenerator::visitGuardObjectIdentity(LGuardObjectIdentity *guard)
 }
 
 bool
+CodeGenerator::visitGuardShapePolymorphic(LGuardShapePolymorphic *lir)
+{
+    const MGuardShapePolymorphic *mir = lir->mir();
+    Register obj = ToRegister(lir->object());
+    Register temp = ToRegister(lir->temp());
+
+    MOZ_ASSERT(mir->numShapes() > 1);
+
+    Label done;
+    masm.loadObjShape(obj, temp);
+
+    for (size_t i = 0; i < mir->numShapes(); i++) {
+        Shape *shape = mir->getShape(i);
+        if (i == mir->numShapes() - 1) {
+            if (!bailoutCmpPtr(Assembler::NotEqual, temp, ImmGCPtr(shape), lir->snapshot()))
+                return false;
+        } else {
+            masm.branchPtr(Assembler::Equal, temp, ImmGCPtr(shape), &done);
+        }
+    }
+
+    masm.bind(&done);
+    return true;
+}
+
+bool
 CodeGenerator::visitTypeBarrierV(LTypeBarrierV *lir)
 {
     ValueOperand operand = ToValue(lir, LTypeBarrierV::Input);
     Register scratch = ToTempRegisterOrInvalid(lir->temp());
 
     Label miss;
-    masm.guardTypeSet(operand, lir->mir()->resultTypeSet(), scratch, &miss);
+    masm.guardTypeSet(operand, lir->mir()->resultTypeSet(), lir->mir()->barrierKind(), scratch, &miss);
     if (!bailoutFrom(&miss, lir->snapshot()))
         return false;
     return true;
@@ -1739,6 +1773,8 @@ CodeGenerator::visitTypeBarrierV(LTypeBarrierV *lir)
 bool
 CodeGenerator::visitTypeBarrierO(LTypeBarrierO *lir)
 {
+    MOZ_ASSERT(lir->mir()->barrierKind() != BarrierKind::TypeTagOnly);
+
     Register obj = ToRegister(lir->object());
     Register scratch = ToTempRegisterOrInvalid(lir->temp());
 
@@ -1756,7 +1792,7 @@ CodeGenerator::visitMonitorTypes(LMonitorTypes *lir)
     Register scratch = ToTempUnboxRegister(lir->temp());
 
     Label matched, miss;
-    masm.guardTypeSet(operand, lir->mir()->typeSet(), scratch, &miss);
+    masm.guardTypeSet(operand, lir->mir()->typeSet(), lir->mir()->barrierKind(), scratch, &miss);
     if (!bailoutFrom(&miss, lir->snapshot()))
         return false;
     return true;
@@ -1834,8 +1870,10 @@ CodeGenerator::visitPostWriteBarrierO(LPostWriteBarrierO *lir)
     Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
+#ifdef DEBUG
         const Nursery &nursery = GetIonContext()->runtime->gcNursery();
         JS_ASSERT(!nursery.isInside(&lir->object()->toConstant()->toObject()));
+#endif
     } else {
         masm.branchPtrInNurseryRange(ToRegister(lir->object()), temp, ool->rejoin());
     }
@@ -1858,8 +1896,10 @@ CodeGenerator::visitPostWriteBarrierV(LPostWriteBarrierV *lir)
     Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
+#ifdef DEBUG
         const Nursery &nursery = GetIonContext()->runtime->gcNursery();
         JS_ASSERT(!nursery.isInside(&lir->object()->toConstant()->toObject()));
+#endif
     } else {
         masm.branchPtrInNurseryRange(ToRegister(lir->object()), temp, ool->rejoin());
     }
@@ -2540,6 +2580,19 @@ CodeGenerator::visitApplyArgsGeneric(LApplyArgsGeneric *apply)
     return true;
 }
 
+typedef bool (*ArraySpliceDenseFn)(JSContext *, HandleObject, uint32_t, uint32_t);
+static const VMFunction ArraySpliceDenseInfo = FunctionInfo<ArraySpliceDenseFn>(ArraySpliceDense);
+
+bool
+CodeGenerator::visitArraySplice(LArraySplice *lir)
+{
+    pushArg(ToRegister(lir->getDeleteCount()));
+    pushArg(ToRegister(lir->getStart()));
+    pushArg(ToRegister(lir->getObject()));
+    return callVM(ArraySpliceDenseInfo, lir);
+}
+
+
 bool
 CodeGenerator::visitBail(LBail *lir)
 {
@@ -2695,7 +2748,7 @@ CodeGenerator::generateArgumentsChecks(bool bailout)
         // ... * sizeof(Value)          - Scale by value size.
         // ArgToStackOffset(...)        - Compute displacement within arg vector.
         int32_t offset = ArgToStackOffset((i - info.startArgSlot()) * sizeof(Value));
-        masm.guardTypeSet(Address(StackPointer, offset), types, temp, &miss);
+        masm.guardTypeSet(Address(StackPointer, offset), types, BarrierKind::TypeSet, temp, &miss);
     }
 
     if (miss.used()) {
@@ -2734,17 +2787,6 @@ class CheckOverRecursedFailure : public OutOfLineCodeBase<CodeGenerator>
         return lir_;
     }
 };
-
-bool
-CodeGenerator::omitOverRecursedCheck() const
-{
-    // If the current function makes no calls (which means it isn't recursive)
-    // and it uses only a small amount of stack space, it doesn't need a
-    // stack overflow check. Note that the actual number here is somewhat
-    // arbitrary, and codegen actually uses small bounded amounts of
-    // additional stack space in some cases too.
-    return frameSize() < 64 && !gen->performsCall();
-}
 
 bool
 CodeGenerator::visitCheckOverRecursed(LCheckOverRecursed *lir)
@@ -2974,15 +3016,15 @@ CodeGenerator::maybeCreateScriptCounts()
     if (!cx || !cx->runtime()->profilingScripts)
         return nullptr;
 
-    IonScriptCounts *counts = nullptr;
-
     CompileInfo *outerInfo = &gen->info();
     JSScript *script = outerInfo->script();
-
-    if (script && !script->hasScriptCounts() && !script->initScriptCounts(cx))
+    if (!script)
         return nullptr;
 
-    counts = js_new<IonScriptCounts>();
+    if (!script->hasScriptCounts() && !script->initScriptCounts(cx))
+        return nullptr;
+
+    IonScriptCounts *counts = js_new<IonScriptCounts>();
     if (!counts || !counts->init(graph.numBlocks())) {
         js_delete(counts);
         return nullptr;
@@ -2991,33 +3033,24 @@ CodeGenerator::maybeCreateScriptCounts()
     for (size_t i = 0; i < graph.numBlocks(); i++) {
         MBasicBlock *block = graph.getBlock(i)->mir();
 
-        uint32_t offset = 0;
-        if (script) {
-            // Find a PC offset in the outermost script to use. If this block
-            // is from an inlined script, find a location in the outer script
-            // to associate information about the inlining with.
-            MResumePoint *resume = block->entryResumePoint();
-            while (resume->caller())
-                resume = resume->caller();
-            offset = script->pcToOffset(resume->pc());
-        }
+        // Find a PC offset in the outermost script to use. If this block
+        // is from an inlined script, find a location in the outer script
+        // to associate information about the inlining with.
+        MResumePoint *resume = block->entryResumePoint();
+        while (resume->caller())
+            resume = resume->caller();
 
+        uint32_t offset = script->pcToOffset(resume->pc());
         if (!counts->block(i).init(block->id(), offset, block->numSuccessors())) {
             js_delete(counts);
             return nullptr;
         }
+
         for (size_t j = 0; j < block->numSuccessors(); j++)
             counts->block(i).setSuccessor(j, block->getSuccessor(j)->id());
     }
 
-    if (script) {
-        script->addIonCounts(counts);
-    } else {
-        // Compiling code for Asm.js. Leave the counts on the CodeGenerator to
-        // be picked up by the AsmJSModule after generation finishes.
-        unassociatedScriptCounts_ = counts;
-    }
-
+    script->addIonCounts(counts);
     return counts;
 }
 
@@ -3191,7 +3224,7 @@ CodeGenerator::emitValueResultChecks(LInstruction *lir, MDefinition *mir)
     if (mir->resultTypeSet() && !mir->resultTypeSet()->unknown()) {
         // We have a result TypeSet, assert this value is in it.
         Label miss, ok;
-        masm.guardTypeSet(output, mir->resultTypeSet(), temp1, &miss);
+        masm.guardTypeSet(output, mir->resultTypeSet(), BarrierKind::TypeSet, temp1, &miss);
         masm.jump(&ok);
 
         masm.bind(&miss);
@@ -4348,6 +4381,13 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD *ins)
 
     const MathCache *mathCache = ins->mir()->cache();
 
+    masm.setupUnalignedABICall(mathCache ? 2 : 1, temp);
+    if (mathCache) {
+        masm.movePtr(ImmPtr(mathCache), temp);
+        masm.passABIArg(temp);
+    }
+    masm.passABIArg(input, MoveOp::DOUBLE);
+
 #   define MAYBE_CACHED(fcn) (mathCache ? (void*)fcn ## _impl : (void*)fcn ## _uncached)
 
     void *funptr = nullptr;
@@ -4356,12 +4396,10 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD *ins)
         funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_log));
         break;
       case MMathFunction::Sin:
-        funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_sin_impl);
-        mathCache = nullptr;
+        funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_sin));
         break;
       case MMathFunction::Cos:
-        funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_cos_impl);
-        mathCache = nullptr;
+        funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_cos));
         break;
       case MMathFunction::Exp:
         funptr = JS_FUNC_TO_DATA_PTR(void *, MAYBE_CACHED(js::math_exp));
@@ -4419,28 +4457,18 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD *ins)
         break;
       case MMathFunction::Floor:
         funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_floor_impl);
-        mathCache = nullptr;
         break;
       case MMathFunction::Ceil:
         funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_ceil_impl);
-        mathCache = nullptr;
         break;
       case MMathFunction::Round:
         funptr = JS_FUNC_TO_DATA_PTR(void *, js::math_round_impl);
-        mathCache = nullptr;
         break;
       default:
         MOZ_ASSUME_UNREACHABLE("Unknown math function");
     }
 
 #   undef MAYBE_CACHED
-
-    masm.setupUnalignedABICall(mathCache ? 2 : 1, temp);
-    if (mathCache) {
-        masm.movePtr(ImmPtr(mathCache), temp);
-        masm.passABIArg(temp);
-    }
-    masm.passABIArg(input, MoveOp::DOUBLE);
 
     masm.callWithABI(funptr, MoveOp::DOUBLE);
     return true;
@@ -6194,7 +6222,7 @@ CodeGenerator::visitRestPar(LRestPar *lir)
 }
 
 bool
-CodeGenerator::generateAsmJS()
+CodeGenerator::generateAsmJS(Label *stackOverflowLabel)
 {
     IonSpew(IonSpew_Codegen, "# Emitting asm.js code");
 
@@ -6207,7 +6235,7 @@ CodeGenerator::generateAsmJS()
     // parameters have been useFixed()ed to these ABI-specified positions.
     // Thus, there is nothing special to do in the prologue except (possibly)
     // bump the stack.
-    if (!generatePrologue())
+    if (!generateAsmJSPrologue(stackOverflowLabel))
         return false;
     if (!generateBody())
         return false;
@@ -8061,7 +8089,7 @@ CodeGenerator::visitProfilerStackOp(LProfilerStackOp *lir)
 
         case MProfilerStackOp::Enter:
             if (gen->options.spsSlowAssertionsEnabled()) {
-                if (!inlinedFunction || js_JitOptions.profileInlineFrames) {
+                if (!inlinedFunction) {
                     saveLive(lir);
                     pushArg(ImmGCPtr(lir->script()));
                     if (!callVM(SPSEnterInfo, lir))
@@ -8084,7 +8112,7 @@ CodeGenerator::visitProfilerStackOp(LProfilerStackOp *lir)
 
         case MProfilerStackOp::Exit:
             if (gen->options.spsSlowAssertionsEnabled()) {
-                if (!inlinedFunction || js_JitOptions.profileInlineFrames) {
+                if (!inlinedFunction) {
                     saveLive(lir);
                     pushArg(ImmGCPtr(lir->script()));
                     // Once we've exited, then we shouldn't emit instrumentation for
@@ -8232,6 +8260,7 @@ CodeGenerator::visitAsmJSCall(LAsmJSCall *ins)
         }
     }
 #endif
+
    if (mir->spIncrement())
         masm.freeStack(mir->spIncrement());
 
@@ -8248,13 +8277,13 @@ CodeGenerator::visitAsmJSCall(LAsmJSCall *ins)
     MAsmJSCall::Callee callee = mir->callee();
     switch (callee.which()) {
       case MAsmJSCall::Callee::Internal:
-        masm.call(callee.internal());
+        masm.call(mir->desc(), callee.internal());
         break;
       case MAsmJSCall::Callee::Dynamic:
-        masm.call(ToRegister(ins->getOperand(mir->dynamicCalleeOperandIndex())));
+        masm.call(mir->desc(), ToRegister(ins->getOperand(mir->dynamicCalleeOperandIndex())));
         break;
       case MAsmJSCall::Callee::Builtin:
-        masm.call(callee.builtin());
+        masm.call(mir->desc(), callee.builtin());
         break;
     }
 
@@ -8286,20 +8315,6 @@ CodeGenerator::visitAsmJSVoidReturn(LAsmJSVoidReturn *lir)
     // Don't emit a jump to the return label if this is the last block.
     if (current->mir() != *gen->graph().poBegin())
         masm.jump(&returnLabel_);
-    return true;
-}
-
-bool
-CodeGenerator::visitAsmJSCheckOverRecursed(LAsmJSCheckOverRecursed *lir)
-{
-    // If we don't push anything on the stack, skip the check.
-    if (omitOverRecursedCheck())
-        return true;
-
-    masm.branchPtr(Assembler::AboveOrEqual,
-                   AsmJSAbsoluteAddress(AsmJSImm_StackLimit),
-                   StackPointer,
-                   lir->mir()->onError());
     return true;
 }
 

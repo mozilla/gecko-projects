@@ -38,13 +38,11 @@ namespace storage {
 ////////////////////////////////////////////////////////////////////////////////
 //// nsIClassInfo
 
-NS_IMPL_CI_INTERFACE_GETTER4(
-  AsyncStatement
-, mozIStorageAsyncStatement
-, mozIStorageBaseStatement
-, mozIStorageBindingParams
-, mozilla::storage::StorageBaseStatementInternal
-)
+NS_IMPL_CI_INTERFACE_GETTER(AsyncStatement,
+                            mozIStorageAsyncStatement,
+                            mozIStorageBaseStatement,
+                            mozIStorageBindingParams,
+                            mozilla::storage::StorageBaseStatementInternal)
 
 class AsyncStatementClassInfo : public nsIClassInfo
 {
@@ -116,7 +114,7 @@ public:
 
 NS_IMETHODIMP_(MozExternalRefCountType) AsyncStatementClassInfo::AddRef() { return 2; }
 NS_IMETHODIMP_(MozExternalRefCountType) AsyncStatementClassInfo::Release() { return 1; }
-NS_IMPL_QUERY_INTERFACE1(AsyncStatementClassInfo, nsIClassInfo)
+NS_IMPL_QUERY_INTERFACE(AsyncStatementClassInfo, nsIClassInfo)
 
 static AsyncStatementClassInfo sAsyncStatementClassInfo;
 
@@ -131,13 +129,15 @@ AsyncStatement::AsyncStatement()
 
 nsresult
 AsyncStatement::initialize(Connection *aDBConnection,
+                           sqlite3 *aNativeConnection,
                            const nsACString &aSQLStatement)
 {
-  NS_ASSERTION(aDBConnection, "No database connection given!");
-  NS_ASSERTION(aDBConnection->GetNativeConnection(),
-               "We should never be called with a null sqlite3 database!");
+  MOZ_ASSERT(aDBConnection, "No database connection given!");
+  MOZ_ASSERT(!aDBConnection->isClosed(), "Database connection should be valid");
+  MOZ_ASSERT(aNativeConnection, "No native connection given!");
 
   mDBConnection = aDBConnection;
+  mNativeConnection = aNativeConnection;
   mSQLString = aSQLStatement;
 
   PR_LOG(gStorageLog, PR_LOG_NOTICE, ("Inited async statement '%s' (0x%p)",
@@ -300,11 +300,12 @@ AsyncStatement::getAsyncStatement(sqlite3_stmt **_stmt)
 #endif
 
   if (!mAsyncStatement) {
-    int rc = mDBConnection->prepareStatement(mSQLString, &mAsyncStatement);
+    int rc = mDBConnection->prepareStatement(mNativeConnection, mSQLString,
+                                             &mAsyncStatement);
     if (rc != SQLITE_OK) {
       PR_LOG(gStorageLog, PR_LOG_ERROR,
              ("Sqlite statement prepare error: %d '%s'", rc,
-              ::sqlite3_errmsg(mDBConnection->GetNativeConnection())));
+              ::sqlite3_errmsg(mNativeConnection)));
       PR_LOG(gStorageLog, PR_LOG_ERROR,
              ("Statement was: '%s'", mSQLString.get()));
       *_stmt = nullptr;

@@ -150,7 +150,13 @@ enum ExecutionMode {
      * MIR analysis performed when invoking 'new' on a script, to determine
      * definite properties. Used by the optimizing JIT.
      */
-    DefinitePropertiesAnalysis
+    DefinitePropertiesAnalysis,
+
+    /*
+     * MIR analysis performed when executing a script which uses its arguments,
+     * when it is not known whether a lazy arguments value can be used.
+     */
+    ArgumentsUsageAnalysis
 };
 
 /*
@@ -184,10 +190,6 @@ namespace jit {
     struct IonScript;
     class IonAllocPolicy;
     class TempAllocator;
-}
-
-namespace analyze {
-    class ScriptAnalysis;
 }
 
 namespace types {
@@ -294,6 +296,13 @@ class Type
 
 /* Get the type of a jsval, or zero for an unknown special value. */
 inline Type GetValueType(const Value &val);
+
+/*
+ * Get the type of a possibly optimized out value. This generally only
+ * happens on unconditional type monitors on bailing out of Ion, such as
+ * for argument and local types.
+ */
+inline Type GetMaybeOptimizedOutValueType(const Value &val);
 
 /*
  * Type inference memory management overview.
@@ -537,7 +546,7 @@ class TypeSet
     static TemporaryTypeSet *unionSets(TypeSet *a, TypeSet *b, LifoAlloc *alloc);
 
     /* Add a type to this set using the specified allocator. */
-    inline void addType(Type type, LifoAlloc *alloc);
+    void addType(Type type, LifoAlloc *alloc);
 
     /* Get a list of all types in this set. */
     typedef Vector<Type, 1, SystemAllocPolicy> TypeList;
@@ -575,6 +584,12 @@ class TypeSet
      */
     bool isSubset(TypeSet *other);
 
+    /*
+     * Get whether the objects in this TypeSet are a subset of the objects
+     * in other.
+     */
+    bool objectsAreSubset(TypeSet *other);
+
     /* Forward all types in this set to the specified constraint. */
     bool addTypesToConstraint(JSContext *cx, TypeConstraint *constraint);
 
@@ -591,7 +606,7 @@ class TypeSet
     }
     inline void setBaseObjectCount(uint32_t count);
 
-    inline void clearObjects();
+    void clearObjects();
 };
 
 /* Superclass common to stack and heap type sets. */
@@ -607,7 +622,7 @@ class ConstraintTypeSet : public TypeSet
      * Add a type to this set, calling any constraint handlers if this is a new
      * possible type.
      */
-    inline void addType(ExclusiveContext *cx, Type type);
+    void addType(ExclusiveContext *cx, Type type);
 
     /* Add a new constraint to this set. */
     bool addConstraint(JSContext *cx, TypeConstraint *constraint, bool callExisting = true);
@@ -972,7 +987,7 @@ struct TypeObject : gc::BarrieredCell<TypeObject>
      *   some number of properties to the object in a definite order
      *   before the object escapes.
      */
-    HeapPtr<TypeObjectAddendum> addendum;
+    HeapPtrTypeObjectAddendum addendum;
   public:
 
     TypeObjectFlags flags() const {
@@ -1173,7 +1188,7 @@ struct TypeObject : gc::BarrieredCell<TypeObject>
  */
 struct TypeObjectWithNewScriptEntry
 {
-    ReadBarriered<TypeObject> object;
+    ReadBarrieredTypeObject object;
 
     // Note: This pointer is only used for equality and does not need a read barrier.
     JSFunction *newFunction;
@@ -1235,9 +1250,6 @@ class TypeScript
 {
     friend class ::JSScript;
 
-    /* Analysis information for the script, cleared on each GC. */
-    analyze::ScriptAnalysis *analysis;
-
   public:
     /* Array of type type sets for variables and JOF_TYPESET ops. */
     StackTypeSet *typeArray() const { return (StackTypeSet *) (uintptr_t(this) + sizeof(TypeScript)); }
@@ -1251,7 +1263,7 @@ class TypeScript
     static inline StackTypeSet *BytecodeTypes(JSScript *script, jsbytecode *pc);
 
     template <typename TYPESET>
-    static inline TYPESET *BytecodeTypes(JSScript *script, jsbytecode *pc,
+    static inline TYPESET *BytecodeTypes(JSScript *script, jsbytecode *pc, uint32_t *bytecodeMap,
                                          uint32_t *hint, TYPESET *typeArray);
 
     /* Get a type object for an allocation site in this script. */
@@ -1303,6 +1315,9 @@ class TypeScript
 #endif
 };
 
+void
+FillBytecodeTypeMap(JSScript *script, uint32_t *bytecodeMap);
+
 class RecompileInfo;
 
 // Allocate a CompilerOutput for a finished compilation and generate the type
@@ -1318,14 +1333,20 @@ void
 FinishDefinitePropertiesAnalysis(JSContext *cx, CompilerConstraintList *constraints);
 
 struct ArrayTableKey;
-typedef HashMap<ArrayTableKey,ReadBarriered<TypeObject>,ArrayTableKey,SystemAllocPolicy> ArrayTypeTable;
+typedef HashMap<ArrayTableKey,
+                ReadBarrieredTypeObject,
+                ArrayTableKey,
+                SystemAllocPolicy> ArrayTypeTable;
 
 struct ObjectTableKey;
 struct ObjectTableEntry;
 typedef HashMap<ObjectTableKey,ObjectTableEntry,ObjectTableKey,SystemAllocPolicy> ObjectTypeTable;
 
 struct AllocationSiteKey;
-typedef HashMap<AllocationSiteKey,ReadBarriered<TypeObject>,AllocationSiteKey,SystemAllocPolicy> AllocationSiteTable;
+typedef HashMap<AllocationSiteKey,
+                ReadBarrieredTypeObject,
+                AllocationSiteKey,
+                SystemAllocPolicy> AllocationSiteTable;
 
 class HeapTypeSetKey;
 

@@ -95,9 +95,23 @@ public:
                                  JS::MutableHandle<JS::Value> aRetValue,
                                  void **aOffThreadToken = nullptr);
 
+  static nsresult EvaluateString(JSContext* aCx,
+                                 JS::SourceBufferHolder& aSrcBuf,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 const EvaluateOptions& aEvaluateOptions,
+                                 JS::MutableHandle<JS::Value> aRetValue,
+                                 void **aOffThreadToken = nullptr);
+
 
   static nsresult EvaluateString(JSContext* aCx,
                                  const nsAString& aScript,
+                                 JS::Handle<JSObject*> aScopeObject,
+                                 JS::CompileOptions &aCompileOptions,
+                                 void **aOffThreadToken = nullptr);
+
+  static nsresult EvaluateString(JSContext* aCx,
+                                 JS::SourceBufferHolder& aSrcBuf,
                                  JS::Handle<JSObject*> aScopeObject,
                                  JS::CompileOptions &aCompileOptions,
                                  void **aOffThreadToken = nullptr);
@@ -171,7 +185,7 @@ public:
 
   bool init(JSContext* aContext, const JS::Value &v)
   {
-      return init(aContext, JSVAL_TO_STRING(v));
+      return init(aContext, v.toString());
   }
 
   void init(JSFlatString* fstr)

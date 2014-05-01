@@ -28,10 +28,22 @@
 #include <unistd.h>
 #endif
 
+#if defined(XP_LINUX) || defined(__FreeBSD__) || defined(XP_MACOSX)
+#define MOZ_SUPPORTS_FIFO 1
+#endif
+
 #if defined(XP_LINUX) || defined(__FreeBSD__)
+#define MOZ_SUPPORTS_RT_SIGNALS 1
+#endif
+
+#if defined(MOZ_SUPPORTS_RT_SIGNALS)
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#endif
+
+#if defined(MOZ_SUPPORTS_FIFO)
+#include "mozilla/Preferences.h"
 #endif
 
 using namespace mozilla;
@@ -90,7 +102,7 @@ private:
 
 } // anonymous namespace
 
-#if defined(XP_LINUX) || defined(__FreeBSD__) // {
+#if defined(MOZ_SUPPORTS_RT_SIGNALS) // {
 namespace {
 
 /*
@@ -123,16 +135,6 @@ static uint8_t sDumpAboutMemorySignum;         // SIGRTMIN
 static uint8_t sDumpAboutMemoryAfterMMUSignum; // SIGRTMIN + 1
 static uint8_t sGCAndCCDumpSignum;             // SIGRTMIN + 2
 
-void doMemoryReport(const nsCString& inputStr)
-{
-  bool doMMUMemoryReport = inputStr == NS_LITERAL_CSTRING("minimize memory report");
-  LOG("FifoWatcher(command:%s) dispatching memory report runnable.", inputStr.get());
-  nsRefPtr<DumpMemoryInfoToTempDirRunnable> runnable =
-    new DumpMemoryInfoToTempDirRunnable(/* identifier = */ EmptyString(),
-                                        doMMUMemoryReport);
-  NS_DispatchToMainThread(runnable);
-}
-
 void doMemoryReport(const uint8_t recvSig)
 {
   // Dump our memory reports (but run this on the main thread!).
@@ -141,17 +143,6 @@ void doMemoryReport(const uint8_t recvSig)
   nsRefPtr<DumpMemoryInfoToTempDirRunnable> runnable =
     new DumpMemoryInfoToTempDirRunnable(/* identifier = */ EmptyString(),
                                         doMMUFirst);
-  NS_DispatchToMainThread(runnable);
-}
-
-void doGCCCDump(const nsCString& inputStr)
-{
-  bool doAllTracesGCCCDump = inputStr == NS_LITERAL_CSTRING("gc log");
-  LOG("FifoWatcher(command:%s) dispatching GC/CC log runnable.", inputStr.get());
-  nsRefPtr<GCAndCCLogDumpRunnable> runnable =
-    new GCAndCCLogDumpRunnable(/* identifier = */ EmptyString(),
-                              doAllTracesGCCCDump,
-                              /* dumpChildProcesses = */ true);
   NS_DispatchToMainThread(runnable);
 }
 
@@ -168,9 +159,73 @@ void doGCCCDump(const uint8_t recvSig)
 }
 
 } // anonymous namespace
-#endif // XP_LINUX }
+#endif // MOZ_SUPPORTS_RT_SIGNALS }
 
-NS_IMPL_ISUPPORTS1(nsMemoryInfoDumper, nsIMemoryInfoDumper)
+#if defined(MOZ_SUPPORTS_FIFO) // {
+namespace {
+
+void doMemoryReport(const nsCString& inputStr)
+{
+  bool doMMUMemoryReport = inputStr == NS_LITERAL_CSTRING("minimize memory report");
+  LOG("FifoWatcher(command:%s) dispatching memory report runnable.", inputStr.get());
+  nsRefPtr<DumpMemoryInfoToTempDirRunnable> runnable =
+    new DumpMemoryInfoToTempDirRunnable(/* identifier = */ EmptyString(),
+                                        doMMUMemoryReport);
+  NS_DispatchToMainThread(runnable);
+}
+
+void doGCCCDump(const nsCString& inputStr)
+{
+  bool doAllTracesGCCCDump = inputStr == NS_LITERAL_CSTRING("gc log");
+  LOG("FifoWatcher(command:%s) dispatching GC/CC log runnable.", inputStr.get());
+  nsRefPtr<GCAndCCLogDumpRunnable> runnable =
+    new GCAndCCLogDumpRunnable(/* identifier = */ EmptyString(),
+                              doAllTracesGCCCDump,
+                              /* dumpChildProcesses = */ true);
+  NS_DispatchToMainThread(runnable);
+}
+
+bool SetupFifo()
+{
+  static bool fifoCallbacksRegistered = false;
+
+  if (!FifoWatcher::MaybeCreate()) {
+    return false;
+  }
+
+  MOZ_ASSERT(!fifoCallbacksRegistered,
+             "FifoWatcher callbacks should be registered only once");
+
+  FifoWatcher* fw = FifoWatcher::GetSingleton();
+  // Dump our memory reports (but run this on the main thread!).
+  fw->RegisterCallback(NS_LITERAL_CSTRING("memory report"),
+                       doMemoryReport);
+  fw->RegisterCallback(NS_LITERAL_CSTRING("minimize memory report"),
+                       doMemoryReport);
+  // Dump GC and CC logs (from the main thread).
+  fw->RegisterCallback(NS_LITERAL_CSTRING("gc log"),
+                       doGCCCDump);
+  fw->RegisterCallback(NS_LITERAL_CSTRING("abbreviated gc log"),
+                       doGCCCDump);
+
+  fifoCallbacksRegistered = true;
+  return true;
+}
+
+void OnFifoEnabledChange(const char* /*unused*/, void* /*unused*/)
+{
+  LOG("%s changed", FifoWatcher::kPrefName);
+  if (SetupFifo()) {
+    Preferences::UnregisterCallback(OnFifoEnabledChange,
+                                    FifoWatcher::kPrefName,
+                                    nullptr);
+  }
+}
+
+} // anonymous namespace
+#endif // MOZ_SUPPORTS_FIFO }
+
+NS_IMPL_ISUPPORTS(nsMemoryInfoDumper, nsIMemoryInfoDumper)
 
 nsMemoryInfoDumper::nsMemoryInfoDumper()
 {
@@ -183,7 +238,7 @@ nsMemoryInfoDumper::~nsMemoryInfoDumper()
 /* static */ void
 nsMemoryInfoDumper::Initialize()
 {
-#if defined(XP_LINUX) || defined(__FreeBSD__)
+#if defined(MOZ_SUPPORTS_RT_SIGNALS)
   SignalPipeWatcher* sw = SignalPipeWatcher::GetSingleton();
 
   // Dump memory reporters (and those of our child processes)
@@ -195,19 +250,17 @@ nsMemoryInfoDumper::Initialize()
   // Dump the GC and CC logs in this and our child processes.
   sGCAndCCDumpSignum = SIGRTMIN + 2;
   sw->RegisterCallback(sGCAndCCDumpSignum, doGCCCDump);
+#endif
 
-  if (FifoWatcher::MaybeCreate()) {
-    FifoWatcher* fw = FifoWatcher::GetSingleton();
-    // Dump our memory reports (but run this on the main thread!).
-    fw->RegisterCallback(NS_LITERAL_CSTRING("memory report"),
-                         doMemoryReport);
-    fw->RegisterCallback(NS_LITERAL_CSTRING("minimize memory report"),
-                         doMemoryReport);
-    // Dump GC and CC logs (from the main thread).
-    fw->RegisterCallback(NS_LITERAL_CSTRING("gc log"),
-                         doGCCCDump);
-    fw->RegisterCallback(NS_LITERAL_CSTRING("abbreviated gc log"),
-                         doGCCCDump);
+#if defined(MOZ_SUPPORTS_FIFO)
+  if (!SetupFifo()) {
+    // NB: This gets loaded early enough that it's possible there is a user pref
+    //     set to enable the fifo watcher that has not been loaded yet. Register
+    //     to attempt to initialize if the fifo watcher becomes enabled by
+    //     a user pref.
+    Preferences::RegisterCallback(OnFifoEnabledChange,
+                                  FifoWatcher::kPrefName,
+                                  nullptr);
   }
 #endif
 }
@@ -350,7 +403,7 @@ private:
   nsRefPtr<nsGZFileWriter> mWriter;
 };
 
-NS_IMPL_ISUPPORTS1(DumpReportCallback, nsIHandleReportCallback)
+NS_IMPL_ISUPPORTS(DumpReportCallback, nsIHandleReportCallback)
 
 } // namespace mozilla
 
@@ -441,7 +494,7 @@ private:
   nsString mIdentifier;
 };
 
-NS_IMPL_ISUPPORTS1(TempDirMemoryFinishCallback, nsIFinishReportingCallback)
+NS_IMPL_ISUPPORTS(TempDirMemoryFinishCallback, nsIFinishReportingCallback)
 
 NS_IMETHODIMP
 nsMemoryInfoDumper::DumpMemoryInfoToTempDir(const nsAString& aIdentifier,
@@ -516,6 +569,10 @@ nsMemoryInfoDumper::DumpMemoryInfoToTempDir(const nsAString& aIdentifier,
 nsresult
 nsMemoryInfoDumper::DumpDMD(const nsAString &aIdentifier)
 {
+  if (!dmd::IsEnabled()) {
+    return NS_OK;
+  }
+
   nsresult rv;
 
   // Create a filename like dmd-<identifier>-<pid>.txt.gz, which will be used
@@ -655,7 +712,7 @@ private:
   nsCOMPtr<nsISupports> mFinishDumpingData;
 };
 
-NS_IMPL_ISUPPORTS1(FinishReportingCallback, nsIFinishReportingCallback)
+NS_IMPL_ISUPPORTS(FinishReportingCallback, nsIFinishReportingCallback)
 
 NS_IMETHODIMP
 nsMemoryInfoDumper::DumpMemoryReportsToNamedFile(

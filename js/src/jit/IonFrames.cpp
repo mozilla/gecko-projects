@@ -11,6 +11,7 @@
 #include "jsscript.h"
 
 #include "gc/Marking.h"
+#include "jit/BaselineDebugModeOSR.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
@@ -24,9 +25,11 @@
 #include "jit/Safepoints.h"
 #include "jit/Snapshots.h"
 #include "jit/VMFunctions.h"
+#include "vm/ArgumentsObject.h"
 #include "vm/ForkJoin.h"
 #include "vm/Interpreter.h"
 
+#include "jsscriptinlines.h"
 #include "jit/JitFrameIterator-inl.h"
 #include "vm/Probes-inl.h"
 
@@ -89,7 +92,7 @@ JitFrameIterator::JitFrameIterator(const ActivationIterator &activations)
       returnAddressToFp_(nullptr),
       frameSize_(0),
       cachedSafepointIndex_(nullptr),
-      activation_(activations.activation()->asJit()),
+      activation_(activations->asJit()),
       mode_(SequentialExecution)
 {
 }
@@ -223,10 +226,25 @@ JitFrameIterator::baselineScriptAndPc(JSScript **scriptRes, jsbytecode **pcRes) 
     if (scriptRes)
         *scriptRes = script;
     uint8_t *retAddr = returnAddressToFp();
+
+    // If we have unwound the scope due to exception handling to a different
+    // pc, the frame should behave as if it were settled on that pc.
+    if (jsbytecode *overridePc = baselineFrame()->getUnwoundScopeOverridePc()) {
+        *pcRes = overridePc;
+        return;
+    }
+
+    // If we are in the middle of a recompile handler, get the real return
+    // address as stashed in the RecompileInfo.
+    if (BaselineDebugModeOSRInfo *info = baselineFrame()->getDebugModeOSRInfo())
+        retAddr = info->resumeAddr;
+
     if (pcRes) {
-        // If the return address is into the prologue entry address, then assume start
-        // of script.
-        if (retAddr == script->baselineScript()->prologueEntryAddr()) {
+        // If the return address is into the prologue entry address or just
+        // after the debug prologue, then assume start of script.
+        if (retAddr == script->baselineScript()->prologueEntryAddr() ||
+            retAddr == script->baselineScript()->postDebugPrologueAddr())
+        {
             *pcRes = script->code();
             return;
         }
@@ -373,6 +391,26 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
     RootedScript script(cx, frame.script());
     jsbytecode *pc = frame.pc();
 
+    bool bailedOutForDebugMode = false;
+    if (cx->compartment()->debugMode()) {
+        // If we have an exception from within Ion and the debugger is active,
+        // we do the following:
+        //
+        //   1. Bailout to baseline to reconstruct a baseline frame.
+        //   2. Resume immediately into the exception tail afterwards, and
+        //   handle the exception again with the top frame now a baseline
+        //   frame.
+        //
+        // An empty exception info denotes that we're propagating an Ion
+        // exception due to debug mode, which BailoutIonToBaseline needs to
+        // know. This is because we might not be able to fully reconstruct up
+        // to the stack depth at the snapshot, as we could've thrown in the
+        // middle of a call.
+        ExceptionBailoutInfo propagateInfo;
+        uint32_t retval = ExceptionHandlerBailout(cx, frame, rfe, propagateInfo, overrecursed);
+        bailedOutForDebugMode = retval == BAILOUT_RETURN_OK;
+    }
+
     if (!script->hasTrynotes())
         return;
 
@@ -400,7 +438,7 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
             break;
 
           case JSTRY_CATCH:
-            if (cx->isExceptionPending()) {
+            if (cx->isExceptionPending() && !bailedOutForDebugMode) {
                 // Ion can compile try-catch, but bailing out to catch
                 // exceptions is slow. Reset the use count so that if we
                 // catch many exceptions we won't Ion-compile the script.
@@ -408,34 +446,13 @@ HandleExceptionIon(JSContext *cx, const InlineFrameIterator &frame, ResumeFromEx
 
                 // Bailout at the start of the catch block.
                 jsbytecode *catchPC = script->main() + tn->start + tn->length;
-
-                ExceptionBailoutInfo excInfo;
-                excInfo.frameNo = frame.frameNo();
-                excInfo.resumePC = catchPC;
-                excInfo.numExprSlots = tn->stackDepth;
-
-                BaselineBailoutInfo *info = nullptr;
-                uint32_t retval = ExceptionHandlerBailout(cx, frame, excInfo, &info);
-
-                if (retval == BAILOUT_RETURN_OK) {
-                    JS_ASSERT(info);
-                    rfe->kind = ResumeFromException::RESUME_BAILOUT;
-                    rfe->target = cx->runtime()->jitRuntime()->getBailoutTail()->raw();
-                    rfe->bailoutInfo = info;
+                ExceptionBailoutInfo excInfo(frame.frameNo(), catchPC, tn->stackDepth);
+                uint32_t retval = ExceptionHandlerBailout(cx, frame, rfe, excInfo, overrecursed);
+                if (retval == BAILOUT_RETURN_OK)
                     return;
-                }
 
-                // Bailout failed. If there was a fatal error, clear the
-                // exception to turn this into an uncatchable error. If the
-                // overrecursion check failed, continue popping all inline
-                // frames and have the caller report an overrecursion error.
-                JS_ASSERT(!info);
-                cx->clearPendingException();
-
-                if (retval == BAILOUT_RETURN_OVERRECURSED)
-                    *overrecursed = true;
-                else
-                    JS_ASSERT(retval == BAILOUT_RETURN_FATAL_ERROR);
+                // Error on bailout clears pending exception.
+                MOZ_ASSERT(!cx->isExceptionPending());
             }
             break;
 
@@ -510,8 +527,19 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
             continue;
 
         // Unwind scope chain (pop block objects).
-        if (cx->isExceptionPending())
-            UnwindScope(cx, si, script->main() + tn->start);
+        if (cx->isExceptionPending()) {
+            jsbytecode *unwindPc = script->main() + tn->start;
+            UnwindScope(cx, si, unwindPc);
+
+            // If we still need to call DebugEpilogue, we must remember the pc
+            // we unwound the scope chain to, as it will be out of sync with
+            // the frame's actual pc.
+            if (tn->kind != JSTRY_CATCH && tn->kind != JSTRY_FINALLY &&
+                cx->compartment()->debugMode() && !*calledDebugEpilogue)
+            {
+                frame.baselineFrame()->setUnwoundScopeOverridePc(unwindPc);
+            }
+        }
 
         // Compute base pointer and stack pointer.
         rfe->framePointer = frame.fp() - BaselineFrame::FramePointerOffset;
@@ -567,6 +595,13 @@ HandleExceptionBaseline(JSContext *cx, const JitFrameIterator &frame, ResumeFrom
 
 }
 
+struct AutoDeleteDebugModeOSRInfo
+{
+    BaselineFrame *frame;
+    AutoDeleteDebugModeOSRInfo(BaselineFrame *frame) : frame(frame) { MOZ_ASSERT(frame); }
+    ~AutoDeleteDebugModeOSRInfo() { frame->deleteDebugModeOSRInfo(); }
+};
+
 void
 HandleException(ResumeFromException *rfe)
 {
@@ -614,9 +649,8 @@ HandleException(ResumeFromException *rfe)
                 if (invalidated)
                     popSPSFrame = ionScript->hasSPSInstrumentation();
 
-                // If inline-frames are not profiled, then don't pop an SPS frame
-                // for them.
-                if (frames.more() && !js_JitOptions.profileInlineFrames)
+                // Don't pop an SPS frame for inlined frames, since they are not instrumented.
+                if (frames.more())
                     popSPSFrame = false;
 
                 // When profiling, each frame popped needs a notification that
@@ -637,6 +671,16 @@ HandleException(ResumeFromException *rfe)
             bool calledDebugEpilogue = false;
 
             HandleExceptionBaseline(cx, iter, rfe, &calledDebugEpilogue);
+
+            // If we are propagating an exception through a frame with
+            // on-stack recompile info, we should free the allocated
+            // RecompileInfo struct before we leave this block, as we will not
+            // be returning to the recompile handler.
+            //
+            // We cannot delete it immediately because of the call to
+            // iter.baselineScriptAndPc below.
+            AutoDeleteDebugModeOSRInfo deleteDebugModeOSRInfo(iter.baselineFrame());
+
             if (rfe->kind != ResumeFromException::RESUME_ENTRY_FRAME)
                 return;
 
@@ -1147,15 +1191,18 @@ MarkRectifierFrame(JSTracer *trc, const JitFrameIterator &frame)
 static void
 MarkJitActivation(JSTracer *trc, const JitActivationIterator &activations)
 {
+    JitActivation *activation = activations->asJit();
+
 #ifdef CHECK_OSIPOINT_REGISTERS
     if (js_JitOptions.checkOsiPointRegisters) {
         // GC can modify spilled registers, breaking our register checks.
         // To handle this, we disable these checks for the current VM call
         // when a GC happens.
-        JitActivation *activation = activations.activation()->asJit();
         activation->setCheckRegs(false);
     }
 #endif
+
+    activation->markRematerializedFrames(trc);
 
     for (JitFrameIterator frames(activations); !frames.done(); ++frames) {
         switch (frames.type()) {
@@ -1189,6 +1236,14 @@ MarkJitActivations(JSRuntime *rt, JSTracer *trc)
 {
     for (JitActivationIterator activations(rt); !activations.done(); ++activations)
         MarkJitActivation(trc, activations);
+}
+
+JSCompartment *
+TopmostJitActivationCompartment(JSRuntime *rt)
+{
+    for (JitActivationIterator activations(rt); !activations.done(); ++activations)
+        return activations.activation()->compartment();
+    return nullptr;
 }
 
 #ifdef JSGC_GENERATIONAL
@@ -1301,7 +1356,8 @@ SnapshotIterator::SnapshotIterator(IonScript *ionScript, SnapshotOffset snapshot
              ionScript->recoversSize()),
     fp_(fp),
     machine_(machine),
-    ionScript_(ionScript)
+    ionScript_(ionScript),
+    instructionResults_(nullptr)
 {
     JS_ASSERT(snapshotOffset < ionScript->snapshotsListSize());
 }
@@ -1316,7 +1372,8 @@ SnapshotIterator::SnapshotIterator(const JitFrameIterator &iter)
              iter.ionScript()->recoversSize()),
     fp_(iter.jsFrame()),
     machine_(iter.machineState()),
-    ionScript_(iter.ionScript())
+    ionScript_(iter.ionScript()),
+    instructionResults_(nullptr)
 {
 }
 
@@ -1324,7 +1381,8 @@ SnapshotIterator::SnapshotIterator()
   : snapshot_(nullptr, 0, 0, 0),
     recover_(snapshot_, nullptr, 0),
     fp_(nullptr),
-    ionScript_(nullptr)
+    ionScript_(nullptr),
+    instructionResults_(nullptr)
 {
 }
 
@@ -1388,6 +1446,9 @@ SnapshotIterator::allocationReadable(const RValueAllocation &alloc)
       case RValueAllocation::UNTYPED_STACK:
         return hasStack(alloc.stackOffset());
 #endif
+
+      case RValueAllocation::RECOVER_INSTRUCTION:
+        return hasInstructionResult(alloc.index());
 
       default:
         return true;
@@ -1494,6 +1555,9 @@ SnapshotIterator::allocationValue(const RValueAllocation &alloc)
       }
 #endif
 
+      case RValueAllocation::RECOVER_INSTRUCTION:
+        return fromInstructionResult(alloc.index());
+
       default:
         MOZ_ASSUME_UNREACHABLE("huh?");
     }
@@ -1508,7 +1572,7 @@ SnapshotIterator::resumePoint() const
 uint32_t
 SnapshotIterator::numAllocations() const
 {
-    return resumePoint()->numOperands();
+    return instruction()->numOperands();
 }
 
 uint32_t
@@ -1525,6 +1589,43 @@ SnapshotIterator::skipInstruction()
     for (size_t i = 0; i < numOperands; i++)
         skip();
     nextInstruction();
+}
+
+bool
+SnapshotIterator::initIntructionResults(AutoValueVector &results)
+{
+    MOZ_ASSERT(recover_.numInstructionsRead() == 1);
+
+    // The last instruction will always be a resume point, no need to allocate
+    // space for it.
+    if (recover_.numInstructions() == 1)
+        return true;
+
+    MOZ_ASSERT(recover_.numInstructions() > 1);
+    size_t numResults = recover_.numInstructions() - 1;
+    if (!results.reserve(numResults))
+        return false;
+
+    for (size_t i = 0; i < numResults; i++)
+        results.infallibleAppend(MagicValue(JS_ION_BAILOUT));
+
+    instructionResults_ = &results;
+    return true;
+}
+
+void
+SnapshotIterator::storeInstructionResult(Value v)
+{
+    uint32_t currIns = recover_.numInstructionsRead() - 1;
+    MOZ_ASSERT((*instructionResults_)[currIns].isMagic(JS_ION_BAILOUT));
+    (*instructionResults_)[currIns].set(v);
+}
+
+Value
+SnapshotIterator::fromInstructionResult(uint32_t index) const
+{
+    MOZ_ASSERT(!(*instructionResults_)[index].isMagic(JS_ION_BAILOUT));
+    return (*instructionResults_)[index];
 }
 
 void

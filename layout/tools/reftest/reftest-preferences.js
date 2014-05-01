@@ -29,8 +29,6 @@
     branch.setBoolPref("security.fileuri.strict_origin_policy", false);
     // Disable the thumbnailing service
     branch.setBoolPref("browser.pagethumbnails.capturing_disabled", true);
-    // Enable APZC so we can test it
-    branch.setBoolPref("layers.async-pan-zoom.enabled", true);
     // Since our tests are 800px wide, set the assume-designed-for width of all
     // pages to be 800px (instead of the default of 980px). This ensures that
     // in our 800px window we don't zoom out by default to try to fit the
@@ -48,5 +46,3 @@
     // reflow so that that rare edge case doesn't lead to reftest
     // failures.
     branch.setBoolPref("layout.interruptible-reflow.enabled", false);
-    // Don't try to connect to the telemetry server.
-    branch.setBoolPref("toolkit.telemetry.enabled", false);

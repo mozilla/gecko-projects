@@ -209,7 +209,7 @@ public:
 
   virtual ~ContentHostDoubleBuffered() {}
 
-  virtual CompositableType GetType() { return COMPOSITABLE_CONTENT_DOUBLE; }
+  virtual CompositableType GetType() { return CompositableType::CONTENT_DOUBLE; }
 
   virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
@@ -232,7 +232,7 @@ public:
   {}
   virtual ~ContentHostSingleBuffered() {}
 
-  virtual CompositableType GetType() { return COMPOSITABLE_CONTENT_SINGLE; }
+  virtual CompositableType GetType() { return CompositableType::CONTENT_SINGLE; }
 
   virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
@@ -256,11 +256,11 @@ public:
   ContentHostIncremental(const TextureInfo& aTextureInfo);
   ~ContentHostIncremental();
 
-  virtual CompositableType GetType() { return BUFFER_CONTENT_INC; }
+  virtual CompositableType GetType() { return CompositableType::BUFFER_CONTENT_INC; }
 
   virtual LayerRenderState GetRenderState() MOZ_OVERRIDE { return LayerRenderState(); }
 
-  virtual void CreatedIncrementalTexture(ISurfaceAllocator* aAllocator,
+  virtual bool CreatedIncrementalTexture(ISurfaceAllocator* aAllocator,
                                          const TextureInfo& aTextureInfo,
                                          const nsIntRect& aBufferRect) MOZ_OVERRIDE;
 

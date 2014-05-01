@@ -366,7 +366,7 @@ private:
   nsCharsetMenu* mCharsetMenu;
 };
 
-NS_IMPL_ISUPPORTS1(nsCharsetMenuObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(nsCharsetMenuObserver, nsIObserver)
 
 NS_IMETHODIMP nsCharsetMenuObserver::Observe(nsISupports *aSubject, const char *aTopic, const char16_t *someData)
 {
@@ -1005,7 +1005,7 @@ nsresult nsCharsetMenu::InitMoreMenu(nsTArray<nsCString>& aDecs,
   if (NS_FAILED(res)) goto done;
 
 done:
-  // free the elements in the VoidArray
+  // free the elements in the nsTArray<nsMenuEntry*>
   FreeMenuItemArray(&moreMenu);
 
   return res;

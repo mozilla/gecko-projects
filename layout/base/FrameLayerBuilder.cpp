@@ -500,6 +500,9 @@ public:
     mAppUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
     mContainerReferenceFrame = aContainerItem ? aContainerItem->ReferenceFrameForChildren() :
       mBuilder->FindReferenceFrameFor(mContainerFrame);
+    mContainerAnimatedGeometryRoot = aContainerItem
+      ? nsLayoutUtils::GetAnimatedGeometryRootFor(aContainerItem, aBuilder)
+      : mContainerReferenceFrame;
     // When AllowResidualTranslation is false, display items will be drawn
     // scaled with a translation by integer pixels, so we know how the snapping
     // will work.
@@ -705,6 +708,7 @@ protected:
   FrameLayerBuilder*               mLayerBuilder;
   nsIFrame*                        mContainerFrame;
   const nsIFrame*                  mContainerReferenceFrame;
+  const nsIFrame*                  mContainerAnimatedGeometryRoot;
   ContainerLayer*                  mContainerLayer;
   ContainerLayerParameters         mParameters;
   /**
@@ -2452,7 +2456,7 @@ ContainerState::ProcessDisplayItems(const nsDisplayList& aList,
         // For inactive layer subtrees, splitting content into ThebesLayers
         // based on animated geometry roots is pointless. It's more efficient
         // to build the minimum number of layers.
-        animatedGeometryRoot = mContainerReferenceFrame;
+        animatedGeometryRoot = mContainerAnimatedGeometryRoot;
       }
       if (animatedGeometryRoot != lastAnimatedGeometryRoot) {
         lastAnimatedGeometryRoot = animatedGeometryRoot;
@@ -2686,6 +2690,7 @@ ContainerState::InvalidateForLayerChange(nsDisplayItem* aItem,
   nsRect invalid;
   nsRegion combined;
   nsPoint shift = aTopLeft - data->mLastAnimatedGeometryRootOrigin;
+  bool notifyRenderingChanged = true;
   if (!oldLayer) {
     // This item is being added for the first time, invalidate its entire area.
     //TODO: We call GetGeometry again in AddThebesDisplayItem, we should reuse this.
@@ -2708,6 +2713,21 @@ ContainerState::InvalidateForLayerChange(nsDisplayItem* aItem,
   } else {
     // Let the display item check for geometry changes and decide what needs to be
     // repainted.
+
+    // We have an optimization to cache the drawing background-attachment: fixed canvas
+    // background images so we can scroll and just blit them when they are flattened into
+    // the same layer as scrolling content. NotifyRenderingChanged is only used to tell
+    // the canvas bg image item to purge this cache. We want to be careful not to accidentally
+    // purge the cache if we are just invalidating due to scrolling (ie the background image
+    // moves on the scrolling layer but it's rendering stays the same) so if
+    // AddOffsetAndComputeDifference is the only thing that will invalidate we skip the
+    // NotifyRenderingChanged call (ComputeInvalidationRegion for background images also calls
+    // NotifyRenderingChanged if anything changes).
+    if (oldGeometry->ComputeInvalidationRegion() == aGeometry->ComputeInvalidationRegion() &&
+        *oldClip == aClip && invalid.IsEmpty() && changedFrames.Length() == 0) {
+      notifyRenderingChanged = false;
+    }
+
     oldGeometry->MoveBy(shift);
     aItem->ComputeInvalidationRegion(mBuilder, oldGeometry, &combined);
     oldClip->AddOffsetAndComputeDifference(shift, oldGeometry->ComputeInvalidationRegion(),
@@ -2735,7 +2755,9 @@ ContainerState::InvalidateForLayerChange(nsDisplayItem* aItem,
 #endif
   }
   if (!combined.IsEmpty()) {
-    aItem->NotifyRenderingChanged();
+    if (notifyRenderingChanged) {
+      aItem->NotifyRenderingChanged();
+    }
     InvalidatePostTransformRegion(newThebesLayer,
         combined.ScaleToOutsidePixels(data->mXScale, data->mYScale, mAppUnitsPerDevPixel),
         GetTranslationForThebesLayer(newThebesLayer));
@@ -2833,7 +2855,7 @@ FrameLayerBuilder::AddThebesDisplayItem(ThebesLayerData* aLayerData,
       if (aLayerState == LAYER_SVG_EFFECTS) {
         invalid = nsSVGIntegrationUtils::AdjustInvalidAreaForSVGEffects(aItem->Frame(),
                                                                         aItem->ToReferenceFrame(),
-                                                                        invalid.GetBounds());
+                                                                        invalid);
       }
       if (!invalid.IsEmpty()) {
 #ifdef MOZ_DUMP_PAINTING

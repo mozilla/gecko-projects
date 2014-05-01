@@ -1,7 +1,6 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99 ft=cpp:
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -73,10 +72,9 @@ class XrayWrapper : public Base {
     virtual bool isExtensible(JSContext *cx, JS::Handle<JSObject*> wrapper, bool *extensible) MOZ_OVERRIDE;
     virtual bool preventExtensions(JSContext *cx, JS::Handle<JSObject*> wrapper) MOZ_OVERRIDE;
     virtual bool getPropertyDescriptor(JSContext *cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
-                                       JS::MutableHandle<JSPropertyDescriptor> desc, unsigned flags);
+                                       JS::MutableHandle<JSPropertyDescriptor> desc);
     virtual bool getOwnPropertyDescriptor(JSContext *cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
-                                          JS::MutableHandle<JSPropertyDescriptor> desc,
-                                          unsigned flags);
+                                          JS::MutableHandle<JSPropertyDescriptor> desc);
     virtual bool defineProperty(JSContext *cx, JS::Handle<JSObject*> wrapper, JS::Handle<jsid> id,
                                 JS::MutableHandle<JSPropertyDescriptor> desc);
     virtual bool getOwnPropertyNames(JSContext *cx, JS::Handle<JSObject*> wrapper,
@@ -156,12 +154,10 @@ public:
 
     virtual bool getPropertyDescriptor(JSContext *cx, JS::Handle<JSObject*> proxy,
                                        JS::Handle<jsid> id,
-                                       JS::MutableHandle<JSPropertyDescriptor> desc,
-                                       unsigned flags) MOZ_OVERRIDE;
+                                       JS::MutableHandle<JSPropertyDescriptor> desc) MOZ_OVERRIDE;
     virtual bool getOwnPropertyDescriptor(JSContext *cx, JS::Handle<JSObject*> proxy,
                                           JS::Handle<jsid> id,
-                                          JS::MutableHandle<JSPropertyDescriptor> desc,
-                                          unsigned flags) MOZ_OVERRIDE;
+                                          JS::MutableHandle<JSPropertyDescriptor> desc) MOZ_OVERRIDE;
 
     // We just forward the derived traps to the BaseProxyHandler versions which
     // implement them in terms of the fundamental traps.

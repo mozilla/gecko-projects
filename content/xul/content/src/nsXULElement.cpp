@@ -144,7 +144,7 @@ private:
   nsCOMPtr<nsIDOMXULElement> mElement;
 };
 
-NS_IMPL_CYCLE_COLLECTION_1(nsXULElementTearoff, mElement)
+NS_IMPL_CYCLE_COLLECTION(nsXULElementTearoff, mElement)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXULElementTearoff)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXULElementTearoff)
@@ -339,8 +339,8 @@ NS_IMPL_ADDREF_INHERITED(nsXULElement, nsStyledElement)
 NS_IMPL_RELEASE_INHERITED(nsXULElement, nsStyledElement)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsXULElement)
-    NS_INTERFACE_TABLE_INHERITED3(nsXULElement, nsIDOMNode, nsIDOMElement,
-                                  nsIDOMXULElement)
+    NS_INTERFACE_TABLE_INHERITED(nsXULElement, nsIDOMNode, nsIDOMElement,
+                                 nsIDOMXULElement)
     NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
     NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMElementCSSInlineStyle,
                                    new nsXULElementTearoff(this))
@@ -2600,6 +2600,7 @@ NotifyOffThreadScriptCompletedRunnable::Run()
     JSScript *script;
     {
         AutoSafeJSContext cx;
+        JSAutoCompartment ac(cx, xpc::GetCompilationScope());
         script = JS::FinishOffThreadScript(cx, JS_GetRuntime(cx), mToken);
     }
 
@@ -2619,8 +2620,7 @@ OffThreadScriptReceiverCallback(void *aToken, void *aCallbackData)
 }
 
 nsresult
-nsXULPrototypeScript::Compile(const char16_t* aText,
-                              int32_t aTextLength,
+nsXULPrototypeScript::Compile(JS::SourceBufferHolder& aSrcBuf,
                               nsIURI* aURI,
                               uint32_t aLineNo,
                               nsIDocument* aDocument,
@@ -2651,9 +2651,9 @@ nsXULPrototypeScript::Compile(const char16_t* aText,
       JS::ExposeObjectToActiveJS(scope);
     }
 
-    if (aOffThreadReceiver && JS::CanCompileOffThread(cx, options, aTextLength)) {
+    if (aOffThreadReceiver && JS::CanCompileOffThread(cx, options, aSrcBuf.length())) {
         if (!JS::CompileOffThread(cx, options,
-                                  static_cast<const jschar*>(aText), aTextLength,
+                                  aSrcBuf.get(), aSrcBuf.length(),
                                   OffThreadScriptReceiverCallback,
                                   static_cast<void*>(aOffThreadReceiver))) {
             return NS_ERROR_OUT_OF_MEMORY;
@@ -2661,13 +2661,26 @@ nsXULPrototypeScript::Compile(const char16_t* aText,
         // This reference will be consumed by the NotifyOffThreadScriptCompletedRunnable.
         NS_ADDREF(aOffThreadReceiver);
     } else {
-        JSScript* script = JS::Compile(cx, scope, options,
-                                   static_cast<const jschar*>(aText), aTextLength);
+        JSScript* script = JS::Compile(cx, scope, options, aSrcBuf);
         if (!script)
             return NS_ERROR_OUT_OF_MEMORY;
         Set(script);
     }
     return NS_OK;
+}
+
+nsresult
+nsXULPrototypeScript::Compile(const char16_t* aText,
+                              int32_t aTextLength,
+                              nsIURI* aURI,
+                              uint32_t aLineNo,
+                              nsIDocument* aDocument,
+                              nsXULPrototypeDocument* aProtoDoc,
+                              nsIOffThreadScriptReceiver *aOffThreadReceiver /* = nullptr */)
+{
+  JS::SourceBufferHolder srcBuf(aText, aTextLength,
+                                JS::SourceBufferHolder::NoOwnership);
+  return Compile(srcBuf, aURI, aLineNo, aDocument, aProtoDoc, aOffThreadReceiver);
 }
 
 void

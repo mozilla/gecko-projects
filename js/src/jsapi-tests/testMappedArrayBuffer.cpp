@@ -65,7 +65,10 @@ JSObject *CreateNewObject(const int offset, const int length)
     if (!ptr)
         return nullptr;
     JSObject *obj = JS_NewMappedArrayBufferWithContents(cx, length, ptr);
-
+    if (!obj) {
+        JS_ReleaseMappedArrayBufferContents(ptr, length);
+        return nullptr;
+    }
     return obj;
 }
 
@@ -109,7 +112,7 @@ bool TestNeuterObject()
 {
     JS::RootedObject obj(cx, CreateNewObject(8, 12));
     CHECK(obj);
-    JS_NeuterArrayBuffer(cx, obj);
+    JS_NeuterArrayBuffer(cx, obj, ChangeData);
     CHECK(isNeutered(obj));
 
     return true;
@@ -125,7 +128,7 @@ bool TestCloneObject()
     CHECK(cloned_buffer.write(cx, v1, callbacks, nullptr));
     JS::RootedValue v2(cx);
     CHECK(cloned_buffer.read(cx, &v2, callbacks, nullptr));
-    JS::RootedObject obj2(cx, JSVAL_TO_OBJECT(v2));
+    JS::RootedObject obj2(cx, v2.toObjectOrNull());
     CHECK(VerifyObject(obj2, 8, 12, false));
 
     return true;
@@ -161,7 +164,7 @@ bool TestTransferObject()
     CHECK(cloned_buffer.write(cx, v1, transferable, callbacks, nullptr));
     JS::RootedValue v2(cx);
     CHECK(cloned_buffer.read(cx, &v2, callbacks, nullptr));
-    JS::RootedObject obj2(cx, JSVAL_TO_OBJECT(v2));
+    JS::RootedObject obj2(cx, v2.toObjectOrNull());
     CHECK(VerifyObject(obj2, 8, 12, true));
     CHECK(isNeutered(obj1));
 

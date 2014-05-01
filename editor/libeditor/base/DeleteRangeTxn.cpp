@@ -7,7 +7,7 @@
 #include "DeleteRangeTxn.h"
 #include "DeleteTextTxn.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/mozalloc.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
@@ -22,6 +22,7 @@
 class nsIDOMRange;
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 // note that aEditor is not refcounted
 DeleteRangeTxn::DeleteRangeTxn()
@@ -32,8 +33,8 @@ DeleteRangeTxn::DeleteRangeTxn()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(DeleteRangeTxn, EditAggregateTxn,
-                                     mRange)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(DeleteRangeTxn, EditAggregateTxn,
+                                   mRange)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DeleteRangeTxn)
 NS_INTERFACE_MAP_END_INHERITING(EditAggregateTxn)

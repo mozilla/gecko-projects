@@ -21,8 +21,8 @@ contract @mozilla.org/browser/directory-provider;1 {9181eb7c-6f87-11e1-90b1-4f59
 category xpcom-directory-providers browser-directory-provider @mozilla.org/browser/directory-provider;1
 
 # ActivitiesGlue.js
-component {70a83123-7467-4389-a309-3e81c74ad002} ActivitiesGlue.js
-contract @mozilla.org/dom/activities/ui-glue;1 {70a83123-7467-4389-a309-3e81c74ad002}
+component {3a54788b-48cc-4ab4-93d6-0d6a8ef74f8e} ActivitiesGlue.js
+contract @mozilla.org/dom/activities/ui-glue;1 {3a54788b-48cc-4ab4-93d6-0d6a8ef74f8e}
 
 # ProcessGlobal.js
 component {1a94c87a-5ece-4d11-91e1-d29c29f21b28} ProcessGlobal.js
@@ -86,4 +86,9 @@ contract @mozilla.org/helperapplauncherdialog;1 {710322af-e6ae-4b0c-b2c9-1474a87
 component {c83c02c0-5d43-4e3e-987f-9173b313e880} SimulatorScreen.js
 contract @mozilla.org/simulator-screen;1 {c83c02c0-5d43-4e3e-987f-9173b313e880}
 category profile-after-change SimulatorScreen @mozilla.org/simulator-screen;1
+
+component {e30b0e13-2d12-4cb0-bc4c-4e617a1bf76e} OopCommandLine.js
+contract @mozilla.org/commandlinehandler/general-startup;1?type=b2goop {e30b0e13-2d12-4cb0-bc4c-4e617a1bf76e}
+category command-line-handler m-b2goop @mozilla.org/commandlinehandler/general-startup;1?type=b2goop
 #endif
+

@@ -10,7 +10,7 @@
 #include "nsCRT.h"
 
 #include "mozilla/AsyncEventDispatcher.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -216,8 +216,8 @@ protected:
   bool                    mSuppressed;
 };
 
-NS_IMPL_ISUPPORTS3(nsPrintEngine, nsIWebProgressListener,
-                   nsISupportsWeakReference, nsIObserver)
+NS_IMPL_ISUPPORTS(nsPrintEngine, nsIWebProgressListener,
+                  nsISupportsWeakReference, nsIObserver)
 
 //---------------------------------------------------
 //-- nsPrintEngine Class Impl

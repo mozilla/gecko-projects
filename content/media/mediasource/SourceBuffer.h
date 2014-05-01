@@ -29,6 +29,7 @@ struct JSContext;
 
 namespace mozilla {
 
+class ContainerParser;
 class ErrorResult;
 class SourceBufferResource;
 class SubBufferDecoder;
@@ -88,7 +89,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SourceBuffer, DOMEventTargetHelper)
 
-  explicit SourceBuffer(MediaSource* aMediaSource, const nsACString& aType);
+  static already_AddRefed<SourceBuffer> Create(MediaSource* aMediaSource, const nsACString& aType);
   ~SourceBuffer();
 
   MediaSource* GetParentObject() const;
@@ -108,10 +109,18 @@ public:
   // Evict data in the source buffer in the given time range.
   void Evict(double aStart, double aEnd);
 
+  // Returns true if the data in the source buffer contains the given time.
+  bool ContainsTime(double aTime);
+
 private:
+  SourceBuffer(MediaSource* aMediaSource, const nsACString& aType);
+
   friend class AsyncEventRunner<SourceBuffer>;
   void DispatchSimpleEvent(const char* aName);
   void QueueAsyncSimpleEvent(const char* aName);
+
+  // Create a new decoder for mType, add it to mDecoders and update mCurrentDecoder.
+  bool InitNewDecoder();
 
   // Update mUpdating and fire the appropriate events.
   void StartUpdating();
@@ -127,6 +136,10 @@ private:
 
   nsRefPtr<MediaSource> mMediaSource;
 
+  const nsAutoCString mType;
+
+  nsAutoPtr<ContainerParser> mParser;
+
   nsRefPtr<SubBufferDecoder> mDecoder;
 
   double mAppendWindowStart;
@@ -136,6 +149,8 @@ private:
 
   SourceBufferAppendMode mAppendMode;
   bool mUpdating;
+
+  bool mDecoderInit;
 };
 
 } // namespace dom

@@ -19,6 +19,7 @@
 #include "nsAutoRef.h"
 #include "speex/speex_resampler.h"
 #include "AudioMixer.h"
+#include "mozilla/dom/AudioChannelBinding.h"
 
 class nsIRunnable;
 
@@ -524,6 +525,8 @@ public:
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
   virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
+  void SetAudioChannelType(dom::AudioChannel aType) { mAudioChannelType = aType; }
+
 protected:
   virtual void AdvanceTimeVaryingValuesToCurrentTime(GraphTime aCurrentTime, GraphTime aBlockedTime)
   {
@@ -650,6 +653,8 @@ protected:
 
   // Our media stream graph
   MediaStreamGraphImpl* mGraph;
+
+  dom::AudioChannel mAudioChannelType;
 };
 
 /**
@@ -790,7 +795,8 @@ public:
     TrackID mID;
     // Sample rate of the input data.
     TrackRate mInputRate;
-    // Sample rate of the output data, always equal to IdealAudioRate()
+    // Sample rate of the output data, always equal to the sample rate of the
+    // graph.
     TrackRate mOutputRate;
     // Resampler if the rate of the input track does not match the
     // MediaStreamGraph's.
@@ -1078,9 +1084,6 @@ protected:
   bool mInCycle;
 };
 
-// Returns ideal audio rate for processing.
-inline TrackRate IdealAudioRate() { return AudioStream::PreferredSampleRate(); }
-
 /**
  * Initially, at least, we will have a singleton MediaStreamGraph per
  * process.  Each OfflineAudioContext object creates its own MediaStreamGraph
@@ -1089,13 +1092,13 @@ inline TrackRate IdealAudioRate() { return AudioStream::PreferredSampleRate(); }
 class MediaStreamGraph {
 public:
   // We ensure that the graph current time advances in multiples of
-  // IdealAudioBlockSize()/IdealAudioRate(). A stream that never blocks
-  // and has a track with the ideal audio rate will produce audio in
-  // multiples of the block size.
+  // IdealAudioBlockSize()/AudioStream::PreferredSampleRate(). A stream that
+  // never blocks and has a track with the ideal audio rate will produce audio
+  // in multiples of the block size.
 
   // Main thread only
   static MediaStreamGraph* GetInstance();
-  static MediaStreamGraph* CreateNonRealtimeInstance();
+  static MediaStreamGraph* CreateNonRealtimeInstance(TrackRate aSampleRate);
   // Idempotent
   static void DestroyNonRealtimeInstance(MediaStreamGraph* aGraph);
 

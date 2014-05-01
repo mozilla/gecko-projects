@@ -12,6 +12,7 @@
 #include "jsfun.h"
 #include "jsscript.h"
 
+#include "jit/AsmJSLink.h"
 #include "jit/JitFrameIterator.h"
 #ifdef CHECK_OSIPOINT_REGISTERS
 #include "jit/Registers.h" // for RegisterDump
@@ -75,6 +76,7 @@ CheckLocalUnaliased(MaybeCheckAliasing checkAliasing, JSScript *script, uint32_t
 
 namespace jit {
     class BaselineFrame;
+    class RematerializedFrame;
 }
 
 /*
@@ -106,6 +108,7 @@ class AbstractFramePtr
         Tag_ScriptFrameIterData = 0x0,
         Tag_InterpreterFrame = 0x1,
         Tag_BaselineFrame = 0x2,
+        Tag_RematerializedFrame = 0x3,
         TagMask = 0x3
     };
 
@@ -117,13 +120,19 @@ class AbstractFramePtr
     AbstractFramePtr(InterpreterFrame *fp)
       : ptr_(fp ? uintptr_t(fp) | Tag_InterpreterFrame : 0)
     {
-        MOZ_ASSERT(asInterpreterFrame() == fp);
+        MOZ_ASSERT_IF(fp, asInterpreterFrame() == fp);
     }
 
     AbstractFramePtr(jit::BaselineFrame *fp)
       : ptr_(fp ? uintptr_t(fp) | Tag_BaselineFrame : 0)
     {
-        MOZ_ASSERT(asBaselineFrame() == fp);
+        MOZ_ASSERT_IF(fp, asBaselineFrame() == fp);
+    }
+
+    AbstractFramePtr(jit::RematerializedFrame *fp)
+      : ptr_(fp ? uintptr_t(fp) | Tag_RematerializedFrame : 0)
+    {
+        MOZ_ASSERT_IF(fp, asRematerializedFrame() == fp);
     }
 
     explicit AbstractFramePtr(JSAbstractFramePtr frame)
@@ -141,7 +150,7 @@ class AbstractFramePtr
         return !!ptr_ && (ptr_ & TagMask) == Tag_ScriptFrameIterData;
     }
     bool isInterpreterFrame() const {
-        return ptr_ & Tag_InterpreterFrame;
+        return (ptr_ & TagMask) == Tag_InterpreterFrame;
     }
     InterpreterFrame *asInterpreterFrame() const {
         JS_ASSERT(isInterpreterFrame());
@@ -150,11 +159,20 @@ class AbstractFramePtr
         return res;
     }
     bool isBaselineFrame() const {
-        return ptr_ & Tag_BaselineFrame;
+        return (ptr_ & TagMask) == Tag_BaselineFrame;
     }
     jit::BaselineFrame *asBaselineFrame() const {
         JS_ASSERT(isBaselineFrame());
         jit::BaselineFrame *res = (jit::BaselineFrame *)(ptr_ & ~TagMask);
+        JS_ASSERT(res);
+        return res;
+    }
+    bool isRematerializedFrame() const {
+        return (ptr_ & TagMask) == Tag_RematerializedFrame;
+    }
+    jit::RematerializedFrame *asRematerializedFrame() const {
+        JS_ASSERT(isRematerializedFrame());
+        jit::RematerializedFrame *res = (jit::RematerializedFrame *)(ptr_ & ~TagMask);
         JS_ASSERT(res);
         return res;
     }
@@ -1287,6 +1305,9 @@ class ActivationIterator
 
     ActivationIterator &operator++();
 
+    Activation *operator->() const {
+        return activation_;
+    }
     Activation *activation() const {
         return activation_;
     }
@@ -1308,6 +1329,20 @@ class JitActivation : public Activation
     JSContext *prevJitJSContext_;
     bool firstFrameIsConstructing_;
     bool active_;
+
+#ifdef JS_ION
+    // Rematerialized Ion frames which has info copied out of snapshots. Maps
+    // frame pointers (i.e. ionTop) to a vector of rematerializations of all
+    // inline frames associated with that frame.
+    //
+    // This table is lazily initialized by calling getRematerializedFrame.
+    typedef Vector<RematerializedFrame *, 1> RematerializedFrameVector;
+    typedef HashMap<uint8_t *, RematerializedFrameVector> RematerializedFrameTable;
+    RematerializedFrameTable rematerializedFrames_;
+
+    void freeRematerializedFramesInVector(RematerializedFrameVector &frames);
+    void clearRematerializedFrames();
+#endif
 
 #ifdef CHECK_OSIPOINT_REGISTERS
   protected:
@@ -1356,6 +1391,30 @@ class JitActivation : public Activation
     static size_t offsetOfRegs() {
         return offsetof(JitActivation, regs_);
     }
+#endif
+
+#ifdef JS_ION
+    // Look up a rematerialized frame keyed by the fp, rematerializing the
+    // frame if one doesn't already exist. A frame can only be rematerialized
+    // if an IonFrameIterator pointing to the nearest uninlined frame can be
+    // provided, as values need to be read out of snapshots.
+    //
+    // The inlineDepth must be within bounds of the frame pointed to by iter.
+    RematerializedFrame *getRematerializedFrame(JSContext *cx, JitFrameIterator &iter,
+                                                size_t inlineDepth = 0);
+
+    // Look up a rematerialized frame by the fp. If inlineDepth is out of
+    // bounds of what has been rematerialized, nullptr is returned.
+    RematerializedFrame *lookupRematerializedFrame(uint8_t *top, size_t inlineDepth = 0);
+
+    bool hasRematerializedFrame(uint8_t *top, size_t inlineDepth = 0) {
+        return !!lookupRematerializedFrame(top, inlineDepth);
+    }
+
+    // Remove a previous rematerialization by fp.
+    void removeRematerializedFrame(uint8_t *top);
+
+    void markRematerializedFrames(JSTracer *trc);
 #endif
 };
 
@@ -1444,18 +1503,16 @@ class AsmJSActivation : public Activation
     void *errorRejoinSP_;
     SPSProfiler *profiler_;
     void *resumePC_;
+    uint8_t *exitSP_;
 
-    // These bits are temporary and will be replaced when real asm.js
-    // stack-walking support lands:
-    unsigned exportIndex_;
+    static const intptr_t InterruptedSP = -1;
 
   public:
-    AsmJSActivation(JSContext *cx, AsmJSModule &module, unsigned exportIndex);
+    AsmJSActivation(JSContext *cx, AsmJSModule &module);
     ~AsmJSActivation();
 
     JSContext *cx() { return cx_; }
     AsmJSModule &module() const { return module_; }
-    unsigned exportIndex() const { return exportIndex_; }
     AsmJSActivation *prevAsmJS() const { return prevAsmJS_; }
 
     // Read by JIT code:
@@ -1464,9 +1521,16 @@ class AsmJSActivation : public Activation
 
     // Initialized by JIT code:
     static unsigned offsetOfErrorRejoinSP() { return offsetof(AsmJSActivation, errorRejoinSP_); }
+    static unsigned offsetOfExitSP() { return offsetof(AsmJSActivation, exitSP_); }
 
     // Set from SIGSEGV handler:
-    void setResumePC(void *pc) { resumePC_ = pc; }
+    void setInterrupted(void *pc) { resumePC_ = pc; exitSP_ = (uint8_t*)InterruptedSP; }
+    bool isInterruptedSP() const { return exitSP_ == (uint8_t*)InterruptedSP; }
+
+    // Note: exitSP is the sp right before the call instruction. On x86, this
+    // means before the return address is pushed on the stack, on ARM, this
+    // means after.
+    uint8_t *exitSP() const { JS_ASSERT(!isInterruptedSP()); return exitSP_; }
 };
 
 // A FrameIter walks over the runtime's stack of JS script activations,
@@ -1516,6 +1580,8 @@ class FrameIter
 
 #ifdef JS_ION
         jit::JitFrameIterator jitFrames_;
+        unsigned ionInlineFrameNo_;
+        AsmJSFrameIterator asmJSFrames_;
 #endif
 
         Data(JSContext *cx, SavedOption savedOption, ContextOption contextOption,
@@ -1553,6 +1619,10 @@ class FrameIter
     bool isGeneratorFrame() const;
     bool hasArgs() const { return isNonEvalFunctionFrame(); }
 
+    /*
+     * Get an abstract frame pointer dispatching to either an interpreter,
+     * baseline, or rematerialized optimized frame.
+     */
     ScriptSource *scriptSource() const;
     const char *scriptFilename() const;
     unsigned computeLine(uint32_t *column = nullptr) const;
@@ -1583,8 +1653,16 @@ class FrameIter
     bool        hasArgsObj() const;
     ArgumentsObject &argsObj() const;
 
-    // Ensure that thisv is correct, see ComputeThis.
+    // Ensure that computedThisValue is correct, see ComputeThis.
     bool        computeThis(JSContext *cx) const;
+    // thisv() may not always be correct, even after computeThis. In case when
+    // the frame is an Ion frame, the computed this value cannot be saved to
+    // the Ion frame but is instead saved in the RematerializedFrame for use
+    // by Debugger.
+    //
+    // Both methods exist because of speed. thisv() will never rematerialize
+    // an Ion frame, whereas computedThisValue() will.
+    Value       computedThisValue() const;
     Value       thisv() const;
 
     Value       returnValue() const;
@@ -1598,9 +1676,19 @@ class FrameIter
     size_t      numFrameSlots() const;
     Value       frameSlotValue(size_t index) const;
 
-    // --------------------------------------------------------------------------
-    // The following functions can only be called when isInterp() or isBaseline()
-    // --------------------------------------------------------------------------
+    // Ensures that we have rematerialized the top frame and its associated
+    // inline frames. Can only be called when isIon().
+    bool ensureHasRematerializedFrame();
+
+    // True when isInterp() or isBaseline(). True when isIon() if it
+    // has a rematerialized frame. False otherwise false otherwise.
+    bool hasUsableAbstractFramePtr() const;
+
+    // -----------------------------------------------------------
+    // The following functions can only be called when isInterp(),
+    // isBaseline(), or isIon(). Further, abstractFramePtr() can
+    // only be called when hasUsableAbstractFramePtr().
+    // -----------------------------------------------------------
 
     AbstractFramePtr abstractFramePtr() const;
     AbstractFramePtr copyDataAsAbstractFramePtr() const;
@@ -1620,6 +1708,7 @@ class FrameIter
 #ifdef JS_ION
     void nextJitFrame();
     void popJitFrame();
+    void popAsmJSFrame();
 #endif
     void settleOnActivation();
 

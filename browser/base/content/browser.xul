@@ -101,6 +101,10 @@
                 accesskey="&moveToNewWindow.accesskey;"
                 tbattr="tabbrowser-multiple"
                 oncommand="gBrowser.replaceTabWithWindow(TabContextMenu.contextTab);"/>
+      <menuitem id="context_openNonRemoteWindow" label="Open in new non-e10s window"
+                tbattr="tabbrowser-remote"
+                hidden="true"
+                oncommand="gBrowser.openNonRemoteWindow(TabContextMenu.contextTab);"/>
       <menuseparator/>
       <menuitem id="context_reloadAllTabs" label="&reloadAllTabs.label;" accesskey="&reloadAllTabs.accesskey;"
                 tbattr="tabbrowser-multiple-visible"
@@ -549,7 +553,7 @@
              iconsize="small"
              aria-label="&tabsToolbar.label;"
              context="toolbar-context-menu"
-             defaultset="tabbrowser-tabs,new-tab-button,alltabs-button,tabs-closebutton"
+             defaultset="tabbrowser-tabs,new-tab-button,alltabs-button"
              collapsed="true">
 
 #if defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
@@ -600,13 +604,6 @@
         </menupopup>
       </toolbarbutton>
 
-      <toolbarbutton id="tabs-closebutton"
-                     class="close-button tabs-closebutton close-icon"
-                     command="cmd_close"
-                     label="&closeTab.label;"
-                     cui-areatype="toolbar"
-                     tooltiptext="&closeTab.label;"/>
-
 #if !defined(MOZ_WIDGET_GTK) && !defined(MOZ_WIDGET_QT)
       <hbox class="private-browsing-indicator" skipintoolbarset="true"/>
 #endif
@@ -646,7 +643,7 @@
 
       <hbox id="nav-bar-customization-target" flex="1">
         <toolbaritem id="urlbar-container" flex="400" persist="width"
-                     forwarddisabled="true" title="&locationItem.title;" removable="false"
+                     title="&locationItem.title;" removable="false"
                      cui-areatype="toolbar"
                      class="chromeclass-location" overflows="false">
           <toolbarbutton id="back-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
@@ -656,21 +653,14 @@
                          onclick="checkForMiddleClick(this, event);"
                          tooltip="back-button-tooltip"
                          context="backForwardMenu"/>
-          <toolbarbutton id="forward-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
-                         label="&forwardCmd.label;"
-                         command="Browser:ForwardOrForwardDuplicate"
-                         cui-areatype="toolbar"
-                         onclick="checkForMiddleClick(this, event);"
-                         tooltip="forward-button-tooltip"
-                         context="backForwardMenu"/>
-          <dummyobservertarget hidden="true"
-                               onbroadcast="if (this.getAttribute('disabled') == 'true')
-                                              this.parentNode.setAttribute('forwarddisabled', 'true');
-                                            else
-                                              this.parentNode.removeAttribute('forwarddisabled');">
-            <observes element="Browser:ForwardOrForwardDuplicate" attribute="disabled"/>
-          </dummyobservertarget>
-          <hbox id="urlbar-wrapper" flex="1" align="center">
+          <hbox id="urlbar-wrapper" flex="1">
+            <toolbarbutton id="forward-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
+                           label="&forwardCmd.label;"
+                           command="Browser:ForwardOrForwardDuplicate"
+                           cui-areatype="toolbar"
+                           onclick="checkForMiddleClick(this, event);"
+                           tooltip="forward-button-tooltip"
+                           context="backForwardMenu"/>
             <textbox id="urlbar" flex="1"
                      placeholder="&urlbar.placeholder2;"
                      type="autocomplete"
@@ -958,7 +948,6 @@
              collapsed="true"
              customizable="true">
       <toolbaritem id="personal-bookmarks"
-                   flex="1"
                    title="&bookmarksToolbarItem.label;"
                    cui-areatype="toolbar"
                    removable="true">
@@ -1061,7 +1050,7 @@
         <sidebarheader id="sidebar-header" align="center">
           <label id="sidebar-title" persist="value" flex="1" crop="end" control="sidebar"/>
           <image id="sidebar-throbber"/>
-          <toolbarbutton class="tabs-closebutton close-icon" tooltiptext="&sidebarCloseButton.tooltip;" oncommand="toggleSidebar();"/>
+          <toolbarbutton class="close-icon tabbable" tooltiptext="&sidebarCloseButton.tooltip;" oncommand="toggleSidebar();"/>
         </sidebarheader>
         <browser id="sidebar" flex="1" autoscroll="false" disablehistory="true"
                   style="min-width: 14em; width: 18em; max-width: 36em;"/>
@@ -1188,22 +1177,13 @@
 
   <svg:svg height="0">
 #include tab-shape.inc.svg
-
-#ifndef XP_MACOSX
-    <svg:clipPath id="keyhole-forward-clip-path" clipPathUnits="objectBoundingBox">
-      <svg:path d="m 0,0 c .3,.25 .3,.75, 0,1 l 1,0 0,-1 z"/>
-    </svg:clipPath>
     <svg:clipPath id="urlbar-back-button-clip-path" clipPathUnits="userSpaceOnUse">
-      <svg:path d="m 0,-5 l 0,7.8 c 2.5,3.2 4,6.2 4,10.2 c 0,4 -1.5,7 -4,10 l 0,22l10000,0 l 0,-50 l -10000,0 z"/>
-    </svg:clipPath>
+#ifndef XP_MACOSX
+      <svg:path d="m 1,-5 l 0,7.8 c 2.5,3.2 4,6.2 4,10.2 c 0,4 -1.5,7 -4,10 l 0,22l10000,0 l 0,-50 l -10000,0 z"/>
 #else
-    <svg:clipPath id="osx-keyhole-forward-clip-path" clipPathUnits="userSpaceOnUse">
-      <svg:path d="M 0,0 a 16 16 0 0 1 0,24 l 10000,0 l 0,-24 l -10000,0 z"/>
-    </svg:clipPath>
-    <svg:clipPath id="osx-urlbar-back-button-clip-path" clipPathUnits="userSpaceOnUse">
-      <svg:path d="M -12,-5 a 16 16 0 0 1 0,34 l 10000,0 l 0,-34 l -10000,0 z"/>
-    </svg:clipPath>
+      <svg:path d="M -11,-5 a 16 16 0 0 1 0,34 l 10000,0 l 0,-34 l -10000,0 z"/>
 #endif
+    </svg:clipPath>
   </svg:svg>
 
 </vbox>

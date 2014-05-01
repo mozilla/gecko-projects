@@ -50,10 +50,6 @@ class Shape;
 class WatchpointMap;
 class NestedScopeObject;
 
-namespace analyze {
-    class ScriptAnalysis;
-}
-
 namespace frontend {
     class BytecodeEmitter;
 }
@@ -184,7 +180,7 @@ class Bindings
     friend class BindingIter;
     friend class AliasedFormalIter;
 
-    HeapPtr<Shape> callObjShape_;
+    HeapPtrShape callObjShape_;
     uintptr_t bindingArrayAndFlag_;
     uint16_t numArgs_;
     uint16_t numBlockScoped_;
@@ -480,8 +476,7 @@ class ScriptSource
     }
     bool initFromOptions(ExclusiveContext *cx, const ReadOnlyCompileOptions &options);
     bool setSourceCopy(ExclusiveContext *cx,
-                       const jschar *src,
-                       uint32_t length,
+                       JS::SourceBufferHolder &srcBuf,
                        bool argumentsNotIncluded,
                        SourceCompressionTask *tok);
     void setSource(const jschar *src, size_t length);
@@ -1134,7 +1129,7 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
     /*
      * As an optimization, even when argsHasLocalBinding, the function prologue
      * may not need to create an arguments object. This is determined by
-     * needsArgsObj which is set by ScriptAnalysis::analyzeSSA before running
+     * needsArgsObj which is set by AnalyzeArgumentsUsage before running
      * the script the first time. When !needsArgsObj, the prologue may simply
      * write MagicValue(JS_OPTIMIZED_ARGUMENTS) to 'arguments's slot and any
      * uses of 'arguments' will be guaranteed to handle this magic value.
@@ -1142,6 +1137,7 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
      * that needsArgsObj is only called after the script has been analyzed.
      */
     bool analyzedArgsUsage() const { return !needsArgsAnalysis_; }
+    inline bool ensureHasAnalyzedArgsUsage(JSContext *cx);
     bool needsArgsObj() const {
         JS_ASSERT(analyzedArgsUsage());
         return needsArgsObj_;
@@ -1317,19 +1313,6 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
     /* Ensure the script has a TypeScript. */
     inline bool ensureHasTypes(JSContext *cx);
 
-    /*
-     * Ensure the script has bytecode analysis information. Performed when the
-     * script first runs, or first runs after a TypeScript GC purge.
-     */
-    inline bool ensureRanAnalysis(JSContext *cx);
-
-    /* Ensure the script has type inference analysis information. */
-    inline bool ensureRanInference(JSContext *cx);
-
-    inline bool hasAnalysis();
-    inline void clearAnalysis();
-    inline js::analyze::ScriptAnalysis *analysis();
-
     inline js::GlobalObject &global() const;
     js::GlobalObject &uninlinedGlobal() const;
 
@@ -1342,7 +1325,6 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
 
   private:
     bool makeTypes(JSContext *cx);
-    bool makeAnalysis(JSContext *cx);
 
   public:
     uint32_t getUseCount() const {
@@ -1504,14 +1486,8 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
     bool formalLivesInArgumentsObject(unsigned argSlot);
 
   private:
-    /*
-     * Recompile with or without single-stepping support, as directed
-     * by stepModeEnabled().
-     */
-    void recompileForStepMode(js::FreeOp *fop);
-
-    /* Attempt to change this->stepMode to |newValue|. */
-    bool tryNewStepMode(JSContext *cx, uint32_t newValue);
+    /* Change this->stepMode to |newValue|. */
+    void setNewStepMode(js::FreeOp *fop, uint32_t newValue);
 
     bool ensureHasDebugScript(JSContext *cx);
     js::DebugScript *debugScript();
@@ -1549,8 +1525,11 @@ class JSScript : public js::gc::BarrieredCell<JSScript>
      * the flag (set by setStepModeFlag) is set, then the script is in
      * single-step mode. (JSD uses an on/off-style interface; Debugger uses a
      * count-style interface.)
+     *
+     * Only incrementing is fallible, as it could allocate a DebugScript.
      */
-    bool changeStepModeCount(JSContext *cx, int delta);
+    bool incrementStepModeCount(JSContext *cx);
+    void decrementStepModeCount(js::FreeOp *fop);
 
     bool stepModeEnabled() { return hasDebugScript_ && !!debugScript()->stepMode; }
 

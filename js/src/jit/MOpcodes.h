@@ -41,6 +41,7 @@ namespace jit {
     _(LoadArrowThis)                                                        \
     _(Call)                                                                 \
     _(ApplyArgs)                                                            \
+    _(ArraySplice)                                                          \
     _(Bail)                                                                 \
     _(AssertFloat32)                                                        \
     _(GetDynamicName)                                                       \
@@ -128,6 +129,7 @@ namespace jit {
     _(SetElementCache)                                                      \
     _(BindNameCache)                                                        \
     _(GuardShape)                                                           \
+    _(GuardShapePolymorphic)                                                \
     _(GuardObjectType)                                                      \
     _(GuardObjectIdentity)                                                  \
     _(GuardClass)                                                           \
@@ -209,7 +211,6 @@ namespace jit {
     _(AsmJSVoidReturn)                                                      \
     _(AsmJSPassStackArg)                                                    \
     _(AsmJSCall)                                                            \
-    _(AsmJSCheckOverRecursed)                                               \
     _(CheckOverRecursedPar)                                                 \
     _(NewCallObjectPar)                                                     \
     _(NewPar)                                                               \

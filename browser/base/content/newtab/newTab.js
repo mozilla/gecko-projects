@@ -19,6 +19,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Rect",
   "resource://gre/modules/Geometry.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
+  "resource://gre/modules/UpdateChannel.jsm");
 
 let {
   links: gLinks,
@@ -41,6 +43,7 @@ function inPrivateBrowsingMode() {
 }
 
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const XUL_NAMESPACE = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
 #include transformations.js
 #include page.js
@@ -54,6 +57,7 @@ const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 #include dropPreview.js
 #include updater.js
 #include undo.js
+#include search.js
 
 // Everything is loaded. Initialize the New Tab Page.
 gPage.init();

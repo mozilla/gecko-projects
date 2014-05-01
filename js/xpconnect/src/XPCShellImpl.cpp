@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -543,7 +544,7 @@ Parent(JSContext *cx, unsigned argc, jsval *vp)
     }
 
     Value v = args[0];
-    if (JSVAL_IS_PRIMITIVE(v)) {
+    if (v.isPrimitive()) {
         JS_ReportError(cx, "Only objects have parents!");
         return false;
     }
@@ -825,7 +826,7 @@ env_enumerate(JSContext *cx, HandleObject obj)
 }
 
 static bool
-env_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
+env_resolve(JSContext *cx, HandleObject obj, HandleId id,
             JS::MutableHandleObject objp)
 {
     JSString *idstr, *valstr;
@@ -1206,7 +1207,7 @@ public:
     TestGlobal(){}
 };
 
-NS_IMPL_ISUPPORTS2(TestGlobal, nsIXPCTestNoisy, nsIXPCScriptable)
+NS_IMPL_ISUPPORTS(TestGlobal, nsIXPCTestNoisy, nsIXPCScriptable)
 
 // The nsIXPCScriptable map declaration that will generate stubs for us...
 #define XPC_MAP_CLASSNAME           TestGlobal
@@ -1239,7 +1240,7 @@ public:
 };
 
 /* Implementation file */
-NS_IMPL_ISUPPORTS1(nsXPCFunctionThisTranslator, nsIXPCFunctionThisTranslator)
+NS_IMPL_ISUPPORTS(nsXPCFunctionThisTranslator, nsIXPCFunctionThisTranslator)
 
 nsXPCFunctionThisTranslator::nsXPCFunctionThisTranslator()
 {
@@ -1667,9 +1668,9 @@ XPCShellDirProvider::Release()
     return 1;
 }
 
-NS_IMPL_QUERY_INTERFACE2(XPCShellDirProvider,
-                         nsIDirectoryServiceProvider,
-                         nsIDirectoryServiceProvider2)
+NS_IMPL_QUERY_INTERFACE(XPCShellDirProvider,
+                        nsIDirectoryServiceProvider,
+                        nsIDirectoryServiceProvider2)
 
 NS_IMETHODIMP
 XPCShellDirProvider::GetFile(const char *prop, bool *persistent,

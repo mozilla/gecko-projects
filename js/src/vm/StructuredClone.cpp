@@ -719,7 +719,7 @@ JSStructuredCloneWriter::parseTransferable()
 {
     MOZ_ASSERT(transferableObjects.empty(), "parseTransferable called with stale data");
 
-    if (JSVAL_IS_NULL(transferable) || JSVAL_IS_VOID(transferable))
+    if (transferable.isNull() || transferable.isUndefined())
         return true;
 
     if (!transferable.isObject())
@@ -1250,7 +1250,7 @@ JSStructuredCloneReader::readTypedArray(uint32_t arrayType, uint32_t nelems, Val
         return false;
     vp->setObject(*obj);
 
-    allObjs[placeholderIndex] = *vp;
+    allObjs[placeholderIndex].set(*vp);
 
     return true;
 }
@@ -1572,7 +1572,9 @@ JSStructuredCloneReader::readTransferMap()
             MOZ_ASSERT(obj);
             MOZ_ASSERT(!cx->isExceptionPending());
         }
-
+        
+        // On failure, the buffer will still own the data (since its ownership will not get set to SCTAG_TMO_UNOWNED),
+        // so the data will be freed by ClearStructuredClone
         if (!obj)
             return false;
 

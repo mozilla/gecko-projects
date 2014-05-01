@@ -33,8 +33,8 @@ namespace mozilla {
 
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(MediaRecorder, DOMEventTargetHelper,
-                                     mStream)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(MediaRecorder, DOMEventTargetHelper,
+                                   mStream)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MediaRecorder)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
@@ -468,7 +468,7 @@ private:
   bool mStopIssued;
 };
 
-NS_IMPL_ISUPPORTS1(MediaRecorder::Session, nsIObserver)
+NS_IMPL_ISUPPORTS(MediaRecorder::Session, nsIObserver)
 
 MediaRecorder::~MediaRecorder()
 {

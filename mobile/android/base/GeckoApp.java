@@ -157,6 +157,7 @@ public abstract class GeckoApp
     public static final String PREFS_OOM_EXCEPTION         = "OOMException";
     public static final String PREFS_VERSION_CODE          = "versionCode";
     public static final String PREFS_WAS_STOPPED           = "wasStopped";
+    public static final String PREFS_CRASHED               = "crashed";
     public static final String PREFS_CLEANUP_TEMP_FILES    = "cleanupTempFiles";
 
     public static final String SAVED_STATE_IN_BACKGROUND   = "inBackground";
@@ -495,31 +496,6 @@ public abstract class GeckoApp
         outState.putString(SAVED_STATE_PRIVATE_SESSION, mPrivateBrowsingSession);
     }
 
-    void handleFaviconRequest(final String url) {
-        (new UiAsyncTask<Void, Void, String>(ThreadUtils.getBackgroundHandler()) {
-            @Override
-            public String doInBackground(Void... params) {
-                return Favicons.getFaviconURLForPageURL(url);
-            }
-
-            @Override
-            public void onPostExecute(String faviconUrl) {
-                JSONObject args = new JSONObject();
-
-                if (faviconUrl != null) {
-                    try {
-                        args.put("url", url);
-                        args.put("faviconUrl", faviconUrl);
-                    } catch (JSONException e) {
-                        Log.w(LOGTAG, "Error building JSON favicon arguments.", e);
-                    }
-                }
-
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Reader:FaviconReturn", args.toString()));
-            }
-        }).execute();
-    }
-
     void handleClearHistory() {
         BrowserDB.clearHistory(getContentResolver());
     }
@@ -564,9 +540,6 @@ public abstract class GeckoApp
                 // generic log listener
                 final String msg = message.getString("msg");
                 Log.d(LOGTAG, "Log: " + msg);
-            } else if (event.equals("Reader:FaviconRequest")) {
-                final String url = message.getString("url");
-                handleFaviconRequest(url);
             } else if (event.equals("Gecko:DelayedStartup")) {
                 ThreadUtils.postToBackgroundThread(new UninstallListener.DelayedStartupTask(this));
             } else if (event.equals("Gecko:Ready")) {
@@ -664,49 +637,7 @@ public abstract class GeckoApp
                 } else {
                     // something went wrong.
                     Log.e(LOGTAG, "Received Contact:Add message with no email nor phone number");
-                }                
-            } else if (event.equals("Intent:GetHandlers")) {
-                Intent intent = GeckoAppShell.getOpenURIIntent((Context) this, message.optString("url"),
-                    message.optString("mime"), message.optString("action"), message.optString("title"));
-                String[] handlers = GeckoAppShell.getHandlersForIntent(intent);
-                List<String> appList = Arrays.asList(handlers);
-                JSONObject handlersJSON = new JSONObject();
-                handlersJSON.put("apps", new JSONArray(appList));
-                EventDispatcher.sendResponse(message, handlersJSON);
-            } else if (event.equals("Intent:Open")) {
-                GeckoAppShell.openUriExternal(message.optString("url"),
-                    message.optString("mime"), message.optString("packageName"),
-                    message.optString("className"), message.optString("action"), message.optString("title"));
-            } else if (event.equals("Intent:OpenForResult")) {
-                Intent intent = GeckoAppShell.getOpenURIIntent(this,
-                                                               message.optString("url"),
-                                                               message.optString("mime"),
-                                                               message.optString("action"),
-                                                               message.optString("title"));
-                intent.setClassName(message.optString("packageName"), message.optString("className"));
-
-                intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-
-                final JSONObject originalMessage = message;
-                ActivityHandlerHelper.startIntentForActivity(this,
-                                                             intent,
-                        new ActivityResultHandler() {
-                            @Override
-                            public void onActivityResult (int resultCode, Intent data) {
-                                JSONObject response = new JSONObject();
-
-                                try {
-                                    if (data != null) {
-                                        response.put("extras", bundleToJSON(data.getExtras()));
-                                    }
-                                    response.put("resultCode", resultCode);
-                                } catch (JSONException e) {
-                                    Log.w(LOGTAG, "Error building JSON response.", e);
-                                }
-
-                                EventDispatcher.sendResponse(originalMessage, response);
-                            }
-                        });
+                }
             } else if (event.equals("Locale:Set")) {
                 setLocale(message.getString("locale"));
             } else if (event.equals("NativeApp:IsDebuggable")) {
@@ -865,23 +796,6 @@ public abstract class GeckoApp
                 });
             }
         });
-    }
-
-    private JSONObject bundleToJSON(Bundle bundle) {
-        JSONObject json = new JSONObject();
-        if (bundle == null) {
-            return json;
-        }
-
-        for (String key : bundle.keySet()) {
-            try {
-                json.put(key, bundle.get(key));
-            } catch (JSONException e) {
-                Log.w(LOGTAG, "Error building JSON response.", e);
-            }
-        }
-
-        return json;
     }
 
     private void addFullScreenPluginView(View view) {
@@ -1382,6 +1296,7 @@ public abstract class GeckoApp
 
         GeckoAppShell.setNotificationClient(makeNotificationClient());
         NotificationHelper.init(getApplicationContext());
+        IntentHelper.init(this);
     }
 
     /**
@@ -1572,11 +1487,6 @@ public abstract class GeckoApp
 
         //register for events
         registerEventListener("log");
-        registerEventListener("Reader:ListStatusRequest");
-        registerEventListener("Reader:Added");
-        registerEventListener("Reader:Removed");
-        registerEventListener("Reader:Share");
-        registerEventListener("Reader:FaviconRequest");
         registerEventListener("onCameraCapture");
         registerEventListener("Gecko:Ready");
         registerEventListener("Gecko:DelayedStartup");
@@ -1600,9 +1510,6 @@ public abstract class GeckoApp
         registerEventListener("Update:Install");
         registerEventListener("PrivateBrowsing:Data");
         registerEventListener("Contact:Add");
-        registerEventListener("Intent:Open");
-        registerEventListener("Intent:OpenForResult");
-        registerEventListener("Intent:GetHandlers");
         registerEventListener("Locale:Set");
         registerEventListener("NativeApp:IsDebuggable");
         registerEventListener("SystemUI:Visibility");
@@ -1772,10 +1679,17 @@ public abstract class GeckoApp
             shouldRestore = true;
         } else if (savedInstanceState != null ||
                    getSessionRestorePreference().equals("always") ||
-                   getRestartFromIntent() ||
-                   prefs.getBoolean(GeckoApp.PREFS_WAS_STOPPED, false)) {
+                   getRestartFromIntent()) {
             // We're coming back from a background kill by the OS, the user
-            // has chosen to always restore, we restarted, or we crashed.
+            // has chosen to always restore, or we restarted.
+            shouldRestore = true;
+        } else if (prefs.getBoolean(GeckoApp.PREFS_CRASHED, false)) {
+            ThreadUtils.postToBackgroundThread(new Runnable() {
+                @Override
+                public void run() {
+                    prefs.edit().putBoolean(PREFS_CRASHED, false).commit();
+                }
+            });
             shouldRestore = true;
         }
 
@@ -2106,11 +2020,6 @@ public abstract class GeckoApp
     public void onDestroy()
     {
         unregisterEventListener("log");
-        unregisterEventListener("Reader:ListStatusRequest");
-        unregisterEventListener("Reader:Added");
-        unregisterEventListener("Reader:Removed");
-        unregisterEventListener("Reader:Share");
-        unregisterEventListener("Reader:FaviconRequest");
         unregisterEventListener("onCameraCapture");
         unregisterEventListener("Gecko:Ready");
         unregisterEventListener("Gecko:DelayedStartup");
@@ -2134,8 +2043,6 @@ public abstract class GeckoApp
         unregisterEventListener("Update:Install");
         unregisterEventListener("PrivateBrowsing:Data");
         unregisterEventListener("Contact:Add");
-        unregisterEventListener("Intent:Open");
-        unregisterEventListener("Intent:GetHandlers");
         unregisterEventListener("Locale:Set");
         unregisterEventListener("NativeApp:IsDebuggable");
         unregisterEventListener("SystemUI:Visibility");
@@ -2157,6 +2064,7 @@ public abstract class GeckoApp
         if (mTextSelection != null)
             mTextSelection.destroy();
         NotificationHelper.destroy();
+        IntentHelper.destroy();
 
         if (SmsManager.getInstance() != null) {
             SmsManager.getInstance().stop();

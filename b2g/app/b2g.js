@@ -156,11 +156,6 @@ pref("browser.search.suggest.enabled", true);
 // tell the search service that we don't really expose the "current engine"
 pref("browser.search.noCurrentEngine", true);
 
-// Enable sparse localization by setting a few package locale overrides
-pref("chrome.override_package.global", "b2g-l10n");
-pref("chrome.override_package.mozapps", "b2g-l10n");
-pref("chrome.override_package.passwordmgr", "b2g-l10n");
-
 // enable xul error pages
 pref("browser.xul.error_pages.enabled", true);
 
@@ -517,7 +512,7 @@ pref("marionette.force-local", true);
 #ifdef MOZ_UPDATER
 // When we're applying updates, we can't let anything hang us on
 // quit+restart.  The user has no recourse.
-pref("shutdown.watchdog.timeoutSecs", 5);
+pref("shutdown.watchdog.timeoutSecs", 10);
 // Timeout before the update prompt automatically installs the update
 pref("b2g.update.apply-prompt-timeout", 60000); // milliseconds
 // Amount of time to wait after the user is idle before prompting to apply an update
@@ -569,7 +564,7 @@ pref("extensions.getAddons.cache.enabled", false);
 
 // Context Menu
 pref("ui.click_hold_context_menus", true);
-pref("ui.click_hold_context_menus.delay", 750);
+pref("ui.click_hold_context_menus.delay", 400);
 
 // Enable device storage
 pref("device.storage.enabled", true);
@@ -582,7 +577,7 @@ pref("dom.sysmsg.enabled", true);
 pref("media.plugins.enabled", false);
 pref("media.omx.enabled", true);
 pref("media.rtsp.enabled", true);
-pref("media.rtsp.video.enabled", false);
+pref("media.rtsp.video.enabled", true);
 
 // Disable printing (particularly, window.print())
 pref("dom.disable_window_print", true);
@@ -899,9 +894,9 @@ pref("osfile.reset_worker_delay", 5000);
 pref("apz.asyncscroll.throttle", 40);
 pref("apz.pan_repaint_interval", 16);
 
-// Maximum fling velocity in inches/ms.  Slower devices may need to reduce this
-// to avoid checkerboarding.  Note, float value must be set as a string.
-pref("apz.max_velocity_inches_per_ms", "0.0375");
+// APZ physics settings, tuned by UX designers
+pref("apz.max_velocity_inches_per_ms", "0.07");
+pref("apz.fling_friction", "0.003");
 
 // Tweak default displayport values to reduce the risk of running out of
 // memory when zooming in

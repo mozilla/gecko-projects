@@ -214,8 +214,8 @@ static bool UseAudioChannelService()
   return Preferences::GetBool("media.useAudioChannelService");
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(AudioDestinationNode, AudioNode,
-                                     mAudioChannelAgent)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(AudioDestinationNode, AudioNode,
+                                   mAudioChannelAgent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(AudioDestinationNode)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventListener)
@@ -228,6 +228,7 @@ NS_IMPL_RELEASE_INHERITED(AudioDestinationNode, AudioNode)
 
 AudioDestinationNode::AudioDestinationNode(AudioContext* aContext,
                                            bool aIsOffline,
+                                           AudioChannel aChannel,
                                            uint32_t aNumberOfChannels,
                                            uint32_t aLength,
                                            float aSampleRate)
@@ -244,7 +245,7 @@ AudioDestinationNode::AudioDestinationNode(AudioContext* aContext,
   , mExtraCurrentTimeUpdatedSinceLastStableState(false)
 {
   MediaStreamGraph* graph = aIsOffline ?
-                            MediaStreamGraph::CreateNonRealtimeInstance() :
+                            MediaStreamGraph::CreateNonRealtimeInstance(aSampleRate) :
                             MediaStreamGraph::GetInstance();
   AudioNodeEngine* engine = aIsOffline ?
                             new OfflineDestinationNodeEngine(this, aNumberOfChannels,
@@ -252,13 +253,13 @@ AudioDestinationNode::AudioDestinationNode(AudioContext* aContext,
                             static_cast<AudioNodeEngine*>(new DestinationNodeEngine(this));
 
   mStream = graph->CreateAudioNodeStream(engine, MediaStreamGraph::EXTERNAL_STREAM);
+  mStream->SetAudioChannelType(aChannel);
   mStream->AddMainThreadListener(this);
   mStream->AddAudioOutput(&gWebAudioOutputKey);
 
-  AudioChannel channel = AudioChannelService::GetDefaultAudioChannel();
-  if (channel != AudioChannel::Normal) {
+  if (aChannel != AudioChannel::Normal) {
     ErrorResult rv;
-    SetMozAudioChannelType(channel, rv);
+    SetMozAudioChannelType(aChannel, rv);
   }
 
   if (!aIsOffline && UseAudioChannelService()) {

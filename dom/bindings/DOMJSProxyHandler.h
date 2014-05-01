@@ -50,8 +50,7 @@ public:
                  JS::AutoIdVector& props) MOZ_OVERRIDE;
   bool getPropertyDescriptor(JSContext* cx, JS::Handle<JSObject*> proxy,
                              JS::Handle<jsid> id,
-                             JS::MutableHandle<JSPropertyDescriptor> desc,
-                             unsigned flags) MOZ_OVERRIDE;
+                             JS::MutableHandle<JSPropertyDescriptor> desc) MOZ_OVERRIDE;
 
   bool watch(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
              JS::Handle<JSObject*> callable) MOZ_OVERRIDE;
@@ -92,10 +91,20 @@ public:
   }
   virtual bool defineProperty(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
                               JS::MutableHandle<JSPropertyDescriptor> desc, bool* defined);
+  bool set(JSContext *cx, JS::Handle<JSObject*> proxy, JS::Handle<JSObject*> receiver,
+           JS::Handle<jsid> id, bool strict, JS::MutableHandle<JS::Value> vp) MOZ_OVERRIDE;
   bool delete_(JSContext* cx, JS::Handle<JSObject*> proxy,
                JS::Handle<jsid> id, bool* bp) MOZ_OVERRIDE;
   bool has(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id, bool* bp) MOZ_OVERRIDE;
   bool isExtensible(JSContext *cx, JS::Handle<JSObject*> proxy, bool *extensible) MOZ_OVERRIDE;
+
+  /*
+   * If assigning to proxy[id] hits a named setter with OverrideBuiltins or
+   * an indexed setter, call it and set *done to true on success. Otherwise, set
+   * *done to false.
+   */
+  virtual bool setCustom(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+                         JS::MutableHandle<JS::Value> vp, bool *done);
 
   static JSObject* GetExpandoObject(JSObject* obj)
   {
@@ -119,6 +128,13 @@ public:
   static JSObject* EnsureExpandoObject(JSContext* cx,
                                        JS::Handle<JSObject*> obj);
 };
+
+inline DOMProxyHandler*
+GetDOMProxyHandler(JSObject* obj)
+{
+  MOZ_ASSERT(IsDOMProxy(obj));
+  return static_cast<DOMProxyHandler*>(js::GetProxyHandler(obj));
+}
 
 extern jsid s_length_id;
 

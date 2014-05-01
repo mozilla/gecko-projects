@@ -11,7 +11,7 @@
 
 using namespace mozilla::dom;
 
-NS_IMPL_CYCLE_COLLECTION_2(AudioChannelAgent, mWindow, mCallback)
+NS_IMPL_CYCLE_COLLECTION(AudioChannelAgent, mWindow, mCallback)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AudioChannelAgent)
   NS_INTERFACE_MAP_ENTRY(nsIAudioChannelAgent)
@@ -85,20 +85,13 @@ AudioChannelAgent::InitInternal(nsIDOMWindow* aWindow, int32_t aChannelType,
 
   // We syncd the enum of channel type between nsIAudioChannelAgent.idl and
   // AudioChannelBinding.h the same.
-  MOZ_ASSERT(static_cast<AudioChannel>(AUDIO_AGENT_CHANNEL_NORMAL) ==
-             AudioChannel::Normal &&
-             static_cast<AudioChannel>(AUDIO_AGENT_CHANNEL_CONTENT) ==
-             AudioChannel::Content &&
-             static_cast<AudioChannel>(AUDIO_AGENT_CHANNEL_NOTIFICATION) ==
-             AudioChannel::Notification &&
-             static_cast<AudioChannel>(AUDIO_AGENT_CHANNEL_ALARM) ==
-             AudioChannel::Alarm &&
-             static_cast<AudioChannel>(AUDIO_AGENT_CHANNEL_TELEPHONY) ==
-             AudioChannel::Telephony &&
-             static_cast<AudioChannel>(AUDIO_AGENT_CHANNEL_RINGER) ==
-             AudioChannel::Ringer &&
-             static_cast<AudioChannel>(AUDIO_AGENT_CHANNEL_PUBLICNOTIFICATION) ==
-             AudioChannel::Publicnotification,
+  MOZ_ASSERT(int(AUDIO_AGENT_CHANNEL_NORMAL) == int(AudioChannel::Normal) &&
+             int(AUDIO_AGENT_CHANNEL_CONTENT) == int(AudioChannel::Content) &&
+             int(AUDIO_AGENT_CHANNEL_NOTIFICATION) == int(AudioChannel::Notification) &&
+             int(AUDIO_AGENT_CHANNEL_ALARM) == int(AudioChannel::Alarm) &&
+             int(AUDIO_AGENT_CHANNEL_TELEPHONY) == int(AudioChannel::Telephony) &&
+             int(AUDIO_AGENT_CHANNEL_RINGER) == int(AudioChannel::Ringer) &&
+             int(AUDIO_AGENT_CHANNEL_PUBLICNOTIFICATION) == int(AudioChannel::Publicnotification),
              "Enum of channel on nsIAudioChannelAgent.idl should be the same with AudioChannelBinding.h");
 
   if (mAudioChannelType != AUDIO_AGENT_CHANNEL_ERROR ||

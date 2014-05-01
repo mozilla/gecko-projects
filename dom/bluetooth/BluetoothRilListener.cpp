@@ -18,7 +18,7 @@ USING_BLUETOOTH_NAMESPACE
 /**
  *  IccListener
  */
-NS_IMPL_ISUPPORTS1(IccListener, nsIIccListener)
+NS_IMPL_ISUPPORTS(IccListener, nsIIccListener)
 
 NS_IMETHODIMP
 IccListener::NotifyIccInfoChanged()
@@ -80,7 +80,7 @@ IccListener::SetOwner(BluetoothRilListener *aOwner)
 /**
  *  MobileConnectionListener
  */
-NS_IMPL_ISUPPORTS1(MobileConnectionListener, nsIMobileConnectionListener)
+NS_IMPL_ISUPPORTS(MobileConnectionListener, nsIMobileConnectionListener)
 
 NS_IMETHODIMP
 MobileConnectionListener::NotifyVoiceChanged()
@@ -148,6 +148,12 @@ MobileConnectionListener::NotifyRadioStateChanged()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+MobileConnectionListener::NotifyClirModeChanged(uint32_t aMode)
+{
+  return NS_OK;
+}
+
 bool
 MobileConnectionListener::Listen(bool aStart)
 {
@@ -168,7 +174,7 @@ MobileConnectionListener::Listen(bool aStart)
 /**
  *  TelephonyListener Implementation
  */
-NS_IMPL_ISUPPORTS1(TelephonyListener, nsITelephonyListener)
+NS_IMPL_ISUPPORTS(TelephonyListener, nsITelephonyListener)
 
 NS_IMETHODIMP
 TelephonyListener::CallStateChanged(uint32_t aServiceId,

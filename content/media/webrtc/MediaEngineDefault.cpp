@@ -22,6 +22,8 @@
 #include "nsISupportsUtils.h"
 #endif
 
+#include "YuvStamper.h"
+
 #define VIDEO_RATE USECS_PER_S
 #define AUDIO_RATE 16000
 #define AUDIO_FRAME_LENGTH ((AUDIO_RATE * MediaEngine::DEFAULT_AUDIO_TIMER_MS) / 1000)
@@ -29,7 +31,7 @@ namespace mozilla {
 
 using namespace mozilla::gfx;
 
-NS_IMPL_ISUPPORTS1(MediaEngineDefaultVideoSource, nsITimerCallback)
+NS_IMPL_ISUPPORTS(MediaEngineDefaultVideoSource, nsITimerCallback)
 /**
  * Default video source.
  */
@@ -59,13 +61,16 @@ MediaEngineDefaultVideoSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineDefaultVideoSource::Allocate(const MediaEnginePrefs &aPrefs)
+MediaEngineDefaultVideoSource::Allocate(const VideoTrackConstraintsN &aConstraints,
+                                        const MediaEnginePrefs &aPrefs)
 {
   if (mState != kReleased) {
     return NS_ERROR_FAILURE;
   }
 
   mOpts = aPrefs;
+  mOpts.mWidth = mOpts.mWidth ? mOpts.mWidth : MediaEngine::DEFAULT_43_VIDEO_WIDTH;
+  mOpts.mHeight = mOpts.mHeight ? mOpts.mHeight : MediaEngine::DEFAULT_43_VIDEO_HEIGHT;
   mState = kAllocated;
   return NS_OK;
 }
@@ -239,6 +244,13 @@ MediaEngineDefaultVideoSource::Notify(nsITimer* aTimer)
       static_cast<layers::PlanarYCbCrImage*>(image.get());
   layers::PlanarYCbCrData data;
   AllocateSolidColorFrame(data, mOpts.mWidth, mOpts.mHeight, 0x80, mCb, mCr);
+
+  uint64_t timestamp = PR_Now();
+  YuvStamper::Encode(mOpts.mWidth, mOpts.mHeight, mOpts.mWidth,
+		     data.mYChannel,
+		     reinterpret_cast<unsigned char*>(&timestamp), sizeof(timestamp),
+		     0, 0);
+
   ycbcr_image->SetData(data);
   // SetData copies data, so we can free the frame
   ReleaseFrame(data);
@@ -332,7 +344,7 @@ private:
 /**
  * Default audio source.
  */
-NS_IMPL_ISUPPORTS1(MediaEngineDefaultAudioSource, nsITimerCallback)
+NS_IMPL_ISUPPORTS(MediaEngineDefaultAudioSource, nsITimerCallback)
 
 MediaEngineDefaultAudioSource::MediaEngineDefaultAudioSource()
   : mTimer(nullptr)
@@ -358,7 +370,8 @@ MediaEngineDefaultAudioSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineDefaultAudioSource::Allocate(const MediaEnginePrefs &aPrefs)
+MediaEngineDefaultAudioSource::Allocate(const AudioTrackConstraintsN &aConstraints,
+                                        const MediaEnginePrefs &aPrefs)
 {
   if (mState != kReleased) {
     return NS_ERROR_FAILURE;

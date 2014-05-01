@@ -27,7 +27,7 @@ namespace mozilla {
 
 using namespace mozilla::gfx;
 
-NS_IMPL_ISUPPORTS2(MediaEngineTabVideoSource, nsIDOMEventListener, nsITimerCallback)
+NS_IMPL_ISUPPORTS(MediaEngineTabVideoSource, nsIDOMEventListener, nsITimerCallback)
 
 MediaEngineTabVideoSource::MediaEngineTabVideoSource()
 : mMonitor("MediaEngineTabVideoSource")
@@ -119,7 +119,8 @@ MediaEngineTabVideoSource::GetUUID(nsAString_internal& aUuid)
 }
 
 nsresult
-MediaEngineTabVideoSource::Allocate(const mozilla::MediaEnginePrefs&)
+MediaEngineTabVideoSource::Allocate(const VideoTrackConstraintsN&,
+                                    const MediaEnginePrefs&)
 {
   return NS_OK;
 }

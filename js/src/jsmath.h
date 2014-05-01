@@ -110,7 +110,10 @@ extern bool
 math_imul(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern bool
-RoundFloat32(JSContext *cx, Handle<Value> v, float *out);
+RoundFloat32(JSContext *cx, HandleValue v, float *out);
+
+extern bool
+RoundFloat32(JSContext *cx, HandleValue arg, MutableHandleValue res);
 
 extern bool
 math_fround(JSContext *cx, unsigned argc, js::Value *vp);
@@ -128,13 +131,19 @@ extern bool
 math_sin(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern double
-math_sin_impl(double x);
+math_sin_impl(MathCache *cache, double x);
+
+extern double
+math_sin_uncached(double x);
 
 extern bool
 math_cos(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern double
-math_cos_impl(double x);
+math_cos_impl(MathCache *cache, double x);
+
+extern double
+math_cos_uncached(double x);
 
 extern bool
 math_exp(JSContext *cx, unsigned argc, js::Value *vp);

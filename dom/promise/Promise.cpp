@@ -717,7 +717,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(AllResolveHandler)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AllResolveHandler)
 NS_INTERFACE_MAP_END_INHERITING(PromiseNativeHandler)
 
-NS_IMPL_CYCLE_COLLECTION_1(AllResolveHandler, mCountdownHolder)
+NS_IMPL_CYCLE_COLLECTION(AllResolveHandler, mCountdownHolder)
 
 /* static */ already_AddRefed<Promise>
 Promise::All(const GlobalObject& aGlobal, JSContext* aCx,
@@ -865,11 +865,20 @@ Promise::RunTask()
   mResolveCallbacks.Clear();
   mRejectCallbacks.Clear();
 
-  ThreadsafeAutoJSContext cx; // Just for rooting.
+  ThreadsafeAutoJSContext cx;
   JS::Rooted<JS::Value> value(cx, mResult);
+  JS::Rooted<JSObject*> wrapper(cx, GetOrCreateWrapper(cx));
+  if (!wrapper) {
+    return;
+  }
+
+  JSAutoCompartment ac(cx, wrapper);
+  if (!MaybeWrapValue(cx, &value)) {
+    return;
+  }
 
   for (uint32_t i = 0; i < callbacks.Length(); ++i) {
-    callbacks[i]->Call(value);
+    callbacks[i]->Call(cx, value);
   }
 }
 

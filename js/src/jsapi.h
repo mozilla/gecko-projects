@@ -235,13 +235,10 @@ class AutoVectorRooter : protected AutoGCRooter
         return vector.reserve(newLength);
     }
 
-    T &operator[](size_t i) { return vector[i]; }
-    const T &operator[](size_t i) const { return vector[i]; }
-
-    JS::MutableHandle<T> handleAt(size_t i) {
+    JS::MutableHandle<T> operator[](size_t i) {
         return JS::MutableHandle<T>::fromMarkedLocation(&vector[i]);
     }
-    JS::Handle<T> handleAt(size_t i) const {
+    JS::Handle<T> operator[](size_t i) const {
         return JS::Handle<T>::fromMarkedLocation(&vector[i]);
     }
 
@@ -840,16 +837,6 @@ JS_StringHasBeenInterned(JSContext *cx, JSString *str);
 JS_PUBLIC_API(jsid)
 INTERNED_STRING_TO_JSID(JSContext *cx, JSString *str);
 
-/*
- * Returns true iff the given jsval is immune to GC and can be used across
- * multiple JSRuntimes without requiring any conversion API.
- */
-static MOZ_ALWAYS_INLINE bool
-JSVAL_IS_UNIVERSAL(jsval v)
-{
-    return !JSVAL_IS_GCTHING(v);
-}
-
 namespace JS {
 
 class AutoIdRooter : private AutoGCRooter
@@ -875,6 +862,91 @@ class AutoIdRooter : private AutoGCRooter
   private:
     jsid id_;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+// Container class for passing in script source buffers to the JS engine.  This
+// not only groups the buffer and length values, it also provides a way to
+// optionally pass ownership of the buffer to the JS engine without copying.
+// Rules for use:
+//
+//  1) The data array must be allocated with js_malloc() or js_realloc() if
+//     ownership is being granted to the SourceBufferHolder.
+//  2) If ownership is not given to the SourceBufferHolder, then the memory
+//     must be kept alive until the JS compilation is complete.
+//  3) Any code calling SourceBufferHolder::take() must guarantee to keep the
+//     memory alive until JS compilation completes.  Normally only the JS
+//     engine should be calling take().
+//
+// Example use:
+//
+//    size_t length = 512;
+//    jschar* chars = static_cast<jschar*>(js_malloc(sizeof(jschar) * length));
+//    JS::SourceBufferHolder srcBuf(chars, length, JS::SourceBufferHolder::GiveOwnership);
+//    JS::Compile(cx, obj, options, srcBuf);
+//
+class MOZ_STACK_CLASS SourceBufferHolder MOZ_FINAL
+{
+  public:
+    enum Ownership {
+      NoOwnership,
+      GiveOwnership
+    };
+
+    SourceBufferHolder(const jschar *data, size_t dataLength, Ownership ownership)
+      : data_(data),
+        length_(dataLength),
+        ownsChars_(ownership == GiveOwnership)
+    {
+        // Ensure that null buffers properly return an unowned, empty,
+        // null-terminated string.
+        static const jschar NullChar_ = 0;
+        if (!get()) {
+            data_ = &NullChar_;
+            length_ = 0;
+            ownsChars_ = false;
+        }
+    }
+
+    ~SourceBufferHolder() {
+        if (ownsChars_)
+            js_free(const_cast<jschar *>(data_));
+    }
+
+    // Access the underlying source buffer without affecting ownership.
+    const jschar *get() const { return data_; }
+
+    // Length of the source buffer in jschars (not bytes)
+    size_t length() const { return length_; }
+
+    // Returns true if the SourceBufferHolder owns the buffer and will free
+    // it upon destruction.  If true, it is legal to call take().
+    bool ownsChars() const { return ownsChars_; }
+
+    // Retrieve and take ownership of the underlying data buffer.  The caller
+    // is now responsible for calling js_free() on the returned value, *but only
+    // after JS script compilation has completed*.
+    //
+    // After the buffer has been taken the SourceBufferHolder functions as if
+    // it had been constructed on an unowned buffer;  get() and length() still
+    // work.  In order for this to be safe the taken buffer must be kept alive
+    // until after JS script compilation completes as noted above.
+    //
+    // Note, it's the caller's responsibility to check ownsChars() before taking
+    // the buffer.  Taking and then free'ing an unowned buffer will have dire
+    // consequences.
+    jschar *take() {
+        JS_ASSERT(ownsChars_);
+        ownsChars_ = false;
+        return const_cast<jschar *>(data_);
+    }
+
+  private:
+    SourceBufferHolder(SourceBufferHolder &) MOZ_DELETE;
+    SourceBufferHolder &operator=(SourceBufferHolder &) MOZ_DELETE;
+
+    const jschar *data_;
+    size_t length_;
+    bool ownsChars_;
 };
 
 } /* namespace JS */
@@ -1727,8 +1799,7 @@ JS_InitStandardClasses(JSContext *cx, JS::Handle<JSObject*> obj);
  * loops any classes not yet resolved lazily.
  */
 extern JS_PUBLIC_API(bool)
-JS_ResolveStandardClass(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
-                        bool *resolved);
+JS_ResolveStandardClass(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *resolved);
 
 extern JS_PUBLIC_API(bool)
 JS_EnumerateStandardClasses(JSContext *cx, JS::HandleObject obj);
@@ -2245,11 +2316,6 @@ JS_StringToId(JSContext *cx, JS::HandleString s, JS::MutableHandleId idp);
 
 extern JS_PUBLIC_API(bool)
 JS_IdToValue(JSContext *cx, jsid id, JS::MutableHandle<JS::Value> vp);
-
-/*
- * JSNewResolveOp flag bits.
- */
-#define JSRESOLVE_ASSIGNING     0x01    /* resolve on the left of assignment */
 
 /*
  * Invoke the [[DefaultValue]] hook (see ES5 8.6.2) with the provided hint on
@@ -2788,14 +2854,6 @@ extern JS_PUBLIC_API(bool)
 JS_LookupPropertyById(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                       JS::MutableHandleValue vp);
 
-extern JS_PUBLIC_API(bool)
-JS_LookupPropertyWithFlags(JSContext *cx, JS::HandleObject obj, const char *name,
-                           unsigned flags, JS::MutableHandleValue vp);
-
-extern JS_PUBLIC_API(bool)
-JS_LookupPropertyWithFlagsById(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
-                               unsigned flags, JS::MutableHandleObject objp, JS::MutableHandleValue vp);
-
 struct JSPropertyDescriptor {
     JSObject           *obj;
     unsigned           attrs;
@@ -2942,10 +3000,10 @@ class MutableHandleBase<JSPropertyDescriptor>
 
 extern JS_PUBLIC_API(bool)
 JS_GetOwnPropertyDescriptorById(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
-                                unsigned flags, JS::MutableHandle<JSPropertyDescriptor> desc);
+                                JS::MutableHandle<JSPropertyDescriptor> desc);
 
 extern JS_PUBLIC_API(bool)
-JS_GetOwnPropertyDescriptor(JSContext *cx, JS::HandleObject obj, const char *name, unsigned flags,
+JS_GetOwnPropertyDescriptor(JSContext *cx, JS::HandleObject obj, const char *name,
                             JS::MutableHandle<JSPropertyDescriptor> desc);
 
 /*
@@ -2954,11 +3012,11 @@ JS_GetOwnPropertyDescriptor(JSContext *cx, JS::HandleObject obj, const char *nam
  * then this property was not found on the prototype chain.
  */
 extern JS_PUBLIC_API(bool)
-JS_GetPropertyDescriptorById(JSContext *cx, JS::HandleObject obj, JS::HandleId id, unsigned flags,
+JS_GetPropertyDescriptorById(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                              JS::MutableHandle<JSPropertyDescriptor> desc);
 
 extern JS_PUBLIC_API(bool)
-JS_GetPropertyDescriptor(JSContext *cx, JS::HandleObject obj, const char *name, unsigned flags,
+JS_GetPropertyDescriptor(JSContext *cx, JS::HandleObject obj, const char *name,
                          JS::MutableHandle<JSPropertyDescriptor> desc);
 
 extern JS_PUBLIC_API(bool)
@@ -3100,9 +3158,8 @@ JS_PUBLIC_API(void)
 JS_SetAllNonReservedSlotsToUndefined(JSContext *cx, JSObject *objArg);
 
 /*
- * Create a new array buffer with the given contents. The new array buffer
- * takes ownership: after calling this function, do not free |contents| or use
- * |contents| from another thread.
+ * Create a new array buffer with the given contents. On success, the ownership
+ * is transferred to the new array buffer.
  */
 extern JS_PUBLIC_API(JSObject *)
 JS_NewArrayBufferWithContents(JSContext *cx, size_t nbytes, void *contents);
@@ -3134,7 +3191,8 @@ extern JS_PUBLIC_API(void *)
 JS_ReallocateArrayBufferContents(JSContext *cx, uint32_t nbytes, void *oldContents, uint32_t oldNbytes);
 
 /*
- * Create a new mapped array buffer with the given memory mapped contents.
+ * Create a new mapped array buffer with the given memory mapped contents. On success,
+ * the ownership is transferred to the new mapped array buffer.
  */
 extern JS_PUBLIC_API(JSObject *)
 JS_NewMappedArrayBufferWithContents(JSContext *cx, size_t nbytes, void *contents);
@@ -3649,6 +3707,10 @@ Compile(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &optio
         const jschar *chars, size_t length);
 
 extern JS_PUBLIC_API(JSScript *)
+Compile(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
+        SourceBufferHolder &srcBuf);
+
+extern JS_PUBLIC_API(JSScript *)
 Compile(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options, FILE *file);
 
 extern JS_PUBLIC_API(JSScript *)
@@ -3690,6 +3752,11 @@ extern JS_PUBLIC_API(JSFunction *)
 CompileFunction(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
                 const char *name, unsigned nargs, const char *const *argnames,
                 const jschar *chars, size_t length);
+
+extern JS_PUBLIC_API(JSFunction *)
+CompileFunction(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
+                const char *name, unsigned nargs, const char *const *argnames,
+                SourceBufferHolder &srcBuf);
 
 } /* namespace JS */
 
@@ -3787,6 +3854,10 @@ namespace JS {
 
 extern JS_PUBLIC_API(bool)
 Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
+         SourceBufferHolder &srcBuf, JS::MutableHandleValue rval);
+
+extern JS_PUBLIC_API(bool)
+Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
          const jschar *chars, size_t length, JS::MutableHandleValue rval);
 
 extern JS_PUBLIC_API(bool)
@@ -3796,6 +3867,10 @@ Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &opti
 extern JS_PUBLIC_API(bool)
 Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
          const char *filename, JS::MutableHandleValue rval);
+
+extern JS_PUBLIC_API(bool)
+Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
+         SourceBufferHolder &srcBuf);
 
 extern JS_PUBLIC_API(bool)
 Evaluate(JSContext *cx, JS::HandleObject obj, const ReadOnlyCompileOptions &options,
@@ -4455,11 +4530,11 @@ extern JS_PUBLIC_API(JSObject *)
 JS_NewUCRegExpObject(JSContext *cx, JS::HandleObject obj, jschar *chars, size_t length,
                      unsigned flags);
 
-extern JS_PUBLIC_API(void)
+extern JS_PUBLIC_API(bool)
 JS_SetRegExpInput(JSContext *cx, JS::HandleObject obj, JS::HandleString input,
                   bool multiline);
 
-extern JS_PUBLIC_API(void)
+extern JS_PUBLIC_API(bool)
 JS_ClearRegExpStatics(JSContext *cx, JS::HandleObject obj);
 
 extern JS_PUBLIC_API(bool)
@@ -4631,11 +4706,12 @@ JS_SetParallelParsingEnabled(JSRuntime *rt, bool enabled);
 extern JS_PUBLIC_API(void)
 JS_SetParallelIonCompilationEnabled(JSRuntime *rt, bool enabled);
 
-#define JIT_COMPILER_OPTIONS(Register)                             \
-  Register(BASELINE_USECOUNT_TRIGGER, "baseline.usecount.trigger") \
-  Register(ION_USECOUNT_TRIGGER, "ion.usecount.trigger")           \
-  Register(ION_ENABLE, "ion.enable")                               \
-  Register(BASELINE_ENABLE, "baseline.enable")
+#define JIT_COMPILER_OPTIONS(Register)                                  \
+    Register(BASELINE_USECOUNT_TRIGGER, "baseline.usecount.trigger")    \
+    Register(ION_USECOUNT_TRIGGER, "ion.usecount.trigger")              \
+    Register(ION_ENABLE, "ion.enable")                                  \
+    Register(BASELINE_ENABLE, "baseline.enable")                        \
+    Register(PARALLEL_COMPILATION_ENABLE, "parallel-compilation.enable")
 
 typedef enum JSJitCompilerOption {
 #define JIT_COMPILER_DECLARE(key, str) \

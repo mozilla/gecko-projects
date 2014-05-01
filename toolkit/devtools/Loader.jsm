@@ -23,6 +23,7 @@ let Debugger = sandbox.Debugger;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+let Timer = Cu.import("resource://gre/modules/Timer.jsm", {});
 
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils", "resource://gre/modules/FileUtils.jsm");
@@ -63,6 +64,7 @@ BuiltinProvider.prototype = {
       modules: {
         "Debugger": Debugger,
         "Services": Object.create(Services),
+        "Timer": Object.create(Timer),
         "toolkit/loader": loader,
         "source-map": SourceMap,
       },
@@ -141,6 +143,7 @@ SrcdirProvider.prototype = {
       modules: {
         "Debugger": Debugger,
         "Services": Object.create(Services),
+        "Timer": Object.create(Timer),
         "toolkit/loader": loader,
         "source-map": SourceMap,
       },
@@ -270,6 +273,24 @@ DevToolsLoader.prototype = {
   require: function() {
     this._chooseProvider();
     return this.require.apply(this, arguments);
+  },
+
+  /**
+   * Define a getter property on the given object that requires the given
+   * module. This enables delaying importing modules until the module is
+   * actually used.
+   *
+   * @param Object obj
+   *    The object to define the property on.
+   * @param String property
+   *    The property name.
+   * @param String module
+   *    The module path.
+   */
+  lazyRequireGetter: function (obj, property, module) {
+    Object.defineProperty(obj, property, {
+      get: () => this.require(module)
+    });
   },
 
   /**

@@ -22,6 +22,7 @@ let { BrowserToolboxProcess } = Cu.import("resource:///modules/devtools/ToolboxP
 let { DebuggerServer } = Cu.import("resource://gre/modules/devtools/dbg-server.jsm", {});
 let { DebuggerClient } = Cu.import("resource://gre/modules/devtools/dbg-client.jsm", {});
 let { AddonManager } = Cu.import("resource://gre/modules/AddonManager.jsm", {});
+const { promiseInvoke } = require("devtools/async-utils");
 let TargetFactory = devtools.TargetFactory;
 let Toolbox = devtools.Toolbox;
 
@@ -748,10 +749,11 @@ function openVarPopup(aPanel, aCoords, aWaitForFetchedProperties) {
   let fetchedProperties = aWaitForFetchedProperties
     ? waitForDebuggerEvents(aPanel, events.FETCHED_BUBBLE_PROPERTIES)
     : promise.resolve(null);
+  let updatedFrame = waitForDebuggerEvents(aPanel, events.FETCHED_SCOPES);
 
   let { left, top } = editor.getCoordsFromPosition(aCoords);
   bubble._findIdentifier(left, top);
-  return promise.all([popupShown, fetchedProperties]).then(waitForTick);
+  return promise.all([popupShown, fetchedProperties, updatedFrame]).then(waitForTick);
 }
 
 // Simulates the mouse hovering a variable in the debugger
@@ -856,3 +858,23 @@ function attachAddonActorForUrl(aClient, aUrl) {
 
   return deferred.promise;
 }
+
+function rdpInvoke(aClient, aMethod, ...args) {
+  return promiseInvoke(aClient, aMethod, ...args)
+    .then(({error, message }) => {
+      if (error) {
+        throw new Error(error + ": " + message);
+      }
+    });
+}
+
+function doResume(aPanel) {
+  const threadClient = aPanel.panelWin.gThreadClient;
+  return rdpInvoke(threadClient, threadClient.resume);
+}
+
+function doInterrupt(aPanel) {
+  const threadClient = aPanel.panelWin.gThreadClient;
+  return rdpInvoke(threadClient, threadClient.interrupt);
+}
+

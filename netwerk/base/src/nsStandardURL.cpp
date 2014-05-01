@@ -112,7 +112,7 @@ end:
 #define NS_NET_PREF_ESCAPEUTF8         "network.standard-url.escape-utf8"
 #define NS_NET_PREF_ALWAYSENCODEINUTF8 "network.standard-url.encode-utf8"
 
-NS_IMPL_ISUPPORTS1(nsStandardURL::nsPrefObserver, nsIObserver)
+NS_IMPL_ISUPPORTS(nsStandardURL::nsPrefObserver, nsIObserver)
 
 NS_IMETHODIMP nsStandardURL::
 nsPrefObserver::Observe(nsISupports *subject,
@@ -1464,6 +1464,12 @@ nsStandardURL::SetHost(const nsACString &input)
             return NS_OK;
         NS_WARNING("cannot set host on no-auth url");
         return NS_ERROR_UNEXPECTED;
+    } else {
+        if (flat.IsEmpty()) {
+            // Setting an empty hostname is not allowed for
+            // URLTYPE_STANDARD and URLTYPE_AUTHORITY.
+            return NS_ERROR_UNEXPECTED;
+        }
     }
 
     if (strlen(host) < flat.Length())

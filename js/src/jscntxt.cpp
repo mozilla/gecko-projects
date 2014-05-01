@@ -544,10 +544,10 @@ js::ReportUsageError(JSContext *cx, HandleObject callee, const char *msg)
     if (!JS_LookupProperty(cx, callee, "usage", &usage))
         return;
 
-    if (JSVAL_IS_VOID(usage)) {
+    if (usage.isUndefined()) {
         JS_ReportError(cx, "%s", msg);
     } else {
-        JSString *str = JSVAL_TO_STRING(usage);
+        JSString *str = usage.toString();
         JS::Anchor<JSString *> a_str(str);
         const jschar *chars = JS_GetStringCharsZ(cx, str);
         if (!chars)
@@ -1108,7 +1108,6 @@ JSContext::JSContext(JSRuntime *rt)
 #ifdef JS_THREADSAFE
     outstandingRequests(0),
 #endif
-    resolveFlags(0),
     iterValue(MagicValue(JS_NO_ITER_VALUE)),
     jitIsBroken(false),
 #ifdef MOZ_TRACE_JSCALLS
@@ -1206,8 +1205,8 @@ bool
 JSContext::currentlyRunning() const
 {
     for (ActivationIterator iter(runtime()); !iter.done(); ++iter) {
-        if (iter.activation()->cx() == this) {
-            if (iter.activation()->hasSavedFrameChain())
+        if (iter->cx() == this) {
+            if (iter->hasSavedFrameChain())
                 return false;
             return true;
         }

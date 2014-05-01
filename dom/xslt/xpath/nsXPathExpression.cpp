@@ -10,12 +10,11 @@
 #include "nsIDOMCharacterData.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMXPathNamespace.h"
 #include "nsXPathResult.h"
 #include "txURIUtils.h"
 #include "txXPathTreeWalker.h"
 
-NS_IMPL_CYCLE_COLLECTION_1(nsXPathExpression, mDocument)
+NS_IMPL_CYCLE_COLLECTION(nsXPathExpression, mDocument)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXPathExpression)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXPathExpression)
@@ -94,8 +93,7 @@ nsXPathExpression::EvaluateWithContext(nsIDOMNode *aContextNode,
              nodeType != nsIDOMNode::ELEMENT_NODE &&
              nodeType != nsIDOMNode::ATTRIBUTE_NODE &&
              nodeType != nsIDOMNode::COMMENT_NODE &&
-             nodeType != nsIDOMNode::PROCESSING_INSTRUCTION_NODE &&
-             nodeType != nsIDOMXPathNamespace::XPATH_NAMESPACE_NODE) {
+             nodeType != nsIDOMNode::PROCESSING_INSTRUCTION_NODE) {
         return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
     }
 

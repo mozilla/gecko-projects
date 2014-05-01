@@ -9,6 +9,8 @@
 
 #ifdef JS_ION
 
+#include "mozilla/Assertions.h"
+
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsgc.h"
@@ -206,15 +208,49 @@ class ICEntry
     uint32_t returnOffset_;
 
     // The PC of this IC's bytecode op within the JSScript.
-    uint32_t pcOffset_ : 31;
-
-    // Whether this IC is for a bytecode op.
-    uint32_t isForOp_ : 1;
+    uint32_t pcOffset_ : 29;
 
   public:
-    ICEntry(uint32_t pcOffset, bool isForOp)
-      : firstStub_(nullptr), returnOffset_(), pcOffset_(pcOffset), isForOp_(isForOp)
-    {}
+    enum Kind {
+        // A for-op IC entry.
+        Kind_Op = 0,
+
+        // A non-op IC entry.
+        Kind_NonOp,
+
+        // A fake IC entry for returning from a callVM.
+        Kind_CallVM,
+
+        // A fake IC entry for returning from DebugTrapHandler.
+        Kind_DebugTrap,
+
+        // A fake IC entry for returning from a callVM to
+        // Debug{Prologue,Epilogue}.
+        Kind_DebugPrologue,
+        Kind_DebugEpilogue
+    };
+
+  private:
+    // What this IC is for.
+    Kind kind_ : 3;
+
+    // Set the kind and asserts that it's sane.
+    void setKind(Kind kind) {
+        kind_ = kind;
+        MOZ_ASSERT(this->kind() == kind);
+    }
+
+  public:
+    ICEntry(uint32_t pcOffset, Kind kind)
+      : firstStub_(nullptr), returnOffset_(), pcOffset_(pcOffset)
+    {
+        // The offset must fit in at least 29 bits, since we shave off 3 for
+        // the Kind enum.
+        MOZ_ASSERT(pcOffset_ == pcOffset);
+        JS_STATIC_ASSERT(BaselineScript::MAX_JSSCRIPT_LENGTH < 0x1fffffffu);
+        MOZ_ASSERT(pcOffset <= BaselineScript::MAX_JSSCRIPT_LENGTH);
+        setKind(kind);
+    }
 
     CodeOffsetLabel returnOffset() const {
         return CodeOffsetLabel(returnOffset_);
@@ -240,8 +276,21 @@ class ICEntry
         return script->offsetToPC(pcOffset_);
     }
 
+    Kind kind() const {
+        // MSVC compiles enums as signed.
+        return (Kind)(kind_ & 0x7);
+    }
     bool isForOp() const {
-        return isForOp_;
+        return kind() == Kind_Op;
+    }
+
+    void setForDebugPrologue() {
+        MOZ_ASSERT(kind() == Kind_CallVM);
+        setKind(Kind_DebugPrologue);
+    }
+    void setForDebugEpilogue() {
+        MOZ_ASSERT(kind() == Kind_CallVM);
+        setKind(Kind_DebugEpilogue);
     }
 
     bool hasStub() const {
@@ -1057,9 +1106,12 @@ class ICStubCompiler
     inline GeneralRegisterSet availableGeneralRegs(size_t numInputs) const {
         GeneralRegisterSet regs(GeneralRegisterSet::All());
         JS_ASSERT(!regs.has(BaselineStackReg));
-#ifdef JS_CODEGEN_ARM
+#if defined(JS_CODEGEN_ARM)
         JS_ASSERT(!regs.has(BaselineTailCallReg));
         regs.take(BaselineSecondScratchReg);
+#elif defined(JS_CODEGEN_MIPS)
+        JS_ASSERT(!regs.has(BaselineTailCallReg));
+        JS_ASSERT(!regs.has(BaselineSecondScratchReg));
 #endif
         regs.take(BaselineFrameReg);
         regs.take(BaselineStubReg);
@@ -1093,10 +1145,14 @@ class ICStubCompiler
   public:
     virtual ICStub *getStub(ICStubSpace *space) = 0;
 
-    ICStubSpace *getStubSpace(JSScript *script) {
+    static ICStubSpace *StubSpaceForKind(ICStub::Kind kind, JSScript *script) {
         if (ICStub::CanMakeCalls(kind))
             return script->baselineScript()->fallbackStubSpace();
         return script->zone()->jitZone()->optimizedStubSpace();
+    }
+
+    ICStubSpace *getStubSpace(JSScript *script) {
+        return StubSpaceForKind(kind, script);
     }
 };
 
@@ -3106,6 +3162,10 @@ class ICGetElem_NativePrototypeCallNative : public ICGetElemNativePrototypeCallS
                         code, firstMonitorStub, shape, name, acctype, needsAtomize, getter,
                         pcOffset, holder, holderShape);
     }
+
+    static ICGetElem_NativePrototypeCallNative *Clone(JSContext *cx, ICStubSpace *space,
+                                                      ICStub *firstMonitorStub,
+                                                      ICGetElem_NativePrototypeCallNative &other);
 };
 
 class ICGetElem_NativePrototypeCallScripted : public ICGetElemNativePrototypeCallStub
@@ -3113,10 +3173,10 @@ class ICGetElem_NativePrototypeCallScripted : public ICGetElemNativePrototypeCal
     friend class ICStubSpace;
 
     ICGetElem_NativePrototypeCallScripted(JitCode *stubCode, ICStub *firstMonitorStub,
-                                        HandleShape shape, HandlePropertyName name,
-                                        AccessType acctype, bool needsAtomize,
-                                        HandleFunction getter, uint32_t pcOffset,
-                                        HandleObject holder, HandleShape holderShape)
+                                          HandleShape shape, HandlePropertyName name,
+                                          AccessType acctype, bool needsAtomize,
+                                          HandleFunction getter, uint32_t pcOffset,
+                                          HandleObject holder, HandleShape holderShape)
       : ICGetElemNativePrototypeCallStub(GetElem_NativePrototypeCallScripted,
                                          stubCode, firstMonitorStub, shape, name,
                                          acctype, needsAtomize, getter, pcOffset, holder,
@@ -3136,6 +3196,11 @@ class ICGetElem_NativePrototypeCallScripted : public ICGetElemNativePrototypeCal
                         code, firstMonitorStub, shape, name, acctype, needsAtomize, getter,
                         pcOffset, holder, holderShape);
     }
+
+    static ICGetElem_NativePrototypeCallScripted *
+    Clone(JSContext *cx, ICStubSpace *space,
+          ICStub *firstMonitorStub,
+          ICGetElem_NativePrototypeCallScripted &other);
 };
 
 // Compiler for GetElem_NativeSlot and GetElem_NativePrototypeSlot stubs.
@@ -3285,6 +3350,9 @@ class ICGetElem_Dense : public ICMonitoredStub
         return space->allocate<ICGetElem_Dense>(code, firstMonitorStub, shape);
     }
 
+    static ICGetElem_Dense *Clone(JSContext *cx, ICStubSpace *space, ICStub *firstMonitorStub,
+                                  ICGetElem_Dense &other);
+
     static size_t offsetOfShape() {
         return offsetof(ICGetElem_Dense, shape_);
     }
@@ -3394,6 +3462,9 @@ class ICGetElem_Arguments : public ICMonitoredStub
             return nullptr;
         return space->allocate<ICGetElem_Arguments>(code, firstMonitorStub, which);
     }
+
+    static ICGetElem_Arguments *Clone(JSContext *, ICStubSpace *space, ICStub *firstMonitorStub,
+                                      ICGetElem_Arguments &other);
 
     Which which() const {
         return static_cast<Which>(extra_);
@@ -4267,6 +4338,9 @@ class ICGetProp_Native : public ICGetPropNativeStub
             return nullptr;
         return space->allocate<ICGetProp_Native>(code, firstMonitorStub, shape, offset);
     }
+
+    static ICGetProp_Native *Clone(JSContext *cx, ICStubSpace *space, ICStub *firstMonitorStub,
+                                   ICGetProp_Native &other);
 };
 
 // Stub for accessing a property on a native object's prototype. Note that due to
@@ -4295,6 +4369,10 @@ class ICGetProp_NativePrototype : public ICGetPropNativeStub
         return space->allocate<ICGetProp_NativePrototype>(code, firstMonitorStub, shape, offset,
                                                           holder, holderShape);
     }
+
+    static ICGetProp_NativePrototype *Clone(JSContext *cx, ICStubSpace *space,
+                                            ICStub *firstMonitorStub,
+                                            ICGetProp_NativePrototype &other);
 
   public:
     HeapPtrObject &holder() {
@@ -4499,6 +4577,9 @@ class ICGetProp_CallScripted : public ICGetPropCallPrototypeGetter
                                                        pcOffset);
     }
 
+    static ICGetProp_CallScripted *Clone(JSContext *cx, ICStubSpace *space,
+                                         ICStub *firstMonitorStub, ICGetProp_CallScripted &other);
+
     class Compiler : public ICGetPropCallPrototypeGetter::Compiler {
       protected:
         bool generateStubCode(MacroAssembler &masm);
@@ -4544,6 +4625,9 @@ class ICGetProp_CallNative : public ICGetPropCallGetter
         return space->allocate<ICGetProp_CallNative>(code, firstMonitorStub, obj, shape,
                                                      getter, pcOffset);
     }
+
+    static ICGetProp_CallNative *Clone(JSContext *cx, ICStubSpace *space, ICStub *firstMonitorStub,
+                                       ICGetProp_CallNative &other);
 
     class Compiler : public ICGetPropCallGetter::Compiler
     {
@@ -4597,6 +4681,10 @@ class ICGetProp_CallNativePrototype : public ICGetPropCallPrototypeGetter
                                                               receiverShape, holder, holderShape,
                                                               getter, pcOffset);
     }
+
+    static ICGetProp_CallNativePrototype *Clone(JSContext *cx, ICStubSpace *space,
+                                                ICStub *firstMonitorStub,
+                                                ICGetProp_CallNativePrototype &other);
 
     class Compiler : public ICGetPropCallPrototypeGetter::Compiler {
       protected:
@@ -4716,6 +4804,10 @@ class ICGetProp_CallDOMProxyNative : public ICGetPropCallDOMProxyNativeStub
                                                    proxyHandler, expandoShape, holder,
                                                    holderShape, getter, pcOffset);
     }
+
+    static ICGetProp_CallDOMProxyNative *Clone(JSContext *cx, ICStubSpace *space,
+                                               ICStub *firstMonitorStub,
+                                               ICGetProp_CallDOMProxyNative &other);
 };
 
 class ICGetProp_CallDOMProxyWithGenerationNative : public ICGetPropCallDOMProxyNativeStub
@@ -4753,6 +4845,10 @@ class ICGetProp_CallDOMProxyWithGenerationNative : public ICGetPropCallDOMProxyN
                                                    generation, expandoShape, holder, holderShape,
                                                    getter, pcOffset);
     }
+
+    static ICGetProp_CallDOMProxyWithGenerationNative *
+    Clone(JSContext *cx, ICStubSpace *space, ICStub *firstMonitorStub,
+          ICGetProp_CallDOMProxyWithGenerationNative &other);
 
     void *expandoAndGeneration() const {
         return expandoAndGeneration_;
@@ -4817,6 +4913,10 @@ class ICGetProp_DOMProxyShadowed : public ICMonitoredStub
         return space->allocate<ICGetProp_DOMProxyShadowed>(code, firstMonitorStub, shape,
                                                            proxyHandler, name, pcOffset);
     }
+
+    static ICGetProp_DOMProxyShadowed *Clone(JSContext *cx, ICStubSpace *space,
+                                             ICStub *firstMonitorStub,
+                                             ICGetProp_DOMProxyShadowed &other);
 
     HeapPtrShape &shape() {
         return shape_;
@@ -5218,6 +5318,9 @@ class ICSetProp_CallScripted : public ICSetPropCallSetter
                                                        pcOffset);
     }
 
+    static ICSetProp_CallScripted *Clone(JSContext *cx, ICStubSpace *space, ICStub *,
+                                         ICSetProp_CallScripted &other);
+
     class Compiler : public ICSetPropCallSetter::Compiler {
       protected:
         bool generateStubCode(MacroAssembler &masm);
@@ -5261,6 +5364,9 @@ class ICSetProp_CallNative : public ICSetPropCallSetter
         return space->allocate<ICSetProp_CallNative>(code, shape, holder, holderShape, setter,
                                                      pcOffset);
     }
+
+    static ICSetProp_CallNative *Clone(JSContext *cx, ICStubSpace *space, ICStub *,
+                                       ICSetProp_CallNative &other);
 
     class Compiler : public ICSetPropCallSetter::Compiler {
       protected:
@@ -5402,6 +5508,9 @@ class ICCall_Scripted : public ICMonitoredStub
                                                 calleeScript, templateObject, pcOffset);
     }
 
+    static ICCall_Scripted *Clone(JSContext *cx, ICStubSpace *space, ICStub *firstMonitorStub,
+                                  ICCall_Scripted &other);
+
     HeapPtrScript &calleeScript() {
         return calleeScript_;
     }
@@ -5437,6 +5546,9 @@ class ICCall_AnyScripted : public ICMonitoredStub
             return nullptr;
         return space->allocate<ICCall_AnyScripted>(code, firstMonitorStub, pcOffset);
     }
+
+    static ICCall_AnyScripted *Clone(JSContext *, ICStubSpace *space, ICStub *firstMonitorStub,
+                                     ICCall_AnyScripted &other);
 
     static size_t offsetOfPCOffset() {
         return offsetof(ICCall_AnyScripted, pcOffset_);
@@ -5517,6 +5629,9 @@ class ICCall_Native : public ICMonitoredStub
                                               callee, templateObject, pcOffset);
     }
 
+    static ICCall_Native *Clone(JSContext *cx, ICStubSpace *space, ICStub *firstMonitorStub,
+                                ICCall_Native &other);
+
     HeapPtrFunction &callee() {
         return callee_;
     }
@@ -5596,6 +5711,10 @@ class ICCall_ScriptedApplyArray : public ICMonitoredStub
         return space->allocate<ICCall_ScriptedApplyArray>(code, firstMonitorStub, pcOffset);
     }
 
+    static ICCall_ScriptedApplyArray *Clone(JSContext *, ICStubSpace *space,
+                                            ICStub *firstMonitorStub,
+                                            ICCall_ScriptedApplyArray &other);
+
     static size_t offsetOfPCOffset() {
         return offsetof(ICCall_ScriptedApplyArray, pcOffset_);
     }
@@ -5645,6 +5764,10 @@ class ICCall_ScriptedApplyArguments : public ICMonitoredStub
             return nullptr;
         return space->allocate<ICCall_ScriptedApplyArguments>(code, firstMonitorStub, pcOffset);
     }
+
+    static ICCall_ScriptedApplyArguments *Clone(JSContext *, ICStubSpace *space,
+                                                ICStub *firstMonitorStub,
+                                                ICCall_ScriptedApplyArguments &other);
 
     static size_t offsetOfPCOffset() {
         return offsetof(ICCall_ScriptedApplyArguments, pcOffset_);
@@ -5696,6 +5819,9 @@ class ICCall_ScriptedFunCall : public ICMonitoredStub
             return nullptr;
         return space->allocate<ICCall_ScriptedFunCall>(code, firstMonitorStub, pcOffset);
     }
+
+    static ICCall_ScriptedFunCall *Clone(JSContext *, ICStubSpace *space, ICStub *firstMonitorStub,
+                                         ICCall_ScriptedFunCall &other);
 
     static size_t offsetOfPCOffset() {
         return offsetof(ICCall_ScriptedFunCall, pcOffset_);
@@ -5752,7 +5878,7 @@ class ICTableSwitch : public ICStub
         return space->allocate<ICTableSwitch>(code, table, min, length, defaultTarget);
     }
 
-    void fixupJumpTable(HandleScript script, BaselineScript *baseline);
+    void fixupJumpTable(JSScript *script, BaselineScript *baseline);
 
     class Compiler : public ICStubCompiler {
         bool generateStubCode(MacroAssembler &masm);

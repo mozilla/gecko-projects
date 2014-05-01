@@ -109,12 +109,12 @@ template<class T> class nsReadingIterator;
 namespace mozilla {
 class ErrorResult;
 class EventListenerManager;
-class Selection;
 
 namespace dom {
 class DocumentFragment;
 class Element;
 class EventTarget;
+class Selection;
 } // namespace dom
 
 namespace layers {
@@ -133,9 +133,7 @@ typedef bool (*DeferredFinalizeFunction)(uint32_t slice, void* data);
 
 } // namespace mozilla
 
-#ifdef IBMBIDI
 class nsIBidiKeyboard;
-#endif
 
 extern const char kLoadAsData[];
 
@@ -461,10 +459,8 @@ public:
     return sIOService;
   }
 
-#ifdef IBMBIDI
   static nsIBidiKeyboard* GetBidiKeyboard();
-#endif
-  
+
   /**
    * Get the cache security manager service. Can return null if the layout
    * module has been shut down.
@@ -2090,7 +2086,7 @@ public:
    * @param aOutStartOffset Output start offset
    * @param aOutEndOffset   Output end offset
    */
-  static void GetSelectionInTextControl(mozilla::Selection* aSelection,
+  static void GetSelectionInTextControl(mozilla::dom::Selection* aSelection,
                                         Element* aRoot,
                                         int32_t& aOutStartOffset,
                                         int32_t& aOutEndOffset);
@@ -2205,9 +2201,7 @@ private:
   static nsILineBreaker* sLineBreaker;
   static nsIWordBreaker* sWordBreaker;
 
-#ifdef IBMBIDI
   static nsIBidiKeyboard* sBidiKeyboard;
-#endif
 
   static bool sInitialized;
   static uint32_t sScriptBlockerCount;

@@ -7,7 +7,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
-#include "mozilla/Selection.h"
+#include "mozilla/dom/Selection.h"
 #include "mozilla/TextRange.h"
 #include "nsIFrame.h"
 #include "nsIContent.h"
@@ -24,9 +24,7 @@ class nsTableOuterFrame;
 { 0x3c6ae2d0, 0x4cf1, 0x44a1, \
   { 0x9e, 0x9d, 0x24, 0x11, 0x86, 0x7f, 0x19, 0xc6 } }
 
-#ifdef IBMBIDI // Constant for Set/Get CaretBidiLevel
 #define BIDI_LEVEL_UNDEFINED 0x80
-#endif
 
 //----------------------------------------------------------------------
 
@@ -176,7 +174,9 @@ struct nsPrevNextBidiLevels
 };
 
 namespace mozilla {
+namespace dom {
 class Selection;
+}
 }
 class nsIScrollableFrame;
 
@@ -355,7 +355,7 @@ public:
    * no query interface for selection. must use this method now.
    * @param aSelectionType enum value defined in nsISelection for the seleciton you want.
    */
-  mozilla::Selection* GetSelection(SelectionType aType) const;
+  mozilla::dom::Selection* GetSelection(SelectionType aType) const;
 
   /**
    * ScrollSelectionIntoView scrolls a region of the selection,
@@ -411,8 +411,7 @@ public:
 
   void SetHint(HINT aHintRight) { mHint = aHintRight; }
   HINT GetHint() const { return mHint; }
-  
-#ifdef IBMBIDI
+
   /** SetCaretBidiLevel sets the caret bidi level
    *  @param aLevel the caret bidi level
    *  This method is virtual since it gets called from outside of layout.
@@ -426,7 +425,6 @@ public:
    *  This method is virtual since it gets called from outside of layout.
    */
   virtual void UndefineCaretBidiLevel();
-#endif
 
   /** CharacterMove will generally be called from the nsiselectioncontroller implementations.
    *  the effect being the selection will move one character left or right.
@@ -623,7 +621,7 @@ private:
     return retval;
   }
 
-  friend class mozilla::Selection;
+  friend class mozilla::dom::Selection;
 #ifdef DEBUG
   void printSelection();       // for debugging
 #endif /* DEBUG */
@@ -650,7 +648,7 @@ private:
   // so remember to use nsCOMPtr when needed.
   nsresult     NotifySelectionListeners(SelectionType aType);     // add parameters to say collapsed etc?
 
-  nsRefPtr<mozilla::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
+  nsRefPtr<mozilla::dom::Selection> mDomSelections[nsISelectionController::NUM_SELECTIONTYPES];
 
   // Table selection support.
   nsITableCellLayout* GetCellLayout(nsIContent *aCellContent) const;
@@ -705,9 +703,7 @@ private:
   int16_t mDisplaySelection; //for visual display purposes.
 
   HINT  mHint;   //hint to tell if the selection is at the end of this line or beginning of next
-#ifdef IBMBIDI
   uint8_t mCaretBidiLevel;
-#endif
 
   int32_t mDesiredX;
   uint32_t mDelayedMouseEventClickCount;

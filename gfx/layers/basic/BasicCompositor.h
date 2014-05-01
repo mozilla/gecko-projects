@@ -65,7 +65,7 @@ public:
                                const gfx::IntPoint &aSourcePoint) MOZ_OVERRIDE;
 
   virtual TemporaryRef<DataTextureSource>
-  CreateDataTextureSource(TextureFlags aFlags = 0) MOZ_OVERRIDE;
+  CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) MOZ_OVERRIDE;
 
   virtual bool SupportsEffect(EffectTypes aEffect) MOZ_OVERRIDE;
 
@@ -125,9 +125,12 @@ public:
   gfx::DrawTarget *GetDrawTarget() { return mDrawTarget; }
 
 private:
+
+  virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE { return mWidgetSize; }
+
   // Widget associated with this compositor
   nsIWidget *mWidget;
-  nsIntSize mWidgetSize;
+  gfx::IntSize mWidgetSize;
 
   // The final destination surface
   RefPtr<gfx::DrawTarget> mDrawTarget;

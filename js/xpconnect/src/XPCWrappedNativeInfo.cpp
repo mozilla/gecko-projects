@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-// vim:cindent:ts=8:et:sw=4:
+/* vim: set ts=8 sts=4 et sw=4 tw=99: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -30,8 +30,8 @@ XPCNativeMember::GetCallInfo(JSObject* funobj,
     jsval ifaceVal = js::GetFunctionNativeReserved(funobj, 0);
     jsval memberVal = js::GetFunctionNativeReserved(funobj, 1);
 
-    *pInterface = (XPCNativeInterface*) JSVAL_TO_PRIVATE(ifaceVal);
-    *pMember = (XPCNativeMember*) JSVAL_TO_PRIVATE(memberVal);
+    *pInterface = (XPCNativeInterface*) ifaceVal.toPrivate();
+    *pMember = (XPCNativeMember*) memberVal.toPrivate();
 
     return true;
 }

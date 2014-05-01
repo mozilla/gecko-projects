@@ -105,7 +105,7 @@ private:
   nsCOMPtr<nsICacheEntryDoomCallback> mCB;
 };
 
-NS_IMPL_ISUPPORTS1(DoomCallbackWrapper, nsICacheListener);
+NS_IMPL_ISUPPORTS(DoomCallbackWrapper, nsICacheListener);
 
 NS_IMETHODIMP DoomCallbackWrapper::OnCacheEntryAvailable(nsICacheEntryDescriptor *descriptor,
                                                          nsCacheAccessMode accessGranted,
@@ -148,7 +148,7 @@ private:
   char* const mDeviceID;
 };
 
-NS_IMPL_ISUPPORTS1(VisitCallbackWrapper, nsICacheVisitor)
+NS_IMPL_ISUPPORTS(VisitCallbackWrapper, nsICacheVisitor)
 
 VisitCallbackWrapper::~VisitCallbackWrapper()
 {
@@ -203,6 +203,76 @@ NS_IMETHODIMP VisitCallbackWrapper::VisitEntry(const char * deviceID,
 } // anon
 
 
+// _OldGetDiskConsumption
+
+//static
+nsresult _OldGetDiskConsumption::Get(nsICacheStorageConsumptionObserver* aCallback)
+{
+  nsresult rv;
+
+  nsCOMPtr<nsICacheService> serv =
+      do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsRefPtr<_OldGetDiskConsumption> cb = new _OldGetDiskConsumption(aCallback);
+
+  // _OldGetDiskConsumption stores the found size value, but until dispatched
+  // to the main thread it doesn't call on the consupmtion observer. See bellow.
+  rv = serv->VisitEntries(cb);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // We are called from CacheStorageService::AsyncGetDiskConsumption whose IDL
+  // documentation claims the callback is always delievered asynchronously
+  // back to the main thread.  Despite we know the result synchronosusly when
+  // querying the old cache, we need to stand the word and dispatch the result
+  // to the main thread asynchronously.  Hence the dispatch here.
+  return NS_DispatchToMainThread(cb);
+}
+
+NS_IMPL_ISUPPORTS_INHERITED(_OldGetDiskConsumption,
+                            nsRunnable,
+                            nsICacheVisitor)
+
+_OldGetDiskConsumption::_OldGetDiskConsumption(
+  nsICacheStorageConsumptionObserver* aCallback)
+  : mCallback(aCallback)
+  , mSize(0)
+{
+}
+
+NS_IMETHODIMP
+_OldGetDiskConsumption::Run()
+{
+  mCallback->OnNetworkCacheDiskConsumption(mSize);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+_OldGetDiskConsumption::VisitDevice(const char * deviceID,
+                                    nsICacheDeviceInfo *deviceInfo,
+                                    bool *_retval)
+{
+  if (!strcmp(deviceID, "disk")) {
+    uint32_t size;
+    nsresult rv = deviceInfo->GetTotalSize(&size);
+    if (NS_SUCCEEDED(rv))
+      mSize = (int64_t)size;
+  }
+
+  *_retval = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+_OldGetDiskConsumption::VisitEntry(const char * deviceID,
+                                   nsICacheEntryInfo *entryInfo,
+                                   bool *_retval)
+{
+  MOZ_CRASH("Unexpected");
+  return NS_OK;
+}
+
+
 // _OldCacheEntryWrapper
 
 _OldCacheEntryWrapper::_OldCacheEntryWrapper(nsICacheEntryDescriptor* desc)
@@ -225,7 +295,7 @@ _OldCacheEntryWrapper::~_OldCacheEntryWrapper()
   LOG(("Destroying _OldCacheEntryWrapper %p for descriptor %p", this, mOldInfo.get()));
 }
 
-NS_IMPL_ISUPPORTS1(_OldCacheEntryWrapper, nsICacheEntry)
+NS_IMPL_ISUPPORTS(_OldCacheEntryWrapper, nsICacheEntry)
 
 NS_IMETHODIMP _OldCacheEntryWrapper::AsyncDoom(nsICacheEntryDoomCallback* listener)
 {
@@ -475,7 +545,7 @@ GetCacheSession(nsCSubstring const &aScheme,
 } // anon
 
 
-NS_IMPL_ISUPPORTS_INHERITED1(_OldCacheLoad, nsRunnable, nsICacheListener)
+NS_IMPL_ISUPPORTS_INHERITED(_OldCacheLoad, nsRunnable, nsICacheListener)
 
 _OldCacheLoad::_OldCacheLoad(nsCSubstring const& aScheme,
                              nsCSubstring const& aCacheKey,
@@ -711,7 +781,7 @@ _OldCacheLoad::OnCacheEntryDoomed(nsresult)
 
 // nsICacheStorage old cache wrapper
 
-NS_IMPL_ISUPPORTS1(_OldStorage, nsICacheStorage)
+NS_IMPL_ISUPPORTS(_OldStorage, nsICacheStorage)
 
 _OldStorage::_OldStorage(nsILoadContextInfo* aInfo,
                          bool aAllowDisk,

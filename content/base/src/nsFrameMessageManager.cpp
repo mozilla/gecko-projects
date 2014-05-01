@@ -32,6 +32,8 @@
 #include "xpcpublic.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/StructuredCloneUtils.h"
+#include "mozilla/dom/PBlobChild.h"
+#include "mozilla/dom/PBlobParent.h"
 #include "JavaScriptChild.h"
 #include "JavaScriptParent.h"
 #include "mozilla/dom/DOMStringList.h"
@@ -128,6 +130,31 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFrameMessageManager)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFrameMessageManager)
 
+enum ActorFlavorEnum {
+  Parent = 0,
+  Child
+};
+
+template <ActorFlavorEnum>
+struct BlobTraits
+{ };
+
+template <>
+struct BlobTraits<Parent>
+{
+  typedef mozilla::dom::BlobParent BlobType;
+  typedef mozilla::dom::PBlobParent ProtocolType;
+  typedef mozilla::dom::ContentParent ConcreteContentManagerType;
+};
+
+template <>
+struct BlobTraits<Child>
+{
+  typedef mozilla::dom::BlobChild BlobType;
+  typedef mozilla::dom::PBlobChild ProtocolType;
+  typedef mozilla::dom::ContentChild ConcreteContentManagerType;
+};
+
 template<ActorFlavorEnum>
 struct DataBlobs
 { };
@@ -180,7 +207,8 @@ BuildClonedMessageData(typename BlobTraits<Flavor>::ConcreteContentManagerType* 
     uint32_t length = blobs.Length();
     blobList.SetCapacity(length);
     for (uint32_t i = 0; i < length; ++i) {
-      Blob<Flavor>* protocolActor = aManager->GetOrCreateActorForBlob(blobs[i]);
+      typename BlobTraits<Flavor>::BlobType* protocolActor =
+        aManager->GetOrCreateActorForBlob(blobs[i]);
       if (!protocolActor) {
         return false;
       }
@@ -220,7 +248,8 @@ UnpackClonedMessageData(const ClonedMessageData& aData)
     uint32_t length = blobs.Length();
     cloneData.mClosure.mBlobs.SetCapacity(length);
     for (uint32_t i = 0; i < length; ++i) {
-      Blob<Flavor>* blob = static_cast<Blob<Flavor>*>(blobs[i]);
+      auto* blob =
+        static_cast<typename BlobTraits<Flavor>::BlobType*>(blobs[i]);
       MOZ_ASSERT(blob);
       nsCOMPtr<nsIDOMBlob> domBlob = blob->GetBlob();
       MOZ_ASSERT(domBlob);
@@ -1181,7 +1210,7 @@ protected:
                       MessageManagerReferentCount* aReferentCount);
 };
 
-NS_IMPL_ISUPPORTS1(MessageManagerReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(MessageManagerReporter, nsIMemoryReporter)
 
 static PLDHashOperator
 CollectMessageListenerData(const nsAString& aKey,
@@ -1464,6 +1493,8 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
   nsCOMPtr<nsIInputStream> input;
   channel->Open(getter_AddRefs(input));
   nsString dataString;
+  jschar* dataStringBuf = nullptr;
+  size_t dataStringLength = 0;
   uint64_t avail64 = 0;
   if (input && NS_SUCCEEDED(input->Available(&avail64)) && avail64) {
     if (avail64 > UINT32_MAX) {
@@ -1475,10 +1506,14 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
       return;
     }
     nsScriptLoader::ConvertToUTF16(channel, (uint8_t*)buffer.get(), avail,
-                                   EmptyString(), nullptr, dataString);
+                                   EmptyString(), nullptr,
+                                   dataStringBuf, dataStringLength);
   }
 
-  if (!dataString.IsEmpty()) {
+  JS::SourceBufferHolder srcBuf(dataStringBuf, dataStringLength,
+                                JS::SourceBufferHolder::GiveOwnership);
+
+  if (dataStringBuf && dataStringLength > 0) {
     AutoSafeJSContext cx;
     JS::Rooted<JSObject*> global(cx, mGlobal->GetJSObject());
     if (global) {
@@ -1489,14 +1524,12 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
       JS::Rooted<JSObject*> funobj(cx);
       if (aRunInGlobalScope) {
         options.setNoScriptRval(true);
-        script = JS::Compile(cx, JS::NullPtr(), options, dataString.get(),
-                             dataString.Length());
+        script = JS::Compile(cx, JS::NullPtr(), options, srcBuf);
       } else {
         JS::Rooted<JSFunction *> fun(cx);
         fun = JS::CompileFunction(cx, JS::NullPtr(), options,
                                   nullptr, 0, nullptr, /* name, nargs, args */
-                                  dataString.get(),
-                                  dataString.Length());
+                                  srcBuf);
         if (!fun) {
           return;
         }
@@ -1578,7 +1611,7 @@ nsFrameScriptExecutor::InitTabChildGlobalInternal(nsISupports* aScope,
   return true;
 }
 
-NS_IMPL_ISUPPORTS1(nsScriptCacheCleaner, nsIObserver)
+NS_IMPL_ISUPPORTS(nsScriptCacheCleaner, nsIObserver)
 
 nsFrameMessageManager* nsFrameMessageManager::sChildProcessManager = nullptr;
 nsFrameMessageManager* nsFrameMessageManager::sParentProcessManager = nullptr;

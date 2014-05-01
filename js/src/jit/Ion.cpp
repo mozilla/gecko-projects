@@ -17,6 +17,7 @@
 #include "jit/AliasAnalysis.h"
 #include "jit/AsmJSModule.h"
 #include "jit/BacktrackingAllocator.h"
+#include "jit/BaselineDebugModeOSR.h"
 #include "jit/BaselineFrame.h"
 #include "jit/BaselineInspector.h"
 #include "jit/BaselineJIT.h"
@@ -158,6 +159,7 @@ JitRuntime::JitRuntime()
     invalidator_(nullptr),
     debugTrapHandler_(nullptr),
     forkJoinGetSliceStub_(nullptr),
+    baselineDebugModeOSRHandler_(nullptr),
     functionWrappers_(nullptr),
     osrTempData_(nullptr),
     flusher_(nullptr),
@@ -608,7 +610,7 @@ JitCompartment::mark(JSTracer *trc, JSCompartment *compartment)
             // callTargetEntries to propagate the parallel age to the entire
             // call graph.
             if (ShouldPreserveParallelJITCode(trc->runtime(), script, /* increase = */ true)) {
-                MarkScript(trc, const_cast<EncapsulatedPtrScript *>(&e.front()), "par-script");
+                MarkScript(trc, const_cast<PreBarrieredScript *>(&e.front()), "par-script");
                 MOZ_ASSERT(script == e.front());
             }
         }
@@ -1617,29 +1619,22 @@ GenerateLIR(MIRGenerator *mir)
 }
 
 CodeGenerator *
-GenerateCode(MIRGenerator *mir, LIRGraph *lir, MacroAssembler *maybeMasm)
+GenerateCode(MIRGenerator *mir, LIRGraph *lir)
 {
-    CodeGenerator *codegen = js_new<CodeGenerator>(mir, lir, maybeMasm);
+    CodeGenerator *codegen = js_new<CodeGenerator>(mir, lir);
     if (!codegen)
         return nullptr;
 
-    if (mir->compilingAsmJS()) {
-        if (!codegen->generateAsmJS()) {
-            js_delete(codegen);
-            return nullptr;
-        }
-    } else {
-        if (!codegen->generate()) {
-            js_delete(codegen);
-            return nullptr;
-        }
+    if (!codegen->generate()) {
+        js_delete(codegen);
+        return nullptr;
     }
 
     return codegen;
 }
 
 CodeGenerator *
-CompileBackEnd(MIRGenerator *mir, MacroAssembler *maybeMasm)
+CompileBackEnd(MIRGenerator *mir)
 {
     if (!OptimizeMIR(mir))
         return nullptr;
@@ -1648,7 +1643,7 @@ CompileBackEnd(MIRGenerator *mir, MacroAssembler *maybeMasm)
     if (!lir)
         return nullptr;
 
-    return GenerateCode(mir, lir, maybeMasm);
+    return GenerateCode(mir, lir);
 }
 
 void
@@ -1824,9 +1819,13 @@ IonCompile(JSContext *cx, JSScript *script,
     if (!graph)
         return AbortReason_Alloc;
 
+    InlineScriptTree *inlineScriptTree = InlineScriptTree::New(temp, nullptr, nullptr, script);
+    if (!inlineScriptTree)
+        return AbortReason_Alloc;
+
     CompileInfo *info = alloc->new_<CompileInfo>(script, script->functionNonDelazifying(), osrPc,
                                                  constructing, executionMode,
-                                                 script->needsArgsObj());
+                                                 script->needsArgsObj(), inlineScriptTree);
     if (!info)
         return AbortReason_Alloc;
 
@@ -1936,11 +1935,6 @@ CheckScript(JSContext *cx, JSScript *script, bool osr)
         return false;
     }
 
-    if (!script->analyzedArgsUsage() && !script->ensureRanAnalysis(cx)) {
-        IonSpew(IonSpew_Abort, "OOM under ensureRanAnalysis");
-        return false;
-    }
-
     if (!script->compileAndGo()) {
         IonSpew(IonSpew_Abort, "not compile-and-go");
         return false;
@@ -1961,7 +1955,8 @@ CheckScriptSize(JSContext *cx, JSScript* script)
         return Method_CantCompile;
     }
 
-    uint32_t numLocalsAndArgs = analyze::TotalSlots(script);
+    uint32_t numLocalsAndArgs = NumLocalsAndArgs(script);
+
     if (cx->runtime()->isWorkerRuntime()) {
         // DOM Workers don't have off thread compilation enabled. Since workers
         // don't block the browser's event loop, allow them to compile larger
@@ -2008,7 +2003,7 @@ CheckScriptSize(JSContext *cx, JSScript* script)
 }
 
 bool
-CanIonCompileScript(JSContext *cx, HandleScript script, bool osr)
+CanIonCompileScript(JSContext *cx, JSScript *script, bool osr)
 {
     if (!script->canIonCompile() || !CheckScript(cx, script, osr))
         return false;
@@ -2382,7 +2377,6 @@ EnterIon(JSContext *cx, EnterJitData &data)
     {
         AssertCompartmentUnchanged pcc(cx);
         JitActivation activation(cx, data.constructing);
-        JSAutoResolveFlags rf(cx, RESOLVE_INFER);
         AutoFlushInhibitor afi(cx->runtime()->jitRuntime());
 
         CALL_GENERATED_CODE(enter, data.jitcode, data.maxArgc, data.maxArgv, /* osrFrame = */nullptr, data.calleeToken,
@@ -2493,8 +2487,6 @@ jit::FastInvoke(JSContext *cx, HandleFunction fun, CallArgs &args)
 
     RootedValue result(cx, Int32Value(args.length()));
     JS_ASSERT(args.length() >= fun->nargs());
-
-    JSAutoResolveFlags rf(cx, RESOLVE_INFER);
 
     CALL_GENERATED_CODE(enter, jitcode, args.length() + 1, args.array() - 1, /* osrFrame = */nullptr,
                         calleeToken, /* scopeChain = */ nullptr, 0, result.address());
@@ -2649,7 +2641,7 @@ jit::InvalidateAll(FreeOp *fop, Zone *zone)
         StopAllOffThreadCompilations(comp);
 
     for (JitActivationIterator iter(fop->runtime()); !iter.done(); ++iter) {
-        if (iter.activation()->compartment()->zone() == zone) {
+        if (iter->compartment()->zone() == zone) {
             IonContext ictx(CompileRuntime::get(fop->runtime()));
             AutoFlushCache afc("InvalidateAll", fop->runtime()->jitRuntime());
             IonSpew(IonSpew_Invalidate, "Invalidating all frames for GC");
@@ -2768,7 +2760,7 @@ jit::Invalidate(JSContext *cx, JSScript *script, ExecutionMode mode, bool resetU
             return false;
 
         // Construct the descriptive string.
-        JS_snprintf(buf, len, "Invalidate %s:%llu", filename, script->lineno());
+        JS_snprintf(buf, len, "Invalidate %s:%u", filename, (unsigned int)script->lineno());
         cx->runtime()->spsProfiler.markEvent(buf);
         js_free(buf);
     }
@@ -3009,6 +3001,44 @@ jit::TraceIonScripts(JSTracer* trc, JSScript *script)
         jit::BaselineScript::Trace(trc, script->baselineScript());
 }
 
+bool
+jit::RematerializeAllFrames(JSContext *cx, JSCompartment *comp)
+{
+    for (JitActivationIterator iter(comp->runtimeFromMainThread()); !iter.done(); ++iter) {
+        if (iter.activation()->compartment() == comp) {
+            for (JitFrameIterator frameIter(iter); !frameIter.done(); ++frameIter) {
+                if (!frameIter.isIonJS())
+                    continue;
+                if (!iter.activation()->asJit()->getRematerializedFrame(cx, frameIter))
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool
+jit::UpdateForDebugMode(JSContext *maybecx, JSCompartment *comp,
+                     AutoDebugModeInvalidation &invalidate)
+{
+    MOZ_ASSERT(invalidate.isFor(comp));
+
+    // Schedule invalidation of all optimized JIT code since debug mode
+    // invalidates assumptions.
+    invalidate.scheduleInvalidation(comp->debugMode());
+
+    // Recompile on-stack baseline scripts if we have a cx.
+    if (maybecx) {
+        IonContext ictx(maybecx, nullptr);
+        if (!RecompileOnStackBaselineScriptsForDebugMode(maybecx, comp)) {
+            js_ReportOutOfMemory(maybecx);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 AutoDebugModeInvalidation::~AutoDebugModeInvalidation()
 {
     MOZ_ASSERT(!!comp_ != !!zone_);
@@ -3027,11 +3057,13 @@ AutoDebugModeInvalidation::~AutoDebugModeInvalidation()
             StopAllOffThreadCompilations(comp);
     }
 
+    // Don't discard active baseline scripts. They are recompiled for debug
+    // mode.
     jit::MarkActiveBaselineScripts(zone);
 
     for (JitActivationIterator iter(rt); !iter.done(); ++iter) {
-        JSCompartment *comp = iter.activation()->compartment();
-        if ((comp_ && comp_ == comp) || (zone_ && zone_ == comp->zone())) {
+        JSCompartment *comp = iter->compartment();
+        if (comp_ == comp || zone_ == comp->zone()) {
             IonContext ictx(CompileRuntime::get(rt));
             AutoFlushCache afc("AutoDebugModeInvalidation", rt->jitRuntime());
             IonSpew(IonSpew_Invalidate, "Invalidating frames for debug mode toggle");
@@ -3041,7 +3073,7 @@ AutoDebugModeInvalidation::~AutoDebugModeInvalidation()
 
     for (gc::CellIter i(zone, gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
         JSScript *script = i.get<JSScript>();
-        if ((comp_ && script->compartment() == comp_) || zone_) {
+        if (script->compartment() == comp_ || zone_) {
             FinishInvalidation<SequentialExecution>(fop, script);
             FinishInvalidation<ParallelExecution>(fop, script);
             FinishDiscardBaselineScript(fop, script);

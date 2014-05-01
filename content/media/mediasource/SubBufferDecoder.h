@@ -21,6 +21,7 @@ public:
   // of the caller to manage the memory of the MediaResource object.
   SubBufferDecoder(MediaResource* aResource, MediaSourceDecoder* aParentDecoder)
     : BufferDecoder(aResource), mParentDecoder(aParentDecoder), mReader(nullptr)
+    , mMediaDuration(-1), mMediaStartTime(0)
   {
   }
 
@@ -30,22 +31,32 @@ public:
     mReader = aReader;
   }
 
+  MediaDecoderReader* GetReader()
+  {
+    return mReader;
+  }
+
   virtual ReentrantMonitor& GetReentrantMonitor() MOZ_OVERRIDE;
   virtual bool OnStateMachineThread() const MOZ_OVERRIDE;
   virtual bool OnDecodeThread() const MOZ_OVERRIDE;
   virtual SourceBufferResource* GetResource() const MOZ_OVERRIDE;
+  virtual void NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded) MOZ_OVERRIDE;
   virtual void SetMediaDuration(int64_t aDuration) MOZ_OVERRIDE;
   virtual void UpdateEstimatedMediaDuration(int64_t aDuration) MOZ_OVERRIDE;
   virtual void SetMediaSeekable(bool aMediaSeekable) MOZ_OVERRIDE;
   virtual void SetTransportSeekable(bool aTransportSeekable) MOZ_OVERRIDE;
   virtual layers::ImageContainer* GetImageContainer() MOZ_OVERRIDE;
+  virtual MediaDecoderOwner* GetOwner() MOZ_OVERRIDE;
 
   void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset)
   {
     mReader->NotifyDataArrived(aBuffer, aLength, aOffset);
 
-    // XXX: aOffset makes no sense here, need view of "data timeline".
-    mParentDecoder->NotifyDataArrived(aBuffer, aLength, aOffset);
+    // XXX: Params make no sense to parent decoder as it relates to a
+    // specific SubBufferDecoder's data stream.  Pass bogus values here to
+    // force parent decoder's state machine to recompute end time for
+    // infinite length media.
+    mParentDecoder->NotifyDataArrived(nullptr, 0, 0);
   }
 
   nsresult GetBuffered(dom::TimeRanges* aBuffered)
@@ -58,9 +69,26 @@ public:
   // cached data. Returns -1 if no such value is computable.
   int64_t ConvertToByteOffset(double aTime);
 
+  int64_t GetMediaDuration() MOZ_OVERRIDE
+  {
+    return mMediaDuration;
+  }
+
+  int64_t GetMediaStartTime()
+  {
+    return mMediaStartTime;
+  }
+
+  void SetMediaStartTime(int64_t aMediaStartTime)
+  {
+    mMediaStartTime = aMediaStartTime;
+  }
+
 private:
   MediaSourceDecoder* mParentDecoder;
   nsAutoPtr<MediaDecoderReader> mReader;
+  int64_t mMediaDuration;
+  int64_t mMediaStartTime;
 };
 
 } // namespace mozilla

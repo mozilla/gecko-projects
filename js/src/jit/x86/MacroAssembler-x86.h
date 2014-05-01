@@ -71,6 +71,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     using MacroAssemblerX86Shared::branch32;
     using MacroAssemblerX86Shared::load32;
     using MacroAssemblerX86Shared::store32;
+    using MacroAssemblerX86Shared::call;
 
     MacroAssemblerX86()
       : inCall_(false),
@@ -1034,6 +1035,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         bind(&noOverflow);
     }
 
+    void incrementInt32Value(const Address &addr) {
+        addl(Imm32(1), payloadOf(addr));
+    }
 
     // If source is a double, load it into dest. If source is int32,
     // convert it to double. Else, branch to failure.
@@ -1104,6 +1108,13 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         makeFrameDescriptor(dynStack, JitFrame_IonJS);
         Push(dynStack);
         call(target);
+    }
+    void call(const CallSiteDesc &desc, AsmJSImmPtr target) {
+        call(target);
+        appendCallSite(desc);
+    }
+    void callExit(AsmJSImmPtr target, uint32_t stackArgBytes) {
+        call(CallSiteDesc::Exit(), target);
     }
 
     // Save an exit frame to the thread data of the current thread, given a

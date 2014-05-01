@@ -1123,7 +1123,9 @@ Experiments.Experiments.prototype = {
           let desc = TELEMETRY_LOG.ACTIVATION;
           let data = [TELEMETRY_LOG.ACTIVATION.REJECTED, id];
           data = data.concat(reason);
-          TelemetryLog.log(TELEMETRY_LOG.ACTIVATION_KEY, data);
+          const key = TELEMETRY_LOG.ACTIVATION_KEY;
+          TelemetryLog.log(key, data);
+          this._log.trace("evaluateExperiments() - added " + key + " to TelemetryLog: " + JSON.stringify(data));
         }
 
         if (!applicable) {
@@ -1700,12 +1702,16 @@ Experiments.ExperimentEntry.prototype = {
     }
 
     this._enabled = false;
-
-    let changes = yield this.reconcileAddonState();
     let now = this._policy.now();
     this._lastChangedDate = now;
     this._endDate = now;
+
+    let changes = yield this.reconcileAddonState();
     this._logTermination(terminationKind, terminationReason);
+
+    if (terminationKind == TELEMETRY_LOG.TERMINATION.ADDON_UNINSTALLED) {
+      changes |= this.ADDON_CHANGE_UNINSTALL;
+    }
 
     return changes;
   }),

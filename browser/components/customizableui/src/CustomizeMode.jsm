@@ -161,8 +161,7 @@ CustomizeMode.prototype = {
       let toolbarVisibilityBtn = document.getElementById(kToolbarVisibilityBtn);
       let togglableToolbars = window.getTogglableToolbars();
       let bookmarksToolbar = document.getElementById("PersonalToolbar");
-      if (togglableToolbars.length == 0 ||
-          (togglableToolbars.length == 1 && togglableToolbars[0] == bookmarksToolbar)) {
+      if (togglableToolbars.length == 0) {
         toolbarVisibilityBtn.setAttribute("hidden", "true");
       } else {
         toolbarVisibilityBtn.removeAttribute("hidden");
@@ -180,19 +179,21 @@ CustomizeMode.prototype = {
       // customization mode when pressing ESC.
       document.addEventListener("keypress", this);
 
-      // Same goes for the menu button - if we're customizing, a mousedown to the
+      // Same goes for the menu button - if we're customizing, a click on the
       // menu button means a quick exit from customization mode.
       window.PanelUI.hide();
-      window.PanelUI.menuButton.addEventListener("mousedown", this);
+      window.PanelUI.menuButton.addEventListener("command", this);
       window.PanelUI.menuButton.open = true;
       window.PanelUI.beginBatchUpdate();
 
       // The menu panel is lazy, and registers itself when the popup shows. We
       // need to force the menu panel to register itself, or else customization
-      // is really not going to work. We pass "true" to ensureRegistered to
+      // is really not going to work. We pass "true" to ensureReady to
       // indicate that we're handling calling startBatchUpdate and
       // endBatchUpdate.
-      yield window.PanelUI.ensureReady(true);
+      if (!window.PanelUI.isReady()) {
+        yield window.PanelUI.ensureReady(true);
+      }
 
       // Hide the palette before starting the transition for increased perf.
       this.visiblePalette.hidden = true;
@@ -332,7 +333,7 @@ CustomizeMode.prototype = {
     CustomizableUI.removeListener(this);
 
     this.document.removeEventListener("keypress", this);
-    this.window.PanelUI.menuButton.removeEventListener("mousedown", this);
+    this.window.PanelUI.menuButton.removeEventListener("command", this);
     this.window.PanelUI.menuButton.open = false;
 
     this.window.PanelUI.beginBatchUpdate();
@@ -1182,13 +1183,13 @@ CustomizeMode.prototype = {
       case "dragend":
         this._onDragEnd(aEvent);
         break;
-      case "mousedown":
-        if (aEvent.button == 0 &&
-            (aEvent.originalTarget == this.window.PanelUI.menuButton)) {
+      case "command":
+        if (aEvent.originalTarget == this.window.PanelUI.menuButton) {
           this.exit();
           aEvent.preventDefault();
-          return;
         }
+        break;
+      case "mousedown":
         this._onMouseDown(aEvent);
         break;
       case "mouseup":

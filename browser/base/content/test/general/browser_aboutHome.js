@@ -9,6 +9,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
 XPCOMUtils.defineLazyModuleGetter(this, "AboutHomeUtils",
   "resource:///modules/AboutHome.jsm");
 
+const TEST_CONTENT_HELPER = "chrome://mochitests/content/browser/browser/base/content/test/general/aboutHome_content_script.js";
 let gRightsVersion = Services.prefs.getIntPref("browser.rights.version");
 
 registerCleanupFunction(function() {
@@ -90,15 +91,11 @@ let gTests = [
 },
 
 // Disabled on Linux for intermittent issues with FHR, see Bug 945667.
-// Disabled always due to bug 992485
 {
   desc: "Check that performing a search fires a search event and records to " +
         "Firefox Health Report.",
   setup: function () { },
   run: function () {
-    // Skip this test always for now since it loads google.com and that causes bug 992485
-    return;
-
     // Skip this test on Linux.
     if (navigator.platform.indexOf("Linux") == 0) { return; }
 
@@ -111,36 +108,39 @@ let gTests = [
     }
 
     let numSearchesBefore = 0;
-    let deferred = Promise.defer();
+    let searchEventDeferred = Promise.defer();
     let doc = gBrowser.contentDocument;
     let engineName = doc.documentElement.getAttribute("searchEngineName");
+    let mm = gBrowser.selectedTab.linkedBrowser.messageManager;
 
-    doc.addEventListener("AboutHomeSearchEvent", function onSearch(e) {
-      let data = JSON.parse(e.detail);
+    mm.loadFrameScript(TEST_CONTENT_HELPER, false);
+
+    mm.addMessageListener("AboutHomeTest:CheckRecordedSearch", function (msg) {
+      let data = JSON.parse(msg.data);
       is(data.engineName, engineName, "Detail is search engine name");
 
-      // We use executeSoon() to ensure that this code runs after the
-      // count has been updated in browser.js, since it uses the same
-      // event.
-      executeSoon(function () {
-        getNumberOfSearches(engineName).then(num => {
-          is(num, numSearchesBefore + 1, "One more search recorded.");
-          deferred.resolve();
-        });
+      getNumberOfSearches(engineName).then(num => {
+        is(num, numSearchesBefore + 1, "One more search recorded.");
+        searchEventDeferred.resolve();
       });
-    }, true, true);
+    });
 
     // Get the current number of recorded searches.
+    let searchStr = "a search";
     getNumberOfSearches(engineName).then(num => {
       numSearchesBefore = num;
 
       info("Perform a search.");
-      doc.getElementById("searchText").value = "a search";
+      doc.getElementById("searchText").value = searchStr;
       doc.getElementById("searchSubmit").click();
-      gBrowser.stop();
     });
 
-    return deferred.promise;
+    let expectedURL = Services.search.currentEngine.
+                      getSubmission(searchStr, null, "homepage").
+                      uri.spec;
+    let loadPromise = waitForDocLoadAndStopIt(expectedURL);
+
+    return Promise.all([searchEventDeferred.promise, loadPromise]);
   }
 },
 

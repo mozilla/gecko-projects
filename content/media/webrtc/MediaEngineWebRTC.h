@@ -142,7 +142,8 @@ public:
 
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
-  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const VideoTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
@@ -170,7 +171,7 @@ public:
 
   void OnHardwareStateChange(HardwareState aState);
   bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
-  void OnError(CameraErrorContext aContext, CameraError aError);
+  void OnUserError(UserContext aContext, nsresult aError);
   void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType);
 
   void AllocImpl();
@@ -247,7 +248,11 @@ private:
   nsString mDeviceName;
   nsString mUniqueId;
 
-  void ChooseCapability(const MediaEnginePrefs &aPrefs);
+  void ChooseCapability(const VideoTrackConstraintsN &aConstraints,
+                        const MediaEnginePrefs &aPrefs);
+
+  void GuessCapability(const VideoTrackConstraintsN &aConstraints,
+                       const MediaEnginePrefs &aPrefs);
 };
 
 class MediaEngineWebRTCAudioSource : public MediaEngineAudioSource,
@@ -280,7 +285,8 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const AudioTrackConstraintsN &aConstraints,
+                            const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);

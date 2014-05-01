@@ -304,7 +304,7 @@ var interfaceNamesInGlobalScope =
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DOMImplementation",
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMMMIError",
+    {name: "DOMMMIError", b2g: true, pref: "dom.mobileconnection.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "DOMParser",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -619,6 +619,8 @@ var interfaceNamesInGlobalScope =
     {name: "MozCellBroadcast", b2g: true, pref: "dom.cellbroadcast.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     {name: "MozCellBroadcastEvent", b2g: true, pref: "dom.cellbroadcast.enabled"},
+// IMPORTANT: Do not change this list without review from a DOM peer!
+    {name: "MozClirModeEvent", b2g: true, pref: "dom.mobileconnection.enabled"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "mozContact",
 // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1189,8 +1191,6 @@ var interfaceNamesInGlobalScope =
     "XPathEvaluator",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "XPathExpression",
-// IMPORTANT: Do not change this list without review from a DOM peer!
-    "XPathNamespace",
 // IMPORTANT: Do not change this list without review from a DOM peer!
     "XPathNSResolver",
 // IMPORTANT: Do not change this list without review from a DOM peer!

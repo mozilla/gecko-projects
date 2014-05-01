@@ -567,13 +567,42 @@ js::Nursery::moveObjectToTenured(JSObject *dst, JSObject *src, AllocKind dstKind
     tenuredSize += moveElementsToTenured(dst, src, dstKind);
 
     if (src->is<TypedArrayObject>())
-        dst->setPrivate(dst->fixedData(TypedArrayObject::FIXED_DATA_START));
+        forwardTypedArrayPointers(dst, src);
 
     /* The shape's list head may point into the old object. */
     if (&src->shape_ == dst->shape_->listp)
         dst->shape_->listp = &dst->shape_;
 
     return tenuredSize;
+}
+
+void
+js::Nursery::forwardTypedArrayPointers(JSObject *dst, JSObject *src)
+{
+    /*
+     * Typed array data may be stored inline inside the object's fixed slots. If
+     * so, we need update the private pointer and leave a forwarding pointer at
+     * the start of the data.
+     */
+    TypedArrayObject &typedArray = src->as<TypedArrayObject>();
+    JS_ASSERT_IF(typedArray.buffer(), !isInside(src->getPrivate()));
+    if (typedArray.buffer())
+        return;
+
+    void *srcData = src->fixedData(TypedArrayObject::FIXED_DATA_START);
+    void *dstData = dst->fixedData(TypedArrayObject::FIXED_DATA_START);
+    JS_ASSERT(src->getPrivate() == srcData);
+    dst->setPrivate(dstData);
+
+    /*
+     * We don't know the number of slots here, but
+     * TypedArrayObject::AllocKindForLazyBuffer ensures that it's always at
+     * least one.
+     */
+    size_t nslots = 1;
+    setSlotsForwardingPointer(reinterpret_cast<HeapSlot*>(srcData),
+                              reinterpret_cast<HeapSlot*>(dstData),
+                              nslots);
 }
 
 size_t
@@ -875,7 +904,7 @@ js::Nursery::sweep(JSRuntime *rt)
     /* Poison the nursery contents so touching a freed object will crash. */
     JS_POISON((void *)start(), JS_SWEPT_NURSERY_PATTERN, NurserySize);
     for (int i = 0; i < NumNurseryChunks; ++i)
-        chunk(i).trailer.runtime = runtime();
+        initChunk(i);
 
     if (rt->gcZeal_ == ZealGenerationalGCValue) {
         MOZ_ASSERT(numActiveChunks_ == NumNurseryChunks);

@@ -457,13 +457,6 @@ pref("browser.tabs.drawInTitlebar", false);
 pref("browser.tabs.drawInTitlebar", true);
 #endif
 
-// Where to show tab close buttons:
-// 0  on active tab only
-// 1  on all tabs until tabClipWidth is reached, then active tab only
-// 2  no close buttons at all
-// 3  at the end of the tabstrip
-pref("browser.tabs.closeButtons", 1);
-
 // When tabs opened by links in other tabs via a combination of 
 // browser.link.open_newwindow being set to 3 and target="_blank" etc are
 // closed:
@@ -1163,7 +1156,6 @@ pref("services.sync.prefs.sync.browser.search.update", true);
 pref("services.sync.prefs.sync.browser.sessionstore.restore_on_demand", true);
 pref("services.sync.prefs.sync.browser.startup.homepage", true);
 pref("services.sync.prefs.sync.browser.startup.page", true);
-pref("services.sync.prefs.sync.browser.tabs.closeButtons", true);
 pref("services.sync.prefs.sync.browser.tabs.loadInBackground", true);
 pref("services.sync.prefs.sync.browser.tabs.warnOnClose", true);
 pref("services.sync.prefs.sync.browser.tabs.warnOnOpen", true);
@@ -1228,7 +1220,7 @@ pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.selectedTool", "webconsole");
-pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","tilt toggle","scratchpad","resize toggle"]');
+pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","tilt toggle","scratchpad","resize toggle","eyedropper"]');
 pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
 
@@ -1239,6 +1231,7 @@ pref("devtools.command-button-paintflashing.enabled", false);
 pref("devtools.command-button-tilt.enabled", false);
 pref("devtools.command-button-scratchpad.enabled", false);
 pref("devtools.command-button-responsive.enabled", true);
+pref("devtools.command-button-eyedropper.enabled", false);
 
 // Inspector preferences
 // Enable the Inspector
@@ -1484,8 +1477,6 @@ pref("security.csp.speccompliant", true);
 
 // Block insecure active content on https pages
 pref("security.mixed_content.block_active_content", true);
-
-pref("security.use_mozillapkix_verification", true);
 
 // Override the Gecko-default value of false for Firefox.
 pref("plain_text.wrap_long_lines", true);

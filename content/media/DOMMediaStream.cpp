@@ -41,11 +41,11 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMMediaStream)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(DOMMediaStream)
 
-NS_IMPL_ISUPPORTS_INHERITED1(DOMLocalMediaStream, DOMMediaStream,
-                             nsIDOMLocalMediaStream)
+NS_IMPL_ISUPPORTS_INHERITED(DOMLocalMediaStream, DOMMediaStream,
+                            nsIDOMLocalMediaStream)
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(DOMAudioNodeMediaStream, DOMMediaStream,
-                                     mStreamNode)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(DOMAudioNodeMediaStream, DOMMediaStream,
+                                   mStreamNode)
 
 NS_IMPL_ADDREF_INHERITED(DOMAudioNodeMediaStream, DOMMediaStream)
 NS_IMPL_RELEASE_INHERITED(DOMAudioNodeMediaStream, DOMMediaStream)

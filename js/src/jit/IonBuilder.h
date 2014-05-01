@@ -343,7 +343,7 @@ class IonBuilder : public MIRGenerator
 
     // Add a guard which ensure that the set of type which goes through this
     // generated code correspond to the observed types for the bytecode.
-    bool pushTypeBarrier(MDefinition *def, types::TemporaryTypeSet *observed, bool needBarrier);
+    bool pushTypeBarrier(MDefinition *def, types::TemporaryTypeSet *observed, BarrierKind kind);
 
     // As pushTypeBarrier, but will compute the needBarrier boolean itself based
     // on observed and the JSFunction that we're planning to call. The
@@ -380,9 +380,9 @@ class IonBuilder : public MIRGenerator
 
     bool hasStaticScopeObject(ScopeCoordinate sc, JSObject **pcall);
     bool loadSlot(MDefinition *obj, size_t slot, size_t nfixed, MIRType rvalType,
-                  bool barrier, types::TemporaryTypeSet *types);
+                  BarrierKind barrier, types::TemporaryTypeSet *types);
     bool loadSlot(MDefinition *obj, Shape *shape, MIRType rvalType,
-                  bool barrier, types::TemporaryTypeSet *types);
+                  BarrierKind barrier, types::TemporaryTypeSet *types);
     bool storeSlot(MDefinition *obj, size_t slot, size_t nfixed,
                    MDefinition *value, bool needsBarrier,
                    MIRType slotType = MIRType_None);
@@ -394,11 +394,11 @@ class IonBuilder : public MIRGenerator
     bool getPropTryConstant(bool *emitted, PropertyName *name,
                             types::TemporaryTypeSet *types);
     bool getPropTryDefiniteSlot(bool *emitted, PropertyName *name,
-                                bool barrier, types::TemporaryTypeSet *types);
+                                BarrierKind barrier, types::TemporaryTypeSet *types);
     bool getPropTryCommonGetter(bool *emitted, PropertyName *name,
                                 types::TemporaryTypeSet *types);
     bool getPropTryInlineAccess(bool *emitted, PropertyName *name,
-                                bool barrier, types::TemporaryTypeSet *types);
+                                BarrierKind barrier, types::TemporaryTypeSet *types);
     bool getPropTryTypedObject(bool *emitted, PropertyName *name,
                                types::TemporaryTypeSet *resultTypes);
     bool getPropTryScalarPropOfTypedObject(bool *emitted,
@@ -411,7 +411,7 @@ class IonBuilder : public MIRGenerator
                                             size_t fieldIndex,
                                             types::TemporaryTypeSet *resultTypes);
     bool getPropTryCache(bool *emitted, PropertyName *name,
-                         bool barrier, types::TemporaryTypeSet *types);
+                         BarrierKind barrier, types::TemporaryTypeSet *types);
     bool needsToMonitorMissingProperties(types::TemporaryTypeSet *types);
 
     // jsop_setprop() helpers.
@@ -649,6 +649,7 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineArrayPopShift(CallInfo &callInfo, MArrayPopShift::Mode mode);
     InliningStatus inlineArrayPush(CallInfo &callInfo);
     InliningStatus inlineArrayConcat(CallInfo &callInfo);
+    InliningStatus inlineArraySplice(CallInfo &callInfo);
 
     // Math natives.
     InliningStatus inlineMathAbs(CallInfo &callInfo);
@@ -716,8 +717,11 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineBailout(CallInfo &callInfo);
     InliningStatus inlineAssertFloat32(CallInfo &callInfo);
 
+    // Bind function.
+    InliningStatus inlineBoundFunction(CallInfo &callInfo, JSFunction *target);
+
     // Main inlining functions
-    InliningStatus inlineNativeCall(CallInfo &callInfo, JSNative native);
+    InliningStatus inlineNativeCall(CallInfo &callInfo, JSFunction *target);
     bool inlineScriptedCall(CallInfo &callInfo, JSFunction *target);
     InliningStatus inlineSingleCall(CallInfo &callInfo, JSFunction *target);
 
@@ -836,6 +840,7 @@ class IonBuilder : public MIRGenerator
 
     types::TemporaryTypeSet *thisTypes, *argTypes, *typeArray;
     uint32_t typeArrayHint;
+    uint32_t *bytecodeTypeMap;
 
     GSNCache gsn;
     ScopeCoordinateNameCache scopeCoordinateNameCache;
@@ -843,6 +848,11 @@ class IonBuilder : public MIRGenerator
     jsbytecode *pc;
     MBasicBlock *current;
     uint32_t loopDepth_;
+
+    BytecodeSite bytecodeSite(jsbytecode *pc) {
+        JS_ASSERT(info().inlineScriptTree()->script()->containsPC(pc));
+        return BytecodeSite(info().inlineScriptTree(), pc);
+    }
 
     /* Information used for inline-call builders. */
     MResumePoint *callerResumePoint_;

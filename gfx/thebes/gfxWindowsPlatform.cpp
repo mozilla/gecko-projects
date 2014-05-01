@@ -109,7 +109,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(GfxD2DSurfaceReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(GfxD2DSurfaceReporter, nsIMemoryReporter)
 
 #endif
 
@@ -139,7 +139,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(GfxD2DVramReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(GfxD2DVramReporter, nsIMemoryReporter)
 
 #define GFX_USE_CLEARTYPE_ALWAYS "gfx.font_rendering.cleartype.always_use_for_content"
 #define GFX_DOWNLOADABLE_FONTS_USE_CLEARTYPE "gfx.font_rendering.cleartype.use_for_downloadable_fonts"
@@ -239,14 +239,15 @@ public:
                         queryStatistics.hProcess = ProcessHandle;
                         queryStatistics.QueryProcessSegment.SegmentId = i;
                         if (NT_SUCCESS(queryD3DKMTStatistics(&queryStatistics))) {
-                            if (aperture)
-                                sharedBytesUsed += queryStatistics.QueryResult
-                                                                  .ProcessSegmentInfo
-                                                                  .BytesCommitted;
+                            ULONGLONG bytesCommitted;
+                            if (!IsWin8OrLater())
+                                bytesCommitted = queryStatistics.QueryResult.ProcessSegmentInfo.Win7.BytesCommitted;
                             else
-                                dedicatedBytesUsed += queryStatistics.QueryResult
-                                                                     .ProcessSegmentInfo
-                                                                     .BytesCommitted;
+                                bytesCommitted = queryStatistics.QueryResult.ProcessSegmentInfo.Win8.BytesCommitted;
+                            if (aperture)
+                                sharedBytesUsed += bytesCommitted;
+                            else
+                                dedicatedBytesUsed += bytesCommitted;
                         }
                     }
                 }
@@ -280,7 +281,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS1(GPUAdapterReporter, nsIMemoryReporter)
+NS_IMPL_ISUPPORTS(GPUAdapterReporter, nsIMemoryReporter)
 
 static __inline void
 BuildKeyNameFromFontName(nsAString &aName)
@@ -312,9 +313,7 @@ gfxWindowsPlatform::gfxWindowsPlatform()
 
     UpdateRenderMode();
 
-    // This reporter is disabled because it frequently gives bogus values.  See
-    // bug 917496.
-    //RegisterStrongMemoryReporter(new GPUAdapterReporter());
+    RegisterStrongMemoryReporter(new GPUAdapterReporter());
 }
 
 gfxWindowsPlatform::~gfxWindowsPlatform()

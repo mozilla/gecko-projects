@@ -191,7 +191,7 @@ void TimerEventAllocator::Free(void* aPtr)
 
 } // anonymous namespace
 
-NS_IMPL_QUERY_INTERFACE1(nsTimerImpl, nsITimer)
+NS_IMPL_QUERY_INTERFACE(nsTimerImpl, nsITimer)
 NS_IMPL_ADDREF(nsTimerImpl)
 
 NS_IMETHODIMP_(MozExternalRefCountType) nsTimerImpl::Release(void)
@@ -504,6 +504,10 @@ void nsTimerImpl::Fire()
 
   PROFILER_LABEL("Timer", "Fire");
 
+#ifdef MOZ_TASK_TRACER
+  mozilla::tasktracer::AutoRunFakeTracedTask runTracedTask(mTracedTask);
+#endif
+
 #ifdef DEBUG_TIMERS
   TimeStamp now = TimeStamp::Now();
   if (PR_LOG_TEST(GetTimerLog(), PR_LOG_DEBUG)) {
@@ -535,7 +539,7 @@ void nsTimerImpl::Fire()
   if (mCallbackType == CALLBACK_TYPE_INTERFACE)
     mTimerCallbackWhileFiring = mCallback.i;
   mFiring = true;
-  
+
   // Handle callbacks that re-init the timer, but avoid leaking.
   // See bug 330128.
   CallbackUnion callback = mCallback;

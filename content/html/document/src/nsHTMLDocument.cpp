@@ -199,26 +199,26 @@ nsHTMLDocument::~nsHTMLDocument()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_11(nsHTMLDocument, nsDocument,
-                                      mAll,
-                                      mImages,
-                                      mApplets,
-                                      mEmbeds,
-                                      mLinks,
-                                      mAnchors,
-                                      mScripts,
-                                      mForms,
-                                      mFormControls,
-                                      mWyciwygChannel,
-                                      mMidasCommandManager)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsHTMLDocument, nsDocument,
+                                   mAll,
+                                   mImages,
+                                   mApplets,
+                                   mEmbeds,
+                                   mLinks,
+                                   mAnchors,
+                                   mScripts,
+                                   mForms,
+                                   mFormControls,
+                                   mWyciwygChannel,
+                                   mMidasCommandManager)
 
 NS_IMPL_ADDREF_INHERITED(nsHTMLDocument, nsDocument)
 NS_IMPL_RELEASE_INHERITED(nsHTMLDocument, nsDocument)
 
 // QueryInterface implementation for nsHTMLDocument
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsHTMLDocument)
-  NS_INTERFACE_TABLE_INHERITED2(nsHTMLDocument, nsIHTMLDocument,
-                                nsIDOMHTMLDocument)
+  NS_INTERFACE_TABLE_INHERITED(nsHTMLDocument, nsIHTMLDocument,
+                               nsIDOMHTMLDocument)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsDocument)
 
 JSObject*

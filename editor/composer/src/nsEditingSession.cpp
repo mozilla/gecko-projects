@@ -86,8 +86,8 @@ nsEditingSession::~nsEditingSession()
     mLoadBlankDocTimer->Cancel();
 }
 
-NS_IMPL_ISUPPORTS3(nsEditingSession, nsIEditingSession, nsIWebProgressListener, 
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS(nsEditingSession, nsIEditingSession, nsIWebProgressListener, 
+                  nsISupportsWeakReference)
 
 /*---------------------------------------------------------------------------
 
@@ -448,7 +448,7 @@ nsEditingSession::SetupEditorOnWindow(nsIDOMWindow *aWindow)
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = editor->Init(domDoc, nullptr /* root content */,
-                    nullptr, mEditorFlags);
+                    nullptr, mEditorFlags, EmptyString());
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsISelection> selection;

@@ -199,13 +199,13 @@ public:
 
   Compositor(PCompositorParent* aParent = nullptr)
     : mCompositorID(0)
-    , mDiagnosticTypes(DIAGNOSTIC_NONE)
+    , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
     , mParent(aParent)
     , mScreenRotation(ROTATION_0)
   {
   }
 
-  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = 0) = 0;
+  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) = 0;
   virtual bool Initialize() = 0;
   virtual void Destroy() = 0;
 
@@ -500,6 +500,7 @@ public:
   // In addition, the clip rect needs to be offset by the rendering origin.
   // This becomes important if intermediate surfaces are used.
   gfx::Rect ClipRectInLayersCoordinates(gfx::Rect aClip) const;
+
 protected:
   void DrawDiagnosticsInternal(DiagnosticFlags aFlags,
                                const gfx::Rect& aVisibleRect,
@@ -527,6 +528,8 @@ protected:
   size_t mPixelsFilled;
 
   ScreenRotation mScreenRotation;
+
+  virtual gfx::IntSize GetWidgetSize() const = 0;
 
 private:
   static LayersBackend sBackend;

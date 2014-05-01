@@ -109,10 +109,10 @@ void nsMenuChainItem::Detach(nsMenuChainItem** aRoot)
   }
 }
 
-NS_IMPL_ISUPPORTS3(nsXULPopupManager,
-                   nsIDOMEventListener,
-                   nsITimerCallback,
-                   nsIObserver)
+NS_IMPL_ISUPPORTS(nsXULPopupManager,
+                  nsIDOMEventListener,
+                  nsITimerCallback,
+                  nsIObserver)
 
 nsXULPopupManager::nsXULPopupManager() :
   mRangeOffset(0),
@@ -973,7 +973,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TransitionEnder)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_1(TransitionEnder, mContent);
+NS_IMPL_CYCLE_COLLECTION(TransitionEnder, mContent);
 
 void
 nsXULPopupManager::HidePopupCallback(nsIContent* aPopup,

@@ -55,8 +55,8 @@ SVGSVGElement::WrapNode(JSContext *aCx)
   return SVGSVGElementBinding::Wrap(aCx, this);
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_1(DOMSVGTranslatePoint, nsISVGPoint,
-                                     mElement)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(DOMSVGTranslatePoint, nsISVGPoint,
+                                   mElement)
 
 NS_IMPL_ADDREF_INHERITED(DOMSVGTranslatePoint, nsISVGPoint)
 NS_IMPL_RELEASE_INHERITED(DOMSVGTranslatePoint, nsISVGPoint)
@@ -149,8 +149,8 @@ NS_IMPL_ADDREF_INHERITED(SVGSVGElement,SVGSVGElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGSVGElement,SVGSVGElementBase)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(SVGSVGElement)
-  NS_INTERFACE_TABLE_INHERITED3(SVGSVGElement, nsIDOMNode, nsIDOMElement,
-                                nsIDOMSVGElement)
+  NS_INTERFACE_TABLE_INHERITED(SVGSVGElement, nsIDOMNode, nsIDOMElement,
+                               nsIDOMSVGElement)
 NS_INTERFACE_TABLE_TAIL_INHERITING(SVGSVGElementBase)
 
 //----------------------------------------------------------------------

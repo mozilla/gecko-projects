@@ -6,6 +6,7 @@
 #ifndef MOZILLA_GFX_COMPOSITOROGL_H
 #define MOZILLA_GFX_COMPOSITOROGL_H
 
+#include "gfx2DGlue.h"
 #include "GLContextTypes.h"             // for GLContext, etc
 #include "GLDefs.h"                     // for GLuint, LOCAL_GL_TEXTURE_2D, etc
 #include "OGLShaderProgram.h"           // for ShaderProgramOGL, etc
@@ -19,7 +20,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float, SurfaceFormat, etc
 #include "mozilla/layers/Compositor.h"  // for SurfaceInitMode, Compositor, etc
-#include "mozilla/layers/CompositorTypes.h"  // for MaskType::NumMaskTypes, etc
+#include "mozilla/layers/CompositorTypes.h"  // for MaskType::MaskType::NumMaskTypes, etc
 #include "mozilla/layers/LayersTypes.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -153,7 +154,9 @@ protected:
   nsTArray<GLuint> mUnusedTextures;
 };
 
-class CompositorOGL : public Compositor
+// If you want to make this class not MOZ_FINAL, first remove calls to virtual
+// methods (Destroy) that are made in the destructor.
+class CompositorOGL MOZ_FINAL : public Compositor
 {
   typedef mozilla::gl::GLContext GLContext;
 
@@ -167,7 +170,7 @@ public:
   virtual ~CompositorOGL();
 
   virtual TemporaryRef<DataTextureSource>
-  CreateDataTextureSource(TextureFlags aFlags = 0) MOZ_OVERRIDE;
+  CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) MOZ_OVERRIDE;
 
   virtual bool Initialize() MOZ_OVERRIDE;
 
@@ -285,6 +288,11 @@ private:
                                 const gfx::Matrix4x4 &aTransformi,
                                 GLuint aDrawMode);
 
+  virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE
+  {
+    return gfx::ToIntSize(mWidgetSize);
+  }
+
   /**
    * Context target, nullptr when drawing directly to our swap chain.
    */
@@ -352,7 +360,7 @@ private:
                           gfx::Rect *aClipRectOut = nullptr,
                           gfx::Rect *aRenderBoundsOut = nullptr) MOZ_OVERRIDE;
 
-  ShaderConfigOGL GetShaderConfigFor(Effect *aEffect, MaskType aMask = MaskNone) const;
+  ShaderConfigOGL GetShaderConfigFor(Effect *aEffect, MaskType aMask = MaskType::MaskNone) const;
   ShaderProgramOGL* GetShaderProgramFor(const ShaderConfigOGL &aConfig);
 
   /**

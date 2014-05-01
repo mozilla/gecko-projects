@@ -96,7 +96,7 @@ using namespace mozilla::dom::indexedDB;
 using namespace mozilla::widget;
 using namespace mozilla::jsipc;
 
-NS_IMPL_ISUPPORTS1(ContentListener, nsIDOMEventListener)
+NS_IMPL_ISUPPORTS(ContentListener, nsIDOMEventListener)
 
 static const CSSSize kDefaultViewportSize(980, 480);
 
@@ -123,7 +123,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(TabChildBase)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabChildBase)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_2(TabChildBase, mTabChildGlobal, mGlobal)
+NS_IMPL_CYCLE_COLLECTION(TabChildBase, mTabChildGlobal, mGlobal)
 
 void
 TabChildBase::InitializeRootMetrics()
@@ -145,12 +145,6 @@ TabChildBase::InitializeRootMetrics()
   // as the resolution.
   mLastRootMetrics.mResolution = mLastRootMetrics.mCumulativeResolution / LayoutDeviceToParentLayerScale(1);
   mLastRootMetrics.SetScrollOffset(CSSPoint(0, 0));
-}
-
-bool
-TabChildBase::HasValidInnerSize()
-{
-  return (mInnerSize.width != 0) && (mInnerSize.height != 0);
 }
 
 void
@@ -696,6 +690,7 @@ TabChild::TabChild(ContentChild* aManager, const TabContext& aContext, uint32_t 
   , mWaitingTouchListeners(false)
   , mIgnoreKeyPressEvent(false)
   , mActiveElementManager(new ActiveElementManager())
+  , mHasValidInnerSize(false)
 {
   if (!sActiveDurationMsSet) {
     Preferences::AddIntVarCache(&sActiveDurationMs,
@@ -747,6 +742,7 @@ TabChild::Observe(nsISupports *aSubject,
 
       if (SameCOMIdentity(subject, doc)) {
         nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
+        utils->SetIsFirstPaint(true);
 
         mContentDocumentIsDisplayed = true;
 
@@ -809,9 +805,6 @@ TabChild::OnLocationChange(nsIWebProgress* aWebProgress,
   if (!window) {
     return NS_OK;
   }
-
-  nsCOMPtr<nsIDOMWindowUtils> utils(do_GetInterface(window));
-  utils->SetIsFirstPaint(true);
 
   nsCOMPtr<nsIDOMDocument> progressDoc;
   window->GetDocument(getter_AddRefs(progressDoc));
@@ -1290,6 +1283,12 @@ TabChild::BrowserFrameProvideWindow(nsIDOMWindow* aOpener,
   return NS_OK;
 }
 
+bool
+TabChild::HasValidInnerSize()
+{
+  return mHasValidInnerSize;
+}
+
 #ifdef DEBUG
 PContentPermissionRequestChild*
 TabChild:: SendPContentPermissionRequestConstructor(PContentPermissionRequestChild* aActor,
@@ -1616,6 +1615,9 @@ TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const 
 
     bool initialSizing = !HasValidInnerSize()
                       && (size.width != 0 && size.height != 0);
+    if (initialSizing) {
+      mHasValidInnerSize = true;
+    }
 
     mOrientation = orientation;
     mInnerSize = ScreenIntSize::FromUnknownSize(
@@ -2720,8 +2722,8 @@ TabChildGlobal::Init()
                                               MM_CHILD);
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_2(TabChildGlobal, DOMEventTargetHelper,
-                                     mMessageManager, mTabChild)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(TabChildGlobal, DOMEventTargetHelper,
+                                   mMessageManager, mTabChild)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TabChildGlobal)
   NS_INTERFACE_MAP_ENTRY(nsIMessageListenerManager)

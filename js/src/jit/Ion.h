@@ -82,7 +82,7 @@ IonContext *MaybeGetIonContext();
 
 void SetIonContext(IonContext *ctx);
 
-bool CanIonCompileScript(JSContext *cx, HandleScript script, bool osr);
+bool CanIonCompileScript(JSContext *cx, JSScript *script, bool osr);
 
 MethodStatus CanEnterAtBranch(JSContext *cx, JSScript *script,
                               BaselineFrame *frame, jsbytecode *pc, bool isConstructing);
@@ -149,8 +149,8 @@ class CodeGenerator;
 
 bool OptimizeMIR(MIRGenerator *mir);
 LIRGraph *GenerateLIR(MIRGenerator *mir);
-CodeGenerator *GenerateCode(MIRGenerator *mir, LIRGraph *lir, MacroAssembler *maybeMasm = nullptr);
-CodeGenerator *CompileBackEnd(MIRGenerator *mir, MacroAssembler *maybeMasm = nullptr);
+CodeGenerator *GenerateCode(MIRGenerator *mir, LIRGraph *lir);
+CodeGenerator *CompileBackEnd(MIRGenerator *mir);
 
 void AttachFinishedCompilations(JSContext *cx);
 void FinishOffThreadBuilder(IonBuilder *builder);
@@ -178,6 +178,15 @@ TooManyArguments(unsigned nargs)
     return nargs >= SNAPSHOT_MAX_NARGS || nargs > js_JitOptions.maxStackArgs;
 }
 
+inline size_t
+NumLocalsAndArgs(JSScript *script)
+{
+    size_t num = 1 /* this */ + script->nfixed();
+    if (JSFunction *fun = script->functionNonDelazifying())
+        num += fun->nargs();
+    return num;
+}
+
 void ForbidCompilation(JSContext *cx, JSScript *script);
 void ForbidCompilation(JSContext *cx, JSScript *script, ExecutionMode mode);
 
@@ -187,6 +196,10 @@ void DestroyIonScripts(FreeOp *fop, JSScript *script);
 void TraceIonScripts(JSTracer* trc, JSScript *script);
 
 void RequestInterruptForIonCode(JSRuntime *rt, JSRuntime::InterruptMode mode);
+
+bool RematerializeAllFrames(JSContext *cx, JSCompartment *comp);
+bool UpdateForDebugMode(JSContext *maybecx, JSCompartment *comp,
+                        AutoDebugModeInvalidation &invalidate);
 
 } // namespace jit
 } // namespace js
