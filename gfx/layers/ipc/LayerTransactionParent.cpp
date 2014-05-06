@@ -29,6 +29,7 @@
 #include "mozilla/layers/PLayerParent.h"  // for PLayerParent
 #include "mozilla/layers/ThebesLayerComposite.h"
 #include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "mozilla/unused.h"
 #include "nsCoord.h"                    // for NSAppUnitsToFloatPixels
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsDeviceContext.h"            // for AppUnitsPerCSSPixel
@@ -174,7 +175,6 @@ LayerTransactionParent::GetCompositorBackendType() const
   return mLayerManager->GetBackendType();
 }
 
-/* virtual */
 bool
 LayerTransactionParent::RecvUpdateNoSwap(const InfallibleTArray<Edit>& cset,
                                          const TargetConfig& targetConfig,
@@ -740,33 +740,6 @@ LayerTransactionParent::RecvForceComposite()
   return true;
 }
 
-
-PGrallocBufferParent*
-LayerTransactionParent::AllocPGrallocBufferParent(const IntSize& aSize,
-                                                  const uint32_t& aFormat,
-                                                  const uint32_t& aUsage,
-                                                  MaybeMagicGrallocBufferHandle* aOutHandle)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  return GrallocBufferActor::Create(aSize, aFormat, aUsage, aOutHandle);
-#else
-  NS_RUNTIMEABORT("No gralloc buffers for you");
-  return nullptr;
-#endif
-}
-
-bool
-LayerTransactionParent::DeallocPGrallocBufferParent(PGrallocBufferParent* actor)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  delete actor;
-  return true;
-#else
-  NS_RUNTIMEABORT("Um, how did we get here?");
-  return false;
-#endif
-}
-
 PLayerParent*
 LayerTransactionParent::AllocPLayerParent()
 {
@@ -805,9 +778,46 @@ LayerTransactionParent::DeallocPTextureParent(PTextureParent* actor)
   return TextureHost::DestroyIPDLActor(actor);
 }
 
+bool
+LayerTransactionParent::RecvChildAsyncMessages(const InfallibleTArray<AsyncChildMessageData>& aMessages)
+{
+  for (AsyncChildMessageArray::index_type i = 0; i < aMessages.Length(); ++i) {
+    const AsyncChildMessageData& message = aMessages[i];
+
+    switch (message.type()) {
+      case AsyncChildMessageData::TOpReplyDeliverFence: {
+        const OpReplyDeliverFence& op = message.get_OpReplyDeliverFence();
+        TransactionCompleteted(op.transactionId());
+        break;
+      }
+      default:
+        NS_ERROR("unknown AsyncChildMessageData type");
+        return false;
+    }
+  }
+  return true;
+}
+
+void
+LayerTransactionParent::ActorDestroy(ActorDestroyReason why)
+{
+  DestroyAsyncTransactionTrackersHolder();
+}
+
 bool LayerTransactionParent::IsSameProcess() const
 {
   return OtherProcess() == ipc::kInvalidProcessHandle;
+}
+
+void
+LayerTransactionParent::SendFenceHandle(AsyncTransactionTracker* aTracker,
+                                        PTextureParent* aTexture,
+                                        const FenceHandle& aFence)
+{
+  HoldUntilComplete(aTracker);
+  mozilla::unused << SendParentAsyncMessage(OpDeliverFence(aTracker->GetId(),
+                                        aTexture, nullptr,
+                                        aFence));
 }
 
 } // namespace layers

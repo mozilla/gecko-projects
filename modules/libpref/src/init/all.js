@@ -523,7 +523,13 @@ pref("accessibility.typeaheadfind.timeout", 4000);
 pref("accessibility.typeaheadfind.enabletimeout", true);
 pref("accessibility.typeaheadfind.soundURL", "beep");
 pref("accessibility.typeaheadfind.enablesound", true);
+#ifdef XP_MACOSX
+pref("accessibility.typeaheadfind.prefillwithselection", false);
+#else
 pref("accessibility.typeaheadfind.prefillwithselection", true);
+#endif
+pref("accessibility.typeaheadfind.matchesCountTimeout", 250);
+pref("accessibility.typeaheadfind.matchesCountLimit", 100);
 
 // use Mac OS X Appearance panel text smoothing setting when rendering text, disabled by default
 pref("gfx.use_text_smoothing_setting", false);
@@ -750,7 +756,7 @@ pref("dom.sysmsg.enabled", false);
 // Enable pre-installed applications.
 pref("dom.webapps.useCurrentProfile", false);
 
-pref("dom.cycle_collector.incremental", false);
+pref("dom.cycle_collector.incremental", true);
 
 // Parsing perf prefs. For now just mimic what the old code did.
 #ifndef XP_WIN
@@ -1310,7 +1316,7 @@ pref("network.dir.format", 2);
 pref("network.prefetch-next", true);
 
 // enables the predictive service
-pref("network.seer.enabled", true);
+pref("network.seer.enabled", false);
 pref("network.seer.enable-hover-on-ssl", false);
 pref("network.seer.page-degradation.day", 0);
 pref("network.seer.page-degradation.week", 5);
@@ -1440,17 +1446,6 @@ pref("converter.html2txt.header_strategy",  1); // 0 = no indention; 1 = indenti
 pref("intl.accept_languages",               "chrome://global/locale/intl.properties");
 pref("intl.menuitems.alwaysappendaccesskeys","chrome://global/locale/intl.properties");
 pref("intl.menuitems.insertseparatorbeforeaccesskeys","chrome://global/locale/intl.properties");
-pref("intl.charsetmenu.browser.static",     "chrome://global/locale/intl.properties");
-pref("intl.charsetmenu.browser.more1",      "ISO-8859-1, ISO-8859-15, IBM850, macintosh, windows-1252, ISO-8859-14, ISO-8859-7, x-mac-greek, windows-1253, x-mac-icelandic, ISO-8859-10, ISO-8859-3");
-pref("intl.charsetmenu.browser.more2",      "ISO-8859-4, ISO-8859-13, windows-1257, IBM852, ISO-8859-2, x-mac-ce, windows-1250, x-mac-croatian, IBM855, ISO-8859-5, ISO-IR-111, KOI8-R, x-mac-cyrillic, windows-1251, IBM866, KOI8-U, x-mac-ukrainian, ISO-8859-16, x-mac-romanian");
-pref("intl.charsetmenu.browser.more3",      "GB2312, gbk, gb18030, HZ-GB-2312, ISO-2022-CN, Big5, Big5-HKSCS, x-euc-tw, EUC-JP, ISO-2022-JP, Shift_JIS, EUC-KR, x-johab, ISO-2022-KR");
-pref("intl.charsetmenu.browser.more4",      "armscii-8, TIS-620, ISO-8859-11, windows-874, IBM857, ISO-8859-9, x-mac-turkish, windows-1254, x-viet-tcvn5712, VISCII, x-viet-vps, windows-1258, x-mac-devanagari, x-mac-gujarati, x-mac-gurmukhi");
-pref("intl.charsetmenu.browser.more5",      "ISO-8859-6, windows-1256, ISO-8859-8-I, windows-1255, ISO-8859-8, IBM862");
-pref("intl.charsetmenu.mailedit",           "chrome://global/locale/intl.properties");
-pref("intl.charsetmenu.browser.cache",      "");
-pref("intl.charsetmenu.mailview.cache",     "");
-pref("intl.charsetmenu.composer.cache",     "");
-pref("intl.charsetmenu.browser.cache.size", 5);
 pref("intl.charset.detector",               "chrome://global/locale/intl.properties");
 pref("intl.charset.fallback.override",      "");
 pref("intl.charset.fallback.tld",           true);
@@ -1810,7 +1805,7 @@ pref("layout.css.masking.enabled", true);
 #endif
 
 // Is support for mix-blend-mode enabled?
-pref("layout.css.mix-blend-mode.enabled", false);
+pref("layout.css.mix-blend-mode.enabled", true);
 
 // Is support for the the @supports rule enabled?
 pref("layout.css.supports-rule.enabled", true);
@@ -1907,6 +1902,12 @@ pref("layout.css.variables.enabled", true);
 // Is support for CSS overflow-clip-box enabled for non-UA sheets?
 pref("layout.css.overflow-clip-box.enabled", false);
 
+// Is support for CSS grid enabled?
+pref("layout.css.grid.enabled", false);
+
+// Is support for CSS box-decoration-break enabled?
+pref("layout.css.box-decoration-break.enabled", false);
+
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
 // 1 = end-side in document/content direction
@@ -1926,6 +1927,11 @@ pref("layout.interruptible-reflow.enabled", true);
 // automatically based on knowledge of the platform (or 60Hz if no platform-
 // specific information is available).
 pref("layout.frame_rate", -1);
+
+// pref to dump the display list to the log. Useful for debugging invalidation problems.
+#ifdef MOZ_DUMP_PAINTING
+pref("layout.display-list.dump", false);
+#endif
 
 // pref to control precision of the frame rate timer. When true,
 // we use a "precise" timer, which means each notification fires

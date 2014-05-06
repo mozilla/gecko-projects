@@ -57,7 +57,8 @@ public:
     LocalOnlyOCSPForEV = 4,
   };
   NSSCertDBTrustDomain(SECTrustType certDBTrustType, OCSPFetching ocspFetching,
-                       OCSPCache& ocspCache, void* pinArg);
+                       OCSPCache& ocspCache, void* pinArg,
+                       CERTChainVerifyCallback* checkChainCallback = nullptr);
 
   virtual SECStatus FindPotentialIssuers(
                         const SECItem* encodedIssuerName,
@@ -67,7 +68,7 @@ public:
   virtual SECStatus GetCertTrust(mozilla::pkix::EndEntityOrCA endEntityOrCA,
                                  SECOidTag policy,
                                  const CERTCertificate* candidateCert,
-                         /*out*/ TrustLevel* trustLevel);
+                         /*out*/ mozilla::pkix::TrustLevel* trustLevel);
 
   virtual SECStatus VerifySignedData(const CERTSignedData* signedData,
                                      const CERTCertificate* cert);
@@ -77,6 +78,8 @@ public:
                           /*const*/ CERTCertificate* issuerCert,
                                     PRTime time,
                        /*optional*/ const SECItem* stapledOCSPResponse);
+
+  virtual SECStatus IsChainValid(const CERTCertList* certChain);
 
 private:
   enum EncodedResponseSource {
@@ -92,6 +95,7 @@ private:
   const OCSPFetching mOCSPFetching;
   OCSPCache& mOCSPCache; // non-owning!
   void* mPinArg; // non-owning!
+  CERTChainVerifyCallback* mCheckChainCallback; // non-owning!
 };
 
 } } // namespace mozilla::psm

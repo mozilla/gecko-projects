@@ -52,8 +52,8 @@ HTMLImageOrCanvasOrVideoElement;
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(HTMLCanvasPrintState, mCanvas,
-                                        mContext, mCallback)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(HTMLCanvasPrintState, mCanvas,
+                                      mContext, mCallback)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(HTMLCanvasPrintState, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(HTMLCanvasPrintState, Release)
@@ -591,7 +591,7 @@ HTMLCanvasElement::MozGetAsFileImpl(const nsAString& aName,
 
   // The DOMFile takes ownership of the buffer
   nsRefPtr<nsDOMMemoryFile> file =
-    new nsDOMMemoryFile(imgData, (uint32_t)imgSize, aName, type);
+    new nsDOMMemoryFile(imgData, (uint32_t)imgSize, aName, type, PR_Now());
 
   file.forget(aResult);
   return NS_OK;

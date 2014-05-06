@@ -56,6 +56,9 @@ include css-animations/reftest.list
 # blending/
 include css-blending/reftest.list
 
+# Tests for the css-break spec
+include css-break/reftest.list
+
 # css calc() tests
 include css-calc/reftest.list
 
@@ -154,6 +157,9 @@ include first-line/reftest.list
 
 # flexbox (display: flex, display: inline-flex)
 include flexbox/reftest.list
+
+# CSS Grid (display: grid, display: inline-grid)
+include css-grid/reftest.list
 
 # floats/
 include floats/reftest.list

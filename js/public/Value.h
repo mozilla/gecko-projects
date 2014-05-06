@@ -1556,7 +1556,9 @@ template <> struct GCMethods<JS::Value>
     static JS::Value initial() { return JS::UndefinedValue(); }
     static ThingRootKind kind() { return THING_ROOT_VALUE; }
     static bool poisoned(const JS::Value &v) { return JS::IsPoisonedValue(v); }
-    static bool needsPostBarrier(const JS::Value &v) { return v.isMarkable(); }
+    static bool needsPostBarrier(const JS::Value &v) {
+        return v.isObject() && gc::IsInsideNursery(reinterpret_cast<gc::Cell*>(&v.toObject()));
+    }
 #ifdef JSGC_GENERATIONAL
     static void postBarrier(JS::Value *v) { JS::HeapValuePostBarrier(v); }
     static void relocate(JS::Value *v) { JS::HeapValueRelocate(v); }
@@ -1897,6 +1899,8 @@ namespace JS {
 
 extern JS_PUBLIC_DATA(const HandleValue) NullHandleValue;
 extern JS_PUBLIC_DATA(const HandleValue) UndefinedHandleValue;
+extern JS_PUBLIC_DATA(const HandleValue) TrueHandleValue;
+extern JS_PUBLIC_DATA(const HandleValue) FalseHandleValue;
 
 }
 

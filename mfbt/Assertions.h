@@ -9,10 +9,17 @@
 #ifndef mozilla_Assertions_h
 #define mozilla_Assertions_h
 
+#if defined(MOZILLA_INTERNAL_API) && defined(__cplusplus)
+#define MOZ_DUMP_ASSERTION_STACK
+#endif
+
 #include "mozilla/Attributes.h"
 #include "mozilla/Compiler.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MacroArgs.h"
+#ifdef MOZ_DUMP_ASSERTION_STACK
+#include "nsTraceRefcnt.h"
+#endif
 
 #include <stddef.h>
 #include <stdio.h>
@@ -125,25 +132,31 @@ extern "C" {
  * for use in implementing release-build assertions.
  */
 static MOZ_ALWAYS_INLINE void
-MOZ_ReportAssertionFailure(const char* s, const char* file, int ln)
+MOZ_ReportAssertionFailure(const char* s, const char* file, int ln) MOZ_PRETEND_NORETURN_FOR_STATIC_ANALYSIS
 {
 #ifdef ANDROID
   __android_log_print(ANDROID_LOG_FATAL, "MOZ_Assert",
                       "Assertion failure: %s, at %s:%d\n", s, file, ln);
 #else
   fprintf(stderr, "Assertion failure: %s, at %s:%d\n", s, file, ln);
+#ifdef MOZ_DUMP_ASSERTION_STACK
+  nsTraceRefcnt::WalkTheStack(stderr);
+#endif
   fflush(stderr);
 #endif
 }
 
 static MOZ_ALWAYS_INLINE void
-MOZ_ReportCrash(const char* s, const char* file, int ln)
+MOZ_ReportCrash(const char* s, const char* file, int ln) MOZ_PRETEND_NORETURN_FOR_STATIC_ANALYSIS
 {
 #ifdef ANDROID
     __android_log_print(ANDROID_LOG_FATAL, "MOZ_CRASH",
                         "Hit MOZ_CRASH(%s) at %s:%d\n", s, file, ln);
 #else
   fprintf(stderr, "Hit MOZ_CRASH(%s) at %s:%d\n", s, file, ln);
+#ifdef MOZ_DUMP_ASSERTION_STACK
+  nsTraceRefcnt::WalkTheStack(stderr);
+#endif
   fflush(stderr);
 #endif
 }
@@ -280,9 +293,67 @@ __declspec(noreturn) __inline void MOZ_NoReturn() {}
  * MOZ_RELEASE_ASSERT, which applies to non-debug builds as well.
  */
 
+/*
+ * Implement MOZ_VALIDATE_ASSERT_CONDITION_TYPE, which is used to guard against
+ * accidentally passing something unintended in lieu of an assertion condition.
+ */
+
+#ifdef __cplusplus
+#  if defined(__clang__)
+#    define MOZ_SUPPORT_ASSERT_CONDITION_TYPE_VALIDATION
+#  elif defined(__GNUC__)
+//   B2G GCC 4.4 has insufficient decltype support.
+#    if MOZ_GCC_VERSION_AT_LEAST(4, 5, 0)
+#      define MOZ_SUPPORT_ASSERT_CONDITION_TYPE_VALIDATION
+#    endif
+#  elif defined(_MSC_VER)
+//   Disabled for now because of insufficient decltype support. Bug 1004028.
+#  endif
+#endif
+
+#ifdef MOZ_SUPPORT_ASSERT_CONDITION_TYPE_VALIDATION
+#  include "mozilla/TypeTraits.h"
+namespace mozilla {
+namespace detail {
+
+template<typename T>
+struct IsFunction
+{
+    static const bool value = false;
+};
+
+template<typename R, typename... A>
+struct IsFunction<R(A...)>
+{
+    static const bool value = true;
+};
+
+template<typename T>
+void ValidateAssertConditionType()
+{
+  typedef typename RemoveReference<T>::Type ValueT;
+  static_assert(!IsArray<ValueT>::value,
+                "Expected boolean assertion condition, got an array or a string!");
+  static_assert(!IsFunction<ValueT>::value,
+                "Expected boolean assertion condition, got a function! Did you intend to call that function?");
+  static_assert(!IsFloatingPoint<ValueT>::value,
+                "It's often a bad idea to assert that a floating-point number is nonzero, "
+                "because such assertions tend to intermittently fail. Shouldn't your code gracefully handle "
+                "this case instead of asserting? Anyway, if you really want to "
+                "do that, write an explicit boolean condition, like !!x or x!=0.");
+}
+
+} // namespace detail
+} // namespace mozilla
+#  define MOZ_VALIDATE_ASSERT_CONDITION_TYPE(x) mozilla::detail::ValidateAssertConditionType<decltype(x)>()
+#else
+#  define MOZ_VALIDATE_ASSERT_CONDITION_TYPE(x)
+#endif
+
 /* First the single-argument form. */
 #define MOZ_ASSERT_HELPER1(expr) \
    do { \
+     MOZ_VALIDATE_ASSERT_CONDITION_TYPE(expr); \
      if (MOZ_UNLIKELY(!(expr))) { \
        MOZ_ReportAssertionFailure(#expr, __FILE__, __LINE__); \
        MOZ_REALLY_CRASH(); \
@@ -291,6 +362,7 @@ __declspec(noreturn) __inline void MOZ_NoReturn() {}
 /* Now the two-argument form. */
 #define MOZ_ASSERT_HELPER2(expr, explain) \
    do { \
+     MOZ_VALIDATE_ASSERT_CONDITION_TYPE(expr); \
      if (MOZ_UNLIKELY(!(expr))) { \
        MOZ_ReportAssertionFailure(#expr " (" explain ")", __FILE__, __LINE__); \
        MOZ_REALLY_CRASH(); \
@@ -424,5 +496,7 @@ __declspec(noreturn) __inline void MOZ_NoReturn() {}
 #  define MOZ_ALWAYS_TRUE(expr)      ((void)(expr))
 #  define MOZ_ALWAYS_FALSE(expr)     ((void)(expr))
 #endif
+
+#undef MOZ_DUMP_ASSERTION_STACK
 
 #endif /* mozilla_Assertions_h */

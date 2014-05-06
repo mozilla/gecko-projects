@@ -26,13 +26,6 @@
 #include "pk11pub.h"
 #include "secder.h"
 
-#ifdef _MSC_VER
-// C4480: nonstandard extension used: specifying underlying type for enum
-#define ENUM_CLASS  __pragma(warning(disable: 4480)) enum
-#else
-#define ENUM_CLASS enum class
-#endif
-
 // TODO: use typed/qualified typedefs everywhere?
 // TODO: When should we return SEC_ERROR_OCSP_UNAUTHORIZED_RESPONSE?
 
@@ -43,7 +36,7 @@ static const PRTime ONE_DAY
 static const PRTime SLOP = ONE_DAY;
 
 // These values correspond to the tag values in the ASN.1 CertStatus
-ENUM_CLASS CertStatus : uint8_t {
+MOZILLA_PKIX_ENUM_CLASS CertStatus : uint8_t {
   Good = der::CONTEXT_SPECIFIC | 0,
   Revoked = der::CONTEXT_SPECIFIC | der::CONSTRUCTED | 1,
   Unknown = der::CONTEXT_SPECIFIC | 2
@@ -87,6 +80,25 @@ private:
   void operator=(const Context&); // delete
 };
 
+static der::Result
+HashBuf(const SECItem& item, /*out*/ uint8_t *hashBuf, size_t hashBufLen)
+{
+  if (hashBufLen != SHA1_LENGTH) {
+    PR_NOT_REACHED("invalid hash length");
+    return der::Fail(SEC_ERROR_INVALID_ARGS);
+  }
+  if (item.len >
+      static_cast<decltype(item.len)>(std::numeric_limits<int32_t>::max())) {
+    PR_NOT_REACHED("large OCSP responses should have already been rejected");
+    return der::Fail(SEC_ERROR_INVALID_ARGS);
+  }
+  if (PK11_HashBuf(SEC_OID_SHA1, hashBuf, item.data,
+                   static_cast<int32_t>(item.len)) != SECSuccess) {
+    return der::Fail(PR_GetError());
+  }
+  return der::Success;
+}
+
 // Verify that potentialSigner is a valid delegated OCSP response signing cert
 // according to RFC 6960 section 4.2.2.2.
 static Result
@@ -96,7 +108,7 @@ CheckOCSPResponseSignerCert(TrustDomain& trustDomain,
 {
   Result rv;
 
-  BackCert cert(&potentialSigner, nullptr, BackCert::ExcludeCN);
+  BackCert cert(&potentialSigner, nullptr, BackCert::IncludeCN::No);
   rv = cert.Init();
   if (rv != Success) {
     return rv;
@@ -126,7 +138,7 @@ CheckOCSPResponseSignerCert(TrustDomain& trustDomain,
   // TODO(bug 926261): If we're validating for a policy then the policy OID we
   // are validating for should be passed to CheckIssuerIndependentProperties.
   rv = CheckIssuerIndependentProperties(trustDomain, cert, time,
-                                        MustBeEndEntity, 0,
+                                        EndEntityOrCA::MustBeEndEntity, 0,
                                         SEC_OID_OCSP_RESPONDER,
                                         SEC_OID_X509_ANY_POLICY, 0);
   if (rv != Success) {
@@ -157,12 +169,7 @@ CheckOCSPResponseSignerCert(TrustDomain& trustDomain,
   return Success;
 }
 
-//typedef enum {
-//    ocspResponderID_byName = 1,
-//    ocspResponderID_byKey = 2
-//} ResponderIDType;
-
-ENUM_CLASS ResponderIDType : uint8_t
+MOZILLA_PKIX_ENUM_CLASS ResponderIDType : uint8_t
 {
   byName = der::CONTEXT_SPECIFIC | der::CONSTRUCTED | 1,
   byKey = der::CONTEXT_SPECIFIC | der::CONSTRUCTED | 2
@@ -181,9 +188,9 @@ static inline der::Result CheckExtensionsForCriticality(der::Input&);
 static inline der::Result CertID(der::Input& input,
                                   const Context& context,
                                   /*out*/ bool& match);
-static der::Result MatchIssuerKey(const SECItem& issuerKeyHash,
-                                   const CERTCertificate& issuer,
-                                   /*out*/ bool& match);
+static der::Result MatchKeyHash(const SECItem& issuerKeyHash,
+                                const CERTCertificate& issuer,
+                                /*out*/ bool& match);
 
 // RFC 6960 section 4.2.2.2: The OCSP responder must either be the issuer of
 // the cert or it must be a delegated OCSP response signing cert directly
@@ -252,12 +259,11 @@ GetOCSPSignerCertificate(TrustDomain& trustDomain,
               != der::Success) {
           return nullptr;
         }
-        SECItem issuerKeyHash;
-        if (der::Skip(responderID, der::OCTET_STRING, issuerKeyHash) != der::Success) {
+        SECItem keyHash;
+        if (der::Skip(responderID, der::OCTET_STRING, keyHash) != der::Success) {
           return nullptr;
         }
-        if (MatchIssuerKey(issuerKeyHash, *potentialSigner.get(), match)
-              != der::Success) {
+        if (MatchKeyHash(keyHash, *potentialSigner.get(), match) != der::Success) {
           return nullptr;
         }
         break;
@@ -454,7 +460,9 @@ BasicResponse(der::Input& input, Context& context)
 
   CERTSignedData signedData;
 
-  input.GetSECItem(siBuffer, mark, signedData.data);
+  if (input.GetSECItem(siBuffer, mark, signedData.data) != der::Success) {
+    return der::Failure;
+  }
 
   if (der::Nested(input, der::SEQUENCE,
                   bind(der::AlgorithmIdentifier, _1,
@@ -515,7 +523,9 @@ BasicResponse(der::Input& input, Context& context)
         return der::Failure;
       }
 
-      input.GetSECItem(siBuffer, mark, certs[numCerts]);
+      if (input.GetSECItem(siBuffer, mark, certs[numCerts]) != der::Success) {
+        return der::Failure;
+      }
       ++numCerts;
     }
   }
@@ -580,7 +590,7 @@ ResponseData(der::Input& input, Context& context,
   // responder will never return an empty response, and handling the case of an
   // empty response makes things unnecessarily complicated.
   if (der::NestedOf(input, der::SEQUENCE, der::SEQUENCE,
-                    der::MustNotBeEmpty,
+                    der::EmptyAllowed::No,
                     bind(SingleResponse, _1, ref(context))) != der::Success) {
     return der::Failure;
   }
@@ -786,8 +796,7 @@ CertID(der::Input& input, const Context& context, /*out*/ bool& match)
   // "The hash shall be calculated over the DER encoding of the
   // issuer's name field in the certificate being checked."
   uint8_t hashBuf[SHA1_LENGTH];
-  if (PK11_HashBuf(SEC_OID_SHA1, hashBuf, cert.derIssuer.data,
-                   cert.derIssuer.len) != SECSuccess) {
+  if (HashBuf(cert.derIssuer, hashBuf, sizeof(hashBuf)) != der::Success) {
     return der::Failure;
   }
   if (memcmp(hashBuf, issuerNameHash.data, issuerNameHash.len)) {
@@ -796,17 +805,17 @@ CertID(der::Input& input, const Context& context, /*out*/ bool& match)
     return der::Success;
   }
 
-  return MatchIssuerKey(issuerKeyHash, issuerCert, match);
+  return MatchKeyHash(issuerKeyHash, issuerCert, match);
 }
 
 // From http://tools.ietf.org/html/rfc6960#section-4.1.1:
 // "The hash shall be calculated over the value (excluding tag and length) of
 // the subject public key field in the issuer's certificate."
 static der::Result
-MatchIssuerKey(const SECItem& issuerKeyHash, const CERTCertificate& issuer,
-               /*out*/ bool& match)
+MatchKeyHash(const SECItem& keyHash, const CERTCertificate& cert,
+             /*out*/ bool& match)
 {
-  if (issuerKeyHash.len != SHA1_LENGTH)  {
+  if (keyHash.len != SHA1_LENGTH)  {
     return der::Fail(SEC_ERROR_OCSP_MALFORMED_RESPONSE);
   }
 
@@ -815,15 +824,15 @@ MatchIssuerKey(const SECItem& issuerKeyHash, const CERTCertificate& issuer,
   // Copy just the length and data pointer (nothing needs to be freed) of the
   // subject public key so we can convert the length from bits to bytes, which
   // is what the digest function expects.
-  SECItem spk = issuer.subjectPublicKeyInfo.subjectPublicKey;
+  SECItem spk = cert.subjectPublicKeyInfo.subjectPublicKey;
   DER_ConvertBitString(&spk);
 
   static uint8_t hashBuf[SHA1_LENGTH];
-  if (PK11_HashBuf(SEC_OID_SHA1, hashBuf, spk.data, spk.len) != SECSuccess) {
+  if (HashBuf(spk, hashBuf, sizeof(hashBuf)) != der::Success) {
     return der::Failure;
   }
 
-  match = !memcmp(hashBuf, issuerKeyHash.data, issuerKeyHash.len);
+  match = !memcmp(hashBuf, keyHash.data, keyHash.len);
   return der::Success;
 }
 
@@ -866,7 +875,7 @@ CheckExtensionsForCriticality(der::Input& input)
   // Extension, which is invalid (der::MayBeEmpty should really be
   // der::MustNotBeEmpty).
   return der::NestedOf(input, der::SEQUENCE, der::SEQUENCE,
-                       der::MayBeEmpty, CheckExtensionForCriticality);
+                       der::EmptyAllowed::Yes, CheckExtensionForCriticality);
 }
 
 //   1. The certificate identified in a received response corresponds to
@@ -956,11 +965,11 @@ CreateEncodedOCSPRequest(PLArenaPool* arena,
   }
 
   uint8_t* d = encodedRequest->data;
-  *d++ = 0x30; *d++ = totalLen - 2;  // OCSPRequest (SEQUENCE)
-  *d++ = 0x30; *d++ = totalLen - 4;  //   tbsRequest (SEQUENCE)
-  *d++ = 0x30; *d++ = totalLen - 6;  //     requestList (SEQUENCE OF)
-  *d++ = 0x30; *d++ = totalLen - 8;  //       Request (SEQUENCE)
-  *d++ = 0x30; *d++ = totalLen - 10; //         reqCert (CertID SEQUENCE)
+  *d++ = 0x30; *d++ = totalLen - 2u;  // OCSPRequest (SEQUENCE)
+  *d++ = 0x30; *d++ = totalLen - 4u;  //   tbsRequest (SEQUENCE)
+  *d++ = 0x30; *d++ = totalLen - 6u;  //     requestList (SEQUENCE OF)
+  *d++ = 0x30; *d++ = totalLen - 8u;  //       Request (SEQUENCE)
+  *d++ = 0x30; *d++ = totalLen - 10u; //         reqCert (CertID SEQUENCE)
 
   // reqCert.hashAlgorithm
   for (size_t i = 0; i < PR_ARRAY_SIZE(hashAlgorithm); ++i) {
@@ -970,8 +979,7 @@ CreateEncodedOCSPRequest(PLArenaPool* arena,
   // reqCert.issuerNameHash (OCTET STRING)
   *d++ = 0x04;
   *d++ = hashLen;
-  if (PK11_HashBuf(SEC_OID_SHA1, d, issuerCert->derSubject.data,
-                   issuerCert->derSubject.len) != SECSuccess) {
+  if (HashBuf(issuerCert->derSubject, d, hashLen) != der::Success) {
     return nullptr;
   }
   d += hashLen;
@@ -981,7 +989,7 @@ CreateEncodedOCSPRequest(PLArenaPool* arena,
   *d++ = hashLen;
   SECItem key = issuerCert->subjectPublicKeyInfo.subjectPublicKey;
   DER_ConvertBitString(&key);
-  if (PK11_HashBuf(SEC_OID_SHA1, d, key.data, key.len) != SECSuccess) {
+  if (HashBuf(key, d, hashLen) != der::Success) {
     return nullptr;
   }
   d += hashLen;

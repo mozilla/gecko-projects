@@ -12,7 +12,10 @@
 #
 # NB: This will cause the following files to be overwritten if they are in
 # the output directory:
-#  cert8.db, key3.db, secmod.db, ocsp-ca.der, ocsp-other-ca.der
+#  cert9.db, key4.db, pkcs11.txt, test-ca.der, other-test-ca.der, default-ee.der
+# NB: You must run genHPKPStaticPins.js after running this file, since its
+# output (StaticHPKPins.h) depends on default-ee.der
+
 set -x
 set -e
 
@@ -23,13 +26,17 @@ fi
 
 OBJDIR=${1}
 OUTPUT_DIR=${2}
+# Use the SQL DB so we can run tests on Android.
+DB_ARGUMENT="sql:$OUTPUT_DIR"
 RUN_MOZILLA="$OBJDIR/dist/bin/run-mozilla.sh"
 CERTUTIL="$OBJDIR/dist/bin/certutil"
+# On BSD, mktemp requires either a template or a prefix.
+MKTEMP="mktemp temp.XXXX"
 
-NOISE_FILE=`mktemp`
+NOISE_FILE=`$MKTEMP`
 # Make a good effort at putting something unique in the noise file.
 date +%s%N  > "$NOISE_FILE"
-PASSWORD_FILE=`mktemp`
+PASSWORD_FILE=`$MKTEMP`
 
 function cleanup {
   rm -f "$NOISE_FILE" "$PASSWORD_FILE"
@@ -50,11 +57,11 @@ if [ ! -d "$OUTPUT_DIR" ]; then
   exit $E_BADARGS
 fi
 
-if [ -f "$OUTPUT_DIR/cert8.db" -o -f "$OUTPUT_DIR/key3.db" -o -f "$OUTPUT_DIR/secmod.db" ]; then
+if [ -f "$OUTPUT_DIR/cert9.db" -o -f "$OUTPUT_DIR/key4.db" -o -f "$OUTPUT_DIR/pkcs11.txt" ]; then
   echo "Found pre-existing NSS DBs. Clobbering old OCSP certs."
-  rm -f "$OUTPUT_DIR/cert8.db" "$OUTPUT_DIR/key3.db" "$OUTPUT_DIR/secmod.db"
+  rm -f "$OUTPUT_DIR/cert9.db" "$OUTPUT_DIR/key4.db" "$OUTPUT_DIR/pkcs11.txt"
 fi
-$RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -N -f $PASSWORD_FILE
+$RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -N -f $PASSWORD_FILE
 
 COMMON_ARGS="-v 360 -w -1 -2 -z $NOISE_FILE"
 
@@ -64,12 +71,12 @@ function make_CA {
   SUBJECT="${2}"
   DERFILE="${3}"
 
-  echo -e "$CA_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -S \
+  echo -e "$CA_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -S \
                                                    -n $NICKNAME \
                                                    -s "$SUBJECT" \
                                                    -t "CT,," \
                                                    -x $COMMON_ARGS
-  $RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -L -n $NICKNAME -r > $OUTPUT_DIR/$DERFILE
+  $RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -L -n $NICKNAME -r > $OUTPUT_DIR/$DERFILE
 }
 
 SERIALNO=1
@@ -81,7 +88,7 @@ function make_INT {
   CA="${3}"
   EXTRA_ARGS="${4}"
 
-  echo -e "$INT_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -S \
+  echo -e "$INT_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -S \
                                                     -n $NICKNAME \
                                                     -s "$SUBJECT" \
                                                     -c $CA \
@@ -101,7 +108,7 @@ function make_EE {
   SUBJECT_ALT_NAME="${4}"
   EXTRA_ARGS="${5} ${6}"
 
-  echo -e "$CERT_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -S \
+  echo -e "$CERT_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -S \
                                                      -n $NICKNAME \
                                                      -s "$SUBJECT" \
                                                      -8 $SUBJECT_ALT_NAME \
@@ -121,7 +128,7 @@ function make_delegated {
   CA="${3}"
   EXTRA_ARGS="${4}"
 
-  echo -e "$CERT_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -S \
+  echo -e "$CERT_RESPONSES" | $RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -S \
                                                      -n $NICKNAME \
                                                      -s "$SUBJECT" \
                                                      -c $CA \
@@ -134,8 +141,12 @@ function make_delegated {
 
 make_CA testCA 'CN=Test CA' test-ca.der
 make_CA otherCA 'CN=Other test CA' other-test-ca.der
-make_EE localhostAndExampleCom 'CN=Test End-entity' testCA "localhost,*.example.com"
-$RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -L -n localhostAndExampleCom -r > $OUTPUT_DIR/default-ee.der
+
+make_EE localhostAndExampleCom 'CN=Test End-entity' testCA "localhost,*.example.com,*.pinning.example.com,*.include-subdomains.pinning.example.com,*.exclude-subdomains.pinning.example.com"
+# Make an EE cert issued by otherCA
+make_EE otherIssuerEE 'CN=Wrong CA Pin Test End-Entity' otherCA "*.include-subdomains.pinning.example.com,*.exclude-subdomains.pinning.example.com"
+
+$RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -L -n localhostAndExampleCom -r > $OUTPUT_DIR/default-ee.der
 # A cert that is like localhostAndExampleCom, but with a different serial number for
 # testing the "OCSP response is from the right issuer, but it is for the wrong cert"
 # case.
@@ -150,7 +161,7 @@ make_EE selfsigned 'CN=Self-signed Test End-entity' testCA "selfsigned.example.c
 # this certificate will have an unknown issuer.
 make_INT deletedINT 'CN=Test Intermediate to delete' testCA
 make_EE unknownissuer 'CN=Test End-entity from unknown issuer' deletedINT "unknownissuer.example.com"
-$RUN_MOZILLA $CERTUTIL -d $OUTPUT_DIR -D -n deletedINT
+$RUN_MOZILLA $CERTUTIL -d $DB_ARGUMENT -D -n deletedINT
 make_INT expiredINT 'CN=Expired Test Intermediate' testCA "-w -400"
 make_EE expiredissuer 'CN=Test End-entity with expired issuer' expiredINT "expiredissuer.example.com"
 NSS_ALLOW_WEAK_SIGNATURE_ALG=1 make_EE md5signature 'CN=Test End-entity with MD5 signature' testCA "md5signature.example.com" "-Z MD5"

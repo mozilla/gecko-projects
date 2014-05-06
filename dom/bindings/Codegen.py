@@ -2966,6 +2966,9 @@ class CGWrapGlobalMethod(CGAbstractMethod):
                                                      aOptions,
                                                      aPrincipal);
 
+              // obj is a new global, so has a new compartment.  Enter it
+              // before doing anything with it.
+              JSAutoCompartment ac(aCx, obj);
               $*{unforgeable}
 
               $*{slots}
@@ -5044,7 +5047,7 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
                   $*{innerTemplate}
                 } while (0);
                 if (!JS_DefineElement(cx, returnArray, ${index}, tmp,
-                                      nullptr, nullptr, JSPROP_ENUMERATE)) {
+                                      JSPROP_ENUMERATE)) {
                   $*{exceptionCode}
                 }
               }
@@ -5576,6 +5579,8 @@ class CGCallGenerator(CGThing):
             self.cgRoot.append(CGGeneric("if (rv.Failed()) {\n"))
             self.cgRoot.append(CGIndenter(errorReport))
             self.cgRoot.append(CGGeneric("}\n"))
+
+        self.cgRoot.append(CGGeneric("MOZ_ASSERT(!JS_IsExceptionPending(cx));\n"))
 
     def define(self):
         return self.cgRoot.define()
@@ -6787,8 +6792,8 @@ class CGNewResolveHook(CGAbstractBindingMethod):
             // define it.
             if (!desc.value().isUndefined() &&
                 !JS_DefinePropertyById(cx, obj, id, desc.value(),
-                                       desc.getter(), desc.setter(),
-                                       desc.attributes())) {
+                                       desc.attributes(),
+                                       desc.getter(), desc.setter())) {
               return false;
             }
             objp.set(obj);
@@ -8688,8 +8693,8 @@ class CGResolveOwnPropertyViaNewresolve(CGAbstractBindingMethod):
               if (objDesc.object() &&
                   !objDesc.value().isUndefined() &&
                   !JS_DefinePropertyById(cx, obj, id, objDesc.value(),
-                                         objDesc.getter(), objDesc.setter(),
-                                         objDesc.attributes())) {
+                                         objDesc.attributes(),
+                                         objDesc.getter(), objDesc.setter())) {
                 return false;
               }
             }
@@ -10570,7 +10575,7 @@ class CGDictionary(CGThing):
                              member.location))
 
         propDef = (
-            'JS_DefinePropertyById(cx, obj, atomsCache->%s, temp, nullptr, nullptr, JSPROP_ENUMERATE)' %
+            'JS_DefinePropertyById(cx, obj, atomsCache->%s, temp, JSPROP_ENUMERATE)' %
             self.makeIdName(member.identifier.name))
 
         innerTemplate = wrapForType(

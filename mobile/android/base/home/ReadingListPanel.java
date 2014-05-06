@@ -9,6 +9,8 @@ import java.util.EnumSet;
 
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.ReaderModeUtils;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.db.BrowserContract.ReadingListItems;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.BrowserDB.URLColumns;
@@ -105,12 +107,14 @@ public class ReadingListPanel extends HomeFragment {
                 String url = c.getString(c.getColumnIndexOrThrow(URLColumns.URL));
                 url = ReaderModeUtils.getAboutReaderForUrl(url);
 
+                Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL);
+
                 // This item is a TwoLinePageRow, so we allow switch-to-tab.
                 mUrlOpenListener.onUrlOpen(url, EnumSet.of(OnUrlOpenListener.Flags.ALLOW_SWITCH_TO_TAB));
             }
         });
 
-        mList.setContextMenuInfoFactory(new HomeListView.ContextMenuInfoFactory() {
+        mList.setContextMenuInfoFactory(new HomeContextMenuInfo.Factory() {
             @Override
             public HomeContextMenuInfo makeInfoForCursor(View view, int position, long id, Cursor cursor) {
                 final HomeContextMenuInfo info = new HomeContextMenuInfo(view, position, id);

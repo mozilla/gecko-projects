@@ -19,6 +19,7 @@
 #include "nsISimpleEnumerator.h"
 #include "nsIDirectoryEnumerator.h"
 #include "nsIObserverService.h"
+#include "nsICacheStorageVisitor.h"
 #include "nsISizeOf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/DebugOnly.h"
@@ -28,6 +29,7 @@
 #include "private/pprio.h"
 #include "mozilla/VisualEventTracer.h"
 #include "mozilla/Preferences.h"
+#include "nsNetUtil.h"
 
 // include files for ftruncate (or equivalent)
 #if defined(XP_UNIX)
@@ -112,6 +114,7 @@ CacheFileHandle::CacheFileHandle(const SHA1Sum::Hash *aHash, bool aPriority)
   , mIsDoomed(false)
   , mPriority(aPriority)
   , mClosed(false)
+  , mSpecialFile(false)
   , mInvalid(false)
   , mFileExists(false)
   , mFileSize(-1)
@@ -126,6 +129,7 @@ CacheFileHandle::CacheFileHandle(const nsACString &aKey, bool aPriority)
   , mIsDoomed(false)
   , mPriority(aPriority)
   , mClosed(false)
+  , mSpecialFile(true)
   , mInvalid(false)
   , mFileExists(false)
   , mFileSize(-1)
@@ -143,7 +147,7 @@ CacheFileHandle::~CacheFileHandle()
   MOZ_ASSERT(CacheFileIOManager::IsOnIOThreadOrCeased());
 
   nsRefPtr<CacheFileIOManager> ioMan = CacheFileIOManager::gInstance;
-  if (ioMan) {
+  if (!IsClosed() && ioMan) {
     ioMan->CloseHandleInternal(this);
   }
 }
@@ -156,19 +160,17 @@ CacheFileHandle::Log()
     mFile->GetNativeLeafName(leafName);
   }
 
-  if (!mHash) {
-    // special file
-    LOG(("CacheFileHandle::Log() [this=%p, hash=nullptr, isDoomed=%d, "
-         "priority=%d, closed=%d, invalid=%d, "
-         "fileExists=%d, fileSize=%lld, leafName=%s, key=%s]",
-         this, mIsDoomed, mPriority, mClosed, mInvalid,
+  if (mSpecialFile) {
+    LOG(("CacheFileHandle::Log() - special file [this=%p, isDoomed=%d, "
+         "priority=%d, closed=%d, invalid=%d, fileExists=%d, fileSize=%lld, "
+         "leafName=%s, key=%s]", this, mIsDoomed, mPriority, mClosed, mInvalid,
          mFileExists, mFileSize, leafName.get(), mKey.get()));
   } else {
-    LOG(("CacheFileHandle::Log() [this=%p, hash=%08x%08x%08x%08x%08x, "
-         "isDoomed=%d, priority=%d, closed=%d, invalid=%d, "
-         "fileExists=%d, fileSize=%lld, leafName=%s, key=%s]",
-         this, LOGSHA1(mHash), mIsDoomed, mPriority, mClosed,
-         mInvalid, mFileExists, mFileSize, leafName.get(), mKey.get()));
+    LOG(("CacheFileHandle::Log() - entry file [this=%p, hash=%08x%08x%08x%08x"
+         "%08x, isDoomed=%d, priority=%d, closed=%d, invalid=%d, fileExists=%d,"
+         " fileSize=%lld, leafName=%s, key=%s]", this, LOGSHA1(mHash),
+         mIsDoomed, mPriority, mClosed, mInvalid, mFileExists, mFileSize,
+         leafName.get(), mKey.get()));
   }
 }
 
@@ -1295,6 +1297,13 @@ CacheFileIOManager::ShutdownInternal()
     } else {
       mHandles.RemoveHandle(h);
     }
+
+    // Pointer to the hash is no longer valid once the last handle with the
+    // given hash is released. Null out the pointer so that we crash if there
+    // is a bug in this code and we dereference the pointer after this point.
+    if (!h->IsSpecialFile()) {
+      h->mHash = nullptr;
+    }
   }
 
   // Assert the table is empty. When we are here, no new handles can be added
@@ -1783,6 +1792,9 @@ nsresult
 CacheFileIOManager::CloseHandleInternal(CacheFileHandle *aHandle)
 {
   LOG(("CacheFileIOManager::CloseHandleInternal() [handle=%p]", aHandle));
+
+  MOZ_ASSERT(!aHandle->IsClosed());
+
   aHandle->Log();
 
   MOZ_ASSERT(CacheFileIOManager::IsOnIOThreadOrCeased());
@@ -2210,6 +2222,92 @@ void CacheFileIOManager::GetCacheDirectory(nsIFile** result)
 
   nsCOMPtr<nsIFile> file = ioMan->mCacheDirectory;
   file.forget(result);
+}
+
+// static
+nsresult
+CacheFileIOManager::GetEntryInfo(const SHA1Sum::Hash *aHash,
+                                 CacheStorageService::EntryInfoCallback *aCallback)
+{
+  MOZ_ASSERT(CacheFileIOManager::IsOnIOThread());
+
+  nsresult rv;
+
+  nsRefPtr<CacheFileIOManager> ioMan = gInstance;
+  if (!ioMan) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
+  nsAutoCString enhanceId;
+  nsAutoCString uriSpec;
+
+  nsRefPtr<CacheFileHandle> handle;
+  ioMan->mHandles.GetHandle(aHash, false, getter_AddRefs(handle));
+  if (handle) {
+    nsRefPtr<nsILoadContextInfo> info =
+      CacheFileUtils::ParseKey(handle->Key(), &enhanceId, &uriSpec);
+
+    MOZ_ASSERT(info);
+    if (!info) {
+      return NS_OK; // ignore
+    }
+
+    nsRefPtr<CacheStorageService> service = CacheStorageService::Self();
+    if (!service) {
+      return NS_ERROR_NOT_INITIALIZED;
+    }
+
+    // Invokes OnCacheEntryInfo when an existing entry is found
+    if (service->GetCacheEntryInfo(info, enhanceId, uriSpec, aCallback)) {
+      return NS_OK;
+    }
+
+    // When we are here, there is no existing entry and we need
+    // to synchrnously load metadata from a disk file.
+  }
+
+  // Locate the actual file
+  nsCOMPtr<nsIFile> file;
+  ioMan->GetFile(aHash, getter_AddRefs(file));
+
+  // Read metadata from the file synchronously
+  nsRefPtr<CacheFileMetadata> metadata = new CacheFileMetadata();
+  rv = metadata->SyncReadMetadata(file);
+  if (NS_FAILED(rv)) {
+    return NS_OK;
+  }
+
+  // Now get the context + enhance id + URL from the key.
+  nsAutoCString key;
+  metadata->GetKey(key);
+
+  nsRefPtr<nsILoadContextInfo> info =
+    CacheFileUtils::ParseKey(key, &enhanceId, &uriSpec);
+  MOZ_ASSERT(info);
+  if (!info) {
+    return NS_OK;
+  }
+
+  // Pick all data to pass to the callback.
+  int64_t dataSize = metadata->Offset();
+  uint32_t fetchCount;
+  if (NS_FAILED(metadata->GetFetchCount(&fetchCount))) {
+    fetchCount = 0;
+  }
+  uint32_t expirationTime;
+  if (NS_FAILED(metadata->GetExpirationTime(&expirationTime))) {
+    expirationTime = 0;
+  }
+  uint32_t lastModified;
+  if (NS_FAILED(metadata->GetLastModified(&lastModified))) {
+    lastModified = 0;
+  }
+
+  // Call directly on the callback.
+  aCallback->OnEntryInfo(uriSpec, enhanceId, dataSize, fetchCount,
+                         lastModified, expirationTime);
+
+  return NS_OK;
 }
 
 static nsresult

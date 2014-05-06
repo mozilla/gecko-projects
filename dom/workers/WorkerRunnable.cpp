@@ -399,9 +399,12 @@ NS_IMETHODIMP
 StopSyncLoopRunnable::Cancel()
 {
   nsresult rv = Run();
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Run() failed");
 
-  return NS_OK;
+  nsresult rv2 = WorkerSyncRunnable::Cancel();
+  NS_WARN_IF_FALSE(NS_SUCCEEDED(rv2), "Cancel() failed");
+
+  return NS_FAILED(rv) ? rv : rv2;
 }
 
 bool
@@ -480,6 +483,46 @@ MainThreadWorkerControlRunnable::PostDispatch(JSContext* aCx,
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(WorkerControlRunnable, WorkerRunnable)
+
+WorkerMainThreadRunnable::WorkerMainThreadRunnable(WorkerPrivate* aWorkerPrivate)
+: mWorkerPrivate(aWorkerPrivate)
+{
+  mWorkerPrivate->AssertIsOnWorkerThread();
+}
+
+bool
+WorkerMainThreadRunnable::Dispatch(JSContext* aCx)
+{
+  mWorkerPrivate->AssertIsOnWorkerThread();
+
+  AutoSyncLoopHolder syncLoop(mWorkerPrivate);
+
+  mSyncLoopTarget = syncLoop.EventTarget();
+
+  if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
+    JS_ReportError(aCx, "Failed to dispatch to main thread!");
+    return false;
+  }
+
+  return syncLoop.Run();
+}
+
+NS_IMETHODIMP
+WorkerMainThreadRunnable::Run()
+{
+  AssertIsOnMainThread();
+
+  bool runResult = MainThreadRun();
+
+  nsRefPtr<MainThreadStopSyncLoopRunnable> response =
+    new MainThreadStopSyncLoopRunnable(mWorkerPrivate,
+                                       mSyncLoopTarget.forget(),
+                                       runResult);
+
+  MOZ_ALWAYS_TRUE(response->Dispatch(nullptr));
+
+  return NS_OK;
+}
 
 bool
 WorkerSameThreadRunnable::PreDispatch(JSContext* aCx,

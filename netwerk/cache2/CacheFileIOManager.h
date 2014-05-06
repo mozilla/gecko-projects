@@ -6,6 +6,7 @@
 #define CacheFileIOManager__h__
 
 #include "CacheIOThread.h"
+#include "CacheStorageService.h"
 #include "nsIEventTarget.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
@@ -22,6 +23,7 @@ class nsIFile;
 class nsITimer;
 class nsIDirectoryEnumerator;
 class nsILoadContextInfo;
+class nsICacheStorageVisitor;
 
 namespace mozilla {
 namespace net {
@@ -53,7 +55,7 @@ public:
   bool IsPriority() const { return mPriority; }
   bool FileExists() const { return mFileExists; }
   bool IsClosed() const { return mClosed; }
-  bool IsSpecialFile() const { return !mHash; }
+  bool IsSpecialFile() const { return mSpecialFile; }
   nsCString & Key() { return mKey; }
 
   // Memory reporting
@@ -71,6 +73,7 @@ private:
   bool                 mIsDoomed;
   bool                 mPriority;
   bool                 mClosed;
+  bool                 mSpecialFile;
   bool                 mInvalid;
   bool                 mFileExists; // This means that the file should exists,
                                     // but it can be still deleted by OS/user
@@ -277,6 +280,13 @@ public:
   };
 
   static void GetCacheDirectory(nsIFile** result);
+
+  // Calls synchronously OnEntryInfo for an entry with the given hash.
+  // Tries to find an existing entry in the service hashtables first, if not
+  // found, loads synchronously from disk file.
+  // Callable on the IO thread only.
+  static nsresult GetEntryInfo(const SHA1Sum::Hash *aHash,
+                               CacheStorageService::EntryInfoCallback *aCallback);
 
   // Memory reporting
   static size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);

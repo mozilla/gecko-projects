@@ -135,8 +135,6 @@ public class GeckoAppShell
     static private int sDensityDpi = 0;
     static private int sScreenDepth = 0;
 
-    private static final EventDispatcher sEventDispatcher = new EventDispatcher();
-
     /* Default colors. */
     private static final float[] DEFAULT_LAUNCHER_ICON_HSV = { 32.0f, 1.0f, 1.0f };
 
@@ -324,6 +322,16 @@ public class GeckoAppShell
             combinedArgs += " -url " + url;
         if (type != null)
             combinedArgs += " " + type;
+
+        // In un-official builds, we want to load Javascript resources fresh
+        // with each build.  In official builds, the startup cache is purged by
+        // the buildid mechanism, but most un-official builds don't bump the
+        // buildid, so we purge here instead.
+        if (!AppConstants.MOZILLA_OFFICIAL) {
+            Log.w(LOGTAG, "STARTUP PERFORMANCE WARNING: un-official build: purging the " +
+                          "startup (JavaScript) caches.");
+            combinedArgs += " -purgecaches";
+        }
 
         DisplayMetrics metrics = getContext().getResources().getDisplayMetrics();
         combinedArgs += " -width " + metrics.widthPixels + " -height " + metrics.heightPixels;
@@ -696,6 +704,43 @@ public class GeckoAppShell
         default:
             Log.w(LOGTAG, "Error! Can't disable unknown SENSOR type " + aSensortype);
         }
+    }
+
+    @WrapElementForJNI
+    public static void startMonitoringGamepad() {
+        if (Build.VERSION.SDK_INT < 9) {
+            return;
+        }
+        ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    AndroidGamepadManager.startup();
+                }
+            });
+    }
+
+    @WrapElementForJNI
+    public static void stopMonitoringGamepad() {
+        if (Build.VERSION.SDK_INT < 9) {
+            return;
+        }
+
+        ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    AndroidGamepadManager.shutdown();
+                }
+            });
+    }
+
+    @WrapElementForJNI
+    public static void gamepadAdded(final int device_id, final int service_id) {
+        ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    AndroidGamepadManager.gamepadAdded(device_id, service_id);
+                }
+            });
     }
 
     @WrapElementForJNI
@@ -2245,34 +2290,6 @@ public class GeckoAppShell
         }
     }
 
-    /**
-     * Adds a listener for a gecko event.
-     * This method is thread-safe and may be called at any time. In particular, calling it
-     * with an event that is currently being processed has the properly-defined behaviour that
-     * any added listeners will not be invoked on the event currently being processed, but
-     * will be invoked on future events of that type.
-     */
-    @RobocopTarget
-    public static void registerEventListener(String event, GeckoEventListener listener) {
-        sEventDispatcher.registerEventListener(event, listener);
-    }
-
-    public static EventDispatcher getEventDispatcher() {
-        return sEventDispatcher;
-    }
-
-    /**
-     * Remove a previously-registered listener for a gecko event.
-     * This method is thread-safe and may be called at any time. In particular, calling it
-     * with an event that is currently being processed has the properly-defined behaviour that
-     * any removed listeners will still be invoked on the event currently being processed, but
-     * will not be invoked on future events of that type.
-     */
-    @RobocopTarget
-    public static void unregisterEventListener(String event, GeckoEventListener listener) {
-        sEventDispatcher.unregisterEventListener(event, listener);
-    }
-
     /*
      * Battery API related methods.
      */
@@ -2283,7 +2300,7 @@ public class GeckoAppShell
 
     @WrapElementForJNI(stubName = "HandleGeckoMessageWrapper")
     public static void handleGeckoMessage(final NativeJSContainer message) {
-        sEventDispatcher.dispatchEvent(message);
+        EventDispatcher.getInstance().dispatchEvent(message);
         message.dispose();
     }
 

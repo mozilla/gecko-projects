@@ -10,6 +10,7 @@
 #include <algorithm>                    // for max, min
 #include "AnimationCommon.h"            // for ComputedTimingFunction
 #include "AsyncPanZoomController.h"     // for AsyncPanZoomController, etc
+#include "Compositor.h"                 // for Compositor
 #include "CompositorParent.h"           // for CompositorParent
 #include "FrameMetrics.h"               // for FrameMetrics, etc
 #include "GestureEventListener.h"       // for GestureEventListener
@@ -323,13 +324,14 @@ static inline void LogRendertraceRect(const ScrollableLayerGuid& aGuid, const ch
   static const TimeStamp sRenderStart = TimeStamp::Now();
   TimeDuration delta = TimeStamp::Now() - sRenderStart;
   printf_stderr("(%llu,%lu,%llu)%s RENDERTRACE %f rect %s %f %f %f %f\n",
-    aGuid.mLayersId, aGuid.mPresShellId, aGuid.GetScrollId(),
+    aGuid.mLayersId, aGuid.mPresShellId, aGuid.mScrollId,
     aDesc, delta.ToMilliseconds(), aColor,
     aRect.x, aRect.y, aRect.width, aRect.height);
 #endif
 }
 
 static TimeStamp sFrameTime;
+static bool sThreadAssertionsEnabled = true;
 
 // Counter used to give each APZC a unique id
 static uint32_t sAsyncPanZoomControllerCount = 0;
@@ -439,6 +441,16 @@ AsyncPanZoomController::SetFrameTime(const TimeStamp& aTime) {
   sFrameTime = aTime;
 }
 
+void
+AsyncPanZoomController::SetThreadAssertionsEnabled(bool aEnabled) {
+  sThreadAssertionsEnabled = aEnabled;
+}
+
+bool
+AsyncPanZoomController::GetThreadAssertionsEnabled() {
+  return sThreadAssertionsEnabled;
+}
+
 /*static*/ void
 AsyncPanZoomController::InitializeGlobalState()
 {
@@ -460,10 +472,10 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
                                                GeckoContentController* aGeckoContentController,
                                                GestureBehavior aGestures)
   :  mLayersId(aLayersId),
-     mCrossProcessCompositorParent(nullptr),
      mPaintThrottler(GetFrameTime()),
      mGeckoContentController(aGeckoContentController),
      mRefPtrMonitor("RefPtrMonitor"),
+     mSharingFrameMetricsAcrossProcesses(false),
      mMonitor("AsyncPanZoomController"),
      mTouchActionPropertyEnabled(gfxPrefs::TouchActionEnabled()),
      mContentResponseTimeoutTask(nullptr),
@@ -492,9 +504,7 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
 }
 
 AsyncPanZoomController::~AsyncPanZoomController() {
-
-  PCompositorParent* compositor =
-    (mCrossProcessCompositorParent ? mCrossProcessCompositorParent : mCompositorParent.get());
+  PCompositorParent* compositor = GetSharedFrameMetricsCompositor();
 
   // Only send the release message if the SharedFrameMetrics has been created.
   if (compositor && mSharedFrameMetricsBuffer) {
@@ -505,6 +515,21 @@ AsyncPanZoomController::~AsyncPanZoomController() {
   delete mSharedLock;
 
   MOZ_COUNT_DTOR(AsyncPanZoomController);
+}
+
+PCompositorParent*
+AsyncPanZoomController::GetSharedFrameMetricsCompositor()
+{
+  if (GetThreadAssertionsEnabled()) {
+    Compositor::AssertOnCompositorThread();
+  }
+
+  if (mSharingFrameMetricsAcrossProcesses) {
+    const CompositorParent::LayerTreeState* state = CompositorParent::GetIndirectShadowTree(mLayersId);
+    // |state| may be null here if the CrossProcessCompositorParent has already been destroyed.
+    return state ? state->mCrossProcessParent : nullptr;
+  }
+  return mCompositorParent.get();
 }
 
 already_AddRefed<GeckoContentController>
@@ -1394,8 +1419,8 @@ void AsyncPanZoomController::SetCompositorParent(CompositorParent* aCompositorPa
   mCompositorParent = aCompositorParent;
 }
 
-void AsyncPanZoomController::SetCrossProcessCompositorParent(PCompositorParent* aCrossProcessCompositorParent) {
-  mCrossProcessCompositorParent = aCrossProcessCompositorParent;
+void AsyncPanZoomController::ShareFrameMetricsAcrossProcesses() {
+  mSharingFrameMetricsAcrossProcesses = true;
 }
 
 void AsyncPanZoomController::ScrollBy(const CSSPoint& aOffset) {
@@ -1784,8 +1809,12 @@ void AsyncPanZoomController::NotifyLayersUpdated(const FrameMetrics& aLayerMetri
   APZC_LOG_FM(aLayerMetrics, "%p got a NotifyLayersUpdated with aIsFirstPaint=%d", this, aIsFirstPaint);
 
   LogRendertraceRect(GetGuid(), "page", "brown", aLayerMetrics.mScrollableRect);
-  LogRendertraceRect(GetGuid(), "painted displayport", "green",
+  LogRendertraceRect(GetGuid(), "painted displayport", "lightgreen",
     aLayerMetrics.mDisplayPort + aLayerMetrics.GetScrollOffset());
+  if (!aLayerMetrics.mCriticalDisplayPort.IsEmpty()) {
+    LogRendertraceRect(GetGuid(), "painted critical displayport", "darkgreen",
+      aLayerMetrics.mCriticalDisplayPort + aLayerMetrics.GetScrollOffset());
+  }
 
   mPaintThrottler.TaskComplete(GetFrameTime());
   bool needContentRepaint = false;
@@ -2204,8 +2233,7 @@ void AsyncPanZoomController::UpdateSharedCompositorFrameMetrics()
 
 void AsyncPanZoomController::ShareCompositorFrameMetrics() {
 
-  PCompositorParent* compositor =
-    (mCrossProcessCompositorParent ? mCrossProcessCompositorParent : mCompositorParent.get());
+  PCompositorParent* compositor = GetSharedFrameMetricsCompositor();
 
   // Only create the shared memory buffer if it hasn't already been created,
   // we are using progressive tile painting, and we have a

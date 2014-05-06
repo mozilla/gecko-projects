@@ -636,12 +636,16 @@ IonBuilder::build()
         return false;
 
 #ifdef DEBUG
-    if (info().executionMode() == SequentialExecution && script()->hasIonScript()) {
+    if (info().executionModeIsAnalysis()) {
+        IonSpew(IonSpew_Scripts, "Analyzing script %s:%d (%p) %s",
+                script()->filename(), script()->lineno(), (void *)script(),
+                ExecutionModeString(info().executionMode()));
+    } else if (info().executionMode() == SequentialExecution && script()->hasIonScript()) {
         IonSpew(IonSpew_Scripts, "Recompiling script %s:%d (%p) (usecount=%d, level=%s)",
                 script()->filename(), script()->lineno(), (void *)script(),
                 (int)script()->getUseCount(), OptimizationLevelString(optimizationInfo().level()));
     } else {
-        IonSpew(IonSpew_Scripts, "Analyzing script %s:%d (%p) (usecount=%d, level=%s)",
+        IonSpew(IonSpew_Scripts, "Compiling script %s:%d (%p) (usecount=%d, level=%s)",
                 script()->filename(), script()->lineno(), (void *)script(),
                 (int)script()->getUseCount(), OptimizationLevelString(optimizationInfo().level()));
     }
@@ -2164,7 +2168,7 @@ IonBuilder::processDoWhileCondEnd(CFGState &state)
     }
 
     // Create the test instruction and end the current block.
-    MTest *test = MTest::New(alloc(), vins, state.loop.entry, successor);
+    MTest *test = newTest(vins, state.loop.entry, successor);
     current->end(test);
     return finishLoop(state, successor);
 }
@@ -2185,9 +2189,9 @@ IonBuilder::processWhileCondEnd(CFGState &state)
 
     MTest *test;
     if (JSOp(*pc) == JSOP_IFNE)
-        test = MTest::New(alloc(), ins, body, state.loop.successor);
+        test = newTest(ins, body, state.loop.successor);
     else
-        test = MTest::New(alloc(), ins, state.loop.successor, body);
+        test = newTest(ins, state.loop.successor, body);
     current->end(test);
 
     state.state = CFGState::WHILE_LOOP_BODY;
@@ -2225,7 +2229,7 @@ IonBuilder::processForCondEnd(CFGState &state)
     if (!body || !state.loop.successor)
         return ControlStatus_Error;
 
-    MTest *test = MTest::New(alloc(), ins, body, state.loop.successor);
+    MTest *test = newTest(ins, body, state.loop.successor);
     current->end(test);
 
     state.state = CFGState::FOR_LOOP_BODY;
@@ -3348,7 +3352,7 @@ IonBuilder::processCondSwitchCase(CFGState &state)
         cmpResult->infer(inspector, pc);
         JS_ASSERT(!cmpResult->isEffectful());
         current->add(cmpResult);
-        current->end(MTest::New(alloc(), cmpResult, bodyBlock, caseBlock));
+        current->end(newTest(cmpResult, bodyBlock, caseBlock));
 
         // Add last case as predecessor of the body if the body is aliasing
         // the previous case body.
@@ -3459,9 +3463,8 @@ IonBuilder::jsop_andor(JSOp op)
         return false;
 
     MTest *test = (op == JSOP_AND)
-                  ? MTest::New(alloc(), lhs, evalRhs, join)
-                  : MTest::New(alloc(), lhs, join, evalRhs);
-    test->infer();
+                  ? newTest(lhs, evalRhs, join)
+                  : newTest(lhs, join, evalRhs);
     current->end(test);
 
     if (!cfgStack_.append(CFGState::AndOr(joinStart, join)))
@@ -3512,7 +3515,7 @@ IonBuilder::jsop_ifeq(JSOp op)
     if (!ifTrue || !ifFalse)
         return false;
 
-    MTest *test = MTest::New(alloc(), ins, ifTrue, ifFalse);
+    MTest *test = newTest(ins, ifTrue, ifFalse);
     current->end(test);
 
     // The bytecode for if/ternary gets emitted either like this:
@@ -3641,7 +3644,7 @@ IonBuilder::jsop_try()
         // Add MTest(true, tryBlock, successorBlock).
         MConstant *true_ = MConstant::New(alloc(), BooleanValue(true));
         current->add(true_);
-        current->end(MTest::New(alloc(), true_, tryBlock, successor));
+        current->end(newTest(true_, tryBlock, successor));
     } else {
         successor = nullptr;
         current->end(MGoto::New(alloc(), tryBlock));
@@ -4175,10 +4178,6 @@ IonBuilder::makeInliningDecision(JSFunction *target, CallInfo &callInfo)
     // TI calls ObjectStateChange to trigger invalidation of the caller.
     types::TypeObjectKey *targetType = types::TypeObjectKey::get(target);
     targetType->watchStateChangeForInlinedCall(constraints());
-
-    // We mustn't relazify functions that have been inlined, because there's
-    // no way to tell if it safe to do so.
-    script()->setHasBeenInlined();
 
     return InliningDecision_Inline;
 }
@@ -4973,7 +4972,7 @@ IonBuilder::jsop_funapply(uint32_t argc)
 
     types::TemporaryTypeSet *calleeTypes = current->peek(calleeDepth)->resultTypeSet();
     JSFunction *native = getSingleCallTarget(calleeTypes);
-    if (argc != 2) {
+    if (argc != 2 || info().executionMode() == ArgumentsUsageAnalysis) {
         CallInfo callInfo(alloc(), false);
         if (!callInfo.init(current, argc))
             return false;
@@ -4998,14 +4997,12 @@ IonBuilder::jsop_funapply(uint32_t argc)
         return makeCall(native, callInfo, false);
     }
 
-    if (!native ||
-        !native->isNative() ||
-        native->native() != js_fun_apply)
+    if ((!native || !native->isNative() ||
+        native->native() != js_fun_apply) &&
+        info().executionMode() != DefinitePropertiesAnalysis)
     {
         return abort("fun.apply speculation failed");
     }
-
-    current->peek(calleeDepth)->setImplicitlyUsedUnchecked();
 
     // Use funapply that definitely uses |arguments|
     return jsop_funapplyarguments(argc);
@@ -5042,7 +5039,8 @@ IonBuilder::jsop_funapplyarguments(uint32_t argc)
         MDefinition *argFunc = current->pop();
 
         // Pop apply function.
-        current->pop();
+        MDefinition *nativeFunc = current->pop();
+        nativeFunc->setImplicitlyUsedUnchecked();
 
         MArgumentsLength *numArgs = MArgumentsLength::New(alloc());
         current->add(numArgs);
@@ -5086,7 +5084,8 @@ IonBuilder::jsop_funapplyarguments(uint32_t argc)
     callInfo.setFun(argFunc);
 
     // Pop apply function.
-    current->pop();
+    MDefinition *nativeFunc = current->pop();
+    nativeFunc->setImplicitlyUsedUnchecked();
 
     // Try to inline the call.
     InliningDecision decision = makeInliningDecision(target, callInfo);
@@ -5999,6 +5998,14 @@ IonBuilder::newPendingLoopHeader(MBasicBlock *predecessor, jsbytecode *pc, bool 
     }
 
     return block;
+}
+
+MTest *
+IonBuilder::newTest(MDefinition *ins, MBasicBlock *ifTrue, MBasicBlock *ifFalse)
+{
+    MTest *test = MTest::New(alloc(), ins, ifTrue, ifFalse);
+    test->cacheOperandMightEmulateUndefined();
+    return test;
 }
 
 // A resume point is a mapping of stack slots to MDefinitions. It is used to
@@ -8280,7 +8287,7 @@ IonBuilder::jsop_not()
     MNot *ins = MNot::New(alloc(), value);
     current->add(ins);
     current->push(ins);
-    ins->infer();
+    ins->cacheOperandMightEmulateUndefined();
     return true;
 }
 
@@ -9768,7 +9775,7 @@ IonBuilder::jsop_typeof()
     MDefinition *input = current->pop();
     MTypeOf *ins = MTypeOf::New(alloc(), input, input->type());
 
-    ins->infer();
+    ins->cacheInputMaybeCallableOrEmulatesUndefined();
 
     current->add(ins);
     current->push(ins);

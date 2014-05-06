@@ -43,6 +43,7 @@ class LayerTransactionParent : public PLayerTransactionParent,
   typedef mozilla::layout::RenderFrameParent RenderFrameParent;
   typedef InfallibleTArray<Edit> EditArray;
   typedef InfallibleTArray<EditReply> EditReplyArray;
+  typedef InfallibleTArray<AsyncChildMessageData> AsyncChildMessageArray;
 
 public:
   LayerTransactionParent(LayerManagerComposite* aManager,
@@ -79,6 +80,10 @@ public:
 
   virtual bool IsSameProcess() const MOZ_OVERRIDE;
 
+  // CompositableParentManager
+  virtual void SendFenceHandle(AsyncTransactionTracker* aTracker,
+                               PTextureParent* aTexture,
+                               const FenceHandle& aFence) MOZ_OVERRIDE;
 protected:
   virtual bool RecvUpdate(const EditArray& cset,
                           const TargetConfig& targetConfig,
@@ -103,13 +108,6 @@ protected:
   virtual bool RecvSetAsyncScrollOffset(PLayerParent* aLayer,
                                         const int32_t& aX, const int32_t& aY) MOZ_OVERRIDE;
 
-  virtual PGrallocBufferParent*
-  AllocPGrallocBufferParent(const IntSize& aSize,
-                            const uint32_t& aFormat, const uint32_t& aUsage,
-                            MaybeMagicGrallocBufferHandle* aOutHandle) MOZ_OVERRIDE;
-  virtual bool
-  DeallocPGrallocBufferParent(PGrallocBufferParent* actor) MOZ_OVERRIDE;
-
   virtual PLayerParent* AllocPLayerParent() MOZ_OVERRIDE;
   virtual bool DeallocPLayerParent(PLayerParent* actor) MOZ_OVERRIDE;
 
@@ -119,6 +117,11 @@ protected:
   virtual PTextureParent* AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                               const TextureFlags& aFlags) MOZ_OVERRIDE;
   virtual bool DeallocPTextureParent(PTextureParent* actor) MOZ_OVERRIDE;
+
+  virtual bool
+  RecvChildAsyncMessages(const InfallibleTArray<AsyncChildMessageData>& aMessages) MOZ_OVERRIDE;
+
+  virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
 
   bool Attach(ShadowLayerParent* aLayerParent,
               CompositableHost* aCompositable,

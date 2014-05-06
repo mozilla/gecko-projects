@@ -2677,6 +2677,21 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   nsRect dirtyRect = visibleRegion.GetBounds();
   builder.EnterPresShell(aFrame, dirtyRect);
   {
+    // If a scrollable container layer is created in nsDisplayList::PaintForFrame,
+    // it will be the scroll parent for display items that are built in the
+    // BuildDisplayListForStackingContext call below. We need to set the scroll
+    // parent on the display list builder while we build those items, so that they
+    // can pick up their scroll parent's id.
+    ViewID id = FrameMetrics::NULL_SCROLL_ID;
+    if (ignoreViewportScrolling && presContext->IsRootContentDocument()) {
+      if (nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame()) {
+        if (nsIContent* content = rootScrollFrame->GetContent()) {
+          id = nsLayoutUtils::FindOrCreateIDFor(content);
+        }
+      }
+    }
+    nsDisplayListBuilder::AutoCurrentScrollParentIdSetter idSetter(&builder, id);
+
     PROFILER_LABEL("nsLayoutUtils","PaintFrame::BuildDisplayList");
     aFrame->BuildDisplayListForStackingContext(&builder, dirtyRect, &list);
   }
@@ -2743,7 +2758,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 
 #ifdef MOZ_DUMP_PAINTING
   FILE* savedDumpFile = gfxUtils::sDumpPaintFile;
-  if (gfxUtils::sDumpPaintList || gfxUtils::sDumpPainting) {
+  if (gfxUtils::DumpPaintList() || gfxUtils::sDumpPainting) {
     if (gfxUtils::sDumpPaintingToFile) {
       nsCString string("dump-");
       string.AppendInt(gPaintCount);
@@ -2802,7 +2817,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   list.PaintRoot(&builder, aRenderingContext, flags);
 
 #ifdef MOZ_DUMP_PAINTING
-  if (gfxUtils::sDumpPaintList || gfxUtils::sDumpPainting) {
+  if (gfxUtils::DumpPaintList() || gfxUtils::sDumpPainting) {
     if (gfxUtils::sDumpPaintingToFile) {
       fprintf_stderr(gfxUtils::sDumpPaintFile, "</script>");
     }

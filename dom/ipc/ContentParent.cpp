@@ -54,6 +54,7 @@
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/layers/CompositorParent.h"
 #include "mozilla/layers/ImageBridgeParent.h"
+#include "mozilla/layers/SharedBufferManagerParent.h"
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
@@ -308,6 +309,8 @@ public:
     MemoryReportRequestParent();
     virtual ~MemoryReportRequestParent();
 
+    virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
+
     virtual bool Recv__delete__(const uint32_t& generation, const InfallibleTArray<MemoryReport>& report);
 private:
     ContentParent* Owner()
@@ -319,6 +322,12 @@ private:
 MemoryReportRequestParent::MemoryReportRequestParent()
 {
     MOZ_COUNT_CTOR(MemoryReportRequestParent);
+}
+
+void
+MemoryReportRequestParent::ActorDestroy(ActorDestroyReason aWhy)
+{
+  // Implement me! Bug 1005154
 }
 
 bool
@@ -598,9 +607,9 @@ ContentParent::GetNewOrUsed(bool aForBrowserElement)
                               aForBrowserElement,
                               /* isForPreallocated = */ false,
                               PROCESS_PRIORITY_FOREGROUND);
+        p->Init();
     }
 
-    p->Init();
     sNonAppContentParents->AppendElement(p);
     return p.forget();
 }
@@ -1148,10 +1157,6 @@ ContentParent::OnChannelConnected(int32_t pid)
         }
 #endif
     }
-
-    // Set a reply timeout. The only time the parent process will actually
-    // timeout is through urgent messages (which are used by CPOWs).
-    SetReplyTimeoutMs(Preferences::GetInt("dom.ipc.cpow.timeout", 3000));
 }
 
 void
@@ -1595,6 +1600,10 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
             }
         }
     }
+#ifdef MOZ_WIDGET_GONK
+    DebugOnly<bool> opened = PSharedBufferManager::Open(this);
+    MOZ_ASSERT(opened);
+#endif
 
     if (aSendRegisteredChrome) {
         nsCOMPtr<nsIChromeRegistry> registrySvc = nsChromeRegistry::GetService();
@@ -1705,7 +1714,7 @@ ContentParent::RecvReadPermissions(InfallibleTArray<IPC::Permission>* aPermissio
 {
 #ifdef MOZ_PERMISSIONS
     nsCOMPtr<nsIPermissionManager> permissionManagerIface =
-        do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+        services::GetPermissionManager();
     nsPermissionManager* permissionManager =
         static_cast<nsPermissionManager*>(permissionManagerIface.get());
     NS_ABORT_IF_FALSE(permissionManager,
@@ -2192,6 +2201,13 @@ ContentParent::AllocPBackgroundParent(Transport* aTransport,
     return BackgroundParent::Alloc(this, aTransport, aOtherProcess);
 }
 
+PSharedBufferManagerParent*
+ContentParent::AllocPSharedBufferManagerParent(mozilla::ipc::Transport* aTransport,
+                                                base::ProcessId aOtherProcess)
+{
+    return SharedBufferManagerParent::Create(aTransport, aOtherProcess);
+}
+
 bool
 ContentParent::RecvGetProcessAttributes(uint64_t* aId,
                                         bool* aIsForApp, bool* aIsForBrowser)
@@ -2354,52 +2370,17 @@ ContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
     }
   }
 
-  // XXX This is only safe so long as all blob implementations in our tree
-  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
-  //     a real interface or something.
-  const nsDOMFileBase* blob = static_cast<nsDOMFileBase*>(aBlob);
-
-  // We often pass blobs that are multipart but that only contain one sub-blob
-  // (WebActivities does this a bunch). Unwrap to reduce the number of actors
-  // that we have to maintain.
-  const nsTArray<nsCOMPtr<nsIDOMBlob> >* subBlobs = blob->GetSubBlobs();
-  if (subBlobs && subBlobs->Length() == 1) {
-    const nsCOMPtr<nsIDOMBlob>& subBlob = subBlobs->ElementAt(0);
-    MOZ_ASSERT(subBlob);
-
-    // We can only take this shortcut if the multipart and the sub-blob are both
-    // Blob objects or both File objects.
-    nsCOMPtr<nsIDOMFile> multipartBlobAsFile = do_QueryInterface(aBlob);
-    nsCOMPtr<nsIDOMFile> subBlobAsFile = do_QueryInterface(subBlob);
-    if (!multipartBlobAsFile == !subBlobAsFile) {
-      // The wrapping might have been unnecessary, see if we can simply pass an
-      // existing remote blob for this ContentParent.
-      if (nsCOMPtr<nsIRemoteBlob> remoteSubBlob = do_QueryInterface(subBlob)) {
-        BlobParent* actor =
-          static_cast<BlobParent*>(
-            static_cast<PBlobParent*>(remoteSubBlob->GetPBlob()));
-        MOZ_ASSERT(actor);
-
-        if (static_cast<ContentParent*>(actor->Manager()) == this) {
-          return actor;
-        }
-      }
-
-      // No need to add a reference here since the original blob must have a
-      // strong reference in the caller and it must also have a strong reference
-      // to this sub-blob.
-      aBlob = subBlob;
-      blob = static_cast<nsDOMFileBase*>(aBlob);
-      subBlobs = blob->GetSubBlobs();
-    }
-  }
-
   // All blobs shared between processes must be immutable.
   nsCOMPtr<nsIMutable> mutableBlob = do_QueryInterface(aBlob);
   if (!mutableBlob || NS_FAILED(mutableBlob->SetMutable(false))) {
     NS_WARNING("Failed to make blob immutable!");
     return nullptr;
   }
+
+  // XXX This is only safe so long as all blob implementations in our tree
+  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
+  //     a real interface or something.
+  const auto* blob = static_cast<nsDOMFileBase*>(aBlob);
 
   ChildBlobConstructorParams params;
 

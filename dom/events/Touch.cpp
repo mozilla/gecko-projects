@@ -79,7 +79,7 @@ Touch::PrefEnabled(JSContext* aCx, JSObject* aGlobal)
   return TouchEvent::PrefEnabled(aCx, aGlobal);
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Touch, mTarget)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Touch, mTarget)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Touch)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -90,7 +90,7 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(Touch)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Touch)
 
 EventTarget*
-Touch::Target() const
+Touch::GetTarget() const
 {
   nsCOMPtr<nsIContent> content = do_QueryInterface(mTarget);
   if (content && content->ChromeOnlyAccess() &&

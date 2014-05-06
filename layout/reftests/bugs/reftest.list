@@ -595,9 +595,8 @@ skip-if(B2G) == 367247-l-scroll.html 367247-l-auto.html
 != 367612-1g.html 367612-1-ref.html
 skip-if(B2G) random-if(/^Windows\x20NT\x205\.1/.test(http.oscpu)) == 368020-1.html 368020-1-ref.html
 == 368020-2.html 368020-2-ref.html
-fails == 368020-3.html 368020-3-ref.html # bug 368085
-fails == 368020-4.html 368020-4-ref.html # bug 368085
-== 368020-5.html 368020-5-ref.html
+== 368020-3.html 368020-3-ref.html
+pref(layout.css.box-decoration-break.enabled,true) == 368020-5.html 368020-5-ref.html
 == 368155-1.xhtml 368155-1-ref.xhtml
 asserts(4) == 368155-negative-margins-1.html 368155-negative-margins-1-ref.html # bug 387205 / bug 457397
 # we can't test this because there's antialiasing involved, and our comparison
@@ -1781,7 +1780,7 @@ skip-if(B2G&&browserIsRemote) == 858803-1.html 858803-1-ref.html # bug 974780
 fuzzy(1,10000) fuzzy-if(Android&&AndroidVersion>=15,5,10000) == 902330-1.html 902330-1-ref.html
 fuzzy-if(Android,8,400) == 906199-1.html 906199-1-ref.html
 == 921716-1.html 921716-1-ref.html
-== 926155-1.html 926155-1-ref.html
+test-pref(layout.css.sticky.enabled,true) == 926155-1.html 926155-1-ref.html
 fuzzy-if(cocoaWidget,1,40) == 928607-1.html 928607-1-ref.html
 == 931464-1.html 931464-1-ref.html
 == 931853.html 931853-ref.html

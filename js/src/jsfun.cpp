@@ -193,7 +193,7 @@ ResolveInterpretedFunctionPrototype(JSContext *cx, HandleObject obj)
 {
 #ifdef DEBUG
     JSFunction *fun = &obj->as<JSFunction>();
-    JS_ASSERT(fun->isInterpreted());
+    JS_ASSERT(fun->isInterpreted() || fun->isAsmJSNative());
     JS_ASSERT(!fun->isFunctionPrototype());
 #endif
 
@@ -576,7 +576,6 @@ JSFunction::trace(JSTracer *trc)
             // - they are not in the self-hosting compartment
             // - they aren't generators
             // - they don't have JIT code attached
-            // - they haven't ever been inlined
             // - they don't have child functions
             // - they have information for un-lazifying them again later
             // This information can either be a LazyScript, or the name of a

@@ -196,7 +196,7 @@ TabChildBase::HandlePossibleViewportChange()
   nsViewportInfo viewportInfo = nsContentUtils::GetViewportInfo(document, mInnerSize);
   uint32_t presShellId;
   mozilla::layers::FrameMetrics::ViewID viewId;
-  bool scrollIdentifiersValid = APZCCallbackHelper::GetScrollIdentifiers(
+  bool scrollIdentifiersValid = APZCCallbackHelper::GetOrCreateScrollIdentifiers(
         document->GetDocumentElement(), &presShellId, &viewId);
   if (scrollIdentifiersValid) {
     ZoomConstraints constraints(
@@ -726,8 +726,8 @@ TabChild::Observe(nsISupports *aSubject,
       nsCOMPtr<nsIDocument> doc(GetDocument());
       uint32_t presShellId;
       ViewID viewId;
-      if (APZCCallbackHelper::GetScrollIdentifiers(doc->GetDocumentElement(),
-                                                    &presShellId, &viewId)) {
+      if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(doc->GetDocumentElement(),
+                                                           &presShellId, &viewId)) {
         CSSRect rect;
         sscanf(NS_ConvertUTF16toUTF8(aData).get(),
                "{\"x\":%f,\"y\":%f,\"w\":%f,\"h\":%f}",
@@ -1980,7 +1980,7 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
   }
 
   if (aEvent.message == NS_TOUCH_START && localEvent.touches.Length() > 0) {
-    mActiveElementManager->SetTargetElement(localEvent.touches[0]->Target());
+    mActiveElementManager->SetTargetElement(localEvent.touches[0]->GetTarget());
   }
 
   nsCOMPtr<nsPIDOMWindow> outerWindow = do_GetInterface(WebNavigation());

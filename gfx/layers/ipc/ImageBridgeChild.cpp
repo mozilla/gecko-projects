@@ -40,8 +40,9 @@
 #include "mozilla/layers/TextureClient.h"
 
 struct nsIntRect;
- 
-using namespace base;
+
+using base::Thread;
+using base::ProcessHandle;
 using namespace mozilla::ipc;
 using namespace mozilla::gfx;
 
@@ -52,7 +53,6 @@ class Shmem;
 
 namespace layers {
 
-class PGrallocBufferChild;
 typedef std::vector<CompositableOperation> OpVector;
 
 struct CompositableTransaction
@@ -204,44 +204,6 @@ static void CreateImageClientSync(RefPtr<ImageClient>* result,
   barrier->NotifyAll();
 }
 
-
-struct GrallocParam {
-  IntSize size;
-  uint32_t format;
-  uint32_t usage;
-  MaybeMagicGrallocBufferHandle* handle;
-  PGrallocBufferChild** child;
-
-  GrallocParam(const IntSize& aSize,
-               const uint32_t& aFormat,
-               const uint32_t& aUsage,
-               MaybeMagicGrallocBufferHandle* aHandle,
-               PGrallocBufferChild** aChild)
-    : size(aSize)
-    , format(aFormat)
-    , usage(aUsage)
-    , handle(aHandle)
-    , child(aChild)
-  {}
-};
-
-// dispatched function
-static void AllocGrallocBufferSync(const GrallocParam& aParam,
-                                   Monitor* aBarrier,
-                                   bool* aDone)
-{
-  MonitorAutoLock autoMon(*aBarrier);
-
-  sImageBridgeChildSingleton->AllocGrallocBufferNow(aParam.size,
-                                                    aParam.format,
-                                                    aParam.usage,
-                                                    aParam.handle,
-                                                    aParam.child);
-  *aDone = true;
-  aBarrier->NotifyAll();
-}
-
-// dispatched function
 static void ConnectImageBridge(ImageBridgeChild * child, ImageBridgeParent * parent)
 {
   MessageLoop *parentMsgLoop = parent->GetMessageLoop();
@@ -512,6 +474,7 @@ ImageBridgeChild::EndTransaction()
       NS_RUNTIMEABORT("not reached");
     }
   }
+  SendPendingAsyncMessge();
 }
 
 
@@ -655,30 +618,6 @@ ImageBridgeChild::CreateImageClientNow(CompositableType aType)
   return client.forget();
 }
 
-PGrallocBufferChild*
-ImageBridgeChild::AllocPGrallocBufferChild(const IntSize&, const uint32_t&, const uint32_t&,
-                                           MaybeMagicGrallocBufferHandle*)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  return GrallocBufferActor::Create();
-#else
-  NS_RUNTIMEABORT("No gralloc buffers for you");
-  return nullptr;
-#endif
-}
-
-bool
-ImageBridgeChild::DeallocPGrallocBufferChild(PGrallocBufferChild* actor)
-{
-#ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
-  delete actor;
-  return true;
-#else
-  NS_RUNTIMEABORT("Um, how did we get here?");
-  return false;
-#endif
-}
-
 bool
 ImageBridgeChild::AllocUnsafeShmem(size_t aSize,
                                    ipc::SharedMemory::SharedMemoryType aType,
@@ -800,99 +739,6 @@ ImageBridgeChild::DeallocShmem(ipc::Shmem& aShmem)
   }
 }
 
-PGrallocBufferChild*
-ImageBridgeChild::AllocGrallocBuffer(const IntSize& aSize,
-                                     uint32_t aFormat,
-                                     uint32_t aUsage,
-                                     MaybeMagicGrallocBufferHandle* aHandle)
-{
-  if (InImageBridgeChildThread()) {
-    PGrallocBufferChild* child = nullptr;
-    ImageBridgeChild::AllocGrallocBufferNow(aSize, aFormat, aUsage, aHandle, &child);
-    return child;
-  }
-
-  Monitor barrier("AllocGrallocBuffer Lock");
-  MonitorAutoLock autoMon(barrier);
-  bool done = false;
-  PGrallocBufferChild* child = nullptr;
-
-  GetMessageLoop()->PostTask(
-    FROM_HERE,
-    NewRunnableFunction(&AllocGrallocBufferSync,
-                        GrallocParam(aSize, aFormat, aUsage, aHandle, &child), &barrier, &done));
-
-  while (!done) {
-    barrier.Wait();
-  }
-
-  return child;
-}
-
-void
-ImageBridgeChild::AllocGrallocBufferNow(const gfx::IntSize& aSize,
-                                        uint32_t aFormat, uint32_t aUsage,
-                                        MaybeMagicGrallocBufferHandle* aHandle,
-                                        PGrallocBufferChild** aChild)
-{
-#ifdef MOZ_WIDGET_GONK
-  *aChild = SendPGrallocBufferConstructor(aSize,
-                                          aFormat,
-                                          aUsage,
-                                          aHandle);
-#else
-  NS_RUNTIMEABORT("not implemented");
-  aChild = nullptr;
-#endif
-}
-
-static void ProxyDeallocGrallocBufferNow(ISurfaceAllocator* aAllocator,
-                                         PGrallocBufferChild* aChild,
-                                         ReentrantMonitor* aBarrier,
-                                         bool* aDone)
-{
-  MOZ_ASSERT(aChild);
-  MOZ_ASSERT(aDone);
-  MOZ_ASSERT(aBarrier);
-
-#ifdef MOZ_WIDGET_GONK
-  PGrallocBufferChild::Send__delete__(aChild);
-#else
-  NS_RUNTIMEABORT("not implemented");
-#endif
-
-  ReentrantMonitorAutoEnter autoMon(*aBarrier);
-  *aDone = true;
-  aBarrier->NotifyAll();
-}
-
-void
-ImageBridgeChild::DeallocGrallocBuffer(PGrallocBufferChild* aChild)
-{
-  MOZ_ASSERT(aChild);
-  if (InImageBridgeChildThread()) {
-#ifdef MOZ_WIDGET_GONK
-    PGrallocBufferChild::Send__delete__(aChild);
-#else
-    NS_RUNTIMEABORT("not implemented");
-#endif
-  } else {
-    ReentrantMonitor barrier("AllocatorProxy Dealloc");
-    ReentrantMonitorAutoEnter autoMon(barrier);
-
-    bool done = false;
-    GetMessageLoop()->PostTask(FROM_HERE,
-                               NewRunnableFunction(&ProxyDeallocGrallocBufferNow,
-                                                   this,
-                                                   aChild,
-                                                   &barrier,
-                                                   &done));
-    while (!done) {
-      barrier.Wait();
-    }
-  }
-}
-
 PTextureChild*
 ImageBridgeChild::AllocPTextureChild(const SurfaceDescriptor&,
                                      const TextureFlags&)
@@ -904,6 +750,29 @@ bool
 ImageBridgeChild::DeallocPTextureChild(PTextureChild* actor)
 {
   return TextureClient::DestroyIPDLActor(actor);
+}
+
+bool
+ImageBridgeChild::RecvParentAsyncMessage(const mozilla::layers::AsyncParentMessageData& aMessage)
+{
+  switch (aMessage.type()) {
+    case AsyncParentMessageData::TOpDeliverFence: {
+      const OpDeliverFence& op = aMessage.get_OpDeliverFence();
+      FenceHandle fence = op.fence();
+      PTextureChild* child = op.textureChild();
+
+      RefPtr<TextureClient> texture = TextureClient::AsTextureClient(child);
+      if (texture) {
+        texture->SetReleaseFenceHandle(fence);
+      }
+      HoldTransactionsToRespond(op.transactionId());
+      break;
+    }
+    default:
+      NS_ERROR("unknown AsyncParentMessageData type");
+      return false;
+  }
+  return true;
 }
 
 PTextureChild*
@@ -962,6 +831,22 @@ void ImageBridgeChild::RemoveTexture(TextureClient* aTexture)
 bool ImageBridgeChild::IsSameProcess() const
 {
   return OtherProcess() == ipc::kInvalidProcessHandle;
+}
+
+void ImageBridgeChild::SendPendingAsyncMessge()
+{
+  if (!IsCreated() ||
+      mTransactionsToRespond.empty()) {
+    return;
+  }
+  // Send OpReplyDeliverFence messages
+  InfallibleTArray<AsyncChildMessageData> replies;
+  replies.SetCapacity(mTransactionsToRespond.size());
+  for (size_t i = 0; i < mTransactionsToRespond.size(); i++) {
+    replies.AppendElement(OpReplyDeliverFence(mTransactionsToRespond[i]));
+  }
+  mTransactionsToRespond.clear();
+  SendChildAsyncMessages(replies);
 }
 
 } // layers

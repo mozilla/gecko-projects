@@ -1444,7 +1444,7 @@ JS_GetArrayBufferViewData(JSObject *obj);
  * object that would return true for JS_IsArrayBufferViewObject().
  */
 extern JS_FRIEND_API(JSObject *)
-JS_GetArrayBufferViewBuffer(JSContext *cx, JSObject *obj);
+JS_GetArrayBufferViewBuffer(JSContext *cx, JS::HandleObject obj);
 
 typedef enum {
     ChangeData,
@@ -1453,6 +1453,12 @@ typedef enum {
 
 /*
  * Set an ArrayBuffer's length to 0 and neuter all of its views.
+ *
+ * The |changeData| argument is a hint to inform internal behavior with respect
+ * to the internal pointer to the ArrayBuffer's data after being neutered.
+ * There is no guarantee it will be respected.  But if it is respected, the
+ * ArrayBuffer's internal data pointer will, or will not, have changed
+ * accordingly.
  */
 extern JS_FRIEND_API(bool)
 JS_NeuterArrayBuffer(JSContext *cx, JS::HandleObject obj,
@@ -2060,7 +2066,8 @@ DefaultValue(JSContext *cx, JS::HandleObject obj, JSType hint, JS::MutableHandle
  */
 extern JS_FRIEND_API(bool)
 CheckDefineProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, JS::HandleValue value,
-                    JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs);
+                    unsigned attrs,
+                    JSPropertyOp getter = nullptr, JSStrictPropertyOp setter = nullptr);
 
 } /* namespace js */
 

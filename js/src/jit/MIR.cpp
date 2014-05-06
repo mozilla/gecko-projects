@@ -230,7 +230,7 @@ MTest::New(TempAllocator &alloc, MDefinition *ins, MBasicBlock *ifTrue, MBasicBl
 }
 
 void
-MTest::infer()
+MTest::cacheOperandMightEmulateUndefined()
 {
     JS_ASSERT(operandMightEmulateUndefined());
 
@@ -1621,7 +1621,7 @@ MAdd::fallible() const
 {
     // the add is fallible if range analysis does not say that it is finite, AND
     // either the truncation analysis shows that there are non-truncated uses.
-    if (isTruncated())
+    if (truncateKind() >= IndirectTruncate)
         return false;
     if (range() && range()->hasInt32Bounds())
         return false;
@@ -1632,7 +1632,7 @@ bool
 MSub::fallible() const
 {
     // see comment in MAdd::fallible()
-    if (isTruncated())
+    if (truncateKind() >= IndirectTruncate)
         return false;
     if (range() && range()->hasInt32Bounds())
         return false;
@@ -2174,7 +2174,7 @@ MTypeOf::foldsTo(TempAllocator &alloc, bool useValueNumbers)
 }
 
 void
-MTypeOf::infer()
+MTypeOf::cacheInputMaybeCallableOrEmulatesUndefined()
 {
     JS_ASSERT(inputMaybeCallableOrEmulatesUndefined());
 
@@ -2669,7 +2669,7 @@ MCompare::filtersUndefinedOrNull(bool trueBranch, MDefinition **subject, bool *f
 }
 
 void
-MNot::infer()
+MNot::cacheOperandMightEmulateUndefined()
 {
     JS_ASSERT(operandMightEmulateUndefined());
 

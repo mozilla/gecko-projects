@@ -130,7 +130,7 @@ public:
   } while (0)
 
 #define REPORT(_path, _amount, _desc) \
-    REPORT_WITH_CLEANUP(_path, UNITS_BYTES, _amount, _desc, (void)0)
+  REPORT_WITH_CLEANUP(_path, UNITS_BYTES, _amount, _desc, (void)0)
 
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
                             nsISupports* aData)
@@ -275,6 +275,14 @@ private:
             break;
         }
         fclose(f);
+
+        // Report the open file descriptors for this process.
+        nsPrintfCString procFdPath("/proc/%s/fd", pidStr);
+        nsresult rv = CollectOpenFileReports(
+                  aHandleReport, aData, procFdPath, processName);
+        if (NS_FAILED(rv)) {
+          break;
+        }
       }
     }
     closedir(d);
@@ -618,16 +626,16 @@ private:
   uint64_t
   ReadSizeFromFile(const char* aFilename)
   {
-      FILE* sizeFile = fopen(aFilename, "r");
-      if (NS_WARN_IF(!sizeFile)) {
-        return 0;
-      }
+    FILE* sizeFile = fopen(aFilename, "r");
+    if (NS_WARN_IF(!sizeFile)) {
+      return 0;
+    }
 
-      uint64_t size = 0;
-      fscanf(sizeFile, "%" SCNu64, &size);
-      fclose(sizeFile);
+    uint64_t size = 0;
+    fscanf(sizeFile, "%" SCNu64, &size);
+    fclose(sizeFile);
 
-      return size;
+    return size;
   }
 
   nsresult
@@ -673,16 +681,16 @@ private:
 
       nsPrintfCString diskUsedPath("zram-disksize/%s/used", name);
       nsPrintfCString diskUsedDesc(
-                           "The uncompressed size of data stored in \"%s.\" "
-                           "This excludes zero-filled pages since "
-                           "no memory is allocated for them.", name);
+        "The uncompressed size of data stored in \"%s.\" "
+        "This excludes zero-filled pages since "
+        "no memory is allocated for them.", name);
       REPORT_WITH_CLEANUP(diskUsedPath, UNITS_BYTES, origSize,
                           diskUsedDesc, closedir(d));
 
       nsPrintfCString diskUnusedPath("zram-disksize/%s/unused", name);
       nsPrintfCString diskUnusedDesc(
-                           "The amount of uncompressed data that can still be "
-                           "be stored in \"%s\"", name);
+        "The amount of uncompressed data that can still be "
+        "be stored in \"%s\"", name);
       REPORT_WITH_CLEANUP(diskUnusedPath, UNITS_BYTES, unusedSize,
                           diskUnusedDesc, closedir(d));
 
@@ -694,15 +702,15 @@ private:
       uint64_t writes = ReadSizeFromFile(writesFile.get());
 
       nsPrintfCString readsDesc(
-                           "The number of reads (failed or successful) done on "
-                           "\"%s\"", name);
+        "The number of reads (failed or successful) done on "
+        "\"%s\"", name);
       nsPrintfCString readsPath("zram-accesses/%s/reads", name);
       REPORT_WITH_CLEANUP(readsPath, UNITS_COUNT_CUMULATIVE, reads,
                           readsDesc, closedir(d));
 
       nsPrintfCString writesDesc(
-                           "The number of writes (failed or successful) done "
-                           "on \"%s\"", name);
+        "The number of writes (failed or successful) done "
+        "on \"%s\"", name);
       nsPrintfCString writesPath("zram-accesses/%s/writes", name);
       REPORT_WITH_CLEANUP(writesPath, UNITS_COUNT_CUMULATIVE, writes,
                           writesDesc, closedir(d));
@@ -712,11 +720,89 @@ private:
       uint64_t comprSize = ReadSizeFromFile(comprSizeFile.get());
 
       nsPrintfCString comprSizeDesc(
-                           "The compressed size of data stored in \"%s\"",
-                            name);
+        "The compressed size of data stored in \"%s\"",
+        name);
       nsPrintfCString comprSizePath("zram-compr-data-size/%s", name);
       REPORT_WITH_CLEANUP(comprSizePath, UNITS_BYTES, comprSize,
                           comprSizeDesc, closedir(d));
+    }
+
+    closedir(d);
+    return NS_OK;
+  }
+
+  nsresult
+  CollectOpenFileReports(nsIHandleReportCallback* aHandleReport,
+                         nsISupports* aData,
+                         const nsACString& aProcPath,
+                         const nsACString& aProcessName)
+  {
+    // All file descriptors opened by a process are listed under
+    // /proc/<pid>/fd/<numerical_fd>. Each entry is a symlink that points to the
+    // path that was opened. This can be an actual file, a socket, a pipe, an
+    // anon_inode, or possibly an uncategorized device.
+    const char kFilePrefix[] = "/";
+    const char kSocketPrefix[] = "socket:";
+    const char kPipePrefix[] = "pipe:";
+    const char kAnonInodePrefix[] = "anon_inode:";
+
+    const nsCString procPath(aProcPath);
+    DIR* d = opendir(procPath.get());
+    if (!d) {
+      if (NS_WARN_IF(errno != ENOENT && errno != EACCES)) {
+        return NS_ERROR_FAILURE;
+      }
+      return NS_OK;
+    }
+
+    char linkPath[PATH_MAX + 1];
+    struct dirent* ent;
+    while ((ent = readdir(d))) {
+      const char* fd = ent->d_name;
+
+      // Skip "." and ".." (and any other dotfiles).
+      if (fd[0] == '.') {
+        continue;
+      }
+
+      nsPrintfCString fullPath("%s/%s", procPath.get(), fd);
+      ssize_t linkPathSize = readlink(fullPath.get(), linkPath, PATH_MAX);
+      if (linkPathSize > 0) {
+        linkPath[linkPathSize] = '\0';
+
+#define CHECK_PREFIX(prefix) \
+  (strncmp(linkPath, prefix, sizeof(prefix) - 1) == 0)
+
+        const char* category = nullptr;
+        const char* descriptionPrefix = nullptr;
+
+        if (CHECK_PREFIX(kFilePrefix)) {
+          category = "files"; // No trailing slash, the file path will have one
+          descriptionPrefix = "An open";
+        } else if (CHECK_PREFIX(kSocketPrefix)) {
+          category = "sockets/";
+          descriptionPrefix = "A socket";
+        } else if (CHECK_PREFIX(kPipePrefix)) {
+          category = "pipes/";
+          descriptionPrefix = "A pipe";
+        } else if (CHECK_PREFIX(kAnonInodePrefix)) {
+          category = "anon_inodes/";
+          descriptionPrefix = "An anon_inode";
+        } else {
+          category = "";
+          descriptionPrefix = "An uncategorized";
+        }
+
+#undef CHECK_PREFIX
+
+        const nsCString processName(aProcessName);
+        nsPrintfCString entryPath(
+            "open-fds/%s/%s%s/%s", processName.get(), category, linkPath, fd);
+        nsPrintfCString entryDescription(
+            "%s file descriptor opened by the process", descriptionPrefix);
+        REPORT_WITH_CLEANUP(
+            entryPath, UNITS_COUNT, 1, entryDescription, closedir(d));
+      }
     }
 
     closedir(d);
@@ -730,15 +816,15 @@ NS_IMPL_ISUPPORTS(SystemReporter, nsIMemoryReporter)
 
 // Keep this in sync with SystemReporter::ProcessSizeKind!
 const char* SystemReporter::kindPathSuffixes[] = {
-    "anonymous/outside-brk",
-    "anonymous/brk-heap",
-    "shared-libraries/read-executable",
-    "shared-libraries/read-write",
-    "shared-libraries/read-only",
-    "shared-libraries/other",
-    "other-files",
-    "main-thread-stack",
-    "vdso"
+  "anonymous/outside-brk",
+  "anonymous/brk-heap",
+  "shared-libraries/read-executable",
+  "shared-libraries/read-write",
+  "shared-libraries/read-only",
+  "shared-libraries/other",
+  "other-files",
+  "main-thread-stack",
+  "vdso"
 };
 
 void Init()

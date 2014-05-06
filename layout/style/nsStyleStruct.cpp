@@ -388,6 +388,7 @@ nsStyleBorder::nsStyleBorder(nsPresContext* aPresContext)
     mBorderImageRepeatH(NS_STYLE_BORDER_IMAGE_REPEAT_STRETCH),
     mBorderImageRepeatV(NS_STYLE_BORDER_IMAGE_REPEAT_STRETCH),
     mFloatEdge(NS_STYLE_FLOAT_EDGE_CONTENT),
+    mBoxDecorationBreak(NS_STYLE_BOX_DECORATION_BREAK_SLICE),
     mComputedBorder(0, 0, 0, 0)
 {
   MOZ_COUNT_CTOR(nsStyleBorder);
@@ -439,6 +440,7 @@ nsStyleBorder::nsStyleBorder(const nsStyleBorder& aSrc)
     mBorderImageRepeatH(aSrc.mBorderImageRepeatH),
     mBorderImageRepeatV(aSrc.mBorderImageRepeatV),
     mFloatEdge(aSrc.mFloatEdge),
+    mBoxDecorationBreak(aSrc.mBoxDecorationBreak),
     mComputedBorder(aSrc.mComputedBorder),
     mBorder(aSrc.mBorder),
     mTwipsPerPixel(aSrc.mTwipsPerPixel)
@@ -528,7 +530,8 @@ nsChangeHint nsStyleBorder::CalcDifference(const nsStyleBorder& aOther) const
       GetComputedBorder() != aOther.GetComputedBorder() ||
       mFloatEdge != aOther.mFloatEdge ||
       mBorderImageOutset != aOther.mBorderImageOutset ||
-      (shadowDifference & nsChangeHint_NeedReflow))
+      (shadowDifference & nsChangeHint_NeedReflow) ||
+      mBoxDecorationBreak != aOther.mBoxDecorationBreak)
     return NS_STYLE_HINT_REFLOW;
 
   NS_FOR_CSS_SIDES(ix) {
@@ -1240,7 +1243,7 @@ nsStylePosition::nsStylePosition(void)
   mGridAutoRowsMax.SetIntValue(NS_STYLE_GRID_TRACK_BREADTH_MAX_CONTENT,
                                eStyleUnit_Enumerated);
 
-  mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_NONE;
+  mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_ROW;
   mBoxSizing = NS_STYLE_BOX_SIZING_CONTENT;
   mAlignContent = NS_STYLE_ALIGN_CONTENT_STRETCH;
   mAlignItems = NS_STYLE_ALIGN_ITEMS_INITIAL_VALUE;
@@ -1252,8 +1255,6 @@ nsStylePosition::nsStylePosition(void)
   mFlexGrow = 0.0f;
   mFlexShrink = 1.0f;
   mZIndex.SetAutoValue();
-  mGridAutoPositionColumn.SetToInteger(1);
-  mGridAutoPositionRow.SetToInteger(1);
   // Other members get their default constructors
   // which initialize them to representations of their respective initial value.
   // mGridTemplateAreas: nullptr for 'none'
@@ -1270,8 +1271,6 @@ nsStylePosition::nsStylePosition(const nsStylePosition& aSource)
   : mGridTemplateColumns(aSource.mGridTemplateColumns)
   , mGridTemplateRows(aSource.mGridTemplateRows)
   , mGridTemplateAreas(aSource.mGridTemplateAreas)
-  , mGridAutoPositionColumn(aSource.mGridAutoPositionColumn)
-  , mGridAutoPositionRow(aSource.mGridAutoPositionRow)
   , mGridColumnStart(aSource.mGridColumnStart)
   , mGridColumnEnd(aSource.mGridColumnEnd)
   , mGridRowStart(aSource.mGridRowStart)
@@ -1289,8 +1288,6 @@ nsStylePosition::nsStylePosition(const nsStylePosition& aSource)
                 sizeof(mGridTemplateColumns) +
                 sizeof(mGridTemplateRows) +
                 sizeof(mGridTemplateAreas) +
-                sizeof(mGridAutoPositionColumn) +
-                sizeof(mGridAutoPositionRow) +
                 sizeof(mGridColumnStart) +
                 sizeof(mGridColumnEnd) +
                 sizeof(mGridRowStart) +
@@ -1968,7 +1965,6 @@ nsStyleBackground::nsStyleBackground()
   , mSizeCount(1)
   , mBlendModeCount(1)
   , mBackgroundColor(NS_RGBA(0, 0, 0, 0))
-  , mBackgroundInlinePolicy(NS_STYLE_BG_INLINE_POLICY_CONTINUOUS)
 {
   MOZ_COUNT_CTOR(nsStyleBackground);
   Layer *onlyLayer = mLayers.AppendElement();
@@ -1987,7 +1983,6 @@ nsStyleBackground::nsStyleBackground(const nsStyleBackground& aSource)
   , mBlendModeCount(aSource.mBlendModeCount)
   , mLayers(aSource.mLayers) // deep copy
   , mBackgroundColor(aSource.mBackgroundColor)
-  , mBackgroundInlinePolicy(aSource.mBackgroundInlinePolicy)
 {
   MOZ_COUNT_CTOR(nsStyleBackground);
   // If the deep copy of mLayers failed, truncate the counts.
@@ -2045,9 +2040,7 @@ nsChangeHint nsStyleBackground::CalcDifference(const nsStyleBackground& aOther) 
     }
   }
 
-  if (hasVisualDifference ||
-      mBackgroundColor != aOther.mBackgroundColor ||
-      mBackgroundInlinePolicy != aOther.mBackgroundInlinePolicy)
+  if (hasVisualDifference || mBackgroundColor != aOther.mBackgroundColor)
     return NS_STYLE_HINT_VISUAL;
 
   return NS_STYLE_HINT_NONE;

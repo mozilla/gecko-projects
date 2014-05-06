@@ -289,7 +289,7 @@ nsComputedDOMStyle::Shutdown()
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsComputedDOMStyle, mContent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsComputedDOMStyle, mContent)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsComputedDOMStyle)
   return tmp->IsBlack();
@@ -2074,16 +2074,6 @@ nsComputedDOMStyle::DoGetBackgroundImage()
 }
 
 CSSValue*
-nsComputedDOMStyle::DoGetBackgroundInlinePolicy()
-{
-  nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
-  val->SetIdent(nsCSSProps::ValueToKeywordEnum(
-                  StyleBackground()->mBackgroundInlinePolicy,
-                  nsCSSProps::kBackgroundInlinePolicyKTable));
-  return val;
-}
-
-CSSValue*
 nsComputedDOMStyle::DoGetBackgroundBlendMode()
 {
   return GetBackgroundList(&nsStyleBackground::Layer::mBlendMode,
@@ -2408,7 +2398,7 @@ nsComputedDOMStyle::DoGetGridAutoFlow()
   nsAutoString str;
   nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_grid_auto_flow,
                                      StylePosition()->mGridAutoFlow,
-                                     NS_STYLE_GRID_AUTO_FLOW_NONE,
+                                     NS_STYLE_GRID_AUTO_FLOW_STACK,
                                      NS_STYLE_GRID_AUTO_FLOW_DENSE,
                                      str);
   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
@@ -2475,24 +2465,6 @@ nsComputedDOMStyle::GetGridLine(const nsStyleGridLine& aGridLine)
 
   NS_ASSERTION(valueList->Length() > 0,
                "Should have appended at least one value");
-  return valueList;
-}
-
-CSSValue*
-nsComputedDOMStyle::DoGetGridAutoPosition()
-{
-  nsDOMCSSValueList* valueList = GetROCSSValueList(false);
-
-  valueList->AppendCSSValue(
-    GetGridLine(StylePosition()->mGridAutoPositionColumn));
-
-  nsROCSSPrimitiveValue* slash = new nsROCSSPrimitiveValue;
-  slash->SetString(NS_LITERAL_STRING("/"));
-  valueList->AppendCSSValue(slash);
-
-  valueList->AppendCSSValue(
-    GetGridLine(StylePosition()->mGridAutoPositionRow));
-
   return valueList;
 }
 
@@ -2978,6 +2950,16 @@ nsComputedDOMStyle::GetCSSShadowArray(nsCSSShadowArray* aArray,
   }
 
   return valueList;
+}
+
+CSSValue*
+nsComputedDOMStyle::DoGetBoxDecorationBreak()
+{
+  nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
+  val->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(StyleBorder()->mBoxDecorationBreak,
+                                   nsCSSProps::kBoxDecorationBreakKTable));
+  return val;
 }
 
 CSSValue*

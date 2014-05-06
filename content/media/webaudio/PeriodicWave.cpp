@@ -11,7 +11,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(PeriodicWave, mContext)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(PeriodicWave, mContext)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(PeriodicWave, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(PeriodicWave, Release)
@@ -55,6 +55,12 @@ PeriodicWave::SizeOfExcludingThisIfNotShared(MallocSizeOf aMallocSizeOf) const
   }
 
   return amount;
+}
+
+size_t
+PeriodicWave::SizeOfIncludingThisIfNotShared(MallocSizeOf aMallocSizeOf) const
+{
+  return aMallocSizeOf(this) + SizeOfExcludingThisIfNotShared(aMallocSizeOf);
 }
 
 JSObject*

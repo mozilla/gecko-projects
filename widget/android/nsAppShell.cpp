@@ -39,6 +39,9 @@
 #include <wchar.h>
 
 #include "mozilla/dom/ScreenOrientation.h"
+#ifdef MOZ_GAMEPAD
+#include "mozilla/dom/GamepadService.h"
+#endif
 
 #include "GeckoProfiler.h"
 #ifdef MOZ_ANDROID_HISTORY
@@ -82,20 +85,21 @@ public:
         nsCOMPtr<nsIBrowserTab> tab;
         mBrowserApp->GetBrowserTab(mTabId, getter_AddRefs(tab));
         if (!tab) {
-            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false);
+            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false, false);
             return NS_ERROR_FAILURE;
         }
 
         tab->GetWindow(getter_AddRefs(domWindow));
         if (!domWindow) {
-            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false);
+            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false, false);
             return NS_ERROR_FAILURE;
         }
 
         NS_ASSERTION(mPoints.Length() == 1, "Thumbnail event does not have enough coordinates");
 
-        nsresult rv = AndroidBridge::Bridge()->CaptureThumbnail(domWindow, mPoints[0].x, mPoints[0].y, mTabId, buffer);
-        mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, NS_SUCCEEDED(rv));
+        bool shouldStore = true;
+        nsresult rv = AndroidBridge::Bridge()->CaptureThumbnail(domWindow, mPoints[0].x, mPoints[0].y, mTabId, buffer, shouldStore);
+        mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, NS_SUCCEEDED(rv), shouldStore);
         return rv;
     }
 private:
@@ -590,6 +594,49 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
                               curEvent->Count());
         break;
 
+    case AndroidGeckoEvent::GAMEPAD_ADDREMOVE: {
+#ifdef MOZ_GAMEPAD
+        nsRefPtr<mozilla::dom::GamepadService> svc =
+            mozilla::dom::GamepadService::GetService();
+        if (svc) {
+            if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_ADDED) {
+                int svc_id = svc->AddGamepad("android",
+                                             mozilla::dom::StandardMapping,
+                                             mozilla::dom::kStandardGamepadButtons,
+                                             mozilla::dom::kStandardGamepadAxes);
+                mozilla::widget::android::GeckoAppShell::GamepadAdded(curEvent->ID(),
+                                                                      svc_id);
+            } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_REMOVED) {
+                svc->RemoveGamepad(curEvent->ID());
+            }
+        }
+#endif
+        break;
+    }
+
+    case AndroidGeckoEvent::GAMEPAD_DATA: {
+#ifdef MOZ_GAMEPAD
+        nsRefPtr<mozilla::dom::GamepadService> svc =
+            mozilla::dom::GamepadService::GetService();
+        if (svc) {
+            int id = curEvent->ID();
+            if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_BUTTON) {
+                 svc->NewButtonEvent(id, curEvent->GamepadButton(),
+                                     curEvent->GamepadButtonPressed(),
+                                     curEvent->GamepadButtonValue());
+            } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_AXES) {
+                int valid = curEvent->Flags();
+                const nsTArray<float>& values = curEvent->GamepadValues();
+                for (unsigned i = 0; i < values.Length(); i++) {
+                    if (valid & (1<<i)) {
+                        svc->NewAxisMoveEvent(id, i, values[i]);
+                    }
+                }
+            }
+        }
+#endif
+        break;
+    }
     case AndroidGeckoEvent::NOOP:
         break;
 

@@ -55,7 +55,7 @@ WebGLFramebuffer::Attachment::HasAlpha() const
 
     GLenum format = 0;
     if (Texture() && Texture()->HasImageInfoAt(mTexImageTarget, mTexImageLevel))
-        format = Texture()->ImageInfoAt(mTexImageTarget, mTexImageLevel).InternalFormat();
+        format = Texture()->ImageInfoAt(mTexImageTarget, mTexImageLevel).WebGLFormat();
     else if (Renderbuffer())
         format = Renderbuffer()->InternalFormat();
     return FormatHasAlpha(format);
@@ -65,7 +65,7 @@ bool
 WebGLFramebuffer::Attachment::IsReadableFloat() const
 {
     if (Texture() && Texture()->HasImageInfoAt(mTexImageTarget, mTexImageLevel)) {
-        GLenum type = Texture()->ImageInfoAt(mTexImageTarget, mTexImageLevel).Type();
+        GLenum type = Texture()->ImageInfoAt(mTexImageTarget, mTexImageLevel).WebGLType();
         switch (type) {
         case LOCAL_GL_FLOAT:
         case LOCAL_GL_HALF_FLOAT_OES:
@@ -282,19 +282,19 @@ WebGLFramebuffer::Attachment::IsComplete() const
         MOZ_ASSERT(Texture()->HasImageInfoAt(mTexImageTarget, mTexImageLevel));
         const WebGLTexture::ImageInfo& imageInfo =
             Texture()->ImageInfoAt(mTexImageTarget, mTexImageLevel);
-        GLenum internalFormat = imageInfo.InternalFormat();
+        GLenum webGLFormat = imageInfo.WebGLFormat();
 
         if (mAttachmentPoint == LOCAL_GL_DEPTH_ATTACHMENT)
-            return IsValidFBOTextureDepthFormat(internalFormat);
+            return IsValidFBOTextureDepthFormat(webGLFormat);
 
         if (mAttachmentPoint == LOCAL_GL_DEPTH_STENCIL_ATTACHMENT)
-            return IsValidFBOTextureDepthStencilFormat(internalFormat);
+            return IsValidFBOTextureDepthStencilFormat(webGLFormat);
 
         if (mAttachmentPoint >= LOCAL_GL_COLOR_ATTACHMENT0 &&
             mAttachmentPoint < GLenum(LOCAL_GL_COLOR_ATTACHMENT0 +
-                                      WebGLContext::sMaxColorAttachments))
+                                      WebGLContext::kMaxColorAttachments))
         {
-            return IsValidFBOTextureColorFormat(internalFormat);
+            return IsValidFBOTextureColorFormat(webGLFormat);
         }
         MOZ_ASSERT(false, "Invalid WebGL attachment point?");
         return false;
@@ -314,7 +314,7 @@ WebGLFramebuffer::Attachment::IsComplete() const
 
         if (mAttachmentPoint >= LOCAL_GL_COLOR_ATTACHMENT0 &&
             mAttachmentPoint < GLenum(LOCAL_GL_COLOR_ATTACHMENT0 +
-                                      WebGLContext::sMaxColorAttachments))
+                                      WebGLContext::kMaxColorAttachments))
         {
             return IsValidFBORenderbufferColorFormat(internalFormat);
         }
@@ -785,8 +785,8 @@ WebGLFramebuffer::CheckAndInitializeAttachments()
 
     // Get buffer-bit-mask and color-attachment-mask-list
     uint32_t mask = 0;
-    bool colorAttachmentsMask[WebGLContext::sMaxColorAttachments] = { false };
-    MOZ_ASSERT(colorAttachmentCount <= WebGLContext::sMaxColorAttachments);
+    bool colorAttachmentsMask[WebGLContext::kMaxColorAttachments] = { false };
+    MOZ_ASSERT(colorAttachmentCount <= WebGLContext::kMaxColorAttachments);
 
     for (size_t i = 0; i < colorAttachmentCount; i++) {
         if (mColorAttachments[i].HasUninitializedImageData()) {
@@ -855,7 +855,7 @@ bool WebGLFramebuffer::CheckColorAttachmentNumber(GLenum attachment, const char*
 
 void WebGLFramebuffer::EnsureColorAttachments(size_t colorAttachmentId)
 {
-    MOZ_ASSERT(colorAttachmentId < WebGLContext::sMaxColorAttachments);
+    MOZ_ASSERT(colorAttachmentId < WebGLContext::kMaxColorAttachments);
 
     size_t currentAttachmentCount = mColorAttachments.Length();
     if (colorAttachmentId < currentAttachmentCount)
@@ -940,7 +940,7 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
                              aName, aFlags);
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(WebGLFramebuffer,
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(WebGLFramebuffer,
   mColorAttachments,
   mDepthAttachment,
   mStencilAttachment,

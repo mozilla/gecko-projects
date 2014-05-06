@@ -17,4 +17,9 @@ LOCAL_INCLUDES += [
     '/tools/profiler',
 ]
 
+UNIFIED_SOURCES += [
+    'JSStreamWriterTest.cpp',
+    'ThreadProfileTest.cpp',
+]
+
 FINAL_LIBRARY = 'xul-gtest'
