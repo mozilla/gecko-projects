@@ -12,6 +12,7 @@ import sys
 SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
 sys.path.insert(0, SCRIPT_DIR);
 
+import ctypes
 import glob
 import json
 import mozcrash
@@ -29,7 +30,7 @@ import traceback
 import urllib2
 import zipfile
 
-from automationutils import environment, getDebuggerInfo, isURL, KeyValueParseError, parseKeyValue, processLeakLog, systemMemory, dumpScreen, ShutdownLeaks, printstatus
+from automationutils import environment, getDebuggerInfo, isURL, KeyValueParseError, parseKeyValue, processLeakLog, dumpScreen, ShutdownLeaks, printstatus
 from datetime import datetime
 from manifestparser import TestManifest
 from mochitest_options import MochitestOptions
@@ -754,11 +755,123 @@ class SSLTunnel:
     if os.path.exists(self.configFile):
       os.remove(self.configFile)
 
+def checkAndConfigureV4l2loopback(device):
+  '''
+  Determine if a given device path is a v4l2loopback device, and if so
+  toggle a few settings on it via fcntl. Very linux-specific.
+
+  Returns (status, device name) where status is a boolean.
+  '''
+  if not mozinfo.isLinux:
+    return False, ''
+
+  libc = ctypes.cdll.LoadLibrary('libc.so.6')
+  O_RDWR = 2
+  # These are from linux/videodev2.h
+  class v4l2_capability(ctypes.Structure):
+    _fields_ = [
+      ('driver', ctypes.c_char * 16),
+      ('card', ctypes.c_char * 32),
+      ('bus_info', ctypes.c_char * 32),
+      ('version', ctypes.c_uint32),
+      ('capabilities', ctypes.c_uint32),
+      ('device_caps', ctypes.c_uint32),
+      ('reserved', ctypes.c_uint32 * 3)
+      ]
+  VIDIOC_QUERYCAP = 0x80685600
+
+  fd = libc.open(device, O_RDWR)
+  if fd < 0:
+    return False, ''
+
+  vcap = v4l2_capability()
+  if libc.ioctl(fd, VIDIOC_QUERYCAP, ctypes.byref(vcap)) != 0:
+    return False, ''
+
+  if vcap.driver != 'v4l2 loopback':
+    return False, ''
+
+  class v4l2_control(ctypes.Structure):
+    _fields_ = [
+      ('id', ctypes.c_uint32),
+      ('value', ctypes.c_int32)
+    ]
+
+  # These are private v4l2 control IDs, see:
+  # https://github.com/umlaeute/v4l2loopback/blob/fd822cf0faaccdf5f548cddd9a5a3dcebb6d584d/v4l2loopback.c#L131
+  KEEP_FORMAT = 0x8000000
+  SUSTAIN_FRAMERATE = 0x8000001
+  VIDIOC_S_CTRL = 0xc008561c
+
+  control = v4l2_control()
+  control.id = KEEP_FORMAT
+  control.value = 1
+  libc.ioctl(fd, VIDIOC_S_CTRL, ctypes.byref(control))
+
+  control.id = SUSTAIN_FRAMERATE
+  control.value = 1
+  libc.ioctl(fd, VIDIOC_S_CTRL, ctypes.byref(control))
+  libc.close(fd)
+
+  return True, vcap.card
+
+def findTestMediaDevices():
+  '''
+  Find the test media devices configured on this system, and return a dict
+  containing information about them. The dict will have keys for 'audio'
+  and 'video', each containing the name of the media device to use.
+
+  If audio and video devices could not be found, return None.
+
+  This method is only currently implemented for Linux.
+  '''
+  if not mozinfo.isLinux:
+    return None
+
+  info = {}
+  # Look for a v4l2loopback device.
+  name = None
+  device = None
+  for dev in sorted(glob.glob('/dev/video*')):
+    result, name_ = checkAndConfigureV4l2loopback(dev)
+    if result:
+      name = name_
+      device = dev
+      break
+
+  if not (name and device):
+    log.error('Couldn\'t find a v4l2loopback video device')
+    return None
+
+  # Feed it a frame of output so it has something to display
+  subprocess.check_call(['/usr/bin/gst-launch-0.10', 'videotestsrc',
+                         'pattern=green', 'num-buffers=1', '!',
+                         'v4l2sink', 'device=%s' % device])
+  info['video'] = name
+
+  # Use pactl to see if the PulseAudio module-sine-source module is loaded.
+  def sine_source_loaded():
+    o = subprocess.check_output(['/usr/bin/pactl', 'list', 'short', 'modules'])
+    return filter(lambda x: 'module-sine-source' in x, o.splitlines())
+
+  if not sine_source_loaded():
+    # Load module-sine-source
+    subprocess.check_call(['/usr/bin/pactl', 'load-module',
+                           'module-sine-source'])
+  if not sine_source_loaded():
+    log.error('Couldn\'t load module-sine-source')
+    return None
+
+  # Hardcode the name since it's always the same.
+  info['audio'] = 'Sine source at 440 Hz'
+  return info
+
 class Mochitest(MochitestUtilsMixin):
   certdbNew = False
   sslTunnel = None
   vmwareHelper = None
   DEFAULT_TIMEOUT = 60.0
+  mediaDevices = None
 
   # XXX use automation.py for test name to avoid breaking legacy
   # TODO: replace this with 'runtests.py' or 'mochitest' or the like
@@ -876,6 +989,11 @@ class Mochitest(MochitestUtilsMixin):
     #             'ws': str(self.webSocketPort)
              'ws': options.sslPort
              }
+
+    # See if we should use fake media devices.
+    if options.useTestMediaDevices:
+      prefs['media.audio_loopback_dev'] = self.mediaDevices['audio']
+      prefs['media.video_loopback_dev'] = self.mediaDevices['video']
 
 
     # create a profile
@@ -1058,7 +1176,6 @@ class Mochitest(MochitestUtilsMixin):
              timeout=-1,
              onLaunch=None,
              webapprtChrome=False,
-             hide_subtests=False,
              screenshotOnFail=False):
     """
     Run the app, log the duration it took to execute, return the status code.
@@ -1118,12 +1235,10 @@ class Mochitest(MochitestUtilsMixin):
                                          symbolsPath=symbolsPath,
                                          dump_screen_on_timeout=not debuggerInfo,
                                          dump_screen_on_fail=screenshotOnFail,
-                                         hide_subtests=hide_subtests,
                                          shutdownLeaks=shutdownLeaks,
         )
 
       def timeoutHandler():
-        outputHandler.log_output_buffer()
         browserProcessId = outputHandler.browserProcessId
         self.handleTimeout(timeout, proc, utilityPath, debuggerInfo, browserProcessId)
       kp_kwargs = {'kill_on_timeout': False,
@@ -1225,6 +1340,13 @@ class Mochitest(MochitestUtilsMixin):
                                    options.debuggerArgs,
                                    options.debuggerInteractive)
 
+    if options.useTestMediaDevices:
+      devices = findTestMediaDevices()
+      if not devices:
+        log.error("Could not find test media devices to use")
+        return 1
+      self.mediaDevices = devices
+
     self.leak_report_file = os.path.join(options.profilePath, "runtests_leaks.log")
 
     browserEnv = self.buildBrowserEnv(options, debuggerInfo is not None)
@@ -1286,7 +1408,6 @@ class Mochitest(MochitestUtilsMixin):
                              timeout=timeout,
                              onLaunch=onLaunch,
                              webapprtChrome=options.webapprtChrome,
-                             hide_subtests=options.hide_subtests,
                              screenshotOnFail=options.screenshotOnFail
         )
       except KeyboardInterrupt:
@@ -1328,20 +1449,16 @@ class Mochitest(MochitestUtilsMixin):
 
   class OutputHandler(object):
     """line output handler for mozrunner"""
-    def __init__(self, harness, utilityPath, symbolsPath=None, dump_screen_on_timeout=True, dump_screen_on_fail=False,
-                 hide_subtests=False, shutdownLeaks=None):
+    def __init__(self, harness, utilityPath, symbolsPath=None, dump_screen_on_timeout=True, dump_screen_on_fail=False, shutdownLeaks=None):
       """
       harness -- harness instance
       dump_screen_on_timeout -- whether to dump the screen on timeout
       """
       self.harness = harness
-      self.output_buffer = []
-      self.running_test = False
       self.utilityPath = utilityPath
       self.symbolsPath = symbolsPath
       self.dump_screen_on_timeout = dump_screen_on_timeout
       self.dump_screen_on_fail = dump_screen_on_fail
-      self.hide_subtests = hide_subtests
       self.shutdownLeaks = shutdownLeaks
 
       # perl binary to use
@@ -1365,13 +1482,12 @@ class Mochitest(MochitestUtilsMixin):
       """returns ordered list of output handlers"""
       return [self.fix_stack,
               self.format,
+              self.record_last_test,
               self.dumpScreenOnTimeout,
               self.dumpScreenOnFail,
               self.metro_subprocess_id,
               self.trackShutdownLeaks,
-              self.check_test_failure,
               self.log,
-              self.record_last_test,
               ]
 
     def stackFixer(self):
@@ -1421,10 +1537,6 @@ class Mochitest(MochitestUtilsMixin):
       if self.shutdownLeaks:
         self.shutdownLeaks.process()
 
-    def log_output_buffer(self):
-        if self.output_buffer:
-            lines = ['  %s' % line for line in self.output_buffer]
-            log.info("Buffered test output:\n%s" % '\n'.join(lines))
 
     # output line handlers:
     # these take a line and return a line
@@ -1438,15 +1550,19 @@ class Mochitest(MochitestUtilsMixin):
       """format the line"""
       return line.rstrip().decode("UTF-8", "ignore")
 
+    def record_last_test(self, line):
+      """record last test on harness"""
+      if "TEST-START" in line and "|" in line:
+        self.harness.lastTestSeen = line.split("|")[1].strip()
+      return line
+
     def dumpScreenOnTimeout(self, line):
       if not self.dump_screen_on_fail and self.dump_screen_on_timeout and "TEST-UNEXPECTED-FAIL" in line and "Test timed out" in line:
-        self.log_output_buffer()
         self.harness.dumpScreen(self.utilityPath)
       return line
 
     def dumpScreenOnFail(self, line):
       if self.dump_screen_on_fail and "TEST-UNEXPECTED-FAIL" in line:
-        self.log_output_buffer()
         self.harness.dumpScreen(self.utilityPath)
       return line
 
@@ -1464,31 +1580,8 @@ class Mochitest(MochitestUtilsMixin):
         self.shutdownLeaks.log(line)
       return line
 
-    def check_test_failure(self, line):
-      if 'TEST-END' in line:
-        self.running_test = False
-        if any('TEST-UNEXPECTED' in l for l in self.output_buffer):
-          self.log_output_buffer()
-      return line
-
     def log(self, line):
-      if self.hide_subtests and self.running_test:
-        self.output_buffer.append(line)
-      else:
-        # hack to make separators align nicely, remove when we use mozlog
-        if self.hide_subtests and 'TEST-END' in line:
-            index = line.index('TEST-END') + len('TEST-END')
-            line = line[:index] + ' ' * (len('TEST-START')-len('TEST-END')) + line[index:]
-        log.info(line)
-      return line
-
-    def record_last_test(self, line):
-      """record last test on harness"""
-      if "TEST-START" in line and "|" in line:
-        if not line.endswith('Shutdown'):
-          self.output_buffer = []
-          self.running_test = True
-        self.harness.lastTestSeen = line.split("|")[1].strip()
+      log.info(line)
       return line
 
 

@@ -53,7 +53,9 @@ groupbox {
   margin-top: 15px;
   margin-bottom: 15px;
   -moz-margin-start: 60px;
+  -moz-margin-end: 0;
   -moz-padding-start: 0;
+  -moz-padding-end: 0;
   font-size: 1.25rem;
 }
 
@@ -182,6 +184,50 @@ button[type="menu"] > .button-box > .button-menu-dropmarker {
   list-style-image: url("chrome://browser/skin/preferences/in-content/dropdown.png");
 }
 
+.help-button {
+  min-width: 30px;
+  border-radius: 2px;
+  border: 1px solid #C1C1C1;
+  background-color: #FFCB00;
+  background-image: none;
+  box-shadow: none;
+}
+
+.help-button:not([disabled="true"]):hover {
+  background-color: #F4C200;
+  background-image: none;
+}
+
+.help-button:not([disabled="true"]):hover:active {
+  background-color: #EABA00;
+  background-image: none;
+}
+
+.help-button > .button-box {
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-right: 0 !important;
+  padding-left: 0 !important;
+}
+
+.help-button > .button-box > .button-icon {
+  width: 26px;
+  height: 26px;
+  background-image: url("chrome://browser/skin/preferences/in-content/help-glyph.png");
+  background-position: center;
+}
+
+@media (min-resolution: 2dppx) {
+  .help-button > .button-box > .button-icon {
+    background-size: 26px 26px;
+    background-image: url("chrome://browser/skin/preferences/in-content/help-glyph@2x.png");
+  }
+}
+
+.help-button > .button-box > .button-text {
+  display: none;
+}
+
 .spinbuttons-button {
   -moz-margin-start: 10px !important;
   -moz-margin-end: 2px !important;
@@ -270,7 +316,16 @@ menulist > menupopup > menu[_moz-menuactive="true"],
 menulist > menupopup > menuitem[_moz-menuactive="true"],
 button[type="menu"] > menupopup > menu[_moz-menuactive="true"],
 button[type="menu"] > menupopup > menuitem[_moz-menuactive="true"] {
-  color: #FFFFFF;
+  color: #737980;
+  background-color: transparent;
+  background-image: linear-gradient(rgba(76,177,255,0.25), rgba(23,146,229,0.25));
+}
+
+menulist > menupopup > menu[selected="true"],
+menulist > menupopup > menuitem[selected="true"],
+button[type="menu"] > menupopup > menu[selected="true"],
+button[type="menu"] > menupopup > menuitem[selected="true"] {
+  color: #fff;
   background-image: linear-gradient(#4CB1FF, #1792E5);
 }
 

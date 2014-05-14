@@ -415,6 +415,17 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   /**
+   * Highlight the breakpoint on the current currently focused line/column
+   * if it exists.
+   */
+  highlightBreakpointAtCursor: function() {
+    let url = DebuggerView.Sources.selectedValue;
+    let line = DebuggerView.editor.getCursor().line + 1;
+    let location = { url: url, line: line };
+    this.highlightBreakpoint(location, { noEditorUpdate: true });
+  },
+
+  /**
    * Unhighlights the current breakpoint in this sources container.
    */
   unhighlightBreakpoint: function() {
@@ -747,7 +758,7 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
    *        The corresponding item.
    */
   _onBreakpointRemoved: function(aItem) {
-    dumpn("Finalizing breakpoint item: " + aItem);
+    dumpn("Finalizing breakpoint item: " + aItem.stringify());
 
     // Destroy the context menu for the breakpoint.
     let contextMenu = aItem.attachment.popup;
@@ -2003,21 +2014,21 @@ VariableBubbleView.prototype = {
   /**
    * The mousemove listener for the source editor.
    */
-  _onMouseMove: function({ clientX: x, clientY: y, buttons: btns }) {
+  _onMouseMove: function(e) {
     // Prevent the variable inspection popup from showing when the thread client
     // is not paused, or while a popup is already visible, or when the user tries
     // to select text in the editor.
-    if (gThreadClient && gThreadClient.state != "paused"
-        || !this._tooltip.isHidden()
-        || (DebuggerView.editor.somethingSelected()
-         && btns > 0)) {
+    let isResumed = gThreadClient && gThreadClient.state != "paused";
+    let isSelecting = DebuggerView.editor.somethingSelected() && e.buttons > 0;
+    let isPopupVisible = !this._tooltip.isHidden();
+    if (isResumed || isSelecting || isPopupVisible) {
       clearNamedTimeout("editor-mouse-move");
       return;
     }
     // Allow events to settle down first. If the mouse hovers over
     // a certain point in the editor long enough, try showing a variable bubble.
     setNamedTimeout("editor-mouse-move",
-      EDITOR_VARIABLE_HOVER_DELAY, () => this._findIdentifier(x, y));
+      EDITOR_VARIABLE_HOVER_DELAY, () => this._findIdentifier(e.clientX, e.clientY));
   },
 
   /**
@@ -2204,6 +2215,7 @@ WatchExpressionsView.prototype = Heritage.extend(WidgetMethods, {
   _createItemView: function(aExpression) {
     let container = document.createElement("hbox");
     container.className = "list-widget-item dbg-expression";
+    container.setAttribute("align", "center");
 
     let arrowNode = document.createElement("hbox");
     arrowNode.className = "dbg-expression-arrow";

@@ -238,20 +238,18 @@ class CallObject : public ScopeObject
     /* These functions are internal and are exposed only for JITs. */
 
     /*
-     * Construct a bare-bones call object given a shape, a non-singleton type,
-     * and slots pointer.  The call object must be further initialized to be
-     * usable.
+     * Construct a bare-bones call object given a shape and a non-singleton
+     * type.  The call object must be further initialized to be usable.
      */
     static CallObject *
-    create(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot *slots);
+    create(JSContext *cx, HandleShape shape, HandleTypeObject type);
 
     /*
-     * Construct a bare-bones call object given a shape and slots pointer, and
-     * make it have singleton type.  The call object must be initialized to be
-     * usable.
+     * Construct a bare-bones call object given a shape and make it have
+     * singleton type.  The call object must be initialized to be usable.
      */
     static CallObject *
-    createSingleton(JSContext *cx, HandleShape shape, HeapSlot *slots);
+    createSingleton(JSContext *cx, HandleShape shape);
 
     static CallObject *
     createTemplateObject(JSContext *cx, HandleScript script, gc::InitialHeap heap);
@@ -801,6 +799,10 @@ class DebugScopeObject : public ProxyObject
 
     /* Currently, the 'declarative' scopes are Call and Block. */
     bool isForDeclarative() const;
+
+    // Get a property by 'id', but returns sentinel values instead of throwing
+    // on exceptional cases.
+    bool getMaybeSentinelValue(JSContext *cx, HandleId id, MutableHandleValue vp);
 };
 
 /* Maintains per-compartment debug scope bookkeeping information. */

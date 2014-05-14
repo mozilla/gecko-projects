@@ -350,13 +350,20 @@ RestyleManager::RecomputePosition(nsIFrame* aFrame)
 
     // Move the frame
     if (display->mPosition == NS_STYLE_POSITION_STICKY) {
-      // Update sticky positioning for an entire element at once when
-      // RecomputePosition is called with the first continuation in a chain.
-      StickyScrollContainer::ComputeStickyOffsets(aFrame);
+      // Update sticky positioning for an entire element at once, starting with
+      // the first continuation or ib-split sibling.
+      // It's rare that the frame we already have isn't already the first
+      // continuation or ib-split sibling, but it can happen when styles differ
+      // across continuations such as ::first-line or ::first-letter, and in
+      // those cases we will generally (but maybe not always) do the work twice.
+      nsIFrame *firstContinuation =
+        nsLayoutUtils::FirstContinuationOrIBSplitSibling(aFrame);
+
+      StickyScrollContainer::ComputeStickyOffsets(firstContinuation);
       StickyScrollContainer* ssc =
-        StickyScrollContainer::GetStickyScrollContainerForFrame(aFrame);
+        StickyScrollContainer::GetStickyScrollContainerForFrame(firstContinuation);
       if (ssc) {
-        ssc->PositionContinuations(aFrame);
+        ssc->PositionContinuations(firstContinuation);
       }
     } else {
       MOZ_ASSERT(NS_STYLE_POSITION_RELATIVE == display->mPosition,
@@ -472,13 +479,13 @@ RestyleManager::RecomputePosition(nsIFrame* aFrame)
   return false;
 }
 
-nsresult
+void
 RestyleManager::StyleChangeReflow(nsIFrame* aFrame, nsChangeHint aHint)
 {
   // If the frame hasn't even received an initial reflow, then don't
   // send it a style-change reflow!
   if (aFrame->GetStateBits() & NS_FRAME_FIRST_REFLOW)
-    return NS_OK;
+    return;
 
   nsIPresShell::IntrinsicDirty dirtyType;
   if (aHint & nsChangeHint_ClearDescendantIntrinsics) {
@@ -503,7 +510,7 @@ RestyleManager::StyleChangeReflow(nsIFrame* aFrame, nsChangeHint aHint)
     aFrame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(aFrame);
   } while (aFrame);
 
-  return NS_OK;
+  return;
 }
 
 NS_DECLARE_FRAME_PROPERTY(ChangeListProperty, nullptr)

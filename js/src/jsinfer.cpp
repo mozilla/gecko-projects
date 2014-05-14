@@ -1192,7 +1192,7 @@ types::FinishCompilation(JSContext *cx, HandleScript script, ExecutionMode execu
     return true;
 }
 
-MOZ_NEVER_INLINE void
+static void
 CheckDefinitePropertiesTypeSet(JSContext *cx, TemporaryTypeSet *frozen, StackTypeSet *actual)
 {
     // The definite properties analysis happens on the main thread, so no new
@@ -3360,7 +3360,9 @@ types::AddClearDefiniteFunctionUsesInScript(JSContext *cx, TypeObject *type,
     // |script|, and add constraints to ensure that if the type sets' contents
     // change then the definite properties are cleared from the type.
     // This ensures that the inlining performed when the definite properties
-    // analysis was done is stable.
+    // analysis was done is stable. We only need to look at type sets which
+    // contain a single object, as IonBuilder does not inline polymorphic sites
+    // during the definite properties analysis.
 
     TypeObjectKey *calleeKey = Type::ObjectType(calleeScript->functionNonDelazifying()).objectKey();
 
@@ -3621,7 +3623,8 @@ JSScript::makeTypes(JSContext *cx)
 
     unsigned count = TypeScript::NumTypeSets(this);
 
-    TypeScript *typeScript = (TypeScript *) cx->calloc_(sizeof(TypeScript) + (sizeof(StackTypeSet) * count));
+    TypeScript *typeScript = (TypeScript *)
+        cx->calloc_(TypeScript::SizeIncludingTypeArray(count));
     if (!typeScript)
         return false;
 
@@ -4167,6 +4170,17 @@ TypeObject::sweep(FreeOp *fop, bool *oom)
             }
         }
     }
+}
+
+void
+TypeCompartment::clearTables()
+{
+    if (allocationSiteTable && allocationSiteTable->initialized())
+        allocationSiteTable->clear();
+    if (arrayTypeTable && arrayTypeTable->initialized())
+        arrayTypeTable->clear();
+    if (objectTypeTable && objectTypeTable->initialized())
+        objectTypeTable->clear();
 }
 
 void

@@ -42,6 +42,7 @@ browser.jar:
   skin/classic/browser/identity-icons-https-mixed-display.png
   skin/classic/browser/identity-icons-https-mixed-display@2x.png
   skin/classic/browser/Info.png
+  skin/classic/browser/in-content/common.css                (../shared/in-content/common.css)
   skin/classic/browser/keyhole-circle.png
   skin/classic/browser/keyhole-circle@2x.png
   skin/classic/browser/KUI-background.png
@@ -230,6 +231,8 @@ browser.jar:
   skin/classic/browser/preferences/in-content/icons@2x.png    (../shared/incontentprefs/icons@2x.png)
   skin/classic/browser/preferences/in-content/header.png      (../shared/incontentprefs/header.png)
   skin/classic/browser/preferences/in-content/header@2x.png   (../shared/incontentprefs/header@2x.png)
+  skin/classic/browser/preferences/in-content/help-glyph.png  (../shared/incontentprefs/help-glyph.png)
+  skin/classic/browser/preferences/in-content/help-glyph@2x.png (../shared/incontentprefs/help-glyph@2x.png)
   skin/classic/browser/preferences/in-content/sorter.png      (../shared/incontentprefs/sorter.png)
   skin/classic/browser/preferences/in-content/sorter@2x.png   (../shared/incontentprefs/sorter@2x.png)
   skin/classic/browser/preferences/in-content/dropdown.png    (../shared/incontentprefs/dropdown.png)
@@ -396,9 +399,13 @@ browser.jar:
   skin/classic/browser/devtools/close.png                   (../shared/devtools/images/close.png)
   skin/classic/browser/devtools/close@2x.png                (../shared/devtools/images/close@2x.png)
   skin/classic/browser/devtools/vview-delete.png            (../shared/devtools/images/vview-delete.png)
-  skin/classic/browser/devtools/vview-lock.png              (../shared/devtools/images/vview-lock.png)
+  skin/classic/browser/devtools/vview-delete@2x.png         (../shared/devtools/images/vview-delete@2x.png)
   skin/classic/browser/devtools/vview-edit.png              (../shared/devtools/images/vview-edit.png)
+  skin/classic/browser/devtools/vview-edit@2x.png           (../shared/devtools/images/vview-edit@2x.png)
+  skin/classic/browser/devtools/vview-lock.png              (../shared/devtools/images/vview-lock.png)
+  skin/classic/browser/devtools/vview-lock@2x.png           (../shared/devtools/images/vview-lock@2x.png)
   skin/classic/browser/devtools/vview-open-inspector.png    (../shared/devtools/images/vview-open-inspector.png)
+  skin/classic/browser/devtools/vview-open-inspector@2x.png (../shared/devtools/images/vview-open-inspector@2x.png)
   skin/classic/browser/devtools/undock@2x.png               (../shared/devtools/images/undock@2x.png)
   skin/classic/browser/devtools/font-inspector.css          (../shared/devtools/font-inspector.css)
   skin/classic/browser/devtools/computedview.css            (devtools/computedview.css)

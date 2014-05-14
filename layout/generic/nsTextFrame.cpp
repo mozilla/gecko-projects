@@ -2117,7 +2117,7 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
   gfxTextRunFactory::Parameters params =
       { mContext, finalUserData, &skipChars,
         textBreakPointsAfterTransform.Elements(),
-        textBreakPointsAfterTransform.Length(),
+        uint32_t(textBreakPointsAfterTransform.Length()),
         int32_t(firstFrame->PresContext()->AppUnitsPerDevPixel())};
 
   if (mDoubleByteText) {
@@ -7561,7 +7561,7 @@ struct NewlineProperty {
   int32_t mNewlineOffset;
 };
 
-nsresult
+void
 nsTextFrame::Reflow(nsPresContext*           aPresContext,
                     nsHTMLReflowMetrics&     aMetrics,
                     const nsHTMLReflowState& aReflowState,
@@ -7576,14 +7576,13 @@ nsTextFrame::Reflow(nsPresContext*           aPresContext,
   if (!aReflowState.mLineLayout) {
     ClearMetrics(aMetrics);
     aStatus = NS_FRAME_COMPLETE;
-    return NS_OK;
+    return;
   }
 
   ReflowText(*aReflowState.mLineLayout, aReflowState.AvailableWidth(),
              aReflowState.rendContext, aMetrics, aStatus);
 
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
-  return NS_OK;
 }
 
 #ifdef ACCESSIBILITY

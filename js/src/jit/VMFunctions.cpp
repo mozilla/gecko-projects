@@ -12,6 +12,7 @@
 #include "jit/BaselineIC.h"
 #include "jit/IonFrames.h"
 #include "jit/JitCompartment.h"
+#include "jit/mips/Simulator-mips.h"
 #include "vm/ArrayObject.h"
 #include "vm/Debugger.h"
 #include "vm/Interpreter.h"
@@ -120,7 +121,7 @@ CheckOverRecursed(JSContext *cx)
     // has not yet been set to 1. That's okay; it will be set to 1 very shortly,
     // and in the interim we might just fire a few useless calls to
     // CheckOverRecursed.
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
     JS_CHECK_SIMULATOR_RECURSION_WITH_EXTRA(cx, 0, return false);
 #else
     JS_CHECK_RECURSION(cx, return false);
@@ -153,7 +154,7 @@ CheckOverRecursedWithExtra(JSContext *cx, BaselineFrame *frame,
     uint8_t spDummy;
     uint8_t *checkSp = (&spDummy) - extra;
     if (earlyCheck) {
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
         (void)checkSp;
         JS_CHECK_SIMULATOR_RECURSION_WITH_EXTRA(cx, extra, frame->setOverRecursed());
 #else
@@ -167,7 +168,7 @@ CheckOverRecursedWithExtra(JSContext *cx, BaselineFrame *frame,
     if (frame->overRecursed())
         return false;
 
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
     JS_CHECK_SIMULATOR_RECURSION_WITH_EXTRA(cx, extra, return false);
 #else
     JS_CHECK_RECURSION_WITH_SP(cx, checkSp, return false);
@@ -365,8 +366,6 @@ NewInitObjectWithClassPrototype(JSContext *cx, HandleObject templateObject)
 bool
 ArraySpliceDense(JSContext *cx, HandleObject obj, uint32_t start, uint32_t deleteCount)
 {
-    JS_ASSERT(obj->is<ArrayObject>());
-
     JS::AutoValueArray<4> argv(cx);
     argv[0].setUndefined();
     argv[1].setObject(*obj);
@@ -527,25 +526,16 @@ InterruptCheck(JSContext *cx)
     return CheckForInterrupt(cx);
 }
 
-HeapSlot *
-NewSlots(JSRuntime *rt, unsigned nslots)
+void *
+MallocWrapper(JSRuntime *rt, size_t nbytes)
 {
-    JS_STATIC_ASSERT(sizeof(Value) == sizeof(HeapSlot));
-
-    Value *slots = reinterpret_cast<Value *>(rt->malloc_(nslots * sizeof(Value)));
-    if (!slots)
-        return nullptr;
-
-    for (unsigned i = 0; i < nslots; i++)
-        slots[i] = UndefinedValue();
-
-    return reinterpret_cast<HeapSlot *>(slots);
+    return rt->pod_malloc<uint8_t>(nbytes);
 }
 
 JSObject *
-NewCallObject(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot *slots)
+NewCallObject(JSContext *cx, HandleShape shape, HandleTypeObject type)
 {
-    JSObject *obj = CallObject::create(cx, shape, type, slots);
+    JSObject *obj = CallObject::create(cx, shape, type);
     if (!obj)
         return nullptr;
 
@@ -561,9 +551,9 @@ NewCallObject(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot 
 }
 
 JSObject *
-NewSingletonCallObject(JSContext *cx, HandleShape shape, HeapSlot *slots)
+NewSingletonCallObject(JSContext *cx, HandleShape shape)
 {
-    JSObject *obj = CallObject::createSingleton(cx, shape, slots);
+    JSObject *obj = CallObject::createSingleton(cx, shape);
     if (!obj)
         return nullptr;
 

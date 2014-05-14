@@ -69,6 +69,10 @@ namespace css {
 class ComputedTimingFunction;
 }
 
+namespace dom {
+class OverfillCallback;
+}
+
 namespace layers {
 
 class Animation;
@@ -605,10 +609,23 @@ public:
   virtual bool IsCompositingCheap() { return true; }
 
   bool IsInTransaction() const { return mInTransaction; }
+  virtual bool RequestOverfill(mozilla::dom::OverfillCallback* aCallback) { return true; }
+  virtual void RunOverfillCallback(const uint32_t aOverfill) { }
 
   virtual void SetRegionToClear(const nsIntRegion& aRegion)
   {
     mRegionToClear = aRegion;
+  }
+
+  virtual bool SupportsMixBlendModes(EnumSet<gfx::CompositionOp>& aMixBlendModes)
+  {
+    return false;
+  }
+
+  bool SupportsMixBlendMode(gfx::CompositionOp aMixBlendMode)
+  {
+    EnumSet<gfx::CompositionOp> modes(aMixBlendMode);
+    return SupportsMixBlendModes(modes);
   }
 
 protected:
@@ -1742,6 +1759,14 @@ protected:
    * and D3D.
    */
   void DefaultComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface);
+
+  /**
+   * A default implementation to compute and set the value for SupportsComponentAlphaChildren().
+   *
+   * If aNeedsSurfaceCopy is provided, then it is set to true if the caller needs to copy the background
+   * up into the intermediate surface created, false otherwise.
+   */
+  void DefaultComputeSupportsComponentAlphaChildren(bool* aNeedsSurfaceCopy = nullptr);
 
   /**
    * Loops over the children calling ComputeEffectiveTransforms on them.

@@ -236,8 +236,7 @@ class JSObject : public js::ObjectImpl
                                    js::gc::AllocKind kind,
                                    js::gc::InitialHeap heap,
                                    js::HandleShape shape,
-                                   js::HandleTypeObject type,
-                                   js::HeapSlot *extantSlots = nullptr);
+                                   js::HandleTypeObject type);
 
     /* Make an array object with the specified initial state. */
     static inline js::ArrayObject *createArray(js::ExclusiveContext *cx,
@@ -1089,8 +1088,9 @@ class JSObject : public js::ObjectImpl
 
     static JSObject *thisObject(JSContext *cx, js::HandleObject obj)
     {
-        JSObjectOp op = obj->getOps()->thisObject;
-        return op ? op(cx, obj) : obj;
+        if (js::ObjectOp op = obj->getOps()->thisObject)
+            return op(cx, obj);
+        return obj;
     }
 
     static bool thisObject(JSContext *cx, const js::Value &v, js::Value *vp);
@@ -1200,17 +1200,19 @@ js_IsCallable(const js::Value &v)
 }
 
 inline JSObject *
-GetInnerObject(JSContext *cx, js::HandleObject obj)
+GetInnerObject(JSObject *obj)
 {
-    if (JSObjectOp op = obj->getClass()->ext.innerObject)
-        return op(cx, obj);
+    if (js::InnerObjectOp op = obj->getClass()->ext.innerObject) {
+        JS::AutoAssertNoGC nogc;
+        return op(obj);
+    }
     return obj;
 }
 
 inline JSObject *
 GetOuterObject(JSContext *cx, js::HandleObject obj)
 {
-    if (JSObjectOp op = obj->getClass()->ext.outerObject)
+    if (js::ObjectOp op = obj->getClass()->ext.outerObject)
         return op(cx, obj);
     return obj;
 }

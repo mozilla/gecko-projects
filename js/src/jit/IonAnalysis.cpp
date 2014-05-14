@@ -143,16 +143,12 @@ jit::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
                     continue;
                 }
 
-                // Function.arguments can be used to access all arguments in
-                // non-strict scripts, so we can't optimize out any arguments.
-                CompileInfo &info = block->info();
-                if (!info.script()->strict()) {
-                    uint32_t slot = uses->index();
-                    uint32_t firstArgSlot = info.firstArgSlot();
-                    if (firstArgSlot <= slot && slot - firstArgSlot < info.nargs()) {
-                        uses++;
-                        continue;
-                    }
+                // The operand is an uneliminable slot. This currently
+                // includes argument slots in non-strict scripts (due to being
+                // observable via Function.arguments).
+                if (!block->info().canOptimizeOutSlot(uses->index())) {
+                    uses++;
+                    continue;
                 }
 
                 // Store an optimized out magic value in place of all dead
@@ -254,18 +250,11 @@ IsPhiObservable(MPhi *phi, Observability observe)
         return true;
     }
 
-    // If the Phi is one of the formal argument, and we are using an argument
-    // object in the function. The phi might be observable after a bailout.
-    // For inlined frames this is not needed, as they are captured in the inlineResumePoint.
-    if (fun && info.hasArguments()) {
-        uint32_t first = info.firstArgSlot();
-        if (first <= slot && slot - first < info.nargs()) {
-            // If arguments obj aliases formals, then the arg slots will never be used.
-            if (info.argsObjAliasesFormals())
-                return false;
-            return true;
-        }
-    }
+    // The Phi is an uneliminable slot. Currently this includes argument slots
+    // in non-strict scripts (due to being observable via Function.arguments).
+    if (fun && !info.canOptimizeOutSlot(slot))
+        return true;
+
     return false;
 }
 
@@ -2158,14 +2147,10 @@ AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
         JS_ASSERT(!baseobj->inDictionaryMode());
 
         Vector<MResumePoint *> callerResumePoints(cx);
-        MBasicBlock *block = ins->block();
-        for (MResumePoint *rp = block->callerResumePoint();
+        for (MResumePoint *rp = ins->block()->callerResumePoint();
              rp;
-             block = rp->block(), rp = block->callerResumePoint())
+             rp = rp->block()->callerResumePoint())
         {
-            JSScript *script = rp->block()->info().script();
-            if (!types::AddClearDefiniteFunctionUsesInScript(cx, type, script, block->info().script()))
-                return true;
             if (!callerResumePoints.append(rp))
                 return false;
         }
@@ -2384,7 +2369,24 @@ jit::AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
             return false;
         }
         if (!handled)
-            return true;
+            break;
+    }
+
+    if (baseobj->slotSpan() != 0) {
+        // We found some definite properties, but their correctness is still
+        // contingent on the correct frames being inlined. Add constraints to
+        // invalidate the definite properties if additional functions could be
+        // called at the inline frame sites.
+        Vector<MBasicBlock *> exitBlocks(cx);
+        for (MBasicBlockIterator block(graph.begin()); block != graph.end(); block++) {
+            if (MResumePoint *rp = block->callerResumePoint()) {
+                if (block->numPredecessors() == 1 && block->getPredecessor(0) == rp->block()) {
+                    JSScript *script = rp->block()->info().script();
+                    if (!types::AddClearDefiniteFunctionUsesInScript(cx, type, script, block->info().script()))
+                        return false;
+                }
+            }
+        }
     }
 
     return true;

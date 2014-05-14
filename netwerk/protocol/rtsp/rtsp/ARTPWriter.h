@@ -18,6 +18,7 @@
 
 #define A_RTP_WRITER_H_
 
+#include "mozilla/Types.h"
 #include <media/stagefright/foundation/ABase.h>
 #include <media/stagefright/foundation/AHandlerReflector.h>
 #include <media/stagefright/foundation/AString.h>
@@ -25,14 +26,16 @@
 #include <media/stagefright/MediaWriter.h>
 
 #include <arpa/inet.h>
-#include <sys/socket.h>
+
+#include "prio.h"
+#include "prnetdb.h"
 
 #define LOG_TO_FILES    0
 
 namespace android {
 
-struct ABuffer;
-struct MediaBuffer;
+struct MOZ_EXPORT ABuffer;
+struct MOZ_EXPORT MediaBuffer;
 
 struct ARTPWriter : public MediaWriter {
     ARTPWriter(int fd);
@@ -76,9 +79,9 @@ private:
     sp<ALooper> mLooper;
     sp<AHandlerReflector<ARTPWriter> > mReflector;
 
-    int mSocket;
-    struct sockaddr_in mRTPAddr;
-    struct sockaddr_in mRTCPAddr;
+    PRFileDesc *mSocket;
+    PRNetAddr mRTPAddr;
+    PRNetAddr mRTCPAddr;
 
     AString mProfileLevel;
     AString mSeqParamSet;

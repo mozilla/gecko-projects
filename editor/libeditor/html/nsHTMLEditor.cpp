@@ -80,13 +80,18 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::widget;
 
-// Some utilities to handle annoying overloading of "A" tag for link and named anchor
-static char hrefText[] = "href";
-static char anchorTxt[] = "anchor";
-static char namedanchorText[] = "namedanchor";
+// Some utilities to handle overloading of "A" tag for link and named anchor.
+static bool
+IsLinkTag(const nsString& s)
+{
+  return s.EqualsIgnoreCase("href");
+}
 
-#define IsLinkTag(s) (s.EqualsIgnoreCase(hrefText))
-#define IsNamedAnchorTag(s) (s.EqualsIgnoreCase(anchorTxt) || s.EqualsIgnoreCase(namedanchorText))
+static bool
+IsNamedAnchorTag(const nsString& s)
+{
+  return s.EqualsIgnoreCase("anchor") || s.EqualsIgnoreCase("namedanchor");
+}
 
 nsHTMLEditor::nsHTMLEditor()
 : nsPlaintextEditor()
@@ -495,9 +500,10 @@ nsHTMLEditor::SetFlags(uint32_t aFlags)
 NS_IMETHODIMP
 nsHTMLEditor::InitRules()
 {
-  MOZ_ASSERT(!mRules);
-  // instantiate the rules for the html editor
-  mRules = new nsHTMLEditRules();
+  if (!mRules) {
+    // instantiate the rules for the html editor
+    mRules = new nsHTMLEditRules();
+  }
   return mRules->Init(static_cast<nsPlaintextEditor*>(this));
 }
 
@@ -648,7 +654,7 @@ nsHTMLEditor::HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent)
       }
 
       bool handled = false;
-      nsresult rv;
+      nsresult rv = NS_OK;
       if (nsHTMLEditUtils::IsTableElement(blockParent)) {
         rv = TabInTable(nativeKeyEvent->IsShift(), &handled);
         if (handled) {
@@ -3007,7 +3013,7 @@ nsresult
 nsHTMLEditor::RemoveStyleSheetFromList(const nsAString &aURL)
 {
   // is it already in the list?
-  uint32_t foundIndex;
+  size_t foundIndex;
   foundIndex = mStyleSheetURLs.IndexOf(aURL);
   if (foundIndex == mStyleSheetURLs.NoIndex)
     return NS_ERROR_FAILURE;
@@ -3027,7 +3033,7 @@ nsHTMLEditor::GetStyleSheetForURL(const nsAString &aURL,
   *aStyleSheet = 0;
 
   // is it already in the list?
-  uint32_t foundIndex;
+  size_t foundIndex;
   foundIndex = mStyleSheetURLs.IndexOf(aURL);
   if (foundIndex == mStyleSheetURLs.NoIndex)
     return NS_OK; //No sheet -- don't fail!

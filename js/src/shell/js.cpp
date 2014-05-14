@@ -2814,7 +2814,7 @@ EvalInContext(JSContext *cx, unsigned argc, jsval *vp)
             ac.construct(cx, sobj);
         }
 
-        sobj = GetInnerObject(cx, sobj);
+        sobj = GetInnerObject(sobj);
         if (!sobj)
             return false;
         if (!(sobj->getClass()->flags & JSCLASS_IS_GLOBAL)) {
@@ -3501,14 +3501,15 @@ Parent(JSContext *cx, unsigned argc, jsval *vp)
     }
 
     Rooted<JSObject*> parent(cx, JS_GetParent(&v.toObject()));
-    args.rval().setObjectOrNull(parent);
 
-    /* Outerize if necessary.  Embrace the ugliness! */
+    /* Outerize if necessary. */
     if (parent) {
-        if (JSObjectOp op = parent->getClass()->ext.outerObject)
-            args.rval().setObjectOrNull(op(cx, parent));
+        parent = GetOuterObject(cx, parent);
+        if (!parent)
+            return false;
     }
 
+    args.rval().setObjectOrNull(parent);
     return true;
 }
 
@@ -5514,8 +5515,7 @@ ShellOpenAsmJSCacheEntryForRead(HandleObject global, const jschar *begin, const 
 }
 
 static void
-ShellCloseAsmJSCacheEntryForRead(HandleObject global, size_t serializedSize, const uint8_t *memory,
-                                 intptr_t handle)
+ShellCloseAsmJSCacheEntryForRead(size_t serializedSize, const uint8_t *memory, intptr_t handle)
 {
     // Undo the cookie adjustment done when opening the file.
     memory -= sizeof(uint32_t);
@@ -5603,8 +5603,7 @@ ShellOpenAsmJSCacheEntryForWrite(HandleObject global, bool installed,
 }
 
 static void
-ShellCloseAsmJSCacheEntryForWrite(HandleObject global, size_t serializedSize, uint8_t *memory,
-                                  intptr_t handle)
+ShellCloseAsmJSCacheEntryForWrite(size_t serializedSize, uint8_t *memory, intptr_t handle)
 {
     // Undo the cookie adjustment done when opening the file.
     memory -= sizeof(uint32_t);
@@ -5986,11 +5985,18 @@ SetRuntimeOptions(JSRuntime *rt, const OptionParser &op)
 
 #endif // JS_ION
 
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR)
     if (op.getBoolOption("arm-sim-icache-checks"))
         jit::Simulator::ICacheCheckingEnabled = true;
 
     int32_t stopAt = op.getIntOption("arm-sim-stop-at");
+    if (stopAt >= 0)
+        jit::Simulator::StopSimAt = stopAt;
+#elif defined(JS_MIPS_SIMULATOR)
+    if (op.getBoolOption("mips-sim-icache-checks"))
+        jit::Simulator::ICacheCheckingEnabled = true;
+
+    int32_t stopAt = op.getIntOption("mips-sim-stop-at");
     if (stopAt >= 0)
         jit::Simulator::StopSimAt = stopAt;
 #endif
@@ -6204,10 +6210,15 @@ main(int argc, char **argv, char **envp)
 #endif
         || !op.addIntOption('\0', "available-memory", "SIZE",
                             "Select GC settings based on available memory (MB)", 0)
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR)
         || !op.addBoolOption('\0', "arm-sim-icache-checks", "Enable icache flush checks in the ARM "
                              "simulator.")
         || !op.addIntOption('\0', "arm-sim-stop-at", "NUMBER", "Stop the ARM simulator after the given "
+                            "NUMBER of instructions.", -1)
+#elif defined(JS_MIPS_SIMULATOR)
+	|| !op.addBoolOption('\0', "mips-sim-icache-checks", "Enable icache flush checks in the MIPS "
+                             "simulator.")
+        || !op.addIntOption('\0', "mips-sim-stop-at", "NUMBER", "Stop the MIPS simulator after the given "
                             "NUMBER of instructions.", -1)
 #endif
     )

@@ -28,47 +28,49 @@ namespace mozilla {
 class JSGCThingParticipant: public nsCycleCollectionParticipant
 {
 public:
-  NS_IMETHOD_(void) Root(void *n)
+  NS_IMETHOD_(void) Root(void* aPtr)
   {
   }
 
-  NS_IMETHOD_(void) Unlink(void *n)
+  NS_IMETHOD_(void) Unlink(void* aPtr)
   {
   }
 
-  NS_IMETHOD_(void) Unroot(void *n)
+  NS_IMETHOD_(void) Unroot(void* aPtr)
   {
   }
 
-  NS_IMETHOD_(void) DeleteCycleCollectable(void *n)
+  NS_IMETHOD_(void) DeleteCycleCollectable(void* aPtr)
   {
   }
 
-  NS_IMETHOD Traverse(void *n, nsCycleCollectionTraversalCallback &cb);
+  NS_IMETHOD Traverse(void* aPtr, nsCycleCollectionTraversalCallback& aCb);
 };
 
 class JSZoneParticipant : public nsCycleCollectionParticipant
 {
 public:
-  MOZ_CONSTEXPR JSZoneParticipant(): nsCycleCollectionParticipant() {}
-
-  NS_IMETHOD_(void) Root(void *p)
+  MOZ_CONSTEXPR JSZoneParticipant(): nsCycleCollectionParticipant()
   {
   }
 
-  NS_IMETHOD_(void) Unlink(void *p)
+  NS_IMETHOD_(void) Root(void* aPtr)
   {
   }
 
-  NS_IMETHOD_(void) Unroot(void *p)
+  NS_IMETHOD_(void) Unlink(void* aPtr)
   {
   }
 
-  NS_IMETHOD_(void) DeleteCycleCollectable(void *n)
+  NS_IMETHOD_(void) Unroot(void* aPtr)
   {
   }
 
-  NS_IMETHOD Traverse(void *p, nsCycleCollectionTraversalCallback &cb);
+  NS_IMETHOD_(void) DeleteCycleCollectable(void* aPtr)
+  {
+  }
+
+  NS_IMETHOD Traverse(void* aPtr, nsCycleCollectionTraversalCallback& aCb);
 };
 
 class IncrementalFinalizeRunnable;
@@ -76,6 +78,13 @@ class IncrementalFinalizeRunnable;
 // Contains various stats about the cycle collection.
 struct CycleCollectorResults
 {
+  CycleCollectorResults()
+  {
+    // Initialize here so when we increment mNumSlices the first time we're
+    // not using uninitialized memory.
+    Init();
+  }
+
   void Init()
   {
     mForcedGC = false;
@@ -84,6 +93,9 @@ struct CycleCollectorResults
     mVisitedGCed = 0;
     mFreedRefCounted = 0;
     mFreedGCed = 0;
+    mNumSlices = 1;
+    // mNumSlices is initialized to one, because we call Init() after the
+    // per-slice increment of mNumSlices has already occurred.
   }
 
   bool mForcedGC;
@@ -92,6 +104,7 @@ struct CycleCollectorResults
   uint32_t mVisitedGCed;
   uint32_t mFreedRefCounted;
   uint32_t mFreedGCed;
+  uint32_t mNumSlices;
 };
 
 class CycleCollectedJSRuntime
@@ -108,10 +121,16 @@ protected:
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
   void UnmarkSkippableJSHolders();
 
-  virtual void TraverseAdditionalNativeRoots(nsCycleCollectionNoteRootCallback& aCb) {}
-  virtual void TraceAdditionalNativeGrayRoots(JSTracer* aTracer) {}
+  virtual void TraverseAdditionalNativeRoots(nsCycleCollectionNoteRootCallback& aCb)
+  {
+  }
+  virtual void TraceAdditionalNativeGrayRoots(JSTracer* aTracer)
+  {
+  }
 
-  virtual void CustomGCCallback(JSGCStatus aStatus) {}
+  virtual void CustomGCCallback(JSGCStatus aStatus)
+  {
+  }
   virtual bool CustomContextCallback(JSContext* aCx, unsigned aOperation)
   {
     return true; // Don't block context creation.
@@ -195,11 +214,11 @@ public:
   nsCycleCollectionParticipant* GCThingParticipant();
   nsCycleCollectionParticipant* ZoneParticipant();
 
-  nsresult TraverseRoots(nsCycleCollectionNoteRootCallback &aCb);
+  nsresult TraverseRoots(nsCycleCollectionNoteRootCallback& aCb);
   bool UsefulToMergeZones() const;
   void FixWeakMappingGrayBits() const;
-  bool NeedCollect() const;
-  void Collect(uint32_t reason) const;
+  bool AreGCGrayBitsValid() const;
+  void GarbageCollect(uint32_t aReason) const;
 
   void DeferredFinalize(DeferredFinalizeAppendFunction aAppendFunc,
                         DeferredFinalizeFunction aFunc,
@@ -210,7 +229,7 @@ public:
 
   virtual void PrepareForForgetSkippable() = 0;
   virtual void BeginCycleCollectionCallback() = 0;
-  virtual void EndCycleCollectionCallback(CycleCollectorResults &aResults) = 0;
+  virtual void EndCycleCollectionCallback(CycleCollectorResults& aResults) = 0;
   virtual void DispatchDeferredDeletion(bool aContinuation) = 0;
 
   JSRuntime* Runtime() const

@@ -275,13 +275,15 @@ DisplayItemClip::RemoveRoundedCorners()
   mRoundedClipRects.Clear();
 }
 
+// Computes the difference between aR1 and aR2, limited to aBounds.
 static void
-AccumulateRectDifference(const nsRect& aR1, const nsRect& aR2, nsRegion* aOut)
+AccumulateRectDifference(const nsRect& aR1, const nsRect& aR2, const nsRect& aBounds, nsRegion* aOut)
 {
   if (aR1.IsEqualInterior(aR2))
     return;
   nsRegion r;
   r.Xor(aR1, aR2);
+  r.And(r, aBounds);
   aOut->Or(*aOut, r);
 }
 
@@ -299,8 +301,8 @@ DisplayItemClip::AddOffsetAndComputeDifference(const nsPoint& aOffset,
     return;
   }
   if (mHaveClipRect) {
-    AccumulateRectDifference((mClipRect + aOffset).Intersect(aBounds),
-                             aOther.mClipRect.Intersect(aOtherBounds),
+    AccumulateRectDifference(mClipRect + aOffset, aOther.mClipRect,
+                             aBounds.Union(aOtherBounds),
                              aDifference);
   }
   for (uint32_t i = 0; i < mRoundedClipRects.Length(); ++i) {
@@ -316,7 +318,7 @@ uint32_t
 DisplayItemClip::GetCommonRoundedRectCount(const DisplayItemClip& aOther,
                                            uint32_t aMax) const
 {
-  uint32_t end = std::min(std::min(mRoundedClipRects.Length(), aMax),
+  uint32_t end = std::min(std::min(mRoundedClipRects.Length(), size_t(aMax)),
                           aOther.mRoundedClipRects.Length());
   uint32_t clipCount = 0;
   for (; clipCount < end; ++clipCount) {
@@ -331,7 +333,7 @@ DisplayItemClip::GetCommonRoundedRectCount(const DisplayItemClip& aOther,
 void
 DisplayItemClip::AppendRoundedRects(nsTArray<RoundedRect>* aArray, uint32_t aCount) const
 {
-  uint32_t count = std::min(mRoundedClipRects.Length(), aCount);
+  uint32_t count = std::min(mRoundedClipRects.Length(), size_t(aCount));
   for (uint32_t i = 0; i < count; ++i) {
     *aArray->AppendElement() = mRoundedClipRects[i];
   }

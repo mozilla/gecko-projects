@@ -244,7 +244,7 @@
            onpopuphidden="SocialShare.onHidden()"
            hidden="true">
       <vbox class="social-share-toolbar">
-        <vbox id="social-share-provider-buttons" flex="1"/>
+        <arrowscrollbox id="social-share-provider-buttons" orient="vertical" flex="1"/>
       </vbox>
     </panel>
 
@@ -798,6 +798,13 @@
               <observes element="viewBookmarksSidebar" attribute="checked"/>
             </menuitem>
             <menuseparator/>
+            <!-- NB: temporary solution for bug 985024, this should go away soon. -->
+            <menuitem id="BMB_bookmarksShowAllTop"
+                      class="subviewbutton"
+                      label="&showAllBookmarks2.label;"
+                      command="Browser:ShowAllBookmarks"
+                      key="manBookmarkKb"/>
+            <menuseparator/>
             <menuitem id="BMB_subscribeToPageMenuitem"
 #ifndef XP_MACOSX
                       class="menuitem-iconic subviewbutton"
@@ -867,6 +874,7 @@
              during the customization of the toolbar, in the palette, and before
              the Downloads Indicator overlay is loaded. -->
         <toolbarbutton id="downloads-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
+                       key="key_openDownloads"
                        oncommand="DownloadsIndicatorView.onCommand(event);"
                        ondrop="DownloadsIndicatorView.onDrop(event);"
                        ondragover="DownloadsIndicatorView.onDragOver(event);"
@@ -883,6 +891,7 @@
                        ondragenter="homeButtonObserver.onDragOver(event)"
                        ondrop="homeButtonObserver.onDrop(event)"
                        ondragexit="homeButtonObserver.onDragExit(event)"
+                       key="goHome"
                        onclick="BrowserGoHome(event);"
                        cui-areatype="toolbar"
                        aboutHomeOverrideTooltip="&abouthome.pageTitle;"/>
@@ -1005,10 +1014,12 @@
       <toolbarbutton id="print-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
 #ifdef XP_MACOSX
                      command="cmd_print"
+                     tooltip="dynamic-shortcut-tooltip"
 #else
                      command="cmd_printPreview"
+                     tooltiptext="&printButton.tooltip;"
 #endif
-                     tooltip="dynamic-shortcut-tooltip" label="&printButton.label;"/>
+                     label="&printButton.label;"/>
 
 
       <toolbarbutton id="new-window-button" class="toolbarbutton-1 chromeclass-toolbar-additional"

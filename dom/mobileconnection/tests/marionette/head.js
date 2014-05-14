@@ -10,6 +10,7 @@ const SETTINGS_KEY_DATA_APN_SETTINGS = "ril.data.apnSettings";
 let Promise = Cu.import("resource://gre/modules/Promise.jsm").Promise;
 
 let _pendingEmulatorCmdCount = 0;
+let _pendingEmulatorShellCmdCount = 0;
 
 /**
  * Send emulator command with safe guard.
@@ -42,6 +43,35 @@ function runEmulatorCmdSafe(aCommand) {
     } else {
       deferred.reject(aResult);
     }
+  });
+
+  return deferred.promise;
+}
+
+/**
+ * Send emulator shell command with safe guard.
+ *
+ * We should only call |finish()| after all emulator shell command transactions
+ * end, so here comes with the pending counter.  Resolve when the emulator
+ * shell gives response. Never reject.
+ *
+ * Fulfill params:
+ *   result -- an array of emulator shell response lines.
+ *
+ * @param aCommands
+ *        A string array commands to be passed to emulator through adb shell.
+ *
+ * @return A deferred promise.
+ */
+function runEmulatorShellCmdSafe(aCommands) {
+  let deferred = Promise.defer();
+
+  ++_pendingEmulatorShellCmdCount;
+  runEmulatorShell(aCommands, function(aResult) {
+    --_pendingEmulatorShellCmdCount;
+
+    log("Emulator shell response: " + JSON.stringify(aResult));
+    deferred.resolve(aResult);
   });
 
   return deferred.promise;
@@ -266,6 +296,24 @@ function ensureMobileConnection(aAdditionalPermissions, aServiceId) {
 }
 
 /**
+ * Get MozMobileConnection by ServiceId
+ *
+ * @param aServiceId [optional]
+ *        A numeric DSDS service id. Default: the one indicated in
+ *        start*TestCommon() or 0 if not indicated.
+ *
+ * @return A MozMobileConnection.
+ */
+function getMozMobileConnectionByServiceId(aServiceId) {
+  let mobileConn = mobileConnection;
+  if (aServiceId !== undefined) {
+    mobileConn =
+      workingFrame.contentWindow.navigator.mozMobileConnections[aServiceId];
+  }
+  return mobileConn;
+}
+
+/**
  * Wait for one named MobileConnection event.
  *
  * Resolve if that named event occurs.  Never reject.
@@ -283,11 +331,7 @@ function ensureMobileConnection(aAdditionalPermissions, aServiceId) {
 function waitForManagerEvent(aEventName, aServiceId) {
   let deferred = Promise.defer();
 
-  let mobileConn = mobileConnection;
-  if (aServiceId !== undefined) {
-    mobileConn =
-      workingFrame.contentWindow.navigator.mozMobileConnections[aServiceId];
-  }
+  let mobileConn = getMozMobileConnectionByServiceId(aServiceId);
 
   mobileConn.addEventListener(aEventName, function onevent(aEvent) {
     mobileConn.removeEventListener(aEventName, onevent);
@@ -303,7 +347,7 @@ function waitForManagerEvent(aEventName, aServiceId) {
  * Get available networks.
  *
  * Fulfill params:
- *   An array of nsIDOMMozMobileNetworkInfo.
+ *   An array of MozMobileNetworkInfo.
  * Reject params:
  *   A DOMEvent.
  *
@@ -323,7 +367,7 @@ function getNetworks() {
  *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'
  *
  * @param aNetwork
- *        A nsIDOMMozMobileNetworkInfo.
+ *        A MozMobileNetworkInfo.
  *
  * @return A deferred promise.
  */
@@ -341,7 +385,7 @@ function selectNetwork(aNetwork) {
  *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'
  *
  * @param aNetwork
- *        A nsIDOMMozMobileNetworkInfo.
+ *        A MozMobileNetworkInfo.
  *
  * @return A deferred promise.
  */
@@ -405,6 +449,136 @@ function sendMMI(aMmi) {
 }
 
 /**
+ * Set roaming preference.
+ *
+ * Fulfill params: (none)
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'.
+ *
+ * @param aMode
+ *        'home', 'affiliated', or 'any'.
+ *
+ * @return A deferred promise.
+ */
+ function setRoamingPreference(aMode) {
+  let request = mobileConnection.setRoamingPreference(aMode);
+  return wrapDomRequestAsPromise(request)
+    .then(null, () => { throw request.error });
+}
+
+/**
+ * Set preferred network type.
+ *
+ * Fulfill params: (none)
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', 'ModeNotSupported' or
+ *   'GenericFailure'.
+ *
+ * @param aType
+ *        'wcdma/gsm', 'gsm', 'wcdma', 'wcdma/gsm-auto', 'cdma/evdo', 'cdma',
+ *        'evdo', 'wcdma/gsm/cdma/evdo', 'lte/cdma/evdo', 'lte/wcdma/gsm',
+ *        'lte/wcdma/gsm/cdma/evdo' or 'lte'.
+ *
+ * @return A deferred promise.
+ */
+ function setPreferredNetworkType(aType) {
+  let request = mobileConnection.setPreferredNetworkType(aType);
+  return wrapDomRequestAsPromise(request)
+    .then(null, () => { throw request.error });
+}
+
+/**
+ * Query current preferred network type.
+ *
+ * Fulfill params:
+ *   'wcdma/gsm', 'gsm', 'wcdma', 'wcdma/gsm-auto', 'cdma/evdo', 'cdma',
+ *   'evdo', 'wcdma/gsm/cdma/evdo', 'lte/cdma/evdo', 'lte/wcdma/gsm',
+ *   'lte/wcdma/gsm/cdma/evdo' or 'lte'.
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'.
+ *
+ * @return A deferred promise.
+ */
+ function getPreferredNetworkType() {
+  let request = mobileConnection.getPreferredNetworkType();
+  return wrapDomRequestAsPromise(request)
+    .then(() => request.result, () => { throw request.error });
+}
+
+/**
+ * Configures call forward options.
+ *
+ * Fulfill params: (none)
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', 'InvalidParameter', or
+ *   'GenericFailure'.
+ *
+ * @param aOptions
+ *        A MozCallForwardingOptions.
+ *
+ * @return A deferred promise.
+ */
+ function setCallForwardingOption(aOptions) {
+  let request = mobileConnection.setCallForwardingOption(aOptions);
+  return wrapDomRequestAsPromise(request)
+    .then(null, () => { throw request.error });
+}
+
+/**
+ * Configures call forward options.
+ *
+ * Fulfill params:
+ *   An array of MozCallForwardingOptions.
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', 'InvalidParameter', or
+ *   'GenericFailure'.
+ *
+ * @param aReason
+ *        One of MozMobileConnection.CALL_FORWARD_REASON_* values.
+ *
+ * @return A deferred promise.
+ */
+ function getCallForwardingOption(aReason) {
+  let request = mobileConnection.getCallForwardingOption(aReason);
+  return wrapDomRequestAsPromise(request)
+    .then(() => request.result, () => { throw request.error });
+}
+
+/**
+ * Set voice privacy preference.
+ *
+ * Fulfill params: (none)
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'.
+ *
+ * @param aEnabled
+ *        Boolean indicates the preferred voice privacy mode.
+ *
+ * @return A deferred promise.
+ */
+ function setVoicePrivacyMode(aEnabled) {
+  let request = mobileConnection.setVoicePrivacyMode(aEnabled);
+  return wrapDomRequestAsPromise(request)
+    .then(null, () => { throw request.error });
+}
+
+/**
+ * Query current voice privacy mode.
+ *
+ * Fulfill params:
+     A boolean indicates the current voice privacy mode.
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'.
+ *
+ * @return A deferred promise.
+ */
+ function getVoicePrivacyMode() {
+  let request = mobileConnection.getVoicePrivacyMode();
+  return wrapDomRequestAsPromise(request)
+    .then(() => request.result, () => { throw request.error });
+}
+
+/**
  * Set data connection enabling state and wait for "datachange" event.
  *
  * Resolve if data connection state changed to the expected one.  Never reject.
@@ -426,11 +600,7 @@ function setDataEnabledAndWait(aEnabled, aServiceId) {
   promises.push(waitForManagerEvent("datachange", aServiceId));
   promises.push(setDataEnabled(aEnabled));
   Promise.all(promises).then(function keepWaiting() {
-    let mobileConn = mobileConnection;
-    if (aServiceId !== undefined) {
-      mobileConn =
-        workingFrame.contentWindow.navigator.mozMobileConnections[aServiceId];
-    }
+    let mobileConn = getMozMobileConnectionByServiceId(aServiceId);
     // To ignore some transient states, we only resolve that deferred promise
     // when the |connected| state equals to the expected one and never rejects.
     let connected = mobileConn.data.connected;
@@ -443,6 +613,116 @@ function setDataEnabledAndWait(aEnabled, aServiceId) {
   });
 
   return deferred.promise;
+}
+
+/**
+ * Set radio enabling state.
+ *
+ * Resolve no matter the request succeeds or fails. Never reject.
+ *
+ * Fulfill params: (none)
+ *
+ * @param aEnabled
+ *        A boolean state.
+ * @param aServiceId [optional]
+ *        A numeric DSDS service id. Default: the one indicated in
+ *        start*TestCommon() or 0 if not indicated.
+ *
+ * @return A deferred promise.
+ */
+function setRadioEnabled(aEnabled, aServiceId) {
+  let mobileConn = getMozMobileConnectionByServiceId(aServiceId);
+  let request = mobileConn.setRadioEnabled(aEnabled);
+  return wrapDomRequestAsPromise(request)
+    .then(function onsuccess() {
+      ok(true, "setRadioEnabled " + aEnabled + " on " + aServiceId + " success.");
+    }, function onerror() {
+      ok(false, "setRadioEnabled " + aEnabled + " on " + aServiceId + " " +
+         request.error.name);
+    });
+}
+
+/**
+ * Set radio enabling state and wait for "radiostatechange" event.
+ *
+ * Resolve if radio state changed to the expected one. Never reject.
+ *
+ * Fulfill params: (none)
+ *
+ * @param aEnabled
+ *        A boolean state.
+ * @param aServiceId [optional]
+ *        A numeric DSDS service id. Default: the one indicated in
+ *        start*TestCommon() or 0 if not indicated.
+ *
+ * @return A deferred promise.
+ */
+function setRadioEnabledAndWait(aEnabled, aServiceId) {
+  let deferred = Promise.defer();
+
+  let promises = [];
+  promises.push(waitForManagerEvent("radiostatechange", aServiceId));
+  promises.push(setRadioEnabled(aEnabled, aServiceId));
+  Promise.all(promises).then(function keepWaiting() {
+    let mobileConn = getMozMobileConnectionByServiceId(aServiceId);
+    // To ignore some transient states, we only resolve that deferred promise
+    // when |radioState| equals to the expected one and never rejects.
+    let state = mobileConn.radioState;
+    aEnabled = aEnabled ? "enabled" : "disabled";
+    if (state == aEnabled) {
+      deferred.resolve();
+      return;
+    }
+
+    return waitForManagerEvent("radiostatechange", aServiceId).then(keepWaiting);
+  });
+
+  return deferred.promise;
+}
+
+/**
+ * Set CLIR (calling line id restriction).
+ *
+ * Fulfill params: (none)
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'
+ *
+ * @param aMode
+ *        A short number.
+ * @param aServiceId [optional]
+ *        A numeric DSDS service id. Default: the one indicated in
+ *        start*TestCommon() or 0 if not indicated.
+ *
+ * @return A deferred promise.
+ */
+function setClir(aMode, aServiceId) {
+  ok(true, "setClir(" + aMode + ", " + aServiceId + ")");
+  let mobileConn = getMozMobileConnectionByServiceId(aServiceId);
+  let request = mobileConn.setCallingLineIdRestriction(aMode);
+  return wrapDomRequestAsPromise(request)
+    .then(null, () => { throw request.error });
+}
+
+/**
+ * Get CLIR (calling line id restriction).
+ *
+ * Fulfill params:
+ *   CLIR mode.
+ * Reject params:
+ *   'RadioNotAvailable', 'RequestNotSupported', or 'GenericFailure'
+ *
+ * @param aServiceId [optional]
+ *        A numeric DSDS service id. Default: the one indicated in
+ *        start*TestCommon() or 0 if not indicated.
+ *
+ * @return A deferred promise.
+ */
+function getClir(aServiceId) {
+  ok(true, "getClir(" + aServiceId + ")");
+  let mobileConn = getMozMobileConnectionByServiceId(aServiceId);
+  let request = mobileConn.getCallingLineIdRestriction();
+  return wrapDomRequestAsPromise(request)
+    .then(() => request.result, () => { throw request.error });
 }
 
 /**
@@ -487,11 +767,7 @@ function setEmulatorRoamingAndWait(aRoaming, aServiceId) {
     let state = (aRoaming ? "roaming" : "home");
     return setEmulatorVoiceDataStateAndWait(aWhich, state, aServiceId)
       .then(() => {
-        let mobileConn = mobileConnection;
-        if (aServiceId !== undefined) {
-          mobileConn =
-            workingFrame.contentWindow.navigator.mozMobileConnections[aServiceId];
-        }
+        let mobileConn = getMozMobileConnectionByServiceId(aServiceId);
         is(mobileConn[aWhich].roaming, aRoaming,
                      aWhich + ".roaming")
       });
@@ -727,7 +1003,8 @@ function cleanUp() {
       finish();
     });
   }, function() {
-    return _pendingEmulatorCmdCount === 0;
+    return _pendingEmulatorCmdCount === 0 &&
+           _pendingEmulatorShellCmdCount === 0;
   });
 }
 

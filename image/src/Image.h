@@ -10,6 +10,7 @@
 #include "imgIContainer.h"
 #include "imgStatusTracker.h"
 #include "ImageURL.h"
+#include "nsStringFwd.h"
 
 class nsIRequest;
 class nsIInputStream;
@@ -83,6 +84,13 @@ public:
   virtual size_t HeapSizeOfDecodedWithComputedFallback(mozilla::MallocSizeOf aMallocSizeOf) const = 0;
   virtual size_t NonHeapSizeOfDecoded() const = 0;
   virtual size_t OutOfProcessSizeOfDecoded() const = 0;
+
+  /**
+   * Gets the size of the memory taken up for the parsed vector image's
+   * document (e.g. SVGDocument), and returns the document's URL via the
+   * aDocURL outparam.
+   */
+  virtual size_t HeapSizeOfVectorImageDocument(nsACString* aDocURL = nullptr) const = 0;
 
   virtual void IncrementAnimationConsumers() = 0;
   virtual void DecrementAnimationConsumers() = 0;
@@ -179,6 +187,17 @@ protected:
   nsresult SetAnimationModeInternal(uint16_t aAnimationMode);
 
   /**
+   * Helper for RequestRefresh.
+   *
+   * If we've had a "recent" refresh (i.e. if this image is being used in
+   * multiple documents & some other document *just* called RequestRefresh() on
+   * this image with a timestamp close to aTime), this method returns true.
+   *
+   * Otherwise, this method updates mLastRefreshTime to aTime & returns false.
+   */
+  bool HadRecentRefresh(const mozilla::TimeStamp& aTime);
+
+  /**
    * Decides whether animation should or should not be happening,
    * and makes sure the right thing is being done.
    */
@@ -198,6 +217,7 @@ protected:
   // Member data shared by all implementations of this abstract class
   nsRefPtr<imgStatusTracker>    mStatusTracker;
   nsRefPtr<ImageURL>            mURI;
+  TimeStamp                     mLastRefreshTime;
   uint64_t                      mInnerWindowId;
   uint32_t                      mAnimationConsumers;
   uint16_t                      mAnimationMode; // Enum values in imgIContainer

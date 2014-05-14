@@ -23,7 +23,7 @@ HASINSTANCE_HOOK_NAME = '_hasInstance'
 NEWRESOLVE_HOOK_NAME = '_newResolve'
 ENUMERATE_HOOK_NAME = '_enumerate'
 ENUM_ENTRY_VARIABLE_NAME = 'strings'
-INSTANCE_RESERVED_SLOTS = 3
+INSTANCE_RESERVED_SLOTS = 1
 
 
 def memberReservedSlot(member):
@@ -353,6 +353,7 @@ JS_NULL_OBJECT_OPS
         if self.descriptor.interface.getExtendedAttribute("Global"):
             classFlags += "JSCLASS_DOM_GLOBAL | JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(DOM_GLOBAL_SLOTS) | JSCLASS_IMPLEMENTS_BARRIERS"
             traceHook = "JS_GlobalObjectTraceHook"
+            reservedSlots = "JSCLASS_GLOBAL_APPLICATION_SLOTS"
             if not self.descriptor.workers:
                 classExtensionAndObjectOps = """\
 {
@@ -388,6 +389,7 @@ JS_NULL_OBJECT_OPS
 """
         else:
             classFlags += "JSCLASS_HAS_RESERVED_SLOTS(%d)" % slotCount
+            reservedSlots = slotCount
         if self.descriptor.interface.getExtendedAttribute("NeedNewResolve"):
             newResolveHook = "(JSResolveOp)" + NEWRESOLVE_HOOK_NAME
             classFlags += " | JSCLASS_NEW_RESOLVE"
@@ -423,6 +425,10 @@ JS_NULL_OBJECT_OPS
               },
               $*{descriptor}
             };
+            static_assert(${instanceReservedSlots} == DOM_INSTANCE_RESERVED_SLOTS,
+                          "Must have the right minimal number of reserved slots.");
+            static_assert(${reservedSlots} >= ${slotCount},
+                          "Must have enough reserved slots.");
             """,
             name=self.descriptor.interface.identifier.name,
             flags=classFlags,
@@ -433,7 +439,10 @@ JS_NULL_OBJECT_OPS
             call=callHook,
             trace=traceHook,
             classExtensionAndObjectOps=classExtensionAndObjectOps,
-            descriptor=DOMClass(self.descriptor))
+            descriptor=DOMClass(self.descriptor),
+            instanceReservedSlots=INSTANCE_RESERVED_SLOTS,
+            reservedSlots=reservedSlots,
+            slotCount=slotCount)
 
 
 class CGDOMProxyJSClass(CGThing):
@@ -2328,6 +2337,8 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
             parentProtoType = "Rooted"
             if self.descriptor.interface.getExtendedAttribute("ArrayClass"):
                 getParentProto = "aCx, JS_GetArrayPrototype(aCx, aGlobal)"
+            elif self.descriptor.interface.getExtendedAttribute("ExceptionClass"):
+                getParentProto = "aCx, JS_GetErrorPrototype(aCx)"
             else:
                 getParentProto = "aCx, JS_GetObjectPrototype(aCx, aGlobal)"
         else:
@@ -2471,13 +2482,17 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
         else:
             domClass = "nullptr"
 
-        if self.properties.hasNonChromeOnly():
+        isGlobal = self.descriptor.interface.getExtendedAttribute("Global") is not None
+        if not isGlobal and self.properties.hasNonChromeOnly():
             properties = "&sNativeProperties"
+        elif self.properties.hasNonChromeOnly():
+            properties = "!GlobalPropertiesAreOwn() ? &sNativeProperties : nullptr"
         else:
             properties = "nullptr"
-        if self.properties.hasChromeOnly():
-            accessCheck = "nsContentUtils::ThreadsafeIsCallerChrome()"
-            chromeProperties = accessCheck + " ? &sChromeOnlyNativeProperties : nullptr"
+        if not isGlobal and self.properties.hasChromeOnly():
+            chromeProperties = "nsContentUtils::ThreadsafeIsCallerChrome() ? &sChromeOnlyNativeProperties : nullptr"
+        elif self.properties.hasChromeOnly():
+            chromeProperties = "!GlobalPropertiesAreOwn() && nsContentUtils::ThreadsafeIsCallerChrome() ? &sChromeOnlyNativeProperties : nullptr"
         else:
             chromeProperties = "nullptr"
 
@@ -2946,12 +2961,29 @@ class CGWrapGlobalMethod(CGAbstractMethod):
                 Argument(descriptor.nativeType + '*', 'aObject'),
                 Argument('nsWrapperCache*', 'aCache'),
                 Argument('JS::CompartmentOptions&', 'aOptions'),
-                Argument('JSPrincipals*', 'aPrincipal')]
+                Argument('JSPrincipals*', 'aPrincipal'),
+                Argument('bool', 'aInitStandardClasses')]
         CGAbstractMethod.__init__(self, descriptor, 'Wrap', 'JSObject*', args)
         self.descriptor = descriptor
         self.properties = properties
 
     def definition_body(self):
+        if self.properties.hasNonChromeOnly():
+            properties = "GlobalPropertiesAreOwn() ? &sNativeProperties : nullptr"
+        else:
+            properties = "nullptr"
+        if self.properties.hasChromeOnly():
+            chromeProperties = "GlobalPropertiesAreOwn() && nsContentUtils::ThreadsafeIsCallerChrome() ? &sChromeOnlyNativeProperties : nullptr"
+        else:
+            chromeProperties = "nullptr"
+
+        if self.descriptor.workers:
+            fireOnNewGlobal = """// XXXkhuey can't do this yet until workers can lazy resolve.
+// JS_FireOnNewGlobalObject(aCx, obj);
+"""
+        else:
+            fireOnNewGlobal = ""
+
         return fill(
             """
             ${assertions}
@@ -2959,29 +2991,39 @@ class CGWrapGlobalMethod(CGAbstractMethod):
                          "nsISupports must be on our primary inheritance chain");
 
               JS::Rooted<JSObject*> obj(aCx);
-              obj = CreateGlobal<${nativeType}, GetProtoObject>(aCx,
-                                                     aObject,
-                                                     aCache,
-                                                     Class.ToJSClass(),
-                                                     aOptions,
-                                                     aPrincipal);
+              CreateGlobal<${nativeType}, GetProtoObject>(aCx,
+                                               aObject,
+                                               aCache,
+                                               Class.ToJSClass(),
+                                               aOptions,
+                                               aPrincipal,
+                                               aInitStandardClasses,
+                                               &obj);
+              if (!obj) {
+                return nullptr;
+              }
 
               // obj is a new global, so has a new compartment.  Enter it
               // before doing anything with it.
               JSAutoCompartment ac(aCx, obj);
+
+              if (!DefineProperties(aCx, obj, ${properties}, ${chromeProperties})) {
+                return nullptr;
+              }
               $*{unforgeable}
 
               $*{slots}
-
-              // XXXkhuey can't do this yet until workers can lazy resolve.
-              // JS_FireOnNewGlobalObject(aCx, obj);
+              $*{fireOnNewGlobal}
 
               return obj;
             """,
             assertions=AssertInheritanceChain(self.descriptor),
             nativeType=self.descriptor.nativeType,
+            properties=properties,
+            chromeProperties=chromeProperties,
             unforgeable=InitUnforgeableProperties(self.descriptor, self.properties),
-            slots=InitMemberSlots(self.descriptor, True))
+            slots=InitMemberSlots(self.descriptor, True),
+            fireOnNewGlobal=fireOnNewGlobal)
 
 
 class CGUpdateMemberSlotsMethod(CGAbstractStaticMethod):
@@ -10027,6 +10069,12 @@ class CGDescriptor(CGThing):
             not descriptor.workers):
             cgThings.append(CGConstructorEnabled(descriptor))
 
+        if (descriptor.interface.hasMembersInSlots() and
+            descriptor.interface.hasChildInterfaces()):
+            raise TypeError("We don't support members in slots on "
+                            "non-leaf interfaces like %s" %
+                            descriptor.interface.identifier.name)
+
         if descriptor.concrete:
             if descriptor.proxy:
                 if descriptor.interface.totalMembersInSlots != 0:
@@ -10054,10 +10102,6 @@ class CGDescriptor(CGThing):
                 cgThings.append(CGDOMJSClass(descriptor))
                 cgThings.append(CGGetJSClassMethod(descriptor))
                 if descriptor.interface.hasMembersInSlots():
-                    if descriptor.interface.hasChildInterfaces():
-                        raise TypeError("We don't support members in slots on "
-                                        "non-leaf interfaces like %s" %
-                                        descriptor.interface.identifier.name)
                     cgThings.append(CGUpdateMemberSlotsMethod(descriptor))
 
             if descriptor.interface.getExtendedAttribute("Global"):

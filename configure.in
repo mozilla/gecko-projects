@@ -2550,8 +2550,13 @@ dnl ===============================================================
 if test "$GNU_CC"; then
   AC_DEFINE(HAVE_VISIBILITY_HIDDEN_ATTRIBUTE)
   AC_DEFINE(HAVE_VISIBILITY_ATTRIBUTE)
-  case "${OS_TARGET}" in
-  Darwin|Android)
+  if test -n "$gonkdir"; then
+    visibility_target=Gonk
+  else
+    visibility_target=$OS_TARGET
+  fi
+  case "$visibility_target" in
+  Darwin|Gonk)
     VISIBILITY_FLAGS='-fvisibility=hidden'
     ;;
   *)
@@ -5785,14 +5790,20 @@ if test -n "$MOZ_ANGLE_RENDERER"; then
     if test -n "$WINDOWSSDKDIR"; then
       MOZ_D3DCOMPILER_VISTA_DLL_PATH="$WINDOWSSDKDIR/Redist/D3D/$MOZ_D3D_CPU_SUFFIX/$MOZ_D3DCOMPILER_VISTA_DLL"
       if test -f "$MOZ_D3DCOMPILER_VISTA_DLL_PATH"; then
-        MOZ_HAS_WINSDK_WITH_D3D=1
         AC_MSG_RESULT([Found MOZ_D3DCOMPILER_VISTA_DLL_PATH: $MOZ_D3DCOMPILER_VISTA_DLL_PATH])
+        MOZ_HAS_WINSDK_WITH_D3D=1
       else
         AC_MSG_RESULT([MOZ_D3DCOMPILER_VISTA_DLL_PATH doesn't exist: $MOZ_D3DCOMPILER_VISTA_DLL_PATH])
+        AC_MSG_ERROR([Windows SDK at "$WINDOWSSDKDIR" appears broken. Try updating to MozillaBuild 1.9 final or higher.])
+        MOZ_D3DCOMPILER_VISTA_DLL_PATH=
       fi
     else
-      AC_MSG_RESULT([WINDOWSSDKDIR is missing.])
+      AC_MSG_RESULT([Windows SDK not found.])
     fi
+  fi
+
+  if test -z "$MOZ_D3DCOMPILER_VISTA_DLL_PATH"; then
+    MOZ_D3DCOMPILER_VISTA_DLL=
   fi
 
   ######################################
@@ -5811,7 +5822,7 @@ if test -n "$MOZ_ANGLE_RENDERER"; then
      test -f "$MOZ_DIRECTX_SDK_PATH"/lib/$MOZ_D3D_CPU_SUFFIX/dxguid.lib ; then
     AC_MSG_RESULT([Found DirectX SDK via registry, using $MOZ_DIRECTX_SDK_PATH])
   else
-    AC_MSG_RESULT([Couldn't find the DirectX SDK.])
+    AC_MSG_RESULT([DirectX SDK not found.])
     MOZ_DIRECTX_SDK_PATH=
   fi
 
@@ -5830,21 +5841,21 @@ if test -n "$MOZ_ANGLE_RENDERER"; then
 
     if test -n "$MOZ_D3DX9_VERSION" ; then
       MOZ_D3DCOMPILER_XP_CAB=`find "$MOZ_DIRECTX_SDK_PATH"/Redist -name *D3DCompiler_${MOZ_D3DX9_VERSION}_${MOZ_D3D_CPU_SUFFIX}.cab | head -n1`
-      MOZ_D3DCOMPILER_XP_DLL=D3DCompiler_$MOZ_D3DX9_VERSION.dll
+
+      if test -n "$MOZ_D3DCOMPILER_XP_CAB"; then
+        MOZ_D3DCOMPILER_XP_DLL=D3DCompiler_$MOZ_D3DX9_VERSION.dll
+      else
+        AC_MSG_RESULT([Couldn't find a CAB containing the D3D compiler DLL.])
+        AC_MSG_ERROR([DirectX SDK at "$MOZ_DIRECTX_SDK_PATH" appears broken.])
+        MOZ_DIRECTX_SDK_PATH=
+      fi
     else
       AC_MSG_RESULT([Couldn't determine the D3DX9 version for the DirectX SDK.])
-    fi
-
-    if test -z "$MOZ_D3DCOMPILER_XP_CAB"; then
-      AC_MSG_RESULT([Couldn't find a CAB containing the D3D compiler DLL.])
       MOZ_DIRECTX_SDK_PATH=
-      MOZ_D3DCOMPILER_XP_DLL=
     fi
   else
     AC_MSG_RESULT([Couldn't find an acceptable DirectX SDK for ANGLE, needed for d3dcompiler_43.])
     AC_MSG_RESULT([  Either ignore, install DirectX SDK (June 2010 version or newer), or reconfigure with --disable-webgl.])
-    MOZ_DIRECTX_SDK_PATH=
-    MOZ_D3DCOMPILER_XP_DLL=
   fi
 
   ######################################
@@ -7629,6 +7640,19 @@ if test "$MOZ_CHROME_FILE_FORMAT" != "jar" &&
     AC_MSG_ERROR([--enable-chrome-format must be set to either jar, flat, or omni])
 fi
 
+dnl ========================================================
+dnl = Enable Support for devtools webide
+dnl ========================================================
+MOZ_ARG_ENABLE_BOOL(devtools-webide,
+[  --enable-devtools-webide Set compile flags necessary for compiling devtools webide ],
+MOZ_DEVTOOLS_WEBIDE=1,
+MOZ_DEVTOOLS_WEBIDE= )
+
+if test -n "$MOZ_DEVTOOLS_WEBIDE"; then
+    AC_DEFINE(MOZ_DEVTOOLS_WEBIDE)
+fi
+AC_SUBST(MOZ_DEVTOOLS_WEBIDE)
+
 dnl =========================================================
 dnl Omnijar packaging (bug 552121)
 dnl =========================================================
@@ -7867,14 +7891,14 @@ else
     fi
     AC_SUBST(CL_INCLUDES_PREFIX)
     rm -f dummy-hello.c
+
+    dnl Make sure that the build system can handle non-ASCII characters
+    dnl in environment variables to prevent it from breaking silently on
+    dnl non-English systems.
+    NONASCII=$'\241\241'
+    AC_SUBST(NONASCII)
   fi
 fi
-
-dnl Make sure that the build system can handle non-ASCII characters
-dnl in environment variables to prevent it from breking silently on
-dnl non-English systems.
-NONASCII=$'\241\241'
-AC_SUBST(NONASCII)
 
 dnl ========================================================
 dnl =
@@ -8982,6 +9006,8 @@ else
   AC_DEFINE(MOZ_STATIC_JS)
 fi
 AC_SUBST(JS_SHARED_LIBRARY)
+
+AC_SUBST(UPLOAD_EXTRA_FILES)
 
 MOZ_CREATE_CONFIG_STATUS()
 

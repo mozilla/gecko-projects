@@ -279,13 +279,10 @@ public:
 
     static bool IsISupportsDescendant(nsIInterfaceInfo* info);
 
-    nsIXPCSecurityManager* GetDefaultSecurityManager() const
+    static nsIScriptSecurityManager* SecurityManager()
     {
-        // mDefaultSecurityManager is main-thread only.
-        if (!NS_IsMainThread()) {
-            return nullptr;
-        }
-        return mDefaultSecurityManager;
+        MOZ_ASSERT(NS_IsMainThread());
+        return gScriptSecurityManager;
     }
 
     // This returns an AddRef'd pointer. It does not do this with an 'out' param
@@ -727,7 +724,6 @@ class MOZ_STACK_CLASS XPCCallContext : public nsAXPCNativeCallContext
 public:
     NS_IMETHOD GetCallee(nsISupports **aResult);
     NS_IMETHOD GetCalleeMethodIndex(uint16_t *aResult);
-    NS_IMETHOD GetCalleeWrapper(nsIXPConnectWrappedNative **aResult);
     NS_IMETHOD GetJSContext(JSContext **aResult);
     NS_IMETHOD GetArgc(uint32_t *aResult);
     NS_IMETHOD GetArgvPtr(jsval **aResult);
@@ -849,7 +845,6 @@ private:
 
     XPCCallContext*                 mPrevCallContext;
 
-    JS::RootedObject                mFlattenedJSObject;
     XPCWrappedNative*               mWrapper;
     XPCWrappedNativeTearOff*        mTearOff;
 
@@ -1083,8 +1078,6 @@ public:
 
     static bool
     IsDyingScope(XPCWrappedNativeScope *scope);
-
-    static void InitStatics() { gScopes = nullptr; gDyingScopes = nullptr; }
 
     XPCContext *GetContext() { return mContext; }
     void ClearContext() { mContext = nullptr; }
@@ -3302,6 +3295,7 @@ struct GlobalProperties {
     }
     bool Parse(JSContext *cx, JS::HandleObject obj);
     bool Define(JSContext *cx, JS::HandleObject obj);
+    bool CSS : 1;
     bool Promise : 1;
     bool indexedDB : 1;
     bool XMLHttpRequest : 1;
@@ -3405,6 +3399,8 @@ JSObject *
 CreateGlobalObject(JSContext *cx, const JSClass *clasp, nsIPrincipal *principal,
                    JS::CompartmentOptions& aOptions);
 
+// InitGlobalObject enters the compartment of aGlobal, so it doesn't matter what
+// compartment aJSContext is in.
 bool
 InitGlobalObject(JSContext* aJSContext, JS::Handle<JSObject*> aGlobal,
                  uint32_t aFlags);

@@ -39,6 +39,11 @@ SHARED_LIBRARY_LIBS += \
     $(NULL)
 endif
 
+# Windows needs this to be linked with a static library.
+ifndef MOZ_NATIVE_FFI
+DEFINES += -DFFI_BUILDING
+endif
+
 endif # JS_HAS_CTYPES
 
 DASH_R		= -r
@@ -304,7 +309,7 @@ install:: $(LIBRARY_NAME).pc
 #
 
 install::
-	$(call py_action,process_install_manifest,--no-remove $(DESTDIR)$(includedir)/$(LIBRARY_NAME) $(DEPTH)/_build_manifests/install/dist_include)
+	$(call py_action,process_install_manifest,--no-remove $(DESTDIR)$(includedir) $(DEPTH)/_build_manifests/install/dist_include)
 
 #
 # END SpiderMonkey header installation
@@ -384,6 +389,7 @@ selfhosted_out_h_deps := \
   $(srcdir)/js.msg \
   $(srcdir)/builtin/embedjs.py \
   $(srcdir)/builtin/TypedObjectConstants.h \
+  $(srcdir)/builtin/SelfHostingDefines.h \
   $(NULL)
 
 SELFHOSTED_DEFINES += $(DEFINES) $(ACDEFINES)

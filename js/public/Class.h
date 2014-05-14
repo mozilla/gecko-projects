@@ -177,11 +177,6 @@ typedef bool
 typedef void
 (* JSTraceOp)(JSTracer *trc, JSObject *obj);
 
-// A generic type for functions mapping an object to another object, or null
-// if an error or exception was thrown on cx.
-typedef JSObject *
-(* JSObjectOp)(JSContext *cx, JS::HandleObject obj);
-
 // Hook that creates an iterator object for a given object. Returns the
 // iterator object or null if an error or exception was thrown on cx.
 typedef JSObject *
@@ -252,8 +247,15 @@ typedef bool
 (* SliceOp)(JSContext *cx, JS::HandleObject obj, uint32_t begin, uint32_t end,
             JS::HandleObject result); // result is actually preallocted.
 
+// A generic type for functions mapping an object to another object, or null
+// if an error or exception was thrown on cx.
 typedef JSObject *
 (* ObjectOp)(JSContext *cx, JS::HandleObject obj);
+
+// Hook to map an object to its inner object. Infallible.
+typedef JSObject *
+(* InnerObjectOp)(JSObject *obj);
+
 typedef void
 (* FinalizeOp)(FreeOp *fop, JSObject *obj);
 
@@ -296,8 +298,8 @@ struct ClassSpec
 
 struct ClassExtension
 {
-    JSObjectOp          outerObject;
-    JSObjectOp          innerObject;
+    ObjectOp            outerObject;
+    InnerObjectOp       innerObject;
     JSIteratorOp        iteratorObject;
 
     /*
@@ -421,7 +423,11 @@ struct JSClass {
 // with the following flags. Failure to use JSCLASS_GLOBAL_FLAGS was
 // previously allowed, but is now an ES5 violation and thus unsupported.
 //
-#define JSCLASS_GLOBAL_SLOT_COUNT      (3 + JSProto_LIMIT * 3 + 31)
+// JSCLASS_GLOBAL_APPLICATION_SLOTS is the number of slots reserved at
+// the beginning of every global object's slots for use by the
+// application.
+#define JSCLASS_GLOBAL_APPLICATION_SLOTS 3
+#define JSCLASS_GLOBAL_SLOT_COUNT      (JSCLASS_GLOBAL_APPLICATION_SLOTS + JSProto_LIMIT * 3 + 31)
 #define JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(n)                                    \
     (JSCLASS_IS_GLOBAL | JSCLASS_HAS_RESERVED_SLOTS(JSCLASS_GLOBAL_SLOT_COUNT + (n)))
 #define JSCLASS_GLOBAL_FLAGS                                                  \

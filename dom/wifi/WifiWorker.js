@@ -161,12 +161,12 @@ var WifiManager = (function() {
 
   // Regular Wifi stuff.
   var netUtil = WifiNetUtil(controlMessage);
-  var wifiCommand = WifiCommand(controlMessage, manager.ifname);
+  var wifiCommand = WifiCommand(controlMessage, manager.ifname, sdkVersion);
 
   // Wifi P2P stuff
   var p2pManager;
   if (p2pSupported) {
-    let p2pCommand = WifiCommand(controlMessage, WifiP2pManager.INTERFACE_NAME);
+    let p2pCommand = WifiCommand(controlMessage, WifiP2pManager.INTERFACE_NAME, sdkVersion);
     p2pManager = WifiP2pManager(p2pCommand, netUtil);
   }
 
@@ -672,6 +672,27 @@ var WifiManager = (function() {
     });
   }
 
+  function handleWpaEapEvents(event) {
+    if (event.indexOf("CTRL-EVENT-EAP-FAILURE") !== -1) {
+      if (event.indexOf("EAP authentication failed") !== -1) {
+        notify("passwordmaybeincorrect");
+      }
+      return true;
+    }
+    if (event.indexOf("CTRL-EVENT-EAP-TLS-CERT-ERROR") !== -1) {
+      // Cert Error
+      manager.disconnect(function() {
+        manager.reassociate(function(){});
+      });
+      return true;
+    }
+    if (event.indexOf("CTRL-EVENT-EAP-STARTED") !== -1) {
+      notifyStateChange({ state: "AUTHENTICATING" });
+      return true;
+    }
+    return true;
+  }
+
   // Handle events sent to us by the event worker.
   function handleEvent(event) {
     debug("Event coming in: " + event);
@@ -777,12 +798,6 @@ var WifiManager = (function() {
       }
       return true;
     }
-    if (eventData.indexOf("CTRL-EVENT-EAP-FAILURE") === 0) {
-      if (event.indexOf("EAP authentication failed") !== -1) {
-        notify("passwordmaybeincorrect");
-      }
-      return true;
-    }
     if (eventData.indexOf("CTRL-EVENT-CONNECTED") === 0) {
       // Format: CTRL-EVENT-CONNECTED - Connection to 00:1e:58:ec:d5:6d completed (reauth) [id=1 id_str=]
       var bssid = event.split(" ")[4];
@@ -803,6 +818,9 @@ var WifiManager = (function() {
       manager.handlePostWifiScan();
       notify("scanresultsavailable");
       return true;
+    }
+    if (eventData.indexOf("CTRL-EVENT-EAP") === 0) {
+      return handleWpaEapEvents(event);
     }
     if (eventData.indexOf("WPS-TIMEOUT") === 0) {
       notifyStateChange({ state: "WPS_TIMEOUT", BSSID: null, id: -1 });
@@ -1061,7 +1079,7 @@ var WifiManager = (function() {
     "ssid", "bssid", "psk", "wep_key0", "wep_key1", "wep_key2", "wep_key3",
     "wep_tx_keyidx", "priority", "key_mgmt", "scan_ssid", "disabled",
     "identity", "password", "auth_alg", "phase1", "phase2", "eap", "pin",
-    "pcsc"
+    "pcsc", "ca_cert"
   ];
 
   manager.getNetworkConfiguration = function(config, callback) {
@@ -1081,16 +1099,17 @@ var WifiManager = (function() {
     var netId = config.netId;
     var done = 0;
     var errors = 0;
+
+    function hasValidProperty(name) {
+      return ((name in config) &&
+               config[name] != null &&
+               (["password", "wep_key0", "psk"].indexOf(name) !== -1 ||
+                config[name] !== '*'));
+    }
+
     for (var n = 0; n < networkConfigurationFields.length; ++n) {
       let fieldName = networkConfigurationFields[n];
-      if (!(fieldName in config) ||
-          // These fields are special: We can't retrieve them from the
-          // supplicant, and often we have a star in our config. In that case,
-          // we need to avoid overwriting the correct password with a *.
-          (fieldName === "password" ||
-           fieldName === "wep_key0" ||
-           fieldName === "psk") &&
-          config[fieldName] === '*') {
+      if (!hasValidProperty(fieldName)) {
         ++done;
       } else {
         wifiCommand.setNetworkVariable(netId, fieldName, config[fieldName], function(ok) {
@@ -1379,6 +1398,15 @@ var WifiManager = (function() {
                                caInfo.certNickname);
   }
 
+  manager.deleteCert = function(caInfo, callback) {
+    var id = idgen++;
+    if (callback) {
+      controlCallbacks[id] = callback;
+    }
+
+    wifiCertService.deleteCert(id, caInfo.certNickname);
+  }
+
   return manager;
 })();
 
@@ -1523,7 +1551,8 @@ Network.api = {
   eap: "rw",
   pin: "rw",
   phase1: "rw",
-  phase2: "rw"
+  phase2: "rw",
+  serverCertificate: "rw"
 };
 
 // Note: We never use ScanResult.prototype, so the fact that it's unrelated to
@@ -1647,6 +1676,7 @@ function WifiWorker() {
                     "WifiManager:setStaticIpMode",
                     "WifiManager:importCert",
                     "WifiManager:getImportedCerts",
+                    "WifiManager:deleteCert",
                     "child-process-shutdown"];
 
   messages.forEach((function(msgName) {
@@ -1753,6 +1783,10 @@ function WifiWorker() {
       pub.known = true;
     if (net.scan_ssid === 1)
       pub.hidden = true;
+    if ("ca_cert" in net && net.ca_cert &&
+        net.ca_cert.indexOf("keystore://WIFI_SERVERCERT_" === 0)) {
+      pub.serverCertificate = net.ca_cert.substr(27);
+    }
     return pub;
   };
 
@@ -1815,15 +1849,29 @@ function WifiWorker() {
       configured.auth_alg = net.auth_alg = "OPEN SHARED";
     }
 
-    if ("pin" in net) {
-      net.pin = quote(net.pin);
+    function hasValidProperty(name) {
+      return ((name in net) && net[name] != null);
     }
 
-    if ("phase1" in net)
-      net.phase1 = quote(net.phase1);
+    if (hasValidProperty("eap")) {
+      if (hasValidProperty("pin")) {
+        net.pin = quote(net.pin);
+      }
 
-    if ("phase2" in net)
-      net.phase2 = quote(net.phase2);
+      if (hasValidProperty("phase1"))
+        net.phase1 = quote(net.phase1);
+
+      if (hasValidProperty("phase2")) {
+        if (net.eap === "PEAP") {
+          net.phase2 = quote("auth=" + net.phase2);
+        } else {  // TLS, TTLS
+          net.phase2 = quote("autheap=" + net.phase2);
+        }
+      }
+
+      if (hasValidProperty("serverCertificate"))
+        net.ca_cert = quote("keystore://WIFI_SERVERCERT_" + net.serverCertificate);
+    }
 
     return net;
   };
@@ -2046,6 +2094,9 @@ function WifiWorker() {
         break;
       case "WPS_OVERLAP_DETECTED":
         self._fireEvent("onwpsoverlap", {});
+        break;
+      case "AUTHENTICATING":
+        self._fireEvent("onauthenticating", {network: netToDOM(self.currentNetwork)});
         break;
       case "SCANNING":
         // If we're already scanning in the background, we don't need to worry
@@ -2605,6 +2656,9 @@ WifiWorker.prototype = {
       case "WifiManager:getImportedCerts":
         this.getImportedCerts(msg);
         break;
+      case "WifiManager:deleteCert":
+        this.deleteCert(msg);
+        break;
       case "WifiManager:getState": {
         let i;
         if ((i = this._domManagers.indexOf(msg.manager)) === -1) {
@@ -3006,7 +3060,7 @@ WifiWorker.prototype = {
     let self = this;
     let detail = msg.data;
     if (detail.method === "pbc") {
-      WifiManager.wpsPbc(WifiManager.ifname, function(ok) {
+      WifiManager.wpsPbc(function(ok) {
         if (ok)
           self._sendMessage(message, true, true, msg);
         else
@@ -3155,6 +3209,15 @@ WifiWorker.prototype = {
     }
 
     self._sendMessage(message, true, importedCerts, msg);
+  },
+
+  deleteCert: function deleteCert(msg) {
+    const message = "WifiManager:deleteCert:Return";
+    let self = this;
+
+    WifiManager.deleteCert(msg.data, function(data) {
+      self._sendMessage(message, data.status === 0, "Delete Cert failed", msg);
+    });
   },
 
   // This is a bit ugly, but works. In particular, this depends on the fact

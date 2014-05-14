@@ -26,6 +26,8 @@
 #include "nsIDOMFile.h"
 #include "nsIDOMFileList.h"
 #include "nsWindowMemoryReporter.h"
+#include "nsDOMClassInfo.h"
+#include "ShimInterfaceInfo.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -303,9 +305,12 @@ nsXPCComponents_Interfaces::NewResolve(nsIXPConnectWrappedNative *wrapper,
 
     // we only allow interfaces by name here
     if (name.encodeLatin1(cx, str) && name.ptr()[0] != '{') {
-        nsCOMPtr<nsIInterfaceInfo> info;
-        XPTInterfaceInfoManager::GetSingleton()->
-            GetInfoForName(name.ptr(), getter_AddRefs(info));
+        nsCOMPtr<nsIInterfaceInfo> info =
+            ShimInterfaceInfo::MaybeConstruct(name.ptr(), cx);
+        if (!info) {
+            XPTInterfaceInfoManager::GetSingleton()->
+                GetInfoForName(name.ptr(), getter_AddRefs(info));
+        }
         if (!info)
             return NS_OK;
 
@@ -1486,8 +1491,7 @@ nsXPCComponents_ID::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
 
     // Do the security check if necessary
 
-    nsIXPCSecurityManager* sm = nsXPConnect::XPConnect()->GetDefaultSecurityManager();
-    if (sm && NS_FAILED(sm->CanCreateInstance(cx, nsJSID::GetCID()))) {
+    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, nsJSID::GetCID()))) {
         // the security manager vetoed. It should have set an exception.
         *_retval = false;
         return NS_OK;
@@ -1850,8 +1854,7 @@ nsXPCComponents_Exception::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
 
     // Do the security check if necessary
 
-    nsIXPCSecurityManager* sm = xpc->GetDefaultSecurityManager();
-    if (sm && NS_FAILED(sm->CanCreateInstance(cx, Exception::GetCID()))) {
+    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, Exception::GetCID()))) {
         // the security manager vetoed. It should have set an exception.
         *_retval = false;
         return NS_OK;
@@ -2359,8 +2362,7 @@ nsXPCComponents_Constructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
 
     // Do the security check if necessary
 
-    nsIXPCSecurityManager* sm = xpc->GetDefaultSecurityManager();
-    if (sm && NS_FAILED(sm->CanCreateInstance(cx, nsXPCConstructor::GetCID()))) {
+    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, nsXPCConstructor::GetCID()))) {
         // the security manager vetoed. It should have set an exception.
         *_retval = false;
         return NS_OK;
@@ -2786,6 +2788,22 @@ nsXPCComponents_Utils::ForceCC()
     return NS_OK;
 }
 
+/* void finishCC(); */
+NS_IMETHODIMP
+nsXPCComponents_Utils::FinishCC()
+{
+    nsCycleCollector_finishAnyCurrentCollection();
+    return NS_OK;
+}
+
+/* void ccSlice(in long long budget); */
+NS_IMETHODIMP
+nsXPCComponents_Utils::CcSlice(int64_t budget)
+{
+    nsJSContext::RunCycleCollectorWorkSlice(budget);
+    return NS_OK;
+}
+
 /* void forceShrinkingGC (); */
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForceShrinkingGC()
@@ -2913,7 +2931,7 @@ nsXPCComponents_Utils::GetGlobalForObject(HandleValue object,
         return NS_ERROR_FAILURE;
 
     // Outerize if necessary.
-    if (JSObjectOp outerize = js::GetObjectClass(obj)->ext.outerObject)
+    if (js::ObjectOp outerize = js::GetObjectClass(obj)->ext.outerObject)
       obj = outerize(cx, obj);
 
     retval.setObject(*obj);

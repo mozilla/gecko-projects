@@ -53,7 +53,6 @@ if (!this.debug) {
 }
 
 let RIL_CELLBROADCAST_DISABLED;
-let RIL_CLIR_MODE;
 let RIL_EMERGENCY_NUMBERS;
 const DEFAULT_EMERGENCY_NUMBERS = ["112", "911"];
 
@@ -96,7 +95,7 @@ let RILQUIRKS_SEND_STK_PROFILE_DOWNLOAD;
 // Ril quirk to attach data registration on demand.
 let RILQUIRKS_DATA_REGISTRATION_ON_DEMAND;
 
-// Ril quirk to control the uicc subscription.
+// Ril quirk to control the uicc/data subscription.
 let RILQUIRKS_SUBSCRIPTION_CONTROL;
 
 function BufObject(aContext) {
@@ -226,7 +225,6 @@ function RilObject(aContext) {
   // Init properties that are only initialized once.
   this.v5Legacy = RILQUIRKS_V5_LEGACY;
   this.cellBroadcastDisabled = RIL_CELLBROADCAST_DISABLED;
-  this.clirMode = RIL_CLIR_MODE;
 
   this._hasHangUpPendingOutgoingCall = false;
 }
@@ -270,11 +268,6 @@ RilObject.prototype = {
    * Global Cell Broadcast switch.
    */
   cellBroadcastDisabled: false,
-
-  /**
-   * Global CLIR mode settings.
-   */
-  clirMode: CLIR_DEFAULT,
 
   /**
    * Parsed Cell Broadcast search lists.
@@ -1117,17 +1110,13 @@ RilObject.prototype = {
    * the called party when originating a call.
    *
    * @param options.clirMode
-   *        Is one of the CLIR_* constants in
-   *        nsIDOMMozMobileConnection interface.
+   *        One of the CLIR_* constants.
    */
   setCLIR: function(options) {
-    if (options) {
-      this.clirMode = options.clirMode;
-    }
     let Buf = this.context.Buf;
     Buf.newParcel(REQUEST_SET_CLIR, options);
     Buf.writeInt32(1);
-    Buf.writeInt32(this.clirMode);
+    Buf.writeInt32(options.clirMode);
     Buf.sendParcel();
   },
 
@@ -2143,10 +2132,15 @@ RilObject.prototype = {
    *        Boolean value indicating attach or detach.
    */
   setDataRegistration: function(options) {
-    let request = options.attach ? RIL_REQUEST_GPRS_ATTACH :
-                                   RIL_REQUEST_GPRS_DETACH;
     this._attachDataRegistration = options.attach;
-    this.context.Buf.simpleRequest(request);
+
+    if (RILQUIRKS_DATA_REGISTRATION_ON_DEMAND) {
+      let request = options.attach ? RIL_REQUEST_GPRS_ATTACH :
+                                     RIL_REQUEST_GPRS_DETACH;
+      this.context.Buf.simpleRequest(request);
+    } else if (RILQUIRKS_SUBSCRIPTION_CONTROL && options.attach) {
+      this.context.Buf.simpleRequest(REQUEST_SET_DATA_SUBSCRIPTION, options);
+    }
   },
 
   /**
@@ -2606,7 +2600,7 @@ RilObject.prototype = {
    * Queries current call forward rules.
    *
    * @param reason
-   *        One of nsIDOMMozMobileCFInfo.CALL_FORWARD_REASON_* constants.
+   *        One of CALL_FORWARD_REASON_* constants.
    * @param serviceClass
    *        One of ICC_SERVICE_CLASS_* constants.
    * @param number
@@ -2629,9 +2623,9 @@ RilObject.prototype = {
    * Configures call forward rule.
    *
    * @param action
-   *        One of nsIDOMMozMobileCFInfo.CALL_FORWARD_ACTION_* constants.
+   *        One of CALL_FORWARD_ACTION_* constants.
    * @param reason
-   *        One of nsIDOMMozMobileCFInfo.CALL_FORWARD_REASON_* constants.
+   *        One of CALL_FORWARD_REASON_* constants.
    * @param serviceClass
    *        One of ICC_SERVICE_CLASS_* constants.
    * @param number
@@ -2655,7 +2649,7 @@ RilObject.prototype = {
    * Queries current call barring rules.
    *
    * @param program
-   *        One of nsIDOMMozMobileConnection.CALL_BARRING_PROGRAM_* constants.
+   *        One of CALL_BARRING_PROGRAM_* constants.
    * @param serviceClass
    *        One of ICC_SERVICE_CLASS_* constants.
    */
@@ -2669,7 +2663,7 @@ RilObject.prototype = {
    * Configures call barring rule.
    *
    * @param program
-   *        One of nsIDOMMozMobileConnection.CALL_BARRING_PROGRAM_* constants.
+   *        One of CALL_BARRING_PROGRAM_* constants.
    * @param enabled
    *        Enable or disable the call barring.
    * @param password
@@ -5786,7 +5780,7 @@ RilObject.prototype[REQUEST_QUERY_CALL_FORWARD_STATUS] =
   if (options.rilMessageType === "sendMMI") {
     options.statusMessage = MMI_SM_KS_SERVICE_INTERROGATED;
     // MMI query call forwarding options request returns a set of rules that
-    // will be exposed in the form of an array of nsIDOMMozMobileCFInfo
+    // will be exposed in the form of an array of MozCallForwardingOptions
     // instances.
     options.additionalInformation = rules;
   }
@@ -5891,6 +5885,8 @@ RilObject.prototype[REQUEST_QUERY_FACILITY_LOCK] = function REQUEST_QUERY_FACILI
   options.success = (options.rilRequestError === 0);
   if (!options.success) {
     options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    this.sendChromeMessage(options);
+    return;
   }
 
   let services;
@@ -6413,7 +6409,9 @@ RilObject.prototype[REQUEST_VOICE_RADIO_TECH] = function REQUEST_VOICE_RADIO_TEC
   this._processRadioTech(radioTech[0]);
 };
 RilObject.prototype[REQUEST_SET_UICC_SUBSCRIPTION] = null;
+RilObject.prototype[REQUEST_SET_DATA_SUBSCRIPTION] = null;
 RilObject.prototype[REQUEST_GET_UICC_SUBSCRIPTION] = null;
+RilObject.prototype[REQUEST_GET_DATA_SUBSCRIPTION] = null;
 RilObject.prototype[REQUEST_GET_UNLOCK_RETRY_COUNT] = function REQUEST_GET_UNLOCK_RETRY_COUNT(length, options) {
   options.success = (options.rilRequestError === 0);
   if (!options.success) {
@@ -6482,8 +6480,9 @@ RilObject.prototype[UNSOLICITED_RESPONSE_RADIO_STATE_CHANGED] = function UNSOLIC
     this.getBasebandVersion();
     this.updateCellBroadcastConfig();
     this.setPreferredNetworkType();
-    this.setCLIR();
-    if (RILQUIRKS_DATA_REGISTRATION_ON_DEMAND && this._attachDataRegistration) {
+    if ((RILQUIRKS_DATA_REGISTRATION_ON_DEMAND ||
+         RILQUIRKS_SUBSCRIPTION_CONTROL) &&
+        this._attachDataRegistration) {
       this.setDataRegistration({attach: true});
     }
   }
@@ -6558,7 +6557,7 @@ RilObject.prototype[UNSOLICITED_ON_USSD] = function UNSOLICITED_ON_USSD() {
 
   this._ussdSession = (typeCode != "0" && typeCode != "2");
 
-  this.sendChromeMessage({rilMessageType: "USSDReceived",
+  this.sendChromeMessage({rilMessageType: "ussdreceived",
                           message: message,
                           sessionEnded: !this._ussdSession});
 };
@@ -14738,7 +14737,6 @@ let ContextPool = {
     DEBUG = DEBUG_WORKER || aOptions.debug;
     RIL_EMERGENCY_NUMBERS = aOptions.rilEmergencyNumbers;
     RIL_CELLBROADCAST_DISABLED = aOptions.cellBroadcastDisabled;
-    RIL_CLIR_MODE = aOptions.clirMode;
 
     let quirks = aOptions.quirks;
     RILQUIRKS_CALLSTATE_EXTRA_UINT32 = quirks.callstateExtraUint32;

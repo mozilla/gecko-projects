@@ -143,11 +143,11 @@ xpc_qsDefineQuickStubs(JSContext *cx, JSObject *protoArg, unsigned flags,
 
                 if (entry->newBindingProperties) {
                     if (entry->newBindingProperties->regular) {
-                        mozilla::dom::DefineWebIDLBindingPropertiesOnXPCObject(cx, proto, entry->newBindingProperties->regular, false);
+                        mozilla::dom::DefineWebIDLBindingPropertiesOnXPCObject(cx, proto, entry->newBindingProperties->regular);
                     }
                     if (entry->newBindingProperties->chromeOnly &&
                         xpc::AccessCheck::isChrome(js::GetContextCompartment(cx))) {
-                        mozilla::dom::DefineWebIDLBindingPropertiesOnXPCObject(cx, proto, entry->newBindingProperties->chromeOnly, false);
+                        mozilla::dom::DefineWebIDLBindingPropertiesOnXPCObject(cx, proto, entry->newBindingProperties->chromeOnly);
                     }
                 }
                 // Next.
@@ -666,24 +666,6 @@ castNativeFromWrapper(JSContext *cx,
     }
 
     return native;
-}
-
-bool
-xpc_qsUnwrapThisFromCcxImpl(XPCCallContext &ccx,
-                            const nsIID &iid,
-                            void **ppThis,
-                            nsISupports **pThisRef,
-                            jsval *vp)
-{
-    nsISupports *native = ccx.GetIdentityObject();
-    if (!native)
-        return xpc_qsThrow(ccx.GetJSContext(), NS_ERROR_XPC_HAS_BEEN_SHUTDOWN);
-
-    RootedObject obj(ccx, ccx.GetFlattenedJSObject());
-    nsresult rv = getNative(native, obj, iid, ppThis, pThisRef, vp);
-    if (NS_FAILED(rv))
-        return xpc_qsThrow(ccx.GetJSContext(), rv);
-    return true;
 }
 
 nsresult

@@ -10,6 +10,7 @@ enum WifiWPSMethod {
 
 enum ConnectionStatus {
   "connecting",
+  "authenticating",
   "associated",
   "connected",
   "disconnected",
@@ -53,6 +54,7 @@ dictionary NetworkProperties {
   DOMString eap;
   DOMString pin;
   boolean dontConnect;
+  DOMString serverCertificate;
 };
 
 [Constructor(optional NetworkProperties properties),
@@ -87,6 +89,7 @@ interface MozWifiNetwork {
            attribute DOMString? eap;
            attribute DOMString? pin;
            attribute boolean? dontConnect;
+           attribute DOMString? serverCertificate;
 };
 
 [JSImplementation="@mozilla.org/mozwificonnection;1",
@@ -245,6 +248,14 @@ interface MozWifiManager : EventTarget {
    * onerror: We have failed to list certificate.
    */
   DOMRequest getImportedCerts();
+
+  /**
+   * Delete an imported certificate.
+   * @param certNickname Nickname of imported to be deleted.
+   * onsuccess: We have successfully deleted certificate.
+   * onerror: We have failed to delete certificate.
+   */
+  DOMRequest deleteCert(DOMString certNickname);
 
   /**
    * Returns whether or not wifi is currently enabled.

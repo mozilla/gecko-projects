@@ -58,7 +58,7 @@ AsmJSModule::initHeap(Handle<ArrayBufferObject*> heap, JSContext *cx)
         JS_ASSERT(disp <= INT32_MAX);
         JSC::X86Assembler::setPointer(addr, (void *)(heapOffset + disp));
     }
-#elif defined(JS_CODEGEN_ARM)
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
     uint32_t heapLength = heap->byteLength();
     for (unsigned i = 0; i < heapAccesses_.length(); i++) {
         jit::Assembler::updateBoundsCheck(heapLength,
@@ -167,10 +167,10 @@ InvokeFromAsmJS_ToNumber(JSContext *cx, int32_t exitIndex, int32_t argc, Value *
 #if defined(JS_CODEGEN_ARM)
 extern "C" {
 
-extern int64_t
+extern MOZ_EXPORT int64_t
 __aeabi_idivmod(int, int);
 
-extern int64_t
+extern MOZ_EXPORT int64_t
 __aeabi_uidivmod(int, int);
 
 }
@@ -186,7 +186,7 @@ FuncCast(F *pf)
 static void *
 RedirectCall(void *fun, ABIFunctionType type)
 {
-#ifdef JS_ARM_SIMULATOR
+#if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
     fun = Simulator::RedirectNativeFunction(fun, type);
 #endif
     return fun;
@@ -1246,7 +1246,7 @@ struct ScopedCacheEntryOpenedForWrite
 
     ~ScopedCacheEntryOpenedForWrite() {
         if (memory)
-            cx->asmJSCacheOps().closeEntryForWrite(cx->global(), serializedSize, memory, handle);
+            cx->asmJSCacheOps().closeEntryForWrite(serializedSize, memory, handle);
     }
 };
 
@@ -1303,7 +1303,7 @@ struct ScopedCacheEntryOpenedForRead
 
     ~ScopedCacheEntryOpenedForRead() {
         if (memory)
-            cx->asmJSCacheOps().closeEntryForRead(cx->global(), serializedSize, memory, handle);
+            cx->asmJSCacheOps().closeEntryForRead(serializedSize, memory, handle);
     }
 };
 

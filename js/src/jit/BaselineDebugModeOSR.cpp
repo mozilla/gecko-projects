@@ -9,6 +9,7 @@
 #include "mozilla/DebugOnly.h"
 
 #include "jit/IonLinker.h"
+#include "jit/PerfSpewer.h"
 
 #include "jit/IonFrames-inl.h"
 #include "vm/Stack-inl.h"
@@ -91,6 +92,10 @@ struct DebugModeOSREntry
                 frameKind == ICEntry::Kind_DebugTrap ||
                 frameKind == ICEntry::Kind_DebugPrologue ||
                 frameKind == ICEntry::Kind_DebugEpilogue);
+    }
+
+    bool recompiled() const {
+        return oldBaselineScript != script->baselineScript();
     }
 
     BaselineDebugModeOSRInfo *takeRecompInfo() {
@@ -208,9 +213,8 @@ SpewPatchBaselineFrame(uint8_t *oldReturnAddress, uint8_t *newReturnAddress,
                        JSScript *script, ICEntry::Kind frameKind, jsbytecode *pc)
 {
     IonSpew(IonSpew_BaselineDebugModeOSR,
-            "Patch return %#016llx -> %#016llx to BaselineJS (%s:%d) from %s at %s",
-            uintptr_t(oldReturnAddress), uintptr_t(newReturnAddress),
-            script->filename(), script->lineno(),
+            "Patch return %p -> %p on BaselineJS frame (%s:%d) from %s at %s",
+            oldReturnAddress, newReturnAddress, script->filename(), script->lineno(),
             ICEntryKindToString(frameKind), js_CodeName[(JSOp)*pc]);
 }
 
@@ -218,8 +222,8 @@ static void
 SpewPatchStubFrame(ICStub *oldStub, ICStub *newStub)
 {
     IonSpew(IonSpew_BaselineDebugModeOSR,
-            "Patch   stub %#016llx -> %#016llx to BaselineStub (%s)",
-            uintptr_t(oldStub), uintptr_t(newStub), ICStub::KindString(newStub->kind()));
+            "Patch   stub %p -> %p on BaselineStub frame (%s)",
+            oldStub, newStub, ICStub::KindString(newStub->kind()));
 }
 
 static void
@@ -254,8 +258,15 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
 
     for (JitFrameIterator iter(activation); !iter.done(); ++iter) {
         DebugModeOSREntry &entry = entries[entryIndex];
+
         switch (iter.type()) {
           case JitFrame_BaselineJS: {
+            // If the script wasn't recompiled, there's nothing to patch.
+            if (!entry.recompiled()) {
+                entryIndex++;
+                break;
+            }
+
             JSScript *script = entry.script;
             uint32_t pcOffset = entry.pcOffset;
             jsbytecode *pc = script->offsetToPC(pcOffset);
@@ -351,6 +362,10 @@ PatchBaselineFramesForDebugMode(JSContext *cx, const JitActivationIterator &acti
           }
 
           case JitFrame_BaselineStub: {
+            // If the script wasn't recompiled, there's nothing to patch.
+            if (!entry.recompiled())
+                break;
+
             IonBaselineStubFrameLayout *layout =
                 reinterpret_cast<IonBaselineStubFrameLayout *>(iter.fp());
             MOZ_ASSERT(entry.script->baselineScript()->debugMode() == expectedDebugMode);
@@ -539,7 +554,7 @@ UndoRecompileBaselineScriptsForDebugMode(JSContext *cx,
     for (size_t i = 0; i < entries.length(); i++) {
         JSScript *script = entries[i].script;
         BaselineScript *baselineScript = script->baselineScript();
-        if (baselineScript != entries[i].oldBaselineScript) {
+        if (entries[i].recompiled()) {
             script->setBaselineScript(cx, entries[i].oldBaselineScript);
             BaselineScript::Destroy(cx->runtime()->defaultFreeOp(), baselineScript);
         }
@@ -587,8 +602,10 @@ jit::RecompileOnStackBaselineScriptsForDebugMode(JSContext *cx, JSCompartment *c
     //
     // After this point the function must be infallible.
 
-    for (size_t i = 0; i < entries.length(); i++)
-        BaselineScript::Destroy(cx->runtime()->defaultFreeOp(), entries[i].oldBaselineScript);
+    for (size_t i = 0; i < entries.length(); i++) {
+        if (entries[i].recompiled())
+            BaselineScript::Destroy(cx->runtime()->defaultFreeOp(), entries[i].oldBaselineScript);
+    }
 
     size_t processed = 0;
     for (JitActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {

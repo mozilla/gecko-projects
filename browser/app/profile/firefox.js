@@ -53,9 +53,9 @@ pref("extensions.blocklist.interval", 86400);
 // Controls what level the blocklist switches from warning about items to forcibly
 // blocking them.
 pref("extensions.blocklist.level", 2);
-pref("extensions.blocklist.url", "https://addons.mozilla.org/blocklist/3/%APP_ID%/%APP_VERSION%/%PRODUCT%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%PING_COUNT%/%TOTAL_PING_COUNT%/%DAYS_SINCE_LAST_PING%/");
+pref("extensions.blocklist.url", "https://blocklist.addons.mozilla.org/blocklist/3/%APP_ID%/%APP_VERSION%/%PRODUCT%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%PING_COUNT%/%TOTAL_PING_COUNT%/%DAYS_SINCE_LAST_PING%/");
 pref("extensions.blocklist.detailsURL", "https://www.mozilla.org/%LOCALE%/blocklist/");
-pref("extensions.blocklist.itemURL", "https://addons.mozilla.org/%LOCALE%/%APP%/blocked/%blockID%");
+pref("extensions.blocklist.itemURL", "https://blocklist.addons.mozilla.org/%LOCALE%/%APP%/blocked/%blockID%");
 
 pref("extensions.update.autoUpdateDefault", true);
 
@@ -784,6 +784,30 @@ pref("plugin.state.npvidyoweb", 2);
 pref("plugin.state.vidyoweb", 2);
 #endif
 
+// McAfee Virtual Technician, bug 981503
+#ifdef XP_WIN
+pref("plugin.state.npmvtplugin", 2);
+#endif
+
+// Verimatrix ViewRightWeb, bug 989872
+#ifdef XP_WIN
+pref("plugin.state.npviewright", 2);
+#endif
+#ifdef XP_MACOSX
+pref("plugin.state.viewrightwebplayer", 2);
+#endif
+
+// McAfee SiteAdvisor Enterprise, bug 987057
+#ifdef XP_WIN
+pref("plugin.state.npmcffplg", 2);
+#endif
+
+// F5 Networks SSLVPN plugin, bug 985640
+#ifdef XP_MACOSX
+pref("plugin.state.f5 ssl vpn plugin", 2);
+pref("plugin.state.f5 sam inspection host plugin", 2);
+#endif
+
 // display door hanger if flash not installed
 pref("plugins.notifyMissingFlash", true);
 
@@ -1215,6 +1239,13 @@ pref("devtools.appmanager.enabled", true);
 pref("devtools.appmanager.lastTab", "help");
 pref("devtools.appmanager.manifestEditor.enabled", true);
 
+// Enable devtools webide
+#ifdef MOZ_DEVTOOLS_WEBIDE
+pref("devtools.webide.enabled", true);
+#else
+pref("devtools.webide.enabled", false);
+#endif
+
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
@@ -1428,7 +1459,7 @@ pref("browser.newtabpage.rows", 3);
 // number of columns of newtab grid
 pref("browser.newtabpage.columns", 3);
 
-pref("browser.newtabpage.directorySource", "data:application/json,{}");
+pref("browser.newtabpage.directorySource", "chrome://global/content/directoryLinks.json");
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
@@ -1532,6 +1563,7 @@ pref("browser.cache.auto_delete_cache_version", 1);
 pref("browser.cache.frecency_experiment", 0);
 
 pref("browser.translation.detectLanguage", false);
+pref("browser.translation.neverForLanguages", "");
 
 // Telemetry experiments settings.
 pref("experiments.enabled", true);

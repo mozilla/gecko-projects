@@ -48,7 +48,7 @@ CompositorChild::Destroy()
   mLayerManager->Destroy();
   mLayerManager = nullptr;
   while (size_t len = ManagedPLayerTransactionChild().Length()) {
-    LayerTransactionChild* layers =
+    RefPtr<LayerTransactionChild> layers =
       static_cast<LayerTransactionChild*>(ManagedPLayerTransactionChild()[len - 1]);
     layers->Destroy();
   }
@@ -136,6 +136,23 @@ CompositorChild::RecvDidComposite(const uint64_t& aId)
     }
   }
   return true;
+}
+
+bool
+CompositorChild::RecvOverfill(const uint32_t &aOverfill)
+{
+  for (size_t i = 0; i < mOverfillObservers.Length(); i++) {
+    mOverfillObservers[i]->RunOverfillCallback(aOverfill);
+  }
+  mOverfillObservers.Clear();
+  return true;
+}
+
+void
+CompositorChild::AddOverfillObserver(ClientLayerManager* aLayerManager)
+{
+  MOZ_ASSERT(aLayerManager);
+  mOverfillObservers.AppendElement(aLayerManager);
 }
 
 void

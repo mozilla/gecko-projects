@@ -144,10 +144,6 @@
 #include "nsIDOMSmsSegmentInfo.h"
 #include "nsIDOMMozMobileMessageThread.h"
 
-#ifdef MOZ_B2G_RIL
-#include "nsIDOMMobileConnection.h"
-#endif // MOZ_B2G_RIL
-
 #ifdef MOZ_B2G_FM
 #include "FMRadio.h"
 #endif
@@ -413,11 +409,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
   NS_DEFINE_CLASSINFO_DATA(MozMobileMessageThread, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
-#ifdef MOZ_B2G_RIL
-  NS_DEFINE_CLASSINFO_DATA(MozMobileConnection, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
-#endif
-
   NS_DEFINE_CLASSINFO_DATA(CSSFontFaceRule, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
@@ -568,14 +559,6 @@ WrapNative(JSContext *cx, nsISupports *native,
            bool aAllowWrapping, JS::MutableHandle<JS::Value> vp)
 {
   return WrapNative(cx, native, nullptr, nullptr, vp, aAllowWrapping);
-}
-
-static inline nsresult
-WrapNative(JSContext *cx, nsISupports *native,
-           nsWrapperCache *cache, bool aAllowWrapping,
-           JS::MutableHandle<JS::Value> vp)
-{
-  return WrapNative(cx, native, cache, nullptr, vp, aAllowWrapping);
 }
 
 // Helper to handle torn-down inner windows.
@@ -1057,13 +1040,6 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_BEGIN(MozMobileMessageThread, nsIDOMMozMobileMessageThread)
      DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozMobileMessageThread)
   DOM_CLASSINFO_MAP_END
-
-#ifdef MOZ_B2G_RIL
-  DOM_CLASSINFO_MAP_BEGIN(MozMobileConnection, nsIDOMMozMobileConnection)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozMobileConnection)
-     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
-  DOM_CLASSINFO_MAP_END
-#endif // MOZ_B2G_RIL
 
   DOM_CLASSINFO_MAP_BEGIN(CSSFontFaceRule, nsIDOMCSSFontFaceRule)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSFontFaceRule)
@@ -1821,8 +1797,17 @@ nsWindowSH::PostCreate(nsIXPConnectWrappedNative *wrapper,
   const NativeProperties* eventTargetProperties =
     EventTargetBinding::sNativePropertyHooks->mNativeProperties.regular;
 
-  return DefineWebIDLBindingPropertiesOnXPCObject(cx, window, windowProperties, true) &&
-         DefineWebIDLBindingPropertiesOnXPCObject(cx, window, eventTargetProperties, true) ?
+  if (!DefineWebIDLBindingUnforgeablePropertiesOnXPCObject(cx, window, windowProperties) ||
+      !DefineWebIDLBindingUnforgeablePropertiesOnXPCObject(cx, window, eventTargetProperties)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (!GlobalPropertiesAreOwn()) {
+    return NS_OK;
+  }
+
+  return DefineWebIDLBindingPropertiesOnXPCObject(cx, window, windowProperties) &&
+         DefineWebIDLBindingPropertiesOnXPCObject(cx, window, eventTargetProperties) ?
          NS_OK : NS_ERROR_FAILURE;
 }
 
@@ -2021,47 +2006,11 @@ DefineInterfaceConstants(JSContext *cx, JS::Handle<JSObject*> obj, const nsIID *
 
   JS::Rooted<JS::Value> v(cx);
   for (i = parent_constant_count; i < constant_count; i++) {
-    const nsXPTConstant *c = nullptr;
+    nsXPIDLCString name;
+    rv = if_info->GetConstant(i, &v, getter_Copies(name));
+    NS_ENSURE_TRUE(NS_SUCCEEDED(rv), rv);
 
-    rv = if_info->GetConstant(i, &c);
-    NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && c, rv);
-
-    uint16_t type = c->GetType().TagPart();
-
-    v.setUndefined();
-    switch (type) {
-      case nsXPTType::T_I8:
-      case nsXPTType::T_U8:
-      {
-        v.setInt32(c->GetValue()->val.u8);
-        break;
-      }
-      case nsXPTType::T_I16:
-      case nsXPTType::T_U16:
-      {
-        v.setInt32(c->GetValue()->val.u16);
-        break;
-      }
-      case nsXPTType::T_I32:
-      {
-        v = JS_NumberValue(c->GetValue()->val.i32);
-        break;
-      }
-      case nsXPTType::T_U32:
-      {
-        v = JS_NumberValue(c->GetValue()->val.u32);
-        break;
-      }
-      default:
-      {
-#ifdef DEBUG
-        NS_ERROR("Non-numeric constant found in interface.");
-#endif
-        continue;
-      }
-    }
-
-    if (!::JS_DefineProperty(cx, obj, c->GetName(), v,
+    if (!::JS_DefineProperty(cx, obj, name, v,
                              JSPROP_ENUMERATE | JSPROP_READONLY |
                              JSPROP_PERMANENT,
                              JS_PropertyStub, JS_StrictPropertyStub)) {

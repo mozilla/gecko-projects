@@ -76,7 +76,8 @@
 }
 
 %ifdef WINDOWS_AERO
-@media not all and (-moz-windows-compositor) {
+@media not all and (-moz-windows-compositor),
+       not all and (-moz-windows-default-theme) {
 %endif
   #toolbar-menubar {
     background-color: transparent !important;
@@ -92,10 +93,20 @@
     color: InactiveCaptionText;
   }
 
+  #main-window[tabsintitlebar] #main-menubar > menu:not(:-moz-lwtheme) {
+    color: inherit;
+  }
+
   #TabsToolbar:-moz-lwtheme {
     background: linear-gradient(to top, @toolbarShadowColor@ 2px, transparent 2px);
   }
+%ifdef WINDOWS_AERO
+}
+%endif
 
+%ifdef WINDOWS_AERO
+@media not all and (-moz-windows-compositor) {
+%endif
   #main-window[tabsintitlebar] #titlebar:-moz-lwtheme {
     visibility: hidden;
   }
@@ -105,25 +116,6 @@
     visibility: visible;
   }
 %ifdef WINDOWS_AERO
-}
-%endif
-
-/* Make the menu inherit the toolbar's color. On non-compositor (Aero Basic, XP modern, classic)
- * this is defined above, but only for tabsintitlebar. Otherwise (Aero Glass, Windows 8),
- * this is hardcoded to black in browser-aero.css, even without tabsintitlebar. */
-%ifdef WINDOWS_AERO
-@media not all and (-moz-windows-compositor) {
-%endif
-  #main-window[tabsintitlebar] #main-menubar > menu:not(:-moz-lwtheme) {
-    color: inherit;
-  }
-%ifdef WINDOWS_AERO
-}
-
-@media (-moz-windows-compositor) {
-  #main-menubar > menu:not(:-moz-lwtheme) {
-    color: inherit;
-  }
 }
 %endif
 
@@ -934,20 +926,23 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
   background-clip: padding-box !important;
   background-color: hsla(210,25%,98%,.08) !important;
   padding: 6px !important;
-  border-color: hsla(210,4%,10%,.25) !important;
-  transition-property: background-color, border-color !important;
+  border-style: none !important;
+  box-shadow: 0 1px 0 0 hsla(210,4%,10%,.25),
+              0 0 0 1px hsla(210,4%,10%,.25);
+  transition-property: background-color, box-shadow !important;
   transition-duration: 250ms !important;
 }
 
 #back-button:not([disabled="true"]):not([open="true"]):not(:active):hover > .toolbarbutton-icon {
   background-color: hsla(210,4%,10%,.08) !important;
-  box-shadow: none !important;
 }
 
 #back-button:not([disabled="true"]):hover:active > .toolbarbutton-icon,
 #back-button[open="true"] > .toolbarbutton-icon {
   background-color: hsla(210,4%,10%,.12) !important;
-  box-shadow: 0 1px 0 0 hsla(210,80%,20%,.1) inset !important;
+  box-shadow: 0 1px 0 0 hsla(210,4%,10%,.25),
+              0 0 0 1px hsla(210,4%,10%,.25),
+              0 1px 0 0 hsla(210,80%,20%,.1) inset !important;
 }
 
 %ifdef WINDOWS_AERO
@@ -955,13 +950,11 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
        (-moz-os-version: windows-win7) {
 %endif
   #back-button > .toolbarbutton-icon {
-    border: none !important;
     background-image: linear-gradient(hsla(0,0%,100%,.6), hsla(0,0%,100%,.1)) !important;
     box-shadow: 0 1px 0 hsla(0,0%,100%,.3) inset,
                 0 0 0 1px hsla(0,0%,100%,.3) inset,
                 0 0 0 1px hsla(210,54%,20%,.25),
                 0 1px 0 hsla(210,54%,20%,.35) !important;
-    transition-property: background-color, box-shadow !important;
   }
 
   #back-button:not([disabled="true"]):not([open="true"]):not(:active):hover > .toolbarbutton-icon {

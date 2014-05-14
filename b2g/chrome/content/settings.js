@@ -562,7 +562,12 @@ setUpdateTrackingId();
         enabled = Services.prefs.getBoolPref('layers.composer2d.enabled');
       } else {
 #ifdef MOZ_WIDGET_GONK
-        enabled = (libcutils.property_get('ro.display.colorfill') === '1');
+        let androidVersion = libcutils.property_get("ro.build.version.sdk");
+        if (androidVersion >= 17 ) {
+          enabled = true;
+        } else {
+          enabled = (libcutils.property_get('ro.display.colorfill') === '1');
+        }
 #endif
       }
       navigator.mozSettings.createLock().set({'layers.composer2d.enabled': enabled });
@@ -597,6 +602,33 @@ SettingsListener.observe("accessibility.screenreader", false, function(value) {
         Services.prefs.setCharPref(pref, value);
       }
     });
+  });
+})();
+
+// =================== Telemetry  ======================
+(function setupTelemetrySettings() {
+  let gaiaSettingName = 'debug.performance_data.shared';
+  let geckoPrefName = 'toolkit.telemetry.enabled';
+  SettingsListener.observe(gaiaSettingName, null, function(value) {
+    if (value !== null) {
+      // Gaia setting has been set; update Gecko pref to that.
+      Services.prefs.setBoolPref(geckoPrefName, value);
+      return;
+    }
+    // Gaia setting has not been set; set the gaia setting to default.
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+    let prefValue = true;
+#else
+    let prefValue = false;
+#endif
+    try {
+      prefValue = Services.prefs.getBoolPref(geckoPrefName);
+    } catch (e) {
+      // Pref not set; use default value.
+    }
+    let setting = {};
+    setting[gaiaSettingName] = prefValue;
+    window.navigator.mozSettings.createLock().set(setting);
   });
 })();
 

@@ -4,7 +4,6 @@
 
 // the "exported" symbols
 let SocialUI,
-    SocialChatBar,
     SocialFlyout,
     SocialMarks,
     SocialShare,
@@ -173,7 +172,6 @@ SocialUI = {
   _providersChanged: function() {
     SocialSidebar.clearProviderMenus();
     SocialSidebar.update();
-    SocialChatBar.update();
     SocialShare.populateProviderMenu();
     SocialStatus.populateToolbarPalette();
     SocialMarks.populateToolbarPalette();
@@ -294,45 +292,6 @@ SocialUI = {
       return;
     SocialMarks.update();
     SocialShare.update();
-  }
-}
-
-SocialChatBar = {
-  get chatbar() {
-    return document.getElementById("pinnedchats");
-  },
-  // Whether the chatbar is available for this window.  Note that in full-screen
-  // mode chats are available, but not shown.
-  get isAvailable() {
-    return SocialUI.enabled;
-  },
-  // Does this chatbar have any chats (whether minimized, collapsed or normal)
-  get hasChats() {
-    return !!this.chatbar.firstElementChild;
-  },
-  openChat: function(aProvider, aURL, aCallback, aMode) {
-    this.update();
-    if (!this.isAvailable)
-      return false;
-    this.chatbar.openChat(aProvider, aURL, aCallback, aMode);
-    // We only want to focus the chat if it is as a result of user input.
-    let dwu = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIDOMWindowUtils);
-    if (dwu.isHandlingUserInput)
-      this.chatbar.focus();
-    return true;
-  },
-  update: function() {
-    let command = document.getElementById("Social:FocusChat");
-    if (!this.isAvailable) {
-      this.chatbar.hidden = command.hidden = true;
-    } else {
-      this.chatbar.hidden = command.hidden = false;
-    }
-    command.setAttribute("disabled", command.hidden ? "true" : "false");
-  },
-  focus: function SocialChatBar_focus() {
-    this.chatbar.focus();
   }
 }
 
@@ -656,7 +615,20 @@ SocialShare = {
 
     let shareEndpoint = OpenGraphBuilder.generateEndpointURL(provider.shareURL, pageData);
 
-    this._dynamicResizer = new DynamicResizeWatcher();
+    let size = provider.getPageSize("share");
+    if (size) {
+      if (this._dynamicResizer) {
+        this._dynamicResizer.stop();
+        this._dynamicResizer = null;
+      }
+      let {width, height} = size;
+      width += this.panel.boxObject.width - iframe.boxObject.width;
+      height += this.panel.boxObject.height - iframe.boxObject.height;
+      this.panel.sizeTo(width, height);
+    } else {
+      this._dynamicResizer = new DynamicResizeWatcher();
+    }
+
     // if we've already loaded this provider/page share endpoint, we don't want
     // to add another load event listener.
     let reload = true;
@@ -666,7 +638,8 @@ SocialShare = {
       reload = shareEndpoint != iframe.contentDocument.location.spec;
     }
     if (!reload) {
-      this._dynamicResizer.start(this.panel, iframe);
+      if (this._dynamicResizer)
+        this._dynamicResizer.start(this.panel, iframe);
       iframe.docShell.isActive = true;
       iframe.docShell.isAppTab = true;
       let evt = iframe.contentDocument.createEvent("CustomEvent");
@@ -678,6 +651,10 @@ SocialShare = {
         iframe.removeEventListener("load", panelBrowserOnload, true);
         iframe.docShell.isActive = true;
         iframe.docShell.isAppTab = true;
+        // to support standard share endpoints mimick window.open by setting
+        // window.opener, some share endpoints rely on w.opener to know they
+        // should close the window when done.
+        iframe.contentWindow.opener = iframe.contentWindow;
         setTimeout(function() {
           if (SocialShare._dynamicResizer) { // may go null if hidden quickly
             SocialShare._dynamicResizer.start(iframe.parentNode, iframe);
@@ -1171,6 +1148,9 @@ SocialStatus = {
     }
 
     if (!frame) {
+      let size = provider.getPageSize("status");
+      let {width, height} = size ? size : {width: PANEL_MIN_WIDTH, height: PANEL_MIN_HEIGHT};
+
       frame = SharedFrame.createFrame(
         notificationFrameId, /* frame name */
         aParent, /* parent */
@@ -1185,7 +1165,8 @@ SocialStatus = {
 
           // work around bug 793057 - by making the panel roughly the final size
           // we are more likely to have the anchor in the correct position.
-          "style": "width: " + PANEL_MIN_WIDTH + "px;",
+          "style": "width: " + width + "px; height: " + height + "px;",
+          "dynamicresizer": !size,
 
           "origin": provider.origin,
           "src": provider.statusURL
@@ -1287,7 +1268,10 @@ SocialStatus = {
     }
 
     // we only use a dynamic resizer when we're located the toolbar.
-    let dynamicResizer = inMenuPanel ? null : this._dynamicResizer;
+    let dynamicResizer;
+    if (!inMenuPanel && notificationFrame.getAttribute("dynamicresizer") == "true") {
+      dynamicResizer = this._dynamicResizer;
+    }
     panel.addEventListener(hidingEvent, function onpopuphiding() {
       panel.removeEventListener(hidingEvent, onpopuphiding);
       aToolbarButton.removeAttribute("open");

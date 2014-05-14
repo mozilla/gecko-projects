@@ -142,10 +142,12 @@ typedef GeckoContentController::APZStateChange APZStateChange;
  * Pref that allows or disallows checkerboarding
  *
  * "apz.asyncscroll.throttle"
- * The time period in ms that throttles mozbrowserasyncscroll event.
+ * The time period that throttles mozbrowserasyncscroll event.
+ * Units: milliseconds
  *
  * "apz.asyncscroll.timeout"
- * The timeout in ms for mAsyncScrollTimeoutTask delay task.
+ * The timeout for mAsyncScrollTimeoutTask delay task.
+ * Units: milliseconds
  *
  * "apz.axis_lock_mode"
  * The preferred axis locking style. See AxisLockMode for possible values.
@@ -155,6 +157,7 @@ typedef GeckoContentController::APZStateChange APZStateChange;
  * content is being unruly/slow and we don't get a response back within this
  * time, we will just pretend that content did not preventDefault any touch
  * events we dispatched to it.
+ * Units: milliseconds
  *
  * "apz.cross_slide_enabled"
  * Pref that enables integration with the Metro "cross-slide" gesture.
@@ -165,10 +168,11 @@ typedef GeckoContentController::APZStateChange APZStateChange;
  * opposite axis.
  *
  * "apz.fling_accel_interval_ms"
- * The time in milliseconds that determines whether a second fling will be
- * treated as accelerated. If two flings are started within this interval,
- * the second one will be accelerated. Setting an interval of 0 means that
- * acceleration will be disabled.
+ * The time that determines whether a second fling will be treated as
+ * accelerated. If two flings are started within this interval, the second one
+ * will be accelerated. Setting an interval of 0 means that acceleration will
+ * be disabled.
+ * Units: milliseconds
  *
  * "apz.fling_accel_base_mult"
  * "apz.fling_accel_supplemental_mult"
@@ -184,15 +188,18 @@ typedef GeckoContentController::APZStateChange APZStateChange;
  * "apz.fling_repaint_interval"
  * Maximum amount of time flinging before sending a viewport change. This will
  * asynchronously repaint the page.
+ * Units: milliseconds
  *
  * "apz.fling_stopped_threshold"
  * When flinging, if the velocity goes below this number, we just stop the
  * animation completely. This is to prevent asymptotically approaching 0
  * velocity and rerendering unnecessarily.
+ * Units: screen pixels per millisecond
  *
  * "apz.max_velocity_inches_per_ms"
- * Maximum velocity in inches per millisecond.  Velocity will be capped at this
- * value if a faster fling occurs.  Negative values indicate unlimited velocity.
+ * Maximum velocity.  Velocity will be capped at this value if a faster fling
+ * occurs.  Negative values indicate unlimited velocity.
+ * Units: (real-world, i.e. screen) inches per millisecond
  *
  * "apz.max_velocity_queue_size"
  * Maximum size of velocity queue. The queue contains last N velocity records.
@@ -202,6 +209,7 @@ typedef GeckoContentController::APZStateChange APZStateChange;
  * "apz.min_skate_speed"
  * Minimum amount of speed along an axis before we switch to "skate" multipliers
  * rather than using the "stationary" multipliers.
+ * Units: CSS pixels per millisecond
  *
  * "apz.num_paint_duration_samples"
  * Number of samples to store of how long it took to paint after the previous
@@ -216,6 +224,7 @@ typedef GeckoContentController::APZStateChange APZStateChange;
  * device DPI, before we start panning the screen. This is to prevent us from
  * accidentally processing taps as touch moves, and from very short/accidental
  * touches moving the screen.
+ * Units: (real-world, i.e. screen) inches
  *
  * "apz.use_paint_duration"
  * Whether or not to use the estimated paint duration as a factor when projecting
@@ -504,16 +513,6 @@ AsyncPanZoomController::AsyncPanZoomController(uint64_t aLayersId,
 }
 
 AsyncPanZoomController::~AsyncPanZoomController() {
-  PCompositorParent* compositor = GetSharedFrameMetricsCompositor();
-
-  // Only send the release message if the SharedFrameMetrics has been created.
-  if (compositor && mSharedFrameMetricsBuffer) {
-    unused << compositor->SendReleaseSharedCompositorFrameMetrics(mFrameMetrics.GetScrollId(), mAPZCId);
-  }
-
-  delete mSharedFrameMetricsBuffer;
-  delete mSharedLock;
-
   MOZ_COUNT_DTOR(AsyncPanZoomController);
 }
 
@@ -558,6 +557,20 @@ AsyncPanZoomController::Destroy()
   mLastChild = nullptr;
   mParent = nullptr;
   mTreeManager = nullptr;
+
+  PCompositorParent* compositor = GetSharedFrameMetricsCompositor();
+  // Only send the release message if the SharedFrameMetrics has been created.
+  if (compositor && mSharedFrameMetricsBuffer) {
+    unused << compositor->SendReleaseSharedCompositorFrameMetrics(mFrameMetrics.GetScrollId(), mAPZCId);
+  }
+
+  { // scope the lock
+    ReentrantMonitorAutoEnter lock(mMonitor);
+    delete mSharedFrameMetricsBuffer;
+    mSharedFrameMetricsBuffer = nullptr;
+    delete mSharedLock;
+    mSharedLock = nullptr;
+  }
 }
 
 bool
@@ -880,6 +893,11 @@ nsEventStatus AsyncPanZoomController::OnScaleBegin(const PinchGestureInput& aEve
 
 nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
   APZC_LOG("%p got a scale in state %d\n", this, mState);
+
+  if (!TouchActionAllowPinchZoom()) {
+    return nsEventStatus_eIgnore;
+  }
+
   if (mState != PINCHING) {
     return nsEventStatus_eConsumeNoDefault;
   }
@@ -958,6 +976,10 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
 
 nsEventStatus AsyncPanZoomController::OnScaleEnd(const PinchGestureInput& aEvent) {
   APZC_LOG("%p got a scale-end in state %d\n", this, mState);
+
+  if (!TouchActionAllowPinchZoom()) {
+    return nsEventStatus_eIgnore;
+  }
 
   SetState(NOTHING);
 
@@ -1485,11 +1507,7 @@ const LayerMargin AsyncPanZoomController::CalculatePendingDisplayPort(
   const ScreenPoint& aVelocity,
   double aEstimatedPaintDuration)
 {
-  CSSSize compositionBounds = aFrameMetrics.CalculateCompositedSizeInCssPixels();
-  CSSSize compositionSize = aFrameMetrics.GetRootCompositionSize();
-  compositionSize =
-    CSSSize(std::min(compositionBounds.width, compositionSize.width),
-            std::min(compositionBounds.height, compositionSize.height));
+  CSSSize compositionSize = aFrameMetrics.CalculateBoundedCompositedSizeInCssPixels();
   CSSPoint velocity = aVelocity / aFrameMetrics.GetZoom();
   CSSPoint scrollOffset = aFrameMetrics.GetScrollOffset();
   CSSRect scrollableRect = aFrameMetrics.GetExpandedScrollableRect();
@@ -1595,10 +1613,7 @@ GetDisplayPortRect(const FrameMetrics& aFrameMetrics)
   // This computation is based on what happens in CalculatePendingDisplayPort. If that
   // changes then this might need to change too
   CSSRect baseRect(aFrameMetrics.GetScrollOffset(),
-                   CSSSize(std::min(aFrameMetrics.CalculateCompositedSizeInCssPixels().width,
-                                    aFrameMetrics.GetRootCompositionSize().width),
-                           std::min(aFrameMetrics.CalculateCompositedSizeInCssPixels().height,
-                                    aFrameMetrics.GetRootCompositionSize().height)));
+                   aFrameMetrics.CalculateBoundedCompositedSizeInCssPixels());
   baseRect.Inflate(aFrameMetrics.GetDisplayPortMargins() / aFrameMetrics.LayersPixelsPerCSSPixel());
   return baseRect;
 }

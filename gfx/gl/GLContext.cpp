@@ -285,7 +285,7 @@ GLContext::GLContext(const SurfaceCaps& caps,
     mNeedsTextureSizeChecks(false),
     mWorkAroundDriverBugs(true)
 {
-    mOwningThread = NS_GetCurrentThread();
+    mOwningThreadId = PlatformThread::CurrentId();
 }
 
 GLContext::~GLContext() {
@@ -301,6 +301,19 @@ GLContext::~GLContext() {
         ReportOutstandingNames();
     }
 #endif
+}
+
+/*static*/ void
+GLContext::StaticDebugCallback(GLenum source,
+                               GLenum type,
+                               GLuint id,
+                               GLenum severity,
+                               GLsizei length,
+                               const GLchar* message,
+                               const GLvoid* userParam)
+{
+    GLContext* gl = (GLContext*)userParam;
+    gl->DebugCallback(source, type, id, severity, length, message);
 }
 
 bool
@@ -1159,6 +1172,17 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
         mTexGarbageBin = new TextureGarbageBin(this);
 
         MOZ_ASSERT(IsCurrent());
+
+        if (DebugMode() && IsExtensionSupported(KHR_debug)) {
+            fEnable(LOCAL_GL_DEBUG_OUTPUT);
+            fDisable(LOCAL_GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            fDebugMessageCallback(&StaticDebugCallback, (void*)this);
+            fDebugMessageControl(LOCAL_GL_DONT_CARE,
+                                 LOCAL_GL_DONT_CARE,
+                                 LOCAL_GL_DONT_CARE,
+                                 0, nullptr,
+                                 true);
+        }
     }
 
     if (mInitialized)
@@ -1172,6 +1196,95 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
     mVersionString = nsPrintfCString("%u.%u.%u", mVersion / 100, (mVersion / 10) % 10, mVersion % 10);
 
     return mInitialized;
+}
+
+void
+GLContext::DebugCallback(GLenum source,
+                         GLenum type,
+                         GLuint id,
+                         GLenum severity,
+                         GLsizei length,
+                         const GLchar* message)
+{
+    nsAutoCString sourceStr;
+    switch (source) {
+    case LOCAL_GL_DEBUG_SOURCE_API:
+        sourceStr = NS_LITERAL_CSTRING("SOURCE_API");
+        break;
+    case LOCAL_GL_DEBUG_SOURCE_WINDOW_SYSTEM:
+        sourceStr = NS_LITERAL_CSTRING("SOURCE_WINDOW_SYSTEM");
+        break;
+    case LOCAL_GL_DEBUG_SOURCE_SHADER_COMPILER:
+        sourceStr = NS_LITERAL_CSTRING("SOURCE_SHADER_COMPILER");
+        break;
+    case LOCAL_GL_DEBUG_SOURCE_THIRD_PARTY:
+        sourceStr = NS_LITERAL_CSTRING("SOURCE_THIRD_PARTY");
+        break;
+    case LOCAL_GL_DEBUG_SOURCE_APPLICATION:
+        sourceStr = NS_LITERAL_CSTRING("SOURCE_APPLICATION");
+        break;
+    case LOCAL_GL_DEBUG_SOURCE_OTHER:
+        sourceStr = NS_LITERAL_CSTRING("SOURCE_OTHER");
+        break;
+    default:
+        sourceStr = nsPrintfCString("<source 0x%04x>", source);
+        break;
+    }
+
+    nsAutoCString typeStr;
+    switch (type) {
+    case LOCAL_GL_DEBUG_TYPE_ERROR:
+        typeStr = NS_LITERAL_CSTRING("TYPE_ERROR");
+        break;
+    case LOCAL_GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+        typeStr = NS_LITERAL_CSTRING("TYPE_DEPRECATED_BEHAVIOR");
+        break;
+    case LOCAL_GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+        typeStr = NS_LITERAL_CSTRING("TYPE_UNDEFINED_BEHAVIOR");
+        break;
+    case LOCAL_GL_DEBUG_TYPE_PORTABILITY:
+        typeStr = NS_LITERAL_CSTRING("TYPE_PORTABILITY");
+        break;
+    case LOCAL_GL_DEBUG_TYPE_PERFORMANCE:
+        typeStr = NS_LITERAL_CSTRING("TYPE_PERFORMANCE");
+        break;
+    case LOCAL_GL_DEBUG_TYPE_OTHER:
+        typeStr = NS_LITERAL_CSTRING("TYPE_OTHER");
+        break;
+    case LOCAL_GL_DEBUG_TYPE_MARKER:
+        typeStr = NS_LITERAL_CSTRING("TYPE_MARKER");
+        break;
+    default:
+        typeStr = nsPrintfCString("<type 0x%04x>", type);
+        break;
+    }
+
+    nsAutoCString sevStr;
+    switch (severity) {
+    case LOCAL_GL_DEBUG_SEVERITY_HIGH:
+        sevStr = NS_LITERAL_CSTRING("SEVERITY_HIGH");
+        break;
+    case LOCAL_GL_DEBUG_SEVERITY_MEDIUM:
+        sevStr = NS_LITERAL_CSTRING("SEVERITY_MEDIUM");
+        break;
+    case LOCAL_GL_DEBUG_SEVERITY_LOW:
+        sevStr = NS_LITERAL_CSTRING("SEVERITY_LOW");
+        break;
+    case LOCAL_GL_DEBUG_SEVERITY_NOTIFICATION:
+        sevStr = NS_LITERAL_CSTRING("SEVERITY_NOTIFICATION");
+        break;
+    default:
+        sevStr = nsPrintfCString("<severity 0x%04x>", severity);
+        break;
+    }
+
+    printf_stderr("[KHR_debug: 0x%x] ID %u: %s %s %s:\n    %s",
+                  (uintptr_t)this,
+                  id,
+                  sourceStr.BeginReading(),
+                  typeStr.BeginReading(),
+                  sevStr.BeginReading(),
+                  message);
 }
 
 void
@@ -1694,7 +1807,38 @@ GLContext::MarkDestroyed()
     mSymbols.Zero();
 }
 
-#ifdef MOZ_ENABLE_GL_TRACKING
+#ifdef DEBUG
+/* static */ void
+GLContext::AssertNotPassingStackBufferToTheGL(const void* ptr)
+{
+  int somethingOnTheStack;
+  const void* someStackPtr = &somethingOnTheStack;
+  const int page_bits = 12;
+  intptr_t page = reinterpret_cast<uintptr_t>(ptr) >> page_bits;
+  intptr_t someStackPage = reinterpret_cast<uintptr_t>(someStackPtr) >> page_bits;
+  uintptr_t pageDistance = std::abs(page - someStackPage);
+
+  // Explanation for the "distance <= 1" check here as opposed to just
+  // an equality check.
+  //
+  // Here we assume that pages immediately adjacent to the someStackAddress page,
+  // are also stack pages. That allows to catch the case where the calling frame put
+  // a buffer on the stack, and we just crossed the page boundary. That is likely
+  // to happen, precisely, when using stack arrays. I hit that specifically
+  // with CompositorOGL::Initialize.
+  //
+  // In theory we could be unlucky and wrongly assert here. If that happens,
+  // it will only affect debug builds, and looking at stacks we'll be able to
+  // see that this assert is wrong and revert to the conservative and safe
+  // approach of only asserting when address and someStackAddress are
+  // on the same page.
+  bool isStackAddress = pageDistance <= 1;
+  MOZ_ASSERT(!isStackAddress,
+             "Please don't pass stack arrays to the GL. "
+             "Consider using HeapCopyOfStackArray. "
+             "See bug 1005658.");
+}
+
 void
 GLContext::CreatedProgram(GLContext *aOrigin, GLuint aName)
 {
@@ -1964,20 +2108,7 @@ GLContext::IsOffscreenSizeAllowed(const IntSize& aSize) const {
 bool
 GLContext::IsOwningThreadCurrent()
 {
-  return NS_GetCurrentThread() == mOwningThread;
-}
-
-void
-GLContext::DispatchToOwningThread(nsIRunnable *event)
-{
-    // Before dispatching, we need to ensure we're not in the middle of
-    // shutting down. Dispatching runnables in the middle of shutdown
-    // (that is, when the main thread is no longer get-able) can cause them
-    // to leak. See Bug 741319, and Bug 744115.
-    nsCOMPtr<nsIThread> mainThread;
-    if (NS_SUCCEEDED(NS_GetMainThread(getter_AddRefs(mainThread)))) {
-        mOwningThread->Dispatch(event, NS_DISPATCH_NORMAL);
-    }
+  return PlatformThread::CurrentId() == mOwningThreadId;
 }
 
 GLBlitHelper*

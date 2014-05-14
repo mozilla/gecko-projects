@@ -121,6 +121,7 @@ TabChildBase::TabChildBase()
 NS_IMPL_CYCLE_COLLECTING_ADDREF(TabChildBase)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(TabChildBase)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TabChildBase)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION(TabChildBase, mTabChildGlobal, mGlobal)
@@ -975,8 +976,7 @@ TabChild::NotifyTabContextUpdated()
     }
 }
 
-NS_INTERFACE_MAP_BEGIN(TabChild)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIWebBrowserChrome)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TabChild)
   NS_INTERFACE_MAP_ENTRY(nsIWebBrowserChrome)
   NS_INTERFACE_MAP_ENTRY(nsIWebBrowserChrome2)
   NS_INTERFACE_MAP_ENTRY(nsIEmbeddingSiteWindow)
@@ -989,10 +989,10 @@ NS_INTERFACE_MAP_BEGIN(TabChild)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsITooltipListener)
-NS_INTERFACE_MAP_END
+NS_INTERFACE_MAP_END_INHERITING(TabChildBase)
 
-NS_IMPL_ADDREF(TabChild)
-NS_IMPL_RELEASE(TabChild)
+NS_IMPL_ADDREF_INHERITED(TabChild, TabChildBase);
+NS_IMPL_RELEASE_INHERITED(TabChild, TabChildBase);
 
 NS_IMETHODIMP
 TabChild::SetStatus(uint32_t aStatusType, const char16_t* aStatus)
@@ -1331,6 +1331,23 @@ TabChild::DestroyWindow()
       }
       mLayersId = 0;
     }
+
+    for (uint32_t index = 0, count = mCachedFileDescriptorInfos.Length();
+         index < count;
+         index++) {
+        nsAutoPtr<CachedFileDescriptorInfo>& info =
+            mCachedFileDescriptorInfos[index];
+
+        MOZ_ASSERT(!info->mCallback);
+
+        if (info->mFileDescriptor.IsValid()) {
+            MOZ_ASSERT(!info->mCanceled);
+
+            nsRefPtr<CloseFileRunnable> runnable =
+                new CloseFileRunnable(info->mFileDescriptor);
+            runnable->Dispatch();
+        }
+    }
 }
 
 bool
@@ -1438,7 +1455,7 @@ TabChild::RecvCacheFileDescriptor(const nsString& aPath,
 
     // First see if we already have a request for this path.
     const CachedFileDescriptorInfo search(aPath);
-    uint32_t index =
+    size_t index =
         mCachedFileDescriptorInfos.IndexOf(search, 0,
                                            search.PathOnlyComparator());
     if (index == mCachedFileDescriptorInfos.NoIndex) {
@@ -1490,7 +1507,7 @@ TabChild::GetCachedFileDescriptor(const nsAString& aPath,
     // First see if we've already received a cached file descriptor for this
     // path.
     const CachedFileDescriptorInfo search(aPath);
-    uint32_t index =
+    size_t index =
         mCachedFileDescriptorInfos.IndexOf(search, 0,
                                            search.PathOnlyComparator());
     if (index == mCachedFileDescriptorInfos.NoIndex) {
@@ -1546,7 +1563,7 @@ TabChild::CancelCachedFileDescriptorCallback(
     }
 
     const CachedFileDescriptorInfo search(aPath, aCallback);
-    uint32_t index =
+    size_t index =
         mCachedFileDescriptorInfos.IndexOf(search, 0,
                                            search.PathAndCallbackComparator());
     if (index == mCachedFileDescriptorInfos.NoIndex) {
@@ -1562,6 +1579,9 @@ TabChild::CancelCachedFileDescriptorCallback(
     MOZ_ASSERT(!info->mFileDescriptor.IsValid());
     MOZ_ASSERT(info->mCallback == aCallback);
     MOZ_ASSERT(!info->mCanceled);
+
+    // No need to hold the callback any longer.
+    info->mCallback = nullptr;
 
     // Set this flag so that we will close the file descriptor when it arrives.
     info->mCanceled = true;
@@ -2359,7 +2379,10 @@ TabChild::RecvSetIsDocShellActive(const bool& aIsActive)
 }
 
 PRenderFrameChild*
-TabChild::AllocPRenderFrameChild()
+TabChild::AllocPRenderFrameChild(ScrollingBehavior* aScrolling,
+                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                                 uint64_t* aLayersId,
+                                 bool* aSuccess)
 {
     return new RenderFrameChild();
 }
@@ -2418,12 +2441,14 @@ TabChild::InitRenderingState()
     uint64_t id;
     bool success;
     RenderFrameChild* remoteFrame =
-        static_cast<RenderFrameChild*>(SendPRenderFrameConstructor());
+        static_cast<RenderFrameChild*>(SendPRenderFrameConstructor(
+                                         &mScrolling,
+                                         &mTextureFactoryIdentifier, &id,
+                                         &success));
     if (!remoteFrame) {
         NS_WARNING("failed to construct RenderFrame");
         return false;
     }
-    SendInitRenderFrame(remoteFrame, &mScrolling, &mTextureFactoryIdentifier, &id, &success);
     if (!success) {
         NS_WARNING("failed to construct RenderFrame");
         PRenderFrameChild::Send__delete__(remoteFrame);

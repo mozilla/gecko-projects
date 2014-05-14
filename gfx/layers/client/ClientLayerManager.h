@@ -162,8 +162,15 @@ public:
   bool NeedsComposite() const { return mNeedsComposite; }
 
   virtual void Composite() MOZ_OVERRIDE;
+  virtual bool RequestOverfill(mozilla::dom::OverfillCallback* aCallback) MOZ_OVERRIDE;
+  virtual void RunOverfillCallback(const uint32_t aOverfill) MOZ_OVERRIDE;
 
   virtual void DidComposite();
+
+  virtual bool SupportsMixBlendModes(EnumSet<gfx::CompositionOp>& aMixBlendModes) MOZ_OVERRIDE
+  {
+   return (GetTextureFactoryIdentifier().mSupportedBlendModes & aMixBlendModes) == aMixBlendModes;
+  }
 
 protected:
   enum TransactionPhase {
@@ -227,6 +234,7 @@ private:
 
   RefPtr<ShadowLayerForwarder> mForwarder;
   nsAutoTArray<RefPtr<TextureClientPool>,2> mTexturePools;
+  nsAutoTArray<dom::OverfillCallback*,0> mOverfillCallbacks;
 
   // indexed by gfx::SurfaceFormat
   nsTArray<RefPtr<SimpleTextureClientPool> > mSimpleTilePools;

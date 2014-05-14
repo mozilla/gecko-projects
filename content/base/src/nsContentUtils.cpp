@@ -195,6 +195,7 @@ const char kLoadAsData[] = "loadAsData";
 
 nsIXPConnect *nsContentUtils::sXPConnect;
 nsIScriptSecurityManager *nsContentUtils::sSecurityManager;
+nsIPrincipal *nsContentUtils::sSystemPrincipal;
 nsIParserService *nsContentUtils::sParserService = nullptr;
 nsNameSpaceManager *nsContentUtils::sNameSpaceManager;
 nsIIOService *nsContentUtils::sIOService;
@@ -376,8 +377,8 @@ nsContentUtils::Init()
     return NS_ERROR_FAILURE;
   NS_ADDREF(sSecurityManager);
 
-  // Getting the first context can trigger GC, so do this non-lazily.
-  sXPConnect->InitSafeJSContext();
+  sSecurityManager->GetSystemPrincipal(&sSystemPrincipal);
+  MOZ_ASSERT(sSystemPrincipal);
 
   nsresult rv = CallGetService(NS_IOSERVICE_CONTRACTID, &sIOService);
   if (NS_FAILED(rv)) {
@@ -1434,6 +1435,7 @@ nsContentUtils::Shutdown()
   NS_IF_RELEASE(sConsoleService);
   sXPConnect = nullptr;
   NS_IF_RELEASE(sSecurityManager);
+  NS_IF_RELEASE(sSystemPrincipal);
   NS_IF_RELEASE(sParserService);
   NS_IF_RELEASE(sIOService);
   NS_IF_RELEASE(sLineBreaker);
@@ -1514,14 +1516,7 @@ nsContentUtils::CheckSameOrigin(const nsINode* aTrustedNode,
 {
   MOZ_ASSERT(aTrustedNode);
   MOZ_ASSERT(unTrustedNode);
-
-  bool isSystem = false;
-  nsresult rv = sSecurityManager->SubjectPrincipalIsSystem(&isSystem);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (isSystem) {
-    // we're running as system, grant access to the node.
-
+  if (IsCallerChrome()) {
     return NS_OK;
   }
 
@@ -1578,45 +1573,19 @@ nsContentUtils::CanCallerAccess(nsIDOMNode *aNode)
 bool
 nsContentUtils::CanCallerAccess(nsINode* aNode)
 {
-  // XXXbz why not check the IsCapabilityEnabled thing up front, and not bother
-  // with the system principal games?  But really, there should be a simpler
-  // API here, dammit.
-  nsCOMPtr<nsIPrincipal> subjectPrincipal;
-  nsresult rv = sSecurityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  if (!subjectPrincipal) {
-    // we're running as system, grant access to the node.
-
-    return true;
-  }
-
-  return CanCallerAccess(subjectPrincipal, aNode->NodePrincipal());
+  return CanCallerAccess(GetSubjectPrincipal(), aNode->NodePrincipal());
 }
 
 // static
 bool
 nsContentUtils::CanCallerAccess(nsPIDOMWindow* aWindow)
 {
-  // XXXbz why not check the IsCapabilityEnabled thing up front, and not bother
-  // with the system principal games?  But really, there should be a simpler
-  // API here, dammit.
-  nsCOMPtr<nsIPrincipal> subjectPrincipal;
-  nsresult rv = sSecurityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  if (!subjectPrincipal) {
-    // we're running as system, grant access to the node.
-
-    return true;
-  }
-
   nsCOMPtr<nsIScriptObjectPrincipal> scriptObject =
     do_QueryInterface(aWindow->IsOuterWindow() ?
                       aWindow->GetCurrentInnerWindow() : aWindow);
   NS_ENSURE_TRUE(scriptObject, false);
 
-  return CanCallerAccess(subjectPrincipal, scriptObject->GetPrincipal());
+  return CanCallerAccess(GetSubjectPrincipal(), scriptObject->GetPrincipal());
 }
 
 //static
@@ -1718,12 +1687,7 @@ bool
 nsContentUtils::IsCallerChrome()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  bool is_caller_chrome = false;
-  nsresult rv = sSecurityManager->SubjectPrincipalIsSystem(&is_caller_chrome);
-  if (NS_FAILED(rv)) {
-    return false;
-  }
-  if (is_caller_chrome) {
+  if (GetSubjectPrincipal() == sSystemPrincipal) {
     return true;
   }
 
@@ -2353,14 +2317,15 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
 nsIPrincipal*
 nsContentUtils::GetSubjectPrincipal()
 {
-  nsCOMPtr<nsIPrincipal> subject;
-  sSecurityManager->GetSubjectPrincipal(getter_AddRefs(subject));
+  JSContext* cx = GetCurrentJSContext();
+  if (!cx) {
+    return GetSystemPrincipal();
+  }
 
-  // When the ssm says the subject is null, that means system principal.
-  if (!subject)
-    sSecurityManager->GetSystemPrincipal(getter_AddRefs(subject));
-
-  return subject;
+  JSCompartment* compartment = js::GetContextCompartment(cx);
+  MOZ_ASSERT(compartment);
+  JSPrincipals* principals = JS_GetCompartmentPrincipals(compartment);
+  return nsJSPrincipals::get(principals);
 }
 
 // static
@@ -2916,14 +2881,15 @@ nsContentUtils::IsExactSitePermDeny(nsIPrincipal* aPrincipal, const char* aType)
 static const char *gEventNames[] = {"event"};
 static const char *gSVGEventNames[] = {"evt"};
 // for b/w compat, the first name to onerror is still 'event', even though it
-// is actually the error message.  (pre this code, the other 2 were not avail.)
-// XXXmarkh - a quick lxr shows no affected code - should we correct this?
-static const char *gOnErrorNames[] = {"event", "source", "lineno"};
+// is actually the error message
+static const char *gOnErrorNames[] = {"event", "source", "lineno",
+                                      "colno", "error"};
 
 // static
 void
 nsContentUtils::GetEventArgNames(int32_t aNameSpaceID,
                                  nsIAtom *aEventName,
+                                 bool aIsForWindow,
                                  uint32_t *aArgCount,
                                  const char*** aArgArray)
 {
@@ -2934,7 +2900,7 @@ nsContentUtils::GetEventArgNames(int32_t aNameSpaceID,
   // JSEventHandler is what does the arg magic for onerror, and it does
   // not seem to take the namespace into account.  So we let onerror in all
   // namespaces get the 3 arg names.
-  if (aEventName == nsGkAtoms::onerror) {
+  if (aEventName == nsGkAtoms::onerror && aIsForWindow) {
     SET_EVENT_ARG_NAMES(gOnErrorNames);
   } else if (aNameSpaceID == kNameSpaceID_SVG) {
     SET_EVENT_ARG_NAMES(gSVGEventNames);
@@ -3141,11 +3107,7 @@ nsContentUtils::IsChromeDoc(nsIDocument *aDocument)
   if (!aDocument) {
     return false;
   }
-  
-  nsCOMPtr<nsIPrincipal> systemPrincipal;
-  sSecurityManager->GetSystemPrincipal(getter_AddRefs(systemPrincipal));
-
-  return aDocument->NodePrincipal() == systemPrincipal;
+  return aDocument->NodePrincipal() == sSystemPrincipal;
 }
 
 bool
@@ -4351,10 +4313,7 @@ nsContentUtils::CheckSecurityBeforeLoad(nsIURI* aURIToLoad,
 {
   NS_PRECONDITION(aLoadingPrincipal, "Must have a loading principal here");
 
-  bool isSystemPrin = false;
-  if (NS_SUCCEEDED(sSecurityManager->IsSystemPrincipal(aLoadingPrincipal,
-                                                       &isSystemPrin)) &&
-      isSystemPrin) {
+  if (aLoadingPrincipal == sSystemPrincipal) {
     return NS_OK;
   }
   
@@ -4393,9 +4352,7 @@ nsContentUtils::CheckSecurityBeforeLoad(nsIURI* aURIToLoad,
 bool
 nsContentUtils::IsSystemPrincipal(nsIPrincipal* aPrincipal)
 {
-  bool isSystem;
-  nsresult rv = sSecurityManager->IsSystemPrincipal(aPrincipal, &isSystem);
-  return NS_SUCCEEDED(rv) && isSystem;
+  return aPrincipal == sSystemPrincipal;
 }
 
 bool
@@ -4408,11 +4365,7 @@ nsContentUtils::IsExpandedPrincipal(nsIPrincipal* aPrincipal)
 nsIPrincipal*
 nsContentUtils::GetSystemPrincipal()
 {
-  nsCOMPtr<nsIPrincipal> sysPrin;
-  DebugOnly<nsresult> rv =
-    sSecurityManager->GetSystemPrincipal(getter_AddRefs(sysPrin));
-  MOZ_ASSERT(NS_SUCCEEDED(rv) && sysPrin);
-  return sysPrin;
+  return sSystemPrincipal;
 }
 
 bool
@@ -4434,7 +4387,7 @@ nsContentUtils::CombineResourcePrincipals(nsCOMPtr<nsIPrincipal>* aResourcePrinc
       subsumes) {
     return false;
   }
-  sSecurityManager->GetSystemPrincipal(getter_AddRefs(*aResourcePrincipal));
+  *aResourcePrincipal = sSystemPrincipal;
   return true;
 }
 
@@ -6106,20 +6059,10 @@ nsContentUtils::GetContentSecurityPolicy(JSContext* aCx,
                                          nsIContentSecurityPolicy** aCSP)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  // Get the security manager
-  nsCOMPtr<nsIScriptSecurityManager> ssm = nsContentUtils::GetSecurityManager();
-
-  if (!ssm) {
-    NS_ERROR("Failed to get security manager service");
-    return false;
-  }
-
-  nsCOMPtr<nsIPrincipal> subjectPrincipal = ssm->GetCxSubjectPrincipal(aCx);
-  NS_ASSERTION(subjectPrincipal, "Failed to get subjectPrincipal");
+  MOZ_ASSERT(aCx == GetCurrentJSContext());
 
   nsCOMPtr<nsIContentSecurityPolicy> csp;
-  nsresult rv = subjectPrincipal->GetCsp(getter_AddRefs(csp));
+  nsresult rv = GetSubjectPrincipal()->GetCsp(getter_AddRefs(csp));
   if (NS_FAILED(rv)) {
     NS_ERROR("CSP: Failed to get CSP from principal.");
     return false;

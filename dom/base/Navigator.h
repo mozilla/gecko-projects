@@ -104,6 +104,10 @@ class AudioChannelManager;
 #endif
 } // namespace system
 
+namespace workers {
+class ServiceWorkerContainer;
+} // namespace workers
+
 class Navigator : public nsIDOMNavigator
                 , public nsIMozNavigatorNetwork
                 , public nsWrapperCache
@@ -164,6 +168,10 @@ public:
 
   already_AddRefed<Promise> GetDataStores(const nsAString &aName,
                                           ErrorResult& aRv);
+
+  // Feature Detection API
+  already_AddRefed<Promise> GetFeature(const nsAString &aName);
+
   bool Vibrate(uint32_t aDuration);
   bool Vibrate(const nsTArray<uint32_t>& aDuration);
   uint32_t MaxTouchPoints();
@@ -246,11 +254,16 @@ public:
                               uint64_t aInnerWindowID,
                               ErrorResult& aRv);
 #endif // MOZ_MEDIA_NAVIGATOR
+
+  already_AddRefed<workers::ServiceWorkerContainer> ServiceWorker();
+
   bool DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                     JS::Handle<jsid> aId,
                     JS::MutableHandle<JSPropertyDescriptor> aDesc);
   void GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
                            ErrorResult& aRv);
+  void GetLanguages(nsTArray<nsString>& aLanguages);
+  void GetAcceptLanguages(nsTArray<nsString>& aLanguages);
 
   // WebIDL helper methods
   static bool HasBatterySupport(JSContext* /* unused*/, JSObject* /*unused */);
@@ -315,6 +328,8 @@ public:
 
   static bool HasNetworkStatsSupport(JSContext* aCx, JSObject* aGlobal);
 
+  static bool HasFeatureDetectionSupport(JSContext* aCx, JSObject* aGlobal);
+
   nsPIDOMWindow* GetParentObject() const
   {
     return GetWindow();
@@ -357,6 +372,7 @@ private:
   nsCOMPtr<nsIDOMNavigatorSystemMessages> mMessagesManager;
   nsTArray<nsRefPtr<nsDOMDeviceStorage> > mDeviceStorageStores;
   nsRefPtr<time::TimeManager> mTimeManager;
+  nsRefPtr<workers::ServiceWorkerContainer> mServiceWorkerContainer;
   nsCOMPtr<nsPIDOMWindow> mWindow;
 
   // Hashtable for saving cached objects newresolve created, so we don't create

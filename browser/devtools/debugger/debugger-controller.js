@@ -90,6 +90,7 @@ const FRAME_TYPE = {
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/devtools/event-emitter.js");
+Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource:///modules/devtools/SimpleListWidget.jsm");
 Cu.import("resource:///modules/devtools/BreadcrumbsWidget.jsm");
 Cu.import("resource:///modules/devtools/SideMenuWidget.jsm");
@@ -785,9 +786,13 @@ StackFrames.prototype = {
     if (!isClientEval && !isPopupShown) {
       // Move the editor's caret to the proper url and line.
       DebuggerView.setEditorLocation(where.url, where.line);
-      // Highlight the breakpoint at the specified url and line if it exists.
-      DebuggerView.Sources.highlightBreakpoint(where, { noEditorUpdate: true });
+    } else {
+      // Highlight the line where the execution is paused in the editor.
+      DebuggerView.setEditorLocation(where.url, where.line, { noCaret: true });
     }
+
+    // Highlight the breakpoint at the line and column if it exists.
+    DebuggerView.Sources.highlightBreakpointAtCursor();
 
     // Don't display the watch expressions textbox inputs in the pane.
     DebuggerView.WatchExpressions.toggleContents(false);
@@ -834,8 +839,8 @@ StackFrames.prototype = {
 
       // The innermost scope is always automatically expanded, because it
       // contains the variables in the current stack frame which are likely to
-      // be inspected.
-      if (innermost) {
+      // be inspected. The previously expanded scopes are also reexpanded here.
+      if (innermost || DebuggerView.Variables.wasExpanded(scope)) {
         scope.expand();
       }
     } while ((environment = environment.parent));
@@ -1746,12 +1751,14 @@ Breakpoints.prototype = {
     // Initialize the breakpoint, but don't update the editor, since this
     // callback is invoked because a breakpoint was added in the editor itself.
     this.addBreakpoint(location, { noEditorUpdate: true }).then(aBreakpointClient => {
-      // If the breakpoint client has an "requestedLocation" attached, then
+      // If the breakpoint client has a "requestedLocation" attached, then
       // the original requested placement for the breakpoint wasn't accepted.
       // In this case, we need to update the editor with the new location.
       if (aBreakpointClient.requestedLocation) {
-        DebuggerView.editor.removeBreakpoint(aBreakpointClient.requestedLocation.line - 1);
-        DebuggerView.editor.addBreakpoint(aBreakpointClient.location.line - 1);
+        DebuggerView.editor.moveBreakpoint(
+          aBreakpointClient.requestedLocation.line - 1,
+          aBreakpointClient.location.line - 1
+        );
       }
       // Notify that we've shown a breakpoint in the source editor.
       window.emit(EVENTS.BREAKPOINT_SHOWN);
@@ -1835,24 +1842,23 @@ Breakpoints.prototype = {
    *         A promise that is resolved after the breakpoint is added, or
    *         rejected if there was an error.
    */
-  addBreakpoint: function(aLocation, aOptions = {}) {
+  addBreakpoint: Task.async(function*(aLocation, aOptions = {}) {
     // Make sure a proper location is available.
     if (!aLocation) {
-      return promise.reject(new Error("Invalid breakpoint location."));
+      throw new Error("Invalid breakpoint location.");
     }
+    let addedPromise, removingPromise;
 
     // If the breakpoint was already added, or is currently being added at the
     // specified location, then return that promise immediately.
-    let addedPromise = this._getAdded(aLocation);
-    if (addedPromise) {
+    if ((addedPromise = this._getAdded(aLocation))) {
       return addedPromise;
     }
 
     // If the breakpoint is currently being removed from the specified location,
-    // then wait for that to finish and retry afterwards.
-    let removingPromise = this._getRemoving(aLocation);
-    if (removingPromise) {
-      return removingPromise.then(() => this.addBreakpoint(aLocation, aOptions));
+    // then wait for that to finish.
+    if ((removingPromise = this._getRemoving(aLocation))) {
+      yield removingPromise;
     }
 
     let deferred = promise.defer();
@@ -1862,7 +1868,7 @@ Breakpoints.prototype = {
     this._added.set(identifier, deferred.promise);
 
     // Try adding the breakpoint.
-    gThreadClient.setBreakpoint(aLocation, (aResponse, aBreakpointClient) => {
+    gThreadClient.setBreakpoint(aLocation, Task.async(function*(aResponse, aBreakpointClient) {
       // If the breakpoint response has an "actualLocation" attached, then
       // the original requested placement for the breakpoint wasn't accepted.
       if (aResponse.actualLocation) {
@@ -1871,11 +1877,6 @@ Breakpoints.prototype = {
         let newIdentifier = identifier = this.getIdentifier(aResponse.actualLocation);
         this._added.delete(oldIdentifier);
         this._added.set(newIdentifier, deferred.promise);
-
-        // Store the originally requested location in case it's ever needed
-        // and update the breakpoint client with the actual location.
-        aBreakpointClient.requestedLocation = aLocation;
-        aBreakpointClient.location = aResponse.actualLocation;
       }
 
       // By default, new breakpoints are always enabled. Disabled breakpoints
@@ -1883,13 +1884,23 @@ Breakpoints.prototype = {
       // so that they may not be forgotten across target navigations.
       let disabledPromise = this._disabled.get(identifier);
       if (disabledPromise) {
-        disabledPromise.then((aPrevBreakpointClient) => {
-          let condition = aPrevBreakpointClient.getCondition();
-          if (condition) {
-            aBreakpointClient.setCondition(gThreadClient, condition);
-          }
-        });
+        let aPrevBreakpointClient = yield disabledPromise;
+        let condition = aPrevBreakpointClient.getCondition();
         this._disabled.delete(identifier);
+
+        if (condition) {
+          aBreakpointClient = yield aBreakpointClient.setCondition(
+            gThreadClient,
+            condition
+          );
+        }
+      }
+
+      if (aResponse.actualLocation) {
+        // Store the originally requested location in case it's ever needed
+        // and update the breakpoint client with the actual location.
+        aBreakpointClient.requestedLocation = aLocation;
+        aBreakpointClient.location = aResponse.actualLocation;
       }
 
       // Preserve information about the breakpoint's line text, to display it
@@ -1905,10 +1916,10 @@ Breakpoints.prototype = {
       // Notify that we've added a breakpoint.
       window.emit(EVENTS.BREAKPOINT_ADDED, aBreakpointClient);
       deferred.resolve(aBreakpointClient);
-    });
+    }.bind(this)));
 
     return deferred.promise;
-  },
+  }),
 
   /**
    * Remove a breakpoint.
@@ -2032,12 +2043,14 @@ Breakpoints.prototype = {
                                       'in specified location'));
     }
 
-    return addedPromise.then(aBreakpointClient => {
+    var promise = addedPromise.then(aBreakpointClient => {
       return aBreakpointClient.setCondition(gThreadClient, aCondition);
-    }, err => {
-      DevToolsUtils.reportException("Breakpoints.prototype.updateCondition",
-                                    err);
     });
+
+    // `setCondition` returns a new breakpoint that has the condition,
+    // so we need to update the store
+    this._added.set(this.getIdentifier(aLocation), promise);
+    return promise;
   },
 
   /**

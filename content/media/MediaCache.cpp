@@ -779,7 +779,7 @@ MediaCache::FindReusableBlock(TimeStamp aNow,
 {
   mReentrantMonitor.AssertCurrentThreadIn();
 
-  uint32_t length = std::min(uint32_t(aMaxSearchBlockIndex), mIndex.Length());
+  uint32_t length = std::min(uint32_t(aMaxSearchBlockIndex), uint32_t(mIndex.Length()));
 
   if (aForStream && aForStreamBlock > 0 &&
       uint32_t(aForStreamBlock) <= aForStream->mBlocks.Length()) {
@@ -1859,14 +1859,13 @@ MediaCacheStream::NotifyDataEnded(nsresult aStatus)
 
   FlushPartialBlockInternal(true);
 
-  if (!mDidNotifyDataEnded) {
-    MediaCache::ResourceStreamIterator iter(mResourceID);
-    while (MediaCacheStream* stream = iter.Next()) {
-      if (NS_SUCCEEDED(aStatus)) {
-        // We read the whole stream, so remember the true length
-        stream->mStreamLength = mChannelOffset;
-      }
-      NS_ASSERTION(!stream->mDidNotifyDataEnded, "Stream already ended!");
+  MediaCache::ResourceStreamIterator iter(mResourceID);
+  while (MediaCacheStream* stream = iter.Next()) {
+    if (NS_SUCCEEDED(aStatus)) {
+      // We read the whole stream, so remember the true length
+      stream->mStreamLength = mChannelOffset;
+    }
+    if (!stream->mDidNotifyDataEnded) {
       stream->mDidNotifyDataEnded = true;
       stream->mNotifyDataEndedStatus = aStatus;
       stream->mClient->CacheClientNotifyDataEnded(aStatus);
@@ -1875,6 +1874,15 @@ MediaCacheStream::NotifyDataEnded(nsresult aStatus)
 
   mChannelEnded = true;
   gMediaCache->QueueUpdate();
+}
+
+void
+MediaCacheStream::NotifyChannelRecreated()
+{
+  NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
+  ReentrantMonitorAutoEnter mon(gMediaCache->GetReentrantMonitor());
+  mChannelEnded = false;
+  mDidNotifyDataEnded = false;
 }
 
 MediaCacheStream::~MediaCacheStream()

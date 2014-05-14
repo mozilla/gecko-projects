@@ -179,6 +179,7 @@ ShadowLayerForwarder::~ShadowLayerForwarder()
   delete mTxn;
   if (mShadowManager) {
     mShadowManager->SetForwarder(nullptr);
+    mShadowManager->Destroy();
   }
 }
 
@@ -498,6 +499,8 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     }
     common.scrollbarTargetContainerId() = mutant->GetScrollbarTargetContainerId();
     common.scrollbarDirection() = mutant->GetScrollbarDirection();
+    common.mixBlendMode() = (int8_t)mutant->GetMixBlendMode();
+    common.forceIsolatedGroup() = mutant->GetForceIsolatedGroup();
     if (Layer* maskLayer = mutant->GetMaskLayer()) {
       common.maskLayerChild() = Shadow(maskLayer->AsShadowableLayer());
     } else {

@@ -26,7 +26,7 @@
 #include "GeckoProfiler.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/gfx/2D.h"
-#include "mozilla/Preferences.h"
+#include "gfxPrefs.h"
 
 #include <algorithm>
 
@@ -1472,6 +1472,11 @@ ContainerState::CreateOrRecycleThebesLayer(const nsIFrame* aAnimatedGeometryRoot
     if (!FuzzyEqual(data->mXScale, mParameters.mXScale, 0.00001f) ||
         !FuzzyEqual(data->mYScale, mParameters.mYScale, 0.00001f) ||
         data->mAppUnitsPerDevPixel != mAppUnitsPerDevPixel) {
+#ifdef MOZ_DUMP_PAINTING
+    if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
+      printf_stderr("Recycled layer %p changed scale\n", layer.get());
+    }
+#endif
       InvalidateEntireThebesLayer(layer, aAnimatedGeometryRoot);
 #ifndef MOZ_ANDROID_OMTC
       didResetScrollPositionForLayerPixelAlignment = true;
@@ -3107,7 +3112,9 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
     // Set any matrix entries close to integers to be those exact integers.
     // This protects against floating-point inaccuracies causing problems
     // in the checks below.
-    transform.NudgeToIntegers();
+    // We use the fixed epsilon version here because we don't want the nudging
+    // to depend on the scroll position.
+    transform.NudgeToIntegersFixedEpsilon();
   }
   gfxMatrix transform2d;
   if (aContainerFrame &&
@@ -3705,14 +3712,7 @@ FrameLayerBuilder::PaintItems(nsTArray<ClippedDisplayItem>& aItems,
  */
 static bool ShouldDrawRectsSeparately(gfxContext* aContext, DrawRegionClip aClip)
 {
-  static bool sPaintRectsSeparately;
-  static bool sPaintRectsSeparatelyPrefCached = false;
-  if (!sPaintRectsSeparatelyPrefCached) {
-    mozilla::Preferences::AddBoolVarCache(&sPaintRectsSeparately, "layout.paint_rects_separately", false);
-    sPaintRectsSeparatelyPrefCached = true;
-  }
-
-  if (!sPaintRectsSeparately ||
+  if (!gfxPrefs::LayoutPaintRectsSeparately() ||
       aContext->IsCairo() ||
       aClip == DrawRegionClip::CLIP_NONE) {
     return false;

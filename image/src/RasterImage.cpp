@@ -182,7 +182,7 @@ DiscardingEnabled()
 class ScaleRequest
 {
 public:
-  ScaleRequest(RasterImage* aImage, const gfx::Size& aScale, imgFrame* aSrcFrame)
+  ScaleRequest(RasterImage* aImage, const gfxSize& aScale, imgFrame* aSrcFrame)
     : scale(aScale)
     , dstLocked(false)
     , done(false)
@@ -276,7 +276,7 @@ public:
   nsRefPtr<gfxImageSurface> dstSurface;
 
   // Below are the values that may be touched on the scaling thread.
-  gfx::Size scale;
+  gfxSize scale;
   uint8_t* srcData;
   uint8_t* dstData;
   nsIntRect srcRect;
@@ -327,7 +327,7 @@ private: /* members */
 class ScaleRunner : public nsRunnable
 {
 public:
-  ScaleRunner(RasterImage* aImage, const gfx::Size& aScale, imgFrame* aSrcFrame)
+  ScaleRunner(RasterImage* aImage, const gfxSize& aScale, imgFrame* aSrcFrame)
   {
     nsAutoPtr<ScaleRequest> request(new ScaleRequest(aImage, aScale, aSrcFrame));
 
@@ -543,6 +543,10 @@ RasterImage::Init(const char* aMimeType,
 NS_IMETHODIMP_(void)
 RasterImage::RequestRefresh(const mozilla::TimeStamp& aTime)
 {
+  if (HadRecentRefresh(aTime)) {
+    return;
+  }
+
   EvaluateAnimation();
 
   if (!mAnimating) {
@@ -2506,7 +2510,7 @@ RasterImage::SyncDecode()
 }
 
 bool
-RasterImage::CanQualityScale(const gfx::Size& scale)
+RasterImage::CanQualityScale(const gfxSize& scale)
 {
   // If target size is 1:1 with original, don't scale.
   if (scale.width == 1.0 && scale.height == 1.0)
@@ -2524,7 +2528,7 @@ RasterImage::CanQualityScale(const gfx::Size& scale)
 
 bool
 RasterImage::CanScale(GraphicsFilter aFilter,
-                      gfx::Size aScale, uint32_t aFlags)
+                      gfxSize aScale, uint32_t aFlags)
 {
 // The high-quality scaler requires Skia.
 #ifdef MOZ_ENABLE_SKIA
@@ -2600,7 +2604,7 @@ RasterImage::DrawWithPreDownscaleIfNeeded(imgFrame *aFrame,
   gfxMatrix userSpaceToImageSpace = aUserSpaceToImageSpace;
   gfxMatrix imageSpaceToUserSpace = aUserSpaceToImageSpace;
   imageSpaceToUserSpace.Invert();
-  gfx::Size scale = ToSize(imageSpaceToUserSpace.ScaleFactors(true));
+  gfxSize scale = imageSpaceToUserSpace.ScaleFactors(true);
   nsIntRect subimage = aSubimage;
   nsRefPtr<gfxASurface> surf;
 
@@ -2857,7 +2861,7 @@ RasterImage::RequestDiscard()
 
 // Flushes up to aMaxBytes to the decoder.
 nsresult
-RasterImage::DecodeSomeData(uint32_t aMaxBytes, DecodeStrategy aStrategy)
+RasterImage::DecodeSomeData(size_t aMaxBytes, DecodeStrategy aStrategy)
 {
   // We should have a decoder if we get here
   NS_ABORT_IF_FALSE(mDecoder, "trying to decode without decoder!");
@@ -2882,8 +2886,8 @@ RasterImage::DecodeSomeData(uint32_t aMaxBytes, DecodeStrategy aStrategy)
   MOZ_ASSERT(mBytesDecoded < mSourceData.Length());
 
   // write the proper amount of data
-  uint32_t bytesToDecode = std::min(aMaxBytes,
-                                    mSourceData.Length() - mBytesDecoded);
+  size_t bytesToDecode = std::min(aMaxBytes,
+                                  mSourceData.Length() - mBytesDecoded);
   nsresult rv = WriteToDecoder(mSourceData.Elements() + mBytesDecoded,
                                bytesToDecode,
                                aStrategy);
@@ -3380,7 +3384,7 @@ RasterImage::DecodePool::DecodeJob::Run()
 
   mRequest->mRequestStatus = DecodeRequest::REQUEST_ACTIVE;
 
-  uint32_t oldByteCount = mImage->mBytesDecoded;
+  size_t oldByteCount = mImage->mBytesDecoded;
 
   DecodeType type = DECODE_TYPE_UNTIL_DONE_BYTES;
 
@@ -3392,7 +3396,7 @@ RasterImage::DecodePool::DecodeJob::Run()
 
   DecodePool::Singleton()->DecodeSomeOfImage(mImage, DECODE_ASYNC, type, mRequest->mBytesToDecode);
 
-  uint32_t bytesDecoded = mImage->mBytesDecoded - oldByteCount;
+  size_t bytesDecoded = mImage->mBytesDecoded - oldByteCount;
 
   mRequest->mRequestStatus = DecodeRequest::REQUEST_WORK_DONE;
 

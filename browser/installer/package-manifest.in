@@ -344,6 +344,8 @@
 @BINPATH@/components/telemetry.xpt
 
 ; JavaScript components
+@BINPATH@/components/ChromeNotifications.js
+@BINPATH@/components/ChromeNotifications.manifest
 @BINPATH@/components/ConsoleAPI.manifest
 @BINPATH@/components/ConsoleAPIStorage.js
 @BINPATH@/components/BrowserElementParent.manifest
@@ -628,6 +630,13 @@
 @BINPATH@/browser/chrome/icons/default/default48.png
 #endif
 
+; [Webide Files]
+#ifdef MOZ_DEVTOOLS_WEBIDE
+@BINPATH@/browser/chrome/webide@JAREXT@
+@BINPATH@/browser/chrome/webide.manifest
+@BINPATH@/browser/@PREF_DIR@/webide-prefs.js
+#endif
+
 ; shell icons
 #ifdef XP_UNIX
 #ifndef XP_MACOSX
@@ -771,6 +780,7 @@ bin/libfreebl_32int64_3.so
 #ifdef MOZ_CRASHREPORTER
 @BINPATH@/components/CrashService.manifest
 @BINPATH@/components/CrashService.js
+@BINPATH@/components/toolkit_crashservice.xpt
 #ifdef XP_MACOSX
 @BINPATH@/crashreporter.app/
 #else

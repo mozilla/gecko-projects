@@ -170,16 +170,25 @@ class nsEditableTextFunctor : public nsBoolDomIterFunctor
  *  Constructor/Destructor 
  ********************************************************/
 
-nsHTMLEditRules::nsHTMLEditRules() : 
-mDocChangeRange(nullptr)
-,mListenerEnabled(true)
-,mReturnInEmptyLIKillsList(true)
-,mDidDeleteSelection(false)
-,mDidRangedDelete(false)
-,mRestoreContentEditableCount(false)
-,mUtilRange(nullptr)
-,mJoinOffset(0)
+nsHTMLEditRules::nsHTMLEditRules()
 {
+  InitFields();
+}
+
+void
+nsHTMLEditRules::InitFields()
+{
+  mHTMLEditor = nullptr;
+  mDocChangeRange = nullptr;
+  mListenerEnabled = true;
+  mReturnInEmptyLIKillsList = true;
+  mDidDeleteSelection = false;
+  mDidRangedDelete = false;
+  mRestoreContentEditableCount = false;
+  mUtilRange = nullptr;
+  mJoinOffset = 0;
+  mNewBlock = nullptr;
+  mRangeItem = new nsRangeStore();
   // populate mCachedStyles
   mCachedStyles[0] = StyleCache(nsEditProperty::b, EmptyString(), EmptyString());
   mCachedStyles[1] = StyleCache(nsEditProperty::i, EmptyString(), EmptyString());
@@ -200,7 +209,6 @@ mDocChangeRange(nullptr)
   mCachedStyles[16] = StyleCache(nsEditProperty::cssBackgroundColor, EmptyString(), EmptyString());
   mCachedStyles[17] = StyleCache(nsEditProperty::sub, EmptyString(), EmptyString());
   mCachedStyles[18] = StyleCache(nsEditProperty::sup, EmptyString(), EmptyString());
-  mRangeItem = new nsRangeStore();
 }
 
 nsHTMLEditRules::~nsHTMLEditRules()
@@ -230,9 +238,11 @@ NS_IMPL_QUERY_INTERFACE_INHERITED(nsHTMLEditRules, nsTextEditRules, nsIEditActio
 NS_IMETHODIMP
 nsHTMLEditRules::Init(nsPlaintextEditor *aEditor)
 {
+  InitFields();
+
   mHTMLEditor = static_cast<nsHTMLEditor*>(aEditor);
   nsresult res;
-  
+
   // call through to base class Init 
   res = nsTextEditRules::Init(aEditor);
   NS_ENSURE_SUCCESS(res, res);
@@ -8145,8 +8155,8 @@ nsHTMLEditRules::RemoveEmptyNodes()
     NS_ENSURE_TRUE(node, NS_ERROR_FAILURE);
 
     nsINode* parent = node->GetParentNode();
-    
-    uint32_t idx = skipList.IndexOf(node);
+
+    size_t idx = skipList.IndexOf(node);
     if (idx != skipList.NoIndex) {
       // this node is on our skip list.  Skip processing for this node, 
       // and replace its value in the skip list with the value of its parent

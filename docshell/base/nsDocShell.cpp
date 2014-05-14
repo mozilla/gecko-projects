@@ -1555,8 +1555,7 @@ nsDocShell::LoadURI(nsIURI * aURI,
     }
     if (!owner && !inheritOwner && !ownerIsExplicit) {
         // See if there's system or chrome JS code running
-        inheritOwner = nsContentUtils::IsSystemPrincipal(
-          nsContentUtils::GetSubjectPrincipal());
+        inheritOwner = nsContentUtils::IsCallerChrome();
     }
 
     if (aLoadFlags & LOAD_FLAGS_DISALLOW_INHERIT_OWNER) {
@@ -3467,11 +3466,14 @@ nsDocShell::IsSandboxedFrom(nsIDocShell* aTargetDocShell)
         return false;
     }
 
-    uint32_t sandboxFlags = 0;
-
-    nsCOMPtr<nsIDocument> doc = mContentViewer->GetDocument();
-    if (doc) {
-        sandboxFlags = doc->GetSandboxFlags();
+    // Default the sandbox flags to our flags, so that if we can't retrieve the
+    // active document, we will still enforce our own.
+    uint32_t sandboxFlags = mSandboxFlags;
+    if (mContentViewer) {
+        nsCOMPtr<nsIDocument> doc = mContentViewer->GetDocument();
+        if (doc) {
+            sandboxFlags = doc->GetSandboxFlags();
+        }
     }
 
     // If no flags, we are not sandboxed at all.
@@ -8645,7 +8647,7 @@ nsDocShell::CheckLoadingPermissions()
     // frames in the new window through window.frames[] (which is
     // allAccess for historic reasons), so we still need to do this
     // check on load.
-    nsresult rv = NS_OK, sameOrigin = NS_OK;
+    nsresult rv = NS_OK;
 
     if (!gValidateOrigin || !IsFrame()) {
         // Origin validation was turned off, or we're not a frame.
@@ -8654,16 +8656,10 @@ nsDocShell::CheckLoadingPermissions()
         return rv;
     }
 
-    nsCOMPtr<nsIScriptSecurityManager> securityManager =
-      do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    // We're a frame. Check that the caller has write permission to
-    // the parent before allowing it to load anything into this
-    // docshell.
-    nsCOMPtr<nsIPrincipal> subjPrincipal;
-    rv = securityManager->GetSubjectPrincipal(getter_AddRefs(subjPrincipal));
-    NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && subjPrincipal, rv);
+    // Note - The check for a current JSContext here isn't necessarily sensical.
+    // It's just designed to preserve the old semantics during a mass-conversion
+    // patch.
+    NS_ENSURE_TRUE(nsContentUtils::GetCurrentJSContext(), NS_OK);
 
     // Check if the caller is from the same origin as this docshell,
     // or any of its ancestors.
@@ -8677,17 +8673,9 @@ nsDocShell::CheckLoadingPermissions()
             return NS_ERROR_UNEXPECTED;
         }
 
-        // Compare origins
-        bool subsumes;
-        sameOrigin = subjPrincipal->Subsumes(p, &subsumes);
-        if (NS_SUCCEEDED(sameOrigin)) {
-            if (subsumes) {
-                // Same origin, permit load
-
-                return sameOrigin;
-            }
-
-            sameOrigin = NS_ERROR_DOM_PROP_ACCESS_DENIED;
+        if (nsContentUtils::GetSubjectPrincipal()->Subsumes(p)) {
+            // Same origin, permit load
+            return NS_OK;
         }
 
         nsCOMPtr<nsIDocShellTreeItem> tmp;
@@ -8695,7 +8683,7 @@ nsDocShell::CheckLoadingPermissions()
         item.swap(tmp);
     } while (item);
 
-    return sameOrigin;
+    return NS_ERROR_DOM_PROP_ACCESS_DENIED;
 }
 
 //*****************************************************************************

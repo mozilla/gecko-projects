@@ -2349,9 +2349,28 @@ MStoreTypedArrayElementStatic::operandTruncateKind(size_t index) const
     return index == 1 && !isFloatArray() ? Truncate : NoTruncate;
 }
 
+MDefinition::TruncateKind
+MDiv::operandTruncateKind(size_t index) const
+{
+    return Min(truncateKind(), TruncateAfterBailouts);
+}
+
+MDefinition::TruncateKind
+MMod::operandTruncateKind(size_t index) const
+{
+    return Min(truncateKind(), TruncateAfterBailouts);
+}
+
 bool
 MCompare::truncate(TruncateKind kind)
 {
+    // If we're compiling AsmJS, don't try to optimize the comparison type, as
+    // the code presumably is already using the type it wants. Also, AsmJS
+    // doesn't support bailouts, so we woudn't be able to rely on
+    // TruncateAfterBailouts to convert our inputs.
+    if (block()->info().compilingAsmJS())
+       return false;
+
     if (!isDoubleComparison())
         return false;
 
@@ -2463,7 +2482,8 @@ AdjustTruncatedInputs(TempAllocator &alloc, MInstruction *truncated)
 {
     MBasicBlock *block = truncated->block();
     for (size_t i = 0, e = truncated->numOperands(); i < e; i++) {
-        if (truncated->operandTruncateKind(i) == MDefinition::NoTruncate)
+        MDefinition::TruncateKind kind = truncated->operandTruncateKind(i);
+        if (kind == MDefinition::NoTruncate)
             continue;
 
         MDefinition *input = truncated->getOperand(i);
@@ -2473,6 +2493,10 @@ AdjustTruncatedInputs(TempAllocator &alloc, MInstruction *truncated)
         if (input->isToDouble() && input->getOperand(0)->type() == MIRType_Int32) {
             JS_ASSERT(input->range()->isInt32());
             truncated->replaceOperand(i, input->getOperand(0));
+        } else if (kind == MDefinition::TruncateAfterBailouts) {
+            MToInt32 *op = MToInt32::New(alloc, truncated->getOperand(i));
+            block->insertBefore(truncated, op);
+            truncated->replaceOperand(i, op);
         } else {
             MTruncateToInt32 *op = MTruncateToInt32::New(alloc, truncated->getOperand(i));
             block->insertBefore(truncated, op);

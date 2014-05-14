@@ -57,8 +57,8 @@ typedef any Transferable;
   //[Throws] readonly attribute WindowProxy parent;
   [Replaceable, Throws, CrossOriginReadable] readonly attribute WindowProxy? parent;
   [Throws] readonly attribute Element? frameElement;
-  //[Throws] WindowProxy open(optional DOMString url = "about:blank", optional DOMString target = "_blank", optional DOMString features = "", optional boolean replace = false);
-  [Throws] WindowProxy? open(optional DOMString url = "", optional DOMString target = "", optional DOMString features = "");
+  //[Throws] WindowProxy open(optional DOMString url = "about:blank", optional DOMString target = "_blank", [TreatNullAs=EmptyString] optional DOMString features = "", optional boolean replace = false);
+  [Throws] WindowProxy? open(optional DOMString url = "", optional DOMString target = "", [TreatNullAs=EmptyString] optional DOMString features = "");
   // We think the indexed getter is a bug in the spec, it actually needs to live
   // on the WindowProxy
   //getter WindowProxy (unsigned long index);
@@ -197,6 +197,17 @@ partial interface Window {
   [Throws] attribute long outerWidth;
   [Throws] attribute long outerHeight;
 };
+
+/**
+ * Special function that gets the fill ratio from the compositor used for testing
+ * and is an indicator that we're layerizing correctly.
+ * This function will call the given callback current fill ratio for a
+ * composited frame. We don't guarantee which frame fill ratios will be returned.
+ */
+partial interface Window {
+  [ChromeOnly, Throws] void mozRequestOverfill(OverfillCallback callback);
+};
+callback OverfillCallback = void (unsigned long overfill);
 
 // https://dvcs.w3.org/hg/webperf/raw-file/tip/specs/RequestAnimationFrame/Overview.html
 partial interface Window {

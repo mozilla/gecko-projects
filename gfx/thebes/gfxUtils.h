@@ -40,10 +40,7 @@ public:
      * If the source is not gfxImageFormat::ARGB32, no operation is performed.  If
      * aDestSurface is given, the data is copied over.
      */
-    static void PremultiplyImageSurface(gfxImageSurface *aSourceSurface,
-                                        gfxImageSurface *aDestSurface = nullptr);
-    static void UnpremultiplyImageSurface(gfxImageSurface *aSurface,
-                                          gfxImageSurface *aDestSurface = nullptr);
+    static void PremultiplyDataSurface(DataSourceSurface *aSurface);
     static mozilla::TemporaryRef<DataSourceSurface> UnpremultiplyDataSurface(DataSourceSurface* aSurface);
 
     static void ConvertBGRAtoRGBA(gfxImageSurface *aSourceSurface,
@@ -210,6 +207,15 @@ public:
 
     static const uint8_t sUnpremultiplyTable[256*256];
     static const uint8_t sPremultiplyTable[256*256];
+
+    /**
+     * Return a color that can be used to identify a frame with a given frame number.
+     * The colors will cycle after sNumFrameColors.  You can query colors 0 .. sNumFrameColors-1
+     * to get all the colors back.
+     */
+    static const mozilla::gfx::Color& GetColorForFrameNumber(uint64_t aFrameNumber);
+    static const uint32_t sNumFrameColors;
+
 #ifdef MOZ_DUMP_PAINTING
     /**
      * Writes a binary PNG file.
