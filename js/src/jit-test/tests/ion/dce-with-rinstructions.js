@@ -31,6 +31,63 @@ function rbitnot_object(i) {
     return i;
 }
 
+var uceFault_bitor_number = eval(uneval(uceFault).replace('uceFault', 'uceFault_bitor_number'));
+function rbitor_number(i) {
+    var x = i | -100; /* -100 == ~99 */
+    if (uceFault_bitor_number(i) || uceFault_bitor_number(i))
+        assertEq(x, -1) /* ~99 | 99 = -1 */
+    return i;
+}
+
+var uceFault_bitor_object = eval(uneval(uceFault).replace('uceFault', 'uceFault_bitor_object'));
+function rbitor_object(i) {
+    var t = i;
+    var o = { valueOf: function() { return t; } };
+    var x = o | -100;
+    t = 1000;
+    if (uceFault_bitor_object(i) || uceFault_bitor_object(i))
+        assertEq(x, -1);
+    return i;
+}
+
+var uceFault_bitxor_number = eval(uneval(uceFault).replace('uceFault', 'uceFault_bitxor_number'));
+function rbitxor_number(i) {
+    var x = 1 ^ i;
+    if (uceFault_bitxor_number(i) || uceFault_bitxor_number(i))
+        assertEq(x, 98  /* = 1 XOR 99 */);
+    return i;
+}
+
+var uceFault_bitxor_object = eval(uneval(uceFault).replace('uceFault', 'uceFault_bitxor_object'));
+function rbitxor_object(i) {
+    var t = i;
+    var o = { valueOf: function () { return t; } };
+    var x = 1 ^ o; /* computed with t == i, not 1000 */
+    t = 1000;
+    if (uceFault_bitxor_object(i) || uceFault_bitxor_object(i))
+        assertEq(x, 98  /* = 1 XOR 99 */);
+    return i;
+}
+
+var uceFault_ursh_number = eval(uneval(uceFault).replace('uceFault', 'uceFault_ursh_number'));
+function rursh_number(i) {
+    var x = i >>> 1;
+    if (uceFault_ursh_number(i) || uceFault_ursh_number(i))
+        assertEq(x, 49  /* = 99 >>> 1 */);
+    return i;
+}
+
+var uceFault_ursh_object = eval(uneval(uceFault).replace('uceFault', 'uceFault_ursh_object'));
+function rursh_object(i) {
+    var t = i;
+    var o = { valueOf: function () { return t; } };
+    var x = o >>> 1; /* computed with t == i, not 1000 */
+    t = 1000;
+    if (uceFault_ursh_object(i) || uceFault_ursh_object(i))
+        assertEq(x, 49  /* = 99 >>> 1 */);
+    return i;
+}
+
 var uceFault_add_number = eval(uneval(uceFault).replace('uceFault', 'uceFault_add_number'));
 function radd_number(i) {
     var x = 1 + i;
@@ -71,6 +128,10 @@ function radd_object(i) {
 for (i = 0; i < 100; i++) {
     rbitnot_number(i);
     rbitnot_object(i);
+    rbitor_number(i);
+    rbitor_object(i);
+    rursh_number(i);
+    rursh_object(i);
     radd_number(i);
     radd_float(i);
     radd_string(i);

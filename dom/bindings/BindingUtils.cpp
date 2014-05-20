@@ -1907,9 +1907,9 @@ InterfaceHasInstance(JSContext* cx, JS::Handle<JSObject*> obj,
   }
 
   JS::Rooted<JSObject*> unwrapped(cx, js::CheckedUnwrap(instance, true));
-  if (unwrapped && jsipc::JavaScriptParent::IsCPOW(unwrapped)) {
+  if (unwrapped && jsipc::IsCPOW(unwrapped)) {
     bool boolp = false;
-    if (!jsipc::JavaScriptParent::DOMInstanceOf(cx, unwrapped, clasp->mPrototypeID,
+    if (!jsipc::DOMInstanceOf(cx, unwrapped, clasp->mPrototypeID,
                                                 clasp->mDepth, &boolp)) {
       return false;
     }
@@ -2177,7 +2177,7 @@ IsInPrivilegedApp(JSContext* aCx, JSObject* aObj)
     return GetWorkerPrivateFromContext(aCx)->IsInPrivilegedApp();
   }
 
-  nsIPrincipal* principal = nsContentUtils::GetObjectPrincipal(aObj);
+  nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aObj);
   uint16_t appStatus = principal->GetAppStatus();
   return (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
           appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED) ||
@@ -2192,7 +2192,7 @@ IsInCertifiedApp(JSContext* aCx, JSObject* aObj)
     return GetWorkerPrivateFromContext(aCx)->IsInCertifiedApp();
   }
 
-  nsIPrincipal* principal = nsContentUtils::GetObjectPrincipal(aObj);
+  nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aObj);
   return principal->GetAppStatus() == nsIPrincipal::APP_STATUS_CERTIFIED ||
          Preferences::GetBool("dom.ignore_webidl_scope_checks", false);
 }

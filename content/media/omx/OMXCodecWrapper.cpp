@@ -443,12 +443,24 @@ nsresult
 OMXVideoEncoder::SetBitrate(int32_t aKbps)
 {
   sp<AMessage> msg = new AMessage();
+#if ANDROID_VERSION >= 19
+  // XXX Do we need a runtime check here?
+  msg->setInt32("video-bitrate", aKbps * 1000 /* kbps -> bps */);
+#else
   msg->setInt32("videoBitrate", aKbps * 1000 /* kbps -> bps */);
+#endif
   status_t result = mCodec->setParameters(msg);
   MOZ_ASSERT(result == OK);
   return result == OK ? NS_OK : NS_ERROR_FAILURE;
 }
 #endif
+
+nsresult
+OMXVideoEncoder::RequestIDRFrame()
+{
+  MOZ_ASSERT(mStarted, "Configure() should be called before RequestIDRFrame().");
+  return mCodec->requestIDRFrame() == OK ? NS_OK : NS_ERROR_FAILURE;
+}
 
 nsresult
 OMXAudioEncoder::Configure(int aChannels, int aInputSampleRate,

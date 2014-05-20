@@ -301,6 +301,7 @@ pref("dom.ipc.tabs.disabled", false);
 pref("layers.acceleration.disabled", false);
 pref("layers.offmainthreadcomposition.async-animations", true);
 pref("layers.async-video.enabled", true);
+pref("layers.async-video-oop.enabled",true);
 pref("layers.async-pan-zoom.enabled", true);
 pref("gfx.content.azure.backends", "cairo");
 #endif
@@ -974,3 +975,6 @@ pref("dom.wakelock.enabled", true);
 pref("services.sync.fxaccounts.enabled", true);
 pref("identity.fxaccounts.enabled", true);
 #endif
+
+// Enable mapped array buffer
+pref("dom.mapped_arraybuffer.enabled", true);

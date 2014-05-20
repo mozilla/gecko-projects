@@ -772,14 +772,15 @@ let CustomizableUIInternal = {
         continue;
       }
 
+      let container = areaNode.customizationTarget;
       let widgetNode = window.document.getElementById(aWidgetId);
-      if (!widgetNode) {
+      if (widgetNode && isOverflowable) {
+        container = areaNode.overflowable.getContainerFor(widgetNode);
+      }
+
+      if (!widgetNode || !container.contains(widgetNode)) {
         INFO("Widget not found, unable to remove");
         continue;
-      }
-      let container = areaNode.customizationTarget;
-      if (isOverflowable) {
-        container = areaNode.overflowable.getContainerFor(widgetNode);
       }
 
       this.notifyListeners("onWidgetBeforeDOMChange", widgetNode, null, container, true);
@@ -1386,6 +1387,12 @@ let CustomizableUIInternal = {
         menuitemCloseMenu = (closemenuVal == "single" || closemenuVal == "none") ?
                             closemenuVal : "auto";
       }
+      // Break out of the loop immediately for disabled items, as we need to
+      // keep the menu open in that case.
+      if (target.getAttribute("disabled") == "true") {
+        return true;
+      }
+
       // This isn't in the loop condition because we want to break before
       // changing |target| if any of these conditions are true
       if (inInput || inItem || target == panel) {
@@ -1401,6 +1408,7 @@ let CustomizableUIInternal = {
         target = target.parentNode;
       }
     }
+
     // If the user clicked a menu item...
     if (inMenu) {
       // We care if we're in an input also,

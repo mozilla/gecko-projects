@@ -28,6 +28,7 @@
 #include "mozilla/Telemetry.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsILoadContext.h"
 #include "nsUnicharUtils.h"
 #include "nsContentList.h"
 #include "nsIObserver.h"
@@ -2337,21 +2338,21 @@ nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
     nsIScriptSecurityManager *securityManager =
       nsContentUtils::GetSecurityManager();
     if (securityManager) {
-      nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
+      nsCOMPtr<nsILoadContext> loadContext(mDocumentContainer);
 
-      if (!docShell && aLoadGroup) {
+      if (!loadContext && aLoadGroup) {
         nsCOMPtr<nsIInterfaceRequestor> cbs;
         aLoadGroup->GetNotificationCallbacks(getter_AddRefs(cbs));
-        docShell = do_GetInterface(cbs);
+        loadContext = do_GetInterface(cbs);
       }
 
-      MOZ_ASSERT(docShell,
-                 "must be in a docshell or pass in an explicit principal");
+      MOZ_ASSERT(loadContext,
+                 "must have a load context or pass in an explicit principal");
 
       nsCOMPtr<nsIPrincipal> principal;
       nsresult rv = securityManager->
-        GetDocShellCodebasePrincipal(mDocumentURI, docShell,
-                                     getter_AddRefs(principal));
+        GetLoadContextCodebasePrincipal(mDocumentURI, loadContext,
+                                        getter_AddRefs(principal));
       if (NS_SUCCEEDED(rv)) {
         SetPrincipal(principal);
       }
@@ -2802,8 +2803,26 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     }
   }
 
-  // create new CSP object
-  csp = do_CreateInstance("@mozilla.org/contentsecuritypolicy;1", &rv);
+  // Create new CSP object - if we're using the new CSP implementation and backend,
+  // use the new contract ID (same interface, but use C++ implementation).
+  if (CSPService::sNewBackendEnabled) {
+    if (oldHeaderIsPresent && !newHeaderIsPresent) {
+      // New CSP implementation doesn't support old header!  ABORT CSP INIT!
+      // (Not a problem if newHeaderIsPresent because the old header will be
+      // ignored).  This check will get removed when x- header support is
+      // removed (see bug 949533)
+#ifdef PR_LOGGING
+      PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("%s %s %s",
+           "This document has an old, x-content-security-policy",
+           "header and the new CSP implementation doesn't support the non-standard",
+           "CSP.  Skipping CSP initialization."));
+#endif
+      return NS_OK;
+    }
+    csp = do_CreateInstance("@mozilla.org/cspcontext;1", &rv);
+  } else {
+    csp = do_CreateInstance("@mozilla.org/contentsecuritypolicy;1", &rv);
+  }
 
   if (NS_FAILED(rv)) {
 #ifdef PR_LOGGING
@@ -6358,7 +6377,7 @@ nsIDocument::LoadBindingDocument(const nsAString& aURI, ErrorResult& rv)
   // It's just designed to preserve the old semantics during a mass-conversion
   // patch.
   nsCOMPtr<nsIPrincipal> subjectPrincipal =
-    nsContentUtils::GetCurrentJSContext() ? nsContentUtils::GetSubjectPrincipal()
+    nsContentUtils::GetCurrentJSContext() ? nsContentUtils::SubjectPrincipal()
                                           : NodePrincipal();
   BindingManager()->LoadBindingDocument(this, uri, subjectPrincipal);
 }

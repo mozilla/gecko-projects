@@ -1106,6 +1106,7 @@ Simulator::setLastDebuggerInput(char *input)
 void
 Simulator::FlushICache(void *start_addr, size_t size)
 {
+    IonSpewCont(IonSpew_CacheFlush, "[%p %zx]", start_addr, size);
     if (!Simulator::ICacheCheckingEnabled)
         return;
     SimulatorRuntime *srt = Simulator::Current()->srt_;
@@ -1489,8 +1490,8 @@ Simulator::setCallResult(int64_t res)
 int
 Simulator::readW(int32_t addr, SimInstruction *instr)
 {
-    // YARR emits unaligned loads, so we don't check for them here like the
-    // other methods below.
+    // The regexp engines emit unaligned loads, so we don't check for them here
+    // like the other methods below.
     intptr_t *ptr = reinterpret_cast<intptr_t*>(addr);
     return *ptr;
 }
@@ -4204,9 +4205,10 @@ Simulator::call(uint8_t* entry, int argument_count, ...)
     va_start(parameters, argument_count);
 
     // First four arguments passed in registers.
-    MOZ_ASSERT(argument_count >= 2);
+    MOZ_ASSERT(argument_count >= 1);
     set_register(r0, va_arg(parameters, int32_t));
-    set_register(r1, va_arg(parameters, int32_t));
+    if (argument_count >= 2)
+        set_register(r1, va_arg(parameters, int32_t));
     if (argument_count >= 3)
         set_register(r2, va_arg(parameters, int32_t));
     if (argument_count >= 4)

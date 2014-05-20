@@ -66,6 +66,30 @@ function openDetailsView(aId) {
   return deferred.promise;
 }
 
+function clickRemoveButton(addonElement) {
+  let btn = gManagerWindow.document.getAnonymousElementByAttribute(addonElement, "anonid", "remove-btn");
+  if (!btn) {
+    return Promise.reject();
+  }
+
+  EventUtils.synthesizeMouseAtCenter(btn, { clickCount: 1 }, gManagerWindow);
+  let deferred = Promise.defer();
+  setTimeout(deferred.resolve, 0);
+  return deferred;
+}
+
+function clickUndoButton(addonElement) {
+  let btn = gManagerWindow.document.getAnonymousElementByAttribute(addonElement, "anonid", "undo-btn");
+  if (!btn) {
+    return Promise.reject();
+  }
+
+  EventUtils.synthesizeMouseAtCenter(btn, { clickCount: 1 }, gManagerWindow);
+  let deferred = Promise.defer();
+  setTimeout(deferred.resolve, 0);
+  return deferred;
+}
+
 add_task(function* initializeState() {
   gManagerWindow = yield open_manager();
   gCategoryUtilities = new CategoryUtilities(gManagerWindow);
@@ -185,17 +209,17 @@ add_task(function* testOpenPreferences() {
   let deferred = Promise.defer();
   Services.obs.addObserver(function observer(prefWin, topic, data) {
     Services.obs.removeObserver(observer, "advanced-pane-loaded");
-
     info("Advanced preference pane opened.");
+    executeSoon(function() {
+      // We want this test to fail if the preferences pane changes.
+      let el = prefWin.document.getElementById("dataChoicesPanel");
+      is_element_visible(el);
 
-    // We want this test to fail if the preferences pane changes.
-    let el = prefWin.document.getElementById("dataChoicesPanel");
-    is_element_visible(el);
+      prefWin.close();
+      info("Closed preferences pane.");
 
-    prefWin.close();
-    info("Closed preferences pane.");
-
-    deferred.resolve();
+      deferred.resolve();
+    });
   }, "advanced-pane-loaded", false);
 
   info("Loading preferences pane.");
@@ -578,6 +602,28 @@ add_task(function testDetailView() {
   is_element_hidden(el, "detail-creator should be hidden.");
   el = gManagerWindow.document.getElementById("detail-experiment-bullet");
   is_element_visible(el, "experiment-bullet should be visible.");
+});
+
+add_task(function* testRemoveAndUndo() {
+  if (!gExperiments) {
+    info("Skipping experiments test because that feature isn't available.");
+    return;
+  }
+
+  yield gCategoryUtilities.openType("experiment");
+
+  let addon = get_addon_element(gManagerWindow, "test-experiment1@experiments.mozilla.org");
+  Assert.ok(addon, "Got add-on element.");
+
+  yield clickRemoveButton(addon);
+  addon.parentNode.ensureElementIsVisible(addon);
+
+  let el = gManagerWindow.document.getAnonymousElementByAttribute(addon, "class", "pending");
+  is_element_visible(el, "Uninstall undo information should be visible.");
+
+  yield clickUndoButton(addon);
+  addon = get_addon_element(gManagerWindow, "test-experiment1@experiments.mozilla.org");
+  Assert.ok(addon, "Got add-on element.");
 });
 
 add_task(function* testCleanup() {

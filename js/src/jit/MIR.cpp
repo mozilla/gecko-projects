@@ -1029,10 +1029,25 @@ MPhi::congruentTo(const MDefinition *ins) const
 {
     if (!ins->isPhi())
         return false;
-    // Since we do not know which predecessor we are merging from, we must
-    // assume that phi instructions in different blocks are not equal.
-    // (Bug 674656)
-    if (ins->block()->id() != block()->id())
+
+    // Phis in different blocks may have different control conditions.
+    // For example, these phis:
+    //
+    //   if (p)
+    //     goto a
+    //   a:
+    //     t = phi(x, y)
+    //
+    //   if (q)
+    //     goto b
+    //   b:
+    //     s = phi(x, y)
+    //
+    // have identical operands, but they are not equvalent because t is
+    // effectively p?x:y and s is effectively q?x:y.
+    //
+    // For now, consider phis in different blocks incongruent.
+    if (ins->block() != block())
         return false;
 
     return congruentIfOperandsEqual(ins);
@@ -2327,7 +2342,8 @@ MResumePoint::inherit(MBasicBlock *block)
     }
 }
 
-void MResumePoint::dump(FILE *fp) const
+void
+MResumePoint::dump(FILE *fp) const
 {
     fprintf(fp, "resumepoint mode=");
 
@@ -2360,6 +2376,12 @@ void
 MResumePoint::dump() const
 {
     dump(stderr);
+}
+
+bool
+MResumePoint::isObservableOperand(size_t index) const
+{
+    return block()->info().isObservableSlot(index);
 }
 
 MDefinition *
