@@ -1,12 +1,13 @@
 #!/bin/bash -vex
+test $GAIA_BASE_REPOSITORY # ex: https://github.com/mozilla-b2g/gaia
+test $GAIA_HEAD_REPOSITORY # ex: https://github.com/mozilla-b2g/gaia
+test $GAIA_REF # ex: master
+test $GAIA_REV # ex: master
 
-
-gaia_dir=/home/worker/gaia
-
-# Some mozharness scripts are harcoded to use $PWD/gaia for the gaia repo and 
-# will delete the directory and clone again if .hg doesn't exist.  Does not work
-# well when trying to cache
-if [ ! -d "$gaia_dir/.hg" ]; then
-  echo "Cloning gaia into $gaia_dir"
-  hg clone https://hg.mozilla.org/integration/gaia-central/ $gaia_dir
-fi
+tc-vcs \
+  checkout \
+  /home/worker/gaia \
+  $GAIA_BASE_REPOSITORY \
+  $GAIA_HEAD_REPOSITORY \
+  $GAIA_REV \
+  $GAIA_REF \

@@ -13,7 +13,6 @@
 #include "jit/MIR.h"
 #include "jit/MIRGraph.h"
 
-#include "jsinferinlines.h"
 #include "jsobjinlines.h"
 #include "jsopcodeinlines.h"
 
@@ -3059,16 +3058,6 @@ LIRGenerator::visitCallGetIntrinsicValue(MCallGetIntrinsicValue *ins)
 {
     LCallGetIntrinsicValue *lir = new(alloc()) LCallGetIntrinsicValue();
     defineReturn(lir, ins);
-    assignSafepoint(lir, ins);
-}
-
-void
-LIRGenerator::visitCallsiteCloneCache(MCallsiteCloneCache *ins)
-{
-    MOZ_ASSERT(ins->callee()->type() == MIRType_Object);
-
-    LCallsiteCloneCache *lir = new(alloc()) LCallsiteCloneCache(useRegister(ins->callee()));
-    define(lir, ins);
     assignSafepoint(lir, ins);
 }
 

@@ -76,6 +76,8 @@
 #include "AppProcessChecker.h"
 #include "ContentParent.h"
 #include "TabParent.h"
+#include "mozilla/plugins/PPluginWidgetParent.h"
+#include "../plugins/ipc/PluginWidgetParent.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/Preferences.h"
@@ -88,7 +90,6 @@
 
 #include "jsapi.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
-#include "mozilla/dom/SVGIFrameElement.h"
 #include "nsSandboxFlags.h"
 #include "mozilla/layers/CompositorChild.h"
 
@@ -209,8 +210,7 @@ nsFrameLoader::LoadFrame()
 
   nsAutoString src;
 
-  bool isSrcdoc = (mOwnerContent->IsHTML(nsGkAtoms::iframe) ||
-                   mOwnerContent->IsSVG(nsGkAtoms::iframe)) &&
+  bool isSrcdoc = mOwnerContent->IsHTML(nsGkAtoms::iframe) &&
                   mOwnerContent->HasAttr(kNameSpaceID_None, nsGkAtoms::srcdoc);
   if (isSrcdoc) {
     src.AssignLiteral("about:srcdoc");
@@ -413,8 +413,7 @@ nsFrameLoader::ReallyStartLoadingInternal()
   nsCOMPtr<nsIURI> referrer;
   
   nsAutoString srcdoc;
-  bool isSrcdoc = (mOwnerContent->IsHTML(nsGkAtoms::iframe) ||
-                   mOwnerContent->IsSVG(nsGkAtoms::iframe)) &&
+  bool isSrcdoc = mOwnerContent->IsHTML(nsGkAtoms::iframe) &&
                   mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::srcdoc,
                                          srcdoc);
 
@@ -970,6 +969,8 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
                                          nsRefPtr<nsFrameLoader>& aFirstToSwap,
                                          nsRefPtr<nsFrameLoader>& aSecondToSwap)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   Element* ourContent = mOwnerContent;
   Element* otherContent = aOther->mOwnerContent;
 
@@ -1022,6 +1023,17 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
   if (NS_FAILED(rv)) {
     mInSwap = aOther->mInSwap = false;
     return rv;
+  }
+
+  // Native plugin windows used by this remote content need to be reparented.
+  const nsTArray<mozilla::plugins::PPluginWidgetParent*>& plugins =
+    aOther->mRemoteBrowser->ManagedPPluginWidgetParent();
+  nsPIDOMWindow* newWin = ourDoc->GetWindow();
+  if (newWin) {
+    nsRefPtr<nsIWidget> newParent = ((nsGlobalWindow*)newWin)->GetMainWidget();
+    for (uint32_t idx = 0; idx < plugins.Length(); ++idx) {
+      static_cast<mozilla::plugins::PluginWidgetParent*>(plugins[idx])->SetParent(newParent);
+    }
   }
 
   SetOwnerContent(otherContent);
@@ -1642,13 +1654,8 @@ nsFrameLoader::MaybeCreateDocShell()
   // Apply sandbox flags even if our owner is not an iframe, as this copies
   // flags from our owning content's owning document.
   uint32_t sandboxFlags = 0;
-  if (!mOwnerContent->IsSVG(nsGkAtoms::iframe)) {
-    HTMLIFrameElement* iframe = HTMLIFrameElement::FromContent(mOwnerContent);
-    if (iframe) {
-      sandboxFlags = iframe->GetSandboxFlags();
-    }
-  } else {
-    SVGIFrameElement* iframe = static_cast<SVGIFrameElement*>(mOwnerContent);
+  HTMLIFrameElement* iframe = HTMLIFrameElement::FromContent(mOwnerContent);
+  if (iframe) {
     sandboxFlags = iframe->GetSandboxFlags();
   }
   ApplySandboxFlags(sandboxFlags);
@@ -1664,8 +1671,7 @@ nsFrameLoader::MaybeCreateDocShell()
   nsAutoString frameName;
 
   int32_t namespaceID = mOwnerContent->GetNameSpaceID();
-  if ((namespaceID == kNameSpaceID_XHTML || namespaceID == kNameSpaceID_SVG)
-      && !mOwnerContent->IsInHTMLDocument()) {
+  if (namespaceID == kNameSpaceID_XHTML && !mOwnerContent->IsInHTMLDocument()) {
     mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::id, frameName);
   } else {
     mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::name, frameName);

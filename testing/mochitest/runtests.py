@@ -1754,7 +1754,7 @@ class Mochitest(MochitestUtilsMixin):
 
     self.setTestRoot(options)
 
-    # Until we have all green, this only runs on bc*/dt* jobs
+    # Until we have all green, this only runs on bc*/dt*/mochitest-chrome jobs, not webapprt*, jetpack*, or plain
     if options.browserChrome:
       options.runByDir = True
 

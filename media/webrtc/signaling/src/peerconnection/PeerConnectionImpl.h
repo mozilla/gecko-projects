@@ -321,9 +321,6 @@ public:
   // Get the DTLS identity (local side)
   mozilla::RefPtr<DtlsIdentity> const GetIdentity() const;
 
-  // Create a fake media stream
-  nsresult CreateFakeMediaStream(uint32_t hint, mozilla::DOMMediaStream** retval);
-
   nsPIDOMWindow* GetWindow() const {
     PC_AUTO_ENTER_API_CALL_NO_CHECK();
     return mWindow;
@@ -621,7 +618,7 @@ private:
   nsresult CloseInt();
   nsresult CheckApiState(bool assert_ice_ready) const;
   void CheckThread() const {
-    NS_ABORT_IF_FALSE(CheckThreadInt(), "Wrong thread");
+    MOZ_ASSERT(CheckThreadInt(), "Wrong thread");
   }
   bool CheckThreadInt() const {
 #ifdef MOZILLA_INTERNAL_API

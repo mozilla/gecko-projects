@@ -43,7 +43,6 @@
 #include "jsatominlines.h"
 #include "jsboolinlines.h"
 #include "jsfuninlines.h"
-#include "jsinferinlines.h"
 #include "jsscriptinlines.h"
 
 #include "jit/JitFrames-inl.h"
@@ -442,11 +441,11 @@ js::RunScript(JSContext *cx, RunState &state)
     return Interpret(cx, state);
 }
 
-struct AutoGCIfNeeded
+struct AutoGCIfRequested
 {
-    JSContext *cx_;
-    explicit AutoGCIfNeeded(JSContext *cx) : cx_(cx) {}
-    ~AutoGCIfNeeded() { cx_->gcIfNeeded(); }
+    JSRuntime *runtime;
+    explicit AutoGCIfRequested(JSRuntime *rt) : runtime(rt) {}
+    ~AutoGCIfRequested() { runtime->gc.gcIfRequested(); }
 };
 
 /*
@@ -462,7 +461,7 @@ js::Invoke(JSContext *cx, CallArgs args, MaybeConstruct construct)
     MOZ_ASSERT(!cx->zone()->types.activeAnalysis);
 
     /* Perform GC if necessary on exit from the function. */
-    AutoGCIfNeeded gcIfNeeded(cx);
+    AutoGCIfRequested gcIfRequested(cx->runtime());
 
     /* MaybeConstruct is a subset of InitialFrameFlags */
     InitialFrameFlags initial = (InitialFrameFlags) construct;
@@ -566,15 +565,12 @@ js::InvokeConstructor(JSContext *cx, CallArgs args)
     if (callee.is<JSFunction>()) {
         RootedFunction fun(cx, &callee.as<JSFunction>());
 
-        if (fun->isNativeConstructor()) {
-            bool ok = CallJSNativeConstructor(cx, fun->native(), args);
-            return ok;
-        }
+        if (fun->isNativeConstructor())
+            return CallJSNativeConstructor(cx, fun->native(), args);
 
-        if (!fun->isInterpretedConstructor()) {
-            RootedValue orig(cx, ObjectValue(*fun->originalFunction()));
-            return ReportIsNotFunction(cx, orig, args.length() + 1, CONSTRUCT);
-        }
+        if (!fun->isInterpretedConstructor())
+            return ReportIsNotFunction(cx, args.calleev(), args.length() + 1, CONSTRUCT);
+
         if (!Invoke(cx, args, CONSTRUCT))
             return false;
 
@@ -2517,30 +2513,14 @@ CASE(JSOP_FUNCALL)
 {
     if (REGS.fp()->hasPushedSPSFrame())
         cx->runtime()->spsProfiler.updatePC(script, REGS.pc);
+
     MOZ_ASSERT(REGS.stackDepth() >= 2u + GET_ARGC(REGS.pc));
     CallArgs args = CallArgsFromSp(GET_ARGC(REGS.pc), REGS.sp);
 
     bool construct = (*REGS.pc == JSOP_NEW);
 
     RootedFunction &fun = rootFunction0;
-    RootedScript &funScript = rootScript0;
     bool isFunction = IsFunctionObject(args.calleev(), fun.address());
-
-    /*
-     * Some builtins are marked as clone-at-callsite to increase precision of
-     * TI and JITs.
-     */
-    if (isFunction && fun->isInterpreted()) {
-        funScript = fun->getOrCreateScript(cx);
-        if (!funScript)
-            goto error;
-        if (funScript->shouldCloneAtCallsite()) {
-            fun = CloneFunctionAtCallsite(cx, fun, script, REGS.pc);
-            if (!fun)
-                goto error;
-            args.setCallee(ObjectValue(*fun));
-        }
-    }
 
     /* Don't bother trying to fast-path calls to scripted non-constructors. */
     if (!isFunction || !fun->isInterpretedConstructor()) {
@@ -2556,6 +2536,11 @@ CASE(JSOP_FUNCALL)
         REGS.sp = newsp;
         ADVANCE_AND_DISPATCH(JSOP_CALL_LENGTH);
     }
+
+    RootedScript &funScript = rootScript0;
+    funScript = fun->getOrCreateScript(cx);
+    if (!funScript)
+        goto error;
 
     InitialFrameFlags initial = construct ? INITIAL_CONSTRUCT : INITIAL_NONE;
     bool createSingleton = ObjectGroup::useSingletonForNewObject(cx, script, REGS.pc);
