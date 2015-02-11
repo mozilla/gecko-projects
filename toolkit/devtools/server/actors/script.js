@@ -19,7 +19,7 @@ const xpcInspector = require("xpcInspector");
 const mapURIToAddonID = require("./utils/map-uri-to-addon-id");
 const ScriptStore = require("./utils/ScriptStore");
 
-const { defer, resolve, reject, all } = promise;
+const { defer, resolve, reject, all } = require("devtools/toolkit/deprecated-sync-thenables");
 
 loader.lazyGetter(this, "Debugger", () => {
   let Debugger = require("Debugger");
@@ -5314,6 +5314,14 @@ ThreadSources.prototype = {
         }
       } catch(ex) {
         // Not a valid URI.
+
+        // bug 1124536: fix getSourceText on scripts associated "javascript:SOURCE" urls
+        // (e.g. 'evaluate(sandbox, sourcecode, "javascript:"+sourcecode)' )
+        if (url.indexOf("javascript:") === 0) {
+          spec.contentType = "text/javascript";
+        } else {
+          console.warn("unable to parse url during SourceActor type detection", url, ex);
+        }
       }
     }
     else {
