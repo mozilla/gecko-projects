@@ -11,13 +11,15 @@ import org.mozilla.gecko.Element;
 import org.mozilla.gecko.R;
 
 import org.mozilla.gecko.EventDispatcher;
+import org.mozilla.gecko.util.GeckoEventListener;
 
-import org.mozilla.gecko.util.EventCallback;
-import org.mozilla.gecko.util.NativeEventListener;
-import org.mozilla.gecko.util.NativeJSObject;
+import org.json.JSONObject;
 
-public class testFindInPage extends JavascriptTest implements NativeEventListener {
-    private static final int WAIT_FOR_TEST = 3000;
+import com.jayway.android.robotium.solo.Condition;
+
+public class testFindInPage extends JavascriptTest implements GeckoEventListener {
+    private static final int WAIT_FOR_CONDITION_MS = 3000;
+
     protected Element next, close;
 
     public testFindInPage() {
@@ -25,15 +27,14 @@ public class testFindInPage extends JavascriptTest implements NativeEventListene
     }
 
     @Override
-    public void handleMessage(final String event, final NativeJSObject message,
-                              final EventCallback callback) {
+    public void handleMessage(String event, final JSONObject message) {
         if (event.equals("Test:FindInPage")) {
             try {
                 final String text = message.getString("text");
-                final int nrOfMatches = message.getInt("nrOfMatches");
+                final int nrOfMatches = Integer.parseInt(message.getString("nrOfMatches"));
                 findText(text, nrOfMatches);
             } catch (Exception e) {
-                callback.sendError("Can't extract find query from JSON :" + e.toString());
+                fFail("Can't extract find query from JSON");
             }
         }
 
@@ -41,11 +42,9 @@ public class testFindInPage extends JavascriptTest implements NativeEventListene
             try {
                 close.click();
             } catch (Exception e) {
-                callback.sendError("FindInPage prompt not opened");
+                fFail("FindInPage prompt not opened");
             }
         }
-
-        callback.sendSuccess("done");
     }
 
     @Override
@@ -53,8 +52,8 @@ public class testFindInPage extends JavascriptTest implements NativeEventListene
         super.setUp();
 
         EventDispatcher.getInstance().registerGeckoThreadListener(this,
-                "Test:FindInPage",
-                "Test:CloseFindInPage");
+            "Test:FindInPage",
+            "Test:CloseFindInPage");
     }
 
     @Override
@@ -62,16 +61,16 @@ public class testFindInPage extends JavascriptTest implements NativeEventListene
         super.tearDown();
 
         EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
-                "Test:FindInPage",
-                "Test:CloseFindInPage");
+            "Test:FindInPage",
+            "Test:CloseFindInPage");
     }
 
     public void findText(String text, int nrOfMatches){
-        selectMenuItem(mStringHelper.FIND_IN_PAGE_LABEL);
+        selectMenuItem(StringHelper.FIND_IN_PAGE_LABEL);
         close = mDriver.findElement(getActivity(), R.id.find_close);
-        boolean success = waitForTest ( new BooleanTest() {
+        boolean success = waitForCondition ( new Condition() {
             @Override
-            public boolean test() {
+            public boolean isSatisfied() {
                 next = mDriver.findElement(getActivity(), R.id.find_next);
                 if (next != null) {
                     return true;
@@ -79,7 +78,7 @@ public class testFindInPage extends JavascriptTest implements NativeEventListene
                     return false;
                 }
             }
-        }, WAIT_FOR_TEST);
+        }, WAIT_FOR_CONDITION_MS);
         mAsserter.ok(success, "Looking for the next search match button in the Find in Page UI", "Found the next match button");
 
         // TODO: Find a better way to wait and then enter the text
@@ -91,17 +90,17 @@ public class testFindInPage extends JavascriptTest implements NativeEventListene
 
         // Advance a few matches to scroll the page
         for (int i=1;i < nrOfMatches;i++) {
-            success = waitForTest ( new BooleanTest() {
+            success = waitForCondition ( new Condition() {
                 @Override
-                public boolean test() {
+                public boolean isSatisfied() {
                     if (next.click()) {
                         return true;
                     } else {
                         return false;
                     }
                 }
-            }, WAIT_FOR_TEST);
-            mSolo.sleep(500); // TODO: Find a better way to wait here because waitForTest is not enough
+            }, WAIT_FOR_CONDITION_MS);
+            mSolo.sleep(500); // TODO: Find a better way to wait here because waitForCondition is not enough
             mAsserter.ok(success, "Checking if the next button was clicked", "button was clicked");
         }
     }

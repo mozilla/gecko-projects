@@ -16,6 +16,8 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.provider.Browser;
 
+import com.jayway.android.robotium.solo.Condition;
+
 /**
   * This test covers the Import from Android feature
   * The test will save the existing bookmarks and history then will do an Import
@@ -56,9 +58,9 @@ public class testImportFromAndroid extends AboutHomeTest {
          * Add a delay to make sure the imported items are added to the array lists 
          * if there are a lot of history items in the Android Browser database
          */
-        boolean success = waitForTest(new BooleanTest() {
+        boolean success = waitForCondition(new Condition() {
             @Override
-            public boolean test() {
+            public boolean isSatisfied() {
                 if (androidData.size() <= firefoxHistory.size()) {
                     return true;
                 } else {
@@ -134,17 +136,17 @@ public class testImportFromAndroid extends AboutHomeTest {
     }
 
     private void importDataFromAndroid() {
-        waitForText(mStringHelper.TITLE_PLACE_HOLDER);
-        selectSettingsItem(mStringHelper.CUSTOMIZE_SECTION_LABEL, mStringHelper.IMPORT_FROM_ANDROID_LABEL);
+        waitForText(StringHelper.TITLE_PLACE_HOLDER);
+        selectSettingsItem(StringHelper.CUSTOMIZE_SECTION_LABEL, StringHelper.IMPORT_FROM_ANDROID_LABEL);
 
         // Wait for the Import form Android pop-up to be opened. It has the same title as the option so waiting for the "Cancel" button
         waitForText("Cancel");
         mSolo.clickOnButton("Import");
 
         // Wait until the import pop-up is dismissed. This depending on the number of items in the android history can take up to a few seconds
-        boolean importComplete = waitForTest(new BooleanTest() {
+        boolean importComplete = waitForCondition(new Condition() {
             @Override
-            public boolean test() {
+            public boolean isSatisfied() {
                 return !mSolo.searchText("Please wait...");
             }
         }, MAX_WAIT_TIMEOUT);
@@ -154,13 +156,13 @@ public class testImportFromAndroid extends AboutHomeTest {
         // Import has finished. Waiting to get back to the Settings Menu and looking for the Import&Export subsection
         if ("phone".equals(mDevice.type)) {
             // Phones don't have headers like tablets, so we need to pop up one more level.
-            waitForText(mStringHelper.IMPORT_FROM_ANDROID_LABEL);
+            waitForText(StringHelper.IMPORT_FROM_ANDROID_LABEL);
             mActions.sendSpecialKey(Actions.SpecialKey.BACK);
         }
-        waitForText(mStringHelper.PRIVACY_SECTION_LABEL); // Settings is a header for the settings menu page. Waiting for Privacy ensures we are back in the top Settings view
+        waitForText(StringHelper.PRIVACY_SECTION_LABEL); // Settings is a header for the settings menu page. Waiting for Privacy ensures we are back in the top Settings view
         mActions.sendSpecialKey(Actions.SpecialKey.BACK); // Exit Settings
         // Make sure the settings menu has been closed.
-        mAsserter.ok(mSolo.waitForText(mStringHelper.TITLE_PLACE_HOLDER), "Waiting for search bar", "Search bar found");
+        mAsserter.ok(mSolo.waitForText(StringHelper.TITLE_PLACE_HOLDER), "Waiting for search bar", "Search bar found");
 
     }
 

@@ -10,10 +10,12 @@ import org.mozilla.gecko.home.HomePager;
 import android.database.Cursor;
 import android.widget.ListView;
 
+import com.jayway.android.robotium.solo.Condition;
+
 
 public class testBookmarklets extends AboutHomeTest {
     public void testBookmarklets() {
-        final String url = getAbsoluteUrl(mStringHelper.ROBOCOP_BLANK_PAGE_01_URL);
+        final String url = getAbsoluteUrl(StringHelper.ROBOCOP_BLANK_PAGE_01_URL);
         final String title = "alertBookmarklet";
         final String js = "javascript:alert(12 + .34)";
         boolean alerted;
@@ -23,14 +25,14 @@ public class testBookmarklets extends AboutHomeTest {
         // load a standard page so bookmarklets work
         inputAndLoadUrl(url);
         // Waiting for page title to ensure the page is loaded
-        verifyUrlBarTitle(mStringHelper.ROBOCOP_BLANK_PAGE_01_URL);
+        verifyUrlBarTitle(StringHelper.ROBOCOP_BLANK_PAGE_01_URL);
 
         // verify that user-entered bookmarklets do *not* work
         enterUrl(js);
         mActions.sendSpecialKey(Actions.SpecialKey.ENTER);
-        alerted = waitForTest(new BooleanTest() {
+        alerted = waitForCondition(new Condition() {
             @Override
-            public boolean test() {
+            public boolean isSatisfied() {
                 return mSolo.searchButton("OK", true) || mSolo.searchText("12.34", true);
             }
         }, 3000);
@@ -68,9 +70,9 @@ public class testBookmarklets extends AboutHomeTest {
             mAsserter.is(found, true, "Found the bookmark: " + js + " and clicked on it");
         }
 
-        alerted = waitForTest(new BooleanTest() {
+        alerted = waitForCondition(new Condition() {
             @Override
-            public boolean test() {
+            public boolean isSatisfied() {
                 return mSolo.searchButton("OK", true) && mSolo.searchText("12.34", true);
             }
         }, 3000);
