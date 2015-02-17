@@ -1121,3 +1121,8 @@ pref("gfx.vsync.compositor", false);
 pref("gfx.touch.resample", false);
 pref("gfx.vsync.refreshdriver", false);
 #endif
+
+// Because we can't have nice things.
+#ifdef MOZ_GRAPHENE
+#include ../graphene/graphene.js
+#endif

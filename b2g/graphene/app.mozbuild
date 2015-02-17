@@ -16,6 +16,5 @@ DIRS += [
     '/b2g',
 ]
 
-JS_PREFERENCE_FILES += [
-    '/b2g/graphene/graphene.js',
-]
+# Add the defaults settings.
+FINAL_TARGET_FILES.defaults += [ 'b2g/graphene/settings.json' ]
