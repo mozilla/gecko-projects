@@ -231,6 +231,13 @@ var shell = {
     let startManifestURL =
       Cc['@mozilla.org/commandlinehandler/general-startup;1?type=b2gbootstrap']
         .getService(Ci.nsISupports).wrappedJSObject.startManifestURL;
+
+    if (!startManifestURL) {
+      try {
+        startManifestURL = Services.prefs.getCharPref("b2g.default.start_manifest_url");
+      } catch(e) {}
+    }
+
     if (startManifestURL) {
       Cu.import('resource://gre/modules/Bootstraper.jsm');
       Bootstraper.ensureSystemAppInstall(startManifestURL)
