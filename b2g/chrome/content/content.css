@@ -11,11 +11,18 @@ xul|window xul|scrollbar {
 }
 
 /* Bug 1041576 - Scrollable with scrollgrab should not have scrollbars */
+
 @-moz-document domain(system.gaiamobile.org) {
   .browser-container > xul|scrollbar {
     display: none;
   }
 }
+
+%ifdef MOZ_GRAPHENE
+.moz-noscrollbars > xul|scrollbar {
+  display: none;
+}
+%endif
 
 html xul|scrollbar[root="true"] {
   position: relative;

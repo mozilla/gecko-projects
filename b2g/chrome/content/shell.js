@@ -330,11 +330,14 @@ var shell = {
 #endif
     this.contentBrowser = container.appendChild(systemAppFrame);
 
-    systemAppFrame.contentWindow
-                  .QueryInterface(Ci.nsIInterfaceRequestor)
-                  .getInterface(Ci.nsIWebNavigation)
-                  .sessionHistory = Cc["@mozilla.org/browser/shistory;1"]
-                                      .createInstance(Ci.nsISHistory);
+    let webNav = systemAppFrame.contentWindow
+                               .QueryInterface(Ci.nsIInterfaceRequestor)
+                               .getInterface(Ci.nsIWebNavigation);
+    webNav.sessionHistory = Cc["@mozilla.org/browser/shistory;1"].createInstance(Ci.nsISHistory);
+
+#ifdef MOZ_GRAPHENE
+    webNav.QueryInterface(Ci.nsIDocShell).windowDraggingAllowed = true;
+#endif
 
     // On firefox mulet, shell.html is loaded in a tab
     // and we have to listen on the chrome event handler
