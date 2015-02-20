@@ -1,4 +1,4 @@
-. "$topsrcdir/b2g/config/mozconfigs/common"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common"
 . "$topsrcdir/build/unix/mozconfig.linux"
 
 ac_add_options --enable-update-channel=${MOZ_UPDATE_CHANNEL}
@@ -26,4 +26,4 @@ no_sccache=
 # graphene options
 export CXXFLAGS=-DMOZ_ENABLE_JS_DUMP
 
-. "$topsrcdir/b2g/config/mozconfigs/common.override"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common.override"

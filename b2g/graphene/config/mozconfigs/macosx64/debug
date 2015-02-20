@@ -1,13 +1,9 @@
-. "$topsrcdir/b2g/config/mozconfigs/common"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common"
 
 # Use sccache
 no_sccache=
 
 . $topsrcdir/build/macosx/mozconfig.common
-
-ac_add_options --enable-update-channel=${MOZ_UPDATE_CHANNEL}
-ac_add_options --enable-update-packaging
-ac_add_options --enable-signmar
 
 # Nightlies only since this has a cost in performance
 ac_add_options --enable-js-diagnostics
@@ -22,6 +18,9 @@ ac_add_options --enable-warnings-as-errors
 
 # graphene Stuff
 ac_add_options --enable-debug-symbols
+ac_add_options --enable-debug
+ENABLE_MARIONETTE=1
+
 export CXXFLAGS=-DMOZ_ENABLE_JS_DUMP
 
-. "$topsrcdir/b2g/config/mozconfigs/common.override"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common.override"
