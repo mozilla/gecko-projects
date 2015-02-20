@@ -324,7 +324,22 @@ NS_NewChannelInternal(nsIChannel**           outChannel,
                       nsLoadFlags            aLoadFlags = nsIRequest::LOAD_NORMAL,
                       nsIIOService*          aIoService = nullptr)
 {
-  MOZ_ASSERT(aLoadInfo, "Can not create a channel without a loadInfo");
+  // NS_NewChannelInternal is mostly called for channel redirects. We should allow
+  // the creation of a channel even if the original channel did not have a loadinfo
+  // attached.
+  if (!aLoadInfo) {
+    return NS_NewChannelInternal(outChannel,
+                                 aUri,
+                                 nullptr, // aLoadingNode
+                                 nullptr, // aLoadingPrincipal
+                                 nullptr, // aTriggeringPrincipal
+                                 nsILoadInfo::SEC_NORMAL,
+                                 nsIContentPolicy::TYPE_OTHER,
+                                 aLoadGroup,
+                                 aCallbacks,
+                                 aLoadFlags,
+                                 aIoService);
+  }
   nsresult rv = NS_NewChannelInternal(outChannel,
                                       aUri,
                                       aLoadInfo->LoadingNode(),
@@ -581,7 +596,6 @@ NS_NewInputStreamChannelInternal(nsIChannel**        outChannel,
                                  const nsACString&   aContentCharset,
                                  nsILoadInfo*        aLoadInfo)
 {
-  MOZ_ASSERT(aLoadInfo, "can not create channel without a loadinfo");
   nsresult rv;
   nsCOMPtr<nsIInputStreamChannel> isc =
     do_CreateInstance(NS_INPUTSTREAMCHANNEL_CONTRACTID, &rv);
@@ -608,7 +622,7 @@ NS_NewInputStreamChannelInternal(nsIChannel**        outChannel,
 
   // If we're sandboxed, make sure to clear any owner the channel
   // might already have.
-  if (aLoadInfo->GetLoadingSandboxed()) {
+  if (aLoadInfo && aLoadInfo->GetLoadingSandboxed()) {
     channel->SetOwner(nullptr);
   }
 

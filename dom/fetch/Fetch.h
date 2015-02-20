@@ -99,7 +99,7 @@ template <class Derived>
 class FetchBody {
 public:
   bool
-  BodyUsed() { return mBodyUsed; }
+  BodyUsed() const { return mBodyUsed; }
 
   already_AddRefed<Promise>
   ArrayBuffer(ErrorResult& aRv)
@@ -135,6 +135,12 @@ public:
   void
   CancelPump();
 
+  void
+  SetBodyUsed()
+  {
+    mBodyUsed = true;
+  }
+
   // Always set whenever the FetchBody is created on the worker thread.
   workers::WorkerPrivate* mWorkerPrivate;
 
@@ -145,15 +151,7 @@ public:
 protected:
   FetchBody();
 
-  virtual ~FetchBody()
-  {
-  }
-
-  void
-  SetBodyUsed()
-  {
-    mBodyUsed = true;
-  }
+  virtual ~FetchBody();
 
   void
   SetMimeType(ErrorResult& aRv);

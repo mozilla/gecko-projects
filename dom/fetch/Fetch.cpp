@@ -866,6 +866,11 @@ FetchBody<Request>::FetchBody();
 template
 FetchBody<Response>::FetchBody();
 
+template <class Derived>
+FetchBody<Derived>::~FetchBody()
+{
+}
+
 // Returns true if addref succeeded.
 // Always succeeds on main thread.
 // May fail on worker if RegisterFeature() fails. In that case, it will release
@@ -1159,7 +1164,7 @@ FetchBody<Derived>::ConsumeBody(ConsumeType aType, ErrorResult& aRv)
 {
   mConsumeType = aType;
   if (BodyUsed()) {
-    aRv.ThrowTypeError(MSG_REQUEST_BODY_CONSUMED_ERROR);
+    aRv.ThrowTypeError(MSG_FETCH_BODY_CONSUMED_ERROR);
     return nullptr;
   }
 
