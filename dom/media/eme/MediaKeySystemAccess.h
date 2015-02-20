@@ -44,12 +44,14 @@ public:
 
   already_AddRefed<Promise> CreateMediaKeys(ErrorResult& aRv);
 
-  static MediaKeySystemStatus GetKeySystemStatus(const nsAString& aKeySystem);
+  static MediaKeySystemStatus GetKeySystemStatus(const nsAString& aKeySystem,
+                                                 int32_t aMinCdmVersion);
 
   static bool IsSupported(const nsAString& aKeySystem,
                           const Sequence<MediaKeySystemOptions>& aOptions);
 
-  static void NotifyObservers(const nsAString& aKeySystem,
+  static void NotifyObservers(nsIDOMWindow* aWindow,
+                              const nsAString& aKeySystem,
                               MediaKeySystemStatus aStatus);
 
 private:

@@ -346,8 +346,8 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
   }
 
   WritingMode lineWM = aReflowState.mLineLayout->GetWritingMode();
-  LogicalSize availSize(lineWM, aReflowState.AvailableWidth(),
-                        aReflowState.AvailableHeight());
+  LogicalSize availSize(lineWM, aReflowState.AvailableISize(),
+                        aReflowState.AvailableBSize());
 
   // We have a reflow state and a line layout for each RTC.
   // They are conceptually the state of the RTCs, but we don't actually
@@ -376,6 +376,7 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
                                                 reflowState->mFloatManager,
                                                 reflowState, nullptr,
                                                 aReflowState.mLineLayout);
+    lineLayout->SetSuppressLineWrap(true);
     lineLayouts.AppendElement(lineLayout);
 
     // Line number is useless for ruby text
@@ -464,8 +465,7 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
     }
 
     lineLayout->VerticalAlignLine();
-    LogicalSize lineSize(lineWM, rtcISize, lineLayout->GetFinalLineBSize());
-    textContainer->SetLineSize(lineSize);
+    textContainer->SetISize(rtcISize);
     lineLayout->EndLineReflow();
   }
 
@@ -623,6 +623,10 @@ LineBreakBefore(const nsHTMLReflowState& aReflowState, nsRubyBaseFrame* aFrame)
     iter.SetOriginalOffset(textFrame->GetContentOffset());
     uint32_t pos = iter.GetSkippedOffset();
     gfxTextRun* textRun = textFrame->GetTextRun(nsTextFrame::eInflated);
+    if (pos >= textRun->GetLength()) {
+      // The text frame contains no character at all.
+      return gfxBreakPriority::eNoBreak;
+    }
     // Return whether we can break before the first character.
     if (textRun->CanBreakLineBefore(pos)) {
       return gfxBreakPriority::eNormalBreak;

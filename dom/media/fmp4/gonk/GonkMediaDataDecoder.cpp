@@ -117,7 +117,7 @@ GonkDecoderManager::Flush()
 }
 
 GonkMediaDataDecoder::GonkMediaDataDecoder(GonkDecoderManager* aManager,
-                                           MediaTaskQueue* aTaskQueue,
+                                           FlushableMediaTaskQueue* aTaskQueue,
                                            MediaDataDecoderCallback* aCallback)
   : mTaskQueue(aTaskQueue)
   , mCallback(aCallback)
@@ -234,7 +234,7 @@ GonkMediaDataDecoder::Flush()
   // it's executing at all. Note the MP4Reader ignores all output while
   // flushing.
   mTaskQueue->Flush();
-
+  mDrainComplete = false;
   return mManager->Flush();
 }
 

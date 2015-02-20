@@ -80,7 +80,8 @@ nsLineLayout::nsLineLayout(nsPresContext* aPresContext,
     mHasBullet(false),
     mDirtyNextLine(false),
     mLineAtStart(false),
-    mHasRuby(false)
+    mHasRuby(false),
+    mSuppressLineWrap(aOuterReflowState->frame->IsSVGText())
 {
   MOZ_ASSERT(aOuterReflowState, "aOuterReflowState must not be null");
   NS_ASSERTION(aFloatManager || aOuterReflowState->frame->GetType() ==
@@ -104,9 +105,6 @@ nsLineLayout::nsLineLayout(nsPresContext* aPresContext,
   mTotalPlacedFrames = 0;
   mBStartEdge = 0;
   mTrimmableISize = 0;
-#ifdef DEBUG
-  mFinalLineBSize = nscoord_MIN;
-#endif
 
   mInflationMinFontSize =
     nsLayoutUtils::InflationMinFontSizeFor(aOuterReflowState->frame);
@@ -228,8 +226,7 @@ nsLineLayout::BeginLineReflow(nscoord aICoord, nscoord aBCoord,
 
   mBStartEdge = aBCoord;
 
-  psd->mNoWrap =
-    !mStyleText->WhiteSpaceCanWrapStyle() || LineContainerFrame()->IsSVGText();
+  psd->mNoWrap = !mStyleText->WhiteSpaceCanWrapStyle() || mSuppressLineWrap;
   psd->mWritingMode = aWritingMode;
 
   // If this is the first line of a block then see if the text-indent
@@ -420,7 +417,6 @@ nsLineLayout::NewPerSpanData()
   psd->mFirstFrame = nullptr;
   psd->mLastFrame = nullptr;
   psd->mContainsFloat = false;
-  psd->mZeroEffectiveSpanBox = false;
   psd->mHasNonemptyContent = false;
 
 #ifdef DEBUG
@@ -460,6 +456,7 @@ nsLineLayout::BeginSpan(nsIFrame* aFrame,
 
   nsIFrame* frame = aSpanReflowState->frame;
   psd->mNoWrap = !frame->StyleText()->WhiteSpaceCanWrap(frame) ||
+                 mSuppressLineWrap ||
                  frame->StyleContext()->IsInlineDescendantOfRuby();
   psd->mWritingMode = aSpanReflowState->GetWritingMode();
 
@@ -1023,7 +1020,7 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
       if (nsGkAtoms::letterFrame==frameType) {
         pfd->mIsLetterFrame = true;
       } else if (nsGkAtoms::rubyFrame == frameType) {
-        SyncAnnotationContainersBounds(pfd);
+        SyncAnnotationBounds(pfd);
       }
       if (pfd->mSpan) {
         isEmpty = !pfd->mSpan->mHasNonemptyContent && pfd->mFrame->IsSelfEmpty();
@@ -1234,13 +1231,15 @@ nsLineLayout::GetCurrentFrameInlineDistanceFromBlock()
 }
 
 /**
- * This method syncs all ruby annotation containers' bounds in their
- * PerFrameData from their rect. It is necessary to do so because the
- * containers are not part of line in their levels, which means their
- * bounds are not set properly before.
+ * This method syncs bounds of ruby annotations and ruby annotation
+ * containers from their rect. It is necessary because:
+ * Containers are not part of the line in their levels, which means
+ * their bounds are not set properly before.
+ * Ruby annotations' block-axis coordinate may have been changed when
+ * reflowing their containers.
  */
 void
-nsLineLayout::SyncAnnotationContainersBounds(PerFrameData* aRubyFrame)
+nsLineLayout::SyncAnnotationBounds(PerFrameData* aRubyFrame)
 {
   MOZ_ASSERT(aRubyFrame->mFrame->GetType() == nsGkAtoms::rubyFrame);
   MOZ_ASSERT(aRubyFrame->mSpan);
@@ -1249,10 +1248,19 @@ nsLineLayout::SyncAnnotationContainersBounds(PerFrameData* aRubyFrame)
   WritingMode lineWM = mRootSpan->mWritingMode;
   nscoord containerWidth = ContainerWidthForSpan(span);
   for (PerFrameData* pfd = span->mFirstFrame; pfd; pfd = pfd->mNext) {
-    for (PerFrameData* annotation = pfd->mNextAnnotation;
-         annotation; annotation = annotation->mNextAnnotation) {
-      LogicalRect bounds(lineWM, annotation->mFrame->GetRect(), containerWidth);
-      annotation->mBounds = bounds;
+    for (PerFrameData* rtc = pfd->mNextAnnotation;
+         rtc; rtc = rtc->mNextAnnotation) {
+      LogicalRect rtcBounds(lineWM, rtc->mFrame->GetRect(), containerWidth);
+      rtc->mBounds = rtcBounds;
+      nscoord rtcWidth = rtcBounds.Width(lineWM);
+      for (PerFrameData* rt = rtc->mSpan->mFirstFrame; rt; rt = rt->mNext) {
+        LogicalRect rtBounds = rt->mFrame->GetLogicalRect(lineWM, rtcWidth);
+        MOZ_ASSERT(rt->mBounds.IStart(lineWM) == rtBounds.IStart(lineWM) &&
+                   rt->mBounds.ISize(lineWM) == rtBounds.ISize(lineWM) &&
+                   rt->mBounds.BSize(lineWM) == rtBounds.BSize(lineWM),
+                   "Metrics other than bstart should not have been changed");
+        rt->mBounds.BStart(lineWM) = rtBounds.BStart(lineWM);
+      }
     }
   }
 }
@@ -1741,7 +1749,7 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
   printf("\n");
 #endif
 
-  // Compute the span's mZeroEffectiveSpanBox flag. What we are trying
+  // Compute the span's zeroEffectiveSpanBox flag. What we are trying
   // to determine is how we should treat the span: should it act
   // "normally" according to css2 or should it effectively
   // "disappear".
@@ -1805,7 +1813,6 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
       }
     }
   }
-  psd->mZeroEffectiveSpanBox = zeroEffectiveSpanBox;
 
   // Setup baselineBCoord, minBCoord, and maxBCoord
   nscoord baselineBCoord, minBCoord, maxBCoord;
@@ -1873,6 +1880,9 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
           psd->mBEndLeading = endLeading;
         }
         psd->mLogicalBSize += deltaLeading;
+        // We have adjusted the leadings, it is no longer a zero
+        // effective span box.
+        zeroEffectiveSpanBox = false;
       }
     }
 
@@ -2233,17 +2243,17 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
   if (psd == mRootSpan) {
     // We should factor in the block element's minimum line-height (as
     // defined in section 10.8.1 of the css2 spec) assuming that
-    // mZeroEffectiveSpanBox is not set on the root span.  This only happens
+    // zeroEffectiveSpanBox is not set on the root span.  This only happens
     // in some cases in quirks mode:
     //  (1) if the root span contains non-whitespace text directly (this
-    //      is handled by mZeroEffectiveSpanBox
+    //      is handled by zeroEffectiveSpanBox
     //  (2) if this line has a bullet
     //  (3) if this is the last line of an LI, DT, or DD element
     //      (The last line before a block also counts, but not before a
     //      BR) (NN4/IE5 quirk)
 
     // (1) and (2) above
-    bool applyMinLH = !psd->mZeroEffectiveSpanBox || mHasBullet;
+    bool applyMinLH = !zeroEffectiveSpanBox || mHasBullet;
     bool isLastLine = !mGotLineBox ||
       (!mLineBox->IsLineWrapped() && !mLineEndsInBR);
     if (!applyMinLH && isLastLine) {
@@ -2300,7 +2310,7 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
     minBCoord = maxBCoord = baselineBCoord;
   }
 
-  if ((psd != mRootSpan) && (psd->mZeroEffectiveSpanBox)) {
+  if (psd != mRootSpan && zeroEffectiveSpanBox) {
 #ifdef NOISY_BLOCKDIR_ALIGN
     printf("   [span]adjusting for zeroEffectiveSpanBox\n");
     printf("     Original: minBCoord=%d, maxBCoord=%d, bSize=%d, ascent=%d, logicalBSize=%d, topLeading=%d, bottomLeading=%d\n",
@@ -2598,15 +2608,78 @@ struct nsLineLayout::JustificationComputationState
 {
   PerFrameData* mFirstParticipant;
   PerFrameData* mLastParticipant;
-  // Whether we are going across a boundary of ruby base, i.e.
-  // entering one, leaving one, or both.
-  bool mCrossingRubyBaseBoundary;
+  // When we are going across a boundary of ruby base, i.e. entering
+  // one, leaving one, or both, the following fields will be set to
+  // the corresponding ruby base frame for handling ruby-align.
+  PerFrameData* mLastExitedRubyBase;
+  PerFrameData* mLastEnteredRubyBase;
 
   JustificationComputationState()
     : mFirstParticipant(nullptr)
     , mLastParticipant(nullptr)
-    , mCrossingRubyBaseBoundary(false) { }
+    , mLastExitedRubyBase(nullptr)
+    , mLastEnteredRubyBase(nullptr) { }
 };
+
+static bool
+IsRubyAlignSpaceAround(nsIFrame* aRubyBase)
+{
+  return aRubyBase->StyleText()->mRubyAlign == NS_STYLE_RUBY_ALIGN_SPACE_AROUND;
+}
+
+/**
+ * Assign justification gaps for justification
+ * opportunities across two frames.
+ */
+/* static */ int
+nsLineLayout::AssignInterframeJustificationGaps(
+  PerFrameData* aFrame, JustificationComputationState& aState)
+{
+  PerFrameData* prev = aState.mLastParticipant;
+  MOZ_ASSERT(prev);
+
+  auto& assign = aFrame->mJustificationAssignment;
+  auto& prevAssign = prev->mJustificationAssignment;
+
+  if (aState.mLastExitedRubyBase || aState.mLastEnteredRubyBase) {
+    PerFrameData* exitedRubyBase = aState.mLastExitedRubyBase;
+    if (!exitedRubyBase || IsRubyAlignSpaceAround(exitedRubyBase->mFrame)) {
+      prevAssign.mGapsAtEnd = 1;
+    } else {
+      exitedRubyBase->mJustificationAssignment.mGapsAtEnd = 1;
+    }
+
+    PerFrameData* enteredRubyBase = aState.mLastEnteredRubyBase;
+    if (!enteredRubyBase || IsRubyAlignSpaceAround(enteredRubyBase->mFrame)) {
+      assign.mGapsAtStart = 1;
+    } else {
+      enteredRubyBase->mJustificationAssignment.mGapsAtStart = 1;
+    }
+
+    // We are no longer going across a ruby base boundary.
+    aState.mLastExitedRubyBase = nullptr;
+    aState.mLastEnteredRubyBase = nullptr;
+    return 1;
+  }
+
+  const auto& info = aFrame->mJustificationInfo;
+  const auto& prevInfo = prev->mJustificationInfo;
+  if (!info.mIsStartJustifiable && !prevInfo.mIsEndJustifiable) {
+    return 0;
+  }
+
+  if (!info.mIsStartJustifiable) {
+    prevAssign.mGapsAtEnd = 2;
+    assign.mGapsAtStart = 0;
+  } else if (!prevInfo.mIsEndJustifiable) {
+    prevAssign.mGapsAtEnd = 0;
+    assign.mGapsAtStart = 2;
+  } else {
+    prevAssign.mGapsAtEnd = 1;
+    assign.mGapsAtStart = 1;
+  }
+  return 1;
+}
 
 /**
  * Compute the justification info of the given span, and store the
@@ -2633,8 +2706,9 @@ nsLineLayout::ComputeFrameJustification(PerSpanData* aPSD,
     }
 
     bool isRubyBase = pfd->mFrame->GetType() == nsGkAtoms::rubyBaseFrame;
+    PerFrameData* outerRubyBase = aState.mLastEnteredRubyBase;
     if (isRubyBase) {
-      aState.mCrossingRubyBaseBoundary = true;
+      aState.mLastEnteredRubyBase = pfd;
     }
 
     int extraOpportunities = 0;
@@ -2643,50 +2717,32 @@ nsLineLayout::ComputeFrameJustification(PerSpanData* aPSD,
       extraOpportunities = ComputeFrameJustification(span, aState);
       innerOpportunities += pfd->mJustificationInfo.mInnerOpportunities;
     } else {
-      const auto& info = pfd->mJustificationInfo;
       if (pfd->mIsTextFrame) {
-        innerOpportunities += info.mInnerOpportunities;
+        innerOpportunities += pfd->mJustificationInfo.mInnerOpportunities;
       }
 
-      PerFrameData* prev = aState.mLastParticipant;
-      if (!prev) {
+      if (!aState.mLastParticipant) {
         aState.mFirstParticipant = pfd;
+        // It is not an empty ruby base, but we are not assigning gaps
+        // to the content for now. Clear the last entered ruby base so
+        // that we can correctly set the last exited ruby base.
+        aState.mLastEnteredRubyBase = nullptr;
       } else {
-        auto& assign = pfd->mJustificationAssignment;
-        auto& prevAssign = prev->mJustificationAssignment;
-        const auto& prevInfo = prev->mJustificationInfo;
-
-        if (info.mIsStartJustifiable ||
-            prevInfo.mIsEndJustifiable ||
-            aState.mCrossingRubyBaseBoundary) {
-          extraOpportunities = 1;
-          if (aState.mCrossingRubyBaseBoundary) {
-            // For ruby alignment with value space-around, there is
-            // always an expansion opportunity at the boundary of a ruby
-            // base, and it always generates one gap at each side. If we
-            // don't do it here, the interaction between text align and
-            // and ruby align could be strange.
-            prevAssign.mGapsAtEnd = 1;
-            assign.mGapsAtStart = 1;
-            aState.mCrossingRubyBaseBoundary = false;
-          } else if (!info.mIsStartJustifiable) {
-            prevAssign.mGapsAtEnd = 2;
-            assign.mGapsAtStart = 0;
-          } else if (!prevInfo.mIsEndJustifiable) {
-            prevAssign.mGapsAtEnd = 0;
-            assign.mGapsAtStart = 2;
-          } else {
-            prevAssign.mGapsAtEnd = 1;
-            assign.mGapsAtStart = 1;
-          }
-        }
+        extraOpportunities = AssignInterframeJustificationGaps(pfd, aState);
       }
 
       aState.mLastParticipant = pfd;
     }
 
     if (isRubyBase) {
-      aState.mCrossingRubyBaseBoundary = true;
+      if (aState.mLastEnteredRubyBase == pfd) {
+        // There is no justification participant inside this ruby base.
+        // Ignore this ruby base completely and restore the outer ruby
+        // base here.
+        aState.mLastEnteredRubyBase = outerRubyBase;
+      } else {
+        aState.mLastExitedRubyBase = pfd;
+      }
     }
 
     if (firstChild) {
@@ -2808,20 +2864,36 @@ nsLineLayout::ApplyFrameJustification(PerSpanData* aPSD,
       }
 
       pfd->mBounds.ISize(lineWM) += dw;
+      nscoord gapsAtEnd = 0;
       if (!pfd->mIsTextFrame && assign.TotalGaps()) {
         // It is possible that we assign gaps to non-text frame.
         // Apply the gaps as margin around the frame.
         deltaICoord += aState.Consume(assign.mGapsAtStart);
-        dw += aState.Consume(assign.mGapsAtEnd);
+        gapsAtEnd = aState.Consume(assign.mGapsAtEnd);
+        dw += gapsAtEnd;
       }
       pfd->mBounds.IStart(lineWM) += deltaICoord;
 
-      ApplyLineJustificationToAnnotations(pfd, aPSD, deltaICoord, dw);
+      // The gaps added to the end of the frame should also be
+      // excluded from the isize added to the annotation.
+      ApplyLineJustificationToAnnotations(pfd, aPSD,
+                                          deltaICoord, dw - gapsAtEnd);
       deltaICoord += dw;
       pfd->mFrame->SetRect(lineWM, pfd->mBounds, ContainerWidthForSpan(aPSD));
     }
   }
   return deltaICoord;
+}
+
+static nsIFrame*
+FindNearestRubyBaseAncestor(nsIFrame* aFrame)
+{
+  MOZ_ASSERT(aFrame->StyleContext()->IsInlineDescendantOfRuby());
+  while (aFrame && aFrame->GetType() != nsGkAtoms::rubyBaseFrame) {
+    aFrame = aFrame->GetParent();
+  }
+  MOZ_ASSERT(aFrame, "No ruby base ancestor?");
+  return aFrame;
 }
 
 /**
@@ -2831,15 +2903,43 @@ void
 nsLineLayout::ExpandRubyBox(PerFrameData* aFrame, nscoord aReservedISize,
                             nscoord aContainerWidth)
 {
-  int32_t opportunities = aFrame->mJustificationInfo.mInnerOpportunities;
-  // Each expandable ruby box has an gap at each of its sides. For
-  // rb/rbc, see comment in ComputeFrameJustification; for rt/rtc,
-  // see comment in this method below.
-  int32_t gaps = opportunities * 2 + 2;
-  JustificationApplicationState state(gaps, aReservedISize);
-  ApplyFrameJustification(aFrame->mSpan, state);
-
   WritingMode lineWM = mRootSpan->mWritingMode;
+  auto rubyAlign = aFrame->mFrame->StyleText()->mRubyAlign;
+  switch (rubyAlign) {
+    case NS_STYLE_RUBY_ALIGN_START:
+      // do nothing for start
+      break;
+    case NS_STYLE_RUBY_ALIGN_SPACE_BETWEEN:
+    case NS_STYLE_RUBY_ALIGN_SPACE_AROUND: {
+      int32_t opportunities = aFrame->mJustificationInfo.mInnerOpportunities;
+      int32_t gaps = opportunities * 2;
+      if (rubyAlign == NS_STYLE_RUBY_ALIGN_SPACE_AROUND) {
+        // Each expandable ruby box with ruby-align space-around has a
+        // gap at each of its sides. For rb/rbc, see comment in
+        // AssignInterframeJustificationGaps; for rt/rtc, see comment
+        // in ExpandRubyBoxWithAnnotations.
+        gaps += 2;
+      }
+      if (gaps > 0) {
+        JustificationApplicationState state(gaps, aReservedISize);
+        ApplyFrameJustification(aFrame->mSpan, state);
+        break;
+      }
+      // If there are no justification opportunities for space-between,
+      // fall-through to center per spec.
+    }
+    case NS_STYLE_RUBY_ALIGN_CENTER:
+      // Indent all children by half of the reserved inline size.
+      for (PerFrameData* child = aFrame->mSpan->mFirstFrame;
+           child; child = child->mNext) {
+        child->mBounds.IStart(lineWM) += aReservedISize / 2;
+        child->mFrame->SetRect(lineWM, child->mBounds, aContainerWidth);
+      }
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unknown ruby-align value");
+  }
+
   aFrame->mBounds.ISize(lineWM) += aReservedISize;
   aFrame->mFrame->SetRect(lineWM, aFrame->mBounds, aContainerWidth);
 }
@@ -2871,9 +2971,11 @@ nsLineLayout::ExpandRubyBoxWithAnnotations(PerFrameData* aFrame,
     if (!computeState.mFirstParticipant) {
       continue;
     }
-    // Add one gap at each side of this annotation.
-    computeState.mFirstParticipant->mJustificationAssignment.mGapsAtStart = 1;
-    computeState.mLastParticipant->mJustificationAssignment.mGapsAtEnd = 1;
+    if (IsRubyAlignSpaceAround(annotation->mFrame)) {
+      // Add one gap at each side of this annotation.
+      computeState.mFirstParticipant->mJustificationAssignment.mGapsAtStart = 1;
+      computeState.mLastParticipant->mJustificationAssignment.mGapsAtEnd = 1;
+    }
     nsIFrame* parentFrame = annotation->mFrame->GetParent();
     nscoord containerWidth = parentFrame->GetRect().Width();
     MOZ_ASSERT(containerWidth == aContainerWidth ||
@@ -2960,14 +3062,20 @@ nsLineLayout::TextAlignLine(nsLineBox* aLine,
       PerFrameData* firstFrame = computeState.mFirstParticipant;
       if (firstFrame->mFrame->StyleContext()->IsInlineDescendantOfRuby()) {
         MOZ_ASSERT(!firstFrame->mJustificationAssignment.mGapsAtStart);
-        firstFrame->mJustificationAssignment.mGapsAtStart = 1;
-        additionalGaps++;
+        nsIFrame* rubyBase = FindNearestRubyBaseAncestor(firstFrame->mFrame);
+        if (IsRubyAlignSpaceAround(rubyBase)) {
+          firstFrame->mJustificationAssignment.mGapsAtStart = 1;
+          additionalGaps++;
+        }
       }
       PerFrameData* lastFrame = computeState.mLastParticipant;
       if (lastFrame->mFrame->StyleContext()->IsInlineDescendantOfRuby()) {
         MOZ_ASSERT(!lastFrame->mJustificationAssignment.mGapsAtEnd);
-        lastFrame->mJustificationAssignment.mGapsAtEnd = 1;
-        additionalGaps++;
+        nsIFrame* rubyBase = FindNearestRubyBaseAncestor(lastFrame->mFrame);
+        if (IsRubyAlignSpaceAround(rubyBase)) {
+          lastFrame->mJustificationAssignment.mGapsAtEnd = 1;
+          additionalGaps++;
+        }
       }
     }
   }

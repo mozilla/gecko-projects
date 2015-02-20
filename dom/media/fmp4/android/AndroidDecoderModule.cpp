@@ -205,7 +205,7 @@ public:
     jni::Object::LocalRef buffer(env);
     NS_ENSURE_SUCCESS_VOID(aFormat->GetByteBuffer(NS_LITERAL_STRING("csd-0"), &buffer));
 
-    if (!buffer) {
+    if (!buffer && aConfig.audio_specific_config->Length() >= 2) {
       csd0[0] = (*aConfig.audio_specific_config)[0];
       csd0[1] = (*aConfig.audio_specific_config)[1];
 
@@ -260,7 +260,7 @@ AndroidDecoderModule::CreateVideoDecoder(
                                 const mp4_demuxer::VideoDecoderConfig& aConfig,
                                 layers::LayersBackend aLayersBackend,
                                 layers::ImageContainer* aImageContainer,
-                                MediaTaskQueue* aVideoTaskQueue,
+                                FlushableMediaTaskQueue* aVideoTaskQueue,
                                 MediaDataDecoderCallback* aCallback)
 {
   MediaFormat::LocalRef format;
@@ -279,7 +279,7 @@ AndroidDecoderModule::CreateVideoDecoder(
 
 already_AddRefed<MediaDataDecoder>
 AndroidDecoderModule::CreateAudioDecoder(const mp4_demuxer::AudioDecoderConfig& aConfig,
-                                         MediaTaskQueue* aAudioTaskQueue,
+                                         FlushableMediaTaskQueue* aAudioTaskQueue,
                                          MediaDataDecoderCallback* aCallback)
 {
   MOZ_ASSERT(aConfig.bits_per_sample == 16, "We only handle 16-bit audio!");

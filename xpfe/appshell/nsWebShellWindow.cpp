@@ -71,8 +71,6 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MouseEvents.h"
 
-#include "nsPIWindowRoot.h"
-
 #ifdef XP_MACOSX
 #include "nsINativeMenuService.h"
 #define USE_NATIVE_MENUS
@@ -259,15 +257,6 @@ nsWebShellWindow::WindowMoved(nsIWidget* aWidget, int32_t x, int32_t y)
     pm->AdjustPopupsOnWindowChange(window);
   }
 
-  // Notify all tabs that the widget moved.
-  if (mDocShell && mDocShell->GetWindow()) {
-    nsCOMPtr<EventTarget> eventTarget = mDocShell->GetWindow()->GetTopWindowRoot();
-    nsContentUtils::DispatchChromeEvent(mDocShell->GetDocument(),
-                                        eventTarget,
-                                        NS_LITERAL_STRING("MozUpdateWindowPos"),
-                                        false, false, nullptr);
-  }
-
   // Persist position, but not immediately, in case this OS is firing
   // repeated move events as the user drags the window
   SetPersistenceTimer(PAD_POSITION);
@@ -429,6 +418,11 @@ nsWebShellWindow::WindowDeactivated()
 #ifdef USE_NATIVE_MENUS
 static void LoadNativeMenus(nsIDOMDocument *aDOMDoc, nsIWidget *aParentWindow)
 {
+  nsCOMPtr<nsINativeMenuService> nms = do_GetService("@mozilla.org/widget/nativemenuservice;1");
+  if (!nms) {
+    return;
+  }
+
   // Find the menubar tag (if there is more than one, we ignore all but
   // the first).
   nsCOMPtr<nsIDOMNodeList> menubarElements;
@@ -439,13 +433,13 @@ static void LoadNativeMenus(nsIDOMDocument *aDOMDoc, nsIWidget *aParentWindow)
   nsCOMPtr<nsIDOMNode> menubarNode;
   if (menubarElements)
     menubarElements->Item(0, getter_AddRefs(menubarNode));
-  if (!menubarNode)
-    return;
 
-  nsCOMPtr<nsINativeMenuService> nms = do_GetService("@mozilla.org/widget/nativemenuservice;1");
-  nsCOMPtr<nsIContent> menubarContent(do_QueryInterface(menubarNode));
-  if (nms && menubarContent)
+  if (menubarNode) {
+    nsCOMPtr<nsIContent> menubarContent(do_QueryInterface(menubarNode));
     nms->CreateNativeMenuBar(aParentWindow, menubarContent);
+  } else {
+    nms->CreateNativeMenuBar(aParentWindow, nullptr);
+  }
 }
 #endif
 

@@ -124,9 +124,7 @@ MP4Demuxer::Init()
                                         mSource, mAudioConfig.mTrackId,
                                         mMonitor);
       mPrivate->mIndexes.AppendElement(index);
-      if (index->IsFragmented()) {
-        mPrivate->mAudioIterator = new SampleIterator(index);
-      }
+      mPrivate->mAudioIterator = new SampleIterator(index);
     } else if (!mPrivate->mVideo.get() && !strncmp(mimeType, "video/", 6)) {
       sp<MediaSource> track = e->getTrack(i);
       if (track->start() != OK) {
@@ -138,9 +136,7 @@ MP4Demuxer::Init()
                                         mSource, mVideoConfig.mTrackId,
                                         mMonitor);
       mPrivate->mIndexes.AppendElement(index);
-      if (index->IsFragmented()) {
-        mPrivate->mVideoIterator = new SampleIterator(index);
-      }
+      mPrivate->mVideoIterator = new SampleIterator(index);
     }
   }
   sp<MetaData> metaData = e->getMetaData();
@@ -335,7 +331,7 @@ MP4Demuxer::GetEvictionOffset(Microseconds aTime)
   for (int i = 0; i < mPrivate->mIndexes.Length(); i++) {
     offset = std::min(offset, mPrivate->mIndexes[i]->GetEvictionOffset(aTime));
   }
-  return offset == std::numeric_limits<uint64_t>::max() ? -1 : offset;
+  return offset == std::numeric_limits<uint64_t>::max() ? 0 : offset;
 }
 
 Microseconds

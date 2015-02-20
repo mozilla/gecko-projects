@@ -3012,8 +3012,6 @@ class MSimdBox
     bool congruentTo(const MDefinition *ins) const MOZ_OVERRIDE {
         if (congruentIfOperandsEqual(ins)) {
             MOZ_ASSERT(ins->toSimdBox()->initialHeap() == initialHeap());
-            // The template object is likely to be different, but represents the
-            // same kind of objects as the MIRTypes are identical.
             return true;
         }
 
@@ -4228,7 +4226,6 @@ class MAssertRange
       : MUnaryInstruction(ins), assertedRange_(assertedRange)
     {
         setGuard();
-        setMovable();
         setResultType(MIRType_None);
     }
 
@@ -6963,7 +6960,8 @@ class MRegExpExec
     bool writeRecoverData(CompactBufferWriter &writer) const MOZ_OVERRIDE;
 
     bool canRecoverOnBailout() const MOZ_OVERRIDE {
-        if (regexp()->isRegExp())
+        // XXX: always return false for now, to work around bug 1132128.
+        if (false && regexp()->isRegExp())
             return !regexp()->toRegExp()->source()->needUpdateLastIndex();
         return false;
     }
@@ -7008,7 +7006,8 @@ class MRegExpTest
         // RegExpTest has a side-effect on the regexp object's lastIndex
         // when sticky or global flags are set.
         // Return false unless we are sure it's not the case.
-        if (regexp()->isRegExp())
+        // XXX: always return false for now, to work around bug 1132128.
+        if (false && regexp()->isRegExp())
             return !regexp()->toRegExp()->source()->needUpdateLastIndex();
         return false;
     }
@@ -7066,7 +7065,8 @@ class MRegExpReplace
     bool canRecoverOnBailout() const MOZ_OVERRIDE {
         // RegExpReplace will zero the lastIndex field when global flag is set.
         // So we can only remove this if it's non-global.
-        if (pattern()->isRegExp())
+        // XXX: always return false for now, to work around bug 1132128.
+        if (false && pattern()->isRegExp())
             return !pattern()->toRegExp()->source()->global();
         return false;
     }

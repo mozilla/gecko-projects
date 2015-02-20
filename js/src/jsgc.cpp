@@ -2075,8 +2075,8 @@ RelocateCell(Zone *zone, TenuredCell *src, AllocKind thingKind, size_t thingSize
 
             // For copy-on-write objects that own their elements, fix up the
             // owner pointer to point to the relocated object.
-            if (srcNative->hasDynamicElements() && srcNative->denseElementsAreCopyOnWrite()) {
-                HeapPtrNativeObject &owner = srcNative->getElementsHeader()->ownerObject();
+            if (srcNative->denseElementsAreCopyOnWrite()) {
+                HeapPtrNativeObject &owner = dstNative->getElementsHeader()->ownerObject();
                 if (owner == srcNative)
                     owner = dstNative;
             }
@@ -5463,6 +5463,10 @@ GCRuntime::compactPhase(bool lastGC)
         releaseRelocatedArenas(relocatedList);
 #endif
 
+    // Ensure execess chunks are returns to the system and free arenas
+    // decommitted.
+    shrinkBuffers();
+
 #ifdef DEBUG
     CheckHashTablesAfterMovingGC(rt);
     for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
@@ -6303,6 +6307,7 @@ js::PrepareForDebugGC(JSRuntime *rt)
 JS_PUBLIC_API(void)
 JS::ShrinkGCBuffers(JSRuntime *rt)
 {
+    MOZ_ASSERT(!rt->isHeapBusy());
     rt->gc.shrinkBuffers();
 }
 
@@ -6311,7 +6316,6 @@ GCRuntime::shrinkBuffers()
 {
     AutoLockHelperThreadState helperLock;
     AutoLockGC lock(rt);
-    MOZ_ASSERT(!rt->isHeapBusy());
 
     if (CanUseExtraThreads())
         helperState.startBackgroundShrink(lock);

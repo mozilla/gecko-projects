@@ -2592,7 +2592,16 @@ MediaDecoderStateMachine::SeekCompleted()
     newCurrentTime = mAudioStartTime = seekTime;
   } else if (HasAudio()) {
     AudioData* audio = AudioQueue().PeekFront();
-    newCurrentTime = mAudioStartTime = audio ? audio->mTime : seekTime;
+    // Though we adjust the newCurrentTime in audio-based, and supplemented
+    // by video. For better UX, should NOT bind the slide position to
+    // the first audio data timestamp directly.
+    // While seeking to a position where there's only either audio or video, or
+    // seeking to a position lies before audio or video, we need to check if
+    // seekTime is bounded in suitable duration. See Bug 1112438.
+    int64_t videoStart = video ? video->mTime : seekTime;
+    int64_t audioStart = audio ? audio->mTime : seekTime;
+    newCurrentTime = mAudioStartTime =
+        std::min(std::min(audioStart, videoStart), seekTime);
   } else {
     newCurrentTime = video ? video->mTime : seekTime;
   }
@@ -2958,7 +2967,7 @@ MediaDecoderStateMachine::FlushDecoding()
     // The reader is not supposed to put any tasks to deliver samples into
     // the queue after this runs (unless we request another sample from it).
     RefPtr<nsIRunnable> task;
-    task = NS_NewRunnableMethod(mReader, &MediaDecoderReader::ResetDecode);
+    task = NS_NewRunnableMethod(this, &MediaDecoderStateMachine::ResetDecode);
 
     // Wait for the ResetDecode to run and for the decoder to abort
     // decoding operations and run any pending callbacks. This is
@@ -2969,13 +2978,33 @@ MediaDecoderStateMachine::FlushDecoding()
     // and shutdown on B2G will fail as there are outstanding video frames
     // alive.
     ReentrantMonitorAutoExit exitMon(mDecoder->GetReentrantMonitor());
-    DecodeTaskQueue()->FlushAndDispatch(task);
+    DecodeTaskQueue()->Dispatch(task);
+    DecodeTaskQueue()->AwaitIdle();
   }
 
   // We must reset playback so that all references to frames queued
   // in the state machine are dropped, else subsequent calls to Shutdown()
   // or ReleaseMediaResources() can fail on B2G.
   ResetPlayback();
+}
+
+void
+MediaDecoderStateMachine::ResetDecode()
+{
+  NS_ASSERTION(OnDecodeThread(), "Should be on decode thread.");
+
+  if (!mReader) {
+    return;
+  }
+
+  {
+    ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
+    if (mWaitingForDecoderSeek && !mCancelingSeek) {
+      mReader->CancelSeek();
+      mCancelingSeek = true;
+    }
+  }
+  mReader->ResetDecode();
 }
 
 void MediaDecoderStateMachine::RenderVideoFrame(VideoData* aData,

@@ -914,7 +914,8 @@ nsFrameLoader::ShowRemoteFrame(const nsIntSize& size,
 
     // Don't show remote iframe if we are waiting for the completion of reflow.
     if (!aFrame || !(aFrame->GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
-      mRemoteBrowser->UpdateDimensions(dimensions, size);
+      nsIntPoint chromeDisp = aFrame->GetChromeDisplacement();
+      mRemoteBrowser->UpdateDimensions(dimensions, size, chromeDisp);
     }
   }
 
@@ -1959,7 +1960,8 @@ nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame *aIFrame)
       nsIntSize size = aIFrame->GetSubdocumentSize();
       nsIntRect dimensions;
       NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), NS_ERROR_FAILURE);
-      mRemoteBrowser->UpdateDimensions(dimensions, size);
+      nsIntPoint chromeDisp = aIFrame->GetChromeDisplacement();
+      mRemoteBrowser->UpdateDimensions(dimensions, size, chromeDisp);
     }
     return NS_OK;
   }
@@ -2301,7 +2303,7 @@ nsFrameLoader::CreateStaticClone(nsIFrameLoader* aDest)
 }
 
 bool
-nsFrameLoader::DoLoadFrameScript(const nsAString& aURL, bool aRunInGlobalScope)
+nsFrameLoader::DoLoadMessageManagerScript(const nsAString& aURL, bool aRunInGlobalScope)
 {
   auto* tabParent = TabParent::GetFrom(GetRemoteBrowser());
   if (tabParent) {

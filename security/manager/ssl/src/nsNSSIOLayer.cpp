@@ -820,10 +820,14 @@ nsSSLIOLayerHelpers::rememberTolerantAtVersion(const nsACString& hostName,
       entry.intolerant = entry.tolerant + 1;
       entry.intoleranceReason = 0; // lose the reason
     }
+    if (entry.strongCipherStatus == StrongCipherStatusUnknown) {
+      entry.strongCipherStatus = StrongCiphersWorked;
+    }
   } else {
     entry.tolerant = tolerant;
     entry.intolerant = 0;
     entry.intoleranceReason = 0;
+    entry.strongCipherStatus = StrongCiphersWorked;
   }
 
   entry.AssertInvariant();
@@ -848,6 +852,9 @@ nsSSLIOLayerHelpers::forgetIntolerance(const nsACString& hostName,
     tolerant = entry.tolerant;
     entry.intolerant = 0;
     entry.intoleranceReason = 0;
+    if (entry.strongCipherStatus != StrongCiphersWorked) {
+      entry.strongCipherStatus = StrongCipherStatusUnknown;
+    }
 
     entry.AssertInvariant();
     mTLSIntoleranceInfo.Put(key, entry);
@@ -938,6 +945,7 @@ nsSSLIOLayerHelpers::rememberIntolerantAtVersion(const nsACString& hostName,
     }
   } else {
     entry.tolerant = 0;
+    entry.strongCipherStatus = StrongCipherStatusUnknown;
   }
 
   entry.intolerant = intolerant;
@@ -948,10 +956,42 @@ nsSSLIOLayerHelpers::rememberIntolerantAtVersion(const nsACString& hostName,
   return true;
 }
 
+// returns true if we should retry the handshake
+bool
+nsSSLIOLayerHelpers::rememberStrongCiphersFailed(const nsACString& hostName,
+                                                 int16_t port,
+                                                 PRErrorCode intoleranceReason)
+{
+  nsCString key;
+  getSiteKey(hostName, port, key);
+
+  MutexAutoLock lock(mutex);
+
+  IntoleranceEntry entry;
+  if (mTLSIntoleranceInfo.Get(key, &entry)) {
+    entry.AssertInvariant();
+    if (entry.strongCipherStatus != StrongCipherStatusUnknown) {
+      // We already know if the server supports a strong cipher.
+      return false;
+    }
+  } else {
+    entry.tolerant = 0;
+    entry.intolerant = 0;
+    entry.intoleranceReason = intoleranceReason;
+  }
+
+  entry.strongCipherStatus = StrongCiphersFailed;
+  entry.AssertInvariant();
+  mTLSIntoleranceInfo.Put(key, entry);
+
+  return true;
+}
+
 void
 nsSSLIOLayerHelpers::adjustForTLSIntolerance(const nsACString& hostName,
                                              int16_t port,
-                                             /*in/out*/ SSLVersionRange& range)
+                                             /*in/out*/ SSLVersionRange& range,
+                                             /*out*/ StrongCipherStatus& strongCipherStatus)
 {
   IntoleranceEntry entry;
 
@@ -974,6 +1014,7 @@ nsSSLIOLayerHelpers::adjustForTLSIntolerance(const nsACString& hostName,
       range.max = entry.intolerant - 1;
     }
   }
+  strongCipherStatus = entry.strongCipherStatus;
 }
 
 PRErrorCode
@@ -1166,6 +1207,7 @@ retryDueToTLSIntolerance(PRErrorCode err, nsNSSSocketInfo* socketInfo)
   // Note this only happens during the initial SSL handshake.
 
   SSLVersionRange range = socketInfo->GetTLSVersionRange();
+  nsSSLIOLayerHelpers& helpers = socketInfo->SharedState().IOLayerHelpers();
 
   if (err == SSL_ERROR_INAPPROPRIATE_FALLBACK_ALERT) {
     // This is a clear signal that we've fallen back too many versions.  Treat
@@ -1175,15 +1217,36 @@ retryDueToTLSIntolerance(PRErrorCode err, nsNSSSocketInfo* socketInfo)
     // First, track the original cause of the version fallback.  This uses the
     // same buckets as the telemetry below, except that bucket 0 will include
     // all cases where there wasn't an original reason.
-    PRErrorCode originalReason = socketInfo->SharedState().IOLayerHelpers()
-      .getIntoleranceReason(socketInfo->GetHostName(), socketInfo->GetPort());
+    PRErrorCode originalReason =
+      helpers.getIntoleranceReason(socketInfo->GetHostName(),
+                                   socketInfo->GetPort());
     Telemetry::Accumulate(Telemetry::SSL_VERSION_FALLBACK_INAPPROPRIATE,
                           tlsIntoleranceTelemetryBucket(originalReason));
 
-    socketInfo->SharedState().IOLayerHelpers()
-      .forgetIntolerance(socketInfo->GetHostName(), socketInfo->GetPort());
+    helpers.forgetIntolerance(socketInfo->GetHostName(),
+                              socketInfo->GetPort());
 
     return false;
+  }
+
+  // Disallow PR_CONNECT_RESET_ERROR if fallback limit reached.
+  bool fallbackLimitReached =
+    helpers.fallbackLimitReached(socketInfo->GetHostName(), range.max);
+  if (err == PR_CONNECT_RESET_ERROR && fallbackLimitReached) {
+    return false;
+  }
+
+  if ((err == SSL_ERROR_NO_CYPHER_OVERLAP || err == PR_END_OF_FILE_ERROR ||
+       err == PR_CONNECT_RESET_ERROR) &&
+      !fallbackLimitReached &&
+      nsNSSComponent::AreAnyWeakCiphersEnabled()) {
+    if (helpers.rememberStrongCiphersFailed(socketInfo->GetHostName(),
+                                            socketInfo->GetPort(), err)) {
+      Telemetry::Accumulate(Telemetry::SSL_WEAK_CIPHERS_FALLBACK,
+                            tlsIntoleranceTelemetryBucket(err));
+      return true;
+    }
+    Telemetry::Accumulate(Telemetry::SSL_WEAK_CIPHERS_FALLBACK, 0);
   }
 
   // When not using a proxy we'll see a connection reset error.
@@ -1240,10 +1303,9 @@ retryDueToTLSIntolerance(PRErrorCode err, nsNSSSocketInfo* socketInfo)
   // TLS intolerance fallback due to remembered tolerance.
   Telemetry::Accumulate(pre, reason);
 
-  if (!socketInfo->SharedState().IOLayerHelpers()
-                 .rememberIntolerantAtVersion(socketInfo->GetHostName(),
-                                              socketInfo->GetPort(),
-                                              range.min, range.max, err)) {
+  if (!helpers.rememberIntolerantAtVersion(socketInfo->GetHostName(),
+                                           socketInfo->GetPort(),
+                                           range.min, range.max, err)) {
     return false;
   }
 
@@ -2570,23 +2632,22 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   }
 
   uint16_t maxEnabledVersion = range.max;
+  StrongCipherStatus strongCiphersStatus = StrongCipherStatusUnknown;
   infoObject->SharedState().IOLayerHelpers()
     .adjustForTLSIntolerance(infoObject->GetHostName(), infoObject->GetPort(),
-                             range);
-  bool useWeakCiphers = range.max <= SSL_LIBRARY_VERSION_TLS_1_0 &&
-                        nsNSSComponent::AreAnyWeakCiphersEnabled();
+                             range, strongCiphersStatus);
   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
          ("[%p] nsSSLIOLayerSetOptions: using TLS version range (0x%04x,0x%04x)%s\n",
           fd, static_cast<unsigned int>(range.min),
               static_cast<unsigned int>(range.max),
-          useWeakCiphers ? " with weak ciphers" : ""));
+          strongCiphersStatus == StrongCiphersFailed ? " with weak ciphers" : ""));
 
   if (SSL_VersionRangeSet(fd, &range) != SECSuccess) {
     return NS_ERROR_FAILURE;
   }
   infoObject->SetTLSVersionRange(range);
 
-  if (useWeakCiphers) {
+  if (strongCiphersStatus == StrongCiphersFailed) {
     nsNSSComponent::UseWeakCiphersOnSocket(fd);
   }
 

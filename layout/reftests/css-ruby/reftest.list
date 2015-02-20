@@ -1,8 +1,5 @@
 default-preferences pref(layout.css.ruby.enabled,true)
 
-== autohiding-1.html autohiding-1-ref.html
-== autohiding-2.html autohiding-2-ref.html
-fails == autohiding-3.html autohiding-3-ref.html # bug 1107701
 == box-generation-1.html box-generation-1-ref.html
 == box-generation-2.html box-generation-2-ref.html
 == box-generation-3.html box-generation-3-ref.html
@@ -19,11 +16,6 @@ fails == autohiding-3.html autohiding-3-ref.html # bug 1107701
 == dynamic-removal-2.html dynamic-removal-2-ref.html
 == dynamic-removal-3.html dynamic-removal-3-ref.html
 == float-handling.html float-handling-ref.html
-== inlinize-blocks-1.html inlinize-blocks-1-ref.html
-== inlinize-blocks-2.html inlinize-blocks-2-ref.html
-== inlinize-blocks-3.html inlinize-blocks-3-ref.html
-== inlinize-blocks-4.html inlinize-blocks-4-ref.html
-== inlinize-blocks-5.html inlinize-blocks-5-ref.html
 == intra-level-whitespace-1.html intra-level-whitespace-1-ref.html
 == intra-level-whitespace-2.html intra-level-whitespace-2-ref.html
 == intra-level-whitespace-3.html intra-level-whitespace-3-ref.html
@@ -33,10 +25,15 @@ fails == autohiding-3.html autohiding-3-ref.html # bug 1107701
 == line-height-1.html line-height-1-ref.html
 == line-height-2.html line-height-2-ref.html
 == line-height-3.html line-height-3-ref.html
+== line-height-4.html line-height-4-ref.html
 load nested-ruby-1.html
 == no-transform.html no-transform-ref.html
-fails-if(cocoaWidget) == relative-positioning-1.html relative-positioning-1-ref.html # bug 1120280
+== relative-positioning-1.html relative-positioning-1-ref.html
 == relative-positioning-2.html relative-positioning-2-ref.html
+== ruby-align-1.html ruby-align-1-ref.html
+== ruby-align-1a.html ruby-align-1-ref.html
+== ruby-align-2.html ruby-align-2-ref.html
+== ruby-align-2a.html ruby-align-2-ref.html
 == ruby-position-horizontal.html ruby-position-horizontal-ref.html
 pref(layout.css.vertical-text.enabled,true) fails == ruby-position-vertical-lr.html ruby-position-vertical-lr-ref.html # bug 1112474
 pref(layout.css.vertical-text.enabled,true) fails == ruby-position-vertical-rl.html ruby-position-vertical-rl-ref.html # bug 1112474

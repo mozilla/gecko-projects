@@ -66,6 +66,7 @@ function check_telemetry() {
   do_check_eq(histogram.counts[13], 1); // MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE
   do_check_eq(histogram.counts[14], 2); // MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE
   do_check_eq(histogram.counts[15], 1); // MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE
+  do_check_eq(histogram.counts[16], 2); // SEC_ERROR_INVALID_TIME
   run_next_test();
 }
 
@@ -97,6 +98,9 @@ function add_simple_tests() {
                          Ci.nsICertOverrideService.ERROR_TIME,
                          getXPCOMStatusFromNSS(
                            MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE));
+  add_cert_override_test("before-epoch.example.com",
+                         Ci.nsICertOverrideService.ERROR_TIME,
+                         getXPCOMStatusFromNSS(SEC_ERROR_INVALID_TIME));
   add_cert_override_test("selfsigned.example.com",
                          Ci.nsICertOverrideService.ERROR_UNTRUSTED,
                          getXPCOMStatusFromNSS(SEC_ERROR_UNKNOWN_ISSUER));
@@ -110,6 +114,9 @@ function add_simple_tests() {
                          Ci.nsICertOverrideService.ERROR_UNTRUSTED,
                          getXPCOMStatusFromNSS(
                            MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE));
+  add_cert_override_test("before-epoch-issuer.example.com",
+                         Ci.nsICertOverrideService.ERROR_TIME,
+                         getXPCOMStatusFromNSS(SEC_ERROR_INVALID_TIME));
   add_cert_override_test("md5signature.example.com",
                          Ci.nsICertOverrideService.ERROR_UNTRUSTED,
                          getXPCOMStatusFromNSS(
@@ -127,6 +134,22 @@ function add_simple_tests() {
 
   add_non_overridable_test("inadequatekeyusage.example.com",
                            SEC_ERROR_INADEQUATE_KEY_USAGE);
+
+  // This is intended to test the case where a verification has failed for one
+  // overridable reason (e.g. unknown issuer) but then, in the process of
+  // reporting that error, a non-overridable error is encountered. The
+  // non-overridable error should be prioritized.
+  add_test(function() {
+    let rootCert = constructCertFromFile("tlsserver/test-ca.der");
+    setCertTrust(rootCert, ",,");
+    run_next_test();
+  });
+  add_non_overridable_test("badSubjectAltNames.example.com", SEC_ERROR_BAD_DER);
+  add_test(function() {
+    let rootCert = constructCertFromFile("tlsserver/test-ca.der");
+    setCertTrust(rootCert, "CTu,,");
+    run_next_test();
+  });
 
   // Bug 990603: Apache documentation has recommended generating a self-signed
   // test certificate with basic constraints: CA:true. For compatibility, this
@@ -205,20 +228,18 @@ function add_distrust_tests() {
   // Before we specifically distrust this certificate, it should be trusted.
   add_connection_test("untrusted.example.com", Cr.NS_OK);
 
-  add_distrust_override_test("tlsserver/default-ee.der",
-                             "untrusted.example.com",
-                             getXPCOMStatusFromNSS(SEC_ERROR_UNTRUSTED_CERT));
+  add_distrust_test("tlsserver/default-ee.der", "untrusted.example.com",
+                    SEC_ERROR_UNTRUSTED_CERT);
 
-  add_distrust_override_test("tlsserver/other-test-ca.der",
-                             "untrustedissuer.example.com",
-                             getXPCOMStatusFromNSS(SEC_ERROR_UNTRUSTED_ISSUER));
+  add_distrust_test("tlsserver/other-test-ca.der",
+                    "untrustedissuer.example.com", SEC_ERROR_UNTRUSTED_ISSUER);
 
-  add_distrust_override_test("tlsserver/test-ca.der",
-                             "ca-used-as-end-entity.example.com",
-                             getXPCOMStatusFromNSS(SEC_ERROR_UNTRUSTED_ISSUER));
+  add_distrust_test("tlsserver/test-ca.der",
+                    "ca-used-as-end-entity.example.com",
+                    SEC_ERROR_UNTRUSTED_ISSUER);
 }
 
-function add_distrust_override_test(certFileName, hostName, expectedResult) {
+function add_distrust_test(certFileName, hostName, expectedResult) {
   let certToDistrust = constructCertFromFile(certFileName);
 
   add_test(function () {
@@ -227,26 +248,9 @@ function add_distrust_override_test(certFileName, hostName, expectedResult) {
     clearSessionCache();
     run_next_test();
   });
-  add_connection_test(hostName, expectedResult, null,
-                      function (securityInfo) {
-                        securityInfo.QueryInterface(Ci.nsISSLStatusProvider);
-                        // XXX(Bug 754369): SSLStatus isn't available for
-                        // non-overridable errors.
-                        if (securityInfo.SSLStatus) {
-                          certOverrideService.rememberValidityOverride(
-                              hostName, 8443, securityInfo.SSLStatus.serverCert,
-                              Ci.nsICertOverrideService.ERROR_UNTRUSTED, true);
-                        } else {
-                          // A missing SSLStatus probably means (due to bug
-                          // 754369) that the error was non-overridable, which
-                          // is what we're trying to test, though we'd rather
-                          // not test it this way.
-                          do_check_neq(expectedResult, Cr.NS_OK);
-                        }
-                        clearSessionCache();
-                      });
-  add_connection_test(hostName, expectedResult, null,
-                      function () {
-                        setCertTrust(certToDistrust, "u,,");
-                      });
+  add_non_overridable_test(hostName, expectedResult);
+  add_test(function () {
+    setCertTrust(certToDistrust, "u,,");
+    run_next_test();
+  });
 }

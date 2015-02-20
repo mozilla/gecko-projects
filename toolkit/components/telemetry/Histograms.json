@@ -6682,6 +6682,12 @@
     "n_values": 16,
     "description": "TLS/SSL version fallback reached the minimum version (1=TLS 1.0, 2=TLS 1.1, 3=TLS 1.2) or the fallback limit (4=TLS 1.0, 8=TLS 1.1, 12=TLS 1.2), stopped the fallback"
   },
+  "SSL_WEAK_CIPHERS_FALLBACK": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 64,
+    "description": "Fallback attempted when server did not support any strong cipher suites"
+  },
   "SSL_CIPHER_SUITE_FULL": {
     "expires_in_version": "never",
     "kind": "enumerated",
@@ -7250,6 +7256,12 @@
     "n_buckets": 16,
     "description": "The number of entries in persistent DataStorage (HSTS and HPKP data, basically)"
   },
+  "VIDEO_MSE_UNLOAD_STATE": {
+    "expires_in_version": "45",
+    "kind": "enumerated",
+    "n_values": 5,
+    "description": "MSE video state when unloading. ended = 0, paused = 1, stalled = 2, seeking = 3, other = 4"
+  },
   "FX_SANITIZE_TOTAL": {
     "alert_emails": ["firefox-dev@mozilla.org", "gavin@mozilla.com"],
     "expires_in_version": "40",
@@ -7356,6 +7368,12 @@
     "n_buckets" : 10,
     "extended_statistics_ok": true,
     "description": "The number of sites for which the user has explicitly rejected saving logins"
+  },
+  "PWMGR_FORM_AUTOFILL_RESULT": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values" : 20,
+    "description": "The result of auto-filling a login form. See http://mzl.la/1Mbs6jL for bucket descriptions."
   },
   "PWMGR_NUM_PASSWORDS_PER_HOSTNAME": {
     "expires_in_version": "never",
