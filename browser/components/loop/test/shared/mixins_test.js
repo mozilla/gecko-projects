@@ -268,22 +268,22 @@ describe("loop.shared.mixins", function() {
       it("should fetch the correct stream sizes for leading axis width and full",
         function() {
           remoteVideoDimensions = {
-            screen: {
+            camera: {
               width: 240,
               height: 320
             }
           };
-          screenShareElement = {
+          remoteElement = {
             offsetWidth: 480,
             offsetHeight: 700
           };
 
           view.updateVideoDimensions(localVideoDimensions, remoteVideoDimensions);
-          var result = view.getRemoteVideoDimensions("screen");
+          var result = view.getRemoteVideoDimensions();
 
-          expect(result.width).eql(screenShareElement.offsetWidth);
-          expect(result.height).eql(screenShareElement.offsetHeight);
-          expect(result.streamWidth).eql(screenShareElement.offsetWidth);
+          expect(result.width).eql(remoteElement.offsetWidth);
+          expect(result.height).eql(remoteElement.offsetHeight);
+          expect(result.streamWidth).eql(remoteElement.offsetWidth);
           // The real height of the stream accounting for the aspect ratio.
           expect(result.streamHeight).eql(640);
           expect(result.offsetX).eql(0);
@@ -305,7 +305,7 @@ describe("loop.shared.mixins", function() {
           };
 
           view.updateVideoDimensions(localVideoDimensions, remoteVideoDimensions);
-          var result = view.getRemoteVideoDimensions("camera");
+          var result = view.getRemoteVideoDimensions();
 
           expect(result.width).eql(remoteElement.offsetWidth);
           expect(result.height).eql(remoteElement.offsetHeight);
@@ -320,24 +320,24 @@ describe("loop.shared.mixins", function() {
       it("should fetch the correct stream sizes for leading axis height and full",
         function() {
           remoteVideoDimensions = {
-            screen: {
+            camera: {
               width: 320,
               height: 240
             }
           };
-          screenShareElement = {
+          remoteElement = {
             offsetWidth: 700,
             offsetHeight: 480
           };
 
           view.updateVideoDimensions(localVideoDimensions, remoteVideoDimensions);
-          var result = view.getRemoteVideoDimensions("screen");
+          var result = view.getRemoteVideoDimensions();
 
-          expect(result.width).eql(screenShareElement.offsetWidth);
-          expect(result.height).eql(screenShareElement.offsetHeight);
+          expect(result.width).eql(remoteElement.offsetWidth);
+          expect(result.height).eql(remoteElement.offsetHeight);
           // The real width of the stream accounting for the aspect ratio.
           expect(result.streamWidth).eql(640);
-          expect(result.streamHeight).eql(screenShareElement.offsetHeight);
+          expect(result.streamHeight).eql(remoteElement.offsetHeight);
           // The remote element width (700) minus the stream width (640) split in 2.
           expect(result.offsetX).eql(30);
           expect(result.offsetY).eql(0);
@@ -357,7 +357,7 @@ describe("loop.shared.mixins", function() {
           };
 
           view.updateVideoDimensions(localVideoDimensions, remoteVideoDimensions);
-          var result = view.getRemoteVideoDimensions("camera");
+          var result = view.getRemoteVideoDimensions();
 
           expect(result.width).eql(remoteElement.offsetWidth);
           expect(result.height).eql(remoteElement.offsetHeight);
