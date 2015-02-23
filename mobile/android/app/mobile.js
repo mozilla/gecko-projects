@@ -402,6 +402,7 @@ pref("font.size.inflation.minTwips", 120);
 pref("browser.ui.zoom.force-user-scalable", false);
 
 pref("ui.zoomedview.enabled", false);
+pref("ui.zoomedview.limitReadableSize", 8);  // value in layer pixels
 
 pref("ui.touch.radius.enabled", false);
 pref("ui.touch.radius.leftmm", 3);
@@ -859,12 +860,6 @@ pref("reader.color_scheme", "auto");
 
 // Color scheme values available in reader mode UI.
 pref("reader.color_scheme.values", "[\"light\",\"dark\",\"auto\"]");
-
-// The font type in reader (charis-sil, clear-sans)
-pref("reader.font_type", "clear-sans");
-
-// Font type values available in reader mode UI.
-pref("reader.font_type.values", "[\"charis-sil\",\"clear-sans\"]");
 
 // Whether to use a vertical or horizontal toolbar.
 pref("reader.toolbar.vertical", false);

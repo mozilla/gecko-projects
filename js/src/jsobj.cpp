@@ -411,7 +411,8 @@ js::Throw(JSContext *cx, jsid id, unsigned errorNumber)
 {
     MOZ_ASSERT(js_ErrorFormatString[errorNumber].argCount == 1);
 
-    JSString *idstr = IdToString(cx, id);
+    RootedValue idVal(cx, IdToValue(id));
+    JSString *idstr = ValueToSource(cx, idVal);
     if (!idstr)
        return false;
     JSAutoByteString bytes(cx, idstr);
@@ -899,7 +900,7 @@ js::StandardDefineProperty(JSContext *cx, HandleObject obj, HandleId id, const P
     if (IsAnyTypedArray(obj))
         return DefinePropertyOnTypedArray(cx, obj, id, desc, throwError, rval);
 
-    if (obj->is<UnboxedPlainObject>() && !obj->as<UnboxedPlainObject>().convertToNative(cx))
+    if (obj->is<UnboxedPlainObject>() && !UnboxedPlainObject::convertToNative(cx, obj))
         return false;
 
     if (obj->getOps()->lookupProperty) {

@@ -4532,15 +4532,6 @@
     "description": "The way the GeckoApp was launched. (Normal, URL, Prefetch, Redirector)",
     "cpp_guard": "ANDROID"
   },
-  "FENNEC_STARTUP_TIME_ABOUTHOME": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "low": 100,
-    "high": "10000",
-    "n_buckets": 20,
-    "description": "Time for the about:home page to be displayed (ms)",
-    "cpp_guard": "ANDROID"
-  },
   "FENNEC_STARTUP_TIME_GECKOREADY": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -7368,6 +7359,12 @@
     "n_buckets" : 10,
     "extended_statistics_ok": true,
     "description": "The number of sites for which the user has explicitly rejected saving logins"
+  },
+  "PWMGR_FORM_ACTION_EFFECT": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values" : 5,
+    "description": "The effect of the form action on signon autofill. (0=No effect, 1=Fewer logins after considering the form action, 2=No logins match form origin and action."
   },
   "PWMGR_FORM_AUTOFILL_RESULT": {
     "expires_in_version": "never",

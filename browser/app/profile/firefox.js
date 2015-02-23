@@ -860,11 +860,7 @@ pref("browser.preferences.instantApply", true);
 #endif
 
 // Toggles between the two Preferences implementations, pop-up window and in-content
-#ifdef EARLY_BETA_OR_EARLIER
 pref("browser.preferences.inContent", true);
-#else
-pref("browser.preferences.inContent", false);
-#endif
 
 pref("browser.download.show_plugins_in_list", true);
 pref("browser.download.hide_plugins_without_extensions", true);
@@ -1032,6 +1028,8 @@ pref("browser.rights.3.shown", false);
 pref("browser.rights.override", true);
 #endif
 
+pref("browser.selfsupport.url", "http://self-repair.mozilla.org/%LOCALE%/repair");
+
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.resume_session_once", false);
 
@@ -1168,6 +1166,12 @@ pref("toolbar.customization.usesheet", false);
 // Disable Flash protected mode to reduce hang/crash rates.
 pref("dom.ipc.plugins.flash.disable-protected-mode", true);
 
+// Feature-disable the protected-mode auto-flip
+pref("browser.flash-protected-mode-flip.enable", true);
+
+// Whether we've already flipped protected mode automatically
+pref("browser.flash-protected-mode-flip.done", false);
+
 #ifdef XP_MACOSX
 // On mac, the default pref is per-architecture
 pref("dom.ipc.plugins.enabled.i386", true);
@@ -1212,6 +1216,18 @@ pref("security.sandbox.windows.content.moreStrict", false);
 pref("security.sandbox.windows.log.stackTraceDepth", 0);
 #endif
 #endif
+#endif
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
+// This pref is discussed in bug 1083344, the naming is inspired from its Windows
+// counterpart, but on Mac it's an integer which means:
+// 0 -> "no sandbox"
+// 1 -> "an imperfect sandbox designed to allow firefox to run reasonably well"
+// 2 -> "an ideal sandbox which may break many things"
+// This setting is read when the content process is started. On Mac the content
+// process is killed when all windows are closed, so a change will take effect
+// when the 1st window is opened. It was decided to default this setting to 1.
+pref("security.sandbox.macos.content.level", 1);
 #endif
 
 // This pref governs whether we attempt to work around problems caused by
@@ -1856,3 +1872,6 @@ pref("dom.ipc.reportProcessHangs", true);
 
 // Disable reader mode by default.
 pref("reader.parse-on-load.enabled", false);
+
+// Disable ReadingList by default.
+pref("browser.readinglist.enabled", false);
