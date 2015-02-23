@@ -1,9 +1,7 @@
-. "$topsrcdir/b2g/config/mozconfigs/common"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common"
 . "$topsrcdir/build/unix/mozconfig.linux32"
 
-ac_add_options --enable-update-channel=${MOZ_UPDATE_CHANNEL}
-ac_add_options --enable-update-packaging
-ac_add_options --enable-signmar
+ac_add_options --enable-debug
 
 # Nightlies only since this has a cost in performance
 #ac_add_options --enable-js-diagnostics
@@ -24,6 +22,7 @@ no_sccache=
 . "$topsrcdir/build/mozconfig.cache"
 
 # graphene options
+ENABLE_MARIONETTE=1
 export CXXFLAGS=-DMOZ_ENABLE_JS_DUMP
 
-. "$topsrcdir/b2g/config/mozconfigs/common.override"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common.override"

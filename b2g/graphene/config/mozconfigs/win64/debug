@@ -1,6 +1,6 @@
 . "$topsrcdir/build/mozconfig.win-common"
 MOZ_AUTOMATION_L10N_CHECK=0
-. "$topsrcdir/b2g/config/mozconfigs/common"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common"
 
 ac_add_options --target=x86_64-pc-mingw32
 ac_add_options --host=x86_64-pc-mingw32
@@ -30,4 +30,4 @@ export MOZ_PACKAGE_JSSHELL=1
 
 . "$topsrcdir/build/mozconfig.cache"
 
-. "$topsrcdir/b2g/config/mozconfigs/common.override"
+. "$topsrcdir/b2g/graphene/config/mozconfigs/common.override"
