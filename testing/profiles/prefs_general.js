@@ -50,6 +50,7 @@ user_pref("browser.panorama.experienced_first_run", true); // Assume experienced
 user_pref("dom.w3c_touch_events.enabled", 1);
 user_pref("dom.undo_manager.enabled", true);
 user_pref("dom.webcomponents.enabled", true);
+user_pref("dom.htmlimports.enabled", true);
 user_pref("dom.animations-api.core.enabled", true);
 // Set a future policy version to avoid the telemetry prompt.
 user_pref("toolkit.telemetry.prompted", 999);
@@ -280,6 +281,9 @@ user_pref("browser.uitour.url", "http://%(server)s/uitour-dummy/tour");
 // side-effect of preventing our geoip lookup.
 user_pref("browser.search.isUS", true);
 user_pref("browser.search.countryCode", "US");
+
+// Make sure the self support tab doesn't hit the network.
+user_pref("browser.selfsupport.url", "https://%(server)s/selfsupport-dummy/");
 
 user_pref("media.eme.enabled", true);
 user_pref("media.eme.apiVisible", true);

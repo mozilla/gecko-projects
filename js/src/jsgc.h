@@ -474,8 +474,8 @@ class ArenaList {
         return *this;
     }
 
-    ArenaHeader *removeRemainingArenas(ArenaHeader **arenap, const AutoLockGC &lock);
-    ArenaHeader *pickArenasToRelocate(JSRuntime *runtime);
+    ArenaHeader *removeRemainingArenas(ArenaHeader **arenap);
+    ArenaHeader **pickArenasToRelocate(size_t &arenaTotalOut, size_t &relocTotalOut);
     ArenaHeader *relocateArenas(ArenaHeader *toRelocate, ArenaHeader *relocated,
                                 gcstats::Statistics& stats);
 };
@@ -804,7 +804,8 @@ class ArenaLists
         MOZ_ASSERT(freeLists[kind].isEmpty());
     }
 
-    ArenaHeader *relocateArenas(ArenaHeader *relocatedList, gcstats::Statistics& stats);
+    bool relocateArenas(ArenaHeader *&relocatedListOut, JS::gcreason::Reason reason,
+                        gcstats::Statistics& stats);
 
     void queueForegroundObjectsForSweep(FreeOp *fop);
     void queueForegroundThingsForSweep(FreeOp *fop);
@@ -1181,15 +1182,43 @@ class RelocationOverlay
     RelocationOverlay *next() const {
         return next_;
     }
+
+    static bool isCellForwarded(Cell *cell) {
+        return fromCell(cell)->isForwarded();
+    }
 };
 
 /* Functions for checking and updating things that might be moved by compacting GC. */
+
+#define TYPE_MIGHT_BE_FORWARDED(T, value)                                     \
+    inline bool                                                               \
+    TypeMightBeForwarded(T *thing)                                            \
+    {                                                                         \
+        return value;                                                         \
+    }                                                                         \
+
+TYPE_MIGHT_BE_FORWARDED(JSObject, true)
+TYPE_MIGHT_BE_FORWARDED(JSString, false)
+TYPE_MIGHT_BE_FORWARDED(JS::Symbol, false)
+TYPE_MIGHT_BE_FORWARDED(JSScript, false)
+TYPE_MIGHT_BE_FORWARDED(Shape, false)
+TYPE_MIGHT_BE_FORWARDED(BaseShape, false)
+TYPE_MIGHT_BE_FORWARDED(jit::JitCode, false)
+TYPE_MIGHT_BE_FORWARDED(LazyScript, false)
+TYPE_MIGHT_BE_FORWARDED(ObjectGroup, false)
+
+#undef TYPE_MIGHT_BE_FORWARDED
 
 template <typename T>
 inline bool
 IsForwarded(T *t)
 {
     RelocationOverlay *overlay = RelocationOverlay::fromCell(t);
+    if (!TypeMightBeForwarded(t)) {
+        MOZ_ASSERT(!overlay->isForwarded());
+        return false;
+    }
+
     return overlay->isForwarded();
 }
 
@@ -1246,7 +1275,7 @@ inline void
 CheckGCThingAfterMovingGC(T *t)
 {
     MOZ_ASSERT_IF(t, !IsInsideNursery(t));
-    MOZ_ASSERT_IF(t, !IsForwarded(t));
+    MOZ_ASSERT_IF(t, !RelocationOverlay::isCellForwarded(t));
 }
 
 inline void

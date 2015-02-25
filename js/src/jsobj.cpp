@@ -92,7 +92,11 @@ JSObject *
 js::NonNullObject(JSContext *cx, const Value &v)
 {
     if (v.isPrimitive()) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT);
+        RootedValue value(cx, v);
+        char *bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, value, NullPtr());
+        if (!bytes)
+            return nullptr;
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, bytes);
         return nullptr;
     }
     return &v.toObject();
@@ -280,7 +284,10 @@ PropDesc::initialize(JSContext *cx, const Value &origval, bool checkAccessors)
 
     /* 8.10.5 step 1 */
     if (v.isPrimitive()) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT);
+        char *bytes = DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, v, NullPtr());
+        if (!bytes)
+            return false;
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, bytes);
         return false;
     }
     RootedObject desc(cx, &v.toObject());
@@ -900,7 +907,7 @@ js::StandardDefineProperty(JSContext *cx, HandleObject obj, HandleId id, const P
     if (IsAnyTypedArray(obj))
         return DefinePropertyOnTypedArray(cx, obj, id, desc, throwError, rval);
 
-    if (obj->is<UnboxedPlainObject>() && !obj->as<UnboxedPlainObject>().convertToNative(cx))
+    if (obj->is<UnboxedPlainObject>() && !UnboxedPlainObject::convertToNative(cx, obj))
         return false;
 
     if (obj->getOps()->lookupProperty) {
@@ -1260,11 +1267,16 @@ js::NewObjectWithGivenTaggedProto(ExclusiveContext *cxArg, const Class *clasp,
 
     /*
      * Default parent to the parent of the prototype, which was set from
-     * the parent of the prototype's constructor.
+     * the parent of the prototype's constructor.  If there is no
+     * prototype, use the global.
      */
     RootedObject parent(cxArg, parentArg);
-    if (!parent && proto.isObject())
-        parent = proto.toObject()->getParent();
+    if (!parent) {
+        if (proto.isObject())
+            parent = proto.toObject()->getParent();
+        else
+            parent = cxArg->global();
+    }
 
     RootedObject obj(cxArg, NewObject(cxArg, group, parent, allocKind, newKind));
     if (!obj)
@@ -1857,7 +1869,8 @@ js::DeepCloneObjectLiteral(JSContext *cx, HandleNativeObject obj, NewObjectKind 
     MOZ_ASSERT(!obj->hasPrivate());
     RootedShape shape(cx, obj->lastProperty());
     size_t span = shape->slotSpan();
-    clone->setLastProperty(cx, shape);
+    if (!clone->setLastProperty(cx, shape))
+        return nullptr;
     for (size_t i = 0; i < span; i++) {
         v = obj->getSlot(i);
         if (v.isObject()) {
@@ -1885,6 +1898,58 @@ js::DeepCloneObjectLiteral(JSContext *cx, HandleNativeObject obj, NewObjectKind 
     }
 
     return clone;
+}
+
+static bool
+InitializePropertiesFromCompatibleNativeObject(JSContext *cx,
+                                               HandleNativeObject dst,
+                                               HandleNativeObject src)
+{
+    assertSameCompartment(cx, src, dst);
+    MOZ_ASSERT(src->getClass() == dst->getClass());
+    MOZ_ASSERT(src->getParent() == dst->getParent());
+    MOZ_ASSERT(dst->getParent() == cx->global());
+    MOZ_ASSERT(src->getProto() == dst->getProto());
+    MOZ_ASSERT(dst->lastProperty()->getObjectFlags() == 0);
+    MOZ_ASSERT(!src->getMetadata());
+    MOZ_ASSERT(!src->isSingleton());
+
+    // Save the dst metadata, if any, before we start messing with its shape.
+    RootedObject dstMetadata(cx, dst->getMetadata());
+
+    if (!dst->ensureElements(cx, src->getDenseInitializedLength()))
+        return false;
+
+    uint32_t initialized = src->getDenseInitializedLength();
+    for (uint32_t i = 0; i < initialized; ++i) {
+        dst->setDenseInitializedLength(i + 1);
+        dst->initDenseElement(i, src->getDenseElement(i));
+    }
+
+    MOZ_ASSERT(!src->hasPrivate());
+    RootedShape shape(cx, src->lastProperty());
+    size_t span = shape->slotSpan();
+    if (!dst->setLastProperty(cx, shape))
+        return false;
+    for (size_t i = JSCLASS_RESERVED_SLOTS(src->getClass()); i < span; i++)
+        dst->setSlot(i, src->getSlot(i));
+
+    if (dstMetadata) {
+        if (!js::SetObjectMetadata(cx, dst, dstMetadata))
+            return false;
+    }
+
+    return true;
+}
+
+JS_FRIEND_API(bool)
+JS_InitializePropertiesFromCompatibleNativeObject(JSContext *cx,
+                                                  HandleObject dst,
+                                                  HandleObject src)
+{
+    return InitializePropertiesFromCompatibleNativeObject(cx,
+                                                          dst.as<NativeObject>(),
+                                                          src.as<NativeObject>());
 }
 
 template<XDRMode mode>
@@ -3549,7 +3614,8 @@ js::PrimitiveToObject(JSContext *cx, const Value &v)
     if (v.isBoolean())
         return BooleanObject::create(cx, v.toBoolean());
     MOZ_ASSERT(v.isSymbol());
-    return SymbolObject::create(cx, v.toSymbol());
+    RootedSymbol symbol(cx, v.toSymbol());
+    return SymbolObject::create(cx, symbol);
 }
 
 /*

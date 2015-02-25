@@ -5229,18 +5229,13 @@ PaintDecorationLine(nsIFrame* aFrame,
 {
   nscolor lineColor = aOverrideColor ? *aOverrideColor : aColor;
   if (aCallbacks) {
-    if (aDecorationType == eNormalDecoration) {
-      aCallbacks->NotifyBeforeDecorationLine(lineColor);
-    } else {
-      aCallbacks->NotifyBeforeSelectionDecorationLine(lineColor);
-    }
-    nsCSSRendering::DecorationLineToPath(aFrame, aCtx, aDirtyRect, lineColor,
-      aPt, aICoordInFrame, aLineSize, aAscent, aOffset, aDecoration, aStyle,
+    Rect path = nsCSSRendering::DecorationLineToPath(ToRect(aDirtyRect),
+      ToPoint(aPt), ToSize(aLineSize), aAscent, aOffset, aDecoration, aStyle,
       aVertical, aDescentLimit);
     if (aDecorationType == eNormalDecoration) {
-      aCallbacks->NotifyDecorationLinePathEmitted();
+      aCallbacks->PaintDecorationLine(path, lineColor);
     } else {
-      aCallbacks->NotifySelectionDecorationLinePathEmitted();
+      aCallbacks->PaintSelectionDecorationLine(path, lineColor);
     }
   } else {
     nsCSSRendering::PaintDecorationLine(aFrame, *aCtx->GetDrawTarget(),
@@ -8524,6 +8519,7 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
   bool emptyTextAtStartOfLine = atStartOfLine && length == 0;
   if (!breakAfter && charsFit == length && !emptyTextAtStartOfLine &&
       transformedOffset + transformedLength == mTextRun->GetLength() &&
+      !StyleContext()->IsInlineDescendantOfRuby() &&
       (mTextRun->GetFlags() & nsTextFrameUtils::TEXT_HAS_TRAILING_BREAK)) {
     // We placed all the text in the textrun and we have a break opportunity at
     // the end of the textrun. We need to record it because the following

@@ -48,8 +48,6 @@ public:
                       nsIntRegion* aDestRegion = nullptr,
                       gfx::IntPoint* aSrcOffset = nullptr) MOZ_OVERRIDE
   {
-    // XXX - For this to work with IncrementalContentHost we will need to support
-    // the aDestRegion and aSrcOffset parameters properly;
     mSurface = aSurface;
     return true;
   }
@@ -69,11 +67,20 @@ BasicCompositor::BasicCompositor(nsIWidget *aWidget)
 {
   MOZ_COUNT_CTOR(BasicCompositor);
   SetBackend(LayersBackend::LAYERS_BASIC);
+
+  mMaxTextureSize =
+    Factory::GetMaxSurfaceSize(gfxPlatform::GetPlatform()->GetContentBackend());
 }
 
 BasicCompositor::~BasicCompositor()
 {
   MOZ_COUNT_DTOR(BasicCompositor);
+}
+
+int32_t
+BasicCompositor::GetMaxTextureSize() const
+{
+  return mMaxTextureSize;
 }
 
 void

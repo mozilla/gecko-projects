@@ -72,6 +72,7 @@ import org.mozilla.gecko.toolbar.AutocompleteHandler;
 import org.mozilla.gecko.toolbar.BrowserToolbar;
 import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
 import org.mozilla.gecko.toolbar.ToolbarProgressView;
+import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GamepadUtils;
@@ -178,6 +179,8 @@ public class BrowserApp extends GeckoApp
     public ViewFlipper mActionBarFlipper;
     public ActionModeCompatView mActionBar;
     private BrowserToolbar mBrowserToolbar;
+    // We can't name the TabStrip class because it's not included on API 9.
+    private Refreshable mTabStrip;
     private ToolbarProgressView mProgressView;
     private FirstrunPane mFirstrunPane;
     private HomePager mHomePager;
@@ -191,6 +194,7 @@ public class BrowserApp extends GeckoApp
     private static final int GECKO_TOOLS_MENU = -1;
     private static final int ADDON_MENU_OFFSET = 1000;
     public static final String TAB_HISTORY_FRAGMENT_TAG = "tabHistoryFragment";
+
     private static class MenuItemInfo {
         public int id;
         public String label;
@@ -721,7 +725,7 @@ public class BrowserApp extends GeckoApp
         }
 
         if (HardwareUtils.isTablet()) {
-            findViewById(R.id.new_tablet_tab_strip).setVisibility(View.VISIBLE);
+            mTabStrip = (Refreshable) (((ViewStub) findViewById(R.id.new_tablet_tab_strip)).inflate());
         }
 
         ((GeckoApp.MainLayout) mMainLayout).setTouchEventInterceptor(new HideOnTouchListener());
@@ -1526,6 +1530,10 @@ public class BrowserApp extends GeckoApp
             mRootLayout.reset();
             updateSideBarState();
             mTabsPanel.refresh();
+        }
+
+        if (mTabStrip != null) {
+            mTabStrip.refresh();
         }
 
         mBrowserToolbar.refresh();
@@ -2878,6 +2886,10 @@ public class BrowserApp extends GeckoApp
             return;
         }
 
+        if (ActivityUtils.isFullScreen(this)) {
+            return;
+        }
+
         if (areTabsShown()) {
             mTabsPanel.showMenu();
             return;
@@ -3509,6 +3521,12 @@ public class BrowserApp extends GeckoApp
         return GeckoProfile.getDefaultProfileName(this);
     }
 
+    // For use from tests only.
+    @RobocopTarget
+    public ReadingListHelper getReadingListHelper() {
+        return mReadingListHelper;
+    }
+
     /**
      * Launch UI that lets the user update Firefox.
      *
@@ -3602,5 +3620,9 @@ public class BrowserApp extends GeckoApp
                                          osLocale,
                                          appLocale,
                                          previousSession);
+    }
+
+    public static interface Refreshable {
+        public void refresh();
     }
 }

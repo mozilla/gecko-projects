@@ -8,6 +8,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
+#include "mozilla/EventDispatcher.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Maybe.h"
@@ -5864,6 +5865,20 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
 
     gfxRect anchoredDestRect(anchorPoint, scaledDest);
     gfxRect anchoredImageRect(imageSpaceAnchorPoint, imageSize);
+
+    // Calculate anchoredDestRect with snapped fill rect when the devPixelFill rect
+    // corresponds to just a single tile in that direction
+    if (fill.Width() != devPixelFill.Width() &&
+        devPixelDest.x == devPixelFill.x &&
+        devPixelDest.XMost() == devPixelFill.XMost()) {
+      anchoredDestRect.width = fill.width;
+    }
+    if (fill.Height() != devPixelFill.Height() &&
+        devPixelDest.y == devPixelFill.y &&
+        devPixelDest.YMost() == devPixelFill.YMost()) {
+      anchoredDestRect.height = fill.height;
+    }
+
     transform = TransformBetweenRects(anchoredImageRect, anchoredDestRect);
     invTransform = TransformBetweenRects(anchoredDestRect, anchoredImageRect);
   }

@@ -607,6 +607,11 @@ pref("gfx.color_management.enablev4", false);
 
 pref("gfx.downloadable_fonts.enabled", true);
 pref("gfx.downloadable_fonts.fallback_delay", 3000);
+
+// disable downloadable font cache so that behavior is consistently
+// the uncached load behavior across pages (useful for testing reflow problems)
+pref("gfx.downloadable_fonts.disable_cache", false);
+
 #ifdef RELEASE_BUILD
 pref("gfx.downloadable_fonts.woff2.enabled", false);
 #else
@@ -4471,6 +4476,16 @@ pref("dom.mozSettings.SettingsService.verbose.enabled", false);
 // IndexedDB transactions to be opened as readonly or keep everything as
 // readwrite.
 pref("dom.mozSettings.allowForceReadOnly", false);
+
+// The interval at which to check for slow running addons
+#ifdef NIGHTLY_BUILD
+pref("browser.addon-watch.interval", 15000);
+#else
+pref("browser.addon-watch.interval", -1);
+#endif
+pref("browser.addon-watch.ignore", "[\"mochikit@mozilla.org\",\"special-powers@mozilla.org\"]");
+// the percentage of time addons are allowed to use without being labeled slow
+pref("browser.addon-watch.percentage-limit", 5);
 
 // RequestSync API is disabled by default.
 pref("dom.requestSync.enabled", false);

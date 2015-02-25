@@ -25,15 +25,6 @@ let gEMEHandler = {
     return "<label class='text-link' href='" + baseURL + "drm-content'>" +
            text + "</label>";
   },
-  getDRMLabel: function(keySystem) {
-    if (keySystem.startsWith("com.adobe")) {
-      return "Adobe Primetime";
-    }
-    if (keySystem == "org.w3.clearkey") {
-      return "ClearKey";
-    }
-    return gNavigatorBundle.getString("emeNotifications.unknownDRMSoftware");
-  },
   onDontAskAgain: function(menuPopupItem) {
     let button = menuPopupItem.parentNode.anchorNode;
     let bar = button.parentNode;
@@ -98,9 +89,9 @@ let gEMEHandler = {
         return;
     }
 
-    this.showNotificationBar(browser, notificationId, params, buttonCallback);
+    this.showNotificationBar(browser, notificationId, keySystem, params, buttonCallback);
   },
-  showNotificationBar: function(browser, notificationId, labelParams, callback) {
+  showNotificationBar: function(browser, notificationId, keySystem, labelParams, callback) {
     let box = gBrowser.getNotificationBox(browser);
     if (box.getNotificationWithValue(notificationId)) {
       return;
@@ -115,6 +106,18 @@ let gEMEHandler = {
 
     let msgPrefix = "emeNotifications." + notificationId + ".";
     let msgId = msgPrefix + "message";
+
+    // Specialcase Adobe's CDM on unsupported platforms to be more informative:
+    if (notificationId == "drmContentCDMNotSupported" &&
+        keySystem.startsWith("com.adobe")) {
+      let os = Services.appinfo.OS.toLowerCase();
+      if (os.startsWith("win") && Services.appinfo.XPCOMABI.startsWith("x86_64")) {
+        msgId = msgPrefix + "64bit.message";
+      } else if (os.startsWith("linux") || os.startsWith("darwin")) {
+        msgId = msgPrefix + "unsupportedOS.message";
+        labelParams.splice(1, 0, os.startsWith("linux") ? "Linux" : "Mac OS X");
+      }
+    }
 
     let message = labelParams.length ?
                   gNavigatorBundle.getFormattedString(msgId, labelParams) :
@@ -158,12 +161,11 @@ let gEMEHandler = {
     }
 
     let msgPrefix = "emeNotifications.drmContentPlaying.";
-    let msgId = msgPrefix + "message";
+    let msgId = msgPrefix + "message2";
     let btnLabelId = msgPrefix + "button.label";
     let btnAccessKeyId = msgPrefix + "button.accesskey";
 
-    let drmProvider = this.getDRMLabel(keySystem);
-    let message = gNavigatorBundle.getFormattedString(msgId, [drmProvider, this._brandShortName]);
+    let message = gNavigatorBundle.getFormattedString(msgId, [this._brandShortName]);
     let anchorId = "eme-notification-icon";
 
     let mainAction = {

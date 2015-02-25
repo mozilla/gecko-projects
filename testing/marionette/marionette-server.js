@@ -603,7 +603,7 @@ MarionetteServerConnection.prototype = {
 
     this.scriptTimeout = 10000;
     if (aRequest && aRequest.parameters) {
-      this.sessionId = aRequest.parameters.session_id ? aRequest.parameters.session_id : null;
+      this.sessionId = aRequest.parameters.sessionId || aRequest.parameters.session_id || null;
       logger.info("Session Id is set to: " + this.sessionId);
       try {
         this.setSessionCapabilities(aRequest.parameters.capabilities);
@@ -1447,16 +1447,11 @@ MarionetteServerConnection.prototype = {
       return this._browserIds.get(permKey);
     }
 
-    let contentWindow = browser.contentWindowAsCPOW;
-    if (contentWindow !== null && !Cu.isDeadWrapper(contentWindow)) {
-      let winId = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                               .getInterface(Ci.nsIDOMWindowUtils)
-                               .outerWindowID;
-      if (winId) {
-        winId += "";
-        this._browserIds.set(permKey, winId);
-        return winId;
-      }
+    let winId = browser.outerWindowID;
+    if (winId) {
+      winId += "";
+      this._browserIds.set(permKey, winId);
+      return winId;
     }
     return null;
   },

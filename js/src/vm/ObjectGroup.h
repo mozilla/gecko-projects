@@ -219,6 +219,11 @@ class ObjectGroup : public gc::TenuredCell
         // as well, if the group is also constructed using 'new').
         Addendum_UnboxedLayout,
 
+        // If this group is used by objects that have been converted from an
+        // unboxed representation, the addendum points to the original unboxed
+        // group.
+        Addendum_OriginalUnboxedGroup,
+
         // When used by typed objects, the addendum stores a TypeDescr.
         Addendum_TypeDescr
     };
@@ -247,7 +252,7 @@ class ObjectGroup : public gc::TenuredCell
     }
 
     TypeNewScript *anyNewScript();
-    void detachNewScript(bool writeBarrier);
+    void detachNewScript(bool writeBarrier, ObjectGroup *replacement);
 
     ObjectGroupFlags flagsDontCheckGeneration() {
         return flags_;
@@ -284,13 +289,28 @@ class ObjectGroup : public gc::TenuredCell
         return maybeUnboxedLayoutDontCheckGeneration();
     }
 
-    UnboxedLayout &unboxedLayout() {
+    UnboxedLayout &unboxedLayoutDontCheckGeneration() const {
         MOZ_ASSERT(addendumKind() == Addendum_UnboxedLayout);
-        return *maybeUnboxedLayout();
+        return *maybeUnboxedLayoutDontCheckGeneration();
+    }
+
+    UnboxedLayout &unboxedLayout() {
+        maybeSweep(nullptr);
+        return unboxedLayoutDontCheckGeneration();
     }
 
     void setUnboxedLayout(UnboxedLayout *layout) {
         setAddendum(Addendum_UnboxedLayout, layout);
+    }
+
+    ObjectGroup *maybeOriginalUnboxedGroup() const {
+        if (addendumKind() == Addendum_OriginalUnboxedGroup)
+            return reinterpret_cast<ObjectGroup *>(addendum_);
+        return nullptr;
+    }
+
+    void setOriginalUnboxedGroup(ObjectGroup *group) {
+        setAddendum(Addendum_OriginalUnboxedGroup, group);
     }
 
     TypeDescr *maybeTypeDescr() {
@@ -460,7 +480,7 @@ class ObjectGroup : public gc::TenuredCell
     void setFlags(ExclusiveContext *cx, ObjectGroupFlags flags);
     void markUnknown(ExclusiveContext *cx);
     void maybeClearNewScriptOnOOM();
-    void clearNewScript(ExclusiveContext *cx);
+    void clearNewScript(ExclusiveContext *cx, ObjectGroup *replacement = nullptr);
     bool isPropertyNonData(jsid id);
     bool isPropertyNonWritable(jsid id);
 

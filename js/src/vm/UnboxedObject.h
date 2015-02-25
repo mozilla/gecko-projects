@@ -65,9 +65,24 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
     // structure as the trace list on a TypeDescr.
     int32_t *traceList_;
 
+    // If objects in this group have ever been converted to native objects,
+    // these store the corresponding native group and initial shape for such
+    // objects. Type information for this object is reflected in nativeGroup.
+    HeapPtrObjectGroup nativeGroup_;
+    HeapPtrShape nativeShape_;
+
+    // If nativeGroup is set and this object originally had a TypeNewScript,
+    // this points to the default 'new' group which replaced this one (and
+    // which might itself have been cleared since). This link is only needed to
+    // keep the replacement group from being GC'ed. If it were GC'ed and a new
+    // one regenerated later, that new group might have a different allocation
+    // kind from this group.
+    HeapPtrObjectGroup replacementNewGroup_;
+
   public:
     UnboxedLayout(const PropertyVector &properties, size_t size)
-      : size_(size), newScript_(nullptr), traceList_(nullptr)
+      : size_(size), newScript_(nullptr), traceList_(nullptr),
+        nativeGroup_(nullptr), nativeShape_(nullptr), replacementNewGroup_(nullptr)
     {
         properties_.appendAll(properties);
     }
@@ -113,11 +128,21 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
         return size_;
     }
 
+    ObjectGroup *nativeGroup() const {
+        return nativeGroup_;
+    }
+
+    Shape *nativeShape() const {
+        return nativeShape_;
+    }
+
     inline gc::AllocKind getAllocKind() const;
 
     void trace(JSTracer *trc);
 
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
+
+    static bool makeNativeGroup(JSContext *cx, ObjectGroup *group);
 };
 
 // Class for a plain object using an unboxed representation. The physical
@@ -159,6 +184,10 @@ class UnboxedPlainObject : public JSObject
         return group()->unboxedLayout();
     }
 
+    const UnboxedLayout &layoutDontCheckGeneration() const {
+        return group()->unboxedLayoutDontCheckGeneration();
+    }
+
     uint8_t *data() {
         return &data_[0];
     }
@@ -166,8 +195,7 @@ class UnboxedPlainObject : public JSObject
     bool setValue(JSContext *cx, const UnboxedLayout::Property &property, const Value &v);
     Value getValue(const UnboxedLayout::Property &property);
 
-    bool convertToNative(JSContext *cx);
-
+    static bool convertToNative(JSContext *cx, JSObject *obj);
     static UnboxedPlainObject *create(JSContext *cx, HandleObjectGroup group, NewObjectKind newKind);
 
     static void trace(JSTracer *trc, JSObject *object);

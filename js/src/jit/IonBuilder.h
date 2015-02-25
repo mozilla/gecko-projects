@@ -805,10 +805,10 @@ class IonBuilder
 
     // SIMD intrinsics and natives.
     InliningStatus inlineConstructSimdObject(CallInfo &callInfo, SimdTypeDescr *target);
-    InliningStatus inlineSimdInt32x4BinaryArith(CallInfo &callInfo, JSNative native,
-                                                MSimdBinaryArith::Operation op);
-    InliningStatus inlineSimdInt32x4BinaryBitwise(CallInfo &callInfo, JSNative native,
-                                                  MSimdBinaryBitwise::Operation op);
+
+    template <typename T>
+    InliningStatus inlineBinarySimd(CallInfo &callInfo, JSNative native,
+                                    typename T::Operation op, SimdTypeDescr::Type type);
 
     // Utility intrinsics.
     InliningStatus inlineIsCallable(CallInfo &callInfo);
@@ -889,7 +889,10 @@ class IonBuilder
     JSObject *testSingletonProperty(JSObject *obj, PropertyName *name);
     bool testSingletonPropertyTypes(MDefinition *obj, JSObject *singleton, PropertyName *name,
                                     bool *testObject, bool *testString);
-    uint32_t getDefiniteSlot(TemporaryTypeSet *types, PropertyName *name);
+    uint32_t getDefiniteSlot(TemporaryTypeSet *types, PropertyName *name, uint32_t *pnfixed,
+                             BaselineInspector::ObjectGroupVector &convertUnboxedGroups);
+    MDefinition *convertUnboxedObjects(MDefinition *obj,
+                                       const BaselineInspector::ObjectGroupVector &list);
     uint32_t getUnboxedOffset(TemporaryTypeSet *types, PropertyName *name,
                               JSValueType *punboxedType);
     MInstruction *loadUnboxedProperty(MDefinition *obj, size_t offset, JSValueType unboxedType,
