@@ -7,6 +7,7 @@
 #include "vm/SavedStacks.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
 
 #include <math.h>
 
@@ -30,6 +31,7 @@
 #include "vm/NativeObject-inl.h"
 
 using mozilla::AddToHash;
+using mozilla::DebugOnly;
 using mozilla::HashString;
 
 namespace js {
@@ -341,7 +343,7 @@ SavedFrame::checkThis(JSContext *cx, CallArgs &args, const char *fnName,
     const Value &thisValue = args.thisv();
 
     if (!thisValue.isObject()) {
-        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT);
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, InformalValueTypeName(thisValue));
         return false;
     }
 

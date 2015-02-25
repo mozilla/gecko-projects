@@ -8,7 +8,7 @@
 
 const Services = require("Services");
 const { Cc, Ci, Cu, components, ChromeWorker } = require("chrome");
-const { ActorPool, getOffsetColumn } = require("devtools/server/actors/common");
+const { ActorPool, OriginalLocation, GeneratedLocation, getOffsetColumn } = require("devtools/server/actors/common");
 const { DebuggerServer } = require("devtools/server/main");
 const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
 const { dbg_assert, dumpn, update, fetch } = DevToolsUtils;
@@ -75,28 +75,23 @@ function BreakpointActorMap() {
 
 BreakpointActorMap.prototype = {
   /**
-   * Return the number of instances of BreakpointActor in this instance of
-   * BreakpointActorMap.
+   * Return the number of BreakpointActors in this BreakpointActorMap.
    *
    * @returns Number
-   *          The number of instances of BreakpointACtor in this instance of
-   *          BreakpointActorMap.
+   *          The number of BreakpointActor in this BreakpointActorMap.
    */
   get size() {
     return this._size;
   },
 
   /**
-   * Generate all instances of BreakpointActor that match the given query in
-   * this instance of BreakpointActorMap.
+   * Generate all BreakpointActors that match the given location in
+   * this BreakpointActorMap.
    *
-   * @param Object query
-   *        An optional object with the following properties:
-   *        - source (optional)
-   *        - line (optional, requires source)
-   *        - column (optional, requires line)
+   * @param OriginalLocation location
+   *        The location for which matching BreakpointActors should be generated.
    */
-  findActors: function* (query = {}) {
+  findActors: function* (location = new OriginalLocation()) {
     function* findKeys(object, key) {
       if (key !== undefined) {
         if (key in object) {
@@ -110,9 +105,21 @@ BreakpointActorMap.prototype = {
       }
     }
 
-    query.sourceActorID = query.sourceActor ? query.sourceActor.actorID : undefined;
-    query.beginColumn = query.column ? query.column : undefined;
-    query.endColumn = query.column ? query.column + 1 : undefined;
+    let query = {
+      sourceActorID: location.originalSourceActor ? location.originalSourceActor.actorID : undefined,
+      line: location.originalLine,
+    };
+
+    // If location contains a line, assume we are searching for a whole line
+    // breakpoint, and set begin/endColumn accordingly. Otherwise, we are
+    // searching for all breakpoints, so begin/endColumn should be left unset.
+    if (location.originalLine) {
+      query.beginColumn = location.originalColumn ? location.originalColumn : 0;
+      query.endColumn = location.originalColumn ? location.originalColumn + 1 : Infinity;
+    } else {
+      query.beginColumn = location.originalColumn ? query.originalColumn : undefined;
+      query.endColumn = location.originalColumn ? query.originalColumn + 1 : undefined;
+    }
 
     for (let sourceActorID of findKeys(this._actors, query.sourceActorID))
     for (let line of findKeys(this._actors[sourceActorID], query.line))
@@ -123,20 +130,17 @@ BreakpointActorMap.prototype = {
   },
 
   /**
-   * Return the instance of BreakpointActor at the given location in this
-   * instance of BreakpointActorMap.
+   * Return the BreakpointActor at the given location in this
+   * BreakpointActorMap.
    *
-   * @param Object location
-   *        An object with the following properties:
-   *        - source
-   *        - line
-   *        - column (optional)
+   * @param OriginalLocation location
+   *        The location for which the BreakpointActor should be returned.
    *
    * @returns BreakpointActor actor
-   *          The instance of BreakpointActor at the given location.
+   *          The BreakpointActor at the given location.
    */
-  getActor: function (location) {
-    for (let actor of this.findActors(location)) {
+  getActor: function (originalLocation) {
+    for (let actor of this.findActors(originalLocation)) {
       return actor;
     }
 
@@ -144,24 +148,22 @@ BreakpointActorMap.prototype = {
   },
 
   /**
-   * Set the given instance of BreakpointActor to the given location in this
-   * instance of BreakpointActorMap.
+   * Set the given BreakpointActor to the given location in this
+   * BreakpointActorMap.
    *
-   * @param Object location
-   *        An object with the following properties:
-   *        - source
-   *        - line
-   *        - column (optional)
+   * @param OriginalLocation location
+   *        The location to which the given BreakpointActor should be set.
    *
    * @param BreakpointActor actor
-   *        The instance of BreakpointActor to be set to the given location.
+   *        The BreakpointActor to be set to the given location.
    */
   setActor: function (location, actor) {
-    let { sourceActor, line, column } = location;
+    let { originalSourceActor, originalLine, originalColumn } = location;
 
-    let sourceActorID = sourceActor.actorID;
-    let beginColumn = column ? column : 0;
-    let endColumn = column ? column + 1 : Infinity;
+    let sourceActorID = originalSourceActor.actorID;
+    let line = originalLine;
+    let beginColumn = originalColumn ? originalColumn : 0;
+    let endColumn = originalColumn ? originalColumn + 1 : Infinity;
 
     if (!this._actors[sourceActorID]) {
       this._actors[sourceActorID] = [];
@@ -179,21 +181,19 @@ BreakpointActorMap.prototype = {
   },
 
   /**
-   * Delete the instance of BreakpointActor from the given location in this
-   * instance of BreakpointActorMap.
+   * Delete the BreakpointActor from the given location in this
+   * BreakpointActorMap.
    *
-   * @param Object location
-   *        An object with the following properties:
-   *        - source
-   *        - line
-   *        - column (optional)
+   * @param OriginalLocation location
+   *        The location from which the BreakpointActor should be deleted.
    */
   deleteActor: function (location) {
-    let { sourceActor, line, column } = location;
+    let { originalSourceActor, originalLine, originalColumn } = location;
 
-    let sourceActorID = sourceActor.actorID;
-    let beginColumn = column ? column : 0;
-    let endColumn = column ? column + 1 : Infinity;
+    let sourceActorID = originalSourceActor.actorID;
+    let line = originalLine;
+    let beginColumn = originalColumn ? originalColumn : 0;
+    let endColumn = originalColumn ? originalColumn + 1 : Infinity;
 
     if (this._actors[sourceActorID]) {
       if (this._actors[sourceActorID][line]) {
@@ -742,9 +742,10 @@ ThreadActor.prototype = {
       }
       packet.why = aReason;
 
-      let loc = this.sources.getFrameLocation(aFrame);
-      this.sources.getOriginalLocation(loc).then(aOrigPosition => {
-        if (!aOrigPosition.sourceActor) {
+      let generatedLocation = this.sources.getFrameLocation(aFrame);
+      this.sources.getOriginalLocation(generatedLocation)
+                  .then((originalLocation) => {
+        if (!originalLocation.originalSourceActor) {
           // The only time the source actor will be null is if there
           // was a sourcemap and it tried to look up the original
           // location but there was no original URL. This is a strange
@@ -759,9 +760,9 @@ ThreadActor.prototype = {
         }
 
         packet.frame.where = {
-          source: aOrigPosition.sourceActor.form(),
-          line: aOrigPosition.line,
-          column: aOrigPosition.column
+          source: originalLocation.originalSourceActor.form(),
+          line: originalLocation.originalLine,
+          column: originalLocation.originalColumn
         };
         resolve(onPacket(packet))
           .then(null, error => {
@@ -806,9 +807,9 @@ ThreadActor.prototype = {
   _makeOnEnterFrame: function ({ pauseAndRespond }) {
     return aFrame => {
       const generatedLocation = this.sources.getFrameLocation(aFrame);
-      let { sourceActor } = this.synchronize(this.sources.getOriginalLocation(
+      let { originalSourceActor } = this.synchronize(this.sources.getOriginalLocation(
         generatedLocation));
-      let url = sourceActor.url;
+      let url = originalSourceActor.url;
 
       return this.sources.isBlackBoxed(url)
         ? undefined
@@ -821,9 +822,9 @@ ThreadActor.prototype = {
       // onPop is called with 'this' set to the current frame.
 
       const generatedLocation = thread.sources.getFrameLocation(this);
-      const { sourceActor } = thread.synchronize(thread.sources.getOriginalLocation(
+      const { originalSourceActor } = thread.synchronize(thread.sources.getOriginalLocation(
         generatedLocation));
-      const url = sourceActor.url;
+      const url = originalSourceActor.url;
 
       if (thread.sources.isBlackBoxed(url)) {
         return undefined;
@@ -882,15 +883,15 @@ ThreadActor.prototype = {
       // 2.2. The source we are in is black boxed.
 
       // Cases 2.1 and 2.2
-      if (newLocation.url == null
-          || thread.sources.isBlackBoxed(newLocation.url)) {
+      if (newLocation.originalUrl == null
+          || thread.sources.isBlackBoxed(newLocation.originalUrl)) {
         return undefined;
       }
 
       // Cases 1.1, 1.2 and 1.3
       if (this !== startFrame
-          || startLocation.url !== newLocation.url
-          || startLocation.line !== newLocation.line) {
+          || startLocation.originalUrl !== newLocation.originalUrl
+          || startLocation.originalLine !== newLocation.originalLine) {
         return pauseAndRespond(this);
       }
 
@@ -1288,16 +1289,16 @@ ThreadActor.prototype = {
       form.depth = i;
       frames.push(form);
 
-      let promise = this.sources.getOriginalLocation({
-        sourceActor: this.sources.createNonSourceMappedActor(frame.script.source),
-        line: form.where.line,
-        column: form.where.column
-      }).then((aOrigLocation) => {
-        let sourceForm = aOrigLocation.sourceActor.form();
+      let promise = this.sources.getOriginalLocation(new GeneratedLocation(
+        this.sources.createNonSourceMappedActor(frame.script.source),
+        form.where.line,
+        form.where.column
+      )).then((originalLocation) => {
+        let sourceForm = originalLocation.originalSourceActor.form();
         form.where = {
           source: sourceForm,
-          line: aOrigLocation.line,
-          column: aOrigLocation.column
+          line: originalLocation.originalLine,
+          column: originalLocation.originalColumn
         };
         form.source = sourceForm;
       });
@@ -1903,9 +1904,9 @@ ThreadActor.prototype = {
     // Don't pause if we are currently stepping (in or over) or the frame is
     // black-boxed.
     const generatedLocation = this.sources.getFrameLocation(aFrame);
-    const { sourceActor } = this.synchronize(this.sources.getOriginalLocation(
+    const { originalSourceActor } = this.synchronize(this.sources.getOriginalLocation(
       generatedLocation));
-    const url = sourceActor ? sourceActor.url : null;
+    const url = originalSourceActor ? originalSourceActor.url : null;
 
     return this.sources.isBlackBoxed(url) || aFrame.onStep
       ? undefined
@@ -2035,14 +2036,23 @@ ThreadActor.prototype = {
     }
 
     // Set any stored breakpoints.
+    let promises = [];
+    let sourceActor = this.sources.createNonSourceMappedActor(aScript.source);
     let endLine = aScript.startLine + aScript.lineCount - 1;
-    let source = this.sources.createNonSourceMappedActor(aScript.source);
-    for (let bpActor of this.breakpointActorMap.findActors({ sourceActor: source })) {
-      // Limit the search to the line numbers contained in the new script.
-      if (bpActor.generatedLocation.line >= aScript.startLine
-          && bpActor.generatedLocation.line <= endLine) {
-        source.setBreakpointForActor(bpActor);
-      }
+    for (let actor of this.breakpointActorMap.findActors()) {
+      promises.push(this.sources.getGeneratedLocation(actor.originalLocation)
+                                .then((generatedLocation) => {
+        // Limit the search to the line numbers contained in the new script.
+        if (generatedLocation.generatedSourceActor.actorID === sourceActor.actorID &&
+            generatedLocation.generatedLine >= aScript.startLine &&
+            generatedLocation.generatedLine <= endLine) {
+          sourceActor.setBreakpointForActor(actor, generatedLocation);
+        }
+      }));
+    }
+
+    if (promises.length > 0) {
+      this.synchronize(Promise.all(promises));
     }
 
     // Go ahead and establish the source actors for this script, which
@@ -2717,21 +2727,21 @@ SourceActor.prototype = {
    * NB: This will override a pre-existing BreakpointActor's condition with
    * the given the location's condition.
    *
-   * @param Object originalLocation
+   * @param OriginalLocation originalLocation
    *        The original location of the breakpoint.
-   * @param Object generatedLocation
+   * @param GeneratedLocation generatedLocation
    *        The generated location of the breakpoint.
    * @returns BreakpointActor
    */
   _getOrCreateBreakpointActor: function (originalLocation, generatedLocation,
                                          condition)
   {
-    let actor = this.breakpointActorMap.getActor(generatedLocation);
+    let actor = this.breakpointActorMap.getActor(originalLocation);
     if (!actor) {
       actor = new BreakpointActor(this.threadActor, originalLocation,
                                   generatedLocation, condition);
       this.threadActor.threadLifetimePool.addActor(actor);
-      this.breakpointActorMap.setActor(generatedLocation, actor);
+      this.breakpointActorMap.setActor(originalLocation, actor);
       return actor;
     }
 
@@ -2751,12 +2761,14 @@ SourceActor.prototype = {
    * @returns Object
    *          The RDP response.
    */
-  _setBreakpointAtColumn: function (scripts, location, actor) {
+  _setBreakpointAtColumn: function (scripts, generatedLocation, actor) {
     // Debugger.Script -> array of offset mappings
     const scriptsAndOffsetMappings = new Map();
 
     for (let script of scripts) {
-      this._findClosestOffsetMappings(location, script, scriptsAndOffsetMappings);
+      this._findClosestOffsetMappings(generatedLocation,
+                                      script,
+                                      scriptsAndOffsetMappings);
     }
 
     for (let [script, mappings] of scriptsAndOffsetMappings) {
@@ -2832,38 +2844,31 @@ SourceActor.prototype = {
    *        A condition for the breakpoint.
    */
   setBreakpoint: function (originalLine, originalColumn, condition) {
-    let originalLocation = {
-      sourceActor: this,
-      line: originalLine,
-      column: originalColumn
-    };
-
+    let originalLocation = new OriginalLocation(this, originalLine, originalColumn);
     return this.threadActor.sources.getGeneratedLocation(originalLocation)
                                    .then(generatedLocation => {
       let actor = this._getOrCreateBreakpointActor(originalLocation,
                                                    generatedLocation,
                                                    condition);
-      return generatedLocation.sourceActor.setBreakpointForActor(actor);
+      return generatedLocation.generatedSourceActor
+                              .setBreakpointForActor(actor, generatedLocation);
     });
   },
 
   /*
-   * Set the given BreakpointActor as breakpoint handler on all scripts that
-   * match the given location for which the BreakpointActor is not already a
-   * breakpoint handler.
+   * Ensure the given BreakpointActor is set as breakpoint handler on all
+   * scripts that match the given generated location.
    *
    * @param BreakpointActor actor
-   *        The BreakpointActor to set as breakpoint handler.
+   *        The BreakpointActor to be set as breakpoint handler for the given
+   *        generated location.
+   * @param GeneratedLocation generatedLocation
+   *        The generated location for which the BreakpointActor should be set
+   *        as breakpoint handler.
    */
-  setBreakpointForActor: function (actor) {
+  setBreakpointForActor: function (actor, generatedLocation) {
     let originalLocation = actor.originalLocation;
-    let generatedLocation = {
-      sourceActor: this,
-      line: actor.generatedLocation.line,
-      column: actor.generatedLocation.column
-    };
-
-    let { line: generatedLine, column: generatedColumn } = generatedLocation;
+    let { generatedLine, generatedColumn } = generatedLocation;
 
     // Find all scripts matching the given location. We will almost always have
     // a `source` object to query, but multiple inline HTML scripts are all
@@ -2889,13 +2894,13 @@ SourceActor.prototype = {
     // handler.
     scripts = scripts.filter((script) => !actor.hasScript(script));
 
-    let actualLocation;
+    let actualGeneratedLocation;
 
     // If generatedColumn is something other than 0, assume this is a column
     // breakpoint and do not perform breakpoint sliding.
     if (generatedColumn) {
       this._setBreakpointAtColumn(scripts, generatedLocation, actor);
-      actualLocation = generatedLocation;
+      actualGeneratedLocation = generatedLocation;
     } else {
       let result;
       if (actor.scripts.size === 0) {
@@ -2925,53 +2930,49 @@ SourceActor.prototype = {
       }
 
       if (result.line !== generatedLine) {
-        actualLocation = {
-          sourceActor: generatedLocation.sourceActor,
-          line: result.line,
-          column: generatedLocation.column
-        };
+        actualGeneratedLocation = new GeneratedLocation(
+          generatedLocation.generatedSourceActor,
+          result.line,
+          generatedLocation.generatedColumn
+        );
+      } else {
+        actualGeneratedLocation = generatedLocation;
+      }
 
+      setBreakpointOnEntryPoints(this.threadActor, actor, result.entryPoints);
+    }
+
+    return Promise.resolve().then(() => {
+      if (actualGeneratedLocation.generatedSourceActor.source) {
+        return this.threadActor.sources.getOriginalLocation(actualGeneratedLocation);
+      } else {
+        return OriginalLocation.fromGeneratedLocation(actualGeneratedLocation);
+      }
+    }).then((actualOriginalLocation) => {
+      let response = { actor: actor.actorID };
+      if (actualOriginalLocation.originalSourceActor.url !== originalLocation.originalSourceActor.url ||
+          actualOriginalLocation.originalLine !== originalLocation.originalLine)
+      {
         // Check whether we already have a breakpoint actor for the actual
         // location. If we do have an existing actor, then the actor we created
         // above is redundant and must be destroyed. If we do not have an existing
         // actor, we need to update the breakpoint store with the new location.
 
-        let existingActor = this.breakpointActorMap.getActor(actualLocation);
+        let existingActor = this.breakpointActorMap.getActor(actualOriginalLocation);
         if (existingActor) {
           actor.onDelete();
-          this.breakpointActorMap.deleteActor(generatedLocation);
-          actor = existingActor;
+          this.breakpointActorMap.deleteActor(originalLocation);
+          response.actor = existingActor.actorID;
         } else {
-          actor.generatedLocation = actualLocation;
-          this.breakpointActorMap.deleteActor(generatedLocation);
-          this.breakpointActorMap.setActor(actualLocation, actor);
-          setBreakpointOnEntryPoints(this.threadActor, actor, result.entryPoints);
+          actor.generatedLocation = actualGeneratedLocation;
+          this.breakpointActorMap.deleteActor(originalLocation);
+          this.breakpointActorMap.setActor(actualOriginalLocation, actor);
         }
-      } else {
-        setBreakpointOnEntryPoints(this.threadActor, actor, result.entryPoints);
-        actualLocation = generatedLocation;
-      }
-    }
 
-    return Promise.resolve().then(() => {
-      if (actualLocation.sourceActor.source) {
-        return this.threadActor.sources.getOriginalLocation({
-          sourceActor: actualLocation.sourceActor,
-          line: actualLocation.line,
-          column: actualLocation.column
-        });
-      } else {
-        return actualLocation;
-      }
-    }).then((actualLocation) => {
-      let response = { actor: actor.actorID };
-      if (actualLocation.sourceActor.url !== originalLocation.sourceActor.url ||
-          actualLocation.line !== originalLocation.line)
-      {
         response.actualLocation = {
-          source: actualLocation.sourceActor.form(),
-          line: actualLocation.line,
-          column: actualLocation.column
+          source: actualOriginalLocation.originalSourceActor.form(),
+          line: actualOriginalLocation.originalLine,
+          column: actualOriginalLocation.originalColumn
         };
       }
       return response;
@@ -3019,7 +3020,7 @@ SourceActor.prototype = {
                                 aScript,
                                 aScriptsAndOffsetMappings) {
     let offsetMappings = aScript.getAllColumnOffsets()
-      .filter(({ lineNumber }) => lineNumber === aTargetLocation.line);
+      .filter(({ lineNumber }) => lineNumber === aTargetLocation.generatedLine);
 
     // Attempt to find the current closest offset distance from the target
     // location by grabbing any offset mapping in the map by doing one iteration
@@ -3028,13 +3029,13 @@ SourceActor.prototype = {
     let closestDistance = Infinity;
     if (aScriptsAndOffsetMappings.size) {
       for (let mappings of aScriptsAndOffsetMappings.values()) {
-        closestDistance = Math.abs(aTargetLocation.column - mappings[0].columnNumber);
+        closestDistance = Math.abs(aTargetLocation.generatedColumn - mappings[0].columnNumber);
         break;
       }
     }
 
     for (let mapping of offsetMappings) {
-      let currentDistance = Math.abs(aTargetLocation.column - mapping.columnNumber);
+      let currentDistance = Math.abs(aTargetLocation.generatedColumn - mapping.columnNumber);
 
       if (currentDistance > closestDistance) {
         continue;
@@ -3329,23 +3330,17 @@ ObjectActor.prototype = {
       };
     }
 
-    const generatedLocation = {
-      sourceActor: this.threadActor.sources.createNonSourceMappedActor(this.obj.script.source),
-      line: this.obj.script.startLine,
-      // TODO bug 901138: use Debugger.Script.prototype.startColumn.
-      column: 0
-    };
-
-    return this.threadActor.sources.getOriginalLocation(generatedLocation)
-      .then(({ sourceActor, line, column }) => {
-
-        return {
-          from: this.actorID,
-          source: sourceActor.form(),
-          line: line,
-          column: column
-        };
-      });
+    return this.threadActor.sources.getOriginalLocation(new GeneratedLocation(
+      this.threadActor.sources.createNonSourceMappedActor(this.obj.script.source),
+      this.obj.script.startLine,
+      0 // TODO bug 901138: use Debugger.Script.prototype.startColumn
+    )).then((originalLocation) => {
+      return {
+        source: originalLocation.originalSourceActor.form(),
+        line: originalLocation.originalLine,
+        column: originalLocation.originalColumn
+      };
+    });
   },
 
   /**
@@ -4330,6 +4325,43 @@ DebuggerServer.ObjectActorPreviewers.Object = [
     return true;
   },
 
+  function PseudoArray({obj, threadActor}, aGrip, aRawObj) {
+    let length = 0;
+
+    // Making sure all keys are numbers from 0 to length-1
+    let keys = obj.getOwnPropertyNames();
+    if (keys.length == 0) {
+      return false;
+    }
+    for (let key of keys) {
+      if (isNaN(key) || key != length++) {
+        return false;
+      }
+    }
+
+    aGrip.preview = {
+      kind: "ArrayLike",
+      length: length,
+    };
+
+    // Avoid recursive object grips.
+    if (threadActor._gripDepth > 1) {
+      return true;
+    }
+
+    let items = aGrip.preview.items = [];
+
+    let i = 0;
+    for (let key of keys) {
+      if (aRawObj.hasOwnProperty(key) && i++ < OBJECT_PREVIEW_MAX_ITEMS) {
+        let value = makeDebuggeeValueIfNeeded(obj, aRawObj[key]);
+        items.push(threadActor.createValueGrip(value));
+      }
+    }
+
+    return true;
+  }, // PseudoArray
+
   function GenericObject(aObjectActor, aGrip) {
     let {obj, threadActor} = aObjectActor;
     if (aGrip.preview || aGrip.displayString || threadActor._gripDepth > 1) {
@@ -4573,11 +4605,11 @@ FrameActor.prototype = {
     form.this = threadActor.createValueGrip(this.frame.this);
     form.arguments = this._args();
     if (this.frame.script) {
-      var loc = this.threadActor.sources.getFrameLocation(this.frame);
+      var generatedLocation = this.threadActor.sources.getFrameLocation(this.frame);
       form.where = {
-        source: loc.sourceActor.form(),
-        line: loc.line,
-        column: loc.column
+        source: generatedLocation.generatedSourceActor.form(),
+        line: generatedLocation.generatedLine,
+        column: generatedLocation.generatedColumn
       };
     }
 
@@ -4633,16 +4665,10 @@ FrameActor.prototype.requestTypes = {
  *
  * @param ThreadActor aThreadActor
  *        The parent thread actor that contains this breakpoint.
- * @param object aOriginalLocation
- *        An object with the following properties:
- *        - sourceActor: A SourceActor that represents the source
- *        - line: the specified line
- *        - column: the specified column
- * @param object aGeneratedLocation
- *        An object with the following properties:
- *        - sourceActor: A SourceActor that represents the source
- *        - line: the specified line
- *        - column: the specified column
+ * @param OriginalLocation originalLocation
+ *        The original location of the breakpoint.
+ * @param GeneratedLocation generatedLocation
+ *        The generated location of the breakpoint.
  * @param string aCondition
  *        Optional. A condition which, when false, will cause the breakpoint to
  *        be skipped.
@@ -4714,10 +4740,10 @@ BreakpointActor.prototype = {
   hit: function (aFrame) {
     // Don't pause if we are currently stepping (in or over) or the frame is
     // black-boxed.
-    let loc = this.threadActor.sources.getFrameLocation(aFrame);
-    let { sourceActor } = this.threadActor.synchronize(
-      this.threadActor.sources.getOriginalLocation(loc));
-    let url = sourceActor.url;
+    let generatedLocation = this.threadActor.sources.getFrameLocation(aFrame);
+    let { originalSourceActor } = this.threadActor.synchronize(
+      this.threadActor.sources.getOriginalLocation(generatedLocation));
+    let url = originalSourceActor.url;
 
     if (this.threadActor.sources.isBlackBoxed(url)
         || aFrame.onStep
@@ -4744,8 +4770,8 @@ BreakpointActor.prototype = {
    */
   onDelete: function (aRequest) {
     // Remove from the breakpoint store.
-    if (this.generatedLocation) {
-      this.threadActor.breakpointActorMap.deleteActor(this.generatedLocation);
+    if (this.originalLocation) {
+      this.threadActor.breakpointActorMap.deleteActor(this.originalLocation);
     }
     this.threadActor.threadLifetimePool.removeActor(this);
     // Remove the actual breakpoint from the associated scripts.
@@ -5558,13 +5584,13 @@ ThreadSources.prototype = {
    */
   getFrameLocation: function (aFrame) {
     if (!aFrame || !aFrame.script) {
-      return { sourceActor: null, line: null, column: null };
+      return new GeneratedLocation();
     }
-    return {
-      sourceActor: this.createNonSourceMappedActor(aFrame.script.source),
-      line: aFrame.script.getOffsetLine(aFrame.offset),
-      column: getOffsetColumn(aFrame.offset, aFrame.script)
-    }
+    return new GeneratedLocation(
+      this.createNonSourceMappedActor(aFrame.script.source),
+      aFrame.script.getOffsetLine(aFrame.offset),
+      getOffsetColumn(aFrame.offset, aFrame.script)
+    );
   },
 
   /**
@@ -5574,53 +5600,52 @@ ThreadSources.prototype = {
    * sure to that it works properly, reusing source maps if already
    * fetched. Use this from any actor that needs sourcemapping.
    */
-  getOriginalLocation: function ({ sourceActor, line, column }) {
-    let source = sourceActor.source;
-    let url = source ? source.url : sourceActor._originalUrl;
+  getOriginalLocation: function (generatedLocation) {
+    let {
+      generatedSourceActor,
+      generatedLine,
+      generatedColumn
+    } = generatedLocation;
+    let source = generatedSourceActor.source;
+    let url = source ? source.url : generatedSourceActor._originalUrl;
 
     // In certain scenarios the source map may have not been fetched
     // yet (or at least tied to this Debugger.Source instance), so use
     // `fetchSourceMap` instead of `getSourceMap`. This allows this
     // function to be called from anywere (across debuggers) and it
     // should just automatically work.
-    return this.fetchSourceMap(source).then(sm => {
-      if (sm) {
+    return this.fetchSourceMap(source).then(map => {
+      if (map) {
         let {
-          source: sourceUrl,
-          line: sourceLine,
-          column: sourceCol,
-          name: sourceName
-        } = sm.originalPositionFor({
-          line: line,
-          column: column == null ? Infinity : column
+          source: originalUrl,
+          line: originalLine,
+          column: originalColumn,
+          name: originalName
+        } = map.originalPositionFor({
+          line: generatedLine,
+          column: generatedColumn == null ? Infinity : generatedColumn
         });
 
-        return {
-          // Since the `Debugger.Source` instance may come from a
-          // different `Debugger` instance (any actor can call this
-          // method), we can't rely on any of the source discovery
-          // setup (`_discoverSources`, etc) to have been run yet. So
-          // we have to assume that the actor may not already exist,
-          // and we might need to create it, so use `source` and give
-          // it the required parameters for a sourcemapped source.
-          sourceActor: (!sourceUrl) ? null : this.source({
-            originalUrl: sourceUrl,
+        // Since the `Debugger.Source` instance may come from a
+        // different `Debugger` instance (any actor can call this
+        // method), we can't rely on any of the source discovery
+        // setup (`_discoverSources`, etc) to have been run yet. So
+        // we have to assume that the actor may not already exist,
+        // and we might need to create it, so use `source` and give
+        // it the required parameters for a sourcemapped source.
+        return new OriginalLocation(
+          originalUrl ? this.source({
+            originalUrl: originalUrl,
             generatedSource: source
-          }),
-          url: sourceUrl,
-          line: sourceLine,
-          column: sourceCol,
-          name: sourceName
-        };
+          }) : null,
+          originalLine,
+          originalColumn,
+          originalName
+        );
       }
 
       // No source map
-      return resolve({
-        sourceActor: sourceActor,
-        url: url,
-        line: line,
-        column: column
-      });
+      return OriginalLocation.fromGeneratedLocation(generatedLocation);
     });
   },
 
@@ -5633,34 +5658,40 @@ ThreadSources.prototype = {
    * the tables this function uses; thus, it won't know that S's original
    * source URLs map to S until P is resolved.
    */
-  getGeneratedLocation: function ({ sourceActor, line, column }) {
+  getGeneratedLocation: function (originalLocation) {
+    let { originalSourceActor } = originalLocation;
+
     // Both original sources and normal sources could have sourcemaps,
     // because normal sources can be pretty-printed which generates a
     // sourcemap for itself. Check both of the source properties to make it work
     // for both kinds of sources.
-    let source = sourceActor.generatedSource || sourceActor.source;
+    let source = originalSourceActor.source || originalSourceActor.generatedSource;
 
     // See comment about `fetchSourceMap` in `getOriginalLocation`.
-    return this.fetchSourceMap(source).then(sm => {
-      if (sm) {
-        let { line: genLine, column: genColumn } = sm.generatedPositionFor({
-          source: sourceActor.url,
-          line: line,
-          column: column == null ? Infinity : column
+    return this.fetchSourceMap(source).then((map) => {
+      if (map) {
+        let {
+          originalLine,
+          originalColumn
+        } = originalLocation;
+
+        let {
+          line: generatedLine,
+          column: generatedColumn
+        } = map.generatedPositionFor({
+          source: originalSourceActor.url,
+          line: originalLine,
+          column: originalColumn == null ? Infinity : originalColumn
         });
 
-        return {
-          sourceActor: this.createNonSourceMappedActor(source),
-          line: genLine,
-          column: genColumn
-        };
+        return new GeneratedLocation(
+          this.createNonSourceMappedActor(source),
+          generatedLine,
+          generatedColumn
+        );
       }
 
-      return resolve({
-        sourceActor: sourceActor,
-        line: line,
-        column: column
-      });
+      return GeneratedLocation.fromOriginalLocation(originalLocation);
     });
   },
 
