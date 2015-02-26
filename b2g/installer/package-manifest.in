@@ -118,6 +118,7 @@
 #endif
 @BINPATH@/blocklist.xml
 @BINPATH@/ua-update.json
+@BINPATH@/settings.json
 #ifdef XP_UNIX
 #ifndef XP_MACOSX
 @BINPATH@/run-mozilla.sh
