@@ -1730,6 +1730,8 @@ IonBuilder::inspectOpcode(JSOp op)
         return jsop_initelem_array();
 
       case JSOP_INITPROP:
+      case JSOP_INITLOCKEDPROP:
+      case JSOP_INITHIDDENPROP:
       {
         PropertyName *name = info().getAtom(pc)->asPropertyName();
         return jsop_initprop(name);
@@ -6381,7 +6383,7 @@ IonBuilder::jsop_initprop(PropertyName *name)
 
     bool useSlowPath = false;
 
-    if (obj->isUnknownValue()) {
+    if (obj->isUnknownValue() || obj->isLambda()) {
         useSlowPath = true;
     } else {
         templateObject = obj->toNewObject()->templateObject();
@@ -7112,6 +7114,10 @@ IonBuilder::ensureDefiniteType(MDefinition *def, MIRType definiteType)
 
       default: {
         if (def->type() != MIRType_Value) {
+            if (def->type() == MIRType_Int32 && definiteType == MIRType_Double) {
+                replace = MToDouble::New(alloc(), def);
+                break;
+            }
             MOZ_ASSERT(def->type() == definiteType);
             return def;
         }

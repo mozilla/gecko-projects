@@ -13,6 +13,7 @@ let {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 let {require, TargetFactory} = devtools;
 let {Utils: WebConsoleUtils} = require("devtools/toolkit/webconsole/utils");
 let {Messages} = require("devtools/webconsole/console-output");
+const asyncStorage = require("devtools/toolkit/shared/async-storage");
 
 // promise._reportErrors = true; // please never leave me.
 //Services.prefs.setBoolPref("devtools.debugger.log", true);
@@ -321,6 +322,9 @@ let finishTest = Task.async(function* () {
 
 registerCleanupFunction(function*() {
   gDevTools.testing = false;
+
+  // Remove stored console commands in between tests
+  yield asyncStorage.removeItem("webConsoleHistory");
 
   dumpConsoles();
 
@@ -1645,4 +1649,33 @@ function once(target, eventName, useCapture=false) {
 function getSourceActor(aSources, aURL) {
   let item = aSources.getItemForAttachment(a => a.source.url === aURL);
   return item && item.value;
+}
+
+/**
+ * Verify that clicking on a link from a popup notification message tries to
+ * open the expected URL.
+ */
+function simulateMessageLinkClick(element, expectedLink) {
+  let deferred = promise.defer();
+
+  // Invoke the click event and check if a new tab would
+  // open to the correct page.
+  let oldOpenUILinkIn = window.openUILinkIn;
+  window.openUILinkIn = function(link) {
+    if (link == expectedLink) {
+      ok(true, "Clicking the message link opens the desired page");
+      window.openUILinkIn = oldOpenUILinkIn;
+      deferred.resolve();
+    }
+  };
+
+  let event = new MouseEvent("click", {
+    detail: 1,
+    button: 0,
+    bubbles: true,
+    cancelable: true
+  });
+  element.dispatchEvent(event);
+
+  return deferred.promise;
 }
