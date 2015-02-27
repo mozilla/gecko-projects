@@ -12,8 +12,20 @@ pref("browser.ignoreNativeFrameTextSelection", false);
 pref("dom.meta-viewport.enabled", false);
 pref("full-screen-api.ignore-widgets", false);
 pref("image.high_quality_downscaling.enabled", true);
+pref("dom.w3c_touch_events.enabled", 0);
+pref("font.size.inflation.minTwips", 0);
+pref("browser.enable_click_image_resizing", true);
+pref("layout.css.scroll-snap.enabled", true);
+pref("dom.mozInputMethod.enabled", false);
+pref("browser.autofocus", true);
+pref("touchcaret.enabled", false);
+pref("layers.async-pan-zoom.enabled", true);
+
+pref("gfx.vsync.hw-vsync.enabled", true);
+pref("gfx.vsync.compositor", true);
 
 // To be removed once bug 942756 is fixed.
 pref("devtools.debugger.unix-domain-socket", "6000");
 
 pref("devtools.debugger.forbid-certified-apps", false);
+pref("devtools.debugger.prompt-connection", false);
