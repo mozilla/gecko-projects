@@ -4,6 +4,10 @@
 
 # This file is included at the top of all b2g mozconfigs
 
+# Disable the l10n-check target, which isn't relevant to b2g builds at all.
+# This needs to be set prior to the next include for it to take effect.
+MOZ_AUTOMATION_L10N_CHECK=0
+
 . "$topsrcdir/build/mozconfig.common"
 
 # Normally, we'd set this unconditionally, but this file is also used
@@ -17,5 +21,3 @@ fi
 
 ac_add_options --enable-application=b2g/graphene
 
-# Disable the l10n-check target, which isn't relevant to b2g builds at all.
-MOZ_AUTOMATION_L10N_CHECK=0
