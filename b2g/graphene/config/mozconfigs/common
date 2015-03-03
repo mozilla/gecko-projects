@@ -6,6 +6,7 @@
 
 # Disable the l10n-check target, which isn't relevant to b2g builds at all.
 # This needs to be set prior to the next include for it to take effect.
+MOZ_AUTOMATION_PACKAGE_TESTS=0
 MOZ_AUTOMATION_L10N_CHECK=0
 
 . "$topsrcdir/build/mozconfig.common"
