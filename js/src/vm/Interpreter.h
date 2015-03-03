@@ -51,7 +51,7 @@ enum MaybeConstruct {
  * before it reaches |v|. If it's -1, the decompiler will search the stack.
  */
 extern bool
-ReportIsNotFunction(JSContext *cx, HandleValue v, int numToSkip = -1,
+ReportIsNotFunction(JSContext *cx, HandleValue v, int numToSkip,
                     MaybeConstruct construct = NO_CONSTRUCT);
 
 /* See ReportIsNotFunction comment for the meaning of numToSkip. */
@@ -391,6 +391,13 @@ InitGetterSetterOperation(JSContext *cx, jsbytecode *pc, HandleObject obj, Handl
 bool
 SpreadCallOperation(JSContext *cx, HandleScript script, jsbytecode *pc, HandleValue thisv,
                     HandleValue callee, HandleValue arr, MutableHandleValue res);
+
+JSObject *
+NewObjectOperation(JSContext *cx, HandleScript script, jsbytecode *pc,
+                   NewObjectKind newKind = GenericObject);
+
+JSObject *
+NewObjectOperationWithTemplate(JSContext *cx, HandleObject templateObject);
 
 inline bool
 SetConstOperation(JSContext *cx, HandleObject varobj, HandlePropertyName name, HandleValue rval)

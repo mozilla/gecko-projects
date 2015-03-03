@@ -146,7 +146,7 @@ let lazilyLoadedObserverScripts = [
   ["Feedback", ["Feedback:Show"], "chrome://browser/content/Feedback.js"],
   ["SelectionHandler", ["TextSelection:Get"], "chrome://browser/content/SelectionHandler.js"],
   ["EmbedRT", ["GeckoView:ImportScript"], "chrome://browser/content/EmbedRT.js"],
-  ["Reader", ["Reader:FetchContent", "Reader:Removed", "Gesture:DoubleTap"], "chrome://browser/content/Reader.js"],
+  ["Reader", ["Reader:FetchContent", "Reader:Removed"], "chrome://browser/content/Reader.js"],
 ];
 if (AppConstants.MOZ_WEBRTC) {
   lazilyLoadedObserverScripts.push(
@@ -323,6 +323,7 @@ let Strings = {
   init: function () {
     XPCOMUtils.defineLazyGetter(Strings, "brand", () => Services.strings.createBundle("chrome://branding/locale/brand.properties"));
     XPCOMUtils.defineLazyGetter(Strings, "browser", () => Services.strings.createBundle("chrome://browser/locale/browser.properties"));
+    XPCOMUtils.defineLazyGetter(Strings, "reader", () => Services.strings.createBundle("chrome://global/locale/aboutReader.properties"));
   },
 
   flush: function () {
@@ -7709,7 +7710,7 @@ var Distribution = {
     for (let key in localizeablePrefs) {
       try {
         let value = localizeablePrefs[key];
-        value = value.replace("%LOCALE%", locale, "g");
+        value = value.replace(/%LOCALE%/g, locale);
         localizedString.data = "data:text/plain," + key + "=" + value;
         defaults.setComplexValue(key, Ci.nsIPrefLocalizedString, localizedString);
       } catch (e) { /* ignore bad prefs and move on */ }

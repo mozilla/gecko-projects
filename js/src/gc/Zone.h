@@ -136,7 +136,7 @@ struct Zone : public JS::shadow::Zone,
     void *onOutOfMemory(void *p, size_t nbytes) {
         return runtimeFromMainThread()->onOutOfMemory(p, nbytes);
     }
-    void reportAllocationOverflow() { js_ReportAllocationOverflow(nullptr); }
+    void reportAllocationOverflow() { js::ReportAllocationOverflow(nullptr); }
 
     void beginSweepTypes(js::FreeOp *fop, bool releaseTypes);
 
@@ -359,14 +359,14 @@ class ZonesIter
 
 struct CompartmentsInZoneIter
 {
-    explicit CompartmentsInZoneIter(JS::Zone *zone) {
+    explicit CompartmentsInZoneIter(JS::Zone *zone) : zone(zone) {
         it = zone->compartments.begin();
-        end = zone->compartments.end();
     }
 
     bool done() const {
         MOZ_ASSERT(it);
-        return it == end;
+        return it < zone->compartments.begin() ||
+               it >= zone->compartments.end();
     }
     void next() {
         MOZ_ASSERT(!done());
@@ -382,10 +382,11 @@ struct CompartmentsInZoneIter
     JSCompartment *operator->() const { return get(); }
 
   private:
-    JSCompartment **it, **end;
+    JS::Zone *zone;
+    JSCompartment **it;
 
     CompartmentsInZoneIter()
-      : it(nullptr), end(nullptr)
+      : zone(nullptr), it(nullptr)
     {}
 
     // This is for the benefit of CompartmentsIterT::comp.

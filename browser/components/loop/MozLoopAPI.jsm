@@ -118,6 +118,15 @@ const cloneValueInto = function(value, targetWindow) {
 };
 
 /**
+ * Get the two-digit hexadecimal code for a byte
+ *
+ * @param {byte} charCode
+ */
+const toHexString = function(charCode) {
+  return ("0" + charCode.toString(16)).slice(-2);
+};
+
+/**
  * Inject any API containing _only_ function properties into the given window.
  *
  * @param {Object}       api          Object containing functions that need to
@@ -187,6 +196,7 @@ function injectLoopAPI(targetWindow) {
   let contactsAPI;
   let roomsAPI;
   let callsAPI;
+  let savedWindowListeners = new Map();
 
   let api = {
     /**
@@ -257,10 +267,21 @@ function injectLoopAPI(targetWindow) {
       }
     },
 
-    getActiveTabWindowId: {
+    /**
+     * Adds a listener to the most recent window for browser/tab sharing. The
+     * listener will be notified straight away of the current tab id, then every
+     * time there is a change of tab.
+     *
+     * Listener parameters:
+     * - {Object}  err      If there is a error this will be defined, null otherwise.
+     * - {Number} windowId The new windowId after a change of tab.
+     *
+     * @param {Function} listener The listener to handle the windowId changes.
+     */
+    addBrowserSharingListener: {
       enumerable: true,
       writable: true,
-      value: function(callback) {
+      value: function(listener) {
         let win = Services.wm.getMostRecentWindow("navigator:browser");
         let browser = win && win.gBrowser.selectedTab.linkedBrowser;
         if (!win || !browser) {
@@ -268,16 +289,39 @@ function injectLoopAPI(targetWindow) {
           // window left.
           let err = new Error("No tabs available to share.");
           MozLoopService.log.error(err);
-          callback(cloneValueInto(err, targetWindow));
+          listener(cloneValueInto(err, targetWindow));
+          return;
+        }
+        win.LoopUI.addBrowserSharingListener(listener);
+
+        savedWindowListeners.set(listener, Cu.getWeakReference(win));
+      }
+    },
+
+    /**
+     * Removes a listener that was previously added.
+     *
+     * @param {Function} listener The listener to handle the windowId changes.
+     */
+    removeBrowserSharingListener: {
+      enumerable: true,
+      writable: true,
+      value: function(listener) {
+        if (!savedWindowListeners.has(listener)) {
           return;
         }
 
-        let mm = browser.messageManager;
-        mm.addMessageListener("webrtc:response:StartBrowserSharing", function listener(message) {
-          mm.removeMessageListener("webrtc:response:StartBrowserSharing", listener);
-          callback(null, message.data.windowID);
-        });
-        mm.sendAsyncMessage("webrtc:StartBrowserSharing");
+        let win = savedWindowListeners.get(listener).get();
+
+        // Remove the element, regardless of if the window exists or not so
+        // that we clean the map.
+        savedWindowListeners.delete(listener);
+
+        if (!win) {
+          return;
+        }
+
+        win.LoopUI.removeBrowserSharingListener(listener);
       }
     },
 
@@ -737,6 +781,43 @@ function injectLoopAPI(targetWindow) {
         };
 
         request.send();
+      }
+    },
+
+    /**
+     * Compose a URL pointing to the location of an avatar by email address.
+     * At the moment we use the Gravatar service to match email addresses with
+     * avatars. This might change in the future as avatars might come from another
+     * source.
+     *
+     * @param {String} emailAddress Users' email address
+     * @param {Number} size         Size of the avatar image to return in pixels.
+     *                              Optional. Default value: 40.
+     * @return the URL pointing to an avatar matching the provided email address.
+     */
+    getUserAvatar: {
+      enumerable: true,
+      writable: true,
+      value: function(emailAddress, size = 40) {
+        const kEmptyGif = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+        if (!emailAddress || !MozLoopService.getLoopPref("contacts.gravatars.show")) {
+          return kEmptyGif;
+        }
+
+        // Do the MD5 dance.
+        let hasher = Cc["@mozilla.org/security/hash;1"]
+                       .createInstance(Ci.nsICryptoHash);
+        hasher.init(Ci.nsICryptoHash.MD5);
+        let stringStream = Cc["@mozilla.org/io/string-input-stream;1"]
+                             .createInstance(Ci.nsIStringInputStream);
+        stringStream.data = emailAddress.trim().toLowerCase();
+        hasher.updateFromStream(stringStream, -1);
+        let hash = hasher.finish(false);
+        // Convert the binary hash data to a hex string.
+        let md5Email = [toHexString(hash.charCodeAt(i)) for (i in hash)].join("");
+
+        // Compose the Gravatar URL.
+        return "https://www.gravatar.com/avatar/" + md5Email + ".jpg?default=blank&s=" + size;
       }
     },
 

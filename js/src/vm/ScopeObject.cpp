@@ -7,6 +7,7 @@
 #include "vm/ScopeObject-inl.h"
 
 #include "mozilla/PodOperations.h"
+#include "mozilla/SizePrintfMacros.h"
 
 #include "jscompartment.h"
 #include "jsiter.h"
@@ -1469,7 +1470,7 @@ class DebugScopeProxy : public BaseProxyHandler
             return false;
 
         if (!argsObj) {
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_DEBUG_NOT_LIVE,
+            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_NOT_LIVE,
                                  "Debugger scope");
             return false;
         }
@@ -1509,7 +1510,7 @@ class DebugScopeProxy : public BaseProxyHandler
           case ACCESS_GENERIC:
             return JS_GetOwnPropertyDescriptorById(cx, scope, id, desc);
           case ACCESS_LOST:
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_DEBUG_OPTIMIZED_OUT);
+            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_OPTIMIZED_OUT);
             return false;
           default:
             MOZ_CRASH("bad AccessResult");
@@ -1523,7 +1524,7 @@ class DebugScopeProxy : public BaseProxyHandler
             return false;
 
         if (!argsObj) {
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_DEBUG_NOT_LIVE,
+            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_NOT_LIVE,
                                  "Debugger scope");
             return false;
         }
@@ -1553,7 +1554,7 @@ class DebugScopeProxy : public BaseProxyHandler
           case ACCESS_GENERIC:
             return GetProperty(cx, scope, scope, id, vp);
           case ACCESS_LOST:
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_DEBUG_OPTIMIZED_OUT);
+            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_OPTIMIZED_OUT);
             return false;
           default:
             MOZ_CRASH("bad AccessResult");
@@ -1720,8 +1721,8 @@ class DebugScopeProxy : public BaseProxyHandler
     bool delete_(JSContext *cx, HandleObject proxy, HandleId id, bool *bp) const MOZ_OVERRIDE
     {
         RootedValue idval(cx, IdToValue(id));
-        return js_ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_CANT_DELETE,
-                                        JSDVG_IGNORE_STACK, idval, NullPtr(), nullptr, nullptr);
+        return ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_CANT_DELETE,
+                                     JSDVG_IGNORE_STACK, idval, NullPtr(), nullptr, nullptr);
     }
 };
 
@@ -1736,7 +1737,7 @@ DebugScopeObject::create(JSContext *cx, ScopeObject &scope, HandleObject enclosi
     MOZ_ASSERT(scope.compartment() == cx->compartment());
     RootedValue priv(cx, ObjectValue(scope));
     JSObject *obj = NewProxyObject(cx, &DebugScopeProxy::singleton, priv,
-                                   nullptr /* proto */, &scope.global());
+                                   nullptr /* proto */);
     if (!obj)
         return nullptr;
 
@@ -1811,7 +1812,7 @@ DebugScopeObject::isOptimizedOut() const
 }
 
 bool
-js_IsDebugScopeSlow(ProxyObject *proxy)
+js::IsDebugScopeSlow(ProxyObject *proxy)
 {
     MOZ_ASSERT(proxy->hasClass(&ProxyObject::class_));
     return proxy->handler() == &DebugScopeProxy::singleton;
@@ -1976,7 +1977,7 @@ DebugScopes::ensureCompartmentData(JSContext *cx)
     if (c->debugScopes)
         js_delete<DebugScopes>(c->debugScopes);
     c->debugScopes = nullptr;
-    js_ReportOutOfMemory(cx);
+    ReportOutOfMemory(cx);
     return nullptr;
 }
 
@@ -2010,7 +2011,7 @@ DebugScopes::addDebugScope(JSContext *cx, ScopeObject &scope, DebugScopeObject &
 
     MOZ_ASSERT(!scopes->proxiedScopes.has(&scope));
     if (!scopes->proxiedScopes.put(&scope, &debugScope)) {
-        js_ReportOutOfMemory(cx);
+        ReportOutOfMemory(cx);
         return false;
     }
 
@@ -2054,7 +2055,7 @@ DebugScopes::addDebugScope(JSContext *cx, const ScopeIter &si, DebugScopeObject 
     MissingScopeKey key(si);
     MOZ_ASSERT(!scopes->missingScopes.has(key));
     if (!scopes->missingScopes.put(key, ReadBarriered<DebugScopeObject*>(&debugScope))) {
-        js_ReportOutOfMemory(cx);
+        ReportOutOfMemory(cx);
         return false;
     }
 
@@ -2063,7 +2064,7 @@ DebugScopes::addDebugScope(JSContext *cx, const ScopeIter &si, DebugScopeObject 
     if (si.withinInitialFrame()) {
         MOZ_ASSERT(!scopes->liveScopes.has(&debugScope.scope()));
         if (!scopes->liveScopes.put(&debugScope.scope(), LiveScopeVal(si))) {
-            js_ReportOutOfMemory(cx);
+            ReportOutOfMemory(cx);
             return false;
         }
         liveScopesPostWriteBarrier(cx->runtime(), &scopes->liveScopes, &debugScope.scope());
@@ -2609,14 +2610,14 @@ AnalyzeEntrainedVariablesInScript(JSContext *cx, HandleScript script, HandleScri
             buf.printf(" ");
         }
 
-        buf.printf("(%s:%d) has variables entrained by ", script->filename(), script->lineno());
+        buf.printf("(%s:%" PRIuSIZE ") has variables entrained by ", script->filename(), script->lineno());
 
         if (JSAtom *name = innerScript->functionNonDelazifying()->displayAtom()) {
             buf.putString(name);
             buf.printf(" ");
         }
 
-        buf.printf("(%s:%d) ::", innerScript->filename(), innerScript->lineno());
+        buf.printf("(%s:%" PRIuSIZE ") ::", innerScript->filename(), innerScript->lineno());
 
         for (PropertyNameSet::Range r = remainingNames.all(); !r.empty(); r.popFront()) {
             buf.printf(" ");

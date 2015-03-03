@@ -65,7 +65,7 @@ AllocateExecutableMemory(ExclusiveContext *cx, size_t bytes)
 #endif
     void *p = AllocateExecutableMemory(nullptr, bytes, permissions, "asm-js-code", AsmJSPageSize);
     if (!p)
-        js_ReportOutOfMemory(cx);
+        ReportOutOfMemory(cx);
     return (uint8_t *)p;
 }
 
@@ -455,7 +455,7 @@ static void
 AsmJSReportOverRecursed()
 {
     JSContext *cx = JSRuntime::innermostAsmJSActivation()->cx();
-    js_ReportOverRecursed(cx);
+    ReportOverRecursed(cx);
 }
 
 static void
@@ -463,14 +463,14 @@ OnDetached()
 {
     // See hasDetachedHeap comment in LinkAsmJS.
     JSContext *cx = JSRuntime::innermostAsmJSActivation()->cx();
-    JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_OUT_OF_MEMORY);
+    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_OUT_OF_MEMORY);
 }
 
 static void
 OnOutOfBounds()
 {
     JSContext *cx = JSRuntime::innermostAsmJSActivation()->cx();
-    JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
+    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
 }
 
 static bool
@@ -1304,6 +1304,7 @@ AsmJSModule::CodeRange::CodeRange(uint32_t nameIndex, uint32_t lineNumber,
     profilingReturn_(l.profilingReturn.offset()),
     end_(l.end.offset())
 {
+    PodZero(&u);  // zero padding for Valgrind
     u.kind_ = Function;
     setDeltas(l.entry.offset(), l.profilingJump.offset(), l.profilingEpilogue.offset());
 
@@ -1328,9 +1329,13 @@ AsmJSModule::CodeRange::setDeltas(uint32_t entry, uint32_t profilingJump, uint32
 }
 
 AsmJSModule::CodeRange::CodeRange(Kind kind, uint32_t begin, uint32_t end)
-  : begin_(begin),
+  : nameIndex_(0),
+    lineNumber_(0),
+    begin_(begin),
+    profilingReturn_(0),
     end_(end)
 {
+    PodZero(&u);  // zero padding for Valgrind
     u.kind_ = kind;
 
     MOZ_ASSERT(begin_ <= end_);
@@ -1338,10 +1343,13 @@ AsmJSModule::CodeRange::CodeRange(Kind kind, uint32_t begin, uint32_t end)
 }
 
 AsmJSModule::CodeRange::CodeRange(Kind kind, uint32_t begin, uint32_t profilingReturn, uint32_t end)
-  : begin_(begin),
+  : nameIndex_(0),
+    lineNumber_(0),
+    begin_(begin),
     profilingReturn_(profilingReturn),
     end_(end)
 {
+    PodZero(&u);  // zero padding for Valgrind
     u.kind_ = kind;
 
     MOZ_ASSERT(begin_ < profilingReturn_);
@@ -1351,10 +1359,13 @@ AsmJSModule::CodeRange::CodeRange(Kind kind, uint32_t begin, uint32_t profilingR
 
 AsmJSModule::CodeRange::CodeRange(AsmJSExit::BuiltinKind builtin, uint32_t begin,
                                   uint32_t profilingReturn, uint32_t end)
-  : begin_(begin),
+  : nameIndex_(0),
+    lineNumber_(0),
+    begin_(begin),
     profilingReturn_(profilingReturn),
     end_(end)
 {
+    PodZero(&u);  // zero padding for Valgrind
     u.kind_ = Thunk;
     u.thunk.target_ = builtin;
 

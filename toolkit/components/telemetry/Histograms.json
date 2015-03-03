@@ -4168,6 +4168,11 @@
     "kind": "boolean",
     "description": "DOM: Ranges that are detached on destruction (bug 702948)"
   },
+  "DOM_WINDOW_SHOWMODALDIALOG_USED": {
+    "expires_in_version": "41",
+    "kind": "flag",
+    "description": "Whether Window.showModalDialog was used in this session"
+  },
   "LOCALDOMSTORAGE_INIT_DATABASE_MS": {
     "expires_in_version": "40",
     "kind": "exponential",
@@ -6940,6 +6945,12 @@
     "n_values": 512,
     "description": "Certificate pinning test results by host for Mozilla operational sites"
   },
+  "CERT_CHAIN_KEY_SIZE_STATUS": {
+    "expires_in_version": "default",
+    "kind": "enumerated",
+    "n_values": 4,
+    "description": "Does enforcing a larger minimum RSA key size cause verification failures? 1 = no, 2 = yes, 3 = another error prevented finding a verified chain"
+  },
   "WEAVE_CONFIGURED": {
     "expires_in_version": "default",
     "kind": "boolean",
@@ -7454,6 +7465,18 @@
     "high": 750,
     "n_buckets" : 40,
     "description": "Time in days each saved login was last used"
+  },
+  "PWMGR_PROMPT_REMEMBER_ACTION" : {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 5,
+    "description": "Action taken by user through prompt for creating a login. (0=Prompt displayed [always recorded], 1=Add login, 2=Don't save now, 3=Never save)"
+  },
+  "PWMGR_PROMPT_UPDATE_ACTION" : {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 5,
+    "description": "Action taken by user through prompt for modifying a login. (0=Prompt displayed [always recorded], 1=Update login)"
   },
   "PWMGR_SAVING_ENABLED": {
     "expires_in_version": "never",
