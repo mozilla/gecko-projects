@@ -469,7 +469,9 @@ MP4Reader::ReadMetadata(MediaInfo* aInfo,
     mInfo.mVideo.mDisplay =
       nsIntSize(video.display_width, video.display_height);
     mVideo.mCallback = new DecoderCallback(this, kVideo);
-    if (mSharedDecoderManager) {
+    if (!mIsEncrypted && mSharedDecoderManager) {
+      // Note: Don't use SharedDecoderManager in EME content, as it doesn't
+      // handle reiniting the decoder properly yet.
       mVideo.mDecoder =
         mSharedDecoderManager->CreateVideoDecoder(mPlatform,
                                                   video,
@@ -596,7 +598,7 @@ MP4Reader::RequestVideoData(bool aSkipToNextKeyframe,
     if (!eos && NS_FAILED(mVideo.mDecoder->Flush())) {
       NS_WARNING("Failed to skip/flush video when skipping-to-next-keyframe.");
     }
-    mDecoder->NotifyDecodedFrames(parsed, 0);
+    mDecoder->NotifyDecodedFrames(parsed, 0, parsed);
   }
 
   MonitorAutoLock lock(mVideo.mMonitor);
@@ -670,8 +672,7 @@ MP4Reader::Update(TrackType aTrack)
 
   // Record number of frames decoded and parsed. Automatically update the
   // stats counters using the AutoNotifyDecoded stack-based class.
-  uint32_t parsed = 0, decoded = 0;
-  AbstractMediaDecoder::AutoNotifyDecoded autoNotify(mDecoder, parsed, decoded);
+  AbstractMediaDecoder::AutoNotifyDecoded a(mDecoder);
 
   bool needInput = false;
   bool needOutput = false;
@@ -686,7 +687,7 @@ MP4Reader::Update(TrackType aTrack)
     }
     if (aTrack == kVideo) {
       uint64_t delta = decoder.mNumSamplesOutput - mLastReportedNumDecodedFrames;
-      decoded = static_cast<uint32_t>(delta);
+      a.mDecoded = static_cast<uint32_t>(delta);
       mLastReportedNumDecodedFrames = decoder.mNumSamplesOutput;
     }
     if (decoder.HasPromise()) {
@@ -720,7 +721,7 @@ MP4Reader::Update(TrackType aTrack)
     if (sample) {
       decoder.mDecoder->Input(sample);
       if (aTrack == kVideo) {
-        parsed++;
+        a.mParsed++;
       }
     } else {
       {
@@ -1075,7 +1076,9 @@ void MP4Reader::NotifyResourcesStatusChanged()
 void
 MP4Reader::SetIdle()
 {
-  if (mSharedDecoderManager && mVideo.mDecoder) {
+  if (!mIsEncrypted && mSharedDecoderManager && mVideo.mDecoder) {
+    // Note: Don't use SharedDecoderManager in EME content, as it doesn't
+    // handle reiniting the decoder properly yet.
     mSharedDecoderManager->SetIdle(mVideo.mDecoder);
     NotifyResourcesStatusChanged();
   }

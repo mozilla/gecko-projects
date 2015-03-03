@@ -461,11 +461,14 @@ function findChildShell(aDocument, aDocShell, aSoughtURI) {
 var gPopupBlockerObserver = {
   _reportButton: null,
 
-  onReportButtonClick: function (aEvent)
+  onReportButtonEvent: function (aEvent)
   {
-    if (aEvent.button != 0 || aEvent.target != this._reportButton)
-      return;
-
+    if ((aEvent.type == "click" && aEvent.button != 0) ||
+        (aEvent.target != this._reportButton) ||
+        (aEvent.type == "keypress" && aEvent.charCode != Ci.nsIDOMKeyEvent.DOM_VK_SPACE &&
+         aEvent.keyCode != Ci.nsIDOMKeyEvent.DOM_VK_RETURN)) {
+      return; // We're only interested in left click and space and enter keypresses
+    }
     document.getElementById("blockedPopupOptions")
             .openPopup(this._reportButton, "after_end", 0, 2, false, false, aEvent);
   },
@@ -7324,23 +7327,23 @@ function switchToTabHavingURI(aURI, aOpenNew, aOpenParams={}) {
                            browser.currentURI.equals(aURI)) {
         // Focus the matching window & tab
         aWindow.focus();
-        aWindow.gBrowser.tabContainer.selectedIndex = i;
         if (ignoreFragment) {
           let spec = aURI.spec;
           if (!aURI.ref)
             spec += "#";
           browser.loadURI(spec);
         }
+        aWindow.gBrowser.tabContainer.selectedIndex = i;
         return true;
       }
       if (ignoreQueryString || replaceQueryString) {
         if (browser.currentURI.spec.split("?")[0] == aURI.spec.split("?")[0]) {
           // Focus the matching window & tab
           aWindow.focus();
-          aWindow.gBrowser.tabContainer.selectedIndex = i;
           if (replaceQueryString) {
             browser.loadURI(aURI.spec);
           }
+          aWindow.gBrowser.tabContainer.selectedIndex = i;
           return true;
         }
       }

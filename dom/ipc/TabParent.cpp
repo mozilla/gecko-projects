@@ -80,6 +80,7 @@
 #include "nsICancelable.h"
 #include "gfxPrefs.h"
 #include "nsILoginManagerPrompter.h"
+#include "nsPIWindowRoot.h"
 #include <algorithm>
 
 using namespace mozilla::dom;
@@ -321,7 +322,27 @@ TabParent::RemoveTabParentFromTable(uint64_t aLayersId)
 void
 TabParent::SetOwnerElement(Element* aElement)
 {
+  // If we held previous content then unregister for its events.
+  if (mFrameElement && mFrameElement->OwnerDoc()->GetWindow()) {
+    nsCOMPtr<nsPIDOMWindow> window = mFrameElement->OwnerDoc()->GetWindow();
+    nsCOMPtr<EventTarget> eventTarget = window->GetTopWindowRoot();
+    if (eventTarget) {
+      eventTarget->RemoveEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
+                                       this, false);
+    }
+  }
+
+  // Update to the new content, and register to listen for events from it.
   mFrameElement = aElement;
+  if (mFrameElement && mFrameElement->OwnerDoc()->GetWindow()) {
+    nsCOMPtr<nsPIDOMWindow> window = mFrameElement->OwnerDoc()->GetWindow();
+    nsCOMPtr<EventTarget> eventTarget = window->GetTopWindowRoot();
+    if (eventTarget) {
+      eventTarget->AddEventListener(NS_LITERAL_STRING("MozUpdateWindowPos"),
+                                    this, false, false);
+    }
+  }
+
   TryCacheDPIAndScale();
 }
 
@@ -356,6 +377,8 @@ TabParent::Destroy()
   if (mIsDestroyed) {
     return;
   }
+
+  SetOwnerElement(nullptr);
 
   // If this fails, it's most likely due to a content-process crash,
   // and auto-cleanup will kick in.  Otherwise, the child side will
@@ -881,9 +904,40 @@ TabParent::RecvSetDimensions(const uint32_t& aFlags,
   return false;
 }
 
+static nsIntPoint
+GetChromeDisplacement(nsFrameLoader *aFrameLoader)
+{
+  if (!aFrameLoader) {
+    return nsIntPoint();
+  }
+
+  // Calculate the displacement from the primary frame of the tab
+  // content to the top-level frame of the widget we are in.
+  nsIFrame* contentFrame = aFrameLoader->GetPrimaryFrameOfOwningContent();
+  if (!contentFrame) {
+    return nsIntPoint();
+  }
+
+  nsIFrame* nextFrame = nsLayoutUtils::GetCrossDocParentFrame(contentFrame);
+  if (!nextFrame) {
+    NS_WARNING("Couldn't find window chrome to calculate displacement to.");
+    return nsIntPoint();
+  }
+
+  nsIFrame* rootFrame = nextFrame;
+  while (nextFrame) {
+    rootFrame = nextFrame;
+    nextFrame = nsLayoutUtils::GetCrossDocParentFrame(rootFrame);
+  }
+
+  nsPoint offset = contentFrame->GetOffsetToCrossDoc(rootFrame);
+  int32_t appUnitsPerDevPixel = rootFrame->PresContext()->AppUnitsPerDevPixel();
+  return nsIntPoint((int)(offset.x/appUnitsPerDevPixel),
+                    (int)(offset.y/appUnitsPerDevPixel));
+}
+
 void
-TabParent::UpdateDimensions(const nsIntRect& rect, const nsIntSize& size,
-                            const nsIntPoint& aChromeDisp)
+TabParent::UpdateDimensions(const nsIntRect& rect, const nsIntSize& size)
 {
   if (mIsDestroyed) {
     return;
@@ -894,12 +948,22 @@ TabParent::UpdateDimensions(const nsIntRect& rect, const nsIntSize& size,
 
   if (!mUpdatedDimensions || mOrientation != orientation ||
       mDimensions != size || !mRect.IsEqualEdges(rect)) {
+    nsCOMPtr<nsIWidget> widget = GetWidget();
+    nsIntRect contentRect = rect;
+    if (widget) {
+      contentRect.x += widget->GetClientOffset().x;
+      contentRect.y += widget->GetClientOffset().y;
+    }
+
     mUpdatedDimensions = true;
-    mRect = rect;
+    mRect = contentRect;
     mDimensions = size;
     mOrientation = orientation;
 
-    unused << SendUpdateDimensions(mRect, mDimensions, mOrientation, aChromeDisp);
+    nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
+    nsIntPoint chromeOffset = GetChromeDisplacement(frameLoader);
+
+    unused << SendUpdateDimensions(mRect, mDimensions, mOrientation, chromeOffset);
   }
 }
 
@@ -931,40 +995,39 @@ TabParent::AcknowledgeScrollUpdate(const ViewID& aScrollId, const uint32_t& aScr
 }
 
 void TabParent::HandleDoubleTap(const CSSPoint& aPoint,
-                                int32_t aModifiers,
+                                Modifiers aModifiers,
                                 const ScrollableLayerGuid &aGuid)
 {
   if (!mIsDestroyed) {
-    unused << SendHandleDoubleTap(aPoint, aGuid);
+    unused << SendHandleDoubleTap(aPoint, aModifiers, aGuid);
   }
 }
 
 void TabParent::HandleSingleTap(const CSSPoint& aPoint,
-                                int32_t aModifiers,
+                                Modifiers aModifiers,
                                 const ScrollableLayerGuid &aGuid)
 {
-  // TODO Send the modifier data to TabChild for use in mouse events.
   if (!mIsDestroyed) {
-    unused << SendHandleSingleTap(aPoint, aGuid);
+    unused << SendHandleSingleTap(aPoint, aModifiers, aGuid);
   }
 }
 
 void TabParent::HandleLongTap(const CSSPoint& aPoint,
-                              int32_t aModifiers,
+                              Modifiers aModifiers,
                               const ScrollableLayerGuid &aGuid,
                               uint64_t aInputBlockId)
 {
   if (!mIsDestroyed) {
-    unused << SendHandleLongTap(aPoint, aGuid, aInputBlockId);
+    unused << SendHandleLongTap(aPoint, aModifiers, aGuid, aInputBlockId);
   }
 }
 
 void TabParent::HandleLongTapUp(const CSSPoint& aPoint,
-                                int32_t aModifiers,
+                                Modifiers aModifiers,
                                 const ScrollableLayerGuid &aGuid)
 {
   if (!mIsDestroyed) {
-    unused << SendHandleLongTapUp(aPoint, aGuid);
+    unused << SendHandleLongTapUp(aPoint, aModifiers, aGuid);
   }
 }
 
@@ -1175,40 +1238,40 @@ CSSPoint TabParent::AdjustTapToChildWidget(const CSSPoint& aPoint)
   return aPoint + (LayoutDevicePoint(mChildProcessOffsetAtTouchStart) * GetLayoutDeviceToCSSScale());
 }
 
-bool TabParent::SendHandleSingleTap(const CSSPoint& aPoint, const ScrollableLayerGuid& aGuid)
+bool TabParent::SendHandleSingleTap(const CSSPoint& aPoint, const Modifiers& aModifiers, const ScrollableLayerGuid& aGuid)
 {
   if (mIsDestroyed) {
     return false;
   }
 
-  return PBrowserParent::SendHandleSingleTap(AdjustTapToChildWidget(aPoint), aGuid);
+  return PBrowserParent::SendHandleSingleTap(AdjustTapToChildWidget(aPoint), aModifiers, aGuid);
 }
 
-bool TabParent::SendHandleLongTap(const CSSPoint& aPoint, const ScrollableLayerGuid& aGuid, const uint64_t& aInputBlockId)
+bool TabParent::SendHandleLongTap(const CSSPoint& aPoint, const Modifiers& aModifiers, const ScrollableLayerGuid& aGuid, const uint64_t& aInputBlockId)
 {
   if (mIsDestroyed) {
     return false;
   }
 
-  return PBrowserParent::SendHandleLongTap(AdjustTapToChildWidget(aPoint), aGuid, aInputBlockId);
+  return PBrowserParent::SendHandleLongTap(AdjustTapToChildWidget(aPoint), aModifiers, aGuid, aInputBlockId);
 }
 
-bool TabParent::SendHandleLongTapUp(const CSSPoint& aPoint, const ScrollableLayerGuid& aGuid)
+bool TabParent::SendHandleLongTapUp(const CSSPoint& aPoint, const Modifiers& aModifiers, const ScrollableLayerGuid& aGuid)
 {
   if (mIsDestroyed) {
     return false;
   }
 
-  return PBrowserParent::SendHandleLongTapUp(AdjustTapToChildWidget(aPoint), aGuid);
+  return PBrowserParent::SendHandleLongTapUp(AdjustTapToChildWidget(aPoint), aModifiers, aGuid);
 }
 
-bool TabParent::SendHandleDoubleTap(const CSSPoint& aPoint, const ScrollableLayerGuid& aGuid)
+bool TabParent::SendHandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers, const ScrollableLayerGuid& aGuid)
 {
   if (mIsDestroyed) {
     return false;
   }
 
-  return PBrowserParent::SendHandleDoubleTap(AdjustTapToChildWidget(aPoint), aGuid);
+  return PBrowserParent::SendHandleDoubleTap(AdjustTapToChildWidget(aPoint), aModifiers, aGuid);
 }
 
 bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)
@@ -1833,7 +1896,6 @@ TabParent::RecvDispatchAfterKeyboardEvent(const WidgetKeyboardEvent& aEvent)
   if (mFrameElement &&
       PresShell::BeforeAfterKeyboardEventEnabled() &&
       localEvent.message != NS_KEY_PRESS) {
-    nsCOMPtr<nsINode> node(do_QueryInterface(mFrameElement));
     presShell->DispatchAfterKeyboardEvent(mFrameElement, localEvent,
                                           aEvent.mFlags.mDefaultPrevented);
   }
@@ -2652,6 +2714,27 @@ TabParent::DeallocPPluginWidgetParent(mozilla::plugins::PPluginWidgetParent* aAc
 {
   delete aActor;
   return true;
+}
+
+nsresult
+TabParent::HandleEvent(nsIDOMEvent* aEvent)
+{
+  nsAutoString eventType;
+  aEvent->GetType(eventType);
+
+  if (eventType.EqualsLiteral("MozUpdateWindowPos")) {
+    // This event is sent when the widget moved.  Therefore we only update
+    // the position.
+    nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
+    if (!frameLoader) {
+      return NS_OK;
+    }
+    nsIntRect windowDims;
+    NS_ENSURE_SUCCESS(frameLoader->GetWindowDimensions(windowDims), NS_ERROR_FAILURE);
+    UpdateDimensions(windowDims, mDimensions);
+    return NS_OK;
+  }
+  return NS_OK;
 }
 
 class FakeChannel MOZ_FINAL : public nsIChannel,

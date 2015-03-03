@@ -13,6 +13,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/SizePrintfMacros.h"
 #include "mozilla/TemplateLib.h"
 
 #include <string.h>
@@ -2412,8 +2413,8 @@ JSObject::swap(JSContext *cx, HandleObject a, HandleObject b)
      */
     JS::Zone *zone = a->zone();
     if (zone->needsIncrementalBarrier()) {
-        MarkChildren(zone->barrierTracer(), a);
-        MarkChildren(zone->barrierTracer(), b);
+        a->markChildren(zone->barrierTracer());
+        b->markChildren(zone->barrierTracer());
     }
 
     NotifyGCPostSwap(a, b, r);
@@ -3764,8 +3765,8 @@ dumpValue(const Value &v)
         }
         if (fun->hasScript()) {
             JSScript *script = fun->nonLazyScript();
-            fprintf(stderr, " (%s:%d)",
-                    script->filename() ? script->filename() : "", (int) script->lineno());
+            fprintf(stderr, " (%s:%" PRIuSIZE ")",
+                    script->filename() ? script->filename() : "", script->lineno());
         }
         fprintf(stderr, " at %p>", (void *) fun);
     } else if (v.isObject()) {
@@ -4002,8 +4003,8 @@ js_DumpInterpreterFrame(JSContext *cx, InterpreterFrame *start)
         }
         fputc('\n', stderr);
 
-        fprintf(stderr, "file %s line %u\n",
-                i.script()->filename(), (unsigned) i.script()->lineno());
+        fprintf(stderr, "file %s line %" PRIuSIZE "\n",
+                i.script()->filename(), i.script()->lineno());
 
         if (jsbytecode *pc = i.pc()) {
             fprintf(stderr, "  pc = %p\n", pc);
