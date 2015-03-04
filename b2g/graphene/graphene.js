@@ -19,7 +19,7 @@ pref("layout.css.scroll-snap.enabled", true);
 pref("dom.mozInputMethod.enabled", false);
 pref("browser.autofocus", true);
 pref("touchcaret.enabled", false);
-pref("layers.async-pan-zoom.enabled", true);
+pref("layers.async-pan-zoom.enabled", false);
 
 pref("gfx.vsync.hw-vsync.enabled", true);
 pref("gfx.vsync.compositor", true);
