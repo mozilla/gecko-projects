@@ -263,6 +263,8 @@ function isContent({ category, location }) {
  * Helper for getting an nsIURL instance out of a string.
  */
 function nsIURL(url) {
+  dump(`CREATING nsIURL for: '${url}'.\n`);
+
   let cached = gNSURLStore.get(url);
   if (cached) {
     return cached;
