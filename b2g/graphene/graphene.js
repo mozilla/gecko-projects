@@ -29,3 +29,6 @@ pref("devtools.debugger.unix-domain-socket", "6000");
 
 pref("devtools.debugger.forbid-certified-apps", false);
 pref("devtools.debugger.prompt-connection", false);
+
+// Update url.
+pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
