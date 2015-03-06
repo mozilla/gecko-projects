@@ -40,6 +40,7 @@ const REASON_IDLE_DAILY = "idle-daily";
 const REASON_GATHER_PAYLOAD = "gather-payload";
 const REASON_TEST_PING = "test-ping";
 const REASON_ENVIRONMENT_CHANGE = "environment-change";
+const REASON_SHUTDOWN = "shutdown";
 
 const ENVIRONMENT_CHANGE_LISTENER = "TelemetrySession::onEnvironmentChange";
 
@@ -508,9 +509,10 @@ let Impl = {
     let si = Services.startup.getStartupInfo();
 
     // Measurements common to chrome and content processes.
+    let elapsedTime = Date.now() - si.process;
     var ret = {
-      // uptime in minutes
-      uptime: Math.round((new Date() - si.process) / 60000)
+      totalTime: Math.round(elapsedTime / 1000), // totalTime, in seconds
+      uptime: Math.round(elapsedTime / 60000) // uptime in minutes
     }
 
     // Look for app-specific timestamps
@@ -1270,8 +1272,36 @@ let Impl = {
     cpmm.sendAsyncMessage(MESSAGE_TELEMETRY_PAYLOAD, payload);
   },
 
+  /**
+   * Save both the "saved-session" and the "shutdown" pings to disk.
+   */
   savePendingPings: function savePendingPings() {
     this._log.trace("savePendingPings");
+
+#ifndef MOZ_WIDGET_ANDROID
+    let options = {
+      retentionDays: RETENTION_DAYS,
+      addClientId: true,
+      addEnvironment: true,
+      overwrite: true,
+    };
+
+    let shutdownPayload = this.getSessionPayload(REASON_SHUTDOWN, false);
+    // Make sure we try to save the pending pings, even though we failed saving the shutdown
+    // ping.
+    return TelemetryPing.savePing(getPingType(shutdownPayload), shutdownPayload, options)
+                        .then(() => this.savePendingPingsClassic(),
+                              () => this.savePendingPingsClassic());
+#else
+    return this.savePendingPingsClassic();
+#endif
+  },
+
+  /**
+   * Save the "saved-session" ping and make TelemetryPing save all the pending pings to disk.
+   */
+  savePendingPingsClassic: function savePendingPingsClassic() {
+    this._log.trace("savePendingPingsClassic");
     let payload = this.getSessionPayload(REASON_SAVED_SESSION, false);
     let options = {
       retentionDays: RETENTION_DAYS,
