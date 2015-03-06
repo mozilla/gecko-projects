@@ -14,7 +14,6 @@
 #include "vm/ArrayObject.h"
 #include "vm/UnboxedObject.h"
 
-#include "jsgcinlines.h"
 #include "jsobjinlines.h"
 
 using namespace js;
@@ -312,7 +311,7 @@ JSObject::makeLazyGroup(JSContext *cx, HandleObject obj)
     // Don't track whether singletons are packed.
     ObjectGroupFlags initialFlags = OBJECT_FLAG_SINGLETON | OBJECT_FLAG_NON_PACKED;
 
-    if (obj->lastProperty()->hasObjectFlag(BaseShape::ITERATED_SINGLETON))
+    if (obj->isIteratedSingleton())
         initialFlags |= OBJECT_FLAG_ITERATED;
 
     if (obj->isIndexed())
@@ -1323,7 +1322,7 @@ ObjectGroupCompartment::makeGroup(ExclusiveContext *cx, const Class *clasp,
 {
     MOZ_ASSERT_IF(proto.isObject(), cx->isInsideCurrentCompartment(proto.toObject()));
 
-    ObjectGroup *group = NewObjectGroup(cx);
+    ObjectGroup *group = Allocate<ObjectGroup>(cx);
     if (!group)
         return nullptr;
     new(group) ObjectGroup(clasp, proto, cx->compartment(), initialFlags);
