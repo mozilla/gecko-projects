@@ -63,6 +63,7 @@
 #include "UnitTransforms.h"
 #include "LayersLogging.h"
 #include "FrameLayerBuilder.h"
+#include "mozilla/EventStateManager.h"
 #include "RestyleManager.h"
 #include "nsCaret.h"
 #include "nsISelection.h"
@@ -521,9 +522,9 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
     nscoord perspective = 0.0;
     nsStyleContext* parentStyleContext = aFrame->StyleContext()->GetParent();
     if (parentStyleContext) {
-      const nsStyleDisplay* disp = parentStyleContext->StyleDisplay();
-      if (disp && disp->mChildPerspective.GetUnit() == eStyleUnit_Coord) {
-        perspective = disp->mChildPerspective.GetCoordValue();
+      const nsStylePosition* pos = parentStyleContext->StylePosition();
+      if (pos && pos->mChildPerspective.GetUnit() == eStyleUnit_Coord) {
+        perspective = pos->mChildPerspective.GetCoordValue();
       }
     }
     nsPoint origin;
@@ -784,6 +785,12 @@ nsDisplayScrollLayer::ComputeFrameMetrics(nsIFrame* aForFrame,
     LayoutDeviceIntSize lineScrollAmountInDevPixels =
       LayoutDeviceIntSize::FromAppUnitsRounded(lineScrollAmount, presContext->AppUnitsPerDevPixel());
     metrics.SetLineScrollAmount(lineScrollAmountInDevPixels);
+
+    if (!aScrollFrame->GetParent() ||
+        EventStateManager::CanVerticallyScrollFrameWithWheel(aScrollFrame->GetParent()))
+    {
+      metrics.SetAllowVerticalScrollWithWheel();
+    }
   }
 
   metrics.SetScrollId(scrollId);
@@ -840,12 +847,20 @@ nsDisplayScrollLayer::ComputeFrameMetrics(nsIFrame* aForFrame,
   nsIFrame* frameForCompositionBoundsCalculation = aScrollFrame ? aScrollFrame : aForFrame;
   nsRect compositionBounds(frameForCompositionBoundsCalculation->GetOffsetToCrossDoc(aReferenceFrame),
                            frameForCompositionBoundsCalculation->GetSize());
+  if (scrollableFrame) {
+    // If we have a scrollable frame, restrict the composition bounds to its
+    // scroll port. The scroll port excludes the frame borders and the scroll
+    // bars, which we don't want to be part of the composition bounds.
+    nsRect scrollPort = scrollableFrame->GetScrollPortRect();
+    compositionBounds = nsRect(compositionBounds.TopLeft() + scrollPort.TopLeft(),
+                               scrollPort.Size());
+  }
   ParentLayerRect frameBounds = LayoutDeviceRect::FromAppUnits(compositionBounds, auPerDevPixel)
                               * metrics.GetCumulativeResolution()
                               * layerToParentLayerScale;
   metrics.mCompositionBounds = frameBounds;
 
-  // For the root scroll frame of the root content document, the above calculation
+  // For the root scroll frame of the root content document (RCD-RSF), the above calculation
   // will yield the size of the viewport frame as the composition bounds, which
   // doesn't actually correspond to what is visible when
   // nsIDOMWindowUtils::setCSSViewport has been called to modify the visible area of
@@ -893,15 +908,17 @@ nsDisplayScrollLayer::ComputeFrameMetrics(nsIFrame* aForFrame,
           metrics.mCompositionBounds.SizeTo(contentSize * scale);
         }
       }
-    }
-  }
 
-  // Adjust composition bounds for the size of scroll bars.
-  if (scrollableFrame && !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars)) {
-    nsMargin sizes = scrollableFrame->GetActualScrollbarSizes();
-    // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
-    ParentLayerMargin boundMargins = CSSMargin::FromAppUnits(sizes) * CSSToParentLayerScale(1.0f);
-    metrics.mCompositionBounds.Deflate(boundMargins);
+      // Exclude any non-overlay scroll bars from the composition bounds.
+      // This is only done for the RCD-RSF case, because otherwise the scroll
+      // port size is used and that already excludes the scroll bars.
+      if (scrollableFrame && !LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars)) {
+        nsMargin sizes = scrollableFrame->GetActualScrollbarSizes();
+        // Scrollbars are not subject to scaling, so CSS pixels = layer pixels for them.
+        ParentLayerMargin boundMargins = CSSMargin::FromAppUnits(sizes) * CSSToParentLayerScale(1.0f);
+        metrics.mCompositionBounds.Deflate(boundMargins);
+      }
+    }
   }
 
   metrics.SetRootCompositionSize(
@@ -5010,8 +5027,8 @@ nsDisplayTransform::Init(nsDisplayListBuilder* aBuilder)
   mStoredList.SetVisibleRect(mChildrenVisibleRect);
   mMaybePrerender = ShouldPrerenderTransformedContent(aBuilder, mFrame);
 
-  const nsStyleDisplay* disp = mFrame->StyleDisplay();
-  if ((disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM)) {
+  const nsStylePosition* pos = mFrame->StylePosition();
+  if ((pos->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM)) {
     // We will only pre-render if this will-change is on budget.
     mMaybePrerender = true;
   }
@@ -5065,7 +5082,8 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
                                               const nsRect* aBoundsOverride)
 {
   NS_PRECONDITION(aFrame, "Can't get delta for a null frame!");
-  NS_PRECONDITION(aFrame->IsTransformed() || aFrame->StyleDisplay()->BackfaceIsHidden(),
+  NS_PRECONDITION(aFrame->IsTransformed() ||
+                  aFrame->StylePosition()->BackfaceIsHidden(),
                   "Shouldn't get a delta for an untransformed frame!");
 
   if (!aFrame->IsTransformed()) {
@@ -5076,7 +5094,7 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
    * percentage, it's relative to the size of the frame.  Otherwise, if it's
    * a distance, it's already computed for us!
    */
-  const nsStyleDisplay* display = aFrame->StyleDisplay();
+  const nsStylePosition* pos = aFrame->StylePosition();
   nsRect boundingRect = (aBoundsOverride ? *aBoundsOverride :
                          nsDisplayTransform::GetFrameBoundsForTransform(aFrame));
 
@@ -5089,7 +5107,7 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
     /* If the -moz-transform-origin specifies a percentage, take the percentage
      * of the size of the box.
      */
-    const nsStyleCoord &coord = display->mTransformOrigin[index];
+    const nsStyleCoord &coord = pos->mTransformOrigin[index];
     if (coord.GetUnit() == eStyleUnit_Calc) {
       const nsStyleCoord::Calc *calc = coord.GetCalcValue();
       coords[index] =
@@ -5115,7 +5133,7 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
     }
   }
 
-  coords[2] = NSAppUnitsToFloatPixels(display->mTransformOrigin[2].GetCoordValue(),
+  coords[2] = NSAppUnitsToFloatPixels(pos->mTransformOrigin[2].GetCoordValue(),
                                       aAppUnitsPerPixel);
   /* Adjust based on the origin of the rectangle. */
   coords[0] += NSAppUnitsToFloatPixels(boundingRect.x, aAppUnitsPerPixel);
@@ -5134,7 +5152,8 @@ nsDisplayTransform::GetDeltaToPerspectiveOrigin(const nsIFrame* aFrame,
                                                 float aAppUnitsPerPixel)
 {
   NS_PRECONDITION(aFrame, "Can't get delta for a null frame!");
-  NS_PRECONDITION(aFrame->IsTransformed() || aFrame->StyleDisplay()->BackfaceIsHidden(),
+  NS_PRECONDITION(aFrame->IsTransformed() ||
+                  aFrame->StylePosition()->BackfaceIsHidden(),
                   "Shouldn't get a delta for an untransformed frame!");
 
   if (!aFrame->IsTransformed()) {
@@ -5159,7 +5178,7 @@ nsDisplayTransform::GetDeltaToPerspectiveOrigin(const nsIFrame* aFrame,
       return Point3D();
     }
   }
-  const nsStyleDisplay* display = psc->StyleDisplay();
+  const nsStylePosition* pos = psc->StylePosition();
   nsRect boundingRect = nsDisplayTransform::GetFrameBoundsForTransform(parent);
 
   /* Allows us to access named variables by index. */
@@ -5173,7 +5192,7 @@ nsDisplayTransform::GetDeltaToPerspectiveOrigin(const nsIFrame* aFrame,
     /* If the -moz-transform-origin specifies a percentage, take the percentage
      * of the size of the box.
      */
-    const nsStyleCoord &coord = display->mPerspectiveOrigin[index];
+    const nsStyleCoord &coord = pos->mPerspectiveOrigin[index];
     if (coord.GetUnit() == eStyleUnit_Calc) {
       const nsStyleCoord::Calc *calc = coord.GetCalcValue();
       *coords[index] =
@@ -5204,18 +5223,18 @@ nsDisplayTransform::FrameTransformProperties::FrameTransformProperties(const nsI
                                                                        float aAppUnitsPerPixel,
                                                                        const nsRect* aBoundsOverride)
   : mFrame(aFrame)
-  , mTransformList(aFrame->StyleDisplay()->mSpecifiedTransform)
+  , mTransformList(aFrame->StylePosition()->mSpecifiedTransform)
   , mToTransformOrigin(GetDeltaToTransformOrigin(aFrame, aAppUnitsPerPixel, aBoundsOverride))
   , mToPerspectiveOrigin(GetDeltaToPerspectiveOrigin(aFrame, aAppUnitsPerPixel))
   , mChildPerspective(0)
 {
-  const nsStyleDisplay* parentDisp = nullptr;
+  const nsStylePosition* parentPos = nullptr;
   nsStyleContext* parentStyleContext = aFrame->StyleContext()->GetParent();
   if (parentStyleContext) {
-    parentDisp = parentStyleContext->StyleDisplay();
+    parentPos = parentStyleContext->StylePosition();
   }
-  if (parentDisp && parentDisp->mChildPerspective.GetUnit() == eStyleUnit_Coord) {
-    mChildPerspective = parentDisp->mChildPerspective.GetCoordValue();
+  if (parentPos && parentPos->mChildPerspective.GetUnit() == eStyleUnit_Coord) {
+    mChildPerspective = parentPos->mChildPerspective.GetCoordValue();
   }
 }
 
@@ -5395,8 +5414,8 @@ nsDisplayTransform::ShouldPrerender(nsDisplayListBuilder* aBuilder) {
     return true;
   }
 
-  const nsStyleDisplay* disp = mFrame->StyleDisplay();
-  if ((disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM) &&
+  const nsStylePosition* pos = mFrame->StylePosition();
+  if ((pos->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM) &&
       aBuilder->IsInWillChangeBudget(mFrame)) {
     return true;
   }
@@ -5485,7 +5504,8 @@ static bool IsFrameVisible(nsIFrame* aFrame, const Matrix4x4& aMatrix)
   if (aMatrix.IsSingular()) {
     return false;
   }
-  if (aFrame->StyleDisplay()->mBackfaceVisibility == NS_STYLE_BACKFACE_VISIBILITY_HIDDEN &&
+  const nsStylePosition* pos = aFrame->StylePosition();
+  if (pos->mBackfaceVisibility == NS_STYLE_BACKFACE_VISIBILITY_HIDDEN &&
       aMatrix.IsBackfaceVisible()) {
     return false;
   }
@@ -5533,7 +5553,8 @@ already_AddRefed<Layer> nsDisplayTransform::BuildLayer(nsDisplayListBuilder *aBu
 {
   const Matrix4x4& newTransformMatrix = GetTransform();
 
-  if (mFrame->StyleDisplay()->mBackfaceVisibility == NS_STYLE_BACKFACE_VISIBILITY_HIDDEN &&
+  const nsStylePosition* pos = mFrame->StylePosition();
+  if (pos->mBackfaceVisibility == NS_STYLE_BACKFACE_VISIBILITY_HIDDEN &&
       newTransformMatrix.IsBackfaceVisible()) {
     return nullptr;
   }
@@ -5592,8 +5613,8 @@ nsDisplayTransform::GetLayerState(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  const nsStyleDisplay* disp = mFrame->StyleDisplay();
-  if ((disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM)) {
+  const nsStylePosition* pos = mFrame->StylePosition();
+  if ((pos->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM)) {
     return LAYER_ACTIVE;
   }
 

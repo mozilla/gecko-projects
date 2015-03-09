@@ -102,7 +102,7 @@ public:
   nsRefPtr<SeekPromise>
   Seek(int64_t aTime, int64_t aEndTime) MOZ_OVERRIDE;
 
-  void CancelSeek() MOZ_OVERRIDE;
+  nsresult ResetDecode() MOZ_OVERRIDE;
 
   // Acquires the decoder monitor, and is thus callable on any thread.
   nsresult GetBuffered(dom::TimeRanges* aBuffered) MOZ_OVERRIDE;
@@ -142,8 +142,14 @@ public:
 #endif
 
   virtual bool IsAsync() const MOZ_OVERRIDE {
+    ReentrantMonitorAutoEnter decoderMon(mDecoder->GetReentrantMonitor());
     return (!GetAudioReader() || GetAudioReader()->IsAsync()) &&
            (!GetVideoReader() || GetVideoReader()->IsAsync());
+  }
+
+  virtual bool VideoIsHardwareAccelerated() const MOZ_OVERRIDE {
+    ReentrantMonitorAutoEnter decoderMon(mDecoder->GetReentrantMonitor());
+    return GetVideoReader() && GetVideoReader()->VideoIsHardwareAccelerated();
   }
 
   // Returns true if aReader is a currently active audio or video
