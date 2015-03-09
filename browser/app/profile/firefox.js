@@ -1792,12 +1792,12 @@ pref("ui.key.menuAccessKeyFocuses", true);
 #endif
 
 // Encrypted media extensions.
-#ifdef RELEASE_BUILD
-pref("media.eme.enabled", false);
-pref("media.eme.apiVisible", false);
-#else
 pref("media.eme.enabled", true);
 pref("media.eme.apiVisible", true);
+
+#ifdef XP_WIN
+pref("media.gmp-eme-adobe.enabled", true);
+pref("browser.eme.ui.enabled", true);
 #endif
 
 // Play with different values of the decay time and get telemetry,
@@ -1829,13 +1829,6 @@ pref("privacy.trackingprotection.ui.enabled", false);
 
 #ifdef NIGHTLY_BUILD
 pref("browser.tabs.remote.autostart.1", true);
-#endif
-
-// Temporary pref to allow printing in e10s windows on some platforms.
-#ifdef UNIX_BUT_NOT_MAC
-pref("print.enable_e10s_testing", false);
-#else
-pref("print.enable_e10s_testing", true);
 #endif
 
 #ifdef NIGHTLY_BUILD
