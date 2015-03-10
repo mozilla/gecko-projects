@@ -77,7 +77,20 @@ protected:
       return NS_OK;
     }
 
-    mCallback->Call(cx, value);
+    JS::Rooted<JSObject*> asyncStack(cx, mPromise->mAllocationStack);
+    JS::Rooted<JSString*> asyncCause(cx, JS_NewStringCopyZ(cx, "Promise"));
+    if (!asyncCause) {
+      JS_ClearPendingException(cx);
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    {
+      Maybe<JS::AutoSetAsyncStackForNewCalls> sas;
+      if (asyncStack) {
+        sas.emplace(cx, asyncStack, asyncCause);
+      }
+      mCallback->Call(cx, value);
+    }
 
     return NS_OK;
   }
@@ -504,12 +517,11 @@ Promise::JSCallbackThenableRejecter(JSContext* aCx,
 }
 
 /* static */ JSObject*
-Promise::CreateFunction(JSContext* aCx, JSObject* aParent, Promise* aPromise,
-                        int32_t aTask)
+Promise::CreateFunction(JSContext* aCx, Promise* aPromise, int32_t aTask)
 {
   JSFunction* func = js::NewFunctionWithReserved(aCx, JSCallback,
                                                  1 /* nargs */, 0 /* flags */,
-                                                 aParent, nullptr);
+                                                 nullptr);
   if (!func) {
     return nullptr;
   }
@@ -536,7 +548,7 @@ Promise::CreateThenableFunction(JSContext* aCx, Promise* aPromise, uint32_t aTas
 
   JSFunction* func = js::NewFunctionWithReserved(aCx, whichFunc,
                                                  1 /* nargs */, 0 /* flags */,
-                                                 nullptr, nullptr);
+                                                 nullptr);
   if (!func) {
     return nullptr;
   }
@@ -584,7 +596,7 @@ Promise::CallInitFunction(const GlobalObject& aGlobal,
   JSContext* cx = aGlobal.Context();
 
   JS::Rooted<JSObject*> resolveFunc(cx,
-                                    CreateFunction(cx, aGlobal.Get(), this,
+                                    CreateFunction(cx, this,
                                                    PromiseCallback::Resolve));
   if (!resolveFunc) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
@@ -592,7 +604,7 @@ Promise::CallInitFunction(const GlobalObject& aGlobal,
   }
 
   JS::Rooted<JSObject*> rejectFunc(cx,
-                                   CreateFunction(cx, aGlobal.Get(), this,
+                                   CreateFunction(cx, this,
                                                   PromiseCallback::Reject));
   if (!rejectFunc) {
     aRv.Throw(NS_ERROR_UNEXPECTED);
