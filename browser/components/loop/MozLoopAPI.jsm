@@ -292,6 +292,15 @@ function injectLoopAPI(targetWindow) {
           listener(cloneValueInto(err, targetWindow));
           return;
         }
+        if (browser.getAttribute("remote") == "true") {
+          // Tab sharing is not supported yet for e10s-enabled browsers. This will
+          // be fixed in bug 1137634.
+          let err = new Error("Tab sharing is not supported for e10s-enabled browsers");
+          MozLoopService.log.error(err);
+          listener(cloneValueInto(err, targetWindow));
+          return;
+        }
+
         win.LoopUI.addBrowserSharingListener(listener);
 
         savedWindowListeners.set(listener, Cu.getWeakReference(win));
@@ -623,6 +632,13 @@ function injectLoopAPI(targetWindow) {
       }
     },
 
+    TWO_WAY_MEDIA_CONN_LENGTH: {
+      enumerable: true,
+      get: function() {
+        return Cu.cloneInto(TWO_WAY_MEDIA_CONN_LENGTH, targetWindow);
+      }
+    },
+
     fxAEnabled: {
       enumerable: true,
       get: function() {
@@ -737,14 +753,14 @@ function injectLoopAPI(targetWindow) {
     /**
      * Adds a value to a telemetry histogram.
      *
-     * @param  {string}  histogramId Name of the telemetry histogram to update.
-     * @param  {integer} value       Value to add to the histogram.
+     * @param  {string} histogramId Name of the telemetry histogram to update.
+     * @param  {string} value       Label of bucket to increment in the histogram.
      */
-    telemetryAdd: {
+    telemetryAddKeyedValue: {
       enumerable: true,
       writable: true,
       value: function(histogramId, value) {
-        Services.telemetry.getHistogramById(histogramId).add(value);
+        Services.telemetry.getKeyedHistogramById(histogramId).add(value);
       }
     },
 
