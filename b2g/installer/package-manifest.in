@@ -173,6 +173,9 @@
 #ifdef MOZ_B2G_BT
 @RESPATH@/components/dom_bluetooth.xpt
 #endif
+#ifdef MOZ_B2G_CAMERA
+@BINPATH@/components/dom_camera.xpt
+#endif
 @RESPATH@/components/dom_canvas.xpt
 @RESPATH@/components/dom_contacts.xpt
 @RESPATH@/components/dom_alarm.xpt
@@ -443,6 +446,12 @@
 @RESPATH@/components/WifiWorker.js
 @RESPATH@/components/WifiWorker.manifest
 #endif // MOZ_WIDGET_GONK
+
+; Camera
+#ifdef MOZ_B2G_CAMERA
+@BINPATH@/components/CameraTestHardware.js
+@BINPATH@/components/CameraTestHardware.manifest
+#endif // MOZ_B2G_CAMERA
 
 ; Tethering
 #ifdef MOZ_WIDGET_GONK
@@ -844,12 +853,6 @@ bin/libfreebl_32int64_3.so
 #endif
 #endif
 @RESPATH@/crashreporter-override.ini
-#endif
-
-; [Extensions]
-;
-#ifdef MOZ_ENABLE_GNOMEVFS
-bin/components/@DLL_PREFIX@nkgnomevfs@DLL_SUFFIX@
 #endif
 
 [b2g]
