@@ -26,3 +26,12 @@ iframe {
   right: 0;
   bottom: 0;
 }
+
+%ifdef MOZ_GRAPHENE
+#placeholder {
+  color: white;
+}
+html {
+  background: white;
+}
+%endif
