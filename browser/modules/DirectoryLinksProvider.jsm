@@ -15,6 +15,7 @@ const XMLHttpRequest =
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://gre/modules/Timer.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
@@ -56,6 +57,9 @@ const ALLOWED_IMAGE_SCHEMES = new Set(["https", "data"]);
 // The frecency of a directory link
 const DIRECTORY_FRECENCY = 1000;
 
+// The frecency of a related link
+const RELATED_FRECENCY = Infinity;
+
 // Divide frecency by this amount for pings
 const PING_SCORE_DIVISOR = 10000;
 
@@ -83,6 +87,16 @@ let DirectoryLinksProvider = {
    * A mapping from eTLD+1 to an enhanced link objects
    */
   _enhancedLinks: new Map(),
+
+  /**
+   * A mapping from site to a list of related link objects
+   */
+  _relatedLinks: new Map(),
+
+  /**
+   * A set of top sites that we can provide related links for
+   */
+  _topSitesWithRelatedLinks: new Set(),
 
   get _observedPrefs() Object.freeze({
     enhanced: PREF_NEWTAB_ENHANCED,
@@ -184,6 +198,14 @@ let DirectoryLinksProvider = {
     for (let pref in this._observedPrefs) {
       let prefName = this._observedPrefs[pref];
       Services.prefs.removeObserver(prefName, this);
+    }
+  },
+
+  _cacheRelatedLinks: function(link) {
+    for (let relatedSite of link.related) {
+      let relatedMap = this._relatedLinks.get(relatedSite) || new Map();
+      relatedMap.set(link.url, link);
+      this._relatedLinks.set(relatedSite, relatedMap);
     }
   },
 
@@ -389,28 +411,40 @@ let DirectoryLinksProvider = {
    */
   getLinks: function DirectoryLinksProvider_getLinks(aCallback) {
     this._readDirectoryLinksFile().then(rawLinks => {
-      // Reset the cache of enhanced images for this new set of links
+      // Reset the cache of related tiles and enhanced images for this new set of links
       this._enhancedLinks.clear();
+      this._relatedLinks.clear();
 
-      return rawLinks.filter(link => {
+      let links = [];
+      rawLinks.filter(link => {
         // Make sure the link url is allowed and images too if they exist
         return this.isURLAllowed(link.url, ALLOWED_LINK_SCHEMES) &&
                this.isURLAllowed(link.imageURI, ALLOWED_IMAGE_SCHEMES) &&
                this.isURLAllowed(link.enhancedImageURI, ALLOWED_IMAGE_SCHEMES);
-      }).map((link, position) => {
+      }).forEach((link, position) => {
         // Stash the enhanced image for the site
         if (link.enhancedImageURI) {
           this._enhancedLinks.set(NewTabUtils.extractSite(link.url), link);
         }
-
-        link.frecency = DIRECTORY_FRECENCY;
         link.lastVisitDate = rawLinks.length - position;
-        return link;
+
+        // We cache related tiles here but do not push any of them in the links list yet.
+        // The decision for which related tile to include will be made separately.
+        if ("related" == link.type) {
+          this._cacheRelatedLinks(link);
+          return;
+        }
+        link.frecency = DIRECTORY_FRECENCY;
+        links.push(link);
       });
+      return links;
     }).catch(ex => {
       Cu.reportError(ex);
       return [];
-    }).then(aCallback);
+    }).then(links => {
+      aCallback(links);
+      this._populatePlacesLinks();
+    });
   },
 
   init: function DirectoryLinksProvider_init() {
@@ -419,6 +453,9 @@ let DirectoryLinksProvider = {
     // setup directory file path and last download timestamp
     this._directoryFilePath = OS.Path.join(OS.Constants.Path.localProfileDir, DIRECTORY_LINKS_FILE);
     this._lastDownloadMS = 0;
+
+    NewTabUtils.placesProvider.addObserver(this);
+
     return Task.spawn(function() {
       // get the last modified time of the links file if it exists
       let doesFileExists = yield OS.File.exists(this._directoryFilePath);
@@ -430,6 +467,123 @@ let DirectoryLinksProvider = {
       yield this._fetchAndCacheLinksIfNecessary();
     }.bind(this));
   },
+
+  _handleManyLinksChanged: function() {
+    this._topSitesWithRelatedLinks.clear();
+    this._relatedLinks.forEach((relatedLinks, site) => {
+      if (NewTabUtils.isTopPlacesSite(site)) {
+        this._topSitesWithRelatedLinks.add(site);
+      }
+    });
+    this._updateRelatedTile();
+  },
+
+  /**
+   * Updates _topSitesWithRelatedLinks based on the link that was changed.
+   *
+   * @return true if _topSitesWithRelatedLinks was modified, false otherwise.
+   */
+  _handleLinkChanged: function(aLink) {
+    let changedLinkSite = NewTabUtils.extractSite(aLink.url);
+    let linkStored = this._topSitesWithRelatedLinks.has(changedLinkSite);
+
+    if (!NewTabUtils.isTopPlacesSite(changedLinkSite) && linkStored) {
+      this._topSitesWithRelatedLinks.delete(changedLinkSite);
+      return true;
+    }
+
+    if (this._relatedLinks.has(changedLinkSite) &&
+        NewTabUtils.isTopPlacesSite(changedLinkSite) && !linkStored) {
+      this._topSitesWithRelatedLinks.add(changedLinkSite);
+      return true;
+    }
+    return false;
+  },
+
+  _populatePlacesLinks: function () {
+    NewTabUtils.links.populateProviderCache(NewTabUtils.placesProvider, () => {
+      this._handleManyLinksChanged();
+    });
+  },
+
+  onLinkChanged: function (aProvider, aLink) {
+    // Make sure NewTabUtils.links handles the notification first.
+    setTimeout(() => {
+      if (this._handleLinkChanged(aLink)) {
+        this._updateRelatedTile();
+      }
+    }, 0);
+  },
+
+  onManyLinksChanged: function () {
+    // Make sure NewTabUtils.links handles the notification first.
+    setTimeout(() => {
+      this._handleManyLinksChanged();
+    }, 0);
+  },
+
+  /**
+   * Chooses and returns a related tile based on a user's top sites
+   * that we have an available related tile for.
+   *
+   * @return the chosen related tile, or undefined if there isn't one
+   */
+  _updateRelatedTile: function() {
+    let sortedLinks = NewTabUtils.getProviderLinks(this);
+
+    if (!sortedLinks) {
+      // If NewTabUtils.links.resetCache() is called before getting here,
+      // sortedLinks may be undefined.
+      return;
+    }
+
+    // Delete the current related tile, if one exists.
+    let initialLength = sortedLinks.length;
+    this.maxNumLinks = initialLength;
+    if (initialLength) {
+      let mostFrecentLink = sortedLinks[0];
+      if ("related" == mostFrecentLink.type) {
+        this._callObservers("onLinkChanged", {
+          url: mostFrecentLink.url,
+          frecency: 0,
+          lastVisitDate: mostFrecentLink.lastVisitDate,
+          type: "related",
+        }, 0, true);
+      }
+    }
+
+    if (this._topSitesWithRelatedLinks.size == 0) {
+      // There are no potential related links we can show.
+      return;
+    }
+
+    // Create a flat list of all possible links we can show as related.
+    // Note that many top sites may map to the same related links, but we only
+    // want to count each related link once (based on url), thus possibleLinks is a map
+    // from url to relatedLink. Thus, each link has an equal chance of being chosen at
+    // random from flattenedLinks if it appears only once.
+    let possibleLinks = new Map();
+    this._topSitesWithRelatedLinks.forEach(topSiteWithRelatedLink => {
+      let relatedLinksMap = this._relatedLinks.get(topSiteWithRelatedLink);
+      relatedLinksMap.forEach((relatedLink, url) => {
+        possibleLinks.set(url, relatedLink);
+      })
+    });
+    let flattenedLinks = [...possibleLinks.values()];
+
+    // Choose our related link at random
+    let relatedIndex = Math.floor(Math.random() * flattenedLinks.length);
+    let chosenRelatedLink = flattenedLinks[relatedIndex];
+
+    // Show the new directory tile.
+    this._callObservers("onLinkChanged", {
+      url: chosenRelatedLink.url,
+      frecency: RELATED_FRECENCY,
+      lastVisitDate: chosenRelatedLink.lastVisitDate,
+      type: "related",
+    });
+    return chosenRelatedLink;
+   },
 
   /**
    * Return the object to its pre-init state
