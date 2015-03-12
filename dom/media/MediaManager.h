@@ -145,6 +145,12 @@ public:
     return mVideoSource && !mStopped && !mVideoSource->IsAvailable() &&
            mVideoSource->GetMediaSource() == dom::MediaSourceEnum::Application;
   }
+  bool CapturingBrowser()
+  {
+    NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
+    return mVideoSource && !mStopped && mVideoSource->IsAvailable() &&
+           mVideoSource->GetMediaSource() == dom::MediaSourceEnum::Browser;
+  }
 
   void SetStopped()
   {
@@ -630,7 +636,7 @@ private:
 
   static StaticRefPtr<MediaManager> sSingleton;
 
-#ifdef MOZ_B2G_CAMERA
+#if defined(MOZ_B2G_CAMERA) && defined(MOZ_WIDGET_GONK)
   nsRefPtr<nsDOMCameraManager> mCameraManager;
 #endif
 };
