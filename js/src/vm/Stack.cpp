@@ -171,9 +171,7 @@ AssertDynamicScopeMatchesStaticScope(JSContext *cx, JSScript *script, JSObject *
 
     // The scope chain is always ended by one or more non-syntactic
     // ScopeObjects (viz. GlobalObject or a non-syntactic WithObject).
-    MOZ_ASSERT(!scope->is<ScopeObject>() ||
-               (scope->is<DynamicWithObject>() &&
-                !scope->as<DynamicWithObject>().isSyntactic()));
+    MOZ_ASSERT(IsValidTerminatingScope(scope));
 #endif
 }
 
@@ -240,7 +238,7 @@ InterpreterFrame::epilogue(JSContext *cx)
                 DebugScopes::onPopStrictEvalScope(this);
         } else if (isDirectEvalFrame()) {
             if (isDebuggerEvalFrame())
-                MOZ_ASSERT(!scopeChain()->is<ScopeObject>());
+                MOZ_ASSERT(IsValidTerminatingScope(scopeChain()));
         } else {
             /*
              * Debugger.Object.prototype.evalInGlobal creates indirect eval
@@ -260,9 +258,7 @@ InterpreterFrame::epilogue(JSContext *cx)
     }
 
     if (isGlobalFrame()) {
-        MOZ_ASSERT(!scopeChain()->is<ScopeObject>() ||
-                   (scopeChain()->is<DynamicWithObject>() &&
-                    !scopeChain()->as<DynamicWithObject>().isSyntactic()));
+        MOZ_ASSERT(IsValidTerminatingScope(scopeChain()));
         return;
     }
 
@@ -1111,12 +1107,6 @@ FrameIter::matchCallee(JSContext *cx, HandleFunction fun) const
     {
         return false;
     }
-
-    // Only some lambdas are optimized in a way which cannot be recovered without
-    // invalidating the frame. Thus, if one of the function is not a lambda we can just
-    // compare it against the calleeTemplate.
-    if (!fun->isLambda() || !currentCallee->isLambda())
-        return currentCallee == fun;
 
     // Use the same condition as |js::CloneFunctionObject|, to know if we should
     // expect both functions to have the same JSScript. If so, and if they are

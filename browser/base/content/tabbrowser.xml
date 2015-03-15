@@ -1498,7 +1498,7 @@
             aBrowser.setAttribute("remote", aShouldBeRemote ? "true" : "false");
             // Tearing down the browser gives a new permanentKey but we want to
             // keep the old one. Re-set it explicitly after unbinding from DOM.
-            aBrowser.permanentKey = permanentKey;
+            aBrowser._permanentKey = permanentKey;
             parent.appendChild(aBrowser);
 
             // Restore the progress listener.
@@ -5511,6 +5511,8 @@
           if (this._selectedPanel != panel) {
             var event = document.createEvent("Events");
             event.initEvent("select", true, true);
+            event.fromTab = fromTab;
+            event.toTab = toTab;
             this.dispatchEvent(event);
 
             this._selectedIndex = val;

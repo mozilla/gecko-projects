@@ -2403,8 +2403,8 @@ nsLayoutUtils::TransformPoint(nsIFrame* aFromFrame, nsIFrame* aToFrame,
     // coordinate space.
     return NONINVERTIBLE_TRANSFORM;
   }
-  aPoint.x = toDevPixels.x / devPixelsPerAppUnitToFrame;
-  aPoint.y = toDevPixels.y / devPixelsPerAppUnitToFrame;
+  aPoint.x = NSToCoordRound(toDevPixels.x / devPixelsPerAppUnitToFrame);
+  aPoint.y = NSToCoordRound(toDevPixels.y / devPixelsPerAppUnitToFrame);
   return TRANSFORM_SUCCEEDED;
 }
 
@@ -5597,7 +5597,7 @@ nsLayoutUtils::GetClosestLayer(nsIFrame* aFrame)
 {
   nsIFrame* layer;
   for (layer = aFrame; layer; layer = layer->GetParent()) {
-    if (layer->IsPositioned() ||
+    if (layer->IsAbsPosContaininingBlock() ||
         (layer->GetParent() &&
           layer->GetParent()->GetType() == nsGkAtoms::scrollFrame))
       break;

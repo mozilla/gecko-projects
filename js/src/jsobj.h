@@ -33,7 +33,7 @@ struct ClassInfo;
 
 namespace js {
 
-class AutoPropDescVector;
+class AutoPropertyDescriptorVector;
 class GCMarker;
 struct NativeIterator;
 class Nursery;
@@ -69,8 +69,6 @@ CastAsObjectJsval(SetterOp op)
 }
 
 /******************************************************************************/
-
-typedef Vector<PropDesc, 1> PropDescArray;
 
 extern const Class IntlClass;
 extern const Class JSONClass;
@@ -767,20 +765,13 @@ GetOwnPropertyDescriptor(JSContext *cx, HandleObject obj, HandleId id,
  * the DefineProperty functions do not enforce some invariants mandated by ES6.
  */
 extern bool
-StandardDefineProperty(JSContext *cx, HandleObject obj, HandleId id, const PropDesc &desc,
-                       ObjectOpResult &result);
-
-extern bool
 StandardDefineProperty(JSContext *cx, HandleObject obj, HandleId id,
                        Handle<PropertyDescriptor> descriptor, ObjectOpResult &result);
 
 /*
- * For convenience, signatures identical to the above except without the
- * ObjectOpResult out-parameter. They throw a TypeError on failure.
+ * Same as above except without the ObjectOpResult out-parameter. Throws a
+ * TypeError on failure.
  */
-extern bool
-StandardDefineProperty(JSContext *cx, HandleObject obj, HandleId id, const PropDesc &desc);
-
 extern bool
 StandardDefineProperty(JSContext *cx, HandleObject obj, HandleId id,
                        Handle<PropertyDescriptor> desc);
@@ -1117,36 +1108,6 @@ extern const char js_lookupSetter_str[];
 
 namespace js {
 
-/*
- * The NewObjectKind allows an allocation site to specify the type properties
- * and lifetime requirements that must be fixed at allocation time.
- */
-enum NewObjectKind {
-    /* This is the default. Most objects are generic. */
-    GenericObject,
-
-    /*
-     * Singleton objects are treated specially by the type system. This flag
-     * ensures that the new object is automatically set up correctly as a
-     * singleton and is allocated in the correct heap.
-     */
-    SingletonObject,
-
-    /*
-     * Objects which may be marked as a singleton after allocation must still
-     * be allocated on the correct heap, but are not automatically setup as a
-     * singleton after allocation.
-     */
-    MaybeSingletonObject,
-
-    /*
-     * Objects which will not benefit from being allocated in the nursery
-     * (e.g. because they are known to have a long lifetime) may be allocated
-     * with this kind to place them immediately into the tenured generation.
-     */
-    TenuredObject
-};
-
 inline gc::InitialHeap
 GetInitialHeap(NewObjectKind newKind, const Class *clasp)
 {
@@ -1174,11 +1135,39 @@ CreateThis(JSContext *cx, const js::Class *clasp, js::HandleObject callee);
 extern JSObject *
 CloneObject(JSContext *cx, HandleObject obj, Handle<js::TaggedProto> proto);
 
-extern NativeObject *
-DeepCloneObjectLiteral(JSContext *cx, HandleNativeObject obj, NewObjectKind newKind = GenericObject);
+extern JSObject *
+DeepCloneObjectLiteral(JSContext *cx, HandleObject obj, NewObjectKind newKind = GenericObject);
 
 extern bool
 DefineProperties(JSContext *cx, HandleObject obj, HandleObject props);
+
+inline JSGetterOp
+CastAsGetterOp(JSObject *object)
+{
+    return JS_DATA_TO_FUNC_PTR(JSGetterOp, object);
+}
+
+inline JSSetterOp
+CastAsSetterOp(JSObject *object)
+{
+    return JS_DATA_TO_FUNC_PTR(JSSetterOp, object);
+}
+
+/* ES6 draft rev 32 (2015 Feb 2) 6.2.4.5 ToPropertyDescriptor(Obj) */
+bool
+ToPropertyDescriptor(JSContext *cx, HandleValue descval, bool checkAccessors,
+                     MutableHandle<PropertyDescriptor> desc);
+
+/*
+ * Throw a TypeError if desc.getterObject() or setterObject() is not
+ * callable. This performs exactly the checks omitted by ToPropertyDescriptor
+ * when checkAccessors is false.
+ */
+bool
+CheckPropertyDescriptorAccessors(JSContext *cx, Handle<PropertyDescriptor> desc);
+
+void
+CompletePropertyDescriptor(MutableHandle<PropertyDescriptor> desc);
 
 /*
  * Read property descriptors from props, as for Object.defineProperties. See
@@ -1186,7 +1175,7 @@ DefineProperties(JSContext *cx, HandleObject obj, HandleObject props);
  */
 extern bool
 ReadPropertyDescriptors(JSContext *cx, HandleObject props, bool checkAccessors,
-                        AutoIdVector *ids, AutoPropDescVector *descs);
+                        AutoIdVector *ids, AutoPropertyDescriptorVector *descs);
 
 /* Read the name using a dynamic lookup on the scopeChain. */
 extern bool
@@ -1241,8 +1230,9 @@ GetOwnPropertyDescriptor(JSContext *cx, HandleObject obj, HandleId id,
 bool
 GetOwnPropertyDescriptor(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp);
 
+/* ES6 draft rev 32 (2015 Feb 2) 6.2.4.4 FromPropertyDescriptor(Desc) */
 bool
-NewPropertyDescriptorObject(JSContext *cx, Handle<PropertyDescriptor> desc, MutableHandleValue vp);
+FromPropertyDescriptor(JSContext *cx, Handle<PropertyDescriptor> desc, MutableHandleValue vp);
 
 extern bool
 IsDelegate(JSContext *cx, HandleObject obj, const Value &v, bool *result);
@@ -1271,7 +1261,7 @@ ToObjectFromStack(JSContext *cx, HandleValue vp)
 
 template<XDRMode mode>
 bool
-XDRObjectLiteral(XDRState<mode> *xdr, MutableHandleNativeObject obj);
+XDRObjectLiteral(XDRState<mode> *xdr, MutableHandleObject obj);
 
 extern JSObject *
 CloneObjectLiteral(JSContext *cx, HandleObject parent, HandleObject srcObj);

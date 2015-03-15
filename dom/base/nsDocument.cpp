@@ -6246,8 +6246,7 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
         return;
       }
 
-      // Check if non-configurable
-      if (desc.isPermanent()) {
+      if (!desc.configurable()) {
         rv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
         return;
       }
@@ -7895,6 +7894,15 @@ nsDocument::GetViewportInfo(const ScreenIntSize& aDisplaySize)
 
   CSSToScreenScale defaultScale = layoutDeviceScale
                                 * LayoutDeviceToScreenScale(1.0);
+  // Get requested Desktopmode
+  nsPIDOMWindow* win = GetWindow();
+  if (win && win->IsDesktopModeViewport())
+  {
+    return nsViewportInfo(aDisplaySize,
+                          defaultScale,
+                          /*allowZoom*/false,
+                          /*allowDoubleTapZoom*/ true);
+  }
 
   if (!Preferences::GetBool("dom.meta-viewport.enabled", false)) {
     return nsViewportInfo(aDisplaySize,

@@ -988,16 +988,14 @@ ReadAllocation(const JitFrameIterator &frame, const LAllocation *a)
 #endif
 
 static void
-MarkThisAndArguments(JSTracer *trc, const JitFrameIterator &frame)
+MarkThisAndArguments(JSTracer *trc, JitFrameLayout *layout)
 {
     // Mark |this| and any extra actual arguments for an Ion frame. Marking of
     // formal arguments is taken care of by the frame's safepoint/snapshot,
     // except when the script might have lazy arguments, in which case we mark
     // them as well.
 
-    JitFrameLayout *layout = frame.jsFrame();
-
-    size_t nargs = frame.numActualArgs();
+    size_t nargs = layout->numActualArgs();
     size_t nformals = 0;
     if (CalleeTokenIsFunction(layout->calleeToken())) {
         JSFunction *fun = CalleeTokenToFunction(layout->calleeToken());
@@ -1012,6 +1010,13 @@ MarkThisAndArguments(JSTracer *trc, const JitFrameIterator &frame)
     // Trace actual arguments beyond the formals. Note + 1 for thisv.
     for (size_t i = nformals + 1; i < nargs + 1; i++)
         gc::MarkValueRoot(trc, &argv[i], "ion-argv");
+}
+
+static void
+MarkThisAndArguments(JSTracer *trc, const JitFrameIterator &frame)
+{
+    JitFrameLayout *layout = frame.jsFrame();
+    MarkThisAndArguments(trc, layout);
 }
 
 #ifdef JS_NUNBOX32
@@ -1349,6 +1354,16 @@ MarkJitExitFrame(JSTracer *trc, const JitFrameIterator &frame)
         } else {
             gc::MarkValueRoot(trc, dom->vp(), "ion-dom-args");
         }
+        return;
+    }
+
+    if (frame.isExitFrameLayout<LazyLinkExitFrameLayout>()) {
+        LazyLinkExitFrameLayout *ll = frame.exitFrame()->as<LazyLinkExitFrameLayout>();
+        JitFrameLayout *layout = ll->jsFrame();
+
+        gc::MarkJitCodeRoot(trc, ll->stubCode(), "lazy-link-code");
+        layout->replaceCalleeToken(MarkCalleeToken(trc, layout->calleeToken()));
+        MarkThisAndArguments(trc, layout);
         return;
     }
 
@@ -2966,7 +2981,16 @@ JitProfilingFrameIterator::tryInitWithTable(JitcodeGlobalTable *table, void *pc,
 
     JSScript *callee = frameScript();
 
-    MOZ_ASSERT(entry.isIon() || entry.isBaseline() || entry.isIonCache());
+    MOZ_ASSERT(entry.isIon() || entry.isBaseline() || entry.isIonCache() || entry.isDummy());
+
+    // Treat dummy lookups as an empty frame sequence.
+    if (entry.isDummy()) {
+        type_ = JitFrame_Entry;
+        fp_ = nullptr;
+        returnAddressToFp_ = nullptr;
+        return true;
+    }
+
     if (entry.isIon()) {
         // If looked-up callee doesn't match frame callee, don't accept lastProfilingCallSite
         if (entry.ionEntry().getScript(0) != callee)

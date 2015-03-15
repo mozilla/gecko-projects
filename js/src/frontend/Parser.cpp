@@ -39,6 +39,7 @@
 #include "jsscriptinlines.h"
 
 #include "frontend/ParseNode-inl.h"
+#include "vm/ScopeObject-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -1236,7 +1237,7 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind, Hand
     gc::AllocKind allocKind = JSFunction::FinalizeKind;
     if (kind == Arrow)
         allocKind = JSFunction::ExtendedFinalizeKind;
-    fun = NewFunctionWithProto(context, NullPtr(), nullptr, 0, flags, NullPtr(), atom, proto,
+    fun = NewFunctionWithProto(context, nullptr, 0, flags, NullPtr(), atom, proto,
                                allocKind, MaybeSingletonObject);
     if (!fun)
         return nullptr;

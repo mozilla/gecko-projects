@@ -420,21 +420,6 @@ JSObject::wasNewScriptCleared() const
 
 namespace js {
 
-PropDesc::PropDesc(const Value &getter, const Value &setter,
-                   Enumerability enumerable, Configurability configurable)
-  : value_(UndefinedValue()),
-    get_(getter), set_(setter),
-    attrs(JSPROP_GETTER | JSPROP_SETTER | JSPROP_SHARED |
-          (enumerable ? JSPROP_ENUMERATE : 0) |
-          (configurable ? 0 : JSPROP_PERMANENT)),
-    hasGet_(true), hasSet_(true),
-    hasValue_(false), hasWritable_(false), hasEnumerable_(true), hasConfigurable_(true),
-    isUndefined_(false)
-{
-    MOZ_ASSERT(getter.isUndefined() || IsCallable(getter));
-    MOZ_ASSERT(setter.isUndefined() || IsCallable(setter));
-}
-
 static MOZ_ALWAYS_INLINE bool
 IsFunctionObject(const js::Value &v)
 {
@@ -568,15 +553,17 @@ inline bool
 IsInternalFunctionObject(JSObject *funobj)
 {
     JSFunction *fun = &funobj->as<JSFunction>();
-    return fun->isLambda() && !funobj->getParent();
+    MOZ_ASSERT_IF(fun->isLambda(),
+                  fun->isInterpreted() || fun->isAsmJSNative());
+    return fun->isLambda() && fun->isInterpreted() && !fun->environment();
 }
 
-class AutoPropDescVector : public AutoVectorRooter<PropDesc>
+class AutoPropertyDescriptorVector : public AutoVectorRooter<PropertyDescriptor>
 {
   public:
-    explicit AutoPropDescVector(JSContext *cx
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-        : AutoVectorRooter<PropDesc>(cx, DESCVECTOR)
+    explicit AutoPropertyDescriptorVector(JSContext *cx
+                                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+        : AutoVectorRooter(cx, DESCVECTOR)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
@@ -682,19 +669,19 @@ NewObjectWithClassProto(ExclusiveContext *cx, const Class *clasp, HandleObject p
 
 template<typename T>
 inline T *
-NewObjectWithProto(ExclusiveContext *cx, HandleObject proto, HandleObject parent,
+NewObjectWithProto(ExclusiveContext *cx, HandleObject proto,
                    gc::AllocKind allocKind, NewObjectKind newKind = GenericObject)
 {
-    JSObject *obj = NewObjectWithClassProto(cx, &T::class_, proto, parent, allocKind, newKind);
+    JSObject *obj = NewObjectWithClassProto(cx, &T::class_, proto, NullPtr(), allocKind, newKind);
     return obj ? &obj->as<T>() : nullptr;
 }
 
 template<typename T>
 inline T *
-NewObjectWithProto(ExclusiveContext *cx, HandleObject proto, HandleObject parent,
+NewObjectWithProto(ExclusiveContext *cx, HandleObject proto,
                    NewObjectKind newKind = GenericObject)
 {
-    JSObject *obj = NewObjectWithClassProto(cx, &T::class_, proto, parent, newKind);
+    JSObject *obj = NewObjectWithClassProto(cx, &T::class_, proto, NullPtr(), newKind);
     return obj ? &obj->as<T>() : nullptr;
 }
 
@@ -737,12 +724,12 @@ bool
 NewObjectScriptedCall(JSContext *cx, MutableHandleObject obj);
 
 JSObject *
-NewObjectWithGroupCommon(JSContext *cx, HandleObjectGroup group, HandleObject parent,
+NewObjectWithGroupCommon(ExclusiveContext *cx, HandleObjectGroup group, HandleObject parent,
                          gc::AllocKind allocKind, NewObjectKind newKind);
 
 template <typename T>
 inline T *
-NewObjectWithGroup(JSContext *cx, HandleObjectGroup group, HandleObject parent,
+NewObjectWithGroup(ExclusiveContext *cx, HandleObjectGroup group, HandleObject parent,
                    gc::AllocKind allocKind, NewObjectKind newKind = GenericObject)
 {
     JSObject *obj = NewObjectWithGroupCommon(cx, group, parent, allocKind, newKind);
@@ -751,7 +738,7 @@ NewObjectWithGroup(JSContext *cx, HandleObjectGroup group, HandleObject parent,
 
 template <typename T>
 inline T *
-NewObjectWithGroup(JSContext *cx, HandleObjectGroup group, HandleObject parent,
+NewObjectWithGroup(ExclusiveContext *cx, HandleObjectGroup group, HandleObject parent,
                    NewObjectKind newKind = GenericObject)
 {
     gc::AllocKind allocKind = gc::GetGCObjectKind(group->clasp());
@@ -768,7 +755,7 @@ GuessObjectGCKind(size_t numSlots)
 {
     if (numSlots)
         return gc::GetGCObjectKind(numSlots);
-    return gc::FINALIZE_OBJECT4;
+    return gc::AllocKind::OBJECT4;
 }
 
 static inline gc::AllocKind
@@ -776,7 +763,7 @@ GuessArrayGCKind(size_t numSlots)
 {
     if (numSlots)
         return gc::GetGCArrayKind(numSlots);
-    return gc::FINALIZE_OBJECT8;
+    return gc::AllocKind::OBJECT8;
 }
 
 inline bool

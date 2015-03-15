@@ -21,7 +21,9 @@ add_task(function* prepare() {
   gList = ReadingList;
   Assert.ok(gList);
   gDBFile.append(gList._store.pathRelativeToProfileDir);
-  do_register_cleanup(() => {
+  do_register_cleanup(function* () {
+    // Wait for the list's store to close its connection to the database.
+    yield gList.destroy();
     if (gDBFile.exists()) {
       gDBFile.remove(true);
     }
@@ -695,7 +697,7 @@ function hash(str) {
   hasher.updateFromStream(stream, -1);
   let binaryStr = hasher.finish(false);
   let hexStr =
-    [("0" + binaryStr.charCodeAt(i).toString(16)).slice(-2) for (i in hash)].
+    [("0" + binaryStr.charCodeAt(i).toString(16)).slice(-2) for (i in binaryStr)].
     join("");
   return hexStr;
 }

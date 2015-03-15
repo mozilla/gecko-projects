@@ -107,11 +107,11 @@
                          data-view="js-flamegraph" />
           <toolbarbutton id="select-memory-calltree-view"
                          class="devtools-toolbarbutton devtools-button"
-                         label="&profilerUI.toolbar.memory-calltree;"
+                         label="&profilerUI.toolbar.memory-calltree1;"
                          data-view="memory-calltree" />
           <toolbarbutton id="select-memory-flamegraph-view"
                          class="devtools-toolbarbutton devtools-button"
-                         label="&profilerUI.toolbar.memory-flamegraph;"
+                         label="&profilerUI.toolbar.memory-flamegraph1;"
                          data-view="memory-flamegraph" />
         </hbox>
         <spacer flex="1"></spacer>
@@ -198,33 +198,13 @@
               <vbox id="memory-calltree-view" flex="1">
                 <hbox class="call-tree-headers-container">
                   <label class="plain call-tree-header"
-                         type="duration"
-                         crop="end"
-                         value="&profilerUI.table.totalDuration2;"/>
-                  <label class="plain call-tree-header"
-                         type="percentage"
-                         crop="end"
-                         value="&profilerUI.table.totalPercentage;"/>
-                  <label class="plain call-tree-header"
                          type="allocations"
                          crop="end"
                          value="&profilerUI.table.totalAlloc;"/>
                   <label class="plain call-tree-header"
-                         type="self-duration"
-                         crop="end"
-                         value="&profilerUI.table.selfDuration2;"/>
-                  <label class="plain call-tree-header"
-                         type="self-percentage"
-                         crop="end"
-                         value="&profilerUI.table.selfPercentage;"/>
-                  <label class="plain call-tree-header"
                          type="self-allocations"
                          crop="end"
                          value="&profilerUI.table.selfAlloc;"/>
-                  <label class="plain call-tree-header"
-                         type="samples"
-                         crop="end"
-                         value="&profilerUI.table.samples;"/>
                   <label class="plain call-tree-header"
                          type="function"
                          crop="end"

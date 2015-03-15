@@ -149,6 +149,7 @@ struct JSCompartment
     bool                         isSystem;
     bool                         isSelfHosting;
     bool                         marked;
+    bool                         warnedAboutNoSuchMethod;
 
     // A null add-on ID means that the compartment is not associated with an
     // add-on.
@@ -347,7 +348,6 @@ struct JSCompartment
     bool wrap(JSContext *cx, JS::MutableHandleObject obj,
               JS::HandleObject existingArg = js::NullPtr());
     bool wrap(JSContext *cx, JS::MutableHandle<js::PropertyDescriptor> desc);
-    bool wrap(JSContext *cx, JS::MutableHandle<js::PropDesc> desc);
 
     template<typename T> bool wrap(JSContext *cx, JS::AutoVectorRooter<T> &vec) {
         for (size_t i = 0; i < vec.length(); ++i) {

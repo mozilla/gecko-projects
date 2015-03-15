@@ -452,7 +452,7 @@ Debugger::getScriptFrameWithIter(JSContext *cx, AbstractFramePtr frame,
         /* Create and populate the Debugger.Frame object. */
         RootedObject proto(cx, &object->getReservedSlot(JSSLOT_DEBUG_FRAME_PROTO).toObject());
         RootedNativeObject frameobj(cx, NewNativeObjectWithGivenProto(cx, &DebuggerFrame_class,
-                                                                      proto, NullPtr()));
+                                                                      proto));
         if (!frameobj)
             return false;
 
@@ -762,7 +762,7 @@ Debugger::wrapEnvironment(JSContext *cx, Handle<Env*> env, MutableHandleValue rv
      * DebuggerEnv should only wrap a debug scope chain obtained (transitively)
      * from GetDebugScopeFor(Frame|Function).
      */
-    MOZ_ASSERT(!env->is<ScopeObject>());
+    MOZ_ASSERT(IsValidTerminatingScope(env));
 
     NativeObject *envobj;
     DependentAddPtr<ObjectWeakMap> p(cx, environments, env);
@@ -771,7 +771,7 @@ Debugger::wrapEnvironment(JSContext *cx, Handle<Env*> env, MutableHandleValue rv
     } else {
         /* Create a new Debugger.Environment for env. */
         RootedObject proto(cx, &object->getReservedSlot(JSSLOT_DEBUG_ENV_PROTO).toObject());
-        envobj = NewNativeObjectWithGivenProto(cx, &DebuggerEnv_class, proto, NullPtr(),
+        envobj = NewNativeObjectWithGivenProto(cx, &DebuggerEnv_class, proto,
                                                TenuredObject);
         if (!envobj)
             return false;
@@ -814,7 +814,7 @@ Debugger::wrapDebuggeeValue(JSContext *cx, MutableHandleValue vp)
             /* Create a new Debugger.Object for obj. */
             RootedObject proto(cx, &object->getReservedSlot(JSSLOT_DEBUG_OBJECT_PROTO).toObject());
             NativeObject *dobj =
-                NewNativeObjectWithGivenProto(cx, &DebuggerObject_class, proto, NullPtr(),
+                NewNativeObjectWithGivenProto(cx, &DebuggerObject_class, proto,
                                               TenuredObject);
             if (!dobj)
                 return false;
@@ -869,41 +869,46 @@ Debugger::wrapDebuggeeValue(JSContext *cx, MutableHandleValue vp)
 }
 
 bool
+Debugger::unwrapDebuggeeObject(JSContext *cx, MutableHandleObject obj)
+{
+    if (obj->getClass() != &DebuggerObject_class) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
+                             "Debugger", "Debugger.Object", obj->getClass()->name);
+        return false;
+    }
+    NativeObject *ndobj = &obj->as<NativeObject>();
+
+    Value owner = ndobj->getReservedSlot(JSSLOT_DEBUGOBJECT_OWNER);
+    if (owner.isUndefined() || &owner.toObject() != object) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                             owner.isUndefined()
+                             ? JSMSG_DEBUG_OBJECT_PROTO
+                             : JSMSG_DEBUG_OBJECT_WRONG_OWNER);
+        return false;
+    }
+
+    obj.set(static_cast<JSObject*>(ndobj->getPrivate()));
+    return true;
+}
+
+bool
 Debugger::unwrapDebuggeeValue(JSContext *cx, MutableHandleValue vp)
 {
     assertSameCompartment(cx, object.get(), vp);
     if (vp.isObject()) {
-        JSObject *dobj = &vp.toObject();
-        if (dobj->getClass() != &DebuggerObject_class) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
-                                 "Debugger", "Debugger.Object", dobj->getClass()->name);
+        RootedObject dobj(cx, &vp.toObject());
+        if (!unwrapDebuggeeObject(cx, &dobj))
             return false;
-        }
-        NativeObject *ndobj = &dobj->as<NativeObject>();
-
-        Value owner = ndobj->getReservedSlot(JSSLOT_DEBUGOBJECT_OWNER);
-        if (owner.isUndefined() || &owner.toObject() != object) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                                 owner.isUndefined()
-                                 ? JSMSG_DEBUG_OBJECT_PROTO
-                                 : JSMSG_DEBUG_OBJECT_WRONG_OWNER);
-            return false;
-        }
-
-        vp.setObject(*static_cast<JSObject*>(ndobj->getPrivate()));
+        vp.setObject(*dobj);
     }
     return true;
 }
 
-/*
- * Convert Debugger.Objects in desc to debuggee values.
- * Reject non-callable getters and setters.
- */
 static bool
-CheckArgCompartment(JSContext *cx, JSObject *obj, HandleValue v,
+CheckArgCompartment(JSContext *cx, JSObject *obj, JSObject *arg,
                     const char *methodname, const char *propname)
 {
-    if (v.isObject() && v.toObject().compartment() != obj->compartment()) {
+    if (arg->compartment() != obj->compartment()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEBUG_COMPARTMENT_MISMATCH,
                              methodname, propname);
         return false;
@@ -911,42 +916,47 @@ CheckArgCompartment(JSContext *cx, JSObject *obj, HandleValue v,
     return true;
 }
 
-bool
-Debugger::unwrapPropDescInto(JSContext *cx, HandleObject obj, Handle<PropDesc> wrapped,
-                             MutableHandle<PropDesc> unwrapped)
+static bool
+CheckArgCompartment(JSContext *cx, JSObject *obj, HandleValue v,
+                    const char *methodname, const char *propname)
 {
-    MOZ_ASSERT(!wrapped.isUndefined());
+    if (v.isObject())
+        return CheckArgCompartment(cx, obj, &v.toObject(), methodname, propname);
+    return true;
+}
 
-    unwrapped.set(wrapped);
-
-    if (unwrapped.hasValue()) {
-        RootedValue value(cx, unwrapped.value());
+bool
+Debugger::unwrapPropertyDescriptor(JSContext *cx, HandleObject obj,
+                                   MutableHandle<PropertyDescriptor> desc)
+{
+    if (desc.hasValue()) {
+        RootedValue value(cx, desc.value());
         if (!unwrapDebuggeeValue(cx, &value) ||
             !CheckArgCompartment(cx, obj, value, "defineProperty", "value"))
         {
             return false;
         }
-        unwrapped.setValue(value);
+        desc.setValue(value);
     }
 
-    if (unwrapped.hasGet()) {
-        RootedValue get(cx, unwrapped.getterValue());
-        if (!unwrapDebuggeeValue(cx, &get) ||
+    if (desc.hasGetterObject()) {
+        RootedObject get(cx, desc.getterObject());
+        if (!unwrapDebuggeeObject(cx, &get) ||
             !CheckArgCompartment(cx, obj, get, "defineProperty", "get"))
         {
             return false;
         }
-        unwrapped.setGetter(get);
+        desc.setGetterObject(get);
     }
 
-    if (unwrapped.hasSet()) {
-        RootedValue set(cx, unwrapped.setterValue());
-        if (!unwrapDebuggeeValue(cx, &set) ||
+    if (desc.hasSetterObject()) {
+        RootedObject set(cx, desc.setterObject());
+        if (!unwrapDebuggeeObject(cx, &set) ||
             !CheckArgCompartment(cx, obj, set, "defineProperty", "set"))
         {
             return false;
         }
-        unwrapped.setSetter(set);
+        desc.setSetterObject(set);
     }
 
     return true;
@@ -1920,7 +1930,7 @@ UpdateExecutionObservabilityOfScriptsInZone(JSContext *cx, Zone *zone,
                     return false;
             }
         } else {
-            for (gc::ZoneCellIter iter(zone, gc::FINALIZE_SCRIPT); !iter.done(); iter.next()) {
+            for (gc::ZoneCellIter iter(zone, gc::AllocKind::SCRIPT); !iter.done(); iter.next()) {
                 JSScript *script = iter.get<JSScript>();
                 if (obs.shouldRecompileOrInvalidate(script) &&
                     !gc::IsScriptAboutToBeFinalized(&script))
@@ -2917,8 +2927,7 @@ Debugger::construct(JSContext *cx, unsigned argc, Value *vp)
      * Debugger.{Frame,Object,Script,Memory}.prototype in reserved slots. The
      * rest of the reserved slots are for hooks; they default to undefined.
      */
-    RootedNativeObject obj(cx, NewNativeObjectWithGivenProto(cx, &Debugger::jsclass, proto,
-                                                             NullPtr()));
+    RootedNativeObject obj(cx, NewNativeObjectWithGivenProto(cx, &Debugger::jsclass, proto));
     if (!obj)
         return false;
     for (unsigned slot = JSSLOT_DEBUG_PROTO_START; slot < JSSLOT_DEBUG_PROTO_STOP; slot++)
@@ -4160,7 +4169,7 @@ Debugger::newDebuggerScript(JSContext *cx, HandleScript script)
     RootedObject proto(cx, &object->getReservedSlot(JSSLOT_DEBUG_SCRIPT_PROTO).toObject());
     MOZ_ASSERT(proto);
     NativeObject *scriptobj = NewNativeObjectWithGivenProto(cx, &DebuggerScript_class,
-                                                            proto, NullPtr(), TenuredObject);
+                                                            proto, TenuredObject);
     if (!scriptobj)
         return nullptr;
     scriptobj->setReservedSlot(JSSLOT_DEBUGSCRIPT_OWNER, ObjectValue(*object));
@@ -5182,7 +5191,7 @@ Debugger::newDebuggerSource(JSContext *cx, HandleScriptSource source)
     RootedObject proto(cx, &object->getReservedSlot(JSSLOT_DEBUG_SOURCE_PROTO).toObject());
     MOZ_ASSERT(proto);
     NativeObject *sourceobj = NewNativeObjectWithGivenProto(cx, &DebuggerSource_class,
-                                                            proto, NullPtr(), TenuredObject);
+                                                            proto, TenuredObject);
     if (!sourceobj)
         return nullptr;
     sourceobj->setReservedSlot(JSSLOT_DEBUGSOURCE_OWNER, ObjectValue(*object));
@@ -5822,8 +5831,7 @@ DebuggerFrame_getArguments(JSContext *cx, unsigned argc, Value *vp)
         RootedObject proto(cx, GlobalObject::getOrCreateArrayPrototype(cx, global));
         if (!proto)
             return false;
-        argsobj = NewNativeObjectWithGivenProto(cx, &DebuggerArguments_class, proto,
-                                                GlobalObject::upcast(global));
+        argsobj = NewNativeObjectWithGivenProto(cx, &DebuggerArguments_class, proto);
         if (!argsobj)
             return false;
         SetReservedSlot(argsobj, JSSLOT_DEBUGARGUMENTS_FRAME, ObjectValue(*thisobj));
@@ -5840,9 +5848,8 @@ DebuggerFrame_getArguments(JSContext *cx, unsigned argc, Value *vp)
         Rooted<jsid> id(cx);
         for (unsigned i = 0; i < fargc; i++) {
             RootedFunction getobj(cx);
-            getobj = NewFunction(cx, js::NullPtr(), DebuggerArguments_getArg, 0,
-                                 JSFunction::NATIVE_FUN, global, js::NullPtr(),
-                                 JSFunction::ExtendedFinalizeKind);
+            getobj = NewNativeFunction(cx, DebuggerArguments_getArg, 0, js::NullPtr(),
+                                       JSFunction::ExtendedFinalizeKind);
             if (!getobj)
                 return false;
             id = INT_TO_JSID(i);
@@ -6022,8 +6029,9 @@ EvaluateInEnv(JSContext *cx, Handle<Env*> env, HandleValue thisv, AbstractFrameP
      * static level will suffice.
      *
      * Pass in a StaticEvalObject *not* linked to env for evalStaticScope, as
-     * ScopeIter should stop at any non-ScopeObject boundaries, and we are
-     * putting a DebugScopeProxy on the scope chain.
+     * ScopeIter should stop at any non-ScopeObject or non-syntactic With
+     * boundaries, and we are putting a DebugScopeProxy or non-syntactic With on
+     * the scope chain.
      */
     Rooted<StaticEvalObject *> staticScope(cx, StaticEvalObject::create(cx, js::NullPtr()));
     if (!staticScope)
@@ -6161,8 +6169,7 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
 
     /* If evalWithBindings, create the inner environment. */
     if (evalWithBindings) {
-        /* TODO - This should probably be a Call object, like ES5 strict eval. */
-        RootedPlainObject nenv(cx, NewObjectWithGivenProto<PlainObject>(cx, NullPtr(), env));
+        RootedPlainObject nenv(cx, NewObjectWithGivenProto<PlainObject>(cx, NullPtr(), NullPtr()));
         if (!nenv)
             return false;
         RootedId id(cx);
@@ -6175,7 +6182,22 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
                 return false;
             }
         }
-        env = nenv;
+
+        AutoObjectVector scopeChain(cx);
+        if (!scopeChain.append(nenv))
+            return false;
+
+        RootedObject dynamicScope(cx);
+        // We ignore the static scope here.  See comments about static
+        // scopes in EvaluateInEnv.
+        RootedObject unusedStaticScope(cx);
+        if (!CreateScopeObjectsForScopeChain(cx, scopeChain, env, &dynamicScope,
+                                             &unusedStaticScope))
+        {
+            return false;
+        }
+
+        env = dynamicScope;
     }
 
     /* Run the code and produce the completion value. */
@@ -6666,7 +6688,7 @@ DebuggerObject_getOwnPropertyDescriptor(JSContext *cx, unsigned argc, Value *vp)
         }
     }
 
-    return NewPropertyDescriptorObject(cx, desc, args.rval());
+    return FromPropertyDescriptor(cx, desc, args.rval());
 }
 
 static bool
@@ -6719,13 +6741,13 @@ DebuggerObject_defineProperty(JSContext *cx, unsigned argc, Value *vp)
     if (!ValueToId<CanGC>(cx, args[0], &id))
         return false;
 
-    Rooted<PropDesc> desc(cx);
-    if (!desc.initialize(cx, args[1], false))
+    Rooted<PropertyDescriptor> desc(cx);
+    if (!ToPropertyDescriptor(cx, args[1], false, &desc))
         return false;
 
-    if (!dbg->unwrapPropDescInto(cx, obj, desc, &desc))
+    if (!dbg->unwrapPropertyDescriptor(cx, obj, &desc))
         return false;
-    if (!desc.checkGetter(cx) || !desc.checkSetter(cx))
+    if (!CheckPropertyDescriptorAccessors(cx, desc))
         return false;
 
     {
@@ -6756,15 +6778,15 @@ DebuggerObject_defineProperties(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     AutoIdVector ids(cx);
-    AutoPropDescVector descs(cx);
+    AutoPropertyDescriptorVector descs(cx);
     if (!ReadPropertyDescriptors(cx, props, false, &ids, &descs))
         return false;
     size_t n = ids.length();
 
     for (size_t i = 0; i < n; i++) {
-        if (!dbg->unwrapPropDescInto(cx, obj, descs[i], descs[i]))
+        if (!dbg->unwrapPropertyDescriptor(cx, obj, descs[i]))
             return false;
-        if (!descs[i].checkGetter(cx) || !descs[i].checkSetter(cx))
+        if (!CheckPropertyDescriptorAccessors(cx, descs[i]))
             return false;
     }
 
@@ -7237,7 +7259,7 @@ DebuggerEnv_checkThis(JSContext *cx, const CallArgs &args, const char *fnname,
         return false;                                                         \
     Rooted<Env*> env(cx, static_cast<Env *>(envobj->getPrivate()));           \
     MOZ_ASSERT(env);                                                          \
-    MOZ_ASSERT(!env->is<ScopeObject>())
+    MOZ_ASSERT(IsValidTerminatingScope(env));
  
  #define THIS_DEBUGENV_OWNER(cx, argc, vp, fnname, args, envobj, env, dbg)    \
      THIS_DEBUGENV(cx, argc, vp, fnname, args, envobj, env);                  \

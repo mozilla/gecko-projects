@@ -347,7 +347,7 @@ MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T &src, AnyRegi
             load32(src, dest.gpr());
 
             // Bail out if the value doesn't fit into a signed int32 value. This
-            // is what allows MLoadTypedArrayElement to have a type() of
+            // is what allows MLoadUnboxedScalar to have a type() of
             // MIRType_Int32 for UInt32 array loads.
             branchTest32(Assembler::Signed, dest.gpr(), dest.gpr(), fail);
         }
@@ -993,7 +993,7 @@ void
 MacroAssembler::allocateObject(Register result, Register temp, gc::AllocKind allocKind,
                                uint32_t nDynamicSlots, gc::InitialHeap initialHeap, Label *fail)
 {
-    MOZ_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
+    MOZ_ASSERT(allocKind <= gc::AllocKind::OBJECT_LAST);
 
     checkAllocatorState(fail);
 
@@ -1029,7 +1029,7 @@ MacroAssembler::newGCThing(Register result, Register temp, JSObject *templateObj
                            gc::InitialHeap initialHeap, Label *fail)
 {
     gc::AllocKind allocKind = templateObj->asTenured().getAllocKind();
-    MOZ_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
+    MOZ_ASSERT(allocKind <= gc::AllocKind::OBJECT_LAST);
 
     size_t ndynamic = 0;
     if (templateObj->isNative())
@@ -1039,10 +1039,10 @@ MacroAssembler::newGCThing(Register result, Register temp, JSObject *templateObj
 
 void
 MacroAssembler::createGCObject(Register obj, Register temp, JSObject *templateObj,
-                               gc::InitialHeap initialHeap, Label *fail, bool initFixedSlots)
+                               gc::InitialHeap initialHeap, Label *fail, bool initContents)
 {
     gc::AllocKind allocKind = templateObj->asTenured().getAllocKind();
-    MOZ_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
+    MOZ_ASSERT(allocKind <= gc::AllocKind::OBJECT_LAST);
 
     uint32_t nDynamicSlots = 0;
     if (templateObj->isNative()) {
@@ -1052,11 +1052,11 @@ MacroAssembler::createGCObject(Register obj, Register temp, JSObject *templateOb
         // elements header. The template object, which owns the original
         // elements, might have another allocation kind.
         if (templateObj->as<NativeObject>().denseElementsAreCopyOnWrite())
-            allocKind = gc::FINALIZE_OBJECT0_BACKGROUND;
+            allocKind = gc::AllocKind::OBJECT0_BACKGROUND;
     }
 
     allocateObject(obj, temp, allocKind, nDynamicSlots, initialHeap, fail);
-    initGCThing(obj, temp, templateObj, initFixedSlots);
+    initGCThing(obj, temp, templateObj, initContents);
 }
 
 
@@ -1073,13 +1073,13 @@ MacroAssembler::allocateNonObject(Register result, Register temp, gc::AllocKind 
 void
 MacroAssembler::newGCString(Register result, Register temp, Label *fail)
 {
-    allocateNonObject(result, temp, js::gc::FINALIZE_STRING, fail);
+    allocateNonObject(result, temp, js::gc::AllocKind::STRING, fail);
 }
 
 void
 MacroAssembler::newGCFatInlineString(Register result, Register temp, Label *fail)
 {
-    allocateNonObject(result, temp, js::gc::FINALIZE_FAT_INLINE_STRING, fail);
+    allocateNonObject(result, temp, js::gc::AllocKind::FAT_INLINE_STRING, fail);
 }
 
 void
@@ -1156,7 +1156,7 @@ FindStartOfUndefinedAndUninitializedSlots(NativeObject *templateObj, uint32_t ns
 
 void
 MacroAssembler::initGCSlots(Register obj, Register temp, NativeObject *templateObj,
-                            bool initFixedSlots)
+                            bool initContents)
 {
     // Slots of non-array objects are required to be initialized.
     // Use the values currently in the template object.
@@ -1191,7 +1191,7 @@ MacroAssembler::initGCSlots(Register obj, Register temp, NativeObject *templateO
     copySlotsFromTemplate(obj, templateObj, 0, startOfUndefined);
 
     // Fill the rest of the fixed slots with undefined and uninitialized.
-    if (initFixedSlots) {
+    if (initContents) {
         fillSlotsWithUndefined(Address(obj, NativeObject::getFixedSlotOffset(startOfUndefined)), temp,
                                startOfUndefined, Min(startOfUninitialized, nfixed));
         size_t offset = NativeObject::getFixedSlotOffset(startOfUninitialized);
@@ -1217,7 +1217,7 @@ MacroAssembler::initGCSlots(Register obj, Register temp, NativeObject *templateO
 
 void
 MacroAssembler::initGCThing(Register obj, Register temp, JSObject *templateObj,
-                            bool initFixedSlots)
+                            bool initContents)
 {
     // Fast initialization of an empty object returned by allocateObject().
 
@@ -1259,7 +1259,7 @@ MacroAssembler::initGCThing(Register obj, Register temp, JSObject *templateObj,
         } else {
             storePtr(ImmPtr(emptyObjectElements), Address(obj, NativeObject::offsetOfElements()));
 
-            initGCSlots(obj, temp, ntemplate, initFixedSlots);
+            initGCSlots(obj, temp, ntemplate, initContents);
 
             if (ntemplate->hasPrivate()) {
                 uint32_t nfixed = ntemplate->numFixedSlots();
@@ -1281,26 +1281,10 @@ MacroAssembler::initGCThing(Register obj, Register temp, JSObject *templateObj,
             offset += sizeof(uintptr_t);
         }
     } else if (templateObj->is<UnboxedPlainObject>()) {
-        const UnboxedLayout &layout = templateObj->as<UnboxedPlainObject>().layout();
-
         storePtr(ImmWord(0), Address(obj, JSObject::offsetOfShape()));
 
-        // Initialize reference fields of the object, per UnboxedPlainObject::create.
-        if (const int32_t *list = layout.traceList()) {
-            while (*list != -1) {
-                storePtr(ImmGCPtr(GetJitContext()->runtime->names().empty),
-                         Address(obj, UnboxedPlainObject::offsetOfData() + *list));
-                list++;
-            }
-            list++;
-            while (*list != -1) {
-                storePtr(ImmWord(0),
-                         Address(obj, UnboxedPlainObject::offsetOfData() + *list));
-                list++;
-            }
-            // Unboxed objects don't have Values to initialize.
-            MOZ_ASSERT(*(list + 1) == -1);
-        }
+        if (initContents)
+            initUnboxedObjectContents(obj, &templateObj->as<UnboxedPlainObject>());
     } else {
         MOZ_CRASH("Unknown object");
     }
@@ -1319,6 +1303,29 @@ MacroAssembler::initGCThing(Register obj, Register temp, JSObject *templateObj,
 
     PopRegsInMask(RegisterSet::Volatile());
 #endif
+}
+
+void
+MacroAssembler::initUnboxedObjectContents(Register object, UnboxedPlainObject *templateObject)
+{
+    const UnboxedLayout &layout = templateObject->layout();
+
+    // Initialize reference fields of the object, per UnboxedPlainObject::create.
+    if (const int32_t *list = layout.traceList()) {
+        while (*list != -1) {
+            storePtr(ImmGCPtr(GetJitContext()->runtime->names().empty),
+                     Address(object, UnboxedPlainObject::offsetOfData() + *list));
+            list++;
+        }
+        list++;
+        while (*list != -1) {
+            storePtr(ImmWord(0),
+                     Address(object, UnboxedPlainObject::offsetOfData() + *list));
+            list++;
+        }
+        // Unboxed objects don't have Values to initialize.
+        MOZ_ASSERT(*(list + 1) == -1);
+    }
 }
 
 void

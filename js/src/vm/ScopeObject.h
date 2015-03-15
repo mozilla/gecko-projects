@@ -339,7 +339,7 @@ class DeclEnvObject : public ScopeObject
 
   public:
     static const uint32_t RESERVED_SLOTS = 2;
-    static const gc::AllocKind FINALIZE_KIND = gc::FINALIZE_OBJECT2_BACKGROUND;
+    static const gc::AllocKind FINALIZE_KIND = gc::AllocKind::OBJECT2_BACKGROUND;
 
     static const Class class_;
 
@@ -361,7 +361,7 @@ class StaticEvalObject : public ScopeObject
 
   public:
     static const unsigned RESERVED_SLOTS = 2;
-    static const gc::AllocKind FINALIZE_KIND = gc::FINALIZE_OBJECT2_BACKGROUND;
+    static const gc::AllocKind FINALIZE_KIND = gc::AllocKind::OBJECT2_BACKGROUND;
 
     static const Class class_;
 
@@ -435,7 +435,7 @@ class StaticWithObject : public NestedScopeObject
 {
   public:
     static const unsigned RESERVED_SLOTS = 1;
-    static const gc::AllocKind FINALIZE_KIND = gc::FINALIZE_OBJECT2_BACKGROUND;
+    static const gc::AllocKind FINALIZE_KIND = gc::AllocKind::OBJECT2_BACKGROUND;
 
     static const Class class_;
 
@@ -451,7 +451,7 @@ class DynamicWithObject : public NestedScopeObject
 
   public:
     static const unsigned RESERVED_SLOTS = 4;
-    static const gc::AllocKind FINALIZE_KIND = gc::FINALIZE_OBJECT4_BACKGROUND;
+    static const gc::AllocKind FINALIZE_KIND = gc::AllocKind::OBJECT4_BACKGROUND;
 
     static const Class class_;
 
@@ -504,7 +504,7 @@ class BlockObject : public NestedScopeObject
 
   public:
     static const unsigned RESERVED_SLOTS = 2;
-    static const gc::AllocKind FINALIZE_KIND = gc::FINALIZE_OBJECT4_BACKGROUND;
+    static const gc::AllocKind FINALIZE_KIND = gc::AllocKind::OBJECT4_BACKGROUND;
 
     static const Class class_;
 
@@ -690,7 +690,7 @@ class UninitializedLexicalObject : public ScopeObject
 {
   public:
     static const unsigned RESERVED_SLOTS = 1;
-    static const gc::AllocKind FINALIZE_KIND = gc::FINALIZE_OBJECT2_BACKGROUND;
+    static const gc::AllocKind FINALIZE_KIND = gc::AllocKind::OBJECT2_BACKGROUND;
 
     static const Class class_;
 
@@ -1031,17 +1031,15 @@ JSObject::is<js::StaticBlockObject>() const
     return is<js::BlockObject>() && !getProto();
 }
 
-inline JSObject *
-JSObject::enclosingScope()
-{
-    return is<js::ScopeObject>()
-           ? &as<js::ScopeObject>().enclosingScope()
-           : is<js::DebugScopeObject>()
-           ? &as<js::DebugScopeObject>().enclosingScope()
-           : getParent();
-}
-
 namespace js {
+
+inline bool
+IsValidTerminatingScope(JSObject* scope)
+{
+    return !scope->is<ScopeObject>() ||
+           (scope->is<DynamicWithObject>() &&
+            !scope->as<DynamicWithObject>().isSyntactic());
+}
 
 inline const Value &
 ScopeObject::aliasedVar(ScopeCoordinate sc)
@@ -1084,9 +1082,15 @@ ScopeIter::enclosingScope() const
     // chain; every scope chain must start with zero or more ScopeObjects and
     // terminate with one or more non-ScopeObjects (viz., GlobalObject).
     MOZ_ASSERT(done());
-    MOZ_ASSERT(!scope_->is<ScopeObject>());
+    MOZ_ASSERT(IsValidTerminatingScope(scope_));
     return *scope_;
 }
+
+extern bool
+CreateScopeObjectsForScopeChain(JSContext *cx, AutoObjectVector &scopeChain,
+                                HandleObject dynamicTerminatingScope,
+                                MutableHandleObject dynamicScopeObj,
+                                MutableHandleObject staticScopeObj);
 
 #ifdef DEBUG
 bool

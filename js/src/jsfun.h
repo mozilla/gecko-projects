@@ -431,11 +431,11 @@ class JSFunction : public js::NativeObject
     }
 
 #if JS_BITS_PER_WORD == 32
-    static const js::gc::AllocKind FinalizeKind = js::gc::FINALIZE_OBJECT2_BACKGROUND;
-    static const js::gc::AllocKind ExtendedFinalizeKind = js::gc::FINALIZE_OBJECT4_BACKGROUND;
+    static const js::gc::AllocKind FinalizeKind = js::gc::AllocKind::OBJECT2_BACKGROUND;
+    static const js::gc::AllocKind ExtendedFinalizeKind = js::gc::AllocKind::OBJECT4_BACKGROUND;
 #else
-    static const js::gc::AllocKind FinalizeKind = js::gc::FINALIZE_OBJECT4_BACKGROUND;
-    static const js::gc::AllocKind ExtendedFinalizeKind = js::gc::FINALIZE_OBJECT8_BACKGROUND;
+    static const js::gc::AllocKind FinalizeKind = js::gc::AllocKind::OBJECT4_BACKGROUND;
+    static const js::gc::AllocKind ExtendedFinalizeKind = js::gc::AllocKind::OBJECT8_BACKGROUND;
 #endif
 
     inline void trace(JSTracer *trc);
@@ -494,14 +494,6 @@ static_assert(sizeof(JSFunction) == sizeof(js::shadow::Function),
 extern JSString *
 fun_toStringHelper(JSContext *cx, js::HandleObject obj, unsigned indent);
 
-inline JSFunction::Flags
-JSAPIToJSFunctionFlags(unsigned flags)
-{
-    return (flags & JSFUN_CONSTRUCTOR)
-           ? JSFunction::NATIVE_CTOR
-           : JSFunction::NATIVE_FUN;
-}
-
 namespace js {
 
 extern bool
@@ -510,16 +502,33 @@ Function(JSContext *cx, unsigned argc, Value *vp);
 extern bool
 Generator(JSContext *cx, unsigned argc, Value *vp);
 
+// Allocate a new function backed by a JSNative.
 extern JSFunction *
-NewFunction(ExclusiveContext *cx, HandleObject funobj, JSNative native, unsigned nargs,
-            JSFunction::Flags flags, HandleObject parent, HandleAtom atom,
-            gc::AllocKind allocKind = JSFunction::FinalizeKind,
-            NewObjectKind newKind = GenericObject);
+NewNativeFunction(ExclusiveContext *cx, JSNative native, unsigned nargs, HandleAtom atom,
+                  gc::AllocKind allocKind = JSFunction::FinalizeKind,
+                  NewObjectKind newKind = GenericObject);
 
-// If proto is nullptr, Function.prototype is used instead.
+// Allocate a new constructor backed by a JSNative.
 extern JSFunction *
-NewFunctionWithProto(ExclusiveContext *cx, HandleObject funobj, JSNative native, unsigned nargs,
-                     JSFunction::Flags flags, HandleObject parent, HandleAtom atom,
+NewNativeConstructor(ExclusiveContext *cx, JSNative native, unsigned nargs, HandleAtom atom,
+                     gc::AllocKind allocKind = JSFunction::FinalizeKind,
+                     NewObjectKind newKind = GenericObject,
+                     JSFunction::Flags flags = JSFunction::NATIVE_CTOR);
+
+// Allocate a new scripted function.  If null is passed for
+// enclosingDynamicScope, the global will be used.
+extern JSFunction *
+NewScriptedFunction(ExclusiveContext *cx, unsigned nargs, JSFunction::Flags flags,
+                    HandleAtom atom, gc::AllocKind allocKind = JSFunction::FinalizeKind,
+                    NewObjectKind newKind = GenericObject,
+                    HandleObject enclosingDynamicScope = NullPtr());
+
+// If proto is nullptr, Function.prototype is used instead.  If
+// enclosingDynamicScope is null, the function will have a null environment()
+// (yes, null, not the global).
+extern JSFunction *
+NewFunctionWithProto(ExclusiveContext *cx, JSNative native, unsigned nargs,
+                     JSFunction::Flags flags, HandleObject enclosingDynamicScope, HandleAtom atom,
                      HandleObject proto, gc::AllocKind allocKind = JSFunction::FinalizeKind,
                      NewObjectKind newKind = GenericObject);
 

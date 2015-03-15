@@ -3372,7 +3372,7 @@ AccumulateFrameBounds(nsIFrame* aContainerFrame,
     nsIFrame *f = aFrame;
 
     while (f && f->IsFrameOfType(nsIFrame::eLineParticipant) &&
-           !f->IsTransformed() && !f->IsPositioned()) {
+           !f->IsTransformed() && !f->IsAbsPosContaininingBlock()) {
       prevFrame = f;
       f = prevFrame->GetParent();
     }
@@ -7368,6 +7368,12 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         frame == mFrameConstructor->GetRootFrame()) {
       nsIFrame* popupFrame =
         nsLayoutUtils::GetPopupFrameForEventCoordinates(rootPresContext, aEvent);
+      // If a remote browser is currently capturing input break out if we
+      // detect a chrome generated popup.
+      if (popupFrame && capturingContent &&
+          EventStateManager::IsRemoteTarget(capturingContent)) {
+        capturingContent = nullptr;
+      }
       // If the popupFrame is an ancestor of the 'frame', the frame should
       // handle the event, otherwise, the popup should handle it.
       if (popupFrame &&

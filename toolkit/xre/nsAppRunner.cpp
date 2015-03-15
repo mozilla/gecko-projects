@@ -910,6 +910,17 @@ nsXULAppInfo::GetAccessibilityIsUIA(bool* aResult)
 }
 
 NS_IMETHODIMP
+nsXULAppInfo::GetIs64Bit(bool* aResult)
+{
+#ifdef HAVE_64BIT_BUILD
+  *aResult = true;
+#else
+  *aResult = false;
+#endif
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsXULAppInfo::EnsureContentProcess()
 {
   if (XRE_GetProcessType() != GeckoProcessType_Default)
@@ -1671,7 +1682,15 @@ RemoteCommandLine(const char* aDesktopStartupID)
                               gArgc, gArgv, aDesktopStartupID,
                               getter_Copies(response), &success);
   // did the command fail?
-  if (NS_FAILED(rv) || !success)
+  if (!success)
+    return REMOTE_NOT_FOUND;
+
+  // The "command not parseable" error is returned when the
+  // nsICommandLineHandler throws a NS_ERROR_ABORT.
+  if (response.EqualsLiteral("500 command not parseable"))
+    return REMOTE_ARG_BAD;
+
+  if (NS_FAILED(rv))
     return REMOTE_NOT_FOUND;
 
   return REMOTE_FOUND;
