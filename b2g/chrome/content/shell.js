@@ -461,6 +461,16 @@ var shell = {
       return false;
     }
 
+    const once = (event) => {
+      let win = this.contentBrowser;
+      return new Promise((resolve, reject) => {
+        win.addEventListener(event, function gotEvent(evt) {
+          win.removeEventListener(event, gotEvent, false);
+          resolve(evt);
+        }, false);
+      });
+    }
+
     let content = this.contentBrowser.contentWindow;
     switch (evt.type) {
       case 'keydown':
@@ -472,6 +482,10 @@ var shell = {
                         .getService(Ci.nsICacheStorageService);
           cache.clear();
           getContentWindow().location.reload(true);
+          once('mozbrowserlocationchange').then(
+            evt => {
+              shell.sendEvent(window, "ContentStart");
+            });
         } else {
           this.broadcastHardwareKeys(evt);
         }
@@ -734,6 +748,21 @@ var CustomEventManager = {
         break;
       case 'do-command':
         DoCommandHelper.handleEvent(detail.cmd);
+        break;
+      case 'shutdown-application':
+        let appStartup = Cc['@mozilla.org/toolkit/app-startup;1']
+                           .getService(Ci.nsIAppStartup);
+        appStartup.quit(appStartup.eAttemptQuit);
+        break;
+      case 'toggle-fullscreen-native-window':
+        if (document.mozFullScreenElement) {
+          document.mozCancelFullScreen();
+        } else {
+          document.body.mozRequestFullScreen();
+        }
+        break;
+      case 'minimize-native-window':
+        window.minimize();
         break;
     }
   }
