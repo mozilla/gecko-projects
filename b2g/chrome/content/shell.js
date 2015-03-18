@@ -687,6 +687,12 @@ var shell = {
       }
       delete shell.pendingChromeEvents;
     });
+
+#ifdef MOZ_GRAPHENE
+    if (Services.prefs.getBoolPref("b2g.nativeWindowGeometry.fullscreen")) {
+      document.body.mozRequestFullScreen();
+    }
+#endif
   }
 };
 
@@ -755,6 +761,8 @@ var CustomEventManager = {
         appStartup.quit(appStartup.eAttemptQuit);
         break;
       case 'toggle-fullscreen-native-window':
+        Services.prefs.setBoolPref("b2g.nativeWindowGeometry.fullscreen",
+                                   !document.mozFullScreenElement);
         if (document.mozFullScreenElement) {
           document.mozCancelFullScreen();
         } else {
@@ -1208,3 +1216,26 @@ Services.obs.addObserver(function resetProfile(subject, topic, data) {
                      .getService(Ci.nsIAppStartup);
   appStartup.quit(Ci.nsIAppStartup.eForceQuit);
 }, 'b2g-reset-profile', false);
+
+#ifdef MOZ_GRAPHENE
+
+const restoreWindowGeometry = () => {
+  const screenX = Services.prefs.getIntPref("b2g.nativeWindowGeometry.screenX");
+  const screenY = Services.prefs.getIntPref("b2g.nativeWindowGeometry.screenY");
+  const width = Services.prefs.getIntPref("b2g.nativeWindowGeometry.width");
+  const height = Services.prefs.getIntPref("b2g.nativeWindowGeometry.height");
+  resizeTo(width, height);
+  moveTo(screenX, screenY);
+}
+restoreWindowGeometry();
+
+const saveWindowGeometry = () => {
+  window.removeEventListener("unload", saveWindowGeometry);
+  Services.prefs.setIntPref("b2g.nativeWindowGeometry.screenX", screenX);
+  Services.prefs.setIntPref("b2g.nativeWindowGeometry.screenY", screenY);
+  Services.prefs.setIntPref("b2g.nativeWindowGeometry.width", outerWidth);
+  Services.prefs.setIntPref("b2g.nativeWindowGeometry.height", outerHeight);
+}
+window.addEventListener("unload", saveWindowGeometry);
+
+#endif

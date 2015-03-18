@@ -32,3 +32,9 @@ pref("devtools.debugger.prompt-connection", false);
 
 // Update url.
 pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+
+pref("b2g.nativeWindowGeometry.width", 700);
+pref("b2g.nativeWindowGeometry.height", 600);
+pref("b2g.nativeWindowGeometry.screenX", 0);
+pref("b2g.nativeWindowGeometry.screenY", 0);
+pref("b2g.nativeWindowGeometry.fullscreen", false);
