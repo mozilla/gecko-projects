@@ -39,7 +39,6 @@ private:
     nsString name;
     nsString stringValue;
     nsRefPtr<File> fileValue;
-    nsString filename;
     bool valueIsFile;
   };
 
@@ -60,13 +59,11 @@ private:
 
   void SetNameFilePair(FormDataTuple* aData,
                        const nsAString& aName,
-                       File* aBlob,
-                       const nsAString& aFilename)
+                       File* aBlob)
   {
     MOZ_ASSERT(aData);
     aData->name = aName;
     aData->fileValue = aBlob;
-    aData->filename = aFilename;
     aData->valueIsFile = true;
   }
 
@@ -117,13 +114,39 @@ public:
     return NS_OK;
   }
   virtual nsresult AddNameFilePair(const nsAString& aName,
-                                   File* aBlob,
-                                   const nsString& aFilename) MOZ_OVERRIDE
+                                   File* aBlob) MOZ_OVERRIDE
   {
     FormDataTuple* data = mFormData.AppendElement();
-    SetNameFilePair(data, aName, aBlob, aFilename);
+    SetNameFilePair(data, aName, aBlob);
     return NS_OK;
   }
+
+  typedef bool (*FormDataEntryCallback)(const nsString& aName, bool aIsFile,
+                                        const nsString& aValue,
+                                        File* aFile, void* aClosure);
+
+  uint32_t
+  Length() const
+  {
+    return mFormData.Length();
+  }
+
+  // Stops iteration and returns false if any invocation of callback returns
+  // false. Returns true otherwise.
+  bool
+  ForEach(FormDataEntryCallback aFunc, void* aClosure)
+  {
+    for (uint32_t i = 0; i < mFormData.Length(); ++i) {
+      FormDataTuple& tuple = mFormData[i];
+      if (!aFunc(tuple.name, tuple.valueIsFile, tuple.stringValue,
+                 tuple.fileValue, aClosure)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
 private:
   nsCOMPtr<nsISupports> mOwner;
 

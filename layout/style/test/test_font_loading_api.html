@@ -24,19 +24,19 @@ var defaultValues = {
   style: "normal",
   weight: "normal",
   stretch: "normal",
-  unicodeRange: "U+0000-10FFFF",
+  unicodeRange: "U+0-10FFFF",
   variant: "normal",
   featureSettings: "normal"
 };
 
 // Non-default values for the FontFace descriptor attributes other than family
 // along with how Gecko currently serializes them.  Each value is chosen to be
-// differeny from the default value and also has a different serialized form.
+// different from the default value and also has a different serialized form.
 var nonDefaultValues = {
   style: ["Italic", "italic"],
   weight: ["Bold", "bold"],
   stretch: ["Ultra-Condensed", "ultra-condensed"],
-  unicodeRange: ["U+3??", "U+0300-03FF"],
+  unicodeRange: ["U+3??", "U+300-3FF"],
   variant: ["Small-Caps", "small-caps"],
   featureSettings: ["'dlig' on", "\"dlig\""]
 };
@@ -451,7 +451,7 @@ function runTest() {
     is(all[0], face, "FontFaces should be not be reordered when a duplicate entry is added (TEST 25)");
     is(all[1], face2, "FontFaces should be not be reordered when a duplicate entry is added (TEST 25)");
     document.fonts.clear();
-    return document.fonts.read;
+    return document.fonts.ready;
 
   }).then(function() {
 
@@ -783,6 +783,9 @@ function runTest() {
 
     // (TEST 33) Test that CSS-connected FontFace objects are created
     // for @font-face rules in the document.
+
+    is(document.fonts.status, "loaded", "document.fonts.status should initially be loaded (TEST 33)");
+
     var style = document.querySelector("style");
     var ruleText = "@font-face { font-family: something; src: url(x); ";
     Object.keys(nonDefaultValues).forEach(function(aDesc) {
@@ -791,22 +794,24 @@ function runTest() {
     ruleText += "}";
 
     style.textContent = ruleText;
-    document.body.offsetTop;
 
     var rule = style.sheet.cssRules[0];
 
     var all = Array.from(document.fonts);
-    is(all.length, 1, "document.fonts should contain one FontFace (TEST 34)");
+    is(all.length, 1, "document.fonts should contain one FontFace (TEST 33)");
 
     var face = all[0];
-    is(face.family, "\"something\"", "FontFace should have correct family value (TEST 34)");
+    is(face.family, "\"something\"", "FontFace should have correct family value (TEST 33)");
     Object.keys(nonDefaultValues).forEach(function(aDesc) {
       var ok_todo = aDesc == "variant" ? todo : ok;
-      ok_todo(face[aDesc] == nonDefaultValues[aDesc][1], "FontFace should have correct " + aDesc + " value (TEST 34)");
+      ok_todo(face[aDesc] == nonDefaultValues[aDesc][1], "FontFace should have correct " + aDesc + " value (TEST 33)");
     });
 
+    is(document.fonts.status, "loaded", "document.fonts.status should still be loaded (TEST 33)");
+    is(face.status, "unloaded", "FontFace.status should be unloaded (TEST 33)");
+
     document.fonts.clear();
-    ok(document.fonts.has(face), "CSS-connected FontFace should not be removed from document.fonts when clear is called (TEST 34)");
+    ok(document.fonts.has(face), "CSS-connected FontFace should not be removed from document.fonts when clear is called (TEST 33)");
 
     var exceptionName = "";
     try {
@@ -814,23 +819,46 @@ function runTest() {
     } catch (ex) {
       exceptionName = ex.name;
     }
-    ok(exceptionName == "InvalidModificationError", "attempting to remove CSS-connected FontFace from document.fonts should throw an InvalidModificationError (TEST 34)");
-    ok(document.fonts.has(face), "CSS-connected FontFace should not be removed from document.fonts when delete is called (TEST 34)");
+    ok(exceptionName == "InvalidModificationError", "attempting to remove CSS-connected FontFace from document.fonts should throw an InvalidModificationError (TEST 33)");
+    ok(document.fonts.has(face), "CSS-connected FontFace should not be removed from document.fonts when delete is called (TEST 33)");
 
     style.textContent = "";
-    document.body.offsetTop;
 
-    ok(!document.fonts.has(face), "CSS-connected FontFace should be removed from document.fonts once the rule has been removed (TEST 34)");
+    ok(!document.fonts.has(face), "CSS-connected FontFace should be removed from document.fonts once the rule has been removed (TEST 33)");
+
+    is(document.fonts.status, "loaded", "document.fonts.status should still be loaded after rule is removed (TEST 33)");
+    is(face.status, "unloaded", "FontFace.status should still be unloaded after rule is removed (TEST 33)");
 
     document.fonts.add(face);
-    ok(document.fonts.has(face), "previously CSS-connected FontFace should be able to be added to document.fonts (TEST 34)");
+    ok(document.fonts.has(face), "previously CSS-connected FontFace should be able to be added to document.fonts (TEST 33)");
+
+    is(document.fonts.status, "loaded", "document.fonts.status should still be loaded after now disconnected FontFace is added (TEST 33)");
+    is(face.status, "unloaded", "FontFace.status should still be unloaded after now disconnected FontFace is added (TEST 33)");
 
     document.fonts.delete(face);
-    ok(!document.fonts.has(face), "previously CSS-connected FontFace should be able to be removed from document.fonts (TEST 34)");
+    ok(!document.fonts.has(face), "previously CSS-connected FontFace should be able to be removed from document.fonts (TEST 33)");
 
   }).then(function() {
 
-    // (TEST 34) Test that a pending style sheet load prevents
+    // (TEST 34) Test that descriptor getters for unspecified descriptors on
+    // CSS-connected FontFace objects return their default values.
+    var style = document.querySelector("style");
+    var ruleText = "@font-face { font-family: something; src: url(x); }";
+
+    style.textContent = ruleText;
+
+    var all = Array.from(document.fonts);
+    var face = all[0];
+
+    Object.keys(defaultValues).forEach(function(aDesc) {
+      is(face[aDesc], defaultValues[aDesc], "FontFace should return default value for " + aDesc + " (TEST 34)");
+    });
+
+    style.textContent = "";
+
+  }).then(function() {
+
+    // (TEST LAST) Test that a pending style sheet load prevents
     // document.fonts.status from being set to "loaded".
 
     // First, add a FontFace to document.fonts that will load soon.
@@ -848,7 +876,7 @@ function runTest() {
     return setTimeoutZero()  // wait for the style sheet to start loading
         .then(function() {
           document.fonts.clear();
-          is(document.fonts.status, "loading", "FontFaceSet.status when the FontFaceSet has been cleared of loading FontFaces but there is a pending style sheet load (TEST 33)");
+          is(document.fonts.status, "loading", "FontFaceSet.status when the FontFaceSet has been cleared of loading FontFaces but there is a pending style sheet load (TEST LAST)");
           document.head.removeChild(link);
           // XXX Removing the <link> element won't cancel the load of the
           // style sheet, so we can't do that to test that
