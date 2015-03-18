@@ -82,6 +82,29 @@ function debug(str) {
   dump(' -*- Shell.js: ' + str + '\n');
 }
 
+const once = event => {
+  let target = shell.contentBrowser;
+  return new Promise((resolve, reject) => {
+    target.addEventListener(event, function gotEvent(evt) {
+      target.removeEventListener(event, gotEvent, false);
+      resolve(evt);
+    }, false);
+  });
+}
+
+function clearCacheAndReload() {
+  // Reload the main frame with a cleared cache.
+  debug('Reloading ' + getContentWindow().location);
+  let cache = Cc["@mozilla.org/netwerk/cache-storage-service;1"]
+                .getService(Ci.nsICacheStorageService);
+  cache.clear();
+  getContentWindow().location.reload(true);
+  once('mozbrowserlocationchange').then(
+    evt => {
+      shell.sendEvent(window, "ContentStart");
+    });
+}
+
 #ifdef MOZ_CRASHREPORTER
 function debugCrashReport(aStr) {
   dump('Crash reporter : ' + aStr);
@@ -461,31 +484,12 @@ var shell = {
       return false;
     }
 
-    const once = (event) => {
-      let win = this.contentBrowser;
-      return new Promise((resolve, reject) => {
-        win.addEventListener(event, function gotEvent(evt) {
-          win.removeEventListener(event, gotEvent, false);
-          resolve(evt);
-        }, false);
-      });
-    }
-
     let content = this.contentBrowser.contentWindow;
     switch (evt.type) {
       case 'keydown':
       case 'keyup':
         if (checkReloadKey()) {
-          // Reload the main frame with a cleared cache.
-          debug('Reloading ' + getContentWindow().location);
-          let cache = Cc["@mozilla.org/netwerk/cache-storage-service;1"]
-                        .getService(Ci.nsICacheStorageService);
-          cache.clear();
-          getContentWindow().location.reload(true);
-          once('mozbrowserlocationchange').then(
-            evt => {
-              shell.sendEvent(window, "ContentStart");
-            });
+          clearCacheAndReload();
         } else {
           this.broadcastHardwareKeys(evt);
         }
@@ -771,6 +775,9 @@ var CustomEventManager = {
         break;
       case 'minimize-native-window':
         window.minimize();
+        break;
+      case 'clear-cache-and-reload':
+        clearCacheAndReload();
         break;
     }
   }
