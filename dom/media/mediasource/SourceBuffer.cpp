@@ -268,7 +268,7 @@ SourceBuffer::Remove(double aStart, double aEnd, ErrorResult& aRv)
   }
 
   StartUpdating();
-  nsRefPtr<nsIRunnable> task = new RangeRemovalRunnable(this, aStart, aEnd);
+  nsCOMPtr<nsIRunnable> task = new RangeRemovalRunnable(this, aStart, aEnd);
   NS_DispatchToMainThread(task);
 }
 
@@ -277,7 +277,7 @@ SourceBuffer::RangeRemoval(double aStart, double aEnd)
 {
   StartUpdating();
   DoRangeRemoval(aStart, aEnd);
-  nsRefPtr<nsIRunnable> task =
+  nsCOMPtr<nsIRunnable> task =
     NS_NewRunnableMethod(this, &SourceBuffer::StopUpdating);
   NS_DispatchToMainThread(task);
 }
@@ -322,6 +322,7 @@ SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
   , mTimestampOffset(0)
   , mAppendMode(SourceBufferAppendMode::Segments)
   , mUpdating(false)
+  , mActive(false)
   , mUpdateID(0)
   , mType(aType)
 {
@@ -432,7 +433,7 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
 
   MOZ_ASSERT(mAppendMode == SourceBufferAppendMode::Segments,
              "We don't handle timestampOffset for sequence mode yet");
-  nsRefPtr<nsIRunnable> task =
+  nsCOMPtr<nsIRunnable> task =
     new AppendDataRunnable(this, data, mTimestampOffset, mUpdateID);
   NS_DispatchToMainThread(task);
 }
@@ -475,7 +476,11 @@ SourceBuffer::AppendDataCompletedWithSuccess(bool aGotMedia)
   }
 
   if (mTrackBuffer->HasInitSegment()) {
-    mMediaSource->QueueInitializationEvent();
+    if (!mActive) {
+      mActive = true;
+      mMediaSource->SourceBufferIsActive(this);
+      mMediaSource->QueueInitializationEvent();
+    }
   }
 
   if (aGotMedia) {
