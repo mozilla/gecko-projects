@@ -1286,6 +1286,10 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-ic
     -moz-image-region: rect(0px, 832px, 64px, 768px);
   }
 
+  #feed-button[cui-areatype="menu-panel"][panel-multiview-anchor=true] {
+    -moz-image-region: rect(64px, 832px, 128px, 768px);
+  }
+
   #social-share-button[cui-areatype="menu-panel"],
   toolbarpaletteitem[place="palette"] > #social-share-button {
     -moz-image-region: rect(0px, 896px, 64px, 832px);
@@ -4216,8 +4220,7 @@ notification[value="loop-sharing-notification"] .messageImage {
   list-style-image: url(chrome://global/skin/icons/question-64.png);
 }
 
-.popup-notification-icon[popupid="password-save"],
-.popup-notification-icon[popupid="password-change"] {
+.popup-notification-icon[popupid="password"] {
   list-style-image: url(chrome://mozapps/skin/passwordmgr/key-64.png);
 }
 

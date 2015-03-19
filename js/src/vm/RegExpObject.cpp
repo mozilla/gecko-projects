@@ -11,6 +11,7 @@
 
 #include "jsstr.h"
 
+#include "builtin/RegExp.h"
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpParser.h"
 #include "vm/MatchPairs.h"
@@ -245,10 +246,10 @@ RegExpObject::trace(JSTracer *trc, JSObject *obj)
     // conditions, since:
     //   1. During TraceRuntime, isHeapBusy() is true, but the tracer might not
     //      be a marking tracer.
-    //   2. When a write barrier executes, IS_GC_MARKING_TRACER is true, but
+    //   2. When a write barrier executes, IsMarkingTracer is true, but
     //      isHeapBusy() will be false.
     if (trc->runtime()->isHeapBusy() &&
-        IS_GC_MARKING_TRACER(trc) &&
+        IsMarkingTracer(trc) &&
         !obj->asTenured().zone()->isPreservingCode())
     {
         obj->as<RegExpObject>().NativeObject::setPrivate(nullptr);
@@ -273,7 +274,17 @@ const Class RegExpObject::class_ = {
     nullptr, /* call */
     nullptr, /* hasInstance */
     nullptr, /* construct */
-    RegExpObject::trace
+    RegExpObject::trace,
+
+    // ClassSpec
+    {
+        GenericCreateConstructor<js::regexp_construct, 2, JSFunction::FinalizeKind>,
+        CreateRegExpPrototype,
+        nullptr,
+        js::regexp_static_props,
+        js::regexp_methods,
+        js::regexp_properties
+    }
 };
 
 RegExpObject *
@@ -566,7 +577,7 @@ RegExpShared::~RegExpShared()
 void
 RegExpShared::trace(JSTracer *trc)
 {
-    if (IS_GC_MARKING_TRACER(trc))
+    if (IsMarkingTracer(trc))
         marked_ = true;
 
     if (source)

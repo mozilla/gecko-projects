@@ -31,6 +31,7 @@
 #include "nsContentUtils.h"
 #include "nsCCUncollectableMarker.h"
 #include "nsCycleCollectionNoteRootCallback.h"
+#include "nsCycleCollector.h"
 #include "nsScriptLoader.h"
 #include "jsfriendapi.h"
 #include "jsprf.h"
@@ -90,7 +91,8 @@ const char* const XPCJSRuntime::mStrings[] = {
     "lineNumber",           // IDX_LINENUMBER
     "columnNumber",         // IDX_COLUMNNUMBER
     "stack",                // IDX_STACK
-    "message"               // IDX_MESSAGE
+    "message",              // IDX_MESSAGE
+    "lastIndex"             // IDX_LASTINDEX
 };
 
 /***************************************************************************/
