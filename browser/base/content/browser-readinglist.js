@@ -58,6 +58,11 @@ let ReadingListUI = {
     for (let msg of this.MESSAGES) {
       mm.removeMessageListener(msg, this);
     }
+
+    if (this.listenerRegistered) {
+      ReadingList.removeListener(this);
+      this.listenerRegistered = false;
+    }
   },
 
   /**
@@ -91,7 +96,7 @@ let ReadingListUI = {
         // This is safe to call if we're not currently registered, but we don't
         // want to forcibly load the normally lazy-loaded module on startup.
         ReadingList.removeListener(this);
-        this.listenerRegistered = true;
+        this.listenerRegistered = false;
       }
 
       this.hideSidebar();
@@ -178,7 +183,7 @@ let ReadingListUI = {
       });
 
       target.insertBefore(menuitem, insertPoint);
-    });
+    }, {sort: "addedOn", descending: true});
 
     if (!hasItems) {
       let menuitem = document.createElement("menuitem");
@@ -242,12 +247,26 @@ let ReadingListUI = {
         uri = null;
     }
 
+    let msg = {topic: "UpdateActiveItem", url: null};
     if (!uri) {
       this.toolbarButton.setAttribute("hidden", true);
+      if (this.isSidebarOpen)
+        document.getElementById("sidebar").contentWindow.postMessage(msg, "*");
       return;
     }
 
-    let isInList = yield ReadingList.containsURL(uri);
+    let isInList = yield ReadingList.hasItemForURL(uri);
+
+    if (window.closed) {
+      // Skip updating the UI if the window was closed since our hasItemForURL call.
+      return;
+    }
+
+    if (this.isSidebarOpen) {
+      if (isInList)
+        msg.url = typeof uri == "string" ? uri : uri.spec;
+      document.getElementById("sidebar").contentWindow.postMessage(msg, "*");
+    }
     this.setToolbarButtonState(isInList);
   }),
 
@@ -284,7 +303,7 @@ let ReadingListUI = {
     if (!uri)
       return;
 
-    let item = yield ReadingList.getItemForURL(uri);
+    let item = yield ReadingList.itemForURL(uri);
     if (item) {
       yield item.delete();
     } else {
@@ -315,8 +334,15 @@ let ReadingListUI = {
    * @param {ReadingListItem} item - Item added.
    */
   onItemAdded(item) {
+    if (!Services.prefs.getBoolPref("browser.readinglist.sidebarEverOpened")) {
+      SidebarUI.show("readingListSidebar");
+    }
     if (this.isItemForCurrentBrowser(item)) {
       this.setToolbarButtonState(true);
+      if (this.isSidebarOpen) {
+        let msg = {topic: "UpdateActiveItem", url: item.url};
+        document.getElementById("sidebar").contentWindow.postMessage(msg, "*");
+      }
     }
   },
 

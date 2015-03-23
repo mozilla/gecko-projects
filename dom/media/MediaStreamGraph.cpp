@@ -1573,12 +1573,12 @@ private:
 class CreateMessage : public ControlMessage {
 public:
   explicit CreateMessage(MediaStream* aStream) : ControlMessage(aStream) {}
-  virtual void Run() MOZ_OVERRIDE
+  virtual void Run() override
   {
     mStream->GraphImpl()->AddStream(mStream);
     mStream->Init();
   }
-  virtual void RunDuringShutdown() MOZ_OVERRIDE
+  virtual void RunDuringShutdown() override
   {
     // Make sure to run this message during shutdown too, to make sure
     // that we balance the number of streams registered with the graph
@@ -1587,7 +1587,7 @@ public:
   }
 };
 
-class MediaStreamGraphShutdownObserver MOZ_FINAL : public nsIObserver
+class MediaStreamGraphShutdownObserver final : public nsIObserver
 {
   ~MediaStreamGraphShutdownObserver() {}
 public:
@@ -2213,6 +2213,7 @@ MediaStream::RunAfterPendingUpdates(already_AddRefed<nsIRunnable> aRunnable)
   // runnable will run in finite time.
   if (!(graph->mRealtime || graph->mNonRealtimeProcessing)) {
     runnable->Run();
+    return;
   }
 
   class Message : public ControlMessage {
@@ -2221,12 +2222,12 @@ MediaStream::RunAfterPendingUpdates(already_AddRefed<nsIRunnable> aRunnable)
                      already_AddRefed<nsIRunnable> aRunnable)
       : ControlMessage(aStream)
       , mRunnable(aRunnable) {}
-    virtual void Run() MOZ_OVERRIDE
+    virtual void Run() override
     {
       mStream->Graph()->
         DispatchToMainThreadAfterStreamStateUpdate(mRunnable.forget());
     }
-    virtual void RunDuringShutdown() MOZ_OVERRIDE
+    virtual void RunDuringShutdown() override
     {
       // Don't run mRunnable now as it may call AppendMessage() which would
       // assume that there are no remaining controlMessagesToRunDuringShutdown.

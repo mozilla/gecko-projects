@@ -26,22 +26,22 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD SetShowFrameBorders(bool aEnable) MOZ_OVERRIDE;
+  NS_IMETHOD SetShowFrameBorders(bool aEnable) override;
 
-  NS_IMETHOD GetShowFrameBorders(bool* aResult) MOZ_OVERRIDE;
+  NS_IMETHOD GetShowFrameBorders(bool* aResult) override;
 
-  NS_IMETHOD SetShowEventTargetFrameBorder(bool aEnable) MOZ_OVERRIDE;
+  NS_IMETHOD SetShowEventTargetFrameBorder(bool aEnable) override;
 
-  NS_IMETHOD GetShowEventTargetFrameBorder(bool* aResult) MOZ_OVERRIDE;
+  NS_IMETHOD GetShowEventTargetFrameBorder(bool* aResult) override;
 
   NS_IMETHOD GetContentSize(nsIDocument* aDocument,
-                            int32_t* aSizeInBytesResult) MOZ_OVERRIDE;
+                            int32_t* aSizeInBytesResult) override;
 
   NS_IMETHOD GetFrameSize(nsIPresShell* aPresentation,
-                          int32_t* aSizeInBytesResult) MOZ_OVERRIDE;
+                          int32_t* aSizeInBytesResult) override;
 
   NS_IMETHOD GetStyleSize(nsIPresShell* aPresentation,
-                          int32_t* aSizeInBytesResult) MOZ_OVERRIDE;
+                          int32_t* aSizeInBytesResult) override;
 
 protected:
   virtual ~nsLayoutDebugger();
@@ -184,14 +184,13 @@ PrintDisplayItemTo(nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem,
     aStream << " fixed";
   }
 
-  const nsStylePosition* pos = aItem->Frame()->StylePosition();
-  if (pos->mWillChange.Length() > 0) {
+  if (aItem->Frame()->StyleDisplay()->mWillChange.Length() > 0) {
     aStream << " (will-change=";
-    for (size_t i = 0; i < pos->mWillChange.Length(); i++) {
+    for (size_t i = 0; i < aItem->Frame()->StyleDisplay()->mWillChange.Length(); i++) {
       if (i > 0) {
         aStream << ",";
       }
-      aStream << NS_LossyConvertUTF16toASCII(pos->mWillChange[i]).get();
+      aStream << NS_LossyConvertUTF16toASCII(aItem->Frame()->StyleDisplay()->mWillChange[i]).get();
     }
     aStream << ")";
   }

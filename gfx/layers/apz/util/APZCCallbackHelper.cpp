@@ -570,7 +570,7 @@ public:
   {
   }
 
-  void DidRefresh() MOZ_OVERRIDE {
+  void DidRefresh() override {
     if (!mCallback) {
       MOZ_ASSERT_UNREACHABLE("Post-refresh observer fired again after failed attempt at unregistering it");
       return;
@@ -664,6 +664,24 @@ APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(
     flags.AppendElement(widget::ContentHelper::GetAllowedTouchBehavior(aWidget, aEvent.touches[i]->mRefPoint));
   }
   aCallback->Run(aInputBlockId, flags);
+}
+
+void
+APZCCallbackHelper::NotifyMozMouseScrollEvent(const FrameMetrics::ViewID& aScrollId, const nsString& aEvent)
+{
+  nsCOMPtr<nsIContent> targetContent = nsLayoutUtils::FindContentFor(aScrollId);
+  if (!targetContent) {
+    return;
+  }
+  nsCOMPtr<nsIDocument> ownerDoc = targetContent->OwnerDoc();
+  if (!ownerDoc) {
+    return;
+  }
+
+  nsContentUtils::DispatchTrustedEvent(
+    ownerDoc, targetContent,
+    aEvent,
+    true, true);
 }
 
 }

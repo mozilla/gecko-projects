@@ -30,7 +30,7 @@ class TimeRanges;
 
 } // namespace dom
 
-class TrackBuffer MOZ_FINAL {
+class TrackBuffer final {
 public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TrackBuffer);
 
@@ -75,6 +75,8 @@ public:
   // Returns true iff mParser->HasInitData() and the decoder using that init
   // segment has successfully initialized by setting mHas{Audio,Video}..
   bool IsReady();
+
+  bool IsWaitingOnCDMResource();
 
   // Returns true if any of the decoders managed by this track buffer
   // contain aTime in their buffered ranges.
@@ -185,10 +187,6 @@ private:
   // Access protected by mParentDecoder's monitor.
   nsTArray<nsRefPtr<SourceBufferDecoder>> mInitializedDecoders;
 
-  // Decoders which are waiting on a Content Decryption Module to be able to
-  // finish ReadMetadata.
-  nsTArray<nsRefPtr<SourceBufferDecoder>> mWaitingDecoders;
-
   // The decoder that the owning SourceBuffer is currently appending data to.
   // Modified on the main thread only.
   nsRefPtr<SourceBufferDecoder> mCurrentDecoder;
@@ -205,6 +203,9 @@ private:
   // The timestamp offset used by our current decoder, in microseconds.
   int64_t mLastTimestampOffset;
   int64_t mAdjustedTimestamp;
+
+  // True if at least one of our decoders has encrypted content.
+  bool mIsWaitingOnCDM;
 
   // Set when the first decoder used by this TrackBuffer is initialized.
   // Protected by mParentDecoder's monitor.

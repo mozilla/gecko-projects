@@ -18,6 +18,7 @@
 #include "nsICancelable.h"
 #include "nsIDNSService.h"
 #include "nsPIDNSService.h"
+#include "nsIScriptSecurityManager.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsThreadUtils.h"
@@ -96,7 +97,7 @@ GetProxyURI(nsIChannel *channel, nsIURI **aOut)
 // The nsPACManCallback portion of this implementation should be run
 // on the main thread - so call nsPACMan::AsyncGetProxyForURI() with
 // a true mainThreadResponse parameter.
-class nsAsyncResolveRequest MOZ_FINAL : public nsIRunnable
+class nsAsyncResolveRequest final : public nsIRunnable
                                       , public nsPACManCallback
                                       , public nsICancelable
 {
@@ -161,14 +162,14 @@ public:
         mProxyInfo = pi;
     }
 
-    NS_IMETHOD Run() MOZ_OVERRIDE
+    NS_IMETHOD Run() override
     {
         if (mCallback)
             DoCallback();
         return NS_OK;
     }
 
-    NS_IMETHOD Cancel(nsresult reason) MOZ_OVERRIDE
+    NS_IMETHOD Cancel(nsresult reason) override
     {
         NS_ENSURE_ARG(NS_FAILED(reason));
 
@@ -203,7 +204,7 @@ private:
     // before calling DoCallback.
     void OnQueryComplete(nsresult status,
                          const nsCString &pacString,
-                         const nsCString &newPACURL) MOZ_OVERRIDE
+                         const nsCString &newPACURL) override
     {
         // If we've already called DoCallback then, nothing more to do.
         if (!mCallback)
@@ -1084,7 +1085,7 @@ nsProtocolProxyService::ReloadPAC()
 // the main thread is blocking on that condvar -
 //  so call nsPACMan::AsyncGetProxyForURI() with
 // a false mainThreadResponse parameter.
-class nsAsyncBridgeRequest MOZ_FINAL  : public nsPACManCallback
+class nsAsyncBridgeRequest final  : public nsPACManCallback
 {
     NS_DECL_THREADSAFE_ISUPPORTS
 
@@ -1097,7 +1098,7 @@ class nsAsyncBridgeRequest MOZ_FINAL  : public nsPACManCallback
 
     void OnQueryComplete(nsresult status,
                          const nsCString &pacString,
-                         const nsCString &newPACURL) MOZ_OVERRIDE
+                         const nsCString &newPACURL) override
     {
         MutexAutoLock lock(mMutex);
         mCompleted = true;
@@ -1285,11 +1286,22 @@ nsProtocolProxyService::AsyncResolve(nsISupports *channelOrURI, uint32_t flags,
             return NS_ERROR_NO_INTERFACE;
         }
 
-        // make a temporary channel from the URI
-        nsCOMPtr<nsIIOService> ios(do_GetIOService(&rv));
-        if (NS_FAILED(rv)) return rv;
-        rv = ios->NewChannelFromURI(uri, getter_AddRefs(channel));
-        if (NS_FAILED(rv)) return rv;
+        nsCOMPtr<nsIScriptSecurityManager> secMan(
+            do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv));
+        NS_ENSURE_SUCCESS(rv, rv);
+        nsCOMPtr<nsIPrincipal> systemPrincipal;
+        rv = secMan->GetSystemPrincipal(getter_AddRefs(systemPrincipal));
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        // creating a temporary channel from the URI which is not
+        // used to perform any network loads, hence its safe to
+        // use systemPrincipal as the loadingPrincipal.
+        rv = NS_NewChannel(getter_AddRefs(channel),
+                           uri,
+                           systemPrincipal,
+                           nsILoadInfo::SEC_NORMAL,
+                           nsIContentPolicy::TYPE_OTHER);
+        NS_ENSURE_SUCCESS(rv, rv);
     }
 
     return AsyncResolveInternal(channel, flags, callback, result, false);

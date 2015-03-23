@@ -147,6 +147,7 @@ CanLazilyParse(ExclusiveContext *cx, const ReadOnlyCompileOptions &options)
 {
     return options.canLazilyParse &&
         options.compileAndGo &&
+        !options.hasPollutedGlobalScope &&
         !cx->compartment()->options().discardSource() &&
         !options.sourceIsLazy;
 }
@@ -282,7 +283,7 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
         return nullptr;
 
     Directives directives(options.strictOption);
-    GlobalSharedContext globalsc(cx, scopeChain, directives, options.extraWarningsOption);
+    GlobalSharedContext globalsc(cx, directives, options.extraWarningsOption);
 
     bool savedCallerFun = evalCaller && evalCaller->functionOrCallerFunction();
     Rooted<JSScript*> script(cx, JSScript::Create(cx, evalStaticScope, savedCallerFun,
@@ -375,7 +376,7 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
             }
         }
 
-        // Accumulate the maximum block scope depth, so that EmitTree can assert
+        // Accumulate the maximum block scope depth, so that emitTree can assert
         // when emitting JSOP_GETLOCAL that the local is indeed within the fixed
         // part of the stack frame.
         script->bindings.updateNumBlockScoped(pc->blockScopeDepth);
@@ -394,7 +395,7 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
         if (!bce.updateLocalsToFrameSlots())
             return nullptr;
 
-        if (!EmitTree(cx, &bce, pn))
+        if (!bce.emitTree(pn))
             return nullptr;
 
         parser.handler.freeTree(pn);
@@ -429,7 +430,7 @@ frontend::CompileScript(ExclusiveContext *cx, LifoAlloc *alloc, HandleObject sco
      * Nowadays the threaded interpreter needs a last return instruction, so we
      * do have to emit that here.
      */
-    if (Emit1(cx, &bce, JSOP_RETRVAL) < 0)
+    if (!bce.emit1(JSOP_RETRVAL))
         return nullptr;
 
     // Global/eval script bindings are always empty (all names are added to the

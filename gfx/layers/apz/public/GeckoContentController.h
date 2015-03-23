@@ -75,18 +75,6 @@ public:
                              uint64_t aInputBlockId) = 0;
 
   /**
-   * Requests handling of releasing a long tap. |aPoint| is in CSS pixels,
-   * relative to the current scroll offset. HandleLongTapUp will always be
-   * preceeded by HandleLongTap. However not all calls to HandleLongTap will
-   * be followed by a HandleLongTapUp (for example, if the user drags
-   * around between the long-tap and lifting their finger, or if content
-   * notifies the APZ that the long-tap event was prevent-defaulted).
-   */
-  virtual void HandleLongTapUp(const CSSPoint& aPoint,
-                               Modifiers aModifiers,
-                               const ScrollableLayerGuid& aGuid) = 0;
-
-  /**
    * Requests sending a mozbrowserasyncscroll domevent to embedder.
    * |aContentRect| is in CSS pixels, relative to the current cssPage.
    * |aScrollableSize| is the current content width/height in CSS pixels.
@@ -153,7 +141,6 @@ public:
     EndTouch,
     APZStateChangeSentinel
   };
-
   /**
    * General notices of APZ state changes for consumers.
    * |aGuid| identifies the APZC originating the state change.
@@ -164,6 +151,12 @@ public:
   virtual void NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
                                     APZStateChange aChange,
                                     int aArg = 0) {}
+
+  /**
+   * Notify content of a MozMouseScrollFailed event.
+   */
+  virtual void NotifyMozMouseScrollEvent(const FrameMetrics::ViewID& aScrollId, const nsString& aEvent)
+  {}
 
   GeckoContentController() {}
   virtual void Destroy() {}

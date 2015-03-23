@@ -84,7 +84,7 @@ public:
   bool mContentActive;
 };
 
-class LayerActivityTracker MOZ_FINAL : public nsExpirationTracker<LayerActivity,4> {
+class LayerActivityTracker final : public nsExpirationTracker<LayerActivity,4> {
 public:
   // 75-100ms is a good timeout period. We use 4 generations of 25ms each.
   enum { GENERATION_MS = 100 };
@@ -265,13 +265,12 @@ ActiveLayerTracker::IsStyleAnimated(nsDisplayListBuilder* aBuilder,
                                     nsIFrame* aFrame, nsCSSProperty aProperty)
 {
   // TODO: Add some abuse restrictions
-  auto willChangeBitField = aFrame->StylePosition()->mWillChangeBitField;
-  if ((willChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM) &&
+  if ((aFrame->StyleDisplay()->mWillChangeBitField & NS_STYLE_WILL_CHANGE_TRANSFORM) &&
       aProperty == eCSSProperty_transform &&
       (!aBuilder || aBuilder->IsInWillChangeBudget(aFrame))) {
     return true;
   }
-  if ((willChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY) &&
+  if ((aFrame->StyleDisplay()->mWillChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY) &&
       aProperty == eCSSProperty_opacity &&
       (!aBuilder || aBuilder->IsInWillChangeBudget(aFrame))) {
     return true;

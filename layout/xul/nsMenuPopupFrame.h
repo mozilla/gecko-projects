@@ -152,7 +152,8 @@ private:
   nsRefPtr<nsPresContext> mPresContext;
 };
 
-class nsMenuPopupFrame MOZ_FINAL : public nsBoxFrame, public nsMenuParent
+class nsMenuPopupFrame final : public nsBoxFrame, public nsMenuParent,
+                                   public nsIReflowCallback
 {
 public:
   NS_DECL_QUERYFRAME_TARGET(nsMenuPopupFrame)
@@ -162,19 +163,19 @@ public:
   explicit nsMenuPopupFrame(nsStyleContext* aContext);
 
   // nsMenuParent interface
-  virtual nsMenuFrame* GetCurrentMenuItem() MOZ_OVERRIDE;
-  NS_IMETHOD SetCurrentMenuItem(nsMenuFrame* aMenuItem) MOZ_OVERRIDE;
-  virtual void CurrentMenuIsBeingDestroyed() MOZ_OVERRIDE;
-  NS_IMETHOD ChangeMenuItem(nsMenuFrame* aMenuItem, bool aSelectFirstItem) MOZ_OVERRIDE;
+  virtual nsMenuFrame* GetCurrentMenuItem() override;
+  NS_IMETHOD SetCurrentMenuItem(nsMenuFrame* aMenuItem) override;
+  virtual void CurrentMenuIsBeingDestroyed() override;
+  NS_IMETHOD ChangeMenuItem(nsMenuFrame* aMenuItem, bool aSelectFirstItem) override;
 
   // as popups are opened asynchronously, the popup pending state is used to
   // prevent multiple requests from attempting to open the same popup twice
   nsPopupState PopupState() { return mPopupState; }
   void SetPopupState(nsPopupState aPopupState) { mPopupState = aPopupState; }
 
-  NS_IMETHOD SetActive(bool aActiveFlag) MOZ_OVERRIDE { return NS_OK; } // We don't care.
-  virtual bool IsActive() MOZ_OVERRIDE { return false; }
-  virtual bool IsMenuBar() MOZ_OVERRIDE { return false; }
+  NS_IMETHOD SetActive(bool aActiveFlag) override { return NS_OK; } // We don't care.
+  virtual bool IsActive() override { return false; }
+  virtual bool IsMenuBar() override { return false; }
 
   /*
    * When this popup is open, should clicks outside of it be consumed?
@@ -194,12 +195,12 @@ public:
    */
   ConsumeOutsideClicksResult ConsumeOutsideClicks();
 
-  virtual bool IsContextMenu() MOZ_OVERRIDE { return mIsContextMenu; }
+  virtual bool IsContextMenu() override { return mIsContextMenu; }
 
-  virtual bool MenuClosed() MOZ_OVERRIDE { return true; }
+  virtual bool MenuClosed() override { return true; }
 
-  virtual void LockMenuUntilClosed(bool aLock) MOZ_OVERRIDE;
-  virtual bool IsMenuLocked() MOZ_OVERRIDE { return mIsMenuLocked; }
+  virtual void LockMenuUntilClosed(bool aLock) override;
+  virtual bool IsMenuLocked() override { return mIsMenuLocked; }
 
   nsIWidget* GetWidget();
 
@@ -209,13 +210,13 @@ public:
   // Overridden methods
   virtual void Init(nsIContent*       aContent,
                     nsContainerFrame* aParent,
-                    nsIFrame*         aPrevInFlow) MOZ_OVERRIDE;
+                    nsIFrame*         aPrevInFlow) override;
 
   virtual nsresult AttributeChanged(int32_t aNameSpaceID,
                                     nsIAtom* aAttribute,
-                                    int32_t aModType) MOZ_OVERRIDE;
+                                    int32_t aModType) override;
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
   // returns true if the popup is a panel with the noautohide attribute set to
   // true. These panels do not roll up automatically.
@@ -232,9 +233,9 @@ public:
   uint8_t GetShadowStyle();
 
   virtual void SetInitialChildList(ChildListID  aListID,
-                                   nsFrameList& aChildList) MOZ_OVERRIDE;
+                                   nsFrameList& aChildList) override;
 
-  virtual bool IsLeaf() const MOZ_OVERRIDE;
+  virtual bool IsLeaf() const override;
 
   // layout, position and display the popup as needed
   void LayoutPopup(nsBoxLayoutState& aState, nsIFrame* aParentMenu,
@@ -261,8 +262,8 @@ public:
   nsMenuFrame* Enter(mozilla::WidgetGUIEvent* aEvent);
 
   nsPopupType PopupType() const { return mPopupType; }
-  bool IsMenu() MOZ_OVERRIDE { return mPopupType == ePopupTypeMenu; }
-  bool IsOpen() MOZ_OVERRIDE { return mPopupState == ePopupOpening ||
+  bool IsMenu() override { return mPopupType == ePopupTypeMenu; }
+  bool IsOpen() override { return mPopupState == ePopupOpening ||
                                       mPopupState == ePopupVisible ||
                                       mPopupState == ePopupShown; }
   bool IsVisible() { return mPopupState == ePopupVisible ||
@@ -315,10 +316,10 @@ public:
 
   void ClearIncrementalString() { mIncrementalString.Truncate(); }
 
-  virtual nsIAtom* GetType() const MOZ_OVERRIDE { return nsGkAtoms::menuPopupFrame; }
+  virtual nsIAtom* GetType() const override { return nsGkAtoms::menuPopupFrame; }
 
 #ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+  virtual nsresult GetFrameName(nsAString& aResult) const override
   {
       return MakeFrameName(NS_LITERAL_STRING("MenuPopup"), aResult);
   }
@@ -399,13 +400,17 @@ public:
     return false;
   }
 
+  // nsIReflowCallback
+  virtual bool ReflowFinished() override;
+  virtual void ReflowCallbackCanceled() override;
+
 protected:
 
   // returns the popup's level.
   nsPopupLevel PopupLevel(bool aIsNoAutoHide) const;
 
   // redefine to tell the box system not to move the views.
-  virtual void GetLayoutFlags(uint32_t& aFlags) MOZ_OVERRIDE;
+  virtual void GetLayoutFlags(uint32_t& aFlags) override;
 
   void InitPositionFromAnchorAlign(const nsAString& aAnchor,
                                    const nsAString& aAlign);
@@ -525,6 +530,28 @@ protected:
   // One of PopupBoxObject::ROLLUP_DEFAULT/ROLLUP_CONSUME/ROLLUP_NO_CONSUME
   uint8_t mConsumeRollupEvent;
   FlipType mFlip; // Whether to flip
+
+  struct ReflowCallbackData {
+    ReflowCallbackData() :
+      mPosted(false),
+      mAnchor(nullptr),
+      mSizedToPopup(false)
+    {}
+    void MarkPosted(nsIFrame* aAnchor, bool aSizedToPopup) {
+      mPosted = true;
+      mAnchor = aAnchor;
+      mSizedToPopup = aSizedToPopup;
+    }
+    void Clear() {
+      mPosted = false;
+      mAnchor = nullptr;
+      mSizedToPopup = false;
+    }
+    bool mPosted;
+    nsIFrame* mAnchor;
+    bool mSizedToPopup;
+  };
+  ReflowCallbackData mReflowCallbackData;
 
   bool mIsOpenChanged; // true if the open state changed since the last layout
   bool mIsContextMenu; // true for context menus

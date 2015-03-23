@@ -167,7 +167,7 @@ public:
     return true;
   }
 
-  NS_IMETHOD Run() MOZ_OVERRIDE
+  NS_IMETHOD Run() override
   {
     if (mState == eReady) {
       // Collect information from the frames that we need to scale.
@@ -449,16 +449,8 @@ RasterImage::GetType(uint16_t *aType)
 {
   NS_ENSURE_ARG_POINTER(aType);
 
-  *aType = GetType();
+  *aType = imgIContainer::TYPE_RASTER;
   return NS_OK;
-}
-
-//******************************************************************************
-/* [noscript, notxpcom] uint16_t GetType(); */
-NS_IMETHODIMP_(uint16_t)
-RasterImage::GetType()
-{
-  return imgIContainer::TYPE_RASTER;
 }
 
 DrawableFrameRef

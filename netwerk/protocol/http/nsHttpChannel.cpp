@@ -2997,7 +2997,7 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, nsIApplicationCache* appC
                 // want to proceed since the LOAD_ONLY_IF_MODIFIED flag is
                 // also set.
                 MOZ_ASSERT(mLoadFlags & LOAD_ONLY_IF_MODIFIED);
-            } else {
+            } else if (mInterceptCache != INTERCEPTED) {
                 return rv;
             }
         }
@@ -5980,7 +5980,7 @@ nsHttpChannel::SetOfflineCacheToken(nsISupports *token)
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-class nsHttpChannelCacheKey MOZ_FINAL : public nsISupportsPRUint32,
+class nsHttpChannelCacheKey final : public nsISupportsPRUint32,
                                         public nsISupportsCString
 {
     NS_DECL_ISUPPORTS
@@ -5990,11 +5990,11 @@ class nsHttpChannelCacheKey MOZ_FINAL : public nsISupportsPRUint32,
 
     // Both interfaces declares toString method with the same signature.
     // Thus we have to delegate only to nsISupportsPRUint32 implementation.
-    NS_IMETHOD GetData(nsACString & aData) MOZ_OVERRIDE
+    NS_IMETHOD GetData(nsACString & aData) override
     {
         return mSupportsCString->GetData(aData);
     }
-    NS_IMETHOD SetData(const nsACString & aData) MOZ_OVERRIDE
+    NS_IMETHOD SetData(const nsACString & aData) override
     {
         return mSupportsCString->SetData(aData);
     }

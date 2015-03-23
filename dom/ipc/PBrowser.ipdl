@@ -528,7 +528,6 @@ child:
     HandleDoubleTap(CSSPoint aPoint, Modifiers aModifiers, ScrollableLayerGuid aGuid);
     HandleSingleTap(CSSPoint aPoint, Modifiers aModifiers, ScrollableLayerGuid aGuid);
     HandleLongTap(CSSPoint point, Modifiers aModifiers, ScrollableLayerGuid aGuid, uint64_t aInputBlockId);
-    HandleLongTapUp(CSSPoint point, Modifiers aModifiers, ScrollableLayerGuid aGuid);
     NotifyAPZStateChange(ViewID aViewId, APZStateChange aChange, int aArg);
 
 
@@ -571,6 +570,11 @@ child:
              int32_t aCharCode,
              int32_t aModifiers,
              bool aPreventDefault);
+
+    /**
+     * APZ notification for mouse scroll testing events.
+     */
+    MouseScrollTestEvent(ViewID aScrollId, nsString aEvent);
 
     CompositionEvent(WidgetCompositionEvent event);
 

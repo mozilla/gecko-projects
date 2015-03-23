@@ -8,7 +8,7 @@
 
 #include "mozilla/RefPtr.h"
 #include "ImageContainer.h"
-#include "Mfidl.h"
+#include "mfidl.h"
 
 namespace mozilla {
 namespace layers {
@@ -20,13 +20,15 @@ public:
 
   virtual bool IsValid() { return true; }
 
-  virtual TextureClient* GetTextureClient(CompositableClient* aClient) MOZ_OVERRIDE;
+  virtual TextureClient* GetTextureClient(CompositableClient* aClient) override;
 
 protected:
-  virtual uint8_t* AllocateBuffer(uint32_t aSize) MOZ_OVERRIDE {
+  virtual uint8_t* AllocateBuffer(uint32_t aSize) override {
     MOZ_CRASH("Can't do manual allocations with IMFYCbCrImage");
     return nullptr;
   }
+
+  TextureClient* GetD3D9TextureClient(CompositableClient* aClient);
 
   ~IMFYCbCrImage();
 

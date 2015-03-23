@@ -53,6 +53,7 @@ protected:
 public:
   explicit AnimationPlayer(AnimationTimeline* aTimeline)
     : mTimeline(aTimeline)
+    , mPlaybackRate(1.0)
     , mIsPending(false)
     , mIsRunningOnCompositor(false)
     , mIsPreviousStateFinished(false)
@@ -64,7 +65,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(AnimationPlayer)
 
   AnimationTimeline* GetParentObject() const { return mTimeline; }
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
   virtual CSSAnimationPlayer* AsCSSAnimationPlayer() { return nullptr; }
   virtual CSSTransitionPlayer* AsCSSTransitionPlayer() { return nullptr; }
@@ -77,6 +78,9 @@ public:
   Nullable<TimeDuration> GetCurrentTime() const;
   void SilentlySetCurrentTime(const TimeDuration& aNewCurrentTime);
   void SetCurrentTime(const TimeDuration& aNewCurrentTime);
+  double PlaybackRate() const { return mPlaybackRate; }
+  void SetPlaybackRate(double aPlaybackRate);
+  void SilentlySetPlaybackRate(double aPlaybackRate);
   AnimationPlayState PlayState() const;
   virtual Promise* GetReady(ErrorResult& aRv);
   virtual void Play();
@@ -241,6 +245,7 @@ protected:
   Nullable<TimeDuration> mStartTime; // Timeline timescale
   Nullable<TimeDuration> mHoldTime;  // Player timescale
   Nullable<TimeDuration> mPendingReadyTime; // Timeline timescale
+  double mPlaybackRate;
 
   // A Promise that is replaced on each call to Play() (and in future Pause())
   // and fulfilled when Play() is successfully completed.

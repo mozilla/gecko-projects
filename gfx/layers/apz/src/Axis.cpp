@@ -12,7 +12,7 @@
 #include "mozilla/layers/APZCTreeManager.h" // for APZCTreeManager
 #include "mozilla/layers/APZThreadUtils.h" // for AssertOnControllerThread
 #include "FrameMetrics.h"               // for FrameMetrics
-#include "mozilla/Attributes.h"         // for MOZ_FINAL
+#include "mozilla/Attributes.h"         // for final
 #include "mozilla/Preferences.h"        // for Preferences
 #include "mozilla/gfx/Rect.h"           // for RoundedIn
 #include "mozilla/mozalloc.h"           // for operator new
@@ -206,7 +206,14 @@ ParentLayerCoord Axis::GetOverscroll() const {
   ParentLayerCoord result = (mOverscroll - mLastOverscrollPeak) / mOverscrollScale;
 
   // Assert that we return overscroll in the correct direction
-  MOZ_ASSERT((result.value * mFirstOverscrollAnimationSample.value) >= 0.0f);
+#ifdef DEBUG
+  if ((result.value * mFirstOverscrollAnimationSample.value) < 0.0f) {
+    nsPrintfCString message("GetOverscroll() (%f) and first overscroll animation sample (%f) have different signs\n",
+                            result.value, mFirstOverscrollAnimationSample.value);
+    NS_ASSERTION(false, message.get());
+    MOZ_CRASH();
+  }
+#endif
 
   return result;
 }
@@ -385,6 +392,16 @@ void Axis::CancelTouch() {
 
 bool Axis::CanScroll() const {
   return GetPageLength() - GetCompositionLength() > COORDINATE_EPSILON;
+}
+
+bool Axis::CanScroll(double aDelta) const
+{
+  if (!CanScroll() || mAxisLocked) {
+    return false;
+  }
+
+  ParentLayerCoord delta = aDelta;
+  return DisplacementWillOverscrollAmount(delta) != delta;
 }
 
 bool Axis::CanScrollNow() const {

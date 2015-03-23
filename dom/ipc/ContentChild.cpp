@@ -220,7 +220,7 @@ public:
 
     MemoryReportRequestChild(uint32_t aGeneration, bool aAnonymize,
                              const MaybeFileDesc& aDMDFile);
-    NS_IMETHOD Run() MOZ_OVERRIDE;
+    NS_IMETHOD Run() override;
 private:
     virtual ~MemoryReportRequestChild();
 
@@ -247,7 +247,7 @@ MemoryReportRequestChild::~MemoryReportRequestChild()
 }
 
 // IPC sender for remote GC/CC logging.
-class CycleCollectWithLogsChild MOZ_FINAL
+class CycleCollectWithLogsChild final
     : public PCycleCollectWithLogsChild
     , public nsICycleCollectorLogSink
 {
@@ -261,7 +261,7 @@ public:
         mCCLog = FileDescriptorToFILE(aCCLog, "w");
     }
 
-    NS_IMETHOD Open(FILE** aGCLog, FILE** aCCLog) MOZ_OVERRIDE
+    NS_IMETHOD Open(FILE** aGCLog, FILE** aCCLog) override
     {
         if (NS_WARN_IF(!mGCLog) || NS_WARN_IF(!mCCLog)) {
             return NS_ERROR_FAILURE;
@@ -271,7 +271,7 @@ public:
         return NS_OK;
     }
 
-    NS_IMETHOD CloseGCLog() MOZ_OVERRIDE
+    NS_IMETHOD CloseGCLog() override
     {
         MOZ_ASSERT(mGCLog);
         fclose(mGCLog);
@@ -280,7 +280,7 @@ public:
         return NS_OK;
     }
 
-    NS_IMETHOD CloseCCLog() MOZ_OVERRIDE
+    NS_IMETHOD CloseCCLog() override
     {
         MOZ_ASSERT(mCCLog);
         fclose(mCCLog);
@@ -289,32 +289,32 @@ public:
         return NS_OK;
     }
 
-    NS_IMETHOD GetFilenameIdentifier(nsAString& aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD GetFilenameIdentifier(nsAString& aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD SetFilenameIdentifier(const nsAString& aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD SetFilenameIdentifier(const nsAString& aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD GetProcessIdentifier(int32_t *aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD GetProcessIdentifier(int32_t *aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD SetProcessIdentifier(int32_t aIdentifier) MOZ_OVERRIDE
+    NS_IMETHOD SetProcessIdentifier(int32_t aIdentifier) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD GetGcLog(nsIFile** aPath) MOZ_OVERRIDE
+    NS_IMETHOD GetGcLog(nsIFile** aPath) override
     {
         return UnimplementedProperty();
     }
 
-    NS_IMETHOD GetCcLog(nsIFile** aPath) MOZ_OVERRIDE
+    NS_IMETHOD GetCcLog(nsIFile** aPath) override
     {
         return UnimplementedProperty();
     }
@@ -383,7 +383,7 @@ private:
     nsString mData;
 };
 
-class ConsoleListener MOZ_FINAL : public nsIConsoleListener
+class ConsoleListener final : public nsIConsoleListener
 {
 public:
     explicit ConsoleListener(ContentChild* aChild)
@@ -449,7 +449,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     return NS_OK;
 }
 
-class SystemMessageHandledObserver MOZ_FINAL : public nsIObserver
+class SystemMessageHandledObserver final : public nsIObserver
 {
     ~SystemMessageHandledObserver() {}
 
@@ -484,7 +484,7 @@ SystemMessageHandledObserver::Observe(nsISupports* aSubject,
 
 NS_IMPL_ISUPPORTS(SystemMessageHandledObserver, nsIObserver)
 
-class BackgroundChildPrimer MOZ_FINAL :
+class BackgroundChildPrimer final :
   public nsIIPCBackgroundChildCreateCallback
 {
 public:
@@ -498,13 +498,13 @@ private:
     { }
 
     virtual void
-    ActorCreated(PBackgroundChild* aActor) MOZ_OVERRIDE
+    ActorCreated(PBackgroundChild* aActor) override
     {
         MOZ_ASSERT(aActor, "Failed to create a PBackgroundChild actor!");
     }
 
     virtual void
-    ActorFailed() MOZ_OVERRIDE
+    ActorFailed() override
     {
         MOZ_CRASH("Failed to create a PBackgroundChild actor!");
     }
@@ -551,19 +551,20 @@ InitOnContentProcessCreated()
 
 #ifdef MOZ_NUWA_PROCESS
 static void
-ResetTransports(void* aUnused) {
+ResetTransports(void* aUnused)
+{
   ContentChild* child = ContentChild::GetSingleton();
   mozilla::ipc::Transport* transport = child->GetTransport();
   int fd = transport->GetFileDescriptor();
   transport->ResetFileDescriptor(fd);
 
-  IToplevelProtocol* toplevel = child->GetFirstOpenedActors();
-  while (toplevel != nullptr) {
+  nsTArray<IToplevelProtocol*> actors;
+  child->GetOpenedActors(actors);
+  for (size_t i = 0; i < actors.Length(); i++) {
+      IToplevelProtocol* toplevel = actors[i];
       transport = toplevel->GetTransport();
       fd = transport->GetFileDescriptor();
       transport->ResetFileDescriptor(fd);
-
-      toplevel = toplevel->getNext();
   }
 }
 #endif
@@ -834,7 +835,7 @@ ContentChild::AllocPMemoryReportRequestChild(const uint32_t& aGeneration,
 
 // This is just a wrapper for InfallibleTArray<MemoryReport> that implements
 // nsISupports, so it can be passed to nsIMemoryReporter::CollectReports.
-class MemoryReportsWrapper MOZ_FINAL : public nsISupports {
+class MemoryReportsWrapper final : public nsISupports {
     ~MemoryReportsWrapper() {}
 public:
     NS_DECL_ISUPPORTS
@@ -843,7 +844,7 @@ public:
 };
 NS_IMPL_ISUPPORTS0(MemoryReportsWrapper)
 
-class MemoryReportCallback MOZ_FINAL : public nsIMemoryReporterCallback
+class MemoryReportCallback final : public nsIMemoryReporterCallback
 {
 public:
     NS_DECL_ISUPPORTS
@@ -856,7 +857,7 @@ public:
     NS_IMETHOD Callback(const nsACString& aProcess, const nsACString &aPath,
                         int32_t aKind, int32_t aUnits, int64_t aAmount,
                         const nsACString& aDescription,
-                        nsISupports* aiWrappedReports) MOZ_OVERRIDE
+                        nsISupports* aiWrappedReports) override
     {
         MemoryReportsWrapper *wrappedReports =
             static_cast<MemoryReportsWrapper *>(aiWrappedReports);
@@ -2677,9 +2678,10 @@ GetProtoFdInfos(NuwaProtoFdInfo* aInfoList,
         content->GetTransport()->GetFileDescriptor();
     i++;
 
-    for (IToplevelProtocol* actor = content->GetFirstOpenedActors();
-         actor != nullptr;
-         actor = actor->getNext()) {
+    IToplevelProtocol* actors[NUWA_TOPLEVEL_MAX];
+    size_t count = content->GetOpenedActorsUnsafe(actors, ArrayLength(actors));
+    for (size_t j = 0; j < count; j++) {
+        IToplevelProtocol* actor = actors[j];
         if (i >= aInfoListSize) {
             NS_RUNTIMEABORT("Too many top level protocols!");
         }

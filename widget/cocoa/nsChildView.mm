@@ -357,24 +357,24 @@ public:
   explicit GLPresenter(GLContext* aContext);
   virtual ~GLPresenter();
 
-  virtual GLContext* gl() const MOZ_OVERRIDE { return mGLContext; }
-  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) MOZ_OVERRIDE
+  virtual GLContext* gl() const override { return mGLContext; }
+  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) override
   {
     MOZ_ASSERT(aTarget == LOCAL_GL_TEXTURE_RECTANGLE_ARB);
     MOZ_ASSERT(aFormat == gfx::SurfaceFormat::R8G8B8A8);
     return mRGBARectProgram;
   }
-  virtual const gfx::Matrix4x4& GetProjMatrix() const MOZ_OVERRIDE
+  virtual const gfx::Matrix4x4& GetProjMatrix() const override
   {
     return mProjMatrix;
   }
-  virtual void ActivateProgram(ShaderProgramOGL *aProg) MOZ_OVERRIDE
+  virtual void ActivateProgram(ShaderProgramOGL *aProg) override
   {
     mGLContext->fUseProgram(aProg->GetProgram());
   }
   virtual void BindAndDrawQuad(ShaderProgramOGL *aProg,
                                const gfx::Rect& aLayerRect,
-                               const gfx::Rect& aTextureRect) MOZ_OVERRIDE;
+                               const gfx::Rect& aTextureRect) override;
 
   void BeginFrame(nsIntSize aRenderSize);
   void EndFrame();
@@ -1601,10 +1601,6 @@ nsChildView::NotifyIMEInternal(const IMENotification& aIMENotification)
       mTextInputHandler->OnFocusChangeInGecko(true);
       return NS_OK;
     case NOTIFY_IME_OF_BLUR:
-      // When we're going to be deactive, we must disable the secure event input
-      // mode, see the Carbon Event Manager Reference.
-      TextInputHandler::EnsureSecureEventInputDisabled();
-
       NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
       mTextInputHandler->OnFocusChangeInGecko(false);
       return NS_OK;
@@ -5503,6 +5499,8 @@ static int32_t RoundUp(double aDouble)
   nsIWidgetListener* listener = mGeckoChild->GetWidgetListener();
   if (listener)
     listener->WindowDeactivated();
+
+  TextInputHandler::EnsureSecureEventInputDisabled();
 }
 
 // If the call to removeFromSuperview isn't delayed from nsChildView::

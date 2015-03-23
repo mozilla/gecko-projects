@@ -148,6 +148,11 @@ public:
   bool CanScroll() const;
 
   /**
+   * Returns whether this axis can scroll any more in a particular direction.
+   */
+  bool CanScroll(double aDelta) const;
+
+  /**
    * Returns true if the page has room to be scrolled along this axis
    * and this axis is not scroll-locked.
    */
@@ -267,21 +272,21 @@ protected:
 class AxisX : public Axis {
 public:
   explicit AxisX(AsyncPanZoomController* mAsyncPanZoomController);
-  virtual ParentLayerCoord GetPointOffset(const ParentLayerPoint& aPoint) const MOZ_OVERRIDE;
-  virtual ParentLayerCoord GetRectLength(const ParentLayerRect& aRect) const MOZ_OVERRIDE;
-  virtual ParentLayerCoord GetRectOffset(const ParentLayerRect& aRect) const MOZ_OVERRIDE;
-  virtual ScreenPoint MakePoint(ScreenCoord aCoord) const MOZ_OVERRIDE;
-  virtual const char* Name() const MOZ_OVERRIDE;
+  virtual ParentLayerCoord GetPointOffset(const ParentLayerPoint& aPoint) const override;
+  virtual ParentLayerCoord GetRectLength(const ParentLayerRect& aRect) const override;
+  virtual ParentLayerCoord GetRectOffset(const ParentLayerRect& aRect) const override;
+  virtual ScreenPoint MakePoint(ScreenCoord aCoord) const override;
+  virtual const char* Name() const override;
 };
 
 class AxisY : public Axis {
 public:
   explicit AxisY(AsyncPanZoomController* mAsyncPanZoomController);
-  virtual ParentLayerCoord GetPointOffset(const ParentLayerPoint& aPoint) const MOZ_OVERRIDE;
-  virtual ParentLayerCoord GetRectLength(const ParentLayerRect& aRect) const MOZ_OVERRIDE;
-  virtual ParentLayerCoord GetRectOffset(const ParentLayerRect& aRect) const MOZ_OVERRIDE;
-  virtual ScreenPoint MakePoint(ScreenCoord aCoord) const MOZ_OVERRIDE;
-  virtual const char* Name() const MOZ_OVERRIDE;
+  virtual ParentLayerCoord GetPointOffset(const ParentLayerPoint& aPoint) const override;
+  virtual ParentLayerCoord GetRectLength(const ParentLayerRect& aRect) const override;
+  virtual ParentLayerCoord GetRectOffset(const ParentLayerRect& aRect) const override;
+  virtual ScreenPoint MakePoint(ScreenCoord aCoord) const override;
+  virtual const char* Name() const override;
 };
 
 }
