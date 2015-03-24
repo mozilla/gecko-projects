@@ -111,7 +111,8 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter *parent,
                                  HandleScript script, Handle<LazyScript *> lazyScript,
                                  bool insideEval, HandleScript evalCaller,
                                  Handle<StaticEvalObject *> staticEvalScope,
-                                 bool hasGlobalScope, uint32_t lineNum, EmitterMode emitterMode)
+                                 bool insideNonGlobalEval, uint32_t lineNum,
+                                 EmitterMode emitterMode)
   : sc(sc),
     cx(sc->context),
     parent(parent),
@@ -142,7 +143,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter *parent,
     emittingForInit(false),
     emittingRunOnceLambda(false),
     insideEval(insideEval),
-    hasGlobalScope(hasGlobalScope),
+    insideNonGlobalEval(insideNonGlobalEval),
     emitterMode(emitterMode)
 {
     MOZ_ASSERT_IF(evalCaller, insideEval);
@@ -1587,14 +1588,24 @@ TryConvertFreeName(BytecodeEmitter *bce, ParseNode *pn)
                 hops++;
             }
 
+            // If this walk up and check for directlyInsideEval is ever removed,
+            // we'll need to adjust CompileLazyFunction to better communicate
+            // whether we're inside eval to the BytecodeEmitter.  For now, this
+            // walk is why CompileLazyFunction can claim that it's never inside
+            // eval.
             if (script->funHasExtensibleScope() || script->directlyInsideEval())
                 return false;
         }
     }
 
     // Unbound names aren't recognizable global-property references if the
-    // script isn't running against its global object.
-    if (!bce->script->compileAndGo() || !bce->hasGlobalScope)
+    // script is inside a non-global eval call.
+    if (bce->insideNonGlobalEval)
+        return false;
+
+    // Skip trying to use GNAME ops if we know our script has a polluted
+    // global scope, since they'll just get treated as NAME ops anyway.
+    if (bce->script->hasPollutedGlobalScope())
         return false;
 
     // Deoptimized names also aren't necessarily globals.
@@ -1623,6 +1634,10 @@ TryConvertFreeName(BytecodeEmitter *bce, ParseNode *pn)
     // worth the trouble for doubly-nested eval code.  So we conservatively
     // approximate.  If the outer eval code is strict, then this eval code will
     // be: thus, don't optimize if we're compiling strict code inside an eval.
+    //
+    // Though actually, we don't even need an inner eval.  We could just as well
+    // have a lambda inside that outer strict mode eval and it would run into
+    // the same issue.
     if (bce->insideEval && bce->sc->strict())
         return false;
 
@@ -2208,10 +2223,10 @@ BytecodeEmitter::emitNewInit(JSProtoKey key)
 static bool
 IteratorResultShape(ExclusiveContext *cx, BytecodeEmitter *bce, unsigned *shape)
 {
-    MOZ_ASSERT(bce->script->compileAndGo());
-
     RootedPlainObject obj(cx);
-    gc::AllocKind kind = GuessObjectGCKind(2);
+    // No need to do any guessing for the object kind, since we know exactly how
+    // many properties we plan to have.
+    gc::AllocKind kind = gc::GetGCObjectKind(2);
     obj = NewBuiltinClassInstance<PlainObject>(cx, kind);
     if (!obj)
         return false;
@@ -2241,14 +2256,10 @@ IteratorResultShape(ExclusiveContext *cx, BytecodeEmitter *bce, unsigned *shape)
 bool
 BytecodeEmitter::emitPrepareIteratorResult()
 {
-    if (script->compileAndGo()) {
-        unsigned shape;
-        if (!IteratorResultShape(cx, this, &shape))
-            return false;
-        return emitIndex32(JSOP_NEWOBJECT, shape);
-    }
-
-    return emitNewInit(JSProto_Object);
+    unsigned shape;
+    if (!IteratorResultShape(cx, this, &shape))
+        return false;
+    return emitIndex32(JSOP_NEWOBJECT, shape);
 }
 
 bool
@@ -2294,7 +2305,7 @@ BytecodeEmitter::emitNameOp(ParseNode *pn, bool callContext)
 
     /* Need to provide |this| value for call */
     if (callContext) {
-        if (op == JSOP_GETNAME) {
+        if (op == JSOP_GETNAME || op == JSOP_GETGNAME) {
             JSOp thisOp = needsImplicitThis() ? JSOP_IMPLICITTHIS : JSOP_GIMPLICITTHIS;
             if (!emitAtomOp(pn, thisOp))
                 return false;
@@ -5310,7 +5321,7 @@ EmitFunc(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, bool needsPr
             BytecodeEmitter bce2(bce, bce->parser, funbox, script, /* lazyScript = */ js::NullPtr(),
                                  bce->insideEval, bce->evalCaller,
                                  /* evalStaticScope = */ js::NullPtr(),
-                                 bce->hasGlobalScope, lineNum, bce->emitterMode);
+                                 bce->insideNonGlobalEval, lineNum, bce->emitterMode);
             if (!bce2.init())
                 return false;
 
@@ -6570,12 +6581,12 @@ BytecodeEmitter::emitObject(ParseNode *pn)
      * JSOP_NEWOBJECT with the final shape instead.
      */
     RootedPlainObject obj(cx);
-    if (script->compileAndGo()) {
-        gc::AllocKind kind = GuessObjectGCKind(pn->pn_count);
-        obj = NewBuiltinClassInstance<PlainObject>(cx, kind, TenuredObject);
-        if (!obj)
-            return false;
-    }
+    // No need to do any guessing for the object kind, since we know exactly
+    // how many properties we plan to have.
+    gc::AllocKind kind = gc::GetGCObjectKind(pn->pn_count);
+    obj = NewBuiltinClassInstance<PlainObject>(cx, kind, TenuredObject);
+    if (!obj)
+        return false;
 
     if (!emitPropertyList(pn, &obj, ObjectLiteral))
         return false;
@@ -6783,7 +6794,7 @@ BytecodeEmitter::emitLexicalInitialization(ParseNode *pn, JSOp globalDefOp)
         return false;
 
     if (pn->getOp() != JSOP_INITLEXICAL) {
-        bool global = js_CodeSpec[pn->getOp()].format & JOF_GNAME;
+        bool global = IsGlobalOp(pn->getOp());
         if (!emitIndex32(global ? JSOP_BINDGNAME : JSOP_BINDNAME, atomIndex))
             return false;
         if (!emit1(JSOP_SWAP))

@@ -154,6 +154,7 @@ SandboxFilterImplContent::Build() {
   Allow(SYSCALL(munmap));
   Allow(SYSCALL(mprotect));
   Allow(SYSCALL(writev));
+  Allow(SYSCALL(pread64));
   AllowThreadClone();
   Allow(SYSCALL(brk));
 #if SYSCALL_EXISTS(set_thread_area)
@@ -369,6 +370,7 @@ void SandboxFilterImplGMP::Build() {
   Allow(SOCKETCALL(recvmsg, RECVMSG));
   Allow(SOCKETCALL(sendmsg, SENDMSG));
   Allow(SYSCALL(time));
+  Allow(SYSCALL(sched_yield));
 
   // Nothing after this line is performance-critical.
 
