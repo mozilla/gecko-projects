@@ -795,6 +795,11 @@ nsDisplayScrollLayer::ComputeFrameMetrics(nsIFrame* aForFrame,
       LayoutDeviceIntSize::FromAppUnitsRounded(lineScrollAmount, presContext->AppUnitsPerDevPixel());
     metrics.SetLineScrollAmount(lineScrollAmountInDevPixels);
 
+    nsSize pageScrollAmount = scrollableFrame->GetPageScrollAmount();
+    LayoutDeviceIntSize pageScrollAmountInDevPixels =
+      LayoutDeviceIntSize::FromAppUnitsRounded(pageScrollAmount, presContext->AppUnitsPerDevPixel());
+    metrics.SetPageScrollAmount(pageScrollAmountInDevPixels);
+
     if (!aScrollFrame->GetParent() ||
         EventStateManager::CanVerticallyScrollFrameWithWheel(aScrollFrame->GetParent()))
     {
@@ -3228,6 +3233,20 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
   }
   if (aBuilder->GetAncestorHasApzAwareEventHandler()) {
     mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, borderBox);
+  }
+
+  // Touch action region
+
+  uint32_t touchAction = nsLayoutUtils::GetTouchActionFromFrame(aFrame);
+  if (touchAction & NS_STYLE_TOUCH_ACTION_NONE) {
+    mNoActionRegion.Or(mNoActionRegion, borderBox);
+  } else {
+    if ((touchAction & NS_STYLE_TOUCH_ACTION_PAN_X)) {
+      mHorizontalPanRegion.Or(mHorizontalPanRegion, borderBox);
+    }
+    if ((touchAction & NS_STYLE_TOUCH_ACTION_PAN_Y)) {
+      mVerticalPanRegion.Or(mVerticalPanRegion, borderBox);
+    }
   }
 }
 
@@ -5687,7 +5706,6 @@ void nsDisplayTransform::HitTest(nsDisplayListBuilder *aBuilder,
                       NSAppUnitsToFloatPixels(aRect.width, factor),
                       NSAppUnitsToFloatPixels(aRect.height, factor));
 
-    Rect rect = matrix.ProjectRectBounds(originalRect);
 
     bool snap;
     nsRect childBounds = mStoredList.GetBounds(aBuilder, &snap);
@@ -5695,7 +5713,8 @@ void nsDisplayTransform::HitTest(nsDisplayListBuilder *aBuilder,
                         NSAppUnitsToFloatPixels(childBounds.y, factor),
                         NSAppUnitsToFloatPixels(childBounds.width, factor),
                         NSAppUnitsToFloatPixels(childBounds.height, factor));
-    rect = rect.Intersect(childGfxBounds);
+
+    Rect rect = matrix.ProjectRectBounds(originalRect, childGfxBounds);
 
     resultingRect = nsRect(NSFloatPixelsToAppUnits(float(rect.X()), factor),
                            NSFloatPixelsToAppUnits(float(rect.Y()), factor),
@@ -5935,8 +5954,7 @@ bool nsDisplayTransform::UntransformRect(const nsRect &aTransformedBounds,
                       NSAppUnitsToFloatPixels(aChildBounds.width, factor),
                       NSAppUnitsToFloatPixels(aChildBounds.height, factor));
 
-  result = ToMatrix4x4(transform.Inverse()).ProjectRectBounds(result);
-  result = result.Intersect(childGfxBounds);
+  result = ToMatrix4x4(transform.Inverse()).ProjectRectBounds(result, childGfxBounds);
   *aOutRect = nsLayoutUtils::RoundGfxRectToAppRect(ThebesRect(result), factor);
   return true;
 }
@@ -5963,8 +5981,7 @@ bool nsDisplayTransform::UntransformVisibleRect(nsDisplayListBuilder* aBuilder,
                       NSAppUnitsToFloatPixels(childBounds.height, factor));
 
   /* We want to untransform the matrix, so invert the transformation first! */
-  result = ToMatrix4x4(matrix.Inverse()).ProjectRectBounds(result);
-  result = result.Intersect(childGfxBounds);
+  result = ToMatrix4x4(matrix.Inverse()).ProjectRectBounds(result, childGfxBounds);
 
   *aOutRect = nsLayoutUtils::RoundGfxRectToAppRect(ThebesRect(result), factor);
 

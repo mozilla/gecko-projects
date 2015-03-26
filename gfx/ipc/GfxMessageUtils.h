@@ -752,6 +752,7 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
     WriteParam(aMsg, aParam.mDoSmoothScroll);
     WriteParam(aMsg, aParam.mSmoothScrollOffset);
     WriteParam(aMsg, aParam.GetLineScrollAmount());
+    WriteParam(aMsg, aParam.GetPageScrollAmount());
     WriteParam(aMsg, aParam.AllowVerticalScrollWithWheel());
     WriteParam(aMsg, aParam.GetContentDescription());
   }
@@ -793,6 +794,7 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
             ReadParam(aMsg, aIter, &aResult->mDoSmoothScroll) &&
             ReadParam(aMsg, aIter, &aResult->mSmoothScrollOffset) &&
             ReadParam(aMsg, aIter, &aResult->mLineScrollAmount) &&
+            ReadParam(aMsg, aIter, &aResult->mPageScrollAmount) &&
             ReadParam(aMsg, aIter, &aResult->mAllowVerticalScrollWithWheel) &&
             ReadContentDescription(aMsg, aIter, aResult));
   }
@@ -912,12 +914,18 @@ struct ParamTraits<mozilla::layers::EventRegions>
   {
     WriteParam(aMsg, aParam.mHitRegion);
     WriteParam(aMsg, aParam.mDispatchToContentHitRegion);
+    WriteParam(aMsg, aParam.mNoActionRegion);
+    WriteParam(aMsg, aParam.mHorizontalPanRegion);
+    WriteParam(aMsg, aParam.mVerticalPanRegion);
   }
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     return (ReadParam(aMsg, aIter, &aResult->mHitRegion) &&
-            ReadParam(aMsg, aIter, &aResult->mDispatchToContentHitRegion));
+            ReadParam(aMsg, aIter, &aResult->mDispatchToContentHitRegion) &&
+            ReadParam(aMsg, aIter, &aResult->mNoActionRegion) &&
+            ReadParam(aMsg, aIter, &aResult->mHorizontalPanRegion) &&
+            ReadParam(aMsg, aIter, &aResult->mVerticalPanRegion));
   }
 };
 
