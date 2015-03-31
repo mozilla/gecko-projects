@@ -749,7 +749,7 @@ let gDevToolsBrowser = {
           return;
         }
         // Otherwise, arbitrary connect to the unique content process.
-        client.attachProcess(contentProcesses[0].id)
+        client.getProcess(contentProcesses[0].id)
               .then(response => {
                 let options = {
                   form: response.form,
@@ -1218,8 +1218,8 @@ let gDevToolsBrowser = {
    * necessary because of the WebConsole's `profile` and `profileEnd` methods.
    */
   _connectToProfiler: function DT_connectToProfiler(event, toolbox) {
-    let SharedPerformanceUtils = devtools.require("devtools/performance/front");
-    let connection = SharedPerformanceUtils.getPerformanceActorsConnection(toolbox.target);
+    let SharedProfilerUtils = devtools.require("devtools/profiler/shared");
+    let connection = SharedProfilerUtils.getProfilerConnection(toolbox);
     connection.open();
   },
 

@@ -39,6 +39,7 @@ OptimizationInfo::initNormalOptimizationInfo()
 
     inlineMaxBytecodePerCallSiteMainThread_ = 500;
     inlineMaxBytecodePerCallSiteOffThread_ = 1000;
+    inlineMaxCalleeInlinedBytecodeLength_ = 3000;
     inlineMaxTotalBytecodeLength_ = 80000;
     inliningMaxCallerBytecodeLength_ = 1500;
     maxInlineDepth_ = 3;
@@ -70,7 +71,7 @@ OptimizationInfo::initAsmjsOptimizationInfo()
 }
 
 uint32_t
-OptimizationInfo::compilerWarmUpThreshold(JSScript *script, jsbytecode *pc) const
+OptimizationInfo::compilerWarmUpThreshold(JSScript* script, jsbytecode* pc) const
 {
     MOZ_ASSERT(pc == nullptr || pc == script->code() || JSOp(*pc) == JSOP_LOOPENTRY);
 
@@ -144,13 +145,13 @@ OptimizationInfos::isLastLevel(OptimizationLevel level) const
 }
 
 OptimizationLevel
-OptimizationInfos::levelForScript(JSScript *script, jsbytecode *pc) const
+OptimizationInfos::levelForScript(JSScript* script, jsbytecode* pc) const
 {
     OptimizationLevel prev = Optimization_DontCompile;
 
     while (!isLastLevel(prev)) {
         OptimizationLevel level = nextLevel(prev);
-        const OptimizationInfo *info = get(level);
+        const OptimizationInfo* info = get(level);
         if (script->getWarmUpCount() < info->compilerWarmUpThreshold(script, pc))
             return prev;
 

@@ -332,6 +332,8 @@ CompositorVsyncObserver::Composite(TimeStamp aVsyncTimestamp)
     mCurrentCompositeTask = nullptr;
   }
 
+  DispatchTouchEvents(aVsyncTimestamp);
+
   if (mNeedsComposite && mCompositorParent) {
     mNeedsComposite = false;
     mCompositorParent->CompositeCallback(aVsyncTimestamp);
@@ -339,8 +341,6 @@ CompositorVsyncObserver::Composite(TimeStamp aVsyncTimestamp)
   } else if (mVsyncNotificationsSkipped++ > gfxPrefs::CompositorUnobserveCount()) {
     UnobserveVsync();
   }
-
-  DispatchTouchEvents(aVsyncTimestamp);
 }
 
 void
@@ -1506,7 +1506,7 @@ CompositorParent::RequestNotifyLayerTreeCleared(uint64_t aLayersId, CompositorUp
  * CompositorParent it's associated with.
  */
 class CrossProcessCompositorParent final : public PCompositorParent,
-                                               public ShadowLayersManager
+                                           public ShadowLayersManager
 {
   friend class CompositorParent;
 

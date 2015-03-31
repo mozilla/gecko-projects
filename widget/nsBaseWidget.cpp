@@ -978,6 +978,8 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
   mAPZC = CompositorParent::GetAPZCTreeManager(rootLayerTreeId);
   MOZ_ASSERT(mAPZC);
 
+  ConfigureAPZControllerThread();
+
   mAPZC->SetDPI(GetDPI());
   mAPZEventState = new APZEventState(this,
       new ChromeProcessContentReceivedInputBlockCallback(mAPZC));
@@ -990,10 +992,17 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
   }
 }
 
+void nsBaseWidget::ConfigureAPZControllerThread()
+{
+  // By default the controller thread is the main thread.
+  APZThreadUtils::SetControllerThread(MessageLoop::current());
+}
+
 nsEventStatus
 nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
                                            const ScrollableLayerGuid& aGuid,
-                                           uint64_t aInputBlockId)
+                                           uint64_t aInputBlockId,
+                                           nsEventStatus aApzResponse)
 {
   MOZ_ASSERT(NS_IsMainThread());
   InputAPZContext context(aGuid, aInputBlockId);
@@ -1026,7 +1035,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
         APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(), *aEvent,
             aGuid, aInputBlockId, mSetTargetAPZCCallback);
       }
-      mAPZEventState->ProcessTouchEvent(*touchEvent, aGuid, aInputBlockId);
+      mAPZEventState->ProcessTouchEvent(*touchEvent, aGuid, aInputBlockId, aApzResponse);
     } else if (WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent()) {
       APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(), *aEvent,
                 aGuid, aInputBlockId, mSetTargetAPZCCallback);
@@ -1063,7 +1072,7 @@ nsBaseWidget::DispatchAPZAwareEvent(WidgetInputEvent* aEvent)
     if (result == nsEventStatus_eConsumeNoDefault) {
         return result;
     }
-    return ProcessUntransformedAPZEvent(aEvent, guid, inputBlockId);
+    return ProcessUntransformedAPZEvent(aEvent, guid, inputBlockId, result);
   }
 
   nsEventStatus status;

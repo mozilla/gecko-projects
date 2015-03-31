@@ -48,11 +48,13 @@ typedef frontend::ParseContext<frontend::FullParseHandler> AsmJSParseContext;
 // In this case, the parser.tokenStream has been advanced an indeterminate
 // amount and the entire function should be reparsed from the beginning.
 extern bool
-ValidateAsmJS(ExclusiveContext *cx, AsmJSParser &parser, frontend::ParseNode *stmtList,
-             bool *validated);
+ValidateAsmJS(ExclusiveContext* cx, AsmJSParser& parser, frontend::ParseNode* stmtList,
+             bool* validated);
 
 // The assumed page size; dynamically checked in ValidateAsmJS.
 const size_t AsmJSPageSize = 4096;
+
+#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
 
 // Targets define AsmJSImmediateRange to be the size of an address immediate,
 // and AsmJSCheckedImmediateRange, to be the size of an address immediate that
@@ -61,8 +63,8 @@ static_assert(jit::AsmJSCheckedImmediateRange <= jit::AsmJSImmediateRange,
               "AsmJSImmediateRange should be the size of an unconstrained "
               "address immediate");
 
-#ifdef JS_CPU_X64
-// On x64, the internal ArrayBuffer data array is inflated to 4GiB (only the
+// To support the use of signal handlers for catching Out Of Bounds accesses,
+// the internal ArrayBuffer data array is inflated to 4GiB (only the
 // byteLength portion of which is accessible) so that out-of-bounds accesses
 // (made using a uint32 index) are guaranteed to raise a SIGSEGV.
 // Then, an additional extent is added to permit folding of small immediate
@@ -73,7 +75,7 @@ static const size_t AsmJSMappedSize = 4 * 1024ULL * 1024ULL * 1024ULL +
                                       jit::AsmJSCheckedImmediateRange +
                                       AsmJSPageSize;
 
-#endif
+#endif // defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
 
 // From the asm.js spec Linking section:
 //  the heap object's byteLength must be either
@@ -118,7 +120,7 @@ IsDeprecatedAsmJSHeapLength(uint32_t length)
 // Return whether asm.js optimization is inhibited by the platform or
 // dynamically disabled:
 extern bool
-IsAsmJSCompilationAvailable(JSContext *cx, unsigned argc, JS::Value *vp);
+IsAsmJSCompilationAvailable(JSContext* cx, unsigned argc, JS::Value* vp);
 
 } // namespace js
 

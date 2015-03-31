@@ -15,7 +15,7 @@
 
 BEGIN_TEST(testSavedStacks_withNoStack)
 {
-    JSCompartment *compartment = js::GetContextCompartment(cx);
+    JSCompartment* compartment = js::GetContextCompartment(cx);
     compartment->setObjectMetadataCallback(js::SavedStacksMetadataCallback);
     JS::RootedObject obj(cx, js::NewDenseEmptyArray(cx));
     compartment->setObjectMetadataCallback(nullptr);
@@ -57,8 +57,7 @@ BEGIN_TEST(testSavedStacks_ApiDefaultValues)
     CHECK(parent.get() == nullptr);
 
     // Stack string
-    result = JS::GetSavedFrameSource(cx, savedFrame, &str);
-    CHECK(result == JS::SavedFrameResult::AccessDenied);
+    CHECK(JS::BuildStackString(cx, savedFrame, &str));
     CHECK(str.get() == cx->runtime()->emptyString);
 
     return true;

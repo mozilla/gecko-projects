@@ -159,7 +159,7 @@ input[type=button] {
 .newtab-cell {
   display: -moz-box;
   height: 180px;
-  margin: 20px 10px 85px;
+  margin: 20px 10px 68px;
   width: 290px;
 }
 
@@ -226,7 +226,7 @@ input[type=button] {
 }
 
 .newtab-suggested-bounds {
-  max-height: 51px; /* 51 / 17 = 3 lines maximum */
+  max-height: 34px; /* 34 / 17 = 2 lines maximum */
 }
 
 .newtab-title {
@@ -262,16 +262,19 @@ input[type=button] {
   display: block;
 }
 
-.newtab-site[type=related] .newtab-suggested {
+.newtab-site[suggested] .newtab-suggested {
   display: table;
 }
 
 .sponsored-explain,
-.sponsored-explain a {
+.sponsored-explain a,
+.suggested-explain,
+.suggested-explain a {
   color: white;
 }
 
-.sponsored-explain {
+.sponsored-explain,
+.suggested-explain {
   background-color: rgba(51, 51, 51, 0.95);
   border-bottom-left-radius: 6px;
   border-bottom-right-radius: 6px;
@@ -283,7 +286,8 @@ input[type=button] {
 }
 
 #newtab-intro-panel input,
-.sponsored-explain input {
+.sponsored-explain input,
+.suggested-explain input {
   background-size: 18px;
   height: 18px;
   opacity: 1;

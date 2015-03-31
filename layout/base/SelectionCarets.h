@@ -57,9 +57,9 @@ class Selection;
  *          caret becomes tilt.
  */
 class SelectionCarets final : public nsIReflowObserver,
-                                  public nsISelectionListener,
-                                  public nsIScrollObserver,
-                                  public nsSupportsWeakReference
+                              public nsISelectionListener,
+                              public nsIScrollObserver,
+                              public nsSupportsWeakReference
 {
 public:
   /**
@@ -84,8 +84,8 @@ public:
   virtual void ScrollPositionChanged() override;
 
   // AsyncPanZoom started/stopped callbacks from nsIScrollObserver
-  virtual void AsyncPanZoomStarted(const mozilla::CSSIntPoint aScrollPos) override;
-  virtual void AsyncPanZoomStopped(const mozilla::CSSIntPoint aScrollPos) override;
+  virtual void AsyncPanZoomStarted() override;
+  virtual void AsyncPanZoomStopped() override;
 
   void Init();
   void Terminate();

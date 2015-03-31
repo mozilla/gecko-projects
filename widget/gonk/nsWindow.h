@@ -90,7 +90,8 @@ public:
     void DispatchTouchInputViaAPZ(mozilla::MultiTouchInput& aInput);
     void DispatchTouchEventForAPZ(const mozilla::MultiTouchInput& aInput,
                                   const ScrollableLayerGuid& aGuid,
-                                  const uint64_t aInputBlockId);
+                                  const uint64_t aInputBlockId,
+                                  nsEventStatus aApzResponse);
     NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
                              nsEventStatus& aStatus);
     virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
@@ -130,6 +131,8 @@ public:
     virtual bool NeedsPaint();
 
     virtual Composer2D* GetComposer2D() override;
+
+    void ConfigureAPZControllerThread() override;
 
 protected:
     nsWindow* mParent;

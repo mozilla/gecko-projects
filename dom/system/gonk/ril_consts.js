@@ -1692,6 +1692,31 @@ this.PDU_NL_IDENTIFIER_TAMIL      = 11;
 this.PDU_NL_IDENTIFIER_TELUGU     = 12;
 this.PDU_NL_IDENTIFIER_URDU       = 13;
 
+// The mapping of mcc and their extra GSM national language locking / single
+// shift table tuples to enable. The default GSM alphabet and extension table
+// are always enabled and need not to be list here.
+//
+// The content should be updated when a relevant national regulatory body
+// requests. See 'NOTE 2' of 6.2.1.2.5 in 3GPP TS 23.038:
+// "
+// Encoding of a message using the national locking shift mechanism is not
+// intended to be implemented until a formal request is issued by the
+// relevant national regulatory body. This is because a receiving entity
+// not supporting the relevant locking-shift decoding will present different
+// characters from the ones intended by the sending entity.
+// "
+this.PDU_MCC_NL_TABLE_TUPLES_MAPPING = {
+  // Configuration for Turkey.
+  //
+  // The Turkish single shift table contains 7 extra characters
+  // (Ğ, İ, Ş, ç, ğ, ı, ş) than the GSM default alphabet extension table. Since
+  // all the 7 characters are also included in Turkish locking shift table, it's
+  // not necessary to enable Turkish single shift table. Using GSM default
+  // alphabet extension table instead saves 3 octets when these extension table
+  // characters present in a message.
+  286: [[PDU_NL_IDENTIFIER_TURKISH, PDU_NL_IDENTIFIER_DEFAULT]]
+};
+
 /*
  * 3GPP TS 23.038 - 6.2.1 GSM 7 bit Default Alphabet
  */
@@ -2552,7 +2577,7 @@ this.GECKO_RADIOSTATE_DISABLED  = 1;
 
 // Only used in ril_worker.js
 this.GECKO_CARDSTATE_UNINITIALIZED = 4294967294; // UINT32_MAX - 1
-// See nsIIccProvider::CARD_STATE_*
+// See nsIIcc::CARD_STATE_*
 this.GECKO_CARDSTATE_UNDETECTED = 4294967295; // UINT32_MAX
 this.GECKO_CARDSTATE_UNKNOWN = 0;
 this.GECKO_CARDSTATE_READY = 1;
@@ -2585,7 +2610,7 @@ this.GECKO_CARDSTATE_RUIM_SERVICE_PROVIDER_PUK_REQUIRED = 27;
 this.GECKO_CARDSTATE_RUIM_PUK_REQUIRED = 28;
 this.GECKO_CARDSTATE_ILLEGAL = 29;
 
-// See nsIIccProvider::CARD_LOCK_TYPE_*
+// See nsIIcc::CARD_LOCK_TYPE_*
 this.GECKO_CARDLOCK_PIN = 0;
 this.GECKO_CARDLOCK_PIN2 = 1;
 this.GECKO_CARDLOCK_PUK = 2;
@@ -2628,17 +2653,17 @@ GECKO_CARDLOCK_TO_SEL_CODE[GECKO_CARDLOCK_SPCK] = ICC_SEL_CODE_PH_SP_PIN;
 // TODO: Bug 1116072: identify the mapping between RIL_PERSOSUBSTATE_SIM_SIM @
 //       ril.h and TS 27.007, clause 8.65 for GECKO_CARDLOCK_PCK.
 
-// See nsIIccProvider::CARD_CONTACT_TYPE_*
+// See nsIIcc::CARD_CONTACT_TYPE_*
 this.GECKO_CARDCONTACT_TYPE_ADN = 0;
 this.GECKO_CARDCONTACT_TYPE_FDN = 1;
 this.GECKO_CARDCONTACT_TYPE_SDN = 2;
 
-// See nsIIccProvider::CARD_MVNO_TYPE_*
+// See nsIIcc::CARD_MVNO_TYPE_*
 this.GECKO_CARDMVNO_TYPE_IMSI = 0;
 this.GECKO_CARDMVNO_TYPE_SPN = 1;
 this.GECKO_CARDMVNO_TYPE_GID = 2;
 
-// See nsIIccProvider::CARD_MVNO_TYPE_*
+// See nsIIcc::CARD_SERVICE_*
 this.GECKO_CARDSERVICE_FDN = 0;
 
 // See ril.h RIL_PersoSubstate
@@ -2693,6 +2718,7 @@ NETWORK_CREG_TO_GECKO_MOBILE_CONNECTION_STATE[NETWORK_CREG_STATE_DENIED_EMERGENC
 NETWORK_CREG_TO_GECKO_MOBILE_CONNECTION_STATE[NETWORK_CREG_STATE_UNKNOWN_EMERGENCY_CALLS] = GECKO_MOBILE_CONNECTION_STATE_UNKNOWN;
 
 
+// Should match enum TelephonyCallDisconnectedReason defined in TelephonyCall.webidl
 this.GECKO_CALL_ERROR_BAD_NUMBER = "BadNumberError";
 this.GECKO_CALL_ERROR_NO_ROUTE_TO_DESTINATION = "NoRouteToDestinationError";
 this.GECKO_CALL_ERROR_CHANNEL_UNACCEPTABLE = "ChannelUnacceptableError";
@@ -2703,7 +2729,7 @@ this.GECKO_CALL_ERROR_NO_USER_RESPONDING = "NoUserRespondingError";
 this.GECKO_CALL_ERROR_USER_ALERTING = "UserAlertingNoAnswerError";
 this.GECKO_CALL_ERROR_REJECTED = "CallRejectedError";
 this.GECKO_CALL_ERROR_NUMBER_CHANGED = "NumberChangedError";
-this.GECKO_CALL_ERROR_REJECTED_DETINATION_FEATURE = "CallRejectedDestinationFeature";
+this.GECKO_CALL_ERROR_REJECTED_DETINATION_FEATURE = "CallRejectedDestinationFeatureError";
 this.GECKO_CALL_ERROR_PRE_EMPTION = "PreEmptionError";
 this.GECKO_CALL_ERROR_DEST_OUT_OF_ORDER = "DestinationOutOfOrderError";
 this.GECKO_CALL_ERROR_INVALID_NUMBER_FORMAT = "InvalidNumberFormatError";

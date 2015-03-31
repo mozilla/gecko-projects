@@ -590,6 +590,50 @@ TabSources.prototype = {
     });
   },
 
+  getAllGeneratedLocations: function (originalLocation) {
+    let {
+      originalSourceActor,
+      originalLine,
+      originalColumn
+    } = originalLocation;
+
+    if (originalColumn === undefined) {
+      let source = originalSourceActor.source ||
+                   originalSourceActor.generatedSource;
+
+      return this.fetchSourceMap(source).then((map) => {
+        if (map) {
+          map.computeColumnSpans();
+
+          return map.allGeneratedPositionsFor({
+            source: originalSourceActor.url,
+            line: originalLine
+          }).map(({ line, column, lastColumn }) => {
+            return new GeneratedLocation(
+              this.createNonSourceMappedActor(source),
+              line,
+              column,
+              lastColumn
+            );
+          });
+        }
+
+        return [GeneratedLocation.fromOriginalLocation(originalLocation)];
+      });
+    } else {
+      // TODO: Some source maps have multiple mappings for the same column
+      return this.getGeneratedLocation(originalLocation)
+                 .then((generatedLocation) => {
+        if (generatedLocation.generatedLine === null &&
+            generatedLocation.generatedColumn === null) {
+          return [];
+        }
+        return [generatedLocation];
+      });
+    }
+  },
+
+
   /**
    * Returns a promise of the location in the generated source corresponding to
    * the original source and line given.

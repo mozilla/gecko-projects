@@ -7,16 +7,17 @@
 /* rendering object for CSS "display: ruby-base-container" */
 
 #include "nsRubyBaseContainerFrame.h"
+
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Maybe.h"
+#include "mozilla/WritingModes.h"
 #include "nsContentUtils.h"
 #include "nsLineLayout.h"
 #include "nsPresContext.h"
 #include "nsStyleContext.h"
 #include "nsStyleStructInlines.h"
-#include "WritingModes.h"
-#include "RubyUtils.h"
 #include "nsTextFrame.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/DebugOnly.h"
+#include "RubyUtils.h"
 
 using namespace mozilla;
 
@@ -425,6 +426,7 @@ nsRubyBaseContainerFrame::Reflow(nsPresContext* aPresContext,
                                  const nsHTMLReflowState& aReflowState,
                                  nsReflowStatus& aStatus)
 {
+  MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsRubyBaseContainerFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
   aStatus = NS_FRAME_COMPLETE;

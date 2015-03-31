@@ -52,7 +52,7 @@ TrackBuffer::TrackBuffer(MediaSourceDecoder* aParentDecoder, const nsACString& a
 {
   MOZ_COUNT_CTOR(TrackBuffer);
   mParser = ContainerParser::CreateForMIMEType(aType);
-  mTaskQueue = new MediaTaskQueue(GetMediaDecodeThreadPool());
+  mTaskQueue = new MediaTaskQueue(GetMediaThreadPool());
   aParentDecoder->AddTrackBuffer(this);
   mDecoderPerSegment = Preferences::GetBool("media.mediasource.decoder-per-segment", false);
   MSE_DEBUG("TrackBuffer created for parent decoder %p", aParentDecoder);
@@ -874,7 +874,7 @@ TrackBuffer::AbortAppendData()
 const nsTArray<nsRefPtr<SourceBufferDecoder>>&
 TrackBuffer::Decoders()
 {
-  // XXX assert OnDecodeThread
+  // XXX assert OnDecodeTaskQueue
   return mInitializedDecoders;
 }
 

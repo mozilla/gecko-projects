@@ -9,6 +9,7 @@ flags:
     - emulator
     - emulator-jb
     - emulator-kk
+    - emulator-x86-kk
     - emulator-l
     - linux32_gecko  # b2g desktop linux 32 bit
     - linux64_gecko  # b2g desktop linux 64 bit
@@ -17,6 +18,10 @@ flags:
     - win32_gecko    # b2g desktop win 32 bit
     - flame-kk       # b2g flame kitkat
     - flame-kk-eng   # b2g flame eng build
+    - dolphin
+    - dolphin-eng
+    - dolphin-512
+    - dolphin-512-eng
 
   tests:
     - cppunit
@@ -28,9 +33,11 @@ flags:
     - gaia-linter
     - gaia-unit
     - gaia-unit-oop
+    - gaia-ui-test-sanity
     - gaia-ui-test-oop
     - gaia-ui-test-accessibility
     - gaia-ui-test-functional
+    - gaia-ui-test-functional-dsds
     - gaia-ui-test-unit
     - jetpack
     - jittests

@@ -114,7 +114,7 @@ AccumulateCacheHitTelemetry(CacheDisposition hitOrMiss)
 
         int32_t experiment = CacheObserver::HalfLifeExperiment();
         if (experiment > 0 && hitOrMiss == kCacheMissed) {
-            Telemetry::Accumulate(Telemetry::HTTP_CACHE_MISS_HALFLIFE_EXPERIMENT,
+            Telemetry::Accumulate(Telemetry::HTTP_CACHE_MISS_HALFLIFE_EXPERIMENT_2,
                                   experiment - 1);
         }
     }
@@ -5981,7 +5981,7 @@ nsHttpChannel::SetOfflineCacheToken(nsISupports *token)
 }
 
 class nsHttpChannelCacheKey final : public nsISupportsPRUint32,
-                                        public nsISupportsCString
+                                    public nsISupportsCString
 {
     NS_DECL_ISUPPORTS
 

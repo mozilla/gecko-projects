@@ -8,6 +8,10 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 Cu.import("resource://gre/modules/Services.jsm");
+const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
+
+// This gives logging to stdout for tests
+var {console} = Cu.import("resource://gre/modules/devtools/Console.jsm", {});
 
 let devtools = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools;
 let WebConsoleUtils = devtools.require("devtools/toolkit/webconsole/utils").Utils;
@@ -83,7 +87,7 @@ function attachConsole(aListeners, aCallback, aAttachToTab)
                                        _onAttachConsole.bind(null, aState));
       });
     } else {
-      aState.dbgClient.attachProcess().then(response => {
+      aState.dbgClient.getProcess().then(response => {
         let consoleActor = response.form.consoleActor;
         aState.actor = consoleActor;
         aState.dbgClient.attachConsole(consoleActor, aListeners,

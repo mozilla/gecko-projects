@@ -317,14 +317,16 @@ MarkupView.prototype = {
   },
 
   _briefBoxModelTimer: null,
-  _brieflyShowBoxModel: function(nodeFront) {
-    let win = this._frame.contentWindow;
 
+  _clearBriefBoxModelTimer: function() {
     if (this._briefBoxModelTimer) {
       clearTimeout(this._briefBoxModelTimer);
       this._briefBoxModelTimer = null;
     }
+  },
 
+  _brieflyShowBoxModel: function(nodeFront) {
+    this._clearBriefBoxModelTimer();
     this._showBoxModel(nodeFront);
 
     this._briefBoxModelTimer = setTimeout(() => {
@@ -1379,6 +1381,7 @@ MarkupView.prototype = {
     // We ignore the promise that |_hideBoxModel| returns, since we should still
     // proceed with the rest of destruction if it fails.
     this._hideBoxModel();
+    this._clearBriefBoxModelTimer();
 
     this._elt.removeEventListener("click", this._onMouseClick, false);
 
@@ -2325,7 +2328,7 @@ function ElementEditor(aContainer, aNode) {
   this.template = this.markup.template.bind(this.markup);
   this.doc = this.markup.doc;
 
-  this.attrs = {};
+  this.attrElements = new Map();
   this.animationTimers = {};
 
   // The templates will fill the following properties
@@ -2405,14 +2408,20 @@ ElementEditor.prototype = {
    * Update the state of the editor from the node.
    */
   update: function() {
-    let attrs = this.node.attributes || [];
-    let attrsToRemove = new Set(this.attrList.querySelectorAll(".attreditor"));
+    let nodeAttributes = this.node.attributes || [];
 
-    // Only loop through the current attributes on the node, anything that's
-    // been removed will be removed from this DOM because it will be part of
-    // the attrsToRemove set.
-    for (let attr of attrs) {
-      let el = this.attrs[attr.name];
+    // Keep the data model in sync with attributes on the node.
+    let currentAttributes = new Set(nodeAttributes.map(a=>a.name));
+    for (let name of this.attrElements.keys()) {
+      if (!currentAttributes.has(name)) {
+        this.removeAttribute(name);
+      }
+    }
+
+    // Only loop through the current attributes on the node.  Missing
+    // attributes have already been removed at this point.
+    for (let attr of nodeAttributes) {
+      let el = this.attrElements.get(attr.name);
       let valueChanged = el && el.querySelector(".attr-value").innerHTML !== attr.value;
       let isEditing = el && el.querySelector(".editable").inplaceEditor;
       let canSimplyShowEditor = el && (!valueChanged || isEditing);
@@ -2420,7 +2429,6 @@ ElementEditor.prototype = {
       if (canSimplyShowEditor) {
         // Element already exists and doesn't need to be recreated.
         // Just show it (it's hidden by default due to the template).
-        attrsToRemove.delete(el);
         el.style.removeProperty("display");
       } else {
         // Create a new editor, because the value of an existing attribute
@@ -2436,10 +2444,6 @@ ElementEditor.prototype = {
         }
       }
     }
-
-    for (let el of attrsToRemove) {
-      el.remove();
-    }
   },
 
   _startModifyingAttributes: function() {
@@ -2454,6 +2458,18 @@ ElementEditor.prototype = {
   getAttributeElement: function(attrName) {
     return this.attrList.querySelector(
       ".attreditor[data-attr=" + attrName + "] .attr-value");
+  },
+
+  /**
+   * Remove an attribute from the attrElements object and the DOM
+   * @param string attrName The name of the attribute to remove
+   */
+  removeAttribute: function(attrName) {
+    let attr = this.attrElements.get(attrName);
+    if (attr) {
+      this.attrElements.delete(attrName);
+      attr.remove();
+    }
   },
 
   _createAttribute: function(aAttr, aBefore = null) {
@@ -2538,18 +2554,13 @@ ElementEditor.prototype = {
     if (aAttr.name == "id") {
       before = this.attrList.firstChild;
     } else if (aAttr.name == "class") {
-      let idNode = this.attrs["id"];
+      let idNode = this.attrElements.get("id");
       before = idNode ? idNode.nextSibling : this.attrList.firstChild;
     }
     this.attrList.insertBefore(attr, before);
 
-    // Remove the old version of this attribute from the DOM.
-    let oldAttr = this.attrs[aAttr.name];
-    if (oldAttr && oldAttr.parentNode) {
-      oldAttr.parentNode.removeChild(oldAttr);
-    }
-
-    this.attrs[aAttr.name] = attr;
+    this.removeAttribute(aAttr.name);
+    this.attrElements.set(aAttr.name, attr);
 
     let collapsedValue;
     if (aAttr.value.match(COLLAPSE_DATA_URL_REGEX)) {

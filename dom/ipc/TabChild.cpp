@@ -2026,8 +2026,8 @@ TabChild::RecvUpdateDimensions(const nsIntRect& rect, const ScreenIntSize& size,
     mOrientation = orientation;
     ScreenIntSize oldScreenSize = mInnerSize;
     mInnerSize = size;
-    mWidget->Resize(0, 0, size.width, size.height,
-                    true);
+    mWidget->Resize(rect.x + chromeDisp.x, rect.y + chromeDisp.y, size.width, size.height,
+                     true);
 
     nsCOMPtr<nsIBaseWindow> baseWin = do_QueryInterface(WebNavigation());
     baseWin->SetPositionAndSize(0, 0, size.width, size.height,
@@ -2392,7 +2392,8 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
     return true;
   }
 
-  mAPZEventState->ProcessTouchEvent(localEvent, aGuid, aInputBlockId);
+  mAPZEventState->ProcessTouchEvent(localEvent, aGuid, aInputBlockId,
+                                    nsEventStatus_eIgnore);
   return true;
 }
 

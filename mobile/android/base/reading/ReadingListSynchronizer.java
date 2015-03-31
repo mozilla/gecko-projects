@@ -176,6 +176,80 @@ public class ReadingListSynchronizer {
     }
   }
 
+  private static class DeletionUploadDelegate implements ReadingListDeleteDelegate {
+    private final ReadingListChangeAccumulator acc;
+    private final StageDelegate next;
+
+    DeletionUploadDelegate(ReadingListChangeAccumulator acc, StageDelegate next) {
+      this.acc = acc;
+      this.next = next;
+    }
+
+    @Override
+    public void onBatchDone() {
+      try {
+        acc.finish();
+      } catch (Exception e) {
+        next.fail(e);
+        return;
+      }
+
+      next.next();
+    }
+
+    @Override
+    public void onSuccess(ReadingListRecordResponse response,
+                          ReadingListRecord record) {
+      Logger.debug(LOG_TAG, "Tracking uploaded deletion " + record.getGUID());
+      acc.addDeletion(record.getGUID());
+    }
+
+    @Override
+    public void onPreconditionFailed(String guid, MozResponse response) {
+      // Should never happen.
+    }
+
+    @Override
+    public void onRecordMissingOrDeleted(String guid, MozResponse response) {
+      // Great!
+      Logger.debug(LOG_TAG, "Tracking redundant deletion " + guid);
+      acc.addDeletion(guid);
+    }
+
+    @Override
+    public void onFailure(Exception e) {
+      // Ignore.
+    }
+
+    @Override
+    public void onFailure(MozResponse response) {
+      // Ignore.
+    }
+  }
+
+
+  private Queue<String> collectDeletedIDsFromCursor(Cursor cursor) {
+    try {
+      final Queue<String> toDelete = new LinkedList<>();
+
+      final int columnGUID = cursor.getColumnIndexOrThrow(ReadingListItems.GUID);
+
+      while (cursor.moveToNext()) {
+        final String guid = cursor.getString(columnGUID);
+        if (guid == null) {
+          // Nothing we can do here.
+          continue;
+        }
+
+        toDelete.add(guid);
+      }
+
+      return toDelete;
+    } finally {
+      cursor.close();
+    }
+  }
+
   private static class StatusUploadDelegate implements ReadingListRecordUploadDelegate {
     private final ReadingListChangeAccumulator acc;
 
@@ -248,11 +322,10 @@ public class ReadingListSynchronizer {
       }
 
       if (failures == 0) {
-        try {
-          next.next();
-        } catch (Exception e) {
-        }
+        next.next();
+        return;
       }
+
       next.fail();
     }
   }
@@ -305,6 +378,149 @@ public class ReadingListSynchronizer {
     }
   }
 
+  private static class ModifiedUploadDelegate implements ReadingListRecordUploadDelegate {
+    private final ReadingListChangeAccumulator acc;
+
+    public volatile int failures = 0;
+    private final StageDelegate next;
+
+    ModifiedUploadDelegate(ReadingListChangeAccumulator acc, StageDelegate next) {
+      this.acc = acc;
+      this.next = next;
+    }
+
+    @Override
+    public void onInvalidUpload(ClientReadingListRecord up,
+                                ReadingListResponse response) {
+      recordFailed(up);
+    }
+
+    @Override
+    public void onConflict(ClientReadingListRecord up,
+                           ReadingListResponse response) {
+      // This can happen for a material change.
+      failures++;
+    }
+
+    @Override
+    public void onSuccess(ClientReadingListRecord up,
+                          ReadingListRecordResponse response,
+                          ServerReadingListRecord down) {
+      if (!TextUtils.equals(up.getGUID(), down.getGUID())) {
+        // Uh oh!
+        // This should never occur. We should get an onConflict instead,
+        // so this would imply a server bug, or something like a truncated
+        // over-long GUID string.
+        //
+        // Should we wish to recover from this case, probably the right approach
+        // is to ensure that the GUID is overwritten locally (given that we know
+        // the numeric ID).
+      }
+
+      // We could upload our material changes but get back additional status
+      // changes from the server.  Apply them.
+      acc.addChangedRecord(up.givenServerRecord(down));
+    }
+
+    @Override
+    public void onBadRequest(ClientReadingListRecord up, MozResponse response) {
+      recordFailed(up);
+    }
+
+    @Override
+    public void onFailure(ClientReadingListRecord up, Exception ex) {
+      recordFailed(up);
+    }
+
+    @Override
+    public void onFailure(ClientReadingListRecord up, MozResponse response) {
+      // Since we download and apply remote changes before uploading local changes, the conflict
+      // window is very small.  We should essentially never see true conflicts here.
+      if (response.getStatusCode() == 404) {
+        // We shouldn't see a 404; we should see a record with deleted=true when
+        // we fetch remote changes.
+        Logger.warn(LOG_TAG, "Ignoring 404 response patching record with guid: " + up.getGUID());
+      } else if (response.getStatusCode() == 409) {
+        // A 409 indicates that resolved_url has collided with an existing
+        // record. Not much to be done here.
+        Logger.info(LOG_TAG, "409 response seen; deleting record with guid: " + up.getGUID());
+        acc.addDeletion(up);
+      } else {
+        // We should never see a 412 since we race to upload our changes (and
+        // accept whatever the server gives us back).
+        recordFailed(up);
+      }
+    }
+
+    private void recordFailed(ClientReadingListRecord up) {
+      ++failures;
+    }
+
+    @Override
+    public void onBatchDone() {
+      try {
+        acc.finish();
+      } catch (Exception e) {
+        next.fail(e);
+        return;
+      }
+
+      if (failures == 0) {
+        next.next();
+        return;
+      }
+
+      next.fail();
+    }
+  }
+
+  private Queue<ClientReadingListRecord> collectModifiedFromCursor(final Cursor cursor) {
+    try {
+      final Queue<ClientReadingListRecord> toUpload = new LinkedList<>();
+
+      final int columnGUID = cursor.getColumnIndexOrThrow(ReadingListItems.GUID);
+      final int columnExcerpt = cursor.getColumnIndexOrThrow(ReadingListItems.EXCERPT);
+      final int columnResolvedURL = cursor.getColumnIndexOrThrow(ReadingListItems.RESOLVED_URL);
+      final int columnResolvedTitle = cursor.getColumnIndexOrThrow(ReadingListItems.RESOLVED_TITLE);
+      // TODO: final int columnIsArticle = cursor.getColumnIndexOrThrow(ReadingListItems.IS_ARTICLE);
+      // TODO: final int columnWordCount = cursor.getColumnIndexOrThrow(ReadingListItems.WORD_COUNT);
+
+      while (cursor.moveToNext()) {
+        final String guid = cursor.getString(columnGUID);
+        if (guid == null) {
+          // Nothing we can do here, but this should never happen: we should
+          // have uploaded this record as new before trying to upload a
+          // material modification!
+          continue;
+        }
+
+        final ExtendedJSONObject o = new ExtendedJSONObject();
+        o.put("id", guid);
+        final String excerpt = cursor.getString(columnExcerpt); // Can be NULL.
+        final String resolvedURL = cursor.getString(columnResolvedURL); // Can be NULL.
+        final String resolvedTitle = cursor.getString(columnResolvedTitle); // Can be NULL.
+        if (excerpt == null && resolvedURL == null && resolvedTitle == null) {
+          // Nothing material to upload, so skip this record.
+          continue;
+        }
+        o.put("excerpt", excerpt);
+        o.put("resolved_url", resolvedURL);
+        o.put("resolved_title", resolvedTitle);
+        // TODO: o.put("is_article", cursor.getInt(columnIsArticle) == 1);
+        // TODO: o.put("word_count", cursor.getInt(columnWordCount));
+
+        final ClientMetadata cm = null;
+        final ServerMetadata sm = new ServerMetadata(guid, -1L);
+        final ClientReadingListRecord record = new ClientReadingListRecord(sm, cm, o);
+        toUpload.add(record);
+      }
+
+      return toUpload;
+    } finally {
+      cursor.close();
+    }
+  }
+
   private Queue<ClientReadingListRecord> accumulateNewItems(Cursor cursor) {
     try {
       final Queue<ClientReadingListRecord> toUpload = new LinkedList<>();
@@ -317,6 +533,36 @@ public class ReadingListSynchronizer {
       return toUpload;
     } finally {
       cursor.close();
+    }
+  }
+
+  protected void uploadDeletions(final StageDelegate delegate) {
+    try {
+      final Cursor cursor = local.getDeletedItems();
+
+      if (cursor == null) {
+        delegate.fail(new RuntimeException("Unable to get unread item cursor."));
+        return;
+      }
+
+      final Queue<String> toDelete = collectDeletedIDsFromCursor(cursor);
+
+      // Nothing to do.
+      if (toDelete.isEmpty()) {
+        Logger.debug(LOG_TAG, "No new deletions to upload. Skipping.");
+        delegate.next();
+        return;
+      } else {
+        Logger.debug(LOG_TAG, "Deleting " + toDelete.size() + " records from the server.");
+      }
+
+      final ReadingListChangeAccumulator acc = this.local.getChangeAccumulator();
+      final DeletionUploadDelegate deleteDelegate = new DeletionUploadDelegate(acc, delegate);
+
+      // Don't send I-U-S; we're happy for the client to win, because this is a one-way state change.
+      this.remote.delete(toDelete, executor, deleteDelegate);
+    } catch (Exception e) {
+      delegate.fail(e);
     }
   }
 
@@ -335,8 +581,11 @@ public class ReadingListSynchronizer {
 
       // Nothing to do.
       if (toUpload.isEmpty()) {
+        Logger.debug(LOG_TAG, "No new unread changes to upload. Skipping.");
         delegate.next();
         return;
+      } else {
+        Logger.debug(LOG_TAG, "Uploading " + toUpload.size() + " new unread changes.");
       }
 
       // Upload each record. This looks like batching, but it's really chained serial requests.
@@ -368,6 +617,8 @@ public class ReadingListSynchronizer {
         Logger.debug(LOG_TAG, "No new items to upload. Skipping.");
         delegate.next();
         return;
+      } else {
+        Logger.debug(LOG_TAG, "Uploading " + toUpload.size() + " new items.");
       }
 
       final ReadingListChangeAccumulator acc = this.local.getChangeAccumulator();
@@ -420,9 +671,79 @@ public class ReadingListSynchronizer {
     }
   }
 
-  private void uploadModified(final StageDelegate delegate) {
-    // TODO
-    delegate.next();
+  protected void uploadModified(final StageDelegate delegate) {
+    try {
+      // This looks strange because modified includes material changes and
+      // status changes, but this is called after status changes have been
+      // uploaded and removed from local storage. So what's left should be
+      // material changes.  Even so, it should be safe to upload status changes
+      // here.
+      final Cursor cursor = this.local.getModified();
+
+      if (cursor == null) {
+        delegate.fail(new RuntimeException("Unable to get modified item cursor."));
+        return;
+      }
+
+      final Queue<ClientReadingListRecord> toUpload = collectModifiedFromCursor(cursor);
+
+      // Nothing to do.
+      if (toUpload.isEmpty()) {
+        Logger.debug(LOG_TAG, "No modified items to upload. Skipping.");
+        delegate.next();
+        return;
+      } else {
+        Logger.debug(LOG_TAG, "Uploading " + toUpload.size() + " modified items.");
+      }
+
+      final ReadingListChangeAccumulator acc = this.local.getChangeAccumulator();
+      final ModifiedUploadDelegate uploadDelegate = new ModifiedUploadDelegate(acc, new StageDelegate() {
+        private boolean tryFlushChanges() {
+          Logger.debug(LOG_TAG, "Flushing post-upload changes.");
+          try {
+            acc.finish();
+            return true;
+          } catch (Exception e) {
+            Logger.warn(LOG_TAG, "Flushing changes failed! This sync went wrong.", e);
+            delegate.fail(e);
+            return false;
+          }
+        }
+
+        @Override
+        public void next() {
+          Logger.debug(LOG_TAG, "Modified items uploaded successfully.");
+
+          if (tryFlushChanges()) {
+            delegate.next();
+          }
+        }
+
+        @Override
+        public void fail() {
+          Logger.warn(LOG_TAG, "Couldn't upload modified items.");
+          if (tryFlushChanges()) {
+            delegate.fail();
+          }
+        }
+
+        @Override
+        public void fail(Exception e) {
+          Logger.warn(LOG_TAG, "Couldn't upload modified items.", e);
+          if (tryFlushChanges()) {
+            delegate.fail(e);
+          }
+        }
+      });
+
+      // Handle 201 for success, 400 for invalid, 303 for redirect.
+      // TODO: 200 == "was already on the server, we didn't touch it, here it is."
+      // ... we need to apply it locally.
+      this.remote.patch(toUpload, executor, uploadDelegate);
+    } catch (Exception e) {
+      delegate.fail(e);
+      return;
+    }
   }
 
   private void downloadIncoming(final long since, final StageDelegate delegate) {
@@ -453,7 +774,11 @@ public class ReadingListSynchronizer {
         final int statusCode = response.getStatusCode();
         Logger.error(LOG_TAG, "Download failed. since = " + since + ". Response: " + statusCode);
         response.logResponseBody(LOG_TAG);
-        delegate.fail();
+        if (response.isInvalidAuthentication()) {
+          delegate.fail(new ReadingListInvalidAuthenticationException(response));
+        } else {
+          delegate.fail();
+        }
       }
 
       @Override
@@ -480,13 +805,13 @@ public class ReadingListSynchronizer {
   }
 
   /**
-   * Upload unread changes, then upload new items, then call `done`.
+   * Upload deletions and unread changes, then upload new items, then call `done`.
    * Substantially modified records are uploaded last.
    *
    * @param syncDelegate only used for status callbacks.
    */
   private void syncUp(final ReadingListSynchronizerDelegate syncDelegate, final StageDelegate done) {
-    // Second.
+    // Third.
     final StageDelegate onNewItemsUploaded = new NextDelegate(executor) {
       @Override
       public void doNext() {
@@ -500,7 +825,7 @@ public class ReadingListSynchronizer {
       }
     };
 
-    // First.
+    // Second.
     final StageDelegate onUnreadChangesUploaded = new NextDelegate(executor) {
       @Override
       public void doNext() {
@@ -515,8 +840,23 @@ public class ReadingListSynchronizer {
       }
     };
 
+    // First.
+    final StageDelegate onDeletionsUploaded = new NextDelegate(executor) {
+      @Override
+      public void doNext() {
+        syncDelegate.onDeletionsUploadComplete();
+        uploadUnreadChanges(onUnreadChangesUploaded);
+      }
+
+      @Override
+      public void doFail(Exception e) {
+        Logger.warn(LOG_TAG, "Uploading deletions failed.", e);
+        done.fail(e);
+      }
+    };
+
     try {
-      uploadUnreadChanges(onUnreadChangesUploaded);
+      uploadDeletions(onDeletionsUploaded);
     } catch (Exception ee) {
       done.fail(ee);
     }

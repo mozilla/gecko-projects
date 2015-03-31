@@ -262,17 +262,17 @@ public:
 
   // Notify Scroll observers when an async panning/zooming transform
   // has started being applied
-  void NotifyAsyncPanZoomStarted(const mozilla::CSSIntPoint aScrollPos);
+  void NotifyAsyncPanZoomStarted();
   // Notify Scroll observers when an async panning/zooming transform
   // is no longer applied
-  void NotifyAsyncPanZoomStopped(const mozilla::CSSIntPoint aScrollPos);
+  void NotifyAsyncPanZoomStopped();
 
   // Add new profile timeline markers to this docShell. This will only add
   // markers if the docShell is currently recording profile timeline markers.
   // See nsIDocShell::recordProfileTimelineMarkers
   void AddProfileTimelineMarker(const char* aName,
                                 TracingMetadata aMetaData);
-  void AddProfileTimelineMarker(mozilla::UniquePtr<TimelineMarker>& aMarker);
+  void AddProfileTimelineMarker(mozilla::UniquePtr<TimelineMarker>&& aMarker);
 
   // Global counter for how many docShells are currently recording profile
   // timeline markers
@@ -984,7 +984,7 @@ private:
   // True if recording profiles.
   bool mProfileTimelineRecording;
 
-  nsTArray<TimelineMarker*> mProfileTimelineMarkers;
+  nsTArray<mozilla::UniquePtr<TimelineMarker>> mProfileTimelineMarkers;
 
   // Get rid of all the timeline markers accumulated so far
   void ClearProfileTimelineMarkers();

@@ -48,8 +48,8 @@ class CacheOutputCloseListener;
 class CacheEntryHandle;
 
 class CacheEntry final : public nsICacheEntry
-                           , public nsIRunnable
-                           , public CacheFileListener
+                       , public nsIRunnable
+                       , public CacheFileListener
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -248,7 +248,7 @@ private:
   // When executed on the management thread directly, the operation(s)
   // is (are) executed immediately.
   void BackgroundOp(uint32_t aOperation, bool aForceAsync = false);
-  void StoreFrecency();
+  void StoreFrecency(double aFrecency);
 
   // Called only from DoomAlreadyRemoved()
   void DoomFile();

@@ -74,6 +74,9 @@ PRLogModuleInfo *gUrlClassifierDbServiceLog = nullptr;
 #define CHECK_TRACKING_PREF     "privacy.trackingprotection.enabled"
 #define CHECK_TRACKING_DEFAULT  false
 
+#define CHECK_TRACKING_PB_PREF    "privacy.trackingprotection.pbmode.enabled"
+#define CHECK_TRACKING_PB_DEFAULT false
+
 #define GETHASH_NOISE_PREF      "urlclassifier.gethashnoise"
 #define GETHASH_NOISE_DEFAULT   4
 
@@ -172,31 +175,24 @@ nsUrlClassifierDBServiceWorker::DoLocalLookup(const nsACString& spec,
 }
 
 static nsresult
-TablesToResponse(const nsACString& tables,
-                 bool checkMalware,
-                 bool checkPhishing,
-                 bool checkTracking)
+TablesToResponse(const nsACString& tables)
 {
-  if (checkMalware &&
-      FindInReadable(NS_LITERAL_CSTRING("-malware-"), tables)) {
+  // We don't check mCheckMalware and friends because BuildTables never
+  // includes a table that is not enabled.
+  if (FindInReadable(NS_LITERAL_CSTRING("-malware-"), tables)) {
     return NS_ERROR_MALWARE_URI;
   }
-  if (checkPhishing &&
-    FindInReadable(NS_LITERAL_CSTRING("-phish-"), tables)) {
+  if (FindInReadable(NS_LITERAL_CSTRING("-phish-"), tables)) {
     return NS_ERROR_PHISHING_URI;
   }
-  if (checkTracking &&
-    FindInReadable(NS_LITERAL_CSTRING("-track-"), tables)) {
+  if (FindInReadable(NS_LITERAL_CSTRING("-track-"), tables)) {
     return NS_ERROR_TRACKING_URI;
   }
   return NS_OK;
 }
 
-static nsresult
-ProcessLookupResults(LookupResultArray* results,
-                     bool checkMalware,
-                     bool checkPhishing,
-                     bool checkTracking)
+static nsCString
+ProcessLookupResults(LookupResultArray* results)
 {
   // Build a stringified list of result tables.
   nsTArray<nsCString> tables;
@@ -214,7 +210,7 @@ ProcessLookupResults(LookupResultArray* results,
       tableStr.Append(',');
     tableStr.Append(tables[i]);
   }
-  return TablesToResponse(tableStr, checkMalware, checkPhishing, checkTracking);
+  return tableStr;
 }
 
 /**
@@ -742,7 +738,7 @@ nsUrlClassifierDBServiceWorker::OpenDb()
 // the client callback.
 
 class nsUrlClassifierLookupCallback final : public nsIUrlClassifierLookupCallback
-                                              , public nsIUrlClassifierHashCompleterCallback
+                                          , public nsIUrlClassifierHashCompleterCallback
 {
 public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -981,18 +977,12 @@ public:
                                   bool checkPhishing,
                                   bool checkTracking)
     : mCallback(c)
-    , mCheckMalware(checkMalware)
-    , mCheckPhishing(checkPhishing)
-    , mCheckTracking(checkTracking)
     {}
 
 private:
   ~nsUrlClassifierClassifyCallback() {}
 
   nsCOMPtr<nsIURIClassifierCallback> mCallback;
-  bool mCheckMalware;
-  bool mCheckPhishing;
-  bool mCheckTracking;
 };
 
 NS_IMPL_ISUPPORTS(nsUrlClassifierClassifyCallback,
@@ -1001,8 +991,7 @@ NS_IMPL_ISUPPORTS(nsUrlClassifierClassifyCallback,
 NS_IMETHODIMP
 nsUrlClassifierClassifyCallback::HandleEvent(const nsACString& tables)
 {
-  nsresult response = TablesToResponse(tables, mCheckMalware,
-                                       mCheckPhishing, mCheckTracking);
+  nsresult response = TablesToResponse(tables);
   mCallback->OnClassifyComplete(response);
   return NS_OK;
 }
@@ -1116,8 +1105,9 @@ nsUrlClassifierDBService::Init()
     CHECK_MALWARE_DEFAULT);
   mCheckPhishing = Preferences::GetBool(CHECK_PHISHING_PREF,
     CHECK_PHISHING_DEFAULT);
-  mCheckTracking = Preferences::GetBool(CHECK_TRACKING_PREF,
-    CHECK_TRACKING_DEFAULT);
+  mCheckTracking =
+    Preferences::GetBool(CHECK_TRACKING_PREF, CHECK_TRACKING_DEFAULT) ||
+    Preferences::GetBool(CHECK_TRACKING_PB_PREF, CHECK_TRACKING_PB_DEFAULT);
   uint32_t gethashNoise = Preferences::GetUint(GETHASH_NOISE_PREF,
     GETHASH_NOISE_DEFAULT);
   gFreshnessGuarantee = Preferences::GetInt(CONFIRM_AGE_PREF,
@@ -1128,6 +1118,7 @@ nsUrlClassifierDBService::Init()
   Preferences::AddStrongObserver(this, CHECK_MALWARE_PREF);
   Preferences::AddStrongObserver(this, CHECK_PHISHING_PREF);
   Preferences::AddStrongObserver(this, CHECK_TRACKING_PREF);
+  Preferences::AddStrongObserver(this, CHECK_TRACKING_PB_PREF);
   Preferences::AddStrongObserver(this, GETHASH_NOISE_PREF);
   Preferences::AddStrongObserver(this, CONFIRM_AGE_PREF);
   Preferences::AddStrongObserver(this, PHISH_TABLE_PREF);
@@ -1255,6 +1246,19 @@ nsUrlClassifierDBService::ClassifyLocal(nsIPrincipal* aPrincipal,
   *aResponse = NS_OK;
   nsAutoCString tables;
   BuildTables(aTrackingProtectionEnabled, tables);
+  nsAutoCString results;
+  nsresult rv = ClassifyLocalWithTables(aPrincipal, tables, results);
+  NS_ENSURE_SUCCESS(rv, rv);
+  *aResponse = TablesToResponse(results);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsUrlClassifierDBService::ClassifyLocalWithTables(nsIPrincipal *aPrincipal,
+                                                  const nsACString & aTables,
+                                                  nsACString & aTableResults)
+{
+  MOZ_ASSERT(NS_IsMainThread(), "ClassifyLocalWithTables must be on main thread");
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
@@ -1277,11 +1281,9 @@ nsUrlClassifierDBService::ClassifyLocal(nsIPrincipal* aPrincipal,
   }
 
   // In unittests, we may not have been initalized, so don't crash.
-  rv = mWorkerProxy->DoLocalLookup(key, tables, results);
+  rv = mWorkerProxy->DoLocalLookup(key, aTables, results);
   if (NS_SUCCEEDED(rv)) {
-    rv = ProcessLookupResults(results, mCheckMalware, mCheckPhishing,
-                              mCheckTracking);
-    *aResponse = rv;
+    aTableResults = ProcessLookupResults(results);
   }
   return NS_OK;
 }
@@ -1527,9 +1529,11 @@ nsUrlClassifierDBService::Observe(nsISupports *aSubject, const char *aTopic,
     } else if (NS_LITERAL_STRING(CHECK_PHISHING_PREF).Equals(aData)) {
       mCheckPhishing = Preferences::GetBool(CHECK_PHISHING_PREF,
         CHECK_PHISHING_DEFAULT);
-    } else if (NS_LITERAL_STRING(CHECK_TRACKING_PREF).Equals(aData)) {
-      mCheckTracking = Preferences::GetBool(CHECK_TRACKING_PREF,
-        CHECK_TRACKING_DEFAULT);
+    } else if (NS_LITERAL_STRING(CHECK_TRACKING_PREF).Equals(aData) ||
+               NS_LITERAL_STRING(CHECK_TRACKING_PB_PREF).Equals(aData)) {
+      mCheckTracking =
+        Preferences::GetBool(CHECK_TRACKING_PREF, CHECK_TRACKING_DEFAULT) ||
+        Preferences::GetBool(CHECK_TRACKING_PB_PREF, CHECK_TRACKING_PB_DEFAULT);
     } else if (
       NS_LITERAL_STRING(PHISH_TABLE_PREF).Equals(aData) ||
       NS_LITERAL_STRING(MALWARE_TABLE_PREF).Equals(aData) ||
@@ -1569,6 +1573,7 @@ nsUrlClassifierDBService::Shutdown()
     prefs->RemoveObserver(CHECK_MALWARE_PREF, this);
     prefs->RemoveObserver(CHECK_PHISHING_PREF, this);
     prefs->RemoveObserver(CHECK_TRACKING_PREF, this);
+    prefs->RemoveObserver(CHECK_TRACKING_PB_PREF, this);
     prefs->RemoveObserver(PHISH_TABLE_PREF, this);
     prefs->RemoveObserver(MALWARE_TABLE_PREF, this);
     prefs->RemoveObserver(TRACKING_TABLE_PREF, this);

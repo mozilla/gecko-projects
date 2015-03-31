@@ -236,7 +236,7 @@ public:
 };
 
 class WorkerDebuggerGlobalScope final : public DOMEventTargetHelper,
-                                            public nsIGlobalObject
+                                        public nsIGlobalObject
 {
   WorkerPrivate* mWorkerPrivate;
 
@@ -265,9 +265,18 @@ public:
   GetGlobal(JSContext* aCx, JS::MutableHandle<JSObject*> aGlobal);
 
   void
+  EnterEventLoop();
+
+  void
+  LeaveEventLoop();
+
+  void
   PostMessage(const nsAString& aMessage);
 
   IMPL_EVENT_HANDLER(message)
+
+  void
+  ReportError(JSContext* aCx, const nsAString& aMessage);
 
   void
   Dump(JSContext* aCx, const Optional<nsAString>& aString) const;

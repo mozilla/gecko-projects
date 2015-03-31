@@ -33,6 +33,12 @@ XPCOMUtils.defineLazyModuleGetter(this, 'ReadingList',
 XPCOMUtils.defineLazyModuleGetter(this, 'Sync',
   'resource:///modules/readinglist/Sync.jsm');
 
+// FxAccountsCommon.js doesn't use a "namespace", so create one here.
+XPCOMUtils.defineLazyGetter(this, "fxAccountsCommon", function() {
+  let namespace = {};
+  Cu.import("resource://gre/modules/FxAccountsCommon.js", namespace);
+  return namespace;
+});
 
 this.EXPORTED_SYMBOLS = ["ReadingListScheduler"];
 
@@ -64,7 +70,7 @@ let intervals = {
   get initial() this._fixupIntervalPref("initial", 10), // 10 seconds.
   // Every interval after the first.
   get schedule() this._fixupIntervalPref("schedule", 2 * 60 * 60), // 2 hours
-  // After an error
+  // Initial retry after an error (exponentially backed-off to .schedule)
   get retry() this._fixupIntervalPref("retry", 2 * 60), // 2 mins
 };
 
@@ -75,6 +81,7 @@ function InternalScheduler(readingList = null) {
     "browserwindow.syncui",
     "FirefoxAccounts",
     "readinglist.api",
+    "readinglist.scheduler",
     "readinglist.serverclient",
     "readinglist.sync",
   ];
@@ -104,6 +111,9 @@ InternalScheduler.prototype = {
   _timerRunning: false,
   // Our sync engine - XXX - maybe just a callback?
   _engine: Sync,
+  // Our current "error backoff" timeout. zero if no error backoff is in
+  // progress and incremented after successive errors until a max is reached.
+  _currentErrorBackoff: 0,
 
   // Our state variable and constants.
   state: null,
@@ -175,6 +185,8 @@ InternalScheduler.prototype = {
         if (this.state == this.STATE_ERROR_AUTHENTICATION) {
           this.state = this.STATE_OK;
         }
+        // and sync now.
+        this._syncNow();
         break;
 
       // The rest just indicate that now is probably a good time to check if
@@ -283,15 +295,34 @@ InternalScheduler.prototype = {
       this.state = this.STATE_OK;
       this._logManager.resetFileLog(this._logManager.REASON_SUCCESS);
       Services.obs.notifyObservers(null, "readinglist:sync:finish", null);
+      this._currentErrorBackoff = 0; // error retry interval is reset on success.
       return intervals.schedule;
     }).catch(err => {
-      this.log.error("Sync failed", err);
-      // XXX - how to detect an auth error?
-      this.state = err == this._engine.ERROR_AUTHENTICATION ?
+      // This isn't ideal - we really should have _canSync() check this - but
+      // that requires a refactor to turn _canSync() into a promise-based
+      // function.
+      if (err.message == fxAccountsCommon.ERROR_NO_ACCOUNT ||
+          err.message == fxAccountsCommon.ERROR_UNVERIFIED_ACCOUNT) {
+        // make everything look like success.
+        this._currentErrorBackoff = 0; // error retry interval is reset on success.
+        this.log.info("Can't sync due to FxA account state " + err.message);
+        this.state = this.STATE_OK;
+        this._logManager.resetFileLog(this._logManager.REASON_SUCCESS);
+        Services.obs.notifyObservers(null, "readinglist:sync:finish", null);
+        // it's unfortunate that we are probably going to hit this every
+        // 2 hours, but it should be invisible to the user.
+        return intervals.schedule;
+      }
+      this.state = err.message == fxAccountsCommon.ERROR_AUTH_ERROR ?
                    this.STATE_ERROR_AUTHENTICATION : this.STATE_ERROR_OTHER;
+      this.log.error("Sync failed, now in state '${state}': ${err}",
+                     {state: this.state, err});
       this._logManager.resetFileLog(this._logManager.REASON_ERROR);
       Services.obs.notifyObservers(null, "readinglist:sync:error", null);
-      return intervals.retry;
+      // We back-off on error retries until it hits our normally scheduled interval.
+      this._currentErrorBackoff = this._currentErrorBackoff == 0 ? intervals.retry :
+                                  Math.min(intervals.schedule, this._currentErrorBackoff * 2);
+      return this._currentErrorBackoff;
     }).then(nextDelay => {
       this._timerRunning = false;
       // ensure a new timer is setup for the appropriate next time.

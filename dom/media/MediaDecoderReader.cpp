@@ -195,7 +195,7 @@ MediaDecoderReader::CallReadMetadata()
 {
   typedef ReadMetadataFailureReason Reason;
 
-  MOZ_ASSERT(OnDecodeThread());
+  MOZ_ASSERT(OnTaskQueue());
   mDecoder->GetReentrantMonitor().AssertNotCurrentThreadIn();
   DECODER_LOG("MediaDecoderReader::CallReadMetadata");
 
@@ -356,10 +356,9 @@ MediaDecoderReader::EnsureTaskQueue()
 {
   if (!mTaskQueue) {
     MOZ_ASSERT(!mTaskQueueIsBorrowed);
-    RefPtr<SharedThreadPool> decodePool(GetMediaDecodeThreadPool());
-    NS_ENSURE_TRUE(decodePool, nullptr);
-
-    mTaskQueue = new MediaTaskQueue(decodePool.forget());
+    RefPtr<SharedThreadPool> pool(GetMediaThreadPool());
+    MOZ_DIAGNOSTIC_ASSERT(pool);
+    mTaskQueue = new MediaTaskQueue(pool.forget());
   }
 
   return mTaskQueue;
@@ -374,7 +373,7 @@ MediaDecoderReader::BreakCycles()
 nsRefPtr<ShutdownPromise>
 MediaDecoderReader::Shutdown()
 {
-  MOZ_ASSERT(OnDecodeThread());
+  MOZ_ASSERT(OnTaskQueue());
   mShutdown = true;
 
   mBaseAudioPromise.RejectIfExists(END_OF_STREAM, __func__);

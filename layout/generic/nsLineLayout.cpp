@@ -931,10 +931,8 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
     mLineBox->DisableResizeReflowOptimization();
   }
 
-  // Let frame know that are reflowing it. Note that we don't bother
-  // positioning the frame yet, because we're probably going to end up
-  // moving it when we do the block-direction alignment
-  aFrame->WillReflow(mPresContext);
+  // Note that we don't bother positioning the frame yet, because we're probably
+  // going to end up moving it when we do the block-direction alignment.
 
   // Adjust spacemanager coordinate system for the frame.
   nsHTMLReflowMetrics metrics(lineWM);
@@ -2173,7 +2171,14 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
       // inverted relative to block direction.
       nscoord revisedBaselineBCoord = baselineBCoord - offset *
         lineWM.FlowRelativeToLineRelativeFactor();
-      pfd->mBounds.BStart(lineWM) = revisedBaselineBCoord - pfd->mAscent;
+      if (lineWM.IsVertical() && !lineWM.IsSideways()) {
+        // If we're using a dominant center baseline, we align with the center
+        // of the frame being placed (bug 1133945).
+        pfd->mBounds.BStart(lineWM) =
+          revisedBaselineBCoord - pfd->mBounds.BSize(lineWM)/2;
+      } else {
+        pfd->mBounds.BStart(lineWM) = revisedBaselineBCoord - pfd->mAscent;
+      }
       pfd->mBlockDirAlign = VALIGN_OTHER;
     }
 

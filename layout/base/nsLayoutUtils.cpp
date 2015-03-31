@@ -2066,7 +2066,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
   // is in.
   int32_t rootAPD = rootFrame->PresContext()->AppUnitsPerDevPixel();
   int32_t localAPD = aFrame->PresContext()->AppUnitsPerDevPixel();
-  widgetToView = widgetToView.ConvertAppUnits(rootAPD, localAPD);
+  widgetToView = widgetToView.ScaleToOtherAppUnits(rootAPD, localAPD);
 
   /* If we encountered a transform, we can't do simple arithmetic to figure
    * out how to convert back to aFrame's coordinates and must use the CTM.
@@ -5877,18 +5877,25 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
     fill = devPixelFill;
   }
 
+  // Apply the context's scale to the dest rect.
   gfxSize destScale = didSnap ? gfxSize(currentMatrix._11, currentMatrix._22)
-                              : gfxSize(1.0, 1.0);
+                              : currentMatrix.ScaleFactors(true);
   gfxSize appUnitScaledDest(dest.width * destScale.width,
                             dest.height * destScale.height);
   gfxSize scaledDest = appUnitScaledDest / aAppUnitsPerDevPixel;
+  if (scaledDest.IsEmpty()) {
+    return SnappedImageDrawingParameters();
+  }
+
+  // Compute a snapped version of the scaled dest rect, which we'll use to
+  // determine the optimal image size to draw with. We need to be sure that
+  // this rect is at least one pixel in width and height, or we'll end up
+  // drawing nothing even if we have a nonempty fill.
   gfxSize snappedScaledDest =
     gfxSize(NSAppUnitsToIntPixels(appUnitScaledDest.width, aAppUnitsPerDevPixel),
             NSAppUnitsToIntPixels(appUnitScaledDest.height, aAppUnitsPerDevPixel));
-
-  if (scaledDest.IsEmpty() || snappedScaledDest.IsEmpty()) {
-    return SnappedImageDrawingParameters();
-  }
+  snappedScaledDest.width = std::max(snappedScaledDest.width, 1.0);
+  snappedScaledDest.height = std::max(snappedScaledDest.height, 1.0);
 
   nsIntSize intImageSize =
     aImage->OptimalImageSizeForDest(snappedScaledDest,
@@ -6780,7 +6787,7 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
   }
 
   result.mCORSUsed = aElement->GetCORSMode() != CORS_NONE;
-  result.mSize = ThebesIntSize(size);
+  result.mSize = size;
   result.mPrincipal = principal.forget();
   result.mIsWriteOnly = false;
 

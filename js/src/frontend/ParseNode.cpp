@@ -20,10 +20,10 @@ void
 ParseNode::checkListConsistency()
 {
     MOZ_ASSERT(isArity(PN_LIST));
-    ParseNode **tail;
+    ParseNode** tail;
     uint32_t count = 0;
     if (pn_head) {
-        ParseNode *pn, *last;
+        ParseNode* pn, *last;
         for (pn = last = pn_head; pn; last = pn, pn = pn->pn_next, count++)
             ;
         tail = &last->pn_next;
@@ -37,7 +37,7 @@ ParseNode::checkListConsistency()
 
 /* Add |node| to |parser|'s free node list. */
 void
-ParseNodeAllocator::freeNode(ParseNode *pn)
+ParseNodeAllocator::freeNode(ParseNode* pn)
 {
     /* Catch back-to-back dup recycles. */
     MOZ_ASSERT(pn != freelist);
@@ -75,24 +75,24 @@ class NodeStack {
   public:
     NodeStack() : top(nullptr) { }
     bool empty() { return top == nullptr; }
-    void push(ParseNode *pn) {
+    void push(ParseNode* pn) {
         pn->pn_next = top;
         top = pn;
     }
     /* Push the children of the PN_LIST node |pn| on the stack. */
-    void pushList(ParseNode *pn) {
+    void pushList(ParseNode* pn) {
         /* This clobbers pn->pn_head if the list is empty; should be okay. */
         *pn->pn_tail = top;
         top = pn->pn_head;
     }
-    ParseNode *pop() {
+    ParseNode* pop() {
         MOZ_ASSERT(!empty());
-        ParseNode *hold = top; /* my kingdom for a prog1 */
+        ParseNode* hold = top; /* my kingdom for a prog1 */
         top = top->pn_next;
         return hold;
     }
   private:
-    ParseNode *top;
+    ParseNode* top;
 };
 
 } /* anonymous namespace */
@@ -100,7 +100,7 @@ class NodeStack {
 enum class PushResult { Recyclable, CleanUpLater };
 
 static PushResult
-PushCodeNodeChildren(ParseNode *node, NodeStack *stack)
+PushCodeNodeChildren(ParseNode* node, NodeStack* stack)
 {
     MOZ_ASSERT(node->isArity(PN_CODE));
 
@@ -130,7 +130,7 @@ PushCodeNodeChildren(ParseNode *node, NodeStack *stack)
 }
 
 static PushResult
-PushNameNodeChildren(ParseNode *node, NodeStack *stack)
+PushNameNodeChildren(ParseNode* node, NodeStack* stack)
 {
     MOZ_ASSERT(node->isArity(PN_NAME));
 
@@ -158,7 +158,7 @@ PushNameNodeChildren(ParseNode *node, NodeStack *stack)
 }
 
 static PushResult
-PushListNodeChildren(ParseNode *node, NodeStack *stack)
+PushListNodeChildren(ParseNode* node, NodeStack* stack)
 {
     MOZ_ASSERT(node->isArity(PN_LIST));
     node->checkListConsistency();
@@ -169,7 +169,7 @@ PushListNodeChildren(ParseNode *node, NodeStack *stack)
 }
 
 static PushResult
-PushUnaryNodeChild(ParseNode *node, NodeStack *stack)
+PushUnaryNodeChild(ParseNode* node, NodeStack* stack)
 {
     MOZ_ASSERT(node->isArity(PN_UNARY));
 
@@ -187,7 +187,7 @@ PushUnaryNodeChild(ParseNode *node, NodeStack *stack)
  * just need to take care of its children.
  */
 static PushResult
-PushNodeChildren(ParseNode *pn, NodeStack *stack)
+PushNodeChildren(ParseNode* pn, NodeStack* stack)
 {
     switch (pn->getKind()) {
       // Trivial nodes that refer to no nodes, are referred to by nothing
@@ -208,6 +208,7 @@ PushNodeChildren(ParseNode *pn, NodeStack *stack)
       case PNK_DEBUGGER:
       case PNK_EXPORT_BATCH_SPEC:
       case PNK_OBJECT_PROPERTY_NAME:
+      case PNK_FRESHENBLOCK:
         MOZ_ASSERT(pn->isArity(PN_NULLARY));
         MOZ_ASSERT(!pn->isUsed(), "handle non-trivial cases separately");
         MOZ_ASSERT(!pn->isDefn(), "handle non-trivial cases separately");
@@ -521,7 +522,7 @@ PushNodeChildren(ParseNode *pn, NodeStack *stack)
  * metadata structures (the function box tree).
  */
 void
-ParseNodeAllocator::prepareNodeForMutation(ParseNode *pn)
+ParseNodeAllocator::prepareNodeForMutation(ParseNode* pn)
 {
     // Nothing to do for nullary nodes.
     if (pn->isArity(PN_NULLARY))
@@ -544,13 +545,13 @@ ParseNodeAllocator::prepareNodeForMutation(ParseNode *pn)
  * Return the nodes in the subtree |pn| to the parser's free node list, for
  * reallocation.
  */
-ParseNode *
-ParseNodeAllocator::freeTree(ParseNode *pn)
+ParseNode*
+ParseNodeAllocator::freeTree(ParseNode* pn)
 {
     if (!pn)
         return nullptr;
 
-    ParseNode *savedNext = pn->pn_next;
+    ParseNode* savedNext = pn->pn_next;
 
     NodeStack stack;
     for (;;) {
@@ -568,23 +569,23 @@ ParseNodeAllocator::freeTree(ParseNode *pn)
  * Allocate a ParseNode from parser's node freelist or, failing that, from
  * cx's temporary arena.
  */
-void *
+void*
 ParseNodeAllocator::allocNode()
 {
-    if (ParseNode *pn = freelist) {
+    if (ParseNode* pn = freelist) {
         freelist = pn->pn_next;
         return pn;
     }
 
-    void *p = alloc.alloc(sizeof (ParseNode));
+    void* p = alloc.alloc(sizeof (ParseNode));
     if (!p)
         ReportOutOfMemory(cx);
     return p;
 }
 
-ParseNode *
-ParseNode::appendOrCreateList(ParseNodeKind kind, JSOp op, ParseNode *left, ParseNode *right,
-                              FullParseHandler *handler, ParseContext<FullParseHandler> *pc)
+ParseNode*
+ParseNode::appendOrCreateList(ParseNodeKind kind, JSOp op, ParseNode* left, ParseNode* right,
+                              FullParseHandler* handler, ParseContext<FullParseHandler>* pc)
 {
     // The asm.js specification is written in ECMAScript grammar terms that
     // specify *only* a binary tree.  It's a royal pain to implement the asm.js
@@ -598,7 +599,7 @@ ParseNode::appendOrCreateList(ParseNodeKind kind, JSOp op, ParseNode *left, Pars
         // the stack.  We use a list node that uses O(1) stack to represent
         // such operations: (+ a b c).
         if (left->isKind(kind) && left->isOp(op) && (js_CodeSpec[op].format & JOF_LEFTASSOC)) {
-            ListNode *list = &left->as<ListNode>();
+            ListNode* list = &left->as<ListNode>();
 
             list->append(right);
             list->pn_pos.end = right->pn_pos.end;
@@ -607,7 +608,7 @@ ParseNode::appendOrCreateList(ParseNodeKind kind, JSOp op, ParseNode *left, Pars
         }
     }
 
-    ParseNode *list = handler->new_<ListNode>(kind, op, left);
+    ParseNode* list = handler->new_<ListNode>(kind, op, left);
     if (!list)
         return nullptr;
 
@@ -615,7 +616,7 @@ ParseNode::appendOrCreateList(ParseNodeKind kind, JSOp op, ParseNode *left, Pars
     return list;
 }
 
-const char *
+const char*
 Definition::kindString(Kind kind)
 {
     static const char * const table[] = {
@@ -634,8 +635,8 @@ namespace frontend {
  * binding context as the original tree.
  */
 template <>
-ParseNode *
-Parser<FullParseHandler>::cloneParseTree(ParseNode *opn)
+ParseNode*
+Parser<FullParseHandler>::cloneParseTree(ParseNode* opn)
 {
     JS_CHECK_RECURSION(context, return nullptr);
 
@@ -644,7 +645,7 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode *opn)
         return null();
     }
 
-    ParseNode *pn = handler.new_<ParseNode>(opn->getKind(), opn->getOp(), opn->getArity(),
+    ParseNode* pn = handler.new_<ParseNode>(opn->getKind(), opn->getOp(), opn->getArity(),
                                             opn->pn_pos);
     if (!pn)
         return nullptr;
@@ -667,8 +668,8 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode *opn)
 
       case PN_LIST:
         pn->makeEmpty();
-        for (ParseNode *opn2 = opn->pn_head; opn2; opn2 = opn2->pn_next) {
-            ParseNode *pn2;
+        for (ParseNode* opn2 = opn->pn_head; opn2; opn2 = opn2->pn_next) {
+            ParseNode* pn2;
             NULLCHECK(pn2 = cloneParseTree(opn2));
             pn->append(pn2);
         }
@@ -715,7 +716,7 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode *opn)
              * The old name is a use of its pn_lexdef. Make the clone also be a
              * use of that definition.
              */
-            Definition *dn = pn->pn_lexdef;
+            Definition* dn = pn->pn_lexdef;
 
             pn->pn_link = dn->dn_uses;
             pn->pn_dflags = opn->pn_dflags;
@@ -729,7 +730,7 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode *opn)
              */
             if (opn->isDefn()) {
                 opn->setDefn(false);
-                handler.linkUseToDef(opn, (Definition *) pn);
+                handler.linkUseToDef(opn, (Definition*) pn);
             }
         }
         break;
@@ -744,8 +745,8 @@ Parser<FullParseHandler>::cloneParseTree(ParseNode *opn)
 }
 
 template <>
-ParseNode *
-Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn);
+ParseNode*
+Parser<FullParseHandler>::cloneLeftHandSide(ParseNode* opn);
 
 /*
  * Used by Parser::cloneLeftHandSide to clone a default expression
@@ -753,8 +754,8 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn);
  *    [a = default] or {a: b = default}
  */
 template <>
-ParseNode *
-Parser<FullParseHandler>::cloneDestructuringDefault(ParseNode *opn)
+ParseNode*
+Parser<FullParseHandler>::cloneDestructuringDefault(ParseNode* opn)
 {
     MOZ_ASSERT(opn->isKind(PNK_ASSIGN));
 
@@ -773,10 +774,10 @@ Parser<FullParseHandler>::cloneDestructuringDefault(ParseNode *opn)
  * the original tree.
  */
 template <>
-ParseNode *
-Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn)
+ParseNode*
+Parser<FullParseHandler>::cloneLeftHandSide(ParseNode* opn)
 {
-    ParseNode *pn = handler.new_<ParseNode>(opn->getKind(), opn->getOp(), opn->getArity(),
+    ParseNode* pn = handler.new_<ParseNode>(opn->getKind(), opn->getOp(), opn->getArity(),
                                             opn->pn_pos);
     if (!pn)
         return nullptr;
@@ -787,11 +788,11 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn)
     if (opn->isArity(PN_LIST)) {
         MOZ_ASSERT(opn->isKind(PNK_ARRAY) || opn->isKind(PNK_OBJECT));
         pn->makeEmpty();
-        for (ParseNode *opn2 = opn->pn_head; opn2; opn2 = opn2->pn_next) {
-            ParseNode *pn2;
+        for (ParseNode* opn2 = opn->pn_head; opn2; opn2 = opn2->pn_next) {
+            ParseNode* pn2;
             if (opn->isKind(PNK_OBJECT)) {
                 if (opn2->isKind(PNK_MUTATEPROTO)) {
-                    ParseNode *target = cloneLeftHandSide(opn2->pn_kid);
+                    ParseNode* target = cloneLeftHandSide(opn2->pn_kid);
                     if (!target)
                         return nullptr;
                     pn2 = handler.new_<UnaryNode>(PNK_MUTATEPROTO, JSOP_NOP, opn2->pn_pos, target);
@@ -799,10 +800,10 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn)
                     MOZ_ASSERT(opn2->isArity(PN_BINARY));
                     MOZ_ASSERT(opn2->isKind(PNK_COLON) || opn2->isKind(PNK_SHORTHAND));
 
-                    ParseNode *tag = cloneParseTree(opn2->pn_left);
+                    ParseNode* tag = cloneParseTree(opn2->pn_left);
                     if (!tag)
                         return nullptr;
-                    ParseNode *target;
+                    ParseNode* target;
                     if (opn2->pn_right->isKind(PNK_ASSIGN)) {
                         target = cloneDestructuringDefault(opn2->pn_right);
                     } else {
@@ -817,7 +818,7 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn)
                 MOZ_ASSERT(opn2->isKind(PNK_ELISION));
                 pn2 = cloneParseTree(opn2);
             } else if (opn2->isKind(PNK_SPREAD)) {
-                ParseNode *target = cloneLeftHandSide(opn2->pn_kid);
+                ParseNode* target = cloneLeftHandSide(opn2->pn_kid);
                 if (!target)
                     return nullptr;
                 pn2 = handler.new_<UnaryNode>(PNK_SPREAD, JSOP_NOP, opn2->pn_pos, target);
@@ -842,7 +843,7 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn)
     pn->pn_u.name = opn->pn_u.name;
     pn->setOp(JSOP_SETNAME);
     if (opn->isUsed()) {
-        Definition *dn = pn->pn_lexdef;
+        Definition* dn = pn->pn_lexdef;
 
         pn->pn_link = dn->dn_uses;
         dn->dn_uses = pn;
@@ -854,7 +855,7 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode *opn)
             pn->pn_dflags &= ~(PND_LEXICAL | PND_BOUND);
             pn->setDefn(false);
 
-            handler.linkUseToDef(pn, (Definition *) opn);
+            handler.linkUseToDef(pn, (Definition*) opn);
         }
     }
     return pn;
@@ -872,7 +873,7 @@ static const char * const parseNodeNames[] = {
 };
 
 void
-frontend::DumpParseTree(ParseNode *pn, int indent)
+frontend::DumpParseTree(ParseNode* pn, int indent)
 {
     if (pn == nullptr)
         fprintf(stderr, "#NULL");
@@ -900,32 +901,32 @@ ParseNode::dump(int indent)
 {
     switch (pn_arity) {
       case PN_NULLARY:
-        ((NullaryNode *) this)->dump();
+        ((NullaryNode*) this)->dump();
         break;
       case PN_UNARY:
-        ((UnaryNode *) this)->dump(indent);
+        ((UnaryNode*) this)->dump(indent);
         break;
       case PN_BINARY:
-        ((BinaryNode *) this)->dump(indent);
+        ((BinaryNode*) this)->dump(indent);
         break;
       case PN_BINARY_OBJ:
-        ((BinaryObjNode *) this)->dump(indent);
+        ((BinaryObjNode*) this)->dump(indent);
         break;
       case PN_TERNARY:
-        ((TernaryNode *) this)->dump(indent);
+        ((TernaryNode*) this)->dump(indent);
         break;
       case PN_CODE:
-        ((CodeNode *) this)->dump(indent);
+        ((CodeNode*) this)->dump(indent);
         break;
       case PN_LIST:
-        ((ListNode *) this)->dump(indent);
+        ((ListNode*) this)->dump(indent);
         break;
       case PN_NAME:
-        ((NameNode *) this)->dump(indent);
+        ((NameNode*) this)->dump(indent);
         break;
       default:
         fprintf(stderr, "#<BAD NODE %p, kind=%u, arity=%u>",
-                (void *) this, unsigned(getKind()), unsigned(pn_arity));
+                (void*) this, unsigned(getKind()), unsigned(pn_arity));
         break;
     }
 }
@@ -940,7 +941,7 @@ NullaryNode::dump()
 
       case PNK_NUMBER: {
         ToCStringBuf cbuf;
-        const char *cstr = NumberToCString(nullptr, &cbuf, pn_dval);
+        const char* cstr = NumberToCString(nullptr, &cbuf, pn_dval);
         if (!IsFinite(pn_dval))
             fputc('#', stderr);
         if (cstr)
@@ -962,7 +963,7 @@ NullaryNode::dump()
 void
 UnaryNode::dump(int indent)
 {
-    const char *name = parseNodeNames[getKind()];
+    const char* name = parseNodeNames[getKind()];
     fprintf(stderr, "(%s ", name);
     indent += strlen(name) + 2;
     DumpParseTree(pn_kid, indent);
@@ -972,7 +973,7 @@ UnaryNode::dump(int indent)
 void
 BinaryNode::dump(int indent)
 {
-    const char *name = parseNodeNames[getKind()];
+    const char* name = parseNodeNames[getKind()];
     fprintf(stderr, "(%s ", name);
     indent += strlen(name) + 2;
     DumpParseTree(pn_left, indent);
@@ -984,7 +985,7 @@ BinaryNode::dump(int indent)
 void
 BinaryObjNode::dump(int indent)
 {
-    const char *name = parseNodeNames[getKind()];
+    const char* name = parseNodeNames[getKind()];
     fprintf(stderr, "(%s ", name);
     indent += strlen(name) + 2;
     DumpParseTree(pn_left, indent);
@@ -996,7 +997,7 @@ BinaryObjNode::dump(int indent)
 void
 TernaryNode::dump(int indent)
 {
-    const char *name = parseNodeNames[getKind()];
+    const char* name = parseNodeNames[getKind()];
     fprintf(stderr, "(%s ", name);
     indent += strlen(name) + 2;
     DumpParseTree(pn_kid1, indent);
@@ -1010,7 +1011,7 @@ TernaryNode::dump(int indent)
 void
 CodeNode::dump(int indent)
 {
-    const char *name = parseNodeNames[getKind()];
+    const char* name = parseNodeNames[getKind()];
     fprintf(stderr, "(%s ", name);
     indent += strlen(name) + 2;
     DumpParseTree(pn_body, indent);
@@ -1020,12 +1021,12 @@ CodeNode::dump(int indent)
 void
 ListNode::dump(int indent)
 {
-    const char *name = parseNodeNames[getKind()];
+    const char* name = parseNodeNames[getKind()];
     fprintf(stderr, "(%s [", name);
     if (pn_head != nullptr) {
         indent += strlen(name) + 3;
         DumpParseTree(pn_head, indent);
-        ParseNode *pn = pn_head->pn_next;
+        ParseNode* pn = pn_head->pn_next;
         while (pn != nullptr) {
             IndentNewLine(indent);
             DumpParseTree(pn, indent);
@@ -1037,7 +1038,7 @@ ListNode::dump(int indent)
 
 template <typename CharT>
 static void
-DumpName(const CharT *s, size_t len)
+DumpName(const CharT* s, size_t len)
 {
     if (len == 0)
         fprintf(stderr, "#<zero-length name>");
@@ -1079,7 +1080,7 @@ NameNode::dump(int indent)
     }
 
     MOZ_ASSERT(!isUsed());
-    const char *name = parseNodeNames[getKind()];
+    const char* name = parseNodeNames[getKind()];
     if (isUsed())
         fprintf(stderr, "(%s)", name);
     else {
@@ -1091,7 +1092,7 @@ NameNode::dump(int indent)
 }
 #endif
 
-ObjectBox::ObjectBox(JSObject *object, ObjectBox* traceLink)
+ObjectBox::ObjectBox(JSObject* object, ObjectBox* traceLink)
   : object(object),
     traceLink(traceLink),
     emitLink(nullptr)
@@ -1100,7 +1101,7 @@ ObjectBox::ObjectBox(JSObject *object, ObjectBox* traceLink)
     MOZ_ASSERT(object->isTenured());
 }
 
-ObjectBox::ObjectBox(JSFunction *function, ObjectBox* traceLink)
+ObjectBox::ObjectBox(JSFunction* function, ObjectBox* traceLink)
   : object(function),
     traceLink(traceLink),
     emitLink(nullptr)
@@ -1110,17 +1111,17 @@ ObjectBox::ObjectBox(JSFunction *function, ObjectBox* traceLink)
     MOZ_ASSERT(object->isTenured());
 }
 
-FunctionBox *
+FunctionBox*
 ObjectBox::asFunctionBox()
 {
     MOZ_ASSERT(isFunctionBox());
-    return static_cast<FunctionBox *>(this);
+    return static_cast<FunctionBox*>(this);
 }
 
 void
-ObjectBox::trace(JSTracer *trc)
+ObjectBox::trace(JSTracer* trc)
 {
-    ObjectBox *box = this;
+    ObjectBox* box = this;
     while (box) {
         MarkObjectRoot(trc, &box->object, "parser.object");
         if (box->isFunctionBox())

@@ -562,7 +562,8 @@ TelephonyService.prototype = {
    * @see 3GPP TS 22.030 Figure 3.5.3.2
    */
   dial: function(aClientId, aNumber, aIsDialEmergency, aCallback) {
-    if (DEBUG) debug("Dialing " + (aIsDialEmergency ? "emergency " : "") + aNumber);
+    if (DEBUG) debug("Dialing " + (aIsDialEmergency ? "emergency " : "")
+                     + aNumber + ", clientId: " + aClientId);
 
     // We don't try to be too clever here, as the phone is probably in the
     // locked state. Let's just check if it's a number without normalizing
@@ -691,7 +692,7 @@ TelephonyService.prototype = {
         return;
       }
 
-      if (this._isEmergencyOnly()) {
+      if (this._isEmergencyOnly(aClientId)) {
         if (DEBUG) debug("Error: Dial a normal call when emergencyCallsOnly. Drop");
         aCallback.notifyError(DIAL_ERROR_BAD_NUMBER);
         return;
@@ -1001,11 +1002,6 @@ TelephonyService.prototype = {
     aRilCall.number = this._formatInternationalNumber(aRilCall.number,
                                                       aRilCall.toa);
 
-    if (!aCall.started &&
-        aCall.state == nsITelephonyService.CALL_STATE_CONNECTED) {
-      aCall.started = new Date().getTime();
-    }
-
     let change = false;
     const key = ["state", "number", "numberPresentation", "name",
                  "namePresentation"];
@@ -1019,6 +1015,11 @@ TelephonyService.prototype = {
 
     aCall.isOutgoing = !aRilCall.isMT;
     aCall.isEmergency = gDialNumberUtils.isEmergency(aCall.number);
+
+    if (!aCall.started &&
+        aCall.state == nsITelephonyService.CALL_STATE_CONNECTED) {
+      aCall.started = new Date().getTime();
+    }
 
     return change;
   },

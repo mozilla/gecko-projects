@@ -102,8 +102,8 @@ bool InImageBridgeChildThread();
  * CompositableHost with an AsyncID).
  */
 class ImageBridgeChild final : public PImageBridgeChild
-                                 , public CompositableForwarder
-                                 , public AsyncTransactionTrackersHolder
+                             , public CompositableForwarder
+                             , public AsyncTransactionTrackersHolder
 {
   friend class ImageContainer;
   typedef InfallibleTArray<AsyncParentMessageData> AsyncParentMessageArray;
@@ -206,13 +206,6 @@ public:
   // CompositableForwarder
 
   virtual void Connect(CompositableClient* aCompositable) override;
-
-  /**
-   * See CompositableForwarder::UpdatedTexture
-   */
-  virtual void UpdatedTexture(CompositableClient* aCompositable,
-                              TextureClient* aTexture,
-                              nsIntRegion* aRegion) override;
 
   virtual bool IsImageBridgeChild() const override { return true; }
 
