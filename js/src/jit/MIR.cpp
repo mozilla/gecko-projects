@@ -1553,8 +1553,8 @@ MPhi::removeOperand(size_t index)
 void
 MPhi::removeAllOperands()
 {
-    for (MUse* p = inputs_.begin(), *e = inputs_.end(); p < e; ++p)
-        p->producer()->removeUse(p);
+    for (MUse& p : inputs_)
+        p.producer()->removeUse(&p);
     inputs_.clear();
 }
 
@@ -1769,6 +1769,61 @@ jit::MergeTypes(MIRType* ptype, TemporaryTypeSet** ptypeSet,
         }
     }
     return true;
+}
+
+// Tests whether 'types' includes all possible values represented by
+// input/inputTypes.
+bool
+jit::TypeSetIncludes(TypeSet* types, MIRType input, TypeSet* inputTypes)
+{
+    if (!types)
+        return inputTypes && inputTypes->empty();
+
+    switch (input) {
+      case MIRType_Undefined:
+      case MIRType_Null:
+      case MIRType_Boolean:
+      case MIRType_Int32:
+      case MIRType_Double:
+      case MIRType_Float32:
+      case MIRType_String:
+      case MIRType_Symbol:
+      case MIRType_MagicOptimizedArguments:
+        return types->hasType(TypeSet::PrimitiveType(ValueTypeFromMIRType(input)));
+
+      case MIRType_Object:
+        return types->unknownObject() || (inputTypes && inputTypes->isSubset(types));
+
+      case MIRType_Value:
+        return types->unknown() || (inputTypes && inputTypes->isSubset(types));
+
+      default:
+        MOZ_CRASH("Bad input type");
+    }
+}
+
+// Tests if two type combos (type/typeset) are equal.
+bool
+jit::EqualTypes(MIRType type1, TemporaryTypeSet* typeset1,
+                MIRType type2, TemporaryTypeSet* typeset2)
+{
+    // Types should equal.
+    if (type1 != type2)
+        return false;
+
+    // Both have equal type and no typeset.
+    if (!typeset1 && !typeset2)
+        return true;
+
+    // If only one instructions has a typeset.
+    // Test if the typset contains the same information as the MIRType.
+    if (typeset1 && !typeset2)
+        return TypeSetIncludes(typeset1, type2, nullptr);
+    if (!typeset1 && typeset2)
+        return TypeSetIncludes(typeset2, type1, nullptr);
+
+    // Typesets should equal.
+    return typeset1->equals(typeset2);
 }
 
 bool
@@ -2724,7 +2779,8 @@ MustBeUInt32(MDefinition* def, MDefinition** pwrapped)
 bool
 MBinaryInstruction::tryUseUnsignedOperands()
 {
-    MDefinition* newlhs, *newrhs;
+    MDefinition* newlhs;
+    MDefinition* newrhs;
     if (MustBeUInt32(getOperand(0), &newlhs) && MustBeUInt32(getOperand(1), &newrhs)) {
         if (newlhs->type() != MIRType_Int32 || newrhs->type() != MIRType_Int32)
             return false;
@@ -4191,6 +4247,10 @@ MaybeUnwrapElements(const MDefinition* elementsOrObj)
     if (elementsOrObj->type() == MIRType_Object)
         return nullptr;
 
+    // MTypedArrayElements and MTypedObjectElements aren't handled.
+    if (!elementsOrObj->isElements())
+        return nullptr;
+
     return elementsOrObj->toElements();
 }
 
@@ -4201,12 +4261,14 @@ GetStoreObject(const MDefinition* store)
     switch (store->op()) {
       case MDefinition::Op_StoreElement: {
         const MDefinition* elementsOrObj = store->toStoreElement()->elements();
+        if (elementsOrObj->type() == MIRType_Object)
+            return elementsOrObj;
+
         const MDefinition* elements = MaybeUnwrapElements(elementsOrObj);
         if (elements)
             return elements->toElements()->input();
 
-        MOZ_ASSERT(elementsOrObj->type() == MIRType_Object);
-        return elementsOrObj;
+        return nullptr;
       }
 
       case MDefinition::Op_StoreElementHole:
@@ -4225,7 +4287,11 @@ GenericLoadMightAlias(const MDefinition* elementsOrObj, const MDefinition* store
     if (elements)
         return elements->mightAlias(store);
 
-    // If MElements couldn't be extracted, then storage must be inline.
+    // Unhandled Elements kind.
+    if (elementsOrObj->type() != MIRType_Object)
+        return true;
+
+    // Inline storage for objects.
     // Refer to IsValidElementsType().
     const MDefinition* object = elementsOrObj;
     MOZ_ASSERT(object->type() == MIRType_Object);

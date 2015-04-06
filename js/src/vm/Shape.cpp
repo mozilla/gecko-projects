@@ -790,7 +790,10 @@ NativeObject::putProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleId
         if (!updateLast && !obj->generateOwnShape(cx))
             return nullptr;
 
-        /* FIXME bug 593129 -- slot allocation and JSObject* this must move out of here! */
+        /*
+         * FIXME bug 593129 -- slot allocation and NativeObject *this must move
+         * out of here!
+         */
         if (slot == SHAPE_INVALID_SLOT && !(attrs & JSPROP_SHARED)) {
             if (!allocSlot(cx, obj, &slot))
                 return nullptr;
@@ -866,13 +869,11 @@ NativeObject::putProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleId
 
 /* static */ Shape*
 NativeObject::changeProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleShape shape,
-                             unsigned attrs, unsigned mask, GetterOp getter, SetterOp setter)
+                             unsigned attrs, GetterOp getter, SetterOp setter)
 {
     MOZ_ASSERT(obj->containsPure(shape));
     MOZ_ASSERT(getter != JS_PropertyStub);
     MOZ_ASSERT(setter != JS_StrictPropertyStub);
-
-    attrs |= shape->attrs & mask;
     MOZ_ASSERT_IF(attrs & (JSPROP_GETTER | JSPROP_SETTER), attrs & JSPROP_SHARED);
 
     /* Allow only shared (slotless) => unshared (slotful) transition. */
@@ -1251,7 +1252,7 @@ JSCompartment::sweepBaseShapeTable()
 
     for (BaseShapeSet::Enum e(baseShapes); !e.empty(); e.popFront()) {
         UnownedBaseShape* base = e.front().unbarrieredGet();
-        if (IsBaseShapeAboutToBeFinalizedFromAnyThread(&base)) {
+        if (IsAboutToBeFinalizedUnbarriered(&base)) {
             e.removeFront();
         } else if (base != e.front().unbarrieredGet()) {
             ReadBarriered<UnownedBaseShape*> b(base);
@@ -1351,8 +1352,10 @@ class InitialShapeSetRef : public BufferableRef
 
     void mark(JSTracer* trc) {
         TaggedProto priorProto = proto;
-        if (proto.isObject())
-            Mark(trc, reinterpret_cast<JSObject**>(&proto), "initialShapes set proto");
+        if (proto.isObject()) {
+            TraceManuallyBarrieredEdge(trc, reinterpret_cast<JSObject**>(&proto),
+                                       "initialShapes set proto");
+        }
         if (proto == priorProto)
             return;
 
@@ -1534,8 +1537,8 @@ JSCompartment::sweepInitialShapeTable()
             const InitialShapeEntry& entry = e.front();
             Shape* shape = entry.shape.unbarrieredGet();
             JSObject* proto = entry.proto.raw();
-            if (IsShapeAboutToBeFinalizedFromAnyThread(&shape) ||
-                (entry.proto.isObject() && IsObjectAboutToBeFinalizedFromAnyThread(&proto)))
+            if (IsAboutToBeFinalizedUnbarriered(&shape) ||
+                (entry.proto.isObject() && IsAboutToBeFinalizedUnbarriered(&proto)))
             {
                 e.removeFront();
             } else {
@@ -1580,7 +1583,7 @@ void
 AutoRooterGetterSetter::Inner::trace(JSTracer* trc)
 {
     if ((attrs & JSPROP_GETTER) && *pgetter)
-        gc::MarkObjectRoot(trc, (JSObject**) pgetter, "AutoRooterGetterSetter getter");
+        TraceRoot(trc, (JSObject**) pgetter, "AutoRooterGetterSetter getter");
     if ((attrs & JSPROP_SETTER) && *psetter)
-        gc::MarkObjectRoot(trc, (JSObject**) psetter, "AutoRooterGetterSetter setter");
+        TraceRoot(trc, (JSObject**) psetter, "AutoRooterGetterSetter setter");
 }

@@ -431,6 +431,7 @@ protected:
     CSSToLayoutDeviceScale mDefaultScale;
     bool mShown;
     bool mUpdatedDimensions;
+    nsIntPoint mChromeOffset;
 
 private:
     already_AddRefed<nsFrameLoader> GetFrameLoader(bool aUseCachedFrameLoaderAfterDestroy = false) const;

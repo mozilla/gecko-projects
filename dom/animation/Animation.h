@@ -116,8 +116,9 @@ public:
   uint32_t GetSteps() const { return mSteps; }
   bool operator==(const ComputedTimingFunction& aOther) const {
     return mType == aOther.mType &&
-           mTimingFunction == aOther.mTimingFunction &&
-           mSteps == aOther.mSteps;
+           (mType == nsTimingFunction::Function ?
+	    mTimingFunction == aOther.mTimingFunction :
+	    mSteps == aOther.mSteps);
   }
   bool operator!=(const ComputedTimingFunction& aOther) const {
     return !(*this == aOther);
@@ -159,9 +160,12 @@ struct AnimationProperty
   // then use this to decide whether to apply the style both in the CSS
   // cascade and for OMTA.
   //
-  // FIXME (bug 847287): For CSS Animations, which are overridden by
-  // !important rules in the cascade, we actually determine this from
-  // the CSS cascade computations, and then use it for OMTA.
+  // For CSS Animations, which are overridden by !important rules in the
+  // cascade, we actually determine this from the CSS cascade
+  // computations, and then use it for OMTA.
+  // **NOTE**: For CSS animations, we only bother setting mWinsInCascade
+  // accurately for properties that we can animate on the compositor.
+  // For other properties, we make it always be true.
   bool mWinsInCascade;
 
   InfallibleTArray<AnimationPropertySegment> mSegments;
@@ -219,7 +223,7 @@ public:
   // cached when used from JS.
   already_AddRefed<AnimationEffect> GetEffect();
   Element* GetTarget() const {
-    // Currently we only implement Element.getAnimationPlayers() which only
+    // Currently we only implement Element.getAnimations() which only
     // returns animations targetting Elements so this should never
     // be called for an animation that targets a pseudo-element.
     MOZ_ASSERT(mPseudoType == nsCSSPseudoElements::ePseudo_NotPseudoElement,

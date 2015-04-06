@@ -661,32 +661,19 @@ ClonedBlockObject::copyUnaliasedValues(AbstractFramePtr frame)
 }
 
 /* static */ ClonedBlockObject*
-ClonedBlockObject::clone(ExclusiveContext* cx, Handle<ClonedBlockObject*> block)
+ClonedBlockObject::clone(JSContext* cx, Handle<ClonedBlockObject*> clonedBlock)
 {
-    RootedObject enclosing(cx, &block->enclosingScope());
+    Rooted<StaticBlockObject*> staticBlock(cx, &clonedBlock->staticBlock());
+    RootedObject enclosing(cx, &clonedBlock->enclosingScope());
 
-    MOZ_ASSERT(block->getClass() == &BlockObject::class_);
-
-    RootedObjectGroup cloneGroup(cx, block->group());
-    RootedShape cloneShape(cx, block->lastProperty());
-
-    JSObject* obj = JSObject::create(cx, FINALIZE_KIND, gc::TenuredHeap, cloneShape, cloneGroup);
-    if (!obj)
+    Rooted<ClonedBlockObject*> copy(cx, create(cx, staticBlock, enclosing));
+    if (!copy)
         return nullptr;
 
-    ClonedBlockObject& copy = obj->as<ClonedBlockObject>();
+    for (uint32_t i = 0, count = staticBlock->numVariables(); i < count; i++)
+        copy->setVar(i, clonedBlock->var(i, DONT_CHECK_ALIASING), DONT_CHECK_ALIASING);
 
-    MOZ_ASSERT(!copy.inDictionaryMode());
-    MOZ_ASSERT(copy.isDelegate());
-    MOZ_ASSERT(block->slotSpan() == copy.slotSpan());
-    MOZ_ASSERT(copy.slotSpan() >= copy.numVariables() + RESERVED_SLOTS);
-
-    copy.setReservedSlot(SCOPE_CHAIN_SLOT, block->getReservedSlot(SCOPE_CHAIN_SLOT));
-
-    for (uint32_t i = 0, count = copy.numVariables(); i < count; i++)
-        copy.setVar(i, block->var(i, DONT_CHECK_ALIASING), DONT_CHECK_ALIASING);
-
-    return &copy;
+    return copy;
 }
 
 StaticBlockObject*
@@ -1185,7 +1172,7 @@ void
 LiveScopeVal::sweep()
 {
     if (staticScope_)
-        MOZ_ALWAYS_FALSE(IsObjectAboutToBeFinalizedFromAnyThread(staticScope_.unsafeGet()));
+        MOZ_ALWAYS_FALSE(IsAboutToBeFinalized(&staticScope_));
 }
 
 // Live ScopeIter values may be added to DebugScopes::liveScopes, as
@@ -1259,7 +1246,7 @@ class DebugScopeProxy : public BaseProxyHandler
      *  - ACCESS_LOST      if the value has been lost to the debugger
      */
     bool handleUnaliasedAccess(JSContext* cx, Handle<DebugScopeObject*> debugScope,
-                               Handle<ScopeObject*> scope, jsid id, Action action,
+                               Handle<ScopeObject*> scope, HandleId id, Action action,
                                MutableHandleValue vp, AccessResult* accessResult) const
     {
         MOZ_ASSERT(&debugScope->scope() == scope);
@@ -1270,7 +1257,7 @@ class DebugScopeProxy : public BaseProxyHandler
         /* Handle unaliased formals, vars, lets, and consts at function scope. */
         if (scope->is<CallObject>() && !scope->as<CallObject>().isForEval()) {
             CallObject& callobj = scope->as<CallObject>();
-            RootedScript script(cx, callobj.callee().nonLazyScript());
+            RootedScript script(cx, callobj.callee().getOrCreateScript(cx));
             if (!script->ensureHasTypes(cx) || !script->ensureHasAnalyzedArgsUsage(cx))
                 return false;
 
@@ -1430,8 +1417,9 @@ class DebugScopeProxy : public BaseProxyHandler
     static bool isMagicMissingArgumentsValue(JSContext* cx, ScopeObject& scope, HandleValue v)
     {
         bool isMagic = v.isMagic() && v.whyMagic() == JS_OPTIMIZED_ARGUMENTS;
-        MOZ_ASSERT_IF(isMagic, isFunctionScope(scope) &&
-                               !scope.as<CallObject>().callee().nonLazyScript()->needsArgsObj());
+        MOZ_ASSERT_IF(isMagic,
+                      isFunctionScope(scope) &&
+                      scope.as<CallObject>().callee().nonLazyScript()->argumentsHasVarBinding());
         return isMagic;
     }
 
@@ -1883,7 +1871,7 @@ DebugScopes::sweep(JSRuntime* rt)
      */
     for (MissingScopeMap::Enum e(missingScopes); !e.empty(); e.popFront()) {
         DebugScopeObject** debugScope = e.front().value().unsafeGet();
-        if (IsObjectAboutToBeFinalizedFromAnyThread(debugScope)) {
+        if (IsAboutToBeFinalizedUnbarriered(debugScope)) {
             /*
              * Note that onPopCall and onPopBlock rely on missingScopes to find
              * scope objects that we synthesized for the debugger's sake, and
@@ -1921,7 +1909,7 @@ DebugScopes::sweep(JSRuntime* rt)
          * Scopes can be finalized when a debugger-synthesized ScopeObject is
          * no longer reachable via its DebugScopeObject.
          */
-        if (IsObjectAboutToBeFinalizedFromAnyThread(&scope))
+        if (IsAboutToBeFinalizedUnbarriered(&scope))
             e.removeFront();
         else if (scope != e.front().key())
             e.rekeyFront(scope);
@@ -2481,7 +2469,10 @@ js::GetDebugScopeForFunction(JSContext* cx, HandleFunction fun)
     MOZ_ASSERT(CanUseDebugScopeMaps(cx));
     if (!DebugScopes::updateLiveScopes(cx))
         return nullptr;
-    ScopeIter si(cx, fun->environment(), fun->nonLazyScript()->enclosingStaticScope());
+    JSScript* script = fun->getOrCreateScript(cx);
+    if (!script)
+        return nullptr;
+    ScopeIter si(cx, fun->environment(), script->enclosingStaticScope());
     return GetDebugScope(cx, si);
 }
 

@@ -34,6 +34,7 @@ const IDLE_PREF = "devtools.performance.ui.show-idle-blocks";
 const INVERT_PREF = "devtools.performance.ui.invert-call-tree";
 const INVERT_FLAME_PREF = "devtools.performance.ui.invert-flame-graph";
 const FLATTEN_PREF = "devtools.performance.ui.flatten-tree-recursion";
+const JIT_PREF = "devtools.performance.ui.show-jit-optimizations";
 
 // All tests are asynchronous.
 waitForExplicitFinish();
@@ -48,17 +49,14 @@ let DEFAULT_PREFS = [
   "devtools.performance.ui.show-idle-blocks",
   "devtools.performance.ui.enable-memory",
   "devtools.performance.ui.enable-framerate",
-
-  // remove after bug 1075567 is resolved.
-  "devtools.performance_dev.enabled"
+  "devtools.performance.ui.show-jit-optimizations",
 ].reduce((prefs, pref) => {
   prefs[pref] = Services.prefs.getBoolPref(pref);
   return prefs;
 }, {});
 
-// Enable the new performance panel for all tests. Remove this after
-// bug 1075567 is resolved.
-Services.prefs.setBoolPref("devtools.performance_dev.enabled", true);
+// Enable the new performance panel for all tests.
+Services.prefs.setBoolPref("devtools.performance.enabled", true);
 // Enable logging for all the tests. Both the debugger server and frontend will
 // be affected by this pref.
 Services.prefs.setBoolPref("devtools.debugger.log", false);

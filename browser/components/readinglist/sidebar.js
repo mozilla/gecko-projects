@@ -103,6 +103,11 @@ let RLSidebar = {
     this.itemsById.set(item.id, item);
 
     this.emptyListInfo.hidden = true;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        itemNode.classList.add('visible');
+      });
+    });
   },
 
   /**
@@ -113,13 +118,22 @@ let RLSidebar = {
     log.trace(`onItemDeleted: ${item}`);
 
     let itemNode = this.itemNodesById.get(item.id);
-    itemNode.remove();
+
     this.itemNodesById.delete(item.id);
     this.itemsById.delete(item.id);
-    // TODO: ensureListItems doesn't yet cope with needing to add one item.
-    //this.ensureListItems();
 
-    this.emptyListInfo.hidden = (this.numItems > 0);
+    itemNode.addEventListener('transitionend', (event) => {
+      if (event.propertyName == "max-height") {
+        itemNode.remove();
+
+        // TODO: ensureListItems doesn't yet cope with needing to add one item.
+        //this.ensureListItems();
+
+        this.emptyListInfo.hidden = (this.numItems > 0);
+      }
+    }, false);
+
+    itemNode.classList.remove('visible');
   },
 
   /**

@@ -348,13 +348,6 @@ xpc::TraceXPCGlobal(JSTracer* trc, JSObject* obj)
 
 namespace xpc {
 
-uint64_t
-GetCompartmentCPOWMicroseconds(JSCompartment* compartment)
-{
-    xpc::CompartmentPrivate* compartmentPrivate = xpc::CompartmentPrivate::Get(compartment);
-    return compartmentPrivate ? PR_IntervalToMicroseconds(compartmentPrivate->CPOWTime) : 0;
-}
-
 JSObject*
 CreateGlobalObject(JSContext* cx, const JSClass* clasp, nsIPrincipal* principal,
                    JS::CompartmentOptions& aOptions)
@@ -1264,7 +1257,7 @@ ReadScriptOrFunction(nsIObjectInputStream* stream, JSContext* cx,
         }
     }
 
-    nsMemory::Free(data);
+    free(data);
     return rv;
 }
 

@@ -23,9 +23,14 @@ ParseNode::checkListConsistency()
     ParseNode** tail;
     uint32_t count = 0;
     if (pn_head) {
-        ParseNode* pn, *last;
-        for (pn = last = pn_head; pn; last = pn, pn = pn->pn_next, count++)
-            ;
+        ParseNode* last = pn_head;
+        ParseNode* pn = last;
+        while (pn) {
+            last = pn;
+            pn = pn->pn_next;
+            count++;
+        }
+
         tail = &last->pn_next;
     } else {
         tail = &pn_head;
@@ -1123,7 +1128,7 @@ ObjectBox::trace(JSTracer* trc)
 {
     ObjectBox* box = this;
     while (box) {
-        MarkObjectRoot(trc, &box->object, "parser.object");
+        TraceRoot(trc, &box->object, "parser.object");
         if (box->isFunctionBox())
             box->asFunctionBox()->bindings.trace(trc);
         box = box->traceLink;

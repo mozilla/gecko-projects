@@ -830,9 +830,9 @@ GeckoDriver.prototype.createExecuteSandbox = function(win, mn, sp) {
   sb.testUtils = utils;
 
   mn.exports.forEach(function(fn) {
-    try {
+    if (typeof mn[fn] === 'function') {
       sb[fn] = mn[fn].bind(mn);
-    } catch(e) {
+    } else {
       sb[fn] = mn[fn];
     }
   });
@@ -1924,7 +1924,7 @@ GeckoDriver.prototype.multiAction = function(cmd, resp) {
     case Context.CONTENT:
       this.addFrameCloseListener("multi action chain");
       yield this.listener.multiAction(
-          {value: value, maxlen: max_len} = cmd.parameters);
+          {value: value, max_len: maxlen} = cmd.parameters);
       break;
   }
 };

@@ -134,6 +134,9 @@ def dedent(s):
 fill_multiline_substitution_re = re.compile(r"( *)\$\*{(\w+)}(\n)?")
 
 
+find_substitutions = re.compile(r"\${")
+
+
 @memoize
 def compile_fill_template(template):
     """
@@ -173,6 +176,8 @@ def compile_fill_template(template):
         return "${" + modified_name + "}"
 
     t = re.sub(fill_multiline_substitution_re, replace, t)
+    if not re.search(find_substitutions, t):
+        raise TypeError("Using fill() when dedent() would do.")
     return (string.Template(t), argModList)
 
 
@@ -1141,14 +1146,14 @@ class CGHeaders(CGWrapper):
         if len(callbacks) != 0:
             # We need CallbackFunction to serve as our parent class
             declareIncludes.add("mozilla/dom/CallbackFunction.h")
-            # And we need BindingUtils.h so we can wrap "this" objects
-            declareIncludes.add("mozilla/dom/BindingUtils.h")
+            # And we need ToJSValue.h so we can wrap "this" objects
+            declareIncludes.add("mozilla/dom/ToJSValue.h")
 
         if len(callbackDescriptors) != 0 or len(jsImplementedDescriptors) != 0:
             # We need CallbackInterface to serve as our parent class
             declareIncludes.add("mozilla/dom/CallbackInterface.h")
-            # And we need BindingUtils.h so we can wrap "this" objects
-            declareIncludes.add("mozilla/dom/BindingUtils.h")
+            # And we need ToJSValue.h so we can wrap "this" objects
+            declareIncludes.add("mozilla/dom/ToJSValue.h")
 
         # Also need to include the headers for ancestors of
         # JS-implemented interfaces.
@@ -1503,7 +1508,7 @@ class CGAddPropertyHook(CGAbstractClassHook):
         args = [Argument('JSContext*', 'cx'),
                 Argument('JS::Handle<JSObject*>', 'obj'),
                 Argument('JS::Handle<jsid>', 'id'),
-                Argument('JS::MutableHandle<JS::Value>', 'vp')]
+                Argument('JS::Handle<JS::Value>', 'val')]
         CGAbstractClassHook.__init__(self, descriptor, ADDPROPERTY_HOOK_NAME,
                                      'bool', args)
 
@@ -2766,14 +2771,13 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
 
         if self.descriptor.hasUnforgeableMembers:
             assert needInterfacePrototypeObject
-            setUnforgeableHolder = CGGeneric(fill(
+            setUnforgeableHolder = CGGeneric(dedent(
                 """
                 if (*protoCache) {
                   js::SetReservedSlot(*protoCache, DOM_INTERFACE_PROTO_SLOTS_BASE,
                                       JS::ObjectValue(*unforgeableHolder));
                 }
-                """,
-                name=self.descriptor.name))
+                """))
         else:
             setUnforgeableHolder = None
 
@@ -11514,7 +11518,7 @@ class CGDictionary(CGThing):
                 """,
                 dictName=self.makeClassName(self.dictionary.parent))
         else:
-            body += fill(
+            body += dedent(
                 """
                 if (!IsConvertibleToDictionary(cx, val)) {
                   return ThrowErrorMessage(cx, MSG_NOT_DICTIONARY, sourceDescription);
@@ -11600,7 +11604,7 @@ class CGDictionary(CGThing):
                 """,
                 dictName=self.makeClassName(self.dictionary.parent))
         else:
-            body += fill(
+            body += dedent(
                 """
                 JS::Rooted<JSObject*> obj(cx, JS_NewPlainObject(cx));
                 if (!obj) {
@@ -13821,7 +13825,7 @@ class CGCallback(CGClass):
             """
             $*{setupCall}
             JS::Rooted<JS::Value> thisValJS(s.GetContext());
-            if (!WrapCallThisValue(s.GetContext(), thisVal, &thisValJS)) {
+            if (!ToJSValue(s.GetContext(), thisVal, &thisValJS)) {
               aRv.Throw(NS_ERROR_FAILURE);
               return${errorReturn};
             }

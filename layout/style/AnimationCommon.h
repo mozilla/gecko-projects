@@ -35,6 +35,14 @@ namespace mozilla {
 class RestyleTracker;
 struct AnimationPlayerCollection;
 
+// Options to set when fetching animations to run on the compositor.
+enum class GetCompositorAnimationOptions {
+  // When fetching compositor animations, if there are any such animations,
+  // also let the ActiveLayerTracker know at the same time.
+  NotifyActiveLayerTracker = 1 << 0
+};
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(GetCompositorAnimationOptions)
+
 namespace css {
 
 bool IsGeometricProperty(nsCSSProperty aProperty);
@@ -65,6 +73,13 @@ public:
   virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
     const MOZ_MUST_OVERRIDE override;
 
+#ifdef DEBUG
+  static void Initialize();
+#endif
+
+  // NOTE:  This can return null after Disconnect().
+  nsPresContext* PresContext() const { return mPresContext; }
+
   /**
    * Notify the manager that the pres context is going away.
    */
@@ -76,9 +91,9 @@ public:
   void AddStyleUpdatesTo(mozilla::RestyleTracker& aTracker);
 
   AnimationPlayerCollection*
-  GetAnimationPlayers(dom::Element *aElement,
-                      nsCSSPseudoElements::Type aPseudoType,
-                      bool aCreateIfNeeded);
+  GetAnimations(dom::Element *aElement,
+                nsCSSPseudoElements::Type aPseudoType,
+                bool aCreateIfNeeded);
 
   // Returns true if aContent or any of its ancestors has an animation
   // or transition.
@@ -124,6 +139,12 @@ protected:
 public:
   static const LayerAnimationRecord sLayerAnimationInfo[kLayerRecords];
 
+  // Will return non-null for any property with the
+  // CSS_PROPERTY_CAN_ANIMATE_ON_COMPOSITOR flag; should only be called
+  // on such properties.
+  static const LayerAnimationRecord*
+    LayerAnimationRecordFor(nsCSSProperty aProperty);
+
 protected:
   virtual ~CommonAnimationManager();
 
@@ -131,11 +152,15 @@ protected:
   friend struct mozilla::AnimationPlayerCollection;
 
   void AddElementCollection(AnimationPlayerCollection* aCollection);
-  void ElementCollectionRemoved() { CheckNeedsRefresh(); }
+  void ElementCollectionRemoved() { MaybeStartOrStopObservingRefreshDriver(); }
   void RemoveAllElementCollections();
 
-  // Check to see if we should stop or start observing the refresh driver
-  void CheckNeedsRefresh();
+  // We should normally only call MaybeStartOrStopObservingRefreshDriver in
+  // situations where we will also queue events since otherwise we may stop
+  // getting refresh driver ticks before we queue the necessary events.
+  void MaybeStartObservingRefreshDriver();
+  void MaybeStartOrStopObservingRefreshDriver();
+  bool NeedsRefresh() const;
 
   virtual nsIAtom* GetAnimationsAtom() = 0;
   virtual nsIAtom* GetAnimationsBeforeAtom() = 0;
@@ -145,12 +170,11 @@ protected:
     return false;
   }
 
-  // When this returns a value other than nullptr, it also,
-  // as a side-effect, notifies the ActiveLayerTracker.
   static AnimationPlayerCollection*
   GetAnimationsForCompositor(nsIContent* aContent,
                              nsIAtom* aElementProperty,
-                             nsCSSProperty aProperty);
+                             nsCSSProperty aProperty,
+                             GetCompositorAnimationOptions aFlags);
 
   PRCList mElementCollections;
   nsPresContext *mPresContext; // weak (non-null from ctor to Disconnect)
@@ -291,6 +315,9 @@ struct AnimationPlayerCollection : public PRCList
   // (This is useful for determining whether throttle the animation
   // (suppress main-thread style updates).)
   bool CanPerformOnCompositorThread(CanAnimateFlags aFlags) const;
+
+  void PostUpdateLayerAnimations();
+
   bool HasAnimationOfProperty(nsCSSProperty aProperty) const;
 
   bool IsForElement() const { // rather than for a pseudo-element

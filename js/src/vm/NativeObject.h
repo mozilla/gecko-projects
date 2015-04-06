@@ -506,7 +506,10 @@ class NativeObject : public JSObject
 
     void invalidateSlotRange(uint32_t start, uint32_t length) {
 #ifdef DEBUG
-        HeapSlot* fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
+        HeapSlot* fixedStart;
+        HeapSlot* fixedEnd;
+        HeapSlot* slotsStart;
+        HeapSlot* slotsEnd;
         getSlotRange(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
         Debug_SetSlotRangeToCrashOnTouch(fixedStart, fixedEnd);
         Debug_SetSlotRangeToCrashOnTouch(slotsStart, slotsEnd);
@@ -691,12 +694,8 @@ class NativeObject : public JSObject
 
     /* Change the given property into a sibling with the same id in this scope. */
     static Shape*
-    changeProperty(ExclusiveContext* cx, HandleNativeObject obj,
-                   HandleShape shape, unsigned attrs, unsigned mask,
-                   JSGetterOp getter, JSSetterOp setter);
-
-    static inline bool changePropertyAttributes(JSContext* cx, HandleNativeObject obj,
-                                                HandleShape shape, unsigned attrs);
+    changeProperty(ExclusiveContext* cx, HandleNativeObject obj, HandleShape shape,
+                   unsigned attrs, JSGetterOp getter, JSSetterOp setter);
 
     /* Remove the property named by id from this object. */
     bool removeProperty(ExclusiveContext* cx, jsid id);
@@ -1351,27 +1350,6 @@ NativeLookupOwnProperty(ExclusiveContext* cx,
                         typename MaybeRooted<NativeObject*, allowGC>::HandleType obj,
                         typename MaybeRooted<jsid, allowGC>::HandleType id,
                         typename MaybeRooted<Shape*, allowGC>::MutableHandleType propp);
-
-/*
- * On success, and if id was found, return true with *objp non-null and with a
- * property of *objp stored in *propp. If successful but id was not found,
- * return true with both *objp and *propp null.
- */
-template <AllowGC allowGC>
-extern bool
-NativeLookupProperty(ExclusiveContext* cx,
-                     typename MaybeRooted<NativeObject*, allowGC>::HandleType obj,
-                     typename MaybeRooted<jsid, allowGC>::HandleType id,
-                     typename MaybeRooted<JSObject*, allowGC>::MutableHandleType objp,
-                     typename MaybeRooted<Shape*, allowGC>::MutableHandleType propp);
-
-inline bool
-NativeLookupProperty(ExclusiveContext* cx, HandleNativeObject obj, PropertyName* name,
-                     MutableHandleObject objp, MutableHandleShape propp);
-
-extern bool
-NativeLookupElement(JSContext* cx, HandleNativeObject obj, uint32_t index,
-                    MutableHandleObject objp, MutableHandleShape propp);
 
 /*
  * Get a property from `receiver`, after having already done a lookup and found

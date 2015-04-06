@@ -259,6 +259,12 @@ function executeInContent(name, data={}, objects={}, expectResponse=true) {
   }
 }
 
+function onceNextPlayerRefresh(player) {
+  let onRefresh = promise.defer();
+  player.once(player.AUTO_REFRESH_EVENT, onRefresh.resolve);
+  return onRefresh.promise;
+}
+
 /**
  * Simulate a click on the playPause button of a playerWidget.
  */
@@ -278,8 +284,66 @@ let togglePlayPauseButton = Task.async(function*(widget) {
 
   yield onClicked;
 
-  // Wait for the next sate change event to make sure the state is updated
-  yield widget.player.once(widget.player.AUTO_REFRESH_EVENT);
+  // Wait until the state changes.
+  yield waitForPlayState(widget.player, nextState);
+});
+
+/**
+ * Wait for a player's auto-refresh events and stop when a condition becomes
+ * truthy.
+ * @param {AnimationPlayerFront} player
+ * @param {Function} conditionCheck Will be called over and over again when the
+ * player state changes, passing the state as argument. This method must return
+ * a truthy value to stop waiting.
+ * @param {String} desc If provided, this will be logged with info(...) every
+ * time the state is refreshed, until the condition passes.
+ * @return {Promise} Resolves when the condition passes.
+ */
+let waitForStateCondition = Task.async(function*(player, conditionCheck, desc="") {
+  if (desc) {
+    desc = "(" + desc + ")";
+  }
+  info("Waiting for a player's auto-refresh event " + desc);
+  let def = promise.defer();
+  player.on(player.AUTO_REFRESH_EVENT, function onNewState() {
+    info("State refreshed, checking condition ... " + desc);
+    if (conditionCheck(player.state)) {
+      player.off(player.AUTO_REFRESH_EVENT, onNewState);
+      def.resolve();
+    }
+  });
+  return def.promise;
+});
+
+/**
+ * Wait for a player's auto-refresh events and stop when the playState is the
+ * provided string.
+ * @param {AnimationPlayerFront} player
+ * @param {String} playState The playState to expect.
+ * @return {Promise} Resolves when the playState has changed to the expected value.
+ */
+function waitForPlayState(player, playState) {
+  return waitForStateCondition(player, state => {
+    return state.playState === playState;
+  }, "Waiting for animation to be " + playState);
+}
+
+/**
+ * Wait for the player's auto-refresh events until the animation is paused.
+ * When done, check its currentTime.
+ * @param {PlayerWidget} widget.
+ * @param {Numer} time.
+ * @return {Promise} Resolves when the animation is paused and tests have ran.
+ */
+let checkPausedAt = Task.async(function*(widget, time) {
+  info("Wait for the next auto-refresh");
+
+  yield waitForPlayState(widget.player, "paused");
+
+  ok(widget.el.classList.contains("paused"), "The widget is in paused mode");
+  is(widget.player.state.currentTime, time,
+    "The player front's currentTime was set to " + time);
+  is(widget.currentTimeEl.value, time, "The input's value was set to " + time);
 });
 
 /**

@@ -117,7 +117,6 @@ HwcComposer2D::HwcComposer2D()
 #if ANDROID_VERSION >= 17
     , mPrevRetireFence(Fence::NO_FENCE)
     , mPrevDisplayFence(Fence::NO_FENCE)
-    , mLastVsyncTime(0)
 #endif
     , mPrepared(false)
     , mHasHWVsync(false)
@@ -229,12 +228,6 @@ void
 HwcComposer2D::Vsync(int aDisplay, nsecs_t aVsyncTimestamp)
 {
     TimeStamp vsyncTime = mozilla::TimeStamp::FromSystemTime(aVsyncTimestamp);
-    nsecs_t vsyncInterval = aVsyncTimestamp - mLastVsyncTime;
-    if (vsyncInterval < 16000000 || vsyncInterval > 17000000) {
-      LOGE("Non-uniform vsync interval: %lld\n", vsyncInterval);
-    }
-    mLastVsyncTime = aVsyncTimestamp;
-
     gfxPlatform::GetPlatform()->GetHardwareVsync()->GetGlobalDisplay().NotifyVsync(vsyncTime);
 }
 
@@ -742,13 +735,6 @@ HwcComposer2D::TryHwComposition()
             // GPU or partial OVERLAY Composition
             return false;
         } else if (blitComposite) {
-            // Some EGLSurface implementations require glClear() on blit composition.
-            // See bug 1029856.
-            if (mGLContext) {
-                mGLContext->MakeCurrent();
-                mGLContext->fClearColor(0.0, 0.0, 0.0, 0.0);
-                mGLContext->fClear(LOCAL_GL_COLOR_BUFFER_BIT);
-            }
             // BLIT Composition, flip FB target
             GetGonkDisplay()->UpdateFBSurface(mDpy, mSur);
             FramebufferSurface* fbsurface = (FramebufferSurface*)(GetGonkDisplay()->GetFBSurface());

@@ -44,7 +44,19 @@ let ReaderParent = {
   receiveMessage: function(message) {
     switch (message.name) {
       case "Reader:AddToList":
-        ReadingList.addItem(message.data.article);
+        let article = message.data.article;
+        ReadingList.getMetadataFromBrowser(message.target).then(function(metadata) {
+          if (metadata.previews.length > 0) {
+            article.preview = metadata.previews[0];
+          }
+
+          ReadingList.addItem({
+            url: article.url,
+            title: article.title,
+            excerpt: article.excerpt,
+            preview: article.preview
+          });
+        });
         break;
 
       case "Reader:ArticleGet":

@@ -122,13 +122,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
                                   "resource://gre/modules/UpdateChannel.jsm");
 #endif
 
-
-#if defined(MOZ_UPDATE_CHANNEL) && MOZ_UPDATE_CHANNEL != release
-#define MOZ_DEBUG_UA // Shorthand define for subsequent conditional sections.
-XPCOMUtils.defineLazyModuleGetter(this, "UserAgentOverrides",
-                                  "resource://gre/modules/UserAgentOverrides.jsm");
-#endif
-
 XPCOMUtils.defineLazyGetter(this, "ShellService", function() {
   try {
     return Cc["@mozilla.org/browser/shell-service;1"].
@@ -138,6 +131,15 @@ XPCOMUtils.defineLazyGetter(this, "ShellService", function() {
     return null;
   }
 });
+
+XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
+  return Services.strings.createBundle('chrome://branding/locale/brand.properties');
+});
+
+XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", function() {
+  return Services.strings.createBundle('chrome://browser/locale/browser.properties');
+});
+
 
 XPCOMUtils.defineLazyModuleGetter(this, "FormValidationHandler",
                                   "resource:///modules/FormValidationHandler.jsm");
@@ -150,6 +152,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "ReaderParent",
 
 XPCOMUtils.defineLazyModuleGetter(this, "AddonWatcher",
                                   "resource://gre/modules/AddonWatcher.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
+                                  "resource://gre/modules/LightweightThemeManager.jsm");
 
 const PREF_PLUGINS_NOTIFYUSER = "plugins.update.notifyUser";
 const PREF_PLUGINS_UPDATEURL  = "plugins.update.url";
@@ -369,6 +374,11 @@ BrowserGlue.prototype = {
         }
         else if (data == "force-places-init") {
           this._initPlaces(false);
+        }
+        else if (data == "smart-bookmarks-init") {
+          this.ensurePlacesDefaultQueriesInitialized().then(() => {
+            Services.obs.notifyObservers(null, "test-smart-bookmarks-done", null);
+          });
         }
         break;
       case "initial-migration-will-import-default-bookmarks":
@@ -710,9 +720,17 @@ BrowserGlue.prototype = {
     Services.prefs.addObserver(POLARIS_ENABLED, this, false);
 #endif
 
-#ifdef MOZ_DEBUG_UA
-    UserAgentOverrides.init();
-    DebugUserAgent.init();
+#ifndef RELEASE_BUILD
+    let themeName = gBrowserBundle.GetStringFromName("deveditionTheme.name");
+    let vendorShortName = gBrandBundle.GetStringFromName("vendorShortName");
+
+    LightweightThemeManager.addBuiltInTheme({
+      id: "firefox-devedition@mozilla.org",
+      name: themeName,
+      headerURL: "resource:///chrome/browser/content/browser/defaultthemes/devedition.header.png",
+      iconURL: "resource:///chrome/browser/content/browser/defaultthemes/devedition.icon.png",
+      author: vendorShortName,
+    });
 #endif
 
     Services.obs.notifyObservers(null, "browser-ui-startup-complete", "");
@@ -746,7 +764,7 @@ BrowserGlue.prototype = {
 
   _onSafeModeRestart: function BG_onSafeModeRestart() {
     // prompt the user to confirm
-    let strings = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+    let strings = gBrowserBundle;
     let promptTitle = strings.GetStringFromName("safeModeRestartPromptTitle");
     let promptMessage = strings.GetStringFromName("safeModeRestartPromptMessage");
     let restartText = strings.GetStringFromName("safeModeRestartButton");
@@ -804,9 +822,7 @@ BrowserGlue.prototype = {
     if (!win)
       return;
 
-    let productName = Services.strings
-                              .createBundle("chrome://branding/locale/brand.properties")
-                              .GetStringFromName("brandFullName");
+    let productName = gBrandBundle.GetStringFromName("brandFullName");
     let message = win.gNavigatorBundle.getFormattedString("slowStartup.message", [productName]);
 
     let buttons = [
@@ -844,9 +860,7 @@ BrowserGlue.prototype = {
     if (!ResetProfile.resetSupported())
       return;
 
-    let productName = Services.strings
-                              .createBundle("chrome://branding/locale/brand.properties")
-                              .GetStringFromName("brandShortName");
+    let productName = gBrandBundle.GetStringFromName("brandShortName");
     let resetBundle = Services.strings
                               .createBundle("chrome://global/locale/resetProfile.properties");
 
@@ -977,9 +991,6 @@ BrowserGlue.prototype = {
     if (Services.prefs.getBoolPref("dom.identity.enabled")) {
       SignInToWebsiteUX.uninit();
     }
-#endif
-#ifdef MOZ_DEBUG_UA
-    UserAgentOverrides.uninit();
 #endif
     webrtcUI.uninit();
     FormValidationHandler.uninit();
@@ -1195,9 +1206,7 @@ BrowserGlue.prototype = {
 
     let prompt = Services.prompt;
     let quitBundle = Services.strings.createBundle("chrome://browser/locale/quitDialog.properties");
-    let brandBundle = Services.strings.createBundle("chrome://branding/locale/brand.properties");
-
-    let appName = brandBundle.GetStringFromName("brandShortName");
+    let appName = gBrandBundle.GetStringFromName("brandShortName");
     let quitDialogTitle = quitBundle.formatStringFromName("quitDialogTitle",
                                                           [appName], 1);
     let neverAskText = quitBundle.GetStringFromName("neverAsk2");
@@ -1274,9 +1283,7 @@ BrowserGlue.prototype = {
 
     var formatter = Cc["@mozilla.org/toolkit/URLFormatterService;1"].
                     getService(Ci.nsIURLFormatter);
-    var browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-    var brandBundle = Services.strings.createBundle("chrome://branding/locale/brand.properties");
-    var appName = brandBundle.GetStringFromName("brandShortName");
+    var appName = gBrandBundle.GetStringFromName("brandShortName");
 
     function getNotifyString(aPropData) {
       var propValue = update.getProperty(aPropData.propName);
@@ -1284,11 +1291,11 @@ BrowserGlue.prototype = {
         if (aPropData.prefName)
           propValue = formatter.formatURLPref(aPropData.prefName);
         else if (aPropData.stringParams)
-          propValue = browserBundle.formatStringFromName(aPropData.stringName,
-                                                         aPropData.stringParams,
-                                                         aPropData.stringParams.length);
+          propValue = gBrowserBundle.formatStringFromName(aPropData.stringName,
+                                                          aPropData.stringParams,
+                                                          aPropData.stringParams.length);
         else
-          propValue = browserBundle.GetStringFromName(aPropData.stringName);
+          propValue = gBrowserBundle.GetStringFromName(aPropData.stringName);
       }
       return propValue;
     }
@@ -1479,8 +1486,8 @@ BrowserGlue.prototype = {
       if (!importBookmarks) {
         // Now apply distribution customized bookmarks.
         // This should always run after Places initialization.
-        this._distributionCustomizer.applyBookmarks();
-        this.ensurePlacesDefaultQueriesInitialized();
+        yield this._distributionCustomizer.applyBookmarks();
+        yield this.ensurePlacesDefaultQueriesInitialized();
       }
       else {
         // An import operation is about to run.
@@ -1512,10 +1519,10 @@ BrowserGlue.prototype = {
           try {
             // Now apply distribution customized bookmarks.
             // This should always run after Places initialization.
-            this._distributionCustomizer.applyBookmarks();
+            yield this._distributionCustomizer.applyBookmarks();
             // Ensure that smart bookmarks are created once the operation is
             // complete.
-            this.ensurePlacesDefaultQueriesInitialized();
+            yield this.ensurePlacesDefaultQueriesInitialized();
           } catch (e) {
             Cu.reportError(e);
           }
@@ -1559,7 +1566,7 @@ BrowserGlue.prototype = {
                       .getHistogramById("PLACES_BACKUPS_DAYSFROMLAST")
                       .add(backupAge);
             } catch (ex) {
-              Components.utils.reportError("Unable to report telemetry.");
+              Cu.reportError("Unable to report telemetry.");
             }
 
             if (backupAge > BOOKMARKS_BACKUP_MAX_INTERVAL_DAYS)
@@ -1608,8 +1615,7 @@ BrowserGlue.prototype = {
    * Show the notificationBox for a locked places database.
    */
   _showPlacesLockedNotificationBox: function BG__showPlacesLockedNotificationBox() {
-    var brandBundle  = Services.strings.createBundle("chrome://branding/locale/brand.properties");
-    var applicationName = brandBundle.GetStringFromName("brandShortName");
+    var applicationName = gBrandBundle.GetStringFromName("brandShortName");
     var placesBundle = Services.strings.createBundle("chrome://browser/locale/places/places.properties");
     var title = placesBundle.GetStringFromName("lockPrompt.title");
     var text = placesBundle.formatStringFromName("lockPrompt.text", [applicationName], 1);
@@ -1643,7 +1649,7 @@ BrowserGlue.prototype = {
   },
 
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 29;
+    const UI_VERSION = 30;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
     let currentUIVersion = 0;
     try {
@@ -1977,6 +1983,42 @@ BrowserGlue.prototype = {
       }
     }
 
+    if (currentUIVersion < 30) {
+      // Convert old devedition theme pref to lightweight theme storage
+      let lightweightThemeSelected = false;
+      let selectedThemeID = null;
+      try {
+        lightweightThemeSelected = Services.prefs.prefHasUserValue("lightweightThemes.selectedThemeID");
+        selectedThemeID = Services.prefs.getCharPref("lightweightThemes.selectedThemeID");
+      } catch(e) {}
+
+      let defaultThemeSelected = false;
+      try {
+         defaultThemeSelected = Services.prefs.getCharPref("general.skins.selectedSkin") == "classic/1.0";
+      } catch(e) {}
+
+      let deveditionThemeEnabled = false;
+      try {
+         deveditionThemeEnabled = Services.prefs.getBoolPref("browser.devedition.theme.enabled");
+      } catch(e) {}
+
+      // If we are on the devedition channel, the devedition theme is on by
+      // default.  But we need to handle the case where they didn't want it
+      // applied, and unapply the theme.
+      let userChoseToNotUseDeveditionTheme =
+        !deveditionThemeEnabled ||
+        !defaultThemeSelected ||
+        (lightweightThemeSelected && selectedThemeID != "firefox-devedition@mozilla.org");
+
+      if (userChoseToNotUseDeveditionTheme && selectedThemeID == "firefox-devedition@mozilla.org") {
+        Services.prefs.setCharPref("lightweightThemes.selectedThemeID", "");
+      }
+
+      // Not clearing browser.devedition.theme.enabled, to preserve user's pref
+      // if for some reason this function runs again (even though it shouldn't)
+      Services.prefs.clearUserPref("browser.devedition.showCustomizeButton");
+    }
+
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
   },
@@ -1989,12 +2031,11 @@ BrowserGlue.prototype = {
     this._sanitizer.sanitize(aParentWindow);
   },
 
-  ensurePlacesDefaultQueriesInitialized:
-  function BG_ensurePlacesDefaultQueriesInitialized() {
-    // This is actual version of the smart bookmarks, must be increased every
-    // time smart bookmarks change.
+  ensurePlacesDefaultQueriesInitialized: Task.async(function* () {
+    // This is the current smart bookmarks version, it must be increased every
+    // time they change.
     // When adding a new smart bookmark below, its newInVersion property must
-    // be set to the version it has been added in, we will compare its value
+    // be set to the version it has been added in.  We will compare its value
     // to users' smartBookmarksVersion and add new smart bookmarks without
     // recreating old deleted ones.
     const SMART_BOOKMARKS_VERSION = 7;
@@ -2010,160 +2051,128 @@ BrowserGlue.prototype = {
       smartBookmarksCurrentVersion = Services.prefs.getIntPref(SMART_BOOKMARKS_PREF);
     } catch(ex) {}
 
-    // If version is current or smart bookmarks are disabled, just bail out.
+    // If version is current, or smart bookmarks are disabled, bail out.
     if (smartBookmarksCurrentVersion == -1 ||
         smartBookmarksCurrentVersion >= SMART_BOOKMARKS_VERSION) {
       return;
     }
 
-    let batch = {
-      runBatched: function BG_EPDQI_runBatched() {
-        let menuIndex = 0;
-        let toolbarIndex = 0;
-        let bundle = Services.strings.createBundle("chrome://browser/locale/places/places.properties");
+    try {
+      let menuIndex = 0;
+      let toolbarIndex = 0;
+      let bundle = Services.strings.createBundle("chrome://browser/locale/places/places.properties");
+      let queryOptions = Ci.nsINavHistoryQueryOptions;
 
-        let smartBookmarks = {
-          MostVisited: {
-            title: bundle.GetStringFromName("mostVisitedTitle"),
-            uri: NetUtil.newURI("place:sort=" +
-                                Ci.nsINavHistoryQueryOptions.SORT_BY_VISITCOUNT_DESCENDING +
-                                "&maxResults=" + MAX_RESULTS),
-            parent: PlacesUtils.toolbarFolderId,
-            get position() { return toolbarIndex++; },
-            newInVersion: 1
-          },
-          RecentlyBookmarked: {
-            title: bundle.GetStringFromName("recentlyBookmarkedTitle"),
-            uri: NetUtil.newURI("place:folder=BOOKMARKS_MENU" +
-                                "&folder=UNFILED_BOOKMARKS" +
-                                "&folder=TOOLBAR" +
-                                "&queryType=" +
-                                Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS +
-                                "&sort=" +
-                                Ci.nsINavHistoryQueryOptions.SORT_BY_DATEADDED_DESCENDING +
-                                "&maxResults=" + MAX_RESULTS +
-                                "&excludeQueries=1"),
-            parent: PlacesUtils.bookmarksMenuFolderId,
-            get position() { return menuIndex++; },
-            newInVersion: 1
-          },
-          RecentTags: {
-            title: bundle.GetStringFromName("recentTagsTitle"),
-            uri: NetUtil.newURI("place:"+
-                                "type=" +
-                                Ci.nsINavHistoryQueryOptions.RESULTS_AS_TAG_QUERY +
-                                "&sort=" +
-                                Ci.nsINavHistoryQueryOptions.SORT_BY_LASTMODIFIED_DESCENDING +
-                                "&maxResults=" + MAX_RESULTS),
-            parent: PlacesUtils.bookmarksMenuFolderId,
-            get position() { return menuIndex++; },
-            newInVersion: 1
-          },
-        };
+      let smartBookmarks = {
+        MostVisited: {
+          title: bundle.GetStringFromName("mostVisitedTitle"),
+          url: "place:sort=" + queryOptions.SORT_BY_VISITCOUNT_DESCENDING +
+                    "&maxResults=" + MAX_RESULTS,
+          parentGuid: PlacesUtils.bookmarks.toolbarGuid,
+          newInVersion: 1
+        },
+        RecentlyBookmarked: {
+          title: bundle.GetStringFromName("recentlyBookmarkedTitle"),
+          url: "place:folder=BOOKMARKS_MENU" +
+                    "&folder=UNFILED_BOOKMARKS" +
+                    "&folder=TOOLBAR" +
+                    "&queryType=" + queryOptions.QUERY_TYPE_BOOKMARKS +
+                    "&sort=" + queryOptions.SORT_BY_DATEADDED_DESCENDING +
+                    "&maxResults=" + MAX_RESULTS +
+                    "&excludeQueries=1",
+          parentGuid: PlacesUtils.bookmarks.menuGuid,
+          newInVersion: 1
+        },
+        RecentTags: {
+          title: bundle.GetStringFromName("recentTagsTitle"),
+          url: "place:type=" + queryOptions.RESULTS_AS_TAG_QUERY +
+                    "&sort=" + queryOptions.SORT_BY_LASTMODIFIED_DESCENDING +
+                    "&maxResults=" + MAX_RESULTS,
+          parentGuid: PlacesUtils.bookmarks.menuGuid,
+          newInVersion: 1
+        },
+      };
 
-        if (Services.metro && Services.metro.supported) {
-          smartBookmarks.Windows8Touch = {
-            title: PlacesUtils.getString("windows8TouchTitle"),
-            get uri() {
-              let metroBookmarksRoot = PlacesUtils.annotations.getItemsWithAnnotation('metro/bookmarksRoot', {});
-              if (metroBookmarksRoot.length > 0) {
-                return NetUtil.newURI("place:folder=" +
-                                      metroBookmarksRoot[0] +
-                                      "&queryType=" +
-                                      Ci.nsINavHistoryQueryOptions.QUERY_TYPE_BOOKMARKS +
-                                      "&sort=" +
-                                      Ci.nsINavHistoryQueryOptions.SORT_BY_DATEADDED_DESCENDING +
-                                      "&maxResults=" + MAX_RESULTS +
-                                      "&excludeQueries=1")
-              }
-              return null;
-            },
-            parent: PlacesUtils.bookmarksMenuFolderId,
-            get position() { return menuIndex++; },
-            newInVersion: 7
-          };
-        }
-
-        // Set current itemId, parent and position if Smart Bookmark exists,
-        // we will use these informations to create the new version at the same
-        // position.
-        let smartBookmarkItemIds = PlacesUtils.annotations.getItemsWithAnnotation(SMART_BOOKMARKS_ANNO);
-        smartBookmarkItemIds.forEach(function (itemId) {
-          let queryId = PlacesUtils.annotations.getItemAnnotation(itemId, SMART_BOOKMARKS_ANNO);
-          if (queryId in smartBookmarks) {
-            let smartBookmark = smartBookmarks[queryId];
-            if (!smartBookmark.uri) {
-              PlacesUtils.bookmarks.removeItem(itemId);
-              return;
-            }
-            smartBookmark.itemId = itemId;
-            smartBookmark.parent = PlacesUtils.bookmarks.getFolderIdForItem(itemId);
-            smartBookmark.updatedPosition = PlacesUtils.bookmarks.getItemIndex(itemId);
-          }
-          else {
-            // We don't remove old Smart Bookmarks because user could still
-            // find them useful, or could have personalized them.
-            // Instead we remove the Smart Bookmark annotation.
-            PlacesUtils.annotations.removeItemAnnotation(itemId, SMART_BOOKMARKS_ANNO);
-          }
-        });
-
-        for (let queryId in smartBookmarks) {
+      // Set current guid, parentGuid and index of existing Smart Bookmarks.
+      // We will use those to create a new version of the bookmark at the same
+      // position.
+      let smartBookmarkItemIds = PlacesUtils.annotations.getItemsWithAnnotation(SMART_BOOKMARKS_ANNO);
+      for (let itemId of smartBookmarkItemIds) {
+        let queryId = PlacesUtils.annotations.getItemAnnotation(itemId, SMART_BOOKMARKS_ANNO);
+        if (queryId in smartBookmarks) {
+          // Known smart bookmark.
           let smartBookmark = smartBookmarks[queryId];
+          smartBookmark.guid = yield PlacesUtils.promiseItemGuid(itemId);
 
-          // We update or create only changed or new smart bookmarks.
-          // Also we respect user choices, so we won't try to create a smart
-          // bookmark if it has been removed.
-          if (smartBookmarksCurrentVersion > 0 &&
-              smartBookmark.newInVersion <= smartBookmarksCurrentVersion &&
-              !smartBookmark.itemId || !smartBookmark.uri)
+          if (!smartBookmark.url) {
+            yield PlacesUtils.bookmarks.remove(smartBookmark.guid);
             continue;
-
-          // Remove old version of the smart bookmark if it exists, since it
-          // will be replaced in place.
-          if (smartBookmark.itemId) {
-            PlacesUtils.bookmarks.removeItem(smartBookmark.itemId);
           }
 
-          // Create the new smart bookmark and store its updated itemId.
-          smartBookmark.itemId =
-            PlacesUtils.bookmarks.insertBookmark(smartBookmark.parent,
-                                                 smartBookmark.uri,
-                                                 smartBookmark.updatedPosition || smartBookmark.position,
-                                                 smartBookmark.title);
-          PlacesUtils.annotations.setItemAnnotation(smartBookmark.itemId,
-                                                    SMART_BOOKMARKS_ANNO,
-                                                    queryId, 0,
-                                                    PlacesUtils.annotations.EXPIRE_NEVER);
+          let bm = yield PlacesUtils.bookmarks.fetch(smartBookmark.guid);
+          smartBookmark.parentGuid = bm.parentGuid;
+          smartBookmark.index = bm.index;
         }
-
-        // If we are creating all Smart Bookmarks from ground up, add a
-        // separator below them in the bookmarks menu.
-        if (smartBookmarksCurrentVersion == 0 &&
-            smartBookmarkItemIds.length == 0) {
-          let id = PlacesUtils.bookmarks.getIdForItemAt(PlacesUtils.bookmarksMenuFolderId,
-                                                        menuIndex);
-          // Don't add a separator if the menu was empty or there is one already.
-          if (id != -1 &&
-              PlacesUtils.bookmarks.getItemType(id) != PlacesUtils.bookmarks.TYPE_SEPARATOR) {
-            PlacesUtils.bookmarks.insertSeparator(PlacesUtils.bookmarksMenuFolderId,
-                                                  menuIndex);
-          }
+        else {
+          // We don't remove old Smart Bookmarks because user could still
+          // find them useful, or could have personalized them.
+          // Instead we remove the Smart Bookmark annotation.
+          PlacesUtils.annotations.removeItemAnnotation(itemId, SMART_BOOKMARKS_ANNO);
         }
       }
-    };
 
-    try {
-      PlacesUtils.bookmarks.runInBatchMode(batch, null);
-    }
-    catch(ex) {
-      Components.utils.reportError(ex);
-    }
-    finally {
+      for (let queryId of Object.keys(smartBookmarks)) {
+        let smartBookmark = smartBookmarks[queryId];
+
+        // We update or create only changed or new smart bookmarks.
+        // Also we respect user choices, so we won't try to create a smart
+        // bookmark if it has been removed.
+        if (smartBookmarksCurrentVersion > 0 &&
+            smartBookmark.newInVersion <= smartBookmarksCurrentVersion &&
+            !smartBookmark.guid || !smartBookmark.url)
+          continue;
+
+        // Remove old version of the smart bookmark if it exists, since it
+        // will be replaced in place.
+        if (smartBookmark.guid) {
+          yield PlacesUtils.bookmarks.remove(smartBookmark.guid);
+        }
+
+        // Create the new smart bookmark and store its updated guid.
+        if (!("index" in smartBookmark)) {
+          if (smartBookmark.parentGuid == PlacesUtils.bookmarks.toolbarGuid)
+            smartBookmark.index = toolbarIndex++;
+          else if (smartBookmark.parentGuid == PlacesUtils.bookmarks.menuGuid)
+            smartBookmark.index = menuIndex++;
+        }
+        smartBookmark = yield PlacesUtils.bookmarks.insert(smartBookmark);
+        let itemId = yield PlacesUtils.promiseItemId(smartBookmark.guid);
+        PlacesUtils.annotations.setItemAnnotation(itemId,
+                                                  SMART_BOOKMARKS_ANNO,
+                                                  queryId, 0,
+                                                  PlacesUtils.annotations.EXPIRE_NEVER);
+      }
+
+      // If we are creating all Smart Bookmarks from ground up, add a
+      // separator below them in the bookmarks menu.
+      if (smartBookmarksCurrentVersion == 0 &&
+          smartBookmarkItemIds.length == 0) {
+        let bm = yield PlacesUtils.bookmarks.fetch({ parentGuid: PlacesUtils.bookmarks.menuGuid,
+                                                     index: menuIndex });
+        // Don't add a separator if the menu was empty or there is one already.
+        if (bm && bm.type != PlacesUtils.bookmarks.TYPE_SEPARATOR) {
+          yield PlacesUtils.bookmarks.insert({ type: PlacesUtils.bookmarks.TYPE_SEPARATOR,
+                                               parentGuid: PlacesUtils.bookmarks.menuGuid,
+                                               index: menuIndex });
+        }
+      }
+    } catch(ex) {
+      Cu.reportError(ex);
+    } finally {
       Services.prefs.setIntPref(SMART_BOOKMARKS_PREF, SMART_BOOKMARKS_VERSION);
       Services.prefs.savePrefFile(null);
     }
-  },
+  }),
 
   // this returns the most recent non-popup browser window
   getMostRecentBrowserWindow: function BG_getMostRecentBrowserWindow() {
@@ -2220,9 +2229,7 @@ BrowserGlue.prototype = {
     if (!win) {
       return;
     }
-    let productName = Services.strings
-      .createBundle("chrome://branding/locale/brand.properties")
-      .GetStringFromName("brandShortName");
+    let productName = gBrandBundle.GetStringFromName("brandShortName");
     let message = win.gNavigatorBundle.
       getFormattedString("flashHang.message", [productName]);
     let buttons = [{
@@ -2288,7 +2295,6 @@ ContentPermissionPrompt.prototype = {
       popup.remove();
     }
 
-    var browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
 
     var browser = this._getBrowserForRequest(aRequest);
     var chromeWin = browser.ownerDocument.defaultView;
@@ -2307,8 +2313,8 @@ ContentPermissionPrompt.prototype = {
       }
 
       var action = {
-        label: browserBundle.GetStringFromName(promptAction.stringId),
-        accessKey: browserBundle.GetStringFromName(promptAction.stringId + ".accesskey"),
+        label: gBrowserBundle.GetStringFromName(promptAction.stringId),
+        accessKey: gBrowserBundle.GetStringFromName(promptAction.stringId + ".accesskey"),
         callback: function() {
           if (promptAction.callback) {
             promptAction.callback();
@@ -2377,7 +2383,6 @@ ContentPermissionPrompt.prototype = {
 
   _promptGeo : function(aRequest) {
     var secHistogram = Services.telemetry.getHistogramById("SECURITY_UI");
-    var browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
     var requestingURI = aRequest.principal.URI;
 
     var message;
@@ -2393,11 +2398,11 @@ ContentPermissionPrompt.prototype = {
     }];
 
     if (requestingURI.schemeIs("file")) {
-      message = browserBundle.formatStringFromName("geolocation.shareWithFile",
-                                                   [requestingURI.path], 1);
+      message = gBrowserBundle.formatStringFromName("geolocation.shareWithFile",
+                                                    [requestingURI.path], 1);
     } else {
-      message = browserBundle.formatStringFromName("geolocation.shareWithSite",
-                                                   [requestingURI.host], 1);
+      message = gBrowserBundle.formatStringFromName("geolocation.shareWithSite",
+                                                    [requestingURI.host], 1);
       // Always share location action.
       actions.push({
         stringId: "geolocation.alwaysShareLocation",
@@ -2430,11 +2435,10 @@ ContentPermissionPrompt.prototype = {
   },
 
   _promptWebNotifications : function(aRequest) {
-    var browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
     var requestingURI = aRequest.principal.URI;
 
-    var message = browserBundle.formatStringFromName("webNotifications.showFromSite",
-                                                     [requestingURI.host], 1);
+    var message = gBrowserBundle.formatStringFromName("webNotifications.showFromSite",
+                                                      [requestingURI.host], 1);
 
     var actions = [
       {
@@ -2464,11 +2468,10 @@ ContentPermissionPrompt.prototype = {
 
   _promptPointerLock: function CPP_promtPointerLock(aRequest, autoAllow) {
 
-    let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
     let requestingURI = aRequest.principal.URI;
 
     let originString = requestingURI.schemeIs("file") ? requestingURI.path : requestingURI.host;
-    let message = browserBundle.formatStringFromName(autoAllow ?
+    let message = gBrowserBundle.formatStringFromName(autoAllow ?
                                   "pointerLock.autoLock.title2" : "pointerLock.title2",
                                   [originString], 1);
     // If this is an autoAllow info prompt, offer no actions.
@@ -2957,36 +2960,3 @@ let globalMM = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessag
 globalMM.addMessageListener("UITour:onPageEvent", function(aMessage) {
   UITour.onPageEvent(aMessage, aMessage.data);
 });
-
-#ifdef MOZ_DEBUG_UA
-// Modify the user agent string for specific domains
-// to route debug information through their logging.
-var DebugUserAgent = {
-  DEBUG_UA: null,
-  DOMAINS: [
-    'youtube.com',
-    'www.youtube.com',
-    'youtube-nocookie.com',
-    'www.youtube-nocookie.com',
-  ],
-
-  init: function() {
-    // Only run if the MediaSource Extension API is available.
-    if (!Services.prefs.getBoolPref("media.mediasource.enabled")) {
-      return;
-    }
-    // Install our override filter.
-    UserAgentOverrides.addComplexOverride(this.onRequest.bind(this));
-    let ua = Cc["@mozilla.org/network/protocol;1?name=http"]
-                .getService(Ci.nsIHttpProtocolHandler).userAgent;
-    this.DEBUG_UA = ua + " Build/" + Services.appinfo.appBuildID;
-  },
-
-  onRequest: function(channel, defaultUA) {
-    if (this.DOMAINS.indexOf(channel.URI.host) != -1) {
-      return this.DEBUG_UA;
-    }
-    return null;
-  },
-};
-#endif // MOZ_DEBUG_UA

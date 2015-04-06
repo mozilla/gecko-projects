@@ -2144,6 +2144,7 @@ class FetchEventRunnable : public WorkerRunnable
   bool mIsReload;
   RequestMode mRequestMode;
   RequestCredentials mRequestCredentials;
+  nsContentPolicyType mContentPolicyType;
 public:
   FetchEventRunnable(WorkerPrivate* aWorkerPrivate,
                      nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel,
@@ -2159,6 +2160,7 @@ public:
     // By default we set it to same-origin since normal HTTP fetches always
     // send credentials to same-origin websites unless explicitly forbidden.
     , mRequestCredentials(RequestCredentials::Same_origin)
+    , mContentPolicyType(nsIContentPolicy::TYPE_INVALID)
   {
     MOZ_ASSERT(aWorkerPrivate);
   }
@@ -2230,6 +2232,12 @@ public:
 
     rv = httpChannel->VisitRequestHeaders(this);
     NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsILoadInfo> loadInfo;
+    rv = channel->GetLoadInfo(getter_AddRefs(loadInfo));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    mContentPolicyType = loadInfo->GetContentPolicyType();
 
     return NS_OK;
   }
@@ -2305,6 +2313,8 @@ private:
     MOZ_ASSERT(internalReq);
     internalReq->SetCreatedByFetchEvent();
 
+    request->SetContentPolicyType(mContentPolicyType);
+
     RootedDictionary<FetchEventInit> init(aCx);
     init.mRequest.Construct();
     init.mRequest.Value() = request;
@@ -2360,8 +2370,11 @@ ServiceWorkerManager::DispatchFetchEvent(nsIDocument* aDoc, nsIInterceptedChanne
 
     nsRefPtr<ServiceWorkerRegistrationInfo> registration =
       GetServiceWorkerRegistrationInfo(uri);
+    if (!registration) {
+      NS_WARNING("No registration found when dispatching the fetch event");
+      return NS_ERROR_FAILURE;
+    }
     // This should only happen if IsAvailableForURI() returned true.
-    MOZ_ASSERT(registration);
     MOZ_ASSERT(registration->mActiveWorker);
 
     nsRefPtr<ServiceWorker> sw;

@@ -14,8 +14,10 @@
 #include "WMFMediaDataDecoder.h"
 #include "nsIWindowsRegKey.h"
 #include "nsComponentManagerUtils.h"
+#include "nsServiceManagerUtils.h"
 #include "nsIGfxInfo.h"
 #include "GfxDriverInfo.h"
+#include "gfxWindowsPlatform.h"
 
 namespace mozilla {
 
@@ -44,7 +46,8 @@ WMFDecoderModule::Init()
   if (NS_FAILED(WMFDecoder::LoadDLLs())) {
     sIsWMFEnabled = false;
   }
-  sDXVAEnabled = Preferences::GetBool("media.windows-media-foundation.use-dxva", false);
+  sDXVAEnabled = !gfxWindowsPlatform::GetPlatform()->IsWARP() &&
+                 gfxPlatform::CanUseHardwareVideoDecoding();
 }
 
 nsresult

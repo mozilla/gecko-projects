@@ -3925,7 +3925,7 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
   if (GDK_IS_X11_DISPLAY(display)) {
       XClassHint *class_hint = XAllocClassHint();
       if (!class_hint) {
-        nsMemory::Free(res_name);
+        free(res_name);
         return NS_ERROR_OUT_OF_MEMORY;
       }
       class_hint->res_name = res_name;
@@ -3940,7 +3940,7 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
   }
 #endif /* MOZ_X11 */
 
-  nsMemory::Free(res_name);
+  free(res_name);
 
   return NS_OK;
 }
@@ -4089,14 +4089,14 @@ nsWindow::SetHasMappedToplevel(bool aState)
     }
 }
 
-nsIntSize
-nsWindow::GetSafeWindowSize(nsIntSize aSize)
+LayoutDeviceIntSize
+nsWindow::GetSafeWindowSize(LayoutDeviceIntSize aSize)
 {
     // The X protocol uses CARD32 for window sizes, but the server (1.11.3)
     // reads it as CARD16.  Sizes of pixmaps, used for drawing, are (unsigned)
     // CARD16 in the protocol, but the server's ProcCreatePixmap returns
     // BadAlloc if dimensions cannot be represented by signed shorts.
-    nsIntSize result = aSize;
+    LayoutDeviceIntSize result = aSize;
     const int32_t kInt16Max = 32767;
     if (result.width > kInt16Max) {
         result.width = kInt16Max;

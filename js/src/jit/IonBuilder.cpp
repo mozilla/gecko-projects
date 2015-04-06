@@ -302,12 +302,12 @@ IonBuilder::CFGState::IfElse(jsbytecode* trueEnd, jsbytecode* falseEnd, MTest* t
 }
 
 IonBuilder::CFGState
-IonBuilder::CFGState::AndOr(jsbytecode* join, MBasicBlock* joinStart)
+IonBuilder::CFGState::AndOr(jsbytecode* join, MBasicBlock* lhs)
 {
     CFGState state;
     state.state = AND_OR;
     state.stopAt = join;
-    state.branch.ifFalse = joinStart;
+    state.branch.ifFalse = lhs;
     state.branch.test = nullptr;
     return state;
 }
@@ -595,7 +595,8 @@ IonBuilder::analyzeNewLoopTypes(MBasicBlock* entry, jsbytecode* start, jsbytecod
     }
     loopHeaders_.append(LoopHeader(start, entry));
 
-    jsbytecode* last = nullptr, *earlier = nullptr;
+    jsbytecode* last = nullptr;
+    jsbytecode* earlier = nullptr;
     for (jsbytecode* pc = start; pc != end; earlier = last, last = pc, pc += GetBytecodeLength(pc)) {
         uint32_t slot;
         if (*pc == JSOP_SETLOCAL)
@@ -2577,7 +2578,8 @@ IonBuilder::processForUpdateEnd(CFGState& state)
 IonBuilder::DeferredEdge*
 IonBuilder::filterDeadDeferredEdges(DeferredEdge* edge)
 {
-    DeferredEdge* head = edge, *prev = nullptr;
+    DeferredEdge* head = edge;
+    DeferredEdge* prev = nullptr;
 
     while (edge) {
         if (edge->block->isDead()) {
@@ -2706,16 +2708,25 @@ IonBuilder::processNextTableSwitchCase(CFGState& state)
 IonBuilder::ControlStatus
 IonBuilder::processAndOrEnd(CFGState& state)
 {
-    // We just processed the RHS of an && or || expression.
-    // Now jump to the join point (the false block).
-    current->end(MGoto::New(alloc(), state.branch.ifFalse));
+    MOZ_ASSERT(current);
+    MBasicBlock* lhs = state.branch.ifFalse;
 
-    if (!state.branch.ifFalse->addPredecessor(alloc(), current))
+    // Create a new block to represent the join.
+    MBasicBlock* join = newBlock(current, state.stopAt);
+    if (!join)
         return ControlStatus_Error;
 
-    if (!setCurrentAndSpecializePhis(state.branch.ifFalse))
+    // End the rhs.
+    current->end(MGoto::New(alloc(), join));
+
+    // End the lhs.
+    lhs->end(MGoto::New(alloc(), join));
+    if (!join->addPredecessor(alloc(), state.branch.ifFalse))
         return ControlStatus_Error;
-    graph().moveBlockToEnd(current);
+
+    // Set the join path as current path.
+    if (!setCurrentAndSpecializePhis(join))
+        return ControlStatus_Error;
     pc = current->pc();
     return ControlStatus_Joined;
 }
@@ -4134,20 +4145,34 @@ IonBuilder::jsop_andor(JSOp op)
     // We have to leave the LHS on the stack.
     MDefinition* lhs = current->peek(-1);
 
+    MBasicBlock* evalLhs = newBlock(current, joinStart);
     MBasicBlock* evalRhs = newBlock(current, rhsStart);
-    MBasicBlock* join = newBlock(current, joinStart);
-    if (!evalRhs || !join)
+    if (!evalLhs || !evalRhs)
         return false;
 
     MTest* test = (op == JSOP_AND)
-                  ? newTest(lhs, evalRhs, join)
-                  : newTest(lhs, join, evalRhs);
+                  ? newTest(lhs, evalRhs, evalLhs)
+                  : newTest(lhs, evalLhs, evalRhs);
     current->end(test);
 
-    if (!cfgStack_.append(CFGState::AndOr(joinStart, join)))
+    // Create the lhs block and specialize.
+    if (!setCurrentAndSpecializePhis(evalLhs))
         return false;
 
-    return setCurrentAndSpecializePhis(evalRhs);
+    if (!improveTypesAtTest(test->getOperand(0), test->ifTrue() == current, test))
+        return false;
+
+    // Create the rhs block.
+    if (!cfgStack_.append(CFGState::AndOr(joinStart, evalLhs)))
+        return false;
+
+    if (!setCurrentAndSpecializePhis(evalRhs))
+        return false;
+
+    if (!improveTypesAtTest(test->getOperand(0), test->ifTrue() == current, test))
+        return false;
+
+    return true;
 }
 
 bool
@@ -7504,36 +7529,6 @@ IonBuilder::getStaticName(JSObject* staticObject, PropertyName* name, bool* psuc
                     rvalType, barrier, types);
 }
 
-// Whether 'types' includes all possible values represented by input/inputTypes.
-bool
-jit::TypeSetIncludes(TypeSet* types, MIRType input, TypeSet* inputTypes)
-{
-    if (!types)
-        return inputTypes && inputTypes->empty();
-
-    switch (input) {
-      case MIRType_Undefined:
-      case MIRType_Null:
-      case MIRType_Boolean:
-      case MIRType_Int32:
-      case MIRType_Double:
-      case MIRType_Float32:
-      case MIRType_String:
-      case MIRType_Symbol:
-      case MIRType_MagicOptimizedArguments:
-        return types->hasType(TypeSet::PrimitiveType(ValueTypeFromMIRType(input)));
-
-      case MIRType_Object:
-        return types->unknownObject() || (inputTypes && inputTypes->isSubset(types));
-
-      case MIRType_Value:
-        return types->unknown() || (inputTypes && inputTypes->isSubset(types));
-
-      default:
-        MOZ_CRASH("Bad input type");
-    }
-}
-
 // Whether a write of the given value may need a post-write barrier for GC purposes.
 bool
 jit::NeedsPostBarrier(CompileInfo& info, MDefinition* value)
@@ -7938,7 +7933,8 @@ IonBuilder::pushScalarLoadFromTypedObject(MDefinition* obj,
     MOZ_ASSERT(size == ScalarTypeDescr::alignment(elemType));
 
     // Find location within the owner object.
-    MDefinition* elements, *scaledOffset;
+    MDefinition* elements;
+    MDefinition* scaledOffset;
     int32_t adjustment;
     loadTypedObjectElements(obj, byteOffset, size, &elements, &scaledOffset, &adjustment);
 
@@ -7977,7 +7973,8 @@ IonBuilder::pushReferenceLoadFromTypedObject(MDefinition* typedObj,
                                              PropertyName* name)
 {
     // Find location within the owner object.
-    MDefinition* elements, *scaledOffset;
+    MDefinition* elements;
+    MDefinition* scaledOffset;
     int32_t adjustment;
     size_t alignment = ReferenceTypeDescr::alignment(type);
     loadTypedObjectElements(typedObj, byteOffset, alignment, &elements, &scaledOffset, &adjustment);
@@ -9723,6 +9720,7 @@ IonBuilder::freezePropertiesForCommonPrototype(TemporaryTypeSet* types, Property
 bool
 IonBuilder::testCommonGetterSetter(TemporaryTypeSet* types, PropertyName* name,
                                    bool isGetter, JSObject* foundProto, Shape* lastProperty,
+                                   JSFunction* getterOrSetter,
                                    MDefinition** guard,
                                    Shape* globalShape/* = nullptr*/,
                                    MDefinition** globalGuard/* = nullptr */)
@@ -9757,9 +9755,17 @@ IonBuilder::testCommonGetterSetter(TemporaryTypeSet* types, PropertyName* name,
     }
 
     if (foundProto->isNative()) {
-        Shape* propShape = foundProto->as<NativeObject>().lookupPure(name);
-        if (propShape && !propShape->configurable())
-            return true;
+        NativeObject& nativeProto = foundProto->as<NativeObject>();
+        if (nativeProto.lastProperty() == lastProperty) {
+            // The proto shape is the same as it was at the point when we
+            // created the baseline IC, so looking up the prop on the object as
+            // it is now should be safe.
+            Shape* propShape = nativeProto.lookupPure(name);
+            MOZ_ASSERT_IF(isGetter, propShape->getterObject() == getterOrSetter);
+            MOZ_ASSERT_IF(!isGetter, propShape->setterObject() == getterOrSetter);
+            if (propShape && !propShape->configurable())
+                return true;
+        }
     }
 
     MInstruction* wrapper = constantMaybeNursery(foundProto);
@@ -10630,8 +10636,8 @@ IonBuilder::getPropTryCommonGetter(bool* emitted, MDefinition* obj, PropertyName
     MDefinition* globalGuard = nullptr;
     bool canUseTIForGetter =
         testCommonGetterSetter(objTypes, name, /* isGetter = */ true,
-                               foundProto, lastProperty, &guard, globalShape,
-                               &globalGuard);
+                               foundProto, lastProperty, commonGetter, &guard,
+                               globalShape, &globalGuard);
     if (!canUseTIForGetter) {
         // If type information is bad, we can still optimize the getter if we
         // shape guard.
@@ -11138,7 +11144,7 @@ IonBuilder::setPropTryCommonSetter(bool* emitted, MDefinition* obj,
     MDefinition* guard = nullptr;
     bool canUseTIForSetter =
         testCommonGetterSetter(objTypes, name, /* isGetter = */ false,
-                               foundProto, lastProperty, &guard);
+                               foundProto, lastProperty, commonSetter, &guard);
     if (!canUseTIForSetter) {
         // If type information is bad, we can still optimize the setter if we
         // shape guard.
@@ -12746,7 +12752,8 @@ IonBuilder::storeScalarTypedObjectValue(MDefinition* typedObj,
                                         MDefinition* value)
 {
     // Find location within the owner object.
-    MDefinition* elements, *scaledOffset;
+    MDefinition* elements;
+    MDefinition* scaledOffset;
     int32_t adjustment;
     size_t alignment = ScalarTypeDescr::alignment(type);
     loadTypedObjectElements(typedObj, byteOffset, alignment, &elements, &scaledOffset, &adjustment);
@@ -12790,7 +12797,8 @@ IonBuilder::storeReferenceTypedObjectValue(MDefinition* typedObj,
     }
 
     // Find location within the owner object.
-    MDefinition* elements, *scaledOffset;
+    MDefinition* elements;
+    MDefinition* scaledOffset;
     int32_t adjustment;
     size_t alignment = ReferenceTypeDescr::alignment(type);
     loadTypedObjectElements(typedObj, byteOffset, alignment, &elements, &scaledOffset, &adjustment);
@@ -12824,6 +12832,18 @@ IonBuilder::storeReferenceTypedObjectValue(MDefinition* typedObj,
 MConstant*
 IonBuilder::constant(const Value& v)
 {
+    // For performance reason (TLS) and error code handling (AtomizeString), we
+    // should prefer the specialized frunction constantMaybeAtomize instead of
+    // constant.
+    MOZ_ASSERT(!v.isString() || v.toString()->isAtom(),
+               "To handle non-atomized strings, you should use constantMaybeAtomize instead of constant.");
+    if (v.isString() && MOZ_UNLIKELY(!v.toString()->isAtom())) {
+        MConstant *cst = constantMaybeAtomize(v);
+        if (!cst)
+            js::CrashAtUnhandlableOOM("Use constantMaybeAtomize.");
+        return cst;
+    }
+
     MConstant* c = MConstant::New(alloc(), v, constraints());
     current->add(c);
     return c;
@@ -12833,6 +12853,19 @@ MConstant*
 IonBuilder::constantInt(int32_t i)
 {
     return constant(Int32Value(i));
+}
+
+MConstant*
+IonBuilder::constantMaybeAtomize(const Value& v)
+{
+    if (!v.isString() || v.toString()->isAtom())
+        return constant(v);
+
+    JSContext* cx = GetJitContext()->cx;
+    JSAtom* atom = js::AtomizeString(cx, v.toString());
+    if (!atom)
+        return nullptr;
+    return constant(StringValue(atom));
 }
 
 MDefinition*

@@ -40,14 +40,12 @@
 
 using namespace mozilla::dom;
 
-nsresult NS_NewHTMLContentSerializer(nsIContentSerializer** aSerializer)
+nsresult
+NS_NewHTMLContentSerializer(nsIContentSerializer** aSerializer)
 {
-  nsHTMLContentSerializer* it = new nsHTMLContentSerializer();
-  if (!it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  return CallQueryInterface(it, aSerializer);
+  nsRefPtr<nsHTMLContentSerializer> it = new nsHTMLContentSerializer();
+  it.forget(aSerializer);
+  return NS_OK;
 }
 
 nsHTMLContentSerializer::nsHTMLContentSerializer()
@@ -587,7 +585,7 @@ nsHTMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
       // if it comes from nsIEntityConverter, it already has '&' and ';'
       else if (fullEntityText) {
         bool ok = AppendASCIItoUTF16(fullEntityText, aOutputStr, mozilla::fallible);
-        nsMemory::Free(fullEntityText);
+        free(fullEntityText);
         advanceLength += lengthReplaced;
         NS_ENSURE_TRUE(ok, false);
       }

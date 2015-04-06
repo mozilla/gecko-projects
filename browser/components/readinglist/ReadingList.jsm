@@ -26,16 +26,6 @@ XPCOMUtils.defineLazyGetter(this, "SyncUtils", function() {
   return Utils;
 });
 
-{ // Prevent the parent log setup from leaking into the global scope.
-  let parentLog = Log.repository.getLogger("readinglist");
-  parentLog.level = Preferences.get("browser.readinglist.logLevel", Log.Level.Warn);
-  Preferences.observe("browser.readinglist.logLevel", value => {
-    parentLog.level = value;
-  });
-  let formatter = new Log.BasicFormatter();
-  parentLog.addAppender(new Log.ConsoleAppender(formatter));
-  parentLog.addAppender(new Log.DumpAppender(formatter));
-}
 let log = Log.repository.getLogger("readinglist.api");
 
 
@@ -70,17 +60,6 @@ const ITEM_RECORD_PROPERTIES = `
   syncStatus
 `.trim().split(/\s+/);
 
-// Article objects that are passed to ReadingList.addItem may contain
-// some properties that are known but are not currently stored in the
-// ReadingList records. This is the list of properties that are knowingly
-// disregarded before the item is normalized.
-const ITEM_DISREGARDED_PROPERTIES = `
-  byline
-  dir
-  content
-  length
-`.trim().split(/\s+/);
-
 // Each local item has a syncStatus indicating the state of the item in relation
 // to the sync server.  See also Sync.jsm.
 const SYNC_STATUS_SYNCED = 0;
@@ -111,6 +90,30 @@ const SYNC_STATUS_PROPERTIES_STATUS = `
   unread
 `.trim().split(/\s+/);
 
+function ReadingListError(message) {
+  this.message = message;
+  this.name = this.constructor.name;
+  this.stack = (new Error()).stack;
+
+  // Consumers can set this to an Error that this ReadingListError wraps.
+  this.originalError = null;
+}
+ReadingListError.prototype = new Error();
+ReadingListError.prototype.constructor = ReadingListError;
+
+function ReadingListExistsError(message) {
+  message = message || "The item already exists";
+  ReadingListError.call(this, message);
+}
+ReadingListExistsError.prototype = new ReadingListError();
+ReadingListExistsError.prototype.constructor = ReadingListExistsError;
+
+function ReadingListDeletedError(message) {
+  message = message || "The item has been deleted";
+  ReadingListError.call(this, message);
+}
+ReadingListDeletedError.prototype = new ReadingListError();
+ReadingListDeletedError.prototype.constructor = ReadingListDeletedError;
 
 /**
  * A reading list contains ReadingListItems.
@@ -171,6 +174,12 @@ function ReadingListImpl(store) {
 }
 
 ReadingListImpl.prototype = {
+
+  Error: {
+    Error: ReadingListError,
+    Exists: ReadingListExistsError,
+    Deleted: ReadingListDeletedError,
+  },
 
   ItemRecordProperties: ITEM_RECORD_PROPERTIES,
 
@@ -244,15 +253,17 @@ ReadingListImpl.prototype = {
    *         an Error on error.
    */
   forEachItem: Task.async(function* (callback, ...optsList) {
-    yield this._forEachItem(callback, optsList, STORE_OPTIONS_IGNORE_DELETED);
+    let thisCallback = record => callback(this._itemFromRecord(record));
+    yield this._forEachRecord(thisCallback, optsList, STORE_OPTIONS_IGNORE_DELETED);
   }),
 
   /**
-   * Like forEachItem, but enumerates only previously synced items that are
-   * marked as being locally deleted.
+   * Enumerates the GUIDs for previously synced items that are marked as being
+   * locally deleted.
    */
-  forEachSyncedDeletedItem: Task.async(function* (callback, ...optsList) {
-    yield this._forEachItem(callback, optsList, {
+  forEachSyncedDeletedGUID: Task.async(function* (callback, ...optsList) {
+    let thisCallback = record => callback(record.guid);
+    yield this._forEachRecord(thisCallback, optsList, {
       syncStatus: SYNC_STATUS_DELETED,
     });
   }),
@@ -263,12 +274,12 @@ ReadingListImpl.prototype = {
    * @param storeOptions An options object passed to the store as the "control"
    *        options.
    */
-  _forEachItem: Task.async(function* (callback, optsList, storeOptions) {
+  _forEachRecord: Task.async(function* (callback, optsList, storeOptions) {
     let promiseChain = Promise.resolve();
     yield this._store.forEachItem(record => {
       promiseChain = promiseChain.then(() => {
         return new Promise((resolve, reject) => {
-          let promise = callback(this._itemFromRecord(record));
+          let promise = callback(record);
           if (promise instanceof Promise) {
             return promise.then(resolve, reject);
           }
@@ -312,7 +323,7 @@ ReadingListImpl.prototype = {
   addItem: Task.async(function* (record) {
     record = normalizeRecord(record);
     if (!record.url) {
-      throw new Error("The item must have a url");
+      throw new ReadingListError("The item to be added must have a url");
     }
     if (!("addedOn" in record)) {
       record.addedOn = Date.now();
@@ -328,7 +339,9 @@ ReadingListImpl.prototype = {
       record.syncStatus = SYNC_STATUS_NEW;
     }
 
+    log.debug("Adding item with guid: ${guid}, url: ${url}", record);
     yield this._store.addItem(record);
+    log.trace("Added item with guid: ${guid}, url: ${url}", record);
     this._invalidateIterators();
     let item = this._itemFromRecord(record);
     this._callListeners("onItemAdded", item);
@@ -352,11 +365,16 @@ ReadingListImpl.prototype = {
    *         Error on error.
    */
   updateItem: Task.async(function* (item) {
+    if (item._deleted) {
+      throw new ReadingListDeletedError("The item to be updated has been deleted");
+    }
     if (!item._record.url) {
-      throw new Error("The item must have a url");
+      throw new ReadingListError("The item to be updated must have a url");
     }
     this._ensureItemBelongsToList(item);
+    log.debug("Updating item with guid: ${guid}, url: ${url}", item._record);
     yield this._store.updateItem(item._record);
+    log.trace("Finished updating item with guid: ${guid}, url: ${url}", item._record);
     this._invalidateIterators();
     this._callListeners("onItemUpdated", item);
   }),
@@ -372,15 +390,23 @@ ReadingListImpl.prototype = {
    *         Error on error.
    */
   deleteItem: Task.async(function* (item) {
+    if (item._deleted) {
+      throw new ReadingListDeletedError("The item has already been deleted");
+    }
     this._ensureItemBelongsToList(item);
+
+    log.debug("Deleting item with guid: ${guid}, url: ${url}");
 
     // If the item is new and therefore hasn't been synced yet, delete it from
     // the store.  Otherwise mark it as deleted but don't actually delete it so
     // that its status can be synced.
     if (item._record.syncStatus == SYNC_STATUS_NEW) {
+      log.debug("Item is new, truly deleting it", item._record);
       yield this._store.deleteItemByURL(item.url);
     }
     else {
+      log.debug("Item has been synced, only marking it as deleted",
+                item._record);
       // To prevent data leakage, only keep the record fields needed to sync
       // the deleted status: guid and syncStatus.
       let newRecord = {};
@@ -389,12 +415,16 @@ ReadingListImpl.prototype = {
       }
       newRecord.guid = item._record.guid;
       newRecord.syncStatus = SYNC_STATUS_DELETED;
-      item._record = newRecord;
-      yield this._store.updateItemByGUID(item._record);
+      yield this._store.updateItemByGUID(newRecord);
     }
 
+    log.trace("Finished deleting item with guid: ${guid}, url: ${url}", item._record);
     item.list = null;
-    this._itemsByNormalizedURL.delete(item.url);
+    item._deleted = true;
+    // failing to remove the item from the map points at something bad!
+    if (!this._itemsByNormalizedURL.delete(item.url)) {
+      log.error("Failed to remove item from the map", item);
+    }
     this._invalidateIterators();
     let mm = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
     mm.broadcastAsyncMessage("Reader:Removed", item);
@@ -432,7 +462,7 @@ ReadingListImpl.prototype = {
    * @return {Promise} Promise that is fullfilled with the added item.
    */
   addItemFromBrowser: Task.async(function* (browser, url) {
-    let metadata = yield getMetadataFromBrowser(browser);
+    let metadata = yield this.getMetadataFromBrowser(browser);
     let record = {
       url: url,
       title: metadata.title,
@@ -446,6 +476,25 @@ ReadingListImpl.prototype = {
 
     return (yield this.addItem(record));
   }),
+
+  /**
+   * Get page metadata from the content document in a given <xul:browser>.
+   * @see PageMetadata.jsm
+   *
+   * @param {<xul:browser>} browser - Browser element for the document.
+   * @returns {Promise} Promise that is fulfilled with an object describing the metadata.
+   */
+  getMetadataFromBrowser(browser) {
+    let mm = browser.messageManager;
+    return new Promise(resolve => {
+      function handleResult(msg) {
+        mm.removeMessageListener("PageMetadata:PageDataResult", handleResult);
+        resolve(msg.json);
+      }
+      mm.addMessageListener("PageMetadata:PageDataResult", handleResult);
+      mm.sendAsyncMessage("PageMetadata:GetPageData");
+    });
+  },
 
   /**
    * Adds a listener that will be notified when the list changes.  Listeners
@@ -506,6 +555,9 @@ ReadingListImpl.prototype = {
    * @return The ReadingListItem.
    */
   _itemFromRecord(record) {
+    if (!record.url) {
+      throw new Error("record must have a URL");
+    }
     let itemWeakRef = this._itemsByNormalizedURL.get(record.url);
     let item = itemWeakRef ? itemWeakRef.get() : null;
     if (item) {
@@ -554,7 +606,7 @@ ReadingListImpl.prototype = {
 
   _ensureItemBelongsToList(item) {
     if (!item || !item._ensureBelongsToList) {
-      throw new Error("The item is not a ReadingListItem");
+      throw new ReadingListError("The item is not a ReadingListItem");
     }
     item._ensureBelongsToList();
   },
@@ -574,6 +626,7 @@ let _unserializable = () => {}; // See comments in the ReadingListItem ctor.
  */
 function ReadingListItem(record={}) {
   this._record = record;
+  this._deleted = false;
 
   // |this._unserializable| works around a problem when sending one of these
   // items via a message manager. If |this.list| is set, the item can't be
@@ -822,9 +875,11 @@ ReadingListItem.prototype = {
    * @return Promise<null> Resolved when the list has been updated.
    */
   delete: Task.async(function* () {
+    if (this._deleted) {
+      throw new ReadingListDeletedError("The item has already been deleted");
+    }
     this._ensureBelongsToList();
     yield this.list.deleteItem(this);
-    this.delete = () => Promise.reject("The item has already been deleted");
   }),
 
   toJSON() {
@@ -881,7 +936,7 @@ ReadingListItem.prototype = {
 
   _ensureBelongsToList() {
     if (!this.list) {
-      throw new Error("The item must belong to a reading list");
+      throw new ReadingListError("The item must belong to a list");
     }
   },
 };
@@ -974,7 +1029,7 @@ ReadingListItemIterator.prototype = {
 
   _ensureValid() {
     if (this.invalid) {
-      throw new Error("The iterator has been invalidated");
+      throw new ReadingListError("The iterator has been invalidated");
     }
   },
 };
@@ -991,11 +1046,8 @@ ReadingListItemIterator.prototype = {
 function normalizeRecord(nonNormalizedRecord) {
   let record = {};
   for (let prop in nonNormalizedRecord) {
-    if (ITEM_DISREGARDED_PROPERTIES.indexOf(prop) >= 0) {
-      continue;
-    }
     if (ITEM_RECORD_PROPERTIES.indexOf(prop) < 0) {
-      throw new Error("Unrecognized item property: " + prop);
+      throw new ReadingListError("Unrecognized item property: " + prop);
     }
     switch (prop) {
     case "url":
@@ -1055,25 +1107,6 @@ function hash(str) {
 
 function clone(obj) {
   return Cu.cloneInto(obj, {}, { cloneFunctions: false });
-}
-
-/**
- * Get page metadata from the content document in a given <xul:browser>.
- * @see PageMetadata.jsm
- *
- * @param {<xul:browser>} browser - Browser element for the document.
- * @returns {Promise} Promise that is fulfilled with an object describing the metadata.
- */
-function getMetadataFromBrowser(browser) {
-  let mm = browser.messageManager;
-  return new Promise(resolve => {
-    function handleResult(msg) {
-      mm.removeMessageListener("PageMetadata:PageDataResult", handleResult);
-      resolve(msg.json);
-    }
-    mm.addMessageListener("PageMetadata:PageDataResult", handleResult);
-    mm.sendAsyncMessage("PageMetadata:GetPageData");
-  });
 }
 
 Object.defineProperty(this, "ReadingList", {

@@ -79,19 +79,15 @@ struct SavedFrame::Lookup {
     JSPrincipals* principals;
 
     void trace(JSTracer* trc) {
-        gc::MarkStringUnbarriered(trc, &source, "SavedFrame::Lookup::source");
+        TraceManuallyBarrieredEdge(trc, &source, "SavedFrame::Lookup::source");
         if (functionDisplayName) {
-            gc::MarkStringUnbarriered(trc, &functionDisplayName,
-                                      "SavedFrame::Lookup::functionDisplayName");
+            TraceManuallyBarrieredEdge(trc, &functionDisplayName,
+                                       "SavedFrame::Lookup::functionDisplayName");
         }
-        if (asyncCause) {
-            gc::MarkStringUnbarriered(trc, &asyncCause,
-                                      "SavedFrame::Lookup::asyncCause");
-        }
-        if (parent) {
-            gc::MarkObjectUnbarriered(trc, &parent,
-                                      "SavedFrame::Lookup::parent");
-        }
+        if (asyncCause)
+            TraceManuallyBarrieredEdge(trc, &asyncCause, "SavedFrame::Lookup::asyncCause");
+        if (parent)
+            TraceManuallyBarrieredEdge(trc, &parent, "SavedFrame::Lookup::parent");
     }
 };
 
@@ -370,7 +366,7 @@ GetFirstSubsumedFrame(JSContext* cx, HandleSavedFrame frame, bool& skippedAsync)
     if (!subsumes)
         return frame;
 
-    JSPrincipals* principals = cx->compartment()->principals;
+    JSPrincipals* principals = cx->compartment()->principals();
 
     RootedSavedFrame rootedFrame(cx, frame);
     while (rootedFrame && !subsumes(principals, rootedFrame->getPrincipals())) {
@@ -475,8 +471,8 @@ public:
         if (obj && cx->compartment() != obj->compartment())
         {
             JSSubsumesOp subsumes = cx->runtime()->securityCallbacks->subsumes;
-            if (subsumes && subsumes(cx->compartment()->principals,
-                                     obj->compartment()->principals))
+            if (subsumes && subsumes(cx->compartment()->principals(),
+                                     obj->compartment()->principals()))
             {
                 ac_.emplace(cx, obj);
             }
@@ -649,7 +645,7 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp)
         }
 
         DebugOnly<JSSubsumesOp> subsumes = cx->runtime()->securityCallbacks->subsumes;
-        DebugOnly<JSPrincipals*> principals = cx->compartment()->principals;
+        DebugOnly<JSPrincipals*> principals = cx->compartment()->principals();
 
         js::RootedSavedFrame parent(cx);
         do {
@@ -817,7 +813,7 @@ SavedStacks::sweep(JSRuntime* rt)
             JSObject* obj = e.front().unbarrieredGet();
             JSObject* temp = obj;
 
-            if (IsObjectAboutToBeFinalizedFromAnyThread(&obj)) {
+            if (IsAboutToBeFinalizedUnbarriered(&obj)) {
                 e.removeFront();
             } else {
                 SavedFrame* frame = &obj->as<SavedFrame>();
@@ -847,7 +843,7 @@ SavedStacks::trace(JSTracer* trc)
     // Mark each of the source strings in our pc to location cache.
     for (PCLocationMap::Enum e(pcLocationMap); !e.empty(); e.popFront()) {
         LocationValue& loc = e.front().value();
-        MarkString(trc, &loc.source, "SavedStacks::PCLocationMap's memoized script source name");
+        TraceEdge(trc, &loc.source, "SavedStacks::PCLocationMap's memoized script source name");
     }
 }
 
@@ -936,7 +932,7 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
           iter.isNonEvalFunctionFrame() ? iter.functionDisplayAtom() : nullptr,
           nullptr,
           nullptr,
-          iter.compartment()->principals
+          iter.compartment()->principals()
         );
 
         ++iter;
@@ -1085,7 +1081,7 @@ SavedStacks::sweepPCLocationMap()
     for (PCLocationMap::Enum e(pcLocationMap); !e.empty(); e.popFront()) {
         PCKey key = e.front().key();
         JSScript* script = key.script.get();
-        if (IsScriptAboutToBeFinalizedFromAnyThread(&script)) {
+        if (IsAboutToBeFinalizedUnbarriered(&script)) {
             e.removeFront();
         } else if (script != key.script.get()) {
             key.script = script;

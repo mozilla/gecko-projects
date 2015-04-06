@@ -137,9 +137,10 @@ class OrderedHashTable
     }
 
     ~OrderedHashTable() {
-        for (Range* r = ranges, *next; r; r = next) {
-            next = r->next;
+        for (Range* r = ranges; r; ) {
+            Range* next = r->next;
             r->onTableDestroyed();
+            r = next;
         }
         alloc.free_(hashTable);
         freeData(data, dataLength);
@@ -593,7 +594,8 @@ class OrderedHashTable
     void rehashInPlace() {
         for (uint32_t i = 0, N = hashBuckets(); i < N; i++)
             hashTable[i] = nullptr;
-        Data* wp = data, *end = data + dataLength;
+        Data* wp = data;
+        Data* end = data + dataLength;
         for (Data* rp = data; rp != end; rp++) {
             if (!Ops::isEmpty(Ops::getKey(rp->element))) {
                 HashNumber h = prepareHash(Ops::getKey(rp->element)) >> hashShift;
@@ -642,7 +644,8 @@ class OrderedHashTable
         }
 
         Data* wp = newData;
-        for (Data* p = data, *end = data + dataLength; p != end; p++) {
+        Data* end = data + dataLength;
+        for (Data* p = data; p != end; p++) {
             if (!Ops::isEmpty(Ops::getKey(p->element))) {
                 HashNumber h = prepareHash(Ops::getKey(p->element)) >> newHashShift;
                 new (wp) Data(Move(p->element), newHashTable[h]);
@@ -837,7 +840,7 @@ HashableValue::mark(JSTracer* trc) const
 {
     HashableValue hv(*this);
     trc->setTracingLocation((void*)this);
-    gc::MarkValue(trc, &hv.value, "key");
+    TraceEdge(trc, &hv.value, "key");
     return hv;
 }
 
@@ -1106,7 +1109,7 @@ MapObject::mark(JSTracer* trc, JSObject* obj)
     if (ValueMap* map = obj->as<MapObject>().getData()) {
         for (ValueMap::Range r = map->all(); !r.empty(); r.popFront()) {
             MarkKey(r, r.front().key, trc);
-            gc::MarkValue(trc, &r.front().value, "value");
+            TraceEdge(trc, &r.front().value, "value");
         }
     }
 }
@@ -1132,7 +1135,7 @@ class OrderedHashTableRef : public gc::BufferableRef
         MOZ_ASSERT(UnbarrieredHashPolicy::hash(key) ==
                    HashableValue::Hasher::hash(*reinterpret_cast<HashableValue*>(&key)));
         Value prior = key;
-        gc::MarkValueUnbarriered(trc, &key, "ordered hash table key");
+        TraceManuallyBarrieredEdge(trc, &key, "ordered hash table key");
         table->rekeyOneEntry(prior, key);
     }
 };

@@ -169,7 +169,6 @@ GeckoTouchDispatcher::DispatchTouchMoveEvents(TimeStamp aVsyncTime)
   {
     MutexAutoLock lock(mTouchQueueLock);
     if (!mHavePendingTouchMoves) {
-      MOZ_ASSERT(mTouchMoveEvents.empty());
       return;
     }
     mHavePendingTouchMoves = false;
@@ -295,7 +294,7 @@ GeckoTouchDispatcher::ResampleTouchMoves(MultiTouchInput& aOutTouch, TimeStamp a
   TimeDuration touchDiff = currentTouch.mTimeStamp - baseTouch.mTimeStamp;
 
   if (currentTouch.mTimeStamp < sampleTime) {
-    TimeDuration maxResampleTime = std::min(touchDiff / 2, mMaxPredict);
+    TimeDuration maxResampleTime = std::min(touchDiff / int64_t(2), mMaxPredict);
     TimeStamp maxTimestamp = currentTouch.mTimeStamp + maxResampleTime;
     if (sampleTime > maxTimestamp) {
       sampleTime = maxTimestamp;

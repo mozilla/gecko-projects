@@ -609,7 +609,7 @@ nsHTTPListener::~nsHTTPListener()
     send_done_signal();
 
   if (mResultData) {
-    moz_free(const_cast<uint8_t *>(mResultData));
+    free(const_cast<uint8_t *>(mResultData));
   }
 
   if (mLoader) {
@@ -835,7 +835,7 @@ void PK11PasswordPromptRunnable::RunOnTargetThread()
   rv = nssComponent->PIPBundleFormatStringFromName("CertPassPrompt",
                                       formatStrings, 1,
                                       promptString);
-  nsMemory::Free(const_cast<char16_t*>(formatStrings[0]));
+  free(const_cast<char16_t*>(formatStrings[0]));
 
   if (NS_FAILED(rv))
     return;

@@ -1,0 +1,106 @@
+{
+  "plugins": [
+    "react"
+  ],
+  "ecmaFeatures": {
+    "forOf": true,
+    "jsx": true,
+    // These are on for this directory for .jsm and content/js files.
+    // If adding more items here, consider turning them off for the following
+    // files if they aren't supported by all browsers.
+    // content/shared/.eslintrc
+    // content/standalone/.eslintrc
+    "blockBindings": true,
+    "arrowFunctions": true,
+    "destructuring": true,
+    "generators": true,
+    "spread": true,
+    "restParams": true,
+    "objectLiteralShorthandMethods": true
+  },
+  "env": {
+    "browser": true,
+    "mocha": true
+  },
+  "globals": {
+    "_": false,
+    "$": false,
+    "Backbone": false,
+    "chai": false,
+    "console": false,
+    "jQuery": false,
+    "loop": false,
+    "MozActivity": false,
+    "OT": false,
+    "Promise": false,
+    "React": false,
+    "sinon": false
+  },
+  "rules": {
+    // turn off all kinds of stuff that we actually do want, because
+    // right now, we're bootstrapping the linting infrastructure.  We'll
+    // want to audit these rules, and start turning them on and fixing the
+    // problems they find, one at a time.
+
+    // Eslint built-in rules are documented at <http://eslint.org/docs/rules/>
+    "camelcase": 0,
+    "comma-dangle": 0,
+    "comma-spacing": 0,
+    "consistent-return": 0,
+    "curly": 0,
+    "dot-notation": 0,
+    "eol-last": 0,
+    "eqeqeq": 0,
+    "global-strict": 0,
+    "key-spacing": 0,
+    "new-cap": 0,
+    "no-catch-shadow": 0,
+    "no-console": 0,
+    "no-empty": 0,
+    "no-extra-bind": 0,
+    "no-extra-boolean-cast": 0,
+    "no-extra-semi": 0,
+    "no-multi-spaces": 0,
+    "no-new": 0,
+    "no-redeclare": 0,
+    "no-return-assign": 0,
+    "no-shadow": 0,
+    "no-spaced-func": 0,
+    "no-trailing-spaces": 0,
+    "no-undef": 0,
+    "no-underscore-dangle": 0,
+    "no-unused-expressions": 0,
+    "no-unused-vars": 0,
+    "no-use-before-define": 0,
+    "no-wrap-func": 0,
+    "quotes": 0,
+    "semi": 0,
+    "semi-spacing": 0,
+    "space-infix-ops": 0,
+    "space-return-throw-case": 0,
+    "strict": 0,
+    "yoda": 0,
+    // eslint-plugin-react rules. These are documented at
+    // <https://github.com/yannickcr/eslint-plugin-react#list-of-supported-rules>
+    "react/jsx-quotes": [2, "double", "avoid-escape"],
+    "react/jsx-no-undef": 2,
+    // Need to fix instances where this is failing.
+    "react/jsx-sort-props": 0,
+    "react/jsx-uses-vars": 2,
+    // Need to fix the couple of instances which don't
+    // currently pass this rule.
+    "react/no-did-mount-set-state": 0,
+    "react/no-did-update-set-state": 2,
+    "react/no-unknown-property": 2,
+    // Need to fix instances where this is currently failing
+    "react/prop-types": 0,
+    "react/self-closing-comp": 2,
+    "react/wrap-multilines": 2,
+    // Not worth it: React is defined globally
+    "react/jsx-uses-react": 0,
+    "react/react-in-jsx-scope": 0,
+    // These ones we don't want to ever enable
+    "react/display-name": 0,
+    "react/no-multi-comp": 0
+  }
+}

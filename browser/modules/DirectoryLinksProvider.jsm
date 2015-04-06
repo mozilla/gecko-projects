@@ -25,6 +25,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS",
   "resource://gre/modules/osfile.jsm")
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
   "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
+  "resource://gre/modules/UpdateChannel.jsm");
 XPCOMUtils.defineLazyGetter(this, "gTextDecoder", () => {
   return new TextDecoder();
 });
@@ -117,6 +119,11 @@ let DirectoryLinksProvider = {
     if (!this.__linksURL) {
       try {
         this.__linksURL = Services.prefs.getCharPref(this._observedPrefs["linksURL"]);
+
+        // Temporarily override the default for en-US until new endpoint is live
+        if (this.locale == "en-US" && !Services.prefs.prefHasUserValue(this._observedPrefs["linksURL"])) {
+          this.__linksURL = "data:text/plain;base64,ewogICAgImRpcmVjdG9yeSI6IFsKICAgICAgICB7CiAgICAgICAgICAgICJiZ0NvbG9yIjogIiIsCiAgICAgICAgICAgICJkaXJlY3RvcnlJZCI6IDQ5OCwKICAgICAgICAgICAgImVuaGFuY2VkSW1hZ2VVUkkiOiAiaHR0cHM6Ly9kdGV4NGt2YnBwb3Z0LmNsb3VkZnJvbnQubmV0L2ltYWdlcy9kMTFiYTBiMzA5NWJiMTlkODA5MmNkMjliZTljYmI5ZTE5NzY3MWVhLjI4MDg4LnBuZyIsCiAgICAgICAgICAgICJpbWFnZVVSSSI6ICJodHRwczovL2R0ZXg0a3ZicHBvdnQuY2xvdWRmcm9udC5uZXQvaW1hZ2VzLzEzMzJhNjhiYWRmMTFlM2Y3ZjY5YmY3MzY0ZTc5YzBhN2UyNzUzYmMuNTMxNi5wbmciLAogICAgICAgICAgICAidGl0bGUiOiAiTW96aWxsYSBDb21tdW5pdHkiLAogICAgICAgICAgICAidHlwZSI6ICJhZmZpbGlhdGUiLAogICAgICAgICAgICAidXJsIjogImh0dHA6Ly9jb250cmlidXRlLm1vemlsbGEub3JnLyIKICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICAgImJnQ29sb3IiOiAiIiwKICAgICAgICAgICAgImRpcmVjdG9yeUlkIjogNTAwLAogICAgICAgICAgICAiZW5oYW5jZWRJbWFnZVVSSSI6ICJodHRwczovL2R0ZXg0a3ZicHBvdnQuY2xvdWRmcm9udC5uZXQvaW1hZ2VzL2NjNjM3NzRiN2E5YWFlMDJmZTM2YmM1Y2FmOTBjMWUyNWU2NmEyYmMuMTM3OTEucG5nIiwKICAgICAgICAgICAgImltYWdlVVJJIjogImh0dHBzOi8vZHRleDRrdmJwcG92dC5jbG91ZGZyb250Lm5ldC9pbWFnZXMvZTgyMmNkNDYyOGM1MTYyMzEzZjQ5ZjVkNDU1NmY4YWFmZGYzODc1MC4xMTUxMy5wbmciLAogICAgICAgICAgICAidGl0bGUiOiAiTW96aWxsYSBNYW5pZmVzdG8iLAogICAgICAgICAgICAidHlwZSI6ICJhZmZpbGlhdGUiLAogICAgICAgICAgICAidXJsIjogImh0dHBzOi8vd3d3Lm1vemlsbGEub3JnL2Fib3V0L21hbmlmZXN0by8iCiAgICAgICAgfSwKICAgICAgICB7CiAgICAgICAgICAgICJiZ0NvbG9yIjogIiIsCiAgICAgICAgICAgICJkaXJlY3RvcnlJZCI6IDUwMiwKICAgICAgICAgICAgImVuaGFuY2VkSW1hZ2VVUkkiOiAiaHR0cHM6Ly9kdGV4NGt2YnBwb3Z0LmNsb3VkZnJvbnQubmV0L2ltYWdlcy80MGU1NjMwNDA1ZDUwMzFjYTczMzkzYmQ3YmMwMDY0MTU2ZjJjYzgyLjEwOTg0LnBuZyIsCiAgICAgICAgICAgICJpbWFnZVVSSSI6ICJodHRwczovL2R0ZXg0a3ZicHBvdnQuY2xvdWRmcm9udC5uZXQvaW1hZ2VzLzQ5MGQ0MmQxZjlhNzZjMDc3Mzk2MjZkMWI4YTU2OTE2OWFlYzhmYmUuMTEwMzkucG5nIiwKICAgICAgICAgICAgInRpdGxlIjogIkN1c3RvbWl6ZSBGaXJlZm94IiwKICAgICAgICAgICAgInR5cGUiOiAiYWZmaWxpYXRlIiwKICAgICAgICAgICAgInVybCI6ICJodHRwOi8vZmFzdGVzdGZpcmVmb3guY29tL2ZpcmVmb3gvZGVza3RvcC9jdXN0b21pemUvIgogICAgICAgIH0sCiAgICAgICAgewogICAgICAgICAgICAiYmdDb2xvciI6ICIiLAogICAgICAgICAgICAiZGlyZWN0b3J5SWQiOiA1MDQsCiAgICAgICAgICAgICJlbmhhbmNlZEltYWdlVVJJIjogImh0dHBzOi8vZHRleDRrdmJwcG92dC5jbG91ZGZyb250Lm5ldC9pbWFnZXMvODc3ZjFjNTYxZTczNWY3YjlmNDE5ZmY5YWM3OWViOGM3NDgxMTE5ZC4xNjc0NC5wbmciLAogICAgICAgICAgICAiaW1hZ2VVUkkiOiAiaHR0cHM6Ly9kdGV4NGt2YnBwb3Z0LmNsb3VkZnJvbnQubmV0L2ltYWdlcy8yNWM5ZmJiMDczMDhiODRkMTYwZmMxYjc5NTkzNjRhMmMxOGY5M2I5LjY0MDQucG5nIiwKICAgICAgICAgICAgInRpdGxlIjogIkZpcmVmb3ggTWFya2V0cGxhY2UiLAogICAgICAgICAgICAidHlwZSI6ICJhZmZpbGlhdGUiLAogICAgICAgICAgICAidXJsIjogImh0dHBzOi8vbWFya2V0cGxhY2UuZmlyZWZveC5jb20vIgogICAgICAgIH0sCiAgICAgICAgewogICAgICAgICAgICAiYmdDb2xvciI6ICIjM2ZiNThlIiwKICAgICAgICAgICAgImRpcmVjdG9yeUlkIjogNTA1LAogICAgICAgICAgICAiZW5oYW5jZWRJbWFnZVVSSSI6ICJodHRwczovL2R0ZXg0a3ZicHBvdnQuY2xvdWRmcm9udC5uZXQvaW1hZ2VzLzcyMDEyMWU3NDYyZDhjNzg2M2I0ZGQ4ZmE3YjVjMTA4OWI1ZjVmYjIuMzM4NjIucG5nIiwKICAgICAgICAgICAgImltYWdlVVJJIjogImh0dHBzOi8vZHRleDRrdmJwcG92dC5jbG91ZGZyb250Lm5ldC9pbWFnZXMvMGU2MDMxNjc1YTljNDkxZGQwYzY1ZTljNjdjZmJmNTRhNTg4MGYxNy4yMjk1LnN2ZyIsCiAgICAgICAgICAgICJ0aXRsZSI6ICJNb3ppbGxhIFdlYm1ha2VyIiwKICAgICAgICAgICAgInR5cGUiOiAiYWZmaWxpYXRlIiwKICAgICAgICAgICAgInVybCI6ICJodHRwczovL3dlYm1ha2VyLm9yZy8%2FdXRtX3NvdXJjZT1kaXJlY3RvcnktdGlsZXMmdXRtX21lZGl1bT1maXJlZm94LWJyb3dzZXIiCiAgICAgICAgfSwKICAgICAgICB7CiAgICAgICAgICAgICJiZ0NvbG9yIjogIiIsCiAgICAgICAgICAgICJkaXJlY3RvcnlJZCI6IDUwNiwKICAgICAgICAgICAgImVuaGFuY2VkSW1hZ2VVUkkiOiAiaHR0cHM6Ly9kdGV4NGt2YnBwb3Z0LmNsb3VkZnJvbnQubmV0L2ltYWdlcy9kOTcxY2JhZmEwMzA5YTIwMWU1MThhY2RhYzRmMWVlNGRhYmM3ZWFhLjE1MTA5LnBuZyIsCiAgICAgICAgICAgICJpbWFnZVVSSSI6ICJodHRwczovL2R0ZXg0a3ZicHBvdnQuY2xvdWRmcm9udC5uZXQvaW1hZ2VzL2I0YWRjNThkZDNjMDJkYTM1NTEwNDk3N2I5MTAyNTUwNjBjZmQ2ZDguMTAzNTAucG5nIiwKICAgICAgICAgICAgInRpdGxlIjogIkZpcmVmb3ggU3luYyIsCiAgICAgICAgICAgICJ0eXBlIjogImFmZmlsaWF0ZSIsCiAgICAgICAgICAgICJ1cmwiOiAiaHR0cDovL21vemlsbGEtZXVyb3BlLm9yZy9maXJlZm94L3N5bmMiCiAgICAgICAgfSwKICAgICAgICB7CiAgICAgICAgICAgICJiZ0NvbG9yIjogIiIsCiAgICAgICAgICAgICJkaXJlY3RvcnlJZCI6IDUwNywKICAgICAgICAgICAgImVuaGFuY2VkSW1hZ2VVUkkiOiAiaHR0cHM6Ly9kdGV4NGt2YnBwb3Z0LmNsb3VkZnJvbnQubmV0L2ltYWdlcy8yMmZiODU2Y2Q1ODM2NTg1NWViNzI1YjE1NjVmMDhhNzI0NjRlMDM5LjE4NzE3LnBuZyIsCiAgICAgICAgICAgICJpbWFnZVVSSSI6ICJodHRwczovL2R0ZXg0a3ZicHBvdnQuY2xvdWRmcm9udC5uZXQvaW1hZ2VzLzA2OGUwY2NiZDg3MDFhMjhlMmYwNzhjNjQwZWUwNzJiOWExNmUyZTEuMTI0OTAucG5nIiwKICAgICAgICAgICAgInRpdGxlIjogIlByaXZhY3kgUHJpbmNpcGxlcyIsCiAgICAgICAgICAgICJ0eXBlIjogImFmZmlsaWF0ZSIsCiAgICAgICAgICAgICJ1cmwiOiAiaHR0cDovL2V1cm9wZS5tb3ppbGxhLm9yZy9wcml2YWN5L3lvdSIKICAgICAgICB9CiAgICBdLAogICAgInN1Z2dlc3RlZCI6IFsKICAgICAgICB7CiAgICAgICAgICAgICJiZ0NvbG9yIjogIiNjYWUxZjQiLAogICAgICAgICAgICAiZGlyZWN0b3J5SWQiOiA3MDIsCiAgICAgICAgICAgICJmcmVjZW50X3NpdGVzIjogWwogICAgICAgICAgICAgICAgImFkZG9ucy5tb3ppbGxhLm9yZyIsCiAgICAgICAgICAgICAgICAiYWlyLm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJibG9nLm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJidWd6aWxsYS5tb3ppbGxhLm9yZyIsCiAgICAgICAgICAgICAgICAiZGV2ZWxvcGVyLm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJldGhlcnBhZC5tb3ppbGxhLm9yZyIsCiAgICAgICAgICAgICAgICAiaGFja3MubW96aWxsYS5vcmciLAogICAgICAgICAgICAgICAgImhnLm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJtb3ppbGxhLm9yZyIsCiAgICAgICAgICAgICAgICAicGxhbmV0Lm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJxdWFsaXR5Lm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJzdXBwb3J0Lm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJzdXBwb3J0Lm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJ0cmVlaGVyZGVyLm1vemlsbGEub3JnIiwKICAgICAgICAgICAgICAgICJ3aWtpLm1vemlsbGEub3JnIgogICAgICAgICAgICBdLAogICAgICAgICAgICAiaW1hZ2VVUkkiOiAiaHR0cHM6Ly9kdGV4NGt2YnBwb3Z0LmNsb3VkZnJvbnQubmV0L2ltYWdlcy85ZWUyYjI2NTY3OGYyNzc1ZGUyZTRiZjY4MGRmNjAwYjUwMmU2MDM4LjM4NzUucG5nIiwKICAgICAgICAgICAgInRpdGxlIjogIlRoYW5rcyBmb3IgdGVzdGluZyEiLAogICAgICAgICAgICAidHlwZSI6ICJhZmZpbGlhdGUiLAogICAgICAgICAgICAidXJsIjogImh0dHBzOi8vd3d3Lm1vemlsbGEuY29tL2ZpcmVmb3gvdGlsZXMiCiAgICAgICAgfQogICAgXQp9Cg%3D%3D";
+        }
       }
       catch (e) {
         Cu.reportError("Error fetching directory links url from prefs: " + e);
@@ -210,6 +217,10 @@ let DirectoryLinksProvider = {
   },
 
   _cacheSuggestedLinks: function(link) {
+    if (!link.frecent_sites || "sponsored" == link.type) {
+      // Don't cache links that don't have the expected 'frecent_sites' or are sponsored.
+      return;
+    }
     for (let suggestedSite of link.frecent_sites) {
       let suggestedMap = this._suggestedLinks.get(suggestedSite) || new Map();
       suggestedMap.set(link.url, link);
@@ -220,6 +231,7 @@ let DirectoryLinksProvider = {
   _fetchAndCacheLinks: function DirectoryLinksProvider_fetchAndCacheLinks(uri) {
     // Replace with the same display locale used for selecting links data
     uri = uri.replace("%LOCALE%", this.locale);
+    uri = uri.replace("%CHANNEL%", UpdateChannel.get());
 
     let deferred = Promise.defer();
     let xmlHttp = new XMLHttpRequest();
@@ -306,13 +318,15 @@ let DirectoryLinksProvider = {
    *         or {'directory': [], 'suggested': []} if read or parse fails.
    */
   _readDirectoryLinksFile: function DirectoryLinksProvider_readDirectoryLinksFile() {
-    let emptyOutput = {directory: [], suggested: []};
+    let emptyOutput = {directory: [], suggested: [], enhanced: []};
     return OS.File.read(this._directoryFilePath).then(binaryData => {
       let output;
       try {
         let json = gTextDecoder.decode(binaryData);
         let linksObj = JSON.parse(json);
-        output = {directory: linksObj.directory || [], suggested: linksObj.suggested || []};
+        output = {directory: linksObj.directory || [],
+                  suggested: linksObj.suggested || [],
+                  enhanced:  linksObj.enhanced  || []};
       }
       catch (e) {
         Cu.reportError(e);
@@ -410,8 +424,7 @@ let DirectoryLinksProvider = {
    */
   getEnhancedLink: function DirectoryLinksProvider_getEnhancedLink(link) {
     // Use the provided link if it's already enhanced
-    return link.type == "history" ? null :
-           link.enhancedImageURI && link ? link :
+    return link.enhancedImageURI && link ? link :
            this._enhancedLinks.get(NewTabUtils.extractSite(link.url));
   },
 
@@ -451,16 +464,8 @@ let DirectoryLinksProvider = {
                this.isURLAllowed(link.enhancedImageURI, ALLOWED_IMAGE_SCHEMES);
       }.bind(this);
 
-      let setCommonProperties = function(link, length, position) {
-        // Stash the enhanced image for the site
-        if (link.enhancedImageURI) {
-          this._enhancedLinks.set(NewTabUtils.extractSite(link.url), link);
-        }
-        link.lastVisitDate = length - position;
-      }.bind(this);
-
       rawLinks.suggested.filter(validityFilter).forEach((link, position) => {
-        setCommonProperties(link, rawLinks.suggested.length, position);
+        link.lastVisitDate = rawLinks.suggested.length - position;
 
         // We cache suggested tiles here but do not push any of them in the links list yet.
         // The decision for which suggested tile to include will be made separately.
@@ -468,8 +473,17 @@ let DirectoryLinksProvider = {
         this._frequencyCaps.set(link.url, DEFAULT_FREQUENCY_CAP);
       });
 
+      rawLinks.enhanced.filter(validityFilter).forEach((link, position) => {
+        link.lastVisitDate = rawLinks.enhanced.length - position;
+
+        // Stash the enhanced image for the site
+        if (link.enhancedImageURI) {
+          this._enhancedLinks.set(NewTabUtils.extractSite(link.url), link);
+        }
+      });
+
       let links = rawLinks.directory.filter(validityFilter).map((link, position) => {
-        setCommonProperties(link, rawLinks.directory.length, position);
+        link.lastVisitDate = rawLinks.directory.length - position;
         link.frecency = DIRECTORY_FRECENCY;
         return link;
       });
@@ -649,20 +663,16 @@ let DirectoryLinksProvider = {
     let suggestedIndex = Math.floor(Math.random() * numLinks);
     let chosenSuggestedLink = flattenedLinks[suggestedIndex];
 
-    // Show the new directory tile.
-    this._callObservers("onLinkChanged", {
-      url: chosenSuggestedLink.url,
-      title: chosenSuggestedLink.title,
+    // Add the suggested link to the front with some extra values
+    this._callObservers("onLinkChanged", Object.assign({
       frecency: SUGGESTED_FRECENCY,
-      lastVisitDate: chosenSuggestedLink.lastVisitDate,
-      type: chosenSuggestedLink.type,
 
       // Choose the first site a user has visited as the target. In the future,
       // this should be the site with the highest frecency. However, we currently
       // store frecency by URL not by site.
       targetedSite: targetedSites.get(chosenSuggestedLink.url).length ?
         targetedSites.get(chosenSuggestedLink.url)[0] : null
-    });
+    }, chosenSuggestedLink));
     return chosenSuggestedLink;
    },
 

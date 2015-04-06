@@ -39,27 +39,31 @@ function waitForFrame() {
 }
 
 /**
- * Wrapper that takes a sequence of N players and returns:
- *
- *   Promise.all([players[0].ready, players[1].ready, ... players[N-1].ready]);
+ * Returns a Promise that is resolved after the given number of consecutive
+ * animation frames have occured (using requestAnimationFrame callbacks).
  */
-function waitForAllPlayers(players) {
-  return Promise.all(players.map(function(player) { return player.ready; }));
+function waitForAnimationFrames(frameCount) {
+  return new Promise(function(resolve, reject) {
+    function handleFrame() {
+      if (--frameCount <= 0) {
+        resolve();
+      } else {
+        window.requestAnimationFrame(handleFrame); // wait another frame
+      }
+    }
+    window.requestAnimationFrame(handleFrame);
+  });
 }
 
 /**
- * Returns a Promise that is resolved after the next two animation frames have
- * occured (that is, after two consecutive requestAnimationFrame callbacks
- * have been called).
+ * Wrapper that takes a sequence of N animations and returns:
+ *
+ *   Promise.all([animations[0].ready, animations[1].ready, ... animations[N-1].ready]);
  */
-function waitForTwoAnimationFrames() {
-   return new Promise(function(resolve, reject) {
-     window.requestAnimationFrame(function() {
-       window.requestAnimationFrame(function() {
-         resolve();
-       });
-     });
-   });
+function waitForAllAnimations(animations) {
+  return Promise.all(animations.map(function(animation) {
+    return animation.ready;
+  }));
 }
 
 /**

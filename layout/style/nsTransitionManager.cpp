@@ -174,7 +174,7 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
   }
 
   AnimationPlayerCollection* collection =
-    GetAnimationPlayers(aElement, pseudoType, false);
+    GetAnimations(aElement, pseudoType, false);
   if (!collection &&
       disp->mTransitionPropertyCount == 1 &&
       disp->mTransitions[0].GetCombinedDuration() <= 0.0f) {
@@ -566,7 +566,7 @@ nsTransitionManager::ConsiderStartingTransition(
 
   if (!aElementTransitions) {
     aElementTransitions =
-      GetAnimationPlayers(aElement, aNewStyleContext->GetPseudoType(), true);
+      GetAnimations(aElement, aNewStyleContext->GetPseudoType(), true);
     if (!aElementTransitions) {
       NS_WARNING("allocating CommonAnimationManager failed");
       return;
@@ -608,19 +608,19 @@ nsTransitionManager::UpdateCascadeResultsWithTransitions(
 {
   AnimationPlayerCollection* animations =
     mPresContext->AnimationManager()->
-      GetAnimationPlayers(aTransitions->mElement,
-                          aTransitions->PseudoElementType(), false);
+      GetAnimations(aTransitions->mElement,
+                    aTransitions->PseudoElementType(), false);
   UpdateCascadeResults(aTransitions, animations);
 }
 
 void
 nsTransitionManager::UpdateCascadeResultsWithAnimations(
-                       const AnimationPlayerCollection* aAnimations)
+                       AnimationPlayerCollection* aAnimations)
 {
   AnimationPlayerCollection* transitions =
     mPresContext->TransitionManager()->
-      GetAnimationPlayers(aAnimations->mElement,
-                          aAnimations->PseudoElementType(), false);
+      GetAnimations(aAnimations->mElement,
+                    aAnimations->PseudoElementType(), false);
   UpdateCascadeResults(transitions, aAnimations);
 }
 
@@ -633,15 +633,15 @@ nsTransitionManager::UpdateCascadeResultsWithAnimationsToBeDestroyed(
   // information that may now be incorrect.
   AnimationPlayerCollection* transitions =
     mPresContext->TransitionManager()->
-      GetAnimationPlayers(aAnimations->mElement,
-                          aAnimations->PseudoElementType(), false);
+      GetAnimations(aAnimations->mElement,
+                    aAnimations->PseudoElementType(), false);
   UpdateCascadeResults(transitions, nullptr);
 }
 
 void
 nsTransitionManager::UpdateCascadeResults(
                        AnimationPlayerCollection* aTransitions,
-                       const AnimationPlayerCollection* aAnimations)
+                       AnimationPlayerCollection* aAnimations)
 {
   if (!aTransitions) {
     // Nothing to do.
@@ -656,8 +656,15 @@ nsTransitionManager::UpdateCascadeResults(
   // http://dev.w3.org/csswg/css-transitions/#application says that
   // transitions do not apply when the same property has a CSS Animation
   // on that element (even though animations are lower in the cascade).
-  if (aAnimations && aAnimations->mStyleRule) {
-    aAnimations->mStyleRule->AddPropertiesToSet(propertiesUsed);
+  if (aAnimations) {
+    TimeStamp now = mPresContext->RefreshDriver()->MostRecentRefresh();
+    // Passing EnsureStyleRule_IsThrottled is OK since we will
+    // unthrottle when animations are finishing.
+    aAnimations->EnsureStyleRuleFor(now, EnsureStyleRule_IsThrottled);
+
+    if (aAnimations->mStyleRule) {
+      aAnimations->mStyleRule->AddPropertiesToSet(propertiesUsed);
+    }
   }
 
   // Since we should never have more than one transition for the same
@@ -685,7 +692,9 @@ nsTransitionManager::UpdateCascadeResults(
   }
 
   if (changed) {
+    mPresContext->RestyleManager()->IncrementAnimationGeneration();
     aTransitions->UpdateAnimationGeneration(mPresContext);
+    aTransitions->PostUpdateLayerAnimations();
 
     // Invalidate our style rule.
     aTransitions->mStyleRuleRefreshTime = TimeStamp();
@@ -856,6 +865,8 @@ nsTransitionManager::FlushTransitions(FlushFlags aFlags)
   if (didThrottle) {
     mPresContext->Document()->SetNeedStyleFlush();
   }
+
+  MaybeStartOrStopObservingRefreshDriver();
 
   for (uint32_t i = 0, i_end = events.Length(); i < i_end; ++i) {
     TransitionEventInfo &info = events[i];

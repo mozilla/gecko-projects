@@ -3546,6 +3546,10 @@
                 readonly="true"
                 onget="return this.mCurrentBrowser.contentWindow"/>
 
+      <property name="contentWindowAsCPOW"
+                readonly="true"
+                onget="return this.mCurrentBrowser.contentWindowAsCPOW"/>
+
       <property name="sessionHistory"
                 onget="return this.mCurrentBrowser.sessionHistory;"
                 readonly="true"/>
@@ -3564,6 +3568,10 @@
 
       <property name="contentDocument"
                 onget="return this.mCurrentBrowser.contentDocument;"
+                readonly="true"/>
+
+      <property name="contentDocumentAsCPOW"
+                onget="return this.mCurrentBrowser.contentDocumentAsCPOW;"
                 readonly="true"/>
 
       <property name="contentTitle"
@@ -3766,6 +3774,8 @@
                                           charSet: aMessage.data.charSet,
                                           referrer: aMessage.data.referrer,
                                           referrerPolicy: aMessage.data.referrerPolicy,
+                                          contentType: aMessage.data.contentType,
+                                          contentDisposition: aMessage.data.contentDisposition,
                                         };
               let popup = browser.ownerDocument.getElementById("contentAreaContextMenu");
               let event = gContextMenuContentData.event;
@@ -3914,8 +3924,8 @@
       <!-- Deprecated stuff, implemented for backwards compatibility. -->
       <method name="enterTabbedMode">
         <body>
-          Application.console.log("enterTabbedMode is an obsolete method and " +
-                                  "will be removed in a future release.");
+          Services.console.logStringMessage("enterTabbedMode is an obsolete method and " +
+                                            "will be removed in a future release.");
         </body>
       </method>
       <field name="mTabbedMode" readonly="true">true</field>

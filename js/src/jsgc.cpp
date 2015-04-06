@@ -2599,8 +2599,8 @@ GCRuntime::updatePointersToRelocatedCells(Zone* zone)
 void
 GCRuntime::protectRelocatedArenas()
 {
-    for (ArenaHeader* arena = relocatedArenasToRelease, *next; arena; arena = next) {
-        next = arena->next;
+    for (ArenaHeader* arena = relocatedArenasToRelease; arena; ) {
+        ArenaHeader* next = arena->next;
 #if defined(XP_WIN)
         DWORD oldProtect;
         if (!VirtualProtect(arena, ArenaSize, PAGE_NOACCESS, &oldProtect))
@@ -2609,6 +2609,7 @@ GCRuntime::protectRelocatedArenas()
         if (mprotect(arena, ArenaSize, PROT_NONE))
             MOZ_CRASH();
 #endif
+        arena = next;
     }
 }
 
@@ -3529,8 +3530,8 @@ Zone::sweepCompartments(FreeOp* fop, bool keepAtleastOne, bool destroyingRuntime
         if ((!comp->marked && !dontDelete) || destroyingRuntime) {
             if (callback)
                 callback(fop, comp);
-            if (comp->principals)
-                JS_DropPrincipals(rt, comp->principals);
+            if (comp->principals())
+                JS_DropPrincipals(rt, comp->principals());
             js_delete(comp);
         } else {
             *write++ = comp;
@@ -4553,11 +4554,11 @@ MarkIncomingCrossCompartmentPointers(JSRuntime* rt, const uint32_t color)
             MOZ_ASSERT(dst->compartment() == c);
 
             if (color == GRAY) {
-                if (IsObjectMarked(&src) && src->asTenured().isMarked(GRAY))
+                if (IsMarkedUnbarriered(&src) && src->asTenured().isMarked(GRAY))
                     MarkGCThingUnbarriered(&rt->gc.marker, (void**)&dst,
                                            "cross-compartment gray pointer");
             } else {
-                if (IsObjectMarked(&src) && !src->asTenured().isMarked(GRAY))
+                if (IsMarkedUnbarriered(&src) && !src->asTenured().isMarked(GRAY))
                     MarkGCThingUnbarriered(&rt->gc.marker, (void**)&dst,
                                            "cross-compartment black pointer");
             }
@@ -5668,7 +5669,7 @@ GCRuntime::pushZealSelectedObjects()
 #ifdef JS_GC_ZEAL
     /* Push selected objects onto the mark stack and clear the list. */
     for (JSObject** obj = selectedForMarking.begin(); obj != selectedForMarking.end(); obj++)
-        MarkObjectUnbarriered(&marker, obj, "selected obj");
+        TraceManuallyBarrieredEdge(&marker, obj, "selected obj");
 #endif
 }
 
@@ -7240,6 +7241,16 @@ ZoneGCNumberGetter(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+#ifdef JS_MORE_DETERMINISTIC
+static bool
+DummyGetter(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setUndefined();
+    return true;
+}
+#endif
+
 } /* namespace MemInfo */
 
 JSObject*
@@ -7263,9 +7274,14 @@ NewMemoryInfoObject(JSContext* cx)
     };
 
     for (size_t i = 0; i < mozilla::ArrayLength(getters); i++) {
+ #ifdef JS_MORE_DETERMINISTIC
+        JSNative getter = DummyGetter;
+#else
+        JSNative getter = getters[i].getter;
+#endif
         if (!JS_DefineProperty(cx, obj, getters[i].name, UndefinedHandleValue,
-                               JSPROP_READONLY | JSPROP_SHARED | JSPROP_ENUMERATE,
-                               getters[i].getter, nullptr))
+                               JSPROP_ENUMERATE | JSPROP_SHARED,
+                               getter, nullptr))
         {
             return nullptr;
         }
@@ -7293,9 +7309,14 @@ NewMemoryInfoObject(JSContext* cx)
     };
 
     for (size_t i = 0; i < mozilla::ArrayLength(zoneGetters); i++) {
+ #ifdef JS_MORE_DETERMINISTIC
+        JSNative getter = DummyGetter;
+#else
+        JSNative getter = zoneGetters[i].getter;
+#endif
         if (!JS_DefineProperty(cx, zoneObj, zoneGetters[i].name, UndefinedHandleValue,
-                               JSPROP_READONLY | JSPROP_SHARED | JSPROP_ENUMERATE,
-                               zoneGetters[i].getter, nullptr))
+                               JSPROP_ENUMERATE | JSPROP_SHARED,
+                               getter, nullptr))
         {
             return nullptr;
         }

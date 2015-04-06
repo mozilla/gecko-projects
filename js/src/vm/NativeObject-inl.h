@@ -28,13 +28,6 @@ NativeObject::fixedData(size_t nslots) const
     return reinterpret_cast<uint8_t*>(&fixedSlots()[nslots]);
 }
 
-/* static */ inline bool
-NativeObject::changePropertyAttributes(JSContext* cx, HandleNativeObject obj,
-                                       HandleShape shape, unsigned attrs)
-{
-    return !!changeProperty(cx, obj, shape, attrs, 0, shape->getter(), shape->setter());
-}
-
 inline void
 NativeObject::removeLastProperty(ExclusiveContext* cx)
 {
@@ -581,14 +574,6 @@ LookupPropertyInline(ExclusiveContext* cx,
     objp.set(nullptr);
     propp.set(nullptr);
     return true;
-}
-
-inline bool
-NativeLookupProperty(ExclusiveContext* cx, HandleNativeObject obj, PropertyName* name,
-                     MutableHandleObject objp, MutableHandleShape propp)
-{
-    RootedId id(cx, NameToId(name));
-    return NativeLookupProperty<CanGC>(cx, obj, id, objp, propp);
 }
 
 inline bool

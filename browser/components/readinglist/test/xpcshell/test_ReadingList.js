@@ -9,6 +9,10 @@ Cu.import("resource:///modules/readinglist/ReadingList.jsm");
 Cu.import("resource:///modules/readinglist/SQLiteStore.jsm");
 Cu.import("resource://gre/modules/Sqlite.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
+Cu.import("resource://gre/modules/Log.jsm");
+
+Log.repository.getLogger("readinglist.api").level = Log.Level.All;
+Log.repository.getLogger("readinglist.api").addAppender(new Log.DumpAppender());
 
 var gList;
 var gItems;
@@ -88,7 +92,8 @@ add_task(function* constraints() {
   catch (e) {
     err = e;
   }
-  checkError(err);
+  Assert.ok(err);
+  Assert.ok(err instanceof ReadingList.Error.Exists);
 
   // add a new item with an existing guid
   let item = kindOfClone(gItems[0]);
@@ -100,7 +105,8 @@ add_task(function* constraints() {
   catch (e) {
     err = e;
   }
-  checkError(err);
+  Assert.ok(err);
+  Assert.ok(err instanceof ReadingList.Error.Exists);
 
   // add a new item with an existing url
   item = kindOfClone(gItems[0]);
@@ -112,7 +118,8 @@ add_task(function* constraints() {
   catch (e) {
     err = e;
   }
-  checkError(err);
+  Assert.ok(err);
+  Assert.ok(err instanceof ReadingList.Error.Exists);
 
   // add a new item with an existing resolvedURL
   item = kindOfClone(gItems[0]);
@@ -124,7 +131,8 @@ add_task(function* constraints() {
   catch (e) {
     err = e;
   }
-  checkError(err);
+  Assert.ok(err);
+  Assert.ok(err instanceof ReadingList.Error.Exists);
 
   // add a new item with no url
   item = kindOfClone(gItems[0]);
@@ -137,8 +145,9 @@ add_task(function* constraints() {
     err = e;
   }
   Assert.ok(err);
-  Assert.ok(err instanceof Cu.getGlobalForObject(ReadingList).Error, err);
-  Assert.equal(err.message, "The item must have a url");
+  Assert.ok(err instanceof ReadingList.Error.Error);
+  Assert.ok(!(err instanceof ReadingList.Error.Exists));
+  Assert.ok(!(err instanceof ReadingList.Error.Deleted));
 
   // update an item with no url
   item = (yield gList.item({ guid: gItems[0].guid }));
@@ -154,8 +163,9 @@ add_task(function* constraints() {
   }
   item._record.url = oldURL;
   Assert.ok(err);
-  Assert.ok(err instanceof Cu.getGlobalForObject(ReadingList).Error, err);
-  Assert.equal(err.message, "The item must have a url");
+  Assert.ok(err instanceof ReadingList.Error.Error);
+  Assert.ok(!(err instanceof ReadingList.Error.Exists));
+  Assert.ok(!(err instanceof ReadingList.Error.Deleted));
 
   // add an item with a bogus property
   item = kindOfClone(gItems[0]);
@@ -168,8 +178,9 @@ add_task(function* constraints() {
     err = e;
   }
   Assert.ok(err);
-  Assert.ok(err.message);
-  Assert.ok(err.message.indexOf("Unrecognized item property:") >= 0);
+  Assert.ok(err instanceof ReadingList.Error.Error);
+  Assert.ok(!(err instanceof ReadingList.Error.Exists));
+  Assert.ok(!(err instanceof ReadingList.Error.Deleted));
 
   // add a new item with no guid, which is allowed
   item = kindOfClone(gItems[0]);
@@ -294,10 +305,10 @@ add_task(function* forEachSyncedDeletedItem() {
   });
   deletedItem._record.syncStatus = gList.SyncStatus.SYNCED;
   yield gList.deleteItem(deletedItem);
-  let items = [];
-  yield gList.forEachSyncedDeletedItem(item => items.push(item));
-  Assert.equal(items.length, 1);
-  Assert.equal(items[0].guid, deletedItem.guid);
+  let guids = [];
+  yield gList.forEachSyncedDeletedGUID(guid => guids.push(guid));
+  Assert.equal(guids.length, 1);
+  Assert.equal(guids[0], deletedItem.guid);
 });
 
 add_task(function* forEachItem_promises() {
@@ -654,7 +665,7 @@ add_task(function* listeners() {
   Assert.equal((yield gList.count()), gItems.length);
 });
 
-// This test deletes items so it should probably run last.
+// This test deletes items so it should probably run last of the 'gItems' tests...
 add_task(function* deleteItem() {
   // delete first item with item.delete()
   let iter = gList.iterator({
@@ -662,7 +673,21 @@ add_task(function* deleteItem() {
   });
   let item = (yield iter.items(1))[0];
   Assert.ok(item);
-  item.delete();
+  let {url, guid} = item;
+  Assert.ok((yield gList.itemForURL(url)), "should be able to get the item by URL before deletion");
+  Assert.ok((yield gList.item({guid})), "should be able to get the item by GUID before deletion");
+
+  yield item.delete();
+  try {
+    yield item.delete();
+    Assert.ok(false, "should not successfully delete the item a second time")
+  } catch(ex) {
+    Assert.ok(ex instanceof ReadingList.Error.Deleted);
+  }
+
+  Assert.ok(!(yield gList.itemForURL(url)), "should fail to get a deleted item by URL");
+  Assert.ok(!(yield gList.item({guid})), "should fail to get a deleted item by GUID");
+
   gItems[0].list = null;
   Assert.equal((yield gList.count()), gItems.length - 1);
   let items = [];
@@ -673,6 +698,12 @@ add_task(function* deleteItem() {
 
   // delete second item with list.deleteItem()
   yield gList.deleteItem(items[0]);
+  try {
+    yield gList.deleteItem(items[0]);
+    Assert.ok(false, "should not successfully delete the item a second time")
+  } catch(ex) {
+    Assert.ok(ex instanceof ReadingList.Error.Deleted);
+  }
   gItems[1].list = null;
   Assert.equal((yield gList.count()), gItems.length - 2);
   items = [];
@@ -692,6 +723,28 @@ add_task(function* deleteItem() {
   checkItems(items, gItems.slice(3));
 });
 
+// Check that when we delete an item with a GUID it's no longer available as
+// an item
+add_task(function* deletedItemRemovedFromMap() {
+  yield gList.forEachItem(item => item.delete());
+  Assert.equal((yield gList.count()), 0);
+  let map = gList._itemsByNormalizedURL;
+  Assert.equal(gList._itemsByNormalizedURL.size, 0, [for (i of map.keys()) i]);
+  let record = {
+    guid: "test-item",
+    url: "http://localhost",
+    syncStatus: gList.SyncStatus.SYNCED,
+  }
+  let item = yield gList.addItem(record);
+  Assert.equal(map.size, 1);
+  yield item.delete();
+  Assert.equal(gList._itemsByNormalizedURL.size, 0, [for (i of map.keys()) i]);
+
+  // Now enumerate deleted items - should not come back.
+  yield gList.forEachSyncedDeletedGUID(() => {});
+  Assert.equal(gList._itemsByNormalizedURL.size, 0, [for (i of map.keys()) i]);
+});
+
 function checkItems(actualItems, expectedItems) {
   Assert.equal(actualItems.length, expectedItems.length);
   for (let i = 0; i < expectedItems.length; i++) {
@@ -700,11 +753,6 @@ function checkItems(actualItems, expectedItems) {
       Assert.equal(actualItems[i]._record[prop], expectedItems[i][prop]);
     }
   }
-}
-
-function checkError(err) {
-  Assert.ok(err);
-  Assert.ok(err instanceof Cu.getGlobalForObject(Sqlite).Error, err);
 }
 
 function kindOfClone(item) {

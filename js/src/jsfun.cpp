@@ -663,7 +663,7 @@ js::CloneFunctionAndScript(JSContext* cx, HandleObject enclosingScope, HandleFun
     if (!clone)
         return nullptr;
 
-    RootedScript srcScript(cx, srcFun->getOrCreateScript(cx));
+    JSScript::AutoDelazify srcScript(cx, srcFun);
     if (!srcScript)
         return nullptr;
     RootedScript clonedScript(cx, CloneScript(cx, enclosingScope, clone, srcScript, polluted));
@@ -721,12 +721,12 @@ inline void
 JSFunction::trace(JSTracer* trc)
 {
     if (isExtended()) {
-        MarkValueRange(trc, ArrayLength(toExtended()->extendedSlots),
-                       toExtended()->extendedSlots, "nativeReserved");
+        TraceRange(trc, ArrayLength(toExtended()->extendedSlots),
+                   (HeapValue*)toExtended()->extendedSlots, "nativeReserved");
     }
 
     if (atom_)
-        MarkString(trc, &atom_, "atom");
+        TraceEdge(trc, &atom_, "atom");
 
     if (isInterpreted()) {
         // Functions can be be marked as interpreted despite having no script
@@ -752,13 +752,13 @@ JSFunction::trace(JSTracer* trc)
             {
                 relazify(trc);
             } else {
-                MarkScriptUnbarriered(trc, &u.i.s.script_, "script");
+                TraceManuallyBarrieredEdge(trc, &u.i.s.script_, "script");
             }
         } else if (isInterpretedLazy() && u.i.s.lazy_) {
-            MarkLazyScriptUnbarriered(trc, &u.i.s.lazy_, "lazyScript");
+            TraceManuallyBarrieredEdge(trc, &u.i.s.lazy_, "lazyScript");
         }
         if (u.i.env_)
-            MarkObjectUnbarriered(trc, &u.i.env_, "fun_environment");
+            TraceManuallyBarrieredEdge(trc, &u.i.env_, "fun_environment");
     }
 }
 
@@ -963,7 +963,7 @@ js::FindBody(JSContext* cx, HandleFunction fun, HandleLinearString src, size_t* 
             return false;
     }
     bool braced = tt == TOK_LC;
-    MOZ_ASSERT_IF(fun->isExprClosure(), !braced);
+    MOZ_ASSERT_IF(fun->isExprBody(), !braced);
     *bodyStart = ts.currentToken().pos.begin;
     if (braced)
         *bodyStart += 1;
@@ -1006,9 +1006,11 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool bodyOnly, bool lamb
             return out.finishString();
         }
     }
+    
+    bool funIsMethodOrNonArrowLambda = (fun->isLambda() && !fun->isArrow()) || fun->isMethod();
     if (!bodyOnly) {
-        // If we're not in pretty mode, put parentheses around lambda functions.
-        if (fun->isInterpreted() && !lambdaParen && fun->isLambda() && !fun->isArrow()) {
+        // If we're not in pretty mode, put parentheses around lambda functions and methods.
+        if (fun->isInterpreted() && !lambdaParen && funIsMethodOrNonArrowLambda) {
             if (!out.append("("))
                 return nullptr;
         }
@@ -1032,7 +1034,7 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool bodyOnly, bool lamb
         if (!src)
             return nullptr;
 
-        bool exprBody = fun->isExprClosure();
+        bool exprBody = fun->isExprBody();
 
         // The source data for functions created by calling the Function
         // constructor is only the function's body.  This depends on the fact,
@@ -1129,7 +1131,7 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool bodyOnly, bool lamb
             // Slap a semicolon on the end of functions with an expression body.
             if (exprBody && !out.append(";"))
                 return nullptr;
-        } else if (!lambdaParen && fun->isLambda() && !fun->isArrow()) {
+        } else if (!lambdaParen && funIsMethodOrNonArrowLambda) {
             if (!out.append(")"))
                 return nullptr;
         }
@@ -1141,7 +1143,7 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool bodyOnly, bool lamb
         if (!lambdaParen && fun->isLambda() && !fun->isArrow() && !out.append(")"))
             return nullptr;
     } else {
-        MOZ_ASSERT(!fun->isExprClosure());
+        MOZ_ASSERT(!fun->isExprBody());
 
         if ((!bodyOnly && !out.append("() {\n    "))
             || !out.append("[native code]")
@@ -1407,7 +1409,8 @@ JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx, HandleFuncti
         // chain of their inner functions, or in the case of eval, possibly
         // eval'd inner functions. This prohibits re-lazification as
         // StaticScopeIter queries isHeavyweight of those functions, which
-        // requires a non-lazy script.
+        // requires a non-lazy script.  Note that if this ever changes,
+        // XDRRelazificationInfo will have to be fixed.
         bool canRelazify = !lazy->numInnerFunctions() && !lazy->hasDirectEval();
 
         if (script) {
@@ -1527,7 +1530,7 @@ JSFunction::relazify(JSTracer* trc)
     // The result is that no function marks the script, but the canonical
     // function expects it to be valid.
     if (script->functionNonDelazifying()->hasScript())
-        MarkScriptUnbarriered(trc, &u.i.s.script_, "script");
+        TraceManuallyBarrieredEdge(trc, &u.i.s.script_, "script");
 
     flags_ &= ~INTERPRETED;
     flags_ |= INTERPRETED_LAZY;
@@ -1540,7 +1543,7 @@ JSFunction::relazify(JSTracer* trc)
         // be freed.
         if (lazy->maybeScript() == script)
             lazy->resetScript();
-        MarkLazyScriptUnbarriered(trc, &u.i.s.lazy_, "lazyScript");
+        TraceManuallyBarrieredEdge(trc, &u.i.s.lazy_, "lazyScript");
     } else {
         MOZ_ASSERT(isSelfHostedBuiltin());
         MOZ_ASSERT(isExtended());
@@ -1787,7 +1790,6 @@ FunctionConstructor(JSContext* cx, unsigned argc, Value* vp, GeneratorKind gener
     options.setMutedErrors(mutedErrors)
            .setFileAndLine(filename, 1)
            .setNoScriptRval(false)
-           .setCompileAndGo(true)
            .setIntroductionInfo(introducerFilename, introductionType, lineno, maybeScript, pcOffset);
 
     unsigned n = args.length() ? args.length() - 1 : 0;
@@ -2132,9 +2134,10 @@ js::CloneFunctionObject(JSContext* cx, HandleFunction fun, HandleObject parent,
 
     bool useSameScript = CloneFunctionObjectUseSameScript(cx->compartment(), fun, parent);
 
+    JSScript::AutoDelazify funScript(cx);
     if (!useSameScript && fun->isInterpretedLazy()) {
-        JSAutoCompartment ac(cx, fun);
-        if (!fun->getOrCreateScript(cx))
+        funScript = fun;
+        if (!funScript)
             return nullptr;
     }
 
@@ -2162,13 +2165,7 @@ js::CloneFunctionObject(JSContext* cx, HandleFunction fun, HandleObject parent,
         return nullptr;
     RootedFunction clone(cx, &cloneobj->as<JSFunction>());
 
-    // Make sure fun didn't get re-lazified during a GC while creating the
-    // clone.
-    if (!useSameScript && fun->isInterpretedLazy()) {
-        JSAutoCompartment ac(cx, fun);
-        if (!fun->getOrCreateScript(cx))
-            return nullptr;
-    }
+    MOZ_ASSERT(useSameScript || !fun->isInterpretedLazy());
 
     uint16_t flags = fun->flags() & ~JSFunction::EXTENDED;
     if (allocKind == JSFunction::ExtendedFinalizeKind)
@@ -2181,6 +2178,7 @@ js::CloneFunctionObject(JSContext* cx, HandleFunction fun, HandleObject parent,
         clone->initEnvironment(parent);
     } else if (fun->isInterpretedLazy()) {
         MOZ_ASSERT(fun->compartment() == clone->compartment());
+        MOZ_ASSERT(useSameScript);
         LazyScript* lazy = fun->lazyScriptOrNull();
         clone->initLazyScript(lazy);
         clone->initEnvironment(parent);

@@ -321,6 +321,16 @@ CallJSSetterOp(JSContext* cx, SetterOp op, HandleObject obj, HandleId id, Mutabl
 }
 
 inline bool
+CallJSAddPropertyOp(JSContext* cx, JSAddPropertyOp op, HandleObject obj, HandleId id,
+                    HandleValue v)
+{
+    JS_CHECK_RECURSION(cx, return false);
+
+    assertSameCompartment(cx, obj, id, v);
+    return op(cx, obj, id, v);
+}
+
+inline bool
 CallJSDeletePropertyOp(JSContext* cx, JSDeletePropertyOp op, HandleObject receiver, HandleId id,
                        ObjectOpResult& result)
 {
@@ -370,7 +380,7 @@ JSContext::setPendingException(js::Value v)
 inline bool
 JSContext::runningWithTrustedPrincipals() const
 {
-    return !compartment() || compartment()->principals == runtime()->trustedPrincipals();
+    return !compartment() || compartment()->principals() == runtime()->trustedPrincipals();
 }
 
 inline void

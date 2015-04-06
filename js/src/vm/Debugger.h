@@ -124,7 +124,7 @@ class DebuggerWeakMap : private WeakMap<PreBarriered<UnbarrieredKey>, Relocatabl
         for (Enum e(*static_cast<Base*>(this)); !e.empty(); e.popFront()) {
             traceValueEdges(tracer, e.front().value());
             Key key = e.front().key();
-            gc::Mark(tracer, &key, "Debugger WeakMap key");
+            TraceEdge(tracer, &key, "Debugger WeakMap key");
             if (key != e.front().key())
                 e.rekeyFront(key);
             key.unsafeSet(nullptr);
@@ -675,7 +675,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static void handleUnrecoverableIonBailoutError(JSContext* cx, jit::RematerializedFrame* frame);
     static void propagateForcedReturn(JSContext* cx, AbstractFramePtr frame, HandleValue rval);
     static bool hasLiveHook(GlobalObject* global, Hook which);
-    static void assertNotInFrameMaps(AbstractFramePtr frame);
+    static bool inFrameMaps(AbstractFramePtr frame);
 
     /************************************* Functions for use by Debugger.cpp. */
 

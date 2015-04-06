@@ -627,8 +627,7 @@ let gDevToolsBrowser = {
     // Enable Browser Toolbox?
     let chromeEnabled = Services.prefs.getBoolPref("devtools.chrome.enabled");
     let devtoolsRemoteEnabled = Services.prefs.getBoolPref("devtools.debugger.remote-enabled");
-    let remoteEnabled = chromeEnabled && devtoolsRemoteEnabled &&
-                        Services.prefs.getBoolPref("devtools.debugger.chrome-enabled");
+    let remoteEnabled = chromeEnabled && devtoolsRemoteEnabled;
     toggleCmd("Tools:BrowserToolbox", remoteEnabled);
     toggleCmd("Tools:BrowserContentToolbox", remoteEnabled && win.gMultiProcessBrowser);
 
@@ -1218,8 +1217,8 @@ let gDevToolsBrowser = {
    * necessary because of the WebConsole's `profile` and `profileEnd` methods.
    */
   _connectToProfiler: function DT_connectToProfiler(event, toolbox) {
-    let SharedProfilerUtils = devtools.require("devtools/profiler/shared");
-    let connection = SharedProfilerUtils.getProfilerConnection(toolbox);
+    let SharedPerformanceUtils = devtools.require("devtools/performance/front");
+    let connection = SharedPerformanceUtils.getPerformanceActorsConnection(toolbox.target);
     connection.open();
   },
 

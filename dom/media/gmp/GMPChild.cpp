@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "GMPChild.h"
+#include "GMPContentChild.h"
 #include "GMPProcessChild.h"
 #include "GMPLoader.h"
 #include "GMPVideoDecoderChild.h"
@@ -34,10 +35,7 @@ static const int MAX_VOUCHER_LENGTH = 500000;
 #endif
 
 #if defined(MOZ_GMP_SANDBOX)
-#if defined(XP_WIN)
-#define TARGET_SANDBOX_EXPORTS
-#include "mozilla/sandboxTarget.h"
-#elif defined(XP_MACOSX)
+#if defined(XP_MACOSX)
 #include "mozilla/Sandbox.h"
 #endif
 #endif
@@ -230,51 +228,44 @@ GetAppPaths(nsCString &aAppPath, nsCString &aAppBinaryPath)
   return true;
 }
 
-void
-GMPChild::StartMacSandbox()
+bool
+GMPChild::SetMacSandboxInfo()
 {
+  if (!mGMPLoader) {
+    return false;
+  }
   nsAutoCString pluginDirectoryPath, pluginFilePath;
   if (!GetPluginPaths(mPluginPath, pluginDirectoryPath, pluginFilePath)) {
-    MOZ_CRASH("Error scanning plugin path");
+    return false;
   }
   nsAutoCString appPath, appBinaryPath;
   if (!GetAppPaths(appPath, appBinaryPath)) {
-    MOZ_CRASH("Error resolving child process path");
+    return false;
   }
 
   MacSandboxInfo info;
   info.type = MacSandboxType_Plugin;
   info.pluginInfo.type = MacSandboxPluginType_GMPlugin_Default;
-  info.pluginInfo.pluginPath.Assign(pluginDirectoryPath);
-  mPluginBinaryPath.Assign(pluginFilePath);
-  info.pluginInfo.pluginBinaryPath.Assign(pluginFilePath);
-  info.appPath.Assign(appPath);
-  info.appBinaryPath.Assign(appBinaryPath);
+  info.pluginInfo.pluginPath.assign(pluginDirectoryPath.get());
+  info.pluginInfo.pluginBinaryPath.assign(pluginFilePath.get());
+  info.appPath.assign(appPath.get());
+  info.appBinaryPath.assign(appBinaryPath.get());
 
-  nsAutoCString err;
-  if (!mozilla::StartMacSandbox(info, err)) {
-    NS_WARNING(err.get());
-    MOZ_CRASH("sandbox_init() failed");
-  }
+  mGMPLoader->SetSandboxInfo(&info);
+  return true;
 }
 #endif // XP_MACOSX && MOZ_GMP_SANDBOX
-
-void
-GMPChild::CheckThread()
-{
-  MOZ_ASSERT(mGMPMessageLoop == MessageLoop::current());
-}
 
 bool
 GMPChild::Init(const std::string& aPluginPath,
                const std::string& aVoucherPath,
-               base::ProcessHandle aParentProcessHandle,
+               base::ProcessId aParentPid,
                MessageLoop* aIOLoop,
                IPC::Channel* aChannel)
 {
   LOGD("%s pluginPath=%s", __FUNCTION__, aPluginPath.c_str());
 
-  if (NS_WARN_IF(!Open(aChannel, aParentProcessHandle, aIOLoop))) {
+  if (NS_WARN_IF(!Open(aChannel, aParentPid, aIOLoop))) {
     return false;
   }
 
@@ -372,24 +363,6 @@ GMPChild::PreLoadLibraries(const std::string& aPluginPath)
 }
 #endif
 
-#if defined(MOZ_GMP_SANDBOX)
-
-#if defined(XP_MACOSX)
-class MacOSXSandboxStarter : public SandboxStarter {
-public:
-  explicit MacOSXSandboxStarter(GMPChild* aGMPChild)
-    : mGMPChild(aGMPChild)
-  {}
-  virtual void Start(const char* aLibPath) override {
-    mGMPChild->StartMacSandbox();
-  }
-private:
-  GMPChild* mGMPChild;
-};
-#endif
-
-#endif // MOZ_GMP_SANDBOX
-
 bool
 GMPChild::GetLibPath(nsACString& aOutLibPath)
 {
@@ -435,8 +408,10 @@ GMPChild::RecvStartPlugin()
   }
 
 #if defined(MOZ_GMP_SANDBOX) && defined(XP_MACOSX)
-  nsAutoPtr<SandboxStarter> starter(new MacOSXSandboxStarter(this));
-  mGMPLoader->SetStartSandboxStarter(starter);
+  if (!SetMacSandboxInfo()) {
+    NS_WARNING("Failed to set Mac GMP sandbox info");
+    return false;
+  }
 #endif
 
   if (!mGMPLoader->Load(libPath.get(),
@@ -469,6 +444,11 @@ void
 GMPChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   LOGD("%s reason=%d", __FUNCTION__, aWhy);
+
+  for (uint32_t i = mGMPContentChildren.Length(); i > 0; i--) {
+    MOZ_ASSERT_IF(aWhy == NormalShutdown, !mGMPContentChildren[i - 1]->IsUsed());
+    mGMPContentChildren[i - 1]->Close();
+  }
 
   if (mGMPLoader) {
     mGMPLoader->Shutdown();
@@ -504,19 +484,6 @@ GMPChild::ProcessingError(Result aCode, const char* aReason)
   }
 }
 
-PGMPAudioDecoderChild*
-GMPChild::AllocPGMPAudioDecoderChild()
-{
-  return new GMPAudioDecoderChild(this);
-}
-
-bool
-GMPChild::DeallocPGMPAudioDecoderChild(PGMPAudioDecoderChild* aActor)
-{
-  delete aActor;
-  return true;
-}
-
 mozilla::dom::PCrashReporterChild*
 GMPChild::AllocPCrashReporterChild(const NativeThreadId& aThread)
 {
@@ -527,120 +494,6 @@ bool
 GMPChild::DeallocPCrashReporterChild(PCrashReporterChild* aCrashReporter)
 {
   delete aCrashReporter;
-  return true;
-}
-
-PGMPVideoDecoderChild*
-GMPChild::AllocPGMPVideoDecoderChild()
-{
-  return new GMPVideoDecoderChild(this);
-}
-
-bool
-GMPChild::DeallocPGMPVideoDecoderChild(PGMPVideoDecoderChild* aActor)
-{
-  delete aActor;
-  return true;
-}
-
-PGMPDecryptorChild*
-GMPChild::AllocPGMPDecryptorChild()
-{
-  GMPDecryptorChild* actor = new GMPDecryptorChild(this, mPluginVoucher, mSandboxVoucher);
-  actor->AddRef();
-  return actor;
-}
-
-bool
-GMPChild::DeallocPGMPDecryptorChild(PGMPDecryptorChild* aActor)
-{
-  static_cast<GMPDecryptorChild*>(aActor)->Release();
-  return true;
-}
-
-bool
-GMPChild::RecvPGMPAudioDecoderConstructor(PGMPAudioDecoderChild* aActor)
-{
-  auto vdc = static_cast<GMPAudioDecoderChild*>(aActor);
-
-  void* vd = nullptr;
-  GMPErr err = GetAPI(GMP_API_AUDIO_DECODER, &vdc->Host(), &vd);
-  if (err != GMPNoErr || !vd) {
-    return false;
-  }
-
-  vdc->Init(static_cast<GMPAudioDecoder*>(vd));
-
-  return true;
-}
-
-PGMPVideoEncoderChild*
-GMPChild::AllocPGMPVideoEncoderChild()
-{
-  return new GMPVideoEncoderChild(this);
-}
-
-bool
-GMPChild::DeallocPGMPVideoEncoderChild(PGMPVideoEncoderChild* aActor)
-{
-  delete aActor;
-  return true;
-}
-
-bool
-GMPChild::RecvPGMPVideoDecoderConstructor(PGMPVideoDecoderChild* aActor)
-{
-  auto vdc = static_cast<GMPVideoDecoderChild*>(aActor);
-
-  void* vd = nullptr;
-  GMPErr err = GetAPI(GMP_API_VIDEO_DECODER, &vdc->Host(), &vd);
-  if (err != GMPNoErr || !vd) {
-    NS_WARNING("GMPGetAPI call failed trying to construct decoder.");
-    return false;
-  }
-
-  vdc->Init(static_cast<GMPVideoDecoder*>(vd));
-
-  return true;
-}
-
-bool
-GMPChild::RecvPGMPVideoEncoderConstructor(PGMPVideoEncoderChild* aActor)
-{
-  auto vec = static_cast<GMPVideoEncoderChild*>(aActor);
-
-  void* ve = nullptr;
-  GMPErr err = GetAPI(GMP_API_VIDEO_ENCODER, &vec->Host(), &ve);
-  if (err != GMPNoErr || !ve) {
-    NS_WARNING("GMPGetAPI call failed trying to construct encoder.");
-    return false;
-  }
-
-  vec->Init(static_cast<GMPVideoEncoder*>(ve));
-
-  return true;
-}
-
-bool
-GMPChild::RecvPGMPDecryptorConstructor(PGMPDecryptorChild* aActor)
-{
-  GMPDecryptorChild* child = static_cast<GMPDecryptorChild*>(aActor);
-  GMPDecryptorHost* host = static_cast<GMPDecryptorHost*>(child);
-
-  void* session = nullptr;
-  GMPErr err = GetAPI(GMP_API_DECRYPTOR, host, &session);
-
-  if (err != GMPNoErr && !session) {
-    // XXX to remove in bug 1147692
-    err = GetAPI(GMP_API_DECRYPTOR_COMPAT, host, &session);
-  }
-
-  if (err != GMPNoErr || !session) {
-    return false;
-  }
-
-  child->Init(static_cast<GMPDecryptor*>(session));
-
   return true;
 }
 
@@ -714,6 +567,15 @@ GMPChild::RecvBeginAsyncShutdown()
     mAsyncShutdown->BeginShutdown();
   } else {
     ShutdownComplete();
+  }
+  return true;
+}
+
+bool
+GMPChild::RecvCloseActive()
+{
+  for (uint32_t i = mGMPContentChildren.Length(); i > 0; i--) {
+    mGMPContentChildren[i - 1]->CloseActive();
   }
   return true;
 }
@@ -802,6 +664,32 @@ GMPChild::PreLoadSandboxVoucher()
   if (!stream) {
     NS_WARNING("PreLoadSandboxVoucher failed to read plugin voucher file!");
     return;
+  }
+}
+
+PGMPContentChild*
+GMPChild::AllocPGMPContentChild(Transport* aTransport,
+                                ProcessId aOtherPid)
+{
+  GMPContentChild* child =
+    mGMPContentChildren.AppendElement(new GMPContentChild(this))->get();
+  child->Open(aTransport, aOtherPid, XRE_GetIOMessageLoop(), ipc::ChildSide);
+
+  return child;
+}
+
+void
+GMPChild::GMPContentChildActorDestroy(GMPContentChild* aGMPContentChild)
+{
+  for (uint32_t i = mGMPContentChildren.Length(); i > 0; i--) {
+    UniquePtr<GMPContentChild>& toDestroy = mGMPContentChildren[i - 1];
+    if (toDestroy.get() == aGMPContentChild) {
+      SendPGMPContentChildDestroyed();
+      MessageLoop::current()->PostTask(FROM_HERE,
+                                       new DeleteTask<GMPContentChild>(toDestroy.release()));
+      mGMPContentChildren.RemoveElementAt(i - 1);
+      break;
+    }
   }
 }
 

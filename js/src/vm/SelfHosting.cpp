@@ -1133,7 +1133,7 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
 
     cx->runtime()->selfHostingGlobal_ = shg;
     compartment->isSelfHosting = true;
-    compartment->isSystem = true;
+    compartment->setIsSystem(true);
 
     if (!GlobalObject::initSelfHostingBuiltins(cx, shg, intrinsic_functions))
         return nullptr;
@@ -1210,7 +1210,7 @@ void
 JSRuntime::markSelfHostingGlobal(JSTracer* trc)
 {
     if (selfHostingGlobal_ && !parentRuntime)
-        MarkObjectRoot(trc, &selfHostingGlobal_, "self-hosting global");
+        TraceRoot(trc, &selfHostingGlobal_, "self-hosting global");
 }
 
 bool

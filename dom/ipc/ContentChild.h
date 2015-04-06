@@ -78,7 +78,7 @@ public:
     };
 
     bool Init(MessageLoop* aIOLoop,
-              base::ProcessHandle aParentHandle,
+              base::ProcessId aParentPid,
               IPC::Channel* aChannel);
     void InitProcessAttributes();
     void InitXPCOM();
@@ -114,6 +114,10 @@ public:
     PContentBridgeChild*
     AllocPContentBridgeChild(mozilla::ipc::Transport* transport,
                              base::ProcessId otherProcess) override;
+
+    PGMPServiceChild*
+    AllocPGMPServiceChild(mozilla::ipc::Transport* transport,
+                          base::ProcessId otherProcess) override;
 
     PCompositorChild*
     AllocPCompositorChild(mozilla::ipc::Transport* aTransport,

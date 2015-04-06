@@ -274,7 +274,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         break;
 
     case AndroidGeckoEvent::SENSOR_EVENT: {
-        InfallibleTArray<float> values;
+        nsAutoTArray<float, 4> values;
         mozilla::hal::SensorType type = (mozilla::hal::SensorType) curEvent->Flags();
 
         switch (type) {
@@ -297,6 +297,14 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
 
         case hal::SENSOR_LIGHT:
             values.AppendElement(curEvent->X());
+            break;
+
+        case hal::SENSOR_ROTATION_VECTOR:
+        case hal::SENSOR_GAME_ROTATION_VECTOR:
+            values.AppendElement(curEvent->X());
+            values.AppendElement(curEvent->Y());
+            values.AppendElement(curEvent->Z());
+            values.AppendElement(curEvent->W());
             break;
 
         default:
@@ -510,9 +518,9 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         nsresult rv = cmdline->Init(4, argv, nullptr, nsICommandLine::STATE_REMOTE_AUTO);
         if (NS_SUCCEEDED(rv))
             cmdline->Run();
-        nsMemory::Free(uri);
+        free(uri);
         if (flag)
-            nsMemory::Free(flag);
+            free(flag);
         break;
     }
 

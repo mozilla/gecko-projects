@@ -206,7 +206,7 @@ class IonBuilder
 
         static CFGState If(jsbytecode* join, MTest* test);
         static CFGState IfElse(jsbytecode* trueEnd, jsbytecode* falseEnd, MTest* test);
-        static CFGState AndOr(jsbytecode* join, MBasicBlock* joinStart);
+        static CFGState AndOr(jsbytecode* join, MBasicBlock* lhs);
         static CFGState TableSwitch(jsbytecode* exitpc, MTableSwitch* ins);
         static CFGState CondSwitch(IonBuilder* builder, jsbytecode* exitpc, jsbytecode* defaultTarget);
         static CFGState Label(jsbytecode* exitpc);
@@ -352,6 +352,9 @@ class IonBuilder
 
     MConstant* constant(const Value& v);
     MConstant* constantInt(int32_t i);
+
+    // Note: This function might return nullptr in case of failure.
+    MConstant* constantMaybeAtomize(const Value& v);
 
     // Improve the type information at tests
     bool improveTypesAtTest(MDefinition* ins, bool trueBranch, MTest* test);
@@ -910,6 +913,7 @@ class IonBuilder
      */
     bool testCommonGetterSetter(TemporaryTypeSet* types, PropertyName* name,
                                 bool isGetter, JSObject* foundProto, Shape* lastProperty,
+                                JSFunction* getterOrSetter,
                                 MDefinition** guard, Shape* globalShape = nullptr,
                                 MDefinition** globalGuard = nullptr);
     bool testShouldDOMCall(TypeSet* inTypes,
@@ -1029,7 +1033,9 @@ class IonBuilder
         return analysis_;
     }
 
-    TemporaryTypeSet* thisTypes, *argTypes, *typeArray;
+    TemporaryTypeSet* thisTypes;
+    TemporaryTypeSet* argTypes;
+    TemporaryTypeSet* typeArray;
     uint32_t typeArrayHint;
     uint32_t* bytecodeTypeMap;
 
@@ -1349,8 +1355,6 @@ class CallInfo
             getArg(i)->setImplicitlyUsedUnchecked();
     }
 };
-
-bool TypeSetIncludes(TypeSet* types, MIRType input, TypeSet* inputTypes);
 
 bool NeedsPostBarrier(CompileInfo& info, MDefinition* value);
 

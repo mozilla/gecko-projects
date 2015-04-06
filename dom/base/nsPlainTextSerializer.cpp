@@ -54,14 +54,12 @@ static int32_t GetUnicharStringWidth(const char16_t* pwcs, int32_t n);
 static const uint32_t TagStackSize = 500;
 static const uint32_t OLStackSize = 100;
 
-nsresult NS_NewPlainTextSerializer(nsIContentSerializer** aSerializer)
+nsresult
+NS_NewPlainTextSerializer(nsIContentSerializer** aSerializer)
 {
-  nsPlainTextSerializer* it = new nsPlainTextSerializer();
-  if (!it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  return CallQueryInterface(it, aSerializer);
+  nsRefPtr<nsPlainTextSerializer> it = new nsPlainTextSerializer();
+  it.forget(aSerializer);
+  return NS_OK;
 }
 
 nsPlainTextSerializer::nsPlainTextSerializer()
@@ -1710,7 +1708,7 @@ nsPlainTextSerializer::Write(const nsAString& aStr)
     foo = ToNewCString(remaining);
     //    printf("Next line: bol = %d, newlinepos = %d, totLen = %d, string = '%s'\n",
     //           bol, nextpos, totLen, foo);
-    nsMemory::Free(foo);
+    free(foo);
 #endif
 
     if (nextpos == kNotFound) {
