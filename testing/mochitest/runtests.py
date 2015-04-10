@@ -12,6 +12,7 @@ import sys
 SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
 sys.path.insert(0, SCRIPT_DIR)
 
+from argparse import Namespace
 from urlparse import urlparse
 import ctypes
 import glob
@@ -21,7 +22,6 @@ import mozdebug
 import mozinfo
 import mozprocess
 import mozrunner
-import optparse
 import re
 import shutil
 import signal
@@ -332,7 +332,7 @@ class MochitestServer(object):
     "Web server used to serve Mochitests, for closer fidelity to the real web."
 
     def __init__(self, options, logger):
-        if isinstance(options, optparse.Values):
+        if isinstance(options, Namespace):
             options = vars(options)
         self._log = logger
         self._closeWhenDone = options['closeWhenDone']
@@ -1277,6 +1277,10 @@ class Mochitest(MochitestUtilsMixin):
         bin_suffix = mozinfo.info.get('bin_suffix', '')
         certutil = os.path.join(options.utilityPath, "certutil" + bin_suffix)
         pk12util = os.path.join(options.utilityPath, "pk12util" + bin_suffix)
+        toolsEnv = env
+        if mozinfo.info["asan"]:
+            # Disable leak checking when running these tools
+            toolsEnv["ASAN_OPTIONS"] = "detect_leaks=0"
 
         if self.certdbNew:
             # android and b2g use the new DB formats exclusively
@@ -1286,7 +1290,7 @@ class Mochitest(MochitestUtilsMixin):
             certdbPath = options.profilePath
 
         status = call(
-            [certutil, "-N", "-d", certdbPath, "-f", pwfilePath], env=env)
+            [certutil, "-N", "-d", certdbPath, "-f", pwfilePath], env=toolsEnv)
         if status:
             return status
 
@@ -1311,11 +1315,11 @@ class Mochitest(MochitestUtilsMixin):
                       root,
                       "-t",
                       trustBits],
-                     env=env)
+                     env=toolsEnv)
             elif ext == ".client":
                 call([pk12util, "-i", os.path.join(options.certPath, item),
                       "-w", pwfilePath, "-d", certdbPath],
-                     env=env)
+                     env=toolsEnv)
 
         os.unlink(pwfilePath)
         return 0
@@ -2576,7 +2580,7 @@ def main():
     # parse command line options
     parser = MochitestOptions()
     commandline.add_logging_group(parser)
-    options, args = parser.parse_args()
+    options = parser.parse_args()
     if options is None:
         # parsing error
         sys.exit(1)

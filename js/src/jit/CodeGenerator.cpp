@@ -1023,11 +1023,11 @@ RegExpPairsVectorStartOffset(size_t inputOutputDataStartOffset)
 }
 
 static Address
-RegExpPairCountAddress(size_t inputOutputDataStartOffset)
+RegExpPairCountAddress(MacroAssembler &masm, size_t inputOutputDataStartOffset)
 {
-    return Address(StackPointer, inputOutputDataStartOffset
-                                 + sizeof(irregexp::InputOutputData)
-                                 + MatchPairs::offsetOfPairCount());
+    return Address(masm.getStackPointer(), inputOutputDataStartOffset
+                                           + sizeof(irregexp::InputOutputData)
+                                           + MatchPairs::offsetOfPairCount());
 }
 
 // Prepare an InputOutputData and optional MatchPairs which space has been
@@ -1044,21 +1044,22 @@ PrepareAndExecuteRegExp(JSContext* cx, MacroAssembler& masm, Register regexp, Re
     size_t matchPairsStartOffset = inputOutputDataStartOffset + sizeof(irregexp::InputOutputData);
     size_t pairsVectorStartOffset = RegExpPairsVectorStartOffset(inputOutputDataStartOffset);
 
-    Address inputStartAddress(StackPointer,
+    Address inputStartAddress(masm.getStackPointer(),
         inputOutputDataStartOffset + offsetof(irregexp::InputOutputData, inputStart));
-    Address inputEndAddress(StackPointer,
+    Address inputEndAddress(masm.getStackPointer(),
         inputOutputDataStartOffset + offsetof(irregexp::InputOutputData, inputEnd));
-    Address matchesPointerAddress(StackPointer,
+    Address matchesPointerAddress(masm.getStackPointer(),
         inputOutputDataStartOffset + offsetof(irregexp::InputOutputData, matches));
-    Address startIndexAddress(StackPointer,
+    Address startIndexAddress(masm.getStackPointer(),
         inputOutputDataStartOffset + offsetof(irregexp::InputOutputData, startIndex));
-    Address matchResultAddress(StackPointer,
+    Address matchResultAddress(masm.getStackPointer(),
         inputOutputDataStartOffset + offsetof(irregexp::InputOutputData, result));
 
-    Address pairCountAddress = RegExpPairCountAddress(inputOutputDataStartOffset);
-    Address pairsPointerAddress(StackPointer, matchPairsStartOffset + MatchPairs::offsetOfPairs());
+    Address pairCountAddress = RegExpPairCountAddress(masm, inputOutputDataStartOffset);
+    Address pairsPointerAddress(masm.getStackPointer(),
+        matchPairsStartOffset + MatchPairs::offsetOfPairs());
 
-    Address pairsVectorAddress(StackPointer, pairsVectorStartOffset);
+    Address pairsVectorAddress(masm.getStackPointer(), pairsVectorStartOffset);
 
     RegExpStatics* res = cx->global()->getRegExpStatics(cx);
     if (!res)
@@ -1132,7 +1133,7 @@ PrepareAndExecuteRegExp(JSContext* cx, MacroAssembler& masm, Register regexp, Re
 
     // Finish filling in the InputOutputData instance on the stack.
     if (mode == RegExpShared::Normal) {
-        masm.computeEffectiveAddress(Address(StackPointer, matchPairsStartOffset), temp2);
+        masm.computeEffectiveAddress(Address(masm.getStackPointer(), matchPairsStartOffset), temp2);
         masm.storePtr(temp2, matchesPointerAddress);
     }
     masm.storePtr(ImmWord(0), startIndexAddress);
@@ -1146,7 +1147,7 @@ PrepareAndExecuteRegExp(JSContext* cx, MacroAssembler& masm, Register regexp, Re
         volatileRegs.add(regexp);
 
     // Execute the RegExp.
-    masm.computeEffectiveAddress(Address(StackPointer, inputOutputDataStartOffset), temp2);
+    masm.computeEffectiveAddress(Address(masm.getStackPointer(), inputOutputDataStartOffset), temp2);
     masm.PushRegsInMask(volatileRegs);
     masm.setupUnalignedABICall(1, temp3);
     masm.passABIArg(temp2);
@@ -1243,7 +1244,7 @@ CreateDependentString(MacroAssembler& masm, const JSAtomState& names,
         masm.push(base);
 
         // Adjust the start index address for the above pushes.
-        MOZ_ASSERT(startIndexAddress.base == StackPointer);
+        MOZ_ASSERT(startIndexAddress.base == masm.getStackPointer());
         BaseIndex newStartIndexAddress = startIndexAddress;
         newStartIndexAddress.offset += 2 * sizeof(void*);
 
@@ -1365,16 +1366,16 @@ JitCompartment::generateRegExpExecStub(JSContext* cx)
     masm.move32(Imm32(0), matchIndex);
 
     size_t pairsVectorStartOffset = RegExpPairsVectorStartOffset(inputOutputDataStartOffset);
-    Address pairsVectorAddress(StackPointer, pairsVectorStartOffset);
-    Address pairCountAddress = RegExpPairCountAddress(inputOutputDataStartOffset);
+    Address pairsVectorAddress(masm.getStackPointer(), pairsVectorStartOffset);
+    Address pairCountAddress = RegExpPairCountAddress(masm, inputOutputDataStartOffset);
 
     size_t elementsOffset = NativeObject::offsetOfFixedElements();
     BaseIndex stringAddress(object, matchIndex, TimesEight, elementsOffset);
 
     JS_STATIC_ASSERT(sizeof(MatchPair) == 8);
-    BaseIndex stringIndexAddress(StackPointer, matchIndex, TimesEight,
+    BaseIndex stringIndexAddress(masm.getStackPointer(), matchIndex, TimesEight,
                                  pairsVectorStartOffset + offsetof(MatchPair, start));
-    BaseIndex stringLimitAddress(StackPointer, matchIndex, TimesEight,
+    BaseIndex stringLimitAddress(masm.getStackPointer(), matchIndex, TimesEight,
                                  pairsVectorStartOffset + offsetof(MatchPair, limit));
 
     // Loop to construct the match strings. There are two different loops,
@@ -1487,7 +1488,8 @@ CodeGenerator::visitOutOfLineRegExpExec(OutOfLineRegExpExec* ool)
     regs.take(regexp);
     Register temp = regs.takeAny();
 
-    masm.computeEffectiveAddress(Address(StackPointer, sizeof(irregexp::InputOutputData)), temp);
+    masm.computeEffectiveAddress(Address(masm.getStackPointer(),
+        sizeof(irregexp::InputOutputData)), temp);
 
     pushArg(temp);
     pushArg(input);
@@ -1710,6 +1712,13 @@ CodeGenerator::visitLambda(LLambda* lir)
 
     emitLambdaInit(output, scopeChain, info);
 
+    if (info.flags & JSFunction::EXTENDED) {
+        MOZ_ASSERT(info.fun->isMethod());
+        static_assert(FunctionExtended::NUM_EXTENDED_SLOTS == 2, "All slots must be initialized");
+        masm.storeValue(UndefinedValue(), Address(output, FunctionExtended::offsetOfExtendedSlot(0)));
+        masm.storeValue(UndefinedValue(), Address(output, FunctionExtended::offsetOfExtendedSlot(1)));
+    }
+
     masm.bind(ool->rejoin());
 }
 
@@ -1757,8 +1766,6 @@ void
 CodeGenerator::emitLambdaInit(Register output, Register scopeChain,
                               const LambdaFunctionInfo& info)
 {
-    MOZ_ASSERT(info.fun->isArrow() == !!(info.flags & JSFunction::EXTENDED));
-
     // Initialize nargs and flags. We do this with a single uint32 to avoid
     // 16-bit writes.
     union {
@@ -1950,7 +1957,7 @@ static const VMFunction DeepCloneObjectLiteralInfo =
 void
 CodeGenerator::visitCloneLiteral(LCloneLiteral* lir)
 {
-    pushArg(ImmWord(js::MaybeSingletonObject));
+    pushArg(ImmWord(TenuredObject));
     pushArg(ToRegister(lir->getObjectLiteral()));
     callVM(DeepCloneObjectLiteralInfo, lir);
 }
@@ -1964,7 +1971,7 @@ void
 CodeGenerator::visitCallee(LCallee* lir)
 {
     Register callee = ToRegister(lir->output());
-    Address ptr(StackPointer, frameSize() + JitFrameLayout::offsetOfCalleeToken());
+    Address ptr(masm.getStackPointer(), frameSize() + JitFrameLayout::offsetOfCalleeToken());
 
     masm.loadFunctionFromCalleeToken(ptr, callee);
 }
@@ -1973,7 +1980,7 @@ void
 CodeGenerator::visitIsConstructing(LIsConstructing* lir)
 {
     Register output = ToRegister(lir->output());
-    Address calleeToken(StackPointer, frameSize() + JitFrameLayout::offsetOfCalleeToken());
+    Address calleeToken(masm.getStackPointer(), frameSize() + JitFrameLayout::offsetOfCalleeToken());
     masm.loadPtr(calleeToken, output);
 
     // We must be inside a function.
@@ -2024,7 +2031,7 @@ CodeGenerator::visitOsrEntry(LOsrEntry* lir)
 
     // If profiling, save the current frame pointer to a per-thread global field.
     if (isProfilerInstrumentationEnabled())
-        masm.profilerEnterFrame(StackPointer, temp);
+        masm.profilerEnterFrame(masm.getStackPointer(), temp);
 
     // Allocate the full frame for this function
     // Note we have a new entry here. So we reset MacroAssembler::framePushed()
@@ -2097,7 +2104,7 @@ CodeGenerator::visitStackArgT(LStackArgT* lir)
     MOZ_ASSERT(argslot - 1u < graph.argumentSlotCount());
 
     int32_t stack_offset = StackOffsetOfPassedArg(argslot);
-    Address dest(StackPointer, stack_offset);
+    Address dest(masm.getStackPointer(), stack_offset);
 
     if (arg->isFloatReg())
         masm.storeDouble(ToFloatRegister(arg), dest);
@@ -2116,7 +2123,7 @@ CodeGenerator::visitStackArgV(LStackArgV* lir)
 
     int32_t stack_offset = StackOffsetOfPassedArg(argslot);
 
-    masm.storeValue(val, Address(StackPointer, stack_offset));
+    masm.storeValue(val, Address(masm.getStackPointer(), stack_offset));
 }
 
 void
@@ -2261,69 +2268,70 @@ CodeGenerator::visitStoreSlotV(LStoreSlotV* lir)
     masm.storeValue(value, Address(base, offset));
 }
 
+static void
+GuardReceiver(MacroAssembler& masm, const ReceiverGuard::StackGuard& guard,
+              Register obj, Register scratch, Label* miss, bool checkNullExpando)
+{
+    if (guard.group) {
+        masm.branchTestObjGroup(Assembler::NotEqual, obj, guard.group, miss);
+
+        Address expandoAddress(obj, UnboxedPlainObject::offsetOfExpando());
+        if (guard.shape) {
+            masm.loadPtr(expandoAddress, scratch);
+            masm.branchPtr(Assembler::Equal, scratch, ImmWord(0), miss);
+            masm.branchTestObjShape(Assembler::NotEqual, scratch, guard.shape, miss);
+        } else if (checkNullExpando) {
+            masm.branchPtr(Assembler::NotEqual, expandoAddress, ImmWord(0), miss);
+        }
+    } else {
+        masm.branchTestObjShape(Assembler::NotEqual, obj, guard.shape, miss);
+    }
+}
+
 void
 CodeGenerator::emitGetPropertyPolymorphic(LInstruction* ins, Register obj, Register scratch,
                                           const TypedOrValueRegister& output)
 {
     MGetPropertyPolymorphic* mir = ins->mirRaw()->toGetPropertyPolymorphic();
 
-    size_t total = mir->numUnboxedGroups() + mir->numShapes();
-    MOZ_ASSERT(total > 1);
-
-    bool groupInScratch = mir->numUnboxedGroups() > 1;
-    bool shapeInScratch = mir->numShapes() > 1;
-
     Label done;
 
-    for (size_t i = 0; i < total; i++) {
-        bool unboxedGroup = i < mir->numUnboxedGroups();
-
-        ImmGCPtr comparePtr = unboxedGroup
-                              ? ImmGCPtr(mir->unboxedGroup(i))
-                              : ImmGCPtr(mir->objShape(i - mir->numUnboxedGroups()));
-        Address addr(obj, unboxedGroup ? JSObject::offsetOfGroup() : JSObject::offsetOfShape());
-
-        if ((i == 0 && groupInScratch) || (i == mir->numUnboxedGroups() && shapeInScratch))
-            masm.loadPtr(addr, scratch);
-
-        bool inScratch = unboxedGroup ? groupInScratch : shapeInScratch;
+    for (size_t i = 0; i < mir->numReceivers(); i++) {
+        ReceiverGuard::StackGuard receiver = mir->receiver(i);
 
         Label next;
-        if (i == total - 1) {
-            if (inScratch)
-                bailoutCmpPtr(Assembler::NotEqual, scratch, comparePtr, ins->snapshot());
-            else
-                bailoutCmpPtr(Assembler::NotEqual, addr, comparePtr, ins->snapshot());
-        } else {
-            if (inScratch)
-                masm.branchPtr(Assembler::NotEqual, scratch, comparePtr, &next);
-            else
-                masm.branchPtr(Assembler::NotEqual, addr, comparePtr, &next);
-        }
+        GuardReceiver(masm, receiver, obj, scratch, &next, /* checkNullExpando = */ false);
 
-        if (unboxedGroup) {
-            const UnboxedLayout::Property* property =
-                mir->unboxedGroup(i)->unboxedLayout().lookup(mir->name());
-            Address propertyAddr(obj, UnboxedPlainObject::offsetOfData() + property->offset);
+        if (receiver.shape) {
+            // If this is an unboxed expando access, GuardReceiver loaded the
+            // expando object into scratch.
+            Register target = receiver.group ? scratch : obj;
 
-            masm.loadUnboxedProperty(propertyAddr, property->type, output);
-        } else {
-            Shape* shape = mir->shape(i - mir->numUnboxedGroups());
+            Shape* shape = mir->shape(i);
             if (shape->slot() < shape->numFixedSlots()) {
                 // Fixed slot.
-                masm.loadTypedOrValue(Address(obj, NativeObject::getFixedSlotOffset(shape->slot())),
+                masm.loadTypedOrValue(Address(target, NativeObject::getFixedSlotOffset(shape->slot())),
                                       output);
             } else {
                 // Dynamic slot.
                 uint32_t offset = (shape->slot() - shape->numFixedSlots()) * sizeof(js::Value);
-                masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch);
+                masm.loadPtr(Address(target, NativeObject::offsetOfSlots()), scratch);
                 masm.loadTypedOrValue(Address(scratch, offset), output);
             }
+        } else {
+            const UnboxedLayout::Property* property =
+                receiver.group->unboxedLayout().lookup(mir->name());
+            Address propertyAddr(obj, UnboxedPlainObject::offsetOfData() + property->offset);
+
+            masm.loadUnboxedProperty(propertyAddr, property->type, output);
         }
 
-        if (i != total - 1)
+        if (i == mir->numReceivers() - 1) {
+            bailoutFrom(&next, ins->snapshot());
+        } else {
             masm.jump(&done);
-        masm.bind(&next);
+            masm.bind(&next);
+        }
     }
 
     masm.bind(&done);
@@ -2354,42 +2362,36 @@ CodeGenerator::emitSetPropertyPolymorphic(LInstruction* ins, Register obj, Regis
 {
     MSetPropertyPolymorphic* mir = ins->mirRaw()->toSetPropertyPolymorphic();
 
-    size_t total = mir->numUnboxedGroups() + mir->numShapes();
-    MOZ_ASSERT(total > 1);
-
-    bool groupInScratch = mir->numUnboxedGroups() > 1;
-    bool shapeInScratch = mir->numShapes() > 1;
-
     Label done;
-    for (size_t i = 0; i < total; i++) {
-        bool unboxedGroup = i < mir->numUnboxedGroups();
-
-        ImmGCPtr comparePtr = unboxedGroup
-                              ? ImmGCPtr(mir->unboxedGroup(i))
-                              : ImmGCPtr(mir->objShape(i - mir->numUnboxedGroups()));
-        Address addr(obj, unboxedGroup ? JSObject::offsetOfGroup() : JSObject::offsetOfShape());
-
-        if ((i == 0 && groupInScratch) || (i == mir->numUnboxedGroups() && shapeInScratch))
-            masm.loadPtr(addr, scratch);
-
-        bool inScratch = unboxedGroup ? groupInScratch : shapeInScratch;
+    for (size_t i = 0; i < mir->numReceivers(); i++) {
+        ReceiverGuard::StackGuard receiver = mir->receiver(i);
 
         Label next;
-        if (i == total - 1) {
-            if (inScratch)
-                bailoutCmpPtr(Assembler::NotEqual, scratch, comparePtr, ins->snapshot());
-            else
-                bailoutCmpPtr(Assembler::NotEqual, addr, comparePtr, ins->snapshot());
-        } else {
-            if (inScratch)
-                masm.branchPtr(Assembler::NotEqual, scratch, comparePtr, &next);
-            else
-                masm.branchPtr(Assembler::NotEqual, addr, comparePtr, &next);
-        }
+        GuardReceiver(masm, receiver, obj, scratch, &next, /* checkNullExpando = */ false);
 
-        if (unboxedGroup) {
+        if (receiver.shape) {
+            // If this is an unboxed expando access, GuardReceiver loaded the
+            // expando object into scratch.
+            Register target = receiver.group ? scratch : obj;
+
+            Shape* shape = mir->shape(i);
+            if (shape->slot() < shape->numFixedSlots()) {
+                // Fixed slot.
+                Address addr(target, NativeObject::getFixedSlotOffset(shape->slot()));
+                if (mir->needsBarrier())
+                    emitPreBarrier(addr);
+                masm.storeConstantOrRegister(value, addr);
+            } else {
+                // Dynamic slot.
+                masm.loadPtr(Address(target, NativeObject::offsetOfSlots()), scratch);
+                Address addr(scratch, (shape->slot() - shape->numFixedSlots()) * sizeof(js::Value));
+                if (mir->needsBarrier())
+                    emitPreBarrier(addr);
+                masm.storeConstantOrRegister(value, addr);
+            }
+        } else {
             const UnboxedLayout::Property* property =
-                mir->unboxedGroup(i)->unboxedLayout().lookup(mir->name());
+                receiver.group->unboxedLayout().lookup(mir->name());
             Address propertyAddr(obj, UnboxedPlainObject::offsetOfData() + property->offset);
 
             if (property->type == JSVAL_TYPE_OBJECT)
@@ -2400,27 +2402,14 @@ CodeGenerator::emitSetPropertyPolymorphic(LInstruction* ins, Register obj, Regis
                 MOZ_ASSERT(!UnboxedTypeNeedsPreBarrier(property->type));
 
             masm.storeUnboxedProperty(propertyAddr, property->type, value, nullptr);
-        } else {
-            Shape* shape = mir->shape(i - mir->numUnboxedGroups());
-            if (shape->slot() < shape->numFixedSlots()) {
-                // Fixed slot.
-                Address addr(obj, NativeObject::getFixedSlotOffset(shape->slot()));
-                if (mir->needsBarrier())
-                    emitPreBarrier(addr);
-                masm.storeConstantOrRegister(value, addr);
-            } else {
-                // Dynamic slot.
-                masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch);
-                Address addr(scratch, (shape->slot() - shape->numFixedSlots()) * sizeof(js::Value));
-                if (mir->needsBarrier())
-                    emitPreBarrier(addr);
-                masm.storeConstantOrRegister(value, addr);
-            }
         }
 
-        if (i != total - 1)
+        if (i == mir->numReceivers() - 1) {
+            bailoutFrom(&next, ins->snapshot());
+        } else {
             masm.jump(&done);
-        masm.bind(&next);
+            masm.bind(&next);
+        }
     }
 
     masm.bind(&done);
@@ -2548,39 +2537,44 @@ CodeGenerator::visitGuardReceiverPolymorphic(LGuardReceiverPolymorphic* lir)
     Register obj = ToRegister(lir->object());
     Register temp = ToRegister(lir->temp());
 
-    MOZ_ASSERT(mir->numShapes() + mir->numUnboxedGroups() > 1);
-
     Label done;
 
-    if (mir->numShapes()) {
-        masm.loadObjShape(obj, temp);
+    for (size_t i = 0; i < mir->numReceivers(); i++) {
+        const ReceiverGuard::StackGuard& receiver = mir->receiver(i);
 
-        for (size_t i = 0; i < mir->numShapes(); i++) {
-            Shape* shape = mir->getShape(i);
-            if (i == mir->numShapes() - 1 && !mir->numUnboxedGroups())
-                bailoutCmpPtr(Assembler::NotEqual, temp, ImmGCPtr(shape), lir->snapshot());
-            else
-                masm.branchPtr(Assembler::Equal, temp, ImmGCPtr(shape), &done);
-        }
-    }
+        Label next;
+        GuardReceiver(masm, receiver, obj, temp, &next, /* checkNullExpando = */ true);
 
-    if (mir->numUnboxedGroups()) {
-        // The guard requires that unboxed objects not have expandos.
-        bailoutCmpPtr(Assembler::NotEqual, Address(obj, JSObject::offsetOfShape()),
-                      ImmWord(0), lir->snapshot());
-
-        masm.loadObjGroup(obj, temp);
-
-        for (size_t i = 0; i < mir->numUnboxedGroups(); i++) {
-            ObjectGroup* group = mir->getUnboxedGroup(i);
-            if (i == mir->numUnboxedGroups() - 1)
-                bailoutCmpPtr(Assembler::NotEqual, temp, ImmGCPtr(group), lir->snapshot());
-            else
-                masm.branchPtr(Assembler::Equal, temp, ImmGCPtr(group), &done);
+        if (i == mir->numReceivers() - 1) {
+            bailoutFrom(&next, lir->snapshot());
+        } else {
+            masm.jump(&done);
+            masm.bind(&next);
         }
     }
 
     masm.bind(&done);
+}
+
+void
+CodeGenerator::visitGuardUnboxedExpando(LGuardUnboxedExpando* lir)
+{
+    Label miss;
+
+    Register obj = ToRegister(lir->object());
+    masm.branchPtr(lir->mir()->requireExpando() ? Assembler::Equal : Assembler::NotEqual,
+                   Address(obj, UnboxedPlainObject::offsetOfExpando()), ImmWord(0), &miss);
+
+    bailoutFrom(&miss, lir->snapshot());
+}
+
+void
+CodeGenerator::visitLoadUnboxedExpando(LLoadUnboxedExpando* lir)
+{
+    Register obj = ToRegister(lir->object());
+    Register result = ToRegister(lir->getDef(0));
+
+    masm.loadPtr(Address(obj, UnboxedPlainObject::offsetOfExpando()), result);
 }
 
 void
@@ -2765,7 +2759,7 @@ CodeGenerator::visitCallNative(LCallNative* call)
     // Preload arguments into registers.
     masm.loadJSContext(argContextReg);
     masm.move32(Imm32(call->numActualArgs()), argUintNReg);
-    masm.movePtr(StackPointer, argVpReg);
+    masm.moveStackPtrTo(argVpReg);
 
     masm.Push(argUintNReg);
 
@@ -2787,7 +2781,7 @@ CodeGenerator::visitCallNative(LCallNative* call)
     masm.branchIfFalseBool(ReturnReg, masm.failureLabel());
 
     // Load the outparam vp[0] into output register(s).
-    masm.loadValue(Address(StackPointer, NativeExitFrameLayout::offsetOfResult()), JSReturnOperand);
+    masm.loadValue(Address(masm.getStackPointer(), NativeExitFrameLayout::offsetOfResult()), JSReturnOperand);
 
     // The next instruction is removing the footer of the exit frame, so there
     // is no need for leaveFakeExitFrame.
@@ -2857,7 +2851,7 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     // &vp[1]
     masm.adjustStack(unusedStack);
     // argObj is filled with the extracted object, then returned.
-    Register obj = masm.extractObject(Address(StackPointer, 0), argObj);
+    Register obj = masm.extractObject(Address(masm.getStackPointer(), 0), argObj);
     MOZ_ASSERT(obj == argObj);
 
     // Push a Value containing the callee object: natives are allowed to access their callee before
@@ -2870,7 +2864,7 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     JS_STATIC_ASSERT(JSJitMethodCallArgsTraits::offsetOfArgv == 0);
     JS_STATIC_ASSERT(JSJitMethodCallArgsTraits::offsetOfArgc ==
                      IonDOMMethodExitFrameLayoutTraits::offsetOfArgcFromArgv);
-    masm.computeEffectiveAddress(Address(StackPointer, 2 * sizeof(Value)), argArgs);
+    masm.computeEffectiveAddress(Address(masm.getStackPointer(), 2 * sizeof(Value)), argArgs);
 
     LoadDOMPrivate(masm, obj, argPrivate);
 
@@ -2880,13 +2874,13 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     // Push our argv onto the stack
     masm.Push(argArgs);
     // And store our JSJitMethodCallArgs* in argArgs.
-    masm.movePtr(StackPointer, argArgs);
+    masm.moveStackPtrTo(argArgs);
 
     // Push |this| object for passing HandleObject. We push after argc to
     // maintain the same sp-relative location of the object pointer with other
     // DOMExitFrames.
     masm.Push(argObj);
-    masm.movePtr(StackPointer, argObj);
+    masm.moveStackPtrTo(argObj);
 
     // Construct native exit frame.
     uint32_t safepointOffset;
@@ -2907,14 +2901,14 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, target->jitInfo()->method));
 
     if (target->jitInfo()->isInfallible) {
-        masm.loadValue(Address(StackPointer, IonDOMMethodExitFrameLayout::offsetOfResult()),
+        masm.loadValue(Address(masm.getStackPointer(), IonDOMMethodExitFrameLayout::offsetOfResult()),
                        JSReturnOperand);
     } else {
         // Test for failure.
         masm.branchIfFalseBool(ReturnReg, masm.exceptionLabel());
 
         // Load the outparam vp[0] into output register(s).
-        masm.loadValue(Address(StackPointer, IonDOMMethodExitFrameLayout::offsetOfResult()),
+        masm.loadValue(Address(masm.getStackPointer(), IonDOMMethodExitFrameLayout::offsetOfResult()),
                        JSReturnOperand);
     }
 
@@ -2948,9 +2942,9 @@ CodeGenerator::emitCallInvokeFunction(LInstruction* call, Register calleereg,
     // Each path must account for framePushed_ separately, for callVM to be valid.
     masm.freeStack(unusedStack);
 
-    pushArg(StackPointer); // argv.
-    pushArg(Imm32(argc));  // argc.
-    pushArg(calleereg);    // JSFunction*.
+    pushArg(masm.getStackPointer()); // argv.
+    pushArg(Imm32(argc));            // argc.
+    pushArg(calleereg);              // JSFunction*.
 
     callVM(InvokeFunctionInfo, call);
 
@@ -3040,7 +3034,7 @@ CodeGenerator::visitCallGeneric(LCallGeneric* call)
     if (call->mir()->isConstructing()) {
         Label notPrimitive;
         masm.branchTestPrimitive(Assembler::NotEqual, JSReturnOperand, &notPrimitive);
-        masm.loadValue(Address(StackPointer, unusedStack), JSReturnOperand);
+        masm.loadValue(Address(masm.getStackPointer(), unusedStack), JSReturnOperand);
         masm.bind(&notPrimitive);
     }
 }
@@ -3106,7 +3100,7 @@ CodeGenerator::visitCallKnown(LCallKnown* call)
     if (call->mir()->isConstructing()) {
         Label notPrimitive;
         masm.branchTestPrimitive(Assembler::NotEqual, JSReturnOperand, &notPrimitive);
-        masm.loadValue(Address(StackPointer, unusedStack), JSReturnOperand);
+        masm.loadValue(Address(masm.getStackPointer(), unusedStack), JSReturnOperand);
         masm.bind(&notPrimitive);
     }
 }
@@ -3118,7 +3112,7 @@ CodeGenerator::emitCallInvokeFunction(LApplyArgsGeneric* apply, Register extraSt
     MOZ_ASSERT(objreg != extraStackSize);
 
     // Push the space used by the arguments.
-    masm.movePtr(StackPointer, objreg);
+    masm.moveStackPtrTo(objreg);
     masm.Push(extraStackSize);
 
     pushArg(objreg);                           // argv.
@@ -3158,7 +3152,7 @@ CodeGenerator::emitPushArguments(LApplyArgsGeneric* apply, Register extraStackSp
     // Reserve space for copying the arguments.
     NativeObject::elementsSizeMustNotOverflow();
     masm.lshiftPtr(Imm32(ValueShift), extraStackSpace);
-    masm.subPtr(extraStackSpace, StackPointer);
+    masm.subFromStackPtr(extraStackSpace);
 
 #ifdef DEBUG
     // Put a magic value in the space reserved for padding. Note, this code
@@ -3169,7 +3163,7 @@ CodeGenerator::emitPushArguments(LApplyArgsGeneric* apply, Register extraStackSp
         Label noPaddingNeeded;
         // if the number of arguments is odd, then we do not need any padding.
         masm.branchTestPtr(Assembler::NonZero, argcreg, Imm32(1), &noPaddingNeeded);
-        BaseValueIndex dstPtr(StackPointer, argcreg);
+        BaseValueIndex dstPtr(masm.getStackPointer(), argcreg);
         masm.storeValue(MagicValue(JS_ARG_POISON), dstPtr);
         masm.bind(&noPaddingNeeded);
     }
@@ -3202,7 +3196,7 @@ CodeGenerator::emitPushArguments(LApplyArgsGeneric* apply, Register extraStackSp
 
     // srcPtr = (StackPointer + extraStackSpace) + argvSrcOffset
     // dstPtr = (StackPointer                  ) + argvDstOffset
-    masm.addPtr(StackPointer, argvSrcBase);
+    masm.addStackPtrTo(argvSrcBase);
 
     // Copy arguments.
     {
@@ -3213,14 +3207,14 @@ CodeGenerator::emitPushArguments(LApplyArgsGeneric* apply, Register extraStackSp
         // to loop back, we have to substract the size of the word which are
         // copied.
         BaseValueIndex srcPtr(argvSrcBase, argvIndex, argvSrcOffset - sizeof(void*));
-        BaseValueIndex dstPtr(StackPointer, argvIndex, argvDstOffset - sizeof(void*));
+        BaseValueIndex dstPtr(masm.getStackPointer(), argvIndex, argvDstOffset - sizeof(void*));
         masm.loadPtr(srcPtr, copyreg);
         masm.storePtr(copyreg, dstPtr);
 
         // Handle 32 bits architectures.
         if (sizeof(Value) == 2 * sizeof(void*)) {
             BaseValueIndex srcPtrLow(argvSrcBase, argvIndex, argvSrcOffset - 2 * sizeof(void*));
-            BaseValueIndex dstPtrLow(StackPointer, argvIndex, argvDstOffset - 2 * sizeof(void*));
+            BaseValueIndex dstPtrLow(masm.getStackPointer(), argvIndex, argvDstOffset - 2 * sizeof(void*));
             masm.loadPtr(srcPtrLow, copyreg);
             masm.storePtr(copyreg, dstPtrLow);
         }
@@ -3339,7 +3333,7 @@ CodeGenerator::visitApplyArgsGeneric(LApplyArgsGeneric* apply)
         markSafepointAt(callOffset, apply);
 
         // Recover the number of arguments from the frame descriptor.
-        masm.loadPtr(Address(StackPointer, 0), stackSpace);
+        masm.loadPtr(Address(masm.getStackPointer(), 0), stackSpace);
         masm.rshiftPtr(Imm32(FRAMESIZE_SHIFT), stackSpace);
         masm.subPtr(Imm32(pushed), stackSpace);
 
@@ -3404,7 +3398,7 @@ CodeGenerator::visitGetDynamicName(LGetDynamicName* lir)
 
     /* Make space for the outparam. */
     masm.adjustStack(-int32_t(sizeof(Value)));
-    masm.movePtr(StackPointer, temp2);
+    masm.moveStackPtrTo(temp2);
 
     masm.setupUnalignedABICall(4, temp1);
     masm.passABIArg(temp3);
@@ -3415,7 +3409,7 @@ CodeGenerator::visitGetDynamicName(LGetDynamicName* lir)
 
     const ValueOperand out = ToOutValue(lir);
 
-    masm.loadValue(Address(StackPointer, 0), out);
+    masm.loadValue(Address(masm.getStackPointer(), 0), out);
     masm.adjustStack(sizeof(Value));
 
     Label undefined;
@@ -3531,7 +3525,7 @@ CodeGenerator::generateArgumentsChecks(bool bailout)
         // ... * sizeof(Value)          - Scale by value size.
         // ArgToStackOffset(...)        - Compute displacement within arg vector.
         int32_t offset = ArgToStackOffset((i - info.startArgSlot()) * sizeof(Value));
-        masm.guardTypeSet(Address(StackPointer, offset), types, BarrierKind::TypeSet, temp, &miss);
+        masm.guardTypeSet(Address(masm.getStackPointer(), offset), types, BarrierKind::TypeSet, temp, &miss);
     }
 
     if (miss.used()) {
@@ -3541,6 +3535,18 @@ CodeGenerator::generateArgumentsChecks(bool bailout)
             Label success;
             masm.jump(&success);
             masm.bind(&miss);
+
+            // Check for cases where the type set guard might have missed due to
+            // changing object groups.
+            for (uint32_t i = info.startArgSlot(); i < info.endArgSlot(); i++) {
+                Label skip;
+                Address addr(StackPointer, ArgToStackOffset((i - info.startArgSlot()) * sizeof(Value)));
+                masm.branchTestObject(Assembler::NotEqual, addr, &skip);
+                Register obj = masm.extractObject(addr, temp);
+                masm.guardTypeSetMightBeIncomplete(obj, temp, &success);
+                masm.bind(&skip);
+            }
+
             masm.assumeUnreachable("Argument check fail.");
             masm.bind(&success);
         }
@@ -3590,7 +3596,7 @@ CodeGenerator::visitCheckOverRecursed(LCheckOverRecursed* lir)
     addOutOfLineCode(ool, lir->mir());
 
     // Conditional forward (unlikely) branch to failure.
-    masm.branchPtr(Assembler::AboveOrEqual, AbsoluteAddress(limitAddr), StackPointer, ool->entry());
+    masm.branchStackPtrRhs(Assembler::AboveOrEqual, AbsoluteAddress(limitAddr), ool->entry());
     masm.bind(ool->rejoin());
 }
 
@@ -3877,7 +3883,7 @@ CodeGenerator::emitAssertResultV(const ValueOperand input, TemporaryTypeSet* typ
     saveVolatile();
 
     masm.pushValue(input);
-    masm.movePtr(StackPointer, temp1);
+    masm.moveStackPtrTo(temp1);
 
     masm.setupUnalignedABICall(2, temp2);
     masm.loadJSContext(temp2);
@@ -4855,7 +4861,7 @@ CodeGenerator::visitCreateArgumentsObject(LCreateArgumentsObject* lir)
     const LAllocation* callObj = lir->getCallObject();
     Register temp = ToRegister(lir->getTemp(0));
 
-    masm.movePtr(StackPointer, temp);
+    masm.moveStackPtrTo(temp);
     masm.addPtr(Imm32(frameSize()), temp);
 
     pushArg(ToRegister(callObj));
@@ -6182,7 +6188,7 @@ JitRuntime::generateLazyLinkStub(JSContext* cx)
     // The caller did not push an exit frame on the stack, it pushed a
     // JitFrameLayout.  We modify the descriptor to be a valid exit frame and
     // restore it once the lazy link is complete.
-    Address descriptor(StackPointer, CommonFrameLayout::offsetOfDescriptor());
+    Address descriptor(masm.getStackPointer(), CommonFrameLayout::offsetOfDescriptor());
     size_t convertToExitFrame = JitFrameLayout::Size() - ExitFrameLayout::Size();
     masm.addPtr(Imm32(convertToExitFrame << FRAMESIZE_SHIFT), descriptor);
 
@@ -7176,7 +7182,7 @@ CodeGenerator::visitArgumentsLength(LArgumentsLength* lir)
 {
     // read number of actual arguments from the JS frame.
     Register argc = ToRegister(lir->output());
-    Address ptr(StackPointer, frameSize() + JitFrameLayout::offsetOfNumActualArgs());
+    Address ptr(masm.getStackPointer(), frameSize() + JitFrameLayout::offsetOfNumActualArgs());
 
     masm.loadPtr(ptr, argc);
 }
@@ -7190,11 +7196,11 @@ CodeGenerator::visitGetFrameArgument(LGetFrameArgument* lir)
 
     if (index->isConstant()) {
         int32_t i = index->toConstant()->toInt32();
-        Address argPtr(StackPointer, sizeof(Value) * i + argvOffset);
+        Address argPtr(masm.getStackPointer(), sizeof(Value) * i + argvOffset);
         masm.loadValue(argPtr, result);
     } else {
         Register i = ToRegister(index);
-        BaseValueIndex argPtr(StackPointer, i, argvOffset);
+        BaseValueIndex argPtr(masm.getStackPointer(), i, argvOffset);
         masm.loadValue(argPtr, result);
     }
 }
@@ -7210,11 +7216,11 @@ CodeGenerator::visitSetFrameArgumentT(LSetFrameArgumentT* lir)
     if (type == MIRType_Double) {
         // Store doubles directly.
         FloatRegister input = ToFloatRegister(lir->input());
-        masm.storeDouble(input, Address(StackPointer, argOffset));
+        masm.storeDouble(input, Address(masm.getStackPointer(), argOffset));
 
     } else {
         Register input = ToRegister(lir->input());
-        masm.storeValue(ValueTypeFromMIRType(type), input, Address(StackPointer, argOffset));
+        masm.storeValue(ValueTypeFromMIRType(type), input, Address(masm.getStackPointer(), argOffset));
     }
 }
 
@@ -7223,7 +7229,7 @@ CodeGenerator:: visitSetFrameArgumentC(LSetFrameArgumentC* lir)
 {
     size_t argOffset = frameSize() + JitFrameLayout::offsetOfActualArgs() +
                        (sizeof(Value) * lir->mir()->argno());
-    masm.storeValue(lir->val(), Address(StackPointer, argOffset));
+    masm.storeValue(lir->val(), Address(masm.getStackPointer(), argOffset));
 }
 
 void
@@ -7232,7 +7238,7 @@ CodeGenerator:: visitSetFrameArgumentV(LSetFrameArgumentV* lir)
     const ValueOperand val = ToValue(lir, LSetFrameArgumentV::Input);
     size_t argOffset = frameSize() + JitFrameLayout::offsetOfActualArgs() +
                        (sizeof(Value) * lir->mir()->argno());
-    masm.storeValue(val, Address(StackPointer, argOffset));
+    masm.storeValue(val, Address(masm.getStackPointer(), argOffset));
 }
 
 typedef bool (*RunOnceScriptPrologueFn)(JSContext*, HandleScript);
@@ -7258,7 +7264,7 @@ CodeGenerator::emitRest(LInstruction* lir, Register array, Register numActuals,
 {
     // Compute actuals() + numFormals.
     size_t actualsOffset = frameSize() + JitFrameLayout::offsetOfActualArgs();
-    masm.movePtr(StackPointer, temp1);
+    masm.moveStackPtrTo(temp1);
     masm.addPtr(Imm32(sizeof(Value) * numFormals + actualsOffset), temp1);
 
     // Compute numActuals - numFormals.
@@ -9225,14 +9231,14 @@ CodeGenerator::visitGetDOMProperty(LGetDOMProperty* ins)
     // We pass the pointer to our out param as an instance of
     // JSJitGetterCallArgs, since on the binary level it's the same thing.
     JS_STATIC_ASSERT(sizeof(JSJitGetterCallArgs) == sizeof(Value*));
-    masm.movePtr(StackPointer, ValueReg);
+    masm.moveStackPtrTo(ValueReg);
 
     masm.Push(ObjectReg);
 
     LoadDOMPrivate(masm, ObjectReg, PrivateReg);
 
     // Rooting will happen at GC time.
-    masm.movePtr(StackPointer, ObjectReg);
+    masm.moveStackPtrTo(ObjectReg);
 
     uint32_t safepointOffset;
     masm.buildFakeExitFrame(JSContextReg, &safepointOffset);
@@ -9251,12 +9257,12 @@ CodeGenerator::visitGetDOMProperty(LGetDOMProperty* ins)
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ins->mir()->fun()));
 
     if (ins->mir()->isInfallible()) {
-        masm.loadValue(Address(StackPointer, IonDOMExitFrameLayout::offsetOfResult()),
+        masm.loadValue(Address(masm.getStackPointer(), IonDOMExitFrameLayout::offsetOfResult()),
                        JSReturnOperand);
     } else {
         masm.branchIfFalseBool(ReturnReg, masm.exceptionLabel());
 
-        masm.loadValue(Address(StackPointer, IonDOMExitFrameLayout::offsetOfResult()),
+        masm.loadValue(Address(masm.getStackPointer(), IonDOMExitFrameLayout::offsetOfResult()),
                        JSReturnOperand);
     }
     masm.adjustStack(IonDOMExitFrameLayout::Size());
@@ -9315,14 +9321,14 @@ CodeGenerator::visitSetDOMProperty(LSetDOMProperty* ins)
     // We pass the pointer to our out param as an instance of
     // JSJitGetterCallArgs, since on the binary level it's the same thing.
     JS_STATIC_ASSERT(sizeof(JSJitSetterCallArgs) == sizeof(Value*));
-    masm.movePtr(StackPointer, ValueReg);
+    masm.moveStackPtrTo(ValueReg);
 
     masm.Push(ObjectReg);
 
     LoadDOMPrivate(masm, ObjectReg, PrivateReg);
 
     // Rooting will happen at GC time.
-    masm.movePtr(StackPointer, ObjectReg);
+    masm.moveStackPtrTo(ObjectReg);
 
     uint32_t safepointOffset;
     masm.buildFakeExitFrame(JSContextReg, &safepointOffset);

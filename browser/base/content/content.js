@@ -164,6 +164,9 @@ let handleContentContextMenu = function (event) {
   let baseURI = doc.baseURI;
   let referrer = doc.referrer;
   let referrerPolicy = doc.referrerPolicy;
+  let frameOuterWindowID = doc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
+                                          .getInterface(Ci.nsIDOMWindowUtils)
+                                          .outerWindowID;
 
   // Media related cache info parent needs for saving
   let contentType = null;
@@ -199,7 +202,8 @@ let handleContentContextMenu = function (event) {
     sendSyncMessage("contextmenu",
                     { editFlags, spellInfo, customMenuItems, addonInfo,
                       principal, docLocation, charSet, baseURI, referrer,
-                      referrerPolicy, contentType, contentDisposition },
+                      referrerPolicy, contentType, contentDisposition,
+                      frameOuterWindowID },
                     { event, popupNode: event.target });
   }
   else {
@@ -568,11 +572,16 @@ let AboutReaderListener = {
     }
   },
   updateReaderButton: function() {
-    if (!ReaderMode.isEnabledForParseOnLoad || this.isAboutReader) {
+    if (!ReaderMode.isEnabledForParseOnLoad || this.isAboutReader ||
+        !(content.document instanceof content.HTMLDocument) ||
+        content.document.mozSyntheticDocument) {
       return;
     }
-    let isArticle = ReaderMode.isProbablyReaderable(content.document);
-    sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: isArticle });
+    // Only send updates when there are articles; there's no point updating with
+    // |false| all the time.
+    if (ReaderMode.isProbablyReaderable(content.document)) {
+      sendAsyncMessage("Reader:UpdateReaderButton", { isArticle: true });
+    }
   },
 };
 AboutReaderListener.init();

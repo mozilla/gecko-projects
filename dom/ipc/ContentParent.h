@@ -35,6 +35,7 @@ class nsIDumpGCAndCCLogsCallback;
 class nsIMemoryReporter;
 class nsITimer;
 class ParentIdleListener;
+class nsIWidget;
 
 namespace mozilla {
 class PRemoteSpellcheckEngineParent;
@@ -144,6 +145,20 @@ public:
 
     static void NotifyUpdatedDictionaries();
 
+#if defined(XP_WIN)
+    /**
+     * Windows helper for firing off an update window request to a plugin
+     * instance.
+     *
+     * aWidget - the eWindowType_plugin_ipc_chrome widget associated with
+     *           this plugin window.
+     */
+    static void SendAsyncUpdate(nsIWidget* aWidget);
+#endif
+
+    // Let managees query if it is safe to send messages.
+    bool IsDestroyed() { return !mIPCOpen; }
+
     virtual bool RecvCreateChildProcess(const IPCTabContext& aContext,
                                         const hal::ProcessPriority& aPriority,
                                         const TabId& aOpenerTabId,
@@ -159,7 +174,7 @@ public:
                                                bool* aHasPlugin,
                                                nsCString* aVersion) override;
 
-    virtual bool RecvLoadPlugin(const uint32_t& aPluginId, nsresult* aRv) override;
+    virtual bool RecvLoadPlugin(const uint32_t& aPluginId, nsresult* aRv, uint32_t* aRunID) override;
     virtual bool RecvConnectPluginBridge(const uint32_t& aPluginId, nsresult* aRv) override;
     virtual bool RecvFindPlugins(const uint32_t& aPluginEpoch,
                                  nsTArray<PluginTag>* aPlugins,
@@ -356,6 +371,7 @@ public:
 
     virtual bool RecvFinishShutdown() override;
 
+    void MaybeInvokeDragSession(TabParent* aParent);
 protected:
     void OnChannelConnected(int32_t pid) override;
     virtual void ActorDestroy(ActorDestroyReason why) override;
@@ -807,6 +823,8 @@ private:
     virtual bool RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
                                                PDocAccessibleParent* aParentDoc, const uint64_t& aParentID) override;
 
+    virtual bool RecvUpdateDropEffect(const uint32_t& aDragAction,
+                                      const uint32_t& aDropEffect) override;
     // If you add strong pointers to cycle collected objects here, be sure to
     // release these objects in ShutDownProcess.  See the comment there for more
     // details.

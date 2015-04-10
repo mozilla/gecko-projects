@@ -1227,16 +1227,6 @@ DrawTargetCG::StrokeRect(const Rect &aRect,
     return;
   }
 
-  MarkChanged();
-
-  CGContextSaveGState(mCg);
-
-  UnboundnessFixer fixer;
-  CGContextRef cg = fixer.Check(mCg, aDrawOptions.mCompositionOp);
-  if (MOZ2D_ERROR_IF(!cg)) {
-    return;
-  }
-
   // Stroking large rectangles with dashes is expensive with CG (fixed
   // overhead based on the number of dashes, regardless of whether the dashes
   // are visible), so we try to reduce the size of the stroked rectangle as
@@ -1248,6 +1238,16 @@ DrawTargetCG::StrokeRect(const Rect &aRect,
     if (rect.IsEmpty()) {
       return;
     }
+  }
+
+  MarkChanged();
+
+  CGContextSaveGState(mCg);
+
+  UnboundnessFixer fixer;
+  CGContextRef cg = fixer.Check(mCg, aDrawOptions.mCompositionOp);
+  if (MOZ2D_ERROR_IF(!cg)) {
+    return;
   }
 
   CGContextSetAlpha(mCg, aDrawOptions.mAlpha);
@@ -1961,6 +1961,10 @@ DrawTargetCG::PushClipRect(const Rect &aRect)
     return;
   }
 
+#ifdef DEBUG
+  mSavedClipBounds.push_back(CGContextGetClipBoundingBox(mCg));
+#endif
+
   CGContextSaveGState(mCg);
 
   /* We go through a bit of trouble to temporarilly set the transform
@@ -1978,6 +1982,10 @@ DrawTargetCG::PushClip(const Path *aPath)
   if (MOZ2D_ERROR_IF(!mCg)) {
     return;
   }
+
+#ifdef DEBUG
+  mSavedClipBounds.push_back(CGContextGetClipBoundingBox(mCg));
+#endif
 
   CGContextSaveGState(mCg);
 
@@ -2013,6 +2021,13 @@ void
 DrawTargetCG::PopClip()
 {
   CGContextRestoreGState(mCg);
+
+#ifdef DEBUG
+  MOZ_ASSERT(!mSavedClipBounds.empty(), "Unbalanced PopClip");
+  MOZ_ASSERT(CGRectEqualToRect(mSavedClipBounds.back(), CGContextGetClipBoundingBox(mCg)),
+             "PopClip didn't restore original clip");
+  mSavedClipBounds.pop_back();
+#endif
 }
 
 void

@@ -122,6 +122,13 @@ XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
                                   "resource://gre/modules/UpdateChannel.jsm");
 #endif
 
+#ifdef MOZ_CRASHREPORTER
+XPCOMUtils.defineLazyModuleGetter(this, "TabCrashReporter",
+                                  "resource:///modules/ContentCrashReporters.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PluginCrashReporter",
+                                  "resource:///modules/ContentCrashReporters.jsm");
+#endif
+
 XPCOMUtils.defineLazyGetter(this, "ShellService", function() {
   try {
     return Cc["@mozilla.org/browser/shell-service;1"].
@@ -731,6 +738,11 @@ BrowserGlue.prototype = {
       iconURL: "resource:///chrome/browser/content/browser/defaultthemes/devedition.icon.png",
       author: vendorShortName,
     });
+#endif
+
+#ifdef MOZ_CRASHREPORTER
+    TabCrashReporter.init();
+    PluginCrashReporter.init();
 #endif
 
     Services.obs.notifyObservers(null, "browser-ui-startup-complete", "");
@@ -2772,7 +2784,12 @@ let E10SUINotification = {
           return;
         }
 
+        // The user has just voluntarily disabled e10s. Subtract one from displayedE10SNotice
+        // so that the next time e10s is activated (either by the user or forced by us), they
+        // can see the notice again.
+        Services.prefs.setIntPref("browser.displayedE10SNotice", this.CURRENT_NOTICE_COUNT - 1);
         Services.prefs.clearUserPref("browser.requestE10sFeedback");
+
         let url = Services.urlFormatter.formatURLPref("app.feedback.baseURL");
         url += "?utm_source=tab&utm_campaign=e10sfeedback";
 

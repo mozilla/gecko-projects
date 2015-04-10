@@ -149,6 +149,7 @@ class RefTest(object):
             break
         dirs.add(path)
         path = os.path.split(path)[0]
+    mozinfo.find_and_update_from_json(*dirs)
 
   def getFullPath(self, path):
     "Get an absolute path relative to self.oldcwd."
@@ -222,6 +223,7 @@ class RefTest(object):
 
     #Don't use auto-enabled e10s
     prefs['browser.tabs.remote.autostart.1'] = False
+    prefs['browser.tabs.remote.autostart.2'] = False
     if options.e10s:
       prefs['browser.tabs.remote.autostart'] = True
 

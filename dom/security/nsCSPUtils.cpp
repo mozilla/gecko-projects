@@ -378,6 +378,21 @@ nsCSPHostSrc::permits(nsIURI* aUri, const nsAString& aNonce, bool aWasRedirected
 
   // 2) host matching: Enforce a single *
   if (mHost.EqualsASCII("*")) {
+    // The single ASTERISK character (*) does not match a URI's scheme of a type
+    // designating a globally unique identifier (such as blob:, data:, or filesystem:)
+    // At the moment firefox does not support filesystem; but for future compatibility
+    // we support it in CSP according to the spec, see: 4.2.2 Matching Source Expressions
+    // Note, that whitelisting any of these schemes would call nsCSPSchemeSrc::permits().
+    bool isBlobScheme =
+      (NS_SUCCEEDED(aUri->SchemeIs("blob", &isBlobScheme)) && isBlobScheme);
+    bool isDataScheme =
+      (NS_SUCCEEDED(aUri->SchemeIs("data", &isDataScheme)) && isDataScheme);
+    bool isFileScheme =
+      (NS_SUCCEEDED(aUri->SchemeIs("filesystem", &isFileScheme)) && isFileScheme);
+
+    if (isBlobScheme || isDataScheme || isFileScheme) {
+      return false;
+    }
     return true;
   }
 
@@ -525,10 +540,11 @@ nsCSPHostSrc::appendPath(const nsAString& aPath)
 /* ===== nsCSPKeywordSrc ===================== */
 
 nsCSPKeywordSrc::nsCSPKeywordSrc(enum CSPKeyword aKeyword)
+ : mKeyword(aKeyword)
+ , mInvalidated(false)
 {
   NS_ASSERTION((aKeyword != CSP_SELF),
                "'self' should have been replaced in the parser");
-  mKeyword = aKeyword;
 }
 
 nsCSPKeywordSrc::~nsCSPKeywordSrc()
@@ -538,8 +554,16 @@ nsCSPKeywordSrc::~nsCSPKeywordSrc()
 bool
 nsCSPKeywordSrc::allows(enum CSPKeyword aKeyword, const nsAString& aHashOrNonce) const
 {
-  CSPUTILSLOG(("nsCSPKeywordSrc::allows, aKeyWord: %s, a HashOrNonce: %s",
-              CSP_EnumToKeyword(aKeyword), NS_ConvertUTF16toUTF8(aHashOrNonce).get()));
+  CSPUTILSLOG(("nsCSPKeywordSrc::allows, aKeyWord: %s, aHashOrNonce: %s, mInvalidated: %s",
+              CSP_EnumToKeyword(aKeyword),
+              NS_ConvertUTF16toUTF8(aHashOrNonce).get(),
+              mInvalidated ? "yes" : "false"));
+  // if unsafe-inline should be ignored, then bail early
+  if (mInvalidated) {
+    NS_ASSERTION(mKeyword == CSP_UNSAFE_INLINE,
+                 "should only invalidate unsafe-inline within script-src");
+    return false;
+  }
   return mKeyword == aKeyword;
 }
 
@@ -547,6 +571,14 @@ void
 nsCSPKeywordSrc::toString(nsAString& outStr) const
 {
   outStr.AppendASCII(CSP_EnumToKeyword(mKeyword));
+}
+
+void
+nsCSPKeywordSrc::invalidate()
+{
+  mInvalidated = true;
+  NS_ASSERTION(mInvalidated == CSP_UNSAFE_INLINE,
+               "invalidate 'unsafe-inline' only within script-src");
 }
 
 /* ===== nsCSPNonceSrc ==================== */

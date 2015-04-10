@@ -38,6 +38,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/DataStoreService.h"
+#include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DOMStorageIPC.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/File.h"
@@ -103,6 +104,7 @@
 #include "nsIDocument.h"
 #include "nsIDOMGeoGeolocation.h"
 #include "nsIDOMGeoPositionError.h"
+#include "nsIDragService.h"
 #include "mozilla/dom/WakeLock.h"
 #include "nsIDOMWindow.h"
 #include "nsIExternalProtocolService.h"
@@ -874,6 +876,27 @@ ContentParent::GetInitialProcessPriority(Element* aFrameElement)
                PROCESS_PRIORITY_FOREGROUND;
 }
 
+#if defined(XP_WIN)
+extern const wchar_t* kPluginWidgetContentParentProperty;
+
+/*static*/ void
+ContentParent::SendAsyncUpdate(nsIWidget* aWidget)
+{
+  if (!aWidget || aWidget->Destroyed()) {
+    return;
+  }
+  printf_stderr("TabParent::SendAsyncUpdate()\n");
+  // Fire off an async request to the plugin to paint its window
+  HWND hwnd = (HWND)aWidget->GetNativeData(NS_NATIVE_WINDOW);
+  NS_ASSERTION(hwnd, "Expected valid hwnd value.");
+  ContentParent* cp = reinterpret_cast<ContentParent*>(
+    ::GetPropW(hwnd, kPluginWidgetContentParentProperty));
+  if (cp && !cp->IsDestroyed()) {
+    cp->SendUpdateWindow((uintptr_t)hwnd);
+  }
+}
+#endif // defined(XP_WIN)
+
 bool
 ContentParent::PreallocatedProcessReady()
 {
@@ -1001,17 +1024,21 @@ ContentParent::RecvGetGMPPluginVersionForAPI(const nsCString& aAPI,
 }
 
 bool
-ContentParent::RecvLoadPlugin(const uint32_t& aPluginId, nsresult* aRv)
+ContentParent::RecvLoadPlugin(const uint32_t& aPluginId, nsresult* aRv, uint32_t* aRunID)
 {
     *aRv = NS_OK;
-    return mozilla::plugins::SetupBridge(aPluginId, this, false, aRv);
+    return mozilla::plugins::SetupBridge(aPluginId, this, false, aRv, aRunID);
 }
 
 bool
 ContentParent::RecvConnectPluginBridge(const uint32_t& aPluginId, nsresult* aRv)
 {
     *aRv = NS_OK;
-    return mozilla::plugins::SetupBridge(aPluginId, this, true, aRv);
+    // We don't need to get the run ID for the plugin, since we already got it
+    // in the first call to SetupBridge in RecvLoadPlugin, so we pass in a dummy
+    // pointer and just throw it away.
+    uint32_t dummy = 0;
+    return mozilla::plugins::SetupBridge(aPluginId, this, true, aRv, &dummy);
 }
 
 bool
@@ -4780,6 +4807,62 @@ ContentParent::RecvSetOfflinePermission(const Principal& aPrincipal)
     nsIPrincipal* principal = aPrincipal;
     nsContentUtils::MaybeAllowOfflineAppByDefault(principal, nullptr);
     return true;
+}
+
+void
+ContentParent::MaybeInvokeDragSession(TabParent* aParent)
+{
+  nsCOMPtr<nsIDragService> dragService =
+    do_GetService("@mozilla.org/widget/dragservice;1");
+  if (dragService && dragService->MaybeAddChildProcess(this)) {
+    // We need to send transferable data to child process.
+    nsCOMPtr<nsIDragSession> session;
+    dragService->GetCurrentSession(getter_AddRefs(session));
+    if (session) {
+      nsTArray<IPCDataTransfer> dataTransfers;
+      nsCOMPtr<nsIDOMDataTransfer> domTransfer;
+      session->GetDataTransfer(getter_AddRefs(domTransfer));
+      nsCOMPtr<DataTransfer> transfer = do_QueryInterface(domTransfer);
+      if (!transfer) {
+        // Pass NS_DRAGDROP_DROP to get DataTransfer with external
+        // drag formats cached.
+        transfer = new DataTransfer(nullptr, NS_DRAGDROP_DROP, true, -1);
+        session->SetDataTransfer(transfer);
+      }
+      // Note, even though this fills the DataTransfer object with
+      // external data, the data is usually transfered over IPC lazily when
+      // needed.
+      transfer->FillAllExternalData();
+      nsCOMPtr<nsILoadContext> lc = aParent ?
+                                     aParent->GetLoadContext() : nullptr;
+      nsCOMPtr<nsISupportsArray> transferables =
+        transfer->GetTransferables(lc);
+      nsContentUtils::TransferablesToIPCTransferables(transferables,
+                                                      dataTransfers,
+                                                      nullptr,
+                                                      this);
+      uint32_t action;
+      session->GetDragAction(&action);
+      mozilla::unused << SendInvokeDragSession(dataTransfers, action);
+    }
+  }
+}
+
+bool
+ContentParent::RecvUpdateDropEffect(const uint32_t& aDragAction,
+                                    const uint32_t& aDropEffect)
+{
+  nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
+  if (dragSession) {
+    dragSession->SetDragAction(aDragAction);
+    nsCOMPtr<nsIDOMDataTransfer> dt;
+    dragSession->GetDataTransfer(getter_AddRefs(dt));
+    if (dt) {
+      dt->SetDropEffectInt(aDropEffect);
+    }
+    dragSession->UpdateDragEffect();
+  }
+  return true;
 }
 
 } // namespace dom

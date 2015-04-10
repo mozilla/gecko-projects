@@ -347,6 +347,10 @@ MaybeFoldConditionBlock(MIRGraph& graph, MBasicBlock* initialBlock)
                      : finalTest->ifFalse();
         phiBlock->removePredecessor(trueBranch);
         graph.removeBlock(trueBranch);
+    } else if (initialTest->input() == trueResult) {
+        trueTarget = finalTest->ifTrue();
+        phiBlock->removePredecessor(trueBranch);
+        graph.removeBlock(trueBranch);
     } else {
         UpdateTestSuccessors(graph.alloc(), trueBranch, trueResult,
                              finalTest->ifTrue(), finalTest->ifFalse(), testBlock);
@@ -357,6 +361,10 @@ MaybeFoldConditionBlock(MIRGraph& graph, MBasicBlock* initialBlock)
         falseTarget = falseResult->constantToBoolean()
                       ? finalTest->ifTrue()
                       : finalTest->ifFalse();
+        phiBlock->removePredecessor(falseBranch);
+        graph.removeBlock(falseBranch);
+    } else if (initialTest->input() == falseResult) {
+        falseTarget = finalTest->ifFalse();
         phiBlock->removePredecessor(falseBranch);
         graph.removeBlock(falseBranch);
     } else {
@@ -2553,7 +2561,8 @@ TryOptimizeLoadObjectOrNull(MDefinition* def, MDefinitionVector* peliminateList)
                 return false;
             break;
           case MDefinition::Op_Unbox:
-            MOZ_ASSERT(ndef->type() == MIRType_Object);
+            if (ndef->type() != MIRType_Object)
+                return true;
             break;
           case MDefinition::Op_TypeBarrier:
             // For now, only handle type barriers which are not consumed

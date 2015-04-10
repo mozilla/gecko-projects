@@ -16,7 +16,7 @@
 #include "signaling/src/jsep/JsepTransport.h"
 #include "signaling/src/common/PtrVector.h"
 
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
 #include "MediaStreamTrack.h"
 #include "nsIPrincipal.h"
 #include "nsIDocument.h"
@@ -196,6 +196,22 @@ MediaPipelineFactory::CreateOrGetTransportFlow(
   rv = dtls->SetSrtpCiphers(srtpCiphers);
   if (NS_FAILED(rv)) {
     MOZ_MTLOG(ML_ERROR, "Couldn't set SRTP ciphers");
+    return rv;
+  }
+
+  // Always permits negotiation of the confidential mode.
+  // Only allow non-confidential (which is an allowed default),
+  // if we aren't confidential.
+  std::set<std::string> alpn;
+  std::string alpnDefault = "";
+  alpn.insert("c-webrtc");
+  if (!mPC->PrivacyRequested()) {
+    alpnDefault = "webrtc";
+    alpn.insert(alpnDefault);
+  }
+  rv = dtls->SetAlpn(alpn, alpnDefault);
+  if (NS_FAILED(rv)) {
+    MOZ_MTLOG(ML_ERROR, "Couldn't set ALPN");
     return rv;
   }
 
@@ -503,7 +519,7 @@ MediaPipelineFactory::CreateMediaPipelineSending(
       aRtcpFlow,
       aFilter);
 
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
   // implement checking for peerIdentity (where failure == black/silence)
   nsIDocument* doc = mPC->GetWindow()->GetExtantDoc();
   if (doc) {
@@ -771,7 +787,7 @@ nsresult
 MediaPipelineFactory::ConfigureVideoCodecMode(const JsepTrack& aTrack,
                                               VideoSessionConduit& aConduit)
 {
-#ifdef MOZILLA_INTERNAL_API
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
   nsRefPtr<LocalSourceStreamInfo> stream =
     mPCMedia->GetLocalStreamById(aTrack.GetStreamId());
 
@@ -842,7 +858,7 @@ MediaPipelineFactory::EnsureExternalCodec(VideoSessionConduit& aConduit,
 #ifdef MOZ_WEBRTC_OMX
       encoder =
           OMXVideoCodec::CreateEncoder(OMXVideoCodec::CodecType::CODEC_H264);
-#else
+#elif !defined(MOZILLA_XPCOMRT_API)
       encoder = GmpVideoCodec::CreateEncoder();
 #endif
       if (encoder) {
@@ -851,11 +867,11 @@ MediaPipelineFactory::EnsureExternalCodec(VideoSessionConduit& aConduit,
         return kMediaConduitInvalidSendCodec;
       }
     } else {
-      VideoDecoder* decoder;
+      VideoDecoder* decoder = nullptr;
 #ifdef MOZ_WEBRTC_OMX
       decoder =
           OMXVideoCodec::CreateDecoder(OMXVideoCodec::CodecType::CODEC_H264);
-#else
+#elif !defined(MOZILLA_XPCOMRT_API)
       decoder = GmpVideoCodec::CreateDecoder();
 #endif
       if (decoder) {

@@ -90,8 +90,8 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 #ifdef JS_CODEGEN_X86
     propertiesReg = eax;
     newKindReg = ecx;
-    masm.loadPtr(Address(StackPointer, sizeof(void*)), propertiesReg);
-    masm.loadPtr(Address(StackPointer, 2 * sizeof(void*)), newKindReg);
+    masm.loadPtr(Address(masm.getStackPointer(), sizeof(void*)), propertiesReg);
+    masm.loadPtr(Address(masm.getStackPointer(), 2 * sizeof(void*)), newKindReg);
 #else
     propertiesReg = IntArgReg0;
     newKindReg = IntArgReg1;
@@ -108,6 +108,10 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
     LiveGeneralRegisterSet savedNonVolatileRegisters = SavedNonVolatileRegisters(regs);
     for (GeneralRegisterForwardIterator iter(savedNonVolatileRegisters); iter.more(); ++iter)
         masm.Push(*iter);
+
+    // The scratch double register might be used by MacroAssembler methods.
+    if (ScratchDoubleReg.volatile_())
+        masm.push(ScratchDoubleReg);
 
     Label failure, tenuredObject, allocated;
     masm.branch32(Assembler::NotEqual, newKindReg, Imm32(GenericObject), &tenuredObject);
@@ -206,6 +210,8 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
         masm.movePtr(object, ReturnReg);
 
     // Restore non-volatile registers which were saved on entry.
+    if (ScratchDoubleReg.volatile_())
+        masm.pop(ScratchDoubleReg);
     for (GeneralRegisterBackwardIterator iter(savedNonVolatileRegisters); iter.more(); ++iter)
         masm.Pop(*iter);
 
@@ -437,7 +443,7 @@ UnboxedLayout::makeNativeGroup(JSContext* cx, ObjectGroup* group)
 
         PlainObject* templateObject = NewObjectWithGroup<PlainObject>(cx, replacementNewGroup,
                                                                       layout.getAllocKind(),
-                                                                      MaybeSingletonObject);
+                                                                      TenuredObject);
         if (!templateObject)
             return false;
 
@@ -650,7 +656,10 @@ UnboxedPlainObject::createWithProperties(ExclusiveContext* cx, HandleObjectGroup
     }
 
 #ifndef JS_CODEGEN_NONE
-    if (cx->isJSContext() && !layout.constructorCode()) {
+    if (cx->isJSContext() &&
+        !layout.constructorCode() &&
+        cx->asJSContext()->runtime()->jitSupportsFloatingPoint)
+    {
         if (!UnboxedLayout::makeConstructorCode(cx->asJSContext(), group))
             return nullptr;
     }

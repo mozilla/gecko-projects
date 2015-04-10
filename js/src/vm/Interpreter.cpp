@@ -53,12 +53,14 @@
 #include "vm/ScopeObject-inl.h"
 #include "vm/Stack-inl.h"
 
-#if defined(XP_UNIX)
+#if defined(XP_MACOSX)
+#include <mach/mach.h>
+#elif defined(XP_UNIX)
 #include <sys/resource.h>
 #elif defined(XP_WIN)
-#include <Processthreadsapi.h>
-#include <Windows.h>
-#endif // defined(XP_UNIX) || defined(XP_WIN)
+#include <processthreadsapi.h>
+#include <windows.h>
+#endif // defined(XP_MACOSX) || defined(XP_UNIX) || defined(XP_WIN)
 
 using namespace js;
 using namespace js::gc;
@@ -522,31 +524,52 @@ struct AutoStopwatch final
         }
     }
 
-    // Get the OS-reported time spent in userland/systemland,
-    // in microseconds.
-    bool getTimes(uint64_t *userTime, uint64_t *systemTime) const {
+    // Get the OS-reported time spent in userland/systemland, in
+    // microseconds. On most platforms, this data is per-thread,
+    // but on some platforms we need to fall back to per-process.
+    bool getTimes(uint64_t* userTime, uint64_t* systemTime) const {
         MOZ_ASSERT(userTime);
         MOZ_ASSERT(systemTime);
 
-#if defined(XP_UNIX)
+#if defined(XP_MACOSX)
+        // On MacOS X, to get we per-thread data, we need to
+        // reach into the kernel.
 
+        mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+        thread_basic_info_data_t info;
+        mach_port_t port = mach_thread_self();
+        kern_return_t err =
+            thread_info(/* [in] targeted thread*/ port,
+                        /* [in] nature of information*/ THREAD_BASIC_INFO,
+                        /* [out] thread information */  (thread_info_t)&info,
+                        /* [inout] number of items */   &count);
+
+        // We do not need ability to communicate with the thread, so
+        // let's release the port.
+        mach_port_deallocate(mach_task_self(), port);
+
+        if (err != KERN_SUCCESS)
+            return false;
+
+        *userTime = info.user_time.microseconds + info.user_time.seconds * 1000000;
+        *systemTime = info.system_time.microseconds + info.system_time.seconds * 1000000;
+
+#elif defined(XP_UNIX)
         struct rusage rusage;
 #if defined(RUSAGE_THREAD)
         // Under Linux, we can obtain per-thread statistics
         int err = getrusage(RUSAGE_THREAD, &rusage);
 #else
-        // Under other Unices, including MacOS X, we need to
-        // do with more noisy per-process statistics.
+        // Under other Unices, we need to do with more noisy
+        // per-process statistics.
         int err = getrusage(RUSAGE_SELF, &rusage);
 #endif // defined(RUSAGE_THREAD)
-        MOZ_ASSERT(!err);
+
         if (err)
             return false;
 
-        *userTime = rusage.ru_utime.tv_usec
-            + rusage.ru_utime.tv_sec * 1000000;
-        *systemTime = rusage.ru_stime.tv_usec
-            + rusage.ru_stime.tv_sec * 1000000;
+        *userTime = rusage.ru_utime.tv_usec + rusage.ru_utime.tv_sec * 1000000;
+        *systemTime = rusage.ru_stime.tv_usec + rusage.ru_stime.tv_sec * 1000000;
 
 #elif defined(XP_WIN)
         // Under Windows, we can obtain per-thread statistics,
@@ -559,7 +582,7 @@ struct AutoStopwatch final
         BOOL success = GetThreadTimes(GetCurrentThread(),
                                       &creationFileTime, &exitFileTime,
                                       &kernelFileTime, &userFileTime);
-        MOZ_ASSERT(success);
+
         if (!success)
             return false;
 
@@ -575,7 +598,7 @@ struct AutoStopwatch final
         // Convert 100 ns to 1 us, make sure that the result is monotonic
         *userTime = runtime_-> stopwatch.userTimeFix.monotonize(userTimeInt.QuadPart / 10);
 
-#endif // defined(XP_UNIX) || defined(XP_WIN)
+#endif // defined(XP_MACOSX) || defined(XP_UNIX) || defined(XP_WIN)
 
         return true;
     }
@@ -1604,9 +1627,12 @@ ModOperation(JSContext* cx, HandleValue lhs, HandleValue rhs, MutableHandleValue
 }
 
 static MOZ_ALWAYS_INLINE bool
-SetObjectElementOperation(JSContext* cx, Handle<JSObject*> obj, HandleId id, const Value& value,
-                          bool strict, JSScript* script = nullptr, jsbytecode* pc = nullptr)
+SetObjectElementOperation(JSContext* cx, HandleObject obj, HandleValue receiver, HandleId id,
+                          const Value& value, bool strict, JSScript* script = nullptr,
+                          jsbytecode* pc = nullptr)
 {
+    // receiver != obj happens only at super[expr], where we expect to find the property
+    // People probably aren't building hashtables with |super| anyway.
     TypeScript::MonitorAssign(cx, obj, id);
 
     if (obj->isNative() && JSID_IS_INT(id)) {
@@ -1623,7 +1649,9 @@ SetObjectElementOperation(JSContext* cx, Handle<JSObject*> obj, HandleId id, con
         return false;
 
     RootedValue tmp(cx, value);
-    return PutProperty(cx, obj, id, tmp, strict);
+    ObjectOpResult result;
+    return SetProperty(cx, obj, id, tmp, receiver, result) &&
+           result.checkStrictErrorOrWarning(cx, obj, id, strict);
 }
 
 static MOZ_NEVER_INLINE bool
@@ -1886,18 +1914,10 @@ CASE(EnableInterruptsPseudoOpcode)
 /* Various 1-byte no-ops. */
 CASE(JSOP_NOP)
 CASE(JSOP_UNUSED2)
-CASE(JSOP_UNUSED92)
-CASE(JSOP_UNUSED103)
-CASE(JSOP_UNUSED104)
-CASE(JSOP_UNUSED105)
-CASE(JSOP_UNUSED107)
-CASE(JSOP_UNUSED125)
 CASE(JSOP_UNUSED126)
 CASE(JSOP_UNUSED148)
 CASE(JSOP_BACKPATCH)
 CASE(JSOP_UNUSED150)
-CASE(JSOP_UNUSED158)
-CASE(JSOP_UNUSED159)
 CASE(JSOP_UNUSED161)
 CASE(JSOP_UNUSED162)
 CASE(JSOP_UNUSED163)
@@ -2661,6 +2681,23 @@ CASE(JSOP_CALLPROP)
 }
 END_CASE(JSOP_GETPROP)
 
+CASE(JSOP_GETPROP_SUPER)
+{
+    RootedObject& receiver = rootObject0;
+    RootedObject& obj = rootObject1;
+
+    FETCH_OBJECT(cx, -2, receiver);
+    obj = &REGS.sp[-1].toObject();
+
+    MutableHandleValue rref = REGS.stackHandleAt(-2);
+
+    if (!GetProperty(cx, obj, receiver, script->getName(REGS.pc), rref))
+        goto error;
+
+    REGS.sp--;
+}
+END_CASE(JSOP_GETPROP_SUPER)
+
 CASE(JSOP_GETXPROP)
 {
     RootedObject& obj = rootObject0;
@@ -2730,6 +2767,38 @@ CASE(JSOP_STRICTSETPROP)
 }
 END_CASE(JSOP_SETPROP)
 
+CASE(JSOP_SETPROP_SUPER)
+CASE(JSOP_STRICTSETPROP_SUPER)
+{
+    static_assert(JSOP_SETPROP_SUPER_LENGTH == JSOP_STRICTSETPROP_SUPER_LENGTH,
+                  "setprop-super and strictsetprop-super must be the same size");
+
+
+    RootedValue& receiver = rootValue0;
+    receiver = REGS.sp[-3];
+    
+    RootedObject& obj = rootObject0;
+    obj = &REGS.sp[-2].toObject();
+
+    RootedValue& rval = rootValue1;
+    rval = REGS.sp[-1];
+
+    RootedId& id = rootId0;
+    id = NameToId(script->getName(REGS.pc));
+
+    ObjectOpResult result;
+    if (!SetProperty(cx, obj, id, rval, receiver, result))
+        goto error;
+
+    bool strict = JSOp(*REGS.pc) == JSOP_STRICTSETPROP_SUPER;
+    if (!result.checkStrictErrorOrWarning(cx, obj, id, strict))
+        goto error;
+
+    REGS.sp[-3] = REGS.sp[-1];
+    REGS.sp -= 2;
+}
+END_CASE(JSOP_SETPROP_SUPER)
+
 CASE(JSOP_GETELEM)
 CASE(JSOP_CALLELEM)
 {
@@ -2751,6 +2820,27 @@ CASE(JSOP_CALLELEM)
 }
 END_CASE(JSOP_GETELEM)
 
+CASE(JSOP_GETELEM_SUPER)
+{
+    HandleValue rval = REGS.stackHandleAt(-3);
+    RootedObject& receiver = rootObject0;
+    FETCH_OBJECT(cx, -2, receiver);
+    RootedObject& obj = rootObject1;
+    obj = &REGS.sp[-1].toObject();
+
+    MutableHandleValue res = REGS.stackHandleAt(-3);
+
+    // Since we have asserted that obj has to be an object, it cannot be
+    // either optimized arguments, or indeed any primitive. This simplifies
+    // our task some.
+    if (!GetObjectElementOperation(cx, JSOp(*REGS.pc), obj, receiver, rval, res))
+        goto error;
+
+    TypeScript::Monitor(cx, script, REGS.pc, res);
+    REGS.sp -= 2;
+}
+END_CASE(JSOP_GETELEM_SUPER)
+
 CASE(JSOP_SETELEM)
 CASE(JSOP_STRICTSETELEM)
 {
@@ -2761,12 +2851,36 @@ CASE(JSOP_STRICTSETELEM)
     RootedId& id = rootId0;
     FETCH_ELEMENT_ID(-2, id);
     Value& value = REGS.sp[-1];
-    if (!SetObjectElementOperation(cx, obj, id, value, *REGS.pc == JSOP_STRICTSETELEM))
+    RootedValue& receiver = rootValue0;
+    receiver = ObjectValue(*obj);
+    if (!SetObjectElementOperation(cx, obj, receiver, id, value, *REGS.pc == JSOP_STRICTSETELEM))
         goto error;
     REGS.sp[-3] = value;
     REGS.sp -= 2;
 }
 END_CASE(JSOP_SETELEM)
+
+CASE(JSOP_SETELEM_SUPER)
+CASE(JSOP_STRICTSETELEM_SUPER)
+{
+    static_assert(JSOP_SETELEM_SUPER_LENGTH == JSOP_STRICTSETELEM_SUPER_LENGTH,
+                  "setelem-super and strictsetelem-super must be the same size");
+
+    RootedId& id = rootId0;
+    FETCH_ELEMENT_ID(-4, id);
+    RootedValue& receiver = rootValue0;
+    receiver = REGS.sp[-3];
+    RootedObject& obj = rootObject1;
+    obj = &REGS.sp[-2].toObject();
+    Value& value = REGS.sp[-1];
+
+    bool strict = JSOp(*REGS.pc) == JSOP_STRICTSETELEM_SUPER;
+    if (!SetObjectElementOperation(cx, obj, receiver, id, value, strict))
+        goto error;
+    REGS.sp[-4] = value;
+    REGS.sp -= 3;
+}
+END_CASE(JSOP_SETELEM_SUPER)
 
 CASE(JSOP_EVAL)
 CASE(JSOP_STRICTEVAL)
@@ -3038,7 +3152,7 @@ CASE(JSOP_OBJECT)
     RootedObject& ref = rootObject0;
     ref = script->getObject(REGS.pc);
     if (JS::CompartmentOptionsRef(cx).cloneSingletons()) {
-        JSObject* obj = DeepCloneObjectLiteral(cx, ref, js::MaybeSingletonObject);
+        JSObject* obj = DeepCloneObjectLiteral(cx, ref, TenuredObject);
         if (!obj)
             goto error;
         PUSH_OBJECT(*obj);
@@ -3818,8 +3932,8 @@ CASE(JSOP_CLASSHERITAGE)
         }
     }
 
-    REGS.sp[-1] = objProto;
-    PUSH_OBJECT(*funcProto);
+    REGS.sp[-1].setObject(*funcProto);
+    PUSH_COPY(objProto);
 }
 END_CASE(JSOP_CLASSHERITAGE)
 
@@ -3853,6 +3967,55 @@ CASE(JSOP_OBJWITHPROTO)
     REGS.sp[-1].setObject(*obj);
 }
 END_CASE(JSOP_OBJWITHPROTO)
+
+CASE(JSOP_INITHOMEOBJECT)
+{
+    MOZ_ASSERT(REGS.stackDepth() >= 2);
+
+    /* Load the function to be initialized */
+    RootedFunction& func = rootFunction0;
+    func = &REGS.sp[-1].toObject().as<JSFunction>();
+    MOZ_ASSERT(func->isMethod());
+
+    /* Load the home object */
+    RootedNativeObject& obj = rootNativeObject0;
+    obj = &REGS.sp[-2].toObject().as<NativeObject>();
+    MOZ_ASSERT(obj->is<PlainObject>() || obj->is<JSFunction>());
+
+    func->setExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT, ObjectValue(*obj));
+}
+END_CASE(JSOP_INITHOMEOBJECT)
+
+CASE(JSOP_SUPERBASE)
+{
+    ScopeIter si(cx, REGS.fp()->scopeChain(), REGS.fp()->script()->innermostStaticScope(REGS.pc));
+    for (; !si.done(); ++si) {
+        if (si.hasScopeObject() && si.type() == ScopeIter::Call) {
+            JSFunction& callee = si.scope().as<CallObject>().callee();
+            MOZ_ASSERT(callee.isMethod());
+            MOZ_ASSERT(callee.nonLazyScript()->needsHomeObject());
+            const Value& homeObjVal = callee.getExtendedSlot(FunctionExtended::METHOD_HOMEOBJECT_SLOT);
+
+            RootedObject& homeObj = rootObject0;
+            homeObj = &homeObjVal.toObject();
+
+            RootedObject& superBase = rootObject1;
+            if (!GetPrototype(cx, homeObj, &superBase))
+                goto error;
+
+            if (!superBase) {
+                JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_CONVERT_TO,
+                                     "null", "object");
+                goto error;
+            }
+            PUSH_OBJECT(*superBase);
+            break;
+        }
+    }
+    if (si.done())
+        MOZ_CRASH("Unexpected scope chain in superbase");
+}
+END_CASE(JSOP_SUPERBASE)
 
 DEFAULT()
 {
@@ -4229,7 +4392,8 @@ js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleV
     RootedId id(cx);
     if (!ValueToId<CanGC>(cx, index, &id))
         return false;
-    return SetObjectElementOperation(cx, obj, id, value, strict);
+    RootedValue receiver(cx, ObjectValue(*obj));
+    return SetObjectElementOperation(cx, obj, receiver, id, value, strict);
 }
 
 bool
@@ -4240,7 +4404,8 @@ js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index, HandleV
     RootedId id(cx);
     if (!ValueToId<CanGC>(cx, index, &id))
         return false;
-    return SetObjectElementOperation(cx, obj, id, value, strict, script, pc);
+    RootedValue receiver(cx, ObjectValue(*obj));
+    return SetObjectElementOperation(cx, obj, receiver, id, value, strict, script, pc);
 }
 
 bool

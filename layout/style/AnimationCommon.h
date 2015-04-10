@@ -35,14 +35,6 @@ namespace mozilla {
 class RestyleTracker;
 struct AnimationPlayerCollection;
 
-// Options to set when fetching animations to run on the compositor.
-enum class GetCompositorAnimationOptions {
-  // When fetching compositor animations, if there are any such animations,
-  // also let the ActiveLayerTracker know at the same time.
-  NotifyActiveLayerTracker = 1 << 0
-};
-MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(GetCompositorAnimationOptions)
-
 namespace css {
 
 bool IsGeometricProperty(nsCSSProperty aProperty);
@@ -173,8 +165,7 @@ protected:
   static AnimationPlayerCollection*
   GetAnimationsForCompositor(nsIContent* aContent,
                              nsIAtom* aElementProperty,
-                             nsCSSProperty aProperty,
-                             GetCompositorAnimationOptions aFlags);
+                             nsCSSProperty aProperty);
 
   PRCList mElementCollections;
   nsPresContext *mPresContext; // weak (non-null from ctor to Disconnect)
@@ -430,9 +421,10 @@ struct AnimationPlayerCollection : public PRCList
 
   // Returns true if there is an animation that has yet to finish.
   bool HasCurrentAnimations() const;
-  // Returns true if there is an animation of the specified property that
-  // has yet to finish.
-  bool HasCurrentAnimationsForProperty(nsCSSProperty aProperty) const;
+  // Returns true if there is an animation of any of the specified properties
+  // that has yet to finish.
+  bool HasCurrentAnimationsForProperties(const nsCSSProperty* aProperties,
+                                         size_t aPropertyCount) const;
 
   // The refresh time associated with mStyleRule.
   TimeStamp mStyleRuleRefreshTime;

@@ -35,7 +35,7 @@ using layers::Image;
 using layers::LayerManager;
 using layers::LayersBackend;
 
-class VP8Sample : public MP4Sample
+class VP8Sample : public MediaRawData
 {
 public:
   VP8Sample(int64_t aTimestamp,
@@ -44,21 +44,13 @@ public:
             uint8_t* aData,
             size_t aSize,
             bool aSyncPoint)
+    : MediaRawData(aData, aSize)
   {
-    decode_timestamp = -1;
-    composition_timestamp = aTimestamp;
-    duration = aDuration;
-    byte_offset = aByteOffset;
-    is_sync_point = aSyncPoint;
-
-    data =  new uint8_t[aSize];
-    size = aSize;
-    memmove(data, aData, size);
-  }
-
-  virtual ~VP8Sample()
-  {
-    delete data;
+    mTimecode = -1;
+    mTime = aTimestamp;
+    mDuration = aDuration;
+    mOffset = aByteOffset;
+    mKeyframe = aSyncPoint;
   }
 };
 
@@ -116,7 +108,7 @@ IntelWebMVideoDecoder::IsSupportedVideoMimeType(const nsACString& aMimeType)
 {
   return (aMimeType.EqualsLiteral("video/webm; codecs=vp8") ||
           aMimeType.EqualsLiteral("video/webm; codecs=vp9")) &&
-         mPlatform->SupportsVideoMimeType(aMimeType);
+         mPlatform->SupportsMimeType(aMimeType);
 }
 
 nsresult
@@ -147,11 +139,12 @@ IntelWebMVideoDecoder::Init(unsigned int aWidth, unsigned int aHeight)
   if (!IsSupportedVideoMimeType(video.mime_type)) {
     return NS_ERROR_FAILURE;
   }
-  mMediaDataDecoder = mPlatform->CreateVideoDecoder(video,
-                                                    mReader->GetLayersBackendType(),
-                                                    mReader->GetDecoder()->GetImageContainer(),
-                                                    mTaskQueue,
-                                                    this);
+  mMediaDataDecoder =
+    mPlatform->CreateDecoder(video,
+                             mTaskQueue,
+                             this,
+                             mReader->GetLayersBackendType(),
+                             mReader->GetDecoder()->GetImageContainer());
   if (!mMediaDataDecoder) {
     return NS_ERROR_FAILURE;
   }
@@ -161,7 +154,7 @@ IntelWebMVideoDecoder::Init(unsigned int aWidth, unsigned int aHeight)
 }
 
 bool
-IntelWebMVideoDecoder::Demux(nsAutoPtr<VP8Sample>& aSample, bool* aEOS)
+IntelWebMVideoDecoder::Demux(nsRefPtr<VP8Sample>& aSample, bool* aEOS)
 {
   nsAutoRef<NesteggPacketHolder> holder(mReader->NextPacket(WebMReader::VIDEO));
   if (!holder) {
@@ -231,6 +224,9 @@ IntelWebMVideoDecoder::Demux(nsAutoPtr<VP8Sample>& aSample, bool* aEOS)
                             data,
                             length,
                             si.is_kf);
+    if (!aSample->mData) {
+      return false;
+    }
   }
 
   return true;
@@ -256,7 +252,7 @@ IntelWebMVideoDecoder::Decode()
            !mEOS) {
       mMonitor.AssertCurrentThreadOwns();
       mMonitor.Unlock();
-      nsAutoPtr<VP8Sample> compressed(PopSample());
+      nsRefPtr<VP8Sample> compressed(PopSample());
       if (!compressed) {
         // EOS, or error. Let the state machine know there are no more
         // frames coming.
@@ -271,7 +267,7 @@ IntelWebMVideoDecoder::Decode()
       } else {
 #ifdef LOG_SAMPLE_DECODE
         LOG("PopSample %s time=%lld dur=%lld", TrackTypeToStr(aTrack),
-            compressed->composition_timestamp, compressed->duration);
+            compressed->mTime, compressed->mDuration);
 #endif
         mMonitor.Lock();
         mDrainComplete = false;
@@ -281,10 +277,6 @@ IntelWebMVideoDecoder::Decode()
         if (NS_FAILED(mMediaDataDecoder->Input(compressed))) {
           return false;
         }
-        // If Input() failed, we let the auto pointer delete |compressed|.
-        // Otherwise, we assume the decoder will delete it when it's finished
-        // with it.
-        compressed.forget();
       }
       mMonitor.Lock();
     }
@@ -316,14 +308,14 @@ IntelWebMVideoDecoder::SkipVideoDemuxToNextKeyFrame(int64_t aTimeThreshold, uint
 
   // Loop until we reach the next keyframe after the threshold.
   while (true) {
-    nsAutoPtr<VP8Sample> compressed(PopSample());
+    nsRefPtr<VP8Sample> compressed(PopSample());
     if (!compressed) {
       // EOS, or error. Let the state machine know.
       return false;
     }
     aParsed++;
-    if (!compressed->is_sync_point ||
-        compressed->composition_timestamp < aTimeThreshold) {
+    if (!compressed->mKeyframe ||
+        compressed->mTime < aTimeThreshold) {
       continue;
     }
     mQueuedVideoSample = compressed;
@@ -366,15 +358,14 @@ IntelWebMVideoDecoder::DecodeVideoFrame(bool& aKeyframeSkip,
   return rv;
 }
 
-VP8Sample*
+already_AddRefed<VP8Sample>
 IntelWebMVideoDecoder::PopSample()
 {
-  VP8Sample* sample = nullptr;
   if (mQueuedVideoSample) {
     return mQueuedVideoSample.forget();
   }
+  nsRefPtr<VP8Sample> sample;
   while (mSampleQueue.empty()) {
-    nsAutoPtr<VP8Sample> sample;
     bool eos = false;
     bool ok = Demux(sample, &eos);
     if (!ok || eos) {
@@ -388,7 +379,7 @@ IntelWebMVideoDecoder::PopSample()
   MOZ_ASSERT(!mSampleQueue.empty());
   sample = mSampleQueue.front();
   mSampleQueue.pop_front();
-  return sample;
+  return sample.forget();
 }
 
 void

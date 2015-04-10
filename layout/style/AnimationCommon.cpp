@@ -136,9 +136,8 @@ CommonAnimationManager::NeedsRefresh() const
 
 AnimationPlayerCollection*
 CommonAnimationManager::GetAnimationsForCompositor(nsIContent* aContent,
-  nsIAtom* aElementProperty,
-  nsCSSProperty aProperty,
-  GetCompositorAnimationOptions aFlags)
+                                                   nsIAtom* aElementProperty,
+                                                   nsCSSProperty aProperty)
 {
   if (!aContent->MayHaveAnimations())
     return nullptr;
@@ -153,23 +152,7 @@ CommonAnimationManager::GetAnimationsForCompositor(nsIContent* aContent,
     return nullptr;
   }
 
-  if (!(aFlags & GetCompositorAnimationOptions::NotifyActiveLayerTracker)) {
-    return collection;
-  }
-
   // This animation can be done on the compositor.
-  // Mark the frame as active, in case we are able to throttle this animation.
-  nsIFrame* frame = nsLayoutUtils::GetStyleFrame(collection->mElement);
-  if (frame) {
-    const auto& info = sLayerAnimationInfo;
-    for (size_t i = 0; i < ArrayLength(info); i++) {
-      if (aProperty == info[i].mProperty) {
-        ActiveLayerTracker::NotifyAnimated(frame, aProperty);
-        break;
-      }
-    }
-  }
-
   return collection;
 }
 
@@ -398,10 +381,6 @@ CommonAnimationManager::GetAnimationRule(mozilla::dom::Element* aElement,
     return nullptr;
   }
 
-  // FIXME: Remove this assignment.  See bug 1061364.
-  if (!IsAnimationManager()) {
-    collection->mNeedsRefreshes = true;
-  }
   collection->EnsureStyleRuleFor(
     mPresContext->RefreshDriver()->MostRecentRefresh(),
     EnsureStyleRule_IsNotThrottled);
@@ -943,15 +922,16 @@ AnimationPlayerCollection::HasCurrentAnimations() const
 }
 
 bool
-AnimationPlayerCollection::HasCurrentAnimationsForProperty(nsCSSProperty
-                                                             aProperty) const
+AnimationPlayerCollection::HasCurrentAnimationsForProperties(
+                              const nsCSSProperty* aProperties,
+                              size_t aPropertyCount) const
 {
   for (size_t playerIdx = mPlayers.Length(); playerIdx-- != 0; ) {
     const AnimationPlayer& player = *mPlayers[playerIdx];
     const Animation* anim = player.GetSource();
     if (anim &&
         anim->IsCurrent(player) &&
-        anim->HasAnimationOfProperty(aProperty)) {
+        anim->HasAnimationOfProperties(aProperties, aPropertyCount)) {
       return true;
     }
   }

@@ -1026,7 +1026,7 @@ class GCParallelTask
     // This should be friended to HelperThread, but cannot be because it
     // would introduce several circular dependencies.
   public:
-    void runFromHelperThread();
+    virtual void runFromHelperThread();
 };
 
 struct GCChunkHasher {
@@ -1259,8 +1259,10 @@ template <typename T>
 inline void
 CheckGCThingAfterMovingGC(T* t)
 {
-    MOZ_ASSERT_IF(t, !IsInsideNursery(t));
-    MOZ_ASSERT_IF(t, !RelocationOverlay::isCellForwarded(t));
+    if (t) {
+        MOZ_RELEASE_ASSERT(!IsInsideNursery(t));
+        MOZ_RELEASE_ASSERT(!RelocationOverlay::isCellForwarded(t));
+    }
 }
 
 inline void

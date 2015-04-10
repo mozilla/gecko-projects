@@ -518,25 +518,19 @@ DefinePropertyOnObject(JSContext* cx, HandleNativeObject obj, HandleId id,
         if (desc.hasEnumerable())
             changed |= JSPROP_ENUMERATE;
         if (desc.hasGetterObject())
-            changed |= JSPROP_GETTER | JSPROP_SHARED | JSPROP_READONLY;
+            changed |= JSPROP_GETTER | JSPROP_SHARED | JSPROP_READONLY | JSPROP_SHADOWABLE;
         if (desc.hasSetterObject())
-            changed |= JSPROP_SETTER | JSPROP_SHARED | JSPROP_READONLY;
+            changed |= JSPROP_SETTER | JSPROP_SHARED | JSPROP_READONLY | JSPROP_SHADOWABLE;
 
         attrs = (desc.attributes() & changed) | (shapeAttributes & ~changed);
-        if (desc.hasGetterObject()) {
+        if (desc.hasGetterObject())
             getter = desc.getter();
-        } else {
-            getter = (shapeHasDefaultGetter && !shapeHasGetterValue)
-                     ? nullptr
-                     : shape->getter();
-        }
-        if (desc.hasSetterObject()) {
+        else
+            getter = shapeHasGetterValue ? shape->getter() : nullptr;
+        if (desc.hasSetterObject())
             setter = desc.setter();
-        } else {
-            setter = (shapeHasDefaultSetter && !shapeHasSetterValue)
-                     ? nullptr
-                     : shape->setter();
-        }
+        else
+            setter = shapeHasSetterValue ? shape->setter() : nullptr;
     }
 
     /*
@@ -1347,7 +1341,7 @@ CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
         // The initial objects registered with a TypeNewScript can't be in the
         // nursery.
         if (newKind == GenericObject)
-            newKind = MaybeSingletonObject;
+            newKind = TenuredObject;
 
         // Not enough objects with this group have been created yet, so make a
         // plain object and register it with the group. Use the maximum number
@@ -1965,8 +1959,7 @@ js::CloneObjectLiteral(JSContext* cx, HandleObject srcObj)
         if (!group)
             return nullptr;
 
-        RootedPlainObject res(cx, NewObjectWithGroup<PlainObject>(cx, group, kind,
-                                                                  MaybeSingletonObject));
+        RootedPlainObject res(cx, NewObjectWithGroup<PlainObject>(cx, group, kind, TenuredObject));
         if (!res)
             return nullptr;
 
@@ -1985,8 +1978,7 @@ js::CloneObjectLiteral(JSContext* cx, HandleObject srcObj)
     MOZ_ASSERT(srcArray->getElementsHeader()->ownerObject() == srcObj);
 
     size_t length = srcArray->as<ArrayObject>().length();
-    RootedArrayObject res(cx, NewDenseFullyAllocatedArray(cx, length, NullPtr(),
-                                                          MaybeSingletonObject));
+    RootedArrayObject res(cx, NewDenseFullyAllocatedArray(cx, length, NullPtr(), TenuredObject));
     if (!res)
         return nullptr;
 

@@ -27,6 +27,7 @@ using class mozilla::gfx::Matrix from "mozilla/gfx/Matrix.h";
 using struct gfxSize from "gfxPoint.h";
 using CSSRect from "Units.h";
 using LayoutDeviceIntRect from "Units.h";
+using mozilla::LayoutDeviceIntPoint from "Units.h";
 using ScreenIntSize from "Units.h";
 using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
 using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
@@ -44,6 +45,7 @@ using mozilla::gfx::IntSize from "mozilla/gfx/Point.h";
 using class mozilla::WidgetKeyboardEvent from "ipc/nsGUIEventIPC.h";
 using class mozilla::WidgetMouseEvent from "ipc/nsGUIEventIPC.h";
 using class mozilla::WidgetWheelEvent from "ipc/nsGUIEventIPC.h";
+using class mozilla::WidgetDragEvent from "ipc/nsGUIEventIPC.h";
 using struct nsRect from "nsRect.h";
 using class mozilla::WidgetSelectionEvent from "ipc/nsGUIEventIPC.h";
 using class mozilla::WidgetTouchEvent from "ipc/nsGUIEventIPC.h";
@@ -333,6 +335,22 @@ parent:
     sync IsParentWindowMainWidgetVisible() returns (bool visible);
 
     /**
+     * Content process forward from PuppetWidget for synth mouse move
+     * events.
+     *
+     * aPoint a synth point relative to the window
+     */
+    sync SynthesizeNativeMouseMove(LayoutDeviceIntPoint aPoint);
+
+    /**
+     * Returns the offset of this tab from the top level window
+     * origin in device pixels.
+     *
+     * aPoint offset values in device pixels.
+     */
+    sync GetTabOffset() returns (LayoutDeviceIntPoint aPoint);
+
+    /**
      * Gets the DPI of the screen corresponding to this browser.
      */
     sync GetDPI() returns (float value);
@@ -496,6 +514,9 @@ parent:
     prio(high) sync DispatchMouseEvent(WidgetMouseEvent event);
     prio(high) sync DispatchKeyboardEvent(WidgetKeyboardEvent event);
 
+    InvokeDragSession(IPCDataTransfer[] transfers, uint32_t action,
+                      nsCString visualData, uint32_t width, uint32_t height,
+                      uint32_t stride, uint8_t format, int32_t dragAreaX, int32_t dragAreaY);
 child:
     /**
      * Notify the remote browser that it has been Show()n on this
@@ -563,6 +584,7 @@ child:
     MouseWheelEvent(WidgetWheelEvent event, ScrollableLayerGuid aGuid, uint64_t aInputBlockId);
     RealTouchEvent(WidgetTouchEvent aEvent, ScrollableLayerGuid aGuid, uint64_t aInputBlockId);
     RealTouchMoveEvent(WidgetTouchEvent aEvent, ScrollableLayerGuid aGuid, uint64_t aInputBlockId);
+    RealDragEvent(WidgetDragEvent aEvent, uint32_t aDragAction, uint32_t aDropEffect);
 
     /**
      * @see nsIDOMWindowUtils sendKeyEvent.

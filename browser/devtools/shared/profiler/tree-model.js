@@ -5,22 +5,22 @@
 
 const {Cc, Ci, Cu, Cr} = require("chrome");
 
-loader.lazyRequireGetter(this, "Services");
 loader.lazyRequireGetter(this, "L10N",
   "devtools/shared/profiler/global", true);
 loader.lazyRequireGetter(this, "CATEGORY_MAPPINGS",
+  "devtools/shared/profiler/global", true);
+loader.lazyRequireGetter(this, "CATEGORIES",
   "devtools/shared/profiler/global", true);
 loader.lazyRequireGetter(this, "CATEGORY_JIT",
   "devtools/shared/profiler/global", true);
 loader.lazyRequireGetter(this, "JITOptimizations",
   "devtools/shared/profiler/jit", true);
-
-const CHROME_SCHEMES = ["chrome://", "resource://", "jar:file://"];
-const CONTENT_SCHEMES = ["http://", "https://", "file://", "app://"];
+loader.lazyRequireGetter(this, "FrameUtils",
+  "devtools/shared/profiler/frame-utils");
 
 exports.ThreadNode = ThreadNode;
 exports.FrameNode = FrameNode;
-exports.FrameNode.isContent = isContent;
+exports.FrameNode.isContent = FrameUtils.isContent;
 
 /**
  * A call tree for a thread. This is essentially a linkage between all frames
@@ -97,7 +97,7 @@ ThreadNode.prototype = {
     // should be taken into consideration.
     if (options.contentOnly) {
       // The (root) node is not considered a content function, it'll be removed.
-      sampleFrames = sampleFrames.filter(isContent);
+      sampleFrames = FrameUtils.filterPlatformData(sampleFrames);
     } else {
       // Remove the (root) node manually.
       sampleFrames = sampleFrames.slice(1);
@@ -161,8 +161,11 @@ ThreadNode.prototype = {
  *        The category type of this function call ("js", "graphics" etc.).
  * @param number allocations
  *        The number of memory allocations performed in this frame.
+ * @param boolean isMetaCategory
+ *        Whether or not this is a platform node that should appear as a
+ *        generalized meta category or not.
  */
-function FrameNode({ location, line, column, category, allocations }) {
+function FrameNode({ location, line, column, category, allocations, isMetaCategory }) {
   this.location = location;
   this.line = line;
   this.column = column;
@@ -173,6 +176,7 @@ function FrameNode({ location, line, column, category, allocations }) {
   this.duration = 0;
   this.calls = {};
   this._optimizations = null;
+  this.isMetaCategory = isMetaCategory;
 }
 
 FrameNode.prototype = {
@@ -202,8 +206,12 @@ FrameNode.prototype = {
     if (!frame) {
       return;
     }
-    let location = frame.location;
-    let child = _store[location] || (_store[location] = new FrameNode(frame));
+    // If we are only displaying content, then platform data will have
+    // a `isMetaCategory` property. Group by category (GC, Graphics, etc.)
+    // to group together frames so they're displayed only once, since we don't
+    // need the location anyway.
+    let key = frame.isMetaCategory ? frame.category : frame.location;
+    let child = _store[key] || (_store[key] = new FrameNode(frame));
     child.sampleTimes.push({ start: time, end: time + duration });
     child.samples++;
     child.duration += duration;
@@ -240,41 +248,13 @@ FrameNode.prototype = {
     // default to an "unknown" category otherwise.
     let categoryData = CATEGORY_MAPPINGS[this.category] || {};
 
-    // Parse the `location` for the function name, source url, line, column etc.
-    let lineAndColumn = this.location.match(/((:\d+)*)\)?$/)[1];
-    let [, line, column] = lineAndColumn.split(":");
-    line = line || this.line;
-    column = column || this.column;
+    let parsedData = FrameUtils.parseLocation(this);
+    parsedData.nodeType = "Frame";
+    parsedData.categoryData = categoryData;
+    parsedData.isContent = FrameUtils.isContent(this);
+    parsedData.isMetaCategory = this.isMetaCategory;
 
-    let firstParenIndex = this.location.indexOf("(");
-    let lineAndColumnIndex = this.location.indexOf(lineAndColumn);
-    let resource = this.location.substring(firstParenIndex + 1, lineAndColumnIndex);
-
-    let url = resource.split(" -> ").pop();
-    let uri = nsIURL(url);
-    let functionName, fileName, hostName;
-
-    // If the URI digged out from the `location` is valid, this is a JS frame.
-    if (uri) {
-      functionName = this.location.substring(0, firstParenIndex - 1);
-      fileName = (uri.fileName + (uri.ref ? "#" + uri.ref : "")) || "/";
-      hostName = url.indexOf("jar:") == 0 ? "" : uri.host;
-    } else {
-      functionName = this.location;
-      url = null;
-    }
-
-    return this._data = {
-      nodeType: "Frame",
-      functionName: functionName,
-      fileName: fileName,
-      hostName: hostName,
-      url: url,
-      line: line,
-      column: column,
-      categoryData: categoryData,
-      isContent: !!isContent(this)
-    };
+    return this._data = parsedData;
   },
 
   /**
@@ -296,39 +276,3 @@ FrameNode.prototype = {
     return this._optimizations;
   }
 };
-
-/**
- * Checks if the specified function represents a chrome or content frame.
- *
- * @param object frame
- *        The { category, location } properties of the frame.
- * @return boolean
- *         True if a content frame, false if a chrome frame.
- */
-function isContent({ category, location }) {
-  // Only C++ stack frames have associated category information.
-  return !category &&
-    !CHROME_SCHEMES.find(e => location.contains(e)) &&
-    CONTENT_SCHEMES.find(e => location.contains(e));
-}
-
-/**
- * Helper for getting an nsIURL instance out of a string.
- */
-function nsIURL(url) {
-  let cached = gNSURLStore.get(url);
-  if (cached) {
-    return cached;
-  }
-  let uri = null;
-  try {
-    uri = Services.io.newURI(url, null, null).QueryInterface(Ci.nsIURL);
-  } catch(e) {
-    // The passed url string is invalid.
-  }
-  gNSURLStore.set(url, uri);
-  return uri;
-}
-
-// The cache used in the `nsIURL` function.
-let gNSURLStore = new Map();

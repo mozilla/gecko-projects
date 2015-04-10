@@ -186,6 +186,9 @@ AddRawValueRoot(JSContext* cx, JS::Value* vp, const char* name);
 JS_FRIEND_API(void)
 RemoveRawValueRoot(JSContext* cx, JS::Value* vp);
 
+JS_FRIEND_API(JSAtom*)
+GetPropertyNameFromPC(JSScript* script, jsbytecode* pc);
+
 #ifdef JS_DEBUG
 
 /*
@@ -871,6 +874,12 @@ AtomToLinearString(JSAtom* atom)
     return reinterpret_cast<JSLinearString*>(atom);
 }
 
+MOZ_ALWAYS_INLINE JSFlatString*
+AtomToFlatString(JSAtom* atom)
+{
+    return reinterpret_cast<JSFlatString*>(atom);
+}
+
 MOZ_ALWAYS_INLINE JSLinearString*
 FlatStringToLinearString(JSFlatString* s)
 {
@@ -1471,6 +1480,27 @@ byteSize(Type atype)
       case Int32x4:
       case Float32x4:
         return 16;
+      default:
+        MOZ_CRASH("invalid scalar type");
+    }
+}
+
+static inline bool
+isSignedIntType(Type atype) {
+    switch (atype) {
+      case Int8:
+      case Int16:
+      case Int32:
+      case Int32x4:
+        return true;
+      case Uint8:
+      case Uint8Clamped:
+      case Uint16:
+      case Uint32:
+      case Float32:
+      case Float64:
+      case Float32x4:
+        return false;
       default:
         MOZ_CRASH("invalid scalar type");
     }

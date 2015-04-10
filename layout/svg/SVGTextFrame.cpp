@@ -16,6 +16,7 @@
 #include "LookAndFeel.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PatternHelpers.h"
+#include "mozilla/Likely.h"
 #include "nsAlgorithm.h"
 #include "nsBlockFrame.h"
 #include "nsCaret.h"
@@ -289,22 +290,25 @@ GetNonEmptyTextFrameAndNode(nsIFrame* aFrame,
                             nsTextNode*& aTextNode)
 {
   nsTextFrame* text = do_QueryFrame(aFrame);
-  if (!text) {
-    return false;
+  bool isNonEmptyTextFrame = text && text->GetContentLength() != 0;
+
+  if (isNonEmptyTextFrame) {
+    nsIContent* content = text->GetContent();
+    NS_ASSERTION(content && content->IsNodeOfType(nsINode::eTEXT),
+                 "unexpected content type for nsTextFrame");
+
+    nsTextNode* node = static_cast<nsTextNode*>(content);
+    MOZ_ASSERT(node->TextLength() != 0,
+               "frame's GetContentLength() should be 0 if the text node "
+               "has no content");
+
+    aTextFrame = text;
+    aTextNode = node;
   }
 
-  nsIContent* content = text->GetContent();
-  NS_ASSERTION(content && content->IsNodeOfType(nsINode::eTEXT),
-               "unexpected content type for nsTextFrame");
-
-  nsTextNode* node = static_cast<nsTextNode*>(content);
-  if (node->TextLength() == 0) {
-    return false;
-  }
-
-  aTextFrame = text;
-  aTextNode = node;
-  return true;
+  MOZ_ASSERT(IsNonEmptyTextFrame(aFrame) == isNonEmptyTextFrame,
+             "our logic should agree with IsNonEmptyTextFrame");
+  return isNonEmptyTextFrame;
 }
 
 /**
@@ -333,7 +337,8 @@ IsGlyphPositioningAttribute(nsIAtom* aAttribute)
 static nscoord
 GetBaselinePosition(nsTextFrame* aFrame,
                     gfxTextRun* aTextRun,
-                    uint8_t aDominantBaseline)
+                    uint8_t aDominantBaseline,
+                    float aFontSizeScaleFactor)
 {
   // use a dummy WritingMode, because nsTextFrame::GetLogicalBaseLine
   // doesn't use it anyway
@@ -352,6 +357,10 @@ GetBaselinePosition(nsTextFrame* aFrame,
     case NS_STYLE_DOMINANT_BASELINE_AUTO:
     case NS_STYLE_DOMINANT_BASELINE_ALPHABETIC:
       return aFrame->GetLogicalBaseline(writingMode);
+    case NS_STYLE_DOMINANT_BASELINE_MIDDLE:
+      return aFrame->GetLogicalBaseline(writingMode) -
+        SVGContentUtils::GetFontXHeight(aFrame) / 2.0 *
+        aFrame->PresContext()->AppUnitsPerCSSPixel() * aFontSizeScaleFactor;
   }
 
   gfxTextRun::Metrics metrics =
@@ -363,7 +372,6 @@ GetBaselinePosition(nsTextFrame* aFrame,
     case NS_STYLE_DOMINANT_BASELINE_IDEOGRAPHIC:
       return metrics.mAscent + metrics.mDescent;
     case NS_STYLE_DOMINANT_BASELINE_CENTRAL:
-    case NS_STYLE_DOMINANT_BASELINE_MIDDLE:
     case NS_STYLE_DOMINANT_BASELINE_MATHEMATICAL:
       return (metrics.mAscent + metrics.mDescent) / 2.0;
   }
@@ -1307,7 +1315,7 @@ GetUndisplayedCharactersBeforeFrame(nsTextFrame* aFrame)
 /**
  * Traverses the nsTextFrames for an SVGTextFrame and records a
  * TextNodeCorrespondenceProperty on each for the number of undisplayed DOM
- * characters between each frame.  This is done by iterating simultaenously
+ * characters between each frame.  This is done by iterating simultaneously
  * over the nsTextNodes and nsTextFrames and noting when nsTextNodes (or
  * parts of them) are skipped when finding the next nsTextFrame.
  */
@@ -1989,7 +1997,8 @@ TextRenderedRunIterator::Next()
     frame->EnsureTextRun(nsTextFrame::eInflated);
     baseline = GetBaselinePosition(frame,
                                    frame->GetTextRun(nsTextFrame::eInflated),
-                                   mFrameIterator.DominantBaseline());
+                                   mFrameIterator.DominantBaseline(),
+                                   mFontSizeScaleFactor);
 
     // Trim the offset/length to remove any leading/trailing white space.
     uint32_t untrimmedOffset = offset;
@@ -4376,23 +4385,28 @@ ShouldStartRunAtIndex(const nsTArray<CharPosition>& aPositions,
   return false;
 }
 
-uint32_t
-SVGTextFrame::ResolvePositions(nsIContent* aContent,
-                               uint32_t aIndex,
-                               bool aInTextPath,
-                               bool& aForceStartOfChunk,
-                               nsTArray<gfxPoint>& aDeltas)
+bool
+SVGTextFrame::ResolvePositionsForNode(nsIContent* aContent,
+                                      uint32_t& aIndex,
+                                      bool aInTextPath,
+                                      bool& aForceStartOfChunk,
+                                      nsTArray<gfxPoint>& aDeltas)
 {
   if (aContent->IsNodeOfType(nsINode::eTEXT)) {
     // We found a text node.
     uint32_t length = static_cast<nsTextNode*>(aContent)->TextLength();
     if (length) {
+      uint32_t end = aIndex + length;
+      if (MOZ_UNLIKELY(end > mPositions.Length())) {
+        MOZ_ASSERT_UNREACHABLE("length of mPositions does not match characters "
+                               "found by iterating content");
+        return false;
+      }
       if (aForceStartOfChunk) {
         // Note this character as starting a new anchored chunk.
         mPositions[aIndex].mStartOfChunk = true;
         aForceStartOfChunk = false;
       }
-      uint32_t end = aIndex + length;
       while (aIndex < end) {
         // Record whether each of these characters should start a new rendered
         // run.  That is always the case for characters on a text path.
@@ -4405,18 +4419,23 @@ SVGTextFrame::ResolvePositions(nsIContent* aContent,
         aIndex++;
       }
     }
-    return aIndex;
+    return true;
   }
 
   // Skip past elements that aren't text content elements.
   if (!IsTextContentElement(aContent)) {
-    return aIndex;
+    return true;
   }
 
   if (aContent->IsSVGElement(nsGkAtoms::textPath)) {
     // <textPath> elements are as if they are specified with x="0" y="0", but
     // only if they actually have some text content.
     if (HasTextContent(aContent)) {
+      if (MOZ_UNLIKELY(aIndex >= mPositions.Length())) {
+        MOZ_ASSERT_UNREACHABLE("length of mPositions does not match characters "
+                               "found by iterating content");
+        return false;
+      }
       mPositions[aIndex].mPosition = gfxPoint();
       mPositions[aIndex].mStartOfChunk = true;
     }
@@ -4436,8 +4455,14 @@ SVGTextFrame::ResolvePositions(nsIContent* aContent,
       rotate = &animatedRotate->GetAnimValue();
     }
 
-    uint32_t count = GetTextContentLength(aContent);
     bool percentages = false;
+    uint32_t count = GetTextContentLength(aContent);
+
+    if (MOZ_UNLIKELY(aIndex + count > mPositions.Length())) {
+      MOZ_ASSERT_UNREACHABLE("length of mPositions does not match characters "
+                             "found by iterating content");
+      return false;
+    }
 
     // New text anchoring chunks start at each character assigned a position
     // with x="" or y="", or if we forced one with aForceStartOfChunk due to
@@ -4516,8 +4541,11 @@ SVGTextFrame::ResolvePositions(nsIContent* aContent,
   for (nsIContent* child = aContent->GetFirstChild();
        child;
        child = child->GetNextSibling()) {
-    aIndex = ResolvePositions(child, aIndex, inTextPath, aForceStartOfChunk,
-                              aDeltas);
+    bool ok = ResolvePositionsForNode(child, aIndex, inTextPath,
+                                      aForceStartOfChunk, aDeltas);
+    if (!ok) {
+      return false;
+    }
   }
 
   if (aContent->IsSVGElement(nsGkAtoms::textPath)) {
@@ -4525,7 +4553,7 @@ SVGTextFrame::ResolvePositions(nsIContent* aContent,
     aForceStartOfChunk = true;
   }
 
-  return aIndex;
+  return true;
 }
 
 bool
@@ -4561,8 +4589,10 @@ SVGTextFrame::ResolvePositions(nsTArray<gfxPoint>& aDeltas,
 
   // Recurse over the content and fill in character positions as we go.
   bool forceStartOfChunk = false;
-  return ResolvePositions(mContent, 0, aRunPerGlyph,
-                          forceStartOfChunk, aDeltas) != 0;
+  index = 0;
+  bool ok = ResolvePositionsForNode(mContent, index, aRunPerGlyph,
+                                    forceStartOfChunk, aDeltas);
+  return ok && index > 0;
 }
 
 void
@@ -4582,7 +4612,8 @@ SVGTextFrame::DetermineCharPositions(nsTArray<nsPoint>& aPositions)
     if (textRun->IsRightToLeft()) {
       position.x += frame->GetRect().width;
     }
-    position.y += GetBaselinePosition(frame, textRun, frit.DominantBaseline());
+    position.y += GetBaselinePosition(frame, textRun, frit.DominantBaseline(),
+                                      mFontSizeScaleFactor);
 
     // Any characters not in a frame, e.g. when display:none.
     for (uint32_t i = 0; i < frit.UndisplayedCharacters(); i++) {
@@ -5015,9 +5046,10 @@ SVGTextFrame::DoGlyphPositioning()
   // Get the x, y, dx, dy, rotate values for the subtree.
   nsTArray<gfxPoint> deltas;
   if (!ResolvePositions(deltas, adjustingTextLength)) {
-    // If ResolvePositions returned false, it means that there were some
-    // characters in the DOM but none of them are displayed.  Clear out
-    // mPositions so that we don't attempt to do any painting later.
+    // If ResolvePositions returned false, it means either there were some
+    // characters in the DOM but none of them are displayed, or there was
+    // an error in processing mPositions.  Clear out mPositions so that we don't
+    // attempt to do any painting later.
     mPositions.Clear();
     return;
   }

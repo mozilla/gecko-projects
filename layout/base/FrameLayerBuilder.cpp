@@ -2315,6 +2315,7 @@ nscolor
 PaintedLayerDataNode::FindOpaqueBackgroundColorCoveringEverything() const
 {
   if (!mPaintedLayerDataStack.IsEmpty() ||
+      mAllDrawingAboveBackground ||
       !mVisibleAboveBackgroundRegion.IsEmpty()) {
     return NS_RGBA(0,0,0,0);
   }
@@ -2835,7 +2836,7 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
     if (imageContainer) {
       nsRefPtr<ImageLayer> imageLayer = CreateOrRecycleImageLayer(data->mLayer);
       imageLayer->SetContainer(imageContainer);
-      data->mImage->ConfigureLayer(imageLayer, mParameters.mOffset);
+      data->mImage->ConfigureLayer(imageLayer, mParameters);
       imageLayer->SetPostScale(mParameters.mXScale,
                                mParameters.mYScale);
       if (data->mItemClip.HasClip()) {

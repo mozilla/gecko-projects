@@ -166,9 +166,6 @@ pref("dom.keyboardevent.code.enabled", true);
 // even if this is true).
 pref("dom.keyboardevent.dispatch_during_composition", false);
 
-// Whether the WebCrypto API is enabled
-pref("dom.webcrypto.enabled", true);
-
 // Whether the UndoManager API is enabled
 pref("dom.undo_manager.enabled", false);
 
@@ -547,13 +544,15 @@ pref("apz.x_stationary_size_multiplier", "3.0");
 pref("apz.y_stationary_size_multiplier", "3.5");
 pref("apz.zoom_animation_duration_ms", 250);
 
-#ifdef XP_MACOSX
+#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+// Desktop prefs
 pref("apz.fling_repaint_interval", 16);
 pref("apz.smooth_scroll_repaint_interval", 16);
 pref("apz.pan_repaint_interval", 16);
 pref("apz.x_skate_size_multiplier", "2.5");
 pref("apz.y_skate_size_multiplier", "3.5");
 #else
+// Mobile prefs
 pref("apz.fling_repaint_interval", 75);
 pref("apz.smooth_scroll_repaint_interval", 75);
 pref("apz.pan_repaint_interval", 250);
@@ -649,7 +648,7 @@ pref("gfx.content.azure.backends", "direct2d1.1,direct2d,cairo");
 #else
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "cg");
-pref("gfx.canvas.azure.backends", "cg");
+pref("gfx.canvas.azure.backends", "skia");
 // Accelerated cg canvas where available (10.7+)
 pref("gfx.canvas.azure.accelerated", false);
 #else
@@ -1847,7 +1846,7 @@ pref("security.csp.debug", false);
 pref("security.csp.experimentalEnabled", false);
 
 // Default Content Security Policy to apply to privileged apps.
-pref("security.apps.privileged.CSP.default", "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'");
+pref("security.apps.privileged.CSP.default", "default-src * data: blob:; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'");
 
 // Mixed content blocking
 pref("security.mixed_content.block_active_content", false);
@@ -3844,6 +3843,10 @@ pref("image.cache.timeweight", 500);
 // them to be decoded on demand when they are drawn.
 pref("image.decode-only-on-draw.enabled", true);
 
+// Decode all images automatically on load, ignoring our normal heuristics.
+// Overrides image.decode-only-on-draw.enabled.
+pref("image.decode-immediately.enabled", false);
+
 // Whether we attempt to downscale images during decoding.
 pref("image.downscale-during-decode.enabled", false);
 
@@ -3933,6 +3936,8 @@ pref("webgl.enable-draft-extensions", false);
 pref("webgl.enable-privileged-extensions", false);
 pref("webgl.bypass-shader-validation", false);
 pref("webgl.enable-prototype-webgl2", false);
+pref("gl.require-hardware", false);
+
 #ifdef XP_WIN
 pref("webgl.angle.try-d3d11", true);
 pref("webgl.angle.force-d3d11", false);
@@ -4051,7 +4056,15 @@ pref("layers.offmainthreadcomposition.testing.enabled", false);
 pref("layers.offmainthreadcomposition.force-basic", false);
 
 // Whether to animate simple opacity and transforms on the compositor
+#ifdef RELEASE_BUILD
 pref("layers.offmainthreadcomposition.async-animations", false);
+#else
+#if defined(MOZ_X11)
+pref("layers.offmainthreadcomposition.async-animations", false);
+#else
+pref("layers.offmainthreadcomposition.async-animations", true);
+#endif
+#endif
 
 // Whether to log information about off main thread animations to stderr
 pref("layers.offmainthreadcomposition.log-animations", false);
@@ -4281,6 +4294,9 @@ pref("dom.idle-observers-api.fuzz_time.disabled", true);
 
 // Lowest localId for apps.
 pref("dom.mozApps.maxLocalId", 1000);
+
+// Reset apps permissions
+pref("dom.apps.reset-permissions", false);
 
 // XXX Security: You CANNOT safely add a new app store for
 // installing privileged apps just by modifying this pref and
@@ -4649,17 +4665,13 @@ pref("reader.toolbar.vertical", true);
 pref("media.gmp.insecure.allow", false);
 #endif
 
-// Use vsync aligned rendering. b2g prefs are in b2g.js
-// Only supported on windows, os x, and b2g
-#if defined(XP_MACOSX) || defined(XP_WIN)
+// Use vsync aligned rendering. b2g prefs are in b2g.js.
+// Hardware vsync supported on windows, os x, and b2g.
+// Linux and fennec will use software vsync.
+#if defined(XP_MACOSX) || defined(XP_WIN) || defined(XP_LINUX)
 pref("gfx.vsync.hw-vsync.enabled", true);
 pref("gfx.vsync.compositor", true);
 pref("gfx.vsync.refreshdriver", true);
-#endif
-
-#if defined(XP_LINUX)
-pref("gfx.vsync.hw-vsync.enabled", true);
-pref("gfx.vsync.compositor", true);
 #endif
 
 // Secure Element API

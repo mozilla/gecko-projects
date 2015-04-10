@@ -21,7 +21,6 @@ EXTRA_JS_MODULES.devtools += [
     'widgets/AbstractTreeItem.jsm',
     'widgets/BreadcrumbsWidget.jsm',
     'widgets/Chart.jsm',
-    'widgets/FlameGraph.jsm',
     'widgets/Graphs.jsm',
     'widgets/GraphsWorker.js',
     'widgets/SideMenuWidget.jsm',
@@ -32,6 +31,7 @@ EXTRA_JS_MODULES.devtools += [
 ]
 
 EXTRA_JS_MODULES.devtools.shared.profiler += [
+    'profiler/frame-utils.js',
     'profiler/global.js',
     'profiler/jit.js',
     'profiler/tree-model.js',
@@ -42,13 +42,11 @@ EXTRA_JS_MODULES.devtools.shared.timeline += [
     'timeline/global.js',
     'timeline/marker-details.js',
     'timeline/markers-overview.js',
-    'timeline/memory-overview.js',
     'timeline/waterfall.js',
 ]
 
 EXTRA_JS_MODULES.devtools.shared += [
     'autocomplete-popup.js',
-    'd3.js',
     'devices.js',
     'doorhanger.js',
     'frame-script-utils.js',
@@ -66,6 +64,7 @@ EXTRA_JS_MODULES.devtools.shared.widgets += [
     'widgets/CubicBezierPresets.js',
     'widgets/CubicBezierWidget.js',
     'widgets/FastListWidget.js',
+    'widgets/FlameGraph.js',
     'widgets/Spectrum.js',
     'widgets/TableWidget.js',
     'widgets/Tooltip.js',

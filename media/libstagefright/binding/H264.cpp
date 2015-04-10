@@ -9,7 +9,7 @@
 #include "mp4_demuxer/ByteWriter.h"
 #include "mp4_demuxer/H264.h"
 #include <media/stagefright/foundation/ABitReader.h>
-#include <cmath>
+#include <limits>
 
 using namespace mozilla;
 
@@ -19,8 +19,8 @@ namespace mp4_demuxer
 class BitReader
 {
 public:
-  explicit BitReader(const ByteBuffer& aBuffer)
-  : mBitReader(aBuffer.Elements(), aBuffer.Length())
+  explicit BitReader(const mozilla::DataBuffer* aBuffer)
+    : mBitReader(aBuffer->Elements(), aBuffer->Length())
   {
   }
 
@@ -75,14 +75,15 @@ SPSData::SPSData()
 {
   PodZero(this);
   // Default values when they aren't defined as per ITU-T H.264 (2014/02).
+  chroma_format_idc = 1;
   video_format = 5;
   colour_primaries = 2;
   transfer_characteristics = 2;
   sample_ratio = 1.0;
 }
 
-/* static */ already_AddRefed<ByteBuffer>
-H264::DecodeNALUnit(const ByteBuffer* aNAL)
+/* static */ already_AddRefed<mozilla::DataBuffer>
+H264::DecodeNALUnit(const mozilla::DataBuffer* aNAL)
 {
   MOZ_ASSERT(aNAL);
 
@@ -90,8 +91,8 @@ H264::DecodeNALUnit(const ByteBuffer* aNAL)
     return nullptr;
   }
 
-  nsRefPtr<ByteBuffer> rbsp = new ByteBuffer;
-  ByteReader reader(*aNAL);
+  nsRefPtr<mozilla::DataBuffer> rbsp = new mozilla::DataBuffer;
+  ByteReader reader(aNAL);
   uint8_t nal_unit_type = reader.ReadU8() & 0x1f;
   uint32_t nalUnitHeaderBytes = 1;
   if (nal_unit_type == 14 || nal_unit_type == 20 || nal_unit_type == 21) {
@@ -132,15 +133,15 @@ ConditionDimension(float aValue)
 {
   // This will exclude NaNs and too-big values.
   if (aValue > 1.0 && aValue <= INT32_MAX)
-    return int32_t(round(aValue));
+    return int32_t(aValue);
   return 0;
 }
 
 /* static */ bool
-H264::DecodeSPS(const ByteBuffer* aSPS, SPSData& aDest)
+H264::DecodeSPS(const mozilla::DataBuffer* aSPS, SPSData& aDest)
 {
   MOZ_ASSERT(aSPS);
-  BitReader br(*aSPS);
+  BitReader br(aSPS);
 
   int32_t lastScale;
   int32_t nextScale;
@@ -183,6 +184,11 @@ H264::DecodeSPS(const ByteBuffer* aSPS, SPSData& aDest)
         }
       }
     }
+  } else if (aDest.profile_idc == 183) {
+      aDest.chroma_format_idc = 0;
+  } else {
+    // default value if chroma_format_idc isn't set.
+    aDest.chroma_format_idc = 1;
   }
   aDest.log2_max_frame_num = br.ReadUE() + 4;
   aDest.pic_order_cnt_type = br.ReadUE();
@@ -223,8 +229,6 @@ H264::DecodeSPS(const ByteBuffer* aSPS, SPSData& aDest)
 
   // Calculate common values.
 
-  // FFmpeg and VLC ignore the left and top cropping. Do the same here.
-
   uint8_t ChromaArrayType =
     aDest.separate_colour_plane_flag ? 0 : aDest.chroma_format_idc;
   // Calculate width.
@@ -233,16 +237,33 @@ H264::DecodeSPS(const ByteBuffer* aSPS, SPSData& aDest)
   if (ChromaArrayType != 0) {
     CropUnitX = SubWidthC;
   }
-  uint32_t cropX = CropUnitX * aDest.frame_crop_right_offset;
-  aDest.pic_width = aDest.pic_width_in_mbs * 16 - cropX;
 
   // Calculate Height
   uint32_t CropUnitY = 2 - aDest.frame_mbs_only_flag;
   uint32_t SubHeightC = aDest.chroma_format_idc <= 1 ? 2 : 1;
-  if (ChromaArrayType != 0)
+  if (ChromaArrayType != 0) {
     CropUnitY *= SubHeightC;
-  uint32_t cropY = CropUnitY * aDest.frame_crop_bottom_offset;
-  aDest.pic_height = aDest.pic_height_in_map_units * 16 - cropY;
+  }
+
+  uint32_t width = aDest.pic_width_in_mbs * 16;
+  uint32_t height = aDest.pic_height_in_map_units * 16;
+  if (aDest.frame_crop_left_offset <= std::numeric_limits<int32_t>::max() / 4 / CropUnitX &&
+      aDest.frame_crop_right_offset <= std::numeric_limits<int32_t>::max() / 4 / CropUnitX &&
+      aDest.frame_crop_top_offset <= std::numeric_limits<int32_t>::max() / 4 / CropUnitY &&
+      aDest.frame_crop_bottom_offset <= std::numeric_limits<int32_t>::max() / 4 / CropUnitY &&
+      (aDest.frame_crop_left_offset + aDest.frame_crop_right_offset) * CropUnitX < width &&
+      (aDest.frame_crop_top_offset + aDest.frame_crop_bottom_offset) * CropUnitY < height) {
+    aDest.crop_left = aDest.frame_crop_left_offset * CropUnitX;
+    aDest.crop_right = aDest.frame_crop_right_offset * CropUnitX;
+    aDest.crop_top = aDest.frame_crop_top_offset * CropUnitY;
+    aDest.crop_bottom = aDest.frame_crop_bottom_offset * CropUnitY;
+  } else {
+    // Nonsensical value, ignore them.
+    aDest.crop_left = aDest.crop_right = aDest.crop_top = aDest.crop_bottom = 0;
+  }
+
+  aDest.pic_width = width - aDest.crop_left - aDest.crop_right;
+  aDest.pic_height = height - aDest.crop_top - aDest.crop_bottom;
 
   aDest.interlaced = !aDest.frame_mbs_only_flag;
 
@@ -440,12 +461,12 @@ H264::vui_parameters(BitReader& aBr, SPSData& aDest)
 }
 
 /* static */ bool
-H264::DecodeSPSFromExtraData(const ByteBuffer* aExtraData, SPSData& aDest)
+H264::DecodeSPSFromExtraData(const mozilla::DataBuffer* aExtraData, SPSData& aDest)
 {
   if (!AnnexB::HasSPS(aExtraData)) {
     return false;
   }
-  ByteReader reader(*aExtraData);
+  ByteReader reader(aExtraData);
 
   if (!reader.Read(5)) {
     return false;
@@ -469,10 +490,10 @@ H264::DecodeSPSFromExtraData(const ByteBuffer* aExtraData, SPSData& aDest)
     return false;
   }
 
-  nsRefPtr<ByteBuffer> rawNAL = new ByteBuffer;
+  nsRefPtr<mozilla::DataBuffer> rawNAL = new mozilla::DataBuffer;
   rawNAL->AppendElements(ptr, length);
 
-  nsRefPtr<ByteBuffer> sps = DecodeNALUnit(rawNAL);
+  nsRefPtr<mozilla::DataBuffer> sps = DecodeNALUnit(rawNAL);
 
   reader.DiscardRemaining();
 

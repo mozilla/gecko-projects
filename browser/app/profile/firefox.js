@@ -102,10 +102,10 @@ pref("app.update.log", false);
 pref("app.update.backgroundMaxErrors", 10);
 
 // The aus update xml certificate checks for application update are disabled on
-// Windows since the mar signature check which is currently only implemented on
-// Windows is sufficient for preventing us from applying a mar that is not
+// Windows and Mac OS X since the mar signature check are implemented on these
+// platforms and is sufficient to prevent us from applying a mar that is not
 // valid.
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("app.update.cert.requireBuiltIn", false);
 pref("app.update.cert.checkAttributes", false);
 #else
@@ -658,6 +658,7 @@ pref("plugins.update.url", "https://www.mozilla.org/%LOCALE%/plugincheck/?utm_so
 pref("plugins.update.notifyUser", false);
 
 pref("plugins.click_to_play", true);
+pref("plugins.testmode", false);
 
 pref("plugin.default.state", 1);
 
@@ -1855,7 +1856,11 @@ pref("privacy.trackingprotection.ui.enabled", false);
 #endif
 
 #ifdef NIGHTLY_BUILD
-pref("browser.tabs.remote.autostart.1", true);
+// At the moment, autostart.2 is used, while autostart.1 is unused.
+// We leave it here set to false to reset users' defaults and allow
+// us to change everybody to true in the future, when desired.
+pref("browser.tabs.remote.autostart.1", false);
+pref("browser.tabs.remote.autostart.2", true);
 #endif
 
 #ifdef NIGHTLY_BUILD

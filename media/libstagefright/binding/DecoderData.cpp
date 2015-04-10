@@ -8,7 +8,6 @@
 #include "mp4_demuxer/DecoderData.h"
 #include <media/stagefright/foundation/ABitReader.h>
 #include "media/stagefright/MetaData.h"
-#include "media/stagefright/MediaBuffer.h"
 #include "media/stagefright/MediaDefs.h"
 #include "media/stagefright/Utils.h"
 #include "mozilla/ArrayUtils.h"
@@ -20,7 +19,7 @@ namespace mp4_demuxer
 {
 
 static int32_t
-FindInt32(sp<MetaData>& mMetaData, uint32_t mKey)
+FindInt32(const MetaData* mMetaData, uint32_t mKey)
 {
   int32_t value;
   if (!mMetaData->findInt32(mKey, &value))
@@ -29,7 +28,7 @@ FindInt32(sp<MetaData>& mMetaData, uint32_t mKey)
 }
 
 static int64_t
-FindInt64(sp<MetaData>& mMetaData, uint32_t mKey)
+FindInt64(const MetaData* mMetaData, uint32_t mKey)
 {
   int64_t value;
   if (!mMetaData->findInt64(mKey, &value))
@@ -39,7 +38,7 @@ FindInt64(sp<MetaData>& mMetaData, uint32_t mKey)
 
 template <typename T, size_t N>
 static bool
-FindData(sp<MetaData>& aMetaData, uint32_t aKey, mozilla::Vector<T, N>* aDest)
+FindData(const MetaData* aMetaData, uint32_t aKey, mozilla::Vector<T, N>* aDest)
 {
   const void* data;
   size_t size;
@@ -58,7 +57,7 @@ FindData(sp<MetaData>& aMetaData, uint32_t aKey, mozilla::Vector<T, N>* aDest)
 
 template <typename T>
 static bool
-FindData(sp<MetaData>& aMetaData, uint32_t aKey, nsTArray<T>* aDest)
+FindData(const MetaData* aMetaData, uint32_t aKey, nsTArray<T>* aDest)
 {
   const void* data;
   size_t size;
@@ -76,25 +75,15 @@ FindData(sp<MetaData>& aMetaData, uint32_t aKey, nsTArray<T>* aDest)
 }
 
 static bool
-FindData(sp<MetaData>& aMetaData, uint32_t aKey, ByteBuffer* aDest)
+FindData(const MetaData* aMetaData, uint32_t aKey, mozilla::DataBuffer* aDest)
 {
   return FindData(aMetaData, aKey, static_cast<nsTArray<uint8_t>*>(aDest));
 }
 
 bool
-CryptoFile::DoUpdate(sp<MetaData>& aMetaData)
+CryptoFile::DoUpdate(const uint8_t* aData, size_t aLength)
 {
-  const void* data;
-  size_t size;
-  uint32_t type;
-
-  // There's no point in checking that the type matches anything because it
-  // isn't set consistently in the MPEG4Extractor.
-  if (!aMetaData->findData(kKeyPssh, &type, &data, &size)) {
-    return false;
-  }
-
-  ByteReader reader(reinterpret_cast<const uint8_t*>(data), size);
+  ByteReader reader(aData, aLength);
   while (reader.Remaining()) {
     PsshInfo psshInfo;
     if (!reader.ReadArray(psshInfo.uuid, 16)) {
@@ -115,34 +104,19 @@ CryptoFile::DoUpdate(sp<MetaData>& aMetaData)
 }
 
 void
-CryptoTrack::Update(sp<MetaData>& aMetaData)
-{
-  valid = aMetaData->findInt32(kKeyCryptoMode, &mode) &&
-          aMetaData->findInt32(kKeyCryptoDefaultIVSize, &iv_size) &&
-          FindData(aMetaData, kKeyCryptoKey, &key);
-}
-
-void
-CryptoSample::Update(sp<MetaData>& aMetaData)
-{
-  CryptoTrack::Update(aMetaData);
-  valid = valid && FindData(aMetaData, kKeyPlainSizes, &plain_sizes) &&
-          FindData(aMetaData, kKeyEncryptedSizes, &encrypted_sizes) &&
-          FindData(aMetaData, kKeyCryptoIV, &iv);
-}
-
-void
-TrackConfig::Update(sp<MetaData>& aMetaData, const char* aMimeType)
+TrackConfig::Update(const MetaData* aMetaData, const char* aMimeType)
 {
   mime_type = aMimeType;
   duration = FindInt64(aMetaData, kKeyDuration);
   media_time = FindInt64(aMetaData, kKeyMediaTime);
   mTrackId = FindInt32(aMetaData, kKeyTrackID);
-  crypto.Update(aMetaData);
+  crypto.mValid = aMetaData->findInt32(kKeyCryptoMode, &crypto.mMode) &&
+    aMetaData->findInt32(kKeyCryptoDefaultIVSize, &crypto.mIVSize) &&
+    FindData(aMetaData, kKeyCryptoKey, &crypto.mKeyId);
 }
 
 void
-AudioDecoderConfig::Update(sp<MetaData>& aMetaData, const char* aMimeType)
+AudioDecoderConfig::Update(const MetaData* aMetaData, const char* aMimeType)
 {
   TrackConfig::Update(aMetaData, aMimeType);
   channel_count = FindInt32(aMetaData, kKeyChannelCount);
@@ -175,11 +149,12 @@ bool
 AudioDecoderConfig::IsValid()
 {
   return channel_count > 0 && samples_per_second > 0 && frequency_index > 0 &&
-         (!mime_type.Equals(MEDIA_MIMETYPE_AUDIO_AAC) || aac_profile > 0);
+         (!mime_type.Equals(MEDIA_MIMETYPE_AUDIO_AAC) ||
+          aac_profile > 0 || extended_profile > 0);
 }
 
 void
-VideoDecoderConfig::Update(sp<MetaData>& aMetaData, const char* aMimeType)
+VideoDecoderConfig::Update(const MetaData* aMetaData, const char* aMimeType)
 {
   TrackConfig::Update(aMetaData, aMimeType);
   display_width = FindInt32(aMetaData, kKeyDisplayWidth);
@@ -194,145 +169,5 @@ bool
 VideoDecoderConfig::IsValid()
 {
   return display_width > 0 && display_height > 0;
-}
-
-MP4Sample::MP4Sample()
-  : mMediaBuffer(nullptr)
-  , decode_timestamp(0)
-  , composition_timestamp(0)
-  , duration(0)
-  , byte_offset(0)
-  , is_sync_point(0)
-  , data(nullptr)
-  , size(0)
-  , extra_data(nullptr)
-{
-}
-
-MP4Sample*
-MP4Sample::Clone() const
-{
-  nsAutoPtr<MP4Sample> s(new MP4Sample());
-  s->decode_timestamp = decode_timestamp;
-  s->composition_timestamp = composition_timestamp;
-  s->duration = duration;
-  s->byte_offset = byte_offset;
-  s->is_sync_point = is_sync_point;
-  s->size = size;
-  s->crypto = crypto;
-  s->extra_data = extra_data;
-  s->extra_buffer = s->data = new (fallible) uint8_t[size];
-  if (!s->extra_buffer) {
-    return nullptr;
-  }
-  memcpy(s->data, data, size);
-  return s.forget();
-}
-
-MP4Sample::~MP4Sample()
-{
-  if (mMediaBuffer) {
-    mMediaBuffer->release();
-  }
-}
-
-void
-MP4Sample::Update(int64_t& aMediaTime)
-{
-  sp<MetaData> m = mMediaBuffer->meta_data();
-  // XXXbholley - Why don't we adjust decode_timestamp for aMediaTime?
-  // According to k17e, this code path is no longer used - we should probably remove it.
-  decode_timestamp = FindInt64(m, kKeyDecodingTime);
-  composition_timestamp = FindInt64(m, kKeyTime) - aMediaTime;
-  duration = FindInt64(m, kKeyDuration);
-  byte_offset = FindInt64(m, kKey64BitFileOffset);
-  is_sync_point = FindInt32(m, kKeyIsSyncFrame);
-  data = reinterpret_cast<uint8_t*>(mMediaBuffer->data());
-  size = mMediaBuffer->range_length();
-
-  crypto.Update(m);
-}
-
-bool
-MP4Sample::Pad(size_t aPaddingBytes)
-{
-  size_t newSize = size + aPaddingBytes;
-
-  // If the existing MediaBuffer has enough space then we just recycle it. If
-  // not then we copy to a new buffer.
-  uint8_t* newData = mMediaBuffer && newSize <= mMediaBuffer->size()
-                       ? data
-                       : new (fallible) uint8_t[newSize];
-  if (!newData) {
-    return false;
-  }
-
-  memset(newData + size, 0, aPaddingBytes);
-
-  if (newData != data) {
-    memcpy(newData, data, size);
-    extra_buffer = data = newData;
-    if (mMediaBuffer) {
-      mMediaBuffer->release();
-      mMediaBuffer = nullptr;
-    }
-  }
-
-  return true;
-}
-
-bool
-MP4Sample::Prepend(const uint8_t* aData, size_t aSize)
-{
-  size_t newSize = size + aSize;
-
-  // If the existing MediaBuffer has enough space then we just recycle it. If
-  // not then we copy to a new buffer.
-  uint8_t* newData = mMediaBuffer && newSize <= mMediaBuffer->size()
-                       ? data
-                       : new (fallible) uint8_t[newSize];
-  if (!newData) {
-    return false;
-  }
-
-  memmove(newData + aSize, data, size);
-  memmove(newData, aData, aSize);
-  size = newSize;
-
-  if (newData != data) {
-    extra_buffer = data = newData;
-    if (mMediaBuffer) {
-      mMediaBuffer->release();
-      mMediaBuffer = nullptr;
-    }
-  }
-
-  return true;
-}
-
-bool
-MP4Sample::Replace(const uint8_t* aData, size_t aSize)
-{
-  // If the existing MediaBuffer has enough space then we just recycle it. If
-  // not then we copy to a new buffer.
-  uint8_t* newData = mMediaBuffer && aSize <= mMediaBuffer->size()
-                       ? data
-                       : new (fallible) uint8_t[aSize];
-  if (!newData) {
-    return false;
-  }
-
-  memcpy(newData, aData, aSize);
-  size = aSize;
-
-  if (newData != data) {
-    extra_buffer = data = newData;
-    if (mMediaBuffer) {
-      mMediaBuffer->release();
-      mMediaBuffer = nullptr;
-    }
-  }
-
-  return true;
 }
 }

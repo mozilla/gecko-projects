@@ -16,6 +16,7 @@ DIRS += [
     'webrtc',
     'webspeech',
     'webvtt',
+    'standalone',
 ]
 
 if CONFIG['MOZ_RAW']:
@@ -122,6 +123,7 @@ EXPORTS += [
     'SharedBuffer.h',
     'SharedThreadPool.h',
     'StreamBuffer.h',
+    'TaskDispatcher.h',
     'ThreadPoolCOMListener.h',
     'TimeUnits.h',
     'TimeVarying.h',

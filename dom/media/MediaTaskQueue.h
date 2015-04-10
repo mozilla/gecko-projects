@@ -10,9 +10,11 @@
 #include <queue>
 #include "mozilla/RefPtr.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/ThreadLocal.h"
 #include "SharedThreadPool.h"
 #include "nsThreadUtils.h"
 #include "MediaPromise.h"
+#include "TaskDispatcher.h"
 
 class nsIRunnable;
 
@@ -27,13 +29,56 @@ typedef MediaPromise<bool, bool, false> ShutdownPromise;
 // they're received, and are guaranteed to not be executed concurrently.
 // They may be executed on different threads, and a memory barrier is used
 // to make this threadsafe for objects that aren't already threadsafe.
-class MediaTaskQueue {
+class MediaTaskQueue : public AbstractThread {
+  static ThreadLocal<MediaTaskQueue*> sCurrentQueueTLS;
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaTaskQueue)
+  static void InitStatics();
 
-  explicit MediaTaskQueue(TemporaryRef<SharedThreadPool> aPool);
+  // Returns the task queue that the caller is currently running in, or null
+  // if the caller is not running in a MediaTaskQueue.
+  static MediaTaskQueue* GetCurrentQueue() { return sCurrentQueueTLS.get(); }
+
+  explicit MediaTaskQueue(TemporaryRef<SharedThreadPool> aPool, bool aRequireTailDispatch = false);
 
   nsresult Dispatch(TemporaryRef<nsIRunnable> aRunnable);
+
+  // Returns a TaskDispatcher that will dispatch its tasks when the currently-
+  // running tasks pops off the stack.
+  //
+  // May only be called when running within the task queue it is invoked up.
+  TaskDispatcher& TailDispatcher();
+
+  // Returns true if this task queue requires all dispatches performed by its
+  // tasks to go through the tail dispatcher.
+  bool RequiresTailDispatch() { return mRequireTailDispatch; }
+
+#ifdef DEBUG
+  static void AssertInTailDispatchIfNeeded()
+  {
+    // See if we're currently running in a task queue that asserts tail
+    // dispatch.
+    MediaTaskQueue* currentQueue = MediaTaskQueue::GetCurrentQueue();
+    if (!currentQueue || !currentQueue->RequiresTailDispatch()) {
+      return;
+    }
+
+    // This is a bit tricky. The only moment when we're running in a task queue
+    // but don't have mTailDispatcher set is precisely the moment that we're
+    // doing tail dispatch (i.e. when AutoTaskGuard's destructor has already
+    // run and AutoTaskDispatcher's destructor is currently running).
+    MOZ_ASSERT(!currentQueue->mTailDispatcher,
+               "Not allowed to dispatch tasks directly from this task queue - use TailDispatcher()");
+  }
+#else
+  static void AssertInTailDispatchIfNeeded() {}
+#endif
+
+  // For AbstractThread.
+  nsresult Dispatch(already_AddRefed<nsIRunnable> aRunnable) override
+  {
+    RefPtr<nsIRunnable> r(aRunnable);
+    return ForceDispatch(r);
+  }
 
   // This should only be used for things that absolutely can't afford to be
   // flushed. Normal operations should use Dispatch.
@@ -60,7 +105,7 @@ public:
 
   // Returns true if the current thread is currently running a Runnable in
   // the task queue. This is for debugging/validation purposes only.
-  bool IsCurrentThreadIn();
+  bool IsCurrentThreadIn() override;
 
 protected:
   virtual ~MediaTaskQueue();
@@ -98,6 +143,35 @@ protected:
   // is the thread currently running in the task queue.
   RefPtr<nsIThread> mRunningThread;
 
+  // RAII class that gets instantiated for each dispatched task.
+  class AutoTaskGuard : public AutoTaskDispatcher
+  {
+  public:
+    explicit AutoTaskGuard(MediaTaskQueue* aQueue) : mQueue(aQueue)
+    {
+      // NB: We don't hold the lock to aQueue here. Don't do anything that
+      // might require it.
+      MOZ_ASSERT(!mQueue->mTailDispatcher);
+      mQueue->mTailDispatcher = this;
+
+      MOZ_ASSERT(sCurrentQueueTLS.get() == nullptr);
+      sCurrentQueueTLS.set(aQueue);
+
+    }
+
+    ~AutoTaskGuard()
+    {
+      sCurrentQueueTLS.set(nullptr);
+      mQueue->mTailDispatcher = nullptr;
+    }
+
+  private:
+  MediaTaskQueue* mQueue;
+  };
+
+  friend class TaskDispatcher;
+  TaskDispatcher* mTailDispatcher;
+
   // True if we've dispatched an event to the pool to execute events from
   // the queue.
   bool mIsRunning;
@@ -108,6 +182,10 @@ protected:
 
   // True if we're flushing; we reject new tasks if we're flushing.
   bool mIsFlushing;
+
+  // True if we want to require that every task dispatched from tasks running in
+  // this queue go through our queue's tail dispatcher.
+  bool mRequireTailDispatch;
 
   class Runner : public nsRunnable {
   public:

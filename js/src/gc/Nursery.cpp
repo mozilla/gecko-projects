@@ -700,8 +700,10 @@ js::Nursery::moveObjectToTenured(MinorCollectionTracer* trc,
 
         // The shape's list head may point into the old object. This can only
         // happen for dictionaries, which are native objects.
-        if (&nsrc->shape_ == ndst->shape_->listp)
+        if (&nsrc->shape_ == ndst->shape_->listp) {
+            MOZ_ASSERT(nsrc->shape_->inDictionary());
             ndst->shape_->listp = &ndst->shape_;
+        }
     }
 
     if (src->is<InlineTypedObject>())
@@ -853,13 +855,6 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason, ObjectGroupList
     sb.markGenericEntries(&trc);
     TIME_END(markGenericEntries);
 
-    TIME_START(checkHashTables);
-#ifdef JS_GC_ZEAL
-    if (rt->gcZeal() == ZealCheckHashTablesOnMinorGC)
-        CheckHashTablesAfterMovingGC(rt);
-#endif
-    TIME_END(checkHashTables);
-
     TIME_START(markRuntime);
     rt->gc.markRuntime(&trc);
     TIME_END(markRuntime);
@@ -914,6 +909,14 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason, ObjectGroupList
     TIME_START(clearStoreBuffer);
     rt->gc.storeBuffer.clear();
     TIME_END(clearStoreBuffer);
+
+    // Make sure hashtables have been updated after the collection.
+    TIME_START(checkHashTables);
+#ifdef JS_GC_ZEAL
+    if (rt->gcZeal() == ZealCheckHashTablesOnMinorGC)
+        CheckHashTablesAfterMovingGC(rt);
+#endif
+    TIME_END(checkHashTables);
 
     // Resize the nursery.
     TIME_START(resize);

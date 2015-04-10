@@ -50,7 +50,7 @@ _SUBDIR_CONFIG_ARGS="$ac_configure_args"
 dnl Set the version number of the libs included with mozilla
 dnl ========================================================
 MOZJPEG=62
-MOZPNG=10616
+MOZPNG=10617
 NSPR_VERSION=4
 NSPR_MINVER=4.10.8
 NSS_VERSION=3
@@ -2343,22 +2343,6 @@ ia64*-hpux*)
     *-mingw*)
         if test -n "$L10NBASEDIR"; then
             L10NBASEDIR=`cd $L10NBASEDIR && pwd -W`
-        fi
-        ;;
-    esac
-
-    case "$host" in
-    *-mingw*)
-        if test -z "$MOZ_TOOLS"; then
-            AC_MSG_ERROR([MOZ_TOOLS is not set])
-        fi
-        MOZ_TOOLS_DIR=`cd $MOZ_TOOLS && pwd -W`
-        if test "$?" != "0" -o -z "$MOZ_TOOLS_DIR"; then
-            AC_MSG_ERROR([cd \$MOZ_TOOLS failed. MOZ_TOOLS ==? $MOZ_TOOLS])
-        fi
-        MOZ_TOOLS_BIN_DIR="$(cd "$MOZ_TOOLS_DIR/bin" && pwd)"
-        if test `echo ${PATH}: | grep -ic "$MOZ_TOOLS_BINDIR:"` = 0; then
-            AC_MSG_ERROR([\$MOZ_TOOLS\\bin must be in your path.])
         fi
         ;;
     esac
@@ -6430,11 +6414,7 @@ MOZ_ARG_ENABLE_BOOL(verify-mar,
     MOZ_VERIFY_MAR_SIGNATURE= )
 
 if test -n "$MOZ_VERIFY_MAR_SIGNATURE"; then
-  if test "$OS_ARCH" = "WINNT"; then
-    AC_DEFINE(MOZ_VERIFY_MAR_SIGNATURE)
-  else
-    AC_MSG_ERROR([Can only build with --enable-verify-mar with a Windows target])
-  fi
+  AC_DEFINE(MOZ_VERIFY_MAR_SIGNATURE)
 fi
 
 dnl ========================================================
@@ -8696,7 +8676,6 @@ fi
 
 dnl win32 options
 AC_SUBST(MOZ_BROWSE_INFO)
-AC_SUBST(MOZ_TOOLS_DIR)
 AC_SUBST(WIN32_REDIST_DIR)
 AC_SUBST(MAKENSISU)
 

@@ -147,6 +147,7 @@ CanLazilyParse(ExclusiveContext* cx, const ReadOnlyCompileOptions& options)
 {
     return options.canLazilyParse &&
            !options.hasPollutedGlobalScope &&
+           !cx->compartment()->options().disableLazyParsing() &&
            !cx->compartment()->options().discardSource() &&
            !options.sourceIsLazy;
 }
@@ -280,10 +281,12 @@ frontend::CompileScript(ExclusiveContext* cx, LifoAlloc* alloc, HandleObject sco
     if (!parser.checkOptions())
         return nullptr;
 
-    Directives directives(options.strictOption);
-    GlobalSharedContext globalsc(cx, directives, options.extraWarningsOption);
-
     bool savedCallerFun = evalCaller && evalCaller->functionOrCallerFunction();
+    bool allowSuperProperty = savedCallerFun && evalCaller->functionOrCallerFunction()->isMethod();
+
+    Directives directives(options.strictOption);
+    GlobalSharedContext globalsc(cx, directives, options.extraWarningsOption, allowSuperProperty);
+
     Rooted<JSScript*> script(cx, JSScript::Create(cx, evalStaticScope, savedCallerFun,
                                                   options, staticLevel, sourceObject, 0,
                                                   srcBuf.length()));

@@ -128,6 +128,8 @@ public:
         return mPluginName + mPluginVersion;
     }
 
+    virtual nsresult GetRunID(uint32_t* aRunID) override;
+
 protected:
     virtual mozilla::ipc::RacyInterruptPolicy
     MediateInterruptRace(const Message& parent, const Message& child) override
@@ -268,6 +270,8 @@ protected:
     void NotifyFlashHang();
     void NotifyPluginCrashed();
     void OnInitFailure();
+    bool MaybeRunDeferredShutdown();
+    bool DoShutdown(NPError* error);
 
     bool GetSetting(NPNVariable aVariable);
     void GetSettings(PluginSettings* aSettings);
@@ -303,8 +307,10 @@ protected:
 
     bool              mIsStartingAsync;
     bool              mNPInitialized;
+    bool              mIsNPShutdownPending;
     nsTArray<nsRefPtr<PluginAsyncSurrogate>> mSurrogateInstances;
     nsresult          mAsyncNewRv;
+    uint32_t          mRunID;
 };
 
 class PluginModuleContentParent : public PluginModuleParent
@@ -551,6 +557,7 @@ private:
     dom::ContentParent* mContentParent;
     nsCOMPtr<nsIObserver> mOfflineObserver;
     bool mIsBlocklisted;
+    static uint32_t sNextRunID;
     static bool sInstantiated;
 };
 

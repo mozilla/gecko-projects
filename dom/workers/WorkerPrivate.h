@@ -25,6 +25,7 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
+#include "nsTObserverArray.h"
 #include "mozilla/dom/StructuredCloneTags.h"
 
 #include "Queue.h"
@@ -163,6 +164,8 @@ private:
   // The lifetime of these objects within LoadInfo is managed explicitly;
   // they do not need to be cycle collected.
   WorkerLoadInfo mLoadInfo;
+
+  Atomic<bool> mLoadingWorkerScript;
 
   // Only used for top level workers.
   nsTArray<nsCOMPtr<nsIRunnable>> mQueuedRunnables;
@@ -480,6 +483,37 @@ public:
     return mLoadInfo.mResolvedScriptURI;
   }
 
+  const nsString&
+  ServiceWorkerCacheName() const
+  {
+    MOZ_ASSERT(IsServiceWorker());
+    AssertIsOnMainThread();
+    return mLoadInfo.mServiceWorkerCacheName;
+  }
+
+  // This is used to handle importScripts(). When the worker is first loaded
+  // and executed, it happens in a sync loop. At this point it sets
+  // mLoadingWorkerScript to true. importScripts() calls that occur during the
+  // execution run in nested sync loops and so this continues to return true,
+  // leading to these scripts being cached offline.
+  // mLoadingWorkerScript is set to false when the top level loop ends.
+  // importScripts() in function calls or event handlers are always fetched
+  // from the network.
+  bool
+  LoadScriptAsPartOfLoadingServiceWorkerScript()
+  {
+    MOZ_ASSERT(IsServiceWorker());
+    return mLoadingWorkerScript;
+  }
+
+  void
+  SetLoadingWorkerScript(bool aLoadingWorkerScript)
+  {
+    // any thread
+    MOZ_ASSERT(IsServiceWorker());
+    mLoadingWorkerScript = aLoadingWorkerScript;
+  }
+
   TimeStamp CreationTimeStamp() const
   {
     return mCreationTimeStamp;
@@ -547,12 +581,7 @@ public:
     return mLoadInfo.mChannel.forget();
   }
 
-  nsIDocument*
-  GetDocument() const
-  {
-    AssertIsOnMainThread();
-    return mLoadInfo.mWindow ? mLoadInfo.mWindow->GetExtantDoc() : nullptr;
-  }
+  nsIDocument* GetDocument() const;
 
   nsPIDOMWindow*
   GetWindow()
@@ -819,7 +848,7 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   nsRefPtr<WorkerGlobalScope> mScope;
   nsRefPtr<WorkerDebuggerGlobalScope> mDebuggerScope;
   nsTArray<ParentType*> mChildWorkers;
-  nsTArray<WorkerFeature*> mFeatures;
+  nsTObserverArray<WorkerFeature*> mFeatures;
   nsTArray<nsAutoPtr<TimeoutInfo>> mTimeouts;
   uint32_t mDebuggerEventLoopLevel;
 
@@ -1182,6 +1211,9 @@ public:
   }
 
   void
+  ClearMainEventQueue(WorkerRanOrNot aRanOrNot);
+
+  void
   OnProcessNextEvent(uint32_t aRecursionDepth);
 
   void
@@ -1222,9 +1254,6 @@ private:
                 const nsAString& aScriptURL, bool aIsChromeWorker,
                 WorkerType aWorkerType, const nsACString& aSharedWorkerName,
                 WorkerLoadInfo& aLoadInfo);
-
-  void
-  ClearMainEventQueue(WorkerRanOrNot aRanOrNot);
 
   bool
   MayContinueRunning()
