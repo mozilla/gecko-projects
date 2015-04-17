@@ -40,7 +40,7 @@ typedef mozilla::layers::TextureClient TextureClient;
 public:
   GonkVideoDecoderManager(MediaTaskQueue* aTaskQueue,
                           mozilla::layers::ImageContainer* aImageContainer,
-		                      const mp4_demuxer::VideoDecoderConfig& aConfig);
+                          const VideoInfo& aConfig);
 
   ~GonkVideoDecoderManager();
 
@@ -50,8 +50,6 @@ public:
                           nsRefPtr<MediaData>& aOutput) override;
 
   virtual nsresult Flush() override;
-
-  virtual void AllocateMediaResources();
 
   virtual void ReleaseMediaResources();
 
@@ -146,7 +144,6 @@ private:
 
   android::sp<MediaCodecProxy> mDecoder;
   nsRefPtr<layers::ImageContainer> mImageContainer;
-  MediaDataDecoderCallback* mCallback;
 
   android::MediaBuffer* mVideoBuffer;
 
@@ -179,7 +176,6 @@ private:
   Vector<android::MediaBuffer*> mPendingVideoBuffers;
   // The lock protects mPendingVideoBuffers.
   Mutex mPendingVideoBuffersLock;
-
 };
 
 } // namespace mozilla

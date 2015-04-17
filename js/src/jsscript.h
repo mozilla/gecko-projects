@@ -1634,6 +1634,9 @@ class JSScript : public js::gc::TenuredCell
         return arr->vector[index];
     }
 
+    // The following 3 functions find the static scope just before the
+    // execution of the instruction pointed to by pc.
+
     js::NestedScopeObject* getStaticBlockScope(jsbytecode* pc);
 
     // Returns the innermost static scope at pc if it falls within the extent
@@ -1789,7 +1792,7 @@ class BindingIter
       : bindings_(script, &script->bindings), i_(0), unaliasedLocal_(0) {}
 
     bool done() const { return i_ == bindings_->count(); }
-    operator bool() const { return !done(); }
+    explicit operator bool() const { return !done(); }
     BindingIter& operator++() { (*this)++; return *this; }
 
     void operator++(int) {
@@ -1860,7 +1863,7 @@ class AliasedFormalIter
     explicit inline AliasedFormalIter(JSScript* script);
 
     bool done() const { return p_ == end_; }
-    operator bool() const { return !done(); }
+    explicit operator bool() const { return !done(); }
     void operator++(int) { MOZ_ASSERT(!done()); p_++; slot_++; settle(); }
 
     const Binding& operator*() const { MOZ_ASSERT(!done()); return *p_; }

@@ -21,6 +21,7 @@
 #include "PaintedLayerComposite.h"      // for PaintedLayerComposite
 #include "TiledLayerBuffer.h"           // for TiledLayerComposer
 #include "Units.h"                      // for ScreenIntRect
+#include "UnitTransforms.h"             // for ViewAs
 #include "gfx2DGlue.h"                  // for ToMatrix4x4
 #include "gfxPrefs.h"                   // for gfxPrefs
 #ifdef XP_MACOSX
@@ -54,6 +55,11 @@
 #include "nsRegion.h"                   // for nsIntRegion, etc
 #ifdef MOZ_WIDGET_ANDROID
 #include <android/log.h>
+#include "AndroidBridge.h"
+#include "opengl/CompositorOGL.h"
+#include "GLContextEGL.h"
+#include "GLContextProvider.h"
+#include "ScopedGLHelpers.h"
 #endif
 #include "GeckoProfiler.h"
 #include "TextRenderer.h"               // for TextRenderer
@@ -234,9 +240,9 @@ LayerManagerComposite::ApplyOcclusionCulling(Layer* aLayer, nsIntRegion& aOpaque
       localOpaque.Or(localOpaque, composite->GetFullyRenderedRegion());
     }
     localOpaque.MoveBy(transform2d._31, transform2d._32);
-    const nsIntRect* clip = aLayer->GetEffectiveClipRect();
+    const Maybe<ParentLayerIntRect>& clip = aLayer->GetEffectiveClipRect();
     if (clip) {
-      localOpaque.And(localOpaque, *clip);
+      localOpaque.And(localOpaque, ParentLayerIntRect::ToUntyped(*clip));
     }
     aOpaqueRegion.Or(aOpaqueRegion, localOpaque);
   }
@@ -306,6 +312,9 @@ LayerManagerComposite::EndTransaction(DrawPaintedLayerCallback aCallback,
     ApplyOcclusionCulling(mRoot, opaque);
 
     Render();
+#ifdef MOZ_WIDGET_ANDROID
+    RenderToPresentationSurface();
+#endif
     mGeometryChanged = false;
   } else {
     // Modified layer tree
@@ -659,7 +668,10 @@ LayerManagerComposite::Render()
     composer2D = mCompositor->GetWidget()->GetComposer2D();
   }
 
-  if (!mTarget && composer2D && composer2D->TryRender(mRoot, mGeometryChanged)) {
+  if (!mTarget &&
+      gfxPrefs::Composer2DCompositionEnabled() &&
+      composer2D && composer2D->TryRender(mRoot, mGeometryChanged))
+  {
     LayerScope::SetHWComposed();
     if (mFPS) {
       double fps = mFPS->mCompositionFps.AddFrameAndGetFps(TimeStamp::Now());
@@ -694,7 +706,7 @@ LayerManagerComposite::Render()
     mInvalidRegion.SetEmpty();
   }
 
-  nsIntRect clipRect;
+  ParentLayerIntRect clipRect;
   Rect bounds(mRenderBounds.x, mRenderBounds.y, mRenderBounds.width, mRenderBounds.height);
   Rect actualBounds;
 
@@ -707,7 +719,7 @@ LayerManagerComposite::Render()
   } else {
     gfx::Rect rect;
     mCompositor->BeginFrame(invalid, nullptr, bounds, &rect, &actualBounds);
-    clipRect = nsIntRect(rect.x, rect.y, rect.width, rect.height);
+    clipRect = ParentLayerIntRect(rect.x, rect.y, rect.width, rect.height);
   }
 
   if (actualBounds.IsEmpty()) {
@@ -729,8 +741,8 @@ LayerManagerComposite::Render()
   }
 
   // Render our layers.
-  RootLayer()->Prepare(RenderTargetPixel::FromUntyped(clipRect));
-  RootLayer()->RenderLayer(clipRect);
+  RootLayer()->Prepare(ViewAs<RenderTargetPixel>(clipRect, PixelCastJustification::RenderTargetIsParentLayerForRoot));
+  RootLayer()->RenderLayer(ParentLayerIntRect::ToUntyped(clipRect));
 
   if (!mRegionToClear.IsEmpty()) {
     nsIntRegionRectIterator iter(mRegionToClear);
@@ -742,7 +754,7 @@ LayerManagerComposite::Render()
 
   if (mTwoPassTmpTarget) {
     MOZ_ASSERT(haveLayerEffects);
-    PopGroupForLayerEffects(previousTarget, clipRect,
+    PopGroupForLayerEffects(previousTarget, ParentLayerIntRect::ToUntyped(clipRect),
                             grayscaleVal, invertVal, contrastVal);
   }
 
@@ -767,6 +779,175 @@ LayerManagerComposite::Render()
 
   RecordFrame();
 }
+
+#ifdef MOZ_WIDGET_ANDROID
+class ScopedCompositorProjMatrix {
+public:
+  ScopedCompositorProjMatrix(CompositorOGL* aCompositor, const Matrix4x4& aProjMatrix):
+    mCompositor(aCompositor),
+    mOriginalProjMatrix(mCompositor->GetProjMatrix())
+  {
+    mCompositor->SetProjMatrix(aProjMatrix);
+  }
+
+  ~ScopedCompositorProjMatrix()
+  {
+    mCompositor->SetProjMatrix(mOriginalProjMatrix);
+  }
+private:
+  CompositorOGL* const mCompositor;
+  const Matrix4x4 mOriginalProjMatrix;
+};
+
+class ScopedCompostitorSurfaceSize {
+public:
+  ScopedCompostitorSurfaceSize(CompositorOGL* aCompositor, const gfx::IntSize& aSize) :
+    mCompositor(aCompositor),
+    mOriginalSize(mCompositor->GetDestinationSurfaceSize())
+  {
+    mCompositor->SetDestinationSurfaceSize(aSize);
+  }
+  ~ScopedCompostitorSurfaceSize()
+  {
+    mCompositor->SetDestinationSurfaceSize(mOriginalSize);
+  }
+private:
+  CompositorOGL* const mCompositor;
+  const gfx::IntSize mOriginalSize;
+};
+
+class ScopedCompositorRenderOffset {
+public:
+  ScopedCompositorRenderOffset(CompositorOGL* aCompositor, const ScreenPoint& aOffset) :
+    mCompositor(aCompositor),
+    mOriginalOffset(mCompositor->GetScreenRenderOffset())
+  {
+    mCompositor->SetScreenRenderOffset(aOffset);
+  }
+  ~ScopedCompositorRenderOffset()
+  {
+    mCompositor->SetScreenRenderOffset(mOriginalOffset);
+  }
+private:
+  CompositorOGL* const mCompositor;
+  const ScreenPoint mOriginalOffset;
+};
+
+class ScopedContextSurfaceOverride {
+public:
+  ScopedContextSurfaceOverride(GLContextEGL* aContext, void* aSurface) :
+    mContext(aContext)
+  {
+    MOZ_ASSERT(aSurface);
+    mContext->SetEGLSurfaceOverride(aSurface);
+    mContext->MakeCurrent(true);
+  }
+  ~ScopedContextSurfaceOverride()
+  {
+    mContext->SetEGLSurfaceOverride(EGL_NO_SURFACE);
+    mContext->MakeCurrent(true);
+  }
+private:
+  GLContextEGL* const mContext;
+};
+
+void
+LayerManagerComposite::RenderToPresentationSurface()
+{
+  if (!AndroidBridge::Bridge()) {
+    return;
+  }
+
+  void* window = AndroidBridge::Bridge()->GetPresentationWindow();
+
+  if (!window) {
+    return;
+  }
+
+  EGLSurface surface = AndroidBridge::Bridge()->GetPresentationSurface();
+
+  if (!surface) {
+    //create surface;
+    surface = GLContextProviderEGL::CreateEGLSurface(window);
+    if (!surface) {
+      return;
+    }
+
+    AndroidBridge::Bridge()->SetPresentationSurface(surface);
+  }
+
+  CompositorOGL* compositor = static_cast<CompositorOGL*>(mCompositor.get());
+  GLContext* gl = compositor->gl();
+  GLContextEGL* egl = GLContextEGL::Cast(gl);
+
+  if (!egl) {
+    return;
+  }
+
+  const IntSize windowSize = AndroidBridge::Bridge()->GetNativeWindowSize(window);
+
+  if ((windowSize.width <= 0) || (windowSize.height <= 0)) {
+    return;
+  }
+
+  const int actualWidth = windowSize.width;
+  const int actualHeight = windowSize.height;
+
+  const gfx::IntSize originalSize = compositor->GetDestinationSurfaceSize();
+
+  const int pageWidth = originalSize.width;
+  const int pageHeight = originalSize.height;
+
+  float scale = 1.0;
+
+  if ((pageWidth > actualWidth) || (pageHeight > actualHeight)) {
+    const float scaleWidth = (float)actualWidth / (float)pageWidth;
+    const float scaleHeight = (float)actualHeight / (float)pageHeight;
+    scale = scaleWidth <= scaleHeight ? scaleWidth : scaleHeight;
+  }
+
+  const gfx::IntSize actualSize(actualWidth, actualHeight);
+  ScopedCompostitorSurfaceSize overrideSurfaceSize(compositor, actualSize);
+
+  const ScreenPoint offset((actualWidth - (int)(scale * pageWidth)) / 2, 0);
+  ScopedCompositorRenderOffset overrideRenderOffset(compositor, offset);
+  ScopedContextSurfaceOverride overrideSurface(egl, surface);
+
+  nsIntRegion invalid;
+  Rect bounds(0.0f, 0.0f, scale * pageWidth, (float)actualHeight);
+  Rect rect, actualBounds;
+
+  mCompositor->BeginFrame(invalid, nullptr, bounds, &rect, &actualBounds);
+
+  // Override the projection matrix since the presentation frame buffer
+  // is probably not the same size as the device frame buffer. The override
+  // projection matrix also scales the content to fit into the presentation
+  // frame buffer.
+  Matrix viewMatrix;
+  viewMatrix.PreTranslate(-1.0, 1.0);
+  viewMatrix.PreScale((2.0f * scale) / (float)actualWidth, (2.0f * scale) / (float)actualHeight);
+  viewMatrix.PreScale(1.0f, -1.0f);
+  viewMatrix.PreTranslate((int)((float)offset.x / scale), offset.y);
+
+  Matrix4x4 projMatrix = Matrix4x4::From2D(viewMatrix);
+
+  ScopedCompositorProjMatrix overrideProjMatrix(compositor, projMatrix);
+
+  // The Java side of Fennec sets a scissor rect that accounts for
+  // chrome such as the URL bar. Override that so that the entire frame buffer
+  // is cleared.
+  ScopedScissorRect screen(egl, 0, 0, actualWidth, actualHeight);
+  egl->fClearColor(0.0, 0.0, 0.0, 0.0);
+  egl->fClear(LOCAL_GL_COLOR_BUFFER_BIT);
+
+  const nsIntRect clipRect = nsIntRect(0, 0, (int)(scale * pageWidth), actualHeight);
+  RootLayer()->Prepare(RenderTargetPixel::FromUntyped(clipRect));
+  RootLayer()->RenderLayer(clipRect);
+
+  mCompositor->EndFrame();
+  mCompositor->SetFBAcquireFence(mRoot);
+}
+#endif
 
 static void
 SubtractTransformedRegion(nsIntRegion& aRegion,
@@ -1096,7 +1277,6 @@ LayerComposite::LayerComposite(LayerManagerComposite *aManager)
   : mCompositeManager(aManager)
   , mCompositor(aManager->GetCompositor())
   , mShadowOpacity(1.0)
-  , mUseShadowClipRect(false)
   , mShadowTransformSetByAnimation(false)
   , mDestroyed(false)
   , mLayerComposited(false)

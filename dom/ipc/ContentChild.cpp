@@ -98,6 +98,7 @@
 #include "nsISystemMessageCache.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
+#include "nsContentPermissionHelper.h"
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -179,6 +180,7 @@
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/dom/voicemail/VoicemailIPCService.h"
 #include "mozilla/net/NeckoMessageUtils.h"
+#include "mozilla/widget/PuppetBidiKeyboard.h"
 #include "mozilla/RemoteSpellCheckEngineChild.h"
 #include "GMPServiceChild.h"
 
@@ -200,6 +202,7 @@ using namespace mozilla::ipc;
 using namespace mozilla::layers;
 using namespace mozilla::net;
 using namespace mozilla::jsipc;
+using namespace mozilla::widget;
 #if defined(MOZ_WIDGET_GONK)
 using namespace mozilla::system;
 #endif
@@ -793,12 +796,14 @@ ContentChild::InitXPCOM()
     if (NS_FAILED(svc->RegisterListener(mConsoleListener)))
         NS_WARNING("Couldn't register console listener for child process");
 
-    bool isOffline;
+    bool isOffline, isLangRTL;
     ClipboardCapabilities clipboardCaps;
     DomainPolicyClone domainPolicy;
 
-    SendGetXPCOMProcessAttributes(&isOffline, &mAvailableDictionaries, &clipboardCaps, &domainPolicy);
+    SendGetXPCOMProcessAttributes(&isOffline, &isLangRTL, &mAvailableDictionaries,
+                                  &clipboardCaps, &domainPolicy);
     RecvSetOffline(isOffline);
+    RecvBidiKeyboardNotify(isLangRTL);
 
     if (domainPolicy.active()) {
         nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
@@ -1220,6 +1225,18 @@ ContentChild::RecvSpeakerManagerNotify()
     return true;
 #endif
     return false;
+}
+
+bool
+ContentChild::RecvBidiKeyboardNotify(const bool& aIsLangRTL)
+{
+    // bidi is always of type PuppetBidiKeyboard* (because in the child, the only
+    // possible implementation of nsIBidiKeyboard is PuppetBidiKeyboard).
+    PuppetBidiKeyboard* bidi = static_cast<PuppetBidiKeyboard*>(nsContentUtils::GetBidiKeyboard());
+    if (bidi) {
+        bidi->SetIsLangRTL(aIsLangRTL);
+    }
+    return true;
 }
 
 static CancelableTask* sFirstIdleTask;
@@ -2703,6 +2720,23 @@ ContentChild::RecvUpdateWindow(const uintptr_t& aChildId)
 #endif
 }
 
+PContentPermissionRequestChild*
+ContentChild::AllocPContentPermissionRequestChild(const InfallibleTArray<PermissionRequest>& aRequests,
+                                                  const IPC::Principal& aPrincipal,
+                                                  const TabId& aTabId)
+{
+    NS_RUNTIMEABORT("unused");
+    return nullptr;
+}
+
+bool
+ContentChild::DeallocPContentPermissionRequestChild(PContentPermissionRequestChild* actor)
+{
+    auto child = static_cast<RemotePermissionRequest*>(actor);
+    child->IPDLRelease();
+    return true;
+}
+
 // This code goes here rather than nsGlobalWindow.cpp because nsGlobalWindow.cpp
 // can't include ContentChild.h since it includes windows.h.
 
@@ -2897,6 +2931,9 @@ NS_EXPORT void
 AfterNuwaFork()
 {
     SetCurrentProcessPrivileges(base::PRIVILEGES_DEFAULT);
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
+    mozilla::SandboxEarlyInit(XRE_GetProcessType(), /* isNuwa: */ false);
+#endif
 }
 
 #endif // MOZ_NUWA_PROCESS

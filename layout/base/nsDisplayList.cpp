@@ -17,6 +17,7 @@
 
 #include "gfxUtils.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/PLayerTransaction.h"
 #include "nsCSSRendering.h"
@@ -351,9 +352,9 @@ AddAnimationForProperty(nsIFrame* aFrame, const AnimationProperty& aProperty,
                         AnimationData& aData, bool aPending)
 {
   MOZ_ASSERT(aLayer->AsContainerLayer(), "Should only animate ContainerLayer");
-  MOZ_ASSERT(aPlayer->GetSource(),
+  MOZ_ASSERT(aPlayer->GetEffect(),
              "Should not be adding an animation for a player without"
-             " an animation");
+             " an effect");
   nsStyleContext* styleContext = aFrame->StyleContext();
   nsPresContext* presContext = aFrame->PresContext();
   nsRect bounds = nsDisplayTransform::GetFrameBoundsForTransform(aFrame);
@@ -363,7 +364,7 @@ AddAnimationForProperty(nsIFrame* aFrame, const AnimationProperty& aProperty,
     aLayer->AddAnimationForNextTransaction() :
     aLayer->AddAnimation();
 
-  const AnimationTiming& timing = aPlayer->GetSource()->Timing();
+  const AnimationTiming& timing = aPlayer->GetEffect()->Timing();
   Nullable<TimeDuration> startTime = aPlayer->GetCurrentOrPendingStartTime();
   animation->startTime() = startTime.IsNull()
                            ? TimeStamp()
@@ -420,10 +421,10 @@ AddAnimationsForProperty(nsIFrame* aFrame, nsCSSProperty aProperty,
     if (!player->IsPlaying()) {
       continue;
     }
-    dom::Animation* anim = player->GetSource();
-    MOZ_ASSERT(anim, "A playing player should have a source animation");
+    dom::KeyframeEffectReadonly* effect = player->GetEffect();
+    MOZ_ASSERT(effect, "A playing player should have an effect");
     const AnimationProperty* property =
-      anim->GetAnimationOfProperty(aProperty);
+      effect->GetAnimationOfProperty(aProperty);
     if (!property) {
       continue;
     }
@@ -1235,7 +1236,7 @@ nsDisplayListBuilder::IsAnimatedGeometryRoot(nsIFrame* aFrame, nsIFrame** aParen
     return true;
   }
 
-  if (parentType == nsGkAtoms::scrollFrame) {
+  if (parentType == nsGkAtoms::scrollFrame || parentType == nsGkAtoms::listControlFrame) {
     nsIScrollableFrame* sf = do_QueryFrame(parent);
     if (sf->IsScrollingActive(this) && sf->GetScrolledFrame() == aFrame) {
       return true;
@@ -4168,10 +4169,13 @@ bool nsDisplayBlendContainer::TryMerge(nsDisplayListBuilder* aBuilder, nsDisplay
 
 nsDisplayOwnLayer::nsDisplayOwnLayer(nsDisplayListBuilder* aBuilder,
                                      nsIFrame* aFrame, nsDisplayList* aList,
-                                     uint32_t aFlags, ViewID aScrollTarget)
+                                     uint32_t aFlags, ViewID aScrollTarget,
+                                     float aScrollbarThumbRatio)
     : nsDisplayWrapList(aBuilder, aFrame, aList)
     , mFlags(aFlags)
-    , mScrollTarget(aScrollTarget) {
+    , mScrollTarget(aScrollTarget)
+    , mScrollbarThumbRatio(aScrollbarThumbRatio)
+{
   MOZ_COUNT_CTOR(nsDisplayOwnLayer);
 }
 
@@ -4185,16 +4189,17 @@ nsDisplayOwnLayer::~nsDisplayOwnLayer() {
 already_AddRefed<Layer>
 nsDisplayOwnLayer::BuildLayer(nsDisplayListBuilder* aBuilder,
                               LayerManager* aManager,
-                              const ContainerLayerParameters& aContainerParameters) {
+                              const ContainerLayerParameters& aContainerParameters)
+{
   nsRefPtr<ContainerLayer> layer = aManager->GetLayerBuilder()->
     BuildContainerLayerFor(aBuilder, aManager, mFrame, this, &mList,
                            aContainerParameters, nullptr,
                            FrameLayerBuilder::CONTAINER_ALLOW_PULL_BACKGROUND_COLOR);
   if (mFlags & VERTICAL_SCROLLBAR) {
-    layer->SetScrollbarData(mScrollTarget, Layer::ScrollDirection::VERTICAL);
+    layer->SetScrollbarData(mScrollTarget, Layer::ScrollDirection::VERTICAL, mScrollbarThumbRatio);
   }
   if (mFlags & HORIZONTAL_SCROLLBAR) {
-    layer->SetScrollbarData(mScrollTarget, Layer::ScrollDirection::HORIZONTAL);
+    layer->SetScrollbarData(mScrollTarget, Layer::ScrollDirection::HORIZONTAL, mScrollbarThumbRatio);
   }
   if (mFlags & SCROLLBAR_CONTAINER) {
     layer->SetIsScrollbarContainer();

@@ -192,8 +192,8 @@ nsHttpHandler::nsHttpHandler()
     , mCoalesceSpdy(true)
     , mSpdyPersistentSettings(false)
     , mAllowPush(true)
-    , mEnableAltSvc(true)
-    , mEnableAltSvcOE(true)
+    , mEnableAltSvc(false)
+    , mEnableAltSvcOE(false)
     , mSpdySendingChunkSize(ASpdySession::kSendingChunkSize)
     , mSpdySendBufferSize(ASpdySession::kTCPSendBufferSize)
     , mSpdyPushAllowance(32768)
@@ -358,6 +358,7 @@ nsHttpHandler::Init()
         mObserverService->AddObserver(this, "net:prune-dead-connections", true);
         mObserverService->AddObserver(this, "net:failed-to-process-uri-content", true);
         mObserverService->AddObserver(this, "last-pb-context-exited", true);
+        mObserverService->AddObserver(this, "webapps-clear-data", true);
         mObserverService->AddObserver(this, "browser:purge-session-history", true);
         mObserverService->AddObserver(this, NS_NETWORK_LINK_TOPIC, false);
     }
@@ -1271,7 +1272,7 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
     }
 
     if (PREF_CHANGED(HTTP_PREF("altsvc.enabled"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("atsvc.enabled"),
+        rv = prefs->GetBoolPref(HTTP_PREF("altsvc.enabled"),
                                 &cVar);
         if (NS_SUCCEEDED(rv))
             mEnableAltSvc = cVar;
@@ -1279,7 +1280,7 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
 
 
     if (PREF_CHANGED(HTTP_PREF("altsvc.oe"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("atsvc.oe"),
+        rv = prefs->GetBoolPref(HTTP_PREF("altsvc.oe"),
                                 &cVar);
         if (NS_SUCCEEDED(rv))
             mEnableAltSvcOE = cVar;
@@ -1988,6 +1989,10 @@ nsHttpHandler::Observe(nsISupports *subject,
         }
     } else if (!strcmp(topic, "last-pb-context-exited")) {
         mPrivateAuthCache.ClearAll();
+        if (mConnMgr) {
+            mConnMgr->ClearAltServiceMappings();
+        }
+    } else if (!strcmp(topic, "webapps-clear-data")) {
         if (mConnMgr) {
             mConnMgr->ClearAltServiceMappings();
         }

@@ -719,11 +719,14 @@ html, .fx-embedded, #main,
     height: 100%;
   }
 
+  .standalone .media.nested {
+    margin-left: 10px;
+  }
+
   .standalone .remote_wrapper {
     position: relative;
-    width: calc(100% - 10px);
+    width: 100%;
     height: 100%;
-    margin-left: 10px;
   }
 
   .standalone {
@@ -902,6 +905,63 @@ html, .fx-embedded, #main,
   bottom: 10px;
 }
 
+.share-service-dropdown {
+  color: #000;
+  text-align: start;
+  bottom: auto;
+  top: 0;
+}
+
+.share-service-dropdown.share-button-unavailable {
+  width: 230px;
+  padding: 8px;
+}
+
+.share-service-dropdown > .dropdown-menu-item > .icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+}
+
+.share-service-dropdown .share-panel-header {
+  background-image: url("../img/icons-16x16.svg#share-darkgrey");
+  background-size: 3em 3em;
+  background-repeat: no-repeat;
+  min-height: 3em;
+  font-weight: bold;
+  margin-bottom: 1em;
+  padding-left: 4.5em;
+}
+
+body[dir=rtl] .share-service-dropdown .share-panel-header {
+  background-position: top right;
+  padding-left: 0;
+  padding-right: 4.5em;
+}
+
+.share-service-dropdown .btn-toolbar-add {
+  padding: 4px 2px;
+  border-radius: 2px;
+  margin-top: 1em;
+  width: 100%;
+}
+
+.dropdown-menu-item > .icon-add-share-service {
+  background-image: url("../img/icons-16x16.svg#add");
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+  width: 12px;
+  height: 12px;
+}
+
+.dropdown-menu-item:hover > .icon-add-share-service {
+  background-image: url("../img/icons-16x16.svg#add-hover");
+}
+
+.dropdown-menu-item:hover:active > .icon-add-share-service {
+  background-image: url("../img/icons-16x16.svg#add-active");
+}
+
 /* Standalone rooms */
 
 .standalone .room-conversation-wrapper {
@@ -919,7 +979,7 @@ html, .fx-embedded, #main,
   /* `top` is chosen to vertically position the area near the center
      of the media element. */
   top: calc(50% - 140px);
-  left: calc(25% + 62.5px + 10px);
+  left: 25%;
   z-index: 1000;
   /* `width` here is specified by the design spec. */
   width: 250px;
@@ -972,18 +1032,44 @@ html, .fx-embedded, #main,
   max-width: 400px;
 }
 
-.standalone .room-conversation h2.room-name,
-.standalone .room-conversation h2.room-info-failure {
+.standalone-room-info {
   position: absolute;
-  display: inline-block;
+  display: block;
   top: 0;
   right: 10px;
   /* 20px is 10px for left and right margins. */
   width: calc(25% - 20px);
-  color: #fff;
   z-index: 2000000;
   font-size: 1.2em;
   padding: .4em;
+  height: 100%;
+}
+
+.standalone-room-info > h2 {
+  color: #fff;
+}
+
+.standalone-context-url {
+  color: #fff;
+  /* Try and keep clear of local video */
+  height: 40%;
+}
+
+.standalone-context-url.screen-share-active {
+  /* Try and keep clear of remote video when screensharing */
+  height: 15%;
+}
+
+.standalone-context-url > img {
+  margin: 1em auto;
+  max-width: 50%;
+  /* allows 20% for the description wrapper plus the margins */
+  max-height: calc(80% - 2em);
+}
+
+.standalone-context-url-description-wrapper {
+  /* So that we can use max-height for the image */
+  height: 20%;
 }
 
 .standalone .room-conversation .media {
@@ -992,7 +1078,7 @@ html, .fx-embedded, #main,
 
 .standalone .room-conversation .video_wrapper.remote_wrapper {
   background-color: #4e4e4e;
-  width: calc(75% - 10px); /* Take the left margin into account. */
+  width: 75%;
 }
 
 .standalone .room-conversation .conversation-toolbar {
@@ -1011,6 +1097,26 @@ html, .fx-embedded, #main,
 
 
 @media screen and (max-width:640px) {
+  .standalone-room-info {
+    /* This isn't perfect, we just center the heading for now. Bug 1141493
+       should fix this. */
+    position: absolute;
+    width: 100%;
+    right: 0px;
+
+    /* Override the 100% specified in the .standalone-room-info selector
+       block so that this div doesn't take over the _whole_ screen and
+       transparently occlude UI widgetry (like the Join button), making
+       it unusable. */
+    height: auto;
+  }
+
+  .standalone-context-url {
+    /* XXX We haven't got UX for standalone yet, so temporarily not displaying
+       on narrow window widths. See bug 1153827. */
+    display: none;
+  }
+
   /* Rooms specific responsive styling */
   .standalone .room-conversation {
     background: #000;
@@ -1022,6 +1128,7 @@ html, .fx-embedded, #main,
     right: 0;
     margin: auto;
     width: 100%;
+    left: 0;
   }
   .standalone .room-conversation-wrapper .video-layout-wrapper {
     /* 50px: header's height; 25px: footer's height */
@@ -1030,6 +1137,10 @@ html, .fx-embedded, #main,
   .standalone .room-conversation .video_wrapper.remote_wrapper {
     width: 100%;
   }
+  .standalone .room-conversation .video_wrapper.remote_wrapper.not-joined {
+    width: 100%;
+  }
+
   .standalone .conversation-toolbar {
     height: 38px;
     padding: 8px;

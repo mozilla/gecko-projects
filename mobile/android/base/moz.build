@@ -273,7 +273,6 @@ gbjar.sources += [
     'gfx/SubdocumentScrollHelper.java',
     'gfx/TextureGenerator.java',
     'gfx/TextureReaper.java',
-    'gfx/TileLayer.java',
     'gfx/TouchEventHandler.java',
     'gfx/ViewTransform.java',
     'gfx/VirtualLayer.java',
@@ -360,7 +359,6 @@ gbjar.sources += [
     'menu/MenuPopup.java',
     'menu/QuickShareBarActionView.java',
     'MotionEventInterceptor.java',
-    'NewTabletUI.java',
     'NotificationClient.java',
     'NotificationHandler.java',
     'NotificationHelper.java',
@@ -445,7 +443,6 @@ gbjar.sources += [
     'ThumbnailHelper.java',
     'tiles/Tile.java',
     'tiles/TilesRecorder.java',
-    'toolbar/ActionBarViewFlipper.java',
     'toolbar/AutocompleteHandler.java',
     'toolbar/BackButton.java',
     'toolbar/BrowserToolbar.java',
@@ -891,3 +888,5 @@ if CONFIG['MOZ_ANDROID_MLS_STUMBLER']:
 if CONFIG['MOZ_ANDROID_SEARCH_ACTIVITY']:
     # The Search Activity code is built as part of Fennec, so we follow suit in Eclipse.
     main.add_classpathentry('search', TOPSRCDIR + '/mobile/android/search/java', dstdir='search')
+
+DIST_FILES += ['package-name.txt.in']

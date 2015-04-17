@@ -26,7 +26,7 @@ public:
 
   already_AddRefed<MediaDataDecoder> CreateVideoDecoder(
     PlatformDecoderModule* aPDM,
-    const mp4_demuxer::VideoDecoderConfig& aConfig,
+    const VideoInfo& aConfig,
     layers::LayersBackend aLayersBackend,
     layers::ImageContainer* aImageContainer,
     FlushableMediaTaskQueue* aVideoTaskQueue,
@@ -42,7 +42,7 @@ public:
   friend class SharedDecoderCallback;
 
   void DisableHardwareAcceleration();
-  bool Recreate(const mp4_demuxer::VideoDecoderConfig& aConfig);
+  bool Recreate(const VideoInfo& aConfig);
 
 private:
   virtual ~SharedDecoderManager();
@@ -74,8 +74,6 @@ public:
   virtual nsresult Drain() override;
   virtual nsresult Shutdown() override;
   virtual bool IsWaitingMediaResources() override;
-  virtual bool IsDormantNeeded() override;
-  virtual void ReleaseMediaResources() override;
   virtual bool IsHardwareAccelerated() const override;
 
   friend class SharedDecoderManager;

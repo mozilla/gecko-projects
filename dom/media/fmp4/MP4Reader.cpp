@@ -71,7 +71,7 @@ TrackTypeToStr(TrackType aTrack)
 #endif
 
 bool
-AccumulateSPSTelemetry(const DataBuffer* aExtradata)
+AccumulateSPSTelemetry(const MediaByteBuffer* aExtradata)
 {
   SPSData spsdata;
   if (H264::DecodeSPSFromExtraData(aExtradata, spsdata)) {
@@ -157,7 +157,6 @@ MP4Reader::MP4Reader(AbstractMediaDecoder* aDecoder)
   , mDemuxerInitialized(false)
   , mFoundSPSForTelemetry(false)
   , mIsEncrypted(false)
-  , mAreDecodersSetup(false)
   , mIndexReady(false)
   , mLastSeenEnd(-1)
   , mDemuxerMonitor("MP4 Demuxer")
@@ -294,12 +293,6 @@ private:
 };
 #endif // MOZ_EME
 
-void MP4Reader::RequestCodecResource() {
-  if (mVideo.mDecoder) {
-    mVideo.mDecoder->AllocateMediaResources();
-  }
-}
-
 bool MP4Reader::IsWaitingMediaResources() {
   return mVideo.mDecoder && mVideo.mDecoder->IsWaitingMediaResources();
 }
@@ -357,14 +350,6 @@ MP4Reader::IsSupportedVideoMimeType(const nsACString& aMimeType)
          mPlatform->SupportsMimeType(aMimeType);
 }
 
-void
-MP4Reader::PreReadMetadata()
-{
-  if (mPlatform) {
-    RequestCodecResource();
-  }
-}
-
 bool
 MP4Reader::InitDemuxer()
 {
@@ -383,13 +368,12 @@ MP4Reader::ReadMetadata(MediaInfo* aInfo,
     mIndexReady = true;
 
     // To decode, we need valid video and a place to put it.
-    mInfo.mVideo.mHasVideo = mVideo.mActive = mDemuxer->HasValidVideo() &&
-                                              mDecoder->GetImageContainer();
+    mVideo.mActive = mDemuxer->HasValidVideo() && mDecoder->GetImageContainer();
     if (mVideo.mActive) {
       mVideo.mTrackDemuxer = new MP4VideoDemuxer(mDemuxer);
     }
 
-    mInfo.mAudio.mHasAudio = mAudio.mActive = mDemuxer->HasValidAudio();
+    mAudio.mActive = mDemuxer->HasValidAudio();
     if (mAudio.mActive) {
       mAudio.mTrackDemuxer = new MP4AudioDemuxer(mDemuxer);
     }
@@ -408,25 +392,20 @@ MP4Reader::ReadMetadata(MediaInfo* aInfo,
   } else if (mPlatform && !IsWaitingMediaResources()) {
     *aInfo = mInfo;
     *aTags = nullptr;
-    return NS_OK;
   }
 
   if (HasAudio()) {
-    const AudioDecoderConfig& audio = mDemuxer->AudioConfig();
-    mInfo.mAudio.mRate = audio.samples_per_second;
-    mInfo.mAudio.mChannels = audio.channel_count;
+    mInfo.mAudio = mDemuxer->AudioConfig();
     mAudio.mCallback = new DecoderCallback(this, kAudio);
   }
 
   if (HasVideo()) {
-    const VideoDecoderConfig& video = mDemuxer->VideoConfig();
-    mInfo.mVideo.mDisplay =
-      nsIntSize(video.display_width, video.display_height);
+    mInfo.mVideo = mDemuxer->VideoConfig();
     mVideo.mCallback = new DecoderCallback(this, kVideo);
 
     // Collect telemetry from h264 AVCC SPS.
     if (!mFoundSPSForTelemetry) {
-      mFoundSPSForTelemetry = AccumulateSPSTelemetry(video.extra_data);
+      mFoundSPSForTelemetry = AccumulateSPSTelemetry(mInfo.mVideo.mExtraData);
     }
   }
 
@@ -461,7 +440,7 @@ MP4Reader::ReadMetadata(MediaInfo* aInfo,
   *aInfo = mInfo;
   *aTags = nullptr;
 
-  if (!IsWaitingMediaResources() && !IsWaitingOnCDMResource()) {
+  if (!IsWaitingOnCDMResource()) {
     NS_ENSURE_TRUE(EnsureDecodersSetup(), NS_ERROR_FAILURE);
   }
 
@@ -471,11 +450,28 @@ MP4Reader::ReadMetadata(MediaInfo* aInfo,
   return NS_OK;
 }
 
+bool MP4Reader::CheckIfDecoderSetup()
+{
+  if (!mDemuxerInitialized) {
+    return false;
+  }
+
+  if (HasAudio() && !mAudio.mDecoder) {
+    return false;
+  }
+
+  if (HasVideo() && !mVideo.mDecoder) {
+    return false;
+  }
+
+  return true;
+}
+
 bool
 MP4Reader::EnsureDecodersSetup()
 {
-  if (mAreDecodersSetup) {
-    return !!mPlatform;
+  if (CheckIfDecoderSetup()) {
+    return true;
   }
 
   if (mIsEncrypted) {
@@ -507,12 +503,15 @@ MP4Reader::EnsureDecodersSetup()
     return false;
 #endif
   } else {
-    mPlatform = PlatformDecoderModule::Create();
-    NS_ENSURE_TRUE(mPlatform, false);
+    // mPlatform doesn't need to be recreated when resuming from dormant.
+    if (!mPlatform) {
+      mPlatform = PlatformDecoderModule::Create();
+      NS_ENSURE_TRUE(mPlatform, false);
+    }
   }
 
   if (HasAudio()) {
-    NS_ENSURE_TRUE(IsSupportedAudioMimeType(mDemuxer->AudioConfig().mime_type),
+    NS_ENSURE_TRUE(IsSupportedAudioMimeType(mDemuxer->AudioConfig().mMimeType),
                    false);
 
     mAudio.mDecoder =
@@ -525,7 +524,7 @@ MP4Reader::EnsureDecodersSetup()
   }
 
   if (HasVideo()) {
-    NS_ENSURE_TRUE(IsSupportedVideoMimeType(mDemuxer->VideoConfig().mime_type),
+    NS_ENSURE_TRUE(IsSupportedVideoMimeType(mDemuxer->VideoConfig().mMimeType),
                    false);
 
     if (mSharedDecoderManager && mPlatform->SupportsSharedDecoders(mDemuxer->VideoConfig())) {
@@ -549,7 +548,6 @@ MP4Reader::EnsureDecodersSetup()
     NS_ENSURE_SUCCESS(rv, false);
   }
 
-  mAreDecodersSetup = true;
   return true;
 }
 
@@ -603,7 +601,7 @@ MP4Reader::DisableHardwareAcceleration()
   if (HasVideo() && mSharedDecoderManager) {
     mSharedDecoderManager->DisableHardwareAcceleration();
 
-    const VideoDecoderConfig& video = mDemuxer->VideoConfig();
+    const VideoInfo& video = mDemuxer->VideoConfig();
     if (!mSharedDecoderManager->Recreate(video)) {
       MonitorAutoLock mon(mVideo.mMonitor);
       mVideo.mError = true;
@@ -783,7 +781,7 @@ MP4Reader::Update(TrackType aTrack)
 
     // Collect telemetry from h264 Annex B SPS.
     if (!mFoundSPSForTelemetry && sample && AnnexB::HasSPS(sample)) {
-      nsRefPtr<DataBuffer> extradata = AnnexB::ExtractExtraData(sample);
+      nsRefPtr<MediaByteBuffer> extradata = AnnexB::ExtractExtraData(sample);
       mFoundSPSForTelemetry = AccumulateSPSTelemetry(extradata);
     }
 
@@ -1125,13 +1123,8 @@ MP4Reader::GetBuffered(dom::TimeRanges* aBuffered)
 
 bool MP4Reader::IsDormantNeeded()
 {
-#if defined(MP4_READER_DORMANT)
-  return
 #if defined(MP4_READER_DORMANT_HEURISTIC)
-        mDormantEnabled &&
-#endif
-        mVideo.mDecoder &&
-        mVideo.mDecoder->IsDormantNeeded();
+  return mDormantEnabled;
 #else
   return false;
 #endif
@@ -1146,7 +1139,8 @@ void MP4Reader::ReleaseMediaResources()
     container->ClearCurrentFrame();
   }
   if (mVideo.mDecoder) {
-    mVideo.mDecoder->ReleaseMediaResources();
+    mVideo.mDecoder->Shutdown();
+    mVideo.mDecoder = nullptr;
   }
 }
 

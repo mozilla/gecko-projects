@@ -263,7 +263,9 @@ void Axis::StepOverscrollAnimation(double aStepDurationMilliseconds) {
   // overscroll, to ensure that GetOverscroll always returns a value of the
   // same sign, and that this value is correctly adjusted as the spring is
   // dampened.
-  bool velocitySignChange = (oldVelocity * mVelocity) < 0;
+  // To handle the case where one of the velocity samples is exaclty zero,
+  // consider a sign change to have occurred when the outgoing velocity is zero.
+  bool velocitySignChange = (oldVelocity * mVelocity) < 0 || mVelocity == 0;
   if (mFirstOverscrollAnimationSample == 0.0f) {
     mFirstOverscrollAnimationSample = mOverscroll;
 
@@ -410,6 +412,23 @@ bool Axis::CanScroll(double aDelta) const
   return DisplacementWillOverscrollAmount(delta) != delta;
 }
 
+CSSCoord Axis::ClampOriginToScrollableRect(CSSCoord aOrigin) const
+{
+  CSSToParentLayerScale zoom = GetScaleForAxis(GetFrameMetrics().GetZoom());
+  ParentLayerCoord origin = aOrigin * zoom;
+
+  ParentLayerCoord result;
+  if (origin < GetPageStart()) {
+    result = GetPageStart();
+  } else if (origin + GetCompositionLength() > GetPageEnd()) {
+    result = GetPageEnd() - GetCompositionLength();
+  } else {
+    result = origin;
+  }
+
+  return result / zoom;
+}
+
 bool Axis::CanScrollNow() const {
   return !mAxisLocked && CanScroll();
 }
@@ -549,6 +568,11 @@ ParentLayerCoord AxisX::GetRectOffset(const ParentLayerRect& aRect) const
   return aRect.x;
 }
 
+CSSToParentLayerScale AxisX::GetScaleForAxis(const CSSToParentLayerScale2D& aScale) const
+{
+  return CSSToParentLayerScale(aScale.xScale);
+}
+
 ScreenPoint AxisX::MakePoint(ScreenCoord aCoord) const
 {
   return ScreenPoint(aCoord, 0);
@@ -578,6 +602,11 @@ ParentLayerCoord AxisY::GetRectLength(const ParentLayerRect& aRect) const
 ParentLayerCoord AxisY::GetRectOffset(const ParentLayerRect& aRect) const
 {
   return aRect.y;
+}
+
+CSSToParentLayerScale AxisY::GetScaleForAxis(const CSSToParentLayerScale2D& aScale) const
+{
+  return CSSToParentLayerScale(aScale.yScale);
 }
 
 ScreenPoint AxisY::MakePoint(ScreenCoord aCoord) const

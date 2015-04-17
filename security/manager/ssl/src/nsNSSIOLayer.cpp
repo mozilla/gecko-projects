@@ -6,12 +6,12 @@
 
 #include "nsNSSIOLayer.h"
 
-#include "pkix/ScopedPtr.h"
 #include "pkix/pkixtypes.h"
 #include "nsNSSComponent.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/Casting.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/Telemetry.h"
 
 #include "prlog.h"
@@ -2313,8 +2313,8 @@ ClientAuthDataRunnable::RunOnTargetThread()
       NS_ASSERTION(nicknames->numnicknames == NumberOfCerts, "nicknames->numnicknames != NumberOfCerts");
 
       // Get CN and O of the subject and O of the issuer
-      mozilla::pkix::ScopedPtr<char, PORT_Free_string> ccn(
-        CERT_GetCommonName(&mServerCert->subject));
+      UniquePtr<char, void(&)(void*)>
+        ccn(CERT_GetCommonName(&mServerCert->subject), PORT_Free);
       NS_ConvertUTF8toUTF16 cn(ccn.get());
 
       int32_t port;
@@ -2531,11 +2531,6 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
       return NS_ERROR_FAILURE;
     }
   }
-
-  // Let's see if we're trying to connect to a site we know is
-  // TLS intolerant.
-  nsAutoCString key;
-  key = nsDependentCString(host) + NS_LITERAL_CSTRING(":") + nsPrintfCString("%d", port);
 
   SSLVersionRange range;
   if (SSL_VersionRangeGet(fd, &range) != SECSuccess) {

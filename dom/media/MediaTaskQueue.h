@@ -11,6 +11,7 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/ThreadLocal.h"
+#include "mozilla/unused.h"
 #include "SharedThreadPool.h"
 #include "nsThreadUtils.h"
 #include "MediaPromise.h"
@@ -40,7 +41,12 @@ public:
 
   explicit MediaTaskQueue(TemporaryRef<SharedThreadPool> aPool, bool aRequireTailDispatch = false);
 
-  nsresult Dispatch(TemporaryRef<nsIRunnable> aRunnable);
+  void Dispatch(TemporaryRef<nsIRunnable> aRunnable,
+                DispatchFailureHandling aFailureHandling = AssertDispatchSuccess)
+  {
+    nsCOMPtr<nsIRunnable> r = dont_AddRef(aRunnable.take());
+    return Dispatch(r.forget(), aFailureHandling);
+  }
 
   // Returns a TaskDispatcher that will dispatch its tasks when the currently-
   // running tasks pops off the stack.
@@ -74,17 +80,18 @@ public:
 #endif
 
   // For AbstractThread.
-  nsresult Dispatch(already_AddRefed<nsIRunnable> aRunnable) override
+  void Dispatch(already_AddRefed<nsIRunnable> aRunnable,
+                DispatchFailureHandling aFailureHandling = AssertDispatchSuccess) override
   {
-    RefPtr<nsIRunnable> r(aRunnable);
-    return ForceDispatch(r);
+    MonitorAutoLock mon(mQueueMonitor);
+    nsresult rv = DispatchLocked(Move(aRunnable), AbortIfFlushing);
+    MOZ_DIAGNOSTIC_ASSERT(aFailureHandling == DontAssertDispatchSuccess || NS_SUCCEEDED(rv));
+    unused << rv;
   }
 
-  // This should only be used for things that absolutely can't afford to be
-  // flushed. Normal operations should use Dispatch.
-  nsresult ForceDispatch(TemporaryRef<nsIRunnable> aRunnable);
-
-  nsresult SyncDispatch(TemporaryRef<nsIRunnable> aRunnable);
+  // DEPRECATED! Do not us, if a flush happens at the same time, this function
+  // can hang and block forever!
+  void SyncDispatch(TemporaryRef<nsIRunnable> aRunnable);
 
   // Puts the queue in a shutdown state and returns immediately. The queue will
   // remain alive at least until all the events are drained, because the Runners
@@ -104,7 +111,7 @@ public:
   bool IsEmpty();
 
   // Returns true if the current thread is currently running a Runnable in
-  // the task queue. This is for debugging/validation purposes only.
+  // the task queue.
   bool IsCurrentThreadIn() override;
 
 protected:
@@ -116,32 +123,27 @@ protected:
   // mQueueMonitor must be held.
   void AwaitIdleLocked();
 
-  enum DispatchMode { AbortIfFlushing, IgnoreFlushing, Forced };
+  enum DispatchMode { AbortIfFlushing, IgnoreFlushing };
 
-  nsresult DispatchLocked(TemporaryRef<nsIRunnable> aRunnable,
-                          DispatchMode aMode);
+  nsresult DispatchLocked(already_AddRefed<nsIRunnable> aRunnable, DispatchMode aMode);
 
   RefPtr<SharedThreadPool> mPool;
 
   // Monitor that protects the queue and mIsRunning;
   Monitor mQueueMonitor;
 
-  struct TaskQueueEntry {
-    RefPtr<nsIRunnable> mRunnable;
-    bool mForceDispatch;
-
-    explicit TaskQueueEntry(TemporaryRef<nsIRunnable> aRunnable,
-                            bool aForceDispatch = false)
-      : mRunnable(aRunnable), mForceDispatch(aForceDispatch) {}
-  };
-
   // Queue of tasks to run.
-  std::queue<TaskQueueEntry> mTasks;
+  std::queue<nsCOMPtr<nsIRunnable>> mTasks;
 
   // The thread currently running the task queue. We store a reference
   // to this so that IsCurrentThreadIn() can tell if the current thread
   // is the thread currently running in the task queue.
-  RefPtr<nsIThread> mRunningThread;
+  //
+  // This may be read on any thread, but may only be written on mRunningThread.
+  // The thread can't die while we're running in it, and we only use it for
+  // pointer-comparison with the current thread anyway - so we make it atomic
+  // and don't refcount it.
+  Atomic<nsIThread*> mRunningThread;
 
   // RAII class that gets instantiated for each dispatched task.
   class AutoTaskGuard : public AutoTaskDispatcher
@@ -157,10 +159,15 @@ protected:
       MOZ_ASSERT(sCurrentQueueTLS.get() == nullptr);
       sCurrentQueueTLS.set(aQueue);
 
+      MOZ_ASSERT(mQueue->mRunningThread == nullptr);
+      mQueue->mRunningThread = NS_GetCurrentThread();
     }
 
     ~AutoTaskGuard()
     {
+      MOZ_ASSERT(mQueue->mRunningThread == NS_GetCurrentThread());
+      mQueue->mRunningThread = nullptr;
+
       sCurrentQueueTLS.set(nullptr);
       mQueue->mTailDispatcher = nullptr;
     }
@@ -169,7 +176,6 @@ protected:
   MediaTaskQueue* mQueue;
   };
 
-  friend class TaskDispatcher;
   TaskDispatcher* mTailDispatcher;
 
   // True if we've dispatched an event to the pool to execute events from
@@ -205,6 +211,8 @@ public:
   explicit FlushableMediaTaskQueue(TemporaryRef<SharedThreadPool> aPool) : MediaTaskQueue(aPool) {}
   nsresult FlushAndDispatch(TemporaryRef<nsIRunnable> aRunnable);
   void Flush();
+
+  bool IsDispatchReliable() override { return false; }
 
 private:
 

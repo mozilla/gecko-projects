@@ -299,6 +299,8 @@ public:
 
     virtual bool RecvSpeakerManagerNotify() override;
 
+    virtual bool RecvBidiKeyboardNotify(const bool& isLangRTL) override;
+
     virtual bool RecvNotifyVisited(const URIParams& aURI) override;
     // auto remove when alertfinished is received.
     nsresult AddRemoteAlertObserver(const nsString& aData, nsIObserver* aObserver);
@@ -454,6 +456,13 @@ public:
             const TabId& aTabId) override;
     virtual bool
     DeallocPOfflineCacheUpdateChild(POfflineCacheUpdateChild* offlineCacheUpdate) override;
+
+    virtual PContentPermissionRequestChild*
+    AllocPContentPermissionRequestChild(const InfallibleTArray<PermissionRequest>& aRequests,
+                                        const IPC::Principal& aPrincipal,
+                                        const TabId& aTabId) override;
+    virtual bool
+    DeallocPContentPermissionRequestChild(PContentPermissionRequestChild* actor) override;
 
 private:
     virtual void ActorDestroy(ActorDestroyReason why) override;

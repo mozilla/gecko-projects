@@ -43,6 +43,7 @@ import org.mozilla.gecko.mozglue.JNITarget;
 import org.mozilla.gecko.mozglue.RobocopTarget;
 import org.mozilla.gecko.mozglue.generatorannotations.OptionalGeneratedParameter;
 import org.mozilla.gecko.mozglue.generatorannotations.WrapElementForJNI;
+import org.mozilla.gecko.overlays.ui.ShareDialog;
 import org.mozilla.gecko.prompts.PromptService;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoRequest;
@@ -293,6 +294,9 @@ public class GeckoAppShell
 
     public static native SurfaceBits getSurfaceBits(Surface surface);
 
+    public static native void addPresentationSurface(Surface surface);
+    public static native void removePresentationSurface(Surface surface);
+
     public static native void onFullScreenPluginHidden(View view);
 
     public static class CreateShortcutFaviconLoadedListener implements OnFaviconLoadedListener {
@@ -317,8 +321,17 @@ public class GeckoAppShell
             return;
         }
         sLayerView = lv;
-        // Install new Gecko-to-Java editable listener.
-        editableListener = new GeckoEditable();
+
+        // We should have a unique GeckoEditable instance per nsWindow instance,
+        // so even though we have a new view here, the underlying nsWindow is the same,
+        // and we don't create a new GeckoEditable.
+        if (editableListener == null) {
+            // Starting up; istall new Gecko-to-Java editable listener.
+            editableListener = new GeckoEditable();
+        } else {
+            // Bind the existing GeckoEditable instance to the new LayerView
+            GeckoAppShell.notifyIMEContext(GeckoEditableListener.IME_STATE_DISABLED, "", "", "");
+        }
     }
 
     @RobocopTarget
@@ -1162,6 +1175,7 @@ public class GeckoAppShell
         Intent shareIntent = getIntentForActionString(Intent.ACTION_SEND);
         shareIntent.putExtra(Intent.EXTRA_TEXT, targetURI);
         shareIntent.putExtra(Intent.EXTRA_SUBJECT, title);
+        shareIntent.putExtra(ShareDialog.INTENT_EXTRA_DEVICES_ONLY, true);
 
         // Note that EXTRA_TITLE is intended to be used for share dialog
         // titles. Common usage (e.g., Pocket) suggests that it's sometimes
@@ -2156,7 +2170,6 @@ public class GeckoAppShell
         public boolean areTabsShown();
         public AbsoluteLayout getPluginContainer();
         public void notifyCheckUpdateResult(String result);
-        public boolean hasTabsSideBar();
         public void invalidateOptionsMenu();
     };
 

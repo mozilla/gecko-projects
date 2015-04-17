@@ -258,8 +258,9 @@
 #define NS_QUERY_CONTENT_STATE          (NS_QUERY_CONTENT_EVENT_START + 6)
 // Query for the selection in the form of a nsITransferable.
 #define NS_QUERY_SELECTION_AS_TRANSFERABLE (NS_QUERY_CONTENT_EVENT_START + 7)
-// Query for character at a point.  This returns the character offset and its
-// rect.  The point is specified by Event::refPoint.
+// Query for character at a point.  This returns the character offset, its
+// rect and also tentative caret point if the point is clicked.  The point is
+// specified by Event::refPoint.
 #define NS_QUERY_CHARACTER_AT_POINT     (NS_QUERY_CONTENT_EVENT_START + 8)
 // Query if the DOM element under Event::refPoint belongs to our widget
 // or not.
@@ -538,6 +539,10 @@ public:
   // for when the parent process need the know first how the event was used
   // by content before handling it itself.
   bool mWantReplyFromContentProcess : 1;
+  // The event's action will be handled by APZ. The main thread should not
+  // perform its associated action. This is currently only relevant for
+  // wheel events.
+  bool mHandledByAPZ : 1;
 
   // If the event is being handled in target phase, returns true.
   inline bool InTargetPhase() const

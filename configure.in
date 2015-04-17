@@ -73,7 +73,7 @@ GNOMEUI_VERSION=2.2.0
 GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.8.8.2
+SQLITE_VERSION=3.8.9
 
 MSMANIFEST_TOOL=
 
@@ -3942,6 +3942,7 @@ MOZ_ANDROID_MLS_STUMBLER=
 MOZ_ANDROID_SHARE_OVERLAY=
 ACCESSIBILITY=1
 MOZ_TIME_MANAGER=
+MOZ_SIMPLEPUSH=
 MOZ_PAY=
 MOZ_AUDIO_CHANNEL_MANAGER=
 NSS_NO_LIBPKIX=
@@ -5319,6 +5320,10 @@ MOZ_ARG_DISABLE_BOOL(fmp4,
 [  --disable-fmp4  Disable support for in built Fragmented MP4 parsing],
     MOZ_FMP4=,
     MOZ_FMP4=1)
+
+if test -n "$MOZ_FFMPEG" -a -z "$MOZ_FMP4"; then
+    AC_MSG_ERROR([Fragmented MP4 support must be enabled if using FFMPEG])
+fi
 
 if test -n "$MOZ_FMP4"; then
     AC_DEFINE(MOZ_FMP4)
@@ -6948,12 +6953,15 @@ elif test "$GNU_CC"; then
     # -Wdeprecated-declarations - we don't want our builds held hostage when a
     #   platform-specific API becomes deprecated.
     # -Wfree-nonheap-object - false positives during PGO
+    # -Warray-bounds - false positives depending on optimization
     MOZ_C_SUPPORTS_WARNING(-W, no-error=uninitialized, ac_c_has_noerror_uninitialized)
     MOZ_CXX_SUPPORTS_WARNING(-W, no-error=uninitialized, ac_cxx_has_noerror_uninitialized)
     MOZ_C_SUPPORTS_WARNING(-W, no-error=maybe-uninitialized, ac_c_has_noerror_maybe_uninitialized)
     MOZ_CXX_SUPPORTS_WARNING(-W, no-error=maybe-uninitialized, ac_cxx_has_noerror_maybe_uninitialized)
     MOZ_C_SUPPORTS_WARNING(-W, no-error=deprecated-declarations, ac_c_has_noerror_deprecated_declarations)
     MOZ_CXX_SUPPORTS_WARNING(-W, no-error=deprecated-declarations, ac_cxx_has_noerror_deprecated_declarations)
+    MOZ_C_SUPPORTS_WARNING(-W, no-error=array-bounds, ac_c_has_noerror_array_bounds)
+    MOZ_CXX_SUPPORTS_WARNING(-W, no-error=array-bounds, ac_cxx_has_noerror_array_bounds)
 
     if test -n "$MOZ_PGO"; then
         MOZ_C_SUPPORTS_WARNING(-W, no-error=coverage-mismatch, ac_c_has_noerror_coverage_mismatch)
@@ -7385,6 +7393,8 @@ if test -n "$STDCXX_COMPAT"; then
    eval $(CXX="$CXX" HOST_CXX="$HOST_CXX" $PYTHON -m mozbuild.configure.libstdcxx)
    AC_SUBST(MOZ_LIBSTDCXX_TARGET_VERSION)
    AC_SUBST(MOZ_LIBSTDCXX_HOST_VERSION)
+   CXXFLAGS="$CXXFLAGS -D_GLIBCXX_USE_CXX11_ABI=0"
+   HOST_CXXFLAGS="$HOST_CXXFLAGS -D_GLIBCXX_USE_CXX11_ABI=0"
 fi
 
 dnl ========================================================
@@ -7529,6 +7539,15 @@ if test -n "$MOZ_B2G_CAMERA"; then
    AC_DEFINE(MOZ_B2G_CAMERA)
 fi
 AC_SUBST(MOZ_B2G_CAMERA)
+
+dnl ========================================================
+dnl = Enable Support for SimplePush (Gonk usually)
+dnl   This will disable the Push API.
+dnl ========================================================
+if test -n "$MOZ_SIMPLEPUSH"; then
+    AC_DEFINE(MOZ_SIMPLEPUSH)
+fi
+AC_SUBST(MOZ_SIMPLEPUSH)
 
 dnl ========================================================
 dnl = Enable Support for Payment API

@@ -179,23 +179,23 @@ body {
   padding: .5rem 0;
 }
 
-.rooms > div > .context {
+.new-room-view > .context {
   margin: .5rem 0 0;
   background-color: #DEEFF7;
   border-radius: 3px 3px 0 0;
   padding: .5rem;
 }
 
-.rooms > div > .context > .context-enabled {
+.new-room-view > .context > .context-enabled {
   margin-bottom: .5rem;
   display: block;
 }
 
-.rooms > div > .context > .context-enabled > input {
+.new-room-view > .context > .context-enabled > input {
   -moz-margin-start: 0;
 }
 
-.rooms > div > .context > .context-preview {
+.new-room-view > .context > .context-preview {
   float: right;
   width: 100px;
   max-height: 200px;
@@ -203,26 +203,26 @@ body {
   margin-bottom: 10px;
 }
 
-body[dir=rtl] .rooms > div > .context > .context-preview {
+body[dir=rtl] .new-room-view > .context > .context-preview {
   float: left;
 }
 
-.rooms > div > .context > .context-preview[src=""] {
+.new-room-view > .context > .context-preview[src=""] {
   display: none;
 }
 
-.rooms > div > .context > .context-description {
+.new-room-view > .context > .context-description {
   display: block;
   color: #707070;
 }
 
-.rooms > div > .context > .context-url {
+.new-room-view > .context > .context-url {
   display: block;
   color: #59A1D7;
   clear: both;
 }
 
-.rooms > div > .btn {
+.new-room-view > .btn {
   display: block;
   font-size: 1rem;
   margin: 0 auto .5rem;
@@ -232,7 +232,7 @@ body[dir=rtl] .rooms > div > .context > .context-preview {
 }
 
 /* Remove when bug 1142671 is backed out. */
-.rooms > div > :not(.context) + .btn {
+.new-room-view > .context.hide + .new-room-button {
   border-radius: 3px;
   margin-top: 0.5rem;
 }
@@ -453,44 +453,6 @@ body[dir=rtl] .rooms > div > .context > .context-preview {
 .button-close:hover:active {
   background-color: transparent;
   border: none;
-}
-
-/* Dropdown menu */
-
-.dropdown {
-  position: relative;
-}
-
-.dropdown-menu {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  background-color: #fdfdfd;
-  box-shadow: 0 1px 3px rgba(0,0,0,.3);
-  list-style: none;
-  padding: 5px;
-  border-radius: 2px;
-}
-
-body[dir=rtl] .dropdown-menu-item {
-  left: auto;
-  right: 10px;
-}
-
-.dropdown-menu-item {
-  text-align: start;
-  margin: .3em 0;
-  padding: .2em .5em;
-  cursor: pointer;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  font-size: 1em;
-  white-space: nowrap;
-}
-
-.dropdown-menu-item:hover {
-  border: 1px solid #ccc;
-  background-color: #eee;
 }
 
 /* Spinner */
@@ -734,11 +696,11 @@ body[dir=rtl] .generate-url-spinner {
 }
 
 .settings-menu .icon {
-  display: inline-block;
   background-size: contain;
   width: 12px;
   height: 12px;
   margin-right: 1em;
+  margin-top: 2px;
 }
 
 .settings-menu .icon-settings {

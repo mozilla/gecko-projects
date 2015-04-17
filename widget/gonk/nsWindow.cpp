@@ -77,7 +77,6 @@ static nsIntRect sVirtualBounds;
 
 static nsTArray<nsWindow *> sTopWindows;
 static nsWindow *gFocusedWindow = nullptr;
-static bool sUsingHwc;
 static bool sScreenInitialized;
 
 namespace {
@@ -183,8 +182,6 @@ nsWindow::nsWindow()
     if (!ShouldUseOffMainThreadCompositing()) {
         MOZ_CRASH("How can we render apps, then?");
     }
-    // Update sUsingHwc whenever layers.composer2d.enabled changes
-    Preferences::AddBoolVarCache(&sUsingHwc, "layers.composer2d.enabled");
 }
 
 nsWindow::~nsWindow()
@@ -357,8 +354,11 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                      TouchPointerState aPointerState,
                                      nsIntPoint aPointerScreenPoint,
                                      double aPointerPressure,
-                                     uint32_t aPointerOrientation)
+                                     uint32_t aPointerOrientation,
+                                     nsIObserver* aObserver)
 {
+    AutoObserverNotifier notifier(aObserver, "touchpoint");
+
     if (aPointerState == TOUCH_HOVER) {
         return NS_ERROR_UNEXPECTED;
     }
@@ -857,10 +857,6 @@ nsWindow::NeedsPaint()
 Composer2D*
 nsWindow::GetComposer2D()
 {
-    if (!sUsingHwc) {
-        return nullptr;
-    }
-
     if (HwcComposer2D* hwc = HwcComposer2D::GetInstance()) {
         return hwc->Initialized() ? hwc : nullptr;
     }

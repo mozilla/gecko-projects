@@ -60,6 +60,7 @@
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/DOMRect.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "imgIRequest.h"
 #include "nsIImageLoadingContent.h"
 #include "nsCOMPtr.h"
@@ -501,12 +502,12 @@ GetMinAndMaxScaleForAnimationProperty(nsIContent* aContent,
 {
   for (size_t playerIdx = aPlayers->mPlayers.Length(); playerIdx-- != 0; ) {
     AnimationPlayer* player = aPlayers->mPlayers[playerIdx];
-    if (!player->GetSource() || player->GetSource()->IsFinishedTransition()) {
+    if (!player->GetEffect() || player->GetEffect()->IsFinishedTransition()) {
       continue;
     }
-    dom::Animation* anim = player->GetSource();
-    for (size_t propIdx = anim->Properties().Length(); propIdx-- != 0; ) {
-      AnimationProperty& prop = anim->Properties()[propIdx];
+    dom::KeyframeEffectReadonly* effect = player->GetEffect();
+    for (size_t propIdx = effect->Properties().Length(); propIdx-- != 0; ) {
+      AnimationProperty& prop = effect->Properties()[propIdx];
       if (prop.mProperty == eCSSProperty_transform) {
         for (uint32_t segIdx = prop.mSegments.Length(); segIdx-- != 0; ) {
           AnimationPropertySegment& segment = prop.mSegments[segIdx];
@@ -1067,6 +1068,9 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
                                      uint32_t aPriority,
                                      RepaintMode aRepaintMode)
 {
+  MOZ_ASSERT(aContent);
+  MOZ_ASSERT(aContent->GetCurrentDoc() == aPresShell->GetDocument());
+
   DisplayPortMarginsPropertyData* currentData =
     static_cast<DisplayPortMarginsPropertyData*>(aContent->GetProperty(nsGkAtoms::DisplayPortMargins));
   if (currentData && currentData->mPriority > aPriority) {
@@ -7987,6 +7991,97 @@ nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell)
     }
   }
   return false;
+}
+
+/* static */ float
+nsLayoutUtils::GetResolution(nsIPresShell* aPresShell)
+{
+  nsIScrollableFrame* sf = aPresShell->GetRootScrollFrameAsScrollable();
+  if (sf) {
+    return sf->GetResolution();
+  }
+  return aPresShell->GetResolution();
+}
+
+/* static */ void
+nsLayoutUtils::SetResolutionAndScaleTo(nsIPresShell* aPresShell, float aResolution)
+{
+  nsIScrollableFrame* sf = aPresShell->GetRootScrollFrameAsScrollable();
+  if (sf) {
+    sf->SetResolutionAndScaleTo(aResolution);
+    aPresShell->SetResolutionAndScaleTo(aResolution);
+  }
+}
+
+static void
+MaybeReflowForInflationScreenSizeChange(nsPresContext *aPresContext)
+{
+  if (aPresContext) {
+    nsIPresShell* presShell = aPresContext->GetPresShell();
+    bool fontInflationWasEnabled = presShell->FontSizeInflationEnabled();
+    presShell->NotifyFontSizeInflationEnabledIsDirty();
+    bool changed = false;
+    if (presShell && presShell->FontSizeInflationEnabled() &&
+        presShell->FontSizeInflationMinTwips() != 0) {
+      aPresContext->ScreenSizeInchesForFontInflation(&changed);
+    }
+
+    changed = changed ||
+      (fontInflationWasEnabled != presShell->FontSizeInflationEnabled());
+    if (changed) {
+      nsCOMPtr<nsIDocShell> docShell = aPresContext->GetDocShell();
+      if (docShell) {
+        nsCOMPtr<nsIContentViewer> cv;
+        docShell->GetContentViewer(getter_AddRefs(cv));
+        if (cv) {
+          nsTArray<nsCOMPtr<nsIContentViewer> > array;
+          cv->AppendSubtree(array);
+          for (uint32_t i = 0, iEnd = array.Length(); i < iEnd; ++i) {
+            nsCOMPtr<nsIPresShell> shell;
+            nsCOMPtr<nsIContentViewer> cv = array[i];
+            cv->GetPresShell(getter_AddRefs(shell));
+            if (shell) {
+              nsIFrame *rootFrame = shell->GetRootFrame();
+              if (rootFrame) {
+                shell->FrameNeedsReflow(rootFrame,
+                                        nsIPresShell::eStyleChange,
+                                        NS_FRAME_IS_DIRTY);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/* static */ void
+nsLayoutUtils::SetScrollPositionClampingScrollPortSize(nsIPresShell* aPresShell, CSSSize aSize)
+{
+  MOZ_ASSERT(aSize.width >= 0.0 && aSize.height >= 0.0);
+
+  aPresShell->SetScrollPositionClampingScrollPortSize(
+    nsPresContext::CSSPixelsToAppUnits(aSize.width),
+    nsPresContext::CSSPixelsToAppUnits(aSize.height));
+
+  // When the "font.size.inflation.minTwips" preference is set, the
+  // layout depends on the size of the screen.  Since when the size
+  // of the screen changes, the scroll position clamping scroll port
+  // size also changes, we hook in the needed updates here rather
+  // than adding a separate notification just for this change.
+  nsPresContext* presContext = aPresShell->GetPresContext();
+  MaybeReflowForInflationScreenSizeChange(presContext);
+}
+
+/* static */ void
+nsLayoutUtils::SetCSSViewport(nsIPresShell* aPresShell, CSSSize aSize)
+{
+  MOZ_ASSERT(aSize.width >= 0.0 && aSize.height >= 0.0);
+
+  nscoord width = nsPresContext::CSSPixelsToAppUnits(aSize.width);
+  nscoord height = nsPresContext::CSSPixelsToAppUnits(aSize.height);
+
+  aPresShell->ResizeReflowOverride(width, height);
 }
 
 /* static */ uint32_t

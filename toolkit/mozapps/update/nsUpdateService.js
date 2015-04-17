@@ -164,8 +164,6 @@ const FOTA_GENERAL_ERROR                   = 80;
 const FOTA_UNKNOWN_ERROR                   = 81;
 const FOTA_FILE_OPERATION_ERROR            = 82;
 const FOTA_RECOVERY_ERROR                  = 83;
-// Staging failed and changed the state to pending
-const STAGE_FAIL_FALLBACK                  = 97;
 const INVALID_UPDATER_STATE_CODE           = 98;
 const INVALID_UPDATER_STATUS_CODE          = 99;
 
@@ -610,16 +608,20 @@ function getCanStageUpdates() {
     return false;
   }
 
+
+  if (AppConstants.platform == "win" && isServiceInstalled() &&
+      shouldUseService()) {
+    // No need to perform directory write checks, the maintenance service will
+    // be able to write to all directories.
+    LOG("getCanStageUpdates - able to stage updates because we'll use the service");
+    return true;
+  }
+
   // For Gonk, the updater will remount the /system partition to move staged
-  // files into place and it uses the app.update.service.enabled preference for
-  // this purpose.
-  if (AppConstants.platform == "win" || AppConstants.platform == "gonk") {
-    if (getPref("getBoolPref", PREF_APP_UPDATE_SERVICE_ENABLED, false)) {
-      // No need to perform directory write checks, the maintenance service will
-      // be able to write to all directories.
-      LOG("getCanStageUpdates - able to stage updates because we'll use the service");
-      return true;
-    }
+  // files into place.
+  if (AppConstants.platform == "gonk") {
+    LOG("getCanStageUpdates - able to stage updates because this is gonk");
+    return true;
   }
 
   if (!hasUpdateMutex()) {
@@ -1432,8 +1434,6 @@ function pingStateAndStatusCodes(aUpdate, aStartup, aStatus) {
         break;
       case STATE_PENDING:
         stateCode = 4;
-        parts[0] = STATE_FAILED;
-        parts.push(STAGE_FAIL_FALLBACK);
         break;
       case STATE_PENDING_SVC:
         stateCode = 5;
@@ -2375,10 +2375,16 @@ UpdateService.prototype = {
     this._isNotify = isNotify;
 
     // Histogram IDs:
-    // UPDATE_CANNOT_APPLY_EXTERNAL
-    // UPDATE_CANNOT_APPLY_NOTIFY
-    AUSTLMY.pingGeneric("UPDATE_CANNOT_APPLY_" + this._pingSuffix,
-                        gCanApplyUpdates);
+    // UPDATE_PING_COUNT_EXTERNAL
+    // UPDATE_PING_COUNT_NOTIFY
+    AUSTLMY.pingGeneric("UPDATE_PING_COUNT_" + this._pingSuffix,
+                        true, false);
+
+    // Histogram IDs:
+    // UPDATE_UNABLE_TO_APPLY_EXTERNAL
+    // UPDATE_UNABLE_TO_APPLY_NOTIFY
+    AUSTLMY.pingGeneric("UPDATE_UNABLE_TO_APPLY_" + this._pingSuffix,
+                        gCanApplyUpdates, true);
     // Histogram IDs:
     // UPDATE_CANNOT_STAGE_EXTERNAL
     // UPDATE_CANNOT_STAGE_NOTIFY

@@ -171,7 +171,7 @@ pref("dom.undo_manager.enabled", false);
 
 // Whether URL,nsLocation,Link::GetHash should be percent encoded
 // in setter and percent decoded in getter (old behaviour = true)
-pref("dom.url.encode_decode_hash", false);
+pref("dom.url.encode_decode_hash", true);
 
 // Whether to run add-on code in different compartments from browser code. This
 // causes a separate compartment for each (addon, global) combination, which may
@@ -270,10 +270,8 @@ pref("media.play-stand-alone", true);
 
 pref("media.hardware-video-decoding.enabled", true);
 
-#if defined(XP_WIN)
 pref("media.decoder.heuristic.dormant.enabled", true);
 pref("media.decoder.heuristic.dormant.timeout", 60000);
-#endif
 
 #ifdef MOZ_WMF
 pref("media.windows-media-foundation.enabled", true);
@@ -1331,8 +1329,6 @@ pref("network.http.spdy.default-concurrent", 100);
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
-pref("network.http.atsvc.enabled", false);
-pref("network.http.atsvc.oe", false);
 pref("network.http.altsvc.enabled", false);
 pref("network.http.altsvc.oe", false);
 
@@ -3019,11 +3015,8 @@ pref("intl.keyboard.per_window_layout", false);
 
 #ifdef NS_ENABLE_TSF
 // Enable/Disable TSF support on Vista or later.
-#ifndef RELEASE_BUILD
 pref("intl.tsf.enable", true);
-#else
-pref("intl.tsf.enable", false);
-#endif
+
 // Force enable TSF even on WinXP or WinServer 2003.
 // Be aware, TSF framework on prior to Vista is not enough stable.
 pref("intl.tsf.force_enable", false);
@@ -4020,7 +4013,7 @@ pref("layers.max-active", -1);
 pref("layers.tiles.adjust", true);
 
 // Set the default values, and then override per-platform as needed
-pref("layers.offmainthreadcomposition.enabled", false);
+pref("layers.offmainthreadcomposition.enabled", true);
 // Compositor target frame rate. NOTE: If vsync is enabled the compositor
 // frame rate will still be capped.
 // -1 -> default (match layout.frame_rate or 60 FPS)
@@ -4032,23 +4025,9 @@ pref("layers.offmainthreadcomposition.frame-rate", -1);
 pref("layers.async-video.enabled", true);
 pref("layers.async-video-oop.enabled",true);
 
-#ifdef XP_WIN
-pref("layers.offmainthreadcomposition.enabled", true);
-#endif
-
-#ifdef MOZ_WIDGET_QT
-pref("layers.offmainthreadcomposition.enabled", true);
-#endif
-
 #ifdef XP_MACOSX
-pref("layers.offmainthreadcomposition.enabled", true);
 pref("layers.enable-tiles", true);
 pref("layers.tiled-drawtarget.enabled", true);
-#endif
-
-// ANDROID covers android and b2g
-#ifdef ANDROID
-pref("layers.offmainthreadcomposition.enabled", true);
 #endif
 
 // same effect as layers.offmainthreadcomposition.enabled, but specifically for
@@ -4201,8 +4180,44 @@ pref("dom.mozContacts.enabled", false);
 // WebAlarms
 pref("dom.mozAlarms.enabled", false);
 
-// SimplePush
-pref("services.push.enabled", false);
+// Push
+pref("dom.push.enabled", false);
+
+pref("dom.push.debug", false);
+pref("dom.push.serverURL", "wss://push.services.mozilla.com/");
+pref("dom.push.userAgentID", "");
+
+// Is the network connection allowed to be up?
+// This preference should be used in UX to enable/disable push.
+pref("dom.push.connection.enabled", true);
+
+// Exponential back-off start is 5 seconds like in HTTP/1.1.
+// Maximum back-off is pingInterval.
+pref("dom.push.retryBaseInterval", 5000);
+
+// Interval at which to ping PushServer to check connection status. In
+// milliseconds. If no reply is received within requestTimeout, the connection
+// is considered closed.
+pref("dom.push.pingInterval", 1800000); // 30 minutes
+
+// How long before we timeout
+pref("dom.push.requestTimeout", 10000);
+pref("dom.push.pingInterval.default", 180000);// 3 min
+pref("dom.push.pingInterval.mobile", 180000); // 3 min
+pref("dom.push.pingInterval.wifi", 180000);  // 3 min
+
+// Adaptive ping
+pref("dom.push.adaptive.enabled", false);
+pref("dom.push.adaptive.lastGoodPingInterval", 180000);// 3 min
+pref("dom.push.adaptive.lastGoodPingInterval.mobile", 180000);// 3 min
+pref("dom.push.adaptive.lastGoodPingInterval.wifi", 180000);// 3 min
+// Valid gap between the biggest good ping and the bad ping
+pref("dom.push.adaptive.gap", 60000); // 1 minute
+// We limit the ping to this maximum value
+pref("dom.push.adaptive.upperLimit", 1740000); // 29 min
+
+// enable udp wakeup support
+pref("dom.push.udp.wakeupEnabled", false);
 
 // WebNetworkStats
 pref("dom.mozNetworkStats.enabled", false);
@@ -4495,6 +4510,9 @@ pref("selectioncaret.enabled", false);
 // user click on selection caret or not. In app units.
 pref("selectioncaret.inflatesize.threshold", 40);
 
+// Selection carets will fall-back to internal LongTap detector.
+pref("selectioncaret.detects.longtap", true);
+
 // Wakelock is disabled by default.
 pref("dom.wakelock.enabled", false);
 
@@ -4538,6 +4556,7 @@ pref("dom.beforeAfterKeyboardEvent.enabled", false);
 
 // Presentation API
 pref("dom.presentation.enabled", false);
+pref("dom.presentation.tcp_server.debug", false);
 
 // Use raw ICU instead of CoreServices API in Unicode collation
 #ifdef XP_MACOSX

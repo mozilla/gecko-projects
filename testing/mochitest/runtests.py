@@ -1519,6 +1519,11 @@ class Mochitest(MochitestUtilsMixin):
         if debugger and not options.slowscript:
             browserEnv["JS_DISABLE_SLOW_SCRIPT_SIGNALS"] = "1"
 
+        # For e10s, our tests default to suppressing the "unsafe CPOW usage"
+        # warnings that can plague test logs.
+        if not options.enableCPOWWarnings:
+            browserEnv["DISABLE_UNSAFE_CPOW_WARNINGS"] = "1"
+
         return browserEnv
 
     def cleanup(self, options):
@@ -2170,12 +2175,17 @@ class Mochitest(MochitestUtilsMixin):
             options,
             debuggerInfo is not None)
 
+
         # If there are any Mulet-specific tests doing remote network access,
         # we will not be aware since we are explicitely allowing this, as for
         # B2G
-        if mozinfo.info.get(
-                'buildapp') == 'mulet' and 'MOZ_DISABLE_NONLOCAL_CONNECTIONS' in self.browserEnv:
-            del self.browserEnv['MOZ_DISABLE_NONLOCAL_CONNECTIONS']
+        #
+        # In addition, the push subsuite directly accesses the production
+        # push service.
+        if 'MOZ_DISABLE_NONLOCAL_CONNECTIONS' in self.browserEnv:
+            if mozinfo.info.get('buildapp') == 'mulet' or options.subsuite == 'push':
+                del self.browserEnv['MOZ_DISABLE_NONLOCAL_CONNECTIONS']
+                os.environ["MOZ_DISABLE_NONLOCAL_CONNECTIONS"] = "0"
 
         if self.browserEnv is None:
             return 1

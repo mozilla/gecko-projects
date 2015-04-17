@@ -327,7 +327,7 @@ nsContextMenu.prototype = {
 
     // Hide menu entries for images, show otherwise
     if (this.inFrame) {
-      if (mimeTypeIsTextBased(this.target.ownerDocument.contentType))
+      if (BrowserUtils.mimeTypeIsTextBased(this.target.ownerDocument.contentType))
         this.isFrameImage.removeAttribute('hidden');
       else
         this.isFrameImage.setAttribute('hidden', 'true');
@@ -578,6 +578,7 @@ nsContextMenu.prototype = {
     this.linkURI           = null;
     this.linkText          = "";
     this.linkProtocol      = "";
+    this.linkDownload      = "";
     this.linkHasNoReferrer = false;
     this.onMathML          = false;
     this.inFrame           = false;
@@ -600,6 +601,7 @@ nsContextMenu.prototype = {
     this.focusedElement = elt;
 
     let ownerDoc = this.target.ownerDocument;
+    this.ownerDoc = ownerDoc;
 
     // If this is a remote context menu event, use the information from
     // gContextMenuContentData instead.
@@ -750,6 +752,14 @@ nsContextMenu.prototype = {
           this.onMailtoLink = (this.linkProtocol == "mailto");
           this.onSaveableLink = this.isLinkSaveable( this.link );
           this.linkHasNoReferrer = BrowserUtils.linkHasNoReferrer(elem);
+          try {
+            if (elem.download) {
+              // Ignore download attribute on cross-origin links
+              this.principal.checkMayLoad(this.linkURI, false, true);
+              this.linkDownload = elem.download;
+            }
+          }
+          catch (ex) {}
         }
 
         // Background image?  Don't bother if we've already found a
@@ -941,7 +951,8 @@ nsContextMenu.prototype = {
 
   // Reload clicked-in frame.
   reloadFrame: function() {
-    this.target.ownerDocument.location.reload();
+    this.browser.messageManager.sendAsyncMessage("ContextMenu:ReloadFrame",
+                                                 null, { target: this.target });
   },
 
   // Open clicked-in frame in its own window.
@@ -1026,13 +1037,13 @@ nsContextMenu.prototype = {
     BrowserPageInfo(this.target.ownerDocument);
   },
 
-  reloadImage: function(e) {
+  reloadImage: function() {
     urlSecurityCheck(this.mediaURL,
                      this.browser.contentPrincipal,
                      Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
 
-    if (this.target instanceof Ci.nsIImageLoadingContent)
-      this.target.forceReload();
+    this.browser.messageManager.sendAsyncMessage("ContextMenu:ReloadImage",
+                                                 null, { target: this.target });
   },
 
   _canvasToDataURL: function(target) {
@@ -1169,7 +1180,8 @@ nsContextMenu.prototype = {
 
   // Helper function to wait for appropriate MIME-type headers and
   // then prompt the user with a file picker
-  saveHelper: function(linkURL, linkText, dialogTitle, bypassCache, doc) {
+  saveHelper: function(linkURL, linkText, dialogTitle, bypassCache, doc,
+                       linkDownload) {
     // canonical def in nsURILoader.h
     const NS_ERROR_SAVE_LINK_AS_TIMEOUT = 0x805d0020;
 
@@ -1275,6 +1287,8 @@ nsContextMenu.prototype = {
                                                null, // aTriggeringPrincipal
                                                Ci.nsILoadInfo.SEC_NORMAL,
                                                Ci.nsIContentPolicy.TYPE_OTHER);
+    if (linkDownload)
+      channel.contentDispositionFilename = linkDownload;
     if (channel instanceof Ci.nsIPrivateBrowsingChannel) {
       let docIsPrivate = PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser);
       channel.setPrivate(docIsPrivate);
@@ -1310,9 +1324,9 @@ nsContextMenu.prototype = {
 
   // Save URL of clicked-on link.
   saveLink: function() {
-    var doc =  this.target.ownerDocument;
     urlSecurityCheck(this.linkURL, this.principal);
-    this.saveHelper(this.linkURL, this.linkText, null, true, doc);
+    this.saveHelper(this.linkURL, this.linkText, null, true, this.ownerDoc,
+                    this.linkDownload);
   },
 
   // Backwards-compatibility wrapper
@@ -1340,7 +1354,7 @@ nsContextMenu.prototype = {
     else if (this.onVideo || this.onAudio) {
       urlSecurityCheck(this.mediaURL, this.principal);
       var dialogTitle = this.onVideo ? "SaveVideoTitle" : "SaveAudioTitle";
-      this.saveHelper(this.mediaURL, null, dialogTitle, false, doc);
+      this.saveHelper(this.mediaURL, null, dialogTitle, false, doc, "");
     }
   },
 

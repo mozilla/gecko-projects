@@ -523,16 +523,6 @@ public abstract class GeckoApp
         outState.putString(SAVED_STATE_PRIVATE_SESSION, mPrivateBrowsingSession);
     }
 
-    void handleClearHistory(final boolean clearSearchHistory) {
-        final BrowserDB db = getProfile().getDB();
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                db.clearHistory(getContentResolver(), clearSearchHistory);
-            }
-        });
-    }
-
     public void addTab() { }
 
     public void addPrivateTab() { }
@@ -624,10 +614,6 @@ public abstract class GeckoApp
 
         } else if ("PrivateBrowsing:Data".equals(event)) {
             mPrivateBrowsingSession = message.optString("session", null);
-
-        } else if ("Sanitize:ClearHistory".equals(event)) {
-            handleClearHistory(message.optBoolean("clearSearchHistory", false));
-            callback.sendSuccess(true);
 
         } else if ("Session:StatePurged".equals(event)) {
             onStatePurged();
@@ -1410,9 +1396,6 @@ public abstract class GeckoApp
             mLayerView = layerView;
             GeckoAppShell.sendEventToGecko(GeckoEvent.createObjectEvent(
                 GeckoEvent.ACTION_OBJECT_LAYER_CLIENT, layerView.getLayerClientObject()));
-
-            // bind the GeckoEditable instance to the new LayerView
-            GeckoAppShell.notifyIMEContext(GeckoEditableListener.IME_STATE_DISABLED, "", "", "");
         }
     }
 
@@ -1547,7 +1530,6 @@ public abstract class GeckoApp
             "Locale:Set",
             "Permissions:Data",
             "PrivateBrowsing:Data",
-            "Sanitize:ClearHistory",
             "Session:StatePurged",
             "Share:Text",
             "SystemUI:Visibility",
@@ -2039,7 +2021,6 @@ public abstract class GeckoApp
             "Locale:Set",
             "Permissions:Data",
             "PrivateBrowsing:Data",
-            "Sanitize:ClearHistory",
             "Session:StatePurged",
             "Share:Text",
             "SystemUI:Visibility",

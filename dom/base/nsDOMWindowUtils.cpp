@@ -290,9 +290,7 @@ nsDOMWindowUtils::UpdateLayerTree()
 NS_IMETHODIMP
 nsDOMWindowUtils::SetCSSViewport(float aWidthPx, float aHeightPx)
 {
-  if (!nsContentUtils::IsCallerChrome()) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
   if (!(aWidthPx >= 0.0 && aHeightPx >= 0.0)) {
     return NS_ERROR_ILLEGAL_VALUE;
@@ -303,10 +301,7 @@ nsDOMWindowUtils::SetCSSViewport(float aWidthPx, float aHeightPx)
     return NS_ERROR_FAILURE;
   }
 
-  nscoord width = nsPresContext::CSSPixelsToAppUnits(aWidthPx);
-  nscoord height = nsPresContext::CSSPixelsToAppUnits(aHeightPx);
-
-  presShell->ResizeReflowOverride(width, height);
+  nsLayoutUtils::SetCSSViewport(presShell, CSSSize(aWidthPx, aHeightPx));
 
   return NS_OK;
 }
@@ -419,9 +414,7 @@ nsDOMWindowUtils::SetDisplayPortMarginsForElement(float aLeftMargin,
                                                   nsIDOMElement* aElement,
                                                   uint32_t aPriority)
 {
-  if (!nsContentUtils::IsCallerChrome()) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
   nsIPresShell* presShell = GetPresShell();
   if (!presShell) {
@@ -513,20 +506,14 @@ nsDOMWindowUtils::SetResolution(float aResolution)
 NS_IMETHODIMP
 nsDOMWindowUtils::SetResolutionAndScaleTo(float aResolution)
 {
-  if (!nsContentUtils::IsCallerChrome()) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
   nsIPresShell* presShell = GetPresShell();
   if (!presShell) {
     return NS_ERROR_FAILURE;
   }
 
-  nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
-  if (sf) {
-    sf->SetResolutionAndScaleTo(aResolution);
-    presShell->SetResolutionAndScaleTo(aResolution);
-  }
+  nsLayoutUtils::SetResolutionAndScaleTo(presShell, aResolution);
 
   return NS_OK;
 }
@@ -541,12 +528,7 @@ nsDOMWindowUtils::GetResolution(float* aResolution)
     return NS_ERROR_FAILURE;
   }
 
-  nsIScrollableFrame* sf = presShell->GetRootScrollFrameAsScrollable();
-  if (sf) {
-    *aResolution = sf->GetResolution();
-  } else {
-    *aResolution = presShell->GetResolution();
-  }
+  *aResolution = nsLayoutUtils::GetResolution(presShell);
 
   return NS_OK;
 }
@@ -599,9 +581,7 @@ nsDOMWindowUtils::GetIsFirstPaint(bool *aIsFirstPaint)
 NS_IMETHODIMP
 nsDOMWindowUtils::GetPresShellId(uint32_t *aPresShellId)
 {
-  if (!nsContentUtils::IsCallerChrome()) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
   nsIPresShell* presShell = GetPresShell();
   if (presShell) {
@@ -1033,6 +1013,12 @@ nsDOMWindowUtils::SendWheelEvent(float aX,
 
   widget->DispatchAPZAwareEvent(&wheelEvent);
 
+  if (gfxPrefs::AsyncPanZoomEnabled()) {
+    // Computing overflow deltas is not compatible with APZ, so if APZ is
+    // enabled, we skip testing it.
+    return NS_OK;
+  }
+
   bool failedX = false;
   if ((aOptions & WHEEL_EVENT_EXPECTED_OVERFLOW_DELTA_X_ZERO) &&
       wheelEvent.overflowDeltaX != 0) {
@@ -1300,7 +1286,8 @@ nsDOMWindowUtils::SendNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                      int32_t aNativeKeyCode,
                                      int32_t aModifiers,
                                      const nsAString& aCharacters,
-                                     const nsAString& aUnmodifiedCharacters)
+                                     const nsAString& aUnmodifiedCharacters,
+                                     nsIObserver* aObserver)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
@@ -1309,8 +1296,11 @@ nsDOMWindowUtils::SendNativeKeyEvent(int32_t aNativeKeyboardLayout,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  return widget->SynthesizeNativeKeyEvent(aNativeKeyboardLayout, aNativeKeyCode,
-                                          aModifiers, aCharacters, aUnmodifiedCharacters);
+  NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs
+    <int32_t, int32_t, uint32_t, nsString, nsString, nsIObserver*>
+    (widget, &nsIWidget::SynthesizeNativeKeyEvent, aNativeKeyboardLayout,
+    aNativeKeyCode, aModifiers, aCharacters, aUnmodifiedCharacters, aObserver));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1318,7 +1308,8 @@ nsDOMWindowUtils::SendNativeMouseEvent(int32_t aScreenX,
                                        int32_t aScreenY,
                                        int32_t aNativeMessage,
                                        int32_t aModifierFlags,
-                                       nsIDOMElement* aElement)
+                                       nsIDOMElement* aElement,
+                                       nsIObserver* aObserver)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
@@ -1327,8 +1318,12 @@ nsDOMWindowUtils::SendNativeMouseEvent(int32_t aScreenX,
   if (!widget)
     return NS_ERROR_FAILURE;
 
-  return widget->SynthesizeNativeMouseEvent(LayoutDeviceIntPoint(aScreenX, aScreenY),
-                                            aNativeMessage, aModifierFlags);
+  NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs
+    <LayoutDeviceIntPoint, int32_t, int32_t, nsIObserver*>
+    (widget, &nsIWidget::SynthesizeNativeMouseEvent,
+    LayoutDeviceIntPoint(aScreenX, aScreenY), aNativeMessage, aModifierFlags,
+    aObserver));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1340,7 +1335,8 @@ nsDOMWindowUtils::SendNativeMouseScrollEvent(int32_t aScreenX,
                                              double aDeltaZ,
                                              uint32_t aModifierFlags,
                                              uint32_t aAdditionalFlags,
-                                             nsIDOMElement* aElement)
+                                             nsIDOMElement* aElement,
+                                             nsIObserver* aObserver)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
@@ -1350,12 +1346,12 @@ nsDOMWindowUtils::SendNativeMouseScrollEvent(int32_t aScreenX,
     return NS_ERROR_FAILURE;
   }
 
-  return widget->SynthesizeNativeMouseScrollEvent(LayoutDeviceIntPoint(aScreenX,
-                                                                       aScreenY),
-                                                  aNativeMessage,
-                                                  aDeltaX, aDeltaY, aDeltaZ,
-                                                  aModifierFlags,
-                                                  aAdditionalFlags);
+  NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs
+    <mozilla::LayoutDeviceIntPoint, uint32_t, double, double, double, uint32_t, uint32_t, nsIObserver*>
+    (widget, &nsIWidget::SynthesizeNativeMouseScrollEvent,
+    LayoutDeviceIntPoint(aScreenX, aScreenY), aNativeMessage, aDeltaX, aDeltaY,
+    aDeltaZ, aModifierFlags, aAdditionalFlags, aObserver));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1364,7 +1360,8 @@ nsDOMWindowUtils::SendNativeTouchPoint(uint32_t aPointerId,
                                        int32_t aScreenX,
                                        int32_t aScreenY,
                                        double aPressure,
-                                       uint32_t aOrientation)
+                                       uint32_t aOrientation,
+                                       nsIObserver* aObserver)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
@@ -1377,16 +1374,19 @@ nsDOMWindowUtils::SendNativeTouchPoint(uint32_t aPointerId,
     return NS_ERROR_INVALID_ARG;
   }
 
-  return widget->SynthesizeNativeTouchPoint(aPointerId,
-                                            (nsIWidget::TouchPointerState)aTouchState,
-                                            nsIntPoint(aScreenX, aScreenY),
-                                            aPressure, aOrientation);
+  NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs
+    <uint32_t, nsIWidget::TouchPointerState, nsIntPoint, double, uint32_t, nsIObserver*>
+    (widget, &nsIWidget::SynthesizeNativeTouchPoint, aPointerId,
+    (nsIWidget::TouchPointerState)aTouchState, nsIntPoint(aScreenX, aScreenY),
+    aPressure, aOrientation, aObserver));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDOMWindowUtils::SendNativeTouchTap(int32_t aScreenX,
                                      int32_t aScreenY,
-                                     bool aLongTap)
+                                     bool aLongTap,
+                                     nsIObserver* aObserver)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
@@ -1394,11 +1394,16 @@ nsDOMWindowUtils::SendNativeTouchTap(int32_t aScreenX,
   if (!widget) {
     return NS_ERROR_FAILURE;
   }
-  return widget->SynthesizeNativeTouchTap(nsIntPoint(aScreenX, aScreenY), aLongTap);
+
+  NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs
+    <nsIntPoint, bool, nsIObserver*>
+    (widget, &nsIWidget::SynthesizeNativeTouchTap,
+    nsIntPoint(aScreenX, aScreenY), aLongTap, aObserver));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::ClearNativeTouchSequence()
+nsDOMWindowUtils::ClearNativeTouchSequence(nsIObserver* aObserver)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
@@ -1406,7 +1411,10 @@ nsDOMWindowUtils::ClearNativeTouchSequence()
   if (!widget) {
     return NS_ERROR_FAILURE;
   }
-  return widget->ClearNativeTouchSequence();
+
+  NS_DispatchToMainThread(NS_NewRunnableMethodWithArgs<nsIObserver*>
+    (widget, &nsIWidget::ClearNativeTouchSequence, aObserver));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2623,8 +2631,10 @@ nsDOMWindowUtils::RestoreNormalRefresh()
     transaction->SendLeaveTestMode();
   }
 
-  nsRefreshDriver* driver = GetPresContext()->RefreshDriver();
-  driver->RestoreNormalRefresh();
+  if (nsPresContext* pc = GetPresContext()) {
+    nsRefreshDriver* driver = pc->RefreshDriver();
+    driver->RestoreNormalRefresh();
+  }
 
   return NS_OK;
 }
@@ -3247,54 +3257,10 @@ nsDOMWindowUtils::GetPlugins(JSContext* cx, JS::MutableHandle<JS::Value> aPlugin
   return NS_OK;
 }
 
-static void
-MaybeReflowForInflationScreenSizeChange(nsPresContext *aPresContext)
-{
-  if (aPresContext) {
-    nsIPresShell* presShell = aPresContext->GetPresShell();
-    bool fontInflationWasEnabled = presShell->FontSizeInflationEnabled();
-    presShell->NotifyFontSizeInflationEnabledIsDirty();
-    bool changed = false;
-    if (presShell && presShell->FontSizeInflationEnabled() &&
-        presShell->FontSizeInflationMinTwips() != 0) {
-      aPresContext->ScreenSizeInchesForFontInflation(&changed);
-    }
-
-    changed = changed ||
-      (fontInflationWasEnabled != presShell->FontSizeInflationEnabled());
-    if (changed) {
-      nsCOMPtr<nsIDocShell> docShell = aPresContext->GetDocShell();
-      if (docShell) {
-        nsCOMPtr<nsIContentViewer> cv;
-        docShell->GetContentViewer(getter_AddRefs(cv));
-        if (cv) {
-          nsTArray<nsCOMPtr<nsIContentViewer> > array;
-          cv->AppendSubtree(array);
-          for (uint32_t i = 0, iEnd = array.Length(); i < iEnd; ++i) {
-            nsCOMPtr<nsIPresShell> shell;
-            nsCOMPtr<nsIContentViewer> cv = array[i];
-            cv->GetPresShell(getter_AddRefs(shell));
-            if (shell) {
-              nsIFrame *rootFrame = shell->GetRootFrame();
-              if (rootFrame) {
-                shell->FrameNeedsReflow(rootFrame,
-                                        nsIPresShell::eStyleChange,
-                                        NS_FRAME_IS_DIRTY);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
 NS_IMETHODIMP
 nsDOMWindowUtils::SetScrollPositionClampingScrollPortSize(float aWidth, float aHeight)
 {
-  if (!nsContentUtils::IsCallerChrome()) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
   if (!(aWidth >= 0.0 && aHeight >= 0.0)) {
     return NS_ERROR_ILLEGAL_VALUE;
@@ -3305,17 +3271,7 @@ nsDOMWindowUtils::SetScrollPositionClampingScrollPortSize(float aWidth, float aH
     return NS_ERROR_FAILURE;
   }
 
-  presShell->SetScrollPositionClampingScrollPortSize(
-    nsPresContext::CSSPixelsToAppUnits(aWidth),
-    nsPresContext::CSSPixelsToAppUnits(aHeight));
-
-  // When the "font.size.inflation.minTwips" preference is set, the
-  // layout depends on the size of the screen.  Since when the size
-  // of the screen changes, the scroll position clamping scroll port
-  // size also changes, we hook in the needed updates here rather
-  // than adding a separate notification just for this change.
-  nsPresContext* presContext = GetPresContext();
-  MaybeReflowForInflationScreenSizeChange(presContext);
+  nsLayoutUtils::SetScrollPositionClampingScrollPortSize(presShell, CSSSize(aWidth, aHeight));
 
   return NS_OK;
 }

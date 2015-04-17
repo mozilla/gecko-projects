@@ -4686,7 +4686,9 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         break;
 
       // let the dwm handle nc painting on glass
-      if(nsUXThemeData::CheckForCompositor())
+      // Never allow native painting if we are on fullscreen
+      if(mSizeMode != nsSizeMode_Fullscreen &&
+         nsUXThemeData::CheckForCompositor())
         break;
 
       if (wParam == TRUE) {
@@ -5786,8 +5788,11 @@ nsWindow::SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                    int32_t aNativeKeyCode,
                                    uint32_t aModifierFlags,
                                    const nsAString& aCharacters,
-                                   const nsAString& aUnmodifiedCharacters)
+                                   const nsAString& aUnmodifiedCharacters,
+                                   nsIObserver* aObserver)
 {
+  AutoObserverNotifier notifier(aObserver, "keyevent");
+
   KeyboardLayout* keyboardLayout = KeyboardLayout::GetInstance();
   return keyboardLayout->SynthesizeNativeKeyEvent(
            this, aNativeKeyboardLayout, aNativeKeyCode, aModifierFlags,
@@ -5797,8 +5802,11 @@ nsWindow::SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout,
 nsresult
 nsWindow::SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
                                      uint32_t aNativeMessage,
-                                     uint32_t aModifierFlags)
+                                     uint32_t aModifierFlags,
+                                     nsIObserver* aObserver)
 {
+  AutoObserverNotifier notifier(aObserver, "mouseevent");
+
   ::SetCursorPos(aPoint.x, aPoint.y);
 
   INPUT input;
@@ -5818,8 +5826,10 @@ nsWindow::SynthesizeNativeMouseScrollEvent(LayoutDeviceIntPoint aPoint,
                                            double aDeltaY,
                                            double aDeltaZ,
                                            uint32_t aModifierFlags,
-                                           uint32_t aAdditionalFlags)
+                                           uint32_t aAdditionalFlags,
+                                           nsIObserver* aObserver)
 {
+  AutoObserverNotifier notifier(aObserver, "mousescrollevent");
   return MouseScrollHandler::SynthesizeNativeMouseScrollEvent(
            this, aPoint, aNativeMessage,
            (aNativeMessage == WM_MOUSEWHEEL || aNativeMessage == WM_VSCROLL) ?
@@ -6544,6 +6554,12 @@ nsWindow::ClearCompositor(nsWindow* aWindow)
 }
 
 bool
+nsWindow::IsPopup()
+{
+  return mWindowType == eWindowType_popup;
+}
+
+bool
 nsWindow::ShouldUseOffMainThreadCompositing()
 {
   // We don't currently support using an accelerated layer manager with
@@ -6566,7 +6582,11 @@ nsWindow::GetPreferredCompositorBackends(nsTArray<LayersBackend>& aHints)
   // transparent windows so don't even try. I'm also not sure if we even
   // want to support this case. See bug 593471
   if (!(prefs.mDisableAcceleration ||
-        mTransparencyMode == eTransparencyTransparent)) {
+        mTransparencyMode == eTransparencyTransparent ||
+        IsPopup())) {
+    // See bug 1150376, D3D11 composition can cause issues on some devices
+    // on windows 7 where presentation fails randomly for windows with drop
+    // shadows.
     if (prefs.mPreferOpenGL) {
       aHints.AppendElement(LayersBackend::LAYERS_OPENGL);
     }

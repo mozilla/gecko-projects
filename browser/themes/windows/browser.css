@@ -733,11 +733,12 @@ toolbarbutton[cui-areatype="toolbar"] > :-moz-any(@nestedButtons@) > .toolbarbut
 }
 
 /* Help SDK icons fit: */
-toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
+toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-icon,
+toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-badge-container > .toolbarbutton-icon {
   width: 16px;
 }
 
-#nav-bar toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
+#nav-bar toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
   /* XXXgijs box models strike again: this is 16px + 2 * 7px padding + 2 * 1px border (from the rules above) */
   width: 32px;
 }
@@ -1125,6 +1126,35 @@ toolbarbutton[sdk-button="true"][cui-areatype="toolbar"] > .toolbarbutton-icon {
 }
 #close-button:hover:active {
   -moz-image-region: rect(32px, 48px, 48px, 32px);
+}
+
+@media not all and (-moz-os-version: windows-xp) {
+  #window-controls {
+    -moz-box-align: start;
+  }
+
+  #minimize-button,
+  #restore-button,
+  #close-button {
+    -moz-appearance: none;
+    border-style: none;
+    margin: 0;
+  }
+  #close-button {
+    -moz-image-region: rect(0, 49px, 16px, 32px);
+  }
+  #close-button:hover {
+    -moz-image-region: rect(16px, 49px, 32px, 32px);
+  }
+  #close-button:hover:active {
+    -moz-image-region: rect(32px, 49px, 48px, 32px);
+  }
+
+  #minimize-button:-moz-locale-dir(rtl),
+  #restore-button:-moz-locale-dir(rtl),
+  #close-button:-moz-locale-dir(rtl) {
+    transform: scaleX(-1);
+  }
 }
 
 /* ::::: Location Bar ::::: */
@@ -1628,13 +1658,6 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
   max-height: 16px;
 }
 
-
-toolbarbutton[type="socialmark"] > .toolbarbutton-icon {
-  width: auto;
-  height: auto;
-  max-width: 32px;
-  max-height: 24px;
-}
 
 /* fixup corners for share panel */
 .social-panel > .social-panel-frame {
@@ -2662,22 +2685,27 @@ chatbox {
   position: relative;
 }
 
-@media (-moz-os-version: windows-xp) {
+@media (-moz-os-version: windows-xp),
+       (-moz-os-version: windows-vista),
+       (-moz-os-version: windows-win7) {
   #TabsToolbar > .private-browsing-indicator {
     background-image: url("chrome://browser/skin/privatebrowsing-mask-tabstrip-XPVista7.png");
   }
 
+  /* We're intentionally using the titlebar asset here for fullscreen mode.
+   * See bug 1008183.
+   */
+  #private-browsing-indicator-titlebar > .private-browsing-indicator,
+  #main-window[inFullscreen] #TabsToolbar > .private-browsing-indicator {
+    background-image: url("chrome://browser/skin/privatebrowsing-mask-titlebar-XPVista7.png");
+  }
+}
+
+@media (-moz-os-version: windows-xp) {
   @media not all and (-moz-windows-classic) {
     #private-browsing-indicator-titlebar > .private-browsing-indicator {
       background-image: url("chrome://browser/skin/privatebrowsing-mask-titlebar-XPVista7-tall.png");
       height: 28px;
-    }
-
-    /* We're intentionally using the titlebar asset here for fullscreen mode.
-     * See bug 1008183.
-     */
-    #main-window[inFullscreen] #TabsToolbar > .private-browsing-indicator {
-      background-image: url("chrome://browser/skin/privatebrowsing-mask-titlebar-XPVista7.png");
     }
 
     #main-window[sizemode="maximized"] > #titlebar > #titlebar-content > #titlebar-buttonbox-container > #private-browsing-indicator-titlebar > .private-browsing-indicator {
@@ -2690,13 +2718,6 @@ chatbox {
 }
 
 @media (-moz-windows-classic) {
-  /* We're intentionally using the titlebar asset here for fullscreen mode.
-   * See bug 1008183.
-   */
-  #private-browsing-indicator-titlebar > .private-browsing-indicator,
-  #main-window[inFullscreen] #TabsToolbar > .private-browsing-indicator {
-    background-image: url("chrome://browser/skin/privatebrowsing-mask-titlebar-XPVista7.png");
-  }
   /**
    * We have to use top instead of background-position in this case, otherwise
    * the bottom of the indicator would get cut off by the bounds of the
@@ -2704,6 +2725,31 @@ chatbox {
    */
   #main-window[sizemode="normal"] > #titlebar > #titlebar-content > #titlebar-buttonbox-container > #private-browsing-indicator-titlebar > .private-browsing-indicator {
     top: 4px;
+  }
+}
+
+@media (-moz-os-version: windows-vista),
+       (-moz-os-version: windows-win7) {
+  @media (-moz-windows-glass) {
+    #main-window[sizemode="normal"] > #titlebar > #titlebar-content > #titlebar-buttonbox-container > #private-browsing-indicator-titlebar > .private-browsing-indicator {
+      top: 1px;
+    }
+    #main-window[sizemode="maximized"] > #titlebar > #titlebar-content > #titlebar-buttonbox-container > #private-browsing-indicator-titlebar > .private-browsing-indicator {
+      top: -1px;
+    }
+  }
+
+  /**
+   * This next block targets Aero Basic, which has different positioning for the
+   * window caption buttons, and therefore needs to be special-cased.
+   */
+  @media (-moz-windows-default-theme) {
+    @media not all and (-moz-windows-compositor) {
+      #main-window[sizemode="normal"] > #titlebar > #titlebar-content > #titlebar-buttonbox-container > #private-browsing-indicator-titlebar > .private-browsing-indicator {
+        background-image: url("chrome://browser/skin/privatebrowsing-mask-titlebar-XPVista7-tall.png");
+        height: 28px;
+      }
+    }
   }
 }
 

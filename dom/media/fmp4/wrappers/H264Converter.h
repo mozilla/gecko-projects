@@ -22,7 +22,7 @@ class H264Converter : public MediaDataDecoder {
 public:
 
   H264Converter(PlatformDecoderModule* aPDM,
-                const mp4_demuxer::VideoDecoderConfig& aConfig,
+                const VideoInfo& aConfig,
                 layers::LayersBackend aLayersBackend,
                 layers::ImageContainer* aImageContainer,
                 FlushableMediaTaskQueue* aVideoTaskQueue,
@@ -35,13 +35,10 @@ public:
   virtual nsresult Drain() override;
   virtual nsresult Shutdown() override;
   virtual bool IsWaitingMediaResources() override;
-  virtual bool IsDormantNeeded() override;
-  virtual void AllocateMediaResources() override;
-  virtual void ReleaseMediaResources() override;
   virtual bool IsHardwareAccelerated() const override;
 
   // Return true if mimetype is H.264.
-  static bool IsH264(const mp4_demuxer::TrackConfig& aConfig);
+  static bool IsH264(const TrackInfo& aConfig);
 
 private:
   // Will create the required MediaDataDecoder if need AVCC and we have a SPS NAL.
@@ -50,10 +47,10 @@ private:
   nsresult CreateDecoder();
   nsresult CreateDecoderAndInit(MediaRawData* aSample);
   nsresult CheckForSPSChange(MediaRawData* aSample);
-  void UpdateConfigFromExtraData(DataBuffer* aExtraData);
+  void UpdateConfigFromExtraData(MediaByteBuffer* aExtraData);
 
   nsRefPtr<PlatformDecoderModule> mPDM;
-  mp4_demuxer::VideoDecoderConfig mCurrentConfig;
+  VideoInfo mCurrentConfig;
   layers::LayersBackend mLayersBackend;
   nsRefPtr<layers::ImageContainer> mImageContainer;
   nsRefPtr<FlushableMediaTaskQueue> mVideoTaskQueue;

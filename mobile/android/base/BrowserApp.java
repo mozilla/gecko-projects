@@ -87,7 +87,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -780,6 +779,7 @@ public class BrowserApp extends GeckoApp
             "Menu:Add",
             "Menu:Remove",
             "Reader:Share",
+            "Sanitize:ClearHistory",
             "Settings:Show",
             "Telemetry:Gather",
             "Updater:Launch");
@@ -1325,6 +1325,7 @@ public class BrowserApp extends GeckoApp
             "Menu:Add",
             "Menu:Remove",
             "Reader:Share",
+            "Sanitize:ClearHistory",
             "Settings:Show",
             "Telemetry:Gather",
             "Updater:Launch");
@@ -1359,6 +1360,16 @@ public class BrowserApp extends GeckoApp
             onCreatePanelMenu(Window.FEATURE_OPTIONS_PANEL, null);
             invalidateOptionsMenu();
         }
+    }
+
+    private void handleClearHistory(final boolean clearSearchHistory) {
+        final BrowserDB db = getProfile().getDB();
+        ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
+            public void run() {
+                db.clearHistory(getContentResolver(), clearSearchHistory);
+            }
+        });
     }
 
     private void shareCurrentUrl() {
@@ -1494,9 +1505,6 @@ public class BrowserApp extends GeckoApp
                     mBrowserChrome.setVisibility(View.VISIBLE);
                 } else {
                     mBrowserChrome.setVisibility(View.GONE);
-                    if (hasTabsSideBar()) {
-                        hideTabs();
-                    }
                 }
             }
         });
@@ -1521,7 +1529,6 @@ public class BrowserApp extends GeckoApp
 
         if (mTabsPanel != null) {
             mRootLayout.reset();
-            updateSideBarState();
             mTabsPanel.refresh();
         }
 
@@ -1530,38 +1537,6 @@ public class BrowserApp extends GeckoApp
         }
 
         mBrowserToolbar.refresh();
-    }
-
-    @Override
-    public boolean hasTabsSideBar() {
-        return (mTabsPanel != null && mTabsPanel.isSideBar());
-    }
-
-    private boolean isSideBar() {
-        return (HardwareUtils.isTablet() && getOrientation() == Configuration.ORIENTATION_LANDSCAPE);
-    }
-
-    private void updateSideBarState() {
-        if (NewTabletUI.isEnabled(this)) {
-            return;
-        }
-
-        if (mMainLayoutAnimator != null)
-            mMainLayoutAnimator.stop();
-
-        boolean isSideBar = isSideBar();
-        final int sidebarWidth = getResources().getDimensionPixelSize(R.dimen.tabs_sidebar_width);
-
-        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) mTabsPanel.getLayoutParams();
-        lp.width = (isSideBar ? sidebarWidth : ViewGroup.LayoutParams.MATCH_PARENT);
-        mTabsPanel.requestLayout();
-
-        final boolean sidebarIsShown = (isSideBar && mTabsPanel.isShown());
-        final int mainLayoutScrollX = (sidebarIsShown ? -sidebarWidth : 0);
-        mMainLayout.scrollTo(mainLayoutScrollX, 0);
-
-        mTabsPanel.setIsSideBar(isSideBar);
-        mRootLayout.updateDragHelperParameters();
     }
 
     @Override
@@ -1673,7 +1648,9 @@ public class BrowserApp extends GeckoApp
             final String title = message.getString("title");
             final String url = message.getString("url");
             GeckoAppShell.openUriExternal(url, "text/plain", "", "", Intent.ACTION_SEND, title);
-
+        } else if ("Sanitize:ClearHistory".equals(event)) {
+            handleClearHistory(message.optBoolean("clearSearchHistory", false));
+            callback.sendSuccess(true);
         } else if ("Settings:Show".equals(event)) {
             final String resource =
                     message.optString(GeckoPreferences.INTENT_EXTRA_RESOURCES, null);
@@ -1921,7 +1898,6 @@ public class BrowserApp extends GeckoApp
         mTabsPanel = (TabsPanel) tabsPanelStub.inflate();
 
         mTabsPanel.setTabsLayoutChangeListener(this);
-        updateSideBarState();
 
         return true;
     }
@@ -1992,16 +1968,9 @@ public class BrowserApp extends GeckoApp
 
         mMainLayoutAnimator = new PropertyAnimator(animationLength, sTabsInterpolator);
         mMainLayoutAnimator.addPropertyAnimationListener(this);
-
-        if (hasTabsSideBar()) {
-            mMainLayoutAnimator.attach(mMainLayout,
-                                       PropertyAnimator.Property.SCROLL_X,
-                                       -width);
-        } else {
-            mMainLayoutAnimator.attach(mMainLayout,
-                                       PropertyAnimator.Property.SCROLL_Y,
-                                       -height);
-        }
+        mMainLayoutAnimator.attach(mMainLayout,
+                                   PropertyAnimator.Property.SCROLL_Y,
+                                   -height);
 
         mTabsPanel.prepareTabsAnimation(mMainLayoutAnimator);
         mBrowserToolbar.triggerTabsPanelTransition(mMainLayoutAnimator, areTabsShown());
@@ -2188,7 +2157,14 @@ public class BrowserApp extends GeckoApp
         }
 
         final Tab selectedTab = Tabs.getInstance().getSelectedTab();
-        mTargetTabForEditingMode = (selectedTab != null ? selectedTab.getId() : null);
+        final String panelId;
+        if (selectedTab != null) {
+            mTargetTabForEditingMode = selectedTab.getId();
+            panelId = selectedTab.getMostRecentHomePanel();
+        } else {
+            mTargetTabForEditingMode = null;
+            panelId = null;
+        }
 
         final PropertyAnimator animator = new PropertyAnimator(250);
         animator.setUseHardwareLayer(false);
@@ -2197,7 +2173,6 @@ public class BrowserApp extends GeckoApp
 
         mBrowserToolbar.startEditing(url, animator);
 
-        final String panelId = selectedTab.getMostRecentHomePanel();
         showHomePagerWithAnimator(panelId, animator);
 
         animator.start();
@@ -3132,14 +3107,6 @@ public class BrowserApp extends GeckoApp
     }
 
     private int resolveBookmarkIconID(final boolean isBookmark) {
-        if (NewTabletUI.isEnabled(this) && HardwareUtils.isLargeTablet()) {
-            if (isBookmark) {
-                return R.drawable.new_tablet_ic_menu_bookmark_remove;
-            } else {
-                return R.drawable.new_tablet_ic_menu_bookmark_add;
-            }
-        }
-
         if (isBookmark) {
             return R.drawable.ic_menu_bookmark_remove;
         } else {
@@ -3170,9 +3137,7 @@ public class BrowserApp extends GeckoApp
         // the frequency of use for various actions.
         Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.MENU, getResources().getResourceEntryName(itemId));
 
-        if (NewTabletUI.isEnabled(this)) {
-            mBrowserToolbar.cancelEdit();
-        }
+        mBrowserToolbar.cancelEdit();
 
         if (itemId == R.id.bookmark) {
             tab = Tabs.getInstance().getSelectedTab();
@@ -3443,13 +3408,23 @@ public class BrowserApp extends GeckoApp
 
         // If the user has clicked the tab queue notification then load the tabs.
         if(AppConstants.NIGHTLY_BUILD  && AppConstants.MOZ_ANDROID_TAB_QUEUE && mInitialized && isTabQueueAction) {
-            int queuedTabCount = TabQueueHelper.getTabQueueLength(this);
-            TabQueueHelper.openQueuedUrls(this, mProfile, TabQueueHelper.FILE_NAME, false);
+            ThreadUtils.postToBackgroundThread(new Runnable() {
+                @Override
+                public void run() {
+                    int queuedTabCount = TabQueueHelper.getTabQueueLength(BrowserApp.this);
+                    TabQueueHelper.openQueuedUrls(BrowserApp.this, mProfile, TabQueueHelper.FILE_NAME, false);
 
-            // If there's more than one tab then also show the tabs panel.
-            if (queuedTabCount > 1) {
-                showNormalTabs();
-            }
+                    // If there's more than one tab then also show the tabs panel.
+                    if (queuedTabCount > 1) {
+                        ThreadUtils.postToUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                showNormalTabs();
+                            }
+                        });
+                    }
+                }
+            });
         }
 
         if (!mInitialized || !Intent.ACTION_MAIN.equals(action)) {

@@ -142,7 +142,7 @@ TrackBuffer::ContinueShutdown()
 }
 
 nsRefPtr<TrackBufferAppendPromise>
-TrackBuffer::AppendData(LargeDataBuffer* aData, int64_t aTimestampOffset)
+TrackBuffer::AppendData(MediaLargeByteBuffer* aData, int64_t aTimestampOffset)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mInitializationPromise.IsEmpty());
@@ -151,7 +151,7 @@ TrackBuffer::AppendData(LargeDataBuffer* aData, int64_t aTimestampOffset)
   nsRefPtr<TrackBufferAppendPromise> p = mInitializationPromise.Ensure(__func__);
   bool hadInitData = mParser->HasInitData();
   bool hadCompleteInitData = mParser->HasCompleteInitData();
-  nsRefPtr<LargeDataBuffer> oldInit = mParser->InitData();
+  nsRefPtr<MediaLargeByteBuffer> oldInit = mParser->InitData();
   bool newInitData = mParser->IsInitSegmentPresent(aData);
 
   // TODO: Run more of the buffer append algorithm asynchronously.
@@ -249,7 +249,7 @@ TrackBuffer::AppendData(LargeDataBuffer* aData, int64_t aTimestampOffset)
 }
 
 bool
-TrackBuffer::AppendDataToCurrentResource(LargeDataBuffer* aData, uint32_t aDuration)
+TrackBuffer::AppendDataToCurrentResource(MediaLargeByteBuffer* aData, uint32_t aDuration)
 {
   MOZ_ASSERT(NS_IsMainThread());
   if (!mCurrentDecoder) {
@@ -564,12 +564,7 @@ TrackBuffer::QueueInitializeDecoder(SourceBufferDecoder* aDecoder)
     NS_NewRunnableMethodWithArg<SourceBufferDecoder*>(this,
                                                       &TrackBuffer::InitializeDecoder,
                                                       aDecoder);
-  if (NS_FAILED(mTaskQueue->Dispatch(task))) {
-    MSE_DEBUG("failed to enqueue decoder initialization task");
-    RemoveDecoder(aDecoder);
-    mInitializationPromise.RejectIfExists(NS_ERROR_FAILURE, __func__);
-    return false;
-  }
+  mTaskQueue->Dispatch(task);
   return true;
 }
 
@@ -631,7 +626,7 @@ TrackBuffer::InitializeDecoder(SourceBufferDecoder* aDecoder)
   }
   if (!wasEnded) {
     // Adding an empty buffer will reopen the SourceBufferResource
-    nsRefPtr<LargeDataBuffer> emptyBuffer = new LargeDataBuffer;
+    nsRefPtr<MediaLargeByteBuffer> emptyBuffer = new MediaLargeByteBuffer;
     aDecoder->GetResource()->AppendData(emptyBuffer);
   }
   // HACK END.

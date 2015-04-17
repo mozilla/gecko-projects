@@ -587,7 +587,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     common.opacity() = mutant->GetOpacity();
     common.useClipRect() = !!mutant->GetClipRect();
     common.clipRect() = (common.useClipRect() ?
-                         *mutant->GetClipRect() : nsIntRect());
+                         *mutant->GetClipRect() : ParentLayerIntRect());
     common.isFixedPosition() = mutant->GetIsFixedPosition();
     common.fixedPositionAnchor() = mutant->GetFixedPositionAnchor();
     common.fixedPositionMargin() = mutant->GetFixedPositionMargins();
@@ -607,6 +607,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     }
     common.scrollbarTargetContainerId() = mutant->GetScrollbarTargetContainerId();
     common.scrollbarDirection() = mutant->GetScrollbarDirection();
+    common.scrollbarThumbRatio() = mutant->GetScrollbarThumbRatio();
     common.mixBlendMode() = (int8_t)mutant->GetMixBlendMode();
     common.forceIsolatedGroup() = mutant->GetForceIsolatedGroup();
     if (Layer* maskLayer = mutant->GetMaskLayer()) {

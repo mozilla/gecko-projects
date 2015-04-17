@@ -575,8 +575,15 @@ js::gc::GCRuntime::bufferGrayRoots()
     }
 }
 
+struct SetMaybeAliveFunctor {
+    template <typename T>
+    void operator()(Cell* cell) {
+        SetMaybeAliveFlag<T>(static_cast<T*>(cell));
+    }
+};
+
 void
-BufferGrayRootsTracer::appendGrayRoot(void* thing, JSGCTraceKind kind)
+BufferGrayRootsTracer::appendGrayRoot(Cell* thing, JSGCTraceKind kind)
 {
     MOZ_ASSERT(runtime()->isHeapBusy());
 
@@ -596,16 +603,8 @@ BufferGrayRootsTracer::appendGrayRoot(void* thing, JSGCTraceKind kind)
         // objects and scripts. We rely on gray root buffering for this to work,
         // but we only need to worry about uncollected dead compartments during
         // incremental GCs (when we do gray root buffering).
-        switch (kind) {
-          case JSTRACE_OBJECT:
-            static_cast<JSObject*>(thing)->compartment()->maybeAlive = true;
-            break;
-          case JSTRACE_SCRIPT:
-            static_cast<JSScript*>(thing)->compartment()->maybeAlive = true;
-            break;
-          default:
-            break;
-        }
+        CallTyped(SetMaybeAliveFunctor(), kind, thing);
+
         if (!zone->gcGrayRoots.append(root))
             bufferingGrayRootsFailed = true;
     }
@@ -621,7 +620,8 @@ GCRuntime::markBufferedGrayRoots(JS::Zone* zone)
 #ifdef DEBUG
         marker.setTracingDetails(elem->debugPrinter, elem->debugPrintArg, elem->debugPrintIndex);
 #endif
-        MarkKind(&marker, &elem->thing, elem->kind);
+        TraceManuallyBarrieredGenericPointerEdge(&marker, reinterpret_cast<Cell**>(&elem->thing),
+                                                 "buffered gray root");
     }
 }
 

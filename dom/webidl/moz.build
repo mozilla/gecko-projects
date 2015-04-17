@@ -11,6 +11,7 @@ GENERATED_WEBIDL_FILES = [
 PREPROCESSED_WEBIDL_FILES = [
     'HTMLMediaElement.webidl',
     'Navigator.webidl',
+    'ServiceWorkerRegistration.webidl',
     'Window.webidl',
 ]
 
@@ -21,8 +22,7 @@ WEBIDL_FILES = [
     'AlarmsManager.webidl',
     'AnalyserNode.webidl',
     'Animatable.webidl',
-    'Animation.webidl',
-    'AnimationEffect.webidl',
+    'AnimationEffectReadonly.webidl',
     'AnimationEvent.webidl',
     'AnimationPlayer.webidl',
     'AnimationTimeline.webidl',
@@ -107,6 +107,7 @@ WEBIDL_FILES = [
     'DisplayPortInputPort.webidl',
     'Document.webidl',
     'DocumentFragment.webidl',
+    'DocumentTimeline.webidl',
     'DocumentType.webidl',
     'DOMCursor.webidl',
     'DOMError.webidl',
@@ -262,6 +263,7 @@ WEBIDL_FILES = [
     'KeyAlgorithm.webidl',
     'KeyboardEvent.webidl',
     'KeyEvent.webidl',
+    'KeyframeEffect.webidl',
     'LegacyQueryInterface.webidl',
     'LinkStyle.webidl',
     'ListBoxObject.webidl',
@@ -353,7 +355,6 @@ WEBIDL_FILES = [
     'ProfileTimelineMarker.webidl',
     'Promise.webidl',
     'PromiseDebugging.webidl',
-    'PushManager.webidl',
     'RadioNodeList.webidl',
     'Range.webidl',
     'Rect.webidl',
@@ -382,7 +383,6 @@ WEBIDL_FILES = [
     'ServiceWorker.webidl',
     'ServiceWorkerContainer.webidl',
     'ServiceWorkerGlobalScope.webidl',
-    'ServiceWorkerRegistration.webidl',
     'SettingChangeNotification.webidl',
     'SettingsManager.webidl',
     'ShadowRoot.webidl',
@@ -660,6 +660,19 @@ if CONFIG['MOZ_B2G_BT']:
             'BluetoothDevice.webidl',
             'BluetoothManager.webidl',
         ]
+
+if CONFIG['MOZ_SIMPLEPUSH']:
+    WEBIDL_FILES += [
+        'SimplePushManager.webidl'
+    ]
+else:
+    WEBIDL_FILES += [
+        'PushEvent.webidl',
+        'PushManager.webidl',
+        'PushManager.webidl',
+        'PushMessageData.webidl',
+        'PushSubscription.webidl',
+    ]
 
 if CONFIG['MOZ_NFC']:
     WEBIDL_FILES += [

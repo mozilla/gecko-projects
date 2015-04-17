@@ -113,6 +113,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Notifications",
 XPCOMUtils.defineLazyModuleGetter(this, "GMPInstallManager",
                                   "resource://gre/modules/GMPInstallManager.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode", "resource://gre/modules/ReaderMode.jsm");
+
 let lazilyLoadedBrowserScripts = [
   ["SelectHelper", "chrome://browser/content/SelectHelper.js"],
   ["InputWidgetHelper", "chrome://browser/content/InputWidgetHelper.js"],
@@ -4562,16 +4564,7 @@ Tab.prototype = {
   },
 
   _stripAboutReaderURL: function (url) {
-    if (!url.startsWith("about:reader")) {
-      return url;
-    }
-
-    // From ReaderParent._getOriginalUrl (browser/modules/ReaderParent.jsm).
-    let searchParams = new URLSearchParams(url.substring("about:reader?".length));
-    if (!searchParams.has("url")) {
-        return url;
-    }
-    return decodeURIComponent(searchParams.get("url"));
+    return ReaderMode.getOriginalUrl(url) || url;
   },
 
   // Properties used to cache security state used to update the UI
@@ -6670,13 +6663,12 @@ var IndexedDB = {
 
     let requestor = subject.QueryInterface(Ci.nsIInterfaceRequestor);
 
-    let contentWindow = requestor.getInterface(Ci.nsIDOMWindow);
-    let contentDocument = contentWindow.document;
-    let tab = BrowserApp.getTabForWindow(contentWindow);
+    let browser = requestor.getInterface(Ci.nsIDOMNode);
+    let tab = BrowserApp.getTabForBrowser(browser);
     if (!tab)
       return;
 
-    let host = contentDocument.documentURIObject.asciiHost;
+    let host = browser.currentURI.asciiHost;
 
     let strings = Strings.browser;
 

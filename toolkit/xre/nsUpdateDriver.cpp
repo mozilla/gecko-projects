@@ -194,7 +194,7 @@ GetXULRunnerStubPath(const char* argv0, nsIFile* *aResult)
   if (NS_FAILED(rv))
     return rv;
 
-  NS_ADDREF(*aResult = static_cast<nsIFile*>(lfm.get()));
+  lfm.forget(aResult);
   return NS_OK;
 }
 #endif /* XP_MACOSX */
@@ -387,7 +387,7 @@ CopyUpdaterIntoUpdateDir(nsIFile *greDir, nsIFile *appDir, nsIFile *updateDir,
     return false;
   CopyFileIntoUpdateDir(appDir, kUpdaterINI, updateDir);
 #endif
-#if defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(ANDROID)
+#if defined(XP_UNIX) && !defined(XP_MACOSX)
   nsCOMPtr<nsIFile> iconDir;
   appDir->Clone(getter_AddRefs(iconDir));
   iconDir->AppendNative(NS_LITERAL_CSTRING("icons"));

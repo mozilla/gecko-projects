@@ -3503,6 +3503,16 @@
     "high": "180",
     "description": "Update: interval in days since the last background update check (timer initiated)"
   },
+  "UPDATE_PING_COUNT_EXTERNAL": {
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Update: count of systems for this ping for comparison with other pings (externally initiated)"
+  },
+  "UPDATE_PING_COUNT_NOTIFY": {
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Update: count of systems for this ping for comparison with other pings (timer initiated)"
+  },
   "UPDATE_SERVICE_INSTALLED_EXTERNAL": {
     "expires_in_version": "never",
     "kind": "boolean",
@@ -3523,15 +3533,15 @@
     "kind": "count",
     "description": "Update: count of systems that manually uninstalled the service (timer initiated)"
   },
-  "UPDATE_CANNOT_APPLY_EXTERNAL": {
+  "UPDATE_UNABLE_TO_APPLY_EXTERNAL": {
     "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "Update: systems that cannot apply updates (externally initiated)"
+    "kind": "count",
+    "description": "Update: count of systems that cannot apply updates (externally initiated)"
   },
-  "UPDATE_CANNOT_APPLY_NOTIFY": {
+  "UPDATE_UNABLE_TO_APPLY_NOTIFY": {
     "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "Update: systems that cannot apply updates (timer initiated)"
+    "kind": "count",
+    "description": "Update: count of systems that cannot apply updates (timer initiated)"
   },
   "UPDATE_CANNOT_STAGE_EXTERNAL": {
     "expires_in_version": "never",
@@ -7502,7 +7512,7 @@
     "description": "Whether a session is set to autostart e10s windows"
   },
   "E10S_AUTOSTART_STATUS": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 6,
     "description": "Why e10s is enabled or disabled (0=ENABLED_BY_USER, 1=ENABLED_BY_DEFAULT, 2=DISABLED_BY_USER, 3=DISABLED_IN_SAFE_MODE, 4=DISABLED_FOR_ACCESSIBILITY, 5=DISABLED_FOR_MAC_GFX)"
@@ -7513,12 +7523,12 @@
     "description": "Whether a browser window is set as an e10s window"
   },
   "E10S_STILL_ACCEPTED_FROM_PROMPT": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "boolean",
     "description": "Whether a user who accepted e10s from the prompt is still using e10s"
   },
   "E10S_BLOCKED_FROM_RUNNING": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "boolean",
     "description": "Whether the e10s pref was set but it was blocked from running due to blacklisted conditions"
   },

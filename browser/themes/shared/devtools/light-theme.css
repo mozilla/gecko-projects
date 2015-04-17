@@ -4,7 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* Colors are taken from:
- * https://developer.mozilla.org/en-US/docs/Tools/DevToolsColors
+ * https://developer.mozilla.org/en-US/docs/Tools/DevToolsColors.
+ * Changes should be kept in sync with commandline.css and commandline.inc.css.
  */
 :root {
   --theme-body-background: #fcfcfc;
@@ -202,9 +203,8 @@
   border-color: var(--theme-splitter-color);
 }
 
-.ruleview-colorswatch,
-.computedview-colorswatch,
-.ruleview-bezierswatch {
+.ruleview-swatch,
+.computedview-colorswatch {
   box-shadow: 0 0 0 1px #c4c4c4;
 }
 

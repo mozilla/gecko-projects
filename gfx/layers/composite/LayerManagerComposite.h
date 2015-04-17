@@ -9,6 +9,7 @@
 #include <stdint.h>                     // for int32_t, uint32_t
 #include "GLDefs.h"                     // for GLenum
 #include "Layers.h"
+#include "Units.h"                      // for ParentLayerIntRect
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr, TemporaryRef
@@ -18,6 +19,7 @@
 #include "mozilla/gfx/Types.h"          // for SurfaceFormat
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/LayersTypes.h"  // for LayersBackend, etc
+#include "mozilla/Maybe.h"              // for Maybe
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "nsAString.h"
@@ -276,6 +278,9 @@ private:
    * Render the current layer tree to the active target.
    */
   void Render();
+#ifdef MOZ_WIDGET_ANDROID
+  void RenderToPresentationSurface();
+#endif
 
   /**
    * Render debug overlays such as the FPS/FrameCounter above the frame.
@@ -403,12 +408,9 @@ public:
     mShadowOpacity = aOpacity;
   }
 
-  void SetShadowClipRect(const nsIntRect* aRect)
+  void SetShadowClipRect(const Maybe<ParentLayerIntRect>& aRect)
   {
-    mUseShadowClipRect = aRect != nullptr;
-    if (aRect) {
-      mShadowClipRect = *aRect;
-    }
+    mShadowClipRect = aRect;
   }
 
   void SetShadowTransform(const gfx::Matrix4x4& aMatrix)
@@ -432,7 +434,7 @@ public:
 
   // These getters can be used anytime.
   float GetShadowOpacity() { return mShadowOpacity; }
-  const nsIntRect* GetShadowClipRect() { return mUseShadowClipRect ? &mShadowClipRect : nullptr; }
+  const Maybe<ParentLayerIntRect>& GetShadowClipRect() { return mShadowClipRect; }
   const nsIntRegion& GetShadowVisibleRegion() { return mShadowVisibleRegion; }
   const gfx::Matrix4x4& GetShadowTransform() { return mShadowTransform; }
   bool GetShadowTransformSetByAnimation() { return mShadowTransformSetByAnimation; }
@@ -449,11 +451,10 @@ public:
 protected:
   gfx::Matrix4x4 mShadowTransform;
   nsIntRegion mShadowVisibleRegion;
-  nsIntRect mShadowClipRect;
+  Maybe<ParentLayerIntRect> mShadowClipRect;
   LayerManagerComposite* mCompositeManager;
   RefPtr<Compositor> mCompositor;
   float mShadowOpacity;
-  bool mUseShadowClipRect;
   bool mShadowTransformSetByAnimation;
   bool mDestroyed;
   bool mLayerComposited;

@@ -370,13 +370,6 @@ static bool IsCloseToVertical(float aAngle, float aThreshold)
   return (fabs(aAngle - (M_PI / 2)) < aThreshold);
 }
 
-template <typename Units>
-static bool IsZero(const gfx::PointTyped<Units>& aPoint)
-{
-  return FuzzyEqualsAdditive(aPoint.x, 0.0f)
-      && FuzzyEqualsAdditive(aPoint.y, 0.0f);
-}
-
 static inline void LogRendertraceRect(const ScrollableLayerGuid& aGuid, const char* aDesc, const char* aColor, const CSSRect& aRect)
 {
 #ifdef APZC_ENABLE_RENDERTRACE
@@ -441,17 +434,17 @@ public:
     MOZ_ASSERT(mOverscrollHandoffChain);
     TimeStamp now = AsyncPanZoomController::GetFrameTime();
 
-    // Drop any velocity on axes where we don't have room to scroll anyways.
+    // Drop any velocity on axes where we don't have room to scroll anyways
+    // (in this APZC, or an APZC further in the handoff chain).
     // This ensures that we don't take the 'overscroll' path in Sample()
     // on account of one axis which can't scroll having a velocity.
-    {
+    if (!mOverscrollHandoffChain->CanScrollInDirection(&mApzc, Layer::HORIZONTAL)) {
       ReentrantMonitorAutoEnter lock(mApzc.mMonitor);
-      if (!mApzc.mX.CanScroll()) {
-        mApzc.mX.SetVelocity(0);
-      }
-      if (!mApzc.mY.CanScroll()) {
-        mApzc.mY.SetVelocity(0);
-      }
+      mApzc.mX.SetVelocity(0);
+    }
+    if (!mOverscrollHandoffChain->CanScrollInDirection(&mApzc, Layer::VERTICAL)) {
+      ReentrantMonitorAutoEnter lock(mApzc.mMonitor);
+      mApzc.mY.SetVelocity(0);
     }
 
     ParentLayerPoint velocity = mApzc.GetVelocityVector();
@@ -1431,6 +1424,10 @@ AsyncPanZoomController::GetScrollWheelDelta(const ScrollWheelInput& aEvent) cons
       delta.y *= scrollAmount.height;
       break;
     }
+    case ScrollWheelInput::SCROLLDELTA_PIXEL: {
+      // aOutDeltaX is already in CSS pixels.
+      break;
+    }
     default:
       MOZ_ASSERT_UNREACHABLE("unexpected scroll delta type");
   }
@@ -1471,14 +1468,31 @@ AsyncPanZoomController::CanScroll(const ScrollWheelInput& aEvent) const
     return false;
   }
 
-  return CanScroll(delta.x, delta.y);
+  return CanScrollWithWheel(delta);
 }
 
 bool
-AsyncPanZoomController::CanScroll(double aDeltaX, double aDeltaY) const
+AsyncPanZoomController::CanScrollWithWheel(const LayoutDevicePoint& aDelta) const
 {
   ReentrantMonitorAutoEnter lock(mMonitor);
-  return mX.CanScroll(aDeltaX) || mY.CanScroll(aDeltaY);
+  if (mX.CanScroll(aDelta.x)) {
+    return true;
+  }
+  if (mY.CanScroll(aDelta.y) && mFrameMetrics.AllowVerticalScrollWithWheel()) {
+    return true;
+  }
+  return false;
+}
+
+bool
+AsyncPanZoomController::CanScroll(Layer::ScrollDirection aDirection) const
+{
+  ReentrantMonitorAutoEnter lock(mMonitor);
+  switch (aDirection) {
+  case Layer::HORIZONTAL: return mX.CanScroll();
+  case Layer::VERTICAL:   return mY.CanScroll();
+  default:                MOZ_ASSERT(false); return false;
+  }
 }
 
 bool
@@ -1493,7 +1507,7 @@ nsEventStatus AsyncPanZoomController::OnScrollWheel(const ScrollWheelInput& aEve
   LayoutDevicePoint delta = GetScrollWheelDelta(aEvent);
 
   if ((delta.x || delta.y) &&
-      !CanScroll(delta.x, delta.y) &&
+      !CanScrollWithWheel(delta) &&
       mInputQueue->GetCurrentWheelTransaction())
   {
     // We can't scroll this apz anymore, so we simply drop the event.
@@ -1538,6 +1552,11 @@ nsEventStatus AsyncPanZoomController::OnScrollWheel(const ScrollWheelInput& aEve
     }
 
     case ScrollWheelInput::SCROLLMODE_SMOOTH: {
+      // The lock must be held across the entire update operation, so the
+      // compositor doesn't end the animation before we get a chance to
+      // update it.
+      ReentrantMonitorAutoEnter lock(mMonitor);
+
       if (mState != WHEEL_SCROLL) {
         CancelAnimation();
         SetState(WHEEL_SCROLL);

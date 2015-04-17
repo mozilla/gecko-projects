@@ -2169,6 +2169,7 @@ gfxPlatform::OptimalFormatForContent(gfxContentType aContent)
  */
 static bool sLayersSupportsD3D9 = false;
 static bool sLayersSupportsD3D11 = false;
+static bool sANGLESupportsD3D11 = false;
 static bool sLayersSupportsHardwareVideoDecoding = false;
 static bool sBufferRotationCheckPref = true;
 static bool sPrefBrowserTabsRemoteAutostart = false;
@@ -2209,6 +2210,11 @@ InitLayersAccelerationPrefs()
       if (!gfxPrefs::LayersD3D11DisableWARP()) {
         // Always support D3D11 when WARP is allowed.
         sLayersSupportsD3D11 = true;
+      }
+      if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT3D_11_ANGLE, &status))) {
+        if (status == nsIGfxInfo::FEATURE_STATUS_OK) {
+          sANGLESupportsD3D11 = true;
+        }
       }
     }
 #endif
@@ -2256,6 +2262,14 @@ gfxPlatform::CanUseHardwareVideoDecoding()
 }
 
 bool
+gfxPlatform::CanUseDirect3D11ANGLE()
+{
+  MOZ_ASSERT(sLayersAccelerationPrefsInitialized);
+  return sANGLESupportsD3D11;
+}
+
+
+bool
 gfxPlatform::BufferRotationEnabled()
 {
   MutexAutoLock autoLock(*gGfxPlatformPrefsLock);
@@ -2301,12 +2315,6 @@ gfxPlatform::UsesOffMainThreadCompositing()
     // Linux users who chose OpenGL are being grandfathered in to OMTC
     result |= gfxPrefs::LayersAccelerationForceEnabled();
 
-#if !defined(NIGHTLY_BUILD)
-    // Yeah, these two env vars do the same thing.
-    // I'm told that one of them is enabled on some test slaves config,
-    // so be slightly careful if you think you can remove one of them.
-    result &= PR_GetEnv("MOZ_USE_OMTC") || PR_GetEnv("MOZ_OMTC_ENABLED");
-#endif
 #endif
     firstTime = false;
   }

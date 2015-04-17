@@ -22,6 +22,7 @@
 #include "Axis.h"
 #include "InputQueue.h"
 #include "APZUtils.h"
+#include "Layers.h"                     // for Layer::ScrollDirection
 #include "LayersTypes.h"
 #include "TaskThrottler.h"
 #include "mozilla/gfx/Matrix.h"
@@ -368,7 +369,11 @@ public:
 
   // Return whether or not a scroll delta will be able to scroll in either
   // direction.
-  bool CanScroll(double aDeltaX, double aDeltaY) const;
+  bool CanScrollWithWheel(const LayoutDevicePoint& aDelta) const;
+
+  // Return whether or not there is room to scroll this APZC
+  // in the given direction.
+  bool CanScroll(Layer::ScrollDirection aDirection) const;
 
   void NotifyMozMouseScrollEvent(const nsString& aString) const;
 

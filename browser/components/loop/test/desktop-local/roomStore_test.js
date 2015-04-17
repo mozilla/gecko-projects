@@ -77,6 +77,9 @@ describe("loop.store.RoomStore", function () {
     beforeEach(function() {
       fakeMozLoop = {
         copyString: function() {},
+        getLoopPref: function(pref) {
+          return pref;
+        },
         notifyUITour: function() {},
         rooms: {
           create: function() {},
@@ -187,7 +190,7 @@ describe("loop.store.RoomStore", function () {
       it("should find next available room number from a non empty room list",
         function() {
           store.setStoreState({
-            rooms: [{roomName: "RoomWord 1"}]
+            rooms: [{decryptedContext: {roomName: "RoomWord 1"}}]
           });
 
           expect(store.findNextAvailableRoomNumber(fakeNameTemplate)).eql(2);
@@ -195,7 +198,15 @@ describe("loop.store.RoomStore", function () {
 
       it("should not be sensitive to initial list order", function() {
         store.setStoreState({
-          rooms: [{roomName: "RoomWord 99"}, {roomName: "RoomWord 98"}]
+          rooms: [{
+            decryptedContext: {
+              roomName: "RoomWord 99"
+            },
+          }, {
+            decryptedContext: {
+              roomName: "RoomWord 98"
+            }
+          }]
         });
 
         expect(store.findNextAvailableRoomNumber(fakeNameTemplate)).eql(100);
@@ -209,15 +220,6 @@ describe("loop.store.RoomStore", function () {
       var fakeRoomCreationData = {
         nameTemplate: fakeNameTemplate,
         roomOwner: fakeOwner
-      };
-
-      var fakeCreatedRoom = {
-        roomName: "Conversation 1",
-        roomToken: "fake",
-        roomUrl: "http://invalid",
-        maxSize: 42,
-        participants: [],
-        ctime: 1234567890
       };
 
       beforeEach(function() {
@@ -241,10 +243,36 @@ describe("loop.store.RoomStore", function () {
         store.createRoom(new sharedActions.CreateRoom(fakeRoomCreationData));
 
         sinon.assert.calledWith(fakeMozLoop.rooms.create, {
-          roomName: "Conversation 1",
+          decryptedContext: {
+            roomName: "Conversation 1"
+          },
           roomOwner: fakeOwner,
-          maxSize: store.maxRoomCreationSize,
-          expiresIn: store.defaultExpiresIn
+          maxSize: store.maxRoomCreationSize
+        });
+      });
+
+      it("should request creation of a new room with context", function() {
+        sandbox.stub(fakeMozLoop.rooms, "create");
+
+        fakeRoomCreationData.urls = [{
+          location: "http://invalid.com",
+          description: "fakeSite",
+          thumbnail: "fakeimage.png"
+        }];
+
+        store.createRoom(new sharedActions.CreateRoom(fakeRoomCreationData));
+
+        sinon.assert.calledWith(fakeMozLoop.rooms.create, {
+          decryptedContext: {
+            roomName: "Conversation 1",
+            urls: [{
+              location: "http://invalid.com",
+              description: "fakeSite",
+              thumbnail: "fakeimage.png"
+            }],
+          },
+          roomOwner: fakeOwner,
+          maxSize: store.maxRoomCreationSize
         });
       });
 
@@ -365,6 +393,62 @@ describe("loop.store.RoomStore", function () {
         sinon.assert.calledOnce(sharedUtils.composeCallUrlEmail);
         sinon.assert.calledWithExactly(sharedUtils.composeCallUrlEmail,
           "http://invalid");
+      });
+    });
+
+    describe("#shareRoomUrl", function() {
+      beforeEach(function() {
+        fakeMozLoop.socialShareRoom = sinon.stub();
+      });
+
+      it("should pass the correct data for GMail sharing", function() {
+        var roomUrl = "http://invalid";
+        var origin = "https://mail.google.com/v1";
+        store.shareRoomUrl(new sharedActions.ShareRoomUrl({
+          roomUrl: roomUrl,
+          provider: {
+            origin: origin
+          }
+        }));
+
+        sinon.assert.calledOnce(fakeMozLoop.socialShareRoom);
+        sinon.assert.calledWithExactly(fakeMozLoop.socialShareRoom, origin,
+          roomUrl, "share_email_subject5", "share_email_body5");
+      });
+
+      it("should pass the correct data for all other Social Providers", function() {
+        var roomUrl = "http://invalid2";
+        var origin = "https://twitter.com/share";
+        store.shareRoomUrl(new sharedActions.ShareRoomUrl({
+          roomUrl: roomUrl,
+          provider: {
+            origin: origin
+          }
+        }));
+
+        sinon.assert.calledOnce(fakeMozLoop.socialShareRoom);
+        sinon.assert.calledWithExactly(fakeMozLoop.socialShareRoom, origin,
+          roomUrl, "share_tweet", null);
+      });
+    });
+
+    describe("#addSocialShareButton", function() {
+      it("should invoke to the correct mozLoop function", function() {
+        fakeMozLoop.addSocialShareButton = sinon.stub();
+
+        store.addSocialShareButton(new sharedActions.AddSocialShareButton());
+
+        sinon.assert.calledOnce(fakeMozLoop.addSocialShareButton);
+      });
+    });
+
+    describe("#addSocialShareProvider", function() {
+      it("should invoke to the correct mozLoop function", function() {
+        fakeMozLoop.addSocialShareProvider = sinon.stub();
+
+        store.addSocialShareProvider(new sharedActions.AddSocialShareProvider());
+
+        sinon.assert.calledOnce(fakeMozLoop.addSocialShareProvider);
       });
     });
 

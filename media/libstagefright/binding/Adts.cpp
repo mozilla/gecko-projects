@@ -14,14 +14,14 @@ namespace mp4_demuxer
 {
 
 int8_t
-Adts::GetFrequencyIndex(uint16_t aSamplesPerSecond)
+Adts::GetFrequencyIndex(uint32_t aSamplesPerSecond)
 {
-  static const int freq_lookup[] = { 96000, 88200, 64000, 48000, 44100,
-                                     32000, 24000, 22050, 16000, 12000,
-                                     11025, 8000,  7350,  0 };
+  static const uint32_t freq_lookup[] = { 96000, 88200, 64000, 48000, 44100,
+                                          32000, 24000, 22050, 16000, 12000,
+                                          11025, 8000,  7350,  0};
 
   int8_t i = 0;
-  while (aSamplesPerSecond < freq_lookup[i]) {
+  while (freq_lookup[i] && aSamplesPerSecond < freq_lookup[i]) {
     i++;
   }
 
@@ -63,10 +63,10 @@ Adts::ConvertSample(uint16_t aChannelCount, int8_t aFrequencyIndex,
 
   if (aSample->mCrypto.mValid) {
     if (aSample->mCrypto.mPlainSizes.Length() == 0) {
-      aSample->mCrypto.mPlainSizes.AppendElement(kADTSHeaderSize);
-      aSample->mCrypto.mEncryptedSizes.AppendElement(aSample->mSize - kADTSHeaderSize);
+      writer->mCrypto.mPlainSizes.AppendElement(kADTSHeaderSize);
+      writer->mCrypto.mEncryptedSizes.AppendElement(aSample->mSize - kADTSHeaderSize);
     } else {
-      aSample->mCrypto.mPlainSizes[0] += kADTSHeaderSize;
+      writer->mCrypto.mPlainSizes[0] += kADTSHeaderSize;
     }
   }
 

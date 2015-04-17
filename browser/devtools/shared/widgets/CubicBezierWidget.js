@@ -171,7 +171,7 @@ BezierCanvas.prototype = {
       this.ctx.closePath();
 
       var circle = function(ctx, cx, cy, r) {
-        return ctx.beginPath();
+        ctx.beginPath();
         ctx.arc(cx, cy, r, 0, 2*Math.PI, !1);
         ctx.closePath();
       };
@@ -583,20 +583,16 @@ CubicBezierPresetWidget.prototype = {
     preset.classList.add("preset");
     preset.id = presetLabel;
     preset.coordinates = PRESETS[categoryLabel][presetLabel];
-
     // Create preset preview
     let curve = doc.createElement("canvas");
     let bezier = new CubicBezier(preset.coordinates);
-
-    curve.setAttribute("height", 55);
-    curve.setAttribute("width", 55);
-
+    curve.setAttribute("height", 50);
+    curve.setAttribute("width", 50);
     preset.bezierCanvas = new BezierCanvas(curve, bezier, [0.15, 0]);
     preset.bezierCanvas.plot({
       drawHandles: false,
       bezierThickness: 0.025
     });
-
     preset.appendChild(curve);
 
     // Create preset label

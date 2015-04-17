@@ -46,6 +46,8 @@
 #include "MediaTrackConstraints.h"
 #include "VideoUtils.h"
 #include "Latency.h"
+#include "nsProxyRelease.h"
+#include "nsNullPrincipal.h"
 
 // For PR_snprintf
 #include "prprf.h"
@@ -330,6 +332,18 @@ public:
   {
     mOnSuccess.swap(aOnSuccess);
     mOnFailure.swap(aOnFailure);
+  }
+
+  ~DeviceSuccessCallbackRunnable()
+  {
+    if (!NS_IsMainThread()) {
+      // This can happen if the main thread processes the runnable before
+      // GetUserMediaDevicesTask::Run returns.
+      nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
+
+      NS_ProxyRelease(mainThread, mOnSuccess);
+      NS_ProxyRelease(mainThread, mOnFailure);
+    }
   }
 
   nsresult
@@ -994,7 +1008,7 @@ public:
 
     nsCOMPtr<nsIPrincipal> principal;
     if (mPeerIdentity) {
-      principal = do_CreateInstance("@mozilla.org/nullprincipal;1");
+      principal = nsNullPrincipal::Create();
       trackunion->SetPeerIdentity(mPeerIdentity.forget());
     } else {
       principal = window->GetExtantDoc()->NodePrincipal();
@@ -1498,10 +1512,7 @@ public:
         result->AppendElement(source);
       }
     }
-    // In the case of failure with this newly allocated runnable, we
-    // intentionally leak the runnable, because we've pawned mOnSuccess and
-    // mOnFailure onto it which are main thread objects unsafe to release here.
-    DeviceSuccessCallbackRunnable* runnable =
+    nsRefPtr<DeviceSuccessCallbackRunnable> runnable =
         new DeviceSuccessCallbackRunnable(mWindowId, mOnSuccess, mOnFailure,
                                           result.forget());
     if (mPrivileged) {

@@ -16,6 +16,7 @@ Cu.import("resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils","resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode", "resource://gre/modules/ReaderMode.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ReadingList", "resource:///modules/readinglist/ReadingList.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UITour", "resource:///modules/UITour.jsm");
 
 const gStringBundle = Services.strings.createBundle("chrome://global/locale/aboutReader.properties");
 
@@ -159,6 +160,11 @@ let ReaderParent = {
     }
   },
 
+  forceShowReaderIcon: function(browser) {
+    browser.isArticle = true;
+    this.updateReaderButton(browser);
+  },
+
   buttonClick: function(event) {
     if (event.button != 0) {
       return;
@@ -172,7 +178,7 @@ let ReaderParent = {
     let url = browser.currentURI.spec;
 
     if (url.startsWith("about:reader")) {
-      let originalURL = this._getOriginalUrl(url);
+      let originalURL = ReaderMode.getOriginalUrl(url);
       if (!originalURL) {
         Cu.reportError("Error finding original URL for about:reader URL: " + url);
       } else {
@@ -183,26 +189,21 @@ let ReaderParent = {
     }
   },
 
-  parseReaderUrl: function(url) {
-    if (!url.startsWith("about:reader?")) {
-      return null;
-    }
-    return this._getOriginalUrl(url);
-  },
-
   /**
-   * Returns original URL from an about:reader URL.
+   * Shows an info panel from the UITour for Reader Mode.
    *
-   * @param url An about:reader URL.
-   * @return The original URL for the article, or null if we did not find
-   *         a properly formatted about:reader URL.
+   * @param browser The <browser> that the tour should be started for.
    */
-  _getOriginalUrl: function(url) {
-    let searchParams = new URLSearchParams(url.substring("about:reader?".length));
-    if (!searchParams.has("url")) {
-      return null;
-    }
-    return decodeURIComponent(searchParams.get("url"));
+  showReaderModeInfoPanel(browser) {
+    let win = browser.ownerDocument.defaultView;
+    let targetPromise = UITour.getTarget(win, "readerMode-urlBar");
+    targetPromise.then(target => {
+      let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+      UITour.showInfo(win, browser.messageManager, target,
+                      browserBundle.GetStringFromName("readerView.promo.firstDetectedArticle.title"),
+                      browserBundle.GetStringFromName("readerView.promo.firstDetectedArticle.body"),
+                      "chrome://browser/skin/reader-tour.png");
+    });
   },
 
   /**
@@ -214,6 +215,9 @@ let ReaderParent = {
    * @resolves JS object representing the article, or null if no article is found.
    */
   _getArticle: Task.async(function* (url, browser) {
-    return yield ReaderMode.downloadAndParseDocument(url);
+    return yield ReaderMode.downloadAndParseDocument(url).catch(e => {
+      Cu.reportError("Error downloading and parsing document: " + e);
+      return null;
+    });
   })
 };

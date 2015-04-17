@@ -124,8 +124,7 @@ public:
    * Gets autocommit status.
    */
   bool getAutocommit() {
-    MOZ_ASSERT(mDBConn, "A connection must exist at this point");
-    return static_cast<bool>(::sqlite3_get_autocommit(mDBConn));
+    return mDBConn && static_cast<bool>(::sqlite3_get_autocommit(mDBConn));
   };
 
   /**
@@ -167,6 +166,11 @@ public:
    * Closes the SQLite database, and warns about any non-finalized statements.
    */
   nsresult internalClose(sqlite3 *aDBConn);
+
+  /**
+   * Shuts down the passed-in async thread.
+   */
+  void shutdownAsyncThread(nsIThread *aAsyncThread);
 
   /**
    * Obtains the filename of the connection.  Useful for logging.
@@ -306,6 +310,12 @@ private:
    * sharedAsyncExecutionMutex.
    */
   bool mAsyncExecutionThreadShuttingDown;
+
+  /**
+   * Tracks whether the async thread has been initialized and Shutdown() has
+   * not yet been invoked on it.
+   */
+  DebugOnly<bool> mAsyncExecutionThreadIsAlive;
 
   /**
    * Set to true just prior to calling sqlite3_close on the

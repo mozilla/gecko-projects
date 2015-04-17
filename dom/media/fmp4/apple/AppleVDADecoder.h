@@ -60,12 +60,12 @@ public:
   // Return a new created AppleVDADecoder or nullptr if media or hardware is
   // not supported by current configuration.
   static already_AddRefed<AppleVDADecoder> CreateVDADecoder(
-    const mp4_demuxer::VideoDecoderConfig& aConfig,
+    const VideoInfo& aConfig,
     FlushableMediaTaskQueue* aVideoTaskQueue,
     MediaDataDecoderCallback* aCallback,
     layers::ImageContainer* aImageContainer);
 
-  AppleVDADecoder(const mp4_demuxer::VideoDecoderConfig& aConfig,
+  AppleVDADecoder(const VideoInfo& aConfig,
                   FlushableMediaTaskQueue* aVideoTaskQueue,
                   MediaDataDecoderCallback* aCallback,
                   layers::ImageContainer* aImageContainer);
@@ -89,7 +89,7 @@ public:
   void ClearReorderedFrames();
   CFDictionaryRef CreateOutputConfiguration();
 
-  nsRefPtr<DataBuffer> mExtraData;
+  nsRefPtr<MediaByteBuffer> mExtraData;
   nsRefPtr<FlushableMediaTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
   nsRefPtr<layers::ImageContainer> mImageContainer;
