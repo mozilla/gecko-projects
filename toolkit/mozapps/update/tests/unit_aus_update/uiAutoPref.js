@@ -41,7 +41,7 @@ function run_test() {
 function check_status() {
   let status = readStatusFile();
   Assert.notEqual(status, STATE_DOWNLOADING,
-                  "the update should not be downloading");
+                  "the update state" + MSG_SHOULD_EQUAL);
 
   // Pause the download and reload the Update Manager with an empty update so
   // the Application Update Service doesn't write the update xml files during
@@ -88,4 +88,4 @@ const WindowMediator = {
   },
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIWindowMediator])
-}
+};

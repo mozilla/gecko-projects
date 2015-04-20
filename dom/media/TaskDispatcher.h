@@ -45,21 +45,17 @@ public:
                        already_AddRefed<nsIRunnable> aRunnable,
                        AbstractThread::DispatchFailureHandling aFailureHandling = AbstractThread::AssertDispatchSuccess) = 0;
 
-#ifdef DEBUG
-  void AssertIsTailDispatcherIfRequired();
-#else
-  void AssertIsTailDispatcherIfRequired() {}
-#endif
+  virtual bool HasTasksFor(AbstractThread* aThread) = 0;
 };
 
 /*
  * AutoTaskDispatcher is a stack-scoped TaskDispatcher implementation that fires
  * its queued tasks when it is popped off the stack.
  */
-class MOZ_STACK_CLASS AutoTaskDispatcher : public TaskDispatcher
+class AutoTaskDispatcher : public TaskDispatcher
 {
 public:
-  AutoTaskDispatcher() {}
+  explicit AutoTaskDispatcher(bool aIsTailDispatcher = false) : mIsTailDispatcher(aIsTailDispatcher) {}
   ~AutoTaskDispatcher()
   {
     for (size_t i = 0; i < mTaskGroups.Length(); ++i) {
@@ -67,8 +63,10 @@ public:
       nsRefPtr<AbstractThread> thread = group->mThread;
 
       AbstractThread::DispatchFailureHandling failureHandling = group->mFailureHandling;
+      AbstractThread::DispatchReason reason = mIsTailDispatcher ? AbstractThread::TailDispatch
+                                                                : AbstractThread::NormalDispatch;
       nsCOMPtr<nsIRunnable> r = new TaskGroupRunnable(Move(group));
-      thread->Dispatch(r.forget(), failureHandling);
+      thread->Dispatch(r.forget(), failureHandling, reason);
     }
   }
 
@@ -91,6 +89,8 @@ public:
       group.mFailureHandling = AbstractThread::AssertDispatchSuccess;
     }
   }
+
+  bool HasTasksFor(AbstractThread* aThread) override { return !!GetTaskGroup(aThread); }
 
 private:
 
@@ -135,18 +135,33 @@ private:
 
   PerThreadTaskGroup& EnsureTaskGroup(AbstractThread* aThread)
   {
-    for (size_t i = 0; i < mTaskGroups.Length(); ++i) {
-      if (mTaskGroups[i]->mThread == aThread) {
-        return *mTaskGroups[i];
-      }
+    PerThreadTaskGroup* existing = GetTaskGroup(aThread);
+    if (existing) {
+      return *existing;
     }
 
     mTaskGroups.AppendElement(new PerThreadTaskGroup(aThread));
     return *mTaskGroups.LastElement();
   }
 
+  PerThreadTaskGroup* GetTaskGroup(AbstractThread* aThread)
+  {
+    for (size_t i = 0; i < mTaskGroups.Length(); ++i) {
+      if (mTaskGroups[i]->mThread == aThread) {
+        return mTaskGroups[i].get();
+      }
+    }
+
+    // Not found.
+    return nullptr;
+  }
+
   // Task groups, organized by thread.
   nsTArray<UniquePtr<PerThreadTaskGroup>> mTaskGroups;
+
+  // True if this TaskDispatcher represents the tail dispatcher for the thread
+  // upon which it runs.
+  const bool mIsTailDispatcher;
 };
 
 // Little utility class to allow declaring AutoTaskDispatcher as a default

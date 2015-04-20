@@ -46,6 +46,7 @@
 #include "jit/BaselineJIT.h"
 #include "js/MemoryMetrics.h"
 #include "js/Proxy.h"
+#include "js/UbiNode.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/Interpreter.h"
 #include "vm/ProxyObject.h"
@@ -2164,8 +2165,8 @@ JSObject::swap(JSContext* cx, HandleObject a, HandleObject b)
      */
     JS::Zone* zone = a->zone();
     if (zone->needsIncrementalBarrier()) {
-        a->markChildren(zone->barrierTracer());
-        b->markChildren(zone->barrierTracer());
+        a->traceChildren(zone->barrierTracer());
+        b->traceChildren(zone->barrierTracer());
     }
 
     NotifyGCPostSwap(a, b, r);
@@ -3489,13 +3490,21 @@ js::ToObjectSlow(JSContext* cx, JS::HandleValue val, bool reportScanStack)
     return PrimitiveToObject(cx, val);
 }
 
-void
-js::GetObjectSlotName(JSTracer* trc, char* buf, size_t bufsize)
+class GetObjectSlotNameFunctor : public JS::CallbackTracer::ContextFunctor
 {
-    MOZ_ASSERT(trc->debugPrinter() == GetObjectSlotName);
+    JSObject* obj;
 
-    JSObject* obj = (JSObject*)trc->debugPrintArg();
-    uint32_t slot = uint32_t(trc->debugPrintIndex());
+  public:
+    explicit GetObjectSlotNameFunctor(JSObject* ctx) : obj(ctx) {}
+    virtual void operator()(JS::CallbackTracer* trc, char* buf, size_t bufsize) override;
+};
+
+void
+GetObjectSlotNameFunctor::operator()(JS::CallbackTracer* trc, char* buf, size_t bufsize)
+{
+    MOZ_ASSERT(trc->contextIndex() != JS::CallbackTracer::InvalidIndex);
+
+    uint32_t slot = uint32_t(trc->contextIndex());
 
     Shape* shape;
     if (obj->isNative()) {
@@ -3897,6 +3906,68 @@ js::DumpBacktrace(JSContext* cx)
 
 /* * */
 
+js::gc::AllocKind
+JSObject::allocKindForTenure(const js::Nursery& nursery) const
+{
+    if (is<ArrayObject>()) {
+        const ArrayObject& aobj = as<ArrayObject>();
+        MOZ_ASSERT(aobj.numFixedSlots() == 0);
+
+        /* Use minimal size object if we are just going to copy the pointer. */
+        if (!nursery.isInside(aobj.getElementsHeader()))
+            return AllocKind::OBJECT0_BACKGROUND;
+
+        size_t nelements = aobj.getDenseCapacity();
+        return GetBackgroundAllocKind(GetGCArrayKind(nelements));
+    }
+
+    if (is<JSFunction>())
+        return as<JSFunction>().getAllocKind();
+
+    /*
+     * Typed arrays in the nursery may have a lazily allocated buffer, make
+     * sure there is room for the array's fixed data when moving the array.
+     */
+    if (is<TypedArrayObject>() && !as<TypedArrayObject>().buffer()) {
+        size_t nbytes = as<TypedArrayObject>().byteLength();
+        return GetBackgroundAllocKind(TypedArrayObject::AllocKindForLazyBuffer(nbytes));
+    }
+
+    // Proxies have finalizers and are not nursery allocated.
+    MOZ_ASSERT(!IsProxy(this));
+
+    // Unboxed plain objects are sized according to the data they store.
+    if (is<UnboxedPlainObject>()) {
+        size_t nbytes = as<UnboxedPlainObject>().layoutDontCheckGeneration().size();
+        return GetGCObjectKindForBytes(UnboxedPlainObject::offsetOfData() + nbytes);
+    }
+
+    // Inlined typed objects are followed by their data, so make sure we copy
+    // it all over to the new object.
+    if (is<InlineTypedObject>()) {
+        // Figure out the size of this object, from the prototype's TypeDescr.
+        // The objects we are traversing here are all tenured, so we don't need
+        // to check forwarding pointers.
+        TypeDescr& descr = as<InlineTypedObject>().typeDescr();
+        MOZ_ASSERT(!IsInsideNursery(&descr));
+        return InlineTypedObject::allocKindForTypeDescriptor(&descr);
+    }
+
+    // Outline typed objects use the minimum allocation kind.
+    if (is<OutlineTypedObject>())
+        return AllocKind::OBJECT0;
+
+    // All nursery allocatable non-native objects are handled above.
+    MOZ_ASSERT(isNative());
+
+    AllocKind kind = GetGCObjectFixedSlotsKind(as<NativeObject>().numFixedSlots());
+    MOZ_ASSERT(!IsBackgroundFinalized(kind));
+    if (!CanBeFinalizedInBackground(kind, getClass()))
+        return kind;
+    return GetBackgroundAllocKind(kind);
+}
+
+
 void
 JSObject::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::ClassInfo* info)
 {
@@ -3949,8 +4020,51 @@ JSObject::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::ClassIn
     }
 }
 
+size_t
+JSObject::sizeOfIncludingThisInNursery() const
+{
+    // This function doesn't concern itself yet with typed objects (bug 1133593)
+    // nor unboxed objects (bug 1133592).
+
+    MOZ_ASSERT(!isTenured());
+
+    const Nursery &nursery = compartment()->runtimeFromAnyThread()->gc.nursery;
+    size_t size = Arena::thingSize(allocKindForTenure(nursery));
+
+    if (is<NativeObject>()) {
+        const NativeObject &native = as<NativeObject>();
+
+        size += native.numFixedSlots() * sizeof(Value);
+        size += native.numDynamicSlots() * sizeof(Value);
+
+        if (native.hasDynamicElements()) {
+            js::ObjectElements &elements = *native.getElementsHeader();
+            if (!elements.isCopyOnWrite() || elements.ownerObject() == this)
+                size += elements.capacity * sizeof(HeapSlot);
+        }
+    }
+
+    return size;
+}
+
+size_t
+JS::ubi::Concrete<JSObject>::size(mozilla::MallocSizeOf mallocSizeOf) const
+{
+    JSObject &obj = get();
+
+    if (!obj.isTenured())
+        return obj.sizeOfIncludingThisInNursery();
+
+    JS::ClassInfo info;
+    obj.addSizeOfExcludingThis(mallocSizeOf, &info);
+    return obj.tenuredSizeOfThis() + info.sizeOfAllThings();
+}
+
+template<> const char16_t JS::ubi::TracerConcrete<JSObject>::concreteTypeName[] =
+    MOZ_UTF16("JSObject");
+
 void
-JSObject::markChildren(JSTracer* trc)
+JSObject::traceChildren(JSTracer* trc)
 {
     TraceEdge(trc, &group_, "group");
 
@@ -3963,7 +4077,11 @@ JSObject::markChildren(JSTracer* trc)
 
         TraceEdge(trc, &nobj->shape_, "shape");
 
-        MarkObjectSlots(trc, nobj, 0, nobj->slotSpan());
+        {
+            GetObjectSlotNameFunctor func(nobj);
+            JS::AutoTracingDetails ctx(trc, func);
+            MarkObjectSlots(trc, nobj, 0, nobj->slotSpan());
+        }
 
         do {
             if (nobj->denseElementsAreCopyOnWrite()) {

@@ -978,7 +978,7 @@ XULDocument::AttributeChanged(nsIDocument* aDocument,
                     static_cast<BroadcastListener*>(entry->mListeners[i]);
 
                 if ((bl->mAttribute == aAttribute) ||
-                    (bl->mAttribute == nsGkAtoms::_asterix)) {
+                    (bl->mAttribute == nsGkAtoms::_asterisk)) {
                     nsCOMPtr<Element> listenerEl
                         = do_QueryReferent(bl->mListener);
                     if (listenerEl) {
@@ -3563,7 +3563,7 @@ XULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
     // Execute the precompiled script with the given version.
     // We're about to run script via JS::CloneAndExecuteScript, so we need an
     // AutoEntryScript. This is Gecko specific and not in any spec.
-    AutoEntryScript aes(mScriptGlobalObject);
+    AutoEntryScript aes(mScriptGlobalObject, "precompiled XUL <script> element");
     aes.TakeOwnershipOfErrorReporting();
     JSContext* cx = aes.cx();
     JS::Rooted<JSObject*> baseGlobal(cx, JS::CurrentGlobalOrNull(cx));
@@ -4168,7 +4168,7 @@ XULDocument::BroadcastAttributeChangeFromOverlay(nsIContent* aNode,
             (entry->mListeners[i]);
 
         if ((bl->mAttribute != aAttribute) &&
-            (bl->mAttribute != nsGkAtoms::_asterix))
+            (bl->mAttribute != nsGkAtoms::_asterisk))
             continue;
 
         nsCOMPtr<nsIContent> l = do_QueryReferent(bl->mListener);

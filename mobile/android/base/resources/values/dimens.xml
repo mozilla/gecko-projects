@@ -104,7 +104,8 @@
     <dimen name="doorhanger_spinner_textsize">9sp</dimen>
     <dimen name="doorhanger_padding">15dp</dimen>
     <dimen name="doorhanger_offsetX">10dp</dimen>
-    <dimen name="doorhanger_offsetY">7dp</dimen>
+    <dimen name="doorhanger_offsetY">67dp</dimen>
+    <dimen name="doorhanger_GB_offsetY">7dp</dimen>
     <dimen name="doorhanger_drawable_padding">5dp</dimen>
     <dimen name="doorhanger_section_padding_small">20dp</dimen>
     <dimen name="doorhanger_section_padding_large">30dp</dimen>
@@ -216,6 +217,8 @@
     <!-- The share icon asset has no padding while the other action bar items do
          so we dynamically add padding to compensate. To be removed in bug 1122752. -->
     <dimen name="ab_share_padding">12dp</dimen>
+
+    <dimen name="progress_bar_scroll_offset">1.5dp</dimen>
 
     <!-- This is a 4:7 ratio (as per UX decision). -->
     <item name="thumbnail_aspect_ratio" format="float" type="dimen">0.571</item>

@@ -10,25 +10,15 @@
 
 namespace mozilla {
 
-ThreadLocal<MediaTaskQueue*> MediaTaskQueue::sCurrentQueueTLS;
-
-/* static */ void
-MediaTaskQueue::InitStatics()
-{
-  if (!sCurrentQueueTLS.init()) {
-    MOZ_CRASH();
-  }
-}
-
 MediaTaskQueue::MediaTaskQueue(TemporaryRef<SharedThreadPool> aPool,
                                bool aRequireTailDispatch)
-  : mPool(aPool)
+  : AbstractThread(aRequireTailDispatch)
+  , mPool(aPool)
   , mQueueMonitor("MediaTaskQueue::Queue")
   , mTailDispatcher(nullptr)
   , mIsRunning(false)
   , mIsShutdown(false)
   , mIsFlushing(false)
-  , mRequireTailDispatch(aRequireTailDispatch)
 {
   MOZ_COUNT_CTOR(MediaTaskQueue);
 }
@@ -49,10 +39,18 @@ MediaTaskQueue::TailDispatcher()
 }
 
 nsresult
-MediaTaskQueue::DispatchLocked(already_AddRefed<nsIRunnable> aRunnable, DispatchMode aMode)
+MediaTaskQueue::DispatchLocked(already_AddRefed<nsIRunnable> aRunnable,
+                               DispatchMode aMode, DispatchFailureHandling aFailureHandling,
+                               DispatchReason aReason)
 {
-  mQueueMonitor.AssertCurrentThreadOwns();
   nsCOMPtr<nsIRunnable> r = aRunnable;
+  AbstractThread* currentThread;
+  if (aReason != TailDispatch && (currentThread = GetCurrent()) && currentThread->RequiresTailDispatch()) {
+    currentThread->TailDispatcher().AddTask(this, r.forget(), aFailureHandling);
+    return NS_OK;
+  }
+
+  mQueueMonitor.AssertCurrentThreadOwns();
   if (mIsFlushing && aMode == AbortIfFlushing) {
     return NS_ERROR_ABORT;
   }
@@ -108,8 +106,16 @@ private:
 void
 MediaTaskQueue::SyncDispatch(TemporaryRef<nsIRunnable> aRunnable) {
   NS_WARNING("MediaTaskQueue::SyncDispatch is dangerous and deprecated. Stop using this!");
-  RefPtr<MediaTaskQueueSyncRunnable> task(new MediaTaskQueueSyncRunnable(aRunnable));
-  Dispatch(task);
+  nsRefPtr<MediaTaskQueueSyncRunnable> task(new MediaTaskQueueSyncRunnable(aRunnable));
+
+  // Tail dispatchers don't interact nicely with sync dispatch. We require that
+  // nothing is already in the tail dispatcher, and then sidestep it for this
+  // task.
+  MOZ_ASSERT_IF(AbstractThread::GetCurrent(),
+                !AbstractThread::GetCurrent()->TailDispatcher().HasTasksFor(this));
+  nsRefPtr<MediaTaskQueueSyncRunnable> taskRef = task;
+  Dispatch(taskRef.forget(), AssertDispatchSuccess, TailDispatch);
+
   task->WaitUntilDone();
 }
 
@@ -123,6 +129,11 @@ MediaTaskQueue::AwaitIdle()
 void
 MediaTaskQueue::AwaitIdleLocked()
 {
+  // Make the there are no tasks for this queue waiting in the caller's tail
+  // dispatcher.
+  MOZ_ASSERT_IF(AbstractThread::GetCurrent(),
+                !AbstractThread::GetCurrent()->TailDispatcher().HasTasksFor(this));
+
   mQueueMonitor.AssertCurrentThreadOwns();
   MOZ_ASSERT(mIsRunning || mTasks.empty());
   while (mIsRunning) {
@@ -133,6 +144,11 @@ MediaTaskQueue::AwaitIdleLocked()
 void
 MediaTaskQueue::AwaitShutdownAndIdle()
 {
+  // Make the there are no tasks for this queue waiting in the caller's tail
+  // dispatcher.
+  MOZ_ASSERT_IF(AbstractThread::GetCurrent(),
+                !AbstractThread::GetCurrent()->TailDispatcher().HasTasksFor(this));
+
   MonitorAutoLock mon(mQueueMonitor);
   while (!mIsShutdown) {
     mQueueMonitor.Wait();
@@ -165,12 +181,11 @@ FlushableMediaTaskQueue::Flush()
 nsresult
 FlushableMediaTaskQueue::FlushAndDispatch(TemporaryRef<nsIRunnable> aRunnable)
 {
-  AssertInTailDispatchIfNeeded(); // Do this before acquiring the monitor.
   MonitorAutoLock mon(mQueueMonitor);
   AutoSetFlushing autoFlush(this);
   FlushLocked();
   nsCOMPtr<nsIRunnable> r = dont_AddRef(aRunnable.take());
-  nsresult rv = DispatchLocked(r.forget(), IgnoreFlushing);
+  nsresult rv = DispatchLocked(r.forget(), IgnoreFlushing, AssertDispatchSuccess);
   NS_ENSURE_SUCCESS(rv, rv);
   AwaitIdleLocked();
   return NS_OK;
@@ -179,6 +194,11 @@ FlushableMediaTaskQueue::FlushAndDispatch(TemporaryRef<nsIRunnable> aRunnable)
 void
 FlushableMediaTaskQueue::FlushLocked()
 {
+  // Make the there are no tasks for this queue waiting in the caller's tail
+  // dispatcher.
+  MOZ_ASSERT_IF(AbstractThread::GetCurrent(),
+                !AbstractThread::GetCurrent()->TailDispatcher().HasTasksFor(this));
+
   mQueueMonitor.AssertCurrentThreadOwns();
   MOZ_ASSERT(mIsFlushing);
 
@@ -200,7 +220,7 @@ bool
 MediaTaskQueue::IsCurrentThreadIn()
 {
   bool in = NS_GetCurrentThread() == mRunningThread;
-  MOZ_ASSERT_IF(in, GetCurrentQueue() == this);
+  MOZ_ASSERT(in == (GetCurrent() == this));
   return in;
 }
 
@@ -266,15 +286,5 @@ MediaTaskQueue::Runner::Run()
 
   return NS_OK;
 }
-
-#ifdef DEBUG
-void
-TaskDispatcher::AssertIsTailDispatcherIfRequired()
-{
-  MediaTaskQueue* currentQueue = MediaTaskQueue::GetCurrentQueue();
-  MOZ_ASSERT_IF(currentQueue && currentQueue->RequiresTailDispatch(),
-                this == &currentQueue->TailDispatcher());
-}
-#endif
 
 } // namespace mozilla
