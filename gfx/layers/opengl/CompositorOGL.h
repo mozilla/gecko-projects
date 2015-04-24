@@ -40,7 +40,6 @@
 class nsIWidget;
 
 namespace mozilla {
-class TimeStamp;
 
 namespace gfx {
 class Matrix4x4;
@@ -237,7 +236,7 @@ public:
                         const gfx::Matrix4x4 &aTransform) override;
 
   virtual void EndFrame() override;
-  virtual void SetFBAcquireFence(Layer* aLayer) override;
+  virtual void SetDispAcquireFence(Layer* aLayer) override;
   virtual FenceHandle GetReleaseFence() override;
   virtual void EndFrameForExternalComposition(const gfx::Matrix& aTransform) override;
 

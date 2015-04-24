@@ -29,15 +29,22 @@ using namespace js;
 using namespace js::gc;
 using mozilla::DebugOnly;
 
+namespace js {
+template<typename T>
+void
+CheckTracedThing(JSTracer* trc, T thing);
+} // namespace js
+
 template <typename T>
 void
 DoCallback(JS::CallbackTracer* trc, T* thingp, const char* name)
 {
+    CheckTracedThing(trc, *thingp);
     JSGCTraceKind kind = MapTypeToTraceKind<typename mozilla::RemovePointer<T>::Type>::kind;
     JS::AutoTracingName ctx(trc, name);
     trc->invoke((void**)thingp, kind);
 }
-#define INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS(name, type) \
+#define INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS(name, type, _) \
     template void DoCallback<type*>(JS::CallbackTracer*, type**, const char*);
 FOR_EACH_GC_LAYOUT(INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS);
 #undef INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS

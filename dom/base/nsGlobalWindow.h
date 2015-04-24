@@ -52,6 +52,7 @@
 #include "Units.h"
 #include "nsComponentManagerUtils.h"
 #include "nsSize.h"
+#include "nsCheapSets.h"
 
 #define DEFAULT_HOME_PAGE "www.mozilla.org"
 #define PREF_BROWSER_STARTUP_HOMEPAGE "browser.startup.homepage"
@@ -1098,6 +1099,8 @@ public:
                     JS::MutableHandle<JS::Value> aRetval,
                     mozilla::ErrorResult& aError);
 
+  already_AddRefed<nsWindowRoot> GetWindowRoot(mozilla::ErrorResult& aError);
+
 protected:
   // Web IDL helpers
 
@@ -1588,6 +1591,7 @@ protected:
   // Indicates whether this window wants gamepad input events
   bool                   mHasGamepad : 1;
 #ifdef MOZ_GAMEPAD
+  nsCheapSet<nsUint32HashKey> mGamepadIndexSet;
   nsRefPtrHashtable<nsUint32HashKey, mozilla::dom::Gamepad> mGamepads;
   bool mHasSeenGamepadInput;
 #endif
@@ -1623,7 +1627,7 @@ protected:
   nsRefPtr<nsDOMWindowUtils>    mWindowUtils;
   nsString                      mStatus;
   nsString                      mDefaultStatus;
-  nsGlobalWindowObserver*       mObserver; // Inner windows only.
+  nsRefPtr<nsGlobalWindowObserver> mObserver; // Inner windows only.
   nsRefPtr<mozilla::dom::Crypto>  mCrypto;
   nsRefPtr<mozilla::dom::cache::CacheStorage> mCacheStorage;
   nsRefPtr<mozilla::dom::Console> mConsole;

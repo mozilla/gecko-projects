@@ -158,15 +158,7 @@ class GCMarker : public JSTracer
     void reset();
 
     // Mark the given GC thing and traverse its children at some point.
-    void traverse(JSObject* thing) { markAndPush(ObjectTag, thing); }
-    void traverse(ObjectGroup* thing) { markAndPush(GroupTag, thing); }
-    void traverse(jit::JitCode* thing) { markAndPush(JitCodeTag, thing); }
-    // The following traverse methods traverse immediately, go out-of-line to do so.
-    void traverse(JSScript* thing) { markAndTraverse(thing); }
-    void traverse(LazyScript* thing) { markAndTraverse(thing); }
-    // The other types are marked immediately and inline via a ScanFoo shared
-    // between PushMarkStack and the processMarkStackTop. Since ScanFoo is
-    // inline in Marking.cpp, we cannot inline it here, yet.
+    template <typename T> void traverse(T* thing);
 
     /*
      * Care must be taken changing the mark color from gray to black. The cycle
@@ -244,17 +236,12 @@ class GCMarker : public JSTracer
         pushTaggedPtr(ObjectTag, obj);
     }
 
-    template <typename T>
-    void markAndPush(StackTag tag, T* thing) {
-        if (mark(thing))
-            pushTaggedPtr(tag, thing);
-    }
-
-    template <typename T>
-    void markAndTraverse(T* thing) {
-        if (mark(thing))
-            dispatchToTraceChildren(thing);
-    }
+    template <typename T> void markAndPush(StackTag tag, T* thing);
+    template <typename T> void markAndScan(T* thing);
+    void eagerlyMarkChildren(Shape* shape);
+    void eagerlyMarkChildren(BaseShape* base);
+    void eagerlyMarkChildren(JSString* str);
+    void eagerlyMarkChildren(JS::Symbol* sym);
 
     // We may not have concrete types yet, so this has to be out of the header.
     template <typename T>
@@ -263,11 +250,7 @@ class GCMarker : public JSTracer
     // Mark the given GC thing, but do not trace its children. Return true
     // if the thing became marked.
     template <typename T>
-    bool mark(T* thing) {
-        JS_COMPARTMENT_ASSERT(runtime(), thing);
-        MOZ_ASSERT(!IsInsideNursery(gc::TenuredCell::fromPointer(thing)));
-        return gc::TenuredCell::fromPointer(thing)->markIfUnmarked(markColor());
-    }
+    bool mark(T* thing);
 
     void pushTaggedPtr(StackTag tag, void* ptr) {
         checkZone(ptr);

@@ -959,6 +959,9 @@ let MozLoopServiceInternal = {
 
     gFxAOAuthClientPromise = this.promiseFxAOAuthParameters().then(
       parameters => {
+        // Add the fact that we want keys to the parameters.
+        parameters.keys = true;
+
         try {
           gFxAOAuthClient = new FxAccountsOAuthClient({
             parameters: parameters,
@@ -1031,7 +1034,10 @@ let MozLoopServiceInternal = {
    * @param {Deferred} deferred used to resolve the gFxAOAuthClientPromise
    * @param {Object} result (with code and state)
    */
-  _fxAOAuthComplete: function(deferred, result) {
+  _fxAOAuthComplete: function(deferred, result, keys) {
+    if (keys.kBr) {
+      Services.prefs.setCharPref("loop.key.fxa", keys.kBr.k);
+    }
     gFxAOAuthClientPromise = null;
     // Note: The state was already verified in FxAccountsOAuthClient.
     deferred.resolve(result);
@@ -1331,8 +1337,14 @@ this.MozLoopService = {
     return new Promise((resolve, reject) => {
       if (this.userProfile) {
         // We're an FxA user.
-        // XXX Bug 1153788 will implement this for FxA.
-        reject(new Error("unimplemented"));
+        if (Services.prefs.prefHasUserValue("loop.key.fxa")) {
+          resolve(MozLoopService.getLoopPref("key.fxa"));
+          return;
+        }
+
+        // XXX If we don't have a key for FxA yet, then simply reject for now.
+        // We'll create some sign-in/sign-out UX in bug 1153788.
+        reject(new Error("FxA re-register not implemented"));
         return;
       }
 
@@ -1649,6 +1661,16 @@ this.MozLoopService = {
       log.error("Error opening Getting Started tour", ex);
     }
   }),
+
+  /**
+   * Opens a URL in a new tab in the browser.
+   *
+   * @param {String} url The new url to open
+   */
+  openURL: function(url) {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    win.openUILinkIn(url, "tab");
+  },
 
   /**
    * Performs a hawk based request to the loop server.

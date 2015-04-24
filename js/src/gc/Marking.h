@@ -56,15 +56,14 @@ void
 TraceManuallyBarrieredCrossCompartmentEdge(JSTracer* trc, JSObject* src, T* dst,
                                            const char* name);
 
+// Permanent atoms and well-known symbols are shared between runtimes and must
+// use a separate marking path so that we can filter them out of normal heap
+// tracing.
+template <typename T>
+void
+TraceProcessGlobalRoot(JSTracer* trc, T* thing, const char* name);
+
 namespace gc {
-
-/*** Object Marking ***/
-
-void
-MarkPermanentAtom(JSTracer* trc, JSAtom* atom, const char* name);
-
-void
-MarkWellKnownSymbol(JSTracer* trc, JS::Symbol* sym);
 
 /* Return true if the pointer is nullptr, or if it is a tagged pointer to
  * nullptr.
@@ -172,6 +171,10 @@ TraceChildren(JSTracer* trc, void* thing, JSGCTraceKind kind);
 
 bool
 UnmarkGrayShapeRecursively(Shape* shape);
+
+template<typename T>
+void
+CheckTracedThing(JSTracer* trc, T thing);
 
 } /* namespace js */
 

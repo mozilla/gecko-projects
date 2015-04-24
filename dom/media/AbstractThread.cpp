@@ -63,12 +63,21 @@ public:
 
   virtual bool IsCurrentThreadIn() override
   {
-    bool in = NS_GetCurrentThread() == mTarget;
+    // Compare NSPR threads so that this works after shutdown when
+    // NS_GetCurrentThread starts returning null.
+    PRThread* thread = nullptr;
+    mTarget->GetPRThread(&thread);
+    bool in = PR_GetCurrentThread() == thread;
     MOZ_ASSERT(in == (GetCurrent() == this));
     return in;
   }
 
-  void FireTailDispatcher() { MOZ_ASSERT(mTailDispatcher.isSome()); mTailDispatcher.reset(); }
+  void FireTailDispatcher()
+  {
+    MOZ_DIAGNOSTIC_ASSERT(mTailDispatcher.isSome());
+    mTailDispatcher.ref().DrainDirectTasks();
+    mTailDispatcher.reset();
+  }
 
   virtual TaskDispatcher& TailDispatcher() override
   {
@@ -84,6 +93,8 @@ public:
 
     return mTailDispatcher.ref();
   }
+
+  virtual nsIThread* AsXPCOMThread() override { return mTarget; }
 
 private:
   nsRefPtr<nsIThread> mTarget;

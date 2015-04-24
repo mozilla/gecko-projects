@@ -66,11 +66,9 @@ loop.shared.views = (function(_, l10n) {
 
     render: function() {
       return (
-        /* jshint ignore:start */
         <button className={this._getClasses()}
                 title={this._getTitle()}
                 onClick={this.handleClick}></button>
-        /* jshint ignore:end */
       );
     }
   });
@@ -163,6 +161,7 @@ loop.shared.views = (function(_, l10n) {
         <div>
           <button className={screenShareClasses}
                   onClick={this.handleClick}
+                  ref="menu-button"
                   title={this._getTitle()}>
             {isActive ? null : <span className="chevron"/>}
           </button>
@@ -450,7 +449,6 @@ loop.shared.views = (function(_, l10n) {
         "local-stream": true,
         "local-stream-audio": !this.state.video.enabled
       });
-      /* jshint ignore:start */
       return (
         <div className="video-layout-wrapper">
           <div className="conversation in-call">
@@ -467,7 +465,6 @@ loop.shared.views = (function(_, l10n) {
           </div>
         </div>
       );
-      /* jshint ignore:end */
     }
   });
 

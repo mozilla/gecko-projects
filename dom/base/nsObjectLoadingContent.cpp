@@ -2733,8 +2733,10 @@ nsObjectLoadingContent::PluginDestroyed()
   // plugins in plugin host. Invalidate instance owner / prototype but otherwise
   // don't take any action.
   TeardownProtoChain();
-  mInstanceOwner->Destroy();
-  mInstanceOwner = nullptr;
+  if (mInstanceOwner) {
+    mInstanceOwner->Destroy();
+    mInstanceOwner = nullptr;
+  }
   return NS_OK;
 }
 
@@ -3191,6 +3193,16 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
     Preferences::AddUintVarCache(&sPersistentTimeoutDays,
                                  "plugin.persistentPermissionAlways.intervalInDays", 90);
     sPrefsInitialized = true;
+  }
+
+  if (XRE_GetProcessType() == GeckoProcessType_Default &&
+      (Preferences::GetBool("browser.tabs.remote.autostart", false) ||
+       Preferences::GetBool("browser.tabs.remote.autostart.1", false) ||
+       Preferences::GetBool("browser.tabs.remote.autostart.2", false))) {
+    // Plugins running OOP from the chrome process along with plugins running
+    // OOP from the content process will hang. Let's prevent that situation.
+    aReason = eFallbackDisabled;
+    return false;
   }
 
   nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();

@@ -34,7 +34,6 @@
 #include <limits>
 #include <algorithm>
 
-class nsIFormControlFrame;
 class nsPresContext;
 class nsIContent;
 class nsIAtom;
@@ -80,7 +79,6 @@ struct RectCornerRadii;
 } // namespace gfx
 namespace layers {
 class Layer;
-class ClientLayerManager;
 }
 }
 
@@ -1926,6 +1924,11 @@ public:
                                           nscoord aLetterSpacing);
 
   /**
+   * Get orientation flags for textrun construction.
+   */
+  static uint32_t GetTextRunOrientFlagsForStyle(nsStyleContext* aStyleContext);
+
+  /**
    * Takes two rectangles whose origins must be the same, and computes
    * the difference between their union and their intersection as two
    * rectangles. (This difference is a superset of the difference
@@ -2603,6 +2606,16 @@ public:
    * (see nsIDOMWindowUtils.setCSSViewport).
    */
   static void SetCSSViewport(nsIPresShell* aPresShell, CSSSize aSize);
+
+  static FrameMetrics ComputeFrameMetrics(nsIFrame* aForFrame,
+                                          nsIFrame* aScrollFrame,
+                                          nsIContent* aContent,
+                                          const nsIFrame* aReferenceFrame,
+                                          Layer* aLayer,
+                                          ViewID aScrollParentId,
+                                          const nsRect& aViewport,
+                                          bool aIsRoot,
+                                          const ContainerLayerParameters& aContainerParameters);
 
 private:
   static uint32_t sFontSizeInflationEmPerLine;

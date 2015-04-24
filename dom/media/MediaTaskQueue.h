@@ -42,6 +42,8 @@ public:
 
   TaskDispatcher& TailDispatcher() override;
 
+  MediaTaskQueue* AsTaskQueue() override { return this; }
+
   void Dispatch(already_AddRefed<nsIRunnable> aRunnable,
                 DispatchFailureHandling aFailureHandling = AssertDispatchSuccess,
                 DispatchReason aReason = NormalDispatch) override
@@ -131,6 +133,8 @@ protected:
 
     ~AutoTaskGuard()
     {
+      DrainDirectTasks();
+
       MOZ_ASSERT(mQueue->mRunningThread == NS_GetCurrentThread());
       mQueue->mRunningThread = nullptr;
 

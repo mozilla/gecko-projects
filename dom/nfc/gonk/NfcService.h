@@ -6,7 +6,7 @@
 #define NfcService_h
 
 #include "mozilla/ipc/Nfc.h"
-#include "mozilla/ipc/UnixSocket.h"
+#include "mozilla/ipc/SocketBase.h"
 #include "nsCOMPtr.h"
 #include "nsINfcService.h"
 #include "NfcMessageHandler.h"
@@ -30,7 +30,7 @@ public:
   void DispatchNfcEvent(const mozilla::dom::NfcEventOptions& aOptions);
 
   virtual void ReceiveSocketData(
-    nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aData) override;
+    nsAutoPtr<mozilla::ipc::UnixSocketBuffer>& aBuffer) override;
 
   virtual void OnConnectSuccess(enum SocketType aSocketType) override;
   virtual void OnConnectError(enum SocketType aSocketType) override;

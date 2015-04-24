@@ -48,7 +48,6 @@ class nsIPrincipal;
 class nsIURI;
 class nsNodeSupportsWeakRefTearoff;
 class nsNodeWeakReference;
-class nsXPCClassInfo;
 class nsDOMMutationObserver;
 
 namespace mozilla {
@@ -73,7 +72,6 @@ class DOMQuad;
 class DOMRectReadOnly;
 class Element;
 class EventHandlerNonNull;
-class OnErrorEventHandlerNonNull;
 template<typename T> class Optional;
 class Text;
 class TextOrElementOrDocument;
@@ -275,8 +273,10 @@ public:
 private:
   ~nsChildContentList() {}
 
-  // The node whose children make up the list (weak reference)
-  nsINode* mNode;
+  // The node whose children make up the list.
+  // This is a non-owning ref which is safe because it's set to nullptr by
+  // DropReference() by the node slots get destroyed.
+  nsINode* MOZ_NON_OWNING_REF mNode;
 };
 
 // This should be used for any nsINode sub-class that has fields of its own
@@ -1969,23 +1969,33 @@ protected:
 
   nsRefPtr<mozilla::dom::NodeInfo> mNodeInfo;
 
-  nsINode* mParent;
+  // mParent is an owning ref most of the time, except for the case of document
+  // nodes, so it cannot be represented by nsCOMPtr, so mark is as
+  // MOZ_OWNING_REF.
+  nsINode* MOZ_OWNING_REF mParent;
 
 private:
   // Boolean flags.
   uint32_t mBoolFlags;
 
 protected:
-  nsIContent* mNextSibling;
-  nsIContent* mPreviousSibling;
-  nsIContent* mFirstChild;
+  // These references are non-owning and safe, as they are managed by
+  // nsAttrAndChildArray.
+  nsIContent* MOZ_NON_OWNING_REF mNextSibling;
+  nsIContent* MOZ_NON_OWNING_REF mPreviousSibling;
+  // This reference is non-owning and safe, since in the case of documents,
+  // it is set to null when the document gets destroyed, and in the case of
+  // other nodes, the children keep the parents alive.
+  nsIContent* MOZ_NON_OWNING_REF mFirstChild;
 
   union {
     // Pointer to our primary frame.  Might be null.
     nsIFrame* mPrimaryFrame;
 
     // Pointer to the root of our subtree.  Might be null.
-    nsINode* mSubtreeRoot;
+    // This reference is non-owning and safe, since it either points to the
+    // object itself, or is reset by ClearSubtreeRootPointer.
+    nsINode* MOZ_NON_OWNING_REF mSubtreeRoot;
   };
 
   // Storage for more members that are usually not needed; allocated lazily.

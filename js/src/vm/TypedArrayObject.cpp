@@ -784,7 +784,11 @@ TypedArrayObject::set(JSContext* cx, unsigned argc, Value* vp)
 /* static */ const JSFunctionSpec
 TypedArrayObject::protoFunctions[] = {
     JS_SELF_HOSTED_FN("subarray", "TypedArraySubarray", 2, 0),
+#if 0 /* disabled until perf-testing is completed */
+    JS_SELF_HOSTED_FN("set", "TypedArraySet", 2, 0),
+#else
     JS_FN("set", TypedArrayObject::set, 2, 0),
+#endif
     JS_SELF_HOSTED_FN("copyWithin", "TypedArrayCopyWithin", 3, 0),
     JS_SELF_HOSTED_FN("every", "TypedArrayEvery", 2, 0),
     JS_SELF_HOSTED_FN("fill", "TypedArrayFill", 3, 0),
@@ -835,6 +839,7 @@ TypedArrayObject::sharedTypedArrayPrototypeClass = {
     nullptr,                /* setProperty */
     nullptr,                /* enumerate */
     nullptr,                /* resolve */
+    nullptr,                /* mayResolve */
     nullptr,                /* convert */
     nullptr,                /* finalize */
     nullptr,                /* call */
@@ -1797,6 +1802,7 @@ IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float64, double, double)
     nullptr,                 /* setProperty */                                 \
     nullptr,                 /* enumerate   */                                 \
     nullptr,                 /* resolve     */                                 \
+    nullptr,                 /* mayResolve  */                                 \
     nullptr,                 /* convert     */                                 \
     nullptr,                 /* finalize    */                                 \
     nullptr,                 /* call        */                                 \
@@ -1842,6 +1848,7 @@ const Class TypedArrayObject::classes[Scalar::MaxTypedArrayViewType] = {
     nullptr, /* setProperty */ \
     nullptr, /* enumerate */ \
     nullptr, /* resolve */ \
+    nullptr, /* mayResolve */ \
     nullptr, /* convert */ \
     nullptr, /* finalize */ \
     nullptr, /* call */ \
@@ -1897,6 +1904,7 @@ const Class DataViewObject::class_ = {
     nullptr, /* setProperty */
     nullptr, /* enumerate */
     nullptr, /* resolve */
+    nullptr, /* mayResolve */
     nullptr, /* convert */
     nullptr, /* finalize */
     nullptr, /* call */
@@ -2107,8 +2115,8 @@ js::StringIsTypedArrayIndex(const Latin1Char* s, size_t length, uint64_t* indexp
 
 /* ES6 draft rev 34 (2015 Feb 20) 9.4.5.3 [[DefineOwnProperty]] step 3.c. */
 bool
-js::DefineTypedArrayElement(JSContext *cx, HandleObject obj, uint64_t index,
-                            Handle<PropertyDescriptor> desc, ObjectOpResult &result)
+js::DefineTypedArrayElement(JSContext* cx, HandleObject obj, uint64_t index,
+                            Handle<PropertyDescriptor> desc, ObjectOpResult& result)
 {
     MOZ_ASSERT(IsAnyTypedArray(obj));
 

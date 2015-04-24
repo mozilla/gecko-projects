@@ -18,7 +18,6 @@
 #include "mozilla/Attributes.h"
 
 class nsIURI;
-class nsIParser;
 class nsIPrincipal;
 class nsINetworkInterceptController;
 
@@ -29,6 +28,12 @@ NS_StartCORSPreflight(nsIChannel* aRequestChannel,
                       bool aWithCredentials,
                       nsTArray<nsCString>& aACUnsafeHeaders,
                       nsIChannel** aPreflightChannel);
+
+enum class DataURIHandling
+{
+  Allow,
+  Disallow
+};
 
 class nsCORSListenerProxy final : public nsIStreamListener,
                                   public nsIInterfaceRequestor,
@@ -57,14 +62,14 @@ public:
 
   static void Shutdown();
 
-  nsresult Init(nsIChannel* aChannel, bool aAllowDataURI = false);
+  nsresult Init(nsIChannel* aChannel, DataURIHandling aAllowDataURI);
 
   void SetInterceptController(nsINetworkInterceptController* aInterceptController);
 
 private:
   ~nsCORSListenerProxy();
 
-  nsresult UpdateChannel(nsIChannel* aChannel, bool aAllowDataURI = false);
+  nsresult UpdateChannel(nsIChannel* aChannel, DataURIHandling aAllowDataURI);
   nsresult CheckRequestApproved(nsIRequest* aRequest);
 
   nsCOMPtr<nsIStreamListener> mOuterListener;

@@ -49,7 +49,6 @@ class nsIDocShell;
 class nsIDocumentEncoder;
 class nsIDocumentObserver;
 class nsIDOMDocument;
-class nsIDOMDocumentFragment;
 class nsIDOMDocumentType;
 class nsIDOMElement;
 class nsIDOMNodeFilter;
@@ -88,7 +87,7 @@ namespace mozilla {
 class CSSStyleSheet;
 class ErrorResult;
 class EventStates;
-class PendingPlayerTracker;
+class PendingAnimationTracker;
 class SVGAttrAnimationRuleProcessor;
 
 namespace css {
@@ -119,7 +118,6 @@ class EventTarget;
 class FontFaceSet;
 class FrameRequestCallback;
 class ImportManager;
-class OverfillCallback;
 class HTMLBodyElement;
 struct LifecycleCallbackArgs;
 class Link;
@@ -1837,16 +1835,17 @@ public:
   // mAnimationController isn't yet initialized.
   virtual nsSMILAnimationController* GetAnimationController() = 0;
 
-  // Gets the tracker for animation players that are waiting to start.
-  // Returns nullptr if there is no pending player tracker for this document
+  // Gets the tracker for animations that are waiting to start.
+  // Returns nullptr if there is no pending animation tracker for this document
   // which will be the case if there have never been any CSS animations or
   // transitions on elements in the document.
-  virtual mozilla::PendingPlayerTracker* GetPendingPlayerTracker() = 0;
+  virtual mozilla::PendingAnimationTracker* GetPendingAnimationTracker() = 0;
 
-  // Gets the tracker for animation players that are waiting to start and
+  // Gets the tracker for animations that are waiting to start and
   // creates it if it doesn't already exist. As a result, the return value
   // will never be nullptr.
-  virtual mozilla::PendingPlayerTracker* GetOrCreatePendingPlayerTracker() = 0;
+  virtual mozilla::PendingAnimationTracker*
+  GetOrCreatePendingAnimationTracker() = 0;
 
   // Makes the images on this document capable of having their animation
   // active or suspended. An Image will animate as long as at least one of its
@@ -2102,6 +2101,13 @@ public:
    * list, and forget about them.
    */
   void TakeFrameRequestCallbacks(FrameRequestCallbackList& aCallbacks);
+
+  /**
+   * @return true if this document's frame request callbacks should be
+   * throttled. We throttle requestAnimationFrame for documents which aren't
+   * visible (e.g. scrolled out of the viewport).
+   */
+  bool ShouldThrottleFrameRequests();
 
   // This returns true when the document tree is being teared down.
   bool InUnlinkOrDeletion() { return mInUnlinkOrDeletion; }

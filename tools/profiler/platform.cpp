@@ -81,10 +81,7 @@ static mozilla::StaticAutoPtr<mozilla::ProfilerIOInterposeObserver>
                                                             sInterposeObserver;
 
 // The name that identifies the gecko thread for calls to
-// profiler_register_thread. For all platform except metro
-// the thread that calls mozilla_sampler_init is considered
-// the gecko thread.  With metro the gecko thread is
-// registered later based on this thread name.
+// profiler_register_thread.
 static const char * gGeckoThreadName = "GeckoMain";
 
 void Sampler::Startup() {
@@ -467,10 +464,6 @@ void mozilla_sampler_init(void* stackTop)
   tlsPseudoStack.set(stack);
 
   bool isMainThread = true;
-#ifdef XP_WIN
-  // For metrofx, we'll register the main thread once it's created.
-  isMainThread = !(XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro);
-#endif
   Sampler::RegisterCurrentThread(isMainThread ?
                                    gGeckoThreadName : "Application Thread",
                                  stack, isMainThread, stackTop);
@@ -648,6 +641,23 @@ const char** mozilla_sampler_get_features()
   };
 
   return features;
+}
+
+void mozilla_sampler_get_buffer_info(uint32_t *aCurrentPosition, uint32_t *aTotalSize,
+                                     uint32_t *aGeneration)
+{
+  *aCurrentPosition = 0;
+  *aTotalSize = 0;
+  *aGeneration = 0;
+
+  if (!stack_key_initialized)
+    return;
+
+  TableTicker *t = tlsTicker.get();
+  if (!t)
+    return;
+
+  t->GetBufferInfo(aCurrentPosition, aTotalSize, aGeneration);
 }
 
 // Values are only honored on the first start

@@ -7,6 +7,7 @@
 #include "nsThemeConstants.h"
 #include "gtkdrawing.h"
 
+#include "gfx2DGlue.h"
 #include "nsIObserverService.h"
 #include "nsIServiceManager.h"
 #include "nsIFrame.h"
@@ -596,7 +597,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
       EventStates eventStates = GetContentState(stateFrame, aWidgetType);
 
       aGtkWidgetType = IsIndeterminateProgress(stateFrame, eventStates)
-                         ? (stateFrame->StyleDisplay()->mOrient == NS_STYLE_ORIENT_VERTICAL)
+                         ? IsVerticalProgress(stateFrame)
                            ? MOZ_GTK_PROGRESS_CHUNK_VERTICAL_INDETERMINATE
                            : MOZ_GTK_PROGRESS_CHUNK_INDETERMINATE
                          : MOZ_GTK_PROGRESS_CHUNK;
@@ -849,7 +850,7 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
   nsIntRect overflowRect(widgetRect);
   nsIntMargin extraSize;
   if (GetExtraSizeForWidget(aFrame, aWidgetType, &extraSize)) {
-    overflowRect.Inflate(extraSize);
+    overflowRect.Inflate(gfx::ToIntMargin(extraSize));
   }
 
   // This is the rectangle that will actually be drawn, in gdk pixels

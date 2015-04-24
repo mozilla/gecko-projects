@@ -170,7 +170,7 @@ BluetoothDevice::FetchUuids(ErrorResult& aRv)
   NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
 
   BluetoothService* bs = BluetoothService::Get();
-  BT_ENSURE_TRUE_REJECT(bs, NS_ERROR_NOT_AVAILABLE);
+  BT_ENSURE_TRUE_REJECT(bs, promise, NS_ERROR_NOT_AVAILABLE);
 
   nsRefPtr<BluetoothReplyRunnable> result =
     new FetchUuidsTask(promise,
@@ -178,7 +178,7 @@ BluetoothDevice::FetchUuids(ErrorResult& aRv)
                        this);
 
   nsresult rv = bs->FetchUuidsInternal(mAddress, result);
-  BT_ENSURE_TRUE_REJECT(NS_SUCCEEDED(rv), NS_ERROR_DOM_OPERATION_ERR);
+  BT_ENSURE_TRUE_REJECT(NS_SUCCEEDED(rv), promise, NS_ERROR_DOM_OPERATION_ERR);
 
   return promise.forget();
 }
@@ -261,7 +261,7 @@ BluetoothDevice::HandlePropertyChanged(const BluetoothValue& aValue)
   const InfallibleTArray<BluetoothNamedValue>& arr =
     aValue.get_ArrayOfBluetoothNamedValue();
 
-  nsTArray<nsString> types;
+  Sequence<nsString> types;
   for (uint32_t i = 0, propCount = arr.Length(); i < propCount; ++i) {
     BluetoothDeviceAttribute type =
       ConvertStringToDeviceAttribute(arr[i].name());
@@ -283,26 +283,16 @@ BluetoothDevice::HandlePropertyChanged(const BluetoothValue& aValue)
 }
 
 void
-BluetoothDevice::DispatchAttributeEvent(const nsTArray<nsString>& aTypes)
+BluetoothDevice::DispatchAttributeEvent(const Sequence<nsString>& aTypes)
 {
   NS_ENSURE_TRUE_VOID(aTypes.Length());
 
-  AutoJSAPI jsapi;
-  NS_ENSURE_TRUE_VOID(jsapi.Init(GetOwner()));
-  JSContext* cx = jsapi.cx();
-  JS::Rooted<JS::Value> value(cx);
-
-  if (!ToJSValue(cx, aTypes, &value)) {
-    JS_ClearPendingException(cx);
-    return;
-  }
-
-  RootedDictionary<BluetoothAttributeEventInit> init(cx);
-  init.mAttrs = value;
+  BluetoothAttributeEventInit init;
+  init.mAttrs = aTypes;
   nsRefPtr<BluetoothAttributeEvent> event =
-    BluetoothAttributeEvent::Constructor(this,
-                                         NS_LITERAL_STRING("attributechanged"),
-                                         init);
+    BluetoothAttributeEvent::Constructor(
+      this, NS_LITERAL_STRING(ATTRIBUTE_CHANGED_ID), init);
+
   DispatchTrustedEvent(event);
 }
 

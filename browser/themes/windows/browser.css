@@ -577,7 +577,7 @@ menuitem.bookmark-item {
 %include ../shared/toolbarbuttons.inc.css
 %include ../shared/menupanel.inc.css
 
-@media (-moz-windows-theme: luna-silver) {
+@media (-moz-windows-theme: luna-silver) and (max-resolution: 1dppx) {
   :-moz-any(@primaryToolbarButtons@),
   #bookmarks-menu-button.toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
     list-style-image: url("chrome://browser/skin/Toolbar-lunaSilver.png");
@@ -2465,19 +2465,6 @@ notification[value="loop-sharing-notification"] .messageImage {
 }
 
 /* Social toolbar item */
-
-#switch-to-metro-button[cui-areatype="toolbar"] {
-  list-style-image: url(chrome://browser/skin/Metro_Glyph.png);
-}
-
-toolbar[brighttext] #switch-to-metro-button[cui-areatype="toolbar"] {
-  list-style-image: url(chrome://browser/skin/Metro_Glyph-inverted.png);
-}
-
-#switch-to-metro-button[cui-areatype="menu-panel"],
-toolbarpaletteitem[place="palette"] > #switch-to-metro-button {
-  list-style-image: url(chrome://browser/skin/Metro_Glyph-menuPanel.png);
-}
 
 #social-undoactivation-button {
   -moz-margin-start: 0; /* override default label margin to match description margin */

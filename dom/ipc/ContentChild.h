@@ -20,7 +20,6 @@
 
 
 struct ChromePackage;
-class nsIDOMBlob;
 class nsIObserver;
 struct ResourceMapping;
 struct OverrideMapping;
@@ -35,10 +34,6 @@ class PFileDescriptorSetChild;
 class URIParams;
 }// namespace ipc
 
-namespace jsipc {
-class JavaScriptShared;
-}
-
 namespace layers {
 class PCompositorChild;
 } // namespace layers
@@ -46,7 +41,6 @@ class PCompositorChild;
 namespace dom {
 
 class AlertObserver;
-class PrefObserver;
 class ConsoleListener;
 class PStorageChild;
 class ClonedMessageData;
@@ -237,6 +231,10 @@ public:
                              float* aSystemDefaultScale,
                              bool* aSuccess) override;
     virtual bool DeallocPScreenManagerChild(PScreenManagerChild*) override;
+
+    virtual PPSMContentDownloaderChild* AllocPPSMContentDownloaderChild(
+            const uint32_t& aCertType) override;
+    virtual bool DeallocPPSMContentDownloaderChild(PPSMContentDownloaderChild* aDownloader) override;
 
     virtual PExternalHelperAppChild *AllocPExternalHelperAppChild(
             const OptionalURIParams& uri,
@@ -465,6 +463,8 @@ public:
                                         const TabId& aTabId) override;
     virtual bool
     DeallocPContentPermissionRequestChild(PContentPermissionRequestChild* actor) override;
+
+    virtual bool RecvGamepadUpdate(const GamepadChangeEvent& aGamepadEvent) override;
 
 private:
     virtual void ActorDestroy(ActorDestroyReason why) override;

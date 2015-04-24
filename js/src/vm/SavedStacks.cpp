@@ -185,6 +185,7 @@ SavedFrame::finishSavedFrameInit(JSContext* cx, HandleObject ctor, HandleObject 
     nullptr,                    // setProperty
     nullptr,                    // enumerate
     nullptr,                    // resolve
+    nullptr,                    // mayResolve
     nullptr,                    // convert
     SavedFrame::finalize,       // finalize
     nullptr,                    // call
@@ -1180,8 +1181,10 @@ SavedStacks::chooseSamplingProbability(JSContext* cx)
 }
 
 JSObject*
-SavedStacksMetadataCallback(JSContext* cx)
+SavedStacksMetadataCallback(JSContext* cx, JSObject* target)
 {
+    RootedObject obj(cx, target);
+
     SavedStacks& stacks = cx->compartment()->savedStacks();
     if (stacks.allocationSkipCount > 0) {
         stacks.allocationSkipCount--;
@@ -1221,7 +1224,7 @@ SavedStacksMetadataCallback(JSContext* cx)
     if (!stacks.saveCurrentStack(cx, &frame))
         CrashAtUnhandlableOOM("SavedStacksMetadataCallback");
 
-    if (!Debugger::onLogAllocationSite(cx, frame, PRMJ_Now()))
+    if (!Debugger::onLogAllocationSite(cx, obj, frame, PRMJ_Now()))
         CrashAtUnhandlableOOM("SavedStacksMetadataCallback");
 
     return frame;

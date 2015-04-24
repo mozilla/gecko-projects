@@ -27,7 +27,6 @@ class BluetoothGatt;
 class BluetoothNamedValue;
 class BluetoothValue;
 class BluetoothSignal;
-class BluetoothSocket;
 
 class BluetoothDevice final : public DOMEventTargetHelper
                             , public BluetoothSignalObserver
@@ -119,7 +118,7 @@ private:
   /**
    * Fire BluetoothAttributeEvent to trigger onattributechanged event handler.
    */
-  void DispatchAttributeEvent(const nsTArray<nsString>& aTypes);
+  void DispatchAttributeEvent(const Sequence<nsString>& aTypes);
 
   /**
    * Convert uint32_t to BluetoothDeviceType.

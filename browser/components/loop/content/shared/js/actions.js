@@ -401,6 +401,8 @@ loop.shared.actions = (function() {
      * @see https://wiki.mozilla.org/Loop/Architecture/Rooms#GET_.2Frooms.2F.7Btoken.7D
      */
     SetupRoomInfo: Action.define("setupRoomInfo", {
+      // roomContextUrls: Array - Optional.
+      // roomDescription: String - Optional.
       // roomName: String - Optional.
       roomOwner: String,
       roomToken: String,
@@ -416,7 +418,7 @@ loop.shared.actions = (function() {
      * @see https://wiki.mozilla.org/Loop/Architecture/Rooms#GET_.2Frooms.2F.7Btoken.7D
      */
     UpdateRoomInfo: Action.define("updateRoomInfo", {
-      // context: Object - Optional.
+      // description: String - Optional.
       // roomName: String - Optional.
       roomOwner: String,
       roomUrl: String
@@ -464,6 +466,17 @@ loop.shared.actions = (function() {
      * Used to indicate the user wishes to leave the room.
      */
     LeaveRoom: Action.define("leaveRoom", {
+    }),
+
+    /**
+     * Used to record a link click for metrics purposes.
+     */
+    RecordClick: Action.define("recordClick", {
+      // Note: for ToS and Privacy links, this should be the link, for
+      // other links this should be a generic description so that we don't
+      // record what users are clicking, just the information about the fact
+      // they clicked the link in that spot (e.g. "Shared URL").
+      linkInfo: String
     }),
 
     /**

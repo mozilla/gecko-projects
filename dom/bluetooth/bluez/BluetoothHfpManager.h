@@ -13,7 +13,7 @@
 #include "BluetoothRilListener.h"
 #endif
 #include "BluetoothSocketObserver.h"
-#include "mozilla/ipc/UnixSocket.h"
+#include "mozilla/ipc/SocketBase.h"
 #include "mozilla/Hal.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
@@ -90,7 +90,7 @@ public:
   // The following functions are inherited from BluetoothSocketObserver
   virtual void ReceiveSocketData(
     BluetoothSocket* aSocket,
-    nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage) override;
+    nsAutoPtr<mozilla::ipc::UnixSocketBuffer>& aMessage) override;
   virtual void OnSocketConnectSuccess(BluetoothSocket* aSocket) override;
   virtual void OnSocketConnectError(BluetoothSocket* aSocket) override;
   virtual void OnSocketDisconnect(BluetoothSocket* aSocket) override;

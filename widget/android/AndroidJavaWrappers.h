@@ -27,7 +27,6 @@
 //#define FORCE_ALOG 1
 
 class nsIAndroidDisplayport;
-class nsIAndroidViewport;
 class nsIWidget;
 
 namespace mozilla {
@@ -495,13 +494,24 @@ public:
         return event;
     }
 
-    static AndroidGeckoEvent* MakeApzInputEvent(const MultiTouchInput& aInput, const mozilla::layers::ScrollableLayerGuid& aGuid, uint64_t aInputBlockId) {
+    static AndroidGeckoEvent* MakeApzInputEvent(const MultiTouchInput& aInput, const mozilla::layers::ScrollableLayerGuid& aGuid, uint64_t aInputBlockId, nsEventStatus aEventStatus) {
         AndroidGeckoEvent* event = new AndroidGeckoEvent();
         event->Init(APZ_INPUT_EVENT);
         event->mApzInput = aInput;
         event->mApzGuid = aGuid;
         event->mApzInputBlockId = aInputBlockId;
+        event->mApzEventStatus = aEventStatus;
         return event;
+    }
+
+    bool IsInputEvent() const {
+        return mType == AndroidGeckoEvent::MOTION_EVENT ||
+            mType == AndroidGeckoEvent::NATIVE_GESTURE_EVENT ||
+            mType == AndroidGeckoEvent::LONG_PRESS ||
+            mType == AndroidGeckoEvent::KEY_EVENT ||
+            mType == AndroidGeckoEvent::IME_EVENT ||
+            mType == AndroidGeckoEvent::IME_KEY_EVENT ||
+            mType == AndroidGeckoEvent::APZ_INPUT_EVENT;
     }
 
     int Action() { return mAction; }
@@ -570,6 +580,7 @@ public:
     nsIObserver *Observer() { return mObserver; }
     mozilla::layers::ScrollableLayerGuid ApzGuid();
     uint64_t ApzInputBlockId();
+    nsEventStatus ApzEventStatus();
 
 protected:
     int mAction;
@@ -612,6 +623,7 @@ protected:
     MultiTouchInput mApzInput;
     mozilla::layers::ScrollableLayerGuid mApzGuid;
     uint64_t mApzInputBlockId;
+    nsEventStatus mApzEventStatus;
     AutoGlobalWrappedJavaObject mObject;
 
     void ReadIntArray(nsTArray<int> &aVals,

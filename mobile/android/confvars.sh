@@ -55,9 +55,6 @@ MOZ_PAY=1
 # Enable UI for healthreporter
 MOZ_SERVICES_HEALTHREPORT=1
 
-# Enable reading list service integration.
-MOZ_ANDROID_READING_LIST_SERVICE=1
-
 # Enable runtime locale switching.
 MOZ_LOCALE_SWITCHER=1
 
@@ -68,6 +65,14 @@ MOZ_DEVICES=1
 # not resource constrained.
 if test -z "$MOZ_ANDROID_RESOURCE_CONSTRAINED"; then
   MOZ_NATIVE_DEVICES=1
+fi
+
+# Enable install tracking SDK if we have Google Play support; MOZ_NATIVE_DEVICES
+# is a proxy flag for that support.
+if test "$RELEASE_BUILD"; then
+if test "$MOZ_NATIVE_DEVICES"; then
+  MOZ_INSTALL_TRACKING=1
+fi
 fi
 
 # Mark as WebGL conformant

@@ -182,7 +182,7 @@ nsImageFrame::DisconnectMap()
 {
   if (mImageMap) {
     mImageMap->Destroy();
-    NS_RELEASE(mImageMap);
+    mImageMap = nullptr;
 
 #ifdef ACCESSIBILITY
   nsAccessibilityService* accService = GetAccService();
@@ -614,7 +614,7 @@ nsImageFrame::OnFrameUpdate(imgIRequest* aRequest, const nsIntRect* aRect)
                              ? mImage->GetImageSpaceInvalidationRect(*aRect)
                              : *aRect;
 
-  if (layerInvalidRect.IsEqualInterior(nsIntRect::GetMaxSizedIntRect())) {
+  if (layerInvalidRect.IsEqualInterior(GetMaxSizedIntRect())) {
     // Invalidate our entire area.
     InvalidateSelf(nullptr, nullptr);
     return NS_OK;
@@ -1779,7 +1779,6 @@ nsImageFrame::GetImageMap()
     nsIContent* map = GetMapElement();
     if (map) {
       mImageMap = new nsImageMap();
-      NS_ADDREF(mImageMap);
       mImageMap->Init(this, map);
     }
   }
@@ -2220,10 +2219,12 @@ nsImageFrame::IconLoad::Observe(nsISupports *aSubject, const char* aTopic,
                "wrong topic");
 #ifdef DEBUG
   // assert |aData| is one of our prefs.
-  for (uint32_t i = 0; i < ArrayLength(kIconLoadPrefs) ||
-                       (NS_NOTREACHED("wrong pref"), false); ++i)
+  uint32_t i = 0;
+  for (; i < ArrayLength(kIconLoadPrefs); ++i) {
     if (NS_ConvertASCIItoUTF16(kIconLoadPrefs[i]) == nsDependentString(aData))
       break;
+  }
+  MOZ_ASSERT(i < ArrayLength(kIconLoadPrefs));
 #endif
 
   GetPrefs();

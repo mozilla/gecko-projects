@@ -476,6 +476,7 @@ class CGDOMJSClass(CGThing):
                 nullptr,               /* setProperty */
                 ${enumerate}, /* enumerate */
                 ${resolve}, /* resolve */
+                nullptr,               /* mayResolve */
                 nullptr,               /* convert */
                 ${finalize}, /* finalize */
                 ${call}, /* call */
@@ -616,6 +617,7 @@ class CGPrototypeJSClass(CGThing):
                 nullptr,               /* setProperty */
                 nullptr,               /* enumerate */
                 nullptr,               /* resolve */
+                nullptr,               /* mayResolve */
                 nullptr,               /* convert */
                 nullptr,               /* finalize */
                 nullptr,               /* call */
@@ -709,6 +711,7 @@ class CGInterfaceObjectJSClass(CGThing):
                 nullptr,               /* setProperty */
                 nullptr,               /* enumerate */
                 nullptr,               /* resolve */
+                nullptr,               /* mayResolve */
                 nullptr,               /* convert */
                 nullptr,               /* finalize */
                 ${ctorname}, /* call */
@@ -8195,8 +8198,8 @@ class CGMemberJITInfo(CGThing):
         return ""
 
     def defineJitInfo(self, infoName, opName, opType, infallible, movable,
-                      aliasSet, alwaysInSlot, lazilyInSlot, slotIndex,
-                      returnTypes, args):
+                      eliminatable, aliasSet, alwaysInSlot, lazilyInSlot,
+                      slotIndex, returnTypes, args):
         """
         aliasSet is a JSJitInfo::AliasSet value, without the "JSJitInfo::" bit.
 
@@ -8206,12 +8209,14 @@ class CGMemberJITInfo(CGThing):
         """
         assert(not movable or aliasSet != "AliasEverything")  # Can't move write-aliasing things
         assert(not alwaysInSlot or movable)  # Things always in slots had better be movable
+        assert(not eliminatable or aliasSet != "AliasEverything")  # Can't eliminate write-aliasing things
+        assert(not alwaysInSlot or eliminatable) # Things always in slots had better be eliminatable
 
         def jitInfoInitializer(isTypedMethod):
             initializer = fill(
                 """
                 {
-                 { ${opName} },
+                  { ${opName} },
                   prototypes::id::${name},
                   PrototypeTraits<prototypes::id::${name}>::Depth,
                   JSJitInfo::${opType},
@@ -8219,6 +8224,7 @@ class CGMemberJITInfo(CGThing):
                   ${returnType},  /* returnType.  Not relevant for setters. */
                   ${isInfallible},  /* isInfallible. False in setters. */
                   ${isMovable},  /* isMovable.  Not relevant for setters. */
+                  ${isEliminatable}, /* isEliminatable.  Not relevant for setters. */
                   ${isAlwaysInSlot}, /* isAlwaysInSlot.  Only relevant for getters. */
                   ${isLazilyCachedInSlot}, /* isLazilyCachedInSlot.  Only relevant for getters. */
                   ${isTypedMethod},  /* isTypedMethod.  Only relevant for methods. */
@@ -8233,12 +8239,17 @@ class CGMemberJITInfo(CGThing):
                                   ""),
                 isInfallible=toStringBool(infallible),
                 isMovable=toStringBool(movable),
+                isEliminatable=toStringBool(eliminatable),
                 isAlwaysInSlot=toStringBool(alwaysInSlot),
                 isLazilyCachedInSlot=toStringBool(lazilyInSlot),
                 isTypedMethod=toStringBool(isTypedMethod),
                 slotIndex=slotIndex)
             return initializer.rstrip()
 
+        slotAssert = dedent(
+            """
+            static_assert(%s <= JSJitInfo::maxSlotIndex, "We won't fit");
+            """ % slotIndex)
         if args is not None:
             argTypes = "%s_argTypes" % infoName
             args = [CGMemberJITInfo.getJSArgType(arg.type) for arg in args]
@@ -8248,21 +8259,27 @@ class CGMemberJITInfo(CGThing):
                 (argTypes, ", ".join(args)))
             return fill(
                 """
-
                 $*{argTypesDecl}
                 static const JSTypedMethodJitInfo ${infoName} = {
-                  ${jitInfo},
+                ${jitInfo},
                   ${argTypes}
                 };
+                $*{slotAssert}
                 """,
                 argTypesDecl=argTypesDecl,
                 infoName=infoName,
-                jitInfo=jitInfoInitializer(True),
-                argTypes=argTypes)
+                jitInfo=indent(jitInfoInitializer(True)),
+                argTypes=argTypes,
+                slotAssert=slotAssert)
 
-        return ("\n"
-                "static const JSJitInfo %s = %s;\n"
-                % (infoName, jitInfoInitializer(False)))
+        return fill(
+            """
+            static const JSJitInfo ${infoName} = ${jitInfo};
+            $*{slotAssert}
+            """,
+            infoName=infoName,
+            jitInfo=jitInfoInitializer(False),
+            slotAssert=slotAssert)
 
     def define(self):
         if self.member.isAttr():
@@ -8275,6 +8292,7 @@ class CGMemberJITInfo(CGThing):
             getterinfal = "infallible" in self.descriptor.getExtendedAttributes(self.member, getter=True)
 
             movable = self.mayBeMovable() and getterinfal
+            eliminatable = self.mayBeEliminatable() and getterinfal
             aliasSet = self.aliasSet()
 
             getterinfal = getterinfal and infallibleForMember(self.member, self.member.type, self.descriptor)
@@ -8291,9 +8309,9 @@ class CGMemberJITInfo(CGThing):
                 slotIndex = "0"
 
             result = self.defineJitInfo(getterinfo, getter, "Getter",
-                                        getterinfal, movable, aliasSet,
-                                        isAlwaysInSlot, isLazilyCachedInSlot,
-                                        slotIndex,
+                                        getterinfal, movable, eliminatable,
+                                        aliasSet, isAlwaysInSlot,
+                                        isLazilyCachedInSlot, slotIndex,
                                         [self.member.type], None)
             if (not self.member.readonly or
                 self.member.getExtendedAttribute("PutForwards") is not None or
@@ -8306,7 +8324,7 @@ class CGMemberJITInfo(CGThing):
                           IDLToCIdentifier(self.member.identifier.name))
                 # Setters are always fallible, since they have to do a typed unwrap.
                 result += self.defineJitInfo(setterinfo, setter, "Setter",
-                                             False, False, "AliasEverything",
+                                             False, False, False, "AliasEverything",
                                              False, False, "0",
                                              [BuiltinTypes[IDLBuiltinType.Types.void]],
                                              None)
@@ -8331,6 +8349,7 @@ class CGMemberJITInfo(CGThing):
                 methodInfal = False
                 args = None
                 movable = False
+                eliminatable = False
             else:
                 sig = sigs[0]
                 # For methods that affect nothing, it's OK to set movable to our
@@ -8340,6 +8359,7 @@ class CGMemberJITInfo(CGThing):
                 # move effectful things.
                 hasInfallibleImpl = "infallible" in self.descriptor.getExtendedAttributes(self.member)
                 movable = self.mayBeMovable() and hasInfallibleImpl
+                eliminatable = self.mayBeEliminatable() and hasInfallibleImpl
                 # XXXbz can we move the smarts about fallibility due to arg
                 # conversions into the JIT, using our new args stuff?
                 if (len(sig[1]) != 0 or
@@ -8356,8 +8376,8 @@ class CGMemberJITInfo(CGThing):
 
             aliasSet = self.aliasSet()
             result = self.defineJitInfo(methodinfo, method, "Method",
-                                        methodInfal, movable, aliasSet,
-                                        False, False, "0",
+                                        methodInfal, movable, eliminatable,
+                                        aliasSet, False, False, "0",
                                         [s[0] for s in sigs], args)
             return result
         raise TypeError("Illegal member type to CGPropertyJITInfo")
@@ -8378,12 +8398,33 @@ class CGMemberJITInfo(CGThing):
         return (affects == "Nothing" and
                 (dependsOn != "Everything" and dependsOn != "DeviceState"))
 
+    def mayBeEliminatable(self):
+        """
+        Returns whether this attribute or method may be eliminatable, just
+        based on Affects/DependsOn annotations.
+        """
+        # dependsOn shouldn't affect this decision at all, except in jitinfo we
+        # have no way to express "Depends on everything, affects nothing",
+        # because we only have three alias set values: AliasNone ("depends on
+        # nothing, affects nothing"), AliasDOMSets ("depends on DOM sets,
+        # affects nothing"), AliasEverything ("depends on everything, affects
+        # everything").  So the [Affects=Nothing, DependsOn=Everything] case
+        # gets encoded as AliasEverything and defineJitInfo asserts that if our
+        # alias state is AliasEverything then we're not eliminatable (because it
+        # thinks we might have side-effects at that point).  Bug 1155796 is
+        # tracking possible solutions for this.
+        affects = self.member.affects
+        dependsOn = self.member.dependsOn
+        assert affects in IDLInterfaceMember.AffectsValues
+        assert dependsOn in IDLInterfaceMember.DependsOnValues
+        return affects == "Nothing" and dependsOn != "Everything"
+
     def aliasSet(self):
-        """Returns the alias set to store in the jitinfo.  This may not be the
+        """
+        Returns the alias set to store in the jitinfo.  This may not be the
         effective alias set the JIT uses, depending on whether we have enough
         information about our args to allow the JIT to prove that effectful
         argument conversions won't happen.
-
         """
         dependsOn = self.member.dependsOn
         assert dependsOn in IDLInterfaceMember.DependsOnValues
@@ -8564,6 +8605,26 @@ class CGStaticMethodJitinfo(CGGeneric):
             (IDLToCIdentifier(method.identifier.name),
              CppKeywords.checkMethodName(
                  IDLToCIdentifier(method.identifier.name))))
+
+
+class CGMethodIdentityTest(CGAbstractMethod):
+    """
+    A class to generate a method-identity test for a given IDL operation.
+    """
+    def __init__(self, descriptor, method):
+        self.method = method
+        name = "Is%sMethod" % MakeNativeName(method.identifier.name)
+        CGAbstractMethod.__init__(self, descriptor, name, 'bool',
+                                  [Argument('JS::Handle<JSObject*>', 'aObj')])
+
+    def definition_body(self):
+        return dedent(
+            """
+            MOZ_ASSERT(aObj);
+            return js::IsFunctionObject(aObj) &&
+                   js::FunctionObjectIsNative(aObj) &&
+                   FUNCTION_VALUE_TO_JITINFO(JS::ObjectValue(*aObj)) == &%s_methodinfo;
+            """ % IDLToCIdentifier(self.method.identifier.name))
 
 
 def getEnumValueName(value):
@@ -11162,6 +11223,8 @@ class CGDescriptor(CGThing):
                         cgThings.append(CGMemberJITInfo(descriptor, m))
                         if props.isCrossOriginMethod:
                             crossOriginMethods.add(m.identifier.name)
+                        if m.getExtendedAttribute("MethodIdentityTestable"):
+                            cgThings.append(CGMethodIdentityTest(descriptor, m))
             elif m.isAttr():
                 if m.stringifier:
                     raise TypeError("Stringifier attributes not supported yet. "

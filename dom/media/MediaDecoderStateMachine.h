@@ -91,17 +91,13 @@ hardware (via AudioStream).
 #include "MediaMetadataManager.h"
 #include "mozilla/RollingMean.h"
 #include "MediaTimer.h"
-
-class nsITimer;
+#include "StateMirroring.h"
 
 namespace mozilla {
 
 class AudioSegment;
-class VideoSegment;
 class MediaTaskQueue;
-class SharedThreadPool;
 class AudioSink;
-class MediaDecoderStateMachineScheduler;
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with MediaDecoderStateMachine::GetCurrentTime
@@ -127,6 +123,7 @@ class MediaDecoderStateMachine
   friend class AudioSink;
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaDecoderStateMachine)
 public:
+  typedef MediaDecoderOwner::NextFrameStatus NextFrameStatus;
   typedef MediaDecoder::DecodedStreamData DecodedStreamData;
   MediaDecoderStateMachine(MediaDecoder* aDecoder,
                                MediaDecoderReader* aReader,
@@ -213,8 +210,6 @@ public:
   // on the appropriate threads.
   bool OnDecodeTaskQueue() const;
   bool OnTaskQueue() const;
-
-  MediaDecoderOwner::NextFrameStatus GetNextFrameStatus();
 
   // Cause state transitions. These methods obtain the decoder monitor
   // to synchronise the change of state, and to notify other threads
@@ -437,6 +432,16 @@ protected:
   // aSample must not be null.
   void Push(AudioData* aSample);
   void Push(VideoData* aSample);
+  void PushFront(AudioData* aSample);
+  void PushFront(VideoData* aSample);
+
+  // Pops MediaData* samples from their respective MediaQueues.
+  // Note that the audio queue is also drained on the audio thread,
+  // which we can't easily react to - This should be fixed when we
+  // remove the audio thread in bug 750596.
+  already_AddRefed<AudioData> PopAudio();
+  already_AddRefed<VideoData> PopVideo();
+
 
   class WakeDecoderRunnable : public nsRunnable {
   public:
@@ -522,8 +527,9 @@ protected:
   // Returns true if we recently exited "quick buffering" mode.
   bool JustExitedQuickBuffering();
 
-  // Dispatches an asynchronous event to update the media element's ready state.
-  void UpdateReadyState();
+  // Recomputes mNextFrameStatus, possibly dispatching notifications to interested
+  // parties.
+  void UpdateNextFrameStatus();
 
   // Called when AudioSink reaches the end. |mPlayStartTime| and
   // |mPlayDuration| are updated to provide a good base for calculating video
@@ -718,16 +724,9 @@ protected:
   // Can only be called on the state machine thread.
   void SetPlayStartTime(const TimeStamp& aTimeStamp);
 
-private:
+public:
   // Update mAudioEndTime.
   void OnAudioEndTimeUpdate(int64_t aAudioEndTime);
-public:
-  void DispatchOnAudioEndTimeUpdate(int64_t aAudioEndTime)
-  {
-    RefPtr<nsRunnable> r =
-      NS_NewRunnableMethodWithArg<int64_t>(this, &MediaDecoderStateMachine::OnAudioEndTimeUpdate, aAudioEndTime);
-    TaskQueue()->Dispatch(r.forget());
-  }
 
 private:
   // Update mDecoder's playback offset.
@@ -885,6 +884,13 @@ public:
   // mDurationSet false doesn't indicate that we do not have a valid duration
   // as mStartTime and mEndTime could have been set separately.
   bool mDurationSet;
+
+  // The status of our next frame. Mirrored on the main thread and used to
+  // compute ready state.
+  Canonical<NextFrameStatus>::Holder mNextFrameStatus;
+public:
+  AbstractCanonical<NextFrameStatus>* CanonicalNextFrameStatus() { return &mNextFrameStatus; }
+protected:
 
   struct SeekJob {
     void Steal(SeekJob& aOther)
@@ -1217,8 +1223,6 @@ public:
   nsAutoPtr<MetadataTags> mMetadataTags;
 
   mozilla::MediaMetadataManager mMetadataManager;
-
-  MediaDecoderOwner::NextFrameStatus mLastFrameStatus;
 
   mozilla::RollingMean<uint32_t, uint32_t> mCorruptFrames;
 

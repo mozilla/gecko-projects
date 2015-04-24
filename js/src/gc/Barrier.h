@@ -173,7 +173,6 @@ class GlobalObject;
 class LazyScript;
 class NativeObject;
 class NestedScopeObject;
-class Nursery;
 class PlainObject;
 class PropertyName;
 class SavedFrame;
@@ -405,7 +404,7 @@ struct InternalGCMethods<jsid>
     static JS::shadow::Runtime* shadowRuntimeFromAnyThread(jsid id) {
         return reinterpret_cast<JS::shadow::Runtime*>(runtimeFromAnyThread(id));
     }
-    static void preBarrierImpl(Zone *zone, jsid id) {
+    static void preBarrierImpl(Zone* zone, jsid id) {
         JS::shadow::Zone* shadowZone = JS::shadow::Zone::asShadowZone(zone);
         if (shadowZone->needsIncrementalBarrier()) {
             jsid tmp(id);
@@ -590,7 +589,8 @@ class ImmutableTenuredPtr
         value = ptr;
     }
 
-    const T * address() { return &value; }
+    T get() const { return value; }
+    const T* address() { return &value; }
 };
 
 /*

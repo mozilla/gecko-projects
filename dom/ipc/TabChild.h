@@ -322,7 +322,7 @@ public:
     virtual bool RecvUpdateDimensions(const nsIntRect& rect,
                                       const ScreenIntSize& size,
                                       const ScreenOrientation& orientation,
-                                      const nsIntPoint& chromeDisp) override;
+                                      const LayoutDeviceIntPoint& chromeDisp) override;
     virtual bool RecvUpdateFrame(const layers::FrameMetrics& aFrameMetrics) override;
     virtual bool RecvRequestFlingSnap(const ViewID& aScrollId,
                                       const CSSPoint& aDestination) override;
@@ -480,6 +480,8 @@ public:
 
     virtual bool RecvUIResolutionChanged() override;
 
+    virtual bool RecvThemeChanged(nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache) override;
+
     /**
      * Native widget remoting protocol for use with windowed plugins with e10s.
      */
@@ -487,7 +489,7 @@ public:
     bool DeallocPPluginWidgetChild(PPluginWidgetChild* aActor) override;
     nsresult CreatePluginWidget(nsIWidget* aParent, nsIWidget** aOut);
 
-    nsIntPoint GetChromeDisplacement() { return mChromeDisp; };
+    LayoutDeviceIntPoint GetChromeDisplacement() { return mChromeDisp; };
 
     bool IPCOpen() { return mIPCOpen; }
 
@@ -625,7 +627,7 @@ private:
     bool mHasValidInnerSize;
     bool mDestroyed;
     // Position of tab, relative to parent widget (typically the window)
-    nsIntPoint mChromeDisp;
+    LayoutDeviceIntPoint mChromeDisp;
     TabId mUniqueId;
     float mDPI;
     double mDefaultScale;

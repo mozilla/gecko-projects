@@ -280,7 +280,7 @@ Transform(DataSourceSurface* aDest,
                                                  (uint32_t*)aSource->GetData(),
                                                  aSource->Stride());
 
-  NS_ABORT_IF_FALSE(src && dest, "Failed to create pixman images?");
+  MOZ_ASSERT(src !=0 && dest != 0, "Failed to create pixman images?");
 
   pixman_transform pixTransform = Matrix3DToPixman(aTransform);
   pixman_transform pixTransformInverted;
@@ -486,7 +486,7 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
 
   // Sometimes the invalid region is larger than we want to draw.
   nsIntRegion invalidRegionSafe;
-  invalidRegionSafe.And(aInvalidRegion, gfx::ThebesIntRect(intRect));
+  invalidRegionSafe.And(aInvalidRegion, intRect);
 
   nsIntRect invalidRect = invalidRegionSafe.GetBounds();
   mInvalidRect = IntRect(invalidRect.x, invalidRect.y, invalidRect.width, invalidRect.height);

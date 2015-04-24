@@ -218,6 +218,7 @@
 @RESPATH@/components/dom_offline.xpt
 @RESPATH@/components/dom_json.xpt
 @RESPATH@/components/dom_power.xpt
+@RESPATH@/components/dom_push.xpt
 @RESPATH@/components/dom_quota.xpt
 @RESPATH@/components/dom_range.xpt
 @RESPATH@/components/dom_security.xpt
@@ -327,7 +328,9 @@
 @RESPATH@/components/toolkit_finalizationwitness.xpt
 @RESPATH@/components/toolkit_formautofill.xpt
 @RESPATH@/components/toolkit_osfile.xpt
+#ifdef NIGHTLY_BUILD
 @RESPATH@/components/toolkit_perfmonitoring.xpt
+#endif
 @RESPATH@/components/toolkit_xulstore.xpt
 @RESPATH@/components/toolkitprofile.xpt
 #ifdef MOZ_ENABLE_XREMOTE
@@ -556,7 +559,7 @@
 @RESPATH@/components/AlarmsManager.manifest
 @RESPATH@/components/Push.js
 @RESPATH@/components/Push.manifest
-@RESPATH@/components/PushServiceLauncher.js
+@RESPATH@/components/PushNotificationService.js
 
 @RESPATH@/components/SlowScriptDebug.manifest
 @RESPATH@/components/SlowScriptDebug.js
@@ -881,36 +884,6 @@ bin/libfreebl_32int64_3.so
 @RESPATH@/webapprt/modules/WebappManager.jsm
 @RESPATH@/webapprt/modules/RemoteDebugger.jsm
 @RESPATH@/webapprt/modules/WebRTCHandler.jsm
-#endif
-
-#ifdef MOZ_METRO
-@RESPATH@/components/MetroUIUtils.js
-@RESPATH@/components/MetroUIUtils.manifest
-[metro]
-; gre resources
-@BINPATH@/CommandExecuteHandler@BIN_SUFFIX@
-@RESPATH@/resources.pri
-@RESPATH@/VisualElementsManifest.xml
-@RESPATH@/tileresources
-; app dir resources
-@RESPATH@/metro/chrome.manifest
-@RESPATH@/metro/searchplugins
-@RESPATH@/metro/metroapp.ini
-@RESPATH@/metro/chrome/browser@JAREXT@
-@RESPATH@/metro/chrome/browser.manifest
-@RESPATH@/metro/chrome/chrome@JAREXT@
-@RESPATH@/metro/chrome/chrome.manifest
-@RESPATH@/metro/chrome/@AB_CD@@JAREXT@
-@RESPATH@/metro/chrome/@AB_CD@.manifest
-#ifdef NIGHTLY_BUILD
-@RESPATH@/metro/chrome/shumway.manifest
-@RESPATH@/metro/chrome/shumway/*
-@RESPATH@/metro/chrome/pdfjs.manifest
-@RESPATH@/metro/chrome/pdfjs/*
-#endif
-@RESPATH@/metro/components
-@RESPATH@/metro/defaults
-@RESPATH@/metro/modules
 #endif
 
 @RESPATH@/components/DataStore.manifest

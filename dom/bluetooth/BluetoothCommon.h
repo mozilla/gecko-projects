@@ -124,26 +124,26 @@ extern bool gBluetoothDebugFlag;
   } while(0)                                                         \
 
 /**
- * Resolve promise with |ret| if |x| is false.
+ * Resolve |promise| with |ret| if |x| is false.
  */
-#define BT_ENSURE_TRUE_RESOLVE(x, ret)                               \
+#define BT_ENSURE_TRUE_RESOLVE(x, promise, ret)                      \
   do {                                                               \
     if (MOZ_UNLIKELY(!(x))) {                                        \
       BT_API2_LOGR("BT_ENSURE_TRUE_RESOLVE(" #x ") failed");         \
-      promise->MaybeResolve(ret);                                    \
-      return promise.forget();                                       \
+      (promise)->MaybeResolve(ret);                                  \
+      return (promise).forget();                                     \
     }                                                                \
   } while(0)
 
 /**
- * Reject promise with |ret| if |x| is false.
+ * Reject |promise| with |ret| if |x| is false.
  */
-#define BT_ENSURE_TRUE_REJECT(x, ret)                                \
+#define BT_ENSURE_TRUE_REJECT(x, promise, ret)                       \
   do {                                                               \
     if (MOZ_UNLIKELY(!(x))) {                                        \
       BT_API2_LOGR("BT_ENSURE_TRUE_REJECT(" #x ") failed");          \
-      promise->MaybeReject(ret);                                     \
-      return promise.forget();                                       \
+      (promise)->MaybeReject(ret);                                   \
+      return (promise).forget();                                     \
     }                                                                \
   } while(0)
 
@@ -235,9 +235,15 @@ extern bool gBluetoothDebugFlag;
 
 /**
  * When a remote BLE device gets connected / disconnected, we'll dispatch an
- * event
+ * event.
  */
 #define GATT_CONNECTION_STATE_CHANGED_ID     "connectionstatechanged"
+
+/**
+ * When attributes of BluetoothManager, BluetoothAdapter, or BluetoothDevice
+ * are changed, we'll dispatch an event.
+ */
+#define ATTRIBUTE_CHANGED_ID                 "attributechanged"
 
 // Bluetooth address format: xx:xx:xx:xx:xx:xx (or xx_xx_xx_xx_xx_xx)
 #define BLUETOOTH_ADDRESS_LENGTH 17

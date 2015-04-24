@@ -521,6 +521,8 @@ EnableUniversalXPConnect(JSContext* cx)
     CompartmentPrivate* priv = CompartmentPrivate::Get(compartment);
     if (!priv)
         return true;
+    if (priv->universalXPConnectEnabled)
+        return true;
     priv->universalXPConnectEnabled = true;
 
     // Recompute all the cross-compartment wrappers leaving the newly-privileged
@@ -3388,7 +3390,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     // Windows PGO stack frames have unfortunately gotten pretty large lately. :-(
     const size_t kStackQuota = 900 * 1024;
     const size_t kTrustedScriptBuffer = (sizeof(size_t) == 8) ? 140 * 1024
-                                                              : 80 * 1024;
+                                                              : 100 * 1024;
     // The following two configurations are linux-only. Given the numbers above,
     // we use 50k and 100k trusted buffers on 32-bit and 64-bit respectively.
 #elif defined(DEBUG)

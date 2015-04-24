@@ -55,6 +55,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "SessionWorker",
 const PREF_UPGRADE_BACKUP = "browser.sessionstore.upgradeBackup.latestBuildID";
 const PREF_MAX_UPGRADE_BACKUPS = "browser.sessionstore.upgradeBackup.maxUpgradeBackups";
 
+const PREF_MAX_SERIALIZE_BACK = "browser.sessionstore.max_serialize_back";
+const PREF_MAX_SERIALIZE_FWD = "browser.sessionstore.max_serialize_forward";
+
 this.SessionFile = {
   /**
    * Read the contents of the session file, asynchronously.
@@ -220,7 +223,13 @@ let SessionFileInternal = {
         break;
       } catch (ex if ex instanceof OS.File.Error && ex.becauseNoSuchFile) {
         exists = false;
+      } catch (ex if ex instanceof OS.File.Error) {
+        // The file might be inaccessible due to wrong permissions
+        // or similar failures. We'll just count it as "corrupted".
+        console.error("Could not read session file ", ex, ex.stack);
+        corrupted = true;
       } catch (ex if ex instanceof SyntaxError) {
+        console.error("Corrupt session file (invalid JSON found) ", ex, ex.stack);
         // File is corrupted, try next file
         corrupted = true;
       } finally {
@@ -250,11 +259,11 @@ let SessionFileInternal = {
 
     // Initialize the worker to let it handle backups and also
     // as a workaround for bug 964531.
-    SessionWorker.post("init", [
-      result.origin,
-      this.Paths,
-      Preferences.get(PREF_MAX_UPGRADE_BACKUPS, 3)
-    ]);
+    SessionWorker.post("init", [result.origin, this.Paths, {
+      maxUpgradeBackups: Preferences.get(PREF_MAX_UPGRADE_BACKUPS, 3),
+      maxSerializeBack: Preferences.get(PREF_MAX_SERIALIZE_BACK, 10),
+      maxSerializeForward: Preferences.get(PREF_MAX_SERIALIZE_FWD, -1)
+    }]);
 
     return result;
   }),

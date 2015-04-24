@@ -21,7 +21,6 @@
 class nsTableCellFrame;
 class nsTableCellMap;
 class nsTableColFrame;
-class nsColGroupFrame;
 class nsTableRowGroupFrame;
 class nsTableRowFrame;
 class nsTableColGroupFrame;
@@ -29,7 +28,6 @@ class nsITableLayoutStrategy;
 class nsStyleContext;
 
 struct nsTableReflowState;
-struct nsStylePosition;
 struct BCPropertyData;
 
 static inline bool IS_TABLE_CELL(nsIAtom* frameType) {
@@ -383,8 +381,8 @@ public:
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
 
-  /** return the width of the column at aColIndex    */
-  int32_t GetColumnWidth(int32_t aColIndex);
+  /** return the isize of the column at aColIndex    */
+  int32_t GetColumnISize(int32_t aColIndex);
 
   /** Helper to get the column spacing style value.
    *  The argument refers to the space between column aColIndex and column

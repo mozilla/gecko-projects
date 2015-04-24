@@ -39,7 +39,7 @@ public:
                             GMPVideoEncoderCallbackProxy* aCallback,
                             int32_t aNumberOfCores,
                             uint32_t aMaxPayloadSize) override;
-  virtual GMPErr Encode(GMPUnique<GMPVideoi420Frame>::Ptr aInputFrame,
+  virtual GMPErr Encode(GMPUniquePtr<GMPVideoi420Frame> aInputFrame,
                         const nsTArray<uint8_t>& aCodecSpecificInfo,
                         const nsTArray<GMPVideoFrameType>& aFrameTypes) override;
   virtual GMPErr SetChannelParameters(uint32_t aPacketLoss, uint32_t aRTT) override;
@@ -77,6 +77,7 @@ private:
 
   bool mIsOpen;
   bool mShuttingDown;
+  bool mActorDestroyed;
   nsRefPtr<GMPContentParent> mPlugin;
   GMPVideoEncoderCallbackProxy* mCallback;
   GMPVideoHostImpl mVideoHost;

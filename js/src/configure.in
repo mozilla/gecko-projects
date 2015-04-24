@@ -190,6 +190,11 @@ MOZ_ARG_WITH_STRING(gonk-toolchain-prefix,
 
 if test -n "$gonkdir" ; then
     kernel_name=`uname -s | tr "[[:upper:]]" "[[:lower:]]"`
+    dnl Default to ICS
+    ANDROID_VERSION=15
+    if test -n "${PLATFORM_SDK_VERSION}"; then
+        ANDROID_VERSION="${PLATFORM_SDK_VERSION}"
+    fi
 
     dnl set up compilers
     AS="$gonk_toolchain_prefix"as
@@ -294,14 +299,6 @@ MOZ_CHECK_COMPILER_WRAPPER
 
 dnl Special win32 checks
 dnl ========================================================
-
-MOZ_ARG_ENABLE_BOOL(metro,
-[  --enable-metro           Enable Windows Metro build targets],
-    MOZ_METRO=1,
-    MOZ_METRO=)
-if test -n "$MOZ_METRO"; then
-    AC_DEFINE(MOZ_METRO)
-fi
 
 # Target the Windows 8.1 SDK by default
 WINSDK_TARGETVER=603
@@ -1243,8 +1240,11 @@ if test "$GNU_CC"; then
 
     # Turn off the following warnings that -Wall turns on:
     # -Wno-unused - lots of violations in third-party code
+    # -Wno-inline-new-delete - we inline 'new' and 'delete' in mozalloc
     #
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wno-unused"
+
+    MOZ_CXX_SUPPORTS_WARNING(-Wno-, inline-new-delete, ac_cxx_has_wno_inline_new_delete)
 
     if test -z "$INTEL_CC" -a -z "$CLANG_CC"; then
        # Don't use -Wcast-align with ICC or clang
@@ -1789,6 +1789,10 @@ ia64*-hpux*)
         # the same thing as C4244, we disable C4267, too.
         CFLAGS="$CFLAGS -wd4244 -wd4267"
         CXXFLAGS="$CXXFLAGS -wd4244 -wd4267 -wd4251"
+        if test -n "$CLANG_CL"; then
+            # Suppress the clang-cl warning for the inline 'new' and 'delete' in mozalloc
+            CXXFLAGS="$CXXFLAGS -Wno-inline-new-delete"
+        fi
         # make 'foo == bar;' error out
         CFLAGS="$CFLAGS -we4553"
         CXXFLAGS="$CXXFLAGS -we4553"
@@ -2957,10 +2961,18 @@ fi
 dnl ========================================================
 dnl = Enable jemalloc
 dnl ========================================================
-MOZ_MEMORY=1
+
+LOCAL_MOZ_MEMORY=1
 MOZ_ARG_DISABLE_BOOL(jemalloc,
 [  --disable-jemalloc       Don't replace memory allocator with jemalloc],
-    MOZ_MEMORY=)
+    LOCAL_MOZ_MEMORY=)
+
+dnl Consult the command-line arguments in stand alone-builds only. In
+dnl non-stand-alone builds, we always use the value of MOZ_MEMORY inherited from
+dnl the top-level configure script.
+if test "$JS_STANDALONE"; then
+    MOZ_MEMORY=$LOCAL_MOZ_MEMORY
+fi
 
 case "${OS_TARGET}" in
 Android|WINNT|Darwin)
@@ -3733,7 +3745,6 @@ AC_SUBST(OS_COMPILE_CXXFLAGS)
 AC_SUBST(OS_LDFLAGS)
 AC_SUBST(OS_LIBS)
 AC_SUBST(CROSS_COMPILE)
-AC_SUBST(MOZ_METRO)
 
 AC_SUBST(HOST_CC)
 AC_SUBST(HOST_CXX)

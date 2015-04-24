@@ -120,7 +120,6 @@ namespace layers {
 struct Effect;
 struct EffectChain;
 class Image;
-class ISurfaceAllocator;
 class Layer;
 class TextureSource;
 class DataTextureSource;
@@ -338,7 +337,7 @@ public:
    */
   virtual void EndFrame() = 0;
 
-  virtual void SetFBAcquireFence(Layer* aLayer) {}
+  virtual void SetDispAcquireFence(Layer* aLayer) {}
 
   virtual FenceHandle GetReleaseFence()
   {

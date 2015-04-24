@@ -47,6 +47,7 @@ GMPVideoDecoderParent::GMPVideoDecoderParent(GMPContentParent* aPlugin)
   : GMPSharedMemManager(aPlugin)
   , mIsOpen(false)
   , mShuttingDown(false)
+  , mActorDestroyed(false)
   , mPlugin(aPlugin)
   , mCallback(nullptr)
   , mVideoHost(this)
@@ -109,7 +110,7 @@ GMPVideoDecoderParent::InitDecode(const GMPVideoCodec& aCodecSettings,
 }
 
 nsresult
-GMPVideoDecoderParent::Decode(GMPUnique<GMPVideoEncodedFrame>::Ptr aInputFrame,
+GMPVideoDecoderParent::Decode(GMPUniquePtr<GMPVideoEncodedFrame> aInputFrame,
                               bool aMissingFrames,
                               const nsTArray<uint8_t>& aCodecSpecificInfo,
                               int64_t aRenderTimeMs)
@@ -121,7 +122,7 @@ GMPVideoDecoderParent::Decode(GMPUnique<GMPVideoEncodedFrame>::Ptr aInputFrame,
 
   MOZ_ASSERT(mPlugin->GMPThread() == NS_GetCurrentThread());
 
-  GMPUnique<GMPVideoEncodedFrameImpl>::Ptr inputFrameImpl(
+  GMPUniquePtr<GMPVideoEncodedFrameImpl> inputFrameImpl(
     static_cast<GMPVideoEncodedFrameImpl*>(aInputFrame.release()));
 
   // Very rough kill-switch if the plugin stops processing.  If it's merely
@@ -213,7 +214,9 @@ GMPVideoDecoderParent::Shutdown()
   }
 
   mIsOpen = false;
-  unused << SendDecodingComplete();
+  if (!mActorDestroyed) {
+    unused << SendDecodingComplete();
+  }
 
   return NS_OK;
 }
@@ -223,6 +226,7 @@ void
 GMPVideoDecoderParent::ActorDestroy(ActorDestroyReason aWhy)
 {
   mIsOpen = false;
+  mActorDestroyed = true;
   mVideoHost.DoneWithAPI();
 
   if (mCallback) {

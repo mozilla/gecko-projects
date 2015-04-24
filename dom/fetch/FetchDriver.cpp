@@ -20,6 +20,7 @@
 #include "nsDataHandler.h"
 #include "nsHostObjectProtocolHandler.h"
 #include "nsNetUtil.h"
+#include "nsPrintfCString.h"
 #include "nsStreamUtils.h"
 #include "nsStringStream.h"
 
@@ -501,7 +502,7 @@ FetchDriver::HttpFetch(bool aCORSFlag, bool aCORSPreflightFlag, bool aAuthentica
     // directly.
     nsRefPtr<nsCORSListenerProxy> corsListener =
       new nsCORSListenerProxy(this, mPrincipal, useCredentials);
-    rv = corsListener->Init(chan, true /* allow data uri */);
+    rv = corsListener->Init(chan, DataURIHandling::Allow);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return FailWithNetworkError();
     }
@@ -629,7 +630,13 @@ public:
   {
     ErrorResult result;
     mResponse->Headers()->Append(aHeader, aValue, result);
-    return result.ErrorCode();
+    if (result.Failed()) {
+      NS_WARNING(nsPrintfCString("Fetch ignoring illegal header - '%s': '%s'",
+                                 PromiseFlatCString(aHeader).get(),
+                                 PromiseFlatCString(aValue).get()).get());
+      result.ClearMessage();
+    }
+    return NS_OK;
   }
 };
 

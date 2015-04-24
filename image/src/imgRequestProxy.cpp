@@ -7,7 +7,7 @@
 #include "ImageLogging.h"
 #include "imgRequestProxy.h"
 #include "imgIOnloadBlocker.h"
-
+#include "imgLoader.h"
 #include "Image.h"
 #include "ImageOps.h"
 #include "nsError.h"
@@ -695,6 +695,11 @@ imgRequestProxy::PerformClone(imgINotificationObserver* aObserver,
     return rv;
   }
 
+  if (GetOwner() && GetOwner()->GetValidator()) {
+    clone->SetNotificationsDeferred(true);
+    GetOwner()->GetValidator()->AddProxy(clone);
+  }
+
   // Assign to *aClone before calling Notify so that if the caller expects to
   // only be notified for requests it's already holding pointers to it won't be
   // surprised.
@@ -835,7 +840,7 @@ NotificationTypeToString(int32_t aType)
 }
 
 void
-imgRequestProxy::Notify(int32_t aType, const nsIntRect* aRect)
+imgRequestProxy::Notify(int32_t aType, const mozilla::gfx::IntRect* aRect)
 {
   MOZ_ASSERT(aType != imgINotificationObserver::LOAD_COMPLETE,
              "Should call OnLoadComplete");

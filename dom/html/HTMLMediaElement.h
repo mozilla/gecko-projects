@@ -23,6 +23,7 @@
 #ifdef MOZ_EME
 #include "mozilla/dom/MediaKeys.h"
 #endif
+#include "StateWatching.h"
 #include "nsGkAtoms.h"
 
 // X.h on Linux #defines CurrentTime as 0L, so we have to #undef it here.
@@ -218,13 +219,6 @@ public:
 
   // Dispatch events that were raised while in the bfcache
   nsresult DispatchPendingMediaEvents();
-
-  // Called by the decoder when some data has been downloaded or
-  // buffering/seeking has ended. aNextFrameAvailable is true when
-  // the data for the next frame is available. This method will
-  // decide whether to set the ready state to HAVE_CURRENT_DATA,
-  // HAVE_FUTURE_DATA or HAVE_ENOUGH_DATA.
-  virtual void UpdateReadyStateForData(MediaDecoderOwner::NextFrameStatus aNextFrame) final override;
 
   // Return true if we can activate autoplay assuming enough data has arrived.
   bool CanActivateAutoplay();
@@ -647,6 +641,19 @@ protected:
   class StreamListener;
   class StreamSizeListener;
 
+  MediaDecoderOwner::NextFrameStatus NextFrameStatus();
+
+  void SetDecoder(MediaDecoder* aDecoder)
+  {
+    if (mDecoder) {
+      mReadyStateUpdater->Unwatch(mDecoder->ReadyStateWatchTarget());
+    }
+    mDecoder = aDecoder;
+    if (mDecoder) {
+      mReadyStateUpdater->Watch(mDecoder->ReadyStateWatchTarget());
+    }
+  }
+
   virtual void GetItemValueText(DOMString& text) override;
   virtual void SetItemValueText(const nsAString& text) override;
 
@@ -660,7 +667,7 @@ protected:
     void SetOuter(HTMLMediaElement* outer) { mOuter = outer; }
     void SetCanPlay(bool aCanPlay);
 
-    operator bool() const { return mValue; }
+    MOZ_IMPLICIT operator bool() const { return mValue; }
 
     WakeLockBoolWrapper& operator=(bool val);
 
@@ -1013,6 +1020,9 @@ protected:
   // MediaElement doesn't yet have one then it will create it.
   TextTrackManager* GetOrCreateTextTrackManager();
 
+  // Recomputes ready state and fires events as necessary based on current state.
+  void UpdateReadyStateInternal();
+
   class nsAsyncEventRunner;
   using nsGenericHTMLElement::DispatchEvent;
   // For nsAsyncEventRunner.
@@ -1090,10 +1100,9 @@ protected:
   // Media loading flags. See:
   //   http://www.whatwg.org/specs/web-apps/current-work/#video)
   nsMediaNetworkState mNetworkState;
-  nsMediaReadyState mReadyState;
+  Watchable<nsMediaReadyState> mReadyState;
 
-  // Last value passed from codec or stream source to UpdateReadyStateForData.
-  NextFrameStatus mLastNextFrameStatus;
+  WatcherHolder mReadyStateUpdater;
 
   enum LoadAlgorithmState {
     // No load algorithm instance is waiting for a source to be added to the
@@ -1328,7 +1337,7 @@ protected:
 #endif // MOZ_EME
 
   // True if the media's channel's download has been suspended.
-  bool mDownloadSuspendedByCache;
+  Watchable<bool> mDownloadSuspendedByCache;
 
   // Audio Channel.
   AudioChannel mAudioChannel;

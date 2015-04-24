@@ -114,7 +114,6 @@
      to. -->
 <!ENTITY overlay_share_send_tab_btn_label "Send to another device">
 <!ENTITY overlay_share_no_url "No link found in this share">
-<!ENTITY overlay_share_retry "Try again">
 <!ENTITY overlay_share_select_device "Select device">
 <!-- Localization note (overlay_no_synced_devices) : Used when the menu option
      to send a tab to a synced device is pressed and no other synced devices
@@ -192,27 +191,22 @@
 <!ENTITY pref_donottrack_title "Do not track">
 <!ENTITY pref_donottrack_summary "&brandShortName; will tell sites that you do not want to be tracked">
 
-<!ENTITY tab_queue_toast_message "Open later">
+<!ENTITY tab_queue_toast_message2 "Tab queued in &brandShortName;">
 <!ENTITY tab_queue_toast_action "Open now">
 <!ENTITY tab_queue_prompt_title "Opening multiple links?">
-<!ENTITY tab_queue_prompt_text "Open them without switching to Firefox each time.">
+<!ENTITY tab_queue_prompt_text2 "Open them without switching to &brandShortName; each time.">
 <!ENTITY tab_queue_prompt_tip_text "you can change this later in Settings">
 <!ENTITY tab_queue_prompt_positive_action_button "Enable">
 <!ENTITY tab_queue_prompt_negative_action_button "Not now">
-<!-- Localization note (tab_queue_notification_text_plural) : The
+<!ENTITY tab_queue_notification_title "&brandShortName;">
+<!-- Localization note (tab_queue_notification_text_plural2) : The
      formatD is replaced with the number of tabs queued.  The
      number of tabs queued is always more than one.  We can't use
      Android plural forms, sadly. See Bug #753859. -->
-<!ENTITY tab_queue_notification_text_plural "&formatD; tabs queued">
-<!-- Localization note (tab_queue_notification_title_plural) : This is the
-     title of a notification; we expect more than one tab queued. -->
-<!ENTITY tab_queue_notification_title_plural "Tabs Queued">
-<!-- Localization note (tab_queue_notification_title_singular) : This is the
-     title of a notification; we expect only one tab queued. -->
-<!ENTITY tab_queue_notification_title_singular "Tab Queued">
-<!-- Localization note (tab_queue_notification_text_singular) : This is the
+<!ENTITY tab_queue_notification_text_plural2 "&formatD; tabs waiting">
+<!-- Localization note (tab_queue_notification_text_singular2) : This is the
      text of a notification; we expect only one tab queued. -->
-<!ENTITY tab_queue_notification_text_singular "1 tab queued">
+<!ENTITY tab_queue_notification_text_singular2 "1 tab waiting">
 
 <!ENTITY pref_char_encoding "Character encoding">
 <!ENTITY pref_char_encoding_on "Show menu">
@@ -397,8 +391,8 @@ size. -->
 <!ENTITY pref_scroll_title_bar2 "Full-screen browsing">
 <!ENTITY pref_scroll_title_bar_summary "Hide the &brandShortName; title bar when scrolling down a page">
 
-<!ENTITY pref_tab_queue_title "Open later">
-<!ENTITY pref_tab_queue_summary "Prevent tabs from opening immediately, but open all queued tabs the next time &brandShortName; loads.">
+<!ENTITY pref_tab_queue_title2 "Open multiple links">
+<!ENTITY pref_tab_queue_summary2 "Queue links for later instead of switching to &brandShortName; each time">
 
 <!-- Localization note (page_removed): This string appears in a toast message when
      any page is removed frome about:home. This includes pages that are in history,

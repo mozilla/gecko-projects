@@ -38,7 +38,6 @@ namespace gl {
 
 namespace layers {
 class CompositorParent;
-class ContainerLayer;
 class Layer;
 }
 
@@ -103,7 +102,7 @@ public:
 
 private:
     void Reset();
-    void Prepare(buffer_handle_t fbHandle, int fence);
+    void Prepare(buffer_handle_t dispHandle, int fence);
     bool Commit();
     bool TryHwComposition();
     bool ReallocLayerList();

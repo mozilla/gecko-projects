@@ -1405,6 +1405,7 @@ class MOZ_STACK_CLASS ModuleCompiler
     NonAssertingLabel              syncInterruptLabel_;
     NonAssertingLabel              onDetachedLabel_;
     NonAssertingLabel              onOutOfBoundsLabel_;
+    NonAssertingLabel              onConversionErrorLabel_;
 
     UniquePtr<char[], JS::FreePolicy> errorString_;
     uint32_t                       errorOffset_;
@@ -1624,6 +1625,7 @@ class MOZ_STACK_CLASS ModuleCompiler
     Label& syncInterruptLabel() { return syncInterruptLabel_; }
     Label& onDetachedLabel() { return onDetachedLabel_; }
     Label& onOutOfBoundsLabel() { return onOutOfBoundsLabel_; }
+    Label& onConversionErrorLabel() { return onConversionErrorLabel_; }
     bool hasError() const { return errorString_ != nullptr; }
     const AsmJSModule& module() const { return *module_.get(); }
     bool usesSignalHandlersForInterrupt() const { return module_->usesSignalHandlersForInterrupt(); }
@@ -2525,6 +2527,7 @@ class FunctionCompiler
                                            options, alloc_,
                                            graph_, info_, optimizationInfo,
                                            &m().onOutOfBoundsLabel(),
+                                           &m().onConversionErrorLabel(),
                                            m().usesSignalHandlersForOOB());
 
         if (!newBlock(/* pred = */ nullptr, &curBlock_, fn_))
@@ -5950,10 +5953,10 @@ CheckSimdOperationCall(FunctionCompiler& f, ParseNode* call, const ModuleCompile
 
       case AsmJSSimdOperation_fromInt32x4:
         return CheckSimdCast<MSimdConvert>(f, call, AsmJSSimdType_int32x4, opType, def, type);
-      case AsmJSSimdOperation_fromInt32x4Bits:
-        return CheckSimdCast<MSimdReinterpretCast>(f, call, AsmJSSimdType_int32x4, opType, def, type);
       case AsmJSSimdOperation_fromFloat32x4:
         return CheckSimdCast<MSimdConvert>(f, call, AsmJSSimdType_float32x4, opType, def, type);
+      case AsmJSSimdOperation_fromInt32x4Bits:
+        return CheckSimdCast<MSimdReinterpretCast>(f, call, AsmJSSimdType_int32x4, opType, def, type);
       case AsmJSSimdOperation_fromFloat32x4Bits:
         return CheckSimdCast<MSimdReinterpretCast>(f, call, AsmJSSimdType_float32x4, opType, def, type);
 
@@ -7399,8 +7402,8 @@ CheckHeapLengthCondition(ModuleCompiler& m, ParseNode* cond, PropertyName* newBu
     uint32_t minLengthExclusive;
     if (!IsLiteralInt(m, minLengthNode, &minLengthExclusive))
         return m.fail(minLengthNode, "expecting integer literal");
-    if (minLengthExclusive < 0xffffff)
-        return m.fail(minLengthNode, "literal must be >= 0xffffff");
+    if (minLengthExclusive < 0xffffff || minLengthExclusive == UINT32_MAX)
+        return m.fail(minLengthNode, "literal must be >= 0xffffff and < 0xffffffff");
 
     // Add one to convert from exclusive (the branch rejects if ==) to inclusive.
     *minLength = minLengthExclusive + 1;
@@ -9035,10 +9038,10 @@ GenerateOnDetachedLabelExit(ModuleCompiler& m, Label* throwLabel)
 }
 
 static bool
-GenerateOnOutOfBoundsLabelExit(ModuleCompiler& m, Label* throwLabel)
+GenerateExceptionLabelExit(ModuleCompiler& m, Label* throwLabel, Label* exit, AsmJSImmKind func)
 {
     MacroAssembler& masm = m.masm();
-    masm.bind(&m.onOutOfBoundsLabel());
+    masm.bind(exit);
 
     // sp can be anything at this point, so ensure it is aligned when calling
     // into C++.  We unconditionally jump to throw so don't worry about restoring sp.
@@ -9046,10 +9049,10 @@ GenerateOnOutOfBoundsLabelExit(ModuleCompiler& m, Label* throwLabel)
 
     // OnOutOfBounds always throws.
     masm.assertStackAlignment(ABIStackAlignment);
-    masm.call(AsmJSImmPtr(AsmJSImm_OnOutOfBounds));
+    masm.call(AsmJSImmPtr(func));
     masm.jump(throwLabel);
 
-    return m.finishGeneratingInlineStub(&m.onOutOfBoundsLabel()) && !masm.oom();
+    return m.finishGeneratingInlineStub(exit) && !masm.oom();
 }
 
 static const LiveRegisterSet AllRegsExceptSP(
@@ -9290,7 +9293,9 @@ GenerateStubs(ModuleCompiler& m)
     if (m.onDetachedLabel().used() && !GenerateOnDetachedLabelExit(m, &throwLabel))
         return false;
 
-    if (!GenerateOnOutOfBoundsLabelExit(m, &throwLabel))
+    if (!GenerateExceptionLabelExit(m, &throwLabel, &m.onOutOfBoundsLabel(), AsmJSImm_OnOutOfBounds))
+        return false;
+    if (!GenerateExceptionLabelExit(m, &throwLabel, &m.onConversionErrorLabel(), AsmJSImm_OnImpreciseConversion))
         return false;
 
     if (!GenerateAsyncInterruptExit(m, &throwLabel))
@@ -9379,8 +9384,9 @@ CheckModule(ExclusiveContext* cx, AsmJSParser& parser, ParseNode* stmtList,
     if (tk != TOK_EOF && tk != TOK_RC)
         return m.fail(nullptr, "top-level export (return) must be the last statement");
 
-    // The instruction cache is flushed when dynamically linking, so can inhibit now.
-    AutoFlushICache afc("CheckModule", /* inhibit= */ true);
+    // Delay flushing until dynamic linking. The inhibited range is set by the
+    // masm.executableCopy() called transitively by FinishModule.
+    AutoFlushICache afc("CheckModule", /* inhibit = */ true);
 
     ScopedJSDeletePtr<AsmJSModule> module;
     if (!FinishModule(m, &module))

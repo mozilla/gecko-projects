@@ -59,6 +59,7 @@
 #include "nsContentPolicyUtils.h" // NS_CheckContentLoadPolicy(...)
 #include "nsISeekableStream.h"
 #include "nsAutoPtr.h"
+#include "nsQueryObject.h"
 #include "nsIWritablePropertyBag2.h"
 #include "nsIAppShell.h"
 #include "nsWidgetsCID.h"
@@ -1138,8 +1139,7 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
     nsCOMPtr<nsISHistory> shistory;
     nsresult rv = GetSessionHistory(getter_AddRefs(shistory));
     if (NS_SUCCEEDED(rv) && shistory) {
-      *aSink = shistory;
-      NS_ADDREF((nsISupports*)*aSink);
+      shistory.forget(aSink);
       return NS_OK;
     }
     return NS_NOINTERFACE;
@@ -1157,8 +1157,7 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
     nsCOMPtr<nsIEditingSession> editingSession;
     mEditorData->GetEditingSession(getter_AddRefs(editingSession));
     if (editingSession) {
-      *aSink = editingSession;
-      NS_ADDREF((nsISupports*)*aSink);
+      editingSession.forget(aSink);
       return NS_OK;
     }
 
@@ -1756,8 +1755,7 @@ nsDocShell::CreateLoadInfo(nsIDocShellLoadInfo** aLoadInfo)
   NS_ENSURE_TRUE(loadInfo, NS_ERROR_OUT_OF_MEMORY);
   nsCOMPtr<nsIDocShellLoadInfo> localRef(loadInfo);
 
-  *aLoadInfo = localRef;
-  NS_ADDREF(*aLoadInfo);
+  localRef.forget(aLoadInfo);
   return NS_OK;
 }
 
@@ -5089,7 +5087,8 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       }
     }
   } else if (NS_ERROR_PHISHING_URI == aError ||
-             NS_ERROR_MALWARE_URI == aError) {
+             NS_ERROR_MALWARE_URI == aError ||
+             NS_ERROR_UNWANTED_URI == aError) {
     nsAutoCString host;
     aURI->GetHost(host);
     CopyUTF8toUTF16(host, formatStrs[0]);
@@ -5108,14 +5107,19 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       error.AssignLiteral("phishingBlocked");
       bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_PHISHING_PAGE_FRAME
                            : nsISecurityUITelemetry::WARNING_PHISHING_PAGE_TOP;
-    } else {
+    } else if (NS_ERROR_MALWARE_URI == aError) {
       error.AssignLiteral("malwareBlocked");
       bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_MALWARE_PAGE_FRAME
                            : nsISecurityUITelemetry::WARNING_MALWARE_PAGE_TOP;
+    } else {
+      error.AssignLiteral("unwantedBlocked");
+      bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_FRAME
+                           : nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_TOP;
     }
 
-    if (errorPage.EqualsIgnoreCase("blocked"))
+    if (errorPage.EqualsIgnoreCase("blocked")) {
       Telemetry::Accumulate(Telemetry::SECURITY_UI, bucketId);
+    }
 
     cssClass.AssignLiteral("blacklist");
   } else if (NS_ERROR_CONTENT_CRASHED == aError) {
@@ -6252,7 +6256,7 @@ nsDocShell::GetOnePermittedSandboxedNavigator(nsIDocShell** aSandboxedNavigator)
   NS_ENSURE_ARG_POINTER(aSandboxedNavigator);
   nsCOMPtr<nsIDocShell> permittedNavigator =
     do_QueryReferent(mOnePermittedSandboxedNavigator);
-  NS_IF_ADDREF(*aSandboxedNavigator = permittedNavigator);
+  permittedNavigator.forget(aSandboxedNavigator);
   return NS_OK;
 }
 
@@ -7826,6 +7830,7 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
              aStatus == NS_ERROR_OFFLINE ||
              aStatus == NS_ERROR_MALWARE_URI ||
              aStatus == NS_ERROR_PHISHING_URI ||
+             aStatus == NS_ERROR_UNWANTED_URI ||
              aStatus == NS_ERROR_UNSAFE_CONTENT_TYPE ||
              aStatus == NS_ERROR_REMOTE_XUL ||
              aStatus == NS_ERROR_OFFLINE ||
@@ -11965,8 +11970,7 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
   if (aNewEntry) {
     *aNewEntry = nullptr;
     if (NS_SUCCEEDED(rv)) {
-      *aNewEntry = entry;
-      NS_ADDREF(*aNewEntry);
+      entry.forget(aNewEntry);
     }
   }
 

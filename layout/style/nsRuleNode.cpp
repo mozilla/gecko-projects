@@ -3784,7 +3784,7 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     aFont->mFont.sizeAdjust = systemFont.sizeAdjust;
   } else
     SetFactor(*sizeAdjustValue, aFont->mFont.sizeAdjust,
-              aCanStoreInRuleTree, aParentFont->mFont.sizeAdjust, 0.0f,
+              aCanStoreInRuleTree, aParentFont->mFont.sizeAdjust, -1.0f,
               SETFCT_NONE | SETFCT_UNSET_INHERIT);
 }
 
@@ -5883,7 +5883,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
               display->mOrient, canStoreInRuleTree,
               SETDSC_ENUMERATED | SETDSC_UNSET_INITIAL,
               parentDisplay->mOrient,
-              NS_STYLE_ORIENT_AUTO, 0, 0, 0, 0);
+              NS_STYLE_ORIENT_INLINE, 0, 0, 0, 0);
 
   COMPUTE_END_RESET(Display, display)
 }

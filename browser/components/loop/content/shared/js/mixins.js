@@ -94,8 +94,16 @@ loop.shared.mixins = (function() {
       return {showMenu: false};
     },
 
-    _onBodyClick: function() {
-      this.setState({showMenu: false});
+    _onBodyClick: function(event) {
+      var menuButton = this.refs["menu-button"] && this.refs["menu-button"].getDOMNode();
+      if (this.refs.anchor) {
+        menuButton = this.refs.anchor.getDOMNode();
+      }
+      // If a menu button/ anchor is defined and clicked on, it will be in charge
+      // of hiding or showing the popup.
+      if (event.target !== menuButton) {
+        this.setState({ showMenu: false });
+      }
     },
 
     _correctMenuPosition: function() {
@@ -230,6 +238,18 @@ loop.shared.mixins = (function() {
     componentWillUnmount: function() {
       rootObject.removeEventListener("orientationchange", this.updateVideoContainer);
       rootObject.removeEventListener("resize", this.updateVideoContainer);
+    },
+
+    /**
+     * Resets the dimensions cache, e.g. for when the session is ended, and
+     * before a new session, so that we always ensure we see an update when a
+     * new session is started.
+     */
+    resetDimensionsCache: function() {
+      this._videoDimensionsCache = {
+        local: {},
+        remote: {}
+      };
     },
 
     /**

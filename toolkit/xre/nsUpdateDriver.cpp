@@ -331,19 +331,6 @@ IsOlderVersion(nsIFile *versionFile, const char *appVersion)
   return false;
 }
 
-#if defined(XP_WIN) && defined(MOZ_METRO)
-static bool
-IsWindowsMetroUpdateRequest(int appArgc, char **appArgv)
-{
-  for (int index = 0; index < appArgc; index++) {
-    if (!strcmp(appArgv[index], "--metro-update")) {
-      return true;
-    }
-  }
-  return false;
-}
-#endif
-
 static bool
 CopyFileIntoUpdateDir(nsIFile *parentDir, const char *leafName, nsIFile *updateDir)
 {
@@ -387,7 +374,7 @@ CopyUpdaterIntoUpdateDir(nsIFile *greDir, nsIFile *appDir, nsIFile *updateDir,
     return false;
   CopyFileIntoUpdateDir(appDir, kUpdaterINI, updateDir);
 #endif
-#if defined(XP_UNIX) && !defined(XP_MACOSX)
+#if defined(XP_UNIX) && !defined(XP_MACOSX) && !defined(ANDROID)
   nsCOMPtr<nsIFile> iconDir;
   appDir->Clone(getter_AddRefs(iconDir));
   iconDir->AppendNative(NS_LITERAL_CSTRING("icons"));
@@ -570,13 +557,6 @@ SwitchToUpdatedApp(nsIFile *greDir, nsIFile *updateDir,
   pid.AppendLiteral("/replace");
 
   int immersiveArgc = 0;
-#if defined(XP_WIN) && defined(MOZ_METRO)
-  // If this is desktop doing an update for metro, or if we're the metro browser
-  // we want to launch the metro browser after we're finished.
-  if (IsWindowsMetroUpdateRequest(appArgc, appArgv) || IsRunningInWindowsMetro()) {
-    immersiveArgc = 1;
-  }
-#endif
   int argc = appArgc + 6 + immersiveArgc;
   char **argv = new char*[argc + 1];
   if (!argv)
@@ -842,13 +822,6 @@ ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
   }
 
   int immersiveArgc = 0;
-#if defined(XP_WIN) && defined(MOZ_METRO)
-  // If this is desktop doing an update for metro, or if we're the metro browser
-  // we want to launch the metro browser after we're finished.
-  if (IsWindowsMetroUpdateRequest(appArgc, appArgv) || IsRunningInWindowsMetro()) {
-    immersiveArgc = 1;
-  }
-#endif
   int argc = appArgc + 6 + immersiveArgc;
   char **argv = new char*[argc + 1 ];
   if (!argv)

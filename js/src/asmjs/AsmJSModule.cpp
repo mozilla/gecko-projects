@@ -97,6 +97,10 @@ AsmJSModule::AsmJSModule(ScriptSource* scriptSource, uint32_t srcStart, uint32_t
     pod.strict_ = strict;
     pod.usesSignalHandlers_ = canUseSignalHandlers;
 
+    // AsmJSCheckedImmediateRange should be defined to be at most the minimum
+    // heap length so that offsets can be folded into bounds checks.
+    MOZ_ASSERT(pod.minHeapLength_ - AsmJSCheckedImmediateRange <= pod.minHeapLength_);
+
     scriptSource_->incref();
 }
 
@@ -476,6 +480,13 @@ OnOutOfBounds()
     JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
 }
 
+static void
+OnImpreciseConversion()
+{
+    JSContext* cx = JSRuntime::innermostAsmJSActivation()->cx();
+    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_SIMD_FAILED_CONVERSION);
+}
+
 static bool
 AsmJSHandleExecutionInterrupt()
 {
@@ -672,6 +683,8 @@ AddressOf(AsmJSImmKind kind, ExclusiveContext* cx)
         return RedirectCall(FuncCast(OnDetached), Args_General0);
       case AsmJSImm_OnOutOfBounds:
         return RedirectCall(FuncCast(OnOutOfBounds), Args_General0);
+      case AsmJSImm_OnImpreciseConversion:
+        return RedirectCall(FuncCast(OnImpreciseConversion), Args_General0);
       case AsmJSImm_HandleExecutionInterrupt:
         return RedirectCall(FuncCast(AsmJSHandleExecutionInterrupt), Args_General0);
       case AsmJSImm_InvokeFromAsmJS_Ignore:
@@ -761,17 +774,40 @@ AsmJSModule::staticallyLink(ExclusiveContext* cx)
         RelativeLink link = staticLinkData_.relativeLinks[i];
         uint8_t* patchAt = code_ + link.patchAtOffset;
         uint8_t* target = code_ + link.targetOffset;
+
+        // In the case of function-pointer tables and long-jumps on MIPS, the
+        // RelativeLink is used to patch a pointer to the function entry. If
+        // profiling is enabled (by cloning a module with profiling enabled),
+        // the target should be the profiling entry.
+        if (profilingEnabled_) {
+            const CodeRange* codeRange = lookupCodeRange(target);
+            if (codeRange && codeRange->isFunction() && link.targetOffset == codeRange->entry())
+                target = code_ + codeRange->profilingEntry();
+        }
+
         if (link.isRawPointerPatch())
             *(uint8_t**)(patchAt) = target;
         else
             Assembler::PatchInstructionImmediate(patchAt, PatchedImmPtr(target));
     }
 
-    for (size_t imm = 0; imm < AsmJSImm_Limit; imm++) {
-        const AsmJSModule::OffsetVector& offsets = staticLinkData_.absoluteLinks[imm];
-        void* target = AddressOf(AsmJSImmKind(imm), cx);
+    for (size_t immIndex = 0; immIndex < AsmJSImm_Limit; immIndex++) {
+        AsmJSImmKind imm = AsmJSImmKind(immIndex);
+        const OffsetVector& offsets = staticLinkData_.absoluteLinks[imm];
         for (size_t i = 0; i < offsets.length(); i++) {
-            Assembler::PatchDataWithValueCheck(CodeLocationLabel(code_ + offsets[i]),
+            uint8_t* patchAt = code_ + offsets[i];
+            void* target = AddressOf(imm, cx);
+
+            // Builtin calls are another case where, when profiling is enabled,
+            // we must point to the profiling entry.
+            AsmJSExit::BuiltinKind builtin;
+            if (profilingEnabled_ && ImmKindIsBuiltin(imm, &builtin)) {
+                const CodeRange* codeRange = lookupCodeRange(patchAt);
+                if (codeRange->isFunction())
+                    target = code_ + builtinThunkOffsets_[builtin];
+            }
+
+            Assembler::PatchDataWithValueCheck(CodeLocationLabel(patchAt),
                                                PatchedImmPtr(target),
                                                PatchedImmPtr((void*)-1));
         }
@@ -780,7 +816,7 @@ AsmJSModule::staticallyLink(ExclusiveContext* cx)
     // Initialize global data segment
 
     for (size_t i = 0; i < exits_.length(); i++) {
-        AsmJSModule::ExitDatum& exitDatum = exitIndexToGlobalDatum(i);
+        ExitDatum& exitDatum = exitIndexToGlobalDatum(i);
         exitDatum.exit = interpExitTrampoline(exits_[i]);
         exitDatum.fun = nullptr;
         exitDatum.baselineScript = nullptr;
@@ -930,6 +966,9 @@ AsmJSModule::detachHeap(JSContext* cx)
     MOZ_ASSERT_IF(active(), activation()->exitReason() == AsmJSExit::Reason_JitFFI ||
                             activation()->exitReason() == AsmJSExit::Reason_SlowFFI);
 
+    AutoFlushICache afc("AsmJSModule::detachHeap");
+    setAutoFlushICacheRange();
+
     restoreHeapToInitialState(maybeHeap_);
 
     MOZ_ASSERT(hasDetachedHeap());
@@ -968,6 +1007,7 @@ const Class AsmJSModuleObject::class_ = {
     nullptr, /* setProperty */
     nullptr, /* enumerate */
     nullptr, /* resolve */
+    nullptr, /* mayResolve */
     nullptr, /* convert */
     AsmJSModuleObject_finalize,
     nullptr, /* call */
@@ -1654,11 +1694,13 @@ AsmJSModule::clone(JSContext* cx, ScopedJSDeletePtr<AsmJSModule>* moduleOut) con
         }
     }
 
-    // We already know the exact extent of areas that need to be patched, just make sure we
-    // flush all of them at once.
+
+    // Delay flushing until dynamic linking.
+    AutoFlushICache afc("AsmJSModule::clone", /* inhibit = */ true);
     out.setAutoFlushICacheRange();
 
     out.restoreToInitialState(maybeHeap_, code_, cx);
+    out.staticallyLink(cx);
     return true;
 }
 
@@ -1747,7 +1789,7 @@ AsmJSModule::setProfilingEnabled(bool enabled, JSContext* cx)
         if (codeRange->kind() != CodeRange::Function)
             continue;
 
-        uint8_t* profilingEntry = code_ + codeRange->begin();
+        uint8_t* profilingEntry = code_ + codeRange->profilingEntry();
         uint8_t* entry = code_ + codeRange->entry();
         MOZ_ASSERT_IF(profilingEnabled_, callee == profilingEntry);
         MOZ_ASSERT_IF(!profilingEnabled_, callee == entry);
@@ -1776,7 +1818,7 @@ AsmJSModule::setProfilingEnabled(bool enabled, JSContext* cx)
         for (size_t j = 0; j < funcPtrTable.numElems(); j++) {
             void* callee = array[j];
             const CodeRange* codeRange = lookupCodeRange(callee);
-            uint8_t* profilingEntry = code_ + codeRange->begin();
+            uint8_t* profilingEntry = code_ + codeRange->profilingEntry();
             uint8_t* entry = code_ + codeRange->entry();
             MOZ_ASSERT_IF(profilingEnabled_, callee == profilingEntry);
             MOZ_ASSERT_IF(!profilingEnabled_, callee == entry);
@@ -2250,10 +2292,8 @@ js::LookupAsmJSModuleInCache(ExclusiveContext* cx,
     parser.tokenStream.advance(module->srcEndBeforeCurly());
 
     {
-        // No need to flush the instruction cache now, it will be flushed when
-        // dynamically linking. We already know the exact extent of areas that need
-        // to be patched, just make sure we flush all of them at once.
-        AutoFlushICache afc("LookupAsmJSModuleInCache", /* inhibit= */ true);
+        // Delay flushing until dynamic linking.
+        AutoFlushICache afc("LookupAsmJSModuleInCache", /* inhibit = */ true);
         module->setAutoFlushICacheRange();
 
         module->staticallyLink(cx);
