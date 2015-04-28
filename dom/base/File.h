@@ -67,7 +67,7 @@ public:
   static already_AddRefed<File>
   Create(nsISupports* aParent, const nsAString& aName,
          const nsAString& aContentType, uint64_t aLength,
-         uint64_t aLastModifiedDate);
+         int64_t aLastModifiedDate);
 
   static already_AddRefed<File>
   Create(nsISupports* aParent, const nsAString& aName,
@@ -87,7 +87,7 @@ public:
   static already_AddRefed<File>
   CreateMemoryFile(nsISupports* aParent, void* aMemoryBuffer, uint64_t aLength,
                    const nsAString& aName, const nsAString& aContentType,
-                   uint64_t aLastModifiedDate);
+                   int64_t aLastModifiedDate);
 
   // The returned File takes ownership of aMemoryBuffer. aMemoryBuffer will be
   // freed by free so it must be allocated by malloc or something
@@ -276,7 +276,7 @@ public:
   virtual void SetLazyData(const nsAString& aName,
                            const nsAString& aContentType,
                            uint64_t aLength,
-                           uint64_t aLastModifiedDate) = 0;
+                           int64_t aLastModifiedDate) = 0;
 
   virtual bool IsMemoryFile() const = 0;
 
@@ -302,7 +302,7 @@ class FileImplBase : public FileImpl
 {
 public:
   FileImplBase(const nsAString& aName, const nsAString& aContentType,
-               uint64_t aLength, uint64_t aLastModifiedDate)
+               uint64_t aLength, int64_t aLastModifiedDate)
     : mIsFile(true)
     , mImmutable(false)
     , mContentType(aContentType)
@@ -323,7 +323,7 @@ public:
     , mName(aName)
     , mStart(0)
     , mLength(aLength)
-    , mLastModificationDate(UINT64_MAX)
+    , mLastModificationDate(INT64_MAX)
   {
     // Ensure non-null mContentType by default
     mContentType.SetIsVoid(false);
@@ -335,7 +335,7 @@ public:
     , mContentType(aContentType)
     , mStart(0)
     , mLength(aLength)
-    , mLastModificationDate(UINT64_MAX)
+    , mLastModificationDate(INT64_MAX)
   {
     // Ensure non-null mContentType by default
     mContentType.SetIsVoid(false);
@@ -348,7 +348,7 @@ public:
     , mContentType(aContentType)
     , mStart(aStart)
     , mLength(aLength)
-    , mLastModificationDate(UINT64_MAX)
+    , mLastModificationDate(INT64_MAX)
   {
     NS_ASSERTION(aLength != UINT64_MAX,
                  "Must know length when creating slice");
@@ -412,7 +412,7 @@ public:
 
   virtual void
   SetLazyData(const nsAString& aName, const nsAString& aContentType,
-              uint64_t aLength, uint64_t aLastModifiedDate) override
+              uint64_t aLength, int64_t aLastModifiedDate) override
   {
     NS_ASSERTION(aLength, "must have length");
 
@@ -430,7 +430,7 @@ public:
 
   virtual bool IsDateUnknown() const override
   {
-    return mIsFile && mLastModificationDate == UINT64_MAX;
+    return mIsFile && mLastModificationDate == INT64_MAX;
   }
 
   virtual bool IsFile() const override
@@ -480,7 +480,7 @@ protected:
   uint64_t mStart;
   uint64_t mLength;
 
-  uint64_t mLastModificationDate;
+  int64_t mLastModificationDate;
 
   // Protected by IndexedDatabaseManager::FileMutex()
   nsTArray<nsRefPtr<indexedDB::FileInfo>> mFileInfos;
@@ -496,7 +496,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   FileImplMemory(void* aMemoryBuffer, uint64_t aLength, const nsAString& aName,
-                 const nsAString& aContentType, uint64_t aLastModifiedDate)
+                 const nsAString& aContentType, int64_t aLastModifiedDate)
     : FileImplBase(aName, aContentType, aLength, aLastModifiedDate)
     , mDataOwner(new DataOwner(aMemoryBuffer, aLength))
   {
@@ -592,9 +592,7 @@ public:
   FileImplTemporaryFileBlob(PRFileDesc* aFD, uint64_t aStartPos,
                             uint64_t aLength, const nsAString& aContentType)
     : FileImplBase(aContentType, aLength)
-    , mLength(aLength)
     , mStartPos(aStartPos)
-    , mContentType(aContentType)
   {
     mFileDescOwner = new nsTemporaryFileInputStream::FileDescOwner(aFD);
   }
@@ -610,17 +608,14 @@ private:
                             uint64_t aStart, uint64_t aLength,
                             const nsAString& aContentType)
     : FileImplBase(aContentType, aLength)
-    , mLength(aLength)
     , mStartPos(aStart)
     , mFileDescOwner(aOther->mFileDescOwner)
-    , mContentType(aContentType) {}
+  {}
 
   ~FileImplTemporaryFileBlob() {}
 
-  uint64_t mLength;
   uint64_t mStartPos;
   nsRefPtr<nsTemporaryFileInputStream::FileDescOwner> mFileDescOwner;
-  nsString mContentType;
 };
 
 class FileImplFile : public FileImplBase
@@ -630,7 +625,7 @@ public:
 
   // Create as a file
   explicit FileImplFile(nsIFile* aFile, bool aTemporary = false)
-    : FileImplBase(EmptyString(), EmptyString(), UINT64_MAX, UINT64_MAX)
+    : FileImplBase(EmptyString(), EmptyString(), UINT64_MAX, INT64_MAX)
     , mFile(aFile)
     , mWholeFile(true)
     , mStoredFile(false)
@@ -643,7 +638,7 @@ public:
   }
 
   FileImplFile(nsIFile* aFile, indexedDB::FileInfo* aFileInfo)
-    : FileImplBase(EmptyString(), EmptyString(), UINT64_MAX, UINT64_MAX)
+    : FileImplBase(EmptyString(), EmptyString(), UINT64_MAX, INT64_MAX)
     , mFile(aFile)
     , mWholeFile(true)
     , mStoredFile(true)
@@ -672,7 +667,7 @@ public:
 
   FileImplFile(const nsAString& aName, const nsAString& aContentType,
                uint64_t aLength, nsIFile* aFile,
-               uint64_t aLastModificationDate)
+               int64_t aLastModificationDate)
     : FileImplBase(aName, aContentType, aLength, aLastModificationDate)
     , mFile(aFile)
     , mWholeFile(true)
@@ -685,7 +680,7 @@ public:
   // Create as a file with custom name
   FileImplFile(nsIFile* aFile, const nsAString& aName,
                const nsAString& aContentType)
-    : FileImplBase(aName, aContentType, UINT64_MAX, UINT64_MAX)
+    : FileImplBase(aName, aContentType, UINT64_MAX, INT64_MAX)
     , mFile(aFile)
     , mWholeFile(true)
     , mStoredFile(false)
@@ -727,7 +722,7 @@ public:
 
   // Create as a file to be later initialized
   FileImplFile()
-    : FileImplBase(EmptyString(), EmptyString(), UINT64_MAX, UINT64_MAX)
+    : FileImplBase(EmptyString(), EmptyString(), UINT64_MAX, INT64_MAX)
     , mWholeFile(true)
     , mStoredFile(false)
     , mIsTemporary(false)

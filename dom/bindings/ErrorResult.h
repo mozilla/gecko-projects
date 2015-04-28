@@ -77,10 +77,23 @@ public:
     AssignErrorCode(rv);
   }
 
+  // Use SuppressException when you want to suppress any exception that might be
+  // on the ErrorResult.  After this call, the ErrorResult will be back a "no
+  // exception thrown" state.
+  void SuppressException();
+
+  // Use StealNSResult() when you want to safely convert the ErrorResult to an
+  // nsresult that you will then return to a caller.  This will
+  // SuppressException(), since there will no longer be a way to report it.
+  nsresult StealNSResult() {
+    nsresult rv = ErrorCode();
+    SuppressException();
+    return rv;
+  }
+
   void ThrowTypeError(const dom::ErrNum errorNumber, ...);
   void ThrowRangeError(const dom::ErrNum errorNumber, ...);
   void ReportErrorWithMessage(JSContext* cx);
-  void ClearMessage();
   bool IsErrorWithMessage() const { return ErrorCode() == NS_ERROR_TYPE_ERR || ErrorCode() == NS_ERROR_RANGE_ERR; }
 
   // Facilities for throwing a preexisting JS exception value via this
@@ -106,6 +119,10 @@ public:
                                 const char* memberName);
   bool IsNotEnoughArgsError() const { return ErrorCode() == NS_ERROR_XPC_NOT_ENOUGH_ARGS; }
 
+  // Report a generic error.  This should only be used if we're not
+  // some more specific exception type.
+  void ReportGenericError(JSContext* cx);
+
   // Support for uncatchable exceptions.
   void ThrowUncatchableException() {
     Throw(NS_ERROR_UNCATCHABLE_EXCEPTION);
@@ -116,7 +133,7 @@ public:
 
   // StealJSException steals the JS Exception from the object. This method must
   // be called only if IsJSException() returns true. This method also resets the
-  // ErrorCode() to NS_OK.
+  // error code to NS_OK.
   void StealJSException(JSContext* cx, JS::MutableHandle<JS::Value> value);
 
   void MOZ_ALWAYS_INLINE MightThrowJSException()
@@ -147,6 +164,16 @@ public:
     return NS_FAILED(mResult);
   }
 
+  bool ErrorCodeIs(nsresult rv) const {
+    return mResult == rv;
+  }
+
+  // For use in logging ONLY.
+  uint32_t ErrorCodeAsInt() const {
+    return static_cast<uint32_t>(ErrorCode());
+  }
+
+protected:
   nsresult ErrorCode() const {
     return mResult;
   }
@@ -169,6 +196,8 @@ private:
     MOZ_ASSERT(!IsNotEnoughArgsError(), "Don't overwrite not enough args error");
     mResult = aRv;
   }
+
+  void ClearMessage();
 
   nsresult mResult;
   struct Message;
@@ -206,7 +235,7 @@ private:
     if (res.Failed()) {                                                   \
       nsCString msg;                                                      \
       msg.AppendPrintf("ENSURE_SUCCESS(%s, %s) failed with "              \
-                       "result 0x%X", #res, #ret, res.ErrorCode());       \
+                       "result 0x%X", #res, #ret, res.ErrorCodeAsInt());  \
       NS_WARNING(msg.get());                                              \
       return ret;                                                         \
     }                                                                     \
@@ -217,7 +246,7 @@ private:
     if (res.Failed()) {                                                   \
       nsCString msg;                                                      \
       msg.AppendPrintf("ENSURE_SUCCESS_VOID(%s) failed with "             \
-                       "result 0x%X", #res, res.ErrorCode());             \
+                       "result 0x%X", #res, res.ErrorCodeAsInt());        \
       NS_WARNING(msg.get());                                              \
       return;                                                             \
     }                                                                     \
