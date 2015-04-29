@@ -89,8 +89,13 @@ nsScriptError::GetMessageMoz(char16_t** result) {
 NS_IMETHODIMP
 nsScriptError::GetLogLevel(uint32_t* aLogLevel)
 {
-  *aLogLevel = mFlags & (uint32_t)nsIScriptError::errorFlag ?
-               nsIConsoleMessage::error : nsIConsoleMessage::warn;
+  if (mFlags & (uint32_t)nsIScriptError::infoFlag) {
+    *aLogLevel = nsIConsoleMessage::info;
+  } else if (mFlags & (uint32_t)nsIScriptError::warningFlag) {
+    *aLogLevel = nsIConsoleMessage::warn;
+  } else {
+    *aLogLevel = nsIConsoleMessage::error;
+  }
   return NS_OK;
 }
 
@@ -203,9 +208,11 @@ nsScriptError::ToString(nsACString& /*UTF8*/ aResult)
     if (!mMessage.IsEmpty())
         tempMessage = ToNewUTF8String(mMessage);
     if (!mSourceName.IsEmpty())
-        tempSourceName = ToNewUTF8String(mSourceName);
+        // Use at most 512 characters from mSourceName.
+        tempSourceName = ToNewUTF8String(StringHead(mSourceName, 512));
     if (!mSourceLine.IsEmpty())
-        tempSourceLine = ToNewUTF8String(mSourceLine);
+        // Use at most 512 characters from mSourceLine.
+        tempSourceLine = ToNewUTF8String(StringHead(mSourceLine, 512));
 
     if (nullptr != tempSourceName && nullptr != tempSourceLine)
         temp = JS_smprintf(format0,

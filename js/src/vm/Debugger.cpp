@@ -1655,6 +1655,28 @@ Debugger::isDebuggee(const JSCompartment* compartment) const
     return compartment->isDebuggee() && debuggees.has(compartment->maybeGlobal());
 }
 
+/* static */ Debugger::AllocationSite*
+Debugger::AllocationSite::create(JSContext* cx, HandleObject frame, int64_t when, HandleObject obj)
+{
+    assertSameCompartment(cx, frame);
+
+    RootedAtom ctorName(cx);
+    {
+        AutoCompartment ac(cx, obj);
+        if (!obj->constructorDisplayAtom(cx, &ctorName))
+            return nullptr;
+    }
+
+    AllocationSite* allocSite = cx->new_<AllocationSite>(frame, when);
+    if (!allocSite)
+        return nullptr;
+
+    allocSite->className = obj->getClass()->name;
+    allocSite->ctorName = ctorName.get();
+    return allocSite;
+}
+
+
 bool
 Debugger::appendAllocationSite(JSContext* cx, HandleObject obj, HandleSavedFrame frame,
                                int64_t when)
@@ -1664,7 +1686,7 @@ Debugger::appendAllocationSite(JSContext* cx, HandleObject obj, HandleSavedFrame
     if (!cx->compartment()->wrap(cx, &wrappedFrame))
         return false;
 
-    AllocationSite* allocSite = cx->new_<AllocationSite>(wrappedFrame, when, obj->getClass()->name);
+    AllocationSite* allocSite = AllocationSite::create(cx, wrappedFrame, when, obj);
     if (!allocSite)
         return false;
 
@@ -2324,6 +2346,8 @@ Debugger::trace(JSTracer* trc)
     for (AllocationSite* s = allocationsLog.getFirst(); s; s = s->getNext()) {
         if (s->frame)
             TraceEdge(trc, &s->frame, "allocation log SavedFrame");
+        if (s->ctorName)
+            TraceEdge(trc, &s->ctorName, "allocation log constructor name");
     }
 
     /* Trace the weak map from JSScript instances to Debugger.Script objects. */
@@ -5648,7 +5672,7 @@ CheckThisFrame(JSContext* cx, const CallArgs& args, const char* fnname, bool che
     THIS_FRAME_THISOBJ(cx, argc, vp, fnname, args, thisobj);                   \
     AbstractFramePtr frame = AbstractFramePtr::FromRaw(thisobj->getPrivate()); \
     if (frame.isScriptFrameIterData()) {                                       \
-        ScriptFrameIter iter(*(ScriptFrameIter::Data*)(frame.raw()));         \
+        ScriptFrameIter iter(*(ScriptFrameIter::Data*)(frame.raw()));          \
         frame = iter.abstractFramePtr();                                       \
     }
 
@@ -5658,10 +5682,11 @@ CheckThisFrame(JSContext* cx, const CallArgs& args, const char* fnname, bool che
     {                                                                          \
         AbstractFramePtr f = AbstractFramePtr::FromRaw(thisobj->getPrivate()); \
         if (f.isScriptFrameIterData()) {                                       \
-            maybeIter.emplace(*(ScriptFrameIter::Data*)(f.raw()));            \
+            maybeIter.emplace(*(ScriptFrameIter::Data*)(f.raw()));             \
         } else {                                                               \
             maybeIter.emplace(cx, ScriptFrameIter::ALL_CONTEXTS,               \
-                              ScriptFrameIter::GO_THROUGH_SAVED);              \
+                              ScriptFrameIter::GO_THROUGH_SAVED,               \
+                              ScriptFrameIter::IGNORE_DEBUGGER_EVAL_PREV_LINK); \
             ScriptFrameIter& iter = *maybeIter;                                \
             while (!iter.hasUsableAbstractFramePtr() || iter.abstractFramePtr() != f) \
                 ++iter;                                                        \
@@ -6383,7 +6408,7 @@ DebuggerObject_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
     RootedObject obj(cx, DebuggerObject_checkThis(cx, args, fnname));         \
     if (!obj)                                                                 \
         return false;                                                         \
-    obj = (JSObject*) obj->as<NativeObject>().getPrivate();                  \
+    obj = (JSObject*) obj->as<NativeObject>().getPrivate();                   \
     MOZ_ASSERT(obj)
 
 #define THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, fnname, args, dbg, obj) \
@@ -6392,7 +6417,7 @@ DebuggerObject_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
    if (!obj)                                                                  \
        return false;                                                          \
    Debugger* dbg = Debugger::fromChildJSObject(obj);                          \
-   obj = (JSObject*) obj->as<NativeObject>().getPrivate();                   \
+   obj = (JSObject*) obj->as<NativeObject>().getPrivate();                    \
    MOZ_ASSERT(obj)
 
 static bool
@@ -7308,10 +7333,10 @@ DebuggerEnv_checkThis(JSContext* cx, const CallArgs& args, const char* fnname,
     NativeObject* envobj = DebuggerEnv_checkThis(cx, args, fnname);           \
     if (!envobj)                                                              \
         return false;                                                         \
-    Rooted<Env*> env(cx, static_cast<Env*>(envobj->getPrivate()));           \
+    Rooted<Env*> env(cx, static_cast<Env*>(envobj->getPrivate()));            \
     MOZ_ASSERT(env);                                                          \
     MOZ_ASSERT(!IsSyntacticScope(env));
- 
+
  #define THIS_DEBUGENV_OWNER(cx, argc, vp, fnname, args, envobj, env, dbg)    \
      THIS_DEBUGENV(cx, argc, vp, fnname, args, envobj, env);                  \
     Debugger* dbg = Debugger::fromChildJSObject(envobj)
