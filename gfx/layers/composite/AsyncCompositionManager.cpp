@@ -13,7 +13,7 @@
 #include "gfxPoint.h"                   // for gfxPoint, gfxSize
 #include "mozilla/StyleAnimationValue.h" // for StyleAnimationValue, etc
 #include "mozilla/WidgetUtils.h"        // for ComputeTransformForRotation
-#include "mozilla/dom/KeyframeEffect.h" // for KeyframeEffectReadonly
+#include "mozilla/dom/KeyframeEffect.h" // for KeyframeEffectReadOnly
 #include "mozilla/gfx/BaseRect.h"       // for BaseRect
 #include "mozilla/gfx/Point.h"          // for RoundedToInt, PointTyped
 #include "mozilla/gfx/Rect.h"           // for RoundedToInt, RectTyped
@@ -474,7 +474,7 @@ SampleAnimations(Layer* aLayer, TimeStamp aPoint)
     timing.mFillMode = NS_STYLE_ANIMATION_FILL_MODE_BOTH;
 
     ComputedTiming computedTiming =
-      dom::KeyframeEffectReadonly::GetComputedTimingAt(
+      dom::KeyframeEffectReadOnly::GetComputedTimingAt(
         Nullable<TimeDuration>(elapsedDuration), timing);
 
     MOZ_ASSERT(0.0 <= computedTiming.mTimeFraction &&
@@ -606,6 +606,17 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer)
     // When doing so, it might be useful to look at how it was called here before
     // bug 1036967 removed the (dead) call.
 
+#if defined(MOZ_ANDROID_APZ)
+    if (mIsFirstPaint) {
+      CSSToLayerScale geckoZoom = metrics.LayersPixelsPerCSSPixel().ToScaleFactor();
+      LayerIntPoint scrollOffsetLayerPixels = RoundedToInt(metrics.GetScrollOffset() * geckoZoom);
+      mContentRect = metrics.GetScrollableRect();
+      SetFirstPaintViewport(scrollOffsetLayerPixels,
+                            geckoZoom,
+                            mContentRect);
+    }
+#endif
+
     mIsFirstPaint = false;
     mLayersUpdated = false;
 
@@ -723,11 +734,13 @@ ApplyAsyncTransformToScrollbarForContent(Layer* aScrollbar,
     // |metrics.CalculateCompositedSizeInCssPixels()| would not give a correct
     // result.
     const CSSToParentLayerScale effectiveZoom(metrics.GetZoom().yScale * asyncZoomY);
-    const CSSCoord compositedHeight = (metrics.mCompositionBounds / effectiveZoom).height;
-    const CSSCoord scrollableHeight = metrics.GetScrollableRect().height;
 
-    // The scrollbar thumb ratio is in AppUnits.
-    const float ratio = aScrollbar->GetScrollbarThumbRatio();
+    const LayoutDeviceToParentLayerScale nonLayoutScale = effectiveZoom /
+        metrics.GetDevPixelsPerCSSPixel();
+    // Here we convert the scrollbar thumb ratio into a true unitless ratio by
+    // dividing out the conversion factor from the scrollframe's parent's space
+    // to the scrollframe's space.
+    const float ratio = aScrollbar->GetScrollbarThumbRatio() / nonLayoutScale.scale;
     ParentLayerCoord yTranslation = -asyncScrollY * ratio;
 
     // The scroll thumb additionally needs to be translated to compensate for
@@ -741,7 +754,7 @@ ApplyAsyncTransformToScrollbarForContent(Layer* aScrollbar,
     // a change of basis. We have a method to help with that,
     // Matrix4x4::ChangeBasis(), but it wouldn't necessarily make the code
     // cleaner in this case).
-    const CSSCoord thumbOrigin = (metrics.GetScrollOffset().y / scrollableHeight) * compositedHeight;
+    const CSSCoord thumbOrigin = (metrics.GetScrollOffset().y * ratio);
     const CSSCoord thumbOriginScaled = thumbOrigin * yScale;
     const CSSCoord thumbOriginDelta = thumbOriginScaled - thumbOrigin;
     const ParentLayerCoord thumbOriginDeltaPL = thumbOriginDelta * effectiveZoom;
@@ -770,14 +783,13 @@ ApplyAsyncTransformToScrollbarForContent(Layer* aScrollbar,
     const float xScale = 1.f / asyncZoomX;
 
     const CSSToParentLayerScale effectiveZoom(metrics.GetZoom().xScale * asyncZoomX);
-    const CSSCoord compositedWidth = (metrics.mCompositionBounds / effectiveZoom).width;
-    const CSSCoord scrollableWidth = metrics.GetScrollableRect().width;
 
-    // The scrollbar thumb ratio is in AppUnits.
-    const float ratio = aScrollbar->GetScrollbarThumbRatio();
+    const LayoutDeviceToParentLayerScale nonLayoutScale = effectiveZoom /
+        metrics.GetDevPixelsPerCSSPixel();
+    const float ratio = aScrollbar->GetScrollbarThumbRatio() / nonLayoutScale.scale;
     ParentLayerCoord xTranslation = -asyncScrollX * ratio;
 
-    const CSSCoord thumbOrigin = (metrics.GetScrollOffset().x / scrollableWidth) * compositedWidth;
+    const CSSCoord thumbOrigin = (metrics.GetScrollOffset().x * ratio);
     const CSSCoord thumbOriginScaled = thumbOrigin * xScale;
     const CSSCoord thumbOriginDelta = thumbOriginScaled - thumbOrigin;
     const ParentLayerCoord thumbOriginDeltaPL = thumbOriginDelta * effectiveZoom;

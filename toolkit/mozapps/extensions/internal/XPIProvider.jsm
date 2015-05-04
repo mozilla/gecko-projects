@@ -129,6 +129,8 @@ const PREFIX_NS_EM                    = "http://www.mozilla.org/2004/em-rdf#";
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
+const XPI_SIGNATURE_CHECK_PERIOD      = 24 * 60 * 60;
+
 // The value for this is in Makefile.in
 #expand const DB_SCHEMA                       = __MOZ_EXTENSIONS_DB_SCHEMA__;
 const NOTIFICATION_TOOLBOXPROCESS_LOADED      = "ToolboxProcessLoaded";
@@ -1058,10 +1060,7 @@ let loadManifestFromDir = Task.async(function* loadManifestFromDir(aDir) {
     addon.hasBinaryComponents = ChromeManifestParser.hasType(chromeManifest,
                                                              "binary-component");
 
-    if (SIGNED_TYPES.has(addon.type))
-      addon.signedState = yield verifyDirSignedState(aDir, addon.id);
-    else
-      addon.signedState = AddonManager.SIGNEDSTATE_MISSING;
+    addon.signedState = yield verifyDirSignedState(aDir, addon);
 
     addon.appDisabled = !isUsableAddon(addon);
     return addon;
@@ -1106,10 +1105,7 @@ let loadManifestFromZipReader = Task.async(function* loadManifestFromZipReader(a
       addon.hasBinaryComponents = false;
     }
 
-    if (SIGNED_TYPES.has(addon.type))
-      addon.signedState = yield verifyZipSignedState(aZipReader.file, addon.id, addon.version);
-    else
-      addon.signedState = AddonManager.SIGNEDSTATE_MISSING;
+    addon.signedState = yield verifyZipSignedState(aZipReader.file, addon);
 
     addon.appDisabled = !isUsableAddon(addon);
     return addon;
@@ -1323,11 +1319,14 @@ function getSignedStatus(aRv, aCert, aExpectedID) {
  *
  * @param  aFile
  *         the xpi file to check
- * @param  aExpectedID
- *         the expected ID of the signature
+ * @param  aAddon
+ *         the add-on object to verify
  * @return a Promise that resolves to an AddonManager.SIGNEDSTATE_* constant.
  */
-function verifyZipSignedState(aFile, aExpectedID, aVersion) {
+function verifyZipSignedState(aFile, aAddon) {
+  if (!SIGNED_TYPES.has(aAddon.type))
+    return Promise.resolve(undefined);
+
   let certDB = Cc["@mozilla.org/security/x509certdb;1"]
                .getService(Ci.nsIX509CertDB);
 
@@ -1339,7 +1338,7 @@ function verifyZipSignedState(aFile, aExpectedID, aVersion) {
     certDB.openSignedAppFileAsync(root, aFile, (aRv, aZipReader, aCert) => {
       if (aZipReader)
         aZipReader.close();
-      resolve(getSignedStatus(aRv, aCert, aExpectedID));
+      resolve(getSignedStatus(aRv, aCert, aAddon.id));
     });
   });
 }
@@ -1350,13 +1349,32 @@ function verifyZipSignedState(aFile, aExpectedID, aVersion) {
  *
  * @param  aDir
  *         the directory to check
- * @param  aExpectedID
- *         the expected ID of the signature
+ * @param  aAddon
+ *         the add-on object to verify
  * @return a Promise that resolves to an AddonManager.SIGNEDSTATE_* constant.
  */
-function verifyDirSignedState(aDir, aExpectedID) {
+function verifyDirSignedState(aDir, aAddon) {
+  if (!SIGNED_TYPES.has(aAddon.type))
+    return Promise.resolve(undefined);
+
   // TODO: Get the certificate for an unpacked add-on (bug 1038072)
   return Promise.resolve(AddonManager.SIGNEDSTATE_MISSING);
+}
+
+/**
+ * Verifies that a bundle's contents are all correctly signed by an
+ * AMO-issued certificate
+ *
+ * @param  aBundle
+ *         the nsIFile for the bundle to check, either a directory or zip file
+ * @param  aAddon
+ *         the add-on object to verify
+ * @return a Promise that resolves to an AddonManager.SIGNEDSTATE_* constant.
+ */
+function verifyBundleSignedState(aBundle, aAddon) {
+  if (aBundle.isFile())
+    return verifyZipSignedState(aBundle, aAddon);
+  return verifyDirSignedState(aBundle, aAddon);
 }
 
 /**
@@ -2344,6 +2362,12 @@ this.XPIProvider = {
 
       this.extensionsActive = true;
       this.runPhase = XPI_BEFORE_UI_STARTUP;
+
+      let timerManager = Cc["@mozilla.org/updates/timer-manager;1"].
+                         getService(Ci.nsIUpdateTimerManager);
+      timerManager.registerTimer("xpi-signature-verification", () => {
+        this.verifySignatures();
+      }, XPI_SIGNATURE_CHECK_PERIOD);
     }
     catch (e) {
       logger.error("startup failed", e);
@@ -2492,6 +2516,45 @@ this.XPIProvider = {
     // Ensure any changes to the add-ons list are flushed to disk
     Services.prefs.setBoolPref(PREF_PENDING_OPERATIONS,
                                !XPIDatabase.writeAddonsList());
+  },
+
+  /**
+   * Verifies that all installed add-ons are still correctly signed.
+   */
+  verifySignatures: function XPI_verifySignatures() {
+    XPIDatabase.getAddonList(a => true, (addons) => {
+      Task.spawn(function*() {
+        let changes = {
+          enabled: [],
+          disabled: []
+        };
+
+        for (let addon of addons) {
+          // The add-on might have vanished, we'll catch that on the next startup
+          if (!addon._sourceBundle.exists())
+            continue;
+
+          let signedState = yield verifyBundleSignedState(addon._sourceBundle, addon);
+          if (signedState == addon.signedState)
+            continue;
+
+          addon.signedState = signedState;
+          AddonManagerPrivate.callAddonListeners("onPropertyChanged",
+                                                 createWrapper(addon),
+                                                 ["signedState"]);
+
+          let disabled = XPIProvider.updateAddonDisabledState(addon);
+          if (disabled !== undefined)
+            changes[disabled ? "disabled" : "enabled"].push(addon.id);
+        }
+
+        XPIDatabase.saveChanges();
+
+        Services.obs.notifyObservers(null, "xpi-signature-changed", JSON.stringify(changes));
+      }).then(null, err => {
+        logger.error("XPI_verifySignature: " + err);
+      })
+    });
   },
 
   /**
@@ -3105,7 +3168,7 @@ this.XPIProvider = {
 
         // If updating from a version of the app that didn't support signedState
         // then fetch that property now
-        if (aOldAddon.signedState === undefined) {
+        if (aOldAddon.signedState === undefined && SIGNED_TYPES.has(aOldAddon.type)) {
           let file = aInstallLocation.getLocationForID(aOldAddon.id);
           let manifest = syncLoadManifestFromFile(file);
           aOldAddon.signedState = manifest.signedState;
@@ -4557,6 +4620,10 @@ this.XPIProvider = {
    * @param  aSoftDisabled
    *         Value for the softDisabled property. If undefined the value will
    *         not change. If true this will force userDisabled to be true
+   * @return a tri-state indicating the action taken for the add-on:
+   *           - undefined: The add-on did not change state
+   *           - true: The add-on because disabled
+   *           - false: The add-on became enabled
    * @throws if addon is not a DBAddonInternal
    */
   updateAddonDisabledState: function XPI_updateAddonDisabledState(aAddon,
@@ -4587,7 +4654,7 @@ this.XPIProvider = {
     if (aAddon.userDisabled == aUserDisabled &&
         aAddon.appDisabled == appDisabled &&
         aAddon.softDisabled == aSoftDisabled)
-      return;
+      return undefined;
 
     let wasDisabled = aAddon.disabled;
     let isDisabled = aUserDisabled || aSoftDisabled || appDisabled;
@@ -4607,21 +4674,22 @@ this.XPIProvider = {
       });
     }
 
+    let wrapper = createWrapper(aAddon);
+
     if (appDisabledChanged) {
       AddonManagerPrivate.callAddonListeners("onPropertyChanged",
-                                            aAddon,
-                                            ["appDisabled"]);
+                                             wrapper,
+                                             ["appDisabled"]);
     }
 
     // If the add-on is not visible or the add-on is not changing state then
     // there is no need to do anything else
     if (!aAddon.visible || (wasDisabled == isDisabled))
-      return;
+      return undefined;
 
     // Flag that active states in the database need to be updated on shutdown
     Services.prefs.setBoolPref(PREF_PENDING_OPERATIONS, true);
 
-    let wrapper = createWrapper(aAddon);
     // Have we just gone back to the current state?
     if (isDisabled != aAddon.active) {
       AddonManagerPrivate.callAddonListeners("onOperationCancelled", wrapper);
@@ -4673,6 +4741,8 @@ this.XPIProvider = {
     // Notify any other providers that a new theme has been enabled
     if (aAddon.type == "theme" && !isDisabled)
       AddonManagerPrivate.notifyAddonChanged(aAddon.id, aAddon.type, needsRestart);
+
+    return isDisabled;
   },
 
   /**
@@ -5348,7 +5418,8 @@ AddonInstall.prototype = {
                                "signature verification failed"])
       }
     }
-    else if (this.addon.signedState == AddonManager.SIGNEDSTATE_UNKNOWN) {
+    else if (this.addon.signedState == AddonManager.SIGNEDSTATE_UNKNOWN ||
+             this.addon.signedState == undefined) {
       // Check object signing certificate, if any
       let x509 = zipreader.getSigningCert(null);
       if (x509) {

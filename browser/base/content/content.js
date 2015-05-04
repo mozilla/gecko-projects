@@ -101,18 +101,22 @@ let handleContentContextMenu = function (event) {
       event.target instanceof Ci.nsIImageLoadingContent &&
       event.target.currentURI) {
     try {
-      let imageCache = Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
-                                                       .getImgCacheForDocument(doc);
+      let imageCache = 
+        Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
+                                        .getImgCacheForDocument(doc);
       let props =
         imageCache.findEntryProperties(event.target.currentURI);
-      if (props) {
+      try {
         contentType = props.get("type", Ci.nsISupportsCString).data;
-        contentDisposition = props.get("content-disposition", Ci.nsISupportsCString).data;
-      }
-    } catch (e) {
-      Cu.reportError(e);
-    }
+      } catch(e) {}
+      try {
+        contentDisposition =
+          props.get("content-disposition", Ci.nsISupportsCString).data;
+      } catch(e) {}
+    } catch(e) {}
   }
+
+  let selectionInfo = BrowserUtils.getSelectionDetails(content);
 
   if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
     let editFlags = SpellCheckHelper.isEditable(event.target, content);
@@ -136,7 +140,7 @@ let handleContentContextMenu = function (event) {
                     { editFlags, spellInfo, customMenuItems, addonInfo,
                       principal, docLocation, charSet, baseURI, referrer,
                       referrerPolicy, contentType, contentDisposition,
-                      frameOuterWindowID },
+                      frameOuterWindowID, selectionInfo },
                     { event, popupNode: event.target });
   }
   else {
@@ -156,6 +160,7 @@ let handleContentContextMenu = function (event) {
       referrerPolicy: referrerPolicy,
       contentType: contentType,
       contentDisposition: contentDisposition,
+      selectionInfo: selectionInfo,
     };
   }
 }
@@ -205,6 +210,15 @@ let AboutNetErrorListener = {
     if (automatic) {
       this.onSendReport(evt);
     }
+    // hide parts of the UI we don't need yet
+    let contentDoc = content.document;
+
+    let reportSendingMsg = contentDoc.getElementById("reportSendingMessage");
+    let reportSentMsg = contentDoc.getElementById("reportSentMessage");
+    let retryBtn = contentDoc.getElementById("reportCertificateErrorRetry");
+    reportSendingMsg.style.display = "none";
+    reportSentMsg.style.display = "none";
+    retryBtn.style.display = "none";
   },
 
   onSetAutomatic: function(evt) {
@@ -231,22 +245,21 @@ let AboutNetErrorListener = {
           reportBtn.style.display = "none";
           retryBtn.style.display = "none";
           reportSentMsg.style.display = "none";
-          reportSendingMsg.style.display = "inline";
+          reportSendingMsg.style.removeProperty("display");
           break;
         case "error":
           // show the retry button
-          retryBtn.style.display = "inline";
+          retryBtn.style.removeProperty("display");
           reportSendingMsg.style.display = "none";
           break;
         case "complete":
           // Show a success indicator
-          reportSentMsg.style.display = "inline";
+          reportSentMsg.style.removeProperty("display");
           reportSendingMsg.style.display = "none";
           break;
         }
       }
     });
-
 
     let failedChannel = docShell.failedChannel;
     let location = contentDoc.location.href;

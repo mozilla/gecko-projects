@@ -1799,7 +1799,7 @@ BrowserGlue.prototype = {
       let currentset = xulStore.getValue(BROWSER_DOCURL, "nav-bar", "currentset");
       // Need to migrate only if toolbar is customized.
       if (currentset) {
-        if (currentset.contains("bookmarks-menu-button-container")) {
+        if (currentset.includes("bookmarks-menu-button-container")) {
           currentset = currentset.replace(/(^|,)bookmarks-menu-button-container($|,)/,
                                           "$1bookmarks-menu-button$2");
           xulStore.setValue(BROWSER_DOCURL, "nav-bar", "currentset", currentset);
@@ -1827,13 +1827,13 @@ BrowserGlue.prototype = {
       let currentset = xulStore.getValue(BROWSER_DOCURL, "nav-bar", "currentset");
       // Need to migrate only if toolbar is customized.
       if (currentset) {
-        if (!currentset.contains("bookmarks-menu-button")) {
+        if (!currentset.includes("bookmarks-menu-button")) {
           // The button isn't in the nav-bar, so let's look for an appropriate
           // place to put it.
-          if (currentset.contains("downloads-button")) {
+          if (currentset.includes("downloads-button")) {
             currentset = currentset.replace(/(^|,)downloads-button($|,)/,
                                             "$1bookmarks-menu-button,downloads-button$2");
-          } else if (currentset.contains("home-button")) {
+          } else if (currentset.includes("home-button")) {
             currentset = currentset.replace(/(^|,)home-button($|,)/,
                                             "$1bookmarks-menu-button,home-button$2");
           } else {
@@ -2811,8 +2811,7 @@ let E10SUINotification = {
       // e10s doesn't work with accessibility, so we prompt to disable
       // e10s if a11y is enabled, now or in the future.
       Services.obs.addObserver(this, "a11y-init-or-shutdown", true);
-      if (Services.appinfo.accessibilityEnabled &&
-          !Services.appinfo.accessibilityIsUIA) {
+      if (Services.appinfo.accessibilityIsBlacklistedForE10S) {
         this._showE10sAccessibilityWarning();
       }
     } else {

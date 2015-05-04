@@ -326,7 +326,7 @@ already_AddRefed<nsStyleContext>
 nsStyleContext::FindChildWithRules(const nsIAtom* aPseudoTag, 
                                    nsRuleNode* aRuleNode,
                                    nsRuleNode* aRulesIfVisited,
-                                   uint32_t aFlags)
+                                   bool aRelevantLinkVisited)
 {
   uint32_t threshold = 10; // The # of siblings we're willing to examine
                            // before just giving this whole thing up.
@@ -334,16 +334,13 @@ nsStyleContext::FindChildWithRules(const nsIAtom* aPseudoTag,
   nsRefPtr<nsStyleContext> result;
   nsStyleContext *list = aRuleNode->IsRoot() ? mEmptyChild : mChild;
 
-  bool relevantLinkVisited = aFlags & eRelevantLinkVisited;
-  bool suppressLineBreak = aFlags & eSuppressLineBreak;
   if (list) {
     nsStyleContext *child = list;
     do {
       if (child->mRuleNode == aRuleNode &&
           child->mPseudoTag == aPseudoTag &&
           !child->IsStyleIfVisited() &&
-          child->RelevantLinkVisited() == relevantLinkVisited &&
-          child->ShouldSuppressLineBreak() == suppressLineBreak) {
+          child->RelevantLinkVisited() == aRelevantLinkVisited) {
         bool match = false;
         if (aRulesIfVisited) {
           match = child->GetStyleIfVisited() &&
@@ -351,7 +348,7 @@ nsStyleContext::FindChildWithRules(const nsIAtom* aPseudoTag,
         } else {
           match = !child->GetStyleIfVisited();
         }
-        if (match) {
+        if (match && !(child->mBits & NS_STYLE_INELIGIBLE_FOR_SHARING)) {
           result = child;
           break;
         }
@@ -702,10 +699,7 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     }
 
     if (::ShouldSuppressLineBreak(disp, containerContext, containerDisp)) {
-      // Note that, in one case, this bit isn't set here: a whitespace
-      // which is surrounded but not contained by ruby boxes. In that
-      // case, this bit is set in nsStyleSet::GetContext.
-      AddStyleBit(NS_STYLE_SUPPRESS_LINEBREAK);
+      mBits |= NS_STYLE_SUPPRESS_LINEBREAK;
       uint8_t displayVal = disp->mDisplay;
       nsRuleNode::EnsureInlineDisplay(displayVal);
       if (displayVal != disp->mDisplay) {
@@ -1402,6 +1396,29 @@ nsStyleContext::DoClearCachedInheritedStyleDataOnDescendants(uint32_t aStructs)
   }
 
   ClearCachedInheritedStyleDataOnDescendants(aStructs);
+}
+
+void
+nsStyleContext::SetIneligibleForSharing()
+{
+  if (mBits & NS_STYLE_INELIGIBLE_FOR_SHARING) {
+    return;
+  }
+  mBits |= NS_STYLE_INELIGIBLE_FOR_SHARING;
+  if (mChild) {
+    nsStyleContext* child = mChild;
+    do {
+      child->SetIneligibleForSharing();
+      child = child->mNextSibling;
+    } while (mChild != child);
+  }
+  if (mEmptyChild) {
+    nsStyleContext* child = mEmptyChild;
+    do {
+      child->SetIneligibleForSharing();
+      child = child->mNextSibling;
+    } while (mEmptyChild != child);
+  }
 }
 
 #ifdef RESTYLE_LOGGING

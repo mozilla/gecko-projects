@@ -132,7 +132,10 @@ pref("dom.workers.maxPerDomain", 20);
 // Whether or not Shared Web Workers are enabled.
 pref("dom.workers.sharedWorkers.enabled", true);
 
-// WebSocket in workers are disabled by default.
+// Whether or not WebSockets in workers are enabled.
+// Note: we need this pref because WebSocket in Workers is a new implementation
+// and we want to be able to disable it quickly in case of regressions.
+// When this feature is stable enough we can get rid of this pref: Bug 1159792
 pref("dom.workers.websocket.enabled", true);
 
 // Service workers
@@ -176,7 +179,7 @@ pref("dom.url.encode_decode_hash", true);
 // Whether to run add-on code in different compartments from browser code. This
 // causes a separate compartment for each (addon, global) combination, which may
 // significantly increase the number of compartments in the system.
-#ifdef NIGHTLY_BUILD
+#ifdef E10S_TESTING_ONLY
 pref("dom.compartment_per_addon", true);
 #else
 pref("dom.compartment_per_addon", false);
@@ -247,6 +250,9 @@ pref("browser.triple_click_selects_paragraph", true);
 
 // Print/Preview Shrink-To-Fit won't shrink below 20% for text-ish documents.
 pref("print.shrink-to-fit.scale-limit-percent", 20);
+
+// Enable scale transform for stretchy MathML operators. See bug 414277.
+pref("mathml.scale_stretchy_operators.enabled", true);
 
 // Media cache size in kilobytes
 pref("media.cache_size", 512000);
@@ -438,7 +444,7 @@ pref("media.track.enabled", false);
 // We want to enable on non-release  builds and on release windows and mac
 // but on release builds restrict to YouTube. We don't enable for other
 // configurations because code for those platforms isn't ready yet.
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GONK)
 pref("media.mediasource.enabled", true);
 #else
 pref("media.mediasource.enabled", false);
@@ -765,6 +771,8 @@ pref("toolkit.scrollbox.verticalScrollDistance", 3);
 pref("toolkit.scrollbox.horizontalScrollDistance", 5);
 pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
 
+// Telemetry settings.
+// Server to submit telemetry pings to.
 pref("toolkit.telemetry.server", "https://incoming.telemetry.mozilla.org");
 // Telemetry server owner. Please change if you set toolkit.telemetry.server to a different server
 pref("toolkit.telemetry.server_owner", "Mozilla");
@@ -773,6 +781,8 @@ pref("toolkit.telemetry.infoURL", "https://www.mozilla.org/legal/privacy/firefox
 // Determines whether full SQL strings are returned when they might contain sensitive info
 // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
 pref("toolkit.telemetry.debugSlowSql", false);
+// Whether to use the unified telemetry behavior, requires a restart.
+pref("toolkit.telemetry.unified", true);
 
 // Identity module
 pref("toolkit.identity.enabled", false);
@@ -786,9 +796,9 @@ pref("devtools.errorconsole.deprecation_warnings", true);
 
 // Disable debugging chrome
 #ifdef MOZ_DEV_EDITION
-pref("devtools.chrome.enabled", true);
+sticky_pref("devtools.chrome.enabled", true);
 #else
-pref("devtools.chrome.enabled", false);
+sticky_pref("devtools.chrome.enabled", false);
 #endif
 
 // Disable remote debugging protocol logging
@@ -796,9 +806,9 @@ pref("devtools.debugger.log", false);
 pref("devtools.debugger.log.verbose", false);
 // Disable remote debugging connections
 #ifdef MOZ_DEV_EDITION
-pref("devtools.debugger.remote-enabled", true);
+sticky_pref("devtools.debugger.remote-enabled", true);
 #else
-pref("devtools.debugger.remote-enabled", false);
+sticky_pref("devtools.debugger.remote-enabled", false);
 #endif
 pref("devtools.debugger.remote-port", 6000);
 // Force debugger server binding on the loopback interface
@@ -1158,6 +1168,11 @@ pref("network.warnOnAboutNetworking", true);
 // Example: make IMAP an exposed protocol
 // pref("network.protocol-handler.expose.imap", true);
 
+// Whether IOService.connectivity and NS_IsOffline depends on connectivity status
+pref("network.manage-offline-status", false);
+// If set to true, IOService.offline depends on IOService.connectivity
+pref("network.offline-mirrors-connectivity", true);
+
 // <http>
 pref("network.http.version", "1.1");      // default
 // pref("network.http.version", "1.0");   // uncomment this out in case of problems
@@ -1325,8 +1340,8 @@ pref("network.http.spdy.default-concurrent", 100);
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
-pref("network.http.altsvc.enabled", false);
-pref("network.http.altsvc.oe", false);
+pref("network.http.altsvc.enabled", true);
+pref("network.http.altsvc.oe", true);
 
 pref("network.http.diagnostics", false);
 
@@ -2383,7 +2398,7 @@ pref("dom.ipc.plugins.timeoutSecs", 45);
 pref("dom.ipc.plugins.parentTimeoutSecs", 0);
 // How long a plugin in e10s is allowed to process a synchronous IPC
 // message before we notify the chrome process of a hang.
-pref("dom.ipc.plugins.contentTimeoutSecs", 45);
+pref("dom.ipc.plugins.contentTimeoutSecs", 10);
 // How long a plugin launch is allowed to take before
 // we consider it failed.
 pref("dom.ipc.plugins.processLaunchTimeoutSecs", 45);
@@ -2428,7 +2443,7 @@ pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 
 // Asynchronous plugin initialization should only be enabled on non-e10s
 // channels until some remaining bugs are resolved.
-#ifdef NIGHTLY_BUILD
+#ifdef E10S_TESTING_ONLY
 pref("dom.ipc.plugins.asyncInit", false);
 #else
 pref("dom.ipc.plugins.asyncInit", true);
@@ -4108,6 +4123,7 @@ pref("browser.history.maxStateObjectSize", 655360);
 pref("xpinstall.whitelist.required", true);
 // Only Firefox requires add-on signatures
 pref("xpinstall.signatures.required", false);
+pref("xpinstall.signatures.infoURL", "https://wiki.mozilla.org/Addons/Extension_Signing");
 pref("extensions.alwaysUnpack", false);
 pref("extensions.minCompatiblePlatformVersion", "2.0");
 
@@ -4707,3 +4723,10 @@ pref("gfx.vsync.refreshdriver", true);
 #ifdef MOZ_SECUREELEMENT
 pref("dom.secureelement.enabled", false);
 #endif
+
+// Allow control characters appear in composition string.
+// When this is false, control characters except
+// CHARACTER TABULATION (horizontal tab) are removed from
+// both composition string and data attribute of compositionupdate
+// and compositionend events.
+pref("dom.compositionevent.allow_control_characters", false);

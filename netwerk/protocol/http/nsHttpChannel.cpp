@@ -321,7 +321,7 @@ nsHttpChannel::Connect()
     rv = mURI->SchemeIs("https", &isHttps);
     NS_ENSURE_SUCCESS(rv,rv);
 
-    if (mAllowSTS && !isHttps) {
+    if (!isHttps) {
         // enforce Strict-Transport-Security
         nsISiteSecurityService* sss = gHttpHandler->GetSSService();
         NS_ENSURE_TRUE(sss, NS_ERROR_OUT_OF_MEMORY);
@@ -338,8 +338,17 @@ nsHttpChannel::Connect()
 
         if (isStsHost) {
             LOG(("nsHttpChannel::Connect() STS permissions found\n"));
-            return AsyncCall(&nsHttpChannel::HandleAsyncRedirectChannelToHttps);
+            if (mAllowSTS) {
+                Telemetry::Accumulate(Telemetry::HTTP_SCHEME_UPGRADE, 3);
+                return AsyncCall(&nsHttpChannel::HandleAsyncRedirectChannelToHttps);
+            } else {
+                Telemetry::Accumulate(Telemetry::HTTP_SCHEME_UPGRADE, 2);
+            }
+        } else {
+            Telemetry::Accumulate(Telemetry::HTTP_SCHEME_UPGRADE, 1);
         }
+    } else {
+        Telemetry::Accumulate(Telemetry::HTTP_SCHEME_UPGRADE, 0);
     }
 
     // ensure that we are using a valid hostname
@@ -2325,7 +2334,7 @@ nsHttpChannel::ProcessPartialContent()
         LOG(("nsHttpChannel::ProcessPartialContent [this=%p] "
              "206 has different total entity size than the content length "
              "of the original partially cached entity.\n", this));
-        
+
         mCacheEntry->AsyncDoom(nullptr);
         Cancel(NS_ERROR_CORRUPTED_CONTENT);
         return CallOnStartRequest();
@@ -2760,7 +2769,7 @@ nsHttpChannel::OpenCacheEntry(bool isHttps)
     }
 
     if (!mPostID && mApplicationCache) {
-        rv = cacheStorageService->AppCacheStorage(info, 
+        rv = cacheStorageService->AppCacheStorage(info,
             mApplicationCache,
             getter_AddRefs(cacheStorage));
     }
@@ -5811,7 +5820,7 @@ nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
             }
             mLogicalOffset += count;
         }
-        
+
         return rv;
     }
 
@@ -5894,11 +5903,15 @@ nsHttpChannel::OnTransportStatus(nsITransport *trans, nsresult status,
 
     if (status == NS_NET_STATUS_CONNECTED_TO ||
         status == NS_NET_STATUS_WAITING_FOR) {
-        nsCOMPtr<nsISocketTransport> socketTransport =
-            do_QueryInterface(trans);
-        if (socketTransport) {
-            socketTransport->GetSelfAddr(&mSelfAddr);
-            socketTransport->GetPeerAddr(&mPeerAddr);
+        if (mTransaction) {
+            mTransaction->GetNetworkAddresses(mSelfAddr, mPeerAddr);
+        } else {
+            nsCOMPtr<nsISocketTransport> socketTransport =
+                do_QueryInterface(trans);
+            if (socketTransport) {
+                socketTransport->GetSelfAddr(&mSelfAddr);
+                socketTransport->GetPeerAddr(&mPeerAddr);
+            }
         }
     }
 

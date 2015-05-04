@@ -1542,7 +1542,7 @@ ThreadActor.prototype = {
     // Clear DOM event breakpoints.
     // XPCShell tests don't use actual DOM windows for globals and cause
     // removeListenerForAllEvents to throw.
-    if (this.global && !this.global.toString().contains("Sandbox")) {
+    if (this.global && !this.global.toString().includes("Sandbox")) {
       let els = Cc["@mozilla.org/eventlistenerservice;1"]
                 .getService(Ci.nsIEventListenerService);
       els.removeListenerForAllEvents(this.global, this._allEventsListener, true);
@@ -1991,15 +1991,7 @@ ThreadActor.prototype = {
     // scripts to the ScriptStore yet.
     this.scripts.addScripts(this.dbg.findScripts({ source: aScript.source }));
 
-    this._addScript(aScript);
-
-    // `onNewScript` is only fired for top-level scripts (AKA staticLevel == 0),
-    // but top-level scripts have the wrong `lineCount` sometimes (bug 979094),
-    // so iterate over the immediate children to activate breakpoints for now
-    // (TODO bug 1124258: don't do this when `lineCount` bug is fixed)
-    for (let s of aScript.getChildScripts()) {
-      this._addScript(s);
-    }
+    this._addSource(aScript.source);
   },
 
   onNewSource: function (aSource) {
@@ -2011,34 +2003,33 @@ ThreadActor.prototype = {
   },
 
   /**
-   * Restore any pre-existing breakpoints to the scripts that we have access to.
+   * Restore any pre-existing breakpoints to the sources that we have access to.
    */
   _restoreBreakpoints: function () {
     if (this.breakpointActorMap.size === 0) {
       return;
     }
 
-    for (let s of this.scripts.getAllScripts()) {
-      this._addScript(s);
+    for (let s of this.scripts.getSources()) {
+      this._addSource(s);
     }
   },
 
   /**
-   * Add the provided script to the server cache.
+   * Add the provided source to the server cache.
    *
-   * @param aScript Debugger.Script
-   *        The source script that will be stored.
-   * @returns true, if the script was added; false otherwise.
+   * @param aSource Debugger.Source
+   *        The source that will be stored.
+   * @returns true, if the source was added; false otherwise.
    */
-  _addScript: function (aScript) {
-    if (!this.sources.allowSource(aScript.source)) {
+  _addSource: function (aSource) {
+    if (!this.sources.allowSource(aSource)) {
       return false;
     }
 
     // Set any stored breakpoints.
     let promises = [];
-    let sourceActor = this.sources.createNonSourceMappedActor(aScript.source);
-    let endLine = aScript.startLine + aScript.lineCount - 1;
+    let sourceActor = this.sources.createNonSourceMappedActor(aSource);
     for (let _actor of this.breakpointActorMap.findActors()) {
       // XXX bug 1142115: We do async work in here, so we need to
       // create a fresh binding because for/of does not yet do that in
@@ -2050,10 +2041,7 @@ ThreadActor.prototype = {
       } else {
         promises.push(this.sources.getGeneratedLocation(actor.originalLocation)
                                   .then((generatedLocation) => {
-          // Limit the search to the line numbers contained in the new script.
-          if (generatedLocation.generatedSourceActor.actorID === sourceActor.actorID &&
-              generatedLocation.generatedLine >= aScript.startLine &&
-              generatedLocation.generatedLine <= endLine) {
+          if (generatedLocation.generatedSourceActor.actorID === sourceActor.actorID) {
             sourceActor._setBreakpointAtGeneratedLocation(
               actor,
               generatedLocation
@@ -2070,7 +2058,7 @@ ThreadActor.prototype = {
     // Go ahead and establish the source actors for this script, which
     // fetches sourcemaps if available and sends onNewSource
     // notifications
-    this.sources.createSourceActors(aScript.source);
+    this.sources.createSourceActors(aSource);
 
     return true;
   },
@@ -2263,12 +2251,13 @@ function resolveURIToLocalPath(aURI) {
  *        Optional. The content type of this source, if immediately available.
  */
 function SourceActor({ source, thread, originalUrl, generatedSource,
-                       contentType }) {
+                       isInlineSource, contentType }) {
   this._threadActor = thread;
   this._originalUrl = originalUrl;
   this._source = source;
   this._generatedSource = generatedSource;
   this._contentType = contentType;
+  this._isInlineSource = isInlineSource;
 
   this.onSource = this.onSource.bind(this);
   this._invertSourceMap = this._invertSourceMap.bind(this);
@@ -2298,8 +2287,14 @@ SourceActor.prototype = {
   _addonPath: null,
 
   get isSourceMapped() {
-    return this._originalURL || this._generatedSource ||
-           this.threadActor.sources.isPrettyPrinted(this.url);
+    return !this.isInlineSource && (
+      this._originalURL || this._generatedSource ||
+        this.threadActor.sources.isPrettyPrinted(this.url)
+    );
+  },
+
+  get isInlineSource() {
+    return this._isInlineSource;
   },
 
   get threadActor() { return this._threadActor; },
@@ -2422,10 +2417,13 @@ SourceActor.prototype = {
         return toResolvedContent(this.source.text);
       }
       else {
-        // XXX bug 865252: Don't load from the cache if this is a source mapped
-        // source because we can't guarantee that the cache has the most up to date
-        // content for this source like we can if it isn't source mapped.
-        let sourceFetched = fetch(this.url, { loadFromCache: !this.source });
+        // Only load the HTML page source from cache (which exists when
+        // there are inline sources). Otherwise, we can't trust the
+        // cache because we are most likely here because we are
+        // fetching the original text for sourcemapped code, and the
+        // page hasn't requested it before (if it has, it was a
+        // previous debugging session).
+        let sourceFetched = fetch(this.url, { loadFromCache: this.isInlineSource });
 
         // Record the contentType we just learned during fetching
         return sourceFetched.then(result => {

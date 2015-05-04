@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1636,6 +1636,8 @@ nsIDocument::~nsIDocument()
   if (mNodeInfoManager) {
     mNodeInfoManager->DropDocumentReference();
   }
+
+  UnlinkOriginalDocumentIfStatic();
 }
 
 
@@ -2093,13 +2095,14 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   }
   tmp->mFirstChild = nullptr;
 
+  tmp->UnlinkOriginalDocumentIfStatic();
+
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mXPathEvaluator)
   tmp->mCachedRootElement = nullptr; // Avoid a dangling pointer
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDisplayDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFirstBaseNodeWithHref)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDOMImplementation)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mImageMaps)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mOriginalDocument)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCachedEncoder)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mUndoManager)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocumentTimeline)
@@ -3925,6 +3928,11 @@ nsIDocument::TakeFrameRequestCallbacks(FrameRequestCallbackList& aCallbacks)
 bool
 nsIDocument::ShouldThrottleFrameRequests()
 {
+  if (mStaticCloneCount > 0) {
+    // Even if we're not visible, a static clone may be, so run at full speed.
+    return false;
+  }
+
   if (!mIsShowing) {
     // We're not showing (probably in a background tab or the bf cache).
     return true;
@@ -4047,9 +4055,6 @@ nsDocument::SetSubDocumentFor(Element* aElement, nsIDocument* aSubDoc)
       };
 
       mSubDocuments = PL_NewDHashTable(&hash_table_ops, sizeof(SubDocMapEntry));
-      if (!mSubDocuments) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
     }
 
     // Add a mapping to the hash table
@@ -10283,6 +10288,9 @@ nsIDocument::CreateStaticClone(nsIDocShell* aCloneContainer)
       } else {
         clonedDoc->mOriginalDocument = this;
       }
+
+      clonedDoc->mOriginalDocument->mStaticCloneCount++;
+
       int32_t sheetsCount = GetNumberOfStyleSheets();
       for (int32_t i = 0; i < sheetsCount; ++i) {
         nsRefPtr<CSSStyleSheet> sheet = do_QueryObject(GetStyleSheetAt(i));
@@ -10318,6 +10326,17 @@ nsIDocument::CreateStaticClone(nsIDocShell* aCloneContainer)
   }
   mCreatingStaticClone = false;
   return clonedDoc.forget();
+}
+
+void
+nsIDocument::UnlinkOriginalDocumentIfStatic()
+{
+  if (IsStaticDocument() && mOriginalDocument) {
+    MOZ_ASSERT(mOriginalDocument->mStaticCloneCount > 0);
+    mOriginalDocument->mStaticCloneCount--;
+    mOriginalDocument = nullptr;
+  }
+  MOZ_ASSERT(!mOriginalDocument);
 }
 
 nsresult

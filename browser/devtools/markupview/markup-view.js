@@ -28,6 +28,7 @@ const {Tooltip} = require("devtools/shared/widgets/Tooltip");
 const EventEmitter = require("devtools/toolkit/event-emitter");
 const Heritage = require("sdk/core/heritage");
 const {setTimeout, clearTimeout, setInterval, clearInterval} = require("sdk/timers");
+const {parseAttribute} = require("devtools/shared/node-attribute-parser");
 const ELLIPSIS = Services.prefs.getComplexValue("intl.ellipsis", Ci.nsIPrefLocalizedString).data;
 
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
@@ -1814,22 +1815,20 @@ MarkupContainer.prototype = {
       return;
     }
 
-    // output-parser generated links handling.
-    if (target.nodeName === "a") {
-      event.stopPropagation();
-      event.preventDefault();
-      let browserWin = this.markup._inspector.target
-                           .tab.ownerDocument.defaultView;
-      browserWin.openUILinkIn(target.href, "tab");
-      return;
-    }
-
     // target is the MarkupContainer itself.
     this._isMouseDown = true;
     this.hovered = false;
     this.markup.navigate(this);
     event.stopPropagation();
-    event.preventDefault();
+
+    // Preventing the default behavior will avoid the body to gain focus on
+    // mouseup (through bubbling) when clicking on a non focusable node in the
+    // line. So, if the click happened outside of a focusable element, do
+    // prevent the default behavior, so that the tagname or textcontent gains
+    // focus.
+    if (!target.closest(".open [tabindex]")) {
+      event.preventDefault();
+    }
 
     // Start dragging the container after a delay.
     this.markup._dragStartEl = target;
@@ -2131,8 +2130,9 @@ MarkupElementContainer.prototype = Heritage.extend(MarkupContainer.prototype, {
       // the element, the tooltip does contain the image
       let def = promise.defer();
 
+      let hasSrc = this.editor.getAttributeElement("src");
       this.tooltipData = {
-        target: this.editor.getAttributeElement("src") || this.editor.tag,
+        target: hasSrc ? hasSrc.querySelector(".link") : this.editor.tag,
         data: def.promise
       };
 
@@ -2264,6 +2264,7 @@ function TextEditor(aContainer, aNode, aTemplate) {
     stopOnReturn: true,
     trigger: "dblclick",
     multiline: true,
+    trimOutput: false,
     done: (aVal, aCommit) => {
       if (!aCommit) {
         return;
@@ -2430,7 +2431,7 @@ ElementEditor.prototype = {
     // attributes have already been removed at this point.
     for (let attr of nodeAttributes) {
       let el = this.attrElements.get(attr.name);
-      let valueChanged = el && el.querySelector(".attr-value").innerHTML !== attr.value;
+      let valueChanged = el && el.querySelector(".attr-value").textContent !== attr.value;
       let isEditing = el && el.querySelector(".editable").inplaceEditor;
       let canSimplyShowEditor = el && (!valueChanged || isEditing);
 
@@ -2486,25 +2487,25 @@ ElementEditor.prototype = {
       attrName: aAttr.name,
     };
     this.template("attribute", data);
-    var {attr, inner, name, val} = data;
+    let {attr, inner, name, val} = data;
 
     // Double quotes need to be handled specially to prevent DOMParser failing.
     // name="v"a"l"u"e" when editing -> name='v"a"l"u"e"'
     // name="v'a"l'u"e" when editing -> name="v'a&quot;l'u&quot;e"
     let editValueDisplayed = aAttr.value || "";
-    let hasDoubleQuote = editValueDisplayed.contains('"');
-    let hasSingleQuote = editValueDisplayed.contains("'");
+    let hasDoubleQuote = editValueDisplayed.includes('"');
+    let hasSingleQuote = editValueDisplayed.includes("'");
     let initial = aAttr.name + '="' + editValueDisplayed + '"';
 
     // Can't just wrap value with ' since the value contains both " and '.
     if (hasDoubleQuote && hasSingleQuote) {
-        editValueDisplayed = editValueDisplayed.replace(/\"/g, "&quot;");
-        initial = aAttr.name + '="' + editValueDisplayed + '"';
+      editValueDisplayed = editValueDisplayed.replace(/\"/g, "&quot;");
+      initial = aAttr.name + '="' + editValueDisplayed + '"';
     }
 
     // Wrap with ' since there are no single quotes in the attribute value.
     if (hasDoubleQuote && !hasSingleQuote) {
-        initial = aAttr.name + "='" + editValueDisplayed + "'";
+      initial = aAttr.name + "='" + editValueDisplayed + "'";
     }
 
     // Make the attribute editable.
@@ -2521,7 +2522,7 @@ ElementEditor.prototype = {
         // select accordingly.
         if (aEvent && aEvent.target === name) {
           aEditor.input.setSelectionRange(0, name.textContent.length);
-        } else if (aEvent && aEvent.target === val) {
+        } else if (aEvent && aEvent.target.closest(".attr-value") === val) {
           let length = editValueDisplayed.length;
           let editorLength = aEditor.input.value.length;
           let start = editorLength - (length + 1);
@@ -2570,15 +2571,40 @@ ElementEditor.prototype = {
     this.removeAttribute(aAttr.name);
     this.attrElements.set(aAttr.name, attr);
 
-    let collapsedValue;
-    if (aAttr.value.match(COLLAPSE_DATA_URL_REGEX)) {
-      collapsedValue = truncateString(aAttr.value, COLLAPSE_DATA_URL_LENGTH);
-    } else {
-      collapsedValue = truncateString(aAttr.value, COLLAPSE_ATTRIBUTE_LENGTH);
+    // Parse the attribute value to detect whether there are linkable parts in
+    // it (make sure to pass a complete list of existing attributes to the
+    // parseAttribute function, by concatenating aAttr, because this could be a
+    // newly added attribute not yet on this.node).
+    let attributes = this.node.attributes.filter(({name}) => name !== aAttr.name);
+    attributes.push(aAttr);
+    let parsedLinksData = parseAttribute(this.node.namespaceURI,
+      this.node.tagName, attributes, aAttr.name);
+
+    // Create links in the attribute value, and collapse long attributes if
+    // needed.
+    let collapse = value => {
+      if (value.match(COLLAPSE_DATA_URL_REGEX)) {
+        return truncateString(value, COLLAPSE_DATA_URL_LENGTH);
+      } else {
+        return truncateString(value, COLLAPSE_ATTRIBUTE_LENGTH);
+      }
+    };
+
+    val.innerHTML = "";
+    for (let token of parsedLinksData) {
+      if (token.type === "string") {
+        val.appendChild(this.doc.createTextNode(collapse(token.value)));
+      } else {
+        let link = this.doc.createElement("span");
+        link.classList.add("link");
+        link.setAttribute("data-type", token.type);
+        link.setAttribute("data-link", token.value);
+        link.textContent = collapse(token.value);
+        val.appendChild(link);
+      }
     }
 
     name.textContent = aAttr.name;
-    val.textContent = collapsedValue;
 
     return attr;
   },

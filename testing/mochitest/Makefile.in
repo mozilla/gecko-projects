@@ -3,7 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MOZ_CHROME_FILE_FORMAT = jar
 
 _DEST_DIR = $(DEPTH)/_tests/$(relativesrcdir)
 
@@ -86,6 +85,7 @@ DIST_BIN = $(DIST)/bin
 
 GMP_TEST_PLUGIN_DIRS := \
   $(DIST_BIN)/gmp-fake \
+  $(DIST_BIN)/gmp-fakeopenh264 \
   $(DIST_BIN)/gmp-clearkey \
   $(NULL)
 

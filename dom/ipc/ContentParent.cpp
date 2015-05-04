@@ -154,12 +154,16 @@
 #include "URIUtils.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsIDocShell.h"
+#include "nsDocShell.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 #include "gfxPrefs.h"
 #include "prio.h"
 #include "private/pprio.h"
 #include "ContentProcessManager.h"
 #include "mozilla/psm/PSMContentListener.h"
+#include "nsPluginHost.h"
+#include "nsPluginTags.h"
+#include "nsIBlocklistService.h"
 
 #include "nsIBidiKeyboard.h"
 
@@ -401,6 +405,7 @@ bool ContentParent::sNuwaReady = false;
 #endif
 
 #define NS_IPC_IOSERVICE_SET_OFFLINE_TOPIC "ipc:network:set-offline"
+#define NS_IPC_IOSERVICE_SET_CONNECTIVITY_TOPIC "ipc:network:set-connectivity"
 
 class MemoryReportRequestParent : public PMemoryReportRequestParent
 {
@@ -639,6 +644,7 @@ static const char* sObserverTopics[] = {
     "xpcom-shutdown",
     "profile-before-change",
     NS_IPC_IOSERVICE_SET_OFFLINE_TOPIC,
+    NS_IPC_IOSERVICE_SET_CONNECTIVITY_TOPIC,
     "child-memory-reporter-request",
     "memory-pressure",
     "child-gc-request",
@@ -1080,6 +1086,25 @@ ContentParent::RecvConnectPluginBridge(const uint32_t& aPluginId, nsresult* aRv)
     // pointer and just throw it away.
     uint32_t dummy = 0;
     return mozilla::plugins::SetupBridge(aPluginId, this, true, aRv, &dummy);
+}
+
+bool
+ContentParent::RecvGetBlocklistState(const uint32_t& aPluginId,
+                                     uint32_t* aState)
+{
+    *aState = nsIBlocklistService::STATE_BLOCKED;
+
+    nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
+    if (!pluginHost) {
+        return false;
+    }
+    nsPluginTag* tag =  pluginHost->PluginWithId(aPluginId);
+
+    if (!tag) {
+        return false;
+    }
+
+    return NS_SUCCEEDED(tag->GetBlocklistState(aState));
 }
 
 bool
@@ -2912,13 +2937,16 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
 
     // Update offline settings.
     bool isOffline, isLangRTL;
+    bool isConnected;
     InfallibleTArray<nsString> unusedDictionaries;
     ClipboardCapabilities clipboardCaps;
     DomainPolicyClone domainPolicy;
 
-    RecvGetXPCOMProcessAttributes(&isOffline, &isLangRTL, &unusedDictionaries,
+    RecvGetXPCOMProcessAttributes(&isOffline, &isConnected,
+                                  &isLangRTL, &unusedDictionaries,
                                   &clipboardCaps, &domainPolicy);
     mozilla::unused << content->SendSetOffline(isOffline);
+    mozilla::unused << content->SendSetConnectivity(isConnected);
     MOZ_ASSERT(!clipboardCaps.supportsSelectionClipboard() &&
                !clipboardCaps.supportsFindClipboard(),
                "Unexpected values");
@@ -3009,6 +3037,17 @@ ContentParent::Observe(nsISupports* aSubject,
           }
 #ifdef MOZ_NUWA_PROCESS
       }
+#endif
+    }
+    else if (!strcmp(aTopic, NS_IPC_IOSERVICE_SET_CONNECTIVITY_TOPIC)) {
+#ifdef MOZ_NUWA_PROCESS
+        if (!(IsNuwaReady() && IsNuwaProcess())) {
+#endif
+            if (!SendSetConnectivity(NS_LITERAL_STRING("true").Equals(aData))) {
+                return NS_ERROR_NOT_AVAILABLE;
+            }
+#ifdef MOZ_NUWA_PROCESS
+        }
 #endif
     }
     // listening for alert notifications
@@ -3259,6 +3298,7 @@ ContentParent::RecvGetProcessAttributes(ContentParentId* aCpId,
 
 bool
 ContentParent::RecvGetXPCOMProcessAttributes(bool* aIsOffline,
+                                             bool* aIsConnected,
                                              bool* aIsLangRTL,
                                              InfallibleTArray<nsString>* dictionaries,
                                              ClipboardCapabilities* clipboardCaps,
@@ -3268,6 +3308,9 @@ ContentParent::RecvGetXPCOMProcessAttributes(bool* aIsOffline,
     MOZ_ASSERT(io, "No IO service?");
     DebugOnly<nsresult> rv = io->GetOffline(aIsOffline);
     MOZ_ASSERT(NS_SUCCEEDED(rv), "Failed getting offline?");
+
+    rv = io->GetConnectivity(aIsConnected);
+    MOZ_ASSERT(NS_SUCCEEDED(rv), "Failed getting connectivity?");
 
     nsIBidiKeyboard* bidi = nsContentUtils::GetBidiKeyboard();
 
@@ -4048,7 +4091,7 @@ ContentParent::RecvGetRandomValues(const uint32_t& length,
 
     memcpy(randomValues->Elements(), buf, length);
 
-    NS_Free(buf);
+    free(buf);
 
     return true;
 }
@@ -4566,6 +4609,24 @@ ContentParent::RecvNotifyKeywordSearchLoading(const nsString &aProvider,
         }
     }
 #endif
+    return true;
+}
+
+bool
+ContentParent::RecvCopyFavicon(const URIParams& aOldURI,
+                               const URIParams& aNewURI,
+                               const bool& aInPrivateBrowsing)
+{
+    nsCOMPtr<nsIURI> oldURI = DeserializeURI(aOldURI);
+    if (!oldURI) {
+        return true;
+    }
+    nsCOMPtr<nsIURI> newURI = DeserializeURI(aNewURI);
+    if (!newURI) {
+        return true;
+    }
+
+    nsDocShell::CopyFavicon(oldURI, newURI, aInPrivateBrowsing);
     return true;
 }
 

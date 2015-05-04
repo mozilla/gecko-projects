@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim:set ts=2 sw=2 sts=2 et cindent: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -946,7 +946,7 @@ void HTMLMediaElement::NotifyMediaStreamTracksAvailable(DOMMediaStream* aStream)
     NotifyOwnerDocumentActivityChanged();
   }
 
-  mReadyStateUpdater->Notify();
+  mWatchManager.ManualNotify(&HTMLMediaElement::UpdateReadyStateInternal);
 }
 
 void HTMLMediaElement::LoadFromSourceChildren()
@@ -2042,10 +2042,10 @@ HTMLMediaElement::LookupMediaElementURITable(nsIURI* aURI)
 
 HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo),
+    mWatchManager(this, AbstractThread::MainThread()),
     mCurrentLoadID(0),
     mNetworkState(nsIDOMHTMLMediaElement::NETWORK_EMPTY),
     mReadyState(nsIDOMHTMLMediaElement::HAVE_NOTHING, "HTMLMediaElement::mReadyState"),
-    mReadyStateUpdater("HTMLMediaElement::mReadyStateUpdater"),
     mLoadWaitStatus(NOT_WAITING),
     mVolume(1.0),
     mPreloadAction(PRELOAD_UNDEFINED),
@@ -2099,7 +2099,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   if (!gMediaElementEventsLog) {
     gMediaElementEventsLog = PR_NewLogModule("nsMediaElementEvents");
   }
-  EnsureStateWatchingLog();
 #endif
 
   mAudioChannel = AudioChannelService::GetDefaultAudioChannel();
@@ -2110,11 +2109,10 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   NotifyOwnerDocumentActivityChanged();
 
   MOZ_ASSERT(NS_IsMainThread());
-  mReadyStateUpdater->AddWeakCallback(this, &HTMLMediaElement::UpdateReadyStateInternal);
-  mReadyStateUpdater->Watch(mDownloadSuspendedByCache);
+  mWatchManager.Watch(mDownloadSuspendedByCache, &HTMLMediaElement::UpdateReadyStateInternal);
   // Paradoxically, there is a self-edge whereby UpdateReadyStateInternal refuses
   // to run until mReadyState reaches at least HAVE_METADATA by some other means.
-  mReadyStateUpdater->Watch(mReadyState);
+  mWatchManager.Watch(mReadyState, &HTMLMediaElement::UpdateReadyStateInternal);
 }
 
 HTMLMediaElement::~HTMLMediaElement()
@@ -3073,7 +3071,7 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
   // playing a stream, we'll need to add a CombineWithPrincipal call here.
   mMediaStreamListener = new StreamListener(this, "HTMLMediaElement::mMediaStreamListener");
   mMediaStreamSizeListener = new StreamSizeListener(this);
-  mReadyStateUpdater->Watch(*mMediaStreamListener);
+  mWatchManager.Watch(*mMediaStreamListener, &HTMLMediaElement::UpdateReadyStateInternal);
 
   GetSrcMediaStream()->AddListener(mMediaStreamListener);
   // Listen for an initial image size on mSrcStream so we can get results even
@@ -3123,7 +3121,7 @@ void HTMLMediaElement::EndSrcMediaStreamPlayback()
   }
 
   // Kill its reference to this element
-  mReadyStateUpdater->Unwatch(*mMediaStreamListener);
+  mWatchManager.Unwatch(*mMediaStreamListener, &HTMLMediaElement::UpdateReadyStateInternal);
   mMediaStreamListener->Forget();
   mMediaStreamListener = nullptr;
   mMediaStreamSizeListener->Forget();
@@ -3226,7 +3224,7 @@ void HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
   if (!aInfo->HasVideo()) {
     ResetState();
   } else {
-    mReadyStateUpdater->Notify();
+    mWatchManager.ManualNotify(&HTMLMediaElement::UpdateReadyStateInternal);
   }
 
   if (IsVideo() && aInfo->HasVideo()) {
@@ -3887,12 +3885,12 @@ void HTMLMediaElement::UpdateMediaSize(const nsIntSize& aSize)
   }
 
   mMediaInfo.mVideo.mDisplay = aSize;
-  mReadyStateUpdater->Notify();
+  mWatchManager.ManualNotify(&HTMLMediaElement::UpdateReadyStateInternal);
 }
 
 void HTMLMediaElement::UpdateInitialMediaSize(const nsIntSize& aSize)
 {
-  if (mMediaInfo.mVideo.mDisplay == nsIntSize(0, 0)) {
+  if (!mMediaInfo.HasVideo()) {
     UpdateMediaSize(aSize);
   }
 }

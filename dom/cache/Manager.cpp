@@ -1621,10 +1621,9 @@ Manager::ExecuteCacheOp(Listener* aListener, CacheId aCacheId,
 {
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
-  MOZ_ASSERT(aOpArgs.type() != CacheOpArgs::TCacheAddAllArgs);
   MOZ_ASSERT(aOpArgs.type() != CacheOpArgs::TCachePutAllArgs);
 
-  if (mState == Closing) {
+  if (NS_WARN_IF(mState == Closing)) {
     aListener->OnOpComplete(ErrorResult(NS_ERROR_FAILURE), void_t());
     return;
   }
@@ -1668,7 +1667,7 @@ Manager::ExecuteStorageOp(Listener* aListener, Namespace aNamespace,
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
 
-  if (mState == Closing) {
+  if (NS_WARN_IF(mState == Closing)) {
     aListener->OnOpComplete(ErrorResult(NS_ERROR_FAILURE), void_t());
     return;
   }
@@ -1717,7 +1716,7 @@ Manager::ExecutePutAll(Listener* aListener, CacheId aCacheId,
   NS_ASSERT_OWNINGTHREAD(Manager);
   MOZ_ASSERT(aListener);
 
-  if (mState == Closing) {
+  if (NS_WARN_IF(mState == Closing)) {
     aListener->OnOpComplete(ErrorResult(NS_ERROR_FAILURE), CachePutAllResult());
     return;
   }

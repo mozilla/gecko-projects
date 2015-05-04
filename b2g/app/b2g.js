@@ -318,6 +318,10 @@ pref("media.cache_readahead_limit", 30);
 // Enable/Disable Gonk Decoder Module
 pref("media.fragmented-mp4.gonk.enabled", true);
 #endif
+
+//Encrypted media extensions.
+pref("media.eme.enabled", true);
+pref("media.eme.apiVisible", true);
 // The default number of decoded video frames that are enqueued in
 // MediaDecoderReader's mVideoQueue.
 pref("media.video-queue.default-size", 3);
@@ -1123,6 +1127,9 @@ pref("dom.mozSettings.allowForceReadOnly", false);
 
 // RequestSync API is enabled by default on B2G.
 pref("dom.requestSync.enabled", true);
+
+// Resample touch events on b2g
+pref("gfx.touch.resample", true);
 
 // Because we can't have nice things.
 #ifdef MOZ_GRAPHENE

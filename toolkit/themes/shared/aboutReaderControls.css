@@ -13,8 +13,8 @@
 }
 
 .sepia-button {
-  color: #333333;
-  background-color: #f0ece7;
+  color: #5b4636;
+  background-color: #f4ecd8;
 }
 
 .sans-serif-button {
@@ -27,7 +27,7 @@
 
 /* Loading/error message */
 
-.message {
+#reader-message {
   margin-top: 40px;
   display: none;
   text-align: center;

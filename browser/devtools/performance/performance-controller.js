@@ -27,12 +27,8 @@ devtools.lazyRequireGetter(this, "RecordingUtils",
   "devtools/performance/recording-utils", true);
 devtools.lazyRequireGetter(this, "RecordingModel",
   "devtools/performance/recording-model", true);
-devtools.lazyRequireGetter(this, "FramerateGraph",
-  "devtools/performance/performance-graphs", true);
-devtools.lazyRequireGetter(this, "MemoryGraph",
-  "devtools/performance/performance-graphs", true);
-devtools.lazyRequireGetter(this, "MarkersOverview",
-  "devtools/shared/timeline/markers-overview", true);
+devtools.lazyRequireGetter(this, "GraphsController",
+  "devtools/performance/graphs", true);
 devtools.lazyRequireGetter(this, "Waterfall",
   "devtools/shared/timeline/waterfall", true);
 devtools.lazyRequireGetter(this, "MarkerDetails",
@@ -52,8 +48,6 @@ devtools.lazyRequireGetter(this, "FlameGraphUtils",
 devtools.lazyRequireGetter(this, "FlameGraph",
   "devtools/shared/widgets/FlameGraph", true);
 
-devtools.lazyImporter(this, "CanvasGraphUtils",
-  "resource:///modules/devtools/Graphs.jsm");
 devtools.lazyImporter(this, "SideMenuWidget",
   "resource:///modules/devtools/SideMenuWidget.jsm");
 devtools.lazyImporter(this, "PluralForm",
@@ -290,10 +284,16 @@ let PerformanceController = {
    * when the front has started to record.
    */
   startRecording: Task.async(function *() {
+    // Store retro-mode here so we can easily list true/false
+    // values for reverting.
+    // TODO bug 1160313
+    let superMode = !this.getOption("retro-mode");
+
     let options = {
-      withMemory: this.getOption("enable-memory"),
+      withMarkers: superMode ? true : false,
+      withMemory: superMode ? this.getOption("enable-memory") : false,
       withTicks: this.getOption("enable-framerate"),
-      withAllocations: this.getOption("enable-memory"),
+      withAllocations: superMode ? this.getOption("enable-memory") : false,
       allocationsSampleProbability: this.getPref("memory-sample-probability"),
       allocationsMaxLogLength: this.getPref("memory-max-log-length"),
       bufferSize: this.getPref("profiler-buffer-size"),
@@ -468,6 +468,42 @@ let PerformanceController = {
    */
   getRecordings: function () {
     return this._recordings;
+  },
+
+  /**
+   * Utility method taking the currently selected recording item's features, or optionally passed
+   * in recording item, as well as the actor support on the server, returning a boolean
+   * indicating if the requirements pass or not. Used to toggle features' visibility mostly.
+   *
+   * @option {Array<string>} features
+   *         An array of strings indicating what configuration is needed on the recording
+   *         model, like `withTicks`, or `withMemory`.
+   * @option {Array<string>} actors
+   *         An array of strings indicating what actors must exist.
+   * @option {boolean} isRecording
+   *         A boolean indicating whether the recording must be either recording or not
+   *         recording. Setting to undefined will allow either state.
+   * @param {RecordingModel} recording
+   *        An optional recording model to use instead of the currently selected.
+   *
+   * @return boolean
+   */
+  isFeatureSupported: function ({ features, actors, isRecording: shouldBeRecording }, recording) {
+    recording = recording || this.getCurrentRecording();
+    let recordingConfig = recording ? recording.getConfiguration() : {};
+    let currentRecordingState = recording ? recording.isRecording() : void 0;
+    let actorsSupported = gFront.getActorSupport();
+
+    if (shouldBeRecording != null && shouldBeRecording !== currentRecordingState) {
+      return false;
+    }
+    if (actors && !actors.every(a => actorsSupported[a])) {
+      return false;
+    }
+    if (features && !features.every(f => recordingConfig[f])) {
+      return false;
+    }
+    return true;
   },
 
   toString: () => "[object PerformanceController]"

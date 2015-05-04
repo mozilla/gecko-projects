@@ -63,11 +63,6 @@ PushSubscription.prototype = {
     return this._pushEndpoint;
   },
 
-  get subscriptionId() {
-    // TODO bug 1149271.  Not sure what this is about.
-    return "The twins of Mammon quarrelled.";
-  },
-
   unsubscribe: function() {
     debug("unsubscribe! ")
 
@@ -267,7 +262,7 @@ Push.prototype = {
         }.bind(this),
 
         function() {
-          reject("denied");
+          reject("PermissionDeniedError");
         }
       );
     }.bind(this));
@@ -291,7 +286,7 @@ Push.prototype = {
         }.bind(this),
 
         function() {
-          reject("denied");
+          reject("PermissionDeniedError");
         }
       );
     }.bind(this));

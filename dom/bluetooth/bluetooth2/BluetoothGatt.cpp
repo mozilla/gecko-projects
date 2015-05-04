@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -256,6 +256,8 @@ BluetoothGatt::DiscoverServices(ErrorResult& aRv)
   BT_ENSURE_TRUE_REJECT(bs, promise, NS_ERROR_NOT_AVAILABLE);
 
   mDiscoveringServices = true;
+  mServices.Clear();
+  BluetoothGattBinding::ClearCachedServicesValue(this);
   nsRefPtr<BluetoothReplyRunnable> result =
     new BluetoothVoidReplyRunnable(nullptr /* DOMRequest */,
                                    promise,
@@ -292,6 +294,7 @@ BluetoothGatt::HandleServicesDiscovered(const BluetoothValue& aValue)
   const InfallibleTArray<BluetoothGattServiceId>& serviceIds =
     aValue.get_ArrayOfBluetoothGattServiceId();
 
+  mServices.Clear();
   for (uint32_t i = 0; i < serviceIds.Length(); i++) {
     mServices.AppendElement(new BluetoothGattService(
       GetParentObject(), mAppUuid, serviceIds[i]));

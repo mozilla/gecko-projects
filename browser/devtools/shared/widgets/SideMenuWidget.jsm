@@ -400,6 +400,15 @@ SideMenuWidget.prototype = {
       return;
     }
 
+    // Don't show the menu if a descendant node is going to be visible also.
+    let node = e.originalTarget;
+    while (node && node !== this._list) {
+      if (node.hasAttribute("contextmenu")) {
+        return;
+      }
+      node = node.parentNode;
+    }
+
     this._contextMenu.openPopupAtScreen(e.screenX, e.screenY, true);
   },
 
@@ -510,7 +519,7 @@ SideMenuGroup.prototype = {
     for (let group of groupsArray) {
       let name = group.getAttribute("name");
       if (sortPredicate(name, identifier) > 0 && // Insertion sort at its best :)
-          !name.contains(identifier)) { // Least significant group should be last.
+          !name.includes(identifier)) { // Least significant group should be last.
         return groupsArray.indexOf(group);
       }
     }

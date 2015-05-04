@@ -610,7 +610,7 @@ pref("mousewheel.with_win.action", 1);
 pref("browser.xul.error_pages.enabled", true);
 pref("browser.xul.error_pages.expert_bad_cert", false);
 
-// Work Offline is best manually managed by the user.
+// If true, network link events will change the value of navigator.onLine
 pref("network.manage-offline-status", false);
 
 // We want to make sure mail URLs are handled externally...
@@ -1198,10 +1198,15 @@ pref("dom.ipc.plugins.sandbox-level.default", 0);
 // purposes. This will require a restart.
 // On windows these levels are:
 // 0 - sandbox with USER_NON_ADMIN access token level
-// 1 - a more strict sandbox, which causes problems in specific areas
+// 1 - level 0 plus low integrity
 // 2 - a policy that we can reasonably call an effective sandbox
 // 3 - an equivalent basic policy to the Chromium renderer processes
+#if defined(NIGHTLY_BUILD)
+pref("security.sandbox.content.level", 1);
+#else
 pref("security.sandbox.content.level", 0);
+#endif
+
 
 #if defined(MOZ_STACKWALKING)
 // This controls the depth of stack trace that is logged when Windows sandbox
@@ -1322,8 +1327,8 @@ pref("services.sync.prefs.sync.xpinstall.whitelist.required", true);
 
 // Developer edition preferences
 #ifdef MOZ_DEV_EDITION
-pref("lightweightThemes.selectedThemeID", "firefox-devedition@mozilla.org");
-pref("browser.devedition.theme.enabled", true);
+sticky_pref("lightweightThemes.selectedThemeID", "firefox-devedition@mozilla.org");
+sticky_pref("browser.devedition.theme.enabled", true);
 #endif
 
 // Developer edition promo preferences
@@ -1438,6 +1443,15 @@ pref("devtools.performance.ui.show-idle-blocks", true);
 pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-framerate", true);
 pref("devtools.performance.ui.show-jit-optimizations", false);
+// If in aurora (40.0, will revert for 40.1), set default
+// to retro mode.
+// TODO bug 1160313
+#if MOZ_UPDATE_CHANNEL == aurora
+  pref("devtools.performance.ui.retro-mode", true);
+#else
+  pref("devtools.performance.ui.retro-mode", false);
+#endif
+
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
@@ -1502,9 +1516,9 @@ pref("devtools.webaudioeditor.inspectorWidth", 300);
 
 // Default theme ("dark" or "light")
 #ifdef MOZ_DEV_EDITION
-pref("devtools.theme", "dark");
+sticky_pref("devtools.theme", "dark");
 #else
-pref("devtools.theme", "light");
+sticky_pref("devtools.theme", "light");
 #endif
 
 // Display the introductory text
@@ -1641,10 +1655,10 @@ pref("browser.newtabpage.rows", 3);
 pref("browser.newtabpage.columns", 5);
 
 // directory tiles download URL
-pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v2/links/fetch/%LOCALE%");
+pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/v3/links/fetch/%LOCALE%/%CHANNEL%");
 
 // endpoint to send newtab click and view pings
-pref("browser.newtabpage.directory.ping", "https://tiles.services.mozilla.com/v2/links/");
+pref("browser.newtabpage.directory.ping", "https://tiles.services.mozilla.com/v3/links/");
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
@@ -1858,7 +1872,7 @@ pref("browser.polaris.enabled", false);
 pref("privacy.trackingprotection.ui.enabled", false);
 #endif
 
-#ifdef NIGHTLY_BUILD
+#ifdef E10S_TESTING_ONLY
 // At the moment, autostart.2 is used, while autostart.1 is unused.
 // We leave it here set to false to reset users' defaults and allow
 // us to change everybody to true in the future, when desired.
@@ -1866,7 +1880,7 @@ pref("browser.tabs.remote.autostart.1", false);
 pref("browser.tabs.remote.autostart.2", true);
 #endif
 
-#ifdef NIGHTLY_BUILD
+#ifdef E10S_TESTING_ONLY
 // Enable e10s add-on interposition by default.
 pref("extensions.interposition.enabled", true);
 pref("extensions.interposition.prefetching", true);
@@ -1895,6 +1909,7 @@ pref("browser.readinglist.sidebarEverOpened", false);
 pref("readinglist.scheduler.enabled", false);
 pref("readinglist.server", "https://readinglist.services.mozilla.com/v1");
 
+pref("browser.reader.detectedFirstArticle", false);
 // Don't limit how many nodes we care about on desktop:
 pref("reader.parse-node-limit", 0);
 
@@ -1905,6 +1920,6 @@ pref("dom.serviceWorkers.enabled", true);
 
 pref("browser.pocket.enabled", false);
 pref("browser.pocket.hostname", "localhost");
-pref("browser.pocket.removedByUser", false);
+pref("browser.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 pref("browser.pocket.useLocaleList", true);
 pref("browser.pocket.enabledLocales", "en-US");

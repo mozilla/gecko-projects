@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,6 +32,7 @@
 #include "nsIXPConnect.h"
 #include "nsPerformance.h"
 #include "nsPIDOMWindow.h"
+#include "nsSerializationHelper.h"
 
 #include <algorithm>
 #include "jsfriendapi.h"
@@ -4079,6 +4080,17 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal,
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
     PrincipalToPrincipalInfo(aPrincipal, mLoadInfo.mPrincipalInfo)));
+}
+
+template <class Derived>
+void
+WorkerPrivateParent<Derived>::SetSecurityInfo(nsISerializable* aSerializable)
+{
+  MOZ_ASSERT(IsServiceWorker());
+  AssertIsOnMainThread();
+  nsAutoCString securityInfo;
+  NS_SerializeToString(aSerializable, securityInfo);
+  SetSecurityInfo(securityInfo);
 }
 
 template <class Derived>

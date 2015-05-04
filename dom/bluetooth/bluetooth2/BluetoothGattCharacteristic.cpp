@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -149,6 +149,7 @@ BluetoothGattCharacteristic::HandleDescriptorsDiscovered(
   const InfallibleTArray<BluetoothGattId>& descriptorIds =
     aValue.get_ArrayOfBluetoothGattId();
 
+  mDescriptors.Clear();
   for (uint32_t i = 0; i < descriptorIds.Length(); i++) {
     mDescriptors.AppendElement(new BluetoothGattDescriptor(
       GetParentObject(), this, descriptorIds[i]));
@@ -194,8 +195,6 @@ void
 BluetoothGattCharacteristic::GetValue(JSContext* cx,
                                       JS::MutableHandle<JSObject*> aValue) const
 {
-  MOZ_ASSERT(aValue);
-
   aValue.set(mValue.IsEmpty()
              ? nullptr
              : ArrayBuffer::Create(cx, mValue.Length(), mValue.Elements()));

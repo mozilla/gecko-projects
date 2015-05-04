@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=2 et tw=78: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -2087,6 +2087,7 @@ Navigator::DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                      JS::Handle<jsid> aId,
                      JS::MutableHandle<JSPropertyDescriptor> aDesc)
 {
+  // Note: Keep this in sync with MayResolve.
   if (!JSID_IS_STRING(aId)) {
     return true;
   }
@@ -2236,6 +2237,28 @@ Navigator::DoResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
   FillPropertyDescriptor(aDesc, aObject, prop_val, false);
   return true;
+}
+
+/* static */
+bool
+Navigator::MayResolve(jsid aId)
+{
+  // Note: This function does not fail and may not have any side-effects.
+  // Note: Keep this in sync with DoResolve.
+  if (!JSID_IS_STRING(aId)) {
+    return false;
+  }
+
+  nsScriptNameSpaceManager *nameSpaceManager = PeekNameSpaceManager();
+  if (!nameSpaceManager) {
+    // Really shouldn't happen here.  Fail safe.
+    return true;
+  }
+
+  nsAutoString name;
+  AssignJSFlatString(name, JSID_TO_FLAT_STRING(aId));
+
+  return nameSpaceManager->LookupNavigatorName(name);
 }
 
 struct NavigatorNameEnumeratorClosure

@@ -525,6 +525,7 @@ child:
     RegisterChromeItem(ChromeRegistryItem item);
 
     async SetOffline(bool offline);
+    async SetConnectivity(bool connectivity);
 
     async NotifyVisited(URIParams uri);
 
@@ -669,7 +670,7 @@ parent:
     sync GetProcessAttributes()
         returns (ContentParentId cpId, bool isForApp, bool isForBrowser);
     sync GetXPCOMProcessAttributes()
-        returns (bool isOffline, bool isLangRTL, nsString[] dictionaries,
+        returns (bool isOffline, bool isConnected, bool isLangRTL, nsString[] dictionaries,
                  ClipboardCapabilities clipboardCaps,
                  DomainPolicyClone domainPolicy);
 
@@ -698,6 +699,11 @@ parent:
      * connection has been made.
      */
     sync ConnectPluginBridge(uint32_t aPluginId) returns (nsresult rv);
+
+    /**
+     * Return the current blocklist state for a particular plugin.
+     */
+    sync GetBlocklistState(uint32_t aPluginId) returns (uint32_t aState);
 
     /**
      * This call returns the set of plugins loaded in the chrome
@@ -897,6 +903,8 @@ parent:
         returns (nsString providerName, OptionalInputStreamParams postData, OptionalURIParams uri);
 
     sync NotifyKeywordSearchLoading(nsString providerName, nsString keyword);
+
+    async CopyFavicon(URIParams oldURI, URIParams newURI, bool isPrivate);
 
     // Tell the compositor to allocate a layer tree id for nested remote mozbrowsers.
     sync AllocateLayerTreeId()

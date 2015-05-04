@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -21268,8 +21270,6 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(DatabaseConnection* aConnection)
   {
     size_t compressedLength = snappy::MaxCompressedLength(uncompressedLength);
 
-    // malloc is equivalent to NS_Alloc, which we use because mozStorage
-    // expects to be able to free the adopted pointer with NS_Free.
     char* compressed = static_cast<char*>(malloc(compressedLength));
     if (NS_WARN_IF(!compressed)) {
       return NS_ERROR_OUT_OF_MEMORY;

@@ -24,12 +24,6 @@ namespace image {
 
 // Inherited methods from Image.
 
-nsresult
-DynamicImage::Init(const char* aMimeType, uint32_t aFlags)
-{
-  return NS_OK;
-}
-
 already_AddRefed<ProgressTracker>
 DynamicImage::GetProgressTracker()
 {
@@ -42,12 +36,12 @@ DynamicImage::SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) const
   return 0;
 }
 
-size_t
-DynamicImage::SizeOfDecoded(gfxMemoryLocation aLocation,
-                            MallocSizeOf aMallocSizeOf) const
+void
+DynamicImage::CollectSizeOfSurfaces(nsTArray<SurfaceMemoryCounter>& aCounters,
+                                    MallocSizeOf aMallocSizeOf) const
 {
-  // We don't know the answer since gfxDrawable doesn't expose this information.
-  return 0;
+  // We can't report anything useful because gfxDrawable doesn't expose this
+  // information.
 }
 
 void

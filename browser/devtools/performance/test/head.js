@@ -56,6 +56,7 @@ let DEFAULT_PREFS = [
   "devtools.performance.memory.max-log-length",
   "devtools.performance.profiler.buffer-size",
   "devtools.performance.profiler.sample-frequency-khz",
+  "devtools.performance.ui.retro-mode",
 ].reduce((prefs, pref) => {
   prefs[pref] = Preferences.get(pref);
   return prefs;
@@ -66,6 +67,10 @@ Services.prefs.setBoolPref("devtools.performance.enabled", true);
 // Enable logging for all the tests. Both the debugger server and frontend will
 // be affected by this pref.
 Services.prefs.setBoolPref("devtools.debugger.log", false);
+
+// Disable retro mode.
+// TODO bug 1160313
+Services.prefs.setBoolPref("devtools.performance.ui.retro-mode", false);
 
 /**
  * Call manually in tests that use frame script utils after initializing
@@ -354,6 +359,7 @@ function* startRecording(panel, options = {
     : Promise.resolve();
 
   yield hasStarted;
+
   let overviewRendered = options.waitForOverview
     ? once(win.OverviewView, win.EVENTS.OVERVIEW_RENDERED)
     : Promise.resolve();
@@ -379,6 +385,7 @@ function* stopRecording(panel, options = {
   let willStop = panel.panelWin.PerformanceController.once(win.EVENTS.RECORDING_WILL_STOP);
   let hasStopped = panel.panelWin.PerformanceController.once(win.EVENTS.RECORDING_STOPPED);
   let button = win.$("#main-record-button");
+  let overviewRendered = null;
 
   ok(button.hasAttribute("checked"),
     "The record button should already be checked.");
@@ -399,12 +406,17 @@ function* stopRecording(panel, options = {
     : Promise.resolve();
 
   yield hasStopped;
-  let overviewRendered = options.waitForOverview
-    ? once(win.OverviewView, win.EVENTS.OVERVIEW_RENDERED)
-    : Promise.resolve();
+
+  // Wait for the final rendering of the overview, not a low res
+  // incremental rendering and less likely to be from another rendering that was selected
+  while (!overviewRendered && options.waitForOverview) {
+    let [_, res] = yield onceSpread(win.OverviewView, win.EVENTS.OVERVIEW_RENDERED);
+    if (res === win.FRAMERATE_GRAPH_HIGH_RES_INTERVAL) {
+      overviewRendered = true;
+    }
+  }
 
   yield stateChanged;
-  yield overviewRendered;
 
   is(win.PerformanceView.getState(), "recorded",
     "The current state is 'recorded'.");
@@ -489,4 +501,14 @@ function fireKey (e) {
 function reload (aTarget, aEvent = "navigate") {
   aTarget.activeTab.reload();
   return once(aTarget, aEvent);
+}
+
+/**
+* Forces cycle collection and GC, used in AudioNode destruction tests.
+*/
+function forceCC () {
+  info("Triggering GC/CC...");
+  SpecialPowers.DOMWindowUtils.cycleCollect();
+  SpecialPowers.DOMWindowUtils.garbageCollect();
+  SpecialPowers.DOMWindowUtils.garbageCollect();
 }

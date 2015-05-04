@@ -454,6 +454,16 @@ imgRequest::GetCurrentURI(nsIURI** aURI)
   return NS_ERROR_FAILURE;
 }
 
+bool
+imgRequest::IsChrome() const
+{
+  bool isChrome = false;
+  if (NS_WARN_IF(NS_FAILED(mURI->SchemeIs("chrome", &isChrome)))) {
+    return false;
+  }
+  return isChrome;
+}
+
 nsresult
 imgRequest::GetImageErrorCode()
 {
@@ -488,7 +498,7 @@ imgRequest::RemoveFromCache()
     if (mCacheEntry) {
       mLoader->RemoveFromCache(mCacheEntry);
     } else {
-      mLoader->RemoveFromCache(mURI);
+      mLoader->RemoveFromCache(ImageCacheKey(mURI));
     }
   }
 
@@ -967,7 +977,8 @@ PrepareForNewPart(nsIRequest* aRequest, nsIInputStream* aInStr, uint32_t aCount,
     if (result.mIsFirstPart) {
       // First part for a multipart channel. Create the MultipartImage wrapper.
       MOZ_ASSERT(aProgressTracker, "Shouldn't have given away tracker yet");
-      result.mImage = new MultipartImage(partImage, aProgressTracker);
+      result.mImage =
+        ImageFactory::CreateMultipartImage(partImage, aProgressTracker);
     } else {
       // Transition to the new part.
       auto multipartImage = static_cast<MultipartImage*>(aExistingImage);

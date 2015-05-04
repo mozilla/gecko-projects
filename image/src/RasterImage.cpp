@@ -250,8 +250,7 @@ NS_IMPL_ISUPPORTS(RasterImage, imgIContainer, nsIProperties,
 #endif
 
 //******************************************************************************
-RasterImage::RasterImage(ProgressTracker* aProgressTracker,
-                         ImageURL* aURI /* = nullptr */) :
+RasterImage::RasterImage(ImageURL* aURI /* = nullptr */) :
   ImageResource(aURI), // invoke superclass's constructor
   mSize(0,0),
   mLockCount(0),
@@ -273,8 +272,6 @@ RasterImage::RasterImage(ProgressTracker* aProgressTracker,
   mAnimationFinished(false),
   mWantFullDecode(false)
 {
-  mProgressTrackerInit = new ProgressTrackerInit(this, aProgressTracker);
-
   Telemetry::GetHistogramById(Telemetry::IMAGE_DECODE_COUNT)->Add(0);
 }
 
@@ -888,16 +885,14 @@ RasterImage::SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) const
   return mSourceBuffer->SizeOfIncludingThisWithComputedFallback(aMallocSizeOf);
 }
 
-size_t
-RasterImage::SizeOfDecoded(gfxMemoryLocation aLocation,
-                           MallocSizeOf aMallocSizeOf) const
+void
+RasterImage::CollectSizeOfSurfaces(nsTArray<SurfaceMemoryCounter>& aCounters,
+                                   MallocSizeOf aMallocSizeOf) const
 {
-  size_t n = 0;
-  n += SurfaceCache::SizeOfSurfaces(ImageKey(this), aLocation, aMallocSizeOf);
+  SurfaceCache::CollectSizeOfSurfaces(ImageKey(this), aCounters, aMallocSizeOf);
   if (mAnim) {
-    n += mAnim->SizeOfCompositingFrames(aLocation, aMallocSizeOf);
+    mAnim->CollectSizeOfCompositingSurfaces(aCounters, aMallocSizeOf);
   }
-  return n;
 }
 
 class OnAddedFrameRunnable : public nsRunnable

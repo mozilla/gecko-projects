@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -186,6 +186,10 @@ public:
   static already_AddRefed<Promise>
   All(const GlobalObject& aGlobal,
       const Sequence<JS::Value>& aIterable, ErrorResult& aRv);
+
+  static already_AddRefed<Promise>
+  All(const GlobalObject& aGlobal,
+      const nsTArray<nsRefPtr<Promise>>& aPromiseList, ErrorResult& aRv);
 
   static already_AddRefed<Promise>
   Race(const GlobalObject& aGlobal,

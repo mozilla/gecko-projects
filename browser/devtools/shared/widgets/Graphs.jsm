@@ -221,6 +221,14 @@ AbstractCanvasGraph.prototype = {
   },
 
   /**
+   * Return true if the mouse is actively messing with the selection, false
+   * otherwise.
+   */
+  get isMouseActive() {
+    return this._isMouseActive;
+  },
+
+  /**
    * Returns a promise resolved once this graph is ready to receive data.
    */
   ready: function() {
@@ -1302,14 +1310,15 @@ LineGraphWidget.prototype = Heritage.extend(AbstractCanvasGraph.prototype, {
    *        represents the elapsed time on each refresh driver tick.
    * @param number interval
    *        The maximum amount of time to wait between calculations.
+   * @param number duration
+   *        The duration of the recording in milliseconds.
    */
-  setDataFromTimestamps: Task.async(function*(timestamps, interval) {
+  setDataFromTimestamps: Task.async(function*(timestamps, interval, duration) {
     let {
       plottedData,
       plottedMinMaxSum
     } = yield CanvasGraphUtils._performTaskInWorker("plotTimestampsGraph", {
-      timestamps: timestamps,
-      interval: interval
+      timestamps, interval, duration
     });
 
     this._tempMinMaxSum = plottedMinMaxSum;

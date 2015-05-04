@@ -760,6 +760,10 @@ for var in ('ANDROID_PACKAGE_NAME', 'ANDROID_CPU_ARCH',
 # Mangle our package name to avoid Bug 750548.
 DEFINES['MANGLED_ANDROID_PACKAGE_NAME'] = CONFIG['ANDROID_PACKAGE_NAME'].replace('fennec', 'f3nn3c')
 DEFINES['MOZ_APP_ABI'] = CONFIG['TARGET_XPCOM_ABI']
+if not CONFIG['COMPILE_ENVIRONMENT']:
+    # These should really come from the included binaries, but that's not easy.
+    DEFINES['MOZ_APP_ABI'] = 'arm-eabi-gcc3' # Observe quote differences here ...
+    DEFINES['TARGET_XPCOM_ABI'] = '"arm-eabi-gcc3"' # ... and here.
 
 if '-march=armv7' in CONFIG['OS_CFLAGS']:
     DEFINES['MOZ_MIN_CPU_VERSION'] = 7
@@ -813,7 +817,6 @@ main.package_name = 'org.mozilla.gecko'
 # .project file to modify this list.
 main.filtered_resources += [
     '1.0-projectRelativePath-matches-false-false-*org/mozilla/gecko/resources/**',
-    '1.0-projectRelativePath-matches-false-false-*org/mozilla/gecko/tests/**',
 ]
 
 main.recursive_make_targets += generated_recursive_make_targets
@@ -833,7 +836,6 @@ main.res = None
 cpe = main.add_classpathentry('src', SRCDIR,
     dstdir='src/org/mozilla/gecko',
     exclude_patterns=[
-        'org/mozilla/gecko/tests/**',
         'org/mozilla/gecko/resources/**'])
 
 if not CONFIG['MOZ_CRASHREPORTER']:

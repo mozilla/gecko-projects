@@ -1247,8 +1247,10 @@ BaseShape::getUnowned(ExclusiveContext* cx, StackBaseShape& base)
 {
     BaseShapeSet& table = cx->compartment()->baseShapes;
 
-    if (!table.initialized() && !table.init())
+    if (!table.initialized() && !table.init()) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
 
     DependentAddPtr<BaseShapeSet> p(cx, table, base);
     if (p)
@@ -1277,6 +1279,22 @@ BaseShape::assertConsistency()
         MOZ_ASSERT(getObjectFlags() == unowned->getObjectFlags());
     }
 #endif
+}
+
+void
+BaseShape::traceChildren(JSTracer* trc)
+{
+    assertConsistency();
+
+    if (trc->isMarkingTracer())
+        compartment()->mark();
+
+    if (isOwned())
+        TraceEdge(trc, &unowned_, "base");
+
+    JSObject* global = compartment()->unsafeUnbarrieredMaybeGlobal();
+    if (global)
+        TraceManuallyBarrieredEdge(trc, &global, "global");
 }
 
 void
@@ -1464,8 +1482,10 @@ EmptyShape::getInitialShape(ExclusiveContext* cx, const Class* clasp, TaggedProt
 
     InitialShapeSet& table = cx->compartment()->initialShapes;
 
-    if (!table.initialized() && !table.init())
+    if (!table.initialized() && !table.init()) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
 
     typedef InitialShapeEntry::Lookup Lookup;
     DependentAddPtr<InitialShapeSet>

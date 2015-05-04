@@ -1,5 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -85,6 +85,7 @@ BluetoothGattService::HandleIncludedServicesDiscovered(
   const InfallibleTArray<BluetoothGattServiceId>& includedServIds =
     aValue.get_ArrayOfBluetoothGattServiceId();
 
+  mIncludedServices.Clear();
   for (uint32_t i = 0; i < includedServIds.Length(); i++) {
     mIncludedServices.AppendElement(new BluetoothGattService(
       GetParentObject(), mAppUuid, includedServIds[i]));
@@ -103,6 +104,7 @@ BluetoothGattService::HandleCharacteristicsDiscovered(
   const InfallibleTArray<BluetoothGattCharAttribute>& characteristics =
     aValue.get_ArrayOfBluetoothGattCharAttribute();
 
+  mCharacteristics.Clear();
   for (uint32_t i = 0; i < characteristics.Length(); i++) {
     mCharacteristics.AppendElement(new BluetoothGattCharacteristic(
       GetParentObject(), this, characteristics[i]));

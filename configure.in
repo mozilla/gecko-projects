@@ -367,6 +367,15 @@ dnl ========================================================
 dnl AR_FLAGS set here so HOST_AR_FLAGS can be set correctly (see bug 538269)
 AR_FLAGS='crs $@'
 
+if test -z "$COMPILE_ENVIRONMENT"; then
+if test "$target" != "$host"; then
+# Assert that we're cross compiling, but don't require a compile toolchain (as
+# MOZ_CROSS_COMPILER does below).
+CROSS_COMPILE=1
+AC_DEFINE(CROSS_COMPILE)
+fi
+fi # !COMPILE_ENVIRONMENT
+
 if test "$COMPILE_ENVIRONMENT"; then
 
 if test "$target" != "$host"; then
@@ -1500,9 +1509,11 @@ if test "$GNU_CC"; then
         _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Werror=return-type"
         _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Werror=sequence-point"
         _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Werror=trigraphs"
+        _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Werror=uninitialized"
         _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Werror=unknown-pragmas"
 
         MOZ_C_SUPPORTS_WARNING(-Werror=, non-literal-null-conversion, ac_c_has_werror_non_literal_null_conversion)
+        MOZ_C_SUPPORTS_WARNING(-Werror=, sometimes-uninitialized, ac_c_has_sometimes_uninitialized)
     fi
 
     # Turn off the following warnings that -Wall turns on:
@@ -1593,9 +1604,11 @@ if test "$GNU_CXX"; then
         _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Werror=switch"
         _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Werror=trigraphs"
         _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Werror=type-limits"
+        _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Werror=uninitialized"
         _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Werror=unused-label"
 
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, non-literal-null-conversion, ac_cxx_has_werror_non_literal_null_conversion)
+        MOZ_CXX_SUPPORTS_WARNING(-Werror=, sometimes-uninitialized, ac_cxx_has_sometimes_uninitialized)
     fi
 
     # Turn off the following warnings that -Wall turns on:
@@ -1961,7 +1974,7 @@ case "$target" in
             TARGET_COMPILER_ABI="ibmc"
             CC_VERSION=`lslpp -Lcq vac.C 2>/dev/null | awk -F: '{ print $3 }'`
             CXX_VERSION=`lslpp -Lcq vacpp.cmp.core 2>/dev/null | awk -F: '{ print $3 }'`
-        fi
+        fi # COMPILE_ENVIRONMENT
     fi
     case "${target_os}" in
     aix4.1*)
@@ -1970,7 +1983,7 @@ case "$target" in
     esac
     if test "$COMPILE_ENVIRONMENT"; then
         MOZ_CHECK_HEADERS(sys/inttypes.h)
-    fi
+    fi # COMPILE_ENVIRONMENT
     AC_DEFINE(NSCAP_DISABLE_DEBUG_PTR_TYPES)
     ;;
 
@@ -2097,7 +2110,9 @@ ia64*-hpux*)
         MOZ_SYNTH_PICO=1
     else
         _PLATFORM_DEFAULT_TOOLKIT=cairo-android
-        MOZ_LINKER=1
+        if test "$COMPILE_ENVIRONMENT"; then
+            MOZ_LINKER=1
+        fi
     fi
     TARGET_NSPR_MDCPUCFG='\"md/_linux.cfg\"'
 
@@ -2583,7 +2598,7 @@ if test -z "$COMPILE_ENVIRONMENT"; then
     SKIP_LIBRARY_CHECKS=1
 else
     MOZ_COMPILER_OPTS
-fi
+fi # COMPILE_ENVIRONMENT
 
 if test -z "$SKIP_COMPILER_CHECKS"; then
 dnl Checks for typedefs, structures, and compiler characteristics.
@@ -3915,7 +3930,9 @@ case "${target}" in
         NSS_DISABLE_DBM=1
         MOZ_THEME_FASTSTRIPE=1
         MOZ_TREE_FREETYPE=1
-        MOZ_MEMORY=1
+        if test "$COMPILE_ENVIRONMENT"; then
+            MOZ_MEMORY=1
+        fi
         MOZ_RAW=1
         ;;
 
@@ -5197,6 +5214,7 @@ if test "$MOZ_WIDGET_TOOLKIT" = "cocoa"; then
   MOZ_APPLEMEDIA=1
 fi
 
+if test "$COMPILE_ENVIRONMENT"; then
 if test -n "$MOZ_APPLEMEDIA"; then
   AC_DEFINE(MOZ_APPLEMEDIA)
   # hack in frameworks for fmp4 - see bug 1029974
@@ -5206,6 +5224,7 @@ if test -n "$MOZ_APPLEMEDIA"; then
   AC_CHECK_HEADER([CoreMedia/CoreMedia.h], [],
     [AC_MSG_ERROR([MacOS X 10.7 SDK or later is required])])
 fi
+fi # COMPILE_ENVIRONMENT
 
 dnl ========================================================
 dnl = DirectShow support
@@ -5450,7 +5469,7 @@ if test -n "$MOZ_VPX" -a -z "$MOZ_NATIVE_LIBVPX"; then
         VPX_ASFLAGS="-f win32 -rnasm -pnasm -DPIC"
         VPX_X86_ASM=1
         dnl The encoder needs obj_int_extract to get asm offsets.
-      fi
+      fi # COMPILE_ENVIRONMENT and others
     ;;
     *:arm*)
       if test -n "$GNU_AS" ; then
@@ -5480,7 +5499,7 @@ if test -n "$MOZ_VPX" -a -z "$MOZ_NATIVE_LIBVPX"; then
 
     if test -n "$COMPILE_ENVIRONMENT" -a -n "$VPX_X86_ASM" -a -z "$VPX_AS"; then
       AC_MSG_ERROR([yasm is a required build tool for this architecture when webm is enabled. You may either install yasm or --disable-webm (which disables the WebM video format). See https://developer.mozilla.org/en/YASM for more details.])
-    fi
+    fi # COMPILE_ENVIRONMENT and others
 
     if test -z "$GNU_CC" -a -z "$INTEL_CC" -a -z "$CLANG_CC" ; then
       dnl We prefer to get asm offsets using inline assembler, which the above
@@ -6503,7 +6522,7 @@ if test -n "$gonkdir"; then
 fi
 
 case "$OS_TARGET:$NIGHTLY_BUILD" in
-WINNT:*)
+WINNT:1)
     MOZ_CONTENT_SANDBOX=$MOZ_SANDBOX
     ;;
 Darwin:1)
@@ -6911,14 +6930,11 @@ if test -z "$MOZ_ENABLE_WARNINGS_AS_ERRORS"; then
    WARNINGS_AS_ERRORS=''
 elif test "$GNU_CC"; then
     # Prevent the following GCC warnings from being treated as errors:
-    # -Wuninitialized - too many false positives
     # -Wmaybe-uninitialized - too many false positives
     # -Wdeprecated-declarations - we don't want our builds held hostage when a
     #   platform-specific API becomes deprecated.
     # -Wfree-nonheap-object - false positives during PGO
     # -Warray-bounds - false positives depending on optimization
-    MOZ_C_SUPPORTS_WARNING(-W, no-error=uninitialized, ac_c_has_noerror_uninitialized)
-    MOZ_CXX_SUPPORTS_WARNING(-W, no-error=uninitialized, ac_cxx_has_noerror_uninitialized)
     MOZ_C_SUPPORTS_WARNING(-W, no-error=maybe-uninitialized, ac_c_has_noerror_maybe_uninitialized)
     MOZ_CXX_SUPPORTS_WARNING(-W, no-error=maybe-uninitialized, ac_cxx_has_noerror_maybe_uninitialized)
     MOZ_C_SUPPORTS_WARNING(-W, no-error=deprecated-declarations, ac_c_has_noerror_deprecated_declarations)
@@ -7341,7 +7357,7 @@ if test -n "$COMPILE_ENVIRONMENT" -a -n "$USE_ELF_HACK"; then
             USE_ELF_HACK=
         fi
     fi
-fi
+fi # COMPILE_ENVIRONMENT and others.
 
 dnl ========================================================
 dnl = libstdc++ compatibility hacks

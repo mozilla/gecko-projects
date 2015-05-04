@@ -12,11 +12,10 @@
 #include "nsContainerFrame.h"
 #include "nsStyleCoord.h"
 #include "nsStyleConsts.h"
-#include "nsTableColFrame.h"
-#include "nsTableColGroupFrame.h"
 #include "nsCellMap.h"
 #include "nsGkAtoms.h"
 #include "nsDisplayList.h"
+#include "TableArea.h"
 
 class nsTableCellFrame;
 class nsTableCellMap;
@@ -99,6 +98,19 @@ private:
 };
 
 /* ============================================================================ */
+
+enum nsTableColGroupType {
+  eColGroupContent            = 0, // there is real col group content associated
+  eColGroupAnonymousCol       = 1, // the result of a col
+  eColGroupAnonymousCell      = 2  // the result of a cell alone
+};
+
+enum nsTableColType {
+  eColContent            = 0, // there is real col content associated
+  eColAnonymousCol       = 1, // the result of a span on a col
+  eColAnonymousColGroup  = 2, // the result of a span on a col group
+  eColAnonymousCell      = 3  // the result of a cell alone
+};
 
 /**
   * nsTableFrame maps the inner portion of a table (everything except captions.)
@@ -289,7 +301,7 @@ public:
 
   friend class nsDelayedCalcBCBorders;
 
-  void AddBCDamageArea(const nsIntRect& aValue);
+  void AddBCDamageArea(const mozilla::TableArea& aValue);
   bool BCRecalcNeeded(nsStyleContext* aOldStyleContext,
                         nsStyleContext* aNewStyleContext);
   void PaintBCBorders(nsRenderingContext& aRenderingContext,
@@ -787,7 +799,7 @@ protected:
   void SetFullBCDamageArea();
   void CalcBCBorders();
 
-  void ExpandBCDamageArea(nsIntRect& aRect) const;
+  void ExpandBCDamageArea(mozilla::TableArea& aRect) const;
 
   void SetColumnDimensions(nscoord         aHeight,
                            const nsMargin& aReflowState);

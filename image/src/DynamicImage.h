@@ -31,13 +31,11 @@ public:
   }
 
   // Inherited methods from Image.
-  virtual nsresult Init(const char* aMimeType, uint32_t aFlags) override;
-
   virtual already_AddRefed<ProgressTracker> GetProgressTracker() override;
   virtual size_t SizeOfSourceWithComputedFallback(
                                  MallocSizeOf aMallocSizeOf) const override;
-  virtual size_t SizeOfDecoded(gfxMemoryLocation aLocation,
-                               MallocSizeOf aMallocSizeOf) const override;
+  virtual void CollectSizeOfSurfaces(nsTArray<SurfaceMemoryCounter>& aCounters,
+                                     MallocSizeOf aMallocSizeOf) const override;
 
   virtual void IncrementAnimationConsumers() override;
   virtual void DecrementAnimationConsumers() override;

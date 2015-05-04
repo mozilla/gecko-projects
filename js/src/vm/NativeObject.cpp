@@ -193,16 +193,15 @@ js::NativeObject::initSlotRange(uint32_t start, const Value* vector, uint32_t le
 void
 js::NativeObject::copySlotRange(uint32_t start, const Value* vector, uint32_t length)
 {
-    JS::Zone* zone = this->zone();
     HeapSlot* fixedStart;
     HeapSlot* fixedEnd;
     HeapSlot* slotsStart;
     HeapSlot* slotsEnd;
     getSlotRange(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
     for (HeapSlot* sp = fixedStart; sp < fixedEnd; sp++)
-        sp->set(zone, this, HeapSlot::Slot, start++, *vector++);
+        sp->set(this, HeapSlot::Slot, start++, *vector++);
     for (HeapSlot* sp = slotsStart; sp < slotsEnd; sp++)
-        sp->set(zone, this, HeapSlot::Slot, start++, *vector++);
+        sp->set(this, HeapSlot::Slot, start++, *vector++);
 }
 
 #ifdef DEBUG
@@ -329,8 +328,11 @@ NativeObject::setLastPropertyMakeNonNative(Shape* shape)
     MOZ_ASSERT(shape->compartment() == compartment());
     MOZ_ASSERT(shape->slotSpan() == 0);
     MOZ_ASSERT(shape->numFixedSlots() == 0);
-    MOZ_ASSERT(!hasDynamicElements());
-    MOZ_ASSERT(!hasDynamicSlots());
+
+    if (hasDynamicElements())
+        js_free(getElementsHeader());
+    if (hasDynamicSlots())
+        js_free(slots_);
 
     shape_ = shape;
 }
@@ -711,6 +713,9 @@ ReallocateElements(ExclusiveContext* cx, JSObject* obj, ObjectElements* oldHeade
 // exceptional resizings will at most triple the capacity, as opposed to the
 // usual doubling.
 //
+// Note: the structure and behavior of this method follow along with
+// UnboxedArrayObject::chooseCapacityIndex. Changes to the allocation strategy
+// in one should generally be matched by the other.
 /* static */ uint32_t
 NativeObject::goodAllocated(uint32_t reqAllocated, uint32_t length = 0)
 {

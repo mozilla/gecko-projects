@@ -1614,7 +1614,7 @@ this.PlacesUtils = {
     }
     let width  = Math.round(aWidth * aWindow.devicePixelRatio);
     let height = Math.round(aHeight * aWindow.devicePixelRatio);
-    return aURL + (aURL.contains("#") ? "&" : "#") +
+    return aURL + (aURL.includes("#") ? "&" : "#") +
            "-moz-resolution=" + width + "," + height;
   },
 
@@ -2006,6 +2006,12 @@ XPCOMUtils.defineLazyGetter(this, "gAsyncDBWrapperPromised",
         Sqlite.shutdown.addBlocker(
           "PlacesUtils wrapped connection closing",
           conn.close.bind(conn));
+
+        // Also ensure we close the wrapper in case Places shutdowns first.
+        Services.obs.addObserver(function observe() {
+          Services.obs.removeObserver(observe, "places-will-close-connection");
+          conn.close();
+        }, "places-will-close-connection", false);
       } catch(ex) {
         // It's too late to block shutdown, just close the connection.
         conn.close();

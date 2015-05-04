@@ -752,10 +752,10 @@ PluginModuleChild::AnswerNPP_GetSitesWithData(InfallibleTArray<nsCString>* aResu
     char** iterator = result;
     while (*iterator) {
         aResult->AppendElement(*iterator);
-        NS_Free(*iterator);
+        free(*iterator);
         ++iterator;
     }
-    NS_Free(result);
+    free(result);
 
     return true;
 }
@@ -1330,7 +1330,7 @@ _memfree(void* aPtr)
     PLUGIN_LOG_DEBUG_FUNCTION;
     // Only assert plugin thread here for consistency with in-process plugins.
     AssertPluginThread();
-    NS_Free(aPtr);
+    free(aPtr);
 }
 
 uint32_t
@@ -1399,7 +1399,7 @@ _memalloc(uint32_t aSize)
     PLUGIN_LOG_DEBUG_FUNCTION;
     // Only assert plugin thread here for consistency with in-process plugins.
     AssertPluginThread();
-    return NS_Alloc(aSize);
+    return moz_xmalloc(aSize);
 }
 
 // Deprecated entry points for the old Java plugin.
@@ -2177,6 +2177,26 @@ PluginModuleChild::AnswerSyncNPP_New(PPluginInstanceChild* aActor, NPError* rv)
     return true;
 }
 
+class AsyncNewResultSender : public ChildAsyncCall
+{
+public:
+    AsyncNewResultSender(PluginInstanceChild* aInstance, NPError aResult)
+        : ChildAsyncCall(aInstance, nullptr, nullptr)
+        , mResult(aResult)
+    {
+    }
+
+    void Run() override
+    {
+        RemoveFromAsyncList();
+        DebugOnly<bool> sendOk = mInstance->SendAsyncNPP_NewResult(mResult);
+        MOZ_ASSERT(sendOk);
+    }
+
+private:
+    NPError  mResult;
+};
+
 bool
 PluginModuleChild::RecvAsyncNPP_New(PPluginInstanceChild* aActor)
 {
@@ -2185,7 +2205,8 @@ PluginModuleChild::RecvAsyncNPP_New(PPluginInstanceChild* aActor)
         reinterpret_cast<PluginInstanceChild*>(aActor);
     AssertPluginThread();
     NPError rv = childInstance->DoNPP_New();
-    childInstance->SendAsyncNPP_NewResult(rv);
+    AsyncNewResultSender* task = new AsyncNewResultSender(childInstance, rv);
+    childInstance->PostChildAsyncCall(task);
     return true;
 }
 

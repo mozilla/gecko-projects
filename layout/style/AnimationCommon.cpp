@@ -30,7 +30,7 @@
 
 using mozilla::layers::Layer;
 using mozilla::dom::Animation;
-using mozilla::dom::KeyframeEffectReadonly;
+using mozilla::dom::KeyframeEffectReadOnly;
 
 namespace mozilla {
 
@@ -506,15 +506,6 @@ AnimationCollection::CanAnimatePropertyOnCompositor(
   CanAnimateFlags aFlags)
 {
   bool shouldLog = nsLayoutUtils::IsAnimationLoggingEnabled();
-  if (!gfxPlatform::OffMainThreadCompositingEnabled()) {
-    if (shouldLog) {
-      nsCString message;
-      message.AppendLiteral("Performance warning: Compositor disabled");
-      LogAsyncAnimationFailure(message);
-    }
-    return false;
-  }
-
   nsIFrame* frame = nsLayoutUtils::GetStyleFrame(aElement);
   if (IsGeometricProperty(aProperty)) {
     if (shouldLog) {
@@ -582,6 +573,19 @@ AnimationCollection::CanPerformOnCompositorThread(
     return false;
   }
 
+  nsIWidget* widget = frame->GetNearestWidget();
+  if (!widget ||
+      widget->GetLayerManager()->GetBackendType() !=
+        layers::LayersBackend::LAYERS_CLIENT) {
+    // No widget (huh?), or a widget not using off-main-thread compositor.
+    if (nsLayoutUtils::IsAnimationLoggingEnabled()) {
+      nsCString message;
+      message.AppendLiteral("Performance warning: Compositor disabled");
+      LogAsyncAnimationFailure(message);
+    }
+    return false;
+  }
+
   if (mElementProperty != nsGkAtoms::transitionsProperty &&
       mElementProperty != nsGkAtoms::animationsProperty) {
     if (nsLayoutUtils::IsAnimationLoggingEnabled()) {
@@ -601,7 +605,7 @@ AnimationCollection::CanPerformOnCompositorThread(
       continue;
     }
 
-    const KeyframeEffectReadonly* effect = anim->GetEffect();
+    const KeyframeEffectReadOnly* effect = anim->GetEffect();
     MOZ_ASSERT(effect, "A playing animation should have an effect");
 
     for (size_t propIdx = 0, propEnd = effect->Properties().Length();
@@ -620,7 +624,7 @@ AnimationCollection::CanPerformOnCompositorThread(
       continue;
     }
 
-    const KeyframeEffectReadonly* effect = anim->GetEffect();
+    const KeyframeEffectReadOnly* effect = anim->GetEffect();
     MOZ_ASSERT(effect, "A playing animation should have an effect");
 
     existsProperty = existsProperty || effect->Properties().Length() > 0;
@@ -673,7 +677,7 @@ bool
 AnimationCollection::HasAnimationOfProperty(nsCSSProperty aProperty) const
 {
   for (size_t animIdx = mAnimations.Length(); animIdx-- != 0; ) {
-    const KeyframeEffectReadonly* effect = mAnimations[animIdx]->GetEffect();
+    const KeyframeEffectReadOnly* effect = mAnimations[animIdx]->GetEffect();
     if (effect && effect->HasAnimationOfProperty(aProperty) &&
         !effect->IsFinishedTransition()) {
       return true;
@@ -922,7 +926,7 @@ AnimationCollection::HasCurrentAnimationsForProperties(
 {
   for (size_t animIdx = mAnimations.Length(); animIdx-- != 0; ) {
     const Animation& anim = *mAnimations[animIdx];
-    const KeyframeEffectReadonly* effect = anim.GetEffect();
+    const KeyframeEffectReadOnly* effect = anim.GetEffect();
     if (effect &&
         effect->IsCurrent(anim) &&
         effect->HasAnimationOfProperties(aProperties, aPropertyCount)) {

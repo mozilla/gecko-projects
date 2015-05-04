@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -72,6 +74,12 @@ ThreadLocal::ThreadLocal(const nsID& aBackgroundChildLoggingId)
   MOZ_ASSERT(mOwningThread);
 
   MOZ_COUNT_CTOR(mozilla::dom::indexedDB::ThreadLocal);
+
+  // NSID_LENGTH counts the null terminator, SetLength() does not.
+  mLoggingIdString.SetLength(NSID_LENGTH - 1);
+
+  aBackgroundChildLoggingId.ToProvidedString(
+    *reinterpret_cast<char(*)[NSID_LENGTH]>(mLoggingIdString.BeginWriting()));
 }
 
 ThreadLocal::~ThreadLocal()

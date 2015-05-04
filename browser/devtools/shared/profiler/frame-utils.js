@@ -54,6 +54,16 @@ exports.parseLocation = function parseLocation (frame) {
 },
 
 /**
+ * Determines if the given frame is the (root) frame.
+ *
+ * @param object frame
+ * @return boolean
+ */
+exports.isRoot = function isRoot({ location }) {
+  return location === "(root)";
+};
+
+/**
 * Checks if the specified function represents a chrome or content frame.
 *
 * @param object frame
@@ -61,11 +71,16 @@ exports.parseLocation = function parseLocation (frame) {
 * @return boolean
 *         True if a content frame, false if a chrome frame.
 */
-exports.isContent = function isContent ({ category, location }) {
+exports.isContent = function isContent (frame) {
+  if (exports.isRoot(frame)) {
+    return true;
+  }
+
   // Only C++ stack frames have associated category information.
+  const { category, location } = frame;
   return !!(!category &&
-    !CHROME_SCHEMES.find(e => location.contains(e)) &&
-    CONTENT_SCHEMES.find(e => location.contains(e)));
+    !CHROME_SCHEMES.find(e => location.includes(e)) &&
+    CONTENT_SCHEMES.find(e => location.includes(e)));
 }
 
 /**
@@ -117,14 +132,20 @@ exports.filterPlatformData = function filterPlatformData (frames) {
  */
 function nsIURL(url) {
   let cached = gNSURLStore.get(url);
-  if (cached) {
+  // If we cached a valid URI, or `null` in the case
+  // of a failure, return it.
+  if (cached !== void 0) {
     return cached;
   }
   let uri = null;
   try {
     uri = Services.io.newURI(url, null, null).QueryInterface(Ci.nsIURL);
+    // Access the host, because the constructor doesn't necessarily throw
+    // if it's invalid, but accessing the host can throw as well
+    uri.host;
   } catch(e) {
     // The passed url string is invalid.
+    uri = null;
   }
   gNSURLStore.set(url, uri);
   return uri;

@@ -1592,8 +1592,10 @@ ScriptSource::chars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holde
 
         const size_t nbytes = sizeof(char16_t) * (length_ + 1);
         char16_t* decompressed = static_cast<char16_t*>(js_malloc(nbytes));
-        if (!decompressed)
+        if (!decompressed) {
+            JS_ReportOutOfMemory(cx);
             return nullptr;
+        }
 
         if (!DecompressString((const unsigned char*) compressedData(), compressedBytes(),
                               reinterpret_cast<unsigned char*>(decompressed), nbytes)) {
@@ -3479,33 +3481,6 @@ JSScript::traceChildren(JSTracer* trc)
     bindings.trace(trc);
 
     jit::TraceJitScripts(trc, this);
-}
-
-void
-LazyScript::traceChildren(JSTracer* trc)
-{
-    if (function_)
-        TraceEdge(trc, &function_, "function");
-
-    if (sourceObject_)
-        TraceEdge(trc, &sourceObject_, "sourceObject");
-
-    if (enclosingScope_)
-        TraceEdge(trc, &enclosingScope_, "enclosingScope");
-
-    if (script_)
-        TraceEdge(trc, &script_, "realScript");
-
-    // We rely on the fact that atoms are always tenured.
-    FreeVariable* freeVariables = this->freeVariables();
-    for (size_t i = 0; i < numFreeVariables(); i++) {
-        JSAtom* atom = freeVariables[i].atom();
-        TraceManuallyBarrieredEdge(trc, &atom, "lazyScriptFreeVariable");
-    }
-
-    HeapPtrFunction* innerFunctions = this->innerFunctions();
-    for (size_t i = 0; i < numInnerFunctions(); i++)
-        TraceEdge(trc, &innerFunctions[i], "lazyScriptInnerFunction");
 }
 
 void

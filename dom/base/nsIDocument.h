@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1938,6 +1939,12 @@ public:
   }
 
   /**
+   * If this document is a static clone, let the original document know that
+   * we're going away and then release our reference to it.
+   */
+  void UnlinkOriginalDocumentIfStatic();
+
+  /**
    * These are called by the parser as it encounters <picture> tags, the end of
    * said tags, and possible picture <source srcset> sources respectively. These
    * are used to inform ResolvePreLoadImage() calls.  Unset attributes are
@@ -2860,6 +2867,9 @@ protected:
    * The current frame request callback handle
    */
   int32_t mFrameRequestCallbackCounter;
+
+  // Count of live static clones of this document.
+  uint32_t mStaticCloneCount;
 
   // Array of nodes that have been blocked to prevent user tracking.
   // They most likely have had their nsIChannel canceled by the URL
