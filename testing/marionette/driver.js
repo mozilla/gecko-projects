@@ -131,7 +131,7 @@ this.GeckoDriver = function(appName, device, emulator) {
   this.testName = null;
   this.mozBrowserClose = null;
   this.enabled_security_pref = false;
-  this.sandbox = null;
+  this.sandboxes = {};
   // frame ID of the current remote frame, used for mozbrowserclose events
   this.oopFrameId = null;
   this.observing = null;
@@ -715,11 +715,17 @@ GeckoDriver.prototype.getContext = function(cmd, resp) {
  * @return {nsIXPCComponents_utils_Sandbox}
  *     Returns the sandbox.
  */
-GeckoDriver.prototype.createExecuteSandbox = function(win, mn, sp) {
-  let sb = new Cu.Sandbox(win,
+GeckoDriver.prototype.createExecuteSandbox = function(win, mn, sp, sandboxName) {
+  let principal = win;
+  if (sandboxName == 'system') {
+    principal = Cc["@mozilla.org/systemprincipal;1"].
+                createInstance(Ci.nsIPrincipal);
+  }
+  let sb = new Cu.Sandbox(principal,
       {sandboxPrototype: win, wantXrays: false, sandboxName: ""});
   sb.global = sb;
   sb.testUtils = utils;
+  sb.proto = win;
 
   mn.exports.forEach(function(fn) {
     if (typeof mn[fn] === 'function') {
@@ -740,7 +746,7 @@ GeckoDriver.prototype.createExecuteSandbox = function(win, mn, sp) {
     pow.map(s => loader.loadSubScript(s, sb));
   }
 
-  return sb;
+  this.sandboxes[sandboxName] = sb;
 };
 
 /**
@@ -820,6 +826,7 @@ GeckoDriver.prototype.execute = function(cmd, resp, directInject) {
        specialPowers,
        filename,
        line} = cmd.parameters;
+  let sandboxName = cmd.parameters.sandbox || 'default';
 
   if (!scriptTimeout) {
     scriptTimeout = this.scriptTimeout;
@@ -836,7 +843,8 @@ GeckoDriver.prototype.execute = function(cmd, resp, directInject) {
       timeout: scriptTimeout,
       specialPowers: specialPowers,
       filename: filename,
-      line: line
+      line: line,
+      sandboxName: sandboxName
     });
     return;
   }
@@ -860,7 +868,9 @@ GeckoDriver.prototype.execute = function(cmd, resp, directInject) {
   }
 
   let win = this.getCurrentWindow();
-  if (!this.sandbox || newSandbox) {
+  if (newSandbox ||
+      !(sandboxName in this.sandboxes) ||
+      (this.sandboxes[sandboxName].proto != win)) {
     let marionette = new Marionette(
         this,
         win,
@@ -869,22 +879,23 @@ GeckoDriver.prototype.execute = function(cmd, resp, directInject) {
         scriptTimeout,
         this.heartbeatCallback,
         this.testName);
-    this.sandbox = this.createExecuteSandbox(
+    this.createExecuteSandbox(
         win,
         marionette,
-        specialPowers);
-    if (!this.sandbox) {
+        specialPowers,
+        sandboxName);
+    if (!this.sandboxes[sandboxName]) {
       return;
     }
   }
-  this.applyArgumentsToSandbox(win, this.sandbox, args);
+  this.applyArgumentsToSandbox(win, this.sandboxes[sandboxName], args);
 
   try {
-    this.sandbox.finish = () => {
+    this.sandboxes[sandboxName].finish = () => {
       if (this.inactivityTimer !== null) {
         this.inactivityTimer.cancel();
       }
-      return this.sandbox.generate_results();
+      return this.sandboxes[sandboxName].generate_results();
     };
 
     if (!directInject) {
@@ -892,7 +903,7 @@ GeckoDriver.prototype.execute = function(cmd, resp, directInject) {
     }
     this.executeScriptInSandbox(
         resp,
-        this.sandbox,
+        this.sandboxes[sandboxName],
         script,
         directInject,
         false /* async */,
@@ -951,6 +962,7 @@ GeckoDriver.prototype.executeJSScript = function(cmd, resp) {
         specialPowers: cmd.parameters.specialPowers,
         filename: cmd.parameters.filename,
         line: cmd.parameters.line,
+        sandboxName: cmd.parameters.sandbox || 'default',
       });
       break;
  }
@@ -980,6 +992,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
       specialPowers,
       filename,
       line} = cmd.parameters;
+  let sandboxName = cmd.parameters.sandbox || 'default';
 
   if (!scriptTimeout) {
     scriptTimeout = this.scriptTimeout;
@@ -998,7 +1011,8 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
       inactivityTimeout: inactivityTimeout,
       specialPowers: specialPowers,
       filename: filename,
-      line: line
+      line: line,
+      sandboxName: sandboxName,
     });
     return;
   }
@@ -1034,7 +1048,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
         throw new WebDriverError("Emulator callback still pending when finish() called");
       }
 
-      if (cmd.id == that.sandbox.command_id) {
+      if (cmd.id == that.sandboxes[sandboxName].command_id) {
         if (that.timer !== null) {
           that.timer.cancel();
           that.timer = null;
@@ -1055,7 +1069,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
     };
 
     let chromeAsyncFinish = function() {
-      let res = that.sandbox.generate_results();
+      let res = that.sandboxes[sandboxName].generate_results();
       chromeAsyncReturnFunc(res);
     };
 
@@ -1064,7 +1078,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
       chromeAsyncReturnFunc(err);
     };
 
-    if (!this.sandbox || newSandbox) {
+    if (newSandbox || !(sandboxName in this.sandboxes)) {
       let marionette = new Marionette(
           this,
           win,
@@ -1073,27 +1087,29 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
           scriptTimeout,
           this.heartbeatCallback,
           this.testName);
-      this.sandbox = this.createExecuteSandbox(win, marionette, specialPowers);
-      if (!this.sandbox) {
-        return;
-      }
+      this.createExecuteSandbox(win, marionette,
+                                specialPowers, sandboxName);
     }
-    this.sandbox.command_id = cmd.id;
-    this.sandbox.runEmulatorCmd = (cmd, cb) => {
+    if (!this.sandboxes[sandboxName]) {
+      return;
+    }
+
+    this.sandboxes[sandboxName].command_id = cmd.id;
+    this.sandboxes[sandboxName].runEmulatorCmd = (cmd, cb) => {
       let ecb = new EmulatorCallback();
       ecb.onresult = cb;
       ecb.onerror = chromeAsyncError;
       this.emulator.pushCallback(ecb);
       this.emulator.send({emulator_cmd: cmd, id: ecb.id});
     };
-    this.sandbox.runEmulatorShell = (args, cb) => {
+    this.sandboxes[sandboxName].runEmulatorShell = (args, cb) => {
       let ecb = new EmulatorCallback();
       ecb.onresult = cb;
       ecb.onerror = chromeAsyncError;
       this.emulator.pushCallback(ecb);
       this.emulator.send({emulator_shell: args, id: ecb.id});
     };
-    this.applyArgumentsToSandbox(win, this.sandbox, args);
+    this.applyArgumentsToSandbox(win, this.sandboxes[sandboxName], args);
 
     // NB: win.onerror is not hooked by default due to the inability to
     // differentiate content exceptions from chrome exceptions. See bug
@@ -1115,8 +1131,8 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
         }, that.timeout, Ci.nsITimer.TYPE_ONE_SHOT);
       }
 
-      this.sandbox.returnFunc = chromeAsyncReturnFunc;
-      this.sandbox.finish = chromeAsyncFinish;
+      this.sandboxes[sandboxName].returnFunc = chromeAsyncReturnFunc;
+      this.sandboxes[sandboxName].finish = chromeAsyncFinish;
 
       if (!directInject) {
         script =  "__marionetteParams.push(returnFunc);" +
@@ -1127,7 +1143,7 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
 
       this.executeScriptInSandbox(
           resp,
-          this.sandbox,
+          this.sandboxes[sandboxName],
           script,
           directInject,
           true /* async */,
@@ -1141,27 +1157,24 @@ GeckoDriver.prototype.executeWithCallback = function(cmd, resp, directInject) {
 };
 
 /**
- * Navigate to to given URL.
+ * Navigate to given URL.
  *
- * This will follow redirects issued by the server.  When the method
- * returns is based on the page load strategy that the user has
- * selected.
+ * Navigates the current browsing context to the given URL and waits for
+ * the document to load or the session's page timeout duration to elapse
+ * before returning.
  *
- * Documents that contain a META tag with the "http-equiv" attribute
- * set to "refresh" will return if the timeout is greater than 1
- * second and the other criteria for determining whether a page is
- * loaded are met.  When the refresh period is 1 second or less and
- * the page load strategy is "normal" or "conservative", it will
- * wait for the page to complete loading before returning.
+ * The command will return with a failure if there is an error loading
+ * the document or the URL is blocked.  This can occur if it fails to
+ * reach host, the URL is malformed, or if there is a certificate issue
+ * to name some examples.
  *
- * If any modal dialog box, such as those opened on
- * window.onbeforeunload or window.alert, is opened at any point in
- * the page load, it will return immediately.
+ * The document is considered successfully loaded when the
+ * DOMContentLoaded event on the frame element associated with the
+ * current window triggers and document.readyState is "complete".
  *
- * If a 401 response is seen by the browser, it will return
- * immediately.  That is, if BASIC, DIGEST, NTLM or similar
- * authentication is required, the page load is assumed to be
- * complete.  This does not include FORM-based authentication.
+ * In chrome context it will change the current window's location to
+ * the supplied URL and wait until document.readyState equals "complete"
+ * or the page timeout duration has elapsed.
  *
  * @param {string} url
  *     URL to navigate to.
@@ -1524,10 +1537,6 @@ GeckoDriver.prototype.switchToWindow = function(cmd, resp) {
   }
 
   if (found) {
-    // As in content, switching to a new window invalidates a sandbox
-    // for reuse.
-    this.sandbox = null;
-
     // Initialise Marionette if browser has not been seen before,
     // otherwise switch to known browser and activate the tab if it's a
     // content browser.
@@ -2455,6 +2464,7 @@ GeckoDriver.prototype.sessionTearDown = function(cmd, resp) {
     }
     this.observing = null;
   }
+  this.sandboxes = {};
 };
 
 /**

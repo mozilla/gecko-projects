@@ -644,8 +644,9 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
   }
 
   if (!mVideoCodecStat) {
-    mVideoCodecStat = new VideoCodecStatistics(mChannel, mPtrViECodec, true);
+    mVideoCodecStat = new VideoCodecStatistics(mChannel, mPtrViECodec);
   }
+  mVideoCodecStat->Register(true);
 
   mSendingWidth = 0;
   mSendingHeight = 0;
@@ -800,8 +801,9 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
   }
 
   if (!mVideoCodecStat) {
-    mVideoCodecStat = new VideoCodecStatistics(mChannel, mPtrViECodec, false);
+    mVideoCodecStat = new VideoCodecStatistics(mChannel, mPtrViECodec);
   }
+  mVideoCodecStat->Register(false);
 
   // XXX Currently, we gather up all of the feedback types that the remote
   // party indicated it supports for all video codecs and configure the entire
@@ -1298,7 +1300,7 @@ int WebrtcVideoConduit::SendRTCPPacket(int channel, const void* data, int len)
     CSFLogDebug(logTag, "%s Sent RTCP Packet ", __FUNCTION__);
     return len;
   } else if(mTransmitterTransport &&
-            (mTransmitterTransport->SendRtpPacket(data, len) == NS_OK)) {
+            (mTransmitterTransport->SendRtcpPacket(data, len) == NS_OK)) {
       CSFLogDebug(logTag, "%s Sent RTCP Packet (sender report) ", __FUNCTION__);
       return len;
   } else {

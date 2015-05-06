@@ -357,7 +357,7 @@
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 10,
-    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0, DestructuringForIn=1, LegacyGenerator=2, ExpressionClosure=3, LetBlock=4, LetExpression=5, NoSuchMethod=6, FlagsArgument=7"
+    "description": "Use of SpiderMonkey's deprecated language extensions in web content: ForEach=0, DestructuringForIn=1, LegacyGenerator=2, ExpressionClosure=3, LetBlock=4, LetExpression=5, NoSuchMethod=6, FlagsArgument=7, RegExpSourceProp=8"
   },
   "TELEMETRY_PING": {
     "expires_in_version": "never",
@@ -3953,14 +3953,6 @@
     "extended_statistics_ok": true,
     "description": "Session restore: Time to collect all window data (ms)"
   },
-  "FX_SESSION_RESTORE_COLLECT_SINGLE_WINDOW_DATA_MS": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "30000",
-    "n_buckets": 10,
-    "extended_statistics_ok": true,
-    "description": "Session restore: Time to collect the data of a single window (ms) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
   "FX_SESSION_RESTORE_COLLECT_COOKIES_MS": {
     "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
     "expires_in_version": "never",
@@ -4015,14 +4007,6 @@
     "extended_statistics_ok": true,
     "description": "Session restore: Time to read the session data from the file on disk (ms)"
   },
-  "FX_SESSION_RESTORE_WRITE_STATE_LONGEST_OP_MS": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "3000",
-    "n_buckets": 10,
-    "extended_statistics_ok": true,
-    "description": "Session restore: Time spent on the main thread serializing, broadcasting and sending the session data for writing (ms) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
   "FX_SESSION_RESTORE_WRITE_FILE_MS": {
     "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
     "expires_in_version": "default",
@@ -4031,14 +4015,6 @@
     "n_buckets": 10,
     "extended_statistics_ok": true,
     "description": "Session restore: Time to write the session data to the file on disk (ms)"
-  },
-  "FX_SESSION_RESTORE_WRITE_FILE_LONGEST_OP_MS": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "3000",
-    "n_buckets": 10,
-    "extended_statistics_ok": true,
-    "description": "Session restore: Duration of the longest uninterruptible operation while writing session data (ms) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
   },
   "FX_SESSION_RESTORE_FILE_SIZE_BYTES": {
     "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
@@ -4070,192 +4046,26 @@
     "extended_statistics_ok": true,
     "description": "Session restore: Time spent blocking the main thread while restoring a window state (ms)"
   },
-  "FX_SESSION_RESTORE_SESSION_LENGTH": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "365",
-    "n_buckets": 15,
-    "description": "Session restore: Days elapsed since the session was first started *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_EXTRACTING_STATISTICS_DURATION_MS": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "3000",
-    "n_buckets": 10,
-    "extended_statistics_ok": true,
-    "description": "Session restore: Duration of the off main thread statistics extraction mechanism (ms) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_TOTAL_OPEN_WINDOWS_SIZE_BYTES": {
-    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "Session restore: The subset of sessionrestore.js representing open windows (total size, in bytes)"
-  },
-  "FX_SESSION_RESTORE_TOTAL_CLOSED_WINDOWS_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "Session restore: The subset of sessionrestore.js representing closed windows (total size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_TOTAL_CLOSED_TABS_IN_OPEN_WINDOWS_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "Sessionrestore: The subset of sesionstore.js representing closed tabs in open windows (total size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_TOTAL_COOKIES_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with cookies (total size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_TOTAL_DOM_STORAGE_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with DOM storage (total size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_TOTAL_FORMDATA_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with storing form data (total size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_TOTAL_HISTORY_SIZE_BYTES": {
-    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with storing history (total size, in bytes)"
-  },
-  "FX_SESSION_RESTORE_INDIVIDUAL_OPEN_WINDOWS_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "5000000",
-    "n_buckets": 30,
-    "description": "Session restore: The subset of sessionrestore.js representing open windows (item size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_INDIVIDUAL_CLOSED_WINDOWS_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "5000000",
-    "n_buckets": 30,
-    "description": "Session restore: The subset of sessionrestore.js representing closed windows (item size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_INDIVIDUAL_CLOSED_TABS_IN_OPEN_WINDOWS_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "5000000",
-    "n_buckets": 30,
-    "description": "Sessionrestore: The subset of sesionstore.js representing closed tabs in open windows (item size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_INDIVIDUAL_COOKIES_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "50000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with cookies (item size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_INDIVIDUAL_DOM_STORAGE_SIZE_BYTES": {
-    "alert_emails": ["session-restore-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "default",
-    "kind": "exponential",
-    "high": "5000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with DOM storage (item size, in bytes)"
-  },
-  "FX_SESSION_RESTORE_INDIVIDUAL_FORMDATA_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "5000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with storing form data (item size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "FX_SESSION_RESTORE_INDIVIDUAL_HISTORY_SIZE_BYTES": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": "5000000",
-    "n_buckets": 30,
-    "description": "The subset of sessionstore.js dealing with storing history (item size, in bytes) *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
   "INNERWINDOWS_WITH_MUTATION_LISTENERS": {
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "Deleted or to-be-reused innerwindow which has had mutation event listeners."
   },
   "CHARSET_OVERRIDE_SITUATION": {
-    "expires_in_version": "default",
+    "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 8,
     "description": "Labeling status of top-level page when overriding charset (0: unlabeled file URL without detection, 1: unlabeled non-TLD-guessed non-file URL without detection, 2: unlabeled file URL with detection, 3: unlabeled non-file URL with detection, 4: labeled, 5: already overridden, 6: bug, 7: unlabeled with TLD guessing)"
   },
   "CHARSET_OVERRIDE_USED": {
-    "expires_in_version": "default",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the character encoding menu was used to override an encoding in this session."
   },
-  "DECODER_INSTANTIATED_HZ": {
-    "expires_in_version": "default",
-    "kind": "flag",
-    "description": "Whether the decoder for HZ has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_ISO2022CN": {
-    "expires_in_version": "40",
-    "kind": "flag",
-    "description": "Whether the decoder for ISO-2022-CN has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_ISO2022KR": {
-    "expires_in_version": "40",
-    "kind": "flag",
-    "description": "Whether the decoder for ISO-2022-KR has been instantiated in this session."
-  },
   "DECODER_INSTANTIATED_ISO2022JP": {
-    "expires_in_version": "default",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for ISO-2022-JP has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_JOHAB": {
-    "expires_in_version": "32",
-    "kind": "flag",
-    "description": "Whether the decoder for JOHAB has been instantiated in this session. *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "DECODER_INSTANTIATED_T61": {
-    "expires_in_version": "32",
-    "kind": "flag",
-    "description": "Whether the decoder for T.61 has been instantiated in this session. *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "DECODER_INSTANTIATED_IBM850": {
-    "expires_in_version": "38",
-    "kind": "flag",
-    "description": "Whether the decoder for IBM850 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_IBM852": {
-    "expires_in_version": "38",
-    "kind": "flag",
-    "description": "Whether the decoder for IBM852 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_IBM855": {
-    "expires_in_version": "38",
-    "kind": "flag",
-    "description": "Whether the decoder for IBM855 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_IBM857": {
-    "expires_in_version": "38",
-    "kind": "flag",
-    "description": "Whether the decoder for IBM857 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_IBM862": {
-    "expires_in_version": "38",
-    "kind": "flag",
-    "description": "Whether the decoder for IBM862 has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_IBM866": {
     "expires_in_version": "never",
@@ -4263,107 +4073,82 @@
     "description": "Whether the decoder for IBM866 has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACGREEK": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACGREEK has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACICELANDIC": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACICELANDIC has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACCE": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACCE has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACHEBREW": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACHEBREW has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACARABIC": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACARABIC has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACFARSI": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACFARSI has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACCROATIAN": {
-    "expires_in_version": "default",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACCROATIAN has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACCYRILLIC": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACCYRILLIC has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACROMANIAN": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACROMANIAN has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACTURKISH": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACTURKISH has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACDEVANAGARI": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACDEVANAGARI has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACGUJARATI": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACGUJARATI has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_MACGURMUKHI": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for MACGURMUKHI has been instantiated in this session."
   },
-  "DECODER_INSTANTIATED_ISOIR111": {
-    "expires_in_version": "38",
-    "kind": "flag",
-    "description": "Whether the decoder for ISOIR111 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_ARMSCII8": {
-    "expires_in_version": "default",
-    "kind": "flag",
-    "description": "Whether the decoder for ARMSCII8 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_VISCII": {
-    "expires_in_version": "40",
-    "kind": "flag",
-    "description": "Whether the decoder for VISCII has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_VIETTCVN5712": {
-    "expires_in_version": "40",
-    "kind": "flag",
-    "description": "Whether the decoder for VIETTCVN5712 has been instantiated in this session."
-  },
-  "DECODER_INSTANTIATED_VIETVPS": {
-    "expires_in_version": "40",
-    "kind": "flag",
-    "description": "Whether the decoder for VIETVPS has been instantiated in this session."
-  },
   "DECODER_INSTANTIATED_KOI8R": {
-    "expires_in_version": "default",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for KOI8R has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_KOI8U": {
-    "expires_in_version": "40",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for KOI8U has been instantiated in this session."
   },
   "DECODER_INSTANTIATED_ISO_8859_5": {
-    "expires_in_version": "default",
+    "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for ISO-8859-5 has been instantiated in this session."
   },

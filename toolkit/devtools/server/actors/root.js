@@ -157,6 +157,9 @@ RootActor.prototype = {
     // Added in Gecko 40, indicating that the backend isn't stupid about
     // sending resumption packets on tab navigation.
     noNeedToFakeResumptionOnNavigation: true,
+    // Added in Firefox 40. Indicates that the backend supports registering custom
+    // commands through the WebConsoleCommands API.
+    webConsoleCommands: true,
     // Whether root actor exposes tab actors
     // if allowChromeProcess is true, you can fetch a ChromeActor instance
     // to debug chrome and any non-content ressource via getProcess request
@@ -169,6 +172,9 @@ RootActor.prototype = {
     // Whether or not `getProfile()` supports specifying a `startTime`
     // and `endTime` to filter out samples. Fx40+
     profilerDataFilterable: true,
+    // Whether or not the profiler has a `getBufferInfo` method
+    // necessary as the profiler does not use the ActorFront class.
+    profilerBufferStatus: true,
   },
 
   /**

@@ -34,8 +34,7 @@ GonkDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
                                      MediaDataDecoderCallback* aCallback)
 {
   nsRefPtr<MediaDataDecoder> decoder =
-  new GonkMediaDataDecoder(new GonkVideoDecoderManager(aVideoTaskQueue,
-                                                       aImageContainer, aConfig),
+  new GonkMediaDataDecoder(new GonkVideoDecoderManager(aImageContainer, aConfig),
                            aVideoTaskQueue, aCallback);
   return decoder.forget();
 }
@@ -46,7 +45,7 @@ GonkDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
                                       MediaDataDecoderCallback* aCallback)
 {
   nsRefPtr<MediaDataDecoder> decoder =
-  new GonkMediaDataDecoder(new GonkAudioDecoderManager(aAudioTaskQueue, aConfig),
+  new GonkMediaDataDecoder(new GonkAudioDecoderManager(aConfig),
                            aAudioTaskQueue, aCallback);
   return decoder.forget();
 }
@@ -66,6 +65,7 @@ GonkDecoderModule::SupportsMimeType(const nsACString& aMimeType)
 {
   return aMimeType.EqualsLiteral("audio/mp4a-latm") ||
     aMimeType.EqualsLiteral("audio/3gpp") ||
+    aMimeType.EqualsLiteral("audio/amr-wb") ||
     aMimeType.EqualsLiteral("video/mp4") ||
     aMimeType.EqualsLiteral("video/mp4v-es") ||
     aMimeType.EqualsLiteral("video/avc");
