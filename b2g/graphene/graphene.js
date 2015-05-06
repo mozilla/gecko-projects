@@ -2,10 +2,17 @@
 // for keyCode values.
 // Default value is F5
 pref("b2g.reload_key", '{ "key": 116, "shift": false, "ctrl": false, "alt": false, "meta": false }');
+
+#ifdef MOZ_HORIZON
+pref("b2g.default.start_manifest_url", "https://mozvr.github.io/horizon/web/manifest.webapp");
+pref("dom.vr.enabled", true);
+pref("dom.ipc.tabs.disabled", true);
+#else
 pref("b2g.default.start_manifest_url", "https://mozilla.github.io/browser.html/manifest.webapp");
+pref("dom.ipc.tabs.disabled", false);
+#endif
 
 pref("javascript.options.discardSystemSource", false);
-pref("dom.ipc.tabs.disabled", false);
 pref("browser.dom.window.dump.enabled", true);
 pref("selectioncaret.enabled", false);
 pref("browser.ignoreNativeFrameTextSelection", false);
