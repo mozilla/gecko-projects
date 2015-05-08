@@ -10,7 +10,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 
-const {MozLoopService} = Cu.import("resource:///modules/loop/MozLoopService.jsm", {});
+const { MozLoopService } = Cu.import("resource:///modules/loop/MozLoopService.jsm", {});
 const consoleLog = MozLoopService.log;
 
 this.EXPORTED_SYMBOLS = ["MozLoopPushHandler"];
@@ -207,7 +207,7 @@ PushSocket.prototype = {
       this._websocket.close(this._websocket.CLOSE_NORMAL);
     }
     catch (e) {}
-  },
+  }
 };
 
 
@@ -260,7 +260,7 @@ RetryManager.prototype = {
       clearTimeout(this._timeoutID);
       this._timeoutID = null;
     }
-  },
+  }
 };
 
 /**
@@ -296,7 +296,7 @@ PingMonitor.prototype = {
   restart: function () {
     consoleLog.info("PushHandler: ping timeout restart");
     this.stop();
-    this._pingTimerID = setTimeout(() => {this._pingSend()}, this._pingInterval);
+    this._pingTimerID = setTimeout(() => { this._pingSend(); }, this._pingInterval);
   },
 
   /**
@@ -313,7 +313,7 @@ PingMonitor.prototype = {
     consoleLog.info("PushHandler: ping sent");
     this._pingTimerID = setTimeout(this._onTimeout, this._pingTimeout);
     this._pingFunc();
-  },
+  }
 };
 
 
@@ -503,7 +503,7 @@ let MozLoopPushHandler = {
     this._channelsToRegister.push(channelID);
     this._registerChannels();
   },
-  
+
   /**
    * Un-register a notification channel.
    *
@@ -771,14 +771,14 @@ let MozLoopPushHandler = {
                                (aMsg) => this._onMsg(aMsg),
                                () => this._onStart(),
                                (aCode, aReason) => this._onClose(aCode, aReason));
-    }
+    };
 
     let pushServerURLFetchError = () => {
       consoleLog.warn("PushHandler: Could not retrieve push server URL from Loop server, will retry");
       this._pushSocket = undefined;
       this._retryManager.retry(() => this._openSocket());
       return;
-    }
+    };
 
     try {
       this.pushServerUri = Services.prefs.getCharPref("loop.debug.pushserver");
@@ -870,5 +870,5 @@ let MozLoopPushHandler = {
       this._pushSocket.send({messageType: "register",
                              channelID: channelID});
     }
-  },
-}
+  }
+};

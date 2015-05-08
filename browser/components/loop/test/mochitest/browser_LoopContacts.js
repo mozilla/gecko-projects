@@ -26,7 +26,7 @@ const kContacts = [{
   category: ["google"],
   published: 1406798311748,
   updated: 1406798311748
-},{
+}, {
   id: 2,
   name: ["Bob Banana"],
   email: [{
@@ -106,7 +106,7 @@ const normalizeContact = function(contact) {
   // Get a copy of contact without private properties.
   for (let prop of Object.getOwnPropertyNames(contact)) {
     if (!prop.startsWith("_")) {
-      result[prop] = contact[prop]
+      result[prop] = contact[prop];
     }
   }
   return result;
@@ -189,7 +189,7 @@ add_task(function* () {
         Assert.ok(!err, "There shouldn't be an error");
         Assert.equal(found.length, 0, "There shouldn't be any contacts left");
         resolve();
-      })
+      });
     });
   });
 });

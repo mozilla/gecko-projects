@@ -1345,10 +1345,9 @@ pref("devtools.devedition.promo.url", "https://www.mozilla.org/firefox/developer
 // Disable the error console
 pref("devtools.errorconsole.enabled", false);
 
-// Developer toolbar and GCLI preferences
+// Developer toolbar preferences
 pref("devtools.toolbar.enabled", true);
 pref("devtools.toolbar.visible", false);
-pref("devtools.commands.dir", "");
 
 // Enable the app manager
 pref("devtools.appmanager.enabled", true);
@@ -1443,15 +1442,14 @@ pref("devtools.performance.ui.show-idle-blocks", true);
 pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-framerate", true);
 pref("devtools.performance.ui.show-jit-optimizations", false);
-// If in aurora (40.0, will revert for 40.1), set default
+// If in aurora/dev edition (40.0, will revert for 40.1), set default
 // to retro mode.
 // TODO bug 1160313
-#if MOZ_UPDATE_CHANNEL == aurora
+#ifdef MOZ_DEV_EDITION
   pref("devtools.performance.ui.retro-mode", true);
 #else
   pref("devtools.performance.ui.retro-mode", false);
 #endif
-
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
@@ -1520,17 +1518,6 @@ sticky_pref("devtools.theme", "dark");
 #else
 sticky_pref("devtools.theme", "light");
 #endif
-
-// Display the introductory text
-pref("devtools.gcli.hideIntro", false);
-
-// How eager are we to show help: never=1, sometimes=2, always=3
-pref("devtools.gcli.eagerHelper", 2);
-
-// Alias to the script URLs for inject command.
-pref("devtools.gcli.jquerySrc", "https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js");
-pref("devtools.gcli.lodashSrc", "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/2.4.1/lodash.min.js");
-pref("devtools.gcli.underscoreSrc", "https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.7.0/underscore-min.js");
 
 // Remember the Web Console filters
 pref("devtools.webconsole.filter.network", true);
@@ -1622,11 +1609,6 @@ pref("devtools.fontinspector.enabled", true);
 // opened developer tool. This allows us to ping telemetry just once per browser
 // version for each user.
 pref("devtools.telemetry.tools.opened.version", "{}");
-
-// Set imgur upload client ID
-pref("devtools.gcli.imgurClientID", '0df414e888d7240');
-// Imgur's upload URL
-pref("devtools.gcli.imgurUploadURL", "https://api.imgur.com/3/image");
 
 // Whether the character encoding menu is under the main Firefox button. This
 // preference is a string so that localizers can alter it.
@@ -1737,7 +1719,7 @@ pref("loop.support_url", "https://support.mozilla.org/kb/group-conversations-fir
 pref("loop.contacts.gravatars.show", false);
 pref("loop.contacts.gravatars.promo", true);
 pref("loop.browserSharing.showInfoBar", true);
-pref("loop.contextInConverations.enabled", false);
+pref("loop.contextInConversations.enabled", false);
 
 pref("social.sidebar.unload_timeout_ms", 10000);
 
@@ -1807,6 +1789,9 @@ pref("identity.fxaccounts.remote.force_auth.uri", "https://accounts.firefox.com/
 
 // The remote content URL shown for signin in. Must use HTTPS.
 pref("identity.fxaccounts.remote.signin.uri", "https://accounts.firefox.com/signin?service=sync&context=fx_desktop_v1");
+
+// The remote content URL where FxAccountsWebChannel messages originate.
+pref("identity.fxaccounts.remote.webchannel.uri", "https://accounts.firefox.com/");
 
 // The URL we take the user to when they opt to "manage" their Firefox Account.
 // Note that this will always need to be in the same TLD as the
@@ -1918,7 +1903,7 @@ pref("reader.parse-node-limit", 0);
 pref("dom.serviceWorkers.enabled", true);
 #endif
 
-pref("browser.pocket.enabled", false);
+pref("browser.pocket.enabled", true);
 pref("browser.pocket.api", "api.getpocket.com");
 pref("browser.pocket.site", "getpocket.com");
 pref("browser.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");

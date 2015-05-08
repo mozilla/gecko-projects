@@ -235,7 +235,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
         return NewFunctionWithProto(cx, class_constructor, 3,
                                     JSFunction::NATIVE_CTOR, NullPtr(),
                                     ClassName(key, cx),
-                                    ctorProto, JSFunction::FinalizeKind,
+                                    ctorProto, gc::AllocKind::FUNCTION,
                                     SingletonObject);
     }
 
@@ -847,7 +847,7 @@ TypedArrayObject::sharedTypedArrayPrototypeClass = {
     nullptr,                /* construct */
     nullptr,                /* trace */
     {
-        GenericCreateConstructor<TypedArrayConstructor, 3, JSFunction::FinalizeKind>,
+        GenericCreateConstructor<TypedArrayConstructor, 3, gc::AllocKind::FUNCTION>,
         GenericCreatePrototype,
         TypedArrayObject::staticFunctions,
         nullptr,
@@ -1093,6 +1093,9 @@ bool
 DataViewObject::class_constructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!ThrowIfNotConstructing(cx, args, "DataView"))
+        return false;
 
     RootedObject bufobj(cx);
     if (!GetFirstArgumentAsObject(cx, args, "DataView constructor", &bufobj))

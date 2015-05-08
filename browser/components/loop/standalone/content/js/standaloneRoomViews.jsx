@@ -205,7 +205,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
           <a href={loop.config.privacyWebsiteUrl} target="_blank">
             {mozL10n.get("privacy_notice_link_text")}
           </a>
-        ),
+        )
       });
     },
 
@@ -215,7 +215,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
       if (event.target && event.target.href) {
         this.props.dispatcher.dispatch(new sharedActions.RecordClick({
           linkInfo: event.target.href
-        }))
+        }));
       }
     },
 
@@ -288,7 +288,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
     getInitialState: function() {
       return {
         failureLogged: false
-      }
+      };
     },
 
     _logFailure: function(message) {
@@ -576,7 +576,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
       var screenShareStreamClasses = React.addons.classSet({
         "screen": true,
         "focus-stream": this.state.receivingScreenShare,
-        hide: !this.state.receivingScreenShare,
+        hide: !this.state.receivingScreenShare
       });
 
       return (

@@ -12,7 +12,7 @@ const INVALID_AUTH_TOKEN = 110;
 
 const LOOP_SESSION_TYPE = {
   GUEST: 1,
-  FXA: 2,
+  FXA: 2
 };
 
 /***
@@ -26,7 +26,7 @@ const TWO_WAY_MEDIA_CONN_LENGTH = {
   SHORTER_THAN_10S: 0,
   BETWEEN_10S_AND_30S: 1,
   BETWEEN_30S_AND_5M: 2,
-  MORE_THAN_5M: 3,
+  MORE_THAN_5M: 3
 };
 
 /**
@@ -64,7 +64,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "injectLoopAPI",
 XPCOMUtils.defineLazyModuleGetter(this, "convertToRTCStatsReport",
   "resource://gre/modules/media/RTCStatsReport.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "loopUtils",
-  "resource:///modules/loop/utils.js", "utils")
+  "resource:///modules/loop/utils.js", "utils");
 XPCOMUtils.defineLazyModuleGetter(this, "loopCrypto",
   "resource:///modules/loop/crypto.js", "LoopCrypto");
 
@@ -123,7 +123,7 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
   let ConsoleAPI = Cu.import("resource://gre/modules/devtools/Console.jsm", {}).ConsoleAPI;
   let consoleOptions = {
     maxLogLevel: Services.prefs.getCharPref(PREF_LOG_LEVEL).toLowerCase(),
-    prefix: "Loop",
+    prefix: "Loop"
   };
   return new ConsoleAPI(consoleOptions);
 });
@@ -159,7 +159,7 @@ let MozLoopServiceInternal = {
   pushURLs: new Map(),
 
   mocks: {
-    pushHandler: undefined,
+    pushHandler: undefined
   },
 
   /**
@@ -170,12 +170,12 @@ let MozLoopServiceInternal = {
   deferredRegistrations: new Map(),
 
   get pushHandler() {
-    return this.mocks.pushHandler || MozLoopPushHandler
+    return this.mocks.pushHandler || MozLoopPushHandler;
   },
 
   // The uri of the Loop server.
   get loopServerUri() {
-    return Services.prefs.getCharPref("loop.server")
+    return Services.prefs.getCharPref("loop.server");
   },
 
   /**
@@ -275,7 +275,7 @@ let MozLoopServiceInternal = {
       Cr.NS_ERROR_OFFLINE,
       Cr.NS_ERROR_PROXY_CONNECTION_REFUSED,
       Cr.NS_ERROR_UNKNOWN_HOST,
-      Cr.NS_ERROR_UNKNOWN_PROXY_HOST,
+      Cr.NS_ERROR_UNKNOWN_PROXY_HOST
     ];
 
     if (error.code === null && error.errno === null &&
@@ -365,7 +365,7 @@ let MozLoopServiceInternal = {
         } else {
           resolve(this.registerWithLoopServer(sessionType, serviceType, pushURL));
         }
-      }
+      };
 
       this.pushHandler.register(channelID, onRegistered, onNotification);
     });
@@ -443,7 +443,7 @@ let MozLoopServiceInternal = {
 
     // Create a blank URL record set if none exists for this sessionType.
     if (!pushURLs) {
-      pushURLs = {calls: undefined, rooms: undefined};
+      pushURLs = { calls: undefined, rooms: undefined };
       this.pushURLs.set(sessionType, pushURLs);
     }
 
@@ -456,7 +456,7 @@ let MozLoopServiceInternal = {
     newURLs[serviceType] = pushURL;
 
     return this.hawkRequestInternal(sessionType, "/registration", "POST",
-                                    {simplePushURLs: newURLs}).then(
+                                    { simplePushURLs: newURLs }).then(
       (response) => {
         // If this failed we got an invalid token.
         if (!this.storeSessionToken(sessionType, response.headers)) {
@@ -533,7 +533,7 @@ let MozLoopServiceInternal = {
           log.error("Failed to unregister with the loop server. Error: ", error);
           throw error;
         });
-    }
+    };
 
     return Promise.all([unregister(sessionType, callsPushURL), unregister(sessionType, roomsPushURL)]);
   },
@@ -584,7 +584,7 @@ let MozLoopServiceInternal = {
         } else {
           newPayloadObj[property] = payloadObj[property];
         }
-      };
+      }
       payloadObj = newPayloadObj;
     }
 
@@ -765,7 +765,7 @@ let MozLoopServiceInternal = {
 
         let ai = Services.appinfo;
         let uuid = uuidgen.generateUUID().toString();
-        uuid = uuid.substr(1,uuid.length-2); // remove uuid curly braces
+        uuid = uuid.substr(1, uuid.length-2); // remove uuid curly braces
 
         let directory = OS.Path.join(OS.Constants.Path.profileDir,
                                      "saved-telemetry-pings");
@@ -804,7 +804,7 @@ let MozLoopServiceInternal = {
           log.info(e.data.ok ?
             "Successfully staged loop report for telemetry upload." :
             ("Failed to stage loop report. Error: " + e.data.fail));
-        }
+        };
         worker.postMessage(job);
       });
     }, pc.id);
@@ -942,7 +942,7 @@ let MozLoopServiceInternal = {
 
       return JSON.parse(response.body);
     },
-    error => {this._hawkRequestError(error);});
+    error => { this._hawkRequestError(error); });
   },
 
   /**
@@ -964,7 +964,7 @@ let MozLoopServiceInternal = {
 
         try {
           gFxAOAuthClient = new FxAccountsOAuthClient({
-            parameters: parameters,
+            parameters: parameters
           });
         } catch (ex) {
           gFxAOAuthClientPromise = null;
@@ -1020,12 +1020,12 @@ let MozLoopServiceInternal = {
 
     let payload = {
       code: code,
-      state: state,
+      state: state
     };
     return this.hawkRequestInternal(LOOP_SESSION_TYPE.FXA, "/fxa-oauth/token", "POST", payload).then(response => {
       return JSON.parse(response.body);
     },
-    error => {this._hawkRequestError(error);});
+    error => { this._hawkRequestError(error); });
   },
 
   /**
@@ -1052,7 +1052,7 @@ let MozLoopServiceInternal = {
   _fxAOAuthError: function(deferred, err) {
     gFxAOAuthClientPromise = null;
     deferred.reject(err);
-  },
+  }
 };
 Object.freeze(MozLoopServiceInternal);
 
@@ -1079,7 +1079,7 @@ this.MozLoopService = {
     return {
       callsFxA: "25389583-921f-4169-a426-a4673658944b",
       roomsFxA: "6add272a-d316-477c-8335-f00f73dfde71",
-      roomsGuest: "19d3f799-a8f3-4328-9822-b7cd02765832",
+      roomsGuest: "19d3f799-a8f3-4328-9822-b7cd02765832"
     };
   },
 
@@ -1621,7 +1621,7 @@ this.MozLoopService = {
     }
 
     let url = this.getTourURL("resume-with-conversation", {
-      incomingConversation: aIncomingConversationState,
+      incomingConversation: aIncomingConversationState
     });
 
     let win = Services.wm.getMostRecentWindow("navigator:browser");
@@ -1632,14 +1632,14 @@ this.MozLoopService = {
     // already open so we ignore the fragment and query string.
     let hadExistingTab = win.switchToTabHavingURI(url, true, {
       ignoreFragment: true,
-      ignoreQueryString: true,
+      ignoreQueryString: true
     });
 
     // If the tab was already open, send an event instead of using the query
     // parameter above (that we don't replace on existing tabs to avoid a reload).
     if (hadExistingTab) {
       UITour.notify("Loop:IncomingConversation", {
-        conversationOpen: aIncomingConversationState === "open",
+        conversationOpen: aIncomingConversationState === "open"
       });
     }
   },
@@ -1655,7 +1655,7 @@ this.MozLoopService = {
       let win = Services.wm.getMostRecentWindow("navigator:browser");
       win.switchToTabHavingURI(url, true, {
         ignoreFragment: true,
-        replaceQueryString: true,
+        replaceQueryString: true
       });
     } catch (ex) {
       log.error("Error opening Getting Started tour", ex);
@@ -1689,7 +1689,7 @@ this.MozLoopService = {
    */
   hawkRequest: function(sessionType, path, method, payloadObj) {
     return MozLoopServiceInternal.hawkRequest(sessionType, path, method, payloadObj).catch(
-      error => {MozLoopServiceInternal._hawkRequestError(error);});
+      error => { MozLoopServiceInternal._hawkRequestError(error); });
   },
 
   /**

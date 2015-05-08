@@ -754,36 +754,35 @@ CreateLazyScriptsForCompartment(JSContext* cx)
 {
     AutoObjectVector lazyFunctions(cx);
 
-    // Find all live root lazy functions in the compartment: those which
-    // have not been compiled, which have a source object, indicating that
-    // they have a parent, and which do not have an uncompiled enclosing
-    // script. The last condition is so that we don't compile lazy scripts
-    // whose enclosing scripts failed to compile, indicating that the lazy
-    // script did not escape the script.
+    // Find all live root lazy functions in the compartment: those which have a
+    // source object, indicating that they have a parent, and which do not have
+    // an uncompiled enclosing script. The last condition is so that we don't
+    // compile lazy scripts whose enclosing scripts failed to compile,
+    // indicating that the lazy script did not escape the script.
+    //
+    // Some LazyScripts have a non-null |JSScript* script| pointer. We still
+    // want to delazify in that case: this pointer is weak so the JSScript
+    // could be destroyed at the next GC.
     //
     // Note that while we ideally iterate over LazyScripts, LazyScripts do not
     // currently stand in 1-1 relation with JSScripts; JSFunctions with the
     // same LazyScript may create different JSScripts due to relazification of
     // clones. See bug 1105306.
-    for (gc::ZoneCellIter i(cx->zone(), JSFunction::FinalizeKind); !i.done(); i.next()) {
-        JSObject* obj = i.get<JSObject>();
+    for (gc::ZoneCellIter i(cx->zone(), AllocKind::FUNCTION); !i.done(); i.next()) {
+        JSFunction* fun = &i.get<JSObject>()->as<JSFunction>();
 
         // Sweeping is incremental; take care to not delazify functions that
         // are about to be finalized. GC things referenced by objects that are
         // about to be finalized (e.g., in slots) may already be freed.
-        if (gc::IsAboutToBeFinalizedUnbarriered(&obj) ||
-            obj->compartment() != cx->compartment() ||
-            !obj->is<JSFunction>())
+        if (gc::IsAboutToBeFinalizedUnbarriered(&fun) ||
+            fun->compartment() != cx->compartment())
         {
             continue;
         }
 
-        JSFunction* fun = &obj->as<JSFunction>();
         if (fun->isInterpretedLazy()) {
             LazyScript* lazy = fun->lazyScriptOrNull();
-            if (lazy && lazy->sourceObject() && !lazy->maybeScript() &&
-                !lazy->hasUncompiledEnclosingScript())
-            {
+            if (lazy && lazy->sourceObject() && !lazy->hasUncompiledEnclosingScript()) {
                 if (!lazyFunctions.append(fun))
                     return false;
             }
