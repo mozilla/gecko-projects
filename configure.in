@@ -429,6 +429,18 @@ MOZ_TOOL_VARIABLES
 
 MOZ_CHECK_COMPILER_WRAPPER
 
+MOZ_PATH_PROG(RUSTC, rustc)
+MOZ_ARG_ENABLE_BOOL([rust],
+                    [  --enable-rust  Include rust language sources],
+                    [MOZ_RUST=1],
+                    [MOZ_RUST= ])
+if test -z "$RUSTC" -a -n "$MOZ_RUST"; then
+  AC_MSG_ERROR([Rust compiler not found.
+    To compile rust language sources, you must have 'rustc' in your path.
+    See http://www.rust-lang.org/ for more information.])
+fi
+AC_SUBST(MOZ_RUST)
+
 dnl ========================================================
 dnl Check for MacOS deployment target version
 dnl ========================================================
@@ -3519,10 +3531,10 @@ AC_SUBST(NIGHTLY_BUILD)
 AC_SUBST(RELEASE_BUILD)
 
 dnl ========================================================
-dnl Multiprocess Firefox Nightly Testing UI
+dnl Multiprocess Firefox Testing UI - Nightly and Aurora
 dnl To be removed in Bug 1003313
 dnl ========================================================
-if test -n "$NIGHTLY_BUILD"; then
+if test -z "$RELEASE_BUILD"; then
     E10S_TESTING_ONLY=1
     AC_DEFINE(E10S_TESTING_ONLY)
 fi

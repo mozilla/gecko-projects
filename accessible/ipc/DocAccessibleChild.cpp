@@ -39,6 +39,9 @@ InterfacesFor(Accessible* aAcc)
   if (aAcc->IsTableCell())
     interfaces |= Interfaces::TABLECELL;
 
+  if (aAcc->IsDoc())
+    interfaces |= Interfaces::DOCUMENT;
+
   return interfaces;
 }
 
@@ -64,6 +67,9 @@ SerializeTree(Accessible* aRoot, nsTArray<AccessibleData>& aTree)
 Accessible*
 DocAccessibleChild::IdToAccessible(const uint64_t& aID) const
 {
+  if (!aID)
+    return mDoc;
+
   return mDoc->GetAccessibleByUniqueID(reinterpret_cast<void*>(aID));
 }
 
@@ -221,7 +227,7 @@ DocAccessibleChild::RecvRelationByType(const uint64_t& aID,
 {
   Accessible* acc = mDoc->GetAccessibleByUniqueID((void*)aID);
   if (!acc)
-    return false;
+    return true;
 
   auto type = static_cast<RelationType>(aType);
   Relation rel = acc->RelationByType(type);
@@ -253,8 +259,8 @@ DocAccessibleChild::RecvRelations(const uint64_t& aID,
                                   nsTArray<RelationTargets>* aRelations)
 {
   Accessible* acc = mDoc->GetAccessibleByUniqueID((void*)aID);
-  if (!aID)
-    return false;
+  if (!acc)
+    return true;
 
 #define RELATIONTYPE(gecko, s, a, m, i) AddRelation(acc, RelationType::gecko, aRelations);
 
@@ -1609,6 +1615,22 @@ DocAccessibleChild::RecvTakeFocus(const uint64_t& aID)
     acc->TakeFocus();
   }
 
+  return true;
+}
+
+bool
+DocAccessibleChild::RecvIndexOfEmbeddedChild(const uint64_t& aID,
+                                             const uint64_t& aChildID,
+                                             uint32_t* aChildIdx)
+{
+  *aChildIdx = 0;
+
+  Accessible* parent = IdToAccessible(aID);
+  Accessible* child = IdToAccessible(aChildID);
+  if (!parent || !child)
+    return true;
+
+  *aChildIdx = parent->GetIndexOfEmbeddedChild(child);
   return true;
 }
 

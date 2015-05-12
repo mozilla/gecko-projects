@@ -8,6 +8,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 this.EXPORTED_SYMBOLS = ["Pocket"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
   "resource:///modules/CustomizableUI.jsm");
@@ -15,13 +16,42 @@ XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode",
   "resource://gre/modules/ReaderMode.jsm");
 
 let Pocket = {
+  get site() Services.prefs.getCharPref("browser.pocket.site"),
+  get listURL() { return "https://" + Pocket.site; },
+
   /**
    * Functions related to the Pocket panel UI.
    */
   onPanelViewShowing(event) {
-    let window = event.target.ownerDocument.defaultView;
-    window.pktUI.pocketButtonOnCommand(event);
-    window.pktUI.pocketPanelDidShow(event)
+    let document = event.target.ownerDocument;
+    let window = document.defaultView;
+    let iframe = document.getElementById('pocket-panel-iframe');
+
+    // ViewShowing fires immediately before it creates the contents,
+    // in lieu of an AfterViewShowing event, just spin the event loop.
+    window.setTimeout(function() {
+      window.pktUI.pocketButtonOnCommand();
+
+      if (iframe.contentDocument &&
+          iframe.contentDocument.readyState == "complete")
+      {
+        window.pktUI.pocketPanelDidShow();
+      } else {
+        // iframe didn't load yet. This seems to always be the case when in
+        // the toolbar panel, but never the case for a subview.
+        // XXX this only being fired when it's a _capturing_ listener!
+        iframe.addEventListener("load", Pocket.onFrameLoaded, true);
+      }
+    }, 0);
+  },
+
+  onFrameLoaded(event) {
+    let document = event.currentTarget.ownerDocument;
+    let window = document.defaultView;
+    let iframe = document.getElementById('pocket-panel-iframe');
+
+    iframe.removeEventListener("load", Pocket.onPanelLoaded, true);
+    window.pktUI.pocketPanelDidShow();
   },
 
   onPanelViewHiding(event) {

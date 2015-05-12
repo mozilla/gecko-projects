@@ -914,6 +914,7 @@ class ArenaLists
 
     friend class GCRuntime;
     friend class js::Nursery;
+    friend class js::TenuringTracer;
 };
 
 /* The number of GC cycles an empty chunk can survive before been released. */
@@ -1342,8 +1343,7 @@ const int ZealCompactValue = 14;
 const int ZealLimit = 14;
 
 enum VerifierType {
-    PreBarrierVerifier,
-    PostBarrierVerifier
+    PreBarrierVerifier
 };
 
 #ifdef JS_GC_ZEAL

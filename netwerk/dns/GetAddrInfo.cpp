@@ -23,16 +23,11 @@
 #endif
 
 #include "prlog.h"
-#if defined(PR_LOGGING)
 static PRLogModuleInfo *gGetAddrInfoLog = PR_NewLogModule("GetAddrInfo");
 #define LOG(msg, ...) \
   PR_LOG(gGetAddrInfoLog, PR_LOG_DEBUG, ("[DNS]: " msg, ##__VA_ARGS__))
 #define LOG_WARNING(msg, ...) \
   PR_LOG(gGetAddrInfoLog, PR_LOG_WARNING, ("[DNS]: " msg, ##__VA_ARGS__))
-#else
-#define LOG(args)
-#define LOG_WARNING(args)
-#endif
 
 #if DNSQUERY_AVAILABLE
 // There is a bug in windns.h where the type of parameter ppQueryResultsSet for
@@ -333,7 +328,9 @@ _GetAddrInfo_Portable(const char* aCanonHost, uint16_t aAddressFamily,
     canonName = PR_GetCanonNameFromAddrInfo(prai);
   }
 
-  nsAutoPtr<AddrInfo> ai(new AddrInfo(aCanonHost, prai, disableIPv4, canonName));
+  bool filterNameCollision = !(aFlags & nsHostResolver::RES_ALLOW_NAME_COLLISION);
+  nsAutoPtr<AddrInfo> ai(new AddrInfo(aCanonHost, prai, disableIPv4,
+                                      filterNameCollision, canonName));
   PR_FreeAddrInfo(prai);
   if (ai->mAddresses.isEmpty()) {
     return NS_ERROR_UNKNOWN_HOST;

@@ -352,7 +352,7 @@ nsHttpChannel::Connect()
     }
 
     // ensure that we are using a valid hostname
-    if (!net_IsValidHostName(nsDependentCString(mConnectionInfo->Host())))
+    if (!net_IsValidHostName(nsDependentCString(mConnectionInfo->Origin())))
         return NS_ERROR_UNKNOWN_HOST;
 
     // Finalize ConnectionInfo flags before SpeculativeConnect
@@ -923,7 +923,7 @@ nsHttpChannel::CallOnStartRequest()
         if (!mContentTypeHint.IsEmpty())
             mResponseHead->SetContentType(mContentTypeHint);
         else if (mResponseHead->Version() == NS_HTTP_VERSION_0_9 &&
-                 mConnectionInfo->Port() != mConnectionInfo->DefaultPort())
+                 mConnectionInfo->OriginPort() != mConnectionInfo->DefaultPort())
             mResponseHead->SetContentType(NS_LITERAL_CSTRING(TEXT_PLAIN));
         else {
             // Uh-oh.  We had better find out what type we are!
@@ -6037,35 +6037,6 @@ nsHttpChannel::SetOfflineCacheToken(nsISupports *token)
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-class nsHttpChannelCacheKey final : public nsISupportsPRUint32,
-                                    public nsISupportsCString
-{
-    NS_DECL_ISUPPORTS
-
-    NS_DECL_NSISUPPORTSPRIMITIVE
-    NS_FORWARD_NSISUPPORTSPRUINT32(mSupportsPRUint32->)
-
-    // Both interfaces declares toString method with the same signature.
-    // Thus we have to delegate only to nsISupportsPRUint32 implementation.
-    NS_IMETHOD GetData(nsACString & aData) override
-    {
-        return mSupportsCString->GetData(aData);
-    }
-    NS_IMETHOD SetData(const nsACString & aData) override
-    {
-        return mSupportsCString->SetData(aData);
-    }
-
-public:
-    nsresult SetData(uint32_t aPostID, const nsACString& aKey);
-
-protected:
-    ~nsHttpChannelCacheKey() {}
-
-    nsCOMPtr<nsISupportsPRUint32> mSupportsPRUint32;
-    nsCOMPtr<nsISupportsCString> mSupportsCString;
-};
-
 NS_IMPL_ADDREF(nsHttpChannelCacheKey)
 NS_IMPL_RELEASE(nsHttpChannelCacheKey)
 NS_INTERFACE_TABLE_HEAD(nsHttpChannelCacheKey)
@@ -6109,6 +6080,19 @@ nsresult nsHttpChannelCacheKey::SetData(uint32_t aPostID,
     if (NS_FAILED(rv)) return rv;
 
     return NS_OK;
+}
+
+nsresult nsHttpChannelCacheKey::GetData(uint32_t *aPostID,
+                                        nsACString& aKey)
+{
+    nsresult rv;
+
+    rv = mSupportsPRUint32->GetData(aPostID);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+
+    return mSupportsCString->GetData(aKey);
 }
 
 NS_IMETHODIMP
@@ -6558,12 +6542,12 @@ nsHttpChannel::MaybeInvalidateCacheEntryForSubsequentGet()
     }
 
     // Invalidate the request-uri.
-#ifdef PR_LOGGING
-    nsAutoCString key;
-    mURI->GetAsciiSpec(key);
-    LOG(("MaybeInvalidateCacheEntryForSubsequentGet [this=%p uri=%s]\n",
-        this, key.get()));
-#endif
+    if (LOG_ENABLED()) {
+      nsAutoCString key;
+      mURI->GetAsciiSpec(key);
+      LOG(("MaybeInvalidateCacheEntryForSubsequentGet [this=%p uri=%s]\n",
+          this, key.get()));
+    }
 
     DoInvalidateCacheEntry(mURI);
 
@@ -6606,11 +6590,12 @@ nsHttpChannel::DoInvalidateCacheEntry(nsIURI* aURI)
 
     nsresult rv;
 
-#ifdef PR_LOGGING
     nsAutoCString key;
-    aURI->GetAsciiSpec(key);
+    if (LOG_ENABLED()) {
+      aURI->GetAsciiSpec(key);
+    }
+
     LOG(("DoInvalidateCacheEntry [channel=%p key=%s]", this, key.get()));
-#endif
 
     nsCOMPtr<nsICacheStorageService> cacheStorageService =
         do_GetService("@mozilla.org/netwerk/cache-storage-service;1", &rv);
