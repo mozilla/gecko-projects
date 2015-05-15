@@ -7,6 +7,8 @@ const { Cc, Ci, Cu, Cr } = require("chrome");
 
 loader.lazyRequireGetter(this, "Services");
 loader.lazyRequireGetter(this, "promise");
+loader.lazyRequireGetter(this, "RecordingUtils",
+  "devtools/performance/recording-utils", true);
 
 loader.lazyImporter(this, "FileUtils",
   "resource://gre/modules/FileUtils.jsm");
@@ -103,6 +105,9 @@ let PerformanceIO = {
       }
       if (recordingData.version === PERF_TOOL_SERIALIZER_LEGACY_VERSION) {
         recordingData = convertLegacyData(recordingData);
+      }
+      if (recordingData.profile.meta.version === 2) {
+        RecordingUtils.deflateProfile(recordingData.profile);
       }
       deferred.resolve(recordingData);
     });

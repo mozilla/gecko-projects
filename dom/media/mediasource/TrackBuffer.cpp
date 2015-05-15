@@ -22,13 +22,9 @@
 #include "nsThreadUtils.h"
 #include "prlog.h"
 
-#ifdef PR_LOGGING
 extern PRLogModuleInfo* GetMediaSourceLog();
 
 #define MSE_DEBUG(arg, ...) PR_LOG(GetMediaSourceLog(), PR_LOG_DEBUG, ("TrackBuffer(%p:%s)::%s: " arg, this, mType.get(), __func__, ##__VA_ARGS__))
-#else
-#define MSE_DEBUG(...)
-#endif
 
 // Time in seconds to substract from the current time when deciding the
 // time point to evict data before in a decoder. This is used to help
@@ -685,6 +681,15 @@ TrackBuffer::OnMetadataRead(MetadataHolder* aMetadata,
 
   mMetadataRequest.Complete();
 
+  if (mShutdown) {
+    MSE_DEBUG("was shut down while reading metadata. Aborting initialization.");
+    return;
+  }
+  if (mCurrentDecoder != aDecoder) {
+    MSE_DEBUG("append was cancelled. Aborting initialization.");
+    return;
+  }
+
   // Adding an empty buffer will reopen the SourceBufferResource
   if (!aWasEnded) {
     nsRefPtr<MediaLargeByteBuffer> emptyBuffer = new MediaLargeByteBuffer;
@@ -735,6 +740,15 @@ TrackBuffer::OnMetadataNotRead(ReadMetadataFailureReason aReason,
   ReentrantMonitorAutoEnter mon(mParentDecoder->GetReentrantMonitor());
 
   mMetadataRequest.Complete();
+
+  if (mShutdown) {
+    MSE_DEBUG("was shut down while reading metadata. Aborting initialization.");
+    return;
+  }
+  if (mCurrentDecoder != aDecoder) {
+    MSE_DEBUG("append was cancelled. Aborting initialization.");
+    return;
+  }
 
   MediaDecoderReader* reader = aDecoder->GetReader();
   reader->SetIdle();
@@ -937,7 +951,6 @@ TrackBuffer::AbortAppendData()
     MOZ_ASSERT(current);
     RemoveDecoder(current);
   }
-  mMetadataRequest.DisconnectIfExists();
   // The SourceBuffer would have disconnected its promise.
   // However we must ensure that the MediaPromiseHolder handle all pending
   // promises.

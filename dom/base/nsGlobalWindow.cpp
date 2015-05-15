@@ -246,9 +246,7 @@ class nsIScriptTimeoutHandler;
 #include <android/log.h>
 #endif
 
-#ifdef PR_LOGGING
 static PRLogModuleInfo* gDOMLeakPRLog;
-#endif
 
 #ifdef XP_WIN
 #include <process.h>
@@ -1212,11 +1210,9 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
   }
 #endif
 
-#ifdef PR_LOGGING
   if (gDOMLeakPRLog)
     PR_LOG(gDOMLeakPRLog, PR_LOG_DEBUG,
            ("DOMWINDOW %p created outer=%p", this, aOuterWindow));
-#endif
 
   NS_ASSERTION(sWindowsById, "Windows hash table must be created!");
   NS_ASSERTION(!sWindowsById->Get(mWindowID),
@@ -1248,10 +1244,8 @@ nsGlobalWindow::Init()
   NS_ASSERTION(gEntropyCollector,
                "gEntropyCollector should have been initialized!");
 
-#ifdef PR_LOGGING
   gDOMLeakPRLog = PR_NewLogModule("DOMLeak");
   NS_ASSERTION(gDOMLeakPRLog, "gDOMLeakPRLog should have been initialized!");
-#endif
 
   sWindowsById = new WindowByIdTable();
 }
@@ -1306,11 +1300,9 @@ nsGlobalWindow::~nsGlobalWindow()
   }
 #endif
 
-#ifdef PR_LOGGING
   if (gDOMLeakPRLog)
     PR_LOG(gDOMLeakPRLog, PR_LOG_DEBUG,
            ("DOMWINDOW %p destroyed", this));
-#endif
 
   if (IsOuterWindow()) {
     JSObject *proxy = GetWrapperPreserveColor();
@@ -2812,7 +2804,6 @@ nsGlobalWindow::InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument)
   NS_PRECONDITION(IsInnerWindow(), "Must only be called on inner windows");
   MOZ_ASSERT(aDocument);
 
-#ifdef PR_LOGGING
   if (gDOMLeakPRLog && PR_LOG_TEST(gDOMLeakPRLog, PR_LOG_DEBUG)) {
     nsIURI *uri = aDocument->GetDocumentURI();
     nsAutoCString spec;
@@ -2820,7 +2811,6 @@ nsGlobalWindow::InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument)
       uri->GetSpec(spec);
     PR_LogPrint("DOMWINDOW %p SetNewDocument %s", this, spec.get());
   }
-#endif
 
   mDoc = aDocument;
   ClearDocumentDependentSlots(aCx);
@@ -8050,9 +8040,9 @@ PostMessageReadStructuredClone(JSContext* cx,
   if (tag == SCTAG_DOM_BLOB) {
     NS_ASSERTION(!data, "Data should be empty");
 
-    // What we get back from the reader is a FileImpl.
+    // What we get back from the reader is a BlobImpl.
     // From that we create a new File.
-    FileImpl* blobImpl;
+    BlobImpl* blobImpl;
     if (JS_ReadBytes(reader, &blobImpl, sizeof(blobImpl))) {
       MOZ_ASSERT(blobImpl);
 
@@ -8063,8 +8053,8 @@ PostMessageReadStructuredClone(JSContext* cx,
       // while destructors are running.
       JS::Rooted<JS::Value> val(cx);
       {
-        nsRefPtr<File> blob = new File(scInfo->window, blobImpl);
-        if (!GetOrCreateDOMReflector(cx, blob, &val)) {
+        nsRefPtr<Blob> blob = Blob::Create(scInfo->window, blobImpl);
+        if (!ToJSValue(cx, blob, &val)) {
           return nullptr;
         }
       }
@@ -8106,9 +8096,9 @@ PostMessageWriteStructuredClone(JSContext* cx,
 
   // See if this is a File/Blob object.
   {
-    File* blob = nullptr;
+    Blob* blob = nullptr;
     if (scInfo->subsumes && NS_SUCCEEDED(UNWRAP_OBJECT(Blob, obj, blob))) {
-      FileImpl* blobImpl = blob->Impl();
+      BlobImpl* blobImpl = blob->Impl();
       if (JS_WriteUint32Pair(writer, SCTAG_DOM_BLOB, 0) &&
           JS_WriteBytes(writer, &blobImpl, sizeof(blobImpl))) {
         scInfo->event->StoreISupports(blobImpl);
@@ -8438,13 +8428,8 @@ nsGlobalWindow::PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
     nsCOMPtr<nsIPrincipal> principal = nsContentUtils::SubjectPrincipal();
     MOZ_ASSERT(principal);
 
-    uint32_t appId;
-    if (NS_WARN_IF(NS_FAILED(principal->GetAppId(&appId))))
-      return;
-
-    bool isInBrowser;
-    if (NS_WARN_IF(NS_FAILED(principal->GetIsInBrowserElement(&isInBrowser))))
-      return;
+    uint32_t appId = principal->GetAppId();
+    bool isInBrowser = principal->GetIsInBrowserElement();
 
     // Create a nsIPrincipal inheriting the app/browser attributes from the
     // caller.
@@ -10573,11 +10558,9 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
   }
 
   if (mSessionStorage) {
-#ifdef PR_LOGGING
     if (PR_LOG_TEST(gDOMLeakPRLog, PR_LOG_DEBUG)) {
       PR_LogPrint("nsGlobalWindow %p has %p sessionStorage", this, mSessionStorage.get());
     }
-#endif
     bool canAccess = mSessionStorage->CanAccess(principal);
     NS_ASSERTION(canAccess,
                  "This window owned sessionStorage "
@@ -10626,11 +10609,9 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
     mSessionStorage = static_cast<DOMStorage*>(storage.get());
     MOZ_ASSERT(mSessionStorage);
 
-#ifdef PR_LOGGING
     if (PR_LOG_TEST(gDOMLeakPRLog, PR_LOG_DEBUG)) {
       PR_LogPrint("nsGlobalWindow %p tried to get a new sessionStorage %p", this, mSessionStorage.get());
     }
-#endif
 
     if (!mSessionStorage) {
       aError.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
@@ -10638,11 +10619,9 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
     }
   }
 
-#ifdef PR_LOGGING
   if (PR_LOG_TEST(gDOMLeakPRLog, PR_LOG_DEBUG)) {
     PR_LogPrint("nsGlobalWindow %p returns %p sessionStorage", this, mSessionStorage.get());
   }
-#endif
 
   return mSessionStorage;
 }
@@ -11558,12 +11537,10 @@ nsGlobalWindow::Observe(nsISupports* aSubject, const char* aTopic,
         return NS_OK;
       }
 
-#ifdef PR_LOGGING
       if (PR_LOG_TEST(gDOMLeakPRLog, PR_LOG_DEBUG)) {
         PR_LogPrint("nsGlobalWindow %p with sessionStorage %p passing event from %p",
                     this, mSessionStorage.get(), changingStorage.get());
       }
-#endif
 
       fireMozStorageChanged = mSessionStorage == changingStorage;
       break;

@@ -9,9 +9,7 @@
 #include "base/basictypes.h"
 #include "prlog.h"
 
-#ifdef PR_LOGGING
 extern PRLogModuleInfo* GetDataChannelLog();
-#endif
 #undef LOG
 #define LOG(args) PR_LOG(GetDataChannelLog(), PR_LOG_DEBUG, args)
 
@@ -267,7 +265,7 @@ nsDOMDataChannel::Send(const nsAString& aData, ErrorResult& aRv)
 }
 
 void
-nsDOMDataChannel::Send(File& aData, ErrorResult& aRv)
+nsDOMDataChannel::Send(Blob& aData, ErrorResult& aRv)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Not running on main thread");
 

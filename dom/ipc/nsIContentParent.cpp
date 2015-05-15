@@ -159,15 +159,24 @@ nsIContentParent::DeallocPBlobParent(PBlobParent* aActor)
 }
 
 BlobParent*
-nsIContentParent::GetOrCreateActorForBlob(File* aBlob)
+nsIContentParent::GetOrCreateActorForBlob(Blob* aBlob)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aBlob);
 
-  nsRefPtr<FileImpl> blobImpl = aBlob->Impl();
+  nsRefPtr<BlobImpl> blobImpl = aBlob->Impl();
   MOZ_ASSERT(blobImpl);
 
-  BlobParent* actor = BlobParent::GetOrCreate(this, blobImpl);
+  return GetOrCreateActorForBlobImpl(blobImpl);
+}
+
+BlobParent*
+nsIContentParent::GetOrCreateActorForBlobImpl(BlobImpl* aImpl)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aImpl);
+
+  BlobParent* actor = BlobParent::GetOrCreate(this, aImpl);
   NS_ENSURE_TRUE(actor, nullptr);
 
   return actor;
@@ -178,7 +187,7 @@ nsIContentParent::RecvSyncMessage(const nsString& aMsg,
                                   const ClonedMessageData& aData,
                                   InfallibleTArray<CpowEntry>&& aCpows,
                                   const IPC::Principal& aPrincipal,
-                                  InfallibleTArray<nsString>* aRetvals)
+                                  nsTArray<OwningSerializedStructuredCloneBuffer>* aRetvals)
 {
   // FIXME Permission check in Content process
   nsIPrincipal* principal = aPrincipal;
@@ -205,7 +214,7 @@ nsIContentParent::RecvRpcMessage(const nsString& aMsg,
                                  const ClonedMessageData& aData,
                                  InfallibleTArray<CpowEntry>&& aCpows,
                                  const IPC::Principal& aPrincipal,
-                                 InfallibleTArray<nsString>* aRetvals)
+                                 nsTArray<OwningSerializedStructuredCloneBuffer>* aRetvals)
 {
   // FIXME Permission check in Content process
   nsIPrincipal* principal = aPrincipal;

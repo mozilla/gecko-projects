@@ -68,6 +68,11 @@
 #include "gfxTextRun.h"
 #include "nsFontFaceUtils.h"
 
+#if defined(MOZ_WIDGET_GTK)
+#include "gfxPlatformGtk.h" // xxx - for UseFcFontList
+#endif
+
+
 // Needed for Start/Stop of Image Animation
 #include "imgIContainer.h"
 #include "nsIImageLoadingContent.h"
@@ -1912,6 +1917,8 @@ nsPresContext::MediaFeatureValuesChanged(nsRestyleHint aRestyleHint,
     return;
   }
 
+  mDocument->NotifyMediaFeatureValuesChanged();
+
   MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
 
   // Media query list listeners should be notified from a queued task
@@ -2168,8 +2175,10 @@ nsPresContext::UserFontSetUpdated(gfxUserFontEntry* aUpdatedFont)
     return;
 
   bool usePlatformFontList = true;
-#if defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
-  usePlatformFontList = false;
+#if defined(MOZ_WIDGET_GTK)
+    usePlatformFontList = gfxPlatformGtk::UseFcFontList();
+#elif defined(MOZ_WIDGET_QT)
+    usePlatformFontList = false;
 #endif
 
   // xxx - until the Linux platform font list is always used, use full

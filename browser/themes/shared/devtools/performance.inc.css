@@ -503,7 +503,12 @@
 .waterfall-marker-bullet.highlight-red {
   background-color: var(--theme-highlight-red);
 }
-
+#performance-filter-menupopup > menuitem.highlight-purple:before,
+.marker-details-bullet.highlight-purple,
+.waterfall-marker-bar.highlight-purple,
+.waterfall-marker-bullet.highlight-purple {
+  background-color: var(--theme-highlight-purple);
+}
 
 #waterfall-details > * {
   padding-top: 3px;
@@ -597,11 +602,6 @@
 
 #jit-optimizations-raw-view .tree-widget-item[level="1"] {
   font-weight: 600;
-}
-
-#jit-optimizations-view .opt-ion-type-site {
-  -moz-margin-start: 4px !important;
-  opacity: 0.6;
 }
 
 #jit-optimizations-view .opt-outcome::before {

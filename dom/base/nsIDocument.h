@@ -2136,6 +2136,10 @@ public:
   virtual void RemovePlugin(nsIObjectLoadingContent* aPlugin) = 0;
   virtual void GetPlugins(nsTArray<nsIObjectLoadingContent*>& aPlugins) = 0;
 
+  virtual nsresult AddResponsiveContent(nsIContent* aContent) = 0;
+  virtual void RemoveResponsiveContent(nsIContent* aContent) = 0;
+  virtual void NotifyMediaFeatureValuesChanged() = 0;
+
   virtual nsresult GetStateObject(nsIVariant** aResult) = 0;
 
   virtual nsDOMNavigationTiming* GetNavigationTiming() const = 0;
@@ -2868,7 +2872,7 @@ protected:
   nsTArray<nsWeakPtr> mBlockedTrackingNodes;
 
   // Weak reference to mScriptGlobalObject QI:d to nsPIDOMWindow,
-  // updated on every set of mSecriptGlobalObject.
+  // updated on every set of mScriptGlobalObject.
   nsPIDOMWindow *mWindow;
 
   nsCOMPtr<nsIDocumentEncoder> mCachedEncoder;

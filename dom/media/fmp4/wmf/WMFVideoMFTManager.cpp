@@ -21,12 +21,8 @@
 #include "IMFYCbCrImage.h"
 #include "mozilla/WindowsVersion.h"
 
-#ifdef PR_LOGGING
 PRLogModuleInfo* GetDemuxerLog();
 #define LOG(...) PR_LOG(GetDemuxerLog(), PR_LOG_DEBUG, (__VA_ARGS__))
-#else
-#define LOG(...)
-#endif
 
 using mozilla::layers::Image;
 using mozilla::layers::IMFYCbCrImage;
@@ -147,7 +143,7 @@ public:
 };
 
 bool
-WMFVideoMFTManager::InitializeDXVA()
+WMFVideoMFTManager::InitializeDXVA(bool aForceD3D9)
 {
   MOZ_ASSERT(!mDXVA2Manager);
 
@@ -156,13 +152,13 @@ WMFVideoMFTManager::InitializeDXVA()
   // to a halt, and makes playback performance *worse*.
   if (!mDXVAEnabled ||
       (mLayersBackend != LayersBackend::LAYERS_D3D9 &&
-       mLayersBackend != LayersBackend::LAYERS_D3D10 &&
        mLayersBackend != LayersBackend::LAYERS_D3D11)) {
     return false;
   }
 
   // The DXVA manager must be created on the main thread.
-  nsRefPtr<CreateDXVAManagerEvent> event(new CreateDXVAManagerEvent(mLayersBackend));
+  nsRefPtr<CreateDXVAManagerEvent> event = 
+    new CreateDXVAManagerEvent(aForceD3D9 ? LayersBackend::LAYERS_D3D9 : mLayersBackend);
 
   if (NS_IsMainThread()) {
     event->Run();
@@ -177,8 +173,23 @@ WMFVideoMFTManager::InitializeDXVA()
 TemporaryRef<MFTDecoder>
 WMFVideoMFTManager::Init()
 {
+  RefPtr<MFTDecoder> decoder = InitInternal(/* aForceD3D9 = */ false);
+
+  // If initialization failed with d3d11 DXVA then try falling back
+  // to d3d9.
+  if (!decoder && mDXVA2Manager && mDXVA2Manager->IsD3D11()) {
+    mDXVA2Manager = nullptr;
+    decoder = InitInternal(true);
+  }
+
+  return decoder.forget();
+}
+
+TemporaryRef<MFTDecoder>
+WMFVideoMFTManager::InitInternal(bool aForceD3D9)
+{
   mUseHwAccel = false; // default value; changed if D3D setup succeeds.
-  bool useDxva = InitializeDXVA();
+  bool useDxva = InitializeDXVA(aForceD3D9);
 
   RefPtr<MFTDecoder> decoder(new MFTDecoder());
 

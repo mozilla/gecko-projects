@@ -23,12 +23,8 @@
 #include "SpeechSynthesisParent.h"
 
 #undef LOG
-#ifdef PR_LOGGING
 extern PRLogModuleInfo* GetSpeechSynthLog();
 #define LOG(type, msg) PR_LOG(GetSpeechSynthLog(), type, msg)
-#else
-#define LOG(type, msg)
-#endif
 
 namespace {
 
@@ -566,6 +562,8 @@ nsSynthVoiceRegistry::Speak(const nsAString& aText,
     aTask->DispatchError(0, 0);
     return;
   }
+
+  aTask->SetChosenVoiceURI(voice->mUri);
 
   LOG(PR_LOG_DEBUG, ("nsSynthVoiceRegistry::Speak - Using voice URI: %s",
                      NS_ConvertUTF16toUTF8(voice->mUri).get()));

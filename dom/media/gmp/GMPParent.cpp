@@ -41,14 +41,9 @@ namespace mozilla {
 #undef LOG
 #undef LOGD
 
-#ifdef PR_LOGGING
 extern PRLogModuleInfo* GetGMPLog();
 #define LOG(level, x, ...) PR_LOG(GetGMPLog(), (level), (x, ##__VA_ARGS__))
 #define LOGD(x, ...) LOG(PR_LOG_DEBUG, "GMPParent[%p|childPid=%d] " x, this, mChildPid, ##__VA_ARGS__)
-#else
-#define LOG(level, x, ...)
-#define LOGD(x, ...)
-#endif
 
 namespace gmp {
 
@@ -62,9 +57,7 @@ GMPParent::GMPParent()
   , mGMPContentChildCount(0)
   , mAsyncShutdownRequired(false)
   , mAsyncShutdownInProgress(false)
-#ifdef PR_LOGGING
   , mChildPid(0)
-#endif
 {
   LOGD("GMPParent ctor");
   mPluginId = GeckoChildProcessHost::GetUniqueID();
@@ -139,24 +132,24 @@ GMPParent::LoadProcess()
   if (!mProcess) {
     mProcess = new GMPProcessParent(NS_ConvertUTF16toUTF8(path).get());
     if (!mProcess->Launch(30 * 1000)) {
+      LOGD("%s: Failed to launch new child process", __FUNCTION__);
       mProcess->Delete();
       mProcess = nullptr;
       return NS_ERROR_FAILURE;
     }
 
-#ifdef PR_LOGGING
     mChildPid = base::GetProcId(mProcess->GetChildProcessHandle());
-#endif
+    LOGD("%s: Launched new child process", __FUNCTION__);
 
     bool opened = Open(mProcess->GetChannel(),
                        base::GetProcId(mProcess->GetChildProcessHandle()));
     if (!opened) {
-      LOGD("%s: Failed to create new child process", __FUNCTION__);
+      LOGD("%s: Failed to open channel to new child process", __FUNCTION__);
       mProcess->Delete();
       mProcess = nullptr;
       return NS_ERROR_FAILURE;
     }
-    LOGD("%s: Created new child process", __FUNCTION__);
+    LOGD("%s: Opened channel to new child process", __FUNCTION__);
 
     bool ok = SendSetNodeId(mNodeId);
     if (!ok) {

@@ -207,10 +207,10 @@ js::CheckTracedThing(JSTracer* trc, T thing)
     if (isGcMarkingTracer) {
         GCMarker* gcMarker = static_cast<GCMarker*>(trc);
         MOZ_ASSERT_IF(gcMarker->shouldCheckCompartments(),
-                      zone->isCollecting() || rt->isAtomsZone(zone));
+                      zone->isCollecting() || zone->isAtomsZone());
 
         MOZ_ASSERT_IF(gcMarker->markColor() == GRAY,
-                      !zone->isGCMarkingBlack() || rt->isAtomsZone(zone));
+                      !zone->isGCMarkingBlack() || zone->isAtomsZone());
 
         MOZ_ASSERT(!(zone->isGCSweeping() || zone->isGCFinished() || zone->isGCCompacting()));
     }
@@ -315,8 +315,7 @@ AssertZoneIsMarking(JSString* str)
 {
 #ifdef DEBUG
     Zone* zone = TenuredCell::fromPointer(str)->zone();
-    JSRuntime* rt = str->runtimeFromMainThread();
-    MOZ_ASSERT(zone->isGCMarking() || rt->isAtomsZone(zone));
+    MOZ_ASSERT(zone->isGCMarking() || zone->isAtomsZone());
 #endif
 }
 
@@ -325,8 +324,7 @@ AssertZoneIsMarking(JS::Symbol* sym)
 {
 #ifdef DEBUG
     Zone* zone = TenuredCell::fromPointer(sym)->zone();
-    JSRuntime* rt = sym->runtimeFromMainThread();
-    MOZ_ASSERT(zone->isGCMarking() || rt->isAtomsZone(zone));
+    MOZ_ASSERT(zone->isGCMarking() || zone->isAtomsZone());
 #endif
 }
 
@@ -753,7 +751,7 @@ void
 js::GCMarker::traverseEdge(S source, T target)
 {
     MOZ_ASSERT_IF(!ThingIsPermanentAtomOrWellKnownSymbol(target),
-                  runtime()->isAtomsZone(target->zone()) || target->zone() == source->zone());
+                  target->zone()->isAtomsZone() || target->zone() == source->zone());
     traverse(target);
 }
 
@@ -1771,6 +1769,19 @@ js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(StoreBuffer* owner, TenuringTracer
         r.front().trace(mover);
 }
 
+namespace js {
+namespace gc {
+template void
+StoreBuffer::MonoTypeBuffer<StoreBuffer::WholeCellEdges>::trace(StoreBuffer*, TenuringTracer&);
+template void
+StoreBuffer::MonoTypeBuffer<StoreBuffer::ValueEdge>::trace(StoreBuffer*, TenuringTracer&);
+template void
+StoreBuffer::MonoTypeBuffer<StoreBuffer::SlotsEdge>::trace(StoreBuffer*, TenuringTracer&);
+template void
+StoreBuffer::MonoTypeBuffer<StoreBuffer::CellPtrEdge>::trace(StoreBuffer*, TenuringTracer&);
+} // namespace js
+} // namespace gc
+
 void
 js::gc::StoreBuffer::SlotsEdge::trace(TenuringTracer& mover) const
 {
@@ -1787,13 +1798,13 @@ js::gc::StoreBuffer::SlotsEdge::trace(TenuringTracer& mover) const
         int32_t initLen = obj->getDenseInitializedLength();
         int32_t clampedStart = Min(start_, initLen);
         int32_t clampedEnd = Min(start_ + count_, initLen);
-        TraceRange(&mover, clampedEnd - clampedStart,
-                   static_cast<HeapSlot*>(obj->getDenseElements() + clampedStart), "element");
+        mover.traceSlots(static_cast<HeapSlot*>(obj->getDenseElements() + clampedStart)->unsafeGet(),
+                         clampedEnd - clampedStart);
     } else {
         int32_t start = Min(uint32_t(start_), obj->slotSpan());
         int32_t end = Min(uint32_t(start_) + count_, obj->slotSpan());
         MOZ_ASSERT(end >= start);
-        TraceObjectSlots(&mover, obj, start, end - start);
+        mover.traceObjectSlots(obj, start, end - start);
     }
 }
 
@@ -1803,10 +1814,8 @@ js::gc::StoreBuffer::WholeCellEdges::trace(TenuringTracer& mover) const
     MOZ_ASSERT(edge->isTenured());
     JSGCTraceKind kind = GetGCThingTraceKind(edge);
     if (kind <= JSTRACE_OBJECT) {
-        JSObject* object = static_cast<JSObject*>(edge);
-
-        // FIXME: bug 1161664 -- call the inline path below, now that it is accessable.
-        object->traceChildren(&mover);
+        JSObject *object = static_cast<JSObject*>(edge);
+        mover.traceObject(object);
 
         // Additionally trace the expando object attached to any unboxed plain
         // objects. Baseline and Ion can write properties to the expando while
@@ -1877,28 +1886,6 @@ js::TenuringTracer::moveToTenured(JSObject* src)
     return dst;
 }
 
-// Structure for counting how many times objects in a particular group have
-// been tenured during a minor collection.
-struct TenureCount
-{
-    ObjectGroup* group;
-    int count;
-};
-
-// Keep rough track of how many times we tenure objects in particular groups
-// during minor collections, using a fixed size hash for efficiency at the cost
-// of potential collisions.
-struct Nursery::TenureCountCache
-{
-    TenureCount entries[16];
-
-    TenureCountCache() { PodZero(this); }
-
-    TenureCount& findEntry(ObjectGroup* group) {
-        return entries[PointerHasher<ObjectGroup*, 3>::hash(group) % ArrayLength(entries)];
-    }
-};
-
 void
 js::Nursery::collectToFixedPoint(TenuringTracer& mover, TenureCountCache& tenureCounts)
 {
@@ -1949,20 +1936,26 @@ js::TenuringTracer::traceObject(JSObject* obj)
     // during parsing and cannot contain nursery pointers.
     if (!nobj->hasEmptyElements() && !nobj->denseElementsAreCopyOnWrite()) {
         Value* elems = static_cast<HeapSlot*>(nobj->getDenseElements())->unsafeGet();
-        markSlots(elems, elems + nobj->getDenseInitializedLength());
+        traceSlots(elems, elems + nobj->getDenseInitializedLength());
     }
 
+    traceObjectSlots(nobj, 0, nobj->slotSpan());
+}
+
+void
+js::TenuringTracer::traceObjectSlots(NativeObject* nobj, uint32_t start, uint32_t length)
+{
     HeapSlot* fixedStart;
     HeapSlot* fixedEnd;
     HeapSlot* dynStart;
     HeapSlot* dynEnd;
-    nobj->getSlotRange(0, nobj->slotSpan(), &fixedStart, &fixedEnd, &dynStart, &dynEnd);
-    markSlots(fixedStart->unsafeGet(), fixedEnd->unsafeGet());
-    markSlots(dynStart->unsafeGet(), dynEnd->unsafeGet());
+    nobj->getSlotRange(start, length, &fixedStart, &fixedEnd, &dynStart, &dynEnd);
+    traceSlots(fixedStart->unsafeGet(), fixedEnd->unsafeGet());
+    traceSlots(dynStart->unsafeGet(), dynEnd->unsafeGet());
 }
 
 void
-js::TenuringTracer::markSlots(Value* vp, Value* end)
+js::TenuringTracer::traceSlots(Value* vp, Value* end)
 {
     for (; vp != end; ++vp)
         traverse(vp);

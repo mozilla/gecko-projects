@@ -187,7 +187,7 @@ private:
     }
 
     // Helper method to avoid gnarly control flow for failures.
-    void OpenFileImpl()
+    void OpenBlobImpl()
     {
         MOZ_ASSERT(!NS_IsMainThread());
         MOZ_ASSERT(!mFD);
@@ -207,7 +207,7 @@ private:
     {
         MOZ_ASSERT(!NS_IsMainThread());
 
-        OpenFileImpl();
+        OpenBlobImpl();
 
         if (NS_FAILED(NS_DispatchToMainThread(this))) {
             NS_WARNING("Failed to dispatch to main thread!");
@@ -1639,7 +1639,7 @@ TabParent::RecvSyncMessage(const nsString& aMessage,
                            const ClonedMessageData& aData,
                            InfallibleTArray<CpowEntry>&& aCpows,
                            const IPC::Principal& aPrincipal,
-                           InfallibleTArray<nsString>* aJSONRetVal)
+                           nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal)
 {
   // FIXME Permission check for TabParent in Content process
   nsIPrincipal* principal = aPrincipal;
@@ -1653,7 +1653,7 @@ TabParent::RecvSyncMessage(const nsString& aMessage,
 
   StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
   CrossProcessCpowHolder cpows(Manager(), aCpows);
-  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aPrincipal, aJSONRetVal);
+  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aPrincipal, aRetVal);
 }
 
 bool
@@ -1661,7 +1661,7 @@ TabParent::RecvRpcMessage(const nsString& aMessage,
                           const ClonedMessageData& aData,
                           InfallibleTArray<CpowEntry>&& aCpows,
                           const IPC::Principal& aPrincipal,
-                          InfallibleTArray<nsString>* aJSONRetVal)
+                          nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal)
 {
   // FIXME Permission check for TabParent in Content process
   nsIPrincipal* principal = aPrincipal;
@@ -1675,7 +1675,7 @@ TabParent::RecvRpcMessage(const nsString& aMessage,
 
   StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
   CrossProcessCpowHolder cpows(Manager(), aCpows);
-  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aPrincipal, aJSONRetVal);
+  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aPrincipal, aRetVal);
 }
 
 bool
@@ -2521,7 +2521,7 @@ TabParent::ReceiveMessage(const nsString& aMessage,
                           const StructuredCloneData* aCloneData,
                           CpowHolder* aCpows,
                           nsIPrincipal* aPrincipal,
-                          InfallibleTArray<nsString>* aJSONRetVal)
+                          nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal)
 {
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader(true);
   if (frameLoader && frameLoader->GetFrameMessageManager()) {
@@ -2535,7 +2535,7 @@ TabParent::ReceiveMessage(const nsString& aMessage,
                             aCloneData,
                             aCpows,
                             aPrincipal,
-                            aJSONRetVal);
+                            aRetVal);
   }
   return true;
 }

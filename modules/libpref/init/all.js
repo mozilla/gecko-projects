@@ -132,12 +132,6 @@ pref("dom.workers.maxPerDomain", 20);
 // Whether or not Shared Web Workers are enabled.
 pref("dom.workers.sharedWorkers.enabled", true);
 
-// Whether or not WebSockets in workers are enabled.
-// Note: we need this pref because WebSocket in Workers is a new implementation
-// and we want to be able to disable it quickly in case of regressions.
-// When this feature is stable enough we can get rid of this pref: Bug 1159792
-pref("dom.workers.websocket.enabled", true);
-
 // Service workers
 pref("dom.serviceWorkers.enabled", false);
 
@@ -3608,6 +3602,18 @@ pref("intl.ime.use_simple_context_on_password_field", true);
 pref("intl.ime.use_simple_context_on_password_field", false);
 #endif
 
+# enable new platform fontlist for linux on GTK platforms
+# temporary pref to allow flipping back to the existing
+# gfxPangoFontGroup/gfxFontconfigUtils code for handling system fonts
+
+#ifdef MOZ_WIDGET_GTK
+#ifdef RELEASE_BUILD
+pref("gfx.font_rendering.fontconfig.fontlist.enabled", false);
+#else
+pref("gfx.font_rendering.fontconfig.fontlist.enabled", true);
+#endif
+#endif
+
 # XP_UNIX
 #endif
 #endif
@@ -3800,6 +3806,7 @@ pref("signon.rememberSignons",              true);
 pref("signon.autofillForms",                true);
 pref("signon.autologin.proxy",              false);
 pref("signon.storeWhenAutocompleteOff",     true);
+pref("signon.ui.experimental",              false);
 pref("signon.debug",                        false);
 
 // Satchel (Form Manager) prefs
@@ -4552,6 +4559,13 @@ pref("selectioncaret.inflatesize.threshold", 40);
 
 // Selection carets will fall-back to internal LongTap detector.
 pref("selectioncaret.detects.longtap", true);
+
+// New implementation to unify touch-caret and selection-carets.
+pref("layout.accessiblecaret.enabled", false);
+
+// Timeout in milliseconds to hide the accessiblecaret under cursor mode while
+// no one touches it. Set the value to 0 to disable this feature.
+pref("layout.accessiblecaret.timeout_ms", 3000);
 
 // Wakelock is disabled by default.
 pref("dom.wakelock.enabled", false);

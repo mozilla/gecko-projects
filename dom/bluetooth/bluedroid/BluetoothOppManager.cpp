@@ -412,8 +412,8 @@ BluetoothOppManager::SendFile(const nsAString& aDeviceAddress,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsRefPtr<FileImpl> impl = aActor->GetBlobImpl();
-  nsCOMPtr<nsIDOMBlob> blob = new File(nullptr, impl);
+  nsRefPtr<BlobImpl> impl = aActor->GetBlobImpl();
+  nsRefPtr<Blob> blob = Blob::Create(nullptr, impl);
 
   return SendFile(aDeviceAddress, blob.get());
 }
@@ -742,10 +742,8 @@ BluetoothOppManager::ExtractPacketHeaders(const ObexHeaderSet& aHeader)
   if (aHeader.Has(ObexHeaderId::Body) ||
       aHeader.Has(ObexHeaderId::EndOfBody)) {
     uint8_t* bodyPtr;
-    aHeader.GetBody(&bodyPtr);
+    aHeader.GetBody(&bodyPtr, &mBodySegmentLength);
     mBodySegment = bodyPtr;
-
-    aHeader.GetBodyLength(&mBodySegmentLength);
   }
 }
 
@@ -1203,7 +1201,7 @@ BluetoothOppManager::SendPutHeaderRequest(const nsAString& aFileName,
 
   int index = 3;
   index += AppendHeaderName(&req[index], mRemoteMaxPacketLength - index,
-                            (char*)fileName, (len + 1) * 2);
+                            fileName, (len + 1) * 2);
   index += AppendHeaderLength(&req[index], aFileSize);
 
   // This is final put packet if file size equals to 0

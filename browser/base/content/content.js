@@ -31,6 +31,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "FormSubmitObserver",
   "resource:///modules/FormSubmitObserver.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PageMetadata",
   "resource://gre/modules/PageMetadata.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUIUtils",
+  "resource:///modules/PlacesUIUtils.jsm");
 XPCOMUtils.defineLazyGetter(this, "PageMenuChild", function() {
   let tmp = {};
   Cu.import("resource://gre/modules/PageMenu.jsm", tmp);
@@ -47,9 +49,15 @@ addMessageListener("ContextMenu:DoCustomCommand", function(message) {
   PageMenuChild.executeMenu(message.data);
 });
 
+addMessageListener("RemoteLogins:fillForm", function(message) {
+  LoginManagerContent.receiveMessage(message, content);
+});
 addEventListener("DOMFormHasPassword", function(event) {
+  LoginManagerContent.onDOMFormHasPassword(event, content);
   InsecurePasswordUtils.checkForInsecurePasswords(event.target);
-  LoginManagerContent.onFormPassword(event);
+});
+addEventListener("pageshow", function(event) {
+  LoginManagerContent.onPageShow(event, content);
 });
 addEventListener("DOMAutoComplete", function(event) {
   LoginManagerContent.onUsernameInput(event);
@@ -642,4 +650,11 @@ addMessageListener("ContextMenu:ReloadImage", (message) => {
   let image = message.objects.target;
   if (image instanceof Ci.nsIImageLoadingContent)
     image.forceReload();
+});
+
+addMessageListener("ContextMenu:BookmarkFrame", (message) => {
+  let frame = message.objects.target.ownerDocument;
+  sendAsyncMessage("ContextMenu:BookmarkFrame:Result",
+                   { title: frame.title,
+                     description: PlacesUIUtils.getDescriptionFromDocument(frame) });
 });

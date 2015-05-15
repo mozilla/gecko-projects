@@ -404,6 +404,8 @@ nsWindow::nsWindow() : nsWindowBase()
 
   mIdleService = nullptr;
 
+  ::InitializeCriticalSection(&mPresentLock);
+
   sInstanceCount++;
 }
 
@@ -439,6 +441,7 @@ nsWindow::~nsWindow()
       sIsOleInitialized = FALSE;
     }
   }
+  ::DeleteCriticalSection(&mPresentLock);
 
   NS_IF_RELEASE(mNativeDragTarget);
 }
@@ -2673,6 +2676,23 @@ void nsWindow::UpdateOpaqueRegion(const nsIntRegion &aOpaqueRegion)
   }
 }
 
+/**************************************************************
+*
+* SECTION: nsIWidget::UpdateWindowDraggingRegion
+*
+* For setting the draggable titlebar region from CSS
+* with -moz-window-dragging: drag.
+*
+**************************************************************/
+
+void
+nsWindow::UpdateWindowDraggingRegion(const nsIntRegion& aRegion)
+{
+  if (mDraggableRegion != aRegion) {
+    mDraggableRegion = aRegion;
+  }
+}
+
 void nsWindow::UpdateGlass()
 {
   MARGINS margins = mGlassMargins;
@@ -4684,12 +4704,19 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       {
         // From msdn, the way around this is to disable the visible state
         // temporarily. We need the text to be set but we don't want the
-        // redraw to occur.
+        // redraw to occur. However, we need to make sure that we don't
+        // do this at the same time that a Present is happening.
+        //
+        // To do this we take mPresentLock in nsWindow::PreRender and
+        // if that lock is taken we wait before doing WM_SETTEXT
+        EnterCriticalSection(&mPresentLock);
         DWORD style = GetWindowLong(mWnd, GWL_STYLE);
         SetWindowLong(mWnd, GWL_STYLE, style & ~WS_VISIBLE);
         *aRetValue = CallWindowProcW(GetPrevWindowProc(), mWnd,
                                      msg, wParam, lParam);
         SetWindowLong(mWnd, GWL_STYLE, style);
+        LeaveCriticalSection(&mPresentLock);
+
         return true;
       }
 
@@ -5582,7 +5609,9 @@ nsWindow::ClientMarginHitTestPoint(int32_t mx, int32_t my)
     ::ScreenToClient(mWnd, &pt);
     if (pt.x == mCachedHitTestPoint.x && pt.y == mCachedHitTestPoint.y &&
         TimeStamp::Now() - mCachedHitTestTime < TimeDuration::FromMilliseconds(HITTEST_CACHE_LIFETIME_MS)) {
-      testResult = mCachedHitTestResult;
+      return mCachedHitTestResult;
+    } else if (mDraggableRegion.Contains(pt.x, pt.y)) {
+      testResult = HTCAPTION;
     } else {
       WidgetMouseEvent event(true, NS_MOUSE_MOZHITTEST, this,
                              WidgetMouseEvent::eReal,
@@ -5594,16 +5623,15 @@ nsWindow::ClientMarginHitTestPoint(int32_t mx, int32_t my)
       if (result) {
         // The mouse is over a blank area
         testResult = testResult == HTCLIENT ? HTCAPTION : testResult;
-
       } else {
         // There's content over the mouse pointer. Set HTCLIENT
         // to possibly override a resizer border.
         testResult = HTCLIENT;
       }
-      mCachedHitTestPoint = pt;
-      mCachedHitTestTime = TimeStamp::Now();
-      mCachedHitTestResult = testResult;
     }
+    mCachedHitTestPoint = pt;
+    mCachedHitTestTime = TimeStamp::Now();
+    mCachedHitTestResult = testResult;
   }
 
   return testResult;
@@ -7536,6 +7564,21 @@ void nsWindow::PickerClosed()
   if (!mPickerDisplayCount && mDestroyCalled) {
     Destroy();
   }
+}
+
+bool nsWindow::PreRender(LayerManagerComposite*)
+{
+  // This can block waiting for WM_SETTEXT to finish
+  // Using PreRender is unnecessarily pessimistic because
+  // we technically only need to block during the present call
+  // not all of compositor rendering
+  EnterCriticalSection(&mPresentLock);
+  return true;
+}
+
+void nsWindow::PostRender(LayerManagerComposite*)
+{
+  LeaveCriticalSection(&mPresentLock);
 }
 
 /**************************************************************

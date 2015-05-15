@@ -194,6 +194,7 @@ public:
   void                    SetDrawsInTitlebar(bool aState);
   mozilla::TemporaryRef<mozilla::gfx::DrawTarget> StartRemoteDrawing() override;
   virtual void            EndRemoteDrawing() override;
+  virtual void UpdateWindowDraggingRegion(const nsIntRegion& aRegion) override;
 
   virtual void            UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries) override;
   virtual uint32_t        GetMaxTouchPoints() const override;
@@ -450,6 +451,8 @@ protected:
   void                    ClearCachedResources();
   nsIWidgetListener*      GetPaintListener();
   static bool             IsRenderMode(gfxWindowsPlatform::RenderMode aMode);
+  virtual bool            PreRender(LayerManagerComposite*) override;
+  virtual void            PostRender(LayerManagerComposite*) override;
 
 protected:
   nsCOMPtr<nsIWidget>   mParent;
@@ -519,6 +522,9 @@ protected:
 
   nsCOMPtr<nsIIdleServiceInternal> mIdleService;
 
+  // Draggable titlebar region maintained by UpdateWindowDraggingRegion
+  nsIntRegion mDraggableRegion;
+
   // Hook Data Memebers for Dropdowns. sProcessHook Tells the
   // hook methods whether they should be processing the hook
   // messages.
@@ -583,6 +589,8 @@ protected:
 
   static bool sNeedsToInitMouseWheelSettings;
   static void InitMouseWheelScrollData();
+
+  CRITICAL_SECTION mPresentLock;
 };
 
 /**

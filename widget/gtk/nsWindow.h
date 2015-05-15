@@ -194,7 +194,10 @@ public:
                                                guint            aTime,
                                                gpointer         aData);
 
-  mozilla::TemporaryRef<mozilla::gfx::DrawTarget> StartRemoteDrawing() override;
+    virtual mozilla::TemporaryRef<mozilla::gfx::DrawTarget>
+                       StartRemoteDrawing() override;
+    virtual void       EndRemoteDrawingInRegion(mozilla::gfx::DrawTarget* aDrawTarget,
+                                                nsIntRegion& aInvalidRegion) override;
 
 private:
     void               UpdateAlpha(gfxPattern* aPattern, nsIntRect aBoundsRect);
@@ -305,6 +308,15 @@ public:
     virtual nsresult SynthesizeNativeMouseMove(mozilla::LayoutDeviceIntPoint aPoint,
                                                nsIObserver* aObserver) override
     { return SynthesizeNativeMouseEvent(aPoint, GDK_MOTION_NOTIFY, 0, aObserver); }
+
+    virtual nsresult SynthesizeNativeMouseScrollEvent(mozilla::LayoutDeviceIntPoint aPoint,
+                                                      uint32_t aNativeMessage,
+                                                      double aDeltaX,
+                                                      double aDeltaY,
+                                                      double aDeltaZ,
+                                                      uint32_t aModifierFlags,
+                                                      uint32_t aAdditionalFlags,
+                                                      nsIObserver* aObserver) override;
 
 protected:
     virtual ~nsWindow();
@@ -467,9 +479,6 @@ private:
                                           LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                           bool* aAllowRetaining = nullptr) override;
-#if (MOZ_WIDGET_GTK == 3)
-    gfxASurface* GetThebesSurface(cairo_t *cr);
-#endif
 
     void CleanLayerManagerRecursive();
 

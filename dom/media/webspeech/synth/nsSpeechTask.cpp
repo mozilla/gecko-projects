@@ -15,12 +15,8 @@
 #endif
 
 #undef LOG
-#ifdef PR_LOGGING
 extern PRLogModuleInfo* GetSpeechSynthLog();
 #define LOG(type, msg) PR_LOG(GetSpeechSynthLog(), type, msg)
-#else
-#define LOG(type, msg)
-#endif
 
 namespace mozilla {
 namespace dom {
@@ -138,6 +134,12 @@ nsSpeechTask::BindStream(ProcessedMediaStream* aStream)
 {
   mStream = MediaStreamGraph::GetInstance()->CreateSourceStream(nullptr);
   mPort = aStream->AllocateInputPort(mStream, 0);
+}
+
+void
+nsSpeechTask::SetChosenVoiceURI(const nsAString& aUri)
+{
+  mChosenVoiceURI = aUri;
 }
 
 NS_IMETHODIMP
@@ -282,6 +284,12 @@ nsSpeechTask::DispatchStart()
 nsresult
 nsSpeechTask::DispatchStartImpl()
 {
+  return DispatchStartImpl(mChosenVoiceURI);
+}
+
+nsresult
+nsSpeechTask::DispatchStartImpl(const nsAString& aUri)
+{
   LOG(PR_LOG_DEBUG, ("nsSpeechTask::DispatchStart"));
 
   MOZ_ASSERT(mUtterance);
@@ -289,6 +297,7 @@ nsSpeechTask::DispatchStartImpl()
                  NS_ERROR_NOT_AVAILABLE);
 
   mUtterance->mState = SpeechSynthesisUtterance::STATE_SPEAKING;
+  mUtterance->mChosenVoiceURI = aUri;
   mUtterance->DispatchSpeechSynthesisEvent(NS_LITERAL_STRING("start"), 0, 0,
                                            NS_LITERAL_STRING(""));
 

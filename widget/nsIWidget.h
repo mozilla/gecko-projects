@@ -1656,6 +1656,9 @@ class nsIWidget : public nsISupports {
      * after each composition.
      */
     virtual void EndRemoteDrawing() = 0;
+    virtual void EndRemoteDrawingInRegion(mozilla::gfx::DrawTarget* aDrawTarget, nsIntRegion& aInvalidRegion) {
+      EndRemoteDrawing();
+    }
 
     /**
      * Clean up any resources used by Start/EndRemoteDrawing.
@@ -1750,8 +1753,6 @@ class nsIWidget : public nsISupports {
      */
     NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* event,
                              nsEventStatus & aStatus) = 0;
-
-    virtual bool IsMultiProcessWindow() = 0;
 
     /**
      * Dispatches an event that must be handled by APZ first, when APZ is

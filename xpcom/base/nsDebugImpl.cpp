@@ -105,7 +105,7 @@ static const char* sMultiprocessDescription = nullptr;
 
 static Atomic<int32_t> gAssertionCount;
 
-NS_IMPL_QUERY_INTERFACE(nsDebugImpl, nsIDebug, nsIDebug2)
+NS_IMPL_QUERY_INTERFACE(nsDebugImpl, nsIDebug2)
 
 NS_IMETHODIMP_(MozExternalRefCountType)
 nsDebugImpl::AddRef()
@@ -579,16 +579,20 @@ Break(const char* aMsg)
 #endif
 }
 
-static const nsDebugImpl kImpl;
-
 nsresult
 nsDebugImpl::Create(nsISupports* aOuter, const nsIID& aIID, void** aInstancePtr)
 {
+  static const nsDebugImpl* sImpl;
+
   if (NS_WARN_IF(aOuter)) {
     return NS_ERROR_NO_AGGREGATION;
   }
 
-  return const_cast<nsDebugImpl*>(&kImpl)->QueryInterface(aIID, aInstancePtr);
+  if (!sImpl) {
+    sImpl = new nsDebugImpl();
+  }
+
+  return const_cast<nsDebugImpl*>(sImpl)->QueryInterface(aIID, aInstancePtr);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

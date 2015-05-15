@@ -31,6 +31,7 @@
 // TODO: Support HID
 #endif
 #include "BluetoothOppManager.h"
+#include "BluetoothPbapManager.h"
 #include "BluetoothProfileController.h"
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothUtils.h"
@@ -333,35 +334,30 @@ BluetoothServiceBluedroid::StopInternal(BluetoothReplyRunnable* aRunnable)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  BluetoothProfileManagerBase* profile;
-  profile = BluetoothHfpManager::Get();
-  NS_ENSURE_TRUE(profile, NS_ERROR_FAILURE);
-  if (profile->IsConnected()) {
-    profile->Disconnect(nullptr);
-  } else {
-    profile->Reset();
-  }
+  static BluetoothProfileManagerBase* sProfiles[] = {
+    BluetoothHfpManager::Get(),
+    BluetoothA2dpManager::Get(),
+    BluetoothOppManager::Get(),
+    BluetoothPbapManager::Get(),
+    BluetoothHidManager::Get()
+  };
 
-  profile = BluetoothOppManager::Get();
-  NS_ENSURE_TRUE(profile, NS_ERROR_FAILURE);
-  if (profile->IsConnected()) {
-    profile->Disconnect(nullptr);
-  }
+  // Disconnect all connected profiles
+  for (uint8_t i = 0; i < MOZ_ARRAY_LENGTH(sProfiles); i++) {
+    nsCString profileName;
+    sProfiles[i]->GetName(profileName);
 
-  profile = BluetoothA2dpManager::Get();
-  NS_ENSURE_TRUE(profile, NS_ERROR_FAILURE);
-  if (profile->IsConnected()) {
-    profile->Disconnect(nullptr);
-  } else {
-    profile->Reset();
-  }
+    if (NS_WARN_IF(!sProfiles[i])) {
+      BT_LOGR("Profile manager [%s] is null", profileName.get());
+      return NS_ERROR_FAILURE;
+    }
 
-  profile = BluetoothHidManager::Get();
-  NS_ENSURE_TRUE(profile, NS_ERROR_FAILURE);
-  if (profile->IsConnected()) {
-    profile->Disconnect(nullptr);
-  } else {
-    profile->Reset();
+    if (sProfiles[i]->IsConnected()) {
+      sProfiles[i]->Disconnect(nullptr);
+    } else if (!profileName.EqualsLiteral("OPP") &&
+               !profileName.EqualsLiteral("PBAP")) {
+      sProfiles[i]->Reset();
+    }
   }
 
   // aRunnable will be a nullptr during starup and shutdown
@@ -2253,10 +2249,15 @@ BluetoothServiceBluedroid::AdapterStateChangedNotification(bool aState)
       BluetoothNamedValue(NS_ConvertUTF8toUTF16("Discoverable"), false),
       new SetAdapterPropertyDiscoverableResultHandler());
 
-    // Trigger BluetoothOppManager to listen
+    // Trigger OPP & PBAP managers to listen
     BluetoothOppManager* opp = BluetoothOppManager::Get();
     if (!opp || !opp->Listen()) {
       BT_LOGR("Fail to start BluetoothOppManager listening");
+    }
+
+    BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+    if (!pbap || !pbap->Listen()) {
+      BT_LOGR("Fail to start BluetoothPbapManager listening");
     }
   }
 
@@ -2318,12 +2319,18 @@ BluetoothServiceBluedroid::AdapterStateChangedNotification(bool aState)
     bs->AdapterAddedReceived();
     bs->TryFiringAdapterAdded();
 
-    // Trigger BluetoothOppManager to listen
+    // Trigger OPP & PBAP managers to listen
     BluetoothOppManager* opp = BluetoothOppManager::Get();
     if (!opp || !opp->Listen()) {
       BT_LOGR("Fail to start BluetoothOppManager listening");
     }
+
+    BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+    if (!pbap || !pbap->Listen()) {
+      BT_LOGR("Fail to start BluetoothPbapManager listening");
+    }
   }
+
   // After ProfileManagers deinit and cleanup, now restarts bluetooth daemon
   if (sIsRestart && !aState) {
     BT_LOGR("sIsRestart and off, now restart");
@@ -2482,8 +2489,9 @@ BluetoothServiceBluedroid::AdapterPropertiesNotification(
  * RemoteDevicePropertiesNotification will be called
  *
  *   (1) automatically by Bluedroid when BT is turning on, or
- *   (2) as result of GetRemoteDeviceProperties, or
- *   (3) as result of GetRemoteServices.
+ *   (2) as result of remote device properties update during discovery, or
+ *   (3) as result of GetRemoteDeviceProperties, or
+ *   (4) as result of GetRemoteServices.
  */
 void
 BluetoothServiceBluedroid::RemoteDevicePropertiesNotification(
@@ -2654,8 +2662,18 @@ BluetoothServiceBluedroid::RemoteDevicePropertiesNotification(
   BT_APPEND_NAMED_VALUE(props, "Connected", IsConnected(aBdAddr));
 
   if (sRequestedDeviceCountArray.IsEmpty()) {
-    // This is possible because the callback would be called after turning
-    // Bluetooth on.
+    /**
+     * This is possible when
+     *
+     *  (1) the callback is called after Bluetooth is turned on, or
+     *  (2) remote device properties get updated during discovery.
+     *
+     * For (2), fire 'devicefound' again to update device name.
+     * See bug 1076553 for more information.
+     */
+    DistributeSignal(BluetoothSignal(NS_LITERAL_STRING("DeviceFound"),
+                                     NS_LITERAL_STRING(KEY_ADAPTER),
+                                     BluetoothValue(props)));
     return;
   }
 
@@ -3129,17 +3147,30 @@ void
 BluetoothServiceBluedroid::BackendErrorNotification(bool aCrashed)
 {
   MOZ_ASSERT(NS_IsMainThread());
- // Recovery step 2 stop bluetooth
- if (aCrashed) {
-  BT_LOGR("Set aRestart = true");
+
+  if (!aCrashed) {
+    return;
+  }
+
+  /*
+   * Reset following profile manager states for unexpected backend crash.
+   * - HFP: connection state and audio state
+   * - A2DP: connection state
+   */
+  BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
+  NS_ENSURE_TRUE_VOID(hfp);
+  hfp->HandleBackendError();
+  BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
+  NS_ENSURE_TRUE_VOID(a2dp);
+  a2dp->HandleBackendError();
+
   sIsRestart = true;
-  BT_LOGR("Reocvery step2: stop bluetooth");
+  BT_LOGR("Recovery step2: stop bluetooth");
 #ifdef MOZ_B2G_BT_API_V2
   StopBluetooth(false, nullptr);
 #else
   StopBluetooth(false);
 #endif
- }
 }
 
 void

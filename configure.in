@@ -73,7 +73,7 @@ GNOMEUI_VERSION=2.2.0
 GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.8.9
+SQLITE_VERSION=3.8.10.1
 
 MSMANIFEST_TOOL=
 
@@ -548,6 +548,9 @@ case "$target" in
             # See http://blogs.msdn.com/b/vcblog/archive/2014/11/12/improvements-to-warnings-in-the-c-compiler.aspx
             CFLAGS="$CFLAGS -Wv:18"
             CXXFLAGS="$CXXFLAGS -Wv:18"
+
+            # -Zc:sizedDealloc- disables C++14 global sized deallocation (see bug 1160146)
+            CXXFLAGS="$CXXFLAGS -Zc:sizedDealloc-"
 
             # https://connect.microsoft.com/VisualStudio/feedback/details/888527/warnings-on-dbghelp-h
             # for dbghelp.h, imagehlp.h, and shobj.h
@@ -3866,7 +3869,6 @@ MOZ_VPX_ERROR_CONCEALMENT=
 MOZ_WEBSPEECH=1
 VPX_AS=
 VPX_ASFLAGS=
-VPX_AS_DASH_C_FLAG=
 VPX_AS_CONVERSION=
 VPX_ASM_SUFFIX=
 VPX_X86_ASM=
@@ -5489,7 +5491,6 @@ if test -n "$MOZ_VPX" -a -z "$MOZ_NATIVE_LIBVPX"; then
         dnl These flags are a lie; they're just used to enable the requisite
         dnl opcodes; actual arch detection is done at runtime.
         VPX_ASFLAGS="-march=armv7-a -mfpu=neon"
-        VPX_DASH_C_FLAG="-c"
         VPX_AS_CONVERSION='$(PERL) $(topsrcdir)/media/libvpx/build/make/ads2gas.pl'
         VPX_ASM_SUFFIX="$ASM_SUFFIX"
         VPX_ARM_ASM=1
@@ -6749,6 +6750,35 @@ then
     if test "x$ac_cv_sqlite_enable_unlock_notify" = "xno"; then
         AC_MSG_ERROR([System SQLite library is not compiled with SQLITE_ENABLE_UNLOCK_NOTIFY.])
     fi
+
+    dnl =========================================
+    dnl === SQLITE_ENABLE_DBSTAT_VTAB check ===
+    dnl =========================================
+    dnl check to see if the system SQLite package is compiled with
+    dnl SQLITE_ENABLE_DBSTAT_VTAB.
+    AC_MSG_CHECKING(for SQLITE_ENABLE_DBSTAT_VTAB support in system SQLite)
+    _SAVE_CFLAGS="$CFLAGS"
+    CFLAGS="$CFLAGS $SQLITE_CFLAGS"
+    _SAVE_LIBS="$LIBS"
+    LIBS="$LIBS $SQLITE_LIBS"
+    AC_CACHE_VAL(ac_cv_sqlite_dbstat_vtab,[
+        AC_TRY_RUN([
+            #include "sqlite3.h"
+
+            int main(int argc, char **argv){
+              return !sqlite3_compileoption_used("SQLITE_ENABLE_DBSTAT_VTAB");
+            }],
+            ac_cv_sqlite_dbstat_vtab=yes,
+            ac_cv_sqlite_dbstat_vtab=no,
+            ac_cv_sqlite_dbstat_vtab=no
+        )
+    ])
+    AC_MSG_RESULT($ac_cv_sqlite_dbstat_vtab)
+    CFLAGS="$_SAVE_CFLAGS"
+    LIBS="$_SAVE_LIBS"
+    if test "x$ac_cv_sqlite_dbstat_vtab" = "xno"; then
+        AC_MSG_ERROR([System SQLite library is not compiled with SQLITE_ENABLE_DBSTAT_VTAB.])
+    fi
 fi
 
 if test -n "$MOZ_NATIVE_SQLITE"; then
@@ -7253,7 +7283,7 @@ if test "$OS_TARGET" = Android; then
     if test "$MOZ_WIDGET_TOOLKIT" = gonk -a -n "$MOZ_NUWA_PROCESS"; then
         MOZ_GLUE_WRAP_LDFLAGS="${MOZ_GLUE_WRAP_LDFLAGS} -Wl,--wrap=pthread_create,--wrap=epoll_wait,--wrap=poll,--wrap=pthread_cond_timedwait,--wrap=pthread_cond_wait,--wrap=epoll_create,--wrap=epoll_ctl,--wrap=close,--wrap=pthread_key_create,--wrap=pthread_key_delete,--wrap=socketpair,--wrap=pthread_self,--wrap=pthread_mutex_lock,--wrap=pthread_mutex_trylock,--wrap=pthread_join,--wrap=pipe,--wrap=pipe2"
     fi
-    if test "$MOZ_WIDGET_TOOLKIT" = android; then
+    if test "$MOZ_WIDGET_TOOLKIT" = android -a "$MOZ_ANDROID_MIN_SDK_VERSION" -lt 11; then
         MOZ_GLUE_WRAP_LDFLAGS="${MOZ_GLUE_WRAP_LDFLAGS} -Wl,--wrap=getaddrinfo,--wrap=freeaddrinfo,--wrap=gai_strerror"
     fi
 fi
@@ -8041,13 +8071,7 @@ dnl ========================================================
 dnl Check for pixman and cairo
 dnl ========================================================
 
-if test "$MOZ_WIDGET_TOOLKIT" = "gtk3" ; then
-  # cairo-gtk3 can be build with system-cairo only
-  MOZ_TREE_CAIRO=
-else
-  MOZ_TREE_CAIRO=1
-fi
-
+MOZ_TREE_CAIRO=1
 MOZ_ARG_ENABLE_BOOL(system-cairo,
 [  --enable-system-cairo   Use system cairo (located with pkgconfig)],
 MOZ_TREE_CAIRO=,
@@ -8138,9 +8162,6 @@ if test "$MOZ_TREE_CAIRO"; then
         if test -n "$WIN32_D2D_SURFACE_FEATURE"; then
           MOZ_CHECK_HEADER(d3d10.h, MOZ_ENABLE_D3D10_LAYER=1)
         fi
-        ;;
-      gtk3)
-        AC_MSG_ERROR([cairo-gtk3 toolkit is incompatible with in-tree cairo. Please add --enable-system-cairo to your build config.])
         ;;
     esac
     if test "$USE_FC_FREETYPE"; then
@@ -8849,8 +8870,7 @@ AC_SUBST(MOZ_OMX_PLUGIN)
 AC_SUBST(MOZ_VPX_ERROR_CONCEALMENT)
 AC_SUBST(MOZ_VPX)
 AC_SUBST(VPX_AS)
-AC_SUBST(VPX_ASFLAGS)
-AC_SUBST(VPX_DASH_C_FLAG)
+AC_SUBST_LIST(VPX_ASFLAGS)
 AC_SUBST(VPX_AS_CONVERSION)
 AC_SUBST(VPX_ASM_SUFFIX)
 AC_SUBST(VPX_X86_ASM)
@@ -8859,7 +8879,7 @@ AC_SUBST(VPX_NEED_OBJ_INT_EXTRACT)
 AC_SUBST(MOZ_INSTRUMENT_EVENT_LOOP)
 AC_SUBST(MOZ_CODE_COVERAGE)
 AC_SUBST(LIBJPEG_TURBO_AS)
-AC_SUBST(LIBJPEG_TURBO_ASFLAGS)
+AC_SUBST_LIST(LIBJPEG_TURBO_ASFLAGS)
 AC_SUBST(LIBJPEG_TURBO_X86_ASM)
 AC_SUBST(LIBJPEG_TURBO_X64_ASM)
 AC_SUBST(LIBJPEG_TURBO_ARM_ASM)
