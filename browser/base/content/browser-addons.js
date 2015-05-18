@@ -49,10 +49,26 @@ const gXPInstallObserver = {
     };
 
     try {
-      options.originHost = installInfo.originatingURI.host;
+      options.displayOrigin = installInfo.originatingURI.host;
     } catch (e) {
       // originatingURI might be missing or 'host' might throw for non-nsStandardURL nsIURIs.
     }
+
+    let cancelInstallation = () => {
+      if (installInfo) {
+        for (let install of installInfo.installs)
+          install.cancel();
+      }
+
+      if (aTopic == "addon-install-confirmation")
+        this.acceptInstallation = null;
+
+      let tab = gBrowser.getTabForBrowser(browser);
+      if (tab)
+        tab.removeEventListener("TabClose", cancelInstallation);
+
+      window.removeEventListener("unload", cancelInstallation);
+    };
 
     switch (aTopic) {
     case "addon-install-disabled": {
@@ -78,7 +94,7 @@ const gXPInstallObserver = {
                               action, null, options);
       break; }
     case "addon-install-blocked": {
-      if (!options.originHost) {
+      if (!options.displayOrigin) {
         // Need to deal with missing originatingURI and with about:/data: URIs more gracefully,
         // see bug 1063418 - but for now, bail:
         return;
@@ -138,7 +154,7 @@ const gXPInstallObserver = {
     case "addon-install-failed": {
       // TODO This isn't terribly ideal for the multiple failure case
       for (let install of installInfo.installs) {
-        let host = options.originHost;
+        let host = options.displayOrigin;
         if (!host)
           host = (install.sourceURI instanceof Ci.nsIStandardURL) &&
                  install.sourceURI.host;
@@ -170,11 +186,7 @@ const gXPInstallObserver = {
       options.eventCallback = (aEvent) => {
         switch (aEvent) {
           case "removed":
-            if (installInfo) {
-              for (let install of installInfo.installs)
-                install.cancel();
-            }
-            this.acceptInstallation = null;
+            cancelInstallation();
             break;
           case "shown":
             let addonList = document.getElementById("addon-install-confirmation-content");
@@ -215,18 +227,22 @@ const gXPInstallObserver = {
       options.learnMoreURL = Services.urlFormatter.formatURLPref("app.support.baseURL") +
                              "find-and-install-add-ons";
 
+      let notification = document.getElementById("addon-install-confirmation-notification");
       if (unsigned.length == installInfo.installs.length) {
         // None of the add-ons are verified
         messageString = gNavigatorBundle.getString("addonConfirmInstallUnsigned.message");
+        notification.setAttribute("warning", "true");
       }
       else if (unsigned.length == 0) {
         // All add-ons are verified or don't need to be verified
         messageString = gNavigatorBundle.getString("addonConfirmInstall.message");
+        notification.removeAttribute("warning");
       }
       else {
         // Some of the add-ons are unverified, the list of names will indicate
         // which
         messageString = gNavigatorBundle.getString("addonConfirmInstallSomeUnsigned.message");
+        notification.setAttribute("warning", "true");
       }
 
       messageString = PluralForm.get(installInfo.installs.length, messageString);
@@ -243,8 +259,12 @@ const gXPInstallObserver = {
 
       let showNotification = () => {
         let tab = gBrowser.getTabForBrowser(browser);
-        if (tab)
+        if (tab) {
           gBrowser.selectedTab = tab;
+          tab.addEventListener("TabClose", cancelInstallation);
+        }
+
+        window.addEventListener("unload", cancelInstallation);
 
         if (PopupNotifications.isPanelOpen) {
           let rect = document.getElementById("addon-progress-notification").getBoundingClientRect();
@@ -283,6 +303,7 @@ const gXPInstallObserver = {
       });
 
       if (needsRestart) {
+        notificationID = "addon-install-restart";
         messageString = gNavigatorBundle.getString("addonsInstalledNeedsRestart");
         action = {
           label: gNavigatorBundle.getString("addonInstallRestartButton"),
