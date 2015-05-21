@@ -134,3 +134,10 @@ VRHMDManager::AllocateDeviceIndex()
 {
   return ++sDeviceBase;
 }
+
+/* static */ already_AddRefed<nsIScreen>
+VRHMDManager::MakeFakeScreen(int32_t x, int32_t y, uint32_t width, uint32_t height)
+{
+  nsCOMPtr<nsIScreen> screen = new FakeScreen(IntRect(x, y, width, height));
+  return screen.forget();
+}

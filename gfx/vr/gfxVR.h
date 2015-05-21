@@ -162,6 +162,8 @@ public:
   const IntSize& SuggestedEyeResolution() const { return mEyeResolution; }
   const Point3D& GetEyeTranslation(uint32_t whichEye) const { return mEyeTranslation[whichEye]; }
   const Matrix4x4& GetEyeProjectionMatrix(uint32_t whichEye) const { return mEyeProjectionMatrix[whichEye]; }
+  const double GetZNear() const { return mZNear; }
+  const double GetZFar() const { return mZFar; }
 
   virtual uint32_t GetSupportedSensorStateBits() { return mSupportedSensorBits; }
   virtual bool StartSensorTracking() = 0;
@@ -197,6 +199,7 @@ protected:
   Matrix4x4 mEyeProjectionMatrix[NumEyes];
   VRDistortionMesh mDistortionMesh[NumEyes];
   uint32_t mSupportedSensorBits;
+  double mZNear, mZFar;
 
   VRFieldOfView mRecommendedEyeFOV[NumEyes];
   VRFieldOfView mMaximumEyeFOV[NumEyes];
@@ -211,6 +214,7 @@ public:
   static void GetAllHMDs(nsTArray<nsRefPtr<VRHMDInfo>>& aHMDResult);
   static uint32_t AllocateDeviceIndex();
 
+  static already_AddRefed<nsIScreen> MakeFakeScreen(int32_t x, int32_t y, uint32_t width, uint32_t height);
 protected:
   typedef nsTArray<nsRefPtr<VRHMDManager>> VRHMDManagerArray;
   static VRHMDManagerArray *sManagers;
