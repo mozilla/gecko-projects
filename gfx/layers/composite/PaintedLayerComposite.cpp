@@ -136,10 +136,13 @@ PaintedLayerComposite::RenderLayer(const gfx::IntRect& aClipRect)
 #endif
 
   if (gfxUtils::sDumpDebug) {
+    nsIntRect lbounds = GetLayerBounds();
     nsIntRect bounds = visibleRegion.GetBounds();
     const gfx::Matrix4x4& xform = GetEffectiveTransform();
-    printf_stderr("PaintedLayer[%p]: visible: [%d %d %d %d] clip: [%.2f %.2f %.2f %.2f]\n",
-                  this, bounds.X(), bounds.Y(), bounds.Width(), bounds.Height(),
+    printf_stderr("PaintedLayer[%p]: bounds: [%d %d %d %d] visible: [%d %d %d %d] clip: [%.2f %.2f %.2f %.2f]\n",
+                  this,
+                  lbounds.X(), lbounds.Y(), lbounds.Width(), lbounds.Height(),
+                  bounds.X(), bounds.Y(), bounds.Width(), bounds.Height(),
                   clipRect.X(), clipRect.Y(), clipRect.Width(), clipRect.Height());
     if (xform.IsTranslation()) {
       printf_stderr("                  xform: [translate %.2f %.2f %.2f]\n", xform._41, xform._42, xform._43);

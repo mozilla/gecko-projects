@@ -268,8 +268,7 @@ ContainerRenderVR(ContainerT* aContainer,
           layerBounds = layer->GetEffectiveVisibleRegion().GetBounds();
         }
         DUMP("  layer %p bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", layer,
-             XYWH(layerBounds), XYWH(layerBounds), XYWH(surfaceRect));
-
+             XYWH(layerBounds), XYWH(surfaceRect));
         // Note that surfaceRect.width == eyeRect.width * 2
         if ((layerBounds.width != 0 && layerBounds.height != 0) &&
             (layerBounds.width != surfaceRect.width ||
