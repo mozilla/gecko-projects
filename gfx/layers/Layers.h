@@ -2218,6 +2218,8 @@ public:
     mPreTransCallbackData = closureData;
   }
 
+  const nsIntRect& GetBounds() const { return mBounds; }
+  
 protected:
   void FirePreTransactionCallback()
   {
