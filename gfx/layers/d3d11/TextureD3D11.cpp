@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 2 -*-
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -64,6 +64,20 @@ GetTileRectD3D11(uint32_t aID, IntSize aSize, uint32_t aMaxSize)
                  verticalTile * aMaxSize,
                  horizontalTile < (horizontalTiles - 1) ? aMaxSize : aSize.width % aMaxSize,
                  verticalTile < (verticalTiles - 1) ? aMaxSize : aSize.height % aMaxSize);
+}
+
+ID3D11ShaderResourceView*
+TextureSourceD3D11::GetShaderResourceView()
+{
+  if (!mSRV) {
+    RefPtr<ID3D11Device> device;
+    mTexture->GetDevice(byRef(device));
+    HRESULT hr = device->CreateShaderResourceView(mTexture, nullptr, byRef(mSRV));
+    if (FAILED(hr)) {
+      return nullptr;
+    }
+  }
+  return mSRV;
 }
 
 DataTextureSourceD3D11::DataTextureSourceD3D11(SurfaceFormat aFormat,

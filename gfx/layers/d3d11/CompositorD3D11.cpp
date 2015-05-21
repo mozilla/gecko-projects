@@ -692,10 +692,11 @@ CompositorD3D11::DrawVRDistortion(const gfx::Rect& aRect,
   mContext->PSSetShader(mAttachments->mVRDistortionPS[hmdType], nullptr, 0);
 
   // This is the source texture SRV for the pixel shader
-  // XXX, um should we cache this SRV on the source?
-  RefPtr<ID3D11ShaderResourceView> view;
-  mDevice->CreateShaderResourceView(source->GetD3D11Texture(), nullptr, byRef(view));
-  ID3D11ShaderResourceView* srView = view;
+  ID3D11ShaderResourceView* srView = source->GetShaderResourceView();
+  if (!srView) {
+    NS_WARNING("Couldn't get ShaderResourceView!");
+    return;
+  }
   mContext->PSSetShaderResources(0, 1, &srView);
 
   gfx::IntSize vpSizeInt = mCurrentRT->GetSize();
@@ -793,15 +794,11 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
       return;
     }
 
-    RefPtr<ID3D11ShaderResourceView> view;
-    HRESULT hr = mDevice->CreateShaderResourceView(source->GetD3D11Texture(), nullptr, byRef(view));
-    if (Failed(hr)) {
-      // XXX - There's a chance we won't be able to render anything, should we
-      // just crash release builds?
+    ID3D11ShaderResourceView* srView = source->GetShaderResourceView();
+    if (!srView) {
+      NS_WARNING("Couldn't get ShaderResourceView!");
       return;
     }
-
-    ID3D11ShaderResourceView* srView = view;
     mContext->PSSetShaderResources(3, 1, &srView);
 
     const gfx::Matrix4x4& maskTransform = maskEffect->mMaskTransform;
@@ -862,15 +859,11 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
 
       SetPSForEffect(aEffectChain.mPrimaryEffect, maskType, texturedEffect->mTexture->GetFormat());
 
-      RefPtr<ID3D11ShaderResourceView> view;
-      HRESULT hr = mDevice->CreateShaderResourceView(source->GetD3D11Texture(), nullptr, byRef(view));
-      if (Failed(hr)) {
-        // XXX - There's a chance we won't be able to render anything, should we
-        // just crash release builds?
+      ID3D11ShaderResourceView* srView = source->GetShaderResourceView();
+      if (!srView) {
+        NS_WARNING("Couldn't get ShaderResourceView!");
         return;
       }
-
-      ID3D11ShaderResourceView* srView = view;
       mContext->PSSetShaderResources(0, 1, &srView);
 
       if (!texturedEffect->mPremultiplied) {
@@ -909,29 +902,13 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
       TextureSourceD3D11* sourceCb = source->GetSubSource(Cb)->AsSourceD3D11();
       TextureSourceD3D11* sourceCr = source->GetSubSource(Cr)->AsSourceD3D11();
 
-      HRESULT hr;
-
-      RefPtr<ID3D11ShaderResourceView> views[3];
-
-      hr = mDevice->CreateShaderResourceView(sourceY->GetD3D11Texture(),
-                                             nullptr, byRef(views[0]));
-      if (Failed(hr)) {
+      ID3D11ShaderResourceView* srViews[3] = { sourceY->GetShaderResourceView(),
+                                               sourceCb->GetShaderResourceView(),
+                                               sourceCr->GetShaderResourceView() };
+      if (!srViews[0] || !srViews[1] || !srViews[2]) {
+        NS_WARNING("Couldn't get ShaderResourceView!");
         return;
       }
-
-      hr = mDevice->CreateShaderResourceView(sourceCb->GetD3D11Texture(),
-                                             nullptr, byRef(views[1]));
-      if (Failed(hr)) {
-        return;
-      }
-
-      hr = mDevice->CreateShaderResourceView(sourceCr->GetD3D11Texture(),
-                                             nullptr, byRef(views[2]));
-      if (Failed(hr)) {
-        return;
-      }
-
-      ID3D11ShaderResourceView* srViews[3] = { views[0], views[1], views[2] };
       mContext->PSSetShaderResources(0, 3, srViews);
     }
     break;
@@ -956,20 +933,12 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
 
       pTexCoordRect = &effectComponentAlpha->mTextureCoords;
 
-      RefPtr<ID3D11ShaderResourceView> views[2];
-
-      HRESULT hr;
-
-      hr = mDevice->CreateShaderResourceView(sourceOnBlack->GetD3D11Texture(), nullptr, byRef(views[0]));
-      if (Failed(hr)) {
+      ID3D11ShaderResourceView* srViews[2] = { sourceOnBlack->GetShaderResourceView(),
+                                               sourceOnWhite->GetShaderResourceView() };
+      if (!srViews[0] || !srViews[1]) {
+        NS_WARNING("Couldn't get ShaderResourceView!");
         return;
       }
-      hr = mDevice->CreateShaderResourceView(sourceOnWhite->GetD3D11Texture(), nullptr, byRef(views[1]));
-      if (Failed(hr)) {
-        return;
-      }
-
-      ID3D11ShaderResourceView* srViews[2] = { views[0], views[1] };
       mContext->PSSetShaderResources(0, 2, srViews);
 
       mContext->OMSetBlendState(mAttachments->mComponentBlendState, sBlendFactor, 0xFFFFFFFF);
