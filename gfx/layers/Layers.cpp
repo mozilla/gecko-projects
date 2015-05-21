@@ -38,6 +38,11 @@
 
 uint8_t gLayerManagerLayerBuilder;
 
+// XXXX HORIZON - remove this once we have builds with MOZ_HORIZON
+#ifndef MOZ_HORIZON
+#define MOZ_HORIZON 1
+#endif
+
 namespace mozilla {
 namespace layers {
 
