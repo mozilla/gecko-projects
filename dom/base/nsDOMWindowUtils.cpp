@@ -18,6 +18,7 @@
 #include "nsFocusManager.h"
 #include "nsFrameManager.h"
 #include "nsRefreshDriver.h"
+#include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/Touch.h"
 #include "mozilla/PendingAnimationTracker.h"
 #include "nsIObjectLoadingContent.h"
@@ -2833,11 +2834,8 @@ nsDOMWindowUtils::GetFileId(JS::Handle<JS::Value> aFile, JSContext* aCx,
     return NS_OK;
   }
 
-  nsISupports* nativeObj =
-    nsContentUtils::XPConnect()->GetNativeOfWrapper(aCx, obj);
-
-  nsCOMPtr<nsIDOMBlob> blob = do_QueryInterface(nativeObj);
-  if (blob) {
+  Blob* blob = nullptr;
+  if (NS_SUCCEEDED(UNWRAP_OBJECT(Blob, obj, blob))) {
     *_retval = blob->GetFileId();
     return NS_OK;
   }
@@ -3074,15 +3072,14 @@ nsDOMWindowUtils::SetContentDocumentFixedPositionMargins(float aTop, float aRigh
 }
 
 nsresult
-nsDOMWindowUtils::RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement,
-                                            const nsAString& aNewOrigin)
+nsDOMWindowUtils::RemoteFrameFullscreenChanged(nsIDOMElement* aFrameElement)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
   nsCOMPtr<nsIDocument> doc = GetDocument();
   NS_ENSURE_STATE(doc);
 
-  doc->RemoteFrameFullscreenChanged(aFrameElement, aNewOrigin);
+  doc->RemoteFrameFullscreenChanged(aFrameElement);
   return NS_OK;
 }
 

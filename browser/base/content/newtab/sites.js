@@ -116,6 +116,26 @@ Site.prototype = {
     }
   },
 
+  _newTabString: function(str, substrArr) {
+    let regExp = /%[0-9]\$S/g;
+    let matches;
+    while (matches = regExp.exec(str)) {
+      let match = matches[0];
+      let index = match.charAt(1); // Get the digit in the regExp.
+      str = str.replace(match, substrArr[index - 1]);
+    }
+    return str;
+  },
+
+  _getSuggestedTileExplanation: function() {
+    let targetedName = `<strong> ${this.link.targetedName} </strong>`;
+    let targetedSite = `<strong> ${this.link.targetedSite} </strong>`;
+    if (this.link.explanation) {
+      return this._newTabString(this.link.explanation, [targetedName, targetedSite]);
+    }
+    return newTabString("suggested.button", [targetedName]);
+  },
+
   /**
    * Renders the site's data (fills the HTML fragment).
    */
@@ -134,10 +154,15 @@ Site.prototype = {
     this.node.setAttribute("type", this.link.type);
 
     if (this.link.targetedSite) {
+      if (this.node.getAttribute("type") != "sponsored") {
+        this._querySelector(".newtab-sponsored").textContent =
+          newTabString("suggested.tag");
+      }
+
       this.node.setAttribute("suggested", true);
-      let targetedSite = `<strong> ${this.link.targetedName} </strong>`;
+      let explanation = this._getSuggestedTileExplanation();
       this._querySelector(".newtab-suggested").innerHTML =
-        `<div class='newtab-suggested-bounds'> ${newTabString("suggested.button", [targetedSite])} </div>`;
+        `<div class='newtab-suggested-bounds'> ${explanation} </div>`;
     }
 
     if (this.isPinned())

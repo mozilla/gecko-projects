@@ -29,19 +29,8 @@ const PREF_ENABLE_MDN_DOCS_TOOLTIP = "devtools.inspector.mdnDocsTooltip.enabled"
 const PROPERTY_NAME_CLASS = "ruleview-propertyname";
 const FILTER_CHANGED_TIMEOUT = 150;
 
-/**
- * These regular expressions are adapted from firebug's css.js, and are
- * used to parse CSSStyleDeclaration's cssText attribute.
- */
-
-// Used to split on css line separators
-const CSS_LINE_RE = /(?:[^;\(]*(?:\([^\)]*?\))?[^;\(]*)*;?/g;
-
-// Used to parse a single property line.
-const CSS_PROP_RE = /\s*([^:\s]*)\s*:\s*(.*?)\s*(?:! (important))?;?$/;
-
-// Used to parse an external resource from a property value
-const CSS_RESOURCE_RE = /url\([\'\"]?(.*?)[\'\"]?\)/;
+// This is used to parse user input when filtering.
+const FILTER_PROP_RE = /\s*([^:\s]*)\s*:\s*(.*?)\s*;?$/;
 
 const IOService = Cc["@mozilla.org/network/io-service;1"]
                   .getService(Ci.nsIIOService);
@@ -234,7 +223,14 @@ ElementStyle.prototype = {
 
         return null;
       });
-    }).then(null, promiseWarn);
+    }).then(null, e => {
+      // populate is often called after a setTimeout,
+      // the connection may already be closed.
+      if (this.destroyed) {
+        return;
+      }
+      return promiseWarn(e);
+    });
     this.populated = populated;
     return this.populated;
   },
@@ -2103,7 +2099,7 @@ CssRuleView.prototype = {
     // Parse search value as a single property line and extract the property
     // name and value. Otherwise, use the search value as both the name and
     // value.
-    let propertyMatch = CSS_PROP_RE.exec(aValue);
+    let propertyMatch = FILTER_PROP_RE.exec(aValue);
     let name = propertyMatch ? propertyMatch[1] : aValue;
     let value = propertyMatch ? propertyMatch[2] : aValue;
 
@@ -2112,8 +2108,10 @@ CssRuleView.prototype = {
       // Get the actual property value displayed in the rule view
       let propertyValue = textProp.editor.valueSpan.textContent.toLowerCase();
       let propertyName = textProp.name.toLowerCase();
+      let styleSheetSource = textProp.rule.title.toLowerCase();
 
       let editor = textProp.editor;
+      let source = editor.ruleEditor.source;
 
       let isPropertyHighlighted = this._highlightMatches(editor.container, {
         searchName: name,
@@ -2141,7 +2139,14 @@ CssRuleView.prototype = {
         }
       }
 
-      if (isPropertyHighlighted || isComputedHighlighted) {
+      // Highlight search matches in the stylesheet source
+      let isStyleSheetHighlighted = styleSheetSource.includes(aValue);
+      if (isStyleSheetHighlighted) {
+        source.classList.add("ruleview-highlight");
+      }
+
+      if (isPropertyHighlighted || isComputedHighlighted ||
+          isStyleSheetHighlighted) {
         isHighlighted = true;
       }
 
@@ -2266,11 +2271,11 @@ RuleEditor.prototype = {
     this.element.style.position = "relative";
 
     // Add the source link.
-    let source = createChild(this.element, "div", {
+    this.source = createChild(this.element, "div", {
       class: "ruleview-rule-source theme-link"
     });
-    source.addEventListener("click", function() {
-      if (source.hasAttribute("unselectable")) {
+    this.source.addEventListener("click", function() {
+      if (this.source.hasAttribute("unselectable")) {
         return;
       }
       let rule = this.rule.domRule;
@@ -2279,7 +2284,7 @@ RuleEditor.prototype = {
     let sourceLabel = this.doc.createElementNS(XUL_NS, "label");
     sourceLabel.setAttribute("crop", "center");
     sourceLabel.classList.add("source-link-label");
-    source.appendChild(sourceLabel);
+    this.source.appendChild(sourceLabel);
 
     this.updateSourceLink();
 
@@ -2846,22 +2851,6 @@ TextPropertyEditor.prototype = {
       relativePath = this.sheetURI.resolve(relativePath);
     }
     return relativePath;
-  },
-
-  /**
-   * Check the property value to find an external resource (if any).
-   * @return {string} the URI in the property value, or null if there is no match.
-   */
-  getResourceURI: function() {
-    let val = this.prop.value;
-    let uriMatch = CSS_RESOURCE_RE.exec(val);
-    let uri = null;
-
-    if (uriMatch && uriMatch[1]) {
-      uri = uriMatch[1];
-    }
-
-    return uri;
   },
 
   /**

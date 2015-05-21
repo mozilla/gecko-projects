@@ -39,6 +39,7 @@ using mozilla::DebugOnly;
 using mozilla::IsBaseOf;
 using mozilla::IsSame;
 using mozilla::MakeRange;
+using mozilla::PodCopy;
 
 // Tracing Overview
 // ================
@@ -103,9 +104,6 @@ using mozilla::MakeRange;
 //     . . .   Static dispatch                                                                  //
 //     ======  Dispatch through a manual stack.                                                 //
 //                                                                                              //
-void * const js::NullPtr::constNullValue = nullptr;
-
-JS_PUBLIC_DATA(void * const) JS::NullPtr::constNullValue = nullptr;
 
 
 /*** Tracing Invariants **************************************************************************/
@@ -1185,7 +1183,7 @@ GCMarker::processMarkStackTop(SliceBudget& budget)
             JSObject* obj2 = &v.toObject();
             MOZ_ASSERT(obj->compartment() == obj2->compartment());
             if (mark(obj2)) {
-                // Save the rest of this value array for later and start scanning obj2's children.N
+                // Save the rest of this value array for later and start scanning obj2's children.
                 pushValueArray(obj, vp, end);
                 obj = obj2;
                 goto scan_obj;
@@ -1950,8 +1948,10 @@ js::TenuringTracer::traceObjectSlots(NativeObject* nobj, uint32_t start, uint32_
     HeapSlot* dynStart;
     HeapSlot* dynEnd;
     nobj->getSlotRange(start, length, &fixedStart, &fixedEnd, &dynStart, &dynEnd);
-    traceSlots(fixedStart->unsafeGet(), fixedEnd->unsafeGet());
-    traceSlots(dynStart->unsafeGet(), dynEnd->unsafeGet());
+    if (fixedStart)
+        traceSlots(fixedStart->unsafeGet(), fixedEnd->unsafeGet());
+    if (dynStart)
+        traceSlots(dynStart->unsafeGet(), dynEnd->unsafeGet());
 }
 
 void

@@ -3421,6 +3421,16 @@ var InspectorActor = exports.InspectorActor = protocol.ActorClass({
     this.tabActor = tabActor;
   },
 
+  destroy: function () {
+    protocol.Actor.prototype.destroy.call(this);
+  },
+
+  // Forces destruction of the actor and all its children
+  // like highlighter, walker and style actors.
+  disconnect: function() {
+    this.destroy();
+  },
+
   get window() this.tabActor.window,
 
   getWalker: method(function(options={}) {
@@ -3494,7 +3504,9 @@ var InspectorActor = exports.InspectorActor = protocol.ActorClass({
     }
 
     this._highlighterPromise = this.getWalker().then(walker => {
-      return HighlighterActor(this, autohide);
+      let highlighter = HighlighterActor(this, autohide);
+      this.manage(highlighter);
+      return highlighter;
     });
     return this._highlighterPromise;
   }, {

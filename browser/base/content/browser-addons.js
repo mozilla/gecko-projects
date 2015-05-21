@@ -94,11 +94,6 @@ const gXPInstallObserver = {
                               action, null, options);
       break; }
     case "addon-install-blocked": {
-      if (!options.displayOrigin) {
-        // Need to deal with missing originatingURI and with about:/data: URIs more gracefully,
-        // see bug 1063418 - but for now, bail:
-        return;
-      }
       messageString = gNavigatorBundle.getFormattedString("xpinstallPromptMessage",
                         [brandShortName]);
 
@@ -159,20 +154,20 @@ const gXPInstallObserver = {
           host = (install.sourceURI instanceof Ci.nsIStandardURL) &&
                  install.sourceURI.host;
 
-        let error = (host || install.error == 0) ? "addonError" : "addonLocalError";
-        if (install.error != 0)
+        let error = (host || install.error == 0) ? "addonInstallError" : "addonLocalInstallError";
+        let args;
+        if (install.error < 0) {
           error += install.error;
-        else if (install.addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED)
+          args = [brandShortName, install.name];
+        } else if (install.addon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED) {
           error += "Blocklisted";
-        else
+          args = [install.name];
+        } else {
           error += "Incompatible";
+          args = [brandShortName, Services.appinfo.version, install.name];
+        }
 
-        messageString = gNavigatorBundle.getString(error);
-        messageString = messageString.replace("#1", install.name);
-        if (host)
-          messageString = messageString.replace("#2", host);
-        messageString = messageString.replace("#3", brandShortName);
-        messageString = messageString.replace("#4", Services.appinfo.version);
+        messageString = gNavigatorBundle.getFormattedString(error, args);
 
         PopupNotifications.show(browser, notificationID, messageString, anchorID,
                                 action, null, options);

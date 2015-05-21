@@ -1235,16 +1235,18 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind, Hand
         break;
       case Getter:
         flags = JSFunction::INTERPRETED_GETTER;
+        allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       case Setter:
         flags = JSFunction::INTERPRETED_SETTER;
+        allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       default:
         flags = JSFunction::INTERPRETED_NORMAL;
         break;
     }
 
-    fun = NewFunctionWithProto(context, nullptr, 0, flags, NullPtr(), atom, proto,
+    fun = NewFunctionWithProto(context, nullptr, 0, flags, nullptr, atom, proto,
                                allocKind, TenuredObject);
     if (!fun)
         return nullptr;
@@ -2987,8 +2989,8 @@ Parser<ParseHandler>::reportRedeclaration(Node pn, Definition::Kind redeclKind, 
 }
 
 /*
- * Define a lexical binding in a block, let-expression, or comprehension scope. pc
- * must already be in such a scope.
+ * Define a lexical binding in a block, or comprehension scope. pc must
+ * already be in such a scope.
  *
  * Throw a SyntaxError if 'atom' is an invalid name. Otherwise create a
  * property for the new variable on the block object, pc->staticScope;
@@ -3678,14 +3680,13 @@ Parser<SyntaxParseHandler>::pushLetScope(HandleStaticBlockObject blockObj, StmtI
 }
 
 /*
- * Parse a let block statement or let expression (determined by 'letContext').
+ * Parse a let block statement.
  * In both cases, bindings are not hoisted to the top of the enclosing block
  * and thus must be carefully injected between variables() and the let body.
  */
 template <typename ParseHandler>
 typename ParseHandler::Node
-Parser<ParseHandler>::deprecatedLetBlockOrExpression(YieldHandling yieldHandling,
-                                                     LetContext letContext)
+Parser<ParseHandler>::deprecatedLetBlock(YieldHandling yieldHandling)
 {
     MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_LET));
 
@@ -3708,81 +3709,21 @@ Parser<ParseHandler>::deprecatedLetBlockOrExpression(YieldHandling yieldHandling
     if (!block)
         return null();
 
-    bool needExprStmt = false;
-    if (letContext == LetStatement) {
-        bool matched;
-        if (!tokenStream.matchToken(&matched, TOK_LC, TokenStream::Operand))
-            return null();
-        if (!matched) {
-            /*
-             * Strict mode eliminates a grammar ambiguity with unparenthesized
-             * LetExpressions in an ExpressionStatement. If followed immediately
-             * by an arguments list, it's ambiguous whether the let expression
-             * is the callee or the call is inside the let expression body.
-             *
-             *   function id(x) { return x; }
-             *   var x = "outer";
-             *   // Does this parse as
-             *   //   (let (loc = "inner") id)(loc) // "outer"
-             *   // or as
-             *   //   let (loc = "inner") (id(loc)) // "inner"
-             *   let (loc = "inner") id(loc);
-             *
-             * See bug 569464.
-             */
-            if (!reportWithOffset(ParseStrictError, pc->sc->strict(), begin,
-                                  JSMSG_STRICT_CODE_LET_EXPR_STMT))
-            {
-                return null();
-            }
+    MUST_MATCH_TOKEN(TOK_LC, JSMSG_CURLY_BEFORE_LET);
 
-            /*
-             * If this is really an expression in let statement guise, then we
-             * need to wrap the PNK_LETEXPR node in a PNK_SEMI node so that we
-             * pop the return value of the expression.
-             */
-            needExprStmt = true;
-            letContext = LetExpression;
-        }
-    }
+    Node expr = statements(yieldHandling);
+    if (!expr)
+        return null();
+    MUST_MATCH_TOKEN(TOK_RC, JSMSG_CURLY_AFTER_LET);
 
-    Node expr;
-    if (letContext == LetStatement) {
-        expr = statements(yieldHandling);
-        if (!expr)
-            return null();
-        MUST_MATCH_TOKEN(TOK_RC, JSMSG_CURLY_AFTER_LET);
+    addTelemetry(JSCompartment::DeprecatedLetBlock);
+    if (!report(ParseWarning, pc->sc->strict(), expr, JSMSG_DEPRECATED_LET_BLOCK))
+        return null();
 
-        addTelemetry(JSCompartment::DeprecatedLetBlock);
-        if (!report(ParseWarning, pc->sc->strict(), expr, JSMSG_DEPRECATED_LET_BLOCK))
-            return null();
-    } else {
-        MOZ_ASSERT(letContext == LetExpression);
-        expr = assignExpr(InAllowed, yieldHandling);
-        if (!expr)
-            return null();
-
-        addTelemetry(JSCompartment::DeprecatedLetExpression);
-        if (!report(ParseWarning, pc->sc->strict(), expr, JSMSG_DEPRECATED_LET_EXPRESSION))
-            return null();
-    }
     handler.setLexicalScopeBody(block, expr);
     PopStatementPC(tokenStream, pc);
 
     TokenPos letPos(begin, pos().end);
-
-    if (letContext == LetExpression) {
-        if (needExprStmt) {
-            if (!MatchOrInsertSemicolon(tokenStream))
-                return null();
-        }
-
-        Node letExpr = handler.newLetExpression(vars, block, letPos);
-        if (!letExpr)
-            return null();
-
-        return needExprStmt ? handler.newExprStatement(letExpr, pos().end) : letExpr;
-    }
 
     return handler.newLetBlock(vars, block, letPos);
 }
@@ -3942,12 +3883,26 @@ Parser<ParseHandler>::variables(YieldHandling yieldHandling,
                 if (!init)
                     return null();
 
+                // Ban the nonsensical |for (var V = E1 in E2);| where V is a
+                // destructuring pattern.  See bug 1164741 for background.
+                if (pc->parsingForInit && kind == PNK_VAR) {
+                    TokenKind afterInit;
+                    if (!tokenStream.peekToken(&afterInit))
+                        return null();
+                    if (afterInit == TOK_IN) {
+                        report(ParseError, false, init, JSMSG_INVALID_FOR_INOF_DECL_WITH_INIT,
+                               "in");
+                        return null();
+                    }
+                }
+
                 if (!bindBeforeInitializer && !checkDestructuring(&data, pn2))
                     return null();
 
                 pn2 = handler.newBinary(PNK_ASSIGN, pn2, init);
                 if (!pn2)
                     return null();
+
                 handler.addList(pn, pn2);
                 break;
             }
@@ -3995,11 +3950,34 @@ Parser<ParseHandler>::variables(YieldHandling yieldHandling,
                 if (!init)
                     return null();
 
-                if (!bindBeforeInitializer && !data.binder(&data, name, this))
-                    return null();
+                // Ignore an initializer if we have a for-in loop declaring a
+                // |var| with an initializer: |for (var v = ... in ...);|.
+                // Warn that this syntax is invalid so that developers looking
+                // in the console know to fix this.  ES<6 permitted the
+                // initializer while ES6 doesn't; ignoring it seems the best
+                // way to incrementally move to ES6 semantics.
+                bool performAssignment = true;
+                if (pc->parsingForInit && kind == PNK_VAR) {
+                    TokenKind afterInit;
+                    if (!tokenStream.peekToken(&afterInit))
+                        return null();
+                    if (afterInit == TOK_IN) {
+                        performAssignment = false;
+                        if (!report(ParseWarning, pc->sc->strict(), init,
+                                    JSMSG_INVALID_FOR_INOF_DECL_WITH_INIT, "in"))
+                        {
+                            return null();
+                        }
+                    }
+                }
 
-                if (!handler.finishInitializerAssignment(pn2, init, data.op))
-                    return null();
+                if (performAssignment) {
+                    if (!bindBeforeInitializer && !data.binder(&data, name, this))
+                        return null();
+
+                    if (!handler.finishInitializerAssignment(pn2, init, data.op))
+                        return null();
+                }
             } else {
                 if (data.isConst && !pc->parsingForInit) {
                     report(ParseError, false, null(), JSMSG_BAD_CONST_DECL);
@@ -4203,24 +4181,17 @@ Parser<FullParseHandler>::letDeclarationOrBlock(YieldHandling yieldHandling)
 {
     handler.disableSyntaxParser();
 
-    /* Check for a let statement or let expression. */
+    /* Check for a let statement. */
     TokenKind tt;
     if (!tokenStream.peekToken(&tt))
         return null();
     if (tt == TOK_LP) {
-        ParseNode* node =
-            deprecatedLetBlockOrExpression(yieldHandling, LetStatement);
+        ParseNode* node = deprecatedLetBlock(yieldHandling);
         if (!node)
             return nullptr;
 
-        if (node->isKind(PNK_LETBLOCK)) {
-            MOZ_ASSERT(node->isArity(PN_BINARY));
-        } else {
-            MOZ_ASSERT(node->isKind(PNK_SEMI));
-            MOZ_ASSERT(node->pn_kid->isKind(PNK_LETEXPR));
-            MOZ_ASSERT(node->pn_kid->isArity(PN_BINARY));
-        }
-
+        MOZ_ASSERT(node->isKind(PNK_LETBLOCK));
+        MOZ_ASSERT(node->isArity(PN_BINARY));
         return node;
     }
 
@@ -4711,8 +4682,7 @@ Parser<FullParseHandler>::forStatement(YieldHandling yieldHandling)
     MUST_MATCH_TOKEN(TOK_LP, JSMSG_PAREN_AFTER_FOR);
 
     /*
-     * True if we have 'for (var/let/const ...)', except in the oddball case
-     * where 'let' begins a let-expression in 'for (let (...) ...)'.
+     * True if we have 'for (var/let/const ...)'.
      */
     bool isForDecl = false;
 
@@ -4751,19 +4721,13 @@ Parser<FullParseHandler>::forStatement(YieldHandling yieldHandling)
                 handler.disableSyntaxParser();
                 bool constDecl = tt == TOK_CONST;
                 tokenStream.consumeKnownToken(tt);
-                if (!tokenStream.peekToken(&tt))
+                isForDecl = true;
+                blockObj = StaticBlockObject::create(context);
+                if (!blockObj)
                     return null();
-                if (tt == TOK_LP) {
-                    pn1 = deprecatedLetBlockOrExpression(yieldHandling, LetExpression);
-                } else {
-                    isForDecl = true;
-                    blockObj = StaticBlockObject::create(context);
-                    if (!blockObj)
-                        return null();
-                    pn1 = variables(yieldHandling,
-                                    constDecl ? PNK_CONST : PNK_LET, nullptr, blockObj,
-                                    DontHoistVars);
-                }
+                pn1 = variables(yieldHandling,
+                                constDecl ? PNK_CONST : PNK_LET, nullptr, blockObj,
+                                DontHoistVars);
             } else {
                 pn1 = expr(InProhibited, yieldHandling);
             }
@@ -4883,8 +4847,14 @@ Parser<FullParseHandler>::forStatement(YieldHandling yieldHandling)
         if (isForDecl) {
             pn2 = pn1->pn_head;
             if ((pn2->isKind(PNK_NAME) && pn2->maybeExpr()) || pn2->isKind(PNK_ASSIGN)) {
-                // We have a bizarre |for (var/const/let x = ... in/of ...)|
-                // loop erroneously permitted by ES1-5 but removed in ES6.
+                MOZ_ASSERT(!(headKind == PNK_FORIN && pn1->isKind(PNK_VAR)),
+                           "Parser::variables should have ignored the "
+                           "initializer in the ES5-sanctioned, ES6-prohibited "
+                           "|for (var ... = ... in ...)| syntax");
+
+                // Otherwise, this bizarre |for (const/let x = ... in/of ...)|
+                // loop isn't valid ES6 and has never been permitted in
+                // SpiderMonkey.
                 report(ParseError, false, pn2, JSMSG_INVALID_FOR_INOF_DECL_WITH_INIT,
                        headKind == PNK_FOROF ? "of" : "in");
                 return null();
@@ -6593,7 +6563,7 @@ Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandl
         if (!tokenStream.peekToken(&ignored))
             return null();
 
-        return functionDef(inHandling, yieldHandling, NullPtr(), Arrow, NotGenerator);
+        return functionDef(inHandling, yieldHandling, nullptr, Arrow, NotGenerator);
       }
 
       default:
@@ -7008,9 +6978,7 @@ LegacyCompExprTransplanter::transplant(ParseNode* pn)
 // The one remaining thing to patch up is the block scope depth.  We need to
 // compute the maximum block scope depth of a function, so we know how much
 // space to reserve in the fixed part of a stack frame.  Normally this is done
-// whenever we leave a statement, via AccumulateBlockScopeDepth.  However if the
-// head has a let expression, we need to re-assign that depth to the tail of the
-// comprehension.
+// whenever we leave a statement, via AccumulateBlockScopeDepth.
 //
 // Thing is, we don't actually know what that depth is, because the only
 // information we keep is the maximum nested depth within a statement, so we
@@ -7083,10 +7051,9 @@ Parser<FullParseHandler>::legacyComprehensionTail(ParseNode* bodyExpr, unsigned 
          * the comprehension's block scope. We allocate that id or one above it
          * here, by calling PushLexicalScope.
          *
-         * In the case of a comprehension expression that has nested blocks
-         * (e.g., let expressions), we will allocate a higher blockid but then
-         * slide all blocks "to the right" to make room for the comprehension's
-         * block scope.
+         * In the case of a comprehension expression that has nested blocks,
+         * we will allocate a higher blockid but then slide all blocks "to the
+         * right" to make room for the comprehension's block scope.
          */
         adjust = pc->blockid();
         pn = pushLexicalScope(&stmtInfo);
@@ -7371,7 +7338,7 @@ Parser<ParseHandler>::generatorComprehensionLambda(GeneratorKind comprehensionKi
             return null();
     }
 
-    RootedFunction fun(context, newFunction(/* atom = */ NullPtr(), Expression, proto));
+    RootedFunction fun(context, newFunction(/* atom = */ nullptr, Expression, proto));
     if (!fun)
         return null();
 
@@ -8174,9 +8141,10 @@ Parser<ParseHandler>::arrayInitializer(YieldHandling yieldHandling)
          *
          *   [i * j for (i in o) for (j in p) if (i != j)]
          *
-         * translates to roughly the following let expression:
+         * translates to roughly the following code:
          *
-         *   let (array = new Array, i, j) {
+         *   {
+         *     let array = new Array, i, j;
          *     for (i in o) let {
          *       for (j in p)
          *         if (i != j)
@@ -8605,9 +8573,6 @@ Parser<ParseHandler>::primaryExpr(YieldHandling yieldHandling, TokenKind tt,
 
       case TOK_LC:
         return propertyList(yieldHandling, ObjectLiteral);
-
-      case TOK_LET:
-        return deprecatedLetBlockOrExpression(yieldHandling, LetExpression);
 
       case TOK_LP: {
         TokenKind next;

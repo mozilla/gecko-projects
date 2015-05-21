@@ -383,6 +383,10 @@ pref("browser.helperApps.deleteTempFileOnExit", true);
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
 
+// Tell the search service to load search plugins from the locale JAR
+pref("browser.search.loadFromJars", true);
+pref("browser.search.jarURIs", "chrome://browser/locale/searchplugins/");
+
 // pointer to the default engine name
 pref("browser.search.defaultenginename",      "chrome://browser-region/locale/region.properties");
 
@@ -1378,7 +1382,7 @@ pref("devtools.toolbox.splitconsoleHeight", 100);
 
 // Toolbox Button preferences
 pref("devtools.command-button-pick.enabled", true);
-pref("devtools.command-button-frames.enabled", false);
+pref("devtools.command-button-frames.enabled", true);
 pref("devtools.command-button-splitconsole.enabled", true);
 pref("devtools.command-button-paintflashing.enabled", false);
 pref("devtools.command-button-tilt.enabled", false);
@@ -1442,7 +1446,9 @@ pref("devtools.performance.enabled", true);
 
 // The default Performance UI settings
 pref("devtools.performance.memory.sample-probability", "0.05");
-pref("devtools.performance.memory.max-log-length", 2147483647); // Math.pow(2,31) - 1
+// Can't go higher than this without causing internal allocation overflows while
+// serializing the allocations data over the RDP.
+pref("devtools.performance.memory.max-log-length", 125000);
 pref("devtools.performance.timeline.hidden-markers", "[]");
 pref("devtools.performance.profiler.buffer-size", 10000000);
 pref("devtools.performance.profiler.sample-frequency-khz", 1);
@@ -1454,6 +1460,13 @@ pref("devtools.performance.ui.show-idle-blocks", true);
 pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-framerate", true);
 pref("devtools.performance.ui.show-jit-optimizations", false);
+
+// Enable experimental options in the UI only in Nightly
+#if defined(NIGHTLY_BUILD)
+pref("devtools.performance.ui.experimental", true);
+#else
+pref("devtools.performance.ui.experimental", false);
+#endif
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);

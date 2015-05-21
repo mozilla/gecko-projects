@@ -383,11 +383,11 @@ struct JSCompartment
     void markCrossCompartmentWrappers(JSTracer* trc);
 
     inline bool wrap(JSContext* cx, JS::MutableHandleValue vp,
-                     JS::HandleObject existing = js::NullPtr());
+                     JS::HandleObject existing = nullptr);
 
     bool wrap(JSContext* cx, js::MutableHandleString strp);
     bool wrap(JSContext* cx, JS::MutableHandleObject obj,
-              JS::HandleObject existingArg = js::NullPtr());
+              JS::HandleObject existingArg = nullptr);
     bool wrap(JSContext* cx, JS::MutableHandle<js::PropertyDescriptor> desc);
 
     template<typename T> bool wrap(JSContext* cx, JS::AutoVectorRooter<T>& vec) {
@@ -586,7 +586,7 @@ struct JSCompartment
         DeprecatedLegacyGenerator = 2,      // JS 1.7+
         DeprecatedExpressionClosure = 3,    // Added in JS 1.8
         DeprecatedLetBlock = 4,             // Added in JS 1.7
-        DeprecatedLetExpression = 5,        // Added in JS 1.7
+        // NO LONGER USING 5
         DeprecatedNoSuchMethod = 6,         // JS 1.7+
         DeprecatedFlagsArgument = 7,        // JS 1.3 or older
         RegExpSourceProperty = 8,           // ES5

@@ -10,16 +10,16 @@ if [ ! -d $HOME/.ssh ]; then
     mkdir $HOME/.ssh
 fi
 
+PLATFORM=${TARGET%%-*}
+
 aws s3 cp s3://b2g-nightly-credentials/balrog_credentials .
-mar_file=b2g-${TARGET%%-*}-gecko-update.mar
+mar_file=b2g-$PLATFORM-gecko-update.mar
 
 # We need different platform names for each variant (user, userdebug and
 # eng). We do not append variant suffix for "user" to keep compability with
 # verions already installed in the phones.
-if [ $VARIANT == "user" ]; then
-  PLATFORM=$TARGET
-else
-  PLATFORM=$TARGET-$VARIANT
+if [ $VARIANT != "user" ]; then
+  PLATFORM=$PLATFORM-$VARIANT
 fi
 
 ./mozharness/scripts/b2g_build.py \
@@ -48,7 +48,7 @@ mkdir -p $HOME/artifacts-public
 
 mv $WORKSPACE/B2G/upload-public/$mar_file $HOME/artifacts-public/
 mv $WORKSPACE/B2G/upload/sources.xml $HOME/artifacts/sources.xml
-#mv $WORKSPACE/B2G/upload/b2g-*.crashreporter-symbols.zip $HOME/artifacts/b2g-crashreporter-symbols.zip
+mv $WORKSPACE/B2G/upload/b2g-*.crashreporter-symbols.zip $HOME/artifacts/b2g-crashreporter-symbols.zip
 mv $WORKSPACE/B2G/upload/b2g-*.android-arm.tar.gz $HOME/artifacts/b2g-android-arm.tar.gz
 mv $WORKSPACE/B2G/upload/${TARGET}.zip $HOME/artifacts/${TARGET}.zip
 mv $WORKSPACE/B2G/upload/gaia.zip $HOME/artifacts/gaia.zip

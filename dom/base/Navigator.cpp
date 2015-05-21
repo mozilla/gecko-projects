@@ -201,6 +201,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
 #endif
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCameraManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaDevices)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMessagesManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDeviceStorageStores)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTimeManager)
@@ -307,6 +308,7 @@ Navigator::Invalidate()
 #endif
 
   mCameraManager = nullptr;
+  mMediaDevices = nullptr;
 
   if (mMessagesManager) {
     mMessagesManager = nullptr;
@@ -1214,17 +1216,13 @@ Navigator::SendBeacon(const nsAString& aUrl,
 
     } else if (aData.Value().IsBlob()) {
       Blob& blob = aData.Value().GetAsBlob();
-      rv = blob.GetInternalStream(getter_AddRefs(in));
-      if (NS_FAILED(rv)) {
-        aRv.Throw(NS_ERROR_FAILURE);
+      blob.GetInternalStream(getter_AddRefs(in), aRv);
+      if (NS_WARN_IF(aRv.Failed())) {
         return false;
       }
+
       nsAutoString type;
-      rv = blob.GetType(type);
-      if (NS_FAILED(rv)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-        return false;
-      }
+      blob.GetType(type);
       mimeType = NS_ConvertUTF16toUTF8(type);
 
     } else if (aData.Value().IsFormData()) {

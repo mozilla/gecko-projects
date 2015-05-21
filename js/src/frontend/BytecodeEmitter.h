@@ -490,7 +490,7 @@ struct BytecodeEmitter
     bool emitWith(ParseNode* pn);
 
     MOZ_NEVER_INLINE bool emitLabeledStatement(const LabeledStatement* pn);
-    MOZ_NEVER_INLINE bool emitLet(ParseNode* pnLet);
+    MOZ_NEVER_INLINE bool emitLetBlock(ParseNode* pnLet);
     MOZ_NEVER_INLINE bool emitLexicalScope(ParseNode* pn);
     MOZ_NEVER_INLINE bool emitSwitch(ParseNode* pn);
     MOZ_NEVER_INLINE bool emitTry(ParseNode* pn);
@@ -523,6 +523,10 @@ struct BytecodeEmitter
     // Emit code to initialize all destructured names to the value on the top of
     // the stack.
     bool emitInitializeDestructuringDecls(JSOp prologueOp, ParseNode* pattern);
+
+    // Throw a TypeError if the value atop the stack isn't convertible to an
+    // object, with no overall effect on the stack.
+    bool emitRequireObjectCoercible();
 
     // emitIterator expects the iterable to already be on the stack.
     // It will replace that stack value with the corresponding iterator

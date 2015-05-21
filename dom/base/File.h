@@ -110,11 +110,26 @@ public:
   CreateSlice(uint64_t aStart, uint64_t aLength, const nsAString& aContentType,
               ErrorResult& aRv);
 
+  void
+  GetInternalStream(nsIInputStream** aStream, ErrorResult& aRv);
+
+  int64_t
+  GetFileId();
+
+  indexedDB::FileInfo*
+  GetFileInfo(indexedDB::FileManager* aFileManager);
+
+  void
+  AddFileInfo(indexedDB::FileInfo* aFileInfo);
+
   // WebIDL methods
   nsISupports* GetParentObject() const
   {
     return mParent;
   }
+
+  bool
+  IsMemoryFile() const;
 
   // Blob constructor
   static already_AddRefed<Blob>
@@ -132,7 +147,7 @@ public:
 
   uint64_t GetSize(ErrorResult& aRv);
 
-  // XPCOM GetType is OK
+  void GetType(nsAString& aType);
 
   already_AddRefed<Blob> Slice(const Optional<int64_t>& aStart,
                                const Optional<int64_t>& aEnd,
@@ -286,6 +301,14 @@ public:
 
   virtual void GetType(nsAString& aType) = 0;
 
+  /**
+   * An effectively-unique serial number identifying this instance of FileImpl.
+   *
+   * Implementations should obtain a serial number from
+   * FileImplBase::NextSerialNumber().
+   */
+  virtual uint64_t GetSerialNumber() const = 0;
+
   already_AddRefed<BlobImpl>
   Slice(const Optional<int64_t>& aStart, const Optional<int64_t>& aEnd,
         const nsAString& aContentType, ErrorResult& aRv);
@@ -297,7 +320,8 @@ public:
   virtual const nsTArray<nsRefPtr<BlobImpl>>*
   GetSubBlobImpls() const = 0;
 
-  virtual nsresult GetInternalStream(nsIInputStream** aStream) = 0;
+  virtual void GetInternalStream(nsIInputStream** aStream,
+                                 ErrorResult& aRv) = 0;
 
   virtual int64_t GetFileId() = 0;
 
@@ -352,6 +376,7 @@ public:
     , mStart(0)
     , mLength(aLength)
     , mLastModificationDate(aLastModifiedDate)
+    , mSerialNumber(NextSerialNumber())
   {
     // Ensure non-null mContentType by default
     mContentType.SetIsVoid(false);
@@ -366,6 +391,7 @@ public:
     , mStart(0)
     , mLength(aLength)
     , mLastModificationDate(INT64_MAX)
+    , mSerialNumber(NextSerialNumber())
   {
     // Ensure non-null mContentType by default
     mContentType.SetIsVoid(false);
@@ -378,6 +404,7 @@ public:
     , mStart(0)
     , mLength(aLength)
     , mLastModificationDate(INT64_MAX)
+    , mSerialNumber(NextSerialNumber())
   {
     // Ensure non-null mContentType by default
     mContentType.SetIsVoid(false);
@@ -391,6 +418,7 @@ public:
     , mStart(aStart)
     , mLength(aLength)
     , mLastModificationDate(INT64_MAX)
+    , mSerialNumber(NextSerialNumber())
   {
     NS_ASSERTION(aLength != UINT64_MAX,
                  "Must know length when creating slice");
@@ -418,6 +446,8 @@ public:
 
   virtual void GetType(nsAString& aType) override;
 
+  virtual uint64_t GetSerialNumber() const override { return mSerialNumber; }
+
   virtual already_AddRefed<BlobImpl>
   CreateSlice(uint64_t aStart, uint64_t aLength,
               const nsAString& aContentType, ErrorResult& aRv) override
@@ -431,9 +461,10 @@ public:
     return nullptr;
   }
 
-  virtual nsresult GetInternalStream(nsIInputStream** aStream) override
+  virtual void GetInternalStream(nsIInputStream** aStream,
+                                 ErrorResult& aRv) override
   {
-    return NS_ERROR_NOT_IMPLEMENTED;
+    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
   }
 
   virtual int64_t GetFileId() override;
@@ -504,6 +535,13 @@ public:
 protected:
   virtual ~BlobImplBase() {}
 
+  /**
+   * Returns a new, effectively-unique serial number. This should be used
+   * by implementations to obtain a serial number for GetSerialNumber().
+   * The implementation is thread safe.
+   */
+  static uint64_t NextSerialNumber();
+
   indexedDB::FileInfo* GetFileInfo() const
   {
     NS_ASSERTION(IsStoredFile(), "Should only be called on stored files!");
@@ -523,6 +561,8 @@ protected:
   uint64_t mLength;
 
   int64_t mLastModificationDate;
+
+  const uint64_t mSerialNumber;
 
   // Protected by IndexedDatabaseManager::FileMutex()
   nsTArray<nsRefPtr<indexedDB::FileInfo>> mFileInfos;
@@ -553,7 +593,8 @@ public:
     NS_ASSERTION(mDataOwner && mDataOwner->mData, "must have data");
   }
 
-  virtual nsresult GetInternalStream(nsIInputStream** aStream) override;
+  virtual void GetInternalStream(nsIInputStream** aStream,
+                                 ErrorResult& aRv) override;
 
   virtual already_AddRefed<BlobImpl>
   CreateSlice(uint64_t aStart, uint64_t aLength,
@@ -639,7 +680,8 @@ public:
     mFileDescOwner = new nsTemporaryFileInputStream::FileDescOwner(aFD);
   }
 
-  virtual nsresult GetInternalStream(nsIInputStream** aStream) override;
+  virtual void GetInternalStream(nsIInputStream** aStream,
+                                 ErrorResult& aRv) override;
 
   virtual already_AddRefed<BlobImpl>
   CreateSlice(uint64_t aStart, uint64_t aLength,
@@ -781,7 +823,8 @@ public:
   virtual void SetLastModified(int64_t aLastModified) override;
   virtual void GetMozFullPathInternal(nsAString& aFullPath,
                                       ErrorResult& aRv) override;
-  virtual nsresult GetInternalStream(nsIInputStream**) override;
+  virtual void GetInternalStream(nsIInputStream** aInputStream,
+                                 ErrorResult& aRv) override;
 
   void SetPath(const nsAString& aFullPath);
 

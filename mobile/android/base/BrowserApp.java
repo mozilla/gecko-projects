@@ -49,6 +49,7 @@ import org.mozilla.gecko.preferences.ClearOnShutdownPref;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.prompts.Prompt;
 import org.mozilla.gecko.prompts.PromptListItem;
+import org.mozilla.gecko.sync.repositories.android.FennecTabsRepository;
 import org.mozilla.gecko.sync.setup.SyncAccounts;
 import org.mozilla.gecko.tabqueue.TabQueueHelper;
 import org.mozilla.gecko.tabqueue.TabQueuePrompt;
@@ -784,6 +785,7 @@ public class BrowserApp extends GeckoApp
             "Menu:Remove",
             "Reader:Share",
             "Sanitize:ClearHistory",
+            "Sanitize:ClearSyncedTabs",
             "Settings:Show",
             "Telemetry:Gather",
             "Updater:Launch");
@@ -1348,6 +1350,7 @@ public class BrowserApp extends GeckoApp
             "Menu:Remove",
             "Reader:Share",
             "Sanitize:ClearHistory",
+            "Sanitize:ClearSyncedTabs",
             "Settings:Show",
             "Telemetry:Gather",
             "Updater:Launch");
@@ -1401,6 +1404,15 @@ public class BrowserApp extends GeckoApp
             @Override
             public void run() {
                 db.clearHistory(getContentResolver(), clearSearchHistory);
+            }
+        });
+    }
+
+    private void handleClearSyncedTabs() {
+        ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
+            public void run() {
+                FennecTabsRepository.deleteNonLocalClientsAndTabs(getContext());
             }
         });
     }
@@ -1684,6 +1696,9 @@ public class BrowserApp extends GeckoApp
             GeckoAppShell.openUriExternal(url, "text/plain", "", "", Intent.ACTION_SEND, title);
         } else if ("Sanitize:ClearHistory".equals(event)) {
             handleClearHistory(message.optBoolean("clearSearchHistory", false));
+            callback.sendSuccess(true);
+        } else if ("Sanitize:ClearSyncedTabs".equals(event)) {
+            handleClearSyncedTabs();
             callback.sendSuccess(true);
         } else if ("Settings:Show".equals(event)) {
             final String resource =
@@ -2634,6 +2649,16 @@ public class BrowserApp extends GeckoApp
 
         fm.beginTransaction().add(R.id.search_container, mBrowserSearch, BROWSER_SEARCH_TAG).commitAllowingStateLoss();
         mBrowserSearch.setUserVisibleHint(true);
+
+        // We want to adjust the window size when the keyboard appears to bring the
+        // SearchEngineBar above the keyboard. However, adjusting the window size
+        // when hiding the keyboard results in graphical glitches where the keyboard was
+        // because nothing was being drawn underneath (bug 933422). This can be
+        // prevented drawing content under the keyboard (i.e. in the Window).
+        //
+        // We do this here because there are glitches when unlocking a device with
+        // BrowserSearch in the foreground if we use BrowserSearch.onStart/Stop.
+        getActivity().getWindow().setBackgroundDrawableResource(android.R.color.white);
     }
 
     private void hideBrowserSearch() {
@@ -2650,6 +2675,8 @@ public class BrowserApp extends GeckoApp
         getSupportFragmentManager().beginTransaction()
                 .remove(mBrowserSearch).commitAllowingStateLoss();
         mBrowserSearch.setUserVisibleHint(false);
+
+        getWindow().setBackgroundDrawable(null);
     }
 
     /**

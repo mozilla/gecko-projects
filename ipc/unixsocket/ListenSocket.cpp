@@ -28,11 +28,8 @@ public:
 
   ListenSocketIO(MessageLoop* mIOLoop,
                  ListenSocket* aListenSocket,
-                 UnixSocketConnector* aConnector,
-                 const nsACString& aAddress);
+                 UnixSocketConnector* aConnector);
   ~ListenSocketIO();
-
-  void GetSocketAddr(nsAString& aAddrStr) const;
 
   // Task callback methods
   //
@@ -64,9 +61,6 @@ public:
 private:
   void FireSocketError();
 
-  // Set up flags on file descriptor.
-  static bool SetSocketFlags(int aFd);
-
   /**
    * Consumer pointer. Non-thread safe RefPtr, so should only be manipulated
    * directly from main thread. All non-main-thread accesses should happen with
@@ -85,33 +79,27 @@ private:
   bool mShuttingDownOnIOThread;
 
   /**
-   * Address we are connecting to, assuming we are creating a client connection.
+   * Number of valid bytes in |mAddress|
    */
-  nsCString mAddress;
+  socklen_t mAddressLength;
 
   /**
-   * Size of the socket address struct
+   * Address structure of the socket currently in use
    */
-  socklen_t mAddrSize;
-
-  /**
-   * Address struct of the socket currently in use
-   */
-  sockaddr_any mAddr;
+  struct sockaddr_storage mAddress;
 
   ConnectionOrientedSocketIO* mCOSocketIO;
 };
 
 ListenSocketIO::ListenSocketIO(MessageLoop* mIOLoop,
                                ListenSocket* aListenSocket,
-                               UnixSocketConnector* aConnector,
-                               const nsACString& aAddress)
+                               UnixSocketConnector* aConnector)
   : UnixSocketWatcher(mIOLoop)
   , SocketIOBase()
   , mListenSocket(aListenSocket)
   , mConnector(aConnector)
   , mShuttingDownOnIOThread(false)
-  , mAddress(aAddress)
+  , mAddressLength(0)
   , mCOSocketIO(nullptr)
 {
   MOZ_ASSERT(mListenSocket);
@@ -125,45 +113,20 @@ ListenSocketIO::~ListenSocketIO()
 }
 
 void
-ListenSocketIO::GetSocketAddr(nsAString& aAddrStr) const
-{
-  if (!mConnector) {
-    NS_WARNING("No connector to get socket address from!");
-    aAddrStr.Truncate();
-    return;
-  }
-  mConnector->GetSocketAddr(mAddr, aAddrStr);
-}
-
-void
 ListenSocketIO::Listen(ConnectionOrientedSocketIO* aCOSocketIO)
 {
   MOZ_ASSERT(MessageLoopForIO::current() == GetIOLoop());
   MOZ_ASSERT(mConnector);
   MOZ_ASSERT(aCOSocketIO);
 
+  struct sockaddr* address = reinterpret_cast<struct sockaddr*>(&mAddress);
+  mAddressLength = sizeof(mAddress);
+
   if (!IsOpen()) {
-    int fd = mConnector->Create();
-    if (fd < 0) {
-      NS_WARNING("Cannot create socket fd!");
-      FireSocketError();
-      return;
-    }
-    if (!SetSocketFlags(fd)) {
-      NS_WARNING("Cannot set socket flags!");
-      FireSocketError();
-      return;
-    }
-    if (!mConnector->SetUpListenSocket(GetFd())) {
-      NS_WARNING("Could not set up listen socket!");
-      FireSocketError();
-      return;
-    }
-    // This will set things we don't particularly care about, but
-    // it will hand back the correct structure size which is what
-    // we do care about.
-    if (!mConnector->CreateAddr(true, mAddrSize, mAddr, nullptr)) {
-      NS_WARNING("Cannot create socket address!");
+    int fd;
+    nsresult rv = mConnector->CreateListenSocket(address, &mAddressLength,
+                                                 fd);
+    if (NS_FAILED(rv)) {
       FireSocketError();
       return;
     }
@@ -173,8 +136,7 @@ ListenSocketIO::Listen(ConnectionOrientedSocketIO* aCOSocketIO)
   mCOSocketIO = aCOSocketIO;
 
   // calls OnListening on success, or OnError otherwise
-  nsresult rv = UnixSocketWatcher::Listen(
-    reinterpret_cast<struct sockaddr*>(&mAddr), mAddrSize);
+  nsresult rv = UnixSocketWatcher::Listen(address, mAddressLength);
   NS_WARN_IF(NS_FAILED(rv));
 }
 
@@ -221,41 +183,6 @@ ListenSocketIO::FireSocketError()
     new SocketIOEventRunnable(this, SocketIOEventRunnable::CONNECT_ERROR));
 }
 
-bool
-ListenSocketIO::SetSocketFlags(int aFd)
-{
-  static const int reuseaddr = 1;
-
-  // Set socket addr to be reused even if kernel is still waiting to close
-  int res = setsockopt(aFd, SOL_SOCKET, SO_REUSEADDR,
-                       &reuseaddr, sizeof(reuseaddr));
-  if (res < 0) {
-    return false;
-  }
-
-  // Set close-on-exec bit.
-  int flags = TEMP_FAILURE_RETRY(fcntl(aFd, F_GETFD));
-  if (-1 == flags) {
-    return false;
-  }
-  flags |= FD_CLOEXEC;
-  if (-1 == TEMP_FAILURE_RETRY(fcntl(aFd, F_SETFD, flags))) {
-    return false;
-  }
-
-  // Set non-blocking status flag.
-  flags = TEMP_FAILURE_RETRY(fcntl(aFd, F_GETFL));
-  if (-1 == flags) {
-    return false;
-  }
-  flags |= O_NONBLOCK;
-  if (-1 == TEMP_FAILURE_RETRY(fcntl(aFd, F_SETFL, flags))) {
-    return false;
-  }
-
-  return true;
-}
-
 void
 ListenSocketIO::OnSocketCanAcceptWithoutBlocking()
 {
@@ -263,20 +190,24 @@ ListenSocketIO::OnSocketCanAcceptWithoutBlocking()
   MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_LISTENING);
   MOZ_ASSERT(mCOSocketIO);
 
-  struct sockaddr_storage addr;
-  socklen_t addrLen = sizeof(addr);
-  int fd = TEMP_FAILURE_RETRY(accept(GetFd(),
-    reinterpret_cast<struct sockaddr*>(&addr), &addrLen));
-  if (fd < 0) {
-    OnError("accept", errno);
+  RemoveWatchers(READ_WATCHER|WRITE_WATCHER);
+
+  struct sockaddr_storage storage;
+  socklen_t addressLength = sizeof(storage);
+
+  int fd;
+  nsresult rv = mConnector->AcceptStreamSocket(
+    GetFd(),
+    reinterpret_cast<struct sockaddr*>(&storage), &addressLength,
+    fd);
+  if (NS_FAILED(rv)) {
+    FireSocketError();
     return;
   }
 
-  RemoveWatchers(READ_WATCHER|WRITE_WATCHER);
-
   mCOSocketIO->Accept(fd,
-                      reinterpret_cast<union sockaddr_any*>(&addr),
-                      addrLen);
+                      reinterpret_cast<union sockaddr_any*>(&storage),
+                      addressLength);
 }
 
 // |SocketIOBase|
@@ -361,6 +292,36 @@ ListenSocket::~ListenSocket()
   MOZ_ASSERT(!mIO);
 }
 
+nsresult
+ListenSocket::Listen(UnixSocketConnector* aConnector,
+                     ConnectionOrientedSocket* aCOSocket)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mIO);
+
+  mIO = new ListenSocketIO(XRE_GetIOMessageLoop(), this, aConnector);
+
+  // Prepared I/O object, now start listening.
+  return Listen(aCOSocket);
+}
+
+nsresult
+ListenSocket::Listen(ConnectionOrientedSocket* aCOSocket)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aCOSocket);
+  MOZ_ASSERT(mIO);
+
+  SetConnectionStatus(SOCKET_LISTENING);
+
+  XRE_GetIOMessageLoop()->PostTask(
+    FROM_HERE, new ListenSocketIO::ListenTask(mIO, aCOSocket->GetIO()));
+
+  return NS_OK;
+}
+
+// |SocketBase|
+
 void
 ListenSocket::Close()
 {
@@ -380,62 +341,6 @@ ListenSocket::Close()
   mIO = nullptr;
 
   NotifyDisconnect();
-}
-
-bool
-ListenSocket::Listen(UnixSocketConnector* aConnector,
-                     ConnectionOrientedSocket* aCOSocket)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aConnector);
-  MOZ_ASSERT(aCOSocket);
-
-  nsAutoPtr<UnixSocketConnector> connector(aConnector);
-
-  if (mIO) {
-    NS_WARNING("Socket already connecting/connected!");
-    return false;
-  }
-
-  mIO = new ListenSocketIO(
-    XRE_GetIOMessageLoop(), this, connector.forget(), EmptyCString());
-
-  // Prepared I/O object, now start listening.
-  return Listen(aCOSocket);
-}
-
-bool
-ListenSocket::Listen(ConnectionOrientedSocket* aCOSocket)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mIO);
-  MOZ_ASSERT(aCOSocket);
-
-  SetConnectionStatus(SOCKET_LISTENING);
-
-  XRE_GetIOMessageLoop()->PostTask(
-    FROM_HERE, new ListenSocketIO::ListenTask(mIO, aCOSocket->GetIO()));
-
-  return true;
-}
-
-void
-ListenSocket::GetSocketAddr(nsAString& aAddrStr)
-{
-  aAddrStr.Truncate();
-  if (!mIO || GetConnectionStatus() != SOCKET_CONNECTED) {
-    NS_WARNING("No socket currently open!");
-    return;
-  }
-  mIO->GetSocketAddr(aAddrStr);
-}
-
-// |SocketBase|
-
-void
-ListenSocket::CloseSocket()
-{
-  Close();
 }
 
 } // namespace ipc

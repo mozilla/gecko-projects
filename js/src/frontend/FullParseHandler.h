@@ -253,7 +253,7 @@ class FullParseHandler
         if (!elision)
             return false;
         literal->append(elision);
-        literal->pn_xflags |= PNX_SPECIALARRAYINIT | PNX_NONCONST;
+        literal->pn_xflags |= PNX_ARRAYHOLESPREAD | PNX_NONCONST;
         return true;
     }
 
@@ -263,7 +263,7 @@ class FullParseHandler
         if (!spread)
             return null();
         literal->append(spread);
-        literal->pn_xflags |= PNX_SPECIALARRAYINIT | PNX_NONCONST;
+        literal->pn_xflags |= PNX_ARRAYHOLESPREAD | PNX_NONCONST;
         return true;
     }
 
@@ -589,14 +589,6 @@ class FullParseHandler
     }
     void setLexicalScopeBody(ParseNode* block, ParseNode* body) {
         block->pn_expr = body;
-    }
-
-    ParseNode* newLetExpression(ParseNode* vars, ParseNode* block, const TokenPos& pos) {
-        ParseNode* letExpr = newBinary(PNK_LETEXPR, vars, block);
-        if (!letExpr)
-            return nullptr;
-        letExpr->pn_pos = pos;
-        return letExpr;
     }
 
     ParseNode* newLetBlock(ParseNode* vars, ParseNode* block, const TokenPos& pos) {
