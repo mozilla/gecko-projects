@@ -677,6 +677,29 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
     currentClip = aCurrentScissorRect;
   }
 
+#ifdef MOZ_HORIZON
+  bool hasUnbroken3DChainToVRContainer = false;
+  // XXX We need to actually fully un-clip these layers somehow.
+  //
+  // If this container has an unbroken chain of preserve-3d containers
+  // all the way up to a VR container, then we don't really want to modify the
+  // clip at all.
+  if (GetContentFlags() & CONTENT_PRESERVE_3D) {
+    for (ContainerLayer *p = container; p; p = p->mParent) {
+      if (p->GetVRHMDInfo() != nullptr) {
+        hasUnbroken3DChainToVRContainer = true;
+        break;
+      }
+      if (!(p->GetContentFlags() & CONTENT_PRESERVE_3D))
+        break;
+    }
+  }
+  
+  if (hasUnbroken3DChainToVRContainer) {
+    return currentClip;
+  }
+#endif
+
   if (!GetEffectiveClipRect()) {
     return currentClip;
   }
