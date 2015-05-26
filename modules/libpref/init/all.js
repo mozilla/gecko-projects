@@ -370,7 +370,7 @@ pref("media.peerconnection.video.start_bitrate", 300);
 pref("media.peerconnection.video.max_bitrate", 2000);
 #endif
 pref("media.navigator.permission.disabled", false);
-pref("media.peerconnection.default_iceservers", "[{\"urls\": [\"stun:stun.services.mozilla.com\"]}]");
+pref("media.peerconnection.default_iceservers", "[]");
 pref("media.peerconnection.ice.loopback", false); // Set only for testing in offline environments.
 pref("media.peerconnection.use_document_iceservers", true);
 pref("media.peerconnection.identity.enabled", true);
@@ -1343,7 +1343,6 @@ pref("network.http.bypass-cachelock-threshold", 250);
 // Try and use SPDY when using SSL
 pref("network.http.spdy.enabled", true);
 pref("network.http.spdy.enabled.v3-1", true);
-pref("network.http.spdy.enabled.http2draft", true);
 pref("network.http.spdy.enabled.http2", true);
 pref("network.http.spdy.enabled.deps", true);
 pref("network.http.spdy.enforce-tls-profile", true);
@@ -1604,7 +1603,7 @@ pref("network.dnsCacheEntries", 400);
 pref("network.dnsCacheExpiration", 60);
 
 // Get TTL; not supported on all platforms; nop on the unsupported ones.
-pref("network.dns.get-ttl", false);
+pref("network.dns.get-ttl", true);
 
 // The grace period allows the DNS cache to use expired entries, while kicking off
 // a revalidation in the background.
@@ -2514,7 +2513,7 @@ pref("font.minimum-size.ko", 0);
 pref("font.size.variable.ko", 16);
 pref("font.size.fixed.ko", 16);
 
-pref("font.default.th", "serif");
+pref("font.default.th", "sans-serif");
 pref("font.minimum-size.th", 0);
 pref("font.size.variable.th", 16);
 pref("font.size.fixed.th", 13);
@@ -4001,6 +4000,7 @@ pref("webgl.enable-draft-extensions", false);
 pref("webgl.enable-privileged-extensions", false);
 pref("webgl.bypass-shader-validation", false);
 pref("webgl.enable-prototype-webgl2", false);
+pref("webgl.disable-fail-if-major-performance-caveat", false);
 pref("gl.require-hardware", false);
 
 #ifdef XP_WIN
@@ -4154,6 +4154,9 @@ pref("layers.force-active", false);
 // Never use gralloc surfaces, even when they're available on this
 // platform and are the optimal surface type.
 pref("layers.gralloc.disable", false);
+
+// Don't use compositor-lru on this platform
+pref("layers.compositor-lru-size", 0);
 
 // Enable/Disable the geolocation API for content
 pref("geo.enabled", true);

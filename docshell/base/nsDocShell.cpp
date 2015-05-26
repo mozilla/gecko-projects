@@ -926,7 +926,7 @@ nsDocShell::nsDocShell()
     gDocShellLeakLog = PR_NewLogModule("nsDocShellLeak");
   }
   if (gDocShellLeakLog) {
-    PR_LOG(gDocShellLeakLog, PR_LOG_DEBUG, ("DOCSHELL %p created\n", this));
+    MOZ_LOG(gDocShellLeakLog, PR_LOG_DEBUG, ("DOCSHELL %p created\n", this));
   }
 
 #ifdef DEBUG
@@ -958,7 +958,7 @@ nsDocShell::~nsDocShell()
   }
 
   if (gDocShellLeakLog) {
-    PR_LOG(gDocShellLeakLog, PR_LOG_DEBUG, ("DOCSHELL %p destroyed\n", this));
+    MOZ_LOG(gDocShellLeakLog, PR_LOG_DEBUG, ("DOCSHELL %p destroyed\n", this));
   }
 
 #ifdef DEBUG
@@ -1095,7 +1095,7 @@ nsDocShell::GetInterface(const nsIID& aIID, void** aSink)
     }
 
 #if defined(DEBUG)
-    PR_LOG(gDocShellLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocShellLog, PR_LOG_DEBUG,
            ("nsDocShell[%p]: returning app cache container %p",
             this, domDoc.get()));
 #endif
@@ -1421,7 +1421,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
   if (PR_LOG_TEST(gDocShellLog, PR_LOG_DEBUG)) {
     nsAutoCString uristr;
     aURI->GetAsciiSpec(uristr);
-    PR_LOG(gDocShellLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocShellLog, PR_LOG_DEBUG,
            ("nsDocShell[%p]: loading %s with flags 0x%08x",
             this, uristr.get(), aLoadFlags));
   }
@@ -1540,7 +1540,7 @@ nsDocShell::LoadURI(nsIURI* aURI,
 
   if (shEntry) {
 #ifdef DEBUG
-    PR_LOG(gDocShellLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocShellLog, PR_LOG_DEBUG,
            ("nsDocShell[%p]: loading from session history", this));
 #endif
 
@@ -2997,7 +2997,7 @@ nsDocShell::PopProfileTimelineMarkers(
       marker->mName = NS_ConvertUTF8toUTF16(startPayload->GetName());
       marker->mStart = startPayload->GetTime();
       marker->mEnd = startPayload->GetTime();
-      startPayload->AddDetails(*marker);
+      startPayload->AddDetails(aCx, *marker);
       continue;
     }
 
@@ -3045,8 +3045,8 @@ nsDocShell::PopProfileTimelineMarkers(
               if (isPaint) {
                 marker->mRectangles.Construct(layerRectangles);
               }
-              startPayload->AddDetails(*marker);
-              endPayload->AddDetails(*marker);
+              startPayload->AddDetails(aCx, *marker);
+              endPayload->AddDetails(aCx, *marker);
             }
 
             // We want the start to be dropped either way.
@@ -5313,7 +5313,7 @@ nsDocShell::LoadErrorPage(nsIURI* aURI, const char16_t* aURL,
       chanName.AssignLiteral("<no channel>");
     }
 
-    PR_LOG(gDocShellLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocShellLog, PR_LOG_DEBUG,
            ("nsDocShell[%p]::LoadErrorPage(\"%s\", \"%s\", {...}, [%s])\n", this,
             spec.get(), NS_ConvertUTF16toUTF8(aURL).get(), chanName.get()));
   }
@@ -11164,7 +11164,7 @@ nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel, nsISupports* aOwner,
       chanName.AssignLiteral("<no channel>");
     }
 
-    PR_LOG(gDocShellLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocShellLog, PR_LOG_DEBUG,
            ("nsDocShell[%p]::OnNewURI(\"%s\", [%s], 0x%x)\n", this, spec.get(),
             chanName.get(), aLoadType));
   }
@@ -11229,7 +11229,7 @@ nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel, nsISupports* aOwner,
   // XXX This log message is almost useless because |updateSHistory|
   //     and |updateGHistory| are not correct at this point.
 
-  PR_LOG(gDocShellLog, PR_LOG_DEBUG,
+  MOZ_LOG(gDocShellLog, PR_LOG_DEBUG,
          ("  shAvailable=%i updateSHistory=%i updateGHistory=%i"
           " equalURI=%i\n",
           shAvailable, updateSHistory, updateGHistory, equalUri));
@@ -11784,7 +11784,7 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
       chanName.AssignLiteral("<no channel>");
     }
 
-    PR_LOG(gDocShellLog, PR_LOG_DEBUG,
+    MOZ_LOG(gDocShellLog, PR_LOG_DEBUG,
            ("nsDocShell[%p]::AddToSessionHistory(\"%s\", [%s])\n",
             this, spec.get(), chanName.get()));
   }
@@ -13912,27 +13912,61 @@ class JavascriptTimelineMarker : public TimelineMarker
 {
 public:
   JavascriptTimelineMarker(nsDocShell* aDocShell, const char* aName,
-                           const char* aReason)
+                           const char* aReason,
+                           const char16_t* aFunctionName,
+                           const char16_t* aFileName,
+                           uint32_t aLineNumber)
     : TimelineMarker(aDocShell, aName, TRACING_INTERVAL_START,
-                     NS_ConvertUTF8toUTF16(aReason))
+                     NS_ConvertUTF8toUTF16(aReason),
+                     NO_STACK)
+    , mFunctionName(aFunctionName)
+    , mFileName(aFileName)
+    , mLineNumber(aLineNumber)
   {
   }
 
-  void AddDetails(mozilla::dom::ProfileTimelineMarker& aMarker) override
+  void AddDetails(JSContext* aCx, mozilla::dom::ProfileTimelineMarker& aMarker)
+    override
   {
     aMarker.mCauseName.Construct(GetCause());
+
+    if (!mFunctionName.IsEmpty() || !mFileName.IsEmpty()) {
+      ProfileTimelineStackFrame stackFrame;
+      stackFrame.mLine.Construct(mLineNumber);
+      stackFrame.mSource.Construct(mFileName);
+      stackFrame.mFunctionDisplayName.Construct(mFunctionName);
+
+      JS::Rooted<JS::Value> newStack(aCx);
+      if (ToJSValue(aCx, stackFrame, &newStack)) {
+        if (newStack.isObject()) {
+          aMarker.mStack = &newStack.toObject();
+        }
+      } else {
+        JS_ClearPendingException(aCx);
+      }
+    }
   }
+
+private:
+  nsString mFunctionName;
+  nsString mFileName;
+  uint32_t mLineNumber;
 };
 
 void
-nsDocShell::NotifyJSRunToCompletionStart(const char* aReason)
+nsDocShell::NotifyJSRunToCompletionStart(const char* aReason,
+                                         const char16_t* aFunctionName,
+                                         const char16_t* aFilename,
+                                         const uint32_t aLineNumber)
 {
   bool timelineOn = nsIDocShell::GetRecordProfileTimelineMarkers();
 
   // If first start, mark interval start.
   if (timelineOn && mJSRunToCompletionDepth == 0) {
     mozilla::UniquePtr<TimelineMarker> marker =
-      MakeUnique<JavascriptTimelineMarker>(this, "Javascript", aReason);
+      MakeUnique<JavascriptTimelineMarker>(this, "Javascript", aReason,
+                                           aFunctionName, aFilename,
+                                           aLineNumber);
     AddProfileTimelineMarker(Move(marker));
   }
   mJSRunToCompletionDepth++;

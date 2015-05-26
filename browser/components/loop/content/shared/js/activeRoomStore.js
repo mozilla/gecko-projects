@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global loop:true */
-
 var loop = loop || {};
 loop.store = loop.store || {};
 
@@ -374,6 +372,8 @@ loop.store.ActiveRoomStore = (function() {
      */
     _handleRoomUpdate: function(eventName, roomData) {
       this.dispatchAction(new sharedActions.UpdateRoomInfo({
+        urls: roomData.decryptedContext.urls,
+        description: roomData.decryptedContext.description,
         roomName: roomData.decryptedContext.roomName,
         roomOwner: roomData.roomOwner,
         roomUrl: roomData.roomUrl
@@ -412,7 +412,20 @@ loop.store.ActiveRoomStore = (function() {
         this.setStoreState({failureReason: undefined});
       }
 
-      this.setStoreState({roomState: ROOM_STATES.MEDIA_WAIT});
+      // XXX Ideally we'd do this check before joining a room, but we're waiting
+      // for the UX for that. See bug 1166824. In the meantime this gives us
+      // additional information for analysis.
+      loop.shared.utils.hasAudioDevices(function(hasAudio) {
+        if (hasAudio) {
+          // MEDIA_WAIT causes the views to dispatch sharedActions.SetupStreamElements,
+          // which in turn starts the sdk obtaining the device permission.
+          this.setStoreState({roomState: ROOM_STATES.MEDIA_WAIT});
+        } else {
+          this.dispatchAction(new sharedActions.ConnectionFailure({
+            reason: FAILURE_DETAILS.NO_MEDIA
+          }));
+        }
+      }.bind(this));
     },
 
     /**

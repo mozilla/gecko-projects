@@ -2,16 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/*jshint newcap:false*/
-/*global loop, sinon */
-
-var expect = chai.expect;
-var TestUtils = React.addons.TestUtils;
-var sharedActions = loop.shared.actions;
-var sharedUtils = loop.shared.utils;
-
 describe("loop.panel", function() {
   "use strict";
+
+  var expect = chai.expect;
+  var TestUtils = React.addons.TestUtils;
+  var sharedActions = loop.shared.actions;
+  var sharedUtils = loop.shared.utils;
 
   var sandbox, notifications;
   var fakeXHR, fakeWindow, fakeMozLoop;
@@ -205,7 +202,7 @@ describe("loop.panel", function() {
         .to.have.length.of(0);
     });
 
-    describe('TabView', function() {
+    describe("TabView", function() {
       var view, callTab, roomsTab, contactsTab;
 
       beforeEach(function() {
@@ -909,7 +906,7 @@ describe("loop.panel", function() {
     });
   });
 
-  describe('loop.panel.ToSView', function() {
+  describe("loop.panel.ToSView", function() {
 
     it("should render when the value of loop.seenToS is not set", function() {
       navigator.mozLoop.getLoopPref = function(key) {
@@ -925,8 +922,7 @@ describe("loop.panel", function() {
       TestUtils.findRenderedDOMComponentWithClass(view, "terms-service");
     });
 
-    it("should not render when the value of loop.seenToS is set to 'seen'",
-      function(done) {
+    it("should not render when the value of loop.seenToS is set to 'seen'", function() {
         navigator.mozLoop.getLoopPref = function(key) {
           return {
             "gettingStarted.seen": true,
@@ -934,11 +930,12 @@ describe("loop.panel", function() {
           }[key];
         };
 
-        try {
+        var view = TestUtils.renderIntoDocument(
+          React.createElement(loop.panel.ToSView));
+
+        expect(function() {
           TestUtils.findRenderedDOMComponentWithClass(view, "terms-service");
-        } catch (err) {
-          done();
-        }
+        }).to.Throw(/not find/);
     });
 
     it("should render when the value of loop.gettingStarted.seen is false",

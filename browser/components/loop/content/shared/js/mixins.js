@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global loop:true */
-
 var loop = loop || {};
 loop.shared = loop.shared || {};
 loop.shared.mixins = (function() {
@@ -517,7 +515,7 @@ loop.shared.mixins = (function() {
           this._bufferedUpdateVideo = null;
           var localStreamParent = this._getElement(".local .OT_publisher");
           var remoteStreamParent = this._getElement(".remote .OT_subscriber");
-          var screenShareStreamParent = this._getElement('.screen .OT_subscriber');
+          var screenShareStreamParent = this._getElement(".screen .OT_subscriber");
           if (localStreamParent) {
             localStreamParent.style.width = "100%";
           }

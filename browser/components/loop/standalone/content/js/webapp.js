@@ -1,11 +1,6 @@
-/** @jsx React.DOM */
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/* global loop:true, React, MozActivity */
-/* jshint newcap:false, maxlen:false */
 
 var loop = loop || {};
 loop.webapp = (function($, _, OT, mozL10n) {
@@ -460,7 +455,7 @@ loop.webapp = (function($, _, OT, mozL10n) {
 
     getInitialState: function() {
       return {
-        urlCreationDateString: '',
+        urlCreationDateString: "",
         disableCallButton: false
       };
     },
@@ -1045,6 +1040,10 @@ loop.webapp = (function($, _, OT, mozL10n) {
       baseServerUrl: loop.config.serverUrl
     });
     var sdkDriver = new loop.OTSdkDriver({
+      // For the standalone, always request data channels. If they aren't
+      // implemented on the client, there won't be a similar message to us, and
+      // we won't display the UI.
+      useDataChannels: true,
       dispatcher: dispatcher,
       sdk: OT
     });
@@ -1090,12 +1089,16 @@ loop.webapp = (function($, _, OT, mozL10n) {
     var standaloneMetricsStore = new loop.store.StandaloneMetricsStore(dispatcher, {
       activeRoomStore: activeRoomStore
     });
+    var textChatStore = new loop.store.TextChatStore(dispatcher, {
+      sdkDriver: sdkDriver
+    });
 
     loop.store.StoreMixin.register({
       feedbackStore: feedbackStore,
       // This isn't used in any views, but is saved here to ensure it
       // is kept alive.
-      standaloneMetricsStore: standaloneMetricsStore
+      standaloneMetricsStore: standaloneMetricsStore,
+      textChatStore: textChatStore
     });
 
     window.addEventListener("unload", function() {

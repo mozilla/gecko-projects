@@ -2,12 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global loop, sinon */
-
-var expect = chai.expect;
-
 describe("loop.standaloneRoomViews", function() {
   "use strict";
+
+  var expect = chai.expect;
+  var TestUtils = React.addons.TestUtils;
 
   var ROOM_STATES = loop.store.ROOM_STATES;
   var FEEDBACK_STATES = loop.store.FEEDBACK_STATES;
@@ -25,10 +24,16 @@ describe("loop.standaloneRoomViews", function() {
       mozLoop: {},
       sdkDriver: {}
     });
+    var textChatStore = new loop.store.TextChatStore(dispatcher, {
+      sdkDriver: {}
+    });
     feedbackStore = new loop.store.FeedbackStore(dispatcher, {
       feedbackClient: {}
     });
-    loop.store.StoreMixin.register({feedbackStore: feedbackStore});
+    loop.store.StoreMixin.register({
+      feedbackStore: feedbackStore,
+      textChatStore: textChatStore
+    });
 
     sandbox.useFakeTimers();
 

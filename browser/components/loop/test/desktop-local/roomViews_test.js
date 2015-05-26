@@ -1,10 +1,13 @@
-var expect = chai.expect;
-
-/* jshint newcap:false */
+/* Any copyright is dedicated to the Public Domain.
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 describe("loop.roomViews", function () {
   "use strict";
 
+  var expect = chai.expect;
+  var TestUtils = React.addons.TestUtils;
+  var sharedActions = loop.shared.actions;
+  var sharedUtils = loop.shared.utils;
   var ROOM_STATES = loop.store.ROOM_STATES;
   var SCREEN_SHARE_STATES = loop.shared.utils.SCREEN_SHARE_STATES;
 
@@ -309,7 +312,7 @@ describe("loop.roomViews", function () {
 
         view.setState({audioMuted: true});
 
-        var muteBtn = view.getDOMNode().querySelector('.btn-mute-audio');
+        var muteBtn = view.getDOMNode().querySelector(".btn-mute-audio");
 
         React.addons.TestUtils.Simulate.click(muteBtn);
 
@@ -327,7 +330,7 @@ describe("loop.roomViews", function () {
 
         view.setState({videoMuted: false});
 
-        var muteBtn = view.getDOMNode().querySelector('.btn-mute-video');
+        var muteBtn = view.getDOMNode().querySelector(".btn-mute-video");
 
         React.addons.TestUtils.Simulate.click(muteBtn);
 
@@ -344,7 +347,7 @@ describe("loop.roomViews", function () {
 
       view.setState({videoMuted: false});
 
-      var muteBtn = view.getDOMNode().querySelector('.btn-mute-video');
+      var muteBtn = view.getDOMNode().querySelector(".btn-mute-video");
 
       expect(muteBtn.classList.contains("muted")).eql(false);
     });
@@ -354,7 +357,7 @@ describe("loop.roomViews", function () {
 
       view.setState({audioMuted: true});
 
-      var muteBtn = view.getDOMNode().querySelector('.btn-mute-audio');
+      var muteBtn = view.getDOMNode().querySelector(".btn-mute-audio");
 
       expect(muteBtn.classList.contains("muted")).eql(true);
     });
@@ -365,7 +368,7 @@ describe("loop.roomViews", function () {
 
       view.setState({screenSharingState: SCREEN_SHARE_STATES.INACTIVE});
 
-      var muteBtn = view.getDOMNode().querySelector('.btn-mute-video');
+      var muteBtn = view.getDOMNode().querySelector(".btn-mute-video");
 
       React.addons.TestUtils.Simulate.click(muteBtn);
 

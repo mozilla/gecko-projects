@@ -703,6 +703,7 @@ var shell = {
   },
 
   handleCmdLine: function() {
+#ifndef MOZ_WIDGET_GONK
     let b2gcmds = Cc["@mozilla.org/commandlinehandler/general-startup;1?type=b2gcmds"]
                     .getService(Ci.nsISupports);
     let args = b2gcmds.wrappedJSObject.cmdLine;
@@ -716,6 +717,7 @@ var shell = {
     } catch(e) {
       // Throws if -url is present with no params.
     }
+#endif
   },
 };
 
@@ -1186,7 +1188,12 @@ window.addEventListener('ContentStart', function update_onContentStart() {
 
   // We must set the size in KB, and keep a bit of free space.
   let size = Math.floor(stats.totalBytes / 1024) - 1024;
-  Services.prefs.setIntPref("browser.cache.disk.capacity", size);
+
+  // keep the default value if it is smaller than the physical partition size.
+  let oldSize = Services.prefs.getIntPref("browser.cache.disk.capacity");
+  if (size < oldSize) {
+    Services.prefs.setIntPref("browser.cache.disk.capacity", size);
+  }
 })();
 #endif
 

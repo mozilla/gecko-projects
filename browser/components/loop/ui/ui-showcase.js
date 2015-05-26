@@ -1,18 +1,15 @@
-/** @jsx React.DOM */
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* jshint newcap:false */
-/* global loop:true, React */
+/* global uncaughtError:true */
 
 (function() {
   "use strict";
 
   // Stop the default init functions running to avoid conflicts.
-  document.removeEventListener('DOMContentLoaded', loop.panel.init);
-  document.removeEventListener('DOMContentLoaded', loop.conversation.init);
+  document.removeEventListener("DOMContentLoaded", loop.panel.init);
+  document.removeEventListener("DOMContentLoaded", loop.conversation.init);
 
   // 1. Desktop components
   // 1.1 Panel
@@ -79,6 +76,8 @@
 
   loop.shared.mixins.setRootObject(rootObject);
 
+  var dispatcher = new loop.Dispatcher();
+
   // Feedback API client configured to send data to the stage input server,
   // which is available at https://input.allizom.org
   var stageFeedbackApiClient = new loop.FeedbackAPIClient(
@@ -87,9 +86,14 @@
     }
   );
 
-  var mockSDK = _.extend({}, Backbone.Events);
+  var mockSDK = _.extend({
+    sendTextChatMessage: function(message) {
+      dispatcher.dispatch(new loop.shared.actions.ReceivedTextChatMessage({
+        message: message
+      }));
+    }
+  }, Backbone.Events);
 
-  var dispatcher = new loop.Dispatcher();
   var activeRoomStore = new loop.store.ActiveRoomStore(dispatcher, {
     mozLoop: navigator.mozLoop,
     sdkDriver: mockSDK
@@ -105,10 +109,19 @@
     mozLoop: navigator.mozLoop,
     sdkDriver: mockSDK
   });
+  var textChatStore = new loop.store.TextChatStore(dispatcher, {
+    sdkDriver: mockSDK
+  });
+
+  textChatStore.setStoreState({
+    // XXX Disabled until we start sorting out some of the layouts.
+    textChatEnabled: false
+  });
 
   loop.store.StoreMixin.register({
     conversationStore: conversationStore,
-    feedbackStore: feedbackStore
+    feedbackStore: feedbackStore,
+    textChatStore: textChatStore
   });
 
   // Local mocks
@@ -746,7 +759,7 @@
    * CSS media rules in their own iframe to mimic the viewport
    * */
   function _renderComponentsInIframes() {
-    var parents = document.querySelectorAll('.breakpoint');
+    var parents = document.querySelectorAll(".breakpoint");
     [].forEach.call(parents, appendChildInIframe);
 
     /**
@@ -755,9 +768,9 @@
      * @type {HTMLElement} parent - Parent DOM node of a component & iframe
      * */
     function appendChildInIframe(parent) {
-      var styles     = document.querySelector('head').children;
+      var styles     = document.querySelector("head").children;
       var component  = parent.children[0];
-      var iframe     = document.createElement('iframe');
+      var iframe     = document.createElement("iframe");
       var width      = parent.dataset.breakpointWidth;
       var height     = parent.dataset.breakpointHeight;
 
@@ -768,8 +781,8 @@
       iframe.src    = "about:blank";
       // Workaround for bug 297685
       iframe.onload = function () {
-        var iframeHead = iframe.contentDocument.querySelector('head');
-        iframe.contentDocument.documentElement.querySelector('body')
+        var iframeHead = iframe.contentDocument.querySelector("head");
+        iframe.contentDocument.documentElement.querySelector("body")
                                               .appendChild(component);
 
         [].forEach.call(styles, function(style) {

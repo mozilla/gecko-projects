@@ -127,6 +127,7 @@
 
 #include "nsStyledElement.h"
 #include "nsIContentInlines.h"
+#include "nsChildContentList.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1157,7 +1158,7 @@ void
 FragmentOrElement::GetTextContentInternal(nsAString& aTextContent,
                                           ErrorResult& aError)
 {
-  if(!nsContentUtils::GetNodeTextContent(this, true, aTextContent)) {
+  if(!nsContentUtils::GetNodeTextContent(this, true, aTextContent, fallible)) {
     aError.Throw(NS_ERROR_OUT_OF_MEMORY);
   }
 }

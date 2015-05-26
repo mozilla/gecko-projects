@@ -113,13 +113,14 @@ protected:
 class BluetoothDaemonConnection : public ConnectionOrientedSocket
 {
 public:
-  BluetoothDaemonConnection();
+  BluetoothDaemonConnection(BluetoothDaemonPDUConsumer* aConsumer);
   virtual ~BluetoothDaemonConnection();
 
   // Methods for |ConnectionOrientedSocket|
   //
 
-  virtual ConnectionOrientedSocketIO* GetIO() override;
+  nsresult PrepareAccept(UnixSocketConnector* aConnector,
+                         ConnectionOrientedSocketIO*& aIO) override;
 
   // Methods for |DataSocket|
   //
@@ -131,15 +132,8 @@ public:
 
   void Close() override;
 
-protected:
-
-  // Prepares an instance of |BluetoothDaemonConnection| in DISCONNECTED
-  // state for accepting a connection. Subclasses implementing |GetIO|
-  // need to call this method.
-  ConnectionOrientedSocketIO*
-    PrepareAccept(BluetoothDaemonPDUConsumer* aConsumer);
-
 private:
+  BluetoothDaemonPDUConsumer* mConsumer;
   BluetoothDaemonConnectionIO* mIO;
 };
 

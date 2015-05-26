@@ -337,11 +337,26 @@ TabChildBase::HandlePossibleViewportChange(const ScreenIntSize& aOldScreenSize)
 
   FrameMetrics metrics(mLastRootMetrics);
   metrics.SetViewport(CSSRect(CSSPoint(), viewport));
+
+  // Calculate the composition bounds based on mInnerSize, excluding the sizes
+  // of the scrollbars if they are not overlay scrollbars.
+  ScreenSize compositionSize(mInnerSize);
+  nsCOMPtr<nsIPresShell> shell = GetPresShell();
+  if (shell) {
+    nsMargin scrollbarsAppUnits =
+        nsLayoutUtils::ScrollbarAreaToExcludeFromCompositionBoundsFor(shell->GetRootScrollFrame());
+    // Scrollbars are not subject to scaling, so CSS pixels = screen pixels for them.
+    ScreenMargin scrollbars = CSSMargin::FromAppUnits(scrollbarsAppUnits)
+                            * CSSToScreenScale(1.0f);
+    compositionSize.width -= scrollbars.LeftRight();
+    compositionSize.height -= scrollbars.TopBottom();
+  }
+
   metrics.SetCompositionBounds(ParentLayerRect(
       ParentLayerPoint(),
-      ParentLayerSize(ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenIsParentLayerForRoot))));
+      ParentLayerSize(ViewAs<ParentLayerPixel>(compositionSize, PixelCastJustification::ScreenIsParentLayerForRoot))));
   metrics.SetRootCompositionSize(
-      ScreenSize(mInnerSize) * ScreenToLayoutDeviceScale(1.0f) / metrics.GetDevPixelsPerCSSPixel());
+      ScreenSize(compositionSize) * ScreenToLayoutDeviceScale(1.0f) / metrics.GetDevPixelsPerCSSPixel());
 
   // This change to the zoom accounts for all types of changes I can conceive:
   // 1. screen size changes, CSS viewport does not (pages with no meta viewport
@@ -362,7 +377,6 @@ TabChildBase::HandlePossibleViewportChange(const ScreenIntSize& aOldScreenSize)
 
   // Changing the zoom when we're not doing a first paint will get ignored
   // by AsyncPanZoomController and causes a blurry flash.
-  nsCOMPtr<nsIPresShell> shell = GetPresShell();
   bool isFirstPaint = true;
   if (shell) {
     isFirstPaint = shell->GetIsFirstPaint();
@@ -773,21 +787,6 @@ TabChild::PreloadSlowThings()
 
     sPreallocatedTab = tab;
     ClearOnShutdown(&sPreallocatedTab);
-}
-
-/*static*/ void
-TabChild::PostForkPreload()
-{
-    // Preallocated Tab can be null if we are forked directly from b2g. In such
-    // case we don't need to preload anything, just return.
-    if (!sPreallocatedTab) {
-        return;
-    }
-
-    // Rebuild connections to parent.
-    sPreallocatedTab->RecvLoadRemoteScript(
-      NS_LITERAL_STRING("chrome://global/content/post-fork-preload.js"),
-      true);
 }
 
 /*static*/ already_AddRefed<TabChild>
@@ -2987,17 +2986,23 @@ TabChild::NotifyPainted()
 void
 TabChild::MakeVisible()
 {
-    if (mWidget) {
-        mWidget->Show(true);
-    }
+  CompositorChild* compositor = CompositorChild::Get();
+  compositor->SendNotifyVisible(mLayersId);
+
+  if (mWidget) {
+    mWidget->Show(true);
+  }
 }
 
 void
 TabChild::MakeHidden()
 {
-    if (mWidget) {
-        mWidget->Show(false);
-    }
+  CompositorChild* compositor = CompositorChild::Get();
+  compositor->SendNotifyHidden(mLayersId);
+
+  if (mWidget) {
+    mWidget->Show(false);
+  }
 }
 
 void
@@ -3137,6 +3142,17 @@ TabChild::DidComposite(uint64_t aTransactionId)
 
   ClientLayerManager *manager = static_cast<ClientLayerManager*>(mWidget->GetLayerManager());
   manager->DidComposite(aTransactionId);
+}
+
+void
+TabChild::ClearCachedResources()
+{
+  MOZ_ASSERT(mWidget);
+  MOZ_ASSERT(mWidget->GetLayerManager());
+  MOZ_ASSERT(mWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT);
+
+  ClientLayerManager *manager = static_cast<ClientLayerManager*>(mWidget->GetLayerManager());
+  manager->ClearCachedResources();
 }
 
 NS_IMETHODIMP

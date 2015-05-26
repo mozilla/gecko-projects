@@ -40,8 +40,8 @@ namespace mozilla {
 #undef LOG
 #endif
 
-#define LOGD(msg) PR_LOG(GetGMPLog(), PR_LOG_DEBUG, msg)
-#define LOG(level, msg) PR_LOG(GetGMPLog(), (level), msg)
+#define LOGD(msg) MOZ_LOG(GetGMPLog(), PR_LOG_DEBUG, msg)
+#define LOG(level, msg) MOZ_LOG(GetGMPLog(), (level), msg)
 
 #ifdef __CLASS__
 #undef __CLASS__
@@ -254,6 +254,7 @@ GeckoMediaPluginServiceParent::Observe(nsISupports* aSubject,
         NS_DISPATCH_NORMAL);
     } else {
       MOZ_ASSERT(mPlugins.IsEmpty());
+      mWaitingForPluginsAsyncShutdown = false;
     }
 
     // Wait for plugins to do async shutdown...

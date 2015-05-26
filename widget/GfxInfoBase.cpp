@@ -311,6 +311,7 @@ BlacklistDevicesToDeviceFamily(nsIDOMHTMLCollection* aDevices)
 static int32_t
 BlacklistFeatureToGfxFeature(const nsAString& aFeature)
 {
+  MOZ_ASSERT(!aFeature.IsEmpty());
   if (aFeature.EqualsLiteral("DIRECT2D"))
     return nsIGfxInfo::FEATURE_DIRECT2D;
   else if (aFeature.EqualsLiteral("DIRECT3D_9_LAYERS"))
@@ -337,7 +338,13 @@ BlacklistFeatureToGfxFeature(const nsAString& aFeature)
     return nsIGfxInfo::FEATURE_STAGEFRIGHT;
   else if (aFeature.EqualsLiteral("WEBRTC_HW_ACCELERATION"))
     return nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION;
-  return 0;
+
+  // If we don't recognize the feature, it may be new, and something
+  // this version doesn't understand.  So, nothing to do.  This is
+  // different from feature not being specified at all, in which case
+  // this method should not get called and we should continue with the
+  // "all features" blocklisting.
+  return -1;
 }
 
 static int32_t
@@ -525,6 +532,11 @@ BlacklistEntryToDriverInfo(nsIDOMNode* aBlacklistEntry,
                                   getter_AddRefs(dataNode))) {
     BlacklistNodeToTextValue(dataNode, dataValue);
     aDriverInfo.mFeature = BlacklistFeatureToGfxFeature(dataValue);
+    if (aDriverInfo.mFeature < 0) {
+      // If we don't recognize the feature, we do not want to proceed.
+      gfxWarning() << "Unrecognized feature " << NS_ConvertUTF16toUTF8(dataValue).get();
+      return false;
+    }
   }
 
   // <featureStatus> BLOCKED_DRIVER_VERSION </featureStatus>
@@ -855,6 +867,11 @@ GfxInfoBase::GetFeatureStatusImpl(int32_t aFeature,
                                   const nsTArray<GfxDriverInfo>& aDriverInfo,
                                   OperatingSystem* aOS /* = nullptr */)
 {
+  if (aFeature <= 0) {
+    gfxWarning() << "Invalid feature <= 0";
+    return NS_OK;
+  }
+
   if (*aStatus != nsIGfxInfo::FEATURE_STATUS_UNKNOWN) {
     // Terminate now with the status determined by the derived type (OS-specific
     // code).

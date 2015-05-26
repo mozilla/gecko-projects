@@ -11,7 +11,6 @@ this.EXPORTED_SYMBOLS = [
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 const myScope = this;
 
-Cu.import("resource://gre/modules/AddonManager.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Log.jsm");
@@ -23,6 +22,7 @@ Cu.import("resource://gre/modules/ObjectUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ctypes",
                                   "resource://gre/modules/ctypes.jsm");
 #ifndef MOZ_WIDGET_GONK
+Cu.import("resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
 #endif
@@ -48,7 +48,7 @@ function getGlobal() {
   return gGlobalEnvironment;
 }
 
-const TelemetryEnvironment = {
+this.TelemetryEnvironment = {
   get currentEnvironment() {
     return getGlobal().currentEnvironment;
   },
@@ -154,6 +154,8 @@ const PREF_UPDATE_AUTODOWNLOAD = "app.update.auto";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const EXPERIMENTS_CHANGED_TOPIC = "experiments-changed";
+const SEARCH_ENGINE_MODIFIED_TOPIC = "browser-search-engine-modified";
+const SEARCH_SERVICE_TOPIC = "browser-search-service";
 
 /**
  * Turn a millisecond timestamp into a day timestamp.
@@ -651,33 +653,42 @@ function EnvironmentCache() {
   };
 
   this._updateSettings();
+  // Fill in the default search engine, if the search provider is already initialized.
+  this._updateSearchEngine();
 
   // Build the remaining asynchronous parts of the environment. Don't register change listeners
   // until the initial environment has been built.
 
+#ifdef MOZ_WIDGET_GONK
+  this._addonBuilder = {
+    watchForChanges: function() {}
+  }
+  let p = [];
+#else
   this._addonBuilder = new EnvironmentAddonBuilder(this);
 
   let p = [ this._addonBuilder.init() ];
+#endif
 #ifndef MOZ_WIDGET_ANDROID
   this._currentEnvironment.profile = {};
   p.push(this._updateProfile());
 #endif
 
+  let setup = () => {
+    this._initTask = null;
+    this._startWatchingPrefs();
+    this._addonBuilder.watchForChanges();
+    this._addObservers();
+    return this.currentEnvironment;
+  };
+
   this._initTask = Promise.all(p)
     .then(
-      () => {
-        this._initTask = null;
-        this._startWatchingPrefs();
-        this._addonBuilder.watchForChanges();
-        return this.currentEnvironment;
-      },
+      () => setup(),
       (err) => {
         // log errors but eat them for consumers
         this._log.error("EnvironmentCache - error while initializing", err);
-        this._initTask = null;
-        this._startWatchingPrefs();
-        this._addonBuilder.watchForChanges();
-        return this.currentEnvironment;
+        return setup();
       });
 }
 EnvironmentCache.prototype = {
@@ -799,6 +810,90 @@ EnvironmentCache.prototype = {
     }
   },
 
+  _addObservers: function () {
+    // Watch the search engine change and service topics.
+    Services.obs.addObserver(this, SEARCH_ENGINE_MODIFIED_TOPIC, false);
+    Services.obs.addObserver(this, SEARCH_SERVICE_TOPIC, false);
+  },
+
+  _removeObservers: function () {
+    // Remove the search engine change and service observers.
+    Services.obs.removeObserver(this, SEARCH_ENGINE_MODIFIED_TOPIC);
+    Services.obs.removeObserver(this, SEARCH_SERVICE_TOPIC);
+  },
+
+  observe: function (aSubject, aTopic, aData) {
+    this._log.trace("observe - aTopic: " + aTopic + ", aData: " + aData);
+    switch (aTopic) {
+      case SEARCH_ENGINE_MODIFIED_TOPIC:
+        if (aData != "engine-default" && aData != "engine-current") {
+          return;
+        }
+        // Record the new default search choice and send the change notification.
+        this._onSearchEngineChange();
+        break;
+      case SEARCH_SERVICE_TOPIC:
+        if (aData != "init-complete") {
+          return;
+        }
+        // Now that the search engine init is complete, record the default search choice.
+        this._updateSearchEngine();
+        break;
+    }
+  },
+
+  /**
+   * Get the default search engine.
+   * @return {String} Returns the search engine identifier, "NONE" if no default search
+   *         engine is defined or "UNDEFINED" if no engine identifier or name can be found.
+   */
+  _getDefaultSearchEngine: function () {
+    let engine;
+    try {
+      engine = Services.search.defaultEngine;
+    } catch (e) {}
+
+    let name;
+    if (!engine) {
+      name = "NONE";
+    } else if (engine.identifier) {
+      name = engine.identifier;
+    } else if (engine.name) {
+      name = "other-" + engine.name;
+    } else {
+      name = "UNDEFINED";
+    }
+
+    return name;
+  },
+
+  /**
+   * Update the default search engine value.
+   */
+  _updateSearchEngine: function () {
+    this._log.trace("_updateSearchEngine - isInitialized: " + Services.search.isInitialized);
+    if (!Services.search.isInitialized) {
+      return;
+    }
+
+    // Make sure we have a settings section.
+    this._currentEnvironment.settings = this._currentEnvironment.settings || {};
+    // Update the search engine entry in the current environment.
+    this._currentEnvironment.settings.defaultSearchEngine = this._getDefaultSearchEngine();
+  },
+
+  /**
+   * Update the default search engine value and trigger the environment change.
+   */
+  _onSearchEngineChange: function () {
+    this._log.trace("_onSearchEngineChange");
+
+    // Finally trigger the environment change notification.
+    let oldEnvironment = Cu.cloneInto(this._currentEnvironment, myScope);
+    this._updateSearchEngine();
+    this._onEnvironmentChange("search-engine-changed", oldEnvironment);
+  },
+
   /**
    * Get the build data in object form.
    * @return Object containing the build data.
@@ -832,6 +927,9 @@ EnvironmentCache.prototype = {
    * @returns null on error, true if we are the default browser, or false otherwise.
    */
   _isDefaultBrowser: function () {
+#ifdef MOZ_WIDGET_GONK
+    return true;
+#else
     if (!("@mozilla.org/browser/shell-service;1" in Cc)) {
       this._log.error("_isDefaultBrowser - Could not obtain shell service");
       return null;
@@ -857,6 +955,7 @@ EnvironmentCache.prototype = {
     }
 
     return null;
+#endif
   },
 
   /**

@@ -2642,7 +2642,8 @@ CanvasRenderingContext2D::Stroke(const CanvasPath& path)
   Redraw();
 }
 
-void CanvasRenderingContext2D::DrawFocusIfNeeded(mozilla::dom::Element& aElement)
+void CanvasRenderingContext2D::DrawFocusIfNeeded(mozilla::dom::Element& aElement,
+                                                 ErrorResult& aRv)
 {
   EnsureUserSpacePath();
 
@@ -2674,8 +2675,12 @@ void CanvasRenderingContext2D::DrawFocusIfNeeded(mozilla::dom::Element& aElement
 
     // set dashing for foreground
     FallibleTArray<mozilla::gfx::Float>& dash = CurrentState().dash;
-    dash.AppendElement(1);
-    dash.AppendElement(1);
+    for (uint32_t i = 0; i < 2; ++i) {
+      if (!dash.AppendElement(1)) {
+        aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+        return;
+      }
+    }
 
     // set the foreground focus color
     CurrentState().SetColorStyle(Style::STROKE, NS_RGBA(0,0,0, 255));
@@ -3947,7 +3952,8 @@ CanvasRenderingContext2D::SetMozDashOffset(double mozDashOffset)
 }
 
 void
-CanvasRenderingContext2D::SetLineDash(const Sequence<double>& aSegments)
+CanvasRenderingContext2D::SetLineDash(const Sequence<double>& aSegments,
+                                      ErrorResult& aRv)
 {
   FallibleTArray<mozilla::gfx::Float> dash;
 
@@ -3957,11 +3963,18 @@ CanvasRenderingContext2D::SetLineDash(const Sequence<double>& aSegments)
       // taken care of by WebIDL
       return;
     }
-    dash.AppendElement(aSegments[x]);
+
+    if (!dash.AppendElement(aSegments[x])) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
   }
   if (aSegments.Length() % 2) { // If the number of elements is odd, concatenate again
     for (uint32_t x = 0; x < aSegments.Length(); x++) {
-      dash.AppendElement(aSegments[x]);
+      if (!dash.AppendElement(aSegments[x])) {
+        aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+        return;
+      }
     }
   }
 
@@ -4079,14 +4092,16 @@ ExtractSubrect(SourceSurface* aSurface, mgfx::Rect* aSourceRect, DrawTarget* aTa
   roundedOutSourceRect.RoundOut();
   mgfx::IntRect roundedOutSourceRectInt;
   if (!roundedOutSourceRect.ToIntRect(&roundedOutSourceRectInt)) {
-    return aSurface;
+    RefPtr<SourceSurface> surface(aSurface);
+    return surface.forget();
   }
 
   RefPtr<DrawTarget> subrectDT =
     aTargetDT->CreateSimilarDrawTarget(roundedOutSourceRectInt.Size(), SurfaceFormat::B8G8R8A8);
 
   if (!subrectDT) {
-    return aSurface;
+    RefPtr<SourceSurface> surface(aSurface);
+    return surface.forget();
   }
 
   *aSourceRect -= roundedOutSourceRect.TopLeft();
@@ -5634,15 +5649,18 @@ CanvasPath::GetPath(const CanvasWindingRule& winding, const DrawTarget* aTarget)
   if (mPath &&
       (mPath->GetBackendType() == aTarget->GetBackendType()) &&
       (mPath->GetFillRule() == fillRule)) {
-    return mPath;
+    RefPtr<gfx::Path> path(mPath);
+    return path.forget();
   }
 
   if (!mPath) {
     // if there is no path, there must be a pathbuilder
     MOZ_ASSERT(mPathBuilder);
     mPath = mPathBuilder->Finish();
-    if (!mPath)
-      return mPath;
+    if (!mPath) {
+      RefPtr<gfx::Path> path(mPath);
+      return path.forget();
+    }
 
     mPathBuilder = nullptr;
   }
@@ -5657,7 +5675,8 @@ CanvasPath::GetPath(const CanvasWindingRule& winding, const DrawTarget* aTarget)
     mPath = tmpPathBuilder->Finish();
   }
 
-  return mPath;
+  RefPtr<gfx::Path> path(mPath);
+  return path.forget();
 }
 
 void

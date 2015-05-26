@@ -364,9 +364,12 @@ TextureClient::CreateForDrawing(ISurfaceAllocator* aAllocator,
   if (!texture && aFormat == SurfaceFormat::B8G8R8X8 &&
       aAllocator->IsSameProcess() &&
       aMoz2DBackend == gfx::BackendType::CAIRO) {
-    texture = new DIBTextureClient(aAllocator, aFormat, aTextureFlags);
+    if (aAllocator->IsSameProcess()) {
+      texture = new TextureClientMemoryDIB(aAllocator, aFormat, aTextureFlags);
+    } else {
+      texture = new TextureClientShmemDIB(aAllocator, aFormat, aTextureFlags);
+    }
   }
-
 #endif
 
 #ifdef MOZ_X11
@@ -405,7 +408,7 @@ TextureClient::CreateForDrawing(ISurfaceAllocator* aAllocator,
   MOZ_ASSERT(!texture || texture->CanExposeDrawTarget(), "texture cannot expose a DrawTarget?");
 
   if (texture && texture->AllocateForSurface(aSize, aAllocFlags)) {
-    return texture;
+    return texture.forget();
   }
 
   if (aAllocFlags & ALLOC_DISALLOW_BUFFERTEXTURECLIENT) {
@@ -423,7 +426,7 @@ TextureClient::CreateForDrawing(ISurfaceAllocator* aAllocator,
     return nullptr;
   }
 
-  return texture;
+  return texture.forget();
 }
 
 // static
@@ -443,7 +446,7 @@ TextureClient::CreateForRawBufferAccess(ISurfaceAllocator* aAllocator,
       return nullptr;
     }
   }
-  return texture;
+  return texture.forget();
 }
 
 // static
@@ -469,7 +472,7 @@ TextureClient::CreateForYCbCr(ISurfaceAllocator* aAllocator,
     return nullptr;
   }
 
-  return texture;
+  return texture.forget();
 }
 
 // static
@@ -494,7 +497,7 @@ TextureClient::CreateWithBufferSize(ISurfaceAllocator* aAllocator,
     return nullptr;
   }
 
-  return texture;
+  return texture.forget();
 }
 
 TextureClient::TextureClient(ISurfaceAllocator* aAllocator, TextureFlags aFlags)
@@ -759,8 +762,7 @@ BufferTextureClient::CreateSimilar(TextureFlags aFlags,
     mAllocator, mFormat, mSize, mBackend, mFlags | aFlags, aAllocFlags
   );
 
-  RefPtr<TextureClient> newTex = newBufferTex.get();
-  return newTex;
+  return newBufferTex.forget();
 }
 
 bool
@@ -947,8 +949,7 @@ SyncObject::CreateSyncObject(SyncHandle aHandle)
   }
 
 #ifdef XP_WIN
-  RefPtr<SyncObject> syncObject = new SyncObjectD3D11(aHandle);
-  return syncObject;
+  return MakeAndAddRef<SyncObjectD3D11>(aHandle);
 #else
   MOZ_ASSERT_UNREACHABLE();
   return nullptr;

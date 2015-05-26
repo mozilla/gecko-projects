@@ -53,7 +53,7 @@ static const int64_t CAN_PLAY_THROUGH_MARGIN = 1;
 
 PRLogModuleInfo* gMediaDecoderLog;
 #define DECODER_LOG(x, ...) \
-  PR_LOG(gMediaDecoderLog, PR_LOG_DEBUG, ("Decoder=%p " x, this, ##__VA_ARGS__))
+  MOZ_LOG(gMediaDecoderLog, PR_LOG_DEBUG, ("Decoder=%p " x, this, ##__VA_ARGS__))
 
 static const char* const gPlayStateStr[] = {
   "START",
@@ -209,7 +209,7 @@ void MediaDecoder::UpdateDormantState(bool aDormantTimeout, bool aActivity)
         mDecoderStateMachine,
         &MediaDecoderStateMachine::SetDormant,
         true);
-    mDecoderStateMachine->TaskQueue()->Dispatch(event);
+    mDecoderStateMachine->TaskQueue()->Dispatch(event.forget());
 
     if (IsEnded()) {
       mWasEndedWhenEnteredDormant = true;
@@ -225,7 +225,7 @@ void MediaDecoder::UpdateDormantState(bool aDormantTimeout, bool aActivity)
         mDecoderStateMachine,
         &MediaDecoderStateMachine::SetDormant,
         false);
-    mDecoderStateMachine->TaskQueue()->Dispatch(event);
+    mDecoderStateMachine->TaskQueue()->Dispatch(event.forget());
   }
 }
 
@@ -384,7 +384,7 @@ void MediaDecoder::RecreateDecodedStream(int64_t aStartTimeUSecs,
   }
   DestroyDecodedStream();
 
-  mDecodedStream.RecreateData(this, aStartTimeUSecs, aGraph->CreateSourceStream(nullptr));
+  mDecodedStream.RecreateData(aStartTimeUSecs, aGraph->CreateSourceStream(nullptr));
 
   // Note that the delay between removing ports in DestroyDecodedStream
   // and adding new ones won't cause a glitch since all graph operations
@@ -419,7 +419,7 @@ void MediaDecoder::AddOutputStream(ProcessedMediaStream* aStream,
       RecreateDecodedStream(mLogicalPosition, aStream->Graph());
     }
     OutputStreamData* os = OutputStreams().AppendElement();
-    os->Init(this, aStream);
+    os->Init(&mDecodedStream, aStream);
     ConnectDecodedStreamToOutputStream(os);
     if (aFinishWhenEnded) {
       // Ensure that aStream finishes the moment mDecodedStream does.
@@ -483,6 +483,7 @@ MediaDecoder::MediaDecoder() :
   mMediaSeekable(true),
   mSameOriginMedia(false),
   mReentrantMonitor("media.decoder"),
+  mDecodedStream(mReentrantMonitor),
   mPlayState(AbstractThread::MainThread(), PLAY_STATE_LOADING,
              "MediaDecoder::mPlayState (Canonical)"),
   mNextState(AbstractThread::MainThread(), PLAY_STATE_PAUSED,

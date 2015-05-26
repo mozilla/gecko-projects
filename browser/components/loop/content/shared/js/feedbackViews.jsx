@@ -1,11 +1,7 @@
-/** @jsx React.DOM */
-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* jshint newcap:false */
-/* global loop:true, React */
 var loop = loop || {};
 loop.shared = loop.shared || {};
 loop.shared.views = loop.shared.views || {};
@@ -173,6 +169,7 @@ loop.shared.views.FeedbackView = (function(l10n) {
    */
   var FeedbackReceived = React.createClass({
     propTypes: {
+      noCloseText: React.PropTypes.bool,
       onAfterFeedbackReceived: React.PropTypes.func
     },
 
@@ -199,14 +196,24 @@ loop.shared.views.FeedbackView = (function(l10n) {
       }
     },
 
+    _renderCloseText: function() {
+      if (this.props.noCloseText) {
+        return null;
+      }
+
+      return (
+        <p className="info thank-you">{
+          l10n.get("feedback_window_will_close_in2", {
+            countdown: this.state.countdown,
+            num: this.state.countdown
+          })}</p>
+      );
+    },
+
     render: function() {
       return (
         <FeedbackLayout title={l10n.get("feedback_thank_you_heading")}>
-          <p className="info thank-you">{
-            l10n.get("feedback_window_will_close_in2", {
-              countdown: this.state.countdown,
-              num: this.state.countdown
-            })}</p>
+          {this._renderCloseText()}
         </FeedbackLayout>
       );
     }
@@ -224,7 +231,8 @@ loop.shared.views.FeedbackView = (function(l10n) {
     propTypes: {
       onAfterFeedbackReceived: React.PropTypes.func,
       // Used by the UI showcase.
-      feedbackState: React.PropTypes.string
+      feedbackState: React.PropTypes.string,
+      noCloseText: React.PropTypes.bool
     },
 
     getInitialState: function() {
@@ -295,6 +303,7 @@ loop.shared.views.FeedbackView = (function(l10n) {
           }
           return (
             <FeedbackReceived
+              noCloseText={this.props.noCloseText}
               onAfterFeedbackReceived={this.props.onAfterFeedbackReceived} />
           );
         }

@@ -2,20 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/*global loop, sinon, React */
-/* jshint newcap:false */
-
-var expect = chai.expect;
-var l10n = navigator.mozL10n || document.mozL10n;
-var TestUtils = React.addons.TestUtils;
-var sharedActions = loop.shared.actions;
-var sharedViews = loop.shared.views;
-
-var FEEDBACK_STATES = loop.store.FEEDBACK_STATES;
-
 describe("loop.shared.views.FeedbackView", function() {
   "use strict";
 
+  var expect = chai.expect;
+  var l10n = navigator.mozL10n || document.mozL10n;
+  var TestUtils = React.addons.TestUtils;
+  var sharedActions = loop.shared.actions;
+  var sharedViews = loop.shared.views;
+
+  var FEEDBACK_STATES = loop.store.FEEDBACK_STATES;
   var sandbox, comp, dispatcher, fakeFeedbackClient, feedbackStore;
 
   beforeEach(function() {
@@ -80,6 +76,15 @@ describe("loop.shared.views.FeedbackView", function() {
       expect(comp.getDOMNode().querySelectorAll(".thank-you")).not.eql(null);
       expect(comp.getDOMNode().querySelector("button.fx-embedded-btn-back"))
         .eql(null);
+    });
+
+    it("should not display the countdown text if noCloseText is true", function() {
+      comp = TestUtils.renderIntoDocument(
+        React.createElement(sharedViews.FeedbackView, {
+          noCloseText: true
+        }));
+
+      expect(comp.getDOMNode().querySelector(".info.thank-you")).eql(null);
     });
   });
 

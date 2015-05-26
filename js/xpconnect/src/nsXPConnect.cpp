@@ -245,7 +245,7 @@ xpc::ErrorReport::LogToConsole()
     if (!gJSDiagnostics)
         gJSDiagnostics = PR_NewLogModule("JSDiagnostics");
     if (gJSDiagnostics) {
-        PR_LOG(gJSDiagnostics,
+        MOZ_LOG(gJSDiagnostics,
                 JSREPORT_IS_WARNING(mFlags) ? PR_LOG_WARNING : PR_LOG_ERROR,
                 ("file %s, line %u\n%s", NS_LossyConvertUTF16toASCII(mFileName).get(),
                  mLineNumber, NS_LossyConvertUTF16toASCII(mErrorMsg).get()));
@@ -372,7 +372,7 @@ CreateGlobalObject(JSContext* cx, const JSClass* clasp, nsIPrincipal* principal,
     if (!((const js::Class*)clasp)->ext.isWrappedNative)
     {
         VerifyTraceProtoAndIfaceCacheCalledTracer trc(JS_GetRuntime(cx));
-        JS_TraceChildren(&trc, global, JSTRACE_OBJECT);
+        JS_TraceChildren(&trc, global, JS::TraceKind::Object);
         MOZ_ASSERT(trc.ok, "Trace hook on global needs to call TraceXPCGlobal for XPConnect compartments.");
     }
 #endif

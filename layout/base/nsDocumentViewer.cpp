@@ -142,7 +142,7 @@ GetPrintingLog()
     sLog = PR_NewLogModule("printing");
   return sLog;
 }
-#define PR_PL(_p1)  PR_LOG(GetPrintingLog(), PR_LOG_DEBUG, _p1);
+#define PR_PL(_p1)  MOZ_LOG(GetPrintingLog(), PR_LOG_DEBUG, _p1);
 #endif // NS_PRINTING
 
 #define PRT_YESNO(_p) ((_p)?"YES":"NO")
@@ -2643,8 +2643,7 @@ NS_IMETHODIMP nsDocumentViewer::CopyLinkLocation()
   NS_ENSURE_SUCCESS(rv, rv);
 
   // copy the href onto the clipboard
-  nsCOMPtr<nsIDOMDocument> doc = do_QueryInterface(mDocument);
-  return clipboard->CopyString(locationText, doc);
+  return clipboard->CopyString(locationText);
 }
 
 NS_IMETHODIMP nsDocumentViewer::CopyImage(int32_t aCopyFlags)

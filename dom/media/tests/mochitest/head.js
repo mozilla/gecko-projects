@@ -135,7 +135,6 @@ function setupEnvironment() {
       ['media.peerconnection.enabled', true],
       ['media.peerconnection.identity.enabled', true],
       ['media.peerconnection.identity.timeout', 12000],
-      ['media.peerconnection.default_iceservers', '[]'],
       ['media.navigator.permission.disabled', true],
       ['media.getusermedia.screensharing.enabled', true],
       ['media.getusermedia.screensharing.allowed_domains', "mochi.test"]
@@ -381,8 +380,8 @@ CommandChain.prototype = {
   /**
    * Inserts the new commands after the specified command.
    */
-  insertAfter: function(functionOrName, commands) {
-    this._insertHelper(functionOrName, commands, 1);
+  insertAfter: function(functionOrName, commands, all, start) {
+    this._insertHelper(functionOrName, commands, 1, all, start);
   },
 
   /**
@@ -432,8 +431,8 @@ CommandChain.prototype = {
   /**
    * Removes all commands after the specified one, returns what was removed.
    */
-  removeAfter: function(functionOrName) {
-    var index = this.indexOf(functionOrName);
+  removeAfter: function(functionOrName, start) {
+    var index = this.indexOf(functionOrName, start);
     if (index >= 0) {
       return this.commands.splice(index + 1);
     }
@@ -462,8 +461,8 @@ CommandChain.prototype = {
   /**
    * Replaces all commands after the specified one, returns what was removed.
    */
-  replaceAfter: function(functionOrName, commands) {
-    var oldCommands = this.removeAfter(functionOrName);
+  replaceAfter: function(functionOrName, commands, start) {
+    var oldCommands = this.removeAfter(functionOrName, start);
     this.append(commands);
     return oldCommands;
   },

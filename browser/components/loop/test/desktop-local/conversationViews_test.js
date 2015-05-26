@@ -1,11 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-var expect = chai.expect;
-
 describe("loop.conversationViews", function () {
   "use strict";
 
+  var expect = chai.expect;
+  var TestUtils = React.addons.TestUtils;
+  var sharedActions = loop.shared.actions;
   var sharedUtils = loop.shared.utils;
   var sharedView = loop.shared.views;
   var sandbox, view, dispatcher, contact, fakeAudioXHR;
@@ -216,7 +217,7 @@ describe("loop.conversationViews", function () {
           enableCancelButton: false
         });
 
-        var cancelBtn = view.getDOMNode().querySelector('.btn-cancel');
+        var cancelBtn = view.getDOMNode().querySelector(".btn-cancel");
 
         expect(cancelBtn.classList.contains("disabled")).eql(true);
       });
@@ -230,7 +231,7 @@ describe("loop.conversationViews", function () {
           enableCancelButton: true
         });
 
-        var cancelBtn = view.getDOMNode().querySelector('.btn-cancel');
+        var cancelBtn = view.getDOMNode().querySelector(".btn-cancel");
 
         expect(cancelBtn.classList.contains("disabled")).eql(false);
       });
@@ -243,7 +244,7 @@ describe("loop.conversationViews", function () {
           dispatcher: dispatcher
         });
 
-        var cancelBtn = view.getDOMNode().querySelector('.btn-cancel');
+        var cancelBtn = view.getDOMNode().querySelector(".btn-cancel");
 
         React.addons.TestUtils.Simulate.click(cancelBtn);
 
@@ -289,7 +290,7 @@ describe("loop.conversationViews", function () {
       function() {
         view = mountTestComponent({contact: contact});
 
-        var retryBtn = view.getDOMNode().querySelector('.btn-retry');
+        var retryBtn = view.getDOMNode().querySelector(".btn-retry");
 
         React.addons.TestUtils.Simulate.click(retryBtn);
 
@@ -302,7 +303,7 @@ describe("loop.conversationViews", function () {
       function() {
         view = mountTestComponent({contact: contact});
 
-        var cancelBtn = view.getDOMNode().querySelector('.btn-cancel');
+        var cancelBtn = view.getDOMNode().querySelector(".btn-cancel");
 
         React.addons.TestUtils.Simulate.click(cancelBtn);
 
@@ -315,7 +316,7 @@ describe("loop.conversationViews", function () {
       function() {
         view = mountTestComponent({contact: contact});
 
-        var emailLinkBtn = view.getDOMNode().querySelector('.btn-email');
+        var emailLinkBtn = view.getDOMNode().querySelector(".btn-email");
 
         React.addons.TestUtils.Simulate.click(emailLinkBtn);
 
@@ -335,7 +336,7 @@ describe("loop.conversationViews", function () {
           name: ["Mr Fake ContactName"]
         }});
 
-        var emailLinkBtn = view.getDOMNode().querySelector('.btn-email');
+        var emailLinkBtn = view.getDOMNode().querySelector(".btn-email");
 
         React.addons.TestUtils.Simulate.click(emailLinkBtn);
 
@@ -347,7 +348,7 @@ describe("loop.conversationViews", function () {
     it("should disable the email link button once the action is dispatched",
       function() {
         view = mountTestComponent({contact: contact});
-        var emailLinkBtn = view.getDOMNode().querySelector('.btn-email');
+        var emailLinkBtn = view.getDOMNode().querySelector(".btn-email");
         React.addons.TestUtils.Simulate.click(emailLinkBtn);
 
         expect(view.getDOMNode().querySelector(".btn-email").disabled).eql(true);
@@ -498,7 +499,7 @@ describe("loop.conversationViews", function () {
           dispatcher: dispatcher
         });
 
-        var hangupBtn = view.getDOMNode().querySelector('.btn-hangup');
+        var hangupBtn = view.getDOMNode().querySelector(".btn-hangup");
 
         React.addons.TestUtils.Simulate.click(hangupBtn);
 
@@ -513,7 +514,7 @@ describe("loop.conversationViews", function () {
           audio: {enabled: false}
         });
 
-        var muteBtn = view.getDOMNode().querySelector('.btn-mute-audio');
+        var muteBtn = view.getDOMNode().querySelector(".btn-mute-audio");
 
         React.addons.TestUtils.Simulate.click(muteBtn);
 
@@ -532,7 +533,7 @@ describe("loop.conversationViews", function () {
           video: {enabled: true}
         });
 
-        var muteBtn = view.getDOMNode().querySelector('.btn-mute-video');
+        var muteBtn = view.getDOMNode().querySelector(".btn-mute-video");
 
         React.addons.TestUtils.Simulate.click(muteBtn);
 
@@ -550,7 +551,7 @@ describe("loop.conversationViews", function () {
         video: {enabled: true}
       });
 
-      var muteBtn = view.getDOMNode().querySelector('.btn-mute-video');
+      var muteBtn = view.getDOMNode().querySelector(".btn-mute-video");
 
       expect(muteBtn.classList.contains("muted")).eql(false);
     });
@@ -561,7 +562,7 @@ describe("loop.conversationViews", function () {
         audio: {enabled: false}
       });
 
-      var muteBtn = view.getDOMNode().querySelector('.btn-mute-audio');
+      var muteBtn = view.getDOMNode().querySelector(".btn-mute-audio");
 
       expect(muteBtn.classList.contains("muted")).eql(true);
     });
@@ -768,7 +769,7 @@ describe("loop.conversationViews", function () {
         });
 
         var primaryBtn = view.getDOMNode()
-                                  .querySelector('.fx-embedded-btn-icon-video');
+                                  .querySelector(".fx-embedded-btn-icon-video");
 
         expect(primaryBtn).not.to.eql(null);
       });
@@ -780,7 +781,7 @@ describe("loop.conversationViews", function () {
         });
 
         var primaryBtn = view.getDOMNode()
-                                  .querySelector('.fx-embedded-btn-icon-audio');
+                                  .querySelector(".fx-embedded-btn-icon-audio");
 
         expect(primaryBtn).not.to.eql(null);
       });
@@ -792,7 +793,7 @@ describe("loop.conversationViews", function () {
         });
 
         var primaryBtn = view.getDOMNode()
-                                  .querySelector('.fx-embedded-btn-icon-video');
+                                  .querySelector(".fx-embedded-btn-icon-video");
 
         React.addons.TestUtils.Simulate.click(primaryBtn);
 
@@ -810,7 +811,7 @@ describe("loop.conversationViews", function () {
         });
 
         var primaryBtn = view.getDOMNode()
-                                  .querySelector('.fx-embedded-btn-icon-audio');
+                                  .querySelector(".fx-embedded-btn-icon-audio");
 
         React.addons.TestUtils.Simulate.click(primaryBtn);
 
@@ -829,7 +830,7 @@ describe("loop.conversationViews", function () {
           });
 
           var secondaryBtn = view.getDOMNode()
-          .querySelector('.fx-embedded-btn-video-small');
+          .querySelector(".fx-embedded-btn-video-small");
 
           React.addons.TestUtils.Simulate.click(secondaryBtn);
 
@@ -848,7 +849,7 @@ describe("loop.conversationViews", function () {
           });
 
           var secondaryBtn = view.getDOMNode()
-          .querySelector('.fx-embedded-btn-audio-small');
+          .querySelector(".fx-embedded-btn-audio-small");
 
           React.addons.TestUtils.Simulate.click(secondaryBtn);
 

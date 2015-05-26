@@ -58,7 +58,7 @@ using namespace mozilla::gfx;
 extern PRLogModuleInfo* gMediaDecoderLog;
 extern PRLogModuleInfo* gMediaSampleLog;
 #define LOG(m, l, x, ...) \
-  PR_LOG(m, l, ("Decoder=%p " x, mDecoder.get(), ##__VA_ARGS__))
+  MOZ_LOG(m, l, ("Decoder=%p " x, mDecoder.get(), ##__VA_ARGS__))
 #define DECODER_LOG(x, ...) \
   LOG(gMediaDecoderLog, PR_LOG_DEBUG, x, ##__VA_ARGS__)
 #define VERBOSE_LOG(x, ...) \
@@ -1713,8 +1713,11 @@ void MediaDecoderStateMachine::NotifyDataArrived(const char* aBuffer,
   //
   // Make sure to only do this if we have a start time, otherwise the reader
   // doesn't know how to compute GetBuffered.
+  if (!mDecoder->IsInfinite() || mStartTime == -1) {
+    return;
+  }
   media::TimeIntervals buffered{mDecoder->GetBuffered()};
-  if (mDecoder->IsInfinite() && (mStartTime != -1) && !buffered.IsInvalid()) {
+  if (!buffered.IsInvalid()) {
     bool exists;
     media::TimeUnit end{buffered.GetEnd(&exists)};
     if (exists) {

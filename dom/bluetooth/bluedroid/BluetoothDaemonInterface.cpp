@@ -1694,24 +1694,18 @@ public:
   void OnConnectError() override;
   void OnDisconnect() override;
 
-  // ConnectionOrientedSocket
-  //
-
-  ConnectionOrientedSocketIO* GetIO() override;
-
 private:
   BluetoothDaemonInterface* mInterface;
   BluetoothDaemonInterface::Channel mChannel;
-  BluetoothDaemonPDUConsumer* mConsumer;
 };
 
 BluetoothDaemonChannel::BluetoothDaemonChannel(
   BluetoothDaemonInterface* aInterface,
   BluetoothDaemonInterface::Channel aChannel,
   BluetoothDaemonPDUConsumer* aConsumer)
-  : mInterface(aInterface)
+  : BluetoothDaemonConnection(aConsumer)
+  , mInterface(aInterface)
   , mChannel(aChannel)
-  , mConsumer(aConsumer)
 { }
 
 void
@@ -1739,12 +1733,6 @@ BluetoothDaemonChannel::OnDisconnect()
   MOZ_ASSERT(mInterface);
 
   mInterface->OnDisconnect(mChannel);
-}
-
-ConnectionOrientedSocketIO*
-BluetoothDaemonChannel::GetIO()
-{
-  return PrepareAccept(mConsumer);
 }
 
 //

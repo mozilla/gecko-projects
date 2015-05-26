@@ -36,7 +36,7 @@ using namespace mozilla::unicode;
 
 #define PRINTING_FC_PROPERTY "gfx.printing"
 
-#define LOG_FONTLIST(args) PR_LOG(gfxPlatform::GetLog(eGfxLog_fontlist), \
+#define LOG_FONTLIST(args) MOZ_LOG(gfxPlatform::GetLog(eGfxLog_fontlist), \
                                PR_LOG_DEBUG, args)
 #define LOG_FONTLIST_ENABLED() PR_LOG_TEST( \
                                    gfxPlatform::GetLog(eGfxLog_fontlist), \
@@ -489,7 +489,7 @@ PrepareFontOptions(FcPattern* aPattern,
 {
     NS_ASSERTION(aFontOptions, "null font options passed to PrepareFontOptions");
 
-    // xxx - taken from the gfxPangoFonts code, needs to be reviewed
+    // xxx - taken from the gfxFontconfigFonts code, needs to be reviewed
 
     FcBool printing;
     if (FcPatternGetBool(aPattern, PRINTING_FC_PROPERTY, 0, &printing) !=
@@ -1142,7 +1142,7 @@ gfxFcPlatformFontList::GetFontList(nsIAtom *aLangGroup,
         NS_NOTREACHED("unexpected CSS generic font family");
 
     // The first in the list becomes the default in
-    // gFontsDialog.readFontSelection() if the preference-selected font is not
+    // FontBuilder.readFontSelection() if the preference-selected font is not
     // available, so put system configured defaults first.
     if (monospace)
         aListOfFonts.InsertElementAt(0, NS_LITERAL_STRING("monospace"));

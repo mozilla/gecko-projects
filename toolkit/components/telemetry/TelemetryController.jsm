@@ -24,6 +24,8 @@ Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 Cu.import("resource://gre/modules/TelemetryUtils.jsm", this);
 
+const Utils = TelemetryUtils;
+
 const LOGGER_NAME = "Toolkit.Telemetry";
 const LOGGER_PREFIX = "TelemetryController::";
 
@@ -52,12 +54,11 @@ const TELEMETRY_TEST_DELAY = 100;
 // Timeout after which we consider a ping submission failed.
 const PING_SUBMIT_TIMEOUT_MS = 2 * 60 * 1000;
 
-// We treat pings before midnight as happening "at midnight" with this tolerance.
-const MIDNIGHT_TOLERANCE_MS = 15 * 60 * 1000;
 // For midnight fuzzing we want to affect pings around midnight with this tolerance.
 const MIDNIGHT_TOLERANCE_FUZZ_MS = 5 * 60 * 1000;
 // We try to spread "midnight" pings out over this interval.
 const MIDNIGHT_FUZZING_INTERVAL_MS = 60 * 60 * 1000;
+// We delay sending "midnight" pings on this client by this interval.
 const MIDNIGHT_FUZZING_DELAY_MS = Math.random() * MIDNIGHT_FUZZING_INTERVAL_MS;
 
 // Ping types.
@@ -232,27 +233,6 @@ this.TelemetryController = Object.freeze({
    */
   getCurrentPingData: function(aSubsession = false) {
     return Impl.getCurrentPingData(aSubsession);
-  },
-
-  /**
-   * Add the ping to the pending ping list and save all pending pings.
-   *
-   * @param {String} aType The type of the ping.
-   * @param {Object} aPayload The actual data payload for the ping.
-   * @param {Object} [aOptions] Options object.
-   * @param {Boolean} [aOptions.addClientId=false] true if the ping should contain the client
-   *                  id, false otherwise.
-   * @param {Boolean} [aOptions.addEnvironment=false] true if the ping should contain the
-   *                  environment data.
-   * @param {Object}  [aOptions.overrideEnvironment=null] set to override the environment data.
-   * @returns {Promise} A promise that resolves when the pings are saved.
-   */
-  savePendingPings: function(aType, aPayload, aOptions = {}) {
-    let options = aOptions;
-    options.addClientId = aOptions.addClientId || false;
-    options.addEnvironment = aOptions.addEnvironment || false;
-
-    return Impl.savePendingPings(aType, aPayload, options);
   },
 
   /**
@@ -532,7 +512,16 @@ let Impl = {
    * @return Number The next time (ms from UNIX epoch) when we can send pings.
    */
   _getNextPingSendTime: function(now) {
-    const midnight = TelemetryUtils.getNearestMidnight(now, MIDNIGHT_FUZZING_INTERVAL_MS);
+    // 1. First we check if the time is between 11pm and 1am. If it's not, we send
+    // immediately.
+    // 2. If we confirmed the time is indeed between 11pm and 1am in step 1, we
+    // then check if the time is also 11:55pm or later. If it's not, we send
+    // immediately.
+    // 3. Finally, if the time is between 11:55pm and 1am, we disallow sending
+    // before (midnight + fuzzing delay), which is a random time between 12am-1am
+    // (decided at startup).
+
+    const midnight = Utils.getNearestMidnight(now, MIDNIGHT_FUZZING_INTERVAL_MS);
 
     // Don't delay ping if we are not close to midnight.
     if (!midnight) {
@@ -647,28 +636,6 @@ let Impl = {
     let promise = Promise.all(p);
     this._trackPendingPingTask(promise);
     return promise;
-  },
-
-  /**
-   * Saves all the pending pings, plus the passed one, to disk.
-   *
-   * @param {String} aType The type of the ping.
-   * @param {Object} aPayload The actual data payload for the ping.
-   * @param {Object} aOptions Options object.
-   * @param {Boolean} aOptions.addClientId true if the ping should contain the client id,
-   *                  false otherwise.
-   * @param {Boolean} aOptions.addEnvironment true if the ping should contain the
-   *                  environment data.
-   * @param {Object}  [aOptions.overrideEnvironment=null] set to override the environment data.
-   *
-   * @returns {Promise} A promise that resolves when all the pings are saved to disk.
-   */
-  savePendingPings: function savePendingPings(aType, aPayload, aOptions) {
-    this._log.trace("savePendingPings - Type " + aType + ", Server " + this._server +
-                    ", aOptions " + JSON.stringify(aOptions));
-
-    let pingData = this.assemblePing(aType, aPayload, aOptions);
-    return TelemetryStorage.savePendingPings(pingData);
   },
 
   /**
@@ -1173,12 +1140,23 @@ let Impl = {
    * Check if pings can be sent to the server. If FHR is not allowed to upload,
    * pings are not sent to the server (Telemetry is a sub-feature of FHR).
    * If unified telemetry is off, don't send pings if Telemetry is disabled.
+   *
    * @return {Boolean} True if pings can be send to the servers, false otherwise.
    */
   _canSend: function() {
-    return (Telemetry.isOfficialTelemetry || this._testMode) &&
-           Preferences.get(PREF_FHR_UPLOAD_ENABLED, false) &&
-           (IS_UNIFIED_TELEMETRY || Preferences.get(PREF_ENABLED));
+    // We only send pings from official builds, but allow overriding this for tests.
+    if (!Telemetry.isOfficialTelemetry && !this._testMode) {
+      return false;
+    }
+
+    // With unified Telemetry, the FHR upload setting controls whether we can send pings.
+    // The Telemetry pref enables sending extended data sets instead.
+    if (IS_UNIFIED_TELEMETRY) {
+      return Preferences.get(PREF_FHR_UPLOAD_ENABLED, false);
+    }
+
+    // Without unified Telemetry, the Telemetry enabled pref controls ping sending.
+    return Preferences.get(PREF_ENABLED, false);
   },
 
   /**

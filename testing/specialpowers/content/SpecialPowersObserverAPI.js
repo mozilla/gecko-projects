@@ -376,32 +376,32 @@ SpecialPowersObserverAPI.prototype = {
               return;
             }
           case "inject-app":
-	    {
+            {
               let aAppId = aMessage.json.appId;
-	      let aApp   = aMessage.json.app;
+              let aApp   = aMessage.json.app;
 
               let keys = Object.keys(Webapps.DOMApplicationRegistry.webapps);
-	      let exists = keys.indexOf(aAppId) !== -1;
-	      if (exists) {
+              let exists = keys.indexOf(aAppId) !== -1;
+              if (exists) {
                 return false;
-	      }
+              }
 
               Webapps.DOMApplicationRegistry.webapps[aAppId] = aApp;
-	      return true;
-	    }
-	  case "reject-app":
-	    {
+              return true;
+            }
+          case "reject-app":
+            {
               let aAppId = aMessage.json.appId;
 
               let keys = Object.keys(Webapps.DOMApplicationRegistry.webapps);
-	      let exists = keys.indexOf(aAppId) !== -1;
-	      if (!exists) {
+              let exists = keys.indexOf(aAppId) !== -1;
+              if (!exists) {
                 return false;
-	      }
+              }
 
               delete Webapps.DOMApplicationRegistry.webapps[aAppId];
-	      return true;
-	    }
+              return true;
+            }
           default:
             throw new SpecialPowersError("Invalid operation for SPWebAppsService");
         }
@@ -409,11 +409,15 @@ SpecialPowersObserverAPI.prototype = {
       }
 
       case "SPObserverService": {
+        let topic = aMessage.json.observerTopic;
         switch (aMessage.json.op) {
           case "notify":
-            let topic = aMessage.json.observerTopic;
             let data = aMessage.json.observerData
             Services.obs.notifyObservers(null, topic, data);
+            break;
+          case "add":
+            this._registerObservers._self = this;
+            this._registerObservers._add(topic);
             break;
           default:
             throw new SpecialPowersError("Invalid operation for SPObserverervice");
