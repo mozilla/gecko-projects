@@ -432,6 +432,7 @@ CompositorOGL::BindAndDrawQuadWithTextureRect(ShaderProgramOGL *aProg,
                                             aTexCoordRect,
                                             &layerRects,
                                             &textureRects);
+
   BindAndDrawQuads(aProg, rects, layerRects, textureRects);
 }
 
@@ -935,6 +936,7 @@ CompositorOGL::DrawQuad(const Rect& aRect,
     DrawVRDistortion(aRect, aClipRect, aEffectChain, aOpacity, aTransform);
     return;
   }
+  LayerScope::DrawBegin();
 
   Rect clipRect = aClipRect;
   // aClipRect is in destination coordinate space (after all
@@ -949,9 +951,6 @@ CompositorOGL::DrawQuad(const Rect& aRect,
 
   gl()->fScissor(intClipRect.x, FlipY(intClipRect.y + intClipRect.height),
                  intClipRect.width, intClipRect.height);
-
-  LayerScope::SendEffectChain(mGLContext, aEffectChain,
-                              aRect.width, aRect.height);
 
   MaskType maskType;
   EffectMask* effectMask;
@@ -1025,7 +1024,7 @@ CompositorOGL::DrawQuad(const Rect& aRect,
   ActivateProgram(program);
   program->SetProjectionMatrix(mProjMatrix);
   program->SetLayerTransform(aTransform);
-
+  LayerScope::SetLayerTransform(aTransform);
   if (colorMatrix) {
       EffectColorMatrix* effectColorMatrix =
         static_cast<EffectColorMatrix*>(aEffectChain.mSecondaryEffects[EffectTypes::COLOR_MATRIX].get());
@@ -1034,6 +1033,8 @@ CompositorOGL::DrawQuad(const Rect& aRect,
 
   IntPoint offset = mCurrentRenderTarget->GetOrigin();
   program->SetRenderOffset(offset.x, offset.y);
+  LayerScope::SetRenderOffset(offset.x, offset.y);
+
   if (aOpacity != 1.f)
     program->SetLayerOpacity(aOpacity);
   if (config.mFeatures & ENABLE_TEXTURE_RECT) {
@@ -1232,6 +1233,7 @@ CompositorOGL::DrawQuad(const Rect& aRect,
 
   // in case rendering has used some other GL context
   MakeCurrent();
+  LayerScope::DrawEnd(mGLContext, aEffectChain, aRect.width, aRect.height);
 }
 
 void
@@ -1493,6 +1495,7 @@ CompositorOGL::BindAndDrawQuads(ShaderProgramOGL *aProg,
   // We are using GL_TRIANGLES here because the Mac Intel drivers fail to properly
   // process uniform arrays with GL_TRIANGLE_STRIP. Go figure.
   mGLContext->fDrawArrays(LOCAL_GL_TRIANGLES, 0, 6 * aQuads);
+  LayerScope::SetLayerRects(aQuads, aLayerRects);
 }
 
 GLBlitTextureImageHelper*
