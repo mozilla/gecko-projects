@@ -141,7 +141,7 @@ ContainerRenderVR(ContainerT* aContainer,
                   const gfx::IntRect& aClipRect,
                   gfx::VRHMDInfo* aHMD)
 {
-  RefPtr<CompositingRenderTarget> surface, eyeSurface[2];
+  RefPtr<CompositingRenderTarget> surface;
 
   DUMP(">>> ContainerRenderVR [%p]\n", aContainer);
   
@@ -155,7 +155,9 @@ ContainerRenderVR(ContainerT* aContainer,
 
   // The size of each individual eye surface
   gfx::IntSize eyeResolution = aHMD->SuggestedEyeResolution();
-  gfx::IntRect eyeRect = gfx::IntRect(0, 0, eyeResolution.width, eyeResolution.height);
+  gfx::IntRect eyeRect[2];
+  eyeRect[0] = gfx::IntRect(0, 0, eyeResolution.width, eyeResolution.height);
+  eyeRect[1] = gfx::IntRect(eyeResolution.width, 0, eyeResolution.width, eyeResolution.height);
 
   // The intermediate surface size; we're going to assume that we're not going to run
   // into max texture size limits
@@ -171,9 +173,23 @@ ContainerRenderVR(ContainerT* aContainer,
   }
   
   // use NONE here, because we draw black to clear below
-  surface = compositor->CreateRenderTarget(surfaceRect, INIT_MODE_CLEAR);
-  if (!surface) {
-    return;
+  gfx::VRHMDRenderingSupport *vrRendering = aHMD->GetRenderingSupport();
+  if (PR_GetEnv("NO_VR_RENDERING")) vrRendering = nullptr;
+  if (vrRendering) {
+    if (!aContainer->mVRRenderTargetSet || aContainer->mVRRenderTargetSet->size != surfaceRect.Size()) {
+      aContainer->mVRRenderTargetSet = vrRendering->CreateRenderTargetSet(compositor, surfaceRect.Size());
+    }
+
+    surface = aContainer->mVRRenderTargetSet->GetNextRenderTarget();
+    if (!surface) {
+      NS_WARNING("GetNextRenderTarget failed");
+      return;
+    }
+  } else {
+    surface = compositor->CreateRenderTarget(surfaceRect, INIT_MODE_CLEAR);
+    if (!surface) {
+      return;
+    }
   }
 
   gfx::IntRect rtBounds = previousTarget->GetRect();
@@ -184,113 +200,98 @@ ContainerRenderVR(ContainerT* aContainer,
   aContainer->SortChildrenBy3DZOrder(children);
 
   gfx::Matrix4x4 origTransform = aContainer->GetEffectiveTransform();
+  gfx::Matrix4x4 cssEyeTransform[2];
+  gfx::Matrix4x4 cssEyeProjection[2];
 
   for (uint32_t eye = 0; eye < 2; eye++) {
-    DUMP(" -- ContainerRenderVR [%p] EYE %d\n", aContainer, eye);
-
-    eyeSurface[eye] = compositor->CreateRenderTarget(eyeRect, INIT_MODE_CLEAR);
-    if (!eyeSurface[eye]) {
-      compositor->SetRenderTarget(previousTarget);
-      return;
-    }
-
-    // Compute pre-rendered VR eye transform:
-    // - translate the incoming layer to the right position for the appropriate eye
-    gfx::Matrix4x4 preRenderedEyeTransform =
-      gfx::Matrix4x4::Translation(-float(eye * eyeResolution.width), 0.0f, 0.0f);
-    
     // Compute the CSS-rendered VR eye transform:
     // - Translate by negative of the eye translation (or rather, the inverse of it)
     // - The convert units so that pixels become 96 dpi "dots", and metres make sense;
     //   this makes the eye translation in metres turn into an appropriate number of pixels
     gfx::Point3D eyeTranslation = aHMD->GetEyeTranslation(eye);
-    gfx::Matrix4x4 cssEyeTransform = gfx::Matrix4x4::Translation(gfx::Point3D(-eyeTranslation.x,
-                                                                              -eyeTranslation.y,
-                                                                              -eyeTranslation.z));
+    cssEyeTransform[eye] = gfx::Matrix4x4::Translation(gfx::Point3D(-eyeTranslation.x,
+                                                                    -eyeTranslation.y,
+                                                                    -eyeTranslation.z));
+
     const float pixelsToMetres = 0.0254f / 96.0f;  // 96 dpi, 2.54 cm per inch, cm -> meters
-    cssEyeTransform.PreScale(pixelsToMetres, pixelsToMetres, pixelsToMetres);
+    cssEyeTransform[eye].PreScale(pixelsToMetres, pixelsToMetres, pixelsToMetres);
 
     // The CSS-rendered VR projection matrix.  This is a right-handed projection matrix, to match CSS.
     // But this projection matrix has Y-up, and CSS has Y-down.  Scale by -1 Y to fix this.
-    gfx::Matrix4x4 cssEyeProjection = aHMD->GetEyeProjectionMatrix(eye);
-    cssEyeProjection.PostScale(1.0f, -1.0f, 1.0f);
+    cssEyeProjection[eye] = aHMD->GetEyeProjectionMatrix(eye);
+    
+    // Scale and translate the projected image to fit each eye viewport.
+    cssEyeProjection[eye].PostScale(0.5f, -1.0f, 1.0f);
+    cssEyeProjection[eye].PostTranslate(-0.5f + eye * 1.0f, 0.0f, 0.0f);
+  }
 
-    // flag to keep track of which projection mode we're in as we're going through our child
-    // layers
-    int lastLayerWasNativeVR = -1;
+  for (uint32_t i = 0; i < children.Length(); i++) {
+    LayerComposite* layerToRender = static_cast<LayerComposite*>(children.ElementAt(i)->ImplData());
+    Layer* layer = layerToRender->GetLayer();
+    uint32_t contentFlags = layer->GetContentFlags();
 
-    for (uint32_t i = 0; i < children.Length(); i++) {
-      LayerComposite* layerToRender = static_cast<LayerComposite*>(children.ElementAt(i)->ImplData());
-      Layer* layer = layerToRender->GetLayer();
-      uint32_t contentFlags = layer->GetContentFlags();
+    if (layer->GetEffectiveVisibleRegion().IsEmpty() &&
+        !layer->AsContainerLayer()) {
+      continue;
+    }
 
-      if (layer->GetEffectiveVisibleRegion().IsEmpty() &&
-          !layer->AsContainerLayer()) {
-        continue;
-      }
+    const gfx::Matrix4x4 childTransform = layer->GetEffectiveTransform();
+    // We flip between pre-rendered and Gecko-rendered VR based on whether
+    // the child layer of this VR container layer has PRESERVE_3D or not.
+    if ((contentFlags & Layer::CONTENT_PRESERVE_3D) == 0) {
+      // This layer is native VR
+      DUMP("%p Switching to pre-rendered VR\n", aContainer);
 
-      // We flip between pre-rendered and Gecko-rendered VR based on whether
-      // the child layer of this VR container layer has PRESERVE_3D or not.
-      int thisLayerNativeVR = (contentFlags & Layer::CONTENT_PRESERVE_3D) ? 0 : 1;
-      if (lastLayerWasNativeVR != thisLayerNativeVR) {
-        if (thisLayerNativeVR) {
-          // XXX we still need depth test here, but we have no way of preserving
-          // depth anyway in native VR layers until we have a way to save them
-          // from WebGL (and maybe depth video?)
-          eyeSurface[eye]->ClearProjection();
-          compositor->SetRenderTarget(eyeSurface[eye]);
-
-          aContainer->ReplaceEffectiveTransform(preRenderedEyeTransform);
-          DUMP("%p Switching to pre-rendered VR\n", aContainer);
-        } else {
-          eyeSurface[eye]->SetProjection(cssEyeProjection, true, aHMD->GetZNear(), aHMD->GetZFar());
-          compositor->SetRenderTarget(eyeSurface[eye]);
-
-          aContainer->ReplaceEffectiveTransform(cssEyeTransform);
-          DUMP("%p Switching to Gecko-rendered VR\n", aContainer);
-        }
-        lastLayerWasNativeVR = thisLayerNativeVR;
-      }
-
-      const gfx::Matrix4x4 childTransform = layer->GetEffectiveTransform();
-      bool restoreTransform = false;
+      // XXX we still need depth test here, but we have no way of preserving
+      // depth anyway in native VR layers until we have a way to save them
+      // from WebGL (and maybe depth video?)
+      surface->ClearProjection();
+      compositor->SetRenderTarget(surface);
+      aContainer->ReplaceEffectiveTransform(origTransform);
       
       // If this native-VR child layer does not have sizes that match
       // the eye resolution (that is, returned by the recommended
       // render rect from the HMD device), then we need to scale it
       // up/down.
-      if (thisLayerNativeVR) {
-        nsIntRect layerBounds;
-        // XXX this is a hack until we work out clipping and sizing!
-        if (layer->GetType() == Layer::TYPE_CANVAS) {
-          layerBounds = static_cast<CanvasLayer*>(layer)->GetBounds();
-        } else {
-          layerBounds = layer->GetEffectiveVisibleRegion().GetBounds();
-        }
-        DUMP("  layer %p bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", layer,
-             XYWH(layerBounds), XYWH(surfaceRect));
-        // Note that surfaceRect.width == eyeRect.width * 2
-        if ((layerBounds.width != 0 && layerBounds.height != 0) &&
-            (layerBounds.width != surfaceRect.width ||
-             layerBounds.height != surfaceRect.height))
-        {
-          gfx::Matrix4x4 scaledChildTransform(childTransform);
-          scaledChildTransform.PreScale(surfaceRect.width / float(layerBounds.width),
-                                        surfaceRect.height / float(layerBounds.height),
-                                        1.0f);
+      nsIntRect layerBounds = layer->GetLayerBounds();
+      DUMP("  layer %p bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", aContainer,
+           XYWH(layerBounds), XYWH(surfaceRect));
+      bool restoreTransform = false;
+      if (layerBounds.width != surfaceRect.width ||
+          layerBounds.height != surfaceRect.height)
+      {
+        gfx::Matrix4x4 scaledChildTransform(childTransform);
+        scaledChildTransform.PreScale(surfaceRect.width / float(layerBounds.width),
+                                      surfaceRect.height / float(layerBounds.height),
+                                      1.0f);
 
-          layer->ReplaceEffectiveTransform(scaledChildTransform);
-          restoreTransform = true;
-        }
+        layer->ReplaceEffectiveTransform(scaledChildTransform);
+        restoreTransform = true;
       }
-      
+
       // XXX these are both clip rects, which end up as scissor rects in the compositor.  So we just
       // pass the full target surface rect here.
-      layerToRender->Prepare(RenderTargetIntRect(surfaceRect.x, surfaceRect.y, surfaceRect.width, surfaceRect.height));
+      layerToRender->Prepare(RenderTargetIntRect(surfaceRect.x, surfaceRect.y,
+                                                 surfaceRect.width, surfaceRect.height));
       layerToRender->RenderLayer(surfaceRect);
 
       if (restoreTransform) {
         layer->ReplaceEffectiveTransform(childTransform);
+      }
+    } else {
+      DUMP("%p Switching to Gecko-rendered VR\n", aContainer);
+      for (uint32_t eye = 0; eye < 2; eye++) {
+        DUMP(" -- ContainerRenderVR [%p] EYE %d\n", aContainer, eye);
+
+        surface->SetProjection(cssEyeProjection[eye], true, aHMD->GetZNear(), aHMD->GetZFar());
+        compositor->SetRenderTarget(surface);
+        aContainer->ReplaceEffectiveTransform(cssEyeTransform[eye]);
+
+        // These are both clip rects, which end up as scissor rects in the
+        // compositor.  We rely on the compositor to clip content to these
+        // rects so that the eye viewports do not overlap.
+        layerToRender->Prepare(RenderTargetIntRect(eyeRect[eye].x, eyeRect[eye].y, eyeRect[eye].width, eyeRect[eye].height));
+        layerToRender->RenderLayer(eyeRect[eye]);
       }
     }
   }
@@ -300,23 +301,16 @@ ContainerRenderVR(ContainerT* aContainer,
   // Now put back the original transfom on this container
   aContainer->ReplaceEffectiveTransform(origTransform);
 
-  // bind and draw each eye to the intermediate surface
-  compositor->SetRenderTarget(surface);
-
-  for (uint32_t eye = 0; eye < 2; eye++) {
-    gfx::Rect destRect(0, 0, eyeResolution.width, eyeResolution.height);
-    gfx::Rect clipRect(surfaceRect.x, surfaceRect.y, surfaceRect.width, surfaceRect.height);
-    EffectChain rtEffect(aContainer);
-    rtEffect.mPrimaryEffect = new EffectRenderTarget(eyeSurface[eye]);
-
-    // when we render, we need to take the eyeResolution quad and scale it to the appropriate size, and put it
-    // in the right place
-    gfx::Matrix4x4 drawTransform = gfx::Matrix4x4::Translation(eye * eyeResolution.width, 0.0f, 0.0f);
-    compositor->DrawQuad(destRect, clipRect, rtEffect, 1.0f, drawTransform);
-  }
-
   // then bind the original target and draw with distortion
   compositor->SetRenderTarget(previousTarget);
+
+  if (vrRendering) {
+    vrRendering->SubmitFrame(aContainer->mVRRenderTargetSet);
+    DUMP("<<< ContainerRenderVR [used vrRendering] [%p]\n", aContainer);
+    if (!gfxPrefs::VRMirrorTextures()) {
+      return;
+    }
+  }
 
   gfx::Rect normRect(0, 0, visibleRect.width, visibleRect.height);
   gfx::Rect rect(visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height);
@@ -333,12 +327,10 @@ ContainerRenderVR(ContainerT* aContainer,
 
   // draw the temporary surface with VR distortion to the original destination
   EffectChain vrEffect(aContainer);
-#ifdef DEBUG
-  if (PR_GetEnv("MOZ_GFX_VR_NO_DISTORTION")) {
+  bool skipDistortion = vrRendering || PR_GetEnv("MOZ_GFX_VR_NO_DISTORTION");
+  if (skipDistortion) {
     vrEffect.mPrimaryEffect = new EffectRenderTarget(surface);
-  } else
-#endif
-  {
+  } else {
     vrEffect.mPrimaryEffect = new EffectVRDistortion(aHMD, surface);
   }
 

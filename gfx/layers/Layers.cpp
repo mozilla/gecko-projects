@@ -703,8 +703,9 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
         hasUnbroken3DChainToVRContainer = true;
         break;
       }
-      if (!(p->GetContentFlags() & CONTENT_PRESERVE_3D))
+      if (!(p->GetContentFlags() & CONTENT_PRESERVE_3D)) {
         break;
+      }
     }
   }
   
