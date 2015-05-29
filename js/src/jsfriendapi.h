@@ -462,7 +462,7 @@ typedef enum  {
   * fp is the file for the dump output.
   */
 extern JS_FRIEND_API(void)
-DumpHeapComplete(JSRuntime* rt, FILE* fp, DumpHeapNurseryBehaviour nurseryBehaviour);
+DumpHeap(JSRuntime* rt, FILE* fp, DumpHeapNurseryBehaviour nurseryBehaviour);
 
 #ifdef JS_OLD_GETTER_SETTER_METHODS
 JS_FRIEND_API(bool) obj_defineGetter(JSContext* cx, unsigned argc, JS::Value* vp);
@@ -477,6 +477,9 @@ IsSystemZone(JS::Zone* zone);
 
 extern JS_FRIEND_API(bool)
 IsAtomsCompartment(JSCompartment* comp);
+
+extern JS_FRIEND_API(bool)
+IsAtomsZone(JS::Zone* zone);
 
 /*
  * Returns whether we're in a non-strict property set (in that we're in a
@@ -2561,18 +2564,32 @@ IdToValue(jsid id)
 }
 
 /*
- * If the embedder has registered a default JSContext callback, returns the
- * result of the callback. Otherwise, asserts that |rt| has exactly one
- * JSContext associated with it, and returns that context.
+ * If the embedder has registered a ScriptEnvironmentPreparer,
+ * PrepareScriptEnvironmentAndInvoke will call the preparer's 'invoke' method
+ * with the given |closure|, with the assumption that the preparer will set up
+ * any state necessary to run script in |scope|, invoke |closure| with a valid
+ * JSContext*, and return.
+ *
+ * If no preparer is registered, PrepareScriptEnvironmentAndInvoke will assert
+ * that |rt| has exactly one JSContext associated with it, enter the compartment
+ * of |scope| on that context, and invoke |closure|.
  */
-extern JS_FRIEND_API(JSContext*)
-DefaultJSContext(JSRuntime* rt);
 
-typedef JSContext*
-(* DefaultJSContextCallback)(JSRuntime* rt);
+struct ScriptEnvironmentPreparer {
+    struct Closure {
+        virtual bool operator()(JSContext* cx) = 0;
+    };
+
+    virtual bool invoke(JS::HandleObject scope, Closure& closure) = 0;
+};
+
+extern JS_FRIEND_API(bool)
+PrepareScriptEnvironmentAndInvoke(JSRuntime* rt, JS::HandleObject scope,
+                                  ScriptEnvironmentPreparer::Closure& closure);
 
 JS_FRIEND_API(void)
-SetDefaultJSContextCallback(JSRuntime* rt, DefaultJSContextCallback cb);
+SetScriptEnvironmentPreparer(JSRuntime* rt, ScriptEnvironmentPreparer*
+preparer);
 
 /*
  * To help embedders enforce their invariants, we allow them to specify in

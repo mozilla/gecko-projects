@@ -180,7 +180,6 @@
 @RESPATH@/components/dom_alarm.xpt
 @RESPATH@/components/dom_core.xpt
 @RESPATH@/components/dom_css.xpt
-@RESPATH@/components/dom_devicestorage.xpt
 @RESPATH@/components/dom_events.xpt
 @RESPATH@/components/dom_geolocation.xpt
 @RESPATH@/components/dom_media.xpt
@@ -501,6 +500,8 @@
 @RESPATH@/components/SmsService.js
 @RESPATH@/components/SmsService.manifest
 #endif
+@RESPATH@/components/StkCmdFactory.js
+@RESPATH@/components/StkCmdFactory.manifest
 @RESPATH@/components/RILContentHelper.js
 @RESPATH@/components/RILContentHelper.manifest
 @RESPATH@/components/RILSystemMessengerHelper.js
@@ -808,7 +809,6 @@
 ; [Personal Security Manager]
 ;
 @BINPATH@/@DLL_PREFIX@nssckbi@DLL_SUFFIX@
-@RESPATH@/components/pipboot.xpt
 @RESPATH@/components/pipnss.xpt
 @RESPATH@/components/pippki.xpt
 @BINPATH@/@DLL_PREFIX@nss3@DLL_SUFFIX@

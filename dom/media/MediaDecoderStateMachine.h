@@ -92,13 +92,13 @@ hardware (via AudioStream).
 #include "mozilla/RollingMean.h"
 #include "MediaTimer.h"
 #include "StateMirroring.h"
+#include "DecodedStream.h"
 
 namespace mozilla {
 
 class AudioSegment;
 class MediaTaskQueue;
 class AudioSink;
-class DecodedStreamData;
 
 /*
   The state machine class. This manages the decoding and seeking in the
@@ -145,20 +145,9 @@ public:
     return mState;
   }
 
-  void DispatchAudioCaptured()
-  {
-    nsRefPtr<MediaDecoderStateMachine> self = this;
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([self] () -> void
-    {
-      MOZ_ASSERT(self->OnTaskQueue());
-      ReentrantMonitorAutoEnter mon(self->mDecoder->GetReentrantMonitor());
-      if (!self->mAudioCaptured) {
-        self->mAudioCaptured = true;
-        self->ScheduleStateMachine();
-      }
-    });
-    TaskQueue()->Dispatch(r.forget());
-  }
+  DecodedStreamData* GetDecodedStream() const;
+
+  void AddOutputStream(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
 
   // Check if the decoder needs to become dormant state.
   bool IsDormantNeeded();
@@ -170,6 +159,21 @@ private:
   // task that gets run on the task queue, and is dispatched from the MDSM
   // constructor immediately after the task queue is created.
   void InitializationTask();
+
+  void DispatchAudioCaptured();
+
+  // Update blocking state of mDecodedStream when mPlayState or
+  // mLogicallySeeking change. Decoder monitor must be held.
+  void UpdateStreamBlockingForPlayState();
+
+  // Call this IsPlaying() changes. Decoder monitor must be held.
+  void UpdateStreamBlockingForStateMachinePlaying();
+
+  // Recreates mDecodedStream. Call this to create mDecodedStream at first,
+  // and when seeking, to ensure a new stream is set up with fresh buffers.
+  // aInitialTime is relative to mStartTime.
+  // Decoder monitor must be held.
+  void RecreateDecodedStream(int64_t aInitialTime, MediaStreamGraph* aGraph);
 
   void Shutdown();
 public:
@@ -352,6 +356,10 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
     if (mReader) {
       mReader->BreakCycles();
+    }
+    {
+      ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
+      mDecodedStream.DestroyData();
     }
     mDecoder = nullptr;
   }
@@ -817,7 +825,7 @@ public:
       }
       Reset();
       mTarget = aTarget;
-      mRequest.Begin(mMediaTimer->WaitUntil(mTarget, __func__)->RefableThen(
+      mRequest.Begin(mMediaTimer->WaitUntil(mTarget, __func__)->Then(
         mSelf->TaskQueue(), __func__, mSelf,
         &MediaDecoderStateMachine::OnDelayedSchedule,
         &MediaDecoderStateMachine::NotReached));
@@ -833,7 +841,7 @@ public:
   private:
     MediaDecoderStateMachine* mSelf;
     nsRefPtr<MediaTimer> mMediaTimer;
-    MediaPromiseConsumerHolder<mozilla::MediaTimerPromise> mRequest;
+    MediaPromiseRequestHolder<mozilla::MediaTimerPromise> mRequest;
     TimeStamp mTarget;
 
   } mDelayedScheduler;
@@ -1143,8 +1151,8 @@ protected:
   // Only one of a given pair of ({Audio,Video}DataPromise, WaitForDataPromise)
   // should exist at any given moment.
 
-  MediaPromiseConsumerHolder<MediaDecoderReader::AudioDataPromise> mAudioDataRequest;
-  MediaPromiseConsumerHolder<MediaDecoderReader::WaitForDataPromise> mAudioWaitRequest;
+  MediaPromiseRequestHolder<MediaDecoderReader::AudioDataPromise> mAudioDataRequest;
+  MediaPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise> mAudioWaitRequest;
   const char* AudioRequestStatus()
   {
     MOZ_ASSERT(OnTaskQueue());
@@ -1157,8 +1165,8 @@ protected:
     return "idle";
   }
 
-  MediaPromiseConsumerHolder<MediaDecoderReader::WaitForDataPromise> mVideoWaitRequest;
-  MediaPromiseConsumerHolder<MediaDecoderReader::VideoDataPromise> mVideoDataRequest;
+  MediaPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise> mVideoWaitRequest;
+  MediaPromiseRequestHolder<MediaDecoderReader::VideoDataPromise> mVideoDataRequest;
   const char* VideoRequestStatus()
   {
     MOZ_ASSERT(OnTaskQueue());
@@ -1171,7 +1179,7 @@ protected:
     return "idle";
   }
 
-  MediaPromiseConsumerHolder<MediaDecoderReader::WaitForDataPromise>& WaitRequestRef(MediaData::Type aType)
+  MediaPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise>& WaitRequestRef(MediaData::Type aType)
   {
     MOZ_ASSERT(OnTaskQueue());
     return aType == MediaData::AUDIO_DATA ? mAudioWaitRequest : mVideoWaitRequest;
@@ -1247,7 +1255,7 @@ protected:
   bool mDecodeToSeekTarget;
 
   // Track the current seek promise made by the reader.
-  MediaPromiseConsumerHolder<MediaDecoderReader::SeekPromise> mSeekRequest;
+  MediaPromiseRequestHolder<MediaDecoderReader::SeekPromise> mSeekRequest;
 
   // We record the playback position before we seek in order to
   // determine where the seek terminated relative to the playback position
@@ -1255,7 +1263,7 @@ protected:
   int64_t mCurrentTimeBeforeSeek;
 
   // Track our request for metadata from the reader.
-  MediaPromiseConsumerHolder<MediaDecoderReader::MetadataPromise> mMetadataRequest;
+  MediaPromiseRequestHolder<MediaDecoderReader::MetadataPromise> mMetadataRequest;
 
   // Stores presentation info required for playback. The decoder monitor
   // must be held when accessing this.
@@ -1284,6 +1292,13 @@ protected:
   bool mSentFirstFrameLoadedEvent;
 
   bool mSentPlaybackEndedEvent;
+
+  // The SourceMediaStream we are using to feed the mOutputStreams. This stream
+  // is never exposed outside the decoder.
+  // Only written on the main thread while holding the monitor. Therefore it
+  // can be read on any thread while holding the monitor, or on the main thread
+  // without holding the monitor.
+  DecodedStream mDecodedStream;
 };
 
 } // namespace mozilla;

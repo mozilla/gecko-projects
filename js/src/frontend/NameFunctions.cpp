@@ -396,6 +396,7 @@ class NameResolver
           case PNK_MUTATEPROTO:
           case PNK_SUPERELEM:
           case PNK_EXPORT:
+          case PNK_EXPORT_DEFAULT:
             MOZ_ASSERT(cur->isArity(PN_UNARY));
             if (!resolve(cur->pn_kid, prefix))
                 return false;
@@ -649,7 +650,6 @@ class NameResolver
           case PNK_GENEXP:
           case PNK_ARRAY:
           case PNK_STATEMENTLIST:
-          case PNK_SEQ:
           case PNK_ARGSBODY:
           // Initializers for individual variables, and computed property names
           // within destructuring patterns, may contain unnamed functions.

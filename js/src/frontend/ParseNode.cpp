@@ -238,6 +238,7 @@ PushNodeChildren(ParseNode* pn, NodeStack* stack)
       case PNK_SPREAD:
       case PNK_MUTATEPROTO:
       case PNK_EXPORT:
+      case PNK_EXPORT_DEFAULT:
       case PNK_SUPERELEM:
         return PushUnaryNodeChild(pn, stack);
 
@@ -487,7 +488,6 @@ PushNodeChildren(ParseNode* pn, NodeStack* stack)
       case PNK_STATEMENTLIST:
       case PNK_IMPORT_SPEC_LIST:
       case PNK_EXPORT_SPEC_LIST:
-      case PNK_SEQ:
       case PNK_ARGSBODY:
       case PNK_CLASSMETHODLIST:
         return PushListNodeChildren(pn, stack);
@@ -1069,6 +1069,11 @@ NameNode::dump(int indent)
 
         if (!pn_atom) {
             fprintf(stderr, "#<null name>");
+        } else if (getOp() == JSOP_GETARG && pn_atom->length() == 0) {
+            // Dump destructuring parameter.
+            fprintf(stderr, "(#<zero-length name> ");
+            DumpParseTree(expr(), indent + 21);
+            fputc(')', stderr);
         } else {
             JS::AutoCheckCannotGC nogc;
             if (pn_atom->hasLatin1Chars())

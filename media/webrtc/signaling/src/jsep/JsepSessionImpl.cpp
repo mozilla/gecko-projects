@@ -903,11 +903,12 @@ CompareCodec(const JsepCodecDescription* lhs, const JsepCodecDescription* rhs)
 }
 
 PtrVector<JsepCodecDescription>
-JsepSessionImpl::GetCommonCodecs(const SdpMediaSection& remoteMsection)
+JsepSessionImpl::GetCommonCodecs(const SdpMediaSection& offerMsection)
 {
+  MOZ_ASSERT(!mIsOfferer);
   PtrVector<JsepCodecDescription> matchingCodecs;
-  for (const std::string& fmt : remoteMsection.GetFormats()) {
-    JsepCodecDescription* codec = FindMatchingCodec(fmt, remoteMsection);
+  for (const std::string& fmt : offerMsection.GetFormats()) {
+    JsepCodecDescription* codec = FindMatchingCodec(fmt, offerMsection);
     if (codec) {
       codec->mDefaultPt = fmt; // Remember the other side's PT
       matchingCodecs.values.push_back(codec->Clone());
@@ -1176,11 +1177,9 @@ JsepSessionImpl::CreateAnswerMSection(const JsepAnswerOptions& options,
   PtrVector<JsepCodecDescription> matchingCodecs(
       GetCommonCodecs(remoteMsection));
 
-  for (const JsepCodecDescription* codec : matchingCodecs.values) {
-    UniquePtr<JsepCodecDescription> negotiated(
-        codec->MakeNegotiatedCodec(remoteMsection));
-    if (negotiated) {
-      negotiated->AddToMediaSection(msection);
+  for (JsepCodecDescription* codec : matchingCodecs.values) {
+    if (codec->Negotiate(remoteMsection)) {
+      codec->AddToMediaSection(msection);
       // TODO(bug 1099351): Once bug 1073475 is fixed on all supported
       // versions, we can remove this limitation.
       break;
@@ -1717,38 +1716,49 @@ JsepSessionImpl::NegotiateTrack(const SdpMediaSection& remoteMsection,
       MakeUnique<JsepTrackNegotiatedDetailsImpl>();
   negotiatedDetails->mProtocol = remoteMsection.GetProtocol();
 
-  // Insert all the codecs we jointly support.
-  PtrVector<JsepCodecDescription> commonCodecs(
-      GetCommonCodecs(remoteMsection));
+  auto& answerMsection = mIsOfferer ? remoteMsection : localMsection;
 
-  for (const JsepCodecDescription* codec : commonCodecs.values) {
+  for (auto& format : answerMsection.GetFormats()) {
+    JsepCodecDescription* origCodec = FindMatchingCodec(format, answerMsection);
+    if (!origCodec) {
+      continue;
+    }
+
+    // Make sure codec->mDefaultPt is consistent with what is in the remote
+    // msection, since the following logic needs to look stuff up there.
+    for (auto& remoteFormat : remoteMsection.GetFormats()) {
+      if (origCodec->Matches(remoteFormat, remoteMsection)) {
+        origCodec->mDefaultPt = remoteFormat;
+        break;
+      }
+    }
+
+    UniquePtr<JsepCodecDescription> codec(origCodec->Clone());
+
     bool sending = (direction == JsepTrack::kJsepTrackSending);
 
     // Everywhere else in JsepSessionImpl, a JsepCodecDescription describes
     // what one side puts in its SDP. However, we don't want that here; we want
     // a JsepCodecDescription that instead encapsulates all the parameters
     // that deal with sending (or receiving). For sending, some of these
-    // parameters will come from the local codec config (eg; rtcp-fb), others
-    // will come from the remote SDP (eg; max-fps), and still others can only be
-    // determined by inspecting both local config and remote SDP (eg;
+    // parameters will come from the remote SDP (eg; max-fps), and others can
+    // only be determined by inspecting both local config and remote SDP (eg;
     // profile-level-id when level-asymmetry-allowed is 0).
-    UniquePtr<JsepCodecDescription> sendOrReceiveCodec;
-
     if (sending) {
-      sendOrReceiveCodec = Move(codec->MakeSendCodec(remoteMsection));
+      if (!codec->LoadSendParameters(remoteMsection)) {
+        continue;
+      }
     } else {
-      sendOrReceiveCodec = Move(codec->MakeRecvCodec(remoteMsection));
-    }
-
-    if (!sendOrReceiveCodec) {
-      continue;
+      if (!codec->LoadRecvParameters(remoteMsection)) {
+        continue;
+      }
     }
 
     if (remoteMsection.GetMediaType() == SdpMediaSection::kAudio ||
         remoteMsection.GetMediaType() == SdpMediaSection::kVideo) {
       // Sanity-check that payload type can work with RTP
       uint16_t payloadType;
-      if (!sendOrReceiveCodec->GetPtAsInt(&payloadType) ||
+      if (!codec->GetPtAsInt(&payloadType) ||
           payloadType > UINT8_MAX) {
         JSEP_SET_ERROR("audio/video payload type is not an 8 bit unsigned int: "
                        << codec->mDefaultPt);
@@ -1756,7 +1766,7 @@ JsepSessionImpl::NegotiateTrack(const SdpMediaSection& remoteMsection,
       }
     }
 
-    negotiatedDetails->mCodecs.values.push_back(sendOrReceiveCodec.release());
+    negotiatedDetails->mCodecs.values.push_back(codec.release());
     break;
   }
 
@@ -1764,8 +1774,6 @@ JsepSessionImpl::NegotiateTrack(const SdpMediaSection& remoteMsection,
     JSEP_SET_ERROR("Failed to negotiate codec details for all codecs");
     return NS_ERROR_INVALID_ARG;
   }
-
-  auto& answerMsection = mIsOfferer ? remoteMsection : localMsection;
 
   if (answerMsection.GetAttributeList().HasAttribute(
         SdpAttribute::kExtmapAttribute)) {

@@ -335,6 +335,7 @@ enum PropListType { ObjectLiteral, ClassBody };
 // parameter everywhere.
 enum YieldHandling { YieldIsName, YieldIsKeyword };
 enum InHandling { InAllowed, InProhibited };
+enum DefaultHandling { NameRequired, AllowDefaultName };
 
 template <typename ParseHandler>
 class Parser : private JS::AutoGCRooter, public StrictModeGetter
@@ -543,7 +544,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
      * Some parsers have two versions:  an always-inlined version (with an 'i'
      * suffix) and a never-inlined version (with an 'n' suffix).
      */
-    Node functionStmt(YieldHandling yieldHandling);
+    Node functionStmt(YieldHandling yieldHandling, DefaultHandling defaultHandling);
     Node functionExpr(InvokedPrediction invoked = PredictUninvoked);
     Node statements(YieldHandling yieldHandling);
 
@@ -598,7 +599,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     /*
      * Additional JS parsers.
      */
-    bool functionArguments(YieldHandling yieldHandling, FunctionSyntaxKind kind, Node* list,
+    bool functionArguments(YieldHandling yieldHandling, FunctionSyntaxKind kind,
                            Node funcpn, bool* hasRest);
 
     Node functionDef(InHandling inHandling, YieldHandling uieldHandling, HandlePropertyName name,
@@ -635,8 +636,10 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node destructuringExprWithoutYield(YieldHandling yieldHandling, BindData<ParseHandler>* data,
                                        TokenKind tt, unsigned msg);
 
+    bool namedImportsOrNamespaceImport(TokenKind tt, Node importSpecSet);
+
     enum ClassContext { ClassStatement, ClassExpression };
-    Node classDefinition(YieldHandling yieldHandling, ClassContext classContext);
+    Node classDefinition(YieldHandling yieldHandling, ClassContext classContext, DefaultHandling defaultHandling);
 
     Node identifierName(YieldHandling yieldHandling);
 
@@ -664,7 +667,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool makeDefIntoUse(Definition* dn, Node pn, JSAtom* atom);
     bool checkFunctionDefinition(HandlePropertyName funName, Node* pn, FunctionSyntaxKind kind,
                                  bool* pbodyProcessed);
-    bool finishFunctionDefinition(Node pn, FunctionBox* funbox, Node prelude, Node body);
+    bool finishFunctionDefinition(Node pn, FunctionBox* funbox, Node body);
     bool addFreeVariablesFromLazyFunction(JSFunction* fun, ParseContext<ParseHandler>* pc);
 
     bool isValidForStatementLHS(Node pn1, JSVersion version, bool forDecl, bool forEach,

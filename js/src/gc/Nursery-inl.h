@@ -41,7 +41,8 @@ AllocateObjectBuffer(ExclusiveContext* cx, uint32_t count)
 {
     if (cx->isJSContext()) {
         Nursery& nursery = cx->asJSContext()->runtime()->gc.nursery;
-        return static_cast<T*>(nursery.allocateBuffer(cx->zone(), count * sizeof(T)));
+        size_t nbytes = JS_ROUNDUP(count * sizeof(T), sizeof(Value));
+        return static_cast<T*>(nursery.allocateBuffer(cx->zone(), nbytes));
     }
     return cx->zone()->pod_malloc<T>(count);
 }
@@ -52,7 +53,11 @@ AllocateObjectBuffer(ExclusiveContext* cx, JSObject* obj, uint32_t count)
 {
     if (cx->isJSContext()) {
         Nursery& nursery = cx->asJSContext()->runtime()->gc.nursery;
-        return static_cast<T*>(nursery.allocateBuffer(obj, count * sizeof(T)));
+        size_t nbytes = JS_ROUNDUP(count * sizeof(T), sizeof(Value));
+        T* buffer = static_cast<T*>(nursery.allocateBuffer(obj, nbytes));
+        if (!buffer)
+            ReportOutOfMemory(cx);
+        return buffer;
     }
     return obj->zone()->pod_malloc<T>(count);
 }

@@ -68,7 +68,27 @@ loop.store.ActiveRoomStore = (function() {
     },
 
     /**
+     * This is a list of states that need resetting when the room is left,
+     * due to user choice, failure or other reason. It is a subset of
+     * getInitialStoreState as some items (e.g. roomState, failureReason,
+     * context information) can persist across room exit & re-entry.
+     *
+     * @type {Array}
+     */
+    _statesToResetOnLeave: [
+      "audioMuted",
+      "localVideoDimensions",
+      "receivingScreenShare",
+      "remoteVideoDimensions",
+      "screenSharingState",
+      "videoMuted"
+    ],
+
+    /**
      * Returns initial state data for this active room.
+     *
+     * When adding states, consider if _statesToResetOnLeave needs updating
+     * as well.
      */
     getInitialStoreState: function() {
       return {
@@ -415,7 +435,7 @@ loop.store.ActiveRoomStore = (function() {
       // XXX Ideally we'd do this check before joining a room, but we're waiting
       // for the UX for that. See bug 1166824. In the meantime this gives us
       // additional information for analysis.
-      loop.shared.utils.hasAudioDevices(function(hasAudio) {
+      loop.shared.utils.hasAudioOrVideoDevices(function(hasAudio) {
         if (hasAudio) {
           // MEDIA_WAIT causes the views to dispatch sharedActions.SetupStreamElements,
           // which in turn starts the sdk obtaining the device permission.
@@ -750,6 +770,15 @@ loop.store.ActiveRoomStore = (function() {
       // We probably don't need to end screen share separately, but lets be safe.
       this._sdkDriver.disconnectSession();
 
+      // Reset various states.
+      var originalStoreState = this.getInitialStoreState();
+      var newStoreState = {};
+
+      this._statesToResetOnLeave.forEach(function(state) {
+        newStoreState[state] = originalStoreState[state];
+      });
+      this.setStoreState(newStoreState);
+
       if (this._timeout) {
         clearTimeout(this._timeout);
         delete this._timeout;
@@ -768,12 +797,16 @@ loop.store.ActiveRoomStore = (function() {
     },
 
     /**
-     * When feedback is complete, we reset the room to the initial state.
+     * When feedback is complete, we go back to the ready state, rather than
+     * init or gather, as we don't need to get the data from the server again.
      */
     feedbackComplete: function() {
-      // Note, that we want some values, such as the windowId, so we don't
-      // do a full reset here.
-      this.setStoreState(this.getInitialStoreState());
+      this.setStoreState({
+        roomState: ROOM_STATES.READY,
+        // Reset the used state here as the user has now given feedback and the
+        // next time they enter the room, the other person might not be there.
+        used: false
+      });
     },
 
     /**

@@ -2153,6 +2153,12 @@ PluginModuleChild::InitQuirksModes(const nsCString& aMimeType)
         mQuirks |= QUIRK_ALLOW_OFFLINE_RENDERER;
     }
 #endif
+
+#ifdef OS_WIN
+    if (specialType == nsPluginHost::eSpecialType_Unity) {
+        mQuirks |= QUIRK_UNITY_FIXUP_MOUSE_CAPTURE;
+    }
+#endif
 }
 
 bool
@@ -2566,10 +2572,9 @@ PluginModuleChild::RecvStopProfiler()
 bool
 PluginModuleChild::AnswerGetProfile(nsCString* aProfile)
 {
-    char* profile = profiler_get_profile();
+    UniquePtr<char[]> profile = profiler_get_profile();
     if (profile != nullptr) {
-        *aProfile = nsCString(profile, strlen(profile));
-        free(profile);
+        *aProfile = nsCString(profile.get(), strlen(profile.get()));
     } else {
         *aProfile = nsCString("", 0);
     }

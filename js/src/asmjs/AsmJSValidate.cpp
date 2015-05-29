@@ -3740,7 +3740,7 @@ CheckArgument(ModuleCompiler& m, ParseNode* arg, PropertyName** name)
     if (!IsDefinition(arg))
         return m.fail(arg, "duplicate argument name not allowed");
 
-    if (arg->pn_dflags & PND_DEFAULT)
+    if (arg->isKind(PNK_ASSIGN))
         return m.fail(arg, "default arguments not allowed");
 
     if (!CheckIdentifier(m, arg, arg->name()))
@@ -7692,6 +7692,8 @@ CheckFunction(ModuleCompiler& m, LifoAlloc& lifo, MIRGenerator** mir, ModuleComp
 
     *mir = f.extractMIR();
     (*mir)->initMinAsmJSHeapLength(m.minHeapLength());
+    jit::SpewBeginFunction(*mir, nullptr);
+
     *funcOut = func;
     return true;
 }
@@ -7768,8 +7770,7 @@ CheckFunctionsSequential(ModuleCompiler& m)
         int64_t before = PRMJ_Now();
 
         JitContext jcx(m.cx(), &mir->alloc());
-
-        IonSpewNewFunction(&mir->graph(), nullptr);
+        jit::AutoSpewEndFunction spewEndFunction(mir);
 
         if (!OptimizeMIR(mir))
             return m.failOffset(func->srcBegin(), "internal compiler failure (probably out of memory)");
@@ -7782,8 +7783,6 @@ CheckFunctionsSequential(ModuleCompiler& m)
 
         if (!GenerateCode(m, *func, *mir, *lir))
             return false;
-
-        IonSpewEndFunction();
     }
 
     if (!CheckAllFunctionsDefined(m))
@@ -8022,7 +8021,7 @@ CheckFunctions(ModuleCompiler& m)
     if (!ParallelCompilationEnabled(m.cx()) || !g.claim())
         return CheckFunctionsSequential(m);
 
-    JitSpew(JitSpew_IonLogs, "Can't log asm.js script. (Compiled on background thread.)");
+    JitSpew(JitSpew_IonSyncLogs, "Can't log asm.js script. (Compiled on background thread.)");
 
     // Saturate all helper threads.
     size_t numParallelJobs = HelperThreadState().maxAsmJSCompilationThreads();

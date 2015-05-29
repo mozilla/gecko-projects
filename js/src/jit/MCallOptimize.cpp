@@ -263,8 +263,6 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineAssertFloat32(callInfo);
     if (native == testingFunc_assertRecoveredOnBailout)
         return inlineAssertRecoveredOnBailout(callInfo);
-    if (native == testingFunc_inIon || native == testingFunc_inJit)
-        return inlineTrue(callInfo);
 
     // Bound function
     if (native == js::CallOrConstructBoundFunction)
@@ -667,7 +665,10 @@ IonBuilder::inlineArrayPopShift(CallInfo& callInfo, MArrayPopShift::Mode mode)
 
     MDefinition* obj = callInfo.thisArg();
     TemporaryTypeSet* thisTypes = obj->resultTypeSet();
-    if (!thisTypes || thisTypes->getKnownClass(constraints()) != &ArrayObject::class_)
+    if (!thisTypes)
+        return InliningStatus_NotInlined;
+    const Class* clasp = thisTypes->getKnownClass(constraints());
+    if (clasp != &ArrayObject::class_ && clasp != &UnboxedArrayObject::class_)
         return InliningStatus_NotInlined;
     if (thisTypes->hasObjectFlags(constraints(), unhandledFlags)) {
         trackOptimizationOutcome(TrackedOutcome::ArrayBadFlags);
@@ -679,9 +680,17 @@ IonBuilder::inlineArrayPopShift(CallInfo& callInfo, MArrayPopShift::Mode mode)
         return InliningStatus_NotInlined;
     }
 
+    JSValueType unboxedType = JSVAL_TYPE_MAGIC;
+    if (clasp == &UnboxedArrayObject::class_) {
+        unboxedType = UnboxedArrayElementType(constraints(), obj, nullptr);
+        if (unboxedType == JSVAL_TYPE_MAGIC)
+            return InliningStatus_NotInlined;
+    }
+
     callInfo.setImplicitlyUsedUnchecked();
 
-    obj = addMaybeCopyElementsForWrite(obj);
+    if (clasp == &ArrayObject::class_)
+        obj = addMaybeCopyElementsForWrite(obj, /* checkNative = */ false);
 
     TemporaryTypeSet* returnTypes = getInlineReturnTypeSet();
     bool needsHoleCheck = thisTypes->hasObjectFlags(constraints(), OBJECT_FLAG_NON_PACKED);
@@ -692,7 +701,8 @@ IonBuilder::inlineArrayPopShift(CallInfo& callInfo, MArrayPopShift::Mode mode)
     if (barrier != BarrierKind::NoBarrier)
         returnType = MIRType_Value;
 
-    MArrayPopShift* ins = MArrayPopShift::New(alloc(), obj, mode, needsHoleCheck, maybeUndefined);
+    MArrayPopShift* ins = MArrayPopShift::New(alloc(), obj, mode,
+                                              unboxedType, needsHoleCheck, maybeUndefined);
     current->add(ins);
     current->push(ins);
     ins->setResultType(returnType);
@@ -795,7 +805,10 @@ IonBuilder::inlineArrayPush(CallInfo& callInfo)
         return InliningStatus_NotInlined;
 
     TemporaryTypeSet* thisTypes = callInfo.thisArg()->resultTypeSet();
-    if (!thisTypes || thisTypes->getKnownClass(constraints()) != &ArrayObject::class_)
+    if (!thisTypes)
+        return InliningStatus_NotInlined;
+    const Class* clasp = thisTypes->getKnownClass(constraints());
+    if (clasp != &ArrayObject::class_ && clasp != &UnboxedArrayObject::class_)
         return InliningStatus_NotInlined;
     if (thisTypes->hasObjectFlags(constraints(), OBJECT_FLAG_SPARSE_INDEXES |
                                   OBJECT_FLAG_LENGTH_OVERFLOW))
@@ -816,6 +829,13 @@ IonBuilder::inlineArrayPush(CallInfo& callInfo)
         return InliningStatus_NotInlined;
     }
 
+    JSValueType unboxedType = JSVAL_TYPE_MAGIC;
+    if (clasp == &UnboxedArrayObject::class_) {
+        unboxedType = UnboxedArrayElementType(constraints(), callInfo.thisArg(), nullptr);
+        if (unboxedType == JSVAL_TYPE_MAGIC)
+            return InliningStatus_NotInlined;
+    }
+
     callInfo.setImplicitlyUsedUnchecked();
     value = callInfo.getArg(0);
 
@@ -827,12 +847,13 @@ IonBuilder::inlineArrayPush(CallInfo& callInfo)
         value = valueDouble;
     }
 
-    obj = addMaybeCopyElementsForWrite(obj);
+    if (unboxedType == JSVAL_TYPE_MAGIC)
+        obj = addMaybeCopyElementsForWrite(obj, /* checkNative = */ false);
 
     if (NeedsPostBarrier(info(), value))
         current->add(MPostWriteBarrier::New(alloc(), obj, value));
 
-    MArrayPush* ins = MArrayPush::New(alloc(), obj, value);
+    MArrayPush* ins = MArrayPush::New(alloc(), obj, value, unboxedType);
     current->add(ins);
     current->push(ins);
 
@@ -863,7 +884,8 @@ IonBuilder::inlineArrayConcat(CallInfo& callInfo)
     if (!thisTypes || !argTypes)
         return InliningStatus_NotInlined;
 
-    if (thisTypes->getKnownClass(constraints()) != &ArrayObject::class_)
+    const Class* clasp = thisTypes->getKnownClass(constraints());
+    if (clasp != &ArrayObject::class_ && clasp != &UnboxedArrayObject::class_)
         return InliningStatus_NotInlined;
     if (thisTypes->hasObjectFlags(constraints(), OBJECT_FLAG_SPARSE_INDEXES |
                                   OBJECT_FLAG_LENGTH_OVERFLOW))
@@ -872,13 +894,22 @@ IonBuilder::inlineArrayConcat(CallInfo& callInfo)
         return InliningStatus_NotInlined;
     }
 
-    if (argTypes->getKnownClass(constraints()) != &ArrayObject::class_)
+    if (argTypes->getKnownClass(constraints()) != clasp)
         return InliningStatus_NotInlined;
     if (argTypes->hasObjectFlags(constraints(), OBJECT_FLAG_SPARSE_INDEXES |
                                  OBJECT_FLAG_LENGTH_OVERFLOW))
     {
         trackOptimizationOutcome(TrackedOutcome::ArrayBadFlags);
         return InliningStatus_NotInlined;
+    }
+
+    JSValueType unboxedType = JSVAL_TYPE_MAGIC;
+    if (clasp == &UnboxedArrayObject::class_) {
+        unboxedType = UnboxedArrayElementType(constraints(), callInfo.thisArg(), nullptr);
+        if (unboxedType == JSVAL_TYPE_MAGIC)
+            return InliningStatus_NotInlined;
+        if (unboxedType != UnboxedArrayElementType(constraints(), callInfo.getArg(0), nullptr))
+            return InliningStatus_NotInlined;
     }
 
     // Watch out for indexed properties on the prototype.
@@ -934,13 +965,14 @@ IonBuilder::inlineArrayConcat(CallInfo& callInfo)
     JSObject* templateObj = inspector->getTemplateObjectForNative(pc, js::array_concat);
     if (!templateObj || templateObj->group() != thisGroup)
         return InliningStatus_NotInlined;
-    MOZ_ASSERT(templateObj->is<ArrayObject>());
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MArrayConcat* ins = MArrayConcat::New(alloc(), constraints(), callInfo.thisArg(), callInfo.getArg(0),
-                                          &templateObj->as<ArrayObject>(),
-                                          templateObj->group()->initialHeap(constraints()));
+    MArrayConcat* ins = MArrayConcat::New(alloc(), constraints(),
+                                          callInfo.thisArg(), callInfo.getArg(0),
+                                          templateObj,
+                                          templateObj->group()->initialHeap(constraints()),
+                                          unboxedType);
     current->add(ins);
     current->push(ins);
 
@@ -2669,15 +2701,6 @@ IonBuilder::inlineBailout(CallInfo& callInfo)
     MConstant* undefined = MConstant::New(alloc(), UndefinedValue());
     current->add(undefined);
     current->push(undefined);
-    return InliningStatus_Inlined;
-}
-
-IonBuilder::InliningStatus
-IonBuilder::inlineTrue(CallInfo& callInfo)
-{
-    callInfo.setImplicitlyUsedUnchecked();
-
-    pushConstant(BooleanValue(true));
     return InliningStatus_Inlined;
 }
 

@@ -14,7 +14,6 @@
 #include "nsIIOService.h"
 #include "nsIProtocolHandler.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsISerializable.h"
 #include "nsIStreamLoader.h"
 #include "nsIStreamListenerTee.h"
 #include "nsIThreadRetargetableRequest.h"
@@ -422,7 +421,7 @@ private:
   bool mFailed;
   nsCOMPtr<nsIInputStreamPump> mPump;
   nsCOMPtr<nsIURI> mBaseURI;
-  nsCString mSecurityInfo;
+  ChannelInfo mChannelInfo;
 };
 
 NS_IMPL_ISUPPORTS(CacheScriptLoader, nsIStreamLoaderObserver)
@@ -589,19 +588,9 @@ private:
       new InternalResponse(200, NS_LITERAL_CSTRING("OK"));
     ir->SetBody(mReader);
 
-    // Set the security info of the channel on the response so that it's
+    // Set the channel info of the channel on the response so that it's
     // saved in the cache.
-    nsCOMPtr<nsISupports> infoObj;
-    channel->GetSecurityInfo(getter_AddRefs(infoObj));
-    if (infoObj) {
-      nsCOMPtr<nsISerializable> serializable = do_QueryInterface(infoObj);
-      if (serializable) {
-        ir->SetSecurityInfo(serializable);
-        MOZ_ASSERT(!ir->GetSecurityInfo().IsEmpty());
-      } else {
-        NS_WARNING("A non-serializable object was obtained from nsIChannel::GetSecurityInfo()!");
-      }
-    }
+    ir->InitChannelInfo(channel);
 
     nsRefPtr<Response> response = new Response(mCacheCreator->Global(), ir);
 
@@ -965,18 +954,9 @@ private:
       // Take care of the base URI first.
       mWorkerPrivate->SetBaseURI(finalURI);
 
-      // Store the security info if needed.
+      // Store the channel info if needed.
       if (mWorkerPrivate->IsServiceWorker()) {
-        nsCOMPtr<nsISupports> infoObj;
-        channel->GetSecurityInfo(getter_AddRefs(infoObj));
-        if (infoObj) {
-          nsCOMPtr<nsISerializable> serializable = do_QueryInterface(infoObj);
-          if (serializable) {
-            mWorkerPrivate->SetSecurityInfo(serializable);
-          } else {
-            NS_WARNING("A non-serializable object was obtained from nsIChannel::GetSecurityInfo()!");
-          }
-        }
+        mWorkerPrivate->InitChannelInfo(channel);
       }
 
       // Now to figure out which principal to give this worker.
@@ -1001,22 +981,6 @@ private:
       NS_ENSURE_SUCCESS(rv, rv);
       MOZ_ASSERT(channelLoadGroup);
 
-      // See if this is a resource URI. Since JSMs usually come from resource://
-      // URIs we're currently considering all URIs with the URI_IS_UI_RESOURCE
-      // flag as valid for creating privileged workers.
-      if (!nsContentUtils::IsSystemPrincipal(channelPrincipal)) {
-        bool isResource;
-        rv = NS_URIChainHasFlags(finalURI,
-                                 nsIProtocolHandler::URI_IS_UI_RESOURCE,
-                                 &isResource);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        if (isResource) {
-          rv = ssm->GetSystemPrincipal(getter_AddRefs(channelPrincipal));
-          NS_ENSURE_SUCCESS(rv, rv);
-        }
-      }
-
       // If the load principal is the system principal then the channel
       // principal must also be the system principal (we do not allow chrome
       // code to create workers with non-chrome scripts). Otherwise this channel
@@ -1024,14 +988,25 @@ private:
       // here in case redirects changed the location of the script).
       if (nsContentUtils::IsSystemPrincipal(loadPrincipal)) {
         if (!nsContentUtils::IsSystemPrincipal(channelPrincipal)) {
-          return NS_ERROR_DOM_BAD_URI;
+          // See if this is a resource URI. Since JSMs usually come from
+          // resource:// URIs we're currently considering all URIs with the
+          // URI_IS_UI_RESOURCE flag as valid for creating privileged workers.
+          bool isResource;
+          rv = NS_URIChainHasFlags(finalURI,
+                                   nsIProtocolHandler::URI_IS_UI_RESOURCE,
+                                   &isResource);
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          if (isResource) {
+            // Assign the system principal to the resource:// worker only if it
+            // was loaded from code using the system principal.
+            channelPrincipal = loadPrincipal;
+          } else {
+            return NS_ERROR_DOM_BAD_URI;
+          }
         }
       }
       else  {
-        nsCString scheme;
-        rv = finalURI->GetScheme(scheme);
-        NS_ENSURE_SUCCESS(rv, rv);
-
         // We exempt data urls and other URI's that inherit their
         // principal again.
         if (NS_FAILED(loadPrincipal->CheckMayLoad(finalURI, false, true))) {
@@ -1052,7 +1027,8 @@ private:
 
   void
   DataReceivedFromCache(uint32_t aIndex, const uint8_t* aString,
-                        uint32_t aStringLen, const nsCString& aSecurityInfo)
+                        uint32_t aStringLen,
+                        const ChannelInfo& aChannelInfo)
   {
     AssertIsOnMainThread();
     MOZ_ASSERT(aIndex < mLoadInfos.Length());
@@ -1080,7 +1056,7 @@ private:
       MOZ_ASSERT(principal);
       nsILoadGroup* loadGroup = mWorkerPrivate->GetLoadGroup();
       MOZ_ASSERT(loadGroup);
-      mWorkerPrivate->SetSecurityInfo(aSecurityInfo);
+      mWorkerPrivate->InitChannelInfo(aChannelInfo);
       // Needed to initialize the principal info. This is fine because
       // the cache principal cannot change, unlike the channel principal.
       mWorkerPrivate->SetPrincipal(principal, loadGroup);
@@ -1434,11 +1410,11 @@ CacheScriptLoader::ResolvedCallback(JSContext* aCx,
 
   nsCOMPtr<nsIInputStream> inputStream;
   response->GetBody(getter_AddRefs(inputStream));
-  mSecurityInfo = response->GetSecurityInfo();
+  mChannelInfo = response->GetChannelInfo();
 
   if (!inputStream) {
     mLoadInfo.mCacheStatus = ScriptLoadInfo::Cached;
-    mRunnable->DataReceivedFromCache(mIndex, (uint8_t*)"", 0, mSecurityInfo);
+    mRunnable->DataReceivedFromCache(mIndex, (uint8_t*)"", 0, mChannelInfo);
     return;
   }
 
@@ -1494,7 +1470,7 @@ CacheScriptLoader::OnStreamComplete(nsIStreamLoader* aLoader, nsISupports* aCont
 
   mLoadInfo.mCacheStatus = ScriptLoadInfo::Cached;
 
-  mRunnable->DataReceivedFromCache(mIndex, aString, aStringLen, mSecurityInfo);
+  mRunnable->DataReceivedFromCache(mIndex, aString, aStringLen, mChannelInfo);
   return NS_OK;
 }
 
