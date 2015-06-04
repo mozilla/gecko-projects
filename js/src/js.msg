@@ -339,6 +339,7 @@ MSG_DEF(JSMSG_YIELD_IN_DEFAULT,        0, JSEXN_SYNTAXERR, "yield in default exp
 MSG_DEF(JSMSG_BAD_COLUMN_NUMBER,       0, JSEXN_RANGEERR, "column number out of range")
 MSG_DEF(JSMSG_COMPUTED_NAME_IN_PATTERN,0, JSEXN_SYNTAXERR, "computed property names aren't supported in this destructuring declaration")
 MSG_DEF(JSMSG_DEFAULT_IN_PATTERN,      0, JSEXN_SYNTAXERR, "destructuring defaults aren't supported in this destructuring declaration")
+MSG_DEF(JSMSG_BAD_NEWTARGET,           0, JSEXN_SYNTAXERR, "new.target only allowed in non-exotic functions")
 
 // asm.js
 MSG_DEF(JSMSG_USE_ASM_TYPE_FAIL,       1, JSEXN_TYPEERR, "asm.js type error: {0}")
@@ -487,11 +488,13 @@ MSG_DEF(JSMSG_ATOMICS_TOO_LONG,          0, JSEXN_RANGEERR, "timeout value too l
 MSG_DEF(JSMSG_ATOMICS_WAIT_NOT_ALLOWED,  0, JSEXN_ERR, "waiting is not allowed on this thread")
 
 // XPConnect wrappers and DOM bindings
-MSG_DEF(JSMSG_CANT_SET_INTERPOSED,      1, JSEXN_TYPEERR, "unable to set interposed data property '{0}'")
+MSG_DEF(JSMSG_CANT_SET_INTERPOSED,       1, JSEXN_TYPEERR, "unable to set interposed data property '{0}'")
 MSG_DEF(JSMSG_CANT_DEFINE_WINDOW_ELEMENT, 0, JSEXN_TYPEERR, "can't define elements on a Window object")
 MSG_DEF(JSMSG_CANT_DELETE_WINDOW_ELEMENT, 0, JSEXN_TYPEERR, "can't delete elements from a Window object")
 MSG_DEF(JSMSG_CANT_DELETE_WINDOW_NAMED_PROPERTY, 1, JSEXN_TYPEERR, "can't delete property {0} from window's named properties object")
-MSG_DEF(JSMSG_CANT_PREVENT_EXTENSIONS,  0, JSEXN_TYPEERR, "can't prevent extensions on this proxy object")
+MSG_DEF(JSMSG_CANT_PREVENT_EXTENSIONS,   0, JSEXN_TYPEERR, "can't prevent extensions on this proxy object")
+MSG_DEF(JSMSG_NO_NAMED_SETTER,           2, JSEXN_TYPEERR, "{0} doesn't have a named property setter for '{1}'")
+MSG_DEF(JSMSG_NO_INDEXED_SETTER,         2, JSEXN_TYPEERR, "{0} doesn't have an indexed property setter for '{1}'")
 
 // Super
 MSG_DEF(JSMSG_CANT_DELETE_SUPER, 0, JSEXN_REFERENCEERR, "invalid delete involving 'super'")

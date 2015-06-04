@@ -26,7 +26,9 @@ flags:
     - aries
     - aries-ota
     - aries-eng
+    - aries-dogfood
     - android-api-11
+    - linux64
 
   tests:
     - cppunit

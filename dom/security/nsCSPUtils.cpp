@@ -23,8 +23,8 @@ GetCspUtilsLog()
   return gCspUtilsPRLog;
 }
 
-#define CSPUTILSLOG(args) MOZ_LOG(GetCspUtilsLog(), PR_LOG_DEBUG, args)
-#define CSPUTILSLOGENABLED() PR_LOG_TEST(GetCspUtilsLog(), PR_LOG_DEBUG)
+#define CSPUTILSLOG(args) MOZ_LOG(GetCspUtilsLog(), mozilla::LogLevel::Debug, args)
+#define CSPUTILSLOGENABLED() MOZ_LOG_TEST(GetCspUtilsLog(), mozilla::LogLevel::Debug)
 
 void
 CSP_GetLocalizedStr(const char16_t* aName,
@@ -148,6 +148,9 @@ CSP_ContentTypeToDirective(nsContentPolicyType aType)
 
     case nsIContentPolicy::TYPE_MEDIA:
       return nsIContentSecurityPolicy::MEDIA_SRC_DIRECTIVE;
+
+    case nsIContentPolicy::TYPE_WEB_MANIFEST:
+      return nsIContentSecurityPolicy::WEB_MANIFEST_SRC_DIRECTIVE;
 
     case nsIContentPolicy::TYPE_SUBDOCUMENT:
       return nsIContentSecurityPolicy::FRAME_SRC_DIRECTIVE;
@@ -836,6 +839,10 @@ nsCSPDirective::toDomCSPStruct(mozilla::dom::CSP& outCSP) const
       outCSP.mFrame_ancestors.Value() = srcs;
       return;
 
+    case nsIContentSecurityPolicy::WEB_MANIFEST_SRC_DIRECTIVE:
+      outCSP.mManifest_src.Construct();
+      outCSP.mManifest_src.Value() = srcs;
+      return;
     // not supporting REFLECTED_XSS_DIRECTIVE
 
     case nsIContentSecurityPolicy::BASE_URI_DIRECTIVE:

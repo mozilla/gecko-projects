@@ -53,7 +53,7 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
 #endif
     global_(nullptr),
     enterCompartmentDepth(0),
-    performanceMonitoring(runtime_, this),
+    performanceMonitoring(runtime_),
     data(nullptr),
     objectMetadataCallback(nullptr),
     lastAnimationTime(0),
@@ -489,7 +489,8 @@ JSCompartment::wrap(JSContext* cx, MutableHandle<PropertyDescriptor> desc)
 void
 JSCompartment::markCrossCompartmentWrappers(JSTracer* trc)
 {
-    MOZ_ASSERT(!zone()->isCollecting() || trc->runtime()->isHeapCompacting());
+    MOZ_ASSERT(trc->runtime()->isHeapMajorCollecting());
+    MOZ_ASSERT(!zone()->isCollecting() || trc->runtime()->gc.isHeapCompacting());
 
     for (WrapperMap::Enum e(crossCompartmentWrappers); !e.empty(); e.popFront()) {
         Value v = e.front().value();
@@ -719,16 +720,17 @@ JSCompartment::clearObjectMetadata()
 void
 JSCompartment::setNewObjectMetadata(JSContext* cx, JSObject* obj)
 {
-    MOZ_ASSERT(this == cx->compartment());
+    assertSameCompartment(cx, this, obj);
 
     if (JSObject* metadata = objectMetadataCallback(cx, obj)) {
+        assertSameCompartment(cx, metadata);
         if (!objectMetadataTable) {
             objectMetadataTable = cx->new_<ObjectWeakMap>(cx);
             if (!objectMetadataTable)
-                CrashAtUnhandlableOOM("setObjectMetadata");
+                CrashAtUnhandlableOOM("setNewObjectMetadata");
         }
         if (!objectMetadataTable->add(cx, obj, metadata))
-            CrashAtUnhandlableOOM("setObjectMetadata");
+            CrashAtUnhandlableOOM("setNewObjectMetadata");
     }
 }
 

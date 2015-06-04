@@ -24,7 +24,7 @@
 #include "mozilla/gfx/Types.h"          // for ExtendMode::ExtendMode::CLAMP, etc
 #include "mozilla/layers/ShadowLayers.h"  // for ShadowableLayer
 #include "mozilla/layers/TextureClient.h"  // for TextureClient
-#include "nsSize.h"                     // for nsIntSize
+#include "mozilla/gfx/Point.h"          // for IntSize
 #include "gfx2DGlue.h"
 #include "nsLayoutUtils.h"              // for invalidation debugging
 
@@ -332,7 +332,7 @@ RotatedContentBuffer::BufferContentType()
 }
 
 bool
-RotatedContentBuffer::BufferSizeOkFor(const nsIntSize& aSize)
+RotatedContentBuffer::BufferSizeOkFor(const IntSize& aSize)
 {
   return (aSize == mBufferRect.Size() ||
           (SizedToVisibleBounds != mBufferSizePolicy &&

@@ -149,7 +149,10 @@ nsCertTreeDispInfo::GetHostPort(nsAString &aHostPort)
 
 NS_IMPL_ISUPPORTS(nsCertTree, nsICertTree, nsITreeView)
 
-nsCertTree::nsCertTree() : mTreeArray(nullptr)
+nsCertTree::nsCertTree()
+  : mTreeArray(nullptr)
+  , mCompareCache(&gMapOps, sizeof(CompareCacheHashEntryPtr),
+                  kInitialCacheLength)
 {
   static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
@@ -165,22 +168,11 @@ nsCertTree::nsCertTree() : mTreeArray(nullptr)
 
 void nsCertTree::ClearCompareHash()
 {
-  if (mCompareCache.IsInitialized()) {
-    PL_DHashTableFinish(&mCompareCache);
-  }
-}
-
-nsresult nsCertTree::InitCompareHash()
-{
-  ClearCompareHash();
-  PL_DHashTableInit(&mCompareCache, &gMapOps,
-                    sizeof(CompareCacheHashEntryPtr), 64);
-  return NS_OK;
+  mCompareCache.ClearAndPrepareForLength(kInitialCacheLength);
 }
 
 nsCertTree::~nsCertTree()
 {
-  ClearCompareHash();
   delete [] mTreeArray;
 }
 
@@ -438,7 +430,7 @@ nsCertTree::GetCertsByTypeFromCertList(CERTCertList *aCertList,
                                        nsCertCompareFunc  aCertCmpFn,
                                        void *aCertCmpFnArg)
 {
-  MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("GetCertsByTypeFromCertList"));
+  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("GetCertsByTypeFromCertList"));
   if (!aCertList)
     return NS_ERROR_FAILURE;
 
@@ -661,11 +653,11 @@ nsCertTree::LoadCertsFromCache(nsIX509CertList *aCache, uint32_t aType)
     mTreeArray = nullptr;
     mNumRows = 0;
   }
-  nsresult rv = InitCompareHash();
-  if (NS_FAILED(rv)) return rv;
+  ClearCompareHash();
 
-  rv = GetCertsByTypeFromCache(aCache, aType, 
-                               GetCompareFuncFromCertType(aType), &mCompareCache);
+  nsresult rv = GetCertsByTypeFromCache(aCache, aType,
+                                        GetCompareFuncFromCertType(aType),
+                                        &mCompareCache);
   if (NS_FAILED(rv)) return rv;
   return UpdateUIContents();
 }
@@ -679,11 +671,10 @@ nsCertTree::LoadCerts(uint32_t aType)
     mTreeArray = nullptr;
     mNumRows = 0;
   }
-  nsresult rv = InitCompareHash();
-  if (NS_FAILED(rv)) return rv;
+  ClearCompareHash();
 
-  rv = GetCertsByType(aType, 
-                      GetCompareFuncFromCertType(aType), &mCompareCache);
+  nsresult rv = GetCertsByType(aType, GetCompareFuncFromCertType(aType),
+                               &mCompareCache);
   if (NS_FAILED(rv)) return rv;
   return UpdateUIContents();
 }
@@ -1360,23 +1351,23 @@ nsCertTree::dumpMap()
 {
   for (int i=0; i<mNumOrgs; i++) {
     nsAutoString org(mTreeArray[i].orgName);
-    MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("ORG[%s]", NS_LossyConvertUTF16toASCII(org).get()));
-    MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("OPEN[%d]", mTreeArray[i].open));
-    MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("INDEX[%d]", mTreeArray[i].certIndex));
-    MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("NCHILD[%d]", mTreeArray[i].numChildren));
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("ORG[%s]", NS_LossyConvertUTF16toASCII(org).get()));
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("OPEN[%d]", mTreeArray[i].open));
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("INDEX[%d]", mTreeArray[i].certIndex));
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NCHILD[%d]", mTreeArray[i].numChildren));
   }
   for (int i=0; i<mNumRows; i++) {
     treeArrayEl *el = GetThreadDescAtIndex(i);
     if (el) {
       nsAutoString td(el->orgName);
-      MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("thread desc[%d]: %s", i, NS_LossyConvertUTF16toASCII(td).get()));
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("thread desc[%d]: %s", i, NS_LossyConvertUTF16toASCII(td).get()));
     }
     nsCOMPtr<nsIX509Cert> ct = GetCertAtIndex(i);
     if (ct) {
       char16_t *goo;
       ct->GetCommonName(&goo);
       nsAutoString doo(goo);
-      MOZ_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("cert [%d]: %s", i, NS_LossyConvertUTF16toASCII(doo).get()));
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("cert [%d]: %s", i, NS_LossyConvertUTF16toASCII(doo).get()));
     }
   }
 }

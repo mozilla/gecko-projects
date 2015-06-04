@@ -336,7 +336,7 @@ namespace {
 static NS_DEFINE_CID(kParserServiceCID, NS_PARSERSERVICE_CID);
 static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
 
-static PLDHashTable2* sEventListenerManagersHash;
+static PLDHashTable* sEventListenerManagersHash;
 
 class DOMEventListenerManagersHashReporter final : public nsIMemoryReporter
 {
@@ -498,7 +498,7 @@ nsContentUtils::Init()
     };
 
     sEventListenerManagersHash =
-      new PLDHashTable2(&hash_table_ops, sizeof(EventListenerManagerMapEntry));
+      new PLDHashTable(&hash_table_ops, sizeof(EventListenerManagerMapEntry));
 
     RegisterStrongMemoryReporter(new DOMEventListenerManagersHashReporter());
   }
@@ -1660,7 +1660,7 @@ nsContentUtils::ParseLegacyFontSize(const nsAString& aValue)
     ++iter;
   }
 
-  if (*iter < char16_t('0') || *iter > char16_t('9')) {
+  if (iter == end || *iter < char16_t('0') || *iter > char16_t('9')) {
     return 0;
   }
 
@@ -3339,7 +3339,7 @@ nsContentUtils::LogSimpleConsoleError(const nsAString& aErrorText,
 /* static */ nsresult
 nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
                                 const nsACString& aCategory,
-                                nsIDocument* aDocument,
+                                const nsIDocument* aDocument,
                                 PropertiesFile aFile,
                                 const char *aMessageName,
                                 const char16_t **aParams,
@@ -3374,7 +3374,7 @@ nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
 nsContentUtils::ReportToConsoleNonLocalized(const nsAString& aErrorText,
                                             uint32_t aErrorFlags,
                                             const nsACString& aCategory,
-                                            nsIDocument* aDocument,
+                                            const nsIDocument* aDocument,
                                             nsIURI* aURI,
                                             const nsAFlatString& aSourceLine,
                                             uint32_t aLineNumber,

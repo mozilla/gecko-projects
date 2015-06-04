@@ -43,7 +43,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/VisualEventTracer.h"
 #include "nsISSLSocketControl.h"
 #include "sslt.h"
 #include "nsContentUtils.h"
@@ -79,6 +78,7 @@
 #include "nsIX509Cert.h"
 #include "ScopedNSSTypes.h"
 #include "nsNullPrincipal.h"
+#include "nsIPackagedAppService.h"
 
 namespace mozilla { namespace net {
 
@@ -213,8 +213,6 @@ AutoRedirectVetoNotifier::ReportRedirectResult(bool succeeded)
 
     // Drop after the notification
     channel->mHasAutoRedirectVetoNotifier = false;
-
-    MOZ_EVENT_TRACER_DONE(channel, "net::http::redirect-callbacks");
 }
 
 //-----------------------------------------------------------------------------
@@ -249,6 +247,7 @@ nsHttpChannel::nsHttpChannel()
     , mConcurentCacheAccess(0)
     , mIsPartialRequest(0)
     , mHasAutoRedirectVetoNotifier(0)
+    , mIsPackagedAppResource(0)
     , mPushedStream(nullptr)
     , mLocalBlocklist(false)
     , mWarningReporter(nullptr)
@@ -274,12 +273,6 @@ nsHttpChannel::Init(nsIURI *uri,
                     uint32_t proxyResolveFlags,
                     nsIURI *proxyURI)
 {
-#ifdef MOZ_VISUAL_EVENT_TRACER
-    nsAutoCString url;
-    uri->GetAsciiSpec(url);
-    MOZ_EVENT_TRACER_NAME_OBJECT(this, url.get());
-#endif
-
     nsresult rv = HttpBaseChannel::Init(uri, caps, proxyInfo,
                                         proxyResolveFlags, proxyURI);
     if (NS_FAILED(rv))
@@ -2672,8 +2665,6 @@ IsSubRangeRequest(nsHttpRequestHead &aRequestHead)
 nsresult
 nsHttpChannel::OpenCacheEntry(bool isHttps)
 {
-    MOZ_EVENT_TRACER_EXEC(this, "net::http::OpenCacheEntry");
-
     // Handle correctly mCacheEntriesToWaitFor
     AutoCacheWaitFlags waitFlags(this);
 
@@ -3339,6 +3330,13 @@ nsHttpChannel::OnCacheEntryAvailableInternal(nsICacheEntry *entry,
         if (!mFallbackChannel && !mFallbackKey.IsEmpty()) {
             return AsyncCall(&nsHttpChannel::HandleAsyncFallback);
         }
+
+        if (mIsPackagedAppResource) {
+            // We need to return FILE_NOT_FOUND in case an error occurs
+            // or we will take the user to the <you're offline> screen.
+            return NS_ERROR_FILE_NOT_FOUND;
+        }
+
         return NS_ERROR_DOCUMENT_NOT_CACHED;
     }
 
@@ -4396,11 +4394,6 @@ nsHttpChannel::AsyncProcessRedirection(uint32_t redirectType)
     LOG(("nsHttpChannel::AsyncProcessRedirection [this=%p type=%u]\n",
         this, redirectType));
 
-    // The channel is actually starting its operation now, at least because
-    // we want it to appear like being in the waiting phase until now.
-    MOZ_EVENT_TRACER_EXEC(this, "net::http::channel");
-    MOZ_EVENT_TRACER_EXEC(this, "net::http::redirect-callbacks");
-
     const char *location = mResponseHead->PeekHeader(nsHttp::Location);
 
     // if a location header was not given, then we can't perform the redirect,
@@ -4760,8 +4753,6 @@ nsHttpChannel::GetSecurityInfo(nsISupports **securityInfo)
 NS_IMETHODIMP
 nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
 {
-    MOZ_EVENT_TRACER_WAIT(this, "net::http::channel");
-
     LOG(("nsHttpChannel::AsyncOpen [this=%p]\n", this));
 
     NS_ENSURE_ARG_POINTER(listener);
@@ -4769,6 +4760,13 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
     NS_ENSURE_TRUE(!mWasOpened, NS_ERROR_ALREADY_OPENED);
 
     nsresult rv;
+
+    MOZ_ASSERT(NS_IsMainThread());
+    if (gHttpHandler->PackagedAppsEnabled()) {
+        nsAutoCString path;
+        mURI->GetPath(path);
+        mIsPackagedAppResource = path.Find(PACKAGED_APP_TOKEN) != kNotFound;
+    }
 
     rv = NS_CheckPortSafety(mURI);
     if (NS_FAILED(rv)) {
@@ -4981,6 +4979,22 @@ nsHttpChannel::BeginConnect()
     // clear the already recorded AsyncOpen value for consistency.
     if (!mTimingEnabled)
         mAsyncOpenTime = TimeStamp();
+
+    if (mIsPackagedAppResource) {
+        // If this is a packaged app resource, the content will be fetched
+        // by the packaged app service into the cache, and the cache entry will
+        // be passed to OnCacheEntryAvailable.
+        mLoadFlags |= LOAD_ONLY_FROM_CACHE;
+        mLoadFlags |= LOAD_FROM_CACHE;
+        mLoadFlags &= ~VALIDATE_ALWAYS;
+        nsCOMPtr<nsIPackagedAppService> pas =
+          do_GetService("@mozilla.org/network/packaged-app-service;1", &rv);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        return pas->RequestURI(mURI, GetLoadContextInfo(this), this);
+    }
 
     // when proxying only use the pipeline bit if ProxyPipelining() allows it.
     if (!mConnectionInfo->UsingConnect() && mConnectionInfo->UsingHttpProxy()) {
@@ -5666,8 +5680,6 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
         mListener->OnStopRequest(this, mListenerContext, status);
     }
 
-    MOZ_EVENT_TRACER_DONE(this, "net::http::channel");
-
     CloseCacheEntry(!contentComplete);
 
     if (mOfflineCacheEntry)
@@ -5793,9 +5805,6 @@ nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
         // already streamed some data from another source (see, for example,
         // OnDoneReadingPartialCacheEntry).
         //
-        if (!mLogicalOffset)
-            MOZ_EVENT_TRACER_EXEC(this, "net::http::channel");
-
         int64_t offsetBefore = 0;
         nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(input);
         if (seekable && NS_FAILED(seekable->Tell(&offsetBefore))) {
@@ -6379,7 +6388,6 @@ nsHttpChannel::OnRedirectVerifyCallback(nsresult result)
         // We are not waiting for the callback. At this moment we must release
         // reference to the redirect target channel, otherwise we may leak.
         mRedirectChannel = nullptr;
-        MOZ_EVENT_TRACER_DONE(this, "net::http::channel");
     }
 
     // We always resume the pumps here. If all functions on stack have been

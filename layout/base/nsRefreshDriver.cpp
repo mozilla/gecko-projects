@@ -74,10 +74,11 @@ using namespace mozilla::ipc;
 using namespace mozilla::layout;
 
 static PRLogModuleInfo *gLog = nullptr;
-#define LOG(...) MOZ_LOG(gLog, PR_LOG_NOTICE, (__VA_ARGS__))
+#define LOG(...) MOZ_LOG(gLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 #define DEFAULT_FRAME_RATE 60
 #define DEFAULT_THROTTLED_FRAME_RATE 1
+#define DEFAULT_RECOMPUTE_VISIBILITY_INTERVAL_MS 1000
 // after 10 minutes, stop firing off inactive timers
 #define DEFAULT_INACTIVE_TIMER_DISABLE_SECONDS 600
 
@@ -970,6 +971,17 @@ nsRefreshDriver::GetThrottledTimerInterval()
   return 1000.0 / rate;
 }
 
+/* static */ mozilla::TimeDuration
+nsRefreshDriver::GetMinRecomputeVisibilityInterval()
+{
+  int32_t interval =
+    Preferences::GetInt("layout.visibility.min-recompute-interval-ms", -1);
+  if (interval <= 0) {
+    interval = DEFAULT_RECOMPUTE_VISIBILITY_INTERVAL_MS;
+  }
+  return TimeDuration::FromMilliseconds(interval);
+}
+
 double
 nsRefreshDriver::GetRefreshTimerInterval() const
 {
@@ -1016,7 +1028,9 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
     mFreezeCount(0),
     mThrottledFrameRequestInterval(TimeDuration::FromMilliseconds(
                                      GetThrottledTimerInterval())),
+    mMinRecomputeVisibilityInterval(GetMinRecomputeVisibilityInterval()),
     mThrottled(false),
+    mNeedToRecomputeVisibility(false),
     mTestControllingRefreshes(false),
     mViewManagerFlushIsPending(false),
     mRequestedHighPrecision(false),
@@ -1028,6 +1042,7 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
   mMostRecentRefresh = TimeStamp::Now();
   mMostRecentTick = mMostRecentRefresh;
   mNextThrottledFrameRequestTick = mMostRecentTick;
+  mNextRecomputeVisibilityTick = mMostRecentTick;
 }
 
 nsRefreshDriver::~nsRefreshDriver()
@@ -1676,6 +1691,8 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
           NS_RELEASE(shell);
         }
 
+        mNeedToRecomputeVisibility = true;
+
         if (tracingStyleFlush) {
           profiler_tracing("Paint", "Styles", TRACING_INTERVAL_END);
         }
@@ -1721,11 +1738,24 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
           NS_RELEASE(shell);
         }
 
+        mNeedToRecomputeVisibility = true;
+
         if (tracingLayoutFlush) {
           profiler_tracing("Paint", "Reflow", TRACING_INTERVAL_END);
         }
       }
     }
+  }
+
+  // Recompute image visibility if it's necessary and enough time has passed
+  // since the last time we did it.
+  if (mNeedToRecomputeVisibility && !mThrottled &&
+      aNowTime >= mNextRecomputeVisibilityTick &&
+      !presShell->IsPaintingSuppressed()) {
+    mNextRecomputeVisibilityTick = aNowTime + mMinRecomputeVisibilityInterval;
+    mNeedToRecomputeVisibility = false;
+
+    presShell->ScheduleImageVisibilityUpdate();
   }
 
   /*

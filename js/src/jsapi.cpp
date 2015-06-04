@@ -130,12 +130,21 @@ JS::CallArgs::requireAtLeast(JSContext* cx, const char* fnname, unsigned require
 }
 
 static bool
-ErrorTakesIdArgument(unsigned msg)
+ErrorTakesArguments(unsigned msg)
 {
     MOZ_ASSERT(msg < JSErr_Limit);
     unsigned argCount = js_ErrorFormatString[msg].argCount;
-    MOZ_ASSERT(argCount <= 1);
-    return argCount == 1;
+    MOZ_ASSERT(argCount <= 2);
+    return argCount == 1 || argCount == 2;
+}
+
+static bool
+ErrorTakesObjectArgument(unsigned msg)
+{
+    MOZ_ASSERT(msg < JSErr_Limit);
+    unsigned argCount = js_ErrorFormatString[msg].argCount;
+    MOZ_ASSERT(argCount <= 2);
+    return argCount == 2;
 }
 
 JS_PUBLIC_API(bool)
@@ -153,7 +162,7 @@ JS::ObjectOpResult::reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, 
         return ReportValueErrorFlags(cx, flags, code_, JSDVG_IGNORE_STACK, val,
                                      nullptr, nullptr, nullptr);
     }
-    if (ErrorTakesIdArgument(code_)) {
+    if (ErrorTakesArguments(code_)) {
         RootedValue idv(cx, IdToValue(id));
         RootedString str(cx, ValueToSource(cx, idv));
         if (!str)
@@ -162,6 +171,11 @@ JS::ObjectOpResult::reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, 
         JSAutoByteString propName(cx, str);
         if (!propName)
             return false;
+
+        if (ErrorTakesObjectArgument(code_)) {
+            return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr, code_,
+                                                obj->getClass()->name, propName.ptr());
+        }
 
         return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr, code_,
                                             propName.ptr());
@@ -174,7 +188,7 @@ JS::ObjectOpResult::reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, 
 {
     MOZ_ASSERT(code_ != Uninitialized);
     MOZ_ASSERT(!ok());
-    MOZ_ASSERT(!ErrorTakesIdArgument(code_));
+    MOZ_ASSERT(!ErrorTakesArguments(code_));
 
     unsigned flags = strict ? JSREPORT_ERROR : (JSREPORT_WARNING | JSREPORT_STRICT);
     return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr, code_);
@@ -234,6 +248,18 @@ JS::ObjectOpResult::failCantPreventExtensions()
     return fail(JSMSG_CANT_PREVENT_EXTENSIONS);
 }
 
+JS_PUBLIC_API(bool)
+JS::ObjectOpResult::failNoNamedSetter()
+{
+    return fail(JSMSG_NO_NAMED_SETTER);
+}
+
+JS_PUBLIC_API(bool)
+JS::ObjectOpResult::failNoIndexedSetter()
+{
+    return fail(JSMSG_NO_INDEXED_SETTER);
+}
+
 JS_PUBLIC_API(int64_t)
 JS_Now()
 {
@@ -274,9 +300,10 @@ JS_GetEmptyString(JSRuntime* rt)
 namespace js {
 
 JS_PUBLIC_API(bool)
-GetPerformanceStats(JSRuntime* rt,
-                    PerformanceStatsVector& stats,
-                    PerformanceStats& processStats)
+IterPerformanceStats(JSContext* cx,
+                     PerformanceStatsWalker walker,
+                     PerformanceData* processStats,
+                     void* closure)
 {
     // As a PerformanceGroup is typically associated to several
     // compartments, use a HashSet to make sure that we only report
@@ -289,13 +316,16 @@ GetPerformanceStats(JSRuntime* rt,
         return false;
     }
 
+    JSRuntime* rt = JS_GetRuntime(cx);
     for (CompartmentsIter c(rt, WithAtoms); !c.done(); c.next()) {
         JSCompartment* compartment = c.get();
         if (!compartment->performanceMonitoring.isLinked()) {
             // Don't report compartments that do not even have a PerformanceGroup.
             continue;
         }
-        PerformanceGroup* group = compartment->performanceMonitoring.getGroup();
+
+        js::AutoCompartment autoCompartment(cx, compartment);
+        PerformanceGroup* group = compartment->performanceMonitoring.getGroup(cx);
 
         if (group->data.ticks == 0) {
             // Don't report compartments that have never been used.
@@ -308,38 +338,16 @@ GetPerformanceStats(JSRuntime* rt,
             continue;
         }
 
-        if (!stats.growBy(1)) {
-            // Memory issue
+        if (!(*walker)(cx, group->data, closure)) {
+            // Issue in callback
             return false;
         }
-        PerformanceStats* stat = &stats.back();
-        stat->isSystem = compartment->isSystem();
-        if (compartment->addonId)
-            stat->addonId = compartment->addonId;
-
-        if (compartment->addonId || !compartment->isSystem()) {
-            if (rt->compartmentNameCallback) {
-                (*rt->compartmentNameCallback)(rt, compartment,
-                                               stat->name,
-                                               mozilla::ArrayLength(stat->name));
-            } else {
-                strcpy(stat->name, "<unknown>");
-            }
-        } else {
-            strcpy(stat->name, "<platform>");
-        }
-        stat->performance = group->data;
         if (!set.add(ptr, group)) {
             // Memory issue
             return false;
         }
     }
-
-    strcpy(processStats.name, "<process>");
-    processStats.addonId = nullptr;
-    processStats.isSystem = true;
-    processStats.performance = rt->stopwatch.performance;
-
+    *processStats = rt->stopwatch.performance;
     return true;
 }
 
@@ -928,6 +936,7 @@ JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSScript* target
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     cx_->enterCompartment(target->compartment());
 }
+
 
 JSAutoCompartment::~JSAutoCompartment()
 {
@@ -4430,7 +4439,7 @@ JS::Construct(JSContext* cx, HandleValue fval, const JS::HandleValueArray& args,
     assertSameCompartment(cx, fval, args);
     AutoLastFrameCheck lfc(cx);
 
-    return InvokeConstructor(cx, fval, args.length(), args.begin(), rval);
+    return InvokeConstructor(cx, fval, args.length(), args.begin(), false, rval);
 }
 
 static JSObject*
@@ -4445,12 +4454,13 @@ JS_NewHelper(JSContext* cx, HandleObject ctor, const JS::HandleValueArray& input
     // of object to create, create it, and clamp the return value to an object,
     // among other details. InvokeConstructor does the hard work.
     InvokeArgs args(cx);
-    if (!args.init(inputArgs.length()))
+    if (!args.init(inputArgs.length(), true))
         return nullptr;
 
     args.setCallee(ObjectValue(*ctor));
     args.setThis(NullValue());
     PodCopy(args.array(), inputArgs.begin(), inputArgs.length());
+    args.newTarget().setObject(*ctor);
 
     if (!InvokeConstructor(cx, args))
         return nullptr;
@@ -4905,8 +4915,10 @@ EncodeLatin1(ExclusiveContext* cx, JSString* str)
 
     size_t len = str->length();
     Latin1Char* buf = cx->pod_malloc<Latin1Char>(len + 1);
-    if (!buf)
+    if (!buf) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
 
     mozilla::PodCopy(buf, linear->latin1Chars(nogc), len);
     buf[len] = '\0';

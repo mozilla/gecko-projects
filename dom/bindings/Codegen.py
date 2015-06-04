@@ -10457,15 +10457,13 @@ class CGDOMJSProxyHandler_defineProperty(ClassMethod):
             # indexed setter.  That's how the object would normally behave if
             # you tried to set the property on it.  That means we don't need to
             # do anything special for Xrays here.
-            set += fill(
+            set += dedent(
                 """
                 if (IsArrayIndex(GetArrayIndexFromId(cx, id))) {
-                  return js::IsInNonStrictPropertySet(cx)
-                         ? opresult.succeed()
-                         : ThrowErrorMessage(cx, MSG_NO_INDEXED_SETTER, "${name}");
+                  *defined = true;
+                  return opresult.failNoIndexedSetter();
                 }
-                """,
-                name=self.descriptor.name)
+                """)
 
         namedSetter = self.descriptor.operations['NamedSetter']
         if namedSetter:
@@ -10498,13 +10496,11 @@ class CGDOMJSProxyHandler_defineProperty(ClassMethod):
                     $*{presenceChecker}
 
                     if (found) {
-                      return js::IsInNonStrictPropertySet(cx)
-                             ? opresult.succeed()
-                             : ThrowErrorMessage(cx, MSG_NO_NAMED_SETTER, "${name}");
+                      *defined = true;
+                      return opresult.failNoNamedSetter();
                     }
                     """,
-                    presenceChecker=CGProxyNamedPresenceChecker(self.descriptor, foundVar="found").define(),
-                    name=self.descriptor.name)
+                    presenceChecker=CGProxyNamedPresenceChecker(self.descriptor, foundVar="found").define())
             set += ("return mozilla::dom::DOMProxyHandler::defineProperty(%s);\n" %
                     ", ".join(a.name for a in self.args))
         return set
@@ -11161,12 +11157,13 @@ def memberProperties(m, descriptor):
             props.isJsonifier = True
         elif (not m.isIdentifierLess() or m == descriptor.operations['Stringifier']):
             if not m.isStatic() and descriptor.interface.hasInterfacePrototypeObject():
-                if m.returnsPromise() and descriptor.needsSpecialGenericOps():
-                    props.isPromiseReturningMethod = True
+                if descriptor.needsSpecialGenericOps():
+                    if m.returnsPromise():
+                        props.isPromiseReturningMethod = True
+                    else:
+                        props.isGenericMethod = True
                 if m.getExtendedAttribute("CrossOriginCallable"):
                     props.isCrossOriginMethod = True
-                elif descriptor.needsSpecialGenericOps():
-                    props.isGenericMethod = True
     elif m.isAttr():
         if not m.isStatic() and descriptor.interface.hasInterfacePrototypeObject():
             if m.hasLenientThis():
@@ -13301,6 +13298,9 @@ class CGBindingImplClass(CGClass):
 
         wrapArgs = [Argument('JSContext*', 'aCx'),
                     Argument('JS::Handle<JSObject*>', 'aGivenProto')]
+        if not descriptor.wrapperCache:
+            wrapArgs.append(Argument('JS::MutableHandle<JSObject*>',
+                                     'aReflector'))
         self.methodDecls.insert(0,
                                 ClassMethod(wrapMethodName, "JSObject*",
                                             wrapArgs, virtual=descriptor.wrapperCache,
@@ -13418,18 +13418,26 @@ class CGExampleClass(CGBindingImplClass):
 
                 """)
 
+        if self.descriptor.wrapperCache:
+            reflectorArg = ""
+            reflectorPassArg = ""
+        else:
+            reflectorArg = ", JS::MutableHandle<JSObject*> aReflector"
+            reflectorPassArg = ", aReflector"
         classImpl = ccImpl + ctordtor + "\n" + dedent("""
             JSObject*
-            ${nativeType}::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
+            ${nativeType}::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto${reflectorArg})
             {
-              return ${ifaceName}Binding::Wrap(aCx, this, aGivenProto);
+              return ${ifaceName}Binding::Wrap(aCx, this, aGivenProto${reflectorPassArg});
             }
 
             """)
         return string.Template(classImpl).substitute(
             ifaceName=self.descriptor.name,
             nativeType=self.nativeLeafName(self.descriptor),
-            parentType=self.nativeLeafName(self.parentDesc) if self.parentIface else "")
+            parentType=self.nativeLeafName(self.parentDesc) if self.parentIface else "",
+            reflectorArg=reflectorArg,
+            reflectorPassArg=reflectorPassArg)
 
     @staticmethod
     def nativeLeafName(descriptor):

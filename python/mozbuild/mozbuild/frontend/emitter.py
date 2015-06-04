@@ -850,15 +850,15 @@ class TreeMetadataEmitter(LoggingMixin):
         for f in generated_files:
             flags = generated_files[f]
             output = f
+            inputs = []
             if flags.script:
                 method = "main"
+                script = SourcePath(context, flags.script).full_path
+
                 # Deal with cases like "C:\\path\\to\\script.py:function".
-                if not flags.script.endswith('.py') and ':' in flags.script:
-                    script, method = flags.script.rsplit(':', 1)
-                else:
-                    script = flags.script
-                script = mozpath.join(context.srcdir, script)
-                inputs = [mozpath.join(context.srcdir, i) for i in flags.inputs]
+                if '.py:' in script:
+                    script, method = script.rsplit('.py:', 1)
+                    script += '.py'
 
                 if not os.path.exists(script):
                     raise SandboxValidationError(
@@ -868,15 +868,18 @@ class TreeMetadataEmitter(LoggingMixin):
                     raise SandboxValidationError(
                         'Script for generating %s does not end in .py: %s'
                         % (f, script), context)
-                for i in inputs:
-                    if not os.path.exists(i):
+
+                for i in flags.inputs:
+                    p = Path(context, i)
+                    if (isinstance(p, SourcePath) and
+                            not os.path.exists(p.full_path)):
                         raise SandboxValidationError(
                             'Input for generating %s does not exist: %s'
-                            % (f, i), context)
+                            % (f, p.full_path), context)
+                    inputs.append(p.full_path)
             else:
                 script = None
                 method = None
-                inputs = []
             yield GeneratedFile(context, script, method, output, inputs)
 
     def _process_test_harness_files(self, context):
@@ -991,6 +994,10 @@ class TreeMetadataEmitter(LoggingMixin):
             for path in context.get('%s_MANIFESTS' % flavor.upper(), []):
                 for obj in self._process_reftest_manifest(context, flavor, path):
                     yield obj
+
+        for path in context.get("WEB_PLATFORM_TESTS_MANIFESTS", []):
+            for obj in self._process_web_platform_tests_manifest(context, path):
+                yield obj
 
     def _process_test_manifest(self, context, info, manifest_path):
         flavor, install_root, install_subdir, package_tests = info
@@ -1168,6 +1175,64 @@ class TreeMetadataEmitter(LoggingMixin):
                 'support-files': '',
                 'subsuite': '',
             })
+
+        yield obj
+
+    def _load_web_platform_tests_manifest(self, context, manifest_path, tests_root):
+        old_path = sys.path[:]
+        try:
+            # Setup sys.path to include all the dependencies required to import
+            # the web-platform-tests manifest parser. web-platform-tests provides
+            # a the localpaths.py to do the path manipulation, which we load,
+            # providing the __file__ variable so it can resolve the relative
+            # paths correctly.
+            paths_file = os.path.join(context.config.topsrcdir, "testing",
+                                      "web-platform", "tests", "tools", "localpaths.py")
+            _globals = {"__file__": paths_file}
+            execfile(paths_file, _globals)
+            import manifest as wptmanifest
+        finally:
+            sys.path = old_path
+
+        return wptmanifest.manifest.load(tests_root, manifest_path)
+
+    def _process_web_platform_tests_manifest(self, context, paths):
+        manifest_path, tests_root = paths
+
+        manifest_path = mozpath.normpath(manifest_path)
+        manifest_full_path = mozpath.normpath(mozpath.join(
+            context.srcdir, manifest_path))
+        manifest_reldir = mozpath.dirname(mozpath.relpath(manifest_full_path,
+            context.config.topsrcdir))
+
+        tests_root = mozpath.normpath(mozpath.join(context.srcdir, tests_root))
+
+        manifest = self._load_web_platform_tests_manifest(context, manifest_full_path, tests_root)
+
+        # Create a equivalent TestManifest object
+        obj = TestManifest(context, manifest_full_path, manifest,
+                           flavor="web-platform-tests",
+                           relpath=mozpath.join(manifest_reldir,
+                                                mozpath.basename(manifest_path)),
+                           install_prefix="web-platform/")
+
+
+        for path, tests in manifest:
+            path = mozpath.join(tests_root, path)
+            for test in tests:
+                if test.item_type not in ["testharness", "reftest"]:
+                    continue
+
+                obj.tests.append({
+                    'path': path,
+                    'here': mozpath.dirname(path),
+                    'manifest': manifest_path,
+                    'name': test.id,
+                    'head': '',
+                    'tail': '',
+                    'support-files': '',
+                    'subsuite': '',
+                })
 
         yield obj
 

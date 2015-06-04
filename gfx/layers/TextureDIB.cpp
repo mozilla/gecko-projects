@@ -105,8 +105,7 @@ TextureClientMemoryDIB::AllocateForSurface(gfx::IntSize aSize, TextureAllocation
   MOZ_ASSERT(!IsAllocated());
   mSize = aSize;
 
-  mSurface = new gfxWindowsSurface(gfxIntSize(aSize.width, aSize.height),
-                                   SurfaceFormatToImageFormat(mFormat));
+  mSurface = new gfxWindowsSurface(aSize, SurfaceFormatToImageFormat(mFormat));
   if (!mSurface || mSurface->CairoStatus())
   {
     NS_WARNING("Could not create surface");
@@ -298,7 +297,7 @@ DIBTextureHost::DIBTextureHost(TextureFlags aFlags,
 }
 
 void
-DIBTextureHost::Updated(const nsIntRegion* aRegion)
+DIBTextureHost::UpdatedInternal(const nsIntRegion* aRegion)
 {
   if (!mCompositor) {
     // This can happen if we send textures to a compositable that isn't yet
@@ -332,7 +331,7 @@ TextureHostFileMapping::~TextureHostFileMapping()
 }
 
 void
-TextureHostFileMapping::Updated(const nsIntRegion* aRegion)
+TextureHostFileMapping::UpdatedInternal(const nsIntRegion* aRegion)
 {
   if (!mCompositor) {
     // This can happen if we send textures to a compositable that isn't yet

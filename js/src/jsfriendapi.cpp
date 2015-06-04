@@ -309,14 +309,6 @@ js::IsAtomsZone(JS::Zone* zone)
 }
 
 JS_FRIEND_API(bool)
-js::IsInNonStrictPropertySet(JSContext* cx)
-{
-    jsbytecode* pc;
-    JSScript* script = cx->currentScript(&pc, JSContext::ALLOW_CROSS_COMPARTMENT);
-    return script && !IsStrictSetPC(pc) && (js_CodeSpec[*pc].format & JOF_SET);
-}
-
-JS_FRIEND_API(bool)
 js::IsFunctionObject(JSObject* obj)
 {
     return obj->is<JSFunction>();
@@ -785,7 +777,7 @@ FormatFrame(JSContext* cx, const ScriptFrameIter& iter, char* buf, int num,
                                         name ? name :"",
                                         name ? " = " : "",
                                         arg.isString() ? "\"" : "",
-                                        value ? value : "?unknown?",
+                                        value,
                                         arg.isString() ? "\"" : "");
                 if (!buf)
                     return buf;
@@ -897,27 +889,22 @@ struct DumpHeapTracer : public JS::CallbackTracer, public WeakMapTracer
     const char* prefix;
     FILE* output;
 
-    DumpHeapTracer(FILE* fp, JSRuntime* rt, JSTraceCallback callback)
-      : JS::CallbackTracer(rt, callback, DoNotTraceWeakMaps),
-        js::WeakMapTracer(rt, DumpWeakMap), prefix(""), output(fp)
+    DumpHeapTracer(FILE* fp, JSRuntime* rt)
+      : JS::CallbackTracer(rt, DoNotTraceWeakMaps),
+        js::WeakMapTracer(rt), prefix(""), output(fp)
     {}
 
   private:
-    static void
-    DumpWeakMap(js::WeakMapTracer* trc, JSObject* map,
-                JS::GCCellPtr key, JS::GCCellPtr value)
-    {
-        DumpHeapTracer* tracer =
-            static_cast<DumpHeapTracer*>(trc);
-
+    void trace(JSObject* map, JS::GCCellPtr key, JS::GCCellPtr value) override {
         JSObject* kdelegate = nullptr;
-        if (key.isObject()) {
+        if (key.isObject())
             kdelegate = js::GetWeakmapKeyDelegate(key.toObject());
-        }
 
-        fprintf(tracer->output, "WeakMapEntry map=%p key=%p keyDelegate=%p value=%p\n",
+        fprintf(output, "WeakMapEntry map=%p key=%p keyDelegate=%p value=%p\n",
                 map, key.asCell(), kdelegate, value.asCell());
     }
+
+    void trace(void** thingp, JS::TraceKind kind) override;
 };
 
 static char
@@ -970,16 +957,15 @@ DumpHeapVisitCell(JSRuntime* rt, void* data, void* thing,
     JS_TraceChildren(dtrc, thing, traceKind);
 }
 
-static void
-DumpHeapVisitGCThing(JS::CallbackTracer* trc, void** thingp, JS::TraceKind kind)
+void
+DumpHeapTracer::trace(void** thingp, JS::TraceKind kind)
 {
     if (gc::IsInsideNursery((js::gc::Cell*)*thingp))
         return;
 
-    DumpHeapTracer* dtrc = static_cast<DumpHeapTracer*>(trc);
     char buffer[1024];
-    dtrc->getTracingEdgeName(buffer, sizeof(buffer));
-    fprintf(dtrc->output, "%s%p %c %s\n", dtrc->prefix, *thingp, MarkDescriptor(*thingp), buffer);
+    getTracingEdgeName(buffer, sizeof(buffer));
+    fprintf(output, "%s%p %c %s\n", prefix, *thingp, MarkDescriptor(*thingp), buffer);
 }
 
 void
@@ -988,7 +974,7 @@ js::DumpHeap(JSRuntime* rt, FILE* fp, js::DumpHeapNurseryBehaviour nurseryBehavi
     if (nurseryBehaviour == js::CollectNurseryBeforeDump)
         rt->gc.evictNursery(JS::gcreason::API);
 
-    DumpHeapTracer dtrc(fp, rt, DumpHeapVisitGCThing);
+    DumpHeapTracer dtrc(fp, rt);
     fprintf(dtrc.output, "# Roots.\n");
     TraceRuntime(&dtrc);
 

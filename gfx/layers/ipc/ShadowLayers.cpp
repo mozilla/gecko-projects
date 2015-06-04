@@ -28,7 +28,6 @@
 #include "mozilla/layers/TextureClient.h"  // for TextureClient
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
-#include "nsSize.h"                     // for nsIntSize
 #include "nsTArray.h"                   // for nsAutoTArray, nsTArray, etc
 #include "nsXULAppAPI.h"                // for XRE_GetProcessType, etc
 #include "mozilla/ReentrantMonitor.h"
@@ -429,7 +428,7 @@ ShadowLayerForwarder::RemoveTextureFromCompositableAsync(AsyncTransactionTracker
                                                      CompositableClient* aCompositable,
                                                      TextureClient* aTexture)
 {
-  if (mTxn->Opened()) {
+  if (mTxn->Opened() && !aCompositable->IsDestroyed()) {
     mTxn->AddEdit(OpRemoveTextureAsync(CompositableClient::GetTrackersHolderId(aCompositable->GetIPDLActor()),
                                        aAsyncTransactionTracker->GetId(),
                                        nullptr, aCompositable->GetIPDLActor(),

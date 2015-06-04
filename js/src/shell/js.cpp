@@ -2380,15 +2380,6 @@ DisassWithSrc(JSContext* cx, unsigned argc, jsval* vp)
 #endif /* DEBUG */
 
 static bool
-BuildDate(JSContext* cx, unsigned argc, jsval* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    fprintf(gOutFile, "built on %s at %s\n", __DATE__, __TIME__);
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
 Intern(JSContext* cx, unsigned argc, jsval* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -4612,10 +4603,6 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "  Similar to the DumpJSStack() function in the browser."),
 
 #endif
-    JS_FN_HELP("build", BuildDate, 0, 0,
-"build()",
-"  Show build date and time."),
-
     JS_FN_HELP("intern", Intern, 1, 0,
 "intern(str)",
 "  Internalize str in the atom table."),
@@ -6065,9 +6052,23 @@ DummyPreserveWrapperCallback(JSContext* cx, JSObject* obj)
     return true;
 }
 
+static void
+PreInit()
+{
+#ifdef XP_WIN
+    // Disable the segfault dialog. We want to fail the tests immediately
+    // instead of hanging automation.
+    UINT prevMode = SetErrorMode(0);
+    UINT newMode = SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX;
+    SetErrorMode(prevMode | newMode);
+#endif
+}
+
 int
 main(int argc, char** argv, char** envp)
 {
+    PreInit();
+
     sArgc = argc;
     sArgv = argv;
 

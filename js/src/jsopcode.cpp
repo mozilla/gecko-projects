@@ -119,9 +119,11 @@ js::StackUses(JSScript* script, jsbytecode* pc)
     switch (op) {
       case JSOP_POPN:
         return GET_UINT16(pc);
+      case JSOP_NEW:
+        return 2 + GET_ARGC(pc) + 1;
       default:
         /* stack: fun, this, [argc arguments] */
-        MOZ_ASSERT(op == JSOP_NEW || op == JSOP_CALL || op == JSOP_EVAL ||
+        MOZ_ASSERT(op == JSOP_CALL || op == JSOP_EVAL ||
                    op == JSOP_STRICTEVAL || op == JSOP_FUNCALL || op == JSOP_FUNAPPLY);
         return 2 + GET_ARGC(pc);
     }
@@ -835,8 +837,10 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
         if (!nbytes)
             return false;
         nbytes = JS_sprintf_append(nullptr, "%s", nbytes);
-        if (!nbytes)
+        if (!nbytes) {
+            ReportOutOfMemory(cx);
             return false;
+        }
         bytes->initBytes(nbytes);
         return true;
     }
@@ -844,8 +848,10 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
     JSRuntime* rt = cx->runtime();
     if (rt->isHeapBusy() || !rt->gc.isAllocAllowed()) {
         char* source = JS_sprintf_append(nullptr, "<value>");
-        if (!source)
+        if (!source) {
+            ReportOutOfMemory(cx);
             return false;
+        }
         bytes->initBytes(source);
         return true;
     }
@@ -855,8 +861,10 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
         if (obj.is<StaticBlockObject>()) {
             Rooted<StaticBlockObject*> block(cx, &obj.as<StaticBlockObject>());
             char* source = JS_sprintf_append(nullptr, "depth %d {", block->localOffset());
-            if (!source)
+            if (!source) {
+                ReportOutOfMemory(cx);
                 return false;
+            }
 
             Shape::Range<CanGC> r(cx, block->lastProperty());
 
@@ -875,13 +883,17 @@ ToDisassemblySource(JSContext* cx, HandleValue v, JSAutoByteString* bytes)
                                            bytes.ptr(),
                                            block->shapeToIndex(*shape),
                                            !r.empty() ? ", " : "");
-                if (!source)
+                if (!source) {
+                    ReportOutOfMemory(cx);
                     return false;
+                }
             }
 
             source = JS_sprintf_append(source, "}");
-            if (!source)
+            if (!source) {
+                ReportOutOfMemory(cx);
                 return false;
+            }
             bytes->initBytes(source);
             return true;
         }
@@ -1262,6 +1274,8 @@ ExpressionDecompiler::decompilePC(jsbytecode* pc)
         // |this| could convert to a very long object initialiser, so cite it by
         // its keyword name.
         return write(js_this_str);
+      case JSOP_NEWTARGET:
+        return write("new.target");
       case JSOP_CALL:
       case JSOP_FUNCALL:
         return decompilePCForStackOperand(pc, -int32_t(GET_ARGC(pc) + 2)) &&

@@ -966,6 +966,27 @@ Layer::GetVisibleRegionRelativeToRootLayer(nsIntRegion& aResult,
   return true;
 }
 
+Maybe<ParentLayerIntRect>
+Layer::GetCombinedClipRect() const
+{
+  Maybe<ParentLayerIntRect> clip = GetClipRect();
+
+  for (size_t i = 0; i < mFrameMetrics.Length(); i++) {
+    if (!mFrameMetrics[i].HasClipRect()) {
+      continue;
+    }
+
+    const ParentLayerIntRect& other = mFrameMetrics[i].ClipRect();
+    if (clip) {
+      clip = Some(clip.value().Intersect(other));
+    } else {
+      clip = Some(other);
+    }
+  }
+
+  return clip;
+}
+
 ContainerLayer::ContainerLayer(LayerManager* aManager, void* aImplData)
   : Layer(aManager, aImplData),
     mFirstChild(nullptr),
@@ -2139,7 +2160,7 @@ LayerManager::IsLogEnabled()
 {
   MOZ_ASSERT(!!sLog,
              "layer manager must be created before logging is allowed");
-  return PR_LOG_TEST(sLog, PR_LOG_DEBUG);
+  return MOZ_LOG_TEST(sLog, LogLevel::Debug);
 }
 
 void

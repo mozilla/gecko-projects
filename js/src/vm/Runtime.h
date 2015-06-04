@@ -1003,11 +1003,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Garbage collector state has been sucessfully initialized. */
     bool                gcInitialized;
 
-    bool isHeapBusy() { return gc.isHeapBusy(); }
-    bool isHeapMajorCollecting() { return gc.isHeapMajorCollecting(); }
-    bool isHeapMinorCollecting() { return gc.isHeapMinorCollecting(); }
-    bool isHeapCollecting() { return gc.isHeapCollecting(); }
-    bool isHeapCompacting() { return gc.isHeapCompacting(); }
+    bool isHeapBusy() const { return heapState_ != JS::HeapState::Idle; }
+    bool isHeapMajorCollecting() const { return heapState_ == JS::HeapState::MajorCollecting; }
+    bool isHeapMinorCollecting() const { return heapState_ == JS::HeapState::MinorCollecting; }
+    bool isHeapCollecting() const { return isHeapMinorCollecting() || isHeapMajorCollecting(); }
 
     int gcZeal() { return gc.zeal(); }
 
@@ -1025,10 +1024,6 @@ struct JSRuntime : public JS::shadow::Runtime,
 #endif
 
   public:
-    void setNeedsIncrementalBarrier(bool needs) {
-        needsIncrementalBarrier_ = needs;
-    }
-
 #if defined(JS_ARM_SIMULATOR) || defined(JS_MIPS_SIMULATOR)
     js::jit::Simulator* simulator() const;
     uintptr_t* addressOfSimulatorStackLimit();
@@ -1492,9 +1487,22 @@ struct JSRuntime : public JS::shadow::Runtime,
          */
         js::PerformanceData performance;
 
+        /**
+         * Callback used to ask the embedding to determine in which
+         * Performance Group the current execution belongs. Typically, this is
+         * used to regroup JSCompartments from several iframes from the same
+         * page or from several compartments of the same addon into a single
+         * Performance Group.
+         *
+         * May be `nullptr`, in which case we put all the JSCompartments
+         * in the same PerformanceGroup.
+         */
+        JSCurrentPerfGroupCallback currentPerfGroupCallback;
+
         Stopwatch()
           : iteration(0)
           , isEmpty(true)
+          , currentPerfGroupCallback(nullptr)
           , isActive_(false)
         { }
 

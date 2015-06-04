@@ -682,6 +682,8 @@ class NodeBuilder
     bool generatorExpression(HandleValue body, NodeVector& blocks, HandleValue filter,
                              bool isLegacy, TokenPos* pos, MutableHandleValue dst);
 
+    bool newTargetExpression(TokenPos* pos, MutableHandleValue dst);
+
     /*
      * declarations
      */
@@ -1749,6 +1751,16 @@ NodeBuilder::classDefinition(bool expr, HandleValue name, HandleValue heritage, 
                    dst);
 }
 
+bool
+NodeBuilder::newTargetExpression(TokenPos* pos, MutableHandleValue dst)
+{
+    RootedValue cb(cx, callbacks[AST_NEWTARGET_EXPR]);
+    if (!cb.isNull())
+        return callback(cb, pos, dst);
+
+    return newNode(AST_NEWTARGET_EXPR, pos, dst);
+}
+
 namespace {
 
 /*
@@ -1910,8 +1922,11 @@ ASTSerializer::aop(JSOp op)
 UnaryOperator
 ASTSerializer::unop(ParseNodeKind kind, JSOp op)
 {
-    if (kind == PNK_DELETE)
+    if (IsDeleteKind(kind))
         return UNOP_DELETE;
+
+    if (kind == PNK_TYPEOFNAME || kind == PNK_TYPEOFEXPR)
+        return UNOP_TYPEOF;
 
     switch (op) {
       case JSOP_NEG:
@@ -1922,9 +1937,6 @@ ASTSerializer::unop(ParseNodeKind kind, JSOp op)
         return UNOP_NOT;
       case JSOP_BITNOT:
         return UNOP_BITNOT;
-      case JSOP_TYPEOF:
-      case JSOP_TYPEOFEXPR:
-        return UNOP_TYPEOF;
       case JSOP_VOID:
         return UNOP_VOID;
       default:
@@ -2926,8 +2938,14 @@ ASTSerializer::expression(ParseNode* pn, MutableHandleValue dst)
       case PNK_INSTANCEOF:
         return leftAssociate(pn, dst);
 
-      case PNK_DELETE:
-      case PNK_TYPEOF:
+      case PNK_DELETENAME:
+      case PNK_DELETEPROP:
+      case PNK_DELETESUPERPROP:
+      case PNK_DELETEELEM:
+      case PNK_DELETESUPERELEM:
+      case PNK_DELETEEXPR:
+      case PNK_TYPEOFNAME:
+      case PNK_TYPEOFEXPR:
       case PNK_VOID:
       case PNK_NOT:
       case PNK_BITNOT:
@@ -3166,6 +3184,9 @@ ASTSerializer::expression(ParseNode* pn, MutableHandleValue dst)
 
       case PNK_CLASS:
         return classDefinition(pn, true, dst);
+
+      case PNK_NEWTARGET:
+        return builder.newTargetExpression(&pn->pn_pos, dst);
 
       default:
         LOCAL_NOT_REACHED("unexpected expression type");

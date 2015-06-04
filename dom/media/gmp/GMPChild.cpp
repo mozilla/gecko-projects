@@ -47,7 +47,7 @@ namespace mozilla {
 
 extern PRLogModuleInfo* GetGMPLog();
 #define LOG(level, x, ...) MOZ_LOG(GetGMPLog(), (level), (x, ##__VA_ARGS__))
-#define LOGD(x, ...) LOG(PR_LOG_DEBUG, "GMPChild[pid=%d] " x, (int)base::GetCurrentProcId(), ##__VA_ARGS__)
+#define LOGD(x, ...) LOG(mozilla::LogLevel::Debug, "GMPChild[pid=%d] " x, (int)base::GetCurrentProcId(), ##__VA_ARGS__)
 
 namespace gmp {
 
@@ -403,12 +403,14 @@ GMPChild::RecvStartPlugin()
   mGMPLoader = GMPProcessChild::GetGMPLoader();
   if (!mGMPLoader) {
     NS_WARNING("Failed to get GMPLoader");
+    delete platformAPI;
     return false;
   }
 
 #if defined(MOZ_GMP_SANDBOX) && defined(XP_MACOSX)
   if (!SetMacSandboxInfo()) {
     NS_WARNING("Failed to set Mac GMP sandbox info");
+    delete platformAPI;
     return false;
   }
 #endif
@@ -419,6 +421,7 @@ GMPChild::RecvStartPlugin()
                         mNodeId.size(),
                         platformAPI)) {
     NS_WARNING("Failed to load GMP");
+    delete platformAPI;
     return false;
   }
 

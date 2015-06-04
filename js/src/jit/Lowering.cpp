@@ -386,6 +386,16 @@ LIRGenerator::visitLoadArrowThis(MLoadArrowThis* ins)
 }
 
 void
+LIRGenerator::visitArrowNewTarget(MArrowNewTarget* ins)
+{
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+    MOZ_ASSERT(ins->callee()->type() == MIRType_Object);
+
+    LArrowNewTarget* lir = new(alloc()) LArrowNewTarget(useRegister(ins->callee()));
+    defineBox(lir, ins);
+}
+
+void
 LIRGenerator::lowerCallArguments(MCall* call)
 {
     uint32_t argc = call->numStackArgs();
@@ -606,24 +616,15 @@ LIRGenerator::visitCallDirectEval(MCallDirectEval* ins)
     MOZ_ASSERT(scopeChain->type() == MIRType_Object);
 
     MDefinition* string = ins->getString();
-    MOZ_ASSERT(string->type() == MIRType_String || string->type() == MIRType_Value);
+    MOZ_ASSERT(string->type() == MIRType_String);
 
     MDefinition* thisValue = ins->getThisValue();
+    MDefinition* newTargetValue = ins->getNewTargetValue();
 
-
-    LInstruction* lir;
-    if (string->type() == MIRType_String) {
-        lir = new(alloc()) LCallDirectEvalS(useRegisterAtStart(scopeChain),
-                                            useRegisterAtStart(string));
-    } else {
-        lir = new(alloc()) LCallDirectEvalV(useRegisterAtStart(scopeChain));
-        useBoxAtStart(lir, LCallDirectEvalV::Argument, string);
-    }
-
-    if (string->type() == MIRType_String)
-        useBoxAtStart(lir, LCallDirectEvalS::ThisValue, thisValue);
-    else
-        useBoxAtStart(lir, LCallDirectEvalV::ThisValue, thisValue);
+    LInstruction* lir = new(alloc()) LCallDirectEval(useRegisterAtStart(scopeChain),
+                                                     useRegisterAtStart(string));
+    useBoxAtStart(lir, LCallDirectEval::ThisValue, thisValue);
+    useBoxAtStart(lir, LCallDirectEval::NewTarget, newTargetValue);
 
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
@@ -1400,13 +1401,6 @@ LIRGenerator::visitPow(MPow* ins)
 }
 
 void
-LIRGenerator::visitRandom(MRandom* ins)
-{
-    LRandom* lir = new(alloc()) LRandom(tempFixed(CallTempReg0), tempFixed(CallTempReg1));
-    defineReturn(lir, ins);
-}
-
-void
 LIRGenerator::visitMathFunction(MMathFunction* ins)
 {
     MOZ_ASSERT(IsFloatingPointType(ins->type()));
@@ -2164,9 +2158,11 @@ LIRGenerator::visitLambdaArrow(MLambdaArrow* ins)
 {
     MOZ_ASSERT(ins->scopeChain()->type() == MIRType_Object);
     MOZ_ASSERT(ins->thisDef()->type() == MIRType_Value);
+    MOZ_ASSERT(ins->newTargetDef()->type() == MIRType_Value);
 
-    LLambdaArrow* lir = new(alloc()) LLambdaArrow(useRegister(ins->scopeChain()), temp());
+    LLambdaArrow* lir = new(alloc()) LLambdaArrow(useRegister(ins->scopeChain()));
     useBox(lir, LLambdaArrow::ThisValue, ins->thisDef());
+    useBox(lir, LLambdaArrow::NewTargetValue, ins->newTargetDef());
     define(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2905,6 +2901,23 @@ LIRGenerator::visitArrayConcat(MArrayConcat* ins)
 }
 
 void
+LIRGenerator::visitArraySlice(MArraySlice* ins)
+{
+    MOZ_ASSERT(ins->type() == MIRType_Object);
+    MOZ_ASSERT(ins->object()->type() == MIRType_Object);
+    MOZ_ASSERT(ins->begin()->type() == MIRType_Int32);
+    MOZ_ASSERT(ins->end()->type() == MIRType_Int32);
+
+    LArraySlice* lir = new(alloc()) LArraySlice(useFixed(ins->object(), CallTempReg0),
+                                                useFixed(ins->begin(), CallTempReg1),
+                                                useFixed(ins->end(), CallTempReg2),
+                                                tempFixed(CallTempReg3),
+                                                tempFixed(CallTempReg4));
+    defineReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
 LIRGenerator::visitArrayJoin(MArrayJoin* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_String);
@@ -3540,6 +3553,13 @@ void
 LIRGenerator::visitGetFrameArgument(MGetFrameArgument* ins)
 {
     LGetFrameArgument* lir = new(alloc()) LGetFrameArgument(useRegisterOrConstant(ins->index()));
+    defineBox(lir, ins);
+}
+
+void
+LIRGenerator::visitNewTarget(MNewTarget* ins)
+{
+    LNewTarget* lir = new(alloc()) LNewTarget();
     defineBox(lir, ins);
 }
 

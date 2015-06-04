@@ -694,8 +694,10 @@ RegExpShared::execute(JSContext* cx, HandleLinearString input, size_t start,
      * Ensure sufficient memory for output vector.
      * No need to initialize it. The RegExp engine fills them in on a match.
      */
-    if (matches && !matches->allocOrExpandArray(pairCount()))
+    if (matches && !matches->allocOrExpandArray(pairCount())) {
+        ReportOutOfMemory(cx);
         return RegExpRunStatus_Error;
+    }
 
     /*
      * |displacement| emulates sticky mode by matching from this offset
@@ -925,7 +927,8 @@ RegExpCompartment::sweep(JSRuntime* rt)
                 keep = false;
             }
         }
-        if (keep || rt->isHeapCompacting()) {
+        MOZ_ASSERT(rt->isHeapMajorCollecting());
+        if (keep || rt->gc.isHeapCompacting()) {
             shared->clearMarked();
         } else {
             js_delete(shared);

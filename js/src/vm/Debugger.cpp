@@ -6287,7 +6287,7 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, HandleValue thisv, AbstractFrameP
 
     script->setActiveEval();
     ExecuteType type = !frame ? EXECUTE_DEBUG_GLOBAL : EXECUTE_DEBUG;
-    return ExecuteKernel(cx, script, *env, thisv, type, frame, rval.address());
+    return ExecuteKernel(cx, script, *env, thisv, NullValue(), type, frame, rval.address());
 }
 
 enum EvalBindings { EvalHasExtraBindings = true, EvalWithDefaultBindings = false };
@@ -6883,12 +6883,14 @@ DebuggerObject_getAllocationSite(JSContext* cx, unsigned argc, Value* vp)
     if (!metadata)
         return null(args);
 
-    metadata = CheckedUnwrap(metadata);
-    if (!metadata || !SavedFrame::isSavedFrameAndNotProto(*metadata))
+    MOZ_ASSERT(!metadata->is<WrapperObject>());
+
+    if (!SavedFrame::isSavedFrameAndNotProto(*metadata))
         return null(args);
 
     if (!cx->compartment()->wrap(cx, &metadata))
         return false;
+
     args.rval().setObject(*metadata);
     return true;
 }

@@ -139,9 +139,6 @@ XrayAwareCalleeGlobal(JSObject* fun);
 void
 TraceXPCGlobal(JSTracer* trc, JSObject* obj);
 
-uint64_t
-GetCompartmentCPOWMicroseconds(JSCompartment* compartment);
-
 } /* namespace xpc */
 
 namespace JS {
@@ -231,7 +228,7 @@ public:
         JS::Zone* zone = js::GetContextZone(cx);
         ZoneStringCache* cache = static_cast<ZoneStringCache*>(JS_GetZoneUserData(zone));
         if (cache && buf == cache->mBuffer) {
-            MOZ_ASSERT(JS::GetTenuredGCThingZone(cache->mString) == zone);
+            MOZ_ASSERT(JS::GetStringZone(cache->mString) == zone);
             JS::MarkStringAsLive(zone, cache->mString);
             rval.setString(cache->mString);
             *sharedBuffer = false;
@@ -531,6 +528,12 @@ class ErrorReport {
 void
 DispatchScriptErrorEvent(nsPIDOMWindow* win, JSRuntime* rt, xpc::ErrorReport* xpcReport,
                          JS::Handle<JS::Value> exception);
+
+// Return a name for the compartment.
+// This function makes reasonable efforts to make this name both mostly human-readable
+// and unique. However, there are no guarantees of either property.
+extern void
+GetCurrentCompartmentName(JSContext*, nsCString& name);
 
 } // namespace xpc
 

@@ -12,8 +12,6 @@
 #include <unistd.h>
 #include "mozilla/ipc/BluetoothDaemonConnectionConsumer.h"
 #include "mozilla/ipc/DataSocket.h"
-#include "mozilla/ipc/UnixSocketConnector.h"
-#include "mozilla/ipc/UnixSocketWatcher.h"
 #include "nsTArray.h"
 #include "nsXULAppAPI.h"
 
@@ -201,33 +199,15 @@ BluetoothDaemonPDUConsumer::~BluetoothDaemonPDUConsumer()
 // BluetoothDaemonConnectionIO
 //
 
-class BluetoothDaemonConnectionIO final
-  : public UnixSocketWatcher
-  , public ConnectionOrientedSocketIO
+class BluetoothDaemonConnectionIO final : public ConnectionOrientedSocketIO
 {
 public:
-  BluetoothDaemonConnectionIO(MessageLoop* aIOLoop, int aFd,
-                              ConnectionStatus aConnectionStatus,
+  BluetoothDaemonConnectionIO(nsIThread* aConsumerThread,
+                              MessageLoop* aIOLoop,
+                              int aFd, ConnectionStatus aConnectionStatus,
+                              UnixSocketConnector* aConnector,
                               BluetoothDaemonConnection* aConnection,
                               BluetoothDaemonPDUConsumer* aConsumer);
-
-  // Task callback methods
-  //
-
-  void Send(UnixSocketIOBuffer* aBuffer);
-
-  void OnSocketCanReceiveWithoutBlocking() override;
-  void OnSocketCanSendWithoutBlocking() override;
-
-  void OnConnected() override;
-  void OnError(const char* aFunction, int aErrno) override;
-
-  // Methods for |ConnectionOrientedSocketIO|
-  //
-
-  nsresult Accept(int aFd,
-                  const struct sockaddr* aAddress,
-                  socklen_t aAddressLength) override;
 
   // Methods for |DataSocketIO|
   //
@@ -241,10 +221,10 @@ public:
 
   SocketBase* GetSocketBase() override;
 
-  bool IsShutdownOnMainThread() const override;
+  bool IsShutdownOnConsumerThread() const override;
   bool IsShutdownOnIOThread() const override;
 
-  void ShutdownOnMainThread() override;
+  void ShutdownOnConsumerThread() override;
   void ShutdownOnIOThread() override;
 
 private:
@@ -255,107 +235,24 @@ private:
 };
 
 BluetoothDaemonConnectionIO::BluetoothDaemonConnectionIO(
-  MessageLoop* aIOLoop, int aFd,
+  nsIThread* aConsumerThread,
+  MessageLoop* aIOLoop,
+  int aFd,
   ConnectionStatus aConnectionStatus,
+  UnixSocketConnector* aConnector,
   BluetoothDaemonConnection* aConnection,
   BluetoothDaemonPDUConsumer* aConsumer)
-: UnixSocketWatcher(aIOLoop, aFd, aConnectionStatus)
-, mConnection(aConnection)
-, mConsumer(aConsumer)
-, mShuttingDownOnIOThread(false)
+  : ConnectionOrientedSocketIO(aConsumerThread,
+                               aIOLoop,
+                               aFd,
+                               aConnectionStatus,
+                               aConnector)
+  , mConnection(aConnection)
+  , mConsumer(aConsumer)
+  , mShuttingDownOnIOThread(false)
 {
   MOZ_ASSERT(mConnection);
   MOZ_ASSERT(mConsumer);
-}
-
-void
-BluetoothDaemonConnectionIO::Send(UnixSocketIOBuffer* aBuffer)
-{
-  MOZ_ASSERT(aBuffer);
-
-  EnqueueData(aBuffer);
-  AddWatchers(WRITE_WATCHER, false);
-}
-
-void
-BluetoothDaemonConnectionIO::OnSocketCanReceiveWithoutBlocking()
-{
-  ssize_t res = ReceiveData(GetFd());
-  if (res < 0) {
-    /* I/O error */
-    RemoveWatchers(READ_WATCHER|WRITE_WATCHER);
-  } else if (!res) {
-    /* EOF or peer shutdown */
-    RemoveWatchers(READ_WATCHER);
-  }
-}
-
-void
-BluetoothDaemonConnectionIO::OnSocketCanSendWithoutBlocking()
-{
-  MOZ_ASSERT(MessageLoopForIO::current() == GetIOLoop());
-  MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_CONNECTED);
-  MOZ_ASSERT(!IsShutdownOnIOThread());
-
-  if (NS_WARN_IF(NS_FAILED(SendPendingData(GetFd())))) {
-    RemoveWatchers(WRITE_WATCHER);
-  }
-}
-
-void
-BluetoothDaemonConnectionIO::OnConnected()
-{
-  MOZ_ASSERT(MessageLoopForIO::current() == GetIOLoop());
-  MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_CONNECTED);
-
-  NS_DispatchToMainThread(
-    new SocketIOEventRunnable(this, SocketIOEventRunnable::CONNECT_SUCCESS));
-
-  AddWatchers(READ_WATCHER, true);
-  if (HasPendingData()) {
-    AddWatchers(WRITE_WATCHER, false);
-  }
-}
-
-void
-BluetoothDaemonConnectionIO::OnError(const char* aFunction, int aErrno)
-{
-  MOZ_ASSERT(MessageLoopForIO::current() == GetIOLoop());
-
-  UnixFdWatcher::OnError(aFunction, aErrno);
-
-  // Clean up watchers, status, fd
-  Close();
-
-  // Tell the main thread we've errored
-  NS_DispatchToMainThread(
-    new SocketIOEventRunnable(this, SocketIOEventRunnable::CONNECT_ERROR));
-}
-
-// |ConnectionOrientedSocketIO|
-
-nsresult
-BluetoothDaemonConnectionIO::Accept(int aFd,
-                                    const struct sockaddr* aAddress,
-                                    socklen_t aAddressLength)
-{
-  MOZ_ASSERT(MessageLoopForIO::current() == GetIOLoop());
-  MOZ_ASSERT(GetConnectionStatus() == SOCKET_IS_CONNECTING);
-
-  // File-descriptor setup
-
-  if (TEMP_FAILURE_RETRY(fcntl(aFd, F_SETFL, O_NONBLOCK)) < 0) {
-    OnError("fcntl", errno);
-    ScopedClose cleanupFd(aFd);
-    return NS_ERROR_FAILURE;
-  }
-
-  SetSocket(aFd, SOCKET_IS_CONNECTED);
-
-  // Signal success
-  OnConnected();
-
-  return NS_OK;
 }
 
 // |DataSocketIO|
@@ -397,9 +294,9 @@ BluetoothDaemonConnectionIO::GetSocketBase()
 }
 
 bool
-BluetoothDaemonConnectionIO::IsShutdownOnMainThread() const
+BluetoothDaemonConnectionIO::IsShutdownOnConsumerThread() const
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsConsumerThread());
 
   return mConnection == nullptr;
 }
@@ -411,10 +308,10 @@ BluetoothDaemonConnectionIO::IsShutdownOnIOThread() const
 }
 
 void
-BluetoothDaemonConnectionIO::ShutdownOnMainThread()
+BluetoothDaemonConnectionIO::ShutdownOnConsumerThread()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!IsShutdownOnMainThread());
+  MOZ_ASSERT(IsConsumerThread());
+  MOZ_ASSERT(!IsShutdownOnConsumerThread());
 
   mConnection = nullptr;
 }
@@ -422,7 +319,7 @@ BluetoothDaemonConnectionIO::ShutdownOnMainThread()
 void
 BluetoothDaemonConnectionIO::ShutdownOnIOThread()
 {
-  MOZ_ASSERT(!NS_IsMainThread());
+  MOZ_ASSERT(!IsConsumerThread());
   MOZ_ASSERT(!mShuttingDownOnIOThread);
 
   Close(); // will also remove fd from I/O loop
@@ -437,10 +334,10 @@ BluetoothDaemonConnection::BluetoothDaemonConnection(
   BluetoothDaemonPDUConsumer* aPDUConsumer,
   BluetoothDaemonConnectionConsumer* aConsumer,
   int aIndex)
-  : mPDUConsumer(aPDUConsumer)
+  : mIO(nullptr)
+  , mPDUConsumer(aPDUConsumer)
   , mConsumer(aConsumer)
   , mIndex(aIndex)
-  , mIO(nullptr)
 {
   MOZ_ASSERT(mConsumer);
 }
@@ -452,21 +349,17 @@ BluetoothDaemonConnection::~BluetoothDaemonConnection()
 
 nsresult
 BluetoothDaemonConnection::PrepareAccept(UnixSocketConnector* aConnector,
+                                         nsIThread* aConsumerThread,
+                                         MessageLoop* aIOLoop,
                                          ConnectionOrientedSocketIO*& aIO)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mIO);
-
-  // |BluetoothDaemonConnection| now owns the connector, but doesn't
-  // actually use it. So the connector is stored in an auto pointer
-  // to be deleted at the end of the method.
-  nsAutoPtr<UnixSocketConnector> connector(aConnector);
 
   SetConnectionStatus(SOCKET_CONNECTING);
 
   mIO = new BluetoothDaemonConnectionIO(
-    XRE_GetIOMessageLoop(), -1, UnixSocketWatcher::SOCKET_IS_CONNECTING,
-    this, mPDUConsumer);
+    aConsumerThread, aIOLoop, -1, UnixSocketWatcher::SOCKET_IS_CONNECTING,
+    aConnector, this, mPDUConsumer);
   aIO = mIO;
 
   return NS_OK;
@@ -477,10 +370,10 @@ BluetoothDaemonConnection::PrepareAccept(UnixSocketConnector* aConnector,
 void
 BluetoothDaemonConnection::SendSocketData(UnixSocketIOBuffer* aBuffer)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mIO);
+  MOZ_ASSERT(mIO->IsConsumerThread());
 
-  XRE_GetIOMessageLoop()->PostTask(
+  mIO->GetIOLoop()->PostTask(
     FROM_HERE,
     new SocketIOSendTask<BluetoothDaemonConnectionIO,
                          UnixSocketIOBuffer>(mIO, aBuffer));
@@ -491,15 +384,15 @@ BluetoothDaemonConnection::SendSocketData(UnixSocketIOBuffer* aBuffer)
 void
 BluetoothDaemonConnection::Close()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   if (!mIO) {
     CHROMIUM_LOG("Bluetooth daemon already disconnected!");
     return;
   }
 
-  XRE_GetIOMessageLoop()->PostTask(FROM_HERE, new SocketIOShutdownTask(mIO));
+  MOZ_ASSERT(mIO->IsConsumerThread());
 
+  mIO->ShutdownOnConsumerThread();
+  mIO->GetIOLoop()->PostTask(FROM_HERE, new SocketIOShutdownTask(mIO));
   mIO = nullptr;
 
   NotifyDisconnect();
@@ -508,24 +401,18 @@ BluetoothDaemonConnection::Close()
 void
 BluetoothDaemonConnection::OnConnectSuccess()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   mConsumer->OnConnectSuccess(mIndex);
 }
 
 void
 BluetoothDaemonConnection::OnConnectError()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   mConsumer->OnConnectError(mIndex);
 }
 
 void
 BluetoothDaemonConnection::OnDisconnect()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   mConsumer->OnDisconnect(mIndex);
 }
 

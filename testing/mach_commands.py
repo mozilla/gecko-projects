@@ -68,7 +68,7 @@ TEST_SUITES = {
     },
     'mochitest-browser': {
         'aliases': ('bc', 'BC', 'Bc'),
-        'mach_command': 'mochitest-browser',
+        'mach_command': 'mochitest',
         'kwargs': {'flavor': 'browser-chrome', 'test_paths': None},
     },
     'mochitest-chrome': {
@@ -77,7 +77,7 @@ TEST_SUITES = {
     },
     'mochitest-devtools': {
         'aliases': ('dt', 'DT', 'Dt'),
-        'mach_command': 'mochitest-browser',
+        'mach_command': 'mochitest',
         'kwargs': {'subsuite': 'devtools', 'test_paths': None},
     },
     'mochitest-ipcplugins': {
@@ -85,7 +85,7 @@ TEST_SUITES = {
     },
     'mochitest-plain': {
         'mach_command': 'mochitest',
-        'kwargs': {'flavor': 'mochitest', 'test_paths': None},
+        'kwargs': {'flavor': 'plain', 'test_paths': None},
     },
     'luciddream': {
         'mach_command': 'luciddream',
@@ -100,6 +100,11 @@ TEST_SUITES = {
         'aliases': ('Ripc',),
         'mach_command': 'reftest-ipc',
         'kwargs': {'test_file': None},
+    },
+    'web-platform-tests': {
+        'aliases': ('wpt',),
+        'mach_command': 'web-platform-tests',
+        'kwargs': {}
     },
     'valgrind': {
         'aliases': ('V', 'v'),
@@ -134,6 +139,10 @@ TEST_FLAVORS = {
     },
     'reftest': { },
     'steeplechase': { },
+    'web-platform-tests': {
+        'mach_command': 'web-platform-tests',
+        'kwargs': {'include': []}
+    },
     'webapprt-chrome': {
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'webapprt-chrome', 'test_paths': []},
@@ -151,6 +160,7 @@ for i in range(1, MOCHITEST_TOTAL_CHUNKS + 1):
         'mach_command': 'mochitest',
         'kwargs': {
             'flavor': 'mochitest',
+            'subsuite': 'default',
             'chunk_by_dir': MOCHITEST_CHUNK_BY_DIR,
             'total_chunks': MOCHITEST_TOTAL_CHUNKS,
             'this_chunk': i,

@@ -2007,6 +2007,9 @@ IonBuilder::inspectOpcode(JSOp op)
         // Just fall through to the unsupported bytecode case.
         break;
 
+      case JSOP_NEWTARGET:
+        return jsop_newtarget();
+
 #ifdef DEBUG
       case JSOP_PUSHBLOCKSCOPE:
       case JSOP_FRESHENBLOCKSCOPE:
@@ -5268,6 +5271,8 @@ IonBuilder::inlineCallsite(const ObjectVector& targets, CallInfo& callInfo)
         if (target->isSingleton()) {
             // Replace the function with an MConstant.
             MConstant* constFun = constant(ObjectValue(*target));
+            if (callInfo.constructing() && callInfo.getNewTarget() == callInfo.fun())
+                callInfo.setNewTarget(constFun);
             callInfo.setFun(constFun);
         }
 
@@ -6136,7 +6141,7 @@ IonBuilder::jsop_call(uint32_t argc, bool constructing)
         }
     }
 
-    int calleeDepth = -((int)argc + 2);
+    int calleeDepth = -((int)argc + 2 + constructing);
 
     // Acquire known call target if existent.
     ObjectVector targets(alloc());
@@ -6279,10 +6284,13 @@ IonBuilder::makeCallHelper(JSFunction* target, CallInfo& callInfo)
         }
     }
 
-    MCall* call = MCall::New(alloc(), target, targetArgs + 1, callInfo.argc(),
-                             callInfo.constructing(), isDOMCall);
+    MCall* call = MCall::New(alloc(), target, targetArgs + 1 + callInfo.constructing(),
+                             callInfo.argc(), callInfo.constructing(), isDOMCall);
     if (!call)
         return nullptr;
+
+    if (callInfo.constructing())
+        call->addArg(targetArgs + 1, callInfo.getNewTarget());
 
     // Explicitly pad any missing arguments with |undefined|.
     // This permits skipping the argumentsRectifier.
@@ -6419,6 +6427,10 @@ IonBuilder::jsop_eval(uint32_t argc)
         current->pushSlot(info().thisSlot());
         MDefinition* thisValue = current->pop();
 
+        if (!jsop_newtarget())
+            return false;
+        MDefinition* newTargetValue = current->pop();
+
         // Try to pattern match 'eval(v + "()")'. In this case v is likely a
         // name on the scope chain and the eval is performing a call on that
         // value. Use a dynamic scope chain lookup rather than a full eval.
@@ -6447,7 +6459,8 @@ IonBuilder::jsop_eval(uint32_t argc)
         MInstruction* filterArguments = MFilterArgumentsOrEval::New(alloc(), string);
         current->add(filterArguments);
 
-        MInstruction* ins = MCallDirectEval::New(alloc(), scopeChain, string, thisValue, pc);
+        MInstruction* ins = MCallDirectEval::New(alloc(), scopeChain, string,
+                                                 thisValue, newTargetValue, pc);
         current->add(ins);
         current->push(ins);
 
@@ -7194,27 +7207,26 @@ IonBuilder::testSingletonProperty(JSObject* obj, PropertyName* name)
     return nullptr;
 }
 
-bool
-IonBuilder::testSingletonPropertyTypes(MDefinition* obj, JSObject* singleton, PropertyName* name,
-                                       bool* testObject, bool* testString)
+JSObject*
+IonBuilder::testSingletonPropertyTypes(MDefinition* obj, PropertyName* name)
 {
     // As for TestSingletonProperty, but the input is any value in a type set
-    // rather than a specific object. If testObject is set then the constant
-    // result can only be used after ensuring the input is an object.
-
-    *testObject = false;
-    *testString = false;
+    // rather than a specific object.
 
     TemporaryTypeSet* types = obj->resultTypeSet();
     if (types && types->unknownObject())
-        return false;
+        return nullptr;
 
     JSObject* objectSingleton = types ? types->maybeSingleton() : nullptr;
     if (objectSingleton)
-        return testSingletonProperty(objectSingleton, name) == singleton;
+        return testSingletonProperty(objectSingleton, name);
+
+    MIRType objType = obj->type();
+    if (objType == MIRType_Value && types)
+        objType = types->getKnownMIRType();
 
     JSProtoKey key;
-    switch (obj->type()) {
+    switch (objType) {
       case MIRType_String:
         key = JSProto_String;
         break;
@@ -7232,23 +7244,14 @@ IonBuilder::testSingletonPropertyTypes(MDefinition* obj, JSObject* singleton, Pr
         key = JSProto_Boolean;
         break;
 
-      case MIRType_Object:
-      case MIRType_Value: {
+      case MIRType_Object: {
         if (!types)
-            return false;
-
-        if (types->hasType(TypeSet::StringType())) {
-            key = JSProto_String;
-            *testString = true;
-            break;
-        }
-
-        if (!types->maybeObject())
-            return false;
+            return nullptr;
 
         // For property accesses which may be on many objects, we just need to
         // find a prototype common to all the objects; if that prototype
         // has the singleton property, the access will not be on a missing property.
+        JSObject* singleton = nullptr;
         for (unsigned i = 0; i < types->getObjectCount(); i++) {
             TypeSet::ObjectKey* key = types->getObject(i);
             if (!key)
@@ -7258,35 +7261,40 @@ IonBuilder::testSingletonPropertyTypes(MDefinition* obj, JSObject* singleton, Pr
 
             const Class* clasp = key->clasp();
             if (!ClassHasEffectlessLookup(clasp) || ObjectHasExtraOwnProperty(compartment, key, name))
-                return false;
+                return nullptr;
             if (key->unknownProperties())
-                return false;
+                return nullptr;
             HeapTypeSetKey property = key->property(NameToId(name));
             if (property.isOwnProperty(constraints()))
-                return false;
+                return nullptr;
 
             if (JSObject* proto = key->proto().toObjectOrNull()) {
                 // Test this type.
-                if (testSingletonProperty(proto, name) != singleton)
-                    return false;
+                JSObject* thisSingleton = testSingletonProperty(proto, name);
+                if (!thisSingleton)
+                    return nullptr;
+                if (singleton) {
+                    if (thisSingleton != singleton)
+                        return nullptr;
+                } else {
+                    singleton = thisSingleton;
+                }
             } else {
                 // Can't be on the prototype chain with no prototypes...
-                return false;
+                return nullptr;
             }
         }
-        // If this is not a known object, a test will be needed.
-        *testObject = (obj->type() != MIRType_Object);
-        return true;
+        return singleton;
       }
       default:
-        return false;
+        return nullptr;
     }
 
     JSObject* proto = GetBuiltinPrototypePure(&script()->global(), key);
     if (proto)
-        return testSingletonProperty(proto, name) == singleton;
+        return testSingletonProperty(proto, name);
 
-    return false;
+    return nullptr;
 }
 
 bool
@@ -7730,6 +7738,8 @@ IonBuilder::jsop_getelem()
         TemporaryTypeSet* types = bytecodeTypes(pc);
         return pushTypeBarrier(ins, types, BarrierKind::TypeSet);
     }
+
+    obj = maybeUnboxForPropertyAccess(obj);
 
     bool emitted = false;
 
@@ -9424,6 +9434,40 @@ IonBuilder::jsop_arguments()
 }
 
 bool
+IonBuilder::jsop_newtarget()
+{
+    if (!info().funMaybeLazy()) {
+        MOZ_ASSERT(!info().script()->isForEval());
+        pushConstant(NullValue());
+        return true;
+    }
+
+    MOZ_ASSERT(info().funMaybeLazy());
+
+    if (info().funMaybeLazy()->isArrow()) {
+        MArrowNewTarget* arrowNewTarget = MArrowNewTarget::New(alloc(), getCallee());
+        current->add(arrowNewTarget);
+        current->push(arrowNewTarget);
+        return true;
+    }
+
+    if (inliningDepth_ == 0) {
+        MNewTarget* newTarget = MNewTarget::New(alloc());
+        current->add(newTarget);
+        current->push(newTarget);
+        return true;
+    }
+
+    if (!info().constructing()) {
+        pushConstant(UndefinedValue());
+        return true;
+    }
+
+    current->push(inlineCallInfo_->getNewTarget());
+    return true;
+}
+
+bool
 IonBuilder::jsop_rest()
 {
     ArrayObject* templateObject = &inspector->getTemplateObject(pc)->as<ArrayObject>();
@@ -9443,7 +9487,7 @@ IonBuilder::jsop_rest()
     }
 
     // We know the exact number of arguments the callee pushed.
-    unsigned numActuals = inlineCallInfo_->argv().length();
+    unsigned numActuals = inlineCallInfo_->argc();
     unsigned numFormals = info().nargs() - 1;
     unsigned numRest = numActuals > numFormals ? numActuals - numFormals : 0;
 
@@ -10009,6 +10053,21 @@ IonBuilder::shouldAbortOnPreliminaryGroups(MDefinition *obj)
     return preliminary;
 }
 
+MDefinition*
+IonBuilder::maybeUnboxForPropertyAccess(MDefinition* def)
+{
+    if (def->type() != MIRType_Value)
+        return def;
+
+    MIRType type = inspector->expectedPropertyAccessInputType(pc);
+    if (type == MIRType_Value || !def->mightBeType(type))
+        return def;
+
+    MUnbox* unbox = MUnbox::New(alloc(), def, type, MUnbox::Fallible);
+    current->add(unbox);
+    return unbox;
+}
+
 bool
 IonBuilder::jsop_getprop(PropertyName* name)
 {
@@ -10033,6 +10092,8 @@ IonBuilder::jsop_getprop(PropertyName* name)
         if (!getPropTryArgumentsCallee(&emitted, obj, name) || emitted)
             return emitted;
     }
+
+    obj = maybeUnboxForPropertyAccess(obj);
 
     BarrierKind barrier = PropertyReadNeedsTypeBarrier(analysisContext, constraints(),
                                                        obj, name, types);
@@ -10301,24 +10362,19 @@ IonBuilder::getPropTryConstant(bool* emitted, MDefinition* obj, PropertyName* na
 {
     MOZ_ASSERT(*emitted == false);
 
-    JSObject* singleton = types ? types->maybeSingleton() : nullptr;
-    if (!singleton) {
-        trackOptimizationOutcome(TrackedOutcome::NotSingleton);
+    if (!types->mightBeMIRType(MIRType_Object)) {
+        // If we have not observed an object result here, don't look for a
+        // singleton constant.
+        trackOptimizationOutcome(TrackedOutcome::NotObject);
         return true;
     }
 
-    bool testObject, testString;
-    if (!testSingletonPropertyTypes(obj, singleton, name, &testObject, &testString))
+    JSObject* singleton = testSingletonPropertyTypes(obj, name);
+    if (!singleton)
         return true;
 
     // Property access is a known constant -- safe to emit.
-    MOZ_ASSERT(!testString || !testObject);
-    if (testObject)
-        current->add(MGuardObject::New(alloc(), obj));
-    else if (testString)
-        current->add(MGuardString::New(alloc(), obj));
-    else
-        obj->setImplicitlyUsedUnchecked();
+    obj->setImplicitlyUsedUnchecked();
 
     pushConstant(ObjectValue(*singleton));
 
@@ -11831,10 +11887,11 @@ IonBuilder::jsop_lambda_arrow(JSFunction* fun)
     MOZ_ASSERT(fun->isArrow());
     MOZ_ASSERT(!fun->isNative());
 
+    MDefinition* newTargetDef = current->pop();
     MDefinition* thisDef = current->pop();
 
     MLambdaArrow* ins = MLambdaArrow::New(alloc(), constraints(), current->scopeChain(),
-                                          thisDef, fun);
+                                          thisDef, newTargetDef, fun);
     current->add(ins);
     current->push(ins);
 

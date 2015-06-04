@@ -4069,19 +4069,21 @@ class MFilterArgumentsOrEval
 };
 
 class MCallDirectEval
-  : public MAryInstruction<3>,
-    public Mix3Policy<ObjectPolicy<0>,
-                      BoxExceptPolicy<1, MIRType_String>,
-                      BoxPolicy<2> >::Data
+  : public MAryInstruction<4>,
+    public Mix4Policy<ObjectPolicy<0>,
+                      StringPolicy<1>,
+                      BoxPolicy<2>,
+                      BoxPolicy<3> >::Data
 {
   protected:
     MCallDirectEval(MDefinition* scopeChain, MDefinition* string, MDefinition* thisValue,
-                    jsbytecode* pc)
+                    MDefinition* newTargetValue, jsbytecode* pc)
         : pc_(pc)
     {
         initOperand(0, scopeChain);
         initOperand(1, string);
         initOperand(2, thisValue);
+        initOperand(3, newTargetValue);
         setResultType(MIRType_Value);
     }
 
@@ -4090,9 +4092,9 @@ class MCallDirectEval
 
     static MCallDirectEval*
     New(TempAllocator& alloc, MDefinition* scopeChain, MDefinition* string, MDefinition* thisValue,
-        jsbytecode* pc)
+        MDefinition* newTargetValue, jsbytecode* pc)
     {
-        return new(alloc) MCallDirectEval(scopeChain, string, thisValue, pc);
+        return new(alloc) MCallDirectEval(scopeChain, string, thisValue, newTargetValue, pc);
     }
 
     MDefinition* getScopeChain() const {
@@ -4103,6 +4105,9 @@ class MCallDirectEval
     }
     MDefinition* getThisValue() const {
         return getOperand(2);
+    }
+    MDefinition* getNewTargetValue() const {
+        return getOperand(3);
     }
 
     jsbytecode* pc() const {
@@ -6702,6 +6707,36 @@ class MLoadArrowThis
     }
 };
 
+// Load an arrow function's |new.target| value.
+class MArrowNewTarget
+  : public MUnaryInstruction,
+    public SingleObjectPolicy::Data
+{
+    explicit MArrowNewTarget(MDefinition* callee)
+      : MUnaryInstruction(callee)
+    {
+        setResultType(MIRType_Value);
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(ArrowNewTarget)
+
+    static MArrowNewTarget* New(TempAllocator& alloc, MDefinition* callee) {
+        return new(alloc) MArrowNewTarget(callee);
+    }
+    MDefinition* callee() const {
+        return getOperand(0);
+    }
+    bool congruentTo(const MDefinition* ins) const override {
+        return congruentIfOperandsEqual(ins);
+    }
+    AliasSet getAliasSet() const override {
+        // An arrow function's lexical |this| value is immutable.
+        return AliasSet::None();
+    }
+};
+
 class MPhi final
   : public MDefinition,
     public InlineListNode<MPhi>,
@@ -7534,14 +7569,14 @@ class MLambda
 };
 
 class MLambdaArrow
-  : public MBinaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, BoxPolicy<1> >::Data
+  : public MTernaryInstruction,
+    public Mix3Policy<ObjectPolicy<0>, BoxPolicy<1>, BoxPolicy<2> >::Data
 {
     const LambdaFunctionInfo info_;
 
     MLambdaArrow(CompilerConstraintList* constraints, MDefinition* scopeChain,
-                 MDefinition* this_, JSFunction* fun)
-      : MBinaryInstruction(scopeChain, this_), info_(fun)
+                 MDefinition* this_, MDefinition* newTarget_, JSFunction* fun)
+      : MTernaryInstruction(scopeChain, this_, newTarget_), info_(fun)
     {
         setResultType(MIRType_Object);
         MOZ_ASSERT(!ObjectGroup::useSingletonForClone(fun));
@@ -7553,15 +7588,19 @@ class MLambdaArrow
     INSTRUCTION_HEADER(LambdaArrow)
 
     static MLambdaArrow* New(TempAllocator& alloc, CompilerConstraintList* constraints,
-                             MDefinition* scopeChain, MDefinition* this_, JSFunction* fun)
+                             MDefinition* scopeChain, MDefinition* this_, MDefinition* newTarget_,
+                             JSFunction* fun)
     {
-        return new(alloc) MLambdaArrow(constraints, scopeChain, this_, fun);
+        return new(alloc) MLambdaArrow(constraints, scopeChain, this_, newTarget_, fun);
     }
     MDefinition* scopeChain() const {
         return getOperand(0);
     }
     MDefinition* thisDef() const {
         return getOperand(1);
+    }
+    MDefinition* newTargetDef() const {
+        return getOperand(2);
     }
     const LambdaFunctionInfo& info() const {
         return info_;
@@ -9130,6 +9169,70 @@ class MArrayConcat
     {
         return new(alloc) MArrayConcat(constraints, lhs, rhs, templateObj,
                                        initialHeap, unboxedType);
+    }
+
+    JSObject* templateObj() const {
+        return templateObj_;
+    }
+
+    gc::InitialHeap initialHeap() const {
+        return initialHeap_;
+    }
+
+    JSValueType unboxedType() const {
+        return unboxedType_;
+    }
+
+    AliasSet getAliasSet() const override {
+        return AliasSet::Store(AliasSet::BoxedOrUnboxedElements(unboxedType()) |
+                               AliasSet::ObjectFields);
+    }
+    bool possiblyCalls() const override {
+        return true;
+    }
+};
+
+// Array.prototype.slice on a dense array.
+class MArraySlice
+  : public MTernaryInstruction,
+    public Mix3Policy<ObjectPolicy<0>, IntPolicy<1>, IntPolicy<2>>::Data
+{
+    AlwaysTenuredObject templateObj_;
+    gc::InitialHeap initialHeap_;
+    JSValueType unboxedType_;
+
+    MArraySlice(CompilerConstraintList* constraints, MDefinition* obj,
+                MDefinition* begin, MDefinition* end,
+                JSObject* templateObj, gc::InitialHeap initialHeap, JSValueType unboxedType)
+      : MTernaryInstruction(obj, begin, end),
+        templateObj_(templateObj),
+        initialHeap_(initialHeap),
+        unboxedType_(unboxedType)
+    {
+        setResultType(MIRType_Object);
+        setResultTypeSet(obj->resultTypeSet());
+    }
+
+  public:
+    INSTRUCTION_HEADER(ArraySlice)
+
+    static MArraySlice* New(TempAllocator& alloc, CompilerConstraintList* constraints,
+                            MDefinition* obj, MDefinition* begin, MDefinition* end,
+                            JSObject* templateObj, gc::InitialHeap initialHeap,
+                            JSValueType unboxedType)
+    {
+        return new(alloc) MArraySlice(constraints, obj, begin, end, templateObj,
+                                      initialHeap, unboxedType);
+    }
+
+    MDefinition* object() const {
+        return getOperand(0);
+    }
+    MDefinition* begin() const {
+        return getOperand(1);
+    }
+    MDefinition* end() const {
+        return getOperand(2);
     }
 
     JSObject* templateObj() const {
@@ -11959,6 +12062,28 @@ class MGetFrameArgument
         // aliased.
         if (scriptHasSetArg_)
             return AliasSet::Load(AliasSet::FrameArgument);
+        return AliasSet::None();
+    }
+};
+
+class MNewTarget : public MNullaryInstruction
+{
+    MNewTarget() : MNullaryInstruction() {
+        setResultType(MIRType_Value);
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(NewTarget)
+
+    static MNewTarget* New(TempAllocator& alloc) {
+        return new(alloc) MNewTarget();
+    }
+
+    bool congruentTo(const MDefinition* ins) const override {
+        return congruentIfOperandsEqual(ins);
+    }
+    AliasSet getAliasSet() const override {
         return AliasSet::None();
     }
 };

@@ -376,14 +376,20 @@ JitFrameIterator::machineState() const
     return machine;
 }
 
+static uint32_t
+NumArgAndLocalSlots(const InlineFrameIterator& frame)
+{
+    JSScript* script = frame.script();
+    return CountArgSlots(script, frame.maybeCalleeTemplate()) + script->nfixed();
+}
+
 static void
-CloseLiveIteratorIon(JSContext* cx, const InlineFrameIterator& frame, uint32_t localSlot)
+CloseLiveIteratorIon(JSContext* cx, const InlineFrameIterator& frame, uint32_t stackSlot)
 {
     SnapshotIterator si = frame.snapshotIterator();
 
     // Skip stack slots until we reach the iterator object.
-    uint32_t base = CountArgSlots(frame.script(), frame.maybeCalleeTemplate()) + frame.script()->nfixed();
-    uint32_t skipSlots = base + localSlot - 1;
+    uint32_t skipSlots = NumArgAndLocalSlots(frame) + stackSlot - 1;
 
     for (unsigned i = 0; i < skipSlots; i++)
         si.skip();
@@ -397,17 +403,26 @@ CloseLiveIteratorIon(JSContext* cx, const InlineFrameIterator& frame, uint32_t l
         UnwindIteratorForUncatchableException(cx, obj);
 }
 
-class IgnoreStackDepthOp
+class IonFrameStackDepthOp
 {
+    uint32_t depth_;
+
   public:
-    uint32_t operator()() { return UINT32_MAX; }
+    explicit IonFrameStackDepthOp(const InlineFrameIterator& frame) {
+        uint32_t base = NumArgAndLocalSlots(frame);
+        SnapshotIterator si = frame.snapshotIterator();
+        MOZ_ASSERT(si.numAllocations() >= base);
+        depth_ = si.numAllocations() - base;
+    }
+
+    uint32_t operator()() { return depth_; }
 };
 
-class TryNoteIterIon : public TryNoteIter<IgnoreStackDepthOp>
+class TryNoteIterIon : public TryNoteIter<IonFrameStackDepthOp>
 {
   public:
-    TryNoteIterIon(JSContext* cx, JSScript* script, jsbytecode* pc)
-      : TryNoteIter(cx, script, pc, IgnoreStackDepthOp())
+    TryNoteIterIon(JSContext* cx, const InlineFrameIterator& frame)
+      : TryNoteIter(cx, frame.script(), frame.pc(), IonFrameStackDepthOp(frame))
     { }
 };
 
@@ -415,9 +430,6 @@ static void
 HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame, ResumeFromException* rfe,
                    bool* overrecursed)
 {
-    RootedScript script(cx, frame.script());
-    jsbytecode* pc = frame.pc();
-
     if (cx->compartment()->isDebuggee()) {
         // We need to bail when there is a catchable exception, and we are the
         // debuggee of a Debugger with a live onExceptionUnwind hook, or if a
@@ -460,10 +472,11 @@ HandleExceptionIon(JSContext* cx, const InlineFrameIterator& frame, ResumeFromEx
         MOZ_ASSERT_IF(rematFrame, !Debugger::inFrameMaps(rematFrame));
     }
 
+    RootedScript script(cx, frame.script());
     if (!script->hasTrynotes())
         return;
 
-    for (TryNoteIterIon tni(cx, script, pc); !tni.done(); ++tni) {
+    for (TryNoteIterIon tni(cx, frame); !tni.done(); ++tni) {
         JSTryNote* tn = *tni;
 
         switch (tn->kind) {
@@ -1034,8 +1047,9 @@ MarkThisAndArguments(JSTracer* trc, JitFrameLayout* layout)
     // Trace |this|.
     TraceRoot(trc, argv, "ion-thisv");
 
-    // Trace actual arguments beyond the formals. Note + 1 for thisv.
-    for (size_t i = nformals + 1; i < nargs + 1; i++)
+    // Trace actual arguments and newTarget beyond the formals. Note + 1 for thisv.
+    bool constructing = CalleeTokenIsConstructing(layout->calleeToken());
+    for (size_t i = nformals + 1; i < nargs + 1 + constructing; i++)
         TraceRoot(trc, &argv[i], "ion-argv");
 }
 
@@ -2445,7 +2459,8 @@ InlineFrameIterator::findNextFrame()
             MOZ_CRASH("Couldn't deduce the number of arguments of an ionmonkey frame");
 
         // Skip over non-argument slots, as well as |this|.
-        unsigned skipCount = (si_.numAllocations() - 1) - numActualArgs_ - 1;
+        bool skipNewTarget = JSOp(*pc_) == JSOP_NEW;
+        unsigned skipCount = (si_.numAllocations() - 1) - numActualArgs_ - 1 - skipNewTarget;
         for (unsigned j = 0; j < skipCount; j++)
             si_.skip();
 

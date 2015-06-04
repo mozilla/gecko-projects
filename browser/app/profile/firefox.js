@@ -272,6 +272,7 @@ pref("general.autoScroll", true);
 // At startup, check if we're the default browser and prompt user if not.
 pref("browser.shell.checkDefaultBrowser", true);
 pref("browser.shell.shortcutFavicons",true);
+pref("browser.shell.isSetAsDefaultBrowser", false);
 
 // 0 = blank, 1 = home (browser.startup.homepage), 2 = last visited page, 3 = resume previous browser session
 // The behavior of option 3 is detailed at: http://wiki.mozilla.org/Session_Restore
@@ -1841,10 +1842,10 @@ pref("ui.key.menuAccessKeyFocuses", true);
 // Encrypted media extensions.
 pref("media.eme.enabled", true);
 pref("media.eme.apiVisible", true);
-
-#ifdef XP_WIN
-pref("media.gmp-eme-adobe.enabled", true);
 pref("browser.eme.ui.enabled", true);
+
+#ifdef MOZ_ADOBE_EME
+pref("media.gmp-eme-adobe.enabled", true);
 #endif
 
 // Play with different values of the decay time and get telemetry,

@@ -7,7 +7,7 @@
 #define GFX_LAYERSTYPES_H
 
 #include <stdint.h>                     // for uint32_t
-#include "nsPoint.h"                    // for nsIntPoint
+#include "mozilla/gfx/Point.h"          // for IntPoint
 #include "nsRegion.h"
 
 #include "mozilla/TypedEnumBits.h"
@@ -21,9 +21,9 @@
 #  define MOZ_LAYERS_HAVE_LOG
 #endif
 #define MOZ_LAYERS_LOG(_args)                             \
-  MOZ_LOG(LayerManager::GetLog(), PR_LOG_DEBUG, _args)
+  MOZ_LOG(LayerManager::GetLog(), LogLevel::Debug, _args)
 #define MOZ_LAYERS_LOG_IF_SHADOWABLE(layer, _args)         \
-  do { if (layer->AsShadowableLayer()) { MOZ_LOG(LayerManager::GetLog(), PR_LOG_DEBUG, _args); } } while (0)
+  do { if (layer->AsShadowableLayer()) { MOZ_LOG(LayerManager::GetLog(), LogLevel::Debug, _args); } } while (0)
 
 #define INVALID_OVERLAY -1
 
@@ -97,7 +97,7 @@ struct LayerRenderState {
 
 #ifdef MOZ_WIDGET_GONK
   LayerRenderState(android::GraphicBuffer* aSurface,
-                   const nsIntSize& aSize,
+                   const gfx::IntSize& aSize,
                    LayerRenderStateFlags aFlags,
                    TextureHost* aTexture)
     : mFlags(aFlags)
@@ -138,7 +138,7 @@ struct LayerRenderState {
   android::sp<android::GraphicBuffer> mSurface;
   int32_t mOverlayId;
   // size of mSurface
-  nsIntSize mSize;
+  gfx::IntSize mSize;
   TextureHost* mTexture;
 #endif
 };

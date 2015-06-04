@@ -2805,6 +2805,12 @@ jit::AddKeepAliveInstructions(MIRGraph& graph)
 
             MOZ_ASSERT(ownerObject->type() == MIRType_Object);
 
+            if (ownerObject->isConstant()) {
+                // Constants are kept alive by other pointers, for instance
+                // ImmGCPtr in JIT code.
+                continue;
+            }
+
             for (MUseDefIterator uses(ins); uses; uses++) {
                 MInstruction* use = uses.def()->toInstruction();
 
@@ -3500,8 +3506,11 @@ jit::AnalyzeArgumentsUsage(JSContext* cx, JSScript* scriptArg)
 
     MIRGraph graph(&temp);
     InlineScriptTree* inlineScriptTree = InlineScriptTree::New(&temp, nullptr, nullptr, script);
-    if (!inlineScriptTree)
+    if (!inlineScriptTree) {
+        ReportOutOfMemory(cx);
         return false;
+    }
+
     CompileInfo info(script, script->functionNonDelazifying(),
                      /* osrPc = */ nullptr, /* constructing = */ false,
                      Analysis_ArgumentsUsage,
@@ -3511,8 +3520,10 @@ jit::AnalyzeArgumentsUsage(JSContext* cx, JSScript* scriptArg)
     const OptimizationInfo* optimizationInfo = js_IonOptimizations.get(Optimization_Normal);
 
     CompilerConstraintList* constraints = NewCompilerConstraintList(temp);
-    if (!constraints)
+    if (!constraints) {
+        ReportOutOfMemory(cx);
         return false;
+    }
 
     BaselineInspector inspector(script);
     const JitCompileOptions options(cx);

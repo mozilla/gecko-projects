@@ -1382,6 +1382,12 @@ pref("network.http.tcp_keepalive.long_lived_idle_time", 600);
 pref("network.http.enforce-framing.http1", false); // should be named "strict"
 pref("network.http.enforce-framing.soft", true);
 
+// Whether nsHttpChannel should use the PackagedAppService to load
+// resources from a package when directed to a URL
+// such as http://domain.com/package.pak!//resource.html
+// See http://www.w3.org/TR/web-packaging/#streamable-package-format
+pref("network.http.enable-packaged-apps", false);
+
 // default values for FTP
 // in a DSCP environment this should be 40 (0x28, or AF11), per RFC-4594,
 // Section 4.8 "High-Throughput Data Service Class", and 80 (0x50, or AF22)
@@ -4156,6 +4162,15 @@ pref("layers.acceleration.force-enabled", false);
 
 pref("layers.acceleration.draw-fps", false);
 
+// Enable DEAA antialiasing for transformed layers in the compositor
+#if !defined(MOZ_WIDGET_GONK) && !defined(MOZ_WIDGET_ANDROID)
+// Desktop prefs
+pref("layers.deaa.enabled", true);
+#else
+// Mobile prefs
+pref("layers.deaa.enabled", false);
+#endif
+
 pref("layers.dump", false);
 #ifdef MOZ_DUMP_PAINTING
 // If we're dumping layers, also dump the texture data
@@ -4401,6 +4416,11 @@ pref("dom.push.adaptive.upperLimit", 1740000); // 29 min
 
 // enable udp wakeup support
 pref("dom.push.udp.wakeupEnabled", false);
+
+// WebPush prefs:
+pref("dom.push.http2.reset_retry_count_after_ms", 60000);
+pref("dom.push.http2.maxRetries", 2);
+pref("dom.push.http2.retryInterval", 5000);
 
 // WebNetworkStats
 pref("dom.mozNetworkStats.enabled", false);

@@ -10,6 +10,9 @@
 #include "BluetoothCommon.h"
 #include "mozilla/ipc/DataSocket.h"
 
+class MessageLoop;
+class nsIThread;
+
 BEGIN_BLUETOOTH_NAMESPACE
 
 class BluetoothSocketObserver;
@@ -19,22 +22,39 @@ class DroidSocketImpl;
 class BluetoothSocket final : public mozilla::ipc::DataSocket
 {
 public:
-  BluetoothSocket(BluetoothSocketObserver* aObserver,
+  BluetoothSocket(BluetoothSocketObserver* aObserver);
+
+  nsresult Connect(const nsAString& aDeviceAddress,
+                   const BluetoothUuid& aServiceUuid,
+                   BluetoothSocketType aType,
+                   int aChannel,
+                   bool aAuth, bool aEncrypt,
+                   nsIThread* aConsumerThread,
+                   MessageLoop* aIOLoop);
+
+  nsresult Connect(const nsAString& aDeviceAddress,
+                   const BluetoothUuid& aServiceUuid,
+                   BluetoothSocketType aType,
+                   int aChannel,
+                   bool aAuth, bool aEncrypt);
+
+  nsresult Listen(const nsAString& aServiceName,
+                  const BluetoothUuid& aServiceUuid,
                   BluetoothSocketType aType,
-                  bool aAuth,
-                  bool aEncrypt);
+                  int aChannel,
+                  bool aAuth, bool aEncrypt,
+                  nsIThread* aConsumerThread,
+                  MessageLoop* aIOLoop);
 
-  bool ConnectSocket(const nsAString& aDeviceAddress,
-                     const BluetoothUuid& aServiceUuid,
-                     int aChannel);
-
-  bool ListenSocket(const nsAString& aServiceName,
-                    const BluetoothUuid& aServiceUuid,
-                    int aChannel);
+  nsresult Listen(const nsAString& aServiceName,
+                  const BluetoothUuid& aServiceUuid,
+                  BluetoothSocketType aType,
+                  int aChannel,
+                  bool aAuth, bool aEncrypt);
 
   /**
    * Method to be called whenever data is received. This is only called on the
-   * main thread.
+   * consumer thread.
    *
    * @param aBuffer Data received from the socket.
    */
@@ -74,8 +94,6 @@ private:
   BluetoothSocketResultHandler* mCurrentRes;
   DroidSocketImpl* mImpl;
   nsString mDeviceAddress;
-  bool mAuth;
-  bool mEncrypt;
 };
 
 END_BLUETOOTH_NAMESPACE

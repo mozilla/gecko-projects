@@ -70,9 +70,6 @@ struct GenericParseContext
     // The following flags are set when parsing enters a particular region of
     // source code, and cleared when that region is exited.
 
-    // true while parsing init expr of for; exclude 'in'
-    bool parsingForInit:1;
-
     // true while we are within a with-statement in the current ParseContext
     // chain (which stops at the top-level or an eval()
     bool parsingWith:1;
@@ -82,7 +79,6 @@ struct GenericParseContext
         sc(sc),
         funHasReturnExpr(false),
         funHasReturnVoid(false),
-        parsingForInit(false),
         parsingWith(parent ? parent->parsingWith : false)
     {}
 };
@@ -526,6 +522,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
 
   private:
     enum InvokedPrediction { PredictUninvoked = false, PredictInvoked = true };
+    enum ForInitLocation { InForInit, NotInForInit };
 
   private:
     /*
@@ -570,8 +567,10 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node expressionStatement(YieldHandling yieldHandling,
                              InvokedPrediction invoked = PredictUninvoked);
     Node variables(YieldHandling yieldHandling,
-                   ParseNodeKind kind, bool* psimple = nullptr,
-                   StaticBlockObject* blockObj = nullptr, VarContext varContext = HoistVars);
+                   ParseNodeKind kind,
+                   ForInitLocation location,
+                   bool* psimple = nullptr, StaticBlockObject* blockObj = nullptr,
+                   VarContext varContext = HoistVars);
     Node expr(InHandling inHandling, YieldHandling yieldHandling,
               InvokedPrediction invoked = PredictUninvoked);
     Node assignExpr(InHandling inHandling, YieldHandling yieldHandling,
@@ -590,6 +589,9 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     Node parenExprOrGeneratorComprehension(YieldHandling yieldHandling);
     Node exprInParens(InHandling inHandling, YieldHandling yieldHandling);
 
+    bool checkAllowedNestedSyntax(SharedContext::AllowedSyntax allowed,
+                                  SharedContext** allowingContext = nullptr);
+    bool tryNewTarget(Node& newTarget);
     bool checkAndMarkSuperScope();
 
     bool methodDefinition(YieldHandling yieldHandling, PropListType listType, Node propList,
@@ -657,7 +659,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
         PlainAssignment,
         CompoundAssignment,
         KeyedDestructuringAssignment,
-        IncDecAssignment
+        IncrementAssignment,
+        DecrementAssignment
     };
 
     bool checkAndMarkAsAssignmentLhs(Node pn, AssignmentFlavor flavor);
@@ -673,8 +676,18 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool isValidForStatementLHS(Node pn1, JSVersion version, bool forDecl, bool forEach,
                                 ParseNodeKind headKind);
     bool checkForHeadConstInitializers(Node pn1);
-    bool checkAndMarkAsIncOperand(Node kid, TokenKind tt, bool preorder);
+
+    bool isValidSimpleAssignmentTarget(Node node);
+
+    // Invalid assignment targets are handled differently in different places.
+    // Select the desired semantics using |flavor|.
+    bool reportIfArgumentsEvalTarget(Node target);
+    bool reportIfNotValidSimpleAssignmentTarget(Node target, AssignmentFlavor flavor);
+
+    bool checkAndMarkAsIncOperand(Node kid, AssignmentFlavor flavor);
+
     bool checkStrictAssignment(Node lhs);
+
     bool checkStrictBinding(PropertyName* name, Node pn);
     bool defineArg(Node funcpn, HandlePropertyName name,
                    bool disallowDuplicateArgs = false, Node* duplicatedArg = nullptr);
@@ -697,7 +710,7 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     bool checkDestructuringObject(BindData<ParseHandler>* data, Node objectPattern);
     bool checkDestructuringArray(BindData<ParseHandler>* data, Node arrayPattern);
     bool bindInitialized(BindData<ParseHandler>* data, Node pn);
-    bool makeSetCall(Node pn, unsigned msg);
+    bool makeSetCall(Node node, unsigned errnum);
     Node cloneDestructuringDefault(Node opn);
     Node cloneLeftHandSide(Node opn);
     Node cloneParseTree(Node opn);
@@ -736,16 +749,6 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     friend class LegacyCompExprTransplanter;
     friend struct BindData<ParseHandler>;
 };
-
-/* Declare some required template specializations. */
-
-template <>
-bool
-Parser<FullParseHandler>::checkAndMarkAsAssignmentLhs(ParseNode* pn, AssignmentFlavor flavor);
-
-template <>
-bool
-Parser<SyntaxParseHandler>::checkAndMarkAsAssignmentLhs(Node pn, AssignmentFlavor flavor);
 
 } /* namespace frontend */
 } /* namespace js */

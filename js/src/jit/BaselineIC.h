@@ -2638,6 +2638,7 @@ class ICGetElem_Fallback : public ICMonitoredFallbackStub
 
     static const uint16_t EXTRA_NON_NATIVE = 0x1;
     static const uint16_t EXTRA_NEGATIVE_INDEX = 0x2;
+    static const uint16_t EXTRA_UNOPTIMIZABLE_ACCESS = 0x4;
 
   public:
     static const uint32_t MAX_OPTIMIZED_STUBS = 16;
@@ -2654,6 +2655,12 @@ class ICGetElem_Fallback : public ICMonitoredFallbackStub
     }
     bool hasNegativeIndex() const {
         return extra_ & EXTRA_NEGATIVE_INDEX;
+    }
+    void noteUnoptimizableAccess() {
+        extra_ |= EXTRA_UNOPTIMIZABLE_ACCESS;
+    }
+    bool hadUnoptimizableAccess() const {
+        return extra_ & EXTRA_UNOPTIMIZABLE_ACCESS;
     }
 
     // Compiler for this stub kind.
@@ -4109,13 +4116,17 @@ class ICGetProp_Primitive : public ICMonitoredStub
     // Fixed or dynamic slot offset.
     uint32_t offset_;
 
-    ICGetProp_Primitive(JitCode* stubCode, ICStub* firstMonitorStub,
+    ICGetProp_Primitive(JitCode* stubCode, ICStub* firstMonitorStub, JSValueType primitiveType,
                         Shape* protoShape, uint32_t offset);
 
   public:
     HeapPtrShape& protoShape() {
         return protoShape_;
     }
+    JSValueType primitiveType() const {
+        return JSValueType(extra_);
+    }
+
     static size_t offsetOfProtoShape() {
         return offsetof(ICGetProp_Primitive, protoShape_);
     }
@@ -4155,7 +4166,7 @@ class ICGetProp_Primitive : public ICMonitoredStub
         ICStub* getStub(ICStubSpace* space) {
             RootedShape protoShape(cx, prototype_->as<NativeObject>().lastProperty());
             return newStub<ICGetProp_Primitive>(space, getStubCode(), firstMonitorStub_,
-                                                protoShape, offset_);
+                                                primitiveType_, protoShape, offset_);
         }
     };
 };
@@ -5511,10 +5522,11 @@ class ICCallStubCompiler : public ICStubCompiler
     };
 
     void pushCallArguments(MacroAssembler& masm, AllocatableGeneralRegisterSet regs,
-                           Register argcReg, bool isJitCall);
+                           Register argcReg, bool isJitCall, bool isConstructing = false);
     void pushSpreadCallArguments(MacroAssembler& masm, AllocatableGeneralRegisterSet regs,
-                                 Register argcReg, bool isJitCall);
-    void guardSpreadCall(MacroAssembler& masm, Register argcReg, Label* failure);
+                                 Register argcReg, bool isJitCall, bool isConstructing);
+    void guardSpreadCall(MacroAssembler& masm, Register argcReg, Label* failure,
+                         bool isConstructing);
     Register guardFunApply(MacroAssembler& masm, AllocatableGeneralRegisterSet regs,
                            Register argcReg, bool checkNative, FunApplyThing applyThing,
                            Label* failure);
@@ -5527,27 +5539,18 @@ class ICCall_Fallback : public ICMonitoredFallbackStub
 {
     friend class ICStubSpace;
   public:
-    static const unsigned CONSTRUCTING_FLAG = 0x1;
-    static const unsigned UNOPTIMIZABLE_CALL_FLAG = 0x2;
+    static const unsigned UNOPTIMIZABLE_CALL_FLAG = 0x1;
 
     static const uint32_t MAX_OPTIMIZED_STUBS = 16;
     static const uint32_t MAX_SCRIPTED_STUBS = 7;
     static const uint32_t MAX_NATIVE_STUBS = 7;
   private:
 
-    ICCall_Fallback(JitCode* stubCode, bool isConstructing)
+    explicit ICCall_Fallback(JitCode* stubCode)
       : ICMonitoredFallbackStub(ICStub::Call_Fallback, stubCode)
-    {
-        extra_ = 0;
-        if (isConstructing)
-            extra_ |= CONSTRUCTING_FLAG;
-    }
+    { }
 
   public:
-    bool isConstructing() const {
-        return extra_ & CONSTRUCTING_FLAG;
-    }
-
     void noteUnoptimizableCall() {
         extra_ |= UNOPTIMIZABLE_CALL_FLAG;
     }
@@ -5572,6 +5575,9 @@ class ICCall_Fallback : public ICMonitoredFallbackStub
 
     // Compiler for this stub kind.
     class Compiler : public ICCallStubCompiler {
+      public:
+        static const int32_t CALL_KEY = static_cast<int32_t>(ICStub::Call_Fallback);
+        static const int32_t CONSTRUCT_KEY = static_cast<int32_t>(ICStub::Call_Fallback) | (1 << 17);
       protected:
         bool isConstructing_;
         bool isSpread_;
@@ -5580,7 +5586,8 @@ class ICCall_Fallback : public ICMonitoredFallbackStub
         bool postGenerateStubCode(MacroAssembler& masm, Handle<JitCode*> code);
 
         virtual int32_t getKey() const {
-            return static_cast<int32_t>(kind) | (static_cast<int32_t>(isSpread_) << 16);
+            return static_cast<int32_t>(kind) | (static_cast<int32_t>(isSpread_) << 16) |
+                   (static_cast<int32_t>(isConstructing_) << 17);
         }
 
       public:
@@ -5591,7 +5598,7 @@ class ICCall_Fallback : public ICMonitoredFallbackStub
         { }
 
         ICStub* getStub(ICStubSpace* space) {
-            ICCall_Fallback* stub = newStub<ICCall_Fallback>(space, getStubCode(), isConstructing_);
+            ICCall_Fallback* stub = newStub<ICCall_Fallback>(space, getStubCode());
             if (!stub || !stub->initMonitoringChain(cx, space))
                 return nullptr;
             return stub;

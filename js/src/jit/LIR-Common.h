@@ -1533,6 +1533,10 @@ class LJSCallInstructionHelper : public LCallInstructionHelper<Defs, Operands, T
     uint32_t numActualArgs() const {
         return mir()->numActualArgs();
     }
+
+    bool isConstructing() const {
+        return mir()->isConstructing();
+    }
 };
 
 // Generates a polymorphic callsite, wherein the function being called is
@@ -1923,18 +1927,19 @@ class LFilterArgumentsOrEvalV : public LCallInstructionHelper<0, BOX_PIECES, 3>
     }
 };
 
-class LCallDirectEvalS : public LCallInstructionHelper<BOX_PIECES, 2 + BOX_PIECES, 0>
+class LCallDirectEval : public LCallInstructionHelper<BOX_PIECES, 2 + (2 * BOX_PIECES), 0>
 {
   public:
-    LIR_HEADER(CallDirectEvalS)
+    LIR_HEADER(CallDirectEval)
 
-    LCallDirectEvalS(const LAllocation& scopeChain, const LAllocation& string)
+    LCallDirectEval(const LAllocation& scopeChain, const LAllocation& string)
     {
         setOperand(0, scopeChain);
         setOperand(1, string);
     }
 
     static const size_t ThisValue = 2;
+    static const size_t NewTarget = 2 + BOX_PIECES;
 
     MCallDirectEval* mir() const {
         return mir_->toCallDirectEval();
@@ -1945,28 +1950,6 @@ class LCallDirectEvalS : public LCallInstructionHelper<BOX_PIECES, 2 + BOX_PIECE
     }
     const LAllocation* getString() {
         return getOperand(1);
-    }
-};
-
-class LCallDirectEvalV : public LCallInstructionHelper<BOX_PIECES, 1 + (2 * BOX_PIECES), 0>
-{
-  public:
-    LIR_HEADER(CallDirectEvalV)
-
-    explicit LCallDirectEvalV(const LAllocation& scopeChain)
-    {
-        setOperand(0, scopeChain);
-    }
-
-    static const size_t Argument = 1;
-    static const size_t ThisValue = 1 + BOX_PIECES;
-
-    MCallDirectEval* mir() const {
-        return mir_->toCallDirectEval();
-    }
-
-    const LAllocation* getScopeChain() {
-        return getOperand(0);
     }
 };
 
@@ -3126,23 +3109,6 @@ class LPowD : public LCallInstructionHelper<1, 2, 1>
     }
 };
 
-// Math.random().
-class LRandom : public LCallInstructionHelper<1, 0, 2>
-{
-  public:
-    LIR_HEADER(Random)
-    LRandom(const LDefinition& temp, const LDefinition& temp2) {
-        setTemp(0, temp);
-        setTemp(1, temp2);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
-    }
-    const LDefinition* temp2() {
-        return getTemp(1);
-    }
-};
-
 class LMathFunctionD : public LCallInstructionHelper<1, 1, 1>
 {
   public:
@@ -4024,22 +3990,19 @@ class LLambda : public LInstructionHelper<1, 1, 1>
     }
 };
 
-class LLambdaArrow : public LInstructionHelper<1, 1 + BOX_PIECES, 1>
+class LLambdaArrow : public LInstructionHelper<1, 1 + (2 * BOX_PIECES), 0>
 {
   public:
     LIR_HEADER(LambdaArrow)
 
     static const size_t ThisValue = 1;
+    static const size_t NewTargetValue = ThisValue + BOX_PIECES;
 
-    LLambdaArrow(const LAllocation& scopeChain, const LDefinition& temp) {
+    explicit LLambdaArrow(const LAllocation& scopeChain) {
         setOperand(0, scopeChain);
-        setTemp(0, temp);
     }
     const LAllocation* scopeChain() {
         return getOperand(0);
-    }
-    const LDefinition* temp() {
-        return getTemp(0);
     }
     const MLambdaArrow* mir() const {
         return mir_->toLambdaArrow();
@@ -4936,6 +4899,39 @@ class LArrayConcat : public LCallInstructionHelper<1, 2, 2>
     }
     const LAllocation* rhs() {
         return getOperand(1);
+    }
+    const LDefinition* temp1() {
+        return getTemp(0);
+    }
+    const LDefinition* temp2() {
+        return getTemp(1);
+    }
+};
+
+class LArraySlice : public LCallInstructionHelper<1, 3, 2>
+{
+  public:
+    LIR_HEADER(ArraySlice)
+
+    LArraySlice(const LAllocation& obj, const LAllocation& begin, const LAllocation& end,
+                const LDefinition& temp1, const LDefinition& temp2) {
+        setOperand(0, obj);
+        setOperand(1, begin);
+        setOperand(2, end);
+        setTemp(0, temp1);
+        setTemp(1, temp2);
+    }
+    const MArraySlice* mir() const {
+        return mir_->toArraySlice();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* begin() {
+        return getOperand(1);
+    }
+    const LAllocation* end() {
+        return getOperand(2);
     }
     const LDefinition* temp1() {
         return getTemp(0);
@@ -7013,6 +7009,26 @@ class LDebugger : public LCallInstructionHelper<0, 0, 2>
     LDebugger(const LDefinition& temp1, const LDefinition& temp2) {
         setTemp(0, temp1);
         setTemp(1, temp2);
+    }
+};
+
+class LNewTarget : public LInstructionHelper<BOX_PIECES, 0, 0>
+{
+  public:
+    LIR_HEADER(NewTarget)
+};
+
+class LArrowNewTarget : public LInstructionHelper<BOX_PIECES, 1, 0>
+{
+  public:
+    explicit LArrowNewTarget(const LAllocation& callee) {
+        setOperand(0, callee);
+    }
+
+    LIR_HEADER(ArrowNewTarget)
+
+    const LAllocation* callee() {
+        return getOperand(0);
     }
 };
 
