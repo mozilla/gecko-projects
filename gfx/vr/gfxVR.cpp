@@ -12,7 +12,12 @@
 
 #include "gfxPrefs.h"
 #include "gfxVR.h"
+#if defined(XP_WIN)
 #include "gfxVROculus.h"
+#endif
+#if defined(XP_MACOSX) || defined(XP_LINUX)
+#include "gfxVROculus050.h"
+#endif
 #include "gfxVRCardboard.h"
 
 #include "nsServiceManagerUtils.h"
@@ -102,9 +107,17 @@ VRHMDManager::ManagerInit()
 
   nsRefPtr<VRHMDManager> mgr;
 
+#ifdef XP_WIN
   mgr = new VRHMDManagerOculus();
   if (mgr->PlatformInit())
     sManagers->AppendElement(mgr);
+#endif
+
+#if defined(XP_MACOSX) || defined(XP_LINUX)
+  mgr = new VRHMDManagerOculus050();
+  if (mgr->PlatformInit())
+    sManagers->AppendElement(mgr);
+#endif
 
   mgr = new VRHMDManagerCardboard();
   if (mgr->PlatformInit())

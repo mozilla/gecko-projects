@@ -104,7 +104,7 @@ ret
 // Approximately 10 instruction slots used
 #endif
 
-const BYTE OculusVRDistortionVS[] =
+const BYTE Oculus050VRDistortionVS[] =
 {
      68,  88,  66,  67,   3,  61, 
     196, 122,  10,  53,  44, 234, 
@@ -439,7 +439,7 @@ ret
 // Approximately 8 instruction slots used
 #endif
 
-const BYTE OculusVRDistortionPS[] =
+const BYTE Oculus050VRDistortionPS[] =
 {
      68,  88,  66,  67, 108, 219, 
      61, 216,  27,   0,  27, 222, 
