@@ -719,7 +719,7 @@ var shell = {
 
 #ifdef MOZ_GRAPHENE
     if (Services.prefs.getBoolPref("b2g.nativeWindowGeometry.fullscreen")) {
-      document.body.mozRequestFullScreen();
+      window.fullScreen = true;
     }
 #endif
 
@@ -816,11 +816,7 @@ var CustomEventManager = {
       case 'toggle-fullscreen-native-window':
         Services.prefs.setBoolPref("b2g.nativeWindowGeometry.fullscreen",
                                    !document.mozFullScreenElement);
-        if (document.mozFullScreenElement) {
-          document.mozCancelFullScreen();
-        } else {
-          document.body.mozRequestFullScreen();
-        }
+        window.fullScreen = !window.fullScreen;
         break;
       case 'minimize-native-window':
         window.minimize();
