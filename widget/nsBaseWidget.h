@@ -243,6 +243,8 @@ public:
   void SetConfirmedTargetAPZC(uint64_t aInputBlockId,
                               const nsTArray<ScrollableLayerGuid>& aTargets) const override;
 
+  bool AsyncPanZoomEnabled() const override;
+
   void NotifyWindowDestroyed();
   void NotifySizeMoveDone();
   void NotifyWindowMoved(int32_t aX, int32_t aY);
@@ -287,6 +289,10 @@ public:
 
   virtual const SizeConstraints& GetSizeConstraints() const override;
   virtual void SetSizeConstraints(const SizeConstraints& aConstraints) override;
+
+  virtual bool CaptureWidgetOnScreen(mozilla::RefPtr<mozilla::gfx::DrawTarget> aDT) override {
+    return false;
+  }
 
   /**
    * Use this when GetLayerManager() returns a BasicLayerManager

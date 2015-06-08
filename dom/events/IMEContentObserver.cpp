@@ -86,6 +86,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(IMEContentObserver)
 
 IMEContentObserver::IMEContentObserver()
   : mESM(nullptr)
+  , mSuppressNotifications(0)
   , mPreCharacterDataChangeLength(-1)
   , mIsObserving(false)
   , mIsSelectionChangeEventPending(false)
@@ -1146,6 +1147,11 @@ IMEContentObserver::FlushMergeableNotifications()
     return;
   }
 
+  // Don't notify IME of anything if it's not good time to do it.
+  if (mSuppressNotifications) {
+    return;
+  }
+
   // If we're in handling an edit action, this method will be called later.
   bool isInEditAction = false;
   if (mEditor && NS_SUCCEEDED(mEditor->GetIsInEditAction(&isInEditAction)) &&
@@ -1173,6 +1179,9 @@ IMEContentObserver::FlushMergeableNotifications()
     nsContentUtils::AddScriptRunner(new TextChangeEvent(this, mTextChangeData));
   }
 
+  // Be aware, PuppetWidget depends on the order of this. A selection change
+  // notification should not be sent before a text change notification because
+  // PuppetWidget shouldn't query new text content every selection change.
   if (mIsSelectionChangeEventPending) {
     mIsSelectionChangeEventPending = false;
     nsContentUtils::AddScriptRunner(

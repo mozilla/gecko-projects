@@ -1010,6 +1010,12 @@ nsBaseWidget::SetConfirmedTargetAPZC(uint64_t aInputBlockId,
     mAPZC.get(), setTargetApzcFunc, aInputBlockId, mozilla::Move(aTargets)));
 }
 
+bool
+nsBaseWidget::AsyncPanZoomEnabled() const
+{
+  return !!mAPZC;
+}
+
 nsEventStatus
 nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
                                            const ScrollableLayerGuid& aGuid,
@@ -1907,6 +1913,60 @@ nsIWidget::UpdateRegisteredPluginWindowVisibility(nsTArray<uintptr_t>& aVisibleL
   MOZ_ASSERT(sPluginWidgetList);
   sPluginWidgetList->EnumerateRead(RegisteredPluginEnumerator, static_cast<void*>(&aVisibleList));
 #endif
+}
+
+TemporaryRef<mozilla::gfx::SourceSurface>
+nsIWidget::SnapshotWidgetOnScreen()
+{
+  // This is only supported on a widget with a compositor.
+  LayerManager* layerManager = GetLayerManager();
+  if (!layerManager) {
+    return nullptr;
+  }
+
+  ClientLayerManager* lm = layerManager->AsClientLayerManager();
+  if (!lm) {
+    return nullptr;
+  }
+
+  CompositorChild* cc = lm->GetRemoteRenderer();
+  if (!cc) {
+    return nullptr;
+  }
+
+  nsIntRect bounds;
+  GetBounds(bounds);
+  if (bounds.IsEmpty()) {
+    return nullptr;
+  }
+
+  gfx::IntSize size(bounds.width, bounds.height);
+
+  ShadowLayerForwarder* forwarder = lm->AsShadowForwarder();
+  SurfaceDescriptor surface;
+  if (!forwarder->AllocSurfaceDescriptor(size, gfxContentType::COLOR_ALPHA, &surface)) {
+    return nullptr;
+  }
+
+  if (!cc->SendMakeWidgetSnapshot(surface)) {
+    return nullptr;
+  }
+
+  RefPtr<gfx::DataSourceSurface> snapshot = GetSurfaceForDescriptor(surface);
+  RefPtr<gfx::DrawTarget> dt =
+    gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(size, gfx::SurfaceFormat::B8G8R8A8);
+  if (!snapshot || !dt) {
+    forwarder->DestroySharedSurface(&surface);
+    return nullptr;
+  }
+
+  dt->DrawSurface(snapshot,
+                  gfx::Rect(gfx::Point(), gfx::Size(size)),
+                  gfx::Rect(gfx::Point(), gfx::Size(size)),
+                  gfx::DrawSurfaceOptions(gfx::Filter::POINT));
+
+  forwarder->DestroySharedSurface(&surface);
+  return dt->Snapshot();
 }
 
 #ifdef DEBUG

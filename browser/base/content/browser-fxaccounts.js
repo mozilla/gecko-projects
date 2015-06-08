@@ -31,6 +31,7 @@ let gFxAccounts = {
       "weave:service:sync:start",
       "weave:service:login:error",
       "weave:service:setup-complete",
+      "weave:ui:login:error",
       "fxa-migration:state-changed",
       this.FxAccountsCommon.ONVERIFIED_NOTIFICATION,
       this.FxAccountsCommon.ONLOGOUT_NOTIFICATION,
@@ -244,8 +245,10 @@ let gFxAccounts = {
 
       if (!this._inCustomizationMode) {
         if (this.loginFailed) {
+          let tooltipDescription = this.strings.formatStringFromName("reconnectDescription", [userData.email], 1);
           this.button.setAttribute("fxastatus", "error");
           this.button.setAttribute("label", errorLabel);
+          this.button.setAttribute("tooltiptext", tooltipDescription);
         } else if (userData) {
           this.button.setAttribute("fxastatus", "signedin");
           this.button.setAttribute("label", userData.email);

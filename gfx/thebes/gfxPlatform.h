@@ -131,6 +131,8 @@ enum eGfxLog {
 // when searching through pref langs, max number of pref langs
 const uint32_t kMaxLenPrefLangList = 32;
 
+extern bool gANGLESupportsD3D11;
+
 #define UNINITIALIZED_VALUE  (-1)
 
 inline const char*
@@ -288,6 +290,8 @@ public:
     /// These should be used instead of directly accessing the preference,
     /// as different platforms may override the behaviour.
     virtual bool UseProgressivePaint() { return gfxPrefs::ProgressivePaintDoNotUseDirectly(); }
+
+    static bool AsyncPanZoomEnabled();
 
     void GetAzureBackendInfo(mozilla::widget::InfoObject &aObj) {
       aObj.DefineProperty("AzureCanvasBackend", GetBackendName(mPreferredCanvasBackend));

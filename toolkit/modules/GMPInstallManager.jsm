@@ -63,10 +63,9 @@ function getScopedLogger(prefix) {
 // TODO: refactor this out somewhere else
 XPCOMUtils.defineLazyGetter(this, "gOSVersion", function aus_gOSVersion() {
   let osVersion;
-  let sysInfo = Cc["@mozilla.org/system-info;1"].
-                getService(Ci.nsIPropertyBag2);
   try {
-    osVersion = sysInfo.getProperty("name") + " " + sysInfo.getProperty("version");
+    osVersion = Services.sysinfo.getProperty("name") + " " +
+                Services.sysinfo.getProperty("version");
   }
   catch (e) {
     LOG("gOSVersion - OS Version unknown: updates are not possible.");
@@ -210,10 +209,6 @@ XPCOMUtils.defineLazyGetter(this, "gABI", function aus_gABI() {
 
     if (macutils.isUniversalBinary)
       abi += "-u-" + macutils.architecturesInBinary;
-    if (AppConstants.MOZ_SHARK) {
-      // Disambiguate optimised and shark nightlies
-      abi += "-shark"
-    }
   }
   return abi;
 });
@@ -890,6 +885,10 @@ GMPDownloader.prototype = {
         // if you need to set other prefs etc. do it before this.
         GMPPrefs.set(GMPPrefs.KEY_PLUGIN_VERSION, gmpAddon.version,
                      gmpAddon.id);
+        // Reset the trial create pref, so that Gecko knows to do a test
+        // run before reporting that the GMP works to content.
+        GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_TRIAL_CREATE, gmpAddon.version,
+                       gmpAddon.id);
         this._deferred.resolve(extractedPaths);
       }, err => {
         this._deferred.reject(err);

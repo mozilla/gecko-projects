@@ -375,7 +375,8 @@ pref("media.peerconnection.ice.loopback", false); // Set only for testing in off
 pref("media.peerconnection.use_document_iceservers", true);
 pref("media.peerconnection.identity.enabled", true);
 pref("media.peerconnection.identity.timeout", 10000);
-pref("media.peerconnection.ice.loopback", false); // Set only for testing in offline environments.
+pref("media.peerconnection.ice.stun_client_maximum_transmits", 7);
+pref("media.peerconnection.ice.trickle_grace_period", 5000);
 // These values (aec, agc, and noice) are from media/webrtc/trunk/webrtc/common_types.h
 // kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each
 // setting (for Xxx = Ec, Agc, or Ns).  Defaults are all set to kXxxDefault here.
@@ -2258,6 +2259,9 @@ pref("layout.css.overflow-clip-box.enabled", false);
 // Is support for CSS grid enabled?
 pref("layout.css.grid.enabled", false);
 
+// Is support for CSS contain enabled?
+pref("layout.css.contain.enabled", false);
+
 // Is support for CSS Ruby enabled?
 //
 // When this pref is removed, make sure that the pref callback registration
@@ -2392,14 +2396,6 @@ pref("hangmonitor.timeout", 0);
 pref("plugins.load_appdir_plugins", false);
 // If true, plugins will be click to play
 pref("plugins.click_to_play", false);
-
-// A comma-delimited list of plugin name prefixes matching plugins that will be
-// exposed when enumerating navigator.plugins[]. For example, prefix "Shockwave"
-// matches both Adobe Flash Player ("Shockwave Flash") and Adobe Shockwave
-// Player ("Shockwave for Director"). To hide all plugins from enumeration, use
-// the empty string "" to match no plugin names. To allow all plugins to be
-// enumerated, use the string "*" to match all plugin names.
-pref("plugins.enumerable_names", "*");
 
 // The default value for nsIPluginTag.enabledState (STATE_ENABLED = 2)
 pref("plugin.default.state", 2);

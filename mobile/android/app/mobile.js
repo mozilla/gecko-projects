@@ -772,13 +772,11 @@ pref("browser.contentHandlers.types.3.type", "application/vnd.mozilla.maybe.feed
 // WebPayment
 pref("dom.mozPay.enabled", true);
 
-#ifndef RELEASE_BUILD
 pref("dom.payment.provider.0.name", "Firefox Marketplace");
 pref("dom.payment.provider.0.description", "marketplace.firefox.com");
 pref("dom.payment.provider.0.uri", "https://marketplace.firefox.com/mozpay/?req=");
 pref("dom.payment.provider.0.type", "mozilla/payments/pay/v1");
 pref("dom.payment.provider.0.requestMethod", "GET");
-#endif
 
 // Enable Cardboard VR on mobile, assuming VR at all is enabled
 pref("dom.vr.cardboard.enabled", true);
@@ -920,4 +918,9 @@ pref("caret.manages-android-actionbar", true);
 pref("consoleservice.logcat", false);
 #else
 pref("consoleservice.logcat", true);
+#endif
+
+// Enable Service Workers for Android on non-release builds
+#ifndef RELEASE_BUILD
+pref("dom.serviceWorkers.enabled", true);
 #endif

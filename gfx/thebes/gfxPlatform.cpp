@@ -2246,7 +2246,7 @@ gfxPlatform::OptimalFormatForContent(gfxContentType aContent)
  */
 static bool sLayersSupportsD3D9 = false;
 static bool sLayersSupportsD3D11 = false;
-static bool sANGLESupportsD3D11 = false;
+bool gANGLESupportsD3D11 = false;
 static bool sLayersSupportsHardwareVideoDecoding = false;
 static bool sLayersHardwareVideoDecodingFailed = false;
 static bool sBufferRotationCheckPref = true;
@@ -2291,7 +2291,7 @@ InitLayersAccelerationPrefs()
       }
       if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT3D_11_ANGLE, &status))) {
         if (status == nsIGfxInfo::FEATURE_STATUS_OK) {
-          sANGLESupportsD3D11 = true;
+          gANGLESupportsD3D11 = true;
         }
       }
     }
@@ -2347,7 +2347,7 @@ bool
 gfxPlatform::CanUseDirect3D11ANGLE()
 {
   MOZ_ASSERT(sLayersAccelerationPrefsInitialized);
-  return sANGLESupportsD3D11;
+  return gANGLESupportsD3D11;
 }
 
 
@@ -2454,7 +2454,7 @@ DetectBadApzWheelInputPrefs()
 void
 gfxPlatform::GetApzSupportInfo(mozilla::widget::InfoObject& aObj)
 {
-  if (!gfxPrefs::AsyncPanZoomEnabled()) {
+  if (!gfxPlatform::AsyncPanZoomEnabled()) {
     return;
   }
 
@@ -2472,3 +2472,17 @@ gfxPlatform::GetApzSupportInfo(mozilla::widget::InfoObject& aObj)
   }
 }
 
+/*static*/ bool
+gfxPlatform::AsyncPanZoomEnabled()
+{
+#if !defined(MOZ_B2G) && !defined(MOZ_WIDGET_ANDROID)
+  // For XUL applications (everything but B2G on mobile and desktop, and
+  // Firefox on Android) we only want to use APZ when E10S is enabled. If
+  // we ever get input events off the main thread we can consider relaxing
+  // this requirement.
+  if (!BrowserTabsRemoteAutostart()) {
+    return false;
+  }
+#endif
+  return gfxPrefs::AsyncPanZoomEnabledDoNotUseDirectly();
+}

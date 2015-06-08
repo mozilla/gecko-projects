@@ -9,7 +9,18 @@
 function runTests() {
   return Promise.resolve()
     .then(navigator.serviceWorker.ready)
-    .then(() => { return testFetchAppResource('swresponse'); })
+    .then(() => {
+        return testFetchAppResource('foo.txt',
+                                    'swresponse', 'text/plain');
+    })
+    .then(() => {
+        return testFetchAppResource('test_custom_content_type',
+                                    'customContentType', 'text/html');
+    })
+    .then(testRedirectedResponse)
+    .then(testRedirectedHttpsResponse)
+    .then(testCachedRedirectedResponse)
+    .then(testCachedRedirectedHttpsResponse)
     .then(done);
 }
   </script>

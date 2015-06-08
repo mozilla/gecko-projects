@@ -986,7 +986,6 @@ var gBrowserInit = {
     mm.loadFrameScript("chrome://browser/content/content.js", true);
     mm.loadFrameScript("chrome://browser/content/content-UITour.js", true);
     mm.loadFrameScript("chrome://global/content/manifestMessages.js", true);
-    mm.loadFrameScript("chrome://global/content/viewSource-content.js", true);
 
     window.messageManager.addMessageListener("Browser:LoadURI", RedirectLoad);
 
@@ -1182,7 +1181,7 @@ var gBrowserInit = {
         break;
       case "restoreAll":
         for (let browserWin of browserWindows()) {
-          for (let tab of window.gBrowser.tabs) {
+          for (let tab of browserWin.gBrowser.tabs) {
             SessionStore.reviveCrashedTab(tab);
           }
         }

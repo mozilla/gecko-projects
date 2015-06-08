@@ -1394,7 +1394,6 @@ SetFactor(const nsCSSValue& aValue, float& aField, bool& aCanStoreInRuleTree,
   NS_NOTREACHED("SetFactor: inappropriate unit");
 }
 
-// Overloaded new operator that allocates from a presShell arena.
 void*
 nsRuleNode::operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW
 {
@@ -1554,20 +1553,11 @@ nsRuleNode::Transition(nsIStyleRule* aRule, uint8_t aLevel,
     else {
       next = entry->mRuleNode = new (mPresContext)
         nsRuleNode(mPresContext, this, aRule, aLevel, aIsImportantRule);
-      if (!next) {
-        PL_DHashTableRawRemove(ChildrenHash(), entry);
-        NS_WARNING("out of memory");
-        return this;
-      }
     }
   } else if (!next) {
     // Create the new entry in our list.
     next = new (mPresContext)
       nsRuleNode(mPresContext, this, aRule, aLevel, aIsImportantRule);
-    if (!next) {
-      NS_WARNING("out of memory");
-      return this;
-    }
     next->mNextSibling = ChildrenList();
     SetChildrenList(next);
   }
@@ -5275,6 +5265,12 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
               SETDSC_ENUMERATED | SETDSC_UNSET_INITIAL,
               parentDisplay->mDisplay,
               NS_STYLE_DISPLAY_INLINE, 0, 0, 0, 0);
+
+  // contain: none, enum, inherit, initial
+  SetDiscrete(*aRuleData->ValueForContain(), display->mContain, canStoreInRuleTree,
+              SETDSC_ENUMERATED | SETDSC_NONE | SETDSC_UNSET_INITIAL,
+              parentDisplay->mContain,
+              NS_STYLE_CONTAIN_NONE, 0, NS_STYLE_CONTAIN_NONE, 0, 0);
 
   // mix-blend-mode: enum, inherit, initial
   SetDiscrete(*aRuleData->ValueForMixBlendMode(), display->mMixBlendMode,

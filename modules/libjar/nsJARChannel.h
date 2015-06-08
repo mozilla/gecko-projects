@@ -62,6 +62,7 @@ public:
     nsresult Init(nsIURI *uri);
 
     nsresult OverrideSecurityInfo(nsISupports* aSecurityInfo);
+    void OverrideURI(nsIURI* aRedirectedURI);
 
 private:
     virtual ~nsJARChannel();
@@ -91,7 +92,8 @@ private:
     void ResetInterception();
     // Override this channel's pending response with a synthesized one. The
     // content will be asynchronously read from the pump.
-    void OverrideWithSynthesizedResponse(nsIInputStream* aSynthesizedInput);
+    void OverrideWithSynthesizedResponse(nsIInputStream* aSynthesizedInput,
+                                         const nsACString& aContentType);
 
     nsCString                       mSpec;
 
