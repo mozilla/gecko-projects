@@ -253,12 +253,21 @@ ContainerRenderVR(ContainerT* aContainer,
       // the eye resolution (that is, returned by the recommended
       // render rect from the HMD device), then we need to scale it
       // up/down.
-      nsIntRect layerBounds = layer->GetLayerBounds();
+      nsIntRect layerBounds;
+      // XXX this is a hack! Canvas layers aren't reporting the
+      // proper bounds here (visible region bounds are 0,0,0,0)
+      // and I'm not sure if this is the bounds we want anyway.
+      if (layer->GetType() == Layer::TYPE_CANVAS) {
+        layerBounds = static_cast<CanvasLayer*>(layer)->GetBounds();
+      } else {
+        layerBounds = layer->GetEffectiveVisibleRegion().GetBounds();
+      }
       DUMP("  layer %p bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", aContainer,
            XYWH(layerBounds), XYWH(surfaceRect));
       bool restoreTransform = false;
-      if (layerBounds.width != surfaceRect.width ||
-          layerBounds.height != surfaceRect.height)
+      if ((layerBounds.width != 0 && layerBounds.height != 0) &&
+          (layerBounds.width != surfaceRect.width ||
+           layerBounds.height != surfaceRect.height))
       {
         gfx::Matrix4x4 scaledChildTransform(childTransform);
         scaledChildTransform.PreScale(surfaceRect.width / float(layerBounds.width),
