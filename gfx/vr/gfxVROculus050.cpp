@@ -318,11 +318,7 @@ HMDInfoOculus050::SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFO
     mEyeTranslation[eye] = Point3D(-renderDesc.HmdToEyeViewOffset.x, -renderDesc.HmdToEyeViewOffset.y, -renderDesc.HmdToEyeViewOffset.z);
 
     // note that we are using a right-handed coordinate system here, to match CSS
-    ovrMatrix4f projMatrix = ovrMatrix4f_Projection(mFOVPort[eye], zNear, zFar, true);
-
-    // XXX this is gross, we really need better methods on Matrix4x4
-    memcpy(&mEyeProjectionMatrix[eye], projMatrix.M, sizeof(ovrMatrix4f));
-    mEyeProjectionMatrix[eye].Transpose();
+    mEyeProjectionMatrix[eye] = mEyeFOV[eye].ConstructProjectionMatrix(zNear, zFar, true);
 
     texSize[eye] = ovrHmd_GetFovTextureSize(mHMD, (ovrEyeType) eye, mFOVPort[eye], pixelsPerDisplayPixel);
 
