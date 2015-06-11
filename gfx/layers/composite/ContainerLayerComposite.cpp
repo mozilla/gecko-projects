@@ -240,7 +240,7 @@ ContainerRenderVR(ContainerT* aContainer,
     // the child layer of this VR container layer has PRESERVE_3D or not.
     if ((contentFlags & Layer::CONTENT_PRESERVE_3D) == 0) {
       // This layer is native VR
-      DUMP("%p Switching to pre-rendered VR\n", aContainer);
+      DUMP("%p pre-rendered VR layer %p\n", aContainer, layerToRender);
 
       // XXX we still need depth test here, but we have no way of preserving
       // depth anyway in native VR layers until we have a way to save them
@@ -288,7 +288,7 @@ ContainerRenderVR(ContainerT* aContainer,
         layer->ReplaceEffectiveTransform(childTransform);
       }
     } else {
-      DUMP("%p Switching to Gecko-rendered VR\n", aContainer);
+      DUMP("%p Gecko-rendered VR layer %p\n", aContainer, layerToRender);
       for (uint32_t eye = 0; eye < 2; eye++) {
         DUMP(" -- ContainerRenderVR [%p] EYE %d\n", aContainer, eye);
 
@@ -629,10 +629,10 @@ ContainerRender(ContainerT* aContainer,
     if (xform.IsTranslation()) {
       printf_stderr("                  xform: [translate %.2f %.2f %.2f]\n", xform._41, xform._42, xform._43);
     } else {
-      printf_stderr("   xform: [%3.2f %3.2f %3.2f %3.2f]\n", xform._11, xform._12, xform._13, xform._14);
-      printf_stderr("          [%3.2f %3.2f %3.2f %3.2f]\n", xform._21, xform._22, xform._23, xform._24);
-      printf_stderr("          [%3.2f %3.2f %3.2f %3.2f]\n", xform._31, xform._32, xform._33, xform._34);
-      printf_stderr("          [%3.2f %3.2f %3.2f %3.2f]\n", xform._41, xform._42, xform._43, xform._44);
+      printf_stderr("   xform: [%7.6f %7.6f %7.6f %7.6f]\n", xform._11, xform._12, xform._13, xform._14);
+      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._21, xform._22, xform._23, xform._24);
+      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._31, xform._32, xform._33, xform._34);
+      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._41, xform._42, xform._43, xform._44);
     }
   }
 

@@ -147,10 +147,10 @@ PaintedLayerComposite::RenderLayer(const gfx::IntRect& aClipRect)
     if (xform.IsTranslation()) {
       printf_stderr("                  xform: [translate %.2f %.2f %.2f]\n", xform._41, xform._42, xform._43);
     } else {
-      printf_stderr("   xform: [%3.2f %3.2f %3.2f %3.2f]\n", xform._11, xform._12, xform._13, xform._14);
-      printf_stderr("          [%3.2f %3.2f %3.2f %3.2f]\n", xform._21, xform._22, xform._23, xform._24);
-      printf_stderr("          [%3.2f %3.2f %3.2f %3.2f]\n", xform._31, xform._32, xform._33, xform._34);
-      printf_stderr("          [%3.2f %3.2f %3.2f %3.2f]\n", xform._41, xform._42, xform._43, xform._44);
+      printf_stderr("   xform: [%7.6f %7.6f %7.6f %7.6f]\n", xform._11, xform._12, xform._13, xform._14);
+      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._21, xform._22, xform._23, xform._24);
+      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._31, xform._32, xform._33, xform._34);
+      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._41, xform._42, xform._43, xform._44);
     }
   }
 
