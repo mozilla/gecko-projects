@@ -15,7 +15,7 @@
 #if defined(XP_WIN)
 #include "gfxVROculus.h"
 #endif
-#if defined(XP_MACOSX) || defined(XP_LINUX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_LINUX)
 #include "gfxVROculus050.h"
 #endif
 #include "gfxVRCardboard.h"
@@ -23,6 +23,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsIScreenManager.h"
 
+#include "mozilla/unused.h"
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/TextureHost.h"
 
@@ -107,16 +108,25 @@ VRHMDManager::ManagerInit()
 
   nsRefPtr<VRHMDManager> mgr;
 
-#ifdef XP_WIN
+  // we'll only load the 0.5.0 oculus runtime if
+  // the >= 0.6.0 one failed to load
+  bool useOculus050 = true;
+  unused << useOculus050;
+
+#if defined(XP_WIN)
   mgr = new VRHMDManagerOculus();
-  if (mgr->PlatformInit())
+  if (mgr->PlatformInit()) {
+    useOculus050 = false;
     sManagers->AppendElement(mgr);
+  }
 #endif
 
-#if defined(XP_MACOSX) || defined(XP_LINUX)
-  mgr = new VRHMDManagerOculus050();
-  if (mgr->PlatformInit())
-    sManagers->AppendElement(mgr);
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_LINUX)
+  if (useOculus050) {
+    mgr = new VRHMDManagerOculus050();
+    if (mgr->PlatformInit())
+      sManagers->AppendElement(mgr);
+  }
 #endif
 
   mgr = new VRHMDManagerCardboard();
