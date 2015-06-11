@@ -682,7 +682,8 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
     currentClip = aCurrentScissorRect;
   }
 
-#ifdef MOZ_HORIZON
+#if 1
+//#ifdef MOZ_HORIZON
   if (gfxPrefs::VREnabled()) {
     return currentClip;
   }
@@ -1211,7 +1212,8 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
   Matrix4x4 idealTransform = GetLocalTransform() * aTransformToSurface;
 
   bool hasUnbroken3DChainToVRContainer = false;
-#ifdef MOZ_HORIZON
+#if 1
+//#ifdef MOZ_HORIZON
   // XXX We need to figure out if this is the proper thing to do or not.
   // Right now we do the below for HORIZON builds but this needs to be
   // heavily reviewed.
@@ -1219,13 +1221,15 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
   // If this container has an unbroken chain of preserve-3d containers
   // all the way up to a VR container, then we're going to make sure that
   // its transforms are kept as pure 3D as possible.
-  for (ContainerLayer *p = this; p; p = p->mParent) {
-    if (p->GetVRHMDInfo() != nullptr) {
-      hasUnbroken3DChainToVRContainer = true;
-      break;
+  if (gfxPrefs::VREnabled()) {
+    for (ContainerLayer *p = this; p; p = p->mParent) {
+      if (p->GetVRHMDInfo() != nullptr) {
+        hasUnbroken3DChainToVRContainer = true;
+        break;
+      }
+      if (!(p->GetContentFlags() & CONTENT_PRESERVE_3D))
+        break;
     }
-    if (!(p->GetContentFlags() & CONTENT_PRESERVE_3D))
-      break;
   }
 #endif
 
