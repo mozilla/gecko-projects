@@ -235,7 +235,6 @@ ContainerRenderVR(ContainerT* aContainer,
       continue;
     }
 
-    const gfx::Matrix4x4 childTransform = layer->GetEffectiveTransform();
     // We flip between pre-rendered and Gecko-rendered VR based on whether
     // the child layer of this VR container layer has PRESERVE_3D or not.
     if ((contentFlags & Layer::CONTENT_PRESERVE_3D) == 0) {
@@ -262,13 +261,18 @@ ContainerRenderVR(ContainerT* aContainer,
       } else {
         layerBounds = layer->GetEffectiveVisibleRegion().GetBounds();
       }
-      DUMP("  layer %p bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", aContainer,
+      DUMP("  layer %p bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", layer,
            XYWH(layerBounds), XYWH(surfaceRect));
+      
+      const gfx::Matrix4x4 childTransform = layer->GetEffectiveTransform();
       bool restoreTransform = false;
       if ((layerBounds.width != 0 && layerBounds.height != 0) &&
           (layerBounds.width != surfaceRect.width ||
            layerBounds.height != surfaceRect.height))
       {
+        DUMP("  layer %p doesn't match, prescaling by %f %f\n", layer,
+             surfaceRect.width / float(layerBounds.width),
+             surfaceRect.height / float(layerBounds.height));
         gfx::Matrix4x4 scaledChildTransform(childTransform);
         scaledChildTransform.PreScale(surfaceRect.width / float(layerBounds.width),
                                       surfaceRect.height / float(layerBounds.height),
@@ -321,8 +325,7 @@ ContainerRenderVR(ContainerT* aContainer,
     }
   }
 
-  gfx::Rect normRect(0, 0, visibleRect.width, visibleRect.height);
-  gfx::Rect rect(visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height);
+  gfx::Rect rect(surfaceRect.x, surfaceRect.y, surfaceRect.width, surfaceRect.height);
   gfx::Rect clipRect(aClipRect.x, aClipRect.y, aClipRect.width, aClipRect.height);
 
   // The VR geometry may not cover the entire area; we need to fill with a solid color
@@ -332,7 +335,7 @@ ContainerRenderVR(ContainerT* aContainer,
   // the entire rect)
   EffectChain solidEffect(aContainer);
   solidEffect.mPrimaryEffect = new EffectSolidColor(Color(0.0, 0.0, 0.0, 1.0));
-  aManager->GetCompositor()->DrawQuad(normRect, normRect, solidEffect, 1.0, gfx::Matrix4x4());
+  aManager->GetCompositor()->DrawQuad(rect, rect, solidEffect, 1.0, gfx::Matrix4x4());
 
   // draw the temporary surface with VR distortion to the original destination
   gfx::Matrix4x4 scaleTransform = aContainer->GetEffectiveTransform();
