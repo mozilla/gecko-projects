@@ -44,6 +44,9 @@ using namespace mozilla::ipc;
 namespace mozilla {
 namespace net {
 
+extern bool
+WillRedirect(const nsHttpResponseHead * response);
+
 namespace {
 
 const uint32_t kMaxFileDescriptorsPerMessage = 250;
@@ -1489,6 +1492,8 @@ propagateLoadInfo(nsILoadInfo *aLoadInfo,
     openArgs.securityFlags() = aLoadInfo->GetSecurityFlags();
     openArgs.contentPolicyType() = aLoadInfo->GetContentPolicyType();
     openArgs.innerWindowID() = aLoadInfo->GetInnerWindowID();
+    openArgs.outerWindowID() = aLoadInfo->GetOuterWindowID();
+    openArgs.parentOuterWindowID() = aLoadInfo->GetParentOuterWindowID();
     return;
   }
 
@@ -1500,6 +1505,8 @@ propagateLoadInfo(nsILoadInfo *aLoadInfo,
   openArgs.securityFlags() = nsILoadInfo::SEC_NORMAL;
   openArgs.contentPolicyType() = nsIContentPolicy::TYPE_OTHER;
   openArgs.innerWindowID() = 0;
+  openArgs.outerWindowID() = 0;
+  openArgs.parentOuterWindowID() = 0;
 }
 
 NS_IMETHODIMP
@@ -2182,8 +2189,11 @@ HttpChannelChild::OverrideWithSynthesizedResponse(nsAutoPtr<nsHttpResponseHead>&
                                                   nsIInputStream* aSynthesizedInput,
                                                   nsIStreamListener* aStreamListener)
 {
-  // Intercepted responses should already be decoded.
-  SetApplyConversion(false);
+  // Intercepted responses should already be decoded.  If its a redirect,
+  // however, we want to respect the encoding of the final result instead.
+  if (!WillRedirect(aResponseHead)) {
+    SetApplyConversion(false);
+  }
 
   mResponseHead = aResponseHead;
   mSynthesizedResponse = true;

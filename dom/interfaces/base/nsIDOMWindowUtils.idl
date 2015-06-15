@@ -49,7 +49,7 @@ interface nsIJSRAIIHelper;
 interface nsIContentPermissionRequest;
 interface nsIObserver;
 
-[scriptable, uuid(098d9f0d-7809-4d3c-8fc6-e5b3fb71835b)]
+[scriptable, uuid(a01d5bb4-3e81-4529-b139-2f4ebb78f717)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -1194,6 +1194,15 @@ interface nsIDOMWindowUtils : nsISupports {
   void remoteFrameFullscreenReverted();
 
   /**
+   * Calls the document to handle any pending fullscreen requests.
+   * It is called when the parent document has entered fullscreen, and
+   * we want to put the current document into fullscreen as well.
+   * The return value indicates whether there is any fullscreen request
+   * handled by this call.
+   */
+  boolean handleFullscreenRequests();
+
+  /**
    * Called when the child frame has fully exit fullscreen, so that the parent
    * process can also fully exit.
    */
@@ -1695,9 +1704,11 @@ interface nsIDOMWindowUtils : nsISupports {
    attribute boolean paintFlashing;
 
    /**
-    * Allows running of a "synchronous section", in the form of an nsIRunnable
-    * once the event loop has reached a "stable state". We've reached a stable
-    * state when the currently executing task/event has finished, see:
+    * Add a "synchronous section", in the form of an nsIRunnable run once the
+    * event loop has reached a "stable state". |runnable| must not cause any
+    * queued events to be processed (i.e. must not spin the event loop).
+    * We've reached a stable state when the currently executing task/event has
+    * finished, see:
     * http://www.whatwg.org/specs/web-apps/current-work/multipage/webappapis.html#synchronous-section
     * In practice this runs aRunnable once the currently executing event
     * finishes. If called multiple times per task/event, all the runnables will
@@ -1814,6 +1825,14 @@ interface nsIDOMWindowUtils : nsISupports {
   attribute boolean serviceWorkersTestingEnabled;
 
   /**
+   * Returns a JSObject which contains a list of frame uniformities
+   * when the pref gfx.vsync.collect-scroll-data is enabled.
+   * Every result contains a layer address and a frame uniformity for that layer.
+   * A negative frame uniformity value indicates an invalid frame uniformity and an error has occured.
+   */
+  [implicit_jscontext] jsval getFrameUniformityTestData();
+
+  /*
    * Increase the chaos mode activation level. An equivalent number of
    * calls to leaveChaosMode must be made in order to restore the original
    * chaos mode state. If the activation level is nonzero all chaos mode

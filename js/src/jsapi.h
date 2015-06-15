@@ -1164,6 +1164,7 @@ class JS_PUBLIC_API(RuntimeOptions) {
         asmJS_(true),
         nativeRegExp_(true),
         unboxedArrays_(false),
+        asyncStack_(true),
         werror_(false),
         strictMode_(false),
         extraWarnings_(false),
@@ -1213,6 +1214,12 @@ class JS_PUBLIC_API(RuntimeOptions) {
         return *this;
     }
 
+    bool asyncStack() const { return asyncStack_; }
+    RuntimeOptions& setAsyncStack(bool flag) {
+        asyncStack_ = flag;
+        return *this;
+    }
+
     bool werror() const { return werror_; }
     RuntimeOptions& setWerror(bool flag) {
         werror_ = flag;
@@ -1259,6 +1266,7 @@ class JS_PUBLIC_API(RuntimeOptions) {
     bool asmJS_ : 1;
     bool nativeRegExp_ : 1;
     bool unboxedArrays_ : 1;
+    bool asyncStack_ : 1;
     bool werror_ : 1;
     bool strictMode_ : 1;
     bool extraWarnings_ : 1;
@@ -4010,6 +4018,9 @@ namespace JS {
  *
  * The provided chain of SavedFrame objects can live in any compartment,
  * although it will be copied to the compartment where the stack is captured.
+ *
+ * See also `js/src/doc/SavedFrame/SavedFrame.md` for documentation on async
+ * stack frames.
  */
 class MOZ_STACK_CLASS JS_PUBLIC_API(AutoSetAsyncStackForNewCalls)
 {
@@ -4927,6 +4938,7 @@ JS_SetOffthreadIonCompilationEnabled(JSRuntime* rt, bool enabled);
     Register(BASELINE_WARMUP_TRIGGER, "baseline.warmup.trigger")           \
     Register(ION_WARMUP_TRIGGER, "ion.warmup.trigger")                     \
     Register(ION_GVN_ENABLE, "ion.gvn.enable")                             \
+    Register(ION_FORCE_IC, "ion.forceinlineCaches")                        \
     Register(ION_ENABLE, "ion.enable")                                     \
     Register(BASELINE_ENABLE, "baseline.enable")                           \
     Register(OFFTHREAD_COMPILATION_ENABLE, "offthread-compilation.enable") \
@@ -5292,6 +5304,8 @@ CaptureCurrentStack(JSContext* cx, MutableHandleObject stackp, unsigned maxFrame
  * caller's principals do not subsume any of the chained SavedFrame object's
  * principals, `SavedFrameResult::AccessDenied` is returned and a (hopefully)
  * sane default value is chosen for the out param.
+ *
+ * See also `js/src/doc/SavedFrame/SavedFrame.md`.
  */
 
 enum class SavedFrameResult {
@@ -5552,11 +5566,19 @@ ResetStopwatches(JSRuntime*);
 /**
  * Turn on/off stopwatch-based CPU monitoring.
  *
- * `SetStopwatchActive` may return `false` if monitoring could not be
- * activated, which may happen if we are out of memory.
+ * `SetStopwatchIsMonitoringCPOW` or `SetStopwatchIsMonitoringJank`
+ * may return `false` if monitoring could not be activated, which may
+ * happen if we are out of memory.
  */
 extern JS_PUBLIC_API(bool)
-SetStopwatchActive(JSRuntime*, bool);
+SetStopwatchIsMonitoringCPOW(JSRuntime*, bool);
+extern JS_PUBLIC_API(bool)
+GetStopwatchIsMonitoringCPOW(JSRuntime*);
+extern JS_PUBLIC_API(bool)
+SetStopwatchIsMonitoringJank(JSRuntime*, bool);
+extern JS_PUBLIC_API(bool)
+GetStopwatchIsMonitoringJank(JSRuntime*);
+
 extern JS_PUBLIC_API(bool)
 IsStopwatchActive(JSRuntime*);
 

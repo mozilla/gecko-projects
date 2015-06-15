@@ -10,8 +10,7 @@
 #include "nsThreadUtils.h"
 #include "TaskDispatcher.h"
 
-#include "nsIAppShell.h"
-#include "nsWidgetsCID.h"
+#include "nsContentUtils.h"
 #include "nsServiceManagerUtils.h"
 
 #include "mozilla/ClearOnShutdown.h"
@@ -23,8 +22,6 @@ namespace mozilla {
 
 StaticRefPtr<AbstractThread> sMainThread;
 ThreadLocal<AbstractThread*> AbstractThread::sCurrentThreadTLS;
-
-static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 class XPCOMThreadWrapper : public AbstractThread
 {
@@ -87,8 +84,7 @@ public:
       mTailDispatcher.emplace(/* aIsTailDispatcher = */ true);
 
       nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this, &XPCOMThreadWrapper::FireTailDispatcher);
-      nsCOMPtr<nsIAppShell> appShell = do_GetService(kAppShellCID);
-      appShell->RunInStableState(event);
+      nsContentUtils::RunInStableState(event.forget());
     }
 
     return mTailDispatcher.ref();
@@ -131,6 +127,18 @@ AbstractThread::InitStatics()
     MOZ_CRASH();
   }
   sCurrentThreadTLS.set(sMainThread);
+}
+
+void
+AbstractThread::DispatchStateChange(already_AddRefed<nsIRunnable> aRunnable)
+{
+  GetCurrent()->TailDispatcher().AddStateChangeTask(this, Move(aRunnable));
+}
+
+/* static */ void
+AbstractThread::DispatchDirectTask(already_AddRefed<nsIRunnable> aRunnable)
+{
+  GetCurrent()->TailDispatcher().AddDirectTask(Move(aRunnable));
 }
 
 } // namespace mozilla

@@ -8,7 +8,6 @@
 
 #include "mozilla/UniquePtr.h"
 
-#include "jit/BaselineHelpers.h"
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/FixedList.h"
@@ -19,6 +18,7 @@
 #ifdef JS_ION_PERF
 # include "jit/PerfSpewer.h"
 #endif
+#include "jit/SharedICHelpers.h"
 #include "jit/VMFunctions.h"
 #include "vm/TraceLogging.h"
 
@@ -232,7 +232,17 @@ BaselineCompiler::compile()
     // Adopt fallback stubs from the compiler into the baseline script.
     baselineScript->adoptFallbackStubs(&stubSpace_);
 
-    // Patch IC loads using IC entries
+    // All barriers are emitted off-by-default, toggle them on if needed.
+    if (cx->zone()->needsIncrementalBarrier())
+        baselineScript->toggleBarriers(true);
+
+    // If profiler instrumentation is enabled, toggle instrumentation on.
+    if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(cx->runtime()))
+        baselineScript->toggleProfilerInstrumentation(true);
+
+    AutoWritableJitCode awjc(code);
+
+    // Patch IC loads using IC entries.
     for (size_t i = 0; i < icLoadLabels_.length(); i++) {
         CodeOffsetLabel label = icLoadLabels_[i].label;
         label.fixup(&masm);
@@ -245,10 +255,6 @@ BaselineCompiler::compile()
 
     if (modifiesArguments_)
         baselineScript->setModifiesArguments();
-
-    // All barriers are emitted off-by-default, toggle them on if needed.
-    if (cx->zone()->needsIncrementalBarrier())
-        baselineScript->toggleBarriers(true);
 
 #ifdef JS_TRACE_LOGGING
     // Initialize the tracelogger instrumentation.
@@ -266,10 +272,6 @@ BaselineCompiler::compile()
 
     if (compileDebugInstrumentation_)
         baselineScript->setHasDebugInstrumentation();
-
-    // If profiler instrumentation is enabled, toggle instrumentation on.
-    if (cx->runtime()->jitRuntime()->isProfilerInstrumentationEnabled(cx->runtime()))
-        baselineScript->toggleProfilerInstrumentation(true);
 
     // Always register a native => bytecode mapping entry, since profiler can be
     // turned on with baseline jitcode on stack, and baseline jitcode cannot be invalidated.
@@ -345,13 +347,11 @@ BaselineCompiler::emitPrologue()
     emitProfilerEnterFrame();
 
     masm.push(BaselineFrameReg);
-    masm.mov(BaselineStackReg, BaselineFrameReg);
-
-    masm.subPtr(Imm32(BaselineFrame::Size()), BaselineStackReg);
+    masm.moveStackPtrTo(BaselineFrameReg);
+    masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
 
     // Initialize BaselineFrame. For eval scripts, the scope chain
-    // is passed in R1, so we have to be careful not to clobber
-    // it.
+    // is passed in R1, so we have to be careful not to clobber it.
 
     // Initialize BaselineFrame::flags.
     uint32_t flags = 0;
@@ -453,7 +453,7 @@ BaselineCompiler::emitEpilogue()
         return false;
 #endif
 
-    masm.mov(BaselineFrameReg, BaselineStackReg);
+    masm.moveToStackPtr(BaselineFrameReg);
     masm.pop(BaselineFrameReg);
 
     emitProfilerExitFrame();
@@ -479,7 +479,7 @@ BaselineCompiler::emitOutOfLinePostBarrierSlot()
     regs.take(objReg);
     regs.take(BaselineFrameReg);
     Register scratch = regs.takeAny();
-#if defined(JS_CODEGEN_ARM)
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
     // On ARM, save the link register before calling.  It contains the return
     // address.  The |masm.ret()| later will pop this into |pc| to return.
     masm.push(lr);
@@ -527,7 +527,7 @@ BaselineCompiler::emitStackCheck(bool earlyCheck)
     uint32_t slotsSize = script->nslots() * sizeof(Value);
     uint32_t tolerance = earlyCheck ? slotsSize : 0;
 
-    masm.movePtr(BaselineStackReg, R1.scratchReg());
+    masm.moveStackPtrTo(R1.scratchReg());
 
     // If this is the early stack check, locals haven't been pushed yet.  Adjust the
     // stack pointer to account for the locals that would be pushed before performing
@@ -3459,13 +3459,14 @@ BaselineCompiler::emit_JSOP_REST()
 {
     frame.syncStack(0);
 
-    ArrayObject* templateObject = NewDenseUnallocatedArray(cx, 0, nullptr, TenuredObject);
+    JSObject* templateObject =
+        ObjectGroup::newArrayObject(cx, nullptr, 0, TenuredObject,
+                                    ObjectGroup::NewArrayKind::UnknownIndex);
     if (!templateObject)
         return false;
-    ObjectGroup::fixRestArgumentsGroup(cx, templateObject);
 
     // Call IC.
-    ICRest_Fallback::Compiler compiler(cx, templateObject);
+    ICRest_Fallback::Compiler compiler(cx, &templateObject->as<ArrayObject>());
     if (!emitOpIC(compiler.getStub(&stubSpace_)))
         return false;
 
@@ -3710,7 +3711,7 @@ BaselineCompiler::emit_JSOP_RESUME()
     // Update BaselineFrame frameSize field and create the frame descriptor.
     masm.computeEffectiveAddress(Address(BaselineFrameReg, BaselineFrame::FramePointerOffset),
                                  scratch2);
-    masm.subPtr(BaselineStackReg, scratch2);
+    masm.subStackPtrFrom(scratch2);
     masm.store32(scratch2, Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
     masm.makeFrameDescriptor(scratch2, JitFrame_BaselineJS);
 
@@ -3755,8 +3756,8 @@ BaselineCompiler::emit_JSOP_RESUME()
 
     // Construct BaselineFrame.
     masm.push(BaselineFrameReg);
-    masm.mov(BaselineStackReg, BaselineFrameReg);
-    masm.subPtr(Imm32(BaselineFrame::Size()), BaselineStackReg);
+    masm.moveStackPtrTo(BaselineFrameReg);
+    masm.subFromStackPtr(Imm32(BaselineFrame::Size()));
     masm.checkStackAlignment();
 
     // Store flags and scope chain.
@@ -3823,7 +3824,7 @@ BaselineCompiler::emit_JSOP_RESUME()
         masm.computeEffectiveAddress(Address(BaselineFrameReg, BaselineFrame::FramePointerOffset),
                                      scratch2);
         masm.movePtr(scratch2, scratch1);
-        masm.subPtr(BaselineStackReg, scratch2);
+        masm.subStackPtrFrom(scratch2);
         masm.store32(scratch2, Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
         masm.loadBaselineFramePtr(BaselineFrameReg, scratch2);
 
@@ -3838,14 +3839,18 @@ BaselineCompiler::emit_JSOP_RESUME()
             return false;
 
         // Create the frame descriptor.
-        masm.subPtr(BaselineStackReg, scratch1);
+        masm.subStackPtrFrom(scratch1);
         masm.makeFrameDescriptor(scratch1, JitFrame_BaselineJS);
 
         // Push the frame descriptor and a dummy return address (it doesn't
         // matter what we push here, frame iterators will use the frame pc
         // set in jit::GeneratorThrowOrClose).
         masm.push(scratch1);
+
+        // On ARM64, the callee will push the return address.
+#ifndef JS_CODEGEN_ARM64
         masm.push(ImmWord(0));
+#endif
         masm.jump(code);
     }
 
@@ -3872,7 +3877,7 @@ BaselineCompiler::emit_JSOP_RESUME()
     // After the generator returns, we restore the stack pointer, push the
     // return value and we're done.
     masm.bind(&returnTarget);
-    masm.computeEffectiveAddress(frame.addressOfStackValue(frame.peek(-1)), BaselineStackReg);
+    masm.computeEffectiveAddress(frame.addressOfStackValue(frame.peek(-1)), masm.getStackPointer());
     frame.popn(2);
     frame.push(R0);
     return true;

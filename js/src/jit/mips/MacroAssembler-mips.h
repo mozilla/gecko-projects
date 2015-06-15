@@ -815,9 +815,6 @@ public:
         ma_li(ScratchRegister, ptr);
         ma_b(SecondScratchReg, ScratchRegister, label, cond);
     }
-    void branchPtr(Condition cond, Address addr, ImmMaybeNurseryPtr ptr, Label* label) {
-        branchPtr(cond, addr, noteMaybeNurseryPtr(ptr), label);
-    }
 
     void branchPtr(Condition cond, Address addr, ImmWord ptr, Label* label) {
         ma_lw(SecondScratchReg, addr);
@@ -1207,6 +1204,7 @@ public:
     void and32(const Address& src, Register dest);
     void or32(Imm32 imm, Register dest);
     void or32(Imm32 imm, const Address& dest);
+    void or32(Register src, Register dest);
     void xor32(Imm32 imm, Register dest);
     void xorPtr(Imm32 imm, Register dest);
     void xorPtr(Register src, Register dest);
@@ -1227,7 +1225,6 @@ public:
     void movePtr(ImmPtr imm, Register dest);
     void movePtr(AsmJSImmPtr imm, Register dest);
     void movePtr(ImmGCPtr imm, Register dest);
-    void movePtr(ImmMaybeNurseryPtr imm, Register dest);
 
     void load8SignExtend(const Address& address, Register dest);
     void load8SignExtend(const BaseIndex& src, Register dest);

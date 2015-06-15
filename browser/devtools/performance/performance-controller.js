@@ -127,8 +127,6 @@ const EVENTS = {
 
   // Emitted by the OverviewView when a range has been selected in the graphs
   OVERVIEW_RANGE_SELECTED: "Performance:UI:OverviewRangeSelected",
-  // Emitted by the OverviewView when a selection range has been removed
-  OVERVIEW_RANGE_CLEARED: "Performance:UI:OverviewRangeCleared",
 
   // Emitted by the DetailsView when a subview is selected
   DETAILS_VIEW_SELECTED: "Performance:UI:DetailsViewSelected",
@@ -154,7 +152,7 @@ const EVENTS = {
 };
 
 /**
- * The current target and the profiler connection, set by this tool's host.
+ * The current target, toolbox and PerformanceFront, set by this tool's host.
  */
 let gToolbox, gTarget, gFront;
 
@@ -297,7 +295,7 @@ let PerformanceController = {
       withMarkers: true,
       withMemory: this.getOption("enable-memory"),
       withTicks: this.getOption("enable-framerate"),
-      withAllocations: this.getOption("enable-memory"),
+      withAllocations: this.getOption("enable-allocations"),
       allocationsSampleProbability: this.getPref("memory-sample-probability"),
       allocationsMaxLogLength: this.getPref("memory-max-log-length"),
       bufferSize: this.getPref("profiler-buffer-size"),
@@ -458,6 +456,7 @@ let PerformanceController = {
     if (state !== "recording-starting" && this.getRecordings().indexOf(model) === -1) {
       return;
     }
+
     switch (state) {
       // Fired when a RecordingModel was just created from the front
       case "recording-starting":

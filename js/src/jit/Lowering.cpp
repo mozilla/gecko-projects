@@ -2250,11 +2250,18 @@ void
 LIRGenerator::visitInterruptCheck(MInterruptCheck* ins)
 {
     // Implicit interrupt checks require asm.js signal handlers to be installed.
+    // They also require writable JIT code: reprotecting in patchIonBackedges
+    // would be expensive and using AutoWritableJitCode in the signal handler
+    // is complicated because there could be another AutoWritableJitCode on the
+    // stack.
     LInstructionHelper<0, 0, 0>* lir;
-    if (GetJitContext()->runtime->canUseSignalHandlers())
+    if (GetJitContext()->runtime->canUseSignalHandlers() &&
+        !ExecutableAllocator::nonWritableJitCode)
+    {
         lir = new(alloc()) LInterruptCheckImplicit();
-    else
+    } else {
         lir = new(alloc()) LInterruptCheck();
+    }
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2516,6 +2523,14 @@ void
 LIRGenerator::visitIncrementUnboxedArrayInitializedLength(MIncrementUnboxedArrayInitializedLength* ins)
 {
     add(new(alloc()) LIncrementUnboxedArrayInitializedLength(useRegister(ins->object())), ins);
+}
+
+void
+LIRGenerator::visitSetUnboxedArrayInitializedLength(MSetUnboxedArrayInitializedLength* ins)
+{
+    add(new(alloc()) LSetUnboxedArrayInitializedLength(useRegister(ins->object()),
+                                                       useRegisterOrConstant(ins->length()),
+                                                       temp()), ins);
 }
 
 void
@@ -4190,12 +4205,6 @@ LIRGenerator::visitDebugger(MDebugger* ins)
     LDebugger* lir = new(alloc()) LDebugger(tempFixed(CallTempReg0), tempFixed(CallTempReg1));
     assignSnapshot(lir, Bailout_Debugger);
     add(lir, ins);
-}
-
-void
-LIRGenerator::visitNurseryObject(MNurseryObject* ins)
-{
-    define(new(alloc()) LNurseryObject(), ins);
 }
 
 static void

@@ -48,7 +48,6 @@ public:
     response->mType = ResponseType::Opaque;
     response->mTerminationReason = mTerminationReason;
     response->mURL = mURL;
-    response->mFinalURL = mFinalURL;
     response->mChannelInfo = mChannelInfo;
     response->mWrappedResponse = this;
     return response.forget();
@@ -90,18 +89,6 @@ public:
     mURL.Assign(aURL);
   }
 
-  bool
-  FinalURL() const
-  {
-    return mFinalURL;
-  }
-
-  void
-  SetFinalURL(bool aFinalURL)
-  {
-    mFinalURL = aFinalURL;
-  }
-
   uint16_t
   GetStatus() const
   {
@@ -131,6 +118,17 @@ public:
   }
 
   void
+  GetInternalBody(nsIInputStream** aStream)
+  {
+    if (mWrappedResponse) {
+      MOZ_ASSERT(!mBody);
+      return mWrappedResponse->GetBody(aStream);
+    }
+    nsCOMPtr<nsIInputStream> stream = mBody;
+    stream.forget(aStream);
+  }
+
+  void
   GetBody(nsIInputStream** aStream)
   {
     if (Type() == ResponseType::Opaque) {
@@ -138,12 +136,7 @@ public:
       return;
     }
 
-    if (mWrappedResponse) {
-      MOZ_ASSERT(!mBody);
-      return mWrappedResponse->GetBody(aStream);
-    }
-    nsCOMPtr<nsIInputStream> stream = mBody;
-    stream.forget(aStream);
+    return GetInternalBody(aStream);
   }
 
   void
@@ -197,7 +190,6 @@ private:
     copy->mType = mType;
     copy->mTerminationReason = mTerminationReason;
     copy->mURL = mURL;
-    copy->mFinalURL = mFinalURL;
     copy->mChannelInfo = mChannelInfo;
     return copy.forget();
   }
@@ -205,7 +197,6 @@ private:
   ResponseType mType;
   nsCString mTerminationReason;
   nsCString mURL;
-  bool mFinalURL;
   const uint16_t mStatus;
   const nsCString mStatusText;
   nsRefPtr<InternalHeaders> mHeaders;

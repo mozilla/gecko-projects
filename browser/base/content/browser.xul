@@ -152,7 +152,11 @@
          work correctly on the menupopup. ContentSelectDropdown expects the
          popuponly menulist to be its immediate parent. -->
     <menulist popuponly="true" id="ContentSelectDropdown" hidden="true">
-      <menupopup rolluponmousewheel="true"/>
+      <menupopup rolluponmousewheel="true"
+#ifdef XP_WIN
+                 consumeoutsideclicks="false"
+#endif
+        />
     </menulist>
 
     <!-- for invalid form error message -->
@@ -817,6 +821,8 @@
                        ondrop="PlacesMenuDNDHandler.onDrop(event);"
                        cui-areatype="toolbar"
                        oncommand="BookmarkingUI.onCommand(event);">
+          <observes element="bookmarkThisPageBroadcaster" attribute="starred"/>
+          <observes element="bookmarkThisPageBroadcaster" attribute="buttontooltiptext"/>
           <menupopup id="BMB_bookmarksPopup"
                      class="cui-widget-panel cui-widget-panelview cui-widget-panelWithFooter PanelUI-subView"
                      placespopup="true"
@@ -1235,9 +1241,14 @@
 
   <svg:svg height="0">
 #include tab-shape.inc.svg
+#if defined(XP_UNIX) && !defined(XP_MACOSX)
+    <svg:clipPath id="urlbar-clip-path" clipPathUnits="userSpaceOnUse">
+      <svg:path d="m 1,-5 l 0,50 l 10000,0 l 0,-50 z"/>
+    </svg:clipPath>
+#endif
     <svg:clipPath id="urlbar-back-button-clip-path" clipPathUnits="userSpaceOnUse">
 #ifndef XP_MACOSX
-      <svg:path d="m 1,-5 l 0,7.8 c 2.5,3.2 4,6.2 4,10.2 c 0,4 -1.5,7 -4,10 l 0,22l10000,0 l 0,-50 l -10000,0 z"/>
+      <svg:path d="m 1,-5 l 0,7.8 c 2.5,3.2 4,6.2 4,10.2 c 0,4 -1.5,7 -4,10 l 0,22 l 10000,0 l 0,-50 l -10000,0 z"/>
 #else
       <svg:path d="M -11,-5 a 16 16 0 0 1 0,34 l 10000,0 l 0,-34 l -10000,0 z"/>
 #endif

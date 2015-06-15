@@ -147,10 +147,14 @@ let gIntro = {
       let imageClass = "";
       switch (this._imageTypes[type]) {
         case this._imageTypes.COG:
-          image = document.getElementById("newtab-customize-panel").cloneNode(true);
-          image.removeAttribute("hidden");
-          image.removeAttribute("type");
+          // Copy the customize panel's subnodes over so that it can be styled
+          // appropriately for the intro.
+          image = document.createElementNS(HTML_NAMESPACE, "div");
           image.classList.add("newtab-intro-image-customize");
+          let imageToCopy = document.getElementById("newtab-customize-panel").cloneNode(true);
+          while (imageToCopy.firstChild) {
+            image.appendChild(imageToCopy.firstChild);
+          }
           break;
         case this._imageTypes.PIN_REMOVE:
           imageClass = "-hover";
@@ -162,15 +166,15 @@ let gIntro = {
           // Create the cell's inner HTML code.
           image.innerHTML =
             '<div class="newtab-intro-cell' + imageClass + '">' +
-            '  <div class="newtab-site newtab-intro-image-tile" type="sponsored">' +
+            '  <div class="newtab-site newtab-intro-image-tile" type="sponsored" suggested="' + (imageClass ? "false" : "true") + '">' +
+            '    <span class="newtab-sponsored">' +
+                   newTabString(imageClass ? "sponsored.button" : "suggested.tag") + '</span>' +
             '    <a class="newtab-link">' +
             '      <span class="newtab-thumbnail"/>' +
             '      <span class="newtab-title">mozilla.org</span>' +
             '    </a>' +
             '    <input type="button" class="newtab-control newtab-control-pin"/>' +
             '    <input type="button" class="newtab-control newtab-control-block"/>' +
-            '    <span class="newtab-sponsored">' +
-                   newTabString(imageClass ? "sponsored.button" : "suggested.tag") + '</span>' +
             '  </div>' +
             '</div>';
             break;

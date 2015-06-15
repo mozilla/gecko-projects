@@ -198,7 +198,7 @@ public:
 
   void ClearRenderFrame() { mRenderFrame = nullptr; }
 
-  virtual void SendAsyncScrollDOMEvent(bool aIsRoot,
+  virtual void SendAsyncScrollDOMEvent(bool aIsRootContent,
                                        const CSSRect& aContentRect,
                                        const CSSSize& aContentSize) override
   {
@@ -207,10 +207,10 @@ public:
         FROM_HERE,
         NewRunnableMethod(this,
                           &RemoteContentController::SendAsyncScrollDOMEvent,
-                          aIsRoot, aContentRect, aContentSize));
+                          aIsRootContent, aContentRect, aContentSize));
       return;
     }
-    if (mRenderFrame && aIsRoot) {
+    if (mRenderFrame && aIsRootContent) {
       TabParent* browser = TabParent::GetFrom(mRenderFrame->Manager());
       BrowserElementParent::DispatchAsyncScrollEvent(browser, aContentRect,
                                                      aContentSize);
@@ -338,8 +338,6 @@ RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader,
     mLayersId = *aId;
     CompositorChild::Get()->SendNotifyChildCreated(mLayersId);
   }
-  // Set a default RenderFrameParent
-  mFrameLoader->SetCurrentRemoteFrame(this);
   *aSuccess = true;
 }
 
@@ -454,15 +452,6 @@ RenderFrameParent::ActorDestroy(ActorDestroyReason why)
     }
   }
 
-  if (mFrameLoader && mFrameLoader->GetCurrentRemoteFrame() == this) {
-    // XXX this might cause some weird issues ... we'll just not
-    // redraw the part of the window covered by this until the "next"
-    // remote frame has a layer-tree transaction.  For
-    // why==NormalShutdown, we'll definitely want to do something
-    // better, especially as nothing guarantees another Update() from
-    // the "next" remote layer tree.
-    mFrameLoader->SetCurrentRemoteFrame(nullptr);
-  }
   mFrameLoader = nullptr;
 }
 
@@ -490,8 +479,6 @@ RenderFrameParent::RecvUpdateHitRegion(const nsRegion& aRegion)
 void
 RenderFrameParent::TriggerRepaint()
 {
-  mFrameLoader->SetCurrentRemoteFrame(this);
-
   nsIFrame* docFrame = mFrameLoader->GetPrimaryFrameOfOwningContent();
   if (!docFrame) {
     // Bad, but nothing we can do about it (XXX/cjones: or is there?

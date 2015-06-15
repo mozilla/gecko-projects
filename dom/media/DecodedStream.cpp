@@ -69,10 +69,21 @@ private:
   bool mStreamFinishedOnMainThread;
 };
 
-DecodedStreamData::DecodedStreamData(int64_t aInitialTime,
-                                     SourceMediaStream* aStream)
+static void
+UpdateStreamBlocking(MediaStream* aStream, bool aBlocking)
+{
+  int32_t delta = aBlocking ? 1 : -1;
+  if (NS_IsMainThread()) {
+    aStream->ChangeExplicitBlockerCount(delta);
+  } else {
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethodWithArg<int32_t>(
+      aStream, &MediaStream::ChangeExplicitBlockerCount, delta);
+    AbstractThread::MainThread()->Dispatch(r.forget());
+  }
+}
+
+DecodedStreamData::DecodedStreamData(SourceMediaStream* aStream)
   : mAudioFramesWritten(0)
-  , mInitialTime(aInitialTime)
   , mNextVideoTime(-1)
   , mNextAudioTime(-1)
   , mStreamInitialized(false)
@@ -80,14 +91,13 @@ DecodedStreamData::DecodedStreamData(int64_t aInitialTime,
   , mHaveSentFinishAudio(false)
   , mHaveSentFinishVideo(false)
   , mStream(aStream)
-  , mHaveBlockedForPlayState(false)
-  , mHaveBlockedForStateMachineNotPlaying(false)
+  , mPlaying(false)
   , mEOSVideoCompensation(false)
 {
   mListener = new DecodedStreamGraphListener(mStream);
   mStream->AddListener(mListener);
-  // Block the stream until the initialization is done.
-  mStream->ChangeExplicitBlockerCount(1);
+  // Block the stream as mPlaying is initially false.
+  UpdateStreamBlocking(mStream, true);
 }
 
 DecodedStreamData::~DecodedStreamData()
@@ -103,9 +113,18 @@ DecodedStreamData::IsFinished() const
 }
 
 int64_t
-DecodedStreamData::GetClock() const
+DecodedStreamData::GetPosition() const
 {
-  return mInitialTime + mListener->GetLastOutputTime();
+  return mListener->GetLastOutputTime();
+}
+
+void
+DecodedStreamData::SetPlaying(bool aPlaying)
+{
+  if (mPlaying != aPlaying) {
+    mPlaying = aPlaying;
+    UpdateStreamBlocking(mStream, !mPlaying);
+  }
 }
 
 class OutputStreamListener : public MediaStreamListener {
@@ -223,7 +242,7 @@ DecodedStream::DestroyData()
 }
 
 void
-DecodedStream::RecreateData(int64_t aInitialTime, MediaStreamGraph* aGraph)
+DecodedStream::RecreateData(MediaStreamGraph* aGraph)
 {
   MOZ_ASSERT(NS_IsMainThread());
   GetReentrantMonitor().AssertCurrentThreadIn();
@@ -235,7 +254,7 @@ DecodedStream::RecreateData(int64_t aInitialTime, MediaStreamGraph* aGraph)
   }
   auto source = aGraph->CreateSourceStream(nullptr);
   DestroyData();
-  mData.reset(new DecodedStreamData(aInitialTime, source));
+  mData.reset(new DecodedStreamData(source));
 
   // Note that the delay between removing ports in DestroyDecodedStream
   // and adding new ones won't cause a glitch since all graph operations
@@ -290,6 +309,14 @@ DecodedStream::Connect(ProcessedMediaStream* aStream, bool aFinishWhenEnded)
     // Ensure that aStream finishes the moment mDecodedStream does.
     aStream->SetAutofinish(true);
   }
+}
+
+void
+DecodedStream::SetPlaying(bool aPlaying)
+{
+  GetReentrantMonitor().AssertCurrentThreadIn();
+  MOZ_ASSERT(mData);
+  mData->SetPlaying(aPlaying);
 }
 
 } // namespace mozilla

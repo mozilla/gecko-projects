@@ -6,6 +6,7 @@
 <resources>
   <!-- Fennec color palette (bug 1127517) -->
   <color name="fennec_ui_orange">#FF9500</color>
+  <color name="affirmative_green">#6FBE4A</color>
   <color name="action_orange">#E66000</color>
   <color name="action_orange_pressed">#DC5600</color>
   <color name="link_blue">#0096DD</color>
@@ -57,8 +58,9 @@
   <!-- highlight-focused on private nav button: 10% white over private_toolbar_grey -->
   <color name="highlight_nav_focused_pb">#FF3F423F</color>
 
+  <color name="dark_transparent_overlay">#99000000</color>
+
   <!-- Firstrun tour-->
-  <color name="firstrun_background">#99000000</color>
   <color name="firstrun_tabstrip">#1193CB</color>
   <color name="firstrun_pager_background">#16A3DF</color>
 

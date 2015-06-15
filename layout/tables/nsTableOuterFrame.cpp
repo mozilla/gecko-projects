@@ -242,7 +242,9 @@ nsTableOuterFrame::InitChildReflowState(nsPresContext&    aPresContext,
   nsMargin* pCollapsePadding = nullptr;
   if (aReflowState.frame == InnerTableFrame() &&
       InnerTableFrame()->IsBorderCollapse()) {
-    collapseBorder  = InnerTableFrame()->GetIncludedOuterBCBorder();
+    WritingMode wm = aReflowState.GetWritingMode();
+    LogicalMargin border = InnerTableFrame()->GetIncludedOuterBCBorder(wm);
+    collapseBorder = border.GetPhysicalMargin(wm);
     pCollapseBorder = &collapseBorder;
     pCollapsePadding = &collapsePadding;
   }
@@ -381,7 +383,8 @@ ChildShrinkWrapISize(nsRenderingContext *aRenderingContext,
 
   // On the other hand, the inline size that we pass to nsCSSOffsetState
   // needs to be in the containing block's writing mode.
-  nsCSSOffsetState offsets(aChildFrame, aRenderingContext, aCBSize.ISize(aWM));
+  nsCSSOffsetState offsets(aChildFrame, aRenderingContext, aWM,
+                           aCBSize.ISize(aWM));
   LogicalSize size =
     aChildFrame->ComputeSize(aRenderingContext,
                   wm, cbSize, aAvailableWidth,

@@ -280,7 +280,7 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline uint32_t framePushed() const;
     inline void setFramePushed(uint32_t framePushed);
-    inline void adjustFrame(int value);
+    inline void adjustFrame(int32_t value);
 
     // Adjust the frame, to account for implicit modification of the stack
     // pointer, such that callee can remove arguments on the behalf of the
@@ -355,7 +355,8 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void guardObjectType(Register obj, const TypeSet* types, Register scratch, Label* miss);
 
-    void guardTypeSetMightBeIncomplete(Register obj, Register scratch, Label* label);
+    template <typename TypeSet>
+    void guardTypeSetMightBeIncomplete(TypeSet* types, Register obj, Register scratch, Label* label);
 
     void loadObjShape(Register objReg, Register dest) {
         loadPtr(Address(objReg, JSObject::offsetOfShape()), dest);

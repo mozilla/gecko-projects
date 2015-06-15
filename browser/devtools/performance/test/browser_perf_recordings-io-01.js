@@ -9,7 +9,8 @@ let test = Task.async(function*() {
   var { target, panel, toolbox } = yield initPerformance(SIMPLE_URL);
   var { EVENTS, PerformanceController, DetailsView, DetailsSubview } = panel.panelWin;
 
-  // Enable memory to test the memory-calltree and memory-flamegraph.
+  // Enable allocations to test the memory-calltree and memory-flamegraph.
+  Services.prefs.setBoolPref(ALLOCATIONS_PREF, true);
   Services.prefs.setBoolPref(MEMORY_PREF, true);
   Services.prefs.setBoolPref(FRAMERATE_PREF, true);
 
@@ -27,7 +28,6 @@ let test = Task.async(function*() {
   yield DetailsView.selectView("js-flamegraph");
   yield DetailsView.selectView("memory-calltree");
   yield DetailsView.selectView("memory-flamegraph");
-
 
   // Verify original recording.
 
@@ -79,25 +79,6 @@ let test = Task.async(function*() {
     "The imported data is identical to the original data (8).");
   is(importedData.configuration.withMemory, originalData.configuration.withMemory,
     "The imported data is identical to the original data (9).");
-
-  yield teardown(panel);
-
-  // Test that when importing and no graphs rendered yet,
-  // we do not get a getMappedSelection error
-  // bug 1160828
-  var { target, panel, toolbox } = yield initPerformance(SIMPLE_URL);
-  var { EVENTS, PerformanceController, DetailsView, DetailsSubview, OverviewView, WaterfallView } = panel.panelWin;
-  yield PerformanceController.clearRecordings();
-
-  rerendered = once(WaterfallView, EVENTS.WATERFALL_RENDERED);
-  imported = once(PerformanceController, EVENTS.RECORDING_IMPORTED);
-  yield PerformanceController.importRecording("", file);
-
-  yield imported;
-  ok(true, "The recording data appears to have been successfully imported.");
-
-  yield rerendered;
-  ok(true, "The imported data was re-rendered.");
 
   yield teardown(panel);
   finish();

@@ -37,19 +37,17 @@ class Image;
  */
 class DecodedStreamData {
 public:
-  DecodedStreamData(int64_t aInitialTime, SourceMediaStream* aStream);
+  explicit DecodedStreamData(SourceMediaStream* aStream);
   ~DecodedStreamData();
   bool IsFinished() const;
-  int64_t GetClock() const;
+  int64_t GetPosition() const;
+  void SetPlaying(bool aPlaying);
 
   /* The following group of fields are protected by the decoder's monitor
    * and can be read or written on any thread.
    */
   // Count of audio frames written to the stream
   int64_t mAudioFramesWritten;
-  // Saved value of aInitialTime. Timestamp of the first audio and/or
-  // video packet written.
-  const int64_t mInitialTime; // microseconds
   // mNextVideoTime is the end timestamp for the last packet sent to the stream.
   // Therefore video packets starting at or after this time need to be copied
   // to the output stream.
@@ -69,12 +67,7 @@ public:
   // The decoder is responsible for calling Destroy() on this stream.
   const nsRefPtr<SourceMediaStream> mStream;
   nsRefPtr<DecodedStreamGraphListener> mListener;
-  // True when we've explicitly blocked this stream because we're
-  // not in PLAY_STATE_PLAYING. Used on the main thread only.
-  bool mHaveBlockedForPlayState;
-  // We also have an explicit blocker on the stream when
-  // mDecoderStateMachine is non-null and MediaDecoderStateMachine is false.
-  bool mHaveBlockedForStateMachineNotPlaying;
+  bool mPlaying;
   // True if we need to send a compensation video frame to ensure the
   // StreamTime going forward.
   bool mEOSVideoCompensation;
@@ -95,10 +88,11 @@ public:
   explicit DecodedStream(ReentrantMonitor& aMonitor);
   DecodedStreamData* GetData() const;
   void DestroyData();
-  void RecreateData(int64_t aInitialTime, MediaStreamGraph* aGraph);
+  void RecreateData(MediaStreamGraph* aGraph);
   nsTArray<OutputStreamData>& OutputStreams();
   ReentrantMonitor& GetReentrantMonitor() const;
   void Connect(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
+  void SetPlaying(bool aPlaying);
 
 private:
   void Connect(OutputStreamData* aStream);

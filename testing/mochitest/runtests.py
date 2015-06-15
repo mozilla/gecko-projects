@@ -22,6 +22,7 @@ import mozdebug
 import mozinfo
 import mozprocess
 import mozrunner
+import numbers
 import re
 import shutil
 import signal
@@ -1935,12 +1936,24 @@ class Mochitest(MochitestUtilsMixin):
 
                 # Add chunking filters if specified
                 if options.totalChunks:
+                    if options.chunkByRuntime:
+                        runtime_file = self.resolve_runtime_file(options, info)
+                        if not os.path.exists(runtime_file):
+                            self.log.warning("runtime file %s not found; defaulting to chunk-by-dir" %
+                                             runtime_file)
+                            options.chunkByRuntime = None
+                            flavor = self.getTestFlavor(options)
+                            if flavor in ('browser-chrome', 'devtools-chrome'):
+                                # these values match current mozharness configs
+                                options.chunkbyDir = 5
+                            else:
+                                options.chunkByDir = 4
+
                     if options.chunkByDir:
                         filters.append(chunk_by_dir(options.thisChunk,
                                                     options.totalChunks,
                                                     options.chunkByDir))
                     elif options.chunkByRuntime:
-                        runtime_file = self.resolve_runtime_file(options, info)
                         with open(runtime_file, 'r') as f:
                             runtime_data = json.loads(f.read())
                         runtimes = runtime_data['runtimes']
@@ -2551,8 +2564,9 @@ class Mochitest(MochitestUtilsMixin):
                 "MOZ_HIDE_RESULTS_TABLE"] == "1":
             options.hideResultsTable = True
 
-        d = dict((k, v) for k, v in options.__dict__.items() if (not k.startswith(
-            'log_') or not any([k.endswith(fmt) for fmt in commandline.log_formatters.keys()])))
+        # strip certain unnecessary items to avoid serialization errors in json.dumps()
+        d = dict((k, v) for k, v in options.__dict__.items() if (v is None) or
+            isinstance(v,(basestring,numbers.Number)))
         d['testRoot'] = self.testRoot
         content = json.dumps(d)
 

@@ -321,10 +321,10 @@ public:
   bool IsPannable() const;
 
   /**
-   * Returns true if the APZC has a velocity greater than the stop-on-tap
-   * fling velocity threshold (which is pref-controlled).
+   * Returns true if the APZC has been flung with a velocity greater than the
+   * stop-on-tap fling velocity threshold (which is pref-controlled).
    */
-  bool IsMovingFast() const;
+  bool IsFlingingFast() const;
 
   /**
    * Returns the identifier of the touch in the last touch event processed by
@@ -899,8 +899,7 @@ public:
   }
 
   /* Returns true if there is no APZC higher in the tree with the same
-   * layers id. Deprecated. New code shouldn't use this. Old code should be
-   * updated to not use this.
+   * layers id.
    */
   bool HasNoParentWithSameLayersId() const {
     return !mParent || (mParent->mLayersId != mLayersId);
@@ -909,6 +908,11 @@ public:
   bool IsRootForLayersId() const {
     ReentrantMonitorAutoEnter lock(mMonitor);
     return mFrameMetrics.IsLayersIdRoot();
+  }
+
+  bool IsRootContent() const {
+    ReentrantMonitorAutoEnter lock(mMonitor);
+    return mFrameMetrics.IsRootContent();
   }
 
 private:

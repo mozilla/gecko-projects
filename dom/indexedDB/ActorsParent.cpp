@@ -858,7 +858,8 @@ ReadCompressedIndexDataValuesFromBlob(
     blobDataIter += keyBufferLength;
 
     if (NS_WARN_IF(!aIndexValues.InsertElementSorted(
-                      IndexDataValue(indexId, unique, Key(keyBuffer))))) {
+                      IndexDataValue(indexId, unique, Key(keyBuffer)),
+                      fallible))) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -2734,7 +2735,8 @@ InsertIndexDataValuesFunction::OnFunctionCall(mozIStorageValueArray* aValues,
   }
 
   MOZ_ALWAYS_TRUE(
-    indexValues.InsertElementSorted(IndexDataValue(indexId, !!unique, value)));
+    indexValues.InsertElementSorted(IndexDataValue(indexId, !!unique, value),
+                                    fallible));
 
   // Compress the array.
   UniqueFreePtr<uint8_t> indexValuesBlob;
@@ -3640,9 +3642,11 @@ SetDefaultPragmas(mozIStorageConnection* aConnection)
 
 #ifndef IDB_MOBILE
   if (kSQLiteGrowthIncrement) {
+    // This is just an optimization so ignore the failure if the disk is
+    // currently too full.
     rv = aConnection->SetGrowthIncrement(kSQLiteGrowthIncrement,
                                          EmptyCString());
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+    if (rv != NS_ERROR_FILE_TOO_BIG && NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
   }
@@ -17854,7 +17858,8 @@ DatabaseOperationBase::IndexDataValuesFromUpdateInfos(
     MOZ_ALWAYS_TRUE(aUniqueIndexTable.Get(indexId, &unique));
 
     MOZ_ALWAYS_TRUE(
-      aIndexValues.InsertElementSorted(IndexDataValue(indexId, unique, key)));
+      aIndexValues.InsertElementSorted(IndexDataValue(indexId, unique, key),
+                                       fallible));
   }
 
   return NS_OK;
@@ -22289,7 +22294,8 @@ UpdateIndexDataValuesFunction::OnFunctionCall(mozIStorageValueArray* aValues,
     MOZ_ALWAYS_TRUE(
       indexValues.InsertElementSorted(IndexDataValue(metadata.id(),
                                                      metadata.unique(),
-                                                     info.value())));
+                                                     info.value()),
+                                      fallible));
   }
 
   UniqueFreePtr<uint8_t> indexValuesBlob;
@@ -22325,7 +22331,8 @@ UpdateIndexDataValuesFunction::OnFunctionCall(mozIStorageValueArray* aValues,
       MOZ_ALWAYS_TRUE(
         indexValues.InsertElementSorted(IndexDataValue(metadata.id(),
                                                        metadata.unique(),
-                                                       info.value())));
+                                                       info.value()),
+                                        fallible));
     }
   }
 

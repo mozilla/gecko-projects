@@ -31,9 +31,11 @@
 #include "nsExceptionHandler.h"
 #endif
 
+class nsIProfileSaveEvent;
 class nsPluginTag;
 
 namespace mozilla {
+class ProfileGatherer;
 namespace dom {
 class PCrashReporterParent;
 class CrashReporterParent;
@@ -190,6 +192,8 @@ protected:
     virtual void UpdatePluginTimeout() {}
 
     virtual bool RecvNotifyContentModuleDestroyed() override { return true; }
+
+    virtual bool RecvProfile(const nsCString& aProfile) override { return true; }
 
     void SetPluginFuncs(NPPluginFuncs* aFuncs);
 
@@ -369,7 +373,19 @@ class PluginModuleChromeParent
 
     virtual ~PluginModuleChromeParent();
 
-    void TerminateChildProcess(MessageLoop* aMsgLoop);
+    /*
+     * Terminates the plugin process associated with this plugin module. Also
+     * generates appropriate crash reports. Takes ownership of the file
+     * associated with aBrowserDumpId on success.
+     *
+     * @param aMsgLoop the main message pump associated with the module
+     *   protocol.
+     * @param aBrowserDumpId (optional) previously taken browser dump id. If
+     *   provided TerminateChildProcess will use this browser dump file in
+     *   generating a multi-process crash report. If not provided a browser
+     *   dump will be taken at the time of this call.
+     */
+    void TerminateChildProcess(MessageLoop* aMsgLoop, nsAString* aBrowserDumpId);
 
 #ifdef XP_WIN
     /**
@@ -400,6 +416,12 @@ class PluginModuleChromeParent
     void OnExitedCall() override;
     void OnEnteredSyncSend() override;
     void OnExitedSyncSend() override;
+
+    void GatherAsyncProfile(mozilla::ProfileGatherer* aGatherer);
+    void GatheredAsyncProfile(nsIProfileSaveEvent* aSaveEvent);
+
+    virtual bool
+    RecvProfile(const nsCString& aProfile) override;
 
 private:
     virtual void
@@ -558,6 +580,8 @@ private:
     NPError             mAsyncInitError;
     dom::ContentParent* mContentParent;
     nsCOMPtr<nsIObserver> mOfflineObserver;
+    nsRefPtr<mozilla::ProfileGatherer> mGatherer;
+    nsCString mProfile;
     bool mIsBlocklisted;
     static bool sInstantiated;
 };

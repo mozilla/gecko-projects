@@ -197,6 +197,7 @@ js::Nursery::allocateObject(JSContext* cx, size_t size, size_t numDynamic, const
     /* If we want external slots, add them. */
     HeapSlot* slots = nullptr;
     if (numDynamic) {
+        MOZ_ASSERT(clasp->isNative());
         slots = static_cast<HeapSlot*>(allocateBuffer(cx->zone(), numDynamic * sizeof(HeapSlot)));
         if (!slots) {
             /*
@@ -420,6 +421,14 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason, ObjectGroupList
     TenuringTracer mover(rt, this);
 
     // Mark the store buffer. This must happen first.
+
+    TIME_START(cancelIonCompilations);
+    if (sb.cancelIonCompilations()) {
+        for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next())
+            jit::StopAllOffThreadCompilations(c);
+    }
+    TIME_END(cancelIonCompilations);
+
     TIME_START(traceValues);
     sb.traceValues(mover);
     TIME_END(traceValues);
@@ -554,11 +563,12 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason, ObjectGroupList
 
 #define FMT " %6" PRIu64
         fprintf(stderr,
-                "MinorGC: %20s %5.1f%% %4d" FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT "\n",
+                "MinorGC: %20s %5.1f%% %4d" FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT FMT "\n",
                 js::gcstats::ExplainReason(reason),
                 promotionRate * 100,
                 numActiveChunks_,
                 totalTime,
+                TIME_TOTAL(cancelIonCompilations),
                 TIME_TOTAL(traceValues),
                 TIME_TOTAL(traceCells),
                 TIME_TOTAL(traceSlots),
@@ -650,8 +660,10 @@ js::Nursery::sweep()
     {
 #ifdef JS_CRASH_DIAGNOSTICS
         JS_POISON((void*)start(), JS_SWEPT_NURSERY_PATTERN, allocationEnd() - start());
-        for (int i = 0; i < numActiveChunks_; ++i)
+        for (int i = 0; i < numActiveChunks_; ++i) {
+            chunk(i).trailer.location = gc::ChunkLocationBitNursery;
             chunk(i).trailer.runtime = runtime();
+        }
 #endif
         setCurrentChunk(0);
     }

@@ -130,7 +130,7 @@ PluginInstanceChild::PluginInstanceChild(const NPPluginFuncs* aPluginIface,
     , mMode(aMode)
     , mNames(aNames)
     , mValues(aValues)
-#if defined(XP_MACOSX)
+#if defined(XP_DARWIN)
     , mContentsScaleFactor(1.0)
 #endif
     , mDrawingModel(kDefaultDrawingModel)
@@ -1281,6 +1281,8 @@ PluginInstanceChild::AnswerNPP_SetWindow(const NPRemoteWindow& aWindow)
     // TODO: Need Android impl
 #elif defined(MOZ_WIDGET_QT)
     // TODO: Need QT-nonX impl
+#elif defined(MOZ_WIDGET_UIKIT)
+    // Don't care
 #else
 #  error Implement me for your OS
 #endif
@@ -1768,7 +1770,7 @@ PluginInstanceChild::SetCaptureHook(HWND aHwnd)
     wchar_t className[256] = {0};
     int numChars = GetClassNameW(aHwnd, className, ArrayLength(className));
     NS_NAMED_LITERAL_STRING(unityClassName, "Unity.WebPlayer");
-    if (numChars == unityClassName.Length() && unityClassName == className) {
+    if (numChars == unityClassName.Length() && unityClassName == wwc(className)) {
         sSetCaptureHookData = new SetCaptureHookData(aHwnd);
     }
     return sUser32SetCaptureHookStub(aHwnd);
@@ -2933,7 +2935,7 @@ PluginInstanceChild::MaybeCreatePlatformHelperSurface(void)
 bool
 PluginInstanceChild::EnsureCurrentBuffer(void)
 {
-#ifndef XP_MACOSX
+#ifndef XP_DARWIN
     nsIntRect toInvalidate(0, 0, 0, 0);
     gfxIntSize winSize = gfxIntSize(mWindow.width, mWindow.height);
 
@@ -2979,7 +2981,7 @@ PluginInstanceChild::EnsureCurrentBuffer(void)
     }
 
     return true;
-#else // XP_MACOSX
+#elif defined(XP_MACOSX)
 
     if (!mDoubleBufferCARenderer.HasCALayer()) {
         void *caLayer = nullptr;
@@ -3033,9 +3035,8 @@ PluginInstanceChild::EnsureCurrentBuffer(void)
         nsIntRect toInvalidate(0, 0, mWindow.width, mWindow.height);
         mAccumulatedInvalidRect.UnionRect(mAccumulatedInvalidRect, toInvalidate);
     }
-  
-    return true;
 #endif
+    return true;
 }
 
 void

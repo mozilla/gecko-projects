@@ -434,8 +434,8 @@ js::EnqueuePendingParseTasksAfterGC(JSRuntime* rt)
     HelperThreadState().notifyAll(GlobalHelperThreadState::PRODUCER);
 }
 
-static const uint32_t kDefaultHelperStackSize = 512 * 1024;
-static const uint32_t kDefaultHelperStackQuota = 450 * 1024;
+static const uint32_t kDefaultHelperStackSize = 2048 * 1024;
+static const uint32_t kDefaultHelperStackQuota = 1800 * 1024;
 
 // TSan enforces a minimum stack size that's just slightly larger than our
 // default helper stack size.  It does this to store blobs of TSan-specific
@@ -1017,7 +1017,7 @@ MFBT_API void NuwaMarkCurrentThread(void (*recreate)(void*), void* arg);
 void
 HelperThread::ThreadMain(void* arg)
 {
-    PR_SetCurrentThreadName("Analysis Helper");
+    PR_SetCurrentThreadName("JS Helper");
 
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {

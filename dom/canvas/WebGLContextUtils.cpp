@@ -75,6 +75,18 @@ TexImageTargetToTexTarget(TexImageTarget texImageTarget)
     }
 }
 
+JS::Value
+StringValue(JSContext* cx, const char* chars, ErrorResult& rv)
+{
+    JSString* str = JS_NewStringCopyZ(cx, chars);
+    if (!str) {
+        rv.Throw(NS_ERROR_OUT_OF_MEMORY);
+        return JS::NullValue();
+    }
+
+    return JS::StringValue(str);
+}
+
 GLComponents::GLComponents(TexInternalFormat internalformat)
 {
     TexInternalFormat unsizedformat = UnsizedInternalFormatFromInternalFormat(internalformat);
@@ -1098,15 +1110,15 @@ WebGLContext::AssertCachedBindings()
 
     // Bound object state
     if (IsWebGL2()) {
-        GLuint bound = mBoundDrawFramebuffer ? mBoundDrawFramebuffer->GLName()
+        GLuint bound = mBoundDrawFramebuffer ? mBoundDrawFramebuffer->mGLName
                                              : 0;
         AssertUintParamCorrect(gl, LOCAL_GL_DRAW_FRAMEBUFFER_BINDING, bound);
 
-        bound = mBoundReadFramebuffer ? mBoundReadFramebuffer->GLName() : 0;
+        bound = mBoundReadFramebuffer ? mBoundReadFramebuffer->mGLName : 0;
         AssertUintParamCorrect(gl, LOCAL_GL_READ_FRAMEBUFFER_BINDING, bound);
     } else {
         MOZ_ASSERT(mBoundDrawFramebuffer == mBoundReadFramebuffer);
-        GLuint bound = mBoundDrawFramebuffer ? mBoundDrawFramebuffer->GLName()
+        GLuint bound = mBoundDrawFramebuffer ? mBoundDrawFramebuffer->mGLName
                                              : 0;
         AssertUintParamCorrect(gl, LOCAL_GL_FRAMEBUFFER_BINDING, bound);
     }
@@ -1119,20 +1131,20 @@ WebGLContext::AssertCachedBindings()
     AssertUintParamCorrect(gl, LOCAL_GL_ACTIVE_TEXTURE, activeTexture);
 
     WebGLTexture* curTex = ActiveBoundTextureForTarget(LOCAL_GL_TEXTURE_2D);
-    bound = curTex ? curTex->GLName() : 0;
+    bound = curTex ? curTex->mGLName : 0;
     AssertUintParamCorrect(gl, LOCAL_GL_TEXTURE_BINDING_2D, bound);
 
     curTex = ActiveBoundTextureForTarget(LOCAL_GL_TEXTURE_CUBE_MAP);
-    bound = curTex ? curTex->GLName() : 0;
+    bound = curTex ? curTex->mGLName : 0;
     AssertUintParamCorrect(gl, LOCAL_GL_TEXTURE_BINDING_CUBE_MAP, bound);
 
     // Buffers
-    bound = mBoundArrayBuffer ? mBoundArrayBuffer->GLName() : 0;
+    bound = mBoundArrayBuffer ? mBoundArrayBuffer->mGLName : 0;
     AssertUintParamCorrect(gl, LOCAL_GL_ARRAY_BUFFER_BINDING, bound);
 
     MOZ_ASSERT(mBoundVertexArray);
     WebGLBuffer* curBuff = mBoundVertexArray->mElementArrayBuffer;
-    bound = curBuff ? curBuff->GLName() : 0;
+    bound = curBuff ? curBuff->mGLName : 0;
     AssertUintParamCorrect(gl, LOCAL_GL_ELEMENT_ARRAY_BUFFER_BINDING, bound);
 
     MOZ_ASSERT(!GetAndFlushUnderlyingGLErrors());
@@ -1198,12 +1210,11 @@ WebGLContext::AssertCachedState()
     //   supported by the GL implementation.
     const int maxStencilBits = 8;
     const GLuint maxStencilBitsMask = (1 << maxStencilBits) - 1;
-
     AssertMaskedUintParamCorrect(gl, LOCAL_GL_STENCIL_VALUE_MASK,      maxStencilBitsMask, mStencilValueMaskFront);
     AssertMaskedUintParamCorrect(gl, LOCAL_GL_STENCIL_BACK_VALUE_MASK, maxStencilBitsMask, mStencilValueMaskBack);
 
-    AssertUintParamCorrect(gl, LOCAL_GL_STENCIL_WRITEMASK,      mStencilWriteMaskFront);
-    AssertUintParamCorrect(gl, LOCAL_GL_STENCIL_BACK_WRITEMASK, mStencilWriteMaskBack);
+    AssertMaskedUintParamCorrect(gl, LOCAL_GL_STENCIL_WRITEMASK,       maxStencilBitsMask, mStencilWriteMaskFront);
+    AssertMaskedUintParamCorrect(gl, LOCAL_GL_STENCIL_BACK_WRITEMASK,  maxStencilBitsMask, mStencilWriteMaskBack);
 
     // Viewport
     GLint int4[4] = {0, 0, 0, 0};

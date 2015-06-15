@@ -162,18 +162,10 @@ private:
 
   void DispatchAudioCaptured();
 
-  // Update blocking state of mDecodedStream when mPlayState or
-  // mLogicallySeeking change. Decoder monitor must be held.
-  void UpdateStreamBlockingForPlayState();
-
-  // Call this IsPlaying() changes. Decoder monitor must be held.
-  void UpdateStreamBlockingForStateMachinePlaying();
-
   // Recreates mDecodedStream. Call this to create mDecodedStream at first,
   // and when seeking, to ensure a new stream is set up with fresh buffers.
-  // aInitialTime is relative to mStartTime.
   // Decoder monitor must be held.
-  void RecreateDecodedStream(int64_t aInitialTime, MediaStreamGraph* aGraph);
+  void RecreateDecodedStream(MediaStreamGraph* aGraph);
 
   void Shutdown();
 public:
@@ -205,19 +197,7 @@ public:
   // media metadata. The decoder monitor must be obtained before calling this.
   // aDuration is in microseconds.
   // A value of INT64_MAX will be treated as infinity.
-  void SetDuration(int64_t aDuration);
-
-  // Called while decoding metadata to set the end time of the media
-  // resource. The decoder monitor must be obtained before calling this.
-  // aEndTime is in microseconds.
-  void SetMediaEndTime(int64_t aEndTime);
-
-  // Called from main thread to update the duration with an estimated value.
-  // The duration is only changed if its significantly different than the
-  // the current duration, as the incoming duration is an estimate and so
-  // often is unstable as more data is read and the estimate is updated.
-  // Can result in a durationchangeevent. aDuration is in microseconds.
-  void UpdateEstimatedDuration(int64_t aDuration);
+  void SetDuration(media::TimeUnit aDuration);
 
   // Functions used by assertions to ensure we're calling things
   // on the appropriate threads.
@@ -440,51 +420,12 @@ protected:
   void PushFront(AudioData* aSample);
   void PushFront(VideoData* aSample);
 
-  // Pops MediaData* samples from their respective MediaQueues.
-  // Note that the audio queue is also drained on the audio thread,
-  // which we can't easily react to - This should be fixed when we
-  // remove the audio thread in bug 750596.
-  already_AddRefed<AudioData> PopAudio();
-  already_AddRefed<VideoData> PopVideo();
+  void OnAudioPopped();
+  void OnVideoPopped();
 
   void VolumeChanged();
   void LogicalPlaybackRateChanged();
   void PreservesPitchChanged();
-
-  class WakeDecoderRunnable : public nsRunnable {
-  public:
-    explicit WakeDecoderRunnable(MediaDecoderStateMachine* aSM)
-      : mMutex("WakeDecoderRunnable"), mStateMachine(aSM) {}
-    NS_IMETHOD Run() override
-    {
-      nsRefPtr<MediaDecoderStateMachine> stateMachine;
-      {
-        // Don't let Run() (called by media stream graph thread) race with
-        // Revoke() (called by decoder state machine thread)
-        MutexAutoLock lock(mMutex);
-        if (!mStateMachine)
-          return NS_OK;
-        stateMachine = mStateMachine;
-      }
-      stateMachine->ScheduleStateMachineWithLockAndWakeDecoder();
-      return NS_OK;
-    }
-    void Revoke()
-    {
-      MutexAutoLock lock(mMutex);
-      mStateMachine = nullptr;
-    }
-
-    Mutex mMutex;
-    // Protected by mMutex.
-    // We don't use an owning pointer here, because keeping mStateMachine alive
-    // would mean in some cases we'd have to destroy mStateMachine from this
-    // object, which would be problematic since MediaDecoderStateMachine can
-    // only be destroyed on the main thread whereas this object can be destroyed
-    // on the media stream graph thread.
-    MediaDecoderStateMachine* mStateMachine;
-  };
-  WakeDecoderRunnable* GetWakeDecoderRunnable();
 
   MediaQueue<AudioData>& AudioQueue() { return mAudioQueue; }
   MediaQueue<VideoData>& VideoQueue() { return mVideoQueue; }
@@ -548,6 +489,8 @@ protected:
   // Returns the audio clock, if we have audio, or -1 if we don't.
   // Called on the state machine thread.
   int64_t GetAudioClock() const;
+
+  int64_t GetStreamClock() const;
 
   // Get the video stream position, taking the |playbackRate| change into
   // account. This is a position in the media, not the duration of the playback
@@ -868,7 +811,7 @@ public:
   // The task queue in which we run decode tasks. This is referred to as
   // the "decode thread", though in practise tasks can run on a different
   // thread every time they're called.
-  MediaTaskQueue* DecodeTaskQueue() const { return mReader->GetTaskQueue(); }
+  MediaTaskQueue* DecodeTaskQueue() const { return mReader->TaskQueue(); }
 
   // The time that playback started from the system clock. This is used for
   // timing the presentation of video frames when there's no audio.
@@ -899,10 +842,23 @@ public:
   // It will be set to -1 if the duration is infinite
   int64_t mEndTime;
 
+  // Recomputes the canonical duration from various sources.
+  void RecomputeDuration();
+
   // Will be set when SetDuration has been called with a value != -1
   // mDurationSet false doesn't indicate that we do not have a valid duration
   // as mStartTime and mEndTime could have been set separately.
   bool mDurationSet;
+
+  // The duration according to the demuxer's current estimate, mirrored from the main thread.
+  Mirror<media::NullableTimeUnit> mEstimatedDuration;
+
+  // The duration explicitly set by JS, mirrored from the main thread.
+  Mirror<Maybe<double>> mExplicitDuration;
+
+  // The highest timestamp that our position has reached. Monotonically
+  // increasing.
+  Watchable<media::TimeUnit> mObservedDuration;
 
   // The current play state and next play state, mirrored from the main thread.
   Mirror<MediaDecoder::PlayState> mPlayState;
@@ -985,13 +941,6 @@ protected:
   // This is created in the state machine's constructor.
   nsRefPtr<MediaDecoderReader> mReader;
 
-  // Accessed only on the state machine thread.
-  // Not an nsRevocableEventPtr since we must Revoke() it well before
-  // this object is destroyed, anyway.
-  // Protected by decoder monitor except during the SHUTDOWN state after the
-  // decoder thread has been stopped.
-  nsRevocableEventPtr<WakeDecoderRunnable> mPendingWakeDecoder;
-
   // The time of the current frame in microseconds, corresponding to the "current
   // playback position" in HTML5. This is referenced from 0, which is the initial
   // playback position.
@@ -999,6 +948,9 @@ protected:
 public:
   AbstractCanonical<int64_t>* CanonicalCurrentPosition() { return &mCurrentPosition; }
 protected:
+  // The presentation time of the first audio/video frame that is sent to the
+  // media stream.
+  int64_t mStreamStartTime;
 
   // The presentation time of the first audio frame that was played in
   // microseconds. We can add this to the audio stream position to determine
@@ -1186,8 +1138,8 @@ protected:
   }
 
   // True if we shouldn't play our audio (but still write it to any capturing
-  // streams). When this is true, mStopAudioThread is always true and
-  // the audio thread will never start again after it has stopped.
+  // streams). When this is true, the audio thread will never start again after
+  // it has stopped.
   bool mAudioCaptured;
 
   // True if an event to notify about a change in the playback
@@ -1214,10 +1166,6 @@ protected:
   // DecodeThreadRun(). We use this flag to prevent us from dispatching
   // unneccessary runnables, since the decode thread runs in a loop.
   bool mDispatchedEventToDecode;
-
-  // False while audio thread should be running. Accessed state machine
-  // and audio threads. Syncrhonised by decoder monitor.
-  bool mStopAudioThread;
 
   // If this is true while we're in buffering mode, we can exit early,
   // as it's likely we may be able to playback. This happens when we enter

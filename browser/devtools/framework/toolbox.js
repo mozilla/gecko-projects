@@ -1,6 +1,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* globals gDevTools, DOMHelpers, toolboxStrings, InspectorFront, Selection,
+   CommandUtils, DevToolsUtils, screenManager, oscpu, Hosts, is64Bit,
+   osString, showDoorhanger, getHighlighterUtils, getPerformanceFront */
 
 "use strict";
 
@@ -18,24 +21,20 @@ let {Cc, Ci, Cu} = require("chrome");
 let {Promise: promise} = require("resource://gre/modules/Promise.jsm");
 let EventEmitter = require("devtools/toolkit/event-emitter");
 let Telemetry = require("devtools/shared/telemetry");
-let {getHighlighterUtils} = require("devtools/framework/toolbox-highlighter-utils");
 let HUDService = require("devtools/webconsole/hudservice");
-let {showDoorhanger} = require("devtools/shared/doorhanger");
 let sourceUtils = require("devtools/shared/source-utils");
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/gDevTools.jsm");
 Cu.import("resource:///modules/devtools/scratchpad-manager.jsm");
 Cu.import("resource:///modules/devtools/DOMHelpers.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 
-loader.lazyGetter(this, "Hosts", () => require("devtools/framework/toolbox-hosts").Hosts);
-
-loader.lazyImporter(this, "CommandUtils", "resource:///modules/devtools/DeveloperToolbar.jsm");
-
+loader.lazyImporter(this, "CommandUtils",
+  "resource:///modules/devtools/DeveloperToolbar.jsm");
 loader.lazyGetter(this, "toolboxStrings", () => {
-  let bundle = Services.strings.createBundle("chrome://browser/locale/devtools/toolbox.properties");
+  const properties = "chrome://browser/locale/devtools/toolbox.properties";
+  const bundle = Services.strings.createBundle(properties);
   return (name, ...args) => {
     try {
       if (!args.length) {
@@ -48,22 +47,31 @@ loader.lazyGetter(this, "toolboxStrings", () => {
     }
   };
 });
-
-loader.lazyGetter(this, "Selection", () => require("devtools/framework/selection").Selection);
-loader.lazyGetter(this, "InspectorFront", () => require("devtools/server/actors/inspector").InspectorFront);
-loader.lazyRequireGetter(this, "DevToolsUtils", "devtools/toolkit/DevToolsUtils");
-loader.lazyRequireGetter(this, "getPerformanceActorsConnection", "devtools/performance/front", true);
-
-XPCOMUtils.defineLazyGetter(this, "screenManager", () => {
+loader.lazyRequireGetter(this, "getHighlighterUtils",
+  "devtools/framework/toolbox-highlighter-utils", true);
+loader.lazyRequireGetter(this, "Hosts",
+  "devtools/framework/toolbox-hosts", true);
+loader.lazyRequireGetter(this, "Selection",
+  "devtools/framework/selection", true);
+loader.lazyRequireGetter(this, "InspectorFront",
+  "devtools/server/actors/inspector", true);
+loader.lazyRequireGetter(this, "DevToolsUtils",
+  "devtools/toolkit/DevToolsUtils");
+loader.lazyRequireGetter(this, "showDoorhanger",
+  "devtools/shared/doorhanger", true);
+loader.lazyRequireGetter(this, "getPerformanceFront",
+  "devtools/performance/front", true);
+loader.lazyGetter(this, "osString", () => {
+  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
+});
+loader.lazyGetter(this, "screenManager", () => {
   return Cc["@mozilla.org/gfx/screenmanager;1"].getService(Ci.nsIScreenManager);
 });
-
-XPCOMUtils.defineLazyGetter(this, "oscpu", () => {
+loader.lazyGetter(this, "oscpu", () => {
   return Cc["@mozilla.org/network/protocol;1?name=http"]
            .getService(Ci.nsIHttpProtocolHandler).oscpu;
 });
-
-XPCOMUtils.defineLazyGetter(this, "is64Bit", () => {
+loader.lazyGetter(this, "is64Bit", () => {
   return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULAppInfo).is64Bit;
 });
 
@@ -76,8 +84,9 @@ const ToolboxButtons = exports.ToolboxButtons = [
       target.getTrait("highlightable")
   },
   { id: "command-button-frames",
-    isTargetSupported: target =>
-      ( target.activeTab && target.activeTab.traits.frames )
+    isTargetSupported: target => {
+      return target.activeTab && target.activeTab.traits.frames;
+    }
   },
   { id: "command-button-splitconsole",
     isTargetSupported: target => !target.isAddon },
@@ -128,6 +137,11 @@ function Toolbox(target, selectedTool, hostType, hostOptions) {
   this._onFocus = this._onFocus.bind(this);
   this._showDevEditionPromo = this._showDevEditionPromo.bind(this);
   this._updateTextboxMenuItems = this._updateTextboxMenuItems.bind(this);
+  this._onBottomHostMinimized = this._onBottomHostMinimized.bind(this);
+  this._onBottomHostMaximized = this._onBottomHostMaximized.bind(this);
+  this._onToolSelectWhileMinimized = this._onToolSelectWhileMinimized.bind(this);
+  this._onBottomHostWillChange = this._onBottomHostWillChange.bind(this);
+  this._toggleMinimizeMode = this._toggleMinimizeMode.bind(this);
 
   this._target.on("close", this.destroy);
 
@@ -281,6 +295,14 @@ Toolbox.prototype = {
   },
 
   /**
+   * Get the toolbox's performance front. Note that it may not always have been
+   * initialized first. Use `initPerformance()` if needed.
+   */
+  get performance() {
+    return this._performance;
+  },
+
+  /**
    * Get the toolbox's inspector front. Note that it may not always have been
    * initialized first. Use `initInspector()` if needed.
    */
@@ -314,7 +336,7 @@ Toolbox.prototype = {
   /**
    * Open the toolbox
    */
-  open: function () {
+  open: function() {
     return Task.spawn(function*() {
       let iframe = yield this._host.create();
       let domReady = promise.defer();
@@ -392,12 +414,13 @@ Toolbox.prototype = {
 
       // Lazily connect to the profiler here and don't wait for it to complete,
       // used to intercept console.profile calls before the performance tools are open.
-      let profilerReady = this._connectProfiler();
+      let profilerReady = this.initPerformance();
 
-      // However, while testing, we must wait for the performance connection to finish,
-      // as most tests shut down without waiting for a toolbox destruction event,
-      // resulting in the shared profiler connection being opened and closed
-      // outside of the test that originally opened the toolbox.
+      // However, while testing, we must wait for the performance connection to
+      // finish, as most tests shut down without waiting for a toolbox
+      // destruction event, resulting in the shared profiler connection being
+      // opened and closed outside of the test that originally opened the
+      // toolbox.
       if (gDevTools.testing) {
         yield profilerReady;
       }
@@ -429,13 +452,13 @@ Toolbox.prototype = {
    *         }
    */
   _prefChanged: function(event, data) {
-    switch(data.pref) {
-    case "devtools.cache.disabled":
-      this._applyCacheSettings();
-      break;
-    case "devtools.serviceWorkers.testing.enabled":
-      this._applyServiceWorkersTestingSettings();
-      break;
+    switch (data.pref) {
+      case "devtools.cache.disabled":
+        this._applyCacheSettings();
+        break;
+      case "devtools.serviceWorkers.testing.enabled":
+        this._applyServiceWorkersTestingSettings();
+        break;
     }
   },
 
@@ -465,7 +488,7 @@ Toolbox.prototype = {
       ["toolbox-force-reload-key", true],
       ["toolbox-force-reload-key2", true]
     ].forEach(([id, force]) => {
-      this.doc.getElementById(id).addEventListener("command", (event) => {
+      this.doc.getElementById(id).addEventListener("command", () => {
         this.reloadTarget(force);
       }, true);
     });
@@ -476,6 +499,9 @@ Toolbox.prototype = {
     nextKey.addEventListener("command", this.selectNextTool.bind(this), true);
     let prevKey = this.doc.getElementById("toolbox-previous-tool-key");
     prevKey.addEventListener("command", this.selectPreviousTool.bind(this), true);
+
+    let minimizeKey = this.doc.getElementById("toolbox-minimize-key");
+    minimizeKey.addEventListener("command", this._toggleMinimizeMode, true);
 
     // Split console uses keypress instead of command so the event can be
     // cancelled with stopPropagation on the keypress, and not preventDefault.
@@ -628,7 +654,8 @@ Toolbox.prototype = {
       }
 
       key.setAttribute("modifiers", toolDefinition.modifiers);
-      key.setAttribute("oncommand", "void(0);"); // needed. See bug 371900
+      // needed. See bug 371900
+      key.setAttribute("oncommand", "void(0);");
       key.addEventListener("command", () => {
         this.selectTool(toolId).then(() => this.fireCustomKey(toolId));
       }, true);
@@ -642,7 +669,8 @@ Toolbox.prototype = {
 
       key.setAttribute("key", toolboxStrings("browserConsoleCmd.commandkey"));
       key.setAttribute("modifiers", "accel,shift");
-      key.setAttribute("oncommand", "void(0)"); // needed. See bug 371900
+      // needed. See bug 371900
+      key.setAttribute("oncommand", "void(0)");
       key.addEventListener("command", () => {
         HUDService.toggleBrowserConsole();
       }, true);
@@ -651,9 +679,10 @@ Toolbox.prototype = {
   },
 
   /**
-   * Handle any custom key events.  Returns true if there was a custom key binding run
-   * @param {string} toolId
-   *        Which tool to run the command on (skip if not current)
+   * Handle any custom key events.  Returns true if there was a custom key
+   * binding run.
+   * @param {string} toolId Which tool to run the command on (skip if not
+   * current)
    */
   fireCustomKey: function(toolId) {
     let toolDefinition = gDevTools.getToolDefinition(toolId);
@@ -678,6 +707,25 @@ Toolbox.prototype = {
 
     if (!this._target.isLocalTab) {
       return;
+    }
+
+    // Bottom-type host can be minimized, add a button for this.
+    if (this.hostType == Toolbox.HostType.BOTTOM) {
+      let minimizeBtn = this.doc.createElement("toolbarbutton");
+      minimizeBtn.id = "toolbox-dock-bottom-minimize";
+
+      minimizeBtn.addEventListener("command", this._toggleMinimizeMode);
+      dockBox.appendChild(minimizeBtn);
+      // Show the button in its maximized state.
+      this._onBottomHostMaximized();
+
+      // Update the label and icon when the state changes.
+      this._host.on("minimized", this._onBottomHostMinimized);
+      this._host.on("maximized", this._onBottomHostMaximized);
+      // Maximize again when a tool gets selected.
+      this.on("before-select", this._onToolSelectWhileMinimized);
+      // Maximize and stop listening before the host type changes.
+      this.once("host-will-change", this._onBottomHostWillChange);
     }
 
     if (this.hostType == Toolbox.HostType.WINDOW) {
@@ -707,6 +755,56 @@ Toolbox.prototype = {
 
       dockBox.appendChild(button);
     }
+  },
+
+  _getMinimizeButtonShortcutTooltip: function() {
+    let key = this.doc.getElementById("toolbox-minimize-key")
+                      .getAttribute("key");
+    return "(" + (osString == "Darwin" ? "Cmd+Shift+" : "Ctrl+Shift+") +
+           key.toUpperCase() + ")";
+  },
+
+  _onBottomHostMinimized: function() {
+    let btn = this.doc.querySelector("#toolbox-dock-bottom-minimize");
+    btn.className = "minimized";
+
+    btn.setAttribute("tooltiptext",
+      toolboxStrings("toolboxDockButtons.bottom.maximize") + " " +
+      this._getMinimizeButtonShortcutTooltip());
+  },
+
+  _onBottomHostMaximized: function() {
+    let btn = this.doc.querySelector("#toolbox-dock-bottom-minimize");
+    btn.className = "maximized";
+
+    btn.setAttribute("tooltiptext",
+      toolboxStrings("toolboxDockButtons.bottom.minimize") + " " +
+      this._getMinimizeButtonShortcutTooltip());
+  },
+
+  _onToolSelectWhileMinimized: function() {
+    this._host.maximize();
+  },
+
+  _onBottomHostWillChange: function() {
+    this._host.maximize();
+
+    this._host.off("minimized", this._onBottomHostMinimized);
+    this._host.off("maximized", this._onBottomHostMaximized);
+    this.off("before-select", this._onToolSelectWhileMinimized);
+  },
+
+  _toggleMinimizeMode: function() {
+    if (this.hostType !== Toolbox.HostType.BOTTOM) {
+      return;
+    }
+
+    // Calculate the height to which the host should be minimized so the
+    // tabbar is still visible.
+    let toolbarHeight = this.doc.querySelector(".devtools-tabbar")
+                                .getBoxQuads({box: "content"})[0]
+                                .bounds.height;
+    this._host.toggleMinimizeMode(toolbarHeight);
   },
 
   /**
@@ -835,8 +933,9 @@ Toolbox.prototype = {
         button: button,
         label: button.getAttribute("tooltiptext"),
         visibilityswitch: "devtools." + options.id + ".enabled",
-        isTargetSupported: options.isTargetSupported ? options.isTargetSupported
-                                                     : target => target.isLocalTab
+        isTargetSupported: options.isTargetSupported
+                           ? options.isTargetSupported
+                           : target => target.isLocalTab
       };
     }).filter(button=>button);
   },
@@ -847,7 +946,7 @@ Toolbox.prototype = {
    */
   setToolboxButtonsVisibility: function() {
     this.toolboxButtons.forEach(buttonSpec => {
-      let { visibilityswitch, id, button, isTargetSupported } = buttonSpec;
+      let { visibilityswitch, button, isTargetSupported } = buttonSpec;
       let on = true;
       try {
         on = Services.prefs.getBoolPref(visibilityswitch);
@@ -939,7 +1038,7 @@ Toolbox.prototype = {
 
     if (toolDefinition.label && !toolDefinition.iconOnly) {
       let label = this.doc.createElement("label");
-      label.setAttribute("value", toolDefinition.label)
+      label.setAttribute("value", toolDefinition.label);
       label.setAttribute("crop", "end");
       label.setAttribute("flex", "1");
       radio.appendChild(label);
@@ -1018,7 +1117,7 @@ Toolbox.prototype = {
 
     let definition = gDevTools.getToolDefinition(id);
     if (!definition) {
-      deferred.reject(new Error("no such tool id "+id));
+      deferred.reject(new Error("no such tool id " + id));
       return deferred.promise;
     }
 
@@ -1112,7 +1211,7 @@ Toolbox.prototype = {
       let callback = () => {
         iframe.removeEventListener("DOMContentLoaded", callback);
         onLoad();
-      }
+      };
       iframe.addEventListener("DOMContentLoaded", callback);
     }
 
@@ -1126,6 +1225,8 @@ Toolbox.prototype = {
    *        The id of the tool to switch to
    */
   selectTool: function(id) {
+    this.emit("before-select", id);
+
     let selected = this.doc.querySelector(".devtools-tab[selected]");
     if (selected) {
       selected.removeAttribute("selected");
@@ -1364,7 +1465,7 @@ Toolbox.prototype = {
     this._host.setTitle(title);
   },
 
-  _listFrames: function (event) {
+  _listFrames: function(event) {
     if (!this._target.activeTab || !this._target.activeTab.traits.frames) {
       // We are not targetting a regular TabActor
       // it can be either an addon or browser toolbox actor
@@ -1379,7 +1480,7 @@ Toolbox.prototype = {
     });
   },
 
-  selectFrame: function (event) {
+  selectFrame: function(event) {
     let windowId = event.target.getAttribute("data-window-id");
     let packet = {
       to: this._target.form.actor,
@@ -1390,7 +1491,7 @@ Toolbox.prototype = {
     // Wait for frameUpdate event to update the UI
   },
 
-  _updateFrames: function (event, data) {
+  _updateFrames: function(event, data) {
     if (!Services.prefs.getBoolPref("devtools.command-button-frames.enabled")) {
       return;
     }
@@ -1420,7 +1521,7 @@ Toolbox.prototype = {
         menu.removeAttribute("checked");
       }
       // Uncheck the previously selected frame
-      let selected = menu.querySelector("menuitem[checked=true]")
+      let selected = menu.querySelector("menuitem[checked=true]");
       if (selected) {
         selected.removeAttribute("checked");
       }
@@ -1458,8 +1559,8 @@ Toolbox.prototype = {
    * Create a host object based on the given host type.
    *
    * Warning: some hosts require that the toolbox target provides a reference to
-   * the attached tab. Not all Targets have a tab property - make sure you correctly
-   * mix and match hosts and targets.
+   * the attached tab. Not all Targets have a tab property - make sure you
+   * correctly mix and match hosts and targets.
    *
    * @param {string} hostType
    *        The host type of the new host object
@@ -1489,6 +1590,8 @@ Toolbox.prototype = {
     if (hostType == this._host.type || !this._target.isLocalTab) {
       return null;
     }
+
+    this.emit("host-will-change", hostType);
 
     let newHost = this._createHost(hostType);
     return newHost.create().then(iframe => {
@@ -1670,32 +1773,72 @@ Toolbox.prototype = {
     screenManager.primaryScreen.GetRect({}, {}, width, height);
     let dims = width.value + "x" + height.value;
 
-    if (width.value < 800 || height.value < 600) return 0;
-    if (dims === "800x600")   return 1;
-    if (dims === "1024x768")  return 2;
-    if (dims === "1280x800")  return 3;
-    if (dims === "1280x1024") return 4;
-    if (dims === "1366x768")  return 5;
-    if (dims === "1440x900")  return 6;
-    if (dims === "1920x1080") return 7;
-    if (dims === "2560×1440") return 8;
-    if (dims === "2560×1600") return 9;
-    if (dims === "2880x1800") return 10;
-    if (width.value > 2880 || height.value > 1800) return 12;
+    if (width.value < 800 || height.value < 600) {
+      return 0;
+    }
+    if (dims === "800x600") {
+      return 1;
+    }
+    if (dims === "1024x768") {
+      return 2;
+    }
+    if (dims === "1280x800") {
+      return 3;
+    }
+    if (dims === "1280x1024") {
+      return 4;
+    }
+    if (dims === "1366x768") {
+      return 5;
+    }
+    if (dims === "1440x900") {
+      return 6;
+    }
+    if (dims === "1920x1080") {
+      return 7;
+    }
+    if (dims === "2560×1440") {
+      return 8;
+    }
+    if (dims === "2560×1600") {
+      return 9;
+    }
+    if (dims === "2880x1800") {
+      return 10;
+    }
+    if (width.value > 2880 || height.value > 1800) {
+      return 12;
+    }
 
-    return 11; // Other dimension such as a VM.
+    // Other dimension such as a VM.
+    return 11;
   },
 
   _getOsCpu: function() {
-    if (oscpu.includes("NT 5.1") || oscpu.includes("NT 5.2")) return 0;
-    if (oscpu.includes("NT 6.0")) return 1;
-    if (oscpu.includes("NT 6.1")) return 2;
-    if (oscpu.includes("NT 6.2")) return 3;
-    if (oscpu.includes("NT 6.3")) return 4;
-    if (oscpu.includes("OS X"))   return 5;
-    if (oscpu.includes("Linux"))  return 6;
+    if (oscpu.includes("NT 5.1") || oscpu.includes("NT 5.2")) {
+      return 0;
+    }
+    if (oscpu.includes("NT 6.0")) {
+      return 1;
+    }
+    if (oscpu.includes("NT 6.1")) {
+      return 2;
+    }
+    if (oscpu.includes("NT 6.2")) {
+      return 3;
+    }
+    if (oscpu.includes("NT 6.3")) {
+      return 4;
+    }
+    if (oscpu.includes("OS X")) {
+      return 5;
+    }
+    if (oscpu.includes("Linux")) {
+      return 6;
+    }
 
-    return 12; // Other OS.
+    // Other OS.
+    return 12;
   },
 
   /**
@@ -1780,7 +1923,7 @@ Toolbox.prototype = {
     }));
 
     // Destroy the profiler connection
-    outstanding.push(this._disconnectProfiler());
+    outstanding.push(this.destroyPerformance());
 
     // We need to grab a reference to win before this._host is destroyed.
     let win = this.frame.ownerGlobal;
@@ -1869,31 +2012,32 @@ Toolbox.prototype = {
    */
   _updateTextboxMenuItems: function() {
     let window = this.doc.defaultView;
-    ['cmd_undo', 'cmd_delete', 'cmd_cut',
-     'cmd_copy', 'cmd_paste','cmd_selectAll'].forEach(window.goUpdateCommand);
-  },
-
-  getPerformanceActorsConnection: function() {
-    if (!this._performanceConnection) {
-      this._performanceConnection = getPerformanceActorsConnection(this.target);
-    }
-    return this._performanceConnection;
+    ["cmd_undo", "cmd_delete", "cmd_cut",
+     "cmd_copy", "cmd_paste", "cmd_selectAll"].forEach(window.goUpdateCommand);
   },
 
   /**
    * Connects to the SPS profiler when the developer tools are open. This is
    * necessary because of the WebConsole's `profile` and `profileEnd` methods.
    */
-  _connectProfiler: Task.async(function*() {
+  initPerformance: Task.async(function*() {
     // If target does not have profiler actor (addons), do not
     // even register the shared performance connection.
     if (!this.target.hasActor("profiler")) {
       return;
     }
 
-    yield this.getPerformanceActorsConnection().open();
+    if (this.performance) {
+      yield this.performance.open();
+      return this.performance;
+    }
+
+    this._performance = getPerformanceFront(this.target);
+    yield this.performance.open();
     // Emit an event when connected, but don't wait on startup for this.
     this.emit("profiler-connected");
+
+    return this.performance;
   }),
 
   /**
@@ -1901,12 +2045,12 @@ Toolbox.prototype = {
    * has not finished initializing, as opening a toolbox does not wait,
    * the performance connection destroy method will wait for it on its own.
    */
-  _disconnectProfiler: Task.async(function*() {
-    if (!this._performanceConnection) {
+  destroyPerformance: Task.async(function*() {
+    if (!this.performance) {
       return;
     }
-    yield this._performanceConnection.destroy();
-    this._performanceConnection = null;
+    yield this.performance.destroy();
+    this._performance = null;
   }),
 
   /**
@@ -1920,7 +2064,7 @@ Toolbox.prototype = {
    * Opens source in style editor. Falls back to plain "view-source:".
    * @see browser/devtools/shared/source-utils.js
    */
-  viewSourceInStyleEditor: function (sourceURL, sourceLine) {
+  viewSourceInStyleEditor: function(sourceURL, sourceLine) {
     return sourceUtils.viewSourceInStyleEditor(this, sourceURL, sourceLine);
   },
 
@@ -1928,7 +2072,7 @@ Toolbox.prototype = {
    * Opens source in debugger. Falls back to plain "view-source:".
    * @see browser/devtools/shared/source-utils.js
    */
-  viewSourceInDebugger: function (sourceURL, sourceLine) {
+  viewSourceInDebugger: function(sourceURL, sourceLine) {
     return sourceUtils.viewSourceInDebugger(this, sourceURL, sourceLine);
   },
 
@@ -1941,7 +2085,7 @@ Toolbox.prototype = {
    *
    * @see browser/devtools/shared/source-utils.js
    */
-  viewSourceInScratchpad: function (sourceURL, sourceLine) {
+  viewSourceInScratchpad: function(sourceURL, sourceLine) {
     return sourceUtils.viewSourceInScratchpad(sourceURL, sourceLine);
   },
 
@@ -1949,7 +2093,7 @@ Toolbox.prototype = {
    * Opens source in plain "view-source:".
    * @see browser/devtools/shared/source-utils.js
    */
-  viewSource: function (sourceURL, sourceLine) {
+  viewSource: function(sourceURL, sourceLine) {
     return sourceUtils.viewSource(this, sourceURL, sourceLine);
   },
 };

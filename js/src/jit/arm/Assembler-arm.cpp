@@ -531,7 +531,7 @@ Imm16::Imm16()
 { }
 
 void
-jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label)
+jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label, ReprotectCode reprotect)
 {
     // We need to determine if this jump can fit into the standard 24+2 bit
     // address or if we need a larger branch (or just need to use our pool
@@ -545,11 +545,18 @@ jit::PatchJump(CodeLocationJump& jump_, CodeLocationLabel label)
     int jumpOffset = label.raw() - jump_.raw();
     if (BOffImm::IsInRange(jumpOffset)) {
         // This instruction started off as a branch, and will remain one.
+        MaybeAutoWritableJitCode awjc(jump, sizeof(Instruction), reprotect);
         Assembler::RetargetNearBranch(jump, jumpOffset, c);
     } else {
         // This instruction started off as a branch, but now needs to be demoted
         // to an ldr.
         uint8_t** slot = reinterpret_cast<uint8_t**>(jump_.jumpTableEntry());
+
+        // Ensure both the branch and the slot are writable.
+        MOZ_ASSERT(uintptr_t(slot) > uintptr_t(jump));
+        size_t size = uintptr_t(slot) - uintptr_t(jump) + sizeof(void*);
+        MaybeAutoWritableJitCode awjc(jump, size, reprotect);
+
         Assembler::RetargetFarBranch(jump, slot, label.raw(), c);
     }
 }
@@ -807,12 +814,6 @@ TraceOneDataRelocation(JSTracer* trc, Iter* iter)
     const void* prior = Assembler::GetPtr32Target(iter, &dest, &rs);
     void* ptr = const_cast<void*>(prior);
 
-    // The low bit shouldn't be set. If it is, we probably got a dummy
-    // pointer inserted by CodeGenerator::visitNurseryObject, but we
-    // shouldn't be able to trigger GC before those are patched to their
-    // real values.
-    MOZ_ASSERT(!(uintptr_t(ptr) & 0x1));
-
     // No barrier needed since these are constants.
     TraceManuallyBarrieredGenericPointerEdge(trc, reinterpret_cast<gc::Cell**>(&ptr),
                                              "ion-masm-ptr");
@@ -853,50 +854,6 @@ void
 Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader)
 {
     ::TraceDataRelocations(trc, code->raw(), reader);
-}
-
-void
-Assembler::FixupNurseryObjects(JSContext* cx, JitCode* code, CompactBufferReader& reader,
-                               const ObjectVector& nurseryObjects)
-{
-    MOZ_ASSERT(!nurseryObjects.empty());
-
-    uint8_t* buffer = code->raw();
-    bool hasNurseryPointers = false;
-
-    while (reader.more()) {
-        size_t offset = reader.readUnsigned();
-        InstructionIterator iter((Instruction*)(buffer + offset));
-        Instruction* ins = iter.cur();
-        Register dest;
-        Assembler::RelocStyle rs;
-        const void* prior = Assembler::GetPtr32Target(&iter, &dest, &rs);
-        void* ptr = const_cast<void*>(prior);
-        uintptr_t word = reinterpret_cast<uintptr_t>(ptr);
-
-        if (!(word & 0x1))
-            continue;
-
-        uint32_t index = word >> 1;
-        JSObject* obj = nurseryObjects[index];
-        MacroAssembler::ma_mov_patch(Imm32(int32_t(obj)), dest, Assembler::Always, rs, ins);
-
-        if (rs != Assembler::L_LDR) {
-            // L_LDR won't cause any instructions to be updated.
-            AutoFlushICache::flush(uintptr_t(ins), 4);
-            AutoFlushICache::flush(uintptr_t(ins->next()), 4);
-        }
-
-        // Either all objects are still in the nursery, or all objects are
-        // tenured.
-        MOZ_ASSERT_IF(hasNurseryPointers, IsInsideNursery(obj));
-
-        if (!hasNurseryPointers && IsInsideNursery(obj))
-            hasNurseryPointers = true;
-    }
-
-    if (hasNurseryPointers)
-        cx->runtime()->gc.storeBuffer.putWholeCellFromMainThread(code);
 }
 
 void

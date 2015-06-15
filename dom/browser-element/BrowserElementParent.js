@@ -84,6 +84,7 @@ function BrowserElementParent() {
   this._pendingDOMRequests = {};
   this._pendingSetInputMethodActive = [];
   this._nextPaintListeners = [];
+  this._pendingDOMFullscreen = false;
 
   Services.obs.addObserver(this, 'oop-frameloader-crashed', /* ownsWeak = */ true);
   Services.obs.addObserver(this, 'copypaste-docommand', /* ownsWeak = */ true);
@@ -196,15 +197,16 @@ BrowserElementParent.prototype = {
       "got-contentdimensions": this._gotDOMRequestResult,
       "got-can-go-back": this._gotDOMRequestResult,
       "got-can-go-forward": this._gotDOMRequestResult,
-      "entered-dom-fullscreen": this._enteredDomFullscreen,
+      "requested-dom-fullscreen": this._requestedDOMFullscreen,
       "fullscreen-origin-change": this._fullscreenOriginChange,
-      "exited-dom-fullscreen": this._exitedDomFullscreen,
+      "exit-dom-fullscreen": this._exitDomFullscreen,
       "got-visible": this._gotDOMRequestResult,
       "visibilitychange": this._childVisibilityChange,
       "got-set-input-method-active": this._gotDOMRequestResult,
       "selectionstatechanged": this._handleSelectionStateChanged,
       "scrollviewchange": this._handleScrollViewChange,
       "caretstatechanged": this._handleCaretStateChanged,
+      "findchange": this._handleFindChange
     };
 
     let mmSecuritySensitiveCalls = {
@@ -474,6 +476,12 @@ BrowserElementParent.prototype = {
     this._frameElement.dispatchEvent(evt);
   },
 
+  _handleFindChange: function(data) {
+    let evt = this._createEvent("findchange", data.json,
+                                /* cancelable = */ false);
+    this._frameElement.dispatchEvent(evt);
+  },
+
   _createEvent: function(evtName, detail, cancelable) {
     // This will have to change if we ever want to send a CustomEvent with null
     // detail.  For now, it's OK.
@@ -644,6 +652,23 @@ BrowserElementParent.prototype = {
   getCanGoBack: defineDOMRequestMethod('get-can-go-back'),
   getCanGoForward: defineDOMRequestMethod('get-can-go-forward'),
   getContentDimensions: defineDOMRequestMethod('get-contentdimensions'),
+
+  findAll: defineNoReturnMethod(function(searchString, caseSensitivity) {
+    return this._sendAsyncMsg('find-all', {
+      searchString,
+      caseSensitive: caseSensitivity == Ci.nsIBrowserElementAPI.FIND_CASE_SENSITIVE
+    });
+  }),
+
+  findNext: defineNoReturnMethod(function(direction) {
+    return this._sendAsyncMsg('find-next', {
+      backward: direction == Ci.nsIBrowserElementAPI.FIND_BACKWARD
+    });
+  }),
+
+  clearMatch: defineNoReturnMethod(function() {
+    return this._sendAsyncMsg('clear-match');
+  }),
 
   goBack: defineNoReturnMethod(function() {
     this._sendAsyncMsg('go-back');
@@ -970,7 +995,8 @@ BrowserElementParent.prototype = {
     this._fireEventFromMsg(data);
   },
 
-  _enteredDomFullscreen: function() {
+  _requestedDOMFullscreen: function() {
+    this._pendingDOMFullscreen = true;
     this._windowUtils.remoteFrameFullscreenChanged(this._frameElement);
   },
 
@@ -979,7 +1005,7 @@ BrowserElementParent.prototype = {
       this._frameElement, "fullscreen-origin-change", data.json.originNoSuffix);
   },
 
-  _exitedDomFullscreen: function(data) {
+  _exitDomFullscreen: function(data) {
     this._windowUtils.remoteFrameFullscreenReverted();
   },
 
@@ -987,6 +1013,9 @@ BrowserElementParent.prototype = {
     if (this._isAlive() && evt.target == this._window.document) {
       if (!this._window.document.mozFullScreen) {
         this._sendAsyncMsg("exit-fullscreen");
+      } else if (this._pendingDOMFullscreen) {
+        this._pendingDOMFullscreen = false;
+        this._sendAsyncMsg("entered-fullscreen");
       }
     }
   },

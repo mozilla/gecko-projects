@@ -87,6 +87,7 @@
 #include "nsAppShellCID.h"
 #include "mozilla/scache/StartupCache.h"
 #include "nsIGfxInfo.h"
+#include "gfxPrefs.h"
 
 #include "base/histogram.h"
 
@@ -2150,6 +2151,10 @@ ShowProfileManager(nsIToolkitProfileService* aProfileSvc,
     ScopedXPCOMStartup xpcom;
     rv = xpcom.Initialize();
     NS_ENSURE_SUCCESS(rv, rv);
+
+    // Initialize the graphics prefs, some of the paths need them before
+    // any other graphics is initialized (e.g., showing the profile chooser.)
+    gfxPrefs::GetSingleton();
 
     rv = xpcom.SetWindowCreator(aNative);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
@@ -4271,6 +4276,8 @@ XREMain::XRE_mainRun()
 int
 XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
 {
+  ScopedLogging log;
+
   char aLocal;
   GeckoProfilerInitRAII profilerGuard(&aLocal);
 
@@ -4296,8 +4303,6 @@ XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
   }
   // used throughout this file
   gAppData = mAppData;
-
-  ScopedLogging log;
 
   mozilla::IOInterposerInit ioInterposerGuard;
 
@@ -4543,7 +4548,7 @@ enum {
   kE10sEnabledByUser = 0,
   kE10sEnabledByDefault = 1,
   kE10sDisabledByUser = 2,
-  kE10sDisabledInSafeMode = 3,
+  // kE10sDisabledInSafeMode = 3, was removed in bug 1172491.
   kE10sDisabledForAccessibility = 4,
   kE10sDisabledForMacGfx = 5,
 };
@@ -4582,10 +4587,7 @@ mozilla::BrowserTabsRemoteAutostart()
   bool disabledForVR = Preferences::GetBool("dom.vr.enabled", false);
 
   if (prefEnabled) {
-    if (gSafeMode) {
-      status = kE10sDisabledInSafeMode;
-      LogE10sBlockedReason("Safe mode");
-    } else if (disabledForA11y) {
+    if (disabledForA11y) {
       status = kE10sDisabledForAccessibility;
       LogE10sBlockedReason("An accessibility tool is or was active. See bug 1115956.");
     } else if (disabledForVR) {

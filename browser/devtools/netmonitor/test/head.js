@@ -40,6 +40,7 @@ const SINGLE_GET_URL = EXAMPLE_URL + "html_single-get-page.html";
 const STATISTICS_URL = EXAMPLE_URL + "html_statistics-test-page.html";
 const CURL_URL = EXAMPLE_URL + "html_copy-as-curl.html";
 const CURL_UTILS_URL = EXAMPLE_URL + "html_curl-utils.html";
+const SEND_BEACON_URL = EXAMPLE_URL + "html_send-beacon.html";
 
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const CONTENT_TYPE_SJS = EXAMPLE_URL + "sjs_content-type-test-server.sjs";
@@ -239,20 +240,24 @@ function waitForNetworkEvents(aMonitor, aGetRequests, aPostRequests = 0) {
     maybeResolve(event, actor);
   }
 
-  function maybeResolve(event, [actor, url]) {
+  function maybeResolve(event, actor) {
     info("> Network events progress: " +
       genericEvents + "/" + ((aGetRequests + aPostRequests) * 13) + ", " +
       postEvents + "/" + (aPostRequests * 2) + ", " +
       "got " + event + " for " + actor);
 
+    let networkInfo =
+      panel.NetMonitorController.webConsoleClient.getNetworkRequest(actor)
+    let url = networkInfo.request.url;
     updateProgressForURL(url, event);
+
     info("> Current state: " + JSON.stringify(progress, null, 2));
 
     // There are 15 updates which need to be fired for a request to be
     // considered finished. The "requestPostData" packet isn't fired for
     // non-POST requests.
-    if (genericEvents == (aGetRequests + aPostRequests) * 13 &&
-        postEvents == aPostRequests * 2) {
+    if (genericEvents >= (aGetRequests + aPostRequests) * 13 &&
+        postEvents >= aPostRequests * 2) {
 
       awaitedEventsToListeners.forEach(([e, l]) => panel.off(events[e], l));
       executeSoon(deferred.resolve);

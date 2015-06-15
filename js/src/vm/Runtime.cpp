@@ -81,6 +81,7 @@ PerThreadData::PerThreadData(JSRuntime* runtime)
     suppressGC(0),
 #ifdef DEBUG
     ionCompiling(false),
+    ionCompilingSafeForMinorGC(false),
     gcSweeping(false),
 #endif
     activeCompilations(0)
@@ -212,6 +213,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     ctypesActivityCallback(nullptr),
     offthreadIonCompilationEnabled_(true),
     parallelParsingEnabled_(true),
+    autoWritableJitCodeActive_(false),
 #ifdef DEBUG
     enteredPolicy(nullptr),
 #endif
@@ -879,17 +881,25 @@ js::ResetStopwatches(JSRuntime* rt)
 }
 
 bool
-js::SetStopwatchActive(JSRuntime* rt, bool isActive)
+js::SetStopwatchIsMonitoringJank(JSRuntime* rt, bool value)
 {
-    MOZ_ASSERT(rt);
-    return rt->stopwatch.setIsActive(isActive);
+    return rt->stopwatch.setIsMonitoringJank(value);
+}
+bool
+js::GetStopwatchIsMonitoringJank(JSRuntime* rt)
+{
+    return rt->stopwatch.isMonitoringJank();
 }
 
 bool
-js::IsStopwatchActive(JSRuntime* rt)
+js::SetStopwatchIsMonitoringCPOW(JSRuntime* rt, bool value)
 {
-    MOZ_ASSERT(rt);
-    return rt->stopwatch.isActive();
+    return rt->stopwatch.setIsMonitoringCPOW(value);
+}
+bool
+js::GetStopwatchIsMonitoringCPOW(JSRuntime* rt)
+{
+    return rt->stopwatch.isMonitoringCPOW();
 }
 
 js::PerformanceGroupHolder::~PerformanceGroupHolder()

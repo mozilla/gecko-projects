@@ -275,6 +275,22 @@
     "n_buckets": 50,
     "description": "Time spent running JS GC (ms)"
   },
+  "GC_BUDGET_MS": {
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "100",
+    "n_buckets": 10,
+    "description": "Requested GC slice budget (ms)"
+  },
+  "GC_ANIMATION_MS": {
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": 50,
+    "description": "Time spent running JS GC when animating (ms)"
+  },
   "GC_MAX_PAUSE_MS": {
     "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
     "expires_in_version": "never",
@@ -711,7 +727,7 @@
     "n_buckets": 10,
     "extended_statistics_ok": true,
     "description": "gfxMacPlatformFontList::InitFontList Total (ms)",
-    "cpp_guard": "XP_MACOSX"
+    "cpp_guard": "XP_DARWIN"
   },
   "SYSTEM_FONT_FALLBACK": {
     "expires_in_version": "never",
@@ -6771,6 +6787,48 @@
     "kind": "boolean",
     "description": "Was WebIDE's debug button used during this runtime connection?"
   },
+  "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_TYPE": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "description": "What runtime type did WebIDE connect to?"
+  },
+  "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_ID": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "description": "What runtime ID did WebIDE connect to?"
+  },
+  "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PROCESSOR": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "description": "What runtime processor did WebIDE connect to?"
+  },
+  "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_OS": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "description": "What runtime OS did WebIDE connect to?"
+  },
+  "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PLATFORM_VERSION": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "description": "What runtime platform version did WebIDE connect to?"
+  },
+  "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_APP_TYPE": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "description": "What runtime app type did WebIDE connect to?"
+  },
+  "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_VERSION": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "description": "What runtime version did WebIDE connect to?"
+  },
   "DEVTOOLS_OS_ENUMERATED_PER_USER": {
     "expires_in_version": "never",
     "kind": "enumerated",
@@ -6998,6 +7056,12 @@
     "n_buckets": 256,
     "description": "Actual size of the metadata parsed from the disk."
   },
+  "NETWORK_CACHE_HASH_STATS": {
+    "expires_in_version": "46",
+    "kind": "enumerated",
+    "n_values": "160",
+    "description": "The longest hash match between a newly added entry and all the existing entries."
+  },
   "DATABASE_LOCKED_EXCEPTION": {
     "expires_in_version": "42",
     "kind": "enumerated",
@@ -7203,6 +7267,12 @@
     "expires_in_version": "4.0a1",
     "kind": "flag",
     "description": "a testing histogram; not meant to be touched"
+  },
+  "TLS_ERROR_REPORT_UI": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 15,
+    "description": "User interaction with the TLS Error Reporter in about:neterror (0=Error seen, 1='auto' checked, 2='auto' unchecked, 3=Sent manually, 4=Sent automatically, 5=Send success, 6=Send failure, 7=Report section expanded)"
   },
   "CERT_OCSP_ENABLED": {
     "expires_in_version": "never",
@@ -7625,6 +7695,20 @@
     "keyed": true,
     "description": "Counts of plugin and content process crashes which are reported with a crash dump."
   },
+  "PROCESS_CRASH_SUBMIT_ATTEMPT": {
+    "expires_in_version": "never",
+    "kind": "count",
+    "keyed": true,
+    "releaseChannelCollection": "opt-out",
+    "description": "An attempt to submit a crash. Keyed on the CrashManager Crash.type."
+  },
+  "PROCESS_CRASH_SUBMIT_SUCCESS": {
+    "expires_in_version": "never",
+    "kind": "boolean",
+    "keyed": true,
+    "releaseChannelCollection": "opt-out",
+    "description": "The submission status when main/plugin/content crashes are submitted. 1 is success, 0 is failure. Keyed on the CrashManager Crash.type."
+  },
   "STUMBLER_TIME_BETWEEN_UPLOADS_SEC": {
     "expires_in_version": "45",
     "kind": "exponential",
@@ -7765,6 +7849,24 @@
     "n_buckets": 20,
     "extended_statistics_ok": true,
     "description": "Sanitize: Time it takes to sanitize cookies (ms)"
+  },
+  "FX_SANITIZE_COOKIES_2": {
+    "alert_emails": ["firefox-dev@mozilla.org"],
+    "expires_in_version": "50",
+    "kind": "exponential",
+    "high": "30000",
+    "n_buckets": 20,
+    "extended_statistics_ok": true,
+    "description": "Sanitize: Time it takes to sanitize firefox cookies (ms). A subset of FX_SANITIZE_COOKIES."
+  },
+  "FX_SANITIZE_PLUGINS": {
+    "alert_emails": ["firefox-dev@mozilla.org"],
+    "expires_in_version": "50",
+    "kind": "exponential",
+    "high": "30000",
+    "n_buckets": 20,
+    "extended_statistics_ok": true,
+    "description": "Sanitize: Time it takes to sanitize plugin cookies (ms). A subset of FX_SANITIZE_COOKIES."
   },
   "FX_SANITIZE_OFFLINEAPPS": {
     "alert_emails": ["firefox-dev@mozilla.org", "gavin@mozilla.com"],
@@ -8122,5 +8224,13 @@
     "expires_in_version": "45",
     "kind": "boolean",
     "description": "Set if media.eme.enabled is false, in a build that supports the Adobe Primetime Content Decryption Module."
+  },
+  "GRAPHICS_DRIVER_STARTUP_TEST": {
+    "alert_emails": ["danderson@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 20,
+    "releaseChannelCollection": "opt-out",
+    "description": "Reports whether or not graphics drivers crashed during startup."
   }
 }

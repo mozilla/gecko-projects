@@ -97,7 +97,6 @@ browser.jar:
   skin/classic/browser/badge-add-engine.png                 (../shared/search/badge-add-engine.png)
   skin/classic/browser/search-indicator-badge-add.png       (../shared/search/search-indicator-badge-add.png)
   skin/classic/browser/search-history-icon.svg              (../shared/search/history-icon.svg)
-  skin/classic/browser/Secure.png
   skin/classic/browser/Security-broken.png
   skin/classic/browser/setDesktopBackground.css
   skin/classic/browser/slowStartup-16.png
@@ -132,8 +131,11 @@ browser.jar:
   skin/classic/browser/webRTC-microphone-white-16.png (../shared/webrtc/microphone-white-16.png)
   skin/classic/browser/webRTC-screen-white-16.png     (../shared/webrtc/screen-white-16.png)
   skin/classic/browser/loop/menuPanel.png             (loop/menuPanel.png)
+  skin/classic/browser/loop/menuPanel@2x.png          (loop/menuPanel@2x.png)
   skin/classic/browser/loop/toolbar.png               (loop/toolbar.png)
+  skin/classic/browser/loop/toolbar@2x.png            (loop/toolbar@2x.png)
   skin/classic/browser/loop/toolbar-inverted.png      (loop/toolbar-inverted.png)
+  skin/classic/browser/loop/toolbar-inverted@2x.png   (loop/toolbar-inverted@2x.png)
 * skin/classic/browser/controlcenter/panel.css        (controlcenter/panel.css)
   skin/classic/browser/customizableui/background-noise-toolbar.png  (customizableui/background-noise-toolbar.png)
   skin/classic/browser/customizableui/customize-illustration.png  (../shared/customizableui/customize-illustration.png)
@@ -299,8 +301,7 @@ browser.jar:
 * skin/classic/browser/devtools/ruleview.css          (../shared/devtools/ruleview.css)
 * skin/classic/browser/devtools/webconsole.css                  (devtools/webconsole.css)
   skin/classic/browser/devtools/webconsole_networkpanel.css     (devtools/webconsole_networkpanel.css)
-  skin/classic/browser/devtools/webconsole.png                  (../shared/devtools/images/webconsole.png)
-  skin/classic/browser/devtools/webconsole@2x.png               (../shared/devtools/images/webconsole@2x.png)
+  skin/classic/browser/devtools/webconsole.svg                  (../shared/devtools/images/webconsole.svg)
   skin/classic/browser/devtools/commandline.css              (../shared/devtools/commandline.css)
   skin/classic/browser/devtools/markup-view.css       (../shared/devtools/markup-view.css)
   skin/classic/browser/devtools/editor-error.png       (../shared/devtools/images/editor-error.png)
@@ -377,6 +378,8 @@ browser.jar:
   skin/classic/browser/devtools/toggle-tools.png          (../shared/devtools/images/toggle-tools.png)
   skin/classic/browser/devtools/toggle-tools@2x.png       (../shared/devtools/images/toggle-tools@2x.png)
   skin/classic/browser/devtools/dock-bottom@2x.png        (../shared/devtools/images/dock-bottom@2x.png)
+  skin/classic/browser/devtools/dock-bottom-minimize@2x.png (../shared/devtools/images/dock-bottom-minimize@2x.png)
+  skin/classic/browser/devtools/dock-bottom-maximize@2x.png (../shared/devtools/images/dock-bottom-maximize@2x.png)
   skin/classic/browser/devtools/dock-side@2x.png          (../shared/devtools/images/dock-side@2x.png)
   skin/classic/browser/devtools/floating-scrollbars.css   (devtools/floating-scrollbars.css)
   skin/classic/browser/devtools/floating-scrollbars-light.css (devtools/floating-scrollbars-light.css)

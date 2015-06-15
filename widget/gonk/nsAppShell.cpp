@@ -34,6 +34,7 @@
 
 #include "base/basictypes.h"
 #include "GonkPermission.h"
+#include "libdisplay/BootAnimation.h"
 #include "nscore.h"
 #ifdef MOZ_OMX_DECODER
 #include "MediaResourceManagerService.h"
@@ -563,17 +564,17 @@ private:
 void
 GeckoInputReaderPolicy::setDisplayInfo()
 {
-    static_assert(nsIScreen::ROTATION_0_DEG ==
-                  DISPLAY_ORIENTATION_0,
+    static_assert(static_cast<int>(nsIScreen::ROTATION_0_DEG) ==
+                  static_cast<int>(DISPLAY_ORIENTATION_0),
                   "Orientation enums not matched!");
-    static_assert(nsIScreen::ROTATION_90_DEG ==
-                  DISPLAY_ORIENTATION_90,
+    static_assert(static_cast<int>(nsIScreen::ROTATION_90_DEG) ==
+                  static_cast<int>(DISPLAY_ORIENTATION_90),
                   "Orientation enums not matched!");
-    static_assert(nsIScreen::ROTATION_180_DEG ==
-                  DISPLAY_ORIENTATION_180,
+    static_assert(static_cast<int>(nsIScreen::ROTATION_180_DEG) ==
+                  static_cast<int>(DISPLAY_ORIENTATION_180),
                   "Orientation enums not matched!");
-    static_assert(nsIScreen::ROTATION_270_DEG ==
-                  DISPLAY_ORIENTATION_270,
+    static_assert(static_cast<int>(nsIScreen::ROTATION_270_DEG) ==
+                  static_cast<int>(DISPLAY_ORIENTATION_270),
                   "Orientation enums not matched!");
 
     nsRefPtr<nsScreenGonk> screen = nsScreenManagerGonk::GetPrimaryScreen();
@@ -936,6 +937,10 @@ nsAppShell::Observe(nsISupports* aSubject,
             updateHeadphoneSwitch();
         }
         mEnableDraw = true;
+
+        // System is almost booting up. Stop the bootAnim now.
+        StopBootAnimation();
+
         NotifyEvent();
         return NS_OK;
     }

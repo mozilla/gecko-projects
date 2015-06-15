@@ -70,7 +70,6 @@
 #endif
 
 #include "Layers.h"
-#include "mozilla/layers/ShadowLayers.h"
 #include "gfxPrefs.h"
 
 #include "mozilla/dom/Element.h"
@@ -82,6 +81,8 @@
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/quota/PersistenceType.h"
 #include "mozilla/dom/quota/QuotaManager.h"
+#include "mozilla/layers/FrameUniformityData.h"
+#include "mozilla/layers/ShadowLayers.h"
 #include "nsPrintfCString.h"
 #include "nsViewportInfo.h"
 #include "nsIFormControl.h"
@@ -1508,18 +1509,23 @@ nsDOMWindowUtils::CompareCanvases(nsIDOMHTMLCanvasElement *aCanvas1,
   RefPtr<DataSourceSurface> img1 = CanvasToDataSourceSurface(aCanvas1);
   RefPtr<DataSourceSurface> img2 = CanvasToDataSourceSurface(aCanvas2);
 
+  DataSourceSurface::ScopedMap map1(img1, DataSourceSurface::READ);
+  DataSourceSurface::ScopedMap map2(img2, DataSourceSurface::READ);
+
   if (img1 == nullptr || img2 == nullptr ||
+      !map1.IsMapped() || !map2.IsMapped() ||
       img1->GetSize() != img2->GetSize() ||
-      img1->Stride() != img2->Stride())
+      map1.GetStride() != map2.GetStride()) {
     return NS_ERROR_FAILURE;
+  }
 
   int v;
   IntSize size = img1->GetSize();
-  uint32_t stride = img1->Stride();
+  int32_t stride = map1.GetStride();
 
   // we can optimize for the common all-pass case
-  if (stride == (uint32_t) size.width * 4) {
-    v = memcmp(img1->GetData(), img2->GetData(), size.width * size.height * 4);
+  if (stride == size.width * 4) {
+    v = memcmp(map1.GetData(), map2.GetData(), size.width * size.height * 4);
     if (v == 0) {
       if (aMaxDifference)
         *aMaxDifference = 0;
@@ -1532,8 +1538,8 @@ nsDOMWindowUtils::CompareCanvases(nsIDOMHTMLCanvasElement *aCanvas1,
   uint32_t different = 0;
 
   for (int j = 0; j < size.height; j++) {
-    unsigned char *p1 = img1->GetData() + j*stride;
-    unsigned char *p2 = img2->GetData() + j*stride;
+    unsigned char *p1 = map1.GetData() + j*stride;
+    unsigned char *p2 = map2.GetData() + j*stride;
     v = memcmp(p1, p2, stride);
 
     if (v) {
@@ -3126,6 +3132,18 @@ nsDOMWindowUtils::RemoteFrameFullscreenReverted()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal)
+{
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  NS_ENSURE_STATE(doc);
+
+  *aRetVal = nsIDocument::HandlePendingFullscreenRequests(doc);
+  return NS_OK;
+}
+
 nsresult
 nsDOMWindowUtils::ExitFullscreen()
 {
@@ -3428,16 +3446,14 @@ nsDOMWindowUtils::DispatchEventToChromeOnly(nsIDOMEventTarget* aTarget,
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::RunInStableState(nsIRunnable *runnable)
+nsDOMWindowUtils::RunInStableState(nsIRunnable *aRunnable)
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
-  nsCOMPtr<nsIAppShell> appShell(do_GetService(kAppShellCID));
-  if (!appShell) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
+  nsCOMPtr<nsIRunnable> runnable = aRunnable;
+  nsContentUtils::RunInStableState(runnable.forget());
 
-  return appShell->RunInStableState(runnable);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -3713,6 +3729,27 @@ nsDOMWindowUtils::SetChromeMargin(int32_t aTop,
     }
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetFrameUniformityTestData(JSContext* aContext,
+                                             JS::MutableHandleValue aOutFrameUniformity)
+{
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+  nsIWidget* widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsRefPtr<LayerManager> manager = widget->GetLayerManager();
+  if (!manager) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  FrameUniformityData outData;
+  manager->GetFrameUniformity(&outData);
+  outData.ToJS(aOutFrameUniformity, aContext);
   return NS_OK;
 }
 

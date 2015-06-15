@@ -5,6 +5,7 @@
 from __future__ import print_function, unicode_literals
 
 import os
+import pprint
 import sys
 
 from mach.decorators import (
@@ -13,6 +14,7 @@ from mach.decorators import (
     Command,
 )
 
+from autotry import AutoTry
 from mozbuild.base import MachCommandBase
 
 
@@ -182,6 +184,24 @@ class Test(MachCommandBase):
     @Command('test', category='testing', description='Run tests (detects the kind of test and runs it).')
     @CommandArgument('what', default=None, nargs='*', help=TEST_HELP)
     def test(self, what):
+        """Run tests from names or paths.
+
+        mach test accepts arguments specifying which tests to run. Each argument
+        can be:
+
+        * The path to a test file
+        * A directory containing tests
+        * A test suite name
+        * An alias to a test suite name (codes used on TreeHerder)
+
+        When paths or directories are given, they are first resolved to test
+        files known to the build system.
+
+        If resolved tests belong to more than one test type/flavor/harness,
+        the harness for each relevant type/flavor will be invoked. e.g. if
+        you specify a directory with xpcshell and browser chrome mochitests,
+        both harnesses will be invoked.
+        """
         from mozbuild.testing import TestResolver
 
         # Parse arguments and assemble a test "plan."
@@ -360,3 +380,118 @@ class JsapiTestsCommand(MachCommandBase):
         jsapi_tests_result = subprocess.call(jsapi_tests_cmd)
 
         return jsapi_tests_result
+
+
+@CommandProvider
+class PushToTry(MachCommandBase):
+
+    def validate_args(self, paths, tests, builds, platforms):
+        if not len(paths) and not tests:
+            print("Paths or tests must be specified as an argument to autotry.")
+            sys.exit(1)
+
+        if platforms is None:
+            platforms = os.environ['AUTOTRY_PLATFORM_HINT']
+
+        for p in paths:
+            p = os.path.normpath(os.path.abspath(p))
+            if not p.startswith(self.topsrcdir):
+                print('Specified path "%s" is outside of the srcdir, unable to'
+                      ' specify tests outside of the srcdir' % p)
+                sys.exit(1)
+            if len(p) <= len(self.topsrcdir):
+                print('Specified path "%s" is at the top of the srcdir and would'
+                      ' select all tests.' % p)
+                sys.exit(1)
+
+        return builds, platforms
+
+    @Command('try', category='testing', description='Push selected tests to the try server')
+    @CommandArgument('paths', nargs='*', help='Paths to search for tests to run on try.')
+    @CommandArgument('-n', dest='verbose', action='store_true', default=False,
+                     help='Print detailed information about the resulting test selection '
+                          'and commands performed.')
+    @CommandArgument('-p', dest='platforms', required='AUTOTRY_PLATFORM_HINT' not in os.environ,
+                     help='Platforms to run. (required if not found in the environment)')
+    @CommandArgument('-u', dest='tests',
+                     help='Test jobs to run. These will be used in place of suites '
+                          'determined by test paths, if any.')
+    @CommandArgument('--extra', dest='extra_tests',
+                     help='Additional tests to run. These will be added to suites '
+                          'determined by test paths, if any.')
+    @CommandArgument('-b', dest='builds', default='do',
+                     help='Build types to run (d for debug, o for optimized)')
+    @CommandArgument('--tag', dest='tags', action='append',
+                     help='Restrict tests to the given tag (may be specified multiple times)')
+    @CommandArgument('--no-push', dest='push', action='store_false',
+                     help='Do not push to try as a result of running this command (if '
+                          'specified this command will only print calculated try '
+                          'syntax and selection info).')
+    def autotry(self, builds=None, platforms=None, paths=None, verbose=None,
+                extra_tests=None, push=None, tags=None, tests=None):
+        """Autotry is in beta, please file bugs blocking 1149670.
+
+        Pushes the specified tests to try. The simplest way to specify tests is
+        by using the -u argument, which will behave as usual for try syntax.
+        This command also provides a mechanism to select test jobs and tests
+        within a job by path based on tests present in the tree under that
+        path. Mochitests, xpcshell tests, and reftests are eligible for
+        selection by this mechanism. Selected tests will be run in a single
+        chunk of the relevant suite, at this time in chunk 1.
+
+        Specifying platforms is still required with the -p argument (a default
+        is taken from the AUTOTRY_PLATFORM_HINT environment variable if set).
+
+        Tests may be further filtered by passing one or more --tag to the
+        command.
+
+        To run suites in addition to those determined from the tree, they
+        can be passed to the --extra arguent.
+
+        The command requires either its own mercurial extension ("push-to-try",
+        installable from mach mercurial-setup) or a git repo using git-cinnabar
+        (available at https://github.com/glandium/git-cinnabar).
+        """
+
+        from mozbuild.testing import TestResolver
+        from mozbuild.controller.building import BuildDriver
+
+        print("mach try is under development, please file bugs blocking 1149670.")
+
+        builds, platforms = self.validate_args(paths, tests, builds, platforms)
+        resolver = self._spawn(TestResolver)
+
+        at = AutoTry(self.topsrcdir, resolver, self._mach_context)
+        if at.find_uncommited_changes():
+            print('ERROR please commit changes before continuing')
+            sys.exit(1)
+
+        driver = self._spawn(BuildDriver)
+        driver.install_tests(remove=False)
+
+        manifests_by_flavor = at.manifests_by_flavor(paths)
+
+        if not manifests_by_flavor and not tests:
+            print("No tests were found when attempting to resolve paths:\n\n\t%s" %
+                  paths)
+            sys.exit(1)
+
+        all_manifests = set()
+        for m in manifests_by_flavor.values():
+            all_manifests |= m
+        all_manifests = list(all_manifests)
+
+        msg = at.calc_try_syntax(platforms, manifests_by_flavor.keys(), tests,
+                                 extra_tests, builds, all_manifests, tags)
+
+        if verbose and manifests_by_flavor:
+            print('Tests from the following manifests will be selected: ')
+            pprint.pprint(manifests_by_flavor)
+
+        if verbose:
+            print('The following try syntax was calculated:\n\n\t%s\n' % msg)
+
+        if push:
+            at.push_to_try(msg, verbose)
+
+        return

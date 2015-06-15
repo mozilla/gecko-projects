@@ -126,6 +126,9 @@ static double gTimeoutInterval = -1.0;
 static volatile bool gServiceInterrupt = false;
 static JS::PersistentRootedValue gInterruptFunc;
 
+static bool gLastWarningEnabled = false;
+static JS::PersistentRootedValue gLastWarning;
+
 static bool enableDisassemblyDumps = false;
 static bool offthreadCompilation = false;
 static bool enableBaseline = false;
@@ -1243,9 +1246,13 @@ Evaluate(JSContext* cx, unsigned argc, jsval* vp)
             if (saveLength != loadLength) {
                 JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr, JSSMSG_CACHE_EQ_SIZE_FAILED,
                                      loadLength, saveLength);
-            } else if (!PodEqual(loadBuffer, saveBuffer.get(), loadLength)) {
+                return false;
+            }
+
+            if (!PodEqual(loadBuffer, saveBuffer.get(), loadLength)) {
                 JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr,
                                      JSSMSG_CACHE_EQ_CONTENT_FAILED);
+                return false;
             }
         }
 
@@ -3037,6 +3044,63 @@ SetInterruptCallback(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+static bool
+EnableLastWarning(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    gLastWarningEnabled = true;
+    gLastWarning.setNull();
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+DisableLastWarning(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    gLastWarningEnabled = false;
+    gLastWarning.setNull();
+
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+GetLastWarning(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!gLastWarningEnabled) {
+        JS_ReportError(cx, "Call enableLastWarning first.");
+        return false;
+    }
+
+    if (!JS_WrapValue(cx, &gLastWarning))
+        return false;
+
+    args.rval().set(gLastWarning);
+    return true;
+}
+
+static bool
+ClearLastWarning(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!gLastWarningEnabled) {
+        JS_ReportError(cx, "Call enableLastWarning first.");
+        return false;
+    }
+
+    gLastWarning.setNull();
+
+    args.rval().setUndefined();
+    return true;
+}
+
 #ifdef DEBUG
 static bool
 StackDump(JSContext* cx, unsigned argc, Value* vp)
@@ -3526,13 +3590,11 @@ EscapeForShell(AutoCStringVector& argv)
 
 static Vector<const char*, 4, js::SystemAllocPolicy> sPropagatedFlags;
 
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
 static bool
 PropagateFlagToNestedShells(const char* flag)
 {
     return sPropagatedFlags.append(flag);
 }
-#endif
 
 static bool
 NestedShell(JSContext* cx, unsigned argc, jsval* vp)
@@ -4706,6 +4768,22 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "  Sets func as the interrupt callback function.\n"
 "  Calling this function will replace any callback set by |timeout|.\n"),
 
+    JS_FN_HELP("enableLastWarning", EnableLastWarning, 0, 0,
+"enableLastWarning()",
+"  Enable storing the last warning."),
+
+    JS_FN_HELP("disableLastWarning", DisableLastWarning, 0, 0,
+"disableLastWarning()",
+"  Disable storing the last warning."),
+
+    JS_FN_HELP("getLastWarning", GetLastWarning, 0, 0,
+"getLastWarning()",
+"  Returns an object that represents the last warning."),
+
+    JS_FN_HELP("clearLastWarning", ClearLastWarning, 0, 0,
+"clearLastWarning()",
+"  Clear the last warning."),
+
     JS_FN_HELP("elapsed", Elapsed, 0, 0,
 "elapsed()",
 "  Execution time elapsed for the current context."),
@@ -5026,9 +5104,55 @@ js::shell::my_GetErrorMessage(void* userRef, const unsigned errorNumber)
     return &jsShell_ErrorFormatString[errorNumber];
 }
 
+static bool
+CreateLastWarningObject(JSContext* cx, JSErrorReport* report)
+{
+    RootedObject warningObj(cx, JS_NewObject(cx, nullptr));
+    if (!warningObj)
+        return false;
+
+    RootedString nameStr(cx);
+    if (report->exnType == JSEXN_NONE)
+        nameStr = JS_NewStringCopyZ(cx, "None");
+    else
+        nameStr = GetErrorTypeName(cx->runtime(), report->exnType);
+    if (!nameStr)
+        return false;
+    RootedValue nameVal(cx, StringValue(nameStr));
+    if (!DefineProperty(cx, warningObj, cx->names().name, nameVal))
+        return false;
+
+    RootedString messageStr(cx, JS_NewUCStringCopyZ(cx, report->ucmessage));
+    if (!messageStr)
+        return false;
+    RootedValue messageVal(cx, StringValue(messageStr));
+    if (!DefineProperty(cx, warningObj, cx->names().message, messageVal))
+        return false;
+
+    RootedValue linenoVal(cx, Int32Value(report->lineno));
+    if (!DefineProperty(cx, warningObj, cx->names().lineNumber, linenoVal))
+        return false;
+
+    RootedValue columnVal(cx, Int32Value(report->column));
+    if (!DefineProperty(cx, warningObj, cx->names().columnNumber, columnVal))
+        return false;
+
+    gLastWarning.setObject(*warningObj);
+    return true;
+}
+
 void
 js::shell::my_ErrorReporter(JSContext* cx, const char* message, JSErrorReport* report)
 {
+    if (report && JSREPORT_IS_WARNING(report->flags) && gLastWarningEnabled) {
+        JS::AutoSaveExceptionState savedExc(cx);
+        if (!CreateLastWarningObject(cx, report)) {
+            fputs("Unhandled error happened while creating last warning object.\n", gOutFile);
+            fflush(gOutFile);
+        }
+        savedExc.restore();
+    }
+
     gGotError = PrintError(cx, gErrFile, message, report, reportWarnings);
     if (report->exnType != JSEXN_NONE && !JSREPORT_IS_WARNING(report->flags)) {
         if (report->errorNumber == JSMSG_OUT_OF_MEMORY) {
@@ -6180,6 +6304,7 @@ main(int argc, char** argv, char** envp)
         || !op.addIntOption('\0', "baseline-warmup-threshold", "COUNT",
                             "Wait for COUNT calls or iterations before baseline-compiling "
                             "(default: 10)", -1)
+        || !op.addBoolOption('\0', "non-writable-jitcode", "Allocate JIT code as non-writable memory.")
         || !op.addBoolOption('\0', "no-fpu", "Pretend CPU does not support floating-point operations "
                              "to test JIT codegen (no-op on platforms other than x86).")
         || !op.addBoolOption('\0', "no-sse3", "Pretend CPU does not support SSE3 instructions and above "
@@ -6255,6 +6380,11 @@ main(int argc, char** argv, char** envp)
     OOM_printAllocationCount = op.getBoolOption('O');
 #endif
 
+    if (op.getBoolOption("non-writable-jitcode")) {
+        js::jit::ExecutableAllocator::nonWritableJitCode = true;
+        PropagateFlagToNestedShells("--non-writable-jitcode");
+    }
+
 #ifdef JS_CODEGEN_X86
     if (op.getBoolOption("no-fpu"))
         js::jit::CPUInfo::SetFloatingPointDisabled();
@@ -6305,6 +6435,7 @@ main(int argc, char** argv, char** envp)
         return 1;
 
     gInterruptFunc.init(rt, NullValue());
+    gLastWarning.init(rt, NullValue());
 
     JS_SetGCParameter(rt, JSGC_MAX_BYTES, 0xffffffff);
 

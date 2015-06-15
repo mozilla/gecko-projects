@@ -42,10 +42,14 @@ static const char sBluetoothdSocketName[] = "bluez_hal_socket";
 
 BluetoothDaemonPDU::BluetoothDaemonPDU(uint8_t aService, uint8_t aOpcode,
                                        uint16_t aPayloadSize)
-  : UnixSocketIOBuffer(HEADER_SIZE + aPayloadSize)
-  , mConsumer(nullptr)
+  : mConsumer(nullptr)
   , mUserData(nullptr)
 {
+  // Allocate memory
+  size_t availableSpace = HEADER_SIZE + aPayloadSize;
+  ResetBuffer(new uint8_t[availableSpace], 0, 0, availableSpace);
+
+  // Reserve PDU header
   uint8_t* data = Append(HEADER_SIZE);
   MOZ_ASSERT(data);
 
@@ -56,10 +60,18 @@ BluetoothDaemonPDU::BluetoothDaemonPDU(uint8_t aService, uint8_t aOpcode,
 }
 
 BluetoothDaemonPDU::BluetoothDaemonPDU(size_t aPayloadSize)
-  : UnixSocketIOBuffer(HEADER_SIZE + aPayloadSize)
-  , mConsumer(nullptr)
+  : mConsumer(nullptr)
   , mUserData(nullptr)
-{ }
+{
+  size_t availableSpace = HEADER_SIZE + aPayloadSize;
+  ResetBuffer(new uint8_t[availableSpace], 0, 0, availableSpace);
+}
+
+BluetoothDaemonPDU::~BluetoothDaemonPDU()
+{
+  nsAutoArrayPtr<uint8_t> data(GetBuffer());
+  ResetBuffer(nullptr, 0, 0, 0);
+}
 
 void
 BluetoothDaemonPDU::GetHeader(uint8_t& aService, uint8_t& aOpcode,
@@ -202,7 +214,7 @@ BluetoothDaemonPDUConsumer::~BluetoothDaemonPDUConsumer()
 class BluetoothDaemonConnectionIO final : public ConnectionOrientedSocketIO
 {
 public:
-  BluetoothDaemonConnectionIO(nsIThread* aConsumerThread,
+  BluetoothDaemonConnectionIO(MessageLoop* aConsumerLoop,
                               MessageLoop* aIOLoop,
                               int aFd, ConnectionStatus aConnectionStatus,
                               UnixSocketConnector* aConnector,
@@ -235,14 +247,14 @@ private:
 };
 
 BluetoothDaemonConnectionIO::BluetoothDaemonConnectionIO(
-  nsIThread* aConsumerThread,
+  MessageLoop* aConsumerLoop,
   MessageLoop* aIOLoop,
   int aFd,
   ConnectionStatus aConnectionStatus,
   UnixSocketConnector* aConnector,
   BluetoothDaemonConnection* aConnection,
   BluetoothDaemonPDUConsumer* aConsumer)
-  : ConnectionOrientedSocketIO(aConsumerThread,
+  : ConnectionOrientedSocketIO(aConsumerLoop,
                                aIOLoop,
                                aFd,
                                aConnectionStatus,
@@ -349,7 +361,7 @@ BluetoothDaemonConnection::~BluetoothDaemonConnection()
 
 nsresult
 BluetoothDaemonConnection::PrepareAccept(UnixSocketConnector* aConnector,
-                                         nsIThread* aConsumerThread,
+                                         MessageLoop* aConsumerLoop,
                                          MessageLoop* aIOLoop,
                                          ConnectionOrientedSocketIO*& aIO)
 {
@@ -358,7 +370,7 @@ BluetoothDaemonConnection::PrepareAccept(UnixSocketConnector* aConnector,
   SetConnectionStatus(SOCKET_CONNECTING);
 
   mIO = new BluetoothDaemonConnectionIO(
-    aConsumerThread, aIOLoop, -1, UnixSocketWatcher::SOCKET_IS_CONNECTING,
+    aConsumerLoop, aIOLoop, -1, UnixSocketWatcher::SOCKET_IS_CONNECTING,
     aConnector, this, mPDUConsumer);
   aIO = mIO;
 

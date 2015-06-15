@@ -981,12 +981,14 @@ BrowserGlue.prototype = {
     this._checkForOldBuildUpdates();
 
     let disabledAddons = AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_DISABLED);
-    for (let id of disabledAddons) {
-      if (AddonManager.getAddonByID(id).signedState <= AddonManager.SIGNEDSTATE_MISSING) {
-        this._notifyUnsignedAddonsDisabled();
-        break;
+    AddonManager.getAddonsByIDs(disabledAddons, (addons) => {
+      for (let addon of addons) {
+        if (addon.signedState <= AddonManager.SIGNEDSTATE_MISSING) {
+          this._notifyUnsignedAddonsDisabled();
+          break;
+        }
       }
-    }
+    });
 
     this._firstWindowTelemetry(aWindow);
   },
@@ -1113,7 +1115,10 @@ BrowserGlue.prototype = {
       }
       catch (ex) { /* Don't break the default prompt if telemetry is broken. */ }
 
-      Services.prefs.setBoolPref("browser.shell.isSetAsDefaultBrowser", isDefault);
+      if (isDefault) {
+        let now = Date.now().toString().slice(0, -3);
+        Services.prefs.setCharPref("browser.shell.mostRecentDateSetAsDefault", now);
+      }
 
       if (shouldCheck && !isDefault && !willRecoverSession) {
         Services.tm.mainThread.dispatch(function() {

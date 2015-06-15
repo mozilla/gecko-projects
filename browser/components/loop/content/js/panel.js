@@ -500,9 +500,8 @@ loop.panel = (function(_, mozL10n) {
 
       return (
         React.createElement("div", {className: "room-entry-context-item"}, 
-          React.createElement("a", {href: roomUrl.location, onClick: this.handleClick}, 
-            React.createElement("img", {title: roomUrl.description, 
-                 src: roomUrl.thumbnail})
+          React.createElement("a", {href: roomUrl.location, title: roomUrl.description, onClick: this.handleClick}, 
+            React.createElement("img", {src: roomUrl.thumbnail || "loop/shared/img/icons-16x16.svg#globe"})
           )
         )
       );
@@ -766,6 +765,7 @@ loop.panel = (function(_, mozL10n) {
         hide: !hostname ||
           !this.props.mozLoop.getLoopPref("contextInConversations.enabled")
       });
+      var thumbnail = this.state.previewImage || "loop/shared/img/icons-16x16.svg#globe";
 
       return (
         React.createElement("div", {className: "new-room-view"}, 
@@ -773,7 +773,7 @@ loop.panel = (function(_, mozL10n) {
             React.createElement(Checkbox, {label: mozL10n.get("context_inroom_label"), 
                       onChange: this.onCheckboxChange}), 
             React.createElement("div", {className: "context-content"}, 
-              React.createElement("img", {className: "context-preview", src: this.state.previewImage}), 
+              React.createElement("img", {className: "context-preview", src: thumbnail}), 
               React.createElement("span", {className: "context-description"}, 
                 this.state.description, 
                 React.createElement("span", {className: "context-url"}, hostname)
@@ -1002,7 +1002,8 @@ loop.panel = (function(_, mozL10n) {
       mozLoop: navigator.mozLoop, 
       dispatcher: dispatcher}), document.querySelector("#main"));
 
-    document.body.setAttribute("dir", mozL10n.getDirection());
+    document.documentElement.setAttribute("lang", mozL10n.getLanguage());
+    document.documentElement.setAttribute("dir", mozL10n.getDirection());
     document.body.setAttribute("platform", loop.shared.utils.getPlatform());
 
     // Notify the window that we've finished initalization and initial layout

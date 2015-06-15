@@ -360,9 +360,13 @@ nsPrincipal::Read(nsIObjectInputStream* aStream)
 
   domain = do_QueryInterface(supports);
 
-  OriginAttributes attrs;
-  rv = attrs.Deserialize(aStream);
+  nsAutoCString suffix;
+  rv = aStream->ReadCString(suffix);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  OriginAttributes attrs;
+  bool ok = attrs.PopulateFromSuffix(suffix);
+  NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
 
   rv = NS_ReadOptionalObject(aStream, true, getter_AddRefs(supports));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -404,7 +408,11 @@ nsPrincipal::Write(nsIObjectOutputStream* aStream)
     return rv;
   }
 
-  OriginAttributesRef().Serialize(aStream);
+  nsAutoCString suffix;
+  OriginAttributesRef().CreateSuffix(suffix);
+
+  rv = aStream->WriteStringZ(suffix.get());
+  NS_ENSURE_SUCCESS(rv, rv);
 
   rv = NS_WriteOptionalCompoundObject(aStream, mCSP,
                                       NS_GET_IID(nsIContentSecurityPolicy),
@@ -460,17 +468,20 @@ IsOnFullDomainWhitelist(nsIURI* aURI)
     NS_LITERAL_CSTRING("m.video.baidu.com"),
     NS_LITERAL_CSTRING("m.video.baidu.com"),
     NS_LITERAL_CSTRING("imgcache.gtimg.cn"), // for m.v.qq.com
+    NS_LITERAL_CSTRING("s.tabelog.jp"),
+    NS_LITERAL_CSTRING("s.yimg.jp"), // for s.tabelog.jp
     NS_LITERAL_CSTRING("i.yimg.jp"), // for *.yahoo.co.jp
     NS_LITERAL_CSTRING("ai.yimg.jp"), // for *.yahoo.co.jp
+    NS_LITERAL_CSTRING("m.finance.yahoo.co.jp"),
     NS_LITERAL_CSTRING("daily.c.yimg.jp"), // for sp.daily.co.jp
     NS_LITERAL_CSTRING("stat100.ameba.jp"), // for ameblo.jp
     NS_LITERAL_CSTRING("user.ameba.jp"), // for ameblo.jp
     NS_LITERAL_CSTRING("www.goo.ne.jp"),
-    NS_LITERAL_CSTRING("s.tabelog.jp"),
     NS_LITERAL_CSTRING("x.gnst.jp"), // for mobile.gnavi.co.jp
     NS_LITERAL_CSTRING("c.x.gnst.jp"), // for mobile.gnavi.co.jp
     NS_LITERAL_CSTRING("www.smbc-card.com"),
     NS_LITERAL_CSTRING("static.card.jp.rakuten-static.com"), // for rakuten-card.co.jp
+    NS_LITERAL_CSTRING("img.travel.rakuten.co.jp"), // for travel.rakuten.co.jp
     NS_LITERAL_CSTRING("img.mixi.net"), // for mixi.jp
     NS_LITERAL_CSTRING("girlschannel.net"),
     NS_LITERAL_CSTRING("www.fancl.co.jp"),
@@ -488,13 +499,14 @@ IsOnFullDomainWhitelist(nsIURI* aURI)
     NS_LITERAL_CSTRING("www.tokyo-sports.co.jp"),
     NS_LITERAL_CSTRING("www.bellemaison.jp"),
     NS_LITERAL_CSTRING("www.kuronekoyamato.co.jp"),
-    NS_LITERAL_CSTRING("s.tsite.jp"),
     NS_LITERAL_CSTRING("formassist.jp"), // for orico.jp
     NS_LITERAL_CSTRING("sp.m.reuters.co.jp"),
     NS_LITERAL_CSTRING("www.atre.co.jp"),
     NS_LITERAL_CSTRING("www.jtb.co.jp"),
     NS_LITERAL_CSTRING("www.sharp.co.jp"),
     NS_LITERAL_CSTRING("www.biccamera.com"),
+    NS_LITERAL_CSTRING("weathernews.jp"),
+    NS_LITERAL_CSTRING("cache.ymail.jp"), // for www.yamada-denkiweb.com
   };
   static const size_t sNumFullDomainsOnWhitelist =
     MOZ_ARRAY_LENGTH(sFullDomainsOnWhitelist);
@@ -524,6 +536,7 @@ IsOnBaseDomainWhitelist(nsIURI* aURI)
     NS_LITERAL_CSTRING("dpfile.com"), // for m.dianping.com
     NS_LITERAL_CSTRING("hao123img.com"), // for hao123.com
     NS_LITERAL_CSTRING("tabelog.k-img.com"), // for s.tabelog.com
+    NS_LITERAL_CSTRING("tsite.jp"), // for *.tsite.jp
   };
   static const size_t sNumBaseDomainsOnWhitelist =
     MOZ_ARRAY_LENGTH(sBaseDomainsOnWhitelist);

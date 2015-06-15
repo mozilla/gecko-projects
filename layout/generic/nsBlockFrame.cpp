@@ -5359,6 +5359,7 @@ nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
         if (line->Contains(child)) {
           *aFoundValidLine = true;
           mLine = line;
+          aFrame->SetLineCursor(line.get());
           return;
         }
         ++line;
@@ -5367,6 +5368,7 @@ nsBlockInFlowLineIterator::nsBlockInFlowLineIterator(nsBlockFrame* aFrame,
         if (rline->Contains(child)) {
           *aFoundValidLine = true;
           mLine = rline;
+          aFrame->SetLineCursor(rline.get());
           return;
         }
         ++rline;
@@ -6524,9 +6526,8 @@ void nsBlockFrame::SetupLineCursor()
       || mLines.empty()) {
     return;
   }
-   
-  Properties().Set(LineCursorProperty(), mLines.front());
-  AddStateBits(NS_BLOCK_HAS_LINE_CURSOR);
+
+  SetLineCursor(mLines.front());
 }
 
 nsLineBox* nsBlockFrame::GetFirstLineContaining(nscoord y)
@@ -6554,7 +6555,7 @@ nsLineBox* nsBlockFrame::GetFirstLineContaining(nscoord y)
   }
 
   if (cursor.get() != property) {
-    props.Set(LineCursorProperty(), cursor.get());
+    SetLineCursor(cursor.get());
   }
 
   return cursor.get();
@@ -7214,7 +7215,7 @@ nsBlockFrame::ISizeToClearPastFloats(nsBlockReflowState& aState,
   nscoord inlineStartOffset, inlineEndOffset;
   WritingMode wm = aState.mReflowState.GetWritingMode();
   nsCSSOffsetState offsetState(aFrame, aState.mReflowState.rendContext,
-                               aState.mContentArea.Width(wm));
+                               wm, aState.mContentArea.ISize(wm));
 
   ReplacedElementISizeToClear result;
   aState.ComputeReplacedBlockOffsetsForFloats(aFrame, aFloatAvailableSpace,

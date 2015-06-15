@@ -168,8 +168,7 @@ JitRuntime::JitRuntime()
     osrTempData_(nullptr),
     mutatingBackedgeList_(false),
     ionReturnOverride_(MagicValue(JS_ARG_POISON)),
-    jitcodeGlobalTable_(nullptr),
-    hasIonNurseryObjects_(false)
+    jitcodeGlobalTable_(nullptr)
 {
 }
 
@@ -642,9 +641,10 @@ JitCompartment::mark(JSTracer* trc, JSCompartment* compartment)
 void
 JitCompartment::sweep(FreeOp* fop, JSCompartment* compartment)
 {
-    // Cancel any active or pending off thread compilations. Note that the
-    // MIR graph does not hold any nursery pointers, so there's no need to
-    // do this for minor GCs.
+    // Cancel any active or pending off thread compilations. The MIR graph only
+    // contains nursery pointers if cancelIonCompilations() is set on the store
+    // buffer, in which case store buffer marking will take care of this during
+    // minor GCs.
     MOZ_ASSERT(!fop->runtime()->isHeapMinorCollecting());
     CancelOffThreadIonCompile(compartment, nullptr);
     FinishAllOffThreadCompilations(compartment);
@@ -652,15 +652,15 @@ JitCompartment::sweep(FreeOp* fop, JSCompartment* compartment)
     stubCodes_->sweep(fop);
 
     // If the sweep removed the ICCall_Fallback stub, nullptr the baselineCallReturnAddr_ field.
-    if (!stubCodes_->lookup(ICCall_Fallback::Compiler::CALL_KEY))
+    if (!stubCodes_->lookup(ICCall_Fallback::Compiler::BASELINE_CALL_KEY))
         baselineCallReturnAddrs_[0] = nullptr;
-    if (!stubCodes_->lookup(ICCall_Fallback::Compiler::CONSTRUCT_KEY))
+    if (!stubCodes_->lookup(ICCall_Fallback::Compiler::BASELINE_CONSTRUCT_KEY))
         baselineCallReturnAddrs_[1] = nullptr;
 
     // Similarly for the ICGetProp_Fallback stub.
-    if (!stubCodes_->lookup(static_cast<uint32_t>(ICStub::GetProp_Fallback)))
+    if (!stubCodes_->lookup(ICGetProp_Fallback::Compiler::BASELINE_KEY))
         baselineGetPropReturnAddr_ = nullptr;
-    if (!stubCodes_->lookup(static_cast<uint32_t>(ICStub::SetProp_Fallback)))
+    if (!stubCodes_->lookup(ICSetProp_Fallback::Compiler::BASELINE_KEY))
         baselineSetPropReturnAddr_ = nullptr;
 
     if (stringConcatStub_ && !IsMarkedUnbarriered(&stringConcatStub_))
@@ -767,6 +767,12 @@ JitCode::traceChildren(JSTracer* trc)
     if (invalidated())
         return;
 
+    // If we're moving objects, we need writable JIT code.
+    ReprotectCode reprotect = (trc->runtime()->isHeapMinorCollecting() || zone()->isGCCompacting())
+                              ? Reprotect
+                              : DontReprotect;
+    MaybeAutoWritableJitCode awjc(this, reprotect);
+
     if (jumpRelocTableBytes_) {
         uint8_t* start = code_ + jumpRelocTableOffset();
         CompactBufferReader reader(start, start + jumpRelocTableBytes_);
@@ -777,17 +783,6 @@ JitCode::traceChildren(JSTracer* trc)
         CompactBufferReader reader(start, start + dataRelocTableBytes_);
         MacroAssembler::TraceDataRelocations(trc, this, reader);
     }
-}
-
-void
-JitCode::fixupNurseryObjects(JSContext* cx, const ObjectVector& nurseryObjects)
-{
-    if (nurseryObjects.empty() || !dataRelocTableBytes_)
-        return;
-
-    uint8_t* start = code_ + dataRelocTableOffset();
-    CompactBufferReader reader(start, start + dataRelocTableBytes_);
-    MacroAssembler::FixupNurseryObjects(cx, this, reader, nurseryObjects);
 }
 
 void
@@ -806,8 +801,11 @@ JitCode::finalize(FreeOp* fop)
     // Buffer can be freed at any time hereafter. Catch use-after-free bugs.
     // Don't do this if the Ion code is protected, as the signal handler will
     // deadlock trying to reacquire the interrupt lock.
-    memset(code_, JS_SWEPT_CODE_PATTERN, bufferSize_);
-    code_ = nullptr;
+    {
+        AutoWritableJitCode awjc(this);
+        memset(code_, JS_SWEPT_CODE_PATTERN, bufferSize_);
+        code_ = nullptr;
+    }
 
     // Code buffers are stored inside JSC pools.
     // Pools are refcounted. Releasing the pool may free it.
@@ -823,6 +821,7 @@ JitCode::finalize(FreeOp* fop)
 void
 JitCode::togglePreBarriers(bool enabled)
 {
+    AutoWritableJitCode awjc(this);
     uint8_t* start = code_ + preBarrierTableOffset();
     CompactBufferReader reader(start, start + preBarrierTableBytes_);
 
@@ -1215,6 +1214,7 @@ IonScript::purgeCaches()
     if (invalidated())
         return;
 
+    AutoWritableJitCode awjc(method());
     for (size_t i = 0; i < numCaches(); i++)
         getCacheFromIndex(i).reset();
 }
@@ -1350,16 +1350,14 @@ OptimizeMIR(MIRGenerator* mir)
             return false;
     }
 
-    if (mir->optimizationInfo().scalarReplacementEnabled()) {
-        AutoTraceLog log(logger, TraceLogger_ScalarReplacement);
-        if (!ScalarReplacement(mir, graph))
-            return false;
-        gs.spewPass("Scalar Replacement");
-        AssertGraphCoherency(graph);
+    ValueNumberer gvn(mir, graph);
+    if (!gvn.init())
+        return false;
 
-        if (mir->shouldCancel("Scalar Replacement"))
-            return false;
-    }
+    size_t doRepeatOptimizations = 0;
+  repeatOptimizations:
+    doRepeatOptimizations++;
+    MOZ_ASSERT(doRepeatOptimizations <= 2);
 
     if (!mir->compilingAsmJS()) {
         AutoTraceLog log(logger, TraceLogger_ApplyTypes);
@@ -1394,10 +1392,6 @@ OptimizeMIR(MIRGenerator* mir)
         if (mir->shouldCancel("Alignment Mask Analysis"))
             return false;
     }
-
-    ValueNumberer gvn(mir, graph);
-    if (!gvn.init())
-        return false;
 
     // Alias analysis is required for LICM and GVN so that we don't move
     // loads across stores.
@@ -1452,6 +1446,26 @@ OptimizeMIR(MIRGenerator* mir)
             if (mir->shouldCancel("LICM"))
                 return false;
         }
+    }
+
+    if (mir->optimizationInfo().scalarReplacementEnabled() && doRepeatOptimizations <= 1) {
+        AutoTraceLog log(logger, TraceLogger_ScalarReplacement);
+        bool success = false;
+        if (!ScalarReplacement(mir, graph, &success))
+            return false;
+        gs.spewPass("Scalar Replacement");
+        AssertGraphCoherency(graph);
+
+        if (mir->shouldCancel("Scalar Replacement"))
+            return false;
+
+        // We got some success at removing objects allocation and removing the
+        // loads and stores, unfortunately, this phase is terrible at keeping
+        // the type consistency, so we re-run the Apply Type phase.  As this
+        // optimization folds loads and stores, it might also introduce new
+        // opportunities for GVN and LICM, so re-run them as well.
+        if (success)
+            goto repeatOptimizations;
     }
 
     if (mir->optimizationInfo().rangeAnalysisEnabled()) {
@@ -1711,7 +1725,7 @@ CodeGenerator*
 CompileBackEnd(MIRGenerator* mir)
 {
     // Everything in CompileBackEnd can potentially run on a helper thread.
-    AutoEnterIonCompilation enter;
+    AutoEnterIonCompilation enter(mir->safeForMinorGC());
     AutoSpewEndFunction spewEndFunction(mir);
 
     if (!OptimizeMIR(mir))
@@ -1838,65 +1852,6 @@ AttachFinishedCompilations(JSContext* cx)
     }
 
     js_delete(debuggerAlloc);
-}
-
-void
-MIRGenerator::traceNurseryObjects(JSTracer* trc)
-{
-    TraceRootRange(trc, nurseryObjects_.length(), nurseryObjects_.begin(), "ion-nursery-objects");
-}
-
-class MarkOffThreadNurseryObjects : public gc::BufferableRef
-{
-  public:
-    void trace(JSTracer* trc) override;
-};
-
-void
-MarkOffThreadNurseryObjects::trace(JSTracer* trc)
-{
-    JSRuntime* rt = trc->runtime();
-
-    if (trc->runtime()->isHeapMinorCollecting()) {
-        // Only reset hasIonNurseryObjects if we're doing an actual minor GC.
-        MOZ_ASSERT(rt->jitRuntime()->hasIonNurseryObjects());
-        rt->jitRuntime()->setHasIonNurseryObjects(false);
-    }
-
-    AutoLockHelperThreadState lock;
-    if (!HelperThreadState().threads)
-        return;
-
-    // Trace nursery objects of any builders which haven't started yet.
-    GlobalHelperThreadState::IonBuilderVector& worklist = HelperThreadState().ionWorklist();
-    for (size_t i = 0; i < worklist.length(); i++) {
-        jit::IonBuilder* builder = worklist[i];
-        if (builder->script()->runtimeFromAnyThread() == rt)
-            builder->traceNurseryObjects(trc);
-    }
-
-    // Trace nursery objects of in-progress entries.
-    for (size_t i = 0; i < HelperThreadState().threadCount; i++) {
-        HelperThread& helper = HelperThreadState().threads[i];
-        if (helper.ionBuilder && helper.ionBuilder->script()->runtimeFromAnyThread() == rt)
-            helper.ionBuilder->traceNurseryObjects(trc);
-    }
-
-    // Trace nursery objects of any completed entries.
-    GlobalHelperThreadState::IonBuilderVector& finished = HelperThreadState().ionFinishedList();
-    for (size_t i = 0; i < finished.length(); i++) {
-        jit::IonBuilder* builder = finished[i];
-        if (builder->script()->runtimeFromAnyThread() == rt)
-            builder->traceNurseryObjects(trc);
-    }
-
-    // Trace nursery objects of lazy-linked builders.
-    jit::IonBuilder* builder = HelperThreadState().ionLazyLinkList().getFirst();
-    while (builder) {
-        if (builder->script()->runtimeFromAnyThread() == rt)
-            builder->traceNurseryObjects(trc);
-        builder = builder->getNext();
-    }
 }
 
 static void
@@ -2032,6 +1987,9 @@ IonCompile(JSContext* cx, JSScript* script,
     if (!builder)
         return AbortReason_Alloc;
 
+    if (cx->runtime()->gc.storeBuffer.cancelIonCompilations())
+        builder->setNotSafeForMinorGC();
+
     MOZ_ASSERT(recompile == builder->script()->hasIonScript());
     MOZ_ASSERT(builder->script()->canIonCompile());
 
@@ -2088,15 +2046,6 @@ IonCompile(JSContext* cx, JSScript* script,
         JitSpew(JitSpew_IonSyncLogs, "Can't log script %s:%" PRIuSIZE
                 ". (Compiled on background thread.)",
                 builderScript->filename(), builderScript->lineno());
-
-        JSRuntime* rt = cx->runtime();
-        if (!builder->nurseryObjects().empty() && !rt->jitRuntime()->hasIonNurseryObjects()) {
-            // Ensure the builder's nursery objects are marked when a nursery
-            // GC happens on the main thread.
-            MarkOffThreadNurseryObjects mark;
-            rt->gc.storeBuffer.putGeneric(mark);
-            rt->jitRuntime()->setHasIonNurseryObjects(true);
-        }
 
         if (!StartOffThreadIonCompile(cx, builder)) {
             JitSpew(JitSpew_IonAbort, "Unable to start off-thread ion compilation.");
@@ -2415,8 +2364,10 @@ jit::CanEnter(JSContext* cx, RunState& state)
             return Method_CantCompile;
         }
 
-        if (!state.maybeCreateThisForConstructor(cx))
+        if (!state.maybeCreateThisForConstructor(cx)) {
+            cx->recoverFromOutOfMemory();
             return Method_Skipped;
+        }
     }
 
     // If --ion-eager is used, compile with Baseline first, so that we
@@ -2707,6 +2658,9 @@ InvalidateActivation(FreeOp* fop, const JitActivationIterator& activations, bool
                     it.maybeCallee(), (JSScript*)it.script(), it.returnAddressToFp());
             break;
           }
+          case JitFrame_IonStub:
+            JitSpew(JitSpew_IonInvalidate, "#%d ion stub frame @ %p", frameno, it.fp());
+            break;
           case JitFrame_BaselineStub:
             JitSpew(JitSpew_IonInvalidate, "#%d baseline stub frame @ %p", frameno, it.fp());
             break;
@@ -2714,6 +2668,7 @@ InvalidateActivation(FreeOp* fop, const JitActivationIterator& activations, bool
             JitSpew(JitSpew_IonInvalidate, "#%d rectifier frame @ %p", frameno, it.fp());
             break;
           case JitFrame_Unwound_IonJS:
+          case JitFrame_Unwound_IonStub:
           case JitFrame_Unwound_BaselineJS:
           case JitFrame_Unwound_BaselineStub:
           case JitFrame_Unwound_IonAccessorIC:
@@ -2809,6 +2764,7 @@ InvalidateActivation(FreeOp* fop, const JitActivationIterator& activations, bool
         // the call sequence causing the safepoint being >= the size of
         // a uint32, which is checked during safepoint index
         // construction.
+        AutoWritableJitCode awjc(ionCode);
         const SafepointIndex* si = ionScript->getSafepointIndex(it.returnAddressToFp());
         CodeLocationLabel dataLabelToMunge(it.returnAddressToFp());
         ptrdiff_t delta = ionScript->invalidateEpilogueDataOffset() -

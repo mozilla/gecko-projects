@@ -711,16 +711,6 @@ class LValue : public LInstructionHelper<BOX_PIECES, 0, 0>
     }
 };
 
-class LNurseryObject : public LInstructionHelper<1, 0, 0>
-{
-  public:
-    LIR_HEADER(NurseryObject);
-
-    MNurseryObject* mir() const {
-        return mir_->toNurseryObject();
-    }
-};
-
 // Clone an object literal such as we are not modifying the object contained in
 // the sources.
 class LCloneLiteral : public LCallInstructionHelper<1, 1, 0>
@@ -4195,6 +4185,30 @@ class LIncrementUnboxedArrayInitializedLength : public LInstructionHelper<0, 1, 
 
     const LAllocation* object() {
         return getOperand(0);
+    }
+};
+
+class LSetUnboxedArrayInitializedLength : public LInstructionHelper<0, 2, 1>
+{
+  public:
+    LIR_HEADER(SetUnboxedArrayInitializedLength)
+
+    explicit LSetUnboxedArrayInitializedLength(const LAllocation& object,
+                                               const LAllocation& length,
+                                               const LDefinition& temp) {
+        setOperand(0, object);
+        setOperand(1, length);
+        setTemp(0, temp);
+    }
+
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* length() {
+        return getOperand(1);
+    }
+    const LDefinition* temp() {
+        return getTemp(0);
     }
 };
 

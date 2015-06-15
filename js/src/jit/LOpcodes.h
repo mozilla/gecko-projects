@@ -217,6 +217,7 @@
     _(UnboxedArrayLength)           \
     _(UnboxedArrayInitializedLength) \
     _(IncrementUnboxedArrayInitializedLength) \
+    _(SetUnboxedArrayInitializedLength) \
     _(BoundsCheck)                  \
     _(BoundsCheckRange)             \
     _(BoundsCheckLower)             \
@@ -348,7 +349,6 @@
     _(AssertResultT)                \
     _(LexicalCheck)                 \
     _(ThrowUninitializedLexical)    \
-    _(NurseryObject)                \
     _(Debugger)                     \
     _(NewTarget)                    \
     _(ArrowNewTarget)

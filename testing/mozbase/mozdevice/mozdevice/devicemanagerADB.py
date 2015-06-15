@@ -134,11 +134,11 @@ class DeviceManagerADB(DeviceManager):
             args.extend(['-s', self._deviceSerial])
         args.extend(["shell", cmdline])
 
-        def _raise():
-            raise DMError("Timeout exceeded for shell call")
+        def _timeout():
+            self._logger.error("Timeout exceeded for shell call '%s'" % ' '.join(args))
 
         self._logger.debug("shell - command: %s" % ' '.join(args))
-        proc = ProcessHandler(args, processOutputLine=self._log, onTimeout=_raise)
+        proc = ProcessHandler(args, processOutputLine=self._log, onTimeout=_timeout)
 
         if not timeout:
             # We are asserting that all commands will complete in this time unless otherwise specified
@@ -539,9 +539,10 @@ class DeviceManagerADB(DeviceManager):
         self.uninstallApp(appName)
         self.reboot()
 
-    def _runCmd(self, args, retryLimit=None):
+    def _runCmd(self, args, timeout=None, retryLimit=None):
         """
         Runs a command using adb
+        If timeout is specified, the process is killed after <timeout> seconds.
 
         returns: instance of ProcessHandler
         """
@@ -555,11 +556,17 @@ class DeviceManagerADB(DeviceManager):
             finalArgs.extend(['-s', self._deviceSerial])
         finalArgs.extend(args)
         self._logger.debug("_runCmd - command: %s" % ' '.join(finalArgs))
+        if not timeout:
+            timeout = self.default_timeout
+
+        def _timeout():
+            self._logger.error("Timeout exceeded for _runCmd call '%s'" % ' '.join(finalArgs))
+
         retries = 0
         while retries < retryLimit:
             proc = ProcessHandler(finalArgs, storeOutput=True,
-                    processOutputLine=self._log)
-            proc.run()
+                    processOutputLine=self._log, onTimeout=_timeout)
+            proc.run(timeout=timeout)
             proc.returncode = proc.wait()
             if proc.returncode == None:
                 proc.kill()
@@ -591,10 +598,13 @@ class DeviceManagerADB(DeviceManager):
             # time unless otherwise specified
             timeout = self.default_timeout
 
+        def _timeout():
+            self._logger.error("Timeout exceeded for _checkCmd call '%s'" % ' '.join(finalArgs))
+
         timeout = int(timeout)
         retries = 0
         while retries < retryLimit:
-            proc = ProcessHandler(finalArgs, processOutputLine=self._log)
+            proc = ProcessHandler(finalArgs, processOutputLine=self._log, onTimeout=_timeout)
             proc.run(timeout=timeout)
             ret_code = proc.wait()
             if ret_code == None:

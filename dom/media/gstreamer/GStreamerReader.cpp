@@ -25,6 +25,7 @@ namespace mozilla {
 
 using namespace gfx;
 using namespace layers;
+using namespace media;
 
 // Un-comment to enable logging of seek bisections.
 //#define SEEK_LOGGING
@@ -373,6 +374,9 @@ nsresult GStreamerReader::ReadMetadata(MediaInfo* aInfo,
    * might be concurrent stream operations happening on both decoding and gstreamer
    * threads which will screw the GStreamer state machine.
    */
+  LOG(LogLevel::Debug, "content-type: %s %s",
+      mDecoder->GetResource()->GetContentType().get(),
+      mDecoder->GetResource()->GetContentURL().get());
   bool isMP3 = mDecoder->GetResource()->GetContentType().EqualsASCII(AUDIO_MP3);
   if (isMP3) {
     ParseMP3Headers();
@@ -470,10 +474,9 @@ nsresult GStreamerReader::ReadMetadata(MediaInfo* aInfo,
   if (isMP3 && mMP3FrameParser.IsMP3()) {
     // The MP3FrameParser has reported a duration; use that over the gstreamer
     // reported duration for inter-platform consistency.
-    ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
     mUseParserDuration = true;
     mLastParserDuration = mMP3FrameParser.GetDuration();
-    mDecoder->SetMediaDuration(mLastParserDuration);
+    mInfo.mMetadataDuration.emplace(TimeUnit::FromMicroseconds(mLastParserDuration));
   } else {
     LOG(LogLevel::Debug, "querying duration");
     // Otherwise use the gstreamer duration.
@@ -485,10 +488,9 @@ nsresult GStreamerReader::ReadMetadata(MediaInfo* aInfo,
     if (gst_element_query_duration(GST_ELEMENT(mPlayBin),
       &format, &duration) && format == GST_FORMAT_TIME) {
 #endif
-      ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
       LOG(LogLevel::Debug, "have duration %" GST_TIME_FORMAT, GST_TIME_ARGS(duration));
       duration = GST_TIME_AS_USECONDS (duration);
-      mDecoder->SetMediaDuration(duration);
+      mInfo.mMetadataDuration.emplace(TimeUnit::FromMicroseconds(duration));
     }
   }
 

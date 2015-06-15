@@ -491,7 +491,8 @@ public:
 
   // Outer windows only.
   virtual nsresult SetFullScreenInternal(bool aIsFullscreen, bool aFullscreenMode,
-                                         mozilla::gfx::VRHMDInfo *aHMD = nullptr) override;
+                                         mozilla::gfx::VRHMDInfo *aHMD = nullptr) override final;
+  virtual void FinishFullscreenChange(bool aIsFullscreen) override final;
   bool FullScreen() const;
 
   // Inner windows only.
@@ -1058,6 +1059,8 @@ public:
             bool aWrapAround, bool aWholeWord, bool aSearchInFrames,
             bool aShowDialog, mozilla::ErrorResult& aError);
   uint64_t GetMozPaintCount(mozilla::ErrorResult& aError);
+
+  bool ShouldResistFingerprinting();
 
   mozilla::dom::MozSelfSupport* GetMozSelfSupport(mozilla::ErrorResult& aError);
 

@@ -58,6 +58,8 @@ ToCharPtr(const FcChar8 *aStr)
 }
 
 FT_Library gfxFcPlatformFontList::sCairoFTLibrary = nullptr;
+FcChar8* gfxFcPlatformFontList::sSentinelFirstFamily = nullptr;
+
 static cairo_user_data_key_t sFcFontlistUserFontDataKey;
 
 // canonical name ==> first en name or first name if no en name
@@ -803,7 +805,7 @@ gfxFontconfigFontEntry::CopyFontTable(uint32_t aTableTag,
     if (FT_Load_Sfnt_Table(mFTFace, aTableTag, 0, nullptr, &length) != 0) {
         return NS_ERROR_NOT_AVAILABLE;
     }
-    if (!aBuffer.SetLength(length)) {
+    if (!aBuffer.SetLength(length, fallible)) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
     if (FT_Load_Sfnt_Table(mFTFace, aTableTag, 0, aBuffer.Elements(), &length) != 0) {
@@ -908,7 +910,10 @@ gfxFontconfigFont::GetGlyphRenderingOptions(const TextRunDrawParams* aRunParams)
 #endif
 
 gfxFcPlatformFontList::gfxFcPlatformFontList()
-    : mLocalNames(64), mGenericMappings(32), mLastConfig(nullptr)
+    : mLocalNames(64)
+    , mGenericMappings(32)
+    , mFcSubstituteCache(64)
+    , mLastConfig(nullptr)
 {
     // if the rescan interval is set, start the timer
     int rescanInterval = FcConfigGetRescanInterval(nullptr);
@@ -1034,6 +1039,8 @@ gfxFcPlatformFontList::InitFontList()
 
     mLocalNames.Clear();
     mGenericMappings.Clear();
+    mFcSubstituteCache.Clear();
+    sSentinelFirstFamily = nullptr;
 
     // iterate over available fonts
     FcFontSet* systemFonts = FcConfigGetFonts(nullptr, FcSetSystem);
@@ -1046,6 +1053,7 @@ gfxFcPlatformFontList::InitFontList()
 #endif
 
     mOtherFamilyNamesInitialized = true;
+
     return NS_OK;
 }
 
@@ -1236,22 +1244,29 @@ gfxFcPlatformFontList::FindFamily(const nsAString& aFamily,
     // In this case fontconfig is including Tex Gyre Heros and
     // Nimbus Sans L as alternatives for Helvetica.
 
-    // substitutions for serif pattern
+    // Because the FcConfigSubstitute call is quite expensive, we cache the
+    // actual font family found via this process. So check the cache first:
+    NS_ConvertUTF16toUTF8 familyToFind(familyName);
+    gfxFontFamily* cached = mFcSubstituteCache.GetWeak(familyToFind);
+    if (cached) {
+        return cached;
+    }
+
     const FcChar8* kSentinelName = ToFcChar8Ptr("-moz-sentinel");
-    nsAutoRef<FcPattern> sentinelSubst(FcPatternCreate());
-    FcPatternAddString(sentinelSubst, FC_FAMILY, kSentinelName);
-    FcConfigSubstitute(nullptr, sentinelSubst, FcMatchPattern);
-    FcChar8* sentinelFirstFamily = nullptr;
-    FcPatternGetString(sentinelSubst, FC_FAMILY, 0, &sentinelFirstFamily);
+    if (!sSentinelFirstFamily) {
+        nsAutoRef<FcPattern> sentinelSubst(FcPatternCreate());
+        FcPatternAddString(sentinelSubst, FC_FAMILY, kSentinelName);
+        FcConfigSubstitute(nullptr, sentinelSubst, FcMatchPattern);
+        FcPatternGetString(sentinelSubst, FC_FAMILY, 0, &sSentinelFirstFamily);
+    }
 
     // substitutions for font, -moz-sentinel pattern
     nsAutoRef<FcPattern> fontWithSentinel(FcPatternCreate());
-    NS_ConvertUTF16toUTF8 familyToFind(familyName);
     FcPatternAddString(fontWithSentinel, FC_FAMILY, ToFcChar8Ptr(familyToFind.get()));
     FcPatternAddString(fontWithSentinel, FC_FAMILY, kSentinelName);
     FcConfigSubstitute(nullptr, fontWithSentinel, FcMatchPattern);
 
-    // iterate through substitutions until hitting the first serif font
+    // iterate through substitutions until hitting the sentinel
     FcChar8* substName = nullptr;
     for (int i = 0;
          FcPatternGetString(fontWithSentinel, FC_FAMILY,
@@ -1259,11 +1274,15 @@ gfxFcPlatformFontList::FindFamily(const nsAString& aFamily,
          i++)
     {
         NS_ConvertUTF8toUTF16 subst(ToCharPtr(substName));
-        if (sentinelFirstFamily && FcStrCmp(substName, sentinelFirstFamily) == 0) {
+        if (sSentinelFirstFamily &&
+            FcStrCmp(substName, sSentinelFirstFamily) == 0) {
             break;
         }
         gfxFontFamily* foundFamily = gfxPlatformFontList::FindFamily(subst);
         if (foundFamily) {
+            // We've figured out what family the given name maps to, after any
+            // fontconfig subsitutions. Cache it to speed up future lookups.
+            mFcSubstituteCache.Put(familyToFind, foundFamily);
             return foundFamily;
         }
     }

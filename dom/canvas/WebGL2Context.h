@@ -324,6 +324,7 @@ public:
     void BindBufferBase(GLenum target, GLuint index, WebGLBuffer* buffer);
     void BindBufferRange(GLenum target, GLuint index, WebGLBuffer* buffer, GLintptr offset, GLsizeiptr size);
 */
+    virtual JS::Value GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv) override;
     void GetIndexedParameter(GLenum target, GLuint index,
                              dom::Nullable<dom::OwningWebGLBufferOrLongLong>& retval);
     void GetUniformIndices(WebGLProgram* program,
@@ -365,10 +366,11 @@ private:
                                 GLsizei width, GLsizei height, GLsizei depth,
                                 const char* info);
 
+    // CreateVertexArrayImpl is assumed to be infallible.
+    virtual WebGLVertexArray* CreateVertexArrayImpl() override;
     virtual bool ValidateAttribPointerType(bool integerMode, GLenum type, GLsizei* alignment, const char* info) override;
     virtual bool ValidateBufferTarget(GLenum target, const char* info) override;
     virtual bool ValidateBufferIndexedTarget(GLenum target, const char* info) override;
-    virtual bool ValidateBufferForTarget(GLenum target, WebGLBuffer* buffer, const char* info) override;
     virtual bool ValidateBufferUsageEnum(GLenum usage, const char* info) override;
     virtual bool ValidateQueryTarget(GLenum target, const char* info) override;
     virtual bool ValidateUniformMatrixTranspose(bool transpose, const char* info) override;

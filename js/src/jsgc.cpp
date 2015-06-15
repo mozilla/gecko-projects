@@ -3004,7 +3004,7 @@ SliceBudget::describe(char* buffer, size_t maxlen) const
 {
     if (isUnlimited())
         return JS_snprintf(buffer, maxlen, "unlimited");
-    else if (deadline == 0)
+    else if (isWorkBudget())
         return JS_snprintf(buffer, maxlen, "work(%lld)", workBudget.budget);
     else
         return JS_snprintf(buffer, maxlen, "%lldms", timeBudget.budget);
@@ -3680,7 +3680,9 @@ class CompartmentCheckTracer : public JS::CallbackTracer
     void trace(void** thingp, JS::TraceKind kind) override;
 
   public:
-    explicit CompartmentCheckTracer(JSRuntime* rt) : JS::CallbackTracer(rt) {}
+    explicit CompartmentCheckTracer(JSRuntime* rt)
+      : JS::CallbackTracer(rt), src(nullptr), zone(nullptr), compartment(nullptr)
+    {}
 
     Cell* src;
     JS::TraceKind srcKind;
@@ -4055,6 +4057,25 @@ GCRuntime::markAllGrayReferences(gcstats::Phase phase)
 }
 
 #ifdef DEBUG
+
+struct GCChunkHasher {
+    typedef gc::Chunk* Lookup;
+
+    /*
+     * Strip zeros for better distribution after multiplying by the golden
+     * ratio.
+     */
+    static HashNumber hash(gc::Chunk* chunk) {
+        MOZ_ASSERT(!(uintptr_t(chunk) & gc::ChunkMask));
+        return HashNumber(uintptr_t(chunk) >> gc::ChunkShift);
+    }
+
+    static bool match(gc::Chunk* k, gc::Chunk* l) {
+        MOZ_ASSERT(!(uintptr_t(k) & gc::ChunkMask));
+        MOZ_ASSERT(!(uintptr_t(l) & gc::ChunkMask));
+        return k == l;
+    }
+};
 
 class js::gc::MarkingValidator
 {
@@ -7350,7 +7371,7 @@ NewMemoryInfoObject(JSContext* cx)
     RootedObject obj(cx, JS_NewObject(cx, nullptr));
 
     using namespace MemInfo;
-    struct {
+    struct NamedGetter {
         const char* name;
         JSNative getter;
     } getters[] = {
@@ -7364,13 +7385,13 @@ NewMemoryInfoObject(JSContext* cx)
         { "minorGCCount", MinorGCCountGetter }
     };
 
-    for (size_t i = 0; i < mozilla::ArrayLength(getters); i++) {
- #ifdef JS_MORE_DETERMINISTIC
+    for (auto pair : getters) {
+#ifdef JS_MORE_DETERMINISTIC
         JSNative getter = DummyGetter;
 #else
-        JSNative getter = getters[i].getter;
+        JSNative getter = pair.getter;
 #endif
-        if (!JS_DefineProperty(cx, obj, getters[i].name, UndefinedHandleValue,
+        if (!JS_DefineProperty(cx, obj, pair.name, UndefinedHandleValue,
                                JSPROP_ENUMERATE | JSPROP_SHARED,
                                getter, nullptr))
         {
@@ -7385,7 +7406,7 @@ NewMemoryInfoObject(JSContext* cx)
     if (!JS_DefineProperty(cx, obj, "zone", zoneObj, JSPROP_ENUMERATE))
         return nullptr;
 
-    struct {
+    struct NamedZoneGetter {
         const char* name;
         JSNative getter;
     } zoneGetters[] = {
@@ -7399,13 +7420,13 @@ NewMemoryInfoObject(JSContext* cx)
         { "gcNumber", ZoneGCNumberGetter }
     };
 
-    for (size_t i = 0; i < mozilla::ArrayLength(zoneGetters); i++) {
+    for (auto pair : zoneGetters) {
  #ifdef JS_MORE_DETERMINISTIC
         JSNative getter = DummyGetter;
 #else
-        JSNative getter = zoneGetters[i].getter;
+        JSNative getter = pair.getter;
 #endif
-        if (!JS_DefineProperty(cx, zoneObj, zoneGetters[i].name, UndefinedHandleValue,
+        if (!JS_DefineProperty(cx, zoneObj, pair.name, UndefinedHandleValue,
                                JSPROP_ENUMERATE | JSPROP_SHARED,
                                getter, nullptr))
         {

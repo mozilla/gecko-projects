@@ -338,6 +338,13 @@ loop.roomViews = (function(mozL10n) {
         }
       }
 
+      // Make sure we do not show the edit-mode when we just successfully saved
+      // context.
+      if (this.props.savingContext && nextProps.savingContext !== this.props.savingContext &&
+        !nextProps.error && this.state.editMode) {
+        newState.editMode = false;
+      }
+
       if (Object.getOwnPropertyNames(newState).length) {
         this.setState(newState);
       }
@@ -345,7 +352,7 @@ loop.roomViews = (function(mozL10n) {
 
     getDefaultProps: function() {
       return { editMode: false };
-     },
+    },
 
     getInitialState: function() {
       var url = this._getURL();
@@ -473,7 +480,7 @@ loop.roomViews = (function(mozL10n) {
       }
 
       var url = this._getURL();
-      var thumbnail = url && url.thumbnail || "";
+      var thumbnail = url && url.thumbnail || "loop/shared/img/icons-16x16.svg#globe";
       var urlDescription = url && url.description || "";
       var location = url && url.location || "";
       var locationData = null;
@@ -528,7 +535,7 @@ loop.roomViews = (function(mozL10n) {
             <button className="btn btn-info"
                     disabled={this.props.savingContext}
                     onClick={this.handleFormSubmit}>
-              {mozL10n.get("context_save_label")}
+              {mozL10n.get("context_save_label2")}
             </button>
             <button className="room-context-btn-close"
                     onClick={this.handleCloseClick}
@@ -546,7 +553,7 @@ loop.roomViews = (function(mozL10n) {
           <div className="room-context-label">{mozL10n.get("context_inroom_label")}</div>
           <div className="room-context-content"
                onClick={this.handleContextClick}>
-            <img className="room-context-thumbnail" src={thumbnail}/>
+            <img className="room-context-thumbnail" src={thumbnail} />
             <div className="room-context-description"
                  title={urlDescription}>
               {this._truncate(urlDescription)}
@@ -579,7 +586,10 @@ loop.roomViews = (function(mozL10n) {
 
     propTypes: {
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
-      mozLoop: React.PropTypes.object.isRequired
+      mozLoop: React.PropTypes.object.isRequired,
+      // The poster URLs are for UI-showcase testing and development.
+      localPosterUrl: React.PropTypes.string,
+      remotePosterUrl: React.PropTypes.string
     },
 
     componentWillUpdate: function(nextProps, nextState) {
@@ -591,10 +601,7 @@ loop.roomViews = (function(mozL10n) {
         this.props.dispatcher.dispatch(new sharedActions.SetupStreamElements({
           publisherConfig: this.getDefaultPublisherConfig({
             publishVideo: !this.state.videoMuted
-          }),
-          getLocalElementFunc: this._getElement.bind(this, ".local"),
-          getScreenShareElementFunc: this._getElement.bind(this, ".screen"),
-          getRemoteElementFunc: this._getElement.bind(this, ".remote")
+          })
         }));
       }
     },
@@ -633,6 +640,40 @@ loop.roomViews = (function(mozL10n) {
         this.props.mozLoop.getLoopPref("contextInConversations.enabled") &&
         (this.state.roomContextUrls || this.state.roomDescription)
       );
+    },
+
+    /**
+     * Works out if remote video should be rended or not, depending on the
+     * room state and other flags.
+     *
+     * @return {Boolean} True if remote video should be rended.
+     */
+    shouldRenderRemoteVideo: function() {
+      switch(this.state.roomState) {
+        case ROOM_STATES.HAS_PARTICIPANTS:
+          if (this.state.remoteVideoEnabled) {
+            return true;
+          }
+
+          if (this.state.mediaConnected) {
+            // since the remoteVideo hasn't yet been enabled, if the
+            // media is connected, then we should be displaying an avatar.
+            return false;
+          }
+
+          return true;
+
+        case ROOM_STATES.SESSION_CONNECTED:
+        case ROOM_STATES.JOINED:
+          // this case is so that we don't show an avatar while waiting for
+          // the other party to connect
+          return true;
+
+        default:
+          console.warn("StandaloneRoomView.shouldRenderRemoteVideo:" +
+            " unexpected roomState: ", this.state.roomState);
+          return true;
+      }
     },
 
     render: function() {
@@ -674,9 +715,9 @@ loop.roomViews = (function(mozL10n) {
           );
         }
         default: {
+
           return (
             <div className="room-conversation-wrapper">
-              <sharedViews.TextChatView dispatcher={this.props.dispatcher} />
               <DesktopRoomInvitationView
                 dispatcher={this.props.dispatcher}
                 error={this.state.error}
@@ -690,10 +731,19 @@ loop.roomViews = (function(mozL10n) {
                 <div className="conversation room-conversation">
                   <div className="media nested">
                     <div className="video_wrapper remote_wrapper">
-                      <div className="video_inner remote focus-stream"></div>
+                      <div className="video_inner remote focus-stream">
+                        <sharedViews.MediaView displayAvatar={!this.shouldRenderRemoteVideo()}
+                          posterUrl={this.props.remotePosterUrl}
+                          mediaType="remote"
+                          srcVideoObject={this.state.remoteSrcVideoObject} />
+                      </div>
                     </div>
-                    <div className={localStreamClasses}></div>
-                    <div className="screen hide"></div>
+                    <div className={localStreamClasses}>
+                      <sharedViews.MediaView displayAvatar={this.state.videoMuted}
+                        posterUrl={this.props.localPosterUrl}
+                        mediaType="local"
+                        srcVideoObject={this.state.localSrcVideoObject} />
+                    </div>
                   </div>
                   <sharedViews.ConversationToolbar
                     dispatcher={this.props.dispatcher}
@@ -711,6 +761,7 @@ loop.roomViews = (function(mozL10n) {
                 mozLoop={this.props.mozLoop}
                 roomData={roomData}
                 show={!shouldRenderInvitationOverlay && shouldRenderContextView} />
+              <sharedViews.TextChatView dispatcher={this.props.dispatcher} />
             </div>
           );
         }

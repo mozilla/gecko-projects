@@ -73,11 +73,8 @@
 #include "SurfaceCache.h"
 #include "gfxPrefs.h"
 
-#if defined(MOZ_CRASHREPORTER)
-#include "nsExceptionHandler.h"
-#endif
-
 #include "VsyncSource.h"
+#include "DriverInitCrashDetection.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -652,6 +649,11 @@ void
 gfxWindowsPlatform::VerifyD2DDevice(bool aAttemptForce)
 {
 #ifdef CAIRO_HAS_D2D_SURFACE
+    DriverInitCrashDetection detectCrashes;
+    if (detectCrashes.DisableAcceleration()) {
+      return;
+    }
+
     if (mD2DDevice) {
         ID3D10Device1 *device = cairo_d2d_device_get_device(mD2DDevice);
 
@@ -1715,16 +1717,12 @@ bool DoesD3D11DeviceWork(ID3D11Device *device)
     gfxWindowsPlatform::GetDLLVersion(L"dlumd32.dll", displayLinkModuleVersionString);
     uint64_t displayLinkModuleVersion;
     if (!ParseDriverVersion(displayLinkModuleVersionString, &displayLinkModuleVersion)) {
-#if defined(MOZ_CRASHREPORTER)
-      CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("DisplayLink: could not parse version\n"));
-#endif
+      gfxCriticalError() << "DisplayLink: could not parse version";
       gANGLESupportsD3D11 = false;
       return false;
     }
     if (displayLinkModuleVersion <= V(8,6,1,36484)) {
-#if defined(MOZ_CRASHREPORTER)
-      CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("DisplayLink: too old version\n"));
-#endif
+      gfxCriticalError(CriticalLog::DefaultOptions(false)) << "DisplayLink: too old version";
       gANGLESupportsD3D11 = false;
       return false;
     }
@@ -1756,9 +1754,7 @@ bool DoesD3D11TextureSharingWorkInternal(ID3D11Device *device, DXGI_FORMAT forma
       gfxInfo->GetAdapterVendorID(vendorID);
       gfxInfo->GetAdapterVendorID2(vendorID2);
       if (vendorID.EqualsLiteral("0x8086") && vendorID2.IsEmpty()) {
-#if defined(MOZ_CRASHREPORTER)
-        CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("Unexpected Intel/AMD dual-GPU setup\n"));
-#endif
+        gfxCriticalError(CriticalLog::DefaultOptions(false)) << "Unexpected Intel/AMD dual-GPU setup";
         return false;
       }
     }
@@ -1798,6 +1794,7 @@ bool DoesD3D11TextureSharingWorkInternal(ID3D11Device *device, DXGI_FORMAT forma
   if (FAILED(device->OpenSharedResource(shareHandle, __uuidof(ID3D11Resource),
                                         getter_AddRefs(sharedResource))))
   {
+    gfxCriticalError(CriticalLog::DefaultOptions(false)) << "OpenSharedResource failed for format " << format;
     return false;
   }
 
@@ -1811,9 +1808,7 @@ bool DoesD3D11TextureSharingWorkInternal(ID3D11Device *device, DXGI_FORMAT forma
 
   // This if(FAILED()) is the one that actually fails on systems affected by bug 1083071.
   if (FAILED(device->CreateShaderResourceView(sharedTexture, NULL, byRef(sharedView)))) {
-#if defined(MOZ_CRASHREPORTER)
-    CrashReporter::AppendAppNotesToCrashReport(NS_LITERAL_CSTRING("CreateShaderResourceView failed\n"));
-#endif
+    gfxCriticalError(CriticalLog::DefaultOptions(false)) << "CreateShaderResourceView failed for format" << format;
     return false;
   }
 
@@ -1833,6 +1828,27 @@ bool DoesD3D11TextureSharingWork(ID3D11Device *device)
   return result;
 }
 
+bool DoesD3D11AlphaTextureSharingWork(ID3D11Device *device)
+{
+  nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
+  if (gfxInfo) {
+    // A8 texture sharing crashes on this intel driver version (and no others)
+    // so just avoid using it in that case.
+    nsString adapterVendor;
+    nsString driverVersion;
+    gfxInfo->GetAdapterVendorID(adapterVendor);
+    gfxInfo->GetAdapterDriverVersion(driverVersion);
+
+    nsAString &intelVendorID = (nsAString &)GfxDriverInfo::GetDeviceVendor(VendorIntel);
+    if (adapterVendor.Equals(intelVendorID, nsCaseInsensitiveStringComparator()) &&
+        driverVersion.Equals(NS_LITERAL_STRING("8.15.10.2086"))) {
+      return false;
+    }
+  }
+
+  return DoesD3D11TextureSharingWorkInternal(device, DXGI_FORMAT_A8_UNORM, D3D11_BIND_SHADER_RESOURCE);
+}
+
 void
 gfxWindowsPlatform::InitD3D11Devices()
 {
@@ -1847,7 +1863,8 @@ gfxWindowsPlatform::InitD3D11Devices()
 
   MOZ_ASSERT(!mD3D11Device); 
 
-  if (InSafeMode()) {
+  DriverInitCrashDetection detectCrashes;
+  if (InSafeMode() || detectCrashes.DisableAcceleration()) {
     return;
   }
 
@@ -1927,6 +1944,8 @@ gfxWindowsPlatform::InitD3D11Devices()
                              featureLevels.Elements(), featureLevels.Length(),
                              D3D11_SDK_VERSION, byRef(mD3D11Device), nullptr, nullptr);
     } MOZ_SEH_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
+      gfxCriticalError() << "Crash during D3D11 device creation";
+
       if (gfxPrefs::LayersD3D11DisableWARP()) {
         return;
       }
@@ -1936,6 +1955,7 @@ gfxWindowsPlatform::InitD3D11Devices()
     }
 
     if (FAILED(hr) || !DoesD3D11DeviceWork(mD3D11Device)) {
+      gfxCriticalError() << "D3D11 device creation failed" << hexa(hr);
       if (gfxPrefs::LayersD3D11DisableWARP()) {
         return;
       }
@@ -1963,7 +1983,7 @@ gfxWindowsPlatform::InitD3D11Devices()
 
       if (FAILED(hr)) {
         // This should always succeed... in theory.
-        gfxCriticalError() << "Failed to initialize WARP D3D11 device!" << hr;
+        gfxCriticalError() << "Failed to initialize WARP D3D11 device! " << hexa(hr);
         return;
       }
 
@@ -2022,7 +2042,7 @@ gfxWindowsPlatform::InitD3D11Devices()
 
     mD3D11ImageBridgeDevice->SetExceptionMode(0);
 
-    if (!DoesD3D11TextureSharingWorkInternal(mD3D11ImageBridgeDevice, DXGI_FORMAT_A8_UNORM, D3D11_BIND_SHADER_RESOURCE)) {
+    if (!DoesD3D11AlphaTextureSharingWork(mD3D11ImageBridgeDevice)) {
       mD3D11ImageBridgeDevice = nullptr;
     }
   }

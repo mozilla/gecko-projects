@@ -92,6 +92,7 @@
 #include "nsHostObjectProtocolHandler.h"
 #include "nsHtml5Module.h"
 #include "nsHtml5StringParser.h"
+#include "nsIAppShell.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsICategoryManager.h"
 #include "nsIChannelEventSink.h"
@@ -182,6 +183,7 @@
 #include "nsUnicodeProperties.h"
 #include "nsViewManager.h"
 #include "nsViewportInfo.h"
+#include "nsWidgetsCID.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsXULPopupManager.h"
 #include "xpcprivate.h" // nsXPConnect
@@ -253,6 +255,7 @@ bool nsContentUtils::sIsResourceTimingEnabled = false;
 bool nsContentUtils::sIsUserTimingLoggingEnabled = false;
 bool nsContentUtils::sIsExperimentalAutocompleteEnabled = false;
 bool nsContentUtils::sEncodeDecodeURLHash = false;
+bool nsContentUtils::sPrivacyResistFingerprinting = false;
 
 uint32_t nsContentUtils::sHandlingInputTimeout = 1000;
 
@@ -336,6 +339,7 @@ namespace {
 
 static NS_DEFINE_CID(kParserServiceCID, NS_PARSERSERVICE_CID);
 static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 static PLDHashTable* sEventListenerManagersHash;
 
@@ -532,6 +536,9 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sEncodeDecodeURLHash,
                                "dom.url.encode_decode_hash", false);
+
+  Preferences::AddBoolVarCache(&sPrivacyResistFingerprinting,
+                               "privacy.resistFingerprinting", false);
 
   Preferences::AddUintVarCache(&sHandlingInputTimeout,
                                "dom.event.handling-user-input-time-limit",
@@ -1987,6 +1994,16 @@ nsContentUtils::IsCallerChrome()
 
   // If the check failed, look for UniversalXPConnect on the cx compartment.
   return xpc::IsUniversalXPConnectEnabled(GetCurrentJSContext());
+}
+
+bool
+nsContentUtils::ShouldResistFingerprinting(nsIDocShell* aDocShell)
+{
+  if (!aDocShell) {
+    return false;
+  }
+  bool isChrome = nsContentUtils::IsChromeDoc(aDocShell->GetDocument());
+  return !isChrome && sPrivacyResistFingerprinting;
 }
 
 namespace mozilla {
@@ -5134,6 +5151,20 @@ nsContentUtils::AddScriptRunner(nsIRunnable* aRunnable)
   return true;
 }
 
+/* static */
+void
+nsContentUtils::RunInStableState(already_AddRefed<nsIRunnable> aRunnable,
+                                 DispatchFailureHandling aHandling)
+{
+  nsCOMPtr<nsIRunnable> runnable = aRunnable;
+  nsCOMPtr<nsIAppShell> appShell(do_GetService(kAppShellCID));
+  if (!appShell) {
+    MOZ_ASSERT(aHandling == DispatchFailureHandling::IgnoreFailure);
+    return;
+  }
+  appShell->RunInStableState(runnable.forget());
+}
+
 void
 nsContentUtils::EnterMicroTask()
 {
@@ -7400,7 +7431,9 @@ nsContentUtils::GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
                                size_t* aLength, int32_t* aStride)
 {
   mozilla::gfx::DataSourceSurface::MappedSurface map;
-  aSurface->Map(mozilla::gfx::DataSourceSurface::MapType::READ, &map);
+  if (NS_WARN_IF(!aSurface->Map(mozilla::gfx::DataSourceSurface::MapType::READ, &map))) {
+    return nullptr;
+  }
   mozilla::gfx::IntSize size = aSurface->GetSize();
   mozilla::CheckedInt32 requiredBytes =
     mozilla::CheckedInt32(map.mStride) * mozilla::CheckedInt32(size.height);
@@ -7772,4 +7805,17 @@ nsContentUtils::FirePageShowEvent(nsIDocShellTreeItem* aItem,
   if (doc->IsShowing() == aFireIfShowing) {
     doc->OnPageShow(true, aChromeEventHandler);
   }
+}
+
+/* static */
+already_AddRefed<nsPIWindowRoot>
+nsContentUtils::GetWindowRoot(nsIDocument* aDoc)
+{
+  if (aDoc) {
+    nsPIDOMWindow* win = aDoc->GetWindow();
+    if (win) {
+      return win->GetTopWindowRoot();
+    }
+  }
+  return nullptr;
 }

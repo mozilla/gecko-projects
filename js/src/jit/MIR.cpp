@@ -641,17 +641,20 @@ MDefinition::emptyResultTypeSet() const
 }
 
 MConstant*
-MConstant::New(TempAllocator& alloc, const Value& v, CompilerConstraintList* constraints)
+MConstant::New(TempAllocator& alloc, const Value& v,
+               CompilerConstraintList* constraints, MIRGenerator* gen)
 {
-    return new(alloc) MConstant(v, constraints);
+    return new(alloc) MConstant(v, constraints, gen);
 }
 
 MConstant*
-MConstant::NewTypedValue(TempAllocator& alloc, const Value& v, MIRType type, CompilerConstraintList* constraints)
+MConstant::NewTypedValue(TempAllocator& alloc, const Value& v, MIRType type,
+                         CompilerConstraintList* constraints, MIRGenerator* gen)
 {
     MOZ_ASSERT(!IsSimdType(type));
-    MOZ_ASSERT_IF(type == MIRType_Float32, IsNaN(v.toDouble()) || v.toDouble() == double(float(v.toDouble())));
-    MConstant* constant = new(alloc) MConstant(v, constraints);
+    MOZ_ASSERT_IF(type == MIRType_Float32,
+                  IsNaN(v.toDouble()) || v.toDouble() == double(float(v.toDouble())));
+    MConstant* constant = new(alloc) MConstant(v, constraints, gen);
     constant->setResultType(type);
     return constant;
 }
@@ -665,9 +668,9 @@ MConstant::NewAsmJS(TempAllocator& alloc, const Value& v, MIRType type)
 }
 
 MConstant*
-MConstant::NewConstraintlessObject(TempAllocator& alloc, JSObject* v)
+MConstant::NewConstraintlessObject(TempAllocator& alloc, JSObject* v, MIRGenerator* gen)
 {
-    return new(alloc) MConstant(v);
+    return new(alloc) MConstant(v, gen);
 }
 
 static TemporaryTypeSet*
@@ -703,14 +706,15 @@ MakeUnknownTypeSet()
     return alloc->new_<TemporaryTypeSet>(alloc, TypeSet::UnknownType());
 }
 
-MConstant::MConstant(const js::Value& vp, CompilerConstraintList* constraints)
+MConstant::MConstant(const js::Value& vp, CompilerConstraintList* constraints, MIRGenerator* gen)
   : value_(vp)
 {
     setResultType(MIRTypeFromValue(vp));
     if (vp.isObject()) {
         // Create a singleton type set for the object. This isn't necessary for
         // other types as the result type encodes all needed information.
-        MOZ_ASSERT(!IsInsideNursery(&vp.toObject()));
+        MOZ_ASSERT(gen);
+        MOZ_ASSERT_IF(IsInsideNursery(&vp.toObject()), !gen->safeForMinorGC());
         setResultTypeSet(MakeSingletonTypeSet(constraints, &vp.toObject()));
     }
     if (vp.isMagic() && vp.whyMagic() == JS_UNINITIALIZED_LEXICAL) {
@@ -729,10 +733,11 @@ MConstant::MConstant(const js::Value& vp, CompilerConstraintList* constraints)
     setMovable();
 }
 
-MConstant::MConstant(JSObject* obj)
+MConstant::MConstant(JSObject* obj, MIRGenerator* gen)
   : value_(ObjectValue(*obj))
 {
-    MOZ_ASSERT(!IsInsideNursery(obj));
+    MOZ_ASSERT(gen);
+    MOZ_ASSERT_IF(IsInsideNursery(obj), !gen->safeForMinorGC());
     setResultType(MIRType_Object);
     setMovable();
 }
@@ -775,12 +780,12 @@ MConstant::printOpcode(GenericPrinter& out) const
         out.printf("0x%x", value().toInt32());
         break;
       case MIRType_Double:
-        out.printf("%f", value().toDouble());
+        out.printf("%.16g", value().toDouble());
         break;
       case MIRType_Float32:
       {
         float val = value().toDouble();
-        out.printf("%f", val);
+        out.printf("%.16g", val);
         break;
       }
       case MIRType_Object:
@@ -840,39 +845,6 @@ MConstant::canProduceFloat32() const
     if (type() == MIRType_Double)
         return IsFloat32Representable(value_.toDouble());
     return true;
-}
-
-MNurseryObject::MNurseryObject(JSObject* obj, uint32_t index, CompilerConstraintList* constraints)
-  : index_(index)
-{
-    setResultType(MIRType_Object);
-
-    MOZ_ASSERT(IsInsideNursery(obj));
-    MOZ_ASSERT(!obj->isSingleton());
-    setResultTypeSet(MakeSingletonTypeSet(constraints, obj));
-
-    setMovable();
-}
-
-MNurseryObject*
-MNurseryObject::New(TempAllocator& alloc, JSObject* obj, uint32_t index,
-                    CompilerConstraintList* constraints)
-{
-    return new(alloc) MNurseryObject(obj, index, constraints);
-}
-
-HashNumber
-MNurseryObject::valueHash() const
-{
-    return HashNumber(index_);
-}
-
-bool
-MNurseryObject::congruentTo(const MDefinition* ins) const
-{
-    if (!ins->isNurseryObject())
-        return false;
-    return ins->toNurseryObject()->index_ == index_;
 }
 
 MDefinition*
@@ -1076,7 +1048,7 @@ void
 MLoadUnboxedScalar::printOpcode(GenericPrinter& out) const
 {
     MDefinition::printOpcode(out);
-    out.printf(" %s", ScalarTypeDescr::typeName(indexType()));
+    out.printf(" %s", ScalarTypeDescr::typeName(storageType()));
 }
 
 void
@@ -3929,20 +3901,75 @@ MCreateThisWithTemplate::canRecoverOnBailout() const
     return true;
 }
 
-MObjectState::MObjectState(MDefinition* obj)
+bool
+OperandIndexMap::init(TempAllocator& alloc, JSObject* templateObject)
+{
+    const UnboxedLayout& layout =
+        templateObject->as<UnboxedPlainObject>().layoutDontCheckGeneration();
+
+    // 0 is used as an error code.
+    const UnboxedLayout::PropertyVector& properties = layout.properties();
+    MOZ_ASSERT(properties.length() < 255);
+
+    // Allocate an array of indexes, where the top of each field correspond to
+    // the index of the operand in the MObjectState instance.
+    if (!map.init(alloc, layout.size()))
+        return false;
+
+    // Reset all indexes to 0, which is an error code.
+    for (size_t i = 0; i < map.length(); i++)
+        map[i] = 0;
+
+    // Map the property offsets to the indexes of MObjectState operands.
+    uint8_t index = 1;
+    for (size_t i = 0; i < properties.length(); i++, index++)
+        map[properties[i].offset] = index;
+
+    return true;
+}
+
+MObjectState::MObjectState(MObjectState* state)
+  : numSlots_(state->numSlots_),
+    numFixedSlots_(state->numFixedSlots_),
+    operandIndex_(state->operandIndex_)
 {
     // This instruction is only used as a summary for bailout paths.
     setResultType(MIRType_Object);
     setRecoveredOnBailout();
-    NativeObject* templateObject = nullptr;
+}
+
+MObjectState::MObjectState(JSObject *templateObject, OperandIndexMap* operandIndex)
+{
+    // This instruction is only used as a summary for bailout paths.
+    setResultType(MIRType_Object);
+    setRecoveredOnBailout();
+
+    if (templateObject->is<NativeObject>()) {
+        NativeObject* nativeObject = &templateObject->as<NativeObject>();
+        numSlots_ = nativeObject->slotSpan();
+        numFixedSlots_ = nativeObject->numFixedSlots();
+    } else {
+        const UnboxedLayout& layout =
+            templateObject->as<UnboxedPlainObject>().layoutDontCheckGeneration();
+        // Same as UnboxedLayout::makeNativeGroup
+        numSlots_ = layout.properties().length();
+        numFixedSlots_ = gc::GetGCKindSlots(layout.getAllocKind());
+    }
+
+    operandIndex_ = operandIndex;
+}
+
+JSObject*
+MObjectState::templateObjectOf(MDefinition* obj)
+{
     if (obj->isNewObject())
-        templateObject = &obj->toNewObject()->templateObject()->as<PlainObject>();
+        return obj->toNewObject()->templateObject();
     else if (obj->isCreateThisWithTemplate())
-        templateObject = &obj->toCreateThisWithTemplate()->templateObject()->as<PlainObject>();
+        return obj->toCreateThisWithTemplate()->templateObject();
     else
-        templateObject = obj->toNewCallObject()->templateObject();
-    numSlots_ = templateObject->slotSpan();
-    numFixedSlots_ = templateObject->numFixedSlots();
+        return obj->toNewCallObject()->templateObject();
+
+    return nullptr;
 }
 
 bool
@@ -3958,7 +3985,17 @@ MObjectState::init(TempAllocator& alloc, MDefinition* obj)
 MObjectState*
 MObjectState::New(TempAllocator& alloc, MDefinition* obj, MDefinition* undefinedVal)
 {
-    MObjectState* res = new(alloc) MObjectState(obj);
+    JSObject* templateObject = templateObjectOf(obj);
+    MOZ_ASSERT(templateObject, "Unexpected object creation.");
+
+    OperandIndexMap* operandIndex = nullptr;
+    if (templateObject->is<UnboxedPlainObject>()) {
+        operandIndex = new(alloc) OperandIndexMap;
+        if (!operandIndex || !operandIndex->init(alloc, templateObject))
+            return nullptr;
+    }
+
+    MObjectState* res = new(alloc) MObjectState(templateObject, operandIndex);
     if (!res || !res->init(alloc, obj))
         return nullptr;
     for (size_t i = 0; i < res->numSlots(); i++)
@@ -3969,9 +4006,8 @@ MObjectState::New(TempAllocator& alloc, MDefinition* obj, MDefinition* undefined
 MObjectState*
 MObjectState::Copy(TempAllocator& alloc, MObjectState* state)
 {
-    MDefinition* obj = state->object();
-    MObjectState* res = new(alloc) MObjectState(obj);
-    if (!res || !res->init(alloc, obj))
+    MObjectState* res = new(alloc) MObjectState(state);
+    if (!res || !res->init(alloc, state->object()))
         return nullptr;
     for (size_t i = 0; i < res->numSlots(); i++)
         res->initSlot(i, state->getSlot(i));
@@ -4024,11 +4060,10 @@ MArrayState::Copy(TempAllocator& alloc, MArrayState* state)
 }
 
 MNewArray::MNewArray(CompilerConstraintList* constraints, uint32_t count, MConstant* templateConst,
-                     gc::InitialHeap initialHeap, AllocatingBehaviour allocating, jsbytecode* pc)
+                     gc::InitialHeap initialHeap, jsbytecode* pc)
   : MUnaryInstruction(templateConst),
     count_(count),
     initialHeap_(initialHeap),
-    allocating_(allocating),
     convertDoubleElements_(false),
     pc_(pc)
 {
@@ -4046,11 +4081,6 @@ MNewArray::shouldUseVM() const
 {
     if (!templateObject())
         return true;
-
-    // Allocate space using the VMCall when mir hints it needs to get allocated
-    // immediately, but only when data doesn't fit the available array slots.
-    if (allocatingBehaviour() == NewArray_Unallocating)
-        return false;
 
     if (templateObject()->is<UnboxedArrayObject>()) {
         MOZ_ASSERT(templateObject()->as<UnboxedArrayObject>().capacity() >= count());
@@ -4962,7 +4992,8 @@ jit::PropertyReadNeedsTypeBarrier(JSContext* propertycx,
 }
 
 BarrierKind
-jit::PropertyReadOnPrototypeNeedsTypeBarrier(CompilerConstraintList* constraints,
+jit::PropertyReadOnPrototypeNeedsTypeBarrier(IonBuilder* builder,
+                                             CompilerConstraintList* constraints,
                                              MDefinition* obj, PropertyName* name,
                                              TemporaryTypeSet* observed)
 {
@@ -4984,7 +5015,8 @@ jit::PropertyReadOnPrototypeNeedsTypeBarrier(CompilerConstraintList* constraints
                 return BarrierKind::TypeSet;
             if (!key->proto().isObject())
                 break;
-            key = TypeSet::ObjectKey::get(key->proto().toObject());
+            JSObject* proto = builder->checkNurseryObject(key->proto().toObject());
+            key = TypeSet::ObjectKey::get(proto);
             BarrierKind kind = PropertyReadNeedsTypeBarrier(constraints, key, name, observed);
             if (kind == BarrierKind::TypeSet)
                 return BarrierKind::TypeSet;
@@ -5176,18 +5208,18 @@ TryAddTypeBarrierForWrite(TempAllocator& alloc, CompilerConstraintList* constrai
 }
 
 static MInstruction*
-AddGroupGuard(TempAllocator& alloc, MBasicBlock* current, MDefinition* obj,
+AddGroupGuard(MIRGenerator* gen, MBasicBlock* current, MDefinition* obj,
               TypeSet::ObjectKey* key, bool bailOnEquality)
 {
     MInstruction* guard;
 
     if (key->isGroup()) {
-        guard = MGuardObjectGroup::New(alloc, obj, key->group(), bailOnEquality,
+        guard = MGuardObjectGroup::New(gen->alloc(), obj, key->group(), bailOnEquality,
                                        Bailout_ObjectIdentityOrTypeGuard);
     } else {
-        MConstant* singletonConst = MConstant::NewConstraintlessObject(alloc, key->singleton());
+        MConstant* singletonConst = MConstant::NewConstraintlessObject(gen->alloc(), key->singleton(), gen);
         current->add(singletonConst);
-        guard = MGuardObjectIdentity::New(alloc, obj, singletonConst, bailOnEquality);
+        guard = MGuardObjectIdentity::New(gen->alloc(), obj, singletonConst, bailOnEquality);
     }
 
     current->add(guard);
@@ -5210,7 +5242,7 @@ jit::CanWriteProperty(TempAllocator& alloc, CompilerConstraintList* constraints,
 }
 
 bool
-jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc, CompilerConstraintList* constraints,
+jit::PropertyWriteNeedsTypeBarrier(MIRGenerator* gen, CompilerConstraintList* constraints,
                                    MBasicBlock* current, MDefinition** pobj,
                                    PropertyName* name, MDefinition** pvalue,
                                    bool canModify, MIRType implicitType)
@@ -5243,14 +5275,14 @@ jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc, CompilerConstraintList*
 
         jsid id = name ? NameToId(name) : JSID_VOID;
         HeapTypeSetKey property = key->property(id);
-        if (!CanWriteProperty(alloc, constraints, property, *pvalue, implicitType)) {
+        if (!CanWriteProperty(gen->alloc(), constraints, property, *pvalue, implicitType)) {
             // Either pobj or pvalue needs to be modified to filter out the
             // types which the value could have but are not in the property,
             // or a VM call is required. A VM call is always required if pobj
             // and pvalue cannot be modified.
             if (!canModify)
                 return true;
-            success = TryAddTypeBarrierForWrite(alloc, constraints, current, types, name, pvalue,
+            success = TryAddTypeBarrierForWrite(gen->alloc(), constraints, current, types, name, pvalue,
                                                 implicitType);
             break;
         }
@@ -5276,7 +5308,7 @@ jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc, CompilerConstraintList*
 
         jsid id = name ? NameToId(name) : JSID_VOID;
         HeapTypeSetKey property = key->property(id);
-        if (CanWriteProperty(alloc, constraints, property, *pvalue, implicitType))
+        if (CanWriteProperty(gen->alloc(), constraints, property, *pvalue, implicitType))
             continue;
 
         if ((property.maybeTypes() && !property.maybeTypes()->empty()) || excluded)
@@ -5297,6 +5329,6 @@ jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc, CompilerConstraintList*
         }
     }
 
-    *pobj = AddGroupGuard(alloc, current, *pobj, excluded, /* bailOnEquality = */ true);
+    *pobj = AddGroupGuard(gen, current, *pobj, excluded, /* bailOnEquality = */ true);
     return false;
 }

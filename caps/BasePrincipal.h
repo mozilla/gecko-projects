@@ -11,8 +11,9 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsJSPrincipals.h"
 
-#include "mozilla/dom/SystemDictionariesBinding.h"
+#include "mozilla/dom/ChromeUtilsBinding.h"
 
+class nsIContentSecurityPolicy;
 class nsIObjectOutputStream;
 class nsIObjectInputStream;
 
@@ -27,6 +28,8 @@ public:
     mAppId = aAppId;
     mInBrowser = aInBrowser;
   }
+  explicit OriginAttributes(const OriginAttributesDictionary& aOther)
+    : OriginAttributesDictionary(aOther) {}
 
   bool operator==(const OriginAttributes& aOther) const
   {
@@ -38,13 +41,13 @@ public:
     return !(*this == aOther);
   }
 
-  // Serializes non-default values into the suffix format, i.e.
+  // Serializes/Deserializes non-default values into the suffix format, i.e.
   // |!key1=value1&key2=value2|. If there are no non-default attributes, this
   // returns an empty string.
   void CreateSuffix(nsACString& aStr) const;
+  bool PopulateFromSuffix(const nsACString& aStr);
 
-  void Serialize(nsIObjectOutputStream* aStream) const;
-  nsresult Deserialize(nsIObjectInputStream* aStream);
+  void CookieJar(nsACString& aStr);
 };
 
 /*
@@ -57,7 +60,7 @@ public:
 class BasePrincipal : public nsJSPrincipals
 {
 public:
-  BasePrincipal() {}
+  BasePrincipal();
 
   enum DocumentDomainConsideration { DontConsiderDocumentDomain, ConsiderDocumentDomain};
   bool Subsumes(nsIPrincipal* aOther, DocumentDomainConsideration aConsideration);
@@ -93,7 +96,7 @@ public:
   bool IsInBrowserElement() const { return mOriginAttributes.mInBrowser; }
 
 protected:
-  virtual ~BasePrincipal() {}
+  virtual ~BasePrincipal();
 
   virtual nsresult GetOriginInternal(nsACString& aOrigin) = 0;
   virtual bool SubsumesInternal(nsIPrincipal* aOther, DocumentDomainConsideration aConsider) = 0;

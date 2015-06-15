@@ -79,6 +79,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/ProcessHangMonitorIPC.h"
+#include "mozilla/ProfileGatherer.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Telemetry.h"
@@ -238,6 +239,7 @@ static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 
 using base::ChildPrivileges;
 using base::KillProcess;
+using mozilla::ProfileGatherer;
 
 #ifdef MOZ_CRASHREPORTER
 using namespace CrashReporter;
@@ -661,6 +663,7 @@ static const char* sObserverTopics[] = {
 #ifdef MOZ_ENABLE_PROFILER_SPS
     "profiler-started",
     "profiler-stopped",
+    "profiler-subprocess-gather",
     "profiler-subprocess",
 #endif
 };
@@ -2012,14 +2015,9 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
                                                        NS_ConvertUTF16toUTF8(mAppManifestURL));
                 }
 
-                if (mCreatedPairedMinidumps) {
-                    // We killed the child with KillHard, so two minidumps should already
-                    // exist - one for the content process, and one for the browser process.
-                    // The "main" minidump of this crash report is the content processes,
-                    // and we use GenerateChildData to annotate our crash report with
-                    // information about the child process.
-                    crashReporter->GenerateChildData(nullptr);
-                } else {
+                // if mCreatedPairedMinidumps is true, we've already generated
+                // parent/child dumps for dekstop crashes.
+                if (!mCreatedPairedMinidumps) {
                     crashReporter->GenerateCrashReport(this, nullptr);
                 }
 
@@ -2065,7 +2063,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
         MessageLoop::current()->PostTask(
             FROM_HERE,
             NewRunnableMethod(cp, &ContentParent::ShutDownProcess,
-                              CLOSE_CHANNEL));
+                              SEND_SHUTDOWN_MESSAGE));
     }
     cpm->RemoveContentProcess(this->ChildID());
 }
@@ -3137,13 +3135,17 @@ ContentParent::Observe(nsISupports* aSubject,
     else if (!strcmp(aTopic, "profiler-stopped")) {
         unused << SendStopProfiler();
     }
+    else if (!strcmp(aTopic, "profiler-subprocess-gather")) {
+        mGatherer = static_cast<ProfileGatherer*>(aSubject);
+        mGatherer->WillGatherOOPProfile();
+        unused << SendGatherProfile();
+    }
     else if (!strcmp(aTopic, "profiler-subprocess")) {
         nsCOMPtr<nsIProfileSaveEvent> pse = do_QueryInterface(aSubject);
         if (pse) {
-            nsCString result;
-            unused << SendGetProfile(&result);
-            if (!result.IsEmpty()) {
-                pse->AddSubProfile(result.get());
+            if (!mProfile.IsEmpty()) {
+                pse->AddSubProfile(mProfile.get());
+                mProfile.Truncate();
             }
         }
     }
@@ -3388,37 +3390,33 @@ ContentParent::KillHard(const char* aReason)
     mForceKillTimer = nullptr;
 
 #if defined(MOZ_CRASHREPORTER) && !defined(MOZ_B2G)
+    // We're about to kill the child process associated with this content.
+    // Something has gone wrong to get us here, so we generate a minidump
+    // of the parent and child for submission to the crash server.
     if (ManagedPCrashReporterParent().Length() > 0) {
         CrashReporterParent* crashReporter =
             static_cast<CrashReporterParent*>(ManagedPCrashReporterParent()[0]);
-
-        // We're about to kill the child process associated with this
-        // ContentParent. Something has gone wrong to get us here,
-        // so we generate a minidump to be potentially submitted in
-        // a crash report. ContentParent::ActorDestroy is where the
-        // actual report gets generated, once the child process has
-        // finally died.
-        if (crashReporter->GeneratePairedMinidump(this)) {
-            mCreatedPairedMinidumps = true;
-            // GeneratePairedMinidump created two minidumps for us - the main
-            // one is for the content process we're about to kill, and the other
-            // one is for the main browser process. That second one is the extra
-            // minidump tagging along, so we have to tell the crash reporter that
-            // it exists and is being appended.
-            nsAutoCString additionalDumps("browser");
-            crashReporter->AnnotateCrashReport(
-                NS_LITERAL_CSTRING("additional_minidumps"),
-                additionalDumps);
-            if (IsKillHardAnnotationSet()) {
-              crashReporter->AnnotateCrashReport(
-                  NS_LITERAL_CSTRING("kill_hard"),
-                  GetKillHardAnnotation());
-            }
-            nsDependentCString reason(aReason);
-            crashReporter->AnnotateCrashReport(
-                NS_LITERAL_CSTRING("ipc_channel_error"),
-                reason);
+        // GeneratePairedMinidump creates two minidumps for us - the main
+        // one is for the content process we're about to kill, and the other
+        // one is for the main browser process. That second one is the extra
+        // minidump tagging along, so we have to tell the crash reporter that
+        // it exists and is being appended.
+        nsAutoCString additionalDumps("browser");
+        crashReporter->AnnotateCrashReport(
+            NS_LITERAL_CSTRING("additional_minidumps"),
+            additionalDumps);
+        if (IsKillHardAnnotationSet()) {
+          crashReporter->AnnotateCrashReport(
+              NS_LITERAL_CSTRING("kill_hard"),
+              GetKillHardAnnotation());
         }
+        nsDependentCString reason(aReason);
+        crashReporter->AnnotateCrashReport(
+            NS_LITERAL_CSTRING("ipc_channel_error"),
+            reason);
+
+        // Generate the report and insert into the queue for submittal.
+        mCreatedPairedMinidumps = crashReporter->GenerateCompleteMinidump(this);
     }
 #endif
     ProcessHandle otherProcessHandle;
@@ -4352,7 +4350,12 @@ ContentParent::RecvPrivateDocShellsExist(const bool& aExist)
         sPrivateContent->AppendElement(this);
     } else {
         sPrivateContent->RemoveElement(this);
-        if (!sPrivateContent->Length()) {
+
+        // Only fire the notification if we have private and non-private
+        // windows: if privatebrowsing.autostart is true, all windows are
+        // private.
+        if (!sPrivateContent->Length() &&
+            !Preferences::GetBool("browser.privatebrowsing.autostart")) {
             nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
             obs->NotifyObservers(nullptr, "last-pb-context-exited", nullptr);
             delete sPrivateContent;
@@ -5097,6 +5100,18 @@ ContentParent::RecvGamepadListenerRemoved()
     mHasGamepadListener = false;
     MaybeStopGamepadMonitoring();
 #endif
+    return true;
+}
+
+bool
+ContentParent::RecvProfile(const nsCString& aProfile)
+{
+    if (NS_WARN_IF(!mGatherer)) {
+        return true;
+    }
+    mProfile = aProfile;
+    mGatherer->GatheredOOPProfile();
+    mGatherer = nullptr;
     return true;
 }
 

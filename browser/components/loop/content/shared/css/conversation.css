@@ -254,6 +254,12 @@
   left: 0px;
 }
 
+.fx-embedded .no-video {
+  background: black none repeat scroll 0% 0%;
+  height: 100%;
+  width: 100%;
+}
+
 .standalone .local-stream,
 .standalone .remote-inset-stream {
   /* required to have it superimposed to the control toolbar */
@@ -512,11 +518,6 @@
   width: 30%;
   height: 28%;
   max-height: 105px;
-  box-shadow: 0px 2px 4px rgba(0,0,0,.5);
-}
-
-.fx-embedded .room-conversation .local-stream {
-  box-shadow: none;
 }
 
 .fx-embedded .local-stream.room-preview {
@@ -541,72 +542,31 @@
 }
 
 /*
- * XXX this approach is fragile because it makes assumptions
- * about the generated OT markup, any change will break it
- */
-
-/*
  * For any audio-only streams, we want to display our own background
  */
-.OT_audio-only .OT_widget-container .OT_video-poster {
+.avatar {
   background-image: url("../img/audio-call-avatar.svg");
   background-repeat: no-repeat;
   background-color: #4BA6E7;
   background-size: contain;
   background-position: center;
+
+  /*
+   * Expand to fill the available space, since there is no video any
+   * intrinsic width. XXX should really change to an <img> for clarity
+   */
+  height: 100%;
+  width: 100%;
 }
 
-/*
- * Audio-only. For local streams, cancel out the SDK's opacity of 0.25.
- * For remote streams we leave them shaded, as otherwise its too bright.
- */
-.local-stream-audio .OT_publisher .OT_video-poster {
-  opacity: 1
+.local .avatar {
+  position: absolute;
+  z-index: 1;
 }
 
-/*
- * In audio-only mode, don't display the video element, doing so interferes
- * with the background opacity of the video-poster element.
- */
-.OT_audio-only .OT_widget-container .OT_video-element {
-  display: none;
-}
-
-/*
- * Ensure that the publisher (i.e. local) video is never cropped, so that it's
- * not possible for someone to be presented with a picture that displays
- * (for example) a person from the neck up, even though the camera is capturing
- * and transmitting a picture of that person from the waist up.
- *
- * The !importants are necessary to override the SDK attempts to avoid
- * letterboxing entirely.
- *
- * If we could easily use test video streams with the SDK (eg if initPublisher
- * supported something like a "testMediaToStreamURI" parameter that it would
- * use to source the stream rather than the output of gUM, it wouldn't be too
- * hard to generate a video with a 1 pixel border at the edges that one could
- * at least visually see wasn't being cropped.
- *
- * Another less ugly possibility would be to work with Ted Mielczarek to use
- * the fake camera drivers he has for Linux.
- */
-.room-conversation .OT_publisher .OT_widget-container {
-  height: 100% !important;
-  width: 100% !important;
-  top: 0 !important;
-  left: 0 !important;
-  background-color: transparent; /* avoid visually obvious letterboxing */
-}
-
-.room-conversation .OT_publisher .OT_widget-container video {
-  background-color: transparent; /* avoid visually obvious letterboxing */
-}
-
-.fx-embedded .room-conversation .room-preview .OT_publisher .OT_widget-container,
-.fx-embedded .room-conversation .room-preview .OT_publisher .OT_widget-container video {
-  /* Desktop conversation window room preview local stream actually wants
-     a black background */
-  background-color: #000;
+.remote .avatar {
+  /* make visually distinct from local avatar */
+  opacity: 0.25;
 }
 
 .fx-embedded .media.nested {
@@ -691,37 +651,13 @@ html, .fx-embedded, #main,
   height: 100%;
 }
 
-/**
- * The .fx-embbeded .text-chat-* styles are very temporarily whilst we work on
- * text chat (bug 1108892 and dependencies).
- */
-.fx-embedded .text-chat-view {
-  height: 60px;
-  color: white;
-  background-color: black;
-}
-
-.fx-embedded .text-chat-entries {
-  /* XXX Should use flex, this is just for the initial implementation. */
-  height: calc(100% - 2em);
-  width: 100%;
-}
-
-.fx-embedded .text-chat-box {
-  width: 100%;
-  margin: auto;
-}
-
-@media screen and (min-width:640px) {
+/* We use 641px rather than 640, as min-width and max-width are inclusive */
+@media screen and (min-width:641px) {
   .standalone .conversation-toolbar {
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
-  }
-
-  .fx-embedded .local-stream {
-    position: fixed;
   }
 
   .standalone .local-stream,
@@ -736,7 +672,7 @@ html, .fx-embedded, #main,
   }
 
   /* Nested video elements */
-  .conversation .media.nested {
+  .standalone .conversation .media.nested {
     position: relative;
     height: 100%;
   }
@@ -766,11 +702,6 @@ html, .fx-embedded, #main,
     height: 90%;
   }
 
-  .standalone .OT_subscriber {
-    height: 100%;
-    width: auto;
-  }
-
   .standalone .media.nested {
     min-height: 500px;
   }
@@ -788,7 +719,7 @@ html, .fx-embedded, #main,
   }
 
   /* Nested video elements */
-  .conversation .media.nested {
+  .standalone .conversation .media.nested {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -798,7 +729,7 @@ html, .fx-embedded, #main,
 
   .standalone .video_wrapper.remote_wrapper {
     /* Because of OT markup we need to set a high flex value
-     * Flex rule assures remote and local streams stack on top of eachother
+     * Flex rule assures remote and local streams stack on top of each other
      * Computed width is not 100% unless the `width` rule */
     flex: 2;
     width: 100%;
@@ -854,16 +785,6 @@ html, .fx-embedded, #main,
   width: 20px;
   height: 20px;
   background: transparent url("../img/svg/glyph-help-16x16.svg") no-repeat;
-}
-
-.room-conversation-wrapper footer {
-  background: #000;
-  height: 60px;
-  margin-top: -12px;
-}
-
-.room-conversation-wrapper footer a {
-  color: #555;
 }
 
 .fx-embedded .room-conversation .conversation-toolbar .btn-hangup {
@@ -923,7 +844,7 @@ html, .fx-embedded, #main,
   text-decoration: underline;
 }
 
-body[dir="rtl"] .room-invitation-addcontext {
+html[dir="rtl"] .room-invitation-addcontext {
   padding-left: 0;
   padding-right: 1.5em;
   background-position: right top;
@@ -1021,10 +942,6 @@ body[platform="win"] .share-service-dropdown.overflow > .dropdown-menu-item {
   background-color: #fff;
   -moz-margin-end: 1ch;
   flex: 0 1 auto;
-}
-
-.room-context-thumbnail[src=""] {
-  display: none;
 }
 
 .room-context > .error-display-area.error {
@@ -1152,13 +1069,13 @@ body[platform="win"] .share-service-dropdown.overflow > .dropdown-menu-item {
   background-image: url("../img/icons-10x10.svg#close-active");
 }
 
-body[dir=rtl] .room-context-btn-close,
-body[dir=rtl] .room-context-btn-edit {
+html[dir="rtl"] .room-context-btn-close,
+html[dir="rtl"] .room-context-btn-edit {
   right: auto;
   left: 8px;
 }
 
-body[dir=rtl] .room-context-btn-edit {
+html[dir="rtl"] .room-context-btn-edit {
   left: 20px;
 }
 
@@ -1171,7 +1088,10 @@ body[dir=rtl] .room-context-btn-edit {
 }
 
 .standalone .room-conversation-wrapper .video-layout-wrapper {
-  height: calc(100% - 50px - 60px);
+  /* 50px = height of header, 3em = height of footer */
+  /* XXX This is currently wrong for narrow/mobile display,
+     bug 1168829  will hopefully address it. */
+  height: calc(100% - 50px - 3em);
 }
 
 .standalone .room-conversation-wrapper .room-inner-info-area {
@@ -1262,9 +1182,8 @@ body[dir=rtl] .room-context-btn-edit {
 
 .standalone-context-url > img {
   margin: 1em auto;
-  max-width: 50%;
-  /* allows 20% for the description wrapper plus the margins */
-  max-height: calc(80% - 2em);
+  width: 16px;
+  height: 16px;
 }
 
 .standalone-context-url-description-wrapper {
@@ -1278,7 +1197,7 @@ body[dir=rtl] .room-context-btn-edit {
 
 .standalone .room-conversation .video_wrapper.remote_wrapper {
   background-color: #4e4e4e;
-  width: 75%;
+  width: calc(75% - 10px); /* Take the left margin into account. */
 }
 
 .standalone .room-conversation .conversation-toolbar {
@@ -1295,18 +1214,64 @@ body[dir=rtl] .room-context-btn-edit {
   height: auto;
 }
 
+/* Text chat in rooms styles */
+
+.fx-embedded .room-conversation-wrapper {
+  display: flex;
+  flex-flow: column nowrap;
+}
+
+.fx-embedded .video-layout-wrapper {
+  flex: 1 1 auto;
+}
+
+.text-chat-view {
+  background: #fff;
+}
+
+.fx-embedded .text-chat-view {
+  flex: 1 0 auto;
+  display: flex;
+  flex-flow: column nowrap;
+}
+
+.fx-embedded .text-chat-entries {
+  flex: 1 1 auto;
+  max-height: 120px;
+  min-height: 60px;
+  padding: .7em .5em 0;
+}
+
+.fx-embedded .text-chat-box {
+  flex: 0 0 auto;
+  max-height: 40px;
+  min-height: 40px;
+  width: 100%;
+}
+
 .text-chat-entries {
-  margin: auto;
   overflow: scroll;
-  border: 1px solid red;
 }
 
 .text-chat-entry {
-  text-align: left;
+  text-align: end;
+  margin-bottom: 1.5em;
+}
+
+.text-chat-entry > span {
+  border-width: 1px;
+  border-style: solid;
+  border-color: #0095dd;
+  border-radius: 10000px;
+  padding: .5em 1em;
 }
 
 .text-chat-entry.received {
-  text-align: right;
+  text-align: start;
+}
+
+.text-chat-entry.received > span {
+  border-color: #d8d8d8;
 }
 
 .text-chat-box {
@@ -1315,6 +1280,14 @@ body[dir=rtl] .room-context-btn-edit {
 
 .text-chat-box > form > input {
   width: 100%;
+  height: 40px;
+  padding: 0 .5em .5em;
+  font-size: 1.1em;
+}
+
+.fx-embedded .text-chat-box > form > input {
+  border: 0;
+  border-top: 1px solid #999;
 }
 
 @media screen and (max-width:640px) {
@@ -1375,16 +1348,6 @@ body[dir=rtl] .room-context-btn-edit {
     /* This forces the remote video stream to fit within wrapper's height */
     min-height: 0px;
   }
-  .standalone .room-conversation-wrapper footer {
-    font-size: 80%;
-    height: 25px;
-  }
-  .standalone .room-conversation-wrapper footer p {
-    padding-top: 4px;
-  }
-  .standalone .room-conversation-wrapper footer .footer-logo {
-    display: none;
-  }
 }
 
 .self-view-hidden-message {
@@ -1401,7 +1364,7 @@ body[dir=rtl] .room-context-btn-edit {
 @media screen and (max-height:160px) {
 
   /* disable the self view */
-  .standalone .OT_publisher {
+  .standalone .local-video {
     display: none;
   }
 
@@ -1411,4 +1374,37 @@ body[dir=rtl] .room-context-btn-edit {
     position: relative;
     top: 90px;
   }
+}
+
+.remote-video {
+  /* Since there is grey stuff behind us, avoid obvious letterboxing, only do
+   * this on remote video as local video has transparent background.
+   */
+  background-color: black;
+}
+
+.standalone .screen.focus-stream {
+  /* Since there is grey stuff behind us, avoid obvious letterboxing */
+  background-color: black;
+}
+
+.local-video {
+  width: 100%;
+  height: 100%;
+  /* Transform is to make the local video act like a mirror, as is the
+     convention in video conferencing systems. */
+  transform: scale(-1, 1);
+  transform-origin: 50% 50% 0;
+}
+
+.remote-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  position: absolute;
+}
+
+.screen-share-video {
+  width: 100%;
+  height: 100%;
 }

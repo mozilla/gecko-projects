@@ -66,20 +66,26 @@ private:
   nsRefPtr<Stream> mSource;
 };
 
-static inline void
-ConvertIndex(nsTArray<Index::Indice>& aDest,
-             const stagefright::Vector<stagefright::MediaSource::Indice>& aIndex)
+static inline bool
+ConvertIndex(FallibleTArray<Index::Indice>& aDest,
+             const stagefright::Vector<stagefright::MediaSource::Indice>& aIndex,
+             int64_t aMediaTime)
 {
+  if (!aDest.SetCapacity(aIndex.size(), mozilla::fallible)) {
+    return false;
+  }
   for (size_t i = 0; i < aIndex.size(); i++) {
     Index::Indice indice;
     const stagefright::MediaSource::Indice& s_indice = aIndex[i];
     indice.start_offset = s_indice.start_offset;
     indice.end_offset = s_indice.end_offset;
-    indice.start_composition = s_indice.start_composition;
-    indice.end_composition = s_indice.end_composition;
+    indice.start_composition = s_indice.start_composition - aMediaTime;
+    indice.end_composition = s_indice.end_composition - aMediaTime;
     indice.sync = s_indice.sync;
-    aDest.AppendElement(indice);
+    // FIXME: Make this infallible after bug 968520 is done.
+    MOZ_ALWAYS_TRUE(aDest.AppendElement(indice, mozilla::fallible));
   }
+  return true;
 }
 
 MP4Metadata::MP4Metadata(Stream* aSource)
@@ -233,7 +239,7 @@ MP4Metadata::UpdateCrypto(const MetaData* aMetaData)
 }
 
 bool
-MP4Metadata::ReadTrackIndex(nsTArray<Index::Indice>& aDest, mozilla::TrackID aTrackID)
+MP4Metadata::ReadTrackIndex(FallibleTArray<Index::Indice>& aDest, mozilla::TrackID aTrackID)
 {
   size_t numTracks = mPrivate->mMetadataExtractor->countTracks();
   int32_t trackNumber = GetTrackNumber(aTrackID);
@@ -244,11 +250,17 @@ MP4Metadata::ReadTrackIndex(nsTArray<Index::Indice>& aDest, mozilla::TrackID aTr
   if (!track.get() || track->start() != OK) {
     return false;
   }
-  ConvertIndex(aDest, track->exportIndex());
+  sp<MetaData> metadata =
+    mPrivate->mMetadataExtractor->getTrackMetaData(trackNumber);
+  int64_t mediaTime;
+  if (!metadata->findInt64(kKeyMediaTime, &mediaTime)) {
+    mediaTime = 0;
+  }
+  bool rv = ConvertIndex(aDest, track->exportIndex(), mediaTime);
 
   track->stop();
 
-  return true;
+  return rv;
 }
 
 int32_t

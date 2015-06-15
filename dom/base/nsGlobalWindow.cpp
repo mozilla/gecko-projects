@@ -2382,6 +2382,17 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   jsapi.Init();
   JSContext *cx = jsapi.cx();
 
+  // Check if we're anywhere near the stack limit before we reach the
+  // transplanting code, since it has no good way to handle errors. This uses
+  // the untrusted script limit, which is not strictly necessary since no
+  // actual script should run.
+  bool overrecursed = false;
+  JS_CHECK_RECURSION_CONSERVATIVE_DONT_REPORT(cx, overrecursed = true);
+  if (overrecursed) {
+    NS_WARNING("Overrecursion in SetNewDocument");
+    return NS_ERROR_FAILURE;
+  }
+
   if (!mDoc) {
     // First document load.
 
@@ -2437,12 +2448,6 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   bool createdInnerWindow = false;
 
   bool thisChrome = IsChromeWindow();
-
-  // Check if we're anywhere near the stack limit before we reach the
-  // transplanting code, since it has no good way to handle errors. This uses
-  // the untrusted script limit, which is not strictly necessary since no
-  // actual script should run.
-  JS_CHECK_RECURSION_CONSERVATIVE(cx, return NS_ERROR_FAILURE);
 
   nsCOMPtr<WindowStateHolder> wsh = do_QueryInterface(aState);
   NS_ASSERTION(!aState || wsh, "What kind of weird state are you giving me here?");
@@ -5003,6 +5008,12 @@ nsGlobalWindow::GetOuterSize(ErrorResult& aError)
 {
   MOZ_ASSERT(IsOuterWindow());
 
+  if (nsContentUtils::ShouldResistFingerprinting(mDocShell)) {
+    CSSIntSize size;
+    aError = GetInnerSize(size);
+    return nsIntSize(size.width, size.height);
+  }
+
   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin = GetTreeOwnerWindow();
   if (!treeOwnerAsWin) {
     aError.Throw(NS_ERROR_FAILURE);
@@ -5167,6 +5178,11 @@ nsGlobalWindow::GetScreenXY(ErrorResult& aError)
 {
   MOZ_ASSERT(IsOuterWindow());
 
+  // When resisting fingerprinting, always return (0,0)
+  if (nsContentUtils::ShouldResistFingerprinting(mDocShell)) {
+    return nsIntPoint(0, 0);
+  }
+
   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin = GetTreeOwnerWindow();
   if (!treeOwnerAsWin) {
     aError.Throw(NS_ERROR_FAILURE);
@@ -5240,6 +5256,11 @@ nsGlobalWindow::GetMozInnerScreenX(ErrorResult& aError)
 {
   FORWARD_TO_OUTER_OR_THROW(GetMozInnerScreenX, (aError), aError, 0);
 
+  // When resisting fingerprinting, always return 0.
+  if (nsContentUtils::ShouldResistFingerprinting(mDocShell)) {
+    return 0.0;
+  }
+
   nsRect r = GetInnerScreenRect();
   return nsPresContext::AppUnitsToFloatCSSPixels(r.x);
 }
@@ -5257,6 +5278,11 @@ float
 nsGlobalWindow::GetMozInnerScreenY(ErrorResult& aError)
 {
   FORWARD_TO_OUTER_OR_THROW(GetMozInnerScreenY, (aError), aError, 0);
+
+  // Return 0 to prevent fingerprinting.
+  if (nsContentUtils::ShouldResistFingerprinting(mDocShell)) {
+    return 0.0;
+  }
 
   nsRect r = GetInnerScreenRect();
   return nsPresContext::AppUnitsToFloatCSSPixels(r.y);
@@ -5283,6 +5309,10 @@ nsGlobalWindow::GetDevicePixelRatio(ErrorResult& aError)
   nsRefPtr<nsPresContext> presContext;
   mDocShell->GetPresContext(getter_AddRefs(presContext));
   if (!presContext) {
+    return 1.0;
+  }
+
+  if (nsContentUtils::ShouldResistFingerprinting(mDocShell)) {
     return 1.0;
   }
 
@@ -6045,6 +6075,21 @@ nsGlobalWindow::SetFullScreen(bool aFullScreen)
   return SetFullScreenInternal(aFullScreen, true);
 }
 
+void
+FinishDOMFullscreenChange(nsIDocument* aDoc, bool aInDOMFullscreen)
+{
+  if (aInDOMFullscreen) {
+    // Ask the document to handle any pending DOM fullscreen change.
+    nsIDocument::HandlePendingFullscreenRequests(aDoc);
+  } else {
+    // Force exit from DOM full-screen mode. This is so that if we're in
+    // DOM full-screen mode and the user exits full-screen mode with
+    // the browser full-screen mode toggle keyboard-shortcut, we'll detect
+    // that and leave DOM API full-screen mode too.
+    nsIDocument::ExitFullscreen(aDoc, /* async */ false);
+  }
+}
+
 nsresult
 nsGlobalWindow::SetFullScreenInternal(bool aFullScreen, bool aFullscreenMode,
                                       gfx::VRHMDInfo* aHMD)
@@ -6086,18 +6131,13 @@ nsGlobalWindow::SetFullScreenInternal(bool aFullScreen, bool aFullscreenMode,
   if (aFullscreenMode) {
     mFullscreenMode = aFullScreen;
   } else {
-    // If we are exiting from DOM fullscreen while we
-    // initially make the window fullscreen because of
-    // fullscreen mode, don't restore the window.
+    // If we are exiting from DOM fullscreen while we initially make
+    // the window fullscreen because of fullscreen mode, don't restore
+    // the window. But we still need to exit the DOM fullscreen state.
     if (!aFullScreen && mFullscreenMode) {
+      FinishDOMFullscreenChange(mDoc, false);
       return NS_OK;
     }
-  }
-
-  // dispatch a "fullscreen" DOM event so that XUL apps can
-  // respond visually if we are kicked into full screen mode
-  if (!DispatchCustomEvent(NS_LITERAL_STRING("fullscreen"))) {
-    return NS_OK;
   }
 
   // Prevent chrome documents which are still loading from resizing
@@ -6127,37 +6167,66 @@ nsGlobalWindow::SetFullScreenInternal(bool aFullScreen, bool aFullscreenMode,
         widget->PrepareForDOMFullscreenTransition();
       }
       widget->MakeFullScreen(aFullScreen, screen);
+      // The rest of code for switching fullscreen is in nsGlobalWindow::
+      // FinishFullscreenChange() which will be called after sizemodechange
+      // event is dispatched.
+      return NS_OK;
     }
   }
 
-  if (!mFullScreen) {
-    // Force exit from DOM full-screen mode. This is so that if we're in
-    // DOM full-screen mode and the user exits full-screen mode with
-    // the browser full-screen mode toggle keyboard-shortcut, we'll detect
-    // that and leave DOM API full-screen mode too.
-    nsIDocument::ExitFullscreen(mDoc, /* async */ false);
+  FinishFullscreenChange(aFullScreen);
+  return NS_OK;
+}
+
+/* virtual */ void
+nsGlobalWindow::FinishFullscreenChange(bool aIsFullscreen)
+{
+  MOZ_ASSERT(IsOuterWindow());
+
+  if (aIsFullscreen != mFullScreen) {
+    NS_WARNING("Failed to toggle fullscreen state of the widget");
+    // We failed to make the widget enter fullscreen.
+    // Stop further changes and restore the state.
+    if (!aIsFullscreen) {
+      mFullScreen = false;
+      mFullscreenMode = false;
+    } else {
+      MOZ_ASSERT_UNREACHABLE("Failed to exit fullscreen?");
+      mFullScreen = true;
+      // We don't know how code can reach here. Not sure
+      // what value should be set for fullscreen mode.
+      mFullscreenMode = false;
+    }
+    return;
   }
+
+  // Note that we must call this to toggle the DOM fullscreen state
+  // of the document before dispatching the "fullscreen" event, so
+  // that the chrome can distinguish between browser fullscreen mode
+  // and DOM fullscreen.
+  FinishDOMFullscreenChange(mDoc, mFullScreen);
+
+  // dispatch a "fullscreen" DOM event so that XUL apps can
+  // respond visually if we are kicked into full screen mode
+  DispatchCustomEvent(NS_LITERAL_STRING("fullscreen"));
 
   if (!mWakeLock && mFullScreen) {
     nsRefPtr<power::PowerManagerService> pmService =
       power::PowerManagerService::GetInstance();
-    NS_ENSURE_TRUE(pmService, NS_OK);
+    if (!pmService) {
+      return;
+    }
 
     ErrorResult rv;
     mWakeLock = pmService->NewWakeLock(NS_LITERAL_STRING("DOM_Fullscreen"),
                                        this, rv);
-    if (rv.Failed()) {
-      return rv.StealNSResult();
-    }
-
+    NS_WARN_IF_FALSE(!rv.Failed(), "Failed to lock the wakelock");
   } else if (mWakeLock && !mFullScreen) {
     ErrorResult rv;
     mWakeLock->Unlock(rv);
     NS_WARN_IF_FALSE(!rv.Failed(), "Failed to unlock the wakelock.");
     mWakeLock = nullptr;
   }
-
-  return NS_OK;
 }
 
 bool

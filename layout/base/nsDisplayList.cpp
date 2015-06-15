@@ -1582,7 +1582,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
   }
 
   if (addMetrics || ensureMetricsForRootId) {
-    bool isRoot = presContext->IsRootContentDocument();
+    bool isRootContent = presContext->IsRootContentDocument();
 
     nsRect viewport(aBuilder->ToReferenceFrame(frame), frame->GetSize());
 
@@ -1591,7 +1591,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
                          rootScrollFrame, content,
                          aBuilder->FindReferenceFrameFor(frame),
                          root, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
-                         isRoot, containerParameters));
+                         isRootContent, containerParameters));
   } else {
     // Set empty metrics to clear any metrics that might be on a recycled layer.
     root->SetFrameMetrics(nsTArray<FrameMetrics>());
@@ -3125,14 +3125,9 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
   }
   if (!aFrame->GetParent()) {
     MOZ_ASSERT(aFrame->GetType() == nsGkAtoms::viewportFrame);
-    nsSubDocumentFrame* subdoc = static_cast<nsSubDocumentFrame*>(
-        nsLayoutUtils::GetCrossDocParentFrame(aFrame));
-    if (subdoc && subdoc->PassPointerEventsToChildren()) {
-      // If this viewport frame is for a subdocument with
-      // mozpasspointerevents, then we don't want to add the viewport itself
-      // to the event regions. Instead we want to add only subframes.
-      return;
-    }
+    // Viewport frames are never event targets, other frames, like canvas frames,
+    // are the event targets for any regions viewport frames may cover.
+    return;
   }
   uint8_t pointerEvents = aFrame->StyleVisibility()->GetEffectivePointerEvents(aFrame);
   if (pointerEvents == NS_STYLE_POINTER_EVENTS_NONE) {

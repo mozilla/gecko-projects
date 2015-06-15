@@ -193,10 +193,15 @@ GetRevocationBehaviorFromPrefs(/*out*/ CertVerifier::OcspDownloadConfig* odc,
   MOZ_ASSERT(ogc);
   MOZ_ASSERT(certShortLifetimeInDays);
 
-  // 0 = disabled, otherwise enabled
-  *odc = Preferences::GetInt("security.OCSP.enabled", 1)
-       ? CertVerifier::ocspOn
-       : CertVerifier::ocspOff;
+  // 0 = disabled
+  // 1 = enabled for everything (default)
+  // 2 = enabled for EV certificates only
+  int32_t ocspLevel = Preferences::GetInt("security.OCSP.enabled", 1);
+  switch (ocspLevel) {
+    case 0: *odc = CertVerifier::ocspOff; break;
+    case 2: *odc = CertVerifier::ocspEVOnly; break;
+    default: *odc = CertVerifier::ocspOn; break;
+  }
 
   *osc = Preferences::GetBool("security.OCSP.require", false)
        ? CertVerifier::ocspStrict
@@ -266,6 +271,8 @@ nsNSSComponent::createBackgroundThreads()
 nsNSSComponent::~nsNSSComponent()
 {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::dtor\n"));
+  NS_ASSERTION(!mCertVerificationThread,
+               "Cert verification thread should have been cleaned up.");
 
   deleteBackgroundThreads();
 
@@ -1009,9 +1016,11 @@ nsNSSComponent::InitializeNSS()
   }
 
   SECStatus init_rv = SECFailure;
-  if (!profileStr.IsEmpty()) {
+  bool nocertdb = Preferences::GetBool("security.nocertdb", false);
+
+  if (!nocertdb && !profileStr.IsEmpty()) {
     // First try to initialize the NSS DB in read/write mode.
-    SECStatus init_rv = ::mozilla::psm::InitializeNSS(profileStr.get(), false);
+    init_rv = ::mozilla::psm::InitializeNSS(profileStr.get(), false);
     // If that fails, attempt read-only mode.
     if (init_rv != SECSuccess) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("could not init NSS r/w in %s\n", profileStr.get()));
@@ -1022,9 +1031,9 @@ nsNSSComponent::InitializeNSS()
     }
   }
   // If we haven't succeeded in initializing the DB in our profile
-  // directory or we don't have a profile at all, attempt to initialize
-  // with no DB.
-  if (init_rv != SECSuccess) {
+  // directory or we don't have a profile at all, or the "security.nocertdb"
+  // pref has been set to "true", attempt to initialize with no DB.
+  if (nocertdb || init_rv != SECSuccess) {
     init_rv = NSS_NoDB_Init(nullptr);
   }
   if (init_rv != SECSuccess) {
@@ -1326,6 +1335,8 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
         bec->DontForward();
       }
     }
+
+    deleteBackgroundThreads();
   }
   else if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
     nsNSSShutDownPreventionLock locker;

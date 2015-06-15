@@ -60,8 +60,6 @@ user_pref("font.size.inflation.minTwips", 0);
 
 // AddonManager tests require that the experiments provider be present.
 user_pref("experiments.supported", true);
-user_pref("experiments.logging.level", "Trace");
-user_pref("experiments.logging.dump", true);
 // Point the manifest at something local so we don't risk it hitting production
 // data and installing experiments that may vary over time.
 user_pref("experiments.manifest.uri", "http://%(server)s/experiments-dummy/manifest");
@@ -69,6 +67,7 @@ user_pref("experiments.manifest.uri", "http://%(server)s/experiments-dummy/manif
 // Only load extensions from the application and user profile
 // AddonManager.SCOPE_PROFILE + AddonManager.SCOPE_APPLICATION
 user_pref("extensions.enabledScopes", 5);
+user_pref("extensions.autoDisableScopes", 0);
 // Disable metadata caching for installed add-ons by default
 user_pref("extensions.getAddons.cache.enabled", false);
 // Disable intalling any distribution add-ons
@@ -327,3 +326,7 @@ user_pref("dom.serviceWorkers.periodic-updates.enabled", false);
 
 // Enable speech synth test service, and disable built in platform services.
 user_pref("media.webspeech.synth.test", true);
+
+// Turn off search suggestions in the location bar so as not to trigger network
+// connections.
+user_pref("browser.urlbar.suggest.searches", false);

@@ -5,6 +5,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
+const { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+
+XPCOMUtils.defineLazyModuleGetter(this, "DevToolsUtils",
+  "resource://gre/modules/devtools/DevToolsUtils.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "HarExporter", function() {
+  return devtools.require("devtools/netmonitor/har/har-exporter.js").HarExporter;
+});
+
+XPCOMUtils.defineLazyGetter(this, "NetworkHelper", function() {
+  return devtools.require("devtools/toolkit/webconsole/network-helper");
+});
+
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const EPSILON = 0.001;
 const SOURCE_SYNTAX_HIGHLIGHT_MAX_FILE_SIZE = 102400; // 100 KB in bytes
@@ -62,6 +75,8 @@ const GENERIC_VARIABLES_VIEW_SETTINGS = {
 const NETWORK_ANALYSIS_PIE_CHART_DIAMETER = 200; // px
 const FREETEXT_FILTER_SEARCH_DELAY = 200; // ms
 
+const {DeferredTask} = Cu.import("resource://gre/modules/DeferredTask.jsm", {});
+
 /**
  * Object defining the network monitor view components.
  */
@@ -82,6 +97,7 @@ let NetMonitorView = {
    * Destroys the network monitor view.
    */
   destroy: function() {
+    this._isDestroyed = true;
     this.Toolbar.destroy();
     this.RequestsMenu.destroy();
     this.NetworkDetails.destroy();
@@ -180,6 +196,10 @@ let NetMonitorView = {
    * @return string (e.g, "network-inspector-view" or "network-statistics-view")
    */
   get currentFrontendMode() {
+    // The getter may be called from a timeout after the panel is destroyed.
+    if (!this._body.selectedPanel) {
+      return null;
+    }
     return this._body.selectedPanel.id;
   },
 
@@ -358,7 +378,6 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     this.allowFocusOnRightClick = true;
     this.maintainSelectionVisible = true;
-    this.widget.autoscrollWithAppendedItems = true;
 
     this.widget.addEventListener("select", this._onSelect, false);
     this.widget.addEventListener("swap", this._onSwap, false);
@@ -377,6 +396,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this._onContextToggleRawHeadersCommand = this.toggleRawHeaders.bind(this);
     this._onContextPerfCommand = () => NetMonitorView.toggleFrontendMode();
     this._onReloadCommand = () => NetMonitorView.reloadPage();
+    this._flushRequestsTask = new DeferredTask(this._flushRequests, REQUESTS_REFRESH_RATE);
 
     this.sendCustomRequestEvent = this.sendCustomRequest.bind(this);
     this.closeCustomRequestEvent = this.closeCustomRequest.bind(this);
@@ -453,7 +473,10 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     $("#requests-menu-clear-button").removeEventListener("click", this.reqeustsMenuClearEvent, false);
     this.freetextFilterBox.removeEventListener("input", this.requestsFreetextFilterEvent, false);
     this.freetextFilterBox.removeEventListener("command", this.requestsFreetextFilterEvent, false);
+
     this.userInputTimer.cancel();
+    this._flushRequestsTask.disarm();
+
     $("#network-request-popup").removeEventListener("popupshowing", this._onContextShowing, false);
     $("#request-menu-context-newtab").removeEventListener("command", this._onContextNewTabCommand, false);
     $("#request-menu-context-copy-url").removeEventListener("command", this._onContextCopyUrlCommand, false);
@@ -479,6 +502,8 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    */
   reset: function() {
     this.empty();
+    this._addQueue = [];
+    this._updateQueue = [];
     this._firstRequestStartedMillis = -1;
     this._lastRequestEndedMillis = -1;
   },
@@ -486,7 +511,18 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   /**
    * Specifies if this view may be updated lazily.
    */
-  lazyUpdate: true,
+  _lazyUpdate: true,
+
+  get lazyUpdate() {
+    return this._lazyUpdate;
+  },
+
+  set lazyUpdate(value) {
+    this._lazyUpdate = value;
+    if (!value) {
+      this._flushRequests();
+    }
+  },
 
   /**
    * Adds a network request to this container.
@@ -506,47 +542,14 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    *        Indicates if the result came from the browser cache
    */
   addRequest: function(aId, aStartedDateTime, aMethod, aUrl, aIsXHR, aFromCache) {
-    // Convert the received date/time string to a unix timestamp.
-    let unixTime = Date.parse(aStartedDateTime);
+    this._addQueue.push([aId, aStartedDateTime, aMethod, aUrl, aIsXHR, aFromCache]);
 
-    // Create the element node for the network request item.
-    let menuView = this._createMenuView(aMethod, aUrl);
-
-    // Remember the first and last event boundaries.
-    this._registerFirstRequestStart(unixTime);
-    this._registerLastRequestEnd(unixTime);
-
-    // Append a network request item to this container.
-    let requestItem = this.push([menuView, aId], {
-      attachment: {
-        startedDeltaMillis: unixTime - this._firstRequestStartedMillis,
-        startedMillis: unixTime,
-        method: aMethod,
-        url: aUrl,
-        isXHR: aIsXHR,
-        fromCache: aFromCache
-      }
-    });
-
-    // Create a tooltip for the newly appended network request item.
-    let requestTooltip = requestItem.attachment.tooltip = new Tooltip(document, {
-      closeOnEvents: [{
-        emitter: $("#requests-menu-contents"),
-        event: "scroll",
-        useCapture: true
-      }]
-    });
-
-    $("#details-pane-toggle").disabled = false;
-    $("#requests-menu-empty-notice").hidden = true;
-
-    this.refreshSummary();
-    this.refreshZebra();
-    this.refreshTooltip(requestItem);
-
-    if (aId == this._preferredItemId) {
-      this.selectedItem = requestItem;
+    // Lazy updating is disabled in some tests.
+    if (!this.lazyUpdate) {
+      return void this._flushRequests();
     }
+
+    this._flushRequestsTask.arm();
   },
 
   /**
@@ -571,7 +574,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    */
   copyUrlParams: function() {
     let selected = this.selectedItem.attachment;
-    let params = nsIURL(selected.url).query.split("&");
+    let params = NetworkHelper.nsIURL(selected.url).query.split("&");
     let string = params.join(Services.appinfo.OS === "WINNT" ? "\r\n" : "\n");
     clipboardHelper.copyString(string);
   },
@@ -631,7 +634,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     let params = [];
     formDataSections.forEach(section => {
-      let paramsArray = parseQueryString(section);
+      let paramsArray = NetworkHelper.parseQueryString(section);
       if (paramsArray) {
         params = [...params, ...paramsArray];
       }
@@ -683,6 +686,34 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
       clipboardHelper.copyString(Curl.generateCommand(data));
     });
+  },
+
+  /**
+   * Copy HAR from the network panel content to the clipboard.
+   */
+  copyAllAsHar: function() {
+    let options = this.getDefaultHarOptions();
+    return HarExporter.copy(options);
+  },
+
+  /**
+   * Save HAR from the network panel content to a file.
+   */
+  saveAllAsHar: function() {
+    let options = this.getDefaultHarOptions();
+    return HarExporter.save(options);
+  },
+
+  getDefaultHarOptions: function() {
+    let form = NetMonitorController._target.form;
+    let title = form.title || form.url;
+
+    return {
+      getString: gNetwork.getString.bind(gNetwork),
+      view: this,
+      items: NetMonitorView.RequestsMenu.items,
+      title: title
+    };
   },
 
   /**
@@ -1281,30 +1312,80 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    * @param object aData
    *        An object containing several { key: value } tuples of network info.
    *        Supported keys are "httpVersion", "status", "statusText" etc.
+   * @param function aCallback
+   *        A function to call once the request has been updated in the view.
    */
-  updateRequest: function(aId, aData) {
-    // Prevent interference from zombie updates received after target closed.
-    if (NetMonitorView._isDestroyed) {
-      return;
-    }
-    this._updateQueue.push([aId, aData]);
+  updateRequest: function(aId, aData, aCallback) {
+    this._updateQueue.push([aId, aData, aCallback]);
 
     // Lazy updating is disabled in some tests.
     if (!this.lazyUpdate) {
       return void this._flushRequests();
     }
-    // Allow requests to settle down first.
-    setNamedTimeout(
-      "update-requests", REQUESTS_REFRESH_RATE, () => this._flushRequests());
+
+    this._flushRequestsTask.arm();
   },
 
   /**
    * Starts adding all queued additional information about network requests.
    */
   _flushRequests: function() {
+    // Prevent displaying any updates received after the target closed.
+    if (NetMonitorView._isDestroyed) {
+      return;
+    }
+
+    let widget = NetMonitorView.RequestsMenu.widget;
+    let isScrolledToBottom = widget.isScrolledToBottom();
+
+    for (let [id, startedDateTime, method, url, isXHR, fromCache] of this._addQueue) {
+      // Convert the received date/time string to a unix timestamp.
+      let unixTime = Date.parse(startedDateTime);
+
+      // Create the element node for the network request item.
+      let menuView = this._createMenuView(method, url);
+
+      // Remember the first and last event boundaries.
+      this._registerFirstRequestStart(unixTime);
+      this._registerLastRequestEnd(unixTime);
+
+      // Append a network request item to this container.
+      let requestItem = this.push([menuView, id], {
+        attachment: {
+          startedDeltaMillis: unixTime - this._firstRequestStartedMillis,
+          startedMillis: unixTime,
+          method: method,
+          url: url,
+          isXHR: isXHR,
+          fromCache: fromCache
+        }
+      });
+
+      // Create a tooltip for the newly appended network request item.
+      let requestTooltip = requestItem.attachment.tooltip = new Tooltip(document, {
+        closeOnEvents: [{
+          emitter: $("#requests-menu-contents"),
+          event: "scroll",
+          useCapture: true
+        }]
+      });
+
+      this.refreshTooltip(requestItem);
+
+      if (id == this._preferredItemId) {
+        this.selectedItem = requestItem;
+      }
+
+      window.emit(EVENTS.REQUEST_ADDED, id);
+    }
+
+    if (isScrolledToBottom && this._addQueue.length) {
+      widget.scrollToBottom();
+    }
+
     // For each queued additional information packet, get the corresponding
     // request item in the view and update it based on the specified data.
-    for (let [id, data] of this._updateQueue) {
+    for (let [id, data, callback] of this._updateQueue) {
       let requestItem = this.getItemByValue(id);
       if (!requestItem) {
         // Packet corresponds to a dead request item, target navigated.
@@ -1437,6 +1518,10 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
         }
       }
       refreshNetworkDetailsPaneIfNecessary(requestItem);
+
+      if (callback) {
+        callback();
+      }
     }
 
     /**
@@ -1457,6 +1542,10 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     // We're done flushing all the requests, clear the update queue.
     this._updateQueue = [];
+    this._addQueue = [];
+
+    $("#details-pane-toggle").disabled = !this.itemCount;
+    $("#requests-menu-empty-notice").hidden = !!this.itemCount;
 
     // Make sure all the requests are sorted and filtered.
     // Freshly added requests may not yet contain all the information required
@@ -1521,7 +1610,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       case "url": {
         let uri;
         try {
-          uri = nsIURL(aValue);
+          uri = NetworkHelper.nsIURL(aValue);
         } catch(e) {
           break; // User input may not make a well-formed url yet.
         }
@@ -1605,9 +1694,9 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       }
       case "responseContent": {
         let { mimeType } = aItem.attachment;
-        let { text, encoding } = aValue.content;
 
         if (mimeType.includes("image/")) {
+          let { text, encoding } = aValue.content;
           let responseBody = yield gNetwork.getString(text);
           let node = $(".requests-menu-icon", aItem.target);
           node.src = "data:" + mimeType + ";" + encoding + "," + responseBody;
@@ -1944,7 +2033,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     copyUrlElement.hidden = !selectedItem;
 
     let copyUrlParamsElement = $("#request-menu-context-copy-url-params");
-    copyUrlParamsElement.hidden = !selectedItem || !nsIURL(selectedItem.attachment.url).query;
+    copyUrlParamsElement.hidden = !selectedItem || !NetworkHelper.nsIURL(selectedItem.attachment.url).query;
 
     let copyPostDataElement = $("#request-menu-context-copy-post-data");
     copyPostDataElement.hidden = !selectedItem || !selectedItem.attachment.requestPostData;
@@ -1971,6 +2060,12 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     let separators = $all(".request-menu-context-separator");
     Array.forEach(separators, separator => separator.hidden = !selectedItem);
+
+    let copyAsHar = $("#request-menu-context-copy-all-as-har");
+    copyAsHar.hidden = !NetMonitorView.RequestsMenu.items.length;
+
+    let saveAsHar = $("#request-menu-context-save-all-as-har");
+    saveAsHar.hidden = !NetMonitorView.RequestsMenu.items.length;
 
     let newTabElement = $("#request-menu-context-newtab");
     newTabElement.hidden = !selectedItem;
@@ -2010,7 +2105,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    */
   _getUriNameWithQuery: function(aUrl) {
     if (!(aUrl instanceof Ci.nsIURL)) {
-      aUrl = nsIURL(aUrl);
+      aUrl = NetworkHelper.nsIURL(aUrl);
     }
     let name = NetworkHelper.convertToUnicode(unescape(aUrl.fileName || aUrl.filePath || "/"));
     let query = NetworkHelper.convertToUnicode(unescape(aUrl.query));
@@ -2018,7 +2113,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   },
   _getUriHostPort: function(aUrl) {
     if (!(aUrl instanceof Ci.nsIURL)) {
-      aUrl = nsIURL(aUrl);
+      aUrl = NetworkHelper.nsIURL(aUrl);
     }
     return NetworkHelper.convertToUnicode(unescape(aUrl.hostPort));
   },
@@ -2107,6 +2202,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   _firstRequestStartedMillis: -1,
   _lastRequestEndedMillis: -1,
   _updateQueue: [],
+  _addQueue: [],
   _updateTimeout: null,
   _resizeTimeout: null,
   _activeFilters: ["all"],
@@ -2254,7 +2350,7 @@ CustomRequestView.prototype = {
    *        The URL to extract query string from.
    */
   updateCustomQuery: function(aUrl) {
-    let paramsArray = parseQueryString(nsIURL(aUrl).query);
+    let paramsArray = NetworkHelper.parseQueryString(NetworkHelper.nsIURL(aUrl).query);
     if (!paramsArray) {
       $("#custom-query").hidden = true;
       return;
@@ -2274,7 +2370,7 @@ CustomRequestView.prototype = {
     let queryString = writeQueryString(params);
 
     let url = $("#custom-url-value").value;
-    let oldQuery = nsIURL(url).query;
+    let oldQuery = NetworkHelper.nsIURL(url).query;
     let path = url.replace(oldQuery, queryString);
 
     $("#custom-url-value").value = path;
@@ -2687,7 +2783,7 @@ NetworkDetailsView.prototype = {
    *        The request's url.
    */
   _setRequestGetParams: function(aUrl) {
-    let query = nsIURL(aUrl).query;
+    let query = NetworkHelper.nsIURL(aUrl).query;
     if (query) {
       this._addParams(this._paramsQueryString, query);
     }
@@ -2758,7 +2854,7 @@ NetworkDetailsView.prototype = {
    *        A query string of params (e.g. "?foo=bar&baz=42").
    */
   _addParams: function(aName, aQueryString) {
-    let paramsArray = parseQueryString(aQueryString);
+    let paramsArray = NetworkHelper.parseQueryString(aQueryString);
     if (!paramsArray) {
       return;
     }
@@ -2852,7 +2948,7 @@ NetworkDetailsView.prototype = {
 
       // Immediately display additional information about the image:
       // file name, mime type and encoding.
-      $("#response-content-image-name-value").setAttribute("value", nsIURL(aUrl).fileName);
+      $("#response-content-image-name-value").setAttribute("value", NetworkHelper.nsIURL(aUrl).fileName);
       $("#response-content-image-mime-value").setAttribute("value", mimeType);
       $("#response-content-image-encoding-value").setAttribute("value", encoding);
 
@@ -3283,44 +3379,6 @@ PerformanceStatisticsView.prototype = {
  */
 let $ = (aSelector, aTarget = document) => aTarget.querySelector(aSelector);
 let $all = (aSelector, aTarget = document) => aTarget.querySelectorAll(aSelector);
-
-/**
- * Helper for getting an nsIURL instance out of a string.
- */
-function nsIURL(aUrl, aStore = nsIURL.store) {
-  if (aStore.has(aUrl)) {
-    return aStore.get(aUrl);
-  }
-  let uri = Services.io.newURI(aUrl, null, null).QueryInterface(Ci.nsIURL);
-  aStore.set(aUrl, uri);
-  return uri;
-}
-nsIURL.store = new Map();
-
-/**
- * Parse a url's query string into its components
- *
- * @param string aQueryString
- *        The query part of a url
- * @return array
- *         Array of query params {name, value}
- */
-function parseQueryString(aQueryString) {
-  // Make sure there's at least one param available.
-  // Be careful here, params don't necessarily need to have values, so
-  // no need to verify the existence of a "=".
-  if (!aQueryString) {
-    return;
-  }
-  // Turn the params string into an array containing { name: value } tuples.
-  let paramsArray = aQueryString.replace(/^[?&]/, "").split("&").map(e => {
-    let param = e.split("=");
-    return {
-      name: param[0] ? NetworkHelper.convertToUnicode(unescape(param[0])) : "",
-      value: param[1] ? NetworkHelper.convertToUnicode(unescape(param[1])) : ""
-    }});
-  return paramsArray;
-}
 
 /**
  * Parse text representation of multiple HTTP headers.

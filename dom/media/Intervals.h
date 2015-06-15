@@ -129,6 +129,11 @@ public:
     return mStart <= aX && aX < mEnd;
   }
 
+  bool ContainsWithStrictEnd(const T& aX) const
+  {
+    return mStart - mFuzz <= aX && aX < mEnd;
+  }
+
   bool Contains(const SelfType& aOther) const
   {
     return (mStart - mFuzz <= aOther.mStart + aOther.mFuzz) &&
@@ -138,6 +143,12 @@ public:
   bool ContainsStrict(const SelfType& aOther) const
   {
     return mStart <= aOther.mStart && aOther.mEnd <= mEnd;
+  }
+
+  bool ContainsWithStrictEnd(const SelfType& aOther) const
+  {
+    return (mStart - mFuzz <= aOther.mStart + aOther.mFuzz) &&
+      aOther.mEnd <= mEnd;
   }
 
   bool Intersects(const SelfType& aOther) const
@@ -389,6 +400,30 @@ public:
     return intervals;
   }
 
+  // Excludes an interval from an IntervalSet.
+  // This is done by inverting aInterval within the bounds of mIntervals
+  // and then doing the intersection.
+  SelfType& operator-= (const ElemType& aInterval)
+  {
+    if (aInterval.IsEmpty() || mIntervals.IsEmpty()) {
+      return *this;
+    }
+    T firstEnd = std::max(mIntervals[0].mStart, aInterval.mStart);
+    T secondStart = std::min(mIntervals.LastElement().mEnd, aInterval.mEnd);
+    ElemType startInterval(mIntervals[0].mStart, firstEnd, aInterval.mFuzz);
+    ElemType endInterval(secondStart, mIntervals.LastElement().mEnd, aInterval.mFuzz);
+    SelfType intervals(Move(startInterval));
+    intervals += Move(endInterval);
+    return Intersection(intervals);
+  }
+
+  SelfType operator- (const ElemType& aInterval)
+  {
+    SelfType intervals(*this);
+    intervals -= aInterval;
+    return intervals;
+  }
+
   // Mutate this IntervalSet to be the union of this and aOther.
   SelfType& Union(const SelfType& aOther)
   {
@@ -530,6 +565,15 @@ public:
   bool ContainsStrict(const T& aX) const {
     for (const auto& interval : mIntervals) {
       if (interval.ContainsStrict(aX)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool ContainsWithStrictEnd(const T& aX) const {
+    for (const auto& interval : mIntervals) {
+      if (interval.ContainsWithStrictEnd(aX)) {
         return true;
       }
     }

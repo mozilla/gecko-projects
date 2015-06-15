@@ -321,7 +321,7 @@
   <string name="site_settings_clear">&site_settings_clear;</string>
   <string name="site_settings_no_settings">&site_settings_no_settings;</string>
 
-  <string name="reading_list_added">&reading_list_added;</string>
+  <string name="reading_list_added">&reading_list_added2;</string>
   <string name="reading_list_removed">&reading_list_removed;</string>
   <string name="reading_list_remove">&reading_list_remove;</string>
   <string name="reading_list_duplicate">&reading_list_duplicate;</string>
@@ -385,7 +385,6 @@
   <string name="button_clear">&button_clear;</string>
   <string name="button_yes">&button_yes;</string>
   <string name="button_no">&button_no;</string>
-  <string name="button_remember">&button_remember;</string>
   <string name="button_copy">&button_copy;</string>
 
   <string name="firstrun_panel_title_welcome">&firstrun_panel_title_welcome;</string>
@@ -458,6 +457,7 @@
   <string name="identity_run_by">&identity_run_by;</string>
   <string name="identity_no_info">&identity_no_info;</string>
   <string name="identity_not_encrypted">&identity_not_encrypted;</string>
+  <string name="identity_encrypted">&identity_encrypted;</string>
   <string name="loaded_mixed_content_message">&loaded_mixed_content_message;</string>
   <string name="blocked_mixed_content_message_top">&blocked_mixed_content_message_top;</string>
   <string name="blocked_mixed_content_message_bottom">&blocked_mixed_content_message_bottom;</string>

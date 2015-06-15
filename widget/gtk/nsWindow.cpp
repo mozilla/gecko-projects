@@ -3256,6 +3256,7 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
         return;
     }
 
+    bool wasInFullscreen = mSizeState == nsSizeMode_Fullscreen;
     if (aEvent->new_window_state & GDK_WINDOW_STATE_ICONIFIED) {
         LOG(("\tIconified\n"));
         mSizeState = nsSizeMode_Minimized;
@@ -3282,8 +3283,14 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
 #endif //ACCESSIBILITY
     }
 
-    if (mWidgetListener)
+    if (mWidgetListener) {
       mWidgetListener->SizeModeChanged(mSizeState);
+
+      bool isInFullscreen = mSizeState == nsSizeMode_Fullscreen;
+      if (isInFullscreen != wasInFullscreen) {
+        mWidgetListener->FullscreenChanged(isInFullscreen);
+      }
+    }
 }
 
 void
@@ -5944,11 +5951,14 @@ nsWindow::NotifyIMEInternal(const IMENotification& aIMENotification)
         case NOTIFY_IME_OF_BLUR:
             mIMModule->OnFocusChangeInGecko(false);
             return NS_OK;
+        case NOTIFY_IME_OF_POSITION_CHANGE:
+            mIMModule->OnLayoutChange();
+            return NS_OK;
         case NOTIFY_IME_OF_COMPOSITION_UPDATE:
             mIMModule->OnUpdateComposition();
             return NS_OK;
         case NOTIFY_IME_OF_SELECTION_CHANGE:
-            mIMModule->OnSelectionChange(this);
+            mIMModule->OnSelectionChange(this, aIMENotification);
             return NS_OK;
         default:
             return NS_ERROR_NOT_IMPLEMENTED;
@@ -5987,7 +5997,8 @@ nsIMEUpdatePreference
 nsWindow::GetIMEUpdatePreference()
 {
     nsIMEUpdatePreference updatePreference(
-        nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE);
+        nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE |
+        nsIMEUpdatePreference::NOTIFY_POSITION_CHANGE);
     // We shouldn't notify IME of selection change caused by changes of
     // composition string.  Therefore, we don't need to be notified selection
     // changes which are caused by compositionchange events handled.

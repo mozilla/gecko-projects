@@ -51,6 +51,10 @@ nsContextMenu.prototype = {
     this.isContentSelected = !this.selectionInfo.docSelectionIsCollapsed;
     this.onPlainTextLink = false;
 
+    let bookmarkPage = document.getElementById("context-bookmarkpage");
+    if (bookmarkPage)
+      BookmarkingUI.onCurrentPageContextPopupShowing();
+
     // Initialize (disable/remove) menu items.
     this.initItems();
 
@@ -198,29 +202,6 @@ nsContextMenu.prototype = {
                               (targetURI.schemeIs("about") && ReaderMode.getOriginalUrl(targetURI.spec)));
     canPocket = canPocket && window.gBrowser && this.browser.getTabBrowser() == window.gBrowser;
 
-    if (canPocket) {
-      let locale = Cc["@mozilla.org/chrome/chrome-registry;1"].
-                   getService(Ci.nsIXULChromeRegistry).
-                   getSelectedLocale("browser");
-      if (locale != "en-US") {
-        if (locale == "ja-JP-mac")
-          locale = "ja";
-        let url = "chrome://browser/content/browser-pocket-" + locale + ".properties";
-        let bundle = Services.strings.createBundle(url);
-        let saveToPocketItem = document.getElementById("context-pocket");
-        let saveLinkToPocketItem = document.getElementById("context-savelinktopocket");
-        try {
-          saveToPocketItem.setAttribute("label", bundle.GetStringFromName("saveToPocketCmd.label"));
-          saveToPocketItem.setAttribute("accesskey", bundle.GetStringFromName("saveToPocketCmd.accesskey"));
-          saveLinkToPocketItem.setAttribute("label", bundle.GetStringFromName("saveLinkToPocketCmd.label"));
-          saveLinkToPocketItem.setAttribute("accesskey", bundle.GetStringFromName("saveLinkToPocketCmd.accesskey"));
-        } catch (err) {
-          // GetStringFromName throws when the bundle doesn't exist.  In that
-          // case, the item will retain the browser-pocket.dtd en-US string that
-          // it has in the markup.
-        }
-      }
-    }
     this.showItem("context-pocket", canPocket && showSaveCurrentPageToPocket);
     let showSaveLinkToPocket = canPocket && !showSaveCurrentPageToPocket &&
                                (this.onSaveableLink || this.onPlainTextLink);
@@ -292,10 +273,14 @@ nsContextMenu.prototype = {
 
   initMiscItems: function CM_initMiscItems() {
     // Use "Bookmark This Link" if on a link.
-    this.showItem("context-bookmarkpage",
+    let bookmarkPage = document.getElementById("context-bookmarkpage");
+    this.showItem(bookmarkPage,
                   !(this.isContentSelected || this.onTextInput || this.onLink ||
                     this.onImage || this.onVideo || this.onAudio || this.onSocial ||
                     this.onCanvas));
+    bookmarkPage.setAttribute("tooltiptext", bookmarkPage.getAttribute("buttontooltiptext"));
+    bookmarkPage.disabled = bookmarkPage.hasAttribute("stardisabled");
+
     this.showItem("context-bookmarklink", (this.onLink && !this.onMailtoLink &&
                                            !this.onSocial) || this.onPlainTextLink);
     this.showItem("context-keywordfield",

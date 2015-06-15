@@ -14,11 +14,15 @@
 #include "MediaSourceUtils.h"
 #include "SourceBufferDecoder.h"
 #include "VideoUtils.h"
+#include "MediaFormatReader.h"
+#include "MediaSourceDemuxer.h"
 
 extern PRLogModuleInfo* GetMediaSourceLog();
 
 #define MSE_DEBUG(arg, ...) MOZ_LOG(GetMediaSourceLog(), mozilla::LogLevel::Debug, ("MediaSourceDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #define MSE_DEBUGV(arg, ...) MOZ_LOG(GetMediaSourceLog(), mozilla::LogLevel::Verbose, ("MediaSourceDecoder(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+
+using namespace mozilla::media;
 
 namespace mozilla {
 
@@ -26,8 +30,10 @@ class SourceBufferDecoder;
 
 MediaSourceDecoder::MediaSourceDecoder(dom::HTMLMediaElement* aElement)
   : mMediaSource(nullptr)
-  , mMediaSourceDuration(UnspecifiedNaN<double>())
+  , mIsUsingFormatReader(Preferences::GetBool("media.mediasource.format-reader", false))
+  , mEnded(false)
 {
+  SetExplicitDuration(UnspecifiedNaN<double>());
   Init(aElement);
 }
 
@@ -41,7 +47,12 @@ MediaSourceDecoder::Clone()
 MediaDecoderStateMachine*
 MediaSourceDecoder::CreateStateMachine()
 {
-  mReader = new MediaSourceReader(this);
+  if (mIsUsingFormatReader) {
+    mDemuxer = new MediaSourceDemuxer();
+    mReader = new MediaFormatReader(this, mDemuxer);
+  } else {
+    mReader = new MediaSourceReader(this);
+  }
   return new MediaDecoderStateMachine(this, mReader);
 }
 
@@ -128,29 +139,29 @@ MediaSourceDecoder::DetachMediaSource()
 already_AddRefed<SourceBufferDecoder>
 MediaSourceDecoder::CreateSubDecoder(const nsACString& aType, int64_t aTimestampOffset)
 {
-  MOZ_ASSERT(mReader);
-  return mReader->CreateSubDecoder(aType, aTimestampOffset);
+  MOZ_ASSERT(mReader && !mIsUsingFormatReader);
+  return GetReader()->CreateSubDecoder(aType, aTimestampOffset);
 }
 
 void
 MediaSourceDecoder::AddTrackBuffer(TrackBuffer* aTrackBuffer)
 {
-  MOZ_ASSERT(mReader);
-  mReader->AddTrackBuffer(aTrackBuffer);
+  MOZ_ASSERT(mReader && !mIsUsingFormatReader);
+  GetReader()->AddTrackBuffer(aTrackBuffer);
 }
 
 void
 MediaSourceDecoder::RemoveTrackBuffer(TrackBuffer* aTrackBuffer)
 {
-  MOZ_ASSERT(mReader);
-  mReader->RemoveTrackBuffer(aTrackBuffer);
+  MOZ_ASSERT(mReader && !mIsUsingFormatReader);
+  GetReader()->RemoveTrackBuffer(aTrackBuffer);
 }
 
 void
 MediaSourceDecoder::OnTrackBufferConfigured(TrackBuffer* aTrackBuffer, const MediaInfo& aInfo)
 {
-  MOZ_ASSERT(mReader);
-  mReader->OnTrackBufferConfigured(aTrackBuffer, aInfo);
+  MOZ_ASSERT(mReader && !mIsUsingFormatReader);
+  GetReader()->OnTrackBufferConfigured(aTrackBuffer, aInfo);
 }
 
 void
@@ -158,57 +169,27 @@ MediaSourceDecoder::Ended(bool aEnded)
 {
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   static_cast<MediaSourceResource*>(GetResource())->SetEnded(aEnded);
-  mReader->Ended(aEnded);
+  if (!mIsUsingFormatReader) {
+    GetReader()->Ended(aEnded);
+  }
+  mEnded = true;
   mon.NotifyAll();
 }
 
 bool
 MediaSourceDecoder::IsExpectingMoreData()
 {
-  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  return !mReader->IsEnded();
-}
-
-class DurationChangedRunnable : public nsRunnable {
-public:
-  DurationChangedRunnable(MediaSourceDecoder* aDecoder,
-                          double aOldDuration,
-                          double aNewDuration)
-    : mDecoder(aDecoder)
-    , mOldDuration(aOldDuration)
-    , mNewDuration(aNewDuration)
-  { }
-
-  NS_IMETHOD Run() override final {
-    mDecoder->DurationChanged(mOldDuration, mNewDuration);
-    return NS_OK;
-  }
-
-private:
-  RefPtr<MediaSourceDecoder> mDecoder;
-  double mOldDuration;
-  double mNewDuration;
-};
-
-void
-MediaSourceDecoder::DurationChanged(double aOldDuration, double aNewDuration)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  // Run the MediaSource duration changed algorithm
-  if (mMediaSource) {
-    mMediaSource->DurationChange(aOldDuration, aNewDuration);
-  }
-  // Run the MediaElement duration changed algorithm
-  MediaDecoder::DurationChanged();
+  return !mEnded;
 }
 
 void
 MediaSourceDecoder::SetInitialDuration(int64_t aDuration)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   // Only use the decoded duration if one wasn't already
   // set.
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  if (!mMediaSource || !IsNaN(mMediaSourceDuration)) {
+  if (!mMediaSource || !IsNaN(ExplicitDuration())) {
     return;
   }
   double duration = aDuration;
@@ -222,8 +203,9 @@ MediaSourceDecoder::SetInitialDuration(int64_t aDuration)
 void
 MediaSourceDecoder::SetMediaSourceDuration(double aDuration, MSRangeRemovalAction aAction)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  double oldDuration = mMediaSourceDuration;
+  double oldDuration = ExplicitDuration();
   if (aDuration >= 0) {
     int64_t checkedDuration;
     if (NS_FAILED(SecondsToUsecs(aDuration, checkedDuration))) {
@@ -231,39 +213,17 @@ MediaSourceDecoder::SetMediaSourceDuration(double aDuration, MSRangeRemovalActio
       // We want a very bigger number, but not infinity.
       checkedDuration = INT64_MAX - 1;
     }
-    GetStateMachine()->SetDuration(checkedDuration);
-    mMediaSourceDuration = aDuration;
+    SetExplicitDuration(aDuration);
   } else {
-    GetStateMachine()->SetDuration(INT64_MAX);
-    mMediaSourceDuration = PositiveInfinity<double>();
+    SetExplicitDuration(PositiveInfinity<double>());
   }
-  if (mReader) {
-    mReader->SetMediaSourceDuration(mMediaSourceDuration);
+  if (!mIsUsingFormatReader && GetReader()) {
+    GetReader()->SetMediaSourceDuration(ExplicitDuration());
   }
-  ScheduleDurationChange(oldDuration, aDuration, aAction);
-}
 
-void
-MediaSourceDecoder::ScheduleDurationChange(double aOldDuration,
-                                           double aNewDuration,
-                                           MSRangeRemovalAction aAction)
-{
-  if (aAction == MSRangeRemovalAction::SKIP) {
-    if (NS_IsMainThread()) {
-      MediaDecoder::DurationChanged();
-    } else {
-      nsCOMPtr<nsIRunnable> task =
-        NS_NewRunnableMethod(this, &MediaDecoder::DurationChanged);
-      NS_DispatchToMainThread(task);
-    }
-  } else {
-    if (NS_IsMainThread()) {
-      DurationChanged(aOldDuration, aNewDuration);
-    } else {
-      nsCOMPtr<nsIRunnable> task =
-        new DurationChangedRunnable(this, aOldDuration, aNewDuration);
-      NS_DispatchToMainThread(task);
-    }
+  MediaDecoder::DurationChanged(TimeUnit::FromSeconds(ExplicitDuration()));
+  if (mMediaSource && aAction != MSRangeRemovalAction::SKIP) {
+    mMediaSource->DurationChange(oldDuration, aDuration);
   }
 }
 
@@ -271,27 +231,33 @@ double
 MediaSourceDecoder::GetMediaSourceDuration()
 {
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  return mMediaSourceDuration;
+  return ExplicitDuration();
 }
 
 void
 MediaSourceDecoder::NotifyTimeRangesChanged()
 {
-  MOZ_ASSERT(mReader);
-  mReader->NotifyTimeRangesChanged();
+  MOZ_ASSERT(mReader && !mIsUsingFormatReader);
+  GetReader()->NotifyTimeRangesChanged();
 }
 
 void
 MediaSourceDecoder::PrepareReaderInitialization()
 {
+  if (mIsUsingFormatReader) {
+    return;
+  }
   MOZ_ASSERT(mReader);
-  mReader->PrepareInitialization();
+  GetReader()->PrepareInitialization();
 }
 
 void
 MediaSourceDecoder::GetMozDebugReaderData(nsAString& aString)
 {
-  mReader->GetMozDebugReaderData(aString);
+  if (mIsUsingFormatReader) {
+    return;
+  }
+  GetReader()->GetMozDebugReaderData(aString);
 }
 
 #ifdef MOZ_EME
@@ -300,9 +266,10 @@ MediaSourceDecoder::SetCDMProxy(CDMProxy* aProxy)
 {
   nsresult rv = MediaDecoder::SetCDMProxy(aProxy);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = mReader->SetCDMProxy(aProxy);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  if (!mIsUsingFormatReader) {
+    rv = GetReader()->SetCDMProxy(aProxy);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
   if (aProxy) {
     // The sub readers can't decrypt EME content until they have a CDMProxy,
     // and the CDMProxy knows the capabilities of the CDM. The MediaSourceReader
@@ -322,14 +289,14 @@ MediaSourceDecoder::SetCDMProxy(CDMProxy* aProxy)
 bool
 MediaSourceDecoder::IsActiveReader(MediaDecoderReader* aReader)
 {
-  return mReader->IsActiveReader(aReader);
+  return !mIsUsingFormatReader && GetReader()->IsActiveReader(aReader);
 }
 
 double
 MediaSourceDecoder::GetDuration()
 {
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  return mMediaSourceDuration;
+  return ExplicitDuration();
 }
 
 already_AddRefed<SourceBufferDecoder>
@@ -337,6 +304,7 @@ MediaSourceDecoder::SelectDecoder(int64_t aTarget,
                                   int64_t aTolerance,
                                   const nsTArray<nsRefPtr<SourceBufferDecoder>>& aTrackDecoders)
 {
+  MOZ_ASSERT(!mIsUsingFormatReader);
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
 
   media::TimeUnit target{media::TimeUnit::FromMicroseconds(aTarget)};
