@@ -149,8 +149,6 @@ ContainerRenderVR(ContainerT* aContainer,
 
   RefPtr<CompositingRenderTarget> previousTarget = compositor->GetCurrentRenderTarget();
 
-  gfx::IntRect visibleRect = aContainer->GetEffectiveVisibleRegion().GetBounds();
-
   float opacity = aContainer->GetEffectiveOpacity();
 
   // The size of each individual eye surface
