@@ -45,3 +45,7 @@ pref("b2g.nativeWindowGeometry.height", 600);
 pref("b2g.nativeWindowGeometry.screenX", 0);
 pref("b2g.nativeWindowGeometry.screenY", 0);
 pref("b2g.nativeWindowGeometry.fullscreen", false);
+
+#ifdef ENABLE_MARIONETTE
+pref("b2g.is_mulet", true);
+#endif
