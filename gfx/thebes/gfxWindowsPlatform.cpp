@@ -442,6 +442,9 @@ gfxWindowsPlatform::gfxWindowsPlatform()
 gfxWindowsPlatform::~gfxWindowsPlatform()
 {
     mDeviceManager = nullptr;
+    mD3D11Device = nullptr;
+    mD3D11ContentDevice = nullptr;
+    mD3D11ImageBridgeDevice = nullptr;
 
     // not calling FT_Done_FreeType because cairo may still hold references to
     // these FT_Faces.  See bug 458169.
@@ -452,6 +455,8 @@ gfxWindowsPlatform::~gfxWindowsPlatform()
 #endif
 
     mozilla::gfx::Factory::D2DCleanup();
+
+    mAdapter = nullptr;
 
     /* 
      * Uninitialize COM 
@@ -1830,23 +1835,7 @@ bool DoesD3D11TextureSharingWork(ID3D11Device *device)
 
 bool DoesD3D11AlphaTextureSharingWork(ID3D11Device *device)
 {
-  nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
-  if (gfxInfo) {
-    // A8 texture sharing crashes on this intel driver version (and no others)
-    // so just avoid using it in that case.
-    nsString adapterVendor;
-    nsString driverVersion;
-    gfxInfo->GetAdapterVendorID(adapterVendor);
-    gfxInfo->GetAdapterDriverVersion(driverVersion);
-
-    nsAString &intelVendorID = (nsAString &)GfxDriverInfo::GetDeviceVendor(VendorIntel);
-    if (adapterVendor.Equals(intelVendorID, nsCaseInsensitiveStringComparator()) &&
-        driverVersion.Equals(NS_LITERAL_STRING("8.15.10.2086"))) {
-      return false;
-    }
-  }
-
-  return DoesD3D11TextureSharingWorkInternal(device, DXGI_FORMAT_A8_UNORM, D3D11_BIND_SHADER_RESOURCE);
+  return DoesD3D11TextureSharingWorkInternal(device, DXGI_FORMAT_R8_UNORM, D3D11_BIND_SHADER_RESOURCE);
 }
 
 void

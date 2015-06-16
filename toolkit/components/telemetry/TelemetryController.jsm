@@ -54,6 +54,7 @@ const TELEMETRY_TEST_DELAY = 100;
 
 // Ping types.
 const PING_TYPE_MAIN = "main";
+const PING_TYPE_DELETION = "deletion";
 
 // Session ping reasons.
 const REASON_GATHER_PAYLOAD = "gather-payload";
@@ -143,6 +144,7 @@ this.TelemetryController = Object.freeze({
    */
   reset: function() {
     Impl._clientID = null;
+    Impl._detachObservers();
     TelemetryStorage.reset();
     TelemetrySend.reset();
 
@@ -153,6 +155,13 @@ this.TelemetryController = Object.freeze({
    */
   setup: function() {
     return Impl.setupTelemetry(true);
+  },
+
+  /**
+   * Used only for testing purposes.
+   */
+  setupContent: function() {
+    return Impl.setupContentTelemetry(true);
   },
 
   /**
@@ -587,21 +596,20 @@ let Impl = {
     Telemetry.canRecordBase = enabled || IS_UNIFIED_TELEMETRY;
 
 #ifdef MOZILLA_OFFICIAL
-    if (!Telemetry.isOfficialTelemetry && !this._testMode) {
-      // We can't send data; no point in initializing observers etc.
-      // Only do this for official builds so that e.g. developer builds
-      // still enable Telemetry based on prefs.
-      Telemetry.canRecordExtended = false;
-      this._log.config("enableTelemetryRecording - Can't send data, disabling extended Telemetry recording.");
-    }
+    // Enable extended telemetry if:
+    //  * the telemetry preference is set and
+    //  * this is an official build or we are in test-mode
+    // We only do the latter check for official builds so that e.g. developer builds
+    // still enable Telemetry based on prefs.
+    Telemetry.canRecordExtended = enabled && (Telemetry.isOfficialTelemetry || this._testMode);
+#else
+    // Turn off extended telemetry recording if disabled by preferences or if base/telemetry
+    // telemetry recording is off.
+    Telemetry.canRecordExtended = enabled;
 #endif
 
-    if (!enabled || !Telemetry.canRecordBase) {
-      // Turn off extended telemetry recording if disabled by preferences or if base/telemetry
-      // telemetry recording is off.
-      Telemetry.canRecordExtended = false;
-      this._log.config("enableTelemetryRecording - Disabling extended Telemetry recording.");
-    }
+    this._log.config("enableTelemetryRecording - canRecordBase:" + Telemetry.canRecordBase +
+                     ", canRecordExtended: " + Telemetry.canRecordExtended);
 
     return Telemetry.canRecordBase;
   },
@@ -647,6 +655,8 @@ let Impl = {
       return Promise.resolve();
     }
 
+    this._attachObservers();
+
     // For very short session durations, we may never load the client
     // id from disk.
     // We try to cache it in prefs to avoid this, even though this may
@@ -689,6 +699,21 @@ let Impl = {
     return this._delayedInitTaskDeferred.promise;
   },
 
+  /**
+   * This triggers basic telemetry initialization for content processes.
+   * @param {Boolean} [testing=false] True if we are in test mode, false otherwise.
+   */
+  setupContentTelemetry: function (testing = false) {
+    this._testMode = testing;
+
+    // We call |enableTelemetryRecording| here to make sure that Telemetry.canRecord* flags
+    // are in sync between chrome and content processes.
+    if (!this.enableTelemetryRecording()) {
+      this._log.trace("setupContentTelemetry - Content process recording disabled.");
+      return;
+    }
+  },
+
   // Do proper shutdown waiting and cleanup.
   _cleanupOnShutdown: Task.async(function*() {
     if (!this._initialized) {
@@ -696,14 +721,15 @@ let Impl = {
     }
 
     Preferences.ignore(PREF_BRANCH_LOG, configureLogging);
+    this._detachObservers();
 
     // Now do an orderly shutdown.
     try {
-      // First wait for clients processing shutdown.
-      yield this._shutdownBarrier.wait();
-
       // Stop any ping sending.
       yield TelemetrySend.shutdown();
+
+      // First wait for clients processing shutdown.
+      yield this._shutdownBarrier.wait();
 
       // ... and wait for any outstanding async ping activity.
       yield this._connectionsBarrier.wait();
@@ -760,13 +786,8 @@ let Impl = {
       // profile-after-change is only registered for chrome processes.
       return this.setupTelemetry();
     case "app-startup":
-      // app-startup is only registered for content processes. We call
-      // |enableTelemetryRecording| here to make sure that Telemetry.canRecord* flags
-      // are in sync between chrome and content processes.
-      if (!this.enableTelemetryRecording()) {
-        this._log.trace("observe - Content process recording disabled.");
-        return;
-      }
+      // app-startup is only registered for content processes.
+      return this.setupContentTelemetry();
       break;
     }
   },
@@ -786,6 +807,37 @@ let Impl = {
       shutdownBarrier: this._shutdownBarrier.state,
       connectionsBarrier: this._connectionsBarrier.state,
     };
+  },
+
+  /**
+   * Called whenever the FHR Upload preference changes (e.g. when user disables FHR from
+   * the preferences panel), this triggers sending the deletion ping.
+   */
+  _onUploadPrefChange: function() {
+    const uploadEnabled = Preferences.get(PREF_FHR_UPLOAD_ENABLED, false);
+    if (uploadEnabled) {
+      // There's nothing we should do if we are enabling upload.
+      return;
+    }
+    // Send the deletion ping.
+    this._log.trace("_onUploadPrefChange - Sending deletion ping.");
+    this.submitExternalPing(PING_TYPE_DELETION, {}, { addClientId: true });
+  },
+
+  _attachObservers: function() {
+    if (IS_UNIFIED_TELEMETRY) {
+      // Watch the FHR upload setting to trigger deletion pings.
+      Preferences.observe(PREF_FHR_UPLOAD_ENABLED, this._onUploadPrefChange, this);
+    }
+  },
+
+  /**
+   * Remove the preference observer to avoid leaks.
+   */
+  _detachObservers: function() {
+    if (IS_UNIFIED_TELEMETRY) {
+      Preferences.ignore(PREF_FHR_UPLOAD_ENABLED, this._onUploadPrefChange, this);
+    }
   },
 
   /**
