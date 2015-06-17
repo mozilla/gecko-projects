@@ -368,6 +368,7 @@ let {
   Debugger,
   createSandbox,
   dump,
+  rpc,
   loadSubScript,
   reportError,
   setImmediate,
@@ -405,6 +406,8 @@ let {
       });
     };
 
+    let rpc = undefined;
+
     let subScriptLoader = Cc['@mozilla.org/moz/jssubscript-loader;1'].
                  getService(Ci.mozIJSSubScriptLoader);
 
@@ -427,6 +430,7 @@ let {
       Debugger,
       createSandbox,
       dump,
+      rpc,
       loadSubScript,
       reportError,
       setImmediate,
@@ -435,6 +439,8 @@ let {
   } else { // Worker thread
     let requestors = [];
 
+    let scope = this;
+
     let xpcInspector = {
       get lastNestRequestor() {
         return requestors.length === 0 ? null : requestors[0];
@@ -442,13 +448,13 @@ let {
 
       enterNestedEventLoop: function (requestor) {
         requestors.push(requestor);
-        this.enterEventLoop();
+        scope.enterEventLoop();
         return requestors.length;
       },
 
       exitNestedEventLoop: function () {
         requestors.pop();
-        this.leaveEventLoop();
+        scope.leaveEventLoop();
         return requestors.length;
       }
     };
@@ -457,6 +463,7 @@ let {
       Debugger: this.Debugger,
       createSandbox: this.createSandbox,
       dump: this.dump,
+      rpc: this.rpc,
       loadSubScript: this.loadSubScript,
       reportError: this.reportError,
       setImmediate: this.setImmediate,
@@ -475,6 +482,7 @@ this.worker = new WorkerDebuggerLoader({
     "dump": dump,
     "loader": loader,
     "reportError": reportError,
+    "rpc": rpc,
     "setImmediate": setImmediate
   },
   loadSubScript: loadSubScript,

@@ -720,6 +720,12 @@ loop.panel = (function(_, mozL10n) {
       // even if there's a small delay.
 
       this.props.mozLoop.getSelectedTabMetadata(function callback(metadata) {
+        // Bail out when the component is not mounted (anymore).
+        // This occurs during test runs. See bug 1174611 for more info.
+        if (!this.isMounted()) {
+          return;
+        }
+
         var previewImage = metadata.favicon || "";
         var description = metadata.title || metadata.description;
         var url = metadata.url;
@@ -765,20 +771,19 @@ loop.panel = (function(_, mozL10n) {
         hide: !hostname ||
           !this.props.mozLoop.getLoopPref("contextInConversations.enabled")
       });
-      var thumbnail = this.state.previewImage || "loop/shared/img/icons-16x16.svg#globe";
 
       return (
         React.createElement("div", {className: "new-room-view"}, 
           React.createElement("div", {className: contextClasses}, 
             React.createElement(Checkbox, {label: mozL10n.get("context_inroom_label"), 
                       onChange: this.onCheckboxChange}), 
-            React.createElement("div", {className: "context-content"}, 
-              React.createElement("img", {className: "context-preview", src: thumbnail}), 
-              React.createElement("span", {className: "context-description"}, 
-                this.state.description, 
-                React.createElement("span", {className: "context-url"}, hostname)
-              )
-            )
+            React.createElement(sharedViews.ContextUrlView, {
+              allowClick: false, 
+              description: this.state.description, 
+              showContextTitle: false, 
+              thumbnail: this.state.previewImage, 
+              url: this.state.url, 
+              useDesktopPaths: true})
           ), 
           React.createElement("button", {className: "btn btn-info new-room-button", 
                   onClick: this.handleCreateButtonClick, 
