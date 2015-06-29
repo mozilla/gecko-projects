@@ -339,6 +339,13 @@
     "n_buckets": 50,
     "description": "Time spent running a JS GC slice (ms)"
   },
+  "GC_SLOW_PHASE": {
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 75,
+    "description": "The longest phase in any slice that goes over 2x the budget"
+  },
   "GC_MMU_50": {
     "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
     "expires_in_version": "never",
@@ -6880,6 +6887,13 @@
     "kind": "boolean",
     "description": "The result of the startup default desktop browser check."
   },
+  "WIN_10_DEFAULT_BROWSER_AB_TEST": {
+    "alert_emails": ["jwein@mozilla.com"],
+    "expires_in_version": "45",
+    "kind": "enumerated",
+    "n_values": 4,
+    "description": "A/B test of different default browser dialogs on Windows 10 (0=openas-notdefault, 1=openas-default, 2=modernsettings-notdefault, 3=modernsettings-default)."
+  },
   "BROWSER_IS_ASSIST_DEFAULT": {
     "expires_in_version": "never",
     "kind": "boolean",
@@ -8232,5 +8246,24 @@
     "n_values": 20,
     "releaseChannelCollection": "opt-out",
     "description": "Reports whether or not graphics drivers crashed during startup."
+  },
+  "GRAPHICS_SANITY_TEST_OS_SNAPSHOT": {
+    "alert_emails": ["danderson@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 10,
+    "releaseChannelCollection": "opt-out",
+    "description": "Reports whether the graphics sanity test passed an OS snapshot test. 0=Pass, 1=Fail, 2=Error, 3=Timed out."
+  },
+  "NONLOWERCASE_NONHTML_ATTR_NODE_SET": {
+    "expires_in_version": "never",
+    "kind": "flag",
+    "description": "An Attr node that's not namespace-aware and was created from an HTML document is set on a non-HTML element and has a name containing uppercase ASCII chars"
+  },
+  "FENNEC_TITLE_IN_TITLEBAR_ENABLED": {
+    "alert_emails": ["michael.l.comella@gmail.com"],
+    "expires_in_version": "43",
+    "kind": "boolean",
+    "description": "Is the title shown in the url bar (as determined by the titlebar title or url preference)?"
   }
 }

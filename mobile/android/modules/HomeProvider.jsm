@@ -5,6 +5,8 @@
 
 "use strict";
 
+/*globals gSyncCheckIntervalSecs, gUpdateTimerManager, Sqlite, DB_PATH */
+
 this.EXPORTED_SYMBOLS = [ "HomeProvider" ];
 
 const { utils: Cu, classes: Cc, interfaces: Ci } = Components;
@@ -21,8 +23,9 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
  * SCHEMA_VERSION history:
  *   1: Create HomeProvider (bug 942288)
  *   2: Add filter column to items table (bug 942295/975841)
+ *   3: Add background_color and background_url columns (bug 1157539)
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // The maximum number of items you can attempt to save at once.
 const MAX_SAVE_COUNT = 100;
@@ -54,6 +57,8 @@ const SQL = {
       "title TEXT," +
       "description TEXT," +
       "image_url TEXT," +
+      "background_color TEXT," +
+      "background_url TEXT," +
       "filter TEXT," +
       "created INTEGER" +
     ")",
@@ -62,11 +67,17 @@ const SQL = {
     "DROP TABLE items",
 
   insertItem:
-    "INSERT INTO items (dataset_id, url, title, description, image_url, filter, created) " +
-      "VALUES (:dataset_id, :url, :title, :description, :image_url, :filter, :created)",
+    "INSERT INTO items (dataset_id, url, title, description, image_url, background_color, background_url, filter, created) " +
+      "VALUES (:dataset_id, :url, :title, :description, :image_url, :background_color, :background_url, :filter, :created)",
 
   deleteFromDataset:
-    "DELETE FROM items WHERE dataset_id = :dataset_id"
+    "DELETE FROM items WHERE dataset_id = :dataset_id",
+
+  addColumnBackgroundColor:
+    "ALTER TABLE items ADD COLUMN background_color TEXT",
+
+  addColumnBackgroundUrl:
+    "ALTER TABLE items ADD COLUMN background_url TEXT",
 }
 
 /**
@@ -116,18 +127,18 @@ function syncTimerCallback(timer) {
   }
 }
 
-this.HomeStorage = function(datasetId) {
+let HomeStorage = function(datasetId) {
   this.datasetId = datasetId;
 };
 
-this.ValidationError = function(message) {
+let ValidationError = function(message) {
   this.name = "ValidationError";
   this.message = message;
 };
 ValidationError.prototype = new Error();
 ValidationError.prototype.constructor = ValidationError;
 
-this.HomeProvider = Object.freeze({
+let HomeProvider = Object.freeze({
   ValidationError: ValidationError,
 
   /**
@@ -204,7 +215,7 @@ var gDatabaseEnsured = false;
  * Creates the database schema.
  */
 function createDatabase(db) {
-  return Task.spawn(function create_database_task() {
+  return Task.spawn(function* create_database_task() {
     yield db.execute(SQL.createItemsTable);
   });
 }
@@ -213,16 +224,22 @@ function createDatabase(db) {
  * Migrates the database schema to a new version.
  */
 function upgradeDatabase(db, oldVersion, newVersion) {
-  return Task.spawn(function upgrade_database_task() {
-    for (let v = oldVersion + 1; v <= newVersion; v++) {
-      switch(v) {
-        case 2:
-          // Recreate the items table discarding any
-          // existing data.
-          yield db.execute(SQL.dropItemsTable);
-          yield db.execute(SQL.createItemsTable);
-          break;
-      }
+  return Task.spawn(function* upgrade_database_task() {
+    switch (oldVersion) {
+      case 1:
+        // Migration from v1 to latest:
+        // Recreate the items table discarding any
+        // existing data.
+        yield db.execute(SQL.dropItemsTable);
+        yield db.execute(SQL.createItemsTable);
+        break;
+
+      case 2:
+        // Migration from v2 to latest:
+        // Add new columns: background_color, background_url
+        yield db.execute(SQL.addColumnBackgroundColor);
+        yield db.execute(SQL.addColumnBackgroundUrl);
+        break;
     }
   });
 }
@@ -236,7 +253,7 @@ function upgradeDatabase(db, oldVersion, newVersion) {
  * @resolves Handle on an opened SQLite database.
  */
 function getDatabaseConnection() {
-  return Task.spawn(function get_database_connection_task() {
+  return Task.spawn(function* get_database_connection_task() {
     let db = yield Sqlite.openConnection({ path: DB_PATH });
     if (gDatabaseEnsured) {
       throw new Task.Result(db);
@@ -335,10 +352,10 @@ HomeStorage.prototype = {
         ": you cannot save more than " + MAX_SAVE_COUNT + " items at once";
     }
 
-    return Task.spawn(function save_task() {
+    return Task.spawn(function* save_task() {
       let db = yield getDatabaseConnection();
       try {
-        yield db.executeTransaction(function save_transaction() {
+        yield db.executeTransaction(function* save_transaction() {
           if (options && options.replace) {
             yield db.executeCached(SQL.deleteFromDataset, { dataset_id: this.datasetId });
           }
@@ -354,6 +371,8 @@ HomeStorage.prototype = {
               title: item.title,
               description: item.description,
               image_url: item.image_url,
+              background_color: item.background_color,
+              background_url: item.background_url,
               filter: item.filter,
               created: Date.now()
             };
@@ -375,7 +394,7 @@ HomeStorage.prototype = {
    * @resolves When the operation has completed.
    */
   deleteAll: function() {
-    return Task.spawn(function delete_all_task() {
+    return Task.spawn(function* delete_all_task() {
       let db = yield getDatabaseConnection();
       try {
         let params = { dataset_id: this.datasetId };

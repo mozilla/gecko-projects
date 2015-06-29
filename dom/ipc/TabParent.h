@@ -222,8 +222,7 @@ public:
                                 const CSSRect& aRect) override;
     virtual bool RecvUpdateZoomConstraints(const uint32_t& aPresShellId,
                                            const ViewID& aViewId,
-                                           const bool& aIsRoot,
-                                           const ZoomConstraints& aConstraints) override;
+                                           const MaybeZoomConstraints& aConstraints) override;
     virtual bool RecvContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
                                                const uint64_t& aInputBlockId,
                                                const bool& aPreventDefault) override;
@@ -273,6 +272,7 @@ public:
                               APZStateChange aChange,
                               int aArg);
     void NotifyMouseScrollTestEvent(const ViewID& aScrollId, const nsString& aEvent);
+    void NotifyFlushComplete();
     void Activate();
     void Deactivate();
 
@@ -469,7 +469,7 @@ protected:
 
     // IME
     static TabParent *mIMETabParent;
-    ContentCache mContentCache;
+    ContentCacheInParent mContentCache;
 
     nsIntRect mRect;
     ScreenIntSize mDimensions;

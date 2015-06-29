@@ -190,8 +190,7 @@ public:
     bool HandlePossibleViewportChange(const ScreenIntSize& aOldScreenSize);
     virtual bool DoUpdateZoomConstraints(const uint32_t& aPresShellId,
                                          const mozilla::layers::FrameMetrics::ViewID& aViewId,
-                                         const bool& aIsRoot,
-                                         const mozilla::layers::ZoomConstraints& aConstraints) = 0;
+                                         const Maybe<mozilla::layers::ZoomConstraints>& aConstraints) = 0;
 
     virtual ScreenIntSize GetInnerSize() = 0;
 
@@ -311,8 +310,7 @@ public:
                                     nsIPrincipal* aPrincipal) override;
     virtual bool DoUpdateZoomConstraints(const uint32_t& aPresShellId,
                                          const ViewID& aViewId,
-                                         const bool& aIsRoot,
-                                         const ZoomConstraints& aConstraints) override;
+                                         const Maybe<ZoomConstraints>& aConstraints) override;
     virtual bool RecvLoadURL(const nsCString& aURI,
                              const BrowserConfiguration& aConfiguration) override;
     virtual bool RecvCacheFileDescriptor(const nsString& aPath,
@@ -346,6 +344,7 @@ public:
     virtual bool RecvNotifyAPZStateChange(const ViewID& aViewId,
                                           const APZStateChange& aChange,
                                           const int& aArg) override;
+    virtual bool RecvNotifyFlushComplete() override;
     virtual bool RecvActivate() override;
     virtual bool RecvDeactivate() override;
     virtual bool RecvMouseEvent(const nsString& aType,
@@ -600,9 +599,6 @@ private:
                         nsIDOMWindow** aReturn);
 
     bool HasValidInnerSize();
-
-    // Get the pres shell resolution of the document in this tab.
-    float GetPresShellResolution() const;
 
     void SetTabId(const TabId& aTabId);
 

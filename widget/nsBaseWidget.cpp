@@ -1011,6 +1011,19 @@ nsBaseWidget::SetConfirmedTargetAPZC(uint64_t aInputBlockId,
     mAPZC.get(), setTargetApzcFunc, aInputBlockId, mozilla::Move(aTargets)));
 }
 
+void
+nsBaseWidget::UpdateZoomConstraints(const uint32_t& aPresShellId,
+                                    const FrameMetrics::ViewID& aViewId,
+                                    const Maybe<ZoomConstraints>& aConstraints)
+{
+  if (!mCompositorParent || !mAPZC) {
+    return;
+  }
+  uint64_t layersId = mCompositorParent->RootLayerTreeId();
+  mAPZC->UpdateZoomConstraints(ScrollableLayerGuid(layersId, aPresShellId, aViewId),
+                               aConstraints);
+}
+
 bool
 nsBaseWidget::AsyncPanZoomEnabled() const
 {
@@ -1034,7 +1047,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
   // TODO: Do other types of events (than touch) need this?
   if (aEvent->AsTouchEvent() && aGuid.mLayersId == mCompositorParent->RootLayerTreeId()) {
     APZCCallbackHelper::ApplyCallbackTransform(*aEvent->AsTouchEvent(), aGuid,
-        GetDefaultScale(), 1.0f);
+        GetDefaultScale());
   }
 
   nsEventStatus status;
@@ -1887,6 +1900,11 @@ nsIWidget::LookupRegisteredPluginWindow(uintptr_t aWindowID)
 }
 
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
+struct VisEnumContext {
+  uintptr_t parentWidget;
+  const nsTArray<uintptr_t>* list;
+};
+
 static PLDHashOperator
 RegisteredPluginEnumerator(const void* aWindowId, nsIWidget* aWidget, void* aUserArg)
 {
@@ -1894,9 +1912,13 @@ RegisteredPluginEnumerator(const void* aWindowId, nsIWidget* aWidget, void* aUse
   MOZ_ASSERT(aWindowId);
   MOZ_ASSERT(aWidget);
   MOZ_ASSERT(aUserArg);
-  const nsTArray<uintptr_t>* visible = static_cast<const nsTArray<uintptr_t>*>(aUserArg);
-  if (!visible->Contains((uintptr_t)aWindowId) && !aWidget->Destroyed()) {
-    aWidget->Show(false);
+
+  if (!aWidget->Destroyed()) {
+    VisEnumContext* pctx = static_cast<VisEnumContext*>(aUserArg);
+    if ((uintptr_t)aWidget->GetParent() == pctx->parentWidget &&
+        !pctx->list->Contains((uintptr_t)aWindowId)) {
+      aWidget->Show(false);
+    }
   }
   return PLDHashOperator::PL_DHASH_NEXT;
 }
@@ -1904,7 +1926,8 @@ RegisteredPluginEnumerator(const void* aWindowId, nsIWidget* aWidget, void* aUse
 
 // static
 void
-nsIWidget::UpdateRegisteredPluginWindowVisibility(nsTArray<uintptr_t>& aVisibleList)
+nsIWidget::UpdateRegisteredPluginWindowVisibility(uintptr_t aOwnerWidget,
+                                                  nsTArray<uintptr_t>& aVisibleList)
 {
 #if !defined(XP_WIN) && !defined(MOZ_WIDGET_GTK)
   NS_NOTREACHED("nsBaseWidget::UpdateRegisteredPluginWindowVisibility not implemented!");
@@ -1912,7 +1935,11 @@ nsIWidget::UpdateRegisteredPluginWindowVisibility(nsTArray<uintptr_t>& aVisibleL
 #else
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(sPluginWidgetList);
-  sPluginWidgetList->EnumerateRead(RegisteredPluginEnumerator, static_cast<void*>(&aVisibleList));
+  // Our visible list is associated with a compositor which is associated with
+  // a specific top level window. We hand the parent widget in here so the
+  // enumerator can skip the plugin widgets owned by other top level windows.
+  VisEnumContext ctx = { aOwnerWidget, &aVisibleList };
+  sPluginWidgetList->EnumerateRead(RegisteredPluginEnumerator, static_cast<void*>(&ctx));
 #endif
 }
 

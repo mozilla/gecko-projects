@@ -92,9 +92,10 @@ loop.roomViews = (function(mozL10n) {
       event.preventDefault();
 
       var origin = event.currentTarget.dataset.provider;
-      var provider = this.props.socialShareProviders.filter(function(provider) {
-        return provider.origin == origin;
-      })[0];
+      var provider = this.props.socialShareProviders
+                         .filter(function(socialProvider) {
+                           return socialProvider.origin == origin;
+                         })[0];
 
       this.props.dispatcher.dispatch(new sharedActions.ShareRoomUrl({
         provider: provider,
@@ -128,8 +129,8 @@ loop.roomViews = (function(mozL10n) {
             this.props.socialShareProviders.map(function(provider, idx) {
               return (
                 React.createElement("li", {className: "dropdown-menu-item", 
-                    key: "provider-" + idx, 
                     "data-provider": provider.origin, 
+                    key: "provider-" + idx, 
                     onClick: this.handleProviderClick}, 
                   React.createElement("img", {className: "icon", src: provider.iconURL}), 
                   React.createElement("span", null, provider.name)
@@ -248,25 +249,25 @@ loop.roomViews = (function(mozL10n) {
                                       mozL10n.get("copy_url_button2")
             ), 
             React.createElement("button", {className: "btn btn-info btn-share", 
-                    ref: "anchor", 
-                    onClick: this.handleShareButtonClick}, 
+                    onClick: this.handleShareButtonClick, 
+                    ref: "anchor"}, 
               mozL10n.get("share_button3")
             )
           ), 
           React.createElement(SocialShareDropdown, {
             dispatcher: this.props.dispatcher, 
+            ref: "menu", 
             roomUrl: this.props.roomData.roomUrl, 
             show: this.state.showMenu, 
-            socialShareProviders: this.props.socialShareProviders, 
-            ref: "menu"}), 
+            socialShareProviders: this.props.socialShareProviders}), 
           React.createElement(DesktopRoomContextView, {
             dispatcher: this.props.dispatcher, 
             editMode: this.state.editMode, 
             error: this.props.error, 
-            savingContext: this.props.savingContext, 
             mozLoop: this.props.mozLoop, 
             onEditModeChange: this.handleEditModeChange, 
             roomData: this.props.roomData, 
+            savingContext: this.props.savingContext, 
             show: this.props.showContext || this.state.editMode})
         )
       );
@@ -277,6 +278,8 @@ loop.roomViews = (function(mozL10n) {
     mixins: [React.addons.LinkedStateMixin],
 
     propTypes: {
+      // Only used for tests.
+      availableContext: React.PropTypes.object,
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
       editMode: React.PropTypes.bool,
       error: React.PropTypes.object,
@@ -304,12 +307,12 @@ loop.roomViews = (function(mozL10n) {
           this.props.mozLoop.getSelectedTabMetadata(function(metadata) {
             var previewImage = metadata.favicon || "";
             var description = metadata.title || metadata.description;
-            var url = metadata.url;
+            var metaUrl = metadata.url;
             this.setState({
               availableContext: {
                 previewImage: previewImage,
                 description: description,
-                url: url
+                url: metaUrl
               }
            });
           }.bind(this));
@@ -518,18 +521,21 @@ loop.roomViews = (function(mozL10n) {
               onChange: this.handleCheckboxChange, 
               value: location}), 
             React.createElement("form", {onSubmit: this.handleFormSubmit}, 
-              React.createElement("input", {type: "text", className: "room-context-name", 
+              React.createElement("input", {className: "room-context-name", 
                 onKeyDown: this.handleTextareaKeyDown, 
                 placeholder: mozL10n.get("context_edit_name_placeholder"), 
+                type: "text", 
                 valueLink: this.linkState("newRoomName")}), 
-              React.createElement("input", {type: "text", className: "room-context-url", 
+              React.createElement("input", {className: "room-context-url", 
+                disabled: availableContext && availableContext.url === this.state.newRoomURL, 
                 onKeyDown: this.handleTextareaKeyDown, 
                 placeholder: "https://", 
-                disabled: availableContext && availableContext.url === this.state.newRoomURL, 
+                type: "text", 
                 valueLink: this.linkState("newRoomURL")}), 
-              React.createElement("textarea", {rows: "3", type: "text", className: "room-context-comments", 
+              React.createElement("textarea", {className: "room-context-comments", 
                 onKeyDown: this.handleTextareaKeyDown, 
                 placeholder: mozL10n.get("context_edit_comments_placeholder"), 
+                rows: "3", type: "text", 
                 valueLink: this.linkState("newRoomDescription")})
             ), 
             React.createElement("button", {className: "btn btn-info", 
@@ -586,9 +592,9 @@ loop.roomViews = (function(mozL10n) {
 
     propTypes: {
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
-      mozLoop: React.PropTypes.object.isRequired,
       // The poster URLs are for UI-showcase testing and development.
       localPosterUrl: React.PropTypes.string,
+      mozLoop: React.PropTypes.object.isRequired,
       remotePosterUrl: React.PropTypes.string
     },
 
@@ -647,6 +653,9 @@ loop.roomViews = (function(mozL10n) {
      * room state and other flags.
      *
      * @return {Boolean} True if remote video should be rended.
+     *
+     * XXX Refactor shouldRenderRemoteVideo & shouldRenderLoading into one fn
+     *     that returns an enum
      */
     shouldRenderRemoteVideo: function() {
       switch(this.state.roomState) {
@@ -663,17 +672,49 @@ loop.roomViews = (function(mozL10n) {
 
           return true;
 
+        case ROOM_STATES.READY:
+        case ROOM_STATES.INIT:
+        case ROOM_STATES.JOINING:
         case ROOM_STATES.SESSION_CONNECTED:
         case ROOM_STATES.JOINED:
+        case ROOM_STATES.MEDIA_WAIT:
           // this case is so that we don't show an avatar while waiting for
           // the other party to connect
           return true;
 
+        case ROOM_STATES.CLOSING:
+          return true;
+
         default:
-          console.warn("StandaloneRoomView.shouldRenderRemoteVideo:" +
+          console.warn("DesktopRoomConversationView.shouldRenderRemoteVideo:" +
             " unexpected roomState: ", this.state.roomState);
           return true;
       }
+    },
+
+    /**
+     * Should we render a visual cue to the user (e.g. a spinner) that a local
+     * stream is on its way from the camera?
+     *
+     * @returns {boolean}
+     * @private
+     */
+    _shouldRenderLocalLoading: function () {
+      return this.state.roomState === ROOM_STATES.MEDIA_WAIT &&
+             !this.state.localSrcVideoObject;
+    },
+
+    /**
+     * Should we render a visual cue to the user (e.g. a spinner) that a remote
+     * stream is on its way from the other user?
+     *
+     * @returns {boolean}
+     * @private
+     */
+    _shouldRenderRemoteLoading: function() {
+      return this.state.roomState === ROOM_STATES.HAS_PARTICIPANTS &&
+             !this.state.remoteSrcVideoObject &&
+             !this.state.mediaConnected;
     },
 
     render: function() {
@@ -733,35 +774,37 @@ loop.roomViews = (function(mozL10n) {
                     React.createElement("div", {className: "video_wrapper remote_wrapper"}, 
                       React.createElement("div", {className: "video_inner remote focus-stream"}, 
                         React.createElement(sharedViews.MediaView, {displayAvatar: !this.shouldRenderRemoteVideo(), 
-                          posterUrl: this.props.remotePosterUrl, 
+                          isLoading: this._shouldRenderRemoteLoading(), 
                           mediaType: "remote", 
+                          posterUrl: this.props.remotePosterUrl, 
                           srcVideoObject: this.state.remoteSrcVideoObject})
                       )
                     ), 
                     React.createElement("div", {className: localStreamClasses}, 
                       React.createElement(sharedViews.MediaView, {displayAvatar: this.state.videoMuted, 
-                        posterUrl: this.props.localPosterUrl, 
+                        isLoading: this._shouldRenderLocalLoading(), 
                         mediaType: "local", 
+                        posterUrl: this.props.localPosterUrl, 
                         srcVideoObject: this.state.localSrcVideoObject})
                     )
                   ), 
                   React.createElement(sharedViews.ConversationToolbar, {
-                    dispatcher: this.props.dispatcher, 
-                    video: {enabled: !this.state.videoMuted, visible: true}, 
                     audio: {enabled: !this.state.audioMuted, visible: true}, 
-                    publishStream: this.publishStream, 
+                    dispatcher: this.props.dispatcher, 
                     hangup: this.leaveRoom, 
-                    screenShare: screenShareData})
+                    publishStream: this.publishStream, 
+                    screenShare: screenShareData, 
+                    video: {enabled: !this.state.videoMuted, visible: true}})
                 )
               ), 
               React.createElement(DesktopRoomContextView, {
                 dispatcher: this.props.dispatcher, 
                 error: this.state.error, 
-                savingContext: this.state.savingContext, 
                 mozLoop: this.props.mozLoop, 
                 roomData: roomData, 
+                savingContext: this.state.savingContext, 
                 show: !shouldRenderInvitationOverlay && shouldRenderContextView}), 
-              React.createElement(sharedViews.TextChatView, {
+              React.createElement(sharedViews.chat.TextChatView, {
                 dispatcher: this.props.dispatcher, 
                 showAlways: false, 
                 showRoomName: false})

@@ -6,7 +6,6 @@
 
 #include "BroadcastChannelParent.h"
 #include "FileDescriptorSetParent.h"
-#include "mozilla/media/MediaParent.h"
 #include "mozilla/AppProcessChecker.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentParent.h"
@@ -494,18 +493,6 @@ BackgroundParentImpl::DeallocPServiceWorkerManagerParent(
   return true;
 }
 
-media::PMediaParent*
-BackgroundParentImpl::AllocPMediaParent()
-{
-  return media::AllocPMediaParent();
-}
-
-bool
-BackgroundParentImpl::DeallocPMediaParent(media::PMediaParent *aActor)
-{
-  return media::DeallocPMediaParent(aActor);
-}
-
 bool
 BackgroundParentImpl::RecvShutdownServiceWorkerRegistrar()
 {
@@ -599,6 +586,17 @@ BackgroundParentImpl::DeallocPMessagePortParent(PMessagePortParent* aActor)
 
   delete static_cast<MessagePortParent*>(aActor);
   return true;
+}
+
+bool
+BackgroundParentImpl::RecvMessagePortForceClose(const nsID& aUUID,
+                                                const nsID& aDestinationUUID,
+                                                const uint32_t& aSequenceID)
+{
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  return MessagePortParent::ForceClose(aUUID, aDestinationUUID, aSequenceID);
 }
 
 } // namespace ipc

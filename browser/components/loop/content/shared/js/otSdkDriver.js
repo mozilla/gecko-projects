@@ -274,6 +274,10 @@ loop.OTSdkDriver = (function() {
     disconnectSession: function() {
       this.endScreenShare();
 
+      this.dispatcher.dispatch(new sharedActions.DataChannelsAvailable({
+        available: false
+      }));
+
       if (this.session) {
         this.session.off("sessionDisconnected streamCreated streamDestroyed connectionCreated connectionDestroyed streamPropertyChanged");
         this.session.disconnect();
@@ -295,6 +299,8 @@ loop.OTSdkDriver = (function() {
       delete this._publishedLocalStream;
       delete this._subscribedRemoteStream;
       delete this._mockPublisherEl;
+      delete this._publisherChannel;
+      delete this._subscriberChannel;
       this.connections = {};
       this._setTwoWayMediaStartTime(this.CONNECTION_START_TIME_UNINITIALIZED);
     },
@@ -338,6 +344,11 @@ loop.OTSdkDriver = (function() {
     _onSessionConnectionCompleted: function(error) {
       if (error) {
         console.error("Failed to complete connection", error);
+        // We log this here before the connection failure to ensure the metrics
+        // event gets to the server before the leave action occurs. Otherwise
+        // the server won't log the metrics event because the user is no longer
+        // in the room.
+        this._notifyMetricsEvent("sdk.exception." + error.code);
         this.dispatcher.dispatch(new sharedActions.ConnectionFailure({
           reason: FAILURE_DETAILS.COULD_NOT_CONNECT
         }));
@@ -393,6 +404,7 @@ loop.OTSdkDriver = (function() {
 
       this._noteConnectionLengthIfNeeded(this._getTwoWayMediaStartTime(),
         performance.now());
+      this._notifyMetricsEvent("Session." + event.reason);
       this.dispatcher.dispatch(new sharedActions.ConnectionFailure({
         reason: reason
       }));
@@ -479,9 +491,14 @@ loop.OTSdkDriver = (function() {
         case "Session.streamDestroyed":
           this._metrics.recvStreams--;
           break;
+        case "Session.networkDisconnected":
+        case "Session.forceDisconnected":
+          break;
         default:
-          console.error("Unexpected event name", eventName);
-          return;
+          if (eventName.indexOf("sdk.exception") === -1) {
+            console.error("Unexpected event name", eventName);
+            return;
+          }
       }
       if (!state) {
         state = this._getConnectionState();
@@ -506,16 +523,9 @@ loop.OTSdkDriver = (function() {
      */
     _handleRemoteScreenShareCreated: function(stream) {
       // Let the stores know first so they can update the display.
-      // XXX We do want to do this - we want them to start re-arranging the
-      // display so that we can a) indicate connecting, b) be ready for
-      // when we get the stream. However, we're currently limited by the fact
-      // the view calculations require the remote (aka screen share) element to
-      // be present and laid out. Hence, we need to drop this for the time being,
-      // and let the client know via _onScreenShareSubscribeCompleted.
-      // Bug 1171933 is going to look at fixing this.
-      // this.dispatcher.dispatch(new sharedActions.ReceivingScreenShare({
-      //  receiving: true
-      // }));
+      this.dispatcher.dispatch(new sharedActions.ReceivingScreenShare({
+        receiving: true
+      }));
 
       // There's no audio for screen shares so we don't need to worry about mute.
       this._mockScreenShareEl = document.createElement("div");
@@ -699,8 +709,12 @@ loop.OTSdkDriver = (function() {
         channel.on({
           message: function(ev) {
             try {
+              var message = JSON.parse(ev.data);
+              /* Append the timestamp. This is the time that gets shown. */
+              message.receivedTimestamp = (new Date()).toISOString();
+
               this.dispatcher.dispatch(
-                new sharedActions.ReceivedTextChatMessage(JSON.parse(ev.data)));
+                new sharedActions.ReceivedTextChatMessage(message));
             } catch (ex) {
               console.error("Failed to process incoming chat message", ex);
             }
@@ -723,7 +737,9 @@ loop.OTSdkDriver = (function() {
      */
     _checkDataChannelsAvailable: function() {
       if (this._publisherChannel && this._subscriberChannel) {
-        this.dispatcher.dispatch(new sharedActions.DataChannelsAvailable());
+        this.dispatcher.dispatch(new sharedActions.DataChannelsAvailable({
+          available: true
+        }));
       }
     },
 
@@ -821,6 +837,10 @@ loop.OTSdkDriver = (function() {
       this._notifyMetricsEvent("Session.streamDestroyed");
 
       if (event.stream.videoType !== "screen") {
+        this.dispatcher.dispatch(new sharedActions.DataChannelsAvailable({
+          available: false
+        }));
+        delete this._subscriberChannel;
         delete this._mockSubscribeEl;
         return;
       }
@@ -839,6 +859,10 @@ loop.OTSdkDriver = (function() {
      */
     _onLocalStreamDestroyed: function() {
       this._notifyMetricsEvent("Publisher.streamDestroyed");
+      this.dispatcher.dispatch(new sharedActions.DataChannelsAvailable({
+        available: false
+      }));
+      delete this._publisherChannel;
       delete this._mockPublisherEl;
     },
 
@@ -897,6 +921,8 @@ loop.OTSdkDriver = (function() {
         this.dispatcher.dispatch(new sharedActions.ConnectionFailure({
           reason: FAILURE_DETAILS.UNABLE_TO_PUBLISH_MEDIA
         }));
+      } else {
+        this._notifyMetricsEvent("sdk.exception." + event.code);
       }
     },
 

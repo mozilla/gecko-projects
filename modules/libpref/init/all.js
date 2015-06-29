@@ -169,6 +169,8 @@ pref("dom.undo_manager.enabled", false);
 // Whether URL,nsLocation,Link::GetHash should be percent encoded
 // in setter and percent decoded in getter (old behaviour = true)
 pref("dom.url.encode_decode_hash", true);
+// Whether ::GetHash should do percent decoding (old behaviour = true)
+pref("dom.url.getters_decode_hash", false);
 
 // Whether to run add-on code in different compartments from browser code. This
 // causes a separate compartment for each (addon, global) combination, which may
@@ -372,6 +374,7 @@ pref("media.peerconnection.video.max_bitrate", 2000);
 pref("media.navigator.permission.disabled", false);
 pref("media.peerconnection.default_iceservers", "[]");
 pref("media.peerconnection.ice.loopback", false); // Set only for testing in offline environments.
+pref("media.peerconnection.ice.tcp", false);
 pref("media.peerconnection.use_document_iceservers", true);
 pref("media.peerconnection.identity.enabled", true);
 pref("media.peerconnection.identity.timeout", 10000);
@@ -2243,11 +2246,7 @@ pref("layout.css.scope-pseudo.enabled", true);
 pref("layout.css.background-blend-mode.enabled", true);
 
 // Is support for CSS vertical text enabled?
-#ifdef RELEASE_BUILD
-pref("layout.css.vertical-text.enabled", false);
-#else
 pref("layout.css.vertical-text.enabled", true);
-#endif
 
 // Is support for object-fit and object-position enabled?
 pref("layout.css.object-fit-and-position.enabled", true);
@@ -2321,11 +2320,10 @@ pref("layout.css.scroll-behavior.damping-ratio", "1.0");
 pref("layout.css.scroll-snap.enabled", true);
 
 // Is support for document.fonts enabled?
-#ifdef RELEASE_BUILD
-pref("layout.css.font-loading-api.enabled", false);
-#else
 pref("layout.css.font-loading-api.enabled", true);
-#endif
+
+// Are the MouseEvent.offsetX/Y properties enabled?
+pref("dom.mouseEvent.offsetXY.enabled", true);
 
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
@@ -4441,12 +4439,11 @@ pref("dom.w3c_touch_events.enabled", 2);
 
 // W3C draft pointer events
 pref("dom.w3c_pointer_events.enabled", false);
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", false);
 
 // W3C draft ImageCapture API
 pref("dom.imagecapture.enabled", false);
-
-// W3C touch-action css property (related to touch and pointer events)
-pref("layout.css.touch_action.enabled", false);
 
 // Enables some assertions in nsStyleContext that are too expensive
 // for general use, but might be useful to enable for specific tests.
@@ -4775,11 +4772,7 @@ pref("camera.control.face_detection.enabled", true);
 
 
 // SW Cache API
-#ifdef RELEASE_BUILD
-pref("dom.caches.enabled", false);
-#else
 pref("dom.caches.enabled", true);
-#endif // RELEASE_BUILD
 
 #ifdef MOZ_WIDGET_GONK
 // Empirically, this is the value returned by hal::GetTotalSystemMemory()

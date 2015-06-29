@@ -74,6 +74,7 @@
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/layers/SharedBufferManagerParent.h"
 #include "mozilla/LookAndFeel.h"
+#include "mozilla/media/MediaParent.h"
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/plugins/PluginBridge.h"
 #include "mozilla/Preferences.h"
@@ -115,7 +116,6 @@
 #include "nsIFormProcessor.h"
 #include "nsIGfxInfo.h"
 #include "nsIIdleService.h"
-#include "nsIJSRuntimeService.h"
 #include "nsIMemoryInfoDumper.h"
 #include "nsIMemoryReporter.h"
 #include "nsIMozBrowserFrame.h"
@@ -258,6 +258,7 @@ using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
+using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gmp;
 using namespace mozilla::hal;
@@ -2625,33 +2626,51 @@ ContentParent::RecvSetClipboard(const IPCDataTransfer& aDataTransfer,
 
         NS_ENSURE_SUCCESS(rv, true);
       } else if (item.data().type() == IPCDataTransferData::TnsCString) {
-        const IPCDataTransferImage& imageDetails = item.imageDetails();
-        const gfxIntSize size(imageDetails.width(), imageDetails.height());
-        if (!size.width || !size.height) {
-          return true;
+        if (item.flavor().EqualsLiteral(kJPEGImageMime) ||
+            item.flavor().EqualsLiteral(kJPGImageMime) ||
+            item.flavor().EqualsLiteral(kPNGImageMime) ||
+            item.flavor().EqualsLiteral(kGIFImageMime)) {
+          const IPCDataTransferImage& imageDetails = item.imageDetails();
+          const gfxIntSize size(imageDetails.width(), imageDetails.height());
+          if (!size.width || !size.height) {
+            return true;
+          }
+
+          nsCString text = item.data().get_nsCString();
+          mozilla::RefPtr<gfx::DataSourceSurface> image =
+            new mozilla::gfx::SourceSurfaceRawData();
+          mozilla::gfx::SourceSurfaceRawData* raw =
+            static_cast<mozilla::gfx::SourceSurfaceRawData*>(image.get());
+          raw->InitWrappingData(
+            reinterpret_cast<uint8_t*>(const_cast<nsCString&>(text).BeginWriting()),
+            size, imageDetails.stride(),
+            static_cast<mozilla::gfx::SurfaceFormat>(imageDetails.format()), false);
+          raw->GuaranteePersistance();
+
+          nsRefPtr<gfxDrawable> drawable = new gfxSurfaceDrawable(image, size);
+          nsCOMPtr<imgIContainer> imageContainer(image::ImageOps::CreateFromDrawable(drawable));
+
+          nsCOMPtr<nsISupportsInterfacePointer>
+            imgPtr(do_CreateInstance(NS_SUPPORTS_INTERFACE_POINTER_CONTRACTID, &rv));
+
+          rv = imgPtr->SetData(imageContainer);
+          NS_ENSURE_SUCCESS(rv, true);
+
+          trans->SetTransferData(item.flavor().get(), imgPtr, sizeof(nsISupports*));
+        } else {
+          nsCOMPtr<nsISupportsCString> dataWrapper =
+            do_CreateInstance(NS_SUPPORTS_CSTRING_CONTRACTID, &rv);
+          NS_ENSURE_SUCCESS(rv, true);
+
+          const nsCString& text = item.data().get_nsCString();
+          rv = dataWrapper->SetData(text);
+          NS_ENSURE_SUCCESS(rv, true);
+
+          rv = trans->SetTransferData(item.flavor().get(), dataWrapper,
+                                      text.Length());
+
+          NS_ENSURE_SUCCESS(rv, true);
         }
-
-        nsCString text = item.data().get_nsCString();
-        mozilla::RefPtr<gfx::DataSourceSurface> image =
-          new mozilla::gfx::SourceSurfaceRawData();
-        mozilla::gfx::SourceSurfaceRawData* raw =
-          static_cast<mozilla::gfx::SourceSurfaceRawData*>(image.get());
-        raw->InitWrappingData(
-          reinterpret_cast<uint8_t*>(const_cast<nsCString&>(text).BeginWriting()),
-          size, imageDetails.stride(),
-          static_cast<mozilla::gfx::SurfaceFormat>(imageDetails.format()), false);
-        raw->GuaranteePersistance();
-
-        nsRefPtr<gfxDrawable> drawable = new gfxSurfaceDrawable(image, size);
-        nsCOMPtr<imgIContainer> imageContainer(image::ImageOps::CreateFromDrawable(drawable));
-
-        nsCOMPtr<nsISupportsInterfacePointer>
-          imgPtr(do_CreateInstance(NS_SUPPORTS_INTERFACE_POINTER_CONTRACTID, &rv));
-
-        rv = imgPtr->SetData(imageContainer);
-        NS_ENSURE_SUCCESS(rv, true);
-
-        trans->SetTransferData(item.flavor().get(), imgPtr, sizeof(nsISupports*));
       }
     }
 
@@ -3805,6 +3824,18 @@ ContentParent::DeallocPVoicemailParent(PVoicemailParent* aActor)
 {
     static_cast<VoicemailParent*>(aActor)->Release();
     return true;
+}
+
+media::PMediaParent*
+ContentParent::AllocPMediaParent()
+{
+  return media::AllocPMediaParent();
+}
+
+bool
+ContentParent::DeallocPMediaParent(media::PMediaParent *aActor)
+{
+  return media::DeallocPMediaParent(aActor);
 }
 
 PStorageParent*

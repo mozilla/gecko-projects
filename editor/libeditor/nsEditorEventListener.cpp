@@ -59,6 +59,8 @@
 #include "nsIBidiKeyboard.h"            // for nsIBidiKeyboard
 #endif
 
+#include "mozilla/dom/TabParent.h"
+
 class nsPresContext;
 
 using namespace mozilla;
@@ -985,6 +987,14 @@ nsEditorEventListener::CanDrop(nsIDOMDragEvent* aEvent)
     return true;
   }
 
+  // If the source node is a remote browser, treat this as coming from a
+  // different document and allow the drop.
+  nsCOMPtr<nsIContent> sourceContent = do_QueryInterface(sourceNode);
+  TabParent* tp = TabParent::GetFrom(sourceContent);
+  if (tp) {
+    return true;
+  }
+
   nsRefPtr<Selection> selection = mEditor->GetSelection();
   if (!selection) {
     return false;
@@ -1059,6 +1069,11 @@ nsEditorEventListener::Focus(nsIDOMEvent* aEvent)
 
   // Spell check a textarea the first time that it is focused.
   SpellCheckIfNeeded();
+  if (!mEditor) {
+    // In e10s, this can cause us to flush notifications, which can destroy
+    // the node we're about to focus.
+    return NS_OK;
+  }
 
   nsCOMPtr<nsIDOMEventTarget> target;
   aEvent->GetTarget(getter_AddRefs(target));

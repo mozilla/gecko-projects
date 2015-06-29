@@ -21,6 +21,7 @@
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/unused.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsPresContext.h"
@@ -191,6 +192,29 @@ MessagePortBase::MessagePortBase()
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(MessagePort)
 
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(MessagePort)
+  bool isBlack = tmp->IsBlack();
+  if (isBlack || tmp->mIsKeptAlive) {
+    if (tmp->mListenerManager) {
+      tmp->mListenerManager->MarkForCC();
+    }
+    if (!isBlack && tmp->PreservingWrapper()) {
+      // This marks the wrapper black.
+      tmp->GetWrapper();
+    }
+    return true;
+  }
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_END
+
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_BEGIN(MessagePort)
+  return tmp->
+    IsBlackAndDoesNotNeedTracing(static_cast<DOMEventTargetHelper*>(tmp));
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_END
+
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(MessagePort)
+  return tmp->IsBlack();
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(MessagePort,
                                                 MessagePortBase)
   if (tmp->mDispatchRunnable) {
@@ -210,6 +234,10 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(MessagePort,
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mUnshippedEntangledPort);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(MessagePort,
+                                               MessagePortBase)
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(MessagePort)
   NS_INTERFACE_MAP_ENTRY(nsIIPCBackgroundChildCreateCallback)
@@ -248,6 +276,50 @@ private:
     MOZ_COUNT_DTOR(MessagePortFeature);
   }
 };
+
+class ForceCloseHelper final : public nsIIPCBackgroundChildCreateCallback
+{
+public:
+  NS_DECL_ISUPPORTS
+
+  static void ForceClose(const MessagePortIdentifier& aIdentifier)
+  {
+    PBackgroundChild* actor =
+      mozilla::ipc::BackgroundChild::GetForCurrentThread();
+    if (actor) {
+      unused << actor->SendMessagePortForceClose(aIdentifier.uuid(),
+                                                 aIdentifier.destinationUuid(),
+                                                 aIdentifier.sequenceId());
+      return;
+    }
+
+    nsRefPtr<ForceCloseHelper> helper = new ForceCloseHelper(aIdentifier);
+    if (NS_WARN_IF(!mozilla::ipc::BackgroundChild::GetOrCreateForCurrentThread(helper))) {
+      MOZ_CRASH();
+    }
+  }
+
+private:
+  explicit ForceCloseHelper(const MessagePortIdentifier& aIdentifier)
+    : mIdentifier(aIdentifier)
+  {}
+
+  ~ForceCloseHelper() {}
+
+  void ActorFailed() override
+  {
+    MOZ_CRASH("Failed to create a PBackgroundChild actor!");
+  }
+
+  void ActorCreated(mozilla::ipc::PBackgroundChild* aActor) override
+  {
+    ForceClose(mIdentifier);
+  }
+
+  const MessagePortIdentifier mIdentifier;
+};
+
+NS_IMPL_ISUPPORTS(ForceCloseHelper, nsIIPCBackgroundChildCreateCallback)
 
 } // anonymous namespace
 
@@ -314,8 +386,13 @@ MessagePort::Initialize(const nsID& aUUID,
   mNextStep = eNextStepNone;
 
   if (mNeutered) {
+    // If this port is neutered we don't want to keep it alive artificially nor
+    // we want to add listeners or workerFeatures.
     mState = eStateDisentangled;
-  } else if (mState == eStateEntangling) {
+    return;
+  }
+
+  if (mState == eStateEntangling) {
     ConnectToPBackground();
   } else {
     MOZ_ASSERT(mState == eStateUnshippedEntangled);
@@ -794,6 +871,14 @@ MessagePort::UpdateMustKeepAlive()
       mWorkerFeature = nullptr;
     }
 
+    if (NS_IsMainThread()) {
+      nsCOMPtr<nsIObserverService> obs =
+        do_GetService("@mozilla.org/observer-service;1");
+      if (obs) {
+        obs->RemoveObserver(this, "inner-window-destroyed");
+      }
+    }
+
     Release();
     return;
   }
@@ -828,12 +913,6 @@ MessagePort::Observe(nsISupports* aSubject, const char* aTopic,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (innerID == mInnerID) {
-    nsCOMPtr<nsIObserverService> obs =
-      do_GetService("@mozilla.org/observer-service;1");
-    if (obs) {
-      obs->RemoveObserver(this, "inner-window-destroyed");
-    }
-
     Close();
   }
 
@@ -861,6 +940,12 @@ MessagePort::RemoveDocFromBFCache()
   }
 
   bfCacheEntry->RemoveFromBFCacheSync();
+}
+
+/* static */ void
+MessagePort::ForceClose(const MessagePortIdentifier& aIdentifier)
+{
+  ForceCloseHelper::ForceClose(aIdentifier);
 }
 
 } // namespace dom

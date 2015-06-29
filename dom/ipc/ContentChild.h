@@ -262,6 +262,9 @@ public:
     PVoicemailChild* SendPVoicemailConstructor(PVoicemailChild* aActor);
     virtual bool DeallocPVoicemailChild(PVoicemailChild*) override;
 
+    virtual PMediaChild* AllocPMediaChild() override;
+    virtual bool DeallocPMediaChild(PMediaChild* aActor) override;
+
     virtual PStorageChild* AllocPStorageChild() override;
     virtual bool DeallocPStorageChild(PStorageChild* aActor) override;
 
@@ -301,10 +304,6 @@ public:
     virtual bool RecvBidiKeyboardNotify(const bool& isLangRTL) override;
 
     virtual bool RecvUpdateServiceWorkerRegistrations() override;
-
-    virtual bool RecvRemoveServiceWorkerRegistrationsForDomain(const nsString& aDomain) override;
-
-    virtual bool RecvRemoveServiceWorkerRegistrations() override;
 
     virtual bool RecvNotifyVisited(const URIParams& aURI) override;
     // auto remove when alertfinished is received.

@@ -44,6 +44,8 @@ if CONFIG['MOZ_NATIVE_DEVICES']:
     resjar.generated_sources += ['android/support/v7/appcompat/R.java']
     resjar.generated_sources += ['android/support/v7/mediarouter/R.java']
 
+resjar.generated_sources += ['android/support/v7/recyclerview/R.java']
+
 resjar.javac_flags += ['-Xlint:all']
 
 mgjar = add_java_jar('gecko-mozglue')
@@ -84,6 +86,7 @@ gujar.sources += [
     'util/HardwareUtils.java',
     'util/INIParser.java',
     'util/INISection.java',
+    'util/InputOptionsUtils.java',
     'util/IOUtils.java',
     'util/JSONUtils.java',
     'util/MenuUtils.java',
@@ -97,6 +100,7 @@ gujar.sources += [
     'util/StringUtils.java',
     'util/ThreadUtils.java',
     'util/UIAsyncTask.java',
+    'util/WeakReferenceHandler.java',
     'util/WebActivityMapper.java',
     'util/WindowUtils.java',
 ]
@@ -355,7 +359,8 @@ gbjar.sources += [
     'home/TwoLinePageRow.java',
     'InputMethods.java',
     'IntentHelper.java',
-    'JavaAddonManager.java',
+    'javaaddons/JavaAddonManager.java',
+    'javaaddons/JavaAddonManagerV1.java',
     'LayoutInterceptor.java',
     'LocaleManager.java',
     'Locales.java',
@@ -522,6 +527,7 @@ gbjar.sources += [
     'widget/ResizablePathDrawable.java',
     'widget/SiteLogins.java',
     'widget/SquaredImageView.java',
+    'widget/SquaredRelativeLayout.java',
     'widget/SwipeDismissListViewTouchListener.java',
     'widget/TabThumbnailWrapper.java',
     'widget/ThumbnailView.java',
@@ -595,6 +601,7 @@ if CONFIG['MOZ_ANDROID_READING_LIST_SERVICE']:
 
 gbjar.sources += sync_java_files
 gbjar.extra_jars += [
+    OBJDIR + '/../javaaddons/javaaddons-1.0.jar',
     'gecko-R.jar',
     'gecko-mozglue.jar',
     'gecko-thirdparty.jar',
@@ -616,6 +623,7 @@ moz_native_devices_sources = [
 if CONFIG['MOZ_NATIVE_DEVICES']:
     gbjar.extra_jars += moz_native_devices_jars
     gbjar.sources += moz_native_devices_sources
+gbjar.extra_jars += [CONFIG['ANDROID_RECYCLERVIEW_LIB']]
 
 gbjar.javac_flags += ['-Xlint:all,-deprecation,-fallthrough', '-J-Xmx512m', '-J-Xms128m']
 

@@ -287,16 +287,8 @@ loop.shared.mixins = (function() {
    * elements and handling updates of the media containers.
    */
   var MediaSetupMixin = {
-
     componentDidMount: function() {
       this.resetDimensionsCache();
-      rootObject.addEventListener("orientationchange", this.updateVideoContainer);
-      rootObject.addEventListener("resize", this.updateVideoContainer);
-    },
-
-    componentWillUnmount: function() {
-      rootObject.removeEventListener("orientationchange", this.updateVideoContainer);
-      rootObject.removeEventListener("resize", this.updateVideoContainer);
     },
 
     /**
@@ -613,7 +605,9 @@ loop.shared.mixins = (function() {
     /**
      * Starts playing an audio file, stopping any audio that is already in progress.
      *
-     * @param {String} name The filename to play (excluding the extension).
+     * @param {String} name    The filename to play (excluding the extension).
+     * @param {Object} options A list of options for the sound:
+     *                         - {Boolean} loop Whether or not to loop the sound.
      */
     play: function(name, options) {
       if (this._isLoopDesktop() && rootObject.navigator.mozLoop.doNotDisturb) {

@@ -20,7 +20,7 @@ interface nsIServiceWorkerUnregisterCallback : nsISupports
   void unregisterFailed();
 };
 
-[scriptable, builtinclass, uuid(103763c8-53ba-42e4-8b26-e601d5bc4afe)]
+[scriptable, builtinclass, uuid(e633b73b-a734-4d04-a09c-b7779a439f3f)]
 interface nsIServiceWorkerInfo : nsISupports
 {
   readonly attribute nsIPrincipal principal;
@@ -33,7 +33,7 @@ interface nsIServiceWorkerInfo : nsISupports
   readonly attribute DOMString waitingCacheName;
 };
 
-[scriptable, builtinclass, uuid(5e112a42-df4c-4ae9-bc71-e6e681ab5f38)]
+[scriptable, builtinclass, uuid(e9abb123-0099-4d9e-85db-c8cd0aff19e6)]
 interface nsIServiceWorkerManager : nsISupports
 {
   /**
@@ -105,12 +105,7 @@ interface nsIServiceWorkerManager : nsISupports
    * - Unregister jobs will be queued for all registrations.
    *   This eventually results in the registration being deleted from disk too.
    */
-  void remove(in AUTF8String aHost);
-
-  /*
-   * Clear all registrations for all hosts. See remove().
-   */
-  void removeAll();
+  void removeAndPropagate(in AUTF8String aHost);
 
   // Testing
   DOMString getScopeForUrl(in nsIPrincipal aPrincipal, in DOMString aPath);
@@ -131,11 +126,11 @@ interface nsIServiceWorkerManager : nsISupports
                            in nsIServiceWorkerUnregisterCallback aCallback,
                            in DOMString aScope);
 
-  [implicit_jscontext] void sendPushEvent(in jsval aOriginAttributes,
-                                          in ACString aScope,
-                                          in DOMString aData);
-  [implicit_jscontext] void sendPushSubscriptionChangeEvent(in jsval aOriginAttributes,
-                                                            in ACString scope);
+  void sendPushEvent(in ACString aOriginAttributes,
+                     in ACString aScope,
+                     in DOMString aData);
+  void sendPushSubscriptionChangeEvent(in ACString aOriginAttributes,
+                                       in ACString scope);
 
   void updateAllRegistrations();
 };

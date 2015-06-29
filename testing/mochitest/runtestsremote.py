@@ -454,10 +454,6 @@ class MochiRemote(Mochitest):
         if 'profileDir' not in kwargs and 'profile' in kwargs:
             kwargs['profileDir'] = kwargs.pop('profile').profile
 
-        # We're handling ssltunnel, so we should lie to automation.py to avoid
-        # it trying to set up ssltunnel as well
-        kwargs['runSSLTunnel'] = False
-
         if 'quiet' in kwargs:
             kwargs.pop('quiet')
 
@@ -547,13 +543,13 @@ def run_test_harness(options):
         if not options.autorun:
             # Force a single loop iteration. The iteration will start Fennec and
             # the httpd server, but not actually run a test.
-            options.testPath = robocop_tests[0]['name']
+            options.test_paths = [robocop_tests[0]['name']]
 
         retVal = None
         # Filtering tests
         active_tests = []
         for test in robocop_tests:
-            if options.testPath and options.testPath != test['name']:
+            if options.test_paths and test['name'] not in options.test_paths:
                 continue
 
             if 'disabled' in test:

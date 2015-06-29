@@ -271,6 +271,7 @@ pref("general.autoScroll", true);
 pref("browser.shell.checkDefaultBrowser", true);
 pref("browser.shell.shortcutFavicons",true);
 pref("browser.shell.mostRecentDateSetAsDefault", "");
+pref("browser.shell.windows10DefaultBrowserABTest", -1);
 
 // 0 = blank, 1 = home (browser.startup.homepage), 2 = last visited page, 3 = resume previous browser session
 // The behavior of option 3 is detailed at: http://wiki.mozilla.org/Session_Restore
@@ -296,7 +297,7 @@ pref("browser.warnOnQuit", true);
 // might still show the window closing dialog with showQuitWarning == false.
 pref("browser.showQuitWarning", false);
 pref("browser.fullscreen.autohide", true);
-pref("browser.fullscreen.animateUp", 1);
+pref("browser.fullscreen.animate", true);
 pref("browser.overlink-delay", 80);
 
 #ifdef UNIX_BUT_NOT_MAC
@@ -339,6 +340,7 @@ pref("browser.urlbar.restrict.bookmark", "*");
 pref("browser.urlbar.restrict.tag", "+");
 pref("browser.urlbar.restrict.openpage", "%");
 pref("browser.urlbar.restrict.typed", "~");
+pref("browser.urlbar.restrict.searches", "$");
 pref("browser.urlbar.match.title", "#");
 pref("browser.urlbar.match.url", "@");
 
@@ -347,7 +349,11 @@ pref("browser.urlbar.match.url", "@");
 pref("browser.urlbar.suggest.history",              true);
 pref("browser.urlbar.suggest.bookmark",             true);
 pref("browser.urlbar.suggest.openpage",             true);
+#ifdef NIGHTLY_BUILD
 pref("browser.urlbar.suggest.searches",             true);
+#else
+pref("browser.urlbar.suggest.searches",             false);
+#endif
 
 // Restrictions to current suggestions can also be applied (intersection).
 // Typed suggestion works only if history is set to true.
@@ -505,9 +511,16 @@ pref("dom.disable_window_move_resize",            false);
 // prevent JS from monkeying with window focus, etc
 pref("dom.disable_window_flip",                   true);
 
-// Disable touch events on Desktop Firefox by default until they are properly
-// supported (bug 736048)
+// Disable touch events on Desktop Firefox by default
+// until they are properly supported (bug 736048)
 pref("dom.w3c_touch_events.enabled",        0);
+
+#ifdef NIGHTLY_BUILD
+// W3C draft pointer events
+pref("dom.w3c_pointer_events.enabled", true);
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", true);
+#endif
 
 // popups.policy 1=allow,2=reject
 pref("privacy.popups.policy",               1);
@@ -621,7 +634,7 @@ pref("browser.xul.error_pages.enabled", true);
 pref("browser.xul.error_pages.expert_bad_cert", false);
 
 // If true, network link events will change the value of navigator.onLine
-pref("network.manage-offline-status", false);
+pref("network.manage-offline-status", true);
 
 // We want to make sure mail URLs are handled externally...
 pref("network.protocol-handler.external.mailto", true); // for mail
@@ -1200,6 +1213,7 @@ pref("security.sandbox.windows.log", false);
 // 3 - the strongest settings we seem to be able to use without breaking
 //     everything, but will probably cause some functionality restrictions
 pref("dom.ipc.plugins.sandbox-level.default", 0);
+pref("dom.ipc.plugins.sandbox-level.flash", 0);
 
 #if defined(MOZ_CONTENT_SANDBOX)
 // This controls the strength of the Windows content process sandbox for testing
@@ -1402,8 +1416,8 @@ pref("devtools.inspector.activeSidebar", "ruleview");
 // Enable the markup preview
 pref("devtools.inspector.markupPreview", false);
 pref("devtools.inspector.remote", false);
-// Expand pseudo-elements by default in the rule-view
-pref("devtools.inspector.show_pseudo_elements", true);
+// Collapse pseudo-elements by default in the rule-view
+pref("devtools.inspector.show_pseudo_elements", false);
 // The default size for image preview tooltips in the rule-view/computed-view/markup-view
 pref("devtools.inspector.imagePreviewTooltipSize", 300);
 // Enable user agent style inspection in rule-view
@@ -1434,9 +1448,10 @@ pref("devtools.debugger.pretty-print-enabled", true);
 pref("devtools.debugger.auto-pretty-print", false);
 pref("devtools.debugger.auto-black-box", true);
 pref("devtools.debugger.tracer", false);
+pref("devtools.debugger.workers", false);
 
 // The default Debugger UI settings
-pref("devtools.debugger.ui.panes-sources-width", 200);
+pref("devtools.debugger.ui.panes-workers-and-sources-width", 200);
 pref("devtools.debugger.ui.panes-instruments-width", 300);
 pref("devtools.debugger.ui.panes-visible-on-startup", false);
 pref("devtools.debugger.ui.variables-sorting-enabled", true);
@@ -1462,7 +1477,7 @@ pref("devtools.performance.ui.show-idle-blocks", true);
 pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-allocations", false);
 pref("devtools.performance.ui.enable-framerate", true);
-pref("devtools.performance.ui.show-jit-optimizations", false);
+pref("devtools.performance.ui.enable-jit-optimizations", false);
 
 // Enable experimental options in the UI only in Nightly
 #if defined(NIGHTLY_BUILD)
@@ -1488,12 +1503,14 @@ pref("devtools.netmonitor.filters", "[\"all\"]");
 
 // The default Network monitor HAR export setting
 pref("devtools.netmonitor.har.defaultLogDir", "");
-pref("devtools.netmonitor.har.defaultFileName", "archive");
+pref("devtools.netmonitor.har.defaultFileName", "Archive %y-%m-%d %H-%M-%S");
 pref("devtools.netmonitor.har.jsonp", false);
 pref("devtools.netmonitor.har.jsonpCallback", "");
 pref("devtools.netmonitor.har.includeResponseBodies", true);
 pref("devtools.netmonitor.har.compress", false);
 pref("devtools.netmonitor.har.forceExport", false);
+pref("devtools.netmonitor.har.pageLoadedTimeout", 1500);
+pref("devtools.netmonitor.har.enableAutoExportToFile", false);
 
 // Enable the Tilt inspector
 pref("devtools.tilt.enabled", true);
@@ -1648,8 +1665,6 @@ pref("prompts.tab_modal.enabled", true);
 // Whether the Panorama should animate going in/out of tabs
 pref("browser.panorama.animate_zoom", true);
 
-// Defines the url to be used for new tabs.
-pref("browser.newtab.url", "about:newtab");
 // Activates preloading of the new tab url.
 pref("browser.newtab.preload", true);
 
@@ -1716,7 +1731,7 @@ pref("shumway.swf.whitelist", "http://www.areweflashyet.com/*.swf");
 pref("image.mem.max_decoded_image_kb", 256000);
 
 pref("loop.enabled", true);
-pref("loop.textChat.enabled", false);
+pref("loop.textChat.enabled", true);
 pref("loop.server", "https://loop.services.mozilla.com/v0");
 pref("loop.seenToS", "unseen");
 pref("loop.showPartnerLogo", true);
@@ -1829,6 +1844,9 @@ pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox
 // The remote URL of the FxA OAuth Server
 pref("identity.fxaccounts.remote.oauth.uri", "https://oauth.accounts.firefox.com/v1");
 
+// Whether we display profile images in the UI or not.
+pref("identity.fxaccounts.profile_image.enabled", true);
+
 // Migrate any existing Firefox Account data from the default profile to the
 // Developer Edition profile.
 #ifdef MOZ_DEV_EDITION
@@ -1937,4 +1955,5 @@ pref("view_source.tab", true);
 // Enable Service Workers for desktop on non-release builds
 #ifndef RELEASE_BUILD
 pref("dom.serviceWorkers.enabled", true);
+pref("dom.serviceWorkers.interception.enabled", true);
 #endif

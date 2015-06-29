@@ -734,12 +734,6 @@ JSRuntime::updateMallocCounter(JS::Zone* zone, size_t nbytes)
     gc.updateMallocCounter(zone, nbytes);
 }
 
-JS_FRIEND_API(void)
-JSRuntime::onTooMuchMalloc()
-{
-    gc.onTooMuchMalloc();
-}
-
 JS_FRIEND_API(void*)
 JSRuntime::onOutOfMemory(AllocFunction allocFunc, size_t nbytes, void* reallocPtr,
                          JSContext* maybecx)
@@ -955,7 +949,7 @@ js::PerformanceGroupHolder::getGroup(JSContext* cx)
         group_ = ptr->value();
         MOZ_ASSERT(group_);
     } else {
-        group_ = runtime_->new_<PerformanceGroup>(key);
+        group_ = runtime_->new_<PerformanceGroup>(cx, key);
         runtime_->stopwatch.groups_.add(ptr, key, group_);
     }
 
@@ -968,6 +962,15 @@ PerformanceData*
 js::GetPerformanceData(JSRuntime* rt)
 {
     return &rt->stopwatch.performance;
+}
+
+js::PerformanceGroup::PerformanceGroup(JSContext* cx, void* key)
+  : uid(cx->runtime()->stopwatch.uniqueId())
+  , stopwatch_(nullptr)
+  , iteration_(0)
+  , key_(key)
+  , refCount_(0)
+{
 }
 
 void

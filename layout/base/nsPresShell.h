@@ -36,6 +36,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/MemoryReporting.h"
+#include "ZoomConstraintsClient.h"
 
 class nsRange;
 
@@ -110,7 +111,9 @@ public:
 
   virtual nsIFrame* GetPlaceholderFrameFor(nsIFrame* aFrame) const override;
   virtual void FrameNeedsReflow(nsIFrame *aFrame, IntrinsicDirty aIntrinsicDirty,
-                                            nsFrameState aBitToAdd) override;
+                                nsFrameState aBitToAdd,
+                                ReflowRootHandling aRootHandling =
+                                  eInferFromBitToAdd) override;
   virtual void FrameNeedsToContinueReflow(nsIFrame *aFrame) override;
   virtual void CancelAllPendingReflows() override;
   virtual bool IsSafeToFlush() const override;
@@ -809,6 +812,8 @@ protected:
   // TouchManager
   TouchManager              mTouchManager;
 
+  nsRefPtr<ZoomConstraintsClient> mZoomConstraintsClient;
+
   // TouchCaret
   nsRefPtr<mozilla::TouchCaret> mTouchCaret;
   nsRefPtr<mozilla::SelectionCarets> mSelectionCarets;
@@ -877,6 +882,9 @@ protected:
 
   // Whether the last chrome-only escape key event is consumed.
   bool                      mIsLastChromeOnlyEscapeKeyConsumed : 1;
+
+  // Whether the widget has received a paint message yet.
+  bool                      mHasReceivedPaintMessage : 1;
 
   static bool               sDisableNonTestMouseEvents;
 };

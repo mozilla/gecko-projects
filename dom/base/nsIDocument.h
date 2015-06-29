@@ -30,8 +30,11 @@
 #include "nsExpirationTracker.h"
 #include "nsClassHashtable.h"
 #include "prclist.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/CORSMode.h"
 #include <bitset>                        // for member
 
+class gfxUserFontSet;
 class imgIRequest;
 class nsAString;
 class nsBindingManager;
@@ -84,7 +87,6 @@ class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
 struct nsCSSSelectorList;
-struct FullscreenRequest; // For nsIDocument::HandlePendingFullscreenRequest
 
 namespace mozilla {
 class CSSStyleSheet;
@@ -120,6 +122,7 @@ class Event;
 class EventTarget;
 class FontFaceSet;
 class FrameRequestCallback;
+struct FullscreenRequest;
 class ImportManager;
 class HTMLBodyElement;
 struct LifecycleCallbackArgs;
@@ -145,27 +148,12 @@ template<typename> class Sequence;
 template<typename, typename> class CallbackObjectHolder;
 typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 
-struct FullScreenOptions {
-  FullScreenOptions();
-  nsRefPtr<gfx::VRHMDInfo> mVRHMDDevice;
-  // This value should be true if the fullscreen request is
-  // originated from chrome code.
-  bool mIsCallerChrome = false;
-  // This value denotes whether we should trigger a NewOrigin event if
-  // requesting fullscreen in its document causes the origin which is
-  // fullscreen to change. We may want *not* to trigger that event if
-  // we're calling RequestFullScreen() as part of a continuation of a
-  // request in a subdocument in different process, whereupon the caller
-  // need to send some notification itself with the real origin.
-  bool mShouldNotifyNewOrigin = true;
-};
-
 } // namespace dom
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0xdcfa30f2, 0x2197, 0x421f, \
-  { 0xa7, 0x5a, 0x3e, 0x70, 0x18, 0x08, 0xde, 0x81 } }
+{ 0x21bbd52a, 0xc2d2, 0x4b2f, \
+  { 0xbc, 0x6c, 0xc9, 0x52, 0xbe, 0x23, 0x6b, 0x19 } }
 
 // Enum for requesting a particular type of document when creating a doc
 enum DocumentFlavor {
@@ -197,9 +185,11 @@ NS_GetContentList(nsINode* aRootNode,
 class nsIDocument : public nsINode
 {
   typedef mozilla::dom::GlobalObject GlobalObject;
+
 public:
   typedef mozilla::net::ReferrerPolicy ReferrerPolicyEnum;
   typedef mozilla::dom::Element Element;
+  typedef mozilla::dom::FullscreenRequest FullscreenRequest;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IDOCUMENT_IID)
   NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
@@ -1100,8 +1090,8 @@ public:
    * the <iframe> or <browser> that contains this document is also mode
    * fullscreen. This happens recursively in all ancestor documents.
    */
-  virtual void AsyncRequestFullScreen(Element* aElement,
-                                      mozilla::dom::FullScreenOptions& aOptions) = 0;
+  virtual void AsyncRequestFullScreen(
+    mozilla::UniquePtr<FullscreenRequest>&& aRequest) = 0;
 
   /**
    * Called when a frame in a child process has entered fullscreen or when a
@@ -2049,7 +2039,8 @@ public:
   /**
    * Called by Parser for link rel=preconnect
    */
-  virtual void MaybePreconnect(nsIURI* uri) = 0;
+  virtual void MaybePreconnect(nsIURI* uri,
+                               mozilla::CORSMode aCORSMode) = 0;
 
   enum DocumentTheme {
     Doc_Theme_Uninitialized, // not determined yet
@@ -2570,8 +2561,13 @@ public:
     }
   }
 
+  gfxUserFontSet* GetUserFontSet();
+  void FlushUserFontSet();
+  void RebuildUserFontSet(); // asynchronously
+  mozilla::dom::FontFaceSet* GetFonts() { return mFontFaceSet; }
+
   // FontFaceSource
-  mozilla::dom::FontFaceSet* GetFonts(mozilla::ErrorResult& aRv);
+  mozilla::dom::FontFaceSet* Fonts();
 
   bool DidFireDOMContentLoaded() const { return mDidFireDOMContentLoaded; }
 
@@ -2615,6 +2611,11 @@ protected:
   }
 
   mozilla::dom::XPathEvaluator* XPathEvaluator();
+
+  void HandleRebuildUserFontSet() {
+    mPostedFlushUserFontSet = false;
+    FlushUserFontSet();
+  }
 
   nsCString mReferrer;
   nsString mLastModified;
@@ -2671,6 +2672,9 @@ protected:
 
   // Our cached .children collection
   nsCOMPtr<nsIHTMLCollection> mChildrenCollection;
+
+  // container for per-context fonts (downloadable, SVG, etc.)
+  nsRefPtr<mozilla::dom::FontFaceSet> mFontFaceSet;
 
   // Compatibility mode
   nsCompatibility mCompatMode;
@@ -2803,6 +2807,15 @@ protected:
    */
   bool mIsLinkUpdateRegistrationsForbidden;
 #endif
+
+  // Is the current mFontFaceSet valid?
+  bool mFontFaceSetDirty;
+
+  // Has GetUserFontSet() been called?
+  bool mGetUserFontSetCalled;
+
+  // Do we currently have an event posted to call FlushUserFontSet?
+  bool mPostedFlushUserFontSet;
 
   enum Type {
     eUnknown, // should never be used

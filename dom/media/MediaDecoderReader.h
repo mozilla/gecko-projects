@@ -11,7 +11,9 @@
 #include "MediaData.h"
 #include "MediaPromise.h"
 #include "MediaQueue.h"
+#include "MediaTimer.h"
 #include "AudioCompactor.h"
+#include "Intervals.h"
 #include "TimeUnits.h"
 
 namespace mozilla {
@@ -80,6 +82,12 @@ public:
   // The caller must ensure that Shutdown() is called before aDecoder is
   // destroyed.
   explicit MediaDecoderReader(AbstractMediaDecoder* aDecoder, MediaTaskQueue* aBorrowedTaskQueue = nullptr);
+
+  // Does any spinup that needs to happen on this task queue. This runs on a
+  // different thread than Init, and there should not be ordering dependencies
+  // between the two (even though in practice, Init will always run first right
+  // now thanks to the tail dispatcher).
+  void InitializationTask();
 
   // Initializes the reader, returns NS_OK on success, or NS_ERROR_FAILURE
   // on failure.
@@ -197,8 +205,10 @@ public:
     mIgnoreAudioOutputFormat = true;
   }
 
-  // Populates aBuffered with the time ranges which are buffered. This function
-  // is called on the main, decode, and state machine threads.
+  // Populates aBuffered with the time ranges which are buffered. This may only
+  // be called on the decode task queue, and should only be used internally by
+  // UpdateBuffered - mBuffered (or mirrors of it) should be used for everything
+  // else.
   //
   // This base implementation in MediaDecoderReader estimates the time ranges
   // buffered by interpolating the cached byte ranges with the duration
@@ -212,6 +222,9 @@ public:
   // since in FirefoxOS we can't do I/O on the main thread, where this is
   // called.
   virtual media::TimeIntervals GetBuffered();
+
+  // Recomputes mBuffered.
+  virtual void UpdateBuffered();
 
   // MediaSourceReader opts out of the start-time-guessing mechanism.
   virtual bool ForceZeroStartTime() const { return false; }
@@ -233,9 +246,38 @@ public:
   virtual size_t SizeOfVideoQueueInFrames();
   virtual size_t SizeOfAudioQueueInFrames();
 
-  // Only used by WebMReader and MediaOmxReader for now, so stub here rather
-  // than in every reader than inherits from MediaDecoderReader.
-  virtual void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset) {}
+protected:
+  friend class TrackBuffer;
+  virtual void NotifyDataArrivedInternal(uint32_t aLength, int64_t aOffset) { }
+
+  void NotifyDataArrived(const media::Interval<int64_t>& aInfo)
+  {
+    MOZ_ASSERT(OnTaskQueue());
+    NS_ENSURE_TRUE_VOID(!mShutdown);
+    NotifyDataArrivedInternal(aInfo.Length(), aInfo.mStart);
+    UpdateBuffered();
+  }
+
+  // Invokes NotifyDataArrived while throttling the calls to occur at most every mThrottleDuration ms.
+  void ThrottledNotifyDataArrived(const media::Interval<int64_t>& aInterval);
+  void DoThrottledNotify();
+
+public:
+  // In situations where these notifications come from stochastic network
+  // activity, we can save significant recomputation by throttling the delivery
+  // of these updates to the reader implementation. We don't want to do this
+  // throttling when the update comes from MSE code, since that code needs the
+  // updates to be observable immediately, and is generally less
+  // trigger-happy with notifications anyway.
+  void DispatchNotifyDataArrived(uint32_t aLength, int64_t aOffset, bool aThrottleUpdates)
+  {
+    RefPtr<nsRunnable> r =
+      NS_NewRunnableMethodWithArg<media::Interval<int64_t>>(this, aThrottleUpdates ? &MediaDecoderReader::ThrottledNotifyDataArrived
+                                                                                   : &MediaDecoderReader::NotifyDataArrived,
+                                                            media::Interval<int64_t>(aOffset, aOffset + aLength));
+    TaskQueue()->Dispatch(r.forget(), AbstractThread::DontAssertDispatchSuccess);
+  }
+
   // Notify the reader that data from the resource was evicted (MediaSource only)
   virtual void NotifyDataRemoved() {}
   virtual int64_t GetEvictionOffset(double aTime) { return -1; }
@@ -256,7 +298,20 @@ public:
   // Indicates if the media is seekable.
   // ReadMetada should be called before calling this method.
   virtual bool IsMediaSeekable() = 0;
-  void SetStartTime(int64_t aStartTime);
+
+  void DispatchSetStartTime(int64_t aStartTime)
+  {
+    nsRefPtr<MediaDecoderReader> self = this;
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableFunction([self, aStartTime] () -> void
+    {
+      MOZ_ASSERT(self->OnTaskQueue());
+      MOZ_ASSERT(self->mStartTime == -1);
+      self->mStartTime = aStartTime;
+      self->UpdateBuffered();
+    });
+    TaskQueue()->Dispatch(r.forget());
+  }
 
   MediaTaskQueue* TaskQueue() {
     return mTaskQueue;
@@ -315,8 +370,29 @@ protected:
   // Decode task queue.
   nsRefPtr<MediaTaskQueue> mTaskQueue;
 
+  // State-watching manager.
+  WatchManager<MediaDecoderReader> mWatchManager;
+
+  // MediaTimer.
+  nsRefPtr<MediaTimer> mTimer;
+
+  // Buffered range.
+  Canonical<media::TimeIntervals> mBuffered;
+public:
+  AbstractCanonical<media::TimeIntervals>* CanonicalBuffered() { return &mBuffered; }
+protected:
+
   // Stores presentation info required for playback.
   MediaInfo mInfo;
+
+  // Duration, mirrored from the state machine task queue.
+  Mirror<media::NullableTimeUnit> mDuration;
+
+  // State for ThrottledNotifyDataArrived.
+  MediaPromiseRequestHolder<MediaTimerPromise> mThrottledNotify;
+  const TimeDuration mThrottleDuration;
+  TimeStamp mLastThrottledNotify;
+  Maybe<media::Interval<int64_t>> mThrottledInterval;
 
   // Whether we should accept media that we know we can't play
   // directly, because they have a number of channel higher than

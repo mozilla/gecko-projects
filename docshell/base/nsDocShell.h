@@ -60,7 +60,6 @@
 namespace mozilla {
 namespace dom {
 class EventTarget;
-class URLSearchParams;
 }
 }
 
@@ -841,9 +840,6 @@ protected:
   nsCOMPtr<nsIChannel> mFailedChannel;
   uint32_t mFailedLoadType;
 
-  // window.location.searchParams is updated in sync with this object.
-  nsRefPtr<mozilla::dom::URLSearchParams> mURLSearchParams;
-
   // Set in DoURILoad when either the LOAD_RELOAD_ALLOW_MIXED_CONTENT flag or
   // the LOAD_NORMAL_ALLOW_MIXED_CONTENT flag is set.
   // Checked in nsMixedContentBlocker, to see if the channels match.
@@ -902,6 +898,9 @@ protected:
 
   // Cached value of the "browser.xul.error_pages.enabled" preference.
   static bool sUseErrorPages;
+
+  // Cached value of the "dom.serviceWorkers.interception.enabled" preference.
+  static bool sInterceptionEnabled;
 
   bool mCreated;
   bool mAllowSubframes;

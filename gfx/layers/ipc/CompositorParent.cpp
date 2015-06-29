@@ -671,7 +671,7 @@ CompositorParent::CompositorParent(nsIWidget* aWidget,
   }
 
   if (UseVsyncComposition()) {
-    NS_WARNING("Enabling vsync compositor");
+    gfxDebugOnce() << "Enabling vsync compositor";
     mCompositorScheduler = new CompositorVsyncScheduler(this, aWidget);
   } else {
     mCompositorScheduler = new CompositorSoftwareTimerScheduler(this);
@@ -1341,6 +1341,19 @@ CompositorParent::RecvRequestOverfill()
 }
 
 void
+CompositorParent::FlushApzRepaints(const LayerTransactionParent* aLayerTree)
+{
+  MOZ_ASSERT(mApzcTreeManager);
+  uint64_t layersId = aLayerTree->GetId();
+  if (layersId == 0) {
+    // The request is coming from the parent-process layer tree, so we should
+    // use the compositor's root layer tree id.
+    layersId = mRootLayerTreeID;
+  }
+  mApzcTreeManager->FlushApzRepaints(layersId);
+}
+
+void
 CompositorParent::GetAPZTestData(const LayerTransactionParent* aLayerTree,
                                  APZTestData* aOutData)
 {
@@ -1440,12 +1453,9 @@ CompositorParent::AllocPLayerTransactionParent(const nsTArray<LayersBackend>& aB
 {
   MOZ_ASSERT(aId == 0);
 
-  // mWidget doesn't belong to the compositor thread, so it should be set to
-  // nullptr before returning from this method, to avoid accessing it elsewhere.
   gfx::IntRect rect;
   mWidget->GetClientBounds(rect);
   InitializeLayerManager(aBackendHints);
-  mWidget = nullptr;
 
   if (!mLayerManager) {
     NS_WARNING("Failed to initialise Compositor");
@@ -1550,7 +1560,10 @@ CompositorParent::DeallocateLayerTreeId(uint64_t aId)
   // Here main thread notifies compositor to remove an element from
   // sIndirectLayerTrees. This removed element might be queried soon.
   // Checking the elements of sIndirectLayerTrees exist or not before using.
-  MOZ_ASSERT(CompositorLoop());
+  if (!CompositorLoop()) {
+    gfxCriticalError() << "Attempting to post to a invalid Compositor Loop";
+    return;
+  }
   CompositorLoop()->PostTask(FROM_HERE,
                              NewRunnableFunction(&EraseLayerState, aId));
 }
@@ -1757,6 +1770,7 @@ public:
   virtual void LeaveTestMode(LayerTransactionParent* aLayerTree) override;
   virtual void ApplyAsyncProperties(LayerTransactionParent* aLayerTree)
                override;
+  virtual void FlushApzRepaints(const LayerTransactionParent* aLayerTree) override;
   virtual void GetAPZTestData(const LayerTransactionParent* aLayerTree,
                               APZTestData* aOutData) override;
   virtual void SetConfirmedTargetAPZC(const LayerTransactionParent* aLayerTree,
@@ -2034,7 +2048,9 @@ UpdatePluginWindowState(uint64_t aId)
       // to do here is hide the plugins for the old tree, so don't waste time
       // calculating clipping.
       nsTArray<uintptr_t> aVisibleIdList;
-      unused << lts.mParent->SendUpdatePluginVisibility(aVisibleIdList);
+      uintptr_t parentWidget = (uintptr_t)lts.mParent->GetWidget();
+      unused << lts.mParent->SendUpdatePluginVisibility(parentWidget,
+                                                        aVisibleIdList);
       lts.mUpdatedPluginDataAvailable = false;
       return;
     }
@@ -2167,6 +2183,21 @@ CrossProcessCompositorParent::ApplyAsyncProperties(
 
   MOZ_ASSERT(state->mParent);
   state->mParent->ApplyAsyncProperties(aLayerTree);
+}
+
+void
+CrossProcessCompositorParent::FlushApzRepaints(const LayerTransactionParent* aLayerTree)
+{
+  uint64_t id = aLayerTree->GetId();
+  MOZ_ASSERT(id != 0);
+  const CompositorParent::LayerTreeState* state =
+    CompositorParent::GetIndirectShadowTree(id);
+  if (!state) {
+    return;
+  }
+
+  MOZ_ASSERT(state->mParent);
+  state->mParent->FlushApzRepaints(aLayerTree);
 }
 
 void

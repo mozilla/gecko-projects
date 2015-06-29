@@ -596,7 +596,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunct
     bufEnd(0),
     length(0),
     generatorKindBits_(GeneratorKindAsBits(generatorKind)),
-    inWith(false),                  // initialized below
+    inWith_(false),                  // initialized below
     inGenexpLambda(false),
     hasDestructuringArgs(false),
     useAsm(false),
@@ -612,7 +612,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunct
     MOZ_ASSERT(fun->isTenured());
 
     if (!outerpc) {
-        inWith = false;
+        inWith_ = false;
 
     } else if (outerpc->parsingWith) {
         // This covers cases that don't involve eval().  For example:
@@ -621,7 +621,7 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunct
         //
         // In this case, |outerpc| corresponds to global code, and
         // outerpc->parsingWith is true.
-        inWith = true;
+        inWith_ = true;
 
     } else if (outerpc->sc->isFunctionBox()) {
         // This is like the above case, but for more deeply nested functions.
@@ -632,8 +632,17 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunct
         // In this case, the inner anonymous function needs to inherit the
         // setting of |inWith| from the outer one.
         FunctionBox* parent = outerpc->sc->asFunctionBox();
-        if (parent && parent->inWith)
-            inWith = true;
+        if (parent && parent->inWith())
+            inWith_ = true;
+    } else {
+        // This is like the above case, but when inside eval.
+        //
+        // For example:
+        //
+        //   with(o) { eval("(function() { g(); })();"); }
+        //
+        // In this case, the static scope chain tells us the presence of with.
+        inWith_ = outerpc->sc->inWith();
     }
 }
 
@@ -819,14 +828,30 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun, const AutoN
     if (!FoldConstants(context, &pn, this))
         return null();
 
+    fn->pn_pos.end = pos().end;
+
+    MOZ_ASSERT(fn->pn_body->isKind(PNK_ARGSBODY));
+    fn->pn_body->append(pn);
+
+    /*
+     * Make sure to deoptimize lexical dependencies that are polluted
+     * by eval and function statements (which both flag the function as
+     * having an extensible scope).
+     */
+    if (funbox->hasExtensibleScope() && pc->lexdeps->count()) {
+        for (AtomDefnRange r = pc->lexdeps->all(); !r.empty(); r.popFront()) {
+            Definition* dn = r.front().value().get<FullParseHandler>();
+            MOZ_ASSERT(dn->isPlaceholder());
+
+            handler.deoptimizeUsesWithin(dn, fn->pn_pos);
+        }
+    }
+
     InternalHandle<Bindings*> funboxBindings =
         InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
     if (!funpc.generateFunctionBindings(context, tokenStream, alloc, funboxBindings))
         return null();
 
-    MOZ_ASSERT(fn->pn_body->isKind(PNK_ARGSBODY));
-    fn->pn_body->append(pn);
-    fn->pn_body->pn_pos = pn->pn_pos;
     return fn;
 }
 
@@ -1139,7 +1164,7 @@ Parser<FullParseHandler>::makeDefIntoUse(Definition* dn, ParseNode* pn, JSAtom* 
  * helper function signature in order to share code among destructuring and
  * simple variable declaration parsers.  In the destructuring case, the binder
  * function is called indirectly from the variable declaration parser by way
- * of checkDestructuring and its friends.
+ * of checkDestructuringPattern and its friends.
  */
 
 template <typename ParseHandler>
@@ -1210,6 +1235,7 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       case ClassConstructor:
+      case DerivedClassConstructor:
         flags = JSFunction::INTERPRETED_CLASS_CONSTRUCTOR;
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
@@ -2215,7 +2241,7 @@ Parser<SyntaxParseHandler>::finishFunctionDefinition(Node pn, FunctionBox* funbo
     // while its ParseContext and associated lexdeps and inner functions are
     // still available.
 
-    if (funbox->inWith)
+    if (funbox->inWith())
         return abortIfSyntaxParser();
 
     size_t numFreeVariables = pc->lexdeps->count();
@@ -2243,6 +2269,8 @@ Parser<SyntaxParseHandler>::finishFunctionDefinition(Node pn, FunctionBox* funbo
     lazy->setGeneratorKind(funbox->generatorKind());
     if (funbox->usesArguments && funbox->usesApply && funbox->usesThis)
         lazy->setUsesArgumentsApplyAndThis();
+    if (funbox->isDerivedClassConstructor())
+        lazy->setIsDerivedClassConstructor();
     PropagateTransitiveParseFlags(funbox, lazy);
 
     fun->initLazyScript(lazy);
@@ -2263,6 +2291,9 @@ Parser<FullParseHandler>::functionArgsAndBody(InHandling inHandling, ParseNode* 
     FunctionBox* funbox = newFunctionBox(pn, fun, pc, inheritedDirectives, generatorKind);
     if (!funbox)
         return false;
+
+    if (kind == DerivedClassConstructor)
+        funbox->setDerivedClassConstructor();
 
     YieldHandling yieldHandling = generatorKind != NotGenerator ? YieldIsKeyword : YieldIsName;
 
@@ -2425,6 +2456,9 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, unsigned st
     if (!funbox)
         return null();
     funbox->length = fun->nargs() - fun->hasRest();
+
+    if (fun->lazyScript()->isDerivedClassConstructor())
+        funbox->setDerivedClassConstructor();
 
     Directives newDirectives = directives;
     ParseContext<FullParseHandler> funpc(this, /* parent = */ nullptr, pn, funbox,
@@ -3358,7 +3392,65 @@ Parser<FullParseHandler>::bindInitialized(BindData<FullParseHandler>* data, Pars
 
 template <>
 bool
-Parser<FullParseHandler>::checkDestructuring(BindData<FullParseHandler>* data, ParseNode* left);
+Parser<FullParseHandler>::checkDestructuringName(BindData<FullParseHandler>* data, ParseNode* expr)
+{
+    MOZ_ASSERT(!handler.isUnparenthesizedDestructuringPattern(expr));
+
+    // Parentheses are forbidden around destructuring *patterns* (but allowed
+    // around names).  Use our nicer error message for parenthesized, nested
+    // patterns.
+    if (handler.isParenthesizedDestructuringPattern(expr)) {
+        report(ParseError, false, expr, JSMSG_BAD_DESTRUCT_PARENS);
+        return false;
+    }
+
+    // This expression might be in a variable-binding pattern where only plain,
+    // unparenthesized names are permitted.
+    if (data) {
+        // Destructuring patterns in declarations must only contain
+        // unparenthesized names.
+        if (!handler.maybeUnparenthesizedName(expr)) {
+            report(ParseError, false, expr, JSMSG_NO_VARIABLE_NAME);
+            return false;
+        }
+
+        return bindInitialized(data, expr);
+    }
+
+    // Otherwise this is an expression in destructuring outside a declaration.
+    if (!reportIfNotValidSimpleAssignmentTarget(expr, KeyedDestructuringAssignment))
+        return false;
+
+    MOZ_ASSERT(!handler.isFunctionCall(expr),
+               "function calls shouldn't be considered valid targets in "
+               "destructuring patterns");
+
+    if (handler.maybeNameAnyParentheses(expr)) {
+        // The arguments/eval identifiers are simple in non-strict mode code.
+        // Warn to discourage their use nonetheless.
+        if (!reportIfArgumentsEvalTarget(expr))
+            return false;
+
+        // We may be called on a name node that has already been
+        // specialized, in the very weird "for (var [x] = i in o) ..."
+        // case. See bug 558633.
+        //
+        // XXX Is this necessary with the changes in bug 1164741?  This is
+        //     likely removable now.
+        handler.maybeDespecializeSet(expr);
+
+        handler.markAsAssigned(expr);
+        return true;
+    }
+
+    // Nothing further to do for property accesses.
+    MOZ_ASSERT(handler.isPropertyAccess(expr));
+    return true;
+}
+
+template <>
+bool
+Parser<FullParseHandler>::checkDestructuringPattern(BindData<FullParseHandler>* data, ParseNode* pattern);
 
 template <>
 bool
@@ -3368,30 +3460,28 @@ Parser<FullParseHandler>::checkDestructuringObject(BindData<FullParseHandler>* d
     MOZ_ASSERT(objectPattern->isKind(PNK_OBJECT));
 
     for (ParseNode* member = objectPattern->pn_head; member; member = member->pn_next) {
-        ParseNode* expr;
+        ParseNode* target;
         if (member->isKind(PNK_MUTATEPROTO)) {
-            expr = member->pn_kid;
+            target = member->pn_kid;
         } else {
             MOZ_ASSERT(member->isKind(PNK_COLON) || member->isKind(PNK_SHORTHAND));
-            expr = member->pn_right;
-        }
-        if (expr->isKind(PNK_ASSIGN))
-            expr = expr->pn_left;
+            MOZ_ASSERT_IF(member->isKind(PNK_SHORTHAND),
+                          member->pn_left->isKind(PNK_OBJECT_PROPERTY_NAME) &&
+                          member->pn_right->isKind(PNK_NAME) &&
+                          member->pn_left->pn_atom == member->pn_right->pn_atom);
 
-        bool ok;
-        if (expr->isKind(PNK_ARRAY) || expr->isKind(PNK_OBJECT)) {
-            ok = checkDestructuring(data, expr);
-        } else if (data) {
-            if (!expr->isKind(PNK_NAME)) {
-                report(ParseError, false, expr, JSMSG_NO_VARIABLE_NAME);
-                return false;
-            }
-            ok = bindInitialized(data, expr);
-        } else {
-            ok = checkAndMarkAsAssignmentLhs(expr, KeyedDestructuringAssignment);
+            target = member->pn_right;
         }
-        if (!ok)
-            return false;
+        if (target->isKind(PNK_ASSIGN))
+            target = target->pn_left;
+
+        if (handler.isUnparenthesizedDestructuringPattern(target)) {
+            if (!checkDestructuringPattern(data, target))
+                return false;
+        } else {
+            if (!checkDestructuringName(data, target))
+                return false;
+        }
     }
 
     return true;
@@ -3408,39 +3498,31 @@ Parser<FullParseHandler>::checkDestructuringArray(BindData<FullParseHandler>* da
         if (element->isKind(PNK_ELISION))
             continue;
 
-        ParseNode* target = element;
-        if (target->isKind(PNK_SPREAD)) {
-            if (target->pn_next) {
-                report(ParseError, false, target->pn_next, JSMSG_PARAMETER_AFTER_REST);
+        ParseNode* target;
+        if (element->isKind(PNK_SPREAD)) {
+            if (element->pn_next) {
+                report(ParseError, false, element->pn_next, JSMSG_PARAMETER_AFTER_REST);
                 return false;
             }
-            target = target->pn_kid;
+            target = element->pn_kid;
 
-            // The RestElement should not support nested patterns.
-            if (target->isKind(PNK_ARRAY) || target->isKind(PNK_OBJECT)) {
+            if (handler.isUnparenthesizedDestructuringPattern(target)) {
                 report(ParseError, false, target, JSMSG_BAD_DESTRUCT_TARGET);
                 return false;
             }
-        } else if (target->isKind(PNK_ASSIGN)) {
-            target = target->pn_left;
+        } else if (element->isKind(PNK_ASSIGN)) {
+            target = element->pn_left;
+        } else {
+            target = element;
         }
 
-        bool ok;
-        if (target->isKind(PNK_ARRAY) || target->isKind(PNK_OBJECT)) {
-            ok = checkDestructuring(data, target);
+        if (handler.isUnparenthesizedDestructuringPattern(target)) {
+            if (!checkDestructuringPattern(data, target))
+                return false;
         } else {
-            if (data) {
-                if (!target->isKind(PNK_NAME)) {
-                    report(ParseError, false, target, JSMSG_NO_VARIABLE_NAME);
-                    return false;
-                }
-                ok = bindInitialized(data, target);
-            } else {
-                ok = checkAndMarkAsAssignmentLhs(target, KeyedDestructuringAssignment);
-            }
+            if (!checkDestructuringName(data, target))
+                return false;
         }
-        if (!ok)
-            return false;
     }
 
     return true;
@@ -3460,16 +3542,16 @@ Parser<FullParseHandler>::checkDestructuringArray(BindData<FullParseHandler>* da
  *   simple names; the destructuring defines them as new variables.
  *
  * In both cases, other code parses the pattern as an arbitrary
- * primaryExpr, and then, here in checkDestructuring, verify that the
- * tree is a valid AssignmentPattern or BindingPattern.
+ * primaryExpr, and then, here in checkDestructuringPattern, verify
+ * that the tree is a valid AssignmentPattern or BindingPattern.
  *
  * In assignment-like contexts, we parse the pattern with
  * pc->inDeclDestructuring clear, so the lvalue expressions in the
  * pattern are parsed normally.  primaryExpr links variable references
  * into the appropriate use chains; creates placeholder definitions;
- * and so on.  checkDestructuring is called with |data| nullptr (since
- * we won't be binding any new names), and we specialize lvalues as
- * appropriate.
+ * and so on.  checkDestructuringPattern is called with |data| nullptr
+ * (since we won't be binding any new names), and we specialize lvalues
+ * as appropriate.
  *
  * In declaration-like contexts, the normal variable reference
  * processing would just be an obstruction, because we're going to
@@ -3477,28 +3559,28 @@ Parser<FullParseHandler>::checkDestructuringArray(BindData<FullParseHandler>* da
  * variables anyway.  In this case, we parse the pattern with
  * pc->inDeclDestructuring set, which directs primaryExpr to leave
  * whatever name nodes it creates unconnected.  Then, here in
- * checkDestructuring, we require the pattern's property value
+ * checkDestructuringPattern, we require the pattern's property value
  * positions to be simple names, and define them as appropriate to the
  * context.  For these calls, |data| points to the right sort of
  * BindData.
  */
 template <>
 bool
-Parser<FullParseHandler>::checkDestructuring(BindData<FullParseHandler>* data, ParseNode* left)
+Parser<FullParseHandler>::checkDestructuringPattern(BindData<FullParseHandler>* data, ParseNode* pattern)
 {
-    if (left->isKind(PNK_ARRAYCOMP)) {
-        report(ParseError, false, left, JSMSG_ARRAY_COMP_LEFTSIDE);
+    if (pattern->isKind(PNK_ARRAYCOMP)) {
+        report(ParseError, false, pattern, JSMSG_ARRAY_COMP_LEFTSIDE);
         return false;
     }
 
-    if (left->isKind(PNK_ARRAY))
-        return checkDestructuringArray(data, left);
-    return checkDestructuringObject(data, left);
+    if (pattern->isKind(PNK_ARRAY))
+        return checkDestructuringArray(data, pattern);
+    return checkDestructuringObject(data, pattern);
 }
 
 template <>
 bool
-Parser<SyntaxParseHandler>::checkDestructuring(BindData<SyntaxParseHandler>* data, Node left)
+Parser<SyntaxParseHandler>::checkDestructuringPattern(BindData<SyntaxParseHandler>* data, Node pattern)
 {
     return abortIfSyntaxParser();
 }
@@ -3515,7 +3597,7 @@ Parser<ParseHandler>::destructuringExpr(YieldHandling yieldHandling, BindData<Pa
     pc->inDeclDestructuring = false;
     if (!pn)
         return null();
-    if (!checkDestructuring(data, pn))
+    if (!checkDestructuringPattern(data, pn))
         return null();
     return pn;
 }
@@ -3804,7 +3886,7 @@ Parser<ParseHandler>::variables(YieldHandling yieldHandling,
                 // handles the non-destructuring case.
                 bool bindBeforeInitializer = (kind != PNK_LET && kind != PNK_CONST) ||
                                              parsingForInOrOfInit;
-                if (bindBeforeInitializer && !checkDestructuring(&data, pn2))
+                if (bindBeforeInitializer && !checkDestructuringPattern(&data, pn2))
                     return null();
 
                 if (parsingForInOrOfInit) {
@@ -3833,7 +3915,7 @@ Parser<ParseHandler>::variables(YieldHandling yieldHandling,
                     }
                 }
 
-                if (!bindBeforeInitializer && !checkDestructuring(&data, pn2))
+                if (!bindBeforeInitializer && !checkDestructuringPattern(&data, pn2))
                     return null();
 
                 pn2 = handler.newBinary(PNK_ASSIGN, pn2, init);
@@ -5106,7 +5188,7 @@ Parser<SyntaxParseHandler>::forStatement(YieldHandling yieldHandling)
 
         /* Check that the left side of the 'in' or 'of' is valid. */
         if (!isForDecl &&
-            !handler.maybeName(lhsNode) &&
+            !handler.maybeNameAnyParentheses(lhsNode) &&
             !handler.isPropertyAccess(lhsNode))
         {
             JS_ALWAYS_FALSE(abortIfSyntaxParser());
@@ -5960,7 +6042,8 @@ Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
 
     MUST_MATCH_TOKEN(TOK_LC, JSMSG_CURLY_BEFORE_CLASS);
 
-    ParseNode* classMethods = propertyList(yieldHandling, ClassBody);
+    ParseNode* classMethods = propertyList(yieldHandling,
+                                           hasHeritage ? DerivedClassBody : ClassBody);
     if (!classMethods)
         return null();
 
@@ -6396,14 +6479,17 @@ template <typename ParseHandler>
 bool
 Parser<ParseHandler>::checkAndMarkAsAssignmentLhs(Node target, AssignmentFlavor flavor)
 {
-    // Handle destructuring object/array patterns specially.
-    if (handler.isDestructuringTarget(target)) {
+    MOZ_ASSERT(flavor != KeyedDestructuringAssignment,
+               "destructuring must use special checking/marking code, not "
+               "this method");
+
+    if (handler.isUnparenthesizedDestructuringPattern(target)) {
         if (flavor == CompoundAssignment) {
             report(ParseError, false, null(), JSMSG_BAD_DESTRUCT_ASS);
             return false;
         }
 
-        return checkDestructuring(nullptr, target);
+        return checkDestructuringPattern(nullptr, target);
     }
 
     // All other permitted targets are simple.
@@ -6413,34 +6499,18 @@ Parser<ParseHandler>::checkAndMarkAsAssignmentLhs(Node target, AssignmentFlavor 
     if (handler.isPropertyAccess(target))
         return true;
 
-    if (handler.maybeName(target)) {
+    if (handler.maybeNameAnyParentheses(target)) {
         // The arguments/eval identifiers are simple in non-strict mode code,
         // but warn to discourage use nonetheless.
         if (!reportIfArgumentsEvalTarget(target))
             return false;
 
-        if (flavor == KeyedDestructuringAssignment) {
-            // We may be called on a name node that has already been
-            // specialized, in the very weird "for (var [x] = i in o) ..."
-            // case. See bug 558633.
-            //
-            // XXX Is this necessary with the changes in bug 1164741?  This is
-            //     likely removable now.
-            handler.maybeDespecializeSet(target);
-        } else {
-            handler.adjustGetToSet(target);
-        }
+        handler.adjustGetToSet(target);
         handler.markAsAssigned(target);
         return true;
     }
 
     MOZ_ASSERT(handler.isFunctionCall(target));
-
-    if (flavor == KeyedDestructuringAssignment) {
-        report(ParseError, false, target, JSMSG_BAD_DESTRUCT_TARGET);
-        return false;
-    }
-
     return makeSetCall(target, JSMSG_BAD_LEFTSIDE_OF_ASS);
 }
 
@@ -6537,6 +6607,11 @@ Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandl
         if (!tokenStream.peekToken(&ignored))
             return null();
 
+        if (pc->sc->isFunctionBox() && pc->sc->asFunctionBox()->isDerivedClassConstructor()) {
+            report(ParseError, false, null(), JSMSG_DISABLED_DERIVED_CLASS, "arrow functions");
+            return null();
+        }
+
         return functionDef(inHandling, yieldHandling, nullptr, Arrow, NotGenerator);
       }
 
@@ -6562,11 +6637,14 @@ Parser<ParseHandler>::assignExpr(InHandling inHandling, YieldHandling yieldHandl
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::isValidSimpleAssignmentTarget(Node node)
+Parser<ParseHandler>::isValidSimpleAssignmentTarget(Node node,
+                                                    FunctionCallBehavior behavior /* = ForbidAssignmentToFunctionCalls */)
 {
-    if (PropertyName* name = handler.maybeName(node)) {
-        // Note that we implement *exactly* the ES6 semantics here.  Warning
-        // for arguments/eval when extraWarnings is set isn't handled here.
+    // Note that this method implements *only* a boolean test.  Reporting an
+    // error for the various syntaxes that fail this, and warning for the
+    // various syntaxes that "pass" this but should not, occurs elsewhere.
+
+    if (PropertyName* name = handler.maybeNameAnyParentheses(node)) {
         if (!pc->sc->strict())
             return true;
 
@@ -6575,16 +6653,21 @@ Parser<ParseHandler>::isValidSimpleAssignmentTarget(Node node)
 
     if (handler.isPropertyAccess(node))
         return true;
-    return handler.isFunctionCall(node);
+
+    if (behavior == PermitAssignmentToFunctionCalls) {
+        if (handler.isFunctionCall(node))
+            return true;
+    }
+
+    return false;
 }
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::reportIfArgumentsEvalTarget(Node target)
+Parser<ParseHandler>::reportIfArgumentsEvalTarget(Node nameNode)
 {
-    PropertyName* name = handler.maybeName(target);
-    if (!name)
-        return true;
+    PropertyName* name = handler.maybeNameAnyParentheses(nameNode);
+    MOZ_ASSERT(name, "must only call this function on known names");
 
     const char* chars = (name == context->names().arguments)
                         ? js_arguments_str
@@ -6594,7 +6677,7 @@ Parser<ParseHandler>::reportIfArgumentsEvalTarget(Node target)
     if (!chars)
         return true;
 
-    if (!report(ParseStrictError, pc->sc->strict(), target, JSMSG_BAD_STRICT_ASSIGN, chars))
+    if (!report(ParseStrictError, pc->sc->strict(), nameNode, JSMSG_BAD_STRICT_ASSIGN, chars))
         return false;
 
     MOZ_ASSERT(!pc->sc->strict(), "in strict mode an error should have been reported");
@@ -6603,15 +6686,21 @@ Parser<ParseHandler>::reportIfArgumentsEvalTarget(Node target)
 
 template <typename ParseHandler>
 bool
-Parser<ParseHandler>::reportIfNotValidSimpleAssignmentTarget(Node target,
-                                                             AssignmentFlavor flavor)
+Parser<ParseHandler>::reportIfNotValidSimpleAssignmentTarget(Node target, AssignmentFlavor flavor)
 {
-    if (isValidSimpleAssignmentTarget(target))
+    FunctionCallBehavior behavior = flavor == KeyedDestructuringAssignment
+                                    ? ForbidAssignmentToFunctionCalls
+                                    : PermitAssignmentToFunctionCalls;
+    if (isValidSimpleAssignmentTarget(target, behavior))
         return true;
 
-    // Use a special error if the target is arguments/eval, as a nicety.
-    if (!reportIfArgumentsEvalTarget(target))
-        return false;
+    if (handler.maybeNameAnyParentheses(target)) {
+        // Use a special error if the target is arguments/eval.  This ensures
+        // targeting these names is consistently a SyntaxError (which error numbers
+        // below don't guarantee) while giving us a nicer error message.
+        if (!reportIfArgumentsEvalTarget(target))
+            return false;
+    }
 
     unsigned errnum;
     const char* extra = nullptr;
@@ -6645,17 +6734,19 @@ template <typename ParseHandler>
 bool
 Parser<ParseHandler>::checkAndMarkAsIncOperand(Node target, AssignmentFlavor flavor)
 {
+    MOZ_ASSERT(flavor == IncrementAssignment || flavor == DecrementAssignment);
+
     // Check.
     if (!reportIfNotValidSimpleAssignmentTarget(target, flavor))
         return false;
 
-    // Assignment to arguments/eval is allowed outside strict mode code,
-    // but it's dodgy.  Report a strict warning (error, if werror was set).
-    if (!reportIfArgumentsEvalTarget(target))
-        return false;
-
     // Mark.
-    if (handler.maybeName(target)) {
+    if (handler.maybeNameAnyParentheses(target)) {
+        // Assignment to arguments/eval is allowed outside strict mode code,
+        // but it's dodgy.  Report a strict warning (error, if werror was set).
+        if (!reportIfArgumentsEvalTarget(target))
+            return false;
+
         handler.markAsAssigned(target);
     } else if (handler.isFunctionCall(target)) {
         if (!makeSetCall(target, JSMSG_BAD_INCOP_OPERAND))
@@ -6741,7 +6832,7 @@ Parser<ParseHandler>::unaryExpr(YieldHandling yieldHandling, InvokedPrediction i
 
         // Per spec, deleting any unary expression is valid -- it simply
         // returns true -- except for one case that is illegal in strict mode.
-        if (handler.maybeName(expr)) {
+        if (handler.maybeNameAnyParentheses(expr)) {
             if (!report(ParseStrictError, pc->sc->strict(), expr, JSMSG_DEPRECATED_DELETE_OPERAND))
                 return null();
             pc->sc->setBindingsAccessedDynamically();
@@ -7226,7 +7317,7 @@ Parser<FullParseHandler>::legacyComprehensionTail(ParseNode* bodyExpr, unsigned 
         switch (tt) {
           case TOK_LB:
           case TOK_LC:
-            if (!checkDestructuring(&data, pn3))
+            if (!checkDestructuringPattern(&data, pn3))
                 return null();
             break;
 
@@ -7982,7 +8073,7 @@ Parser<ParseHandler>::memberExpr(YieldHandling yieldHandling, TokenKind tt, bool
                 return null();
 
             JSOp op = JSOP_CALL;
-            if (PropertyName* name = handler.maybeName(lhs)) {
+            if (PropertyName* name = handler.maybeNameAnyParentheses(lhs)) {
                 if (tt == TOK_LP && name == context->names().eval) {
                     /* Select JSOP_EVAL and flag pc as heavyweight. */
                     op = pc->sc->strict() ? JSOP_STRICTEVAL : JSOP_EVAL;
@@ -8287,7 +8378,7 @@ Parser<ParseHandler>::computedPropertyName(YieldHandling yieldHandling, Node lit
     // Turn off the inDeclDestructuring flag when parsing computed property
     // names. In short, when parsing 'let {[x + y]: z} = obj;', noteNameUse()
     // should be called on x and y, but not on z. See the comment on
-    // Parser<>::checkDestructuring() for details.
+    // Parser<>::checkDestructuringPattern() for details.
     bool saved = pc->inDeclDestructuring;
     pc->inDeclDestructuring = false;
     Node assignNode = assignExpr(InAllowed, yieldHandling);
@@ -8307,7 +8398,7 @@ template <typename ParseHandler>
 typename ParseHandler::Node
 Parser<ParseHandler>::newPropertyListNode(PropListType type)
 {
-    if (type == ClassBody)
+    if (IsClassBody(type))
         return handler.newClassMethodList(pos().begin);
 
     MOZ_ASSERT(type == ObjectLiteral);
@@ -8335,7 +8426,7 @@ Parser<ParseHandler>::propertyList(YieldHandling yieldHandling, PropListType typ
             break;
 
         bool isStatic = false;
-        if (type == ClassBody) {
+        if (IsClassBody(type)) {
             if (ltok == TOK_SEMI)
                 continue;
 
@@ -8475,7 +8566,7 @@ Parser<ParseHandler>::propertyList(YieldHandling yieldHandling, PropListType typ
             }
         }
 
-        if (type == ClassBody) {
+        if (IsClassBody(type)) {
             if (!isStatic && atom == context->names().constructor) {
                 if (isGenerator || op != JSOP_INITPROP) {
                     report(ParseError, false, propname, JSMSG_BAD_METHOD_DEF);
@@ -8499,7 +8590,7 @@ Parser<ParseHandler>::propertyList(YieldHandling yieldHandling, PropListType typ
                 return null();
 
             if (tt == TOK_COLON) {
-                if (type == ClassBody) {
+                if (IsClassBody(type)) {
                     report(ParseError, false, null(), JSMSG_BAD_METHOD_DEF);
                     return null();
                 }
@@ -8541,7 +8632,7 @@ Parser<ParseHandler>::propertyList(YieldHandling yieldHandling, PropListType typ
                  * Support, e.g., |var {x, y} = o| as destructuring shorthand
                  * for |var {x: x, y: y} = o|, per proposed JS2/ES4 for JS1.8.
                  */
-                if (type == ClassBody) {
+                if (IsClassBody(type)) {
                     report(ParseError, false, null(), JSMSG_BAD_METHOD_DEF);
                     return null();
                 }
@@ -8563,7 +8654,9 @@ Parser<ParseHandler>::propertyList(YieldHandling yieldHandling, PropListType typ
             } else if (tt == TOK_LP) {
                 tokenStream.ungetToken();
                 if (!methodDefinition(yieldHandling, type, propList, propname,
-                                      isConstructor ? ClassConstructor : Method,
+                                      isConstructor ? type == DerivedClassBody ? DerivedClassConstructor
+                                                                               : ClassConstructor
+                                                    : Method,
                                       isGenerator ? StarGenerator : NotGenerator, isStatic, op))
                 {
                     return null();
@@ -8595,7 +8688,7 @@ Parser<ParseHandler>::propertyList(YieldHandling yieldHandling, PropListType typ
     }
 
     // Default constructors not yet implemented. See bug 1105463
-    if (type == ClassBody && !seenConstructor) {
+    if (IsClassBody(type) && !seenConstructor) {
         report(ParseError, false, null(), JSMSG_NO_CLASS_CONSTRUCTOR);
         return null();
     }
@@ -8610,19 +8703,23 @@ Parser<ParseHandler>::methodDefinition(YieldHandling yieldHandling, PropListType
                                        Node propList, Node propname, FunctionSyntaxKind kind,
                                        GeneratorKind generatorKind, bool isStatic, JSOp op)
 {
-    MOZ_ASSERT(kind == Method || kind == ClassConstructor || kind == Getter || kind == Setter);
+    MOZ_ASSERT(kind == Method || kind == ClassConstructor || kind == DerivedClassConstructor ||
+               kind == Getter || kind == Setter);
     /* NB: Getter function in { get x(){} } is unnamed. */
     RootedPropertyName funName(context);
-    if ((kind == Method || kind == ClassConstructor) && tokenStream.isCurrentTokenType(TOK_NAME))
+    if ((kind == Method || kind == ClassConstructor || kind == DerivedClassConstructor) &&
+        tokenStream.isCurrentTokenType(TOK_NAME))
+    {
         funName = tokenStream.currentName();
-    else
+    } else {
         funName = nullptr;
+    }
 
     Node fn = functionDef(InAllowed, yieldHandling, funName, kind, generatorKind);
     if (!fn)
         return false;
 
-    if (listType == ClassBody)
+    if (IsClassBody(listType))
         return handler.addClassMethodDefinition(propList, propname, fn, op, isStatic);
 
     MOZ_ASSERT(listType == ObjectLiteral);

@@ -1352,14 +1352,16 @@ OptimizeMIR(MIRGenerator* mir)
             return false;
     }
 
-    ValueNumberer gvn(mir, graph);
-    if (!gvn.init())
-        return false;
+    if (mir->optimizationInfo().scalarReplacementEnabled()) {
+        AutoTraceLog log(logger, TraceLogger_ScalarReplacement);
+        if (!ScalarReplacement(mir, graph))
+            return false;
+        gs.spewPass("Scalar Replacement");
+        AssertGraphCoherency(graph);
 
-    size_t doRepeatOptimizations = 0;
-  repeatOptimizations:
-    doRepeatOptimizations++;
-    MOZ_ASSERT(doRepeatOptimizations <= 2);
+        if (mir->shouldCancel("Scalar Replacement"))
+            return false;
+    }
 
     if (!mir->compilingAsmJS()) {
         AutoTraceLog log(logger, TraceLogger_ApplyTypes);
@@ -1394,6 +1396,10 @@ OptimizeMIR(MIRGenerator* mir)
         if (mir->shouldCancel("Alignment Mask Analysis"))
             return false;
     }
+
+    ValueNumberer gvn(mir, graph);
+    if (!gvn.init())
+        return false;
 
     // Alias analysis is required for LICM and GVN so that we don't move
     // loads across stores.
@@ -1448,26 +1454,6 @@ OptimizeMIR(MIRGenerator* mir)
             if (mir->shouldCancel("LICM"))
                 return false;
         }
-    }
-
-    if (mir->optimizationInfo().scalarReplacementEnabled() && doRepeatOptimizations <= 1) {
-        AutoTraceLog log(logger, TraceLogger_ScalarReplacement);
-        bool success = false;
-        if (!ScalarReplacement(mir, graph, &success))
-            return false;
-        gs.spewPass("Scalar Replacement");
-        AssertGraphCoherency(graph);
-
-        if (mir->shouldCancel("Scalar Replacement"))
-            return false;
-
-        // We got some success at removing objects allocation and removing the
-        // loads and stores, unfortunately, this phase is terrible at keeping
-        // the type consistency, so we re-run the Apply Type phase.  As this
-        // optimization folds loads and stores, it might also introduce new
-        // opportunities for GVN and LICM, so re-run them as well.
-        if (success)
-            goto repeatOptimizations;
     }
 
     if (mir->optimizationInfo().rangeAnalysisEnabled()) {
@@ -2130,12 +2116,12 @@ CheckScript(JSContext* cx, JSScript* script, bool osr)
         return false;
     }
 
-    if (script->hasPollutedGlobalScope() && !script->functionNonDelazifying()) {
-        // Support functions with a polluted global scope but not other
+    if (script->hasNonSyntacticScope() && !script->functionNonDelazifying()) {
+        // Support functions with a non-syntactic global scope but not other
         // scripts. For global scripts, IonBuilder currently uses the global
         // object as scope chain, this is not valid when the script has a
-        // polluted global scope.
-        TrackAndSpewIonAbort(cx, script, "has polluted global scope");
+        // non-syntactic global scope.
+        TrackAndSpewIonAbort(cx, script, "has non-syntactic global scope");
         return false;
     }
 

@@ -1639,10 +1639,14 @@ nsEventStatus AsyncPanZoomController::OnPanBegin(const PanGestureInput& aEvent) 
   }
 
   float dx = aEvent.mPanDisplacement.x, dy = aEvent.mPanDisplacement.y;
-  double angle = atan2(dy, dx); // range [-pi, pi]
-  angle = fabs(angle); // range [0, pi]
 
-  HandlePanning(angle);
+  if (dx || dy) {
+    double angle = atan2(dy, dx); // range [-pi, pi]
+    angle = fabs(angle); // range [0, pi]
+    HandlePanning(angle);
+  } else {
+    SetState(PANNING);
+  }
 
   return nsEventStatus_eConsumeNoDefault;
 }
@@ -2459,6 +2463,13 @@ void AsyncPanZoomController::FlushRepaintForNewInputBlock() {
   UpdateSharedCompositorFrameMetrics();
 }
 
+void AsyncPanZoomController::FlushRepaintIfPending() {
+  // Just tell the paint throttler to send the pending repaint request if
+  // there is one.
+  ReentrantMonitorAutoEnter lock(mMonitor);
+  mPaintThrottler.TaskComplete(GetFrameTime());
+}
+
 bool AsyncPanZoomController::SnapBackIfOverscrolled() {
   ReentrantMonitorAutoEnter lock(mMonitor);
   // It's possible that we're already in the middle of an overscroll
@@ -3116,6 +3127,7 @@ void AsyncPanZoomController::SetState(PanZoomState aNewState)
   // Intentional scoping for mutex
   {
     ReentrantMonitorAutoEnter lock(mMonitor);
+    APZC_LOG("%p changing from state %d to %d\n", this, mState, aNewState);
     oldState = mState;
     mState = aNewState;
   }

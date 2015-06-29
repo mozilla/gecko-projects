@@ -1609,7 +1609,7 @@
             // and the URL is "about:newtab". We do not support preloading for
             // custom newtab URLs.
             return Services.prefs.getBoolPref("browser.newtab.preload") &&
-                   !Services.prefs.prefHasUserValue("browser.newtab.url");
+                   !NewTabURL.overridden;
           ]]>
         </body>
       </method>
@@ -3371,6 +3371,16 @@
                 return;
               }
 
+              // Instrumentation to figure out bug 1166351 - if the binding
+              // on the browser we're switching to has gone away, try to find out
+              // why. We should remove this and the checkBrowserBindingAlive
+              // method once bug 1166351 has been closed.
+              if (this.tabbrowser.AppConstants.E10S_TESTING_ONLY &&
+                  !this.checkBrowserBindingAlive(tab)) {
+                Cu.reportError("Please report the above errors in bug 1166351.");
+                return;
+              }
+
               this.logState("requestTab " + this.tinfo(tab));
               this.startTabSwitch();
 
@@ -3464,6 +3474,42 @@
               this._shouldLog = result;
               this._logInit = true;
               return this._shouldLog;
+            },
+
+            // Instrumentation for bug 1166351
+            checkBrowserBindingAlive: function(tab) {
+              let err = Cu.reportError;
+
+              if (!tab.linkedBrowser) {
+                err("Attempting to switch to tab that has no linkedBrowser.");
+                return false;
+              }
+
+              let b = tab.linkedBrowser;
+
+              if (!b._alive) {
+                // The browser binding has been removed. Dump a bunch of
+                // diagnostic information to the browser console.
+                let utils = Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
+                let results = utils.getBindingURLs(b);
+                let urls = [];
+
+                for (let i = 0; i < results.length; ++i) {
+                  urls.push(results.queryElementAt(i, Ci.nsIURI).spec);
+                }
+                err("The browser has the following bindings:");
+                err(urls);
+                err("MozBinding is currently: " +
+                    window.getComputedStyle(b).MozBinding);
+                if (!b.parentNode) {
+                  err("Browser was removed from the DOM.");
+                } else {
+                  err("Parent is: " + b.parentNode.outerHTML);
+                }
+                return false;
+              }
+
+              return true;
             },
 
             tinfo: function(tab) {

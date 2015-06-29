@@ -69,6 +69,7 @@ class nsIImageLoadingContent;
 class nsIInterfaceRequestor;
 class nsIIOService;
 class nsILineBreaker;
+class nsILoadGroup;
 class nsIMessageBroadcaster;
 class nsNameSpaceManager;
 class nsIObserver;
@@ -729,6 +730,11 @@ public:
    * Returns true if this document is in a Private Browsing window.
    */
   static bool IsInPrivateBrowsing(nsIDocument* aDoc);
+
+  /**
+   * Returns true if this loadGroup uses Private Browsing.
+   */
+  static bool IsInPrivateBrowsing(nsILoadGroup* aLoadGroup);
 
   /**
    * If aNode is not an element, return true exactly when aContent's binding
@@ -1949,6 +1955,14 @@ public:
   }
 
   /*
+   * Returns true if URL getters should percent decode the value of the segment
+   */
+  static bool GettersDecodeURLHash()
+  {
+    return sGettersDecodeURLHash && sEncodeDecodeURLHash;
+  }
+
+  /*
    * Returns true if the browser should attempt to prevent content scripts
    * from collecting distinctive information about the browser that could
    * be used to "fingerprint" and track the user across websites.
@@ -2363,7 +2377,7 @@ public:
    * Synthesize a key event to the given widget
    * (see nsIDOMWindowUtils.sendKeyEvent).
    */
-  static nsresult SendKeyEvent(nsCOMPtr<nsIWidget> aWidget,
+  static nsresult SendKeyEvent(nsIWidget* aWidget,
                                const nsAString& aType,
                                int32_t aKeyCode,
                                int32_t aCharCode,
@@ -2397,6 +2411,25 @@ public:
                                 mozilla::dom::EventTarget* aChromeEventHandler);
 
   static already_AddRefed<nsPIWindowRoot> GetWindowRoot(nsIDocument* aDoc);
+
+  /*
+   * Implements step 3.1 and 3.3 of the Determine request's Referrer algorithm
+   * from the Referrer Policy specification.
+   *
+   * The referrer policy of the document is applied by Necko when using
+   * channels.
+   *
+   * For documents representing an iframe srcdoc attribute, the document sets
+   * its own URI correctly, so this method simply uses the document's original
+   * or current URI as appropriate.
+   *
+   * aDoc may be null.
+   *
+   * https://w3c.github.io/webappsec/specs/referrer-policy/#determine-requests-referrer
+   */
+  static nsresult SetFetchReferrerURIWithPolicy(nsIPrincipal* aPrincipal,
+                                                nsIDocument* aDoc,
+                                                nsIHttpChannel* aChannel);
 
 private:
   static bool InitializeEventTable();
@@ -2499,6 +2532,7 @@ private:
   static bool sIsUserTimingLoggingEnabled;
   static bool sIsExperimentalAutocompleteEnabled;
   static bool sEncodeDecodeURLHash;
+  static bool sGettersDecodeURLHash;
   static bool sPrivacyResistFingerprinting;
 
   static nsHtml5StringParser* sHTMLFragmentParser;

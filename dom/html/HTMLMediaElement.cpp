@@ -2201,7 +2201,11 @@ HTMLMediaElement::Play(ErrorResult& aRv)
 {
   // Prevent media element from being auto-started by a script when
   // media.autoplay.enabled=false
-  if (!IsAutoplayEnabled() && !EventStateManager::IsHandlingUserInput() && !nsContentUtils::IsCallerChrome()) {
+  nsRefPtr<TimeRanges> played(Played());
+  if (played->Length() == 0
+      && !IsAutoplayEnabled()
+      && !EventStateManager::IsHandlingUserInput()
+      && !nsContentUtils::IsCallerChrome()) {
     LOG(LogLevel::Debug, ("%p Blocked attempt to autoplay media.", this));
     return;
   }
@@ -3110,7 +3114,17 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
   ChangeDelayLoadStatus(false);
   GetSrcMediaStream()->AddAudioOutput(this);
   SetVolumeInternal();
-  VideoFrameContainer* container = GetVideoFrameContainer();
+
+  bool bUseOverlayImage = mSrcStream->AsDOMHwMediaStream() != nullptr;
+  VideoFrameContainer* container;
+
+  if (bUseOverlayImage) {
+    container = GetOverlayImageVideoFrameContainer();
+  }
+  else {
+    container = GetVideoFrameContainer();
+  }
+
   if (container) {
     GetSrcMediaStream()->AddVideoOutput(container);
   }
@@ -3778,7 +3792,23 @@ VideoFrameContainer* HTMLMediaElement::GetVideoFrameContainer()
   }
 
   mVideoFrameContainer =
-    new VideoFrameContainer(this, LayerManager::CreateAsynchronousImageContainer());
+    new VideoFrameContainer(this, LayerManager::CreateImageContainer(ImageContainer::ASYNCHRONOUS));
+
+  return mVideoFrameContainer;
+}
+
+VideoFrameContainer* HTMLMediaElement::GetOverlayImageVideoFrameContainer()
+{
+  if (mVideoFrameContainer)
+    return mVideoFrameContainer;
+
+  // Only video frames need an image container.
+  if (!IsVideo()) {
+    return nullptr;
+  }
+
+  mVideoFrameContainer =
+    new VideoFrameContainer(this, LayerManager::CreateImageContainer(ImageContainer::ASYNCHRONOUS_OVERLAY));
 
   return mVideoFrameContainer;
 }

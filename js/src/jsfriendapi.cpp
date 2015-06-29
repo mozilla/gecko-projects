@@ -71,13 +71,6 @@ JS_SetGrayGCRootsTracer(JSRuntime* rt, JSTraceDataOp traceOp, void* data)
     rt->gc.setGrayRootsTracer(traceOp, data);
 }
 
-JS_FRIEND_API(JSString*)
-JS_GetAnonymousString(JSRuntime* rt)
-{
-    MOZ_ASSERT(rt->hasContexts());
-    return rt->commonNames->anonymous;
-}
-
 JS_FRIEND_API(JSObject*)
 JS_FindCompilationScope(JSContext* cx, HandleObject objArg)
 {
@@ -314,24 +307,6 @@ js::IsFunctionObject(JSObject* obj)
     return obj->is<JSFunction>();
 }
 
-JS_FRIEND_API(bool)
-js::IsScopeObject(JSObject* obj)
-{
-    return obj->is<ScopeObject>();
-}
-
-JS_FRIEND_API(bool)
-js::IsCallObject(JSObject* obj)
-{
-    return obj->is<CallObject>();
-}
-
-JS_FRIEND_API(bool)
-js::CanAccessObjectShape(JSObject* obj)
-{
-    return obj->maybeShape() != nullptr;
-}
-
 JS_FRIEND_API(JSObject*)
 js::GetGlobalForObjectCrossCompartment(JSObject* obj)
 {
@@ -344,12 +319,6 @@ js::GetPrototypeNoProxy(JSObject* obj)
     MOZ_ASSERT(!obj->is<js::ProxyObject>());
     MOZ_ASSERT(!obj->getTaggedProto().isLazy());
     return obj->getTaggedProto().toObjectOrNull();
-}
-
-JS_FRIEND_API(void)
-js::SetPendingExceptionCrossContext(JSContext* cx, JS::HandleValue v)
-{
-    cx->setPendingException(v);
 }
 
 JS_FRIEND_API(void)
@@ -508,19 +477,6 @@ js::SetReservedOrProxyPrivateSlotWithBarrier(JSObject* obj, size_t slot, const j
     } else {
         obj->as<NativeObject>().setSlot(slot, value);
     }
-}
-
-JS_FRIEND_API(bool)
-js::GetGeneric(JSContext* cx, JSObject* objArg, JSObject* receiverArg, jsid idArg,
-               Value* vp)
-{
-    RootedObject obj(cx, objArg), receiver(cx, receiverArg);
-    RootedId id(cx, idArg);
-    RootedValue value(cx);
-    if (!GetProperty(cx, obj, receiver, id, &value))
-        return false;
-    *vp = value;
-    return true;
 }
 
 void
@@ -1018,18 +974,6 @@ js::IsContextRunningJS(JSContext* cx)
     return cx->currentlyRunning();
 }
 
-JS_FRIEND_API(int64_t)
-GetMaxGCPauseSinceClear(JSRuntime* rt)
-{
-    return rt->gc.stats.getMaxGCPauseSinceClear();
-}
-
-JS_FRIEND_API(int64_t)
-ClearMaxGCPauseAccumulator(JSRuntime* rt)
-{
-    return rt->gc.stats.clearMaxGCPauseAccumulator();
-}
-
 JS_FRIEND_API(void)
 JS::NotifyDidPaint(JSRuntime* rt)
 {
@@ -1198,23 +1142,6 @@ js::GetObjectMetadata(JSObject* obj)
     if (map)
         return map->lookup(obj);
     return nullptr;
-}
-
-JS_FRIEND_API(bool)
-js::DefineOwnProperty(JSContext* cx, JSObject* objArg, jsid idArg,
-                      JS::Handle<js::PropertyDescriptor> descriptor, ObjectOpResult& result)
-{
-    RootedObject obj(cx, objArg);
-    RootedId id(cx, idArg);
-    AssertHeapIsIdle(cx);
-    CHECK_REQUEST(cx);
-    assertSameCompartment(cx, obj, id, descriptor.value());
-    if (descriptor.hasGetterObject())
-        assertSameCompartment(cx, descriptor.getterObject());
-    if (descriptor.hasSetterObject())
-        assertSameCompartment(cx, descriptor.setterObject());
-
-    return StandardDefineProperty(cx, obj, id, descriptor, result);
 }
 
 JS_FRIEND_API(bool)

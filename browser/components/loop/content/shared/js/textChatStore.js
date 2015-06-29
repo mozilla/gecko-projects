@@ -5,7 +5,7 @@
 var loop = loop || {};
 loop.store = loop.store || {};
 
-loop.store.TextChatStore = (function(mozL10n) {
+loop.store.TextChatStore = (function() {
   "use strict";
 
   var sharedActions = loop.shared.actions;
@@ -69,10 +69,15 @@ loop.store.TextChatStore = (function(mozL10n) {
     /**
      * Handles information for when data channels are available - enables
      * text chat.
+     *
+     * @param {sharedActions.DataChannelsAvailable} actionData
      */
-    dataChannelsAvailable: function() {
-      this.setStoreState({ textChatEnabled: true });
-      window.dispatchEvent(new CustomEvent("LoopChatEnabled"));
+    dataChannelsAvailable: function(actionData) {
+      this.setStoreState({ textChatEnabled: actionData.available });
+
+      if (actionData.available) {
+        window.dispatchEvent(new CustomEvent("LoopChatEnabled"));
+      }
     },
 
     /**
@@ -91,7 +96,9 @@ loop.store.TextChatStore = (function(mozL10n) {
         type: type,
         contentType: messageData.contentType,
         message: messageData.message,
-        extraData: messageData.extraData
+        extraData: messageData.extraData,
+        sentTimestamp: messageData.sentTimestamp,
+        receivedTimestamp: messageData.receivedTimestamp
       };
       var newList = this._storeState.messageList.concat(message);
       this.setStoreState({ messageList: newList });
@@ -137,13 +144,15 @@ loop.store.TextChatStore = (function(mozL10n) {
     updateRoomInfo: function(actionData) {
       // XXX When we add special messages to desktop, we'll need to not post
       // multiple changes of room name, only the first. Bug 1171940 should fix this.
-      this._appendTextChatMessage(CHAT_MESSAGE_TYPES.SPECIAL, {
-        contentType: CHAT_CONTENT_TYPES.ROOM_NAME,
-        message: mozL10n.get("rooms_welcome_title", {conversationName: actionData.roomName})
-      });
+      if (actionData.roomName) {
+        this._appendTextChatMessage(CHAT_MESSAGE_TYPES.SPECIAL, {
+          contentType: CHAT_CONTENT_TYPES.ROOM_NAME,
+          message: actionData.roomName
+        });
+      }
 
       // Append the context if we have any.
-      if ("urls" in actionData && actionData.urls.length) {
+      if (("urls" in actionData) && actionData.urls && actionData.urls.length) {
         // We only support the first url at the moment.
         var urlData = actionData.urls[0];
 
@@ -160,4 +169,4 @@ loop.store.TextChatStore = (function(mozL10n) {
   });
 
   return TextChatStore;
-})(navigator.mozL10n || window.mozL10n);
+})();

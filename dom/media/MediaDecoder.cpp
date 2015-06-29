@@ -10,7 +10,6 @@
 #include <limits>
 #include "nsIObserver.h"
 #include "nsTArray.h"
-#include "CubebUtils.h"
 #include "VideoUtils.h"
 #include "MediaDecoderStateMachine.h"
 #include "ImageContainer.h"
@@ -304,25 +303,21 @@ void MediaDecoder::AddOutputStream(ProcessedMediaStream* aStream,
 double MediaDecoder::GetDuration()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (mInfiniteStream) {
-    return std::numeric_limits<double>::infinity();
-  }
-  if (mDuration >= 0) {
-     return static_cast<double>(mDuration) / static_cast<double>(USECS_PER_S);
-  }
-  return std::numeric_limits<double>::quiet_NaN();
+  return mDuration;
 }
 
-int64_t MediaDecoder::GetMediaDuration()
+AbstractCanonical<media::NullableTimeUnit>*
+MediaDecoder::CanonicalDurationOrNull()
 {
-  NS_ENSURE_TRUE(GetStateMachine(), -1);
-  return GetStateMachine()->GetDuration();
+  MOZ_ASSERT(mDecoderStateMachine);
+  return mDecoderStateMachine->CanonicalDuration();
 }
 
 void MediaDecoder::SetInfinite(bool aInfinite)
 {
   MOZ_ASSERT(NS_IsMainThread());
   mInfiniteStream = aInfinite;
+  DurationChanged();
 }
 
 bool MediaDecoder::IsInfinite()
@@ -333,6 +328,7 @@ bool MediaDecoder::IsInfinite()
 
 MediaDecoder::MediaDecoder() :
   mWatchManager(this, AbstractThread::MainThread()),
+  mBuffered(AbstractThread::MainThread(), TimeIntervals(), "MediaDecoder::mBuffered (Mirror)"),
   mNextFrameStatus(AbstractThread::MainThread(),
                    MediaDecoderOwner::NEXT_FRAME_UNINITIALIZED,
                    "MediaDecoder::mNextFrameStatus (Mirror)"),
@@ -343,7 +339,8 @@ MediaDecoder::MediaDecoder() :
   mVolume(AbstractThread::MainThread(), 0.0, "MediaDecoder::mVolume (Canonical)"),
   mPlaybackRate(AbstractThread::MainThread(), 1.0, "MediaDecoder::mPlaybackRate (Canonical)"),
   mPreservesPitch(AbstractThread::MainThread(), true, "MediaDecoder::mPreservesPitch (Canonical)"),
-  mDuration(-1),
+  mDuration(std::numeric_limits<double>::quiet_NaN()),
+  mStateMachineDuration(AbstractThread::MainThread(), NullableTimeUnit(), "MediaDecoder::mStateMachineDuration (Mirror)"),
   mMediaSeekable(true),
   mSameOriginMedia(false),
   mReentrantMonitor("media.decoder"),
@@ -366,6 +363,7 @@ MediaDecoder::MediaDecoder() :
   mPausedForPlaybackRateNull(false),
   mMinimizePreroll(false),
   mMediaTracksConstructed(false),
+  mFiredMetadataLoaded(false),
   mIsDormant(false),
   mWasEndedWhenEnteredDormant(false),
   mIsHeuristicDormantSupported(
@@ -385,6 +383,9 @@ MediaDecoder::MediaDecoder() :
   // Initialize watchers.
   //
 
+  // mDuration
+  mWatchManager.Watch(mStateMachineDuration, &MediaDecoder::DurationChanged);
+
   // readyState
   mWatchManager.Watch(mPlayState, &MediaDecoder::UpdateReadyState);
   mWatchManager.Watch(mNextFrameStatus, &MediaDecoder::UpdateReadyState);
@@ -401,11 +402,6 @@ bool MediaDecoder::Init(MediaDecoderOwner* aOwner)
   mOwner = aOwner;
   mVideoFrameContainer = aOwner->GetVideoFrameContainer();
   MediaShutdownManager::Instance().Register(this);
-  // We don't use the cubeb context yet, but need to ensure it is created on
-  // the main thread.
-  if (!CubebUtils::GetCubebContext()) {
-    NS_WARNING("Audio backend initialization failed.");
-  }
   return true;
 }
 
@@ -649,17 +645,6 @@ void MediaDecoder::MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
               aInfo->mAudio.mChannels, aInfo->mAudio.mRate,
               aInfo->HasAudio(), aInfo->HasVideo());
 
-  {
-    ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-    mDuration = mDecoderStateMachine ? mDecoderStateMachine->GetDuration() : -1;
-    // Duration has changed so we should recompute playback rate
-    UpdatePlaybackRate();
-  }
-
-  if (mDuration == -1) {
-    SetInfinite(true);
-  }
-
   mInfo = aInfo.forget();
   ConstructMediaTracks();
 
@@ -668,6 +653,7 @@ void MediaDecoder::MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
     // our new size.
     Invalidate();
     if (aEventVisibility != MediaDecoderEventVisibility::Suppressed) {
+      mFiredMetadataLoaded = true;
       mOwner->MetadataLoaded(mInfo, nsAutoPtr<const MetadataTags>(aTags.forget()));
     }
   }
@@ -868,9 +854,9 @@ double MediaDecoder::ComputePlaybackRate(bool* aReliable)
   MOZ_ASSERT(NS_IsMainThread() || OnStateMachineTaskQueue() || OnDecodeTaskQueue());
 
   int64_t length = mResource ? mResource->GetLength() : -1;
-  if (mDuration >= 0 && length >= 0) {
+  if (!IsNaN(mDuration) && !mozilla::IsInfinite<double>(mDuration) && length >= 0) {
     *aReliable = true;
-    return length * static_cast<double>(USECS_PER_S) / mDuration;
+    return length * mDuration;
   }
   return mPlaybackStatistics->GetRateAtLastStop(aReliable);
 }
@@ -1077,29 +1063,45 @@ void MediaDecoder::UpdateLogicalPosition(MediaDecoderEventVisibility aEventVisib
   }
 }
 
-void MediaDecoder::DurationChanged(TimeUnit aNewDuration)
+void MediaDecoder::DurationChanged()
 {
   MOZ_ASSERT(NS_IsMainThread());
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-  int64_t oldDuration = mDuration;
-  mDuration = aNewDuration.ToMicroseconds();
+
+  double oldDuration = mDuration;
+  if (IsInfinite()) {
+    mDuration = std::numeric_limits<double>::infinity();
+  } else if (mExplicitDuration.Ref().isSome()) {
+    mDuration = mExplicitDuration.Ref().ref();
+  } else if (mStateMachineDuration.Ref().isSome()) {
+    mDuration = mStateMachineDuration.Ref().ref().ToSeconds();
+  }
+
+  if (mDuration == oldDuration || IsNaN(mDuration)) {
+    return;
+  }
+
+  DECODER_LOG("Duration changed to %f", mDuration);
+
   // Duration has changed so we should recompute playback rate
   UpdatePlaybackRate();
 
-  SetInfinite(mDuration == -1);
-
-  if (mOwner && oldDuration != mDuration && !IsInfinite()) {
-    DECODER_LOG("Duration changed to %lld", mDuration);
+  // See https://www.w3.org/Bugs/Public/show_bug.cgi?id=28822 for a discussion
+  // of whether we should fire durationchange on explicit infinity.
+  if (mOwner && mFiredMetadataLoaded &&
+      (!mozilla::IsInfinite<double>(mDuration) || mExplicitDuration.Ref().isSome())) {
     mOwner->DispatchAsyncEvent(NS_LITERAL_STRING("durationchange"));
   }
 
-  if (CurrentPosition() > aNewDuration.ToMicroseconds()) {
-    Seek(aNewDuration.ToSeconds(), SeekTarget::Accurate);
+  if (CurrentPosition() > TimeUnit::FromSeconds(mDuration).ToMicroseconds()) {
+    Seek(mDuration, SeekTarget::Accurate);
   }
 }
 
 void MediaDecoder::UpdateEstimatedMediaDuration(int64_t aDuration)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   if (mPlayState <= PLAY_STATE_LOADING) {
     return;
   }
@@ -1256,9 +1258,13 @@ MediaDecoder::SetStateMachine(MediaDecoderStateMachine* aStateMachine)
   mDecoderStateMachine = aStateMachine;
 
   if (mDecoderStateMachine) {
+    mStateMachineDuration.Connect(mDecoderStateMachine->CanonicalDuration());
+    mBuffered.Connect(mDecoderStateMachine->CanonicalBuffered());
     mNextFrameStatus.Connect(mDecoderStateMachine->CanonicalNextFrameStatus());
     mCurrentPosition.Connect(mDecoderStateMachine->CanonicalCurrentPosition());
   } else {
+    mStateMachineDuration.DisconnectIfConnected();
+    mBuffered.DisconnectIfConnected();
     mNextFrameStatus.DisconnectIfConnected();
     mCurrentPosition.DisconnectIfConnected();
   }
@@ -1290,8 +1296,7 @@ void MediaDecoder::Invalidate()
 // Constructs the time ranges representing what segments of the media
 // are buffered and playable.
 media::TimeIntervals MediaDecoder::GetBuffered() {
-  NS_ENSURE_TRUE(mDecoderStateMachine && !mShuttingDown, media::TimeIntervals::Invalid());
-  return mDecoderStateMachine->GetBuffered();
+  return mBuffered.Ref();
 }
 
 size_t MediaDecoder::SizeOfVideoQueue() {
@@ -1308,9 +1313,11 @@ size_t MediaDecoder::SizeOfAudioQueue() {
   return 0;
 }
 
-void MediaDecoder::NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset) {
+void MediaDecoder::NotifyDataArrived(uint32_t aLength, int64_t aOffset, bool aThrottleUpdates) {
+  MOZ_ASSERT(NS_IsMainThread());
+
   if (mDecoderStateMachine) {
-    mDecoderStateMachine->NotifyDataArrived(aBuffer, aLength, aOffset);
+    mDecoderStateMachine->DispatchNotifyDataArrived(aLength, aOffset, aThrottleUpdates);
   }
 
   // ReadyState computation depends on MediaDecoder::CanPlayThrough, which

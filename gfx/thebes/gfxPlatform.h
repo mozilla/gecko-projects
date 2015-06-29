@@ -308,7 +308,9 @@ public:
     mozilla::gfx::BackendType GetPreferredCanvasBackend() {
       return mPreferredCanvasBackend;
     }
-
+    mozilla::gfx::BackendType GetFallbackCanvasBackend() {
+      return mFallbackCanvasBackend;
+    }
     /*
      * Font bits
      */
@@ -505,7 +507,7 @@ public:
 
     static bool CanUseDirect3D9();
     static bool CanUseDirect3D11();
-    static bool CanUseHardwareVideoDecoding();
+    virtual bool CanUseHardwareVideoDecoding();
     static bool CanUseDirect3D11ANGLE();
 
     /**
@@ -638,6 +640,16 @@ public:
     }
 
     virtual void FlushContentDrawing() {}
+
+    /**
+     * Helper method, creates a draw target for a specific Azure backend.
+     * Used by CreateOffscreenDrawTarget.
+     */
+    mozilla::TemporaryRef<DrawTarget>
+      CreateDrawTargetForBackend(mozilla::gfx::BackendType aBackend,
+                                 const mozilla::gfx::IntSize& aSize,
+                                 mozilla::gfx::SurfaceFormat aFormat);
+
 protected:
     gfxPlatform();
     virtual ~gfxPlatform();
@@ -649,15 +661,6 @@ protected:
      * Initialized hardware vsync based on each platform.
      */
     virtual already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource();
-
-    /**
-     * Helper method, creates a draw target for a specific Azure backend.
-     * Used by CreateOffscreenDrawTarget.
-     */
-    mozilla::TemporaryRef<DrawTarget>
-      CreateDrawTargetForBackend(mozilla::gfx::BackendType aBackend,
-                                 const mozilla::gfx::IntSize& aSize,
-                                 mozilla::gfx::SurfaceFormat aFormat);
 
     /**
      * Initialise the preferred and fallback canvas backends

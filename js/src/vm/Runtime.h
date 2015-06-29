@@ -1359,11 +1359,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     void reportAllocationOverflow() { js::ReportAllocationOverflow(nullptr); }
 
     /*
-     * The function must be called outside the GC lock.
-     */
-    JS_FRIEND_API(void) onTooMuchMalloc();
-
-    /*
      * This should be called after system malloc/calloc/realloc returns nullptr
      * to try to recove some memory or to report an error.  For realloc, the
      * original pointer must be passed as reallocPtr.
@@ -1517,6 +1512,7 @@ struct JSRuntime : public JS::shadow::Runtime,
           , currentPerfGroupCallback(nullptr)
           , isMonitoringJank_(false)
           , isMonitoringCPOW_(false)
+          , idCounter_(0)
         { }
 
         /**
@@ -1570,6 +1566,13 @@ struct JSRuntime : public JS::shadow::Runtime,
             return isMonitoringCPOW_;
         }
 
+        /**
+         * Return a identifier for a group, unique to the runtime.
+         */
+        uint64_t uniqueId() {
+            return idCounter_++;
+        }
+
         // Some systems have non-monotonic clocks. While we cannot
         // improve the precision, we can make sure that our measures
         // are monotonic nevertheless. We do this by storing the
@@ -1620,6 +1623,11 @@ struct JSRuntime : public JS::shadow::Runtime,
          */
         bool isMonitoringJank_;
         bool isMonitoringCPOW_;
+
+        /**
+         * A counter used to generate unique identifiers for groups.
+         */
+        uint64_t idCounter_;
     };
     Stopwatch stopwatch;
 };

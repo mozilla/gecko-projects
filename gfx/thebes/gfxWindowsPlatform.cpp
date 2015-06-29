@@ -409,6 +409,7 @@ gfxWindowsPlatform::gfxWindowsPlatform()
   : mD3D11DeviceInitialized(false)
   , mIsWARP(false)
   , mHasDeviceReset(false)
+  , mDoesD3D11TextureSharingWork(false)
 {
     mUseClearTypeForDownloadableFonts = UNINITIALIZED_VALUE;
     mUseClearTypeAlways = UNINITIALIZED_VALUE;
@@ -468,6 +469,15 @@ double
 gfxWindowsPlatform::GetDPIScale()
 {
   return WinUtils::LogToPhysFactor();
+}
+
+bool
+gfxWindowsPlatform::CanUseHardwareVideoDecoding()
+{
+    if (!gfxPrefs::LayersPreferD3D9() && !mDoesD3D11TextureSharingWork) {
+        return false;
+    }
+    return !IsWARP() && gfxPlatform::CanUseHardwareVideoDecoding();
 }
 
 void
@@ -535,7 +545,7 @@ gfxWindowsPlatform::UpdateRenderMode()
 
     ID3D11Device *device = GetD3D11Device();
     if (isVistaOrHigher && !InSafeMode() && tryD2D && device &&
-        DoesD3D11TextureSharingWork(device)) {
+        mDoesD3D11TextureSharingWork) {
 
         VerifyD2DDevice(d2dForceEnabled);
         if (mD2DDevice && GetD3D11Device()) {
@@ -1849,6 +1859,7 @@ gfxWindowsPlatform::InitD3D11Devices()
   // a WARP device which should always be available on Windows 7 and higher.
 
   mD3D11DeviceInitialized = true;
+  mDoesD3D11TextureSharingWork = false;
 
   MOZ_ASSERT(!mD3D11Device); 
 
@@ -1951,6 +1962,12 @@ gfxWindowsPlatform::InitD3D11Devices()
 
       useWARP = true;
       adapter = nullptr;
+    }
+
+    if (mD3D11Device) {
+      // Only test this when not using WARP since it can fail and cause GetDeviceRemovedReason to return
+      // weird values.
+      mDoesD3D11TextureSharingWork = ::DoesD3D11TextureSharingWork(mD3D11Device);
     }
   }
 

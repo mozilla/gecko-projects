@@ -186,16 +186,6 @@ public:
 
   bool IsRealTime() const;
 
-  // Called from the main thread to get the duration. The decoder monitor
-  // must be obtained before calling this. It is in units of microseconds.
-  int64_t GetDuration();
-
-  // Time of the last frame in the media, in microseconds or INT64_MAX if
-  // media has an infinite duration.
-  // Accessed on state machine, decode, and main threads.
-  // Access controlled by decoder monitor.
-  int64_t GetEndTime();
-
   // Functions used by assertions to ensure we're calling things
   // on the appropriate threads.
   bool OnDecodeTaskQueue() const;
@@ -262,11 +252,6 @@ public:
     return mState == DECODER_STATE_SEEKING;
   }
 
-  media::TimeIntervals GetBuffered() {
-    ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-    return mReader->GetBuffered();
-  }
-
   size_t SizeOfVideoQueue() {
     if (mReader) {
       return mReader->SizeOfVideoQueueInBytes();
@@ -281,7 +266,12 @@ public:
     return 0;
   }
 
-  void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset);
+  void DispatchNotifyDataArrived(uint32_t aLength, int64_t aOffset, bool aThrottleUpdates)
+  {
+    mReader->DispatchNotifyDataArrived(aLength, aOffset, aThrottleUpdates);
+  }
+
+  AbstractCanonical<media::TimeIntervals>* CanonicalBuffered() { return mReader->CanonicalBuffered(); }
 
   // Returns the state machine task queue.
   MediaTaskQueue* TaskQueue() const { return mTaskQueue; }
@@ -402,6 +392,8 @@ protected:
   void AssertCurrentThreadInMonitor() const { mDecoder->GetReentrantMonitor().AssertCurrentThreadIn(); }
 
   void SetState(State aState);
+
+  void BufferedRangeUpdated();
 
   // Inserts MediaData* samples into their respective MediaQueues.
   // aSample must not be null.
@@ -694,6 +686,7 @@ public:
       NS_NewRunnableMethod(this, &MediaDecoderStateMachine::OnAudioSinkComplete);
     TaskQueue()->Dispatch(runnable.forget());
   }
+private:
 
   // Called by the AudioSink to signal errors.
   void OnAudioSinkError();
@@ -947,19 +940,19 @@ public:
   // buffering.
   TimeStamp mBufferingStart;
 
-  // Time of the last frame in the media, in microseconds. This is the
-  // end time of the last frame in the media. Accessed on state
-  // machine, decode, and main threads. Access controlled by decoder monitor.
-  // It will be set to -1 if the duration is infinite
-  int64_t mEndTime;
+  // The buffered range. Mirrored from the decoder thread.
+  Mirror<media::TimeIntervals> mBuffered;
+
+  // Duration of the media. This is guaranteed to be non-null after we finish
+  // decoding the first frame.
+  Canonical<media::NullableTimeUnit> mDuration;
+  media::TimeUnit Duration() const { MOZ_ASSERT(OnTaskQueue()); return mDuration.Ref().ref(); }
+public:
+  AbstractCanonical<media::NullableTimeUnit>* CanonicalDuration() { return &mDuration; }
+protected:
 
   // Recomputes the canonical duration from various sources.
   void RecomputeDuration();
-
-  // Will be set when SetDuration has been called with a value != -1
-  // mDurationSet false doesn't indicate that we do not have a valid duration
-  // as mStartTime and mEndTime could have been set separately.
-  bool mDurationSet;
 
   // The duration according to the demuxer's current estimate, mirrored from the main thread.
   Mirror<media::NullableTimeUnit> mEstimatedDuration;

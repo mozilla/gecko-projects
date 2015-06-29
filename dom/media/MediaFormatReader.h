@@ -9,7 +9,6 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Monitor.h"
 #include "MediaDataDemuxer.h"
 #include "MediaDecoderReader.h"
 #include "MediaTaskQueue.h"
@@ -68,9 +67,9 @@ public:
   }
 
   int64_t GetEvictionOffset(double aTime) override;
-  void NotifyDataArrived(const char* aBuffer,
-                                 uint32_t aLength,
-                                 int64_t aOffset) override;
+protected:
+  void NotifyDataArrivedInternal(uint32_t aLength, int64_t aOffset) override;
+public:
   void NotifyDataRemoved() override;
 
   media::TimeIntervals GetBuffered() override;
@@ -131,6 +130,7 @@ private:
   void NotifyDrainComplete(TrackType aTrack);
   void NotifyError(TrackType aTrack);
   void NotifyWaitingForData(TrackType aTrack);
+  void NotifyEndOfStream(TrackType aTrack);
 
   void ExtractCryptoInitData(nsTArray<uint8_t>& aInitData);
 
@@ -205,8 +205,7 @@ private:
       , mNumSamplesInput(0)
       , mNumSamplesOutput(0)
       , mSizeOfQueue(0)
-      , mMonitor(aType == MediaData::AUDIO_DATA ? "audio decoder data"
-                                                : "video decoder data")
+      , mLastStreamSourceID(UINT32_MAX)
     {}
 
     MediaFormatReader* mOwner;
@@ -230,6 +229,9 @@ private:
     bool mReceivedNewData;
     bool mDiscontinuity;
 
+    // Pending seek.
+    MediaPromiseRequestHolder<MediaTrackDemuxer::SeekPromise> mSeekRequest;
+
     // Queued demux samples waiting to be decoded.
     nsTArray<nsRefPtr<MediaRawData>> mQueuedSamples;
     MediaPromiseRequestHolder<MediaTrackDemuxer::SamplesPromise> mDemuxRequest;
@@ -245,6 +247,10 @@ private:
     bool mInputExhausted;
     bool mError;
     bool mDrainComplete;
+    // If set, all decoded samples prior mTimeThreshold will be dropped.
+    // Used for internal seeking when a change of stream is detected.
+    Maybe<media::TimeUnit> mTimeThreshold;
+
     // Decoded samples returned my mDecoder awaiting being returned to
     // state machine upon request.
     nsTArray<nsRefPtr<MediaData>> mOutput;
@@ -276,6 +282,7 @@ private:
       mOutputRequested = false;
       mInputExhausted = false;
       mDrainComplete = false;
+      mTimeThreshold.reset();
       mOutput.Clear();
       mNumSamplesInput = 0;
       mNumSamplesOutput = 0;
@@ -283,10 +290,10 @@ private:
 
     // Used by the MDSM for logging purposes.
     Atomic<size_t> mSizeOfQueue;
-    // Monitor that protects all non-threadsafe state; the primitives
-    // that follow.
-    Monitor mMonitor;
+    // Sample format monitoring.
+    uint32_t mLastStreamSourceID;
     media::TimeIntervals mTimeRanges;
+    nsRefPtr<SharedTrackInfo> mInfo;
   };
 
   template<typename PromiseType>
@@ -393,8 +400,6 @@ private:
   }
   // Temporary seek information while we wait for the data
   Maybe<media::TimeUnit> mPendingSeekTime;
-  MediaPromiseRequestHolder<MediaTrackDemuxer::SeekPromise> mVideoSeekRequest;
-  MediaPromiseRequestHolder<MediaTrackDemuxer::SeekPromise> mAudioSeekRequest;
   MediaPromiseHolder<SeekPromise> mSeekPromise;
 
 #ifdef MOZ_EME
@@ -409,9 +414,6 @@ private:
   nsRefPtr<MediaDataDemuxer> mMainThreadDemuxer;
   nsRefPtr<MediaTrackDemuxer> mAudioTrackDemuxer;
   nsRefPtr<MediaTrackDemuxer> mVideoTrackDemuxer;
-  ByteInterval mDataRange;
-  media::TimeIntervals mCachedTimeRanges;
-  bool mCachedTimeRangesStale;
 
 #if defined(READER_DORMANT_HEURISTIC)
   const bool mDormantEnabled;

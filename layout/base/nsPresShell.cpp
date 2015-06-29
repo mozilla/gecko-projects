@@ -806,6 +806,7 @@ PresShell::PresShell()
   mPaintingIsFrozen = false;
   mHasCSSBackgroundColor = true;
   mIsLastChromeOnlyEscapeKeyConsumed = false;
+  mHasReceivedPaintMessage = false;
 }
 
 NS_IMPL_ISUPPORTS(PresShell, nsIPresShell, nsIDocumentObserver,
@@ -979,6 +980,11 @@ PresShell::Init(nsIDocument* aDocument,
   SetupFontInflation();
 
   mTouchManager.Init(this, mDocument);
+
+  if (mPresContext->IsRootContentDocument()) {
+    mZoomConstraintsClient = new ZoomConstraintsClient();
+    mZoomConstraintsClient->Init(this, mDocument);
+  }
 }
 
 enum TextPerfLogType {
@@ -1091,6 +1097,11 @@ PresShell::Destroy()
 
   if (mHaveShutDown)
     return;
+
+  if (mZoomConstraintsClient) {
+    mZoomConstraintsClient->Destroy();
+    mZoomConstraintsClient = nullptr;
+  }
 
 #ifdef ACCESSIBILITY
   if (mDocAccessible) {
@@ -2507,7 +2518,8 @@ PresShell::VerifyHasDirtyRootAncestor(nsIFrame* aFrame)
 
 void
 PresShell::FrameNeedsReflow(nsIFrame *aFrame, IntrinsicDirty aIntrinsicDirty,
-                            nsFrameState aBitToAdd)
+                            nsFrameState aBitToAdd,
+                            ReflowRootHandling aRootHandling)
 {
   NS_PRECONDITION(aBitToAdd == NS_FRAME_IS_DIRTY ||
                   aBitToAdd == NS_FRAME_HAS_DIRTY_CHILDREN ||
@@ -2557,13 +2569,24 @@ PresShell::FrameNeedsReflow(nsIFrame *aFrame, IntrinsicDirty aIntrinsicDirty,
     bool wasDirty = NS_SUBTREE_DIRTY(subtreeRoot);
     subtreeRoot->AddStateBits(aBitToAdd);
 
-    // Now if subtreeRoot is a reflow root we can cut off this reflow at it if
-    // the bit being added is NS_FRAME_HAS_DIRTY_CHILDREN.
-    bool targetFrameDirty = (aBitToAdd == NS_FRAME_IS_DIRTY);
+    // Determine whether we need to keep looking for the next ancestor
+    // reflow root if subtreeRoot itself is a reflow root.
+    bool targetNeedsReflowFromParent;
+    switch (aRootHandling) {
+      case ePositionOrSizeChange:
+        targetNeedsReflowFromParent = true;
+        break;
+      case eNoPositionOrSizeChange:
+        targetNeedsReflowFromParent = false;
+        break;
+      case eInferFromBitToAdd:
+        targetNeedsReflowFromParent = (aBitToAdd == NS_FRAME_IS_DIRTY);
+        break;
+    }
 
 #define FRAME_IS_REFLOW_ROOT(_f)                   \
   ((_f->GetStateBits() & NS_FRAME_REFLOW_ROOT) &&  \
-   (_f != subtreeRoot || !targetFrameDirty))
+   (_f != subtreeRoot || !targetNeedsReflowFromParent))
 
 
     // Mark the intrinsic widths as dirty on the frame, all of its ancestors,
@@ -2868,6 +2891,7 @@ PresShell::CreateReferenceRenderingContext()
   if (mPresContext->IsScreen()) {
     rc = new gfxContext(gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget());
   } else {
+    // We assume the devCtx has positive width and height for this call
     rc = devCtx->CreateRenderingContext();
   }
 
@@ -3999,7 +4023,7 @@ PresShell::FlushPendingNotifications(mozilla::ChangesToFlush aFlush)
       // Flush any pending update of the user font set, since that could
       // cause style changes (for updating ex/ch units, and to cause a
       // reflow).
-      mPresContext->FlushUserFontSet();
+      mDocument->FlushUserFontSet();
 
       mPresContext->FlushCounterStyles();
 
@@ -4410,8 +4434,9 @@ nsIPresShell::ReconstructStyleDataInternal()
     return;
   }
 
+  mDocument->RebuildUserFontSet();
+
   if (mPresContext) {
-    mPresContext->RebuildUserFontSet();
     mPresContext->RebuildCounterStyles();
   }
 
@@ -8550,6 +8575,19 @@ PresShell::DidPaintWindow()
     // about compositing of popups.
     return;
   }
+
+  if (!mHasReceivedPaintMessage) {
+    mHasReceivedPaintMessage = true;
+
+    nsCOMPtr<nsIObserverService> obsvc = services::GetObserverService();
+    if (obsvc && mDocument) {
+      nsPIDOMWindow* window = mDocument->GetWindow();
+      nsCOMPtr<nsIDOMChromeWindow> chromeWin(do_QueryInterface(window));
+      if (chromeWin) {
+        obsvc->NotifyObservers(chromeWin, "widget-first-paint", nullptr);
+      }
+    }
+  }
 }
 
 bool
@@ -8775,7 +8813,7 @@ PresShell::DidCauseReflow()
 void
 PresShell::WillDoReflow()
 {
-  mPresContext->FlushUserFontSet();
+  mDocument->FlushUserFontSet();
 
   mPresContext->FlushCounterStyles();
 

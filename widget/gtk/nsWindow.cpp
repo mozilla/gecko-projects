@@ -718,11 +718,7 @@ nsWindow::GetDPI()
 double
 nsWindow::GetDefaultScaleInternal()
 {
-#if (MOZ_WIDGET_GTK == 3)
-    return GdkScaleFactor();
-#else
-    return gfxPlatformGtk::GetDPIScale();
-#endif
+    return GdkScaleFactor() * gfxPlatformGtk::GetDPIScale();
 }
 
 NS_IMETHODIMP
@@ -1924,7 +1920,7 @@ nsWindow::HasPendingInputEvent()
     // without blocking or removing.  To prevent event reordering, peek
     // anything except expose events.  Reordering expose and others should be
     // ok, hopefully.
-    bool haveEvent;
+    bool haveEvent = false;
 #ifdef MOZ_X11
     XEvent ev;
     GdkDisplay* gdkDisplay = gdk_display_get_default();
@@ -1947,8 +1943,6 @@ nsWindow::HasPendingInputEvent()
             XPutBackEvent(display, &ev);
         }
     }
-#else
-    haveEvent = false;
 #endif
     return haveEvent;
 }

@@ -9,6 +9,10 @@ body {
   overflow: visible;
 }
 
+.overflow-hidden {
+  overflow: hidden;
+}
+
 .showcase {
   width: 100%;
   margin: 0 auto;
@@ -57,7 +61,9 @@ body {
   margin: 0 auto; /* width is usually set programmatically */
 }
 
-.showcase > section .comp.dashed {
+.showcase > section .comp.dashed,
+.showcase > section .comp > iframe.dashed
+{
   border: 1px dashed #ccc;
 }
 

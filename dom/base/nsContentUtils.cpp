@@ -130,7 +130,6 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIIOService.h"
-#include "nsIJSRuntimeService.h"
 #include "nsILineBreaker.h"
 #include "nsILoadContext.h"
 #include "nsILoadGroup.h"
@@ -256,6 +255,7 @@ bool nsContentUtils::sIsResourceTimingEnabled = false;
 bool nsContentUtils::sIsUserTimingLoggingEnabled = false;
 bool nsContentUtils::sIsExperimentalAutocompleteEnabled = false;
 bool nsContentUtils::sEncodeDecodeURLHash = false;
+bool nsContentUtils::sGettersDecodeURLHash = false;
 bool nsContentUtils::sPrivacyResistFingerprinting = false;
 
 uint32_t nsContentUtils::sHandlingInputTimeout = 1000;
@@ -537,6 +537,9 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sEncodeDecodeURLHash,
                                "dom.url.encode_decode_hash", false);
+
+  Preferences::AddBoolVarCache(&sGettersDecodeURLHash,
+                               "dom.url.getters_decode_hash", false);
 
   Preferences::AddBoolVarCache(&sPrivacyResistFingerprinting,
                                "privacy.resistFingerprinting", false);
@@ -2985,18 +2988,29 @@ nsContentUtils::IsInPrivateBrowsing(nsIDocument* aDoc)
   if (!aDoc) {
     return false;
   }
-  bool isPrivate = false;
+
   nsCOMPtr<nsILoadGroup> loadGroup = aDoc->GetDocumentLoadGroup();
-  nsCOMPtr<nsIInterfaceRequestor> callbacks;
   if (loadGroup) {
-    loadGroup->GetNotificationCallbacks(getter_AddRefs(callbacks));
-    if (callbacks) {
-      nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(callbacks);
-      isPrivate = loadContext && loadContext->UsePrivateBrowsing();
-    }
-  } else {
-    nsCOMPtr<nsIChannel> channel = aDoc->GetChannel();
-    isPrivate = channel && NS_UsePrivateBrowsing(channel);
+    return IsInPrivateBrowsing(loadGroup);
+  }
+
+  nsCOMPtr<nsIChannel> channel = aDoc->GetChannel();
+  return channel && NS_UsePrivateBrowsing(channel);
+}
+
+// static
+bool
+nsContentUtils::IsInPrivateBrowsing(nsILoadGroup* aLoadGroup)
+{
+  if (!aLoadGroup) {
+    return false;
+  }
+  bool isPrivate = false;
+  nsCOMPtr<nsIInterfaceRequestor> callbacks;
+  aLoadGroup->GetNotificationCallbacks(getter_AddRefs(callbacks));
+  if (callbacks) {
+    nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(callbacks);
+    isPrivate = loadContext && loadContext->UsePrivateBrowsing();
   }
   return isPrivate;
 }
@@ -6313,10 +6327,7 @@ nsContentUtils::FlushLayoutForTree(nsIDOMWindow* aWindow)
     // is O(N^2) in docshell tree depth.  However, the docshell tree is
     // usually pretty shallow.
 
-    nsCOMPtr<nsIDOMDocument> domDoc;
-    aWindow->GetDocument(getter_AddRefs(domDoc));
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
-    if (doc) {
+    if (nsCOMPtr<nsIDocument> doc = piWin->GetDoc()) {
         doc->FlushPendingNotifications(Flush_Layout);
     }
 
@@ -7575,7 +7586,7 @@ nsContentUtils::GetViewToDispatchEvent(nsPresContext* presContext,
 }
 
 nsresult
-nsContentUtils::SendKeyEvent(nsCOMPtr<nsIWidget> aWidget,
+nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
                              const nsAString& aType,
                              int32_t aKeyCode,
                              int32_t aCharCode,
@@ -7860,4 +7871,55 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType)
   default:
     return aType;
   }
+}
+
+
+nsresult
+nsContentUtils::SetFetchReferrerURIWithPolicy(nsIPrincipal* aPrincipal,
+                                              nsIDocument* aDoc,
+                                              nsIHttpChannel* aChannel)
+{
+  NS_ENSURE_ARG_POINTER(aPrincipal);
+  NS_ENSURE_ARG_POINTER(aChannel);
+
+  nsCOMPtr<nsIURI> principalURI;
+
+  if (IsSystemPrincipal(aPrincipal)) {
+    return NS_OK;
+  }
+
+  aPrincipal->GetURI(getter_AddRefs(principalURI));
+
+  if (!aDoc) {
+    return aChannel->SetReferrerWithPolicy(principalURI, net::RP_Default);
+  }
+
+  // If it weren't for history.push/replaceState, we could just use the
+  // principal's URI here.  But since we want changes to the URI effected
+  // by push/replaceState to be reflected in the XHR referrer, we have to
+  // be more clever.
+  //
+  // If the document's original URI (before any push/replaceStates) matches
+  // our principal, then we use the document's current URI (after
+  // push/replaceStates).  Otherwise (if the document is, say, a data:
+  // URI), we just use the principal's URI.
+  nsCOMPtr<nsIURI> docCurURI = aDoc->GetDocumentURI();
+  nsCOMPtr<nsIURI> docOrigURI = aDoc->GetOriginalURI();
+
+  nsCOMPtr<nsIURI> referrerURI;
+
+  if (principalURI && docCurURI && docOrigURI) {
+    bool equal = false;
+    principalURI->Equals(docOrigURI, &equal);
+    if (equal) {
+      referrerURI = docCurURI;
+    }
+  }
+
+  if (!referrerURI) {
+    referrerURI = principalURI;
+  }
+
+  net::ReferrerPolicy referrerPolicy = aDoc->GetReferrerPolicy();
+  return aChannel->SetReferrerWithPolicy(referrerURI, referrerPolicy);
 }

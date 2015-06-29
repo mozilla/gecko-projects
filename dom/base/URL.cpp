@@ -27,7 +27,6 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(URL)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(URL)
   if (tmp->mSearchParams) {
-    tmp->mSearchParams->RemoveObserver(tmp);
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mSearchParams)
   }
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -374,7 +373,7 @@ URL::UpdateURLSearchParams()
     }
   }
 
-  mSearchParams->ParseInput(search, this);
+  mSearchParams->ParseInput(search);
 }
 
 void
@@ -501,22 +500,6 @@ URL::SearchParams()
 }
 
 void
-URL::SetSearchParams(URLSearchParams& aSearchParams)
-{
-  if (mSearchParams) {
-    mSearchParams->RemoveObserver(this);
-  }
-
-  // the observer will be cleared using the cycle collector.
-  mSearchParams = &aSearchParams;
-  mSearchParams->AddObserver(this);
-
-  nsAutoString search;
-  mSearchParams->Serialize(search);
-  SetSearchInternal(search);
-}
-
-void
 URL::GetHash(nsAString& aHash, ErrorResult& aRv) const
 {
   aHash.Truncate();
@@ -525,7 +508,7 @@ URL::GetHash(nsAString& aHash, ErrorResult& aRv) const
   nsresult rv = mURI->GetRef(ref);
   if (NS_SUCCEEDED(rv) && !ref.IsEmpty()) {
     aHash.Assign(char16_t('#'));
-    if (nsContentUtils::EncodeDecodeURLHash()) {
+    if (nsContentUtils::GettersDecodeURLHash()) {
       NS_UnescapeURL(ref); // XXX may result in random non-ASCII bytes!
     }
     AppendUTF8toUTF16(ref, aHash);
@@ -550,8 +533,7 @@ void
 URL::CreateSearchParamsIfNeeded()
 {
   if (!mSearchParams) {
-    mSearchParams = new URLSearchParams();
-    mSearchParams->AddObserver(this);
+    mSearchParams = new URLSearchParams(this);
     UpdateURLSearchParams();
   }
 }

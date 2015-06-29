@@ -85,6 +85,8 @@ EXPORTS.mozilla += [
     'CSSVariableResolver.h',
     'CSSVariableValues.h',
     'IncrementalClearCOMRuleArray.h',
+    'RuleNodeCacheConditions.h',
+    'RuleProcessorCache.h',
     'StyleAnimationValue.h',
 ]
 
@@ -163,6 +165,8 @@ UNIFIED_SOURCES += [
     'nsStyleTransformMatrix.cpp',
     'nsStyleUtil.cpp',
     'nsTransitionManager.cpp',
+    'RuleNodeCacheConditions.cpp',
+    'RuleProcessorCache.cpp',
     'StyleAnimationValue.cpp',
     'StyleRule.cpp',
     'SVGAttrAnimationRuleProcessor.cpp',

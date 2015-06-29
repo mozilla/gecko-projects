@@ -1652,7 +1652,7 @@ Debugger::slowPathOnNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global)
 
 /* static */ bool
 Debugger::slowPathOnLogAllocationSite(JSContext* cx, HandleObject obj, HandleSavedFrame frame,
-                                      int64_t when, GlobalObject::DebuggerVector& dbgs)
+                                      double when, GlobalObject::DebuggerVector& dbgs)
 {
     MOZ_ASSERT(!dbgs.empty());
     mozilla::DebugOnly<Debugger**> begin = dbgs.begin();
@@ -1700,7 +1700,7 @@ Debugger::isDebuggee(const JSCompartment* compartment) const
 }
 
 /* static */ Debugger::AllocationSite*
-Debugger::AllocationSite::create(JSContext* cx, HandleObject frame, int64_t when, HandleObject obj)
+Debugger::AllocationSite::create(JSContext* cx, HandleObject frame, double when, HandleObject obj)
 {
     assertSameCompartment(cx, frame);
 
@@ -1723,7 +1723,7 @@ Debugger::AllocationSite::create(JSContext* cx, HandleObject frame, int64_t when
 
 bool
 Debugger::appendAllocationSite(JSContext* cx, HandleObject obj, HandleSavedFrame frame,
-                               int64_t when)
+                               double when)
 {
     MOZ_ASSERT(trackingAllocationSites);
 
@@ -6261,12 +6261,14 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, HandleValue thisv, AbstractFrameP
      * boundaries, and we are putting a DebugScopeProxy or non-syntactic With on
      * the scope chain.
      */
-    Rooted<StaticEvalObject*> staticScope(cx, StaticEvalObject::create(cx, nullptr));
+    Rooted<ScopeObject*> enclosingStaticScope(cx);
+    if (!env->is<GlobalObject>())
+        enclosingStaticScope = StaticNonSyntacticScopeObjects::create(cx, nullptr);
+    Rooted<StaticEvalObject*> staticScope(cx, StaticEvalObject::create(cx, enclosingStaticScope));
     if (!staticScope)
         return false;
     CompileOptions options(cx);
-    options.setHasPollutedScope(true)
-           .setIsRunOnce(true)
+    options.setIsRunOnce(true)
            .setForEval(true)
            .setNoScriptRval(false)
            .setFileAndLine(filename, lineno)
@@ -6275,8 +6277,8 @@ EvaluateInEnv(JSContext* cx, Handle<Env*> env, HandleValue thisv, AbstractFrameP
            .maybeMakeStrictMode(frame ? frame.script()->strict() : false);
     RootedScript callerScript(cx, frame ? frame.script() : nullptr);
     SourceBufferHolder srcBuf(chars.start().get(), chars.length(), SourceBufferHolder::NoOwnership);
-    RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, callerScript,
-                                                    staticScope, options, srcBuf,
+    RootedScript script(cx, frontend::CompileScript(cx, &cx->tempLifoAlloc(), env, staticScope,
+                                                    callerScript, options, srcBuf,
                                                     /* source = */ nullptr,
                                                     /* staticLevel = */ frame ? 1 : 0));
     if (!script)
@@ -6301,6 +6303,13 @@ DebuggerGenericEval(JSContext* cx, const char* fullMethodName, const Value& code
     /* Either we're specifying the frame, or a global. */
     MOZ_ASSERT_IF(iter, !scope);
     MOZ_ASSERT_IF(!iter, scope && scope->is<GlobalObject>());
+
+    if (iter && iter->script()->isDerivedClassConstructor()) {
+        MOZ_ASSERT(iter->isFunctionFrame() && iter->calleeTemplate()->isClassConstructor());
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DISABLED_DERIVED_CLASS,
+                             "debugger eval");
+        return false;
+    }
 
     /* Check the first argument, the eval code string. */
     if (!code.isString()) {
@@ -6417,14 +6426,8 @@ DebuggerGenericEval(JSContext* cx, const char* fullMethodName, const Value& code
             return false;
 
         RootedObject dynamicScope(cx);
-        // We ignore the static scope here.  See comments about static
-        // scopes in EvaluateInEnv.
-        RootedObject unusedStaticScope(cx);
-        if (!CreateScopeObjectsForScopeChain(cx, scopeChain, env, &dynamicScope,
-                                             &unusedStaticScope))
-        {
+        if (!CreateScopeObjectsForScopeChain(cx, scopeChain, env, &dynamicScope))
             return false;
-        }
 
         env = dynamicScope;
     }
@@ -7017,7 +7020,7 @@ DebuggerObject_defineProperty(JSContext* cx, unsigned argc, Value* vp)
             return false;
 
         ErrorCopier ec(ac);
-        if (!StandardDefineProperty(cx, obj, id, desc))
+        if (!DefineProperty(cx, obj, id, desc))
             return false;
     }
 
@@ -7060,7 +7063,7 @@ DebuggerObject_defineProperties(JSContext* cx, unsigned argc, Value* vp)
 
         ErrorCopier ec(ac);
         for (size_t i = 0; i < n; i++) {
-            if (!StandardDefineProperty(cx, obj, ids[i], descs[i]))
+            if (!DefineProperty(cx, obj, ids[i], descs[i]))
                 return false;
         }
     }
@@ -8060,8 +8063,8 @@ GarbageCollectionEvent::Create(JSRuntime* rt, ::js::gcstats::Statistics& stats, 
         if (!data->collections.growBy(1))
             return nullptr;
 
-        data->collections.back().startTimestamp = range.front().start;
-        data->collections.back().endTimestamp = range.front().end;
+        data->collections.back().startTimestamp = range.front().startTimestamp;
+        data->collections.back().endTimestamp = range.front().endTimestamp;
     }
 
 

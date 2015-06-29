@@ -30,6 +30,7 @@
 #include "mozilla/layers/LayerManagerComposite.h"  // for LayerComposite
 #include "mozilla/layers/LayerMetricsWrapper.h" // for LayerMetricsWrapper
 #include "mozilla/layers/LayersMessages.h"  // for TransformFunction, etc
+#include "mozilla/layers/PersistentBufferProvider.h"
 #include "nsAString.h"
 #include "nsCSSValue.h"                 // for nsCSSValue::Array, etc
 #include "nsPrintfCString.h"            // for nsPrintfCString
@@ -164,6 +165,27 @@ LayerManager::CreateDrawTarget(const IntSize &aSize,
     CreateOffscreenCanvasDrawTarget(aSize, aFormat);
 }
 
+TemporaryRef<PersistentBufferProvider>
+LayerManager::CreatePersistentBufferProvider(const mozilla::gfx::IntSize &aSize,
+                                             mozilla::gfx::SurfaceFormat aFormat)
+{
+  RefPtr<PersistentBufferProviderBasic> bufferProvider =
+    new PersistentBufferProviderBasic(this, aSize, aFormat,
+                                      gfxPlatform::GetPlatform()->GetPreferredCanvasBackend());
+
+  if (!bufferProvider->IsValid()) {
+    bufferProvider =
+      new PersistentBufferProviderBasic(this, aSize, aFormat,
+                                        gfxPlatform::GetPlatform()->GetFallbackCanvasBackend());
+  }
+
+  if (!bufferProvider->IsValid()) {
+    return nullptr;
+  }
+
+  return bufferProvider.forget();
+}
+
 #ifdef DEBUG
 void
 LayerManager::Mutated(Layer* aLayer)
@@ -172,16 +194,9 @@ LayerManager::Mutated(Layer* aLayer)
 #endif  // DEBUG
 
 already_AddRefed<ImageContainer>
-LayerManager::CreateImageContainer()
+LayerManager::CreateImageContainer(ImageContainer::Mode flag)
 {
-  nsRefPtr<ImageContainer> container = new ImageContainer(ImageContainer::DISABLE_ASYNC);
-  return container.forget();
-}
-
-already_AddRefed<ImageContainer>
-LayerManager::CreateAsynchronousImageContainer()
-{
-  nsRefPtr<ImageContainer> container = new ImageContainer(ImageContainer::ENABLE_ASYNC);
+  nsRefPtr<ImageContainer> container = new ImageContainer(flag);
   return container.forget();
 }
 

@@ -763,7 +763,14 @@ struct WorkerStructuredCloneCallbacks
   FreeTransfer(uint32_t aTag, JS::TransferableOwnership aOwnership,
                void *aContent, uint64_t aExtraData, void* aClosure)
   {
-    // Nothing to do.
+    if (aTag == SCTAG_DOM_MAP_MESSAGEPORT) {
+      MOZ_ASSERT(aClosure);
+      MOZ_ASSERT(!aContent);
+      auto* closure = static_cast<WorkerStructuredCloneClosure*>(aClosure);
+
+      MOZ_ASSERT(aExtraData < closure->mMessagePortIdentifiers.Length());
+      dom::MessagePort::ForceClose(closure->mMessagePortIdentifiers[aExtraData]);
+    }
   }
 };
 
@@ -2329,6 +2336,8 @@ WorkerLoadInfo::WorkerLoadInfo()
   , mIsInPrivilegedApp(false)
   , mIsInCertifiedApp(false)
   , mIndexedDBAllowed(false)
+  , mPrivateBrowsing(true)
+  , mServiceWorkersTestingInWindow(false)
 {
   MOZ_COUNT_CTOR(WorkerLoadInfo);
 }
@@ -2383,6 +2392,8 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo& aOther)
   mIsInPrivilegedApp = aOther.mIsInPrivilegedApp;
   mIsInCertifiedApp = aOther.mIsInCertifiedApp;
   mIndexedDBAllowed = aOther.mIndexedDBAllowed;
+  mPrivateBrowsing = aOther.mPrivateBrowsing;
+  mServiceWorkersTestingInWindow = aOther.mServiceWorkersTestingInWindow;
 }
 
 template <class Derived>
@@ -4095,7 +4106,7 @@ WorkerPrivateParent<Derived>::SetBaseURI(nsIURI* aBaseURI)
   if (NS_SUCCEEDED(aBaseURI->GetRef(temp)) && !temp.IsEmpty()) {
     nsCOMPtr<nsITextToSubURI> converter =
       do_GetService(NS_ITEXTTOSUBURI_CONTRACTID);
-    if (converter && nsContentUtils::EncodeDecodeURLHash()) {
+    if (converter && nsContentUtils::GettersDecodeURLHash()) {
       nsCString charset;
       nsAutoString unicodeRef;
       if (NS_SUCCEEDED(aBaseURI->GetOriginCharset(charset)) &&
@@ -4156,6 +4167,7 @@ WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal,
   mLoadInfo.mLoadGroup = aLoadGroup;
 
   mLoadInfo.mPrincipalInfo = new PrincipalInfo();
+  mLoadInfo.mPrivateBrowsing = nsContentUtils::IsInPrivateBrowsing(aLoadGroup);
 
   MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
     PrincipalToPrincipalInfo(aPrincipal, mLoadInfo.mPrincipalInfo)));
@@ -4957,6 +4969,9 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
     loadInfo.mFromWindow = aParent->IsFromWindow();
     loadInfo.mWindowID = aParent->WindowID();
     loadInfo.mIndexedDBAllowed = aParent->IsIndexedDBAllowed();
+    loadInfo.mPrivateBrowsing = aParent->IsInPrivateBrowsing();
+    loadInfo.mServiceWorkersTestingInWindow =
+      aParent->ServiceWorkersTestingInWindow();
   } else {
     AssertIsOnMainThread();
 
@@ -5001,6 +5016,9 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
       nsPIDOMWindow* outerWindow = globalWindow->GetOuterWindow();
       if (outerWindow) {
         loadInfo.mWindow = outerWindow->GetCurrentInnerWindow();
+        // TODO: fix this for SharedWorkers with multiple documents (bug 1177935)
+        loadInfo.mServiceWorkersTestingInWindow =
+          outerWindow->GetServiceWorkersTestingEnabled();
       }
 
       if (!loadInfo.mWindow ||
@@ -5076,6 +5094,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
       loadInfo.mFromWindow = true;
       loadInfo.mWindowID = globalWindow->WindowID();
       loadInfo.mIndexedDBAllowed = IDBFactory::AllowedForWindow(globalWindow);
+      loadInfo.mPrivateBrowsing = nsContentUtils::IsInPrivateBrowsing(document);
     } else {
       // Not a window
       MOZ_ASSERT(isChrome);
@@ -5117,6 +5136,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindow* aWindow,
       loadInfo.mFromWindow = false;
       loadInfo.mWindowID = UINT64_MAX;
       loadInfo.mIndexedDBAllowed = true;
+      loadInfo.mPrivateBrowsing = false;
     }
 
     MOZ_ASSERT(loadInfo.mPrincipal);
@@ -5962,11 +5982,13 @@ WorkerPrivate::AddFeature(JSContext* aCx, WorkerFeature* aFeature)
   }
 
   MOZ_ASSERT(!mFeatures.Contains(aFeature), "Already know about this one!");
-  mFeatures.AppendElement(aFeature);
 
-  return mFeatures.Length() == 1 ?
-         ModifyBusyCountFromWorker(aCx, true) :
-         true;
+  if (mFeatures.IsEmpty() && !ModifyBusyCountFromWorker(aCx, true)) {
+    return false;
+  }
+
+  mFeatures.AppendElement(aFeature);
+  return true;
 }
 
 void

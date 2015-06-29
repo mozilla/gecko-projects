@@ -298,6 +298,7 @@ public:
     mForceTransparentSurface(false),
     mHideAllLayersBelow(false),
     mOpaqueForAnimatedGeometryRootParent(false),
+    mDisableFlattening(false),
     mImage(nullptr),
     mCommonClipCount(-1),
     mNewChildLayersIndex(-1)
@@ -476,7 +477,10 @@ public:
    * and the PaintedLayer completely fills the displayport of the scrollframe.
    */
   bool mOpaqueForAnimatedGeometryRootParent;
-
+  /**
+   * Set if there is content in the layer that must avoid being flattened.
+   */
+  bool mDisableFlattening;
   /**
    * Stores the pointer to the nsDisplayImage if we want to
    * convert this to an ImageLayer.
@@ -3130,6 +3134,9 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
   } else if (data->mNeedComponentAlpha && !hidpi) {
     flags |= Layer::CONTENT_COMPONENT_ALPHA;
   }
+  if (data->mDisableFlattening) {
+    flags |= Layer::CONTENT_DISABLE_FLATTENING;
+  }
   layer->SetContentFlags(flags);
 
   SetFixedPositionLayerData(layer, data->mFixedPosFrameForLayerData);
@@ -3359,6 +3366,16 @@ PaintedLayerData::Accumulate(ContainerState* aState,
         }
       }
     }
+  }
+
+  // Ensure animated text does not get flattened, even if it forces other
+  // content in the container to be layerized. The content backend might
+  // not support subpixel positioning of text that animated transforms can
+  // generate. bug 633097
+  if (aState->mParameters.mInActiveTransformedSubtree &&
+       (mNeedComponentAlpha ||
+         !aItem->GetComponentAlphaBounds(aState->mBuilder).IsEmpty())) {
+    mDisableFlattening = true;
   }
 }
 
@@ -4543,7 +4560,8 @@ ContainerState::Finish(uint32_t* aTextContentFlags, LayerManagerData* aData,
     if (!layer->GetVisibleRegion().IsEmpty()) {
       textContentFlags |=
         layer->GetContentFlags() & (Layer::CONTENT_COMPONENT_ALPHA |
-                                    Layer::CONTENT_COMPONENT_ALPHA_DESCENDANT);
+                                    Layer::CONTENT_COMPONENT_ALPHA_DESCENDANT |
+                                    Layer::CONTENT_DISABLE_FLATTENING);
 
       // Notify the parent of component alpha children unless it's coming from
       // within a child that has asked not to contribute to layer flattening.
@@ -4584,6 +4602,15 @@ ContainerState::Finish(uint32_t* aTextContentFlags, LayerManagerData* aData,
 static inline gfxSize RoundToFloatPrecision(const gfxSize& aSize)
 {
   return gfxSize(float(aSize.width), float(aSize.height));
+}
+
+static inline gfxSize NudgedToIntegerSize(const gfxSize& aSize)
+{
+  float width = aSize.width;
+  float height = aSize.height;
+  gfx::NudgeToInteger(&width);
+  gfx::NudgeToInteger(&height);
+  return gfxSize(width, height);
 }
 
 static void RestrictScaleToMaxLayerSize(gfxSize& aScale,
@@ -4630,12 +4657,13 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
   if (aTransform) {
     // aTransform is applied first, then the scale is applied to the result
     transform = (*aTransform)*transform;
-    // Set any matrix entries close to integers to be those exact integers.
-    // This protects against floating-point inaccuracies causing problems
-    // in the checks below.
-    // We use the fixed epsilon version here because we don't want the nudging
-    // to depend on the scroll position.
-    transform.NudgeToIntegersFixedEpsilon();
+    // Set relevant 3d matrix entries that are close to integers to be those
+    // exact integers. This protects against floating-point inaccuracies
+    // causing problems in the CanDraw2D / Is2D checks below.
+    // We don't nudge all matrix components here. In particular, we don't want to
+    // nudge the X/Y translation components, because those include the scroll
+    // offset, and we don't want scrolling to affect whether we nudge or not.
+    transform.NudgeTo2D();
   }
   Matrix transform2d;
   if (aContainerFrame &&
@@ -4703,7 +4731,7 @@ ChooseScaleAndSetTransform(FrameLayerBuilder* aLayerBuilder,
           scale.height = gfxUtils::ClampToScaleFactor(scale.height);
         }
       } else {
-        // XXX Do we need to move nearly-integer values to integers here?
+        scale = NudgedToIntegerSize(scale);
       }
     }
     // If the scale factors are too small, just use 1.0. The content is being
@@ -4913,6 +4941,7 @@ FrameLayerBuilder::BuildContainerLayerFor(nsDisplayListBuilder* aBuilder,
     state.Finish(&flags, data, pixBounds, aChildren, hasComponentAlphaChildren);
 
     if (hasComponentAlphaChildren &&
+        !(flags & Layer::CONTENT_DISABLE_FLATTENING) &&
         mRetainingManager &&
         mRetainingManager->ShouldAvoidComponentAlphaLayers() &&
         containerLayer->HasMultipleChildren() &&

@@ -26,7 +26,6 @@
 #include "nsIMemoryReporter.h"
 #include "nsIProtocolHandler.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsIJSRuntimeService.h"
 #include "nsIDOMClassInfo.h"
 #include "xpcpublic.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
@@ -1785,8 +1784,7 @@ nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
       }
     } else {
       // We're going to run these against some non-global scope.
-      options.setHasPollutedScope(true);
-      if (!JS::Compile(cx, options, srcBuf, &script)) {
+      if (!JS::CompileForNonSyntacticScope(cx, options, srcBuf, &script)) {
         return;
       }
     }
@@ -1823,15 +1821,6 @@ nsMessageManagerScriptExecutor::InitChildGlobalInternal(
   nsISupports* aScope,
   const nsACString& aID)
 {
-
-  nsCOMPtr<nsIJSRuntimeService> runtimeSvc =
-    do_GetService("@mozilla.org/js/xpc/RuntimeService;1");
-  NS_ENSURE_TRUE(runtimeSvc, false);
-
-  JSRuntime* rt = nullptr;
-  runtimeSvc->GetRuntime(&rt);
-  NS_ENSURE_TRUE(rt, false);
-
   AutoSafeJSContext cx;
   nsContentUtils::GetSecurityManager()->GetSystemPrincipal(getter_AddRefs(mPrincipal));
 

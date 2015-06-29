@@ -147,6 +147,12 @@ SourceBuffer::GetBuffered(ErrorResult& aRv)
   return tr.forget();
 }
 
+media::TimeIntervals
+SourceBuffer::GetTimeIntervals()
+{
+  return mContentManager->Buffered();
+}
+
 void
 SourceBuffer::SetAppendWindowStart(double aAppendWindowStart, ErrorResult& aRv)
 {
@@ -297,7 +303,7 @@ SourceBuffer::Ended()
   mContentManager->Ended();
   // We want the MediaSourceReader to refresh its buffered range as it may
   // have been modified (end lined up).
-  mMediaSource->GetDecoder()->NotifyDataArrived(nullptr, 1, mReportedOffset++);
+  mMediaSource->GetDecoder()->NotifyDataArrived(1, mReportedOffset++, /* aThrottleUpdates = */ false);
 }
 
 SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
@@ -316,7 +322,7 @@ SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aMediaSource);
   mEvictionThreshold = Preferences::GetUint("media.mediasource.eviction_threshold",
-                                            75 * (1 << 20));
+                                            100 * (1 << 20));
   mContentManager =
     SourceBufferContentManager::CreateManager(this,
                                               aMediaSource->GetDecoder(),
@@ -441,7 +447,7 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
 
   StartUpdating();
 
-  MOZ_ASSERT(mAppendMode == SourceBufferAppendMode::Segments,
+  MOZ_ASSERT(mIsUsingFormatReader || mAppendMode == SourceBufferAppendMode::Segments,
              "We don't handle timestampOffset for sequence mode yet");
   nsCOMPtr<nsIRunnable> task = new BufferAppendRunnable(this, mUpdateID);
   NS_DispatchToMainThread(task);
@@ -487,10 +493,14 @@ SourceBuffer::AppendDataCompletedWithSuccess(bool aHasActiveTracks)
         mMediaSource->GetDecoder()->NotifyWaitingForResourcesStatusChanged();
       }
     }
+  }
+  if (mActive && mIsUsingFormatReader) {
     // Tell our parent decoder that we have received new data.
     // The information provided do not matter much so long as it is monotonically
     // increasing.
-    mMediaSource->GetDecoder()->NotifyDataArrived(nullptr, 1, mReportedOffset++);
+    mMediaSource->GetDecoder()->NotifyDataArrived(1, mReportedOffset++, /* aThrottleUpdates = */ false);
+    // Send progress event.
+    mMediaSource->GetDecoder()->NotifyBytesDownloaded();
   }
 
   CheckEndTime();
@@ -577,8 +587,9 @@ SourceBuffer::PrepareAppend(const uint8_t* aData, uint32_t aLength, ErrorResult&
   // See if we have enough free space to append our new data.
   // As we can only evict once we have playable data, we must give a chance
   // to the DASH player to provide a complete media segment.
-  if (aLength > mEvictionThreshold ||
-      ((mContentManager->GetSize() > mEvictionThreshold - aLength) &&
+  if (aLength > mEvictionThreshold || evicted == Result::BUFFER_FULL ||
+      ((!mIsUsingFormatReader &&
+        mContentManager->GetSize() > mEvictionThreshold - aLength) &&
        evicted != Result::CANT_EVICT)) {
     aRv.Throw(NS_ERROR_DOM_QUOTA_EXCEEDED_ERR);
     return nullptr;
@@ -589,7 +600,6 @@ SourceBuffer::PrepareAppend(const uint8_t* aData, uint32_t aLength, ErrorResult&
     aRv.Throw(NS_ERROR_DOM_QUOTA_EXCEEDED_ERR);
     return nullptr;
   }
-  // TODO: Test buffer full flag.
   return data.forget();
 }
 

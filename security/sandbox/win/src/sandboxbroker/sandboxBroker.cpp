@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "sandboxBroker.h"
+
+#include "base/win/windows_version.h"
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/sandbox_factory.h"
 #include "sandbox/win/src/security_level.h"
@@ -240,6 +242,12 @@ SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel)
                             L"\\??\\pipe\\chrome.*");
   ret = ret && (sandbox::SBOX_ALL_OK == result);
 
+  // Add the policy for the client side of the crash server pipe.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                            sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                            L"\\??\\pipe\\gecko-crash-server-pipe.*");
+  ret = ret && (sandbox::SBOX_ALL_OK == result);
+
   // The NPAPI process needs to be able to duplicate shared memory to the
   // content process and broker process, which are Section type handles.
   // Content and broker are for e10s and non-e10s cases.
@@ -287,9 +295,13 @@ SandboxBroker::SetSecurityLevelForGMPlugin()
 
   auto result = mPolicy->SetJobLevel(sandbox::JOB_LOCKDOWN, 0);
   bool ret = (sandbox::SBOX_ALL_OK == result);
-  result =
-    mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                           sandbox::USER_LOCKDOWN);
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+    result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                                    sandbox::USER_LOCKDOWN);
+  } else {
+    result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                                    sandbox::USER_RESTRICTED);
+  }
   ret = ret && (sandbox::SBOX_ALL_OK == result);
 
   result = mPolicy->SetAlternateDesktop(true);

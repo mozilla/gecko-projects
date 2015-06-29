@@ -112,7 +112,6 @@
 #include "nsIXPConnect.h"
 #include "nsIInterfaceInfo.h"
 #include "nsIXPCScriptable.h"
-#include "nsIJSRuntimeService.h"
 #include "nsIObserver.h"
 #include "nsWeakReference.h"
 #include "nsCOMPtr.h"
@@ -192,7 +191,6 @@
 /***************************************************************************/
 // data declarations...
 extern const char XPC_CONTEXT_STACK_CONTRACTID[];
-extern const char XPC_RUNTIME_CONTRACTID[];
 extern const char XPC_EXCEPTION_CONTRACTID[];
 extern const char XPC_CONSOLE_CONTRACTID[];
 extern const char XPC_SCRIPT_ERROR_CONTRACTID[];
@@ -245,15 +243,13 @@ static inline bool IS_WN_REFLECTOR(JSObject* obj)
 
 class nsXPConnect final : public nsIXPConnect,
                           public nsIThreadObserver,
-                          public nsSupportsWeakReference,
-                          public nsIJSRuntimeService
+                          public nsSupportsWeakReference
 {
 public:
     // all the interface method declarations...
     NS_DECL_ISUPPORTS
     NS_DECL_NSIXPCONNECT
     NS_DECL_NSITHREADOBSERVER
-    NS_DECL_NSIJSRUNTIMESERVICE
 
     // non-interface implementation
 public:
@@ -602,8 +598,6 @@ public:
 
     void AddGCCallback(xpcGCCallback cb);
     void RemoveGCCallback(xpcGCCallback cb);
-    void AddContextCallback(xpcContextCallback cb);
-    void RemoveContextCallback(xpcContextCallback cb);
 
     struct EnvironmentPreparer : public js::ScriptEnvironmentPreparer {
         bool invoke(JS::HandleObject scope, Closure& closure) override;
@@ -670,7 +664,6 @@ private:
     XPCRootSetElem* mWrappedJSRoots;
     XPCRootSetElem* mObjectHolderRoots;
     nsTArray<xpcGCCallback> extraGCCallbacks;
-    nsTArray<xpcContextCallback> extraContextCallbacks;
     nsRefPtr<WatchdogManager> mWatchdogManager;
     JS::GCSliceCallback mPrevGCSliceCallback;
     JS::PersistentRootedObject mUnprivilegedJunkScope;
@@ -2406,7 +2399,7 @@ private:
                                uint16_t methodIndex,
                                uint8_t paramIndex,
                                nsXPTCMiniVariant* params,
-                               uint32_t* result);
+                               uint32_t* result) const;
 
     bool GetInterfaceTypeFromParam(JSContext* cx,
                                    const XPTMethodDescriptor* method,
@@ -2414,14 +2407,17 @@ private:
                                    uint16_t methodIndex,
                                    const nsXPTType& type,
                                    nsXPTCMiniVariant* params,
-                                   nsID* result);
+                                   nsID* result) const;
 
-    void CleanupPointerArray(const nsXPTType& datum_type,
-                             uint32_t array_count,
-                             void** arrayp);
+    static void CleanupPointerArray(const nsXPTType& datum_type,
+                                    uint32_t array_count,
+                                    void** arrayp);
 
-    void CleanupPointerTypeObject(const nsXPTType& type,
-                                  void** pp);
+    static void CleanupPointerTypeObject(const nsXPTType& type,
+                                         void** pp);
+
+    void CleanupOutparams(JSContext* cx, uint16_t methodIndex, const nsXPTMethodInfo* info,
+                          nsXPTCMiniVariant* nativeParams, bool inOutOnly, uint8_t n) const;
 
 private:
     XPCJSRuntime* mRuntime;

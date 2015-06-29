@@ -92,12 +92,6 @@ protected:
   virtual bool
   DeallocPServiceWorkerManagerParent(PServiceWorkerManagerParent* aActor) override;
 
-  virtual PMediaParent*
-  AllocPMediaParent() override;
-
-  virtual bool
-  DeallocPMediaParent(PMediaParent* aActor) override;
-
   virtual bool
   RecvShutdownServiceWorkerRegistrar() override;
 
@@ -143,6 +137,11 @@ protected:
 
   virtual bool
   DeallocPMessagePortParent(PMessagePortParent* aActor) override;
+
+  virtual bool
+  RecvMessagePortForceClose(const nsID& aUUID,
+                            const nsID& aDestinationUUID,
+                            const uint32_t& aSequenceID) override;
 };
 
 } // namespace ipc

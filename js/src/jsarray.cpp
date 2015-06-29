@@ -3195,9 +3195,6 @@ js::ArrayConstructor(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    if (args.isConstructing())
-        MOZ_ASSERT(args.newTarget().toObject().as<JSFunction>().native() == js::ArrayConstructor);
-
     if (args.length() != 1 || !args[0].isNumber())
         return ArrayFromCallArgs(cx, args);
 
@@ -3440,25 +3437,6 @@ js::NewDenseUnallocatedArray(ExclusiveContext* cx, uint32_t length,
                              NewObjectKind newKind /* = GenericObject */)
 {
     return NewArray<0>(cx, length, proto, newKind);
-}
-
-ArrayObject*
-js::NewDenseCopiedArray(ExclusiveContext* cx, uint32_t length, HandleArrayObject src,
-                        uint32_t elementOffset, HandleObject proto /* = nullptr */)
-{
-    MOZ_ASSERT(!src->isIndexed());
-
-    ArrayObject* arr = NewArray<UINT32_MAX>(cx, length, proto);
-    if (!arr)
-        return nullptr;
-
-    MOZ_ASSERT(arr->getDenseCapacity() >= length);
-
-    const Value* vp = src->getDenseElements() + elementOffset;
-    arr->setDenseInitializedLength(length);
-    arr->initDenseElements(0, vp, length);
-
-    return arr;
 }
 
 // values must point at already-rooted Value objects

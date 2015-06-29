@@ -52,6 +52,7 @@
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/plugins/PluginModuleParent.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
+#include "mozilla/media/MediaChild.h"
 
 #if defined(MOZ_CONTENT_SANDBOX)
 #if defined(XP_WIN)
@@ -91,7 +92,6 @@
 #include "nsDebugImpl.h"
 #include "nsHashPropertyBag.h"
 #include "nsLayoutStylesheetCache.h"
-#include "nsIJSRuntimeService.h"
 #include "nsThreadManager.h"
 #include "nsAnonymousTemporaryFile.h"
 #include "nsISpellChecker.h"
@@ -204,6 +204,7 @@ using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
+using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gmp;
 using namespace mozilla::hal_sandbox;
@@ -1242,26 +1243,6 @@ ContentChild::RecvUpdateServiceWorkerRegistrations()
     return true;
 }
 
-bool
-ContentChild::RecvRemoveServiceWorkerRegistrationsForDomain(const nsString& aDomain)
-{
-    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
-    if (swm) {
-        swm->Remove(NS_ConvertUTF16toUTF8(aDomain));
-    }
-    return true;
-}
-
-bool
-ContentChild::RecvRemoveServiceWorkerRegistrations()
-{
-    nsCOMPtr<nsIServiceWorkerManager> swm = mozilla::services::GetServiceWorkerManager();
-    if (swm) {
-        swm->RemoveAll();
-    }
-    return true;
-}
-
 static CancelableTask* sFirstIdleTask;
 
 static void FirstIdle(void)
@@ -1748,6 +1729,18 @@ ContentChild::DeallocPVoicemailChild(PVoicemailChild* aActor)
 {
     static_cast<VoicemailIPCService*>(aActor)->Release();
     return true;
+}
+
+media::PMediaChild*
+ContentChild::AllocPMediaChild()
+{
+  return media::AllocPMediaChild();
+}
+
+bool
+ContentChild::DeallocPMediaChild(media::PMediaChild *aActor)
+{
+  return media::DeallocPMediaChild(aActor);
 }
 
 PStorageChild*

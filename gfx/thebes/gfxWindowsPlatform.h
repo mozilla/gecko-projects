@@ -203,6 +203,8 @@ public:
                                            const uint8_t* aFontData,
                                            uint32_t aLength);
 
+    virtual bool CanUseHardwareVideoDecoding() override;
+
     /**
      * Check whether format is supported on a platform or not (if unclear, returns true)
      */
@@ -255,6 +257,7 @@ public:
     static bool IsOptimus();
 
     bool IsWARP() { return mIsWARP; }
+    bool DoesD3D11TextureSharingWork() { return mDoesD3D11TextureSharingWork; }
 
     bool SupportsApzWheelInput() const override {
       return true;
@@ -300,12 +303,10 @@ private:
     mozilla::RefPtr<mozilla::layers::ReadbackManagerD3D11> mD3D11ReadbackManager;
     bool mIsWARP;
     bool mHasDeviceReset;
+    bool mDoesD3D11TextureSharingWork;
     DeviceResetReason mDeviceResetReason;
 
     virtual void GetPlatformCMSOutputProfile(void* &mem, size_t &size);
 };
-
-bool DoesD3D11TextureSharingWork(ID3D11Device *device);
-bool DoesD3D11DeviceWork(ID3D11Device *device);
 
 #endif /* GFX_WINDOWS_PLATFORM_H */

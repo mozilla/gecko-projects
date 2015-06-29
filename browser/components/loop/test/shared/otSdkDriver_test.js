@@ -67,6 +67,7 @@ describe("loop.OTSdkDriver", function () {
 
     window.OT = {
       ExceptionCodes: {
+        CONNECT_FAILED: 1006,
         UNABLE_TO_PUBLISH: 1500
       }
     };
@@ -388,12 +389,31 @@ describe("loop.OTSdkDriver", function () {
         sinon.assert.calledOnce(session.publish);
       });
 
+      it("should notify metrics", function() {
+        session.connect.callsArgWith(2, {
+          title: "Fake",
+          code: OT.ExceptionCodes.CONNECT_FAILED
+        });
+
+        driver.connectSession(sessionData);
+
+        sinon.assert.calledTwice(dispatcher.dispatch);
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          new sharedActions.ConnectionStatus({
+            event: "sdk.exception." + OT.ExceptionCodes.CONNECT_FAILED,
+            state: "starting",
+            connections: 0,
+            sendStreams: 0,
+            recvStreams: 0
+          }));
+      });
+
       it("should dispatch connectionFailure if connecting failed", function() {
         session.connect.callsArgWith(2, new Error("Failure"));
 
         driver.connectSession(sessionData);
 
-        sinon.assert.calledOnce(dispatcher.dispatch);
+        sinon.assert.calledTwice(dispatcher.dispatch);
         sinon.assert.calledWithMatch(dispatcher.dispatch,
           sinon.match.hasOwn("name", "connectionFailure"));
         sinon.assert.calledWithMatch(dispatcher.dispatch,
@@ -409,6 +429,16 @@ describe("loop.OTSdkDriver", function () {
       driver.disconnectSession();
 
       sinon.assert.calledOnce(session.disconnect);
+    });
+
+    it("should dispatch a DataChannelsAvailable action with available = false", function() {
+      driver.disconnectSession();
+
+      sinon.assert.calledOnce(dispatcher.dispatch);
+      sinon.assert.calledWithExactly(dispatcher.dispatch,
+        new sharedActions.DataChannelsAvailable({
+          available: false
+        }));
     });
 
     it("should destroy the publisher", function() {
@@ -713,13 +743,29 @@ describe("loop.OTSdkDriver", function () {
     });
 
     describe("sessionDisconnected", function() {
+      it("should notify metrics", function() {
+        session.trigger("sessionDisconnected", {
+          reason: "networkDisconnected"
+        });
+
+        sinon.assert.calledTwice(dispatcher.dispatch);
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          new sharedActions.ConnectionStatus({
+            event: "Session.networkDisconnected",
+            state: "starting",
+            connections: 0,
+            sendStreams: 0,
+            recvStreams: 0
+          }));
+      });
+
       it("should dispatch a connectionFailure action if the session was disconnected",
         function() {
           session.trigger("sessionDisconnected", {
             reason: "networkDisconnected"
           });
 
-          sinon.assert.calledOnce(dispatcher.dispatch);
+          sinon.assert.calledTwice(dispatcher.dispatch);
           sinon.assert.calledWithMatch(dispatcher.dispatch,
             sinon.match.hasOwn("name", "connectionFailure"));
           sinon.assert.calledWithMatch(dispatcher.dispatch,
@@ -732,7 +778,7 @@ describe("loop.OTSdkDriver", function () {
             reason: "forceDisconnected"
           });
 
-          sinon.assert.calledOnce(dispatcher.dispatch);
+          sinon.assert.calledTwice(dispatcher.dispatch);
           sinon.assert.calledWithMatch(dispatcher.dispatch,
             sinon.match.hasOwn("name", "connectionFailure"));
           sinon.assert.calledWithMatch(dispatcher.dispatch,
@@ -982,9 +1028,7 @@ describe("loop.OTSdkDriver", function () {
             new sharedActions.ReceivingScreenShare({receiving: true}));
         });
 
-      // XXX See bug 1171933 and the comment in
-      // OtSdkDriver#_handleRemoteScreenShareCreated
-      it.skip("should dispatch a ReceivingScreenShare action for screen" +
+      it("should dispatch a ReceivingScreenShare action for screen" +
         " sharing streams", function() {
           fakeStream.videoType = "screen";
 
@@ -1005,7 +1049,7 @@ describe("loop.OTSdkDriver", function () {
 
         publisher.trigger("streamDestroyed");
 
-        sinon.assert.calledOnce(dispatcher.dispatch);
+        sinon.assert.calledTwice(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
           new sharedActions.ConnectionStatus({
             event: "Publisher.streamDestroyed",
@@ -1013,6 +1057,16 @@ describe("loop.OTSdkDriver", function () {
             connections: 2,
             recvStreams: 1,
             sendStreams: 0
+          }));
+      });
+
+      it("should dispatch a DataChannelsAvailable action", function() {
+        publisher.trigger("streamDestroyed");
+
+        sinon.assert.calledTwice(dispatcher.dispatch);
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          new sharedActions.DataChannelsAvailable({
+            available: false
           }));
       });
     });
@@ -1054,13 +1108,32 @@ describe("loop.OTSdkDriver", function () {
           }));
       });
 
-      it("should not dispatch an action if the videoType is camera", function() {
+      it("should not dispatch a ConnectionStatus action if the videoType is camera", function() {
         stream.videoType = "camera";
 
         session.trigger("streamDestroyed", { stream: stream });
 
         sinon.assert.neverCalledWithMatch(dispatcher.dispatch,
           sinon.match.hasOwn("name", "receivingScreenShare"));
+      });
+
+      it("should dispatch a DataChannelsAvailable action for videoType = camera", function() {
+        stream.videoType = "camera";
+
+        session.trigger("streamDestroyed", { stream: stream });
+
+        sinon.assert.calledTwice(dispatcher.dispatch);
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          new sharedActions.DataChannelsAvailable({
+            available: false
+          }));
+      });
+
+      it("should not dispatch a DataChannelsAvailable action for videoType = screen", function() {
+        session.trigger("streamDestroyed", { stream: stream });
+
+        sinon.assert.neverCalledWithMatch(dispatcher.dispatch,
+          sinon.match.hasOwn("name", "dataChannelsAvailable"));
       });
     });
 
@@ -1297,11 +1370,16 @@ describe("loop.OTSdkDriver", function () {
 
         sinon.assert.calledOnce(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
-          new sharedActions.DataChannelsAvailable());
+          new sharedActions.DataChannelsAvailable({
+            available: true
+          }));
       });
 
       it("should dispatch `ReceivedTextChatMessage` when a text message is received", function() {
         var fakeChannel = _.extend({}, Backbone.Events);
+        var data = '{"contentType":"' + CHAT_CONTENT_TYPES.TEXT +
+                   '","message":"Are you there?","receivedTimestamp": "2015-06-25T00:29:14.197Z"}';
+        var clock = sinon.useFakeTimers();
 
         subscriber._.getDataChannel.callsArgWith(2, null, fakeChannel);
 
@@ -1309,19 +1387,41 @@ describe("loop.OTSdkDriver", function () {
 
         // Now send the message.
         fakeChannel.trigger("message", {
-          data: '{"contentType":"' + CHAT_CONTENT_TYPES.TEXT + '","message":"Are you there?"}'
+          data: data
         });
 
         sinon.assert.calledOnce(dispatcher.dispatch);
         sinon.assert.calledWithExactly(dispatcher.dispatch,
           new sharedActions.ReceivedTextChatMessage({
             contentType: CHAT_CONTENT_TYPES.TEXT,
-            message: "Are you there?"
+            message: "Are you there?",
+            receivedTimestamp: "1970-01-01T00:00:00.000Z"
           }));
+
+        /* Restore the time. */
+        clock.restore();
       });
     });
 
     describe("exception", function() {
+      it("should notify metrics", function() {
+        sdk.trigger("exception", {
+          code: OT.ExceptionCodes.CONNECT_FAILED,
+          message: "Fake",
+          title: "Connect Failed"
+        });
+
+        sinon.assert.calledOnce(dispatcher.dispatch);
+        sinon.assert.calledWithExactly(dispatcher.dispatch,
+          new sharedActions.ConnectionStatus({
+            event: "sdk.exception." + OT.ExceptionCodes.CONNECT_FAILED,
+            state: "starting",
+            connections: 0,
+            sendStreams: 0,
+            recvStreams: 0
+          }));
+      });
+
       describe("Unable to publish (GetUserMedia)", function() {
         it("should destroy the publisher", function() {
           sdk.trigger("exception", {
@@ -1330,6 +1430,25 @@ describe("loop.OTSdkDriver", function () {
           });
 
           sinon.assert.calledOnce(publisher.destroy);
+        });
+
+        // XXX We should remove this when we stop being unable to publish as a
+        // workaround for knowing if the user has video as well as audio devices
+        // installed (bug 1138851).
+        it("should not notify metrics", function() {
+          sdk.trigger("exception", {
+            code: OT.ExceptionCodes.UNABLE_TO_PUBLISH,
+            message: "GetUserMedia"
+          });
+
+          sinon.assert.neverCalledWith(dispatcher.dispatch,
+            new sharedActions.ConnectionStatus({
+              event: "sdk.exception." + OT.ExceptionCodes.UNABLE_TO_PUBLISH,
+              state: "starting",
+              connections: 0,
+              sendStreams: 0,
+              recvStreams: 0
+            }));
         });
 
         it("should dispatch a ConnectionFailure action", function() {

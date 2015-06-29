@@ -224,7 +224,6 @@ const UnsolicitedNotifications = {
   "networkEventUpdate": "networkEventUpdate",
   "newGlobal": "newGlobal",
   "newScript": "newScript",
-  "newSource": "newSource",
   "tabDetached": "tabDetached",
   "tabListChanged": "tabListChanged",
   "reflowActivity": "reflowActivity",
@@ -740,6 +739,7 @@ DebuggerClient.prototype = {
 
     let request = new Request(aRequest);
     request.format = "json";
+    request.stack = Components.stack;
     if (aOnResponse) {
       request.on("json-reply", aOnResponse);
     }
@@ -1033,7 +1033,13 @@ DebuggerClient.prototype = {
     }
 
     if (activeRequest) {
-      activeRequest.emit("json-reply", aPacket);
+      let emitReply = () => activeRequest.emit("json-reply", aPacket);
+      if (activeRequest.stack) {
+        Cu.callFunctionWithAsyncStack(emitReply, activeRequest.stack,
+                                      "DevTools RDP");
+      } else {
+        emitReply();
+      }
     }
   },
 
@@ -1364,6 +1370,7 @@ function WorkerClient(aClient, aForm) {
   this._actor = aForm.from;
   this._isClosed = false;
   this._isFrozen = aForm.isFrozen;
+  this._url = aForm.url;
 
   this._onClose = this._onClose.bind(this);
   this._onFreeze = this._onFreeze.bind(this);
@@ -1385,6 +1392,10 @@ WorkerClient.prototype = {
 
   get actor() {
     return this._actor;
+  },
+
+  get url() {
+    return this._url;
   },
 
   get isClosed() {
@@ -1618,7 +1629,6 @@ function ThreadClient(aClient, aActor) {
   this._pauseGrips = {};
   this._threadGrips = {};
   this.request = this.client.request;
-  this.events = [];
 }
 
 ThreadClient.prototype = {
@@ -2165,7 +2175,9 @@ ThreadClient.prototype = {
     actors: args(0)
   }, {
     telemetry: "PROTOTYPESANDPROPERTIES"
-  })
+  }),
+
+  events: ["newSource"]
 };
 
 eventSource(ThreadClient.prototype);
@@ -2453,7 +2465,21 @@ ObjectClient.prototype = {
       }
       return aPacket;
     }
-  })
+  }),
+
+  /**
+   * Request the stack to the promise's allocation point.
+   */
+  getPromiseAllocationStack: DebuggerClient.requester({
+    type: "allocationStack"
+  }, {
+    before: function(aPacket) {
+      if (this._grip.class !== "Promise") {
+        throw new Error("getAllocationStack is only valid for promise grips.");
+      }
+      return aPacket;
+    }
+  }),
 };
 
 /**

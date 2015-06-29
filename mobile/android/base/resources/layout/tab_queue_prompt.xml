@@ -4,7 +4,7 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
-<FrameLayout
+<merge
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/tab_queue_container"
@@ -14,6 +14,7 @@
     android:clipToPadding="false">
 
     <LinearLayout
+        android:id="@+id/tab_queue_container"
         android:layout_width="@dimen/tab_queue_container_width"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center"
@@ -116,5 +117,4 @@
         </FrameLayout>
 
     </LinearLayout>
-
-</FrameLayout>
+</merge>

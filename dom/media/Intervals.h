@@ -281,6 +281,16 @@ public:
     }
   }
 
+  bool operator== (const SelfType& aOther) const
+  {
+    return mIntervals == aOther.mIntervals;
+  }
+
+  bool operator!= (const SelfType& aOther) const
+  {
+    return mIntervals != aOther.mIntervals;
+  }
+
   SelfType& operator= (const SelfType& aOther)
   {
     mIntervals = aOther.mIntervals;
@@ -607,6 +617,27 @@ public:
       }
     }
     return NoIndex;
+  }
+
+  // Methods for range-based for loops.
+  typename ContainerType::iterator begin()
+  {
+    return mIntervals.begin();
+  }
+
+  typename ContainerType::const_iterator begin() const
+  {
+    return mIntervals.begin();
+  }
+
+  typename ContainerType::iterator end()
+  {
+    return mIntervals.end();
+  }
+
+  typename ContainerType::const_iterator end() const
+  {
+    return mIntervals.end();
   }
 
 protected:

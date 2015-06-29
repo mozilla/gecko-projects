@@ -308,6 +308,18 @@ public:
   PropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
                       const nsAString& aScope);
 
+  void
+  PropagateRemove(const nsACString& aHost);
+
+  void
+  Remove(const nsACString& aHost);
+
+  void
+  PropagateRemoveAll();
+
+  void
+  RemoveAll();
+
   already_AddRefed<ServiceWorkerRegistrationInfo>
   GetRegistration(nsIPrincipal* aPrincipal, const nsACString& aScope) const;
 
@@ -540,6 +552,8 @@ private:
 
   struct PendingOperation;
   nsTArray<PendingOperation> mPendingOperations;
+
+  bool mShuttingDown;
 };
 
 } // namespace workers

@@ -37,18 +37,30 @@ describe("loop.store.TextChatStore", function () {
   });
 
   describe("#dataChannelsAvailable", function() {
-    it("should set textChatEnabled to true", function() {
-      store.dataChannelsAvailable();
+    it("should set textChatEnabled to the supplied state", function() {
+      store.dataChannelsAvailable(new sharedActions.DataChannelsAvailable({
+        available: true
+      }));
 
       expect(store.getStoreState("textChatEnabled")).eql(true);
     });
 
     it("should dispatch a LoopChatEnabled event", function() {
-      store.dataChannelsAvailable();
+      store.dataChannelsAvailable(new sharedActions.DataChannelsAvailable({
+        available: true
+      }));
 
       sinon.assert.calledOnce(window.dispatchEvent);
       sinon.assert.calledWithExactly(window.dispatchEvent,
         new CustomEvent("LoopChatEnabled"));
+    });
+
+    it("should not dispatch a LoopChatEnabled event if available is false", function() {
+      store.dataChannelsAvailable(new sharedActions.DataChannelsAvailable({
+        available: false
+      }));
+
+      sinon.assert.notCalled(window.dispatchEvent);
     });
   });
 
@@ -58,14 +70,19 @@ describe("loop.store.TextChatStore", function () {
 
       store.receivedTextChatMessage({
         contentType: CHAT_CONTENT_TYPES.TEXT,
-        message: message
+        message: message,
+        extraData: undefined,
+        sentTimestamp: "2015-06-24T23:58:53.848Z",
+        receivedTimestamp: "1970-01-01T00:00:00.000Z"
       });
 
       expect(store.getStoreState("messageList")).eql([{
         type: CHAT_MESSAGE_TYPES.RECEIVED,
         contentType: CHAT_CONTENT_TYPES.TEXT,
         message: message,
-        extraData: undefined
+        extraData: undefined,
+        sentTimestamp: "2015-06-24T23:58:53.848Z",
+        receivedTimestamp: "1970-01-01T00:00:00.000Z"
       }]);
     });
 
@@ -106,7 +123,9 @@ describe("loop.store.TextChatStore", function () {
     it("should add the message to the list", function() {
       var messageData = {
         contentType: CHAT_CONTENT_TYPES.TEXT,
-        message: "It's awesome!"
+        message: "It's awesome!",
+        sentTimestamp: "2015-06-24T23:58:53.848Z",
+        receivedTimestamp: "2015-06-24T23:58:53.848Z"
       };
 
       store.sendTextChatMessage(messageData);
@@ -115,7 +134,9 @@ describe("loop.store.TextChatStore", function () {
         type: CHAT_MESSAGE_TYPES.SENT,
         contentType: messageData.contentType,
         message: messageData.message,
-        extraData: undefined
+        extraData: undefined,
+        sentTimestamp: "2015-06-24T23:58:53.848Z",
+        receivedTimestamp: "2015-06-24T23:58:53.848Z"
       }]);
     });
 
@@ -133,8 +154,6 @@ describe("loop.store.TextChatStore", function () {
 
   describe("#updateRoomInfo", function() {
     it("should add the room name to the list", function() {
-      sandbox.stub(navigator.mozL10n, "get").returns("Let's really share!");
-
       store.updateRoomInfo(new sharedActions.UpdateRoomInfo({
         roomName: "Let's share!",
         roomOwner: "Mark",
@@ -144,14 +163,14 @@ describe("loop.store.TextChatStore", function () {
       expect(store.getStoreState("messageList")).eql([{
         type: CHAT_MESSAGE_TYPES.SPECIAL,
         contentType: CHAT_CONTENT_TYPES.ROOM_NAME,
-        message: "Let's really share!",
-        extraData: undefined
+        message: "Let's share!",
+        extraData: undefined,
+        sentTimestamp: undefined,
+        receivedTimestamp: undefined
       }]);
     });
 
     it("should add the context to the list", function() {
-      sandbox.stub(navigator.mozL10n, "get").returns("Let's really share!");
-
       store.updateRoomInfo(new sharedActions.UpdateRoomInfo({
         roomName: "Let's share!",
         roomOwner: "Mark",
@@ -167,12 +186,16 @@ describe("loop.store.TextChatStore", function () {
         {
           type: CHAT_MESSAGE_TYPES.SPECIAL,
           contentType: CHAT_CONTENT_TYPES.ROOM_NAME,
-          message: "Let's really share!",
-          extraData: undefined
+          message: "Let's share!",
+          extraData: undefined,
+          sentTimestamp: undefined,
+          receivedTimestamp: undefined
         }, {
           type: CHAT_MESSAGE_TYPES.SPECIAL,
           contentType: CHAT_CONTENT_TYPES.CONTEXT,
           message: "A wonderful event",
+          sentTimestamp: undefined,
+          receivedTimestamp: undefined,
           extraData: {
             location: "http://wonderful.invalid",
             thumbnail: "fake"
@@ -182,8 +205,6 @@ describe("loop.store.TextChatStore", function () {
     });
 
     it("should not dispatch a LoopChatMessageAppended event", function() {
-      sandbox.stub(navigator.mozL10n, "get").returns("Let's really share!");
-
       store.updateRoomInfo(new sharedActions.UpdateRoomInfo({
         roomName: "Let's share!",
         roomOwner: "Mark",

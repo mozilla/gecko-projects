@@ -335,7 +335,7 @@ nsresult GStreamerReader::ParseMP3Headers()
     NS_ENSURE_SUCCESS(rv, rv);
     NS_ENSURE_TRUE(bytesRead, NS_ERROR_FAILURE);
 
-    mMP3FrameParser.Parse(bytes, bytesRead, offset);
+    mMP3FrameParser.Parse(reinterpret_cast<uint8_t*>(bytes), bytesRead, offset);
     offset += bytesRead;
   } while (!mMP3FrameParser.ParsedHeaders());
 
@@ -875,6 +875,7 @@ GStreamerReader::Seek(int64_t aTarget, int64_t aEndTime)
 
 media::TimeIntervals GStreamerReader::GetBuffered()
 {
+  MOZ_ASSERT(OnTaskQueue());
   media::TimeIntervals buffered;
   if (!mInfo.HasValidMedia()) {
     return buffered;
@@ -887,15 +888,9 @@ media::TimeIntervals GStreamerReader::GetBuffered()
   nsTArray<MediaByteRange> ranges;
   resource->GetCachedRanges(ranges);
 
-  if (resource->IsDataCachedToEndOfResource(0)) {
+  if (resource->IsDataCachedToEndOfResource(0) && mDuration.ReadOnWrongThread().isSome()) {
     /* fast path for local or completely cached files */
-    gint64 duration = 0;
-
-    {
-      ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-      duration = mDecoder->GetMediaDuration();
-    }
-
+    gint64 duration = mDuration.ReadOnWrongThread().ref().ToMicroseconds();
     LOG(LogLevel::Debug, "complete range [0, %f] for [0, %li]",
         (double) duration / GST_MSECOND, GetDataLength());
     buffered +=
@@ -1278,11 +1273,10 @@ GStreamerReader::AutoplugSortCb(GstElement* aElement, GstPad* aPad,
  * If this is an MP3 stream, pass any new data we get to the MP3 frame parser
  * for duration estimation.
  */
-void GStreamerReader::NotifyDataArrived(const char *aBuffer,
-                                        uint32_t aLength,
-                                        int64_t aOffset)
+void GStreamerReader::NotifyDataArrivedInternal(uint32_t aLength,
+                                                int64_t aOffset)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(OnTaskQueue());
   if (HasVideo()) {
     return;
   }
@@ -1290,7 +1284,9 @@ void GStreamerReader::NotifyDataArrived(const char *aBuffer,
     return;
   }
 
-  mMP3FrameParser.Parse(aBuffer, aLength, aOffset);
+  nsRefPtr<MediaByteBuffer> bytes = mDecoder->GetResource()->SilentReadAt(aOffset, aLength);
+  NS_ENSURE_TRUE_VOID(bytes);
+  mMP3FrameParser.Parse(bytes->Elements(), aLength, aOffset);
   if (!mMP3FrameParser.IsMP3()) {
     return;
   }
@@ -1298,9 +1294,8 @@ void GStreamerReader::NotifyDataArrived(const char *aBuffer,
   int64_t duration = mMP3FrameParser.GetDuration();
   if (duration != mLastParserDuration && mUseParserDuration) {
     MOZ_ASSERT(mDecoder);
-    ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
     mLastParserDuration = duration;
-    mDecoder->UpdateEstimatedMediaDuration(mLastParserDuration);
+    mDecoder->DispatchUpdateEstimatedMediaDuration(mLastParserDuration);
   }
 }
 

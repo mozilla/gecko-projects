@@ -102,6 +102,8 @@ MSG_DEF(JSMSG_CANT_SET_PROTO_CYCLE,    0, JSEXN_TYPEERR, "can't set prototype: i
 MSG_DEF(JSMSG_INVALID_ARG_TYPE,        3, JSEXN_TYPEERR, "Invalid type: {0} can't be a{1} {2}")
 MSG_DEF(JSMSG_TERMINATED,              1, JSEXN_ERR, "Script terminated by timeout at:\n{0}")
 MSG_DEF(JSMSG_PROTO_NOT_OBJORNULL,     1, JSEXN_TYPEERR, "{0}.prototype is not an object or null")
+MSG_DEF(JSMSG_CANT_CALL_CLASS_CONSTRUCTOR, 0, JSEXN_TYPEERR, "class constructors must be invoked with |new|")
+MSG_DEF(JSMSG_DISABLED_DERIVED_CLASS,  1, JSEXN_INTERNALERR, "{0} temporarily disallowed in derived class constructors")
 
 // JSON
 MSG_DEF(JSMSG_JSON_BAD_PARSE,          3, JSEXN_SYNTAXERR, "JSON.parse: {0} at line {1} column {2} of the JSON data")
@@ -192,6 +194,7 @@ MSG_DEF(JSMSG_BAD_CONST_ASSIGN,        1, JSEXN_SYNTAXERR, "invalid assignment t
 MSG_DEF(JSMSG_BAD_CONTINUE,            0, JSEXN_SYNTAXERR, "continue must be inside loop")
 MSG_DEF(JSMSG_BAD_DESTRUCT_ASS,        0, JSEXN_REFERENCEERR, "invalid destructuring assignment operator")
 MSG_DEF(JSMSG_BAD_DESTRUCT_TARGET,     0, JSEXN_SYNTAXERR, "invalid destructuring target")
+MSG_DEF(JSMSG_BAD_DESTRUCT_PARENS,     0, JSEXN_SYNTAXERR, "destructuring patterns in assignments can't be parenthesized")
 MSG_DEF(JSMSG_BAD_DESTRUCT_DECL,       0, JSEXN_SYNTAXERR, "missing = in destructuring declaration")
 MSG_DEF(JSMSG_BAD_DUP_ARGS,            0, JSEXN_SYNTAXERR, "duplicate argument names not allowed in this context")
 MSG_DEF(JSMSG_BAD_FOR_EACH_LOOP,       0, JSEXN_SYNTAXERR, "invalid for each loop")

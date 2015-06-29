@@ -360,16 +360,10 @@ nsPrintEngine::GetSeqFrameAndCountPagesInternal(nsPrintObject*  aPO,
     return NS_ERROR_FAILURE;
   }
 
-  // first count the total number of pages
-  aCount = 0;
-  nsIFrame* pageFrame = aSeqFrame->GetFirstPrincipalChild();
-  while (pageFrame != nullptr) {
-    aCount++;
-    pageFrame = pageFrame->GetNextSibling();
-  }
+  // count the total number of pages
+  aCount = aSeqFrame->PrincipalChildList().GetLength();
 
   return NS_OK;
-
 }
 
 //-----------------------------------------------------------------
@@ -2498,6 +2492,7 @@ nsPrintEngine::DoPrint(nsPrintObject * aPO)
         poPresContext->SetIsRenderingOnlySelection(true);
         // temporarily creating rendering context
         // which is needed to find the selection frames
+        // mPrintDC must have positive width and height for this call
         nsRenderingContext rc(mPrt->mPrintDC->CreateRenderingContext());
 
         // find the starting and ending page numbers

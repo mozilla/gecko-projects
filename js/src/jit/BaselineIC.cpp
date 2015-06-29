@@ -6133,7 +6133,7 @@ DoGetNameFallback(JSContext* cx, BaselineFrame* frame, ICGetName_Fallback* stub_
         attached = true;
     }
 
-    if (!attached && IsGlobalOp(JSOp(*pc)) && !script->hasPollutedGlobalScope()) {
+    if (!attached && IsGlobalOp(JSOp(*pc)) && !script->hasNonSyntacticScope()) {
         if (!TryAttachGlobalNameAccessorStub(cx, script, pc, stub, scopeChain.as<GlobalObject>(),
             name, &attached, &isTemporarilyUnoptimizable))
         {
@@ -6163,7 +6163,7 @@ DoGetNameFallback(JSContext* cx, BaselineFrame* frame, ICGetName_Fallback* stub_
     if (attached)
         return true;
 
-    if (IsGlobalOp(JSOp(*pc)) && !script->hasPollutedGlobalScope()) {
+    if (IsGlobalOp(JSOp(*pc)) && !script->hasNonSyntacticScope()) {
         Handle<GlobalObject*> global = scopeChain.as<GlobalObject>();
         if (!TryAttachGlobalNameValueStub(cx, script, pc, stub, global, name, &attached))
             return false;
@@ -7666,14 +7666,13 @@ ICGetProp_CallNative::Compiler::generateStubCode(MacroAssembler& masm)
 
     Label failure;
 
-    AllocatableGeneralRegisterSet regs(availableGeneralRegs(0));
+    AllocatableGeneralRegisterSet regs(availableGeneralRegs(1));
     Register objReg = InvalidReg;
 
     MOZ_ASSERT(!(inputDefinitelyObject_ && outerClass_));
     if (inputDefinitelyObject_) {
         objReg = R0.scratchReg();
     } else {
-        regs.take(R0);
         // Guard input is an object and unbox.
         masm.branchTestObject(Assembler::NotEqual, R0, &failure);
         objReg = masm.extractObject(R0, ExtractTemp0);
@@ -7683,12 +7682,11 @@ ICGetProp_CallNative::Compiler::generateStubCode(MacroAssembler& masm)
             masm.branchTestObjClass(Assembler::NotEqual, objReg, tmp, outerClass_, &failure);
             masm.loadPtr(Address(objReg, ProxyDataOffset + offsetof(ProxyDataLayout, values)), tmp);
             masm.loadValue(Address(tmp, offsetof(ProxyValueArray, privateSlot)), val);
-            objReg = masm.extractObject(val, ExtractTemp0);
+            masm.movePtr(masm.extractObject(val, ExtractTemp0), objReg);
             regs.add(val);
             regs.add(tmp);
         }
     }
-    regs.takeUnchecked(objReg);
 
     Register scratch = regs.takeAnyExcluding(ICTailCallReg);
 
@@ -7704,6 +7702,13 @@ ICGetProp_CallNative::Compiler::generateStubCode(MacroAssembler& masm)
         regs.add(holderReg);
     }
 
+    // Box and push obj onto baseline frame stack for decompiler
+    if (inputDefinitelyObject_)
+        masm.tagValue(JSVAL_TYPE_OBJECT, objReg, R0);
+    EmitStowICValues(masm, 1);
+    if (inputDefinitelyObject_)
+        objReg = masm.extractObject(R0, ExtractTemp0);
+
     // Push a stub frame so that we can perform a non-tail call.
     enterStubFrame(masm, scratch);
 
@@ -7715,14 +7720,13 @@ ICGetProp_CallNative::Compiler::generateStubCode(MacroAssembler& masm)
     masm.push(objReg);
     masm.push(callee);
 
-    if (!inputDefinitelyObject_)
-        regs.add(R0);
-    else
-        regs.add(objReg);
+    regs.add(R0);
 
     if (!callVM(DoCallNativeGetterInfo, masm))
         return false;
     leaveStubFrame(masm);
+
+    EmitUnstowICValues(masm, 1, /* discard = */true);
 
     // Enter type monitor IC to type-check result.
     EmitEnterTypeMonitorIC(masm);
@@ -9560,6 +9564,10 @@ TryAttachCallStub(JSContext* cx, ICCall_Fallback* stub, HandleScript script, jsb
         if (constructing && !fun->isConstructor())
             return true;
 
+        // Likewise, if the callee is a class constructor, we have to throw.
+        if (!constructing && fun->isClassConstructor())
+            return true;
+
         if (!fun->hasJITCode()) {
             // Don't treat this as an unoptimizable case, as we'll add a stub
             // when the callee becomes hot.
@@ -10418,10 +10426,13 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler& masm)
         // Ensure the object is a function.
         masm.branchTestObjClass(Assembler::NotEqual, callee, regs.getAny(), &JSFunction::class_,
                                 &failure);
-        if (isConstructing_)
+        if (isConstructing_) {
             masm.branchIfNotInterpretedConstructor(callee, regs.getAny(), &failure);
-        else
+        } else {
             masm.branchIfFunctionHasNoScript(callee, &failure);
+            masm.branchFunctionKind(Assembler::Equal, JSFunction::ClassConstructor, callee,
+                                    regs.getAny(), &failure);
+        }
     }
 
     // Load the JSScript.
