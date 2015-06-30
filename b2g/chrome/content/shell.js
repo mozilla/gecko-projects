@@ -843,9 +843,9 @@ var CustomEventManager = {
         appStartup.quit(appStartup.eAttemptQuit);
         break;
       case 'toggle-fullscreen-native-window':
-        Services.prefs.setBoolPref("b2g.nativeWindowGeometry.fullscreen",
-                                   !document.mozFullScreenElement);
         window.fullScreen = !window.fullScreen;
+        Services.prefs.setBoolPref("b2g.nativeWindowGeometry.fullscreen",
+                                   window.fullScreen);
         break;
       case 'minimize-native-window':
         window.minimize();
