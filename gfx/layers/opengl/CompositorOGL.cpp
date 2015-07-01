@@ -488,7 +488,7 @@ CompositorOGL::PrepareViewport(CompositingRenderTargetOGL* aRenderTarget)
   }
 }
 
-TemporaryRef<CompositingRenderTarget>
+already_AddRefed<CompositingRenderTarget>
 CompositorOGL::CreateRenderTarget(const IntRect &aRect, SurfaceInitMode aInit)
 {
   MOZ_ASSERT(aRect.width != 0 && aRect.height != 0, "Trying to create a render target of invalid size");
@@ -506,7 +506,7 @@ CompositorOGL::CreateRenderTarget(const IntRect &aRect, SurfaceInitMode aInit)
   return surface.forget();
 }
 
-TemporaryRef<CompositingRenderTarget>
+already_AddRefed<CompositingRenderTarget>
 CompositorOGL::CreateRenderTargetFromSource(const IntRect &aRect,
                                             const CompositingRenderTarget *aSource,
                                             const IntPoint &aSourcePoint)
@@ -1553,7 +1553,7 @@ CompositorOGL::Resume()
   return true;
 }
 
-TemporaryRef<DataTextureSource>
+already_AddRefed<DataTextureSource>
 CompositorOGL::CreateDataTextureSource(TextureFlags aFlags)
 {
   return MakeAndAddRef<TextureImageTextureSourceOGL>(this, aFlags);
