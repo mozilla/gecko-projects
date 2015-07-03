@@ -82,12 +82,40 @@ ContentEventHandler::InitCommon()
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  // This shell doesn't support selection.
-  if (NS_WARN_IF(!mSelection->RangeCount())) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-  mFirstSelectedRange = mSelection->GetRangeAt(0);
+  if (!mSelection->RangeCount()) {
+    // If there is no selection range, we should compute the selection root
+    // from ancestor limiter or root content of the document.
+    rv = mSelection->GetAncestorLimiter(getter_AddRefs(mRootContent));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return NS_ERROR_FAILURE;
+    }
+    if (!mRootContent) {
+      mRootContent = mPresShell->GetDocument()->GetRootElement();
+      if (NS_WARN_IF(!mRootContent)) {
+        return NS_ERROR_NOT_AVAILABLE;
+      }
+    }
 
+    // Assume that there is selection at beginning of the root content.
+    rv = nsRange::CreateRange(mRootContent, 0, mRootContent, 0,
+                              getter_AddRefs(mFirstSelectedRange));
+    if (NS_WARN_IF(NS_FAILED(rv)) || NS_WARN_IF(!mFirstSelectedRange)) {
+      return NS_ERROR_UNEXPECTED;
+    }
+    return NS_OK;
+  }
+
+  mFirstSelectedRange = mSelection->GetRangeAt(0);
+  if (NS_WARN_IF(!mFirstSelectedRange)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  // If there is a selection, we should retrieve the selection root from
+  // the range since when the window is inactivated, the ancestor limiter
+  // of mSelection was cleared by blur event handler of nsEditor but the
+  // selection range still keeps storing the nodes.  If the active element of
+  // the deactive window is <input> or <textarea>, we can compute the selection
+  // root from them.
   nsINode* startNode = mFirstSelectedRange->GetStartParent();
   NS_ENSURE_TRUE(startNode, NS_ERROR_FAILURE);
   nsINode* endNode = mFirstSelectedRange->GetEndParent();
@@ -212,10 +240,7 @@ static bool IsContentBR(nsIContent* aContent)
 
 static void ConvertToNativeNewlines(nsAFlatString& aString)
 {
-#if defined(XP_MACOSX)
-  // XXX Mac OS X doesn't use "\r".
-  aString.ReplaceSubstring(NS_LITERAL_STRING("\n"), NS_LITERAL_STRING("\r"));
-#elif defined(XP_WIN)
+#if defined(XP_WIN)
   aString.ReplaceSubstring(NS_LITERAL_STRING("\n"), NS_LITERAL_STRING("\r\n"));
 #endif
 }
@@ -334,12 +359,7 @@ ContentEventHandler::GetTextLength(nsIContent* aContent,
 {
   if (aContent->IsNodeOfType(nsINode::eTEXT)) {
     uint32_t textLengthDifference =
-#if defined(XP_MACOSX)
-      // On Mac, the length of a native newline ("\r") is equal to the length of
-      // the XP newline ("\n"), so the native length is the same as the XP
-      // length.
-      0;
-#elif defined(XP_WIN)
+#if defined(XP_WIN)
       // On Windows, the length of a native newline ("\r\n") is twice the length
       // of the XP newline ("\n"), so XP length is equal to the length of the
       // native offset plus the number of newlines encountered in the string.
@@ -364,11 +384,7 @@ ContentEventHandler::GetTextLength(nsIContent* aContent,
 
 static uint32_t ConvertToXPOffset(nsIContent* aContent, uint32_t aNativeOffset)
 {
-#if defined(XP_MACOSX)
-  // On Mac, the length of a native newline ("\r") is equal to the length of
-  // the XP newline ("\n"), so the native offset is the same as the XP offset.
-  return aNativeOffset;
-#elif defined(XP_WIN)
+#if defined(XP_WIN)
   // On Windows, the length of a native newline ("\r\n") is twice the length of
   // the XP newline ("\n"), so XP offset is equal to the length of the native
   // offset minus the number of newlines encountered in the string.

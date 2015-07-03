@@ -73,9 +73,6 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
   , mSeekable(false)
   , mIsEncrypted(false)
   , mTrackDemuxersMayBlock(false)
-#if defined(READER_DORMANT_HEURISTIC)
-  , mDormantEnabled(Preferences::GetBool("media.decoder.heuristic.dormant.enabled", false))
-#endif
 {
   MOZ_ASSERT(aDemuxer);
   MOZ_COUNT_CTOR(MediaFormatReader);
@@ -1107,9 +1104,7 @@ nsresult
 MediaFormatReader::ResetDecode()
 {
   MOZ_ASSERT(OnTaskQueue());
-
   LOGV("");
-  ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
 
   mAudio.mSeekRequest.DisconnectIfExists();
   mVideo.mSeekRequest.DisconnectIfExists();
@@ -1409,8 +1404,8 @@ MediaFormatReader::GetBuffered()
   int64_t startTime;
   {
     ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-    NS_ENSURE_TRUE(mStartTime >= 0, media::TimeIntervals());
-    startTime = mStartTime;
+    NS_ENSURE_TRUE(HaveStartTime(), media::TimeIntervals());
+    startTime = StartTime();
   }
   // Ensure we have up to date buffered time range.
   if (HasVideo()) {
@@ -1434,15 +1429,6 @@ MediaFormatReader::GetBuffered()
   }
 
   return intervals.Shift(media::TimeUnit::FromMicroseconds(-startTime));
-}
-
-bool MediaFormatReader::IsDormantNeeded()
-{
-#if defined(READER_DORMANT_HEURISTIC)
-  return mDormantEnabled;
-#else
-  return false;
-#endif
 }
 
 void MediaFormatReader::ReleaseMediaResources()

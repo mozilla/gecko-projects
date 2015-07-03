@@ -393,10 +393,6 @@ ClientTiledPaintedLayer::RenderLayer()
   LayerManager::DrawPaintedLayerCallback callback =
     ClientManager()->GetPaintedLayerCallback();
   void *data = ClientManager()->GetPaintedLayerCallbackData();
-  if (!callback) {
-    ClientManager()->SetTransactionIncomplete();
-    return;
-  }
 
   if (!mContentClient) {
     mContentClient = new TiledContentClient(this, ClientManager());
@@ -442,11 +438,14 @@ ClientTiledPaintedLayer::RenderLayer()
     return;
   }
 
+  if (!callback) {
+    ClientManager()->SetTransactionIncomplete();
+    return;
+  }
+
   if (!ClientManager()->IsRepeatTransaction()) {
-    // Only paint the mask layer on the first transaction.
-    if (GetMaskLayer()) {
-      ToClientLayer(GetMaskLayer())->RenderLayer();
-    }
+    // Only paint the mask layers on the first transaction.
+    RenderMaskLayers(this);
 
     // For more complex cases we need to calculate a bunch of metrics before we
     // can do the paint.

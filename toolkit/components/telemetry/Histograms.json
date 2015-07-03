@@ -2486,6 +2486,12 @@
     "n_buckets": 1000,
     "description": "Time spend blocked on poll (ms)."
   },
+  "IPV4_AND_IPV6_ADDRESS_CONNECTIVITY": {
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 4,
+    "description": "Count the number of 0) successful connections to an ipv4 address, 1) failed connection an ipv4 address, 2) successful connection to an ipv6 address and 3) failed connections to an ipv6 address."
+  },
   "URL_PATH_ENDS_IN_EXCLAMATION": {
     "expires_in_version": "never",
     "kind": "boolean",
@@ -7830,11 +7836,27 @@
     "description": "Whether or not the Adobe EME GMP was expected to be resident on disk but mysteriously isn't.",
     "releaseChannelCollection": "opt-out"
   },
+  "VIDEO_ADOBE_GMP_MISSING_FILES": {
+    "alert_emails": ["cpearce@mozilla.com"],
+    "expires_in_version": "42",
+    "kind": "enumerated",
+    "n_values" : 8,
+    "description": "Adobe EME GMP files missing (0=none, or sum of: 1=library, 2=info, 4=voucher)",
+    "releaseChannelCollection": "opt-out"
+  },
   "VIDEO_OPENH264_GMP_DISAPPEARED": {
     "alert_emails": ["cpearce@mozilla.com", "rjesup@mozilla.com"],
     "expires_in_version": "42",
     "kind": "flag",
     "description": "Whether or not the OpenH264 GMP was expected to be resident on disk but mysteriously isn't.",
+    "releaseChannelCollection": "opt-out"
+  },
+  "VIDEO_OPENH264_GMP_MISSING_FILES": {
+    "alert_emails": ["cpearce@mozilla.com", "rjesup@mozilla.com"],
+    "expires_in_version": "42",
+    "kind": "enumerated",
+    "n_values" : 4,
+    "description": "OpenH264 GMP files missing (0=none, or sum of: 1=library, 2=info)",
     "releaseChannelCollection": "opt-out"
   },
   "FX_SANITIZE_TOTAL": {

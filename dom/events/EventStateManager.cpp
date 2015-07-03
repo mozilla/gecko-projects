@@ -842,21 +842,6 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       NS_ASSERTION(selectedText.mSucceeded, "Failed to get selected text");
       compositionEvent->mData = selectedText.mReply.mString;
     }
-    // through to compositionend handling
-  case NS_COMPOSITION_END:
-  case NS_COMPOSITION_CHANGE:
-  case NS_COMPOSITION_COMMIT_AS_IS:
-  case NS_COMPOSITION_COMMIT:
-    {
-      WidgetCompositionEvent* compositionEvent = aEvent->AsCompositionEvent();
-      if (IsTargetCrossProcess(compositionEvent)) {
-        // Will not be handled locally, remote the event
-        if (GetCrossProcessTarget()->SendCompositionEvent(*compositionEvent)) {
-          // Cancel local dispatching
-          aEvent->mFlags.mPropagationStopped = true;
-        }
-      }
-    }
     break;
   }
   return NS_OK;
@@ -3708,18 +3693,8 @@ EventStateManager::IsHandlingUserInput()
   }
 
   TimeDuration timeout = nsContentUtils::HandlingUserInputTimeout();
-  TimeDuration elapsed = TimeStamp::Now() - sHandlingInputStart;
-  bool inTime = timeout <= TimeDuration(0) || elapsed <= timeout;
-
-  if (!inTime) {
-#ifdef DEBUG
-    printf("EventStateManager::IsHandlingUserInput() has timed out "
-           "(timeout: %f, elapsed: %f)\n",
-           timeout.ToMilliseconds(), elapsed.ToMilliseconds());
-#endif
-    return false;
-  }
-  return true;
+  return timeout <= TimeDuration(0) ||
+         (TimeStamp::Now() - sHandlingInputStart) <= timeout;
 }
 
 static void

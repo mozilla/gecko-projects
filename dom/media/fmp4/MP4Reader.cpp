@@ -156,9 +156,6 @@ MP4Reader::MP4Reader(AbstractMediaDecoder* aDecoder, MediaTaskQueue* aBorrowedTa
   , mIndexReady(false)
   , mLastSeenEnd(-1)
   , mDemuxerMonitor("MP4 Demuxer")
-#if defined(MP4_READER_DORMANT_HEURISTIC)
-  , mDormantEnabled(Preferences::GetBool("media.decoder.heuristic.dormant.enabled", false))
-#endif
 {
   MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
   MOZ_COUNT_CTOR(MP4Reader);
@@ -1082,7 +1079,7 @@ MP4Reader::GetBuffered()
     return buffered;
   }
   UpdateIndex();
-  NS_ENSURE_TRUE(mStartTime >= 0, media::TimeIntervals());
+  NS_ENSURE_TRUE(HaveStartTime(), media::TimeIntervals());
 
   AutoPinned<MediaResource> resource(mDecoder->GetResource());
   nsTArray<MediaByteRange> ranges;
@@ -1093,21 +1090,12 @@ MP4Reader::GetBuffered()
     mDemuxer->ConvertByteRangesToTime(ranges, &timeRanges);
     for (size_t i = 0; i < timeRanges.Length(); i++) {
       buffered += media::TimeInterval(
-        media::TimeUnit::FromMicroseconds(timeRanges[i].start - mStartTime),
-        media::TimeUnit::FromMicroseconds(timeRanges[i].end - mStartTime));
+        media::TimeUnit::FromMicroseconds(timeRanges[i].start - StartTime()),
+        media::TimeUnit::FromMicroseconds(timeRanges[i].end - StartTime()));
     }
   }
 
   return buffered;
-}
-
-bool MP4Reader::IsDormantNeeded()
-{
-#if defined(MP4_READER_DORMANT_HEURISTIC)
-  return mDormantEnabled;
-#else
-  return false;
-#endif
 }
 
 void MP4Reader::ReleaseMediaResources()

@@ -339,7 +339,7 @@ public:
   }
   void SetResource(MediaResource* aResource)
   {
-    NS_ASSERTION(NS_IsMainThread(), "Should only be called on main thread");
+    MOZ_ASSERT(NS_IsMainThread());
     mResource = aResource;
   }
 
@@ -559,17 +559,21 @@ public:
   virtual void UpdatePlaybackRate();
 
   // Used to estimate rates of data passing through the decoder's channel.
-  // Records activity stopping on the channel. The monitor must be held.
-  virtual void NotifyPlaybackStarted() {
-    GetReentrantMonitor().AssertCurrentThreadIn();
-    mPlaybackStatistics->Start();
+  // Records activity stopping on the channel.
+  void DispatchPlaybackStarted() {
+    nsRefPtr<MediaDecoder> self = this;
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableFunction([self] () { self->mPlaybackStatistics->Start(); });
+    AbstractThread::MainThread()->Dispatch(r.forget());
   }
 
   // Used to estimate rates of data passing through the decoder's channel.
-  // Records activity stopping on the channel. The monitor must be held.
-  virtual void NotifyPlaybackStopped() {
-    GetReentrantMonitor().AssertCurrentThreadIn();
-    mPlaybackStatistics->Stop();
+  // Records activity stopping on the channel.
+  void DispatchPlaybackStopped() {
+    nsRefPtr<MediaDecoder> self = this;
+    nsCOMPtr<nsIRunnable> r =
+      NS_NewRunnableFunction([self] () { self->mPlaybackStatistics->Stop(); });
+    AbstractThread::MainThread()->Dispatch(r.forget());
   }
 
   // The actual playback rate computation. The monitor must be held.
@@ -640,6 +644,7 @@ public:
 
   void OnSeekRejected()
   {
+    MOZ_ASSERT(NS_IsMainThread());
     mSeekRequest.Complete();
     mLogicallySeeking = false;
   }
@@ -650,7 +655,11 @@ public:
   void SeekingStarted(MediaDecoderEventVisibility aEventVisibility = MediaDecoderEventVisibility::Observable);
 
   void UpdateLogicalPosition(MediaDecoderEventVisibility aEventVisibility);
-  void UpdateLogicalPosition() { UpdateLogicalPosition(MediaDecoderEventVisibility::Observable); }
+  void UpdateLogicalPosition()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    UpdateLogicalPosition(MediaDecoderEventVisibility::Observable);
+  }
 
   // Find the end of the cached data starting at the current decoder
   // position.
@@ -895,12 +904,21 @@ protected:
   // Buffered range, mirrored from the reader.
   Mirror<media::TimeIntervals> mBuffered;
 
+  // Whether the state machine is shut down.
+  Mirror<bool> mStateMachineIsShutdown;
+
+  // Used by the ogg decoder to watch mStateMachineIsShutdown.
+  virtual void ShutdownBitChanged() {}
+
   // NextFrameStatus, mirrored from the state machine.
   Mirror<MediaDecoderOwner::NextFrameStatus> mNextFrameStatus;
 
   /******
    * The following members should be accessed with the decoder lock held.
    ******/
+
+  // Whether the decoder implementation supports dormant mode.
+  bool mDormantSupported;
 
   // Current decoding position in the stream. This is where the decoder
   // is up to consuming the stream. This is not adjusted during decoder

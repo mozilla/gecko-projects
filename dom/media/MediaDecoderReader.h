@@ -98,8 +98,6 @@ public:
   // True if this reader is waiting for a Content Decryption Module to become
   // available.
   virtual bool IsWaitingOnCDMResource() { return false; }
-  // True when this reader need to become dormant state
-  virtual bool IsDormantNeeded() { return false; }
   // Release media resources they should be released in dormant state
   // The reader can be made usable again by calling ReadMetadata().
   virtual void ReleaseMediaResources() {};
@@ -290,8 +288,7 @@ public:
     return mDecoder;
   }
 
-  // TODO: DEPRECATED.  This uses synchronous decoding.
-  VideoData* DecodeToFirstVideoData();
+  nsRefPtr<VideoDataPromise> DecodeToFirstVideoData();
 
   MediaInfo GetMediaInfo() { return mInfo; }
 
@@ -306,8 +303,8 @@ public:
       NS_NewRunnableFunction([self, aStartTime] () -> void
     {
       MOZ_ASSERT(self->OnTaskQueue());
-      MOZ_ASSERT(self->mStartTime == -1);
-      self->mStartTime = aStartTime;
+      MOZ_ASSERT(!self->HaveStartTime());
+      self->mStartTime.emplace(aStartTime);
       self->UpdateBuffered();
     });
     TaskQueue()->Dispatch(r.forget());
@@ -409,7 +406,9 @@ protected:
   // readers to return the correct value of GetBuffered. We should refactor
   // things such that all GetBuffered calls go through the MDSM, which would
   // offset the range accordingly.
-  int64_t mStartTime;
+  Maybe<int64_t> mStartTime;
+  bool HaveStartTime() { MOZ_ASSERT(OnTaskQueue()); return mStartTime.isSome(); }
+  int64_t StartTime() { MOZ_ASSERT(HaveStartTime()); return mStartTime.ref(); }
 
   // This is a quick-and-dirty way for DecodeAudioData implementations to
   // communicate the presence of a decoding error to RequestAudioData. We should

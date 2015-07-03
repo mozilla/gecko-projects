@@ -1006,8 +1006,7 @@ js::CreateThisForFunctionWithProto(JSContext* cx, HandleObject callee, HandleObj
 
         res = CreateThisForFunctionWithGroup(cx, group, newKind);
     } else {
-        gc::AllocKind allocKind = NewObjectGCKind(&PlainObject::class_);
-        res = NewObjectWithProto<PlainObject>(cx, proto, allocKind, newKind);
+        res = NewBuiltinClassInstance<PlainObject>(cx, newKind);
     }
 
     if (res) {
@@ -2945,7 +2944,7 @@ JS::OrdinaryToPrimitive(JSContext* cx, HandleObject obj, JSType hint, MutableHan
     /* Avoid recursive death when decompiling in ReportValueError. */
     RootedString str(cx);
     if (hint == JSTYPE_STRING) {
-        str = JS_InternString(cx, clasp->name);
+        str = JS_AtomizeAndPinString(cx, clasp->name);
         if (!str)
             return false;
     } else {

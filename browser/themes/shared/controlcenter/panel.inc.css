@@ -15,7 +15,7 @@
 /* PANEL */
 
 #identity-popup,
-.panel-viewstack[viewtype="main"] > .panel-mainview[panelid=identity-popup] > #identity-popup-mainView {
+.panel-viewstack[viewtype="main"]:not([transitioning]) > .panel-mainview[panelid=identity-popup] > #identity-popup-mainView {
   /* Tiny hack to ensure the panel shrinks back to its original
      size after closing a subview that is bigger than the main view. */
   max-height: 0;
@@ -70,6 +70,32 @@
 #identity-popup-permissions-content:-moz-locale-dir(rtl),
 #tracking-protection-content:-moz-locale-dir(rtl) {
   background-position: calc(100% - 1em) 1em;
+}
+
+/* IN-CONTENT-PREF STYLE BUTTONS */
+
+.identity-popup-button {
+  -moz-appearance: none;
+  margin: 5px 0;
+  height: 30px;
+  color: #333;
+  line-height: 20px;
+  border: 1px solid #c1c1c1;
+  border-radius: 2px;
+  background-color: #fbfbfb;
+}
+
+.identity-popup-button:not([disabled="true"]):hover {
+  background-color: #ebebeb;
+}
+
+.identity-popup-button:not([disabled="true"]):hover:active {
+  background-color: #dadada;
+}
+
+.identity-popup-button[disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* EXPAND BUTTON */
@@ -182,6 +208,11 @@
   background-image: url(chrome://browser/skin/controlcenter/conn-secure-ev.svg);
 }
 
+#identity-popup-securityView.mixedActiveContent,
+#identity-popup-security-content.mixedActiveContent {
+  background-image: url(chrome://browser/skin/controlcenter/mcb-disabled.svg);
+}
+
 #identity-popup-securityView-header {
   border-bottom: 1px solid #e5e5e5;
   padding-bottom: 1em;
@@ -211,7 +242,8 @@
   background-image: url("chrome://browser/skin/controlcenter/tracking-protection-disabled.svg");
 }
 
-#tracking-actions {
+#tracking-action-block,
+#tracking-action-unblock {
   margin: 1em 0 0;
 }
 

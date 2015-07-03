@@ -54,7 +54,6 @@ public:
   virtual size_t SizeOfVideoQueueInFrames() override;
   virtual size_t SizeOfAudioQueueInFrames() override;
 
-  virtual bool IsDormantNeeded() override;
   virtual void ReleaseMediaResources() override;
 
   void OnAudioDecoded(AudioData* aSample);
@@ -124,12 +123,6 @@ public:
   nsRefPtr<ShutdownPromise> Shutdown() override;
 
   virtual void BreakCycles() override;
-
-  bool IsShutdown()
-  {
-    ReentrantMonitorAutoEnter decoderMon(mDecoder->GetReentrantMonitor());
-    return mDecoder->IsShutdown();
-  }
 
   // Return true if all of the active tracks contain data for the specified time.
   bool TrackBuffersContainTime(int64_t aTime);
