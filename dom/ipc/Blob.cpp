@@ -4569,8 +4569,7 @@ BlobParent::RecvGetFilePath(nsString* aFilePath)
   MOZ_ASSERT(mOwnsBlobImpl);
 
   // In desktop e10s the file picker code sends this message.
-
-#if defined(MOZ_CHILD_PERMISSIONS) && !defined(MOZ_GRAPHENE)
+#ifdef MOZ_CHILD_PERMISSIONS
   if (NS_WARN_IF(!IndexedDatabaseManager::InTestingMode())) {
     ASSERT_UNLESS_FUZZING();
     return false;
