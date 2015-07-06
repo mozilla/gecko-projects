@@ -559,7 +559,11 @@ let settingsToObserve = {
   'layers.draw-borders': false,
   'layers.draw-tile-borders': false,
   'layers.dump': false,
+#ifdef XP_WIN
+  'layers.enable-tiles': false,
+#else
   'layers.enable-tiles': true,
+#endif
   'layers.effect.invert': false,
   'layers.effect.grayscale': false,
   'layers.effect.contrast': "0.0",
