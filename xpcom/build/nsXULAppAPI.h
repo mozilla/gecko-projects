@@ -18,6 +18,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Vector.h"
+#include "mozilla/TimeStamp.h"
 
 /**
  * A directory service key which provides the platform-correct "application
@@ -407,6 +408,9 @@ XRE_API(GeckoProcessType,
 XRE_API(bool,
         XRE_IsParentProcess, ())
 
+XRE_API(bool,
+        XRE_IsContentProcess, ())
+
 typedef void (*MainFunction)(void* aData);
 
 XRE_API(nsresult,
@@ -450,7 +454,7 @@ XRE_API(void,
         XRE_TelemetryAccumulate, (int aID, uint32_t aSample))
 
 XRE_API(void,
-        XRE_StartupTimelineRecord, (int aEvent, PRTime aWhen))
+        XRE_StartupTimelineRecord, (int aEvent, mozilla::TimeStamp aWhen))
 
 XRE_API(void,
         XRE_InitOmnijar, (nsIFile* aGreOmni,

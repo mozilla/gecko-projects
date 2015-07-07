@@ -37,7 +37,6 @@
 #include "nsCategoryCache.h"
 #include "nsIContentSniffer.h"
 #include "Predictor.h"
-#include "nsNetUtil.h"
 #include "nsIThreadPool.h"
 #include "mozilla/net/NeckoChild.h"
 
@@ -131,6 +130,16 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(RedirectChannelRegistrar)
 #include "CacheStorageService.h"
 typedef mozilla::net::CacheStorageService CacheStorageService;
 NS_GENERIC_FACTORY_CONSTRUCTOR(CacheStorageService)
+
+
+///////////////////////////////////////////////////////////////////////////////
+
+#include "mozilla/net/CaptivePortalService.h"
+namespace mozilla {
+namespace net {
+  NS_GENERIC_FACTORY_CONSTRUCTOR(CaptivePortalService)
+}
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -809,6 +818,7 @@ NS_DEFINE_NAMED_CID(NS_SERIALIZATION_HELPER_CID);
 NS_DEFINE_NAMED_CID(NS_REDIRECTCHANNELREGISTRAR_CID);
 NS_DEFINE_NAMED_CID(NS_CACHE_STORAGE_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_NETWORKPREDICTOR_CID);
+NS_DEFINE_NAMED_CID(NS_CAPTIVEPORTAL_CID);
 
 static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_IOSERVICE_CID, false, nullptr, nsIOServiceConstructor },
@@ -956,6 +966,7 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
     { &kNS_REDIRECTCHANNELREGISTRAR_CID, false, nullptr, RedirectChannelRegistrarConstructor },
     { &kNS_CACHE_STORAGE_SERVICE_CID, false, nullptr, CacheStorageServiceConstructor },
     { &kNS_NETWORKPREDICTOR_CID, false, nullptr, mozilla::net::Predictor::Create },
+    { &kNS_CAPTIVEPORTAL_CID, false, nullptr, mozilla::net::CaptivePortalServiceConstructor },
     { nullptr }
 };
 
@@ -1107,6 +1118,7 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
     { NS_CACHE_STORAGE_SERVICE_CONTRACTID, &kNS_CACHE_STORAGE_SERVICE_CID },
     { NS_CACHE_STORAGE_SERVICE_CONTRACTID2, &kNS_CACHE_STORAGE_SERVICE_CID },
     { NS_NETWORKPREDICTOR_CONTRACTID, &kNS_NETWORKPREDICTOR_CID },
+    { NS_CAPTIVEPORTAL_CONTRACTID, &kNS_CAPTIVEPORTAL_CID },
     { nullptr }
 };
 

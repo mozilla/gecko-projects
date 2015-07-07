@@ -293,6 +293,11 @@ static bool UseAudioChannelService()
   return Preferences::GetBool("media.useAudioChannelService");
 }
 
+static bool UseAudioChannelAPI()
+{
+  return Preferences::GetBool("media.useAudioChannelAPI");
+}
+
 class EventProxyHandler final : public nsIDOMEventListener
 {
 public:
@@ -398,7 +403,7 @@ AudioDestinationNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 void
-AudioDestinationNode::DestroyMediaStream()
+AudioDestinationNode::DestroyAudioChannelAgent()
 {
   if (mAudioChannelAgent && !Context()->IsOffline()) {
     mAudioChannelAgent->StopPlaying();
@@ -411,6 +416,12 @@ AudioDestinationNode::DestroyMediaStream()
                                       mEventProxyHelper,
                                       /* useCapture = */ true);
   }
+}
+
+void
+AudioDestinationNode::DestroyMediaStream()
+{
+  DestroyAudioChannelAgent();
 
   if (!mStream)
     return;
@@ -543,9 +554,11 @@ AudioDestinationNode::CanPlayChanged(int32_t aCanPlay)
   mAudioChannelAgentPlaying = playing;
   SetCanPlay(playing);
 
-  Context()->DispatchTrustedEvent(
-    playing ? NS_LITERAL_STRING("mozinterruptend")
-            : NS_LITERAL_STRING("mozinterruptbegin"));
+  if (UseAudioChannelAPI()) {
+    Context()->DispatchTrustedEvent(
+      playing ? NS_LITERAL_STRING("mozinterruptend")
+              : NS_LITERAL_STRING("mozinterruptbegin"));
+  }
 
   return NS_OK;
 }
@@ -598,7 +611,7 @@ AudioDestinationNode::SetMozAudioChannelType(AudioChannel aValue, ErrorResult& a
 bool
 AudioDestinationNode::CheckAudioChannelPermissions(AudioChannel aValue)
 {
-  if (!Preferences::GetBool("media.useAudioChannelService")) {
+  if (!UseAudioChannelService()) {
     return true;
   }
 

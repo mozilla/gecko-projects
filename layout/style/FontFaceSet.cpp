@@ -33,6 +33,8 @@
 #include "nsISupportsPriority.h"
 #include "nsIWebNavigation.h"
 #include "nsNetUtil.h"
+#include "nsIProtocolHandler.h"
+#include "nsIInputStream.h"
 #include "nsPresContext.h"
 #include "nsPrintfCString.h"
 #include "nsStyleSet.h"
@@ -1785,3 +1787,6 @@ FontFaceSet::UserFontSet::CreateUserFontEntry(
                         aFeatureSettings, aLanguageOverride, aUnicodeRanges);
   return entry.forget();
 }
+
+#undef LOG_ENABLED
+#undef LOG

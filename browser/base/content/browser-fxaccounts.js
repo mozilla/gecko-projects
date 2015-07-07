@@ -266,6 +266,11 @@ let gFxAccounts = {
     let signedInTooltiptext = this.panelUIStatus.getAttribute("signedinTooltiptext");
 
     let updateWithUserData = (userData) => {
+      // Window might have been closed while fetching data.
+      if (window.closed) {
+        return;
+      }
+
       // Reset the button to its original state.
       this.panelUILabel.setAttribute("label", defaultLabel);
       this.panelUIStatus.removeAttribute("tooltiptext");
@@ -313,7 +318,7 @@ let gFxAccounts = {
     fxAccounts.getSignedInUser().then(userData => {
       // userData may be null here when the user is not signed-in, but that's expected
       updateWithUserData(userData);
-      return fxAccounts.getSignedInUserProfile();
+      return userData ? fxAccounts.getSignedInUserProfile() : null;
     }).then(profile => {
       if (!profile) {
         return;

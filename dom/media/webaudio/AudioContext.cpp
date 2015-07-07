@@ -35,6 +35,8 @@
 #include "PeriodicWave.h"
 #include "ConvolverNode.h"
 #include "OscillatorNode.h"
+#include "nsNetCID.h"
+#include "blink/PeriodicWave.h"
 #include "nsNetUtil.h"
 #include "AudioStream.h"
 #include "mozilla/dom/Promise.h"
@@ -105,6 +107,11 @@ AudioContext::AudioContext(nsPIDOMWindow* aWindow,
   // bound to the window.
   mDestination = new AudioDestinationNode(this, aIsOffline, aChannel,
                                           aNumberOfChannels, aLength, aSampleRate);
+}
+
+void
+AudioContext::Init()
+{
   // We skip calling SetIsOnlyNodeForContext and the creation of the
   // audioChannelAgent during mDestination's constructor, because we can only
   // call them after mDestination has been set up.
@@ -145,6 +152,7 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
   nsRefPtr<AudioContext> object =
     new AudioContext(window, false,
                      AudioChannelService::GetDefaultAudioChannel());
+  object->Init();
 
   RegisterWeakMemoryReporter(object);
 
@@ -163,6 +171,7 @@ AudioContext::Constructor(const GlobalObject& aGlobal,
   }
 
   nsRefPtr<AudioContext> object = new AudioContext(window, false, aChannel);
+  object->Init();
 
   RegisterWeakMemoryReporter(object);
 
@@ -843,6 +852,8 @@ AudioContext::Suspend(ErrorResult& aRv)
     return promise.forget();
   }
 
+  Destination()->DestroyAudioChannelAgent();
+
   MediaStream* ds = DestinationStream();
   if (ds) {
     ds->BlockStreamIfNeeded();
@@ -881,6 +892,8 @@ AudioContext::Resume(ErrorResult& aRv)
     return promise.forget();
   }
 
+  Destination()->CreateAudioChannelAgent();
+
   MediaStream* ds = DestinationStream();
   if (ds) {
     ds->UnblockStreamIfNeeded();
@@ -914,6 +927,10 @@ AudioContext::Close(ErrorResult& aRv)
   }
 
   mCloseCalled = true;
+
+  if (Destination()) {
+    Destination()->DestroyAudioChannelAgent();
+  }
 
   mPromiseGripArray.AppendElement(promise);
 
@@ -1041,6 +1058,49 @@ double
 AudioContext::ExtraCurrentTime() const
 {
   return mDestination->ExtraCurrentTime();
+}
+
+BasicWaveFormCache*
+AudioContext::GetBasicWaveFormCache()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!mBasicWaveFormCache) {
+    mBasicWaveFormCache = new BasicWaveFormCache(SampleRate());
+  }
+  return mBasicWaveFormCache;
+}
+
+BasicWaveFormCache::BasicWaveFormCache(uint32_t aSampleRate)
+  : mSampleRate(aSampleRate)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+}
+BasicWaveFormCache::~BasicWaveFormCache()
+{ }
+
+WebCore::PeriodicWave*
+BasicWaveFormCache::GetBasicWaveForm(OscillatorType aType)
+{
+  MOZ_ASSERT(!NS_IsMainThread());
+  if (aType == OscillatorType::Sawtooth) {
+    if (!mSawtooth) {
+      mSawtooth = WebCore::PeriodicWave::createSawtooth(mSampleRate);
+    }
+    return mSawtooth;
+  } else if (aType == OscillatorType::Square) {
+    if (!mSquare) {
+      mSquare = WebCore::PeriodicWave::createSquare(mSampleRate);
+    }
+    return mSquare;
+  } else if (aType == OscillatorType::Triangle) {
+    if (!mTriangle) {
+      mTriangle = WebCore::PeriodicWave::createTriangle(mSampleRate);
+    }
+    return mTriangle;
+  } else {
+    MOZ_ASSERT(false, "Not reached");
+    return nullptr;
+  }
 }
 
 }

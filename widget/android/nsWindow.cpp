@@ -182,7 +182,9 @@ nsWindow::nsWindow() :
     mIMEMaskEventsCount(1), // Mask IME events since there's no focus yet
     mIMERanges(new TextRangeArray()),
     mIMEUpdatingContext(false),
-    mIMESelectionChanged(false)
+    mIMESelectionChanged(false),
+    mAwaitingFullScreen(false),
+    mIsFullScreen(false)
 {
 }
 
@@ -494,6 +496,12 @@ nsWindow::Resize(double aX,
     if (aRepaint && FindTopLevel() == nsWindow::TopWindow())
         RedrawAll();
 
+    nsIWidgetListener* listener = GetWidgetListener();
+    if (mAwaitingFullScreen && listener) {
+      listener->FullscreenChanged(mIsFullScreen);
+      mAwaitingFullScreen = false;
+    }
+
     return NS_OK;
 }
 
@@ -630,7 +638,7 @@ nsWindow::GetScreenBounds(nsIntRect &aRect)
     aRect.y = p.y;
     aRect.width = mBounds.width;
     aRect.height = mBounds.height;
-    
+
     return NS_OK;
 }
 
@@ -672,6 +680,8 @@ nsWindow::DispatchEvent(WidgetGUIEvent* aEvent)
 NS_IMETHODIMP
 nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen*)
 {
+    mIsFullScreen = aFullScreen;
+    mAwaitingFullScreen = true;
     GeckoAppShell::SetFullScreen(aFullScreen);
     return NS_OK;
 }
@@ -785,7 +795,7 @@ nsWindow::OnGlobalAndroidEvent(AndroidGeckoEvent *ae)
             gAndroidScreenBounds.width = newScreenWidth;
             gAndroidScreenBounds.height = newScreenHeight;
 
-            if (XRE_GetProcessType() != GeckoProcessType_Default &&
+            if (!XRE_IsParentProcess() &&
                 !Preferences::GetBool("browser.tabs.remote.desktopbehavior", false)) {
                 break;
             }
@@ -931,7 +941,7 @@ nsWindow::InitEvent(WidgetGUIEvent& event, nsIntPoint* aPoint)
 gfxIntSize
 nsWindow::GetAndroidScreenBounds()
 {
-    if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    if (XRE_IsContentProcess()) {
         return ContentChild::GetSingleton()->GetScreenSize();
     }
     return gAndroidScreenBounds;
@@ -2110,7 +2120,7 @@ nsWindow::SetInputContext(const InputContext& aContext,
 
     // Ensure that opening the virtual keyboard is allowed for this specific
     // InputContext depending on the content.ime.strict.policy pref
-    if (aContext.mIMEState.mEnabled != IMEState::DISABLED && 
+    if (aContext.mIMEState.mEnabled != IMEState::DISABLED &&
         aContext.mIMEState.mEnabled != IMEState::PLUGIN &&
         Preferences::GetBool("content.ime.strict_policy", false) &&
         !aAction.ContentGotFocusByTrustedCause() &&
@@ -2401,9 +2411,10 @@ nsWindow::SetCompositor(mozilla::layers::LayerManager* aLayerManager,
 }
 
 void
-nsWindow::ScheduleComposite()
+nsWindow::InvalidateAndScheduleComposite()
 {
     if (sCompositorParent) {
+        sCompositorParent->InvalidateOnCompositorThread();
         sCompositorParent->ScheduleRenderOnCompositorThread();
     }
 }

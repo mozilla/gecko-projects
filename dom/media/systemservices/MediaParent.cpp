@@ -13,8 +13,11 @@
 #include "MediaEngine.h"
 #include "VideoUtils.h"
 #include "nsThreadUtils.h"
+#include "nsNetCID.h"
 #include "nsNetUtil.h"
+#include "nsIOutputStream.h"
 #include "nsILineInputStream.h"
+#include "nsISafeOutputStream.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsISupportsImpl.h"
 #include "mozilla/Logging.h"
@@ -503,16 +506,12 @@ Parent<Super>::Parent(bool aSameProcess)
   if (!gMediaParentLog)
     gMediaParentLog = PR_NewLogModule("MediaParent");
   LOG(("media::Parent: %p", this));
-
-  MOZ_COUNT_CTOR(Parent);
 }
 
 template<class Super>
 Parent<Super>::~Parent()
 {
   LOG(("~media::Parent: %p", this));
-
-  MOZ_COUNT_DTOR(Parent);
 }
 
 PMediaParent*

@@ -28,6 +28,12 @@
 #include "nsIURI.h"
 #include "nsILoadGroup.h"
 #include "nsNetUtil.h"
+#include "nsStringStream.h"
+#include "nsIAuthPrompt.h"
+#include "nsIAuthPrompt2.h"
+#include "nsIOutputStream.h"
+#include "nsISupportsPrimitives.h"
+#include "nsIInterfaceRequestorUtils.h"
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
 #include "nsIUploadChannel.h"
@@ -2946,7 +2952,7 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
         if (scheme.LowerCaseEqualsLiteral("app") ||
             scheme.LowerCaseEqualsLiteral("jar")) {
           mIsMappedArrayBuffer = true;
-          if (XRE_GetProcessType() != GeckoProcessType_Default) {
+          if (!XRE_IsParentProcess()) {
             nsCOMPtr<nsIJARChannel> jarChannel = do_QueryInterface(mChannel);
             // For memory mapping from child process, we need to get file
             // descriptor of the JAR file opened remotely on the parent proess.

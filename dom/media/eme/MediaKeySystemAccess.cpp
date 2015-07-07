@@ -161,17 +161,6 @@ EnsureMinCDMVersion(mozIGeckoMediaPluginService* aGMPService,
     return MediaKeySystemStatus::Cdm_not_installed;
   }
 
-  if (aMinCdmVersion == NO_CDM_VERSION) {
-    return MediaKeySystemStatus::Available;
-  }
-
-  nsresult rv;
-  int32_t version = versionStr.ToInteger(&rv);
-  if (NS_FAILED(rv) || version < 0 || aMinCdmVersion > version) {
-    aOutMessage = NS_LITERAL_CSTRING("Installed CDM version insufficient");
-    return MediaKeySystemStatus::Cdm_insufficient_version;
-  }
-
 #ifdef XP_WIN
   if (aKeySystem.EqualsLiteral("com.adobe.access") ||
       aKeySystem.EqualsLiteral("com.adobe.primetime")) {
@@ -186,7 +175,7 @@ EnsureMinCDMVersion(mozIGeckoMediaPluginService* aGMPService,
       aOutMessage = NS_LITERAL_CSTRING("Adobe plugin voucher was expected to be on disk but was not");
       somethingMissing = true;
     }
-    if (somethingMissing) {    
+    if (somethingMissing) {
       NS_WARNING("Adobe EME plugin or voucher disappeared from disk!");
       // Reset the prefs that Firefox's GMP downloader sets, so that
       // Firefox will try to download the plugin next time the updater runs.
@@ -196,6 +185,14 @@ EnsureMinCDMVersion(mozIGeckoMediaPluginService* aGMPService,
     }
   }
 #endif
+
+  nsresult rv;
+  int32_t version = versionStr.ToInteger(&rv);
+  if (aMinCdmVersion != NO_CDM_VERSION &&
+      (NS_FAILED(rv) || version < 0 || aMinCdmVersion > version)) {
+    aOutMessage = NS_LITERAL_CSTRING("Installed CDM version insufficient");
+    return MediaKeySystemStatus::Cdm_insufficient_version;
+  }
 
   return MediaKeySystemStatus::Available;
 }

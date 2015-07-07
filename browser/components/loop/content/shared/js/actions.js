@@ -415,6 +415,7 @@ loop.shared.actions = (function() {
      * XXX: should move to some roomActions module - refs bug 1079284
      */
     CopyRoomUrl: Action.define("copyRoomUrl", {
+      from: String,
       roomUrl: String
     }),
 
@@ -423,6 +424,7 @@ loop.shared.actions = (function() {
      * XXX: should move to some roomActions module - refs bug 1079284
      */
     EmailRoomUrl: Action.define("emailRoomUrl", {
+      from: String,
       roomUrl: String
       // roomDescription: String, Optional.
     }),
@@ -496,6 +498,13 @@ loop.shared.actions = (function() {
      * XXX: should move to some roomActions module - refs bug 1079284
      */
     JoinRoom: Action.define("joinRoom", {
+    }),
+
+    /**
+     * Starts the process for the user to join the room.
+     * XXX: should move to some roomActions module - refs bug 1079284
+     */
+    RetryAfterRoomFailure: Action.define("retryAfterRoomFailure", {
     }),
 
     /**

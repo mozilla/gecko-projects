@@ -459,7 +459,7 @@ loop.conversationViews = (function(mozL10n) {
     _onEmailLinkReceived: function() {
       var emailLink = this.getStoreState().emailLink;
       var contactEmail = _getPreferredEmail(this.props.contact).value;
-      sharedUtils.composeCallUrlEmail(emailLink, contactEmail);
+      sharedUtils.composeCallUrlEmail(emailLink, contactEmail, null, "callfailed");
       this.closeWindow();
     },
 
@@ -659,6 +659,7 @@ loop.conversationViews = (function(mozL10n) {
               React.createElement("div", {className: "video_wrapper remote_wrapper"}, 
                 React.createElement("div", {className: "video_inner remote focus-stream"}, 
                   React.createElement(sharedViews.MediaView, {displayAvatar: !this.shouldRenderRemoteVideo(), 
+                    isLoading: false, 
                     mediaType: "remote", 
                     posterUrl: this.props.remotePosterUrl, 
                     srcVideoObject: this.state.remoteSrcVideoObject})
@@ -666,6 +667,7 @@ loop.conversationViews = (function(mozL10n) {
               ), 
               React.createElement("div", {className: localStreamClasses}, 
                 React.createElement(sharedViews.MediaView, {displayAvatar: !this.props.video.enabled, 
+                  isLoading: false, 
                   mediaType: "local", 
                   posterUrl: this.props.localPosterUrl, 
                   srcVideoObject: this.state.localSrcVideoObject})
@@ -674,6 +676,7 @@ loop.conversationViews = (function(mozL10n) {
             React.createElement(loop.shared.views.ConversationToolbar, {
               audio: this.props.audio, 
               dispatcher: this.props.dispatcher, 
+              edit: { visible: false, enabled: false}, 
               hangup: this.hangup, 
               publishStream: this.publishStream, 
               video: this.props.video})

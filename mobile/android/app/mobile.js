@@ -275,6 +275,9 @@ pref("browser.search.order.US.3", "chrome://browser/locale/region.properties");
 // disable updating
 pref("browser.search.update", false);
 
+// enable tracking protection for private browsing
+pref("privacy.trackingprotection.pbmode.enabled", true);
+
 // disable search suggestions by default
 pref("browser.search.suggest.enabled", false);
 pref("browser.search.suggest.prompted", false);
@@ -333,6 +336,9 @@ pref("gfx.displayport.strategy_pb.threshold", -1); // velocity threshold in inch
 
 // Allow 24-bit colour when the hardware supports it
 pref("gfx.android.rgb16.force", false);
+
+// Allow GLContexts to be attached/detached from SurfaceTextures
+pref("gfx.SurfaceTexture.detach.enabled", true);
 
 // don't allow JS to move and resize existing windows
 pref("dom.disable_window_move_resize", true);

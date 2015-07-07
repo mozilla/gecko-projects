@@ -35,6 +35,7 @@ function test() {
     "dom/media/webaudio/test/browser_mozAudioChannel.html";
 
   SpecialPowers.pushPrefEnv({"set": [["media.defaultAudioChannel", "content" ],
+                                     ["media.useAudioChannelAPI", true ],
                                      ["media.useAudioChannelService", true ]]},
     function() {
       let tab1 = gBrowser.addTab(testURL);
@@ -60,8 +61,10 @@ function test() {
               info("Unloading a tab...");
               whenBrowserUnloaded(tab2.linkedBrowser, function() { info("Tab unloaded."); });
 
-              gBrowser.removeTab(tab2);
-              gBrowser.selectedTab = tab1;
+              executeSoon(function() {
+                gBrowser.removeTab(tab2);
+                gBrowser.selectedTab = tab1;
+              });
             }
 
             let tab2 = gBrowser.addTab(testURL);

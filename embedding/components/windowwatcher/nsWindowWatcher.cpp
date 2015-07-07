@@ -11,6 +11,10 @@
 
 #include "nsCRT.h"
 #include "nsNetUtil.h"
+#include "nsIAuthPrompt.h"
+#include "nsIAuthPrompt2.h"
+#include "nsISimpleEnumerator.h"
+#include "nsIInterfaceRequestorUtils.h"
 #include "nsJSUtils.h"
 #include "plstr.h"
 
@@ -480,7 +484,7 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow* aParent,
   }
 
   MOZ_ASSERT_IF(openedFromRemoteTab,
-                XRE_GetProcessType() == GeckoProcessType_Default);
+                XRE_IsParentProcess());
   NS_ENSURE_ARG_POINTER(aResult);
   *aResult = 0;
 

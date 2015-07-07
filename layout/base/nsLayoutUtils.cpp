@@ -3394,7 +3394,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     // except requesting composition. Geometry updates were calculated and
     // shipped to the chrome process in nsDisplayList when the layer
     // transaction completed.
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
       rootPresContext->ComputePluginGeometryUpdates(aFrame, &builder, &list);
       // We're not going to get a WillPaintWindow event here if we didn't do
       // widget invalidation, so just apply the plugin geometry update here
@@ -6863,8 +6863,12 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
   if (!container)
     return result;
 
-  mozilla::gfx::IntSize size;
-  result.mSourceSurface = container->GetCurrentAsSourceSurface(&size);
+  AutoLockImage lockImage(container);
+  layers::Image* image = lockImage.GetImage();
+  if (!image) {
+    return result;
+  }
+  result.mSourceSurface = image->GetAsSourceSurface();
   if (!result.mSourceSurface)
     return result;
 
@@ -6877,7 +6881,7 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
 
   result.mCORSUsed = aElement->GetCORSMode() != CORS_NONE;
   result.mHasSize = true;
-  result.mSize = size;
+  result.mSize = image->GetSize();
   result.mPrincipal = principal.forget();
   result.mIsWriteOnly = false;
 

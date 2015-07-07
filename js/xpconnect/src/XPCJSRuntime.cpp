@@ -15,6 +15,7 @@
 #include "XPCJSMemoryReporter.h"
 #include "WrapperFactory.h"
 #include "mozJSComponentLoader.h"
+#include "nsNetUtil.h"
 
 #include "nsIMemoryInfoDumper.h"
 #include "nsIMemoryReporter.h"
@@ -1354,7 +1355,7 @@ XPCJSRuntime::InterruptCallback(JSContext* cx)
     if (!nsContentUtils::IsInitialized())
         return true;
 
-    bool contentProcess = XRE_GetProcessType() == GeckoProcessType_Content;
+    bool contentProcess = XRE_IsContentProcess();
 
     // This is at least the second interrupt callback we've received since
     // returning to the event loop. See how long it's been, and what the limit
@@ -2309,6 +2310,10 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
         cStats.regexpCompartment,
         "The regexp compartment and regexp data.");
 
+    ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("saved-stacks-set"),
+        cStats.savedStacksSet,
+        "The saved stacks set.");
+
     if (sundriesGCHeap > 0) {
         // We deliberately don't use ZCREPORT_GC_BYTES here.
         REPORT_GC_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("sundries/gc-heap"),
@@ -2501,9 +2506,8 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
         "Memory being used by the GC's nursery.");
 
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/gc/nursery-malloced-buffers"),
-        KIND_NONHEAP, rtStats.runtime.gc.nurseryMallocedBuffers,
-        "Out-of-line slots and elements belonging to objects in the "
-        "nursery.");
+        KIND_HEAP, rtStats.runtime.gc.nurseryMallocedBuffers,
+        "Out-of-line slots and elements belonging to objects in the nursery.");
 
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/gc/store-buffer/vals"),
         KIND_HEAP, rtStats.runtime.gc.storeBufferVals,
@@ -2549,7 +2553,7 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
 
     REPORT_BYTES(rtPath2 + NS_LITERAL_CSTRING("runtime/gc/nursery-decommitted"),
         KIND_NONHEAP, rtStats.runtime.gc.nurseryDecommitted,
-        "Memory allocated to the GC's nursery this is decommitted, i.e. it takes up "
+        "Memory allocated to the GC's nursery that is decommitted, i.e. it takes up "
         "address space but no physical memory or swap space.");
 
     REPORT_GC_BYTES(rtPath + NS_LITERAL_CSTRING("gc-heap/unused-chunks"),
@@ -2581,7 +2585,7 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
                                  size_t* rtTotalOut)
 {
     nsCOMPtr<amIAddonManager> am;
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
         // Only try to access the service from the main process.
         am = do_GetService("@mozilla.org/addons/integration;1");
     }
@@ -2837,7 +2841,7 @@ JSReporter::CollectReports(WindowPaths* windowPaths,
     // stats seems like a bad idea.
 
     nsCOMPtr<amIAddonManager> addonManager;
-    if (XRE_GetProcessType() == GeckoProcessType_Default) {
+    if (XRE_IsParentProcess()) {
         // Only try to access the service from the main process.
         addonManager = do_GetService("@mozilla.org/addons/integration;1");
     }

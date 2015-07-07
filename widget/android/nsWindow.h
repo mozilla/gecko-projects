@@ -155,7 +155,7 @@ public:
                               mozilla::layers::CompositorParent* aCompositorParent,
                               mozilla::layers::CompositorChild* aCompositorChild);
     static bool IsCompositionPaused();
-    static void ScheduleComposite();
+    static void InvalidateAndScheduleComposite();
     static void SchedulePauseComposition();
     static void ScheduleResumeComposition();
     static void ScheduleResumeComposition(int width, int height);
@@ -230,6 +230,9 @@ protected:
     nsAutoTArray<mozilla::AndroidGeckoEvent, 8> mIMEKeyEvents;
     nsAutoTArray<IMEChange, 4> mIMETextChanges;
     bool mIMESelectionChanged;
+
+    bool mAwaitingFullScreen;
+    bool mIsFullScreen;
 
     InputContext mInputContext;
 

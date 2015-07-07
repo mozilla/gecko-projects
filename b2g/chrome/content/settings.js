@@ -148,12 +148,16 @@ Components.utils.import('resource://gre/modules/ctypes.jsm');
   // Get the hardware info and firmware revision from device properties.
   let hardware_info = null;
   let firmware_revision = null;
+  let product_manufacturer = null;
   let product_model = null;
+  let product_device = null;
   let build_number = null;
 #ifdef MOZ_WIDGET_GONK
     hardware_info = libcutils.property_get('ro.hardware');
     firmware_revision = libcutils.property_get('ro.firmware_revision');
+    product_manufacturer = libcutils.property_get('ro.product.manufacturer');
     product_model = libcutils.property_get('ro.product.model');
+    product_device = libcutils.property_get('ro.product.device');
     build_number = libcutils.property_get('ro.build.version.incremental');
 #endif
 
@@ -173,7 +177,9 @@ Components.utils.import('resource://gre/modules/ctypes.jsm');
       'deviceinfo.platform_build_id': appInfo.platformBuildID,
       'deviceinfo.hardware': hardware_info,
       'deviceinfo.firmware_revision': firmware_revision,
-      'deviceinfo.product_model': product_model
+      'deviceinfo.product_manufacturer': product_manufacturer,
+      'deviceinfo.product_model': product_model,
+      'deviceinfo.product_device': product_device
     }
     lock.set(setting);
   }
@@ -555,6 +561,8 @@ let settingsToObserve = {
   },
   'dom.mozApps.use_reviewer_certs': false,
   'dom.mozApps.signed_apps_installable_from': 'https://marketplace.firefox.com',
+  'dom.serviceWorkers.interception.enabled': true,
+  'dom.serviceWorkers.testing.enabled': false,
   'gfx.layerscope.enabled': false,
   'layers.draw-borders': false,
   'layers.draw-tile-borders': false,
@@ -566,12 +574,12 @@ let settingsToObserve = {
 #endif
   'layers.effect.invert': false,
   'layers.effect.grayscale': false,
-  'layers.effect.contrast': "0.0",
+  'layers.effect.contrast': '0.0',
+  'mms.debugging.enabled': false,
   'network.debugging.enabled': false,
   'privacy.donottrackheader.enabled': false,
   'ril.debugging.enabled': false,
   'ril.radio.disabled': false,
-  'mms.debugging.enabled': false,
   'ril.mms.requestReadReport.enabled': {
     prefName: 'dom.mms.requestReadReport',
     defaultValue: true

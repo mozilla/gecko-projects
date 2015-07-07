@@ -15,7 +15,7 @@ const LOOP_SESSION_TYPE = {
   FXA: 2
 };
 
-/***
+/**
  * Values that we segment 2-way media connection length telemetry probes
  * into.
  *
@@ -42,6 +42,49 @@ const SHARING_STATE_CHANGE = {
   BROWSER_DISABLED: 3
 };
 
+/**
+ * Values that we segment sharing a room URL action telemetry probes into.
+ *
+ * @type {{COPY_FROM_PANEL: Number, COPY_FROM_CONVERSATION: Number,
+ *   EMAIL_FROM_CALLFAILED: Number, EMAIL_FROM_CONVERSATION: Number}}
+ */
+const SHARING_ROOM_URL = {
+  COPY_FROM_PANEL: 0,
+  COPY_FROM_CONVERSATION: 1,
+  EMAIL_FROM_CALLFAILED: 2,
+  EMAIL_FROM_CONVERSATION: 3
+};
+
+/**
+ * Values that we segment room create action telemetry probes into.
+ *
+ * @type {{CREATE_SUCCESS: Number, CREATE_FAIL: Number}}
+ */
+const ROOM_CREATE = {
+  CREATE_SUCCESS: 0,
+  CREATE_FAIL: 1
+};
+
+/**
+ * Values that we segment room delete action telemetry probes into.
+ *
+ * @type {{DELETE_SUCCESS: Number, DELETE_FAIL: Number}}
+ */
+const ROOM_DELETE = {
+  DELETE_SUCCESS: 0,
+  DELETE_FAIL: 1
+};
+
+/**
+ * Values that we segment room context action telemetry probes into.
+ *
+ * @type {{ADD_FROM_PANEL: Number, ADD_FROM_CONVERSATION: Number}}
+ */
+const ROOM_CONTEXT_ADD = {
+  ADD_FROM_PANEL: 0,
+  ADD_FROM_CONVERSATION: 1
+};
+
 // See LOG_LEVELS in Console.jsm. Common examples: "All", "Info", "Warn", & "Error".
 const PREF_LOG_LEVEL = "loop.debug.loglevel";
 
@@ -56,7 +99,8 @@ Cu.import("resource://gre/modules/FxAccountsOAuthClient.jsm");
 Cu.importGlobalProperties(["URL"]);
 
 this.EXPORTED_SYMBOLS = ["MozLoopService", "LOOP_SESSION_TYPE",
-  "TWO_WAY_MEDIA_CONN_LENGTH", "SHARING_STATE_CHANGE"];
+  "TWO_WAY_MEDIA_CONN_LENGTH", "SHARING_STATE_CHANGE", "SHARING_ROOM_URL",
+  "ROOM_CREATE", "ROOM_DELETE", "ROOM_CONTEXT_ADD"];
 
 XPCOMUtils.defineLazyModuleGetter(this, "injectLoopAPI",
   "resource:///modules/loop/MozLoopAPI.jsm");
@@ -614,7 +658,8 @@ let MozLoopServiceInternal = {
               return this.hawkRequestInternal(sessionType, path, method, payloadObj, false);
             },
             () => {
-              return handle401Error(error); //Process the original error that triggered the retry.
+              // Process the original error that triggered the retry.
+              return handle401Error(error);
             }
           );
         }
@@ -889,7 +934,10 @@ let MozLoopServiceInternal = {
           // When the chat box or messages are shown, resize the panel or window
           // to be slightly higher to accomodate them.
           let customSize = kSizeMap[ev.type];
-          if (customSize) {
+          let currSize = chatbox.getAttribute("customSize");
+          // If the size is already at the requested one or at the maximum size
+          // already, don't do anything. Especially don't make it shrink.
+          if (customSize && currSize != customSize && currSize != "loopChatMessageAppended") {
             chatbox.setAttribute("customSize", customSize);
             chatbox.parentNode.setAttribute("customSize", customSize);
           }
@@ -916,10 +964,10 @@ let MozLoopServiceInternal = {
             // Not ideal but insert our data amidst existing data like this:
             // - 000 (id=00 url=http)
             // + 000 (session=000 call=000 id=00 url=http)
-            var pair = pc.id.split("(");  //)
+            var pair = pc.id.split("(");
             if (pair.length == 2) {
               pc.id = pair[0] + "(session=" + context.sessionId +
-                  (context.callId ? " call=" + context.callId : "") + " " + pair[1]; //)
+                  (context.callId ? " call=" + context.callId : "") + " " + pair[1];
             }
           }
 
