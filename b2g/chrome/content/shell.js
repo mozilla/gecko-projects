@@ -95,17 +95,28 @@ const once = event => {
   });
 }
 
-function clearCacheAndReload() {
-  // Reload the main frame with a cleared cache.
-  debug('Reloading ' + getContentWindow().location);
+function clearCache() {
   let cache = Cc["@mozilla.org/netwerk/cache-storage-service;1"]
                 .getService(Ci.nsICacheStorageService);
   cache.clear();
+}
+
+function clearCacheAndReload() {
+  // Reload the main frame with a cleared cache.
+  debug('Reloading ' + getContentWindow().location);
+  clearCache();
   getContentWindow().location.reload(true);
   once('mozbrowserlocationchange').then(
     evt => {
       shell.sendEvent(window, "ContentStart");
     });
+}
+
+function clearCacheAndRestart() {
+  clearCache();
+  let appStartup = Cc['@mozilla.org/toolkit/app-startup;1']
+                     .getService(Ci.nsIAppStartup);
+  appStartup.quit(Ci.nsIAppStartup.eForceQuit | Ci.nsIAppStartup.eRestart);
 }
 
 #ifdef MOZ_CRASHREPORTER
@@ -859,6 +870,9 @@ var CustomEventManager = {
         break;
       case 'clear-cache-and-reload':
         clearCacheAndReload();
+        break;
+      case 'clear-cache-and-restart':
+        clearCacheAndRestart();
         break;
     }
   }
