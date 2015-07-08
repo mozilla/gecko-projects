@@ -101,6 +101,7 @@
 #include "nsIContentIterator.h"
 #include "nsIDOMStyleSheet.h"
 #include "nsIStyleSheet.h"
+#include "nsIStyleSheetService.h"
 #include "nsContentPermissionHelper.h"
 #include "nsNetUtil.h"
 
@@ -3196,7 +3197,10 @@ nsDOMWindowUtils::ExitFullscreen()
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
 
-  nsIDocument::ExitFullscreen(nullptr, /* async */ false);
+  nsCOMPtr<nsIDocument> doc = GetDocument();
+  NS_ENSURE_STATE(doc);
+
+  nsIDocument::ExitFullscreen(doc, /* async */ false);
   return NS_OK;
 }
 
@@ -3888,6 +3892,21 @@ nsDOMWindowUtils::LeaveChaosMode()
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
   ChaosMode::leaveChaosMode();
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::HasRuleProcessorUsedByMultipleStyleSets(uint32_t aSheetType,
+                                                          bool* aRetVal)
+{
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
+  nsIPresShell* presShell = GetPresShell();
+  if (!presShell) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return presShell->HasRuleProcessorUsedByMultipleStyleSets(aSheetType,
+                                                            aRetVal);
 }
 
 NS_INTERFACE_MAP_BEGIN(nsTranslationNodeList)

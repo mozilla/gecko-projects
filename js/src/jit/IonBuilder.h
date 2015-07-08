@@ -587,6 +587,7 @@ class IonBuilder
                                             TypedObjectPrediction objTypeReprs,
                                             TypedObjectPrediction elemTypeReprs,
                                             int32_t elemSize);
+    TemporaryTypeSet* computeHeapType(const TemporaryTypeSet* objTypes, const jsid id);
 
     enum BoundsChecking { DoBoundsCheck, SkipBoundsCheck };
 
@@ -692,7 +693,7 @@ class IonBuilder
     bool jsop_isnoiter();
     bool jsop_iterend();
     bool jsop_in();
-    bool jsop_in_dense(JSValueType unboxedType);
+    bool jsop_in_dense(MDefinition* obj, MDefinition* id, JSValueType unboxedType);
     bool jsop_instanceof();
     bool jsop_getaliasedvar(ScopeCoordinate sc);
     bool jsop_setaliasedvar(ScopeCoordinate sc);
@@ -927,8 +928,8 @@ class IonBuilder
     JSObject* testSingletonProperty(JSObject* obj, PropertyName* name);
     JSObject* testSingletonPropertyTypes(MDefinition* obj, PropertyName* name);
 
-    uint32_t getDefiniteSlot(TemporaryTypeSet* types, PropertyName* name, uint32_t* pnfixed,
-                             BaselineInspector::ObjectGroupVector& convertUnboxedGroups);
+    uint32_t getDefiniteSlot(TemporaryTypeSet* types, PropertyName* name, uint32_t* pnfixed);
+    MDefinition* convertUnboxedObjects(MDefinition* obj);
     MDefinition* convertUnboxedObjects(MDefinition* obj,
                                        const BaselineInspector::ObjectGroupVector& list);
     uint32_t getUnboxedOffset(TemporaryTypeSet* types, PropertyName* name,
