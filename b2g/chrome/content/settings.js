@@ -575,6 +575,10 @@ let settingsToObserve = {
   'layers.effect.invert': false,
   'layers.effect.grayscale': false,
   'layers.effect.contrast': '0.0',
+#ifdef MOZ_GRAPHENE
+  // Restart required
+  'layers.async-pan-zoom.enabled': false,
+#endif
   'mms.debugging.enabled': false,
   'network.debugging.enabled': false,
   'privacy.donottrackheader.enabled': false,
