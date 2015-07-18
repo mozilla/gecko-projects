@@ -6,6 +6,7 @@
 
 #include "mozilla/BasePrincipal.h"
 
+#include "nsIAddonPolicyService.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
@@ -15,6 +16,7 @@
 #include "nsIURIWithPrincipal.h"
 #include "nsNullPrincipal.h"
 #include "nsScriptSecurityManager.h"
+#include "nsServiceManagerUtils.h"
 
 #include "mozilla/dom/CSPDictionariesBinding.h"
 #include "mozilla/dom/ToJSValue.h"
@@ -41,11 +43,15 @@ OriginAttributes::CreateSuffix(nsACString& aStr) const
     params->Set(NS_LITERAL_STRING("inBrowser"), NS_LITERAL_STRING("1"));
   }
 
+  if (!mAddonId.IsEmpty()) {
+    params->Set(NS_LITERAL_STRING("addonId"), mAddonId);
+  }
+
   aStr.Truncate();
 
   params->Serialize(value);
   if (!value.IsEmpty()) {
-    aStr.AppendLiteral("!");
+    aStr.AppendLiteral("^");
     aStr.Append(NS_ConvertUTF16toUTF8(value));
   }
 }
@@ -88,6 +94,12 @@ public:
       return true;
     }
 
+    if (aName.EqualsLiteral("addonId")) {
+      MOZ_RELEASE_ASSERT(mOriginAttributes->mAddonId.IsEmpty());
+      mOriginAttributes->mAddonId.Assign(aValue);
+      return true;
+    }
+
     // No other attributes are supported.
     return false;
   }
@@ -96,7 +108,7 @@ private:
   OriginAttributes* mOriginAttributes;
 };
 
-} // anonymous namespace
+} // namespace
 
 bool
 OriginAttributes::PopulateFromSuffix(const nsACString& aStr)
@@ -105,7 +117,7 @@ OriginAttributes::PopulateFromSuffix(const nsACString& aStr)
     return true;
   }
 
-  if (aStr[0] != '!') {
+  if (aStr[0] != '^') {
     return false;
   }
 
@@ -122,7 +134,7 @@ OriginAttributes::PopulateFromOrigin(const nsACString& aOrigin,
 {
   // RFindChar is only available on nsCString.
   nsCString origin(aOrigin);
-  int32_t pos = origin.RFindChar('!');
+  int32_t pos = origin.RFindChar('^');
 
   if (pos == kNotFound) {
     aOriginNoSuffix = origin;
@@ -131,12 +143,6 @@ OriginAttributes::PopulateFromOrigin(const nsACString& aOrigin,
 
   aOriginNoSuffix = Substring(origin, 0, pos);
   return PopulateFromSuffix(Substring(origin, pos));
-}
-
-void
-OriginAttributes::CookieJar(nsACString& aStr)
-{
-  mozilla::GetJarPrefix(mAppId, mInBrowser, aStr);
 }
 
 BasePrincipal::BasePrincipal()
@@ -150,6 +156,15 @@ BasePrincipal::GetOrigin(nsACString& aOrigin)
 {
   nsresult rv = GetOriginInternal(aOrigin);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // OriginAttributes::CreateSuffix asserts against UNKNOWN_APP_ID. It's trivial
+  // to trigger this getter from script on such a principal, so we handle it
+  // here at the API entry point.
+  if (mOriginAttributes.mAppId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+    NS_WARNING("Refusing to provide canonical origin string to principal with UNKNOWN_APP_ID");
+    return NS_ERROR_FAILURE;
+  }
+
   nsAutoCString suffix;
   mOriginAttributes.CreateSuffix(suffix);
   aOrigin.Append(suffix);
@@ -247,7 +262,7 @@ BasePrincipal::GetJarPrefix(nsACString& aJarPrefix)
 {
   MOZ_ASSERT(AppId() != nsIScriptSecurityManager::UNKNOWN_APP_ID);
 
-  mOriginAttributes.CookieJar(aJarPrefix);
+  mozilla::GetJarPrefix(mOriginAttributes.mAppId, mOriginAttributes.mInBrowser, aJarPrefix);
   return NS_OK;
 }
 
@@ -264,13 +279,6 @@ NS_IMETHODIMP
 BasePrincipal::GetOriginSuffix(nsACString& aOriginAttributes)
 {
   mOriginAttributes.CreateSuffix(aOriginAttributes);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::GetCookieJar(nsACString& aCookieJar)
-{
-  mOriginAttributes.CookieJar(aCookieJar);
   return NS_OK;
 }
 
@@ -344,6 +352,21 @@ BasePrincipal::CreateCodebasePrincipal(nsIURI* aURI, OriginAttributes& aAttrs)
   rv = codebase->Init(aURI, aAttrs);
   NS_ENSURE_SUCCESS(rv, nullptr);
   return codebase.forget();
+}
+
+bool
+BasePrincipal::AddonAllowsLoad(nsIURI* aURI)
+{
+  if (mOriginAttributes.mAddonId.IsEmpty()) {
+    return false;
+  }
+
+  nsCOMPtr<nsIAddonPolicyService> aps = do_GetService("@mozilla.org/addons/policy-service;1");
+  NS_ENSURE_TRUE(aps, false);
+
+  bool allowed = false;
+  nsresult rv = aps->AddonMayLoadURI(mOriginAttributes.mAddonId, aURI, &allowed);
+  return NS_SUCCEEDED(rv) && allowed;
 }
 
 } // namespace mozilla

@@ -1631,6 +1631,13 @@
             let notificationbox = this.getNotificationBox(browser);
             this.mPanelContainer.appendChild(notificationbox);
 
+            if (remote) {
+              // For remote browsers, we need to make sure that the webProgress is
+              // instantiated, otherwise the parent won't get informed about the state
+              // of the preloaded browser until it gets attached to a tab.
+              browser.webProgress;
+            }
+
             browser.loadURI(BROWSER_NEW_TAB_URL);
             browser.docShellIsActive = false;
           ]]>
@@ -1919,7 +1926,7 @@
             }
 
             if (animate) {
-              mozRequestAnimationFrame(function () {
+              requestAnimationFrame(function () {
                 this.tabContainer._handleTabTelemetryStart(t, aURI);
 
                 // kick the animation off
@@ -2997,7 +3004,7 @@
             // How long to wait for a tab's layers to load. After this
             // time elapses, we're free to put up the spinner and start
             // trying to load a different tab.
-            TAB_SWITCH_TIMEOUT: 300 /* ms */,
+            TAB_SWITCH_TIMEOUT: 400 /* ms */,
 
             // When the user hasn't switched tabs for this long, we unload
             // layers for all tabs that aren't in use.

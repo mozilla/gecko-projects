@@ -8,7 +8,8 @@
 #define AbstractMediaDecoder_h_
 
 #include "mozilla/Attributes.h"
-#include "StateMirroring.h"
+#include "mozilla/StateMirroring.h"
+
 #include "MediaInfo.h"
 #include "nsISupports.h"
 #include "nsDataHashtable.h"
@@ -20,7 +21,7 @@ namespace mozilla
 namespace layers
 {
   class ImageContainer;
-}
+} // namespace layers
 class MediaResource;
 class ReentrantMonitor;
 class VideoFrameContainer;
@@ -259,7 +260,7 @@ private:
   nsRefPtr<AbstractMediaDecoder> mDecoder;
 };
 
-}
+} // namespace mozilla
 
 #endif
 

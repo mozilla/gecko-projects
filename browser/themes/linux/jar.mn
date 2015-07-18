@@ -46,16 +46,13 @@ browser.jar:
   skin/classic/browser/heartbeat-icon.svg                   (../shared/heartbeat-icon.svg)
   skin/classic/browser/heartbeat-star-lit.svg               (../shared/heartbeat-star-lit.svg)
   skin/classic/browser/heartbeat-star-off.svg               (../shared/heartbeat-star-off.svg)
-  skin/classic/browser/identity-icons-generic.png
-  skin/classic/browser/identity-icons-generic@2x.png
-  skin/classic/browser/identity-icons-https.png
-  skin/classic/browser/identity-icons-https@2x.png
-  skin/classic/browser/identity-icons-https-ev.png
-  skin/classic/browser/identity-icons-https-ev@2x.png
-  skin/classic/browser/identity-icons-https-mixed-active.png
-  skin/classic/browser/identity-icons-https-mixed-active@2x.png
-  skin/classic/browser/identity-icons-https-mixed-display.png
-  skin/classic/browser/identity-icons-https-mixed-display@2x.png
+  skin/classic/browser/identity-not-secure.svg              (../shared/identity-block/identity-not-secure.svg)
+  skin/classic/browser/identity-secure.svg                  (../shared/identity-block/identity-secure.svg)
+  skin/classic/browser/identity-mixed-active-blocked.svg    (../shared/identity-block/identity-mixed-active-blocked.svg)
+  skin/classic/browser/identity-mixed-passive-loaded.svg    (../shared/identity-block/identity-mixed-passive-loaded.svg)
+  skin/classic/browser/identity-mixed-active-loaded.svg     (../shared/identity-block/identity-mixed-active-loaded.svg)
+  skin/classic/browser/tracking-protection-16.svg           (../shared/identity-block/tracking-protection-16.svg)
+  skin/classic/browser/tracking-protection-disabled-16.svg  (../shared/identity-block/tracking-protection-disabled-16.svg)
   skin/classic/browser/Info.png
   skin/classic/browser/magnifier.png                        (../shared/magnifier.png)
   skin/classic/browser/magnifier@2x.png                     (../shared/magnifier@2x.png)
@@ -105,8 +102,8 @@ browser.jar:
   skin/classic/browser/Toolbar-small.png
   skin/classic/browser/undoCloseTab.png                        (../shared/undoCloseTab.png)
   skin/classic/browser/update-badge.svg                        (../shared/update-badge.svg)
-  skin/classic/browser/urlbar-arrow.png
-  skin/classic/browser/urlbar-arrow@2x.png
+  skin/classic/browser/urlbar-arrow.png                     (../shared/urlbar-arrow.png)
+  skin/classic/browser/urlbar-arrow@2x.png                  (../shared/urlbar-arrow@2x.png)
   skin/classic/browser/session-restore.svg                  (../shared/incontent-icons/session-restore.svg)
   skin/classic/browser/tab-crashed.svg                      (../shared/incontent-icons/tab-crashed.svg)
   skin/classic/browser/welcome-back.svg                     (../shared/incontent-icons/welcome-back.svg)
@@ -147,8 +144,8 @@ browser.jar:
 * skin/classic/browser/controlcenter/panel.css        (controlcenter/panel.css)
   skin/classic/browser/controlcenter/arrow-subview.svg  (../shared/controlcenter/arrow-subview.svg)
   skin/classic/browser/controlcenter/conn-not-secure.svg  (../shared/controlcenter/conn-not-secure.svg)
-  skin/classic/browser/controlcenter/conn-secure-dv.svg  (../shared/controlcenter/conn-secure-dv.svg)
-  skin/classic/browser/controlcenter/conn-secure-ev.svg  (../shared/controlcenter/conn-secure-ev.svg)
+  skin/classic/browser/controlcenter/conn-secure.svg  (../shared/controlcenter/conn-secure.svg)
+  skin/classic/browser/controlcenter/conn-degraded.svg  (../shared/controlcenter/conn-degraded.svg)
   skin/classic/browser/controlcenter/mcb-disabled.svg  (../shared/controlcenter/mcb-disabled.svg)
   skin/classic/browser/controlcenter/permissions.svg  (../shared/controlcenter/permissions.svg)
   skin/classic/browser/controlcenter/tracking-protection.svg                 (../shared/controlcenter/tracking-protection.svg)
@@ -270,6 +267,8 @@ browser.jar:
   skin/classic/browser/translation-16@2x.png          (../shared/translation/translation-16@2x.png)
   skin/classic/browser/devedition/search.svg          (../shared/devedition/search.svg)
   skin/classic/browser/devedition/urlbar-history-dropmarker.svg            (../shared/devedition/urlbar-history-dropmarker.svg)
+  skin/classic/browser/devedition/urlbar-arrow.png    (../shared/devedition/urlbar-arrow.png)
+  skin/classic/browser/devedition/urlbar-arrow@2x.png (../shared/devedition/urlbar-arrow@2x.png)
 * skin/classic/browser/devtools/common.css            (../shared/devtools/common.css)
 * skin/classic/browser/devtools/dark-theme.css        (../shared/devtools/dark-theme.css)
 * skin/classic/browser/devtools/light-theme.css       (../shared/devtools/light-theme.css)
@@ -376,6 +375,12 @@ browser.jar:
   skin/classic/browser/devtools/debugger-blackbox@2x.png  (../shared/devtools/images/debugger-blackbox@2x.png)
   skin/classic/browser/devtools/debugger-prettyprint.png  (../shared/devtools/images/debugger-prettyprint.png)
   skin/classic/browser/devtools/debugger-prettyprint@2x.png (../shared/devtools/images/debugger-prettyprint@2x.png)
+  skin/classic/browser/devtools/debugger-no-pause-exceptions.png  (../shared/devtools/images/debugger-no-pause-exceptions.png)
+  skin/classic/browser/devtools/debugger-no-pause-exceptions@2x.png (../shared/devtools/images/debugger-no-pause-exceptions@2x.png)
+  skin/classic/browser/devtools/debugger-pause-all-exceptions.png  (../shared/devtools/images/debugger-pause-all-exceptions.png)
+  skin/classic/browser/devtools/debugger-pause-all-exceptions@2x.png (../shared/devtools/images/debugger-pause-all-exceptions@2x.png)
+  skin/classic/browser/devtools/debugger-pause-uncaught-exceptions.png  (../shared/devtools/images/debugger-pause-uncaught-exceptions.png)
+  skin/classic/browser/devtools/debugger-pause-uncaught-exceptions@2x.png (../shared/devtools/images/debugger-pause-uncaught-exceptions@2x.png)
   skin/classic/browser/devtools/debugger-toggleBreakpoints.png (../shared/devtools/images/debugger-toggleBreakpoints.png)
   skin/classic/browser/devtools/debugger-toggleBreakpoints@2x.png (../shared/devtools/images/debugger-toggleBreakpoints@2x.png)
   skin/classic/browser/devtools/tracer-icon.png        (../shared/devtools/images/tracer-icon.png)

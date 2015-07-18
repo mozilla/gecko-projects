@@ -9,9 +9,9 @@ import os
 import tempfile
 
 from droid import DroidADB, DroidSUT
-from mozlog import structured
 from mozprofile import DEFAULT_PORTS
 import mozinfo
+import mozlog
 import moznetwork
 
 
@@ -1016,12 +1016,6 @@ class AndroidArguments(ArgumentContainer):
           "default": "",
           "help": "name of the Robocop APK to use for ADB test running",
           }],
-        [["--robocop-ids"],
-         {"dest": "robocopIds",
-          "default": "",
-          "help": "name of the file containing the view ID map \
-                   (fennec_ids.txt)",
-          }],
         [["--remoteTestRoot"],
          {"dest": "remoteTestRoot",
           "default": None,
@@ -1130,13 +1124,6 @@ class AndroidArguments(ArgumentContainer):
                     options.robocopApk)
             options.robocopApk = os.path.abspath(options.robocopApk)
 
-        if options.robocopIds != "":
-            if not os.path.exists(options.robocopIds):
-                parser.error(
-                    "Unable to find specified robocop IDs file '%s'" %
-                    options.robocopIds)
-            options.robocopIds = os.path.abspath(options.robocopIds)
-
         # allow us to keep original application around for cleanup while
         # running robocop via 'am'
         options.remoteappname = options.app
@@ -1201,7 +1188,7 @@ class MochitestArgumentParser(ArgumentParser):
                 group.add_argument(*cli, **kwargs)
 
         self.set_defaults(**defaults)
-        structured.commandline.add_logging_group(self)
+        mozlog.commandline.add_logging_group(self)
 
     @property
     def containers(self):

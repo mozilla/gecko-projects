@@ -1465,8 +1465,9 @@ nsHttpConnection::CloseTransaction(nsAHttpTransaction *trans, nsresult reason)
         mCallbacks = nullptr;
     }
 
-    if (NS_FAILED(reason))
+    if (NS_FAILED(reason) && (reason != NS_BINDING_RETARGETED)) {
         Close(reason);
+    }
 
     // flag the connection as reused here for convenience sake.  certainly
     // it might be going away instead ;-)
@@ -1625,7 +1626,7 @@ nsHttpConnection::OnWriteSegment(char *buf,
         return NS_ERROR_FAILURE; // stop iterating
     }
 
-    if (ChaosMode::isActive(ChaosMode::IOAmounts) &&
+    if (ChaosMode::isActive(ChaosFeature::IOAmounts) &&
         ChaosMode::randomUint32LessThan(2)) {
         // read 1...count bytes
         count = ChaosMode::randomUint32LessThan(count) + 1;
@@ -2127,5 +2128,5 @@ nsHttpConnection::CheckForTraffic(bool check)
     }
 }
 
-} // namespace mozilla::net
+} // namespace net
 } // namespace mozilla

@@ -153,6 +153,9 @@
 
   <string name="pref_category_devtools">&pref_category_devtools;</string>
   <string name="pref_developer_remotedebugging">&pref_developer_remotedebugging;</string>
+  <string name="pref_developer_remotedebugging_usb">&pref_developer_remotedebugging_usb;</string>
+  <string name="pref_developer_remotedebugging_wifi">&pref_developer_remotedebugging_wifi;</string>
+  <string name="pref_developer_remotedebugging_wifi_disabled_summary">&pref_developer_remotedebugging_wifi_disabled_summary;</string>
 
   <string name="pref_category_home">&pref_category_home;</string>
   <string name="pref_category_home_summary">&pref_category_home_summary;</string>
@@ -247,6 +250,11 @@
   <string name="pref_update_autodownload_disabled">&pref_update_autodownload_never;</string>
   <string name="pref_update_autodownload_enabled">&pref_update_autodownload_always;</string>
 
+  <string name="tracking_protection_prompt_title">&tracking_protection_prompt_title;</string>
+  <string name="tracking_protection_prompt_text">&tracking_protection_prompt_text;</string>
+  <string name="tracking_protection_prompt_tip_text">&tracking_protection_prompt_tip_text;</string>
+  <string name="tracking_protection_prompt_action_button">&tracking_protection_prompt_action_button;</string>
+
   <string name="pref_tab_queue_title">&pref_tab_queue_title2;</string>
   <string name="pref_tab_queue_summary">&pref_tab_queue_summary3;</string>
   <string name="tab_queue_prompt_title">&tab_queue_prompt_title;</string>
@@ -310,7 +318,6 @@
   <string name="addons">&addons;</string>
   <string name="logins">&logins;</string>
   <string name="downloads">&downloads;</string>
-  <string name="apps">&apps;</string>
   <string name="char_encoding">&char_encoding;</string>
   <string name="new_tab">&new_tab;</string>
   <string name="new_private_tab">&new_private_tab;</string>
@@ -461,10 +468,13 @@
   <string name="loaded_mixed_content_message">&loaded_mixed_content_message;</string>
   <string name="blocked_mixed_content_message_top">&blocked_mixed_content_message_top;</string>
   <string name="blocked_mixed_content_message_bottom">&blocked_mixed_content_message_bottom;</string>
-  <string name="loaded_tracking_content_message_top">&loaded_tracking_content_message_top;</string>
-  <string name="loaded_tracking_content_message_bottom">&loaded_tracking_content_message_bottom;</string>
-  <string name="blocked_tracking_content_message_top">&blocked_tracking_content_message_top2;</string>
-  <string name="blocked_tracking_content_message_bottom">&blocked_tracking_content_message_bottom2;</string>
+
+  <string name="doorhanger_tracking_title">&doorhanger_tracking_title;</string>
+  <string name="doorhanger_tracking_state_enabled">&doorhanger_tracking_state_enabled;</string>
+  <string name="doorhanger_tracking_state_disabled">&doorhanger_tracking_state_disabled;</string>
+  <string name="doorhanger_tracking_message_enabled">&doorhanger_tracking_message_enabled;</string>
+  <string name="doorhanger_tracking_message_disabled">&doorhanger_tracking_message_disabled;</string>
+
   <string name="learn_more">&learn_more;</string>
   <string name="enable_protection">&enable_protection;</string>
   <string name="disable_protection">&disable_protection;</string>
@@ -545,4 +555,6 @@
   <string name="remote_tabs_last_synced">&remote_tabs_last_synced;</string>
 
   <string name="intent_uri_cannot_open">&intent_uri_cannot_open;</string>
+
+  <string name="devtools_auth_scan_header">&devtools_auth_scan_header;</string>
 </resources>

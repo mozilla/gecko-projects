@@ -670,6 +670,7 @@ let DirectoryLinksProvider = {
    * @return download promise
    */
   reportSitesAction: function DirectoryLinksProvider_reportSitesAction(sites, action, triggeringSiteIndex) {
+    let pastImpressions;
     // Check if the suggested tile was shown
     if (action == "view") {
       sites.slice(0, triggeringSiteIndex + 1).forEach(site => {
@@ -679,10 +680,21 @@ let DirectoryLinksProvider = {
         }
       });
     }
-    // Use up all views if the user clicked on a frequency capped tile
-    else if (action == "click") {
-      let {targetedSite, url} = sites[triggeringSiteIndex].link;
-      if (targetedSite) {
+    // any click action on a suggested tile should stop that tile suggestion
+    // click/block - user either removed a tile or went to a landing page
+    // pin - tile turned into history tile, should no longer be suggested
+    // unpin - the tile was pinned before, should not matter
+    else {
+      // suggested tile has targetedSite, or frecent_sites if it was pinned
+      let {frecent_sites, targetedSite, url} = sites[triggeringSiteIndex].link;
+      if (frecent_sites || targetedSite) {
+        // skip past_impressions for "unpin" to avoid chance of tracking
+        if (this._frequencyCaps[url] && action != "unpin") {
+          pastImpressions = {
+            total: this._frequencyCaps[url].totalViews,
+            daily: this._frequencyCaps[url].dailyViews
+          };
+        }
         this._setFrequencyCapClick(url);
       }
     }
@@ -720,6 +732,7 @@ let DirectoryLinksProvider = {
             id: id || site.enhancedId,
             pin: site.isPinned() ? 1 : undefined,
             pos: pos != tilesIndex ? pos : undefined,
+            past_impressions: pos == triggeringSiteIndex ? pastImpressions : undefined,
             score: Math.round(link.frecency / PING_SCORE_DIVISOR) || undefined,
             url: site.enhancedId && "",
           });
@@ -1317,7 +1330,7 @@ let DirectoryLinksProvider = {
       capObject.lastShownDate = Date.now();
     }
 
-    // bump both dialy and total counters
+    // bump both daily and total counters
     capObject.totalViews++;
     capObject.dailyViews++;
 
@@ -1332,7 +1345,7 @@ let DirectoryLinksProvider = {
    * Sets clicked flag for link url
    * @param url String url of the suggested link
    */
-  _setFrequencyCapClick: function DirectoryLinksProvider_reportFrequencyCapClick(url) {
+  _setFrequencyCapClick(url) {
     let capObject = this._frequencyCaps[url];
     // sanity check
     if (!capObject) {

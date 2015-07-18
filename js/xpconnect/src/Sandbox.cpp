@@ -37,7 +37,9 @@
 #include "mozilla/dom/PromiseBinding.h"
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/ResponseBinding.h"
+#ifdef MOZ_WEBRTC
 #include "mozilla/dom/RTCIdentityProviderRegistrar.h"
+#endif
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/TextDecoderBinding.h"
 #include "mozilla/dom/TextEncoderBinding.h"
@@ -226,6 +228,7 @@ SandboxCreateCrypto(JSContext* cx, JS::HandleObject obj)
     return JS_DefineProperty(cx, obj, "crypto", wrapped, JSPROP_ENUMERATE);
 }
 
+#ifdef MOZ_WEBRTC
 static bool
 SandboxCreateRTCIdentityProvider(JSContext* cx, JS::HandleObject obj)
 {
@@ -239,6 +242,7 @@ SandboxCreateRTCIdentityProvider(JSContext* cx, JS::HandleObject obj)
     JS::RootedObject wrapped(cx, registrar->WrapObject(cx, nullptr));
     return JS_DefineProperty(cx, obj, "rtcIdentityProvider", wrapped, JSPROP_ENUMERATE);
 }
+#endif
 
 static bool
 SetFetchRequestFromValue(JSContext *cx, RequestOrUSVString& request,
@@ -287,7 +291,7 @@ SandboxFetch(JSContext* cx, JS::HandleObject scope, const CallArgs& args)
         FetchRequest(global, Constify(request), Constify(options), rv);
     rv.WouldReportJSException();
     if (rv.Failed()) {
-        return ThrowMethodFailedWithDetails(cx, rv, "Sandbox", "fetch");
+        return ThrowMethodFailed(cx, rv);
     }
     if (!GetOrCreateDOMReflector(cx, scope, response, args.rval())) {
         return false;
@@ -898,8 +902,10 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
             File = true;
         } else if (!strcmp(name.ptr(), "crypto")) {
             crypto = true;
+#ifdef MOZ_WEBRTC
         } else if (!strcmp(name.ptr(), "rtcIdentityProvider")) {
             rtcIdentityProvider = true;
+#endif
         } else if (!strcmp(name.ptr(), "fetch")) {
             fetch = true;
         } else {
@@ -959,8 +965,10 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
     if (crypto && !SandboxCreateCrypto(cx, obj))
         return false;
 
+#ifdef MOZ_WEBRTC
     if (rtcIdentityProvider && !SandboxCreateRTCIdentityProvider(cx, obj))
         return false;
+#endif
 
     if (fetch && !SandboxCreateFetch(cx, obj))
         return false;
@@ -1021,8 +1029,9 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     if (!sandbox)
         return NS_ERROR_FAILURE;
 
-    CompartmentPrivate::Get(sandbox)->writeToGlobalPrototype =
-      options.writeToGlobalPrototype;
+    CompartmentPrivate* priv = CompartmentPrivate::Get(sandbox);
+    priv->allowWaivers = options.allowWaivers;
+    priv->writeToGlobalPrototype = options.writeToGlobalPrototype;
 
     // Set up the wantXrays flag, which indicates whether xrays are desired even
     // for same-origin access.
@@ -1033,7 +1042,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
     // Arguably we should just flip the default for chrome and still honor the
     // flag, but such a change would break code in subtle ways for minimal
     // benefit. So we just switch it off here.
-    CompartmentPrivate::Get(sandbox)->wantXrays =
+    priv->wantXrays =
       AccessCheck::isChrome(sandbox) ? false : options.wantXrays;
 
     {
@@ -1044,15 +1053,26 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
             if (!ok)
                 return NS_ERROR_XPC_UNEXPECTED;
 
-            // Now check what sort of thing we've got in |proto|
-            JSObject* unwrappedProto = js::CheckedUnwrap(options.proto, false);
-            if (!unwrappedProto) {
-                JS_ReportError(cx, "Sandbox must subsume sandboxPrototype");
-                return NS_ERROR_INVALID_ARG;
+            // Now check what sort of thing we've got in |proto|, and figure out
+            // if we need a SandboxProxyHandler.
+            //
+            // Note that, in the case of a window, we can't require that the
+            // Sandbox subsumes the prototype, because we have to hold our
+            // reference to it via an outer window, and the window may navigate
+            // at any time. So we have to handle that case separately.
+            bool useSandboxProxy = !!WindowOrNull(js::UncheckedUnwrap(options.proto, false));
+            if (!useSandboxProxy) {
+                JSObject* unwrappedProto = js::CheckedUnwrap(options.proto, false);
+                if (!unwrappedProto) {
+                    JS_ReportError(cx, "Sandbox must subsume sandboxPrototype");
+                    return NS_ERROR_INVALID_ARG;
+                }
+                const js::Class* unwrappedClass = js::GetObjectClass(unwrappedProto);
+                useSandboxProxy = IS_WN_CLASS(unwrappedClass) ||
+                                  mozilla::dom::IsDOMClass(Jsvalify(unwrappedClass));
             }
-            const js::Class* unwrappedClass = js::GetObjectClass(unwrappedProto);
-            if (IS_WN_CLASS(unwrappedClass) ||
-                mozilla::dom::IsDOMClass(Jsvalify(unwrappedClass))) {
+
+            if (useSandboxProxy) {
                 // Wrap it up in a proxy that will do the right thing in terms
                 // of this-binding for methods.
                 RootedValue priv(cx, ObjectValue(*options.proto));
@@ -1472,6 +1492,7 @@ SandboxOptions::Parse()
 {
     bool ok = ParseObject("sandboxPrototype", &proto) &&
               ParseBoolean("wantXrays", &wantXrays) &&
+              ParseBoolean("allowWaivers", &allowWaivers) &&
               ParseBoolean("wantComponents", &wantComponents) &&
               ParseBoolean("wantExportHelpers", &wantExportHelpers) &&
               ParseString("sandboxName", sandboxName) &&

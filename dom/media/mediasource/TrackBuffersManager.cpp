@@ -109,6 +109,7 @@ TrackBuffersManager::TrackBuffersManager(dom::SourceBuffer* aParent, MediaSource
 
 TrackBuffersManager::~TrackBuffersManager()
 {
+  ShutdownDemuxers();
 }
 
 bool
@@ -733,7 +734,7 @@ TrackBuffersManager::ScheduleSegmentParserLoop()
 }
 
 void
-TrackBuffersManager::CreateDemuxerforMIMEType()
+TrackBuffersManager::ShutdownDemuxers()
 {
   if (mVideoTracks.mDemuxer) {
     mVideoTracks.mDemuxer->BreakCycles();
@@ -744,6 +745,13 @@ TrackBuffersManager::CreateDemuxerforMIMEType()
     mAudioTracks.mDemuxer = nullptr;
   }
   mInputDemuxer = nullptr;
+}
+
+void
+TrackBuffersManager::CreateDemuxerforMIMEType()
+{
+  ShutdownDemuxers();
+
   if (mType.LowerCaseEqualsLiteral("video/webm") || mType.LowerCaseEqualsLiteral("audio/webm")) {
     NS_WARNING("Waiting on WebMDemuxer");
   // mInputDemuxer = new WebMDemuxer(mCurrentInputBuffer);
@@ -1551,6 +1559,7 @@ TrackBuffersManager::RemoveFrames(const TimeIntervals& aIntervals,
     lastRemovedIndex = i;
   }
 
+  int64_t maxSampleDuration = 0;
   TimeIntervals removedIntervals;
   for (uint32_t i = firstRemovedIndex.ref(); i <= lastRemovedIndex; i++) {
     MediaRawData* sample = data[i].get();
@@ -1558,8 +1567,13 @@ TrackBuffersManager::RemoveFrames(const TimeIntervals& aIntervals,
       TimeInterval(TimeUnit::FromMicroseconds(sample->mTime),
                    TimeUnit::FromMicroseconds(sample->GetEndTime()));
     removedIntervals += sampleInterval;
+    if (sample->mDuration > maxSampleDuration) {
+      maxSampleDuration = sample->mDuration;
+    }
     aTrackData.mSizeBuffer -= sizeof(*sample) + sample->mSize;
   }
+
+  removedIntervals.SetFuzz(TimeUnit::FromMicroseconds(maxSampleDuration));
 
   MSE_DEBUG("Removing frames from:%u (frames:%u) ([%f, %f))",
             firstRemovedIndex.ref(),
@@ -1697,6 +1711,15 @@ TrackBuffersManager::Buffered(TrackInfo::TrackType aTrack)
 {
   MOZ_ASSERT(OnTaskQueue());
   return GetTracksData(aTrack).mBufferedRanges;
+}
+
+TimeIntervals
+TrackBuffersManager::SafeBuffered(TrackInfo::TrackType aTrack) const
+{
+  MonitorAutoLock mon(mMonitor);
+  return aTrack == TrackInfo::kVideoTrack
+    ? mVideoBufferedRanges
+    : mAudioBufferedRanges;
 }
 
 const TrackBuffersManager::TrackBuffer&
@@ -1883,7 +1906,7 @@ TrackBuffersManager::GetNextRandomAccessPoint(TrackInfo::TrackType aTrack)
   return media::TimeUnit::FromInfinity();
 }
 
-}
+} // namespace mozilla
 #undef MSE_DEBUG
 #undef MSE_DEBUGV
 #undef SAMPLE_DEBUG

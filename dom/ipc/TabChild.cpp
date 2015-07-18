@@ -742,7 +742,7 @@ NestedTabChildMap()
   static std::map<TabId, nsRefPtr<TabChild>> sNestedTabChildMap;
   return sNestedTabChildMap;
 }
-} // anonymous namespace
+} // namespace
 
 already_AddRefed<TabChild>
 TabChild::FindTabChild(const TabId& aTabId)
@@ -877,6 +877,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mDefaultScale(0)
   , mIPCOpen(true)
   , mParentIsActive(false)
+  , mAudioChannelActive(false)
 {
   // In the general case having the TabParent tell us if APZ is enabled or not
   // doesn't really work because the TabParent itself may not have a reference
@@ -889,6 +890,22 @@ TabChild::TabChild(nsIContentChild* aManager,
   if (mUniqueId) {
     MOZ_ASSERT(NestedTabChildMap().find(mUniqueId) == NestedTabChildMap().end());
     NestedTabChildMap()[mUniqueId] = this;
+  }
+
+  nsCOMPtr<nsIObserverService> observerService =
+    mozilla::services::GetObserverService();
+
+  if (observerService) {
+    const nsAttrValue::EnumTable* table =
+      AudioChannelService::GetAudioChannelTable();
+
+    nsAutoCString topic;
+    for (uint32_t i = 0; table[i].tag; ++i) {
+      topic.Assign("audiochannel-activity-");
+      topic.Append(table[i].tag);
+
+      observerService->AddObserver(this, topic.get(), false);
+    }
   }
 }
 
@@ -954,6 +971,56 @@ TabChild::Observe(nsISupports *aSubject,
           HandlePossibleViewportChange(GetInnerSize());
         }
       }
+    }
+  }
+
+  const nsAttrValue::EnumTable* table =
+    AudioChannelService::GetAudioChannelTable();
+
+  nsAutoCString topic;
+  int16_t audioChannel = -1;
+  for (uint32_t i = 0; table[i].tag; ++i) {
+    topic.Assign("audiochannel-activity-");
+    topic.Append(table[i].tag);
+
+    if (topic.Equals(aTopic)) {
+      audioChannel = table[i].value;
+      break;
+    }
+  }
+
+  if (audioChannel != -1 && mIPCOpen) {
+    // If the subject is not a wrapper, it is sent by the TabParent and we
+    // should ignore it.
+    nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
+    if (!wrapper) {
+      return NS_OK;
+    }
+
+    // We must have a window in order to compare the windowID contained into the
+    // wrapper.
+    nsCOMPtr<nsPIDOMWindow> window = do_GetInterface(WebNavigation());
+    if (!window) {
+      return NS_OK;
+    }
+
+    uint64_t windowID = 0;
+    nsresult rv = wrapper->GetData(&windowID);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    // In theory a tabChild should contain just 1 top window, but let's double
+    // check it comparing the windowID.
+    if (window->WindowID() != windowID) {
+      return NS_OK;
+    }
+
+    nsAutoString activeStr(aData);
+    bool active = activeStr.EqualsLiteral("active");
+    if (active != mAudioChannelActive) {
+      mAudioChannelActive = active;
+      unused << SendAudioChannelActivityNotification(audioChannel, active);
     }
   }
 
@@ -1369,16 +1436,16 @@ TabChild::Blur()
 }
 
 NS_IMETHODIMP
-TabChild::FocusNextElement()
+TabChild::FocusNextElement(bool aForDocumentNavigation)
 {
-  SendMoveFocus(true);
+  SendMoveFocus(true, aForDocumentNavigation);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TabChild::FocusPrevElement()
+TabChild::FocusPrevElement(bool aForDocumentNavigation)
 {
-  SendMoveFocus(false);
+  SendMoveFocus(false, aForDocumentNavigation);
   return NS_OK;
 }
 
@@ -2592,6 +2659,7 @@ TabChild::RecvKeyEvent(const nsString& aType,
 bool
 TabChild::RecvCompositionEvent(const WidgetCompositionEvent& event)
 {
+  unused << SendOnEventNeedingAckReceived(event.message);
   WidgetCompositionEvent localEvent(event);
   localEvent.widget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
@@ -2601,6 +2669,7 @@ TabChild::RecvCompositionEvent(const WidgetCompositionEvent& event)
 bool
 TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
 {
+  unused << SendOnEventNeedingAckReceived(event.message);
   WidgetSelectionEvent localEvent(event);
   localEvent.widget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
@@ -2817,6 +2886,17 @@ TabChild::RecvDestroy()
   observerService->RemoveObserver(this, BROWSER_ZOOM_TO_RECT);
   observerService->RemoveObserver(this, BEFORE_FIRST_PAINT);
 
+  const nsAttrValue::EnumTable* table =
+    AudioChannelService::GetAudioChannelTable();
+
+  nsAutoCString topic;
+  for (uint32_t i = 0; table[i].tag; ++i) {
+    topic.Assign("audiochannel-activity-");
+    topic.Append(table[i].tag);
+
+    observerService->RemoveObserver(this, topic.get());
+  }
+
   // XXX what other code in ~TabChild() should we be running here?
   DestroyWindow();
 
@@ -2858,6 +2938,24 @@ TabChild::RecvSetIsDocShellActive(const bool& aIsActive)
       docShell->SetIsActive(aIsActive);
     }
     return true;
+}
+
+bool
+TabChild::RecvNavigateDocument(const bool& aForward)
+{
+  nsIFocusManager* fm = nsFocusManager::GetFocusManager();
+  if (fm) {
+    nsCOMPtr<nsIDOMElement> result;
+    nsCOMPtr<nsPIDOMWindow> window = do_GetInterface(WebNavigation());
+
+    // Move to the first or last document.
+    fm->MoveFocus(window, nullptr, aForward ? nsIFocusManager::MOVEFOCUS_FIRSTDOC :
+                                              nsIFocusManager::MOVEFOCUS_LASTDOC,
+                  nsIFocusManager::FLAG_BYKEY, getter_AddRefs(result));
+    SendRequestFocus(false);
+  }
+
+  return true;
 }
 
 PRenderFrameChild*
@@ -3423,6 +3521,10 @@ TabChildGlobal::MarkForCC()
 {
   if (mTabChild) {
     mTabChild->MarkScopesForCC();
+  }
+  EventListenerManager* elm = GetExistingListenerManager();
+  if (elm) {
+    elm->MarkForCC();
   }
   return mMessageManager ? mMessageManager->MarkForCC() : false;
 }

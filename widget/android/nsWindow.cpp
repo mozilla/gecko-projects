@@ -723,8 +723,6 @@ nsWindow::CreateLayerManager(int aCompositorWidth, int aCompositorHeight)
         return;
     }
 
-    mUseLayersAcceleration = ComputeShouldAccelerate(mUseLayersAcceleration);
-
     if (ShouldUseOffMainThreadCompositing()) {
         if (sLayerManager) {
             return;
@@ -742,7 +740,7 @@ nsWindow::CreateLayerManager(int aCompositorWidth, int aCompositorHeight)
         sFailedToCreateGLContext = true;
     }
 
-    if (!mUseLayersAcceleration || sFailedToCreateGLContext) {
+    if (!ComputeShouldAccelerate() || sFailedToCreateGLContext) {
         printf_stderr(" -- creating basic, not accelerated\n");
         mLayerManager = CreateBasicLayerManager();
     }
@@ -1737,8 +1735,9 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
             // combine with this text change, and overflow might occur if
             // we just use INT32_MAX
             IMENotification notification(NOTIFY_IME_OF_TEXT_CHANGE);
-            notification.mTextChangeData.mOldEndOffset =
-                notification.mTextChangeData.mNewEndOffset = INT32_MAX / 2;
+            notification.mTextChangeData.mStartOffset = 0;
+            notification.mTextChangeData.mRemovedEndOffset =
+                notification.mTextChangeData.mAddedEndOffset = INT32_MAX / 2;
             NotifyIMEOfTextChange(notification);
             FlushIMEChanges();
         }
@@ -1895,7 +1894,7 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
                                               this);
                 InitEvent(event, nullptr);
                 DispatchEvent(&event);
-                MOZ_ASSERT(event.mSucceeded && !event.mWasAsync);
+                MOZ_ASSERT(event.mSucceeded);
 
                 if (start < 0)
                     start = int32_t(event.GetSelectionStart());
@@ -1978,7 +1977,7 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
                                                        this);
                     InitEvent(queryEvent, nullptr);
                     DispatchEvent(&queryEvent);
-                    MOZ_ASSERT(queryEvent.mSucceeded && !queryEvent.mWasAsync);
+                    MOZ_ASSERT(queryEvent.mSucceeded);
                     event.mData = queryEvent.mReply.mString;
                 }
 
@@ -2246,8 +2245,8 @@ nsWindow::NotifyIMEOfTextChange(const IMENotification& aIMENotification)
 
     ALOGIME("IME: NotifyIMEOfTextChange: s=%d, oe=%d, ne=%d",
             aIMENotification.mTextChangeData.mStartOffset,
-            aIMENotification.mTextChangeData.mOldEndOffset,
-            aIMENotification.mTextChangeData.mNewEndOffset);
+            aIMENotification.mTextChangeData.mRemovedEndOffset,
+            aIMENotification.mTextChangeData.mAddedEndOffset);
 
     /* Make sure Java's selection is up-to-date */
     mIMESelectionChanged = false;

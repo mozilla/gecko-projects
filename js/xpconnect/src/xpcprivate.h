@@ -580,9 +580,6 @@ public:
     inline void AddWrappedJSRoot(nsXPCWrappedJS* wrappedJS);
     inline void AddObjectHolderRoot(XPCJSObjectHolder* holder);
 
-    static void SuspectWrappedNative(XPCWrappedNative* wrapper,
-                                     nsCycleCollectionNoteRootCallback& cb);
-
     void DebugDump(int16_t depth);
 
     void SystemIsBeingShutDown();
@@ -2156,7 +2153,6 @@ public:
                  XPCNativeInterface* Interface,
                  XPCWrappedNative** wrapper);
 
-public:
     static nsresult
     GetUsedOnly(nsISupports* Object,
                 XPCWrappedNativeScope* Scope,
@@ -2181,7 +2177,6 @@ public:
 
     inline bool HasInterfaceNoQI(const nsIID& iid);
 
-    XPCWrappedNativeTearOff* LocateTearOff(XPCNativeInterface* aInterface);
     XPCWrappedNativeTearOff* FindTearOff(XPCNativeInterface* aInterface,
                                          bool needJSObject = false,
                                          nsresult* pError = nullptr);
@@ -2249,6 +2244,7 @@ public:
 
     bool HasExternalReference() const {return mRefCnt > 1;}
 
+    void Suspect(nsCycleCollectionNoteRootCallback& cb);
     void NoteTearoffs(nsCycleCollectionTraversalCallback& cb);
 
     // Make ctor and dtor protected (rather than private) to placate nsCOMPtr.
@@ -2274,8 +2270,6 @@ private:
         // Flags bits for mFlatJSObject:
         FLAT_JS_OBJECT_VALID = JS_BIT(0)
     };
-
-private:
 
     bool Init(const XPCNativeScriptableCreateInfo* sci);
     bool FinishInit();
@@ -2865,9 +2859,9 @@ namespace mozilla {
 namespace dom {
 namespace danger {
 class AutoCxPusher;
-}
-}
-}
+} // namespace danger
+} // namespace dom
+} // namespace mozilla
 
 class XPCJSContextStack
 {
@@ -2995,7 +2989,7 @@ xpc_PrintJSStack(JSContext* cx, bool showArgs, bool showLocals,
 
 // Definition of nsScriptError, defined here because we lack a place to put
 // XPCOM objects associated with the JavaScript engine.
-class nsScriptError final : public nsIScriptError {
+class nsScriptError : public nsIScriptError {
 public:
     nsScriptError();
 
@@ -3005,7 +2999,7 @@ public:
     NS_DECL_NSICONSOLEMESSAGE
     NS_DECL_NSISCRIPTERROR
 
-private:
+protected:
     virtual ~nsScriptError();
 
     void
@@ -3026,6 +3020,30 @@ private:
     // thread from InitializeOnMainThread().
     mozilla::Atomic<bool> mInitializedOnMainThread;
     bool mIsFromPrivateWindow;
+};
+
+class nsScriptErrorWithStack : public nsScriptError {
+public:
+    explicit nsScriptErrorWithStack(JS::HandleObject);
+
+    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsScriptErrorWithStack)
+
+    NS_IMETHOD Init(const nsAString& message,
+                    const nsAString& sourceName,
+                    const nsAString& sourceLine,
+                    uint32_t lineNumber,
+                    uint32_t columnNumber,
+                    uint32_t flags,
+                    const char* category) override;
+
+    NS_IMETHOD GetStack(JS::MutableHandleValue) override;
+
+private:
+    virtual ~nsScriptErrorWithStack();
+    // Complete stackframe where the error happened.
+    // Must be SavedFrame object.
+    JS::Heap<JSObject*>  mStack;
 };
 
 /******************************************************************************
@@ -3448,6 +3466,7 @@ public:
                             JSObject* options = nullptr)
         : OptionsBase(cx, options)
         , wantXrays(true)
+        , allowWaivers(true)
         , wantComponents(true)
         , wantExportHelpers(false)
         , proto(cx)
@@ -3463,6 +3482,7 @@ public:
     virtual bool Parse();
 
     bool wantXrays;
+    bool allowWaivers;
     bool wantComponents;
     bool wantExportHelpers;
     JS::RootedObject proto;
@@ -3659,6 +3679,7 @@ public:
 
     explicit CompartmentPrivate(JSCompartment* c)
         : wantXrays(false)
+        , allowWaivers(true)
         , writeToGlobalPrototype(false)
         , skipWriteToGlobalPrototype(false)
         , universalXPConnectEnabled(false)
@@ -3686,8 +3707,16 @@ public:
         return Get(compartment);
     }
 
-
+    // Controls whether this compartment gets Xrays to same-origin. This behavior
+    // is deprecated, but is still the default for sandboxes for compatibity
+    // reasons.
     bool wantXrays;
+
+    // Controls whether this compartment is allowed to waive Xrays to content
+    // that it subsumes. This should generally be true, except in cases where we
+    // want to prevent code from depending on Xray Waivers (which might make it
+    // more portable to other browser architectures).
+    bool allowWaivers;
 
     // This flag is intended for a very specific use, internal to Gecko. It may
     // go away or change behavior at any time. It should not be added to any

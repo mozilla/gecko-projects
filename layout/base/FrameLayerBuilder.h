@@ -28,11 +28,11 @@ class ContainerLayer;
 class LayerManager;
 class BasicLayerManager;
 class PaintedLayer;
-}
+} // namespace layers
 
 namespace gfx {
 class Matrix4x4;
-}
+} // namespace gfx
 
 class FrameLayerBuilder;
 class LayerManagerData;
@@ -226,7 +226,7 @@ public:
    * sets the container layer children to layers which together render
    * the contents of the display list. It reuses existing layers from
    * the retained layer manager if possible.
-   * aContainer may be null, in which case we construct a root layer.
+   * aContainerItem may be null, in which case we construct a root layer.
    * This gets called by display list code. It calls BuildLayer on the
    * items in the display list, making items with their own layers
    * children of the new container, and assigning all other items to
@@ -479,7 +479,7 @@ public:
      * longer than the transaction.
      *
      * Updates the geometry, frame list and clip.
-     * For items within a PaintedLayer, a geometry object must be specifed to retain
+     * For items within a PaintedLayer, a geometry object must be specified to retain
      * until the next transaction.
      *
      */
@@ -563,8 +563,6 @@ protected:
                                                        uint32_t aDisplayItemKey, 
                                                        LayerManagerData* aData);
 
-  static PLDHashOperator DumpDisplayItemDataForFrame(nsRefPtrHashKey<DisplayItemData>* aEntry,
-                                                     void* aClosure);
   /**
    * We store one of these for each display item associated with a
    * PaintedLayer, in a hashtable that maps each PaintedLayer to an array
@@ -681,14 +679,6 @@ public:
   void ComputeGeometryChangeForItem(DisplayItemData* aData);
 
 protected:
-  static PLDHashOperator ProcessRemovedDisplayItems(nsRefPtrHashKey<DisplayItemData>* aEntry,
-                                                    void* aUserArg);
-  static PLDHashOperator RestoreDisplayItemData(nsRefPtrHashKey<DisplayItemData>* aEntry,
-                                                void *aUserArg);
-
-  static PLDHashOperator RestorePaintedLayerItemEntries(PaintedLayerItemsEntry* aEntry,
-                                                       void *aUserArg);
-
   /**
    * Returns true if the DOM has been modified since we started painting,
    * in which case we should bail out and not paint anymore. This should
@@ -743,6 +733,6 @@ protected:
   uint32_t                            mMaxContainerLayerGeneration;
 };
 
-}
+} // namespace mozilla
 
 #endif /* FRAMELAYERBUILDER_H_ */

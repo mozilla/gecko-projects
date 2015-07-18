@@ -9,6 +9,7 @@
 #include "GLBlitHelper.h"
 #include "GLContext.h"
 #include "GLReadTexImageHelper.h"
+#include "GLScreenBuffer.h"
 #include "nsThreadUtils.h"
 #include "ScopedGLHelpers.h"
 #include "SharedSurfaceGL.h"
@@ -623,5 +624,6 @@ ReadPixel(SharedSurface* src)
     return pixel;
 }
 
-} /* namespace gfx */
+} // namespace gl
+
 } /* namespace mozilla */

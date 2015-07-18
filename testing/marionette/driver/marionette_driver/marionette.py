@@ -631,8 +631,7 @@ class Marionette(object):
         self.client = MarionetteTransport(
             self.host,
             self.port,
-            self.socket_timeout,
-            instance=self.instance)
+            self.socket_timeout)
 
         if emulator:
             if busybox:
@@ -663,6 +662,7 @@ class Marionette(object):
     def is_port_available(port, host=''):
         port = int(port)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind((host, port))
             return True
@@ -689,6 +689,13 @@ class Marionette(object):
 
         try:
             response = self.client.send(message)
+        except IOError:
+            if self.instance and not hasattr(self.instance, 'detached'):
+                # If we've launched the binary we've connected to, wait
+                # for it to shut down.
+                returncode = self.instance.runner.wait()
+                raise IOError("process died with returncode %d" % returncode)
+            raise
         except socket.timeout:
             self.session = None
             self.window = None

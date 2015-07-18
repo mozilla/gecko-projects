@@ -286,6 +286,7 @@ loop.roomViews = (function(mozL10n) {
 
   var DesktopRoomEditContextView = React.createClass({
     mixins: [React.addons.LinkedStateMixin],
+    maxRoomNameLength: 124,
 
     propTypes: {
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
@@ -510,6 +511,7 @@ loop.roomViews = (function(mozL10n) {
             value={location} />
           <form onSubmit={this.handleFormSubmit}>
             <input className="room-context-name"
+              maxLength={this.maxRoomNameLength}
               onKeyDown={this.handleTextareaKeyDown}
               placeholder={mozL10n.get("context_edit_name_placeholder")}
               type="text"
@@ -763,6 +765,14 @@ loop.roomViews = (function(mozL10n) {
                         posterUrl={this.props.localPosterUrl}
                         srcVideoObject={this.state.localSrcVideoObject} />
                     </div>
+                    <DesktopRoomEditContextView
+                      dispatcher={this.props.dispatcher}
+                      error={this.state.error}
+                      mozLoop={this.props.mozLoop}
+                      onClose={this.handleEditContextClose}
+                      roomData={roomData}
+                      savingContext={this.state.savingContext}
+                      show={!shouldRenderInvitationOverlay && shouldRenderEditContextView} />
                   </div>
                   <sharedViews.ConversationToolbar
                     audio={{enabled: !this.state.audioMuted, visible: true}}
@@ -775,14 +785,6 @@ loop.roomViews = (function(mozL10n) {
                     video={{enabled: !this.state.videoMuted, visible: true}} />
                 </div>
               </div>
-              <DesktopRoomEditContextView
-                dispatcher={this.props.dispatcher}
-                error={this.state.error}
-                mozLoop={this.props.mozLoop}
-                onClose={this.handleEditContextClose}
-                roomData={roomData}
-                savingContext={this.state.savingContext}
-                show={!shouldRenderInvitationOverlay && shouldRenderEditContextView} />
               <sharedViews.chat.TextChatView
                 dispatcher={this.props.dispatcher}
                 showAlways={false}

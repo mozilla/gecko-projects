@@ -318,6 +318,21 @@
   ERROR(NS_NET_STATUS_SENDING_TO,      FAILURE(5)),
   ERROR(NS_NET_STATUS_WAITING_FOR,     FAILURE(10)),
   ERROR(NS_NET_STATUS_RECEIVING_FROM,  FAILURE(6)),
+
+  /* nsIInterceptedChannel */
+  /* Generic error for non-specific failures during service worker interception */
+  ERROR(NS_ERROR_INTERCEPTION_FAILED,                  FAILURE(100)),
+  /* Service worker intercepted with an opaque response while
+     dom.serviceWorkers.interception.opaque.enabled pref was set to false */
+  ERROR(NS_ERROR_OPAQUE_INTERCEPTION_DISABLED,         FAILURE(101)),
+  /* Attempt to return opaque response for anything but "non-cors" request */
+  ERROR(NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE, FAILURE(102)),
+  /* Service worker intercepted with an error response */
+  ERROR(NS_ERROR_INTERCEPTED_ERROR_RESPONSE,           FAILURE(103)),
+  /* Service worker intercepted with a response with bodyUsed set to true */
+  ERROR(NS_ERROR_INTERCEPTED_USED_RESPONSE,            FAILURE(104)),
+  /* Service worker intercepted a client request with an opaque response */
+  ERROR(NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION,   FAILURE(105)),
 #undef MODULE
 
 
@@ -768,6 +783,20 @@
   ERROR(NS_XSLT_GET_NEW_HANDLER,  SUCCESS(1)),
 #undef MODULE
 
+
+  /* ======================================================================= */
+  /* 28: NS_ERROR_MODULE_IPC */
+  /* ======================================================================= */
+#define MODULE NS_ERROR_MODULE_IPC
+  // Initial creation of a Transport object failed internally for unknown reasons.
+  ERROR(NS_ERROR_TRANSPORT_INIT,          FAILURE(1)),
+  // Generic error related to duplicating handle failures.
+  ERROR(NS_ERROR_DUPLICATE_HANDLE,        FAILURE(2)),
+  // Bridging: failure trying to open the connection to the parent
+  ERROR(NS_ERROR_BRIDGE_OPEN_PARENT,      FAILURE(3)),
+  // Bridging: failure trying to open the connection to the child
+  ERROR(NS_ERROR_BRIDGE_OPEN_CHILD,       FAILURE(4)),
+#undef MODULE
 
   /* ======================================================================= */
   /* 29: NS_ERROR_MODULE_SVG */

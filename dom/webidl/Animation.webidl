@@ -17,7 +17,7 @@ interface Animation {
   // Bug 1049975: Make 'effect' writeable
   [Pure]
   readonly attribute AnimationEffectReadOnly? effect;
-  readonly attribute AnimationTimeline timeline;
+  readonly attribute AnimationTimeline? timeline;
   [BinaryName="startTimeAsDouble"]
   attribute double? startTime;
   [SetterThrows, BinaryName="currentTimeAsDouble"]
@@ -37,9 +37,8 @@ interface Animation {
   void play ();
   [Throws, BinaryName="pauseFromJS"]
   void pause ();
-  /*
+  [Throws]
   void reverse ();
-  */
 };
 
 // Non-standard extensions

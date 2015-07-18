@@ -204,7 +204,6 @@ protected:
   };
 
   static void DeleteAllForEntry(Entry* aEntry);
-  static PLDHashOperator DeleteEnumerator(Entry* aEntry, void* aArg);
 
   nsTHashtable<Entry> mEntries;
   nsIFrame* mLastFrame;
@@ -245,6 +244,6 @@ private:
   nsIFrame* mFrame;
 };
 
-}
+} // namespace mozilla
 
 #endif /* FRAMEPROPERTYTABLE_H_ */

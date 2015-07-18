@@ -1133,6 +1133,7 @@ static gint
 moz_gtk_scrollbar_trough_paint(GtkThemeWidgetType widget,
                                cairo_t *cr, GdkRectangle* rect,
                                GtkWidgetState* state,
+                               GtkScrollbarTrackFlags flags,
                                GtkTextDirection direction)
 {
     GtkStyleContext* style;
@@ -1147,6 +1148,11 @@ moz_gtk_scrollbar_trough_paint(GtkThemeWidgetType widget,
 
     gtk_widget_set_direction(GTK_WIDGET(scrollbar), direction);
     
+    if (flags & MOZ_GTK_TRACK_OPAQUE) {
+        style = gtk_widget_get_style_context(GTK_WIDGET(gProtoWindow));
+        gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
+    }
+
     style = gtk_widget_get_style_context(GTK_WIDGET(scrollbar));
     gtk_style_context_save(style);
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_TROUGH);
@@ -1909,14 +1915,25 @@ moz_gtk_resizer_paint(cairo_t *cr, GdkRectangle* rect,
     GtkStyleContext* style;
 
     ensure_frame_widget();
-    gtk_widget_set_direction(gStatusbarWidget, direction);
+    gtk_widget_set_direction(gStatusbarWidget, GTK_TEXT_DIR_LTR);
 
     style = gtk_widget_get_style_context(gStatusbarWidget);
     gtk_style_context_save(style);
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_GRIP);
     gtk_style_context_set_state(style, GetStateFlagsFromGtkWidgetState(state));
 
+    // Workaround unico not respecting the text direction for resizers.
+    // See bug 1174248.
+    cairo_save(cr);
+    if (direction == GTK_TEXT_DIR_RTL) {
+      cairo_matrix_t mat;
+      cairo_matrix_init_translate(&mat, 2 * rect->x + rect->width, 0);
+      cairo_matrix_scale(&mat, -1, 1);
+      cairo_transform(cr, &mat);
+    }
+
     gtk_render_handle(style, cr, rect->x, rect->y, rect->width, rect->height);
+    cairo_restore(cr);
     gtk_style_context_restore(style);
 
     return MOZ_GTK_SUCCESS;
@@ -2008,7 +2025,10 @@ moz_gtk_progress_chunk_paint(cairo_t *cr, GdkRectangle* rect,
     }
   
     gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
-    gtk_render_activity(style, cr, rect->x, rect->y, rect->width, rect->height);
+    // gtk_render_activity was used to render progress chunks on GTK versions
+    // before 3.13.7, see bug 1173907.
+    if (gtk_check_version(3, 13, 7))
+      gtk_render_activity(style, cr, rect->x, rect->y, rect->width, rect->height);
     gtk_style_context_restore(style);
 
     return MOZ_GTK_SUCCESS;
@@ -3093,7 +3113,9 @@ moz_gtk_widget_paint(GtkThemeWidgetType widget, cairo_t *cr,
     case MOZ_GTK_SCROLLBAR_TRACK_HORIZONTAL:
     case MOZ_GTK_SCROLLBAR_TRACK_VERTICAL:
         return moz_gtk_scrollbar_trough_paint(widget, cr, rect,
-                                              state, direction);
+                                              state,
+                                              (GtkScrollbarTrackFlags) flags,
+                                              direction);
         break;
     case MOZ_GTK_SCROLLBAR_THUMB_HORIZONTAL:
     case MOZ_GTK_SCROLLBAR_THUMB_VERTICAL:

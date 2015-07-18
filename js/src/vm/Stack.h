@@ -25,8 +25,8 @@ struct JSCompartment;
 namespace JS {
 namespace dbg {
 class AutoEntryMonitor;
-}
-}
+} // namespace dbg
+} // namespace JS
 
 namespace js {
 
@@ -82,7 +82,7 @@ enum MaybeCheckLexical { CheckLexical = true, DontCheckLexical = false };
 namespace jit {
     class BaselineFrame;
     class RematerializedFrame;
-}
+} // namespace jit
 
 /*
  * Pointer to either a ScriptFrameIter::Data, an InterpreterFrame, or a Baseline
@@ -1066,6 +1066,7 @@ class InvokeArgs : public JS::CallArgs
     explicit InvokeArgs(JSContext* cx, bool construct = false) : v_(cx) {}
 
     bool init(unsigned argc, bool construct = false) {
+        MOZ_ASSERT(2 + argc + construct > argc);  // no overflow
         if (!v_.resize(2 + argc + construct))
             return false;
         ImplicitCast<CallArgs>(*this) = CallArgsFromVp(argc, v_.begin());
@@ -1095,7 +1096,7 @@ class AsmJSActivation;
 
 namespace jit {
     class JitActivation;
-};
+} // namespace jit
 
 class Activation
 {

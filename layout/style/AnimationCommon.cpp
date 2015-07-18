@@ -13,6 +13,7 @@
 #include "nsCSSPropertySet.h"
 #include "nsCSSValue.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsDOMMutationObserver.h"
 #include "nsStyleContext.h"
 #include "nsIFrame.h"
 #include "nsLayoutUtils.h"
@@ -528,7 +529,7 @@ AnimValuesStyleRule::List(FILE* out, int32_t aIndent) const
 }
 #endif
 
-} /* end sub-namespace css */
+} // namespace css
 
 bool
 AnimationCollection::CanAnimatePropertyOnCompositor(
@@ -770,6 +771,13 @@ AnimationCollection::PropertyDtor(void *aObject, nsIAtom *aPropertyName,
   MOZ_ASSERT(!collection->mCalledPropertyDtor, "can't call dtor twice");
   collection->mCalledPropertyDtor = true;
 #endif
+  {
+    nsAutoAnimationMutationBatch mb(collection->mElement);
+
+    for (size_t animIdx = collection->mAnimations.Length(); animIdx-- != 0; ) {
+      collection->mAnimations[animIdx]->CancelFromStyle();
+    }
+  }
   delete collection;
 }
 
@@ -964,4 +972,4 @@ AnimationCollection::HasCurrentAnimationsForProperties(
   return false;
 }
 
-}
+} // namespace mozilla

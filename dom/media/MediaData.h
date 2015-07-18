@@ -20,7 +20,7 @@ namespace mozilla {
 namespace layers {
 class Image;
 class ImageContainer;
-}
+} // namespace layers
 
 class MediaByteBuffer;
 class SharedTrackInfo;
@@ -144,7 +144,7 @@ protected:
 namespace layers {
 class TextureClient;
 class PlanarYCbCrImage;
-}
+} // namespace layers
 
 class VideoInfo;
 
@@ -409,6 +409,8 @@ private:
   // MediaByteBuffer is a ref counted infallible TArray.
 class MediaByteBuffer : public nsTArray<uint8_t> {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaByteBuffer);
+  MediaByteBuffer() = default;
+  explicit MediaByteBuffer(size_t aCapacity) : nsTArray<uint8_t>(aCapacity) {}
 
 private:
   ~MediaByteBuffer() {}

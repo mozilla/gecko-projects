@@ -800,7 +800,10 @@ nsFrameMessageManager::DispatchAsyncMessageInternal(JSContext* aCx,
     return NS_OK;
   }
 
-  NS_ENSURE_TRUE(mCallback, NS_ERROR_NOT_INITIALIZED);
+  if (!mCallback) {
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
   if (!mCallback->DoSendAsyncMessage(aCx, aMessage, aData, aCpows, aPrincipal)) {
     return NS_ERROR_FAILURE;
   }
@@ -1444,7 +1447,7 @@ struct MessageManagerReferentCount
   nsDataHashtable<nsStringHashKey, uint32_t> mMessageCounter;
 };
 
-} // anonymous namespace
+} // namespace
 
 namespace mozilla {
 namespace dom {

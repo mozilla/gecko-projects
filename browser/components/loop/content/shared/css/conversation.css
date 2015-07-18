@@ -31,6 +31,7 @@
 .standalone .conversation-toolbar {
   padding: 20px;
   height: 64px;
+  border: none;
 }
 
 .standalone .focus-stream {
@@ -1089,16 +1090,19 @@ html[dir="rtl"] .room-context-btn-close {
 }
 
 .media-layout {
-  /* 50px is the header, 3em is the footer. */
-  height: calc(100% - 50px - 3em);
+  height: 100%;
+}
+
+.standalone-room-wrapper > .media-layout {
+  /* 50px is the header, 64px for toolbar, 3em is the footer. */
+  height: calc(100% - 50px - 64px - 3em);
 }
 
 .media-layout > .media-wrapper {
   display: flex;
   flex-flow: column wrap;
-  /* 64px for .conversation-toolbar */
-  height: calc(100% - 64px);
   margin: 0 10px;
+  height: 100%;
 }
 
 .media-wrapper > .focus-stream {
@@ -1182,17 +1186,19 @@ html[dir="rtl"] .room-context-btn-close {
 }
 
 @media screen and (max-width:640px) {
-  .media-layout {
-    /* 50px is height of header, 25px is height of footer. */
-    height: calc(100% - 50px - 25px);
+  .media-layout-wrapper {
+    height: 100%;
+  }
+
+  .standalone-room-wrapper > .media-layout {
+    /* 50px is height of header, 38px is height of toolbar, 25px is height of footer. */
+    height: calc(100% - 50px - 38px - 25px);
   }
 
   .media-layout > .media-wrapper {
     flex-direction: row;
     margin: 0;
     width: 100%;
-    /* conversation toolbar is 38px in narrow mode */
-    height: calc(100% - 38px);
   }
 
   .media-wrapper > .focus-stream {
@@ -1459,12 +1465,18 @@ html[dir="rtl"] .standalone .room-conversation-wrapper .room-inner-info-area {
 .text-chat-entry {
   display: flex;
   flex-direction: row;
+  margin-right: .2em;
   margin-bottom: .5em;
   text-align: end;
   flex-wrap: nowrap;
   justify-content: flex-start;
   align-content: stretch;
   align-items: flex-start;
+}
+
+html[dir="rtl"] .text-chat-entry {
+  margin-right: auto;
+  margin-left: .2em;
 }
 
 .text-chat-entry > p {
@@ -1477,9 +1489,8 @@ html[dir="rtl"] .standalone .room-conversation-wrapper .room-inner-info-area {
   max-width: 80%;
   border-width: 1px;
   border-style: solid;
-  border-color: #2ea4ff;
+  border-color: #5cccee;
   background: #fff;
-  word-wrap: break-word;
   word-wrap: break-word;
   flex: 0 1 auto;
   align-self: auto;
@@ -1528,7 +1539,7 @@ html[dir="rtl"] .text-chat-entry.received > p {
 
 /* Text chat entry timestamp */
 .text-chat-entry-timestamp {
-  margin: 0 .2em;
+  margin: 0 .5em;
   color: #aaa;
   font-style: italic;
   font-size: .8em;
@@ -1663,7 +1674,32 @@ html[dir="rtl"] .text-chat-entry.received .text-chat-arrow {
   padding: 0 .5em .5em;
   font-size: 1.1em;
   border: 0;
-  border-top: 1px solid #999;
+  border-top: 1px solid #d8d8d8;
+}
+
+.text-chat-box > form > input::-webkit-input-placeholder {
+  font-size: 1.1em;
+  color: #999;
+}
+
+.text-chat-box > form > input::-moz-placeholder {
+  font-size: 1.1em;
+  color: #999;
+}
+
+.text-chat-box > form > input:-moz-placeholder {
+  font-size: 1.1em;
+  color: #999;
+}
+
+.text-chat-box > form > input:-ms-input-placeholder {
+  font-size: 1.1em;
+  color: #999;
+}
+
+.text-chat-box > form > input:input-placeholder {
+  font-size: 1.1em;
+  color: #999;
 }
 
 /* turn the visible border blue as a visual indicator of focus */

@@ -79,7 +79,7 @@ jclass AndroidBridge::GetClassGlobalRef(JNIEnv* env, const char* className)
         classRef = ClassObject::LocalRef::Adopt(env,
                 env->CallObjectMethod(sBridge->mClassLoader.Get(),
                                       sBridge->mClassLoaderLoadClass,
-                                      Param<String>::Type(className, env).Get()));
+                                      Param<String>(className, env).Get()));
     }
 
     if (!classRef) {
@@ -740,7 +740,8 @@ AndroidBridge::CreateEGLSurfaceForCompositor()
     }
 
     JNIEnv* const env = GetJNIForThread(); // called on the compositor thread
-    return reinterpret_cast<EGLSurface>(
+    return reinterpret_cast<EGLSurface>(mAPIVersion >= 20 ?
+            env->GetLongField(eglSurface.Get(), jEGLSurfacePointerField) :
             env->GetIntField(eglSurface.Get(), jEGLSurfacePointerField));
 }
 

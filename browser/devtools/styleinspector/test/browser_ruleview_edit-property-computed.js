@@ -29,13 +29,13 @@ function* editAndCheck(view) {
   let newPaddingValue = "20px";
 
   info("Focusing the inplace editor field");
-  let editor = yield focusEditableField(propEditor.valueSpan);
+  let editor = yield focusEditableField(view, propEditor.valueSpan);
   is(inplaceEditor(propEditor.valueSpan), editor, "Focused editor should be the value span.");
 
   let onPropertyChange = waitForComputedStyleProperty("#testid", null, "padding-top", newPaddingValue);
 
   info("Entering a new value");
-  EventUtils.sendString(newPaddingValue, view.doc.defaultView);
+  EventUtils.sendString(newPaddingValue, view.styleWindow);
 
   info("Waiting for the throttled previewValue to apply the changes to document");
   yield onPropertyChange;

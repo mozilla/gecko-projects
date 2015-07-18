@@ -505,7 +505,7 @@ class NuwaMarkPredictorThreadRunner : public nsRunnable
     return NS_OK;
   }
 };
-} // anon namespace
+} // namespace
 #endif
 
 // Predictor::nsICacheEntryMetaDataVisitor
@@ -680,7 +680,8 @@ private:
   nsCOMPtr<nsIThread> mIOThread;
   nsCOMPtr<nsIFile> mDBFile;
 };
-} // anon namespace
+
+} // namespace
 
 void
 Predictor::MaybeCleanupOldDBFiles()
@@ -1484,7 +1485,7 @@ Predictor::SpaceCleaner::OnMetaDataElement(const char *key, const char *value)
 
   if (!ok || !mKeyToDelete || lastHit < mLRUStamp) {
     mKeyToDelete = key;
-    mLRUStamp = lastHit;
+    mLRUStamp = ok ? lastHit : 0;
   }
 
   return NS_OK;
@@ -2034,5 +2035,5 @@ Predictor::OnPredictDNS(nsIURI *aURI) {
   return NS_OK;
 }
 
-} // ::mozilla::net
-} // ::mozilla
+} // namespace net
+} // namespace mozilla

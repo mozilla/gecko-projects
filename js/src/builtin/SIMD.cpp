@@ -13,6 +13,7 @@
 
 #include "builtin/SIMD.h"
 
+#include "mozilla/FloatingPoint.h"
 #include "mozilla/IntegerTypeTraits.h"
 
 #include "jsapi.h"
@@ -30,12 +31,10 @@ using mozilla::ArrayLength;
 using mozilla::IsFinite;
 using mozilla::IsNaN;
 using mozilla::FloorLog2;
+using mozilla::NumberIsInt32;
 
 ///////////////////////////////////////////////////////////////////////////
 // SIMD
-
-static const char* laneNames[] = {"lane 0", "lane 1", "lane 2", "lane 3", "lane 4", "lane 5", "lane 6", "lane 7",
-                                  "lane 8", "lane 9", "lane 10", "lane 11", "lane 12", "lane 13", "lane 14", "lane 15"};
 
 static bool
 CheckVectorObject(HandleValue v, SimdTypeDescr::Type expectedType)
@@ -116,63 +115,6 @@ TypedObjectMemory(HandleValue v)
     TypedObject& obj = v.toObject().as<TypedObject>();
     return reinterpret_cast<Elem>(obj.typedMem());
 }
-
-template<typename SimdType, int lane>
-static bool GetSimdLane(JSContext* cx, unsigned argc, Value* vp)
-{
-    typedef typename SimdType::Elem Elem;
-
-    CallArgs args = CallArgsFromVp(argc, vp);
-    if (!IsVectorObject<SimdType>(args.thisv())) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             SimdTypeDescr::class_.name, laneNames[lane],
-                             InformalValueTypeName(args.thisv()));
-        return false;
-    }
-
-    Elem* data = TypedObjectMemory<Elem*>(args.thisv());
-    SimdType::setReturn(args, data[lane]);
-    return true;
-}
-
-#define LANE_ACCESSOR(type, lane) \
-static bool type##Lane##lane(JSContext* cx, unsigned argc, Value* vp) { \
-    return GetSimdLane<type, lane>(cx, argc, vp);\
-}
-
-#define FOUR_LANES_ACCESSOR(type) \
-    LANE_ACCESSOR(type, 0); \
-    LANE_ACCESSOR(type, 1); \
-    LANE_ACCESSOR(type, 2); \
-    LANE_ACCESSOR(type, 3);
-
-    FOUR_LANES_ACCESSOR(Int32x4);
-    FOUR_LANES_ACCESSOR(Float32x4);
-
-#define EIGHT_LANES_ACCESSOR(type) \
-    FOUR_LANES_ACCESSOR(type) \
-    LANE_ACCESSOR(type, 4) \
-    LANE_ACCESSOR(type, 5) \
-    LANE_ACCESSOR(type, 6) \
-    LANE_ACCESSOR(type, 7)
-
-    EIGHT_LANES_ACCESSOR(Int16x8);
-
-    EIGHT_LANES_ACCESSOR(Int8x16);
-    LANE_ACCESSOR(Int8x16, 8);
-    LANE_ACCESSOR(Int8x16, 9);
-    LANE_ACCESSOR(Int8x16, 10);
-    LANE_ACCESSOR(Int8x16, 11);
-    LANE_ACCESSOR(Int8x16, 12);
-    LANE_ACCESSOR(Int8x16, 13);
-    LANE_ACCESSOR(Int8x16, 14);
-    LANE_ACCESSOR(Int8x16, 15);
-#undef FOUR_LANES_ACCESSOR
-#undef EIGHT_LANES_ACCESSOR
-
-    LANE_ACCESSOR(Float64x2, 0);
-    LANE_ACCESSOR(Float64x2, 1);
-#undef LANE_ACCESSOR
 
 template<typename SimdType>
 static bool SignMask(JSContext* cx, unsigned argc, Value* vp)
@@ -281,7 +223,7 @@ class Float64x2Defn {
     static const JSFunctionSpec Methods[];
 };
 
-}
+} // namespace
 
 const JSFunctionSpec Float32x4Defn::TypeDescriptorMethods[] = {
     JS_SELF_HOSTED_FN("toSource", "DescrToSource", 0, 0),
@@ -291,10 +233,6 @@ const JSFunctionSpec Float32x4Defn::TypeDescriptorMethods[] = {
 };
 
 const JSPropertySpec Float32x4Defn::TypedObjectProperties[] = {
-    JS_PSG("x", Float32x4Lane0, JSPROP_PERMANENT),
-    JS_PSG("y", Float32x4Lane1, JSPROP_PERMANENT),
-    JS_PSG("z", Float32x4Lane2, JSPROP_PERMANENT),
-    JS_PSG("w", Float32x4Lane3, JSPROP_PERMANENT),
     JS_PSG("signMask", Float32x4SignMask, JSPROP_PERMANENT),
     JS_PS_END
 };
@@ -320,8 +258,6 @@ const JSFunctionSpec Float64x2Defn::TypeDescriptorMethods[] = {
 };
 
 const JSPropertySpec Float64x2Defn::TypedObjectProperties[] = {
-    JS_PSG("x", Float64x2Lane0, JSPROP_PERMANENT),
-    JS_PSG("y", Float64x2Lane1, JSPROP_PERMANENT),
     JS_PSG("signMask", Float64x2SignMask, JSPROP_PERMANENT),
     JS_PS_END
 };
@@ -347,22 +283,6 @@ const JSFunctionSpec Int8x16Defn::TypeDescriptorMethods[] = {
 };
 
 const JSPropertySpec Int8x16Defn::TypedObjectProperties[] = {
-    JS_PSG("s0", Int8x16Lane0, JSPROP_PERMANENT),
-    JS_PSG("s1", Int8x16Lane1, JSPROP_PERMANENT),
-    JS_PSG("s2", Int8x16Lane2, JSPROP_PERMANENT),
-    JS_PSG("s3", Int8x16Lane3, JSPROP_PERMANENT),
-    JS_PSG("s4", Int8x16Lane4, JSPROP_PERMANENT),
-    JS_PSG("s5", Int8x16Lane5, JSPROP_PERMANENT),
-    JS_PSG("s6", Int8x16Lane6, JSPROP_PERMANENT),
-    JS_PSG("s7", Int8x16Lane7, JSPROP_PERMANENT),
-    JS_PSG("s8", Int8x16Lane8, JSPROP_PERMANENT),
-    JS_PSG("s9", Int8x16Lane9, JSPROP_PERMANENT),
-    JS_PSG("s10", Int8x16Lane10, JSPROP_PERMANENT),
-    JS_PSG("s11", Int8x16Lane11, JSPROP_PERMANENT),
-    JS_PSG("s12", Int8x16Lane12, JSPROP_PERMANENT),
-    JS_PSG("s13", Int8x16Lane13, JSPROP_PERMANENT),
-    JS_PSG("s14", Int8x16Lane14, JSPROP_PERMANENT),
-    JS_PSG("s15", Int8x16Lane15, JSPROP_PERMANENT),
     JS_PSG("signMask", Int8x16SignMask, JSPROP_PERMANENT),
     JS_PS_END
 };
@@ -388,14 +308,6 @@ const JSFunctionSpec Int16x8Defn::TypeDescriptorMethods[] = {
 };
 
 const JSPropertySpec Int16x8Defn::TypedObjectProperties[] = {
-    JS_PSG("s0", Int16x8Lane0, JSPROP_PERMANENT),
-    JS_PSG("s1", Int16x8Lane1, JSPROP_PERMANENT),
-    JS_PSG("s2", Int16x8Lane2, JSPROP_PERMANENT),
-    JS_PSG("s3", Int16x8Lane3, JSPROP_PERMANENT),
-    JS_PSG("s4", Int16x8Lane4, JSPROP_PERMANENT),
-    JS_PSG("s5", Int16x8Lane5, JSPROP_PERMANENT),
-    JS_PSG("s6", Int16x8Lane6, JSPROP_PERMANENT),
-    JS_PSG("s7", Int16x8Lane7, JSPROP_PERMANENT),
     JS_PSG("signMask", Int16x8SignMask, JSPROP_PERMANENT),
     JS_PS_END
 };
@@ -421,10 +333,6 @@ const JSFunctionSpec Int32x4Defn::TypeDescriptorMethods[] = {
 };
 
 const JSPropertySpec Int32x4Defn::TypedObjectProperties[] = {
-    JS_PSG("x", Int32x4Lane0, JSPROP_PERMANENT),
-    JS_PSG("y", Int32x4Lane1, JSPROP_PERMANENT),
-    JS_PSG("z", Int32x4Lane2, JSPROP_PERMANENT),
-    JS_PSG("w", Int32x4Lane3, JSPROP_PERMANENT),
     JS_PSG("signMask", Int32x4SignMask, JSPROP_PERMANENT),
     JS_PS_END
 };
@@ -508,12 +416,11 @@ static bool
 FillLanes(JSContext* cx, Handle<TypedObject*> result, const CallArgs& args)
 {
     typedef typename T::Elem Elem;
-    InternalHandle<Elem*> mem(result, reinterpret_cast<Elem*>(result->typedMem()));
     Elem tmp;
     for (unsigned i = 0; i < T::lanes; i++) {
         if (!T::toType(cx, args.get(i), &tmp))
             return false;
-        mem.get()[i] = tmp;
+        reinterpret_cast<Elem*>(result->typedMem())[i] = tmp;
     }
     args.rval().setObject(*result);
     return true;
@@ -767,7 +674,8 @@ struct ShiftRightLogical {
         return uint32_t(bits) >= sizeof(T) * 8 ? 0 : uint32_t(v) >> bits;
     }
 };
-}
+
+} // namespace js
 
 template<typename Out>
 static bool
@@ -834,6 +742,27 @@ static bool
 BinaryFunc(JSContext* cx, unsigned argc, Value* vp)
 {
     return CoercedBinaryFunc<In, Out, Op, Out>(cx, argc, vp);
+}
+
+template<typename V>
+static bool
+ExtractLane(JSContext* cx, unsigned argc, Value* vp)
+{
+    typedef typename V::Elem Elem;
+
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() < 2 || !IsVectorObject<V>(args[0]) || !args[1].isNumber())
+        return ErrorBadArgs(cx);
+
+    int32_t lane;
+    if (!NumberIsInt32(args[1].toNumber(), &lane))
+        return ErrorBadArgs(cx);
+    if (lane < 0 || uint32_t(lane) >= V::lanes)
+        return ErrorBadArgs(cx);
+
+    Elem* vec = TypedObjectMemory<Elem*>(args[0]);
+    V::setReturn(args, vec[lane]);
+    return true;
 }
 
 template<typename V>
@@ -1109,34 +1038,9 @@ Bool(JSContext* cx, unsigned argc, Value* vp)
     return StoreResult<V>(cx, args, result);
 }
 
-template<typename In>
-static bool
-Clamp(JSContext* cx, unsigned argc, Value* vp)
-{
-    typedef typename In::Elem InElem;
-    CallArgs args = CallArgsFromVp(argc, vp);
-    if (args.length() != 3 || !IsVectorObject<In>(args[0]) ||
-        !IsVectorObject<In>(args[1]) || !IsVectorObject<In>(args[2]))
-    {
-        return ErrorBadArgs(cx);
-    }
-
-    InElem* val = TypedObjectMemory<InElem*>(args[0]);
-    InElem* lowerLimit = TypedObjectMemory<InElem*>(args[1]);
-    InElem* upperLimit = TypedObjectMemory<InElem*>(args[2]);
-
-    InElem result[In::lanes];
-    for (unsigned i = 0; i < In::lanes; i++) {
-        result[i] = val[i] < lowerLimit[i] ? lowerLimit[i] : val[i];
-        result[i] = result[i] > upperLimit[i] ? upperLimit[i] : result[i];
-    }
-
-    return StoreResult<In>(cx, args, result);
-}
-
 template<typename V, typename MaskType>
 static bool
-BitSelect(JSContext* cx, unsigned argc, Value* vp)
+SelectBits(JSContext* cx, unsigned argc, Value* vp)
 {
     typedef typename V::Elem Elem;
     typedef typename MaskType::Elem MaskTypeElem;

@@ -17,6 +17,7 @@
 #include "XrayWrapper.h"
 
 #include "nsContentUtils.h"
+#include "nsCycleCollectionNoteRootCallback.h"
 
 #include <stdint.h>
 #include "mozilla/DeferredFinalize.h"
@@ -67,7 +68,7 @@ NS_CYCLE_COLLECTION_CLASSNAME(XPCWrappedNative)::Traverse
         NS_IMPL_CYCLE_COLLECTION_DESCRIBE(XPCWrappedNative, tmp->mRefCnt.get())
     }
 
-    if (tmp->mRefCnt.get() > 1) {
+    if (tmp->HasExternalReference()) {
 
         // If our refcount is > 1, our reference to the flat JS object is
         // considered "strong", and we're going to traverse it.
@@ -91,6 +92,25 @@ NS_CYCLE_COLLECTION_CLASSNAME(XPCWrappedNative)::Traverse
     tmp->NoteTearoffs(cb);
 
     return NS_OK;
+}
+
+void
+XPCWrappedNative::Suspect(nsCycleCollectionNoteRootCallback& cb)
+{
+    if (!IsValid() || IsWrapperExpired())
+        return;
+
+    MOZ_ASSERT(NS_IsMainThread(),
+               "Suspecting wrapped natives from non-main thread");
+
+    // Only record objects that might be part of a cycle as roots, unless
+    // the callback wants all traces (a debug feature). Do this even if
+    // the XPCWN doesn't own the JS reflector object in case the reflector
+    // keeps alive other C++ things. This is safe because if the reflector
+    // had died the reference from the XPCWN to it would have been cleared.
+    JSObject* obj = GetFlatJSObjectPreserveColor();
+    if (JS::ObjectIsMarkedGray(obj) || cb.WantAllTraces())
+        cb.NoteJSRoot(obj);
 }
 
 void
@@ -1036,20 +1056,6 @@ XPCWrappedNative::ExtendSet(XPCNativeInterface* aInterface)
 }
 
 XPCWrappedNativeTearOff*
-XPCWrappedNative::LocateTearOff(XPCNativeInterface* aInterface)
-{
-    for (XPCWrappedNativeTearOffChunk* chunk = &mFirstChunk;
-         chunk != nullptr;
-         chunk = chunk->mNextChunk) {
-        XPCWrappedNativeTearOff* tearOff = &chunk->mTearOff;
-        if (tearOff->GetInterface() == aInterface) {
-            return tearOff;
-        }
-    }
-    return nullptr;
-}
-
-XPCWrappedNativeTearOff*
 XPCWrappedNative::FindTearOff(XPCNativeInterface* aInterface,
                               bool needJSObject /* = false */,
                               nsresult* pError /* = nullptr */)
@@ -1297,7 +1303,7 @@ class MOZ_STACK_CLASS CallMethodHelper
     const uint32_t mArgc;
 
     MOZ_ALWAYS_INLINE bool
-    GetArraySizeFromParam(uint8_t paramIndex, uint32_t* result) const;
+    GetArraySizeFromParam(uint8_t paramIndex, HandleValue maybeArray, uint32_t* result);
 
     MOZ_ALWAYS_INLINE bool
     GetInterfaceTypeFromParam(uint8_t paramIndex,
@@ -1446,7 +1452,7 @@ CallMethodHelper::~CallMethodHelper()
                     // We need some basic information to properly destroy the array.
                     uint32_t array_count = 0;
                     nsXPTType datum_type;
-                    if (!GetArraySizeFromParam(i, &array_count) ||
+                    if (!GetArraySizeFromParam(i, UndefinedHandleValue, &array_count) ||
                         !NS_SUCCEEDED(mIFaceInfo->GetTypeForParam(mVTableIndex,
                                                                   &paramInfo,
                                                                   1, &datum_type))) {
@@ -1480,7 +1486,8 @@ CallMethodHelper::~CallMethodHelper()
 
 bool
 CallMethodHelper::GetArraySizeFromParam(uint8_t paramIndex,
-                                        uint32_t* result) const
+                                        HandleValue maybeArray,
+                                        uint32_t* result)
 {
     nsresult rv;
     const nsXPTParamInfo& paramInfo = mMethodInfo->GetParam(paramIndex);
@@ -1490,6 +1497,22 @@ CallMethodHelper::GetArraySizeFromParam(uint8_t paramIndex,
     rv = mIFaceInfo->GetSizeIsArgNumberForParam(mVTableIndex, &paramInfo, 0, &paramIndex);
     if (NS_FAILED(rv))
         return Throw(NS_ERROR_XPC_CANT_GET_ARRAY_INFO, mCallContext);
+
+    // If the array length wasn't passed, it might have been listed as optional.
+    // When converting arguments from JS to C++, we pass the array as |maybeArray|,
+    // and give ourselves the chance to infer the length. Once we have it, we stick
+    // it in the right slot so that we can find it again when cleaning up the params.
+    // from the array.
+    if (paramIndex >= mArgc && maybeArray.isObject()) {
+        MOZ_ASSERT(mMethodInfo->GetParam(paramIndex).IsOptional());
+        RootedObject arrayOrNull(mCallContext, maybeArray.isObject() ? &maybeArray.toObject()
+                                                                     : nullptr);
+        if (!JS_IsArrayObject(mCallContext, maybeArray) ||
+            !JS_GetArrayLength(mCallContext, arrayOrNull, &GetDispatchParam(paramIndex)->val.u32))
+        {
+            return Throw(NS_ERROR_XPC_CANT_CONVERT_OBJECT_TO_ARRAY, mCallContext);
+        }
+    }
 
     *result = GetDispatchParam(paramIndex)->val.u32;
 
@@ -1586,7 +1609,7 @@ CallMethodHelper::GatherAndConvertResults()
             datum_type = type;
 
         if (isArray || isSizedString) {
-            if (!GetArraySizeFromParam(i, &array_count))
+            if (!GetArraySizeFromParam(i, UndefinedHandleValue, &array_count))
                 return false;
         }
 
@@ -1968,7 +1991,7 @@ CallMethodHelper::ConvertDependentParam(uint8_t i)
     nsresult err;
 
     if (isArray || isSizedString) {
-        if (!GetArraySizeFromParam(i, &array_count))
+        if (!GetArraySizeFromParam(i, src, &array_count))
             return false;
 
         if (isArray) {

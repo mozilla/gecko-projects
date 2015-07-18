@@ -1406,6 +1406,29 @@ DoubleValue(double dbl)
     return v;
 }
 
+static inline JS_VALUE_CONSTEXPR Value
+CanonicalizedDoubleValue(double d)
+{
+    /*
+     * This is a manually inlined version of:
+     *    d = JS_CANONICALIZE_NAN(d);
+     *    return IMPL_TO_JSVAL(DOUBLE_TO_JSVAL_IMPL(d));
+     * because GCC from XCode 3.1.4 miscompiles the above code.
+     */
+#if defined(JS_VALUE_IS_CONSTEXPR)
+    return IMPL_TO_JSVAL(MOZ_UNLIKELY(mozilla::IsNaN(d))
+                         ? (jsval_layout) { .asBits = 0x7FF8000000000000LL }
+                         : (jsval_layout) { .asDouble = d });
+#else
+    jsval_layout l;
+    if (MOZ_UNLIKELY(d != d))
+        l.asBits = 0x7FF8000000000000LL;
+    else
+        l.asDouble = d;
+    return IMPL_TO_JSVAL(l);
+#endif
+}
+
 static inline Value
 DoubleNaNValue()
 {
@@ -1540,12 +1563,12 @@ NumberValue(int32_t i)
     return Int32Value(i);
 }
 
-static inline Value
+static inline JS_VALUE_CONSTEXPR Value
 NumberValue(uint32_t i)
 {
-    Value v;
-    v.setNumber(i);
-    return v;
+    return i <= JSVAL_INT_MAX
+           ? Int32Value(int32_t(i))
+           : CanonicalizedDoubleValue(double(i));
 }
 
 namespace detail {
@@ -1628,7 +1651,7 @@ SameType(const Value& lhs, const Value& rhs)
 
 namespace JS {
 JS_PUBLIC_API(void) HeapValuePostBarrier(Value* valuep, const Value& prev, const Value& next);
-}
+} // namespace JS
 
 namespace js {
 
@@ -1929,37 +1952,6 @@ static_assert(sizeof(jsval_layout) == sizeof(JS::Value),
 
 /************************************************************************/
 
-static inline JS_VALUE_CONSTEXPR jsval
-DOUBLE_TO_JSVAL(double d)
-{
-    /*
-     * This is a manually inlined version of:
-     *    d = JS_CANONICALIZE_NAN(d);
-     *    return IMPL_TO_JSVAL(DOUBLE_TO_JSVAL_IMPL(d));
-     * because GCC from XCode 3.1.4 miscompiles the above code.
-     */
-#if defined(JS_VALUE_IS_CONSTEXPR)
-    return IMPL_TO_JSVAL(MOZ_UNLIKELY(mozilla::IsNaN(d))
-                         ? (jsval_layout) { .asBits = 0x7FF8000000000000LL }
-                         : (jsval_layout) { .asDouble = d });
-#else
-    jsval_layout l;
-    if (MOZ_UNLIKELY(d != d))
-        l.asBits = 0x7FF8000000000000LL;
-    else
-        l.asDouble = d;
-    return IMPL_TO_JSVAL(l);
-#endif
-}
-
-static inline JS_VALUE_CONSTEXPR jsval
-UINT_TO_JSVAL(uint32_t i)
-{
-    return i <= JSVAL_INT_MAX
-           ? JS::Int32Value(int32_t(i))
-           : DOUBLE_TO_JSVAL((double)i);
-}
-
 namespace JS {
 
 extern JS_PUBLIC_DATA(const HandleValue) NullHandleValue;
@@ -1967,7 +1959,7 @@ extern JS_PUBLIC_DATA(const HandleValue) UndefinedHandleValue;
 extern JS_PUBLIC_DATA(const HandleValue) TrueHandleValue;
 extern JS_PUBLIC_DATA(const HandleValue) FalseHandleValue;
 
-}
+} // namespace JS
 
 #undef JS_VALUE_IS_CONSTEXPR
 #undef JS_RETURN_LAYOUT_FROM_BITS

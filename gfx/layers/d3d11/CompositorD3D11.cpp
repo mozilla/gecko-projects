@@ -135,10 +135,7 @@ CompositorD3D11::Initialize()
 
   ScopedGfxFeatureReporter reporter("D3D11 Layers", force);
 
-  if (!gfxPlatform::CanUseDirect3D11()) {
-    NS_WARNING("Direct3D 11-accelerated layers are not supported on this system.");
-    return false;
-  }
+  MOZ_ASSERT(gfxPlatform::CanUseDirect3D11());
 
   HRESULT hr;
 
@@ -389,6 +386,10 @@ CompositorD3D11::Initialize()
     // We need this because we don't want DXGI to respond to Alt+Enter.
     dxgiFactory->MakeWindowAssociation(swapDesc.OutputWindow,
                                        DXGI_MWA_NO_WINDOW_CHANGES);
+  }
+
+  if (!mWidget->InitCompositor(this)) {
+    return false;
   }
 
   reporter.SetSuccessful();

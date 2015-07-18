@@ -16,8 +16,8 @@ namespace mozilla {
 namespace media {
 template<class T>
 class IntervalSet;
-}
-}
+} // namespace media
+} // namespace mozilla
 
 template<class E>
 struct nsTArray_CopyChooser<mozilla::media::IntervalSet<E>>
@@ -155,6 +155,11 @@ public:
   {
     return (mStart - mFuzz < aOther.mEnd + aOther.mFuzz) &&
       (aOther.mStart - aOther.mFuzz < mEnd + mFuzz);
+  }
+
+  bool IntersectsStrict(const SelfType& aOther) const
+  {
+    return mStart < aOther.mEnd && aOther.mStart < mEnd;
   }
 
   // Same as Intersects, but including the boundaries.
@@ -308,14 +313,18 @@ public:
   SelfType& operator= (const ElemType& aInterval)
   {
     mIntervals.Clear();
-    mIntervals.AppendElement(aInterval);
+    if (!aInterval.IsEmpty()) {
+      mIntervals.AppendElement(aInterval);
+    }
     return *this;
   }
 
   SelfType& operator= (ElemType&& aInterval)
   {
     mIntervals.Clear();
-    mIntervals.AppendElement(Move(aInterval));
+    if (!aInterval.IsEmpty()) {
+      mIntervals.AppendElement(Move(aInterval));
+    }
     return *this;
   }
 
@@ -463,7 +472,7 @@ public:
     const ContainerType& other = aOther.mIntervals;
     IndexType i = 0, j = 0;
     for (; i < mIntervals.Length() && j < other.Length();) {
-      if (mIntervals[i].Intersects(other[j])) {
+      if (mIntervals[i].IntersectsStrict(other[j])) {
         intersection.AppendElement(mIntervals[i].Intersection(other[j]));
       }
       if (mIntervals[i].mEnd < other[j].mEnd) {

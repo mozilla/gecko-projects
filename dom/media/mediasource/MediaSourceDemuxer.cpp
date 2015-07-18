@@ -10,6 +10,7 @@
 
 #include "MediaSourceDemuxer.h"
 #include "SourceBufferList.h"
+#include "nsPrintfCString.h"
 
 namespace mozilla {
 
@@ -23,8 +24,8 @@ using media::TimeIntervals;
 #define EOS_FUZZ_US 125000
 
 MediaSourceDemuxer::MediaSourceDemuxer()
-  : mTaskQueue(new MediaTaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK),
-                                  /* aSupportsTailDispatch = */ true))
+  : mTaskQueue(new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK),
+                             /* aSupportsTailDispatch = */ true))
   , mMonitor("MediaSourceDemuxer")
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -224,6 +225,41 @@ MediaSourceDemuxer::~MediaSourceDemuxer()
   mTaskQueue = nullptr;
 }
 
+void
+MediaSourceDemuxer::GetMozDebugReaderData(nsAString& aString)
+{
+  MonitorAutoLock mon(mMonitor);
+  nsAutoCString result;
+  result += nsPrintfCString("Dumping data for demuxer %p:\n", this);
+  if (mAudioTrack) {
+    result += nsPrintfCString("\tDumping Audio Track Buffer(%s): - mLastAudioTime: %f\n"
+                              "\t\tNumSamples:%u Size:%u NextGetSampleIndex:%u NextInsertionIndex:%d\n",
+                              mAudioTrack->mAudioTracks.mInfo->mMimeType.get(),
+                              mAudioTrack->mAudioTracks.mNextSampleTime.ToSeconds(),
+                              mAudioTrack->mAudioTracks.mBuffers[0].Length(),
+                              mAudioTrack->mAudioTracks.mSizeBuffer,
+                              mAudioTrack->mAudioTracks.mNextGetSampleIndex.valueOr(-1),
+                              mAudioTrack->mAudioTracks.mNextInsertionIndex.valueOr(-1));
+
+    result += nsPrintfCString("\t\tBuffered: ranges=%s\n",
+                              DumpTimeRanges(mAudioTrack->SafeBuffered(TrackInfo::kAudioTrack)).get());
+  }
+  if (mVideoTrack) {
+    result += nsPrintfCString("\tDumping Video Track Buffer(%s) - mLastVideoTime: %f\n"
+                              "\t\tNumSamples:%u Size:%u NextGetSampleIndex:%u NextInsertionIndex:%d\n",
+                              mVideoTrack->mVideoTracks.mInfo->mMimeType.get(),
+                              mVideoTrack->mVideoTracks.mNextSampleTime.ToSeconds(),
+                              mVideoTrack->mVideoTracks.mBuffers[0].Length(),
+                              mVideoTrack->mVideoTracks.mSizeBuffer,
+                              mVideoTrack->mVideoTracks.mNextGetSampleIndex.valueOr(-1),
+                              mVideoTrack->mVideoTracks.mNextInsertionIndex.valueOr(-1));
+
+    result += nsPrintfCString("\t\tBuffered: ranges=%s\n",
+                              DumpTimeRanges(mVideoTrack->SafeBuffered(TrackInfo::kVideoTrack)).get());
+  }
+  aString += NS_ConvertUTF8toUTF16(result);
+}
+
 MediaSourceTrackDemuxer::MediaSourceTrackDemuxer(MediaSourceDemuxer* aParent,
                                                  TrackInfo::TrackType aType,
                                                  TrackBuffersManager* aManager)
@@ -314,7 +350,10 @@ MediaSourceTrackDemuxer::BreakCycles()
 {
   nsRefPtr<MediaSourceTrackDemuxer> self = this;
   nsCOMPtr<nsIRunnable> task =
-    NS_NewRunnableFunction([self]() { self->mParent = nullptr; } );
+    NS_NewRunnableFunction([self]() {
+      self->mParent = nullptr;
+      self->mManager = nullptr;
+    } );
   mParent->GetTaskQueue()->Dispatch(task.forget());
 }
 

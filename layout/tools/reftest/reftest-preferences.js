@@ -59,9 +59,14 @@
     // desired side-effect of preventing our geoip lookup.
     branch.setBoolPref("browser.search.isUS", true);
     branch.setCharPref("browser.search.countryCode", "US");
+    // Prevent the geoSpecificDefaults XHR by emptying the URL.
+    branch.setCharPref("browser.search.geoSpecificDefaults.url", "");
 
     // Make sure SelfSupport doesn't hit the network.
     branch.setCharPref("browser.selfsupport.url", "https://%(server)s/selfsupport-dummy/");
 
     // Disable periodic updates of service workers.
     branch.setBoolPref("dom.serviceWorkers.periodic-updates.enabled", false);
+
+    // Allow XUL and XBL files to be opened from file:// URIs
+    branch.setBoolPref("dom.allow_XUL_XBL_for_file", true);

@@ -298,6 +298,8 @@ NS_IMPL_ISUPPORTS(CompareCache, nsIStreamLoaderObserver)
 class CompareManager final : public PromiseNativeHandler
 {
 public:
+  NS_DECL_ISUPPORTS
+
   explicit CompareManager(CompareCallback* aCallback)
     : mCallback(aCallback)
     , mState(WaitingForOpen)
@@ -647,6 +649,8 @@ private:
   bool mInCache;
 };
 
+NS_IMPL_ISUPPORTS0(CompareManager)
+
 NS_IMETHODIMP
 CompareNetwork::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
 {
@@ -943,7 +947,7 @@ CompareCache::ManageValueResult(JSContext* aCx, JS::Handle<JS::Value> aValue)
   }
 }
 
-} // anonymous namespace
+} // namespace
 
 nsresult
 PurgeCache(nsIPrincipal* aPrincipal, const nsAString& aCacheName)
@@ -1015,6 +1019,6 @@ Compare(nsIPrincipal* aPrincipal, const nsAString& aCacheName,
   return NS_OK;
 }
 
-} // serviceWorkerScriptCache namespace
+} // namespace serviceWorkerScriptCache
 
 END_WORKERS_NAMESPACE

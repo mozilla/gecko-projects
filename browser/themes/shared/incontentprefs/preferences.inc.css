@@ -231,6 +231,10 @@ description > html|a {
   box-shadow: 0px 0px 0px 1px #0095DD;
 }
 
+#fxaProfileImage:active {
+  box-shadow: 0px 0px 0px 1px #ff9500;
+}
+
 #noFxaAccount {
   /* Overriding the margins from the base preferences.css theme file.
      These overrides can be simplified by fixing bug 1027174 */
@@ -384,11 +388,19 @@ description > html|a {
  * Sync
  */
 
-#fxaDeviceName {
-  margin: 14px 0px;
+#fxaSyncEngines > vbox:first-child {
+  margin-right: 80px;
+}
+
+#fxaSyncComputerName {
+  margin-left: 0px;
 }
 
 #fxaSyncComputerName.plain {
   background-color: transparent;
   opacity: 1;
+}
+
+#tosPP-small-ToS {
+  margin-bottom: 1em;
 }

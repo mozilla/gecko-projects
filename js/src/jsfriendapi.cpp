@@ -50,7 +50,6 @@ PerThreadDataFriendFields::PerThreadDataFriendFields()
     for (int i=0; i<StackKindCount; i++)
         nativeStackLimit[i] = UINTPTR_MAX;
 #endif
-    PodArrayZero(thingGCRooters);
 }
 
 JS_FRIEND_API(void)
@@ -493,7 +492,7 @@ js::SetPreserveWrapperCallback(JSRuntime* rt, PreserveWrapperCallback callback)
 namespace js {
 // Defined in vm/GlobalObject.cpp.
 extern size_t sSetProtoCalled;
-}
+} // namespace js
 
 JS_FRIEND_API(size_t)
 JS_SetProtoCalled(JSContext*)
@@ -1190,6 +1189,12 @@ JS_StoreStringPostBarrierCallback(JSContext* cx,
     JSRuntime* rt = cx->runtime();
     if (IsInsideNursery(key))
         rt->gc.storeBuffer.putCallback(callback, key, data);
+}
+
+extern JS_FRIEND_API(void)
+JS_ClearAllPostBarrierCallbacks(JSRuntime* rt)
+{
+    rt->gc.clearPostBarrierCallbacks();
 }
 
 JS_FRIEND_API(bool)

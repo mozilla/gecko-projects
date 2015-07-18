@@ -112,5 +112,5 @@ CompositingRenderTargetOGL::InitializeImpl()
   mInitParams.mStatus = InitParams::INITIALIZED;
 }
 
-}
-}
+} // namespace layers
+} // namespace mozilla

@@ -21,11 +21,11 @@ class MediaRawData;
 
 namespace layers {
 class ImageContainer;
-}
+} // namespace layers
 
 class MediaDataDecoder;
 class MediaDataDecoderCallback;
-class FlushableMediaTaskQueue;
+class FlushableTaskQueue;
 class CDMProxy;
 
 // The PlatformDecoderModule interface is used by the MP4Reader to abstract
@@ -75,16 +75,14 @@ public:
   // that we use on on aTaskQueue to decode the decrypted stream.
   // This is called on the decode task queue.
   static already_AddRefed<PlatformDecoderModule>
-  CreateCDMWrapper(CDMProxy* aProxy,
-                   bool aHasAudio,
-                   bool aHasVideo);
+  CreateCDMWrapper(CDMProxy* aProxy);
 #endif
 
   // Creates a decoder.
   // See CreateVideoDecoder and CreateAudioDecoder for implementation details.
   virtual already_AddRefed<MediaDataDecoder>
   CreateDecoder(const TrackInfo& aConfig,
-                FlushableMediaTaskQueue* aTaskQueue,
+                FlushableTaskQueue* aTaskQueue,
                 MediaDataDecoderCallback* aCallback,
                 layers::LayersBackend aLayersBackend = layers::LayersBackend::LAYERS_NONE,
                 layers::ImageContainer* aImageContainer = nullptr);
@@ -132,7 +130,7 @@ protected:
   CreateVideoDecoder(const VideoInfo& aConfig,
                      layers::LayersBackend aLayersBackend,
                      layers::ImageContainer* aImageContainer,
-                     FlushableMediaTaskQueue* aVideoTaskQueue,
+                     FlushableTaskQueue* aVideoTaskQueue,
                      MediaDataDecoderCallback* aCallback) = 0;
 
   // Creates an Audio decoder with the specified properties.
@@ -147,7 +145,7 @@ protected:
   // This is called on the decode task queue.
   virtual already_AddRefed<MediaDataDecoder>
   CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableMediaTaskQueue* aAudioTaskQueue,
+                     FlushableTaskQueue* aAudioTaskQueue,
                      MediaDataDecoderCallback* aCallback) = 0;
 
   // Caches pref media.fragmented-mp4.use-blank-decoder
@@ -197,7 +195,7 @@ public:
 // should (like in Flush()).
 //
 // Decoding is done asynchronously. Any async work can be done on the
-// MediaTaskQueue passed into the PlatformDecoderModules's Create*Decoder()
+// TaskQueue passed into the PlatformDecoderModules's Create*Decoder()
 // function. This may not be necessary for platforms with async APIs
 // for decoding.
 class MediaDataDecoder {

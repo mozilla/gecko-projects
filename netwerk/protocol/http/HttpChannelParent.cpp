@@ -98,7 +98,7 @@ HttpChannelParent::ActorDestroy(ActorDestroyReason why)
   // If this is an intercepted channel, we need to make sure that any resources are
   // cleaned up to avoid leaks.
   if (mInterceptedChannel) {
-    mInterceptedChannel->Cancel();
+    mInterceptedChannel->Cancel(NS_ERROR_INTERCEPTION_FAILED);
     mInterceptedChannel = nullptr;
   }
 }
@@ -274,7 +274,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const bool&                allowSpdy,
                                  const bool&                allowAltSvc,
                                  const OptionalFileDescriptorSet& aFds,
-                                 const LoadInfoArgs&        aLoadInfoArgs,
+                                 const OptionalLoadInfoArgs& aLoadInfoArgs,
                                  const OptionalHttpResponseHead& aSynthesizedResponseHead,
                                  const uint32_t&            aCacheKey)
 {
@@ -1321,4 +1321,5 @@ HttpChannelParent::ReportSecurityMessage(const nsAString& aMessageTag,
   return NS_OK;
 }
 
-}} // mozilla::net
+} // namespace net
+} // namespace mozilla

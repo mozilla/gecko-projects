@@ -104,7 +104,9 @@
 namespace js {
 
 template <typename T>
-struct GCMethods {};
+struct GCMethods {
+    static T initial() { return T(); }
+};
 
 template <typename T>
 class RootedBase {};
@@ -507,69 +509,6 @@ class MOZ_STACK_CLASS MutableHandle : public js::MutableHandleBase<T>
 namespace js {
 
 /*
- * InternalHandle is a handle to an internal pointer into a gcthing. Use
- * InternalHandle when you have a pointer to a direct field of a gcthing, or
- * when you need a parameter type for something that *may* be a pointer to a
- * direct field of a gcthing.
- */
-template <typename T>
-class InternalHandle {};
-
-template <typename T>
-class InternalHandle<T*>
-{
-    void * const* holder;
-    size_t offset;
-
-  public:
-    /*
-     * Create an InternalHandle using a Handle to the gcthing containing the
-     * field in question, and a pointer to the field.
-     */
-    template<typename H>
-    InternalHandle(const JS::Handle<H>& handle, T* field)
-      : holder((void**)handle.address()), offset(uintptr_t(field) - uintptr_t(handle.get()))
-    {}
-
-    /*
-     * Create an InternalHandle to a field within a Rooted<>.
-     */
-    template<typename R>
-    InternalHandle(const JS::Rooted<R>& root, T* field)
-      : holder((void**)root.address()), offset(uintptr_t(field) - uintptr_t(root.get()))
-    {}
-
-    InternalHandle(const InternalHandle<T*>& other)
-      : holder(other.holder), offset(other.offset) {}
-
-    T* get() const { return reinterpret_cast<T*>(uintptr_t(*holder) + offset); }
-
-    const T& operator*() const { return *get(); }
-    T* operator->() const { return get(); }
-
-    static InternalHandle<T*> fromMarkedLocation(T* fieldPtr) {
-        return InternalHandle(fieldPtr);
-    }
-
-  private:
-    /*
-     * Create an InternalHandle to something that is not a pointer to a
-     * gcthing, and so does not need to be rooted in the first place. Use these
-     * InternalHandles to pass pointers into functions that also need to accept
-     * regular InternalHandles to gcthing fields.
-     *
-     * Make this private to prevent accidental misuse; this is only for
-     * fromMarkedLocation().
-     */
-    explicit InternalHandle(T* field)
-      : holder(&js::ConstNullValue),
-        offset(uintptr_t(field))
-    {}
-
-    void operator=(InternalHandle<T*> other) = delete;
-};
-
-/*
  * By default, things should use the inheritance hierarchy to find their
  * ThingRootKind. Some pointer types are explicitly set in jspubtd.h so that
  * Rooted<T> may be used without the class definition being available.
@@ -627,6 +566,54 @@ struct GCMethods<JSFunction*>
 
 namespace JS {
 
+// To use a static class or struct as part of a Rooted/Handle/MutableHandle,
+// ensure that it derives from StaticTraceable (i.e. so that automatic upcast
+// via calls works) and ensure that a method |static void trace(T*, JSTracer*)|
+// exists on the class.
+class StaticTraceable
+{
+  public:
+    static js::ThingRootKind rootKind() { return js::THING_ROOT_STATIC_TRACEABLE; }
+};
+
+} /* namespace JS */
+
+namespace js {
+
+template <typename T>
+class DispatchWrapper
+{
+    static_assert(mozilla::IsBaseOf<JS::StaticTraceable, T>::value,
+                  "DispatchWrapper is intended only for usage with a StaticTraceable");
+
+    using TraceFn = void (*)(T*, JSTracer*);
+    TraceFn tracer;
+#if JS_BITS_PER_WORD == 32
+    uint32_t padding; // Ensure the storage fields have CellSize alignment.
+#endif
+    T storage;
+
+  public:
+    // Mimic a pointer type, so that we can drop into Rooted.
+    MOZ_IMPLICIT DispatchWrapper(const T& initial) : tracer(&T::trace), storage(initial) {}
+    T* operator &() { return &storage; }
+    const T* operator &() const { return &storage; }
+    operator T&() { return storage; }
+    operator const T&() const { return storage; }
+
+    // Trace the contained storage (of unknown type) using the trace function
+    // we set aside when we did know the type.
+    static void TraceWrapped(JSTracer* trc, JS::StaticTraceable* thingp, const char* name) {
+        auto wrapper = reinterpret_cast<DispatchWrapper*>(
+                           uintptr_t(thingp) - offsetof(DispatchWrapper, storage));
+        wrapper->tracer(&wrapper->storage, trc);
+    }
+};
+
+} /* namespace js */
+
+namespace JS {
+
 /*
  * Local variable of type T whose value is always rooted. This is typically
  * used for local variables, or for non-rooted values being passed to a
@@ -642,7 +629,7 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
     template <typename CX>
     void init(CX* cx) {
         js::ThingRootKind kind = js::RootKind<T>::rootKind();
-        this->stack = &cx->thingGCRooters[kind];
+        this->stack = &cx->roots.stackRoots_[kind];
         this->prev = *stack;
         *stack = reinterpret_cast<Rooted<void*>*>(this);
     }
@@ -743,10 +730,18 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
     Rooted<void*>* prev;
 
     /*
-     * |ptr| must be the last field in Rooted because the analysis treats all
-     * Rooted as Rooted<void*> during the analysis. See bug 829372.
+     * For pointer types, the TraceKind for tracing is based on the list it is
+     * in (selected via rootKind), so no additional storage is required here.
+     * All StaticTraceable, however, share the same list, so the function to
+     * call for tracing is stored adjacent to the struct. Since C++ cannot
+     * templatize on storage class, this is implemented via the wrapper class
+     * DispatchWrapper.
      */
-    T ptr;
+    using MaybeWrapped = typename mozilla::Conditional<
+        mozilla::IsBaseOf<StaticTraceable, T>::value,
+        js::DispatchWrapper<T>,
+        T>::Type;
+    MaybeWrapped ptr;
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 

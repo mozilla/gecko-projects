@@ -631,7 +631,7 @@ imgRequest::SetCacheValidation(imgCacheEntry* aCacheEntry, nsIRequest* aRequest)
   }
 }
 
-namespace { // anon
+namespace {
 
 already_AddRefed<nsIApplicationCache>
 GetApplicationCache(nsIRequest* aRequest)
@@ -659,7 +659,7 @@ GetApplicationCache(nsIRequest* aRequest)
   return appCache.forget();
 }
 
-} // anon
+} // namespace
 
 bool
 imgRequest::CacheChanged(nsIRequest* aNewRequest)
@@ -940,18 +940,18 @@ PrepareForNewPart(nsIRequest* aRequest, nsIInputStream* aInStr, uint32_t aCount,
 
   nsCOMPtr<nsIChannel> chan(do_QueryInterface(aRequest));
   if (result.mContentType.IsEmpty()) {
-    nsresult rv = NS_ERROR_FAILURE;
-    if (chan) {
-      rv = chan->GetContentType(result.mContentType);
-      chan->GetContentDispositionHeader(result.mContentDisposition);
-    }
-
+    nsresult rv = chan ? chan->GetContentType(result.mContentType)
+                       : NS_ERROR_FAILURE;
     if (NS_FAILED(rv)) {
       MOZ_LOG(GetImgLog(),
-             LogLevel::Error, ("imgRequest::PrepareForNewPart "
-                            "-- Content type unavailable from the channel\n"));
+              LogLevel::Error, ("imgRequest::PrepareForNewPart -- "
+                                "Content type unavailable from the channel\n"));
       return result;
     }
+  }
+
+  if (chan) {
+    chan->GetContentDispositionHeader(result.mContentDisposition);
   }
 
   MOZ_LOG(GetImgLog(), LogLevel::Debug,
@@ -1260,7 +1260,17 @@ imgRequest::OnRedirectVerifyCallback(nsresult result)
                                     &schemeLocal))  ||
       (!isHttps && !isChrome && !schemeLocal)) {
     MutexAutoLock lock(mMutex);
-    mHadInsecureRedirect = true;
+
+    // The csp directive upgrade-insecure-requests performs an internal redirect
+    // to upgrade all requests from http to https before any data is fetched from
+    // the network. Do not pollute mHadInsecureRedirect in case of such an internal
+    // redirect.
+    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
+    bool upgradeInsecureRequests = loadInfo ? loadInfo->GetUpgradeInsecureRequests()
+                                            : false;
+    if (!upgradeInsecureRequests) {
+      mHadInsecureRedirect = true;
+    }
   }
 
   // Update the current URI.

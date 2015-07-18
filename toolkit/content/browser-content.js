@@ -29,6 +29,7 @@ let ClickEventHandler = {
     this._screenX = null;
     this._screenY = null;
     this._lastFrame = null;
+    this.autoscrollLoop = this.autoscrollLoop.bind(this);
 
     Services.els.addSystemEventListener(global, "mousedown", this, true);
 
@@ -142,9 +143,9 @@ let ClickEventHandler = {
     this._screenY = event.screenY;
     this._scrollErrorX = 0;
     this._scrollErrorY = 0;
-    this._lastFrame = content.mozAnimationStartTime;
+    this._lastFrame = content.performance.now();
 
-    content.mozRequestAnimationFrame(this);
+    content.requestAnimationFrame(this.autoscrollLoop);
   },
 
   stopScroll: function() {
@@ -211,11 +212,7 @@ let ClickEventHandler = {
       this._scrollable.scrollLeft += actualScrollX;
       this._scrollable.scrollTop += actualScrollY;
     }
-    content.mozRequestAnimationFrame(this);
-  },
-
-  sample: function(timestamp) {
-    this.autoscrollLoop(timestamp);
+    content.requestAnimationFrame(this.autoscrollLoop);
   },
 
   handleEvent: function(event) {
@@ -392,7 +389,7 @@ let Printing = {
     let data = message.data;
     switch(message.name) {
       case "Printing:Preview:Enter": {
-        this.enterPrintPreview(objects.contentWindow);
+        this.enterPrintPreview(Services.wm.getOuterWindowWithId(data.windowID));
         break;
       }
 
@@ -412,7 +409,7 @@ let Printing = {
       }
 
       case "Printing:Print": {
-        this.print(objects.contentWindow);
+        this.print(Services.wm.getOuterWindowWithId(data.windowID));
         break;
       }
     }
@@ -691,3 +688,39 @@ addMessageListener("WebChannelMessageToContent", function (e) {
     Cu.reportError("WebChannel message failed. No message data.");
   }
 });
+
+let MediaPlaybackListener = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+
+  init() {
+    Services.obs.addObserver(this, "media-playback", false);
+    addMessageListener("MediaPlaybackMute", this);
+    addEventListener("unload", () => {
+      MediaPlaybackListener.uninit();
+    });
+  },
+
+  uninit() {
+    Services.obs.removeObserver(this, "media-playback");
+    removeMessageListener("MediaPlaybackMute", this);
+  },
+
+  observe(subject, topic, data) {
+    if (topic === "media-playback") {
+      if (subject && subject.top == global.content) {
+        let name = "MediaPlayback:";
+        name += (data === "active") ? "Start" : "Stop";
+        sendAsyncMessage(name);
+      }
+    }
+  },
+
+  receiveMessage(msg) {
+    if (msg.name == "MediaPlaybackMute") {
+      let utils = global.content.QueryInterface(Ci.nsIInterfaceRequestor)
+                                .getInterface(Ci.nsIDOMWindowUtils);
+      utils.audioMuted = msg.data.type === "mute";
+    }
+  },
+};
+MediaPlaybackListener.init();

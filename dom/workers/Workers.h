@@ -39,12 +39,13 @@ class nsIPrincipal;
 class nsILoadGroup;
 class nsITabChild;
 class nsIChannel;
+class nsIRunnable;
 class nsIURI;
 
 namespace mozilla {
 namespace ipc {
 class PrincipalInfo;
-}
+} // namespace ipc
 
 namespace dom {
 // If you change this, the corresponding list in nsIWorkerDebugger.idl needs to
@@ -55,8 +56,9 @@ enum WorkerType
   WorkerTypeShared,
   WorkerTypeService
 };
-}
-}
+
+} // namespace dom
+} // namespace mozilla
 
 BEGIN_WORKERS_NAMESPACE
 
@@ -219,6 +221,12 @@ struct WorkerLoadInfo
   nsCOMPtr<nsIContentSecurityPolicy> mCSP;
   nsCOMPtr<nsIChannel> mChannel;
   nsCOMPtr<nsILoadGroup> mLoadGroup;
+
+  // mLoadFailedAsyncRunnable will execute on main thread if script loading
+  // fails during script loading.  If script loading is never started due to
+  // a synchronous error, then the runnable is never executed.  The runnable
+  // is guaranteed to be released on the main thread.
+  nsCOMPtr<nsIRunnable> mLoadFailedAsyncRunnable;
 
   class InterfaceRequestor final : public nsIInterfaceRequestor
   {

@@ -115,8 +115,8 @@ public:
     virtual gfxPlatformFontList* CreatePlatformFontList();
 
     virtual already_AddRefed<gfxASurface>
-      CreateOffscreenSurface(const IntSize& size,
-                             gfxContentType contentType) override;
+      CreateOffscreenSurface(const IntSize& aSize,
+                             gfxImageFormat aFormat) override;
 
     virtual already_AddRefed<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
@@ -268,6 +268,12 @@ public:
     static mozilla::Atomic<size_t> sD3D9SharedTextureUsed;
 
 protected:
+    bool AccelerateLayersByDefault() override {
+      return true;
+    }
+    void GetAcceleratedCompositorBackends(nsTArray<mozilla::layers::LayersBackend>& aBackends);
+
+protected:
     RenderMode mRenderMode;
 
     int8_t mUseClearTypeForDownloadableFonts;
@@ -275,7 +281,26 @@ protected:
 
 private:
     void Init();
+
     void InitD3D11Devices();
+
+    // Used by InitD3D11Devices().
+    enum class D3D11Status {
+      Ok,
+      TryWARP,
+      ForceWARP,
+      Blocked
+    };
+    D3D11Status CheckD3D11Support();
+    bool AttemptD3D11DeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptWARPDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptD3D11ImageBridgeDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+    bool AttemptD3D11ContentDeviceCreation(const nsTArray<D3D_FEATURE_LEVEL>& aFeatureLevels);
+
+    // Used by UpdateRenderMode().
+    void InitD2DSupport();
+    void InitDWriteSupport();
+
     IDXGIAdapter1 *GetDXGIAdapter();
     bool IsDeviceReset(HRESULT hr, DeviceResetReason* aReason);
 

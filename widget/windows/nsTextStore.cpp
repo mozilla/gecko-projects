@@ -657,6 +657,24 @@ GetModifiersName(Modifiers aModifiers)
   return names;
 }
 
+class GetWritingModeName : public nsAutoCString
+{
+public:
+  GetWritingModeName(const WritingMode& aWritingMode)
+  {
+    if (!aWritingMode.IsVertical()) {
+      AssignLiteral("Horizontal");
+      return;
+    }
+    if (aWritingMode.IsVerticalLR()) {
+      AssignLiteral("Vertical (LR)");
+      return;
+    }
+    AssignLiteral("Vertical (RL)");
+  }
+  virtual ~GetWritingModeName() {}
+};
+
 /******************************************************************/
 /* InputScopeImpl                                                 */
 /******************************************************************/
@@ -1230,6 +1248,7 @@ nsTextStore::nsTextStore()
   , mPendingOnSelectionChange(false)
   , mPendingOnLayoutChange(false)
   , mPendingDestroy(false)
+  , mPendingClearLockedContent(false)
   , mNativeCaretIsCreated(false)
   , mDeferNotifyingTSF(false)
 {
@@ -1604,7 +1623,10 @@ nsTextStore::FlushPendingActions()
     return;
   }
 
-  mLockedContent.Clear();
+  // If dispatching event causes NOTIFY_IME_OF_COMPOSITION_UPDATE, we should
+  // wait to abandon mLockedContent until it's notified because the dispatched
+  // event may be handled asynchronously in e10s mode.
+  mPendingClearLockedContent = !mPendingActions.Length();
 
   nsRefPtr<nsWindowBase> kungFuDeathGrip(mWidget);
   for (uint32_t i = 0; i < mPendingActions.Length(); i++) {
@@ -1638,6 +1660,8 @@ nsTextStore::FlushPendingActions()
         WidgetCompositionEvent compositionStart(true, NS_COMPOSITION_START,
                                                 mWidget);
         mWidget->InitEvent(compositionStart);
+        // NS_COMPOSITION_START always causes NOTIFY_IME_OF_COMPOSITION_UPDATE.
+        mPendingClearLockedContent = true;
         DispatchEvent(compositionStart);
         if (!mWidget || mWidget->Destroyed()) {
           break;
@@ -1701,6 +1725,11 @@ nsTextStore::FlushPendingActions()
           action.mRanges->AppendElement(wholeRange);
         }
         compositionChange.mRanges = action.mRanges;
+        // When the NS_COMPOSITION_CHANGE causes a DOM text event,
+        // NOTIFY_IME_OF_COMPOSITION_UPDATE will be notified.
+        if (compositionChange.CausesDOMTextEvent()) {
+          mPendingClearLockedContent = true;
+        }
         DispatchEvent(compositionChange);
         // Be aware, the mWidget might already have been destroyed.
         break;
@@ -1721,6 +1750,11 @@ nsTextStore::FlushPendingActions()
                                                  mWidget);
         mWidget->InitEvent(compositionCommit);
         compositionCommit.mData = action.mData;
+        // When the NS_COMPOSITION_COMMIT causes a DOM text event,
+        // NOTIFY_IME_OF_COMPOSITION_UPDATE will be notified.
+        if (compositionCommit.CausesDOMTextEvent()) {
+          mPendingClearLockedContent = true;
+        }
         DispatchEvent(compositionCommit);
         if (!mWidget || mWidget->Destroyed()) {
           break;
@@ -1781,6 +1815,11 @@ nsTextStore::MaybeFlushPendingNotifications()
   if (mPendingDestroy) {
     Destroy();
     return;
+  }
+
+  if (mPendingClearLockedContent) {
+    mPendingClearLockedContent = false;
+    mLockedContent.Clear();
   }
 
   if (mPendingOnLayoutChange) {
@@ -1904,9 +1943,9 @@ nsTextStore::GetSelection(ULONG ulIndex,
 nsTextStore::Content&
 nsTextStore::LockedContent()
 {
-  MOZ_ASSERT(IsReadLocked(),
-             "LockedContent must be called only during the document is locked");
-  if (!IsReadLocked()) {
+  // This should be called when the document is locked or the content hasn't
+  // been abandoned yet.
+  if (NS_WARN_IF(!IsReadLocked() && !mLockedContent.IsInitialized())) {
     mLockedContent.Clear();
     return mLockedContent;
   }
@@ -4176,9 +4215,10 @@ nsTextStore::OnFocusChange(bool aGotFocus,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
+  nsRefPtr<ITfDocumentMgr> prevFocusedDocumentMgr;
+
   // If currently sEnableTextStore has focus, notifies TSF of losing focus.
   if (ThinksHavingFocus()) {
-    nsRefPtr<ITfDocumentMgr> prevFocusedDocumentMgr;
     DebugOnly<HRESULT> hr =
       sThreadMgr->AssociateFocus(
         sEnabledTextStore->mWidget->GetWindowHandle(),
@@ -4314,12 +4354,12 @@ nsTextStore::OnTextChangeInternal(const IMENotification& aIMENotification)
   MOZ_LOG(sTextStoreLog, LogLevel::Debug,
          ("TSF: 0x%p   nsTextStore::OnTextChangeInternal(aIMENotification={ "
           "mMessage=0x%08X, mTextChangeData={ mStartOffset=%lu, "
-          "mOldEndOffset=%lu, mNewEndOffset=%lu}), mSink=0x%p, mSinkMask=%s, "
-          "mComposition.IsComposing()=%s",
+          "mRemovedEndOffset=%lu, mAddedEndOffset=%lu}), mSink=0x%p, "
+          "mSinkMask=%s, mComposition.IsComposing()=%s",
           this, aIMENotification.mMessage,
           aIMENotification.mTextChangeData.mStartOffset,
-          aIMENotification.mTextChangeData.mOldEndOffset,
-          aIMENotification.mTextChangeData.mNewEndOffset, mSink.get(),
+          aIMENotification.mTextChangeData.mRemovedEndOffset,
+          aIMENotification.mTextChangeData.mAddedEndOffset, mSink.get(),
           GetSinkMaskNameStr(mSinkMask).get(),
           GetBoolName(mComposition.IsComposing())));
 
@@ -4343,9 +4383,9 @@ nsTextStore::OnTextChangeInternal(const IMENotification& aIMENotification)
     textChange.acpStart =
       static_cast<LONG>(aIMENotification.mTextChangeData.mStartOffset);
     textChange.acpOldEnd =
-      static_cast<LONG>(aIMENotification.mTextChangeData.mOldEndOffset);
+      static_cast<LONG>(aIMENotification.mTextChangeData.mRemovedEndOffset);
     textChange.acpNewEnd =
-      static_cast<LONG>(aIMENotification.mTextChangeData.mNewEndOffset);
+      static_cast<LONG>(aIMENotification.mTextChangeData.mAddedEndOffset);
     NotifyTSFOfTextChange(textChange);
   } else {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
@@ -4363,6 +4403,8 @@ nsTextStore::OnTextChangeInternal(const IMENotification& aIMENotification)
 void
 nsTextStore::NotifyTSFOfTextChange(const TS_TEXTCHANGE& aTextChange)
 {
+  // XXX We need to cache the text change ranges and notify TSF of that
+  //     the document is unlocked.
   if (NS_WARN_IF(IsReadLocked())) {
     return;
   }
@@ -4390,11 +4432,20 @@ nsTextStore::NotifyTSFOfTextChange(const TS_TEXTCHANGE& aTextChange)
 nsresult
 nsTextStore::OnSelectionChangeInternal(const IMENotification& aIMENotification)
 {
+  const IMENotification::SelectionChangeData& selectionChangeData =
+    aIMENotification.mSelectionChangeData;
   MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-         ("TSF: 0x%p   nsTextStore::OnSelectionChangeInternal(), "
-          "mSink=0x%p, mSinkMask=%s, mIsRecordingActionsWithoutLock=%s, "
-          "mComposition.IsComposing()=%s",
-          this, mSink.get(), GetSinkMaskNameStr(mSinkMask).get(),
+         ("TSF: 0x%p   nsTextStore::OnSelectionChangeInternal("
+          "aIMENotification={ mSelectionChangeData={ mOffset=%lu, mLength=%lu, "
+          "mReversed=%s, mWritingMode=%s, mCausedByComposition=%s, "
+          "mCausedBySelectionEvent=%s } }), mSink=0x%p, mSinkMask=%s, "
+          "mIsRecordingActionsWithoutLock=%s, mComposition.IsComposing()=%s",
+          this, selectionChangeData.mOffset, selectionChangeData.mLength,
+          GetBoolName(selectionChangeData.mReversed),
+          GetWritingModeName(selectionChangeData.GetWritingMode()).get(),
+          GetBoolName(selectionChangeData.mCausedByComposition),
+          GetBoolName(selectionChangeData.mCausedBySelectionEvent),
+          mSink.get(), GetSinkMaskNameStr(mSinkMask).get(),
           GetBoolName(mIsRecordingActionsWithoutLock),
           GetBoolName(mComposition.IsComposing())));
 
@@ -4406,20 +4457,28 @@ nsTextStore::OnSelectionChangeInternal(const IMENotification& aIMENotification)
   }
 
   mSelection.SetSelection(
-    aIMENotification.mSelectionChangeData.mOffset,
-    aIMENotification.mSelectionChangeData.mLength,
-    aIMENotification.mSelectionChangeData.mReversed,
-    aIMENotification.mSelectionChangeData.GetWritingMode());
+    selectionChangeData.mOffset,
+    selectionChangeData.mLength,
+    selectionChangeData.mReversed,
+    selectionChangeData.GetWritingMode());
 
-  if (mIsRecordingActionsWithoutLock) {
-    MOZ_LOG(sTextStoreLog, LogLevel::Info,
-           ("TSF: 0x%p   nsTextStore::OnSelectionChangeInternal(), putting off "
-            "notifying TSF of selection change...", this));
+  if (!selectionChangeData.mCausedBySelectionEvent) {
+    // Should be notified via MaybeFlushPendingNotifications() for keeping
+    // the order of change notifications.
     mPendingOnSelectionChange = true;
-    return NS_OK;
+    if (mIsRecordingActionsWithoutLock) {
+      MOZ_LOG(sTextStoreLog, LogLevel::Info,
+             ("TSF: 0x%p   nsTextStore::OnSelectionChangeInternal(), putting "
+              "off notifying TSF of selection change...", this));
+      return NS_OK;
+    }
+  } else {
+    // If the selection change is caused by setting selection range, we don't
+    // need to notify that.  Additionally, even if there is pending selection
+    // change notification, we don't need to notify that since the selection
+    // range is changed as expected by TSF or TIP.
+    mPendingOnSelectionChange = false;
   }
-
-  NotifyTSFOfSelectionChange();
 
   // Flush remaining pending notifications here if it's possible.
   MaybeFlushPendingNotifications();
@@ -4530,9 +4589,7 @@ nsTextStore::OnUpdateCompositionInternal()
      "mDeferNotifyingTSF=%s",
      this, GetBoolName(mDeferNotifyingTSF)));
 
-  if (!mDeferNotifyingTSF) {
-    return NS_OK;
-  }
+  mPendingClearLockedContent = true;
   mDeferNotifyingTSF = false;
   MaybeFlushPendingNotifications();
   return NS_OK;

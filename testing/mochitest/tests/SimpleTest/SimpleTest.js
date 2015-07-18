@@ -219,27 +219,9 @@ if (typeof(computedStyle) == 'undefined') {
 **/
 SimpleTest.testPluginIsOOP = function () {
     var testPluginIsOOP = false;
-    if (navigator.platform.indexOf("Mac") == 0) {
-        if (SpecialPowers.XPCOMABI.match(/x86-/)) {
-            try {
-                testPluginIsOOP = SpecialPowers.getBoolPref("dom.ipc.plugins.enabled.i386.test.plugin");
-            } catch (e) {
-                testPluginIsOOP = SpecialPowers.getBoolPref("dom.ipc.plugins.enabled.i386");
-            }
-        }
-        else if (SpecialPowers.XPCOMABI.match(/x86_64-/)) {
-            try {
-                testPluginIsOOP = SpecialPowers.getBoolPref("dom.ipc.plugins.enabled.x86_64.test.plugin");
-            } catch (e) {
-                testPluginIsOOP = SpecialPowers.getBoolPref("dom.ipc.plugins.enabled.x86_64");
-            }
-        }
-    }
-    else {
-        testPluginIsOOP = SpecialPowers.getBoolPref("dom.ipc.plugins.enabled");
-    }
-
-    return testPluginIsOOP;
+    var ph = SpecialPowers.Cc["@mozilla.org/plugin/host;1"]
+                          .getService(SpecialPowers.Ci.nsIPluginHost);
+    return ph.isPluginOOP("application/x-test");
 };
 
 SimpleTest._tests = [];
@@ -273,7 +255,15 @@ SimpleTest.ok = function (condition, name, diag) {
       var successInfo = {status:"PASS", expected:"PASS", message:"TEST-PASS"};
       var failureInfo = {status:"FAIL", expected:"PASS", message:"TEST-UNEXPECTED-FAIL"};
     }
-    SimpleTest._logResult(test, successInfo, failureInfo);
+
+    var stack = null;
+    if (!condition) {
+      stack = (new Error).stack.replace(/^(.*@)http:\/\/mochi.test:8888\/tests\//gm, '    $1').split('\n');
+      stack.splice(0, 1);
+      stack = stack.join('\n');
+    }
+
+    SimpleTest._logResult(test, successInfo, failureInfo, stack);
     SimpleTest._tests.push(test);
 };
 
@@ -364,7 +354,7 @@ SimpleTest.requestCompleteLog = function() {
     });
 };
 
-SimpleTest._logResult = function (test, passInfo, failInfo) {
+SimpleTest._logResult = function (test, passInfo, failInfo, stack) {
     var url = SimpleTest._getCurrentTestURL();
     var result = test.result ? passInfo : failInfo;
     var diagnostic = test.diag || null;
@@ -388,7 +378,8 @@ SimpleTest._logResult = function (test, passInfo, failInfo) {
                                                  subtest,
                                                  result.status,
                                                  result.expected,
-                                                 diagnostic);
+                                                 diagnostic,
+                                                 stack);
     } else if (typeof dump === "function") {
         var diagMessage = test.name + (test.diag ? " - " + test.diag : "");
         var debugMsg = [result.message, url, diagMessage].join(' | ');

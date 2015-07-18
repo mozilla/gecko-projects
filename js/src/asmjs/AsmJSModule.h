@@ -70,6 +70,7 @@ enum AsmJSMathBuiltinFunction
 enum AsmJSAtomicsBuiltinFunction
 {
     AsmJSAtomicsBuiltin_compareExchange,
+    AsmJSAtomicsBuiltin_exchange,
     AsmJSAtomicsBuiltin_load,
     AsmJSAtomicsBuiltin_store,
     AsmJSAtomicsBuiltin_fence,
@@ -1630,6 +1631,6 @@ class AsmJSModuleObject : public NativeObject
     static const Class class_;
 };
 
-}  // namespace js
+} // namespace js
 
 #endif /* asmjs_AsmJSModule_h */

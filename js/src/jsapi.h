@@ -741,7 +741,7 @@ JS_NumberValue(double d)
     d = JS::CanonicalizeNaN(d);
     if (mozilla::NumberIsInt32(d, &i))
         return JS::Int32Value(i);
-    return DOUBLE_TO_JSVAL(d);
+    return JS::DoubleValue(d);
 }
 
 /************************************************************************/
@@ -1594,13 +1594,14 @@ namespace JS {
 extern JS_PUBLIC_API(JSObject*)
 CurrentGlobalOrNull(JSContext* cx);
 
-}
+} // namespace JS
 
 /*
- * Initialize the 'Reflect' object on a global object.
+ * Add 'Reflect.parse', a SpiderMonkey extension, to the Reflect object on the
+ * given global.
  */
-extern JS_PUBLIC_API(JSObject*)
-JS_InitReflect(JSContext* cx, JS::HandleObject global);
+extern JS_PUBLIC_API(bool)
+JS_InitReflectParse(JSContext* cx, JS::HandleObject global);
 
 /*
  * Add various profiling-related functions as properties of the given object.
@@ -4043,7 +4044,7 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(AutoSetAsyncStackForNewCalls)
     ~AutoSetAsyncStackForNewCalls();
 };
 
-}
+} // namespace JS
 
 /************************************************************************/
 
@@ -4914,6 +4915,9 @@ JS_DropExceptionState(JSContext* cx, JSExceptionState* state);
  */
 extern JS_PUBLIC_API(JSErrorReport*)
 JS_ErrorFromException(JSContext* cx, JS::HandleObject obj);
+
+extern JS_PUBLIC_API(JSObject*)
+ExceptionStackOrNull(JSContext* cx, JS::HandleObject obj);
 
 /*
  * Throws a StopIteration exception on cx.

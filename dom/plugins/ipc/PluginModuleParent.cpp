@@ -129,7 +129,18 @@ mozilla::plugins::SetupBridge(uint32_t aPluginId,
         // We'll handle the bridging asynchronously
         return true;
     }
-    return PPluginModule::Bridge(aContentParent, chromeParent);
+    *rv = PPluginModule::Bridge(aContentParent, chromeParent);
+    if (NS_FAILED(*rv)) {
+#if defined(MOZ_CRASHREPORTER)
+        // We are going to abort due to the failure, lets note the cause
+        // in the report for diagnosing.
+        nsAutoCString error;
+        error.AppendPrintf("%X %d", *rv, chromeParent->GetIPCChannel()->GetChannelState__TotallyRacy());
+        CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("BridgePluginError"), error);
+#endif
+      return false;
+    }
+    return true;
 }
 
 #ifdef MOZ_CRASHREPORTER_INJECTOR
@@ -347,7 +358,7 @@ PRCList PluginModuleMapping::sModuleListHead =
 
 bool PluginModuleMapping::sIsLoadModuleOnStack = false;
 
-} // anonymous namespace
+} // namespace
 
 void
 mozilla::plugins::TerminatePlugin(uint32_t aPluginId,
@@ -947,7 +958,7 @@ GetProcessCpuUsage(const InfallibleTArray<base::ProcessHandle>& processHandles, 
   return true;
 }
 
-} // anonymous namespace
+} // namespace
 
 #endif // #ifdef XP_WIN
 

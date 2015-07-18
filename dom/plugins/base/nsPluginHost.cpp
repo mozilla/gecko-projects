@@ -186,6 +186,37 @@ PRLogModuleInfo* nsPluginLogging::gPluginLog = nullptr;
 nsIFile *nsPluginHost::sPluginTempDir;
 nsPluginHost *nsPluginHost::sInst;
 
+/* to cope with short read */
+/* we should probably put this into a global library now that this is the second
+   time we need this. */
+static
+PRInt32
+busy_beaver_PR_Read(PRFileDesc *fd, void * start, PRInt32 len)
+{
+    int n;
+    PRInt32 remaining = len;
+
+    while (remaining > 0)
+    {
+        n = PR_Read(fd, start, remaining);
+        if (n < 0)
+        {
+            /* may want to repeat if errno == EINTR */
+            if( (len - remaining) == 0 ) // no octet is ever read
+                return -1;
+            break;
+        }
+        else
+        {
+            remaining -= n;
+            char *cp = (char *) start;
+            cp += n;
+            start = cp;
+        }
+    }
+    return len - remaining;
+}
+
 NS_IMPL_ISUPPORTS0(nsInvalidPluginTag)
 
 nsInvalidPluginTag::nsInvalidPluginTag(const char* aFullPath, int64_t aLastModifiedTime)
@@ -1065,6 +1096,18 @@ nsPluginHost::GetBlocklistStateForType(const nsACString &aMimeType,
 }
 
 NS_IMETHODIMP
+nsPluginHost::IsPluginOOP(const nsACString& aMimeType,
+                          bool* aResult)
+{
+  nsPluginTag* tag = FindNativePluginForType(aMimeType, true);
+  if (!tag) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  *aResult = nsNPAPIPlugin::RunPluginOOP(tag);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsPluginHost::GetPermissionStringForType(const nsACString &aMimeType,
                                          uint32_t aExcludeFlags,
                                          nsACString &aPermissionString)
@@ -1108,7 +1151,8 @@ nsPluginHost::HavePluginForExtension(const nsACString & aExtension,
 }
 
 void
-nsPluginHost::GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray)
+nsPluginHost::GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray,
+                         bool aIncludeDisabled)
 {
   aPluginArray.Clear();
 
@@ -1116,7 +1160,7 @@ nsPluginHost::GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray)
 
   nsPluginTag* plugin = mPlugins;
   while (plugin != nullptr) {
-    if (plugin->IsEnabled()) {
+    if (plugin->IsEnabled() || aIncludeDisabled) {
       aPluginArray.AppendElement(plugin);
     }
     plugin = plugin->mNext;
@@ -1913,7 +1957,7 @@ struct CompareFilesByTime
   }
 };
 
-} // anonymous namespace
+} // namespace
 
 void
 nsPluginHost::AddPluginTag(nsPluginTag* aPluginTag)
@@ -2512,7 +2556,7 @@ nsPluginHost::FindPluginsForContent(uint32_t aPluginEpoch,
   }
 
   nsTArray<nsRefPtr<nsPluginTag>> plugins;
-  GetPlugins(plugins);
+  GetPlugins(plugins, true);
 
   for (size_t i = 0; i < plugins.Length(); i++) {
     nsRefPtr<nsPluginTag> tag = plugins[i];
@@ -2839,7 +2883,9 @@ nsPluginHost::ReadPluginInfo()
   // set rv to return an error on goto out
   rv = NS_ERROR_FAILURE;
 
-  int32_t bread = PR_Read(fd, registry, flen);
+  // We know how many octes we are supposed to read.
+  // So let use the busy_beaver_PR_Read version.
+  int32_t bread = busy_beaver_PR_Read(fd, registry, flen);
 
   PRStatus prrc;
   prrc = PR_Close(fd);
@@ -2850,6 +2896,7 @@ nsPluginHost::ReadPluginInfo()
     return rv;
   }
 
+  // short read error, so to speak.
   if (flen > bread)
     return rv;
 

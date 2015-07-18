@@ -526,7 +526,7 @@ CurrentWindowOrNull(JSContext* cx)
     return glob ? WindowOrNull(glob) : nullptr;
 }
 
-}
+} // namespace xpc
 
 static void
 CompartmentDestroyedCallback(JSFreeOp* fop, JSCompartment* compartment)
@@ -569,24 +569,6 @@ void XPCJSRuntime::TraceAdditionalNativeGrayRoots(JSTracer* trc)
 
     for (XPCRootSetElem* e = mWrappedJSRoots; e ; e = e->GetNextRoot())
         static_cast<nsXPCWrappedJS*>(e)->TraceJS(trc);
-}
-
-// static
-void
-XPCJSRuntime::SuspectWrappedNative(XPCWrappedNative* wrapper,
-                                   nsCycleCollectionNoteRootCallback& cb)
-{
-    if (!wrapper->IsValid() || wrapper->IsWrapperExpired())
-        return;
-
-    MOZ_ASSERT(NS_IsMainThread(),
-               "Suspecting wrapped natives from non-main thread");
-
-    // Only record objects that might be part of a cycle as roots, unless
-    // the callback wants all traces (a debug feature).
-    JSObject* obj = wrapper->GetFlatJSObjectPreserveColor();
-    if (JS::ObjectIsMarkedGray(obj) || cb.WantAllTraces())
-        cb.NoteJSRoot(obj);
 }
 
 void

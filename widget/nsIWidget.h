@@ -37,32 +37,34 @@ class   ViewWrapper;
 class   nsIWidgetListener;
 class   nsIntRegion;
 class   nsIScreen;
+class   nsIRunnable;
 
 namespace mozilla {
 class CompositorVsyncDispatcher;
 class WritingMode;
 namespace dom {
 class TabChild;
-}
+} // namespace dom
 namespace plugins {
 class PluginWidgetChild;
-}
+} // namespace plugins
 namespace layers {
 class Composer2D;
+class Compositor;
 class CompositorChild;
 class LayerManager;
 class LayerManagerComposite;
 class PLayerTransactionChild;
 struct ScrollableLayerGuid;
-}
+} // namespace layers
 namespace gfx {
 class DrawTarget;
 class SourceSurface;
-}
+} // namespace gfx
 namespace widget {
 class TextEventDispatcher;
-}
-}
+} // namespace widget
+} // namespace mozilla
 
 /**
  * Callback function that processes events.
@@ -119,8 +121,8 @@ typedef void* nsNativeWidget;
 #define NS_NATIVE_PLUGIN_ID            105
 
 #define NS_IWIDGET_IID \
-{ 0x53376F57, 0xF081, 0x4949, \
-  { 0xB5, 0x5E, 0x87, 0xEF, 0x6A, 0xE9, 0xE3, 0x5A } };
+{ 0x22b4504e, 0xddba, 0x4211, \
+  { 0xa1, 0x49, 0x6e, 0x11, 0x73, 0xc4, 0x11, 0x45 } }
 
 /*
  * Window shadow styles
@@ -572,8 +574,11 @@ struct SizeConstraints {
 typedef int8_t IMEMessageType;
 enum IMEMessage : IMEMessageType
 {
+  // This is used by IMENotification internally.  This means that the instance
+  // hasn't been initialized yet.
+  NOTIFY_IME_OF_NOTHING,
   // An editable content is getting focus
-  NOTIFY_IME_OF_FOCUS = 1,
+  NOTIFY_IME_OF_FOCUS,
   // An editable content is losing focus
   NOTIFY_IME_OF_BLUR,
   // Selection in the focused editable content is changed
@@ -597,7 +602,7 @@ enum IMEMessage : IMEMessageType
 struct IMENotification
 {
   IMENotification()
-    : mMessage(static_cast<IMEMessage>(-1))
+    : mMessage(NOTIFY_IME_OF_NOTHING)
   {}
 
   MOZ_IMPLICIT IMENotification(IMEMessage aMessage)
@@ -610,12 +615,10 @@ struct IMENotification
         mSelectionChangeData.mWritingMode = 0;
         mSelectionChangeData.mReversed = false;
         mSelectionChangeData.mCausedByComposition = false;
+        mSelectionChangeData.mCausedBySelectionEvent = false;
         break;
       case NOTIFY_IME_OF_TEXT_CHANGE:
-        mTextChangeData.mStartOffset = 0;
-        mTextChangeData.mOldEndOffset = 0;
-        mTextChangeData.mNewEndOffset = 0;
-        mTextChangeData.mCausedByComposition = false;
+        mTextChangeData.Clear();
         break;
       case NOTIFY_IME_OF_MOUSE_BUTTON_EVENT:
         mMouseButtonEventData.mEventMessage = 0;
@@ -630,7 +633,100 @@ struct IMENotification
     }
   }
 
+  void Clear()
+  {
+    mMessage = NOTIFY_IME_OF_NOTHING;
+  }
+
+  bool HasNotification() const
+  {
+    return mMessage != NOTIFY_IME_OF_NOTHING;
+  }
+
+  void MergeWith(const IMENotification& aNotification)
+  {
+    switch (mMessage) {
+      case NOTIFY_IME_OF_NOTHING:
+        MOZ_ASSERT(aNotification.mMessage != NOTIFY_IME_OF_NOTHING);
+        *this = aNotification;
+        break;
+      case NOTIFY_IME_OF_SELECTION_CHANGE:
+        MOZ_ASSERT(aNotification.mMessage == NOTIFY_IME_OF_SELECTION_CHANGE);
+        mSelectionChangeData.mOffset =
+          aNotification.mSelectionChangeData.mOffset;
+        mSelectionChangeData.mLength =
+          aNotification.mSelectionChangeData.mLength;
+        mSelectionChangeData.mWritingMode =
+          aNotification.mSelectionChangeData.mWritingMode;
+        mSelectionChangeData.mReversed =
+          aNotification.mSelectionChangeData.mReversed;
+        if (!mSelectionChangeData.mCausedByComposition) {
+          mSelectionChangeData.mCausedByComposition =
+            aNotification.mSelectionChangeData.mCausedByComposition;
+        } else {
+          mSelectionChangeData.mCausedByComposition =
+            mSelectionChangeData.mCausedByComposition &&
+              aNotification.mSelectionChangeData.mCausedByComposition;
+        }
+        if (!mSelectionChangeData.mCausedBySelectionEvent) {
+          mSelectionChangeData.mCausedBySelectionEvent =
+            aNotification.mSelectionChangeData.mCausedBySelectionEvent;
+        } else {
+          mSelectionChangeData.mCausedBySelectionEvent =
+            mSelectionChangeData.mCausedBySelectionEvent &&
+              aNotification.mSelectionChangeData.mCausedBySelectionEvent;
+        }
+        break;
+      case NOTIFY_IME_OF_TEXT_CHANGE:
+        MOZ_ASSERT(aNotification.mMessage == NOTIFY_IME_OF_TEXT_CHANGE);
+        mTextChangeData += aNotification.mTextChangeData;
+        break;
+      case NOTIFY_IME_OF_COMPOSITION_UPDATE:
+        MOZ_ASSERT(aNotification.mMessage == NOTIFY_IME_OF_COMPOSITION_UPDATE);
+        break;
+      default:
+        MOZ_CRASH("Merging notification isn't supported");
+        break;
+    }
+  }
+
   IMEMessage mMessage;
+
+  struct Point
+  {
+    int32_t mX;
+    int32_t mY;
+
+    void Set(const nsIntPoint& aPoint)
+    {
+      mX = aPoint.x;
+      mY = aPoint.y;
+    }
+    nsIntPoint AsIntPoint() const
+    {
+      return nsIntPoint(mX, mY);
+    }
+  };
+
+  struct Rect
+  {
+    int32_t mX;
+    int32_t mY;
+    int32_t mWidth;
+    int32_t mHeight;
+
+    void Set(const nsIntRect& aRect)
+    {
+      mX = aRect.x;
+      mY = aRect.y;
+      mWidth = aRect.width;
+      mHeight = aRect.height;
+    }
+    nsIntRect AsIntRect() const
+    {
+      return nsIntRect(mX, mY, mWidth, mHeight);
+    }
+  };
 
   // NOTIFY_IME_OF_SELECTION_CHANGE specific data
   struct SelectionChangeData
@@ -644,6 +740,7 @@ struct IMENotification
 
     bool mReversed;
     bool mCausedByComposition;
+    bool mCausedBySelectionEvent;
 
     void SetWritingMode(const WritingMode& aWritingMode);
     WritingMode GetWritingMode() const;
@@ -662,83 +759,120 @@ struct IMENotification
     }
   };
 
+  struct TextChangeDataBase
+  {
+    // mStartOffset is the start offset of modified or removed text in
+    // original content and inserted text in new content.
+    uint32_t mStartOffset;
+    // mRemovalEndOffset is the end offset of modified or removed text in
+    // original content.  If the value is same as mStartOffset, no text hasn't
+    // been removed yet.
+    uint32_t mRemovedEndOffset;
+    // mAddedEndOffset is the end offset of inserted text or same as
+    // mStartOffset if just removed.  The vlaue is offset in the new content.
+    uint32_t mAddedEndOffset;
+
+    bool mCausedByComposition;
+
+    uint32_t OldLength() const
+    {
+      MOZ_ASSERT(IsValid());
+      return mRemovedEndOffset - mStartOffset;
+    }
+    uint32_t NewLength() const
+    {
+      MOZ_ASSERT(IsValid());
+      return mAddedEndOffset - mStartOffset;
+    }
+
+    // Positive if text is added. Negative if text is removed.
+    int64_t Difference() const 
+    {
+      return mAddedEndOffset - mRemovedEndOffset;
+    }
+
+    bool IsInInt32Range() const
+    {
+      MOZ_ASSERT(IsValid());
+      return mStartOffset <= INT32_MAX &&
+             mRemovedEndOffset <= INT32_MAX &&
+             mAddedEndOffset <= INT32_MAX;
+    }
+
+    bool IsValid() const
+    {
+      return !(mStartOffset == UINT32_MAX &&
+               !mRemovedEndOffset && !mAddedEndOffset);
+    }
+
+    void Clear()
+    {
+      mStartOffset = UINT32_MAX;
+      mRemovedEndOffset = mAddedEndOffset = 0;
+    }
+
+    void MergeWith(const TextChangeDataBase& aOther);
+    TextChangeDataBase& operator+=(const TextChangeDataBase& aOther)
+    {
+      MergeWith(aOther);
+      return *this;
+    }
+
+#ifdef DEBUG
+    void Test();
+#endif // #ifdef DEBUG
+  };
+
+  // TextChangeDataBase cannot have constructors because they are used in union.
+  // Therefore, TextChangeData should only implement constructor.  In other
+  // words, add other members to TextChangeDataBase.
+  struct TextChangeData : public TextChangeDataBase
+  {
+    TextChangeData() { Clear(); }
+
+    TextChangeData(uint32_t aStartOffset,
+                   uint32_t aRemovedEndOffset,
+                   uint32_t aAddedEndOffset,
+                   bool aCausedByComposition)
+    {
+      MOZ_ASSERT(aRemovedEndOffset >= aStartOffset,
+                 "removed end offset must not be smaller than start offset");
+      MOZ_ASSERT(aAddedEndOffset >= aStartOffset,
+                 "added end offset must not be smaller than start offset");
+      mStartOffset = aStartOffset;
+      mRemovedEndOffset = aRemovedEndOffset;
+      mAddedEndOffset = aAddedEndOffset;
+      mCausedByComposition = aCausedByComposition;
+    }
+  };
+
+  struct MouseButtonEventData
+  {
+    // The value of WidgetEvent::message
+    uint32_t mEventMessage;
+    // Character offset from the start of the focused editor under the cursor
+    uint32_t mOffset;
+    // Cursor position in pixels relative to the widget
+    Point mCursorPos;
+    // Character rect in pixels under the cursor relative to the widget
+    Rect mCharRect;
+    // The value of WidgetMouseEventBase::button and buttons
+    int16_t mButton;
+    int16_t mButtons;
+    // The value of WidgetInputEvent::modifiers
+    Modifiers mModifiers;
+  };
+
   union
   {
     // NOTIFY_IME_OF_SELECTION_CHANGE specific data
     SelectionChangeData mSelectionChangeData;
 
     // NOTIFY_IME_OF_TEXT_CHANGE specific data
-    struct
-    {
-      uint32_t mStartOffset;
-      uint32_t mOldEndOffset;
-      uint32_t mNewEndOffset;
-
-      bool mCausedByComposition;
-
-      uint32_t OldLength() const { return mOldEndOffset - mStartOffset; }
-      uint32_t NewLength() const { return mNewEndOffset - mStartOffset; }
-      int32_t AdditionalLength() const
-      {
-        return static_cast<int32_t>(mNewEndOffset - mOldEndOffset);
-      }
-      bool IsInInt32Range() const
-      {
-        return mStartOffset <= INT32_MAX &&
-               mOldEndOffset <= INT32_MAX &&
-               mNewEndOffset <= INT32_MAX;
-      }
-    } mTextChangeData;
+    TextChangeDataBase mTextChangeData;
 
     // NOTIFY_IME_OF_MOUSE_BUTTON_EVENT specific data
-    struct
-    {
-      // The value of WidgetEvent::message
-      uint32_t mEventMessage;
-      // Character offset from the start of the focused editor under the cursor
-      uint32_t mOffset;
-      // Cursor position in pixels relative to the widget
-      struct
-      {
-        int32_t mX;
-        int32_t mY;
-
-        void Set(const nsIntPoint& aPoint)
-        {
-          mX = aPoint.x;
-          mY = aPoint.y;
-        }
-        nsIntPoint AsIntPoint() const
-        {
-          return nsIntPoint(mX, mY);
-        }
-      } mCursorPos;
-      // Character rect in pixels under the cursor relative to the widget
-      struct
-      {
-        int32_t mX;
-        int32_t mY;
-        int32_t mWidth;
-        int32_t mHeight;
-
-        void Set(const nsIntRect& aRect)
-        {
-          mX = aRect.x;
-          mY = aRect.y;
-          mWidth = aRect.width;
-          mHeight = aRect.height;
-        }
-        nsIntRect AsIntRect() const
-        {
-          return nsIntRect(mX, mY, mWidth, mHeight);
-        }
-      } mCharRect;
-      // The value of WidgetMouseEventBase::button and buttons
-      int16_t mButton;
-      int16_t mButtons;
-      // The value of WidgetInputEvent::modifiers
-      Modifiers mModifiers;
-    } mMouseButtonEventData;
+    MouseButtonEventData mMouseButtonEventData;
   };
 
   bool IsCausedByComposition() const
@@ -1585,18 +1719,33 @@ class nsIWidget : public nsISupports {
      */
     NS_IMETHOD HideWindowChrome(bool aShouldHide) = 0;
 
+    enum FullscreenTransitionStage
+    {
+      eBeforeFullscreenToggle,
+      eAfterFullscreenToggle
+    };
+
     /**
-     * Ask the widget to start the transition for entering or exiting
-     * DOM Fullscreen.
-     *
-     * XXX This method is currently not actually implemented by any
-     * widget. The only function of this method is to notify cocoa
-     * window that it should not use the native fullscreen mode. This
-     * method is reserved for bug 1160014 where a transition will be
-     * added for DOM fullscreen. Hence, this function is likely to
-     * be further changed then.
+     * Prepares for fullscreen transition and returns whether the widget
+     * supports fullscreen transition. If this method returns false,
+     * PerformFullscreenTransition() must never be called. Otherwise,
+     * caller should call that method twice with "before" and "after"
+     * stages respectively in order. In the latter case, this method may
+     * return some data via aData pointer. Caller must pass that data to
+     * PerformFullscreenTransition() if any, and caller is responsible
+     * for releasing that data.
      */
-    virtual void PrepareForDOMFullscreenTransition() = 0;
+    virtual bool PrepareForFullscreenTransition(nsISupports** aData) = 0;
+
+    /**
+     * Performs fullscreen transition. This method returns immediately,
+     * and will post aCallback to the main thread when the transition
+     * finishes.
+     */
+    virtual void PerformFullscreenTransition(FullscreenTransitionStage aStage,
+                                             uint16_t aDuration,
+                                             nsISupports* aData,
+                                             nsIRunnable* aCallback) = 0;
 
     /**
      * Put the toplevel window into or out of fullscreen mode.
@@ -1606,6 +1755,18 @@ class nsIWidget : public nsISupports {
      * aTargetScreen support is currently only implemented on Windows.
      */
     NS_IMETHOD MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen = nullptr) = 0;
+
+    /**
+     * Same as MakeFullScreen, except that, on systems which natively
+     * support fullscreen transition, calling this method explicitly
+     * requests that behavior.
+     * It is currently only supported on OS X 10.7+.
+     */
+    NS_IMETHOD MakeFullScreenWithNativeTransition(
+      bool aFullScreen, nsIScreen* aTargetScreen = nullptr)
+    {
+      return MakeFullScreen(aFullScreen, aTargetScreen);
+    }
 
     /**
      * Invalidate a specified rect for a widget so that it will be repainted
@@ -1716,6 +1877,16 @@ class nsIWidget : public nsISupports {
     virtual void EndRemoteDrawingInRegion(mozilla::gfx::DrawTarget* aDrawTarget, nsIntRegion& aInvalidRegion) {
       EndRemoteDrawing();
     }
+
+    /**
+     * A hook for the widget to prepare a Compositor, during the latter's initialization.
+     *
+     * If this method returns true, it means that the widget will be able to
+     * present frames from the compoositor.
+     * Returning false will cause the compositor's initialization to fail, and
+     * a different compositor backend will be used (if any).
+     */
+    virtual bool InitCompositor(mozilla::layers::Compositor*) { return true; }
 
     /**
      * Clean up any resources used by Start/EndRemoteDrawing.

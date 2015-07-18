@@ -60,9 +60,8 @@ RUN_MOCHITEST_REMOTE = \
 
 RUN_MOCHITEST_ROBOCOP = \
   rm -f ./$@.log && \
-  $(PYTHON) _tests/testing/mochitest/runtestsremote.py \
+  $(PYTHON) _tests/testing/mochitest/runrobocop.py \
     --robocop-apk=$(DEPTH)/build/mobile/robocop/robocop-debug.apk \
-    --robocop-ids=$(DEPTH)/mobile/android/base/fennec_ids.txt \
     --robocop-ini=_tests/testing/mochitest/robocop.ini \
     --log-tbpl=./$@.log $(DM_FLAGS) --dm_trans=$(DM_TRANS) \
     --app=$(TEST_PACKAGE_NAME) --deviceIP=${TEST_DEVICE} --xre-path=${MOZ_HOST_BIN} \
@@ -428,6 +427,10 @@ TEST_PKGS := \
 PKG_ARG = --$(1) '$(PKG_BASENAME).$(1).tests.zip'
 
 test-packages-manifest-tc:
+	@rm -f $(MOZ_TEST_PACKAGES_FILE_TC)
+ifndef UNIVERSAL_BINARY
+	$(NSINSTALL) -D $(dir $(MOZ_TEST_PACKAGES_FILE_TC))
+endif
 	$(PYTHON) $(topsrcdir)/build/gen_test_packages_manifest.py \
       --jsshell $(JSSHELL_NAME) \
       --dest-file $(MOZ_TEST_PACKAGES_FILE_TC) \
@@ -437,6 +440,9 @@ test-packages-manifest-tc:
 
 test-packages-manifest:
 	@rm -f $(MOZ_TEST_PACKAGES_FILE)
+ifndef UNIVERSAL_BINARY
+	$(NSINSTALL) -D $(dir $(MOZ_TEST_PACKAGES_FILE))
+endif
 	$(PYTHON) $(topsrcdir)/build/gen_test_packages_manifest.py \
       --jsshell $(JSSHELL_NAME) \
       --dest-file $(MOZ_TEST_PACKAGES_FILE) \

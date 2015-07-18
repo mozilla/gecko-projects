@@ -192,7 +192,7 @@ public:
   nsRefPtr<gfx::VRHMDRenderingSupport::RenderTargetSet> mVRRenderTargetSet;
 };
 
-} /* layers */
-} /* mozilla */
+} // namespace layers
+} // namespace mozilla
 
 #endif /* GFX_ContainerLayerComposite_H */

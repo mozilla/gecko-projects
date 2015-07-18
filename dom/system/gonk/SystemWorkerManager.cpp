@@ -52,7 +52,7 @@ NS_DEFINE_CID(kWifiWorkerCID, NS_WIFIWORKER_CID);
 // Doesn't carry a reference, we're owned by services.
 SystemWorkerManager *gInstance = nullptr;
 
-} // anonymous namespace
+} // namespace
 
 SystemWorkerManager::SystemWorkerManager()
   : mShutdown(false)
@@ -119,7 +119,7 @@ SystemWorkerManager::Shutdown()
   ShutdownAutoMounter();
 
 #ifdef MOZ_B2G_RIL
-  RilConsumer::Shutdown();
+  RilWorker::Shutdown();
 #endif
 
   nsCOMPtr<nsIWifi> wifi(do_QueryInterface(mWifiWorker));
@@ -201,7 +201,7 @@ SystemWorkerManager::RegisterRilWorker(unsigned int aClientId,
     return NS_ERROR_FAILURE;
   }
 
-  return RilConsumer::Register(aClientId, wctd);
+  return RilWorker::Register(aClientId, wctd);
 #endif // MOZ_B2G_RIL
 }
 

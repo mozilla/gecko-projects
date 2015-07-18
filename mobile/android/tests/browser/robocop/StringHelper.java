@@ -10,7 +10,7 @@ import android.content.res.Resources;
 import org.mozilla.gecko.R;
 
 public class StringHelper {
-    private static StringHelper instance = null;
+    private static StringHelper instance;
 
     // This needs to be accessed statically, before an instance of StringHelper can be created.
     public static String STATIC_ABOUT_HOME_URL = "about:home";
@@ -33,7 +33,6 @@ public class StringHelper {
     public final String ABOUT_HOME_URL = "about:home";
     public final String ABOUT_ADDONS_URL = "about:addons";
     public static final String ABOUT_LOGINS_URL = "about:logins";
-    public final String ABOUT_APPS_URL = "about:apps";
     public final String ABOUT_ABOUT_URL = "about:about";
     public final String ABOUT_SCHEME = "about:";
 
@@ -145,6 +144,8 @@ public class StringHelper {
 
     // Privacy
     public final String TRACKING_PROTECTION_LABEL;
+    public final String TRACKING_PROTECTION_PROMPT_TITLE;
+    public final String TRACKING_PROTECTION_PROMPT_BUTTON;
     public final String DNT_LABEL;
     public final String COOKIES_LABEL;
     public final String REMEMBER_LOGINS_LABEL;
@@ -162,7 +163,8 @@ public class StringHelper {
     public final String MY_HEALTH_REPORT_LABEL;
 
     // Developer tools
-    public final String REMOTE_DEBUGGING_LABEL;
+    public final String REMOTE_DEBUGGING_USB_LABEL;
+    public final String REMOTE_DEBUGGING_WIFI_LABEL;
     public final String LEARN_MORE_LABEL;
 
     // Labels for the about:home tabs
@@ -191,7 +193,6 @@ public class StringHelper {
     public final String DOWNLOADS_LABEL;
     public final String ADDONS_LABEL;
     public final String LOGINS_LABEL;
-    public final String APPS_LABEL;
     public final String SETTINGS_LABEL;
     public final String GUEST_MODE_LABEL;
     public final String TAB_QUEUE_LABEL;
@@ -328,6 +329,8 @@ public class StringHelper {
 
         // Privacy
         TRACKING_PROTECTION_LABEL = res.getString(R.string.pref_tracking_protection_title);
+        TRACKING_PROTECTION_PROMPT_TITLE = res.getString(R.string.tracking_protection_prompt_title);
+        TRACKING_PROTECTION_PROMPT_BUTTON = res.getString(R.string.tracking_protection_prompt_action_button);
         DNT_LABEL = res.getString(R.string.pref_donottrack_title);
         COOKIES_LABEL = res.getString(R.string.pref_cookies_menu);
         REMEMBER_LOGINS_LABEL = res.getString(R.string.pref_remember_signons);
@@ -341,7 +344,8 @@ public class StringHelper {
         MY_HEALTH_REPORT_LABEL = res.getString(R.string.datareporting_abouthr_title);
 
         // Developer tools
-        REMOTE_DEBUGGING_LABEL = res.getString(R.string.pref_developer_remotedebugging);
+        REMOTE_DEBUGGING_USB_LABEL = res.getString(R.string.pref_developer_remotedebugging_usb);
+        REMOTE_DEBUGGING_WIFI_LABEL = res.getString(R.string.pref_developer_remotedebugging_wifi);
         LEARN_MORE_LABEL = res.getString(R.string.pref_learn_more);
 
         // Labels for the about:home tabs
@@ -368,7 +372,6 @@ public class StringHelper {
         DOWNLOADS_LABEL = res.getString(R.string.downloads);
         ADDONS_LABEL = res.getString(R.string.addons);
         LOGINS_LABEL = res.getString(R.string.logins);
-        APPS_LABEL = res.getString(R.string.apps);
         SETTINGS_LABEL = res.getString(R.string.settings);
         GUEST_MODE_LABEL = res.getString(R.string.new_guest_session);
         TAB_QUEUE_LABEL = res.getString(R.string.pref_tab_queue_title);

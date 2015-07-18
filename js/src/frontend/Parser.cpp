@@ -371,7 +371,7 @@ template <typename ParseHandler>
 bool
 ParseContext<ParseHandler>::generateFunctionBindings(ExclusiveContext* cx, TokenStream& ts,
                                                      LifoAlloc& alloc,
-                                                     InternalHandle<Bindings*> bindings) const
+                                                     MutableHandle<Bindings> bindings) const
 {
     MOZ_ASSERT(sc->isFunctionBox());
     MOZ_ASSERT(args_.length() < ARGNO_LIMIT);
@@ -847,10 +847,10 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun, const AutoN
         }
     }
 
-    InternalHandle<Bindings*> funboxBindings =
-        InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
-    if (!funpc.generateFunctionBindings(context, tokenStream, alloc, funboxBindings))
+    Rooted<Bindings> bindings(context, funbox->bindings);
+    if (!funpc.generateFunctionBindings(context, tokenStream, alloc, &bindings))
         return null();
+    funbox->bindings = bindings;
 
     return fn;
 }
@@ -1470,9 +1470,12 @@ Parser<FullParseHandler>::leaveFunction(ParseNode* fn, ParseContext<FullParseHan
         }
     }
 
-    InternalHandle<Bindings*> bindings =
-        InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
-    return pc->generateFunctionBindings(context, tokenStream, alloc, bindings);
+    Rooted<Bindings> bindings(context, funbox->bindings);
+    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
+        return false;
+    funbox->bindings = bindings;
+
+    return true;
 }
 
 template <>
@@ -2492,10 +2495,10 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, unsigned st
         }
     }
 
-    InternalHandle<Bindings*> bindings =
-        InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
-    if (!pc->generateFunctionBindings(context, tokenStream, alloc, bindings))
+    Rooted<Bindings> bindings(context, funbox->bindings);
+    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
         return null();
+    funbox->bindings = bindings;
 
     if (!FoldConstants(context, &pn, this))
         return null();
@@ -4628,42 +4631,62 @@ template <typename ParseHandler>
 typename ParseHandler::Node
 Parser<ParseHandler>::ifStatement(YieldHandling yieldHandling)
 {
-    uint32_t begin = pos().begin;
-
-    /* An IF node has three kids: condition, then, and optional else. */
-    Node cond = condition(InAllowed, yieldHandling);
-    if (!cond)
-        return null();
-
-    TokenKind tt;
-    if (!tokenStream.peekToken(&tt, TokenStream::Operand))
-        return null();
-    if (tt == TOK_SEMI) {
-        if (!report(ParseExtraWarning, false, null(), JSMSG_EMPTY_CONSEQUENT))
-            return null();
-    }
+    Vector<Node, 4> condList(context), thenList(context);
+    Vector<uint32_t, 4> posList(context);
+    Node elseBranch;
 
     StmtInfoPC stmtInfo(context);
     PushStatementPC(pc, &stmtInfo, STMT_IF);
-    Node thenBranch = statement(yieldHandling);
-    if (!thenBranch)
-        return null();
 
-    Node elseBranch;
-    bool matched;
-    if (!tokenStream.matchToken(&matched, TOK_ELSE, TokenStream::Operand))
-        return null();
-    if (matched) {
-        stmtInfo.type = STMT_ELSE;
-        elseBranch = statement(yieldHandling);
-        if (!elseBranch)
+    while (true) {
+        uint32_t begin = pos().begin;
+
+        /* An IF node has three kids: condition, then, and optional else. */
+        Node cond = condition(InAllowed, yieldHandling);
+        if (!cond)
             return null();
-    } else {
-        elseBranch = null();
+
+        TokenKind tt;
+        if (!tokenStream.peekToken(&tt, TokenStream::Operand))
+            return null();
+        if (tt == TOK_SEMI) {
+            if (!report(ParseExtraWarning, false, null(), JSMSG_EMPTY_CONSEQUENT))
+                return null();
+        }
+
+        Node thenBranch = statement(yieldHandling);
+        if (!thenBranch)
+            return null();
+
+        if (!condList.append(cond) || !thenList.append(thenBranch) || !posList.append(begin))
+            return null();
+
+        bool matched;
+        if (!tokenStream.matchToken(&matched, TOK_ELSE, TokenStream::Operand))
+            return null();
+        if (matched) {
+            if (!tokenStream.matchToken(&matched, TOK_IF, TokenStream::Operand))
+                return null();
+            if (matched)
+                continue;
+            elseBranch = statement(yieldHandling);
+            if (!elseBranch)
+                return null();
+        } else {
+            elseBranch = null();
+        }
+        break;
     }
 
     PopStatementPC(tokenStream, pc);
-    return handler.newIfStatement(begin, cond, thenBranch, elseBranch);
+
+    for (int i = condList.length() - 1; i >= 0; i--) {
+        elseBranch = handler.newIfStatement(posList[i], condList[i], thenList[i], elseBranch);
+        if (!elseBranch)
+            return null();
+    }
+
+    return elseBranch;
 }
 
 template <typename ParseHandler>

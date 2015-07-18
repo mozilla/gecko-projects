@@ -30,7 +30,7 @@ namespace jit {
     struct IonScript;
     class JitAllocPolicy;
     class TempAllocator;
-}
+} // namespace jit
 
 class TaggedProto;
 struct TypeZone;
@@ -352,8 +352,6 @@ class TypeSet
 
         bool operator == (Type o) const { return data == o.data; }
         bool operator != (Type o) const { return data != o.data; }
-
-        static ThingRootKind rootKind() { return THING_ROOT_TYPE; }
     };
 
     static inline Type UndefinedType() { return Type(JSVAL_TYPE_UNDEFINED); }
@@ -799,6 +797,7 @@ class PreliminaryObjectArray
     }
 
     bool full() const;
+    bool empty() const;
     void sweep();
 };
 
@@ -972,17 +971,6 @@ inline bool isInlinableCall(jsbytecode* pc);
 
 bool
 ClassCanHaveExtraProperties(const Class* clasp);
-
-/*
- * Whether Array.prototype, or an object on its proto chain, has an
- * indexed property.
- */
-bool
-ArrayPrototypeHasIndexedProperty(CompilerConstraintList* constraints, JSScript* script);
-
-/* Whether obj or any of its prototypes have an indexed property. */
-bool
-TypeCanHaveExtraIndexedProperties(CompilerConstraintList* constraints, TemporaryTypeSet* types);
 
 /* Persistent type information for a script, retained across GCs. */
 class TypeScript
@@ -1303,7 +1291,7 @@ PrintTypes(JSContext* cx, JSCompartment* comp, bool force);
 namespace JS {
 namespace ubi {
 template<> struct Concrete<js::ObjectGroup> : TracerConcrete<js::ObjectGroup> { };
-}
-}
+} // namespace ubi
+} // namespace JS
 
 #endif /* vm_TypeInference_h */

@@ -24,12 +24,13 @@
 #include "GMPDecoderModule.h"
 
 #include "mozilla/Preferences.h"
+#include "mozilla/TaskQueue.h"
+
 #ifdef MOZ_EME
 #include "EMEDecoderModule.h"
 #include "mozilla/CDMProxy.h"
 #endif
 #include "SharedThreadPool.h"
-#include "MediaTaskQueue.h"
 
 #include "MediaInfo.h"
 #include "H264Converter.h"
@@ -89,9 +90,7 @@ PlatformDecoderModule::Init()
 #ifdef MOZ_EME
 /* static */
 already_AddRefed<PlatformDecoderModule>
-PlatformDecoderModule::CreateCDMWrapper(CDMProxy* aProxy,
-                                        bool aHasAudio,
-                                        bool aHasVideo)
+PlatformDecoderModule::CreateCDMWrapper(CDMProxy* aProxy)
 {
   bool cdmDecodesAudio;
   bool cdmDecodesVideo;
@@ -101,14 +100,11 @@ PlatformDecoderModule::CreateCDMWrapper(CDMProxy* aProxy,
     cdmDecodesVideo = caps.CanDecryptAndDecodeVideo();
   }
 
-  nsRefPtr<PlatformDecoderModule> pdm;
-  if ((!cdmDecodesAudio && aHasAudio) || (!cdmDecodesVideo && aHasVideo)) {
-    // The CDM itself can't decode. We need to wrap a PDM to decode the
-    // decrypted output of the CDM.
-    pdm = Create();
-    if (!pdm) {
-      return nullptr;
-    }
+  // We always create a default PDM in order to decode
+  // non-encrypted tracks.
+  nsRefPtr<PlatformDecoderModule> pdm = Create();
+  if (!pdm) {
+    return nullptr;
   }
 
   nsRefPtr<PlatformDecoderModule> emepdm(
@@ -181,7 +177,7 @@ PlatformDecoderModule::CreatePDM()
 
 already_AddRefed<MediaDataDecoder>
 PlatformDecoderModule::CreateDecoder(const TrackInfo& aConfig,
-                                     FlushableMediaTaskQueue* aTaskQueue,
+                                     FlushableTaskQueue* aTaskQueue,
                                      MediaDataDecoderCallback* aCallback,
                                      layers::LayersBackend aLayersBackend,
                                      layers::ImageContainer* aImageContainer)

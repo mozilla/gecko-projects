@@ -1904,6 +1904,8 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
 {
     JS_CHECK_RECURSION(cx, return false);
 
+ restart:
+
     switch (pn->getKind()) {
       // Trivial cases with no side effects.
       case PNK_NEWTARGET:
@@ -2151,6 +2153,7 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
         *answer = true;
         return true;
 
+      case PNK_IF:
       case PNK_CONDITIONAL:
         MOZ_ASSERT(pn->isArity(PN_TERNARY));
         if (!checkSideEffects(pn->pn_kid1, answer))
@@ -2161,22 +2164,8 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
             return false;
         if (*answer)
             return true;
-        return checkSideEffects(pn->pn_kid3, answer);
-
-      case PNK_IF:
-        MOZ_ASSERT(pn->isArity(PN_TERNARY));
-        if (!checkSideEffects(pn->pn_kid1, answer))
-            return false;
-        if (*answer)
-            return true;
-        if (!checkSideEffects(pn->pn_kid2, answer))
-            return false;
-        if (*answer)
-            return true;
-        if (ParseNode* elseNode = pn->pn_kid3) {
-            if (!checkSideEffects(elseNode, answer))
-                return false;
-        }
+        if ((pn = pn->pn_kid3))
+            goto restart;
         return true;
 
       // Function calls can invoke non-local code.
@@ -3425,8 +3414,7 @@ BytecodeEmitter::emitFunctionScript(ParseNode* body)
         switchToPrologue();
         if (!emit1(JSOP_ARGUMENTS))
             return false;
-        InternalBindingsHandle bindings(script, &script->bindings);
-        BindingIter bi = Bindings::argumentsBinding(cx, bindings);
+        BindingIter bi = Bindings::argumentsBinding(cx, script);
         if (script->bindingIsAliased(bi)) {
             ScopeCoordinate sc;
             sc.setHops(0);
@@ -4135,28 +4123,48 @@ BytecodeEmitter::emitTemplateString(ParseNode* pn)
 {
     MOZ_ASSERT(pn->isArity(PN_LIST));
 
+    bool pushedString = false;
+
     for (ParseNode* pn2 = pn->pn_head; pn2 != NULL; pn2 = pn2->pn_next) {
-        if (pn2->getKind() != PNK_STRING && pn2->getKind() != PNK_TEMPLATE_STRING) {
+        bool isString = (pn2->getKind() == PNK_STRING || pn2->getKind() == PNK_TEMPLATE_STRING);
+
+        // Skip empty strings. These are very common: a template string like
+        // `${a}${b}` has three empty strings and without this optimization
+        // we'd emit four JSOP_ADD operations instead of just one.
+        if (isString && pn2->pn_atom->empty())
+            continue;
+
+        if (!isString) {
             // We update source notes before emitting the expression
             if (!updateSourceCoordNotes(pn2->pn_pos.begin))
                 return false;
         }
+
         if (!emitTree(pn2))
             return false;
 
-        if (pn2->getKind() != PNK_STRING && pn2->getKind() != PNK_TEMPLATE_STRING) {
+        if (!isString) {
             // We need to convert the expression to a string
             if (!emit1(JSOP_TOSTRING))
                 return false;
         }
 
-        if (pn2 != pn->pn_head) {
+        if (pushedString) {
             // We've pushed two strings onto the stack. Add them together, leaving just one.
             if (!emit1(JSOP_ADD))
                 return false;
+        } else {
+            pushedString = true;
         }
-
     }
+
+    if (!pushedString) {
+        // All strings were empty, this can happen for something like `${""}`.
+        // Just push an empty string.
+        if (!emitAtomOp(cx->names().empty, JSOP_STRING))
+            return false;
+    }
+
     return true;
 }
 

@@ -55,6 +55,11 @@ public:
   virtual bool RecvCaretMoveEvent(const uint64_t& aID, const int32_t& aOffset)
     override final;
 
+  virtual bool RecvTextChangeEvent(const uint64_t& aID, const nsString& aStr,
+                                   const int32_t& aStart, const uint32_t& aLen,
+                                   const bool& aIsInsert,
+                                   const bool& aFromUser) override;
+
   virtual bool RecvBindChildDoc(PDocAccessibleParent* aChildDoc, const uint64_t& aID) override;
   void Unbind()
   {
@@ -145,6 +150,8 @@ private:
   uint32_t AddSubtree(ProxyAccessible* aParent,
                       const nsTArray<AccessibleData>& aNewTree, uint32_t aIdx,
                       uint32_t aIdxInParent);
+  void CheckDocTree() const;
+
   static PLDHashOperator ShutdownAccessibles(ProxyEntry* entry, void* unused);
 
   nsTArray<DocAccessibleParent*> mChildDocs;

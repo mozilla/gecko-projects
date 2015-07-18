@@ -609,6 +609,7 @@ class GCRuntime
         gcstats::AutoPhase ap(stats, gcstats::PHASE_EVICT_NURSERY);
         minorGCImpl(reason, nullptr);
     }
+    void clearPostBarrierCallbacks();
     bool gcIfRequested(JSContext* cx = nullptr);
     void gc(JSGCInvocationKind gckind, JS::gcreason::Reason reason);
     void startGC(JSGCInvocationKind gckind, JS::gcreason::Reason reason, int64_t millis = 0);
@@ -1084,6 +1085,9 @@ class GCRuntime
 
     /* The invocation kind of the current GC, taken from the first slice. */
     JSGCInvocationKind invocationKind;
+
+    /* The initial GC reason, taken from the first slice. */
+    JS::gcreason::Reason initialReason;
 
     /*
      * If this is 0, all cross-compartment proxies must be registered in the

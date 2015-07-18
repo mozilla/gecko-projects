@@ -28,7 +28,10 @@ MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(AudioContext* a
               2,
               ChannelCountMode::Explicit,
               ChannelInterpretation::Speakers)
-  , mDOMStream(DOMAudioNodeMediaStream::CreateTrackUnionStream(GetOwner(), this))
+  , mDOMStream(
+      DOMAudioNodeMediaStream::CreateTrackUnionStream(GetOwner(),
+                                                      this,
+                                                      aContext->Graph()))
 {
   // Ensure an audio track with the correct ID is exposed to JS
   mDOMStream->CreateDOMTrack(AudioNodeStream::AUDIO_TRACK, MediaSegment::AUDIO);
@@ -81,5 +84,5 @@ MediaStreamAudioDestinationNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*
   return MediaStreamAudioDestinationNodeBinding::Wrap(aCx, this, aGivenProto);
 }
 
-}
-}
+} // namespace dom
+} // namespace mozilla

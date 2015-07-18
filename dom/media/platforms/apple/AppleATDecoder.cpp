@@ -19,7 +19,7 @@ PRLogModuleInfo* GetAppleMediaLog();
 namespace mozilla {
 
 AppleATDecoder::AppleATDecoder(const AudioInfo& aConfig,
-                               FlushableMediaTaskQueue* aAudioTaskQueue,
+                               FlushableTaskQueue* aAudioTaskQueue,
                                MediaDataDecoderCallback* aCallback)
   : mConfig(aConfig)
   , mFileStreamError(false)
@@ -505,4 +505,5 @@ AppleATDecoder::GetImplicitAACMagicCookie(const MediaRawData* aSample)
 
   return (mFileStreamError || status) ? NS_ERROR_FAILURE : NS_OK;
 }
+
 } // namespace mozilla

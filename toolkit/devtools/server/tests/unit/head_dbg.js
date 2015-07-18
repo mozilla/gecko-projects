@@ -315,18 +315,6 @@ function startTestDebuggerServer(title, server = DebuggerServer) {
   return connect(client).then(() => client);
 }
 
-function initTestTracerServer(aServer = DebuggerServer)
-{
-  aServer.registerModule("xpcshell-test/testactors");
-  aServer.registerModule("devtools/server/actors/tracer", {
-    prefix: "trace",
-    constructor: "TracerActor",
-    type: { global: true, tab: true }
-  });
-  // Allow incoming connections.
-  aServer.init(function () { return true; });
-}
-
 function finishClient(aClient)
 {
   aClient.close(function() {
@@ -704,6 +692,18 @@ function blackBox(sourceClient) {
 function unBlackBox(sourceClient) {
   dumpn("Un-black boxing source: " + sourceClient.actor);
   return rdpRequest(sourceClient, sourceClient.unblackBox);
+}
+
+/**
+ * Perform a "source" RDP request with the given SourceClient to get the source
+ * content and content type.
+ *
+ * @param SourceClient sourceClient
+ * @returns Promise
+ */
+function getSourceContent(sourceClient) {
+  dumpn("Getting source content for " + sourceClient.actor);
+  return rdpRequest(sourceClient, sourceClient.source);
 }
 
 /**

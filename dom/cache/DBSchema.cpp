@@ -31,11 +31,11 @@ namespace dom {
 namespace cache {
 namespace db {
 
-const int32_t kMaxWipeSchemaVersion = 14;
+const int32_t kMaxWipeSchemaVersion = 15;
 
 namespace {
 
-const int32_t kLatestSchemaVersion = 14;
+const int32_t kLatestSchemaVersion = 15;
 const int32_t kMaxEntriesPerStatement = 255;
 
 const uint32_t kPageSize = 4 * 1024;
@@ -55,7 +55,7 @@ const uint32_t kWalAutoCheckpointPages = kWalAutoCheckpointSize / kPageSize;
 static_assert(kWalAutoCheckpointSize % kPageSize == 0,
               "WAL checkpoint size must be multiple of page size");
 
-} // anonymous namespace
+} // namespace
 
 // If any of the static_asserts below fail, it means that you have changed
 // the corresponding WebIDL enum in a way that may be incompatible with the
@@ -204,7 +204,7 @@ static nsresult CreateAndBindKeyStatement(mozIStorageConnection* aConn,
                                           mozIStorageStatement** aStateOut);
 static nsresult HashCString(nsICryptoHash* aCrypto, const nsACString& aIn,
                             nsACString& aOut);
-} // anonymous namespace
+} // namespace
 
 nsresult
 CreateSchema(mozIStorageConnection* aConn)
@@ -1833,7 +1833,6 @@ ReadResponse(mozIStorageConnection* aConn, EntryId aEntryId,
   if (!serializedInfo.IsEmpty()) {
     nsAutoCString originNoSuffix;
     OriginAttributes attrs;
-    fprintf(stderr, "\n%s\n", serializedInfo.get());
     if (!attrs.PopulateFromOrigin(serializedInfo, originNoSuffix)) {
       NS_WARNING("Something went wrong parsing a serialized principal!");
       return NS_ERROR_FAILURE;
@@ -2118,7 +2117,7 @@ HashCString(nsICryptoHash* aCrypto, const nsACString& aIn, nsACString& aOut)
   return rv;
 }
 
-} // anonymouns namespace
+} // namespace
 
 nsresult
 IncrementalVacuum(mozIStorageConnection* aConn)

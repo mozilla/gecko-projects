@@ -294,7 +294,7 @@ private:
 
 NS_IMPL_ISUPPORTS(ForceCloseHelper, nsIIPCBackgroundChildCreateCallback)
 
-} // anonymous namespace
+} // namespace
 
 MessagePort::MessagePort(nsPIDOMWindow* aWindow)
   : MessagePortBase(aWindow)
@@ -900,7 +900,9 @@ MessagePort::RemoveDocFromBFCache()
   }
 
   nsPIDOMWindow* window = GetOwner();
-  MOZ_ASSERT(window);
+  if (!window) {
+    return;
+  }
 
   nsIDocument* doc = window->GetExtantDoc();
   if (!doc) {

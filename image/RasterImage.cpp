@@ -265,7 +265,6 @@ RasterImage::RasterImage(ImageURL* aURI /* = nullptr */) :
   mFrameCount(0),
   mRetryCount(0),
   mHasSize(false),
-  mDecodeOnlyOnDraw(false),
   mTransient(false),
   mSyncLoad(false),
   mDiscardable(false),
@@ -308,18 +307,15 @@ RasterImage::Init(const char* aMimeType,
 
   NS_ENSURE_ARG_POINTER(aMimeType);
 
-  // We must be non-discardable and non-decode-only-on-draw for
-  // transient images.
+  // We want to avoid redecodes for transient images.
   MOZ_ASSERT(!(aFlags & INIT_FLAG_TRANSIENT) ||
                (!(aFlags & INIT_FLAG_DISCARDABLE) &&
-                !(aFlags & INIT_FLAG_DECODE_ONLY_ON_DRAW) &&
                 !(aFlags & INIT_FLAG_DOWNSCALE_DURING_DECODE)),
              "Illegal init flags for transient image");
 
   // Store initialization data
   mSourceDataMimeType.Assign(aMimeType);
   mDiscardable = !!(aFlags & INIT_FLAG_DISCARDABLE);
-  mDecodeOnlyOnDraw = !!(aFlags & INIT_FLAG_DECODE_ONLY_ON_DRAW);
   mWantFullDecode = !!(aFlags & INIT_FLAG_DECODE_IMMEDIATELY);
   mTransient = !!(aFlags & INIT_FLAG_TRANSIENT);
   mDownscaleDuringDecode = !!(aFlags & INIT_FLAG_DOWNSCALE_DURING_DECODE);
@@ -963,9 +959,7 @@ RasterImage::OnAddedFrame(uint32_t aNewFrameCount,
     return;
   }
 
-  MOZ_ASSERT((mFrameCount == 1 && aNewFrameCount == 1) ||
-             mFrameCount < aNewFrameCount,
-             "Frame count running backwards");
+  MOZ_ASSERT(aNewFrameCount <= mFrameCount + 1, "Skipped a frame?");
 
   if (mError) {
     return;  // We're in an error state, possibly due to OOM. Bail.
@@ -1034,7 +1028,7 @@ RasterImage::SetSize(int32_t aWidth, int32_t aHeight, Orientation aOrientation)
 }
 
 void
-RasterImage::OnDecodingComplete()
+RasterImage::OnDecodingComplete(bool aIsAnimated)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1045,10 +1039,28 @@ RasterImage::OnDecodingComplete()
   // Flag that we've been decoded before.
   mHasBeenDecoded = true;
 
-  // Let our FrameAnimator know not to expect any more frames.
-  if (mAnim) {
-    mAnim->SetDoneDecoding(true);
+  if (aIsAnimated) {
+    if (mAnim) {
+      mAnim->SetDoneDecoding(true);
+    } else {
+      // The OnAddedFrame event that will create mAnim is still in the event
+      // queue. Wait for it.
+      nsCOMPtr<nsIRunnable> runnable =
+        NS_NewRunnableMethod(this, &RasterImage::MarkAnimationDecoded);
+      NS_DispatchToMainThread(runnable);
+    }
   }
+}
+
+void
+RasterImage::MarkAnimationDecoded()
+{
+  MOZ_ASSERT(mAnim, "Should have an animation now");
+  if (!mAnim) {
+    return;
+  }
+
+  mAnim->SetDoneDecoding(true);
 }
 
 NS_IMETHODIMP
@@ -1196,7 +1208,13 @@ RasterImage::OnImageDataComplete(nsIRequest*, nsISupports*, nsresult aStatus,
   // Let decoders know that there won't be any more data coming.
   mSourceBuffer->Complete(aStatus);
 
-  if (mSyncLoad && !mHasSize) {
+  // Allow a synchronous size decode if mSyncLoad was set, or if we're running
+  // on a single thread (in which case waiting for the async size decoder could
+  // delay this image's load event quite a bit), or if this image is transient.
+  bool canSyncSizeDecode = mSyncLoad || mTransient ||
+                           DecodePool::NumberOfCores() < 2;
+
+  if (canSyncSizeDecode && !mHasSize) {
     // We're loading this image synchronously, so it needs to be usable after
     // this call returns.  Since we haven't gotten our size yet, we need to do a
     // synchronous size decode here.
@@ -1219,7 +1237,7 @@ RasterImage::OnImageDataComplete(nsIRequest*, nsISupports*, nsresult aStatus,
 
   if (!mHasSize && !mError) {
     // We don't have our size yet, so we'll fire the load event in SetSize().
-    MOZ_ASSERT(!mSyncLoad, "Firing load asynchronously but mSyncLoad is set?");
+    MOZ_ASSERT(!canSyncSizeDecode, "Firing load async but canSyncSizeDecode?");
     NotifyProgress(FLAG_ONLOAD_BLOCKED);
     mLoadProgress = Some(loadProgress);
     return finalStatus;
@@ -1237,13 +1255,6 @@ RasterImage::NotifyForLoadEvent(Progress aProgress)
   MOZ_ASSERT(!mHasSize ||
              (mProgressTracker->GetProgress() & FLAG_SIZE_AVAILABLE),
              "Should have notified that the size is available if we have it");
-
-  if (mDecodeOnlyOnDraw) {
-    // For decode-only-on-draw images, we want to send notifications as if we've
-    // already finished decoding. Otherwise some observers will never even try
-    // to draw.
-    aProgress |= FLAG_FRAME_COMPLETE | FLAG_DECODE_COMPLETE;
-  }
 
   // If we encountered an error, make sure we notify for that as well.
   if (mError) {
@@ -1446,18 +1457,6 @@ RasterImage::CreateDecoder(const Maybe<IntSize>& aSize, uint32_t aFlags)
     decoder->SetImageIsLocked();
   }
 
-  if (aSize) {
-    // We already have the size; tell the decoder so it can preallocate a
-    // frame.  By default, we create an ARGB frame with no offset. If decoders
-    // need a different type, they need to ask for it themselves.
-    // XXX(seth): Note that we call SetSize() and NeedNewFrame() with the
-    // image's intrinsic size, but AllocateFrame with our target size.
-    decoder->SetSize(mSize, mOrientation);
-    decoder->NeedNewFrame(0, 0, 0, aSize->width, aSize->height,
-                          SurfaceFormat::B8G8R8A8);
-    decoder->AllocateFrame(*aSize);
-  }
-
   if (aSize && decoder->HasError()) {
     if (gfxPrefs::ImageDecodeRetryOnAllocFailure() &&
         mRetryCount < 10) {
@@ -1528,11 +1527,6 @@ RasterImage::CreateDecoder(const Maybe<IntSize>& aSize, uint32_t aFlags)
 NS_IMETHODIMP
 RasterImage::RequestDecode()
 {
-  // For decode-only-on-draw images, we only act on RequestDecodeForSize.
-  if (mDecodeOnlyOnDraw) {
-    return NS_OK;
-  }
-
   return RequestDecodeForSize(mSize, DECODE_FLAGS_DEFAULT);
 }
 
@@ -1540,11 +1534,6 @@ RasterImage::RequestDecode()
 NS_IMETHODIMP
 RasterImage::StartDecoding()
 {
-  // For decode-only-on-draw images, we only act on RequestDecodeForSize.
-  if (mDecodeOnlyOnDraw) {
-    return NS_OK;
-  }
-
   return RequestDecodeForSize(mSize, FLAG_SYNC_DECODE_IF_FAST);
 }
 

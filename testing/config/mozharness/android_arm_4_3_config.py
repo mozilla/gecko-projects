@@ -12,7 +12,6 @@ config = {
                 "--http-port=%(http_port)s", "--ssl-port=%(ssl_port)s",
                 "--certificate-path=%(certs_path)s", "--symbols-path=%(symbols_path)s",
                 "--quiet", "--log-raw=%(raw_log_file)s", "--screenshot-on-fail",
-                "--total-chunks=16",
             ],
         },
         "mochitest-gl": {
@@ -28,7 +27,7 @@ config = {
             ],
         },
         "robocop": {
-            "run_filename": "runtestsremote.py",
+            "run_filename": "runrobocop.py",
             "testsdir": "mochitest",
             "options": ["--dm_trans=adb", "--app=%(app)s", "--remote-webserver=%(remote_webserver)s",
                 "--xre-path=%(xre_path)s", "--utility-path=%(utility_path)s",
@@ -37,7 +36,6 @@ config = {
                 "--quiet", "--log-raw=%(raw_log_file)s",
                 "--total-chunks=4",
                 "--robocop-apk=../../robocop.apk",
-                "--robocop-ids=fennec_ids.txt",
                 "--robocop-ini=robocop.ini",
             ],
         },

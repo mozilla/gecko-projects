@@ -35,7 +35,7 @@ add_task(function*() {
 });
 
 function getStyleRule(ruleView) {
-  return ruleView.doc.querySelector(".ruleview-rule");
+  return ruleView.styleDocument.querySelector(".ruleview-rule");
 }
 
 function* modifyRuleViewWidth(value, ruleView, inspector) {
@@ -43,7 +43,7 @@ function* modifyRuleViewWidth(value, ruleView, inspector) {
   let valueSpan = getStyleRule(ruleView).querySelector(".ruleview-propertyvalue");
 
   info("Focusing the property value to set it to edit mode");
-  let editor = yield focusEditableField(valueSpan.parentNode);
+  let editor = yield focusEditableField(ruleView, valueSpan.parentNode);
 
   ok(editor.input, "The inplace-editor field is ready");
   info("Setting the new value");
@@ -57,7 +57,7 @@ function* modifyRuleViewWidth(value, ruleView, inspector) {
   yield onMutation;
 
   info("Escaping out of the new property field that has been created after the value was edited");
-  let onNewFieldBlur = once(ruleView.doc.activeElement, "blur", true);
+  let onNewFieldBlur = once(ruleView.styleDocument.activeElement, "blur", true);
   EventUtils.sendKey("escape");
   yield onNewFieldBlur;
 }

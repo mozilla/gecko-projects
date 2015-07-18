@@ -364,6 +364,11 @@ AddAnimationForProperty(nsIFrame* aFrame, const AnimationProperty& aProperty,
   MOZ_ASSERT(aLayer->AsContainerLayer(), "Should only animate ContainerLayer");
   MOZ_ASSERT(aAnimation->GetEffect(),
              "Should not be adding an animation without an effect");
+  MOZ_ASSERT(!aAnimation->GetCurrentOrPendingStartTime().IsNull() ||
+             (aAnimation->GetTimeline() &&
+              aAnimation->GetTimeline()->TracksWallclockTime()),
+             "Animation should either have a resolved start time or "
+             "a timeline that tracks wallclock time");
   nsStyleContext* styleContext = aFrame->StyleContext();
   nsPresContext* presContext = aFrame->PresContext();
   TransformReferenceBox refBox(aFrame);
@@ -377,7 +382,7 @@ AddAnimationForProperty(nsIFrame* aFrame, const AnimationProperty& aProperty,
   Nullable<TimeDuration> startTime = aAnimation->GetCurrentOrPendingStartTime();
   animation->startTime() = startTime.IsNull()
                            ? TimeStamp()
-                           : aAnimation->Timeline()->ToTimeStamp(
+                           : aAnimation->GetTimeline()->ToTimeStamp(
                               startTime.Value() + timing.mDelay);
   animation->initialCurrentTime() = aAnimation->GetCurrentTime().Value()
                                     - timing.mDelay;
@@ -451,20 +456,20 @@ AddAnimationsForProperty(nsIFrame* aFrame, nsCSSProperty aProperty,
     MOZ_ASSERT(property->mWinsInCascade,
                "GetAnimationOfProperty already tested mWinsInCascade");
 
-    // Don't add animations that are pending when their corresponding
-    // refresh driver is under test control. This is because any pending
-    // animations on layers will have their start time updated with the
-    // current timestamp but when the refresh driver is under test control
-    // its refresh times are unrelated to timestamp values.
+    // Don't add animations that are pending if their timeline does not
+    // track wallclock time. This is because any pending animations on layers
+    // will have their start time updated with the current wallclock time.
+    // If we can't convert that wallclock time back to an equivalent timeline
+    // time, we won't be able to update the content animation and it will end
+    // up being out of sync with the layer animation.
     //
-    // Instead we leave the animation running on the main thread and the
-    // next time the refresh driver is advanced it will trigger any pending
-    // animations.
-    if (anim->PlayState() == AnimationPlayState::Pending) {
-      nsRefreshDriver* driver = anim->Timeline()->GetRefreshDriver();
-      if (driver && driver->IsTestControllingRefreshesEnabled()) {
-        continue;
-      }
+    // Currently this only happens when the timeline is driven by a refresh
+    // driver under test control. In this case, the next time the refresh
+    // driver is advanced it will trigger any pending animations.
+    if (anim->PlayState() == AnimationPlayState::Pending &&
+        (!anim->GetTimeline() ||
+         !anim->GetTimeline()->TracksWallclockTime())) {
+      continue;
     }
 
     AddAnimationForProperty(aFrame, *property, anim, aLayer, aData, aPending);
@@ -1295,6 +1300,18 @@ nsDisplayListBuilder::GetDirtyRectForScrolledContents(const nsIFrame* aScrollabl
   return result;
 }
 
+bool
+nsDisplayListBuilder::IsBuildingLayerEventRegions()
+{
+  if (mMode == PAINTING) {
+    // Note: this is the only place that gets to query LayoutEventRegionsEnabled
+    // 'directly' - other code should call this function.
+    return gfxPrefs::LayoutEventRegionsEnabledDoNotUseDirectly() ||
+           mAsyncPanZoomEnabled;
+  }
+  return false;
+}
+
 void nsDisplayListSet::MoveTo(const nsDisplayListSet& aDestination) const
 {
   aDestination.BorderBackground()->AppendToTop(BorderBackground());
@@ -1524,6 +1541,13 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
     props = Move(LayerProperties::CloneFrom(layerManager->GetRoot()));
   }
 
+  // Clear any FrameMetrics that may have been set on the root layer on a
+  // previous paint. This paint will set new metrics if necessary, and if we
+  // don't clear the old one here, we may be left with extra metrics.
+  if (Layer* root = layerManager->GetRoot()) {
+      root->SetFrameMetrics(nsTArray<FrameMetrics>());
+  }
+
   ContainerLayerParameters containerParameters
     (presShell->GetResolution(), presShell->GetResolution());
   nsRefPtr<ContainerLayer> root = layerBuilder->
@@ -1599,9 +1623,6 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
                          aBuilder->FindReferenceFrameFor(frame),
                          root, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
                          isRootContent, containerParameters));
-  } else {
-    // Set empty metrics to clear any metrics that might be on a recycled layer.
-    root->SetFrameMetrics(nsTArray<FrameMetrics>());
   }
 
   // NS_WARNING is debug-only, so don't even bother checking the conditions in

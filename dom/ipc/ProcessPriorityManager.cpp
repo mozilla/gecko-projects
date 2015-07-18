@@ -1041,7 +1041,7 @@ ParticularProcessPriorityManager::ComputePriority()
     return PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE;
   }
 
-  AudioChannelService* service = AudioChannelService::GetOrCreateAudioChannelService();
+  nsRefPtr<AudioChannelService> service = AudioChannelService::GetOrCreate();
   if (service->ProcessContentOrNormalChannelIsActive(ChildID())) {
     return PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE;
   }
@@ -1095,7 +1095,7 @@ ParticularProcessPriorityManager::SetPriorityNow(ProcessPriority aPriority,
   }
 
   if (aPriority < PROCESS_PRIORITY_FOREGROUND) {
-    unused << mContentParent->SendFlushMemory(NS_LITERAL_STRING("low-memory"));
+    unused << mContentParent->SendFlushMemory(NS_LITERAL_STRING("lowering-priority"));
   }
 
   FireTestOnlyObserverNotification("process-priority-set",
@@ -1372,7 +1372,7 @@ ProcessLRUPool::Add(ParticularProcessPriorityManager* aParticularManager)
       ProcessPriorityToString(mPriority));
 }
 
-} // anonymous namespace
+} // namespace
 
 namespace mozilla {
 

@@ -1400,24 +1400,6 @@ nsMemoryReporterManager::StartGettingReports()
   return NS_OK;
 }
 
-typedef nsCOMArray<nsIMemoryReporter> MemoryReporterArray;
-
-static PLDHashOperator
-StrongEnumerator(nsRefPtrHashKey<nsIMemoryReporter>* aElem, void* aData)
-{
-  MemoryReporterArray* allReporters = static_cast<MemoryReporterArray*>(aData);
-  allReporters->AppendElement(aElem->GetKey());
-  return PL_DHASH_NEXT;
-}
-
-static PLDHashOperator
-WeakEnumerator(nsPtrHashKey<nsIMemoryReporter>* aElem, void* aData)
-{
-  MemoryReporterArray* allReporters = static_cast<MemoryReporterArray*>(aData);
-  allReporters->AppendElement(aElem->GetKey());
-  return PL_DHASH_NEXT;
-}
-
 NS_IMETHODIMP
 nsMemoryReporterManager::GetReportsForThisProcess(
   nsIHandleReportCallback* aHandleReport,
@@ -1448,11 +1430,17 @@ nsMemoryReporterManager::GetReportsForThisProcessExtended(
   MOZ_ASSERT(!aDMDFile);
 #endif
 
-  MemoryReporterArray allReporters;
+  nsCOMArray<nsIMemoryReporter> allReporters;
   {
     mozilla::MutexAutoLock autoLock(mMutex);
-    mStrongReporters->EnumerateEntries(StrongEnumerator, &allReporters);
-    mWeakReporters->EnumerateEntries(WeakEnumerator, &allReporters);
+    for (auto iter = mStrongReporters->Iter(); !iter.Done(); iter.Next()) {
+      nsRefPtrHashKey<nsIMemoryReporter>* entry = iter.Get();
+      allReporters.AppendElement(entry->GetKey());
+    }
+    for (auto iter = mWeakReporters->Iter(); !iter.Done(); iter.Next()) {
+      nsPtrHashKey<nsIMemoryReporter>* entry = iter.Get();
+      allReporters.AppendElement(entry->GetKey());
+    }
   }
   for (uint32_t i = 0; i < allReporters.Length(); i++) {
     allReporters[i]->CollectReports(aHandleReport, aHandleReportData,
@@ -2212,7 +2200,7 @@ private:
   uint32_t mRemainingIters;
 };
 
-} // anonymous namespace
+} // namespace
 
 NS_IMETHODIMP
 nsMemoryReporterManager::MinimizeMemoryUsage(nsIRunnable* aCallback)
@@ -2377,7 +2365,7 @@ DEFINE_REGISTER_SIZE_OF_TAB(NonJS);
 
 #undef GET_MEMORY_REPORTER_MANAGER
 
-}
+} // namespace mozilla
 
 #if defined(MOZ_DMD)
 

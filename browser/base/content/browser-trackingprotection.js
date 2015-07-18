@@ -3,29 +3,44 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 let TrackingProtection = {
-  PREF_ENABLED: "privacy.trackingprotection.enabled",
+  PREF_ENABLED_GLOBALLY: "privacy.trackingprotection.enabled",
+  PREF_ENABLED_IN_PRIVATE_WINDOWS: "privacy.trackingprotection.pbmode.enabled",
+  enabledGlobally: false,
+  enabledInPrivateWindows: false,
 
   init() {
     let $ = selector => document.querySelector(selector);
     this.container = $("#tracking-protection-container");
     this.content = $("#tracking-protection-content");
+    this.icon = $("#tracking-protection-icon");
 
     this.updateEnabled();
-    Services.prefs.addObserver(this.PREF_ENABLED, this, false);
+    Services.prefs.addObserver(this.PREF_ENABLED_GLOBALLY, this, false);
+    Services.prefs.addObserver(this.PREF_ENABLED_IN_PRIVATE_WINDOWS, this, false);
 
-    this.enabledHistogram.add(this.enabled);
+    this.enabledHistogram.add(this.enabledGlobally);
   },
 
   uninit() {
-    Services.prefs.removeObserver(this.PREF_ENABLED, this);
+    Services.prefs.removeObserver(this.PREF_ENABLED_GLOBALLY, this);
+    Services.prefs.removeObserver(this.PREF_ENABLED_IN_PRIVATE_WINDOWS, this);
   },
 
   observe() {
     this.updateEnabled();
   },
 
+  get enabled() {
+    return this.enabledGlobally ||
+           (this.enabledInPrivateWindows &&
+            PrivateBrowsingUtils.isWindowPrivate(window));
+  },
+
   updateEnabled() {
-    this.enabled = Services.prefs.getBoolPref(this.PREF_ENABLED);
+    this.enabledGlobally =
+      Services.prefs.getBoolPref(this.PREF_ENABLED_GLOBALLY);
+    this.enabledInPrivateWindows =
+      Services.prefs.getBoolPref(this.PREF_ENABLED_IN_PRIVATE_WINDOWS);
     this.container.hidden = !this.enabled;
   },
 
@@ -46,15 +61,14 @@ let TrackingProtection = {
       STATE_BLOCKED_TRACKING_CONTENT, STATE_LOADED_TRACKING_CONTENT
     } = Ci.nsIWebProgressListener;
 
-    if (state & STATE_BLOCKED_TRACKING_CONTENT) {
-      this.content.setAttribute("block-active", true);
-      this.content.removeAttribute("block-disabled");
-    } else if (state & STATE_LOADED_TRACKING_CONTENT) {
-      this.content.setAttribute("block-disabled", true);
-      this.content.removeAttribute("block-active");
-    } else {
-      this.content.removeAttribute("block-disabled");
-      this.content.removeAttribute("block-active");
+    for (let element of [this.icon, this.content]) {
+      if (state & STATE_BLOCKED_TRACKING_CONTENT) {
+        element.setAttribute("state", "blocked-tracking-content");
+      } else if (state & STATE_LOADED_TRACKING_CONTENT) {
+        element.setAttribute("state", "loaded-tracking-content");
+      } else {
+        element.removeAttribute("state");
+      }
     }
 
     // Telemetry for state change.
@@ -85,7 +99,11 @@ let TrackingProtection = {
     // Remove the current host from the 'trackingprotection' consumer
     // of the permission manager. This effectively removes this host
     // from the tracking protection allowlist.
-    Services.perms.remove(gBrowser.selectedBrowser.currentURI,
+    let normalizedUrl = Services.io.newURI(
+      "https://" + gBrowser.selectedBrowser.currentURI.hostPort,
+      null, null);
+
+    Services.perms.remove(normalizedUrl,
       "trackingprotection");
 
     // Telemetry for enable protection.

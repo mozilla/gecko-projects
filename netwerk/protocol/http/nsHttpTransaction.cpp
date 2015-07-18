@@ -384,6 +384,12 @@ nsHttpTransaction::Init(uint32_t caps,
                      nsIOService::gDefaultSegmentCount);
     if (NS_FAILED(rv)) return rv;
 
+#ifdef WIN32 // bug 1153929
+    MOZ_DIAGNOSTIC_ASSERT(mPipeOut);
+    uint32_t * vtable = (uint32_t *) mPipeOut.get();
+    MOZ_DIAGNOSTIC_ASSERT(*vtable != 0);
+#endif // WIN32
+
     Classify();
 
     nsCOMPtr<nsIAsyncInputStream> tmp(mPipeIn);
@@ -676,6 +682,16 @@ nsHttpTransaction::ReadSegments(nsAHttpSegmentReader *reader,
 
     mReader = nullptr;
 
+    if (mForceRestart) {
+        // The forceRestart condition was dealt with on the stack, but it did not
+        // clear the flag because nsPipe in the readsegment stack clears out
+        // return codes, so we need to use the flag here as a cue to return ERETARGETED
+        if (NS_SUCCEEDED(rv)) {
+            rv = NS_BINDING_RETARGETED;
+        }
+        mForceRestart = false;
+    }
+
     // if read would block then we need to AsyncWait on the request stream.
     // have callback occur on socket thread so we stay synchronized.
     if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
@@ -748,22 +764,42 @@ nsresult
 nsHttpTransaction::WriteSegments(nsAHttpSegmentWriter *writer,
                                  uint32_t count, uint32_t *countWritten)
 {
+    static bool reentrantFlag = false;
+    MOZ_DIAGNOSTIC_ASSERT(!reentrantFlag);
+    reentrantFlag = true;
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
-    if (mTransactionDone)
+    if (mTransactionDone) {
+        reentrantFlag = false;
         return NS_SUCCEEDED(mStatus) ? NS_BASE_STREAM_CLOSED : mStatus;
+    }
 
     mWriter = writer;
 
-    // Bug 1153929 - add checks to fix windows crash
-    MOZ_ASSERT(mPipeOut);
+#ifdef WIN32 // bug 1153929
+    MOZ_DIAGNOSTIC_ASSERT(mPipeOut);
+    uint32_t * vtable = (uint32_t *) mPipeOut.get();
+    MOZ_DIAGNOSTIC_ASSERT(*vtable != 0);
+#endif // WIN32
+
     if (!mPipeOut) {
+        reentrantFlag = false;
         return NS_ERROR_UNEXPECTED;
     }
 
     nsresult rv = mPipeOut->WriteSegments(WritePipeSegment, this, count, countWritten);
 
     mWriter = nullptr;
+
+    if (mForceRestart) {
+        // The forceRestart condition was dealt with on the stack, but it did not
+        // clear the flag because nsPipe in the writesegment stack clears out
+        // return codes, so we need to use the flag here as a cue to return ERETARGETED
+        if (NS_SUCCEEDED(rv)) {
+            rv = NS_BINDING_RETARGETED;
+        }
+        mForceRestart = false;
+    }
 
     // if pipe would block then we need to AsyncWait on it.  have callback
     // occur on socket thread so we stay synchronized.
@@ -778,6 +814,7 @@ nsHttpTransaction::WriteSegments(nsAHttpSegmentWriter *writer,
         }
     }
 
+    reentrantFlag = false;
     return rv;
 }
 
@@ -826,6 +863,10 @@ nsHttpTransaction::Close(nsresult reason)
     LOG(("nsHttpTransaction::Close [this=%p reason=%x]\n", this, reason));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
+    if (reason == NS_BINDING_RETARGETED) {
+        LOG(("  close %p skipped due to ERETARGETED\n", this));
+        return;
+    }
 
     if (mClosed) {
         LOG(("  already closed\n"));
@@ -884,6 +925,21 @@ nsHttpTransaction::Close(nsresult reason)
     if (reason == NS_ERROR_NET_RESET || reason == NS_OK) {
 
         if (mForceRestart && NS_SUCCEEDED(Restart())) {
+            if (mResponseHead) {
+                mResponseHead->Reset();
+            }
+            mContentRead = 0;
+            mContentLength = -1;
+            delete mChunkedDecoder;
+            mChunkedDecoder = nullptr;
+            mHaveStatusLine = false;
+            mHaveAllHeaders = false;
+            mHttpResponseMatched = false;
+            mResponseIsComplete = false;
+            mDidContentStart = false;
+            mNoContent = false;
+            mSentData = false;
+            mReceivedData = false;
             LOG(("transaction force restarted\n"));
             return;
         }
@@ -1016,6 +1072,13 @@ nsHttpTransaction::Close(nsresult reason)
 
     // closing this pipe triggers the channel's OnStopRequest method.
     mPipeOut->CloseWithStatus(reason);
+
+#ifdef WIN32 // bug 1153929
+    MOZ_DIAGNOSTIC_ASSERT(mPipeOut);
+    uint32_t * vtable = (uint32_t *) mPipeOut.get();
+    MOZ_DIAGNOSTIC_ASSERT(*vtable != 0);
+    mPipeOut = nullptr; // just in case
+#endif // WIN32
 }
 
 nsHttpConnectionInfo *
@@ -1180,7 +1243,6 @@ nsHttpTransaction::Restart()
             mRequestHead->SetHeader(nsHttp::Alternate_Service_Used, NS_LITERAL_CSTRING("0"));
         }
     }
-    mForceRestart = false;
 
     return gHttpHandler->InitiateTransaction(this, mPriority);
 }
@@ -1505,8 +1567,11 @@ nsHttpTransaction::HandleContentStart()
             gHttpHandler->ConnMgr()->ClearHostMapping(mConnInfo);
 
             // retry on a new connection - just in case
-            mCaps &= ~NS_HTTP_ALLOW_KEEPALIVE;
-            mForceRestart = true; // force restart has built in loop protection
+            if (!mRestartCount) {
+                mCaps &= ~NS_HTTP_ALLOW_KEEPALIVE;
+                mForceRestart = true; // force restart has built in loop protection
+                return NS_ERROR_NET_RESET;
+            }
             break;
         }
 
@@ -2210,5 +2275,5 @@ nsHttpTransaction::GetNetworkAddresses(NetAddr &self, NetAddr &peer)
     peer = mPeerAddr;
 }
 
-} // namespace mozilla::net
+} // namespace net
 } // namespace mozilla
