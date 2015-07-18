@@ -133,7 +133,7 @@ interface nsIThreadObserver : nsISupports
    * This method is called (from nsIThread::ProcessNextEvent) after an event
    * is processed.  It does not guarantee that an event was actually processed
    * (depends on the value of |eventWasProcessed|.  This method is only called
-   * on the target thread.
+   * on the target thread.  DO NOT EVER RUN SCRIPT FROM THIS CALLBACK!!!
    *
    * @param thread
    *   The thread that processed another event.

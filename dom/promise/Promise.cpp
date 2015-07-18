@@ -30,6 +30,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsJSEnvironment.h"
 #include "nsIScriptObjectPrincipal.h"
+#include "nsIThreadInternal.h"
 #include "xpcpublic.h"
 #include "nsGlobalWindow.h"
 
@@ -488,6 +489,11 @@ Promise::PerformMicroTaskCheckpoint()
     return false;
   }
 
+  uint32_t recursionDepth;
+  nsCOMPtr<nsIThread> thread = do_GetCurrentThread();
+  nsCOMPtr<nsIThreadInternal> internalThread = do_QueryInterface(thread);
+  internalThread->GetRecursionDepth(&recursionDepth);
+
   Maybe<AutoSafeJSContext> cx;
   if (NS_IsMainThread()) {
     cx.emplace();
@@ -506,6 +512,7 @@ Promise::PerformMicroTaskCheckpoint()
     if (cx.isSome()) {
       JS_CheckForInterrupt(cx.ref());
     }
+    runtime->AfterProcessMicrotask(recursionDepth);
   } while (!microtaskQueue.empty());
 
   return true;
