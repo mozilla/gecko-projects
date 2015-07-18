@@ -1413,4 +1413,21 @@ const saveWindowGeometry = () => {
 }
 window.addEventListener("unload", saveWindowGeometry);
 
+(() => {
+  let baseWindow = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIWebNavigation)
+                         .QueryInterface(Ci.nsIDocShellTreeItem)
+                         .treeOwner
+                         .QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIBaseWindow);
+
+  baseWindow.visibility = false; // prevent native window to show up until we are ready
+
+  window.addEventListener("ContentStart", () => {
+    shell.contentBrowser.contentWindow.addEventListener('load', () => {
+      baseWindow.visibility = true;
+    });
+  });
+})();
+
 #endif
