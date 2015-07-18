@@ -16,9 +16,11 @@
 #include "mozilla/dom/DOMError.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/ipc/BackgroundChild.h"
+#include "nsIAppShell.h"
 #include "nsPIDOMWindow.h"
 #include "nsServiceManagerUtils.h"
 #include "nsTHashtable.h"
+#include "nsWidgetsCID.h"
 #include "ProfilerHelpers.h"
 #include "ReportInternalError.h"
 #include "WorkerFeature.h"
@@ -33,6 +35,36 @@ namespace indexedDB {
 
 using namespace mozilla::dom::workers;
 using namespace mozilla::ipc;
+
+namespace {
+
+NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
+
+bool
+RunBeforeNextEvent(IDBTransaction* aTransaction)
+{
+  MOZ_ASSERT(aTransaction);
+
+  if (NS_IsMainThread()) {
+    nsCOMPtr<nsIAppShell> appShell = do_GetService(kAppShellCID);
+    MOZ_ASSERT(appShell);
+
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(appShell->RunBeforeNextEvent(aTransaction)));
+
+    return true;
+  }
+
+  WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
+  MOZ_ASSERT(workerPrivate);
+
+  if (NS_WARN_IF(!workerPrivate->RunBeforeNextEvent(aTransaction))) {
+    return false;
+  }
+
+  return true;
+}
+
+} // namespace
 
 class IDBTransaction::WorkerFeature final
   : public mozilla::dom::workers::WorkerFeature
@@ -190,8 +222,15 @@ IDBTransaction::CreateVersionChange(
 
   transaction->SetScriptOwner(aDatabase->GetScriptOwner());
 
-  nsCOMPtr<nsIRunnable> runnable = do_QueryObject(transaction);
-  nsContentUtils::RunInMetastableState(runnable.forget());
+  if (NS_WARN_IF(!RunBeforeNextEvent(transaction))) {
+    MOZ_ASSERT(!NS_IsMainThread());
+#ifdef DEBUG
+    // Silence assertions.
+    transaction->mSentCommitOrAbort = true;
+#endif
+    aActor->SendDeleteMeInternal(/* aFailedConstructor */ true);
+    return nullptr;
+  }
 
   transaction->mBackgroundActor.mVersionChangeBackgroundActor = aActor;
   transaction->mNextObjectStoreId = aNextObjectStoreId;
@@ -223,8 +262,10 @@ IDBTransaction::Create(IDBDatabase* aDatabase,
 
   transaction->SetScriptOwner(aDatabase->GetScriptOwner());
 
-  nsCOMPtr<nsIRunnable> runnable = do_QueryObject(transaction);
-  nsContentUtils::RunInMetastableState(runnable.forget());
+  if (NS_WARN_IF(!RunBeforeNextEvent(transaction))) {
+    MOZ_ASSERT(!NS_IsMainThread());
+    return nullptr;
+  }
 
   transaction->mCreating = true;
 

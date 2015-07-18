@@ -2749,6 +2749,22 @@ WorkerPrivate::SyncLoopInfo::SyncLoopInfo(EventTarget* aEventTarget)
 {
 }
 
+struct WorkerPrivate::PreemptingRunnableInfo final
+{
+  nsCOMPtr<nsIRunnable> mRunnable;
+  uint32_t mRecursionDepth;
+
+  PreemptingRunnableInfo()
+  {
+    MOZ_COUNT_CTOR(WorkerPrivate::PreemptingRunnableInfo);
+  }
+
+  ~PreemptingRunnableInfo()
+  {
+    MOZ_COUNT_DTOR(WorkerPrivate::PreemptingRunnableInfo);
+  }
+};
+
 template <class Derived>
 nsIDocument*
 WorkerPrivateParent<Derived>::GetDocument() const
@@ -5386,6 +5402,29 @@ WorkerPrivate::OnProcessNextEvent(uint32_t aRecursionDepth)
       mSyncLoopStack.Length() < aRecursionDepth - 1) {
     ProcessAllControlRunnables();
   }
+
+  // Run any preempting runnables that match this depth.
+  if (!mPreemptingRunnableInfos.IsEmpty()) {
+    nsTArray<PreemptingRunnableInfo> pendingRunnableInfos;
+
+    for (uint32_t index = 0;
+         index < mPreemptingRunnableInfos.Length();
+         index++) {
+      PreemptingRunnableInfo& preemptingRunnableInfo =
+        mPreemptingRunnableInfos[index];
+
+      if (preemptingRunnableInfo.mRecursionDepth == aRecursionDepth) {
+        preemptingRunnableInfo.mRunnable->Run();
+        preemptingRunnableInfo.mRunnable = nullptr;
+      } else {
+        PreemptingRunnableInfo* pending = pendingRunnableInfos.AppendElement();
+        pending->mRunnable.swap(preemptingRunnableInfo.mRunnable);
+        pending->mRecursionDepth = preemptingRunnableInfo.mRecursionDepth;
+      }
+    }
+
+    mPreemptingRunnableInfos.SwapElements(pendingRunnableInfos);
+  }
 }
 
 void
@@ -5393,6 +5432,42 @@ WorkerPrivate::AfterProcessNextEvent(uint32_t aRecursionDepth)
 {
   AssertIsOnWorkerThread();
   MOZ_ASSERT(aRecursionDepth);
+}
+
+bool
+WorkerPrivate::RunBeforeNextEvent(nsIRunnable* aRunnable)
+{
+  AssertIsOnWorkerThread();
+  MOZ_ASSERT(aRunnable);
+  MOZ_ASSERT_IF(!mPreemptingRunnableInfos.IsEmpty(),
+                NS_HasPendingEvents(mThread));
+
+  const uint32_t recursionDepth =
+    mThread->RecursionDepth(WorkerThreadFriendKey());
+
+  PreemptingRunnableInfo* preemptingRunnableInfo =
+    mPreemptingRunnableInfos.AppendElement();
+
+  preemptingRunnableInfo->mRunnable = aRunnable;
+
+  // Due to the weird way that the thread recursion counter is implemented we
+  // subtract one from the recursion level if we have one.
+  preemptingRunnableInfo->mRecursionDepth =
+    recursionDepth ? recursionDepth - 1 : 0;
+
+  // Ensure that we have a pending event so that the runnable will be guaranteed
+  // to run.
+  if (mPreemptingRunnableInfos.Length() == 1 && !NS_HasPendingEvents(mThread)) {
+    nsRefPtr<DummyRunnable> dummyRunnable = new DummyRunnable(this);
+    if (NS_FAILED(Dispatch(dummyRunnable.forget()))) {
+      NS_WARNING("RunBeforeNextEvent called after the thread is shutting "
+                 "down!");
+      mPreemptingRunnableInfos.Clear();
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void

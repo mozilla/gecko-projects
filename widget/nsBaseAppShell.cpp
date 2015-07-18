@@ -414,12 +414,14 @@ nsBaseAppShell::ScheduleSyncSection(already_AddRefed<nsIRunnable> aRunnable,
       NS_ERROR("This should never fail!");
     }
 
-    section->mThreadRecursionLevel = recursionLevel;
+    // Due to the weird way that the thread recursion counter is implemented we
+    // subtract one from the recursion level if we have one.
+    section->mThreadRecursionLevel = recursionLevel ? recursionLevel - 1 : 0;
   }
 
   // Ensure we've got a pending event, else the callbacks will never run.
   if (!NS_HasPendingEvents(thread) && !DispatchDummyEvent(thread)) {
-    RunSyncSections(true, 1);
+    RunSyncSections(true, 0);
   }
 }
 
@@ -440,5 +442,19 @@ nsBaseAppShell::Observe(nsISupports *subject, const char *topic,
 {
   NS_ASSERTION(!strcmp(topic, NS_XPCOM_SHUTDOWN_OBSERVER_ID), "oops");
   Exit();
+  return NS_OK;
+}
+
+void
+nsBaseAppShell::RunInStableState(already_AddRefed<nsIRunnable> aRunnable)
+{
+  ScheduleSyncSection(mozilla::Move(aRunnable), true);
+}
+
+NS_IMETHODIMP
+nsBaseAppShell::RunBeforeNextEvent(nsIRunnable* aRunnable)
+{
+  nsCOMPtr<nsIRunnable> runnable = aRunnable;
+  ScheduleSyncSection(runnable.forget(), false);
   return NS_OK;
 }

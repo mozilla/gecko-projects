@@ -606,7 +606,9 @@ AudioDestinationNode::ScheduleStableStateNotification()
     NS_NewRunnableMethod(this, &AudioDestinationNode::NotifyStableState);
   // Dispatch will fail if this is called on AudioNode destruction during
   // shutdown, in which case failure can be ignored.
-  nsContentUtils::RunInStableState(event.forget());
+  nsContentUtils::RunInStableState(event.forget(),
+                                   nsContentUtils::
+                                     DispatchFailureHandling::IgnoreFailure);
 }
 
 double
