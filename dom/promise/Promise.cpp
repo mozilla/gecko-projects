@@ -30,6 +30,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsJSEnvironment.h"
 #include "nsIScriptObjectPrincipal.h"
+#include "nsIThreadInternal.h"
 #include "xpcpublic.h"
 #include "nsGlobalWindow.h"
 
@@ -506,6 +507,7 @@ Promise::PerformMicroTaskCheckpoint()
     if (cx.isSome()) {
       JS_CheckForInterrupt(cx.ref());
     }
+    runtime->AfterProcessMicrotask();
   } while (!microtaskQueue.empty());
 
   return true;

@@ -3,6 +3,11 @@ function ok(a, msg) {
   postMessage({type: 'status', status: !!a, msg: a + ": " + msg });
 }
 
+function todo(a, msg) {
+  dump("TODO: " + !a + "  =>  " + a + " " + msg + "\n");
+  postMessage({type: 'status', status: !a, msg: a + ": " + msg });
+}
+
 function is(a, b, msg) {
   dump("IS: " + (a===b) + "  =>  " + a + " | " + b + " " + msg + "\n");
   postMessage({type: 'status', status: a === b, msg: a + " === " + b + ": " + msg });
@@ -148,7 +153,7 @@ function promiseAsync_ResolveThenTimeout() {
   ok(!handlerExecuted, "Handlers are not called before 'then' returns.");
 }
 
-function promiseAsync_SyncHXRAndImportScripts()
+function promiseAsync_SyncXHRAndImportScripts()
 {
   var handlerExecuted = false;
 
@@ -165,11 +170,11 @@ function promiseAsync_SyncHXRAndImportScripts()
   xhr.open("GET", "testXHR.txt", false);
   xhr.send(null);
 
-  ok(!handlerExecuted, "Sync XHR should not trigger microtask execution.");
+  todo(!handlerExecuted, "Sync XHR should not trigger microtask execution.");
 
   importScripts("relativeLoad_import.js");
 
-  ok(!handlerExecuted, "importScripts should not trigger microtask execution.");
+  todo(!handlerExecuted, "importScripts should not trigger microtask execution.");
 }
 
 function promiseDoubleThen() {
@@ -790,7 +795,7 @@ var tests = [
     promiseAsync_TimeoutResolveThen,
     promiseAsync_ResolveTimeoutThen,
     promiseAsync_ResolveThenTimeout,
-    promiseAsync_SyncHXRAndImportScripts,
+    promiseAsync_SyncXHRAndImportScripts,
     promiseDoubleThen,
     promiseThenException,
     promiseThenCatchThen,
