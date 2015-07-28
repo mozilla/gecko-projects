@@ -566,30 +566,6 @@ describe("loop.store.ActiveRoomStore", function () {
     });
   });
 
-  describe("#feedbackComplete", function() {
-    it("should set the room state to READY", function() {
-      store.setStoreState({
-        roomState: ROOM_STATES.ENDED,
-        used: true
-      });
-
-      store.feedbackComplete(new sharedActions.FeedbackComplete());
-
-      expect(store.getStoreState().roomState).eql(ROOM_STATES.READY);
-    });
-
-    it("should reset the 'used' state", function() {
-      store.setStoreState({
-        roomState: ROOM_STATES.ENDED,
-        used: true
-      });
-
-      store.feedbackComplete(new sharedActions.FeedbackComplete());
-
-      expect(store.getStoreState().used).eql(false);
-    });
-  });
-
   describe("#videoDimensionsChanged", function() {
     it("should not contain any video dimensions at the very start", function() {
       expect(store.getStoreState()).eql(store.getInitialStoreState());
@@ -938,26 +914,6 @@ describe("loop.store.ActiveRoomStore", function () {
       connectionFailureAction = new sharedActions.ConnectionFailure({
         reason: "FAIL"
       });
-    });
-
-    it("should retry publishing if on desktop, and in the videoMuted state", function() {
-      store._isDesktop = true;
-
-      store.connectionFailure(new sharedActions.ConnectionFailure({
-        reason: FAILURE_DETAILS.UNABLE_TO_PUBLISH_MEDIA
-      }));
-
-      sinon.assert.calledOnce(fakeSdkDriver.retryPublishWithoutVideo);
-    });
-
-    it("should set videoMuted to try when retrying publishing", function() {
-      store._isDesktop = true;
-
-      store.connectionFailure(new sharedActions.ConnectionFailure({
-        reason: FAILURE_DETAILS.UNABLE_TO_PUBLISH_MEDIA
-      }));
-
-      expect(store.getStoreState().videoMuted).eql(true);
     });
 
     it("should store the failure reason", function() {

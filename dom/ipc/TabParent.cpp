@@ -1211,11 +1211,25 @@ TabParent::RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
 #ifdef ACCESSIBILITY
   auto doc = static_cast<a11y::DocAccessibleParent*>(aDoc);
   if (aParentDoc) {
+    // A document should never directly be the parent of another document.
+    // There should always be an outer doc accessible child of the outer
+    // document containing the child.
     MOZ_ASSERT(aParentID);
+    if (!aParentID) {
+      return false;
+    }
+
     auto parentDoc = static_cast<a11y::DocAccessibleParent*>(aParentDoc);
     return parentDoc->AddChildDoc(doc, aParentID);
   } else {
+    // null aParentDoc means this document is at the top level in the child
+    // process.  That means it makes no sense to get an id for an accessible
+    // that is its parent.
     MOZ_ASSERT(!aParentID);
+    if (aParentID) {
+      return false;
+    }
+
     doc->SetTopLevel();
     a11y::DocManager::RemoteDocAdded(doc);
   }
@@ -2079,13 +2093,13 @@ TabParent::RecvNotifyIMEPositionChange(const ContentCache& aContentCache,
   const nsIMEUpdatePreference updatePreference =
     widget->GetIMEUpdatePreference();
   if (updatePreference.WantPositionChanged()) {
-    IMEStateManager::NotifyIME(aIMENotification, widget, true);
+    mContentCache.MaybeNotifyIME(widget, aIMENotification);
   }
   return true;
 }
 
 bool
-TabParent::RecvOnEventNeedingAckReceived(const uint32_t& aMessage)
+TabParent::RecvOnEventNeedingAckHandled(const uint32_t& aMessage)
 {
   // This is called when the child process receives WidgetCompositionEvent or
   // WidgetSelectionEvent.
@@ -2094,10 +2108,10 @@ TabParent::RecvOnEventNeedingAckReceived(const uint32_t& aMessage)
     return true;
   }
 
-  // While calling OnEventNeedingAckReceived(), TabParent *might* be destroyed
+  // While calling OnEventNeedingAckHandled(), TabParent *might* be destroyed
   // since it may send notifications to IME.
   nsRefPtr<TabParent> kungFuDeathGrip(this);
-  mContentCache.OnEventNeedingAckReceived(widget, aMessage);
+  mContentCache.OnEventNeedingAckHandled(widget, aMessage);
   return true;
 }
 
@@ -2612,18 +2626,16 @@ TabParent::AllocPRenderFrameParent()
   TextureFactoryIdentifier textureFactoryIdentifier;
   uint64_t layersId = 0;
   bool success = false;
-  if(frameLoader) {
-    PRenderFrameParent* renderFrame = 
-      new RenderFrameParent(frameLoader,
-                            &textureFactoryIdentifier,
-                            &layersId,
-                            &success);
-    MOZ_ASSERT(success);
+
+  PRenderFrameParent* renderFrame =
+    new RenderFrameParent(frameLoader,
+                          &textureFactoryIdentifier,
+                          &layersId,
+                          &success);
+  if (success) {
     AddTabParentToTable(layersId, this);
-    return renderFrame;
-  } else {
-    return nullptr;
   }
+  return renderFrame;
 }
 
 bool
@@ -2936,9 +2948,9 @@ TabParent::SetHasContentOpener(bool aHasContentOpener)
 }
 
 NS_IMETHODIMP
-TabParent::NavigateDocument(bool aForward)
+TabParent::NavigateByKey(bool aForward, bool aForDocumentNavigation)
 {
-  unused << SendNavigateDocument(aForward);
+  unused << SendNavigateByKey(aForward, aForDocumentNavigation);
   return NS_OK;
 }
 

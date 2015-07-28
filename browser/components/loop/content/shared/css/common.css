@@ -536,7 +536,7 @@ html[dir="rtl"] .context-content {
   width: 16px;
   max-height: 16px;
   margin-right: .8em;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 
 html[dir="rtl"] .context-wrapper > .context-preview {
@@ -549,6 +549,9 @@ html[dir="rtl"] .context-wrapper > .context-preview {
   flex: 0 1 auto;
   display: block;
   color: black;
+  /* 16px for the preview, plus its .8em margin */
+  max-width: calc(100% - 16px - .8em);
+  word-wrap: break-word;
 }
 
 .context-wrapper > .context-description > .context-url {

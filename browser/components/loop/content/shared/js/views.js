@@ -944,6 +944,139 @@ loop.shared.views = (function(_, mozL10n) {
     }
   });
 
+  var MediaLayoutView = React.createClass({displayName: "MediaLayoutView",
+    propTypes: {
+      children: React.PropTypes.node,
+      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
+      displayScreenShare: React.PropTypes.bool.isRequired,
+      isLocalLoading: React.PropTypes.bool.isRequired,
+      isRemoteLoading: React.PropTypes.bool.isRequired,
+      isScreenShareLoading: React.PropTypes.bool.isRequired,
+      // The poster URLs are for UI-showcase testing and development.
+      localPosterUrl: React.PropTypes.string,
+      localSrcVideoObject: React.PropTypes.object,
+      localVideoMuted: React.PropTypes.bool.isRequired,
+      // Passing in matchMedia, allows it to be overriden for ui-showcase's
+      // benefit. We expect either the override or window.matchMedia.
+      matchMedia: React.PropTypes.func.isRequired,
+      remotePosterUrl: React.PropTypes.string,
+      remoteSrcVideoObject: React.PropTypes.object,
+      renderRemoteVideo: React.PropTypes.bool.isRequired,
+      screenSharePosterUrl: React.PropTypes.string,
+      screenShareVideoObject: React.PropTypes.object,
+      showContextRoomName: React.PropTypes.bool.isRequired,
+      useDesktopPaths: React.PropTypes.bool.isRequired
+    },
+
+    isLocalMediaAbsolutelyPositioned: function(matchMedia) {
+      if (!matchMedia) {
+        matchMedia = this.props.matchMedia;
+      }
+      return matchMedia &&
+        // The screen width is less than 640px and we are not screen sharing.
+        ((matchMedia("screen and (max-width:640px)").matches &&
+         !this.props.displayScreenShare) ||
+         // or the screen width is less than 300px.
+         (matchMedia("screen and (max-width:300px)").matches));
+    },
+
+    getInitialState: function() {
+      return {
+        localMediaAboslutelyPositioned: this.isLocalMediaAbsolutelyPositioned()
+      };
+    },
+
+    componentWillReceiveProps: function(nextProps) {
+      // This is all for the ui-showcase's benefit.
+      if (this.props.matchMedia != nextProps.matchMedia) {
+        this.updateLocalMediaState(null, nextProps.matchMedia);
+      }
+    },
+
+    componentDidMount: function() {
+      window.addEventListener("resize", this.updateLocalMediaState);
+    },
+
+    componentWillUnmount: function() {
+      window.removeEventListener("resize", this.updateLocalMediaState);
+    },
+
+    updateLocalMediaState: function(event, matchMedia) {
+      var newState = this.isLocalMediaAbsolutelyPositioned(matchMedia);
+      if (this.state.localMediaAboslutelyPositioned != newState) {
+        this.setState({
+          localMediaAboslutelyPositioned: newState
+        });
+      }
+    },
+
+    renderLocalVideo: function() {
+      return (
+        React.createElement("div", {className: "local"}, 
+          React.createElement(MediaView, {displayAvatar: this.props.localVideoMuted, 
+            isLoading: this.props.isLocalLoading, 
+            mediaType: "local", 
+            posterUrl: this.props.localPosterUrl, 
+            srcVideoObject: this.props.localSrcVideoObject})
+        )
+      );
+    },
+
+    render: function() {
+      var remoteStreamClasses = React.addons.classSet({
+        "remote": true,
+        "focus-stream": !this.props.displayScreenShare
+      });
+
+      var screenShareStreamClasses = React.addons.classSet({
+        "screen": true,
+        "focus-stream": this.props.displayScreenShare
+      });
+
+      var mediaWrapperClasses = React.addons.classSet({
+        "media-wrapper": true,
+        "receiving-screen-share": this.props.displayScreenShare,
+        "showing-local-streams": this.props.localSrcVideoObject ||
+          this.props.localPosterUrl,
+        "showing-remote-streams": this.props.remoteSrcVideoObject ||
+          this.props.remotePosterUrl || this.props.isRemoteLoading
+      });
+
+      return (
+        React.createElement("div", {className: "media-layout"}, 
+          React.createElement("div", {className: mediaWrapperClasses}, 
+            React.createElement("span", {className: "self-view-hidden-message"}, 
+              mozL10n.get("self_view_hidden_message")
+            ), 
+            React.createElement("div", {className: remoteStreamClasses}, 
+              React.createElement(MediaView, {displayAvatar: !this.props.renderRemoteVideo, 
+                isLoading: this.props.isRemoteLoading, 
+                mediaType: "remote", 
+                posterUrl: this.props.remotePosterUrl, 
+                srcVideoObject: this.props.remoteSrcVideoObject}), 
+               this.state.localMediaAboslutelyPositioned ?
+                this.renderLocalVideo() : null, 
+               this.props.children
+            ), 
+            React.createElement("div", {className: screenShareStreamClasses}, 
+              React.createElement(MediaView, {displayAvatar: false, 
+                isLoading: this.props.isScreenShareLoading, 
+                mediaType: "screen-share", 
+                posterUrl: this.props.screenSharePosterUrl, 
+                srcVideoObject: this.props.screenShareVideoObject})
+            ), 
+            React.createElement(loop.shared.views.chat.TextChatView, {
+              dispatcher: this.props.dispatcher, 
+              showRoomName: this.props.showContextRoomName, 
+              useDesktopPaths: false}), 
+             this.state.localMediaAboslutelyPositioned ?
+              null : this.renderLocalVideo()
+          )
+        )
+      );
+    }
+  });
+
   return {
     AvatarView: AvatarView,
     Button: Button,
@@ -953,6 +1086,7 @@ loop.shared.views = (function(_, mozL10n) {
     ConversationView: ConversationView,
     ConversationToolbar: ConversationToolbar,
     MediaControlButton: MediaControlButton,
+    MediaLayoutView: MediaLayoutView,
     MediaView: MediaView,
     LoadingView: LoadingView,
     ScreenShareControlButton: ScreenShareControlButton,

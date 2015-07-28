@@ -40,20 +40,18 @@ typedef RootedValueMap::Range RootRange;
 typedef RootedValueMap::Entry RootEntry;
 typedef RootedValueMap::Enum RootEnum;
 
-// Note: the following two functions cannot be static as long as we are using
-// GCC 4.4, since it requires template function parameters to have external
-// linkage.
-
-void
-MarkBindingsRoot(JSTracer* trc, Bindings* bindings, const char* name)
+// We cannot instantiate (even indirectly) the abstract JS::DynamicTraceable.
+// Instead we cast to a ConcreteTraceable, then upcast before calling trace so
+// that we get the implementation defined dynamically in the vtable.
+struct ConcreteTraceable : public JS::DynamicTraceable
 {
-    bindings->trace(trc);
-}
+    void trace(JSTracer* trc) override {}
+};
 
-void
-MarkPropertyDescriptorRoot(JSTracer* trc, JSPropertyDescriptor* pd, const char* name)
+static void
+MarkDynamicTraceable(JSTracer* trc, ConcreteTraceable* t, const char* name)
 {
-    pd->trace(trc);
+    static_cast<JS::DynamicTraceable*>(t)->trace(trc);
 }
 
 template <typename T>
@@ -87,12 +85,11 @@ MarkExactStackRootsAcrossTypes(T context, JSTracer* trc)
     MarkExactStackRootList<LazyScript*>(trc, context, "exact-lazy-script");
     MarkExactStackRootList<jsid>(trc, context, "exact-id");
     MarkExactStackRootList<Value>(trc, context, "exact-value");
-    MarkExactStackRootList<Bindings, MarkBindingsRoot>(trc, context, "Bindings");
-    MarkExactStackRootList<JSPropertyDescriptor, MarkPropertyDescriptorRoot>(
-        trc, context, "JSPropertyDescriptor");
     MarkExactStackRootList<JS::StaticTraceable,
                            js::DispatchWrapper<JS::StaticTraceable>::TraceWrapped>(
         trc, context, "StaticTraceable");
+    MarkExactStackRootList<ConcreteTraceable, MarkDynamicTraceable>(
+        trc, context, "DynamicTraceable");
 }
 
 static void
@@ -191,18 +188,6 @@ AutoGCRooter::trace(JSTracer* trc)
       case SCRIPTVECTOR: {
         AutoScriptVector::VectorImpl& vector = static_cast<AutoScriptVector*>(this)->vector;
         TraceRootRange(trc, vector.length(), vector.begin(), "js::AutoScriptVector.vector");
-        return;
-      }
-
-      case OBJU32HASHMAP: {
-        AutoObjectUnsigned32HashMap* self = static_cast<AutoObjectUnsigned32HashMap*>(this);
-        AutoObjectUnsigned32HashMap::HashMapImpl& map = self->map;
-        for (AutoObjectUnsigned32HashMap::Enum e(map); !e.empty(); e.popFront()) {
-            JSObject* key = e.front().key();
-            TraceRoot(trc, &key, "AutoObjectUnsignedHashMap key");
-            if (key != e.front().key())
-                e.rekeyFront(key);
-        }
         return;
       }
 
@@ -333,22 +318,28 @@ struct PersistentRootedMarker
 } // namespace js
 
 void
+js::gc::MarkPersistentRootedChainsInLists(RootLists& roots, JSTracer* trc)
+{
+    PersistentRootedMarker<JSFunction*>::markChain(trc, roots.functionPersistentRooteds,
+                                                   "PersistentRooted<JSFunction*>");
+    PersistentRootedMarker<JSObject*>::markChain(trc, roots.objectPersistentRooteds,
+                                                 "PersistentRooted<JSObject*>");
+    PersistentRootedMarker<JSScript*>::markChain(trc, roots.scriptPersistentRooteds,
+                                                 "PersistentRooted<JSScript*>");
+    PersistentRootedMarker<JSString*>::markChain(trc, roots.stringPersistentRooteds,
+                                                 "PersistentRooted<JSString*>");
+    PersistentRootedMarker<jsid>::markChain(trc, roots.idPersistentRooteds,
+                                            "PersistentRooted<jsid>");
+    PersistentRootedMarker<Value>::markChain(trc, roots.valuePersistentRooteds,
+                                             "PersistentRooted<Value>");
+}
+
+void
 js::gc::MarkPersistentRootedChains(JSTracer* trc)
 {
-    JSRuntime* rt = trc->runtime();
-
-    PersistentRootedMarker<JSFunction*>::markChain(trc, rt->functionPersistentRooteds,
-                                                   "PersistentRooted<JSFunction*>");
-    PersistentRootedMarker<JSObject*>::markChain(trc, rt->objectPersistentRooteds,
-                                                 "PersistentRooted<JSObject*>");
-    PersistentRootedMarker<JSScript*>::markChain(trc, rt->scriptPersistentRooteds,
-                                                 "PersistentRooted<JSScript*>");
-    PersistentRootedMarker<JSString*>::markChain(trc, rt->stringPersistentRooteds,
-                                                 "PersistentRooted<JSString*>");
-    PersistentRootedMarker<jsid>::markChain(trc, rt->idPersistentRooteds,
-                                            "PersistentRooted<jsid>");
-    PersistentRootedMarker<Value>::markChain(trc, rt->valuePersistentRooteds,
-                                             "PersistentRooted<Value>");
+    for (ContextIter cx(trc->runtime()); !cx.done(); cx.next())
+        MarkPersistentRootedChainsInLists(cx->roots, trc);
+    MarkPersistentRootedChainsInLists(trc->runtime()->mainThread.roots, trc);
 }
 
 void
@@ -408,6 +399,9 @@ js::gc::GCRuntime::markRuntime(JSTracer* trc,
             jit::JitRuntime::Mark(trc);
         }
     }
+
+    if (rt->isHeapMinorCollecting())
+        jit::JitRuntime::MarkJitcodeGlobalTableUnconditionally(trc);
 
     for (ContextIter acx(rt); !acx.done(); acx.next())
         acx->mark(trc);

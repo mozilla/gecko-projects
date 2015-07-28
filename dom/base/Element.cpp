@@ -140,6 +140,7 @@
 #include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/VRDevice.h"
 #include "nsComputedDOMStyle.h"
+#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -3116,10 +3117,6 @@ GetFullScreenError(nsIDocument* aDoc)
     return "FullScreenDeniedNotInputDriven";
   }
 
-  if (nsContentUtils::IsSitePermDeny(aDoc->NodePrincipal(), "fullscreen")) {
-    return "FullScreenDeniedBlocked";
-  }
-
   return nullptr;
 }
 
@@ -3484,4 +3481,17 @@ Element::FontSizeInflation()
   }
 
   return 1.0;
+}
+
+net::ReferrerPolicy
+Element::GetReferrerPolicy()
+{
+  if (Preferences::GetBool("network.http.enablePerElementReferrer", false) &&
+      IsHTMLElement()) {
+    const nsAttrValue* referrerValue = GetParsedAttr(nsGkAtoms::referrer);
+    if (referrerValue && referrerValue->Type() == nsAttrValue::eEnum) {
+      return net::ReferrerPolicy(referrerValue->GetEnumValue());
+    }
+  }
+  return net::RP_Unset;
 }

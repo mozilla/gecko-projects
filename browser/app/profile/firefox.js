@@ -432,6 +432,9 @@ pref("browser.search.redirectWindowsSearch", true);
 pref("browser.search.redirectWindowsSearch", false);
 #endif
 
+pref("browser.usedOnWindows10", false);
+pref("browser.usedOnWindows10.introURL", "https://www.mozilla.org/%LOCALE%/firefox/windows-10/welcome/?utm_source=firefox-browser&utm_medium=firefox-browser");
+
 pref("browser.sessionhistory.max_entries", 50);
 
 // Built-in default permissions.
@@ -541,7 +544,6 @@ pref("privacy.item.cookies",                false);
 
 pref("privacy.clearOnShutdown.history",     true);
 pref("privacy.clearOnShutdown.formdata",    true);
-pref("privacy.clearOnShutdown.passwords",   false);
 pref("privacy.clearOnShutdown.downloads",   true);
 pref("privacy.clearOnShutdown.cookies",     true);
 pref("privacy.clearOnShutdown.cache",       true);
@@ -573,6 +575,8 @@ pref("privacy.sanitize.timeSpan", 1);
 pref("privacy.sanitize.sanitizeOnShutdown", false);
 
 pref("privacy.sanitize.migrateFx3Prefs",    false);
+
+pref("privacy.sanitize.migrateClearSavedPwdsOnExit", false);
 
 pref("privacy.panicButton.enabled",         true);
 
@@ -1344,7 +1348,6 @@ pref("services.sync.prefs.sync.privacy.clearOnShutdown.downloads", true);
 pref("services.sync.prefs.sync.privacy.clearOnShutdown.formdata", true);
 pref("services.sync.prefs.sync.privacy.clearOnShutdown.history", true);
 pref("services.sync.prefs.sync.privacy.clearOnShutdown.offlineApps", true);
-pref("services.sync.prefs.sync.privacy.clearOnShutdown.passwords", true);
 pref("services.sync.prefs.sync.privacy.clearOnShutdown.sessions", true);
 pref("services.sync.prefs.sync.privacy.clearOnShutdown.siteSettings", true);
 pref("services.sync.prefs.sync.privacy.donottrackheader.enabled", true);
@@ -1680,9 +1683,6 @@ pref("browser.newtab.preload", true);
 // Remembers if the about:newtab intro has been shown
 pref("browser.newtabpage.introShown", false);
 
-// Remembers if the about:newtab update intro has been shown
-pref("browser.newtabpage.updateIntroShown", false);
-
 // Toggles the content of 'about:newtab'. Shows the grid when enabled.
 pref("browser.newtabpage.enabled", true);
 
@@ -1703,11 +1703,6 @@ pref("browser.newtabpage.directory.ping", "https://tiles.services.mozilla.com/v3
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
-
-// True if the fullscreen API requires approval upon a domain entering fullscreen.
-// Domains that have already had fullscreen permission granted won't re-request
-// approval.
-pref("full-screen-api.approval-required", true);
 
 // Startup Crash Tracking
 // number of startup crashes that can occur before starting into safe mode automatically
@@ -1766,6 +1761,9 @@ pref("loop.debug.dispatcher", false);
 pref("loop.debug.websocket", false);
 pref("loop.debug.sdk", false);
 pref("loop.debug.twoWayMediaTelemetry", false);
+pref("loop.feedback.dateLastSeenSec", 0);
+pref("loop.feedback.periodSec", 15770000); // 6 months.
+pref("loop.feedback.formURL", "http://www.surveygizmo.com/s3/2227372/Firefox-Hello-Product-Survey");
 #ifdef DEBUG
 pref("loop.CSP", "default-src 'self' about: file: chrome: http://localhost:*; img-src * data:; font-src 'none'; connect-src wss://*.tokbox.com https://*.opentok.com https://*.tokbox.com wss://*.mozilla.com https://*.mozilla.org wss://*.mozaws.net http://localhost:* ws://localhost:*; media-src blob:");
 #else
@@ -1930,6 +1928,12 @@ pref("privacy.trackingprotection.introURL", "https://support.mozilla.org/kb/trac
 // us to change everybody to true in the future, when desired.
 pref("browser.tabs.remote.autostart.1", false);
 pref("browser.tabs.remote.autostart.2", true);
+#endif
+
+#ifdef NIGHTLY_BUILD
+#if defined(XP_MACOSX) || defined(XP_WIN)
+pref("layers.async-pan-zoom.enabled", true);
+#endif
 #endif
 
 #ifdef E10S_TESTING_ONLY

@@ -3976,7 +3976,7 @@ class CGCallbackTempRoot(CGGeneric):
         define = dedent("""
             { // Scope for tempRoot
               JS::Rooted<JSObject*> tempRoot(cx, &${val}.toObject());
-              ${declName} = new %s(tempRoot, mozilla::dom::GetIncumbentGlobal());
+              ${declName} = new %s(cx, tempRoot, mozilla::dom::GetIncumbentGlobal());
             }
             """) % name
         CGGeneric.__init__(self, define=define)
@@ -7830,23 +7830,23 @@ class CGJsonifierMethod(CGSpecializedMethod):
             }
             """)
 
-        jsonInterfaces = []
-        interface = self.descriptor.interface
+        jsonDescriptors = [ self.descriptor ]
+        interface = self.descriptor.interface.parent
         while interface:
             descriptor = self.descriptor.getDescriptor(interface.identifier.name)
             if descriptor.operations['Jsonifier']:
-                jsonInterfaces.append(interface)
+                jsonDescriptors.append(descriptor)
             interface = interface.parent
 
         # Iterate the array in reverse: oldest ancestor first
-        for interface in jsonInterfaces[::-1]:
+        for descriptor in jsonDescriptors[::-1]:
             ret += fill(
                 """
                 if (!${parentclass}::JsonifyAttributes(cx, obj, self, result)) {
                   return false;
                 }
                 """,
-                parentclass=toBindingNamespace(interface.identifier.name)
+                parentclass=toBindingNamespace(descriptor.name)
                 )
         ret += ('args.rval().setObject(*result);\n'
                 'return true;\n')
@@ -13908,7 +13908,7 @@ class CGJSImplClass(CGBindingImplClass):
             destructor = ClassDestructor(virtual=False, visibility="private")
 
         baseConstructors = [
-            ("mImpl(new %s(aJSImplObject, /* aIncumbentGlobal = */ nullptr))" %
+            ("mImpl(new %s(nullptr, aJSImplObject, /* aIncumbentGlobal = */ nullptr))" %
              jsImplName(descriptor.name)),
             "mParent(aParent)"]
         parentInterface = descriptor.interface.parent
@@ -14053,13 +14053,14 @@ class CGCallback(CGClass):
             # CallbackObject does that already.
             body = ""
         return [ClassConstructor(
-            [Argument("JS::Handle<JSObject*>", "aCallback"),
+            [Argument("JSContext*", "aCx"),
+             Argument("JS::Handle<JSObject*>", "aCallback"),
              Argument("nsIGlobalObject*", "aIncumbentGlobal")],
             bodyInHeader=True,
             visibility="public",
             explicit=True,
             baseConstructors=[
-                "%s(aCallback, aIncumbentGlobal)" % self.baseName,
+                "%s(aCx, aCallback, aIncumbentGlobal)" % self.baseName,
             ],
             body=body)]
 

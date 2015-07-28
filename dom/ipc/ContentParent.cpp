@@ -669,6 +669,8 @@ static const char* sObserverTopics[] = {
 #ifdef MOZ_ENABLE_PROFILER_SPS
     "profiler-started",
     "profiler-stopped",
+    "profiler-paused",
+    "profiler-resumed",
     "profiler-subprocess-gather",
     "profiler-subprocess",
 #endif
@@ -1119,12 +1121,15 @@ ContentParent::RecvGetBlocklistState(const uint32_t& aPluginId,
 
     nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
     if (!pluginHost) {
+        NS_WARNING("Plugin host not found");
         return false;
     }
     nsPluginTag* tag =  pluginHost->PluginWithId(aPluginId);
 
     if (!tag) {
-        return false;
+        // Default state is blocked anyway
+        NS_WARNING("Plugin tag not found. This should never happen, but to avoid a crash we're forcibly blocking it");
+        return true;
     }
 
     return NS_SUCCEEDED(tag->GetBlocklistState(aState));
@@ -3112,6 +3117,12 @@ ContentParent::Observe(nsISupports* aSubject,
     }
     else if (!strcmp(aTopic, "profiler-stopped")) {
         unused << SendStopProfiler();
+    }
+    else if (!strcmp(aTopic, "profiler-paused")) {
+        unused << SendPauseProfiler(true);
+    }
+    else if (!strcmp(aTopic, "profiler-resumed")) {
+        unused << SendPauseProfiler(false);
     }
     else if (!strcmp(aTopic, "profiler-subprocess-gather")) {
         mGatherer = static_cast<ProfileGatherer*>(aSubject);

@@ -4,6 +4,8 @@
 
 #filter substitution
 
+// For the all MOZ_MULET ifdef conditions in this file: see bug 1174234
+
 #ifndef MOZ_MULET
 pref("toolkit.defaultChromeURI", "chrome://b2g/content/shell.html");
 pref("browser.chromeURL", "chrome://b2g/content/");

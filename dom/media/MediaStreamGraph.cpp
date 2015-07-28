@@ -18,6 +18,7 @@
 #include "mozilla/Attributes.h"
 #include "TrackUnionStream.h"
 #include "ImageContainer.h"
+#include "AudioCaptureStream.h"
 #include "AudioChannelService.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
@@ -3192,6 +3193,17 @@ MediaStreamGraph::CreateTrackUnionStream(DOMMediaStream* aWrapper)
   return stream;
 }
 
+ProcessedMediaStream*
+MediaStreamGraph::CreateAudioCaptureStream(DOMMediaStream* aWrapper)
+{
+  AudioCaptureStream* stream = new AudioCaptureStream(aWrapper);
+  NS_ADDREF(stream);
+  MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(this);
+  stream->SetGraphImpl(graph);
+  graph->AppendMessage(new CreateMessage(stream));
+  return stream;
+}
+
 AudioNodeExternalInputStream*
 MediaStreamGraph::CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine, TrackRate aSampleRate)
 {
@@ -3473,6 +3485,13 @@ MediaStreamGraphImpl::ApplyAudioContextOperationImpl(AudioNodeStream* aStream,
         mMixer.RemoveCallback(CurrentDriver()->AsAudioCallbackDriver());
         CurrentDriver()->SwitchAtNextIteration(driver);
       }
+      // We are closing or suspending an AudioContext, but we just got resumed.
+      // Queue the operation on the next driver so that the ordering is
+      // preserved.
+    } else if (!audioTrackPresent && CurrentDriver()->Switching()) {
+      MOZ_ASSERT(CurrentDriver()->NextDriver()->AsAudioCallbackDriver());
+      CurrentDriver()->NextDriver()->AsAudioCallbackDriver()->
+        EnqueueStreamAndPromiseForOperation(aStream, aPromise, aOperation);
     } else {
       // We are closing or suspending an AudioContext, but something else is
       // using the audio stream, we can resolve the promise now.
@@ -3547,6 +3566,67 @@ ProcessedMediaStream::AddInput(MediaInputPort* aPort)
 {
   mInputs.AppendElement(aPort);
   GraphImpl()->SetStreamOrderDirty();
+}
+
+void
+MediaStreamGraph::RegisterCaptureStreamForWindow(
+    uint64_t aWindowId, ProcessedMediaStream* aCaptureStream)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MediaStreamGraphImpl* graphImpl = static_cast<MediaStreamGraphImpl*>(this);
+  graphImpl->RegisterCaptureStreamForWindow(aWindowId, aCaptureStream);
+}
+
+void
+MediaStreamGraphImpl::RegisterCaptureStreamForWindow(
+  uint64_t aWindowId, ProcessedMediaStream* aCaptureStream)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  WindowAndStream winAndStream;
+  winAndStream.mWindowId = aWindowId;
+  winAndStream.mCaptureStreamSink = aCaptureStream;
+  mWindowCaptureStreams.AppendElement(winAndStream);
+}
+
+void
+MediaStreamGraph::UnregisterCaptureStreamForWindow(uint64_t aWindowId)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MediaStreamGraphImpl* graphImpl = static_cast<MediaStreamGraphImpl*>(this);
+  graphImpl->UnregisterCaptureStreamForWindow(aWindowId);
+}
+
+void
+MediaStreamGraphImpl::UnregisterCaptureStreamForWindow(uint64_t aWindowId)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  for (uint32_t i = 0; i < mWindowCaptureStreams.Length(); i++) {
+    if (mWindowCaptureStreams[i].mWindowId == aWindowId) {
+      mWindowCaptureStreams.RemoveElementAt(i);
+    }
+  }
+}
+
+already_AddRefed<MediaInputPort>
+MediaStreamGraph::ConnectToCaptureStream(uint64_t aWindowId,
+                                         MediaStream* aMediaStream)
+{
+  return aMediaStream->GraphImpl()->ConnectToCaptureStream(aWindowId,
+                                                           aMediaStream);
+}
+
+already_AddRefed<MediaInputPort>
+MediaStreamGraphImpl::ConnectToCaptureStream(uint64_t aWindowId,
+                                             MediaStream* aMediaStream)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  for (uint32_t i = 0; i < mWindowCaptureStreams.Length(); i++) {
+    if (mWindowCaptureStreams[i].mWindowId == aWindowId) {
+      ProcessedMediaStream* sink = mWindowCaptureStreams[i].mCaptureStreamSink;
+      return sink->AllocateInputPort(aMediaStream, 0);
+    }
+  }
+  return nullptr;
 }
 
 } // namespace mozilla

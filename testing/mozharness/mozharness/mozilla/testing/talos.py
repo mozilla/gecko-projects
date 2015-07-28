@@ -74,12 +74,6 @@ talos_config_options = [
       "default": [],
       "help": "Specify the tests to run"
       }],
-    [["--results-url"],
-     {'action': 'store',
-      'dest': 'results_url',
-      'default': None,
-      'help': "URL to send results to"
-      }],
 ]
 
 
@@ -159,20 +153,10 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
                                               'run-tests',
                                               ])
         kwargs.setdefault('config', {})
-        kwargs['config'].setdefault(
-            'virtualenv_modules', ["mozinstall", "mozdevice", "pyyaml", "mozversion", "datazilla",
-                                   "mozcrash", "mozhttpd", "mozprofile", "mozfile", "mozinfo",
-                                   "moznetwork", "mozprocess", "httplib2"]
-        )
         super(Talos, self).__init__(**kwargs)
 
         self.workdir = self.query_abs_dirs()['abs_work_dir']  # convenience
 
-        # results output
-        self.results_url = self.config.get('results_url')
-        if self.results_url is None:
-            # use a results_url by default based on the class name in the working directory
-            self.results_url = 'file://%s' % os.path.join(self.workdir, self.__class__.__name__.lower() + '.txt')
         self.installer_url = self.config.get("installer_url")
         self.talos_json_url = self.config.get("talos_json_url")
         self.talos_json = self.config.get("talos_json")
@@ -427,8 +411,7 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         if binary_path.endswith('.exe'):
             binary_path = binary_path[:-4]
         kw_options = {'output': 'talos.yml',  # options overwritten from **kw
-                      'executablePath': binary_path,
-                      'results_url': self.results_url}
+                      'executablePath': binary_path}
         kw_options['activeTests'] = self.query_tests()
         if self.config.get('title'):
             kw_options['title'] = self.config['title']
@@ -444,13 +427,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
             kw_options['activeTests'] = tests
         for key, value in kw_options.items():
             options.extend(['--%s' % key, value])
-        # add datazilla results urls
-        for url in self.config.get('datazilla_urls', []):
-            options.extend(['--datazilla-url', url])
-        # add datazilla authfile
-        authfile = self.config.get('datazilla_authfile')
-        if authfile:
-            options.extend(['--authfile', authfile])
         # configure profiling options
         options.extend(self.query_sps_profile_options())
         # extra arguments
@@ -536,7 +512,16 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         talos from its source, we have to wrap that method here."""
         # XXX This method could likely be replaced with a PreScriptAction hook.
         if self.has_cloned_talos:
-            virtualenv_modules = list(self.config.get('virtualenv_modules', []))
+            requirements = self.read_from_file(
+                os.path.join(self.talos_path, 'requirements.txt'),
+                verbose=False
+            )
+            # talos in harness requires mozinstall
+            virtualenv_modules = ['mozinstall']
+            for requirement in requirements.splitlines():
+                requirement = requirement.strip()
+                if requirement:
+                    virtualenv_modules.append(requirement)
 
             # Bug 900015 - Silent warnings on osx when libyaml is not found
             pyyaml_module = {

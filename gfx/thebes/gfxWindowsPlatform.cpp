@@ -377,6 +377,8 @@ gfxWindowsPlatform::gfxWindowsPlatform()
   , mIsWARP(false)
   , mHasDeviceReset(false)
   , mDoesD3D11TextureSharingWork(false)
+  , mD3D11Status(FeatureStatus::Unused)
+  , mD2DStatus(FeatureStatus::Unused)
 {
     mUseClearTypeForDownloadableFonts = UNINITIALIZED_VALUE;
     mUseClearTypeAlways = UNINITIALIZED_VALUE;
@@ -436,7 +438,7 @@ gfxWindowsPlatform::CanUseHardwareVideoDecoding()
     return !IsWARP() && gfxPlatform::CanUseHardwareVideoDecoding();
 }
 
-void
+FeatureStatus
 gfxWindowsPlatform::InitD2DSupport()
 {
 #ifdef CAIRO_HAS_D2D_SURFACE
@@ -458,30 +460,41 @@ gfxWindowsPlatform::InitD2DSupport()
 
   // If D2D is blocked or D3D9 is prefered, and D2D is not force-enabled, then
   // we don't attempt to use D2D.
-  if ((d2dBlocked || gfxPrefs::LayersPreferD3D9()) && !gfxPrefs::Direct2DForceEnabled()) {
-    return;
+  if (!gfxPrefs::Direct2DForceEnabled()) {
+    if (d2dBlocked) {
+      return FeatureStatus::Blacklisted;
+    }
+    if (gfxPrefs::LayersPreferD3D9()) {
+      return FeatureStatus::Disabled;
+    }
   }
 
   // Do not ever try to use D2D if it's explicitly disabled or if we're not
   // using DWrite fonts.
   if (gfxPrefs::Direct2DDisabled() || mUsingGDIFonts) {
-    return;
+    return FeatureStatus::Disabled;
   }
 
-  ID3D11Device* device = GetD3D11Device();
-  if (IsVistaOrLater() &&
-      !InSafeMode() &&
-      device &&
-      mDoesD3D11TextureSharingWork)
-  {
-    VerifyD2DDevice(gfxPrefs::Direct2DForceEnabled());
-    if (mD3D10Device && GetD3D11Device()) {
-      mRenderMode = RENDER_DIRECT2D;
-      mUseDirectWrite = true;
-    }
-  } else {
-    mD3D10Device = nullptr;
+  if (!IsVistaOrLater() || !GetD3D11Device()) {
+    return FeatureStatus::Unavailable;
   }
+  if (!mDoesD3D11TextureSharingWork) {
+    return FeatureStatus::Failed;
+  }
+  if (InSafeMode()) {
+    return FeatureStatus::Blocked;
+  }
+
+  VerifyD2DDevice(gfxPrefs::Direct2DForceEnabled());
+  if (!mD3D10Device || !GetD3D11Device()) {
+    return FeatureStatus::Failed;
+  }
+
+  mRenderMode = RENDER_DIRECT2D;
+  mUseDirectWrite = true;
+  return FeatureStatus::Available;
+#else
+  return FeatureStatus::Unavailable;
 #endif
 }
 
@@ -552,7 +565,7 @@ gfxWindowsPlatform::UpdateRenderMode()
     mRenderMode = RENDER_GDI;
     mUseDirectWrite = gfxPrefs::DirectWriteFontRenderingEnabled();
 
-    InitD2DSupport();
+    mD2DStatus = InitD2DSupport();
     InitDWriteSupport();
 
     uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO);
@@ -1722,6 +1735,12 @@ CheckForAdapterMismatch(ID3D11Device *device)
 
 void CheckIfRenderTargetViewNeedsRecreating(ID3D11Device *device)
 {
+    // CreateTexture2D is known to crash on lower feature levels, see bugs
+    // 1170211 and 1089413.
+    if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0) {
+        return;
+    }
+
     nsRefPtr<ID3D11DeviceContext> deviceContext;
     device->GetImmediateContext(getter_AddRefs(deviceContext));
     int backbufferWidth = 32; int backbufferHeight = 32;
@@ -2056,15 +2075,17 @@ gfxWindowsPlatform::InitD3D11Devices()
   mD3D11DeviceInitialized = true;
   mDoesD3D11TextureSharingWork = false;
 
-  MOZ_ASSERT(!mD3D11Device); 
+  MOZ_ASSERT(!mD3D11Device);
 
   DriverInitCrashDetection detectCrashes;
   if (InSafeMode() || detectCrashes.DisableAcceleration()) {
+    mD3D11Status = FeatureStatus::Blocked;
     return;
   }
 
   D3D11Status status = CheckD3D11Support();
   if (status == D3D11Status::Blocked) {
+    mD3D11Status = FeatureStatus::Blacklisted;
     return;
   }
 
@@ -2074,6 +2095,7 @@ gfxWindowsPlatform::InitD3D11Devices()
 
   if (!sD3D11CreateDeviceFn) {
     // We should just be on Windows Vista or XP in this case.
+    mD3D11Status = FeatureStatus::Unavailable;
     return;
   }
 
@@ -2097,6 +2119,13 @@ gfxWindowsPlatform::InitD3D11Devices()
       (status == D3D11Status::TryWARP || status == D3D11Status::ForceWARP))
   {
     AttemptWARPDeviceCreation(featureLevels);
+    mD3D11Status = FeatureStatus::Failed;
+  }
+
+  // Only test for texture sharing on Windows 8 since it puts the device into
+  // an unusable state if used on Windows 7
+  if (mD3D11Device && IsWin8OrLater()) {
+    mDoesD3D11TextureSharingWork = ::DoesD3D11TextureSharingWork(mD3D11Device);
   }
 
   if (!mD3D11Device) {
@@ -2105,6 +2134,7 @@ gfxWindowsPlatform::InitD3D11Devices()
   }
 
   mD3D11Device->SetExceptionMode(0);
+  mD3D11Status = FeatureStatus::Available;
 
   // We create our device for D2D content drawing here. Normally we don't use
   // D2D content drawing when using WARP. However when WARP is forced by
@@ -2408,4 +2438,33 @@ gfxWindowsPlatform::GetAcceleratedCompositorBackends(nsTArray<LayersBackend>& aB
       NS_WARNING("Direct3D 9-accelerated layers are not supported on this system.");
     }
   }
+}
+
+FeatureStatus
+gfxWindowsPlatform::GetD2D1Status()
+{
+  if (GetD2DStatus() != FeatureStatus::Available ||
+      !Factory::SupportsD2D1())
+  {
+    return FeatureStatus::Unavailable;
+  }
+
+  if (!GetD3D11ContentDevice()) {
+    return FeatureStatus::Failed;
+  }
+
+  if (!gfxPrefs::Direct2DUse1_1()) {
+    return FeatureStatus::Disabled;
+  }
+  return FeatureStatus::Available;
+}
+
+unsigned
+gfxWindowsPlatform::GetD3D11Version()
+{
+  ID3D11Device* device = GetD3D11Device();
+  if (!device) {
+    return 0;
+  }
+  return device->GetFeatureLevel();
 }

@@ -371,7 +371,7 @@ template <typename ParseHandler>
 bool
 ParseContext<ParseHandler>::generateFunctionBindings(ExclusiveContext* cx, TokenStream& ts,
                                                      LifoAlloc& alloc,
-                                                     InternalHandle<Bindings*> bindings) const
+                                                     MutableHandle<Bindings> bindings) const
 {
     MOZ_ASSERT(sc->isFunctionBox());
     MOZ_ASSERT(args_.length() < ARGNO_LIMIT);
@@ -847,10 +847,10 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun, const AutoN
         }
     }
 
-    InternalHandle<Bindings*> funboxBindings =
-        InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
-    if (!funpc.generateFunctionBindings(context, tokenStream, alloc, funboxBindings))
+    Rooted<Bindings> bindings(context, funbox->bindings);
+    if (!funpc.generateFunctionBindings(context, tokenStream, alloc, &bindings))
         return null();
+    funbox->bindings = bindings;
 
     return fn;
 }
@@ -1470,9 +1470,12 @@ Parser<FullParseHandler>::leaveFunction(ParseNode* fn, ParseContext<FullParseHan
         }
     }
 
-    InternalHandle<Bindings*> bindings =
-        InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
-    return pc->generateFunctionBindings(context, tokenStream, alloc, bindings);
+    Rooted<Bindings> bindings(context, funbox->bindings);
+    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
+        return false;
+    funbox->bindings = bindings;
+
+    return true;
 }
 
 template <>
@@ -2492,10 +2495,10 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, unsigned st
         }
     }
 
-    InternalHandle<Bindings*> bindings =
-        InternalHandle<Bindings*>::fromMarkedLocation(&funbox->bindings);
-    if (!pc->generateFunctionBindings(context, tokenStream, alloc, bindings))
+    Rooted<Bindings> bindings(context, funbox->bindings);
+    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
         return null();
+    funbox->bindings = bindings;
 
     if (!FoldConstants(context, &pn, this))
         return null();
@@ -2539,7 +2542,7 @@ Parser<ParseHandler>::functionArgsAndBodyGeneric(InHandling inHandling,
     if (!tokenStream.getToken(&tt, TokenStream::Operand))
         return false;
     if (tt != TOK_LC) {
-        if (funbox->isStarGenerator() || kind == Method || kind == ClassConstructor) {
+        if (funbox->isStarGenerator() || kind == Method || IsConstructorKind(kind)) {
             report(ParseError, false, null(), JSMSG_CURLY_BEFORE_BODY);
             return false;
         }
@@ -2564,7 +2567,7 @@ Parser<ParseHandler>::functionArgsAndBodyGeneric(InHandling inHandling,
     if (!body)
         return false;
 
-    if ((kind != Method && kind != ClassConstructor) && fun->name() &&
+    if ((kind != Method && !IsConstructorKind(kind)) && fun->name() &&
         !checkStrictBinding(fun->name(), pn))
     {
         return false;
@@ -4945,7 +4948,7 @@ Parser<FullParseHandler>::forStatement(YieldHandling yieldHandling)
          * rhs of 'in'.
          */
         if (headKind == PNK_FOROF) {
-            forStmt.type = (headKind == PNK_FOROF) ? STMT_FOR_OF_LOOP : STMT_FOR_IN_LOOP;
+            forStmt.type = STMT_FOR_OF_LOOP;
             if (isForEach) {
                 report(ParseError, false, null(), JSMSG_BAD_FOR_EACH_LOOP);
                 return null();
@@ -5037,7 +5040,7 @@ Parser<FullParseHandler>::forStatement(YieldHandling yieldHandling)
             return null();
         }
 
-        headKind = PNK_FORHEAD;
+        MOZ_ASSERT(headKind == PNK_FORHEAD);
 
         if (blockObj) {
             // Ensure here that the previously-unchecked assignment mandate for
@@ -8729,9 +8732,7 @@ Parser<ParseHandler>::methodDefinition(YieldHandling yieldHandling, PropListType
                kind == Getter || kind == Setter);
     /* NB: Getter function in { get x(){} } is unnamed. */
     RootedPropertyName funName(context);
-    if ((kind == Method || kind == ClassConstructor || kind == DerivedClassConstructor) &&
-        tokenStream.isCurrentTokenType(TOK_NAME))
-    {
+    if ((kind == Method || IsConstructorKind(kind)) && tokenStream.isCurrentTokenType(TOK_NAME)) {
         funName = tokenStream.currentName();
     } else {
         funName = nullptr;

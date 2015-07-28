@@ -570,15 +570,8 @@ CreateHeadlessANGLE(bool forceEnabled, const nsCOMPtr<nsIGfxInfo>& gfxInfo,
     nsRefPtr<GLContext> gl;
 
 #ifdef XP_WIN
-    if (!forceEnabled &&
-        IsFeatureInBlacklist(gfxInfo, nsIGfxInfo::FEATURE_WEBGL_ANGLE))
-    {
-        webgl->GenerateWarning("Refused to create ANGLE OpenGL context"
-                               " because of blacklisting.");
-        return nullptr;
-    }
-
-    gl = gl::GLContextProviderEGL::CreateHeadless(requireCompatProfile);
+    gl = gl::GLContextProviderEGL::CreateHeadless(requireCompatProfile,
+                                                  forceEnabled);
     if (!gl) {
         webgl->GenerateWarning("Error during ANGLE OpenGL init.");
         return nullptr;
@@ -901,6 +894,11 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
         return NS_ERROR_FAILURE; // exit without changing the value of mGeneration
     }
 
+    // increment the generation number - Do this early because later
+    // in CreateOffscreenGL(), "default" objects are created that will
+    // pick up the old generation.
+    ++mGeneration;
+
     // Get some prefs for some preferred/overriden things
     NS_ENSURE_TRUE(Preferences::GetRootBranch(), NS_ERROR_FAILURE);
 
@@ -948,9 +946,6 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
 
     mResetLayer = true;
     mOptionsFrozen = true;
-
-    // increment the generation number
-    ++mGeneration;
 
     // Update our internal stuff:
     if (gl->WorkAroundDriverBugs() && gl->IsANGLE()) {

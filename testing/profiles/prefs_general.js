@@ -165,7 +165,7 @@ user_pref("layout.spammy_warnings.enabled", false);
 
 // Enable Media Source Extensions for testing
 user_pref("media.mediasource.mp4.enabled", true);
-user_pref("media.mediasource.webm.enabled", true);
+user_pref("media.mediasource.webm.enabled", false);
 
 // Enable mozContacts
 user_pref("dom.mozContacts.enabled", true);
@@ -195,7 +195,6 @@ user_pref("browser.download.panel.shown", true);
 // Assume the about:newtab page's intro panels have been shown to not depend on
 // which test runs first and happens to open about:newtab
 user_pref("browser.newtabpage.introShown", true);
-user_pref("browser.newtabpage.updateIntroShown", true);
 
 // Tell the PBackground infrastructure to run a test at startup.
 user_pref("pbackground.testing", true);
@@ -335,3 +334,5 @@ user_pref("media.webspeech.synth.test", true);
 // Turn off search suggestions in the location bar so as not to trigger network
 // connections.
 user_pref("browser.urlbar.suggest.searches", false);
+
+user_pref("dom.audiochannel.mutedByDefault", false);

@@ -877,6 +877,7 @@ ClientTiledLayerBuffer::GetSurfaceDescriptorTiles()
 void
 ClientTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
                                    const nsIntRegion& aPaintRegion,
+                                   const nsIntRegion& aDirtyRegion,
                                    LayerManager::DrawPaintedLayerCallback aCallback,
                                    void* aCallbackData)
 {
@@ -929,7 +930,8 @@ ClientTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
     PROFILER_LABEL("ClientTiledLayerBuffer", "PaintThebesSingleBufferDraw",
       js::ProfileEntry::Category::GRAPHICS);
 
-    mCallback(mPaintedLayer, ctxt, aPaintRegion, DrawRegionClip::NONE, nsIntRegion(), mCallbackData);
+    mCallback(mPaintedLayer, ctxt, aPaintRegion, aDirtyRegion,
+              DrawRegionClip::NONE, nsIntRegion(), mCallbackData);
   }
 
 #ifdef GFX_TILEDLAYER_PREF_WARNINGS
@@ -951,7 +953,7 @@ ClientTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
     js::ProfileEntry::Category::GRAPHICS);
 
   mNewValidRegion = aNewValidRegion;
-  Update(aNewValidRegion, aPaintRegion);
+  Update(aNewValidRegion, aPaintRegion, aDirtyRegion);
 
 #ifdef GFX_TILEDLAYER_PREF_WARNINGS
   if (PR_IntervalNow() - start > 10) {
@@ -1047,7 +1049,8 @@ void PadDrawTargetOutFromRegion(RefPtr<DrawTarget> drawTarget, nsIntRegion &regi
 }
 
 void
-ClientTiledLayerBuffer::PostValidate(const nsIntRegion& aPaintRegion)
+ClientTiledLayerBuffer::PostValidate(const nsIntRegion& aPaintRegion,
+                                     const nsIntRegion& aDirtyRegion)
 {
   if (gfxPrefs::TiledDrawTargetEnabled() && mMoz2DTiles.size() > 0) {
     gfx::TileSet tileset;
@@ -1063,7 +1066,8 @@ ClientTiledLayerBuffer::PostValidate(const nsIntRegion& aPaintRegion)
     ctx->SetMatrix(
       ctx->CurrentMatrix().Scale(mResolution, mResolution).Translate(ThebesPoint(-mTilingOrigin)));
 
-    mCallback(mPaintedLayer, ctx, aPaintRegion, DrawRegionClip::DRAW, nsIntRegion(), mCallbackData);
+    mCallback(mPaintedLayer, ctx, aPaintRegion, aDirtyRegion,
+              DrawRegionClip::DRAW, nsIntRegion(), mCallbackData);
     mMoz2DTiles.clear();
     // Reset:
     mTilingOrigin = IntPoint(std::numeric_limits<int32_t>::max(),
@@ -1092,7 +1096,8 @@ ClientTiledLayerBuffer::UnlockTile(TileClient& aTile)
 }
 
 void ClientTiledLayerBuffer::Update(const nsIntRegion& newValidRegion,
-                                    const nsIntRegion& aPaintRegion)
+                                    const nsIntRegion& aPaintRegion,
+                                    const nsIntRegion& aDirtyRegion)
 {
   const IntSize scaledTileSize = GetScaledTileSize();
   const gfx::IntRect newBounds = newValidRegion.GetBounds();
@@ -1145,7 +1150,7 @@ void ClientTiledLayerBuffer::Update(const nsIntRegion& newValidRegion,
     }
   }
 
-  PostValidate(aPaintRegion);
+  PostValidate(aPaintRegion, aDirtyRegion);
 
   for (TileClient& tile : mRetainedTiles) {
     UnlockTile(tile);
@@ -1640,7 +1645,8 @@ ClientTiledLayerBuffer::ProgressiveUpdate(nsIntRegion& aValidRegion,
     validOrStale.Or(aValidRegion, aOldValidRegion);
 
     // Paint the computed region and subtract it from the invalid region.
-    PaintThebes(validOrStale, regionToPaint, aCallback, aCallbackData);
+    PaintThebes(validOrStale, regionToPaint, aInvalidRegion,
+                aCallback, aCallbackData);
     aInvalidRegion.Sub(aInvalidRegion, regionToPaint);
   } while (repeat);
 

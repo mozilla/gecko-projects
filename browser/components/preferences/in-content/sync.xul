@@ -268,6 +268,9 @@
         <!-- logged in locally but server rejected credentials -->
         <hbox id="fxaLoginRejected"
               flex="1">
+          <vbox>
+            <image id="fxaLoginRejectedWarning"/>
+          </vbox>
           <description>
             &signedInLoginFailure.beforename.label;
             <label id="fxaEmailAddress3"/>
@@ -319,30 +322,27 @@
       </hbox>
     </groupbox>
     <groupbox>
-      <vbox>
-        <caption>
-          <label accesskey="&syncDeviceName.accesskey;"
-                 control="fxaSyncComputerName">
-            &fxaSyncDeviceName.label;
-          </label>
-        </caption>
-        <hbox id="fxaDeviceName">
-          <hbox flex="1">
-            <textbox id="fxaSyncComputerName" class="plain"
-                     disabled="true" flex="1"/>
-          </hbox>
-          <hbox>
-            <button id="fxaChangeDeviceName"
-                    label="&changeSyncDeviceName.label;"/>
-            <button id="fxaCancelChangeDeviceName"
-                    label="&cancelChangeSyncDeviceName.label;"
-                    hidden="true"/>
-            <button id="fxaSaveChangeDeviceName"
-                    label="&saveChangeSyncDeviceName.label;"
-                    hidden="true"/>
-          </hbox>
+      <caption>
+        <label accesskey="&syncDeviceName.accesskey;"
+               control="fxaSyncComputerName">
+          &fxaSyncDeviceName.label;
+        </label>
+      </caption>
+      <hbox id="fxaDeviceName">
+        <hbox flex="1">
+          <textbox id="fxaSyncComputerName" disabled="true" flex="1"/>
         </hbox>
-      </vbox>
+        <hbox>
+          <button id="fxaChangeDeviceName"
+                  label="&changeSyncDeviceName.label;"/>
+          <button id="fxaCancelChangeDeviceName"
+                  label="&cancelChangeSyncDeviceName.label;"
+                  hidden="true"/>
+          <button id="fxaSaveChangeDeviceName"
+                  label="&saveChangeSyncDeviceName.label;"
+                  hidden="true"/>
+        </hbox>
+      </hbox>
     </groupbox>
     <spacer flex="1"/>
     <vbox id="tosPP-small">

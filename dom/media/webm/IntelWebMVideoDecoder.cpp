@@ -24,8 +24,6 @@
 PRLogModuleInfo* GetDemuxerLog();
 #define LOG(...) MOZ_LOG(GetDemuxerLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
 
-using namespace mp4_demuxer;
-
 namespace mozilla {
 
 using layers::Image;
@@ -186,7 +184,7 @@ IntelWebMVideoDecoder::Demux(nsRefPtr<VP8Sample>& aSample, bool* aEOS)
   nsRefPtr<NesteggPacketHolder> next_holder(mReader->NextPacket(WebMReader::VIDEO));
   if (next_holder) {
     next_tstamp = holder->Timestamp();
-    mReader->PushVideoPacket(next_holder.forget());
+    mReader->PushVideoPacket(next_holder);
   } else {
     next_tstamp = tstamp;
     next_tstamp += tstamp - mReader->GetLastVideoFrameTime();

@@ -258,13 +258,15 @@ bool MediaFormatReader::IsWaitingOnCDMResource() {
 bool
 MediaFormatReader::IsSupportedAudioMimeType(const nsACString& aMimeType)
 {
-  return mPlatform && mPlatform->SupportsMimeType(aMimeType);
+  return mPlatform && (mPlatform->SupportsMimeType(aMimeType) ||
+    PlatformDecoderModule::AgnosticMimeType(aMimeType));
 }
 
 bool
 MediaFormatReader::IsSupportedVideoMimeType(const nsACString& aMimeType)
 {
-  return mPlatform && mPlatform->SupportsMimeType(aMimeType);
+  return mPlatform && (mPlatform->SupportsMimeType(aMimeType) ||
+    PlatformDecoderModule::AgnosticMimeType(aMimeType));
 }
 
 nsRefPtr<MediaDecoderReader::MetadataPromise>
@@ -713,6 +715,7 @@ MediaFormatReader::NotifyDrainComplete(TrackType aTrack)
 {
   MOZ_ASSERT(OnTaskQueue());
   auto& decoder = GetDecoderData(aTrack);
+  LOG("%s", TrackTypeToStr(aTrack));
   if (!decoder.mOutputRequested) {
     LOG("MediaFormatReader called DrainComplete() before flushing, ignoring.");
     return;
@@ -981,6 +984,11 @@ MediaFormatReader::DrainDecoder(TrackType aTrack)
     return;
   }
   decoder.mOutputRequested = true;
+  if (decoder.mNumSamplesInput == decoder.mNumSamplesOutput) {
+    // No frames to drain.
+    NotifyDrainComplete(aTrack);
+    return;
+  }
   decoder.mDecoder->Drain();
   decoder.mDraining = true;
   LOG("Requesting %s decoder to drain", TrackTypeToStr(aTrack));
@@ -1022,6 +1030,10 @@ MediaFormatReader::Update(TrackType aTrack)
     needOutput = true;
     if (!decoder.mOutput.IsEmpty()) {
       // We have a decoded sample ready to be returned.
+      if (aTrack == TrackType::kVideoTrack) {
+        mVideo.mIsHardwareAccelerated =
+          mVideo.mDecoder && mVideo.mDecoder->IsHardwareAccelerated();
+      }
       nsRefPtr<MediaData> output = decoder.mOutput[0];
       decoder.mOutput.RemoveElementAt(0);
       decoder.mSizeOfQueue -= 1;
@@ -1132,6 +1144,10 @@ MediaFormatReader::WaitForData(MediaData::Type aType)
   TrackType trackType = aType == MediaData::VIDEO_DATA ?
     TrackType::kVideoTrack : TrackType::kAudioTrack;
   auto& decoder = GetDecoderData(trackType);
+  if (!decoder.mWaitingForData) {
+    // We aren't waiting for data any longer.
+    return WaitForDataPromise::CreateAndResolve(decoder.mType, __func__);
+  }
   nsRefPtr<WaitForDataPromise> p = decoder.mWaitingPromise.Ensure(__func__);
   ScheduleUpdate(trackType);
   return p;
@@ -1439,10 +1455,14 @@ MediaFormatReader::GetBuffered()
     return intervals;
   }
   int64_t startTime;
-  {
-    ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-    NS_ENSURE_TRUE(HaveStartTime(), media::TimeIntervals());
+  if (!ForceZeroStartTime()) {
+    if (!HaveStartTime()) {
+      return intervals;
+    }
     startTime = StartTime();
+  } else {
+    // MSE, start time is assumed to be 0 we can proceeed with what we have.
+    startTime = 0;
   }
   // Ensure we have up to date buffered time range.
   if (HasVideo()) {
@@ -1502,7 +1522,7 @@ MediaFormatReader::SetSharedDecoderManager(SharedDecoderManager* aManager)
 bool
 MediaFormatReader::VideoIsHardwareAccelerated() const
 {
-  return mVideo.mDecoder && mVideo.mDecoder->IsHardwareAccelerated();
+  return mVideo.mIsHardwareAccelerated;
 }
 
 void

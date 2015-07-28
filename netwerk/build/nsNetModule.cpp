@@ -272,8 +272,14 @@ namespace net {
 #ifdef NECKO_PROTOCOL_res
 // resource
 #include "nsResProtocolHandler.h"
+#include "ExtensionProtocolHandler.h"
+#include "SubstitutingProtocolHandler.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsResProtocolHandler, Init)
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsResURL)
+
+namespace mozilla {
+NS_GENERIC_FACTORY_CONSTRUCTOR(ExtensionProtocolHandler)
+NS_GENERIC_FACTORY_CONSTRUCTOR(SubstitutingURL)
+} // namespace mozilla
 #endif
 
 #ifdef NECKO_PROTOCOL_device
@@ -427,6 +433,7 @@ nsresult NS_NewStreamConv(nsStreamConverterService **aStreamConv);
 #define INDEX_TO_HTML                "?from=application/http-index-format&to=text/html"
 #define MULTI_MIXED_X                "?from=multipart/x-mixed-replace&to=*/*"
 #define MULTI_MIXED                  "?from=multipart/mixed&to=*/*"
+#define APPLICATION_PACKAGE_CONV     "?from=" APPLICATION_PACKAGE "&to=*/*"
 #define MULTI_BYTERANGES             "?from=multipart/byteranges&to=*/*"
 #define UNKNOWN_CONTENT              "?from=" UNKNOWN_CONTENT_TYPE "&to=*/*"
 #define GZIP_TO_UNCOMPRESSED         "?from=gzip&to=uncompressed"
@@ -445,6 +452,7 @@ static const mozilla::Module::CategoryEntry kNeckoCategories[] = {
     { NS_ISTREAMCONVERTER_KEY, INDEX_TO_HTML, "" },
     { NS_ISTREAMCONVERTER_KEY, MULTI_MIXED_X, "" },
     { NS_ISTREAMCONVERTER_KEY, MULTI_MIXED, "" },
+    { NS_ISTREAMCONVERTER_KEY, APPLICATION_PACKAGE_CONV, "" },
     { NS_ISTREAMCONVERTER_KEY, MULTI_BYTERANGES, "" },
     { NS_ISTREAMCONVERTER_KEY, UNKNOWN_CONTENT, "" },
     { NS_ISTREAMCONVERTER_KEY, GZIP_TO_UNCOMPRESSED, "" },
@@ -756,7 +764,8 @@ NS_DEFINE_NAMED_CID(NS_FTPPROTOCOLHANDLER_CID);
 #endif
 #ifdef NECKO_PROTOCOL_res
 NS_DEFINE_NAMED_CID(NS_RESPROTOCOLHANDLER_CID);
-NS_DEFINE_NAMED_CID(NS_RESURL_CID);
+NS_DEFINE_NAMED_CID(NS_EXTENSIONPROTOCOLHANDLER_CID);
+NS_DEFINE_NAMED_CID(NS_SUBSTITUTINGURL_CID);
 #endif
 NS_DEFINE_NAMED_CID(NS_ABOUTPROTOCOLHANDLER_CID);
 NS_DEFINE_NAMED_CID(NS_SAFEABOUTPROTOCOLHANDLER_CID);
@@ -902,7 +911,8 @@ static const mozilla::Module::CIDEntry kNeckoCIDs[] = {
 #endif
 #ifdef NECKO_PROTOCOL_res
     { &kNS_RESPROTOCOLHANDLER_CID, false, nullptr, nsResProtocolHandlerConstructor },
-    { &kNS_RESURL_CID, false, nullptr, nsResURLConstructor },
+    { &kNS_EXTENSIONPROTOCOLHANDLER_CID, false, nullptr, mozilla::ExtensionProtocolHandlerConstructor },
+    { &kNS_SUBSTITUTINGURL_CID, false, nullptr, mozilla::SubstitutingURLConstructor },
 #endif
     { &kNS_ABOUTPROTOCOLHANDLER_CID, false, nullptr, nsAboutProtocolHandlerConstructor },
     { &kNS_SAFEABOUTPROTOCOLHANDLER_CID, false, nullptr, nsSafeAboutProtocolHandlerConstructor },
@@ -1024,6 +1034,7 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
     { NS_ISTREAMCONVERTER_KEY MULTI_MIXED_X, &kNS_MULTIMIXEDCONVERTER_CID },
     { NS_ISTREAMCONVERTER_KEY MULTI_BYTERANGES, &kNS_MULTIMIXEDCONVERTER_CID },
     { NS_ISTREAMCONVERTER_KEY MULTI_MIXED, &kNS_MULTIMIXEDCONVERTER_CID },
+    { NS_ISTREAMCONVERTER_KEY APPLICATION_PACKAGE_CONV, &kNS_MULTIMIXEDCONVERTER_CID },
     { NS_ISTREAMCONVERTER_KEY UNKNOWN_CONTENT, &kNS_UNKNOWNDECODER_CID },
     { NS_GENERIC_CONTENT_SNIFFER, &kNS_UNKNOWNDECODER_CID },
     { NS_BINARYDETECTOR_CONTRACTID, &kNS_BINARYDETECTOR_CID },
@@ -1057,6 +1068,7 @@ static const mozilla::Module::ContractIDEntry kNeckoContracts[] = {
 #endif
 #ifdef NECKO_PROTOCOL_res
     { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "resource", &kNS_RESPROTOCOLHANDLER_CID },
+    { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "moz-extension", &kNS_EXTENSIONPROTOCOLHANDLER_CID },
 #endif
     { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "about", &kNS_ABOUTPROTOCOLHANDLER_CID },
     { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "moz-safe-about", &kNS_SAFEABOUTPROTOCOLHANDLER_CID },

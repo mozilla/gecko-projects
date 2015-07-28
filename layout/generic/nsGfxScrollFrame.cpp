@@ -505,6 +505,9 @@ nsHTMLScrollFrame::ReflowScrolledFrame(ScrollReflowState* aState,
   kidReflowState.SetComputedBSize(computedBSize);
   kidReflowState.ComputedMinBSize() = computedMinBSize;
   kidReflowState.ComputedMaxBSize() = computedMaxBSize;
+  if (aState->mReflowState.IsBResize()) {
+    kidReflowState.SetBResize(true);
+  }
 
   // Temporarily set mHasHorizontalScrollbar/mHasVerticalScrollbar to
   // reflect our assumptions while we reflow the child.
@@ -1039,34 +1042,38 @@ ScrollFrameHelper::GetDesiredScrollbarSizes(nsBoxLayoutState* aState)
 }
 
 nscoord
-ScrollFrameHelper::GetNondisappearingScrollbarWidth(nsBoxLayoutState* aState)
+ScrollFrameHelper::GetNondisappearingScrollbarWidth(nsBoxLayoutState* aState,
+                                                    WritingMode aWM)
 {
   NS_ASSERTION(aState && aState->GetRenderingContext(),
                "Must have rendering context in layout state for size "
                "computations");
 
+  bool verticalWM = aWM.IsVertical();
   if (LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars) != 0) {
     // We're using overlay scrollbars, so we need to get the width that
     // non-disappearing scrollbars would have.
     nsITheme* theme = aState->PresContext()->GetTheme();
     if (theme &&
         theme->ThemeSupportsWidget(aState->PresContext(),
-                                   mVScrollbarBox,
+                                   verticalWM ? mHScrollbarBox
+                                              : mVScrollbarBox,
                                    NS_THEME_SCROLLBAR_NON_DISAPPEARING)) {
       LayoutDeviceIntSize size;
       bool canOverride = true;
       theme->GetMinimumWidgetSize(aState->PresContext(),
-                                  mVScrollbarBox,
+                                  verticalWM ? mHScrollbarBox
+                                             : mVScrollbarBox,
                                   NS_THEME_SCROLLBAR_NON_DISAPPEARING,
                                   &size,
                                   &canOverride);
-      if (size.width) {
-        return aState->PresContext()->DevPixelsToAppUnits(size.width);
-      }
+      return aState->PresContext()->
+             DevPixelsToAppUnits(verticalWM ? size.height : size.width);
     }
   }
 
-  return GetDesiredScrollbarSizes(aState).LeftRight();
+  nsMargin sizes(GetDesiredScrollbarSizes(aState));
+  return verticalWM ? sizes.TopBottom() : sizes.LeftRight();
 }
 
 void
@@ -3839,6 +3846,14 @@ ScrollFrameHelper::CreateAnonymousContent(
   if (canHaveHorizontal) {
     nsRefPtr<NodeInfo> ni = nodeInfo;
     NS_TrustedNewXULElement(getter_AddRefs(mHScrollbarContent), ni.forget());
+#ifdef DEBUG
+    // Scrollbars can get restyled by theme changes.  Whether such a restyle
+    // will actually reconstruct them correctly if it involves a frame
+    // reconstruct... I don't know.  :(
+    mHScrollbarContent->SetProperty(nsGkAtoms::restylableAnonymousNode,
+                                    reinterpret_cast<void*>(true));
+#endif // DEBUG
+
     mHScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::orient,
                                 NS_LITERAL_STRING("horizontal"), false);
     mHScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::clickthrough,
@@ -3854,6 +3869,14 @@ ScrollFrameHelper::CreateAnonymousContent(
   if (canHaveVertical) {
     nsRefPtr<NodeInfo> ni = nodeInfo;
     NS_TrustedNewXULElement(getter_AddRefs(mVScrollbarContent), ni.forget());
+#ifdef DEBUG
+    // Scrollbars can get restyled by theme changes.  Whether such a restyle
+    // will actually reconstruct them correctly if it involves a frame
+    // reconstruct... I don't know.  :(
+    mVScrollbarContent->SetProperty(nsGkAtoms::restylableAnonymousNode,
+                                    reinterpret_cast<void*>(true));
+#endif // DEBUG
+
     mVScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::orient,
                                 NS_LITERAL_STRING("vertical"), false);
     mVScrollbarContent->SetAttr(kNameSpaceID_None, nsGkAtoms::clickthrough,

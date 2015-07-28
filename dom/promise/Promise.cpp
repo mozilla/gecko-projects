@@ -1314,7 +1314,7 @@ Promise::ResolveInternal(JSContext* aCx,
       }
 
       nsRefPtr<PromiseInit> thenCallback =
-        new PromiseInit(thenObj, mozilla::dom::GetIncumbentGlobal());
+        new PromiseInit(nullptr, thenObj, mozilla::dom::GetIncumbentGlobal());
       nsRefPtr<ThenableResolverTask> task =
         new ThenableResolverTask(this, valueObj, thenCallback);
       DispatchToMicroTask(task);

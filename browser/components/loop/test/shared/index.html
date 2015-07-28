@@ -30,7 +30,6 @@
 
   <!-- libs -->
   <script src="../../content/shared/libs/react-0.12.2.js"></script>
-  <script src="../../content/shared/libs/jquery-2.1.4.js"></script>
   <script src="../../content/shared/libs/lodash-3.9.3.js"></script>
   <script src="../../content/shared/libs/backbone-1.2.1.js"></script>
   <script src="../../standalone/content/libs/l10n-gaia-02ca67948fe8.js"></script>
@@ -52,7 +51,6 @@
   <script src="../../content/shared/js/mixins.js"></script>
   <script src="../../content/shared/js/crypto.js"></script>
   <script src="../../content/shared/js/websocket.js"></script>
-  <script src="../../content/shared/js/feedbackApiClient.js"></script>
   <script src="../../content/shared/js/validate.js"></script>
   <script src="../../content/shared/js/actions.js"></script>
   <script src="../../content/shared/js/dispatcher.js"></script>
@@ -62,11 +60,9 @@
   <script src="../../content/shared/js/fxOSActiveRoomStore.js"></script>
   <script src="../../content/shared/js/activeRoomStore.js"></script>
   <script src="../../content/shared/js/conversationStore.js"></script>
-  <script src="../../content/shared/js/feedbackStore.js"></script>
   <script src="../../content/shared/js/views.js"></script>
   <script src="../../content/shared/js/textChatStore.js"></script>
   <script src="../../content/shared/js/textChatView.js"></script>
-  <script src="../../content/shared/js/feedbackViews.js"></script>
 
   <!-- Test scripts -->
   <script src="models_test.js"></script>
@@ -75,14 +71,11 @@
   <script src="crypto_test.js"></script>
   <script src="views_test.js"></script>
   <script src="websocket_test.js"></script>
-  <script src="feedbackApiClient_test.js"></script>
-  <script src="feedbackViews_test.js"></script>
   <script src="validate_test.js"></script>
   <script src="dispatcher_test.js"></script>
   <script src="activeRoomStore_test.js"></script>
   <script src="fxOSActiveRoomStore_test.js"></script>
   <script src="conversationStore_test.js"></script>
-  <script src="feedbackStore_test.js"></script>
   <script src="otSdkDriver_test.js"></script>
   <script src="store_test.js"></script>
   <script src="textChatStore_test.js"></script>
@@ -101,7 +94,10 @@
     });
 
     mocha.run(function () {
-      $("#mocha").append("<p id='complete'>Complete.</p>");
+      var completeNode = document.createElement("p");
+      completeNode.setAttribute("id", "complete");
+      completeNode.appendChild(document.createTextNode("Complete"));
+      document.getElementById("mocha").appendChild(completeNode);
     });
   </script>
 </body>

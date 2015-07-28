@@ -984,6 +984,12 @@ PresShell::Init(nsIDocument* aDocument,
   if (mPresContext->IsRootContentDocument()) {
     mZoomConstraintsClient = new ZoomConstraintsClient();
     mZoomConstraintsClient->Init(this, mDocument);
+#ifndef MOZ_WIDGET_ANDROID
+    // Fennec will need some work to use this code; see bug 1180267.
+    if (gfxPrefs::MetaViewportEnabled()) {
+      mMobileViewportManager = new MobileViewportManager(this, mDocument);
+    }
+#endif
   }
 }
 
@@ -1101,6 +1107,10 @@ PresShell::Destroy()
   if (mZoomConstraintsClient) {
     mZoomConstraintsClient->Destroy();
     mZoomConstraintsClient = nullptr;
+  }
+  if (mMobileViewportManager) {
+    mMobileViewportManager->Destroy();
+    mMobileViewportManager = nullptr;
   }
 
 #ifdef ACCESSIBILITY
@@ -1726,6 +1736,12 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     }
   }
 
+  // If we get here and painting is not suppressed, then we can paint anytime
+  // and we should fire the before-first-paint notification
+  if (!mPaintingSuppressed) {
+    ScheduleBeforeFirstPaint();
+  }
+
   if (root && root->IsXULElement()) {
     mozilla::Telemetry::AccumulateTimeDelta(Telemetry::XUL_INITIAL_FRAME_CONSTRUCTION,
                                             timerStart);
@@ -1752,6 +1768,19 @@ nsresult
 PresShell::ResizeReflowOverride(nscoord aWidth, nscoord aHeight)
 {
   mViewportOverridden = true;
+
+  if (mMobileViewportManager) {
+    // Once the viewport is explicitly overridden, we don't need the
+    // MobileViewportManager any more (in this presShell at least). Destroying
+    // it simplifies things because then it can maintain an invariant that any
+    // time it gets a meta-viewport change (for example) it knows it must
+    // recompute the CSS viewport and do a reflow. If we didn't destroy it here
+    // then there would be times where a meta-viewport change would have no
+    // effect.
+    mMobileViewportManager->Destroy();
+    mMobileViewportManager = nullptr;
+  }
+
   return ResizeReflowIgnoreOverride(aWidth, aHeight);
 }
 
@@ -1763,6 +1792,15 @@ PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight)
     // didn't ask to ignore the override.  Pretend it didn't happen.
     return NS_OK;
   }
+
+  if (mMobileViewportManager) {
+    // If we have a mobile viewport manager, request a reflow from it. It can
+    // recompute the final CSS viewport and trigger a call to
+    // ResizeReflowIgnoreOverride if it changed.
+    mMobileViewportManager->RequestReflow();
+    return NS_OK;
+  }
+
   return ResizeReflowIgnoreOverride(aWidth, aHeight);
 }
 
@@ -3742,6 +3780,17 @@ PresShell::CaptureHistoryState(nsILayoutHistoryState** aState)
 }
 
 void
+PresShell::ScheduleBeforeFirstPaint()
+{
+  if (!mDocument->IsResourceDoc()) {
+    // Notify observers that a new page is about to be drawn. Execute this
+    // as soon as it is safe to run JS, which is guaranteed to be before we
+    // go back to the event loop and actually draw the page.
+    nsContentUtils::AddScriptRunner(new nsBeforeFirstPaintDispatcher(mDocument));
+  }
+}
+
+void
 PresShell::UnsuppressAndInvalidate()
 {
   // Note: We ignore the EnsureVisible check for resource documents, because
@@ -3752,12 +3801,7 @@ PresShell::UnsuppressAndInvalidate()
     return;
   }
 
-  if (!mDocument->IsResourceDoc()) {
-    // Notify observers that a new page is about to be drawn. Execute this
-    // as soon as it is safe to run JS, which is guaranteed to be before we
-    // go back to the event loop and actually draw the page.
-    nsContentUtils::AddScriptRunner(new nsBeforeFirstPaintDispatcher(mDocument));
-  }
+  ScheduleBeforeFirstPaint();
 
   mPaintingSuppressed = false;
   nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
@@ -7591,10 +7635,12 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         // retarget the event back at the keydown target. This prevents a
         // content area from grabbing the focus from chrome in-between key
         // events.
-        if (eventTarget &&
-            nsContentUtils::IsChromeDoc(gKeyDownTarget->GetComposedDoc()) !=
-            nsContentUtils::IsChromeDoc(eventTarget->GetComposedDoc())) {
-          eventTarget = gKeyDownTarget;
+        if (eventTarget) {
+          bool keyDownIsChrome = nsContentUtils::IsChromeDoc(gKeyDownTarget->GetComposedDoc());
+          if (keyDownIsChrome != nsContentUtils::IsChromeDoc(eventTarget->GetComposedDoc()) ||
+              (keyDownIsChrome && TabParent::GetFrom(eventTarget))) {
+            eventTarget = gKeyDownTarget;
+          }
         }
 
         if (aEvent->message == NS_KEY_UP) {
@@ -8923,7 +8969,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
 
   nsDocShell* docShell = static_cast<nsDocShell*>(GetPresContext()->GetDocShell());
   if (docShell) {
-    docShell->AddProfileTimelineMarker("Reflow", TRACING_INTERVAL_START);
+    TimelineConsumers::AddMarkerForDocShell(docShell, "Reflow", TRACING_INTERVAL_START);
   }
 
   if (mReflowContinueTimer) {
@@ -9100,7 +9146,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   }
 
   if (docShell) {
-    docShell->AddProfileTimelineMarker("Reflow", TRACING_INTERVAL_END);
+    TimelineConsumers::AddMarkerForDocShell(docShell, "Reflow", TRACING_INTERVAL_END);
   }
   return !interrupted;
 }

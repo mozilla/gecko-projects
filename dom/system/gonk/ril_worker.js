@@ -67,22 +67,18 @@ const GET_CURRENT_CALLS_RETRY_MAX = 3;
 let RILQUIRKS_CALLSTATE_EXTRA_UINT32;
 let RILQUIRKS_REQUEST_USE_DIAL_EMERGENCY_CALL;
 let RILQUIRKS_SIM_APP_STATE_EXTRA_FIELDS;
+let RILQUIRKS_SIGNAL_EXTRA_INT32;
+let RILQUIRKS_AVAILABLE_NETWORKS_EXTRA_STRING;
 // Needed for call-waiting on Peak device
 let RILQUIRKS_EXTRA_UINT32_2ND_CALL;
 // On the emulator we support querying the number of lock retries
 let RILQUIRKS_HAVE_QUERY_ICC_LOCK_RETRY_COUNT;
-
 // Ril quirk to Send STK Profile Download
 let RILQUIRKS_SEND_STK_PROFILE_DOWNLOAD;
-
 // Ril quirk to attach data registration on demand.
 let RILQUIRKS_DATA_REGISTRATION_ON_DEMAND;
-
 // Ril quirk to control the uicc/data subscription.
 let RILQUIRKS_SUBSCRIPTION_CONTROL;
-
-let RILQUIRKS_SIGNAL_EXTRA_INT32;
-
 // Ril quirk to describe the SMSC address format.
 let RILQUIRKS_SMSC_ADDRESS_FORMAT;
 
@@ -174,7 +170,6 @@ RilObject.prototype = {
     this.IMEISV = null;
     this.ESN = null;
     this.MEID = null;
-    this.SMSC = null;
 
     /**
      * ICC information that is not exposed to Gaia.
@@ -1625,17 +1620,7 @@ RilObject.prototype = {
    * Get the Short Message Service Center address.
    */
   getSmscAddress: function(options) {
-    if (!this.SMSC) {
-      this.context.Buf.simpleRequest(REQUEST_GET_SMSC_ADDRESS, options);
-      return;
-    }
-
-    if (!options || options.rilMessageType !== "getSmscAddress") {
-      return;
-    }
-
-    options.smscAddress = this.SMSC;
-    this.sendChromeMessage(options);
+    this.context.Buf.simpleRequest(REQUEST_GET_SMSC_ADDRESS, options);
   },
 
   /**
@@ -1647,8 +1632,8 @@ RilObject.prototype = {
    *        Type of number in integer, as defined in
    *        |Table 10.5.118: Called party BCD number| of 3GPP TS 24.008.
    * @param numberPlanIdentification
-   *        Number plan identification in integer, as defined in
-   *        |Table 10.5.118: Called party BCD number| of 3GPP TS 24.008.
+   *        The index of number plan identification value in
+   *        CALLED_PARTY_BCD_NPI array.
    */
   setSmscAddress: function(options) {
     let ton = options.typeOfNumber;
@@ -1677,7 +1662,6 @@ RilObject.prototype = {
     }
 
     // Init parcel.
-    this.SMSC = null;
     let Buf = this.context.Buf;
     Buf.newParcel(REQUEST_SET_SMSC_ADDRESS, options);
 
@@ -3064,7 +3048,8 @@ RilObject.prototype = {
     let strings = this.context.Buf.readStringList();
     let networks = [];
 
-    for (let i = 0; i < strings.length; i += 4) {
+    for (let i = 0; i < strings.length;
+         i += RILQUIRKS_AVAILABLE_NETWORKS_EXTRA_STRING ? 5 : 4) {
       let network = {
         longName: strings[i],
         shortName: strings[i + 1],
@@ -4827,22 +4812,96 @@ RilObject.prototype[REQUEST_EXIT_EMERGENCY_CALLBACK_MODE] = function REQUEST_EXI
   this.sendChromeMessage(options);
 };
 RilObject.prototype[REQUEST_GET_SMSC_ADDRESS] = function REQUEST_GET_SMSC_ADDRESS(length, options) {
-  this.SMSC = options.errorMsg ? null : this.context.Buf.readString();
-
   if (!options.rilMessageType || options.rilMessageType !== "getSmscAddress") {
     return;
   }
 
-  options.smscAddress = this.SMSC;
+  if (options.errorMsg) {
+    this.sendChromeMessage(options);
+    return;
+  }
+
+  let tosca = TOA_UNKNOWN;
+  let smsc = "";
+  let Buf = this.context.Buf;
+  if (RILQUIRKS_SMSC_ADDRESS_FORMAT === "pdu") {
+    let pduHelper = this.context.GsmPDUHelper;
+    let strlen = Buf.readInt32();
+    let length = pduHelper.readHexOctet();
+
+    // As defined in |8.2.5.2 Destination address element| of 3GPP TS 24.011,
+    // the value of length field can not exceed 11. Since the content might be
+    // filled with 12 'F' when SMSC is cleared, we don't parse the TOA and
+    // address fields if reported length exceeds 11 here. Instead, keep the
+    // default value (TOA_UNKNOWN with an empty address) in this case.
+    const MAX_LENGTH = 11
+    if (length <= MAX_LENGTH) {
+      tosca = pduHelper.readHexOctet();
+
+      // Read and covert the decimal values back to special BCD digits defined in
+      // |Called party BCD number| of 3GPP TS 24.008 (refer the following table).
+      //
+      // +=========+=======+=====+
+      // |  value  | digit | hex |
+      // +========================
+      // | 1 0 1 0 |   *   | 0xA |
+      // | 1 0 1 1 |   #   | 0xB |
+      // | 1 1 0 0 |   a   | 0xC |
+      // | 1 1 0 1 |   b   | 0xD |
+      // | 1 1 1 0 |   c   | 0xE |
+      // +=========+=======+=====+
+      smsc = pduHelper.readSwappedNibbleBcdString(length - 1, true)
+                      .replace(/a/ig, "*")
+                      .replace(/b/ig, "#")
+                      .replace(/c/ig, "a")
+                      .replace(/d/ig, "b")
+                      .replace(/e/ig, "c");
+
+      Buf.readStringDelimiter(strlen);
+    }
+  } else /* RILQUIRKS_SMSC_ADDRESS_FORMAT === "text" */ {
+    let text = Buf.readString();
+    let segments = text.split(",", 2);
+    // Parse TOA only if it presents since some devices might omit the TOA
+    // segment in the reported SMSC address. If TOA does not present, keep the
+    // default value TOA_UNKNOWN.
+    if (segments.length === 2) {
+      tosca = this.parseInt(segments[1], TOA_UNKNOWN, 10);
+    }
+
+    smsc = segments[0].replace(/\"/g, "");
+  }
+
+  // Convert the NPI value to the corresponding index of CALLED_PARTY_BCD_NPI
+  // array. If the value does not present in the array, use
+  // CALLED_PARTY_BCD_NPI_ISDN.
+  let npi = CALLED_PARTY_BCD_NPI.indexOf(tosca & 0xf);
+  if (npi === -1) {
+    npi = CALLED_PARTY_BCD_NPI.indexOf(CALLED_PARTY_BCD_NPI_ISDN);
+  }
+
+  // Extract TON.
+  let ton = (tosca & 0x70) >> 4;
+
+  // Ensure + sign if TON is international, and vice versa.
+  const TON_INTERNATIONAL = (TOA_INTERNATIONAL & 0x70) >> 4;
+  if (ton ===  TON_INTERNATIONAL && smsc.charAt(0) !== "+") {
+    smsc = "+" + smsc;
+  } else if (smsc.charAt(0) === "+" && ton !== TON_INTERNATIONAL) {
+    if (DEBUG) {
+      this.context.debug("SMSC address number begins with '+' while the TON is not international. Change TON to international.");
+    }
+    ton = TON_INTERNATIONAL;
+  }
+
+  options.smscAddress = smsc;
+  options.typeOfNumber = ton;
+  options.numberPlanIdentification = npi;
   this.sendChromeMessage(options);
 };
 RilObject.prototype[REQUEST_SET_SMSC_ADDRESS] = function REQUEST_SET_SMSC_ADDRESS(length, options) {
   if (!options.rilMessageType || options.rilMessageType !== "setSmscAddress") {
     return;
-  }
-
-  if (options.rilRequestError) {
-    optioins.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
   }
 
   this.sendChromeMessage(options);
@@ -14795,6 +14854,7 @@ let ContextPool = {
     RILQUIRKS_DATA_REGISTRATION_ON_DEMAND = quirks.dataRegistrationOnDemand;
     RILQUIRKS_SUBSCRIPTION_CONTROL = quirks.subscriptionControl;
     RILQUIRKS_SIGNAL_EXTRA_INT32 = quirks.signalExtraInt;
+    RILQUIRKS_AVAILABLE_NETWORKS_EXTRA_STRING = quirks.availableNetworkExtraStr;
     RILQUIRKS_SMSC_ADDRESS_FORMAT = quirks.smscAddressFormat;
   },
 

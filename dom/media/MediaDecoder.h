@@ -399,6 +399,8 @@ public:
   // The stream is initially blocked. The decoder is responsible for unblocking
   // it while it is playing back.
   virtual void AddOutputStream(ProcessedMediaStream* aStream, bool aFinishWhenEnded);
+  // Remove an output stream added with AddOutputStream.
+  virtual void RemoveOutputStream(MediaStream* aStream);
 
   // Return the duration of the video in seconds.
   virtual double GetDuration();
@@ -545,15 +547,6 @@ public:
   // outlined in the specification.
   void FireTimeUpdate();
 
-  // Stop updating the bytes downloaded for progress notifications. Called
-  // when seeking to prevent wild changes to the progress notification.
-  // Must be called with the decoder monitor held.
-  virtual void StopProgressUpdates();
-
-  // Allow updating the bytes downloaded for progress notifications. Must
-  // be called with the decoder monitor held.
-  virtual void StartProgressUpdates();
-
   // Something has changed that could affect the computed playback rate,
   // so recompute it. The monitor must be held.
   virtual void UpdatePlaybackRate();
@@ -631,13 +624,6 @@ public:
   // the track list. Call on the main thread only.
   virtual void RemoveMediaTracks() override;
 
-  // Returns true if the this decoder is expecting any more data to arrive
-  // sometime in the not-too-distant future, either from the network or from
-  // an appendBuffer call on a MediaSource element.
-  //
-  // Acquires the monitor. Call from any thread.
-  virtual bool IsExpectingMoreData();
-
   // Called when the video has completed playing.
   // Call on the main thread only.
   void PlaybackEnded();
@@ -649,6 +635,14 @@ public:
     mLogicallySeeking = false;
   }
   void OnSeekResolved(SeekResolveValue aVal);
+
+  void SeekingChanged()
+  {
+    // Stop updating the bytes downloaded for progress notifications when
+    // seeking to prevent wild changes to the progress notification.
+    MOZ_ASSERT(NS_IsMainThread());
+    mIgnoreProgressData = mLogicallySeeking;
+  }
 
   // Seeking has started. Inform the element on the main
   // thread.
@@ -993,8 +987,7 @@ protected:
   // True when seeking or otherwise moving the play position around in
   // such a manner that progress event data is inaccurate. This is set
   // during seek and duration operations to prevent the progress indicator
-  // from jumping around. Read/Write from any thread. Must have decode monitor
-  // locked before accessing.
+  // from jumping around. Read/Write on the main thread only.
   bool mIgnoreProgressData;
 
   // True if the stream is infinite (e.g. a webradio).

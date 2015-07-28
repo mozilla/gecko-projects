@@ -27,3 +27,6 @@
 <!ENTITY trackingProtection.showPreferences    "Privacy Preferences">
 
 <!ENTITY trackingProtection.startTour          "See what's new">
+
+<!ENTITY trackingProtection.enable.label       "Turn on Tracking Protection">
+<!ENTITY trackingProtection.enable.accesskey   "T">

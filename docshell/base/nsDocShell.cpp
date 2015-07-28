@@ -77,6 +77,7 @@
 #include "IHistory.h"
 #include "nsViewSourceHandler.h"
 #include "nsWhitespaceTokenizer.h"
+#include "nsICookieService.h"
 
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
@@ -207,10 +208,6 @@
 #endif
 
 #include "mozIThirdPartyUtil.h"
-// Values for the network.cookie.cookieBehavior pref are documented in
-// nsCookieService.cpp
-#define COOKIE_BEHAVIOR_ACCEPT 0 // Allow all cookies.
-#define COOKIE_BEHAVIOR_REJECT_FOREIGN 1 // Reject all third-party cookies.
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
@@ -1713,20 +1710,22 @@ nsDocShell::LoadStream(nsIInputStream* aStream, nsIURI* aURI,
   }
 
   uint32_t loadType = LOAD_NORMAL;
+  nsCOMPtr<nsIPrincipal> requestingPrincipal;
   if (aLoadInfo) {
     nsDocShellInfoLoadType lt = nsIDocShellLoadInfo::loadNormal;
     (void)aLoadInfo->GetLoadType(&lt);
     // Get the appropriate LoadType from nsIDocShellLoadInfo type
     loadType = ConvertDocShellLoadInfoToLoadType(lt);
+  
+    nsCOMPtr<nsISupports> owner;
+    aLoadInfo->GetOwner(getter_AddRefs(owner));
+    requestingPrincipal = do_QueryInterface(owner);
   }
 
   NS_ENSURE_SUCCESS(Stop(nsIWebNavigation::STOP_NETWORK), NS_ERROR_FAILURE);
 
   mLoadType = loadType;
 
-  nsCOMPtr<nsISupports> owner;
-  aLoadInfo->GetOwner(getter_AddRefs(owner));
-  nsCOMPtr<nsIPrincipal> requestingPrincipal = do_QueryInterface(owner);
   if (!requestingPrincipal) {
     requestingPrincipal = nsContentUtils::GetSystemPrincipal();
   }
@@ -2929,29 +2928,17 @@ nsDocShell::HistoryTransactionRemoved(int32_t aIndex)
   return NS_OK;
 }
 
-unsigned long nsDocShell::gProfileTimelineRecordingsCount = 0;
-
-mozilla::LinkedList<nsDocShell::ObservedDocShell>* nsDocShell::gObservedDocShells = nullptr;
-
 NS_IMETHODIMP
 nsDocShell::SetRecordProfileTimelineMarkers(bool aValue)
 {
   bool currentValue = nsIDocShell::GetRecordProfileTimelineMarkers();
   if (currentValue != aValue) {
     if (aValue) {
-      ++gProfileTimelineRecordingsCount;
+      TimelineConsumers::AddConsumer(this);
       UseEntryScriptProfiling();
-
-      MOZ_ASSERT(!mObserved);
-      mObserved.reset(new ObservedDocShell(this));
-      GetOrCreateObservedDocShells().insertFront(mObserved.get());
     } else {
-      --gProfileTimelineRecordingsCount;
+      TimelineConsumers::RemoveConsumer(this);
       UnuseEntryScriptProfiling();
-
-      mObserved.reset(nullptr);
-
-      ClearProfileTimelineMarkers();
     }
   }
 
@@ -2968,119 +2955,16 @@ nsDocShell::GetRecordProfileTimelineMarkers(bool* aValue)
 nsresult
 nsDocShell::PopProfileTimelineMarkers(
     JSContext* aCx,
-    JS::MutableHandle<JS::Value> aProfileTimelineMarkers)
+    JS::MutableHandle<JS::Value> aOut)
 {
-  // Looping over all markers gathered so far at the docShell level, whenever a
-  // START marker is found, look for the corresponding END marker and build a
-  // {name,start,end} JS object.
-  // Paint markers are different because paint is handled at root docShell level
-  // in the information that a paint was done is then stored at each sub
-  // docShell level but we can only be sure that a paint did happen in a
-  // docShell if an Layer marker type was recorded too.
+  nsTArray<dom::ProfileTimelineMarker> store;
+  SequenceRooter<dom::ProfileTimelineMarker> rooter(aCx, &store);
 
-  nsTArray<mozilla::dom::ProfileTimelineMarker> profileTimelineMarkers;
-  SequenceRooter<mozilla::dom::ProfileTimelineMarker> rooter(
-    aCx, &profileTimelineMarkers);
-
-  // If we see an unpaired START, we keep it around for the next call
-  // to PopProfileTimelineMarkers.  We store the kept START objects in
-  // this array.
-  nsTArray<UniquePtr<TimelineMarker>> keptMarkers;
-
-  for (uint32_t i = 0; i < mProfileTimelineMarkers.Length(); ++i) {
-    UniquePtr<TimelineMarker>& startPayload = mProfileTimelineMarkers[i];
-    const char* startMarkerName = startPayload->GetName();
-
-    bool hasSeenPaintedLayer = false;
-    bool isPaint = strcmp(startMarkerName, "Paint") == 0;
-
-    // If we are processing a Paint marker, we append information from
-    // all the embedded Layer markers to this array.
-    dom::Sequence<dom::ProfileTimelineLayerRect> layerRectangles;
-
-    // If this is a TRACING_TIMESTAMP marker, there's no corresponding "end"
-    // marker, as it's a single unit of time, not a duration, create the final
-    // marker here.
-    if (startPayload->GetMetaData() == TRACING_TIMESTAMP) {
-      mozilla::dom::ProfileTimelineMarker* marker =
-        profileTimelineMarkers.AppendElement();
-
-      marker->mName = NS_ConvertUTF8toUTF16(startPayload->GetName());
-      marker->mStart = startPayload->GetTime();
-      marker->mEnd = startPayload->GetTime();
-      marker->mStack = startPayload->GetStack();
-      startPayload->AddDetails(aCx, *marker);
-      continue;
-    }
-
-    if (startPayload->GetMetaData() == TRACING_INTERVAL_START) {
-      bool hasSeenEnd = false;
-
-      // DOM events can be nested, so we must take care when searching
-      // for the matching end.  It doesn't hurt to apply this logic to
-      // all event types.
-      uint32_t markerDepth = 0;
-
-      // The assumption is that the devtools timeline flushes markers frequently
-      // enough for the amount of markers to always be small enough that the
-      // nested for loop isn't going to be a performance problem.
-      for (uint32_t j = i + 1; j < mProfileTimelineMarkers.Length(); ++j) {
-        UniquePtr<TimelineMarker>& endPayload = mProfileTimelineMarkers[j];
-        const char* endMarkerName = endPayload->GetName();
-
-        // Look for Layer markers to stream out paint markers.
-        if (isPaint && strcmp(endMarkerName, "Layer") == 0) {
-          hasSeenPaintedLayer = true;
-          endPayload->AddLayerRectangles(layerRectangles);
-        }
-
-        if (!startPayload->Equals(*endPayload)) {
-          continue;
-        }
-
-        // Pair start and end markers.
-        if (endPayload->GetMetaData() == TRACING_INTERVAL_START) {
-          ++markerDepth;
-        } else if (endPayload->GetMetaData() == TRACING_INTERVAL_END) {
-          if (markerDepth > 0) {
-            --markerDepth;
-          } else {
-            // But ignore paint start/end if no layer has been painted.
-            if (!isPaint || (isPaint && hasSeenPaintedLayer)) {
-              mozilla::dom::ProfileTimelineMarker* marker =
-                profileTimelineMarkers.AppendElement();
-
-              marker->mName = NS_ConvertUTF8toUTF16(startPayload->GetName());
-              marker->mStart = startPayload->GetTime();
-              marker->mEnd = endPayload->GetTime();
-              marker->mStack = startPayload->GetStack();
-              if (isPaint) {
-                marker->mRectangles.Construct(layerRectangles);
-              }
-              startPayload->AddDetails(aCx, *marker);
-              endPayload->AddDetails(aCx, *marker);
-            }
-
-            // We want the start to be dropped either way.
-            hasSeenEnd = true;
-
-            break;
-          }
-        }
-      }
-
-      // If we did not see the corresponding END, keep the START.
-      if (!hasSeenEnd) {
-        keptMarkers.AppendElement(Move(mProfileTimelineMarkers[i]));
-        mProfileTimelineMarkers.RemoveElementAt(i);
-        --i;
-      }
-    }
+  if (IsObserved()) {
+    mObserved->PopMarkers(aCx, store);
   }
 
-  mProfileTimelineMarkers.SwapElements(keptMarkers);
-
-  if (!ToJSValue(aCx, profileTimelineMarkers, aProfileTimelineMarkers)) {
+  if (!ToJSValue(aCx, store, aOut)) {
     JS_ClearPendingException(aCx);
     return NS_ERROR_UNEXPECTED;
   }
@@ -3095,24 +2979,6 @@ nsDocShell::Now(DOMHighResTimeStamp* aWhen)
   *aWhen =
     (TimeStamp::Now() - TimeStamp::ProcessCreation(ignore)).ToMilliseconds();
   return NS_OK;
-}
-
-void
-nsDocShell::AddProfileTimelineMarker(const char* aName,
-                                     TracingMetadata aMetaData)
-{
-  if (IsObserved()) {
-    TimelineMarker* marker = new TimelineMarker(this, aName, aMetaData);
-    mProfileTimelineMarkers.AppendElement(marker);
-  }
-}
-
-void
-nsDocShell::AddProfileTimelineMarker(UniquePtr<TimelineMarker>&& aMarker)
-{
-  if (IsObserved()) {
-    mProfileTimelineMarkers.AppendElement(Move(aMarker));
-  }
 }
 
 NS_IMETHODIMP
@@ -3142,12 +3008,6 @@ nsDocShell::GetWindowDraggingAllowed(bool* aValue)
     *aValue = mWindowDraggingAllowed;
   }
   return NS_OK;
-}
-
-void
-nsDocShell::ClearProfileTimelineMarkers()
-{
-  mProfileTimelineMarkers.Clear();
 }
 
 nsIDOMStorageManager*
@@ -6486,7 +6346,9 @@ nsDocShell::GetCurScrollPos(int32_t aScrollOrientation, int32_t* aCurPos)
   NS_ENSURE_ARG_POINTER(aCurPos);
 
   nsIScrollableFrame* sf = GetRootScrollFrame();
-  NS_ENSURE_TRUE(sf, NS_ERROR_FAILURE);
+  if (!sf) {
+    return NS_ERROR_FAILURE;
+  }
 
   nsPoint pt = sf->GetScrollPosition();
 
@@ -13520,6 +13382,16 @@ nsDocShell::OnLinkClickSync(nsIContent* aContent,
   nsCOMPtr<nsIURI> referer = refererDoc->GetDocumentURI();
   uint32_t refererPolicy = refererDoc->GetReferrerPolicy();
 
+  // get referrer attribute from clicked link and parse it
+  // if per element referrer is enabled, the element referrer overrules
+  // the document wide referrer
+  if (IsElementAnchor(aContent)) {
+    net::ReferrerPolicy refPolEnum = aContent->AsElement()->GetReferrerPolicy();
+    if (refPolEnum != net::RP_Unset) {
+      refererPolicy = refPolEnum;
+    }
+  }
+
   // referer could be null here in some odd cases, but that's ok,
   // we'll just load the link w/o sending a referer in those cases.
 
@@ -13984,7 +13856,7 @@ nsDocShell::NotifyJSRunToCompletionStart(const char* aReason,
       MakeUnique<JavascriptTimelineMarker>(this, "Javascript", aReason,
                                            aFunctionName, aFilename,
                                            aLineNumber);
-    AddProfileTimelineMarker(Move(marker));
+    TimelineConsumers::AddMarkerForDocShell(this, Move(marker));
   }
   mJSRunToCompletionDepth++;
 }
@@ -13997,7 +13869,7 @@ nsDocShell::NotifyJSRunToCompletionStop()
   // If last stop, mark interval end.
   mJSRunToCompletionDepth--;
   if (timelineOn && mJSRunToCompletionDepth == 0) {
-    AddProfileTimelineMarker("Javascript", TRACING_INTERVAL_END);
+    TimelineConsumers::AddMarkerForDocShell(this, "Javascript", TRACING_INTERVAL_END);
   }
 }
 
@@ -14076,11 +13948,14 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNavigate,
       bool isThirdPartyURI = true;
       result = thirdPartyUtil->IsThirdPartyURI(mCurrentURI, aURI,
                                                &isThirdPartyURI);
-      NS_ENSURE_SUCCESS(result, result);
+      if (NS_FAILED(result)) {
+          return result;
+      }
+
       if (isThirdPartyURI &&
           (Preferences::GetInt("network.cookie.cookieBehavior",
-                               COOKIE_BEHAVIOR_ACCEPT) ==
-                               COOKIE_BEHAVIOR_REJECT_FOREIGN)) {
+                               nsICookieService::BEHAVIOR_ACCEPT) ==
+                               nsICookieService::BEHAVIOR_REJECT_FOREIGN)) {
         return NS_OK;
       }
     }

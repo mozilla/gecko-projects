@@ -33,6 +33,9 @@ to date and optimally configured for a better, more productive experience
 when working on Mozilla projects.
 
 Please run `mach mercurial-setup` now.
+
+Note: `mach mercurial-setup` does not make any changes without prompting
+you first.
 '''.strip()
 
 OLD_MERCURIAL_TOOLS = '''
@@ -45,6 +48,9 @@ Having the latest Mercurial tools and configuration should lead to a better,
 more productive experience when working on Mozilla projects.
 
 Please run `mach mercurial-setup` now.
+
+Reminder: `mach mercurial-setup` does not make any changes without
+prompting you first.
 
 To avoid this message in the future, run `mach mercurial-setup` once a month.
 Or, schedule `mach mercurial-setup --update-only` to run automatically in
@@ -245,7 +251,7 @@ def bootstrap(topsrcdir, mozilla_dir=None):
             return
 
         # The environment is likely a machine invocation.
-        if not sys.stdin.isatty():
+        if sys.stdin.closed or not sys.stdin.isatty():
             return
 
         # Mercurial isn't managing this source checkout.

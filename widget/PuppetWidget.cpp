@@ -217,7 +217,14 @@ PuppetWidget::Resize(double aWidth,
     InvalidateRegion(this, dirty);
   }
 
+  // call WindowResized() on both the current listener, and possibly
+  // also the previous one if we're in a state where we're drawing that one
+  // because the current one is paint suppressed
   if (!oldBounds.IsEqualEdges(mBounds) && mAttachedWidgetListener) {
+    if (GetCurrentWidgetListener() &&
+        GetCurrentWidgetListener() != mAttachedWidgetListener) {
+      GetCurrentWidgetListener()->WindowResized(this, mBounds.width, mBounds.height);
+    }
     mAttachedWidgetListener->WindowResized(this, mBounds.width, mBounds.height);
   }
 
@@ -313,8 +320,8 @@ PuppetWidget::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
 
   aStatus = nsEventStatus_eIgnore;
 
-  if (mAttachedWidgetListener) {
-    aStatus = mAttachedWidgetListener->HandleEvent(event, mUseAttachedEvents);
+  if (GetCurrentWidgetListener()) {
+    aStatus = GetCurrentWidgetListener()->HandleEvent(event, mUseAttachedEvents);
   }
 
   return NS_OK;
@@ -513,25 +520,28 @@ PuppetWidget::ExecuteNativeKeyBinding(NativeKeyBindingsType aType,
 #else // #ifdef MOZ_WIDGET_GONK
   MOZ_ASSERT(mNativeKeyCommandsValid);
 
-  nsTArray<mozilla::CommandInt>& commands = mSingleLineCommands;
+  const nsTArray<mozilla::CommandInt>* commands = nullptr;
   switch (aType) {
     case nsIWidget::NativeKeyBindingsForSingleLineEditor:
-      commands = mSingleLineCommands;
+      commands = &mSingleLineCommands;
       break;
     case nsIWidget::NativeKeyBindingsForMultiLineEditor:
-      commands = mMultiLineCommands;
+      commands = &mMultiLineCommands;
       break;
     case nsIWidget::NativeKeyBindingsForRichTextEditor:
-      commands = mRichTextCommands;
+      commands = &mRichTextCommands;
+      break;
+    default:
+      MOZ_CRASH("Invalid type");
       break;
   }
 
-  if (commands.IsEmpty()) {
+  if (commands->IsEmpty()) {
     return false;
   }
 
-  for (uint32_t i = 0; i < commands.Length(); i++) {
-    aCallback(static_cast<mozilla::Command>(commands[i]), aCallbackData);
+  for (uint32_t i = 0; i < commands->Length(); i++) {
+    aCallback(static_cast<mozilla::Command>((*commands)[i]), aCallbackData);
   }
   return true;
 #endif
@@ -785,7 +795,7 @@ PuppetWidget::NotifyIMEOfSelectionChange(
   mContentCache.SetSelection(
     this, 
     aIMENotification.mSelectionChangeData.mOffset,
-    aIMENotification.mSelectionChangeData.mLength,
+    aIMENotification.mSelectionChangeData.Length(),
     aIMENotification.mSelectionChangeData.mReversed,
     aIMENotification.mSelectionChangeData.GetWritingMode());
 
@@ -909,7 +919,7 @@ PuppetWidget::Paint()
 {
   MOZ_ASSERT(!mDirtyRegion.IsEmpty(), "paint event logic messed up");
 
-  if (!mAttachedWidgetListener)
+  if (!GetCurrentWidgetListener())
     return NS_OK;
 
   nsIntRegion region = mDirtyRegion;
@@ -918,9 +928,9 @@ PuppetWidget::Paint()
   mDirtyRegion.SetEmpty();
   mPaintTask.Revoke();
 
-  mAttachedWidgetListener->WillPaintWindow(this);
+  GetCurrentWidgetListener()->WillPaintWindow(this);
 
-  if (mAttachedWidgetListener) {
+  if (GetCurrentWidgetListener()) {
 #ifdef DEBUG
     debug_DumpPaintEvent(stderr, this, region,
                          nsAutoCString("PuppetWidget"), 0);
@@ -937,15 +947,15 @@ PuppetWidget::Paint()
       ctx->Clip();
       AutoLayerManagerSetup setupLayerManager(this, ctx,
                                               BufferMode::BUFFER_NONE);
-      mAttachedWidgetListener->PaintWindow(this, region);
+      GetCurrentWidgetListener()->PaintWindow(this, region);
       if (mTabChild) {
         mTabChild->NotifyPainted();
       }
     }
   }
 
-  if (mAttachedWidgetListener) {
-    mAttachedWidgetListener->DidPaintWindow();
+  if (GetCurrentWidgetListener()) {
+    GetCurrentWidgetListener()->DidPaintWindow();
   }
 
   return NS_OK;
@@ -1055,14 +1065,14 @@ PuppetWidget::GetNativeData(uint32_t aDataType)
     }
     return (void*)nativeData;
   }
-  case NS_NATIVE_WINDOW:
+  case NS_NATIVE_WIDGET:
   case NS_NATIVE_DISPLAY:
+    // These types are ignored (see bug 1183828).
+    break;
+  case NS_NATIVE_WINDOW:
   case NS_NATIVE_PLUGIN_PORT:
   case NS_NATIVE_GRAPHIC:
   case NS_NATIVE_SHELLWIDGET:
-  case NS_NATIVE_WIDGET:
-    NS_WARNING("nsWindow::GetNativeData not implemented for this type");
-    break;
   default:
     NS_WARNING("nsWindow::GetNativeData called with bad value");
     break;
@@ -1245,6 +1255,21 @@ PuppetScreenManager::GetSystemDefaultScale(float *aDefaultScale)
 {
   *aDefaultScale = 1.0f;
   return NS_OK;
+}
+
+nsIWidgetListener*
+PuppetWidget::GetCurrentWidgetListener()
+{
+  if (!mPreviouslyAttachedWidgetListener ||
+      !mAttachedWidgetListener) {
+    return mAttachedWidgetListener;
+  }
+
+  if (mAttachedWidgetListener->GetView()->IsPrimaryFramePaintSuppressed()) {
+    return mPreviouslyAttachedWidgetListener;
+  }
+
+  return mAttachedWidgetListener;
 }
 
 } // namespace widget

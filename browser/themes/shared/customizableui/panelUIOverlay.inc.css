@@ -21,12 +21,6 @@
 %include ../browser.inc
 
 :root {
-  --panel-ui-button-background-image: linear-gradient(to bottom, transparent, hsla(0,0%,100%,.3) 30%, hsla(0,0%,100%,.3) 70%, transparent),
-                    linear-gradient(to bottom, transparent, hsla(210,54%,20%,.3) 30%, hsla(210,54%,20%,.3) 70%, transparent),
-                    linear-gradient(to bottom, transparent, hsla(0,0%,100%,.3) 30%, hsla(0,0%,100%,.3) 70%, transparent);
-  --panel-ui-button-background-size: 1px calc(100% - 1px), 1px calc(100% - 1px), 1px  calc(100% - 1px) !important;
-  --panel-ui-button-background-position: 0px 0px, 1px 0px, 2px 0px;
-  --panel-ui-button-background-repeat: no-repeat;
   --panel-ui-exit-subview-gutter-width: 38px;
 }
 
@@ -97,20 +91,23 @@
 }
 
 #PanelUI-button {
-  background-image: var(--panel-ui-button-background-image);
-  background-size: var(--panel-ui-button-background-size);
-  background-position: var(--panel-ui-button-background-position);
-  background-repeat: var(--panel-ui-button-background-repeat);
+  margin-inline-start: 2px;
+  border-inline-start: 1px solid;
+  border-image: linear-gradient(transparent, rgba(0,0,0,.1) 20%, rgba(0,0,0,.1) 80%, transparent);
+  border-image-slice: 1;
 }
 
-#PanelUI-button:-moz-locale-dir(rtl) {
-  background-position: 100% 0, calc(100% - 1px) 0, calc(100% - 2px) 0;
+#nav-bar[brighttext] > #PanelUI-button {
+  border-image-source: linear-gradient(transparent, rgba(100%,100%,100%,.2) 20%, rgba(100%,100%,100%,.2) 80%, transparent);
 }
 
-#PanelUI-menu-button[update-status="succeeded"] .toolbarbutton-badge::after {
-  content: url(chrome://browser/skin/update-badge.svg);
+#PanelUI-menu-button[update-status="succeeded"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
+  display: -moz-box;
+  background-image: url(chrome://browser/skin/update-badge.svg);
   background-color: #74BF43;
   height: 10px;
+  width: 10px;
+  border: none;
 }
 
 .panel-subviews {
@@ -175,16 +172,6 @@ panelmultiview[nosubviews=true] > .panel-viewcontainer > .panel-viewstack > .pan
 #PanelUI-mainView {
   display: flex;
   flex-direction: column;
-}
-
-#app-extension-point-end > #PanelUI-menu-button {
-  padding: 2px 5px;
-}
-#app-extension-point-end > #PanelUI-menu-button .toolbarbutton-text {
-  display: none;
-}
-#app-extension-point-end > #PanelUI-menu-button .toolbarbutton-icon {
-  margin: 0;
 }
 
 #PanelUI-popup > arrowscrollbox > autorepeatbutton {
@@ -515,6 +502,17 @@ toolbarpaletteitem[place="palette"] > toolbaritem > toolbarbutton {
   display: none;
 }
 
+#PanelUI-footer-fxa[fxastatus="error"] > #PanelUI-fxa-status::after {
+  content: url(chrome://browser/skin/warning.svg);
+  filter: drop-shadow(0 1px 0 hsla(206, 50%, 10%, .15));
+  width: 47px;
+  padding-top: 1px;
+  display: block;
+  text-align: center;
+  position: relative;
+  top: 25%;
+}
+
 #PanelUI-fxa-status {
   display: flex;
   flex: 1 1 0%;
@@ -642,8 +640,8 @@ toolbarpaletteitem[place="palette"] > toolbaritem > toolbarbutton {
 
 #PanelUI-footer-fxa[fxastatus="migrate-signup"] > #PanelUI-fxa-status > #PanelUI-fxa-label,
 #PanelUI-footer-fxa[fxastatus="migrate-verify"] > #PanelUI-fxa-status > #PanelUI-fxa-label {
-  list-style-image: url(chrome://browser/skin/warning16.png);
-  -moz-image-region: rect(0, 32px, 16px, 16px);
+  list-style-image: url(chrome://browser/skin/warning.svg);
+  -moz-image-region: auto;
 }
 
 #PanelUI-customize {
@@ -755,16 +753,16 @@ toolbarpaletteitem[place="palette"] > toolbaritem > toolbarbutton {
 }
 
 #PanelUI-footer-fxa[fxastatus="error"] {
-  background-color: rgb(255, 236, 158);
-  border-top: 1px solid rgb(254, 212, 21);
+  background-color: hsla(42, 94%, 88%, 1.0);
+  border-top: 1px solid hsla(42, 94%, 70%, 1.0);
 }
 
 #PanelUI-footer-fxa[fxastatus="error"] > #PanelUI-fxa-status:hover {
-  background-color: #F9E79A;
+  background-color: hsla(42, 94%, 85%, 1.0);
 }
 
 #PanelUI-footer-fxa[fxastatus="error"] > #PanelUI-fxa-status:hover:active {
-  background-color: #ECDB92;
+  background-color: hsla(42, 94%, 82%, 1.0);
   box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
 }
 
@@ -1507,12 +1505,6 @@ menuitem[checked="true"].subviewbutton > .menu-iconic-left {
 
   #PanelUI-footer-fxa[syncstatus="active"] > #PanelUI-fxa-icon {
     list-style-image: url(chrome://browser/skin/syncProgress-horizontalbar@2x.png);
-  }
-
-  #PanelUI-footer-fxa[fxastatus="migrate-signup"] > #PanelUI-fxa-status > #PanelUI-fxa-label,
-  #PanelUI-footer-fxa[fxastatus="migrate-verify"] > #PanelUI-fxa-status > #PanelUI-fxa-label {
-    list-style-image: url(chrome://browser/skin/warning16@2x.png);
-    -moz-image-region: rect(0, 64px, 32px, 32px);
   }
 
   #PanelUI-customize {

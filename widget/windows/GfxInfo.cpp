@@ -978,14 +978,23 @@ GfxInfo::GetGfxDriverInfo()
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_VISTA, IntelGMA950,   V(7,14,10,1504));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_VISTA, IntelGMA3150,  V(7,14,10,2124));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_VISTA, IntelGMAX3000, V(7,15,10,1666));
-    IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_VISTA, IntelGMAX4500HD, V(8,15,10,2202));
+    IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_VISTA, IntelHDGraphicsToIvyBridge, V(8,15,10,2202));
 
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_7, IntelGMA500,   V(5,0,0,2026));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_7, IntelGMA900,   GfxDriverInfo::allDriverVersions);
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_7, IntelGMA950,   V(8,15,10,1930));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_7, IntelGMA3150,  V(8,14,10,2117));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_7, IntelGMAX3000, V(8,15,10,1930));
-    IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_7, IntelGMAX4500HD, V(8,15,10,2202));
+    IMPLEMENT_INTEL_DRIVER_BLOCKLIST_D2D(DRIVER_OS_WINDOWS_7, IntelHDGraphicsToIvyBridge, V(8,15,10,2202));
+
+    /* Disable Direct2D on Intel GMAX4500 devices because of rendering corruption discovered
+     * in bug 1180379. These seems to affect even the most recent drivers. We're black listing
+     * all of the devices to be safe even though we've only confirmed the issue on the G45
+     */
+    APPEND_TO_DRIVER_BLOCKLIST2(DRIVER_OS_ALL,
+        (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(IntelGMAX4500HD),
+      nsIGfxInfo::FEATURE_DIRECT2D, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions);
 
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_XP, IntelGMA500,   V(3,0,20,3200));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_XP, IntelGMA900,   V(6,14,10,4764));
@@ -993,6 +1002,7 @@ GfxInfo::GetGfxDriverInfo()
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_XP, IntelGMA3150,  V(6,14,10,5134));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_XP, IntelGMAX3000, V(6,14,10,5218));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_XP, IntelGMAX4500HD, V(6,14,10,4969));
+    IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_XP, IntelHDGraphicsToIvyBridge, V(6,14,10,4969));
 
     // StrechRect seems to suffer from precision issues which leads to artifacting
     // during content drawing starting with at least version 6.14.10.5082
@@ -1009,6 +1019,7 @@ GfxInfo::GetGfxDriverInfo()
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_VISTA, IntelGMA3150,  V(7,14,10,1910));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_VISTA, IntelGMAX3000, V(7,15,10,1666));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_VISTA, IntelGMAX4500HD, V(7,15,10,1666));
+    IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_VISTA, IntelHDGraphicsToIvyBridge, V(7,15,10,1666));
 
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7, IntelGMA500,   V(5,0,0,2026));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7, IntelGMA900,   GfxDriverInfo::allDriverVersions);
@@ -1016,11 +1027,17 @@ GfxInfo::GetGfxDriverInfo()
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7, IntelGMA3150,  V(8,14,10,1972));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7, IntelGMAX3000, V(7,15,10,1666));
     IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7, IntelGMAX4500HD, V(7,15,10,1666));
+    IMPLEMENT_INTEL_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7, IntelHDGraphicsToIvyBridge, V(7,15,10,1666));
 
     // Bug 1074378
     APPEND_TO_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel),
       (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(IntelGMAX4500HD),
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_EQUAL, V(8,15,10,1749), "8.15.10.2342");
+    APPEND_TO_DRIVER_BLOCKLIST(DRIVER_OS_WINDOWS_7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel),
+      (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(IntelHDGraphicsToIvyBridge),
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_EQUAL, V(8,15,10,1749), "8.15.10.2342");
 
@@ -1253,6 +1270,42 @@ GfxInfo::FindMonitors(JSContext* aCx, JS::HandleObject aOutArray)
     JS_SetElement(aCx, aOutArray, deviceCount++, element);
   }
   return NS_OK;
+}
+
+void
+GfxInfo::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj)
+{
+  JS::Rooted<JSObject*> obj(aCx);
+
+  gfxWindowsPlatform* platform = gfxWindowsPlatform::GetPlatform();
+
+  gfx::FeatureStatus d3d11 = platform->GetD3D11Status();
+  if (!InitFeatureObject(aCx, aObj, "d3d11", d3d11, &obj)) {
+    return;
+  }
+  if (d3d11 == gfx::FeatureStatus::Available) {
+    JS::Rooted<JS::Value> val(aCx, JS::Int32Value(platform->GetD3D11Version()));
+    JS_SetProperty(aCx, obj, "version", val);
+
+    val = JS::BooleanValue(platform->IsWARP());
+    JS_SetProperty(aCx, obj, "warp", val);
+
+    val = JS::BooleanValue(platform->DoesD3D11TextureSharingWork());
+    JS_SetProperty(aCx, obj, "textureSharing", val);
+  }
+
+  gfx::FeatureStatus d2d = platform->GetD2DStatus();
+  if (!InitFeatureObject(aCx, aObj, "d2d", d2d, &obj)) {
+    return;
+  }
+  {
+    const char* version = "1.0";
+    if (platform->GetD2D1Status() == gfx::FeatureStatus::Available)
+      version = "1.1";
+    JS::Rooted<JSString*> str(aCx, JS_NewStringCopyZ(aCx, version));
+    JS::Rooted<JS::Value> val(aCx, JS::StringValue(str));
+    JS_SetProperty(aCx, obj, "version", val);
+  }
 }
 
 #ifdef DEBUG

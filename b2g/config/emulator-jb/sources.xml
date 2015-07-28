@@ -12,15 +12,15 @@
   <!--original fetch url was https://git.mozilla.org/releases-->
   <remote fetch="https://git.mozilla.org/releases" name="mozillaorg"/>
   <!-- B2G specific things. -->
-  <project name="platform_build" path="build" remote="b2g" revision="4efd19d199ae52656604f794c5a77518400220fd">
+  <project name="platform_build" path="build" remote="b2g" revision="660169a3d7e034a892359e39135e8c2785a6ad6f">
     <copyfile dest="Makefile" src="core/root.mk"/>
   </project>
   <project name="rilproxy" path="rilproxy" remote="b2g" revision="5ef30994f4778b4052e58a4383dbe7890048c87e"/>
   <project name="fake-libdvm" path="dalvik" remote="b2g" revision="d50ae982b19f42f0b66d08b9eb306be81687869f"/>
-  <project name="gaia" path="gaia" remote="mozillaorg" revision="a47e0c58dd1340a17be7cc96ccd90fcad15a922b"/>
-  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="c490ae41c67f892232599f4ef049467a922b613e"/>
+  <project name="gaia" path="gaia" remote="mozillaorg" revision="14e32276025b0310d3e89027320cf4b2a24cedfb"/>
+  <project name="gonk-misc" path="gonk-misc" remote="b2g" revision="9f45c1988fe72749f0659409e6e3320fabf7b79a"/>
   <project name="moztt" path="external/moztt" remote="b2g" revision="657894b4a1dc0a926117f4812e0940229f9f676f"/>
-  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="cacd27c973f6c84d13a67adaf5d6fce4ae898e9e"/>
+  <project name="apitrace" path="external/apitrace" remote="apitrace" revision="5bb657ada461be666c35f419dbe072ed2ce632fc"/>
   <project name="valgrind" path="external/valgrind" remote="b2g" revision="daa61633c32b9606f58799a3186395fd2bbb8d8c"/>
   <project name="vex" path="external/VEX" remote="b2g" revision="47f031c320888fe9f3e656602588565b52d43010"/>
   <!-- Stock Android things -->
@@ -30,6 +30,7 @@
   <project groups="linux" name="platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.7-4.6" path="prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.7-4.6" revision="b89fda71fcd0fa0cf969310e75be3ea33e048b44"/>
   <project groups="linux,arm" name="platform/prebuilts/gcc/linux-x86/arm/arm-eabi-4.7" path="prebuilts/gcc/linux-x86/arm/arm-eabi-4.7" revision="2e7d5348f35575870b3c7e567a9a9f6d66f8d6c5"/>
   <project groups="linux,arm" name="platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.7" path="prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.7" revision="1342fd7b4b000ac3e76a5dfe111a0de9d710b4c8"/>
+  <project groups="linux,arm" name="platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9" path="prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9" revision="a70724fae4d4c571e5657340f80a0c130d5283ec"/>
   <project groups="linux,x86" name="platform/prebuilts/gcc/linux-x86/x86/i686-linux-android-4.7" path="prebuilts/gcc/linux-x86/x86/i686-linux-android-4.7" revision="1b26ad444462ccbd97f6319565b4735f7bd779e5"/>
   <project name="device/common" path="device/common" revision="4e1a38704dcfadef60ed2da3cfeba02a56b069d2"/>
   <project name="device/sample" path="device/sample" revision="b045905b46c8b4ee630d0c2aee7db63eaec722d9"/>

@@ -9,6 +9,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/Services.h"
 #include "mozilla/unused.h"
 #include "nsPermissionManager.h"
 #include "nsPermission.h"
@@ -42,6 +43,7 @@
 #include "nsIConsoleService.h"
 #include "nsINavHistoryService.h"
 #include "nsToolkitCompsCID.h"
+#include "nsIObserverService.h"
 
 static nsPermissionManager *gPermissionManager = nullptr;
 
@@ -197,9 +199,9 @@ NS_IMPL_ISUPPORTS(AppClearDataObserver, nsIObserver)
 
 class MOZ_STACK_CLASS UpgradeHostToOriginHelper {
 public:
-  virtual nsresult Insert(nsIPrincipal* aPrincipal, const nsAFlatCString& aType,
-                      uint32_t aPermission, uint32_t aExpireType, int64_t aExpireTime,
-                      int64_t aModificationTime) = 0;
+  virtual nsresult Insert(const nsACString& aOrigin, const nsAFlatCString& aType,
+                          uint32_t aPermission, uint32_t aExpireType, int64_t aExpireTime,
+                          int64_t aModificationTime) = 0;
 };
 
 class UpgradeHostToOriginDBMigration final : public UpgradeHostToOriginHelper {
@@ -210,67 +212,46 @@ public:
     mDBConn->CreateStatement(NS_LITERAL_CSTRING(
       "INSERT INTO moz_hosts_new "
       "(id, origin, type, permission, expireType, expireTime, modificationTime) "
-      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"), getter_AddRefs(mInsertStmt));
-
-    mDBConn->CreateStatement(NS_LITERAL_CSTRING("SELECT id FROM moz_hosts_new WHERE origin = ?1"),
-                             getter_AddRefs(mLookupStmt));
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"), getter_AddRefs(mStmt));
   }
 
   nsresult
-  Insert(nsIPrincipal* aPrincipal, const nsAFlatCString& aType,
+  Insert(const nsACString& aOrigin, const nsAFlatCString& aType,
          uint32_t aPermission, uint32_t aExpireType, int64_t aExpireTime,
          int64_t aModificationTime) final
   {
-    nsAutoCString origin;
-    nsresult rv = aPrincipal->GetOrigin(origin);
+    nsresult rv = mStmt->BindInt64ByIndex(0, *mID);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = mLookupStmt->Reset();
+    rv = mStmt->BindUTF8StringByIndex(1, aOrigin);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = mLookupStmt->BindUTF8StringByIndex(0, origin);
+    rv = mStmt->BindUTF8StringByIndex(2, aType);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // Check to see if the origin already exists in the database
-    bool hasResult = false;
-    if (NS_SUCCEEDED(mLookupStmt->ExecuteStep(&hasResult)) && hasResult) {
-      mLookupStmt->Reset();
-      return NS_OK;
-    }
-
-    rv = mInsertStmt->BindInt64ByIndex(0, *mID);
+    rv = mStmt->BindInt32ByIndex(3, aPermission);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = mInsertStmt->BindUTF8StringByIndex(1, origin);
+    rv = mStmt->BindInt32ByIndex(4, aExpireType);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = mInsertStmt->BindUTF8StringByIndex(2, aType);
+    rv = mStmt->BindInt64ByIndex(5, aExpireTime);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = mInsertStmt->BindInt32ByIndex(3, aPermission);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = mInsertStmt->BindInt32ByIndex(4, aExpireType);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = mInsertStmt->BindInt64ByIndex(5, aExpireTime);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = mInsertStmt->BindInt64ByIndex(6, aModificationTime);
+    rv = mStmt->BindInt64ByIndex(6, aModificationTime);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Increment the working identifier, as we are about to use this one
     (*mID)++;
 
-    rv = mInsertStmt->Execute();
+    rv = mStmt->Execute();
     NS_ENSURE_SUCCESS(rv, rv);
 
     return NS_OK;
   }
 
 private:
-  nsCOMPtr<mozIStorageStatement> mLookupStmt;
-  nsCOMPtr<mozIStorageStatement> mInsertStmt;
+  nsCOMPtr<mozIStorageStatement> mStmt;
   nsCOMPtr<mozIStorageConnection> mDBConn;
   int64_t* mID;
 };
@@ -285,12 +266,15 @@ public:
   {}
 
   nsresult
-  Insert(nsIPrincipal* aPrincipal, const nsAFlatCString& aType,
+  Insert(const nsACString& aOrigin, const nsAFlatCString& aType,
          uint32_t aPermission, uint32_t aExpireType, int64_t aExpireTime,
          int64_t aModificationTime) final
   {
-    // AddInternal won't do anything if the permission already exists
-    return mPm->AddInternal(aPrincipal, aType, aPermission, mID,
+    nsCOMPtr<nsIPrincipal> principal;
+    nsresult rv = GetPrincipalFromOrigin(aOrigin, getter_AddRefs(principal));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    return mPm->AddInternal(principal, aType, aPermission, mID,
                             aExpireType, aExpireTime, aModificationTime,
                             nsPermissionManager::eDontNotify, mOperation);
   }
@@ -331,7 +315,11 @@ UpgradeHostToOriginAndInsert(const nsACString& aHost, const nsAFlatCString& aTyp
     rv = GetPrincipal(uri, aAppId, aIsInBrowserElement, getter_AddRefs(principal));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    return aHelper->Insert(principal, aType, aPermission,
+    nsAutoCString origin;
+    rv = principal->GetOrigin(origin);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    return aHelper->Insert(origin, aType, aPermission,
                            aExpireType, aExpireTime, aModificationTime);
     return NS_OK;
   }
@@ -349,8 +337,22 @@ UpgradeHostToOriginAndInsert(const nsACString& aHost, const nsAFlatCString& aTyp
     rv = histSrv->GetNewQuery(getter_AddRefs(histQuery));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    // We want to only find history items for this particular host, and subdomains
-    rv = histQuery->SetDomain(aHost);
+    // Get the eTLD+1 of the domain
+    nsAutoCString eTLD1;
+    nsCOMPtr<nsIEffectiveTLDService> tldService =
+      do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID);
+    MOZ_ASSERT(tldService); // We should always have a tldService
+    if (tldService) {
+      rv = tldService->GetBaseDomainFromHost(aHost, 0, eTLD1);
+      NS_ENSURE_SUCCESS(rv, rv);
+    } else {
+      // We should never hit this branch, but we produce a fake eTLD1
+      // to avoid crashing in a release build in case we hit this branch
+      eTLD1 = aHost;
+    }
+
+    // We want to only find history items for this particular eTLD+1, and subdomains
+    rv = histQuery->SetDomain(eTLD1);
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = histQuery->SetDomainIsHost(false);
@@ -388,14 +390,15 @@ UpgradeHostToOriginAndInsert(const nsACString& aHost, const nsAFlatCString& aTyp
     rv = histResultContainer->GetChildCount(&childCount);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    nsTHashtable<nsCStringHashKey> insertedOrigins;
     for (uint32_t i = 0; i < childCount; i++) {
       nsCOMPtr<nsINavHistoryResultNode> child;
       histResultContainer->GetChild(i, getter_AddRefs(child));
-      if (NS_FAILED(rv)) continue;
+      if (NS_WARN_IF(NS_FAILED(rv))) continue;
 
       uint32_t type;
       rv = child->GetType(&type);
-      if (NS_FAILED(rv) || type != nsINavHistoryResultNode::RESULT_TYPE_URI) {
+      if (NS_WARN_IF(NS_FAILED(rv)) || type != nsINavHistoryResultNode::RESULT_TYPE_URI) {
         NS_WARNING("Unexpected non-RESULT_TYPE_URI node in "
                    "UpgradeHostToOriginAndInsert()");
         continue;
@@ -403,26 +406,35 @@ UpgradeHostToOriginAndInsert(const nsACString& aHost, const nsAFlatCString& aTyp
 
       nsAutoCString uriSpec;
       rv = child->GetUri(uriSpec);
-      if (NS_FAILED(rv)) continue;
+      if (NS_WARN_IF(NS_FAILED(rv))) continue;
 
       nsCOMPtr<nsIURI> uri;
       rv = NS_NewURI(getter_AddRefs(uri), uriSpec);
-      if (NS_FAILED(rv)) continue;
+      if (NS_WARN_IF(NS_FAILED(rv))) continue;
 
       // Use the provided host - this URI may be for a subdomain, rather than the host we care about.
       rv = uri->SetHost(aHost);
-      if (NS_FAILED(rv)) continue;
+      if (NS_WARN_IF(NS_FAILED(rv))) continue;
 
       // We now have a URI which we can make a nsIPrincipal out of
       nsCOMPtr<nsIPrincipal> principal;
       rv = GetPrincipal(uri, aAppId, aIsInBrowserElement, getter_AddRefs(principal));
-      if (NS_FAILED(rv)) continue;
+      if (NS_WARN_IF(NS_FAILED(rv))) continue;
 
-      // Insert it! (The backend should be able to deal with us inserting the same origin repeatedly)
+      nsAutoCString origin;
+      rv = principal->GetOrigin(origin);
+      if (NS_WARN_IF(NS_FAILED(rv))) continue;
+
+      // Ensure that we don't insert the same origin repeatedly
+      if (insertedOrigins.Contains(origin)) {
+        continue;
+      }
+
       foundHistory = true;
-      rv = aHelper->Insert(principal, aType, aPermission,
+      rv = aHelper->Insert(origin, aType, aPermission,
                            aExpireType, aExpireTime, aModificationTime);
-      NS_WARN_IF(NS_FAILED(rv));
+      NS_WARN_IF(NS_WARN_IF(NS_FAILED(rv)));
+      insertedOrigins.PutEntry(origin);
     }
 
     rv = histResultContainer->SetContainerOpen(false);
@@ -440,7 +452,11 @@ UpgradeHostToOriginAndInsert(const nsACString& aHost, const nsAFlatCString& aTyp
       rv = GetPrincipal(uri, aAppId, aIsInBrowserElement, getter_AddRefs(principal));
       NS_ENSURE_SUCCESS(rv, rv);
 
-      aHelper->Insert(principal, aType, aPermission,
+      nsAutoCString origin;
+      rv = principal->GetOrigin(origin);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      aHelper->Insert(origin, aType, aPermission,
                       aExpireType, aExpireTime, aModificationTime);
     }
     rv = NS_NewURI(getter_AddRefs(uri), NS_LITERAL_CSTRING("https://") + aHost);
@@ -449,7 +465,11 @@ UpgradeHostToOriginAndInsert(const nsACString& aHost, const nsAFlatCString& aTyp
       rv = GetPrincipal(uri, aAppId, aIsInBrowserElement, getter_AddRefs(principal));
       NS_ENSURE_SUCCESS(rv, rv);
 
-      aHelper->Insert(principal, aType, aPermission,
+      nsAutoCString origin;
+      rv = principal->GetOrigin(origin);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      aHelper->Insert(origin, aType, aPermission,
                       aExpireType, aExpireTime, aModificationTime);
     }
   }
@@ -585,7 +605,8 @@ NS_IMETHODIMP DeleteFromMozHostListener::HandleCompletion(uint16_t aReason)
 /* static */ void
 nsPermissionManager::AppClearDataObserverInit()
 {
-  nsCOMPtr<nsIObserverService> observerService = do_GetService("@mozilla.org/observer-service;1");
+  nsCOMPtr<nsIObserverService> observerService =
+    mozilla::services::GetObserverService();
   observerService->AddObserver(new AppClearDataObserver(), "webapps-clear-data", /* holdsWeak= */ false);
 }
 
@@ -593,7 +614,7 @@ nsPermissionManager::AppClearDataObserverInit()
 // nsPermissionManager Implementation
 
 #define PERMISSIONS_FILE_NAME "permissions.sqlite"
-#define HOSTS_SCHEMA_VERSION 5
+#define HOSTS_SCHEMA_VERSION 7
 
 #define HOSTPERM_FILE_NAME "hostperm.1"
 
@@ -647,22 +668,20 @@ nsPermissionManager::GetXPCOMSingleton()
 nsresult
 nsPermissionManager::Init()
 {
-  nsresult rv;
-
   // If the 'permissions.memory_only' pref is set to true, then don't write any
   // permission settings to disk, but keep them in a memory-only database.
   mMemoryOnlyDB = mozilla::Preferences::GetBool("permissions.memory_only", false);
 
-  mObserverService = do_GetService("@mozilla.org/observer-service;1", &rv);
-  if (NS_SUCCEEDED(rv)) {
-    mObserverService->AddObserver(this, "profile-before-change", true);
-    mObserverService->AddObserver(this, "profile-do-change", true);
-    mObserverService->AddObserver(this, "xpcom-shutdown", true);
-  }
-
   if (IsChildProcess()) {
     // Stop here; we don't need the DB in the child process
     return FetchPermissions();
+  }
+
+  nsCOMPtr<nsIObserverService> observerService =
+    mozilla::services::GetObserverService();
+  if (observerService) {
+    observerService->AddObserver(this, "profile-before-change", true);
+    observerService->AddObserver(this, "profile-do-change", true);
   }
 
   // ignore failure here, since it's non-fatal (we can run fine without
@@ -769,11 +788,14 @@ nsPermissionManager::InitDB(bool aRemoveFile)
   LogToConsole(NS_LITERAL_STRING("Get a connection to permissions.sqlite."));
 
   bool tableExists = false;
-  mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts"), &tableExists);
+  mDBConn->TableExists(NS_LITERAL_CSTRING("moz_perms"), &tableExists);
+  if (!tableExists) {
+    mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts"), &tableExists);
+  }
   if (!tableExists) {
     rv = CreateTable();
     NS_ENSURE_SUCCESS(rv, rv);
-    LogToConsole(NS_LITERAL_STRING("DB table(moz_hosts) is created!"));
+    LogToConsole(NS_LITERAL_STRING("DB table(moz_perms) is created!"));
   } else {
     // table already exists; check the schema version before reading
     int32_t dbSchemaVersion;
@@ -814,7 +836,7 @@ nsPermissionManager::InitDB(bool aRemoveFile)
               "ALTER TABLE moz_hosts ADD isInBrowserElement INTEGER"));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        rv = mDBConn->SetSchemaVersion(HOSTS_SCHEMA_VERSION);
+        rv = mDBConn->SetSchemaVersion(3);
         NS_ENSURE_SUCCESS(rv, rv);
       }
 
@@ -831,92 +853,289 @@ nsPermissionManager::InitDB(bool aRemoveFile)
         // now() would mean, eg, that doing "remove all from the last hour"
         // within the first hour after migration would remove all permissions.
 
-        rv = mDBConn->SetSchemaVersion(HOSTS_SCHEMA_VERSION);
+        rv = mDBConn->SetSchemaVersion(4);
         NS_ENSURE_SUCCESS(rv, rv);
       }
 
       // fall through to the next upgrade
 
-    // Version 4->5 is the merging of host, appId, and isInBrowserElement into origin
-    case 4:
-      {
-        bool tableExists = false;
-        mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts_new"), &tableExists);
-        if (tableExists) {
-          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("DROP TABLE moz_hosts_new"));
+    // In version 5, host appId, and isInBrowserElement were merged into a
+    // single origin entry
+    //
+    // In version 6, the tables were renamed for backwards compatability reasons
+    // with version 4 and earlier.
+    //
+    // In version 7, a bug in the migration used for version 4->5 was discovered
+    // which could have triggered data-loss. Because of that, all users with a
+    // version 4, 5, or 6 database will be re-migrated from the backup database.
+    // (bug 1186034). This migration bug is not present after bug 1185340, and the
+    // re-migration ensures that all users have the fix.
+    case 5:
+      // This branch could also be reached via dbSchemaVersion == 3, in which case
+      // we want to fall through to the dbSchemaVersion == 4 case.
+      // The easiest way to do that is to perform this extra check here to make
+      // sure that we didn't get here via a fallthrough from v3
+      if (dbSchemaVersion == 5) {
+        // In version 5, the backup database is named moz_hosts_v4. We perform
+        // the version 5->6 migration to get the tables to have consistent
+        // naming conventions.
+
+        // Version 5->6 is the renaming of moz_hosts to moz_perms, and
+        // moz_hosts_v4 to moz_hosts (bug 1185343)
+        //
+        // In version 5, we performed the modifications to the permissions
+        // database in place, this meant that if you upgraded to a version which
+        // used V5, and then downgraded to a version which used v4 or earlier,
+        // the fallback path would drop the table, and your permissions data
+        // would be lost. This migration undoes that mistake, by restoring the
+        // old moz_hosts table (if it was present), and instead using the new
+        // table moz_perms for the new permissions schema.
+        //
+        // NOTE: If you downgrade, store new permissions, and then upgrade
+        // again, these new permissions won't be migrated or reflected in the
+        // updated database. This migration only occurs once, as if moz_perms
+        // exists, it will skip creating it. In addition, permissions added
+        // after the migration will not be visible in previous versions of
+        // firefox.
+
+        bool permsTableExists = false;
+        mDBConn->TableExists(NS_LITERAL_CSTRING("moz_perms"), &permsTableExists);
+        if (!permsTableExists) {
+          // Move the upgraded database to moz_perms
+          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+                 "ALTER TABLE moz_hosts RENAME TO moz_perms"));
+          NS_ENSURE_SUCCESS(rv, rv);
+        } else {
+          NS_WARNING("moz_hosts was not renamed to moz_perms, "
+                     "as a moz_perms table already exists");
+
+          // In the situation where a moz_perms table already exists, but the
+          // schema is lower than 6, a migration has already previously occured
+          // to V6, but a downgrade has caused the moz_hosts table to be
+          // dropped. This should only occur in the case of a downgrade to a V5
+          // database, which was only present in a few day's nightlies. As that
+          // version was likely used only on a temporary basis, we assume that
+          // the database from the previous V6 has the permissions which the
+          // user actually wants to use. We have to get rid of moz_hosts such
+          // that moz_hosts_v4 can be moved into its place if it exists.
+          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("DROP TABLE moz_hosts"));
           NS_ENSURE_SUCCESS(rv, rv);
         }
-        rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-          "CREATE TABLE moz_hosts_new ("
-            " id INTEGER PRIMARY KEY"
-            ",origin TEXT"
-            ",type TEXT"
-            ",permission INTEGER"
-            ",expireType INTEGER"
-            ",expireTime INTEGER"
-            ",modificationTime INTEGER"
-          ")"));
-        NS_ENSURE_SUCCESS(rv, rv);
 
-        nsCOMPtr<mozIStorageStatement> stmt;
-        rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
-          "SELECT host, type, permission, expireType, expireTime, modificationTime, appId, isInBrowserElement "
-          "FROM moz_hosts"), getter_AddRefs(stmt));
-        NS_ENSURE_SUCCESS(rv, rv);
+#ifdef DEBUG
+        // The moz_hosts table shouldn't exist anymore
+        bool hostsTableExists = false;
+        mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts"), &hostsTableExists);
+        MOZ_ASSERT(!hostsTableExists);
+#endif
 
-        nsCOMPtr<mozIStoragePendingStatement> pending;
-
-        int64_t id = 0;
-        nsAutoCString host, type;
-        uint32_t permission;
-        uint32_t expireType;
-        int64_t expireTime;
-        int64_t modificationTime;
-        uint32_t appId;
-        bool isInBrowserElement;
-        bool hasResult;
-
-        while (NS_SUCCEEDED(stmt->ExecuteStep(&hasResult)) && hasResult) {
-          // Read in the old row
-          rv = stmt->GetUTF8String(0, host);
-          if (NS_FAILED(rv)) {
-            continue;
-          }
-          rv = stmt->GetUTF8String(1, type);
-          if (NS_FAILED(rv)) {
-            continue;
-          }
-          permission = stmt->AsInt32(2);
-          expireType = stmt->AsInt32(3);
-          expireTime = stmt->AsInt64(4);
-          modificationTime = stmt->AsInt64(5);
-          if (stmt->AsInt64(6) < 0) {
-            continue;
-          }
-          appId = static_cast<uint32_t>(stmt->AsInt64(6));
-          isInBrowserElement = static_cast<bool>(stmt->AsInt32(7));
-
-          UpgradeHostToOriginDBMigration upHelper(mDBConn, &id);
-          rv = UpgradeHostToOriginAndInsert(host, type, permission,
-                                            expireType, expireTime,
-                                            modificationTime, appId,
-                                            isInBrowserElement,
-                                            &upHelper);
-          if (NS_FAILED(rv)) {
-            NS_WARNING("Unexpected failure when upgrading migrating permission from host to origin");
-          }
+        // Rename moz_hosts_v4 back to it's original location, if it exists
+        bool v4TableExists = false;
+        mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts_v4"), &v4TableExists);
+        if (v4TableExists) {
+          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+                 "ALTER TABLE moz_hosts_v4 RENAME TO moz_hosts"));
+          NS_ENSURE_SUCCESS(rv, rv);
         }
 
-        // We rename the old table to moz_hosts_v4 instead of dropping it, such that if
-        // we discover that there was a problem with our migration code in the future, we have information
-        // to roll-back with.
-        rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("ALTER TABLE moz_hosts RENAME TO moz_hosts_v4"));
+        rv = mDBConn->SetSchemaVersion(6);
         NS_ENSURE_SUCCESS(rv, rv);
+      }
 
-        rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("ALTER TABLE moz_hosts_new RENAME TO moz_hosts"));
-        NS_ENSURE_SUCCESS(rv, rv);
+      // fall through to the next upgrade
 
-        rv = mDBConn->SetSchemaVersion(HOSTS_SCHEMA_VERSION);
+    // At this point, the version 5 table has been migrated to a version 6 table
+    // We are guaranteed to have at least one of moz_hosts and moz_perms. If
+    // we have moz_hosts, we will migrate moz_hosts into moz_perms (even if
+    // we already have a moz_perms, as we need a re-migration due to bug 1186034).
+    //
+    // After this migration, we are guaranteed to have both a moz_hosts (for backwards
+    // compatability), and a moz_perms table. The moz_hosts table will have a v4 schema,
+    // and the moz_perms table will have a v6 schema.
+    case 4:
+    case 6:
+      {
+        bool hostsTableExists = false;
+        mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts"), &hostsTableExists);
+        if (hostsTableExists) {
+          bool migrationError = false;
+
+          // Both versions 4 and 6 have a version 4 formatted hosts table named
+          // moz_hosts. We can migrate this table to our version 7 table moz_perms.
+          // If moz_perms is present, then we can use it as a basis for comparison.
+
+          rv = mDBConn->BeginTransaction();
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          bool tableExists = false;
+          mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts_new"), &tableExists);
+          if (tableExists) {
+            NS_WARNING("The temporary database moz_hosts_new already exists, dropping it.");
+            rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("DROP TABLE moz_hosts_new"));
+            NS_ENSURE_SUCCESS(rv, rv);
+          }
+          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+            "CREATE TABLE moz_hosts_new ("
+              " id INTEGER PRIMARY KEY"
+              ",origin TEXT"
+              ",type TEXT"
+              ",permission INTEGER"
+              ",expireType INTEGER"
+              ",expireTime INTEGER"
+              ",modificationTime INTEGER"
+            ")"));
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          nsCOMPtr<mozIStorageStatement> stmt;
+          rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
+            "SELECT host, type, permission, expireType, expireTime, "
+            "modificationTime, appId, isInBrowserElement FROM moz_hosts"),
+             getter_AddRefs(stmt));
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          int64_t id = 0;
+          nsAutoCString host, type;
+          uint32_t permission;
+          uint32_t expireType;
+          int64_t expireTime;
+          int64_t modificationTime;
+          uint32_t appId;
+          bool isInBrowserElement;
+          bool hasResult;
+
+          while (NS_SUCCEEDED(stmt->ExecuteStep(&hasResult)) && hasResult) {
+            // Read in the old row
+            rv = stmt->GetUTF8String(0, host);
+            if (NS_WARN_IF(NS_FAILED(rv))) {
+              migrationError = true;
+              continue;
+            }
+            rv = stmt->GetUTF8String(1, type);
+            if (NS_WARN_IF(NS_FAILED(rv))) {
+              migrationError = true;
+              continue;
+            }
+            permission = stmt->AsInt32(2);
+            expireType = stmt->AsInt32(3);
+            expireTime = stmt->AsInt64(4);
+            modificationTime = stmt->AsInt64(5);
+            if (NS_WARN_IF(stmt->AsInt64(6) < 0)) {
+              migrationError = true;
+              continue;
+            }
+            appId = static_cast<uint32_t>(stmt->AsInt64(6));
+            isInBrowserElement = static_cast<bool>(stmt->AsInt32(7));
+
+            // Perform the meat of the migration by deferring to the
+            // UpgradeHostToOriginAndInsert function.
+            UpgradeHostToOriginDBMigration upHelper(mDBConn, &id);
+            rv = UpgradeHostToOriginAndInsert(host, type, permission,
+                                              expireType, expireTime,
+                                              modificationTime, appId,
+                                              isInBrowserElement,
+                                              &upHelper);
+            if (NS_FAILED(rv)) {
+              NS_WARNING("Unexpected failure when upgrading migrating permission "
+                         "from host to origin");
+              migrationError = true;
+            }
+          }
+
+          // We don't drop the moz_hosts table such that it is avaliable for
+          // backwards-compatability and for future migrations in case of
+          // migration errors in the current code.
+          // Create a marker empty table which will indicate that the moz_hosts
+          // table is intended to act as a backup. If this table is not present,
+          // then the moz_hosts table was created as a random empty table.
+          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+            "CREATE TABLE moz_hosts_is_backup (dummy INTEGER PRIMARY KEY)"));
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          bool permsTableExists = false;
+          mDBConn->TableExists(NS_LITERAL_CSTRING("moz_perms"), &permsTableExists);
+          if (permsTableExists) {
+            // The user already had a moz_perms table, and we are performing a
+            // re-migration. We count the rows in the old table for telemetry,
+            // and then back up their old database as moz_perms_v6
+
+            nsCOMPtr<mozIStorageStatement> countStmt;
+            mDBConn->CreateStatement(NS_LITERAL_CSTRING("SELECT COUNT(*) FROM moz_perms"),
+                                     getter_AddRefs(countStmt));
+            bool hasResult = false;
+            if (NS_SUCCEEDED(rv) &&
+                NS_SUCCEEDED(countStmt->ExecuteStep(&hasResult)) &&
+                hasResult) {
+              int32_t permsCount = countStmt->AsInt32(0);
+
+              // The id variable contains the number of rows inserted into the
+              // moz_hosts_new table (as one ID was used per entry)
+              uint32_t telemetryValue;
+              if (permsCount > id) {
+                telemetryValue = 3; // NEW > OLD
+              } else if (permsCount == id) {
+                telemetryValue = 2; // NEW == OLD
+              } else if (permsCount == 0) {
+                telemetryValue = 0; // NEW = 0
+              } else {
+                telemetryValue = 1; // NEW < OLD
+              }
+
+              // Report the telemetry value to telemetry
+              mozilla::Telemetry::Accumulate(
+                  mozilla::Telemetry::PERMISSIONS_REMIGRATION_COMPARISON,
+                  telemetryValue);
+            } else {
+              NS_WARNING("Could not count the rows in moz_perms");
+            }
+
+            // Back up the old moz_perms database as moz_perms_v6 before we
+            // move the new table into its position
+            rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+              "ALTER TABLE moz_perms RENAME TO moz_perms_v6"));
+            NS_ENSURE_SUCCESS(rv, rv);
+          }
+
+          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+            "ALTER TABLE moz_hosts_new RENAME TO moz_perms"));
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          rv = mDBConn->CommitTransaction();
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          mozilla::Telemetry::Accumulate(mozilla::Telemetry::PERMISSIONS_MIGRATION_7_ERROR,
+                                         NS_WARN_IF(migrationError));
+        } else {
+          // We don't have a moz_hosts table, so we create one for downgrading purposes.
+          // This table is empty.
+          rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+            "CREATE TABLE moz_hosts ("
+              " id INTEGER PRIMARY KEY"
+              ",host TEXT"
+              ",type TEXT"
+              ",permission INTEGER"
+              ",expireType INTEGER"
+              ",expireTime INTEGER"
+              ",modificationTime INTEGER"
+              ",appId INTEGER"
+              ",isInBrowserElement INTEGER"
+            ")"));
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          // We are guaranteed to have a moz_perms table at this point.
+        }
+
+#ifdef DEBUG
+        {
+          // At this point, both the moz_hosts and moz_perms tables should exist
+          bool hostsTableExists = false;
+          bool permsTableExists = false;
+          mDBConn->TableExists(NS_LITERAL_CSTRING("moz_hosts"), &hostsTableExists);
+          mDBConn->TableExists(NS_LITERAL_CSTRING("moz_perms"), &permsTableExists);
+          MOZ_ASSERT(hostsTableExists && permsTableExists);
+        }
+#endif
+
+        rv = mDBConn->SetSchemaVersion(7);
         NS_ENSURE_SUCCESS(rv, rv);
       }
 
@@ -935,13 +1154,14 @@ nsPermissionManager::InitDB(bool aRemoveFile)
         // check if all the expected columns exist
         nsCOMPtr<mozIStorageStatement> stmt;
         rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
-          "SELECT origin, type, permission, expireType, expireTime, modificationTime FROM moz_hosts"),
-          getter_AddRefs(stmt));
+          "SELECT origin, type, permission, expireType, expireTime, "
+          "modificationTime FROM moz_perms"),
+           getter_AddRefs(stmt));
         if (NS_SUCCEEDED(rv))
           break;
 
         // our columns aren't there - drop the table!
-        rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("DROP TABLE moz_hosts"));
+        rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("DROP TABLE moz_perms"));
         NS_ENSURE_SUCCESS(rv, rv);
 
         rv = CreateTable();
@@ -953,18 +1173,18 @@ nsPermissionManager::InitDB(bool aRemoveFile)
 
   // cache frequently used statements (for insertion, deletion, and updating)
   rv = mDBConn->CreateAsyncStatement(NS_LITERAL_CSTRING(
-    "INSERT INTO moz_hosts "
+    "INSERT INTO moz_perms "
     "(id, origin, type, permission, expireType, expireTime, modificationTime) "
     "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"), getter_AddRefs(mStmtInsert));
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = mDBConn->CreateAsyncStatement(NS_LITERAL_CSTRING(
-    "DELETE FROM moz_hosts "
+    "DELETE FROM moz_perms "
     "WHERE id = ?1"), getter_AddRefs(mStmtDelete));
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = mDBConn->CreateAsyncStatement(NS_LITERAL_CSTRING(
-    "UPDATE moz_hosts "
+    "UPDATE moz_perms "
     "SET permission = ?2, expireType= ?3, expireTime = ?4, modificationTime = ?5 WHERE id = ?1"),
     getter_AddRefs(mStmtUpdate));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -978,7 +1198,7 @@ nsPermissionManager::InitDB(bool aRemoveFile)
   return Import();
 }
 
-// sets the schema version and creates the moz_hosts table.
+// sets the schema version and creates the moz_perms table.
 nsresult
 nsPermissionManager::CreateTable()
 {
@@ -988,9 +1208,9 @@ nsPermissionManager::CreateTable()
 
   // create the table
   // SQL also lives in automation.py.in. If you change this SQL change that
-  // one too.
-  return mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-    "CREATE TABLE moz_hosts ("
+  // one too
+  rv = mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "CREATE TABLE moz_perms ("
       " id INTEGER PRIMARY KEY"
       ",origin TEXT"
       ",type TEXT"
@@ -998,6 +1218,22 @@ nsPermissionManager::CreateTable()
       ",expireType INTEGER"
       ",expireTime INTEGER"
       ",modificationTime INTEGER"
+    ")"));
+  if (NS_FAILED(rv)) return rv;
+
+  // We also create a legacy V4 table, for backwards compatability,
+  // and to ensure that downgrades don't trigger a schema version change.
+  return mDBConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "CREATE TABLE moz_hosts ("
+      " id INTEGER PRIMARY KEY"
+      ",host TEXT"
+      ",type TEXT"
+      ",permission INTEGER"
+      ",expireType INTEGER"
+      ",expireTime INTEGER"
+      ",modificationTime INTEGER"
+      ",appId INTEGER"
+      ",isInBrowserElement INTEGER"
     ")"));
 }
 
@@ -1449,7 +1685,7 @@ nsPermissionManager::RemoveAllInternal(bool aNotifyObservers)
     nsCOMPtr<mozIStorageAsyncStatement> removeStmt;
     nsresult rv = mDBConn->
       CreateAsyncStatement(NS_LITERAL_CSTRING(
-         "DELETE FROM moz_hosts"
+         "DELETE FROM moz_perms"
       ), getter_AddRefs(removeStmt));
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     if (!removeStmt) {
@@ -1762,11 +1998,6 @@ NS_IMETHODIMP nsPermissionManager::GetEnumerator(nsISimpleEnumerator **aEnum)
 
 NS_IMETHODIMP nsPermissionManager::Observe(nsISupports *aSubject, const char *aTopic, const char16_t *someData)
 {
-  if (!nsCRT::strcmp(aTopic, "xpcom-shutdown")) {
-    mObserverService = nullptr;
-    return NS_OK;
-  }
-
   ENSURE_NOT_CHILD_PROCESS;
 
   if (!nsCRT::strcmp(aTopic, "profile-before-change")) {
@@ -1859,7 +2090,7 @@ nsPermissionManager::RemovePermissionsForApp(uint32_t aAppId, bool aBrowserOnly)
   // it is dangerous.
 
   nsAutoCString sql;
-  sql.AppendLiteral("DELETE FROM moz_hosts WHERE appId=");
+  sql.AppendLiteral("DELETE FROM moz_perms WHERE appId=");
   sql.AppendInt(aAppId);
 
   if (aBrowserOnly) {
@@ -2050,10 +2281,12 @@ void
 nsPermissionManager::NotifyObservers(nsIPermission   *aPermission,
                                      const char16_t *aData)
 {
-  if (mObserverService)
-    mObserverService->NotifyObservers(aPermission,
-                                      kPermissionChangeNotification,
-                                      aData);
+  nsCOMPtr<nsIObserverService> observerService =
+    mozilla::services::GetObserverService();
+  if (observerService)
+    observerService->NotifyObservers(aPermission,
+                                     kPermissionChangeNotification,
+                                     aData);
 }
 
 nsresult
@@ -2068,7 +2301,7 @@ nsPermissionManager::Read()
     // this deletion has its own scope so the write lock is released when done.
     nsCOMPtr<mozIStorageStatement> stmtDeleteExpired;
     rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
-          "DELETE FROM moz_hosts WHERE expireType = ?1 AND expireTime <= ?2"),
+          "DELETE FROM moz_perms WHERE expireType = ?1 AND expireTime <= ?2"),
           getter_AddRefs(stmtDeleteExpired));
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2086,7 +2319,7 @@ nsPermissionManager::Read()
   nsCOMPtr<mozIStorageStatement> stmt;
   rv = mDBConn->CreateStatement(NS_LITERAL_CSTRING(
     "SELECT id, origin, type, permission, expireType, expireTime, modificationTime "
-    "FROM moz_hosts"), getter_AddRefs(stmt));
+    "FROM moz_perms"), getter_AddRefs(stmt));
   NS_ENSURE_SUCCESS(rv, rv);
 
   int64_t id;

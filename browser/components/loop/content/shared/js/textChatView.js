@@ -149,12 +149,12 @@ loop.shared.views.chat = (function(mozL10n) {
       /* Keep track of the last printed timestamp. */
       var lastTimestamp = 0;
 
-      if (!this.props.messageList.length) {
-        return null;
-      }
+      var entriesClasses = React.addons.classSet({
+        "text-chat-entries": true
+      });
 
       return (
-        React.createElement("div", {className: "text-chat-entries"}, 
+        React.createElement("div", {className: entriesClasses}, 
           React.createElement("div", {className: "text-chat-scroller"}, 
             
               this.props.messageList.map(function(entry, i) {
@@ -379,13 +379,10 @@ loop.shared.views.chat = (function(mozL10n) {
         hasNonSpecialMessages = !!messageList.length;
       }
 
-      if (!this.state.textChatEnabled && !messageList.length) {
-        return null;
-      }
-
       var textChatViewClasses = React.addons.classSet({
         "text-chat-view": true,
-        "text-chat-disabled": !this.state.textChatEnabled
+        "text-chat-disabled": !this.state.textChatEnabled,
+        "text-chat-entries-empty": !messageList.length
       });
 
       return (

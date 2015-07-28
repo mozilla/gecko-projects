@@ -632,8 +632,8 @@ nsWindow::Destroy(void)
 
     NativeShow(false);
 
-    if (mIMModule) {
-        mIMModule->OnDestroyWindow(this);
+    if (mIMContext) {
+        mIMContext->OnDestroyWindow(this);
     }
 
     // make sure that we remove ourself as the focus window
@@ -1367,8 +1367,8 @@ nsWindow::SetFocus(bool aRaise)
     // Set this window to be the focused child window
     gFocusWindow = this;
 
-    if (mIMModule) {
-        mIMModule->OnFocusWindow(this);
+    if (mIMContext) {
+        mIMContext->OnFocusWindow(this);
     }
 
     LOGFOCUS(("  widget now has focus in SetFocus() [%p]\n",
@@ -2793,8 +2793,8 @@ nsWindow::OnContainerFocusOutEvent(GdkEventFocus *aEvent)
 
     if (gFocusWindow) {
         nsRefPtr<nsWindow> kungFuDeathGrip = gFocusWindow;
-        if (gFocusWindow->mIMModule) {
-            gFocusWindow->mIMModule->OnBlurWindow(gFocusWindow);
+        if (gFocusWindow->mIMContext) {
+            gFocusWindow->mIMContext->OnBlurWindow(gFocusWindow);
         }
         gFocusWindow = nullptr;
     }
@@ -2857,9 +2857,9 @@ nsWindow::OnKeyPressEvent(GdkEventKey *aEvent)
     // if we are in the middle of composing text, XIM gets to see it
     // before mozilla does.
     bool IMEWasEnabled = false;
-    if (mIMModule) {
-        IMEWasEnabled = mIMModule->IsEnabled();
-        if (mIMModule->OnKeyEvent(this, aEvent)) {
+    if (mIMContext) {
+        IMEWasEnabled = mIMContext->IsEnabled();
+        if (mIMContext->OnKeyEvent(this, aEvent)) {
             return TRUE;
         }
     }
@@ -2888,10 +2888,10 @@ nsWindow::OnKeyPressEvent(GdkEventKey *aEvent)
     // If a keydown event handler causes to enable IME, i.e., it moves
     // focus from IME unusable content to IME usable editor, we should
     // send the native key event to IME for the first input on the editor.
-    if (!IMEWasEnabled && mIMModule && mIMModule->IsEnabled()) {
+    if (!IMEWasEnabled && mIMContext && mIMContext->IsEnabled()) {
         // Notice our keydown event was already dispatched.  This prevents
         // unnecessary DOM keydown event in the editor.
-        if (mIMModule->OnKeyEvent(this, aEvent, true)) {
+        if (mIMContext->OnKeyEvent(this, aEvent, true)) {
             return TRUE;
         }
     }
@@ -2989,7 +2989,7 @@ nsWindow::OnKeyReleaseEvent(GdkEventKey *aEvent)
 {
     LOGFOCUS(("OnKeyReleaseEvent [%p]\n", (void *)this));
 
-    if (mIMModule && mIMModule->OnKeyEvent(this, aEvent)) {
+    if (mIMContext && mIMContext->OnKeyEvent(this, aEvent)) {
         return TRUE;
     }
 
@@ -3660,12 +3660,12 @@ nsWindow::Create(nsIWidget        *aParent,
         // We create input contexts for all containers, except for
         // toplevel popup windows
         if (mWindowType != eWindowType_popup) {
-            mIMModule = new nsGtkIMModule(this);
+            mIMContext = new IMContextWrapper(this);
         }
-    } else if (!mIMModule) {
+    } else if (!mIMContext) {
         nsWindow *container = GetContainerWindow();
         if (container) {
-            mIMModule = container->mIMModule;
+            mIMContext = container->mIMContext;
         }
     }
 
@@ -4609,6 +4609,117 @@ nsWindow::ConvertBorderStyles(nsBorderStyle aStyle)
         w |= GDK_DECOR_MAXIMIZE;
 
     return w;
+}
+
+class FullscreenTransitionWindow final : public nsISupports
+{
+public:
+    NS_DECL_ISUPPORTS
+
+    explicit FullscreenTransitionWindow(GtkWidget* aWidget);
+
+    GtkWidget* mWindow;
+
+private:
+    ~FullscreenTransitionWindow();
+};
+
+NS_IMPL_ISUPPORTS0(FullscreenTransitionWindow)
+
+FullscreenTransitionWindow::FullscreenTransitionWindow(GtkWidget* aWidget)
+{
+    mWindow = gtk_window_new(GTK_WINDOW_POPUP);
+    GtkWindow* gtkWin = GTK_WINDOW(mWindow);
+
+    gtk_window_set_type_hint(gtkWin, GDK_WINDOW_TYPE_HINT_SPLASHSCREEN);
+    gtk_window_set_transient_for(gtkWin, GTK_WINDOW(aWidget));
+    gtk_window_set_decorated(gtkWin, false);
+
+    GdkScreen* screen = gtk_widget_get_screen(aWidget);
+    gint width = gdk_screen_get_width(screen);
+    gint height = gdk_screen_get_height(screen);
+    gtk_window_set_screen(gtkWin, screen);
+    gtk_window_move(gtkWin, 0, 0);
+    gtk_window_resize(gtkWin, width, height);
+
+    GdkColor bgColor;
+    bgColor.red = bgColor.green = bgColor.blue = 0;
+    gtk_widget_modify_bg(mWindow, GTK_STATE_NORMAL, &bgColor);
+
+    gtk_window_set_opacity(gtkWin, 0.0);
+    gtk_widget_show(mWindow);
+}
+
+FullscreenTransitionWindow::~FullscreenTransitionWindow()
+{
+    gtk_widget_destroy(mWindow);
+}
+
+class FullscreenTransitionData
+{
+public:
+    FullscreenTransitionData(nsIWidget::FullscreenTransitionStage aStage,
+                             uint16_t aDuration, nsIRunnable* aCallback,
+                             FullscreenTransitionWindow* aWindow)
+        : mStage(aStage)
+        , mStep(0)
+        , mTotalSteps(aDuration / sInterval)
+        , mCallback(aCallback)
+        , mWindow(aWindow) { }
+
+    static const guint sInterval = 10; // 10ms
+    static gboolean TimeoutCallback(gpointer aData);
+
+private:
+    nsIWidget::FullscreenTransitionStage mStage;
+    uint16_t mStep, mTotalSteps;
+    nsCOMPtr<nsIRunnable> mCallback;
+    nsRefPtr<FullscreenTransitionWindow> mWindow;
+};
+
+/* static */ gboolean
+FullscreenTransitionData::TimeoutCallback(gpointer aData)
+{
+    auto data = static_cast<FullscreenTransitionData*>(aData);
+    data->mStep++;
+    gdouble opacity = data->mStep / gdouble(data->mTotalSteps);
+    if (data->mStage == nsIWidget::eAfterFullscreenToggle) {
+        opacity = 1.0 - opacity;
+    }
+    gtk_window_set_opacity(GTK_WINDOW(data->mWindow->mWindow), opacity);
+
+    if (data->mStep != data->mTotalSteps) {
+        return TRUE;
+    }
+    NS_DispatchToMainThread(data->mCallback.forget());
+    delete data;
+    return FALSE;
+}
+
+/* virtual */ bool
+nsWindow::PrepareForFullscreenTransition(nsISupports** aData)
+{
+    GdkScreen* screen = gtk_widget_get_screen(mShell);
+    if (!gdk_screen_is_composited(screen)) {
+        return false;
+    }
+    *aData = do_AddRef(new FullscreenTransitionWindow(mShell)).take();
+    return true;
+}
+
+/* virtual */ void
+nsWindow::PerformFullscreenTransition(FullscreenTransitionStage aStage,
+                                      uint16_t aDuration, nsISupports* aData,
+                                      nsIRunnable* aCallback)
+{
+    auto data = static_cast<FullscreenTransitionWindow*>(aData);
+    // This will be released at the end of the last timeout callback for it.
+    auto transitionData = new FullscreenTransitionData(aStage, aDuration,
+                                                       aCallback, data);
+    g_timeout_add_full(G_PRIORITY_HIGH,
+                       FullscreenTransitionData::sInterval,
+                       FullscreenTransitionData::TimeoutCallback,
+                       transitionData, nullptr);
 }
 
 NS_IMETHODIMP
@@ -5859,27 +5970,27 @@ nsChildWindow::~nsChildWindow()
 nsresult
 nsWindow::NotifyIMEInternal(const IMENotification& aIMENotification)
 {
-    if (MOZ_UNLIKELY(!mIMModule)) {
+    if (MOZ_UNLIKELY(!mIMContext)) {
         return NS_ERROR_NOT_AVAILABLE;
     }
     switch (aIMENotification.mMessage) {
         case REQUEST_TO_COMMIT_COMPOSITION:
         case REQUEST_TO_CANCEL_COMPOSITION:
-            return mIMModule->EndIMEComposition(this);
+            return mIMContext->EndIMEComposition(this);
         case NOTIFY_IME_OF_FOCUS:
-            mIMModule->OnFocusChangeInGecko(true);
+            mIMContext->OnFocusChangeInGecko(true);
             return NS_OK;
         case NOTIFY_IME_OF_BLUR:
-            mIMModule->OnFocusChangeInGecko(false);
+            mIMContext->OnFocusChangeInGecko(false);
             return NS_OK;
         case NOTIFY_IME_OF_POSITION_CHANGE:
-            mIMModule->OnLayoutChange();
+            mIMContext->OnLayoutChange();
             return NS_OK;
         case NOTIFY_IME_OF_COMPOSITION_UPDATE:
-            mIMModule->OnUpdateComposition();
+            mIMContext->OnUpdateComposition();
             return NS_OK;
         case NOTIFY_IME_OF_SELECTION_CHANGE:
-            mIMModule->OnSelectionChange(this, aIMENotification);
+            mIMContext->OnSelectionChange(this, aIMENotification);
             return NS_OK;
         default:
             return NS_ERROR_NOT_IMPLEMENTED;
@@ -5890,17 +6001,17 @@ NS_IMETHODIMP_(void)
 nsWindow::SetInputContext(const InputContext& aContext,
                           const InputContextAction& aAction)
 {
-    if (!mIMModule) {
+    if (!mIMContext) {
         return;
     }
-    mIMModule->SetInputContext(this, &aContext, &aAction);
+    mIMContext->SetInputContext(this, &aContext, &aAction);
 }
 
 NS_IMETHODIMP_(InputContext)
 nsWindow::GetInputContext()
 {
   InputContext context;
-  if (!mIMModule) {
+  if (!mIMContext) {
       context.mIMEState.mEnabled = IMEState::DISABLED;
       context.mIMEState.mOpen = IMEState::OPEN_STATE_NOT_SUPPORTED;
       // If IME context isn't available on this widget, we should set |this|
@@ -5908,8 +6019,8 @@ nsWindow::GetInputContext()
       // context per process.
       context.mNativeIMEContext = this;
   } else {
-      context = mIMModule->GetInputContext();
-      context.mNativeIMEContext = mIMModule;
+      context = mIMContext->GetInputContext();
+      context.mNativeIMEContext = mIMContext;
   }
   return context;
 }

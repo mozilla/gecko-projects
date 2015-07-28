@@ -2311,35 +2311,35 @@ nsLayoutUtils::RoundedRectIntersectsRect(const nsRect& aRoundedRect,
 
 nsRect
 nsLayoutUtils::MatrixTransformRectOut(const nsRect &aBounds,
-                                      const gfx3DMatrix &aMatrix, float aFactor)
+                                      const Matrix4x4 &aMatrix, float aFactor)
 {
   nsRect outside = aBounds;
   outside.ScaleRoundOut(1/aFactor);
-  gfxRect image = aMatrix.TransformBounds(gfxRect(outside.x,
-                                                  outside.y,
-                                                  outside.width,
-                                                  outside.height));
+  gfxRect image = gfxRect(outside.x, outside.y, outside.width, outside.height);
+  image.TransformBounds(aMatrix);
   return RoundGfxRectToAppRect(image, aFactor);
 }
 
 nsRect
 nsLayoutUtils::MatrixTransformRect(const nsRect &aBounds,
-                                   const gfx3DMatrix &aMatrix, float aFactor)
+                                   const Matrix4x4 &aMatrix, float aFactor)
 {
-  gfxRect image = aMatrix.TransformBounds(gfxRect(NSAppUnitsToDoublePixels(aBounds.x, aFactor),
-                                                  NSAppUnitsToDoublePixels(aBounds.y, aFactor),
-                                                  NSAppUnitsToDoublePixels(aBounds.width, aFactor),
-                                                  NSAppUnitsToDoublePixels(aBounds.height, aFactor)));
+  gfxRect image = gfxRect(NSAppUnitsToDoublePixels(aBounds.x, aFactor),
+                          NSAppUnitsToDoublePixels(aBounds.y, aFactor),
+                          NSAppUnitsToDoublePixels(aBounds.width, aFactor),
+                          NSAppUnitsToDoublePixels(aBounds.height, aFactor));
+  image.TransformBounds(aMatrix);
 
   return RoundGfxRectToAppRect(image, aFactor);
 }
 
 nsPoint
 nsLayoutUtils::MatrixTransformPoint(const nsPoint &aPoint,
-                                    const gfx3DMatrix &aMatrix, float aFactor)
+                                    const Matrix4x4 &aMatrix, float aFactor)
 {
-  gfxPoint image = aMatrix.Transform(gfxPoint(NSAppUnitsToFloatPixels(aPoint.x, aFactor),
-                                              NSAppUnitsToFloatPixels(aPoint.y, aFactor)));
+  gfxPoint image = gfxPoint(NSAppUnitsToFloatPixels(aPoint.x, aFactor),
+                            NSAppUnitsToFloatPixels(aPoint.y, aFactor));
+  image.Transform(aMatrix);
   return nsPoint(NSFloatPixelsToAppUnits(float(image.x), aFactor),
                  NSFloatPixelsToAppUnits(float(image.y), aFactor));
 }
@@ -4459,6 +4459,17 @@ AddIntrinsicSizeOffset(nsRenderingContext* aRenderingContext,
   return result;
 }
 
+static void
+AddStateBitToAncestors(nsIFrame* aFrame, nsFrameState aBit)
+{
+  for (nsIFrame* f = aFrame; f; f = f->GetParent()) {
+    if (f->HasAnyStateBits(aBit)) {
+      break;
+    }
+    f->AddStateBits(aBit);
+  }
+}
+
 /* static */ nscoord
 nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
                                 nsRenderingContext* aRenderingContext,
@@ -4594,6 +4605,9 @@ nsLayoutUtils::IntrinsicForAxis(PhysicalAxis        aAxis,
       nscoord ratioISize = (horizontalAxis ? ratio.width  : ratio.height);
       nscoord ratioBSize = (horizontalAxis ? ratio.height : ratio.width);
       if (ratioBSize != 0) {
+        AddStateBitToAncestors(aFrame,
+            NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE);
+
         nscoord bSizeTakenByBoxSizing = 0;
         switch (boxSizing) {
         case NS_STYLE_BOX_SIZING_BORDER: {

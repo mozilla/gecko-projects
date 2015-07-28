@@ -16,6 +16,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/fallible.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/Attributes.h"
 
 #include <new>
 
@@ -82,7 +83,7 @@ enum PLDHashOperator
 };
 
 template<class EntryType>
-class nsTHashtable
+class MOZ_NEEDS_NO_VTABLE_TYPE nsTHashtable
 {
   typedef mozilla::fallible_t fallible_t;
 
@@ -90,7 +91,7 @@ public:
   // Separate constructors instead of default aInitLength parameter since
   // otherwise the default no-arg constructor isn't found.
   nsTHashtable()
-    : mTable(Ops(), sizeof(EntryType), PL_DHASH_DEFAULT_INITIAL_LENGTH)
+    : mTable(Ops(), sizeof(EntryType), PLDHashTable::kDefaultInitialLength)
   {}
   explicit nsTHashtable(uint32_t aInitLength)
     : mTable(Ops(), sizeof(EntryType), aInitLength)

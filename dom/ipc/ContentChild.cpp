@@ -1838,7 +1838,7 @@ ContentChild::DeallocPWebrtcGlobalChild(PWebrtcGlobalChild *aActor)
 
 bool
 ContentChild::RecvRegisterChrome(InfallibleTArray<ChromePackage>&& packages,
-                                 InfallibleTArray<ResourceMapping>&& resources,
+                                 InfallibleTArray<SubstitutionMapping>&& resources,
                                  InfallibleTArray<OverrideMapping>&& overrides,
                                  const nsCString& locale,
                                  const bool& reset)
@@ -1866,8 +1866,8 @@ ContentChild::RecvRegisterChromeItem(const ChromeRegistryItem& item)
             chromeRegistry->RegisterOverride(item.get_OverrideMapping());
             break;
 
-        case ChromeRegistryItem::TResourceMapping:
-            chromeRegistry->RegisterResource(item.get_ResourceMapping());
+        case ChromeRegistryItem::TSubstitutionMapping:
+            chromeRegistry->RegisterSubstitution(item.get_SubstitutionMapping());
             break;
 
         default:
@@ -2609,6 +2609,18 @@ bool
 ContentChild::RecvStopProfiler()
 {
     profiler_stop();
+    return true;
+}
+
+bool
+ContentChild::RecvPauseProfiler(const bool& aPause)
+{
+    if (aPause) {
+        profiler_pause();
+    } else {
+        profiler_resume();
+    }
+
     return true;
 }
 

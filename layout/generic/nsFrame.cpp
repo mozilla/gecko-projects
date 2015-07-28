@@ -4906,8 +4906,8 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                  "Cannot transform the viewport frame!");
     int32_t scaleFactor = PresContext()->AppUnitsPerDevPixel();
 
-    Matrix4x4 result = ToMatrix4x4(
-      nsDisplayTransform::GetResultingTransformMatrix(this, nsPoint(0, 0), scaleFactor, nullptr, aOutAncestor));
+    Matrix4x4 result = nsDisplayTransform::GetResultingTransformMatrix(this,
+                         nsPoint(0, 0), scaleFactor, nullptr, aOutAncestor);
     // XXXjwatt: seems like this will double count offsets in the face of preserve-3d:
     nsPoint delta = GetOffsetToCrossDoc(*aOutAncestor);
     /* Combine the raw transform with a translation to our parent. */
@@ -5783,13 +5783,13 @@ nsFrame::MakeFrameName(const nsAString& aType, nsAString& aResult) const
 }
 
 void
-nsIFrame::DumpFrameTree()
+nsIFrame::DumpFrameTree() const
 {
   RootFrameList(PresContext(), stderr);
 }
 
 void
-nsIFrame::DumpFrameTreeLimited()
+nsIFrame::DumpFrameTreeLimited() const
 {
   List(stderr);
 }
@@ -8815,7 +8815,25 @@ nsIFrame::SetParent(nsContainerFrame* aParent)
       f->AddStateBits(NS_FRAME_HAS_CHILD_WITH_VIEW);
     }
   }
-  
+
+  if (HasAnyStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE)) {
+    for (nsIFrame* f = aParent; f; f = f->GetParent()) {
+      if (f->HasAnyStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE)) {
+        break;
+      }
+      f->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
+    }
+  }
+
+  if (HasAnyStateBits(NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE)) {
+    for (nsIFrame* f = aParent; f; f = f->GetParent()) {
+      if (f->HasAnyStateBits(NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE)) {
+        break;
+      }
+      f->AddStateBits(NS_FRAME_DESCENDANT_INTRINSIC_ISIZE_DEPENDS_ON_BSIZE);
+    }
+  }
+
   if (HasInvalidFrameInSubtree()) {
     for (nsIFrame* f = aParent;
          f && !f->HasAnyStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT);

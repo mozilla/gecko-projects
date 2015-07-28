@@ -94,7 +94,6 @@
 #include "nsIRollupListener.h"
 #include "nsIServiceManager.h"
 #include "nsIClipboard.h"
-#include "nsIMM32Handler.h"
 #include "WinMouseScrollHandler.h"
 #include "nsFontMetrics.h"
 #include "nsIFontEnumerator.h"
@@ -997,6 +996,12 @@ nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 nsIWidget* nsWindow::GetParent(void)
 {
   return GetParentWindow(false);
+}
+
+static int32_t RoundDown(double aDouble)
+{
+  return aDouble > 0 ? static_cast<int32_t>(floor(aDouble)) :
+                       static_cast<int32_t>(ceil(aDouble));
 }
 
 float nsWindow::GetDPI()
@@ -2988,8 +2993,16 @@ nsWindow::PrepareForFullscreenTransition(nsISupports** aData)
 {
   FullscreenTransitionInitData initData;
   nsCOMPtr<nsIScreen> screen = GetWidgetScreen();
-  screen->GetRectDisplayPix(&initData.mBounds.x, &initData.mBounds.y,
-                            &initData.mBounds.width, &initData.mBounds.height);
+  int32_t x, y, width, height;
+  screen->GetRectDisplayPix(&x, &y, &width, &height);
+  MOZ_ASSERT(BoundsUseDisplayPixels(),
+             "Should only be called on top-level window");
+  CSSToLayoutDeviceScale scale = GetDefaultScale();
+  initData.mBounds.x = NSToIntRound(x * scale.scale);
+  initData.mBounds.y = NSToIntRound(y * scale.scale);
+  initData.mBounds.width = NSToIntRound(width * scale.scale);
+  initData.mBounds.height = NSToIntRound(height * scale.scale);
+
   // Create a semaphore for synchronizing the window handle which will
   // be created by the transition thread and used by the main thread for
   // posting the transition messages.
@@ -3703,20 +3716,32 @@ nsWindow::EndRemoteDrawing()
 void
 nsWindow::UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries)
 {
-  nsIntRegion clearRegion;
-  if (!HasGlass() || !nsUXThemeData::CheckForCompositor()) {
+  nsRefPtr<LayerManager> layerManager = GetLayerManager();
+  if (!layerManager) {
     return;
   }
+
+  nsIntRegion clearRegion;
+  if (!HasGlass() || !nsUXThemeData::CheckForCompositor()) {
+    // Make sure and clear old regions we've set previously. Note HasGlass can be false
+    // for glass desktops if the window we are rendering to doesn't make use of glass
+    // (e.g. fullscreen browsing).
+    layerManager->SetRegionToClear(clearRegion);
+    return;
+  }
+
   // On Win10, force show the top border:
   if (IsWin10OrLater() && mCustomNonClient && mSizeMode == nsSizeMode_Normal) {
     RECT rect;
     ::GetWindowRect(mWnd, &rect);
-    clearRegion.Or(clearRegion, nsIntRect(0, 0, rect.right - rect.left, 1.0));
+    // We want 1 pixel of border for every whole 100% of scaling
+    double borderSize = RoundDown(GetDefaultScale().scale);
+    clearRegion.Or(clearRegion, nsIntRect(0, 0, rect.right - rect.left, borderSize));
   }
+
   if (!IsWin10OrLater()) {
     for (size_t i = 0; i < aThemeGeometries.Length(); i++) {
-      if (aThemeGeometries[i].mType == nsNativeThemeWin::eThemeGeometryTypeWindowButtons)
-      {
+      if (aThemeGeometries[i].mType == nsNativeThemeWin::eThemeGeometryTypeWindowButtons) {
         nsIntRect bounds = aThemeGeometries[i].mRect;
         clearRegion.Or(clearRegion, nsIntRect(bounds.X(), bounds.Y(), bounds.Width(), bounds.Height() - 2.0));
         clearRegion.Or(clearRegion, nsIntRect(bounds.X() + 1.0, bounds.YMost() - 2.0, bounds.Width() - 1.0, 1.0));
@@ -3725,10 +3750,7 @@ nsWindow::UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries)
     }
   }
 
-  nsRefPtr<LayerManager> layerManager = GetLayerManager();
-  if (layerManager) {
-    layerManager->SetRegionToClear(clearRegion);
-  }
+  layerManager->SetRegionToClear(clearRegion);
 }
 
 uint32_t
@@ -6455,12 +6477,6 @@ bool nsWindow::OnTouch(WPARAM wParam, LPARAM lParam)
   delete [] pInputs;
   mGesture.CloseTouchInputHandle((HTOUCHINPUT)lParam);
   return true;
-}
-
-static int32_t RoundDown(double aDouble)
-{
-  return aDouble > 0 ? static_cast<int32_t>(floor(aDouble)) :
-                       static_cast<int32_t>(ceil(aDouble));
 }
 
 // Gesture event processing. Handles WM_GESTURE events.

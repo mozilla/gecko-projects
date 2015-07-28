@@ -152,8 +152,8 @@ typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x21bbd52a, 0xc2d2, 0x4b2f, \
-  { 0xbc, 0x6c, 0xc9, 0x52, 0xbe, 0x23, 0x6b, 0x19 } }
+{ 0xbbce44c8, 0x22fe, 0x404f, \
+  { 0x9e, 0x71, 0x23, 0x1d, 0xf4, 0xcc, 0x8e, 0x34 } }
 
 // Enum for requesting a particular type of document when creating a doc
 enum DocumentFlavor {
@@ -1157,14 +1157,6 @@ public:
   virtual void SetFullscreenRoot(nsIDocument* aRoot) = 0;
 
   /**
-   * Sets whether this document is approved for fullscreen mode.
-   * Documents aren't approved for fullscreen until chrome has sent a
-   * "fullscreen-approved" notification with a subject which is a pointer
-   * to the approved document.
-   */
-  virtual void SetApprovedForFullscreen(bool aIsApproved) = 0;
-
-  /**
    * Synchronously cleans up the fullscreen state on the given document.
    *
    * Calling this without performing fullscreen transition could lead
@@ -2122,14 +2114,11 @@ public:
 
   virtual mozilla::dom::DocumentTimeline* Timeline() = 0;
 
-  typedef mozilla::dom::CallbackObjectHolder<
-    mozilla::dom::FrameRequestCallback,
-    nsIFrameRequestCallback> FrameRequestCallbackHolder;
-  nsresult ScheduleFrameRequestCallback(const FrameRequestCallbackHolder& aCallback,
+  nsresult ScheduleFrameRequestCallback(mozilla::dom::FrameRequestCallback& aCallback,
                                         int32_t *aHandle);
   void CancelFrameRequestCallback(int32_t aHandle);
 
-  typedef nsTArray<FrameRequestCallbackHolder> FrameRequestCallbackList;
+  typedef nsTArray<nsRefPtr<mozilla::dom::FrameRequestCallback>> FrameRequestCallbackList;
   /**
    * Put this document's frame request callbacks into the provided
    * list, and forget about them.

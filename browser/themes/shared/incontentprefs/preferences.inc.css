@@ -195,6 +195,14 @@ treecol {
   -moz-margin-end: 8px !important;
 }
 
+/* Privacy pane */
+
+#doNotTrackInfo,
+#trackingProtectionPBMLearnMore,
+#trackingProtectionLearnMore {
+  margin-top: 0;
+}
+
 /* Collapse the non-active vboxes in decks to use only the height the
    active vbox needs */
 #historyPane:not([selectedIndex="1"]) > #historyDontRememberPane,
@@ -396,11 +404,12 @@ description > html|a {
   margin-left: 0px;
 }
 
-#fxaSyncComputerName.plain {
-  background-color: transparent;
-  opacity: 1;
-}
-
 #tosPP-small-ToS {
   margin-bottom: 1em;
+}
+
+#fxaLoginRejectedWarning {
+  list-style-image: url(chrome://browser/skin/warning.svg);
+  filter: drop-shadow(0 1px 0 hsla(206, 50%, 10%, .15));
+  margin: 4px 8px 0px 0px;
 }

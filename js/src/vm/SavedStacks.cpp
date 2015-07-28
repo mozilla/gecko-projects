@@ -912,6 +912,17 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
     while (!iter.done()) {
         Activation& activation = *iter.activation();
 
+        if (asyncActivation && asyncActivation != &activation) {
+            // We found an async stack in the previous activation, and we
+            // walked past the oldest frame of that activation, we're done.
+            // However, we only want to use the async parent if it was
+            // explicitly requested; if we got here otherwise, we have
+            // a direct parent, which we prefer.
+            if (asyncActivation->asyncCallIsExplicit())
+                break;
+            asyncActivation = nullptr;
+        }
+
         if (!asyncActivation) {
             asyncStack = activation.asyncStack();
             if (asyncStack) {
@@ -923,35 +934,27 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
                 asyncCause = activation.asyncCause();
                 asyncActivation = &activation;
             }
-        } else if (asyncActivation != &activation) {
-            // We found an async stack in the previous activation, and we
-            // walked past the oldest frame of that activation, we're done.
-            break;
         }
 
         AutoLocationValueRooter location(cx);
-
         {
             AutoCompartment ac(cx, iter.compartment());
             if (!cx->compartment()->savedStacks().getLocation(cx, iter, &location))
                 return false;
         }
 
-        // Use growByUninitialized and placement-new instead of just append.
-        // We'd ideally like to use an emplace method once Vector supports it.
-        if (!stackChain->growByUninitialized(1)) {
+        auto displayAtom = iter.isNonEvalFunctionFrame() ? iter.functionDisplayAtom() : nullptr;
+        if (!stackChain->emplaceBack(location->source,
+                                     location->line,
+                                     location->column,
+                                     displayAtom,
+                                     nullptr,
+                                     nullptr,
+                                     iter.compartment()->principals()))
+        {
             ReportOutOfMemory(cx);
             return false;
         }
-        new (&stackChain->back()) SavedFrame::Lookup(
-          location->source,
-          location->line,
-          location->column,
-          iter.isNonEvalFunctionFrame() ? iter.functionDisplayAtom() : nullptr,
-          nullptr,
-          nullptr,
-          iter.compartment()->principals()
-        );
 
         ++iter;
 
@@ -1011,13 +1014,10 @@ SavedStacks::adoptAsyncStack(JSContext* cx, HandleSavedFrame asyncStack,
     SavedFrame::AutoLookupVector stackChain(cx);
     SavedFrame* currentSavedFrame = asyncStack;
     for (unsigned i = 0; i < maxFrameCount && currentSavedFrame; i++) {
-        // Use growByUninitialized and placement-new instead of just append.
-        // We'd ideally like to use an emplace method once Vector supports it.
-        if (!stackChain->growByUninitialized(1)) {
+        if (!stackChain->emplaceBack(*currentSavedFrame)) {
             ReportOutOfMemory(cx);
             return false;
         }
-        new (&stackChain->back()) SavedFrame::Lookup(*currentSavedFrame);
 
         // Attach the asyncCause to the youngest frame.
         if (i == 0)

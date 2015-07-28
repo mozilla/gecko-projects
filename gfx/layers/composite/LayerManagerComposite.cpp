@@ -22,7 +22,6 @@
 #include "TiledContentHost.h"
 #include "Units.h"                      // for ScreenIntRect
 #include "UnitTransforms.h"             // for ViewAs
-#include "gfx2DGlue.h"                  // for ToMatrix4x4
 #include "gfxPrefs.h"                   // for gfxPrefs
 #ifdef XP_MACOSX
 #include "gfxPlatformMac.h"
@@ -760,11 +759,11 @@ LayerManagerComposite::Render()
       js::ProfileEntry::Category::GRAPHICS);
 
     mCompositor->EndFrame();
-    mCompositor->SetDispAcquireFence(mRoot);
   }
 
   if (composer2D) {
     composer2D->Render(mCompositor->GetWidget());
+    mCompositor->SetDispAcquireFence(mRoot);
   }
 
   mCompositor->GetWidget()->PostRender(this);

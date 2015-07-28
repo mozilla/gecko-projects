@@ -11,6 +11,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/Move.h"
 #include "mozilla/TypeTraits.h"
 
 #include "jspubtd.h"
@@ -509,69 +510,6 @@ class MOZ_STACK_CLASS MutableHandle : public js::MutableHandleBase<T>
 namespace js {
 
 /*
- * InternalHandle is a handle to an internal pointer into a gcthing. Use
- * InternalHandle when you have a pointer to a direct field of a gcthing, or
- * when you need a parameter type for something that *may* be a pointer to a
- * direct field of a gcthing.
- */
-template <typename T>
-class InternalHandle {};
-
-template <typename T>
-class InternalHandle<T*>
-{
-    void * const* holder;
-    size_t offset;
-
-  public:
-    /*
-     * Create an InternalHandle using a Handle to the gcthing containing the
-     * field in question, and a pointer to the field.
-     */
-    template<typename H>
-    InternalHandle(const JS::Handle<H>& handle, T* field)
-      : holder((void**)handle.address()), offset(uintptr_t(field) - uintptr_t(handle.get()))
-    {}
-
-    /*
-     * Create an InternalHandle to a field within a Rooted<>.
-     */
-    template<typename R>
-    InternalHandle(const JS::Rooted<R>& root, T* field)
-      : holder((void**)root.address()), offset(uintptr_t(field) - uintptr_t(root.get()))
-    {}
-
-    InternalHandle(const InternalHandle<T*>& other)
-      : holder(other.holder), offset(other.offset) {}
-
-    T* get() const { return reinterpret_cast<T*>(uintptr_t(*holder) + offset); }
-
-    const T& operator*() const { return *get(); }
-    T* operator->() const { return get(); }
-
-    static InternalHandle<T*> fromMarkedLocation(T* fieldPtr) {
-        return InternalHandle(fieldPtr);
-    }
-
-  private:
-    /*
-     * Create an InternalHandle to something that is not a pointer to a
-     * gcthing, and so does not need to be rooted in the first place. Use these
-     * InternalHandles to pass pointers into functions that also need to accept
-     * regular InternalHandles to gcthing fields.
-     *
-     * Make this private to prevent accidental misuse; this is only for
-     * fromMarkedLocation().
-     */
-    explicit InternalHandle(T* field)
-      : holder(&js::ConstNullValue),
-        offset(uintptr_t(field))
-    {}
-
-    void operator=(InternalHandle<T*> other) = delete;
-};
-
-/*
  * By default, things should use the inheritance hierarchy to find their
  * ThingRootKind. Some pointer types are explicitly set in jspubtd.h so that
  * Rooted<T> may be used without the class definition being available.
@@ -629,10 +567,22 @@ struct GCMethods<JSFunction*>
 
 namespace JS {
 
-// To use a static class or struct as part of a Rooted/Handle/MutableHandle,
-// ensure that it derives from StaticTraceable (i.e. so that automatic upcast
-// via calls works) and ensure that a method |static void trace(T*, JSTracer*)|
-// exists on the class.
+// If a class containing GC pointers has (or can gain) a vtable, then it can be
+// trivially used with Rooted/Handle/MutableHandle by deriving from
+// DynamicTraceable and overriding |void trace(JSTracer*)|.
+class DynamicTraceable
+{
+  public:
+    static js::ThingRootKind rootKind() { return js::THING_ROOT_DYNAMIC_TRACEABLE; }
+
+    virtual ~DynamicTraceable() {}
+    virtual void trace(JSTracer* trc) = 0;
+};
+
+// To use a static class or struct (e.g. not containing a vtable) as part of a
+// Rooted/Handle/MutableHandle, ensure that it derives from StaticTraceable
+// (i.e. so that automatic upcast via calls works) and ensure that a method
+// |static void trace(T*, JSTracer*)| exists on the class.
 class StaticTraceable
 {
   public:
@@ -688,78 +638,48 @@ namespace JS {
 template <typename T>
 class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
 {
+    static_assert(!mozilla::IsConvertible<T, StaticTraceable*>::value &&
+                  !mozilla::IsConvertible<T, DynamicTraceable*>::value,
+                  "Rooted takes pointer or Traceable types but not Traceable* type");
+
     /* Note: CX is a subclass of either ContextFriendFields or PerThreadDataFriendFields. */
-    template <typename CX>
-    void init(CX* cx) {
+    void registerWithRootLists(js::RootLists& roots) {
         js::ThingRootKind kind = js::RootKind<T>::rootKind();
-        this->stack = &cx->roots.stackRoots_[kind];
+        this->stack = &roots.stackRoots_[kind];
         this->prev = *stack;
         *stack = reinterpret_cast<Rooted<void*>*>(this);
     }
 
+    static js::RootLists& rootListsForRootingContext(JSContext* cx) {
+        return js::ContextFriendFields::get(cx)->roots;
+    }
+    static js::RootLists& rootListsForRootingContext(js::ContextFriendFields* cx) {
+        return cx->roots;
+    }
+    static js::RootLists& rootListsForRootingContext(JSRuntime* rt) {
+        return js::PerThreadDataFriendFields::getMainThread(rt)->roots;
+    }
+    static js::RootLists& rootListsForRootingContext(js::PerThreadDataFriendFields* pt) {
+        return pt->roots;
+    }
+
   public:
-    explicit Rooted(JSContext* cx
+    template <typename RootingContext>
+    explicit Rooted(const RootingContext& cx
                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(js::GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(js::ContextFriendFields::get(cx));
+        registerWithRootLists(rootListsForRootingContext(cx));
     }
 
-    Rooted(JSContext* cx, T initial
+    template <typename RootingContext, typename S>
+    Rooted(const RootingContext& cx, S&& initial
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : ptr(initial)
+      : ptr(mozilla::Forward<S>(initial))
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(js::ContextFriendFields::get(cx));
-    }
-
-    explicit Rooted(js::ContextFriendFields* cx
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : ptr(js::GCMethods<T>::initial())
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(cx);
-    }
-
-    Rooted(js::ContextFriendFields* cx, T initial
-           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : ptr(initial)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(cx);
-    }
-
-    explicit Rooted(js::PerThreadDataFriendFields* pt
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : ptr(js::GCMethods<T>::initial())
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(pt);
-    }
-
-    Rooted(js::PerThreadDataFriendFields* pt, T initial
-           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : ptr(initial)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(pt);
-    }
-
-    explicit Rooted(JSRuntime* rt
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : ptr(js::GCMethods<T>::initial())
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(js::PerThreadDataFriendFields::getMainThread(rt));
-    }
-
-    Rooted(JSRuntime* rt, T initial
-           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : ptr(initial)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(js::PerThreadDataFriendFields::getMainThread(rt));
+        registerWithRootLists(rootListsForRootingContext(cx));
     }
 
     ~Rooted() {
@@ -1069,12 +989,11 @@ class PersistentRooted : public js::PersistentRootedBase<T>,
 
     friend struct js::gc::PersistentRootedMarker<T>;
 
-    friend void js::gc::FinishPersistentRootedChains(JSRuntime* rt);
+    friend void js::gc::FinishPersistentRootedChains(js::RootLists&);
 
-    void registerWithRuntime(JSRuntime* rt) {
+    void registerWithRootLists(js::RootLists& roots) {
         MOZ_ASSERT(!initialized());
-        JS::shadow::Runtime* srt = JS::shadow::Runtime::asShadowRuntime(rt);
-        srt->getPersistentRootedList<T>().insertBack(this);
+        roots.getPersistentRootedList<T>().insertBack(this);
     }
 
   public:
@@ -1121,7 +1040,7 @@ class PersistentRooted : public js::PersistentRootedBase<T>,
 
     void init(JSContext* cx, T initial) {
         ptr = initial;
-        registerWithRuntime(js::GetRuntime(cx));
+        registerWithRootLists(js::ContextFriendFields::get(cx)->roots);
     }
 
     void init(JSRuntime* rt) {
@@ -1130,7 +1049,7 @@ class PersistentRooted : public js::PersistentRootedBase<T>,
 
     void init(JSRuntime* rt, T initial) {
         ptr = initial;
-        registerWithRuntime(rt);
+        registerWithRootLists(js::PerThreadDataFriendFields::getMainThread(rt)->roots);
     }
 
     void reset() {
@@ -1144,7 +1063,18 @@ class PersistentRooted : public js::PersistentRootedBase<T>,
     DECLARE_POINTER_CONSTREF_OPS(T);
     DECLARE_POINTER_ASSIGN_OPS(PersistentRooted, T);
     DECLARE_NONPOINTER_ACCESSOR_METHODS(ptr);
-    DECLARE_NONPOINTER_MUTABLE_ACCESSOR_METHODS(ptr);
+
+    // These are the same as DECLARE_NONPOINTER_MUTABLE_ACCESSOR_METHODS, except
+    // they check that |this| is initialized in case the caller later stores
+    // something in |ptr|.
+    T* address() {
+        MOZ_ASSERT(initialized());
+        return &ptr;
+    }
+    T& get() {
+        MOZ_ASSERT(initialized());
+        return ptr;
+    }
 
   private:
     void set(T value) {

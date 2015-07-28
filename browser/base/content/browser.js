@@ -3481,9 +3481,8 @@ const BrowserSearch = {
       if (!aSearchBar || document.activeElement != aSearchBar.textbox.inputField) {
         let url = gBrowser.currentURI.spec.toLowerCase();
         let mm = gBrowser.selectedBrowser.messageManager;
-        if (url === "about:home") {
-          AboutHome.focusInput(mm);
-        } else if (url === "about:newtab" && NewTabUtils.allPages.enabled) {
+        if (url === "about:home" ||
+            (url === "about:newtab" && NewTabUtils.allPages.enabled)) {
           ContentSearch.focusInput(mm);
         } else {
           openUILinkIn("about:home", "current");
@@ -4010,7 +4009,7 @@ var XULBrowserWindow = {
   init: function () {
     // Initialize the security button's state and tooltip text.
     var securityUI = gBrowser.securityUI;
-    this.onSecurityChange(null, null, securityUI.state);
+    this.onSecurityChange(null, null, securityUI.state, true);
   },
 
   setJSStatus: function () {
@@ -4358,7 +4357,13 @@ var XULBrowserWindow = {
   _state: null,
   _lastLocation: null,
 
-  onSecurityChange: function (aWebProgress, aRequest, aState) {
+  // This is called in multiple ways:
+  //  1. Due to the nsIWebProgressListener.onSecurityChange notification.
+  //  2. Called by tabbrowser.xml when updating the current browser.
+  //  3. Called directly during this object's initializations.
+  // aRequest will be null always in case 2 and 3, and sometimes in case 1 (for
+  // instance, there won't be a request when STATE_BLOCKED_TRACKING_CONTENT is observed).
+  onSecurityChange: function (aWebProgress, aRequest, aState, aIsSimulated) {
     // Don't need to do anything if the data we use to update the UI hasn't
     // changed
     let uri = gBrowser.currentURI;
@@ -4368,6 +4373,10 @@ var XULBrowserWindow = {
       return;
     this._state = aState;
     this._lastLocation = spec;
+
+    if (typeof(aIsSimulated) != "boolean" && typeof(aIsSimulated) != "undefined") {
+      throw "onSecurityChange: aIsSimulated receieved an unexpected type";
+    }
 
     // aState is defined as a bitmask that may be extended in the future.
     // We filter out any unknown bits before testing for known values.
@@ -4404,7 +4413,7 @@ var XULBrowserWindow = {
       uri = Services.uriFixup.createExposableURI(uri);
     } catch (e) {}
     gIdentityHandler.checkIdentity(this._state, uri);
-    TrackingProtection.onSecurityChange(this._state);
+    TrackingProtection.onSecurityChange(this._state, aIsSimulated);
   },
 
   // simulate all change notifications after switching tabs
@@ -5611,11 +5620,24 @@ function handleLinkClick(event, href, linkNode) {
     catch (e) { }
   }
 
+  // first get document wide referrer policy, then
+  // get referrer attribute from clicked link and parse it and
+  // allow per element referrer to overrule the document wide referrer if enabled
+  let referrerPolicy = doc.referrerPolicy;
+  if (Services.prefs.getBoolPref("network.http.enablePerElementReferrer") &&
+      linkNode) {
+    let referrerAttrValue = Services.netUtils.parseAttributePolicyString(linkNode.
+                            getAttribute("referrer"));
+    if (referrerAttrValue != Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT) {
+      referrerPolicy = referrerAttrValue;
+    }
+  }
+
   urlSecurityCheck(href, doc.nodePrincipal);
   let params = { charset: doc.characterSet,
                  allowMixedContent: persistAllowMixedContentInChildTab,
                  referrerURI: referrerURI,
-                 referrerPolicy: doc.referrerPolicy,
+                 referrerPolicy: referrerPolicy,
                  noReferrer: BrowserUtils.linkHasNoReferrer(linkNode) };
   openLinkIn(href, where, params);
   event.preventDefault();
@@ -7785,6 +7807,11 @@ let AboutPrivateBrowsingListener = {
       "AboutPrivateBrowsing:OpenPrivateWindow",
       msg => {
         OpenBrowserWindow({private: true});
+    });
+    window.messageManager.addMessageListener(
+      "AboutPrivateBrowsing:EnableTrackingProtection",
+      msg => {
+        Services.prefs.setBoolPref("privacy.trackingprotection.pbmode.enabled", true);
     });
   }
 };

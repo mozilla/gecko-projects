@@ -147,6 +147,7 @@ NS_IMPL_ISUPPORTS(nsBaseWidget, nsIWidget, nsISupportsWeakReference)
 nsBaseWidget::nsBaseWidget()
 : mWidgetListener(nullptr)
 , mAttachedWidgetListener(nullptr)
+, mPreviouslyAttachedWidgetListener(nullptr)
 , mLayerManager(nullptr)
 , mCompositorVsyncDispatcher(nullptr)
 , mCursor(eCursor_standard)
@@ -397,6 +398,16 @@ nsBaseWidget::AttachViewToTopLevel(bool aUseAttachedEvents)
 nsIWidgetListener* nsBaseWidget::GetAttachedWidgetListener()
  {
    return mAttachedWidgetListener;
+ }
+
+nsIWidgetListener* nsBaseWidget::GetPreviouslyAttachedWidgetListener()
+ {
+   return mPreviouslyAttachedWidgetListener;
+ }
+
+void nsBaseWidget::SetPreviouslyAttachedWidgetListener(nsIWidgetListener* aListener)
+ {
+   mPreviouslyAttachedWidgetListener = aListener;
  }
 
 void nsBaseWidget::SetAttachedWidgetListener(nsIWidgetListener* aListener)
@@ -1131,6 +1142,8 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
   WindowUsesOMTC();
 
   mLayerManager = lm.forget();
+
+  gfxPlatform::GetPlatform()->NotifyCompositorCreated(mLayerManager->GetCompositorBackendType());
 }
 
 bool nsBaseWidget::ShouldUseOffMainThreadCompositing()

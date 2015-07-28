@@ -326,6 +326,13 @@ void MediaDecoder::AddOutputStream(ProcessedMediaStream* aStream,
   mDecoderStateMachine->AddOutputStream(aStream, aFinishWhenEnded);
 }
 
+void MediaDecoder::RemoveOutputStream(MediaStream* aStream)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mDecoderStateMachine, "Must be called after Load().");
+  mDecoderStateMachine->RemoveOutputStream(aStream);
+}
+
 double MediaDecoder::GetDuration()
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -432,6 +439,9 @@ MediaDecoder::MediaDecoder() :
   mWatchManager.Watch(mCurrentPosition, &MediaDecoder::UpdateLogicalPosition);
   mWatchManager.Watch(mPlayState, &MediaDecoder::UpdateLogicalPosition);
   mWatchManager.Watch(mLogicallySeeking, &MediaDecoder::UpdateLogicalPosition);
+
+  // mIgnoreProgressData
+  mWatchManager.Watch(mLogicallySeeking, &MediaDecoder::SeekingChanged);
 }
 
 bool MediaDecoder::Init(MediaDecoderOwner* aOwner)
@@ -505,6 +515,7 @@ nsresult MediaDecoder::Load(nsIStreamListener** aStreamListener,
                             MediaDecoder* aCloneDonor)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mResource, "Can't load without a MediaResource");
 
   nsresult rv = OpenResource(aStreamListener);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -554,12 +565,11 @@ void MediaDecoder::SetMinimizePrerollUntilPlaybackStarts()
 nsresult MediaDecoder::ScheduleStateMachine()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_ASSERTION(mDecoderStateMachine,
-               "Must have state machine to start state machine thread");
-  NS_ENSURE_STATE(mDecoderStateMachine);
-
   if (mShuttingDown)
     return NS_OK;
+
+  MOZ_ASSERT(mDecoderStateMachine);
+  NS_ENSURE_STATE(mDecoderStateMachine);
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   mDecoderStateMachine->ScheduleStateMachineCrossThread();
   return NS_OK;
@@ -649,25 +659,6 @@ void MediaDecoder::QueueMetadata(int64_t aPublishTime,
   MOZ_ASSERT(OnDecodeTaskQueue());
   GetReentrantMonitor().AssertCurrentThreadIn();
   mDecoderStateMachine->QueueMetadata(aPublishTime, aInfo, aTags);
-}
-
-bool
-MediaDecoder::IsExpectingMoreData()
-{
-  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-
-  // If there's no resource, we're probably just getting set up.
-  if (!mResource) {
-    return true;
-  }
-
-  // If we've downloaded anything, we're not waiting for anything.
-  if (mResource->IsDataCachedToEndOfResource(mDecoderPosition)) {
-    return false;
-  }
-
-  // Otherwise, we should be getting data unless the stream is suspended.
-  return !mResource->IsSuspended();
 }
 
 void MediaDecoder::MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
@@ -972,15 +963,13 @@ void MediaDecoder::NotifyPrincipalChanged()
 void MediaDecoder::NotifyBytesConsumed(int64_t aBytes, int64_t aOffset)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (mShuttingDown) {
+
+  if (mShuttingDown || mIgnoreProgressData) {
     return;
   }
 
-  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   MOZ_ASSERT(mDecoderStateMachine);
-  if (mIgnoreProgressData) {
-    return;
-  }
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   if (aOffset >= mDecoderPosition) {
     mPlaybackStatistics->AddBytes(aBytes);
   }
@@ -1213,26 +1202,6 @@ void MediaDecoder::Resume(bool aForceBuffering)
     if (mDecoderStateMachine) {
       mDecoderStateMachine->DispatchStartBuffering();
     }
-  }
-}
-
-void MediaDecoder::StopProgressUpdates()
-{
-  MOZ_ASSERT(OnStateMachineTaskQueue() || OnDecodeTaskQueue());
-  GetReentrantMonitor().AssertCurrentThreadIn();
-  mIgnoreProgressData = true;
-  if (mResource) {
-    mResource->SetReadMode(MediaCacheStream::MODE_METADATA);
-  }
-}
-
-void MediaDecoder::StartProgressUpdates()
-{
-  MOZ_ASSERT(OnStateMachineTaskQueue() || OnDecodeTaskQueue());
-  GetReentrantMonitor().AssertCurrentThreadIn();
-  mIgnoreProgressData = false;
-  if (mResource) {
-    mResource->SetReadMode(MediaCacheStream::MODE_PLAYBACK);
   }
 }
 

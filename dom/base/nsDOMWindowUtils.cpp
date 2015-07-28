@@ -284,6 +284,8 @@ nsDOMWindowUtils::Redraw(uint32_t aCount, uint32_t *aDurationOut)
 NS_IMETHODIMP
 nsDOMWindowUtils::UpdateLayerTree()
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   if (nsIPresShell* presShell = GetPresShell()) {
     presShell->FlushPendingNotifications(Flush_Display);
     nsRefPtr<nsViewManager> vm = presShell->GetViewManager();
@@ -1651,6 +1653,8 @@ getScrollXYAppUnits(nsWeakPtr aWindow, bool aFlushLayout, nsPoint& aScrollPos) {
 NS_IMETHODIMP
 nsDOMWindowUtils::GetScrollXY(bool aFlushLayout, int32_t* aScrollX, int32_t* aScrollY)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsPoint scrollPos(0,0);
   nsresult rv = getScrollXYAppUnits(mWindow, aFlushLayout, scrollPos);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1663,6 +1667,8 @@ nsDOMWindowUtils::GetScrollXY(bool aFlushLayout, int32_t* aScrollX, int32_t* aSc
 NS_IMETHODIMP
 nsDOMWindowUtils::GetScrollXYFloat(bool aFlushLayout, float* aScrollX, float* aScrollY)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsPoint scrollPos(0,0);
   nsresult rv = getScrollXYAppUnits(mWindow, aFlushLayout, scrollPos);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1829,6 +1835,8 @@ nsDOMWindowUtils::FindElementWithViewId(nsViewID aID,
 NS_IMETHODIMP
 nsDOMWindowUtils::GetViewId(nsIDOMElement* aElement, nsViewID* aResult)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsCOMPtr<nsIContent> content = do_QueryInterface(aElement);
   if (content && nsLayoutUtils::FindIDFor(content, aResult)) {
     return NS_OK;
@@ -1839,6 +1847,8 @@ nsDOMWindowUtils::GetViewId(nsIDOMElement* aElement, nsViewID* aResult)
 NS_IMETHODIMP
 nsDOMWindowUtils::GetScreenPixelsPerCSSPixel(float* aScreenPixels)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
   NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
   return window->GetDevicePixelRatio(aScreenPixels);
@@ -2454,6 +2464,8 @@ NS_IMETHODIMP
 nsDOMWindowUtils::SetAsyncScrollOffset(nsIDOMNode* aNode,
                                        int32_t aX, int32_t aY)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsCOMPtr<Element> element = do_QueryInterface(aNode);
   if (!element) {
     return NS_ERROR_INVALID_ARG;
@@ -2481,6 +2493,8 @@ nsDOMWindowUtils::SetAsyncScrollOffset(nsIDOMNode* aNode,
 NS_IMETHODIMP
 nsDOMWindowUtils::SetAsyncZoom(nsIDOMNode* aRootElement, float aValue)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsCOMPtr<Element> element = do_QueryInterface(aRootElement);
   if (!element) {
     return NS_ERROR_INVALID_ARG;
@@ -2508,6 +2522,8 @@ nsDOMWindowUtils::SetAsyncZoom(nsIDOMNode* aRootElement, float aValue)
 NS_IMETHODIMP
 nsDOMWindowUtils::FlushApzRepaints(bool* aOutResult)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsIWidget* widget = GetWidget();
   if (!widget) {
     *aOutResult = false;
@@ -3468,6 +3484,8 @@ nsDOMWindowUtils::IsNodeDisabledForEvents(nsIDOMNode* aNode, bool* aRetVal)
 NS_IMETHODIMP
 nsDOMWindowUtils::SetPaintFlashing(bool aPaintFlashing)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsPresContext* presContext = GetPresContext();
   if (presContext) {
     presContext->SetPaintFlashing(aPaintFlashing);
@@ -3486,6 +3504,8 @@ nsDOMWindowUtils::SetPaintFlashing(bool aPaintFlashing)
 NS_IMETHODIMP
 nsDOMWindowUtils::GetPaintFlashing(bool* aRetVal)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   *aRetVal = false;
   nsPresContext* presContext = GetPresContext();
   if (presContext) {
@@ -3574,7 +3594,7 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
           forwarder->GetShadowManager()->SendGetAnimationTransform(
             layer->AsShadowableLayer()->GetShadow(), &transform);
           if (transform.type() == MaybeTransform::TMatrix4x4) {
-            gfx3DMatrix matrix = To3DMatrix(transform.get_Matrix4x4());
+            Matrix4x4 matrix = transform.get_Matrix4x4();
             cssValue = nsComputedDOMStyle::MatrixToCSSValue(matrix);
           }
         }
@@ -3635,6 +3655,8 @@ HandlingUserInputHelper::~HandlingUserInputHelper()
 NS_IMETHODIMP
 HandlingUserInputHelper::Destruct()
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   if (NS_WARN_IF(mDestructCalled)) {
     return NS_ERROR_FAILURE;
   }
@@ -3706,6 +3728,8 @@ nsDOMWindowUtils::GetCompositorAPZTestData(JSContext* aContext,
 NS_IMETHODIMP
 nsDOMWindowUtils::PostRestyleSelfEvent(nsIDOMElement* aElement)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsCOMPtr<Element> element = do_QueryInterface(aElement);
   if (!element) {
     return NS_ERROR_INVALID_ARG;
@@ -3764,6 +3788,8 @@ nsDOMWindowUtils::SetChromeMargin(int32_t aTop,
                                   int32_t aBottom,
                                   int32_t aLeft)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
   if (window) {
     nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(window->GetDocShell());
@@ -3804,6 +3830,8 @@ nsDOMWindowUtils::GetFrameUniformityTestData(JSContext* aContext,
 NS_IMETHODIMP
 nsDOMWindowUtils::XpconnectArgument(nsIDOMWindowUtils* aThis)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   // Do nothing.
   return NS_OK;
 }
@@ -3811,6 +3839,8 @@ nsDOMWindowUtils::XpconnectArgument(nsIDOMWindowUtils* aThis)
 NS_IMETHODIMP
 nsDOMWindowUtils::AskPermission(nsIContentPermissionRequest* aRequest)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
   return nsContentPermissionUtils::AskPermission(aRequest, window->GetCurrentInnerWindow());
 }
@@ -3818,6 +3848,8 @@ nsDOMWindowUtils::AskPermission(nsIContentPermissionRequest* aRequest)
 NS_IMETHODIMP
 nsDOMWindowUtils::GetFramesConstructed(uint64_t* aResult)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsPresContext* presContext = GetPresContext();
   if (!presContext) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -3830,6 +3862,8 @@ nsDOMWindowUtils::GetFramesConstructed(uint64_t* aResult)
 NS_IMETHODIMP
 nsDOMWindowUtils::GetFramesReflowed(uint64_t* aResult)
 {
+  MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
+
   nsPresContext* presContext = GetPresContext();
   if (!presContext) {
     return NS_ERROR_NOT_AVAILABLE;

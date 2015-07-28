@@ -430,6 +430,9 @@ function checkSystemSection(data) {
     }
   }
 
+  Assert.equal(typeof gfxData.features, "object");
+  Assert.equal(typeof gfxData.features.compositor, "string");
+
   try {
     // If we've not got nsIGfxInfoDebug, then this will throw and stop us doing
     // this test.
@@ -439,6 +442,9 @@ function checkSystemSection(data) {
       Assert.equal(GFX_VENDOR_ID, gfxData.adapters[0].vendorID);
       Assert.equal(GFX_DEVICE_ID, gfxData.adapters[0].deviceID);
     }
+
+    let features = gfxInfo.getFeatures();
+    Assert.equal(features.compositor, gfxData.features.compositor);
   }
   catch (e) {}
 }
@@ -1017,9 +1023,7 @@ add_task(function* test_defaultSearchEngine() {
   defaultBranch.setCharPref("browser.search.jarURIs", "chrome://testsearchplugin/locale/searchplugins/");
   defaultBranch.setBoolPref("browser.search.loadFromJars", true);
 
-  // Initialize the search service and disable geoip lookup, so we don't get unwanted
-  // network connections.
-  Preferences.set("browser.search.geoip.url", "");
+  // Initialize the search service.
   yield new Promise(resolve => Services.search.init(resolve));
 
   // Our default engine from the JAR file has an identifier. Check if it is correctly
@@ -1029,8 +1033,7 @@ add_task(function* test_defaultSearchEngine() {
   Assert.equal(data.settings.defaultSearchEngine, "telemetrySearchIdentifier");
   let expectedSearchEngineData = {
     name: "telemetrySearchIdentifier",
-    loadPath: "jar:[other]/searchTest.jar!testsearchplugin/telemetrySearchIdentifier.xml",
-    submissionURL: "http://ar.wikipedia.org/wiki/%D8%AE%D8%A7%D8%B5:%D8%A8%D8%AD%D8%AB?search=&sourceid=Mozilla-search"
+    loadPath: "jar:[other]/searchTest.jar!testsearchplugin/telemetrySearchIdentifier.xml"
   };
   Assert.deepEqual(data.settings.defaultSearchEngineData, expectedSearchEngineData);
 
@@ -1097,6 +1100,15 @@ add_task(function* test_defaultSearchEngine() {
   data = TelemetryEnvironment.currentEnvironment;
   checkEnvironmentData(data);
   Assert.equal(data.settings.defaultSearchEngine, EXPECTED_SEARCH_ENGINE);
+
+  // Check that by default we are not sending a cohort identifier...
+  Assert.equal(data.settings.searchCohort, undefined);
+
+  // ... but that if a cohort identifier is set, we send it.
+  Services.prefs.setCharPref("browser.search.cohort", "testcohort");
+  Services.obs.notifyObservers(null, "browser-search-service", "init-complete");
+  data = TelemetryEnvironment.currentEnvironment;
+  Assert.equal(data.settings.searchCohort, "testcohort");
 });
 
 add_task(function*() {

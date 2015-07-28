@@ -7,7 +7,7 @@ const HAWK_TOKEN_LENGTH = 64;
 const {
   LOOP_SESSION_TYPE,
   MozLoopServiceInternal,
-  MozLoopService,
+  MozLoopService
 } = Cu.import("resource:///modules/loop/MozLoopService.jsm", {});
 const {LoopCalls} = Cu.import("resource:///modules/loop/LoopCalls.jsm", {});
 const {LoopRooms} = Cu.import("resource:///modules/loop/LoopRooms.jsm", {});
@@ -204,52 +204,6 @@ function promiseOAuthGetRegistration(baseURL) {
     xhr.addEventListener("load", () => resolve(xhr));
     xhr.addEventListener("error", reject);
     xhr.send();
-  });
-}
-
-/**
- * Waits for a load (or custom) event to finish in a given tab. If provided
- * load an uri into the tab.
- *
- * @param tab
- *        The tab to load into.
- * @param [optional] url
- *        The url to load, or the current url.
- * @param [optional] event
- *        The load event type to wait for.  Defaults to "load".
- * @return {Promise} resolved when the event is handled.
- * @resolves to the received event
- * @rejects if a valid load event is not received within a meaningful interval
- */
-function promiseTabLoadEvent(tab, url, eventType="load") {
-  return new Promise((resolve, reject) => {
-    info("Wait tab event: " + eventType);
-
-    function handle(event) {
-      if (event.originalTarget != tab.linkedBrowser.contentDocument ||
-          event.target.location.href == "about:blank" ||
-          (url && event.target.location.href != url)) {
-        info("Skipping spurious '" + eventType + "'' event" +
-             " for " + event.target.location.href);
-        return;
-      }
-      clearTimeout(timeout);
-      tab.linkedBrowser.removeEventListener(eventType, handle, true);
-      info("Tab event received: " + eventType);
-      resolve(event);
-    }
-
-    let timeout = setTimeout(() => {
-      if (tab.linkedBrowser) {
-        tab.linkedBrowser.removeEventListener(eventType, handle, true);
-      }
-      reject(new Error("Timed out while waiting for a '" + eventType + "'' event"));
-    }, 30000);
-
-    tab.linkedBrowser.addEventListener(eventType, handle, true, true);
-    if (url) {
-      tab.linkedBrowser.loadURI(url);
-    }
   });
 }
 

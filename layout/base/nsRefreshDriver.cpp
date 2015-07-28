@@ -49,7 +49,6 @@
 #include "RestyleManager.h"
 #include "Layers.h"
 #include "imgIContainer.h"
-#include "nsIFrameRequestCallback.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsDocShell.h"
 #include "nsISimpleEnumerator.h"
@@ -64,6 +63,7 @@
 #include "mozilla/VsyncDispatcher.h"
 #include "nsThreadUtils.h"
 #include "mozilla/unused.h"
+#include "mozilla/TimelineConsumers.h"
 
 #ifdef MOZ_NUWA_PROCESS
 #include "ipc/Nuwa.h"
@@ -993,7 +993,7 @@ RefreshDriverTimer*
 nsRefreshDriver::ChooseTimer() const
 {
   if (mThrottled) {
-    if (!sThrottledRateTimer) 
+    if (!sThrottledRateTimer)
       sThrottledRateTimer = new InactiveRefreshDriverTimer(GetThrottledTimerInterval(),
                                                            DEFAULT_INACTIVE_TIMER_DISABLE_SECONDS * 1000.0);
     return sThrottledRateTimer;
@@ -1051,7 +1051,7 @@ nsRefreshDriver::~nsRefreshDriver()
   MOZ_ASSERT(ObserverCount() == 0,
              "observers should have unregistered");
   MOZ_ASSERT(!mActiveTimer, "timer should be gone");
-  
+
   if (mRootRefresh) {
     mRootRefresh->RemoveRefreshObserver(this, Flush_Style);
     mRootRefresh = nullptr;
@@ -1436,7 +1436,7 @@ HasPendingAnimations(nsIPresShell* aShell)
 static void GetProfileTimelineSubDocShells(nsDocShell* aRootDocShell,
                                            nsTArray<nsDocShell*>& aShells)
 {
-  if (!aRootDocShell || nsDocShell::gProfileTimelineRecordingsCount == 0) {
+  if (!aRootDocShell || TimelineConsumers::IsEmpty()) {
     return;
   }
 
@@ -1552,7 +1552,6 @@ nsRefreshDriver::RunFrameRequestCallbacks(int64_t aNowEpoch, TimeStamp aNowTime)
 
   if (!frameRequestCallbacks.IsEmpty()) {
     profiler_tracing("Paint", "Scripts", TRACING_INTERVAL_START);
-    int64_t eventTime = aNowEpoch / PR_USEC_PER_MSEC;
     for (const DocumentFrameCallbacks& docCallbacks : frameRequestCallbacks) {
       // XXXbz Bug 863140: GetInnerWindow can return the outer
       // window in some cases.
@@ -1565,15 +1564,10 @@ nsRefreshDriver::RunFrameRequestCallbacks(int64_t aNowEpoch, TimeStamp aNowTime)
         }
         // else window is partially torn down already
       }
-      for (const nsIDocument::FrameRequestCallbackHolder& holder :
-           docCallbacks.mCallbacks) {
-        nsAutoMicroTask mt;
-        if (holder.HasWebIDLCallback()) {
-          ErrorResult ignored;
-          holder.GetWebIDLCallback()->Call(timeStamp, ignored);
-        } else {
-          holder.GetXPCOMCallback()->Sample(eventTime);
-        }
+      for (auto& callback : docCallbacks.mCallbacks) {
+        ErrorResult ignored;
+        callback->Call(timeStamp, ignored);
+        ignored.SuppressException();
       }
     }
     profiler_tracing("Paint", "Scripts", TRACING_INTERVAL_END);
@@ -1818,7 +1812,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     for (nsDocShell* docShell : profilingDocShells) {
       // For the sake of the profile timeline's simplicity, this is flagged as
       // paint even if it includes creating display lists
-      docShell->AddProfileTimelineMarker("Paint", TRACING_INTERVAL_START);
+      TimelineConsumers::AddMarkerForDocShell(docShell, "Paint", TRACING_INTERVAL_START);
     }
 #ifdef MOZ_DUMP_PAINTING
     if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
@@ -1835,7 +1829,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     }
 #endif
     for (nsDocShell* docShell : profilingDocShells) {
-      docShell->AddProfileTimelineMarker("Paint", TRACING_INTERVAL_END);
+      TimelineConsumers::AddMarkerForDocShell(docShell, "Paint", TRACING_INTERVAL_END);
     }
 
     if (nsContentUtils::XPConnect()) {

@@ -197,6 +197,14 @@ public:
     }
 
     /**
+    * Returns true if the context is using WARP. This should only be overridden
+    * for an ANGLE implementation.
+    */
+    virtual bool IsWARP() const {
+        return false;
+    }
+
+    /**
      * Return true if we are running on a OpenGL core profile context
      */
     inline bool IsCoreProfile() const {
@@ -2376,6 +2384,22 @@ public:
 // -----------------------------------------------------------------------------
 //  GL 3.0, GL ES 3.0 & EXT_gpu_shader4
 public:
+    void fGetVertexAttribIiv(GLuint index, GLenum pname, GLint* params)
+    {
+        ASSERT_SYMBOL_PRESENT(fGetVertexAttribIiv);
+        BEFORE_GL_CALL;
+        mSymbols.fGetVertexAttribIiv(index, pname, params);
+        AFTER_GL_CALL;
+    }
+
+    void fGetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params)
+    {
+        ASSERT_SYMBOL_PRESENT(fGetVertexAttribIuiv);
+        BEFORE_GL_CALL;
+        mSymbols.fGetVertexAttribIuiv(index, pname, params);
+        AFTER_GL_CALL;
+    }
+
     void fVertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w)
     {
         BEFORE_GL_CALL;

@@ -22,6 +22,8 @@ browser.jar:
 #endif
         skin/classic/browser/aboutTabCrashed.css                     (../shared/aboutTabCrashed.css)
         skin/classic/browser/actionicon-tab.png
+        skin/classic/browser/actionicon-tab@2x.png
+        skin/classic/browser/actionicon-tab-XPVista7.png
         skin/classic/browser/addons/addon-install-blocked.svg        (../shared/addons/addon-install-blocked.svg)
         skin/classic/browser/addons/addon-install-confirm.svg        (../shared/addons/addon-install-confirm.svg)
         skin/classic/browser/addons/addon-install-downloading.svg    (../shared/addons/addon-install-downloading.svg)
@@ -105,6 +107,8 @@ browser.jar:
         skin/classic/browser/privatebrowsing-mask-titlebar-XPVista7-tall.png
         skin/classic/browser/reload-stop-go.png
         skin/classic/browser/reload-stop-go@2x.png
+        skin/classic/browser/reload-stop-go-preWin10.png
+        skin/classic/browser/reload-stop-go-preWin10@2x.png
         skin/classic/browser/searchbar.css
         skin/classic/browser/searchbar-dropdown-arrow.png
         skin/classic/browser/searchbar-dropdown-arrow-XP.png
@@ -118,6 +122,8 @@ browser.jar:
         skin/classic/browser/search-indicator-badge-add.png          (../shared/search/search-indicator-badge-add.png)
         skin/classic/browser/search-indicator-badge-add@2x.png       (../shared/search/search-indicator-badge-add@2x.png)
         skin/classic/browser/search-history-icon.svg                 (../shared/search/history-icon.svg)
+        skin/classic/browser/search-indicator-magnifying-glass.svg   (../shared/search/search-indicator-magnifying-glass.svg)
+        skin/classic/browser/search-arrow-go.svg                     (../shared/search/search-arrow-go.svg)
         skin/classic/browser/setDesktopBackground.css
         skin/classic/browser/slowStartup-16.png
         skin/classic/browser/theme-switcher-icon.png                 (../shared/theme-switcher-icon.png)
@@ -142,6 +148,8 @@ browser.jar:
         skin/classic/browser/urlbar-popup-blocked.png
         skin/classic/browser/urlbar-history-dropmarker.png
         skin/classic/browser/urlbar-history-dropmarker@2x.png
+        skin/classic/browser/urlbar-history-dropmarker-preWin10.png
+        skin/classic/browser/urlbar-history-dropmarker-preWin10@2x.png
         skin/classic/browser/session-restore.svg                     (../shared/incontent-icons/session-restore.svg)
         skin/classic/browser/tab-crashed.svg                         (../shared/incontent-icons/tab-crashed.svg)
         skin/classic/browser/welcome-back.svg                        (../shared/incontent-icons/welcome-back.svg)
@@ -598,8 +606,7 @@ browser.jar:
 #ifdef E10S_TESTING_ONLY
         skin/classic/browser/e10s-64@2x.png (../shared/e10s-64@2x.png)
 #endif
-        skin/classic/browser/warning16.png                            (../shared/warning16.png)
-        skin/classic/browser/warning16@2x.png                         (../shared/warning16@2x.png)
+        skin/classic/browser/warning.svg                            (../shared/warning.svg)
 
 ../extensions/{972ce4c6-7e08-4474-a285-3208198ce6fd}/chrome.jar:
 % override chrome://browser/skin/page-livemarks.png                   chrome://browser/skin/feeds/feedIcon16.png
@@ -640,6 +647,7 @@ browser.jar:
 % override chrome://browser/skin/preferences/saveFile.png             chrome://browser/skin/preferences/saveFile-XP.png                 os=WINNT osversion<6
 % override chrome://browser/skin/tabbrowser/tab-separator.png         chrome://browser/skin/tabbrowser/tab-separator-XP.png             os=WINNT osversion<6
 
+% override chrome://browser/skin/actionicon-tab.png                   chrome://browser/skin/actionicon-tab-XPVista7.png                 os=WINNT osversion<=6.1
 % override chrome://browser/skin/sync-horizontalbar.png               chrome://browser/skin/sync-horizontalbar-XPVista7.png             os=WINNT osversion<=6.1
 % override chrome://browser/skin/sync-horizontalbar@2x.png            chrome://browser/skin/sync-horizontalbar-XPVista7@2x.png          os=WINNT osversion<=6.1
 % override chrome://browser/skin/syncProgress-horizontalbar.png       chrome://browser/skin/syncProgress-horizontalbar-XPVista7.png     os=WINNT osversion<=6.1
@@ -690,4 +698,9 @@ browser.jar:
 % override chrome://browser/skin/preferences/checkbox.png             chrome://browser/skin/preferences/checkbox-aero.png               os=WINNT osversion=6
 % override chrome://browser/skin/preferences/checkbox.png             chrome://browser/skin/preferences/checkbox-aero.png               os=WINNT osversion=6.1
 % override chrome://browser/skin/preferences/checkbox.png             chrome://browser/skin/preferences/checkbox-xp.png                 os=WINNT osversion<6
+
+% override chrome://browser/skin/reload-stop-go.png                   chrome://browser/skin/reload-stop-go-preWin10.png                 os=WINNT osversion<=6.3
+% override chrome://browser/skin/reload-stop-go@2x.png                chrome://browser/skin/reload-stop-go-preWin10@2x.png              os=WINNT osversion<=6.3
+% override chrome://browser/skin/urlbar-history-dropmarker.png        chrome://browser/skin/urlbar-history-dropmarker-preWin10.png      os=WINNT osversion<=6.3
+% override chrome://browser/skin/urlbar-history-dropmarker@2x.png     chrome://browser/skin/urlbar-history-dropmarker-preWin10@2x.png   os=WINNT osversion<=6.3
 

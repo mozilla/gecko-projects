@@ -1008,13 +1008,10 @@ CodeGenerator::visitRegExp(LRegExp* lir)
     callVM(CloneRegExpObjectInfo, lir);
 }
 
-// The maximum number of pairs we can handle when executing RegExps inline.
-static const size_t RegExpMaxPairCount = 6;
-
 // Amount of space to reserve on the stack when executing RegExps inline.
 static const size_t RegExpReservedStack = sizeof(irregexp::InputOutputData)
                                         + sizeof(MatchPairs)
-                                        + RegExpMaxPairCount * sizeof(MatchPair);
+                                        + RegExpObject::MaxPairCount * sizeof(MatchPair);
 
 static size_t
 RegExpPairsVectorStartOffset(size_t inputOutputDataStartOffset)
@@ -1093,7 +1090,7 @@ PrepareAndExecuteRegExp(JSContext* cx, MacroAssembler& masm, Register regexp, Re
     if (mode == RegExpShared::Normal) {
         // Don't handle RegExps with excessive parens.
         masm.load32(Address(temp1, RegExpShared::offsetOfParenCount()), temp2);
-        masm.branch32(Assembler::AboveOrEqual, temp2, Imm32(RegExpMaxPairCount), failure);
+        masm.branch32(Assembler::AboveOrEqual, temp2, Imm32(RegExpObject::MaxPairCount), failure);
 
         // Fill in the paren count in the MatchPairs on the stack.
         masm.add32(Imm32(1), temp2);
@@ -1342,7 +1339,7 @@ JitCompartment::generateRegExpExecStub(JSContext* cx)
 
     // The template object should have enough space for the maximum number of
     // pairs this stub can handle.
-    MOZ_ASSERT(ObjectElements::VALUES_PER_HEADER + RegExpMaxPairCount ==
+    MOZ_ASSERT(ObjectElements::VALUES_PER_HEADER + RegExpObject::MaxPairCount ==
                gc::GetGCKindSlots(templateObject->asTenured().getAllocKind()));
 
     MacroAssembler masm(cx);
@@ -2742,6 +2739,7 @@ CodeGenerator::visitPostWriteBarrierO(LPostWriteBarrierO* lir)
     Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
+        // Constant nursery objects cannot appear here, see LIRGenerator::visitPostWriteBarrier.
         MOZ_ASSERT(!IsInsideNursery(&lir->object()->toConstant()->toObject()));
     } else {
         masm.branchPtrInNurseryRange(Assembler::Equal, ToRegister(lir->object()), temp,
@@ -2762,9 +2760,8 @@ CodeGenerator::visitPostWriteBarrierV(LPostWriteBarrierV* lir)
     Register temp = ToTempRegisterOrInvalid(lir->temp());
 
     if (lir->object()->isConstant()) {
-#ifdef DEBUG
+        // Constant nursery objects cannot appear here, see LIRGenerator::visitPostWriteBarrier.
         MOZ_ASSERT(!IsInsideNursery(&lir->object()->toConstant()->toObject()));
-#endif
     } else {
         masm.branchPtrInNurseryRange(Assembler::Equal, ToRegister(lir->object()), temp,
                                      ool->rejoin());
@@ -3613,7 +3610,7 @@ CodeGenerator::generateArgumentsChecks(bool bailout)
                     continue;
 
                 Label skip;
-                Address addr(StackPointer, ArgToStackOffset((i - info.startArgSlot()) * sizeof(Value)));
+                Address addr(masm.getStackPointer(), ArgToStackOffset((i - info.startArgSlot()) * sizeof(Value)));
                 masm.branchTestObject(Assembler::NotEqual, addr, &skip);
                 Register obj = masm.extractObject(addr, temp);
                 masm.guardTypeSetMightBeIncomplete(types, obj, temp, &success);
