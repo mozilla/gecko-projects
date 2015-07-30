@@ -105,6 +105,12 @@ static PRLogModuleInfo* gMediaElementEventsLog;
 
 #include "mozilla/EventStateManager.h"
 
+#if defined(MOZ_B2G) && !defined(MOZ_GRAPHENE)
+// This controls the b2g specific of pausing the media element when the
+// AudioChannel tells us to mute it.
+#define PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
+#endif
+
 using namespace mozilla::layers;
 using mozilla::net::nsMediaFragmentURIParser;
 
@@ -1420,6 +1426,12 @@ HTMLMediaElement::Seek(double aTime,
   // aTime should be non-NaN.
   MOZ_ASSERT(!mozilla::IsNaN(aTime));
 
+  // Detect if user has interacted with element by seeking so that
+  // play will not be blocked when initiated by a script.
+  if (EventStateManager::IsHandlingUserInput() || nsContentUtils::IsCallerChrome()) {
+    mHasUserInteraction = true;
+  }
+
   StopSuspendingAfterFirstFrame();
 
   if (mSrcStream) {
@@ -1706,36 +1718,6 @@ NS_IMETHODIMP HTMLMediaElement::SetVolume(double aVolume)
   return rv.StealNSResult();
 }
 
-// Helper struct with arguments for our hash iterator.
-typedef struct MOZ_STACK_CLASS {
-  JSContext* cx;
-  JS::Handle<JSObject*> tags;
-  bool error;
-} MetadataIterCx;
-
-PLDHashOperator
-HTMLMediaElement::BuildObjectFromTags(nsCStringHashKey::KeyType aKey,
-                                      nsCString aValue,
-                                      void* aUserArg)
-{
-  MetadataIterCx* args = static_cast<MetadataIterCx*>(aUserArg);
-
-  nsString wideValue = NS_ConvertUTF8toUTF16(aValue);
-  JS::Rooted<JSString*> string(args->cx, JS_NewUCStringCopyZ(args->cx, wideValue.Data()));
-  if (!string) {
-    NS_WARNING("Failed to perform string copy");
-    args->error = true;
-    return PL_DHASH_STOP;
-  }
-  if (!JS_DefineProperty(args->cx, args->tags, aKey.Data(), string, JSPROP_ENUMERATE)) {
-    NS_WARNING("Failed to set metadata property");
-    args->error = true;
-    return PL_DHASH_STOP;
-  }
-
-  return PL_DHASH_NEXT;
-}
-
 void
 HTMLMediaElement::MozGetMetadata(JSContext* cx,
                                  JS::MutableHandle<JSObject*> aRetval,
@@ -1752,12 +1734,16 @@ HTMLMediaElement::MozGetMetadata(JSContext* cx,
     return;
   }
   if (mTags) {
-    MetadataIterCx iter = {cx, tags, false};
-    mTags->EnumerateRead(BuildObjectFromTags, static_cast<void*>(&iter));
-    if (iter.error) {
-      NS_WARNING("couldn't create metadata object!");
-      aRv.Throw(NS_ERROR_FAILURE);
-      return;
+    for (auto iter = mTags->ConstIter(); !iter.Done(); iter.Next()) {
+      nsString wideValue = NS_ConvertUTF8toUTF16(iter.UserData());
+      JS::Rooted<JSString*> string(cx,
+                                   JS_NewUCStringCopyZ(cx, wideValue.Data()));
+      if (!string || !JS_DefineProperty(cx, tags, iter.Key().Data(), string,
+                                        JSPROP_ENUMERATE)) {
+        NS_WARNING("couldn't create metadata object!");
+        aRv.Throw(NS_ERROR_FAILURE);
+        return;
+      }
     }
   }
 
@@ -2056,7 +2042,8 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mPlayingThroughTheAudioChannel(false),
     mDisableVideo(false),
     mPlayBlockedBecauseHidden(false),
-    mElementInTreeState(ELEMENT_NOT_INTREE)
+    mElementInTreeState(ELEMENT_NOT_INTREE),
+    mHasUserInteraction(false)
 {
   if (!gMediaElementLog) {
     gMediaElementLog = PR_NewLogModule("nsMediaElement");
@@ -2172,14 +2159,16 @@ HTMLMediaElement::Play(ErrorResult& aRv)
 {
   // Prevent media element from being auto-started by a script when
   // media.autoplay.enabled=false
-  nsRefPtr<TimeRanges> played(Played());
-  if (played->Length() == 0
+  if (!mHasUserInteraction
       && !IsAutoplayEnabled()
       && !EventStateManager::IsHandlingUserInput()
       && !nsContentUtils::IsCallerChrome()) {
     LOG(LogLevel::Debug, ("%p Blocked attempt to autoplay media.", this));
     return;
   }
+
+  // Play was not blocked so assume user interacted with the element.
+  mHasUserInteraction = true;
 
   StopSuspendingAfterFirstFrame();
   SetPlayedOrSeeked(true);
@@ -4021,7 +4010,7 @@ HTMLMediaElement::NotifyOwnerDocumentActivityChangedInternal()
   }
 
   bool pauseElement = !IsActive();
-#ifdef MOZ_B2G
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
   pauseElement |= ComputedMuted();
 #endif
 
@@ -4465,7 +4454,7 @@ nsresult HTMLMediaElement::UpdateChannelMuteState(float aVolume, bool aMuted)
     }
   }
 
-#ifdef MOZ_B2G
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
   SuspendOrResumeElement(ComputedMuted(), false);
 #endif
   return NS_OK;
@@ -4535,7 +4524,7 @@ NS_IMETHODIMP HTMLMediaElement::WindowVolumeChanged(float aVolume, bool aMuted)
 
   UpdateChannelMuteState(aVolume, aMuted);
 
-#ifdef MOZ_B2G
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
   mPaused.SetCanPlay(!aMuted);
 #endif
 

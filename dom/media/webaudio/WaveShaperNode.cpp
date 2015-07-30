@@ -232,7 +232,7 @@ public:
       float* scaledSample = (float *)(aInput.mChannelData[i]);
       AudioBlockInPlaceScale(scaledSample, aInput.mVolume);
       const float* inputBuffer = static_cast<const float*>(scaledSample);
-      float* outputBuffer = const_cast<float*> (static_cast<const float*>(aOutput->mChannelData[i]));
+      float* outputBuffer = aOutput->ChannelFloatsForWrite(i);
       float* sampleBuffer;
 
       switch (mType) {
@@ -324,10 +324,14 @@ WaveShaperNode::SetCurve(const Nullable<Float32Array>& aCurve, ErrorResult& aRv)
       return;
     }
 
-    mCurve = floats.Obj();
+    if (!curve.SetLength(argLength, fallible)) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return;
+    }
 
-    curve.SetLength(argLength);
     PodCopy(curve.Elements(), floats.Data(), floats.Length());
+
+    mCurve = floats.Obj();
   } else {
     mCurve = nullptr;
   }

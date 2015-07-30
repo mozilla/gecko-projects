@@ -95,6 +95,18 @@ HMDInfoCardboard::HMDInfoCardboard()
   mMaximumEyeFOV[Eye_Right] = VRFieldOfView(45.0, 45.0, 45.0, 45.0);
 
   SetFOV(mRecommendedEyeFOV[Eye_Left], mRecommendedEyeFOV[Eye_Right], 0.01, 10000.0);
+
+#if 1
+  int32_t xcoord = 0;
+  if (PR_GetEnv("FAKE_CARDBOARD_SCREEN")) {
+      const char *env = PR_GetEnv("FAKE_CARDBOARD_SCREEN");
+      nsresult err;
+      xcoord = nsCString(env).ToInteger(&err);
+      if (err != NS_OK) xcoord = 0;
+  }
+  mScreen = VRHMDManager::MakeFakeScreen(xcoord, 0, 1920, 1080);
+#endif
+
 }
 
 bool
@@ -265,6 +277,12 @@ HMDInfoCardboard::SetFOV(const VRFieldOfView& aFOVLeft,
   mEyeResolution.width = 1920 / 2;
   mEyeResolution.height = 1080;
 
+  if (PR_GetEnv("FAKE_CARDBOARD_SCREEN")) {
+    // for testing, make the eye resolution 2x of the screen
+    mEyeResolution.width *= 2;
+    mEyeResolution.height *= 2;
+  }
+
   mConfiguration.hmdType = mType;
   mConfiguration.value = 0;
   mConfiguration.fov[0] = aFOVLeft;
@@ -282,8 +300,13 @@ HMDInfoCardboard::FillDistortionConstants(uint32_t whichEye,
   // these modify the texture coordinates; texcoord * zw + xy
   values.eyeToSourceScaleAndOffset[0] = 0.0;
   values.eyeToSourceScaleAndOffset[1] = 0.0;
-  values.eyeToSourceScaleAndOffset[2] = 1.0;
-  values.eyeToSourceScaleAndOffset[3] = 1.0;
+  if (PR_GetEnv("FAKE_CARDBOARD_SCREEN")) {
+    values.eyeToSourceScaleAndOffset[2] = 2.0;
+    values.eyeToSourceScaleAndOffset[3] = 2.0;
+  } else {
+    values.eyeToSourceScaleAndOffset[2] = 1.0;
+    values.eyeToSourceScaleAndOffset[3] = 1.0;
+  }
 
   // Our mesh positions are in the [-1..1] clip space; we give appropriate offset
   // and scaling for the right viewport.  (In the 0..2 space for sanity)
@@ -313,7 +336,7 @@ HMDInfoCardboard::Destroy()
 bool
 VRHMDManagerCardboard::PlatformInit()
 {
-  return gfxPrefs::VRCardboardEnabled();
+  return gfxPrefs::VREnabled() && gfxPrefs::VRCardboardEnabled();
 }
 
 bool

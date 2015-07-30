@@ -639,7 +639,6 @@ CompositorD3D11::DrawVRDistortion(const gfx::Rect& aRect,
     static_cast<EffectVRDistortion*>(aEffectChain.mPrimaryEffect.get());
 
   TextureSourceD3D11* source = vrEffect->mTexture->AsSourceD3D11();
-  gfx::IntSize size = vrEffect->mRenderTarget->GetSize(); // XXX source->GetSize()
 
   VRHMDInfo* hmdInfo = vrEffect->mHMD;
   VRHMDType hmdType = hmdInfo->GetType();
@@ -705,27 +704,25 @@ CompositorD3D11::DrawVRDistortion(const gfx::Rect& aRect,
 
   // This is the source texture SRV for the pixel shader
   ID3D11ShaderResourceView* srView = source->GetShaderResourceView();
-  if (!srView) {
-    NS_WARNING("Couldn't get ShaderResourceView!");
-    return;
-  }
   mContext->PSSetShaderResources(0, 1, &srView);
 
-  gfx::IntSize vpSizeInt = mCurrentRT->GetSize();
-  gfx::Size vpSize(vpSizeInt.width, vpSizeInt.height);
+  Rect destRect = aTransform.TransformBounds(aRect);
+  gfx::IntSize preDistortionSize = vrEffect->mRenderTarget->GetSize(); // XXX source->GetSize()
+  gfx::Size vpSize = destRect.Size();
+
   ID3D11Buffer* vbuffer;
   UINT vsize, voffset;
 
   for (uint32_t eye = 0; eye < 2; eye++) {
     gfx::IntRect eyeViewport;
-    eyeViewport.x = eye * size.width / 2;
+    eyeViewport.x = eye * preDistortionSize.width / 2;
     eyeViewport.y = 0;
-    eyeViewport.width = size.width / 2;
-    eyeViewport.height = size.height;
+    eyeViewport.width = preDistortionSize.width / 2;
+    eyeViewport.height = preDistortionSize.height;
 
     hmdInfo->FillDistortionConstants(eye,
-                                     size, eyeViewport,
-                                     vpSize, aRect,
+                                     preDistortionSize, eyeViewport,
+                                     vpSize, destRect,
                                      shaderConstants);
 
     // D3D has clip space top-left as -1,1 so we need to flip the Y coordinate offset here
@@ -733,9 +730,14 @@ CompositorD3D11::DrawVRDistortion(const gfx::Rect& aRect,
 
     // XXX I really want to write a templated helper for these next 4 lines
     D3D11_MAPPED_SUBRESOURCE resource;
-    mContext->Map(mAttachments->mVRDistortionConstants, 0, D3D11_MAP_WRITE_DISCARD, 0, &resource);
+    hr = mContext->Map(mAttachments->mVRDistortionConstants, 0, D3D11_MAP_WRITE_DISCARD, 0, &resource);
+    if (FAILED(hr) || !resource.pData) {
+      gfxCriticalError() << "Failed to map VRDistortionConstants. Result: " << hr;
+      return;
+    }
     *(gfx::VRDistortionConstants*)resource.pData = shaderConstants;
     mContext->Unmap(mAttachments->mVRDistortionConstants, 0);
+    resource.pData = nullptr;
 
     // XXX is there a better way to change a bunch of these things from what they were set to
     // in BeginFrame/etc?
@@ -808,13 +810,6 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
     }
 
     ID3D11ShaderResourceView* srView = source->GetShaderResourceView();
-    if (!srView) {
-      // XXX - There's a chance we won't be able to render anything, should we
-      // just crash release builds?
-      gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false))
-        << "Failed in DrawQuad 1 - Couldn't get ShaderResourceView!";
-      return;
-    }
     mContext->PSSetShaderResources(3, 1, &srView);
 
     const gfx::Matrix4x4& maskTransform = maskEffect->mMaskTransform;
@@ -876,13 +871,6 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
       SetPSForEffect(aEffectChain.mPrimaryEffect, maskType, texturedEffect->mTexture->GetFormat());
 
       ID3D11ShaderResourceView* srView = source->GetShaderResourceView();
-      if (!srView) {
-        // XXX - There's a chance we won't be able to render anything, should we
-        // just crash release builds?
-        gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false))
-          << "Failed in DrawQuad 2 - Couldn't get ShaderResourceView!";
-        return;
-      }
       mContext->PSSetShaderResources(0, 1, &srView);
 
       if (!texturedEffect->mPremultiplied) {
@@ -924,11 +912,6 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
       ID3D11ShaderResourceView* srViews[3] = { sourceY->GetShaderResourceView(),
                                                sourceCb->GetShaderResourceView(),
                                                sourceCr->GetShaderResourceView() };
-      if (!srViews[0] || !srViews[1] || !srViews[2]) {
-        gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false))
-          << "Failed in DrawQuad 3 - Couldn't get ShaderResourceView!";
-        return;
-      }
       mContext->PSSetShaderResources(0, 3, srViews);
     }
     break;
@@ -955,11 +938,6 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
 
       ID3D11ShaderResourceView* srViews[2] = { sourceOnBlack->GetShaderResourceView(),
                                                sourceOnWhite->GetShaderResourceView() };
-      if (!srViews[0] || !srViews[1]) {
-        gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false))
-          << "Failed in DrawQuad 4 - Couldn't get ShaderResourceView!";
-        return;
-      }
       mContext->PSSetShaderResources(0, 2, srViews);
 
       mContext->OMSetBlendState(mAttachments->mComponentBlendState, sBlendFactor, 0xFFFFFFFF);

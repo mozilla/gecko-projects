@@ -276,7 +276,6 @@ HMDInfoOculus::HMDInfoOculus(ovrHmd aHMD)
 
   SetFOV(mRecommendedEyeFOV[Eye_Left], mRecommendedEyeFOV[Eye_Right], 0.01, 10000.0);
 
-
 #if 1
   int32_t xcoord = 0;
   if (getenv("FAKE_OCULUS_SCREEN")) {
@@ -289,7 +288,9 @@ HMDInfoOculus::HMDInfoOculus(ovrHmd aHMD)
   uint32_t h = mHMD->Resolution.h;
   mScreen = VRHMDManager::MakeFakeScreen(xcoord, 0, std::max(w, h), std::min(w, h));
 
+#ifdef DEBUG
   printf_stderr("OCULUS SCREEN: %d %d %d %d\n", xcoord, 0, std::max(w, h), std::min(w, h));
+#endif
 #endif
 }
 
@@ -338,8 +339,6 @@ HMDInfoOculus::SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFOVRi
   mConfiguration.fov[1] = aFOVRight;
 
   return true;
-  //* need to call this during rendering each frame I think? */
-  //ovrHmd_GetRenderScaleAndOffset(fovPort, texSize, renderViewport, uvScaleOffsetOut);
 }
 
 void
@@ -585,8 +584,11 @@ VRHMDManagerOculus::PlatformInit()
   if (mOculusPlatformInitialized)
     return true;
 
-  if (!gfxPrefs::VREnabled())
+  if (!gfxPrefs::VREnabled() ||
+      !gfxPrefs::VROculusEnabled())
+  {
     return false;
+  }
 
   if (!InitializeOculusCAPI())
     return false;

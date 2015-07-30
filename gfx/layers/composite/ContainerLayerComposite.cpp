@@ -24,7 +24,7 @@
 #include "mozilla/layers/AsyncCompositionManager.h" // for ViewTransform
 #include "mozilla/layers/LayerMetricsWrapper.h" // for LayerMetricsWrapper
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsRefPtr.h"                   // for nsRefPtr
+#include "mozilla/nsRefPtr.h"                   // for nsRefPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsISupportsUtils.h"           // for NS_ADDREF, NS_RELEASE
@@ -190,9 +190,10 @@ ContainerRenderVR(ContainerT* aContainer,
   }
 
   gfx::IntRect rtBounds = previousTarget->GetRect();
-  DUMP("eyeResolution: %d %d targetRT: %d %d %d %d\n",
-       WH(eyeResolution), XYWH(rtBounds));
-  
+  DUMP("eyeResolution: %d %d targetRT: %d %d %d %d\n", WH(eyeResolution), XYWH(rtBounds));
+
+  compositor->SetRenderTarget(surface);
+
   nsAutoTArray<Layer*, 12> children;
   aContainer->SortChildrenBy3DZOrder(children);
 
@@ -236,7 +237,7 @@ ContainerRenderVR(ContainerT* aContainer,
     // the child layer of this VR container layer has PRESERVE_3D or not.
     if ((contentFlags & Layer::CONTENT_PRESERVE_3D) == 0) {
       // This layer is native VR
-      DUMP("%p pre-rendered VR layer %p\n", aContainer, layerToRender);
+      DUMP("%p Switching to pre-rendered VR\n", aContainer);
 
       // XXX we still need depth test here, but we have no way of preserving
       // depth anyway in native VR layers until we have a way to save them
@@ -258,7 +259,7 @@ ContainerRenderVR(ContainerT* aContainer,
       } else {
         layerBounds = layer->GetEffectiveVisibleRegion().GetBounds();
       }
-      DUMP("  layer %p bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", layer,
+      DUMP("  layer %p [type %d] bounds [%d %d %d %d] surfaceRect [%d %d %d %d]\n", layer, (int) layer->GetType(),
            XYWH(layerBounds), XYWH(surfaceRect));
       
       const gfx::Matrix4x4 childTransform = layer->GetEffectiveTransform();
@@ -335,18 +336,18 @@ ContainerRenderVR(ContainerT* aContainer,
   aManager->GetCompositor()->DrawQuad(rect, rect, solidEffect, 1.0, gfx::Matrix4x4());
 
   // draw the temporary surface with VR distortion to the original destination
-  gfx::Matrix4x4 scaleTransform = aContainer->GetEffectiveTransform();
   EffectChain vrEffect(aContainer);
   bool skipDistortion = vrRendering || PR_GetEnv("MOZ_GFX_VR_NO_DISTORTION");
   if (skipDistortion) {
     vrEffect.mPrimaryEffect = new EffectRenderTarget(surface);
-    scaleTransform.PreScale(rtBounds.width / float(surfaceRect.width),
-                            rtBounds.height / float(surfaceRect.height),
-                            1.0f);
   } else {
     vrEffect.mPrimaryEffect = new EffectVRDistortion(aHMD, surface);
-    // no need to scale, because the VRDistortion effect will sample from surface
   }
+
+  gfx::Matrix4x4 scaleTransform = aContainer->GetEffectiveTransform();
+  scaleTransform.PreScale(rtBounds.width / float(surfaceRect.width),
+                          rtBounds.height / float(surfaceRect.height),
+                          1.0f);
 
   // XXX we shouldn't use visibleRect here -- the VR distortion needs to know the
   // full rect, not just the visible one.  Luckily, right now, VR distortion is only

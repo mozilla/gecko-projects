@@ -64,6 +64,8 @@ public:
 
   virtual gfx::DrawTarget* BorrowDrawTarget() override;
 
+  virtual void UpdateFromSurface(gfx::DataSourceSurface* aSurface) override;
+
   virtual bool AllocateForSurface(gfx::IntSize aSize,
                                   TextureAllocationFlags aFlags = ALLOC_DEFAULT) override;
 
@@ -192,6 +194,8 @@ public:
 
   virtual ID3D11Texture2D* GetD3D11Texture() const override;
 
+  virtual ID3D11ShaderResourceView* GetShaderResourceView() override;
+
   virtual DataTextureSource* AsDataTextureSource() override { return this; }
 
   virtual void DeallocateDeviceData() override { mTexture = nullptr; }
@@ -226,6 +230,7 @@ protected:
   void Reset();
 
   std::vector< RefPtr<ID3D11Texture2D> > mTileTextures;
+  std::vector< RefPtr<ID3D11ShaderResourceView> > mTileSRVs;
   RefPtr<CompositorD3D11> mCompositor;
   gfx::SurfaceFormat mFormat;
   TextureFlags mFlags;

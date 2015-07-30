@@ -552,12 +552,13 @@ The layout of the identity dialog prevents combining this into a single string w
 substitution variables.  If it is difficult to translate the sense of the string
 with that structure, consider a translation which ignores the preceding domain and
 just addresses the organization to follow, e.g. "This site is run by " -->
-<!ENTITY identity_run_by "which is run by">
-<!ENTITY identity_no_info "This website does not supply identity information.">
-<!ENTITY identity_not_encrypted "Your connection to this website is not encrypted.">
-<!ENTITY identity_encrypted "Encrypted">
+<!ENTITY identity_connection_secure "Secure Connection">
+<!ENTITY identity_connection_insecure "Insecure connection">
 
 <!-- Mixed content notifications in site identity popup -->
+<!ENTITY mixed_content_blocked_all "&brandShortName; has blocked insecure elements on this page.">
+<!ENTITY mixed_content_protection_disabled "You have disabled protection from insecure elements.">
+
 <!ENTITY loaded_mixed_content_message "This page is displaying content that isn\'t secure.">
 <!ENTITY blocked_mixed_content_message_top "&brandShortName; has blocked content that isn\'t secure.">
 <!ENTITY blocked_mixed_content_message_bottom "Most websites will still work properly even when this content is blocked.">
@@ -566,8 +567,8 @@ just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY doorhanger_tracking_title "Tracking protection">
 <!ENTITY doorhanger_tracking_state_enabled "Enabled">
 <!ENTITY doorhanger_tracking_state_disabled "Disabled">
-<!ENTITY doorhanger_tracking_message_enabled "Blocking tracking elements that may affect your browsing experience.">
-<!ENTITY doorhanger_tracking_message_disabled "Attempts to track your online behavior are not being blocked.">
+<!ENTITY doorhanger_tracking_message_enabled1 "Attempts to track your online behavior have been blocked.">
+<!ENTITY doorhanger_tracking_message_disabled1 "This site includes content that tracks your browsing.">
 
 <!-- Common mixed and tracking content strings in site identity popup -->
 <!ENTITY learn_more "Learn More">
@@ -678,3 +679,18 @@ just addresses the organization to follow, e.g. "This site is run by " -->
      desktop Firefox via WebIDE), so you just need to aim this device at the QR
      code. -->
 <!ENTITY devtools_auth_scan_header "Scanning for the QR code displayed on your other device">
+
+<!-- Restrictions -->
+<!-- Localization note: These are restrictions the device owner (e.g. parent) can enable for
+     a restricted profile (e.g. child). Used inside the Android settings UI. -->
+<!ENTITY restriction_disallow_tools_menu_title "Disallow Tools menu">
+<!ENTITY restriction_disallow_tools_menu_description "Hide Tools menu from UI.">
+<!ENTITY restriction_disallow_report_site_issue_title "Disallow \'Report site issue\'">
+<!ENTITY restriction_disallow_report_site_issue_description "Hide \'Report site issue\' menu item.">
+<!ENTITY restriction_disallow_import_settings_title "Disallow importing settings">
+<!ENTITY restriction_disallow_import_settings_description "Do not allow to import settings from other system browsers.">
+<!ENTITY restriction_disallow_addons_title "Disallow add-ons">
+<!ENTITY restriction_disallow_addons_description "Disallow installation of add-ons.">
+<!ENTITY restriction_disallow_apps_title "Disallow apps">
+<!ENTITY restriction_disallow_apps_description "Disallow installing apps from Firefox Marketplace.">
+

@@ -8,7 +8,7 @@
 #define nsAutoPtr_h
 
 #include "nsCOMPtr.h"
-#include "nsRefPtr.h"
+#include "mozilla/nsRefPtr.h"
 
 #include "nsCycleCollectionNoteChild.h"
 #include "mozilla/MemoryReporting.h"
@@ -97,7 +97,7 @@ public:
   }
 
   template <typename I>
-  nsAutoPtr(nsAutoPtr<I>& aSmartPtr)
+  MOZ_IMPLICIT nsAutoPtr(nsAutoPtr<I>& aSmartPtr)
     : mRawPtr(aSmartPtr.forget())
     // Construct by transferring ownership from another smart pointer.
   {
@@ -110,7 +110,7 @@ public:
   }
 
   template <typename I>
-  nsAutoPtr(nsAutoPtr<I>&& aSmartPtr)
+  MOZ_IMPLICIT nsAutoPtr(nsAutoPtr<I>&& aSmartPtr)
     : mRawPtr(aSmartPtr.forget())
     // Construct by transferring ownership from another smart pointer.
   {

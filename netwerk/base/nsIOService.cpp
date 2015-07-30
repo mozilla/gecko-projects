@@ -49,6 +49,7 @@
 
 #ifdef MOZ_WIDGET_GONK
 #include "nsINetworkManager.h"
+#include "nsINetworkInterface.h"
 #endif
 
 #if defined(XP_WIN)
@@ -557,6 +558,9 @@ nsIOService::GetProtocolFlags(const char* scheme, uint32_t *flags)
     nsresult rv = GetProtocolHandler(scheme, getter_AddRefs(handler));
     if (NS_FAILED(rv)) return rv;
 
+    // We can't call DoGetProtocolFlags here because we don't have a URI. This
+    // API is used by (and only used by) extensions, which is why it's still
+    // around. Calling this on a scheme with dynamic flags will throw.
     rv = handler->GetProtocolFlags(flags);
     return rv;
 }
@@ -722,7 +726,7 @@ nsIOService::NewChannelFromURIWithProxyFlagsInternal(nsIURI* aURI,
         return rv;
 
     uint32_t protoFlags;
-    rv = handler->GetProtocolFlags(&protoFlags);
+    rv = handler->DoGetProtocolFlags(aURI, &protoFlags);
     if (NS_FAILED(rv))
         return rv;
 
@@ -1318,18 +1322,18 @@ IsWifiActive()
     if (!networkManager) {
         return false;
     }
-    nsCOMPtr<nsINetworkInterface> active;
-    networkManager->GetActive(getter_AddRefs(active));
-    if (!active) {
+    nsCOMPtr<nsINetworkInfo> activeNetworkInfo;
+    networkManager->GetActiveNetworkInfo(getter_AddRefs(activeNetworkInfo));
+    if (!activeNetworkInfo) {
         return false;
     }
     int32_t type;
-    if (NS_FAILED(active->GetType(&type))) {
+    if (NS_FAILED(activeNetworkInfo->GetType(&type))) {
         return false;
     }
     switch (type) {
-    case nsINetworkInterface::NETWORK_TYPE_WIFI:
-    case nsINetworkInterface::NETWORK_TYPE_WIFI_P2P:
+    case nsINetworkInfo::NETWORK_TYPE_WIFI:
+    case nsINetworkInfo::NETWORK_TYPE_WIFI_P2P:
         return true;
     default:
         return false;
@@ -1430,7 +1434,7 @@ nsIOService::Observe(nsISupports *subject,
         if (IsNeckoChild()) {
           return NS_OK;
         }
-        nsCOMPtr<nsINetworkInterface> interface = do_QueryInterface(subject);
+        nsCOMPtr<nsINetworkInfo> interface = do_QueryInterface(subject);
         if (!interface) {
             return NS_ERROR_FAILURE;
         }
@@ -1441,8 +1445,8 @@ nsIOService::Observe(nsISupports *subject,
 
         bool wifiActive = IsWifiActive();
         int32_t newWifiState = wifiActive ?
-            nsINetworkInterface::NETWORK_TYPE_WIFI :
-            nsINetworkInterface::NETWORK_TYPE_MOBILE;
+            nsINetworkInfo::NETWORK_TYPE_WIFI :
+            nsINetworkInfo::NETWORK_TYPE_MOBILE;
         if (mPreviousWifiState != newWifiState) {
             // Notify wifi-only apps of their new status
             int32_t status = wifiActive ?
@@ -1481,15 +1485,17 @@ nsIOService::ProtocolHasFlags(nsIURI   *uri,
     nsAutoCString scheme;
     nsresult rv = uri->GetScheme(scheme);
     NS_ENSURE_SUCCESS(rv, rv);
-  
-    uint32_t protocolFlags;
-    rv = GetProtocolFlags(scheme.get(), &protocolFlags);
 
-    if (NS_SUCCEEDED(rv)) {
-        *result = (protocolFlags & flags) == flags;
-    }
-  
-    return rv;
+    // Grab the protocol flags from the URI.
+    uint32_t protocolFlags;
+    nsCOMPtr<nsIProtocolHandler> handler;
+    rv = GetProtocolHandler(scheme.get(), getter_AddRefs(handler));
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = handler->DoGetProtocolFlags(uri, &protocolFlags);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    *result = (protocolFlags & flags) == flags;
+    return NS_OK;
 }
 
 NS_IMETHODIMP

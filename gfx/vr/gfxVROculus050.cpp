@@ -301,10 +301,10 @@ HMDInfoOculus050::SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFO
   float pixelsPerDisplayPixel = 1.0;
   ovrSizei texSize[2];
 
-  uint32_t caps = ovrDistortionCap_Chromatic | ovrDistortionCap_Vignette; // XXX TODO add TimeWarp
-
   mZNear = zNear;
   mZFar = zFar;
+
+  uint32_t caps = ovrDistortionCap_Chromatic | ovrDistortionCap_Vignette; // XXX TODO add TimeWarp
 
   // get eye parameters and create the mesh
   for (uint32_t eye = 0; eye < NumEyes; eye++) {
@@ -362,8 +362,6 @@ HMDInfoOculus050::SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFO
   mConfiguration.fov[1] = aFOVRight;
 
   return true;
-  //* need to call this during rendering each frame I think? */
-  //ovrHmd_GetRenderScaleAndOffset(fovPort, texSize, renderViewport, uvScaleOffsetOut);
 }
 
 void
@@ -485,8 +483,11 @@ VRHMDManagerOculus050::PlatformInit()
   if (mOculusPlatformInitialized)
     return true;
 
-  if (!gfxPrefs::VREnabled())
+  if (!gfxPrefs::VREnabled() ||
+      !gfxPrefs::VROculus050Enabled())
+  {
     return false;
+  }
 
   if (!InitializeOculusCAPI())
     return false;

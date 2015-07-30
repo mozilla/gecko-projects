@@ -10,7 +10,7 @@
 #include "nsIScreen.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
-#include "nsRefPtr.h"
+#include "mozilla/nsRefPtr.h"
 
 #include "mozilla/gfx/2D.h"
 #include "mozilla/EnumeratedArray.h"
@@ -250,8 +250,8 @@ public:
   static void ManagerDestroy();
   static void GetAllHMDs(nsTArray<nsRefPtr<VRHMDInfo>>& aHMDResult);
   static uint32_t AllocateDeviceIndex();
-
   static already_AddRefed<nsIScreen> MakeFakeScreen(int32_t x, int32_t y, uint32_t width, uint32_t height);
+
 protected:
   typedef nsTArray<nsRefPtr<VRHMDManager>> VRHMDManagerArray;
   static VRHMDManagerArray *sManagers;

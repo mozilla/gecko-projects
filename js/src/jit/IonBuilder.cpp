@@ -28,6 +28,7 @@
 #include "jsscriptinlines.h"
 
 #include "jit/CompileInfo-inl.h"
+#include "jit/shared/Lowering-shared-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/ObjectGroup-inl.h"
 #include "vm/ScopeObject-inl.h"
@@ -1656,6 +1657,9 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_DIV:
       case JSOP_MOD:
         return jsop_binary(op);
+
+      case JSOP_POW:
+        return jsop_pow();
 
       case JSOP_POS:
         return jsop_pos();
@@ -4595,6 +4599,25 @@ IonBuilder::jsop_binary(JSOp op, MDefinition* left, MDefinition* right)
     if (ins->isEffectful())
         return resumeAfter(ins);
     return maybeInsertResume();
+}
+
+bool
+IonBuilder::jsop_pow()
+{
+    MDefinition* exponent = current->pop();
+    MDefinition* base = current->pop();
+
+    if (inlineMathPowHelper(base, exponent, MIRType_Double) == InliningStatus_Inlined) {
+        base->setImplicitlyUsedUnchecked();
+        exponent->setImplicitlyUsedUnchecked();
+        return true;
+    }
+
+    // For now, use MIRType_Double, as a safe cover-all. See bug 1188079.
+    MPow* pow = MPow::New(alloc(), base, exponent, MIRType_Double);
+    current->add(pow);
+    current->push(pow);
+    return true;
 }
 
 bool
@@ -10094,6 +10117,27 @@ IonBuilder::maybeUnboxForPropertyAccess(MDefinition* def)
 
     MUnbox* unbox = MUnbox::New(alloc(), def, type, MUnbox::Fallible);
     current->add(unbox);
+
+    // Fixup type information for a common case where a property call
+    // is converted to the following bytecodes
+    //
+    //      a.foo()
+    // ================= Compiles to ================
+    //      LOAD "a"
+    //      DUP
+    //      CALLPROP "foo"
+    //      SWAP
+    //      CALL 0
+    //
+    // If we have better type information to unbox the first copy going into
+    // the CALLPROP operation, we can replace the duplicated copy on the
+    // stack as well.
+    if (*pc == JSOP_CALLPROP || *pc == JSOP_CALLELEM) {
+        uint32_t idx = current->stackDepth() - 1;
+        MOZ_ASSERT(current->getSlot(idx) == def);
+        current->setSlot(idx, unbox);
+    }
+
     return unbox;
 }
 

@@ -625,9 +625,7 @@ pref("app.update.socket.maxErrors", 20);
 pref("app.update.log", true);
 
 // SystemUpdate API
-#ifdef MOZ_WIDGET_GONK
 pref("dom.system_update.active", "@mozilla.org/updates/update-prompt;1");
-#endif
 #else
 // Explicitly disable the shutdown watchdog.  It's enabled by default.
 // When the updater is disabled, we want to know about shutdown hangs.
@@ -674,9 +672,6 @@ pref("dom.forms.number", true);
 // Don't enable <input type=color> yet as we don't have a color picker
 // implemented for b2g (bug 875751)
 pref("dom.forms.color", false);
-
-// Turns on gralloc-based direct texturing for Gonk
-pref("gfx.gralloc.enabled", false);
 
 // This preference instructs the JS engine to discard the
 // source of any privileged JS after compilation. This saves
@@ -1159,8 +1154,13 @@ pref("dom.serviceWorkers.enabled", false);
 
 // Retain at most 10 processes' layers buffers
 pref("layers.compositor-lru-size", 10);
+
 // Enable Cardboard VR on mobile, assuming VR at all is enabled
 pref("dom.vr.cardboard.enabled", true);
+
+// In B2G by deafult any AudioChannelAgent is muted when created.
+pref("dom.audiochannel.mutedByDefault", true);
+
 // Because we can't have nice things.
 #ifdef MOZ_GRAPHENE
 #include ../graphene/graphene.js

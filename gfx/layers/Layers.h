@@ -387,13 +387,6 @@ public:
   };
 
   /**
-   * Returns true if aLayer is optimized for the given PaintedLayerCreationHint.
-   */
-  virtual bool IsOptimizedFor(PaintedLayer* aLayer,
-                              PaintedLayerCreationHint aCreationHint)
-  { return true; }
-
-  /**
    * CONSTRUCTION PHASE ONLY
    * Create a PaintedLayer for this manager's layer tree.
    */
@@ -1674,6 +1667,13 @@ public:
 #endif
   }
 
+  /**
+   * Replace the current effective transform with the given one,
+   * returning the old one.  This is currently added as a hack for VR
+   * rendering, and might go away if we find a better way to do this.
+   * If you think you have a need for this method, talk with
+   * vlad/mstange/mwoodrow first.
+   */
   virtual gfx::Matrix4x4 ReplaceEffectiveTransform(const gfx::Matrix4x4& aNewEffectiveTransform) {
     gfx::Matrix4x4 old = mEffectiveTransform;
     mEffectiveTransform = aNewEffectiveTransform;
@@ -1854,6 +1854,13 @@ public:
 
   bool UsedForReadback() { return mUsedForReadback; }
   void SetUsedForReadback(bool aUsed) { mUsedForReadback = aUsed; }
+
+  /**
+   * Returns true if aLayer is optimized for the given PaintedLayerCreationHint.
+   */
+  virtual bool IsOptimizedFor(LayerManager::PaintedLayerCreationHint aCreationHint)
+  { return true; }
+
   /**
    * Returns the residual translation. Apply this translation when drawing
    * into the PaintedLayer so that when mEffectiveTransform is applied afterwards
@@ -2060,7 +2067,14 @@ public:
   void SetVRHMDInfo(gfx::VRHMDInfo* aHMD) { mHMDInfo = aHMD; }
   gfx::VRHMDInfo* GetVRHMDInfo() { return mHMDInfo; }
 
-  virtual gfx::Matrix4x4 ReplaceEffectiveTransform(const gfx::Matrix4x4& aNewEffectiveTransform) override {
+  /**
+   * Replace the current effective transform with the given one,
+   * returning the old one.  This is currently added as a hack for VR
+   * rendering, and might go away if we find a better way to do this.
+   * If you think you have a need for this method, talk with
+   * vlad/mstange/mwoodrow first.
+   */
+  gfx::Matrix4x4 ReplaceEffectiveTransform(const gfx::Matrix4x4& aNewEffectiveTransform) override {
     gfx::Matrix4x4 old = mEffectiveTransform;
     mEffectiveTransform = aNewEffectiveTransform;
     ComputeEffectiveTransformsForChildren(mEffectiveTransform);
@@ -2274,7 +2288,7 @@ public:
   }
 
   const nsIntRect& GetBounds() const { return mBounds; }
-  
+
 protected:
   void FirePreTransactionCallback()
   {

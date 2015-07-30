@@ -737,7 +737,10 @@ public:
 
   /**
    * If a Projection matrix is set, then it is used for rendering to
-   * this render target instead of generating one.
+   * this render target instead of generating one.  If no explicit
+   * projection is set, Compositors are expected to generate an
+   * orthogonal maaping that maps 0..1 to the full size of the render
+   * target.
    */
   bool HasComplexProjection() const { return mHasComplexProjection; }
   void ClearProjection() { mHasComplexProjection = false; }
@@ -764,10 +767,10 @@ protected:
 private:
   gfx::IntPoint mOrigin;
 
-  bool mHasComplexProjection;
   gfx::Matrix4x4 mProjectionMatrix;
-  bool mEnableDepthBuffer;
   float mZNear, mZFar;
+  bool mHasComplexProjection;
+  bool mEnableDepthBuffer;
 };
 
 /**
