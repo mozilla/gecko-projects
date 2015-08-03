@@ -278,6 +278,13 @@ var shell = {
 
     if (startManifestURL) {
       Cu.import('resource://gre/modules/Bootstraper.jsm');
+#ifdef MOZ_GRAPHENE
+      if (Bootstraper.isInstallRequired(startManifestURL)) {
+        // Installing the app my take some time. We don't want to keep the
+        // native window hidden.
+        showInstallScreen();
+      }
+#endif
       Bootstraper.ensureSystemAppInstall(startManifestURL)
                  .then(this.start.bind(this))
                  .catch(Bootstraper.bailout);
@@ -1395,12 +1402,19 @@ Services.obs.addObserver(function resetProfile(subject, topic, data) {
 #ifdef MOZ_GRAPHENE
 
 const restoreWindowGeometry = () => {
-  const screenX = Services.prefs.getIntPref("b2g.nativeWindowGeometry.screenX");
-  const screenY = Services.prefs.getIntPref("b2g.nativeWindowGeometry.screenY");
-  const width = Services.prefs.getIntPref("b2g.nativeWindowGeometry.width");
-  const height = Services.prefs.getIntPref("b2g.nativeWindowGeometry.height");
-  resizeTo(width, height);
+  let screenX = Services.prefs.getIntPref("b2g.nativeWindowGeometry.screenX");
+  let screenY = Services.prefs.getIntPref("b2g.nativeWindowGeometry.screenY");
+  let width = Services.prefs.getIntPref("b2g.nativeWindowGeometry.width");
+  let height = Services.prefs.getIntPref("b2g.nativeWindowGeometry.height");
+
+  if (screenX == -1) {
+    // Center
+    screenX = (screen.width - width) / 2;
+    screenY = (screen.height - height) / 2;
+  }
+
   moveTo(screenX, screenY);
+  resizeTo(width, height);
 }
 restoreWindowGeometry();
 
@@ -1413,21 +1427,35 @@ const saveWindowGeometry = () => {
 }
 window.addEventListener("unload", saveWindowGeometry);
 
-(() => {
-  let baseWindow = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIWebNavigation)
-                         .QueryInterface(Ci.nsIDocShellTreeItem)
-                         .treeOwner
-                         .QueryInterface(Ci.nsIInterfaceRequestor)
-                         .getInterface(Ci.nsIBaseWindow);
+let baseWindow = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                       .getInterface(Ci.nsIWebNavigation)
+                       .QueryInterface(Ci.nsIDocShellTreeItem)
+                       .treeOwner
+                       .QueryInterface(Ci.nsIInterfaceRequestor)
+                       .getInterface(Ci.nsIBaseWindow);
 
-  baseWindow.visibility = false; // prevent native window to show up until we are ready
+const showNativeWindow = () => baseWindow.visibility = true;
+const hideNativeWindow = () => baseWindow.visibility = false;
 
-  window.addEventListener("ContentStart", () => {
-    shell.contentBrowser.contentWindow.addEventListener('load', () => {
-      baseWindow.visibility = true;
-    });
+const showInstallScreen = () => {
+  const grapheneStrings =
+    Services.strings.createBundle('chrome://b2g-l10n/locale/graphene.properties');
+  document.querySelector('#installing > .message').textContent =
+    grapheneStrings.GetStringFromName('installing');
+  showNativeWindow();
+}
+
+const hideInstallScreen = () => {
+  document.body.classList.add('content-loaded');
+}
+
+window.addEventListener('ContentStart', () => {
+  shell.contentBrowser.contentWindow.addEventListener('load', () => {
+    hideInstallScreen();
+    showNativeWindow();
   });
-})();
+});
+
+hideNativeWindow();
 
 #endif

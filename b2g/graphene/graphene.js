@@ -42,8 +42,8 @@ pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%B
 
 pref("b2g.nativeWindowGeometry.width", 700);
 pref("b2g.nativeWindowGeometry.height", 600);
-pref("b2g.nativeWindowGeometry.screenX", 0);
-pref("b2g.nativeWindowGeometry.screenY", 0);
+pref("b2g.nativeWindowGeometry.screenX", -1); // center
+pref("b2g.nativeWindowGeometry.screenY", -1); // center
 pref("b2g.nativeWindowGeometry.fullscreen", false);
 
 pref("media.useAudioChannelService", false);
