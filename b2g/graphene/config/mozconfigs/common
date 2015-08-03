@@ -21,5 +21,6 @@ if test -d $topsrcdir/../gcc/bin; then
     ac_add_options --enable-stdcxx-compat
 fi
 
+ac_add_options --with-branding=b2g/branding/browserhtml
 ac_add_options --enable-application=b2g/graphene
 
