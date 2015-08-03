@@ -6,8 +6,11 @@
 
 #include "StructuredCloneHelper.h"
 
+#include "ImageContainer.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/FileListBinding.h"
+#include "mozilla/dom/ImageBitmap.h"
+#include "mozilla/dom/ImageBitmapBinding.h"
 #include "mozilla/dom/StructuredCloneTags.h"
 
 namespace mozilla {
@@ -211,42 +214,51 @@ StructuredCloneHelper::~StructuredCloneHelper()
   Shutdown();
 }
 
-bool
-StructuredCloneHelper::Write(JSContext* aCx,
-                             JS::Handle<JS::Value> aValue)
-{
-  return Write(aCx, aValue, JS::UndefinedHandleValue);
-}
-
-bool
+void
 StructuredCloneHelper::Write(JSContext* aCx,
                              JS::Handle<JS::Value> aValue,
-                             JS::Handle<JS::Value> aTransfer)
+                             ErrorResult& aRv)
 {
-  bool ok = StructuredCloneHelperInternal::Write(aCx, aValue, aTransfer);
-  mTransferringPort.Clear();
-  return ok;
+  Write(aCx, aValue, JS::UndefinedHandleValue, aRv);
 }
 
-bool
+void
+StructuredCloneHelper::Write(JSContext* aCx,
+                             JS::Handle<JS::Value> aValue,
+                             JS::Handle<JS::Value> aTransfer,
+                             ErrorResult& aRv)
+{
+  if (!StructuredCloneHelperInternal::Write(aCx, aValue, aTransfer)) {
+    aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
+  }
+
+  mTransferringPort.Clear();
+}
+
+void
 StructuredCloneHelper::Read(nsISupports* aParent,
                             JSContext* aCx,
-                            JS::MutableHandle<JS::Value> aValue)
+                            JS::MutableHandle<JS::Value> aValue,
+                            ErrorResult& aRv)
 {
   mozilla::AutoRestore<nsISupports*> guard(mParent);
   mParent = aParent;
 
-  bool ok = StructuredCloneHelperInternal::Read(aCx, aValue);
+  if (!StructuredCloneHelperInternal::Read(aCx, aValue)) {
+    JS_ClearPendingException(aCx);
+    aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
+  }
+
   mBlobImplArray.Clear();
-  return ok;
 }
 
-bool
+void
 StructuredCloneHelper::ReadFromBuffer(nsISupports* aParent,
                                       JSContext* aCx,
                                       uint64_t* aBuffer,
                                       size_t aBufferLength,
-                                      JS::MutableHandle<JS::Value> aValue)
+                                      JS::MutableHandle<JS::Value> aValue,
+                                      ErrorResult& aRv)
 {
   MOZ_ASSERT(!mBuffer, "ReadFromBuffer() must be called without a Write().");
   MOZ_ASSERT(aBuffer);
@@ -254,9 +266,12 @@ StructuredCloneHelper::ReadFromBuffer(nsISupports* aParent,
   mozilla::AutoRestore<nsISupports*> guard(mParent);
   mParent = aParent;
 
-  return JS_ReadStructuredClone(aCx, aBuffer, aBufferLength,
-                                JS_STRUCTURED_CLONE_VERSION, aValue,
-                                &gCallbacks, this);
+  if (!JS_ReadStructuredClone(aCx, aBuffer, aBufferLength,
+                              JS_STRUCTURED_CLONE_VERSION, aValue,
+                              &gCallbacks, this)) {
+    JS_ClearPendingException(aCx);
+    aRv.Throw(NS_ERROR_DOM_DATA_CLONE_ERR);
+  }
 }
 
 void
@@ -351,6 +366,15 @@ StructuredCloneHelper::ReadCallback(JSContext* aCx,
     return &val.toObject();
   }
 
+  if (aTag == SCTAG_DOM_IMAGEBITMAP) {
+     // Get the current global object.
+     // This can be null.
+     nsCOMPtr<nsIGlobalObject> parent = do_QueryInterface(mParent);
+     // aIndex is the index of the cloned image.
+     return ImageBitmap::ReadStructuredClone(aCx, aReader,
+                                             parent, GetImages(), aIndex);
+   }
+
   return NS_DOMReadStructuredClone(aCx, aReader, aTag, aIndex, nullptr);
 }
 
@@ -399,6 +423,16 @@ StructuredCloneHelper::WriteCallback(JSContext* aCx,
     }
   }
 
+  // See if this is an ImageBitmap object.
+  {
+    ImageBitmap* imageBitmap = nullptr;
+    if (NS_SUCCEEDED(UNWRAP_OBJECT(ImageBitmap, aObj, imageBitmap))) {
+      return ImageBitmap::WriteStructuredClone(aWriter,
+                                               GetImages(),
+                                               imageBitmap);
+    }
+  }
+
   return NS_DOMWriteStructuredClone(aCx, aWriter, aObj, nullptr);
 }
 
@@ -441,7 +475,6 @@ StructuredCloneHelper::ReadTransferCallback(JSContext* aCx,
 
   return false;
 }
-
 
 bool
 StructuredCloneHelper::WriteTransferCallback(JSContext* aCx,

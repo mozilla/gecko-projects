@@ -335,7 +335,6 @@ pref("media.video-queue.default-size", 3);
 // optimize images' memory usage
 pref("image.downscale-during-decode.enabled", true);
 pref("image.mem.allow_locking_in_content_processes", true);
-pref("image.decode.retry-on-alloc-failure", true);
 // Limit the surface cache to 1/8 of main memory or 128MB, whichever is smaller.
 // Almost everything that was factored into 'max_decoded_image_kb' is now stored
 // in the surface cache.  1/8 of main memory is 32MB on a 256MB device, which is
@@ -1033,7 +1032,10 @@ pref("security.exthelperapp.disable_background_handling", true);
 pref("osfile.reset_worker_delay", 5000);
 
 // APZC preferences.
-//
+#ifdef MOZ_WIDGET_GONK
+pref("apz.allow_zooming", true);
+#endif
+
 // Gaia relies heavily on scroll events for now, so lets fire them
 // more often than the default value (100).
 pref("apz.asyncscroll.throttle", 40);
@@ -1095,6 +1097,9 @@ pref("touchcaret.enabled", true);
 
 // Enable selection caret by default
 pref("selectioncaret.enabled", true);
+
+// New implementation to unify touch-caret and selection-carets.
+pref("layout.accessiblecaret.enabled", true);
 
 // Enable sync and mozId with Firefox Accounts.
 pref("services.sync.fxaccounts.enabled", true);

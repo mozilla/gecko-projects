@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_ContentParent_h
 #define mozilla_dom_ContentParent_h
 
+#include "mozilla/dom/NuwaParent.h"
 #include "mozilla/dom/PContentParent.h"
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
@@ -382,6 +383,9 @@ public:
     DeallocPContentPermissionRequestParent(PContentPermissionRequestParent* actor) override;
 
     bool HasGamepadListener() const { return mHasGamepadListener; }
+
+    void SetNuwaParent(NuwaParent* aNuwaParent) { mNuwaParent = aNuwaParent; }
+    void ForkNewProcess(bool aBlocking);
 
 protected:
     void OnChannelConnected(int32_t pid) override;
@@ -775,10 +779,10 @@ private:
 
     virtual bool RecvSystemMessageHandled() override;
 
-    virtual bool RecvNuwaReady() override;
-
-    virtual bool RecvAddNewProcess(const uint32_t& aPid,
-                                   InfallibleTArray<ProtocolFdMapping>&& aFds) override;
+    // Callbacks from NuwaParent.
+    void OnNuwaReady();
+    void OnNewProcessCreated(uint32_t aPid,
+                             UniquePtr<nsTArray<ProtocolFdMapping>>&& aFds);
 
     virtual bool RecvCreateFakeVolume(const nsString& fsName, const nsString& mountPoint) override;
 
@@ -858,6 +862,7 @@ private:
     virtual bool RecvGamepadListenerAdded() override;
     virtual bool RecvGamepadListenerRemoved() override;
     virtual bool RecvProfile(const nsCString& aProfile) override;
+    virtual bool RecvGetGraphicsDeviceInitData(DeviceInitData* aOut) override;
 
     // If you add strong pointers to cycle collected objects here, be sure to
     // release these objects in ShutDownProcess.  See the comment there for more
@@ -916,6 +921,9 @@ private:
 
     friend class CrashReporterParent;
 
+    // Allows NuwaParent to access OnNuwaReady() and OnNewProcessCreated().
+    friend class NuwaParent;
+
     nsRefPtr<nsConsoleService>  mConsoleService;
     nsConsoleService* GetConsoleService();
 
@@ -933,6 +941,11 @@ private:
 #endif
 
     PProcessHangMonitorParent* mHangMonitorActor;
+
+    // NuwaParent and ContentParent hold strong references to each other. The
+    // cycle will be broken when either actor is destroyed.
+    nsRefPtr<NuwaParent> mNuwaParent;
+
 #ifdef MOZ_ENABLE_PROFILER_SPS
     nsRefPtr<mozilla::ProfileGatherer> mGatherer;
 #endif

@@ -76,6 +76,7 @@ public:
               IPC::Channel* aChannel);
     void InitProcessAttributes();
     void InitXPCOM();
+    void InitGraphicsDeviceData();
 
     static ContentChild* GetSingleton() {
         return sSingleton;
@@ -363,8 +364,6 @@ public:
                                       const bool& aIsHotSwappable) override;
     virtual bool RecvVolumeRemoved(const nsString& aFsName) override;
 
-    virtual bool RecvNuwaFork() override;
-
     virtual bool
     RecvNotifyProcessPriorityChanged(const hal::ProcessPriority& aPriority) override;
     virtual bool RecvMinimizeMemoryUsage() override;
@@ -469,6 +468,8 @@ public:
 
     virtual bool RecvGamepadUpdate(const GamepadChangeEvent& aGamepadEvent) override;
 
+    virtual bool RecvTestGraphicsDeviceReset(const uint32_t& aResetReason) override;
+
 private:
     virtual void ActorDestroy(ActorDestroyReason why) override;
 
@@ -514,6 +515,9 @@ private:
 
     DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };
+
+void
+InitOnContentProcessCreated();
 
 uint64_t
 NextWindowID();

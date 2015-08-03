@@ -934,7 +934,7 @@ EventListenerManager::CompileEventHandlerInternal(Listener* aListener,
   NS_ENSURE_TRUE(jsStr, NS_ERROR_OUT_OF_MEMORY);
 
   // Get the reflector for |aElement|, so that we can pass to setElement.
-  if (NS_WARN_IF(!GetOrCreateDOMReflector(cx, target, aElement, &v))) {
+  if (NS_WARN_IF(!GetOrCreateDOMReflector(cx, aElement, &v))) {
     return NS_ERROR_FAILURE;
   }
   JS::CompileOptions options(cx);
@@ -1444,7 +1444,7 @@ size_t
 EventListenerManager::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
-  n += mListeners.SizeOfExcludingThis(aMallocSizeOf);
+  n += mListeners.ShallowSizeOfExcludingThis(aMallocSizeOf);
   uint32_t count = mListeners.Length();
   for (uint32_t i = 0; i < count; ++i) {
     JSEventHandler* jsEventHandler =

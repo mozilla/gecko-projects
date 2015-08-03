@@ -195,6 +195,10 @@ gfxPlatformFontList::~gfxPlatformFontList()
 nsresult
 gfxPlatformFontList::InitFontList()
 {
+    if (LOG_FONTINIT_ENABLED()) {
+        LOG_FONTINIT(("(fontinit) system fontlist initialization\n"));
+    }
+
     // rebuilding fontlist so clear out font/word caches
     gfxFontCache *fontCache = gfxFontCache::GetCache();
     if (fontCache) {
@@ -1088,7 +1092,7 @@ SizeOfPrefFontEntryExcludingThis
     // again, we only care about the size of the array itself; we don't follow
     // the refPtrs stored in it, because they point to entries already owned
     // and accounted-for by the main font list
-    return aList.SizeOfExcludingThis(aMallocSizeOf);
+    return aList.ShallowSizeOfExcludingThis(aMallocSizeOf);
 }
 
 static size_t
@@ -1130,7 +1134,7 @@ gfxPlatformFontList::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
     aSizes->mFontListSize +=
         mCodepointsWithNoFonts.SizeOfExcludingThis(aMallocSizeOf);
     aSizes->mFontListSize +=
-        mFontFamiliesToLoad.SizeOfExcludingThis(aMallocSizeOf);
+        mFontFamiliesToLoad.ShallowSizeOfExcludingThis(aMallocSizeOf);
 
     aSizes->mFontListSize +=
         mPrefFonts.SizeOfExcludingThis(SizeOfPrefFontEntryExcludingThis,

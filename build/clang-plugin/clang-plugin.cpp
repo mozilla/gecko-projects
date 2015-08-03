@@ -96,12 +96,22 @@ private:
     virtual void run(const MatchFinder::MatchResult &Result);
   };
 
+  class NoDuplicateRefCntMemberChecker : public MatchFinder::MatchCallback {
+  public:
+    virtual void run(const MatchFinder::MatchResult &Result);
+  };
+
   class NeedsNoVTableTypeChecker : public MatchFinder::MatchCallback {
   public:
     virtual void run(const MatchFinder::MatchResult &Result);
   };
 
   class NonMemMovableChecker : public MatchFinder::MatchCallback {
+  public:
+    virtual void run(const MatchFinder::MatchResult &Result);
+  };
+
+  class ExplicitImplicitChecker : public MatchFinder::MatchCallback {
   public:
     virtual void run(const MatchFinder::MatchResult &Result);
   };
@@ -115,8 +125,10 @@ private:
   NoAddRefReleaseOnReturnChecker noAddRefReleaseOnReturnChecker;
   RefCountedInsideLambdaChecker refCountedInsideLambdaChecker;
   ExplicitOperatorBoolChecker explicitOperatorBoolChecker;
+  NoDuplicateRefCntMemberChecker noDuplicateRefCntMemberChecker;
   NeedsNoVTableTypeChecker needsNoVTableTypeChecker;
   NonMemMovableChecker nonMemMovableChecker;
+  ExplicitImplicitChecker explicitImplicitChecker;
   MatchFinder astMatcher;
 };
 
@@ -175,7 +187,6 @@ bool isInIgnoredNamespaceForImplicitConversion(const Decl *decl) {
 }
 
 bool isIgnoredPathForImplicitCtor(const Decl *decl) {
-  decl = decl->getCanonicalDecl();
   SourceLocation Loc = decl->getLocation();
   const SourceManager &SM = decl->getASTContext().getSourceManager();
   SmallString<1024> FileName = SM.getFilename(Loc);
@@ -214,11 +225,6 @@ bool isIgnoredPathForImplicitConversion(const Decl *decl) {
     }
   }
   return false;
-}
-
-bool isInterestingDeclForImplicitCtor(const Decl *decl) {
-  return !isInIgnoredNamespaceForImplicitCtor(decl) &&
-         !isIgnoredPathForImplicitCtor(decl);
 }
 
 bool isInterestingDeclForImplicitConversion(const Decl *decl) {
@@ -364,34 +370,6 @@ public:
         Diag.Report(d->getLocation(), overrideID) << d->getDeclName() <<
           (*it)->getDeclName();
         Diag.Report((*it)->getLocation(), overrideNote);
-      }
-    }
-
-    if (!d->isAbstract() && isInterestingDeclForImplicitCtor(d)) {
-      for (CXXRecordDecl::ctor_iterator ctor = d->ctor_begin(),
-           e = d->ctor_end(); ctor != e; ++ctor) {
-        // Ignore non-converting ctors
-        if (!ctor->isConvertingConstructor(false)) {
-          continue;
-        }
-        // Ignore copy or move constructors
-        if (ctor->isCopyOrMoveConstructor()) {
-          continue;
-        }
-        // Ignore deleted constructors
-        if (ctor->isDeleted()) {
-          continue;
-        }
-        // Ignore whitelisted constructors
-        if (MozChecker::hasCustomAnnotation(*ctor, "moz_implicit")) {
-          continue;
-        }
-        unsigned ctorID = Diag.getDiagnosticIDs()->getCustomDiagID(
-          DiagnosticIDs::Error, "bad implicit conversion constructor for %0");
-        unsigned noteID = Diag.getDiagnosticIDs()->getCustomDiagID(
-          DiagnosticIDs::Note, "consider adding the explicit keyword to the constructor");
-        Diag.Report(ctor->getLocation(), ctorID) << d->getDeclName();
-        Diag.Report(ctor->getLocation(), noteID);
       }
     }
 
@@ -581,6 +559,48 @@ bool IsInSystemHeader(const ASTContext &AC, const T &D) {
   return SourceManager.isInSystemHeader(ExpansionLoc);
 }
 
+const FieldDecl *getClassRefCntMember(const CXXRecordDecl *D) {
+  for (RecordDecl::field_iterator field = D->field_begin(), e = D->field_end();
+       field != e; ++field) {
+    if (field->getName() == "mRefCnt") {
+      return *field;
+    }
+  }
+  return 0;
+}
+
+const FieldDecl *getClassRefCntMember(QualType T) {
+  while (const ArrayType *arrTy = T->getAsArrayTypeUnsafe())
+    T = arrTy->getElementType();
+  CXXRecordDecl *clazz = T->getAsCXXRecordDecl();
+  return clazz ? getClassRefCntMember(clazz) : 0;
+}
+
+const FieldDecl *getBaseRefCntMember(QualType T);
+
+const FieldDecl *getBaseRefCntMember(const CXXRecordDecl *D) {
+  const FieldDecl *refCntMember = getClassRefCntMember(D);
+  if (refCntMember && isClassRefCounted(D)) {
+    return refCntMember;
+  }
+
+  for (CXXRecordDecl::base_class_const_iterator base = D->bases_begin(), e = D->bases_end();
+       base != e; ++base) {
+    refCntMember = getBaseRefCntMember(base->getType());
+    if (refCntMember) {
+      return refCntMember;
+    }
+  }
+  return 0;
+}
+
+const FieldDecl *getBaseRefCntMember(QualType T) {
+  while (const ArrayType *arrTy = T->getAsArrayTypeUnsafe())
+    T = arrTy->getElementType();
+  CXXRecordDecl *clazz = T->getAsCXXRecordDecl();
+  return clazz ? getBaseRefCntMember(clazz) : 0;
+}
+
 bool typeHasVTable(QualType T) {
   while (const ArrayType *arrTy = T->getAsArrayTypeUnsafe())
     T = arrTy->getElementType();
@@ -742,6 +762,10 @@ AST_POLYMORPHIC_MATCHER_P(equalsBoundNode,
 
 #endif
 
+AST_MATCHER(CXXRecordDecl, hasRefCntMember) {
+  return isClassRefCounted(&Node) && getClassRefCntMember(&Node);
+}
+
 AST_MATCHER(QualType, hasVTable) {
   return typeHasVTable(Node);
 }
@@ -758,6 +782,29 @@ AST_MATCHER(QualType, isNonMemMovable) {
 /// This matcher will select classes which require a memmovable template arg
 AST_MATCHER(CXXRecordDecl, needsMemMovable) {
   return MozChecker::hasCustomAnnotation(&Node, "moz_needs_memmovable_type");
+}
+
+AST_MATCHER(CXXConstructorDecl, isInterestingImplicitCtor) {
+  const CXXConstructorDecl *decl = Node.getCanonicalDecl();
+  return
+    // Skip ignored namespaces and paths
+    !isInIgnoredNamespaceForImplicitCtor(decl) &&
+    !isIgnoredPathForImplicitCtor(decl) &&
+    // We only want Converting constructors
+    decl->isConvertingConstructor(false) &&
+    // We don't want copy of move constructors, as those are allowed to be implicit
+    !decl->isCopyOrMoveConstructor() &&
+    // We don't want deleted constructors.
+    !decl->isDeleted();
+}
+
+// We can't call this "isImplicit" since it clashes with an existing matcher in clang.
+AST_MATCHER(CXXConstructorDecl, isMarkedImplicit) {
+  return MozChecker::hasCustomAnnotation(&Node, "moz_implicit");
+}
+
+AST_MATCHER(CXXRecordDecl, isConcreteClass) {
+  return !Node.isAbstract();
 }
 
 }
@@ -984,6 +1031,10 @@ DiagnosticsMatcher::DiagnosticsMatcher()
                                          hasName("operator _Bool"))).bind("node"),
     &explicitOperatorBoolChecker);
 
+  astMatcher.addMatcher(recordDecl(allOf(decl().bind("decl"),
+                                         hasRefCntMember())),
+                        &noDuplicateRefCntMemberChecker);
+
   astMatcher.addMatcher(classTemplateSpecializationDecl(
              allOf(hasAnyTemplateArgument(refersToType(hasVTable())),
                    hasNeedsNoVTableTypeAttr())).bind("node"),
@@ -995,6 +1046,12 @@ DiagnosticsMatcher::DiagnosticsMatcher()
             hasAnyTemplateArgument(refersToType(isNonMemMovable())))
       ).bind("specialization"),
       &nonMemMovableChecker);
+
+  astMatcher.addMatcher(
+      constructorDecl(isInterestingImplicitCtor(),
+                      ofClass(allOf(isConcreteClass(), decl().bind("class"))),
+                      unless(isMarkedImplicit())).bind("ctor"),
+      &explicitImplicitChecker);
 }
 
 void DiagnosticsMatcher::ScopeChecker::run(
@@ -1177,6 +1234,32 @@ void DiagnosticsMatcher::ExplicitOperatorBoolChecker::run(
   }
 }
 
+void DiagnosticsMatcher::NoDuplicateRefCntMemberChecker::run(
+    const MatchFinder::MatchResult &Result) {
+  DiagnosticsEngine &Diag = Result.Context->getDiagnostics();
+  unsigned warningID = Diag.getDiagnosticIDs()->getCustomDiagID(
+      DiagnosticIDs::Error, "Refcounted record %0 has multiple mRefCnt members");
+  unsigned note1ID = Diag.getDiagnosticIDs()->getCustomDiagID(
+      DiagnosticIDs::Note, "Superclass %0 also has an mRefCnt member");
+  unsigned note2ID = Diag.getDiagnosticIDs()->getCustomDiagID(
+      DiagnosticIDs::Note, "Consider using the _INHERITED macros for AddRef and Release here");
+
+  const CXXRecordDecl *decl = Result.Nodes.getNodeAs<CXXRecordDecl>("decl");
+  const FieldDecl *refCntMember = getClassRefCntMember(decl);
+  assert(refCntMember && "The matcher checked to make sure we have a refCntMember");
+
+  // Check every superclass for whether it has a base with a refcnt member, and warn for those which do
+  for (CXXRecordDecl::base_class_const_iterator base = decl->bases_begin(), e = decl->bases_end();
+       base != e; ++base) {
+    const FieldDecl *baseRefCntMember = getBaseRefCntMember(base->getType());
+    if (baseRefCntMember) {
+      Diag.Report(decl->getLocStart(), warningID) << decl;
+      Diag.Report(baseRefCntMember->getLocStart(), note1ID) << baseRefCntMember->getParent();
+      Diag.Report(refCntMember->getLocStart(), note2ID);
+    }
+  }
+}
+
 void DiagnosticsMatcher::NeedsNoVTableTypeChecker::run(
     const MatchFinder::MatchResult &Result) {
   DiagnosticsEngine &Diag = Result.Context->getDiagnostics();
@@ -1241,6 +1324,23 @@ void DiagnosticsMatcher::NonMemMovableChecker::run(
         << argType << reason;
     }
   }
+}
+
+void DiagnosticsMatcher::ExplicitImplicitChecker::run(
+    const MatchFinder::MatchResult &Result) {
+  DiagnosticsEngine &Diag = Result.Context->getDiagnostics();
+  unsigned ErrorID = Diag.getDiagnosticIDs()->getCustomDiagID(
+      DiagnosticIDs::Error, "bad implicit conversion constructor for %0");
+  unsigned NoteID = Diag.getDiagnosticIDs()->getCustomDiagID(
+      DiagnosticIDs::Note, "consider adding the explicit keyword to the constructor");
+
+  // We've already checked everything in the matcher, so we just have to report the error.
+
+  const CXXConstructorDecl *Ctor = Result.Nodes.getNodeAs<CXXConstructorDecl>("ctor");
+  const CXXRecordDecl *Decl = Result.Nodes.getNodeAs<CXXRecordDecl>("class");
+
+  Diag.Report(Ctor->getLocation(), ErrorID) << Decl->getDeclName();
+  Diag.Report(Ctor->getLocation(), NoteID);
 }
 
 class MozCheckAction : public PluginASTAction {

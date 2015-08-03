@@ -71,8 +71,8 @@ pref("extensions.hotfix.certs.2.sha1Fingerprint", "39:E7:2B:7A:5B:CF:37:78:F9:5D
 // See the SCOPE constants in AddonManager.jsm for values to use here.
 pref("extensions.autoDisableScopes", 15);
 
-// Don't require signed add-ons by default
-pref("xpinstall.signatures.required", false);
+// Require signed add-ons by default
+pref("xpinstall.signatures.required", true);
 pref("xpinstall.signatures.devInfoURL", "https://wiki.mozilla.org/Addons/Extension_Signing");
 
 // Dictionary download preference
@@ -451,6 +451,12 @@ pref("browser.tabs.drawInTitlebar", true);
 // true   return to the tab that opened this tab (its owner)
 // false  return to the adjacent tab (old default)
 pref("browser.tabs.selectOwnerOnClose", true);
+
+#ifdef RELEASE_BUILD
+pref("browser.tabs.showAudioPlayingIcon", false);
+#else
+pref("browser.tabs.showAudioPlayingIcon", true);
+#endif
 
 pref("browser.ctrlTab.previews", false);
 
@@ -1883,7 +1889,7 @@ pref("privacy.trackingprotection.introURL", "https://support.mozilla.org/kb/trac
 pref("privacy.trackingprotection.introCount", 0);
 pref("privacy.trackingprotection.introURL", "https://support.mozilla.org/kb/tracking-protection-firefox");
 
-#ifdef NIGHTLY_BUILD
+#ifndef RELEASE_BUILD
 // At the moment, autostart.2 is used, while autostart.1 is unused.
 // We leave it here set to false to reset users' defaults and allow
 // us to change everybody to true in the future, when desired.

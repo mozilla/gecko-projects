@@ -56,7 +56,8 @@ let CERTIFICATE_ERROR_PAGE_PREF = 'security.alternate_certificate_error_page';
 const OBSERVED_EVENTS = [
   'xpcom-shutdown',
   'media-playback',
-  'activity-done'
+  'activity-done',
+  'invalid-widget'
 ];
 
 const COMMAND_MAP = {
@@ -221,6 +222,11 @@ BrowserElementChild.prototype = {
       "send-touch-event": this._recvSendTouchEvent,
       "get-can-go-back": this._recvCanGoBack,
       "get-can-go-forward": this._recvCanGoForward,
+      "mute": this._recvMute.bind(this),
+      "unmute": this._recvUnmute.bind(this),
+      "get-muted": this._recvGetMuted.bind(this),
+      "set-volume": this._recvSetVolume.bind(this),
+      "get-volume": this._recvGetVolume.bind(this),
       "go-back": this._recvGoBack,
       "go-forward": this._recvGoForward,
       "reload": this._recvReload,
@@ -299,6 +305,9 @@ BrowserElementChild.prototype = {
         break;
       case 'xpcom-shutdown':
         this._shuttingDown = true;
+        break;
+      case 'invalid-widget':
+        sendAsyncMsg('error', { type: 'invalid-widget' });
         break;
     }
   },
@@ -1293,6 +1302,32 @@ BrowserElementChild.prototype = {
     sendAsyncMsg('got-can-go-forward', {
       id: data.json.id,
       successRv: webNav.canGoForward
+    });
+  },
+
+  _recvMute: function(data) {
+    this._windowUtils.audioMuted = true;
+  },
+
+  _recvUnmute: function(data) {
+    this._windowUtils.audioMuted = false;
+  },
+
+  _recvGetMuted: function(data) {
+    sendAsyncMsg('got-muted', {
+      id: data.json.id,
+      successRv: this._windowUtils.audioMuted
+    });
+  },
+
+  _recvSetVolume: function(data) {
+    this._windowUtils.audioVolume = data.json.volume;
+  },
+
+  _recvGetVolume: function(data) {
+    sendAsyncMsg('got-volume', {
+      id: data.json.id,
+      successRv: this._windowUtils.audioVolume
     });
   },
 

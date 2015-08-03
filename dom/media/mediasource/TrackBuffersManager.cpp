@@ -13,6 +13,10 @@
 #include "SourceBufferResource.h"
 #include "SourceBuffer.h"
 
+#ifdef MOZ_WEBM
+#include "WebMDemuxer.h"
+#endif
+
 #ifdef MOZ_FMP4
 #include "MP4Demuxer.h"
 #endif
@@ -370,6 +374,8 @@ TrackBuffersManager::CompleteResetParserState()
   mInputBuffer = nullptr;
   if (mCurrentInputBuffer) {
     mCurrentInputBuffer->EvictAll();
+    // The demuxer will be recreated during the next run of SegmentParserLoop.
+    // As such we don't need to notify it that data has been removed.
     mCurrentInputBuffer = new SourceBufferResource(mType);
   }
 
@@ -386,7 +392,7 @@ TrackBuffersManager::CompleteResetParserState()
     mInputBuffer = new MediaByteBuffer;
     mInputBuffer->AppendElements(*mInitData);
   }
-  RecreateParser();
+  RecreateParser(true);
 
   // 7. Set append state to WAITING_FOR_SEGMENT.
   SetAppendState(AppendState::WAITING_FOR_SEGMENT);
@@ -558,9 +564,6 @@ TrackBuffersManager::CodedFrameRemoval(TimeInterval aInterval)
   }
   mEvictionOccurred = true;
 
-  // Tell our demuxer that data was removed.
-  mMediaSourceDemuxer->NotifyTimeRangesChanged();
-
   return dataRemoved;
 }
 
@@ -649,8 +652,7 @@ TrackBuffersManager::SegmentParserLoop()
         SetAppendState(AppendState::PARSING_INIT_SEGMENT);
         if (mFirstInitializationSegmentReceived) {
           // This is a new initialization segment. Obsolete the old one.
-          mInitData = nullptr;
-          RecreateParser();
+          RecreateParser(false);
         }
         continue;
       }
@@ -689,7 +691,7 @@ TrackBuffersManager::SegmentParserLoop()
       }
       // 2. If the input buffer does not contain a complete media segment header yet, then jump to the need more data step below.
       if (mParser->MediaHeaderRange().IsNull()) {
-        mCurrentInputBuffer->AppendData(mInputBuffer);
+        AppendDataToCurrentInputBuffer(mInputBuffer);
         mInputBuffer = nullptr;
         NeedMoreData();
         return;
@@ -761,11 +763,12 @@ TrackBuffersManager::CreateDemuxerforMIMEType()
 {
   ShutdownDemuxers();
 
+#ifdef MOZ_WEBM
   if (mType.LowerCaseEqualsLiteral("video/webm") || mType.LowerCaseEqualsLiteral("audio/webm")) {
-    NS_WARNING("Waiting on WebMDemuxer");
-  // mInputDemuxer = new WebMDemuxer(mCurrentInputBuffer);
+    mInputDemuxer = new WebMDemuxer(mCurrentInputBuffer);
     return;
   }
+#endif
 
 #ifdef MOZ_FMP4
   if (mType.LowerCaseEqualsLiteral("video/mp4") || mType.LowerCaseEqualsLiteral("audio/mp4")) {
@@ -778,10 +781,23 @@ TrackBuffersManager::CreateDemuxerforMIMEType()
 }
 
 void
+TrackBuffersManager::AppendDataToCurrentInputBuffer(MediaByteBuffer* aData)
+{
+  MOZ_ASSERT(mCurrentInputBuffer);
+  int64_t offset = mCurrentInputBuffer->GetLength();
+  mCurrentInputBuffer->AppendData(aData);
+  // A MediaByteBuffer has a maximum size of 2GiB.
+  mInputDemuxer->NotifyDataArrived(uint32_t(aData->Length()), offset);
+}
+
+void
 TrackBuffersManager::InitializationSegmentReceived()
 {
   MOZ_ASSERT(mParser->HasCompleteInitData());
   mCurrentInputBuffer = new SourceBufferResource(mType);
+  // The demuxer isn't initialized yet ; we don't want to notify it
+  // that data has been appended yet ; so we simply append the init segment
+  // to the resource.
   mCurrentInputBuffer->AppendData(mParser->InitData());
   uint32_t length =
     mParser->InitSegmentRange().mEnd - (mProcessedInput - mInputBuffer->Length());
@@ -994,7 +1010,8 @@ TrackBuffersManager::OnDemuxerInitDone(nsresult)
   // This step has already been done in InitializationSegmentReceived when we
   // transferred the content into mCurrentInputBuffer.
   mCurrentInputBuffer->EvictAll();
-  RecreateParser();
+  mInputDemuxer->NotifyDataRemoved();
+  RecreateParser(true);
 
   // 4. Set append state to WAITING_FOR_SEGMENT.
   SetAppendState(AppendState::WAITING_FOR_SEGMENT);
@@ -1018,25 +1035,22 @@ TrackBuffersManager::CodedFrameProcessing()
   MOZ_ASSERT(mProcessingPromise.IsEmpty());
   nsRefPtr<CodedFrameProcessingPromise> p = mProcessingPromise.Ensure(__func__);
 
-  int64_t offset = mCurrentInputBuffer->GetLength();
   MediaByteRange mediaRange = mParser->MediaSegmentRange();
-  uint32_t length;
   if (mediaRange.IsNull()) {
-    length = mInputBuffer->Length();
-    mCurrentInputBuffer->AppendData(mInputBuffer);
+    AppendDataToCurrentInputBuffer(mInputBuffer);
     mInputBuffer = nullptr;
   } else {
     // The mediaRange is offset by the init segment position previously added.
-    length = mediaRange.mEnd - (mProcessedInput - mInputBuffer->Length());
+    uint32_t length =
+      mediaRange.mEnd - (mProcessedInput - mInputBuffer->Length());
     nsRefPtr<MediaByteBuffer> segment = new MediaByteBuffer;
     MOZ_ASSERT(mInputBuffer->Length() >= length);
     if (!segment->AppendElements(mInputBuffer->Elements(), length, fallible)) {
       return CodedFrameProcessingPromise::CreateAndReject(NS_ERROR_OUT_OF_MEMORY, __func__);
     }
-    mCurrentInputBuffer->AppendData(segment);
+    AppendDataToCurrentInputBuffer(segment);
     mInputBuffer->RemoveElementsAt(0, length);
   }
-  mInputDemuxer->NotifyDataArrived(length, offset);
 
   DoDemuxVideo();
 
@@ -1191,13 +1205,10 @@ TrackBuffersManager::CompleteCodedFrameProcessing()
   // from the resource.
   mCurrentInputBuffer->EvictAll();
   mInputDemuxer->NotifyDataRemoved();
-  RecreateParser();
+  RecreateParser(true);
 
   // 7. Set append state to WAITING_FOR_SEGMENT.
   SetAppendState(AppendState::WAITING_FOR_SEGMENT);
-
-  // Tell our demuxer that data was added.
-  mMediaSourceDemuxer->NotifyTimeRangesChanged();
 
   // 8. Jump to the loop top step above.
   ResolveProcessing(false, __func__);
@@ -1515,6 +1526,14 @@ TrackBuffersManager::InsertFrames(TrackBuffer& aSamples,
   CheckNextInsertionIndex(aTrackData,
                           TimeUnit::FromMicroseconds(aSamples[0]->mTime));
 
+  // Adjust our demuxing index if necessary.
+  if (trackBuffer.mNextGetSampleIndex.isSome() &&
+      (trackBuffer.mNextInsertionIndex.ref() < trackBuffer.mNextGetSampleIndex.ref() ||
+       (trackBuffer.mNextInsertionIndex.ref() == trackBuffer.mNextGetSampleIndex.ref() &&
+        aIntervals.GetEnd() < trackBuffer.mNextSampleTime))) {
+    trackBuffer.mNextGetSampleIndex.ref() += aSamples.Length();
+  }
+
   TrackBuffer& data = trackBuffer.mBuffers.LastElement();
   data.InsertElementsAt(trackBuffer.mNextInsertionIndex.ref(), aSamples);
   trackBuffer.mNextInsertionIndex.ref() += aSamples.Length();
@@ -1624,7 +1643,7 @@ TrackBuffersManager::RemoveFrames(const TimeIntervals& aIntervals,
 }
 
 void
-TrackBuffersManager::RecreateParser()
+TrackBuffersManager::RecreateParser(bool aReuseInitData)
 {
   MOZ_ASSERT(OnTaskQueue());
   // Recreate our parser for only the data remaining. This is required
@@ -1632,7 +1651,7 @@ TrackBuffersManager::RecreateParser()
   // Once the old TrackBuffer/MediaSource implementation is removed
   // we can optimize this part. TODO
   mParser = ContainerParser::CreateForMIMEType(mType);
-  if (mInitData) {
+  if (aReuseInitData && mInitData) {
     int64_t start, end;
     mParser->ParseStartAndEndTimestamps(mInitData, start, end);
     mProcessedInput = mInitData->Length();

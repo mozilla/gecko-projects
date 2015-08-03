@@ -1326,6 +1326,20 @@ public:
   }
 
   bool
+  PushEnabled() const
+  {
+    AssertIsOnWorkerThread();
+    return mPreferences[WORKERPREF_PUSH];
+  }
+
+  bool
+  RequestContextEnabled() const
+  {
+    AssertIsOnWorkerThread();
+    return mPreferences[WORKERPREF_REQUESTCONTEXT];
+  }
+
+  bool
   OnLine() const
   {
     AssertIsOnWorkerThread();

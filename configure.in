@@ -74,7 +74,7 @@ GNOMEUI_VERSION=2.2.0
 GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.8.10.1
+SQLITE_VERSION=3.8.11.1
 
 MSMANIFEST_TOOL=
 
@@ -230,15 +230,12 @@ if test -n "$gonkdir" ; then
     17|18)
         GONK_INCLUDES="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include -I$gonkdir/external/mdnsresponder/mDNSShared"
         if test -d "$gonkdir/external/bluetooth/bluez"; then
-          GONK_INCLUDES="$GONK_INCLUDES -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib"
+            GONK_INCLUDES="$GONK_INCLUDES -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib"
             MOZ_B2G_BT=1
             MOZ_B2G_BT_BLUEZ=1
-        elif test -d "$gonkdir/external/bluetooth/bluedroid"; then
+        elif test -d "$gonkdir/system/bluetoothd"; then
             MOZ_B2G_BT=1
-            MOZ_B2G_BT_BLUEDROID=1
-            if test -d "$gonkdir/system/bluetoothd"; then
-                MOZ_B2G_BT_DAEMON=1
-            fi
+            MOZ_B2G_BT_DAEMON=1
         fi
 
         MOZ_RTSP=1
@@ -249,15 +246,14 @@ if test -n "$gonkdir" ; then
         MOZ_OMX_ENCODER=1
         AC_SUBST(MOZ_OMX_ENCODER)
         AC_DEFINE(MOZ_OMX_ENCODER)
-	MOZ_FMP4=1
+        MOZ_FMP4=1
         MOZ_SECUREELEMENT=1
         ;;
     19)
         GONK_INCLUDES="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include -I$gonkdir/external/mdnsresponder/mDNSShared"
         MOZ_B2G_CAMERA=1
-        MOZ_B2G_BT=1
-        MOZ_B2G_BT_BLUEDROID=1
         if test -d "$gonkdir/system/bluetoothd"; then
+            MOZ_B2G_BT=1
             MOZ_B2G_BT_DAEMON=1
         fi
         MOZ_NFC=1
@@ -281,9 +277,8 @@ if test -n "$gonkdir" ; then
         AC_DEFINE(MOZ_AUDIO_OFFLOAD)
         MOZ_FMP4=
         MOZ_B2G_CAMERA=1
-        MOZ_B2G_BT=1
-        MOZ_B2G_BT_BLUEDROID=1
         if test -d "$gonkdir/system/bluetoothd"; then
+            MOZ_B2G_BT=1
             MOZ_B2G_BT_DAEMON=1
         fi
         MOZ_NFC=1
@@ -2337,6 +2332,8 @@ ia64*-hpux*)
     AC_DEFINE(HW_THREADS)
     AC_DEFINE(STDC_HEADERS)
     AC_DEFINE(WIN32_LEAN_AND_MEAN)
+    dnl See http://support.microsoft.com/kb/143208 to use STL
+    AC_DEFINE(NOMINMAX)
     TARGET_MD_ARCH=win32
     _PLATFORM_DEFAULT_TOOLKIT='cairo-windows'
     BIN_SUFFIX='.exe'
@@ -7619,7 +7616,6 @@ if test -n "$MOZ_B2G_BT"; then
 fi
 AC_SUBST(MOZ_B2G_BT)
 AC_SUBST(MOZ_B2G_BT_BLUEZ)
-AC_SUBST(MOZ_B2G_BT_BLUEDROID)
 AC_SUBST(MOZ_B2G_BT_DAEMON)
 
 dnl ========================================================
@@ -8319,6 +8315,7 @@ dnl ========================================================
 dnl Skia
 dnl ========================================================
 if test "$MOZ_ENABLE_SKIA"; then
+  SKIA_INCLUDES="/gfx/skia /gfx/skia/skia/include/config /gfx/skia/skia/include/core"
   AC_DEFINE(MOZ_ENABLE_SKIA)
   AC_DEFINE(USE_SKIA)
   if test "${MOZ_WIDGET_TOOLKIT}" = "android" -o x"$MOZ_WIDGET_TOOLKIT" = x"gonk"; then
@@ -8326,12 +8323,14 @@ if test "$MOZ_ENABLE_SKIA"; then
   fi
 
   if test "${CPU_ARCH}" != "ppc" -a "${CPU_ARCH}" != "ppc64" -a "${CPU_ARCH}" != "sparc" -a -z "$MOZ_DISABLE_SKIA_GPU" ; then
+    SKIA_INCLUDES="$SKIA_INCLUDES /gfx/skia/skia/include/gpu /gfx/skia/skia/include/utils"
     MOZ_ENABLE_SKIA_GPU=1
     AC_DEFINE(USE_SKIA_GPU)
     AC_SUBST(MOZ_ENABLE_SKIA_GPU)
   fi
 fi
 AC_SUBST(MOZ_ENABLE_SKIA)
+AC_SUBST_LIST(SKIA_INCLUDES)
 
 dnl ========================================================
 dnl disable xul

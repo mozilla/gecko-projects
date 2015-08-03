@@ -29,13 +29,12 @@ EXPORTS.mozilla.dom += [
     'CanvasPattern.h',
     'CanvasRenderingContext2D.h',
     'CanvasUtils.h',
+    'ImageBitmap.h',
+    'ImageBitmapSource.h',
     'ImageData.h',
     'TextMetrics.h',
     'WebGLVertexArrayObject.h',
 ]
-
-# http://support.microsoft.com/kb/143208
-DEFINES['NOMINMAX'] = True
 
 # Canvas 2D and common sources
 UNIFIED_SOURCES += [
@@ -44,6 +43,7 @@ UNIFIED_SOURCES += [
     'CanvasUtils.cpp',
     'DocumentRendererChild.cpp',
     'DocumentRendererParent.cpp',
+    'ImageBitmap.cpp',
     'ImageData.cpp',
 ]
 
@@ -146,6 +146,7 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
+    '../workers',
     '/dom/base',
     '/dom/html',
     '/dom/svg',
@@ -156,7 +157,11 @@ LOCAL_INCLUDES += [
     '/layout/generic',
     '/layout/style',
     '/layout/xul',
+    '/media/libyuv/include',
 ]
 
 CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']
+
+LOCAL_INCLUDES += CONFIG['SKIA_INCLUDES']
+

@@ -7,12 +7,15 @@
 #include "Animation.h"
 #include "AnimationUtils.h"
 #include "mozilla/dom/AnimationBinding.h"
+#include "mozilla/dom/AnimationPlaybackEvent.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/AsyncEventDispatcher.h" //For AsyncEventDispatcher
 #include "AnimationCommon.h" // For AnimationCollection,
                              // CommonAnimationManager
 #include "nsIDocument.h" // For nsIDocument
 #include "nsIPresShell.h" // For nsIPresShell
 #include "nsLayoutUtils.h" // For PostRestyleEvent (remove after bug 1073336)
+#include "nsThreadUtils.h" // For nsRunnableMethod and nsRevocableEventPtr
 #include "PendingAnimationTracker.h" // For PendingAnimationTracker
 
 namespace mozilla {
@@ -21,14 +24,17 @@ namespace dom {
 // Static members
 uint64_t Animation::sNextSequenceNum = 0;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Animation, mGlobal, mTimeline,
-                                      mEffect, mReady, mFinished)
-NS_IMPL_CYCLE_COLLECTING_ADDREF(Animation)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(Animation)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Animation)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED(Animation, DOMEventTargetHelper,
+                                   mTimeline,
+                                   mEffect,
+                                   mReady,
+                                   mFinished)
+
+NS_IMPL_ADDREF_INHERITED(Animation, DOMEventTargetHelper)
+NS_IMPL_RELEASE_INHERITED(Animation, DOMEventTargetHelper)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(Animation)
+NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 JSObject*
 Animation::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
@@ -70,7 +76,7 @@ Animation::SetTimeline(AnimationTimeline* aTimeline)
 
   // FIXME(spec): Once we implement the seeking defined in the spec
   // surely this should be SeekFlag::DidSeek but the spec says otherwise.
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
 
   // FIXME: When we expose this method to script we'll need to call PostUpdate
   // (but *not* when this method gets called from style).
@@ -107,7 +113,7 @@ Animation::SetStartTime(const Nullable<TimeDuration>& aNewStartTime)
     mReady->MaybeResolve(this);
   }
 
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
   PostUpdate();
 }
 
@@ -148,7 +154,7 @@ Animation::SetCurrentTime(const TimeDuration& aSeekTime)
     CancelPendingTasks();
   }
 
-  UpdateTiming(SeekFlag::DidSeek);
+  UpdateTiming(SeekFlag::DidSeek, SyncNotifyFlag::Async);
   PostUpdate();
 }
 
@@ -189,8 +195,9 @@ Animation::PlayState() const
 Promise*
 Animation::GetReady(ErrorResult& aRv)
 {
-  if (!mReady && mGlobal) {
-    mReady = Promise::Create(mGlobal, aRv); // Lazily create on demand
+  nsCOMPtr<nsIGlobalObject> global = GetOwnerGlobal();
+  if (!mReady && global) {
+    mReady = Promise::Create(global, aRv); // Lazily create on demand
   }
   if (!mReady) {
     aRv.Throw(NS_ERROR_FAILURE);
@@ -203,13 +210,14 @@ Animation::GetReady(ErrorResult& aRv)
 Promise*
 Animation::GetFinished(ErrorResult& aRv)
 {
-  if (!mFinished && mGlobal) {
-    mFinished = Promise::Create(mGlobal, aRv); // Lazily create on demand
+  nsCOMPtr<nsIGlobalObject> global = GetOwnerGlobal();
+  if (!mFinished && global) {
+    mFinished = Promise::Create(global, aRv); // Lazily create on demand
   }
   if (!mFinished) {
     aRv.Throw(NS_ERROR_FAILURE);
-  } else if (PlayState() == AnimationPlayState::Finished) {
-    mFinished->MaybeResolve(this);
+  } else if (mFinishedIsResolved) {
+    MaybeResolveFinishedPromise();
   }
   return mFinished;
 }
@@ -234,7 +242,7 @@ Animation::Finish(ErrorResult& aRv)
   TimeDuration limit =
     mPlaybackRate > 0 ? TimeDuration(EffectEnd()) : TimeDuration(0);
 
-  SetCurrentTime(limit);
+  SilentlySetCurrentTime(limit);
 
   // If we are paused or play-pending we need to fill in the start time in
   // order to transition to the finished state.
@@ -250,18 +258,22 @@ Animation::Finish(ErrorResult& aRv)
                         limit.MultDouble(1.0 / mPlaybackRate));
   }
 
-  // If we just resolved the start time for a pause-pending animation, we need
-  // to clear the task. We don't do this as a branch of the above however since
-  // we can have a play-pending animation with a resolved start time if we
-  // aborted a pause operation.
-  if (mPendingState == PendingState::PlayPending &&
-      !mStartTime.IsNull()) {
+  // If we just resolved the start time for a pause or play-pending
+  // animation, we need to clear the task. We don't do this as a branch of
+  // the above however since we can have a play-pending animation with a
+  // resolved start time if we aborted a pause operation.
+  if (!mStartTime.IsNull() &&
+      (mPendingState == PendingState::PlayPending ||
+       mPendingState == PendingState::PausePending)) {
+    if (mPendingState == PendingState::PausePending) {
+      mHoldTime.SetNull();
+    }
     CancelPendingTasks();
     if (mReady) {
       mReady->MaybeResolve(this);
     }
   }
-  UpdateTiming(SeekFlag::DidSeek);
+  UpdateTiming(SeekFlag::DidSeek, SyncNotifyFlag::Sync);
   PostUpdate();
 }
 
@@ -357,7 +369,7 @@ Animation::Tick()
     FinishPendingAt(mTimeline->GetCurrentTime().Value());
   }
 
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
 }
 
 void
@@ -464,13 +476,14 @@ Animation::DoCancel()
   if (mFinished) {
     mFinished->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
   }
-  // Clear finished promise. We'll create a new one lazily.
-  mFinished = nullptr;
+  ResetFinishedPromise();
+
+  DispatchPlaybackEvent(NS_LITERAL_STRING("cancel"));
 
   mHoldTime.SetNull();
   mStartTime.SetNull();
 
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
 }
 
 void
@@ -602,7 +615,7 @@ Animation::ComposeStyle(nsRefPtr<css::AnimValuesStyleRule>& aStyleRule,
     mEffect->ComposeStyle(aStyleRule, aSetProperties);
 
     if (updatedHoldTime) {
-      UpdateTiming(SeekFlag::NoSeek);
+      UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
     }
 
     mFinishedAtLastComposeStyle = (playState == AnimationPlayState::Finished);
@@ -681,7 +694,7 @@ Animation::DoPlay(ErrorResult& aRv, LimitBehavior aLimitBehavior)
     TriggerOnNextTick(Nullable<TimeDuration>());
   }
 
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
 }
 
 // http://w3c.github.io/web-animations/#pause-an-animation
@@ -732,7 +745,7 @@ Animation::DoPause(ErrorResult& aRv)
     TriggerOnNextTick(Nullable<TimeDuration>());
   }
 
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
 }
 
 void
@@ -760,7 +773,7 @@ Animation::ResumeAt(const TimeDuration& aReadyTime)
   }
   mPendingState = PendingState::NotPending;
 
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
 
   if (mReady) {
     mReady->MaybeResolve(this);
@@ -780,7 +793,7 @@ Animation::PauseAt(const TimeDuration& aReadyTime)
   mStartTime.SetNull();
   mPendingState = PendingState::NotPending;
 
-  UpdateTiming(SeekFlag::NoSeek);
+  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
 
   if (mReady) {
     mReady->MaybeResolve(this);
@@ -788,7 +801,7 @@ Animation::PauseAt(const TimeDuration& aReadyTime)
 }
 
 void
-Animation::UpdateTiming(SeekFlag aSeekFlag)
+Animation::UpdateTiming(SeekFlag aSeekFlag, SyncNotifyFlag aSyncNotifyFlag)
 {
   // Update the sequence number each time we transition in or out of the
   // idle state
@@ -802,7 +815,7 @@ Animation::UpdateTiming(SeekFlag aSeekFlag)
 
   // We call UpdateFinishedState before UpdateEffect because the former
   // can change the current time, which is used by the latter.
-  UpdateFinishedState(aSeekFlag);
+  UpdateFinishedState(aSeekFlag, aSyncNotifyFlag);
   UpdateEffect();
 
   // Unconditionally Add/Remove from the timeline. This is ok because if the
@@ -842,7 +855,8 @@ Animation::UpdateTiming(SeekFlag aSeekFlag)
 }
 
 void
-Animation::UpdateFinishedState(SeekFlag aSeekFlag)
+Animation::UpdateFinishedState(SeekFlag aSeekFlag,
+                               SyncNotifyFlag aSyncNotifyFlag)
 {
   Nullable<TimeDuration> currentTime = GetCurrentTime();
   TimeDuration effectEnd = TimeDuration(EffectEnd());
@@ -880,18 +894,14 @@ Animation::UpdateFinishedState(SeekFlag aSeekFlag)
   }
 
   bool currentFinishedState = PlayState() == AnimationPlayState::Finished;
-  if (currentFinishedState && !mIsPreviousStateFinished) {
-    if (mFinished) {
-      mFinished->MaybeResolve(this);
-    }
-  } else if (!currentFinishedState && mIsPreviousStateFinished) {
-    // Clear finished promise. We'll create a new one lazily.
-    mFinished = nullptr;
+  if (currentFinishedState && !mFinishedIsResolved) {
+    DoFinishNotification(aSyncNotifyFlag);
+  } else if (!currentFinishedState && mFinishedIsResolved) {
+    ResetFinishedPromise();
     if (mEffect->AsTransition()) {
       mEffect->SetIsFinishedTransition(false);
     }
   }
-  mIsPreviousStateFinished = currentFinishedState;
   // We must recalculate the current time to take account of any mHoldTime
   // changes the code above made.
   mPreviousCurrentTime = GetCurrentTime();
@@ -1060,6 +1070,70 @@ Animation::GetCollection() const
              "An animation with an animation manager must have a target");
 
   return manager->GetAnimations(targetElement, targetPseudoType, false);
+}
+
+void
+Animation::DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag)
+{
+  if (aSyncNotifyFlag == SyncNotifyFlag::Sync) {
+    DoFinishNotificationImmediately();
+  } else if (!mFinishNotificationTask.IsPending()) {
+    nsRefPtr<nsRunnableMethod<Animation>> runnable =
+      NS_NewRunnableMethod(this, &Animation::DoFinishNotificationImmediately);
+    Promise::DispatchToMicroTask(runnable);
+    mFinishNotificationTask = runnable;
+  }
+}
+
+void
+Animation::ResetFinishedPromise()
+{
+  mFinishedIsResolved = false;
+  mFinished = nullptr;
+}
+
+void
+Animation::MaybeResolveFinishedPromise()
+{
+  if (mFinished) {
+    mFinished->MaybeResolve(this);
+  }
+  mFinishedIsResolved = true;
+}
+
+void
+Animation::DoFinishNotificationImmediately()
+{
+  mFinishNotificationTask.Revoke();
+
+  if (PlayState() != AnimationPlayState::Finished) {
+    return;
+  }
+
+  MaybeResolveFinishedPromise();
+
+  DispatchPlaybackEvent(NS_LITERAL_STRING("finish"));
+}
+
+void
+Animation::DispatchPlaybackEvent(const nsAString& aName)
+{
+  AnimationPlaybackEventInit init;
+
+  if (aName.EqualsLiteral("finish")) {
+    init.mCurrentTime = GetCurrentTimeAsDouble();
+  }
+  if (mTimeline) {
+    init.mTimelineTime = mTimeline->GetCurrentTimeAsDouble();
+  }
+
+  nsRefPtr<AnimationPlaybackEvent> event =
+    AnimationPlaybackEvent::Constructor(this, aName, init);
+  event->SetTrusted(true);
+
+  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
+    new AsyncEventDispatcher(this, event);
+  asyncDispatcher->PostDOMEvent();
 }
 
 } // namespace dom

@@ -154,12 +154,13 @@ private:
   // ContainerParser objects and methods.
   // Those are used to parse the incoming input buffer.
 
-  // Recreate the ContainerParser and only feed it with the previous init
-  // segment found.
-  void RecreateParser();
+  // Recreate the ContainerParser and if aReuseInitData is true then
+  // feed it with the previous init segment found.
+  void RecreateParser(bool aReuseInitData);
   nsAutoPtr<ContainerParser> mParser;
 
   // Demuxer objects and methods.
+  void AppendDataToCurrentInputBuffer(MediaByteBuffer* aData);
   nsRefPtr<MediaByteBuffer> mInitData;
   nsRefPtr<SourceBufferResource> mCurrentInputBuffer;
   nsRefPtr<MediaDataDemuxer> mInputDemuxer;

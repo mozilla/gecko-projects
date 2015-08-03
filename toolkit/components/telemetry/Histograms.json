@@ -3387,7 +3387,7 @@
     "description": "Number of thumbnails stored in the browser DB *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
   },
   "FENNEC_READING_LIST_COUNT": {
-    "expires_in_version": "40",
+    "expires_in_version": "50",
     "kind": "exponential",
     "high": "1000",
     "n_buckets": 10,
@@ -4655,6 +4655,18 @@
     "n_buckets": 20,
     "description": "Time (ms) it takes for evicting over-quota pings"
   },
+  "TELEMETRY_PENDING_LOAD_FAILURE_READ": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Number of pending Telemetry pings that failed to load from the disk"
+  },
+  "TELEMETRY_PENDING_LOAD_FAILURE_PARSE": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Number of pending Telemetry pings that failed to parse once loaded from the disk"
+  },
   "TELEMETRY_PENDING_PINGS_SIZE_MB": {
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
     "expires_in_version": "never",
@@ -4694,6 +4706,48 @@
     "high": "300000",
     "n_buckets": 20,
     "description": "Time (ms) it takes for checking if the pending pings are over-quota"
+  },
+  "TELEMETRY_PING_SIZE_EXCEEDED_SEND": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Number of Telemetry pings discarded before sending because they exceeded the maximum size"
+  },
+  "TELEMETRY_PING_SIZE_EXCEEDED_PENDING": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Number of Telemetry pending pings discarded because they exceeded the maximum size"
+  },
+  "TELEMETRY_PING_SIZE_EXCEEDED_ARCHIVED": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Number of archived Telemetry pings discarded because they exceeded the maximum size"
+  },
+  "TELEMETRY_DISCARDED_PENDING_PINGS_SIZE_MB": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "30",
+    "n_buckets": 29,
+    "description": "The size (MB) of the Telemetry pending pings exceeding the maximum file size"
+  },
+  "TELEMETRY_DISCARDED_ARCHIVED_PINGS_SIZE_MB": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "30",
+    "n_buckets": 29,
+    "description": "The size (MB) of the Telemetry archived, compressed, pings exceeding the maximum file size"
+  },
+  "TELEMETRY_DISCARDED_SEND_PINGS_SIZE_MB": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": "30",
+    "n_buckets": 29,
+    "description": "The size (MB) of the ping data submitted to Telemetry exceeding the maximum size"
   },
   "TELEMETRY_DISCARDED_CONTENT_PINGS_COUNT": {
     "alert_emails": ["perf-telemetry-alerts@mozilla.com"],
@@ -4744,6 +4798,12 @@
     "kind": "count",
     "keyed": true,
     "description": "Count of individual invalid ping types that were submitted to Telemetry."
+  },
+  "TELEMETRY_PING_EVICTED_FOR_SERVER_ERRORS": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Number of Telemetry ping files evicted due to server errors (4XX HTTP code received)"
   },
   "TELEMETRY_TEST_FLAG": {
     "expires_in_version": "never",
@@ -8230,6 +8290,12 @@
     "n_buckets": 30,
     "extended_statistics_ok": true,
     "description": "How long getAllLogins() on about:logins takes for mobile users"
+  },
+  "PWMGR_ABOUT_LOGINS_USAGE": {
+    "expires_in_version": "55",
+    "kind": "enumerated",
+    "n_values": 12,
+    "description": "Usage of about:logins 0= list of logins viewed, 1=a login's specifics page was viewed, 2=user edited login credentials 3=user toggled the show/hide button"
   },
   "PWMGR_BLOCKLIST_NUM_SITES": {
     "expires_in_version": "never",

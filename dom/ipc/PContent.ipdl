@@ -60,6 +60,7 @@ include PluginTypes;
 include ProtocolTypes;
 include PContentPermission;
 include BrowserConfiguration;
+include GraphicsMessages;
 
 // Workaround to prevent error if PContentChild.cpp & PContentBridgeParent.cpp
 // are put into different UnifiedProtocolsXX.cpp files.
@@ -579,9 +580,6 @@ child:
     // Notify volume is removed.
     VolumeRemoved(nsString fsName);
 
-    // Ask the Nuwa process to create a new child process.
-    NuwaFork();
-
     NotifyProcessPriorityChanged(ProcessPriority priority);
     MinimizeMemoryUsage();
 
@@ -650,6 +648,12 @@ child:
      * Send gamepad status update to child.
      */
     GamepadUpdate(GamepadChangeEvent aGamepadEvent);
+
+    /**
+     * Tell the child that for testing purposes, a graphics device reset has
+     * occurred.
+     */
+    async TestGraphicsDeviceReset(uint32_t aReason);
 parent:
     /**
      * Tell the content process some attributes of itself.  This is
@@ -882,10 +886,6 @@ parent:
     // Notify the parent that the child has finished handling a system message.
     async SystemMessageHandled();
 
-    NuwaReady();
-
-    sync AddNewProcess(uint32_t pid, ProtocolFdMapping[] aFds);
-
     // called by the child (test code only) to propagate volume changes to the parent
     async CreateFakeVolume(nsString fsName, nsString mountPoint);
     async SetFakeVolumeState(nsString fsName, int32_t fsState);
@@ -1053,6 +1053,12 @@ parent:
     GamepadListenerRemoved();
 
     async Profile(nsCString aProfile);
+
+    /**
+     * Request graphics initialization information from the parent.
+     */
+    sync GetGraphicsDeviceInitData()
+        returns (DeviceInitData aData);
 
 both:
      AsyncMessage(nsString aMessage, ClonedMessageData aData,
