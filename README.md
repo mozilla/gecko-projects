@@ -2,7 +2,12 @@ gecko-projects
 ==============
 
 This repository is synced from hg.mozilla.org and should be read-only.
-It is intended to be used with gecko-dev.  For instance, to add the 'alder' branch to your local repository:
+
+Note: 'master' branch is rairly updated - view the branch you care about
+to see how recent it is. It should be within ~30 minutes of
+hg.mozilla.org copy.
+
+This repo is intended to be used with gecko-dev.  For instance, to add the 'alder' branch to your local repository:
 
     git clone https://github.com/mozilla/gecko-dev.git
     cd gecko-dev
