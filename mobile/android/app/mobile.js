@@ -791,6 +791,9 @@ pref("dom.payment.provider.0.uri", "https://marketplace.firefox.com/mozpay/?req=
 pref("dom.payment.provider.0.type", "mozilla/payments/pay/v1");
 pref("dom.payment.provider.0.requestMethod", "GET");
 
+// Enable Cardboard VR on mobile, assuming VR at all is enabled
+pref("dom.vr.cardboard.enabled", true);
+
 // Shortnumber matching needed for e.g. Brazil:
 // 01187654321 can be found with 87654321
 pref("dom.phonenumber.substringmatching.BR", 8);

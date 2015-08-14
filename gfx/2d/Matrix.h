@@ -474,6 +474,14 @@ public:
     return true;
   }
 
+  bool IsTranslation() const
+  {
+    return gfx::FuzzyEqual(_11, 1.0f) && gfx::FuzzyEqual(_12, 0.0f) && gfx::FuzzyEqual(_13, 0.0f) && gfx::FuzzyEqual(_14, 0.0f) &&
+           gfx::FuzzyEqual(_21, 0.0f) && gfx::FuzzyEqual(_22, 1.0f) && gfx::FuzzyEqual(_23, 0.0f) && gfx::FuzzyEqual(_24, 0.0f) &&
+           gfx::FuzzyEqual(_31, 0.0f) && gfx::FuzzyEqual(_32, 0.0f) && gfx::FuzzyEqual(_33, 1.0f) && gfx::FuzzyEqual(_34, 0.0f) &&
+           gfx::FuzzyEqual(_44, 1.0f);
+  }
+
   Matrix4x4& ProjectTo2D() {
     _31 = 0.0f;
     _32 = 0.0f;

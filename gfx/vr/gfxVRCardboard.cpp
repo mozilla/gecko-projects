@@ -230,6 +230,9 @@ HMDInfoCardboard::SetFOV(const VRFieldOfView& aFOVLeft,
 {
   const float standardIPD = 0.064f;
 
+  mZNear = zNear;
+  mZFar = zFar;
+
   for (uint32_t eye = 0; eye < NumEyes; eye++) {
     mEyeFOV[eye] = eye == Eye_Left ? aFOVLeft : aFOVRight;
     mEyeTranslation[eye] = Point3D(standardIPD * (eye == Eye_Left ? -1.0 : 1.0), 0.0, 0.0);

@@ -170,11 +170,11 @@ function promiseAsync_SyncXHRAndImportScripts()
   xhr.open("GET", "testXHR.txt", false);
   xhr.send(null);
 
-  ok(!handlerExecuted, "Sync XHR should not trigger microtask execution.");
+  todo(!handlerExecuted, "Sync XHR should not trigger microtask execution.");
 
   importScripts("relativeLoad_import.js");
 
-  ok(!handlerExecuted, "importScripts should not trigger microtask execution.");
+  todo(!handlerExecuted, "importScripts should not trigger microtask execution.");
 }
 
 function promiseDoubleThen() {

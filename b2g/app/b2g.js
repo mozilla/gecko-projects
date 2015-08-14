@@ -327,7 +327,6 @@ pref("media.fragmented-mp4.gonk.enabled", true);
 //Encrypted media extensions.
 pref("media.eme.enabled", true);
 pref("media.eme.apiVisible", true);
-
 // The default number of decoded video frames that are enqueued in
 // MediaDecoderReader's mVideoQueue.
 pref("media.video-queue.default-size", 3);
@@ -458,9 +457,7 @@ pref("dom.ipc.processCount", 100000);
 
 pref("dom.ipc.browser_frames.oop_by_default", false);
 
-#ifndef MOZ_MULET
 pref("dom.meta-viewport.enabled", true);
-#endif
 
 // SMS/MMS
 pref("dom.sms.enabled", true);
@@ -1096,11 +1093,11 @@ pref("dom.wakelock.enabled", true);
 // Enable webapps add-ons
 pref("dom.apps.customization.enabled", true);
 
-// Original caret implementation on collapsed selection.
-pref("touchcaret.enabled", false);
+// Enable touch caret by default
+pref("touchcaret.enabled", true);
 
-// Original caret implementation on non-collapsed selection.
-pref("selectioncaret.enabled", false);
+// Enable selection caret by default
+pref("selectioncaret.enabled", true);
 
 // New implementation to unify touch-caret and selection-carets.
 pref("layout.accessiblecaret.enabled", true);
@@ -1116,6 +1113,9 @@ pref("services.mobileid.server.uri", "https://msisdn.services.mozilla.com");
 #ifndef XP_WIN
 pref("dom.mapped_arraybuffer.enabled", true);
 #endif
+
+// BroadcastChannel API
+pref("dom.broadcastChannel.enabled", true);
 
 // SystemUpdate API
 pref("dom.system_update.enabled", true);
@@ -1175,3 +1175,7 @@ pref("dom.presentation.device.name", "Firefox OS");
 // Enable notification of performance timing
 pref("dom.performance.enable_notify_performance_timing", true);
 
+// Because we can't have nice things.
+#ifdef MOZ_GRAPHENE
+#include ../graphene/graphene.js
+#endif
