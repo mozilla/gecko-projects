@@ -113,8 +113,7 @@ function clearCacheAndReload() {
     });
 }
 
-function clearCacheAndRestart() {
-  clearCache();
+function restart() {
   let appStartup = Cc['@mozilla.org/toolkit/app-startup;1']
                      .getService(Ci.nsIAppStartup);
   appStartup.quit(Ci.nsIAppStartup.eForceQuit | Ci.nsIAppStartup.eRestart);
@@ -269,6 +268,16 @@ var shell = {
     let startManifestURL =
       Cc['@mozilla.org/commandlinehandler/general-startup;1?type=b2gbootstrap']
         .getService(Ci.nsISupports).wrappedJSObject.startManifestURL;
+
+#ifdef MOZ_GRAPHENE
+    // If --start-manifest hasn't been specified, we re-use the latest specified manifest.
+    // If it's the first launch, we will fallback to b2g.default.start_manifest_url
+    if (!startManifestURL) {
+      try {
+        startManifestURL = Services.prefs.getCharPref("b2g.system_manifest_url");
+      } catch(e) {}
+    }
+#endif
 
     if (!startManifestURL) {
       try {
@@ -904,7 +913,11 @@ var CustomEventManager = {
         clearCacheAndReload();
         break;
       case 'clear-cache-and-restart':
-        clearCacheAndRestart();
+        clearCache();
+        restart();
+        break;
+      case 'restart':
+        restart();
         break;
     }
   }
