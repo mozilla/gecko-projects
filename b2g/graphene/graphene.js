@@ -25,6 +25,7 @@ pref("layout.css.scroll-snap.enabled", true);
 pref("dom.mozInputMethod.enabled", false);
 pref("browser.autofocus", true);
 pref("layers.async-pan-zoom.enabled", false);
+pref("network.predictor.enabled", true);
 
 // Not touch caret
 pref("layout.accessiblecaret.enabled", false);
