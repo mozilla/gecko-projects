@@ -14,7 +14,6 @@ pref("dom.ipc.tabs.disabled", false);
 
 pref("javascript.options.discardSystemSource", false);
 pref("browser.dom.window.dump.enabled", true);
-pref("selectioncaret.enabled", false);
 pref("browser.ignoreNativeFrameTextSelection", false);
 pref("dom.meta-viewport.enabled", false);
 pref("full-screen-api.ignore-widgets", false);
@@ -25,8 +24,12 @@ pref("browser.enable_click_image_resizing", true);
 pref("layout.css.scroll-snap.enabled", true);
 pref("dom.mozInputMethod.enabled", false);
 pref("browser.autofocus", true);
-pref("touchcaret.enabled", false);
 pref("layers.async-pan-zoom.enabled", false);
+
+// Not touch caret
+pref("layout.accessiblecaret.enabled", false);
+pref("selectioncaret.enabled", false);
+pref("touchcaret.enabled", false);
 
 pref("gfx.vsync.hw-vsync.enabled", true);
 pref("gfx.vsync.compositor", true);
