@@ -901,7 +901,10 @@ SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame, unsi
     MOZ_ASSERT(initialized());
     assertSameCompartment(cx, this);
 
-    if (creatingSavedFrame || cx->isExceptionPending()) {
+    if (creatingSavedFrame ||
+        cx->isExceptionPending() ||
+        !cx->global()->isStandardClassResolved(JSProto_Object))
+    {
         frame.set(nullptr);
         return true;
     }
@@ -1372,3 +1375,29 @@ CompartmentChecker::check(SavedStacks* stacks)
 #endif /* JS_CRASH_DIAGNOSTICS */
 
 } /* namespace js */
+
+namespace JS {
+namespace ubi {
+
+bool
+ConcreteStackFrame<SavedFrame>::isSystem() const
+{
+    auto trustedPrincipals = get().runtimeFromAnyThread()->trustedPrincipals();
+    return get().getPrincipals() == trustedPrincipals;
+}
+
+bool
+ConcreteStackFrame<SavedFrame>::constructSavedFrameStack(JSContext* cx,
+                                                         MutableHandleObject outSavedFrameStack)
+    const
+{
+    outSavedFrameStack.set(&get());
+    if (!cx->compartment()->wrap(cx, outSavedFrameStack)) {
+        outSavedFrameStack.set(nullptr);
+        return false;
+    }
+    return true;
+}
+
+} // namespace ubi
+} // namespace JS

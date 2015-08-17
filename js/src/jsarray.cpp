@@ -579,7 +579,14 @@ js::ArraySetLength(JSContext* cx, Handle<ArrayObject*> arr, HandleId id,
         // that element must prevent any deletions below it.  Bug 586842 should
         // fix this inefficiency by moving indexed storage to be entirely
         // separate from non-indexed storage.
-        if (!arr->isIndexed()) {
+        // A second reason for this optimization to be invalid is an active
+        // for..in iteration over the array. Keys deleted before being reached
+        // during the iteration must not be visited, and suppressing them here
+        // would be too costly.
+        ObjectGroup* arrGroup = arr->getGroup(cx);
+        if (!arr->isIndexed() &&
+            !MOZ_UNLIKELY(!arrGroup || arrGroup->hasAllFlags(OBJECT_FLAG_ITERATED)))
+        {
             if (!arr->maybeCopyElementsForWrite(cx))
                 return false;
 
@@ -2931,86 +2938,6 @@ js::array_slice_dense(JSContext* cx, HandleObject obj, int32_t begin, int32_t en
     return &argv[0].toObject();
 }
 
-/* ES5 15.4.4.20. */
-static bool
-array_filter(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    /* Step 1. */
-    RootedObject obj(cx, ToObject(cx, args.thisv()));
-    if (!obj)
-        return false;
-
-    /* Step 2-3. */
-    uint32_t len;
-    if (!GetLengthProperty(cx, obj, &len))
-        return false;
-
-    /* Step 4. */
-    if (args.length() == 0) {
-        ReportMissingArg(cx, args.calleev(), 0);
-        return false;
-    }
-    RootedObject callable(cx, ValueToCallable(cx, args[0], args.length() - 1));
-    if (!callable)
-        return false;
-
-    /* Step 5. */
-    RootedValue thisv(cx, args.length() >= 2 ? args[1] : UndefinedValue());
-
-    /* Step 6. */
-    RootedObject arr(cx, NewFullyAllocatedArrayForCallingAllocationSite(cx, 0));
-    if (!arr)
-        return false;
-
-    /* Step 7. */
-    uint32_t k = 0;
-
-    /* Step 8. */
-    uint32_t to = 0;
-
-    /* Step 9. */
-    FastInvokeGuard fig(cx, ObjectValue(*callable));
-    InvokeArgs& args2 = fig.args();
-    RootedValue kValue(cx);
-    while (k < len) {
-        if (!CheckForInterrupt(cx))
-            return false;
-
-        /* Step a, b, and c.i. */
-        bool kNotPresent;
-        if (!GetElement(cx, obj, k, &kNotPresent, &kValue))
-            return false;
-
-        /* Step c.ii-iii. */
-        if (!kNotPresent) {
-            if (!args2.init(3))
-                return false;
-            args2.setCallee(ObjectValue(*callable));
-            args2.setThis(thisv);
-            args2[0].set(kValue);
-            args2[1].setNumber(k);
-            args2[2].setObject(*obj);
-            if (!fig.invoke(cx))
-                return false;
-
-            if (ToBoolean(args2.rval())) {
-                if (!SetArrayElement(cx, arr, to, kValue))
-                    return false;
-                to++;
-            }
-        }
-
-        /* Step d. */
-        k++;
-    }
-
-    /* Step 10. */
-    args.rval().setObject(*arr);
-    return true;
-}
-
 static bool
 array_isArray(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -3112,9 +3039,9 @@ static const JSFunctionSpec array_methods[] = {
     JS_SELF_HOSTED_FN("indexOf",     "ArrayIndexOf",     1,0),
     JS_SELF_HOSTED_FN("forEach",     "ArrayForEach",     1,0),
     JS_SELF_HOSTED_FN("map",         "ArrayMap",         1,0),
+    JS_SELF_HOSTED_FN("filter",      "ArrayFilter",      1,0),
     JS_SELF_HOSTED_FN("reduce",      "ArrayReduce",      1,0),
     JS_SELF_HOSTED_FN("reduceRight", "ArrayReduceRight", 1,0),
-    JS_FN("filter",             array_filter,       1,JSFUN_GENERIC_NATIVE),
     JS_SELF_HOSTED_FN("some",        "ArraySome",        1,0),
     JS_SELF_HOSTED_FN("every",       "ArrayEvery",       1,0),
 
@@ -3143,6 +3070,7 @@ static const JSFunctionSpec array_static_methods[] = {
     JS_SELF_HOSTED_FN("indexOf",     "ArrayStaticIndexOf", 2,0),
     JS_SELF_HOSTED_FN("forEach",     "ArrayStaticForEach", 2,0),
     JS_SELF_HOSTED_FN("map",         "ArrayStaticMap",   2,0),
+    JS_SELF_HOSTED_FN("filter",      "ArrayStaticFilter", 2,0),
     JS_SELF_HOSTED_FN("every",       "ArrayStaticEvery", 2,0),
     JS_SELF_HOSTED_FN("some",        "ArrayStaticSome",  2,0),
     JS_SELF_HOSTED_FN("reduce",      "ArrayStaticReduce", 2,0),

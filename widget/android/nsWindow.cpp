@@ -2050,7 +2050,7 @@ nsWindow::NotifyIMEInternal(const IMENotification& aIMENotification)
             ALOGIME("IME: REQUEST_TO_CANCEL_COMPOSITION");
 
             // Cancel composition on Gecko side
-            if (GetIMEComposition()) {
+            if (!!GetIMEComposition()) {
                 nsRefPtr<nsWindow> kungFuDeathGrip(this);
 
                 WidgetCompositionEvent compositionCommitEvent(
@@ -2522,7 +2522,7 @@ nsWindow::ConfigureAPZControllerThread()
 already_AddRefed<GeckoContentController>
 nsWindow::CreateRootContentController()
 {
-    nsRefPtr<GeckoContentController> controller = new widget::android::AndroidContentController(this, mAPZEventState);
+    nsRefPtr<GeckoContentController> controller = new widget::android::AndroidContentController(this, mAPZEventState, mAPZC);
     return controller.forget();
 }
 
