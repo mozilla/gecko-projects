@@ -1874,64 +1874,6 @@ class LGetDynamicName : public LCallInstructionHelper<BOX_PIECES, 2, 3>
     }
 };
 
-class LFilterArgumentsOrEvalS : public LCallInstructionHelper<0, 1, 2>
-{
-  public:
-    LIR_HEADER(FilterArgumentsOrEvalS)
-
-    LFilterArgumentsOrEvalS(const LAllocation& string, const LDefinition& temp1,
-                            const LDefinition& temp2)
-    {
-        setOperand(0, string);
-        setTemp(0, temp1);
-        setTemp(1, temp2);
-    }
-
-    MFilterArgumentsOrEval* mir() const {
-        return mir_->toFilterArgumentsOrEval();
-    }
-
-    const LAllocation* getString() {
-        return getOperand(0);
-    }
-    const LDefinition* temp1() {
-        return getTemp(0);
-    }
-    const LDefinition* temp2() {
-        return getTemp(1);
-    }
-};
-
-class LFilterArgumentsOrEvalV : public LCallInstructionHelper<0, BOX_PIECES, 3>
-{
-  public:
-    LIR_HEADER(FilterArgumentsOrEvalV)
-
-    LFilterArgumentsOrEvalV(const LDefinition& temp1, const LDefinition& temp2,
-                            const LDefinition& temp3)
-    {
-        setTemp(0, temp1);
-        setTemp(1, temp2);
-        setTemp(2, temp3);
-    }
-
-    static const size_t Input = 0;
-
-    MFilterArgumentsOrEval* mir() const {
-        return mir_->toFilterArgumentsOrEval();
-    }
-
-    const LDefinition* temp1() {
-        return getTemp(0);
-    }
-    const LDefinition* temp2() {
-        return getTemp(1);
-    }
-    const LDefinition* temp3() {
-        return getTemp(2);
-    }
-};
-
 class LCallDirectEval : public LCallInstructionHelper<BOX_PIECES, 2 + (2 * BOX_PIECES), 0>
 {
   public:
@@ -3976,6 +3918,31 @@ class LStringReplace: public LStrReplace
     const MStringReplace* mir() const {
         return mir_->toStringReplace();
     }
+};
+
+class LBinarySharedStub : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(BinarySharedStub)
+
+    const MBinarySharedStub* mir() const {
+        return mir_->toBinarySharedStub();
+    }
+
+    static const size_t LhsInput = 0;
+    static const size_t RhsInput = BOX_PIECES;
+};
+
+class LUnarySharedStub : public LCallInstructionHelper<BOX_PIECES, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(UnarySharedStub)
+
+    const MUnarySharedStub* mir() const {
+        return mir_->toUnarySharedStub();
+    }
+
+    static const size_t Input = 0;
 };
 
 class LLambdaForSingleton : public LCallInstructionHelper<1, 1, 0>

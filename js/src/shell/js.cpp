@@ -56,6 +56,7 @@
 #endif
 #include "jswrapper.h"
 
+#include "builtin/ModuleObject.h"
 #include "builtin/TestingFunctions.h"
 #include "frontend/Parser.h"
 #include "gc/GCInternals.h"
@@ -130,6 +131,7 @@ static JS::PersistentRootedValue gInterruptFunc;
 static bool gLastWarningEnabled = false;
 static JS::PersistentRootedValue gLastWarning;
 
+static bool enableCodeCoverage = false;
 static bool enableDisassemblyDumps = false;
 static bool offthreadCompilation = false;
 static bool enableBaseline = false;
@@ -227,7 +229,7 @@ class ShellPrincipals: public JSPrincipals {
     static void destroy(JSPrincipals* principals) {
         MOZ_ASSERT(principals != &fullyTrusted);
         MOZ_ASSERT(principals->refcount == 0);
-        js_free(static_cast<ShellPrincipals*>(principals));
+        js_delete(static_cast<const ShellPrincipals*>(principals));
     }
 
     static bool subsumes(JSPrincipals* first, JSPrincipals* second) {
@@ -2067,7 +2069,12 @@ DisassembleToSprinter(JSContext* cx, unsigned argc, Value* vp, Sprinter* sprinte
     } else {
         for (unsigned i = 0; i < p.argc; i++) {
             RootedFunction fun(cx);
-            RootedScript script (cx, ValueToScript(cx, p.argv[i], fun.address()));
+            RootedScript script(cx);
+            RootedValue value(cx, p.argv[i]);
+            if (value.isObject() && value.toObject().is<ModuleObject>())
+                script = value.toObject().as<ModuleObject>().script();
+            else
+                script = ValueToScript(cx, value, fun.address());
             if (!script)
                 return false;
             if (!DisassembleScript(cx, script, fun, p.lines, p.recursive, sprinter))
@@ -3056,6 +3063,45 @@ Compile(JSContext* cx, unsigned argc, Value* vp)
     bool ok = JS_CompileUCScript(cx, chars, scriptContents->length(), options, &script);
     args.rval().setUndefined();
     return ok;
+}
+
+static bool
+ParseModule(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() < 1) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                             JSMSG_MORE_ARGS_NEEDED, "parseModule", "0", "s");
+        return false;
+    }
+    if (!args[0].isString()) {
+        const char* typeName = InformalValueTypeName(args[0]);
+        JS_ReportError(cx, "expected string to compile, got %s", typeName);
+        return false;
+    }
+
+    RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
+    JSFlatString* scriptContents = args[0].toString()->ensureFlat(cx);
+    if (!scriptContents)
+        return false;
+
+    CompileOptions options(cx);
+    options.setFileAndLine("<string>", 1);
+
+    AutoStableStringChars stableChars(cx);
+    if (!stableChars.initTwoByte(cx, scriptContents))
+        return false;
+
+    const char16_t* chars = stableChars.twoByteRange().start().get();
+    SourceBufferHolder srcBuf(chars, scriptContents->length(),
+                              SourceBufferHolder::NoOwnership);
+
+    RootedObject module(cx, frontend::CompileModule(cx, global, options, srcBuf));
+    if (!module)
+        return false;
+
+    args.rval().setObject(*module);
+    return true;
 }
 
 static bool
@@ -4200,18 +4246,28 @@ DumpStaticScopeChain(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    if (!args[0].isObject() || !args[0].toObject().is<JSFunction>()) {
-        ReportUsageError(cx, callee, "Argument must be an interpreted function");
+    if (!args[0].isObject() ||
+        !(args[0].toObject().is<JSFunction>() || args[0].toObject().is<ModuleObject>()))
+    {
+        ReportUsageError(cx, callee, "Argument must be an interpreted function or a module");
         return false;
     }
 
-    RootedFunction fun(cx, &args[0].toObject().as<JSFunction>());
-    if (!fun->isInterpreted()) {
-        ReportUsageError(cx, callee, "Argument must be an interpreted function");
-        return false;
+    RootedObject obj(cx, &args[0].toObject());
+    RootedScript script(cx);
+
+    if (obj->is<JSFunction>()) {
+        RootedFunction fun(cx, &obj->as<JSFunction>());
+        if (!fun->isInterpreted()) {
+            ReportUsageError(cx, callee, "Argument must be an interpreted function");
+            return false;
+        }
+        script = fun->getOrCreateScript(cx);
+    } else {
+        script = obj->as<ModuleObject>().script();
     }
 
-    js::DumpStaticScopeChain(fun->getOrCreateScript(cx));
+    js::DumpStaticScopeChain(script);
 
     args.rval().setUndefined();
     return true;
@@ -4606,6 +4662,10 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "compile(code)",
 "  Compiles a string to bytecode, potentially throwing."),
 
+    JS_FN_HELP("parseModule", ParseModule, 1, 0,
+"parseModule(code)",
+"  Parses source text as a module and returns a Module object."),
+
     JS_FN_HELP("parse", Parse, 1, 0,
 "parse(code)",
 "  Parses a string, potentially throwing."),
@@ -4861,8 +4921,8 @@ static const JSFunctionSpecWithHelp fuzzing_unsafe_functions[] = {
 
 #ifdef DEBUG
     JS_FN_HELP("dumpStaticScopeChain", DumpStaticScopeChain, 1, 0,
-"dumpStaticScopeChain(fun)",
-"  Prints the static scope chain of an interpreted function fun."),
+"dumpStaticScopeChain(obj)",
+"  Prints the static scope chain of an interpreted function or a module."),
 #endif
 
     JS_FS_HELP_END
@@ -5874,6 +5934,15 @@ SetRuntimeOptions(JSRuntime* rt, const OptionParser& op)
             return OptionFailure("ion-loop-unrolling", str);
     }
 
+    if (const char* str = op.getStringOption("ion-instruction-reordering")) {
+        if (strcmp(str, "on") == 0)
+            jit::js_JitOptions.disableInstructionReordering = false;
+        else if (strcmp(str, "off") == 0)
+            jit::js_JitOptions.disableInstructionReordering = true;
+        else
+            return OptionFailure("ion-instruction-reordering", str);
+    }
+
     if (op.getBoolOption("ion-check-range-analysis"))
         jit::js_JitOptions.checkRangeAnalysis = true;
 
@@ -5973,7 +6042,9 @@ SetRuntimeOptions(JSRuntime* rt, const OptionParser& op)
     reportWarnings = op.getBoolOption('w');
     compileOnly = op.getBoolOption('c');
     printTiming = op.getBoolOption('b');
-    rt->profilingScripts = enableDisassemblyDumps = op.getBoolOption('D');
+    enableCodeCoverage = op.getBoolOption("code-coverage");
+    enableDisassemblyDumps = op.getBoolOption('D');
+    rt->profilingScripts = enableCodeCoverage || enableDisassemblyDumps;
 
     jsCacheDir = op.getStringOption("js-cache");
     if (jsCacheDir) {
@@ -6012,7 +6083,7 @@ SetWorkerRuntimeOptions(JSRuntime* rt)
                              .setNativeRegExp(enableNativeRegExp)
                              .setUnboxedArrays(enableUnboxedArrays);
     rt->setOffthreadIonCompilationEnabled(offthreadCompilation);
-    rt->profilingScripts = enableDisassemblyDumps;
+    rt->profilingScripts = enableCodeCoverage || enableDisassemblyDumps;
 
 #ifdef JS_GC_ZEAL
     if (*gZealStr)
@@ -6153,6 +6224,7 @@ main(int argc, char** argv, char** envp)
                                "specified by --js-cache. This cache directory will be removed"
                                "when the js shell exits. This is useful for running tests in"
                                "parallel.")
+        || !op.addBoolOption('\0', "code-coverage", "Enable code coverage instrumentation.")
 #ifdef DEBUG
         || !op.addBoolOption('O', "print-alloc", "Print the number of allocations at exit")
 #endif
@@ -6186,6 +6258,8 @@ main(int argc, char** argv, char** envp)
                                "Sink code motion (default: off, on to enable)")
         || !op.addStringOption('\0', "ion-loop-unrolling", "on/off",
                                "Loop unrolling (default: off, on to enable)")
+        || !op.addStringOption('\0', "ion-instruction-reordering", "on/off",
+                               "Instruction reordering (default: off, on to enable)")
         || !op.addBoolOption('\0', "ion-check-range-analysis",
                                "Range analysis checking")
         || !op.addBoolOption('\0', "ion-extra-checks",

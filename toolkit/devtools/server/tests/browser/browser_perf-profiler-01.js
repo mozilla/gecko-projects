@@ -8,7 +8,7 @@
  */
 
 const { PerformanceFront } = require("devtools/server/actors/performance");
-const { PMM_isProfilerActive, PMM_stopProfiler, PMM_loadProfilerScripts } = require("devtools/toolkit/shared/profiler");
+const { sendProfilerCommand, PMM_isProfilerActive, PMM_stopProfiler, PMM_loadFrameScripts } = require("devtools/toolkit/performance/process-communication");
 
 add_task(function*() {
   let doc = yield addTab(MAIN_DOMAIN + "doc_perf.html");
@@ -19,7 +19,7 @@ add_task(function*() {
   let front = PerformanceFront(client, form);
   yield front.connect();
 
-  PMM_loadProfilerScripts(gBrowser);
+  PMM_loadFrameScripts(gBrowser);
 
   ok(!(yield PMM_isProfilerActive()),
     "The built-in profiler module should not have been automatically started.");
@@ -34,6 +34,7 @@ add_task(function*() {
   ok((yield PMM_isProfilerActive()),
     "The built-in profiler module should still be active (2).");
 
+  yield front.destroy();
   yield closeDebuggerClient(client);
 
   ok(!(yield PMM_isProfilerActive()),

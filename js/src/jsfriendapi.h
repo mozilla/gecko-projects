@@ -1053,6 +1053,15 @@ GetPCCountScriptSummary(JSContext* cx, size_t script);
 JS_FRIEND_API(JSString*)
 GetPCCountScriptContents(JSContext* cx, size_t script);
 
+// Generate lcov trace file content for the current compartment, and allocate a
+// new buffer and return the content in it, the size of the newly allocated
+// content within the buffer would be set to the length out-param.
+//
+// In case of out-of-memory, this function returns nullptr and does not set any
+// value to the length out-param.
+JS_FRIEND_API(char*)
+GetCodeCoverageSummary(JSContext* cx, size_t* length);
+
 JS_FRIEND_API(bool)
 ContextHasOutstandingRequests(const JSContext* cx);
 
@@ -2126,6 +2135,16 @@ JS_IsNeuteredArrayBufferObject(JSObject* obj);
  */
 JS_FRIEND_API(bool)
 JS_IsDataViewObject(JSObject* obj);
+
+/*
+ * Create a new DataView using the given ArrayBuffer for storage. The given
+ * buffer must be an ArrayBuffer (or a cross-compartment wrapper of an
+ * ArrayBuffer), and the offset and length must fit within the bounds of the
+ * arrayBuffer. Currently, nullptr will be returned and an exception will be
+ * thrown if these conditions do not hold, but do not depend on that behavior.
+ */
+JS_FRIEND_API(JSObject*)
+JS_NewDataView(JSContext* cx, JS::HandleObject arrayBuffer, uint32_t byteOffset, int32_t byteLength);
 
 /*
  * Return the byte offset of a data view into its array buffer. |obj| must be a

@@ -111,7 +111,8 @@ public:
     EXPECT_EQ(mHub->GetState(), MockAccessibleCaretEventHub::NoActionState());
   }
 
-  static UniquePtr<WidgetEvent> CreateMouseEvent(uint32_t aMessage, nscoord aX,
+  static UniquePtr<WidgetEvent> CreateMouseEvent(EventMessage aMessage,
+                                                 nscoord aX,
                                                  nscoord aY)
   {
     auto event = MakeUnique<WidgetMouseEvent>(true, aMessage, nullptr,
@@ -125,25 +126,26 @@ public:
 
   static UniquePtr<WidgetEvent> CreateMousePressEvent(nscoord aX, nscoord aY)
   {
-    return CreateMouseEvent(NS_MOUSE_BUTTON_DOWN, aX, aY);
+    return CreateMouseEvent(eMouseDown, aX, aY);
   }
 
   static UniquePtr<WidgetEvent> CreateMouseMoveEvent(nscoord aX, nscoord aY)
   {
-    return CreateMouseEvent(NS_MOUSE_MOVE, aX, aY);
+    return CreateMouseEvent(eMouseMove, aX, aY);
   }
 
   static UniquePtr<WidgetEvent> CreateMouseReleaseEvent(nscoord aX, nscoord aY)
   {
-    return CreateMouseEvent(NS_MOUSE_BUTTON_UP, aX, aY);
+    return CreateMouseEvent(eMouseUp, aX, aY);
   }
 
   static UniquePtr<WidgetEvent> CreateLongTapEvent(nscoord aX, nscoord aY)
   {
-    return CreateMouseEvent(NS_MOUSE_MOZLONGTAP, aX, aY);
+    return CreateMouseEvent(eMouseLongTap, aX, aY);
   }
 
-  static UniquePtr<WidgetEvent> CreateTouchEvent(uint32_t aMessage, nscoord aX,
+  static UniquePtr<WidgetEvent> CreateTouchEvent(EventMessage aMessage,
+                                                 nscoord aX,
                                                  nscoord aY)
   {
     auto event = MakeUnique<WidgetTouchEvent>(true, aMessage, nullptr);
@@ -175,7 +177,7 @@ public:
     return CreateTouchEvent(NS_TOUCH_END, aX, aY);
   }
 
-  static UniquePtr<WidgetEvent> CreateWheelEvent(uint32_t aMessage)
+  static UniquePtr<WidgetEvent> CreateWheelEvent(EventMessage aMessage)
   {
     auto event = MakeUnique<WidgetWheelEvent>(true, aMessage, nullptr);
 

@@ -97,6 +97,7 @@ TrackBuffersManager::TrackBuffersManager(dom::SourceBufferAttributes* aAttribute
   , mAppendState(AppendState::WAITING_FOR_SEGMENT)
   , mBufferFull(false)
   , mFirstInitializationSegmentReceived(false)
+  , mNewMediaSegmentStarted(false)
   , mActiveTrack(false)
   , mType(aType)
   , mParser(ContainerParser::CreateForMIMEType(aType))
@@ -156,8 +157,8 @@ TrackBuffersManager::BufferAppend()
   MOZ_ASSERT(NS_IsMainThread());
   MSE_DEBUG("");
 
-  return ProxyMediaCall(GetTaskQueue(), this,
-                        __func__, &TrackBuffersManager::InitSegmentParserLoop);
+  return InvokeAsync(GetTaskQueue(), this,
+                     __func__, &TrackBuffersManager::InitSegmentParserLoop);
 }
 
 // Abort any pending AppendData.
@@ -211,9 +212,9 @@ TrackBuffersManager::RangeRemoval(TimeUnit aStart, TimeUnit aEnd)
 
   mEnded = false;
 
-  return ProxyMediaCall(GetTaskQueue(), this, __func__,
-                        &TrackBuffersManager::CodedFrameRemovalWithPromise,
-                        TimeInterval(aStart, aEnd));
+  return InvokeAsync(GetTaskQueue(), this, __func__,
+                     &TrackBuffersManager::CodedFrameRemovalWithPromise,
+                     TimeInterval(aStart, aEnd));
 }
 
 TrackBuffersManager::EvictDataResult
@@ -659,6 +660,7 @@ TrackBuffersManager::SegmentParserLoop()
       }
       if (mParser->IsMediaSegmentPresent(mInputBuffer)) {
         SetAppendState(AppendState::PARSING_MEDIA_SEGMENT);
+        mNewMediaSegmentStarted = true;
         continue;
       }
       // We have neither an init segment nor a media segment, this is either
@@ -669,7 +671,7 @@ TrackBuffersManager::SegmentParserLoop()
     }
 
     int64_t start, end;
-    mParser->ParseStartAndEndTimestamps(mInputBuffer, start, end);
+    bool newData = mParser->ParseStartAndEndTimestamps(mInputBuffer, start, end);
     mProcessedInput += mInputBuffer->Length();
 
     // 5. If the append state equals PARSING_INIT_SEGMENT, then run the
@@ -689,13 +691,42 @@ TrackBuffersManager::SegmentParserLoop()
         RejectAppend(NS_ERROR_FAILURE, __func__);
         return;
       }
-      // 2. If the input buffer does not contain a complete media segment header yet, then jump to the need more data step below.
-      if (mParser->MediaHeaderRange().IsNull()) {
-        AppendDataToCurrentInputBuffer(mInputBuffer);
-        mInputBuffer = nullptr;
-        NeedMoreData();
-        return;
+
+      // We can't feed some demuxers (WebMDemuxer) with data that do not have
+      // monotonizally increasing timestamps. So we check if we have a
+      // discontinuity from the previous segment parsed.
+      // If so, recreate a new demuxer to ensure that the demuxer is only fed
+      // monotonically increasing data.
+      if (mNewMediaSegmentStarted) {
+        if (newData && mLastParsedEndTime.isSome() &&
+            start < mLastParsedEndTime.ref().ToMicroseconds()) {
+          MSE_DEBUG("Re-creating demuxer");
+          ResetDemuxingState();
+          return;
+        }
+        if (newData || !mParser->MediaSegmentRange().IsNull()) {
+          if (mPendingInputBuffer) {
+            // We now have a complete media segment header. We can resume parsing
+            // the data.
+            AppendDataToCurrentInputBuffer(mPendingInputBuffer);
+            mPendingInputBuffer = nullptr;
+          }
+          mNewMediaSegmentStarted = false;
+        } else {
+          // We don't have any data to demux yet, stash aside the data.
+          // This also handles the case:
+          // 2. If the input buffer does not contain a complete media segment header yet, then jump to the need more data step below.
+          if (!mPendingInputBuffer) {
+            mPendingInputBuffer = mInputBuffer;
+          } else {
+            mPendingInputBuffer->AppendElements(*mInputBuffer);
+          }
+          mInputBuffer = nullptr;
+          NeedMoreData();
+          return;
+        }
       }
+
       // 3. If the input buffer contains one or more complete coded frames, then run the coded frame processing algorithm.
       nsRefPtr<TrackBuffersManager> self = this;
       mProcessingRequest.Begin(CodedFrameProcessing()
@@ -756,6 +787,7 @@ TrackBuffersManager::ShutdownDemuxers()
     mAudioTracks.mDemuxer = nullptr;
   }
   mInputDemuxer = nullptr;
+  mLastParsedEndTime.reset();
 }
 
 void
@@ -765,7 +797,7 @@ TrackBuffersManager::CreateDemuxerforMIMEType()
 
 #ifdef MOZ_WEBM
   if (mType.LowerCaseEqualsLiteral("video/webm") || mType.LowerCaseEqualsLiteral("audio/webm")) {
-    mInputDemuxer = new WebMDemuxer(mCurrentInputBuffer);
+    mInputDemuxer = new WebMDemuxer(mCurrentInputBuffer, true /* IsMediaSource*/ );
     return;
   }
 #endif
@@ -778,6 +810,66 @@ TrackBuffersManager::CreateDemuxerforMIMEType()
 #endif
   NS_WARNING("Not supported (yet)");
   return;
+}
+
+// We reset the demuxer by creating a new one and initializing it.
+void
+TrackBuffersManager::ResetDemuxingState()
+{
+  MOZ_ASSERT(mParser && mParser->HasInitData());
+  RecreateParser(true);
+  mCurrentInputBuffer = new SourceBufferResource(mType);
+  // The demuxer isn't initialized yet ; we don't want to notify it
+  // that data has been appended yet ; so we simply append the init segment
+  // to the resource.
+  mCurrentInputBuffer->AppendData(mParser->InitData());
+  CreateDemuxerforMIMEType();
+  if (!mInputDemuxer) {
+    RejectAppend(NS_ERROR_FAILURE, __func__);
+    return;
+  }
+  mDemuxerInitRequest.Begin(mInputDemuxer->Init()
+                      ->Then(GetTaskQueue(), __func__,
+                             this,
+                             &TrackBuffersManager::OnDemuxerResetDone,
+                             &TrackBuffersManager::OnDemuxerInitFailed));
+}
+
+void
+TrackBuffersManager::OnDemuxerResetDone(nsresult)
+{
+  MOZ_ASSERT(OnTaskQueue());
+  MSE_DEBUG("mAbort:%d", static_cast<bool>(mAbort));
+  mDemuxerInitRequest.Complete();
+  if (mAbort) {
+    RejectAppend(NS_ERROR_ABORT, __func__);
+    return;
+  }
+
+  // Recreate track demuxers.
+  uint32_t numVideos = mInputDemuxer->GetNumberTracks(TrackInfo::kVideoTrack);
+  if (numVideos) {
+    // We currently only handle the first video track.
+    mVideoTracks.mDemuxer = mInputDemuxer->GetTrackDemuxer(TrackInfo::kVideoTrack, 0);
+    MOZ_ASSERT(mVideoTracks.mDemuxer);
+  }
+
+  uint32_t numAudios = mInputDemuxer->GetNumberTracks(TrackInfo::kAudioTrack);
+  if (numAudios) {
+    // We currently only handle the first audio track.
+    mAudioTracks.mDemuxer = mInputDemuxer->GetTrackDemuxer(TrackInfo::kAudioTrack, 0);
+    MOZ_ASSERT(mAudioTracks.mDemuxer);
+  }
+
+  if (mPendingInputBuffer) {
+    // We had a partial media segment header stashed aside.
+    // Reparse its content so we can continue parsing the current input buffer.
+    int64_t start, end;
+    mParser->ParseStartAndEndTimestamps(mPendingInputBuffer, start, end);
+    mProcessedInput += mPendingInputBuffer->Length();
+  }
+
+  SegmentParserLoop();
 }
 
 void
@@ -1056,6 +1148,14 @@ TrackBuffersManager::CodedFrameProcessing()
     // The mediaRange is offset by the init segment position previously added.
     uint32_t length =
       mediaRange.mEnd - (mProcessedInput - mInputBuffer->Length());
+    if (!length) {
+      // We've completed our earlier media segment and no new data is to be
+      // processed. This happens with some containers that can't detect that a
+      // media segment is ending until a new one starts.
+      nsRefPtr<CodedFrameProcessingPromise> p = mProcessingPromise.Ensure(__func__);
+      CompleteCodedFrameProcessing();
+      return p;
+    }
     nsRefPtr<MediaByteBuffer> segment = new MediaByteBuffer;
     if (!segment->AppendElements(mInputBuffer->Elements(), length, fallible)) {
       return CodedFrameProcessingPromise::CreateAndReject(NS_ERROR_OUT_OF_MEMORY, __func__);
@@ -1213,6 +1313,9 @@ TrackBuffersManager::CompleteCodedFrameProcessing()
     return;
   }
 
+  mLastParsedEndTime = Some(std::max(mAudioTracks.mLastParsedEndTime,
+                                     mVideoTracks.mLastParsedEndTime));
+
   // 6. Remove the media segment bytes from the beginning of the input buffer.
   // Clear our demuxer from any already processed data.
   // As we have handled a complete media segment, it is safe to evict all data
@@ -1292,6 +1395,10 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
   // a frame be ignored due to the target window.
   bool needDiscontinuityCheck = true;
 
+  if (aSamples.Length()) {
+    aTrackData.mLastParsedEndTime = TimeUnit();
+  }
+
   for (auto& sample : aSamples) {
     SAMPLE_DEBUG("Processing %s frame(pts:%lld end:%lld, dts:%lld, duration:%lld, "
                "kf:%d)",
@@ -1301,6 +1408,12 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
                sample->mTimecode,
                sample->mDuration,
                sample->mKeyframe);
+
+    const TimeUnit sampleEndTime =
+      TimeUnit::FromMicroseconds(sample->GetEndTime());
+    if (sampleEndTime > aTrackData.mLastParsedEndTime) {
+      aTrackData.mLastParsedEndTime = sampleEndTime;
+    }
 
     // We perform step 10 right away as we can't do anything should a keyframe
     // be needed until we have one.

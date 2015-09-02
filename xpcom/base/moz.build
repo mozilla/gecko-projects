@@ -33,6 +33,12 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     XPIDL_SOURCES += [
         'nsIMacUtils.idl',
     ]
+    EXPORTS.mozilla += [
+        'MacHelpers.h',
+    ]
+    UNIFIED_SOURCES += [
+        'MacHelpers.mm',
+    ]
 
 XPIDL_MODULE = 'xpcom_base'
 
@@ -145,5 +151,3 @@ LOCAL_INCLUDES += [
 
 if CONFIG['MOZ_WIDGET_GTK']:
     CXXFLAGS += CONFIG['TK_CFLAGS']
-
-FAIL_ON_WARNINGS = True

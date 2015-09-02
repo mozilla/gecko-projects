@@ -170,12 +170,12 @@ LayerManager::CreatePersistentBufferProvider(const mozilla::gfx::IntSize &aSize,
                                              mozilla::gfx::SurfaceFormat aFormat)
 {
   RefPtr<PersistentBufferProviderBasic> bufferProvider =
-    new PersistentBufferProviderBasic(this, aSize, aFormat,
+    new PersistentBufferProviderBasic(aSize, aFormat,
                                       gfxPlatform::GetPlatform()->GetPreferredCanvasBackend());
 
   if (!bufferProvider->IsValid()) {
     bufferProvider =
-      new PersistentBufferProviderBasic(this, aSize, aFormat,
+      new PersistentBufferProviderBasic(aSize, aFormat,
                                         gfxPlatform::GetPlatform()->GetFallbackCanvasBackend());
   }
 
@@ -224,7 +224,7 @@ Layer::Layer(LayerManager* aManager, void* aImplData) :
   mContentFlags(0),
   mUseTileSourceRect(false),
   mIsFixedPosition(false),
-  mMargins(0, 0, 0, 0),
+  mFixedPositionData(nullptr),
   mStickyPositionData(nullptr),
   mScrollbarTargetId(FrameMetrics::NULL_SCROLL_ID),
   mScrollbarDirection(ScrollDirection::NONE),
@@ -863,9 +863,10 @@ Layer::ApplyPendingUpdatesForThisTransaction()
 const float
 Layer::GetLocalOpacity()
 {
-   if (LayerComposite* shadow = AsLayerComposite())
-    return shadow->GetShadowOpacity();
-  return mOpacity;
+  float opacity = mOpacity;
+  if (LayerComposite* shadow = AsLayerComposite())
+    opacity = shadow->GetShadowOpacity();
+  return std::min(std::max(opacity, 0.0f), 1.0f);
 }
 
 float
@@ -1295,14 +1296,30 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
     } else {
       useIntermediateSurface = false;
       gfx::Matrix contTransform;
-      if (!mEffectiveTransform.Is2D(&contTransform) ||
+      bool checkClipRect = false;
+      bool checkMaskLayers = false;
+
+      if (!mEffectiveTransform.Is2D(&contTransform)) {
+        // In 3D case, always check if we should use IntermediateSurface.
+        checkClipRect = true;
+        checkMaskLayers = true;
+      } else {
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
-          !contTransform.PreservesAxisAlignedRectangles()
+        if (!contTransform.PreservesAxisAlignedRectangles()) {
 #else
-          gfx::ThebesMatrix(contTransform).HasNonIntegerTranslation()
+        if (gfx::ThebesMatrix(contTransform).HasNonIntegerTranslation()) {
 #endif
-          )
-      {
+          checkClipRect = true;
+        }
+        /* In 2D case, only translation and/or positive scaling can be done w/o using IntermediateSurface.
+         * Otherwise, when rotation or flip happen, we should check whether to use IntermediateSurface.
+         */
+        if (contTransform.HasNonAxisAlignedTransform() || contTransform.HasNegativeScaling()) {
+          checkMaskLayers = true;
+        }
+      }
+
+      if (checkClipRect || checkMaskLayers) {
         for (Layer* child = GetFirstChild(); child; child = child->GetNextSibling()) {
           const Maybe<ParentLayerIntRect>& clipRect = child->GetEffectiveClipRect();
           /* We can't (easily) forward our transform to children with a non-empty clip
@@ -1310,8 +1327,11 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
            * the calculations performed by CalculateScissorRect above.
            * Nor for a child with a mask layer.
            */
-          if ((clipRect && !clipRect->IsEmpty() && !child->GetVisibleRegion().IsEmpty()) ||
-              child->HasMaskLayers()) {
+          if (checkClipRect && (clipRect && !clipRect->IsEmpty() && !child->GetVisibleRegion().IsEmpty())) {
+            useIntermediateSurface = true;
+            break;
+          }
+          if (checkMaskLayers && child->HasMaskLayers()) {
             useIntermediateSurface = true;
             break;
           }
@@ -1775,9 +1795,10 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
     aStream << nsPrintfCString(" [hscrollbar=%lld]", GetScrollbarTargetContainerId()).get();
   }
   if (GetIsFixedPosition()) {
-    aStream << nsPrintfCString(" [isFixedPosition anchor=%s margin=%f,%f,%f,%f]",
-                     ToString(mAnchor).c_str(),
-                     mMargins.top, mMargins.right, mMargins.bottom, mMargins.left).get();
+    LayerPoint anchor = GetFixedPositionAnchor();
+    aStream << nsPrintfCString(" [isFixedPosition scrollId=%d anchor=%s]",
+                     GetFixedPositionScrollContainerId(),
+                     ToString(anchor).c_str()).get();
   }
   if (GetIsStickyPosition()) {
     aStream << nsPrintfCString(" [isStickyPosition scrollId=%d outer=%f,%f %fx%f "

@@ -168,6 +168,14 @@ let gSyncPane = {
     textbox.setSelectionRange(valLength, valLength);
   },
 
+  _blurComputerNameTextbox: function() {
+    document.getElementById("fxaSyncComputerName").blur();
+  },
+
+  _focusChangeDeviceNameButton: function() {
+    document.getElementById("fxaChangeDeviceName").focus();
+  },
+
   _updateComputerNameValue: function(save) {
     let textbox = document.getElementById("fxaSyncComputerName");
     if (save) {
@@ -214,12 +222,17 @@ let gSyncPane = {
       this._focusComputerNameTextbox();
     });
     setEventListener("fxaCancelChangeDeviceName", "command", function () {
+      // We explicitly blur the textbox because of bug 1194032
+      this._blurComputerNameTextbox();
       this._toggleComputerNameControls(false);
       this._updateComputerNameValue(false);
+      this._focusChangeDeviceNameButton();
     });
     setEventListener("fxaSaveChangeDeviceName", "command", function () {
+      this._blurComputerNameTextbox();
       this._toggleComputerNameControls(false);
       this._updateComputerNameValue(true);
+      this._focusChangeDeviceNameButton();
     });
     setEventListener("unlinkDevice", "click", function () {
       gSyncPane.startOver(true);
@@ -247,7 +260,7 @@ let gSyncPane = {
       gSyncPane.signIn();
       return false;
     });
-    setEventListener("verifiedManage", "command",
+    setEventListener("verifiedManage", "click",
       gSyncPane.manageFirefoxAccount);
     setEventListener("fxaUnlinkButton", "click", function () {
       gSyncPane.unlinkFirefoxAccount(true);
@@ -565,6 +578,25 @@ let gSyncPane = {
       gSyncUtils.resetPassphrase();
   },
 
+  _getEntryPoint: function () {
+    let params = new URLSearchParams(document.URL.split("#")[0].split("?")[1] || "");
+    return params.get("entrypoint") || "preferences";
+  },
+
+  _openAboutAccounts: function(action) {
+    let entryPoint = this._getEntryPoint();
+    let params = new URLSearchParams();
+    if (action) {
+      params.set("action", action);
+    }
+    params.set("entrypoint", entryPoint);
+
+    this.openContentInBrowser("about:accounts?" + params, {
+      replaceQueryString: true
+    });
+
+  },
+
   /**
    * Invoke the Sync setup wizard.
    *
@@ -580,9 +612,7 @@ let gSyncPane = {
                   .wrappedJSObject;
 
     if (service.fxAccountsEnabled) {
-      this.openContentInBrowser("about:accounts?entrypoint=preferences", {
-        replaceQueryString: true
-      });
+      this._openAboutAccounts();
     } else {
       let win = Services.wm.getMostRecentWindow("Weave:AccountSetup");
       if (win)
@@ -618,25 +648,19 @@ let gSyncPane = {
   },
 
   signUp: function() {
-    this.openContentInBrowser("about:accounts?action=signup&entrypoint=preferences", {
-      replaceQueryString: true
-    });
+    this._openAboutAccounts("signup");
   },
 
   signIn: function() {
-    this.openContentInBrowser("about:accounts?action=signin&entrypoint=preferences", {
-      replaceQueryString: true
-    });
+    this._openAboutAccounts("signin");
   },
 
   reSignIn: function() {
-    this.openContentInBrowser("about:accounts?action=reauth&entrypoint=preferences", {
-      replaceQueryString: true
-    });
+    this._openAboutAccounts("reauth");
   },
 
   openChangeProfileImage: function() {
-    fxAccounts.promiseAccountsChangeProfileURI("preferences", "avatar")
+    fxAccounts.promiseAccountsChangeProfileURI(this._getEntryPoint(), "avatar")
       .then(url => {
         this.openContentInBrowser(url, {
           replaceQueryString: true
@@ -645,7 +669,7 @@ let gSyncPane = {
   },
 
   manageFirefoxAccount: function() {
-    fxAccounts.promiseAccountsManageURI("preferences")
+    fxAccounts.promiseAccountsManageURI(this._getEntryPoint())
       .then(url => {
         this.openContentInBrowser(url, {
           replaceQueryString: true

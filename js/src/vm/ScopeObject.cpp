@@ -191,8 +191,8 @@ CallObject::createTemplateObject(JSContext* cx, HandleScript script, gc::Initial
     if (!obj)
         return nullptr;
 
-    // Set uninitialized lexicals even on template objects, as Ion will use
-    // copy over the template object's slot values in the fast path.
+    // Set uninitialized lexicals even on template objects, as Ion will copy
+    // over the template object's slot values in the fast path.
     obj->as<CallObject>().initAliasedLexicalsToThrowOnTouch(script);
 
     return &obj->as<CallObject>();
@@ -310,6 +310,59 @@ const Class CallObject::class_ = {
     "Call",
     JSCLASS_IS_ANONYMOUS | JSCLASS_HAS_RESERVED_SLOTS(CallObject::RESERVED_SLOTS)
 };
+
+/*****************************************************************************/
+
+const Class ModuleEnvironmentObject::class_ = {
+    "ModuleEnvironmentObject",
+    JSCLASS_IMPLEMENTS_BARRIERS |
+    JSCLASS_HAS_RESERVED_SLOTS(ModuleEnvironmentObject::RESERVED_SLOTS) |
+    JSCLASS_IS_ANONYMOUS
+};
+
+/* static */ ModuleEnvironmentObject*
+ModuleEnvironmentObject::create(ExclusiveContext* cx, HandleModuleObject module)
+{
+    RootedScript script(cx, module->script());
+    RootedShape shape(cx, script->bindings.callObjShape());
+    MOZ_ASSERT(shape->getObjectClass() == &class_);
+
+    RootedObjectGroup group(cx, ObjectGroup::defaultNewGroup(cx, &class_, TaggedProto(nullptr)));
+    if (!group)
+        return nullptr;
+
+    gc::AllocKind kind = gc::GetGCObjectKind(shape->numFixedSlots());
+    MOZ_ASSERT(CanBeFinalizedInBackground(kind, &class_));
+    kind = gc::GetBackgroundAllocKind(kind);
+
+    JSObject* obj = JSObject::create(cx, kind, TenuredHeap, shape, group);
+    if (!obj)
+        return nullptr;
+
+    Rooted<ModuleEnvironmentObject*> scope(cx, &obj->as<ModuleEnvironmentObject>());
+
+    // Set uninitialized lexicals even on template objects, as Ion will use
+    // copy over the template object's slot values in the fast path.
+    scope->initAliasedLexicalsToThrowOnTouch(script);
+
+    scope->initFixedSlot(MODULE_SLOT, ObjectValue(*module));
+    if (!JSObject::setSingleton(cx, scope))
+        return nullptr;
+
+    // Initialize this early so that we can manipulate the scope object without
+    // causing assertions.
+    scope->setEnclosingScope(cx->global());
+
+    return scope;
+}
+
+ModuleObject&
+ModuleEnvironmentObject::module() const
+{
+    return getReservedSlot(MODULE_SLOT).toObject().as<ModuleObject>();
+}
+
+/*****************************************************************************/
 
 const Class DeclEnvObject::class_ = {
     js_Object_str,
@@ -593,25 +646,6 @@ const Class NonSyntacticVariablesObject::class_ = {
     JSCLASS_IS_ANONYMOUS
 };
 
-/* static */ StaticFunctionBoxScopeObject*
-StaticFunctionBoxScopeObject::create(ExclusiveContext* cx, HandleObject enclosing)
-{
-    StaticFunctionBoxScopeObject* obj =
-        NewObjectWithNullTaggedProto<StaticFunctionBoxScopeObject>(cx, GenericObject,
-                                                                   BaseShape::DELEGATE);
-    if (!obj)
-        return nullptr;
-
-    obj->setReservedSlot(SCOPE_CHAIN_SLOT, ObjectOrNullValue(enclosing));
-    return obj;
-}
-
-const Class StaticFunctionBoxScopeObject::class_ = {
-    "StaticFunctionBoxScopeObject",
-    JSCLASS_HAS_RESERVED_SLOTS(StaticFunctionBoxScopeObject::RESERVED_SLOTS) |
-    JSCLASS_IS_ANONYMOUS
-};
-
 /*****************************************************************************/
 
 /* static */ ClonedBlockObject*
@@ -704,6 +738,19 @@ StaticBlockObject*
 StaticBlockObject::create(ExclusiveContext* cx)
 {
     return NewObjectWithNullTaggedProto<StaticBlockObject>(cx, TenuredObject, BaseShape::DELEGATE);
+}
+
+Shape*
+StaticBlockObject::lookupAliasedName(PropertyName* name)
+{
+    Shape::Range<NoGC> r(lastProperty());
+    while (!r.empty()) {
+        jsid id = r.front().propidRaw();
+        if (JSID_TO_ATOM(id)->asPropertyName() == name && isAliased(shapeToIndex(r.front())))
+            return &r.front();
+        r.popFront();
+    }
+    return nullptr;
 }
 
 /* static */ Shape*
@@ -1081,6 +1128,9 @@ ScopeIter::settle()
 #ifdef DEBUG
     if (!ssi_.done() && hasAnyScopeObject()) {
         switch (ssi_.type()) {
+          case StaticScopeIter<CanGC>::Module:
+            MOZ_ASSERT(scope_->as<ModuleEnvironmentObject>().module() == ssi_.module());
+            break;
           case StaticScopeIter<CanGC>::Function:
             MOZ_ASSERT(scope_->as<CallObject>().callee().nonLazyScript() == ssi_.funScript());
             break;
@@ -1124,6 +1174,8 @@ ScopeIter::type() const
     MOZ_ASSERT(!done());
 
     switch (ssi_.type()) {
+      case StaticScopeIter<CanGC>::Module:
+        return Module;
       case StaticScopeIter<CanGC>::Function:
         return Call;
       case StaticScopeIter<CanGC>::Block:
@@ -1157,6 +1209,8 @@ ScopeIter::maybeStaticScope() const
     switch (ssi_.type()) {
       case StaticScopeIter<CanGC>::Function:
         return &fun();
+      case StaticScopeIter<CanGC>::Module:
+        return &module();
       case StaticScopeIter<CanGC>::Block:
         return &staticBlock();
       case StaticScopeIter<CanGC>::With:
@@ -2393,6 +2447,10 @@ GetDebugScopeForMissing(JSContext* cx, const ScopeIter& si)
      */
     DebugScopeObject* debugScope = nullptr;
     switch (si.type()) {
+      case ScopeIter::Module:
+          MOZ_CRASH(); // TODO: Implement debug scopes for modules.
+          break;
+
       case ScopeIter::Call: {
         RootedFunction callee(cx, &si.fun());
         // Generators should always reify their scopes.
@@ -2598,8 +2656,11 @@ js::DumpStaticScopeChain(JSObject* staticScope)
 {
     for (StaticScopeIter<NoGC> ssi(staticScope); !ssi.done(); ssi++) {
         switch (ssi.type()) {
+          case StaticScopeIter<NoGC>::Module:
+            fprintf(stdout, "module [%p]", &ssi.module());
+            break;
           case StaticScopeIter<NoGC>::Function:
-            if (ssi.maybeFunctionBox())
+            if (ssi.fun().isBeingParsed())
                 fprintf(stdout, "funbox [%p fun=%p]", ssi.maybeFunctionBox(), &ssi.fun());
             else
                 fprintf(stdout, "function [%p]", &ssi.fun());

@@ -41,6 +41,7 @@ let test = Task.async(function*() {
   isEmptyArray(allocations.sites, "allocations.sites");
   isEmptyArray(allocations.timestamps, "allocations.timestamps");
   isEmptyArray(allocations.frames, "allocations.frames");
+  isEmptyArray(allocations.sizes, "allocations.sizes");
 
   let sampleCount = 0;
 
@@ -60,7 +61,7 @@ let test = Task.async(function*() {
   ok(sampleCount > 0,
     "At least some samples have been iterated over, checking for root nodes.");
 
-  is($("#overview-pane").hidden, true,
+  is(isVisible($("#overview-pane")), false,
     "overview pane hidden when timeline mocked.");
 
   is($("#select-waterfall-view").hidden, true,

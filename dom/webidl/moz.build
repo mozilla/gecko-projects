@@ -276,6 +276,7 @@ WEBIDL_FILES = [
     'KeyboardEvent.webidl',
     'KeyEvent.webidl',
     'KeyframeEffect.webidl',
+    'KillSwitch.webidl',
     'LegacyQueryInterface.webidl',
     'LinkStyle.webidl',
     'ListBoxObject.webidl',
@@ -349,10 +350,14 @@ WEBIDL_FILES = [
     'PannerNode.webidl',
     'ParentNode.webidl',
     'Performance.webidl',
+    'PerformanceCompositeTiming.webidl',
     'PerformanceEntry.webidl',
     'PerformanceMark.webidl',
     'PerformanceMeasure.webidl',
     'PerformanceNavigation.webidl',
+    'PerformanceObserver.webidl',
+    'PerformanceObserverEntryList.webidl',
+    'PerformanceRenderTiming.webidl',
     'PerformanceResourceTiming.webidl',
     'PerformanceTiming.webidl',
     'PeriodicWave.webidl',
@@ -385,6 +390,7 @@ WEBIDL_FILES = [
     'RGBColor.webidl',
     'RTCStatsReport.webidl',
     'Screen.webidl',
+    'ScreenOrientation.webidl',
     'ScriptProcessorNode.webidl',
     'ScrollAreaEvent.webidl',
     'ScrollBoxObject.webidl',
@@ -679,6 +685,8 @@ if CONFIG['MOZ_B2G_BT']:
         'BluetoothManager.webidl',
         'BluetoothPairingHandle.webidl',
         'BluetoothPairingListener.webidl',
+        'BluetoothPbapParameters.webidl',
+        'BluetoothPbapRequestHandle.webidl',
     ]
 
 if CONFIG['MOZ_SIMPLEPUSH']:
@@ -825,7 +833,10 @@ if CONFIG['MOZ_B2G_BT']:
         'BluetoothDeviceEvent.webidl',
         'BluetoothGattCharacteristicEvent.webidl',
         'BluetoothPairingEvent.webidl',
+        'BluetoothPhonebookPullingEvent.webidl',
         'BluetoothStatusChangedEvent.webidl',
+        'BluetoothVCardListingEvent.webidl',
+        'BluetoothVCardPullingEvent.webidl'
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':

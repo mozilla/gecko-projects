@@ -12,6 +12,7 @@ LOCAL_INCLUDES += [
 
 UNIFIED_SOURCES = [
     'DeserializedNodeUbiNodes.cpp',
+    'DeserializedStackFrameUbiStackFrames.cpp',
     'DoesCrossZoneBoundaries.cpp',
     'DoesntCrossZoneBoundaries.cpp',
     'SerializesEdgeNames.cpp',
@@ -19,5 +20,8 @@ UNIFIED_SOURCES = [
     'SerializesTypeNames.cpp',
     'UniqueStringHashPolicy.cpp',
 ]
+
+# XXX: We should fix these warnings.
+ALLOW_COMPILER_WARNINGS = True
 
 FINAL_LIBRARY = 'xul-gtest'

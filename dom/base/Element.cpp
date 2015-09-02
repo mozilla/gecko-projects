@@ -2054,7 +2054,7 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
   NS_PRECONDITION(aSourceEvent, "Must have source event");
   NS_PRECONDITION(aStatus, "Null out param?");
 
-  WidgetMouseEvent event(aSourceEvent->mFlags.mIsTrusted, NS_MOUSE_CLICK,
+  WidgetMouseEvent event(aSourceEvent->mFlags.mIsTrusted, eMouseClick,
                          aSourceEvent->widget, WidgetMouseEvent::eReal);
   event.refPoint = aSourceEvent->refPoint;
   uint32_t clickCount = 1;
@@ -2850,9 +2850,9 @@ Element::CheckHandleEventForLinksPrecondition(EventChainVisitor& aVisitor,
 {
   if (aVisitor.mEventStatus == nsEventStatus_eConsumeNoDefault ||
       (!aVisitor.mEvent->mFlags.mIsTrusted &&
-       (aVisitor.mEvent->message != NS_MOUSE_CLICK) &&
-       (aVisitor.mEvent->message != NS_KEY_PRESS) &&
-       (aVisitor.mEvent->message != NS_UI_ACTIVATE)) ||
+       (aVisitor.mEvent->mMessage != eMouseClick) &&
+       (aVisitor.mEvent->mMessage != eKeyPress) &&
+       (aVisitor.mEvent->mMessage != eLegacyDOMActivate)) ||
       !aVisitor.mPresContext ||
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented) {
     return false;
@@ -2867,11 +2867,11 @@ Element::PreHandleEventForLinks(EventChainPreVisitor& aVisitor)
 {
   // Optimisation: return early if this event doesn't interest us.
   // IMPORTANT: this switch and the switch below it must be kept in sync!
-  switch (aVisitor.mEvent->message) {
-  case NS_MOUSE_OVER:
-  case NS_FOCUS_CONTENT:
-  case NS_MOUSE_OUT:
-  case NS_BLUR_CONTENT:
+  switch (aVisitor.mEvent->mMessage) {
+  case eMouseOver:
+  case eFocus:
+  case eMouseOut:
+  case eBlur:
     break;
   default:
     return NS_OK;
@@ -2887,12 +2887,12 @@ Element::PreHandleEventForLinks(EventChainPreVisitor& aVisitor)
 
   // We do the status bar updates in PreHandleEvent so that the status bar gets
   // updated even if the event is consumed before we have a chance to set it.
-  switch (aVisitor.mEvent->message) {
+  switch (aVisitor.mEvent->mMessage) {
   // Set the status bar similarly for mouseover and focus
-  case NS_MOUSE_OVER:
+  case eMouseOver:
     aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
     // FALL THROUGH
-  case NS_FOCUS_CONTENT: {
+  case eFocus: {
     InternalFocusEvent* focusEvent = aVisitor.mEvent->AsFocusEvent();
     if (!focusEvent || !focusEvent->isRefocus) {
       nsAutoString target;
@@ -2904,10 +2904,10 @@ Element::PreHandleEventForLinks(EventChainPreVisitor& aVisitor)
     }
     break;
   }
-  case NS_MOUSE_OUT:
+  case eMouseOut:
     aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
     // FALL THROUGH
-  case NS_BLUR_CONTENT:
+  case eBlur:
     rv = LeaveLink(aVisitor.mPresContext);
     if (NS_SUCCEEDED(rv)) {
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
@@ -2928,11 +2928,11 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
 {
   // Optimisation: return early if this event doesn't interest us.
   // IMPORTANT: this switch and the switch below it must be kept in sync!
-  switch (aVisitor.mEvent->message) {
-  case NS_MOUSE_BUTTON_DOWN:
-  case NS_MOUSE_CLICK:
-  case NS_UI_ACTIVATE:
-  case NS_KEY_PRESS:
+  switch (aVisitor.mEvent->mMessage) {
+  case eMouseDown:
+  case eMouseClick:
+  case eLegacyDOMActivate:
+  case eKeyPress:
     break;
   default:
     return NS_OK;
@@ -2946,8 +2946,8 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
 
   nsresult rv = NS_OK;
 
-  switch (aVisitor.mEvent->message) {
-  case NS_MOUSE_BUTTON_DOWN:
+  switch (aVisitor.mEvent->mMessage) {
+  case eMouseDown:
     {
       if (aVisitor.mEvent->AsMouseEvent()->button ==
             WidgetMouseEvent::eLeftButton) {
@@ -2970,7 +2970,7 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
     }
     break;
 
-  case NS_MOUSE_CLICK: {
+  case eMouseClick: {
     WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
     if (mouseEvent->IsLeftClickEvent()) {
       if (mouseEvent->IsControl() || mouseEvent->IsMeta() ||
@@ -2983,7 +2983,9 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
       if (shell) {
         // single-click
         nsEventStatus status = nsEventStatus_eIgnore;
-        InternalUIEvent actEvent(mouseEvent->mFlags.mIsTrusted, NS_UI_ACTIVATE);
+        // DOMActive event should be trusted since the activation is actually
+        // occurred even if the cause is an untrusted click event.
+        InternalUIEvent actEvent(true, eLegacyDOMActivate, mouseEvent);
         actEvent.detail = 1;
 
         rv = shell->HandleDOMEventWithTarget(this, &actEvent, &status);
@@ -2994,20 +2996,21 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
     }
     break;
   }
-  case NS_UI_ACTIVATE:
+  case eLegacyDOMActivate:
     {
       if (aVisitor.mEvent->originalTarget == this) {
         nsAutoString target;
         GetLinkTarget(target);
+        const InternalUIEvent* activeEvent = aVisitor.mEvent->AsUIEvent();
+        MOZ_ASSERT(activeEvent);
         nsContentUtils::TriggerLink(this, aVisitor.mPresContext, absURI, target,
-                                    true, true,
-                                    aVisitor.mEvent->mFlags.mIsTrusted);
+                                    true, true, activeEvent->IsTrustable());
         aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
       }
     }
     break;
 
-  case NS_KEY_PRESS:
+  case eKeyPress:
     {
       WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
       if (keyEvent && keyEvent->keyCode == NS_VK_RETURN) {

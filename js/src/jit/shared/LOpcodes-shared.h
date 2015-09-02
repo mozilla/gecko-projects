@@ -77,8 +77,6 @@
     _(Unreachable)                  \
     _(EncodeSnapshot)               \
     _(GetDynamicName)               \
-    _(FilterArgumentsOrEvalS)       \
-    _(FilterArgumentsOrEvalV)       \
     _(CallDirectEval)               \
     _(StackArgT)                    \
     _(StackArgV)                    \
@@ -195,6 +193,8 @@
     _(RegExpReplace)                \
     _(StringReplace)                \
     _(Substr)                       \
+    _(BinarySharedStub)             \
+    _(UnarySharedStub)              \
     _(Lambda)                       \
     _(LambdaArrow)                  \
     _(LambdaForSingleton)           \

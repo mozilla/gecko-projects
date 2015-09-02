@@ -31,17 +31,14 @@ var observerService = SpecialPowers.Cc["@mozilla.org/observer-service;1"]
 var tests = [
   function() {
     iframe = document.querySelector("iframe");
-    SpecialPowers.pushPrefEnv({"set": [["media.useAudioChannelService", true]]}, runTest);
+    observerService.addObserver(observer, "audio-playback", false);
+    ok(true, "Observer set");
+    runTest();
   },
 
   function() {
     iframe.src = "file_webaudioLoop.html";
-  },
-
-  function() {
-    observerService.addObserver(observer, "audio-playback", false);
-    ok(true, "Observer set");
-    runTest();
+    expectedNotification = 'active';
   },
 
   function() {

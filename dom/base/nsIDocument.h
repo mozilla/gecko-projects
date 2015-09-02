@@ -25,6 +25,7 @@
 #include "mozilla/net/ReferrerPolicy.h"  // for member
 #include "nsWeakReference.h"
 #include "mozilla/dom/DocumentBinding.h"
+#include "mozilla/UseCounter.h"
 #include "mozilla/WeakPtr.h"
 #include "Units.h"
 #include "nsExpirationTracker.h"
@@ -132,7 +133,9 @@ class MediaQueryList;
 class GlobalObject;
 class NodeFilter;
 class NodeIterator;
+enum class OrientationType : uint32_t;
 class ProcessingInstruction;
+class Promise;
 class StyleSheetList;
 class SVGDocument;
 class Touch;
@@ -1182,15 +1185,6 @@ public:
   static void AsyncExitFullscreen(nsIDocument* aDocument);
 
   /**
-   * Handles one single fullscreen request, updates `aHandled` if the request
-   * is handled, and returns whether this request should be removed from the
-   * request queue.
-   */
-  static bool HandlePendingFullscreenRequest(const FullscreenRequest& aRequest,
-                                             nsIDocShellTreeItem* aRootShell,
-                                             bool* aHandled);
-
-  /**
    * Handles any pending fullscreen in aDocument or its subdocuments.
    *
    * Returns whether there is any fullscreen request handled.
@@ -1201,6 +1195,14 @@ public:
 
   static void UnlockPointer(nsIDocument* aDoc = nullptr);
 
+  // ScreenOrientation related APIs
+
+  virtual void SetCurrentOrientation(mozilla::dom::OrientationType aType,
+                                     uint16_t aAngle) = 0;
+  virtual uint16_t CurrentOrientationAngle() const = 0;
+  virtual mozilla::dom::OrientationType CurrentOrientationType() const = 0;
+  virtual void SetOrientationPendingPromise(mozilla::dom::Promise* aPromise) = 0;
+  virtual mozilla::dom::Promise* GetOrientationPendingPromise() const = 0;
 
   //----------------------------------------------------------------------
 
@@ -1714,7 +1716,7 @@ public:
 
   bool IsResourceDoc() const {
     return IsBeingUsedAsImage() || // Are we a helper-doc for an SVG image?
-      !!mDisplayDocument;          // Are we an external resource doc?
+      mHasDisplayDocument;         // Are we an external resource doc?
   }
 
   /**
@@ -1734,15 +1736,17 @@ public:
    */
   void SetDisplayDocument(nsIDocument* aDisplayDocument)
   {
-    NS_PRECONDITION(!GetShell() &&
-                    !GetContainer() &&
-                    !GetWindow(),
-                    "Shouldn't set mDisplayDocument on documents that already "
-                    "have a presentation or a docshell or a window");
-    NS_PRECONDITION(aDisplayDocument != this, "Should be different document");
-    NS_PRECONDITION(!aDisplayDocument->GetDisplayDocument(),
-                    "Display documents should not nest");
+    MOZ_ASSERT(!GetShell() &&
+               !GetContainer() &&
+               !GetWindow(),
+               "Shouldn't set mDisplayDocument on documents that already "
+               "have a presentation or a docshell or a window");
+    MOZ_ASSERT(aDisplayDocument, "Must not be null");
+    MOZ_ASSERT(aDisplayDocument != this, "Should be different document");
+    MOZ_ASSERT(!aDisplayDocument->GetDisplayDocument(),
+               "Display documents should not nest");
     mDisplayDocument = aDisplayDocument;
+    mHasDisplayDocument = !!aDisplayDocument;
   }
 
   /**
@@ -1761,7 +1765,7 @@ public:
     virtual ~ExternalResourceLoad() {}
 
     void AddObserver(nsIObserver* aObserver) {
-      NS_PRECONDITION(aObserver, "Must have observer");
+      MOZ_ASSERT(aObserver, "Must have observer");
       mObservers.AppendElement(aObserver);
     }
 
@@ -2316,6 +2320,8 @@ public:
     eAttributeChanged
   };
 
+  nsIDocument* GetTopLevelContentDocument();
+
   /**
    * Registers an unresolved custom element that is a candidate for
    * upgrade when the definition is registered via registerElement.
@@ -2579,6 +2585,41 @@ public:
 
   bool DidFireDOMContentLoaded() const { return mDidFireDOMContentLoaded; }
 
+  void SetDocumentUseCounter(mozilla::UseCounter aUseCounter)
+  {
+    if (!mUseCounters[aUseCounter]) {
+      mUseCounters[aUseCounter] = true;
+    }
+  }
+
+  void SetPageUseCounter(mozilla::UseCounter aUseCounter);
+
+  void SetDocumentAndPageUseCounter(mozilla::UseCounter aUseCounter)
+  {
+    SetDocumentUseCounter(aUseCounter);
+    SetPageUseCounter(aUseCounter);
+  }
+
+  void PropagateUseCounters(nsIDocument* aParentDocument);
+
+protected:
+  bool GetUseCounter(mozilla::UseCounter aUseCounter)
+  {
+    return mUseCounters[aUseCounter];
+  }
+
+  void SetChildDocumentUseCounter(mozilla::UseCounter aUseCounter)
+  {
+    if (!mChildDocumentUseCounters[aUseCounter]) {
+      mChildDocumentUseCounters[aUseCounter] = true;
+    }
+  }
+
+  bool GetChildDocumentUseCounter(mozilla::UseCounter aUseCounter)
+  {
+    return mChildDocumentUseCounters[aUseCounter];
+  }
+
 private:
   mutable std::bitset<eDeprecatedOperationCount> mDeprecationWarnedAbout;
   mutable std::bitset<eDocumentWarningCount> mDocWarningWarnedAbout;
@@ -2810,6 +2851,12 @@ protected:
   // caches.
   bool mDidDocumentOpen : 1;
 
+  // Whether this document has a display document and thus is considered to
+  // be a resource document.  Normally this is the same as !!mDisplayDocument,
+  // but mDisplayDocument is cleared during Unlink.  mHasDisplayDocument is
+  // valid in the document's destructor.
+  bool mHasDisplayDocument : 1;
+
   // Is the current mFontFaceSet valid?
   bool mFontFaceSetDirty : 1;
 
@@ -2956,6 +3003,14 @@ protected:
 
   // Our live MediaQueryLists
   PRCList mDOMMediaQueryLists;
+
+  // Flags for use counters used directly by this document.
+  std::bitset<mozilla::eUseCounter_Count> mUseCounters;
+  // Flags for use counters used by any child documents of this document.
+  std::bitset<mozilla::eUseCounter_Count> mChildDocumentUseCounters;
+  // Flags for whether we've notified our top-level "page" of a use counter
+  // for this child document.
+  std::bitset<mozilla::eUseCounter_Count> mNotifiedPageForUseCounter;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIDocument, NS_IDOCUMENT_IID)

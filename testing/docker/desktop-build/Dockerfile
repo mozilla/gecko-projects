@@ -1,13 +1,10 @@
-FROM          quay.io/djmitche/ubuntu-build:0.0.4
+FROM          taskcluster/ubuntu-build:0.0.5
 MAINTAINER    Morgan Reece Phillips <winter2718@gmail.com>
 
 # Add build scripts; these are the entry points from the taskcluster worker, and
 # operate on environment variables
 ADD             bin /home/worker/bin
 RUN             chmod +x /home/worker/bin/*
-
-# Add custom mozharness configs
-ADD             configs /home/worker/configs
 
 ##
 # COMPILER HACKS
@@ -31,6 +28,10 @@ ADD           oauth.txt /home/worker/
 # Note that this needs to be in the parent of the workspace directory and in
 # the directory where mozharness is run (not its --work-dir)
 ADD           buildprops.json /home/worker/
+
+# Make sure commands from here on run as `worker`
+# XXX but non-root tasks aren't yet supported - bug 1093833
+# USER worker
 
 # Set a default command useful for debugging
 CMD ["/bin/bash", "--login"]

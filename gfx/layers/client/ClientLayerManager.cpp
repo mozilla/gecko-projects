@@ -110,7 +110,8 @@ ClientLayerManager::ClientLayerManager(nsIWidget* aWidget)
 ClientLayerManager::~ClientLayerManager()
 {
   if (mTransactionIdAllocator) {
-    DidComposite(mLatestTransactionId);
+    TimeStamp now = TimeStamp::Now();
+    DidComposite(mLatestTransactionId, now, now);
   }
   mMemoryPressureObserver->Destroy();
   ClearCachedResources();
@@ -194,7 +195,7 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
   // If the last transaction was incomplete (a failed DoEmptyTransaction),
   // don't signal a new transaction to ShadowLayerForwarder. Carry on adding
   // to the previous transaction.
-  dom::ScreenOrientation orientation;
+  dom::ScreenOrientationInternal orientation;
   if (dom::TabChild* window = mWidget->GetOwningTabChild()) {
     orientation = window->GetOrientation();
   } else {
@@ -230,9 +231,14 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
   }
 
   // If this is a new paint, increment the paint sequence number.
-  if (!mIsRepeatTransaction && gfxPrefs::APZTestLoggingEnabled()) {
+  if (!mIsRepeatTransaction) {
+    // Increment the paint sequence number even if test logging isn't
+    // enabled in this process; it may be enabled in the parent process,
+    // and the parent process expects unique sequence numbers.
     ++mPaintSequenceNumber;
-    mApzTestData.StartNewPaint(mPaintSequenceNumber);
+    if (gfxPrefs::APZTestLoggingEnabled()) {
+      mApzTestData.StartNewPaint(mPaintSequenceNumber);
+    }
   }
 }
 
@@ -384,16 +390,18 @@ ClientLayerManager::Composite()
 }
 
 void
-ClientLayerManager::DidComposite(uint64_t aTransactionId)
+ClientLayerManager::DidComposite(uint64_t aTransactionId,
+                                 const TimeStamp& aCompositeStart,
+                                 const TimeStamp& aCompositeEnd)
 {
   MOZ_ASSERT(mWidget);
   nsIWidgetListener *listener = mWidget->GetWidgetListener();
   if (listener) {
-    listener->DidCompositeWindow();
+    listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
   }
   listener = mWidget->GetAttachedWidgetListener();
   if (listener) {
-    listener->DidCompositeWindow();
+    listener->DidCompositeWindow(aCompositeStart, aCompositeEnd);
   }
   mTransactionIdAllocator->NotifyTransactionCompleted(aTransactionId);
 }
@@ -506,7 +514,7 @@ ClientLayerManager::MakeSnapshotIfRequired()
         gfx::Matrix rotate = ComputeTransformForUnRotation(outerBounds, mTargetRotation);
 
         gfx::Matrix oldMatrix = dt->GetTransform();
-        dt->SetTransform(oldMatrix * rotate);
+        dt->SetTransform(rotate * oldMatrix);
         dt->DrawSurface(surf, dstRect, srcRect,
                         DrawSurfaceOptions(),
                         DrawOptions(1.0f, CompositionOp::OP_OVER));
@@ -788,6 +796,12 @@ bool
 ClientLayerManager::AsyncPanZoomEnabled() const
 {
   return mWidget && mWidget->AsyncPanZoomEnabled();
+}
+
+void
+ClientLayerManager::SetNextPaintSyncId(int32_t aSyncId)
+{
+  mForwarder->SetPaintSyncId(aSyncId);
 }
 
 ClientLayer::~ClientLayer()

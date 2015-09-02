@@ -49,6 +49,7 @@ class AsyncPanZoomAnimation;
 class FlingAnimation;
 class InputBlockState;
 class TouchBlockState;
+class PanGestureBlockState;
 class OverscrollHandoffChain;
 class StateChangeNotificationBlocker;
 
@@ -370,11 +371,11 @@ public:
 
   // Return whether or not a wheel event will be able to scroll in either
   // direction.
-  bool CanScroll(const ScrollWheelInput& aEvent) const;
+  bool CanScroll(const InputData& aEvent) const;
 
   // Return whether or not a scroll delta will be able to scroll in either
   // direction.
-  bool CanScrollWithWheel(const LayoutDevicePoint& aDelta) const;
+  bool CanScrollWithWheel(const ParentLayerPoint& aDelta) const;
 
   // Return whether or not there is room to scroll this APZC
   // in the given direction.
@@ -440,7 +441,7 @@ protected:
   nsEventStatus OnPanMayBegin(const PanGestureInput& aEvent);
   nsEventStatus OnPanCancelled(const PanGestureInput& aEvent);
   nsEventStatus OnPanBegin(const PanGestureInput& aEvent);
-  nsEventStatus OnPan(const PanGestureInput& aEvent, ScrollSource aSource, bool aFingersOnTouchpad);
+  nsEventStatus OnPan(const PanGestureInput& aEvent, bool aFingersOnTouchpad);
   nsEventStatus OnPanEnd(const PanGestureInput& aEvent);
   nsEventStatus OnPanMomentumStart(const PanGestureInput& aEvent);
   nsEventStatus OnPanMomentumEnd(const PanGestureInput& aEvent);
@@ -450,7 +451,7 @@ protected:
    */
   nsEventStatus OnScrollWheel(const ScrollWheelInput& aEvent);
 
-  LayoutDevicePoint GetScrollWheelDelta(const ScrollWheelInput& aEvent) const;
+  ParentLayerPoint GetScrollWheelDelta(const ScrollWheelInput& aEvent) const;
 
   /**
    * Helper methods for long press gestures.
@@ -644,6 +645,10 @@ protected:
   // Common processing at the end of a touch block.
   void OnTouchEndOrCancel();
 
+  // This is called by OverscrollAnimation to notify us when the overscroll
+  // animation is ending.
+  void OverscrollAnimationEnding();
+
   uint64_t mLayersId;
   nsRefPtr<CompositorParent> mCompositorParent;
   TaskThrottler mPaintThrottler;
@@ -750,6 +755,8 @@ protected:
     PANNING_LOCKED_X,         /* touch-start followed by move (i.e. panning with axis lock) X axis */
     PANNING_LOCKED_Y,         /* as above for Y axis */
 
+    PAN_MOMENTUM,             /* like PANNING, but controlled by momentum PanGestureInput events */
+
     CROSS_SLIDING_X,          /* Panning disabled while user does a horizontal gesture
                                  on a vertically-scrollable view. This used for the
                                  Windows Metro "cross-slide" gesture. */
@@ -822,10 +829,13 @@ public:
   void ResetInputState();
 
 private:
+  void CancelAnimationAndGestureState();
+
   nsRefPtr<InputQueue> mInputQueue;
   TouchBlockState* CurrentTouchBlock();
   bool HasReadyTouchBlock();
 
+  PanGestureBlockState* CurrentPanGestureBlock();
 
   /* ===================================================================
    * The functions and members in this section are used to manage
@@ -833,9 +843,6 @@ private:
    */
 
 private:
-  UniquePtr<InputBlockState> mPanGestureState;
-
-
   /* ===================================================================
    * The functions and members in this section are used to manage
    * fling animations, smooth scroll animations, and overscroll
@@ -886,8 +893,8 @@ private:
 
   void StartSmoothScroll(ScrollSource aSource);
 
-  // Returns whether overscroll is allowed during a wheel event.
-  bool AllowScrollHandoffInWheelTransaction() const;
+  // Returns whether overscroll is allowed during an event.
+  bool AllowScrollHandoffInCurrentBlock() const;
 
   /* ===================================================================
    * The functions and members in this section are used to make ancestor chains
@@ -1040,6 +1047,10 @@ public:
 
   bool IsOverscrolled() const {
     return mX.IsOverscrolled() || mY.IsOverscrolled();
+  }
+
+  bool IsPannedIntoOverscroll() const {
+    return IsOverscrolled() && IsInPanningState();
   }
 
 private:

@@ -4034,7 +4034,7 @@ GCRuntime::markWeakReferences(gcstats::Phase phase)
         for (CompartmentIterT c(rt); !c.done(); c.next()) {
             if (c->watchpointMap)
                 markedAny |= c->watchpointMap->markIteratively(&marker);
-            if (marker.weakMapAction() != ExpandWeakMaps)
+            if (!marker.isWeakMarkingTracer())
                 markedAny |= WeakMapBase::markCompartmentIteratively(c, &marker);
         }
         markedAny |= Debugger::markAllIteratively(&marker);
@@ -6655,6 +6655,12 @@ gc::MergeCompartments(JSCompartment* source, JSCompartment* target)
         ObjectGroup* group = iter.get<ObjectGroup>();
         group->setGeneration(target->zone()->types.generation);
         group->compartment_ = target;
+
+        // Remove any unboxed layouts from the list in the off thread
+        // compartment. These do not need to be reinserted in the target
+        // compartment's list, as the list is not required to be complete.
+        if (UnboxedLayout* layout = group->maybeUnboxedLayoutDontCheckGeneration())
+            layout->detachFromCompartment();
     }
 
     // Fixup zone pointers in source's zone to refer to target's zone.

@@ -67,6 +67,11 @@ class nsPluginNativeWindowGtk;
 class nsShmImage;
 #endif
 
+namespace mozilla {
+class TimeStamp;
+class CurrentX11TimeGetter;
+}
+
 class nsWindow : public nsBaseWidget
 {
 public:
@@ -121,7 +126,7 @@ public:
                                    nsIWidget                  *aWidget,
                                    bool                        aActivate) override;
     void               SetZIndex(int32_t aZIndex) override;
-    NS_IMETHOD         SetSizeMode(int32_t aMode) override;
+    NS_IMETHOD         SetSizeMode(nsSizeMode aMode) override;
     NS_IMETHOD         Enable(bool aState) override;
     NS_IMETHOD         SetFocus(bool aRaise = false) override;
     NS_IMETHOD         GetScreenBounds(nsIntRect &aRect) override;
@@ -254,7 +259,7 @@ public:
     GdkWindow*         GetGdkWindow() { return mGdkWindow; }
     bool               IsDestroyed() { return mIsDestroyed; }
 
-    void               DispatchDragEvent(uint32_t aMsg,
+    void               DispatchDragEvent(mozilla::EventMessage aMsg,
                                          const nsIntPoint& aRefPoint,
                                          guint aTime);
     static void        UpdateDragStatus (GdkDragContext *aDragContext,
@@ -263,6 +268,8 @@ public:
     // otherwise, FALSE.
     bool               DispatchKeyDownEvent(GdkEventKey *aEvent,
                                             bool *aIsCancelled);
+    mozilla::TimeStamp GetEventTimeStamp(guint32 aEventTime);
+    mozilla::CurrentX11TimeGetter* GetCurrentTimeGetter();
 
     NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                       const InputContextAction& aAction) override;
@@ -362,7 +369,7 @@ private:
     void               InitButtonEvent(mozilla::WidgetMouseEvent& aEvent,
                                        GdkEventButton* aGdkEvent);
     bool               DispatchCommandEvent(nsIAtom* aCommand);
-    bool               DispatchContentCommandEvent(int32_t aMsg);
+    bool               DispatchContentCommandEvent(mozilla::EventMessage aMsg);
     bool               CheckForRollup(gdouble aMouseX, gdouble aMouseY,
                                       bool aIsWheel, bool aAlwaysRollup);
     bool               GetDragInfo(mozilla::WidgetMouseEvent* aMouseEvent,
@@ -493,6 +500,8 @@ private:
      * however, IME doesn't work at that time.
      */
     nsRefPtr<mozilla::widget::IMContextWrapper> mIMContext;
+
+    nsAutoPtr<mozilla::CurrentX11TimeGetter> mCurrentTimeGetter;
 
     // HiDPI scale conversion
     gint GdkScaleFactor();

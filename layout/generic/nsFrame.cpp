@@ -2368,7 +2368,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
 
   bool isPositioned = disp->IsAbsPosContainingBlock(child);
   bool isStackingContext =
-    (isPositioned && (disp->mPosition == NS_STYLE_POSITION_STICKY ||
+    (isPositioned && (disp->IsPositionForcingStackingContext() ||
                       pos->mZIndex.GetUnit() == eStyleUnit_Integer)) ||
      (disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_STACKING_CONTEXT) ||
      disp->mIsolation != NS_STYLE_ISOLATION_AUTO ||
@@ -2558,7 +2558,7 @@ nsFrame::HandleEvent(nsPresContext* aPresContext,
                      nsEventStatus* aEventStatus)
 {
 
-  if (aEvent->message == NS_MOUSE_MOVE) {
+  if (aEvent->mMessage == eMouseMove) {
     // XXX If the second argument of HandleDrag() is WidgetMouseEvent,
     //     the implementation becomes simpler.
     return HandleDrag(aPresContext, aEvent, aEventStatus);
@@ -2567,9 +2567,11 @@ nsFrame::HandleEvent(nsPresContext* aPresContext,
   if ((aEvent->mClass == eMouseEventClass &&
        aEvent->AsMouseEvent()->button == WidgetMouseEvent::eLeftButton) ||
       aEvent->mClass == eTouchEventClass) {
-    if (aEvent->message == NS_MOUSE_BUTTON_DOWN || aEvent->message == NS_TOUCH_START) {
+    if (aEvent->mMessage == eMouseDown ||
+        aEvent->mMessage == NS_TOUCH_START) {
       HandlePress(aPresContext, aEvent, aEventStatus);
-    } else if (aEvent->message == NS_MOUSE_BUTTON_UP || aEvent->message == NS_TOUCH_END) {
+    } else if (aEvent->mMessage == eMouseUp ||
+               aEvent->mMessage == NS_TOUCH_END) {
       HandleRelease(aPresContext, aEvent, aEventStatus);
     }
   }
@@ -2602,8 +2604,8 @@ nsFrame::GetDataForTableSelection(const nsFrameSelection* aFrameSelection,
   //  (Mouse down does normal selection unless Ctrl/Cmd is pressed)
   bool doTableSelection =
      displaySelection == nsISelectionDisplay::DISPLAY_ALL && selectingTableCells &&
-     (aMouseEvent->message == NS_MOUSE_MOVE ||
-      (aMouseEvent->message == NS_MOUSE_BUTTON_UP &&
+     (aMouseEvent->mMessage == eMouseMove ||
+      (aMouseEvent->mMessage == eMouseUp &&
        aMouseEvent->button == WidgetMouseEvent::eLeftButton) ||
       aMouseEvent->IsShift());
 

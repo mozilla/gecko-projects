@@ -83,6 +83,7 @@
                onpopuphidden="if (event.target == this) TabContextMenu.contextTab = null;">
       <menuitem id="context_reloadTab" label="&reloadTab.label;" accesskey="&reloadTab.accesskey;"
                 oncommand="gBrowser.reloadTab(TabContextMenu.contextTab);"/>
+      <menuitem id="context_toggleMuteTab" oncommand="TabContextMenu.contextTab.toggleMuteAudio();"/>
       <menuseparator/>
       <menuitem id="context_pinTab" label="&pinTab.label;"
                 accesskey="&pinTab.accesskey;"
@@ -815,7 +816,6 @@
 
         <toolbarbutton id="bookmarks-menu-button"
                        class="toolbarbutton-1 chromeclass-toolbar-additional"
-                       persist="class"
                        removable="true"
                        type="menu-button"
                        label="&bookmarksMenuButton.label;"
@@ -939,7 +939,7 @@
                        tooltip="dynamic-shortcut-tooltip"/>
 
         <toolbarbutton id="home-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
-                       persist="class" removable="true"
+                       removable="true"
                        label="&homeButton.label;"
                        ondragover="homeButtonObserver.onDragOver(event)"
                        ondragenter="homeButtonObserver.onDragOver(event)"

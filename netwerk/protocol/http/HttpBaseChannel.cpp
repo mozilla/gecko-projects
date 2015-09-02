@@ -77,6 +77,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mAllRedirectsSameOrigin(true)
   , mAllRedirectsPassTimingAllowCheck(true)
   , mForceNoIntercept(false)
+  , mResponseCouldBeSynthesized(false)
   , mSuspendCount(0)
   , mProxyResolveFlags(0)
   , mProxyURI(nullptr)
@@ -87,6 +88,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mForcePending(false)
   , mCorsIncludeCredentials(false)
   , mCorsMode(nsIHttpChannelInternal::CORS_MODE_NO_CORS)
+  , mRedirectMode(nsIHttpChannelInternal::REDIRECT_MODE_FOLLOW)
   , mOnStartRequestCalled(false)
 {
   LOG(("Creating HttpBaseChannel @%x\n", this));
@@ -1435,14 +1437,14 @@ HttpBaseChannel::OverrideSecurityInfo(nsISupports* aSecurityInfo)
              "This can only be called when we don't have a security info object already");
   MOZ_RELEASE_ASSERT(aSecurityInfo,
                      "This can only be called with a valid security info object");
-  MOZ_ASSERT(ShouldIntercept(),
+  MOZ_ASSERT(mResponseCouldBeSynthesized,
              "This can only be called on channels that can be intercepted");
   if (mSecurityInfo) {
     LOG(("HttpBaseChannel::OverrideSecurityInfo mSecurityInfo is null! "
          "[this=%p]\n", this));
     return NS_ERROR_UNEXPECTED;
   }
-  if (!ShouldIntercept()) {
+  if (!mResponseCouldBeSynthesized) {
     LOG(("HttpBaseChannel::OverrideSecurityInfo channel cannot be intercepted! "
          "[this=%p]\n", this));
     return NS_ERROR_UNEXPECTED;
@@ -1464,7 +1466,7 @@ HttpBaseChannel::OverrideURI(nsIURI* aRedirectedURI)
          this));
     return NS_ERROR_UNEXPECTED;
   }
-  if (!ShouldIntercept()) {
+  if (!mResponseCouldBeSynthesized) {
     LOG(("HttpBaseChannel::OverrideURI channel cannot be intercepted! "
          "[this=%p]\n", this));
     return NS_ERROR_UNEXPECTED;
@@ -1969,6 +1971,7 @@ NS_IMETHODIMP
 HttpBaseChannel::ForceNoIntercept()
 {
   mForceNoIntercept = true;
+  mResponseCouldBeSynthesized = false;
   return NS_OK;
 }
 
@@ -1997,6 +2000,20 @@ NS_IMETHODIMP
 HttpBaseChannel::SetCorsMode(uint32_t aMode)
 {
   mCorsMode = aMode;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetRedirectMode(uint32_t* aMode)
+{
+  *aMode = mRedirectMode;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetRedirectMode(uint32_t aMode)
+{
+  mRedirectMode = aMode;
   return NS_OK;
 }
 
@@ -2275,14 +2292,6 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
     }
   }
 
-  // Preserve any skip-serviceworker-flag if possible.
-  if (mForceNoIntercept) {
-    nsCOMPtr<nsIHttpChannelInternal> httpChan = do_QueryInterface(newChannel);
-    if (httpChan) {
-      httpChan->ForceNoIntercept();
-    }
-  }
-
   // Propagate our loadinfo if needed.
   newChannel->SetLoadInfo(mLoadInfo);
 
@@ -2382,6 +2391,17 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
              "[this=%p] transferring chain of redirect cache-keys", this));
         httpInternal->SetCacheKeysRedirectChain(mRedirectedCachekeys.forget());
     }
+
+    // Preserve any skip-serviceworker-flag.
+    if (mForceNoIntercept) {
+      httpInternal->ForceNoIntercept();
+    }
+
+    // Preserve CORS mode flag.
+    httpInternal->SetCorsMode(mCorsMode);
+
+    // Preserve Redirect mode flag.
+    httpInternal->SetRedirectMode(mRedirectMode);
   }
 
   // transfer application cache information

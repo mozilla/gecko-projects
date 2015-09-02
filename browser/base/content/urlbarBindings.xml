@@ -193,8 +193,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             case KeyEvent.DOM_VK_LEFT:
             case KeyEvent.DOM_VK_RIGHT:
             case KeyEvent.DOM_VK_HOME:
-              this.popup.hidePopup();
-              return;
+              // Reset the selected index so that nsAutoCompleteController
+              // simply closes the popup without trying to fill anything.
+              this.popup.selectedIndex = -1;
               break;
           }
 
@@ -665,6 +666,9 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
               case "userMadeSearchSuggestionsChoice":
                 this._userMadeSearchSuggestionsChoice =
                   this._prefs.getBoolPref(aData);
+                this.popup.searchSuggestionsNotificationWasDismissed(
+                  this._prefs.getBoolPref("suggest.searches")
+                );
                 break;
               case "trimURLs":
                 this._mayTrimURLs = this._prefs.getBoolPref(aData);
@@ -932,6 +936,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <property name="shouldShowSearchSuggestionsNotification" readonly="true">
         <getter><![CDATA[
           return !this._userMadeSearchSuggestionsChoice &&
+                 !this.inPrivateContext &&
                  // When _urlbarFocused is true, tabbrowser would close the
                  // popup if it's opened here, so don't show the notification.
                  !gBrowser.selectedBrowser._urlbarFocused &&
@@ -1553,16 +1558,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         <parameter name="enableSuggestions"/>
         <body><![CDATA[
           Services.prefs.setBoolPref(
-            "browser.urlbar.userMadeSearchSuggestionsChoice", true
-          );
-          Services.prefs.setBoolPref(
             "browser.urlbar.suggest.searches", enableSuggestions
           );
-          this._hideSearchSuggestionsNotification(true);
-          if (enableSuggestions && this.input.textValue) {
-            // Start a new search so that suggestions appear immediately.
-            this.input.controller.startSearch(this.input.textValue);
-          }
+          Services.prefs.setBoolPref(
+            "browser.urlbar.userMadeSearchSuggestionsChoice", true
+          );
+          // The input's pref observer will now hide the notification.
         ]]></body>
       </method>
 
@@ -1687,14 +1688,27 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         </body>
       </method>
 
-      <method name="_hideSearchSuggestionsNotification">
-        <parameter name="animate"/>
+      <method name="searchSuggestionsNotificationWasDismissed">
+        <parameter name="enableSuggestions"/>
         <body>
           <![CDATA[
-          if (animate) {
-            this._hideSearchSuggestionsNotificationWithAnimation();
+          if (!this.popupOpen) {
+            this._hideSearchSuggestionsNotification();
             return;
           }
+          this._hideSearchSuggestionsNotificationWithAnimation().then(() => {
+            if (enableSuggestions && this.input.textValue) {
+              // Start a new search so that suggestions appear immediately.
+              this.input.controller.startSearch(this.input.textValue);
+            }
+          });
+          ]]>
+        </body>
+      </method>
+
+      <method name="_hideSearchSuggestionsNotification">
+        <body>
+          <![CDATA[
           this.classList.remove("showSearchSuggestionsNotification");
           this.richlistbox.flex = 1;
           this.removeAttribute("dontanimate");
@@ -1711,23 +1725,26 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
       <method name="_hideSearchSuggestionsNotificationWithAnimation">
         <body>
           <![CDATA[
-          let notificationHeight = this.searchSuggestionsNotification
-                                       .getBoundingClientRect()
-                                       .height;
-          this.searchSuggestionsNotification.style.marginTop =
-            "-" + notificationHeight + "px";
+          return new Promise(resolve => {
+            let notificationHeight = this.searchSuggestionsNotification
+                                         .getBoundingClientRect()
+                                         .height;
+            this.searchSuggestionsNotification.style.marginTop =
+              "-" + notificationHeight + "px";
 
-          let popupHeightPx =
-            (this.getBoundingClientRect().height - notificationHeight) + "px";
-          this.style.height = popupHeightPx;
+            let popupHeightPx =
+              (this.getBoundingClientRect().height - notificationHeight) + "px";
+            this.style.height = popupHeightPx;
 
-          let onTransitionEnd = () => {
-            this.removeEventListener("transitionend", onTransitionEnd, true);
-            this.searchSuggestionsNotification.style.marginTop = "0px";
-            this.style.removeProperty("height");
-            this._hideSearchSuggestionsNotification(false);
-          };
-          this.addEventListener("transitionend", onTransitionEnd, true);
+            let onTransitionEnd = () => {
+              this.removeEventListener("transitionend", onTransitionEnd, true);
+              this.searchSuggestionsNotification.style.marginTop = "0px";
+              this.style.removeProperty("height");
+              this._hideSearchSuggestionsNotification();
+              resolve();
+            };
+            this.addEventListener("transitionend", onTransitionEnd, true);
+          });
           ]]>
         </body>
       </method>
@@ -2386,6 +2403,20 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         }
         document.getAnonymousElementByAttribute(this, "anonid", "center-item-warning-label").value = warningString;
 
+        let chromeWin = window.QueryInterface(Ci.nsIDOMChromeWindow);
+        let isWindowPrivate = PrivateBrowsingUtils.isWindowPrivate(chromeWin);
+
+        if (isWindowPrivate) {
+          // TODO: temporary compromise of hiding some privacy leaks, remove once bug 892487 is fixed
+          let allowalways = document.getAnonymousElementByAttribute(this, "anonid", "allowalways");
+          let block = document.getAnonymousElementByAttribute(this, "anonid", "block");
+          let allownow = document.getAnonymousElementByAttribute(this, "anonid", "allownow");
+
+          allowalways.hidden = curState !== "allowalways";
+          block.hidden       = curState !== "block";
+          allownow.hidden    = curState === "allowalways";
+        }
+
         if (url || linkHandler) {
           link.value = linkString;
           if (url) {
@@ -2561,6 +2592,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         <body><![CDATA[
           var action = this._items[0].action;
           var prePath = action.pluginPermissionPrePath;
+          let chromeWin = window.QueryInterface(Ci.nsIDOMChromeWindow);
+          let isWindowPrivate = PrivateBrowsingUtils.isWindowPrivate(chromeWin);
 
           let label, linkLabel, linkUrl, button1, button2;
 
@@ -2598,6 +2631,11 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
             default:
               Cu.reportError(Error("Unexpected blocklist state"));
+            }
+
+            // TODO: temporary compromise, remove this once bug 892487 is fixed
+            if (isWindowPrivate) {
+              this._buttonContainer.hidden = true;
             }
           }
           else if (action.pluginTag.enabledState == Ci.nsIPluginTag.STATE_DISABLED) {
@@ -2653,6 +2691,12 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
             default:
               Cu.reportError(Error("Unexpected blocklist state"));
+            }
+
+            // TODO: temporary compromise, remove this once bug 892487 is fixed
+            if (isWindowPrivate) {
+              button1.default = true;
+              this._secondaryButton.hidden = true;
             }
           }
           this._setupDescription(label, action.pluginName, prePath);

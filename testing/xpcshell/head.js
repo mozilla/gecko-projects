@@ -378,7 +378,7 @@ function _setupDebuggerServer(breakpointFiles, callback) {
     prefs.setBoolPref("devtools.debugger.log.verbose", true);
   }
 
-  let { require } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+  let { require } = Components.utils.import("resource://gre/modules/devtools/Loader.jsm", {});
   let { DebuggerServer } = require("devtools/server/main");
   let { OriginalLocation } = require("devtools/server/actors/common");
   DebuggerServer.init();
@@ -1215,6 +1215,7 @@ function do_load_child_test_harness()
   let command =
         "const _HEAD_JS_PATH=" + uneval(_HEAD_JS_PATH) + "; "
       + "const _HEAD_FILES=" + uneval(_HEAD_FILES) + "; "
+      + "const _MOZINFO_JS_PATH=" + uneval(_MOZINFO_JS_PATH) + "; "
       + "const _TAIL_FILES=" + uneval(_TAIL_FILES) + "; "
       + "const _TEST_NAME=" + uneval(_TEST_NAME) + "; "
       // We'll need more magic to get the debugger working in the child
@@ -1520,3 +1521,29 @@ try {
     prefs.deleteBranch("browser.devedition.theme.enabled");
   }
 } catch (e) { }
+
+function _load_mozinfo() {
+  let mozinfoFile = Components.classes["@mozilla.org/file/local;1"]
+    .createInstance(Components.interfaces.nsIFile);
+  mozinfoFile.initWithPath(_MOZINFO_JS_PATH);
+  let stream = Components.classes["@mozilla.org/network/file-input-stream;1"]
+    .createInstance(Components.interfaces.nsIFileInputStream);
+  stream.init(mozinfoFile, -1, 0, 0);
+  let json = Components.classes["@mozilla.org/dom/json;1"]
+    .createInstance(Components.interfaces.nsIJSON);
+  let mozinfo = json.decodeFromStream(stream, stream.available());
+  stream.close();
+  return mozinfo;
+}
+
+Object.defineProperty(this, "mozinfo", {
+  configurable: true,
+  get() {
+    let _mozinfo = _load_mozinfo();
+    Object.defineProperty(this, "mozinfo", {
+      configurable: false,
+      value: _mozinfo
+    });
+    return _mozinfo;
+  }
+});

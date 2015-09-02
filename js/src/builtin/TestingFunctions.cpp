@@ -1685,7 +1685,7 @@ class CloneBufferObject : public NativeObject {
     }
 
     static bool
-    setCloneBuffer_impl(JSContext* cx, CallArgs args) {
+    setCloneBuffer_impl(JSContext* cx, const CallArgs& args) {
         if (args.length() != 1 || !args[0].isString()) {
             JS_ReportError(cx,
                            "the first argument argument must be maxBytes, "
@@ -1726,7 +1726,7 @@ class CloneBufferObject : public NativeObject {
     }
 
     static bool
-    getCloneBuffer_impl(JSContext* cx, CallArgs args) {
+    getCloneBuffer_impl(JSContext* cx, const CallArgs& args) {
         Rooted<CloneBufferObject*> obj(cx, &args.thisv().toObject().as<CloneBufferObject>());
         MOZ_ASSERT(args.length() == 0);
 
@@ -2521,11 +2521,23 @@ AllocationMarker(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    static const JSClass cls = { "AllocationMarker" };
+    bool allocateInsideNursery = true;
+    if (args.length() > 0 && args[0].isObject()) {
+        RootedObject options(cx, &args[0].toObject());
 
-    RootedObject obj(cx, JS_NewObject(cx, &cls));
+        RootedValue nurseryVal(cx);
+        if (!JS_GetProperty(cx, options, "nursery", &nurseryVal))
+            return false;
+        allocateInsideNursery = ToBoolean(nurseryVal);
+    }
+
+    static const Class cls = { "AllocationMarker" };
+
+    auto newKind = allocateInsideNursery ? GenericObject : TenuredObject;
+    RootedObject obj(cx, NewObjectWithGivenProto(cx, &cls, nullptr, newKind));
     if (!obj)
         return false;
+
     args.rval().setObject(*obj);
     return true;
 }
@@ -2696,6 +2708,56 @@ SetARMHwCapFlags(JSContext* cx, unsigned argc, Value* vp)
 #endif
 
     args.rval().setUndefined();
+    return true;
+}
+
+static bool
+GetLcovInfo(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (args.length() > 1) {
+        JS_ReportError(cx, "Wrong number of arguments");
+        return false;
+    }
+
+    RootedObject global(cx);
+    if (args.hasDefined(0)) {
+        global = ToObject(cx, args[0]);
+        if (!global) {
+            JS_ReportError(cx, "First argument should be an object");
+            return false;
+        }
+        global = CheckedUnwrap(global);
+        if (!global) {
+            JS_ReportError(cx, "Permission denied to access global");
+            return false;
+        }
+        if (!global->is<GlobalObject>()) {
+            JS_ReportError(cx, "Argument must be a global object");
+            return false;
+        }
+    } else {
+        global = JS::CurrentGlobalOrNull(cx);
+    }
+
+    size_t length = 0;
+    char* content = nullptr;
+    {
+        AutoCompartment ac(cx, global);
+        content = js::GetCodeCoverageSummary(cx, &length);
+    }
+
+    if (!content)
+        return false;
+
+    JSString* str = JS_NewStringCopyN(cx, content, length);
+    free(content);
+
+    if (!str)
+        return false;
+
+    args.rval().setString(str);
     return true;
 }
 
@@ -3122,11 +3184,13 @@ gc::ZealModeHelpText),
 "  Otherwise, return null."),
 
     JS_FN_HELP("allocationMarker", AllocationMarker, 0, 0,
-"allocationMarker()",
+"allocationMarker([options])",
 "  Return a freshly allocated object whose [[Class]] name is\n"
 "  \"AllocationMarker\". Such objects are allocated only by calls\n"
 "  to this function, never implicitly by the system, making them\n"
-"  suitable for use in allocation tooling tests.\n"),
+"  suitable for use in allocation tooling tests. Takes an optional\n"
+"  options object which may contain the following properties:\n"
+"    * nursery: bool, whether to allocate the object in the nursery\n"),
 
     JS_FN_HELP("setGCCallback", SetGCCallback, 1, 0,
 "setGCCallback({action:\"...\", options...})",
@@ -3138,6 +3202,11 @@ gc::ZealModeHelpText),
 "setARMHwCapFlags(\"flag1,flag2 flag3\")",
 "  On non-ARM, no-op. On ARM, set the hardware capabilities. The list of \n"
 "  flags is available by calling this function with \"help\" as the flag's name"),
+
+    JS_FN_HELP("getLcovInfo", GetLcovInfo, 1, 0,
+"getLcovInfo(global)",
+"  Generate LCOV tracefile for the given compartment.  If no global are provided then\n"
+"  the current global is used as the default one.\n"),
 
     JS_FS_HELP_END
 };

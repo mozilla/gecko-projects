@@ -173,7 +173,7 @@ js::AsArrayBuffer(JSObject* obj)
 }
 
 MOZ_ALWAYS_INLINE bool
-ArrayBufferObject::byteLengthGetterImpl(JSContext* cx, CallArgs args)
+ArrayBufferObject::byteLengthGetterImpl(JSContext* cx, const CallArgs& args)
 {
     MOZ_ASSERT(IsArrayBuffer(args.thisv()));
     args.rval().setInt32(args.thisv().toObject().as<ArrayBufferObject>().byteLength());
@@ -188,7 +188,7 @@ ArrayBufferObject::byteLengthGetter(JSContext* cx, unsigned argc, Value* vp)
 }
 
 bool
-ArrayBufferObject::fun_slice_impl(JSContext* cx, CallArgs args)
+ArrayBufferObject::fun_slice_impl(JSContext* cx, const CallArgs& args)
 {
     MOZ_ASSERT(IsArrayBuffer(args.thisv()));
 
@@ -266,8 +266,8 @@ ReleaseAsmJSMappedData(void* base)
 #ifdef NIGHTLY_BUILD
 # if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
 static bool
-TransferAsmJSMappedBuffer(JSContext* cx, CallArgs args, Handle<ArrayBufferObject*> oldBuffer,
-                          size_t newByteLength)
+TransferAsmJSMappedBuffer(JSContext* cx, const CallArgs& args,
+                          Handle<ArrayBufferObject*> oldBuffer, size_t newByteLength)
 {
     size_t oldByteLength = oldBuffer->byteLength();
     MOZ_ASSERT(oldByteLength % AsmJSPageSize == 0);
@@ -371,11 +371,6 @@ ArrayBufferObject::fun_transfer(JSContext* cx, unsigned argc, Value* vp)
         oldBuffer = &unwrapped->as<ArrayBufferObject>();
     }
 
-    if (oldBuffer->isNeutered()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
-        return false;
-    }
-
     size_t oldByteLength = oldBuffer->byteLength();
     size_t newByteLength;
     if (newByteLengthArg.isUndefined()) {
@@ -389,6 +384,11 @@ ArrayBufferObject::fun_transfer(JSContext* cx, unsigned argc, Value* vp)
             return false;
         }
         newByteLength = size_t(i32);
+    }
+
+    if (oldBuffer->isNeutered()) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+        return false;
     }
 
     UniquePtr<uint8_t, JS::FreePolicy> newData;
@@ -863,7 +863,7 @@ ArrayBufferObject::createSlice(JSContext* cx, Handle<ArrayBufferObject*> arrayBu
 }
 
 bool
-ArrayBufferObject::createDataViewForThisImpl(JSContext* cx, CallArgs args)
+ArrayBufferObject::createDataViewForThisImpl(JSContext* cx, const CallArgs& args)
 {
     MOZ_ASSERT(IsArrayBuffer(args.thisv()));
 
@@ -1025,17 +1025,19 @@ ArrayBufferObject::addView(JSContext* cx, JSObject* viewArg)
 static size_t VIEW_LIST_MAX_LENGTH = 500;
 
 bool
-InnerViewTable::addView(JSContext* cx, ArrayBufferObject* obj, ArrayBufferViewObject* view)
+InnerViewTable::addView(JSContext* cx, ArrayBufferObject* buffer, ArrayBufferViewObject* view)
 {
     // ArrayBufferObject entries are only added when there are multiple views.
-    MOZ_ASSERT(obj->firstView());
+    MOZ_ASSERT(buffer->firstView());
 
-    if (!map.initialized() && !map.init())
+    if (!map.initialized() && !map.init()) {
+        ReportOutOfMemory(cx);
         return false;
+    }
 
-    Map::AddPtr p = map.lookupForAdd(obj);
+    Map::AddPtr p = map.lookupForAdd(buffer);
 
-    MOZ_ASSERT(!gc::IsInsideNursery(obj));
+    MOZ_ASSERT(!gc::IsInsideNursery(buffer));
     bool addToNursery = nurseryKeysValid && gc::IsInsideNursery(view);
 
     if (p) {
@@ -1050,42 +1052,48 @@ InnerViewTable::addView(JSContext* cx, ArrayBufferObject* obj, ArrayBufferViewOb
                 nurseryKeysValid = false;
             } else {
                 for (size_t i = 0; i < views.length(); i++) {
-                    if (gc::IsInsideNursery(views[i]))
+                    if (gc::IsInsideNursery(views[i])) {
                         addToNursery = false;
+                        break;
+                    }
                 }
             }
         }
 
-        if (!views.append(view))
+        if (!views.append(view)) {
+            ReportOutOfMemory(cx);
             return false;
+        }
     } else {
-        if (!map.add(p, obj, ViewVector()))
+        if (!map.add(p, buffer, ViewVector())) {
+            ReportOutOfMemory(cx);
             return false;
-        JS_ALWAYS_TRUE(p->value().append(view));
+        }
+        MOZ_ALWAYS_TRUE(p->value().append(view));
     }
 
-    if (addToNursery && !nurseryKeys.append(obj))
+    if (addToNursery && !nurseryKeys.append(buffer))
         nurseryKeysValid = false;
 
     return true;
 }
 
 InnerViewTable::ViewVector*
-InnerViewTable::maybeViewsUnbarriered(ArrayBufferObject* obj)
+InnerViewTable::maybeViewsUnbarriered(ArrayBufferObject* buffer)
 {
     if (!map.initialized())
         return nullptr;
 
-    Map::Ptr p = map.lookup(obj);
+    Map::Ptr p = map.lookup(buffer);
     if (p)
         return &p->value();
     return nullptr;
 }
 
 void
-InnerViewTable::removeViews(ArrayBufferObject* obj)
+InnerViewTable::removeViews(ArrayBufferObject* buffer)
 {
-    Map::Ptr p = map.lookup(obj);
+    Map::Ptr p = map.lookup(buffer);
     MOZ_ASSERT(p);
 
     map.remove(p);
@@ -1128,7 +1136,7 @@ InnerViewTable::sweep(JSRuntime* rt)
 void
 InnerViewTable::sweepAfterMinorGC(JSRuntime* rt)
 {
-    MOZ_ASSERT(!nurseryKeys.empty());
+    MOZ_ASSERT(needsSweepAfterMinorGC());
 
     if (nurseryKeysValid) {
         for (size_t i = 0; i < nurseryKeys.length(); i++) {

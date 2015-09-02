@@ -63,15 +63,28 @@ struct CGTryNoteList {
     void finish(TryNoteArray* array);
 };
 
+struct CGBlockScopeNote : public BlockScopeNote
+{
+    // The end offset. Used to compute the length; may need adjusting first if
+    // in the prologue.
+    uint32_t end;
+
+    // Is the start offset in the prologue?
+    bool startInPrologue;
+
+    // Is the end offset in the prologue?
+    bool endInPrologue;
+};
+
 struct CGBlockScopeList {
-    Vector<BlockScopeNote> list;
+    Vector<CGBlockScopeNote> list;
     explicit CGBlockScopeList(ExclusiveContext* cx) : list(cx) {}
 
-    bool append(uint32_t scopeObject, uint32_t offset, uint32_t parent);
+    bool append(uint32_t scopeObject, uint32_t offset, bool inPrologue, uint32_t parent);
     uint32_t findEnclosingScope(uint32_t index);
-    void recordEnd(uint32_t index, uint32_t offset);
+    void recordEnd(uint32_t index, uint32_t offset, bool inPrologue);
     size_t length() const { return list.length(); }
-    void finish(BlockScopeArray* array);
+    void finish(BlockScopeArray* array, uint32_t prologueLength);
 };
 
 struct CGYieldOffsetList {
@@ -224,9 +237,11 @@ struct BytecodeEmitter
     JSObject* innermostStaticScope() const;
     JSObject* blockScopeOfDef(ParseNode* pn) const {
         MOZ_ASSERT(pn->resolve());
-        return parser->blockScopes[pn->resolve()->pn_blockid];
+        unsigned blockid = pn->resolve()->pn_blockid;
+        return parser->blockScopes[blockid];
     }
 
+    bool atBodyLevel() const;
     uint32_t computeHops(ParseNode* pn, BytecodeEmitter** bceOfDefOut);
     bool isAliasedName(BytecodeEmitter* bceOfDef, ParseNode* pn);
     bool computeDefinitionIsAliased(BytecodeEmitter* bceOfDef, Definition* dn, JSOp* op);
@@ -266,6 +281,7 @@ struct BytecodeEmitter
     ptrdiff_t prologueOffset() const { return prologue.code.end() - prologue.code.begin(); }
     void switchToMain() { current = &main; }
     void switchToPrologue() { current = &prologue; }
+    bool inPrologue() const { return current == &prologue; }
 
     SrcNotesVector& notes() const { return current->notes; }
     ptrdiff_t lastNoteOffset() const { return current->lastNoteOffset; }
@@ -319,6 +335,12 @@ struct BytecodeEmitter
 
     // Emit function code for the tree rooted at body.
     bool emitFunctionScript(ParseNode* body);
+
+    // Emit module code for the tree rooted at body.
+    bool emitModuleScript(ParseNode* body);
+
+    // Report an error if we are not processing a module.
+    bool checkIsModule();
 
     // If op is JOF_TYPESET (see the type barriers comment in TypeInference.h),
     // reserve a type set to store its result.

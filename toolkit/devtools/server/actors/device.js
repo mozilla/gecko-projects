@@ -6,7 +6,7 @@ const {Cc, Ci, Cu, CC} = require("chrome");
 const Services = require("Services");
 const protocol = require("devtools/server/protocol");
 const {method, RetVal} = protocol;
-const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+const promise = require("promise");
 const {LongStringActor} = require("devtools/server/actors/string");
 const {DebuggerServer} = require("devtools/server/main");
 const {getSystemInfo, getSetting} = require("devtools/toolkit/shared/system");
@@ -42,16 +42,18 @@ let DeviceActor = exports.DeviceActor = protocol.ActorClass({
 
   screenshotToDataURL: method(function() {
     let window = Services.wm.getMostRecentWindow(DebuggerServer.chromeWindowType);
+    var devicePixelRatio = window.devicePixelRatio;
     let canvas = window.document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
     let width = window.innerWidth;
     let height = window.innerHeight;
-    canvas.setAttribute('width', width);
-    canvas.setAttribute('height', height);
+    canvas.setAttribute('width', Math.round(width * devicePixelRatio));
+    canvas.setAttribute('height', Math.round(height * devicePixelRatio));
     let context = canvas.getContext('2d');
     let flags =
           context.DRAWWINDOW_DRAW_CARET |
           context.DRAWWINDOW_DRAW_VIEW |
           context.DRAWWINDOW_USE_WIDGET_LAYERS;
+    context.scale(devicePixelRatio, devicePixelRatio);
     context.drawWindow(window, 0, 0, width, height, 'rgb(255,255,255)', flags);
     let dataURL = canvas.toDataURL('image/png')
     return new LongStringActor(this.conn, dataURL);

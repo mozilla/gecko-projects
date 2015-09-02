@@ -68,13 +68,13 @@ private:
 
 static inline bool
 ConvertIndex(FallibleTArray<Index::Indice>& aDest,
-             const stagefright::Vector<stagefright::MediaSource::Indice>& aIndex,
+             const nsTArray<stagefright::MediaSource::Indice>& aIndex,
              int64_t aMediaTime)
 {
-  if (!aDest.SetCapacity(aIndex.size(), mozilla::fallible)) {
+  if (!aDest.SetCapacity(aIndex.Length(), mozilla::fallible)) {
     return false;
   }
-  for (size_t i = 0; i < aIndex.size(); i++) {
+  for (size_t i = 0; i < aIndex.Length(); i++) {
     Index::Indice indice;
     const stagefright::MediaSource::Indice& s_indice = aIndex[i];
     indice.start_offset = s_indice.start_offset;
@@ -287,17 +287,14 @@ MP4Metadata::HasCompleteMetadata(Stream* aSource)
   return parser->HasMetadata();
 }
 
-/*static*/ mozilla::MediaByteRange
-MP4Metadata::MetadataRange(Stream* aSource)
+/*static*/ already_AddRefed<mozilla::MediaByteBuffer>
+MP4Metadata::Metadata(Stream* aSource)
 {
   // The MoofParser requires a monitor, but we don't need one here.
   mozilla::Monitor monitor("MP4Metadata::HasCompleteMetadata");
   mozilla::MonitorAutoLock mon(monitor);
   auto parser = mozilla::MakeUnique<MoofParser>(aSource, 0, false, &monitor);
-  if (parser->HasMetadata()) {
-    return parser->mInitRange;
-  }
-  return mozilla::MediaByteRange();
+  return parser->Metadata();
 }
 
 } // namespace mp4_demuxer

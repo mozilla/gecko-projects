@@ -66,6 +66,13 @@ this.AppConstants = Object.freeze({
   false,
 #endif
 
+  MOZ_ANDROID_NATIVE_ACCOUNT_UI:
+#ifdef MOZ_ANDROID_NATIVE_ACCOUNT_UI
+  true,
+#else
+  false,
+#endif
+
   MOZ_SAFE_BROWSING:
 #ifdef MOZ_SAFE_BROWSING
   true,
@@ -89,6 +96,13 @@ this.AppConstants = Object.freeze({
 
   MOZ_UPDATER:
 #ifdef MOZ_UPDATER
+  true,
+#else
+  false,
+#endif
+
+  MOZ_SWITCHBOARD:
+#ifdef MOZ_SWITCHBOARD
   true,
 #else
   false,
@@ -143,6 +157,13 @@ this.AppConstants = Object.freeze({
   false,
 #endif
 
+  MOZ_VERIFY_MAR_SIGNATURE:
+#ifdef MOZ_VERIFY_MAR_SIGNATURE
+  true,
+#else
+  false,
+#endif
+
   MOZ_MAINTENANCE_SERVICE:
 #ifdef MOZ_MAINTENANCE_SERVICE
   true,
@@ -159,6 +180,20 @@ this.AppConstants = Object.freeze({
 
   DEBUG:
 #ifdef DEBUG
+  true,
+#else
+  false,
+#endif
+
+  MOZ_B2G:
+#ifdef MOZ_B2G
+  true,
+#else
+  false,
+#endif
+
+  MOZ_B2GDROID:
+#ifdef MOZ_B2GDROID
   true,
 #else
   false,

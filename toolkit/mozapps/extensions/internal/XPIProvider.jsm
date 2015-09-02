@@ -209,6 +209,11 @@ const TYPE_ALIASES = {
   "webextension": "extension",
 };
 
+const CHROME_TYPES = new Set([
+  "extension",
+  "locale",
+]);
+
 const RESTARTLESS_TYPES = new Set([
   "webextension",
   "dictionary",
@@ -665,20 +670,20 @@ function getExternalType(aType) {
 
 function getManifestFileForDir(aDir) {
   let file = aDir.clone();
-  file.append(FILE_WEB_MANIFEST);
+  file.append(FILE_RDF_MANIFEST);
   if (file.exists() && file.isFile())
     return file;
-  file.leafName = FILE_RDF_MANIFEST;
+  file.leafName = FILE_WEB_MANIFEST;
   if (file.exists() && file.isFile())
     return file;
   return null;
 }
 
 function getManifestEntryForZipReader(aZipReader) {
-  if (aZipReader.hasEntry(FILE_WEB_MANIFEST))
-    return FILE_WEB_MANIFEST;
   if (aZipReader.hasEntry(FILE_RDF_MANIFEST))
     return FILE_RDF_MANIFEST;
+  if (aZipReader.hasEntry(FILE_WEB_MANIFEST))
+    return FILE_WEB_MANIFEST;
   return null;
 }
 
@@ -1481,7 +1486,7 @@ function getSignedStatus(aRv, aCert, aExpectedID) {
  */
 function verifyZipSignedState(aFile, aAddon) {
   if (!ADDON_SIGNING || !SIGNED_TYPES.has(aAddon.type))
-    return Promise.resolve(undefined);
+    return Promise.resolve(AddonManager.SIGNEDSTATE_NOT_REQUIRED);
 
   let certDB = Cc["@mozilla.org/security/x509certdb;1"]
                .getService(Ci.nsIX509CertDB);
@@ -1511,7 +1516,7 @@ function verifyZipSignedState(aFile, aAddon) {
  */
 function verifyDirSignedState(aDir, aAddon) {
   if (!ADDON_SIGNING || !SIGNED_TYPES.has(aAddon.type))
-    return Promise.resolve(undefined);
+    return Promise.resolve(AddonManager.SIGNEDSTATE_NOT_REQUIRED);
 
   let certDB = Cc["@mozilla.org/security/x509certdb;1"]
                .getService(Ci.nsIX509CertDB);
@@ -4024,26 +4029,28 @@ this.XPIProvider = {
   /**
    * Called to test whether installing XPI add-ons from a URI is allowed.
    *
-   * @param  aUri
-   *         The URI being installed from
+   * @param  aInstallingPrincipal
+   *         The nsIPrincipal that initiated the install
    * @return true if installing is allowed
    */
-  isInstallAllowed: function XPI_isInstallAllowed(aUri) {
+  isInstallAllowed: function XPI_isInstallAllowed(aInstallingPrincipal) {
     if (!this.isInstallEnabled())
       return false;
 
+    let uri = aInstallingPrincipal.URI;
+
     // Direct requests without a referrer are either whitelisted or blocked.
-    if (!aUri)
+    if (!uri)
       return this.isDirectRequestWhitelisted();
 
     // Local referrers can be whitelisted.
     if (this.isFileRequestWhitelisted() &&
-        (aUri.schemeIs("chrome") || aUri.schemeIs("file")))
+        (uri.schemeIs("chrome") || uri.schemeIs("file")))
       return true;
 
     this.importPermissions();
 
-    let permission = Services.perms.testPermission(aUri, XPI_PERMISSION);
+    let permission = Services.perms.testPermissionFromPrincipal(aInstallingPrincipal, XPI_PERMISSION);
     if (permission == Ci.nsIPermissionManager.DENY_ACTION)
       return false;
 
@@ -4053,7 +4060,7 @@ this.XPIProvider = {
 
     let requireSecureOrigin = Preferences.get(PREF_INSTALL_REQUIRESECUREORIGIN, true);
     let safeSchemes = ["https", "chrome", "file"];
-    if (requireSecureOrigin && safeSchemes.indexOf(aUri.scheme) == -1)
+    if (requireSecureOrigin && safeSchemes.indexOf(uri.scheme) == -1)
       return false;
 
     return true;
@@ -4733,7 +4740,7 @@ this.XPIProvider = {
     }
 
     let timeStart = new Date();
-    if (aMethod == "startup") {
+    if (CHROME_TYPES.has(aAddon.type) && aMethod == "startup") {
       logger.debug("Registering manifest for " + aFile.path);
       Components.manager.addBootstrappedManifestLocation(aFile);
     }
@@ -4776,7 +4783,7 @@ this.XPIProvider = {
       }
     }
     finally {
-      if (aMethod == "shutdown" && aReason != BOOTSTRAP_REASONS.APP_SHUTDOWN) {
+      if (CHROME_TYPES.has(aAddon.type) && aMethod == "shutdown" && aReason != BOOTSTRAP_REASONS.APP_SHUTDOWN) {
         logger.debug("Removing manifest for " + aFile.path);
         Components.manager.removeBootstrappedManifestLocation(aFile);
 
@@ -5607,7 +5614,7 @@ AddonInstall.prototype = {
       }
     }
     else if (this.addon.signedState == AddonManager.SIGNEDSTATE_UNKNOWN ||
-             this.addon.signedState == undefined) {
+             this.addon.signedState == AddonManager.SIGNEDSTATE_NOT_REQUIRED) {
       // Check object signing certificate, if any
       let x509 = zipreader.getSigningCert(null);
       if (x509) {
@@ -7663,9 +7670,17 @@ DirectoryInstallLocation.prototype = {
   getTrashDir: function DirInstallLocation_getTrashDir() {
     let trashDir = this._directory.clone();
     trashDir.append(DIR_TRASH);
-    if (trashDir.exists())
-      recursiveRemove(trashDir);
-    trashDir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    let trashDirExists = trashDir.exists();
+    try {
+      if (trashDirExists)
+        recursiveRemove(trashDir);
+      trashDirExists = false;
+    } catch (e) {
+      logger.warn("Failed to remove trash directory", e);
+    }
+    if (!trashDirExists)
+      trashDir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+
     return trashDir;
   },
 

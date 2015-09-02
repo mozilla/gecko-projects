@@ -31,6 +31,16 @@ LIRGenerator::useBoxAtStart(LInstruction* lir, size_t n, MDefinition* mir, LUse:
 }
 
 void
+LIRGenerator::useBoxFixedAtStart(LInstruction* lir, size_t n, MDefinition* mir, ValueOperand op)
+{
+#if defined(JS_NUNBOX32)
+    return useBoxFixed(lir, n, mir, op.typeReg(), op.payloadReg(), true);
+#elif defined(JS_PUNBOX64)
+    return useBoxFixed(lir, n, mir, op.valueReg(), op.scratchReg(), true);
+#endif
+}
+
+void
 LIRGenerator::visitCloneLiteral(MCloneLiteral* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType_Object);
@@ -456,9 +466,11 @@ LIRGenerator::visitCall(MCall* call)
         MOZ_ASSERT(ok, "How can we not have four temp registers?");
         lir = new(alloc()) LCallDOMNative(tempFixed(cxReg), tempFixed(objReg),
                                           tempFixed(privReg), tempFixed(argsReg));
-    } else if (target && !(target->isClassConstructor() && !call->isConstructing())) {
+    } else if (target) {
         // Call known functions.
         if (target->isNative()) {
+            MOZ_ASSERT(!target->isClassConstructor());
+
             Register cxReg, numReg, vpReg, tmpReg;
             GetTempRegForIntArg(0, 0, &cxReg);
             GetTempRegForIntArg(1, 0, &numReg);
@@ -583,30 +595,6 @@ LIRGenerator::visitGetDynamicName(MGetDynamicName* ins)
 
     assignSnapshot(lir, Bailout_DynamicNameNotFound);
     defineReturn(lir, ins);
-}
-
-void
-LIRGenerator::visitFilterArgumentsOrEval(MFilterArgumentsOrEval* ins)
-{
-    MDefinition* string = ins->getString();
-    MOZ_ASSERT(string->type() == MIRType_String || string->type() == MIRType_Value);
-
-    LInstruction* lir;
-    if (string->type() == MIRType_String) {
-        lir = new(alloc()) LFilterArgumentsOrEvalS(useFixed(string, CallTempReg0),
-                                                   tempFixed(CallTempReg1),
-                                                   tempFixed(CallTempReg2));
-    } else {
-        lir = new(alloc()) LFilterArgumentsOrEvalV(tempFixed(CallTempReg0),
-                                                   tempFixed(CallTempReg1),
-                                                   tempFixed(CallTempReg2));
-        useBoxFixed(lir, LFilterArgumentsOrEvalV::Input, string,
-                    CallTempReg3, CallTempReg4);
-    }
-
-    assignSnapshot(lir, Bailout_StringArgumentsEval);
-    add(lir, ins);
-    assignSafepoint(lir, ins);
 }
 
 void
@@ -2131,6 +2119,38 @@ LIRGenerator::visitStringReplace(MStringReplace* ins)
                                                       useRegisterAtStart(ins->pattern()),
                                                       useRegisterOrConstantAtStart(ins->replacement()));
     defineReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitBinarySharedStub(MBinarySharedStub* ins)
+{
+    MDefinition* lhs = ins->getOperand(0);
+    MDefinition* rhs = ins->getOperand(1);
+
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+
+    LBinarySharedStub* lir = new(alloc()) LBinarySharedStub();
+
+    useBoxFixedAtStart(lir, LBinarySharedStub::LhsInput, lhs, R0);
+    useBoxFixedAtStart(lir, LBinarySharedStub::RhsInput, rhs, R1);
+
+    defineSharedStubReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitUnarySharedStub(MUnarySharedStub* ins)
+{
+    MDefinition* input = ins->getOperand(0);
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+
+    LUnarySharedStub* lir = new(alloc()) LUnarySharedStub();
+
+    useBoxFixedAtStart(lir, LUnarySharedStub::Input, input, R0);
+
+    defineSharedStubReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
 

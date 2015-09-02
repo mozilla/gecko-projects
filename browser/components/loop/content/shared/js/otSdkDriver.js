@@ -272,14 +272,17 @@ loop.OTSdkDriver = (function() {
       }));
 
       if (this.session) {
-        this.session.off("sessionDisconnected streamCreated streamDestroyed connectionCreated connectionDestroyed streamPropertyChanged");
+        this.session.off("sessionDisconnected streamCreated streamDestroyed " +
+                         "connectionCreated connectionDestroyed " +
+                         "streamPropertyChanged signal:readyForDataChannel");
         this.session.disconnect();
         delete this.session;
 
         this._notifyMetricsEvent("Session.connectionDestroyed", "local");
       }
       if (this.publisher) {
-        this.publisher.off("accessAllowed accessDenied accessDialogOpened streamCreated");
+        this.publisher.off("accessAllowed accessDenied accessDialogOpened " +
+                           "streamCreated streamDestroyed");
         this.publisher.destroy();
         delete this.publisher;
       }
@@ -1111,7 +1114,7 @@ loop.OTSdkDriver = (function() {
      * be running in the standalone client and return immediately.
      *
      * @param  {String}  type    Type of sharing that was flipped. May be 'window'
-     *                           or 'tab'.
+     *                           or 'browser'.
      * @param  {Boolean} enabled Flag that tells us if the feature was flipped on
      *                           or off.
      * @private

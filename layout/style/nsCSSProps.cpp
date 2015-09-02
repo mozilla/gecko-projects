@@ -745,6 +745,7 @@ const KTableValue nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword__moz_mac_vibrancy_dark,         NS_THEME_MAC_VIBRANCY_DARK,
   eCSSKeyword__moz_mac_disclosure_button_open,   NS_THEME_MAC_DISCLOSURE_BUTTON_OPEN,
   eCSSKeyword__moz_mac_disclosure_button_closed, NS_THEME_MAC_DISCLOSURE_BUTTON_CLOSED,
+  eCSSKeyword__moz_gtk_info_bar,              NS_THEME_GTK_INFO_BAR,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -960,6 +961,7 @@ const KTableValue nsCSSProps::kColorKTable[] = {
   eCSSKeyword__moz_dialog, LookAndFeel::eColorID__moz_dialog,
   eCSSKeyword__moz_dialogtext, LookAndFeel::eColorID__moz_dialogtext,
   eCSSKeyword__moz_dragtargetzone, LookAndFeel::eColorID__moz_dragtargetzone,
+  eCSSKeyword__moz_gtk_info_bar_text, LookAndFeel::eColorID__moz_gtk_info_bar_text,
   eCSSKeyword__moz_hyperlinktext, NS_COLOR_MOZ_HYPERLINKTEXT,
   eCSSKeyword__moz_html_cellhighlight, LookAndFeel::eColorID__moz_html_cellhighlight,
   eCSSKeyword__moz_html_cellhighlighttext, LookAndFeel::eColorID__moz_html_cellhighlighttext,
@@ -2934,6 +2936,21 @@ nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT_with_aliases] = {
     true,
   #include "nsCSSPropAliasList.h"
   #undef CSS_PROP_ALIAS
+};
+
+#include "../../dom/base/PropertyUseCounterMap.inc"
+
+/* static */ const UseCounter
+nsCSSProps::gPropertyUseCounter[eCSSProperty_COUNT_no_shorthands] = {
+  #define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) privatename_
+  #define CSS_PROP_LIST_INCLUDE_LOGICAL
+  #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_,     \
+                   kwtable_, stylestruct_, stylestructoffset_, animtype_) \
+    static_cast<UseCounter>(USE_COUNTER_FOR_CSS_PROPERTY_##method_),
+  #include "nsCSSPropList.h"
+  #undef CSS_PROP
+  #undef CSS_PROP_LIST_INCLUDE_LOGICAL
+  #undef CSS_PROP_PUBLIC_OR_PRIVATE
 };
 
 // Check that all logical property flags are used appropriately.

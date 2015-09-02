@@ -90,7 +90,7 @@ const EVENTS = {
   UI_STOP_RECORDING: "Performance:UI:StopRecording",
 
   // Emitted by the PerformanceView on import button click
-  UI_RECORDING_IMPORTED: "Performance:UI:ImportRecording",
+  UI_IMPORT_RECORDING: "Performance:UI:ImportRecording",
   // Emitted by the RecordingsView on export button click
   UI_EXPORT_RECORDING: "Performance:UI:ExportRecording",
 
@@ -116,7 +116,7 @@ const EVENTS = {
   // When the PerformanceView updates the display of the buffer status
   UI_BUFFER_STATUS_UPDATED: "Performance:UI:BufferUpdated",
 
-  // Emitted by the JITOptimizationsView when it renders new optimization
+  // Emitted by the OptimizationsListView when it renders new optimization
   // data and clears the optimization data
   OPTIMIZATIONS_RESET: "Performance:UI:OptimizationsReset",
   OPTIMIZATIONS_RENDERED: "Performance:UI:OptimizationsRendered",
@@ -226,7 +226,7 @@ let PerformanceController = {
     ToolbarView.on(EVENTS.PREF_CHANGED, this._onPrefChanged);
     PerformanceView.on(EVENTS.UI_START_RECORDING, this.startRecording);
     PerformanceView.on(EVENTS.UI_STOP_RECORDING, this.stopRecording);
-    PerformanceView.on(EVENTS.UI_RECORDING_IMPORTED, this.importRecording);
+    PerformanceView.on(EVENTS.UI_IMPORT_RECORDING, this.importRecording);
     PerformanceView.on(EVENTS.UI_CLEAR_RECORDINGS, this.clearRecordings);
     RecordingsView.on(EVENTS.UI_EXPORT_RECORDING, this.exportRecording);
     RecordingsView.on(EVENTS.RECORDING_SELECTED, this._onRecordingSelectFromView);
@@ -244,7 +244,7 @@ let PerformanceController = {
     ToolbarView.off(EVENTS.PREF_CHANGED, this._onPrefChanged);
     PerformanceView.off(EVENTS.UI_START_RECORDING, this.startRecording);
     PerformanceView.off(EVENTS.UI_STOP_RECORDING, this.stopRecording);
-    PerformanceView.off(EVENTS.UI_RECORDING_IMPORTED, this.importRecording);
+    PerformanceView.off(EVENTS.UI_IMPORT_RECORDING, this.importRecording);
     PerformanceView.off(EVENTS.UI_CLEAR_RECORDINGS, this.clearRecordings);
     RecordingsView.off(EVENTS.UI_EXPORT_RECORDING, this.exportRecording);
     RecordingsView.off(EVENTS.RECORDING_SELECTED, this._onRecordingSelectFromView);
@@ -338,7 +338,7 @@ let PerformanceController = {
    */
   exportRecording: Task.async(function*(_, recording, file) {
     yield recording.exportRecording(file);
-    this.emit(EVENTS.RECORDING_EXPORTED, recording);
+    this.emit(EVENTS.RECORDING_EXPORTED, recording, file);
   }),
 
   /**

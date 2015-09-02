@@ -66,6 +66,9 @@
 #include "nsIWidget.h"
 #include "nsIWindowMediator.h"
 #include "nsIWindowWatcher.h"
+#ifndef XP_WIN
+#include "nsJARProtocolHandler.h"
+#endif
 #include "nsOpenURIInFrameParams.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowWatcher.h"
@@ -287,6 +290,7 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mCursor(nsCursor(-1))
   , mTabSetsCursor(false)
   , mHasContentOpener(false)
+  , mActiveSupressDisplayportCount(0)
 {
   MOZ_ASSERT(aManager);
 }
@@ -432,11 +436,9 @@ TabParent::IsVisible()
 }
 
 void
-TabParent::Destroy()
+TabParent::DestroyInternal()
 {
-  if (mIsDestroyed) {
-    return;
-  }
+  IMEStateManager::OnTabParentDestroying(this);
 
   RemoveWindowListeners();
 
@@ -449,11 +451,6 @@ TabParent::Destroy()
     RemoveTabParentFromTable(frame->GetLayersId());
     frame->Destroy();
   }
-  mIsDestroyed = true;
-
-  if (XRE_IsParentProcess()) {
-    Manager()->AsContentParent()->NotifyTabDestroying(this);
-  }
 
   // Let all PluginWidgets know we are tearing down. Prevents
   // these objects from sending async events after the child side
@@ -461,6 +458,24 @@ TabParent::Destroy()
   const nsTArray<PPluginWidgetParent*>& kids = ManagedPPluginWidgetParent();
   for (uint32_t idx = 0; idx < kids.Length(); ++idx) {
       static_cast<mozilla::plugins::PluginWidgetParent*>(kids[idx])->ParentDestroy();
+  }
+}
+
+void
+TabParent::Destroy()
+{
+  if (mIsDestroyed) {
+    return;
+  }
+
+  DestroyInternal();
+
+  mIsDestroyed = true;
+
+  if (XRE_IsParentProcess()) {
+    ContentParent::NotifyTabDestroying(this->GetTabId(), Manager()->AsContentParent()->ChildID());
+  } else {
+    ContentParent::NotifyTabDestroying(this->GetTabId(), Manager()->ChildID());
   }
 
   mMarkedDestroying = true;
@@ -470,12 +485,15 @@ bool
 TabParent::Recv__delete__()
 {
   if (XRE_IsParentProcess()) {
-    Manager()->AsContentParent()->NotifyTabDestroyed(this, mMarkedDestroying);
     ContentParent::DeallocateTabId(mTabId,
-                                   Manager()->AsContentParent()->ChildID());
+                                   Manager()->AsContentParent()->ChildID(),
+                                   mMarkedDestroying);
   }
   else {
-    ContentParent::DeallocateTabId(mTabId, ContentParentId(0));
+    Manager()->AsContentBridgeParent()->NotifyTabDestroyed();
+    ContentParent::DeallocateTabId(mTabId,
+                                   Manager()->ChildID(),
+                                   mMarkedDestroying);
   }
 
   return true;
@@ -484,7 +502,25 @@ TabParent::Recv__delete__()
 void
 TabParent::ActorDestroy(ActorDestroyReason why)
 {
+  // Even though TabParent::Destroy calls this, we need to do it here too in
+  // case of a crash.
   IMEStateManager::OnTabParentDestroying(this);
+
+  // Prevent executing ContentParent::NotifyTabDestroying in
+  // TabParent::Destroy() called by frameLoader->DestroyComplete() below
+  // when tab crashes in contentprocess because ContentParent::ActorDestroy()
+  // in main process will be triggered before this function
+  // and remove the process information that
+  // ContentParent::NotifyTabDestroying need from mContentParentMap.
+
+  // When tab crashes in content process,
+  // there is no need to call ContentParent::NotifyTabDestroying
+  // because the jobs in ContentParent::NotifyTabDestroying
+  // will be done by ContentParent::ActorDestroy.
+  if (XRE_IsContentProcess() && why == AbnormalShutdown && !mIsDestroyed) {
+    DestroyInternal();
+    mIsDestroyed = true;
+  }
 
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader(true);
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
@@ -893,9 +929,21 @@ TabParent::LoadURL(nsIURI* aURI)
                 rv = packageFile->GetPath(path);
                 NS_ENSURE_SUCCESS_VOID(rv);
 
-                nsRefPtr<OpenFileAndSendFDRunnable> openFileRunnable =
-                    new OpenFileAndSendFDRunnable(path, this);
-                openFileRunnable->Dispatch();
+#ifndef XP_WIN
+                PRFileDesc* cachedFd = nullptr;
+                gJarHandler->JarCache()->GetFd(packageFile, &cachedFd);
+
+                if (cachedFd) {
+                    FileDescriptor::PlatformHandleType handle =
+                        FileDescriptor::PlatformHandleType(PR_FileDesc2NativeHandle(cachedFd));
+                    unused << SendCacheFileDescriptor(path, FileDescriptor(handle));
+                } else
+#endif
+                {
+                    nsRefPtr<OpenFileAndSendFDRunnable> openFileRunnable =
+                        new OpenFileAndSendFDRunnable(path, this);
+                    openFileRunnable->Dispatch();
+                }
             }
         }
     }
@@ -1006,7 +1054,7 @@ TabParent::UpdateDimensions(const nsIntRect& rect, const ScreenIntSize& size)
   }
   hal::ScreenConfiguration config;
   hal::GetCurrentScreenConfiguration(&config);
-  ScreenOrientation orientation = config.orientation();
+  ScreenOrientationInternal orientation = config.orientation();
   LayoutDeviceIntPoint chromeOffset = -GetChildProcessOffset();
 
   nsCOMPtr<nsIWidget> widget = GetWidget();
@@ -1039,7 +1087,9 @@ TabParent::UpdateDimensions(const nsIntRect& rect, const ScreenIntSize& size)
 
     CSSRect unscaledRect = devicePixelRect / widgetScale;
     CSSSize unscaledSize = devicePixelSize / widgetScale;
-    unused << SendUpdateDimensions(unscaledRect, unscaledSize, orientation, chromeOffset);
+    unused << SendUpdateDimensions(unscaledRect, unscaledSize,
+                                   widget->SizeMode(),
+                                   orientation, chromeOffset);
   }
 }
 
@@ -1363,20 +1413,24 @@ bool TabParent::SendRealMouseEvent(WidgetMouseEvent& event)
   if (widget) {
     // When we mouseenter the tab, the tab's cursor should
     // become the current cursor.  When we mouseexit, we stop.
-    if (NS_MOUSE_ENTER_WIDGET == event.message) {
+    if (eMouseEnterIntoWidget == event.mMessage) {
       mTabSetsCursor = true;
       if (mCustomCursor) {
         widget->SetCursor(mCustomCursor, mCustomCursorHotspotX, mCustomCursorHotspotY);
       } else if (mCursor != nsCursor(-1)) {
         widget->SetCursor(mCursor);
       }
-    } else if (NS_MOUSE_EXIT_WIDGET == event.message) {
+    } else if (eMouseExitFromWidget == event.mMessage) {
       mTabSetsCursor = false;
     }
   }
 
-  if (NS_MOUSE_MOVE == event.message) {
-    return SendRealMouseMoveEvent(event);
+  if (eMouseMove == event.mMessage) {
+    if (event.reason == WidgetMouseEvent::eSynthesized) {
+      return SendSynthMouseMoveEvent(event);
+    } else {
+      return SendRealMouseMoveEvent(event);
+    }
   }
   return SendRealMouseButtonEvent(event);
 }
@@ -1717,7 +1771,7 @@ bool TabParent::SendRealKeyEvent(WidgetKeyboardEvent& event)
 
   MaybeNativeKeyBinding bindings;
   bindings = void_t();
-  if (event.message == NS_KEY_PRESS) {
+  if (event.mMessage == eKeyPress) {
     nsCOMPtr<nsIWidget> widget = GetWidget();
 
     AutoInfallibleTArray<mozilla::CommandInt, 4> singleLine;
@@ -1749,7 +1803,7 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
   // confuses remote content and the panning and zooming logic into thinking
   // that the added touches are part of the touchend/cancel, when actually
   // they're not.
-  if (event.message == NS_TOUCH_END || event.message == NS_TOUCH_CANCEL) {
+  if (event.mMessage == NS_TOUCH_END || event.mMessage == NS_TOUCH_CANCEL) {
     for (int i = event.touches.Length() - 1; i >= 0; i--) {
       if (!event.touches[i]->mChanged) {
         event.touches.RemoveElementAt(i);
@@ -1771,7 +1825,7 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
     event.touches[i]->mRefPoint += offset;
   }
 
-  return (event.message == NS_TOUCH_MOVE) ?
+  return (event.mMessage == NS_TOUCH_MOVE) ?
     PBrowserParent::SendRealTouchMoveEvent(event, guid, blockId, apzResponse) :
     PBrowserParent::SendRealTouchEvent(event, guid, blockId, apzResponse);
 }
@@ -2105,7 +2159,7 @@ TabParent::RecvNotifyIMEPositionChange(const ContentCache& aContentCache,
 }
 
 bool
-TabParent::RecvOnEventNeedingAckHandled(const uint32_t& aMessage)
+TabParent::RecvOnEventNeedingAckHandled(const EventMessage& aMessage)
 {
   // This is called when the child process receives WidgetCompositionEvent or
   // WidgetSelectionEvent.
@@ -2258,7 +2312,7 @@ TabParent::RecvDispatchAfterKeyboardEvent(const WidgetKeyboardEvent& aEvent)
 
   if (mFrameElement &&
       PresShell::BeforeAfterKeyboardEventEnabled() &&
-      localEvent.message != NS_KEY_PRESS) {
+      localEvent.mMessage != eKeyPress) {
     presShell->DispatchAfterKeyboardEvent(mFrameElement, localEvent,
                                           aEvent.mFlags.mDefaultPrevented);
   }
@@ -2277,7 +2331,7 @@ TabParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent)
       NS_WARN_IF(!aEvent.mSucceeded)) {
     return true;
   }
-  switch (aEvent.message) {
+  switch (aEvent.mMessage) {
     case NS_QUERY_TEXT_RECT:
     case NS_QUERY_CARET_RECT:
     case NS_QUERY_EDITOR_RECT:
@@ -2826,6 +2880,16 @@ TabParent::RecvUpdateZoomConstraints(const uint32_t& aPresShellId,
 }
 
 bool
+TabParent::RecvRespondStartSwipeEvent(const uint64_t& aInputBlockId,
+                                      const bool& aStartSwipe)
+{
+  if (nsCOMPtr<nsIWidget> widget = GetWidget()) {
+    widget->ReportSwipeStarted(aInputBlockId, aStartSwipe);
+  }
+  return true;
+}
+
+bool
 TabParent::RecvContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
                                          const uint64_t& aInputBlockId,
                                          const bool& aPreventDefault)
@@ -2886,8 +2950,8 @@ TabParent::InjectTouchEvent(const nsAString& aType,
                             uint32_t aCount,
                             int32_t aModifiers)
 {
-  uint32_t msg;
-  nsContentUtils::GetEventIdAndAtom(aType, eTouchEventClass, &msg);
+  EventMessage msg;
+  nsContentUtils::GetEventMessageAndAtom(aType, eTouchEventClass, &msg);
   if (msg != NS_TOUCH_START && msg != NS_TOUCH_MOVE &&
       msg != NS_TOUCH_END && msg != NS_TOUCH_CANCEL) {
     return NS_ERROR_FAILURE;
@@ -2948,6 +3012,25 @@ NS_IMETHODIMP
 TabParent::SetIsDocShellActive(bool isActive)
 {
   unused << SendSetIsDocShellActive(isActive);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::SuppressDisplayport(bool aEnabled)
+{
+  if (IsDestroyed()) {
+    return NS_OK;
+  }
+
+  if (aEnabled) {
+    mActiveSupressDisplayportCount++;
+  } else {
+    mActiveSupressDisplayportCount--;
+  }
+
+  MOZ_ASSERT(mActiveSupressDisplayportCount >= 0);
+
+  unused << SendSuppressDisplayport(aEnabled);
   return NS_OK;
 }
 

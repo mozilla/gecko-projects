@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* global Frame:false uncaughtError:true fakeContacts:true */
+/* global Frame:false uncaughtError:true fakeManyContacts:true fakeFewerContacts:true */
 
 (function() {
   "use strict";
@@ -21,6 +21,7 @@
   var ContactDetailsForm = loop.contacts.ContactDetailsForm;
   var ContactDropdown = loop.contacts.ContactDropdown;
   var ContactDetail = loop.contacts.ContactDetail;
+  var GettingStartedView = loop.panel.GettingStartedView;
   // 1.2. Conversation Window
   var AcceptCallView = loop.conversationViews.AcceptCallView;
   var DesktopPendingConversationView = loop.conversationViews.PendingConversationView;
@@ -384,7 +385,6 @@
   // Update the text chat store with the room info.
   textChatStore.updateRoomInfo(new sharedActions.UpdateRoomInfo({
     roomName: "A Very Long Conversation Name",
-    roomOwner: "fake",
     roomUrl: "http://showcase",
     urls: [{
       description: "A wonderful page!",
@@ -469,12 +469,33 @@
   var mockMozLoopRooms = _.extend({}, navigator.mozLoop);
 
   var mozLoopNoContacts = _.cloneDeep(navigator.mozLoop);
+  mozLoopNoContacts.contacts.getAll = function(callback) {
+    callback(null, []);
+  };
   mozLoopNoContacts.userProfile = {
     email: "reallyreallylongtext@example.com",
     uid: "0354b278a381d3cb408bb46ffc01266"
   };
   mozLoopNoContacts.contacts.getAll = function(callback) {
     callback(null, []);
+  };
+
+  var mozLoopNoContactsFilter = _.cloneDeep(navigator.mozLoop);
+  mozLoopNoContactsFilter.userProfile = {
+    email: "reallyreallylongtext@example.com",
+    uid: "0354b278a381d3cb408bb46ffc01266"
+  };
+  mozLoopNoContactsFilter.contacts.getAll = function(callback) {
+    callback(null, fakeFewerContacts); // Defined in fake-mozLoop.js.
+  };
+
+  var firstTimeUseMozLoop = _.cloneDeep(navigator.mozLoop);
+  firstTimeUseMozLoop.getLoopPref = function(prop) {
+    if (prop === "gettingStarted.seen") {
+      return false;
+    }
+
+    return true;
   };
 
   var mockContact = {
@@ -530,7 +551,7 @@
         "dropdown-white", "dropdown-active", "dropdown-disabled", "edit",
         "edit-active", "edit-disabled", "edit-white", "expand", "expand-active",
         "expand-disabled", "minimize", "minimize-active", "minimize-disabled",
-        "settings-cog"
+        "settings-cog-grey", "settings-cog-white"
       ],
       "14x14": ["audio", "audio-active", "audio-disabled", "facemute",
         "facemute-active", "facemute-disabled", "hangup", "hangup-active",
@@ -539,7 +560,7 @@
         "link", "link-active", "link-disabled", "mute", "mute-active",
         "mute-disabled", "pause", "pause-active", "pause-disabled", "video",
         "video-white", "video-active", "video-disabled", "volume", "volume-active",
-        "volume-disabled"
+        "volume-disabled", "clear", "magnifier"
       ],
       "16x16": ["add", "add-hover", "add-active", "audio", "audio-hover", "audio-active",
         "block", "block-red", "block-hover", "block-active", "contacts", "contacts-hover",
@@ -705,6 +726,21 @@
                            summary="Re-sign-in view"
                            width={332}>
               <div className="panel">
+                <PanelView client={mockClient}
+                  dispatcher={dispatcher}
+                  mozLoop={firstTimeUseMozLoop}
+                  notifications={notifications}
+                  roomStore={roomStore}
+                  selectedTab="rooms" />
+              </div>
+            </FramedExample>
+
+            <FramedExample cssClass="fx-embedded-panel"
+              dashed={true}
+              height={410}
+              summary="Re-sign-in view"
+              width={332}>
+              <div className="panel">
                 <SignInRequestView mozLoop={mockMozLoopLoggedIn} />
               </div>
             </FramedExample>
@@ -748,6 +784,20 @@
                 <PanelView client={mockClient}
                            dispatcher={dispatcher}
                            mozLoop={mockMozLoopLoggedIn}
+                           notifications={notifications}
+                           roomStore={roomStore}
+                           selectedTab="contacts" />
+              </div>
+            </FramedExample>
+            <FramedExample cssClass="fx-embedded-panel"
+                           dashed={true}
+                           height={410}
+                           summary="Contact list tab (no search filter)"
+                           width={332}>
+              <div className="panel">
+                <PanelView client={mockClient}
+                           dispatcher={dispatcher}
+                           mozLoop={mozLoopNoContactsFilter}
                            notifications={notifications}
                            roomStore={roomStore}
                            selectedTab="contacts" />
@@ -841,11 +891,24 @@
               <div className="panel">
                 <PanelView client={mockClient}
                            dispatcher={dispatcher}
+                           initialSelectedTabComponent="contactAdd"
                            mozLoop={mockMozLoopLoggedIn}
                            notifications={notifications}
                            roomStore={roomStore}
-                           selectedTab="contacts_add"
+                           selectedTab="contacts"
                            userProfile={{email: "test@example.com"}} />
+              </div>
+            </FramedExample>
+            <FramedExample cssClass="fx-embedded-panel"
+                           dashed={true}
+                           height={321}
+                           summary="Contact Form - Edit"
+                           width={332}>
+              <div className="panel">
+                <ContactDetailsForm contactFormData={fakeManyContacts[1]}
+                                    mode={"edit"}
+                                    mozLoop={mockMozLoopLoggedIn}
+                                    switchToInitialView={noop} />
               </div>
             </FramedExample>
           </Section>
@@ -882,7 +945,7 @@
                            summary="ContactDetail"
                            width={300}>
               <div className="panel force-menu-show">
-                <ContactDetail contact={fakeContacts[0]}
+                <ContactDetail contact={fakeManyContacts[0]}
                                handleContactAction={function() {}} />
               </div>
             </FramedExample>
@@ -955,76 +1018,41 @@
           </Section>
 
           <Section name="ConversationToolbar">
-            <h2>Desktop Conversation Window</h2>
             <div>
               <FramedExample dashed={true}
-                             height={26}
+                             height={56}
                              summary="Default"
                              width={300}>
                 <div className="fx-embedded">
-                  <ConversationToolbar audio={{enabled: true}}
+                  <ConversationToolbar audio={{ enabled: true, visible: true }}
                                        hangup={noop}
                                        publishStream={noop}
-                                       video={{enabled: true}} />
+                                       settingsMenuItems={[{ id: "feedback" }]}
+                                       video={{ enabled: true, visible: true }} />
                 </div>
               </FramedExample>
               <FramedExample dashed={true}
-                             height={26}
+                             height={56}
                              summary="Video muted"
                              width={300}>
                 <div className="fx-embedded">
-                  <ConversationToolbar audio={{enabled: true}}
+                  <ConversationToolbar audio={{ enabled: true, visible: true }}
                                        hangup={noop}
                                        publishStream={noop}
-                                       video={{enabled: false}} />
+                                       settingsMenuItems={[{ id: "feedback" }]}
+                                       video={{ enabled: false, visible: true }} />
                 </div>
               </FramedExample>
               <FramedExample dashed={true}
-                             height={26}
+                             height={56}
                              summary="Audio muted"
                              width={300}>
                 <div className="fx-embedded">
-                  <ConversationToolbar audio={{enabled: false}}
+                  <ConversationToolbar audio={{ enabled: false, visible: true }}
                                        hangup={noop}
                                        publishStream={noop}
-                                       video={{enabled: true}} />
-                </div>
-              </FramedExample>
-            </div>
-
-            <h2>Standalone</h2>
-            <div className="standalone override-position">
-              <FramedExample dashed={true}
-                             height={26}
-                             summary="Default"
-                             width={300}>
-                <div className="fx-embedded">
-                  <ConversationToolbar audio={{enabled: true}}
-                                       hangup={noop}
-                                       publishStream={noop}
-                                       video={{enabled: true}} />
-                </div>
-              </FramedExample>
-              <FramedExample dashed={true}
-                             height={26}
-                             summary="Video muted"
-                             width={300}>
-                <div className="fx-embedded">
-                  <ConversationToolbar audio={{enabled: true}}
-                                       hangup={noop}
-                                       publishStream={noop}
-                                       video={{enabled: false}} />
-                </div>
-              </FramedExample>
-              <FramedExample dashed={true}
-                             height={26}
-                             summary="Audio muted"
-                             width={300}>
-                <div className="fx-embedded">
-                  <ConversationToolbar audio={{enabled: false}}
-                                       hangup={noop}
-                                       publishStream={noop}
-                                       video={{enabled: true}} />
+                                       settingsMenuItems={[{ id: "feedback" }]}
+                                       video={{ enabled: true, visible: true }} />
                 </div>
               </FramedExample>
             </div>
@@ -1084,14 +1112,14 @@
                            width={298}>
               <div className="fx-embedded">
                 <OngoingConversationView
-                  audio={{enabled: true}}
+                  audio={{ enabled: true, visible: true }}
                   conversationStore={conversationStores[0]}
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mediaConnected={true}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   remoteVideoEnabled={true}
-                  video={{enabled: true}} />
+                  video={{ enabled: true, visible: true }} />
               </div>
             </FramedExample>
 
@@ -1102,14 +1130,14 @@
                            width={600}>
               <div className="fx-embedded">
                 <OngoingConversationView
-                  audio={{enabled: true}}
+                  audio={{ enabled: true, visible: true }}
                   conversationStore={conversationStores[1]}
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mediaConnected={true}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   remoteVideoEnabled={true}
-                  video={{enabled: true}} />
+                  video={{ enabled: true, visible: true }} />
               </div>
             </FramedExample>
 
@@ -1119,14 +1147,14 @@
                            width={800}>
               <div className="fx-embedded">
                 <OngoingConversationView
-                  audio={{enabled: true}}
+                  audio={{ enabled: true, visible: true }}
                   conversationStore={conversationStores[2]}
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mediaConnected={true}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   remoteVideoEnabled={true}
-                  video={{enabled: true}} />
+                  video={{ enabled: true, visible: true }} />
               </div>
             </FramedExample>
 
@@ -1137,14 +1165,14 @@
                            width={298}>
               <div className="fx-embedded">
                 <OngoingConversationView
-                  audio={{enabled: true}}
+                  audio={{ enabled: true, visible: true }}
                   conversationStore={conversationStores[3]}
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mediaConnected={true}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   remoteVideoEnabled={true}
-                  video={{enabled: false}} />
+                  video={{ enabled: true, visible: true }} />
               </div>
             </FramedExample>
 
@@ -1155,14 +1183,14 @@
                            width={298} >
               <div className="fx-embedded">
                 <OngoingConversationView
-                  audio={{enabled: true}}
+                  audio={{ enabled: true, visible: true }}
                   conversationStore={conversationStores[4]}
                   dispatcher={dispatcher}
                   localPosterUrl="sample-img/video-screen-local.png"
                   mediaConnected={true}
                   remotePosterUrl="sample-img/video-screen-remote.png"
                   remoteVideoEnabled={false}
-                  video={{enabled: true}} />
+                  video={{ enabled: true, visible: true }} />
               </div>
             </FramedExample>
 
@@ -1655,27 +1683,52 @@
 
       // This simulates the mocha layout for errors which means we can run
       // this alongside our other unit tests but use the same harness.
-      var expectedWarningsCount = 16;
+      var expectedWarningsCount = 10;
       var warningsMismatch = caughtWarnings.length !== expectedWarningsCount;
+      var resultsElement = document.querySelector("#results");
+      var divFailuresNode = document.createElement("div");
+      var pCompleteNode = document.createElement("p");
+      var emNode = document.createElement("em");
+
       if (uncaughtError || warningsMismatch) {
-        $("#results").append("<div class='failures'><em>" +
-          ((uncaughtError && warningsMismatch) ? 2 : 1) + "</em></div>");
+        var liTestFail = document.createElement("li");
+        var h2Node = document.createElement("h2");
+        var preErrorNode = document.createElement("pre");
+
+        divFailuresNode.className = "failures";
+        emNode.innerHTML = ((uncaughtError && warningsMismatch) ? 2 : 1).toString();
+        divFailuresNode.appendChild(emNode);
+        resultsElement.appendChild(divFailuresNode);
+
         if (warningsMismatch) {
-          $("#results").append("<li class='test fail'>" +
-            "<h2>Unexpected number of warnings detected in UI-Showcase</h2>" +
-            "<pre class='error'>Got: " + caughtWarnings.length + "\n" +
-            "Expected: " + expectedWarningsCount + "</pre></li>");
+          liTestFail.className = "test";
+          liTestFail.className = liTestFail.className + " fail";
+          h2Node.innerHTML = "Unexpected number of warnings detected in UI-Showcase";
+          preErrorNode.className = "error";
+          preErrorNode.innerHTML = "Got: " + caughtWarnings.length + "\n" + "Expected: " + expectedWarningsCount;
+          liTestFail.appendChild(h2Node);
+          liTestFail.appendChild(preErrorNode);
+          resultsElement.appendChild(liTestFail);
         }
         if (uncaughtError) {
-          $("#results").append("<li class='test fail'>" +
-            "<h2>Errors rendering UI-Showcase</h2>" +
-            "<pre class='error'>" + uncaughtError + "\n" + uncaughtError.stack + "</pre>" +
-            "</li>");
+          liTestFail.className = "test";
+          liTestFail.className = liTestFail.className + " fail";
+          h2Node.innerHTML = "Errors rendering UI-Showcase";
+          preErrorNode.className = "error";
+          preErrorNode.innerHTML = uncaughtError + "\n" + uncaughtError.stack;
+          liTestFail.appendChild(h2Node);
+          liTestFail.appendChild(preErrorNode);
+          resultsElement.appendChild(liTestFail);
         }
       } else {
-        $("#results").append("<div class='failures'><em>0</em></div>");
+        divFailuresNode.className = "failures";
+        emNode.innerHTML = "0";
+        divFailuresNode.appendChild(emNode);
+        resultsElement.appendChild(divFailuresNode);
       }
-      $("#results").append("<p id='complete'>Complete.</p>");
+      pCompleteNode.id = "complete";
+      pCompleteNode.innerHTML = "Completed";
+      resultsElement.appendChild(pCompleteNode);
     }, 1000);
   });
 

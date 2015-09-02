@@ -129,6 +129,7 @@ EXPORTS.js += [
     '../public/TrackedOptimizationInfo.h',
     '../public/TypeDecls.h',
     '../public/UbiNode.h',
+    '../public/UbiNodeCensus.h',
     '../public/UbiNodeTraverse.h',
     '../public/Utility.h',
     '../public/Value.h',
@@ -146,6 +147,7 @@ UNIFIED_SOURCES += [
     'builtin/Eval.cpp',
     'builtin/Intl.cpp',
     'builtin/MapObject.cpp',
+    'builtin/ModuleObject.cpp',
     'builtin/Object.cpp',
     'builtin/Profilers.cpp',
     'builtin/Reflect.cpp',
@@ -205,6 +207,7 @@ UNIFIED_SOURCES += [
     'jit/EdgeCaseAnalysis.cpp',
     'jit/EffectiveAddressAnalysis.cpp',
     'jit/ExecutableAllocator.cpp',
+    'jit/InstructionReordering.cpp',
     'jit/Ion.cpp',
     'jit/IonAnalysis.cpp',
     'jit/IonBuilder.cpp',
@@ -321,6 +324,7 @@ UNIFIED_SOURCES += [
     'vm/TypedArrayObject.cpp',
     'vm/TypeInference.cpp',
     'vm/UbiNode.cpp',
+    'vm/UbiNodeCensus.cpp',
     'vm/UnboxedObject.cpp',
     'vm/Unicode.cpp',
     'vm/Value.cpp',
@@ -417,6 +421,8 @@ elif CONFIG['JS_CODEGEN_ARM']:
         'jit/arm/BaselineCompiler-arm.cpp',
         'jit/arm/BaselineIC-arm.cpp',
         'jit/arm/CodeGenerator-arm.cpp',
+        'jit/arm/disasm/Constants-arm.cpp',
+        'jit/arm/disasm/Disasm-arm.cpp',
         'jit/arm/Lowering-arm.cpp',
         'jit/arm/MacroAssembler-arm.cpp',
         'jit/arm/MoveEmitter-arm.cpp',
@@ -456,21 +462,25 @@ elif CONFIG['JS_CODEGEN_ARM64']:
         ]
 elif CONFIG['JS_CODEGEN_MIPS32']:
     UNIFIED_SOURCES += [
-        'jit/mips32/Architecture-mips32.cpp',
-        'jit/mips32/Assembler-mips32.cpp',
-        'jit/mips32/Bailouts-mips32.cpp',
-        'jit/mips32/BaselineCompiler-mips32.cpp',
-        'jit/mips32/BaselineIC-mips32.cpp',
-        'jit/mips32/CodeGenerator-mips32.cpp',
-        'jit/mips32/Lowering-mips32.cpp',
-        'jit/mips32/MacroAssembler-mips32.cpp',
-        'jit/mips32/MoveEmitter-mips32.cpp',
-        'jit/mips32/Trampoline-mips32.cpp',
+        'jit/mips-shared/Architecture-mips-shared.cpp',
     ]
-    if CONFIG['JS_SIMULATOR_MIPS32']:
+    if CONFIG['JS_CODEGEN_MIPS32']:
         UNIFIED_SOURCES += [
-            'jit/mips32/Simulator-mips32.cpp'
+            'jit/mips32/Architecture-mips32.cpp',
+            'jit/mips32/Assembler-mips32.cpp',
+            'jit/mips32/Bailouts-mips32.cpp',
+            'jit/mips32/BaselineCompiler-mips32.cpp',
+            'jit/mips32/BaselineIC-mips32.cpp',
+            'jit/mips32/CodeGenerator-mips32.cpp',
+            'jit/mips32/Lowering-mips32.cpp',
+            'jit/mips32/MacroAssembler-mips32.cpp',
+            'jit/mips32/MoveEmitter-mips32.cpp',
+            'jit/mips32/Trampoline-mips32.cpp',
         ]
+        if CONFIG['JS_SIMULATOR_MIPS32']:
+            UNIFIED_SOURCES += [
+                'jit/mips32/Simulator-mips32.cpp'
+            ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     SOURCES += [
@@ -611,8 +621,8 @@ if CONFIG['OS_ARCH'] == 'SunOS':
 CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
 CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
 
-if CONFIG['GNU_CXX']:
-    FAIL_ON_WARNINGS = True
+if not CONFIG['GNU_CXX']:
+    ALLOW_COMPILER_WARNINGS = True
 
 NO_EXPAND_LIBS = True
 

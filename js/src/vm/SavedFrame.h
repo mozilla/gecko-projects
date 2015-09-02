@@ -109,6 +109,36 @@ struct SavedFrame::HashPolicy
 // SavedFrame object or wrapper (Xray or CCW) around a SavedFrame object.
 inline void AssertObjectIsSavedFrameOrWrapper(JSContext* cx, HandleObject stack);
 
+// When we reconstruct a SavedFrame stack from a JS::ubi::StackFrame, we may not
+// have access to the principals that the original stack was captured
+// with. Instead, we use these two singleton principals based on whether
+// JS::ubi::StackFrame::isSystem or not. These singletons should never be passed
+// to the subsumes callback, and should be special cased with a shortcut before
+// that.
+struct ReconstructedSavedFramePrincipals : public JSPrincipals
+{
+    explicit ReconstructedSavedFramePrincipals()
+        : JSPrincipals()
+    {
+        MOZ_ASSERT(is(this));
+        this->refcount = 1;
+    }
+
+    static ReconstructedSavedFramePrincipals IsSystem;
+    static ReconstructedSavedFramePrincipals IsNotSystem;
+
+    // Return true if the given JSPrincipals* points to one of the
+    // ReconstructedSavedFramePrincipals singletons, false otherwise.
+    static bool is(JSPrincipals* p) { return p == &IsSystem || p == &IsNotSystem;}
+
+    // Get the appropriate ReconstructedSavedFramePrincipals singleton for the
+    // given JS::ubi::StackFrame that is being reconstructed as a SavedFrame
+    // stack.
+    static JSPrincipals* getSingleton(JS::ubi::StackFrame& f) {
+        return f.isSystem() ? &IsSystem : &IsNotSystem;
+    }
+};
+
 } // namespace js
 
 namespace JS {
@@ -140,9 +170,11 @@ class ConcreteStackFrame<SavedFrame> : public BaseStackFrame {
     }
 
     void trace(JSTracer* trc) override {
-        JSObject* obj = &get();
-        js::TraceManuallyBarrieredEdge(trc, &obj, "ConcreteStackFrame<SavedFrame>::ptr");
-        ptr = obj;
+        JSObject* prev = &get();
+        JSObject* next = prev;
+        js::TraceRoot(trc, &next, "ConcreteStackFrame<SavedFrame>::ptr");
+        if (next != prev)
+            ptr = next;
     }
 
     bool isSelfHosted() const override { return get().isSelfHosted(); }

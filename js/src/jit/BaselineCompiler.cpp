@@ -25,6 +25,7 @@
 
 #include "jsscriptinlines.h"
 
+#include "jit/MacroAssembler-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/NativeObject-inl.h"
 
@@ -491,7 +492,7 @@ BaselineCompiler::emitOutOfLinePostBarrierSlot()
 #endif
     masm.pushValue(R0);
 
-    masm.setupUnalignedABICall(2, scratch);
+    masm.setupUnalignedABICall(scratch);
     masm.movePtr(ImmPtr(cx->runtime()), scratch);
     masm.passABIArg(scratch);
     masm.passABIArg(objReg);
@@ -586,7 +587,7 @@ BaselineCompiler::emitIsDebuggeeCheck()
 {
     if (compileDebugInstrumentation_) {
         masm.Push(BaselineFrameReg);
-        masm.setupUnalignedABICall(1, R0.scratchReg());
+        masm.setupUnalignedABICall(R0.scratchReg());
         masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
         masm.passABIArg(R0.scratchReg());
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, jit::FrameIsDebuggeeCheck));
@@ -804,6 +805,17 @@ BaselineCompiler::emitDebugTrap()
     return appendICEntry(ICEntry::Kind_DebugTrap, masm.currentOffset());
 }
 
+void
+BaselineCompiler::emitCoverage(jsbytecode* pc)
+{
+    PCCounts* counts = script->maybeGetPCCounts(pc);
+    if (!counts)
+        return;
+
+    uint64_t* counterAddr = &counts->numExec();
+    masm.inc64(AbsoluteAddress(counterAddr));
+}
+
 #ifdef JS_TRACE_LOGGING
 bool
 BaselineCompiler::emitTraceLoggerEnter()
@@ -901,6 +913,7 @@ BaselineCompiler::emitBody()
     bool lastOpUnreachable = false;
     uint32_t emittedOps = 0;
     mozilla::DebugOnly<jsbytecode*> prevpc = pc;
+    bool compileCoverage = script->hasScriptCounts();
 
     while (true) {
         JSOp op = JSOp(*pc);
@@ -954,6 +967,10 @@ BaselineCompiler::emitBody()
         // Emit traps for breakpoints and step mode.
         if (compileDebugInstrumentation_ && !emitDebugTrap())
             return Method_Error;
+
+        // Emit code coverage code, to fill the same data as the interpreter.
+        if (compileCoverage)
+            emitCoverage(pc);
 
         switch (op) {
           default:
@@ -1611,7 +1628,7 @@ BaselineCompiler::emitBinaryArith()
     frame.popRegsAndSync(2);
 
     // Call IC
-    ICBinaryArith_Fallback::Compiler stubCompiler(cx);
+    ICBinaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -1627,7 +1644,7 @@ BaselineCompiler::emitUnaryArith()
     frame.popRegsAndSync(1);
 
     // Call IC
-    ICUnaryArith_Fallback::Compiler stubCompiler(cx);
+    ICUnaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::Baseline);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))
         return false;
 
@@ -3769,7 +3786,11 @@ BaselineCompiler::emit_JSOP_RESUME()
     // Push a fake return address on the stack. We will resume here when the
     // generator returns.
     Label genStart, returnTarget;
+#ifdef JS_USE_LINK_REGISTER
+    masm.call(&genStart);
+#else
     masm.callAndPushReturnAddress(&genStart);
+#endif
 
     // Add an IC entry so the return offset -> pc mapping works.
     if (!appendICEntry(ICEntry::Kind_Op, masm.currentOffset()))
@@ -3777,6 +3798,9 @@ BaselineCompiler::emit_JSOP_RESUME()
 
     masm.jump(&returnTarget);
     masm.bind(&genStart);
+#ifdef JS_USE_LINK_REGISTER
+    masm.pushReturnAddress();
+#endif
 
     // If profiler instrumentation is on, update lastProfilingFrame on
     // current JitActivation

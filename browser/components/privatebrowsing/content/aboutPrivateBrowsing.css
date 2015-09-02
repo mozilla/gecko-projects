@@ -1,8 +1,6 @@
-%if 0
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-%endif
 
 @import url("chrome://global/skin/in-content/common.css");
 
@@ -21,6 +19,9 @@ body[tpEnabled] .showTpDisabled,
 body:not([tpEnabled]) .showTpEnabled {
   display: none !important;
 }
+body[globalTpEnabled] .showGlobalTpDisabled {
+  display: none !important;
+}
 
 @media screen and (min-width: 1200px) and (min-height: 700px) {
   body.private {
@@ -35,9 +36,9 @@ body:not([tpEnabled]) .showTpEnabled {
   background-size: 47px 26px;
   padding-inline-start: 87px;
   color: white;
-  font-size: 24pt;
+  font-size: 1.5em;
   font-weight: 200;
-  line-height: 60pt;
+  line-height: 2.5em;
 }
 
 #main {
@@ -61,7 +62,7 @@ body:not([tpEnabled]) .showTpEnabled {
 }
 
 ul {
-  margin-bottom: 0;
+  margin: 0;
   padding-inline-start: 8px;
 }
 
@@ -99,10 +100,11 @@ li {
 }
 
 #list-area > div {
-  margin-inline-end: 1em;
+  margin-inline-end: 3em;
 }
 
 .list-header {
+  margin-bottom: 0.4em;
   font-weight: bold;
 }
 
@@ -155,8 +157,7 @@ li {
 }
 
 #startTour {
-  display: inline-block;
-  width: 16em;
+  display: block;
   border-radius: 2px;
   background-color: var(--in-content-primary-button-background);
   color: var(--in-content-selected-text);

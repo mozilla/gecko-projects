@@ -51,8 +51,8 @@ const TargetFactory = require("devtools/framework/target").TargetFactory;
 const EventEmitter = require("devtools/toolkit/event-emitter");
 const {DevToolsWorker} = require("devtools/toolkit/shared/worker");
 const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
+const promise = require("promise");
 
-const { Promise: promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
@@ -1734,7 +1734,7 @@ var Scratchpad = {
                                                       msg, okstring);
       editorElement.addEventListener("paste", this._onPaste);
       editorElement.addEventListener("drop", this._onPaste);
-      this.editor.on("save", () => this.saveFile());
+      this.editor.on("saveRequested", () => this.saveFile());
       this.editor.focus();
       this.editor.setCursor({ line: lines.length, ch: lines.pop().length });
 

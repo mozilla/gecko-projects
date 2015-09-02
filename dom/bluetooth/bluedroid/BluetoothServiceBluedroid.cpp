@@ -19,6 +19,7 @@
 #include "BluetoothServiceBluedroid.h"
 
 #include "BluetoothA2dpManager.h"
+#include "BluetoothAvrcpManager.h"
 #include "BluetoothGattManager.h"
 #include "BluetoothHfpManager.h"
 #include "BluetoothHidManager.h"
@@ -154,6 +155,7 @@ public:
     static void (* const sInitManager[])(BluetoothProfileResultHandler*) = {
       BluetoothHfpManager::InitHfpInterface,
       BluetoothA2dpManager::InitA2dpInterface,
+      BluetoothAvrcpManager::InitAvrcpInterface,
       BluetoothGattManager::InitGattInterface
     };
 
@@ -295,6 +297,7 @@ BluetoothServiceBluedroid::StopInternal(BluetoothReplyRunnable* aRunnable)
 
   static BluetoothProfileManagerBase* sProfiles[] = {
     BluetoothHfpManager::Get(),
+    BluetoothAvrcpManager::Get(),
     BluetoothA2dpManager::Get(),
     BluetoothOppManager::Get(),
     BluetoothPbapManager::Get(),
@@ -552,6 +555,51 @@ BluetoothServiceBluedroid::GattClientWriteDescriptorValueInternal(
                              aDescriptorId, aValue, aRunnable);
 }
 
+// GATT Server
+void
+BluetoothServiceBluedroid::GattServerConnectPeripheralInternal(
+  const nsAString& aAppUuid, const nsAString& aAddress,
+  BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  ENSURE_BLUETOOTH_IS_READY_VOID(aRunnable);
+
+  BluetoothGattManager* gatt = BluetoothGattManager::Get();
+  ENSURE_GATT_MGR_IS_READY_VOID(gatt, aRunnable);
+
+  gatt->ConnectPeripheral(aAppUuid, aAddress, aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::GattServerDisconnectPeripheralInternal(
+  const nsAString& aAppUuid, const nsAString& aAddress,
+  BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  ENSURE_BLUETOOTH_IS_READY_VOID(aRunnable);
+
+  BluetoothGattManager* gatt = BluetoothGattManager::Get();
+  ENSURE_GATT_MGR_IS_READY_VOID(gatt, aRunnable);
+
+  gatt->DisconnectPeripheral(aAppUuid, aAddress, aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::UnregisterGattServerInternal(
+  int aServerIf, BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  ENSURE_BLUETOOTH_IS_READY_VOID(aRunnable);
+
+  BluetoothGattManager* gatt = BluetoothGattManager::Get();
+  ENSURE_GATT_MGR_IS_READY_VOID(gatt, aRunnable);
+
+  gatt->UnregisterServer(aServerIf, aRunnable);
+}
+
 nsresult
 BluetoothServiceBluedroid::GetAdaptersInternal(
   BluetoothReplyRunnable* aRunnable)
@@ -600,8 +648,8 @@ class BluetoothServiceBluedroid::GetDeviceRequest final
 {
 public:
   GetDeviceRequest(int aDeviceCount, BluetoothReplyRunnable* aRunnable)
-  : mDeviceCount(aDeviceCount)
-  , mRunnable(aRunnable)
+    : mDeviceCount(aDeviceCount)
+    , mRunnable(aRunnable)
   { }
 
   int mDeviceCount;
@@ -617,8 +665,8 @@ public:
   GetRemoteDevicePropertiesResultHandler(
     nsTArray<GetDeviceRequest>& aRequests,
     const nsAString& aDeviceAddress)
-  : mRequests(aRequests)
-  , mDeviceAddress(aDeviceAddress)
+    : mRequests(aRequests)
+    , mDeviceAddress(aDeviceAddress)
   { }
 
   void OnError(BluetoothStatus aStatus) override
@@ -640,7 +688,7 @@ public:
   }
 
 private:
-  nsTArray<GetDeviceRequest> mRequests;
+  nsTArray<GetDeviceRequest>& mRequests;
   nsString mDeviceAddress;
 };
 
@@ -706,26 +754,29 @@ BluetoothServiceBluedroid::GetPairedDevicePropertiesInternal(
   return NS_OK;
 }
 
-class BluetoothServiceBluedroid::StartDiscoveryResultHandler final
+class BluetoothServiceBluedroid::DispatchReplyErrorResultHandler final
   : public BluetoothResultHandler
 {
 public:
-  StartDiscoveryResultHandler(
+  DispatchReplyErrorResultHandler(
     nsTArray<nsRefPtr<BluetoothReplyRunnable>>& aRunnableArray,
     BluetoothReplyRunnable* aRunnable)
-  : mRunnableArray(aRunnableArray)
-  , mRunnable(aRunnable)
+    : mRunnableArray(aRunnableArray)
+    , mRunnable(aRunnable)
   { }
 
   void OnError(BluetoothStatus aStatus) override
   {
     MOZ_ASSERT(NS_IsMainThread());
+
     mRunnableArray.RemoveElement(mRunnable);
-    DispatchReplyError(mRunnable, aStatus);
+    if (mRunnable) {
+      DispatchReplyError(mRunnable, aStatus);
+    }
   }
 
 private:
-  nsTArray<nsRefPtr<BluetoothReplyRunnable>> mRunnableArray;
+  nsTArray<nsRefPtr<BluetoothReplyRunnable>>& mRunnableArray;
   BluetoothReplyRunnable* mRunnable;
 };
 
@@ -738,54 +789,8 @@ BluetoothServiceBluedroid::StartDiscoveryInternal(
 
   mChangeDiscoveryRunnables.AppendElement(aRunnable);
   sBtInterface->StartDiscovery(
-    new StartDiscoveryResultHandler(mChangeDiscoveryRunnables, aRunnable));
+    new DispatchReplyErrorResultHandler(mChangeDiscoveryRunnables, aRunnable));
 }
-
-class BluetoothServiceBluedroid::CancelDiscoveryResultHandler final
-  : public BluetoothResultHandler
-{
-public:
-  CancelDiscoveryResultHandler(
-    nsTArray<nsRefPtr<BluetoothReplyRunnable>>& aRunnableArray,
-    BluetoothReplyRunnable* aRunnable)
-  : mRunnableArray(aRunnableArray)
-  , mRunnable(aRunnable)
-  { }
-
-  void OnError(BluetoothStatus aStatus) override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    mRunnableArray.RemoveElement(mRunnable);
-    DispatchReplyError(mRunnable, aStatus);
-  }
-
-private:
-  nsTArray<nsRefPtr<BluetoothReplyRunnable>> mRunnableArray;
-  BluetoothReplyRunnable* mRunnable;
-};
-
-class BluetoothServiceBluedroid::GetRemoteServicesResultHandler final
-  : public BluetoothResultHandler
-{
-public:
-  GetRemoteServicesResultHandler(
-    nsTArray<nsRefPtr<BluetoothReplyRunnable>>& aRunnableArray,
-    BluetoothReplyRunnable* aRunnable)
-  : mRunnableArray(aRunnableArray)
-  , mRunnable(aRunnable)
-  { }
-
-  void OnError(BluetoothStatus aStatus) override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    mRunnableArray.RemoveElement(mRunnable);
-    DispatchReplyError(mRunnable, aStatus);
-  }
-
-private:
-  nsTArray<nsRefPtr<BluetoothReplyRunnable>> mRunnableArray;
-  BluetoothReplyRunnable* mRunnable;
-};
 
 nsresult
 BluetoothServiceBluedroid::FetchUuidsInternal(
@@ -800,14 +805,12 @@ BluetoothServiceBluedroid::FetchUuidsInternal(
    * if it is currently discovering nearby remote devices.
    */
   if (mDiscovering) {
-    sBtInterface->CancelDiscovery(
-      new CancelDiscoveryResultHandler(mChangeDiscoveryRunnables, aRunnable));
+    StopDiscoveryInternal(aRunnable);
   }
 
   mFetchUuidsRunnables.AppendElement(aRunnable);
-
   sBtInterface->GetRemoteServices(aDeviceAddress,
-    new GetRemoteServicesResultHandler(mFetchUuidsRunnables, aRunnable));
+    new DispatchReplyErrorResultHandler(mFetchUuidsRunnables, aRunnable));
 
   return NS_OK;
 }
@@ -817,37 +820,13 @@ BluetoothServiceBluedroid::StopDiscoveryInternal(
   BluetoothReplyRunnable* aRunnable)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
   ENSURE_BLUETOOTH_IS_READY_VOID(aRunnable);
 
   mChangeDiscoveryRunnables.AppendElement(aRunnable);
   sBtInterface->CancelDiscovery(
-    new CancelDiscoveryResultHandler(mChangeDiscoveryRunnables,
-                                     aRunnable));
+    new DispatchReplyErrorResultHandler(mChangeDiscoveryRunnables, aRunnable));
 }
-
-class BluetoothServiceBluedroid::SetAdapterPropertyResultHandler final
-  : public BluetoothResultHandler
-{
-public:
-  SetAdapterPropertyResultHandler(
-    nsTArray<nsRefPtr<BluetoothReplyRunnable>>& aRunnableArray,
-    BluetoothReplyRunnable* aRunnable)
-  : mRunnableArray(aRunnableArray)
-  , mRunnable(aRunnable)
-  { }
-
-  void OnError(BluetoothStatus aStatus) override
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    mRunnableArray.RemoveElement(mRunnable);
-    DispatchReplyError(mRunnable, aStatus);
-  }
-
-private:
-  nsTArray<nsRefPtr<BluetoothReplyRunnable>> mRunnableArray;
-  BluetoothReplyRunnable* mRunnable;
-};
 
 nsresult
 BluetoothServiceBluedroid::SetProperty(BluetoothObjectType aType,
@@ -859,9 +838,8 @@ BluetoothServiceBluedroid::SetProperty(BluetoothObjectType aType,
   ENSURE_BLUETOOTH_IS_READY(aRunnable, NS_OK);
 
   mSetAdapterPropertyRunnables.AppendElement(aRunnable);
-
   sBtInterface->SetAdapterProperty(aValue,
-    new SetAdapterPropertyResultHandler(mSetAdapterPropertyRunnables,
+    new DispatchReplyErrorResultHandler(mSetAdapterPropertyRunnables,
                                         aRunnable));
 
   return NS_OK;
@@ -884,30 +862,6 @@ BluetoothServiceBluedroid::UpdateSdpRecords(
   return true;
 }
 
-class BluetoothServiceBluedroid::CreateBondResultHandler final
-  : public BluetoothResultHandler
-{
-public:
-  CreateBondResultHandler(
-    nsTArray<nsRefPtr<BluetoothReplyRunnable>>& aRunnableArray,
-    BluetoothReplyRunnable* aRunnable)
-  : mRunnableArray(aRunnableArray)
-  , mRunnable(aRunnable)
-  {
-    MOZ_ASSERT(mRunnable);
-  }
-
-  void OnError(BluetoothStatus aStatus) override
-  {
-    mRunnableArray.RemoveElement(mRunnable);
-    DispatchReplyError(mRunnable, aStatus);
-  }
-
-private:
-  nsTArray<nsRefPtr<BluetoothReplyRunnable>> mRunnableArray;
-  nsRefPtr<BluetoothReplyRunnable> mRunnable;
-};
-
 nsresult
 BluetoothServiceBluedroid::CreatePairedDeviceInternal(
   const nsAString& aDeviceAddress, int aTimeout,
@@ -918,36 +872,11 @@ BluetoothServiceBluedroid::CreatePairedDeviceInternal(
   ENSURE_BLUETOOTH_IS_READY(aRunnable, NS_OK);
 
   mCreateBondRunnables.AppendElement(aRunnable);
-
   sBtInterface->CreateBond(aDeviceAddress, TRANSPORT_AUTO,
-    new CreateBondResultHandler(mCreateBondRunnables, aRunnable));
+    new DispatchReplyErrorResultHandler(mCreateBondRunnables, aRunnable));
 
   return NS_OK;
 }
-
-class BluetoothServiceBluedroid::RemoveBondResultHandler final
-  : public BluetoothResultHandler
-{
-public:
-  RemoveBondResultHandler(
-    nsTArray<nsRefPtr<BluetoothReplyRunnable>>& aRunnableArray,
-    BluetoothReplyRunnable* aRunnable)
-  : mRunnableArray(aRunnableArray)
-  , mRunnable(aRunnable)
-  {
-    MOZ_ASSERT(mRunnable);
-  }
-
-  void OnError(BluetoothStatus aStatus) override
-  {
-    mRunnableArray.RemoveElement(mRunnable);
-    DispatchReplyError(mRunnable, aStatus);
-  }
-
-private:
-  nsTArray<nsRefPtr<BluetoothReplyRunnable>> mRunnableArray;
-  nsRefPtr<BluetoothReplyRunnable> mRunnable;
-};
 
 nsresult
 BluetoothServiceBluedroid::RemoveDeviceInternal(
@@ -958,9 +887,8 @@ BluetoothServiceBluedroid::RemoveDeviceInternal(
   ENSURE_BLUETOOTH_IS_READY(aRunnable, NS_OK);
 
   mRemoveBondRunnables.AppendElement(aRunnable);
-
   sBtInterface->RemoveBond(aDeviceAddress,
-    new RemoveBondResultHandler(mRemoveBondRunnables, aRunnable));
+    new DispatchReplyErrorResultHandler(mRemoveBondRunnables, aRunnable));
 
   return NS_OK;
 }
@@ -970,7 +898,7 @@ class BluetoothServiceBluedroid::PinReplyResultHandler final
 {
 public:
   PinReplyResultHandler(BluetoothReplyRunnable* aRunnable)
-  : mRunnable(aRunnable)
+    : mRunnable(aRunnable)
   { }
 
   void PinReply() override
@@ -1021,7 +949,7 @@ class BluetoothServiceBluedroid::SspReplyResultHandler final
 {
 public:
   SspReplyResultHandler(BluetoothReplyRunnable* aRunnable)
-  : mRunnable(aRunnable)
+    : mRunnable(aRunnable)
   { }
 
   void SspReply() override
@@ -1246,6 +1174,109 @@ BluetoothServiceBluedroid::IsScoConnected(BluetoothReplyRunnable* aRunnable)
 }
 
 void
+BluetoothServiceBluedroid::ReplyTovCardPulling(
+  BlobParent* aBlobParent,
+  BlobChild* aBlobChild,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCardPulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardEntry(aBlobParent);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyTovCardPulling(
+  Blob* aBlob,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCardPulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardEntry(aBlob);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyToPhonebookPulling(
+  BlobParent* aBlobParent,
+  BlobChild* aBlobChild,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to Phonebook Pulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullPhonebook(aBlobParent, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyToPhonebookPulling(
+  Blob* aBlob,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to Phonebook Pulling failed"));
+    return;
+  }
+
+  pbap->ReplyToPullPhonebook(aBlob, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyTovCardListing(
+  BlobParent* aBlobParent,
+  BlobChild* aBlobChild,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCard Listing failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardListing(aBlobParent, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
+BluetoothServiceBluedroid::ReplyTovCardListing(
+  Blob* aBlob,
+  uint16_t aPhonebookSize,
+  BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothPbapManager* pbap = BluetoothPbapManager::Get();
+  if (!pbap) {
+    DispatchReplyError(aRunnable,
+                       NS_LITERAL_STRING("Reply to vCard Listing failed"));
+    return;
+  }
+
+  pbap->ReplyToPullvCardListing(aBlob, aPhonebookSize);
+  DispatchReplySuccess(aRunnable);
+}
+
+void
 BluetoothServiceBluedroid::SendMetaData(const nsAString& aTitle,
                                         const nsAString& aArtist,
                                         const nsAString& aAlbum,
@@ -1254,10 +1285,10 @@ BluetoothServiceBluedroid::SendMetaData(const nsAString& aTitle,
                                         int64_t aDuration,
                                         BluetoothReplyRunnable* aRunnable)
 {
-  BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
-  if (a2dp) {
-    a2dp->UpdateMetaData(aTitle, aArtist, aAlbum, aMediaNumber,
-                         aTotalMediaCount, aDuration);
+  BluetoothAvrcpManager* avrcp = BluetoothAvrcpManager::Get();
+  if (avrcp) {
+    avrcp->UpdateMetaData(aTitle, aArtist, aAlbum, aMediaNumber,
+                          aTotalMediaCount, aDuration);
   }
   DispatchReplySuccess(aRunnable);
 }
@@ -1268,11 +1299,11 @@ BluetoothServiceBluedroid::SendPlayStatus(
   const nsAString& aPlayStatus,
   BluetoothReplyRunnable* aRunnable)
 {
-  BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
-  if (a2dp) {
+  BluetoothAvrcpManager* avrcp = BluetoothAvrcpManager::Get();
+  if (avrcp) {
     ControlPlayStatus playStatus =
       PlayStatusStringToControlPlayStatus(aPlayStatus);
-    a2dp->UpdatePlayStatus(aDuration, aPosition, playStatus);
+    avrcp->UpdatePlayStatus(aDuration, aPosition, playStatus);
   }
   DispatchReplySuccess(aRunnable);
 }
@@ -1759,9 +1790,8 @@ BluetoothServiceBluedroid::DiscoveryStateChangedNotification(bool aState)
 }
 
 void
-BluetoothServiceBluedroid::PinRequestNotification(const nsAString& aRemoteBdAddr,
-                                                  const nsAString& aBdName,
-                                                  uint32_t aCod)
+BluetoothServiceBluedroid::PinRequestNotification(
+  const nsAString& aRemoteBdAddr, const nsAString& aBdName, uint32_t aCod)
 {
   MOZ_ASSERT(NS_IsMainThread());
 

@@ -117,8 +117,7 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_CRASHREPORTER_ENABLED = "datareporting.crashreporter.submitEnabled";
     private static final String PREFS_MENU_CHAR_ENCODING = "browser.menu.showCharacterEncoding";
     private static final String PREFS_MP_ENABLED = "privacy.masterpassword.enabled";
-    private static final String PREFS_LOGIN_MANAGE = NON_PREF_PREFIX + "signon.manage";
-    private static final String PREFS_DISABLE_ZOOMED_VIEW = "ui.zoomedview.disabled";
+    private static final String PREFS_ZOOMED_VIEW_ENABLED = "ui.zoomedview.enabled";
     private static final String PREFS_UPDATER_AUTODOWNLOAD = "app.update.autodownload";
     private static final String PREFS_UPDATER_URL = "app.update.url.android";
     private static final String PREFS_GEO_REPORTING = NON_PREF_PREFIX + "app.geo.reportdata";
@@ -418,6 +417,7 @@ OnSharedPreferenceChangeListener
 
         // If launched from notification, explicitly cancel the notification.
         if (intentExtras != null && intentExtras.containsKey(DataReportingNotification.ALERT_NAME_DATAREPORTING_NOTIFICATION)) {
+            Telemetry.sendUIEvent(TelemetryContract.Event.LAUNCH, Method.NOTIFICATION, "settings-data-choices");
             NotificationManager notificationManager = (NotificationManager) this.getSystemService(Context.NOTIFICATION_SERVICE);
             notificationManager.cancel(DataReportingNotification.ALERT_NAME_DATAREPORTING_NOTIFICATION.hashCode());
         }
@@ -736,13 +736,7 @@ OnSharedPreferenceChangeListener
                         i--;
                         continue;
                     }
-                } else if (PREFS_LOGIN_MANAGE.equals(key)) {
-                    if (!AppConstants.NIGHTLY_BUILD) {
-                        preferences.removePreference(pref);
-                        i--;
-                        continue;
-                    }
-                } else if (PREFS_DISABLE_ZOOMED_VIEW.equals(key)) {
+                } else if (PREFS_ZOOMED_VIEW_ENABLED.equals(key)) {
                     // Only enable the ZoomedView / magnifying pref on Nightly.
                     if (!AppConstants.NIGHTLY_BUILD) {
                         preferences.removePreference(pref);

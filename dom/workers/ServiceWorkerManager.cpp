@@ -7,7 +7,6 @@
 #include "ServiceWorkerManager.h"
 
 #include "mozIApplication.h"
-#include "mozIApplicationClearPrivateDataParams.h"
 #include "nsIAppsService.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDocument.h"
@@ -47,6 +46,7 @@
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
 #include "mozilla/unused.h"
+#include "mozilla/EnumSet.h"
 
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
@@ -83,7 +83,7 @@ BEGIN_WORKERS_NAMESPACE
 
 #define PURGE_DOMAIN_DATA "browser:purge-domain-data"
 #define PURGE_SESSION_HISTORY "browser:purge-session-history"
-#define WEBAPPS_CLEAR_DATA "webapps-clear-data"
+#define CLEAR_ORIGIN_DATA "clear-origin-data"
 
 static_assert(nsIHttpChannelInternal::CORS_MODE_SAME_ORIGIN == static_cast<uint32_t>(RequestMode::Same_origin),
               "RequestMode enumeration value should match Necko CORS mode value.");
@@ -93,6 +93,15 @@ static_assert(nsIHttpChannelInternal::CORS_MODE_CORS == static_cast<uint32_t>(Re
               "RequestMode enumeration value should match Necko CORS mode value.");
 static_assert(nsIHttpChannelInternal::CORS_MODE_CORS_WITH_FORCED_PREFLIGHT == static_cast<uint32_t>(RequestMode::Cors_with_forced_preflight),
               "RequestMode enumeration value should match Necko CORS mode value.");
+
+static_assert(nsIHttpChannelInternal::REDIRECT_MODE_FOLLOW == static_cast<uint32_t>(RequestRedirect::Follow),
+              "RequestRedirect enumeration value should make Necko Redirect mode value.");
+static_assert(nsIHttpChannelInternal::REDIRECT_MODE_ERROR == static_cast<uint32_t>(RequestRedirect::Error),
+              "RequestRedirect enumeration value should make Necko Redirect mode value.");
+static_assert(nsIHttpChannelInternal::REDIRECT_MODE_MANUAL == static_cast<uint32_t>(RequestRedirect::Manual),
+              "RequestRedirect enumeration value should make Necko Redirect mode value.");
+static_assert(3 == static_cast<uint32_t>(RequestRedirect::EndGuard_),
+              "RequestRedirect enumeration value should make Necko Redirect mode value.");
 
 static StaticRefPtr<ServiceWorkerManager> gInstance;
 
@@ -431,7 +440,7 @@ ServiceWorkerManager::Init()
       MOZ_ASSERT(NS_SUCCEEDED(rv));
       rv = obs->AddObserver(this, PURGE_DOMAIN_DATA, false /* ownsWeak */);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
-      rv = obs->AddObserver(this, WEBAPPS_CLEAR_DATA, false /* ownsWeak */);
+      rv = obs->AddObserver(this, CLEAR_ORIGIN_DATA, false /* ownsWeak */);
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }
@@ -542,28 +551,6 @@ private:
 
 };
 
-class ServiceWorkerUpdateFinishCallback
-{
-protected:
-  virtual ~ServiceWorkerUpdateFinishCallback()
-  { }
-
-public:
-  NS_INLINE_DECL_REFCOUNTING(ServiceWorkerUpdateFinishCallback)
-
-  virtual
-  void UpdateSucceeded(ServiceWorkerRegistrationInfo* aInfo)
-  { }
-
-  virtual
-  void UpdateFailed(nsresult aStatus)
-  { }
-
-  virtual
-  void UpdateFailed(const ErrorEventInit& aDesc)
-  { }
-};
-
 class ServiceWorkerResolveWindowPromiseOnUpdateCallback final : public ServiceWorkerUpdateFinishCallback
 {
   nsRefPtr<nsPIDOMWindow> mWindow;
@@ -597,7 +584,7 @@ public:
   }
 
   void
-  UpdateFailed(const ErrorEventInit& aErrorDesc) override
+  UpdateFailed(JSExnType aExnType, const ErrorEventInit& aErrorDesc) override
   {
     AutoJSAPI jsapi;
     jsapi.Init(mWindow);
@@ -621,7 +608,8 @@ public:
     JS::Rooted<JSString*> msg(cx, msgval.toString());
 
     JS::Rooted<JS::Value> error(cx);
-    if (!JS::CreateError(cx, JSEXN_ERR, nullptr, fn, aErrorDesc.mLineno,
+    if ((aExnType < JSEXN_ERR) ||
+        !JS::CreateError(cx, aExnType, nullptr, fn, aErrorDesc.mLineno,
                          aErrorDesc.mColno, nullptr, msg, &error)) {
       JS_ClearPendingException(cx);
       mPromise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
@@ -998,13 +986,17 @@ public:
                    const nsACString& aMaxScope) override
   {
     nsRefPtr<ServiceWorkerRegisterJob> kungFuDeathGrip = this;
-    if (mCanceled) {
+    if (NS_WARN_IF(mCanceled)) {
       Fail(NS_ERROR_DOM_TYPE_ERR);
       return;
     }
 
     if (NS_WARN_IF(NS_FAILED(aStatus))) {
-      Fail(NS_ERROR_DOM_TYPE_ERR);
+      if (aStatus == NS_ERROR_DOM_SECURITY_ERR) {
+        Fail(aStatus);
+      } else {
+        Fail(NS_ERROR_DOM_TYPE_ERR);
+      }
       return;
     }
 
@@ -1124,7 +1116,7 @@ public:
   // Public so our error handling code can use it.
   // Callers MUST hold a strong ref before calling this!
   void
-  Fail(const ErrorEventInit& aError)
+  Fail(JSExnType aExnType, const ErrorEventInit& aError)
   {
     MOZ_ASSERT(mCallback);
     nsRefPtr<ServiceWorkerUpdateFinishCallback> callback = mCallback.forget();
@@ -1134,7 +1126,7 @@ public:
     // FailCommon relies on it.
     // FailCommon does check for cancellation, but let's be safe here.
     nsRefPtr<ServiceWorkerRegisterJob> kungFuDeathGrip = this;
-    callback->UpdateFailed(aError);
+    callback->UpdateFailed(aExnType, aError);
     FailCommon(NS_ERROR_DOM_JS_EXCEPTION);
   }
 
@@ -1926,7 +1918,7 @@ LifecycleEventWorkerRunnable::DispatchLifecycleEvent(JSContext* aCx, WorkerPriva
     // FIXME(nsm): Bug 982787 pass previous active worker.
     ExtendableEventInit init;
     init.mBubbles = false;
-    init.mCancelable = true;
+    init.mCancelable = false;
     event = ExtendableEvent::Constructor(target, mEventName, init);
   } else {
     MOZ_CRASH("Unexpected lifecycle event");
@@ -2327,7 +2319,7 @@ public:
     // FIXME(nsm): Bug 1149195.
     // pei.mData.Construct(mData);
     pei.mBubbles = false;
-    pei.mCancelable = true;
+    pei.mCancelable = false;
 
     ErrorResult result;
     nsRefPtr<PushEvent> event =
@@ -2526,7 +2518,7 @@ public:
     NotificationEventInit nei;
     nei.mNotification = notification;
     nei.mBubbles = false;
-    nei.mCancelable = true;
+    nei.mCancelable = false;
 
     nsRefPtr<NotificationEvent> event =
       NotificationEvent::Constructor(target, NS_LITERAL_STRING("notificationclick"), nei, result);
@@ -2950,7 +2942,8 @@ ServiceWorkerManager::HandleError(JSContext* aCx,
                                   nsString aLine,
                                   uint32_t aLineNumber,
                                   uint32_t aColumnNumber,
-                                  uint32_t aFlags)
+                                  uint32_t aFlags,
+                                  JSExnType aExnType)
 {
   AssertIsOnMainThread();
   MOZ_ASSERT(aPrincipal);
@@ -2990,7 +2983,7 @@ ServiceWorkerManager::HandleError(JSContext* aCx,
               "Script error caused ServiceWorker registration to fail: %s:%u '%s'",
               NS_ConvertUTF16toUTF8(aFilename).get(), aLineNumber,
               NS_ConvertUTF16toUTF8(aMessage).get()).get());
-    regJob->Fail(init);
+    regJob->Fail(aExnType, init);
   }
 
   return true;
@@ -3003,14 +2996,10 @@ ServiceWorkerRegistrationInfo::FinishActivate(bool aSuccess)
     return;
   }
 
-  if (aSuccess) {
-    mActiveWorker->UpdateState(ServiceWorkerState::Activated);
-    nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-    swm->StoreRegistration(mPrincipal, this);
-  } else {
-    mActiveWorker->UpdateState(ServiceWorkerState::Redundant);
-    mActiveWorker = nullptr;
-  }
+  // Activation never fails, so aSuccess is ignored.
+  mActiveWorker->UpdateState(ServiceWorkerState::Activated);
+  nsRefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  swm->StoreRegistration(mPrincipal, this);
 }
 
 NS_IMETHODIMP
@@ -3636,7 +3625,9 @@ class FetchEventRunnable : public WorkerRunnable
   nsCString mSpec;
   nsCString mMethod;
   bool mIsReload;
+  DebugOnly<bool> mIsHttpChannel;
   RequestMode mRequestMode;
+  RequestRedirect mRequestRedirect;
   RequestCredentials mRequestCredentials;
   nsContentPolicyType mContentPolicyType;
   nsCOMPtr<nsIInputStream> mUploadStream;
@@ -3652,7 +3643,9 @@ public:
     , mServiceWorker(aServiceWorker)
     , mClientInfo(aClientInfo)
     , mIsReload(aIsReload)
+    , mIsHttpChannel(false)
     , mRequestMode(RequestMode::No_cors)
+    , mRequestRedirect(RequestRedirect::Follow)
     // By default we set it to same-origin since normal HTTP fetches always
     // send credentials to same-origin websites unless explicitly forbidden.
     , mRequestCredentials(RequestCredentials::Same_origin)
@@ -3708,28 +3701,20 @@ public:
 
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(channel);
     if (httpChannel) {
+      mIsHttpChannel = true;
+
       rv = httpChannel->GetRequestMethod(mMethod);
       NS_ENSURE_SUCCESS(rv, rv);
 
       nsCOMPtr<nsIHttpChannelInternal> internalChannel = do_QueryInterface(httpChannel);
       NS_ENSURE_TRUE(internalChannel, NS_ERROR_NOT_AVAILABLE);
 
-      uint32_t mode;
-      internalChannel->GetCorsMode(&mode);
-      switch (mode) {
-        case nsIHttpChannelInternal::CORS_MODE_SAME_ORIGIN:
-          mRequestMode = RequestMode::Same_origin;
-          break;
-        case nsIHttpChannelInternal::CORS_MODE_NO_CORS:
-          mRequestMode = RequestMode::No_cors;
-          break;
-        case nsIHttpChannelInternal::CORS_MODE_CORS:
-        case nsIHttpChannelInternal::CORS_MODE_CORS_WITH_FORCED_PREFLIGHT:
-          mRequestMode = RequestMode::Cors;
-          break;
-        default:
-          MOZ_CRASH("Unexpected CORS mode");
-      }
+      mRequestMode = InternalRequest::MapChannelToRequestMode(channel);
+
+      // This is safe due to static_asserts at top of file.
+      uint32_t redirectMode;
+      internalChannel->GetRedirectMode(&redirectMode);
+      mRequestRedirect = static_cast<RequestRedirect>(redirectMode);
 
       if (loadFlags & nsIRequest::LOAD_ANONYMOUS) {
         mRequestCredentials = RequestCredentials::Omit;
@@ -3756,6 +3741,8 @@ public:
       NS_ENSURE_TRUE(jarChannel, NS_ERROR_NOT_AVAILABLE);
 
       mMethod = "GET";
+
+      mRequestMode = InternalRequest::MapChannelToRequestMode(channel);
 
       if (loadFlags & nsIRequest::LOAD_ANONYMOUS) {
         mRequestCredentials = RequestCredentials::Omit;
@@ -3823,6 +3810,7 @@ private:
     reqInit.mHeaders.Value().SetAsHeaders() = headers;
 
     reqInit.mMode.Construct(mRequestMode);
+    reqInit.mRedirect.Construct(mRequestRedirect);
     reqInit.mCredentials.Construct(mRequestCredentials);
 
     ErrorResult result;
@@ -3841,11 +3829,16 @@ private:
 
     request->SetContentPolicyType(mContentPolicyType);
 
+    // TODO: remove conditional on http here once app protocol support is
+    //       removed from service worker interception
+    MOZ_ASSERT_IF(mIsHttpChannel && internalReq->IsNavigationRequest(),
+                  request->Redirect() == RequestRedirect::Manual);
+
     RootedDictionary<FetchEventInit> init(aCx);
     init.mRequest.Construct();
     init.mRequest.Value() = request;
     init.mBubbles = false;
-    init.mCancelable = true;
+    init.mCancelable = false;
     init.mIsReload.Construct(mIsReload);
     nsRefPtr<FetchEvent> event =
       FetchEvent::Constructor(globalObj, NS_LITERAL_STRING("fetch"), init, result);
@@ -3896,7 +3889,7 @@ ServiceWorkerManager::DispatchFetchEvent(const OriginAttributes& aOriginAttribut
     MOZ_ASSERT(aDoc);
     aRv = GetDocumentController(aDoc->GetInnerWindow(), failRunnable,
                                 getter_AddRefs(serviceWorker));
-    clientInfo = new ServiceWorkerClientInfo(aDoc, aDoc->GetWindow());
+    clientInfo = new ServiceWorkerClientInfo(aDoc);
   } else {
     nsCOMPtr<nsIChannel> internalChannel;
     aRv = aChannel->GetChannel(getter_AddRefs(internalChannel));
@@ -4078,6 +4071,9 @@ ServiceWorkerManager::CreateServiceWorker(nsIPrincipal* aPrincipal,
   AssertIsOnMainThread();
   MOZ_ASSERT(aPrincipal);
 
+  // Ensure that the IndexedDatabaseManager is initialized
+  NS_WARN_IF(!indexedDB::IndexedDatabaseManager::GetOrCreate());
+
   WorkerLoadInfo info;
   nsresult rv = NS_NewURI(getter_AddRefs(info.mBaseURI), aInfo->ScriptSpec(),
                           nullptr, nullptr);
@@ -4097,9 +4093,12 @@ ServiceWorkerManager::CreateServiceWorker(nsIPrincipal* aPrincipal,
 
   info.mPrincipal = aPrincipal;
 
-  info.mIndexedDBAllowed =
-    indexedDB::IDBFactory::AllowedForPrincipal(aPrincipal);
-   info.mPrivateBrowsing = false;
+  nsContentUtils::StorageAccess access =
+    nsContentUtils::StorageAllowedForPrincipal(aPrincipal);
+  info.mStorageAllowed =
+    access > nsContentUtils::StorageAccess::ePrivateBrowsing;
+
+  info.mPrivateBrowsing = false;
 
   nsCOMPtr<nsIContentSecurityPolicy> csp;
   rv = aPrincipal->GetCsp(getter_AddRefs(csp));
@@ -4175,7 +4174,8 @@ ServiceWorkerManager::InvalidateServiceWorkerRegistrationWorker(ServiceWorkerReg
 
 void
 ServiceWorkerManager::SoftUpdate(nsIPrincipal* aPrincipal,
-                                 const nsACString& aScope)
+                                 const nsACString& aScope,
+                                 ServiceWorkerUpdateFinishCallback* aCallback)
 {
   MOZ_ASSERT(aPrincipal);
 
@@ -4185,21 +4185,23 @@ ServiceWorkerManager::SoftUpdate(nsIPrincipal* aPrincipal,
     return;
   }
 
-  SoftUpdate(scopeKey, aScope);
+  SoftUpdate(scopeKey, aScope, aCallback);
 }
 
 void
 ServiceWorkerManager::SoftUpdate(const OriginAttributes& aOriginAttributes,
-                                 const nsACString& aScope)
+                                 const nsACString& aScope,
+                                 ServiceWorkerUpdateFinishCallback* aCallback)
 {
   nsAutoCString scopeKey;
   aOriginAttributes.CreateSuffix(scopeKey);
-  SoftUpdate(scopeKey, aScope);
+  SoftUpdate(scopeKey, aScope, aCallback);
 }
 
 void
 ServiceWorkerManager::SoftUpdate(const nsACString& aScopeKey,
-                                 const nsACString& aScope)
+                                 const nsACString& aScope,
+                                 ServiceWorkerUpdateFinishCallback* aCallback)
 {
   nsRefPtr<ServiceWorkerRegistrationInfo> registration =
     GetRegistration(aScopeKey, aScope);
@@ -4232,8 +4234,10 @@ ServiceWorkerManager::SoftUpdate(const nsACString& aScopeKey,
     GetOrCreateJobQueue(aScopeKey, aScope);
   MOZ_ASSERT(queue);
 
-  nsRefPtr<ServiceWorkerUpdateFinishCallback> cb =
-    new ServiceWorkerUpdateFinishCallback();
+  nsRefPtr<ServiceWorkerUpdateFinishCallback> cb(aCallback);
+  if (!cb) {
+    cb = new ServiceWorkerUpdateFinishCallback();
+  }
 
   // "Invoke Update algorithm, or its equivalent, with client, registration as
   // its argument."
@@ -4276,7 +4280,7 @@ EnumControlledDocuments(nsISupports* aKey,
     return PL_DHASH_NEXT;
   }
 
-  ServiceWorkerClientInfo clientInfo(document, document->GetWindow());
+  ServiceWorkerClientInfo clientInfo(document);
   data->mDocuments.AppendElement(clientInfo);
 
   return PL_DHASH_NEXT;
@@ -4663,46 +4667,36 @@ UnregisterIfMatchesHostPerPrincipal(const nsACString& aKey,
 }
 
 PLDHashOperator
-UnregisterIfMatchesClearPrivateDataParams(const nsACString& aScope,
-                                          ServiceWorkerRegistrationInfo* aReg,
-                                          void* aPtr)
+UnregisterIfMatchesClearOriginParams(const nsACString& aScope,
+                                     ServiceWorkerRegistrationInfo* aReg,
+                                     void* aPtr)
 {
   UnregisterIfMatchesUserData* data =
     static_cast<UnregisterIfMatchesUserData*>(aPtr);
+  MOZ_ASSERT(data);
 
   if (data->mUserData) {
-    mozIApplicationClearPrivateDataParams *params =
-      static_cast<mozIApplicationClearPrivateDataParams*>(data->mUserData);
+    OriginAttributes* params = static_cast<OriginAttributes*>(data->mUserData);
     MOZ_ASSERT(params);
+    MOZ_ASSERT(aReg);
     MOZ_ASSERT(aReg->mPrincipal);
-
-    uint32_t appId;
-    nsresult rv = params->GetAppId(&appId);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return PL_DHASH_NEXT;
-    }
-
-    bool browserOnly;
-    rv = params->GetBrowserOnly(&browserOnly);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return PL_DHASH_NEXT;
-    }
 
     bool equals = false;
 
-    if (browserOnly) {
+    if (params->mInBrowser) {
       // When we do a system wide "clear cookies and stored data" on B2G we get
-      // the "webapps-clear-data" notification with the System app appID and
+      // the "clear-origin-data" notification with the System app appID and
       // the browserOnly flag set to true.
       // Web sites registering a service worker on B2G have a principal with the
       // following information: web site origin + System app appId + inBrowser=1
       // So we need to check if the service worker registration info contains
       // the System app appID and the enabled inBrowser flag and in that case
       // remove it from the registry.
-      equals = (appId == aReg->mPrincipal->GetAppId()) &&
-               aReg->mPrincipal->GetIsInBrowserElement();
+      OriginAttributes attrs =
+        mozilla::BasePrincipal::Cast(aReg->mPrincipal)->OriginAttributesRef();
+      equals = attrs == *params;
     } else {
-      // If we get the "webapps-clear-data" notification because of an app
+      // If we get the "clear-origin-data" notification because of an app
       // uninstallation, we need to check the full principal to get the match
       // in the service workers registry. If we find a match, we unregister the
       // worker.
@@ -4713,7 +4707,7 @@ UnregisterIfMatchesClearPrivateDataParams(const nsACString& aScope,
       }
 
       nsCOMPtr<mozIApplication> app;
-      appsService->GetAppByLocalId(appId, getter_AddRefs(app));
+      appsService->GetAppByLocalId(params->mAppId, getter_AddRefs(app));
       if (NS_WARN_IF(!app)) {
         return PL_DHASH_NEXT;
       }
@@ -4737,7 +4731,7 @@ UnregisterIfMatchesClearPrivateDataParams(const nsACString& aScope,
 }
 
 PLDHashOperator
-UnregisterIfMatchesClearPrivateDataParams(const nsACString& aKey,
+UnregisterIfMatchesClearOriginParams(const nsACString& aKey,
                              ServiceWorkerManager::RegistrationDataPerPrincipal* aData,
                              void* aUserData)
 {
@@ -4745,7 +4739,7 @@ UnregisterIfMatchesClearPrivateDataParams(const nsACString& aKey,
   // We can use EnumerateRead because ForceUnregister (and Unregister) are async.
   // Otherwise doing some R/W operations on an hashtable during an EnumerateRead
   // will crash.
-  aData->mInfos.EnumerateRead(UnregisterIfMatchesClearPrivateDataParams,
+  aData->mInfos.EnumerateRead(UnregisterIfMatchesClearOriginParams,
                               &data);
   return PL_DHASH_NEXT;
 }
@@ -4963,14 +4957,13 @@ UpdateEachRegistration(const nsACString& aKey,
 }
 
 void
-ServiceWorkerManager::RemoveAllRegistrations(
-    mozIApplicationClearPrivateDataParams* aParams)
+ServiceWorkerManager::RemoveAllRegistrations(OriginAttributes* aParams)
 {
   AssertIsOnMainThread();
 
   MOZ_ASSERT(aParams);
 
-  mRegistrationInfos.EnumerateRead(UnregisterIfMatchesClearPrivateDataParams,
+  mRegistrationInfos.EnumerateRead(UnregisterIfMatchesClearOriginParams,
                                    aParams);
 }
 
@@ -5011,15 +5004,12 @@ ServiceWorkerManager::Observe(nsISupports* aSubject,
     return NS_OK;
   }
 
-  if (strcmp(aTopic, WEBAPPS_CLEAR_DATA) == 0) {
+  if (strcmp(aTopic, CLEAR_ORIGIN_DATA) == 0) {
     MOZ_ASSERT(XRE_IsParentProcess());
-    nsCOMPtr<mozIApplicationClearPrivateDataParams> params =
-      do_QueryInterface(aSubject);
-    if (NS_WARN_IF(!params)) {
-      return NS_OK;
-    }
+    OriginAttributes attrs;
+    MOZ_ALWAYS_TRUE(attrs.Init(nsAutoString(aData)));
 
-    RemoveAllRegistrations(params);
+    RemoveAllRegistrations(&attrs);
     return NS_OK;
   }
 
@@ -5033,7 +5023,7 @@ ServiceWorkerManager::Observe(nsISupports* aSubject,
       if (XRE_IsParentProcess()) {
         obs->RemoveObserver(this, PURGE_SESSION_HISTORY);
         obs->RemoveObserver(this, PURGE_DOMAIN_DATA);
-        obs->RemoveObserver(this, WEBAPPS_CLEAR_DATA);
+        obs->RemoveObserver(this, CLEAR_ORIGIN_DATA);
       }
     }
 

@@ -287,31 +287,6 @@ intrinsic_DecompileArg(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-/*
- * NewDenseArray(length): Allocates and returns a new dense array with
- * the given length where all values are initialized to holes.
- */
-bool
-js::intrinsic_NewDenseArray(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    // Check that index is an int32
-    if (!args[0].isInt32()) {
-        JS_ReportError(cx, "Expected int32 as second argument");
-        return false;
-    }
-    uint32_t length = args[0].toInt32();
-
-    // Make a new buffer and initialize it up to length.
-    RootedObject buffer(cx, NewFullyAllocatedArrayForCallingAllocationSite(cx, length));
-    if (!buffer)
-        return false;
-
-    args.rval().setObject(*buffer);
-    return true;
-}
-
 bool
 js::intrinsic_DefineDataProperty(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1146,7 +1121,7 @@ js::intrinsic_SetOverlappingTypedElements(JSContext* cx, unsigned argc, Value* v
 }
 
 bool
-CallSelfHostedNonGenericMethod(JSContext* cx, CallArgs args)
+CallSelfHostedNonGenericMethod(JSContext* cx, const CallArgs& args)
 {
     // This function is called when a self-hosted method is invoked on a
     // wrapper object, like a CrossCompartmentWrapper. The last argument is
@@ -1270,6 +1245,7 @@ intrinsic_ConstructorForTypedArray(JSContext* cx, unsigned argc, Value* vp)
 // Additionally, a set of C++-implemented helper functions is defined on the
 // self-hosting global.
 static const JSFunctionSpec intrinsic_functions[] = {
+    JS_FN("std_Array",                           ArrayConstructor,             1,0),
     JS_FN("std_Array_join",                      array_join,                   1,0),
     JS_FN("std_Array_push",                      array_push,                   1,0),
     JS_FN("std_Array_pop",                       array_pop,                    0,0),
@@ -1416,8 +1392,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
           CallNonGenericSelfhostedMethod<Is<StarGeneratorObject>>, 2, 0),
 
     JS_FN("IsWeakSet",               intrinsic_IsWeakSet,               1,0),
-
-    JS_FN("NewDenseArray",           intrinsic_NewDenseArray,           1,0),
 
     // See builtin/TypedObject.h for descriptors of the typedobj functions.
     JS_FN("NewOpaqueTypedObject",           js::NewOpaqueTypedObject, 1, 0),
@@ -1749,13 +1723,13 @@ CloneString(JSContext* cx, JSFlatString* selfHostedString)
 static JSObject*
 CloneObject(JSContext* cx, HandleNativeObject selfHostedObject)
 {
+#ifdef DEBUG
     AutoCycleDetector detect(cx, selfHostedObject);
     if (!detect.init())
         return nullptr;
-    if (detect.foundCycle()) {
-        JS_ReportError(cx, "SelfHosted cloning cannot handle cyclic object graphs.");
-        return nullptr;
-    }
+    if (detect.foundCycle())
+        MOZ_CRASH("SelfHosted cloning cannot handle cyclic object graphs.");
+#endif
 
     RootedObject clone(cx);
     if (selfHostedObject->is<JSFunction>()) {

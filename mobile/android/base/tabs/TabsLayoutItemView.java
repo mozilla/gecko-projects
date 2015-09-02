@@ -24,7 +24,6 @@ import android.view.TouchDelegate;
 import android.view.View;
 import android.view.ViewTreeObserver;
 import android.widget.Checkable;
-import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -37,7 +36,7 @@ public class TabsLayoutItemView extends LinearLayout
 
     private int mTabId;
     private TextView mTitle;
-    private ImageView mThumbnail;
+    private TabsPanelThumbnailView mThumbnail;
     private ImageView mCloseButton;
     private ImageView mAudioPlayingButton;
     private TabThumbnailWrapper mThumbnailWrapper;
@@ -98,14 +97,12 @@ public class TabsLayoutItemView extends LinearLayout
     protected void onFinishInflate() {
         super.onFinishInflate();
         mTitle = (TextView) findViewById(R.id.title);
-        mThumbnail = (ImageView) findViewById(R.id.thumbnail);
+        mThumbnail = (TabsPanelThumbnailView) findViewById(R.id.thumbnail);
         mCloseButton = (ImageView) findViewById(R.id.close);
         mAudioPlayingButton = (ImageView) findViewById(R.id.audio_playing);
         mThumbnailWrapper = (TabThumbnailWrapper) findViewById(R.id.wrapper);
 
-        if (HardwareUtils.isTablet()) {
-            growCloseButtonHitArea();
-        }
+        growCloseButtonHitArea();
 
         mAudioPlayingButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -158,6 +155,8 @@ public class TabsLayoutItemView extends LinearLayout
 
         Drawable thumbnailImage = tab.getThumbnail();
         mThumbnail.setImageDrawable(thumbnailImage);
+
+        mThumbnail.setPrivateMode(tab.isPrivate());
 
         if (mThumbnailWrapper != null) {
             mThumbnailWrapper.setRecording(tab.isRecording());

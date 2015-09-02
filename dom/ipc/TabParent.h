@@ -179,7 +179,7 @@ public:
                                                bool* aConsumedByIME) override;
     virtual bool RecvNotifyIMEPositionChange(const ContentCache& aContentCache,
                                              const widget::IMENotification& aEventMessage) override;
-    virtual bool RecvOnEventNeedingAckHandled(const uint32_t& aMessage) override;
+    virtual bool RecvOnEventNeedingAckHandled(const EventMessage& aMessage) override;
     virtual bool RecvEndIMEComposition(const bool& aCancel,
                                        bool* aNoCompositionEvent,
                                        nsString* aComposition) override;
@@ -229,6 +229,8 @@ public:
     virtual bool RecvUpdateZoomConstraints(const uint32_t& aPresShellId,
                                            const ViewID& aViewId,
                                            const MaybeZoomConstraints& aConstraints) override;
+    virtual bool RecvRespondStartSwipeEvent(const uint64_t& aInputBlockId,
+                                            const bool& aStartSwipe) override;
     virtual bool RecvContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
                                                const uint64_t& aInputBlockId,
                                                const bool& aPreventDefault) override;
@@ -482,13 +484,14 @@ protected:
 
     nsIntRect mRect;
     ScreenIntSize mDimensions;
-    ScreenOrientation mOrientation;
+    ScreenOrientationInternal mOrientation;
     float mDPI;
     CSSToLayoutDeviceScale mDefaultScale;
     bool mUpdatedDimensions;
     LayoutDeviceIntPoint mChromeOffset;
 
 private:
+    void DestroyInternal();
     already_AddRefed<nsFrameLoader> GetFrameLoader(bool aUseCachedFrameLoaderAfterDestroy = false) const;
     nsRefPtr<nsIContentParent> mManager;
     void TryCacheDPIAndScale();
@@ -609,6 +612,8 @@ private:
     nsRefPtr<nsIPresShell> mPresShellWithRefreshListener;
 
     bool mHasContentOpener;
+
+    DebugOnly<int32_t> mActiveSupressDisplayportCount;
 private:
     // This is used when APZ needs to find the TabParent associated with a layer
     // to dispatch events.

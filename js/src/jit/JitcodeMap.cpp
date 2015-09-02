@@ -808,11 +808,14 @@ JitcodeGlobalTable::markIteratively(JSTracer* trc)
     // above is checked in JitcodeGlobalTable::lookupForSampler.
 
     MOZ_ASSERT(!trc->runtime()->isHeapMinorCollecting());
-    MOZ_ASSERT(trc->runtime()->spsProfiler.enabled());
 
     AutoSuppressProfilerSampling suppressSampling(trc->runtime());
     uint32_t gen = trc->runtime()->profilerSampleBufferGen();
     uint32_t lapCount = trc->runtime()->profilerSampleBufferLapCount();
+
+    // If the profiler is off, all entries are considered to be expired.
+    if (!trc->runtime()->spsProfiler.enabled())
+        gen = UINT32_MAX;
 
     bool markedAny = false;
     for (Range r(*this); !r.empty(); r.popFront()) {
@@ -855,7 +858,7 @@ JitcodeGlobalTable::sweep(JSRuntime* rt)
         if (entry->baseEntry().isJitcodeAboutToBeFinalized())
             e.removeFront();
         else
-            entry->sweep(rt);
+            entry->sweepChildren(rt);
     }
 }
 
@@ -895,7 +898,7 @@ JitcodeGlobalEntry::BaselineEntry::mark(JSTracer* trc)
 }
 
 void
-JitcodeGlobalEntry::BaselineEntry::sweep()
+JitcodeGlobalEntry::BaselineEntry::sweepChildren()
 {
     MOZ_ALWAYS_FALSE(IsAboutToBeFinalizedUnbarriered(&script_));
 }
@@ -946,7 +949,7 @@ JitcodeGlobalEntry::IonEntry::mark(JSTracer* trc)
 }
 
 void
-JitcodeGlobalEntry::IonEntry::sweep()
+JitcodeGlobalEntry::IonEntry::sweepChildren()
 {
     for (unsigned i = 0; i < numScripts(); i++)
         MOZ_ALWAYS_FALSE(IsAboutToBeFinalizedUnbarriered(&sizedScriptList()->pairs[i].script));
@@ -1004,11 +1007,11 @@ JitcodeGlobalEntry::IonCacheEntry::mark(JSTracer* trc)
 }
 
 void
-JitcodeGlobalEntry::IonCacheEntry::sweep(JSRuntime* rt)
+JitcodeGlobalEntry::IonCacheEntry::sweepChildren(JSRuntime* rt)
 {
     JitcodeGlobalEntry entry;
     RejoinEntry(rt, *this, nativeStartAddr(), &entry);
-    entry.sweep(rt);
+    entry.sweepChildren(rt);
 }
 
 bool

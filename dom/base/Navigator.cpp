@@ -185,6 +185,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGeolocation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNotification)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryPromise)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPowerManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCellBroadcast)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIccManager)
@@ -206,7 +207,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCameraManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaDevices)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMessagesManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDeviceStorageStores)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTimeManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mServiceWorkerContainer)
 
@@ -252,6 +252,8 @@ Navigator::Invalidate()
     mBatteryManager->Shutdown();
     mBatteryManager = nullptr;
   }
+
+  mBatteryPromise = nullptr;
 
 #ifdef MOZ_B2G_FM
   if (mFMRadio) {
@@ -328,7 +330,10 @@ Navigator::Invalidate()
 
   uint32_t len = mDeviceStorageStores.Length();
   for (uint32_t i = 0; i < len; ++i) {
-    mDeviceStorageStores[i]->Shutdown();
+    nsRefPtr<nsDOMDeviceStorage> ds = do_QueryReferent(mDeviceStorageStores[i]);
+    if (ds) {
+      ds->Shutdown();
+    }
   }
   mDeviceStorageStores.Clear();
 
@@ -961,7 +966,26 @@ Navigator::GetDeviceStorageAreaListener(ErrorResult& aRv)
   return mDeviceStorageAreaListener;
 }
 
-nsDOMDeviceStorage*
+already_AddRefed<nsDOMDeviceStorage>
+Navigator::FindDeviceStorage(const nsAString& aName, const nsAString& aType)
+{
+  auto i = mDeviceStorageStores.Length();
+  while (i > 0) {
+    --i;
+    nsRefPtr<nsDOMDeviceStorage> storage =
+      do_QueryReferent(mDeviceStorageStores[i]);
+    if (storage) {
+      if (storage->Equals(mWindow, aName, aType)) {
+        return storage.forget();
+      }
+    } else {
+      mDeviceStorageStores.RemoveElementAt(i);
+    }
+  }
+  return nullptr;
+}
+
+already_AddRefed<nsDOMDeviceStorage>
 Navigator::GetDeviceStorage(const nsAString& aType, ErrorResult& aRv)
 {
   if (!mWindow || !mWindow->GetOuterWindow() || !mWindow->GetDocShell()) {
@@ -969,7 +993,13 @@ Navigator::GetDeviceStorage(const nsAString& aType, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsRefPtr<nsDOMDeviceStorage> storage;
+  nsString name;
+  nsDOMDeviceStorage::GetDefaultStorageName(aType, name);
+  nsRefPtr<nsDOMDeviceStorage> storage = FindDeviceStorage(name, aType);
+  if (storage) {
+    return storage.forget();
+  }
+
   nsDOMDeviceStorage::CreateDeviceStorageFor(mWindow, aType,
                                              getter_AddRefs(storage));
 
@@ -977,8 +1007,9 @@ Navigator::GetDeviceStorage(const nsAString& aType, ErrorResult& aRv)
     return nullptr;
   }
 
-  mDeviceStorageStores.AppendElement(storage);
-  return storage;
+  mDeviceStorageStores.AppendElement(
+    do_GetWeakReference(static_cast<DOMEventTargetHelper*>(storage)));
+  return storage.forget();
 }
 
 void
@@ -991,12 +1022,31 @@ Navigator::GetDeviceStorages(const nsAString& aType,
     return;
   }
 
-  nsDOMDeviceStorage::CreateDeviceStoragesFor(mWindow, aType, aStores);
+  nsDOMDeviceStorage::VolumeNameArray volumes;
+  nsDOMDeviceStorage::GetOrderedVolumeNames(aType, volumes);
+  if (volumes.IsEmpty()) {
+    nsRefPtr<nsDOMDeviceStorage> storage = GetDeviceStorage(aType, aRv);
+    if (storage) {
+      aStores.AppendElement(storage.forget());
+    }
+  } else {
+    uint32_t len = volumes.Length();
+    aStores.SetCapacity(len);
+    for (uint32_t i = 0; i < len; ++i) {
+      nsRefPtr<nsDOMDeviceStorage> storage =
+        GetDeviceStorageByNameAndType(volumes[i], aType, aRv);
+      if (aRv.Failed()) {
+        break;
+      }
 
-  mDeviceStorageStores.AppendElements(aStores);
+      if (storage) {
+        aStores.AppendElement(storage.forget());
+      }
+    }
+  }
 }
 
-nsDOMDeviceStorage*
+already_AddRefed<nsDOMDeviceStorage>
 Navigator::GetDeviceStorageByNameAndType(const nsAString& aName,
                                          const nsAString& aType,
                                          ErrorResult& aRv)
@@ -1006,7 +1056,10 @@ Navigator::GetDeviceStorageByNameAndType(const nsAString& aName,
     return nullptr;
   }
 
-  nsRefPtr<nsDOMDeviceStorage> storage;
+  nsRefPtr<nsDOMDeviceStorage> storage = FindDeviceStorage(aName, aType);
+  if (storage) {
+    return storage.forget();
+  }
   nsDOMDeviceStorage::CreateDeviceStorageByNameAndType(mWindow, aName, aType,
                                                        getter_AddRefs(storage));
 
@@ -1014,8 +1067,9 @@ Navigator::GetDeviceStorageByNameAndType(const nsAString& aName,
     return nullptr;
   }
 
-  mDeviceStorageStores.AppendElement(storage);
-  return storage;
+  mDeviceStorageStores.AppendElement(
+    do_GetWeakReference(static_cast<DOMEventTargetHelper*>(storage)));
+  return storage.forget();
 }
 
 Geolocation*
@@ -1404,8 +1458,37 @@ Navigator::GetMozFMRadio(ErrorResult& aRv)
 //    Navigator::nsINavigatorBattery
 //*****************************************************************************
 
-battery::BatteryManager*
+Promise*
 Navigator::GetBattery(ErrorResult& aRv)
+{
+  if (mBatteryPromise) {
+    return mBatteryPromise;
+  }
+
+  if (!mWindow || !mWindow->GetDocShell()) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIGlobalObject> go = do_QueryInterface(mWindow);
+  nsRefPtr<Promise> batteryPromise = Promise::Create(go, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return nullptr;
+  }
+  mBatteryPromise = batteryPromise;
+
+  if (!mBatteryManager) {
+    mBatteryManager = new battery::BatteryManager(mWindow);
+    mBatteryManager->Init();
+  }
+
+  mBatteryPromise->MaybeResolve(mBatteryManager);
+
+  return mBatteryPromise;
+}
+
+battery::BatteryManager*
+Navigator::GetDeprecatedBattery(ErrorResult& aRv)
 {
   if (!mBatteryManager) {
     if (!mWindow) {
@@ -2384,24 +2467,6 @@ Navigator::HasUserMediaSupport(JSContext* /* unused */,
          Preferences::GetBool("media.peerconnection.enabled", false);
 }
 #endif // MOZ_MEDIA_NAVIGATOR
-
-/* static */
-bool
-Navigator::HasInputMethodSupport(JSContext* /* unused */,
-                                 JSObject* aGlobal)
-{
-  nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
-  if (!win || !Preferences::GetBool("dom.mozInputMethod.enabled", false)) {
-    return false;
-  }
-
-  if (Preferences::GetBool("dom.mozInputMethod.testing", false)) {
-    return true;
-  }
-
-  return CheckPermission(win, "input") ||
-         CheckPermission(win, "input-manage");
-}
 
 /* static */
 bool

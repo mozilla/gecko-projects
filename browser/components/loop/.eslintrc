@@ -15,11 +15,9 @@
   "extends": "eslint:recommended",
   "globals": {
     "_": false,
-    "$": false,
     "Backbone": false,
     "chai": false,
     "console": false,
-    "jQuery": false,
     "loop": true,
     "MozActivity": false,
     "mozRTCSessionDescription": false,
@@ -36,6 +34,7 @@
     // problems they find, one at a time.
 
     // Eslint built-in rules are documented at <http://eslint.org/docs/rules/>
+    "block-spacing": [2, "always"],
     "callback-return": 0,         // TBD
     "camelcase": 0,               // TODO: set to 2
     "comma-spacing": 2,

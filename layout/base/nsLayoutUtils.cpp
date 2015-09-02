@@ -9,6 +9,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/FloatingPoint.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Maybe.h"
@@ -61,6 +62,7 @@
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/KeyframeEffect.h"
+#include "mozilla/layers/APZCCallbackHelper.h"
 #include "imgIRequest.h"
 #include "nsIImageLoadingContent.h"
 #include "nsCOMPtr.h"
@@ -453,6 +455,15 @@ GetSuitableScale(float aMaxScale, float aMinScale,
   // transform animation, unless that would make us rasterize something
   // larger than the screen.  But we never want to go smaller than the
   // minimum scale over the animation.
+  if (FuzzyEqualsMultiplicative(displayVisibleRatio, aMaxScale, .01f)) {
+    // Using aMaxScale may make us rasterize something a fraction larger than
+    // the screen. However, if aMaxScale happens to be the final scale of a
+    // transform animation it is better to use aMaxScale so that for the
+    // fraction of a second before we delayerize the composited texture it has
+    // a better chance of being pixel aligned and composited without resampling
+    // (avoiding visually clunky delayerization).
+    return aMaxScale;
+  }
   return std::max(std::min(aMaxScale, displayVisibleRatio), aMinScale);
 }
 
@@ -909,6 +920,12 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
   ScreenRect screenRect = LayoutDeviceRect::FromAppUnits(base, auPerDevPixel)
                         * parentRes;
 
+  nsRect expandedScrollableRect =
+    nsLayoutUtils::CalculateExpandedScrollableRect(frame);
+  ScreenRect screenExpScrollableRect =
+    LayoutDeviceRect::FromAppUnits(expandedScrollableRect - scrollPos,
+                                   auPerDevPixel) * parentRes;
+
   if (gfxPrefs::LayersTilesEnabled()) {
     // Note on the correctness of applying the alignment in Screen space:
     //   The correct space to apply the alignment in would be Layer space, but
@@ -931,6 +948,9 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
     // moving origin occasionally being smaller when it coincidentally lines
     // up to tile boundaries.
     screenRect.Inflate(1);
+
+    // Make sure the displayport remains within the scrollable rect.
+    screenRect = screenRect.ForceInside(screenExpScrollableRect);
 
     // Avoid division by zero.
     if (alignmentX == 0) {
@@ -981,6 +1001,9 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
       screenRect.x -= left;
       screenRect.width += left + right;
     }
+
+    // Make sure the displayport remains within the scrollable rect.
+    screenRect = screenRect.ForceInside(screenExpScrollableRect);
   }
 
   // Convert the aligned rect back into app units.
@@ -990,7 +1013,6 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
   result = ApplyRectMultiplier(result, aMultiplier);
 
   // Finally, clamp it to the expanded scrollable rect.
-  nsRect expandedScrollableRect = nsLayoutUtils::CalculateExpandedScrollableRect(frame);
   result = expandedScrollableRect.Intersect(result + scrollPos) - scrollPos;
 
   return result;
@@ -1028,7 +1050,10 @@ GetDisplayPortImpl(nsIContent* aContent, nsRect *aResult, float aMultiplier)
                "Only one of rectData or marginsData should be set!");
 
   nsRect result;
-  if (rectData) {
+  if (APZCCallbackHelper::IsDisplayportSuppressed()) {
+    DisplayPortMarginsPropertyData noMargins(ScreenMargin(), 1);
+    result = GetDisplayPortFromMarginsData(aContent, &noMargins, aMultiplier);
+  } else if (rectData) {
     result = GetDisplayPortFromRectData(aContent, rectData, aMultiplier);
   } else {
     result = GetDisplayPortFromMarginsData(aContent, marginsData, aMultiplier);
@@ -1742,17 +1767,6 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
   // corresponding side of its container should be the anchor point,
   // defaulting to top-left.
   LayerPoint anchor(anchorRect.x, anchorRect.y);
-  // Make sure the layer is aware of any fixed position margins that have
-  // been set.
-  nsMargin fixedMargins = aPresContext->PresShell()->GetContentDocumentFixedPositionMargins();
-  LayerMargin fixedLayerMargins(NSAppUnitsToFloatPixels(fixedMargins.top, factor) *
-                                  aContainerParameters.mYScale,
-                                NSAppUnitsToFloatPixels(fixedMargins.right, factor) *
-                                  aContainerParameters.mXScale,
-                                NSAppUnitsToFloatPixels(fixedMargins.bottom, factor) *
-                                  aContainerParameters.mYScale,
-                                NSAppUnitsToFloatPixels(fixedMargins.left, factor) *
-                                  aContainerParameters.mXScale);
 
   if (aFixedPosFrame != aViewportFrame) {
     const nsStylePosition* position = aFixedPosFrame->StylePosition();
@@ -1770,22 +1784,15 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
         anchor.y = anchorRect.YMost();
       }
     }
-
-    // If the frame is auto-positioned on either axis, set the top/left layer
-    // margins to -1, to indicate to the compositor that this layer is
-    // unaffected by fixed margins.
-    if (position->mOffset.GetLeftUnit() == eStyleUnit_Auto &&
-        position->mOffset.GetRightUnit() == eStyleUnit_Auto) {
-      fixedLayerMargins.left = -1;
-    }
-    if (position->mOffset.GetTopUnit() == eStyleUnit_Auto &&
-        position->mOffset.GetBottomUnit() == eStyleUnit_Auto) {
-      fixedLayerMargins.top = -1;
-    }
   }
 
-  aLayer->SetFixedPositionAnchor(anchor);
-  aLayer->SetFixedPositionMargins(fixedLayerMargins);
+  ViewID id = FrameMetrics::NULL_SCROLL_ID;
+  if (nsIFrame* rootScrollFrame = aPresContext->PresShell()->GetRootScrollFrame()) {
+    if (nsIContent* content = rootScrollFrame->GetContent()) {
+      id = FindOrCreateIDFor(content);
+    }
+  }
+  aLayer->SetFixedPositionData(id, anchor);
 }
 
 bool
@@ -2321,22 +2328,34 @@ nsLayoutUtils::MatrixTransformRectOut(const nsRect &aBounds,
 {
   nsRect outside = aBounds;
   outside.ScaleRoundOut(1/aFactor);
-  gfxRect image = gfxRect(outside.x, outside.y, outside.width, outside.height);
-  image.TransformBounds(aMatrix);
-  return RoundGfxRectToAppRect(image, aFactor);
+  RectDouble image = RectDouble(outside.x, outside.y,
+                                outside.width, outside.height);
+
+  RectDouble maxBounds = RectDouble(double(nscoord_MIN) / aFactor * 0.5,
+                                    double(nscoord_MIN) / aFactor * 0.5,
+                                    double(nscoord_MAX) / aFactor,
+                                    double(nscoord_MAX) / aFactor);
+  image = aMatrix.TransformAndClipBounds(image, maxBounds);
+  return RoundGfxRectToAppRect(ThebesRect(image), aFactor);
 }
 
 nsRect
 nsLayoutUtils::MatrixTransformRect(const nsRect &aBounds,
                                    const Matrix4x4 &aMatrix, float aFactor)
 {
-  gfxRect image = gfxRect(NSAppUnitsToDoublePixels(aBounds.x, aFactor),
-                          NSAppUnitsToDoublePixels(aBounds.y, aFactor),
-                          NSAppUnitsToDoublePixels(aBounds.width, aFactor),
-                          NSAppUnitsToDoublePixels(aBounds.height, aFactor));
-  image.TransformBounds(aMatrix);
+  RectDouble image = RectDouble(NSAppUnitsToDoublePixels(aBounds.x, aFactor),
+                                NSAppUnitsToDoublePixels(aBounds.y, aFactor),
+                                NSAppUnitsToDoublePixels(aBounds.width, aFactor),
+                                NSAppUnitsToDoublePixels(aBounds.height, aFactor));
 
-  return RoundGfxRectToAppRect(image, aFactor);
+  RectDouble maxBounds = RectDouble(double(nscoord_MIN) / aFactor * 0.5,
+                                    double(nscoord_MIN) / aFactor * 0.5,
+                                    double(nscoord_MAX) / aFactor,
+                                    double(nscoord_MAX) / aFactor);
+
+  image = aMatrix.TransformAndClipBounds(image, maxBounds);
+
+  return RoundGfxRectToAppRect(ThebesRect(image), aFactor);
 }
 
 nsPoint
@@ -2680,7 +2699,11 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
     *aPreservesAxisAlignedRectangles =
       ctm.Is2D(&matrix2d) && matrix2d.PreservesAxisAlignedRectangles();
   }
-  return ctm.TransformBounds(aRect);
+  Rect maxBounds = Rect(-std::numeric_limits<float>::max() * 0.5,
+                        -std::numeric_limits<float>::max() * 0.5,
+                        std::numeric_limits<float>::max(),
+                        std::numeric_limits<float>::max());
+  return ctm.TransformAndClipBounds(aRect, maxBounds);
 }
 
 static SVGTextFrame*
@@ -8166,7 +8189,7 @@ nsLayoutUtils::HasApzAwareListeners(EventListenerManager* aElm)
 nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell)
 {
   if (nsIDocument* doc = aShell->GetDocument()) {
-    WidgetEvent event(true, NS_EVENT_NULL);
+    WidgetEvent event(true, eVoidEvent);
     nsTArray<EventTarget*> targets;
     nsresult rv = EventDispatcher::Dispatch(doc, nullptr, &event, nullptr,
         nullptr, nullptr, &targets);
@@ -8258,17 +8281,6 @@ nsLayoutUtils::SetScrollPositionClampingScrollPortSize(nsIPresShell* aPresShell,
   // than adding a separate notification just for this change.
   nsPresContext* presContext = aPresShell->GetPresContext();
   MaybeReflowForInflationScreenSizeChange(presContext);
-}
-
-/* static */ void
-nsLayoutUtils::SetCSSViewport(nsIPresShell* aPresShell, CSSSize aSize)
-{
-  MOZ_ASSERT(aSize.width >= 0.0 && aSize.height >= 0.0);
-
-  nscoord width = nsPresContext::CSSPixelsToAppUnits(aSize.width);
-  nscoord height = nsPresContext::CSSPixelsToAppUnits(aSize.height);
-
-  aPresShell->ResizeReflowOverride(width, height);
 }
 
 /* static */ FrameMetrics
@@ -8569,4 +8581,27 @@ nsLayoutUtils::ShouldUseNoFramesSheet(nsIDocument* aDocument)
     docShell->GetAllowSubframes(&allowSubframes);
   }
   return !allowSubframes;
+}
+
+/* static */ void
+nsLayoutUtils::GetFrameTextContent(nsIFrame* aFrame, nsAString& aResult)
+{
+  aResult.Truncate();
+  AppendFrameTextContent(aFrame, aResult);
+}
+
+/* static */ void
+nsLayoutUtils::AppendFrameTextContent(nsIFrame* aFrame, nsAString& aResult)
+{
+  if (aFrame->GetType() == nsGkAtoms::textFrame) {
+    auto textFrame = static_cast<nsTextFrame*>(aFrame);
+    auto offset = textFrame->GetContentOffset();
+    auto length = textFrame->GetContentLength();
+    textFrame->GetContent()->
+      GetText()->AppendTo(aResult, offset, length);
+  } else {
+    for (nsIFrame* child : aFrame->PrincipalChildList()) {
+      AppendFrameTextContent(child, aResult);
+    }
+  }
 }

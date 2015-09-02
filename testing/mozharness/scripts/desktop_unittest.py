@@ -246,7 +246,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
 
         abs_app_dir = self.query_abs_app_dir()
         if self._is_darwin():
-            res_subdir = self.tree_config.get("mac_res_subdir", "Resources")
+            res_subdir = self.config.get("mac_res_subdir", "Resources")
             self.abs_res_dir = os.path.join(os.path.dirname(abs_app_dir), res_subdir)
         else:
             self.abs_res_dir = abs_app_dir
@@ -255,6 +255,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
     @PreScriptAction('create-virtualenv')
     def _pre_create_virtualenv(self, action):
         dirs = self.query_abs_dirs()
+
+        self.register_virtualenv_module(name='pip>=1.5')
+        self.register_virtualenv_module('psutil==3.1.1', method='pip')
         self.register_virtualenv_module(name='mock')
         self.register_virtualenv_module(name='simplejson')
 
@@ -368,23 +371,10 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             abs_res_plugins_dir = os.path.join(abs_res_dir, 'plugins')
             str_format_values['test_plugin_path'] = abs_res_plugins_dir
 
-            missing_key = True
-            if "suite_definitions" in self.tree_config: # new structure
-                if suite_category in self.tree_config["suite_definitions"]:
-                    missing_key = False
-                options = self.tree_config["suite_definitions"][suite_category]["options"]
-            else:
-                suite_options = '%s_options' % suite_category
-                if suite_options in self.tree_config:
-                    missing_key = False
-                options = self.tree_config[suite_options]
+            if suite_category not in c["suite_definitions"]:
+                self.fatal("'%s' not defined in the config!")
 
-            if missing_key:
-                self.fatal("'%s' not defined in the in-tree config! Please add it to '%s'. "
-                           "See bug 981030 for more details." %
-                           (suite_category,
-                            os.path.join('gecko', 'testing', self.config['in_tree_config'])))
-
+            options = c["suite_definitions"][suite_category]["options"]
             if options:
                 for option in options:
                     option = option % str_format_values
@@ -599,8 +589,9 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                 if not os.path.isdir(env['MOZ_UPLOAD_DIR']):
                     self.mkdir_p(env['MOZ_UPLOAD_DIR'])
                 env = self.query_env(partial_env=env, log_level=INFO)
+                cmd_timeout = 2500 if suite_category == 'cppunittest' else 1000
                 return_code = self.run_command(cmd, cwd=dirs['abs_work_dir'],
-                                               output_timeout=1000,
+                                               output_timeout=cmd_timeout,
                                                output_parser=parser,
                                                env=env)
 

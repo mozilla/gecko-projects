@@ -118,15 +118,15 @@ p {
 .btn-accept,
 .btn-success,
 .btn-accept + .btn-chevron {
-  background-color: #5bc0a4;
-  border: 1px solid #5bc0a4;
+  background-color: #56b397;
+  border: 1px solid #56b397;
 }
 
   .btn-accept:hover,
   .btn-success:hover,
   .btn-accept + .btn-chevron:hover {
-    background-color: #47b396;
-    border: 1px solid #47b396;
+    background-color: #50e3c2;
+    border: 1px solid #50e3c2;
   }
 
   .btn-accept:active,
@@ -453,11 +453,11 @@ html[dir="rtl"] .dropdown-menu {
 }
 
 .dropdown-menu-item:first-child {
-  padding-top: .8rem;
+  padding-top: .5rem;
 }
 
 .dropdown-menu-item:last-child {
-  padding-bottom: .8rem;
+  padding-bottom: .5rem;
 }
 
 .dropdown-menu-item:first-child:hover {
@@ -524,6 +524,17 @@ html[dir="rtl"] .checkbox {
   background-image: url("../img/check.svg#check-disabled");
 }
 
+.checkbox-label.ellipsis {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  text-align: left;
+}
+
+html[dir="rtl"] .checkbox-label.ellipsis {
+  text-align: right;
+}
+
 /* ContextUrlView classes */
 
 .context-content {
@@ -586,7 +597,10 @@ html[dir="rtl"] .context-wrapper > .context-preview {
 }
 
 .clicks-allowed.context-wrapper:hover {
-  background-color: #dbf7ff;
+  border: 2px solid #5cccee;
+  /* Due to the increased border width, reduce the padding accordingly so that
+     the text doesn't move. */
+  padding: calc(.8em - 1px);
 }
 
 /* Only underline the url, not the associated text */

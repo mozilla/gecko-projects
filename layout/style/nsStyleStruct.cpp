@@ -152,7 +152,7 @@ nsStyleFont::Init(nsPresContext* aPresContext)
   // Content-Language may be a comma-separated list of language codes,
   // in which case the HTML5 spec says to treat it as unknown
   if (!language.IsEmpty() &&
-      language.FindChar(char16_t(',')) == kNotFound) {
+      !language.Contains(char16_t(','))) {
     mLanguage = do_GetAtom(language);
     // NOTE:  This does *not* count as an explicit language; in other
     // words, it doesn't trigger language-specific hyphenation.
@@ -1120,6 +1120,8 @@ nsStyleClipPath::ReleaseRef()
     NS_ASSERTION(mURL, "expected pointer");
     mURL->Release();
   }
+  // mBasicShap, mURL, etc. are all pointers in a union of pointers. Nulling
+  // one of them nulls all of them:
   mURL = nullptr;
 }
 

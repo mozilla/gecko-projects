@@ -13,7 +13,7 @@ Cu.import("resource:///modules/devtools/ViewHelpers.jsm");
 Cu.import("resource://gre/modules/devtools/Console.jsm");
 
 const {require} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
-const promise = Cu.import("resource://gre/modules/Promise.jsm", {}).Promise;
+const promise = require("promise");
 const EventEmitter = require("devtools/toolkit/event-emitter");
 const {Tooltip} = require("devtools/shared/widgets/Tooltip");
 const Editor = require("devtools/sourceeditor/editor");
@@ -95,7 +95,8 @@ let EventsHandler = {
     gTarget.on("will-navigate", this._onTabNavigated);
     gTarget.on("navigate", this._onTabNavigated);
     gFront.on("program-linked", this._onProgramLinked);
-
+    this.reloadButton = $("#requests-menu-reload-notice-button");
+    this.reloadButton.addEventListener("command", this._onReloadCommand);
   },
 
   /**
@@ -107,6 +108,14 @@ let EventsHandler = {
     gTarget.off("will-navigate", this._onTabNavigated);
     gTarget.off("navigate", this._onTabNavigated);
     gFront.off("program-linked", this._onProgramLinked);
+    this.reloadButton.removeEventListener("command", this._onReloadCommand);
+  },
+
+  /**
+   * Handles a command event on reload button
+   */
+  _onReloadCommand() {
+    gFront.setup({ reload: true });
   },
 
   /**

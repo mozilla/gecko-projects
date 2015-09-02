@@ -945,10 +945,10 @@ EmitGetterCall(JSContext* cx, MacroAssembler& masm,
 
         if (!masm.icBuildOOLFakeExitFrame(returnAddr, aic))
             return false;
-        masm.enterFakeExitFrame(IonOOLNativeExitFrameLayout::Token());
+        masm.enterFakeExitFrame(IonOOLNativeExitFrameLayoutToken);
 
         // Construct and execute call.
-        masm.setupUnalignedABICall(3, scratchReg);
+        masm.setupUnalignedABICall(scratchReg);
         masm.passABIArg(argJSContextReg);
         masm.passABIArg(argUintNReg);
         masm.passABIArg(argVpReg);
@@ -1003,10 +1003,10 @@ EmitGetterCall(JSContext* cx, MacroAssembler& masm,
 
         if (!masm.icBuildOOLFakeExitFrame(returnAddr, aic))
             return false;
-        masm.enterFakeExitFrame(IonOOLPropertyOpExitFrameLayout::Token());
+        masm.enterFakeExitFrame(IonOOLPropertyOpExitFrameLayoutToken);
 
         // Make the call.
-        masm.setupUnalignedABICall(4, scratchReg);
+        masm.setupUnalignedABICall(scratchReg);
         masm.passABIArg(argJSContextReg);
         masm.passABIArg(argObjReg);
         masm.passABIArg(argIdReg);
@@ -1482,6 +1482,9 @@ GetPropertyIC::tryAttachUnboxedArrayLength(JSContext* cx, HandleScript outerScri
     if (obj->as<UnboxedArrayObject>().length() > INT32_MAX)
         return true;
 
+    if (!allowArrayLength(cx))
+        return true;
+
     *emitted = true;
 
     MacroAssembler masm(cx, ion, outerScript, profilerLeavePc_);
@@ -1583,10 +1586,10 @@ EmitCallProxyGet(JSContext* cx, MacroAssembler& masm, IonCache::StubAttacher& at
 
     if (!masm.icBuildOOLFakeExitFrame(returnAddr, aic))
         return false;
-    masm.enterFakeExitFrame(IonOOLProxyExitFrameLayout::Token());
+    masm.enterFakeExitFrame(IonOOLProxyExitFrameLayoutToken);
 
     // Make the call.
-    masm.setupUnalignedABICall(5, scratch);
+    masm.setupUnalignedABICall(scratch);
     masm.passABIArg(argJSContextReg);
     masm.passABIArg(argProxyReg);
     masm.passABIArg(argProxyReg);
@@ -2222,7 +2225,7 @@ EmitObjectOpResultCheck(MacroAssembler& masm, Label* failure, bool strict,
     masm.computeEffectiveAddress(
         Address(masm.getStackPointer(), FrameLayout::offsetOfObjectOpResult()),
         argResultReg);
-    masm.setupUnalignedABICall(5, scratchReg);
+    masm.setupUnalignedABICall(scratchReg);
     masm.passABIArg(argJSContextReg);
     masm.passABIArg(argObjReg);
     masm.passABIArg(argIdReg);
@@ -2294,10 +2297,10 @@ EmitCallProxySet(JSContext* cx, MacroAssembler& masm, IonCache::StubAttacher& at
 
     if (!masm.icBuildOOLFakeExitFrame(returnAddr, aic))
         return false;
-    masm.enterFakeExitFrame(IonOOLProxyExitFrameLayout::Token());
+    masm.enterFakeExitFrame(IonOOLProxyExitFrameLayoutToken);
 
     // Make the call.
-    masm.setupUnalignedABICall(5, scratch);
+    masm.setupUnalignedABICall(scratch);
     masm.passABIArg(argJSContextReg);
     masm.passABIArg(argProxyReg);
     masm.passABIArg(argIdReg);
@@ -2503,10 +2506,10 @@ GenerateCallSetter(JSContext* cx, IonScript* ion, MacroAssembler& masm,
 
         if (!masm.icBuildOOLFakeExitFrame(returnAddr, aic))
             return false;
-        masm.enterFakeExitFrame(IonOOLNativeExitFrameLayout::Token());
+        masm.enterFakeExitFrame(IonOOLNativeExitFrameLayoutToken);
 
         // Make the call
-        masm.setupUnalignedABICall(3, scratchReg);
+        masm.setupUnalignedABICall(scratchReg);
         masm.passABIArg(argJSContextReg);
         masm.passABIArg(argUintNReg);
         masm.passABIArg(argVpReg);
@@ -2567,10 +2570,10 @@ GenerateCallSetter(JSContext* cx, IonScript* ion, MacroAssembler& masm,
 
         if (!masm.icBuildOOLFakeExitFrame(returnAddr, aic))
             return false;
-        masm.enterFakeExitFrame(IonOOLSetterOpExitFrameLayout::Token());
+        masm.enterFakeExitFrame(IonOOLSetterOpExitFrameLayoutToken);
 
         // Make the call.
-        masm.setupUnalignedABICall(5, scratchReg);
+        masm.setupUnalignedABICall(scratchReg);
         masm.passABIArg(argJSContextReg);
         masm.passABIArg(argObjReg);
         masm.passABIArg(argIdReg);
@@ -2815,7 +2818,7 @@ GenerateAddSlot(JSContext* cx, MacroAssembler& masm, IonCache::StubAttacher& att
             masm.loadPtr(Address(object, UnboxedPlainObject::offsetOfExpando()), object);
         }
 
-        masm.setupUnalignedABICall(3, temp1);
+        masm.setupUnalignedABICall(temp1);
         masm.loadJSContext(temp1);
         masm.passABIArg(temp1);
         masm.passABIArg(object);
@@ -3309,7 +3312,8 @@ SetPropertyIC::update(JSContext* cx, HandleScript outerScript, size_t cacheIndex
     }
 
     RootedShape oldShape(cx, obj->maybeShape());
-    if (!oldShape) {
+    if (obj->is<UnboxedPlainObject>()) {
+        MOZ_ASSERT(!oldShape);
         if (UnboxedExpandoObject* expando = obj->as<UnboxedPlainObject>().maybeExpando())
             oldShape = expando->lastProperty();
     }
@@ -3463,7 +3467,7 @@ GetElementIC::attachGetProp(JSContext* cx, HandleScript outerScript, IonScript* 
     if (!volatileRegs.has(objReg))
         masm.push(objReg);
 
-    masm.setupUnalignedABICall(2, scratch);
+    masm.setupUnalignedABICall(scratch);
     masm.movePtr(ImmGCPtr(name), objReg);
     masm.passABIArg(objReg);
     masm.unboxString(val, scratch);
@@ -3820,7 +3824,7 @@ GenerateGetTypedOrUnboxedArrayElement(JSContext* cx, MacroAssembler& masm,
 
         Register temp = regs.takeAnyGeneral();
 
-        masm.setupUnalignedABICall(1, temp);
+        masm.setupUnalignedABICall(temp);
         masm.passABIArg(str);
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, GetIndexFromString));
         masm.mov(ReturnReg, indexReg);

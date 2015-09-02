@@ -39,13 +39,10 @@ EXPORTS.mozilla.dom += [
     'UnionMember.h',
 ]
 
-FAIL_ON_WARNINGS = True
-
 LOCAL_INCLUDES += [
     '/dom/base',
     '/dom/battery',
-    '/dom/bluetooth',
-    '/dom/bluetooth/bluetooth2',
+    '/dom/bluetooth/common/webapi',
     '/dom/camera',
     '/dom/canvas',
     '/dom/geolocation',

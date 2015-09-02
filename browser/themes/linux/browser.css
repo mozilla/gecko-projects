@@ -31,9 +31,6 @@
 
   --toolbarbutton-checkedhover-backgroundcolor: rgba(90%,90%,90%,.4);
 
-  --toolbarbutton-combined-boxshadow: 0 0 0 1px hsla(0,0%,100%,.2);
-  --toolbarbutton-combined-backgroundimage: linear-gradient(hsla(210,54%,20%,.2) 0, hsla(210,54%,20%,.2) 18px);
-
   --identity-box-verified-background-color: #fff;
 
   --panel-separator-color: ThreeDShadow;
@@ -59,6 +56,10 @@
   -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
   height: 1px;
   background-color: ThreeDShadow;
+}
+
+#navigator-toolbox:-moz-lwtheme::after {
+  background-color: rgba(0,0,0,.3);
 }
 
 #navigator-toolbox > toolbar:not(:-moz-lwtheme):not(#toolbar-menubar):not(#TabsToolbar) {
@@ -142,7 +143,7 @@ toolbarbutton.bookmark-item[open="true"] {
   -moz-padding-end: 2px;
 }
 
-.bookmark-item:not(#home-button) > .toolbarbutton-icon,
+.bookmark-item > .toolbarbutton-icon,
 #personal-bookmarks[cui-areatype="toolbar"] > #bookmarks-toolbar-placeholder > .toolbarbutton-icon {
   width: 16px;
   height: 16px;
@@ -659,18 +660,33 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
   padding: 3px;
 }
 
+:-moz-any(#TabsToolbar, #nav-bar) .toolbaritem-combined-buttons {
+  margin-left: 2px;
+  margin-right: 2px;
+}
+
+:-moz-any(#TabsToolbar, #nav-bar) .toolbaritem-combined-buttons > .toolbarbutton-1 {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+:-moz-any(#TabsToolbar, #nav-bar) .toolbaritem-combined-buttons:not(:hover) > separator,
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1:not(:hover):not(:active):not([open]) > .toolbarbutton-menubutton-dropmarker::before {
   content: "";
   display: -moz-box;
   width: 1px;
   height: 18px;
   -moz-margin-end: -1px;
-  background-image: var(--toolbarbutton-combined-backgroundimage);
-  background-clip: padding-box;
+  background-image: linear-gradient(currentColor 0, currentColor 100%);
   background-position: center;
   background-repeat: no-repeat;
   background-size: 1px 18px;
-  box-shadow: var(--toolbarbutton-combined-boxshadow);
+  opacity: .2;
+}
+
+:-moz-any(#TabsToolbar, #nav-bar)[brighttext] .toolbaritem-combined-buttons > separator,
+:-moz-any(#TabsToolbar, #nav-bar)[brighttext] .toolbarbutton-1:not(:hover):not(:active):not([open]) > .toolbarbutton-menubutton-dropmarker::before {
+  opacity: .3;
 }
 
 :-moz-any(#TabsToolbar, #nav-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
@@ -1108,8 +1124,7 @@ notification[value="loop-sharing-notification"] .messageImage {
 
 .ac-result-type-bookmark,
 .autocomplete-treebody::-moz-tree-image(bookmark, treecolAutoCompleteImage) {
-  list-style-image: url("chrome://browser/skin/places/star-icons.png");
-  -moz-image-region: rect(0px 32px 16px 16px);
+  list-style-image: url("chrome://browser/skin/places/autocomplete-star.png");
   width: 16px;
   height: 16px;
 }

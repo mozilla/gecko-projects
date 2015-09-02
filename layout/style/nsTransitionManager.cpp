@@ -141,6 +141,17 @@ CSSTransition::QueueEvents()
                         owningPseudoType));
 }
 
+bool
+CSSTransition::HasEndEventToQueue() const
+{
+  if (!mEffect) {
+    return false;
+  }
+
+  return !mWasFinishedOnLastTick &&
+         PlayState() == AnimationPlayState::Finished;
+}
+
 void
 CSSTransition::Tick()
 {
@@ -329,7 +340,7 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
     afterChangeStyle = newStyleContext;
   }
 
-  nsAutoAnimationMutationBatch mb(aElement);
+  nsAutoAnimationMutationBatch mb(aElement->OwnerDoc());
 
   // Per http://lists.w3.org/Archives/Public/www-style/2009Aug/0109.html
   // I'll consider only the transitions from the number of items in
@@ -467,7 +478,7 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
     collection->UpdateCheckGeneration(mPresContext);
     collection->mNeedsRefreshes = true;
     TimeStamp now = mPresContext->RefreshDriver()->MostRecentRefresh();
-    collection->EnsureStyleRuleFor(now, EnsureStyleRule_IsNotThrottled);
+    collection->EnsureStyleRuleFor(now);
   }
 
   // We want to replace the new style context with the after-change style.
@@ -824,9 +835,7 @@ nsTransitionManager::UpdateCascadeResults(AnimationCollection* aTransitions,
   // on that element (even though animations are lower in the cascade).
   if (aAnimations) {
     TimeStamp now = mPresContext->RefreshDriver()->MostRecentRefresh();
-    // Passing EnsureStyleRule_IsThrottled is OK since we will
-    // unthrottle when animations are finishing.
-    aAnimations->EnsureStyleRuleFor(now, EnsureStyleRule_IsThrottled);
+    aAnimations->EnsureStyleRuleFor(now);
 
     if (aAnimations->mStyleRule) {
       aAnimations->mStyleRule->AddPropertiesToSet(propertiesUsed);
@@ -857,14 +866,10 @@ nsTransitionManager::UpdateCascadeResults(AnimationCollection* aTransitions,
 #endif
   }
 
+  // If there is any change in the cascade result, update animations on layers
+  // with the winning animations.
   if (changed) {
-    mPresContext->RestyleManager()->IncrementAnimationGeneration();
-    aTransitions->UpdateAnimationGeneration(mPresContext);
-    aTransitions->PostUpdateLayerAnimations();
-
-    // Invalidate our style rule.
-    aTransitions->mStyleRuleRefreshTime = TimeStamp();
-    aTransitions->mNeedsRefreshes = true;
+    aTransitions->RequestRestyle(AnimationCollection::RestyleType::Layer);
   }
 }
 

@@ -49,18 +49,6 @@ namespace jit {
                                                  \
     _(ToNumber_Fallback)                         \
                                                  \
-    _(BinaryArith_Fallback)                      \
-    _(BinaryArith_Int32)                         \
-    _(BinaryArith_Double)                        \
-    _(BinaryArith_StringConcat)                  \
-    _(BinaryArith_StringObjectConcat)            \
-    _(BinaryArith_BooleanWithInt32)              \
-    _(BinaryArith_DoubleWithInt32)               \
-                                                 \
-    _(UnaryArith_Fallback)                       \
-    _(UnaryArith_Int32)                          \
-    _(UnaryArith_Double)                         \
-                                                 \
     _(Call_Fallback)                             \
     _(Call_Scripted)                             \
     _(Call_AnyScripted)                          \

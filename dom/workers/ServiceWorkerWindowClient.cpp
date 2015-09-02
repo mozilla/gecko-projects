@@ -7,6 +7,7 @@
 
 #include "ServiceWorkerWindowClient.h"
 
+#include "mozilla/Mutex.h"
 #include "mozilla/dom/ClientBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
@@ -90,9 +91,14 @@ public:
     UniquePtr<ServiceWorkerClientInfo> clientInfo;
 
     if (window) {
-      nsContentUtils::DispatchChromeEvent(window->GetExtantDoc(), window->GetOuterWindow(), NS_LITERAL_STRING("DOMServiceWorkerFocusClient"), true, true);
-      clientInfo.reset(new ServiceWorkerClientInfo(window->GetDocument(),
-                                                   window->GetOuterWindow()));
+      nsCOMPtr<nsIDocument> doc = window->GetDocument();
+      if (doc) {
+        nsContentUtils::DispatchChromeEvent(doc,
+                                            window->GetOuterWindow(),
+                                            NS_LITERAL_STRING("DOMServiceWorkerFocusClient"),
+                                            true, true);
+        clientInfo.reset(new ServiceWorkerClientInfo(doc));
+      }
     }
 
     DispatchResult(Move(clientInfo));
@@ -103,6 +109,12 @@ private:
   void
   DispatchResult(UniquePtr<ServiceWorkerClientInfo>&& aClientInfo)
   {
+    AssertIsOnMainThread();
+    MutexAutoLock lock(mPromiseProxy->GetCleanUpLock());
+    if (mPromiseProxy->IsClean()) {
+      return;
+    }
+
     WorkerPrivate* workerPrivate = mPromiseProxy->GetWorkerPrivate();
     MOZ_ASSERT(workerPrivate);
 

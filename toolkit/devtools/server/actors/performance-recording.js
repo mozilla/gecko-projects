@@ -163,7 +163,7 @@ let PerformanceRecordingActor = exports.PerformanceRecordingActor = protocol.Act
       this._frames = [];
       this._memory = [];
       this._ticks = [];
-      this._allocations = { sites: [], timestamps: [], frames: [], counts: [] };
+      this._allocations = { sites: [], timestamps: [], frames: [], sizes: [] };
     }
   },
 
@@ -236,6 +236,14 @@ let PerformanceRecordingFront = exports.PerformanceRecordingFront = protocol.Fro
     if (form.profile) {
       this._profile = form.profile;
     }
+
+    // Sort again on the client side if we're using realtime markers and the recording
+    // just finished. This is because GC/Compositing markers can come into the array out of order with
+    // the other markers, leading to strange collapsing in waterfall view.
+    if (this._completed && !this._markersSorted) {
+      this._markers = this._markers.sort((a, b) => (a.start > b.start));
+      this._markersSorted = true;
+    }
   },
 
   initialize: function (client, form, config) {
@@ -244,7 +252,7 @@ let PerformanceRecordingFront = exports.PerformanceRecordingFront = protocol.Fro
     this._frames = [];
     this._memory = [];
     this._ticks = [];
-    this._allocations = { sites: [], timestamps: [], frames: [], counts: [] };
+    this._allocations = { sites: [], timestamps: [], frames: [], sizes: [] };
   },
 
   destroy: function () {
@@ -336,6 +344,7 @@ let PerformanceRecordingFront = exports.PerformanceRecordingFront = protocol.Fro
         let {
           allocations: sites,
           allocationsTimestamps: timestamps,
+          allocationSizes: sizes,
           frames,
         } = data;
 
@@ -343,6 +352,7 @@ let PerformanceRecordingFront = exports.PerformanceRecordingFront = protocol.Fro
         RecordingUtils.pushAll(this._allocations.sites, sites);
         RecordingUtils.pushAll(this._allocations.timestamps, timestamps);
         RecordingUtils.pushAll(this._allocations.frames, frames);
+        RecordingUtils.pushAll(this._allocations.sizes, sizes);
         break;
       }
     }

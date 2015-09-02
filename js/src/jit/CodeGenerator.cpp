@@ -383,7 +383,7 @@ CodeGenerator::emitOOLTestObject(Register objreg,
                                  Register scratch)
 {
     saveVolatile(scratch);
-    masm.setupUnalignedABICall(1, scratch);
+    masm.setupUnalignedABICall(scratch);
     masm.passABIArg(objreg);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, js::EmulatesUndefined));
     masm.storeCallResult(scratch);
@@ -1147,7 +1147,7 @@ PrepareAndExecuteRegExp(JSContext* cx, MacroAssembler& masm, Register regexp, Re
     // Execute the RegExp.
     masm.computeEffectiveAddress(Address(masm.getStackPointer(), inputOutputDataStartOffset), temp2);
     masm.PushRegsInMask(volatileRegs);
-    masm.setupUnalignedABICall(1, temp3);
+    masm.setupUnalignedABICall(temp3);
     masm.passABIArg(temp2);
     masm.callWithABI(codePointer);
     masm.PopRegsInMask(volatileRegs);
@@ -1680,6 +1680,62 @@ CodeGenerator::visitStringReplace(LStringReplace* lir)
         pushArg(ToRegister(lir->string()));
 
     callVM(StringReplaceInfo, lir);
+}
+
+void
+CodeGenerator::emitSharedStub(ICStub::Kind kind, LInstruction* lir)
+{
+    JSScript* script = lir->mirRaw()->block()->info().script();
+    jsbytecode* pc = lir->mirRaw()->toInstruction()->resumePoint()->pc();
+
+    // Create descriptor signifying end of Ion frame.
+    uint32_t descriptor = MakeFrameDescriptor(masm.framePushed(), JitFrame_IonJS);
+    masm.Push(Imm32(descriptor));
+
+    // Call into the stubcode.
+    CodeOffsetLabel patchOffset;
+    IonICEntry entry(script->pcToOffset(pc), ICEntry::Kind_Op, script);
+    EmitCallIC(&patchOffset, masm);
+    entry.setReturnOffset(CodeOffsetLabel(masm.currentOffset()));
+
+    SharedStub sharedStub(kind, entry, patchOffset);
+    masm.propagateOOM(sharedStubs_.append(sharedStub));
+
+    // Fix up upon return.
+    uint32_t callOffset = masm.currentOffset();
+    masm.freeStack(sizeof(intptr_t));
+    markSafepointAt(callOffset, lir);
+}
+
+void
+CodeGenerator::visitBinarySharedStub(LBinarySharedStub* lir)
+{
+    JSOp jsop = JSOp(*lir->mir()->resumePoint()->pc());
+    switch (jsop) {
+      case JSOP_ADD:
+      case JSOP_SUB:
+      case JSOP_MUL:
+      case JSOP_DIV:
+      case JSOP_MOD:
+        emitSharedStub(ICStub::Kind::BinaryArith_Fallback, lir);
+        break;
+      default:
+        MOZ_CRASH("Unsupported jsop in shared stubs.");
+    }
+}
+
+void
+CodeGenerator::visitUnarySharedStub(LUnarySharedStub* lir)
+{
+    JSOp jsop = JSOp(*lir->mir()->resumePoint()->pc());
+    switch (jsop) {
+      case JSOP_BITNOT:
+      case JSOP_NEG:
+        emitSharedStub(ICStub::Kind::UnaryArith_Fallback, lir);
+        break;
+      default:
+        MOZ_CRASH("Unsupported jsop in shared stubs.");
+    }
 }
 
 typedef JSObject* (*LambdaFn)(JSContext*, HandleFunction, HandleObject);
@@ -2721,7 +2777,7 @@ CodeGenerator::visitOutOfLineCallPostWriteBarrier(OutOfLineCallPostWriteBarrier*
     masm.mov(ImmPtr(GetJitContext()->runtime), runtimereg);
 
     void (*fun)(JSRuntime*, JSObject*) = isGlobal ? PostGlobalWriteBarrier : PostWriteBarrier;
-    masm.setupUnalignedABICall(2, regs.takeAny());
+    masm.setupUnalignedABICall(regs.takeAny());
     masm.passABIArg(runtimereg);
     masm.passABIArg(objreg);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, fun));
@@ -2816,14 +2872,13 @@ CodeGenerator::visitCallNative(LCallNative* call)
     masm.Push(argUintNReg);
 
     // Construct native exit frame.
-    uint32_t safepointOffset;
-    masm.buildFakeExitFrame(tempReg, &safepointOffset);
-    masm.enterFakeExitFrame(NativeExitFrameLayout::Token());
+    uint32_t safepointOffset = masm.buildFakeExitFrame(tempReg);
+    masm.enterFakeExitFrame(NativeExitFrameLayoutToken);
 
     markSafepointAt(safepointOffset, call);
 
     // Construct and execute call.
-    masm.setupUnalignedABICall(3, tempReg);
+    masm.setupUnalignedABICall(tempReg);
     masm.passABIArg(argContextReg);
     masm.passABIArg(argUintNReg);
     masm.passABIArg(argVpReg);
@@ -2935,14 +2990,13 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
     masm.moveStackPtrTo(argObj);
 
     // Construct native exit frame.
-    uint32_t safepointOffset;
-    masm.buildFakeExitFrame(argJSContext, &safepointOffset);
-    masm.enterFakeExitFrame(IonDOMMethodExitFrameLayout::Token());
+    uint32_t safepointOffset = masm.buildFakeExitFrame(argJSContext);
+    masm.enterFakeExitFrame(IonDOMMethodExitFrameLayoutToken);
 
     markSafepointAt(safepointOffset, call);
 
     // Construct and execute call.
-    masm.setupUnalignedABICall(4, argJSContext);
+    masm.setupUnalignedABICall(argJSContext);
 
     masm.loadJSContext(argJSContext);
 
@@ -3127,14 +3181,20 @@ CodeGenerator::visitCallKnown(LCallKnown* call)
 
     // Native single targets are handled by LCallNative.
     MOZ_ASSERT(!target->isNative());
-    MOZ_ASSERT_IF(target->isClassConstructor(), call->isConstructing());
     // Missing arguments must have been explicitly appended by the IonBuilder.
     DebugOnly<unsigned> numNonArgsOnStack = 1 + call->isConstructing();
     MOZ_ASSERT(target->nargs() <= call->mir()->numStackArgs() - numNonArgsOnStack);
 
-    MOZ_ASSERT_IF(call->mir()->isConstructing(), target->isConstructor());
+    MOZ_ASSERT_IF(call->isConstructing(), target->isConstructor());
 
     masm.checkStackAlignment();
+
+    if (target->isClassConstructor() && !call->isConstructing()) {
+        emitCallInvokeFunction(call, calleereg, call->isConstructing(), call->numActualArgs(), unusedStack);
+        return;
+    }
+
+    MOZ_ASSERT_IF(target->isClassConstructor(), call->isConstructing());
 
     // The calleereg is known to be a non-native function, but might point to
     // a LazyScript instead of a JSScript.
@@ -3483,7 +3543,7 @@ CodeGenerator::visitGetDynamicName(LGetDynamicName* lir)
     masm.adjustStack(-int32_t(sizeof(Value)));
     masm.moveStackPtrTo(temp2);
 
-    masm.setupUnalignedABICall(4, temp1);
+    masm.setupUnalignedABICall(temp1);
     masm.passABIArg(temp3);
     masm.passABIArg(scopeChain);
     masm.passABIArg(name);
@@ -3498,45 +3558,6 @@ CodeGenerator::visitGetDynamicName(LGetDynamicName* lir)
     Label undefined;
     masm.branchTestUndefined(Assembler::Equal, out, &undefined);
     bailoutFrom(&undefined, lir->snapshot());
-}
-
-void
-CodeGenerator::emitFilterArgumentsOrEval(LInstruction* lir, Register string,
-                                         Register temp1, Register temp2)
-{
-    masm.loadJSContext(temp2);
-
-    masm.setupUnalignedABICall(2, temp1);
-    masm.passABIArg(temp2);
-    masm.passABIArg(string);
-    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, FilterArgumentsOrEval));
-
-    Label bail;
-    masm.branchIfFalseBool(ReturnReg, &bail);
-    bailoutFrom(&bail, lir->snapshot());
-}
-
-void
-CodeGenerator::visitFilterArgumentsOrEvalS(LFilterArgumentsOrEvalS* lir)
-{
-    emitFilterArgumentsOrEval(lir, ToRegister(lir->getString()),
-                              ToRegister(lir->temp1()),
-                              ToRegister(lir->temp2()));
-}
-
-void
-CodeGenerator::visitFilterArgumentsOrEvalV(LFilterArgumentsOrEvalV* lir)
-{
-    ValueOperand input = ToValue(lir, LFilterArgumentsOrEvalV::Input);
-
-    // Act as nop on non-strings.
-    Label done;
-    masm.branchTestString(Assembler::NotEqual, input, &done);
-
-    emitFilterArgumentsOrEval(lir, masm.extractString(input, ToRegister(lir->temp3())),
-                              ToRegister(lir->temp1()), ToRegister(lir->temp2()));
-
-    masm.bind(&done);
 }
 
 typedef bool (*DirectEvalSFn)(JSContext*, HandleObject, HandleScript, HandleValue, HandleValue,
@@ -3883,7 +3904,7 @@ CodeGenerator::emitAssertObjectOrStringResult(Register input, MIRType type, cons
 
     // Check that we have a valid GC pointer.
     saveVolatile();
-    masm.setupUnalignedABICall(2, temp);
+    masm.setupUnalignedABICall(temp);
     masm.loadJSContext(temp);
     masm.passABIArg(temp);
     masm.passABIArg(input);
@@ -3956,7 +3977,7 @@ CodeGenerator::emitAssertResultV(const ValueOperand input, const TemporaryTypeSe
     masm.pushValue(input);
     masm.moveStackPtrTo(temp1);
 
-    masm.setupUnalignedABICall(2, temp2);
+    masm.setupUnalignedABICall(temp2);
     masm.loadJSContext(temp2);
     masm.passABIArg(temp2);
     masm.passABIArg(temp1);
@@ -4218,7 +4239,7 @@ CodeGenerator::visitAtan2D(LAtan2D* lir)
     FloatRegister y = ToFloatRegister(lir->y());
     FloatRegister x = ToFloatRegister(lir->x());
 
-    masm.setupUnalignedABICall(2, temp);
+    masm.setupUnalignedABICall(temp);
     masm.passABIArg(y, MoveOp::DOUBLE);
     masm.passABIArg(x, MoveOp::DOUBLE);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ecmaAtan2), MoveOp::DOUBLE);
@@ -4231,7 +4252,7 @@ CodeGenerator::visitHypot(LHypot* lir)
 {
     Register temp = ToRegister(lir->temp());
     uint32_t numArgs = lir->numArgs();
-    masm.setupUnalignedABICall(numArgs, temp);
+    masm.setupUnalignedABICall(temp);
 
     for (uint32_t i = 0 ; i < numArgs; ++i)
         masm.passABIArg(ToFloatRegister(lir->getOperand(i)), MoveOp::DOUBLE);
@@ -5100,7 +5121,7 @@ CodeGenerator::visitSetDisjointTypedElements(LSetDisjointTypedElements* lir)
 
     Register temp = ToRegister(lir->temp());
 
-    masm.setupUnalignedABICall(3, temp);
+    masm.setupUnalignedABICall(temp);
     masm.passABIArg(target);
     masm.passABIArg(targetOffset);
     masm.passABIArg(source);
@@ -5231,10 +5252,7 @@ CodeGenerator::visitPowI(LPowI* ins)
 
     MOZ_ASSERT(power != temp);
 
-    // In all implementations, setupUnalignedABICall() relinquishes use of
-    // its scratch register. We can therefore save an input register by
-    // reusing the scratch register to pass constants to callWithABI.
-    masm.setupUnalignedABICall(2, temp);
+    masm.setupUnalignedABICall(temp);
     masm.passABIArg(value, MoveOp::DOUBLE);
     masm.passABIArg(power);
 
@@ -5249,7 +5267,7 @@ CodeGenerator::visitPowD(LPowD* ins)
     FloatRegister power = ToFloatRegister(ins->power());
     Register temp = ToRegister(ins->temp());
 
-    masm.setupUnalignedABICall(2, temp);
+    masm.setupUnalignedABICall(temp);
     masm.passABIArg(value, MoveOp::DOUBLE);
     masm.passABIArg(power, MoveOp::DOUBLE);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ecmaPow), MoveOp::DOUBLE);
@@ -5264,9 +5282,9 @@ CodeGenerator::visitMathFunctionD(LMathFunctionD* ins)
     FloatRegister input = ToFloatRegister(ins->input());
     MOZ_ASSERT(ToFloatRegister(ins->output()) == ReturnDoubleReg);
 
-    const MathCache* mathCache = ins->mir()->cache();
+    masm.setupUnalignedABICall(temp);
 
-    masm.setupUnalignedABICall(mathCache ? 2 : 1, temp);
+    const MathCache* mathCache = ins->mir()->cache();
     if (mathCache) {
         masm.movePtr(ImmPtr(mathCache), temp);
         masm.passABIArg(temp);
@@ -5365,7 +5383,7 @@ CodeGenerator::visitMathFunctionF(LMathFunctionF* ins)
     FloatRegister input = ToFloatRegister(ins->input());
     MOZ_ASSERT(ToFloatRegister(ins->output()) == ReturnFloat32Reg);
 
-    masm.setupUnalignedABICall(1, temp);
+    masm.setupUnalignedABICall(temp);
     masm.passABIArg(input, MoveOp::FLOAT32);
 
     void* funptr = nullptr;
@@ -5389,7 +5407,7 @@ CodeGenerator::visitModD(LModD* ins)
 
     MOZ_ASSERT(ToFloatRegister(ins->output()) == ReturnDoubleReg);
 
-    masm.setupUnalignedABICall(2, temp);
+    masm.setupUnalignedABICall(temp);
     masm.passABIArg(lhs, MoveOp::DOUBLE);
     masm.passABIArg(rhs, MoveOp::DOUBLE);
 
@@ -6217,7 +6235,7 @@ JitRuntime::generateMallocStub(JSContext* cx)
     const Register regRuntime = regTemp;
     MOZ_ASSERT(regTemp != regNBytes);
 
-    masm.setupUnalignedABICall(2, regTemp);
+    masm.setupUnalignedABICall(regTemp);
     masm.movePtr(ImmPtr(cx->runtime()), regRuntime);
     masm.passABIArg(regRuntime);
     masm.passABIArg(regNBytes);
@@ -6255,7 +6273,7 @@ JitRuntime::generateFreeStub(JSContext* cx)
     const Register regTemp = regs.takeAnyGeneral();
     MOZ_ASSERT(regTemp != regSlots);
 
-    masm.setupUnalignedABICall(1, regTemp);
+    masm.setupUnalignedABICall(regTemp);
     masm.passABIArg(regSlots);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, js_free));
 
@@ -6293,10 +6311,10 @@ JitRuntime::generateLazyLinkStub(JSContext* cx)
     size_t convertToExitFrame = JitFrameLayout::Size() - ExitFrameLayout::Size();
     masm.addPtr(Imm32(convertToExitFrame << FRAMESIZE_SHIFT), descriptor);
 
-    masm.enterFakeExitFrame(LazyLinkExitFrameLayout::Token());
+    masm.enterFakeExitFrame(LazyLinkExitFrameLayoutToken);
     masm.PushStubCode();
 
-    masm.setupUnalignedABICall(1, temp0);
+    masm.setupUnalignedABICall(temp0);
     masm.loadJSContext(temp0);
     masm.passABIArg(temp0);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, LazyLinkTopActivation));
@@ -7094,7 +7112,7 @@ CodeGenerator::emitArrayPopShift(LInstruction* lir, const MArrayPopShift* mir, R
         temps.add(lengthTemp);
 
         saveVolatile(temps);
-        masm.setupUnalignedABICall(1, lengthTemp);
+        masm.setupUnalignedABICall(lengthTemp);
         masm.passABIArg(obj);
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, js::ArrayShiftMoveElements));
         restoreVolatile(temps);
@@ -7222,22 +7240,23 @@ CodeGenerator::visitArrayConcat(LArrayConcat* lir)
     // inline and pass it to the stub. Else, we just pass nullptr and the stub falls
     // back to a slow path.
     Label fail, call;
-    if (lir->mir()->unboxedType() == JSVAL_TYPE_MAGIC) {
-        masm.loadPtr(Address(lhs, NativeObject::offsetOfElements()), temp1);
-        masm.load32(Address(temp1, ObjectElements::offsetOfInitializedLength()), temp2);
-        masm.branch32(Assembler::NotEqual, Address(temp1, ObjectElements::offsetOfLength()), temp2, &fail);
-
-        masm.loadPtr(Address(rhs, NativeObject::offsetOfElements()), temp1);
-        masm.load32(Address(temp1, ObjectElements::offsetOfInitializedLength()), temp2);
-        masm.branch32(Assembler::NotEqual, Address(temp1, ObjectElements::offsetOfLength()), temp2, &fail);
-    } else {
+    if (lir->mir()->unboxedThis()) {
         masm.load32(Address(lhs, UnboxedArrayObject::offsetOfCapacityIndexAndInitializedLength()), temp1);
         masm.and32(Imm32(UnboxedArrayObject::InitializedLengthMask), temp1);
         masm.branch32(Assembler::NotEqual, Address(lhs, UnboxedArrayObject::offsetOfLength()), temp1, &fail);
-
+    } else {
+        masm.loadPtr(Address(lhs, NativeObject::offsetOfElements()), temp1);
+        masm.load32(Address(temp1, ObjectElements::offsetOfInitializedLength()), temp2);
+        masm.branch32(Assembler::NotEqual, Address(temp1, ObjectElements::offsetOfLength()), temp2, &fail);
+    }
+    if (lir->mir()->unboxedArg()) {
         masm.load32(Address(rhs, UnboxedArrayObject::offsetOfCapacityIndexAndInitializedLength()), temp1);
         masm.and32(Imm32(UnboxedArrayObject::InitializedLengthMask), temp1);
         masm.branch32(Assembler::NotEqual, Address(rhs, UnboxedArrayObject::offsetOfLength()), temp1, &fail);
+    } else {
+        masm.loadPtr(Address(rhs, NativeObject::offsetOfElements()), temp1);
+        masm.load32(Address(temp1, ObjectElements::offsetOfInitializedLength()), temp2);
+        masm.branch32(Assembler::NotEqual, Address(temp1, ObjectElements::offsetOfLength()), temp2, &fail);
     }
 
     // Try to allocate an object.
@@ -7842,6 +7861,35 @@ struct AutoDiscardIonCode
 };
 
 bool
+CodeGenerator::linkSharedStubs(JSContext* cx)
+{
+    for (uint32_t i = 0; i < sharedStubs_.length(); i++) {
+        ICStub *stub = nullptr;
+
+        switch (sharedStubs_[i].kind) {
+          case ICStub::Kind::BinaryArith_Fallback: {
+            ICBinaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::IonMonkey);
+            stub = stubCompiler.getStub(&stubSpace_);
+            break;
+          }
+          case ICStub::Kind::UnaryArith_Fallback: {
+            ICUnaryArith_Fallback::Compiler stubCompiler(cx, ICStubCompiler::Engine::IonMonkey);
+            stub = stubCompiler.getStub(&stubSpace_);
+            break;
+          }
+          default:
+            MOZ_CRASH("Unsupported shared stub.");
+        }
+
+        if (!stub)
+            return false;
+
+        sharedStubs_[i].entry.setFirstStub(stub);
+    }
+    return true;
+}
+
+bool
 CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
 {
     RootedScript script(cx, gen->info().script());
@@ -7864,6 +7912,9 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
     }
 
     if (scriptCounts_ && !script->hasScriptCounts() && !script->initScriptCounts(cx))
+        return false;
+
+    if (!linkSharedStubs(cx))
         return false;
 
     // Check to make sure we didn't have a mid-build invalidation. If so, we
@@ -7897,7 +7948,8 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
                      recovers_.size(), bailouts_.length(), graph.numConstants(),
                      safepointIndices_.length(), osiIndices_.length(),
                      cacheList_.length(), runtimeData_.length(),
-                     safepoints_.size(), patchableBackedges_.length(), optimizationLevel);
+                     safepoints_.size(), patchableBackedges_.length(),
+                     sharedStubs_.length(), optimizationLevel);
     if (!ionScript)
         return false;
     discardIonCode.ionScript = ionScript;
@@ -7991,6 +8043,9 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
 
     script->setIonScript(cx, ionScript);
 
+    // Adopt fallback shared stubs from the compiler into the ion script.
+    ionScript->adoptFallbackStubs(&stubSpace_);
+
     {
         AutoWritableJitCode awjc(code);
         invalidateEpilogueData_.fixup(&masm);
@@ -8027,6 +8082,23 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
             }
         }
 #endif
+        // Patch shared stub IC loads using IC entries
+        for (size_t i = 0; i < sharedStubs_.length(); i++) {
+            CodeOffsetLabel label = sharedStubs_[i].label;
+            label.fixup(&masm);
+
+            IonICEntry& entry = ionScript->sharedStubList()[i];
+            entry = sharedStubs_[i].entry;
+            entry.fixupReturnOffset(masm);
+            Assembler::PatchDataWithValueCheck(CodeLocationLabel(code, label),
+                                               ImmPtr(&entry),
+                                               ImmPtr((void*)-1));
+
+            MOZ_ASSERT(entry.hasStub());
+            MOZ_ASSERT(entry.firstStub()->isFallback());
+
+            entry.firstStub()->toFallbackStub()->fixupICEntry(&entry);
+        }
     }
 
     JitSpew(JitSpew_Codegen, "Created IonScript %p (raw %p)",
@@ -8848,7 +8920,7 @@ CodeGenerator::visitOutOfLineTypeOfV(OutOfLineTypeOfV* ool)
     Register obj = masm.extractObject(input, temp);
 
     saveVolatile(output);
-    masm.setupUnalignedABICall(2, output);
+    masm.setupUnalignedABICall(output);
     masm.passABIArg(obj);
     masm.movePtr(ImmPtr(GetJitContext()->runtime), output);
     masm.passABIArg(output);
@@ -9661,13 +9733,12 @@ CodeGenerator::visitGetDOMProperty(LGetDOMProperty* ins)
     // Rooting will happen at GC time.
     masm.moveStackPtrTo(ObjectReg);
 
-    uint32_t safepointOffset;
-    masm.buildFakeExitFrame(JSContextReg, &safepointOffset);
-    masm.enterFakeExitFrame(IonDOMExitFrameLayout::GetterToken());
+    uint32_t safepointOffset = masm.buildFakeExitFrame(JSContextReg);
+    masm.enterFakeExitFrame(IonDOMExitFrameLayoutGetterToken);
 
     markSafepointAt(safepointOffset, ins);
 
-    masm.setupUnalignedABICall(4, JSContextReg);
+    masm.setupUnalignedABICall(JSContextReg);
 
     masm.loadJSContext(JSContextReg);
 
@@ -9751,13 +9822,12 @@ CodeGenerator::visitSetDOMProperty(LSetDOMProperty* ins)
     // Rooting will happen at GC time.
     masm.moveStackPtrTo(ObjectReg);
 
-    uint32_t safepointOffset;
-    masm.buildFakeExitFrame(JSContextReg, &safepointOffset);
-    masm.enterFakeExitFrame(IonDOMExitFrameLayout::SetterToken());
+    uint32_t safepointOffset = masm.buildFakeExitFrame(JSContextReg);
+    masm.enterFakeExitFrame(IonDOMExitFrameLayoutSetterToken);
 
     markSafepointAt(safepointOffset, ins);
 
-    masm.setupUnalignedABICall(4, JSContextReg);
+    masm.setupUnalignedABICall(JSContextReg);
 
     masm.loadJSContext(JSContextReg);
 
@@ -9825,7 +9895,7 @@ CodeGenerator::visitOutOfLineIsCallable(OutOfLineIsCallable* ool)
     Register output = ToRegister(ins->output());
 
     saveVolatile(output);
-    masm.setupUnalignedABICall(1, output);
+    masm.setupUnalignedABICall(output);
     masm.passABIArg(object);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ObjectIsCallable));
     masm.storeCallResult(output);
@@ -10192,7 +10262,7 @@ CodeGenerator::visitDebugger(LDebugger* ins)
     Register temp = ToRegister(ins->getTemp(1));
 
     masm.loadJSContext(cx);
-    masm.setupUnalignedABICall(1, temp);
+    masm.setupUnalignedABICall(temp);
     masm.passABIArg(cx);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, GlobalHasLiveOnDebuggerStatement));
 

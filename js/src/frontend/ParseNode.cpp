@@ -521,6 +521,7 @@ PushNodeChildren(ParseNode* pn, NodeStack* stack)
         return PushNameNodeChildren(pn, stack);
 
       case PNK_FUNCTION:
+      case PNK_MODULE:
         return PushCodeNodeChildren(pn, stack);
 
       case PNK_LIMIT: // invalid sentinel value
@@ -820,7 +821,9 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode* opn)
             ParseNode* pn2;
             if (opn->isKind(PNK_OBJECT)) {
                 if (opn2->isKind(PNK_MUTATEPROTO)) {
-                    ParseNode* target = cloneLeftHandSide(opn2->pn_kid);
+                    ParseNode* target = opn2->pn_kid->isKind(PNK_ASSIGN)
+                                        ? cloneDestructuringDefault(opn2->pn_kid)
+                                        : cloneLeftHandSide(opn2->pn_kid);
                     if (!target)
                         return nullptr;
                     pn2 = handler.new_<UnaryNode>(PNK_MUTATEPROTO, JSOP_NOP, opn2->pn_pos, target);
@@ -831,12 +834,9 @@ Parser<FullParseHandler>::cloneLeftHandSide(ParseNode* opn)
                     ParseNode* tag = cloneParseTree(opn2->pn_left);
                     if (!tag)
                         return nullptr;
-                    ParseNode* target;
-                    if (opn2->pn_right->isKind(PNK_ASSIGN)) {
-                        target = cloneDestructuringDefault(opn2->pn_right);
-                    } else {
-                        target = cloneLeftHandSide(opn2->pn_right);
-                    }
+                    ParseNode* target = opn2->pn_right->isKind(PNK_ASSIGN)
+                                        ? cloneDestructuringDefault(opn2->pn_right)
+                                        : cloneLeftHandSide(opn2->pn_right);
                     if (!target)
                         return nullptr;
 
@@ -1151,6 +1151,13 @@ ObjectBox::asFunctionBox()
     return static_cast<FunctionBox*>(this);
 }
 
+ModuleBox*
+ObjectBox::asModuleBox()
+{
+    MOZ_ASSERT(isModuleBox());
+    return static_cast<ModuleBox*>(this);
+}
+
 void
 ObjectBox::trace(JSTracer* trc)
 {
@@ -1160,8 +1167,11 @@ ObjectBox::trace(JSTracer* trc)
         if (box->isFunctionBox()) {
             FunctionBox* funbox = box->asFunctionBox();
             funbox->bindings.trace(trc);
-            if (funbox->staticScope_)
-                TraceRoot(trc, &funbox->staticScope_, "funbox-staticScope");
+            if (funbox->enclosingStaticScope_)
+                TraceRoot(trc, &funbox->enclosingStaticScope_, "funbox-enclosingStaticScope");
+        } else if (box->isModuleBox()) {
+            ModuleBox* modulebox = box->asModuleBox();
+            modulebox->bindings.trace(trc);
         }
         box = box->traceLink;
     }

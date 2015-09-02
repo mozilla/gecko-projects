@@ -25,6 +25,7 @@ DIRS += [
     'gmp-plugin',
     'gmp-plugin-openh264',
     'imagecapture',
+    'mediasink',
     'mediasource',
     'ogg',
     'platforms',
@@ -100,6 +101,7 @@ EXPORTS += [
     'AudioChannelFormat.h',
     'AudioCompactor.h',
     'AudioMixer.h',
+    'AudioPacketizer.h',
     'AudioSampleFormat.h',
     'AudioSegment.h',
     'AudioStream.h',
@@ -148,13 +150,11 @@ EXPORTS += [
     'VideoSegment.h',
     'VideoUtils.h',
     'VorbisUtils.h',
+    'XiphExtradata.h',
 ]
 
 EXPORTS.mozilla += [
     'MediaManager.h',
-    'MozPromise.h',
-    'StateMirroring.h',
-    'StateWatching.h',
 ]
 
 EXPORTS.mozilla.media.webrtc += [
@@ -196,7 +196,6 @@ UNIFIED_SOURCES += [
     'AudioChannelFormat.cpp',
     'AudioCompactor.cpp',
     'AudioSegment.cpp',
-    'AudioSink.cpp',
     'AudioStream.cpp',
     'AudioStreamTrack.cpp',
     'AudioTrack.cpp',
@@ -248,6 +247,7 @@ UNIFIED_SOURCES += [
     'VideoTrackList.cpp',
     'VideoUtils.cpp',
     'WebVTTListener.cpp',
+    'XiphExtradata.cpp',
 ]
 
 if CONFIG['OS_TARGET'] == 'WINNT':
@@ -278,8 +278,6 @@ EXTRA_JS_MODULES.media += [
     'PeerConnectionIdp.jsm',
     'RTCStatsReport.jsm',
 ]
-
-FAIL_ON_WARNINGS = True
 
 LOCAL_INCLUDES += [
     '/caps',

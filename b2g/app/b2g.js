@@ -351,11 +351,6 @@ pref("dom.w3c_touch_events.enabled", 1);
 pref("dom.w3c_touch_events.safetyX", 0); // escape borders in units of 1/240"
 pref("dom.w3c_touch_events.safetyY", 120); // escape borders in units of 1/240"
 
-// W3C draft pointer events
-pref("dom.w3c_pointer_events.enabled", false);
-// W3C touch-action css property (related to touch and pointer events)
-pref("layout.css.touch_action.enabled", false);
-
 #ifdef MOZ_SAFE_BROWSING
 // Safe browsing does nothing unless this pref is set
 pref("browser.safebrowsing.enabled", false);
@@ -435,8 +430,6 @@ pref("browser.dom.window.dump.enabled", false);
 // Default Content Security Policy to apply to certified apps.
 // If you change this CSP, make sure to update the fast path in nsCSPService.cpp
 pref("security.apps.certified.CSP.default", "default-src * data: blob:; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline' app://theme.gaiamobile.org");
-// Default Content Security Policy to apply to trusted apps.
-pref("security.apps.trusted.CSP.default", "default-src * data: blob:; object-src 'none'; frame-src 'none'");
 
 // handle links targeting new windows
 // 1=current window/tab, 2=new window, 3=new tab in most recent window
@@ -602,7 +595,7 @@ pref("app.update.incompatible.mode", 0);
 pref("app.update.staging.enabled", true);
 pref("app.update.service.enabled", true);
 
-pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%PRODUCT_DEVICE%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+pref("app.update.url", "https://aus5.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%PRODUCT_DEVICE%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
 
 // Interval at which update manifest is fetched.  In units of seconds.
@@ -924,8 +917,6 @@ pref("general.useragent.updates.retry", 86400); // 1 day
 // Device ID can be composed of letter, numbers, hyphen ("-") and dot (".")
 pref("general.useragent.device_id", "");
 
-// Make <audio> and <video> talk to the AudioChannelService.
-pref("media.useAudioChannelService", true);
 // Add Mozilla AudioChannel APIs.
 pref("media.useAudioChannelAPI", true);
 

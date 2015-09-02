@@ -1032,17 +1032,19 @@ class Redirect1Event : public ChannelEvent
                  const uint32_t& newChannelId,
                  const URIParams& newURI,
                  const uint32_t& redirectFlags,
-                 const nsHttpResponseHead& responseHead)
+                 const nsHttpResponseHead& responseHead,
+                 const nsACString& securityInfoSerialization)
   : mChild(child)
   , mNewChannelId(newChannelId)
   , mNewURI(newURI)
   , mRedirectFlags(redirectFlags)
-  , mResponseHead(responseHead) {}
+  , mResponseHead(responseHead)
+  , mSecurityInfoSerialization(securityInfoSerialization) {}
 
   void Run()
   {
     mChild->Redirect1Begin(mNewChannelId, mNewURI, mRedirectFlags,
-                           mResponseHead);
+                           mResponseHead, mSecurityInfoSerialization);
   }
  private:
   HttpChannelChild*   mChild;
@@ -1050,20 +1052,25 @@ class Redirect1Event : public ChannelEvent
   URIParams           mNewURI;
   uint32_t            mRedirectFlags;
   nsHttpResponseHead  mResponseHead;
+  nsCString           mSecurityInfoSerialization;
 };
 
 bool
 HttpChannelChild::RecvRedirect1Begin(const uint32_t& newChannelId,
                                      const URIParams& newUri,
                                      const uint32_t& redirectFlags,
-                                     const nsHttpResponseHead& responseHead)
+                                     const nsHttpResponseHead& responseHead,
+                                     const nsCString& securityInfoSerialization)
 {
+  // TODO: handle security info
   LOG(("HttpChannelChild::RecvRedirect1Begin [this=%p]\n", this));
   if (mEventQ->ShouldEnqueue()) {
     mEventQ->Enqueue(new Redirect1Event(this, newChannelId, newUri,
-                                       redirectFlags, responseHead));
+                                       redirectFlags, responseHead,
+                                       securityInfoSerialization));
   } else {
-    Redirect1Begin(newChannelId, newUri, redirectFlags, responseHead);
+    Redirect1Begin(newChannelId, newUri, redirectFlags, responseHead,
+                   securityInfoSerialization);
   }
   return true;
 }
@@ -1072,7 +1079,8 @@ void
 HttpChannelChild::Redirect1Begin(const uint32_t& newChannelId,
                                  const URIParams& newUri,
                                  const uint32_t& redirectFlags,
-                                 const nsHttpResponseHead& responseHead)
+                                 const nsHttpResponseHead& responseHead,
+                                 const nsACString& securityInfoSerialization)
 {
   LOG(("HttpChannelChild::Redirect1Begin [this=%p]\n", this));
 
@@ -1104,6 +1112,11 @@ HttpChannelChild::Redirect1Begin(const uint32_t& newChannelId,
 
   // We won't get OnStartRequest, set cookies here.
   mResponseHead = new nsHttpResponseHead(responseHead);
+
+  if (!securityInfoSerialization.IsEmpty()) {
+    NS_DeserializeObject(securityInfoSerialization,
+                         getter_AddRefs(mSecurityInfo));
+  }
 
   bool rewriteToGET = HttpBaseChannel::ShouldRewriteRedirectToGET(mResponseHead->Status(),
                                                                   mRequestHead.ParsedMethod());
@@ -1307,6 +1320,10 @@ HttpChannelChild::CompleteRedirectSetup(nsIStreamListener *listener,
     // fresh - we will intercept the child channel this time, before creating a new
     // parent channel unnecessarily.
     PHttpChannelChild::Send__delete__(this);
+    if (mLoadInfo && mLoadInfo->GetEnforceSecurity()) {
+        MOZ_ASSERT(!aContext, "aContext should be null!");
+        return AsyncOpen2(listener);
+    }
     return AsyncOpen(listener, aContext);
   }
 
@@ -1547,6 +1564,8 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   }
 
   if (ShouldIntercept()) {
+    mResponseCouldBeSynthesized = true;
+
     nsCOMPtr<nsINetworkInterceptController> controller;
     GetCallback(controller);
 
@@ -1623,6 +1642,11 @@ HttpChannelChild::ContinueAsyncOpen()
     openArgs.synthesizedResponseHead() = *mResponseHead;
   } else {
     openArgs.synthesizedResponseHead() = mozilla::void_t();
+  }
+
+  nsCOMPtr<nsISerializable> secInfoSer = do_QueryInterface(mSecurityInfo);
+  if (secInfoSer) {
+    NS_SerializeToString(secInfoSer, openArgs.synthesizedSecurityInfoSerialization());
   }
 
   OptionalFileDescriptorSet optionalFDs;
@@ -2167,6 +2191,14 @@ HttpChannelChild::ResetInterception()
   // Continue with the original cross-process request
   nsresult rv = ContinueAsyncOpen();
   NS_ENSURE_SUCCESS_VOID(rv);
+}
+
+NS_IMETHODIMP
+HttpChannelChild::GetResponseSynthesized(bool* aSynthesized)
+{
+  NS_ENSURE_ARG_POINTER(aSynthesized);
+  *aSynthesized = mSynthesizedResponse;
+  return NS_OK;
 }
 
 void

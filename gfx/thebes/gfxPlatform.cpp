@@ -580,7 +580,7 @@ gfxPlatform::Init()
 
     RegisterStrongMemoryReporter(new GfxMemoryImageReporter());
 
-    if (XRE_IsParentProcess() && gfxPrefs::HardwareVsyncEnabled()) {
+    if (XRE_IsParentProcess()) {
       gPlatform->mVsyncSource = gPlatform->CreateHardwareVsyncSource();
     }
 }
@@ -2065,26 +2065,19 @@ gfxPlatform::GetLog(eGfxLog aWhichLog)
     switch (aWhichLog) {
     case eGfxLog_fontlist:
         return sFontlistLog;
-        break;
     case eGfxLog_fontinit:
         return sFontInitLog;
-        break;
     case eGfxLog_textrun:
         return sTextrunLog;
-        break;
     case eGfxLog_textrunui:
         return sTextrunuiLog;
-        break;
     case eGfxLog_cmapdata:
         return sCmapDataLog;
-        break;
     case eGfxLog_textperf:
         return sTextPerfLog;
-        break;
-    default:
-        break;
     }
 
+    MOZ_ASSERT_UNREACHABLE("Unexpected log type");
     return nullptr;
 }
 

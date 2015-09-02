@@ -90,7 +90,7 @@ nsHTTPDownloadEvent::Run()
                    nullptr, // aLoadingNode
                    nsContentUtils::GetSystemPrincipal(),
                    nullptr, // aTriggeringPrincipal
-                   nsILoadInfo::SEC_NORMAL,
+                   nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                    nsIContentPolicy::TYPE_OTHER,
                    getter_AddRefs(chan));
   NS_ENSURE_STATE(chan);
@@ -157,7 +157,7 @@ nsHTTPDownloadEvent::Run()
 
   if (NS_SUCCEEDED(rv)) {
     mStartTime = TimeStamp::Now();
-    rv = hchan->AsyncOpen(mListener->mLoader, nullptr);
+    rv = hchan->AsyncOpen2(mListener->mLoader);
   }
 
   if (NS_FAILED(rv)) {
@@ -1246,8 +1246,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
   // to log the warning. In particular, these warnings should go to the web
   // console instead of to the error console. Also, the warning is not
   // localized.
-  if (!siteSupportsSafeRenego &&
-      ioLayerHelpers.getWarnLevelMissingRFC5746() > 0) {
+  if (!siteSupportsSafeRenego) {
     nsXPIDLCString hostName;
     infoObject->GetHostName(getter_Copies(hostName));
 

@@ -192,7 +192,8 @@ loop.conversationViews = (function(mozL10n) {
 
       /* Prevent event propagation
        * stop the click from reaching parent element */
-      return false;
+       e.stopPropagation();
+       e.preventDefault();
     },
 
     /*
@@ -583,6 +584,7 @@ loop.conversationViews = (function(mozL10n) {
       // This is used from the props rather than the state to make it easier for
       // the ui-showcase.
       mediaConnected: React.PropTypes.bool,
+      mozLoop: React.PropTypes.object,
       remotePosterUrl: React.PropTypes.string,
       remoteVideoEnabled: React.PropTypes.bool,
       // local
@@ -680,6 +682,16 @@ loop.conversationViews = (function(mozL10n) {
     },
 
     render: function() {
+      // 'visible' and 'enabled' are true by default.
+      var settingsMenuItems = [
+        {
+          id: "edit",
+          visible: false,
+          enabled: false
+        },
+        { id: "feedback" },
+        { id: "help" }
+      ];
       return (
         <div className="desktop-call-wrapper">
           <sharedViews.MediaLayoutView
@@ -698,14 +710,16 @@ loop.conversationViews = (function(mozL10n) {
             screenSharePosterUrl={null}
             screenShareVideoObject={this.state.screenShareVideoObject}
             showContextRoomName={false}
-            useDesktopPaths={true} />
-          <loop.shared.views.ConversationToolbar
-            audio={this.props.audio}
-            dispatcher={this.props.dispatcher}
-            edit={{ visible: false, enabled: false }}
-            hangup={this.hangup}
-            publishStream={this.publishStream}
-            video={this.props.video} />
+            useDesktopPaths={true}>
+            <loop.shared.views.ConversationToolbar
+              audio={this.props.audio}
+              dispatcher={this.props.dispatcher}
+              hangup={this.hangup}
+              mozLoop={this.props.mozLoop}
+              publishStream={this.publishStream}
+              settingsMenuItems={settingsMenuItems}
+              video={this.props.video} />
+          </sharedViews.MediaLayoutView>
         </div>
       );
     }
@@ -802,13 +816,14 @@ loop.conversationViews = (function(mozL10n) {
         }
         case CALL_STATES.ONGOING: {
           return (<OngoingConversationView
-            audio={{enabled: !this.state.audioMuted}}
+            audio={{ enabled: !this.state.audioMuted, visible: true }}
             conversationStore={this.getStore()}
             dispatcher={this.props.dispatcher}
             mediaConnected={this.state.mediaConnected}
+            mozLoop={this.props.mozLoop}
             remoteSrcVideoObject={this.state.remoteSrcVideoObject}
             remoteVideoEnabled={this.state.remoteVideoEnabled}
-            video={{enabled: !this.state.videoMuted}} />
+            video={{ enabled: !this.state.videoMuted, visible: true }} />
           );
         }
         case CALL_STATES.FINISHED: {

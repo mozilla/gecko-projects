@@ -42,6 +42,7 @@ using JS::HandleValue;
 using JS::Value;
 using JS::ZoneSet;
 using JS::ubi::AtomOrTwoByteChars;
+using JS::ubi::CoarseType;
 using JS::ubi::Concrete;
 using JS::ubi::Edge;
 using JS::ubi::EdgeRange;
@@ -112,7 +113,39 @@ StackFrame::functionDisplayName(RangedPtr<char16_t> destination, size_t length) 
     return functionDisplayName().match(m);
 }
 
+struct LengthMatcher
+{
+    using ReturnType = size_t;
+
+    size_t
+    match(JSAtom* atom)
+    {
+        return atom ? atom->length() : 0;
+    }
+
+    size_t
+    match(const char16_t* chars)
+    {
+        return chars ? js_strlen(chars) : 0;
+    }
+};
+
+size_t
+StackFrame::sourceLength()
+{
+    LengthMatcher m;
+    return source().match(m);
+}
+
+size_t
+StackFrame::functionDisplayNameLength()
+{
+    LengthMatcher m;
+    return functionDisplayName().match(m);
+}
+
 // All operations on null ubi::Nodes crash.
+CoarseType Concrete<void>::coarseType() const      { MOZ_CRASH("null ubi::Node"); }
 const char16_t* Concrete<void>::typeName() const   { MOZ_CRASH("null ubi::Node"); }
 JS::Zone* Concrete<void>::zone() const             { MOZ_CRASH("null ubi::Node"); }
 JSCompartment* Concrete<void>::compartment() const { MOZ_CRASH("null ubi::Node"); }
@@ -122,7 +155,7 @@ Concrete<void>::edges(JSContext*, bool) const {
     MOZ_CRASH("null ubi::Node");
 }
 
-size_t
+Node::Size
 Concrete<void>::size(mozilla::MallocSizeOf mallocSizeof) const
 {
     MOZ_CRASH("null ubi::Node");

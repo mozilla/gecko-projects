@@ -3,6 +3,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* globals ViewHelpers, Task, AnimationsPanel, promise, EventEmitter,
+   AnimationsFront */
 
 "use strict";
 
@@ -35,7 +37,8 @@ let startup = Task.async(function*(inspector) {
 
   // Don't assume that AnimationsPanel is defined here, it's in another file.
   if (!typeof AnimationsPanel === "undefined") {
-    throw new Error("AnimationsPanel was not loaded in the animationinspector window");
+    throw new Error("AnimationsPanel was not loaded in the " +
+                    "animationinspector window");
   }
 
   // Startup first initalizes the controller and then the panel, in sequence.
@@ -60,11 +63,43 @@ let shutdown = Task.async(function*() {
 
 // This is what makes the sidebar widget able to load/unload the panel.
 function setPanel(panel) {
-  return startup(panel).catch(Cu.reportError);
+  return startup(panel).catch(e => console.error(e));
 }
 function destroy() {
-  return shutdown().catch(Cu.reportError);
+  return shutdown().catch(e => console.error(e));
 }
+
+/**
+ * Get all the server-side capabilities (traits) so the UI knows whether or not
+ * features should be enabled/disabled.
+ * @param {Target} target The current toolbox target.
+ * @return {Object} An object with boolean properties.
+ */
+let getServerTraits = Task.async(function*(target) {
+  let config = [{
+    name: "hasToggleAll", actor: "animations", method: "toggleAll"
+  }, {
+    name: "hasSetCurrentTime", actor: "animationplayer", method: "setCurrentTime"
+  }, {
+    name: "hasMutationEvents", actor: "animations", method: "stopAnimationPlayerUpdates"
+  }, {
+    name: "hasSetPlaybackRate", actor: "animationplayer", method: "setPlaybackRate"
+  }, {
+    name: "hasTargetNode", actor: "domwalker", method: "getNodeFromActor"
+  }, {
+    name: "hasSetCurrentTimes", actor: "animations", method: "setCurrentTimes"
+  }];
+
+  let traits = {};
+  for (let {name, actor, method} of config) {
+    traits[name] = yield target.actorHasMethod(actor, method);
+  }
+
+  // Special pref-based UI trait.
+  traits.isNewUI = Services.prefs.getBoolPref("devtools.inspector.animationInspectorV3");
+
+  return traits;
+});
 
 /**
  * The animationinspector controller's job is to retrieve AnimationPlayerFronts
@@ -103,16 +138,7 @@ let AnimationsController = {
     this.animationsFront = new AnimationsFront(target.client, target.form);
 
     // Expose actor capabilities.
-    this.hasToggleAll = yield target.actorHasMethod("animations", "toggleAll");
-    this.hasSetCurrentTime = yield target.actorHasMethod("animationplayer",
-                                                         "setCurrentTime");
-    this.hasMutationEvents = yield target.actorHasMethod("animations",
-                                                         "stopAnimationPlayerUpdates");
-    this.hasSetPlaybackRate = yield target.actorHasMethod("animationplayer",
-                                                          "setPlaybackRate");
-    this.hasTargetNode = yield target.actorHasMethod("domwalker",
-                                                     "getNodeFromActor");
-    this.isNewUI = Services.prefs.getBoolPref("devtools.inspector.animationInspectorV3");
+    this.traits = yield getServerTraits(target);
 
     if (this.destroyed) {
       console.warn("Could not fully initialize the AnimationsController");
@@ -170,7 +196,7 @@ let AnimationsController = {
            gInspector.sidebar.getCurrentTabID() == "animationinspector";
   },
 
-  onPanelVisibilityChange: Task.async(function*(e, id) {
+  onPanelVisibilityChange: Task.async(function*() {
     if (this.isPanelVisible()) {
       this.onNewNodeFront();
       this.startAllAutoRefresh();
@@ -181,14 +207,15 @@ let AnimationsController = {
 
   onNewNodeFront: Task.async(function*() {
     // Ignore if the panel isn't visible or the node selection hasn't changed.
-    if (!this.isPanelVisible() || this.nodeFront === gInspector.selection.nodeFront) {
+    if (!this.isPanelVisible() ||
+        this.nodeFront === gInspector.selection.nodeFront) {
       return;
     }
 
     let done = gInspector.updating("animationscontroller");
 
-    if(!gInspector.selection.isConnected() ||
-       !gInspector.selection.isElementNode()) {
+    if (!gInspector.selection.isConnected() ||
+        !gInspector.selection.isElementNode()) {
       yield this.destroyAnimationPlayers();
       this.emit(this.PLAYERS_UPDATED_EVENT);
       done();
@@ -206,12 +233,35 @@ let AnimationsController = {
    * Toggle (pause/play) all animations in the current target.
    */
   toggleAll: function() {
-    if (!this.hasToggleAll) {
-      return promis.resolve();
+    if (!this.traits.hasToggleAll) {
+      return promise.resolve();
     }
 
-    return this.animationsFront.toggleAll().catch(Cu.reportError);
+    return this.animationsFront.toggleAll().catch(e => console.error(e));
   },
+
+  /**
+   * Set all known animations' currentTimes to the provided time.
+   * Note that depending on the server's capabilities, this might resolve in
+   * either one packet, or as many packets as there are animations. In the
+   * latter case, some time deltas might be introduced.
+   * @param {Number} time.
+   * @param {Boolean} shouldPause Should the animations be paused too.
+   * @return {Promise} Resolves when the current time has been set.
+   */
+  setCurrentTimeAll: Task.async(function*(time, shouldPause) {
+    if (this.traits.hasSetCurrentTimes) {
+      yield this.animationsFront.setCurrentTimes(this.animationPlayers, time,
+                                                 shouldPause);
+    } else {
+      for (let animation of this.animationPlayers) {
+        if (shouldPause) {
+          yield animation.pause();
+        }
+        yield animation.setCurrentTime(time);
+      }
+    }
+  }),
 
   // AnimationPlayerFront objects are managed by this controller. They are
   // retrieved when refreshAnimationPlayers is called, stored in the
@@ -227,7 +277,7 @@ let AnimationsController = {
 
     // Start listening for animation mutations only after the first method call
     // otherwise events won't be sent.
-    if (!this.isListeningToMutations && this.hasMutationEvents) {
+    if (!this.isListeningToMutations && this.traits.hasMutationEvents) {
       this.animationsFront.on("mutations", this.onAnimationMutations);
       this.isListeningToMutations = true;
     }
@@ -239,13 +289,13 @@ let AnimationsController = {
     for (let {type, player} of changes) {
       if (type === "added") {
         this.animationPlayers.push(player);
-        if (!this.isNewUI) {
+        if (!this.traits.isNewUI) {
           player.startAutoRefresh();
         }
       }
 
       if (type === "removed") {
-        if (!this.isNewUI) {
+        if (!this.traits.isNewUI) {
           player.stopAutoRefresh();
         }
         yield player.release();
@@ -259,7 +309,7 @@ let AnimationsController = {
   }),
 
   startAllAutoRefresh: function() {
-    if (this.isNewUI) {
+    if (this.traits.isNewUI) {
       return;
     }
 
@@ -269,7 +319,7 @@ let AnimationsController = {
   },
 
   stopAllAutoRefresh: function() {
-    if (this.isNewUI) {
+    if (this.traits.isNewUI) {
       return;
     }
 
@@ -282,7 +332,7 @@ let AnimationsController = {
     // Let the server know that we're not interested in receiving updates about
     // players for the current node. We're either being destroyed or a new node
     // has been selected.
-    if (this.hasMutationEvents) {
+    if (this.traits.hasMutationEvents) {
       yield this.animationsFront.stopAnimationPlayerUpdates();
     }
     this.stopAllAutoRefresh();

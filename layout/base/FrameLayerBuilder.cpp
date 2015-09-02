@@ -30,6 +30,7 @@
 #include "nsPrintfCString.h"
 #include "nsRenderingContext.h"
 #include "nsSVGIntegrationUtils.h"
+#include "mozilla/LayerTimelineMarker.h"
 
 #include "mozilla/Move.h"
 #include "mozilla/ReverseIterator.h"
@@ -446,13 +447,8 @@ public:
    */
   already_AddRefed<ImageContainer> GetContainerForImageLayer(nsDisplayListBuilder* aBuilder);
 
-  bool VisibleAboveRegionIntersects(const nsIntRect& aRect) const
-  { return mVisibleAboveRegion.Intersects(aRect); }
   bool VisibleAboveRegionIntersects(const nsIntRegion& aRegion) const
   { return !mVisibleAboveRegion.Intersect(aRegion).IsEmpty(); }
-
-  bool VisibleRegionIntersects(const nsIntRect& aRect) const
-  { return mVisibleRegion.Intersects(aRect); }
   bool VisibleRegionIntersects(const nsIntRegion& aRegion) const
   { return !mVisibleRegion.Intersect(aRegion).IsEmpty(); }
 
@@ -1087,6 +1083,13 @@ public:
 
   nsIFrame* GetContainerFrame() const { return mContainerFrame; }
   nsDisplayListBuilder* Builder() const { return mBuilder; }
+
+  /**
+   * Check if we are currently inside an inactive layer.
+   */
+  bool IsInInactiveLayer() const {
+    return mLayerBuilder->GetContainingPaintedLayerData();
+  }
 
   /**
    * Sets aOuterVisibleRegion as aLayer's visible region. aOuterVisibleRegion
@@ -2584,12 +2587,22 @@ PaintedLayerDataNode::FindPaintedLayerFor(const nsIntRect& aVisibleRect,
     } else {
       PaintedLayerData* lowestUsableLayer = nullptr;
       for (auto& data : Reversed(mPaintedLayerDataStack)) {
-        if (data.VisibleAboveRegionIntersects(aVisibleRect)) {
+        if (data.mVisibleAboveRegion.Intersects(aVisibleRect)) {
           break;
         }
         MOZ_ASSERT(!data.mExclusiveToOneItem);
         lowestUsableLayer = &data;
-        if (data.VisibleRegionIntersects(aVisibleRect)) {
+        nsIntRegion visibleRegion = data.mVisibleRegion;
+        // When checking whether the visible region intersects the given
+        // visible rect, also include the event-regions in the visible region,
+        // unless we're in an inactive layer, in which case the event-regions
+        // will be hoisted out into their own layer.
+        ContainerState& contState = mTree.ContState();
+        if (!contState.IsInInactiveLayer()) {
+          visibleRegion.OrWith(contState.ScaleRegionToOutsidePixels(data.mHitRegion));
+          visibleRegion.OrWith(contState.ScaleRegionToOutsidePixels(data.mMaybeHitRegion));
+        }
+        if (visibleRegion.Intersects(aVisibleRect)) {
           break;
         }
       }
@@ -4680,7 +4693,7 @@ ContainerState::Finish(uint32_t* aTextContentFlags, LayerManagerData* aData,
 {
   mPaintedLayerDataTree.Finish();
 
-  NS_ASSERTION(mContainerBounds.IsEqualInterior(mAccumulatedChildBounds),
+  NS_ASSERTION(mContainerBounds.Contains(mAccumulatedChildBounds),
                "Bounds computation mismatch");
 
   if (mLayerBuilder->IsBuildingRetainedLayers()) {
@@ -5485,36 +5498,6 @@ static void DrawForcedBackgroundColor(DrawTarget& aDrawTarget,
   }
 }
 
-class LayerTimelineMarker : public TimelineMarker
-{
-public:
-  LayerTimelineMarker(nsDocShell* aDocShell, const nsIntRegion& aRegion)
-    : TimelineMarker(aDocShell, "Layer", TRACING_EVENT)
-    , mRegion(aRegion)
-  {
-  }
-
-  ~LayerTimelineMarker()
-  {
-  }
-
-  virtual void AddLayerRectangles(mozilla::dom::Sequence<mozilla::dom::ProfileTimelineLayerRect>& aRectangles) override
-  {
-    nsIntRegionRectIterator it(mRegion);
-    while (const nsIntRect* iterRect = it.Next()) {
-      mozilla::dom::ProfileTimelineLayerRect rect;
-      rect.mX = iterRect->X();
-      rect.mY = iterRect->Y();
-      rect.mWidth = iterRect->Width();
-      rect.mHeight = iterRect->Height();
-      aRectangles.AppendElement(rect, fallible);
-    }
-  }
-
-private:
-  nsIntRegion mRegion;
-};
-
 /*
  * A note on residual transforms:
  *
@@ -5675,8 +5658,7 @@ FrameLayerBuilder::DrawPaintedLayer(PaintedLayer* aLayer,
     bool isRecording;
     docShell->GetRecordProfileTimelineMarkers(&isRecording);
     if (isRecording) {
-      mozilla::UniquePtr<TimelineMarker> marker =
-        MakeUnique<LayerTimelineMarker>(docShell, aRegionToDraw);
+      UniquePtr<TimelineMarker> marker = MakeUnique<LayerTimelineMarker>(aRegionToDraw);
       TimelineConsumers::AddMarkerForDocShell(docShell, Move(marker));
     }
   }

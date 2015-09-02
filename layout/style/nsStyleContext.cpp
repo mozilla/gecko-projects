@@ -5,6 +5,7 @@
  
 /* the interface (to internal code) for retrieving computed style data */
 
+#include "CSSVariableImageTable.h"
 #include "mozilla/DebugOnly.h"
 
 #include "nsCSSAnonBoxes.h"
@@ -165,6 +166,9 @@ nsStyleContext::~nsStyleContext()
   if (mCachedResetData) {
     mCachedResetData->Destroy(mBits, presContext);
   }
+
+  // Free any ImageValues we were holding on to for CSS variable values.
+  CSSVariableImageTable::RemoveAll(this);
 }
 
 #ifdef DEBUG
@@ -308,18 +312,30 @@ nsStyleContext::MoveTo(nsStyleContext* aNewParent)
   // Assertions checking for visited style are just to avoid some tricky
   // cases we can't be bothered handling at the moment.
   MOZ_ASSERT(!IsStyleIfVisited());
+  MOZ_ASSERT(!mParent->IsStyleIfVisited());
   MOZ_ASSERT(!aNewParent->IsStyleIfVisited());
+  MOZ_ASSERT(!mStyleIfVisited || mStyleIfVisited->mParent == mParent);
 
   nsStyleContext* oldParent = mParent;
 
+  if (oldParent->HasChildThatUsesResetStyle()) {
+    aNewParent->AddStyleBit(NS_STYLE_HAS_CHILD_THAT_USES_RESET_STYLE);
+  }
+
   aNewParent->AddRef();
-
   mParent->RemoveChild(this);
-
   mParent = aNewParent;
   mParent->AddChild(this);
-
   oldParent->Release();
+
+  if (mStyleIfVisited) {
+    oldParent = mStyleIfVisited->mParent;
+    aNewParent->AddRef();
+    mStyleIfVisited->mParent->RemoveChild(mStyleIfVisited);
+    mStyleIfVisited->mParent = aNewParent;
+    mStyleIfVisited->mParent->AddChild(mStyleIfVisited);
+    oldParent->Release();
+  }
 }
 
 already_AddRefed<nsStyleContext>
@@ -759,16 +775,19 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     }
   }
 
-  // Elements with display:inline whose writing-mode is orthogonal to their
-  // parent's mode will be converted to display:inline-block.
+  /*
+   * According to https://drafts.csswg.org/css-writing-modes-3/#block-flow:
+   *
+   * If a box has a different block flow direction than its containing block:
+   *   * If the box has a specified display of inline, its display computes
+   *     to inline-block. [CSS21]
+   *   ...etc.
+   */
   if (disp->mDisplay == NS_STYLE_DISPLAY_INLINE && mParent) {
-    // We don't need the full mozilla::WritingMode value (incorporating dir and
-    // text-orientation) here, all we care about is vertical vs horizontal.
-    bool thisHorizontal =
-      StyleVisibility()->mWritingMode == NS_STYLE_WRITING_MODE_HORIZONTAL_TB;
-    bool parentHorizontal = mParent->StyleVisibility()->mWritingMode ==
-                              NS_STYLE_WRITING_MODE_HORIZONTAL_TB;
-    if (thisHorizontal != parentHorizontal) {
+    // We don't need the full mozilla::WritingMode value (incorporating dir
+    // and text-orientation) here; just the writing-mode property is enough.
+    if (StyleVisibility()->mWritingMode !=
+        mParent->StyleVisibility()->mWritingMode) {
       nsStyleDisplay *mutable_display =
         static_cast<nsStyleDisplay*>(GetUniqueStyleData(eStyleStruct_Display));
       mutable_display->mOriginalDisplay = mutable_display->mDisplay =
@@ -783,7 +802,8 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 nsChangeHint
 nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
                                     nsChangeHint aParentHintsNotHandledForDescendants,
-                                    uint32_t* aEqualStructs)
+                                    uint32_t* aEqualStructs,
+                                    uint32_t* aSamePointerStructs)
 {
   PROFILER_LABEL("nsStyleContext", "CalcStyleDifference",
     js::ProfileEntry::Category::CSS);
@@ -916,6 +936,26 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
 
   MOZ_ASSERT(styleStructCount == nsStyleStructID_Length,
              "missing a call to DO_STRUCT_DIFFERENCE");
+
+  // We check for struct pointer equality here rather than as part of the
+  // DO_STRUCT_DIFFERENCE calls, since those calls can result in structs
+  // we previously examined and found to be null on this style context
+  // getting computed by later DO_STRUCT_DIFFERENCE calls (which can
+  // happen when the nsRuleNode::ComputeXXXData method looks up another
+  // struct.)  This is important for callers in RestyleManager that
+  // need to know the equality or not of the final set of cached struct
+  // pointers.
+  *aSamePointerStructs = 0;
+
+#define STYLE_STRUCT(name_, callback_)                                        \
+  {                                                                           \
+    const nsStyle##name_* data = PeekStyle##name_();                          \
+    if (!data || data == aOther->Style##name_()) {                            \
+      *aSamePointerStructs |= NS_STYLE_INHERIT_BIT(name_);                    \
+    }                                                                         \
+  }
+#include "nsStyleStructList.h"
+#undef STYLE_STRUCT
 
   // Note that we do not check whether this->RelevantLinkVisited() !=
   // aOther->RelevantLinkVisited(); we don't need to since
@@ -1301,13 +1341,6 @@ nsStyleContext::LookupStruct(const nsACString& aName, nsStyleStructID& aResult)
   return true;
 }
 #endif
-
-bool
-nsStyleContext::HasSameCachedStyleData(nsStyleContext* aOther,
-                                       nsStyleStructID aSID)
-{
-  return GetCachedStyleData(aSID) == aOther->GetCachedStyleData(aSID);
-}
 
 void
 nsStyleContext::SwapStyleData(nsStyleContext* aNewContext, uint32_t aStructs)

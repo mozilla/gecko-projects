@@ -236,7 +236,7 @@ CSSAnimation::QueueEvents()
     mPreviousPhaseOrIteration = PREVIOUS_PHASE_AFTER;
   }
 
-  uint32_t message;
+  EventMessage message;
 
   if (!wasActive && isActive) {
     message = NS_ANIMATION_START;
@@ -275,6 +275,21 @@ CSSAnimation::QueueEvents()
   manager->QueueEvent(
     AnimationEventInfo(owningElement, mAnimationName, message, elapsedTime,
                        owningPseudoType));
+}
+
+bool
+CSSAnimation::HasEndEventToQueue() const
+{
+  if (!mEffect) {
+    return false;
+  }
+
+  bool wasActive = mPreviousPhaseOrIteration != PREVIOUS_PHASE_BEFORE &&
+                   mPreviousPhaseOrIteration != PREVIOUS_PHASE_AFTER;
+  bool isActive = mEffect->GetComputedTiming().mPhase ==
+                    ComputedTiming::AnimationPhase_Active;
+
+  return wasActive && !isActive;
 }
 
 CommonAnimationManager*
@@ -375,7 +390,7 @@ nsAnimationManager::CheckAnimationRule(nsStyleContext* aStyleContext,
     return nullptr;
   }
 
-  nsAutoAnimationMutationBatch mb(aElement);
+  nsAutoAnimationMutationBatch mb(aElement->OwnerDoc());
 
   // build the animations list
   dom::DocumentTimeline* timeline = aElement->OwnerDoc()->Timeline();
@@ -455,14 +470,8 @@ nsAnimationManager::CheckAnimationRule(nsStyleContext* aStyleContext,
           animationChanged =
             oldEffect->Timing() != newEffect->Timing() ||
             oldEffect->Properties() != newEffect->Properties();
-          oldEffect->Timing() = newEffect->Timing();
+          oldEffect->SetTiming(newEffect->Timing(), *oldAnim);
           oldEffect->Properties() = newEffect->Properties();
-          // FIXME: Currently assigning to KeyframeEffect::Timing() does not
-          // update the corresponding Animation (which may, for example, no
-          // longer be finished). Until we introduce proper setters for
-          // properties on effects, we need to manually cause the owning
-          // Animation to update its timing by setting the effect again.
-          oldAnim->SetEffect(oldEffect);
         }
 
         // Reset compositor state so animation will be re-synchronized.
@@ -507,10 +516,6 @@ nsAnimationManager::CheckAnimationRule(nsStyleContext* aStyleContext,
         newAnim = nullptr;
         newAnimations.ReplaceElementAt(newIdx, oldAnim);
         collection->mAnimations.RemoveElementAt(oldIdx);
-
-        // We've touched the old animation's timing properties, so this
-        // could update the old animation's relevance.
-        oldAnim->UpdateRelevance();
       }
     }
   } else {
@@ -534,7 +539,7 @@ nsAnimationManager::CheckAnimationRule(nsStyleContext* aStyleContext,
   UpdateCascadeResults(aStyleContext, collection);
 
   TimeStamp refreshTime = mPresContext->RefreshDriver()->MostRecentRefresh();
-  collection->EnsureStyleRuleFor(refreshTime, EnsureStyleRule_IsNotThrottled);
+  collection->EnsureStyleRuleFor(refreshTime);
   // We don't actually dispatch the pending events now.  We'll either
   // dispatch them the next time we get a refresh driver notification
   // or the next time somebody calls
@@ -949,14 +954,9 @@ nsAnimationManager::UpdateCascadeResults(
     }
   }
 
+  // If there is any change in the cascade result, update animations on layers
+  // with the winning animations.
   if (changed) {
-    nsPresContext* presContext = aElementAnimations->mManager->PresContext();
-    presContext->RestyleManager()->IncrementAnimationGeneration();
-    aElementAnimations->UpdateAnimationGeneration(presContext);
-    aElementAnimations->PostUpdateLayerAnimations();
-
-    // Invalidate our style rule.
-    aElementAnimations->mNeedsRefreshes = true;
-    aElementAnimations->mStyleRuleRefreshTime = TimeStamp();
+    aElementAnimations->RequestRestyle(AnimationCollection::RestyleType::Layer);
   }
 }

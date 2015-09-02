@@ -81,13 +81,23 @@ bool
 DirectProxyHandler::construct(JSContext* cx, HandleObject proxy, const CallArgs& args) const
 {
     assertEnteredPolicy(cx, proxy, JSID_VOID, CALL);
+
     RootedValue target(cx, proxy->as<ProxyObject>().private_());
-    return InvokeConstructor(cx, target, args.length(), args.array(), true, args.rval());
+    if (!IsConstructor(target)) {
+        ReportValueError(cx, JSMSG_NOT_CONSTRUCTOR, JSDVG_IGNORE_STACK, target, nullptr);
+        return false;
+    }
+
+    ConstructArgs cargs(cx);
+    if (!FillArgumentsFromArraylike(cx, cargs, args))
+        return false;
+
+    return Construct(cx, target, cargs, args.newTarget(), args.rval());
 }
 
 bool
 DirectProxyHandler::nativeCall(JSContext* cx, IsAcceptableThis test, NativeImpl impl,
-                               CallArgs args) const
+                               const CallArgs& args) const
 {
     args.setThis(ObjectValue(*args.thisv().toObject().as<ProxyObject>().target()));
     if (!test(args.thisv())) {

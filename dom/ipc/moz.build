@@ -112,8 +112,6 @@ IPDL_SOURCES += [
     'PTabContext.ipdlh',
 ]
 
-FAIL_ON_WARNINGS = True
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
@@ -128,9 +126,8 @@ LOCAL_INCLUDES += [
     '/chrome',
     '/docshell/base',
     '/dom/base',
-    '/dom/bluetooth',
-    '/dom/bluetooth/bluetooth2',
-    '/dom/bluetooth/bluetooth2/ipc',
+    '/dom/bluetooth/common',
+    '/dom/bluetooth/ipc',
     '/dom/devicestorage',
     '/dom/filesystem',
     '/dom/fmradio/ipc',
@@ -159,6 +156,11 @@ if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
     LOCAL_INCLUDES += [
         '/security/sandbox/chromium',
         '/security/sandbox/chromium-shim',
+    ]
+
+if CONFIG['OS_ARCH'] != 'WINNT':
+    LOCAL_INCLUDES += [
+        '/modules/libjar',
     ]
 
 DEFINES['BIN_SUFFIX'] = '"%s"' % CONFIG['BIN_SUFFIX']

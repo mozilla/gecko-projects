@@ -17,7 +17,6 @@
 #include "nsNetUtil.h"
 #include "nsISupportsPriority.h"
 #include "nsIAuthPromptProvider.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsSerializationHelper.h"
 #include "nsISerializable.h"
 #include "nsIAssociatedContentSecurity.h"
@@ -34,7 +33,10 @@
 #include "mozilla/LoadInfo.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsQueryObject.h"
+#include "mozilla/BasePrincipal.h"
 
+using mozilla::BasePrincipal;
+using mozilla::OriginAttributes;
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
 
@@ -120,8 +122,9 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
                        a.thirdPartyFlags(), a.resumeAt(), a.startPos(),
                        a.entityID(), a.chooseApplicationCache(),
                        a.appCacheClientID(), a.allowSpdy(), a.allowAltSvc(), a.fds(),
-                       a.loadInfo(), a.synthesizedResponseHead(), a.cacheKey(),
-                       a.schedulingContextID());
+                       a.loadInfo(), a.synthesizedResponseHead(),
+                       a.synthesizedSecurityInfoSerialization(),
+                       a.cacheKey(), a.schedulingContextID());
   }
   case HttpChannelCreationArgs::THttpChannelConnectArgs:
   {
@@ -277,6 +280,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const OptionalFileDescriptorSet& aFds,
                                  const OptionalLoadInfoArgs& aLoadInfoArgs,
                                  const OptionalHttpResponseHead& aSynthesizedResponseHead,
+                                 const nsCString&           aSecurityInfoSerialization,
                                  const uint32_t&            aCacheKey,
                                  const nsCString&           aSchedulingContextID)
 {
@@ -390,6 +394,14 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   if (aSynthesizedResponseHead.type() == OptionalHttpResponseHead::TnsHttpResponseHead) {
     mSynthesizedResponseHead = new nsHttpResponseHead(aSynthesizedResponseHead.get_nsHttpResponseHead());
     mShouldIntercept = true;
+    mChannel->SetCouldBeSynthesized();
+
+    if (!aSecurityInfoSerialization.IsEmpty()) {
+      nsCOMPtr<nsISupports> secInfo;
+      NS_DeserializeObject(aSecurityInfoSerialization, getter_AddRefs(secInfo));
+      mChannel->OverrideSecurityInfo(secInfo);
+    }
+
   } else {
     mChannel->ForceNoIntercept();
   }
@@ -447,17 +459,15 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
         mLoadContext->GetIsInBrowserElement(&inBrowser);
       }
 
-      bool chooseAppCache = false;
-      nsCOMPtr<nsIScriptSecurityManager> secMan =
-        do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
-      if (secMan) {
-        nsCOMPtr<nsIPrincipal> principal;
-        secMan->GetAppCodebasePrincipal(uri, appId, inBrowser, getter_AddRefs(principal));
+      // TODO: Bug 1165466 - use originAttribute in nsILoadContext.
+      OriginAttributes attrs(appId, inBrowser);
+      nsCOMPtr<nsIPrincipal> principal =
+        BasePrincipal::CreateCodebasePrincipal(uri, attrs);
 
-        // This works because we've already called SetNotificationCallbacks and
-        // done mPBOverride logic by this point.
-        chooseAppCache = NS_ShouldCheckAppCache(principal, NS_UsePrivateBrowsing(mChannel));
-      }
+      bool chooseAppCache = false;
+      // This works because we've already called SetNotificationCallbacks and
+      // done mPBOverride logic by this point.
+      chooseAppCache = NS_ShouldCheckAppCache(principal, NS_UsePrivateBrowsing(mChannel));
 
       appCacheChan->SetChooseApplicationCache(chooseAppCache);
     }
@@ -467,7 +477,12 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   schedulingContextID.Parse(aSchedulingContextID.BeginReading());
   mChannel->SetSchedulingContextID(schedulingContextID);
 
-  rv = mChannel->AsyncOpen(mParentListener, nullptr);
+  if (loadInfo && loadInfo->GetEnforceSecurity()) {
+    rv = mChannel->AsyncOpen2(mParentListener);
+  }
+  else {
+    rv = mChannel->AsyncOpen(mParentListener, nullptr);
+  }
   if (NS_FAILED(rv))
     return SendFailedAsyncOpen(rv);
 
@@ -822,14 +837,7 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
   chan->GetStatus(&channelStatus);
 
   nsCString secInfoSerialization;
-  nsCOMPtr<nsISupports> secInfoSupp;
-  chan->GetSecurityInfo(getter_AddRefs(secInfoSupp));
-  if (secInfoSupp) {
-    mAssociatedContentSecurity = do_QueryInterface(secInfoSupp);
-    nsCOMPtr<nsISerializable> secInfoSer = do_QueryInterface(secInfoSupp);
-    if (secInfoSer)
-      NS_SerializeToString(secInfoSer, secInfoSerialization);
-  }
+  UpdateAndSerializeSecurityInfo(secInfoSerialization);
 
   uint16_t redirectCount = 0;
   mChannel->GetRedirectCount(&redirectCount);
@@ -1034,10 +1042,14 @@ HttpChannelParent::StartRedirect(uint32_t newChannelId,
   URIParams uriParams;
   SerializeURI(newURI, uriParams);
 
+  nsCString secInfoSerialization;
+  UpdateAndSerializeSecurityInfo(secInfoSerialization);
+
   nsHttpResponseHead *responseHead = mChannel->GetResponseHead();
   bool result = SendRedirect1Begin(newChannelId, uriParams, redirectFlags,
                                    responseHead ? *responseHead
-                                                : nsHttpResponseHead());
+                                                : nsHttpResponseHead(),
+                                   secInfoSerialization);
   if (!result) {
     // Bug 621446 investigation
     mSentRedirect1BeginFailed = true;
@@ -1310,6 +1322,20 @@ HttpChannelParent::GetAuthPrompt(uint32_t aPromptReason, const nsIID& iid,
     new NeckoParent::NestedFrameAuthPrompt(Manager(), mNestedFrameId);
   prompt.forget(aResult);
   return NS_OK;
+}
+
+void
+HttpChannelParent::UpdateAndSerializeSecurityInfo(nsACString& aSerializedSecurityInfoOut)
+{
+  nsCOMPtr<nsISupports> secInfoSupp;
+  mChannel->GetSecurityInfo(getter_AddRefs(secInfoSupp));
+  if (secInfoSupp) {
+    mAssociatedContentSecurity = do_QueryInterface(secInfoSupp);
+    nsCOMPtr<nsISerializable> secInfoSer = do_QueryInterface(secInfoSupp);
+    if (secInfoSer) {
+      NS_SerializeToString(secInfoSer, aSerializedSecurityInfoOut);
+    }
+  }
 }
 
 //-----------------------------------------------------------------------------

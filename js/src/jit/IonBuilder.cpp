@@ -4485,18 +4485,48 @@ IonBuilder::pushConstant(const Value& v)
 }
 
 bool
+IonBuilder::bitnotTrySpecialized(bool* emitted, MDefinition* input)
+{
+    MOZ_ASSERT(*emitted == false);
+
+    // Try to emit a specialized bitnot instruction based on the input type
+    // of the operand.
+
+    if (input->mightBeType(MIRType_Object) || input->mightBeType(MIRType_Symbol))
+        return true;
+
+    MBitNot* ins = MBitNot::New(alloc(), input);
+    ins->setSpecialization(MIRType_Int32);
+
+    current->add(ins);
+    current->push(ins);
+
+    *emitted = true;
+    return true;
+}
+
+bool
 IonBuilder::jsop_bitnot()
 {
+    bool emitted = false;
+
     MDefinition* input = current->pop();
+
+    if (!forceInlineCaches()) {
+        if (!bitnotTrySpecialized(&emitted, input) || emitted)
+            return emitted;
+    }
+
+    if (!arithTrySharedStub(&emitted, JSOP_BITNOT, nullptr, input) || emitted)
+        return emitted;
+
+    // Not possible to optimize. Do a slow vm call.
     MBitNot* ins = MBitNot::New(alloc(), input);
 
     current->add(ins);
-    ins->infer();
-
     current->push(ins);
-    if (ins->isEffectful() && !resumeAfter(ins))
-        return false;
-    return true;
+    MOZ_ASSERT(ins->isEffectful());
+    return resumeAfter(ins);
 }
 bool
 IonBuilder::jsop_bitop(JSOp op)
@@ -4672,6 +4702,57 @@ IonBuilder::binaryArithTrySpecializedOnBaselineInspector(bool* emitted, JSOp op,
 }
 
 bool
+IonBuilder::arithTrySharedStub(bool* emitted, JSOp op,
+                               MDefinition* left, MDefinition* right)
+{
+    MOZ_ASSERT(*emitted == false);
+    JSOp actualOp = JSOp(*pc);
+
+    // Try to emit a shared stub cache.
+
+    if (js_JitOptions.disableSharedStubs)
+        return true;
+
+    // The actual jsop 'jsop_pos' is not supported yet.
+    if (actualOp == JSOP_POS)
+        return true;
+
+    MInstruction* stub = nullptr;
+    switch (actualOp) {
+      case JSOP_NEG:
+      case JSOP_BITNOT:
+        MOZ_ASSERT_IF(op == JSOP_MUL, left->isConstantValue() &&
+                                      left->constantValue().toInt32() == -1);
+        MOZ_ASSERT_IF(op != JSOP_MUL, !left);
+
+        stub = MUnarySharedStub::New(alloc(), right);
+        break;
+      case JSOP_ADD:
+      case JSOP_SUB:
+      case JSOP_MUL:
+      case JSOP_DIV:
+      case JSOP_MOD:
+        stub = MBinarySharedStub::New(alloc(), left, right);
+        break;
+      default:
+        MOZ_CRASH("unsupported arith");
+    }
+
+    current->add(stub);
+    current->push(stub);
+
+    // Decrease type from 'any type' to 'empty type' when one of the operands
+    // is 'empty typed'.
+    maybeMarkEmpty(stub);
+
+    if (!resumeAfter(stub))
+        return false;
+
+    *emitted = true;
+    return true;
+}
+
+bool
 IonBuilder::jsop_binary_arith(JSOp op, MDefinition* left, MDefinition* right)
 {
     bool emitted = false;
@@ -4686,6 +4767,9 @@ IonBuilder::jsop_binary_arith(JSOp op, MDefinition* left, MDefinition* right)
         if (!binaryArithTrySpecializedOnBaselineInspector(&emitted, op, left, right) || emitted)
             return emitted;
     }
+
+    if (!arithTrySharedStub(&emitted, op, left, right) || emitted)
+        return emitted;
 
     // Not possible to optimize. Do a slow vm call.
     MDefinition::Opcode def_op = JSOpToMDefinition(op);
@@ -4758,9 +4842,7 @@ IonBuilder::jsop_neg()
 
     MDefinition* right = current->pop();
 
-    if (!jsop_binary_arith(JSOP_MUL, negator, right))
-        return false;
-    return true;
+    return jsop_binary_arith(JSOP_MUL, negator, right);
 }
 
 class AutoAccumulateReturns
@@ -6598,9 +6680,6 @@ IonBuilder::jsop_eval(uint32_t argc)
                 return makeCall(nullptr, evalCallInfo);
             }
         }
-
-        MInstruction* filterArguments = MFilterArgumentsOrEval::New(alloc(), string);
-        current->add(filterArguments);
 
         MInstruction* ins = MCallDirectEval::New(alloc(), scopeChain, string,
                                                  thisValue, newTargetValue, pc);
@@ -9540,6 +9619,9 @@ IonBuilder::jsop_length_fastPath()
 
     MDefinition* obj = current->peek(-1);
 
+    if (shouldAbortOnPreliminaryGroups(obj))
+        return false;
+
     if (obj->mightBeType(MIRType_String)) {
         if (obj->mightBeType(MIRType_Object))
             return false;
@@ -9656,6 +9738,15 @@ IonBuilder::jsop_newtarget()
 bool
 IonBuilder::jsop_rest()
 {
+    if (info().analysisMode() == Analysis_ArgumentsUsage) {
+        // There's no BaselineScript with the template object. Just push a
+        // dummy value, it does not affect the arguments analysis.
+        MUnknownValue* unknown = MUnknownValue::New(alloc());
+        current->add(unknown);
+        current->push(unknown);
+        return true;
+    }
+
     ArrayObject* templateObject = &inspector->getTemplateObject(pc)->as<ArrayObject>();
 
     if (inliningDepth_ == 0) {

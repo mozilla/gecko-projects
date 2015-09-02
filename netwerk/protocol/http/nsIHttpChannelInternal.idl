@@ -38,7 +38,7 @@ interface nsIHttpUpgradeListener : nsISupports
  * using any feature exposed by this interface, be aware that this interface
  * will change and you will be broken.  You have been warned.
  */
-[scriptable, uuid(4c9e681e-efd8-4ed2-b57f-20d48c9b3c3b)]
+[scriptable, uuid(e2eebad8-e51f-473a-bbb7-8e2829376625)]
 
 interface nsIHttpChannelInternal : nsISupports
 {
@@ -221,6 +221,8 @@ interface nsIHttpChannelInternal : nsISupports
      */
     void forceNoIntercept();
 
+    readonly attribute boolean responseSynthesized;
+
     /**
      * Set by nsCORSListenerProxy if credentials should be included in
      * cross-origin requests. false indicates "same-origin", users should still
@@ -236,6 +238,16 @@ interface nsIHttpChannelInternal : nsISupports
      * Set by nsCORSListenerProxy to indicate CORS load type. Defaults to CORS_MODE_NO_CORS.
      */
     attribute unsigned long corsMode;
+
+    const unsigned long REDIRECT_MODE_FOLLOW = 0;
+    const unsigned long REDIRECT_MODE_ERROR = 1;
+    const unsigned long REDIRECT_MODE_MANUAL = 2;
+    /**
+     * Set to indicate Request.redirect mode exposed during ServiceWorker
+     * interception. No policy enforcement is performed by the channel for this
+     * value.
+     */
+    attribute unsigned long redirectMode;
 
     /**
      * The URI of the top-level window that's associated with this channel.

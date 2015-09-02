@@ -470,7 +470,7 @@ SVGSVGElement::SetZoomAndPan(uint16_t aZoomAndPan, ErrorResult& rv)
     return;
   }
 
-  rv.ThrowRangeError(MSG_INVALID_ZOOMANDPAN_VALUE_ERROR, &aZoomAndPan);
+  rv.ThrowRangeError(MSG_INVALID_ZOOMANDPAN_VALUE_ERROR);
 }
 
 //----------------------------------------------------------------------
@@ -590,7 +590,7 @@ SVGSVGElement::IsAttributeMapped(const nsIAtom* name) const
 nsresult
 SVGSVGElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 {
-  if (aVisitor.mEvent->message == NS_SVG_LOAD) {
+  if (aVisitor.mEvent->mMessage == NS_SVG_LOAD) {
     if (mTimedDocumentRoot) {
       mTimedDocumentRoot->Begin();
       // Set 'resample needed' flag, so that if any script calls a DOM method

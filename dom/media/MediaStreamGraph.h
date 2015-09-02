@@ -638,7 +638,6 @@ protected:
   TimeVarying<GraphTime,uint32_t,0> mExplicitBlockerCount;
   nsTArray<nsRefPtr<MediaStreamListener> > mListeners;
   nsTArray<MainThreadMediaStreamListener*> mMainThreadListeners;
-  nsRefPtr<nsRunnable> mNotificationMainThreadRunnable;
   nsTArray<TrackID> mDisabledTrackIDs;
 
   // Precomputed blocking status (over GraphTime).
@@ -898,9 +897,7 @@ protected:
     // Resampler if the rate of the input track does not match the
     // MediaStreamGraph's.
     nsAutoRef<SpeexResamplerState> mResampler;
-#ifdef DEBUG
     int mResamplerChannelCount;
-#endif
     StreamTime mStart;
     // End-time of data already flushed to the track (excluding mData)
     StreamTime mEndOfFlushedData;
@@ -1196,22 +1193,33 @@ protected:
 };
 
 /**
- * Initially, at least, we will have a singleton MediaStreamGraph per
- * process.  Each OfflineAudioContext object creates its own MediaStreamGraph
- * object too.
+ * There can be multiple MediaStreamGraph per process: one per AudioChannel.
+ * Additionaly, each OfflineAudioContext object creates its own MediaStreamGraph
+ * object too..
  */
 class MediaStreamGraph
 {
 public:
+
   // We ensure that the graph current time advances in multiples of
   // IdealAudioBlockSize()/AudioStream::PreferredSampleRate(). A stream that
   // never blocks and has a track with the ideal audio rate will produce audio
   // in multiples of the block size.
   //
 
+  // Initializing an graph that outputs audio can be quite long on some
+  // platforms. Code that want to output audio at some point can express the
+  // fact that they will need an audio stream at some point by passing
+  // AUDIO_THREAD_DRIVER when getting an instance of MediaStreamGraph, so that
+  // the graph starts with the right driver.
+  enum GraphDriverType {
+    AUDIO_THREAD_DRIVER,
+    SYSTEM_THREAD_DRIVER,
+    OFFLINE_THREAD_DRIVER
+  };
   // Main thread only
-  static MediaStreamGraph* GetInstance(bool aStartWithAudioDriver = false,
-                                       dom::AudioChannel aChannel = dom::AudioChannel::Normal);
+  static MediaStreamGraph* GetInstance(GraphDriverType aGraphDriverRequested,
+                                       dom::AudioChannel aChannel);
   static MediaStreamGraph* CreateNonRealtimeInstance(TrackRate aSampleRate);
   // Idempotent
   static void DestroyNonRealtimeInstance(MediaStreamGraph* aGraph);
@@ -1241,23 +1249,11 @@ public:
    * Create a stream that will mix all its audio input.
    */
   ProcessedMediaStream* CreateAudioCaptureStream(DOMMediaStream* aWrapper);
-  // Internal AudioNodeStreams can only pass their output to another
-  // AudioNode, whereas external AudioNodeStreams can pass their output
-  // to an nsAudioStream for playback.
-  enum AudioNodeStreamKind { SOURCE_STREAM, INTERNAL_STREAM, EXTERNAL_STREAM };
-  /**
-   * Create a stream that will process audio for an AudioNode.
-   * Takes ownership of aEngine.  aSampleRate is the sampling rate used
-   * for the stream.  If 0 is passed, the sampling rate of the engine's
-   * node will get used.
-   */
-  AudioNodeStream* CreateAudioNodeStream(AudioNodeEngine* aEngine,
-                                         AudioNodeStreamKind aKind,
-                                         TrackRate aSampleRate = 0);
 
-  AudioNodeExternalInputStream*
-  CreateAudioNodeExternalInputStream(AudioNodeEngine* aEngine,
-                                     TrackRate aSampleRate = 0);
+  /**
+   * Add a new stream to the graph.  Main thread.
+   */
+  void AddStream(MediaStream* aStream);
 
   /* From the main thread, ask the MSG to send back an event when the graph
    * thread is running, and audio is being processed. */

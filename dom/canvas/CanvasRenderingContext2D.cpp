@@ -1014,7 +1014,7 @@ CanvasRenderingContext2D::ParseColor(const nsAString& aString,
     *aColor = value.GetColorValue();
   } else {
     // otherwise resolve it
-    nsIPresShell* presShell = GetPresShell();
+    nsCOMPtr<nsIPresShell> presShell = GetPresShell();
     nsRefPtr<nsStyleContext> parentContext;
     if (mCanvasElement && mCanvasElement->IsInDoc()) {
       // Inherit from the canvas element.
@@ -1728,7 +1728,11 @@ CanvasRenderingContext2D::Scale(double x, double y, ErrorResult& error)
   }
 
   Matrix newMatrix = mTarget->GetTransform();
-  mTarget->SetTransform(newMatrix.PreScale(x, y));
+  newMatrix.PreScale(x, y);
+  if (!newMatrix.IsFinite()) {
+    return;
+  }
+  mTarget->SetTransform(newMatrix);
 }
 
 void
@@ -1740,8 +1744,11 @@ CanvasRenderingContext2D::Rotate(double angle, ErrorResult& error)
     return;
   }
 
-  Matrix rotation = Matrix::Rotation(angle);
-  mTarget->SetTransform(rotation * mTarget->GetTransform());
+  Matrix newMatrix = Matrix::Rotation(angle) * mTarget->GetTransform();
+  if (!newMatrix.IsFinite()) {
+    return;
+  }
+  mTarget->SetTransform(newMatrix);
 }
 
 void
@@ -1753,7 +1760,12 @@ CanvasRenderingContext2D::Translate(double x, double y, ErrorResult& error)
     return;
   }
 
-  mTarget->SetTransform(Matrix(mTarget->GetTransform()).PreTranslate(x, y));
+  Matrix newMatrix = mTarget->GetTransform();
+  newMatrix.PreTranslate(x, y);
+  if (!newMatrix.IsFinite()) {
+    return;
+  }
+  mTarget->SetTransform(newMatrix);
 }
 
 void
@@ -1767,8 +1779,12 @@ CanvasRenderingContext2D::Transform(double m11, double m12, double m21,
     return;
   }
 
-  Matrix matrix(m11, m12, m21, m22, dx, dy);
-  mTarget->SetTransform(matrix * mTarget->GetTransform());
+  Matrix newMatrix(m11, m12, m21, m22, dx, dy);
+  newMatrix *= mTarget->GetTransform();
+  if (!newMatrix.IsFinite()) {
+    return;
+  }
+  mTarget->SetTransform(newMatrix);
 }
 
 void
@@ -1784,6 +1800,9 @@ CanvasRenderingContext2D::SetTransform(double m11, double m12,
   }
 
   Matrix matrix(m11, m12, m21, m22, dx, dy);
+  if (!matrix.IsFinite()) {
+    return;
+  }
   mTarget->SetTransform(matrix);
 }
 
@@ -2151,9 +2170,15 @@ GetFontParentStyleContext(Element* aElement, nsIPresShell* presShell,
                           ErrorResult& error)
 {
   if (aElement && aElement->IsInDoc()) {
-    // inherit from the canvas element
-    return nsComputedDOMStyle::GetStyleContextForElement(aElement, nullptr,
-                                                         presShell);
+    // Inherit from the canvas element.
+    nsRefPtr<nsStyleContext> result =
+      nsComputedDOMStyle::GetStyleContextForElement(aElement, nullptr,
+                                                    presShell);
+    if (!result) {
+      error.Throw(NS_ERROR_FAILURE);
+      return nullptr;
+    }
+    return result.forget();
   }
 
   // otherwise inherit from default (10px sans-serif)
@@ -2168,7 +2193,14 @@ GetFontParentStyleContext(Element* aElement, nsIPresShell* presShell,
 
   nsTArray<nsCOMPtr<nsIStyleRule>> parentRules;
   parentRules.AppendElement(parentRule);
-  return presShell->StyleSet()->ResolveStyleForRules(nullptr, parentRules);
+  nsRefPtr<nsStyleContext> result =
+    presShell->StyleSet()->ResolveStyleForRules(nullptr, parentRules);
+
+  if (!result) {
+    error.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+  return result.forget();
 }
 
 static bool
@@ -2221,6 +2253,12 @@ GetFontStyleContext(Element* aElement, const nsAString& aFont,
     error.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
+
+  MOZ_RELEASE_ASSERT(parentContext,
+                     "GetFontParentStyleContext should have returned an error if it couldn't get a parent context.");
+
+  MOZ_ASSERT(!presShell->IsDestroying(),
+             "GetFontParentStyleContext should have returned an error if the presshell is being destroyed.");
 
   nsTArray<nsCOMPtr<nsIStyleRule>> rules;
   rules.AppendElement(rule);
@@ -2299,7 +2337,7 @@ CanvasRenderingContext2D::ParseFilter(const nsAString& aString,
     return false;
   }
 
-  nsIPresShell* presShell = GetPresShell();
+  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   if (!presShell) {
     error.Throw(NS_ERROR_FAILURE);
     return false;
@@ -3035,6 +3073,13 @@ void
 CanvasRenderingContext2D::SetFont(const nsAString& font,
                                   ErrorResult& error)
 {
+  SetFontInternal(font, error);
+}
+
+bool
+CanvasRenderingContext2D::SetFontInternal(const nsAString& font,
+                                          ErrorResult& error)
+{
   /*
     * If font is defined with relative units (e.g. ems) and the parent
     * style context changes in between calls, setting the font to the
@@ -3046,20 +3091,20 @@ CanvasRenderingContext2D::SetFont(const nsAString& font,
   if (!mCanvasElement && !mDocShell) {
     NS_WARNING("Canvas element must be non-null or a docshell must be provided");
     error.Throw(NS_ERROR_FAILURE);
-    return;
+    return false;
   }
 
-  nsIPresShell* presShell = GetPresShell();
+  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   if (!presShell) {
     error.Throw(NS_ERROR_FAILURE);
-    return;
+    return false;
   }
 
   nsString usedFont;
   nsRefPtr<nsStyleContext> sc =
     GetFontStyleContext(mCanvasElement, font, presShell, usedFont, error);
   if (!sc) {
-    return;
+    return false;
   }
 
   const nsStyleFont* fontStyle = sc->StyleFont();
@@ -3099,6 +3144,8 @@ CanvasRenderingContext2D::SetFont(const nsAString& font,
   CurrentState().fontFont.size = fontStyle->mSize;
   CurrentState().fontLanguage = fontStyle->mLanguage;
   CurrentState().fontExplicitLanguage = fontStyle->mExplicitLanguage;
+
+  return true;
 }
 
 void
@@ -3693,7 +3740,12 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   }
 
   gfxFontGroup* currentFontStyle = GetCurrentFontStyle();
-  NS_ASSERTION(currentFontStyle, "font group is null");
+  if (!currentFontStyle) {
+    return NS_ERROR_FAILURE;
+  }
+
+  MOZ_ASSERT(!presShell->IsDestroying(),
+             "GetCurrentFontStyle() should have returned null if the presshell is being destroyed");
 
   // ensure user font set is up to date
   currentFontStyle->
@@ -3891,8 +3943,9 @@ gfxFontGroup *CanvasRenderingContext2D::GetCurrentFontStyle()
     ErrorResult err;
     NS_NAMED_LITERAL_STRING(kDefaultFontStyle, "10px sans-serif");
     static float kDefaultFontSize = 10.0;
-    SetFont(kDefaultFontStyle, err);
-    if (err.Failed()) {
+    nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+    bool fontUpdated = SetFontInternal(kDefaultFontStyle, err);
+    if (err.Failed() || !fontUpdated) {
       gfxFontStyle style;
       style.size = kDefaultFontSize;
       CurrentState().fontGroup =
@@ -3901,9 +3954,7 @@ gfxFontGroup *CanvasRenderingContext2D::GetCurrentFontStyle()
                                                     nullptr);
       if (CurrentState().fontGroup) {
         CurrentState().font = kDefaultFontStyle;
-
-        nsIPresShell* presShell = GetPresShell();
-        if (presShell) {
+        if (presShell && !presShell->IsDestroying()) {
           CurrentState().fontGroup->SetTextPerfMetrics(
             presShell->GetPresContext()->GetTextPerfMetrics());
         }
@@ -3911,7 +3962,6 @@ gfxFontGroup *CanvasRenderingContext2D::GetCurrentFontStyle()
         NS_ERROR("Default canvas font is invalid");
       }
     }
-
   }
 
   return CurrentState().fontGroup;

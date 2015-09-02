@@ -26,7 +26,6 @@ import org.mozilla.gecko.widget.IconTabWidget;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -39,7 +38,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
-import org.mozilla.gecko.widget.ThemedImageButton;
+import org.mozilla.gecko.widget.themed.ThemedImageButton;
 
 public class TabsPanel extends LinearLayout
                        implements GeckoPopupMenu.OnMenuItemClickListener,
@@ -56,7 +55,6 @@ public class TabsPanel extends LinearLayout
         void setTabsPanel(TabsPanel panel);
         void show();
         void hide();
-        boolean shouldExpand();
     }
 
     public interface CloseAllPanelView extends PanelView {
@@ -67,14 +65,6 @@ public class TabsPanel extends LinearLayout
         void setEmptyView(View view);
     }
 
-    public static View createTabsLayout(final Context context, final AttributeSet attrs) {
-        if (HardwareUtils.isTablet()) {
-            return new TabsGridLayout(context, attrs);
-        } else {
-            return new TabsListLayout(context, attrs);
-        }
-    }
-
     public interface TabsLayoutChangeListener {
         void onTabsLayoutChange(int width, int height);
     }
@@ -83,14 +73,14 @@ public class TabsPanel extends LinearLayout
     private final GeckoApp mActivity;
     private final LightweightTheme mTheme;
     private RelativeLayout mHeader;
-    private TabsLayoutContainer mTabsContainer;
+    private FrameLayout mTabsContainer;
     private PanelView mPanel;
     private PanelView mPanelNormal;
     private PanelView mPanelPrivate;
     private TabsLayoutChangeListener mLayoutChangeListener;
 
     private IconTabWidget mTabWidget;
-    private static ImageButton mMenuButton;
+    private static View mMenuButton;
     private static ImageButton mAddTab;
     private ImageButton mNavBackButton;
 
@@ -122,7 +112,7 @@ public class TabsPanel extends LinearLayout
 
     private void initialize() {
         mHeader = (RelativeLayout) findViewById(R.id.tabs_panel_header);
-        mTabsContainer = (TabsLayoutContainer) findViewById(R.id.tabs_container);
+        mTabsContainer = (FrameLayout) findViewById(R.id.tabs_container);
 
         mPanelNormal = (PanelView) findViewById(R.id.normal_tabs);
         mPanelNormal.setTabsPanel(this);
@@ -151,7 +141,7 @@ public class TabsPanel extends LinearLayout
 
         mTabWidget.setTabSelectionListener(this);
 
-        mMenuButton = (ImageButton) findViewById(R.id.menu);
+        mMenuButton = findViewById(R.id.menu);
         mMenuButton.setOnClickListener(new Button.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -244,7 +234,7 @@ public class TabsPanel extends LinearLayout
         return mActivity.onOptionsItemSelected(item);
     }
 
-    private static int getTabContainerHeight(TabsLayoutContainer tabsContainer) {
+    private static int getTabContainerHeight(View tabsContainer) {
         Resources resources = tabsContainer.getContext().getResources();
 
         int screenHeight = resources.getDisplayMetrics().heightPixels;
@@ -287,18 +277,6 @@ public class TabsPanel extends LinearLayout
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         super.onLayout(changed, left, top, right, bottom);
         onLightweightThemeChanged();
-    }
-
-    static class TabsLayoutContainer extends FrameLayout {
-        public TabsLayoutContainer(Context context, AttributeSet attrs) {
-            super(context, attrs);
-        }
-
-        @Override
-        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            int heightSpec = MeasureSpec.makeMeasureSpec(getTabContainerHeight(TabsLayoutContainer.this), MeasureSpec.EXACTLY);
-            super.onMeasure(widthMeasureSpec, heightSpec);
-        }
     }
 
     // Tabs Panel Toolbar contains the Buttons
@@ -394,7 +372,6 @@ public class TabsPanel extends LinearLayout
         mPanel.show();
 
         mAddTab.setVisibility(View.VISIBLE);
-        mAddTab.setImageLevel(index);
 
         if (!HardwareUtils.hasMenuButton()) {
             mMenuButton.setVisibility(View.VISIBLE);
@@ -443,10 +420,6 @@ public class TabsPanel extends LinearLayout
     @Override
     public boolean isShown() {
         return mVisible;
-    }
-
-    public Panel getCurrentPanel() {
-        return mCurrentPanel;
     }
 
     public void setHWLayerEnabled(boolean enabled) {

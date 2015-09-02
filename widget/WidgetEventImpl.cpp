@@ -77,18 +77,18 @@ WidgetEvent::IsNativeEventDelivererForPlugin() const
 bool
 WidgetEvent::HasMouseEventMessage() const
 {
-  switch (message) {
-    case NS_MOUSE_BUTTON_DOWN:
-    case NS_MOUSE_BUTTON_UP:
-    case NS_MOUSE_CLICK:
-    case NS_MOUSE_DOUBLECLICK:
-    case NS_MOUSE_ENTER_WIDGET:
-    case NS_MOUSE_EXIT_WIDGET:
-    case NS_MOUSE_ACTIVATE:
-    case NS_MOUSE_OVER:
-    case NS_MOUSE_OUT:
-    case NS_MOUSE_MOZHITTEST:
-    case NS_MOUSE_MOVE:
+  switch (mMessage) {
+    case eMouseDown:
+    case eMouseUp:
+    case eMouseClick:
+    case eMouseDoubleClick:
+    case eMouseEnterIntoWidget:
+    case eMouseExitFromWidget:
+    case eMouseActivate:
+    case eMouseOver:
+    case eMouseOut:
+    case eMouseHitTest:
+    case eMouseMove:
       return true;
     default:
       return false;
@@ -98,17 +98,17 @@ WidgetEvent::HasMouseEventMessage() const
 bool
 WidgetEvent::HasDragEventMessage() const
 {
-  switch (message) {
-    case NS_DRAGDROP_ENTER:
-    case NS_DRAGDROP_OVER:
-    case NS_DRAGDROP_EXIT:
-    case NS_DRAGDROP_DRAGDROP:
-    case NS_DRAGDROP_GESTURE:
-    case NS_DRAGDROP_DRAG:
-    case NS_DRAGDROP_END:
-    case NS_DRAGDROP_START:
-    case NS_DRAGDROP_DROP:
-    case NS_DRAGDROP_LEAVE:
+  switch (mMessage) {
+    case eDragEnter:
+    case eDragOver:
+    case eDragExit:
+    case eLegacyDragDrop:
+    case eLegacyDragGesture:
+    case eDrag:
+    case eDragEnd:
+    case eDragStart:
+    case eDrop:
+    case eDragLeave:
       return true;
     default:
       return false;
@@ -118,14 +118,14 @@ WidgetEvent::HasDragEventMessage() const
 bool
 WidgetEvent::HasKeyEventMessage() const
 {
-  switch (message) {
-    case NS_KEY_DOWN:
-    case NS_KEY_PRESS:
-    case NS_KEY_UP:
-    case NS_KEY_BEFORE_DOWN:
-    case NS_KEY_BEFORE_UP:
-    case NS_KEY_AFTER_DOWN:
-    case NS_KEY_AFTER_UP:
+  switch (mMessage) {
+    case eKeyDown:
+    case eKeyPress:
+    case eKeyUp:
+    case eBeforeKeyDown:
+    case eBeforeKeyUp:
+    case eAfterKeyDown:
+    case eAfterKeyUp:
       return true;
     default:
       return false;
@@ -135,7 +135,7 @@ WidgetEvent::HasKeyEventMessage() const
 bool
 WidgetEvent::HasIMEEventMessage() const
 {
-  switch (message) {
+  switch (mMessage) {
     case NS_COMPOSITION_START:
     case NS_COMPOSITION_END:
     case NS_COMPOSITION_UPDATE:
@@ -151,8 +151,8 @@ WidgetEvent::HasIMEEventMessage() const
 bool
 WidgetEvent::HasPluginActivationEventMessage() const
 {
-  return message == NS_PLUGIN_ACTIVATE ||
-         message == NS_PLUGIN_FOCUS;
+  return mMessage == ePluginActivate ||
+         mMessage == ePluginFocus;
 }
 
 /******************************************************************************

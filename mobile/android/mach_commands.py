@@ -95,11 +95,10 @@ class MachCommands(MachCommandBase):
 
         srcdir('preprocessed_code/build.gradle', 'mobile/android/gradle/preprocessed_code/build.gradle')
         srcdir('preprocessed_code/src/main/AndroidManifest.xml', 'mobile/android/gradle/preprocessed_code/AndroidManifest.xml')
-        objdir('preprocessed_code/src/main/java', 'mobile/android/base/generated/preprocessed')
+        srcdir('preprocessed_code/src/adjust/java/org/mozilla/gecko/adjust', 'mobile/android/base/adjust')
 
         srcdir('preprocessed_resources/build.gradle', 'mobile/android/gradle/preprocessed_resources/build.gradle')
         srcdir('preprocessed_resources/src/main/AndroidManifest.xml', 'mobile/android/gradle/preprocessed_resources/AndroidManifest.xml')
-        objdir('preprocessed_resources/src/main/res', 'mobile/android/base/res')
 
         srcdir('thirdparty/build.gradle', 'mobile/android/gradle/thirdparty/build.gradle')
         srcdir('thirdparty/src/main/AndroidManifest.xml', 'mobile/android/gradle/thirdparty/AndroidManifest.xml')
@@ -120,8 +119,6 @@ class MachCommands(MachCommandBase):
         objdir('app/src/androidTest/AndroidManifest.xml', 'build/mobile/robocop/AndroidManifest.xml')
         srcdir('app/src/androidTest/res', 'build/mobile/robocop/res')
         srcdir('app/src/androidTest/assets', 'mobile/android/tests/browser/robocop/assets')
-        objdir('app/src/debug/assets', 'dist/fennec/assets')
-        objdir('app/src/debug/jniLibs', 'dist/fennec/lib')
         # Test code.
         srcdir('app/src/robocop_harness/org/mozilla/gecko', 'build/mobile/robocop')
         srcdir('app/src/robocop/org/mozilla/gecko/tests', 'mobile/android/tests/browser/robocop')
@@ -267,4 +264,74 @@ class PackageFrontend(MachCommandBase):
     def artifact_clear_cache(self, tree=None, job=None):
         artifacts = self._make_artifacts(tree=tree, job=job)
         artifacts.clear_cache()
+        return 0
+
+@CommandProvider
+class AndroidEmulatorCommands(MachCommandBase):
+    """
+       Run the Android emulator with one of the AVDs used in the Mozilla
+       automated test environment. If necessary, the AVD is fetched from
+       the tooltool server and installed.
+    """
+    @Command('android-emulator', category='devenv',
+        conditions=[],
+        description='Run the Android emulator with an AVD from test automation.')
+    @CommandArgument('--version', metavar='VERSION', choices=['2.3', '4.3', 'x86'],
+        help='Specify Android version to run in emulator. One of "2.3", "4.3", or "x86".',
+        default='4.3')
+    @CommandArgument('--wait', action='store_true',
+        help='Wait for emulator to be closed.')
+    @CommandArgument('--force-update', action='store_true',
+        help='Update AVD definition even when AVD is already installed.')
+    @CommandArgument('--verbose', action='store_true',
+        help='Log informative status messages.')
+    def emulator(self, version, wait=False, force_update=False, verbose=False):
+        from mozrunner.devices.android_device import AndroidEmulator
+
+        emulator = AndroidEmulator(version, verbose, substs=self.substs)
+        if emulator.is_running():
+            # It is possible to run multiple emulators simultaneously, but:
+            #  - if more than one emulator is using the same avd, errors may
+            #    occur due to locked resources;
+            #  - additional parameters must be specified when running tests,
+            #    to select a specific device.
+            # To avoid these complications, allow just one emulator at a time.
+            self.log(logging.ERROR, "emulator", {},
+                     "An Android emulator is already running.\n"
+                     "Close the existing emulator and re-run this command.")
+            return 1
+
+        if not emulator.is_available():
+            self.log(logging.WARN, "emulator", {},
+                     "Emulator binary not found.\n"
+                     "Install the Android SDK and make sure 'emulator' is in your PATH.")
+            return 2
+
+        if not emulator.check_avd(force_update):
+            self.log(logging.INFO, "emulator", {},
+                     "Fetching and installing AVD. This may take a few minutes...")
+            emulator.update_avd(force_update)
+
+        self.log(logging.INFO, "emulator", {},
+                 "Starting Android emulator running %s..." %
+                 emulator.get_avd_description())
+        emulator.start()
+        if emulator.wait_for_start():
+            self.log(logging.INFO, "emulator", {},
+                     "Android emulator is running.")
+        else:
+            # This is unusual but the emulator may still function.
+            self.log(logging.WARN, "emulator", {},
+                     "Unable to verify that emulator is running.")
+
+        if wait:
+            self.log(logging.INFO, "emulator", {},
+                     "Waiting for Android emulator to close...")
+            rc = emulator.wait()
+            if rc is not None:
+                self.log(logging.INFO, "emulator", {},
+                         "Android emulator completed with return code %d." % rc)
+            else:
+                self.log(logging.WARN, "emulator", {},
+                         "Unable to retrieve Android emulator return code.")
         return 0

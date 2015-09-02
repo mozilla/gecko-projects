@@ -447,7 +447,7 @@ let gFxAccounts = {
       this.openPreferences();
       break;
     default:
-      this.openAccountsPage(null, { entryPoint: "menupanel" });
+      this.openPreferences();
       break;
     }
 
@@ -455,16 +455,16 @@ let gFxAccounts = {
   },
 
   openPreferences: function () {
-    openPreferences("paneSync");
+    openPreferences("paneSync", { urlParams: { entrypoint: "menupanel" } });
   },
 
   openAccountsPage: function (action, urlParams={}) {
-    // An entryPoint param is used for server-side metrics.  If the current tab
+    // An entrypoint param is used for server-side metrics.  If the current tab
     // is UITour, assume that it initiated the call to this method and override
-    // the entryPoint accordingly.
+    // the entrypoint accordingly.
     if (UITour.tourBrowsersByWindow.get(window) &&
         UITour.tourBrowsersByWindow.get(window).has(gBrowser.selectedBrowser)) {
-      urlParams.entryPoint = "uitour";
+      urlParams.entrypoint = "uitour";
     }
     let params = new URLSearchParams();
     if (action) {
@@ -482,7 +482,7 @@ let gFxAccounts = {
   },
 
   openSignInAgainPage: function (entryPoint) {
-    this.openAccountsPage("reauth", { entryPoint: entryPoint });
+    this.openAccountsPage("reauth", { entrypoint: entryPoint });
   },
 };
 

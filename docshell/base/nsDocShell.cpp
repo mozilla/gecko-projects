@@ -11,11 +11,13 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/Casting.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/ProfileTimelineMarkerBinding.h"
+#include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/EventStateManager.h"
@@ -47,6 +49,7 @@
 #include "prenv.h"
 #include "nsIDOMWindow.h"
 #include "nsIGlobalObject.h"
+#include "nsIViewSourceChannel.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsPoint.h"
 #include "nsIObserverService.h"
@@ -93,6 +96,7 @@
 #include "nsSHistory.h"
 #include "nsDocShellEditorData.h"
 #include "GeckoProfiler.h"
+#include "timeline/JavascriptTimelineMarker.h"
 
 // Helper Classes
 #include "nsError.h"
@@ -754,6 +758,7 @@ nsDocShell::nsDocShell()
   , mLoadedTransIndex(-1)
   , mSandboxFlags(0)
   , mFullscreenAllowed(CHECK_ATTRIBUTES)
+  , mOrientationLock(eScreenOrientation_None)
   , mCreated(false)
   , mAllowSubframes(true)
   , mAllowPlugins(true)
@@ -1597,7 +1602,7 @@ nsDocShell::LoadStream(nsIInputStream* aStream, nsIURI* aURI,
     (void)aLoadInfo->GetLoadType(&lt);
     // Get the appropriate LoadType from nsIDocShellLoadInfo type
     loadType = ConvertDocShellLoadInfoToLoadType(lt);
-  
+
     nsCOMPtr<nsISupports> owner;
     aLoadInfo->GetOwner(getter_AddRefs(owner));
     requestingPrincipal = do_QueryInterface(owner);
@@ -2546,6 +2551,18 @@ nsDocShell::SetFullscreenAllowed(bool aFullscreenAllowed)
   }
   mFullscreenAllowed = (aFullscreenAllowed ? PARENT_ALLOWS : PARENT_PROHIBITS);
   return NS_OK;
+}
+
+ScreenOrientationInternal
+nsDocShell::OrientationLock()
+{
+  return mOrientationLock;
+}
+
+void
+nsDocShell::SetOrientationLock(ScreenOrientationInternal aOrientationLock)
+{
+  mOrientationLock = aOrientationLock;
 }
 
 NS_IMETHODIMP
@@ -4953,6 +4970,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       case NS_ERROR_INTERCEPTED_ERROR_RESPONSE:
       case NS_ERROR_INTERCEPTED_USED_RESPONSE:
       case NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION:
+      case NS_ERROR_BAD_OPAQUE_REDIRECT_INTERCEPTION:
         // ServiceWorker intercepted request, but something went wrong.
         nsContentUtils::MaybeReportInterceptionErrorToConsole(GetDocument(),
                                                               aError);
@@ -5921,6 +5939,19 @@ nsDocShell::SetIsActive(bool aIsActive)
   if (mScriptGlobal) {
     mScriptGlobal->SetIsBackground(!aIsActive);
     if (nsCOMPtr<nsIDocument> doc = mScriptGlobal->GetExtantDoc()) {
+      // Update orientation when the top-level browsing context becomes active.
+      // We make an exception for apps because they currently rely on
+      // orientation locks persisting across browsing contexts.
+      if (aIsActive && !GetIsApp()) {
+        nsCOMPtr<nsIDocShellTreeItem> parent;
+        GetSameTypeParent(getter_AddRefs(parent));
+        if (!parent) {
+          // We only care about the top-level browsing context.
+          uint16_t orientation = OrientationLock();
+          ScreenOrientation::UpdateActiveOrientationLock(orientation);
+        }
+      }
+
       doc->PostVisibilityUpdateEvent();
     }
   }
@@ -9332,9 +9363,6 @@ nsDocShell::CreatePrincipalFromReferrer(nsIURI* aReferrer,
                                         nsIPrincipal** aResult)
 {
   nsresult rv;
-  nsCOMPtr<nsIScriptSecurityManager> secMan =
-    do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
 
   uint32_t appId;
   rv = GetAppId(&appId);
@@ -9342,12 +9370,14 @@ nsDocShell::CreatePrincipalFromReferrer(nsIURI* aReferrer,
   bool isInBrowserElement;
   rv = GetIsInBrowserElement(&isInBrowserElement);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = secMan->GetAppCodebasePrincipal(aReferrer,
-                                       appId,
-                                       isInBrowserElement,
-                                       aResult);
-  NS_ENSURE_SUCCESS(rv, rv);
-  return NS_OK;
+
+  // TODO: Bug 1165466 - Pass mOriginAttributes directly.
+  OriginAttributes attrs(appId, isInBrowserElement);
+  nsCOMPtr<nsIPrincipal> prin =
+    BasePrincipal::CreateCodebasePrincipal(aReferrer, attrs);
+  prin.forget(aResult);
+
+  return *aResult ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -9961,11 +9991,12 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       /* restore previous position of scroller(s), if we're moving
        * back in history (bug 59774)
        */
+      nscoord bx, by;
+      bool needsScrollPosUpdate = false;
       if (mOSHE && (aLoadType == LOAD_HISTORY ||
                     aLoadType == LOAD_RELOAD_NORMAL)) {
-        nscoord bx, by;
+        needsScrollPosUpdate = true;
         mOSHE->GetScrollPosition(&bx, &by);
-        SetCurScrollPosEx(bx, by);
       }
 
       // Dispatch the popstate and hashchange events, as appropriate.
@@ -9979,6 +10010,10 @@ nsDocShell::InternalLoad(nsIURI* aURI,
 
         if (historyNavBetweenSameDoc || doHashchange) {
           win->DispatchSyncPopState();
+        }
+
+        if (needsScrollPosUpdate && win->HasActiveDocument()) {
+          SetCurScrollPosEx(bx, by);
         }
 
         if (doHashchange) {
@@ -10040,6 +10075,24 @@ nsDocShell::InternalLoad(nsIURI* aURI,
 
   if (mTiming && timeBeforeUnload) {
     mTiming->NotifyUnloadAccepted(mCurrentURI);
+  }
+
+  // Whenever a top-level browsing context is navigated, the user agent MUST
+  // lock the orientation of the document to the document's default
+  // orientation. We don't explicitly check for a top-level browsing context
+  // here because orientation is only set on top-level browsing contexts.
+  // We make an exception for apps because they currently rely on
+  // orientation locks persisting across browsing contexts.
+  if (OrientationLock() != eScreenOrientation_None && !GetIsApp()) {
+#ifdef DEBUG
+    nsCOMPtr<nsIDocShellTreeItem> parent;
+    GetSameTypeParent(getter_AddRefs(parent));
+    MOZ_ASSERT(!parent);
+#endif
+    SetOrientationLock(eScreenOrientation_None);
+    if (mIsActive) {
+      ScreenOrientation::UpdateActiveOrientationLock(eScreenOrientation_None);
+    }
   }
 
   // Check for saving the presentation here, before calling Stop().
@@ -10355,20 +10408,18 @@ nsDocShell::DoURILoad(nsIURI* aURI,
   }
 
   if (!isSrcdoc) {
-    nsCOMPtr<nsILoadInfo> loadInfo =
-      new LoadInfo(requestingNode ? requestingNode->NodePrincipal() :
-                                    triggeringPrincipal.get(),
-                   triggeringPrincipal,
-                   requestingNode,
-                   securityFlags,
-                   aContentPolicyType,
-                   aBaseURI);
     rv = NS_NewChannelInternal(getter_AddRefs(channel),
                                aURI,
-                               loadInfo,
-                               nullptr,   // loadGroup
-                               static_cast<nsIInterfaceRequestor*>(this),
-                               loadFlags);
+                               requestingNode,
+                               requestingNode
+                                 ? requestingNode->NodePrincipal()
+                                 : triggeringPrincipal.get(),
+                                triggeringPrincipal,
+                                securityFlags,
+                                aContentPolicyType,
+                                nullptr,   // loadGroup
+                                static_cast<nsIInterfaceRequestor*>(this),
+                                loadFlags);
 
     if (NS_FAILED(rv)) {
       if (rv == NS_ERROR_UNKNOWN_PROTOCOL) {
@@ -10385,6 +10436,12 @@ nsDocShell::DoURILoad(nsIURI* aURI,
       }
       return rv;
     }
+    if (aBaseURI) {
+        nsCOMPtr<nsIViewSourceChannel> vsc = do_QueryInterface(channel);
+        if (vsc) {
+            vsc->SetBaseURI(aBaseURI);
+        }
+    }
   } else {
     nsAutoCString scheme;
     rv = aURI->GetScheme(scheme);
@@ -10396,17 +10453,15 @@ nsDocShell::DoURILoad(nsIURI* aURI,
       nsViewSourceHandler* vsh = nsViewSourceHandler::GetInstance();
       NS_ENSURE_TRUE(vsh, NS_ERROR_FAILURE);
 
-      rv = vsh->NewSrcdocChannel(aURI, aSrcdoc, getter_AddRefs(channel));
-      NS_ENSURE_SUCCESS(rv, rv);
-      nsCOMPtr<nsILoadInfo> loadInfo =
-        new LoadInfo(requestingNode ? requestingNode->NodePrincipal() :
-                                      triggeringPrincipal.get(),
-                     triggeringPrincipal,
-                     requestingNode,
-                     securityFlags,
-                     aContentPolicyType,
-                     aBaseURI);
-      channel->SetLoadInfo(loadInfo);
+      rv = vsh->NewSrcdocChannel(aURI, aBaseURI, aSrcdoc,
+                                 requestingNode,
+                                 requestingNode
+                                   ? requestingNode->NodePrincipal()
+                                   : triggeringPrincipal.get(),
+                                 triggeringPrincipal,
+                                 securityFlags,
+                                 aContentPolicyType,
+                                 getter_AddRefs(channel));
     } else {
       rv = NS_NewInputStreamChannelInternal(getter_AddRefs(channel),
                                             aURI,
@@ -10419,9 +10474,11 @@ nsDocShell::DoURILoad(nsIURI* aURI,
                                             triggeringPrincipal,
                                             securityFlags,
                                             aContentPolicyType,
-                                            true,
-                                            aBaseURI);
+                                            true);
       NS_ENSURE_SUCCESS(rv, rv);
+      nsCOMPtr<nsIInputStreamChannel> isc = do_QueryInterface(channel);
+      MOZ_ASSERT(isc);
+      isc->SetBaseURI(aBaseURI);
     }
   }
 
@@ -10507,6 +10564,8 @@ nsDocShell::DoURILoad(nsIURI* aURI,
     } else {
       httpChannelInternal->SetDocumentURI(aReferrerURI);
     }
+    httpChannelInternal->SetRedirectMode(
+      nsIHttpChannelInternal::REDIRECT_MODE_MANUAL);
   }
 
   nsCOMPtr<nsIWritablePropertyBag2> props(do_QueryInterface(channel));
@@ -11695,7 +11754,7 @@ nsDocShell::AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
       nsCOMPtr<nsILoadInfo> loadInfo;
       aChannel->GetLoadInfo(getter_AddRefs(loadInfo));
       nsCOMPtr<nsIURI> baseURI;
-      loadInfo->GetBaseURI(getter_AddRefs(baseURI));
+      inStrmChan->GetBaseURI(getter_AddRefs(baseURI));
       entry->SetBaseURI(baseURI);
     }
   }
@@ -13708,51 +13767,6 @@ nsDocShell::GetOpener()
   return opener;
 }
 
-class JavascriptTimelineMarker : public TimelineMarker
-{
-public:
-  JavascriptTimelineMarker(nsDocShell* aDocShell, const char* aName,
-                           const char* aReason,
-                           const char16_t* aFunctionName,
-                           const char16_t* aFileName,
-                           uint32_t aLineNumber)
-    : TimelineMarker(aDocShell, aName, TRACING_INTERVAL_START,
-                     NS_ConvertUTF8toUTF16(aReason),
-                     NO_STACK)
-    , mFunctionName(aFunctionName)
-    , mFileName(aFileName)
-    , mLineNumber(aLineNumber)
-  {
-  }
-
-  void AddDetails(JSContext* aCx, mozilla::dom::ProfileTimelineMarker& aMarker)
-    override
-  {
-    aMarker.mCauseName.Construct(GetCause());
-
-    if (!mFunctionName.IsEmpty() || !mFileName.IsEmpty()) {
-      RootedDictionary<ProfileTimelineStackFrame> stackFrame(aCx);
-      stackFrame.mLine.Construct(mLineNumber);
-      stackFrame.mSource.Construct(mFileName);
-      stackFrame.mFunctionDisplayName.Construct(mFunctionName);
-
-      JS::Rooted<JS::Value> newStack(aCx);
-      if (ToJSValue(aCx, stackFrame, &newStack)) {
-        if (newStack.isObject()) {
-          aMarker.mStack = &newStack.toObject();
-        }
-      } else {
-        JS_ClearPendingException(aCx);
-      }
-    }
-  }
-
-private:
-  nsString mFunctionName;
-  nsString mFileName;
-  uint32_t mLineNumber;
-};
-
 void
 nsDocShell::NotifyJSRunToCompletionStart(const char* aReason,
                                          const char16_t* aFunctionName,
@@ -13763,10 +13777,8 @@ nsDocShell::NotifyJSRunToCompletionStart(const char* aReason,
 
   // If first start, mark interval start.
   if (timelineOn && mJSRunToCompletionDepth == 0) {
-    mozilla::UniquePtr<TimelineMarker> marker =
-      MakeUnique<JavascriptTimelineMarker>(this, "Javascript", aReason,
-                                           aFunctionName, aFilename,
-                                           aLineNumber);
+    UniquePtr<TimelineMarker> marker = MakeUnique<JavascriptTimelineMarker>(
+      aReason, aFunctionName, aFilename, aLineNumber, MarkerTracingType::START);
     TimelineConsumers::AddMarkerForDocShell(this, Move(marker));
   }
   mJSRunToCompletionDepth++;
@@ -13780,7 +13792,7 @@ nsDocShell::NotifyJSRunToCompletionStop()
   // If last stop, mark interval end.
   mJSRunToCompletionDepth--;
   if (timelineOn && mJSRunToCompletionDepth == 0) {
-    TimelineConsumers::AddMarkerForDocShell(this, "Javascript", TRACING_INTERVAL_END);
+    TimelineConsumers::AddMarkerForDocShell(this, "Javascript", MarkerTracingType::END);
   }
 }
 

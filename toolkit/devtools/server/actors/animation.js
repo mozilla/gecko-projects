@@ -26,7 +26,7 @@
  */
 
 const {Cu} = require("chrome");
-const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+const promise = require("promise");
 const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
 const {setInterval, clearInterval} = require("sdk/timers");
 const protocol = require("devtools/server/protocol");
@@ -39,6 +39,13 @@ const events = require("sdk/event/core");
 // How long (in ms) should we wait before polling again the state of an
 // animationPlayer.
 const PLAYER_DEFAULT_AUTO_REFRESH_TIMEOUT = 500;
+
+// Types of animations.
+const ANIMATION_TYPES = {
+  CSS_ANIMATION: "cssanimation",
+  CSS_TRANSITION: "csstransition",
+  UNKNOWN: "unknown"
+};
 
 /**
  * The AnimationPlayerActor provides information about a given animation: its
@@ -121,6 +128,16 @@ let AnimationPlayerActor = ActorClass({
     return player instanceof this.tabActor.window.CSSTransition;
   },
 
+  getType: function() {
+    if (this.isAnimation()) {
+      return ANIMATION_TYPES.CSS_ANIMATION;
+    } else if (this.isTransition()) {
+      return ANIMATION_TYPES.CSS_TRANSITION;
+    }
+
+    return ANIMATION_TYPES.UNKNOWN;
+  },
+
   /**
    * Some of the player's properties are retrieved from the node's
    * computed-styles because the Web Animations API does not provide them yet.
@@ -168,9 +185,9 @@ let AnimationPlayerActor = ActorClass({
       return this.player.animationName;
     } else if (this.isTransition()) {
       return this.player.transitionProperty;
-    } else {
-      return  "";
     }
+
+    return "";
   },
 
   /**
@@ -254,6 +271,7 @@ let AnimationPlayerActor = ActorClass({
     // add the corresponding property in the AnimationPlayerFront' initialState
     // getter.
     let newState = {
+      type: this.getType(),
       // startTime is null whenever the animation is paused or waiting to start.
       startTime: this.player.startTime,
       currentTime: this.player.currentTime,
@@ -268,7 +286,11 @@ let AnimationPlayerActor = ActorClass({
       // Firefox OS (where we have compositor animations enabled).
       // Returns false whenever the animation is paused as it is taken off the
       // compositor then.
-      isRunningOnCompositor: this.player.isRunningOnCompositor
+      isRunningOnCompositor: this.player.isRunningOnCompositor,
+      // The document timeline's currentTime is being sent along too. This is
+      // not strictly related to the node's animationPlayer, but is useful to
+      // know the current time of the animation with respect to the document's.
+      documentCurrentTime: this.node.ownerDocument.timeline.currentTime
     };
 
     // If we've saved a state before, compare and only send what has changed.
@@ -412,6 +434,7 @@ let AnimationPlayerFront = FrontClass(AnimationPlayerActor, {
    */
   get initialState() {
     return {
+      type: this._form.type,
       startTime: this._form.startTime,
       currentTime: this._form.currentTime,
       playState: this._form.playState,
@@ -420,7 +443,8 @@ let AnimationPlayerFront = FrontClass(AnimationPlayerActor, {
       duration: this._form.duration,
       delay: this._form.delay,
       iterationCount: this._form.iterationCount,
-      isRunningOnCompositor: this._form.isRunningOnCompositor
+      isRunningOnCompositor: this._form.isRunningOnCompositor,
+      documentCurrentTime: this._form.documentCurrentTime
     };
   },
 
@@ -622,6 +646,7 @@ let AnimationsActor = exports.AnimationsActor = ActorClass({
 
   onAnimationMutation: function(mutations) {
     let eventData = [];
+    let readyPromises = [];
 
     for (let {addedAnimations, removedAnimations} of mutations) {
       for (let player of removedAnimations) {
@@ -635,11 +660,13 @@ let AnimationsActor = exports.AnimationsActor = ActorClass({
           continue;
         }
         let index = this.actors.findIndex(a => a.player === player);
-        eventData.push({
-          type: "removed",
-          player: this.actors[index]
-        });
-        this.actors.splice(index, 1);
+        if (index !== -1) {
+          eventData.push({
+            type: "removed",
+            player: this.actors[index]
+          });
+          this.actors.splice(index, 1);
+        }
       }
 
       for (let player of addedAnimations) {
@@ -673,11 +700,16 @@ let AnimationsActor = exports.AnimationsActor = ActorClass({
           type: "added",
           player: actor
         });
+        readyPromises.push(player.ready);
       }
     }
 
     if (eventData.length) {
-      events.emit(this, "mutations", eventData);
+      // Let's wait for all added animations to be ready before telling the
+      // front-end.
+      Promise.all(readyPromises).then(() => {
+        events.emit(this, "mutations", eventData);
+      });
     }
   },
 
@@ -785,6 +817,26 @@ let AnimationsActor = exports.AnimationsActor = ActorClass({
     return this.pauseAll();
   }, {
     request: {},
+    response: {}
+  }),
+
+  /**
+   * Set the current time of several animations at the same time.
+   * @param {Array} players A list of AnimationPlayerActor.
+   * @param {Number} time The new currentTime.
+   * @param {Boolean} shouldPause Should the players be paused too.
+   */
+  setCurrentTimes: method(function(players, time, shouldPause) {
+    return promise.all(players.map(player => {
+      let pause = shouldPause ? player.pause() : promise.resolve();
+      return pause.then(() => player.setCurrentTime(time));
+    }));
+  }, {
+    request: {
+      players: Arg(0, "array:animationplayer"),
+      time: Arg(1, "number"),
+      shouldPause: Arg(2, "boolean")
+    },
     response: {}
   })
 });

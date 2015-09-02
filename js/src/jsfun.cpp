@@ -129,14 +129,6 @@ ArgumentsRestrictions(JSContext* cx, HandleFunction fun)
         return false;
     }
 
-    // Functions with rest arguments don't include a local |arguments| binding.
-    // Similarly, "arguments" shouldn't work on them.
-    if (fun->hasRest()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                             JSMSG_FUNCTION_ARGUMENTS_AND_REST);
-        return false;
-    }
-
     // Otherwise emit a strict warning about |f.arguments| to discourage use of
     // this non-standard, performance-harmful feature.
     if (!JS_ReportErrorFlagsAndNumber(cx, JSREPORT_WARNING | JSREPORT_STRICT, GetErrorMessage,
@@ -149,7 +141,7 @@ ArgumentsRestrictions(JSContext* cx, HandleFunction fun)
 }
 
 bool
-ArgumentsGetterImpl(JSContext* cx, CallArgs args)
+ArgumentsGetterImpl(JSContext* cx, const CallArgs& args)
 {
     MOZ_ASSERT(IsFunction(args.thisv()));
 
@@ -186,7 +178,7 @@ ArgumentsGetter(JSContext* cx, unsigned argc, Value* vp)
 }
 
 bool
-ArgumentsSetterImpl(JSContext* cx, CallArgs args)
+ArgumentsSetterImpl(JSContext* cx, const CallArgs& args)
 {
     MOZ_ASSERT(IsFunction(args.thisv()));
 
@@ -238,7 +230,7 @@ CallerRestrictions(JSContext* cx, HandleFunction fun)
 }
 
 bool
-CallerGetterImpl(JSContext* cx, CallArgs args)
+CallerGetterImpl(JSContext* cx, const CallArgs& args)
 {
     MOZ_ASSERT(IsFunction(args.thisv()));
 
@@ -299,7 +291,7 @@ CallerGetter(JSContext* cx, unsigned argc, Value* vp)
 }
 
 bool
-CallerSetterImpl(JSContext* cx, CallArgs args)
+CallerSetterImpl(JSContext* cx, const CallArgs& args)
 {
     MOZ_ASSERT(IsFunction(args.thisv()));
 
@@ -441,15 +433,16 @@ fun_resolve(JSContext* cx, HandleObject obj, HandleId id, bool* resolvedp)
          * isBuiltin() test covers this case because bound functions are native
          * (and thus built-in) functions by definition/construction.
          *
-         * In ES6 9.2.8 MakeConstructor the .prototype property is only assigned
-         * to constructors.
+         * ES6 9.2.8 MakeConstructor defines the .prototype property on constructors.
+         * Generators are not constructors, but they have a .prototype property anyway,
+         * according to errata to ES6. See bug 1191486.
          *
          * Thus all of the following don't get a .prototype property:
          * - Methods (that are not class-constructors or generators)
          * - Arrow functions
          * - Function.prototype
          */
-        if (fun->isBuiltin() || !fun->isConstructor())
+        if (fun->isBuiltin() || (!fun->isConstructor() && !fun->isGenerator()))
             return true;
 
         if (!ResolveInterpretedFunctionPrototype(cx, fun, id))
@@ -687,12 +680,12 @@ JSFunction::trace(JSTracer* trc)
         // Functions can be be marked as interpreted despite having no script
         // yet at some points when parsing, and can be lazy with no lazy script
         // for self-hosted code.
-        if (hasScript() && u.i.s.script_)
+        if (hasScript() && !hasUncompiledScript())
             TraceManuallyBarrieredEdge(trc, &u.i.s.script_, "script");
         else if (isInterpretedLazy() && u.i.s.lazy_)
             TraceManuallyBarrieredEdge(trc, &u.i.s.lazy_, "lazyScript");
 
-        if (u.i.env_)
+        if (!isBeingParsed() && u.i.env_)
             TraceManuallyBarrieredEdge(trc, &u.i.env_, "fun_environment");
     }
 }
@@ -1504,9 +1497,10 @@ js::CallOrConstructBoundFunction(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(fun->isBoundFunction());
 
     /* 15.3.4.5.1 step 1, 15.3.4.5.2 step 3. */
-    unsigned argslen = fun->getBoundFunctionArgumentCount();
+    unsigned boundArgsLen = fun->getBoundFunctionArgumentCount();
 
-    if (args.length() + argslen > ARGS_LENGTH_MAX) {
+    uint32_t argsLen = args.length();
+    if (argsLen + boundArgsLen > ARGS_LENGTH_MAX) {
         ReportAllocationOverflow(cx);
         return false;
     }
@@ -1517,31 +1511,44 @@ js::CallOrConstructBoundFunction(JSContext* cx, unsigned argc, Value* vp)
     /* 15.3.4.5.1 step 2. */
     const Value& boundThis = fun->getBoundFunctionThis();
 
+    if (args.isConstructing()) {
+        ConstructArgs cargs(cx);
+        if (!cargs.init(argsLen + boundArgsLen))
+            return false;
+
+        /* 15.3.4.5.1, 15.3.4.5.2 step 4. */
+        for (uint32_t i = 0; i < boundArgsLen; i++)
+            cargs[i].set(fun->getBoundFunctionArgument(i));
+        for (uint32_t i = 0; i < argsLen; i++)
+            cargs[boundArgsLen + i].set(args[i]);
+
+        RootedValue targetv(cx, ObjectValue(*target));
+
+        /* ES6 9.4.1.2 step 5 */
+        RootedValue newTarget(cx);
+        if (&args.newTarget().toObject() == fun)
+            newTarget.set(targetv);
+        else
+            newTarget.set(args.newTarget());
+
+        return Construct(cx, targetv, cargs, newTarget, args.rval());
+    }
+
     InvokeArgs invokeArgs(cx);
-    if (!invokeArgs.init(args.length() + argslen, args.isConstructing()))
+    if (!invokeArgs.init(argsLen + boundArgsLen))
         return false;
 
     /* 15.3.4.5.1, 15.3.4.5.2 step 4. */
-    for (unsigned i = 0; i < argslen; i++)
+    for (uint32_t i = 0; i < boundArgsLen; i++)
         invokeArgs[i].set(fun->getBoundFunctionArgument(i));
-    PodCopy(invokeArgs.array() + argslen, vp + 2, args.length());
+    for (uint32_t i = 0; i < argsLen; i++)
+        invokeArgs[boundArgsLen + i].set(args[i]);
 
     /* 15.3.4.5.1, 15.3.4.5.2 step 5. */
     invokeArgs.setCallee(ObjectValue(*target));
+    invokeArgs.setThis(boundThis);
 
-    bool constructing = args.isConstructing();
-    if (!constructing)
-        invokeArgs.setThis(boundThis);
-
-    /* ES6 9.4.1.2 step 5 */
-    if (constructing) {
-        if (&args.newTarget().toObject() == fun)
-            invokeArgs.newTarget().setObject(*target);
-        else
-            invokeArgs.newTarget().set(args.newTarget());
-    }
-
-    if (constructing ? !InvokeConstructor(cx, invokeArgs) : !Invoke(cx, invokeArgs))
+    if (!Invoke(cx, invokeArgs))
         return false;
 
     args.rval().set(invokeArgs.rval());

@@ -361,7 +361,7 @@ jit::CanEnterBaselineMethod(JSContext* cx, RunState& state)
     } else {
         MOZ_ASSERT(state.isExecute());
         ExecuteType type = state.asExecute()->type();
-        if (type == EXECUTE_DEBUG || type == EXECUTE_DEBUG_GLOBAL) {
+        if (type == EXECUTE_DEBUG) {
             JitSpew(JitSpew_BaselineAbort, "debugger frame");
             return Method_CantCompile;
         }
@@ -441,10 +441,7 @@ BaselineScript::trace(JSTracer* trc)
     // Mark all IC stub codes hanging off the IC stub entries.
     for (size_t i = 0; i < numICEntries(); i++) {
         ICEntry& ent = icEntry(i);
-        if (!ent.hasStub())
-            continue;
-        for (ICStub* stub = ent.firstStub(); stub; stub = stub->next())
-            stub->trace(trc);
+        ent.trace(trc);
     }
 }
 
@@ -479,6 +476,21 @@ BaselineScript::Destroy(FreeOp* fop, BaselineScript* script)
     script->unlinkDependentAsmJSModules(fop);
 
     fop->delete_(script);
+}
+
+void
+BaselineScript::clearDependentAsmJSModules()
+{
+    // Remove any links from AsmJSModules that contain optimized FFI calls into
+    // this BaselineScript.
+    if (dependentAsmJSModules_) {
+        for (size_t i = 0; i < dependentAsmJSModules_->length(); i++) {
+            DependentAsmJSModuleExit exit = (*dependentAsmJSModules_)[i];
+            exit.module->detachJitCompilation(exit.exitIndex);
+        }
+
+        dependentAsmJSModules_->clear();
+    }
 }
 
 void

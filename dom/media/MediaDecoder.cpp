@@ -132,8 +132,6 @@ MediaDecoder::InitStatics()
 
   // Log modules.
   gMediaDecoderLog = PR_NewLogModule("MediaDecoder");
-  gMozPromiseLog = PR_NewLogModule("MozPromise");
-  gStateWatchingLog = PR_NewLogModule("StateWatching");
   gMediaTimerLog = PR_NewLogModule("MediaTimer");
   gMediaSampleLog = PR_NewLogModule("MediaSample");
 }
@@ -161,9 +159,8 @@ bool
 MediaDecoder::IsHeuristicDormantSupported() const
 {
   return
-#if defined(MOZ_EME) && defined(RELEASE_BUILD)
-    // We disallow dormant for encrypted media on Beta and Release until
-    // bug 1181864 is fixed.
+#if defined(MOZ_EME)
+    // We disallow dormant for encrypted media until bug 1181864 is fixed.
     mInfo &&
     !mInfo->IsEncrypted() &&
 #endif
@@ -619,9 +616,9 @@ void MediaDecoder::CallSeek(const SeekTarget& aTarget)
 {
   MOZ_ASSERT(NS_IsMainThread());
   mSeekRequest.DisconnectIfExists();
-  mSeekRequest.Begin(ProxyMediaCall(mDecoderStateMachine->OwnerThread(),
-                                    mDecoderStateMachine.get(), __func__,
-                                    &MediaDecoderStateMachine::Seek, aTarget)
+  mSeekRequest.Begin(InvokeAsync(mDecoderStateMachine->OwnerThread(),
+                                 mDecoderStateMachine.get(), __func__,
+                                 &MediaDecoderStateMachine::Seek, aTarget)
     ->Then(AbstractThread::MainThread(), __func__, this,
            &MediaDecoder::OnSeekResolved, &MediaDecoder::OnSeekRejected));
 }

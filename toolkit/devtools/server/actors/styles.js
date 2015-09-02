@@ -6,7 +6,7 @@
 "use strict";
 
 const {Cc, Ci, Cu} = require("chrome");
-const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+const promise = require("promise");
 const protocol = require("devtools/server/protocol");
 const {Arg, Option, method, RetVal, types} = protocol;
 const events = require("sdk/event/core");
@@ -1448,17 +1448,39 @@ let StyleRuleFront = protocol.FrontClass(StyleRuleActor, {
 
 /**
  * Convenience API for building a list of attribute modifications
- * for the `modifyAttributes` request.
+ * for the `modifyProperties` request.  A RuleModificationList holds a
+ * list of modifications that will be applied to a StyleRuleActor.
+ * The modifications are processed in the order in which they are
+ * added to the RuleModificationList.
  */
 let RuleModificationList = Class({
+  /**
+   * Initialize a RuleModificationList.
+   * @param {StyleRuleFront} rule the associated rule
+   */
   initialize: function(rule) {
     this.rule = rule;
     this.modifications = [];
   },
 
+  /**
+   * Apply the modifications in this object to the associated rule.
+   *
+   * @return {Promise} A promise which will be resolved when the modifications
+   *         are complete; @see StyleRuleActor.modifyProperties.
+   */
   apply: function() {
     return this.rule.modifyProperties(this.modifications);
   },
+
+  /**
+   * Add a "set" entry to the modification list.
+   *
+   * @param {string} name the property's name
+   * @param {string} value the property's value
+   * @param {string} priority the property's priority, either the empty
+   *                          string or "important"
+   */
   setProperty: function(name, value, priority) {
     this.modifications.push({
       type: "set",
@@ -1467,6 +1489,12 @@ let RuleModificationList = Class({
       priority: priority
     });
   },
+
+  /**
+   * Add a "remove" entry to the modification list.
+   *
+   * @param {string} name the name of the property to remove
+   */
   removeProperty: function(name) {
     this.modifications.push({
       type: "remove",
@@ -1527,3 +1555,104 @@ function getFontPreviewData(font, doc, options) {
 }
 
 exports.getFontPreviewData = getFontPreviewData;
+
+/**
+ * Get the text content of a rule given some CSS text, a line and a column
+ * Consider the following example:
+ * body {
+ *  color: red;
+ * }
+ * p {
+ *  line-height: 2em;
+ *  color: blue;
+ * }
+ * Calling the function with the whole text above and line=4 and column=1 would
+ * return "line-height: 2em; color: blue;"
+ * @param {String} initialText
+ * @param {Number} line (1-indexed)
+ * @param {Number} column (1-indexed)
+ * @return {object} An object of the form {offset: number, text: string}
+ *                  The offset is the index into the input string where
+ *                  the rule text started.  The text is the content of
+ *                  the rule.
+ */
+function getRuleText(initialText, line, column) {
+  if (typeof line === "undefined" || typeof column === "undefined") {
+    throw new Error("Location information is missing");
+  }
+
+  let {offset: textOffset, text} =
+      getTextAtLineColumn(initialText, line, column);
+  let lexer = DOMUtils.getCSSLexer(text);
+
+  // Search forward for the opening brace.
+  while (true) {
+    let token = lexer.nextToken();
+    if (!token) {
+      throw new Error("couldn't find start of the rule");
+    }
+    if (token.tokenType === "symbol" && token.text === "{") {
+      break;
+    }
+  }
+
+  // Now collect text until we see the matching close brace.
+  let braceDepth = 1;
+  let startOffset, endOffset;
+  while (true) {
+    let token = lexer.nextToken();
+    if (!token) {
+      break;
+    }
+    if (startOffset === undefined) {
+      startOffset = token.startOffset;
+    }
+    if (token.tokenType === "symbol") {
+      if (token.text === "{") {
+        ++braceDepth;
+      } else if (token.text === "}") {
+        --braceDepth;
+        if (braceDepth == 0) {
+          break;
+        }
+      }
+    }
+    endOffset = token.endOffset;
+  }
+
+  // If the rule was of the form "selector {" with no closing brace
+  // and no properties, just return an empty string.
+  if (startOffset === undefined) {
+    return {offset: 0, text: ""};
+  }
+  // Note that this approach will preserve comments, despite the fact
+  // that cssTokenizer skips them.
+  return {offset: textOffset + startOffset,
+          text: text.substring(startOffset, endOffset)};
+}
+
+exports.getRuleText = getRuleText;
+
+/**
+ * Return the offset and substring of |text| that starts at the given
+ * line and column.
+ * @param {String} text
+ * @param {Number} line (1-indexed)
+ * @param {Number} column (1-indexed)
+ * @return {object} An object of the form {offset: number, text: string},
+ *                  where the offset is the offset into the input string
+ *                  where the text starts, and where text is the text.
+ */
+function getTextAtLineColumn(text, line, column) {
+  let offset;
+  if (line > 1) {
+    let rx = new RegExp("(?:.*(?:\\r\\n|\\n|\\r|\\f)){" + (line - 1) + "}");
+    offset = rx.exec(text)[0].length;
+  } else {
+    offset = 0;
+  }
+  offset += column - 1;
+  return {offset: offset, text: text.substr(offset) };
+}
+
+exports.getTextAtLineColumn = getTextAtLineColumn;

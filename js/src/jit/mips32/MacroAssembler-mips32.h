@@ -315,14 +315,6 @@ class MacroAssemblerMIPS : public Assembler
                               FPConditionBit fcc = FCC0);
 
   public:
-    // calls an Ion function, assumes that the stack is untouched (8 byte alinged)
-    void ma_callJit(const Register reg);
-    // callso an Ion function, assuming that sp has already been decremented
-    void ma_callJitNoPush(const Register reg);
-    // calls an ion function, assuming that the stack is currently not 8 byte aligned
-    void ma_callJitHalfPush(const Register reg);
-    void ma_callJitHalfPush(Label* label);
-
     void ma_call(ImmPtr dest);
 
     void ma_jump(ImmPtr dest);
@@ -352,34 +344,8 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     MacroAssembler& asMasm();
     const MacroAssembler& asMasm() const;
 
-  private:
-    // Number of bytes the stack is adjusted inside a call to C. Calls to C may
-    // not be nested.
-    bool inCall_;
-    uint32_t args_;
-    // The actual number of arguments that were passed, used to assert that
-    // the initial number of arguments declared was correct.
-    uint32_t passedArgs_;
-    uint32_t passedArgTypes_;
-
-    uint32_t usedArgSlots_;
-    MoveOp::Type firstArgType;
-
-    bool dynamicAlignment_;
-
-    // Compute space needed for the function call and set the properties of the
-    // callee.  It returns the space which has to be allocated for calling the
-    // function.
-    //
-    // arg            Number of arguments of the function.
-    void setupABICall(uint32_t arg);
-
-  protected:
-    MoveResolver moveResolver_;
-
   public:
     MacroAssemblerMIPSCompat()
-      : inCall_(false)
     { }
 
   public:
@@ -403,10 +369,6 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     }
     void mov(Address src, Register dest) {
         MOZ_CRASH("NYI-IC");
-    }
-
-    void callAndPushReturnAddress(Label* label) {
-        ma_callJitHalfPush(label);
     }
 
     void branch(JitCode* c) {
@@ -759,8 +721,8 @@ protected:
 public:
     void moveValue(const Value& val, Register type, Register data);
 
-    CodeOffsetJump backedgeJump(RepatchLabel* label);
-    CodeOffsetJump jumpWithPatch(RepatchLabel* label);
+    CodeOffsetJump backedgeJump(RepatchLabel* label, Label* documentation = nullptr);
+    CodeOffsetJump jumpWithPatch(RepatchLabel* label, Label* documentation = nullptr);
 
     template <typename T>
     CodeOffsetJump branchPtrWithPatch(Condition cond, Register reg, T ptr, RepatchLabel* label) {
@@ -919,11 +881,6 @@ public:
     void storePayload(Register src, const BaseIndex& dest);
     void storeTypeTag(ImmTag tag, Address dest);
     void storeTypeTag(ImmTag tag, const BaseIndex& dest);
-
-    void makeFrameDescriptor(Register frameSizeReg, FrameType type) {
-        ma_sll(frameSizeReg, frameSizeReg, Imm32(FRAMESIZE_SHIFT));
-        ma_or(frameSizeReg, frameSizeReg, Imm32(type));
-    }
 
     void handleFailureWithHandlerTail(void* handler);
 
@@ -1146,19 +1103,6 @@ public:
     void atomicXor32(const T& value, const S& mem) {
         MOZ_CRASH("NYI");
     }
-
-    // Builds an exit frame on the stack, with a return address to an internal
-    // non-function. Returns offset to be passed to markSafepointAt().
-    void buildFakeExitFrame(Register scratch, uint32_t* offset);
-
-    void callWithExitFrame(Label* target);
-    void callWithExitFrame(JitCode* target);
-    void callWithExitFrame(JitCode* target, Register dynStack);
-
-    // Makes a call using the only two methods that it is sane for indep code
-    // to make a call.
-    void callJit(Register callee);
-    void callJitFromAsmJS(Register callee) { callJit(callee); }
 
     void add32(Register src, Register dest);
     void add32(Imm32 imm, Register dest);
@@ -1418,43 +1362,10 @@ public:
         ma_cmp_set(dest, lhs, rhs, cond);
     }
 
-    // Setup a call to C/C++ code, given the number of general arguments it
-    // takes. Note that this only supports cdecl.
-    //
-    // In order for alignment to work correctly, the MacroAssembler must have a
-    // consistent view of the stack displacement. It is okay to call "push"
-    // manually, however, if the stack alignment were to change, the macro
-    // assembler should be notified before starting a call.
-    void setupAlignedABICall(uint32_t args);
-
-    // Sets up an ABI call for when the alignment is not known. This may need a
-    // scratch register.
-    void setupUnalignedABICall(uint32_t args, Register scratch);
-
-    // Arguments must be assigned in a left-to-right order. This process may
-    // temporarily use more stack, in which case sp-relative addresses will be
-    // automatically adjusted. It is extremely important that sp-relative
-    // addresses are computed *after* setupABICall(). Furthermore, no
-    // operations should be emitted while setting arguments.
-    void passABIArg(const MoveOperand& from, MoveOp::Type type);
-    void passABIArg(Register reg);
-    void passABIArg(FloatRegister reg, MoveOp::Type type);
-    void passABIArg(const ValueOperand& regs);
-
   protected:
     bool buildOOLFakeExitFrame(void* fakeReturnAddr);
 
-  private:
-    void callWithABIPre(uint32_t* stackAdjust, bool callFromAsmJS = false);
-    void callWithABIPost(uint32_t stackAdjust, MoveOp::Type result);
-
   public:
-    // Emits a call to a C/C++ function, resolving all argument moves.
-    void callWithABI(void* fun, MoveOp::Type result = MoveOp::GENERAL);
-    void callWithABI(AsmJSImmPtr imm, MoveOp::Type result = MoveOp::GENERAL);
-    void callWithABI(const Address& fun, MoveOp::Type result = MoveOp::GENERAL);
-    void callWithABI(Register fun, MoveOp::Type result = MoveOp::GENERAL);
-
     CodeOffsetLabel labelForPatch() {
         return CodeOffsetLabel(nextOffset().getOffset());
     }

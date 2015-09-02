@@ -7,10 +7,11 @@ const {Cu} = require("chrome");
 const {Services} = Cu.import("resource://gre/modules/Services.jsm");
 const {AppProjects} = require("devtools/app-manager/app-projects");
 const {AppManager} = require("devtools/webide/app-manager");
-const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+const promise = require("promise");
 const EventEmitter = require("devtools/toolkit/event-emitter");
 const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
 const utils = require("devtools/webide/utils");
+const Telemetry = require("devtools/shared/telemetry");
 
 const Strings = Services.strings.createBundle("chrome://browser/locale/devtools/webide.properties");
 
@@ -23,6 +24,7 @@ module.exports = ProjectList = function(win, parentWindow) {
   this._parentWindow = parentWindow;
   this._panelNodeEl = "toolbarbutton";
   this._sidebarsEnabled = Services.prefs.getBoolPref("devtools.webide.sidebars");
+  this._telemetry = new Telemetry();
 
   if (this._sidebarsEnabled) {
     this._panelNodeEl = "div";
@@ -77,6 +79,7 @@ ProjectList.prototype = {
    */
   newApp: function(testOptions) {
     let parentWindow = this._parentWindow;
+    let self = this;
     return this._UI.busyUntil(Task.spawn(function*() {
       // Open newapp.xul, which will feed ret.location
       let ret = {location: null, testOptions: testOptions};
@@ -89,6 +92,8 @@ ProjectList.prototype = {
 
       // Select project
       AppManager.selectedProject = project;
+
+      self._telemetry.actionOccurred("webideNewProject");
     }), "creating new app");
   },
 
@@ -143,6 +148,14 @@ ProjectList.prototype = {
     }
   },
 
+  refreshTabs: function() {
+    if (AppManager.connected) {
+      return AppManager.listTabs().then(() => {
+        this.updateTabs();
+      }).catch(console.error);
+    }
+  },
+
   updateTabs: function() {
     let tabsHeaderNode = this._doc.querySelector("#panel-header-tabs");
     let tabsNode = this._doc.querySelector("#project-panel-tabs");
@@ -178,7 +191,9 @@ ProjectList.prototype = {
       // tabs, so that's no help for any remote tabs.  Maybe some favicon wizard
       // knows how to get high-res favicons easily, or we could offer actor
       // support for this (bug 1061654).
-      tab.favicon = url.origin + "/favicon.ico";
+      if (url.origin) {
+        tab.favicon = url.origin + "/favicon.ico";
+      }
       tab.name = tab.title || Strings.GetStringFromName("project_tab_loading");
       if (url.protocol.startsWith("http")) {
         tab.name = url.hostname + ": " + tab.name;
@@ -189,7 +204,7 @@ ProjectList.prototype = {
       this._renderProjectItem({
         panel: panelItemNode,
         name: tab.name,
-        icon: tab.favicon
+        icon: tab.favicon || AppManager.DEFAULT_PROJECT_ICON
       });
       panelItemNode.addEventListener("click", () => {
         if (!this._sidebarsEnabled) {
@@ -198,7 +213,7 @@ ProjectList.prototype = {
         AppManager.selectedProject = {
           type: "tab",
           app: tab,
-          icon: tab.favicon,
+          icon: tab.favicon || AppManager.DEFAULT_PROJECT_ICON,
           location: tab.url,
           name: tab.name
         };

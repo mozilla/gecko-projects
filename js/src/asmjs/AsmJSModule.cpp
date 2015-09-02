@@ -319,7 +319,7 @@ AsmJSModule::finish(ExclusiveContext* cx, TokenStream& tokenStream, MacroAssembl
     MOZ_ASSERT(masm.jumpRelocationTableBytes() == 0);
     MOZ_ASSERT(masm.dataRelocationTableBytes() == 0);
     MOZ_ASSERT(masm.preBarrierTableBytes() == 0);
-    MOZ_ASSERT(!masm.hasEnteredExitFrame());
+    MOZ_ASSERT(!masm.hasSelfReference());
 
     // Copy over metadata, making sure to update all offsets on ARM.
 
@@ -538,6 +538,12 @@ TryEnablingJit(JSContext* cx, AsmJSModule& module, HandleFunction fun, uint32_t 
         MOZ_ASSERT(!script->hasIonScript());
         return true;
     }
+
+    // Don't enable jit entry when we have a pending ion builder.
+    // Take the interpreter path which will link it and enable
+    // the fast path on the next call.
+    if (script->baselineScript()->hasPendingIonBuilder())
+        return true;
 
     // Currently we can't rectify arguments. Therefore disabling if argc is too low.
     if (fun->nargs() > size_t(argc))

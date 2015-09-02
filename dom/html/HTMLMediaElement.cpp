@@ -116,6 +116,37 @@ static PRLogModuleInfo* gMediaElementEventsLog;
 using namespace mozilla::layers;
 using mozilla::net::nsMediaFragmentURIParser;
 
+class MOZ_STACK_CLASS AutoNotifyAudioChannelAgent
+{
+  nsRefPtr<mozilla::dom::HTMLMediaElement> mElement;
+  bool mShouldNotify;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
+public:
+  AutoNotifyAudioChannelAgent(mozilla::dom::HTMLMediaElement* aElement,
+                              bool aNotify
+                              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mElement(aElement)
+    , mShouldNotify(aNotify)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    if (mShouldNotify) {
+      // The audio channel agent may not exist now.
+      if (mElement->MaybeCreateAudioChannelAgent()) {
+        mElement->NotifyAudioChannelAgent(false);
+      }
+    }
+  }
+  ~AutoNotifyAudioChannelAgent()
+  {
+    if (mShouldNotify) {
+      // The audio channel agent is destroyed at this point.
+      if (mElement->MaybeCreateAudioChannelAgent()) {
+        mElement->NotifyAudioChannelAgent(true);
+      }
+    }
+  }
+};
+
 namespace mozilla {
 namespace dom {
 
@@ -1097,11 +1128,6 @@ static bool IsAutoplayEnabled()
   return Preferences::GetBool("media.autoplay.enabled");
 }
 
-static bool UseAudioChannelService()
-{
-  return Preferences::GetBool("media.useAudioChannelService");
-}
-
 static bool UseAudioChannelAPI()
 {
   return Preferences::GetBool("media.useAudioChannelAPI");
@@ -1835,6 +1861,14 @@ HTMLMediaElement::CaptureStreamInternal(bool aFinishWhenEnded,
     return nullptr;
   }
 #endif
+
+  if (!aGraph) {
+    MediaStreamGraph::GraphDriverType graphDriverType =
+      HasAudio() ? MediaStreamGraph::AUDIO_THREAD_DRIVER
+                 : MediaStreamGraph::SYSTEM_THREAD_DRIVER;
+    aGraph = MediaStreamGraph::GetInstance(graphDriverType, mAudioChannel);
+  }
+
   OutputMediaStream* out = mOutputStreams.AppendElement();
   out->mStream = DOMMediaStream::CreateTrackUnionStream(window, aGraph);
   nsRefPtr<nsIPrincipal> principal = GetCurrentPrincipal();
@@ -2339,7 +2373,6 @@ HTMLMediaElement::WakeLockRelease()
   if (mWakeLock) {
     ErrorResult rv;
     mWakeLock->Unlock(rv);
-    NS_WARN_IF_FALSE(!rv.Failed(), "Failed to unlock the wakelock.");
     mWakeLock = nullptr;
   }
 }
@@ -2411,10 +2444,6 @@ bool HTMLMediaElement::ParseAttribute(int32_t aNamespaceID,
 
 bool HTMLMediaElement::CheckAudioChannelPermissions(const nsAString& aString)
 {
-  if (!UseAudioChannelService()) {
-    return true;
-  }
-
   // Only normal channel doesn't need permission.
   if (aString.EqualsASCII("normal")) {
     return true;
@@ -3061,7 +3090,8 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
     // version |mPlaybackStream|. If two media elements are playing the
     // same realtime DOMMediaStream, this allows them to pause playback
     // independently of each other.
-    mPlaybackStream = DOMMediaStream::CreateTrackUnionStream(window);
+    MediaStreamGraph* graph = mSrcStream->GetStream()->Graph();
+    mPlaybackStream = DOMMediaStream::CreateTrackUnionStream(window, graph);
     mPlaybackStreamInputPort = mPlaybackStream->GetStream()->AsProcessedStream()->
       AllocateInputPort(mSrcStream->GetStream(), MediaInputPort::FLAG_BLOCK_OUTPUT);
 
@@ -3189,6 +3219,14 @@ void HTMLMediaElement::MetadataLoaded(const MediaInfo* aInfo,
                                       nsAutoPtr<const MetadataTags> aTags)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  // If the element is gaining or losing an audio track, we need to notify
+  // the audio channel agent so that the correct audio-playback events will
+  // get dispatched.
+  bool audioTrackChanging = mMediaInfo.HasAudio() != aInfo->HasAudio();
+  AutoNotifyAudioChannelAgent autoNotify(this,
+                                         audioTrackChanging &&
+                                         mPlayingThroughTheAudioChannel);
 
   mMediaInfo = *aInfo;
   mIsEncrypted = aInfo->IsEncrypted()
@@ -4015,7 +4053,15 @@ bool HTMLMediaElement::IsBeingDestroyed()
 void HTMLMediaElement::NotifyOwnerDocumentActivityChanged()
 {
   bool pauseElement = NotifyOwnerDocumentActivityChangedInternal();
-  if (pauseElement && mAudioChannelAgent) {
+  if (pauseElement && mAudioChannelAgent
+#ifdef PAUSE_MEDIA_ELEMENT_FROM_AUDIOCHANNEL
+      // On B2G, NotifyOwnerDocumentActivityChangedInternal may return true for
+      // two reasons: the document no longer being active, or the element being
+      // paused by the audio channel.  However we are only interested in the
+      // first case here, so we need to filter out the second case.
+      && !ComputedMuted()
+#endif
+      ) {
     // If the element is being paused since we are navigating away from the
     // document, notify the audio channel agent.
     // Be careful to ignore this event during a docshell frame swap.
@@ -4457,10 +4503,6 @@ ImageContainer* HTMLMediaElement::GetImageContainer()
 
 nsresult HTMLMediaElement::UpdateChannelMuteState(float aVolume, bool aMuted)
 {
-  if (!UseAudioChannelService()) {
-    return NS_OK;
-  }
-
   if (mAudioChannelVolume != aVolume) {
     mAudioChannelVolume = aVolume;
     SetVolumeInternal();
@@ -4485,12 +4527,26 @@ nsresult HTMLMediaElement::UpdateChannelMuteState(float aVolume, bool aMuted)
   return NS_OK;
 }
 
-void HTMLMediaElement::UpdateAudioChannelPlayingState()
+bool
+HTMLMediaElement::MaybeCreateAudioChannelAgent()
 {
-  if (!UseAudioChannelService()) {
-    return;
+  if (!mAudioChannelAgent) {
+    nsresult rv;
+    mAudioChannelAgent = do_CreateInstance("@mozilla.org/audiochannelagent;1", &rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+    MOZ_ASSERT(mAudioChannelAgent);
+    mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetInnerWindow(),
+                                             static_cast<int32_t>(mAudioChannel),
+                                             this);
   }
+  return true;
+}
 
+void
+HTMLMediaElement::UpdateAudioChannelPlayingState()
+{
   bool playingThroughTheAudioChannel =
      (!mPaused &&
       !Muted() &&
@@ -4507,18 +4563,9 @@ void HTMLMediaElement::UpdateAudioChannelPlayingState()
        return;
     }
 
-    if (!mAudioChannelAgent) {
-      nsresult rv;
-      mAudioChannelAgent = do_CreateInstance("@mozilla.org/audiochannelagent;1", &rv);
-      if (!mAudioChannelAgent) {
-        return;
-      }
-      mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetInnerWindow(),
-                                               static_cast<int32_t>(mAudioChannel),
-                                               this);
+    if (MaybeCreateAudioChannelAgent()) {
+      NotifyAudioChannelAgent(mPlayingThroughTheAudioChannel);
     }
-
-    NotifyAudioChannelAgent(mPlayingThroughTheAudioChannel);
   }
 }
 
@@ -4551,7 +4598,7 @@ HTMLMediaElement::NotifyAudioChannelAgent(bool aPlaying)
 
 NS_IMETHODIMP HTMLMediaElement::WindowVolumeChanged(float aVolume, bool aMuted)
 {
-  NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
+  MOZ_ASSERT(NS_IsMainThread());
 
   UpdateChannelMuteState(aVolume, aMuted);
 
@@ -4719,7 +4766,9 @@ NS_IMETHODIMP HTMLMediaElement::WindowAudioCaptureChanged()
       nsCOMPtr<nsPIDOMWindow> window =
         do_QueryInterface(OwnerDoc()->GetParentObject());
       uint64_t id = window->WindowID();
-      MediaStreamGraph* msg = MediaStreamGraph::GetInstance();
+      MediaStreamGraph* msg =
+        MediaStreamGraph::GetInstance(MediaStreamGraph::AUDIO_THREAD_DRIVER,
+                                      AudioChannel::Normal);
 
       if (!mPlaybackStream) {
         nsRefPtr<DOMMediaStream> stream = CaptureStreamInternal(false, msg);

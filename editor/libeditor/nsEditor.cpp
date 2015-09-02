@@ -147,6 +147,7 @@ nsEditor::nsEditor()
 ,  mDidPostCreate(false)
 ,  mDispatchInputEvent(true)
 ,  mIsInEditAction(false)
+,  mHidingCaret(false)
 {
 }
 
@@ -158,6 +159,8 @@ nsEditor::~nsEditor()
     mComposition->OnEditorDestroyed();
     mComposition = nullptr;
   }
+  // If this editor is still hiding the caret, we need to restore it.
+  HideCaret(false);
   mTxnMgr = nullptr;
 
   delete mPhonetic;
@@ -464,6 +467,8 @@ nsEditor::PreDestroy(bool aDestroyingFrames)
 
   // Unregister event listeners
   RemoveEventListeners();
+  // If this editor is still hiding the caret, we need to restore it.
+  HideCaret(false);
   mActionListeners.Clear();
   mEditorObservers.Clear();
   mDocStateListeners.Clear();
@@ -2064,6 +2069,10 @@ nsEditor::EndIMEComposition()
                    "nsIAbsorbingTransaction::Commit() failed");
     }
   }
+
+  // Composition string may have hidden the caret.  Therefore, we need to
+  // cancel it here.
+  HideCaret(false);
 
   /* reset the data we need to construct a transaction */
   mIMETextNode = nullptr;
@@ -4686,7 +4695,7 @@ nsEditor::HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent)
   WidgetKeyboardEvent* nativeKeyEvent =
     aKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
   NS_ENSURE_TRUE(nativeKeyEvent, NS_ERROR_UNEXPECTED);
-  NS_ASSERTION(nativeKeyEvent->message == NS_KEY_PRESS,
+  NS_ASSERTION(nativeKeyEvent->mMessage == eKeyPress,
                "HandleKeyPressEvent gets non-keypress event");
 
   // if we are readonly or disabled, then do nothing.
@@ -5142,7 +5151,7 @@ nsEditor::IsAcceptableInputEvent(nsIDOMEvent* aEvent)
   // strange event order.
   bool needsWidget = false;
   WidgetGUIEvent* widgetGUIEvent = nullptr;
-  switch (widgetEvent->message) {
+  switch (widgetEvent->mMessage) {
     case NS_USER_DEFINED_EVENT:
       // If events are not created with proper event interface, their message
       // are initialized with NS_USER_DEFINED_EVENT.  Let's ignore such event.
@@ -5257,4 +5266,24 @@ nsEditor::GetIMESelectionStartOffsetIn(nsINode* aTextNode)
     }
   }
   return minOffset < INT32_MAX ? minOffset : -1;
+}
+
+void
+nsEditor::HideCaret(bool aHide)
+{
+  if (mHidingCaret == aHide) {
+    return;
+  }
+
+  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  NS_ENSURE_TRUE_VOID(presShell);
+  nsRefPtr<nsCaret> caret = presShell->GetCaret();
+  NS_ENSURE_TRUE_VOID(caret);
+
+  mHidingCaret = aHide;
+  if (aHide) {
+    caret->AddForceHide();
+  } else {
+    caret->RemoveForceHide();
+  }
 }

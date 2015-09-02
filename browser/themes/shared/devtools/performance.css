@@ -20,6 +20,16 @@
   --row-hover-background-color: rgba(76,158,217,0.2);
 }
 
+/**
+ * A generic class to hide elements, replacing the `element.hidden` attribute
+ * that we use to hide elements that can later be active
+ */
+.hidden {
+  display: none;
+  width: 0px;
+  height: 0px;
+}
+
 /* Toolbar */
 
 #performance-toolbar-control-other {
@@ -224,8 +234,20 @@
 .call-tree-header[type="count"],
 .call-tree-cell[type="count"],
 .call-tree-header[type="self-count"],
-.call-tree-cell[type="self-count"] {
-  width: 9vw;
+.call-tree-cell[type="self-count"],
+.call-tree-header[type="size"],
+.call-tree-cell[type="size"],
+.call-tree-header[type="self-size"],
+.call-tree-cell[type="self-size"],
+.call-tree-header[type="count-percentage"],
+.call-tree-cell[type="count-percentage"],
+.call-tree-header[type="self-count-percentage"],
+.call-tree-cell[type="self-count-percentage"],
+.call-tree-header[type="size-percentage"],
+.call-tree-cell[type="size-percentage"],
+.call-tree-header[type="self-size-percentage"],
+.call-tree-cell[type="self-size-percentage"] {
+  width: 6vw;
 }
 
 .call-tree-header[type="function"],
@@ -518,6 +540,11 @@
   font-weight: bold;
 }
 
+.marker-details-customcontainer .custom-button {
+  padding: 2px 5px;
+  border-width: 1px;
+}
+
 /**
  * Marker colors
  */
@@ -669,9 +696,6 @@ description.opt-icon::before {
 }
 .opt-icon[severity=warning]::before {
   background-position: -24px -24px;
-}
-.opt-icon[type=linkable]::before {
-  cursor: pointer;
 }
 
 ul.frames-list {

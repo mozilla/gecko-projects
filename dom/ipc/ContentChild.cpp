@@ -33,8 +33,6 @@
 #include "mozilla/dom/PCrashReporterChild.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/Promise.h"
-#include "mozilla/dom/asmjscache/AsmJSCache.h"
-#include "mozilla/dom/asmjscache/PAsmJSCacheEntryChild.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
@@ -842,9 +840,6 @@ ContentChild::InitXPCOM()
         global->SetInitialProcessData(data);
     }
 
-    DebugOnly<FileUpdateDispatcher*> observer = FileUpdateDispatcher::GetSingleton();
-    NS_ASSERTION(observer, "FileUpdateDispatcher is null");
-
     // This object is held alive by the observer service.
     nsRefPtr<SystemMessageHandledObserver> sysMsgObserver =
         new SystemMessageHandledObserver();
@@ -1414,6 +1409,18 @@ ContentChild::RecvNotifyPresentationReceiverLaunched(PBrowserChild* aIframe,
     return true;
 }
 
+bool
+ContentChild::RecvNotifyPresentationReceiverCleanUp(const nsString& aSessionId)
+{
+  nsCOMPtr<nsIPresentationService> service =
+      do_GetService(PRESENTATION_SERVICE_CONTRACTID);
+  NS_WARN_IF(!service);
+
+  NS_WARN_IF(NS_FAILED(service->UntrackSessionInfo(aSessionId)));
+
+  return true;
+}
+
 PCrashReporterChild*
 ContentChild::AllocPCrashReporterChild(const mozilla::dom::NativeThreadId& id,
                                        const uint32_t& processType)
@@ -1467,23 +1474,6 @@ ContentChild::DeallocPIccChild(PIccChild* aActor)
 {
     // IccChild is refcounted, must not be freed manually.
     static_cast<IccChild*>(aActor)->Release();
-    return true;
-}
-
-asmjscache::PAsmJSCacheEntryChild*
-ContentChild::AllocPAsmJSCacheEntryChild(
-                                    const asmjscache::OpenMode& aOpenMode,
-                                    const asmjscache::WriteParams& aWriteParams,
-                                    const IPC::Principal& aPrincipal)
-{
-    NS_NOTREACHED("Should never get here!");
-    return nullptr;
-}
-
-bool
-ContentChild::DeallocPAsmJSCacheEntryChild(PAsmJSCacheEntryChild* aActor)
-{
-    asmjscache::DeallocEntryChild(aActor);
     return true;
 }
 
@@ -2294,11 +2284,7 @@ ContentChild::RecvAppInit()
     // PreloadSlowThings() may set the docshell of the first TabChild
     // inactive, and we can only safely restore it to active from
     // BrowserElementChild.js.
-    if ((mIsForApp || mIsForBrowser)
-#ifdef MOZ_NUWA_PROCESS
-        && !IsNuwaProcess()
-#endif
-       ) {
+    if (mIsForApp || mIsForBrowser) {
         PreloadSlowThings();
     }
 
@@ -2823,7 +2809,7 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
     if (session) {
       session->SetDragAction(aAction);
       nsCOMPtr<DataTransfer> dataTransfer =
-        new DataTransfer(nullptr, NS_DRAGDROP_START, false, -1);
+        new DataTransfer(nullptr, eDragStart, false, -1);
       for (uint32_t i = 0; i < aTransfers.Length(); ++i) {
         auto& items = aTransfers[i].items();
         for (uint32_t j = 0; j < items.Length(); ++j) {

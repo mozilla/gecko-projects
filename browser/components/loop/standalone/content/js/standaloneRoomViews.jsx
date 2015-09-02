@@ -77,6 +77,10 @@ loop.standaloneRoomViews = (function(mozL10n) {
   });
 
   var StandaloneRoomInfoArea = React.createClass({
+    statics: {
+      RENDER_WAITING_DELAY: 2000
+    },
+
     propTypes: {
       activeRoomStore: React.PropTypes.oneOfType([
         React.PropTypes.instanceOf(loop.store.ActiveRoomStore),
@@ -90,9 +94,58 @@ loop.standaloneRoomViews = (function(mozL10n) {
       roomUsed: React.PropTypes.bool.isRequired
     },
 
+    getInitialState: function() {
+      return { waitToRenderWaiting: true };
+    },
+
     componentDidMount: function() {
       // Watch for messages from the waiting-tile iframe
       window.addEventListener("message", this.recordTileClick);
+    },
+
+    /**
+     * Change state to allow for the waiting message to be shown and send an
+     * event to record that fact.
+     */
+    _allowRenderWaiting: function() {
+      delete this._waitTimer;
+
+      // Only update state if we're still showing a waiting message.
+      switch (this.props.roomState) {
+        case ROOM_STATES.JOINING:
+        case ROOM_STATES.JOINED:
+        case ROOM_STATES.SESSION_CONNECTED:
+          this.setState({ waitToRenderWaiting: false });
+          this.props.dispatcher.dispatch(new sharedActions.TileShown());
+          break;
+      }
+    },
+
+    componentDidUpdate: function() {
+      // Start a timer once from the earliest waiting state if we need to wait
+      // before showing a message.
+      if (this.props.roomState === ROOM_STATES.JOINING &&
+          this.state.waitToRenderWaiting &&
+          this._waitTimer === undefined) {
+        this._waitTimer = setTimeout(this._allowRenderWaiting,
+          this.constructor.RENDER_WAITING_DELAY);
+      }
+    },
+
+    componentWillReceiveProps: function(nextProps) {
+      switch (nextProps.roomState) {
+        // Reset waiting for the next time the user joins.
+        case ROOM_STATES.ENDED:
+        case ROOM_STATES.READY:
+          if (!this.state.waitToRenderWaiting) {
+            this.setState({ waitToRenderWaiting: true });
+          }
+          if (this._waitTimer !== undefined) {
+            clearTimeout(this._waitTimer);
+            delete this._waitTimer;
+          }
+          break;
+      }
     },
 
     componentWillUnmount: function() {
@@ -170,6 +223,12 @@ loop.standaloneRoomViews = (function(mozL10n) {
         case ROOM_STATES.JOINING:
         case ROOM_STATES.JOINED:
         case ROOM_STATES.SESSION_CONNECTED: {
+          // Don't show the waiting display until after a brief wait in case
+          // there's another participant that will momentarily appear.
+          if (this.state.waitToRenderWaiting) {
+            return null;
+          }
+
           return (
             <div className="room-inner-info-area">
               <p className="empty-room-message">
@@ -520,18 +579,17 @@ loop.standaloneRoomViews = (function(mozL10n) {
               joinRoom={this.joinRoom}
               roomState={this.state.roomState}
               roomUsed={this.state.used} />
+            <sharedViews.ConversationToolbar
+              audio={{enabled: !this.state.audioMuted,
+                      visible: this._roomIsActive()}}
+              dispatcher={this.props.dispatcher}
+              enableHangup={this._roomIsActive()}
+              hangup={this.leaveRoom}
+              hangupButtonLabel={mozL10n.get("rooms_leave_button_label")}
+              publishStream={this.publishStream}
+              video={{enabled: !this.state.videoMuted,
+                      visible: this._roomIsActive()}} />
           </sharedViews.MediaLayoutView>
-          <sharedViews.ConversationToolbar
-            audio={{enabled: !this.state.audioMuted,
-                    visible: this._roomIsActive()}}
-            dispatcher={this.props.dispatcher}
-            edit={{ visible: false, enabled: false }}
-            enableHangup={this._roomIsActive()}
-            hangup={this.leaveRoom}
-            hangupButtonLabel={mozL10n.get("rooms_leave_button_label")}
-            publishStream={this.publishStream}
-            video={{enabled: !this.state.videoMuted,
-                    visible: this._roomIsActive()}} />
           <loop.fxOSMarketplaceViews.FxOSHiddenMarketplaceView
             marketplaceSrc={this.state.marketplaceSrc}
             onMarketplaceMessage={this.state.onMarketplaceMessage} />

@@ -12,7 +12,7 @@ let {CssComputedView} = require("devtools/styleinspector/computed-view");
 let {CssRuleView, _ElementStyle} = require("devtools/styleinspector/rule-view");
 let {CssLogic, CssSelector} = require("devtools/styleinspector/css-logic");
 let DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
-let {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+let promise = require("promise");
 let {editableField, getInplaceEditorForSpan: inplaceEditor} =
   require("devtools/shared/inplace-editor");
 let {console} =
@@ -908,6 +908,25 @@ let createNewRuleViewProperty = Task.async(function*(ruleEditor, inputValue) {
   EventUtils.synthesizeKey("VK_RETURN", {},
     ruleEditor.element.ownerDocument.defaultView);
   yield onFocus;
+});
+
+/**
+ * Set the search value for the rule-view filter styles search box.
+ *
+ * @param {CssRuleView} view
+ *        The instance of the rule-view panel
+ * @param {String} searchValue
+ *        The filter search value
+ * @return a promise that resolves when the rule-view is filtered for the
+ * search term
+ */
+let setSearchFilter = Task.async(function*(view, searchValue) {
+  info("Setting filter text to \"" + searchValue + "\"");
+  let win = view.styleWindow;
+  let searchField = view.searchField;
+  searchField.focus();
+  synthesizeKeys(searchValue, win);
+  yield view.inspector.once("ruleview-filtered");
 });
 
 /* *********************************************

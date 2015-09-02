@@ -20,7 +20,6 @@
 #include "nsTArray.h"
 #include "nsReadableUtils.h"
 #include "nsILineInputStream.h"
-#include "nsIIDNService.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceDefs.h"
 #include "prprf.h"
@@ -127,19 +126,24 @@ GetPrincipalFromOrigin(const nsACString& aOrigin, nsIPrincipal** aPrincipal)
 nsresult
 GetPrincipal(nsIURI* aURI, uint32_t aAppId, bool aIsInBrowserElement, nsIPrincipal** aPrincipal)
 {
-  nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
-  NS_ENSURE_TRUE(secMan, NS_ERROR_FAILURE);
+  // TODO: Bug 1165267 - Use OriginAttributes for nsCookieService
+  mozilla::OriginAttributes attrs(aAppId, aIsInBrowserElement);
+  nsCOMPtr<nsIPrincipal> principal = mozilla::BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
+  NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
 
-  return secMan->GetAppCodebasePrincipal(aURI, aAppId, aIsInBrowserElement, aPrincipal);
+  principal.forget(aPrincipal);
+  return NS_OK;
 }
 
 nsresult
 GetPrincipal(nsIURI* aURI, nsIPrincipal** aPrincipal)
 {
-  nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
-  NS_ENSURE_TRUE(secMan, NS_ERROR_FAILURE);
+  mozilla::OriginAttributes attrs;
+  nsCOMPtr<nsIPrincipal> principal = mozilla::BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
+  NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
 
-  return secMan->GetNoAppCodebasePrincipal(aURI, aPrincipal);
+  principal.forget(aPrincipal);
+  return NS_OK;
 }
 
 nsCString
@@ -847,9 +851,7 @@ nsPermissionManager::InitDB(bool aRemoveFile)
   }
 
   rv = OpenDatabase(permissionsFile);
-  if (rv == NS_ERROR_UNEXPECTED) {
-    return rv;
-  } else if (rv == NS_ERROR_FILE_CORRUPTED) {
+  if (rv == NS_ERROR_FILE_CORRUPTED) {
     LogToConsole(NS_LITERAL_STRING("permissions.sqlite is corrupted! Try again!"));
 
     // Add telemetry probe
@@ -863,6 +865,8 @@ nsPermissionManager::InitDB(bool aRemoveFile)
     rv = OpenDatabase(permissionsFile);
     NS_ENSURE_SUCCESS(rv, rv);
     LogToConsole(NS_LITERAL_STRING("OpenDatabase to permissions.sqlite is successful!"));
+  } else if (NS_FAILED(rv)) {
+    return rv;
   }
 
   bool ready;
@@ -2741,19 +2745,6 @@ nsPermissionManager::_DoImport(nsIInputStream *inputStream, mozIStorageConnectio
   } while (isMore);
 
   return NS_OK;
-}
-
-nsresult
-nsPermissionManager::NormalizeToACE(nsCString &aHost)
-{
-  // lazily init the IDN service
-  if (!mIDNService) {
-    nsresult rv;
-    mIDNService = do_GetService(NS_IDNSERVICE_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  return mIDNService->ConvertUTF8toACE(aHost, aHost);
 }
 
 void

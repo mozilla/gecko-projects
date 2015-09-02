@@ -16,7 +16,7 @@ ClipboardEvent::ClipboardEvent(EventTarget* aOwner,
                                nsPresContext* aPresContext,
                                InternalClipboardEvent* aEvent)
   : Event(aOwner, aPresContext,
-          aEvent ? aEvent : new InternalClipboardEvent(false, 0))
+          aEvent ? aEvent : new InternalClipboardEvent(false, eVoidEvent))
 {
   if (aEvent) {
     mEventIsInternal = false;
@@ -108,8 +108,8 @@ ClipboardEvent::GetClipboardData()
         new DataTransfer(ToSupports(this), NS_COPY, false, -1);
     } else {
       event->clipboardData =
-        new DataTransfer(ToSupports(this), event->message,
-                         event->message == NS_PASTE,
+        new DataTransfer(ToSupports(this), event->mMessage,
+                         event->mMessage == NS_PASTE,
                          nsIClipboard::kGlobalClipboard);
     }
   }

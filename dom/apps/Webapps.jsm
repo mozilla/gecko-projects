@@ -85,11 +85,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "ScriptPreloader",
 XPCOMUtils.defineLazyModuleGetter(this, "Langpacks",
                                   "resource://gre/modules/Langpacks.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "TrustedHostedAppsUtils",
-                                  "resource://gre/modules/TrustedHostedAppsUtils.jsm");
-
 XPCOMUtils.defineLazyModuleGetter(this, "ImportExport",
                                   "resource://gre/modules/ImportExport.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
 
 #ifdef MOZ_WIDGET_GONK
 XPCOMUtils.defineLazyGetter(this, "libcutils", function() {
@@ -107,10 +107,14 @@ let debug = Cu.import("resource://gre/modules/AndroidLog.jsm", {})
               .AndroidLog.d.bind(null, "Webapps");
 #else
 // Elsewhere, report debug messages only if dom.mozApps.debug is set to true.
-// The pref is only checked once, on startup, so restart after changing it.
-let debug = Services.prefs.getBoolPref("dom.mozApps.debug")
-              ? (aMsg) => dump("-*- Webapps.jsm : " + aMsg + "\n")
-              : (aMsg) => {};
+let debug;
+function debugPrefObserver() {
+  debug = Services.prefs.getBoolPref("dom.mozApps.debug")
+            ? (aMsg) => dump("-*- Webapps.jsm : " + aMsg + "\n")
+            : (aMsg) => {};
+}
+debugPrefObserver();
+Services.prefs.addObserver("dom.mozApps.debug", debugPrefObserver, false);
 #endif
 
 function getNSPRErrorCode(err) {
@@ -191,7 +195,6 @@ this.DOMApplicationRegistry = {
   get kPackaged()       "packaged",
   get kHosted()         "hosted",
   get kHostedAppcache() "hosted-appcache",
-  get kTrustedHosted()  "hosted-trusted",
 
   // Path to the webapps.json file where we store the registry data.
   appsFile: null,
@@ -466,9 +469,7 @@ this.DOMApplicationRegistry = {
     } else {
       // Hosted apps, can be appcached or not.
       let kind = this.kHosted;
-      if (aManifest.type == "trusted") {
-        kind = this.kTrustedHosted;
-      } else if (aManifest.appcache_path) {
+      if (aManifest.appcache_path) {
         kind = this.kHostedAppcache;
       }
       return kind;
@@ -787,9 +788,9 @@ this.DOMApplicationRegistry = {
           }
         }
 
-#ifdef MOZ_B2G
-        yield this.installSystemApps();
-#endif
+        if (AppConstants.MOZ_B2GDROID || AppConstants.MOZ_B2G) {
+          yield this.installSystemApps();
+        }
 
         // At first run, install preloaded apps and set up their permissions.
         for (let id in this.webapps) {
@@ -826,8 +827,7 @@ this.DOMApplicationRegistry = {
     let uri = Services.io.newURI(aOrigin, null, null);
     let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"]
                    .getService(Ci.nsIScriptSecurityManager);
-    let principal = secMan.getAppCodebasePrincipal(uri, aId,
-                                                   /*mozbrowser*/ false);
+    let principal = secMan.createCodebasePrincipal(uri, {appId: aId});
     if (!dataStoreService.checkPermission(principal)) {
       return;
     }
@@ -865,8 +865,16 @@ this.DOMApplicationRegistry = {
       root = aManifest.entry_points[aEntryPoint];
     }
 
-    if (!root.messages || !Array.isArray(root.messages) ||
-        root.messages.length == 0) {
+    if (!root.messages) {
+      // This application just doesn't use system messages.
+      return;
+    }
+
+    if (!Array.isArray(root.messages) || root.messages.length == 0) {
+      dump("Could not register invalid system message entry for " + aApp.manifestURL + "\n");
+      try {
+        dump(JSON.stringify(root.messages) + "\n");
+      } catch(e) {}
       return;
     }
 
@@ -876,31 +884,36 @@ this.DOMApplicationRegistry = {
     root.messages.forEach(function registerPages(aMessage) {
       let handlerPageURI = launchPathURI;
       let messageName;
-      if (typeof(aMessage) === "object" && Object.keys(aMessage).length === 1) {
-        messageName = Object.keys(aMessage)[0];
-        let handlerPath = aMessage[messageName];
-        // Resolve the handler path from origin. If |handler_path| is absent,
-        // simply skip.
-        let fullHandlerPath;
+      if (typeof(aMessage) !== "object" || Object.keys(aMessage).length !== 1) {
+        dump("Could not register invalid system message entry for " + aApp.manifestURL + "\n");
         try {
-          if (handlerPath && handlerPath.trim()) {
-            fullHandlerPath = manifest.resolveURL(handlerPath);
-          } else {
-            throw new Error("Empty or blank handler path.");
-          }
-        } catch(e) {
-          debug("system message handler path (" + handlerPath + ") is " +
-                "invalid, skipping. Error is: " + e);
-          return;
-        }
-        handlerPageURI = Services.io.newURI(fullHandlerPath, null, null);
-      } else {
-        messageName = aMessage;
+          dump(JSON.stringify(aMessage) + "\n");
+        } catch(e) {}
+        return;
       }
+
+      messageName = Object.keys(aMessage)[0];
+      let handlerPath = aMessage[messageName];
+      // Resolve the handler path from origin. If |handler_path| is absent,
+      // simply skip.
+      let fullHandlerPath;
+      try {
+        if (handlerPath && handlerPath.trim()) {
+          fullHandlerPath = manifest.resolveURL(handlerPath);
+        } else {
+          throw new Error("Empty or blank handler path.");
+        }
+      } catch(e) {
+        debug("system message handler path (" + handlerPath + ") is " +
+              "invalid, skipping. Error is: " + e);
+        return;
+      }
+      handlerPageURI = Services.io.newURI(fullHandlerPath, null, null);
 
       if (SystemMessagePermissionsChecker
             .isSystemMessagePermittedToRegister(messageName,
                                                 aApp.manifestURL,
+                                                aApp.origin,
                                                 aManifest)) {
         msgmgr.registerPage(messageName, handlerPageURI, manifestURI);
       }
@@ -956,6 +969,7 @@ this.DOMApplicationRegistry = {
       if (SystemMessagePermissionsChecker
             .isSystemMessagePermittedToRegister("connection",
                                                 aApp.manifestURL,
+                                                aApp.origin,
                                                 aManifest)) {
         msgmgr.registerPage("connection", handlerPageURI, manifestURI);
       }
@@ -1057,6 +1071,7 @@ this.DOMApplicationRegistry = {
         if (SystemMessagePermissionsChecker
               .isSystemMessagePermittedToRegister("activity",
                                                   aApp.manifestURL,
+                                                  aApp.origin,
                                                   aManifest)) {
           msgmgr.registerPage("activity", launchPathURI, manifestURI);
         }
@@ -1587,24 +1602,6 @@ this.DOMApplicationRegistry = {
       return;
     }
 
-    // Check if launching trusted hosted app
-    if (this.kTrustedHosted == app.kind) {
-      debug("Launching Trusted Hosted App!");
-      // sanity check on manifest host's CA
-      // (proper CA check with pinning is done by regular networking code)
-      if (!TrustedHostedAppsUtils.isHostPinned(aManifestURL)) {
-        debug("Trusted App Host certificate Not OK");
-        aOnFailure("TRUSTED_APPLICATION_HOST_CERTIFICATE_INVALID");
-        return;
-      }
-
-      debug("Trusted App Host pins exist");
-      if (!TrustedHostedAppsUtils.verifyCSPWhiteList(app.csp)) {
-        aOnFailure("TRUSTED_APPLICATION_WHITELIST_VALIDATION_FAILED");
-        return;
-      }
-    }
-
     // We have to clone the app object as nsIDOMApplication objects are
     // stringified as an empty object. (see bug 830376)
     let appClone = AppsUtils.cloneAppObject(app);
@@ -1926,9 +1923,7 @@ this.DOMApplicationRegistry = {
 
   startOfflineCacheDownload: function(aManifest, aApp, aProfileDir, aIsUpdate) {
     debug("startOfflineCacheDownload " + aApp.id + " " + aApp.kind);
-    if ((aApp.kind !== this.kHostedAppcache &&
-         aApp.kind !== this.kTrustedHosted) ||
-         !aManifest.appcache_path) {
+    if (aApp.kind !== this.kHostedAppcache || !aManifest.appcache_path) {
       return;
     }
     debug("startOfflineCacheDownload " + aManifest.appcache_path);
@@ -2069,8 +2064,7 @@ this.DOMApplicationRegistry = {
 
     if (onlyCheckAppCache) {
       // Bail out for packaged apps & hosted apps without appcache.
-      if (aApp.kind !== this.kHostedAppcache &&
-          aApp.kind !== this.kTrustedHosted) {
+      if (aApp.kind !== this.kHostedAppcache) {
         sendError("NOT_UPDATABLE");
         return;
       }
@@ -2184,16 +2178,7 @@ this.DOMApplicationRegistry = {
 
             // For hosted apps and hosted apps with appcache, use the
             // manifest "as is".
-            if (this.kTrustedHosted !== this.appKind(app, manifest)) {
-              this.updateHostedApp(aData, id, app, oldManifest, manifest);
-              return;
-            }
-
-            // For trusted hosted apps, verify the manifest before
-            // installation.
-            TrustedHostedAppsUtils.verifyManifest(app, id, manifest)
-              .then(() => this.updateHostedApp(aData, id, app, oldManifest, manifest),
-                sendError);
+            this.updateHostedApp(aData, id, app, oldManifest, manifest);
           }
         }
       } else if (xhr.status == 304) {
@@ -2372,9 +2357,7 @@ this.DOMApplicationRegistry = {
     this.webapps[aId] = aApp;
     yield this._saveApps();
 
-    if ((aApp.kind !== this.kHostedAppcache &&
-         aApp.kind !== this.kTrustedHosted) ||
-         !aApp.manifest.appcache_path) {
+    if (aApp.kind !== this.kHostedAppcache || !aApp.manifest.appcache_path) {
       MessageBroadcaster.broadcastMessage("Webapps:UpdateState", {
         app: aApp,
         manifest: aApp.manifest,
@@ -2530,12 +2513,7 @@ this.DOMApplicationRegistry = {
     if (app.manifest) {
       if (checkManifest()) {
         debug("Installed manifest check OK");
-        if (this.kTrustedHosted !== this.appKind(app, app.manifest)) {
-          installApp();
-          return;
-        }
-        TrustedHostedAppsUtils.verifyManifest(aData.app, aData.appId, app.manifest)
-          .then(installApp, sendError);
+        installApp();
       } else {
         debug("Installed manifest check failed");
         // checkManifest() sends error before return
@@ -2563,14 +2541,7 @@ this.DOMApplicationRegistry = {
         if (checkManifest()) {
           debug("Downloaded manifest check OK");
           app.etag = xhr.getResponseHeader("Etag");
-          if (this.kTrustedHosted !== this.appKind(app, app.manifest)) {
-            installApp();
-            return;
-          }
-
-          debug("App kind: " + this.kTrustedHosted);
-          TrustedHostedAppsUtils.verifyManifest(aData.app, aData.appId, app.manifest)
-            .then(installApp, sendError);
+          installApp();
           return;
         } else {
           debug("Downloaded manifest check failed");
@@ -2829,9 +2800,6 @@ this.DOMApplicationRegistry = {
       aNewApp.appStatus || Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
     let usesAppcache = appObject.kind == this.kHostedAppcache;
-    if (appObject.kind == this.kTrustedHosted && aManifest.appcache_path) {
-      usesAppcache = true;
-    }
 
     if (usesAppcache) {
       appObject.installState = "pending";
@@ -2845,8 +2813,7 @@ this.DOMApplicationRegistry = {
       appObject.downloading = true;
       appObject.downloadSize = aLocaleManifest.size;
       appObject.readyToApplyDownload = false;
-    } else if (appObject.kind == this.kHosted ||
-               appObject.kind == this.kTrustedHosted) {
+    } else if (appObject.kind == this.kHosted) {
       appObject.installState = "installed";
       appObject.downloadAvailable = false;
       appObject.downloading = false;
@@ -3027,9 +2994,7 @@ this.DOMApplicationRegistry = {
 
     let dontNeedNetwork = false;
 
-    if ((appObject.kind == this.kHostedAppcache ||
-        appObject.kind == this.kTrustedHosted) &&
-        manifest.appcache_path) {
+    if (appObject.kind == this.kHostedAppcache && manifest.appcache_path) {
       this.queuedDownload[app.manifestURL] = {
         manifest: manifest,
         app: appObject,
@@ -3414,8 +3379,9 @@ this.DOMApplicationRegistry = {
     let requestChannel;
 
     let appURI = NetUtil.newURI(aNewApp.origin, null, null);
-    let principal = Services.scriptSecurityManager.getAppCodebasePrincipal(
-                      appURI, aNewApp.localId, false);
+    let principal =
+      Services.scriptSecurityManager.createCodebasePrincipal(appURI,
+                                                             {appId: aNewApp.localId});
 
     if (aIsLocalFileInstall) {
       requestChannel = NetUtil.newChannel({

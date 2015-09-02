@@ -8,9 +8,11 @@ this.EXPORTED_SYMBOLS = ["UITour", "UITourMetricsProvider"];
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
+Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
+Cu.import("resource:///modules/RecentWindow.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/TelemetryController.jsm");
 
@@ -398,7 +400,6 @@ this.UITour = {
       window = Services.wm.getMostRecentWindow("navigator:browser");
     }
 
-    let tab = window.gBrowser.getTabForBrowser(browser);
     let messageManager = browser.messageManager;
 
     log.debug("onPageEvent:", aEvent.detail, aMessage);
@@ -460,21 +461,35 @@ this.UITour = {
         // Validate the input parameters.
         if (typeof data.message !== "string" || data.message === "") {
           log.error("showHeartbeat: Invalid message specified.");
-          break;
+          return false;
         }
 
         if (typeof data.thankyouMessage !== "string" || data.thankyouMessage === "") {
           log.error("showHeartbeat: Invalid thank you message specified.");
-          break;
+          return false;
         }
 
         if (typeof data.flowId !== "string" || data.flowId === "") {
           log.error("showHeartbeat: Invalid flowId specified.");
-          break;
+          return false;
+        }
+
+        if (data.engagementButtonLabel && typeof data.engagementButtonLabel != "string") {
+          log.error("showHeartbeat: Invalid engagementButtonLabel specified");
+          return false;
+        }
+
+        let heartbeatWindow = window;
+        if (data.privateWindowsOnly && !PrivateBrowsingUtils.isWindowPrivate(heartbeatWindow)) {
+          heartbeatWindow = RecentWindow.getMostRecentBrowserWindow({ private: true });
+          if (!heartbeatWindow) {
+            log.debug("showHeartbeat: No private window found");
+            return false;
+          }
         }
 
         // Finally show the Heartbeat UI.
-        this.showHeartbeat(window, messageManager, data);
+        this.showHeartbeat(heartbeatWindow, data);
         break;
       }
 
@@ -1104,14 +1119,13 @@ this.UITour = {
    * Show the Heartbeat UI to request user feedback. This function reports back to the
    * caller using |notify|. The notification event name reflects the current status the UI
    * is in (either "Heartbeat:NotificationOffered", "Heartbeat:NotificationClosed",
-   * "Heartbeat:LearnMore" or "Heartbeat:Voted"). When a "Heartbeat:Voted" event is notified
+   * "Heartbeat:LearnMore", "Heartbeat:Engaged" or "Heartbeat:Voted").
+   * When a "Heartbeat:Voted" event is notified
    * the data payload contains a |score| field which holds the rating picked by the user.
    * Please note that input parameters are already validated by the caller.
    *
    * @param aChromeWindow
    *        The chrome window that the heartbeat notification is displayed in.
-   * @param aMessageManager
-   *        The message manager to communicate with the API caller.
    * @param {Object} aOptions Options object.
    * @param {String} aOptions.message
    *        The message, or question, to display on the notification.
@@ -1120,24 +1134,56 @@ this.UITour = {
    * @param {String} aOptions.flowId
    *        An identifier for this rating flow. Please note that this is only used to
    *        identify the notification box.
+   * @param {String} [aOptions.engagementButtonLabel=null]
+   *        The text of the engagement button to use instad of stars. If this is null
+   *        or invalid, rating stars are used.
    * @param {String} [aOptions.engagementURL=null]
-   *        The engagement URL to open in a new tab once user has voted. If this is null
+   *        The engagement URL to open in a new tab once user has engaged. If this is null
    *        or invalid, no new tab is opened.
    * @param {String} [aOptions.learnMoreLabel=null]
    *        The label of the learn more link. No link will be shown if this is null.
    * @param {String} [aOptions.learnMoreURL=null]
    *        The learn more URL to open when clicking on the learn more link. No learn more
    *        will be shown if this is an invalid URL.
+   * @param {String} [aOptions.privateWindowsOnly=false]
+   *        Whether the heartbeat UI should only be targeted at a private window (if one exists).
+   *        No notifications should be fired when this is true.
    */
-  showHeartbeat: function(aChromeWindow, aMessageManager, aOptions) {
-    let nb = aChromeWindow.document.getElementById("high-priority-global-notificationbox");
+  showHeartbeat(aChromeWindow, aOptions) {
+    let maybeNotifyHeartbeat = (...aParams) => {
+      if (aOptions.privateWindowsOnly) {
+        return;
+      }
+      this.notify(...aParams);
+    };
 
+    let nb = aChromeWindow.document.getElementById("high-priority-global-notificationbox");
+    let buttons = null;
+
+    if (aOptions.engagementButtonLabel) {
+      buttons = [{
+        label: aOptions.engagementButtonLabel,
+        callback: () => {
+          // Let the consumer know user engaged.
+          maybeNotifyHeartbeat("Heartbeat:Engaged", { flowId: aOptions.flowId, timestamp: Date.now() });
+
+          userEngaged(new Map([
+            ["type", "button"],
+            ["flowid", aOptions.flowId]
+          ]));
+
+          // Return true so that the notification bar doesn't close itself since
+          // we have a thank you message to show.
+          return true;
+        },
+      }];
+    }
     // Create the notification. Prefix its ID to decrease the chances of collisions.
     let notice = nb.appendNotification(aOptions.message, "heartbeat-" + aOptions.flowId,
-      "chrome://browser/skin/heartbeat-icon.svg", nb.PRIORITY_INFO_HIGH, null, function() {
+      "chrome://browser/skin/heartbeat-icon.svg", nb.PRIORITY_INFO_HIGH, buttons, function() {
         // Let the consumer know the notification bar was closed. This also happens
         // after voting.
-        this.notify("Heartbeat:NotificationClosed", { flowId: aOptions.flowId, timestamp: Date.now() });
+        maybeNotifyHeartbeat("Heartbeat:NotificationClosed", { flowId: aOptions.flowId, timestamp: Date.now() });
     }.bind(this));
 
     // Get the elements we need to style.
@@ -1146,11 +1192,51 @@ this.UITour = {
     let messageText =
       aChromeWindow.document.getAnonymousElementByAttribute(notice, "anonid", "messageText");
 
+    function userEngaged(aEngagementParams) {
+      // Make the heartbeat icon pulse twice.
+      notice.label = aOptions.thankyouMessage;
+      messageImage.classList.remove("pulse-onshow");
+      messageImage.classList.add("pulse-twice");
+
+      // Remove all the children of the notice (rating container
+      // and the flex).
+      while (notice.firstChild) {
+        notice.removeChild(notice.firstChild);
+      }
+
+      // Make sure that we have a valid URL. If we haven't, do not open the engagement page.
+      let engagementURL = null;
+      try {
+        engagementURL = new URL(aOptions.engagementURL);
+      } catch (error) {
+        log.error("showHeartbeat: Invalid URL specified.");
+      }
+
+      // Just open the engagement tab if we have a valid engagement URL.
+      if (engagementURL) {
+        for (let [param, value] of aEngagementParams) {
+          engagementURL.searchParams.append(param, value);
+        }
+
+        // Open the engagement URL in a new tab.
+        aChromeWindow.gBrowser.selectedTab =
+          aChromeWindow.gBrowser.addTab(engagementURL.toString(), {
+            owner: aChromeWindow.gBrowser.selectedTab,
+            relatedToCurrent: true
+          });
+      }
+
+      // Remove the notification bar after 3 seconds.
+      aChromeWindow.setTimeout(() => {
+        nb.removeNotification(notice);
+      }, 3000);
+    }
+
     // Create the fragment holding the rating UI.
     let frag = aChromeWindow.document.createDocumentFragment();
 
     // Build the Heartbeat star rating.
-    const numStars = 5;
+    const numStars = aOptions.engagementButtonLabel ? 0 : 5;
     let ratingContainer = aChromeWindow.document.createElement("hbox");
     ratingContainer.id = "star-rating-container";
 
@@ -1169,46 +1255,18 @@ this.UITour = {
         let rating = Number(evt.target.getAttribute("data-score"), 10);
 
         // Let the consumer know user voted.
-        this.notify("Heartbeat:Voted", { flowId: aOptions.flowId, score: rating, timestamp: Date.now() });
+        maybeNotifyHeartbeat("Heartbeat:Voted", {
+          flowId: aOptions.flowId,
+          score: rating,
+          timestamp: Date.now(),
+        });
 
-        // Make the heartbeat icon pulse twice.
-        notice.label = aOptions.thankyouMessage;
-        messageImage.classList.remove("pulse-onshow");
-        messageImage.classList.add("pulse-twice");
-
-        // Remove all the children of the notice (rating container
-        // and the flex).
-        while (notice.firstChild) {
-          notice.removeChild(notice.firstChild);
-        }
-
-        // Make sure that we have a valid URL. If we haven't, do not open the engagement page.
-        let engagementURL = null;
-        try {
-          engagementURL = new URL(aOptions.engagementURL);
-        } catch (error) {
-          log.error("showHeartbeat: Invalid URL specified.");
-        }
-
-        // Just open the engagement tab if we have a valid engagement URL.
-        if (engagementURL) {
-          // Append the score data to the engagement URL.
-          engagementURL.searchParams.append("type", "stars");
-          engagementURL.searchParams.append("score", rating);
-          engagementURL.searchParams.append("flowid", aOptions.flowId);
-
-          // Open the engagement URL in a new tab.
-          aChromeWindow.gBrowser.selectedTab =
-            aChromeWindow.gBrowser.addTab(engagementURL.toString(), {
-              owner: aChromeWindow.gBrowser.selectedTab,
-              relatedToCurrent: true
-            });
-        }
-
-        // Remove the notification bar after 3 seconds.
-        aChromeWindow.setTimeout(() => {
-          nb.removeNotification(notice);
-        }, 3000);
+        // Append the score data to the engagement URL.
+        userEngaged(new Map([
+          ["type", "stars"],
+          ["score", rating],
+          ["flowid", aOptions.flowId]
+        ]));
       }.bind(this));
 
       // Add it to the container.
@@ -1240,7 +1298,7 @@ this.UITour = {
       learnMore.className = "text-link";
       learnMore.href = learnMoreURL.toString();
       learnMore.setAttribute("value", aOptions.learnMoreLabel);
-      learnMore.addEventListener("click", () => this.notify("Heartbeat:LearnMore",
+      learnMore.addEventListener("click", () => maybeNotifyHeartbeat("Heartbeat:LearnMore",
         { flowId: aOptions.flowId, timestamp: Date.now() }));
       frag.appendChild(learnMore);
     }
@@ -1252,7 +1310,10 @@ this.UITour = {
     messageText.classList.add("heartbeat");
 
     // Let the consumer know the notification was shown.
-    this.notify("Heartbeat:NotificationOffered", { flowId: aOptions.flowId, timestamp: Date.now() });
+    maybeNotifyHeartbeat("Heartbeat:NotificationOffered", {
+      flowId: aOptions.flowId,
+      timestamp: Date.now(),
+    });
   },
 
   /**
@@ -1805,6 +1866,27 @@ this.UITour = {
           }
         } catch (e) {}
         appinfo["defaultBrowser"] = isDefaultBrowser;
+
+        let canSetDefaultBrowserInBackground = true;
+        if (AppConstants.isPlatformAndVersionAtLeast("win", "6.2")) {
+          let prefBranch =
+            Services.prefs.getBranch("browser.shell.associationHash");
+          let prefChildren = prefBranch.getChildList("");
+          canSetDefaultBrowserInBackground = prefChildren.length > 0;
+        } else if (AppConstants.isPlatformAndVersionAtLeast("macosx", "10.10")) {
+          canSetDefaultBrowserInBackground = false;
+        } else if (AppConstants.platform == "linux") {
+          // The ShellService may not exist on some versions of Linux.
+          try {
+            let shell = aWindow.getShellService();
+          } catch (e) {
+            canSetDefaultBrowserInBackground = null;
+          }
+        }
+
+        appinfo["canSetDefaultBrowserInBackground"] =
+          canSetDefaultBrowserInBackground;
+
         this.sendPageCallback(aMessageManager, aCallbackID, appinfo);
         break;
       case "availableTargets":
@@ -1933,30 +2015,30 @@ this.UITour = {
   },
 
   _addAnnotationPanelMutationObserver: function(aPanelEl) {
-#ifdef XP_LINUX
-    let observer = this._annotationPanelMutationObservers.get(aPanelEl);
-    if (observer) {
-      return;
+    if (AppConstants.platform == "linux") {
+      let observer = this._annotationPanelMutationObservers.get(aPanelEl);
+      if (observer) {
+        return;
+      }
+      let win = aPanelEl.ownerDocument.defaultView;
+      observer = new win.MutationObserver(this._annotationMutationCallback);
+      this._annotationPanelMutationObservers.set(aPanelEl, observer);
+      let observerOptions = {
+        attributeFilter: ["height", "width"],
+        attributes: true,
+      };
+      observer.observe(aPanelEl, observerOptions);
     }
-    let win = aPanelEl.ownerDocument.defaultView;
-    observer = new win.MutationObserver(this._annotationMutationCallback);
-    this._annotationPanelMutationObservers.set(aPanelEl, observer);
-    let observerOptions = {
-      attributeFilter: ["height", "width"],
-      attributes: true,
-    };
-    observer.observe(aPanelEl, observerOptions);
-#endif
   },
 
   _removeAnnotationPanelMutationObserver: function(aPanelEl) {
-#ifdef XP_LINUX
-    let observer = this._annotationPanelMutationObservers.get(aPanelEl);
-    if (observer) {
-      observer.disconnect();
-      this._annotationPanelMutationObservers.delete(aPanelEl);
+    if (AppConstants.platform == "linux") {
+      let observer = this._annotationPanelMutationObservers.get(aPanelEl);
+      if (observer) {
+        observer.disconnect();
+        this._annotationPanelMutationObservers.delete(aPanelEl);
+      }
     }
-#endif
   },
 
 /**
@@ -2113,68 +2195,28 @@ const UITourHealthReport = {
       addClientId: true,
       addEnvironment: true,
     });
-#ifdef MOZ_SERVICES_HEALTHREPORT
-    Task.spawn(function*() {
-      let reporter = Cc["@mozilla.org/datareporting/service;1"]
-                       .getService()
-                       .wrappedJSObject
-                       .healthReporter;
 
-      // This can happen if the FHR component of the data reporting service is
-      // disabled. This is controlled by a pref that most will never use.
-      if (!reporter) {
-        return;
-      }
+    if (AppConstants.MOZ_SERVICES_HEALTHREPORT) {
+      Task.spawn(function*() {
+        let reporter = Cc["@mozilla.org/datareporting/service;1"]
+                         .getService()
+                         .wrappedJSObject
+                         .healthReporter;
 
-      yield reporter.onInit();
+        // This can happen if the FHR component of the data reporting service is
+        // disabled. This is controlled by a pref that most will never use.
+        if (!reporter) {
+          return;
+        }
 
-      // Get the UITourMetricsProvider instance from the Health Reporter
-      reporter.getProvider("org.mozilla.uitour").recordTreatmentTag(tag, value);
-    });
-#endif
+        yield reporter.onInit();
+
+        // Get the UITourMetricsProvider instance from the Health Reporter
+        reporter.getProvider("org.mozilla.uitour").recordTreatmentTag(tag, value);
+      });
+    }
   }
 };
-
-#ifdef MOZ_SERVICES_HEALTHREPORT
-const DAILY_DISCRETE_TEXT_FIELD = Metrics.Storage.FIELD_DAILY_DISCRETE_TEXT;
-
-this.UITourMetricsProvider = function() {
-  Metrics.Provider.call(this);
-}
-
-UITourMetricsProvider.prototype = Object.freeze({
-  __proto__: Metrics.Provider.prototype,
-
-  name: "org.mozilla.uitour",
-
-  measurementTypes: [
-    UITourTreatmentMeasurement1,
-  ],
-
-  recordTreatmentTag: function(tag, value) {
-    let m = this.getMeasurement(UITourTreatmentMeasurement1.prototype.name,
-                                UITourTreatmentMeasurement1.prototype.version);
-    let field = tag;
-
-    if (this.storage.hasFieldFromMeasurement(m.id, field,
-                                             DAILY_DISCRETE_TEXT_FIELD)) {
-      let fieldID = this.storage.fieldIDFromMeasurement(m.id, field);
-      return this.enqueueStorageOperation(function recordKnownField() {
-        return this.storage.addDailyDiscreteTextFromFieldID(fieldID, value);
-      }.bind(this));
-    }
-
-    // Otherwise, we first need to create the field.
-    return this.enqueueStorageOperation(function recordField() {
-      // This function has to return a promise.
-      return Task.spawn(function () {
-        let fieldID = yield this.storage.registerField(m.id, field,
-                                                       DAILY_DISCRETE_TEXT_FIELD);
-        yield this.storage.addDailyDiscreteTextFromFieldID(fieldID, value);
-      }.bind(this));
-    }.bind(this));
-  },
-});
 
 function UITourTreatmentMeasurement1() {
   Metrics.Measurement.call(this);
@@ -2187,24 +2229,66 @@ function UITourTreatmentMeasurement1() {
 
 }
 
-UITourTreatmentMeasurement1.prototype = Object.freeze({
-  __proto__: Metrics.Measurement.prototype,
+if (AppConstants.MOZ_SERVICES_HEALTHREPORT) {
 
-  name: "treatment",
-  version: 1,
+  const DAILY_DISCRETE_TEXT_FIELD = Metrics.Storage.FIELD_DAILY_DISCRETE_TEXT;
 
-  // our fields are dynamic
-  fields: { },
-
-  // We need a custom serializer because the default one doesn't accept unknown fields
-  _serializeJSONDaily: function(data) {
-    let result = {_v: this.version };
-
-    for (let [field, data] of data) {
-      result[field] = data;
-    }
-
-    return result;
+  this.UITourMetricsProvider = function() {
+    Metrics.Provider.call(this);
   }
-});
-#endif
+
+  UITourMetricsProvider.prototype = Object.freeze({
+    __proto__: Metrics.Provider.prototype,
+
+    name: "org.mozilla.uitour",
+
+    measurementTypes: [
+      UITourTreatmentMeasurement1,
+    ],
+
+    recordTreatmentTag: function(tag, value) {
+      let m = this.getMeasurement(UITourTreatmentMeasurement1.prototype.name,
+                                  UITourTreatmentMeasurement1.prototype.version);
+      let field = tag;
+
+      if (this.storage.hasFieldFromMeasurement(m.id, field,
+                                               DAILY_DISCRETE_TEXT_FIELD)) {
+        let fieldID = this.storage.fieldIDFromMeasurement(m.id, field);
+        return this.enqueueStorageOperation(function recordKnownField() {
+          return this.storage.addDailyDiscreteTextFromFieldID(fieldID, value);
+        }.bind(this));
+      }
+
+      // Otherwise, we first need to create the field.
+      return this.enqueueStorageOperation(function recordField() {
+        // This function has to return a promise.
+        return Task.spawn(function () {
+          let fieldID = yield this.storage.registerField(m.id, field,
+                                                         DAILY_DISCRETE_TEXT_FIELD);
+          yield this.storage.addDailyDiscreteTextFromFieldID(fieldID, value);
+        }.bind(this));
+      }.bind(this));
+    },
+  });
+
+  UITourTreatmentMeasurement1.prototype = Object.freeze({
+    __proto__: Metrics.Measurement.prototype,
+
+    name: "treatment",
+    version: 1,
+
+    // our fields are dynamic
+    fields: { },
+
+    // We need a custom serializer because the default one doesn't accept unknown fields
+    _serializeJSONDaily: function(data) {
+      let result = {_v: this.version };
+
+      for (let [field, data] of data) {
+        result[field] = data;
+      }
+
+      return result;
+    }
+  });
+}

@@ -16,7 +16,7 @@ const {AppProjects} = require("devtools/app-manager/app-projects");
 const {Connection} = require("devtools/client/connection-manager");
 const {AppManager} = require("devtools/webide/app-manager");
 const EventEmitter = require("devtools/toolkit/event-emitter");
-const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+const promise = require("promise");
 const ProjectEditor = require("projecteditor/projecteditor");
 const {GetAvailableAddons} = require("devtools/webide/addons");
 const {getJSON} = require("devtools/shared/getjson");
@@ -77,6 +77,14 @@ let UI = {
     projectList = new ProjectList(window, window);
     if (projectList.sidebarsEnabled) {
       ProjectPanel.toggleSidebar();
+
+      // TODO: Remove if/when dropdown layout is removed.
+      let toolbarNode = document.querySelector("#main-toolbar");
+      toolbarNode.classList.add("sidebar-layout");
+      let projectNode = document.querySelector("#project-panel-button");
+      projectNode.setAttribute("hidden", "true");
+      let runtimeNode = document.querySelector("#runtime-panel-button");
+      runtimeNode.setAttribute("hidden", "true");
     }
     runtimeList = new RuntimeList(window, window);
     if (runtimeList.sidebarsEnabled) {
@@ -147,6 +155,8 @@ let UI = {
     window.removeEventListener("message", this.onMessage);
     this.updateConnectionTelemetry();
     this._telemetry.toolClosed("webide");
+    this._telemetry.toolClosed("webideProjectEditor");
+    this._telemetry.destroy();
   },
 
   canCloseProject: function() {
@@ -497,8 +507,14 @@ let UI = {
 
     if (AppManager.connected) {
       runtimePanelButton.setAttribute("active", "true");
+      if (projectList.sidebarsEnabled) {
+        runtimePanelButton.removeAttribute("hidden");
+      }
     } else {
       runtimePanelButton.removeAttribute("active");
+      if (projectList.sidebarsEnabled) {
+        runtimePanelButton.setAttribute("hidden", "true");
+      }
     }
 
     projectPanelCmd.removeAttribute("disabled");
@@ -670,13 +686,18 @@ let UI = {
     }
   },
 
-  updateProjectEditorMenusVisibility: function() {
+  /**
+   * Called when selecting or deselecting the project editor panel.
+   */
+  onChangeProjectEditorSelected: function() {
     if (this.projecteditor) {
       let panel = document.querySelector("#deck").selectedPanel;
       if (panel && panel.id == "deck-panel-projecteditor") {
         this.projecteditor.menuEnabled = true;
+        this._telemetry.toolOpened("webideProjectEditor");
       } else {
         this.projecteditor.menuEnabled = false;
+        this._telemetry.toolClosed("webideProjectEditor");
       }
     }
   },
@@ -691,8 +712,9 @@ let UI = {
       menubar: document.querySelector("#main-menubar"),
       menuindex: 1
     });
-    this.projecteditor.on("onEditorSave", (editor, resource) => {
+    this.projecteditor.on("onEditorSave", () => {
       AppManager.validateAndUpdateProject(AppManager.selectedProject);
+      this._telemetry.actionOccurred("webideProjectEditorSave");
     });
     return this.projecteditor.loaded;
   },
@@ -748,11 +770,11 @@ let UI = {
 
     // Show ProjectEditor
 
-    this.selectDeckPanel("projecteditor");
-
     this.getProjectEditor().then(() => {
       this.updateProjectEditorHeader();
     }, console.error);
+
+    this.selectDeckPanel("projecteditor");
   },
 
   autoStartProject: Task.async(function*() {
@@ -806,6 +828,8 @@ let UI = {
 
     // Select project
     AppManager.selectedProject = project;
+
+    this._telemetry.actionOccurred("webideImportProject");
   }),
 
   // Remember the last selected project on the runtime
@@ -919,7 +943,7 @@ let UI = {
       panel.setAttribute("src", lazysrc);
     }
     deck.selectedPanel = panel;
-    this.updateProjectEditorMenusVisibility();
+    this.onChangeProjectEditorSelected();
     this.updateToolboxFullscreenState();
   },
 
@@ -927,7 +951,7 @@ let UI = {
     this.resetFocus();
     let deck = document.querySelector("#deck");
     deck.selectedPanel = null;
-    this.updateProjectEditorMenusVisibility();
+    this.onChangeProjectEditorSelected();
   },
 
   buildIDToDate(buildID) {
@@ -1032,6 +1056,10 @@ let UI = {
   },
 
   updateToolboxFullscreenState: function() {
+    if (projectList.sidebarsEnabled) {
+      return;
+    }
+
     let panel = document.querySelector("#deck").selectedPanel;
     let nbox = document.querySelector("#notificationbox");
     if (panel && panel.id == "deck-panel-details" &&
@@ -1105,14 +1133,9 @@ let Cmds = {
       ProjectPanel.showPopup();
     }
 
-    // There are currently no available events to listen for when an unselected
-    // tab navigates.  Since we show every tab's location in the project menu,
-    // we re-list all the tabs each time the menu is displayed.
-    // TODO: An event-based solution will be needed for the sidebar UI.
+    // TODO: Remove this check if/when we remove the dropdown view.
     if (!projectList.sidebarsEnabled && AppManager.connected) {
-      return AppManager.listTabs().then(() => {
-        projectList.updateTabs();
-      }).catch(console.error);
+      projectList.refreshTabs();
     }
 
     return promise.resolve();

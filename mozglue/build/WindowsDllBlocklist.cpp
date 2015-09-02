@@ -153,8 +153,9 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
   { "libinject2.dll", 0x537DDC93, DllBlockInfo::USE_TIMESTAMP },
   { "libredir2.dll", 0x5385B7ED, DllBlockInfo::USE_TIMESTAMP },
 
-  // Crashes with RoboForm2Go written against old SDK, bug 988311
+  // Crashes with RoboForm2Go written against old SDK, bug 988311/1196859
   { "rf-firefox-22.dll", ALL_VERSIONS },
+  { "rf-firefox-40.dll", ALL_VERSIONS },
 
   // Crashes with DesktopTemperature, bug 1046382
   { "dtwxsvc.dll", 0x53153234, DllBlockInfo::USE_TIMESTAMP },
@@ -474,7 +475,7 @@ wchar_t* getFullPath (PWCHAR filePath, wchar_t* fname)
   // path name.  For example, its numerical value can be 1.  Passing a non-valid
   // pointer to SearchPathW will cause a crash, so we need to check to see if we
   // are handed a valid pointer, and otherwise just pass nullptr to SearchPathW.
-  PWCHAR sanitizedFilePath = (intptr_t(filePath) < 1024) ? nullptr : filePath;
+  PWCHAR sanitizedFilePath = (intptr_t(filePath) < 4096) ? nullptr : filePath;
 
   // figure out the length of the string that we need
   DWORD pathlen = SearchPathW(sanitizedFilePath, fname, L".dll", 0, nullptr,

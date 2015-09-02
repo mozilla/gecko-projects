@@ -6,7 +6,6 @@
  */
 
 const { PerformanceFront } = require("devtools/server/actors/performance");
-const { defer } = require("sdk/core/promise");
 
 add_task(function*() {
   let doc = yield addTab(MAIN_DOMAIN + "doc_perf.html");
@@ -43,6 +42,7 @@ add_task(function*() {
   is(counters.memory.length, 3, "three memory events fired.");
   is(counters.ticks.length, 3, "three ticks events fired.");
 
+  yield front.destroy();
   yield closeDebuggerClient(client);
   gBrowser.removeCurrentTab();
 

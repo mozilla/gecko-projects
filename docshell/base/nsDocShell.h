@@ -33,9 +33,9 @@
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
 #include "nsContentUtils.h"
-#include "timeline/TimelineMarker.h"
-#include "timeline/TimelineConsumers.h"
 #include "timeline/ObservedDocShell.h"
+#include "timeline/TimelineConsumers.h"
+#include "timeline/TimelineMarker.h"
 
 // Threshold value in ms for META refresh based redirects
 #define REFRESH_REDIRECT_TIMER 15000
@@ -62,6 +62,7 @@
 namespace mozilla {
 namespace dom {
 class EventTarget;
+typedef uint32_t ScreenOrientationInternal;
 } // namespace dom
 } // namespace mozilla
 
@@ -274,12 +275,14 @@ private:
   // be very fast, so instead of using a Map or having to search for some
   // docshell-specific markers storage, a pointer to an `ObservedDocShell` is
   // is stored on docshells directly.
-  friend void mozilla::TimelineConsumers::AddConsumer(nsDocShell* aDocShell);
-  friend void mozilla::TimelineConsumers::RemoveConsumer(nsDocShell* aDocShell);
+  friend void mozilla::TimelineConsumers::AddConsumer(nsDocShell*);
+  friend void mozilla::TimelineConsumers::RemoveConsumer(nsDocShell*);
   friend void mozilla::TimelineConsumers::AddMarkerForDocShell(
-    nsDocShell* aDocShell, UniquePtr<TimelineMarker>&& aMarker);
+    nsDocShell*, const char*, MarkerTracingType);
   friend void mozilla::TimelineConsumers::AddMarkerForDocShell(
-    nsDocShell* aDocShell, const char* aName, TracingMetadata aMetaData);
+    nsDocShell*, const char*, const TimeStamp&, MarkerTracingType);
+  friend void mozilla::TimelineConsumers::AddMarkerForDocShell(
+    nsDocShell*, UniquePtr<TimelineMarker>&&);
 
 public:
   // Tell the favicon service that aNewURI has the same favicon as aOldURI.
@@ -874,6 +877,10 @@ protected:
     PARENT_PROHIBITS
   };
   FullscreenAllowedState mFullscreenAllowed;
+
+  // The orientation lock as described by
+  // https://w3c.github.io/screen-orientation/
+  mozilla::dom::ScreenOrientationInternal mOrientationLock;
 
   // Cached value of the "browser.xul.error_pages.enabled" preference.
   static bool sUseErrorPages;

@@ -76,8 +76,7 @@ loop.shared.views.chat = (function(mozL10n) {
     mixins: [React.addons.PureRenderMixin],
 
     propTypes: {
-      message: React.PropTypes.string.isRequired,
-      useDesktopPaths: React.PropTypes.bool.isRequired
+      message: React.PropTypes.string.isRequired
     },
 
     render: function() {
@@ -180,8 +179,7 @@ loop.shared.views.chat = (function(mozL10n) {
                       return (
                         React.createElement(TextChatRoomName, {
                           key: i, 
-                          message: entry.message, 
-                          useDesktopPaths: this.props.useDesktopPaths})
+                          message: entry.message})
                       );
                     case CHAT_CONTENT_TYPES.CONTEXT:
                       return (
@@ -380,9 +378,13 @@ loop.shared.views.chat = (function(mozL10n) {
 
     render: function() {
       var messageList;
+      var showingRoomName = false;
 
       if (this.props.showRoomName) {
         messageList = this.state.messageList;
+        showingRoomName = this.state.messageList.some(function(item) {
+          return item.contentType === CHAT_CONTENT_TYPES.ROOM_NAME;
+        });
       } else {
         messageList = this.state.messageList.filter(function(item) {
           return item.type !== CHAT_MESSAGE_TYPES.SPECIAL ||
@@ -396,6 +398,7 @@ loop.shared.views.chat = (function(mozL10n) {
       });
 
       var textChatViewClasses = React.addons.classSet({
+        "showing-room-name": showingRoomName,
         "text-chat-view": true,
         "text-chat-disabled": !this.state.textChatEnabled,
         "text-chat-entries-empty": !messageList.length

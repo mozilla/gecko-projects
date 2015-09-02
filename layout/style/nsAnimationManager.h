@@ -7,6 +7,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/ContentEvents.h"
+#include "mozilla/EventForwards.h"
 #include "AnimationCommon.h"
 #include "nsCSSPseudoElements.h"
 #include "mozilla/dom/Animation.h"
@@ -30,7 +31,7 @@ struct AnimationEventInfo {
 
   AnimationEventInfo(mozilla::dom::Element *aElement,
                      const nsSubstring& aAnimationName,
-                     uint32_t aMessage,
+                     EventMessage aMessage,
                      const mozilla::StickyTimeDuration& aElapsedTime,
                      nsCSSPseudoElements::Type aPseudoType)
     : mElement(aElement), mEvent(true, aMessage)
@@ -44,7 +45,8 @@ struct AnimationEventInfo {
   // InternalAnimationEvent doesn't support copy-construction, so we need
   // to ourselves in order to work with nsTArray
   AnimationEventInfo(const AnimationEventInfo &aOther)
-    : mElement(aOther.mElement), mEvent(true, aOther.mEvent.message)
+    : mElement(aOther.mElement)
+    , mEvent(true, aOther.mEvent.mMessage)
   {
     mEvent.AssignAnimationEventData(aOther.mEvent, false);
   }
@@ -101,6 +103,7 @@ public:
 
   void Tick() override;
   void QueueEvents();
+  bool HasEndEventToQueue() const override;
 
   bool IsStylePaused() const { return mIsStylePaused; }
 

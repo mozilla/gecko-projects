@@ -167,6 +167,7 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
 
         self.workdir = self.query_abs_dirs()['abs_work_dir']  # convenience
 
+        self.run_local = self.config.get('run_local')
         self.installer_url = self.config.get("installer_url")
         self.talos_json_url = self.config.get("talos_json_url")
         self.talos_json = self.config.get("talos_json")
@@ -522,15 +523,18 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         talos from its source, we have to wrap that method here."""
         # XXX This method could likely be replaced with a PreScriptAction hook.
         if self.has_cloned_talos:
+            # require pip >= 1.5 so pip will prefer .whl files to install
+            super(Talos, self).create_virtualenv(
+                modules=['mozinstall', 'pip>=1.5']
+            )
             # talos in harness requires mozinstall and what is
             # listed in talos requirements.txt file.
-            return super(Talos, self).create_virtualenv(
-                modules=['mozinstall'],
+            self.install_module(
                 requirements=[os.path.join(self.talos_path,
                                            'requirements.txt')]
             )
         else:
-            return super(Talos, self).create_virtualenv(**kwargs)
+            super(Talos, self).create_virtualenv(**kwargs)
 
     def postflight_create_virtualenv(self):
         """ This belongs in download_and_install() but requires the
@@ -564,6 +568,8 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
                                    error_list=TalosErrorList)
         env = {}
         env['MOZ_UPLOAD_DIR'] = self.query_abs_dirs()['abs_blob_upload_dir']
+        if not self.run_local:
+            env['MINIDUMP_STACKWALK'] = self.query_minidump_stackwalk()
         env['MINIDUMP_SAVE_PATH'] = self.query_abs_dirs()['abs_blob_upload_dir']
         if not os.path.isdir(env['MOZ_UPLOAD_DIR']):
             self.mkdir_p(env['MOZ_UPLOAD_DIR'])

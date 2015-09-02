@@ -25,6 +25,7 @@
 NS_IMPL_ISUPPORTS(ZoomConstraintsClient, nsIDOMEventListener, nsIObserver)
 
 static const nsLiteralString DOM_META_ADDED = NS_LITERAL_STRING("DOMMetaAdded");
+static const nsLiteralString DOM_META_CHANGED = NS_LITERAL_STRING("DOMMetaChanged");
 static const nsLiteralCString BEFORE_FIRST_PAINT = NS_LITERAL_CSTRING("before-first-paint");
 
 using namespace mozilla;
@@ -66,6 +67,7 @@ ZoomConstraintsClient::Destroy()
 
   if (mEventTarget) {
     mEventTarget->RemoveEventListener(DOM_META_ADDED, this, false);
+    mEventTarget->RemoveEventListener(DOM_META_CHANGED, this, false);
     mEventTarget = nullptr;
   }
 
@@ -102,6 +104,7 @@ ZoomConstraintsClient::Init(nsIPresShell* aPresShell, nsIDocument* aDocument)
   }
   if (mEventTarget) {
     mEventTarget->AddEventListener(DOM_META_ADDED, this, false);
+    mEventTarget->AddEventListener(DOM_META_CHANGED, this, false);
   }
 
   nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
@@ -119,7 +122,11 @@ ZoomConstraintsClient::HandleEvent(nsIDOMEvent* event)
   if (type.Equals(DOM_META_ADDED)) {
     ZCC_LOG("Got a dom-meta-added event in %p\n", this);
     RefreshZoomConstraints();
+  } else if (type.Equals(DOM_META_CHANGED)) {
+    ZCC_LOG("Got a dom-meta-changed event in %p\n", this);
+    RefreshZoomConstraints();
   }
+
   return NS_OK;
 }
 
@@ -131,6 +138,13 @@ ZoomConstraintsClient::Observe(nsISupports* aSubject, const char* aTopic, const 
     RefreshZoomConstraints();
   }
   return NS_OK;
+}
+
+void
+ZoomConstraintsClient::ScreenSizeChanged()
+{
+  ZCC_LOG("Got a screen-size change notification in %p\n", this);
+  RefreshZoomConstraints();
 }
 
 mozilla::layers::ZoomConstraints
@@ -161,14 +175,10 @@ ZoomConstraintsClient::RefreshZoomConstraints()
     return;
   }
 
-  nsIFrame* rootFrame = mPresShell->GetRootScrollFrame();
-  if (!rootFrame) {
-    rootFrame = mPresShell->GetRootFrame();
+  LayoutDeviceIntSize screenSize;
+  if (!nsLayoutUtils::GetContentViewerSize(mPresShell->GetPresContext(), screenSize)) {
+    return;
   }
-  nsSize size = nsLayoutUtils::CalculateCompositionSizeForFrame(rootFrame, false);
-  int32_t auPerDevPixel = mPresShell->GetPresContext()->AppUnitsPerDevPixel();
-  LayoutDeviceIntSize screenSize = LayoutDeviceIntSize::FromAppUnitsRounded(
-        size, auPerDevPixel);
 
   nsViewportInfo viewportInfo = nsContentUtils::GetViewportInfo(
     mDocument,
@@ -180,6 +190,7 @@ ZoomConstraintsClient::RefreshZoomConstraints()
   if (zoomConstraints.mAllowDoubleTapZoom) {
     // If the CSS viewport is narrower than the screen (i.e. width <= device-width)
     // then we disable double-tap-to-zoom behaviour.
+    int32_t auPerDevPixel = mPresShell->GetPresContext()->AppUnitsPerDevPixel();
     CSSToLayoutDeviceScale scale(
       (float)nsPresContext::AppUnitsPerCSSPixel() / auPerDevPixel);
     if ((viewportInfo.GetSize() * scale).width <= screenSize.width) {

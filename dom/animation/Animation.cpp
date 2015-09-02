@@ -51,9 +51,9 @@ Animation::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 void
 Animation::SetEffect(KeyframeEffectReadOnly* aEffect)
 {
-  // FIXME: We should perform an early return if aEffect == mEffect but
-  // current nsAnimationManager::CheckAnimationRule is relying on this
-  // method updating timing even in that case.
+  if (mEffect == aEffect) {
+    return;
+  }
   if (mEffect) {
     mEffect->SetParentTime(Nullable<TimeDuration>());
   }
@@ -374,6 +374,16 @@ Animation::Tick()
   }
 
   UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
+
+  // FIXME: Detect the no-change case and don't request a restyle at all
+  // FIXME: Detect changes to IsPlaying() state and request RestyleType::Layer
+  //        so that layers get updated immediately
+  AnimationCollection* collection = GetCollection();
+  if (collection) {
+    collection->RequestRestyle(CanThrottle() ?
+      AnimationCollection::RestyleType::Throttled :
+      AnimationCollection::RestyleType::Standard);
+  }
 }
 
 void
@@ -564,7 +574,8 @@ Animation::ComposeStyle(nsRefPtr<AnimValuesStyleRule>& aStyleRule,
 
   AnimationPlayState playState = PlayState();
   if (playState == AnimationPlayState::Running ||
-      playState == AnimationPlayState::Pending) {
+      playState == AnimationPlayState::Pending ||
+      HasEndEventToQueue()) {
     aNeedsRefreshes = true;
   }
 
@@ -638,6 +649,16 @@ Animation::ComposeStyle(nsRefPtr<AnimValuesStyleRule>& aStyleRule,
 
     mFinishedAtLastComposeStyle = (playState == AnimationPlayState::Finished);
   }
+}
+
+void
+Animation::NotifyEffectTimingUpdated()
+{
+  MOZ_ASSERT(mEffect,
+             "We should only update timing effect when we have a target "
+             "effect");
+  UpdateTiming(Animation::SeekFlag::NoSeek,
+               Animation::SyncNotifyFlag::Async);
 }
 
 // http://w3c.github.io/web-animations/#play-an-animation
@@ -945,7 +966,7 @@ Animation::PostUpdate()
 {
   AnimationCollection* collection = GetCollection();
   if (collection) {
-    collection->NotifyAnimationUpdated();
+    collection->RequestRestyle(AnimationCollection::RestyleType::Layer);
   }
 }
 

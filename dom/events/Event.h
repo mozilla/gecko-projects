@@ -124,7 +124,7 @@ public:
 
   static void Shutdown();
 
-  static const char* GetEventName(uint32_t aEventType);
+  static const char* GetEventName(EventMessage aEventType);
   static CSSIntPoint GetClientCoords(nsPresContext* aPresContext,
                                      WidgetEvent* aEvent,
                                      LayoutDeviceIntPoint aPoint,
@@ -270,7 +270,7 @@ protected:
   bool                        mPrivateDataDuplicated;
   bool                        mIsMainThreadEvent;
   // True when popup control check should rely on event.type, not
-  // WidgetEvent.message.
+  // WidgetEvent.mMessage.
   bool                        mWantsPopupControlCheck;
 };
 

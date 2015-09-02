@@ -658,7 +658,7 @@ gfxWindowsPlatform::VerifyD2DDevice(bool aAttemptForce)
         mozilla::gfx::Factory::SetDirect3D10Device(mD3D10Device);
     }
 
-    ScopedGfxFeatureReporter reporter1_1("D2D1.1");
+    ScopedGfxFeatureReporter reporter1_1("D2D1.1V");
 
     if (Factory::SupportsD2D1()) {
       reporter1_1.SetSuccessful();
@@ -1668,19 +1668,29 @@ bool CouldD3D11DeviceWork()
     return true;
   }
 
-  if (GetModuleHandleW(L"dlumd32.dll") && GetModuleHandleW(L"igd10umd32.dll")) {
-    nsString displayLinkModuleVersionString;
-    gfxWindowsPlatform::GetDLLVersion(L"dlumd32.dll", displayLinkModuleVersionString);
-    uint64_t displayLinkModuleVersion;
-    if (!ParseDriverVersion(displayLinkModuleVersionString, &displayLinkModuleVersion)) {
-      gfxCriticalError() << "DisplayLink: could not parse version";
-      gANGLESupportsD3D11 = false;
-      return false;
-    }
-    if (displayLinkModuleVersion <= V(8,6,1,36484)) {
-      gfxCriticalError(CriticalLog::DefaultOptions(false)) << "DisplayLink: too old version";
-      gANGLESupportsD3D11 = false;
-      return false;
+  if (GetModuleHandleW(L"igd10umd32.dll")) {
+    const wchar_t* checkModules[] = {L"dlumd32.dll",
+                                     L"dlumd11.dll",
+                                     L"dlumd10.dll"};
+    for (int i=0; i<PR_ARRAY_SIZE(checkModules); i+=1) {
+      if (GetModuleHandleW(checkModules[i])) {
+        nsString displayLinkModuleVersionString;
+        gfxWindowsPlatform::GetDLLVersion(checkModules[i],
+                                          displayLinkModuleVersionString);
+        uint64_t displayLinkModuleVersion;
+        if (!ParseDriverVersion(displayLinkModuleVersionString,
+                                &displayLinkModuleVersion)) {
+          gfxCriticalError() << "DisplayLink: could not parse version "
+                             << checkModules[i];
+          gANGLESupportsD3D11 = false;
+          return false;
+        }
+        if (displayLinkModuleVersion <= V(8,6,1,36484)) {
+          gfxCriticalError(CriticalLog::DefaultOptions(false)) << "DisplayLink: too old version " << displayLinkModuleVersionString.get();
+          gANGLESupportsD3D11 = false;
+          return false;
+        }
+      }
     }
   }
   result = true;
@@ -1721,12 +1731,13 @@ CheckForAdapterMismatch(ID3D11Device *device)
   }
 }
 
-void CheckIfRenderTargetViewNeedsRecreating(ID3D11Device *device)
+bool DoesRenderTargetViewNeedsRecreating(ID3D11Device *device)
 {
+    bool result = false;
     // CreateTexture2D is known to crash on lower feature levels, see bugs
     // 1170211 and 1089413.
     if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0) {
-        return;
+        return true;
     }
 
     nsRefPtr<ID3D11DeviceContext> deviceContext;
@@ -1748,9 +1759,17 @@ void CheckIfRenderTargetViewNeedsRecreating(ID3D11Device *device)
     offscreenTextureDesc.CPUAccessFlags = 0;
     offscreenTextureDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
-    HRESULT result = device->CreateTexture2D(&offscreenTextureDesc, NULL, getter_AddRefs(offscreenTexture));
+    HRESULT hr = device->CreateTexture2D(&offscreenTextureDesc, NULL, getter_AddRefs(offscreenTexture));
+    if (FAILED(hr)) {
+        gfxCriticalNote << "DoesRecreatingCreateTexture2DFail";
+        return false;
+    }
 
-    result = offscreenTexture->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)getter_AddRefs(keyedMutex));
+    hr = offscreenTexture->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)getter_AddRefs(keyedMutex));
+    if (FAILED(hr)) {
+        gfxCriticalNote << "DoesRecreatingKeyedMutexFailed";
+        return false;
+    }
 
     D3D11_RENDER_TARGET_VIEW_DESC offscreenRTVDesc;
     offscreenRTVDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -1758,7 +1777,11 @@ void CheckIfRenderTargetViewNeedsRecreating(ID3D11Device *device)
     offscreenRTVDesc.Texture2D.MipSlice = 0;
 
     nsRefPtr<ID3D11RenderTargetView> offscreenRTView;
-    result = device->CreateRenderTargetView(offscreenTexture, &offscreenRTVDesc, getter_AddRefs(offscreenRTView));
+    hr = device->CreateRenderTargetView(offscreenTexture, &offscreenRTVDesc, getter_AddRefs(offscreenRTView));
+    if (FAILED(hr)) {
+        gfxCriticalNote << "DoesRecreatingCreateRenderTargetViewFailed";
+        return false;
+    }
 
     // Acquire and clear
     keyedMutex->AcquireSync(0, INFINITE);
@@ -1779,7 +1802,11 @@ void CheckIfRenderTargetViewNeedsRecreating(ID3D11Device *device)
     desc.MiscFlags = 0;
     desc.BindFlags = 0;
     ID3D11Texture2D* cpuTexture;
-    device->CreateTexture2D(&desc, NULL, &cpuTexture);
+    hr = device->CreateTexture2D(&desc, NULL, &cpuTexture);
+    if (FAILED(hr)) {
+        gfxCriticalNote << "DoesRecreatingCreateCPUTextureFailed";
+        return false;
+    }
 
     deviceContext->CopyResource(cpuTexture, offscreenTexture);
 
@@ -1793,12 +1820,14 @@ void CheckIfRenderTargetViewNeedsRecreating(ID3D11Device *device)
     // match the clear
     if (resultColor != 0xffffff00) {
         gfxCriticalNote << "RenderTargetViewNeedsRecreating";
+        result = true;
     }
 
     keyedMutex->ReleaseSync(0);
 
     // It seems like this may only happen when we're using the NVIDIA gpu
     CheckForAdapterMismatch(device);
+    return result;
 }
 
 
@@ -1999,11 +2028,14 @@ gfxWindowsPlatform::AttemptD3D11DeviceCreation()
     return;
   }
 
-  CheckIfRenderTargetViewNeedsRecreating(mD3D11Device);
-
   // Only test this when not using WARP since it can fail and cause
   // GetDeviceRemovedReason to return weird values.
   mCompositorD3D11TextureSharingWorks = ::DoesD3D11TextureSharingWork(mD3D11Device);
+
+  if (!mCompositorD3D11TextureSharingWorks || !DoesRenderTargetViewNeedsRecreating(mD3D11Device)) {
+      gANGLESupportsD3D11 = false;
+  }
+
   mD3D11Device->SetExceptionMode(0);
   mIsWARP = false;
 }
@@ -2490,6 +2522,7 @@ public:
     public:
       D3DVsyncDisplay()
         : mVsyncEnabledLock("D3DVsyncEnabledLock")
+        , mPrevVsync(TimeStamp::Now())
         , mVsyncEnabled(false)
       {
         mVsyncThread = new base::Thread("WindowsVsyncThread");
@@ -2549,6 +2582,53 @@ public:
             delay.ToMilliseconds());
       }
 
+      TimeStamp GetAdjustedVsyncTimeStamp(LARGE_INTEGER& aFrequency,
+                                          QPC_TIME& aQpcVblankTime)
+      {
+        TimeStamp vsync = TimeStamp::Now();
+        LARGE_INTEGER qpcNow;
+        QueryPerformanceCounter(&qpcNow);
+
+        const int microseconds = 1000000;
+        int64_t adjust = qpcNow.QuadPart - aQpcVblankTime;
+        int64_t usAdjust = (adjust * microseconds) / aFrequency.QuadPart;
+        vsync -= TimeDuration::FromMicroseconds((double) usAdjust);
+
+        if (IsWin10OrLater()) {
+          // On Windows 10 and on, DWMGetCompositionTimingInfo, mostly
+          // reports the upcoming vsync time, which is in the future.
+          // It can also sometimes report a vblank time in the past.
+          // Since large parts of Gecko assume TimeStamps can't be in future,
+          // use the previous vsync.
+
+          // Windows 10 and Intel HD vsync timestamps are messy and
+          // all over the place once in a while. Most of the time,
+          // it reports the upcoming vsync. Sometimes, that upcoming
+          // vsync is in the past. Sometimes that upcoming vsync is before
+          // the previously seen vsync. Sometimes, the previous vsync
+          // is still in the future. In these error cases,
+          // we try to normalize to Now().
+          TimeStamp upcomingVsync = vsync;
+          if (upcomingVsync < mPrevVsync) {
+            // Windows can report a vsync that's before
+            // the previous one. So update it to sometime in the future.
+            upcomingVsync = TimeStamp::Now() + TimeDuration::FromMilliseconds(1);
+          }
+
+          vsync = mPrevVsync;
+          mPrevVsync = upcomingVsync;
+        }
+        // On Windows 7 and 8, DwmFlush wakes up AFTER qpcVBlankTime
+        // from DWMGetCompositionTimingInfo. We can return the adjusted vsync.
+
+        // Once in a while, the reported vsync timestamp can be in the future.
+        // Normalize the reported timestamp to now.
+        if (vsync >= TimeStamp::Now()) {
+          vsync = TimeStamp::Now();
+        }
+        return vsync;
+      }
+
       void VBlankLoop()
       {
         MOZ_ASSERT(IsInVsyncThread());
@@ -2558,12 +2638,9 @@ public:
         // Make sure to init the cbSize, otherwise GetCompositionTiming will fail
         vblankTime.cbSize = sizeof(DWM_TIMING_INFO);
 
-        LARGE_INTEGER qpcNow;
         LARGE_INTEGER frequency;
         QueryPerformanceFrequency(&frequency);
         TimeStamp vsync = TimeStamp::Now();
-        TimeStamp previousVsync = vsync;
-        const int microseconds = 1000000;
 
         for (;;) {
           { // scope lock
@@ -2571,12 +2648,9 @@ public:
             if (!mVsyncEnabled) return;
           }
 
-          if (previousVsync > vsync) {
-            vsync = TimeStamp::Now();
-            NS_WARNING("Previous vsync timestamp is ahead of the calculated vsync timestamp.");
-          }
-
-          previousVsync = vsync;
+          // Large parts of gecko assume that the refresh driver timestamp
+          // must be <= Now() and cannot be in the future.
+          MOZ_ASSERT(vsync <= TimeStamp::Now());
           Display::NotifyVsync(vsync);
 
           // DwmComposition can be dynamically enabled/disabled
@@ -2594,13 +2668,7 @@ public:
           HRESULT hr = WinUtils::dwmGetCompositionTimingInfoPtr(0, &vblankTime);
           vsync = TimeStamp::Now();
           if (SUCCEEDED(hr)) {
-            QueryPerformanceCounter(&qpcNow);
-            // Adjust the timestamp to be the vsync timestamp since when
-            // DwmFlush wakes up and when the actual vsync occurred are not the
-            // same.
-            int64_t adjust = qpcNow.QuadPart - vblankTime.qpcVBlank;
-            int64_t usAdjust = (adjust * microseconds) / frequency.QuadPart;
-            vsync -= TimeDuration::FromMicroseconds((double) usAdjust);
+            vsync = GetAdjustedVsyncTimeStamp(frequency, vblankTime.qpcVBlank);
           }
         } // end for
       }
@@ -2620,6 +2688,7 @@ public:
       }
 
       TimeDuration mSoftwareVsyncRate;
+      TimeStamp mPrevVsync; // Only used on Windows 10
       Monitor mVsyncEnabledLock;
       base::Thread* mVsyncThread;
       bool mVsyncEnabled;

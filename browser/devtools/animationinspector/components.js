@@ -32,7 +32,7 @@ const {
 const STRINGS_URI = "chrome://browser/locale/devtools/animationinspector.properties";
 const L10N = new ViewHelpers.L10N(STRINGS_URI);
 const MILLIS_TIME_FORMAT_MAX_DURATION = 4000;
-// The minimum spacing between 2 time graduation headers in the timeline (ms).
+// The minimum spacing between 2 time graduation headers in the timeline (px).
 const TIME_GRADUATION_MIN_SPACING = 40;
 
 /**
@@ -564,9 +564,13 @@ let TimeScale = {
    * Add a new animation to time scale.
    * @param {Object} state A PlayerFront.state object.
    */
-  addAnimation: function({startTime, delay, duration, iterationCount}) {
+  addAnimation: function(state) {
+    let {startTime, delay, duration, iterationCount, playbackRate} = state;
+
     this.minStartTime = Math.min(this.minStartTime, startTime);
-    let length = delay + (duration * (!iterationCount ? 1 : iterationCount));
+    let length = (delay / playbackRate) +
+                 ((duration / playbackRate) *
+                  (!iterationCount ? 1 : iterationCount));
     this.maxEndTime = Math.max(this.maxEndTime, startTime + length);
   },
 
@@ -651,6 +655,11 @@ exports.TimeScale = TimeScale;
  * time play head.
  * Animations are organized by lines, with a left margin containing the preview
  * of the target DOM element the animation applies to.
+ * The current time play head can be moved by clicking/dragging in the header.
+ * when this happens, the component emits "current-time-changed" events with the
+ * new time.
+ *
+ * @param {InspectorPanel} inspector.
  */
 function AnimationsTimeline(inspector) {
   this.animations = [];
@@ -658,6 +667,12 @@ function AnimationsTimeline(inspector) {
   this.inspector = inspector;
 
   this.onAnimationStateChanged = this.onAnimationStateChanged.bind(this);
+  this.onTimeHeaderMouseDown = this.onTimeHeaderMouseDown.bind(this);
+  this.onTimeHeaderMouseUp = this.onTimeHeaderMouseUp.bind(this);
+  this.onTimeHeaderMouseOut = this.onTimeHeaderMouseOut.bind(this);
+  this.onTimeHeaderMouseMove = this.onTimeHeaderMouseMove.bind(this);
+
+  EventEmitter.decorate(this);
 }
 
 exports.AnimationsTimeline = AnimationsTimeline;
@@ -673,12 +688,20 @@ AnimationsTimeline.prototype = {
       }
     });
 
+    this.scrubberEl = createNode({
+      parent: this.rootWrapperEl,
+      attributes: {
+        "class": "scrubber"
+      }
+    });
+
     this.timeHeaderEl = createNode({
       parent: this.rootWrapperEl,
       attributes: {
         "class": "time-header"
       }
     });
+    this.timeHeaderEl.addEventListener("mousedown", this.onTimeHeaderMouseDown);
 
     this.animationsEl = createNode({
       parent: this.rootWrapperEl,
@@ -690,7 +713,11 @@ AnimationsTimeline.prototype = {
   },
 
   destroy: function() {
+    this.stopAnimatingScrubber();
     this.unrender();
+
+    this.timeHeaderEl.removeEventListener("mousedown",
+      this.onTimeHeaderMouseDown);
 
     this.rootWrapperEl.remove();
     this.animations = [];
@@ -698,6 +725,7 @@ AnimationsTimeline.prototype = {
     this.rootWrapperEl = null;
     this.timeHeaderEl = null;
     this.animationsEl = null;
+    this.scrubberEl = null;
     this.win = null;
     this.inspector = null;
   },
@@ -717,6 +745,50 @@ AnimationsTimeline.prototype = {
     TimeScale.reset();
     this.destroyTargetNodes();
     this.animationsEl.innerHTML = "";
+  },
+
+  onTimeHeaderMouseDown: function(e) {
+    this.moveScrubberTo(e.pageX);
+    this.win.addEventListener("mouseup", this.onTimeHeaderMouseUp);
+    this.win.addEventListener("mouseout", this.onTimeHeaderMouseOut);
+    this.win.addEventListener("mousemove", this.onTimeHeaderMouseMove);
+  },
+
+  onTimeHeaderMouseUp: function() {
+    this.cancelTimeHeaderDragging();
+  },
+
+  onTimeHeaderMouseOut: function(e) {
+    // Check that mouseout happened on the window itself, and if yes, cancel
+    // the dragging.
+    if (!this.win.document.contains(e.relatedTarget)) {
+      this.cancelTimeHeaderDragging();
+    }
+  },
+
+  cancelTimeHeaderDragging: function() {
+    this.win.removeEventListener("mouseup", this.onTimeHeaderMouseUp);
+    this.win.removeEventListener("mouseout", this.onTimeHeaderMouseOut);
+    this.win.removeEventListener("mousemove", this.onTimeHeaderMouseMove);
+  },
+
+  onTimeHeaderMouseMove: function(e) {
+    this.moveScrubberTo(e.pageX);
+  },
+
+  moveScrubberTo: function(pageX) {
+    this.stopAnimatingScrubber();
+
+    let offset = pageX - this.scrubberEl.offsetWidth;
+    if (offset < 0) {
+      offset = 0;
+    }
+
+    this.scrubberEl.style.left = offset + "px";
+
+    let time = TimeScale.distanceToRelativeTime(offset,
+      this.timeHeaderEl.offsetWidth);
+    this.emit("current-time-changed", time);
   },
 
   render: function(animations) {
@@ -772,6 +844,39 @@ AnimationsTimeline.prototype = {
       // Save the targetNode so it can be destroyed later.
       this.targetNodes.push(targetNode);
     }
+
+    // Use the document's current time to position the scrubber (if the server
+    // doesn't provide it, hide the scrubber entirely).
+    // Note that because the currentTime was sent via the protocol, some time
+    // may have gone by since then, and so the scrubber might be a bit late.
+    let time = this.animations[0].state.documentCurrentTime;
+    if (!time) {
+      this.scrubberEl.style.display = "none";
+    } else {
+      this.scrubberEl.style.display = "block";
+      this.startAnimatingScrubber(time);
+    }
+  },
+
+  startAnimatingScrubber: function(time) {
+    let x = TimeScale.startTimeToDistance(time, this.timeHeaderEl.offsetWidth);
+    this.scrubberEl.style.left = x + "px";
+
+    if (time < TimeScale.minStartTime ||
+        time > TimeScale.maxEndTime) {
+      return;
+    }
+
+    let now = this.win.performance.now();
+    this.rafID = this.win.requestAnimationFrame(() => {
+      this.startAnimatingScrubber(time + this.win.performance.now() - now);
+    });
+  },
+
+  stopAnimatingScrubber: function() {
+    if (this.rafID) {
+      this.win.cancelAnimationFrame(this.rafID);
+    }
   },
 
   onAnimationStateChanged: function() {
@@ -783,7 +888,8 @@ AnimationsTimeline.prototype = {
   drawHeaderAndBackground: function() {
     let width = this.timeHeaderEl.offsetWidth;
     let scale = width / (TimeScale.maxEndTime - TimeScale.minStartTime);
-    drawGraphElementBackground(this.win.document, "time-graduations", width, scale);
+    drawGraphElementBackground(this.win.document, "time-graduations",
+                               width, scale);
 
     // And the time graduation header.
     this.timeHeaderEl.innerHTML = "";
@@ -805,22 +911,26 @@ AnimationsTimeline.prototype = {
   drawTimeBlock: function({state}, el) {
     let width = el.offsetWidth;
 
-    // Container for all iterations and delay. Positioned at the right start
-    // time.
-    let x = TimeScale.startTimeToDistance(state.startTime + (state.delay || 0),
-                                          width);
-    // With the right width (duration*duration).
-    let count = state.iterationCount || 1;
-    let w = TimeScale.durationToDistance(state.duration, width);
+    // Create a container element to hold the delay and iterations.
+    // It is positioned according to its delay (divided by the playbackrate),
+    // and its width is according to its duration (divided by the playbackrate).
+    let start = state.startTime;
+    let duration = state.duration;
+    let rate = state.playbackRate;
+    let count = state.iterationCount;
+    let delay = state.delay || 0;
+
+    let x = TimeScale.startTimeToDistance(start + (delay / rate), width);
+    let w = TimeScale.durationToDistance(duration / rate, width);
 
     let iterations = createNode({
       parent: el,
       attributes: {
-        "class": "iterations" + (state.iterationCount ? "" : " infinite"),
+        "class": state.type + " iterations" + (count ? "" : " infinite"),
         // Individual iterations are represented by setting the size of the
         // repeating linear-gradient.
         "style": `left:${x}px;
-                  width:${w * count}px;
+                  width:${w * (count || 1)}px;
                   background-size:${Math.max(w, 2)}px 100%;`
       }
     });
@@ -829,20 +939,22 @@ AnimationsTimeline.prototype = {
     createNode({
       parent: iterations,
       attributes: {
-        "class": "name"
+        "class": "name",
+        "title": L10N.getFormatStr("timeline." + state.type + ".nameLabel",
+                                   state.name)
       },
       textContent: state.name
     });
 
     // Delay.
-    if (state.delay) {
-      let delay = TimeScale.durationToDistance(state.delay, width);
+    if (delay) {
+      let w = TimeScale.durationToDistance(delay / rate, width);
       createNode({
         parent: iterations,
         attributes: {
           "class": "delay",
-          "style": `left:-${delay}px;
-                    width:${delay}px;`
+          "style": `left:-${w}px;
+                    width:${w}px;`
         }
       });
     }

@@ -12,6 +12,7 @@ this.EXPORTED_SYMBOLS = ["UserCustomizations"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/AppsUtils.jsm");
 Cu.import("resource://gre/modules/Extension.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "ValueExtractor",
@@ -34,6 +35,7 @@ function log(aStr) {
 
 this.UserCustomizations = {
   extensions: new Map(), // id -> extension. Needed to disable extensions.
+  appId: new Set(),
 
   register: function(aApp) {
     if (!this._enabled || !aApp.enabled || aApp.role != "addon") {
@@ -46,12 +48,15 @@ this.UserCustomizations = {
     debug("Starting customization registration for " + aApp.manifestURL + "\n");
 
     let extension = new Extension({
-      id: aApp.manifestURL,
+      id: AppsUtils.computeHash(aApp.manifestURL),
       resourceURI: Services.io.newURI(aApp.origin + "/", null, null)
     });
 
     this.extensions.set(aApp.manifestURL, extension);
-    extension.startup();
+    extension.startup().then(() => {
+      let uri = Services.io.newURI(aApp.origin, null, null);
+      this.appId.add(uri.host);
+    });
   },
 
   unregister: function(aApp) {
@@ -63,7 +68,13 @@ this.UserCustomizations = {
     if (this.extensions.has(aApp.manifestURL)) {
       this.extensions.get(aApp.manifestURL).shutdown();
       this.extensions.delete(aApp.manifestURL);
+      let uri = Services.io.newURI(aApp.origin, null, null);
+      this.appId.delete(uri.host);
     }
+  },
+
+  isFromExtension: function(aURI) {
+    return this.appId.has(aURI.host);
   },
 
   // Checks that this is a valid extension manifest.
@@ -140,6 +151,9 @@ this.UserCustomizations = {
   },
 
   init: function() {
+    // XXX : For testing purposes. Will not commit.
+    AppsUtils.allowUnsignedAddons = true;
+
     this._enabled = false;
     try {
       this._enabled = Services.prefs.getBoolPref("dom.apps.customization.enabled");

@@ -49,7 +49,7 @@ interface nsIJSRAIIHelper;
 interface nsIContentPermissionRequest;
 interface nsIObserver;
 
-[scriptable, uuid(47fa312b-2ad1-4b80-8a0a-c9822e2d1ec9)]
+[scriptable, uuid(a30a95ac-3b95-4251-88dc-8efa89ba9f9c)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -105,15 +105,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * Force a synchronous layer transaction for this window if necessary.
    */
   void updateLayerTree();
-
-  /**
-   * Set the CSS viewport to be |widthPx| x |heightPx| in units of CSS
-   * pixels, regardless of the size of the enclosing widget/view.
-   * This will trigger reflow.
-   *
-   * The caller of this method must have chrome privileges.
-   */
-  void setCSSViewport(in float aWidthPx, in float aHeightPx);
 
   /**
    * Information retrieved from the <meta name="viewport"> tag.
@@ -819,11 +810,11 @@ interface nsIDOMWindowUtils : nsISupports {
   void runNextCollectorTimer();
 
   /** Synthesize a simple gesture event for a window. The event types
-   *  supported are: MozSwipeGestureStart, MozSwipeGestureUpdate,
-   *  MozSwipeGestureEnd, MozSwipeGesture, MozMagnifyGestureStart,
-   *  MozMagnifyGestureUpdate, MozMagnifyGesture, MozRotateGestureStart,
-   *  MozRotateGestureUpdate, MozRotateGesture, MozPressTapGesture,
-   *  MozTapGesture, and MozEdgeUIGesture.
+   *  supported are: MozSwipeGestureMayStart, MozSwipeGestureStart,
+   *  MozSwipeGestureUpdate, MozSwipeGestureEnd, MozSwipeGesture,
+   *  MozMagnifyGestureStart, MozMagnifyGestureUpdate, MozMagnifyGesture,
+   *  MozRotateGestureStart, MozRotateGestureUpdate, MozRotateGesture,
+   *  MozPressTapGesture, MozTapGesture, and MozEdgeUIGesture.
    *
    * Cannot be accessed from unprivileged context (not
    * content-accessible) Will throw a DOM security error if called
@@ -1090,8 +1081,6 @@ interface nsIDOMWindowUtils : nsISupports {
                                in long aX,
                                in long aY,
                                [optional] in unsigned long aAdditionalFlags);
-
-  // NOTE: following values are same as NS_QUERY_* in BasicEvents.h
 
   /**
    * QUERY_SELECTED_TEXT queries the first selection range's information.
@@ -1626,19 +1615,6 @@ interface nsIDOMWindowUtils : nsISupports {
   void setScrollPositionClampingScrollPortSize(in float aWidth, in float aHeight);
 
   /**
-   * Set margins for the layout of fixed position elements in the content
-   * document. These are used on mobile, where the viewable area can be
-   * temporarily obscured by the browser chrome. In this situation, we're ok
-   * with scrollable page content being obscured, but fixed position content
-   * cannot be revealed without removing the obscuring chrome, so we use these
-   * margins so that it can remain visible.
-   *
-   * The caller of this method must have chrome privileges.
-   */
-  void setContentDocumentFixedPositionMargins(in float aTop, in float aRight,
-                                              in float aBottom, in float aLeft);
-
-  /**
    * These are used to control whether dialogs (alert, prompt, confirm) are
    * allowed.
    */
@@ -1847,6 +1823,19 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aSheetType One of the nsIStyleSheetService.*_SHEET constants.
    */
   bool hasRuleProcessorUsedByMultipleStyleSets(in unsigned long aSheetType);
+
+  /*
+   * Force the use counters for the node's associated document(s) to be
+   * flushed to telemetry.  For example, a document node will flush its own
+   * counters and an image node with an SVG source will flush the SVG
+   * document's counters.  Normally, use counters are flushed to telemetry
+   * upon document destruction, but as document destruction is somewhat
+   * non-deterministic, we have this method here for more determinism when
+   * running tests.
+   */
+  void forceUseCounterFlush(in nsIDOMNode aNode);
+
+  void setNextPaintSyncId(in long aSyncId);
 };
 
 [scriptable, uuid(c694e359-7227-4392-a138-33c0cc1f15a6)]

@@ -110,6 +110,7 @@
   -moz-margin-start: 2px;
 }
 
+:root[devtoolstheme="dark"] .findbar-closebutton,
 /* Tab styling - make sure to use an inverted icon for the selected tab
    (brighttext only covers the unselected tabs) */
 .tab-close-button[visuallyselected=true] {
@@ -117,6 +118,7 @@
 }
 
 @media (min-resolution: 1.1dppx) {
+  :root[devtoolstheme="dark"] .findbar-closebutton,
   .tab-close-button[visuallyselected=true] {
     list-style-image: url("chrome://global/skin/icons/close-inverted@2x.png");
   }
@@ -238,6 +240,22 @@
     padding-left: 0;
     padding-right: 0;
   }
+}
+
+/* Restored windows get an artificial border on windows, because the lwtheme background
+ * overlaps the regular window border. That isn't the case for us, so we avoid painting
+ * over the native border with our custom borders: */
+#browser-panel {
+  /* These are !important to avoid specificity-wars with the selectors that add borders here. */
+  background-image: none !important;
+  border-top: none !important;
+}
+
+#navigator-toolbox {
+  /* The side borders on the toolbox also look out-of-place because we don't paint over
+   * the native background color at all, and these are !important for the same reason as above. */
+  border-left: none !important;
+  border-right: none !important;
 }
 
 @media (-moz-os-version: windows-win10) {

@@ -130,7 +130,8 @@ public:
       return rv;
     }
 
-    mChannel->SynthesizeStatus(mInternalResponse->GetStatus(), mInternalResponse->GetStatusText());
+    mChannel->SynthesizeStatus(mInternalResponse->GetUnfilteredStatus(),
+                               mInternalResponse->GetUnfilteredStatusText());
 
     nsAutoTArray<InternalHeaders::Entry, 5> entries;
     mInternalResponse->UnfilteredHeaders()->GetEntries(entries);
@@ -148,18 +149,21 @@ class RespondWithHandler final : public PromiseNativeHandler
 {
   nsMainThreadPtrHandle<nsIInterceptedChannel> mInterceptedChannel;
   nsMainThreadPtrHandle<ServiceWorker> mServiceWorker;
-  RequestMode mRequestMode;
-  bool mIsClientRequest;
+  const RequestMode mRequestMode;
+  const DebugOnly<bool> mIsClientRequest;
+  const bool mIsNavigationRequest;
 public:
   NS_DECL_ISUPPORTS
 
   RespondWithHandler(nsMainThreadPtrHandle<nsIInterceptedChannel>& aChannel,
                      nsMainThreadPtrHandle<ServiceWorker>& aServiceWorker,
-                     RequestMode aRequestMode, bool aIsClientRequest)
+                     RequestMode aRequestMode, bool aIsClientRequest,
+                     bool aIsNavigationRequest)
     : mInterceptedChannel(aChannel)
     , mServiceWorker(aServiceWorker)
     , mRequestMode(aRequestMode)
     , mIsClientRequest(aIsClientRequest)
+    , mIsNavigationRequest(aIsNavigationRequest)
   {
   }
 
@@ -264,26 +268,27 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
     return;
   }
 
-  // Section 4.2, step 2.2:
+  // Section "HTTP Fetch", step 2.2:
   //  If one of the following conditions is true, return a network error:
   //    * response's type is "error".
   //    * request's mode is not "no-cors" and response's type is "opaque".
-  //    * request is a client request and response's type is neither "basic"
-  //      nor "default".
+  //    * request is not a navigation request and response's type is
+  //      "opaqueredirect".
 
   if (response->Type() == ResponseType::Error) {
     autoCancel.SetCancelStatus(NS_ERROR_INTERCEPTED_ERROR_RESPONSE);
     return;
   }
 
+  MOZ_ASSERT_IF(mIsClientRequest, mRequestMode == RequestMode::Same_origin);
+
   if (response->Type() == ResponseType::Opaque && mRequestMode != RequestMode::No_cors) {
     autoCancel.SetCancelStatus(NS_ERROR_BAD_OPAQUE_INTERCEPTION_REQUEST_MODE);
     return;
   }
 
-  if (mIsClientRequest && response->Type() != ResponseType::Basic &&
-      response->Type() != ResponseType::Default) {
-    autoCancel.SetCancelStatus(NS_ERROR_CLIENT_REQUEST_OPAQUE_INTERCEPTION);
+  if (!mIsNavigationRequest && response->Type() == ResponseType::Opaqueredirect) {
+    autoCancel.SetCancelStatus(NS_ERROR_BAD_OPAQUE_REDIRECT_INTERCEPTION);
     return;
   }
 
@@ -300,7 +305,7 @@ RespondWithHandler::ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValu
   nsAutoPtr<RespondWithClosure> closure(
       new RespondWithClosure(mInterceptedChannel, ir, worker->GetChannelInfo()));
   nsCOMPtr<nsIInputStream> body;
-  ir->GetInternalBody(getter_AddRefs(body));
+  ir->GetUnfilteredBody(getter_AddRefs(body));
   // Errors and redirects may not have a body.
   if (body) {
     response->SetBodyUsed();
@@ -359,7 +364,7 @@ FetchEvent::RespondWith(Promise& aArg, ErrorResult& aRv)
   mWaitToRespond = true;
   nsRefPtr<RespondWithHandler> handler =
     new RespondWithHandler(mChannel, mServiceWorker, mRequest->Mode(),
-                           ir->IsClientRequest());
+                           ir->IsClientRequest(), ir->IsNavigationRequest());
   aArg.AppendNativeHandler(handler);
 }
 
@@ -395,14 +400,34 @@ ExtendableEvent::ExtendableEvent(EventTarget* aOwner)
 }
 
 void
-ExtendableEvent::WaitUntil(Promise& aPromise)
+ExtendableEvent::WaitUntil(Promise& aPromise, ErrorResult& aRv)
 {
   MOZ_ASSERT(!NS_IsMainThread());
 
-  // Only first caller counts.
-  if (EventPhase() == AT_TARGET && !mPromise) {
-    mPromise = &aPromise;
+  if (EventPhase() == nsIDOMEvent::NONE) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
   }
+
+  mPromises.AppendElement(&aPromise);
+}
+
+already_AddRefed<Promise>
+ExtendableEvent::GetPromise()
+{
+  WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
+  MOZ_ASSERT(worker);
+  worker->AssertIsOnWorkerThread();
+
+  GlobalObject global(worker->GetJSContext(), worker->GlobalScope()->GetGlobalJSObject());
+
+  ErrorResult result;
+  nsRefPtr<Promise> p = Promise::All(global, Move(mPromises), result);
+  if (NS_WARN_IF(result.Failed())) {
+    return nullptr;
+  }
+
+  return p.forget();
 }
 
 NS_IMPL_ADDREF_INHERITED(ExtendableEvent, Event)
@@ -411,7 +436,7 @@ NS_IMPL_RELEASE_INHERITED(ExtendableEvent, Event)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(ExtendableEvent)
 NS_INTERFACE_MAP_END_INHERITING(Event)
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(ExtendableEvent, Event, mPromise)
+NS_IMPL_CYCLE_COLLECTION_INHERITED(ExtendableEvent, Event, mPromises)
 
 #ifndef MOZ_SIMPLEPUSH
 

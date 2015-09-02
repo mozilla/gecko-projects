@@ -17,22 +17,17 @@ BEGIN_BLUETOOTH_NAMESPACE
 class BluetoothServiceBluedroid : public BluetoothService
                                 , public BluetoothNotificationHandler
 {
-  class CancelDiscoveryResultHandler;
   class CleanupResultHandler;
-  class CreateBondResultHandler;
   class DisableResultHandler;
+  class DispatchReplyErrorResultHandler;
   class EnableResultHandler;
   class GetRemoteDevicePropertiesResultHandler;
-  class GetRemoteServicesResultHandler;
   class InitResultHandler;
   class PinReplyResultHandler;
   class ProfileDeinitResultHandler;
   class ProfileInitResultHandler;
-  class RemoveBondResultHandler;
   class SetAdapterPropertyDiscoverableResultHandler;
-  class SetAdapterPropertyResultHandler;
   class SspReplyResultHandler;
-  class StartDiscoveryResultHandler;
 
   class GetDeviceRequest;
 
@@ -146,6 +141,37 @@ public:
 
   virtual void
   IsScoConnected(BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyTovCardPulling(BlobParent* aBlobParent,
+                      BlobChild* aBlobChild,
+                      BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyTovCardPulling(Blob* aBlob,
+                      BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToPhonebookPulling(BlobParent* aBlobParent,
+                          BlobChild* aBlobChild,
+                          uint16_t aPhonebookSize,
+                          BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyToPhonebookPulling(Blob* aBlob,
+                          uint16_t aPhonebookSize,
+                          BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyTovCardListing(BlobParent* aBlobParent,
+                      BlobChild* aBlobChild,
+                      uint16_t aPhonebookSize,
+                      BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ReplyTovCardListing(Blob* aBlob,
+                      uint16_t aPhonebookSize,
+                      BluetoothReplyRunnable* aRunnable);
 
   virtual void
   AnswerWaitingCall(BluetoothReplyRunnable* aRunnable);
@@ -263,6 +289,22 @@ public:
     const BluetoothGattId& aDescriptorId,
     const nsTArray<uint8_t>& aValue,
     BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  GattServerConnectPeripheralInternal(
+    const nsAString& aAppUuid,
+    const nsAString& aAddress,
+    BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  GattServerDisconnectPeripheralInternal(
+    const nsAString& aAppUuid,
+    const nsAString& aAddress,
+    BluetoothReplyRunnable* aRunnable) override;
+
+  virtual void
+  UnregisterGattServerInternal(int aServerIf,
+                               BluetoothReplyRunnable* aRunnable) override;
 
   //
   // Bluetooth notifications

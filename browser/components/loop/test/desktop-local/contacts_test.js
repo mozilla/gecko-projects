@@ -13,7 +13,7 @@ describe("loop.contacts", function() {
   var fakeEditContactButtonText = "Fake Edit Contact";
   var fakeDoneButtonText = "Fake Done";
   // The fake contacts array is copied each time mozLoop.contacts.getAll() is called.
-  var fakeContacts = [{
+  var fakeManyContacts = [{
     id: 1,
     _guid: 1,
     name: ["Ally Avocado"],
@@ -71,7 +71,45 @@ describe("loop.contacts", function() {
     category: ["google"],
     published: 1406798311748,
     updated: 1406798311748
+  }, {
+    id: 5,
+    _guid: 5,
+    name: ["Erin J. Bazile"],
+    email: [{
+      "pref": true,
+      "type": ["work"],
+      "value": "erinjbazile@armyspy.com"
+    }],
+    category: ["google"],
+    published: 1406798311748,
+    updated: 1406798311748
+  }, {
+    id: 6,
+    _guid: 6,
+    name: ["Kelly F. Maldanado"],
+    email: [{
+      "pref": true,
+      "type": ["work"],
+      "value": "kellyfmaldonado@jourrapide.com"
+    }],
+    category: ["google"],
+    published: 1406798311748,
+    updated: 1406798311748
+  }, {
+    id: 7,
+    _guid: 7,
+    name: ["John J. Brown"],
+    email: [{
+      "pref": true,
+      "type": ["work"],
+      "value": "johnjbrow@johndoe.com"
+    }],
+    category: ["google"],
+    published: 1406798311748,
+    updated: 1406798311748,
+    blocked: true
   }];
+  var fakeFewerContacts = fakeManyContacts.slice(0, 4);
   var sandbox;
   var fakeWindow;
   var notifications;
@@ -115,14 +153,16 @@ describe("loop.contacts", function() {
       },
       contacts: {
         getAll: function(callback) {
-          callback(null, [].concat(fakeContacts));
+          callback(null, [].concat(fakeFewerContacts));
         },
+        add: sandbox.stub(),
         on: sandbox.stub()
       },
       calls: {
         startDirectCall: function() {},
         clearCallInProgress: function() {}
-      }
+      },
+      generateUUID: sandbox.stub()
     };
 
     fakeWindow = {
@@ -148,10 +188,10 @@ describe("loop.contacts", function() {
 
       // When gravatars are enabled, contacts should be rendered with gravatars.
       var gravatars = node.querySelectorAll(".contact img[src=gravatarsEnabled]");
-      expect(gravatars.length).to.equal(enabled ? fakeContacts.length : 0);
+      expect(gravatars.length).to.equal(enabled ? fakeFewerContacts.length : 0);
       // Sanity check the reverse:
       gravatars = node.querySelectorAll(".contact img[src=gravatarsDisabled]");
-      expect(gravatars.length).to.equal(enabled ? 0 : fakeContacts.length);
+      expect(gravatars.length).to.equal(enabled ? 0 : fakeFewerContacts.length);
     }
 
     it("should show the gravatars promo box", function() {
@@ -159,11 +199,15 @@ describe("loop.contacts", function() {
         React.createElement(loop.contacts.ContactsList, {
           mozLoop: navigator.mozLoop,
           notifications: notifications,
-          startForm: function() {}
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
         }));
 
       var promo = listView.getDOMNode().querySelector(".contacts-gravatar-promo");
       expect(promo).to.not.equal(null);
+
+      var avatars = listView.getDOMNode().querySelectorAll(".contacts-gravatar-avatars img");
+      expect(avatars).to.have.length(2, "two example avatars are shown");
 
       checkGravatarContacts(false);
     });
@@ -182,7 +226,8 @@ describe("loop.contacts", function() {
         React.createElement(loop.contacts.ContactsList, {
           mozLoop: navigator.mozLoop,
           notifications: notifications,
-          startForm: function() {}
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
         }));
 
       var promo = listView.getDOMNode().querySelector(".contacts-gravatar-promo");
@@ -196,11 +241,12 @@ describe("loop.contacts", function() {
         React.createElement(loop.contacts.ContactsList, {
           mozLoop: navigator.mozLoop,
           notifications: notifications,
-          startForm: function() {}
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
         }));
 
       React.addons.TestUtils.Simulate.click(listView.getDOMNode().querySelector(
-        ".contacts-gravatar-promo .button-accept"));
+        ".contacts-gravatar-promo .secondary:last-child"));
 
       sinon.assert.calledTwice(navigator.mozLoop.setLoopPref);
 
@@ -213,11 +259,12 @@ describe("loop.contacts", function() {
         React.createElement(loop.contacts.ContactsList, {
           mozLoop: navigator.mozLoop,
           notifications: notifications,
-          startForm: function() {}
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
         }));
 
       React.addons.TestUtils.Simulate.click(listView.getDOMNode().querySelector(
-        ".contacts-gravatar-promo .button-accept"));
+        ".contacts-gravatar-promo .secondary:last-child"));
 
       sinon.assert.calledTwice(navigator.mozLoop.setLoopPref);
       sinon.assert.calledWithExactly(navigator.mozLoop.setLoopPref, "contacts.gravatars.promo", false);
@@ -229,11 +276,12 @@ describe("loop.contacts", function() {
         React.createElement(loop.contacts.ContactsList, {
           mozLoop: navigator.mozLoop,
           notifications: notifications,
-          startForm: function() {}
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
         }));
 
       React.addons.TestUtils.Simulate.click(listView.getDOMNode().querySelector(
-        ".contacts-gravatar-promo .button-close"));
+        ".contacts-gravatar-promo .secondary:first-child"));
 
       var promo = listView.getDOMNode().querySelector(".contacts-gravatar-promo");
       expect(promo).to.equal(null);
@@ -244,7 +292,41 @@ describe("loop.contacts", function() {
         React.createElement(loop.contacts.ContactsList, {
           mozLoop: navigator.mozLoop,
           notifications: notifications,
-          startForm: function() {}
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
+        }));
+
+      React.addons.TestUtils.Simulate.click(listView.getDOMNode().querySelector(
+        ".contacts-gravatar-promo .secondary:first-child"));
+
+      sinon.assert.calledOnce(navigator.mozLoop.setLoopPref);
+      sinon.assert.calledWithExactly(navigator.mozLoop.setLoopPref,
+        "contacts.gravatars.promo", false);
+    });
+
+    it("should hide the gravatars promo box when the 'close' X button is clicked", function() {
+      listView = TestUtils.renderIntoDocument(
+        React.createElement(loop.contacts.ContactsList, {
+          mozLoop: navigator.mozLoop,
+          notifications: notifications,
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
+        }));
+
+      React.addons.TestUtils.Simulate.click(listView.getDOMNode().querySelector(
+        ".contacts-gravatar-promo .button-close"));
+
+      var promo = listView.getDOMNode().querySelector(".contacts-gravatar-promo");
+      expect(promo).to.equal(null);
+    });
+
+    it("should set prefs correctly when the 'close' X button is clicked", function() {
+      listView = TestUtils.renderIntoDocument(
+        React.createElement(loop.contacts.ContactsList, {
+          mozLoop: navigator.mozLoop,
+          notifications: notifications,
+          switchToContactAdd: sandbox.stub(),
+          switchToContactEdit: sandbox.stub()
         }));
 
       React.addons.TestUtils.Simulate.click(listView.getDOMNode().querySelector(
@@ -253,6 +335,69 @@ describe("loop.contacts", function() {
       sinon.assert.calledOnce(navigator.mozLoop.setLoopPref);
       sinon.assert.calledWithExactly(navigator.mozLoop.setLoopPref,
         "contacts.gravatars.promo", false);
+    });
+  });
+
+  describe("ContactsControllerView - contactAdd", function() {
+    var view;
+
+    beforeEach(function() {
+      view = TestUtils.renderIntoDocument(
+        React.createElement(loop.contacts.ContactsControllerView, {
+          initialSelectedTabComponent: "contactAdd",
+          mozLoop: navigator.mozLoop,
+          notifications: notifications
+        }));
+    });
+
+    it("should switch component to Contact List view", function() {
+      view.switchComponentView("contactList")();
+
+      expect(view.refs.contacts_list).to.not.eql(null);
+    });
+  });
+
+  describe("ContactsControllerView - contactEdit", function() {
+    var view;
+
+    beforeEach(function() {
+      view = TestUtils.renderIntoDocument(
+        React.createElement(loop.contacts.ContactsControllerView, {
+          initialSelectedTabComponent: "contactEdit",
+          mozLoop: navigator.mozLoop,
+          notifications: notifications
+        }));
+    });
+
+    it("should switch component to Contact List view", function() {
+      view.switchComponentView("contactList")();
+
+      expect(view.refs.contacts_list).to.not.eql(null);
+    });
+  });
+
+  describe("ContactsControllerView - contactList", function() {
+    var view;
+
+    beforeEach(function() {
+      view = TestUtils.renderIntoDocument(
+        React.createElement(loop.contacts.ContactsControllerView, {
+          initialSelectedTabComponent: "contactList",
+          mozLoop: navigator.mozLoop,
+          notifications: notifications
+        }));
+    });
+
+    it("should switch component to Contact Add view", function() {
+      view.handleAddEditContact("contactAdd")({});
+
+      expect(view.refs.contacts_add).to.not.eql(null);
+    });
+
+    it("should switch component to Contact Edit view", function() {
+      view.handleAddEditContact("contactEdit")();
+
+      expect(view.refs.contacts_edit).to.not.eql(null);
     });
   });
 
@@ -272,7 +417,8 @@ describe("loop.contacts", function() {
           React.createElement(loop.contacts.ContactsList, {
             mozLoop: navigator.mozLoop,
             notifications: notifications,
-            startForm: function() {}
+            switchToContactAdd: sandbox.stub(),
+            switchToContactEdit: sandbox.stub()
           }));
         node = listView.getDOMNode();
       });
@@ -288,22 +434,23 @@ describe("loop.contacts", function() {
 
       it("should display the no contacts strings", function() {
         sinon.assert.calledWithExactly(mozL10nGetSpy,
-                                       "no_contacts_message_heading");
+                                       "no_contacts_message_heading2");
         sinon.assert.calledWithExactly(mozL10nGetSpy,
-                                       "no_contacts_import_or_add");
+                                       "no_contacts_import_or_add2");
       });
     });
 
     describe("#RenderWithContacts", function() {
       beforeEach(function() {
         sandbox.stub(navigator.mozLoop.contacts, "getAll", function(cb) {
-          cb(null, [].concat(fakeContacts));
+          cb(null, [].concat(fakeFewerContacts));
         });
         listView = TestUtils.renderIntoDocument(
           React.createElement(loop.contacts.ContactsList, {
             mozLoop: navigator.mozLoop,
             notifications: notifications,
-            startForm: function() {}
+            switchToContactAdd: sandbox.stub(),
+            switchToContactEdit: sandbox.stub()
           }));
         node = listView.getDOMNode();
       });
@@ -311,6 +458,119 @@ describe("loop.contacts", function() {
       it("should show a contacts title", function() {
         expect(node.querySelector(".contact-list-title")).not.to.eql(null);
         sinon.assert.calledWithExactly(mozL10nGetSpy, "contact_list_title");
+      });
+
+      it("should not render the filter view unless MIN_CONTACTS_FOR_FILTERING",
+         function() {
+           var filterView = listView.getDOMNode()
+             .querySelector(".contact-filter-container");
+
+           expect(filterView).to.eql(null);
+         });
+    });
+
+    describe("ContactsFiltering", function() {
+      beforeEach(function() {
+        navigator.mozLoop.contacts = {
+          getAll: function(callback) {
+            callback(null, [].concat(fakeManyContacts));
+          },
+          on: sandbox.stub()
+        };
+        listView = TestUtils.renderIntoDocument(
+          React.createElement(loop.contacts.ContactsList, {
+            mozLoop: navigator.mozLoop,
+            notifications: notifications,
+            switchToContactAdd: sandbox.stub(),
+            switchToContactEdit: sandbox.stub()
+          }));
+        node = listView.getDOMNode();
+      });
+
+      it("should filter a non-existent user name", function() {
+        expect(listView.filterContact("foo")(fakeFewerContacts[0]))
+          .to.eql(false);
+      });
+
+      it("should display search returned no contacts view", function() {
+        listView.setState({
+          filter: "foo"
+        });
+
+        var view = node.querySelector(".contact-search-list-empty");
+
+        expect(view).to.not.eql(null);
+      });
+
+      it("should display the no search results strings", function() {
+        listView.setState({
+          filter: "foo"
+        });
+
+        sinon.assert.calledWithExactly(mozL10nGetSpy,
+                                       "contacts_no_search_results");
+      });
+
+      it("should filter the user name correctly", function() {
+        expect(listView.filterContact("ally")(fakeFewerContacts[0]))
+          .to.eql(true);
+      });
+
+      it("should filter and render a contact", function() {
+        listView.setState({
+          filter: "Ally"
+        });
+
+        var contacts = node.querySelectorAll(".contact");
+
+        expect(contacts.length).to.eql(1);
+      });
+
+      it("should render a list of contacts", function() {
+        var contactList = listView.getDOMNode().querySelectorAll(".contact");
+
+        expect(contactList.length).to.eql(fakeManyContacts.length);
+      });
+
+      it("should render the filter view for >= MIN_CONTACTS_FOR_FILTERING",
+         function() {
+           var filterView = listView.getDOMNode()
+             .querySelector(".contact-filter-container");
+
+           expect(filterView).to.not.eql(null);
+         });
+
+      it("should filter by name", function() {
+        var input = listView.getDOMNode()
+          .querySelector(".contact-filter-container input");
+
+        React.addons.TestUtils.Simulate.change(input,
+                                               { target: { value: "Ally" } });
+        var contactList = listView.getDOMNode().querySelectorAll(".contact");
+
+        expect(contactList.length).to.eql(1);
+      });
+
+      it("should filter by email", function() {
+        var input = listView.getDOMNode()
+          .querySelector(".contact-filter-container input");
+
+        React.addons.TestUtils.Simulate.change(input,
+                                               { target: { value: "@hotmail" } });
+        var contactList = listView.getDOMNode().querySelectorAll(".contact");
+
+        expect(contactList.length).to.eql(1);
+      });
+
+      it("should filter by phone number", function() {
+        var input = listView.getDOMNode()
+          .querySelector(".contact-filter-container input");
+
+        React.addons.TestUtils.Simulate.change(input,
+                                               { target: { value: "12345678" } });
+        var contactList = listView.getDOMNode().querySelectorAll(".contact");
+
+        expect(contactList.length).to.eql(1);
       });
     });
 
@@ -323,7 +583,8 @@ describe("loop.contacts", function() {
           React.createElement(loop.contacts.ContactsList, {
             mozLoop: navigator.mozLoop,
             notifications: notifications,
-            startForm: function() {}
+            switchToContactAdd: sandbox.stub(),
+            switchToContactEdit: sandbox.stub()
           }));
         node = listView.getDOMNode();
       });
@@ -343,6 +604,35 @@ describe("loop.contacts", function() {
         });
     });
 
+    describe("#handleContactAddEdit", function() {
+
+      beforeEach(function() {
+        listView = TestUtils.renderIntoDocument(
+          React.createElement(loop.contacts.ContactsList, {
+            mozLoop: navigator.mozLoop,
+            notifications: notifications,
+            switchToContactAdd: sandbox.stub(),
+            switchToContactEdit: sandbox.stub()
+          }));
+      });
+
+      it("should call switchToContactAdd function when Add Contact button is clicked",
+        function() {
+          var addContactBttn = listView.getDOMNode().querySelector(".contact-controls .primary");
+
+          React.addons.TestUtils.Simulate.click(addContactBttn);
+
+          sinon.assert.calledOnce(listView.props.switchToContactAdd);
+        });
+
+      it("should call switchToContactEdit function when selecting to Edit Contact",
+        function() {
+          listView.handleContactAction({}, "edit");
+
+          sinon.assert.calledOnce(listView.props.switchToContactEdit);
+        });
+    });
+
     describe("#handleImportButtonClick", function() {
       beforeEach(function() {
         sandbox.stub(navigator.mozLoop.contacts, "getAll", function(cb) {
@@ -352,12 +642,13 @@ describe("loop.contacts", function() {
           React.createElement(loop.contacts.ContactsList, {
             mozLoop: navigator.mozLoop,
             notifications: notifications,
-            startForm: function() {}
+            switchToContactAdd: sandbox.stub(),
+            switchToContactEdit: sandbox.stub()
           }));
         node = listView.getDOMNode();
       });
 
-      it("should notify the end user from a succesful import", function() {
+      it("should notify the end user from a successful import", function() {
         sandbox.stub(notifications, "successL10n");
         navigator.mozLoop.startImport = function(opts, cb) {
           cb(null, {success: 42});
@@ -394,8 +685,10 @@ describe("loop.contacts", function() {
         beforeEach(function() {
           view = TestUtils.renderIntoDocument(
             React.createElement(loop.contacts.ContactDetailsForm, {
+              contactFormData: {},
               mode: "add",
-              selectTab: function() {}
+              mozLoop: navigator.mozLoop,
+              switchToInitialView: sandbox.stub()
             }));
         });
 
@@ -498,6 +791,26 @@ describe("loop.contacts", function() {
           expect(emailInput.checkValidity()).to.equal(true);
           expect(telInput.checkValidity()).to.equal(true);
         });
+
+        it("should call switchToInitialView when Add Contact button is clicked", function() {
+          var nameInput = view.getDOMNode().querySelector("input[type='text']");
+          var emailInput = view.getDOMNode().querySelector("input[type='email']");
+          var addButton = view.getDOMNode().querySelector(".button-accept");
+
+          TestUtils.Simulate.change(nameInput, {target: {value: "Example"}});
+          TestUtils.Simulate.change(emailInput, {target: {value: "test@example.com"}});
+          React.addons.TestUtils.Simulate.click(addButton);
+
+          sinon.assert.calledOnce(view.props.switchToInitialView);
+        });
+
+        it("should call switchToInitialView when Cancel button is clicked", function() {
+          var cancelButton = view.getDOMNode().querySelector(".button-cancel");
+
+          React.addons.TestUtils.Simulate.click(cancelButton);
+
+          sinon.assert.calledOnce(view.props.switchToInitialView);
+        });
       });
 
       describe("edit mode", function() {
@@ -506,8 +819,10 @@ describe("loop.contacts", function() {
         beforeEach(function() {
           view = TestUtils.renderIntoDocument(
             React.createElement(loop.contacts.ContactDetailsForm, {
+              contactFormData: {},
               mode: "edit",
-              selectTab: function() {}
+              mozLoop: navigator.mozLoop,
+              switchToInitialView: sandbox.stub()
             }));
         });
 

@@ -142,7 +142,7 @@ pref("app.update.badge", false);
 pref("app.update.staging.enabled", true);
 
 // Update service URL:
-pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+pref("app.update.url", "https://aus5.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 // app.update.url.manual is in branding section
 // app.update.url.details is in branding section
 
@@ -228,6 +228,8 @@ pref("general.autoScroll", true);
 pref("browser.shell.checkDefaultBrowser", true);
 pref("browser.shell.shortcutFavicons",true);
 pref("browser.shell.mostRecentDateSetAsDefault", "");
+pref("browser.shell.skipDefaultBrowserCheck", true);
+pref("browser.shell.defaultBrowserCheckCount", 0);
 
 // 0 = blank, 1 = home (browser.startup.homepage), 2 = last visited page, 3 = resume previous browser session
 // The behavior of option 3 is detailed at: http://wiki.mozilla.org/Session_Restore
@@ -489,16 +491,9 @@ pref("dom.disable_window_move_resize",            false);
 // prevent JS from monkeying with window focus, etc
 pref("dom.disable_window_flip",                   true);
 
-// Disable touch events on Desktop Firefox by default
-// until they are properly supported (bug 736048)
+// Disable touch events on Desktop Firefox by default until they are properly
+// supported (bug 736048)
 pref("dom.w3c_touch_events.enabled",        0);
-
-#ifdef NIGHTLY_BUILD
-// W3C draft pointer events
-pref("dom.w3c_pointer_events.enabled", true);
-// W3C touch-action css property (related to touch and pointer events)
-pref("layout.css.touch_action.enabled", true);
-#endif
 
 // popups.policy 1=allow,2=reject
 pref("privacy.popups.policy",               1);
@@ -1160,14 +1155,6 @@ pref("browser.flash-protected-mode-flip.enable", false);
 // Whether we've already flipped protected mode automatically
 pref("browser.flash-protected-mode-flip.done", false);
 
-#ifdef XP_MACOSX
-// On mac, the default pref is per-architecture
-pref("dom.ipc.plugins.enabled.i386", true);
-pref("dom.ipc.plugins.enabled.x86_64", true);
-#else
-pref("dom.ipc.plugins.enabled", true);
-#endif
-
 pref("dom.ipc.shims.enabledWarnings", false);
 
 // Start the browser in e10s mode
@@ -1192,7 +1179,12 @@ pref("security.sandbox.windows.log", false);
 // 3 - the strongest settings we seem to be able to use without breaking
 //     everything, but will probably cause some functionality restrictions
 pref("dom.ipc.plugins.sandbox-level.default", 0);
+#if defined(_AMD64_)
+// The lines in PluginModuleParent.cpp should be changed in line with this.
+pref("dom.ipc.plugins.sandbox-level.flash", 2);
+#else
 pref("dom.ipc.plugins.sandbox-level.flash", 0);
+#endif
 
 #if defined(MOZ_CONTENT_SANDBOX)
 // This controls the strength of the Windows content process sandbox for testing
@@ -1443,7 +1435,7 @@ pref("devtools.performance.memory.sample-probability", "0.05");
 // Can't go higher than this without causing internal allocation overflows while
 // serializing the allocations data over the RDP.
 pref("devtools.performance.memory.max-log-length", 125000);
-pref("devtools.performance.timeline.hidden-markers", "[]");
+pref("devtools.performance.timeline.hidden-markers", "[\"Composite\"]");
 pref("devtools.performance.profiler.buffer-size", 10000000);
 pref("devtools.performance.profiler.sample-frequency-khz", 1);
 pref("devtools.performance.ui.invert-call-tree", true);
@@ -1455,6 +1447,12 @@ pref("devtools.performance.ui.enable-memory", false);
 pref("devtools.performance.ui.enable-allocations", false);
 pref("devtools.performance.ui.enable-framerate", true);
 pref("devtools.performance.ui.enable-jit-optimizations", false);
+pref("devtools.performance.ui.show-triggers-for-gc-types",
+  "TOO_MUCH_MALLOC ALLOC_TRIGGER LAST_DITCH EAGER_ALLOC_TRIGGER");
+
+// Temporary pref disabling memory flame views
+// TODO remove once we have flame charts via bug 1148663
+pref("devtools.performance.ui.enable-memory-flame", false);
 
 // Enable experimental options in the UI only in Nightly
 #if defined(NIGHTLY_BUILD)
@@ -1562,6 +1560,10 @@ pref("devtools.webconsole.filter.secwarn", true);
 pref("devtools.webconsole.filter.serviceworkers", false);
 pref("devtools.webconsole.filter.sharedworkers", false);
 pref("devtools.webconsole.filter.windowlessworkers", false);
+pref("devtools.webconsole.filter.servererror", false);
+pref("devtools.webconsole.filter.serverwarn", false);
+pref("devtools.webconsole.filter.serverinfo", false);
+pref("devtools.webconsole.filter.serverlog", false);
 
 // Remember the Browser Console filters
 pref("devtools.browserconsole.filter.network", true);
@@ -1583,6 +1585,10 @@ pref("devtools.browserconsole.filter.secwarn", true);
 pref("devtools.browserconsole.filter.serviceworkers", true);
 pref("devtools.browserconsole.filter.sharedworkers", true);
 pref("devtools.browserconsole.filter.windowlessworkers", true);
+pref("devtools.browserconsole.filter.servererror", false);
+pref("devtools.browserconsole.filter.serverwarn", false);
+pref("devtools.browserconsole.filter.serverinfo", false);
+pref("devtools.browserconsole.filter.serverlog", false);
 
 // Text size in the Web Console. Use 0 for the system default size.
 pref("devtools.webconsole.fontSize", 0);
@@ -1689,13 +1695,7 @@ pref("pdfjs.previousHandler.alwaysAskBeforeHandling", false);
 
 // Shumway is only bundled in Nightly.
 #ifdef NIGHTLY_BUILD
-// By default, Shumway (SWF player) is only enabled for whitelisted SWFs on Windows + OS X.
-#ifdef UNIX_BUT_NOT_MAC
 pref("shumway.disabled", true);
-#else
-pref("shumway.disabled", false);
-pref("shumway.swf.whitelist", "http://www.areweflashyet.com/*.swf");
-#endif
 #endif
 
 // The maximum amount of decoded image data we'll willingly keep around (we
@@ -1727,7 +1727,7 @@ pref("loop.debug.sdk", false);
 pref("loop.debug.twoWayMediaTelemetry", false);
 pref("loop.feedback.dateLastSeenSec", 0);
 pref("loop.feedback.periodSec", 15770000); // 6 months.
-pref("loop.feedback.formURL", "http://www.surveygizmo.com/s3/2227372/Firefox-Hello-Product-Survey");
+pref("loop.feedback.formURL", "https://www.mozilla.org/firefox/hello/npssurvey/");
 #ifdef DEBUG
 pref("loop.CSP", "default-src 'self' about: file: chrome: http://localhost:*; img-src * data:; font-src 'none'; connect-src wss://*.tokbox.com https://*.opentok.com https://*.tokbox.com wss://*.mozilla.com https://*.mozilla.org wss://*.mozaws.net http://localhost:* ws://localhost:*; media-src blob:");
 #else
@@ -1883,10 +1883,9 @@ pref("browser.apps.URL", "https://marketplace.firefox.com/discovery/");
 #ifdef NIGHTLY_BUILD
 pref("browser.polaris.enabled", false);
 pref("privacy.trackingprotection.ui.enabled", false);
-pref("privacy.trackingprotection.introURL", "https://support.mozilla.org/kb/tracking-protection-firefox");
 #endif
 pref("privacy.trackingprotection.introCount", 0);
-pref("privacy.trackingprotection.introURL", "https://support.mozilla.org/kb/tracking-protection-firefox");
+pref("privacy.trackingprotection.introURL", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/tracking-protection-pbm");
 
 #ifndef RELEASE_BUILD
 // At the moment, autostart.2 is used, while autostart.1 is unused.

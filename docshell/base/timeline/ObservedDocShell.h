@@ -4,17 +4,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ObservedDocShell_h_
-#define ObservedDocShell_h_
+#ifndef mozilla_ObservedDocShell_h_
+#define mozilla_ObservedDocShell_h_
 
-#include "GeckoProfiler.h"
 #include "nsTArray.h"
 #include "mozilla/nsRefPtr.h"
 
 class nsDocShell;
-class TimelineMarker;
 
 namespace mozilla {
+class TimelineMarker;
+
 namespace dom {
 struct ProfileTimelineMarker;
 }
@@ -33,7 +33,6 @@ public:
   explicit ObservedDocShell(nsDocShell* aDocShell);
   nsDocShell* operator*() const { return mDocShell.get(); }
 
-  void AddMarker(const char* aName, TracingMetadata aMetaData);
   void AddMarker(UniquePtr<TimelineMarker>&& aMarker);
   void ClearMarkers();
   void PopMarkers(JSContext* aCx, nsTArray<dom::ProfileTimelineMarker>& aStore);
@@ -41,4 +40,4 @@ public:
 
 } // namespace mozilla
 
-#endif /* ObservedDocShell_h_ */
+#endif /* mozilla_ObservedDocShell_h_ */

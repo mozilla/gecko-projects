@@ -1524,7 +1524,7 @@ IMMHandler::HandleEndComposition(nsWindow* aWindow,
     mNativeCaretIsCreated = false;
   }
 
-  uint32_t message =
+  EventMessage message =
     aCommitString ? NS_COMPOSITION_COMMIT : NS_COMPOSITION_COMMIT_AS_IS;
   WidgetCompositionEvent compositionCommitEvent(true, message, aWindow);
   nsIntPoint point(0, 0);
@@ -1971,13 +1971,25 @@ IMMHandler::CreateTextRangeArray()
     return textRangeArray.forget();
   }
 
-  int32_t cursor = mCursorPosition;
-  if (uint32_t(cursor) > mCompositionString.Length()) {
+  uint32_t cursor = static_cast<uint32_t>(mCursorPosition);
+  if (cursor > mCompositionString.Length()) {
     MOZ_LOG(gIMMLog, LogLevel::Info,
       ("IMM: CreateTextRangeArray, mCursorPosition=%ld. "
        "This is larger than mCompositionString.Length()=%lu",
        mCursorPosition, mCompositionString.Length()));
     cursor = mCompositionString.Length();
+  }
+
+  // If caret is in the target clause, the target clause will be painted as
+  // normal selection range.  Since caret shouldn't be in selection range on
+  // Windows, we shouldn't append caret range in such case.
+  const TextRange* targetClause = textRangeArray->GetTargetClause();
+  if (targetClause &&
+      cursor >= targetClause->mStartOffset &&
+      cursor <= targetClause->mEndOffset) {
+    MOZ_LOG(gIMMLog, LogLevel::Info,
+      ("IMM: CreateTextRangeArray, no caret due to it's in the target clause"));
+    return textRangeArray.forget();
   }
 
   range.mStartOffset = range.mEndOffset = cursor;
@@ -2163,8 +2175,8 @@ IMMHandler::GetCharacterRectOfSelectedTextAt(nsWindow* aWindow,
       if (aWritingMode) {
         *aWritingMode = charRect.GetWritingMode();
       }
-      MOZ_LOG(gIMMLog, LogLevel::Error,
-        ("IMM: GetCharacterRectOfSelectedTextAt, FAILED, due to "
+      MOZ_LOG(gIMMLog, LogLevel::Debug,
+        ("IMM: GetCharacterRectOfSelectedTextAt, Succeeded, aOffset=%u, "
          "aCharRect={ x: %ld, y: %ld, width: %ld, height: %ld }, "
          "charRect.GetWritingMode()=%s",
          aOffset, aCharRect.x, aCharRect.y, aCharRect.width, aCharRect.height,
@@ -2589,8 +2601,7 @@ IMMHandler::OnMouseButtonEvent(nsWindow* aWindow,
   }
 
   // We need to handle only mousedown event.
-  if (aIMENotification.mMouseButtonEventData.mEventMessage !=
-        NS_MOUSE_BUTTON_DOWN) {
+  if (aIMENotification.mMouseButtonEventData.mEventMessage != eMouseDown) {
     return NS_OK;
   }
 
@@ -2683,13 +2694,13 @@ IMMHandler::OnKeyDownEvent(nsWindow* aWindow,
     case VK_UP:
     case VK_RIGHT:
     case VK_DOWN:
+    case VK_RETURN:
       // If IME didn't process the key message (the virtual key code wasn't
       // converted to VK_PROCESSKEY), and the virtual key code event causes
-      // to move caret, we should cancel the composition here.  Then, this
-      // event will be dispatched.
-      // XXX I think that we should dispatch all key events during composition,
-      //     and nsEditor should cancel/commit the composition if it *thinks*
-      //     it's needed.
+      // moving caret or editing text with keeping composing state, we should
+      // cancel the composition here because we cannot support moving
+      // composition string with DOM events (IE also cancels the composition
+      // in same cases).  Then, this event will be dispatched.
       if (IsComposingOnOurEditor()) {
         // NOTE: We don't need to cancel the composition on another window.
         CancelComposition(aWindow, false);

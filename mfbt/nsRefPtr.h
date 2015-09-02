@@ -348,12 +348,14 @@ public:
 private:
   // This helper class makes |nsRefPtr<const T>| possible by casting away
   // the constness from the pointer when calling AddRef() and Release().
+  //
   // This is necessary because AddRef() and Release() implementations can't
   // generally expected to be const themselves (without heavy use of |mutable|
   // and |const_cast| in their own implementations).
-  // This should be sound because while |nsRefPtr<const T>| provides a const
-  // view of an object, the object itself should be const (it would have to be
-  // allocated as |new const T| or similar to itself be const).
+  //
+  // This should be sound because while |nsRefPtr<const T>| provides a
+  // const view of an object, the object itself should not be const (it
+  // would have to be allocated as |new const T| or similar to be const).
   template<class U>
   struct AddRefTraits
   {
@@ -549,42 +551,34 @@ operator!=(U* aLhs, const nsRefPtr<T>& aRhs)
   return const_cast<const U*>(aLhs) != static_cast<const T*>(aRhs.get());
 }
 
-namespace detail {
-class nsRefPtrZero;
-} // namespace detail
-
-// Comparing an |nsRefPtr| to |0|
+// Comparing an |nsRefPtr| to |nullptr|
 
 template <class T>
 inline bool
-operator==(const nsRefPtr<T>& aLhs, ::detail::nsRefPtrZero* aRhs)
-// specifically to allow |smartPtr == 0|
+operator==(const nsRefPtr<T>& aLhs, decltype(nullptr))
 {
-  return static_cast<const void*>(aLhs.get()) == reinterpret_cast<const void*>(aRhs);
+  return aLhs.get() == nullptr;
 }
 
 template <class T>
 inline bool
-operator==(::detail::nsRefPtrZero* aLhs, const nsRefPtr<T>& aRhs)
-// specifically to allow |0 == smartPtr|
+operator==(decltype(nullptr), const nsRefPtr<T>& aRhs)
 {
-  return reinterpret_cast<const void*>(aLhs) == static_cast<const void*>(aRhs.get());
+  return nullptr == aRhs.get();
 }
 
 template <class T>
 inline bool
-operator!=(const nsRefPtr<T>& aLhs, ::detail::nsRefPtrZero* aRhs)
-// specifically to allow |smartPtr != 0|
+operator!=(const nsRefPtr<T>& aLhs, decltype(nullptr))
 {
-  return static_cast<const void*>(aLhs.get()) != reinterpret_cast<const void*>(aRhs);
+  return aLhs.get() != nullptr;
 }
 
 template <class T>
 inline bool
-operator!=(::detail::nsRefPtrZero* aLhs, const nsRefPtr<T>& aRhs)
-// specifically to allow |0 != smartPtr|
+operator!=(decltype(nullptr), const nsRefPtr<T>& aRhs)
 {
-  return reinterpret_cast<const void*>(aLhs) != static_cast<const void*>(aRhs.get());
+  return nullptr != aRhs.get();
 }
 
 /*****************************************************************************/

@@ -2029,8 +2029,8 @@ js::GetBuiltinPrototype(ExclusiveContext* cx, JSProtoKey key, MutableHandleObjec
     return true;
 }
 
-static bool
-IsStandardPrototype(JSObject* obj, JSProtoKey key)
+bool
+js::IsStandardPrototype(JSObject* obj, JSProtoKey key)
 {
     GlobalObject& global = obj->global();
     Value v = global.getPrototype(key);
@@ -3625,7 +3625,7 @@ JSObject::sizeOfIncludingThisInNursery() const
     return size;
 }
 
-size_t
+JS::ubi::Node::Size
 JS::ubi::Concrete<JSObject>::size(mozilla::MallocSizeOf mallocSizeOf) const
 {
     JSObject& obj = get();

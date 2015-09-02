@@ -39,6 +39,9 @@
 
 namespace JS {
 
+extern JS_PUBLIC_API(void)
+ResetTimeZone();
+
 class TwoByteChars;
 
 #ifdef JS_DEBUG
@@ -2437,20 +2440,20 @@ namespace JS {
 template <typename Outer>
 class PropertyDescriptorOperations
 {
-    const JSPropertyDescriptor* desc() const { return static_cast<const Outer*>(this)->extract(); }
+    const JSPropertyDescriptor& desc() const { return static_cast<const Outer*>(this)->get(); }
 
     bool has(unsigned bit) const {
         MOZ_ASSERT(bit != 0);
         MOZ_ASSERT((bit & (bit - 1)) == 0);  // only a single bit
-        return (desc()->attrs & bit) != 0;
+        return (desc().attrs & bit) != 0;
     }
 
     bool hasAny(unsigned bits) const {
-        return (desc()->attrs & bits) != 0;
+        return (desc().attrs & bits) != 0;
     }
 
     bool hasAll(unsigned bits) const {
-        return (desc()->attrs & bits) == bits;
+        return (desc().attrs & bits) == bits;
     }
 
     // Non-API attributes bit used internally for arguments objects.
@@ -2461,7 +2464,7 @@ class PropertyDescriptorOperations
     // descriptors. It's complicated.
     bool isAccessorDescriptor() const { return hasAny(JSPROP_GETTER | JSPROP_SETTER); }
     bool isGenericDescriptor() const {
-        return (desc()->attrs&
+        return (desc().attrs&
                 (JSPROP_GETTER | JSPROP_SETTER | JSPROP_IGNORE_READONLY | JSPROP_IGNORE_VALUE)) ==
                (JSPROP_IGNORE_READONLY | JSPROP_IGNORE_VALUE);
     }
@@ -2475,7 +2478,7 @@ class PropertyDescriptorOperations
 
     bool hasValue() const { return !isAccessorDescriptor() && !has(JSPROP_IGNORE_VALUE); }
     JS::HandleValue value() const {
-        return JS::HandleValue::fromMarkedLocation(&desc()->value);
+        return JS::HandleValue::fromMarkedLocation(&desc().value);
     }
 
     bool hasWritable() const { return !isAccessorDescriptor() && !has(JSPROP_IGNORE_READONLY); }
@@ -2485,24 +2488,24 @@ class PropertyDescriptorOperations
     JS::HandleObject getterObject() const {
         MOZ_ASSERT(hasGetterObject());
         return JS::HandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject* const*>(&desc()->getter));
+                reinterpret_cast<JSObject* const*>(&desc().getter));
     }
     bool hasSetterObject() const { return has(JSPROP_SETTER); }
     JS::HandleObject setterObject() const {
         MOZ_ASSERT(hasSetterObject());
         return JS::HandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject* const*>(&desc()->setter));
+                reinterpret_cast<JSObject* const*>(&desc().setter));
     }
 
-    bool hasGetterOrSetter() const { return desc()->getter || desc()->setter; }
+    bool hasGetterOrSetter() const { return desc().getter || desc().setter; }
     bool isShared() const { return has(JSPROP_SHARED); }
 
     JS::HandleObject object() const {
-        return JS::HandleObject::fromMarkedLocation(&desc()->obj);
+        return JS::HandleObject::fromMarkedLocation(&desc().obj);
     }
-    unsigned attributes() const { return desc()->attrs; }
-    JSGetterOp getter() const { return desc()->getter; }
-    JSSetterOp setter() const { return desc()->setter; }
+    unsigned attributes() const { return desc().attrs; }
+    JSGetterOp getter() const { return desc().getter; }
+    JSSetterOp setter() const { return desc().setter; }
 
     void assertValid() const {
 #ifdef DEBUG
@@ -2569,7 +2572,7 @@ class PropertyDescriptorOperations
 template <typename Outer>
 class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<Outer>
 {
-    JSPropertyDescriptor * desc() { return static_cast<Outer*>(this)->extractMutable(); }
+    JSPropertyDescriptor& desc() { return static_cast<Outer*>(this)->get(); }
 
   public:
     void clear() {
@@ -2615,63 +2618,63 @@ class MutablePropertyDescriptorOperations : public PropertyDescriptorOperations<
     }
 
     JS::MutableHandleObject object() {
-        return JS::MutableHandleObject::fromMarkedLocation(&desc()->obj);
+        return JS::MutableHandleObject::fromMarkedLocation(&desc().obj);
     }
-    unsigned& attributesRef() { return desc()->attrs; }
-    JSGetterOp& getter() { return desc()->getter; }
-    JSSetterOp& setter() { return desc()->setter; }
+    unsigned& attributesRef() { return desc().attrs; }
+    JSGetterOp& getter() { return desc().getter; }
+    JSSetterOp& setter() { return desc().setter; }
     JS::MutableHandleValue value() {
-        return JS::MutableHandleValue::fromMarkedLocation(&desc()->value);
+        return JS::MutableHandleValue::fromMarkedLocation(&desc().value);
     }
     void setValue(JS::HandleValue v) {
-        MOZ_ASSERT(!(desc()->attrs & (JSPROP_GETTER | JSPROP_SETTER)));
+        MOZ_ASSERT(!(desc().attrs & (JSPROP_GETTER | JSPROP_SETTER)));
         attributesRef() &= ~JSPROP_IGNORE_VALUE;
         value().set(v);
     }
 
     void setConfigurable(bool configurable) {
-        setAttributes((desc()->attrs & ~(JSPROP_IGNORE_PERMANENT | JSPROP_PERMANENT)) |
+        setAttributes((desc().attrs & ~(JSPROP_IGNORE_PERMANENT | JSPROP_PERMANENT)) |
                       (configurable ? 0 : JSPROP_PERMANENT));
     }
     void setEnumerable(bool enumerable) {
-        setAttributes((desc()->attrs & ~(JSPROP_IGNORE_ENUMERATE | JSPROP_ENUMERATE)) |
+        setAttributes((desc().attrs & ~(JSPROP_IGNORE_ENUMERATE | JSPROP_ENUMERATE)) |
                       (enumerable ? JSPROP_ENUMERATE : 0));
     }
     void setWritable(bool writable) {
-        MOZ_ASSERT(!(desc()->attrs & (JSPROP_GETTER | JSPROP_SETTER)));
-        setAttributes((desc()->attrs & ~(JSPROP_IGNORE_READONLY | JSPROP_READONLY)) |
+        MOZ_ASSERT(!(desc().attrs & (JSPROP_GETTER | JSPROP_SETTER)));
+        setAttributes((desc().attrs & ~(JSPROP_IGNORE_READONLY | JSPROP_READONLY)) |
                       (writable ? 0 : JSPROP_READONLY));
     }
-    void setAttributes(unsigned attrs) { desc()->attrs = attrs; }
+    void setAttributes(unsigned attrs) { desc().attrs = attrs; }
 
     void setGetter(JSGetterOp op) {
         MOZ_ASSERT(op != JS_PropertyStub);
-        desc()->getter = op;
+        desc().getter = op;
     }
     void setSetter(JSSetterOp op) {
         MOZ_ASSERT(op != JS_StrictPropertyStub);
-        desc()->setter = op;
+        desc().setter = op;
     }
     void setGetterObject(JSObject* obj) {
-        desc()->getter = reinterpret_cast<JSGetterOp>(obj);
-        desc()->attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
-        desc()->attrs |= JSPROP_GETTER | JSPROP_SHARED;
+        desc().getter = reinterpret_cast<JSGetterOp>(obj);
+        desc().attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
+        desc().attrs |= JSPROP_GETTER | JSPROP_SHARED;
     }
     void setSetterObject(JSObject* obj) {
-        desc()->setter = reinterpret_cast<JSSetterOp>(obj);
-        desc()->attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
-        desc()->attrs |= JSPROP_SETTER | JSPROP_SHARED;
+        desc().setter = reinterpret_cast<JSSetterOp>(obj);
+        desc().attrs &= ~(JSPROP_IGNORE_VALUE | JSPROP_IGNORE_READONLY | JSPROP_READONLY);
+        desc().attrs |= JSPROP_SETTER | JSPROP_SHARED;
     }
 
     JS::MutableHandleObject getterObject() {
         MOZ_ASSERT(this->hasGetterObject());
         return JS::MutableHandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject**>(&desc()->getter));
+                reinterpret_cast<JSObject**>(&desc().getter));
     }
     JS::MutableHandleObject setterObject() {
         MOZ_ASSERT(this->hasSetterObject());
         return JS::MutableHandleObject::fromMarkedLocation(
-                reinterpret_cast<JSObject**>(&desc()->setter));
+                reinterpret_cast<JSObject**>(&desc().setter));
     }
 };
 
@@ -2682,40 +2685,17 @@ namespace js {
 template <>
 class RootedBase<JSPropertyDescriptor>
   : public JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>
-{
-    friend class JS::PropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>;
-    friend class JS::MutablePropertyDescriptorOperations<JS::Rooted<JSPropertyDescriptor>>;
-    const JSPropertyDescriptor* extract() const {
-        return static_cast<const JS::Rooted<JSPropertyDescriptor>*>(this)->address();
-    }
-    JSPropertyDescriptor* extractMutable() {
-        return static_cast<JS::Rooted<JSPropertyDescriptor>*>(this)->address();
-    }
-};
+{};
 
 template <>
 class HandleBase<JSPropertyDescriptor>
   : public JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor>>
-{
-    friend class JS::PropertyDescriptorOperations<JS::Handle<JSPropertyDescriptor>>;
-    const JSPropertyDescriptor* extract() const {
-        return static_cast<const JS::Handle<JSPropertyDescriptor>*>(this)->address();
-    }
-};
+{};
 
 template <>
 class MutableHandleBase<JSPropertyDescriptor>
   : public JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>
-{
-    friend class JS::PropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>;
-    friend class JS::MutablePropertyDescriptorOperations<JS::MutableHandle<JSPropertyDescriptor>>;
-    const JSPropertyDescriptor* extract() const {
-        return static_cast<const JS::MutableHandle<JSPropertyDescriptor>*>(this)->address();
-    }
-    JSPropertyDescriptor* extractMutable() {
-        return static_cast<JS::MutableHandle<JSPropertyDescriptor>*>(this)->address();
-    }
-};
+{};
 
 } /* namespace js */
 
@@ -3293,10 +3273,20 @@ namespace JS {
  * it doesn't care who owns them, or what's keeping them alive. It does its own
  * addrefs/copies/tracing/etc.
  *
- * So, we have a class hierarchy that reflects these three use cases:
+ * Furthermore, in some cases compile options are propagated from one entity to
+ * another (e.g. from a scriipt to a function defined in that script).  This
+ * involves copying over some, but not all, of the options.
  *
- * - ReadOnlyCompileOptions is the common base class. It can be used by code
- *   that simply needs to access options set elsewhere, like the compiler.
+ * So, we have a class hierarchy that reflects these four use cases:
+ *
+ * - TransitiveCompileOptions is the common base class, representing options
+ *   that should get propagated from a script to functions defined in that
+ *   script.  This is never instantiated directly.
+ *
+ * - ReadOnlyCompileOptions is the only subclass of TransitiveCompileOptions,
+ *   representing a full set of compile options.  It can be used by code that
+ *   simply needs to access options set elsewhere, like the compiler.  This,
+ *   again, is never instantiated directly.
  *
  * - The usual CompileOptions class must be stack-allocated, and holds
  *   non-owning references to the filename, element, and so on. It's derived
@@ -3310,15 +3300,11 @@ namespace JS {
 /*
  * The common base class for the CompileOptions hierarchy.
  *
- * Use this in code that only needs to access compilation options created
- * elsewhere, like the compiler. Don't instantiate this class (the constructor
- * is protected anyway); instead, create instances only of the derived classes:
- * CompileOptions and OwningCompileOptions.
+ * Use this in code that needs to propagate compile options from one compilation
+ * unit to another.
  */
-class JS_FRIEND_API(ReadOnlyCompileOptions)
+class JS_FRIEND_API(TransitiveCompileOptions)
 {
-    friend class CompileOptions;
-
   protected:
     // The Web Platform allows scripts to be loaded from arbitrary cross-origin
     // sources. This allows an attack by which a malicious website loads a
@@ -3340,7 +3326,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     // is unusable until that's set to something more specific; the derived
     // classes' constructors take care of that, in ways appropriate to their
     // purpose.
-    ReadOnlyCompileOptions()
+    TransitiveCompileOptions()
       : mutedErrors_(false),
         filename_(nullptr),
         introducerFilename_(nullptr),
@@ -3348,11 +3334,6 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
         version(JSVERSION_UNKNOWN),
         versionSet(false),
         utf8(false),
-        lineno(1),
-        column(0),
-        isRunOnce(false),
-        forEval(false),
-        noScriptRval(false),
         selfHostingMode(false),
         canLazilyParse(true),
         strictOption(false),
@@ -3370,7 +3351,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
 
     // Set all POD options (those not requiring reference counts, copies,
     // rooting, or other hand-holding) to their values in |rhs|.
-    void copyPODOptions(const ReadOnlyCompileOptions& rhs);
+    void copyPODTransitiveOptions(const TransitiveCompileOptions& rhs);
 
   public:
     // Read-only accessors for non-POD options. The proper way to set these
@@ -3387,12 +3368,6 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     JSVersion version;
     bool versionSet;
     bool utf8;
-    unsigned lineno;
-    unsigned column;
-    // isRunOnce only applies to non-function scripts.
-    bool isRunOnce;
-    bool forEval;
-    bool noScriptRval;
     bool selfHostingMode;
     bool canLazilyParse;
     bool strictOption;
@@ -3411,7 +3386,55 @@ class JS_FRIEND_API(ReadOnlyCompileOptions)
     bool hasIntroductionInfo;
 
   private:
-    static JSObject * const nullObjectPtr;
+    void operator=(const TransitiveCompileOptions&) = delete;
+};
+
+/*
+ * The class representing a full set of compile options.
+ *
+ * Use this in code that only needs to access compilation options created
+ * elsewhere, like the compiler. Don't instantiate this class (the constructor
+ * is protected anyway); instead, create instances only of the derived classes:
+ * CompileOptions and OwningCompileOptions.
+ */
+class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
+{
+    friend class CompileOptions;
+
+  protected:
+    ReadOnlyCompileOptions()
+      : TransitiveCompileOptions(),
+        lineno(1),
+        column(0),
+        isRunOnce(false),
+        forEval(false),
+        noScriptRval(false)
+    { }
+
+    // Set all POD options (those not requiring reference counts, copies,
+    // rooting, or other hand-holding) to their values in |rhs|.
+    void copyPODOptions(const ReadOnlyCompileOptions& rhs);
+
+  public:
+    // Read-only accessors for non-POD options. The proper way to set these
+    // depends on the derived type.
+    bool mutedErrors() const { return mutedErrors_; }
+    const char* filename() const { return filename_; }
+    const char* introducerFilename() const { return introducerFilename_; }
+    const char16_t* sourceMapURL() const { return sourceMapURL_; }
+    virtual JSObject* element() const = 0;
+    virtual JSString* elementAttributeName() const = 0;
+    virtual JSScript* introductionScript() const = 0;
+
+    // POD options.
+    unsigned lineno;
+    unsigned column;
+    // isRunOnce only applies to non-function scripts.
+    bool isRunOnce;
+    bool forEval;
+    bool noScriptRval;
+
+  private:
     void operator=(const ReadOnlyCompileOptions&) = delete;
 };
 
@@ -3526,8 +3549,22 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOpti
     {
         copyPODOptions(rhs);
 
-        mutedErrors_ = rhs.mutedErrors_;
         filename_ = rhs.filename();
+        introducerFilename_ = rhs.introducerFilename();
+        sourceMapURL_ = rhs.sourceMapURL();
+        elementRoot = rhs.element();
+        elementAttributeNameRoot = rhs.elementAttributeName();
+        introductionScriptRoot = rhs.introductionScript();
+    }
+
+    CompileOptions(js::ContextFriendFields* cx, const TransitiveCompileOptions& rhs)
+      : ReadOnlyCompileOptions(), elementRoot(cx), elementAttributeNameRoot(cx),
+        introductionScriptRoot(cx)
+    {
+        copyPODTransitiveOptions(rhs);
+
+        filename_ = rhs.filename();
+        introducerFilename_ = rhs.introducerFilename();
         sourceMapURL_ = rhs.sourceMapURL();
         elementRoot = rhs.element();
         elementAttributeNameRoot = rhs.elementAttributeName();
@@ -4963,15 +5000,16 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(AutoFilename)
 };
 
 /*
- * Return the current filename and line number of the most currently running
- * frame. Returns true if a scripted frame was found, false otherwise.
+ * Return the current filename, line number and column number of the most
+ * currently running frame. Returns true if a scripted frame was found, false
+ * otherwise.
  *
  * If a the embedding has hidden the scripted caller for the topmost activation
  * record, this will also return false.
  */
 extern JS_PUBLIC_API(bool)
 DescribeScriptedCaller(JSContext* cx, AutoFilename* filename = nullptr,
-                       unsigned* lineno = nullptr);
+                       unsigned* lineno = nullptr, unsigned* column = nullptr);
 
 extern JS_PUBLIC_API(JSObject*)
 GetScriptedCallerGlobal(JSContext* cx);
@@ -5331,6 +5369,7 @@ class AutoStopwatch;
 
 // Container for performance data
 // All values are monotonic.
+// All values are updated after running to completion.
 struct PerformanceData {
     // Number of times we have spent at least 2^n consecutive
     // milliseconds executing code in this group.
@@ -5397,28 +5436,66 @@ struct PerformanceGroup {
     // An id unique to this runtime.
     const uint64_t uid;
 
+    // The number of cycles spent in this group during this iteration
+    // of the event loop. Note that cycles are not a reliable measure,
+    // especially over short intervals. See Runtime.cpp for a more
+    // complete discussion on the imprecision of cycle measurement.
+    uint64_t recentCycles;
+
+    // The number of times this group has been activated during this
+    // iteration of the event loop.
+    uint64_t recentTicks;
+
+    // The number of milliseconds spent doing CPOW during this
+    // iteration of the event loop.
+    uint64_t recentCPOW;
+
+    // The current iteration of the event loop.
+    uint64_t iteration() const {
+        return iteration_;
+    }
+
     // `true` if an instance of `AutoStopwatch` is already monitoring
     // the performance of this performance group for this iteration
     // of the event loop, `false` otherwise.
-    bool hasStopwatch(uint64_t iteration) const {
-        return stopwatch_ != nullptr && iteration_ == iteration;
+    bool hasStopwatch(uint64_t it) const {
+        return stopwatch_ != nullptr && iteration_ == it;
+    }
+
+    // `true` if a specific instance of `AutoStopwatch` is already monitoring
+    // the performance of this performance group for this iteration
+    // of the event loop, `false` otherwise.
+    bool hasStopwatch(uint64_t it, const AutoStopwatch* stopwatch) const {
+        return stopwatch_ == stopwatch && iteration_ == it;
     }
 
     // Mark that an instance of `AutoStopwatch` is monitoring
     // the performance of this group for a given iteration.
-    void acquireStopwatch(uint64_t iteration, const AutoStopwatch* stopwatch) {
-        iteration_ = iteration;
+    void acquireStopwatch(uint64_t it, const AutoStopwatch* stopwatch) {
+        if (iteration_ != it) {
+            // Any data that pretends to be recent is actually bound
+            // to an older iteration and therefore stale.
+            resetRecentData();
+        }
+        iteration_ = it;
         stopwatch_ = stopwatch;
     }
 
     // Mark that no `AutoStopwatch` is monitoring the
     // performance of this group for the iteration.
-    void releaseStopwatch(uint64_t iteration, const AutoStopwatch* stopwatch) {
-        if (iteration_ != iteration)
+    void releaseStopwatch(uint64_t it, const AutoStopwatch* stopwatch) {
+        if (iteration_ != it)
             return;
 
         MOZ_ASSERT(stopwatch == stopwatch_ || stopwatch_ == nullptr);
         stopwatch_ = nullptr;
+    }
+
+    // Get rid of any data that pretends to be recent.
+    void resetRecentData() {
+        recentCycles = 0;
+        recentTicks = 0;
+        recentCPOW = 0;
     }
 
     // Refcounting. For use with mozilla::RefPtr.
@@ -5448,9 +5525,8 @@ private:
     // The hash key for this PerformanceGroup.
     void* const key_;
 
-    // A reference counter.
+    // Refcounter.
     uint64_t refCount_;
-
 
     // `true` if this PerformanceGroup may be shared by several
     // compartments, `false` if it is dedicated to a single
@@ -5511,12 +5587,19 @@ struct PerformanceGroupHolder {
 };
 
 /**
- * Reset any stopwatch currently measuring.
+ * Commit any Performance Monitoring data.
  *
- * This function is designed to be called when we process a new event.
+ * Until `FlushMonitoring` has been called, all PerformanceMonitoring data is invisible
+ * to the outside world and can cancelled with a call to `ResetMonitoring`.
  */
 extern JS_PUBLIC_API(void)
-ResetStopwatches(JSRuntime*);
+FlushPerformanceMonitoring(JSRuntime*);
+
+/**
+ * Cancel any measurement that hasn't been committed.
+ */
+extern JS_PUBLIC_API(void)
+ResetPerformanceMonitoring(JSRuntime*);
 
 /**
  * Turn on/off stopwatch-based CPU monitoring.
@@ -5541,11 +5624,17 @@ GetStopwatchIsMonitoringPerCompartment(JSRuntime*);
 extern JS_PUBLIC_API(bool)
 IsStopwatchActive(JSRuntime*);
 
+// Extract the CPU rescheduling data.
+extern JS_PUBLIC_API(void)
+GetPerfMonitoringTestCpuRescheduling(JSRuntime*, uint64_t* stayed, uint64_t* moved);
+
+
 /**
- * Access the performance information stored in a compartment.
+ * Add a number of microseconds to the time spent waiting on CPOWs
+ * since process start.
  */
-extern JS_PUBLIC_API(PerformanceData*)
-GetPerformanceData(JSRuntime*);
+extern JS_PUBLIC_API(void)
+AddCPOWPerformanceDelta(JSRuntime*, uint64_t delta);
 
 typedef bool
 (PerformanceStatsWalker)(JSContext* cx,

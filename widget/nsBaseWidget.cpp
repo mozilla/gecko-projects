@@ -106,14 +106,14 @@ namespace mozilla {
 namespace widget {
 
 void
-IMENotification::SelectionChangeData::SetWritingMode(
+IMENotification::SelectionChangeDataBase::SetWritingMode(
                                         const WritingMode& aWritingMode)
 {
   mWritingMode = aWritingMode.mWritingMode;
 }
 
 WritingMode
-IMENotification::SelectionChangeData::GetWritingMode() const
+IMENotification::SelectionChangeDataBase::GetWritingMode() const
 {
   return WritingMode(mWritingMode);
 }
@@ -640,17 +640,15 @@ NS_IMETHODIMP nsBaseWidget::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
 // merely stores the state.
 //
 //-------------------------------------------------------------------------
-NS_IMETHODIMP nsBaseWidget::SetSizeMode(int32_t aMode)
+NS_IMETHODIMP
+nsBaseWidget::SetSizeMode(nsSizeMode aMode)
 {
-  if (aMode == nsSizeMode_Normal ||
-      aMode == nsSizeMode_Minimized ||
-      aMode == nsSizeMode_Maximized ||
-      aMode == nsSizeMode_Fullscreen) {
-
-    mSizeMode = (nsSizeMode) aMode;
-    return NS_OK;
-  }
-  return NS_ERROR_ILLEGAL_VALUE;
+  MOZ_ASSERT(aMode == nsSizeMode_Normal ||
+             aMode == nsSizeMode_Minimized ||
+             aMode == nsSizeMode_Maximized ||
+             aMode == nsSizeMode_Fullscreen);
+  mSizeMode = aMode;
+  return NS_OK;
 }
 
 //-------------------------------------------------------------------------
@@ -992,7 +990,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
     // TODO: Eventually we'll be able to move the SendSetTargetAPZCNotification
     // call into APZEventState::Process*Event() as well.
     if (WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent()) {
-      if (touchEvent->message == NS_TOUCH_START) {
+      if (touchEvent->mMessage == NS_TOUCH_START) {
         if (gfxPrefs::TouchActionEnabled()) {
           APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(this, *touchEvent,
               aInputBlockId, mSetAllowedTouchBehaviorCallback);
@@ -1002,9 +1000,14 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
       }
       mAPZEventState->ProcessTouchEvent(*touchEvent, aGuid, aInputBlockId, aApzResponse);
     } else if (WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent()) {
-      APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(), *aEvent,
-                aGuid, aInputBlockId);
-      mAPZEventState->ProcessWheelEvent(*wheelEvent, aGuid, aInputBlockId);
+      if (wheelEvent->mFlags.mHandledByAPZ) {
+        APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(), *aEvent,
+                  aGuid, aInputBlockId);
+        if (wheelEvent->mCanTriggerSwipe) {
+          ReportSwipeStarted(aInputBlockId, wheelEvent->TriggersSwipe());
+        }
+        mAPZEventState->ProcessWheelEvent(*wheelEvent, aGuid, aInputBlockId);
+      }
     }
   }
 
@@ -1058,13 +1061,11 @@ nsBaseWidget::GetDocument() const
 
 void nsBaseWidget::CreateCompositorVsyncDispatcher()
 {
-  if (gfxPrefs::HardwareVsyncEnabled()) {
-    // Parent directly listens to the vsync source whereas
-    // child process communicate via IPC
-    // Should be called AFTER gfxPlatform is initialized
-    if (XRE_IsParentProcess()) {
-      mCompositorVsyncDispatcher = new CompositorVsyncDispatcher();
-    }
+  // Parent directly listens to the vsync source whereas
+  // child process communicate via IPC
+  // Should be called AFTER gfxPlatform is initialized
+  if (XRE_IsParentProcess()) {
+    mCompositorVsyncDispatcher = new CompositorVsyncDispatcher();
   }
 }
 
@@ -2628,39 +2629,39 @@ nsBaseWidget::debug_GuiEventToString(WidgetGUIEvent* aGuiEvent)
 #define _ASSIGN_eventName(_value,_name)\
 case _value: eventName.AssignLiteral(_name) ; break
 
-  switch(aGuiEvent->message)
+  switch(aGuiEvent->mMessage)
   {
-    _ASSIGN_eventName(NS_BLUR_CONTENT,"NS_BLUR_CONTENT");
-    _ASSIGN_eventName(NS_DRAGDROP_GESTURE,"NS_DND_GESTURE");
-    _ASSIGN_eventName(NS_DRAGDROP_DROP,"NS_DND_DROP");
-    _ASSIGN_eventName(NS_DRAGDROP_ENTER,"NS_DND_ENTER");
-    _ASSIGN_eventName(NS_DRAGDROP_EXIT,"NS_DND_EXIT");
-    _ASSIGN_eventName(NS_DRAGDROP_OVER,"NS_DND_OVER");
+    _ASSIGN_eventName(eBlur,"eBlur");
+    _ASSIGN_eventName(eLegacyDragGesture,"eLegacyDragGesture");
+    _ASSIGN_eventName(eDrop,"eDrop");
+    _ASSIGN_eventName(eDragEnter,"eDragEnter");
+    _ASSIGN_eventName(eDragExit,"eDragExit");
+    _ASSIGN_eventName(eDragOver,"eDragOver");
     _ASSIGN_eventName(NS_EDITOR_INPUT,"NS_EDITOR_INPUT");
-    _ASSIGN_eventName(NS_FOCUS_CONTENT,"NS_FOCUS_CONTENT");
-    _ASSIGN_eventName(NS_FORM_SELECTED,"NS_FORM_SELECTED");
-    _ASSIGN_eventName(NS_FORM_CHANGE,"NS_FORM_CHANGE");
-    _ASSIGN_eventName(NS_FORM_RESET,"NS_FORM_RESET");
-    _ASSIGN_eventName(NS_FORM_SUBMIT,"NS_FORM_SUBMIT");
-    _ASSIGN_eventName(NS_IMAGE_ABORT,"NS_IMAGE_ABORT");
-    _ASSIGN_eventName(NS_LOAD_ERROR,"NS_LOAD_ERROR");
-    _ASSIGN_eventName(NS_KEY_DOWN,"NS_KEY_DOWN");
-    _ASSIGN_eventName(NS_KEY_PRESS,"NS_KEY_PRESS");
-    _ASSIGN_eventName(NS_KEY_UP,"NS_KEY_UP");
-    _ASSIGN_eventName(NS_MOUSE_ENTER_WIDGET,"NS_MOUSE_ENTER_WIDGET");
-    _ASSIGN_eventName(NS_MOUSE_EXIT_WIDGET,"NS_MOUSE_EXIT_WIDGET");
-    _ASSIGN_eventName(NS_MOUSE_BUTTON_DOWN,"NS_MOUSE_BUTTON_DOWN");
-    _ASSIGN_eventName(NS_MOUSE_BUTTON_UP,"NS_MOUSE_BUTTON_UP");
-    _ASSIGN_eventName(NS_MOUSE_CLICK,"NS_MOUSE_CLICK");
-    _ASSIGN_eventName(NS_MOUSE_DOUBLECLICK,"NS_MOUSE_DBLCLICK");
-    _ASSIGN_eventName(NS_MOUSE_MOVE,"NS_MOUSE_MOVE");
-    _ASSIGN_eventName(NS_LOAD,"NS_LOAD");
-    _ASSIGN_eventName(NS_POPSTATE,"NS_POPSTATE");
+    _ASSIGN_eventName(eFocus,"eFocus");
+    _ASSIGN_eventName(eFormSelect,"eFormSelect");
+    _ASSIGN_eventName(eFormChange,"eFormChange");
+    _ASSIGN_eventName(eFormReset,"eFormReset");
+    _ASSIGN_eventName(eFormSubmit,"eFormSubmit");
+    _ASSIGN_eventName(eImageAbort,"eImageAbort");
+    _ASSIGN_eventName(eLoadError,"eLoadError");
+    _ASSIGN_eventName(eKeyDown,"eKeyDown");
+    _ASSIGN_eventName(eKeyPress,"eKeyPress");
+    _ASSIGN_eventName(eKeyUp,"eKeyUp");
+    _ASSIGN_eventName(eMouseEnterIntoWidget,"eMouseEnterIntoWidget");
+    _ASSIGN_eventName(eMouseExitFromWidget,"eMouseExitFromWidget");
+    _ASSIGN_eventName(eMouseDown,"eMouseDown");
+    _ASSIGN_eventName(eMouseUp,"eMouseUp");
+    _ASSIGN_eventName(eMouseClick,"eMouseClick");
+    _ASSIGN_eventName(eMouseDoubleClick,"eMouseDoubleClick");
+    _ASSIGN_eventName(eMouseMove,"eMouseMove");
+    _ASSIGN_eventName(eLoad,"eLoad");
+    _ASSIGN_eventName(ePopState,"ePopState");
     _ASSIGN_eventName(NS_BEFORE_SCRIPT_EXECUTE,"NS_BEFORE_SCRIPT_EXECUTE");
     _ASSIGN_eventName(NS_AFTER_SCRIPT_EXECUTE,"NS_AFTER_SCRIPT_EXECUTE");
-    _ASSIGN_eventName(NS_PAGE_UNLOAD,"NS_PAGE_UNLOAD");
-    _ASSIGN_eventName(NS_HASHCHANGE,"NS_HASHCHANGE");
-    _ASSIGN_eventName(NS_READYSTATECHANGE,"NS_READYSTATECHANGE");
+    _ASSIGN_eventName(eUnload,"eUnload");
+    _ASSIGN_eventName(eHashChange,"eHashChange");
+    _ASSIGN_eventName(eReadyStateChange,"eReadyStateChange");
     _ASSIGN_eventName(NS_XUL_BROADCAST, "NS_XUL_BROADCAST");
     _ASSIGN_eventName(NS_XUL_COMMAND_UPDATE, "NS_XUL_COMMAND_UPDATE");
 
@@ -2670,7 +2671,7 @@ case _value: eventName.AssignLiteral(_name) ; break
     {
       char buf[32];
 
-      snprintf_literal(buf,"UNKNOWN: %d",aGuiEvent->message);
+      snprintf_literal(buf,"UNKNOWN: %d",aGuiEvent->mMessage);
 
       CopyASCIItoUTF16(buf, eventName);
     }
@@ -2802,15 +2803,13 @@ nsBaseWidget::debug_DumpEvent(FILE *                aFileOut,
                               const nsAutoCString & aWidgetName,
                               int32_t               aWindowID)
 {
-  if (aGuiEvent->message == NS_MOUSE_MOVE)
-  {
+  if (aGuiEvent->mMessage == eMouseMove) {
     if (!debug_GetCachedBoolPref("nglayout.debug.motion_event_dumping"))
       return;
   }
 
-  if (aGuiEvent->message == NS_MOUSE_ENTER_WIDGET ||
-      aGuiEvent->message == NS_MOUSE_EXIT_WIDGET)
-  {
+  if (aGuiEvent->mMessage == eMouseEnterIntoWidget ||
+      aGuiEvent->mMessage == eMouseExitFromWidget) {
     if (!debug_GetCachedBoolPref("nglayout.debug.crossing_event_dumping"))
       return;
   }

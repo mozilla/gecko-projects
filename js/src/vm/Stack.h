@@ -275,15 +275,15 @@ class NullFramePtr : public AbstractFramePtr
 /* Flags specified for a frame as it is constructed. */
 enum InitialFrameFlags {
     INITIAL_NONE           =          0,
-    INITIAL_CONSTRUCT      =       0x10, /* == InterpreterFrame::CONSTRUCTING, asserted below */
+    INITIAL_CONSTRUCT      =       0x20, /* == InterpreterFrame::CONSTRUCTING, asserted below */
 };
 
 enum ExecuteType {
     EXECUTE_GLOBAL         =        0x1, /* == InterpreterFrame::GLOBAL */
-    EXECUTE_DIRECT_EVAL    =        0x4, /* == InterpreterFrame::EVAL */
-    EXECUTE_INDIRECT_EVAL  =        0x5, /* == InterpreterFrame::GLOBAL | EVAL */
-    EXECUTE_DEBUG          =        0xc, /* == InterpreterFrame::EVAL | DEBUGGER */
-    EXECUTE_DEBUG_GLOBAL   =        0xd  /* == InterpreterFrame::EVAL | DEBUGGER | GLOBAL */
+    EXECUTE_MODULE         =        0x4, /* == InterpreterFrame::GLOBAL */
+    EXECUTE_DIRECT_EVAL    =        0x8, /* == InterpreterFrame::EVAL */
+    EXECUTE_INDIRECT_EVAL  =        0x9, /* == InterpreterFrame::GLOBAL | EVAL */
+    EXECUTE_DEBUG          =       0x18, /* == InterpreterFrame::EVAL | DEBUGGER_EVAL */
 };
 
 /*****************************************************************************/
@@ -295,9 +295,10 @@ class InterpreterFrame
         /* Primary frame type */
         GLOBAL                 =        0x1,  /* frame pushed for a global script */
         FUNCTION               =        0x2,  /* frame pushed for a scripted call */
+        MODULE                 =        0x4,  /* frame pushed for a module */
 
         /* Frame subtypes */
-        EVAL                   =        0x4,  /* frame pushed for eval() or debugger eval */
+        EVAL                   =        0x8,  /* frame pushed for eval() or debugger eval */
 
 
         /*
@@ -312,13 +313,13 @@ class InterpreterFrame
          *   previous frame in memory. Iteration should treat
          *   evalInFramePrev_ as this frame's previous frame.
          */
-        DEBUGGER_EVAL          =        0x8,
+        DEBUGGER_EVAL          =       0x10,
 
-        CONSTRUCTING           =       0x10,  /* frame is for a constructor invocation */
+        CONSTRUCTING           =       0x20,  /* frame is for a constructor invocation */
 
-        RESUMED_GENERATOR      =       0x20,  /* frame is for a resumed generator invocation */
+        RESUMED_GENERATOR      =       0x40,  /* frame is for a resumed generator invocation */
 
-        /* (0x40 and 0x80 are unused) */
+        /* (0x80 is unused) */
 
         /* Function prologue state */
         HAS_CALL_OBJ           =      0x100,  /* CallObject created for heavyweight fun */
@@ -363,6 +364,7 @@ class InterpreterFrame
     union {                             /* describes what code is executing in a */
         JSScript*       script;        /*   global frame */
         JSFunction*     fun;           /*   function frame, pre GetScopeChain */
+        ModuleObject*   module;        /*   module frame */
     } exec;
     union {                             /* describes the arguments of a function */
         unsigned        nactual;        /*   for non-eval frames */
@@ -466,6 +468,7 @@ class InterpreterFrame
      *
      *  global frame:   execution of global code or an eval in global code
      *  function frame: execution of function code or an eval in a function
+     *  module frame: execution of a module
      */
 
     bool isFunctionFrame() const {
@@ -474,6 +477,10 @@ class InterpreterFrame
 
     bool isGlobalFrame() const {
         return !!(flags_ & GLOBAL);
+    }
+
+    bool isModuleFrame() const {
+        return !!(flags_ & MODULE);
     }
 
     /*
@@ -651,11 +658,10 @@ class InterpreterFrame
      */
 
     JSScript* script() const {
-        return isFunctionFrame()
-               ? isEvalFrame()
-                 ? u.evalScript
-                 : fun()->nonLazyScript()
-               : exec.script;
+        if (isFunctionFrame())
+            return isEvalFrame() ? u.evalScript : fun()->nonLazyScript();
+        MOZ_ASSERT(isGlobalFrame() || isModuleFrame());
+        return exec.script;
     }
 
     /* Return the previous frame's pc. */
@@ -686,6 +692,17 @@ class InterpreterFrame
 
     JSFunction* maybeFun() const {
         return isFunctionFrame() ? fun() : nullptr;
+    }
+
+    /* Module */
+
+    ModuleObject* module() const {
+        MOZ_ASSERT(isModuleFrame());
+        return exec.module;
+    }
+
+    ModuleObject* maybeModule() const {
+        return isModuleFrame() ? module() : nullptr;
     }
 
     /*
@@ -1083,23 +1100,61 @@ void MarkInterpreterActivations(JSRuntime* rt, JSTracer* trc);
 
 /*****************************************************************************/
 
-class InvokeArgs : public JS::CallArgs
+namespace detail {
+
+class GenericInvokeArgs : public JS::CallArgs
 {
+  protected:
     AutoValueVector v_;
 
-  public:
-    explicit InvokeArgs(JSContext* cx, bool construct = false) : v_(cx) {}
+    explicit GenericInvokeArgs(JSContext* cx) : v_(cx) {}
 
-    bool init(unsigned argc, bool construct = false) {
+    bool init(unsigned argc, bool construct) {
         MOZ_ASSERT(2 + argc + construct > argc);  // no overflow
         if (!v_.resize(2 + argc + construct))
             return false;
-        ImplicitCast<CallArgs>(*this) = CallArgsFromVp(argc, v_.begin());
-        // Set the internal flag, since we are not initializing from a made array
+
+        *static_cast<JS::CallArgs*>(this) = CallArgsFromVp(argc, v_.begin());
         constructing_ = construct;
         return true;
     }
 };
+
+} // namespace detail
+
+class InvokeArgs : public detail::GenericInvokeArgs
+{
+  public:
+    explicit InvokeArgs(JSContext* cx) : detail::GenericInvokeArgs(cx) {}
+
+    bool init(unsigned argc) {
+        return detail::GenericInvokeArgs::init(argc, false);
+    }
+};
+
+class ConstructArgs : public detail::GenericInvokeArgs
+{
+  public:
+    explicit ConstructArgs(JSContext* cx) : detail::GenericInvokeArgs(cx) {}
+
+    bool init(unsigned argc) {
+        return detail::GenericInvokeArgs::init(argc, true);
+    }
+};
+
+template <class Args, class Arraylike>
+inline bool
+FillArgumentsFromArraylike(JSContext* cx, Args& args, const Arraylike& arraylike)
+{
+    uint32_t len = arraylike.length();
+    if (!args.init(len))
+        return false;
+
+    for (uint32_t i = 0; i < len; i++)
+        args[i].set(arraylike[i]);
+
+    return true;
+}
 
 template <>
 struct DefaultHasher<AbstractFramePtr> {

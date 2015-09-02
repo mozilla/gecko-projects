@@ -16,6 +16,7 @@
 #include "mozilla/dom/URL.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/workers/bindings/URL.h"
+#include "mozilla/unused.h"
 
 #include "WorkerPrivate.h"
 
@@ -81,7 +82,17 @@ GetRequestURLFromDocument(nsIDocument* aDocument, const nsAString& aInput,
   nsCOMPtr<nsIURI> resolvedURI;
   aRv = NS_NewURI(getter_AddRefs(resolvedURI), aInput, nullptr, baseURI);
   if (NS_WARN_IF(aRv.Failed())) {
-      return;
+    aRv.ThrowTypeError(MSG_INVALID_URL, &aInput);
+    return;
+  }
+
+  // This fails with URIs with weird protocols, even when they are valid,
+  // so we ignore the failure
+  nsAutoCString credentials;
+  unused << resolvedURI->GetUserPass(credentials);
+  if (!credentials.IsEmpty()) {
+    aRv.ThrowTypeError(MSG_URL_HAS_CREDENTIALS, &aInput);
+    return;
   }
 
   nsCOMPtr<nsIURI> resolvedURIClone;
@@ -110,6 +121,16 @@ GetRequestURLFromChrome(const nsAString& aInput, nsAString& aRequestURL,
   nsCOMPtr<nsIURI> uri;
   aRv = NS_NewURI(getter_AddRefs(uri), aInput, nullptr, nullptr);
   if (NS_WARN_IF(aRv.Failed())) {
+    aRv.ThrowTypeError(MSG_INVALID_URL, &aInput);
+    return;
+  }
+
+  // This fails with URIs with weird protocols, even when they are valid,
+  // so we ignore the failure
+  nsAutoCString credentials;
+  unused << uri->GetUserPass(credentials);
+  if (!credentials.IsEmpty()) {
+    aRv.ThrowTypeError(MSG_URL_HAS_CREDENTIALS, &aInput);
     return;
   }
 
@@ -142,6 +163,24 @@ GetRequestURLFromWorker(const GlobalObject& aGlobal, const nsAString& aInput,
   nsRefPtr<workers::URL> url =
     workers::URL::Constructor(aGlobal, aInput, baseURL, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
+    aRv.ThrowTypeError(MSG_INVALID_URL, &aInput);
+    return;
+  }
+
+  nsString username;
+  url->GetUsername(username, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  nsString password;
+  url->GetPassword(password, aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  if (!username.IsEmpty() || !password.IsEmpty()) {
+    aRv.ThrowTypeError(MSG_URL_HAS_CREDENTIALS, &aInput);
     return;
   }
 
@@ -163,8 +202,8 @@ Request::Constructor(const GlobalObject& aGlobal,
                      const RequestOrUSVString& aInput,
                      const RequestInit& aInit, ErrorResult& aRv)
 {
+  nsCOMPtr<nsIInputStream> temporaryBody;
   nsRefPtr<InternalRequest> request;
-  bool inputRequestHasBody = false;
 
   nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
 
@@ -173,13 +212,11 @@ Request::Constructor(const GlobalObject& aGlobal,
     nsCOMPtr<nsIInputStream> body;
     inputReq->GetBody(getter_AddRefs(body));
     if (body) {
-      inputRequestHasBody = true;
       if (inputReq->BodyUsed()) {
         aRv.ThrowTypeError(MSG_FETCH_BODY_CONSUMED_ERROR);
         return nullptr;
-      } else {
-        inputReq->SetBodyUsed();
       }
+      temporaryBody = body;
     }
 
     request = inputReq->GetInternalRequest();
@@ -252,6 +289,10 @@ Request::Constructor(const GlobalObject& aGlobal,
   if (cache != RequestCache::EndGuard_) {
     request->ClearCreatedByFetchEvent();
     request->SetCacheMode(cache);
+  }
+
+  if (aInit.mRedirect.WasPassed()) {
+    request->SetRedirectMode(aInit.mRedirect.Value());
   }
 
   // Request constructor step 14.
@@ -327,7 +368,7 @@ Request::Constructor(const GlobalObject& aGlobal,
     return nullptr;
   }
 
-  if (aInit.mBody.WasPassed() || inputRequestHasBody) {
+  if (aInit.mBody.WasPassed() || temporaryBody) {
     // HEAD and GET are not allowed to have a body.
     nsAutoCString method;
     request->GetMethod(method);
@@ -347,8 +388,8 @@ Request::Constructor(const GlobalObject& aGlobal,
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
-    request->ClearCreatedByFetchEvent();
-    request->SetBody(stream);
+
+    temporaryBody = stream;
 
     if (!contentType.IsVoid() &&
         !requestHeaders->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
@@ -356,13 +397,26 @@ Request::Constructor(const GlobalObject& aGlobal,
                              contentType, aRv);
     }
 
-    if (aRv.Failed()) {
+    if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
+
+    request->ClearCreatedByFetchEvent();
+    request->SetBody(temporaryBody);
   }
 
   nsRefPtr<Request> domRequest = new Request(global, request);
   domRequest->SetMimeType();
+
+  if (aInput.IsRequest()) {
+    nsRefPtr<Request> inputReq = &aInput.GetAsRequest();
+    nsCOMPtr<nsIInputStream> body;
+    inputReq->GetBody(getter_AddRefs(body));
+    if (body) {
+      inputReq->SetBody(nullptr);
+      inputReq->SetBodyUsed();
+    }
+  }
   return domRequest.forget();
 }
 

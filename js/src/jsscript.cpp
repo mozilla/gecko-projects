@@ -14,7 +14,9 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/Vector.h"
 
+#include <algorithm>
 #include <string.h>
 
 #include "jsapi.h"
@@ -75,7 +77,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
                                    uint32_t numArgs, uint32_t numVars,
                                    uint32_t numBodyLevelLexicals, uint32_t numBlockScoped,
                                    uint32_t numUnaliasedVars, uint32_t numUnaliasedBodyLevelLexicals,
-                                   const Binding* bindingArray)
+                                   const Binding* bindingArray, bool isModule /* = false */)
 {
     MOZ_ASSERT(!self.callObjShape());
     MOZ_ASSERT(self.bindingArrayUsingTemporaryStorage());
@@ -141,9 +143,10 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
     uint32_t nfixed = gc::GetGCKindSlots(gc::GetGCObjectKind(nslots));
 
     // Start with the empty shape and then append one shape per aliased binding.
+    const Class* cls = isModule ? &ModuleEnvironmentObject::class_ : &CallObject::class_;
     RootedShape shape(cx,
-        EmptyShape::getInitialShape(cx, &CallObject::class_, TaggedProto(nullptr),
-                                    nfixed, BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE));
+        EmptyShape::getInitialShape(cx, cls, TaggedProto(nullptr), nfixed,
+                                    BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE));
     if (!shape)
         return false;
 
@@ -157,6 +160,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
 
     uint32_t slot = CallObject::RESERVED_SLOTS;
     for (BindingIter bi(self); bi; bi++) {
+        MOZ_ASSERT_IF(isModule, bi->aliased());
         if (!bi->aliased())
             continue;
 
@@ -169,9 +173,7 @@ Bindings::initWithTemporaryStorage(ExclusiveContext* cx, MutableHandle<Bindings>
         }
 #endif
 
-        StackBaseShape stackBase(cx, &CallObject::class_,
-                                 BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
-
+        StackBaseShape stackBase(cx, cls, BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE);
         UnownedBaseShape* base = BaseShape::getUnowned(cx, stackBase);
         if (!base)
             return false;
@@ -1271,38 +1273,79 @@ JSScript::initScriptCounts(JSContext* cx)
 {
     MOZ_ASSERT(!hasScriptCounts());
 
-    // We allocate one PCCounts for each offset, instead of for each bytecode,
-    // because the pcCountsVector maps an offset to a PCCounts structure.
-    size_t nbytes = length() * sizeof(PCCounts);
+    // Record all pc which are the first instruction of a basic block.
+    mozilla::Vector<jsbytecode*, 16, SystemAllocPolicy> jumpTargets;
+    jsbytecode* end = codeEnd();
+    jsbytecode* mainEntry = main();
+    for (jsbytecode* pc = code(); pc != end; pc = GetNextPc(pc)) {
+        if (pc == mainEntry) {
+            if (!jumpTargets.append(pc))
+                return false;
+        }
+
+        bool jump = IsJumpOpcode(JSOp(*pc));
+        if (jump) {
+            jsbytecode* target = pc + GET_JUMP_OFFSET(pc);
+            if (!jumpTargets.append(target))
+                return false;
+
+            if (BytecodeFallsThrough(JSOp(*pc))) {
+                jsbytecode* fallthrough = GetNextPc(pc);
+                if (!jumpTargets.append(fallthrough))
+                    return false;
+            }
+        }
+    }
+
+    // Mark catch/finally blocks as being jump targets.
+    if (hasTrynotes()) {
+        JSTryNote* tn = trynotes()->vector;
+        JSTryNote* tnlimit = tn + trynotes()->length;
+        for (; tn < tnlimit; tn++) {
+            jsbytecode* tryStart = mainEntry + tn->start;
+            jsbytecode* tryPc = tryStart - 1;
+            if (JSOp(*tryPc) != JSOP_TRY)
+                continue;
+
+            jsbytecode* tryTarget = tryStart + tn->length;
+            if (!jumpTargets.append(tryTarget))
+                return false;
+        }
+    }
+
+    // Sort all pc, and remove duplicates.
+    std::sort(jumpTargets.begin(), jumpTargets.end());
+    auto last = std::unique(jumpTargets.begin(), jumpTargets.end());
+    jumpTargets.erase(last, jumpTargets.end());
 
     // Initialize all PCCounts counters to 0.
-    uint8_t* base = zone()->pod_calloc<uint8_t>(nbytes);
-    if (!base)
+    ScriptCounts::PCCountsVector base;
+    if (!base.reserve(jumpTargets.length()))
         return false;
+
+    for (size_t i = 0; i < jumpTargets.length(); i++)
+        MOZ_ALWAYS_TRUE(base.emplaceBack(pcToOffset(jumpTargets[i])));
 
     // Create compartment's scriptCountsMap if necessary.
     ScriptCountsMap* map = compartment()->scriptCountsMap;
     if (!map) {
         map = cx->new_<ScriptCountsMap>();
         if (!map || !map->init()) {
-            js_free(base);
             js_delete(map);
             return false;
         }
         compartment()->scriptCountsMap = map;
     }
 
-    ScriptCounts scriptCounts;
-    scriptCounts.pcCountsVector = (PCCounts*) base;
-
     // Register the current ScriptCount in the compartment's map.
-    if (!map->putNew(this, scriptCounts)) {
-        js_free(base);
+    if (!map->putNew(this, Move(base)))
         return false;
-    }
-    hasScriptCounts_ = true; // safe to set this;  we can't fail after this point
 
-    /* Enable interrupts in any interpreter frames running on this script. */
+    // safe to set this;  we can't fail after this point.
+    hasScriptCounts_ = true;
+
+    // Enable interrupts in any interpreter frames running on this script. This
+    // is used to let the interpreter increment the PCCounts, if present.
     for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
         if (iter->isInterpreter())
             iter->asInterpreter()->enableInterruptsIfRunning(this);
@@ -1320,11 +1363,47 @@ static inline ScriptCountsMap::Ptr GetScriptCountsMapEntry(JSScript* script)
     return p;
 }
 
-js::PCCounts&
-JSScript::getPCCounts(jsbytecode* pc) {
-    MOZ_ASSERT(containsPC(pc));
+ScriptCounts&
+JSScript::getScriptCounts()
+{
     ScriptCountsMap::Ptr p = GetScriptCountsMapEntry(this);
-    return p->value().pcCountsVector[pcToOffset(pc)];
+    return p->value();
+}
+
+js::PCCounts*
+ScriptCounts::maybeGetPCCounts(size_t offset) {
+    PCCounts searched = PCCounts(offset);
+    PCCounts* elem = std::lower_bound(pcCounts_.begin(), pcCounts_.end(), searched);
+    if (elem == pcCounts_.end() || elem->pcOffset() != offset)
+        return nullptr;
+    return elem;
+}
+
+const js::PCCounts*
+ScriptCounts::maybeGetPCCounts(size_t offset) const {
+    PCCounts searched = PCCounts(offset);
+    const PCCounts* elem = std::lower_bound(pcCounts_.begin(), pcCounts_.end(), searched);
+    if (elem == pcCounts_.end() || elem->pcOffset() != offset)
+        return nullptr;
+    return elem;
+}
+
+const js::PCCounts*
+ScriptCounts::maybeGetThrowCounts(size_t offset) const {
+    PCCounts searched = PCCounts(offset);
+    const PCCounts* elem = std::lower_bound(throwCounts_.begin(), throwCounts_.end(), searched);
+    if (elem == throwCounts_.end() || elem->pcOffset() != offset)
+        return nullptr;
+    return elem;
+}
+
+js::PCCounts*
+ScriptCounts::getThrowCounts(size_t offset) {
+    PCCounts searched = PCCounts(offset);
+    PCCounts* elem = std::lower_bound(throwCounts_.begin(), throwCounts_.end(), searched);
+    if (elem == throwCounts_.end() || elem->pcOffset() != offset)
+        elem = throwCounts_.insert(elem, searched);
+    return elem;
 }
 
 void
@@ -1338,38 +1417,54 @@ JSScript::setIonScript(JSContext* maybecx, js::jit::IonScript* ionScript)
     updateBaselineOrIonRaw(maybecx);
 }
 
+js::PCCounts*
+JSScript::maybeGetPCCounts(jsbytecode* pc) {
+    MOZ_ASSERT(containsPC(pc));
+    return getScriptCounts().maybeGetPCCounts(pcToOffset(pc));
+}
+
+const js::PCCounts*
+JSScript::maybeGetThrowCounts(jsbytecode* pc) {
+    MOZ_ASSERT(containsPC(pc));
+    return getScriptCounts().maybeGetThrowCounts(pcToOffset(pc));
+}
+
+js::PCCounts*
+JSScript::getThrowCounts(jsbytecode* pc) {
+    MOZ_ASSERT(containsPC(pc));
+    return getScriptCounts().getThrowCounts(pcToOffset(pc));
+}
+
 void
 JSScript::addIonCounts(jit::IonScriptCounts* ionCounts)
 {
-    ScriptCountsMap::Ptr p = GetScriptCountsMapEntry(this);
-    if (p->value().ionCounts)
-        ionCounts->setPrevious(p->value().ionCounts);
-    p->value().ionCounts = ionCounts;
+    ScriptCounts& sc = getScriptCounts();
+    if (sc.ionCounts_)
+        ionCounts->setPrevious(sc.ionCounts_);
+    sc.ionCounts_ = ionCounts;
 }
 
 jit::IonScriptCounts*
 JSScript::getIonCounts()
 {
-    ScriptCountsMap::Ptr p = GetScriptCountsMapEntry(this);
-    return p->value().ionCounts;
+    return getScriptCounts().ionCounts_;
 }
 
-ScriptCounts
-JSScript::releaseScriptCounts()
+void
+JSScript::releaseScriptCounts(ScriptCounts* counts)
 {
     ScriptCountsMap::Ptr p = GetScriptCountsMapEntry(this);
-    ScriptCounts counts = p->value();
+    *counts = Move(p->value());
     compartment()->scriptCountsMap->remove(p);
     hasScriptCounts_ = false;
-    return counts;
 }
 
 void
 JSScript::destroyScriptCounts(FreeOp* fop)
 {
     if (hasScriptCounts()) {
-        ScriptCounts scriptCounts = releaseScriptCounts();
-        scriptCounts.destroy(fop);
+        ScriptCounts scriptCounts;
+        releaseScriptCounts(&scriptCounts);
     }
 }
 
@@ -2650,10 +2745,25 @@ JSScript::linkToFunctionFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScrip
         fun->setUnlazifiedScript(script);
     else
         fun->setScript(script);
+}
 
-    // Switch the static scope over to the JSFunction now that we have a
-    // JSScript.
-    funbox->switchStaticScopeToFunction();
+/* static */ void
+JSScript::linkToModuleFromEmitter(js::ExclusiveContext* cx, JS::Handle<JSScript*> script,
+                                    js::frontend::ModuleBox* modulebox)
+{
+    script->funHasExtensibleScope_ = false;
+    script->funNeedsDeclEnvObject_ = false;
+    script->needsHomeObject_ = false;
+    script->isDerivedClassConstructor_ = false;
+    script->funLength_ = 0;
+
+    script->isGeneratorExp_ = false;
+    script->setGeneratorKind(NotGenerator);
+
+    // Link the module and the script to each other, so that StaticScopeIter
+    // may walk the scope chain of currently compiling scripts.
+    RootedModuleObject module(cx, modulebox->module());
+    script->setModule(module);
 }
 
 /* static */ bool
@@ -2732,7 +2842,7 @@ JSScript::fullyInitFromEmitter(ExclusiveContext* cx, HandleScript script, Byteco
     if (bce->tryNoteList.length() != 0)
         bce->tryNoteList.finish(script->trynotes());
     if (bce->blockScopeList.length() != 0)
-        bce->blockScopeList.finish(script->blockScopes());
+        bce->blockScopeList.finish(script->blockScopes(), prologueLength);
     script->strict_ = bce->sc->strict();
     script->explicitUseStrict_ = bce->sc->hasExplicitUseStrict();
     script->bindingsAccessedDynamically_ = bce->sc->bindingsAccessedDynamically();
@@ -3583,7 +3693,7 @@ JSScript::traceChildren(JSTracer* trc)
 
     if (hasRegexps()) {
         ObjectArray* objarray = regexps();
-        TraceRange(trc, objarray->length, objarray->vector, "objects");
+        TraceRange(trc, objarray->length, objarray->vector, "regexps");
     }
 
     if (hasConsts()) {
@@ -3598,6 +3708,9 @@ JSScript::traceChildren(JSTracer* trc)
 
     if (functionNonDelazifying())
         TraceEdge(trc, &function_, "function");
+
+    if (module_)
+        TraceEdge(trc, &module_, "module");
 
     if (enclosingStaticScope_)
         TraceEdge(trc, &enclosingStaticScope_, "enclosingStaticScope");
@@ -3659,10 +3772,7 @@ JSScript::getStaticBlockScope(jsbytecode* pc)
     if (!hasBlockScopes())
         return nullptr;
 
-    if (pc < main())
-        return nullptr;
-
-    size_t offset = pc - main();
+    size_t offset = pc - code();
 
     BlockScopeArray* scopes = blockScopes();
     NestedScopeObject* blockChain = nullptr;
@@ -3711,6 +3821,8 @@ JSScript::innermostStaticScopeInScript(jsbytecode* pc)
 {
     if (JSObject* scope = getStaticBlockScope(pc))
         return scope;
+    if (module())
+        return module();
     return functionNonDelazifying();
 }
 
@@ -3972,9 +4084,9 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     p.bindingsAccessedDynamically = false;
     p.hasDebuggerStatement = false;
     p.hasDirectEval = false;
-    p.directlyInsideEval = false;
     p.usesArgumentsApplyAndThis = false;
     p.isDerivedClassConstructor = false;
+    p.needsHomeObject = false;
 
     LazyScript* res = LazyScript::CreateRaw(cx, fun, packedFields, begin, end, lineno, column);
     MOZ_ASSERT_IF(res, res->version() == version);

@@ -134,11 +134,17 @@ loop.contacts = (function(_, mozL10n) {
                   onClick={this.handleCloseButtonClick} />
           <p dangerouslySetInnerHTML={{__html: message}}
              onClick={this.handleLinkClick}></p>
-          <ButtonGroup>
-            <Button caption={mozL10n.get("gravatars_promo_button_nothanks")}
+          <div className="contacts-gravatar-avatars">
+            <img src="loop/shared/img/avatars.svg#orange-avatar" />
+            <span className="contacts-gravatar-arrow" />
+            <img src="loop/shared/img/firefox-avatar.svg" />
+          </div>
+          <ButtonGroup additionalClass="contacts-gravatar-buttons">
+            <Button additionalClass="secondary"
+                    caption={mozL10n.get("gravatars_promo_button_nothanks2")}
                     onClick={this.handleCloseButtonClick}/>
-            <Button additionalClass="button-accept"
-                    caption={mozL10n.get("gravatars_promo_button_use")}
+            <Button additionalClass="secondary"
+                    caption={mozL10n.get("gravatars_promo_button_use2")}
                     onClick={this.handleUseButtonClick}/>
           </ButtonGroup>
         </div>
@@ -324,10 +330,9 @@ loop.contacts = (function(_, mozL10n) {
 
     propTypes: {
       mozLoop: React.PropTypes.object.isRequired,
-      notifications: React.PropTypes.instanceOf(
-                     loop.shared.models.NotificationCollection).isRequired,
-      // Callback to handle entry to the add/edit contact form.
-      startForm: React.PropTypes.func.isRequired
+      notifications: React.PropTypes.instanceOf(loop.shared.models.NotificationCollection).isRequired,
+      switchToContactAdd: React.PropTypes.func.isRequired,
+      switchToContactEdit: React.PropTypes.func.isRequired
     },
 
     /**
@@ -413,6 +418,63 @@ loop.contacts = (function(_, mozL10n) {
       window.removeEventListener("LoopStatusChanged", this._onStatusChanged);
     },
 
+    /*
+     * Filter a user by name, email or phone number.
+     * Takes in an input to filter by and returns a filter function which
+     * expects a contact.
+     *
+     * @returns {Function}
+     */
+    filterContact: function(filter) {
+      return function(contact) {
+        return getPreferred(contact, "name").toLocaleLowerCase().includes(filter) ||
+          getPreferred(contact, "email").value.toLocaleLowerCase().includes(filter) ||
+          getPreferred(contact, "tel").value.toLocaleLowerCase().includes(filter);
+      };
+    },
+
+    /*
+     * Takes all contacts, it groups and filters them before rendering.
+     */
+    _filterContactsList: function() {
+      let shownContacts = _.groupBy(this.contacts, function(contact) {
+        return contact.blocked ? "blocked" : "available";
+      });
+
+      if (this._shouldShowFilter()) {
+        let filter = this.state.filter.trim().toLocaleLowerCase();
+        let filterFn = this.filterContact(filter);
+        if (filter) {
+          if (shownContacts.available) {
+            shownContacts.available = shownContacts.available.filter(filterFn);
+            // Filter can return an empty array.
+            if (!shownContacts.available.length) {
+              shownContacts.available = null;
+            }
+          }
+          if (shownContacts.blocked) {
+            shownContacts.blocked = shownContacts.blocked.filter(filterFn);
+            // Filter can return an empty array.
+            if (!shownContacts.blocked.length) {
+              shownContacts.blocked = null;
+            }
+          }
+        }
+      }
+
+      return shownContacts;
+    },
+
+    /*
+     * Decide to render contacts filter based on the number of contacts.
+     *
+     * @returns {bool}
+     */
+    _shouldShowFilter: function() {
+      return Object.getOwnPropertyNames(this.contacts).length >=
+        MIN_CONTACTS_FOR_FILTERING;
+    },
+
     _onStatusChanged: function() {
       let profile = this.props.mozLoop.userProfile;
       let currUid = this._userProfile ? this._userProfile.uid : null;
@@ -469,13 +531,13 @@ loop.contacts = (function(_, mozL10n) {
     },
 
     handleAddContactButtonClick: function() {
-      this.props.startForm("contacts_add");
+      this.props.switchToContactAdd();
     },
 
     handleContactAction: function(contact, actionName) {
       switch (actionName) {
         case "edit":
-          this.props.startForm("contacts_edit", contact);
+          this.props.switchToContactEdit(contact);
           break;
         case "remove":
           this.props.mozLoop.confirm({
@@ -531,6 +593,16 @@ loop.contacts = (function(_, mozL10n) {
       this.refresh();
     },
 
+    /*
+     * Callback triggered when clicking the `X` from the contacts filter.
+     * Clears the search query.
+     */
+    _handleFilterClear: function() {
+      this.setState({
+        filter: ""
+      });
+    },
+
     sortContacts: function(contact1, contact2) {
       let comp = contact1.name[0].localeCompare(contact2.name[0]);
       if (comp !== 0) {
@@ -541,9 +613,35 @@ loop.contacts = (function(_, mozL10n) {
       return contact1._guid - contact2._guid;
     },
 
+    _renderFilterClearButton: function() {
+      if (this.state.filter) {
+        return (
+          <button className="clear-search"
+                  onClick={this._handleFilterClear} />
+        );
+      }
+
+      return null;
+    },
+
+    _renderContactsFilter: function() {
+      if (this._shouldShowFilter()) {
+        return (
+          <div className="contact-filter-container">
+            <input className="contact-filter"
+                   placeholder={mozL10n.get("contacts_search_placesholder2")}
+                   valueLink={this.linkState("filter")} />
+            {this._renderFilterClearButton()}
+          </div>
+        );
+      }
+
+      return null;
+    },
+
     _renderContactsList: function() {
       let cx = React.addons.classSet;
-
+      let shownContacts = this._filterContactsList();
       let viewForItem = item => {
         return (
           <ContactDetail contact={item}
@@ -552,94 +650,166 @@ loop.contacts = (function(_, mozL10n) {
         );
       };
 
-      let shownContacts = _.groupBy(this.contacts, function(contact) {
-        return contact.blocked ? "blocked" : "available";
-      });
-
-      let showFilter = Object.getOwnPropertyNames(this.contacts).length >=
-                       MIN_CONTACTS_FOR_FILTERING;
-      if (showFilter) {
-        let filter = this.state.filter.trim().toLocaleLowerCase();
-        if (filter) {
-          let filterFn = contact => {
-            return contact.name[0].toLocaleLowerCase().includes(filter) ||
-                   getPreferred(contact, "email").value.toLocaleLowerCase().includes(filter);
-          };
-          if (shownContacts.available) {
-            shownContacts.available = shownContacts.available.filter(filterFn);
-          }
-          if (shownContacts.blocked) {
-            shownContacts.blocked = shownContacts.blocked.filter(filterFn);
-          }
-        }
+      // If no contacts to show and filter is set, then none match the search.
+      if (!shownContacts.available && !shownContacts.blocked &&
+          this.state.filter) {
+        return (
+          <div className="contact-search-list-empty">
+            <p className="panel-text-medium">
+              {mozL10n.get("contacts_no_search_results")}
+            </p>
+          </div>
+        );
       }
 
-      if (shownContacts.available || shownContacts.blocked) {
+      // If no contacts to show and filter is not set, we don't have contacts.
+      if (!shownContacts.available && !shownContacts.blocked &&
+          !this.state.filter) {
         return (
-          <div>
-            <div className="contact-list-title">
-              {mozL10n.get("contact_list_title")}
-            </div>
-            <ul className="contact-list">
-              {shownContacts.available ?
-                shownContacts.available.sort(this.sortContacts).map(viewForItem) :
-                null}
-              {shownContacts.blocked && shownContacts.blocked.length > 0 ?
-                <div className="contact-separator">{mozL10n.get("contacts_blocked_contacts")}</div> :
-                null}
-              {shownContacts.blocked ?
-                shownContacts.blocked.sort(this.sortContacts).map(viewForItem) :
-                null}
-            </ul>
+          <div className="contact-list-empty">
+            <p className="panel-text-medium">
+              {mozL10n.get("no_contacts_message_heading2")}
+            </p>
+            <p className="panel-text-medium">
+              {mozL10n.get("no_contacts_import_or_add2")}
+            </p>
           </div>
         );
       }
 
       return (
-        <div className="contact-list-empty">
-          <p className="panel-text-large">
-            {mozL10n.get("no_contacts_message_heading")}
-          </p>
-          <p className="panel-text-medium">
-            {mozL10n.get("no_contacts_import_or_add")}
-          </p>
+        <div>
+          {!this.state.filter ? <div className="contact-list-title">
+                                  {mozL10n.get("contact_list_title")}
+                                </div> : null}
+          {this._renderGravatarPromoMessage()}
+          <ul className="contact-list">
+            {shownContacts.available ?
+              shownContacts.available.sort(this.sortContacts).map(viewForItem) :
+              null}
+            {shownContacts.blocked && shownContacts.blocked.length > 0 ?
+              <div className="contact-separator">{mozL10n.get("contacts_blocked_contacts")}</div> :
+              null}
+            {shownContacts.blocked ?
+              shownContacts.blocked.sort(this.sortContacts).map(viewForItem) :
+              null}
+          </ul>
         </div>
       );
     },
 
-    render: function() {
+    _renderAddContactButtons: function() {
       let cx = React.addons.classSet;
-      let showFilter = Object.getOwnPropertyNames(this.contacts).length >=
-                       MIN_CONTACTS_FOR_FILTERING;
+
+      if (this.state.filter) {
+        return null;
+      }
 
       return (
+        <ButtonGroup additionalClass="contact-controls">
+          <Button additionalClass="secondary"
+            caption={this.state.importBusy ? mozL10n.get("importing_contacts_progress_button") :
+                                             mozL10n.get("import_contacts_button3")}
+              disabled={this.state.importBusy}
+              onClick={this.handleImportButtonClick} >
+              <div className={cx({"contact-import-spinner": true,
+                                 spinner: true,
+              busy: this.state.importBusy})} />
+          </Button>
+          <Button additionalClass="primary"
+            caption={mozL10n.get("new_contact_button2")}
+            onClick={this.handleAddContactButtonClick} />
+        </ButtonGroup>
+      );
+    },
+
+    _renderGravatarPromoMessage: function() {
+      if (this.state.filter) {
+        return null;
+      }
+
+      return (
+        <GravatarPromo handleUse={this.handleUseGravatar} />
+      );
+    },
+
+    render: function() {
+      return (
         <div>
-          <div className="content-area">
-            {showFilter ?
-            <input className="contact-filter"
-                   placeholder={mozL10n.get("contacts_search_placesholder")}
-                   valueLink={this.linkState("filter")} />
-            : null }
-            <GravatarPromo handleUse={this.handleUseGravatar}/>
-          </div>
+          {this._renderContactsFilter()}
           {this._renderContactsList()}
-          <ButtonGroup additionalClass="contact-controls">
-            <Button additionalClass="secondary"
-              caption={this.state.importBusy
-                ? mozL10n.get("importing_contacts_progress_button")
-                : mozL10n.get("import_contacts_button3")}
-                disabled={this.state.importBusy}
-                onClick={this.handleImportButtonClick} >
-                <div className={cx({"contact-import-spinner": true,
-                                   spinner: true,
-                busy: this.state.importBusy})} />
-            </Button>
-            <Button additionalClass="primary"
-              caption={mozL10n.get("new_contact_button")}
-              onClick={this.handleAddContactButtonClick} />
-          </ButtonGroup>
+          {this._renderAddContactButtons()}
         </div>
       );
+    }
+  });
+
+  const ContactsControllerView = React.createClass({
+    propTypes: {
+      initialSelectedTabComponent: React.PropTypes.string,
+      mozLoop: React.PropTypes.object.isRequired,
+      notifications: React.PropTypes.object.isRequired
+    },
+
+    getInitialState: function() {
+      return {
+        currentComponent: this.props.initialSelectedTabComponent || "contactList",
+        contactFormData: {}
+      };
+    },
+
+    /* XXX We should have success/Fail callbacks that the children call instead of this
+    * Children should not have knowledge of other views
+    * However, this is being implemented in this way so the view can be directed appropriately
+    * without making it too complex
+    */
+    switchComponentView: function(componentName) {
+      return function() {
+        this.setState({currentComponent: componentName});
+      }.bind(this);
+    },
+
+    handleAddEditContact: function(componentName) {
+      return function(contactFormData) {
+        this.setState({
+          contactFormData: contactFormData || {},
+          currentComponent: componentName
+        });
+      }.bind(this);
+    },
+
+    /* XXX Consider whether linkedStated makes sense for this */
+    render: function() {
+      switch(this.state.currentComponent) {
+        case "contactAdd":
+          return (
+            <ContactDetailsForm
+              contactFormData={this.state.contactFormData}
+              mode="add"
+              mozLoop={this.props.mozLoop}
+              ref="contacts_add"
+              switchToInitialView={this.switchComponentView("contactList")} />
+          );
+        case "contactEdit":
+          return (
+            <ContactDetailsForm
+              contactFormData={this.state.contactFormData}
+              mode="edit"
+              mozLoop={this.props.mozLoop}
+              ref="contacts_edit"
+              switchToInitialView={this.switchComponentView("contactList")} />
+          );
+        case "contactList":
+        default:
+          return (
+            <ContactsList
+              mozLoop={this.props.mozLoop}
+              notifications={this.props.notifications}
+              ref="contacts_list"
+              switchToContactAdd={this.handleAddEditContact("contactAdd")}
+              switchToContactEdit={this.handleAddEditContact("contactEdit")} />
+          );
+      }
     }
   });
 
@@ -647,9 +817,14 @@ loop.contacts = (function(_, mozL10n) {
     mixins: [React.addons.LinkedStateMixin],
 
     propTypes: {
+      contactFormData: React.PropTypes.object.isRequired,
       mode: React.PropTypes.string,
-      // Callback used to change the selected tab - it is passed the tab name.
-      selectTab: React.PropTypes.func.isRequired
+      mozLoop: React.PropTypes.object.isRequired,
+      switchToInitialView: React.PropTypes.func.isRequired
+    },
+
+    componentDidMount: function() {
+      this.initForm(this.props.contactFormData);
     },
 
     getInitialState: function() {
@@ -664,12 +839,14 @@ loop.contacts = (function(_, mozL10n) {
 
     initForm: function(contact) {
       let state = this.getInitialState();
-      if (contact) {
+      // Test for an empty contact object
+      if (_.keys(contact).length > 0) {
         state.contact = contact;
         state.name = contact.name[0];
         state.email = getPreferred(contact, "email").value;
         state.tel = getPreferred(contact, "tel").value;
       }
+
       this.setState(state);
     },
 
@@ -687,10 +864,7 @@ loop.contacts = (function(_, mozL10n) {
         return;
       }
 
-      this.props.selectTab("contacts");
-
-      let contactsAPI = navigator.mozLoop.contacts;
-
+      let contactsAPI = this.props.mozLoop.contacts;
       switch (this.props.mode) {
         case "edit":
           this.state.contact.name[0] = this.state.name.trim();
@@ -707,7 +881,7 @@ loop.contacts = (function(_, mozL10n) {
           break;
         case "add":
           var contact = {
-            id: navigator.mozLoop.generateUUID(),
+            id: this.props.mozLoop.generateUUID(),
             name: [this.state.name.trim()],
             email: [{
               pref: true,
@@ -731,10 +905,12 @@ loop.contacts = (function(_, mozL10n) {
           });
           break;
       }
+
+      this.props.switchToInitialView();
     },
 
     handleCancelButtonClick: function() {
-      this.props.selectTab("contacts");
+      this.props.switchToInitialView();
     },
 
     render: function() {
@@ -794,6 +970,7 @@ loop.contacts = (function(_, mozL10n) {
     ContactsList: ContactsList,
     ContactDetail: ContactDetail,
     ContactDetailsForm: ContactDetailsForm,
+    ContactsControllerView: ContactsControllerView,
     _getPreferred: getPreferred,
     _setPreferred: setPreferred
   };

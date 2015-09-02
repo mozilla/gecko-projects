@@ -15,7 +15,7 @@ AnimationEvent::AnimationEvent(EventTarget* aOwner,
                                nsPresContext* aPresContext,
                                InternalAnimationEvent* aEvent)
   : Event(aOwner, aPresContext,
-          aEvent ? aEvent : new InternalAnimationEvent(false, 0))
+          aEvent ? aEvent : new InternalAnimationEvent(false, eVoidEvent))
 {
   if (aEvent) {
     mEventIsInternal = false;

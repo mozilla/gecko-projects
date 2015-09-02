@@ -15,7 +15,8 @@ InputEvent::InputEvent(EventTarget* aOwner,
                        nsPresContext* aPresContext,
                        InternalEditorInputEvent* aEvent)
   : UIEvent(aOwner, aPresContext,
-            aEvent ? aEvent : new InternalEditorInputEvent(false, 0, nullptr))
+            aEvent ? aEvent :
+                     new InternalEditorInputEvent(false, eVoidEvent, nullptr))
 {
   NS_ASSERTION(mEvent->mClass == eEditorInputEventClass,
                "event type mismatch");

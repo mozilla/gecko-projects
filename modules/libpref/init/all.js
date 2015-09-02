@@ -397,6 +397,7 @@ pref("media.navigator.permission.disabled", false);
 pref("media.peerconnection.default_iceservers", "[]");
 pref("media.peerconnection.ice.loopback", false); // Set only for testing in offline environments.
 pref("media.peerconnection.ice.tcp", false);
+pref("media.peerconnection.ice.tcp_so_sock_count", 0); // Disable SO gathering
 pref("media.peerconnection.ice.link_local", false); // Set only for testing IPV6 in networks that don't assign IPV6 addresses
 pref("media.peerconnection.ice.force_interface", ""); // Limit to only a single interface
 pref("media.peerconnection.ice.relay_only", false); // Limit candidates to TURN
@@ -468,17 +469,15 @@ pref("media.webvtt.regions.enabled", false);
 pref("media.track.enabled", false);
 
 // Whether to enable MediaSource support.
-// We want to enable on non-release  builds and on release windows and mac
-// but on release builds restrict to YouTube. We don't enable for other
-// configurations because code for those platforms isn't ready yet.
-#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GONK)
 pref("media.mediasource.enabled", true);
-#else
-pref("media.mediasource.enabled", false);
-#endif
 
 pref("media.mediasource.mp4.enabled", true);
+
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GONK) || defined(MOZ_WIDGET_ANDROID)
 pref("media.mediasource.webm.enabled", false);
+#else
+pref("media.mediasource.webm.enabled", true);
+#endif
 
 // Enable new MediaSource architecture.
 pref("media.mediasource.format-reader", true);
@@ -554,6 +553,7 @@ pref("apz.fling_curve_threshold_inches_per_ms", "-1.0");
 pref("apz.fling_friction", "0.002");
 pref("apz.fling_stop_on_tap_threshold", "0.05");
 pref("apz.fling_stopped_threshold", "0.01");
+pref("apz.highlight_checkerboarded_areas", false);
 pref("apz.max_velocity_inches_per_ms", "-1.0");
 pref("apz.max_velocity_queue_size", 5);
 pref("apz.min_skate_speed", "1.0");
@@ -1094,7 +1094,7 @@ pref("privacy.trackingprotection.pbmode.enabled",  true);
 
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
-#if defined(XP_WIN) && !defined(RELEASE_BUILD)
+#if defined(XP_WIN) && !defined(RELEASE_BUILD) || defined(MOZ_WIDGET_GTK) && !defined(RELEASE_BUILD)
 pref("dom.event.highrestimestamp.enabled",  true);
 #else
 pref("dom.event.highrestimestamp.enabled",  false);
@@ -1251,9 +1251,6 @@ pref("network.http.version", "1.1");      // default
 pref("network.http.proxy.version", "1.1");    // default
 // pref("network.http.proxy.version", "1.0"); // uncomment this out in case of problems
                                               // (required if using junkbuster proxy)
-
-// enable caching of http documents
-pref("network.http.use-cache", true);
 
 // this preference can be set to override the socket type used for normal
 // HTTP traffic.  an empty value indicates the normal TCP/IP socket type.
@@ -1785,7 +1782,7 @@ pref("network.generic-ntlm-auth.workstation", "WORKSTATION");
 //   1 - allow sub-resources to open HTTP authentication credentials dialogs,
 //       but don't allow it for cross-origin sub-resources
 //   2 - allow the cross-origin authentication as well.
-pref("network.auth.allow-subresource-auth", 1);
+pref("network.auth.allow-subresource-auth", 2);
 
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
@@ -2525,12 +2522,6 @@ pref("dom.ipc.plugins.hangUITimeoutSecs", 0);
 pref("dom.ipc.plugins.hangUIMinDisplaySecs", 0);
 #endif
 pref("dom.ipc.tabs.shutdownTimeoutSecs", 0);
-#endif
-
-#ifdef XP_WIN
-// Disable oopp for java on windows. They run their own
-// process isolation which conflicts with our implementation.
-pref("dom.ipc.plugins.java.enabled", false);
 #endif
 
 pref("dom.ipc.plugins.flash.disable-protected-mode", false);
@@ -4295,10 +4286,6 @@ pref("layers.offmainthreadcomposition.frame-rate", -1);
 pref("layers.async-pan-zoom.enabled", true);
 #endif
 
-#ifdef MOZ_WIDGET_UIKIT
-pref("layers.async-pan-zoom.enabled", true);
-#endif
-
 #ifdef XP_MACOSX
 pref("layers.enable-tiles", true);
 pref("layers.tile-width", 512);
@@ -4532,11 +4519,12 @@ pref("dom.w3c_touch_events.enabled", 2);
 
 // W3C draft pointer events
 pref("dom.w3c_pointer_events.enabled", false);
-// W3C touch-action css property (related to touch and pointer events)
-pref("layout.css.touch_action.enabled", false);
 
 // W3C draft ImageCapture API
 pref("dom.imagecapture.enabled", false);
+
+// W3C touch-action css property (related to touch and pointer events)
+pref("layout.css.touch_action.enabled", false);
 
 // Enables some assertions in nsStyleContext that are too expensive
 // for general use, but might be useful to enable for specific tests.
@@ -4893,9 +4881,6 @@ pref("dom.system_update.debug", false);
 // UDPSocket API
 pref("dom.udpsocket.enabled", false);
 
-// MessageChannel enabled by default.
-pref("dom.messageChannel.enabled", true);
-
 // Disable before keyboard events and after keyboard events by default.
 pref("dom.beforeAfterKeyboardEvent.enabled", false);
 
@@ -4978,7 +4963,7 @@ pref("browser.search.official", true);
 //pref("media.gmp-manager.url.override", "");
 
 // Update service URL for GMP install/updates:
-pref("media.gmp-manager.url", "https://aus4.mozilla.org/update/3/GMP/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+pref("media.gmp-manager.url", "https://aus5.mozilla.org/update/3/GMP/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 
 // When |media.gmp-manager.cert.requireBuiltIn| is true or not specified the
 // final certificate and all certificates the connection is redirected to before
@@ -5003,10 +4988,10 @@ pref("media.gmp-manager.cert.requireBuiltIn", true);
 // IMPORTANT! app.update.certs.* prefs should also be updated if these
 // are updated.
 pref("media.gmp-manager.cert.checkAttributes", true);
-pref("media.gmp-manager.certs.1.issuerName", "CN=DigiCert Secure Server CA,O=DigiCert Inc,C=US");
-pref("media.gmp-manager.certs.1.commonName", "aus4.mozilla.org");
-pref("media.gmp-manager.certs.2.issuerName", "CN=Thawte SSL CA,O=\"Thawte, Inc.\",C=US");
-pref("media.gmp-manager.certs.2.commonName", "aus4.mozilla.org");
+pref("media.gmp-manager.certs.1.issuerName", "CN=DigiCert SHA2 Secure Server CA,O=DigiCert Inc,C=US");
+pref("media.gmp-manager.certs.1.commonName", "aus5.mozilla.org");
+pref("media.gmp-manager.certs.2.issuerName", "CN=thawte SSL CA - G2,O=\"thawte, Inc.\",C=US");
+pref("media.gmp-manager.certs.2.commonName", "aus5.mozilla.org");
 #endif
 
 // Whether or not to perform reader mode article parsing on page load.
@@ -5055,13 +5040,6 @@ pref("media.gmp.insecure.allow", false);
 
 pref("dom.audiochannel.mutedByDefault", false);
 
-// Use vsync aligned rendering. b2g prefs are in b2g.js.
-// Hardware vsync supported on windows, os x, and b2g.
-// Linux and fennec will use software vsync.
-pref("gfx.vsync.hw-vsync.enabled", true);
-pref("gfx.vsync.compositor", true);
-pref("gfx.vsync.refreshdriver", true);
-
 // Secure Element API
 #ifdef MOZ_SECUREELEMENT
 pref("dom.secureelement.enabled", false);
@@ -5084,10 +5062,10 @@ pref("memory.report_concurrency", 1);
 pref("memory.report_concurrency", 10);
 #endif
 
-// Make <audio>, <video>, NPAPI plugins and webAudio talk to the AudioChannelService.
-pref("media.useAudioChannelService", true);
 // Add Mozilla AudioChannel APIs.
 pref("media.useAudioChannelAPI", false);
 
 // Expose Request.context. Currently disabled since the spec is in flux.
 pref("dom.requestcontext.enabled", false);
+
+pref("dom.mozKillSwitch.enabled", false);

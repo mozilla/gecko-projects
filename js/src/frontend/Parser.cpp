@@ -29,6 +29,7 @@
 #include "jstypes.h"
 
 #include "asmjs/AsmJSValidate.h"
+#include "builtin/ModuleObject.h"
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FoldConstants.h"
 #include "frontend/ParseMaps.h"
@@ -47,6 +48,22 @@ using namespace js::gc;
 using mozilla::Maybe;
 
 using JS::AutoGCRooter;
+
+JSFunction::AutoParseUsingFunctionBox::AutoParseUsingFunctionBox(ExclusiveContext* cx,
+                                                                 frontend::FunctionBox* funbox)
+  : fun_(cx, funbox->function()),
+    oldEnv_(cx, fun_->environment())
+{
+    fun_->setFunctionBox(funbox);
+    funbox->computeAllowSyntax(fun_);
+    funbox->computeInWith(fun_);
+}
+
+JSFunction::AutoParseUsingFunctionBox::~AutoParseUsingFunctionBox()
+{
+    fun_->unsetFunctionBox();
+    fun_->setEnvironment(oldEnv_);
+}
 
 namespace js {
 namespace frontend {
@@ -225,7 +242,7 @@ ParseContext<FullParseHandler>::define(TokenStream& ts,
 
       case Definition::GLOBALCONST:
       case Definition::VAR:
-        if (sc->isFunctionBox()) {
+        if (!sc->isGlobalContext()) {
             dn->setOp((js_CodeSpec[dn->getOp()].format & JOF_SET) ? JSOP_SETLOCAL : JSOP_GETLOCAL);
             dn->pn_blockid = bodyid;
             dn->pn_dflags |= PND_BOUND;
@@ -236,6 +253,8 @@ ParseContext<FullParseHandler>::define(TokenStream& ts,
             if (!checkLocalsOverflow(ts))
                 return false;
         }
+        if (atModuleScope())
+            dn->pn_dflags |= PND_CLOSED;
         if (!decls_.addUnique(name, dn))
             return false;
         break;
@@ -244,6 +263,8 @@ ParseContext<FullParseHandler>::define(TokenStream& ts,
       case Definition::CONST:
         dn->setOp(JSOP_INITLEXICAL);
         dn->pn_dflags |= (PND_LEXICAL | PND_BOUND);
+        if (atModuleLevel())
+            dn->pn_dflags |= PND_CLOSED;
         if (atBodyLevel()) {
             if (!bodyLevelLexicals_.append(dn))
                 return false;
@@ -393,12 +414,11 @@ AppendPackedBindings(const ParseContext<ParseHandler>* pc, const DeclVector& vec
 
 template <typename ParseHandler>
 bool
-ParseContext<ParseHandler>::generateFunctionBindings(ExclusiveContext* cx, TokenStream& ts,
-                                                     LifoAlloc& alloc,
-                                                     MutableHandle<Bindings> bindings) const
+ParseContext<ParseHandler>::generateBindings(ExclusiveContext* cx, TokenStream& ts, LifoAlloc& alloc,
+                                             MutableHandle<Bindings> bindings) const
 {
-    MOZ_ASSERT(sc->isFunctionBox());
-    MOZ_ASSERT(args_.length() < ARGNO_LIMIT);
+    MOZ_ASSERT_IF(sc->isFunctionBox(), args_.length() < ARGNO_LIMIT);
+    MOZ_ASSERT_IF(sc->isModuleBox(), args_.length() == 0);
     MOZ_ASSERT(vars_.length() + bodyLevelLexicals_.length() < LOCALNO_LIMIT);
 
     /*
@@ -434,7 +454,7 @@ ParseContext<ParseHandler>::generateFunctionBindings(ExclusiveContext* cx, Token
     return Bindings::initWithTemporaryStorage(cx, bindings, args_.length(), vars_.length(),
                                               bodyLevelLexicals_.length(), blockScopeDepth,
                                               numUnaliasedVars, numUnaliasedBodyLevelLexicals,
-                                              packedBindings);
+                                              packedBindings, sc->isModuleBox());
 }
 
 template <typename ParseHandler>
@@ -613,12 +633,12 @@ Parser<ParseHandler>::newObjectBox(JSObject* obj)
 
 template <typename ParseHandler>
 FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunction* fun,
-                         JSObject* staticScope, ParseContext<ParseHandler>* outerpc,
+                         JSObject* enclosingStaticScope, ParseContext<ParseHandler>* outerpc,
                          Directives directives, bool extraWarnings, GeneratorKind generatorKind)
   : ObjectBox(fun, traceListHead),
     SharedContext(cx, directives, extraWarnings),
     bindings(),
-    staticScope_(staticScope),
+    enclosingStaticScope_(enclosingStaticScope),
     bufStart(0),
     bufEnd(0),
     length(0),
@@ -636,22 +656,17 @@ FunctionBox::FunctionBox(ExclusiveContext* cx, ObjectBox* traceListHead, JSFunct
     // baked into JIT code, so they must be allocated tenured. They are held by
     // the JSScript so cannot be collected during a minor GC anyway.
     MOZ_ASSERT(fun->isTenured());
-
-    if (staticScope->is<StaticFunctionBoxScopeObject>())
-        staticScope->as<StaticFunctionBoxScopeObject>().setFunctionBox(this);
-
-    computeAllowSyntax(staticScope);
-    computeInWith(staticScope);
 }
 
 template <typename ParseHandler>
 FunctionBox*
-Parser<ParseHandler>::newFunctionBoxWithScope(Node fn, JSFunction* fun,
-                                              ParseContext<ParseHandler>* outerpc,
-                                              Directives inheritedDirectives,
-                                              GeneratorKind generatorKind,
-                                              JSObject* staticScope)
+Parser<ParseHandler>::newFunctionBox(Node fn, JSFunction* fun,
+                                     ParseContext<ParseHandler>* outerpc,
+                                     Directives inheritedDirectives,
+                                     GeneratorKind generatorKind,
+                                     JSObject* enclosingStaticScope)
 {
+    MOZ_ASSERT_IF(outerpc, enclosingStaticScope == outerpc->innermostStaticScope());
     MOZ_ASSERT(fun);
 
     /*
@@ -662,9 +677,8 @@ Parser<ParseHandler>::newFunctionBoxWithScope(Node fn, JSFunction* fun,
      * function.
      */
     FunctionBox* funbox =
-        alloc.new_<FunctionBox>(context, traceListHead, fun, staticScope, outerpc,
-                                inheritedDirectives,
-                                options().extraWarningsOption,
+        alloc.new_<FunctionBox>(context, traceListHead, fun, enclosingStaticScope, outerpc,
+                                inheritedDirectives, options().extraWarningsOption,
                                 generatorKind);
     if (!funbox) {
         ReportOutOfMemory(context);
@@ -679,26 +693,46 @@ Parser<ParseHandler>::newFunctionBoxWithScope(Node fn, JSFunction* fun,
 }
 
 template <typename ParseHandler>
-FunctionBox*
-Parser<ParseHandler>::newFunctionBox(Node fn, HandleFunction fun,
-                                     ParseContext<ParseHandler>* outerpc,
-                                     Directives inheritedDirectives,
-                                     GeneratorKind generatorKind,
-                                     HandleObject enclosingStaticScope)
+ModuleBox::ModuleBox(ExclusiveContext* cx, ObjectBox* traceListHead, ModuleObject* module,
+                     ParseContext<ParseHandler>* outerpc)
+  : ObjectBox(module, traceListHead),
+    SharedContext(cx, Directives(true), false),
+    bindings()
+{}
+
+template <typename ParseHandler>
+ModuleBox*
+Parser<ParseHandler>::newModuleBox(Node pn, HandleModuleObject module)
 {
-    MOZ_ASSERT_IF(outerpc, enclosingStaticScope == outerpc->innermostStaticScope());
+    MOZ_ASSERT(module);
 
-    StaticFunctionBoxScopeObject* scope =
-        StaticFunctionBoxScopeObject::create(context, enclosingStaticScope);
-    if (!scope)
+    /*
+     * We use JSContext.tempLifoAlloc to allocate parsed objects and place them
+     * on a list in this Parser to ensure GC safety. Thus the tempLifoAlloc
+     * arenas containing the entries must be alive until we are done with
+     * scanning, parsing and code generation for the whole module.
+     */
+    ParseContext<ParseHandler>* outerpc = nullptr;
+    ModuleBox* modbox =
+        alloc.new_<ModuleBox>(context, traceListHead, module, outerpc);
+    if (!modbox) {
+        ReportOutOfMemory(context);
         return nullptr;
+    }
 
-    FunctionBox* funbox = newFunctionBoxWithScope(fn, fun, outerpc, inheritedDirectives,
-                                                  generatorKind, scope);
-    if (!funbox)
-        return nullptr;
+    traceListHead = modbox;
+    if (pn)
+        handler.setModuleBox(pn, modbox);
 
-    return funbox;
+    return modbox;
+}
+
+template <>
+ModuleBox*
+Parser<SyntaxParseHandler>::newModuleBox(Node pn, HandleModuleObject module)
+{
+    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
+    return nullptr;
 }
 
 template <typename ParseHandler>
@@ -798,6 +832,92 @@ Parser<ParseHandler>::checkStrictBinding(PropertyName* name, Node pn)
     return true;
 }
 
+template <typename ParseHandler>
+typename ParseHandler::Node
+Parser<ParseHandler>::standaloneModule(HandleModuleObject module)
+{
+    MOZ_ASSERT(checkOptionsCalled);
+
+    Node mn = handler.newModule();
+    if (!mn)
+        return null();
+
+    ModuleBox* modulebox = newModuleBox(mn, module);
+    if (!modulebox)
+        return null();
+    handler.setModuleBox(mn, modulebox);
+
+    ParseContext<FullParseHandler> modulepc(this, pc, mn, modulebox, nullptr, 0);
+    if (!modulepc.init(*this))
+        return null();
+
+    ParseNode* pn = statements(YieldIsKeyword);
+    if (!pn)
+        return null();
+
+    pn->pn_blockid = modulepc.blockid();
+
+    MOZ_ASSERT(pn->isKind(PNK_STATEMENTLIST));
+    mn->pn_body = pn;
+
+    TokenKind tt;
+    if (!tokenStream.getToken(&tt, TokenStream::Operand))
+        return null();
+    MOZ_ASSERT(tt == TOK_EOF);
+
+    if (!FoldConstants(context, &pn, this))
+        return null();
+
+    Rooted<Bindings> bindings(context, modulebox->bindings);
+    if (!modulepc.generateBindings(context, tokenStream, alloc, &bindings))
+        return null();
+    modulebox->bindings = bindings;
+
+    MOZ_ASSERT(mn->pn_modulebox == modulebox);
+    return mn;
+}
+
+template <>
+SyntaxParseHandler::Node
+Parser<SyntaxParseHandler>::standaloneModule(HandleModuleObject module)
+{
+    MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
+    return SyntaxParseHandler::NodeFailure;
+}
+
+template <>
+ParseNode*
+Parser<FullParseHandler>::evalBody()
+{
+    AutoPushStmtInfoPC stmtInfo(*this, StmtType::BLOCK);
+    ParseNode* block = pushLexicalScope(stmtInfo);
+    if (!block)
+        return nullptr;
+
+    // For parsing declarations and directives, eval scripts must be
+    // considered body level despite having a lexical scope.
+    MOZ_ASSERT(pc->atBodyLevel());
+
+    ParseNode* body = statements(YieldIsName);
+    if (!body)
+        return nullptr;
+
+    // The statements() call above breaks on TOK_RC, so make sure we've
+    // reached EOF here.
+    TokenKind tt;
+    if (!tokenStream.peekToken(&tt, TokenStream::Operand))
+        return nullptr;
+    if (tt != TOK_EOF) {
+        report(ParseError, false, null(), JSMSG_UNEXPECTED_TOKEN,
+               "expression", TokenKindToDesc(tt));
+        return nullptr;
+    }
+
+    block->pn_expr = body;
+    block->pn_pos = body->pn_pos;
+    return block;
+}
+
 template <>
 ParseNode*
 Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
@@ -872,7 +992,7 @@ Parser<FullParseHandler>::standaloneFunctionBody(HandleFunction fun,
     }
 
     Rooted<Bindings> bindings(context, funbox->bindings);
-    if (!funpc.generateFunctionBindings(context, tokenStream, alloc, &bindings))
+    if (!funpc.generateBindings(context, tokenStream, alloc, &bindings))
         return null();
     funbox->bindings = bindings;
 
@@ -915,10 +1035,6 @@ Parser<FullParseHandler>::checkFunctionArguments()
         }
     }
 
-    /*
-     * Report error if both rest parameters and 'arguments' are used. Do this
-     * check before adding artificial 'arguments' below.
-     */
     Definition* maybeArgDef = pc->decls().lookupFirst(arguments);
     bool argumentsHasBinding = !!maybeArgDef;
     // ES6 9.2.13.17 says that a lexical binding of 'arguments' shadows the
@@ -926,18 +1042,12 @@ Parser<FullParseHandler>::checkFunctionArguments()
     bool argumentsHasLocalBinding = maybeArgDef && (maybeArgDef->kind() != Definition::ARG &&
                                                     maybeArgDef->kind() != Definition::LET &&
                                                     maybeArgDef->kind() != Definition::CONST);
-    bool hasRest = pc->sc->asFunctionBox()->function()->hasRest();
-    if (hasRest && argumentsHasLocalBinding) {
-        report(ParseError, false, nullptr, JSMSG_ARGUMENTS_AND_REST);
-        return false;
-    }
 
     /*
      * Even if 'arguments' isn't explicitly mentioned, dynamic name lookup
-     * forces an 'arguments' binding. The exception is that functions with rest
-     * parameters are free from 'arguments'.
+     * forces an 'arguments' binding.
      */
-    if (!argumentsHasBinding && pc->sc->bindingsAccessedDynamically() && !hasRest) {
+    if (!argumentsHasBinding && pc->sc->bindingsAccessedDynamically()) {
         ParseNode* pn = newName(arguments);
         if (!pn)
             return false;
@@ -956,14 +1066,8 @@ Parser<FullParseHandler>::checkFunctionArguments()
         FunctionBox* funbox = pc->sc->asFunctionBox();
         funbox->setArgumentsHasLocalBinding();
 
-        /*
-         * If a script has both explicit mentions of 'arguments' and dynamic
-         * name lookups which could access the arguments, an arguments object
-         * must be created eagerly. The SSA analysis used for lazy arguments
-         * cannot cope with dynamic name accesses, so any 'arguments' accessed
-         * via a NAME opcode must force construction of the arguments object.
-         */
-        if (pc->sc->bindingsAccessedDynamically() && maybeArgDef)
+        /* Dynamic scope access destroys all hope of optimization. */
+        if (pc->sc->bindingsAccessedDynamically())
             funbox->setDefinitelyNeedsArgsObj();
 
         /*
@@ -991,9 +1095,6 @@ Parser<FullParseHandler>::checkFunctionArguments()
                         funbox->setDefinitelyNeedsArgsObj();
                 }
             }
-            /* Watch for mutation of arguments through e.g. eval(). */
-            if (pc->sc->bindingsAccessedDynamically())
-                funbox->setDefinitelyNeedsArgsObj();
         }
     }
 
@@ -1004,21 +1105,8 @@ template <>
 bool
 Parser<SyntaxParseHandler>::checkFunctionArguments()
 {
-    bool hasRest = pc->sc->asFunctionBox()->function()->hasRest();
-
-    if (pc->lexdeps->lookup(context->names().arguments)) {
+    if (pc->lexdeps->lookup(context->names().arguments))
         pc->sc->asFunctionBox()->usesArguments = true;
-        if (hasRest) {
-            report(ParseError, false, null(), JSMSG_ARGUMENTS_AND_REST);
-            return false;
-        }
-    } else if (hasRest) {
-        DefinitionNode maybeArgDef = pc->decls().lookupFirst(context->names().arguments);
-        if (maybeArgDef && handler.getDefinitionKind(maybeArgDef) != Definition::ARG) {
-            report(ParseError, false, null(), JSMSG_ARGUMENTS_AND_REST);
-            return false;
-        }
-    }
 
     return true;
 }
@@ -1104,9 +1192,12 @@ Parser<ParseHandler>::functionBody(InHandling inHandling, YieldHandling yieldHan
             return null();
     }
 
-    /* Define the 'arguments' binding if necessary. */
-    if (!checkFunctionArguments())
-        return null();
+    if (kind != Arrow) {
+        // Define the 'arguments' binding if necessary. Arrow functions
+        // don't have 'arguments'.
+        if (!checkFunctionArguments())
+            return null();
+    }
 
     return pn;
 }
@@ -1306,7 +1397,9 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
     JSFunction::Flags flags;
     switch (kind) {
       case Expression:
-        flags = JSFunction::INTERPRETED_LAMBDA;
+        flags = (generatorKind == NotGenerator
+                 ? JSFunction::INTERPRETED_LAMBDA
+                 : JSFunction::INTERPRETED_LAMBDA_GENERATOR);
         break;
       case Arrow:
         flags = JSFunction::INTERPRETED_LAMBDA_ARROW;
@@ -1314,10 +1407,9 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
         break;
       case Method:
         MOZ_ASSERT(generatorKind == NotGenerator || generatorKind == StarGenerator);
-        if (generatorKind == NotGenerator)
-            flags = JSFunction::INTERPRETED_METHOD;
-        else
-            flags = JSFunction::INTERPRETED_METHOD_GENERATOR;
+        flags = (generatorKind == NotGenerator
+                 ? JSFunction::INTERPRETED_METHOD
+                 : JSFunction::INTERPRETED_METHOD_GENERATOR);
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       case ClassConstructor:
@@ -1334,8 +1426,9 @@ Parser<ParseHandler>::newFunction(HandleAtom atom, FunctionSyntaxKind kind,
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
         break;
       default:
-        flags = JSFunction::INTERPRETED_NORMAL;
-        break;
+        flags = (generatorKind == NotGenerator
+                 ? JSFunction::INTERPRETED_NORMAL
+                 : JSFunction::INTERPRETED_GENERATOR);
     }
 
     fun = NewFunctionWithProto(context, nullptr, 0, flags, nullptr, atom, proto,
@@ -1437,7 +1530,7 @@ ConvertDefinitionToNamedLambdaUse(TokenStream& ts, ParseContext<FullParseHandler
      * Since 'dn' is a placeholder, it has not been defined in the
      * ParseContext and hence we must manually flag a closed-over
      * callee name as needing a dynamic scope (this is done for all
-     * definitions in the ParseContext by generateFunctionBindings).
+     * definitions in the ParseContext by generateBindings).
      *
      * If 'dn' has been assigned to, then we also flag the function
      * scope has needing a dynamic scope so that dynamic scope
@@ -1598,7 +1691,7 @@ Parser<FullParseHandler>::leaveFunction(ParseNode* fn, ParseContext<FullParseHan
     }
 
     Rooted<Bindings> bindings(context, funbox->bindings);
-    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
+    if (!pc->generateBindings(context, tokenStream, alloc, &bindings))
         return false;
     funbox->bindings = bindings;
 
@@ -2021,8 +2114,7 @@ Parser<FullParseHandler>::checkFunctionDefinition(HandlePropertyName funName,
 
         if (bodyLevel) {
             MOZ_ASSERT(pn->functionIsHoisted());
-            MOZ_ASSERT_IF(pc->sc->isFunctionBox(), !pn->pn_scopecoord.isFree());
-            MOZ_ASSERT_IF(!pc->sc->isFunctionBox(), pn->pn_scopecoord.isFree());
+            MOZ_ASSERT(pc->sc->isGlobalContext() == pn->pn_scopecoord.isFree());
         } else {
             /*
              * As a SpiderMonkey-specific extension, non-body-level function
@@ -2084,6 +2176,9 @@ Parser<FullParseHandler>::checkFunctionDefinition(HandlePropertyName funName,
         if (!funbox)
             return false;
 
+        if (fun->lazyScript()->needsHomeObject())
+            funbox->setNeedsHomeObject();
+
         if (!addFreeVariablesFromLazyFunction(fun, pc))
             return false;
 
@@ -2128,8 +2223,9 @@ Parser<ParseHandler>::addFreeVariablesFromLazyFunction(JSFunction* fun,
     for (size_t i = 0; i < lazy->numFreeVariables(); i++) {
         JSAtom* atom = freeVariables[i].atom();
 
-        // 'arguments' will be implicitly bound within the inner function.
-        if (atom == context->names().arguments)
+        // 'arguments' will be implicitly bound within the inner function,
+        // except if the inner function is an arrow function.
+        if (atom == context->names().arguments && !fun->isArrow())
             continue;
 
         DefinitionNode dn = pc->decls().lookupFirst(atom);
@@ -2404,6 +2500,8 @@ Parser<SyntaxParseHandler>::finishFunctionDefinition(Node pn, FunctionBox* funbo
         lazy->setUsesArgumentsApplyAndThis();
     if (funbox->isDerivedClassConstructor())
         lazy->setIsDerivedClassConstructor();
+    if (funbox->needsHomeObject())
+        lazy->setNeedsHomeObject();
     PropagateTransitiveParseFlags(funbox, lazy);
 
     fun->initLazyScript(lazy);
@@ -2624,7 +2722,7 @@ Parser<FullParseHandler>::standaloneLazyFunction(HandleFunction fun, bool strict
     }
 
     Rooted<Bindings> bindings(context, funbox->bindings);
-    if (!pc->generateFunctionBindings(context, tokenStream, alloc, &bindings))
+    if (!pc->generateBindings(context, tokenStream, alloc, &bindings))
         return null();
     funbox->bindings = bindings;
 
@@ -3139,7 +3237,7 @@ Parser<FullParseHandler>::bindLexical(BindData<FullParseHandler>* data,
     // script->nfixed and body-level lets.
     //
     // For body-level lets, the index is bogus at this point and is adjusted
-    // when creating Bindings. See ParseContext::generateFunctionBindings and
+    // when creating Bindings. See ParseContext::generateBindings and
     // AppendPackedBindings.
     if (!pn->pn_scopecoord.setSlot(parser->tokenStream, index))
         return false;
@@ -4233,7 +4331,7 @@ Parser<FullParseHandler>::checkAndPrepareLexical(bool isConst, const TokenPos& e
 static StaticBlockObject*
 CurrentLexicalStaticBlock(ParseContext<FullParseHandler>* pc)
 {
-    return pc->atBodyLevel() ? nullptr :
+    return !pc->innermostStmt() ? nullptr :
            &pc->innermostStmt()->staticScope->as<StaticBlockObject>();
 }
 
@@ -6110,6 +6208,52 @@ Parser<ParseHandler>::debuggerStatement()
     return handler.newDebuggerStatement(p);
 }
 
+static JSOp
+JSOpFromPropertyType(PropertyType propType)
+{
+    switch (propType) {
+      case PropertyType::Getter:
+        return JSOP_INITPROP_GETTER;
+      case PropertyType::Setter:
+        return JSOP_INITPROP_SETTER;
+      case PropertyType::Normal:
+      case PropertyType::Method:
+      case PropertyType::GeneratorMethod:
+      case PropertyType::Constructor:
+      case PropertyType::DerivedConstructor:
+        return JSOP_INITPROP;
+      default:
+        MOZ_CRASH("unexpected property type");
+    }
+}
+
+static FunctionSyntaxKind
+FunctionSyntaxKindFromPropertyType(PropertyType propType)
+{
+    switch (propType) {
+      case PropertyType::Getter:
+        return Getter;
+      case PropertyType::Setter:
+        return Setter;
+      case PropertyType::Method:
+        return Method;
+      case PropertyType::GeneratorMethod:
+        return Method;
+      case PropertyType::Constructor:
+        return ClassConstructor;
+      case PropertyType::DerivedConstructor:
+        return DerivedClassConstructor;
+      default:
+        MOZ_CRASH("unexpected property type");
+    }
+}
+
+static GeneratorKind
+GeneratorKindFromPropertyType(PropertyType propType)
+{
+    return propType == PropertyType::GeneratorMethod ? StarGenerator : NotGenerator;
+}
+
 template <>
 ParseNode*
 Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
@@ -6153,6 +6297,8 @@ Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
 
     ParseNode* classBlock = null();
 
+    RootedAtom propAtom(context);
+
     // A named class creates a new lexical scope with a const binding of the
     // class name.
     Maybe<AutoPushStmtInfoPC> classStmt;
@@ -6182,10 +6328,94 @@ Parser<FullParseHandler>::classDefinition(YieldHandling yieldHandling,
 
     MUST_MATCH_TOKEN(TOK_LC, JSMSG_CURLY_BEFORE_CLASS);
 
-    ParseNode* classMethods = propertyList(yieldHandling,
-                                           hasHeritage ? DerivedClassBody : ClassBody);
-    if (!classMethods)
+    ParseNode* classMethods = handler.newClassMethodList(pos().begin);
+
+    bool seenConstructor = false;
+    for (;;) {
+        TokenKind tt;
+        if (!tokenStream.getToken(&tt, TokenStream::KeywordIsName))
+            return null();
+        if (tt == TOK_RC)
+            break;
+
+        if (tt == TOK_SEMI)
+            continue;
+
+        bool isStatic = false;
+        if (tt == TOK_NAME && tokenStream.currentName() == context->names().static_) {
+            if (!tokenStream.peekToken(&tt, TokenStream::KeywordIsName))
+                return null();
+            if (tt != TOK_LP) {
+                isStatic = true;
+            } else {
+                tokenStream.addModifierException(TokenStream::NoneIsKeywordIsName);
+                tokenStream.ungetToken();
+            }
+        } else {
+            tokenStream.ungetToken();
+        }
+
+        PropertyType propType;
+        ParseNode* propName = propertyName(yieldHandling, classMethods, &propType, &propAtom);
+        if (!propName)
+            return null();
+
+        if (propType != PropertyType::Getter && propType != PropertyType::Setter &&
+            propType != PropertyType::Method && propType != PropertyType::GeneratorMethod &&
+            propType != PropertyType::Constructor && propType != PropertyType::DerivedConstructor)
+        {
+            report(ParseError, false, null(), JSMSG_BAD_METHOD_DEF);
+            return null();
+        }
+
+        if (!isStatic && propAtom == context->names().constructor) {
+            if (propType != PropertyType::Method) {
+                report(ParseError, false, propName, JSMSG_BAD_METHOD_DEF);
+                return null();
+            }
+            if (seenConstructor) {
+                report(ParseError, false, propName, JSMSG_DUPLICATE_PROPERTY, "constructor");
+                return null();
+            }
+            seenConstructor = true;
+            propType = hasHeritage ? PropertyType::DerivedConstructor : PropertyType::Constructor;
+        } else if (isStatic && propAtom == context->names().prototype) {
+            report(ParseError, false, propName, JSMSG_BAD_METHOD_DEF);
+            return null();
+        }
+
+        // FIXME: Implement ES6 function "name" property semantics
+        // (bug 883377).
+        RootedPropertyName funName(context);
+        switch (propType) {
+          case PropertyType::Getter:
+          case PropertyType::Setter:
+            funName = nullptr;
+            break;
+          case PropertyType::Constructor:
+          case PropertyType::DerivedConstructor:
+            funName = name;
+            break;
+          default:
+            if (tokenStream.isCurrentTokenType(TOK_NAME))
+                funName = tokenStream.currentName();
+            else
+                funName = nullptr;
+        }
+        ParseNode* fn = methodDefinition(yieldHandling, propType, funName);
+        if (!fn)
+            return null();
+
+        JSOp op = JSOpFromPropertyType(propType);
+        if (!handler.addClassMethodDefinition(classMethods, propName, fn, op, isStatic))
+            return null();
+    }
+
+    // Default constructors not yet implemented. See bug 1105463
+    if (!seenConstructor) {
+        report(ParseError, false, null(), JSMSG_NO_CLASS_CONSTRUCTOR);
         return null();
+    }
 
     ParseNode* nameNode = null();
     ParseNode* methodsOrBlock = classMethods;
@@ -8427,6 +8657,151 @@ DoubleToAtom(ExclusiveContext* cx, double value)
 
 template <typename ParseHandler>
 typename ParseHandler::Node
+Parser<ParseHandler>::propertyName(YieldHandling yieldHandling, Node propList,
+                                   PropertyType* propType, MutableHandleAtom propAtom)
+{
+    TokenKind ltok;
+    if (!tokenStream.getToken(&ltok, TokenStream::KeywordIsName))
+        return null();
+
+    // TOK_RC should be handled in caller.
+    MOZ_ASSERT(ltok != TOK_RC);
+
+    bool isGenerator = false;
+    if (ltok == TOK_MUL) {
+        isGenerator = true;
+        if (!tokenStream.getToken(&ltok, TokenStream::KeywordIsName))
+            return null();
+    }
+
+    propAtom.set(nullptr);
+    Node propName;
+    switch (ltok) {
+      case TOK_NUMBER:
+        propAtom.set(DoubleToAtom(context, tokenStream.currentToken().number()));
+        if (!propAtom.get())
+            return null();
+        propName = newNumber(tokenStream.currentToken());
+        if (!propName)
+            return null();
+        break;
+
+      case TOK_LB:
+        propName = computedPropertyName(yieldHandling, propList);
+        if (!propName)
+            return null();
+        break;
+
+      case TOK_NAME: {
+        propAtom.set(tokenStream.currentName());
+        // Do not look for accessor syntax on generators
+        if (isGenerator ||
+            !(propAtom.get() == context->names().get ||
+              propAtom.get() == context->names().set))
+        {
+            propName = handler.newObjectLiteralPropertyName(propAtom, pos());
+            if (!propName)
+                return null();
+            break;
+        }
+
+        *propType = propAtom.get() == context->names().get ? PropertyType::Getter
+                                                           : PropertyType::Setter;
+
+        // We have parsed |get| or |set|. Look for an accessor property
+        // name next.
+        TokenKind tt;
+        if (!tokenStream.getToken(&tt, TokenStream::KeywordIsName))
+            return null();
+        if (tt == TOK_NAME) {
+            propAtom.set(tokenStream.currentName());
+            return handler.newObjectLiteralPropertyName(propAtom, pos());
+        }
+        if (tt == TOK_STRING) {
+            propAtom.set(tokenStream.currentToken().atom());
+
+            uint32_t index;
+            if (propAtom->isIndex(&index)) {
+                propAtom.set(DoubleToAtom(context, index));
+                if (!propAtom.get())
+                    return null();
+                return handler.newNumber(index, NoDecimal, pos());
+            }
+            return stringLiteral();
+        }
+        if (tt == TOK_NUMBER) {
+            propAtom.set(DoubleToAtom(context, tokenStream.currentToken().number()));
+            if (!propAtom.get())
+                return null();
+            return newNumber(tokenStream.currentToken());
+        }
+        if (tt == TOK_LB)
+            return computedPropertyName(yieldHandling, propList);
+
+        // Not an accessor property after all.
+        tokenStream.ungetToken();
+        propName = handler.newObjectLiteralPropertyName(propAtom.get(), pos());
+        if (!propName)
+            return null();
+        tokenStream.addModifierException(TokenStream::NoneIsKeywordIsName);
+        break;
+      }
+
+      case TOK_STRING: {
+        propAtom.set(tokenStream.currentToken().atom());
+        uint32_t index;
+        if (propAtom->isIndex(&index)) {
+            propName = handler.newNumber(index, NoDecimal, pos());
+            if (!propName)
+                return null();
+            break;
+        }
+        propName = stringLiteral();
+        if (!propName)
+            return null();
+        break;
+      }
+
+      default:
+        report(ParseError, false, null(), JSMSG_BAD_PROP_ID);
+        return null();
+    }
+
+    TokenKind tt;
+    if (!tokenStream.getToken(&tt))
+        return null();
+
+    if (tt == TOK_COLON) {
+        if (isGenerator) {
+            report(ParseError, false, null(), JSMSG_BAD_PROP_ID);
+            return null();
+        }
+        *propType = PropertyType::Normal;
+        return propName;
+    }
+
+    if (ltok == TOK_NAME && (tt == TOK_COMMA || tt == TOK_RC)) {
+        if (isGenerator) {
+            report(ParseError, false, null(), JSMSG_BAD_PROP_ID);
+            return null();
+        }
+        tokenStream.ungetToken();
+        *propType = PropertyType::Shorthand;
+        return propName;
+    }
+
+    if (tt == TOK_LP) {
+        tokenStream.ungetToken();
+        *propType = isGenerator ? PropertyType::GeneratorMethod : PropertyType::Method;
+        return propName;
+    }
+
+    report(ParseError, false, null(), JSMSG_COLON_AFTER_ID);
+    return null();
+}
+
+template <typename ParseHandler>
+typename ParseHandler::Node
 Parser<ParseHandler>::computedPropertyName(YieldHandling yieldHandling, Node literal)
 {
     uint32_t begin = pos().begin;
@@ -8452,335 +8827,119 @@ Parser<ParseHandler>::computedPropertyName(YieldHandling yieldHandling, Node lit
 
 template <typename ParseHandler>
 typename ParseHandler::Node
-Parser<ParseHandler>::newPropertyListNode(PropListType type)
+Parser<ParseHandler>::objectLiteral(YieldHandling yieldHandling)
 {
-    if (IsClassBody(type))
-        return handler.newClassMethodList(pos().begin);
+    MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_LC));
 
-    MOZ_ASSERT(type == ObjectLiteral);
-    return handler.newObjectLiteral(pos().begin);
+    Node literal = handler.newObjectLiteral(pos().begin);
+    if (!literal)
+        return null();
+
+    bool seenPrototypeMutation = false;
+    RootedAtom propAtom(context);
+    for (;;) {
+        TokenKind tt;
+        if (!tokenStream.getToken(&tt, TokenStream::KeywordIsName))
+            return null();
+        if (tt == TOK_RC)
+            break;
+
+        tokenStream.ungetToken();
+
+        PropertyType propType;
+        Node propName = propertyName(yieldHandling, literal, &propType, &propAtom);
+        if (!propName)
+            return null();
+
+        if (propType == PropertyType::Normal) {
+            Node propExpr = assignExpr(InAllowed, yieldHandling);
+            if (!propExpr)
+                return null();
+
+            if (foldConstants && !FoldConstants(context, &propExpr, this))
+                return null();
+
+            if (propAtom == context->names().proto) {
+                if (seenPrototypeMutation) {
+                    report(ParseError, false, propName, JSMSG_DUPLICATE_PROPERTY, "__proto__");
+                    return null();
+                }
+                seenPrototypeMutation = true;
+
+                // Note: this occurs *only* if we observe TOK_COLON!  Only
+                // __proto__: v mutates [[Prototype]].  Getters, setters,
+                // method/generator definitions, computed property name
+                // versions of all of these, and shorthands do not.
+                uint32_t begin = handler.getPosition(propName).begin;
+                if (!handler.addPrototypeMutation(literal, begin, propExpr))
+                    return null();
+            } else {
+                if (!handler.isConstant(propExpr))
+                    handler.setListFlag(literal, PNX_NONCONST);
+
+                if (!handler.addPropertyDefinition(literal, propName, propExpr))
+                    return null();
+            }
+        } else if (propType == PropertyType::Shorthand) {
+            /*
+             * Support, e.g., |var {x, y} = o| as destructuring shorthand
+             * for |var {x: x, y: y} = o|, per proposed JS2/ES4 for JS1.8.
+             */
+            if (!tokenStream.checkForKeyword(propAtom, nullptr))
+                return null();
+
+            Node nameExpr = identifierName(yieldHandling);
+            if (!nameExpr)
+                return null();
+
+            if (!handler.addShorthand(literal, propName, nameExpr))
+                return null();
+        } else {
+            // FIXME: Implement ES6 function "name" property semantics
+            // (bug 883377).
+            RootedPropertyName funName(context);
+            switch (propType) {
+              case PropertyType::Getter:
+              case PropertyType::Setter:
+                funName = nullptr;
+                break;
+              default:
+                if (tokenStream.isCurrentTokenType(TOK_NAME))
+                    funName = tokenStream.currentName();
+                else
+                    funName = nullptr;
+            }
+            Node fn = methodDefinition(yieldHandling, propType, funName);
+            if (!fn)
+                return null();
+
+            JSOp op = JSOpFromPropertyType(propType);
+            if (!handler.addObjectMethodDefinition(literal, propName, fn, op))
+                return null();
+        }
+
+        if (!tokenStream.getToken(&tt))
+            return null();
+        if (tt == TOK_RC)
+            break;
+        if (tt != TOK_COMMA) {
+            report(ParseError, false, null(), JSMSG_CURLY_AFTER_LIST);
+            return null();
+        }
+    }
+
+    handler.setEndPosition(literal, pos().end);
+    return literal;
 }
 
 template <typename ParseHandler>
 typename ParseHandler::Node
-Parser<ParseHandler>::propertyList(YieldHandling yieldHandling, PropListType type)
+Parser<ParseHandler>::methodDefinition(YieldHandling yieldHandling, PropertyType propType,
+                                       HandlePropertyName funName)
 {
-    MOZ_ASSERT(tokenStream.isCurrentTokenType(TOK_LC));
-
-    Node propList = newPropertyListNode(type);
-    if (!propList)
-        return null();
-
-    bool seenPrototypeMutation = false;
-    bool seenConstructor = false;
-    RootedAtom atom(context);
-    for (;;) {
-        TokenKind ltok;
-        if (!tokenStream.getToken(&ltok, TokenStream::KeywordIsName))
-            return null();
-        if (ltok == TOK_RC)
-            break;
-
-        bool isStatic = false;
-        if (IsClassBody(type)) {
-            if (ltok == TOK_SEMI)
-                continue;
-
-            if (ltok == TOK_NAME &&
-                tokenStream.currentName() == context->names().static_)
-            {
-                isStatic = true;
-                if (!tokenStream.getToken(&ltok, TokenStream::KeywordIsName))
-                    return null();
-            }
-        }
-
-        bool isGenerator = false;
-        if (ltok == TOK_MUL) {
-            isGenerator = true;
-            if (!tokenStream.getToken(&ltok, TokenStream::KeywordIsName))
-                return null();
-        }
-
-        atom = nullptr;
-
-        JSOp op = JSOP_INITPROP;
-        Node propname;
-        bool isConstructor = false;
-        switch (ltok) {
-          case TOK_NUMBER:
-            atom = DoubleToAtom(context, tokenStream.currentToken().number());
-            if (!atom)
-                return null();
-            propname = newNumber(tokenStream.currentToken());
-            if (!propname)
-                return null();
-            break;
-
-          case TOK_LB: {
-              propname = computedPropertyName(yieldHandling, propList);
-              if (!propname)
-                  return null();
-              break;
-          }
-
-          case TOK_NAME: {
-            atom = tokenStream.currentName();
-            // Do not look for accessor syntax on generators
-            if (!isGenerator &&
-                (atom == context->names().get ||
-                 atom == context->names().set))
-            {
-                op = atom == context->names().get ? JSOP_INITPROP_GETTER
-                                                  : JSOP_INITPROP_SETTER;
-            } else {
-                propname = handler.newObjectLiteralPropertyName(atom, pos());
-                if (!propname)
-                    return null();
-                break;
-            }
-
-            // We have parsed |get| or |set|. Look for an accessor property
-            // name next.
-            TokenKind tt;
-            if (!tokenStream.getToken(&tt, TokenStream::KeywordIsName))
-                return null();
-            if (tt == TOK_NAME) {
-                atom = tokenStream.currentName();
-                propname = handler.newObjectLiteralPropertyName(atom, pos());
-                if (!propname)
-                    return null();
-            } else if (tt == TOK_STRING) {
-                atom = tokenStream.currentToken().atom();
-
-                uint32_t index;
-                if (atom->isIndex(&index)) {
-                    propname = handler.newNumber(index, NoDecimal, pos());
-                    if (!propname)
-                        return null();
-                    atom = DoubleToAtom(context, index);
-                    if (!atom)
-                        return null();
-                } else {
-                    propname = stringLiteral();
-                    if (!propname)
-                        return null();
-                }
-            } else if (tt == TOK_NUMBER) {
-                atom = DoubleToAtom(context, tokenStream.currentToken().number());
-                if (!atom)
-                    return null();
-                propname = newNumber(tokenStream.currentToken());
-                if (!propname)
-                    return null();
-            } else if (tt == TOK_LB) {
-                propname = computedPropertyName(yieldHandling, propList);
-                if (!propname)
-                    return null();
-            } else {
-                // Not an accessor property after all.
-                tokenStream.ungetToken();
-                propname = handler.newObjectLiteralPropertyName(atom, pos());
-                if (!propname)
-                    return null();
-                tokenStream.addModifierException(TokenStream::NoneIsKeywordIsName);
-                op = JSOP_INITPROP;
-                break;
-            }
-
-            MOZ_ASSERT(op == JSOP_INITPROP_GETTER || op == JSOP_INITPROP_SETTER);
-            break;
-          }
-
-          case TOK_STRING: {
-            atom = tokenStream.currentToken().atom();
-            uint32_t index;
-            if (atom->isIndex(&index)) {
-                propname = handler.newNumber(index, NoDecimal, pos());
-                if (!propname)
-                    return null();
-            } else {
-                propname = stringLiteral();
-                if (!propname)
-                    return null();
-            }
-            break;
-          }
-
-          default:
-            // There is never a case in which |static *(| can make a meaningful method definition.
-            if (isStatic && !isGenerator) {
-                // Turns out it wasn't static. Put it back and pretend it was a name all along.
-                tokenStream.ungetToken();
-                if (isStatic)
-                    tokenStream.addModifierException(TokenStream::NoneIsKeywordIsName);
-                isStatic = false;
-                atom = tokenStream.currentName();
-                propname = handler.newObjectLiteralPropertyName(atom->asPropertyName(), pos());
-                if (!propname)
-                    return null();
-            } else {
-                report(ParseError, false, null(), JSMSG_BAD_PROP_ID);
-                return null();
-            }
-        }
-
-        if (IsClassBody(type)) {
-            if (!isStatic && atom == context->names().constructor) {
-                if (isGenerator || op != JSOP_INITPROP) {
-                    report(ParseError, false, propname, JSMSG_BAD_METHOD_DEF);
-                    return null();
-                }
-                if (seenConstructor) {
-                    report(ParseError, false, propname, JSMSG_DUPLICATE_PROPERTY, "constructor");
-                    return null();
-                }
-                seenConstructor = true;
-                isConstructor = true;
-            } else if (isStatic && atom == context->names().prototype) {
-                report(ParseError, false, propname, JSMSG_BAD_METHOD_DEF);
-                return null();
-            }
-        }
-
-        if (op == JSOP_INITPROP) {
-            TokenKind tt;
-            if (!tokenStream.getToken(&tt))
-                return null();
-
-            if (tt == TOK_COLON) {
-                if (IsClassBody(type)) {
-                    report(ParseError, false, null(), JSMSG_BAD_METHOD_DEF);
-                    return null();
-                }
-                if (isGenerator) {
-                    report(ParseError, false, null(), JSMSG_BAD_PROP_ID);
-                    return null();
-                }
-
-                Node propexpr = assignExpr(InAllowed, yieldHandling);
-                if (!propexpr)
-                    return null();
-
-                if (foldConstants && !FoldConstants(context, &propexpr, this))
-                    return null();
-
-                if (atom == context->names().proto) {
-                    if (seenPrototypeMutation) {
-                        report(ParseError, false, propname, JSMSG_DUPLICATE_PROPERTY, "__proto__");
-                        return null();
-                    }
-                    seenPrototypeMutation = true;
-
-                    // Note: this occurs *only* if we observe TOK_COLON!  Only
-                    // __proto__: v mutates [[Prototype]].  Getters, setters,
-                    // method/generator definitions, computed property name
-                    // versions of all of these, and shorthands do not.
-                    uint32_t begin = handler.getPosition(propname).begin;
-                    if (!handler.addPrototypeMutation(propList, begin, propexpr))
-                        return null();
-                } else {
-                    if (!handler.isConstant(propexpr))
-                        handler.setListFlag(propList, PNX_NONCONST);
-
-                    if (!handler.addPropertyDefinition(propList, propname, propexpr))
-                        return null();
-                }
-            } else if (ltok == TOK_NAME && (tt == TOK_COMMA || tt == TOK_RC)) {
-                /*
-                 * Support, e.g., |var {x, y} = o| as destructuring shorthand
-                 * for |var {x: x, y: y} = o|, per proposed JS2/ES4 for JS1.8.
-                 */
-                if (IsClassBody(type)) {
-                    report(ParseError, false, null(), JSMSG_BAD_METHOD_DEF);
-                    return null();
-                }
-                if (isGenerator) {
-                    report(ParseError, false, null(), JSMSG_BAD_PROP_ID);
-                    return null();
-                }
-
-                tokenStream.ungetToken();
-                if (!tokenStream.checkForKeyword(atom, nullptr))
-                    return null();
-
-                Node nameExpr = identifierName(yieldHandling);
-                if (!nameExpr)
-                    return null();
-
-                if (!handler.addShorthand(propList, propname, nameExpr))
-                    return null();
-            } else if (tt == TOK_LP) {
-                tokenStream.ungetToken();
-                if (!methodDefinition(yieldHandling, type, propList, propname,
-                                      isConstructor ? type == DerivedClassBody ? DerivedClassConstructor
-                                                                               : ClassConstructor
-                                                    : Method,
-                                      isGenerator ? StarGenerator : NotGenerator, isStatic, op))
-                {
-                    return null();
-                }
-            } else {
-                report(ParseError, false, null(), JSMSG_COLON_AFTER_ID);
-                return null();
-            }
-        } else {
-            if (!methodDefinition(yieldHandling, type, propList, propname,
-                                  op == JSOP_INITPROP_GETTER ? Getter : Setter, NotGenerator,
-                                  isStatic, op))
-            {
-                return null();
-            }
-        }
-
-        if (type == ObjectLiteral) {
-            TokenKind tt;
-            if (!tokenStream.getToken(&tt))
-                return null();
-            if (tt == TOK_RC)
-                break;
-            if (tt != TOK_COMMA) {
-                report(ParseError, false, null(), JSMSG_CURLY_AFTER_LIST);
-                return null();
-            }
-        }
-    }
-
-    // Default constructors not yet implemented. See bug 1105463
-    if (IsClassBody(type) && !seenConstructor) {
-        report(ParseError, false, null(), JSMSG_NO_CLASS_CONSTRUCTOR);
-        return null();
-    }
-
-    handler.setEndPosition(propList, pos().end);
-    return propList;
-}
-
-template <typename ParseHandler>
-bool
-Parser<ParseHandler>::methodDefinition(YieldHandling yieldHandling, PropListType listType,
-                                       Node propList, Node propname, FunctionSyntaxKind kind,
-                                       GeneratorKind generatorKind, bool isStatic, JSOp op)
-{
-    MOZ_ASSERT(kind == Method || kind == ClassConstructor || kind == DerivedClassConstructor ||
-               kind == Getter || kind == Setter);
-    /* NB: Getter function in { get x(){} } is unnamed. */
-    RootedPropertyName funName(context);
-    if ((kind == Method || IsConstructorKind(kind)) && tokenStream.isCurrentTokenType(TOK_NAME)) {
-        funName = tokenStream.currentName();
-    } else {
-        funName = nullptr;
-    }
-
-    Node fn = functionDef(InAllowed, yieldHandling, funName, kind, generatorKind);
-    if (!fn)
-        return false;
-
-    if (IsClassBody(listType))
-        return handler.addClassMethodDefinition(propList, propname, fn, op, isStatic);
-
-    MOZ_ASSERT(listType == ObjectLiteral);
-    return handler.addObjectMethodDefinition(propList, propname, fn, op);
+    FunctionSyntaxKind kind = FunctionSyntaxKindFromPropertyType(propType);
+    GeneratorKind generatorKind = GeneratorKindFromPropertyType(propType);
+    return functionDef(InAllowed, yieldHandling, funName, kind, generatorKind);
 }
 
 template <typename ParseHandler>
@@ -8838,7 +8997,7 @@ Parser<ParseHandler>::primaryExpr(YieldHandling yieldHandling, TokenKind tt,
         return arrayInitializer(yieldHandling);
 
       case TOK_LC:
-        return propertyList(yieldHandling, ObjectLiteral);
+        return objectLiteral(yieldHandling);
 
       case TOK_LP: {
         TokenKind next;

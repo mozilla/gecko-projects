@@ -93,16 +93,16 @@ public:
   NS_DECL_NSIMEMORYREPORTER
 
   /**
-   * Set aRealtime to true in order to create a MediaStreamGraph which provides
-   * support for real-time audio and video.  Set it to false in order to create
-   * a non-realtime instance which just churns through its inputs and produces
-   * output.  Those objects currently only support audio, and are used to
-   * implement OfflineAudioContext.  They do not support MediaStream inputs.
+   * Use aGraphDriverRequested with SYSTEM_THREAD_DRIVER or AUDIO_THREAD_DRIVER
+   * to create a MediaStreamGraph which provides support for real-time audio
+   * and/or video.  Set it to false in order to create a non-realtime instance
+   * which just churns through its inputs and produces output.  Those objects
+   * currently only support audio, and are used to implement
+   * OfflineAudioContext.  They do not support MediaStream inputs.
    */
-  explicit MediaStreamGraphImpl(bool aRealtime,
+  explicit MediaStreamGraphImpl(GraphDriverType aGraphDriverRequested,
                                 TrackRate aSampleRate,
-                                bool aStartWithAudioDriver = false,
-                                dom::AudioChannel aChannel = dom::AudioChannel::Normal);
+                                dom::AudioChannel aChannel);
 
   /**
    * Unregisters memory reporting and deletes this instance. This should be
@@ -424,12 +424,12 @@ public:
   /**
    * Add aStream to the graph and initializes its graph-specific state.
    */
-  void AddStream(MediaStream* aStream);
+  void AddStreamGraphThread(MediaStream* aStream);
   /**
    * Remove aStream from the graph. Ensures that pending messages about the
    * stream back to the main thread are flushed.
    */
-  void RemoveStream(MediaStream* aStream);
+  void RemoveStreamGraphThread(MediaStream* aStream);
   /**
    * Remove aPort from the graph and release it.
    */

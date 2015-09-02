@@ -2652,9 +2652,6 @@ gfxFontGroup::FindNonItalicFaceForChar(gfxFontFamily* aFamily, uint32_t aCh)
     }
 
     nsRefPtr<gfxFont> font = fe->FindOrMakeFont(&mStyle, needsBold);
-    if (!font->Valid()) {
-        return nullptr;
-    }
     return font.forget();
 }
 
@@ -3269,7 +3266,7 @@ gfxMissingFontRecorder::Flush()
             }
             mNotifiedFonts[i] |= (1 << j);
             if (!fontNeeded.IsEmpty()) {
-                fontNeeded.Append(PRUnichar(','));
+                fontNeeded.Append(char16_t(','));
             }
             uint32_t tag = GetScriptTagForCode(i * 32 + j);
             fontNeeded.Append(char16_t(tag >> 24));

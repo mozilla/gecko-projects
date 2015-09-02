@@ -35,6 +35,16 @@ add_task(function*() {
   do_check_eq(GlobalManager.count, 1);
   do_check_true(GlobalManager.extensionMap.has(ID));
 
+  let chromeReg = AM_Cc["@mozilla.org/chrome/chrome-registry;1"].
+                  getService(AM_Ci.nsIChromeRegistry);
+  try {
+    chromeReg.convertChromeURL(NetUtil.newURI("chrome://webex/content/webex.xul"));
+    do_throw("Chrome manifest should not have been registered");
+  }
+  catch (e) {
+    // Expected the chrome url to not be registered
+  }
+
   let addon = yield promiseAddonByID(ID);
   do_check_neq(addon, null);
   do_check_eq(addon.version, "1.0");
@@ -43,7 +53,7 @@ add_task(function*() {
   do_check_false(addon.appDisabled);
   do_check_true(addon.isActive);
   do_check_eq(addon.type, "extension");
-  do_check_eq(addon.signedState, AddonManager.SIGNEDSTATE_MISSING);
+  do_check_eq(addon.signedState, mozinfo.addon_signing ? AddonManager.SIGNEDSTATE_MISSING : AddonManager.SIGNEDSTATE_NOT_REQUIRED);
 
   // Should persist through a restart
   yield promiseShutdownManager();
@@ -65,7 +75,7 @@ add_task(function*() {
   do_check_false(addon.appDisabled);
   do_check_true(addon.isActive);
   do_check_eq(addon.type, "extension");
-  do_check_eq(addon.signedState, AddonManager.SIGNEDSTATE_MISSING);
+  do_check_eq(addon.signedState, mozinfo.addon_signing ? AddonManager.SIGNEDSTATE_MISSING : AddonManager.SIGNEDSTATE_NOT_REQUIRED);
 
   let file = getFileForAddon(profileDir, ID);
   do_check_true(file.exists());
@@ -112,7 +122,7 @@ add_task(function*() {
   do_check_false(addon.appDisabled);
   do_check_true(addon.isActive);
   do_check_eq(addon.type, "extension");
-  do_check_eq(addon.signedState, AddonManager.SIGNEDSTATE_MISSING);
+  do_check_eq(addon.signedState, mozinfo.addon_signing ? AddonManager.SIGNEDSTATE_MISSING : AddonManager.SIGNEDSTATE_NOT_REQUIRED);
 
   let file = getFileForAddon(profileDir, ID);
   do_check_true(file.exists());
@@ -184,6 +194,28 @@ add_task(function*() {
 
   let file = getFileForAddon(profileDir, ID);
   do_check_false(file.exists());
+
+  yield promiseRestartManager();
+});
+
+// install.rdf should be read before manifest.json
+add_task(function*() {
+
+  yield Promise.all([
+    promiseInstallAllFiles([do_get_addon("webextension_2")], true)
+  ]);
+
+  yield promiseRestartManager();
+
+  let installrdf_id = "first-webextension2@tests.mozilla.org";
+  let first_addon = yield promiseAddonByID(installrdf_id);
+  do_check_neq(first_addon, null);
+  do_check_false(first_addon.appDisabled);
+  do_check_true(first_addon.isActive);
+
+  let manifestjson_id= "last-webextension2@tests.mozilla.org";
+  let last_addon = yield promiseAddonByID(manifestjson_id);
+  do_check_eq(last_addon, null);
 
   yield promiseRestartManager();
 });

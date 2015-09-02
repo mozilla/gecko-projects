@@ -110,8 +110,6 @@ public:
   // feeding it to MediaDataDecoder::Input.
   virtual ConversionRequired DecoderNeedsConversion(const TrackInfo& aConfig) const = 0;
 
-  virtual void DisableHardwareAcceleration() {}
-
   virtual bool SupportsSharedDecoders(const VideoInfo& aConfig) const {
     return !AgnosticMimeType(aConfig.mMimeType);
   }
@@ -161,6 +159,9 @@ protected:
   static bool sAndroidMCDecoderPreferred;
   static bool sAndroidMCDecoderEnabled;
   static bool sGMPDecoderEnabled;
+  static bool sEnableFuzzingWrapper;
+  static uint32_t sVideoOutputMinimumInterval_ms;
+  static bool sDontDelayInputExhausted;
 };
 
 // A callback used by MediaDataDecoder to return output/errors to the

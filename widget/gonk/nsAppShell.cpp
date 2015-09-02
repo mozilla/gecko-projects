@@ -242,7 +242,7 @@ private:
 
     void DispatchKeyDownEvent();
     void DispatchKeyUpEvent();
-    nsEventStatus DispatchKeyEventInternal(uint32_t aEventMessage);
+    nsEventStatus DispatchKeyEventInternal(EventMessage aEventMessage);
 };
 
 KeyEventDispatcher::KeyEventDispatcher(const UserInputData& aData,
@@ -294,10 +294,10 @@ KeyEventDispatcher::PrintableKeyValue() const
 }
 
 nsEventStatus
-KeyEventDispatcher::DispatchKeyEventInternal(uint32_t aEventMessage)
+KeyEventDispatcher::DispatchKeyEventInternal(EventMessage aEventMessage)
 {
     WidgetKeyboardEvent event(true, aEventMessage, nullptr);
-    if (aEventMessage == NS_KEY_PRESS) {
+    if (aEventMessage == eKeyPress) {
         // XXX If the charCode is not a printable character, the charCode
         //     should be computed without Ctrl/Alt/Meta modifiers.
         event.charCode = static_cast<uint32_t>(mChar);
@@ -341,16 +341,16 @@ KeyEventDispatcher::Dispatch()
 void
 KeyEventDispatcher::DispatchKeyDownEvent()
 {
-    nsEventStatus status = DispatchKeyEventInternal(NS_KEY_DOWN);
+    nsEventStatus status = DispatchKeyEventInternal(eKeyDown);
     if (status != nsEventStatus_eConsumeNoDefault) {
-        DispatchKeyEventInternal(NS_KEY_PRESS);
+        DispatchKeyEventInternal(eKeyPress);
     }
 }
 
 void
 KeyEventDispatcher::DispatchKeyUpEvent()
 {
-    DispatchKeyEventInternal(NS_KEY_UP);
+    DispatchKeyEventInternal(eKeyUp);
 }
 
 class SwitchEventRunnable : public nsRunnable {

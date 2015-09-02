@@ -7,19 +7,20 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 let { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
 let { Preferences } = Cu.import("resource://gre/modules/Preferences.jsm", {});
 let { Task } = Cu.import("resource://gre/modules/Task.jsm", {});
-let { Promise } = Cu.import("resource://gre/modules/Promise.jsm", {});
 let { require } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
-let { TargetFactory } = require("devtools/framework/target");
 let { gDevTools } = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
-const DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
-let { DebuggerServer } = require("devtools/server/main");
 let { console } = require("resource://gre/modules/devtools/Console.jsm");
+let { TargetFactory } = require("devtools/framework/target");
+let Promise = require("promise");
+let DevToolsUtils = require("devtools/toolkit/DevToolsUtils");
+let { DebuggerServer } = require("devtools/server/main");
 let { merge } = require("sdk/util/object");
 let { createPerformanceFront } = require("devtools/server/actors/performance");
 let RecordingUtils = require("devtools/toolkit/performance/utils");
 let {
-  PMM_loadProfilerScripts, PMM_isProfilerActive, PMM_stopProfiler, sendProfilerCommand
-} = require("devtools/toolkit/shared/profiler");
+  PMM_loadFrameScripts, PMM_isProfilerActive, PMM_stopProfiler,
+  sendProfilerCommand, consoleMethod
+} = require("devtools/toolkit/performance/process-communication");
 
 let mm = null;
 
@@ -55,6 +56,7 @@ let DEFAULT_PREFS = [
   "devtools.debugger.log",
   "devtools.performance.ui.invert-call-tree",
   "devtools.performance.ui.flatten-tree-recursion",
+  "devtools.performance.ui.show-triggers-for-gc-types",
   "devtools.performance.ui.show-platform-data",
   "devtools.performance.ui.show-idle-blocks",
   "devtools.performance.ui.enable-memory",
@@ -77,6 +79,10 @@ Services.prefs.setBoolPref("devtools.performance.enabled", true);
 // Enable logging for all the tests. Both the debugger server and frontend will
 // be affected by this pref.
 Services.prefs.setBoolPref("devtools.debugger.log", false);
+
+// By default, enable memory flame graphs for tests for now
+// TODO remove when we have flame charts via bug 1148663
+Services.prefs.setBoolPref("devtools.performance.ui.enable-memory-flame", true);
 
 /**
  * Call manually in tests that use frame script utils after initializing
@@ -286,21 +292,6 @@ function busyWait(time) {
   let start = Date.now();
   let stack;
   while (Date.now() - start < time) { stack = Components.stack; }
-}
-
-function consoleMethod (...args) {
-  if (!mm) {
-    throw new Error("`loadFrameScripts()` must be called before using frame scripts.");
-  }
-  // Terrible ugly hack -- this gets stringified when it uses the
-  // message manager, so an undefined arg in `console.profileEnd()`
-  // turns into a stringified "null", which is terrible. This method is only used
-  // for test helpers, so swap out the argument if its undefined with an empty string.
-  // Differences between empty string and undefined are tested on the front itself.
-  if (args[1] == null) {
-    args[1] = "";
-  }
-  mm.sendAsyncMessage("devtools:test:console", args);
 }
 
 function* consoleProfile(win, label) {
@@ -554,4 +545,12 @@ function synthesizeProfileForTest(samples) {
     samples: samples,
     markers: []
   }, uniqueStacks);
+}
+
+function isVisible (element) {
+  return !element.classList.contains("hidden") && !element.hidden;
+}
+
+function within (actual, expected, fuzz, desc) {
+  ok((actual - expected) <= fuzz, `${desc}: Expected ${actual} to be within ${fuzz} of ${expected}`);
 }

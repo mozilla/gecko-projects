@@ -25,7 +25,7 @@ function makePrincipal(origin, appId) {
   let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"]
                  .getService(Ci.nsIScriptSecurityManager);
   let uri = Services.io.newURI(origin, null, null);
-  return secMan.getAppCodebasePrincipal(uri, appId, false);
+  return secMan.createCodebasePrincipal(uri, {appId: appId});
 }
 let principal = makePrincipal('app://settings.gaiamobile.org', 27, false);
 
@@ -396,6 +396,7 @@ add_test(function() {
       do_throw("Unexpected success");
     },
     error => {
+      do_check_eq(error.error, ERROR_OFFLINE);
       FxAccountsManager._fxAccounts._reset();
       Services.io.offline = false;
       certExpired = false;

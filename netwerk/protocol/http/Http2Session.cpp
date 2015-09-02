@@ -1152,9 +1152,12 @@ Http2Session::ParsePadding(uint8_t &paddingControlBytes, uint16_t &paddingLength
   if (mInputFrameFlags & kFlag_PADDED) {
     paddingLength = *reinterpret_cast<uint8_t *>(mInputFrameBuffer + kFrameHeaderBytes);
     paddingControlBytes = 1;
+  } else {
+    paddingLength = 0;
+    paddingControlBytes = 0;
   }
 
-  if (paddingLength > mInputFrameDataSize) {
+  if (static_cast<uint32_t>(paddingLength + paddingControlBytes) > mInputFrameDataSize) {
     // This is fatal to the session
     LOG3(("Http2Session::ParsePadding %p stream 0x%x PROTOCOL_ERROR "
           "paddingLength %d > frame size %d\n",
@@ -1211,6 +1214,11 @@ Http2Session::RecvHeaders(Http2Session *self)
         self->mInputFrameFlags & kFlag_PRIORITY,
         paddingLength,
         self->mInputFrameFlags & kFlag_PADDED));
+
+  if ((paddingControlBytes + priorityLen + paddingLength) > self->mInputFrameDataSize) {
+    // This is fatal to the session
+    RETURN_SESSION_ERROR(self, PROTOCOL_ERROR);
+  }
 
   if (!self->mInputFrameDataStream) {
     // Cannot find stream. We can continue the session, but we need to
@@ -1557,11 +1565,11 @@ Http2Session::RecvPushPromise(Http2Session *self)
     self->mContinuedPromiseStream = promisedID;
   }
 
-  if (paddingLength > self->mInputFrameDataSize) {
+  if ((paddingControlBytes + promiseLen + paddingLength) > self->mInputFrameDataSize) {
     // This is fatal to the session
     LOG3(("Http2Session::RecvPushPromise %p ID 0x%X assoc ID 0x%X "
-          "PROTOCOL_ERROR paddingLength %d > frame size %d\n",
-          self, promisedID, associatedID, paddingLength,
+          "PROTOCOL_ERROR extra %d > frame size %d\n",
+          self, promisedID, associatedID, (paddingControlBytes + promiseLen + paddingLength),
           self->mInputFrameDataSize));
     RETURN_SESSION_ERROR(self, PROTOCOL_ERROR);
   }

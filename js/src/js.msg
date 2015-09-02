@@ -139,7 +139,6 @@ MSG_DEF(JSMSG_BAD_APPLY_ARGS,          1, JSEXN_TYPEERR, "second argument to Fun
 MSG_DEF(JSMSG_BAD_FORMAL,              0, JSEXN_SYNTAXERR, "malformed formal parameter")
 MSG_DEF(JSMSG_CALLER_IS_STRICT,        0, JSEXN_TYPEERR, "access to strict mode caller function is censored")
 MSG_DEF(JSMSG_DEPRECATED_USAGE,        1, JSEXN_REFERENCEERR, "deprecated {0} usage")
-MSG_DEF(JSMSG_FUNCTION_ARGUMENTS_AND_REST, 0, JSEXN_TYPEERR, "the 'arguments' property of a function with a rest parameter may not be used")
 MSG_DEF(JSMSG_NOT_SCRIPTED_FUNCTION,   1, JSEXN_TYPEERR, "{0} is not a scripted function")
 MSG_DEF(JSMSG_NO_REST_NAME,            0, JSEXN_SYNTAXERR, "no parameter name after ...")
 MSG_DEF(JSMSG_PARAMETER_AFTER_REST,    0, JSEXN_SYNTAXERR, "parameter after rest parameter")
@@ -181,7 +180,6 @@ MSG_DEF(JSMSG_UNKNOWN_FORMAT,          1, JSEXN_INTERNALERR, "unknown bytecode f
 
 // Frontend
 MSG_DEF(JSMSG_ACCESSOR_WRONG_ARGS,     3, JSEXN_SYNTAXERR, "{0} functions must have {1} argument{2}")
-MSG_DEF(JSMSG_ARGUMENTS_AND_REST,      0, JSEXN_SYNTAXERR, "'arguments' object may not be used in conjunction with a rest parameter")
 MSG_DEF(JSMSG_ARRAY_COMP_LEFTSIDE,     0, JSEXN_SYNTAXERR, "invalid array comprehension left-hand side")
 MSG_DEF(JSMSG_ARRAY_INIT_TOO_BIG,      0, JSEXN_INTERNALERR, "array initialiser too large")
 MSG_DEF(JSMSG_AS_AFTER_IMPORT_STAR,    0, JSEXN_SYNTAXERR, "missing keyword 'as' after import *")
@@ -260,6 +258,7 @@ MSG_DEF(JSMSG_IDSTART_AFTER_NUMBER,    0, JSEXN_SYNTAXERR, "identifier starts im
 MSG_DEF(JSMSG_ILLEGAL_CHARACTER,       0, JSEXN_SYNTAXERR, "illegal character")
 MSG_DEF(JSMSG_IMPORT_DECL_AT_TOP_LEVEL, 0, JSEXN_SYNTAXERR, "import declarations may only appear at top level")
 MSG_DEF(JSMSG_INVALID_FOR_INOF_DECL_WITH_INIT,1,JSEXN_SYNTAXERR,"for-{0} loop head declarations may not have initializers")
+MSG_DEF(JSMSG_INVALID_OUTSIDE_MODULE,  0, JSEXN_SYNTAXERR, "import and export declarations are only valid at the top level of a module")
 MSG_DEF(JSMSG_IN_AFTER_FOR_NAME,       0, JSEXN_SYNTAXERR, "missing 'in' or 'of' after for")
 MSG_DEF(JSMSG_LABEL_NOT_FOUND,         0, JSEXN_SYNTAXERR, "label not found")
 MSG_DEF(JSMSG_LET_CLASS_BINDING,       0, JSEXN_SYNTAXERR, "'let' is not a valid name for a class")
@@ -273,7 +272,6 @@ MSG_DEF(JSMSG_MISSING_EXPR_AFTER_THROW,0, JSEXN_SYNTAXERR, "throw statement is m
 MSG_DEF(JSMSG_MISSING_FORMAL,          0, JSEXN_SYNTAXERR, "missing formal parameter")
 MSG_DEF(JSMSG_MISSING_HEXDIGITS,       0, JSEXN_SYNTAXERR, "missing hexadecimal digits after '0x'")
 MSG_DEF(JSMSG_MISSING_OCTAL_DIGITS,    0, JSEXN_SYNTAXERR, "missing octal digits after '0o'")
-MSG_DEF(JSMSG_MODULES_NOT_IMPLEMENTED, 0, JSEXN_SYNTAXERR, "modules are not implemented yet")
 MSG_DEF(JSMSG_MODULE_SPEC_AFTER_FROM,  0, JSEXN_SYNTAXERR, "missing module specifier after 'from' keyword")
 MSG_DEF(JSMSG_NAME_AFTER_DOT,          0, JSEXN_SYNTAXERR, "missing name after . operator")
 MSG_DEF(JSMSG_NAME_AFTER_IMPORT_STAR_AS, 0, JSEXN_SYNTAXERR, "missing name after import * as")

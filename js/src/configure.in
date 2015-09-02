@@ -489,8 +489,6 @@ case "$target" in
     fi
 
     AC_DEFINE_UNQUOTED(MOZ_WINSDK_TARGETVER,0x$MOZ_WINSDK_TARGETVER)
-    # Definitions matching sdkddkver.h
-    AC_DEFINE_UNQUOTED(MOZ_NTDDI_WIN7, 0x06010000)
     ;;
 esac
 
@@ -1741,8 +1739,10 @@ ia64*-hpux*)
         _DEFINES_CXXFLAGS='-FI $(DEPTH)/js/src/js-confdefs.h -DMOZILLA_CLIENT'
         CFLAGS="$CFLAGS -W3 -Gy"
         CXXFLAGS="$CXXFLAGS -W3 -Gy"
-        if test "$CPU_ARCH" = "x86"; then
+        if test "$CPU_ARCH" = "x86" -a -z "$CLANG_CL"; then
             dnl VS2012+ defaults to -arch:SSE2.
+            dnl Clang-cl gets confused by -arch:IA32, so don't add it.
+            dnl (See https://llvm.org/bugs/show_bug.cgi?id=24335)
             CFLAGS="$CFLAGS -arch:IA32"
             CXXFLAGS="$CXXFLAGS -arch:IA32"
         fi
@@ -1795,6 +1795,7 @@ ia64*-hpux*)
         dnl Probably also a compiler bug, but what can you do?
         PROFILE_USE_LDFLAGS="-LTCG:PGUPDATE"
         LDFLAGS="$LDFLAGS -DYNAMICBASE"
+        RCFLAGS="-nologo"
     fi
     AC_DEFINE(HAVE_SNPRINTF)
     AC_DEFINE(HAVE__MSIZE)
@@ -3080,8 +3081,10 @@ elif test "$JS_SIMULATOR" = arm; then
     fi
     AC_DEFINE(JS_SIMULATOR)
     AC_DEFINE(JS_SIMULATOR_ARM)
+    AC_DEFINE(JS_DISASM_ARM)
     AC_DEFINE(JS_CODEGEN_ARM)
     JS_SIMULATOR_ARM=1
+    JS_DISASM_ARM=1
     JS_CODEGEN_ARM=1
 elif test "$JS_SIMULATOR" = arm64; then
     if test "$CPU_ARCH" != "x86_64"; then
@@ -3115,6 +3118,10 @@ elif test "$CPU_ARCH" = "x86_64"; then
 elif test "$CPU_ARCH" = "arm"; then
     AC_DEFINE(JS_CODEGEN_ARM)
     JS_CODEGEN_ARM=1
+    if test -n "$MOZ_DEBUG"; then
+        AC_DEFINE(JS_DISASM_ARM)
+        JS_DISASM_ARM=1
+    fi
 elif test "$CPU_ARCH" = "mips32"; then
     AC_DEFINE(JS_CODEGEN_MIPS32)
     JS_CODEGEN_MIPS32=1
@@ -3130,6 +3137,7 @@ AC_SUBST(JS_CODEGEN_MIPS32)
 AC_SUBST(JS_CODEGEN_X86)
 AC_SUBST(JS_CODEGEN_X64)
 AC_SUBST(JS_CODEGEN_NONE)
+AC_SUBST(JS_DISASM_ARM)
 AC_SUBST(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
 
 dnl ========================================================
