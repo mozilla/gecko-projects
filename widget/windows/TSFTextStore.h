@@ -511,7 +511,7 @@ protected:
       COMPOSITION_START,
       COMPOSITION_UPDATE,
       COMPOSITION_END,
-      SELECTION_SET
+      SET_SELECTION
     };
     ActionType mType;
     // For compositionstart and selectionset
@@ -841,6 +841,8 @@ protected:
   static bool sDoNotReturnNoLayoutErrorToEasyChangjei;
   static bool sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar;
   static bool sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret;
+  static bool sHackQueryInsertForMSSimplifiedTIP;
+  static bool sHackQueryInsertForMSTraditionalTIP;
 };
 
 } // namespace widget

@@ -82,10 +82,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
     },
 
     propTypes: {
-      activeRoomStore: React.PropTypes.oneOfType([
-        React.PropTypes.instanceOf(loop.store.ActiveRoomStore),
-        React.PropTypes.instanceOf(loop.store.FxOSActiveRoomStore)
-      ]).isRequired,
+      activeRoomStore: React.PropTypes.instanceOf(loop.store.ActiveRoomStore).isRequired,
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
       failureReason: React.PropTypes.string,
       isFirefox: React.PropTypes.bool.isRequired,
@@ -122,9 +119,10 @@ loop.standaloneRoomViews = (function(mozL10n) {
     },
 
     componentDidUpdate: function() {
-      // Start a timer once from the earliest waiting state if we need to wait
-      // before showing a message.
-      if (this.props.roomState === ROOM_STATES.JOINING &&
+      // Start a timer once from the earliest waiting state or from the state
+      // after someone else leaves if we need to wait before showing a message.
+      if ((this.props.roomState === ROOM_STATES.JOINING ||
+           this.props.roomState === ROOM_STATES.SESSION_CONNECTED) &&
           this.state.waitToRenderWaiting &&
           this._waitTimer === undefined) {
         this._waitTimer = setTimeout(this._allowRenderWaiting,
@@ -232,7 +230,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
           return (
             React.createElement("div", {className: "room-inner-info-area"}, 
               React.createElement("p", {className: "empty-room-message"}, 
-                mozL10n.get("rooms_only_occupant_label")
+                mozL10n.get("rooms_only_occupant_label2")
               ), 
               React.createElement("p", {className: "room-waiting-area"}, 
                 mozL10n.get("rooms_read_while_wait_offer"), 
@@ -355,10 +353,7 @@ loop.standaloneRoomViews = (function(mozL10n) {
     propTypes: {
       // We pass conversationStore here rather than use the mixin, to allow
       // easy configurability for the ui-showcase.
-      activeRoomStore: React.PropTypes.oneOfType([
-        React.PropTypes.instanceOf(loop.store.ActiveRoomStore),
-        React.PropTypes.instanceOf(loop.store.FxOSActiveRoomStore)
-      ]).isRequired,
+      activeRoomStore: React.PropTypes.instanceOf(loop.store.ActiveRoomStore).isRequired,
       dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
       isFirefox: React.PropTypes.bool.isRequired,
       // The poster URLs are for UI-showcase testing and development
@@ -590,9 +585,6 @@ loop.standaloneRoomViews = (function(mozL10n) {
               video: {enabled: !this.state.videoMuted,
                       visible: this._roomIsActive()}})
           ), 
-          React.createElement(loop.fxOSMarketplaceViews.FxOSHiddenMarketplaceView, {
-            marketplaceSrc: this.state.marketplaceSrc, 
-            onMarketplaceMessage: this.state.onMarketplaceMessage}), 
           React.createElement(StandaloneRoomFooter, {dispatcher: this.props.dispatcher})
         )
       );

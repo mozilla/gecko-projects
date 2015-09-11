@@ -3460,6 +3460,8 @@ nsContentUtils::MaybeReportInterceptionErrorToConsole(nsIDocument* aDocument,
     messageName = "ClientRequestOpaqueInterception";
   } else if (aError == NS_ERROR_BAD_OPAQUE_REDIRECT_INTERCEPTION) {
     messageName = "BadOpaqueRedirectInterception";
+  } else if (aError == NS_ERROR_INTERCEPTION_CANCELED) {
+    messageName = "InterceptionCanceled";
   }
 
   if (messageName) {
@@ -3682,7 +3684,7 @@ nsContentUtils::GetEventMessage(nsIAtom* aName)
     }
   }
 
-  return NS_USER_DEFINED_EVENT;
+  return eUnidentifiedEvent;
 }
 
 // static
@@ -3705,7 +3707,7 @@ nsContentUtils::GetEventMessageAndAtom(const nsAString& aName,
   if (sStringEventTable->Get(aName, &mapping)) {
     *aEventMessage =
       mapping.mEventClassID == aEventClassID ? mapping.mMessage :
-                                               NS_USER_DEFINED_EVENT;
+                                               eUnidentifiedEvent;
     return mapping.mAtom;
   }
 
@@ -3718,11 +3720,11 @@ nsContentUtils::GetEventMessageAndAtom(const nsAString& aName,
     }
   }
 
-  *aEventMessage = NS_USER_DEFINED_EVENT;
+  *aEventMessage = eUnidentifiedEvent;
   nsCOMPtr<nsIAtom> atom = do_GetAtom(NS_LITERAL_STRING("on") + aName);
   sUserDefinedEvents->AppendObject(atom);
   mapping.mAtom = atom;
-  mapping.mMessage = NS_USER_DEFINED_EVENT;
+  mapping.mMessage = eUnidentifiedEvent;
   mapping.mType = EventNameType_None;
   mapping.mEventClassID = eBasicEventClass;
   sStringEventTable->Put(aName, mapping);
@@ -4085,7 +4087,7 @@ nsContentUtils::MaybeFireNodeRemoved(nsINode* aChild, nsINode* aParent,
 
   if (HasMutationListeners(aChild,
         NS_EVENT_BITS_MUTATION_NODEREMOVED, aParent)) {
-    InternalMutationEvent mutation(true, NS_MUTATION_NODEREMOVED);
+    InternalMutationEvent mutation(true, eLegacyNodeRemoved);
     mutation.mRelatedNode = do_QueryInterface(aParent);
 
     mozAutoSubtreeModified subtree(aOwnerDoc, aParent);

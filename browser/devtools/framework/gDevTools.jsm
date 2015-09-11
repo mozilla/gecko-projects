@@ -83,6 +83,9 @@ DevTools.prototype = {
    *        (string|required)
    * - label: Localized name for the tool to be displayed to the user
    *          (string|required)
+   * - hideInOptions: Boolean indicating whether or not this tool should be
+                      shown in toolbox options or not. Defaults to false.
+   *                  (boolean)
    * - build: Function that takes an iframe, which has been populated with the
    *          markup from |url|, and also the toolbox containing the panel.
    *          And returns an instance of ToolPanel (function|required)
@@ -883,13 +886,13 @@ let gDevToolsBrowser = {
         switch (threadClient.state) {
           case "paused":
             // When the debugger is already paused.
-            threadClient.breakOnNext();
+            threadClient.resumeThenPause();
             aCallback();
             break;
           case "attached":
             // When the debugger is already open.
             threadClient.interrupt(() => {
-              threadClient.breakOnNext();
+              threadClient.resumeThenPause();
               aCallback();
             });
             break;
@@ -897,7 +900,7 @@ let gDevToolsBrowser = {
             // The debugger is newly opened.
             threadClient.addOneTimeListener("resumed", () => {
               threadClient.interrupt(() => {
-                threadClient.breakOnNext();
+                threadClient.resumeThenPause();
                 aCallback();
               });
             });

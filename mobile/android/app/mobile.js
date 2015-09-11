@@ -221,6 +221,8 @@ pref("extensions.compatability.locales.buildid", "0");
 
 /* blocklist preferences */
 pref("extensions.blocklist.enabled", true);
+// OneCRL freshness checking depends on this value, so if you change it,
+// please also update security.onecrl.maximum_staleness_in_seconds.
 pref("extensions.blocklist.interval", 86400);
 pref("extensions.blocklist.url", "https://blocklist.addons.mozilla.org/blocklist/3/%APP_ID%/%APP_VERSION%/%PRODUCT%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%PING_COUNT%/%TOTAL_PING_COUNT%/%DAYS_SINCE_LAST_PING%/");
 pref("extensions.blocklist.detailsURL", "https://www.mozilla.com/%LOCALE%/blocklist/");
@@ -284,10 +286,6 @@ pref("privacy.trackingprotection.pbmode.enabled", true);
 // disable search suggestions by default
 pref("browser.search.suggest.enabled", false);
 pref("browser.search.suggest.prompted", false);
-
-// Tell the search service to load search plugins from the locale JAR
-pref("browser.search.loadFromJars", true);
-pref("browser.search.jarURIs", "chrome://browser/locale/searchplugins/");
 
 // tell the search service that we don't really expose the "current engine"
 pref("browser.search.noCurrentEngine", true);
@@ -486,6 +484,10 @@ pref("security.mixed_content.block_active_content", true);
 // Enable pinning
 pref("security.cert_pinning.enforcement_level", 1);
 
+// Required blocklist freshness for OneCRL OCSP bypass
+// (default is 1.25x extensions.blocklist.interval, or 30 hours)
+pref("security.onecrl.maximum_staleness_in_seconds", 108000);
+
 // Only fetch OCSP for EV certificates
 pref("security.OCSP.enabled", 2);
 
@@ -611,14 +613,20 @@ pref("dom.w3c_touch_events.enabled", 1);
 #ifdef MOZ_SAFE_BROWSING
 pref("browser.safebrowsing.enabled", true);
 pref("browser.safebrowsing.malware.enabled", true);
+pref("browser.safebrowsing.downloads.enabled", false);
+pref("browser.safebrowsing.downloads.remote.enabled", false);
+pref("browser.safebrowsing.downloads.remote.timeout_ms", 10000);
 pref("browser.safebrowsing.debug", false);
 
-pref("browser.safebrowsing.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
-pref("browser.safebrowsing.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.provider.google.lists", "goog-badbinurl-shavar,goog-downloadwhite-digest256,goog-phish-shavar,goog-malware-shavar,goog-unwanted-shavar");
+pref("browser.safebrowsing.provider.google.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
+pref("browser.safebrowsing.provider.google.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.provider.google.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
+pref("browser.safebrowsing.provider.google.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
+
 pref("browser.safebrowsing.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
-pref("browser.safebrowsing.malware.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 
 pref("browser.safebrowsing.id", @MOZ_APP_UA_NAME@);
 
@@ -934,5 +942,10 @@ pref("consoleservice.logcat", true);
 // Enable Cardboard VR on mobile, assuming VR at all is enabled
 pref("dom.vr.cardboard.enabled", true);
 
-// TODO: Disabled until bug 1190301 is fixed.
-pref("browser.tabs.showAudioPlayingIcon", false);
+pref("browser.tabs.showAudioPlayingIcon", true);
+
+// Enable service workers and fetch interception on Nightly Fennec
+#ifdef NIGHTLY_BUILD
+pref("dom.serviceWorkers.enabled", true);
+pref("dom.serviceWorkers.interception.enabled", true);
+#endif

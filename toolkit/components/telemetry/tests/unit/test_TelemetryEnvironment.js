@@ -365,9 +365,40 @@ function checkSystemSection(data) {
   }
 
   Assert.ok(Number.isFinite(data.system.memoryMB), "MemoryMB must be a number.");
-  if (gIsWindows) {
-    Assert.equal(typeof data.system.isWow64, "boolean",
-              "isWow64 must be available on Windows and have the correct type.");
+
+  if (gIsWindows || gIsMac || gIsLinux) {
+    let EXTRA_CPU_FIELDS = ["cores", "model", "family", "stepping",
+			    "l2cacheKB", "l3cacheKB", "speedMHz", "vendor"];
+
+    for (let f of EXTRA_CPU_FIELDS) {
+      // Note this is testing TelemetryEnvironment.js only, not that the
+      // values are valid - null is the fallback.
+      Assert.ok(f in data.system.cpu, f + " must be available under cpu.");
+    }
+
+    if (gIsWindows) {
+      Assert.equal(typeof data.system.isWow64, "boolean",
+             "isWow64 must be available on Windows and have the correct type.");
+      Assert.ok("virtualMaxMB" in data.system, "virtualMaxMB must be available.");
+      Assert.ok(Number.isFinite(data.system.virtualMaxMB),
+                "virtualMaxMB must be a number.");
+    }
+
+    // We insist these are available
+    for (let f of ["cores"]) {
+	Assert.ok(!(f in data.system.cpu) ||
+		  Number.isFinite(data.system.cpu[f]),
+		  f + " must be a number if non null.");
+    }
+
+    // These should be numbers if they are not null
+    for (let f of ["model", "family", "stepping", "l2cacheKB",
+		   "l3cacheKB", "speedMHz"]) {
+	Assert.ok(!(f in data.system.cpu) ||
+		  data.system.cpu[f] === null ||
+		  Number.isFinite(data.system.cpu[f]),
+		  f + " must be a number if non null.");
+    }
   }
 
   let cpuData = data.system.cpu;
@@ -1036,9 +1067,11 @@ add_task(function* test_defaultSearchEngine() {
 
   // Load the engines definitions from a custom JAR file: that's needed so that
   // the search provider reports an engine identifier.
-  let defaultBranch = Services.prefs.getDefaultBranch(null);
-  defaultBranch.setCharPref("browser.search.jarURIs", "chrome://testsearchplugin/locale/searchplugins/");
-  defaultBranch.setBoolPref("browser.search.loadFromJars", true);
+  let url = "chrome://testsearchplugin/locale/searchplugins/";
+  let resProt = Services.io.getProtocolHandler("resource")
+                        .QueryInterface(Ci.nsIResProtocolHandler);
+  resProt.setSubstitution("search-plugins",
+                          Services.io.newURI(url, null, null));
 
   // Initialize the search service.
   yield new Promise(resolve => Services.search.init(resolve));

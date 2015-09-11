@@ -69,8 +69,7 @@ ImportEntryObject::class_ = {
     "ImportEntry",
     JSCLASS_HAS_RESERVED_SLOTS(ImportEntryObject::SlotCount) |
     JSCLASS_HAS_CACHED_PROTO(JSProto_ImportEntry) |
-    JSCLASS_IS_ANONYMOUS |
-    JSCLASS_IMPLEMENTS_BARRIERS
+    JSCLASS_IS_ANONYMOUS
 };
 
 DEFINE_GETTER_FUNCTIONS(ImportEntryObject, moduleRequest, ModuleRequestSlot)
@@ -138,8 +137,7 @@ ExportEntryObject::class_ = {
     "ExportEntry",
     JSCLASS_HAS_RESERVED_SLOTS(ExportEntryObject::SlotCount) |
     JSCLASS_HAS_CACHED_PROTO(JSProto_ExportEntry) |
-    JSCLASS_IS_ANONYMOUS |
-    JSCLASS_IMPLEMENTS_BARRIERS
+    JSCLASS_IS_ANONYMOUS
 };
 
 DEFINE_GETTER_FUNCTIONS(ExportEntryObject, exportName, ExportNameSlot)
@@ -218,8 +216,7 @@ ModuleObject::class_ = {
     "Module",
     JSCLASS_HAS_RESERVED_SLOTS(ModuleObject::SlotCount) |
     JSCLASS_HAS_CACHED_PROTO(JSProto_Module) |
-    JSCLASS_IS_ANONYMOUS |
-    JSCLASS_IMPLEMENTS_BARRIERS,
+    JSCLASS_IS_ANONYMOUS,
     nullptr,        /* addProperty */
     nullptr,        /* delProperty */
     nullptr,        /* getProperty */
@@ -263,6 +260,7 @@ ModuleObject::create(ExclusiveContext* cx)
 void
 ModuleObject::init(HandleScript script)
 {
+    MOZ_ASSERT(!script->enclosingStaticScope());
     initReservedSlot(ScriptSlot, PrivateValue(script));
 }
 
@@ -286,6 +284,14 @@ ModuleObject::initImportExportData(HandleArrayObject requestedModules,
     initReservedSlot(StarExportEntriesSlot, ObjectValue(*starExportEntries));
 }
 
+bool
+ModuleObject::hasScript() const
+{
+    // When modules are parsed via the Reflect.parse() API, the module object
+    // doesn't have a script.
+    return !getReservedSlot(ScriptSlot).isUndefined();
+}
+
 JSScript*
 ModuleObject::script() const
 {
@@ -298,13 +304,24 @@ ModuleObject::initialEnvironment() const
     return getReservedSlot(InitialEnvironmentSlot).toObject().as<ModuleEnvironmentObject>();
 }
 
+JSObject*
+ModuleObject::enclosingStaticScope() const
+{
+    // A ModuleObject is always the last thing on the scope chain before the global.
+    // TODO: This may no longer be true when we get top-level lexical scopes.
+    MOZ_ASSERT_IF(hasScript(), !script()->enclosingStaticScope());
+    return nullptr;
+}
+
 /* static */ void
 ModuleObject::trace(JSTracer* trc, JSObject* obj)
 {
     ModuleObject& module = obj->as<ModuleObject>();
-    JSScript* script = module.script();
-    TraceManuallyBarrieredEdge(trc, &script, "Module script");
-    module.setReservedSlot(ScriptSlot, PrivateValue(script));
+    if (module.hasScript()) {
+        JSScript* script = module.script();
+        TraceManuallyBarrieredEdge(trc, &script, "Module script");
+        module.setReservedSlot(ScriptSlot, PrivateValue(script));
+    }
 }
 
 DEFINE_GETTER_FUNCTIONS(ModuleObject, initialEnvironment, InitialEnvironmentSlot)
@@ -488,10 +505,10 @@ ModuleBuilder::processImport(frontend::ParseNode* pn)
 bool
 ModuleBuilder::processExport(frontend::ParseNode* pn)
 {
-    MOZ_ASSERT(pn->isArity(PN_UNARY));
+    MOZ_ASSERT(pn->getArity() == pn->isKind(PNK_EXPORT) ? PN_UNARY : PN_BINARY);
 
-    ParseNode* kid = pn->pn_kid;
     bool isDefault = pn->getKind() == PNK_EXPORT_DEFAULT;
+    ParseNode* kid = isDefault ? pn->pn_left : pn->pn_kid;
 
     switch (kid->getKind()) {
       case PNK_EXPORT_SPEC_LIST:

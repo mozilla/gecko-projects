@@ -542,6 +542,11 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
 
   *aStatus = nsEventStatus_eIgnore;
 
+  if (aEvent->mClass == eQueryContentEventClass) {
+    HandleQueryContentEvent(aEvent->AsQueryContentEvent());
+    return NS_OK;
+  }
+
   switch (aEvent->mMessage) {
   case eContextMenu:
     if (sIsPointerLocked) {
@@ -706,9 +711,9 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       keyEvent->mIsComposing = !!composition;
     }
     break;
-  case NS_WHEEL_WHEEL:
-  case NS_WHEEL_START:
-  case NS_WHEEL_STOP:
+  case eWheel:
+  case eWheelOperationStart:
+  case eWheelOperationEnd:
     {
       NS_ASSERTION(aEvent->mFlags.mIsTrusted,
                    "Untrusted wheel event shouldn't be here");
@@ -718,7 +723,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
         mCurrentTargetContent = content;
       }
 
-      if (aEvent->mMessage != NS_WHEEL_WHEEL) {
+      if (aEvent->mMessage != eWheel) {
         break;
       }
 
@@ -738,101 +743,30 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
         InitLineOrPageDelta(aTargetFrame, this, wheelEvent);
     }
     break;
-  case NS_QUERY_SELECTED_TEXT:
-    DoQuerySelectedText(aEvent->AsQueryContentEvent());
-    break;
-  case NS_QUERY_TEXT_CONTENT:
-    {
-      if (RemoteQueryContentEvent(aEvent)) {
-        break;
-      }
-      ContentEventHandler handler(mPresContext);
-      handler.OnQueryTextContent(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_QUERY_CARET_RECT:
-    {
-      if (RemoteQueryContentEvent(aEvent)) {
-        break;
-      }
-      ContentEventHandler handler(mPresContext);
-      handler.OnQueryCaretRect(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_QUERY_TEXT_RECT:
-    {
-      if (RemoteQueryContentEvent(aEvent)) {
-        break;
-      }
-      ContentEventHandler handler(mPresContext);
-      handler.OnQueryTextRect(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_QUERY_EDITOR_RECT:
-    {
-      if (RemoteQueryContentEvent(aEvent)) {
-        break;
-      }
-      ContentEventHandler handler(mPresContext);
-      handler.OnQueryEditorRect(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_QUERY_CONTENT_STATE:
-    {
-      // XXX remote event
-      ContentEventHandler handler(mPresContext);
-      handler.OnQueryContentState(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_QUERY_SELECTION_AS_TRANSFERABLE:
-    {
-      // XXX remote event
-      ContentEventHandler handler(mPresContext);
-      handler.OnQuerySelectionAsTransferable(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_QUERY_CHARACTER_AT_POINT:
-    {
-      // XXX remote event
-      ContentEventHandler handler(mPresContext);
-      handler.OnQueryCharacterAtPoint(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_QUERY_DOM_WIDGET_HITTEST:
-    {
-      // XXX remote event
-      ContentEventHandler handler(mPresContext);
-      handler.OnQueryDOMWidgetHittest(aEvent->AsQueryContentEvent());
-    }
-    break;
-  case NS_SELECTION_SET:
+  case eSetSelection:
     IMEStateManager::HandleSelectionEvent(aPresContext, GetFocusedContent(),
                                           aEvent->AsSelectionEvent());
     break;
-  case NS_CONTENT_COMMAND_CUT:
-  case NS_CONTENT_COMMAND_COPY:
-  case NS_CONTENT_COMMAND_PASTE:
-  case NS_CONTENT_COMMAND_DELETE:
-  case NS_CONTENT_COMMAND_UNDO:
-  case NS_CONTENT_COMMAND_REDO:
-  case NS_CONTENT_COMMAND_PASTE_TRANSFERABLE:
-    {
-      DoContentCommandEvent(aEvent->AsContentCommandEvent());
-    }
+  case eContentCommandCut:
+  case eContentCommandCopy:
+  case eContentCommandPaste:
+  case eContentCommandDelete:
+  case eContentCommandUndo:
+  case eContentCommandRedo:
+  case eContentCommandPasteTransferable:
+    DoContentCommandEvent(aEvent->AsContentCommandEvent());
     break;
-  case NS_CONTENT_COMMAND_SCROLL:
-    {
-      DoContentCommandScrollEvent(aEvent->AsContentCommandEvent());
-    }
+  case eContentCommandScroll:
+    DoContentCommandScrollEvent(aEvent->AsContentCommandEvent());
     break;
   case NS_COMPOSITION_START:
     if (aEvent->mFlags.mIsTrusted) {
       // If the event is trusted event, set the selected text to data of
       // composition event.
       WidgetCompositionEvent* compositionEvent = aEvent->AsCompositionEvent();
-      WidgetQueryContentEvent selectedText(true, NS_QUERY_SELECTED_TEXT,
+      WidgetQueryContentEvent selectedText(true, eQuerySelectedText,
                                            compositionEvent->widget);
-      DoQuerySelectedText(&selectedText);
+      HandleQueryContentEvent(&selectedText);
       NS_ASSERTION(selectedText.mSucceeded, "Failed to get selected text");
       compositionEvent->mData = selectedText.mReply.mString;
     }
@@ -841,6 +775,42 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     break;
   }
   return NS_OK;
+}
+
+void
+EventStateManager::HandleQueryContentEvent(WidgetQueryContentEvent* aEvent)
+{
+  switch (aEvent->mMessage) {
+    case eQuerySelectedText:
+    case eQueryTextContent:
+    case eQueryCaretRect:
+    case NS_QUERY_TEXT_RECT:
+    case eQueryEditorRect:
+      if (!IsTargetCrossProcess(aEvent)) {
+        break;
+      }
+      // Will not be handled locally, remote the event
+      GetCrossProcessTarget()->HandleQueryContentEvent(*aEvent);
+      return;
+    // Following events have not been supported in e10s mode yet.
+    case eQueryContentState:
+    case eQuerySelectionAsTransferable:
+    case eQueryCharacterAtPoint:
+    case eQueryDOMWidgetHittest:
+      break;
+    default:
+      return;
+  }
+
+  // If there is an IMEContentObserver, we need to handle QueryContentEvent
+  // with it.
+  if (mIMEContentObserver) {
+    mIMEContentObserver->HandleQueryContentEvent(aEvent);
+    return;
+  }
+
+  ContentEventHandler handler(mPresContext);
+  handler.HandleQueryContentEvent(aEvent);
 }
 
 // static
@@ -2219,8 +2189,8 @@ EventStateManager::SendLineScrollEvent(nsIFrame* aTargetFrame,
     targetContent = targetContent->GetParent();
   }
 
-  WidgetMouseScrollEvent event(aEvent->mFlags.mIsTrusted, NS_MOUSE_SCROLL,
-                               aEvent->widget);
+  WidgetMouseScrollEvent event(aEvent->mFlags.mIsTrusted,
+                               eLegacyMouseLineOrPageScroll, aEvent->widget);
   event.mFlags.mDefaultPrevented = aState.mDefaultPrevented;
   event.mFlags.mDefaultPreventedByContent = aState.mDefaultPreventedByContent;
   event.refPoint = aEvent->refPoint;
@@ -2259,8 +2229,8 @@ EventStateManager::SendPixelScrollEvent(nsIFrame* aTargetFrame,
     targetContent = targetContent->GetParent();
   }
 
-  WidgetMouseScrollEvent event(aEvent->mFlags.mIsTrusted, NS_MOUSE_PIXEL_SCROLL,
-                               aEvent->widget);
+  WidgetMouseScrollEvent event(aEvent->mFlags.mIsTrusted,
+                               eLegacyMousePixelScroll, aEvent->widget);
   event.mFlags.mDefaultPrevented = aState.mDefaultPrevented;
   event.mFlags.mDefaultPreventedByContent = aState.mDefaultPreventedByContent;
   event.refPoint = aEvent->refPoint;
@@ -3038,7 +3008,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       }
     }
     break;
-  case NS_WHEEL_STOP:
+  case eWheelOperationEnd:
     {
       MOZ_ASSERT(aEvent->mFlags.mIsTrusted);
       ScrollbarsForWheel::MayInactivate();
@@ -3051,8 +3021,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       }
     }
     break;
-  case NS_WHEEL_WHEEL:
-  case NS_WHEEL_START:
+  case eWheel:
+  case eWheelOperationStart:
     {
       MOZ_ASSERT(aEvent->mFlags.mIsTrusted);
 
@@ -3078,7 +3048,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
 
           ScrollbarsForWheel::PrepareToScrollText(this, aTargetFrame, wheelEvent);
 
-          if (aEvent->mMessage != NS_WHEEL_WHEEL ||
+          if (aEvent->mMessage != eWheel ||
               (!wheelEvent->deltaX && !wheelEvent->deltaY)) {
             break;
           }
@@ -3111,8 +3081,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           break;
         }
         case WheelPrefs::ACTION_HISTORY: {
-          // If this event doesn't cause NS_MOUSE_SCROLL event or the direction
-          // is oblique, don't perform history back/forward.
+          // If this event doesn't cause eLegacyMouseLineOrPageScroll event or
+          // the direction is oblique, don't perform history back/forward.
           int32_t intDelta = wheelEvent->GetPreferredIntDelta();
           if (!intDelta) {
             break;
@@ -3121,8 +3091,8 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           break;
         }
         case WheelPrefs::ACTION_ZOOM: {
-          // If this event doesn't cause NS_MOUSE_SCROLL event or the direction
-          // is oblique, don't perform zoom in/out.
+          // If this event doesn't cause eLegacyMouseLineOrPageScroll event or
+          // the direction is oblique, don't perform zoom in/out.
           int32_t intDelta = wheelEvent->GetPreferredIntDelta();
           if (!intDelta) {
             break;
@@ -3366,18 +3336,6 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
   mCurrentTargetContent = nullptr;
 
   return ret;
-}
-
-bool
-EventStateManager::RemoteQueryContentEvent(WidgetEvent* aEvent)
-{
-  WidgetQueryContentEvent* queryEvent = aEvent->AsQueryContentEvent();
-  if (!IsTargetCrossProcess(queryEvent)) {
-    return false;
-  }
-  // Will not be handled locally, remote the event
-  GetCrossProcessTarget()->HandleQueryContentEvent(*queryEvent);
-  return true;
 }
 
 TabParent*
@@ -5077,25 +5035,25 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
   NS_ENSURE_TRUE(root, NS_ERROR_FAILURE);
   const char* cmd;
   switch (aEvent->mMessage) {
-    case NS_CONTENT_COMMAND_CUT:
+    case eContentCommandCut:
       cmd = "cmd_cut";
       break;
-    case NS_CONTENT_COMMAND_COPY:
+    case eContentCommandCopy:
       cmd = "cmd_copy";
       break;
-    case NS_CONTENT_COMMAND_PASTE:
+    case eContentCommandPaste:
       cmd = "cmd_paste";
       break;
-    case NS_CONTENT_COMMAND_DELETE:
+    case eContentCommandDelete:
       cmd = "cmd_delete";
       break;
-    case NS_CONTENT_COMMAND_UNDO:
+    case eContentCommandUndo:
       cmd = "cmd_undo";
       break;
-    case NS_CONTENT_COMMAND_REDO:
+    case eContentCommandRedo:
       cmd = "cmd_redo";
       break;
-    case NS_CONTENT_COMMAND_PASTE_TRANSFERABLE:
+    case eContentCommandPasteTransferable:
       cmd = "cmd_pasteTransferable";
       break;
     default:
@@ -5115,7 +5073,7 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
     aEvent->mIsEnabled = canDoIt;
     if (canDoIt && !aEvent->mOnlyEnabledCheck) {
       switch (aEvent->mMessage) {
-        case NS_CONTENT_COMMAND_PASTE_TRANSFERABLE: {
+        case eContentCommandPasteTransferable: {
           nsCOMPtr<nsICommandController> commandController = do_QueryInterface(controller);
           NS_ENSURE_STATE(commandController);
 
@@ -5187,16 +5145,6 @@ EventStateManager::DoContentCommandScrollEvent(
   // The caller may want synchronous scrolling.
   sf->ScrollBy(pt, scrollUnit, nsIScrollableFrame::INSTANT);
   return NS_OK;
-}
-
-void
-EventStateManager::DoQuerySelectedText(WidgetQueryContentEvent* aEvent)
-{
-  if (RemoteQueryContentEvent(aEvent)) {
-    return;
-  }
-  ContentEventHandler handler(mPresContext);
-  handler.OnQuerySelectedText(aEvent);
 }
 
 void
@@ -5624,7 +5572,7 @@ EventStateManager::WheelPrefs::HasUserPrefsForDelta(WidgetWheelEvent* aEvent)
 bool
 EventStateManager::WheelEventIsScrollAction(WidgetWheelEvent* aEvent)
 {
-  return aEvent->mMessage == NS_WHEEL_WHEEL &&
+  return aEvent->mMessage == eWheel &&
          WheelPrefs::GetInstance()->ComputeActionFor(aEvent) == WheelPrefs::ACTION_SCROLL;
 }
 

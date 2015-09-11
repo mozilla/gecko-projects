@@ -200,6 +200,8 @@ struct BytecodeEmitter
     const bool      insideNonGlobalEval:1;  /* True if this is a direct eval
                                                call in some non-global scope. */
 
+    bool            insideModule:1;     /* True if compiling inside a module. */
+
     enum EmitterMode {
         Normal,
 
@@ -480,6 +482,8 @@ struct BytecodeEmitter
     bool emitPropOp(ParseNode* pn, JSOp op);
     bool emitPropIncDec(ParseNode* pn);
 
+    bool emitComputedPropertyName(ParseNode* computedPropName);
+
     // Emit bytecode to put operands for a JSOP_GETELEM/CALLELEM/SETELEM/DELELEM
     // opcode onto the stack in the right order. In the case of SETELEM, the
     // value to be assigned must already be pushed.
@@ -554,9 +558,7 @@ struct BytecodeEmitter
 
     bool emitDeleteName(ParseNode* pn);
     bool emitDeleteProperty(ParseNode* pn);
-    bool emitDeleteSuperProperty(ParseNode* pn);
     bool emitDeleteElement(ParseNode* pn);
-    bool emitDeleteSuperElement(ParseNode* pn);
     bool emitDeleteExpression(ParseNode* pn);
 
     // |op| must be JSOP_TYPEOF or JSOP_TYPEOFEXPR.
@@ -611,11 +613,9 @@ struct BytecodeEmitter
     bool emitClass(ParseNode* pn);
     bool emitSuperPropLHS(bool isCall = false);
     bool emitSuperPropOp(ParseNode* pn, JSOp op, bool isCall = false);
-    bool emitSuperPropIncDec(ParseNode* pn);
     enum SuperElemOptions { SuperElem_Get, SuperElem_Set, SuperElem_Call, SuperElem_IncDec };
     bool emitSuperElemOperands(ParseNode* pn, SuperElemOptions opts = SuperElem_Get);
     bool emitSuperElemOp(ParseNode* pn, JSOp op, bool isCall = false);
-    bool emitSuperElemIncDec(ParseNode* pn);
 };
 
 } /* namespace frontend */

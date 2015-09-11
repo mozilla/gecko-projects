@@ -1857,6 +1857,9 @@ nsEditor::NotifyEditorObservers(NotificationForEditorObservers aNotification)
       FireInputEvent();
       break;
     case eNotifyEditorObserversOfBefore:
+      if (NS_WARN_IF(mIsInEditAction)) {
+        break;
+      }
       mIsInEditAction = true;
       for (auto& observer : observers) {
         observer->BeforeEditAction();
@@ -5152,9 +5155,9 @@ nsEditor::IsAcceptableInputEvent(nsIDOMEvent* aEvent)
   bool needsWidget = false;
   WidgetGUIEvent* widgetGUIEvent = nullptr;
   switch (widgetEvent->mMessage) {
-    case NS_USER_DEFINED_EVENT:
+    case eUnidentifiedEvent:
       // If events are not created with proper event interface, their message
-      // are initialized with NS_USER_DEFINED_EVENT.  Let's ignore such event.
+      // are initialized with eUnidentifiedEvent.  Let's ignore such event.
       return false;
     case NS_COMPOSITION_START:
     case NS_COMPOSITION_END:

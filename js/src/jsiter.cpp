@@ -520,8 +520,10 @@ NativeIterator::allocateIterator(JSContext* cx, uint32_t numGuards, const AutoId
 
     size_t plength = props.length();
     NativeIterator* ni = cx->zone()->pod_malloc_with_extra<NativeIterator, void*>(plength + numGuards * 2);
-    if (!ni)
+    if (!ni) {
+        ReportOutOfMemory(cx);
         return nullptr;
+    }
 
     AutoValueVector strings(cx);
     ni->props_array = ni->props_cursor = reinterpret_cast<HeapPtrFlatString*>(ni + 1);
@@ -992,7 +994,6 @@ PropertyIteratorObject::finalize(FreeOp* fop, JSObject* obj)
 
 const Class PropertyIteratorObject::class_ = {
     "Iterator",
-    JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_CACHED_PROTO(JSProto_Iterator) |
     JSCLASS_HAS_PRIVATE |
     JSCLASS_BACKGROUND_FINALIZE,
@@ -1013,7 +1014,7 @@ const Class PropertyIteratorObject::class_ = {
 
 static const Class ArrayIteratorPrototypeClass = {
     "Array Iterator",
-    JSCLASS_IMPLEMENTS_BARRIERS
+    0
 };
 
 enum {
@@ -1025,7 +1026,6 @@ enum {
 
 const Class ArrayIteratorObject::class_ = {
     "Array Iterator",
-    JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_RESERVED_SLOTS(ArrayIteratorSlotCount)
 };
 
@@ -1037,7 +1037,7 @@ static const JSFunctionSpec array_iterator_methods[] = {
 
 static const Class StringIteratorPrototypeClass = {
     "String Iterator",
-    JSCLASS_IMPLEMENTS_BARRIERS
+    0
 };
 
 enum {
@@ -1048,7 +1048,6 @@ enum {
 
 const Class StringIteratorObject::class_ = {
     "String Iterator",
-    JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_RESERVED_SLOTS(StringIteratorSlotCount)
 };
 

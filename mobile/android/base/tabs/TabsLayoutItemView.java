@@ -4,6 +4,7 @@
 
 package org.mozilla.gecko.tabs;
 
+import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
@@ -38,7 +39,6 @@ public class TabsLayoutItemView extends LinearLayout
     private TextView mTitle;
     private TabsPanelThumbnailView mThumbnail;
     private ImageView mCloseButton;
-    private ImageView mAudioPlayingButton;
     private TabThumbnailWrapper mThumbnailWrapper;
 
     public TabsLayoutItemView(Context context, AttributeSet attrs) {
@@ -99,28 +99,11 @@ public class TabsLayoutItemView extends LinearLayout
         mTitle = (TextView) findViewById(R.id.title);
         mThumbnail = (TabsPanelThumbnailView) findViewById(R.id.thumbnail);
         mCloseButton = (ImageView) findViewById(R.id.close);
-        mAudioPlayingButton = (ImageView) findViewById(R.id.audio_playing);
         mThumbnailWrapper = (TabThumbnailWrapper) findViewById(R.id.wrapper);
 
-        growCloseButtonHitArea();
-
-        mAudioPlayingButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mTabId < 0) {
-                    throw new IllegalStateException("Invalid tab id:" + mTabId);
-                }
-
-                // TODO: Toggle icon in the UI as well (bug 1190301)
-                final JSONObject args = new JSONObject();
-                try {
-                    args.put("tabId", mTabId);
-                    GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Tab:ToggleMuteAudio", args.toString()));
-                } catch (JSONException e) {
-                    Log.e(LOGTAG, "Error toggling mute audio: error building json arguments", e);
-                }
-            }
-        });
+        if (HardwareUtils.isTablet() || AppConstants.NIGHTLY_BUILD) {
+            growCloseButtonHitArea();
+        }
     }
 
     private void growCloseButtonHitArea() {
@@ -161,9 +144,20 @@ public class TabsLayoutItemView extends LinearLayout
         if (mThumbnailWrapper != null) {
             mThumbnailWrapper.setRecording(tab.isRecording());
         }
-        mTitle.setText(tab.getDisplayTitle());
+
+        final String tabTitle = tab.getDisplayTitle();
+        mTitle.setText(tabTitle);
         mCloseButton.setTag(this);
-        mAudioPlayingButton.setVisibility(tab.isAudioPlaying() ? View.VISIBLE : View.GONE);
+
+        if (tab.isAudioPlaying()) {
+            mTitle.setCompoundDrawablesWithIntrinsicBounds(R.drawable.tab_audio_playing, 0, 0, 0);
+            final String tabTitleWithAudio =
+                    getResources().getString(R.string.tab_title_prefix_is_playing_audio, tabTitle);
+            mTitle.setContentDescription(tabTitleWithAudio);
+        } else {
+            mTitle.setCompoundDrawables(null, null, null, null);
+            mTitle.setContentDescription(tabTitle);
+        }
     }
 
     public int getTabId() {

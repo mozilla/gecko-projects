@@ -1497,7 +1497,9 @@ IsAutonessEqual(const nsStyleSides& aSides1, const nsStyleSides& aSides2)
   return true;
 }
 
-nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) const
+nsChangeHint
+nsStylePosition::CalcDifference(const nsStylePosition& aOther,
+                                nsStyleContext* aContext) const
 {
   nsChangeHint hint = nsChangeHint(0);
 
@@ -1582,35 +1584,31 @@ nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) cons
     NS_UpdateHint(hint, nsChangeHint_NeedReflow);
   }
 
-  // Properties that apply only to multi-line flex containers:
-  // 'align-content' can change the positioning & sizing of a multi-line flex
-  // container's children when there's extra space in the cross axis, but it
-  // shouldn't affect the container's own sizing.
-  //
-  // NOTE: If we get here, we know that mFlexWrap == aOther.mFlexWrap
-  // (otherwise, we would've returned earlier). So it doesn't matter which one
-  // of those we check to see if we're multi-line.
-  if (mFlexWrap != NS_STYLE_FLEX_WRAP_NOWRAP &&
-      mAlignContent != aOther.mAlignContent) {
+  // 'align-content' doesn't apply to a single-line flexbox but we don't know
+  // if we're a flex container at this point so we can't optimize for that.
+  if (mAlignContent != aOther.mAlignContent) {
     NS_UpdateHint(hint, nsChangeHint_NeedReflow);
   }
 
-  if (mHeight != aOther.mHeight ||
-      mMinHeight != aOther.mMinHeight ||
-      mMaxHeight != aOther.mMaxHeight) {
-    // Height changes can affect descendant intrinsic sizes due to replaced
-    // elements with percentage heights in descendants which also have
-    // percentage heights. This is handled via nsChangeHint_UpdateComputedBSize
+  bool widthChanged = mWidth != aOther.mWidth ||
+                      mMinWidth != aOther.mMinWidth ||
+                      mMaxWidth != aOther.mMaxWidth;
+  bool heightChanged = mHeight != aOther.mHeight ||
+                       mMinHeight != aOther.mMinHeight ||
+                       mMaxHeight != aOther.mMaxHeight;
+  bool isVertical = WritingMode(aContext).IsVertical();
+  if (isVertical ? widthChanged : heightChanged) {
+    // Block-size changes can affect descendant intrinsic sizes due to replaced
+    // elements with percentage bsizes in descendants which also have
+    // percentage bsizes. This is handled via nsChangeHint_UpdateComputedBSize
     // which clears intrinsic sizes for frames that have such replaced elements.
     NS_UpdateHint(hint, nsChangeHint_NeedReflow |
         nsChangeHint_UpdateComputedBSize |
         nsChangeHint_ReflowChangesSizeOrPosition);
   }
 
-  if (mWidth != aOther.mWidth ||
-      mMinWidth != aOther.mMinWidth ||
-      mMaxWidth != aOther.mMaxWidth) {
-    // None of our width differences can affect descendant intrinsic
+  if (isVertical ? heightChanged : widthChanged) {
+    // None of our inline-size differences can affect descendant intrinsic
     // sizes and none of them need to force children to reflow.
     NS_UpdateHint(hint, NS_SubtractHint(nsChangeHint_AllReflowHints,
                                         NS_CombineHint(nsChangeHint_ClearDescendantIntrinsics,

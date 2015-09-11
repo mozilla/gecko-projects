@@ -595,6 +595,7 @@ let settingsToObserve = {
   // Restart required
   'layers.async-pan-zoom.enabled': false,
 #endif
+  'layout.display-list.dump': false,
   'mms.debugging.enabled': false,
   'network.debugging.enabled': false,
   'privacy.donottrackheader.enabled': false,

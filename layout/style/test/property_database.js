@@ -2490,7 +2490,7 @@ var gCSSProperties = {
                      "font-kerning", "font-synthesis", "font-variant-alternates", "font-variant-caps", "font-variant-east-asian",
                      "font-variant-ligatures", "font-variant-numeric", "font-variant-position" ],
     initial_values: [ (gInitialFontFamilyIsSansSerif ? "medium sans-serif" : "medium serif") ],
-    other_values: [ "large serif", "9px fantasy", "bold italic small-caps 24px/1.4 Times New Roman, serif", "small inherit roman", "small roman inherit",
+    other_values: [ "large serif", "9px fantasy", "condensed bold italic small-caps 24px/1.4 Times New Roman, serif", "small inherit roman", "small roman inherit",
       // system fonts
       "caption", "icon", "menu", "message-box", "small-caption", "status-bar",
       // Gecko-specific system fonts
@@ -3641,6 +3641,14 @@ var gCSSProperties = {
       "calc(3em * 3em / 100%)",
     ],
     quirks_values: { "5": "5px" },
+  },
+  "will-change": {
+    domProp: "willChange",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "auto" ],
+    other_values: [ "scroll-position", "contents", "transform", "opacity", "scroll-position, transform", "transform, opacity", "contents, transform", "property-that-doesnt-exist-yet" ],
+    invalid_values: [ "none", "all", "default", "auto, scroll-position", "scroll-position, auto", "transform scroll-position", ",", "trailing,", "will-change", "transform, will-change" ]
   },
   "word-break": {
     domProp: "wordBreak",
@@ -6374,17 +6382,6 @@ if (SpecialPowers.getBoolPref("layout.css.background-blend-mode.enabled")) {
     other_values: [ "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
       "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity" ],
     invalid_values: ["none", "10px", "multiply multiply"]
-  };
-}
-
-if (SpecialPowers.getBoolPref("layout.css.will-change.enabled")) {
-  gCSSProperties["will-change"] = {
-    domProp: "willChange",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "auto" ],
-    other_values: [ "scroll-position", "contents", "transform", "opacity", "scroll-position, transform", "transform, opacity", "contents, transform", "property-that-doesnt-exist-yet" ],
-    invalid_values: [ "none", "all", "default", "auto, scroll-position", "scroll-position, auto", "transform scroll-position", ",", "trailing,", "will-change", "transform, will-change" ]
   };
 }
 

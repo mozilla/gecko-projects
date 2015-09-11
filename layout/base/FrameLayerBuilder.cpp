@@ -422,17 +422,7 @@ public:
    * Add the given hit regions to the hit regions to the hit retions for this
    * PaintedLayer.
    */
-  void AccumulateEventRegions(nsDisplayLayerEventRegions* aEventRegions)
-  {
-    FLB_LOG_PAINTED_LAYER_DECISION(this, "Accumulating event regions %p against pld=%p\n", aEventRegions, this);
-
-    mHitRegion.Or(mHitRegion, aEventRegions->HitRegion());
-    mMaybeHitRegion.Or(mMaybeHitRegion, aEventRegions->MaybeHitRegion());
-    mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, aEventRegions->DispatchToContentHitRegion());
-    mNoActionRegion.Or(mNoActionRegion, aEventRegions->NoActionRegion());
-    mHorizontalPanRegion.Or(mHorizontalPanRegion, aEventRegions->HorizontalPanRegion());
-    mVerticalPanRegion.Or(mVerticalPanRegion, aEventRegions->VerticalPanRegion());
-  }
+  void AccumulateEventRegions(ContainerState* aState, nsDisplayLayerEventRegions* aEventRegions);
 
   /**
    * If this represents only a nsDisplayImage, and the image type supports being
@@ -496,6 +486,14 @@ public:
    * mDispatchToContentHitRegion.
    */
   nsRegion mVerticalPanRegion;
+  /**
+   * Scaled versions of the bounds of mHitRegion and mMaybeHitRegion.
+   * We store these because FindPaintedLayerFor() needs to consume them
+   * in this form, and it's a hot code path so we don't want to scale
+   * them inside that function.
+   */
+  nsIntRect mScaledHitRegionBounds;
+  nsIntRect mScaledMaybeHitRegionBounds;
   /**
    * The "active scrolled root" for all content in the layer. Must
    * be non-null; all content in a PaintedLayer must have the same
@@ -2593,14 +2591,15 @@ PaintedLayerDataNode::FindPaintedLayerFor(const nsIntRect& aVisibleRect,
         MOZ_ASSERT(!data.mExclusiveToOneItem);
         lowestUsableLayer = &data;
         nsIntRegion visibleRegion = data.mVisibleRegion;
-        // When checking whether the visible region intersects the given
-        // visible rect, also include the event-regions in the visible region,
+        // Also check whether the event-regions intersect the visible rect,
         // unless we're in an inactive layer, in which case the event-regions
         // will be hoisted out into their own layer.
-        ContainerState& contState = mTree.ContState();
-        if (!contState.IsInInactiveLayer()) {
-          visibleRegion.OrWith(contState.ScaleRegionToOutsidePixels(data.mHitRegion));
-          visibleRegion.OrWith(contState.ScaleRegionToOutsidePixels(data.mMaybeHitRegion));
+        // For performance reasons, we check the intersection with the bounds
+        // of the event-regions.
+        if (!mTree.ContState().IsInInactiveLayer() &&
+            (data.mScaledHitRegionBounds.Intersects(aVisibleRect) ||
+             data.mScaledMaybeHitRegionBounds.Intersects(aVisibleRect))) {
+          break;
         }
         if (visibleRegion.Intersects(aVisibleRect)) {
           break;
@@ -3439,6 +3438,24 @@ PaintedLayerData::Accumulate(ContainerState* aState,
   }
 }
 
+void
+PaintedLayerData::AccumulateEventRegions(ContainerState* aState, nsDisplayLayerEventRegions* aEventRegions)
+{
+  FLB_LOG_PAINTED_LAYER_DECISION(this, "Accumulating event regions %p against pld=%p\n", aEventRegions, this);
+
+  mHitRegion.Or(mHitRegion, aEventRegions->HitRegion());
+  mMaybeHitRegion.Or(mMaybeHitRegion, aEventRegions->MaybeHitRegion());
+  mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, aEventRegions->DispatchToContentHitRegion());
+  mNoActionRegion.Or(mNoActionRegion, aEventRegions->NoActionRegion());
+  mHorizontalPanRegion.Or(mHorizontalPanRegion, aEventRegions->HorizontalPanRegion());
+  mVerticalPanRegion.Or(mVerticalPanRegion, aEventRegions->VerticalPanRegion());
+
+  // Calculate scaled versions of the bounds of mHitRegion and mMaybeHitRegion
+  // for quick access in FindPaintedLayerFor().
+  mScaledHitRegionBounds = aState->ScaleToOutsidePixels(mHitRegion.GetBounds());
+  mScaledMaybeHitRegionBounds = aState->ScaleToOutsidePixels(mMaybeHitRegion.GetBounds());
+}
+
 PaintedLayerData
 ContainerState::NewPaintedLayerData(nsDisplayItem* aItem,
                                     const nsIntRect& aVisibleRect,
@@ -3653,7 +3670,7 @@ GetScrollClipIntersection(nsDisplayListBuilder* aBuilder, const nsIFrame* aAnima
       continue;
     }
 
-    const DisplayItemClip* clip = scrollFrame->ComputeScrollClip(aIsCaret);
+    Maybe<DisplayItemClip> clip = scrollFrame->ComputeScrollClip(aIsCaret);
     if (clip) {
       resultClip.IntersectWith(*clip);
     }
@@ -4013,7 +4030,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       if (itemType == nsDisplayItem::TYPE_LAYER_EVENT_REGIONS) {
         nsDisplayLayerEventRegions* eventRegions =
             static_cast<nsDisplayLayerEventRegions*>(item);
-        paintedLayerData->AccumulateEventRegions(eventRegions);
+        paintedLayerData->AccumulateEventRegions(this, eventRegions);
       } else {
         // check to see if the new item has rounded rect clips in common with
         // other items in the layer
@@ -4525,7 +4542,7 @@ ContainerState::SetupScrollingMetadata(NewLayerEntry* aEntry)
     }
 
     FrameMetrics& metrics = info->metrics;
-    const DisplayItemClip* clip = info->clip;
+    Maybe<DisplayItemClip> clip = info->clip;
 
     if (clip &&
         clip->HasClip() &&

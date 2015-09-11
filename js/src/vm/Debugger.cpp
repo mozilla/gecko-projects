@@ -1289,7 +1289,7 @@ Debugger::fireOnGarbageCollectionHook(JSContext* cx,
 }
 
 JSTrapStatus
-Debugger::fireOnIonCompilationHook(JSContext* cx, AutoScriptVector& scripts, LSprinter& graph)
+Debugger::fireOnIonCompilationHook(JSContext* cx, Handle<ScriptVector> scripts, LSprinter& graph)
 {
     RootedObject hook(cx, getHook(OnIonCompilation));
     MOZ_ASSERT(hook);
@@ -1676,7 +1676,7 @@ Debugger::slowPathOnLogAllocationSite(JSContext* cx, HandleObject obj, HandleSav
 }
 
 /* static */ void
-Debugger::slowPathOnIonCompilation(JSContext* cx, AutoScriptVector& scripts, LSprinter& graph)
+Debugger::slowPathOnIonCompilation(JSContext* cx, Handle<ScriptVector> scripts, LSprinter& graph)
 {
     JSTrapStatus status = dispatchHook(
         cx,
@@ -2594,7 +2594,7 @@ Debugger::finalize(FreeOp* fop, JSObject* obj)
 
 const Class Debugger::jsclass = {
     "Debugger",
-    JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |
+    JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUG_COUNT),
     nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, Debugger::finalize,
@@ -3469,7 +3469,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     /* Construct a ScriptQuery to use matching scripts for |dbg|. */
     ScriptQuery(JSContext* cx, Debugger* dbg):
         cx(cx), debugger(dbg), compartments(cx->runtime()), url(cx), displayURLString(cx),
-        source(cx), innermostForCompartment(cx->runtime())
+        source(cx), innermostForCompartment(cx->runtime()), vector(cx, ScriptVector(cx))
     {}
 
     /*
@@ -3615,7 +3615,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
      * Search all relevant compartments and the stack for scripts matching
      * this query, and append the matching scripts to |vector|.
      */
-    bool findScripts(AutoScriptVector* v) {
+    bool findScripts() {
         if (!prepareQuery())
             return false;
 
@@ -3624,7 +3624,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
             singletonComp = compartments.all().front();
 
         /* Search each compartment for debuggee scripts. */
-        vector = v;
+        MOZ_ASSERT(vector.empty());
         oom = false;
         IterateScripts(cx->runtime(), singletonComp, this, considerScript);
         if (oom) {
@@ -3633,7 +3633,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         }
 
         /* We cannot touch the gray bits while isHeapBusy, so do this now. */
-        for (JSScript** i = vector->begin(); i != vector->end(); ++i)
+        for (JSScript** i = vector.begin(); i != vector.end(); ++i)
             JS::ExposeScriptToActiveJS(*i);
 
         /*
@@ -3648,7 +3648,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
                  r.popFront())
             {
                 JS::ExposeScriptToActiveJS(r.front().value());
-                if (!v->append(r.front().value())) {
+                if (!vector.append(r.front().value())) {
                     ReportOutOfMemory(cx);
                     return false;
                 }
@@ -3656,6 +3656,10 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         }
 
         return true;
+    }
+
+    Handle<ScriptVector> foundScripts() const {
+        return vector;
     }
 
   private:
@@ -3706,8 +3710,12 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
      */
     CompartmentToScriptMap innermostForCompartment;
 
-    /* The vector to which to append the scripts found. */
-    AutoScriptVector* vector;
+    /*
+     * Accumulate the scripts in an Rooted<ScriptVector>, instead of creating
+     * the JS array as we go, because we mustn't allocate JS objects or GC
+     * while we use the CellIter.
+     */
+    Rooted<ScriptVector> vector;
 
     /* Indicates whether OOM has occurred while matching. */
     bool oom;
@@ -3846,7 +3854,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
             }
         } else {
             /* Record this matching script in the results vector. */
-            if (!vector->append(script)) {
+            if (!vector.append(script)) {
                 oom = true;
                 return;
             }
@@ -3874,16 +3882,10 @@ Debugger::findScripts(JSContext* cx, unsigned argc, Value* vp)
             return false;
     }
 
-    /*
-     * Accumulate the scripts in an AutoScriptVector, instead of creating
-     * the JS array as we go, because we mustn't allocate JS objects or GC
-     * while we use the CellIter.
-     */
-    AutoScriptVector scripts(cx);
-
-    if (!query.findScripts(&scripts))
+    if (!query.findScripts())
         return false;
 
+    Handle<ScriptVector> scripts(query.foundScripts());
     RootedArrayObject result(cx, NewDenseFullyAllocatedArray(cx, scripts.length()));
     if (!result)
         return false;
@@ -4483,7 +4485,7 @@ DebuggerScript_trace(JSTracer* trc, JSObject* obj)
 
 const Class DebuggerScript_class = {
     "Script",
-    JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |
+    JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGSCRIPT_COUNT),
     nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr,
@@ -5491,7 +5493,7 @@ DebuggerSource_trace(JSTracer* trc, JSObject* obj)
 
 const Class DebuggerSource_class = {
     "Source",
-    JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |
+    JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGSOURCE_COUNT),
     nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr,
@@ -5909,7 +5911,7 @@ CheckThisFrame(JSContext* cx, const CallArgs& args, const char* fnname, bool che
     THIS_FRAME_THISOBJ(cx, argc, vp, fnname, args, thisobj);                   \
     AbstractFramePtr frame = AbstractFramePtr::FromRaw(thisobj->getPrivate()); \
     if (frame.isScriptFrameIterData()) {                                       \
-        ScriptFrameIter iter(cx, *(ScriptFrameIter::Data*)(frame.raw()));      \
+        ScriptFrameIter iter(*(ScriptFrameIter::Data*)(frame.raw()));          \
         frame = iter.abstractFramePtr();                                       \
     }
 
@@ -5919,7 +5921,7 @@ CheckThisFrame(JSContext* cx, const CallArgs& args, const char* fnname, bool che
     {                                                                          \
         AbstractFramePtr f = AbstractFramePtr::FromRaw(thisobj->getPrivate()); \
         if (f.isScriptFrameIterData()) {                                       \
-            maybeIter.emplace(cx, *(ScriptFrameIter::Data*)(f.raw()));         \
+            maybeIter.emplace(*(ScriptFrameIter::Data*)(f.raw()));             \
         } else {                                                               \
             maybeIter.emplace(cx, ScriptFrameIter::ALL_CONTEXTS,               \
                               ScriptFrameIter::GO_THROUGH_SAVED,               \
@@ -6617,7 +6619,7 @@ DebuggerObject_trace(JSTracer* trc, JSObject* obj)
 
 const Class DebuggerObject_class = {
     "Object",
-    JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |
+    JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGOBJECT_COUNT),
     nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr,
@@ -7563,7 +7565,7 @@ DebuggerEnv_trace(JSTracer* trc, JSObject* obj)
 
 const Class DebuggerEnv_class = {
     "Environment",
-    JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |
+    JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGENV_COUNT),
     nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr,
@@ -8123,17 +8125,19 @@ JS::dbg::onPromiseSettled(JSContext* cx, HandleObject promise)
 }
 
 JS_PUBLIC_API(bool)
-JS::dbg::IsDebugger(const JSObject& obj)
+JS::dbg::IsDebugger(JSObject& obj)
 {
-    return js::GetObjectClass(&obj) == &Debugger::jsclass &&
-           js::Debugger::fromJSObject(&obj) != nullptr;
+    JSObject* unwrapped = CheckedUnwrap(&obj);
+    return unwrapped &&
+           js::GetObjectClass(unwrapped) == &Debugger::jsclass &&
+           js::Debugger::fromJSObject(unwrapped) != nullptr;
 }
 
 JS_PUBLIC_API(bool)
-JS::dbg::GetDebuggeeGlobals(JSContext* cx, const JSObject& dbgObj, AutoObjectVector& vector)
+JS::dbg::GetDebuggeeGlobals(JSContext* cx, JSObject& dbgObj, AutoObjectVector& vector)
 {
     MOZ_ASSERT(IsDebugger(dbgObj));
-    js::Debugger* dbg = js::Debugger::fromJSObject(&dbgObj);
+    js::Debugger* dbg = js::Debugger::fromJSObject(CheckedUnwrap(&dbgObj));
 
     if (!vector.reserve(vector.length() + dbg->debuggees.count())) {
         JS_ReportOutOfMemory(cx);

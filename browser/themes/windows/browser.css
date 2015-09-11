@@ -47,6 +47,8 @@
   --urlbar-dropmarker-active-2x-region: rect(0, 66px, 28px, 44px);
 
   --panel-separator-color: ThreeDLightShadow;
+
+  --urlbar-separator-color: hsla(0,0%,16%,.2);
 }
 
 #menubar-items {
@@ -724,7 +726,7 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
   transition-duration: 150ms;
 }
 
-toolbarbutton[cui-areatype="toolbar"] > :-moz-any(@nestedButtons@) > .toolbarbutton-icon,
+toolbaritem[cui-areatype="toolbar"] > :-moz-any(@nestedButtons@) > .toolbarbutton-icon,
 :-moz-any(@primaryToolbarButtons@):-moz-any([cui-areatype="toolbar"],:not([cui-areatype])):not(:-moz-any(@nestedButtons@)) > .toolbarbutton-icon,
 :-moz-any(@primaryToolbarButtons@):-moz-any([cui-areatype="toolbar"],:not([cui-areatype])) > .toolbarbutton-badge-stack > .toolbarbutton-icon,
 :-moz-any(@primaryToolbarButtons@):-moz-any([cui-areatype="toolbar"],:not([cui-areatype])) > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
@@ -732,8 +734,8 @@ toolbarbutton[cui-areatype="toolbar"] > :-moz-any(@nestedButtons@) > .toolbarbut
   width: 18px;
 }
 
-#nav-bar toolbarbutton[cui-areatype="toolbar"] > :-moz-any(@nestedButtons@) > .toolbarbutton-icon,
-#nav-bar :-moz-any(@primaryToolbarButtons@):-moz-any([cui-areatype="toolbar"],:not([cui-areatype])) > .toolbarbutton-icon,
+#nav-bar toolbaritem[cui-areatype="toolbar"] > :-moz-any(@nestedButtons@) > .toolbarbutton-icon,
+#nav-bar :-moz-any(@primaryToolbarButtons@):-moz-any([cui-areatype="toolbar"],:not([cui-areatype])):not(:-moz-any(@nestedButtons@)) > .toolbarbutton-icon,
 #nav-bar :-moz-any(@primaryToolbarButtons@):-moz-any([cui-areatype="toolbar"],:not([cui-areatype])) > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
 #nav-bar #bookmarks-menu-button[cui-areatype="toolbar"] > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon {
   /* horizontal padding + border + actual icon width */
@@ -1228,10 +1230,6 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
   border: 1px solid ThreeDShadow;
 }
 
-#urlbar {
-  -moz-padding-end: 2px;
-}
-
 /* overlap the urlbar's border */
 #PopupAutoCompleteRichResult {
   margin-top: -1px;
@@ -1265,7 +1263,6 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
     .searchbar-textbox:not(:-moz-lwtheme) {
       border-color: hsl(0,0%,90%);
       padding: 1px;
-      -moz-padding-end: 3px;
       transition-property: border-color, box-shadow;
       transition-duration: .1s;
     }
@@ -1392,7 +1389,6 @@ html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
   padding: 0 3px;
 }
 
-.searchbar-engine-button,
 .search-go-container {
   padding: 2px 2px;
 }
@@ -1649,12 +1645,20 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 
 /* combined go/reload/stop button in location bar */
 
-#urlbar > toolbarbutton {
+#urlbar-go-button,
+#urlbar-reload-button,
+#urlbar-stop-button {
   -moz-appearance: none;
-  padding: 0 2px;
-  background-origin: border-box;
-  border: none;
+  border-style: none;
   list-style-image: url("chrome://browser/skin/reload-stop-go.png");
+  padding: 0 9px;
+  margin-inline-start: 2px;
+  border-inline-start: 1px solid var(--urlbar-separator-color);
+  border-image: linear-gradient(transparent 15%,
+                                var(--urlbar-separator-color) 15%,
+                                var(--urlbar-separator-color) 85%,
+                                transparent 85%);
+  border-image-slice: 1;
 }
 
 #urlbar-reload-button {
@@ -1702,8 +1706,16 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 }
 
 @media (min-resolution: 1.1dppx) {
-  #urlbar > toolbarbutton {
+  #urlbar-go-button,
+  #urlbar-reload-button,
+  #urlbar-stop-button {
     list-style-image: url("chrome://browser/skin/reload-stop-go@2x.png");
+  }
+
+  #urlbar-go-button > .toolbarbutton-icon,
+  #urlbar-reload-button > .toolbarbutton-icon,
+  #urlbar-stop-button > .toolbarbutton-icon {
+    width: 14px;
   }
 
   #urlbar-go-button {
@@ -1740,10 +1752,6 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 
   #urlbar-stop-button:hover:active {
     -moz-image-region: rect(56px, 56px, 84px, 28px);
-  }
-
-  #urlbar > toolbarbutton > .toolbarbutton-icon {
-    width: 14px;
   }
 }
 

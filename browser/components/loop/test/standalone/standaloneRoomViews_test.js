@@ -209,6 +209,17 @@ describe("loop.standaloneRoomViews", function() {
 
           sinon.assert.notCalled(dispatch);
         });
+
+      it("should dispatch a `TileShown` action after a wait when a participant leaves",
+        function() {
+          activeRoomStore.setStoreState({roomState: ROOM_STATES.HAS_PARTICIPANTS});
+          clock.tick(loop.standaloneRoomViews.StandaloneRoomInfoArea.RENDER_WAITING_DELAY);
+          activeRoomStore.remotePeerDisconnected();
+          clock.tick(loop.standaloneRoomViews.StandaloneRoomInfoArea.RENDER_WAITING_DELAY);
+
+          sinon.assert.calledOnce(dispatch);
+          sinon.assert.calledWithExactly(dispatch, new sharedActions.TileShown());
+        });
     });
 
     describe("#componentWillReceiveProps", function() {
@@ -741,26 +752,6 @@ describe("loop.standaloneRoomViews", function() {
             expect(view.getDOMNode().querySelector(".local .avatar")).not.eql(
               null);
           });
-      });
-
-      describe("Marketplace hidden iframe", function() {
-
-        it("should set src when the store state change",
-           function(done) {
-
-          var marketplace = view.getDOMNode().querySelector("#marketplace");
-          expect(marketplace.src).to.be.equal("");
-
-          activeRoomStore.setStoreState({
-            marketplaceSrc: "http://market/",
-            onMarketplaceMessage: function () {}
-          });
-
-          view.forceUpdate(function() {
-            expect(marketplace.src).to.be.equal("http://market/");
-            done();
-          });
-        });
       });
     });
   });

@@ -927,13 +927,12 @@ UnboxedPlainObject::obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector&
 
 const Class UnboxedExpandoObject::class_ = {
     "UnboxedExpandoObject",
-    JSCLASS_IMPLEMENTS_BARRIERS
+    0
 };
 
 const Class UnboxedPlainObject::class_ = {
     js_Object_str,
     Class::NON_NATIVE |
-    JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_CACHED_PROTO(JSProto_Object),
     nullptr,        /* addProperty */
     nullptr,        /* delProperty */
@@ -1600,7 +1599,6 @@ UnboxedArrayObject::obj_enumerate(JSContext* cx, HandleObject obj, AutoIdVector&
 const Class UnboxedArrayObject::class_ = {
     "Array",
     Class::NON_NATIVE |
-    JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_SKIP_NURSERY_FINALIZE |
     JSCLASS_BACKGROUND_FINALIZE,
     nullptr,        /* addProperty */
@@ -2045,12 +2043,15 @@ js::TryConvertToUnboxedLayout(ExclusiveContext* cx, Shape* templateShape,
         if (!obj)
             continue;
 
-        if (isArray) {
-            if (!GetValuesFromPreliminaryArrayObject(&obj->as<ArrayObject>(), values))
-                return false;
-        } else {
-            if (!GetValuesFromPreliminaryPlainObject(&obj->as<PlainObject>(), values))
-                return false;
+        bool ok;
+        if (isArray)
+            ok = GetValuesFromPreliminaryArrayObject(&obj->as<ArrayObject>(), values);
+        else
+            ok = GetValuesFromPreliminaryPlainObject(&obj->as<PlainObject>(), values);
+
+        if (!ok) {
+            cx->recoverFromOutOfMemory();
+            return false;
         }
     }
 

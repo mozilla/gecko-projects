@@ -81,7 +81,7 @@ StaticScopeIter<allowGC>::operator++(int)
     } else if (obj->template is<StaticNonSyntacticScopeObjects>()) {
         obj = obj->template as<StaticNonSyntacticScopeObjects>().enclosingScopeForStaticScopeIter();
     } else if (obj->template is<ModuleObject>()) {
-        obj = obj->template as<ModuleObject>().script()->enclosingStaticScope();
+        obj = obj->template as<ModuleObject>().enclosingStaticScope();
     } else if (onNamedLambda || !obj->template as<JSFunction>().isNamedLambda()) {
         onNamedLambda = false;
         JSFunction& fun = obj->template as<JSFunction>();
@@ -103,8 +103,8 @@ StaticScopeIter<allowGC>::hasSyntacticDynamicScopeObject() const
     if (obj->template is<JSFunction>()) {
         JSFunction& fun = obj->template as<JSFunction>();
         if (fun.isBeingParsed())
-            return fun.functionBox()->isHeavyweight();
-        return fun.isHeavyweight();
+            return fun.functionBox()->needsCallObject();
+        return fun.needsCallObject();
     }
     if (obj->template is<ModuleObject>())
         return true;
@@ -147,6 +147,7 @@ StaticScopeIter<allowGC>::type() const
         return NonSyntactic;
     if (obj->template is<ModuleObject>())
         return Module;
+    MOZ_ASSERT(obj->template is<JSFunction>());
     return Function;
 }
 

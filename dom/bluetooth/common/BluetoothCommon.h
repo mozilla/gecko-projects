@@ -59,22 +59,6 @@ extern bool gBluetoothDebugFlag;
 #endif
 
 /**
- * Wrap literal name and value into a BluetoothNamedValue
- * and append it to the array.
- */
-#define BT_APPEND_NAMED_VALUE(array, name, value)                    \
-  array.AppendElement(BluetoothNamedValue(NS_LITERAL_STRING(name),   \
-                                          BluetoothValue(value)))
-
-/**
- * Wrap literal name and value into a BluetoothNamedValue
- * and insert it to the array.
- */
-#define BT_INSERT_NAMED_VALUE(array, index, name, value)                      \
-  array.InsertElementAt(index, BluetoothNamedValue(NS_LITERAL_STRING(name),   \
-                                                   BluetoothValue(value)))
-
-/**
  * Convert an enum value to string and append it to a fallible array.
  */
 #define BT_APPEND_ENUM_STRING_FALLIBLE(array, enumType, enumValue)   \
@@ -202,6 +186,12 @@ extern bool gBluetoothDebugFlag;
 #define PULL_VCARD_LISTING_REQ_ID            "pullvcardlistingreq"
 
 /**
+ * When receiving a MAP request of 'messages listing' from a remote device,
+ * we'll dispatch an event.
+ */
+#define MAP_MESSAGES_LISTING_REQ_ID          "mapmessageslistingreq"
+
+/**
  * When the value of a characteristic of a remote BLE device changes, we'll
  * dispatch an event
  */
@@ -320,6 +310,11 @@ struct BluetoothUuid {
       }
     }
     return true;
+  }
+
+  bool operator!=(const BluetoothUuid& aOther) const
+  {
+    return !(*this == aOther);
   }
 };
 

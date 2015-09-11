@@ -126,7 +126,7 @@ out:
   DWORD written;
   WriteFile(reinterpret_cast<HANDLE>(aFd), buf, b - buf, &written, nullptr);
 #else
-  mozilla::unused << write(aFd, buf, b - buf);
+  MOZ_UNUSED(write(aFd, buf, b - buf));
 #endif
   va_end(ap);
 }

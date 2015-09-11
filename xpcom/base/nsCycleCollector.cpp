@@ -868,33 +868,44 @@ public:
   }
 #endif
 
+  PtrToNodeEntry* FindNodeEntry(void* aPtr);
   PtrInfo* FindNode(void* aPtr);
   PtrToNodeEntry* AddNodeToMap(void* aPtr);
-  void RemoveNodeFromMap(void* aPtr);
+  void RemoveNodeFromMap(PtrToNodeEntry* aPtr);
 
   uint32_t MapCount() const
   {
     return mPtrToNodeMap.EntryCount();
   }
 
-  void SizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
-                           size_t* aNodesSize, size_t* aEdgesSize,
-                           size_t* aWeakMapsSize) const
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
   {
-    *aNodesSize = mNodes.SizeOfExcludingThis(aMallocSizeOf);
-    *aEdgesSize = mEdges.SizeOfExcludingThis(aMallocSizeOf);
+    size_t n = 0;
+
+    n += mNodes.SizeOfExcludingThis(aMallocSizeOf);
+    n += mEdges.SizeOfExcludingThis(aMallocSizeOf);
 
     // We don't measure what the WeakMappings point to, because the
     // pointers are non-owning.
-    *aWeakMapsSize = mWeakMaps.ShallowSizeOfExcludingThis(aMallocSizeOf);
+    n += mWeakMaps.ShallowSizeOfExcludingThis(aMallocSizeOf);
+
+    n += mPtrToNodeMap.ShallowSizeOfExcludingThis(aMallocSizeOf);
+
+    return n;
   }
 };
+
+PtrToNodeEntry*
+CCGraph::FindNodeEntry(void* aPtr)
+{
+  return
+    static_cast<PtrToNodeEntry*>(PL_DHashTableSearch(&mPtrToNodeMap, aPtr));
+}
 
 PtrInfo*
 CCGraph::FindNode(void* aPtr)
 {
-  PtrToNodeEntry* e =
-    static_cast<PtrToNodeEntry*>(PL_DHashTableSearch(&mPtrToNodeMap, aPtr));
+  PtrToNodeEntry* e = FindNodeEntry(aPtr);
   return e ? e->mNode : nullptr;
 }
 
@@ -917,9 +928,9 @@ CCGraph::AddNodeToMap(void* aPtr)
 }
 
 void
-CCGraph::RemoveNodeFromMap(void* aPtr)
+CCGraph::RemoveNodeFromMap(PtrToNodeEntry* aEntry)
 {
-  PL_DHashTableRemove(&mPtrToNodeMap, aPtr);
+  mPtrToNodeMap.RemoveEntry(aEntry);
 }
 
 
@@ -1315,9 +1326,7 @@ public:
 
   void SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                            size_t* aObjectSize,
-                           size_t* aGraphNodesSize,
-                           size_t* aGraphEdgesSize,
-                           size_t* aWeakMapsSize,
+                           size_t* aGraphSize,
                            size_t* aPurpleBufferSize) const;
 
   JSPurpleBuffer* GetJSPurpleBuffer();
@@ -3307,12 +3316,9 @@ NS_IMETHODIMP
 nsCycleCollector::CollectReports(nsIHandleReportCallback* aHandleReport,
                                  nsISupports* aData, bool aAnonymize)
 {
-  size_t objectSize, graphNodesSize, graphEdgesSize, weakMapsSize,
-         purpleBufferSize;
+  size_t objectSize, graphSize, purpleBufferSize;
   SizeOfIncludingThis(CycleCollectorMallocSizeOf,
-                      &objectSize,
-                      &graphNodesSize, &graphEdgesSize,
-                      &weakMapsSize,
+                      &objectSize, &graphSize,
                       &purpleBufferSize);
 
 #define REPORT(_path, _amount, _desc)                                     \
@@ -3333,17 +3339,8 @@ nsCycleCollector::CollectReports(nsIHandleReportCallback* aHandleReport,
   REPORT("explicit/cycle-collector/collector-object", objectSize,
          "Memory used for the cycle collector object itself.");
 
-  REPORT("explicit/cycle-collector/graph-nodes", graphNodesSize,
-         "Memory used for the nodes of the cycle collector's graph. "
-         "This should be zero when the collector is idle.");
-
-  REPORT("explicit/cycle-collector/graph-edges", graphEdgesSize,
-         "Memory used for the edges of the cycle collector's graph. "
-         "This should be zero when the collector is idle.");
-
-  REPORT("explicit/cycle-collector/weak-maps", weakMapsSize,
-         "Memory used for the representation of weak maps in the "
-         "cycle collector's graph. "
+  REPORT("explicit/cycle-collector/graph", graphSize,
+         "Memory used for the cycle collector's graph. "
          "This should be zero when the collector is idle.");
 
   REPORT("explicit/cycle-collector/purple-buffer", purpleBufferSize,
@@ -3848,8 +3845,10 @@ nsCycleCollector::RemoveObjectFromGraph(void* aObj)
     return;
   }
 
-  if (PtrInfo* pinfo = mGraph.FindNode(aObj)) {
-    mGraph.RemoveNodeFromMap(aObj);
+  PtrToNodeEntry* e = mGraph.FindNodeEntry(aObj);
+  PtrInfo* pinfo = e ? e->mNode : nullptr;
+  if (pinfo) {
+    mGraph.RemoveNodeFromMap(e);
 
     pinfo->mPointer = nullptr;
     pinfo->mParticipant = nullptr;
@@ -3859,15 +3858,12 @@ nsCycleCollector::RemoveObjectFromGraph(void* aObj)
 void
 nsCycleCollector::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                                       size_t* aObjectSize,
-                                      size_t* aGraphNodesSize,
-                                      size_t* aGraphEdgesSize,
-                                      size_t* aWeakMapsSize,
+                                      size_t* aGraphSize,
                                       size_t* aPurpleBufferSize) const
 {
   *aObjectSize = aMallocSizeOf(this);
 
-  mGraph.SizeOfExcludingThis(aMallocSizeOf, aGraphNodesSize, aGraphEdgesSize,
-                             aWeakMapsSize);
+  *aGraphSize = mGraph.SizeOfExcludingThis(aMallocSizeOf);
 
   *aPurpleBufferSize = mPurpleBuf.SizeOfExcludingThis(aMallocSizeOf);
 

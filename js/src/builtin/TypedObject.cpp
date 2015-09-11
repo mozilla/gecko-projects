@@ -2189,7 +2189,7 @@ InlineTransparentTypedObject::getOrCreateBuffer(JSContext* cx)
     ObjectWeakMap*& table = cx->compartment()->lazyArrayBuffers;
     if (!table) {
         table = cx->new_<ObjectWeakMap>(cx);
-        if (!table)
+        if (!table || !table->init())
             return nullptr;
     }
 
@@ -2247,7 +2247,7 @@ OutlineTransparentTypedObject::getOrCreateBuffer(JSContext* cx)
 #define DEFINE_TYPEDOBJ_CLASS(Name, Trace)        \
     const Class Name::class_ = {                         \
         # Name,                                          \
-        Class::NON_NATIVE | JSCLASS_IMPLEMENTS_BARRIERS, \
+        Class::NON_NATIVE, \
         nullptr,        /* addProperty */                \
         nullptr,        /* delProperty */                \
         nullptr,        /* getProperty */                \

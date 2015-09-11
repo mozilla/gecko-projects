@@ -666,10 +666,12 @@ public:
   static const nsOuterWindowProxy singleton;
 
 protected:
-  static nsGlobalWindow* GetWindow(JSObject *proxy)
+  static nsGlobalWindow* GetOuterWindow(JSObject *proxy)
   {
-    return nsGlobalWindow::FromSupports(
+    nsGlobalWindow* outerWindow = nsGlobalWindow::FromSupports(
       static_cast<nsISupports*>(js::GetProxyExtra(proxy, 0).toPrivate()));
+    MOZ_ASSERT_IF(outerWindow, outerWindow->IsOuterWindow());
+    return outerWindow;
   }
 
   // False return value means we threw an exception.  True return value
@@ -711,15 +713,15 @@ nsOuterWindowProxy::className(JSContext *cx, JS::Handle<JSObject*> proxy) const
 void
 nsOuterWindowProxy::finalize(JSFreeOp *fop, JSObject *proxy) const
 {
-  nsGlobalWindow* global = GetWindow(proxy);
-  if (global) {
-    global->ClearWrapper();
+  nsGlobalWindow* outerWindow = GetOuterWindow(proxy);
+  if (outerWindow) {
+    outerWindow->ClearWrapper();
 
     // Ideally we would use OnFinalize here, but it's possible that
     // EnsureScriptEnvironment will later be called on the window, and we don't
     // want to create a new script object in that case. Therefore, we need to
     // write a non-null value that will reliably crash when dereferenced.
-    global->PoisonOuterWindowProxy(proxy);
+    outerWindow->PoisonOuterWindowProxy(proxy);
   }
 }
 
@@ -985,7 +987,7 @@ nsOuterWindowProxy::GetSubframeWindow(JSContext *cx,
     return nullptr;
   }
 
-  nsGlobalWindow* win = GetWindow(proxy);
+  nsGlobalWindow* win = GetOuterWindow(proxy);
   MOZ_ASSERT(win->IsOuterWindow());
   return win->IndexedGetterOuter(index);
 }
@@ -994,7 +996,7 @@ bool
 nsOuterWindowProxy::AppendIndexedPropertyNames(JSContext *cx, JSObject *proxy,
                                                JS::AutoIdVector &props) const
 {
-  uint32_t length = GetWindow(proxy)->Length();
+  uint32_t length = GetOuterWindow(proxy)->Length();
   MOZ_ASSERT(int32_t(length) >= 0);
   if (!props.reserve(props.length() + length)) {
     return false;
@@ -1023,9 +1025,9 @@ nsOuterWindowProxy::unwatch(JSContext *cx, JS::Handle<JSObject*> proxy,
 void
 nsOuterWindowProxy::ObjectMoved(JSObject *obj, const JSObject *old)
 {
-  nsGlobalWindow* global = GetWindow(obj);
-  if (global) {
-    global->UpdateWrapper(obj, old);
+  nsGlobalWindow* outerWindow = GetOuterWindow(obj);
+  if (outerWindow) {
+    outerWindow->UpdateWrapper(obj, old);
   }
 }
 
@@ -6918,7 +6920,9 @@ nsGlobalWindow::AlertOrConfirm(bool aAlert,
   MOZ_ASSERT(IsOuterWindow());
 
   if (!AreDialogsEnabled()) {
-    aError.Throw(NS_ERROR_NOT_AVAILABLE);
+    // Just silently return.  In the case of alert(), the return value is
+    // ignored.  In the case of confirm(), returning false is the same thing as
+    // would happen if the user cancels.
     return false;
   }
 
@@ -7058,7 +7062,7 @@ nsGlobalWindow::PromptOuter(const nsAString& aMessage, const nsAString& aInitial
   SetDOMStringToNull(aReturn);
 
   if (!AreDialogsEnabled()) {
-    aError.Throw(NS_ERROR_NOT_AVAILABLE);
+    // Return null, as if the user just canceled the prompt.
     return;
   }
 
@@ -7496,6 +7500,8 @@ nsGlobalWindow::PrintOuter(ErrorResult& aError)
   }
 
   if (!AreDialogsEnabled()) {
+    // We probably want to keep throwing here; silently doing nothing is a bit
+    // weird given the typical use cases of print().
     aError.Throw(NS_ERROR_NOT_AVAILABLE);
     return;
   }
@@ -8652,7 +8658,7 @@ nsGlobalWindow::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> aMessa
   JS::Rooted<JS::Value> message(aCx, aMessage);
   JS::Rooted<JS::Value> transfer(aCx, aTransfer);
 
-  event->Write(aCx, message, transfer, false, aError);
+  event->Write(aCx, message, transfer, aError);
   if (NS_WARN_IF(aError.Failed())) {
     return;
   }
@@ -9553,6 +9559,8 @@ nsGlobalWindow::ShowModalDialogOuter(const nsAString& aUrl, nsIVariant* aArgumen
   EnsureReflowFlushAndPaint();
 
   if (!AreDialogsEnabled()) {
+    // We probably want to keep throwing here; silently doing nothing is a bit
+    // weird given the typical use cases of showModalDialog().
     aError.Throw(NS_ERROR_NOT_AVAILABLE);
     return nullptr;
   }
@@ -12369,7 +12377,8 @@ nsGlobalWindow::SetTimeout(JSContext* aCx, Function& aFunction,
                            const Sequence<JS::Value>& aArguments,
                            ErrorResult& aError)
 {
-  return SetTimeoutOrInterval(aFunction, aTimeout, aArguments, false, aError);
+  return SetTimeoutOrInterval(aCx, aFunction, aTimeout, aArguments, false,
+                              aError);
 }
 
 int32_t
@@ -12403,7 +12412,7 @@ nsGlobalWindow::SetInterval(JSContext* aCx, Function& aFunction,
 {
   int32_t timeout;
   bool isInterval = IsInterval(aTimeout, timeout);
-  return SetTimeoutOrInterval(aFunction, timeout, aArguments, isInterval,
+  return SetTimeoutOrInterval(aCx, aFunction, timeout, aArguments, isInterval,
                               aError);
 }
 
@@ -12545,7 +12554,8 @@ nsGlobalWindow::SetTimeoutOrInterval(nsIScriptTimeoutHandler *aHandler,
 }
 
 int32_t
-nsGlobalWindow::SetTimeoutOrInterval(Function& aFunction, int32_t aTimeout,
+nsGlobalWindow::SetTimeoutOrInterval(JSContext *aCx, Function& aFunction,
+                                     int32_t aTimeout,
                                      const Sequence<JS::Value>& aArguments,
                                      bool aIsInterval, ErrorResult& aError)
 {
@@ -12555,12 +12565,12 @@ nsGlobalWindow::SetTimeoutOrInterval(Function& aFunction, int32_t aTimeout,
   }
 
   if (inner != this) {
-    return inner->SetTimeoutOrInterval(aFunction, aTimeout, aArguments,
+    return inner->SetTimeoutOrInterval(aCx, aFunction, aTimeout, aArguments,
                                        aIsInterval, aError);
   }
 
   nsCOMPtr<nsIScriptTimeoutHandler> handler =
-    NS_CreateJSTimeoutHandler(this, aFunction, aArguments, aError);
+    NS_CreateJSTimeoutHandler(aCx, this, aFunction, aArguments, aError);
   if (!handler) {
     return 0;
   }
@@ -12642,8 +12652,8 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
     NS_ASSERTION(script, "timeout has no script nor handler text!");
 
     const char* filename = nullptr;
-    uint32_t lineNo = 0;
-    handler->GetLocation(&filename, &lineNo);
+    uint32_t lineNo = 0, dummyColumn = 0;
+    handler->GetLocation(&filename, &lineNo, &dummyColumn);
 
     // New script entry point required, due to the "Create a script" sub-step of
     // http://www.whatwg.org/specs/web-apps/current-work/#timer-initialisation-steps

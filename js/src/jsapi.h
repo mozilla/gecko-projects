@@ -219,7 +219,6 @@ class MOZ_STACK_CLASS AutoVectorRooter : public AutoVectorRooterBase<T>
 typedef AutoVectorRooter<Value> AutoValueVector;
 typedef AutoVectorRooter<jsid> AutoIdVector;
 typedef AutoVectorRooter<JSObject*> AutoObjectVector;
-typedef AutoVectorRooter<JSScript*> AutoScriptVector;
 
 using ValueVector = js::TraceableVector<JS::Value>;
 using IdVector = js::TraceableVector<jsid>;
@@ -2079,8 +2078,10 @@ struct JSFunctionSpec {
  * Initializer macros for a JSFunctionSpec array element. JS_FN (whose name pays
  * homage to the old JSNative/JSFastNative split) simply adds the flag
  * JSFUN_STUB_GSOPS. JS_FNINFO allows the simple adding of
- * JSJitInfos. JS_SELF_HOSTED_FN declares a self-hosted function. Finally
- * JS_FNSPEC has slots for all the fields.
+ * JSJitInfos. JS_SELF_HOSTED_FN declares a self-hosted function.
+ * JS_INLINABLE_FN allows specifying an InlinableNative enum value for natives
+ * inlined or specialized by the JIT. Finally JS_FNSPEC has slots for all the
+ * fields.
  *
  * The _SYM variants allow defining a function with a symbol key rather than a
  * string key. For example, use JS_SYM_FN(iterator, ...) to define an
@@ -2090,6 +2091,8 @@ struct JSFunctionSpec {
     JS_FNSPEC(name, call, nullptr, nargs, flags, nullptr)
 #define JS_FN(name,call,nargs,flags)                                          \
     JS_FNSPEC(name, call, nullptr, nargs, (flags) | JSFUN_STUB_GSOPS, nullptr)
+#define JS_INLINABLE_FN(name,call,nargs,flags,native)                         \
+    JS_FNSPEC(name, call, &js::jit::JitInfo_##native, nargs, (flags) | JSFUN_STUB_GSOPS, nullptr)
 #define JS_SYM_FN(name,call,nargs,flags)                                      \
     JS_SYM_FNSPEC(symbol, call, nullptr, nargs, (flags) | JSFUN_STUB_GSOPS, nullptr)
 #define JS_FNINFO(name,call,info,nargs,flags)                                 \
@@ -4477,6 +4480,10 @@ JS_GetLocaleCallbacks(JSRuntime* rt);
 /*
  * Error reporting.
  */
+
+namespace JS {
+const uint16_t MaxNumErrorArguments = 10;
+};
 
 /*
  * Report an exception represented by the sprintf-like conversion of format

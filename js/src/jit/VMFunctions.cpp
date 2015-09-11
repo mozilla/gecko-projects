@@ -835,15 +835,15 @@ GeneratorThrowOrClose(JSContext* cx, BaselineFrame* frame, Handle<GeneratorObjec
 }
 
 bool
-StrictEvalPrologue(JSContext* cx, BaselineFrame* frame)
+InitStrictEvalScopeObjects(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->strictEvalPrologue(cx);
+    return frame->initStrictEvalScopeObjects(cx);
 }
 
 bool
-HeavyweightFunPrologue(JSContext* cx, BaselineFrame* frame)
+InitFunctionScopeObjects(JSContext* cx, BaselineFrame* frame)
 {
-    return frame->heavyweightFunPrologue(cx);
+    return frame->initFunctionScopeObjects(cx);
 }
 
 bool
@@ -1041,11 +1041,7 @@ RegExpReplace(JSContext* cx, HandleString string, HandleObject regexp, HandleStr
     MOZ_ASSERT(string);
     MOZ_ASSERT(repl);
 
-    RootedValue rval(cx);
-    if (!str_replace_regexp_raw(cx, string, regexp, repl, &rval))
-        return nullptr;
-
-    return rval.toString();
+    return str_replace_regexp_raw(cx, string, regexp.as<RegExpObject>(), repl);
 }
 
 JSString*
@@ -1055,11 +1051,7 @@ StringReplace(JSContext* cx, HandleString string, HandleString pattern, HandleSt
     MOZ_ASSERT(pattern);
     MOZ_ASSERT(repl);
 
-    RootedValue rval(cx);
-    if (!str_replace_string_raw(cx, string, pattern, repl, &rval))
-        return nullptr;
-
-    return rval.toString();
+    return str_replace_string_raw(cx, string, pattern, repl);
 }
 
 bool

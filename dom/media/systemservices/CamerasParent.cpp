@@ -324,21 +324,24 @@ CamerasParent::CloseEngines()
     }
   }
 
-  for (int i = 0; i < CaptureEngine::MaxEngine; i++) {
-    if (mEngines[i].mEngineIsRunning) {
-      LOG(("Being closed down while engine %d is running!", i));
-    }
-    if (mEngines[i].mPtrViERender) {
-      mEngines[i].mPtrViERender->Release();
-      mEngines[i].mPtrViERender = nullptr;
-    }
-    if (mEngines[i].mPtrViECapture) {
-      mEngines[i].mPtrViECapture->Release();
-      mEngines[i].mPtrViECapture = nullptr;
-    }
-    if(mEngines[i].mPtrViEBase) {
-      mEngines[i].mPtrViEBase->Release();
-      mEngines[i].mPtrViEBase = nullptr;
+  {
+    MutexAutoLock lock(mEngineMutex);
+    for (int i = 0; i < CaptureEngine::MaxEngine; i++) {
+      if (mEngines[i].mEngineIsRunning) {
+        LOG(("Being closed down while engine %d is running!", i));
+      }
+      if (mEngines[i].mPtrViERender) {
+        mEngines[i].mPtrViERender->Release();
+        mEngines[i].mPtrViERender = nullptr;
+      }
+      if (mEngines[i].mPtrViECapture) {
+        mEngines[i].mPtrViECapture->Release();
+        mEngines[i].mPtrViECapture = nullptr;
+      }
+      if(mEngines[i].mPtrViEBase) {
+        mEngines[i].mPtrViEBase->Release();
+        mEngines[i].mPtrViEBase = nullptr;
+      }
     }
   }
 }
@@ -373,7 +376,11 @@ CamerasParent::RecvNumberOfCaptureDevices(const int& aCapEngine)
   nsRefPtr<CamerasParent> self(this);
   nsRefPtr<nsRunnable> webrtc_runnable =
     media::NewRunnableFrom([self, aCapEngine]() -> nsresult {
-      int num = self->mEngines[aCapEngine].mPtrViECapture->NumberOfCaptureDevices();
+      MutexAutoLock lock(self->mEngineMutex);
+      int num = -1;
+      if (self->mEngines[aCapEngine].mPtrViECapture) {
+        num = self->mEngines[aCapEngine].mPtrViECapture->NumberOfCaptureDevices();
+      }
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, num]() -> nsresult {
           if (self->IsShuttingDown()) {
@@ -412,10 +419,14 @@ CamerasParent::RecvNumberOfCapabilities(const int& aCapEngine,
   nsRefPtr<CamerasParent> self(this);
   nsRefPtr<nsRunnable> webrtc_runnable =
     media::NewRunnableFrom([self, unique_id, aCapEngine]() -> nsresult {
-      int num =
-        self->mEngines[aCapEngine].mPtrViECapture->NumberOfCapabilities(
-         unique_id.get(),
-          MediaEngineSource::kMaxUniqueIdLength);
+      MutexAutoLock lock(self->mEngineMutex);
+      int num = -1;
+      if (self->mEngines[aCapEngine].mPtrViECapture) {
+        num =
+          self->mEngines[aCapEngine].mPtrViECapture->NumberOfCapabilities(
+            unique_id.get(),
+            MediaEngineSource::kMaxUniqueIdLength);
+      }
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, num]() -> nsresult {
           if (self->IsShuttingDown()) {
@@ -456,8 +467,12 @@ CamerasParent::RecvGetCaptureCapability(const int &aCapEngine,
   nsRefPtr<nsRunnable> webrtc_runnable =
     media::NewRunnableFrom([self, unique_id, aCapEngine, num]() -> nsresult {
       webrtc::CaptureCapability webrtcCaps;
-      int error = self->mEngines[aCapEngine].mPtrViECapture->GetCaptureCapability(
-        unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, num, webrtcCaps);
+      MutexAutoLock lock(self->mEngineMutex);
+      int error = -1;
+      if (self->mEngines[aCapEngine].mPtrViECapture) {
+        error = self->mEngines[aCapEngine].mPtrViECapture->GetCaptureCapability(
+          unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, num, webrtcCaps);
+      }
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, webrtcCaps, error]() -> nsresult {
           if (self->IsShuttingDown()) {
@@ -510,13 +525,15 @@ CamerasParent::RecvGetCaptureDevice(const int& aCapEngine,
       char deviceUniqueId[MediaEngineSource::kMaxUniqueIdLength];
       nsCString name;
       nsCString uniqueId;
-
-      int error =
-        self->mEngines[aCapEngine].mPtrViECapture->GetCaptureDevice(aListNumber,
-                                                                    deviceName,
-                                                                    sizeof(deviceName),
-                                                                    deviceUniqueId,
-                                                                    sizeof(deviceUniqueId));
+      MutexAutoLock lock(self->mEngineMutex);
+      int error = -1;
+      if (self->mEngines[aCapEngine].mPtrViECapture) {
+        error = self->mEngines[aCapEngine].mPtrViECapture->GetCaptureDevice(aListNumber,
+                                                                            deviceName,
+                                                                            sizeof(deviceName),
+                                                                            deviceUniqueId,
+                                                                            sizeof(deviceUniqueId));
+      }
       if (!error) {
         name.Assign(deviceName);
         uniqueId.Assign(deviceUniqueId);
@@ -558,9 +575,13 @@ CamerasParent::RecvAllocateCaptureDevice(const int& aCapEngine,
   nsRefPtr<CamerasParent> self(this);
   nsRefPtr<nsRunnable> webrtc_runnable =
     media::NewRunnableFrom([self, aCapEngine, unique_id]() -> nsresult {
-      int numdev;
-      int error = self->mEngines[aCapEngine].mPtrViECapture->AllocateCaptureDevice(
-        unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, numdev);
+      int numdev = -1;
+      MutexAutoLock lock(self->mEngineMutex);
+      int error = -1;
+      if (self->mEngines[aCapEngine].mPtrViECapture) {
+        error = self->mEngines[aCapEngine].mPtrViECapture->AllocateCaptureDevice(
+          unique_id.get(), MediaEngineSource::kMaxUniqueIdLength, numdev);
+      }
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, numdev, error]() -> nsresult {
           if (self->IsShuttingDown()) {
@@ -597,7 +618,11 @@ CamerasParent::RecvReleaseCaptureDevice(const int& aCapEngine,
   nsRefPtr<nsRunnable> webrtc_runnable =
     media::NewRunnableFrom([self, aCapEngine, numdev]() -> nsresult {
       LOG(("RecvReleaseCamera device nr %d", numdev));
-      int error = self->mEngines[aCapEngine].mPtrViECapture->ReleaseCaptureDevice(numdev);
+      MutexAutoLock lock(self->mEngineMutex);
+      int error = -1;
+      if (self->mEngines[aCapEngine].mPtrViECapture) {
+        error = self->mEngines[aCapEngine].mPtrViECapture->ReleaseCaptureDevice(numdev);
+      }
       nsRefPtr<nsIRunnable> ipc_runnable =
         media::NewRunnableFrom([self, error, numdev]() -> nsresult {
           if (self->IsShuttingDown()) {
@@ -639,35 +664,45 @@ CamerasParent::RecvStartCapture(const int& aCapEngine,
   nsRefPtr<CamerasParent> self(this);
   nsRefPtr<nsRunnable> webrtc_runnable =
     media::NewRunnableFrom([self, aCapEngine, capnum, ipcCaps]() -> nsresult {
-      MutexAutoLock lock(self->mCallbackMutex);
-      auto cbh = self->mCallbacks.AppendElement(
-        new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum, self));
-      auto render = static_cast<webrtc::ExternalRenderer*>(*cbh);
-
-      EngineHelper* helper = &self->mEngines[aCapEngine];
-
-      int error =
-        helper->mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, render);
-
-      if (!error) {
-        error = helper->mPtrViERender->StartRender(capnum);
+      CallbackHelper** cbh;
+      webrtc::ExternalRenderer* render;
+      EngineHelper* helper = nullptr;
+      int error;
+      {
+        MutexAutoLock lockCallback(self->mCallbackMutex);
+        cbh = self->mCallbacks.AppendElement(
+          new CallbackHelper(static_cast<CaptureEngine>(aCapEngine), capnum, self));
+        render = static_cast<webrtc::ExternalRenderer*>(*cbh);
       }
+      {
+        MutexAutoLock lockEngine(self->mEngineMutex);
+        if (self->mEngines[aCapEngine].mPtrViECapture) {
+          helper = &self->mEngines[aCapEngine];
+          error =
+            helper->mPtrViERender->AddRenderer(capnum, webrtc::kVideoI420, render);
+        } else {
+          error = -1;
+        }
 
-      webrtc::CaptureCapability capability;
-      capability.width = ipcCaps.width();
-      capability.height = ipcCaps.height();
-      capability.maxFPS = ipcCaps.maxFPS();
-      capability.expectedCaptureDelay = ipcCaps.expectedCaptureDelay();
-      capability.rawType = static_cast<webrtc::RawVideoType>(ipcCaps.rawType());
-      capability.codecType = static_cast<webrtc::VideoCodecType>(ipcCaps.codecType());
-      capability.interlaced = ipcCaps.interlaced();
+        if (!error) {
+          error = helper->mPtrViERender->StartRender(capnum);
+        }
 
-      if (!error) {
-        error = helper->mPtrViECapture->StartCapture(capnum, capability);
-      }
+        webrtc::CaptureCapability capability;
+        capability.width = ipcCaps.width();
+        capability.height = ipcCaps.height();
+        capability.maxFPS = ipcCaps.maxFPS();
+        capability.expectedCaptureDelay = ipcCaps.expectedCaptureDelay();
+        capability.rawType = static_cast<webrtc::RawVideoType>(ipcCaps.rawType());
+        capability.codecType = static_cast<webrtc::VideoCodecType>(ipcCaps.codecType());
+        capability.interlaced = ipcCaps.interlaced();
 
-      if (!error) {
-        helper->mEngineIsRunning = true;
+        if (!error) {
+          error = helper->mPtrViECapture->StartCapture(capnum, capability);
+        }
+        if (!error) {
+          helper->mEngineIsRunning = true;
+        }
       }
 
       nsRefPtr<nsIRunnable> ipc_runnable =
@@ -704,11 +739,17 @@ CamerasParent::RecvStopCapture(const int& aCapEngine,
   nsRefPtr<CamerasParent> self(this);
   nsRefPtr<nsRunnable> webrtc_runnable =
     media::NewRunnableFrom([self, aCapEngine, capnum]() -> nsresult {
-      self->mEngines[aCapEngine].mPtrViECapture->StopCapture(capnum);
-      self->mEngines[aCapEngine].mPtrViERender->StopRender(capnum);
-      self->mEngines[aCapEngine].mPtrViERender->RemoveRenderer(capnum);
-      self->mEngines[aCapEngine].mEngineIsRunning = false;
-
+      {
+        MutexAutoLock lock(self->mEngineMutex);
+        // We only need to check mPtrViECapture as all other engines are guaranteed
+        // to be nulled under the same lock.
+        if (self->mEngines[aCapEngine].mPtrViECapture) {
+          self->mEngines[aCapEngine].mPtrViECapture->StopCapture(capnum);
+          self->mEngines[aCapEngine].mPtrViERender->StopRender(capnum);
+          self->mEngines[aCapEngine].mPtrViERender->RemoveRenderer(capnum);
+          self->mEngines[aCapEngine].mEngineIsRunning = false;
+        }
+      }
       MutexAutoLock lock(self->mCallbackMutex);
       for (unsigned int i = 0; i < self->mCallbacks.Length(); i++) {
         if (self->mCallbacks[i]->mCapEngine == aCapEngine
@@ -739,11 +780,14 @@ void CamerasParent::DoShutdown()
   LOG((__PRETTY_FUNCTION__));
   CloseEngines();
 
-  for (int i = 0; i < CaptureEngine::MaxEngine; i++) {
-    if (mEngines[i].mEngine) {
-      mEngines[i].mEngine->SetTraceCallback(nullptr);
-      webrtc::VideoEngine::Delete(mEngines[i].mEngine);
-      mEngines[i].mEngine = nullptr;
+  {
+    MutexAutoLock lock(mEngineMutex);
+    for (int i = 0; i < CaptureEngine::MaxEngine; i++) {
+      if (mEngines[i].mEngine) {
+        mEngines[i].mEngine->SetTraceCallback(nullptr);
+        webrtc::VideoEngine::Delete(mEngines[i].mEngine);
+        mEngines[i].mEngine = nullptr;
+      }
     }
   }
 
@@ -774,6 +818,7 @@ CamerasParent::ActorDestroy(ActorDestroyReason aWhy)
 
 CamerasParent::CamerasParent()
   : mCallbackMutex("CamerasParent.mCallbackMutex"),
+    mEngineMutex("CamerasParent.mEngineMutex"),
     mShmemPool(CaptureEngine::MaxEngine),
     mVideoCaptureThread(nullptr),
     mChildIsAlive(true),

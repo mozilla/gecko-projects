@@ -857,11 +857,6 @@ AudioContext::Suspend(ErrorResult& aRv)
 
   Destination()->Suspend();
 
-  MediaStream* ds = DestinationStream();
-  if (ds) {
-    ds->BlockStreamIfNeeded();
-  }
-
   mPromiseGripArray.AppendElement(promise);
   Graph()->ApplyAudioContextOperation(DestinationStream()->AsAudioNodeStream(),
                                       AudioContextOperation::Suspend, promise);
@@ -896,11 +891,6 @@ AudioContext::Resume(ErrorResult& aRv)
   }
 
   Destination()->Resume();
-
-  MediaStream* ds = DestinationStream();
-  if (ds) {
-    ds->UnblockStreamIfNeeded();
-  }
 
   mPromiseGripArray.AppendElement(promise);
   Graph()->ApplyAudioContextOperation(DestinationStream()->AsAudioNodeStream(),
@@ -943,10 +933,6 @@ AudioContext::Close(ErrorResult& aRv)
   if (ds) {
     Graph()->ApplyAudioContextOperation(ds->AsAudioNodeStream(),
                                         AudioContextOperation::Close, promise);
-
-    if (ds) {
-      ds->BlockStreamIfNeeded();
-    }
   }
   return promise.forget();
 }
@@ -957,8 +943,11 @@ AudioContext::UpdateNodeCount(int32_t aDelta)
   bool firstNode = mNodeCount == 0;
   mNodeCount += aDelta;
   MOZ_ASSERT(mNodeCount >= 0);
-  // mDestinationNode may be null when we're destroying nodes unlinked by CC
-  if (!firstNode && mDestination) {
+  // mDestinationNode may be null when we're destroying nodes unlinked by CC.
+  // Skipping unnecessary calls after shutdown avoids RunInStableState events
+  // getting stuck in CycleCollectedJSRuntime during final cycle collection
+  // (bug 1200514).
+  if (!firstNode && mDestination && !mIsShutDown) {
     mDestination->SetIsOnlyNodeForContext(mNodeCount == 1);
   }
 }

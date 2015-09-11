@@ -1204,6 +1204,9 @@ bool CanvasRenderingContext2D::SwitchRenderingMode(RenderingMode aRenderingMode)
     transform = mTarget->GetTransform();
   } else {
     MOZ_ASSERT(mBufferProvider);
+    // When mBufferProvider is true but we have no mTarget, our current state's
+    // transform is always valid. See ReturnTarget().
+    transform = CurrentState().transform;
     snapshot = mBufferProvider->GetSnapshot();
   }
   mTarget = nullptr;
@@ -3948,16 +3951,16 @@ gfxFontGroup *CanvasRenderingContext2D::GetCurrentFontStyle()
     if (err.Failed() || !fontUpdated) {
       gfxFontStyle style;
       style.size = kDefaultFontSize;
+      gfxTextPerfMetrics* tp = nullptr;
+      if (presShell && !presShell->IsDestroying()) {
+        tp = presShell->GetPresContext()->GetTextPerfMetrics();
+      }
       CurrentState().fontGroup =
         gfxPlatform::GetPlatform()->CreateFontGroup(FontFamilyList(eFamily_sans_serif),
-                                                    &style,
+                                                    &style, tp,
                                                     nullptr);
       if (CurrentState().fontGroup) {
         CurrentState().font = kDefaultFontStyle;
-        if (presShell && !presShell->IsDestroying()) {
-          CurrentState().fontGroup->SetTextPerfMetrics(
-            presShell->GetPresContext()->GetTextPerfMetrics());
-        }
       } else {
         NS_ERROR("Default canvas font is invalid");
       }

@@ -143,14 +143,13 @@ private:
   void ReplyToSetPath();
   void ReplyError(uint8_t aError);
   void SendObexData(uint8_t* aData, uint8_t aOpcode, int aSize);
-  bool ReplyToGet(nsIInputStream* aStream, uint16_t aPhonebookSize = 0);
-  bool GetInputStreamFromBlob(nsIInputStream* aStream, Blob* aBlob);
+  bool ReplyToGet(uint16_t aPhonebookSize = 0);
 
   uint8_t SetPhoneBookPath(uint8_t flags, const ObexHeaderSet& aHeader);
   uint8_t PullPhonebook(const ObexHeaderSet& aHeader);
   uint8_t PullvCardListing(const ObexHeaderSet& aHeader);
   uint8_t PullvCardEntry(const ObexHeaderSet& aHeader);
-  void AppendBtNamedValueByTagId(
+  void AppendNamedValueByTagId(
     const ObexHeaderSet& aHeader,
     InfallibleTArray<BluetoothNamedValue>& aValues,
     const AppParameterTag aTagId);
@@ -158,19 +157,26 @@ private:
   InfallibleTArray<uint32_t>  PackPropertiesMask(uint8_t* aData, int aSize);
   bool CompareHeaderTarget(const ObexHeaderSet& aHeader);
   bool IsLegalPath(const nsAString& aPath);
+  bool GetInputStreamFromBlob(Blob* aBlob);
   void AfterPbapConnected();
   void AfterPbapDisconnected();
+
+
+  /**
+   * Whether 'PhonebookSize' is required for the OBEX response
+   */
+  bool mPhonebookSizeRequired;
+
+  /**
+   * OBEX session status. Set when OBEX session is established
+   */
+  bool mConnected;
+  nsString mDeviceAddress;
 
   /**
    * Current phonebook path
    */
   nsString mCurrentPath;
-
-  /**
-   * OBEX session status. Set when OBEX session is established.
-   */
-  bool mConnected;
-  nsString mDeviceAddress;
 
   /**
    * Maximum packet length that remote device can receive
@@ -188,15 +194,9 @@ private:
   nsRefPtr<BluetoothSocket> mServerSocket;
 
   /**
-   * The data stream of vCards which is used in current processing response.
+   * The vCard data stream for current processing response
    */
   nsCOMPtr<nsIInputStream> mVCardDataStream;
-
-  /**
-   * A flag to indicate whether 'PhonebookSize' is mandatory for next OBEX
-   * response
-   */
-  bool mRequirePhonebookSize;
 };
 
 END_BLUETOOTH_NAMESPACE

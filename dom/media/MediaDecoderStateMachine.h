@@ -94,16 +94,16 @@ hardware (via AudioStream).
 #include "MediaEventSource.h"
 #include "MediaMetadataManager.h"
 #include "MediaTimer.h"
-#include "DecodedStream.h"
 #include "ImageContainer.h"
 
 namespace mozilla {
 
 namespace media {
-class AudioSink;
+class MediaSink;
 }
 
 class AudioSegment;
+class DecodedStream;
 class TaskQueue;
 
 extern PRLogModuleInfo* gMediaDecoderLog;
@@ -157,25 +157,22 @@ public:
   // Set/Unset dormant state.
   void SetDormant(bool aDormant);
 
+  TimedMetadataEventSource& TimedMetadataEvent() {
+    return mMetadataManager.TimedMetadataEvent();
+  }
+
 private:
   // Initialization that needs to happen on the task queue. This is the first
   // task that gets run on the task queue, and is dispatched from the MDSM
   // constructor immediately after the task queue is created.
   void InitializationTask();
 
-  void DispatchAudioCaptured();
-  void DispatchAudioUncaptured();
+  void SetAudioCaptured(bool aCaptured);
 
   void Shutdown();
 public:
 
-  void DispatchShutdown()
-  {
-    mDecodedStream->Shutdown();
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethod(this, &MediaDecoderStateMachine::Shutdown);
-    OwnerThread()->Dispatch(runnable.forget());
-  }
+  void DispatchShutdown();
 
   void FinishShutdown();
 
@@ -208,8 +205,10 @@ private:
   // immediately stop playback and buffer downloaded data. Called on
   // the state machine thread.
   void StartBuffering();
-public:
 
+  bool CanPlayThrough();
+
+public:
   void DispatchStartBuffering()
   {
     nsCOMPtr<nsIRunnable> runnable =
@@ -333,10 +332,6 @@ public:
   // shutting down. The decoder monitor must be held while calling this.
   bool IsShutdown();
 
-  void QueueMetadata(const media::TimeUnit& aPublishTime,
-                     nsAutoPtr<MediaInfo> aInfo,
-                     nsAutoPtr<MetadataTags> aTags);
-
   // Returns true if we're currently playing. The decoder monitor must
   // be held.
   bool IsPlaying() const;
@@ -366,8 +361,8 @@ public:
     OwnerThread()->Dispatch(r.forget());
   }
 
-  void OnAudioDecoded(AudioData* aSample);
-  void OnVideoDecoded(VideoData* aSample);
+  void OnAudioDecoded(MediaData* aAudioSample);
+  void OnVideoDecoded(MediaData* aVideoSample);
   void OnNotDecoded(MediaData::Type aType, MediaDecoderReader::NotDecodedReason aReason);
   void OnAudioNotDecoded(MediaDecoderReader::NotDecodedReason aReason)
   {
@@ -395,10 +390,9 @@ protected:
 
   // Inserts MediaData* samples into their respective MediaQueues.
   // aSample must not be null.
-  void Push(AudioData* aSample);
-  void Push(VideoData* aSample);
-  void PushFront(AudioData* aSample);
-  void PushFront(VideoData* aSample);
+
+  void Push(MediaData* aSample, MediaData::Type aSampleType);
+  void PushFront(MediaData* aSample, MediaData::Type aSampleType);
 
   void OnAudioPopped(const nsRefPtr<MediaData>& aSample);
   void OnVideoPopped(const nsRefPtr<MediaData>& aSample);
@@ -457,22 +451,6 @@ protected:
   // parties.
   void UpdateNextFrameStatus();
 
-  // Called when AudioSink reaches the end. |mPlayStartTime| and
-  // |mPlayDuration| are updated to provide a good base for calculating video
-  // stream time.
-  void ResyncAudioClock();
-
-  // Returns the audio clock, if we have audio, or -1 if we don't.
-  // Called on the state machine thread.
-  int64_t GetAudioClock() const;
-
-  int64_t GetStreamClock() const;
-
-  // Get the video stream position, taking the |playbackRate| change into
-  // account. This is a position in the media, not the duration of the playback
-  // so far. Returns the position for the given time aTimeStamp.
-  int64_t GetVideoStreamPosition(TimeStamp aTimeStamp) const;
-
   // Return the current time, either the audio clock if available (if the media
   // has audio, and the playback is possible), or a clock for the video.
   // Called on the state machine thread.
@@ -480,8 +458,8 @@ protected:
   // to the returned stream time.
   int64_t GetClock(TimeStamp* aTimeStamp = nullptr) const;
 
-  nsresult DropAudioUpToSeekTarget(AudioData* aSample);
-  nsresult DropVideoUpToSeekTarget(VideoData* aSample);
+  nsresult DropAudioUpToSeekTarget(MediaData* aSample);
+  nsresult DropVideoUpToSeekTarget(MediaData* aSample);
 
   void SetStartTime(int64_t aStartTimeUsecs);
 
@@ -511,19 +489,17 @@ protected:
   // state machine thread.
   void UpdateRenderedVideoFrames();
 
-  // Stops the audio sink and shut it down.
+  media::MediaSink* CreateAudioSink();
+
+  // Stops the media sink and shut it down.
   // The decoder monitor must be held with exactly one lock count.
   // Called on the state machine thread.
-  void StopAudioSink();
+  void StopMediaSink();
 
-  // Create and start the audio sink.
+  // Create and start the media sink.
   // The decoder monitor must be held with exactly one lock count.
   // Called on the state machine thread.
-  void StartAudioSink();
-
-  void StopDecodedStream();
-
-  void StartDecodedStream();
+  void StartMediaSink();
 
   // Notification method invoked when mPlayState changes.
   void PlayStateChanged();
@@ -665,21 +641,13 @@ protected:
   bool IsAudioDecoding();
   bool IsVideoDecoding();
 
-  // Set the time that playback started from the system clock.
-  // Can only be called on the state machine thread.
-  void SetPlayStartTime(const TimeStamp& aTimeStamp);
-
 private:
-  // Resolved by the AudioSink to signal that all outstanding work is complete
+  // Resolved by the MediaSink to signal that all outstanding work is complete
   // and the sink is shutting down.
-  void OnAudioSinkComplete();
+  void OnMediaSinkComplete();
 
-  // Rejected by the AudioSink to signal errors.
-  void OnAudioSinkError();
-
-  void OnDecodedStreamFinish();
-
-  void OnDecodedStreamError();
+  // Rejected by the MediaSink to signal errors.
+  void OnMediaSinkError();
 
   // Return true if the video decoder's decode speed can not catch up the
   // play time.
@@ -808,14 +776,14 @@ private:
       typedef typename PromiseType::ResolveValueType::element_type Type;
     };
 
-    template<typename PromiseType>
+    template<typename PromiseType, MediaData::Type SampleType>
     nsRefPtr<PromiseType> ProcessFirstSample(typename PromiseSampleType<PromiseType>::Type* aData)
     {
       typedef typename PromiseSampleType<PromiseType>::Type DataType;
       typedef typename PromiseType::Private PromisePrivate;
       MOZ_ASSERT(mOwnerThread->IsCurrentThreadIn());
 
-      MaybeSetChannelStartTime<DataType>(aData->mTime);
+      MaybeSetChannelStartTime<SampleType>(aData->mTime);
 
       nsRefPtr<PromisePrivate> p = new PromisePrivate(__func__);
       nsRefPtr<DataType> data = aData;
@@ -830,7 +798,7 @@ private:
       return p.forget();
     }
 
-    template<typename SampleType>
+    template<MediaData::Type SampleType>
     void FirstSampleRejected(MediaDecoderReader::NotDecodedReason aReason)
     {
       MOZ_ASSERT(mOwnerThread->IsCurrentThreadIn());
@@ -838,7 +806,7 @@ private:
         mHaveStartTimePromise.RejectIfExists(false, __func__);
       } else if (aReason == MediaDecoderReader::END_OF_STREAM) {
         MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,
-                ("StartTimeRendezvous=%p %s Has no samples.", this, SampleType::sTypeName));
+                ("StartTimeRendezvous=%p SampleType(%d) Has no samples.", this, SampleType));
         MaybeSetChannelStartTime<SampleType>(INT64_MAX);
       }
     }
@@ -852,20 +820,20 @@ private:
   private:
     virtual ~StartTimeRendezvous() {}
 
-    template<typename SampleType>
+    template<MediaData::Type SampleType>
     void MaybeSetChannelStartTime(int64_t aStartTime)
     {
-      if (ChannelStartTime(SampleType::sType).isSome()) {
+      if (ChannelStartTime(SampleType).isSome()) {
         // If we're initialized with aForceZeroStartTime=true, the channel start
         // times are already set.
         return;
       }
 
       MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,
-              ("StartTimeRendezvous=%p Setting %s start time to %lld",
-               this, SampleType::sTypeName, aStartTime));
+              ("StartTimeRendezvous=%p Setting SampleType(%d) start time to %lld",
+               this, SampleType, aStartTime));
 
-      ChannelStartTime(SampleType::sType).emplace(aStartTime);
+      ChannelStartTime(SampleType).emplace(aStartTime);
       if (HaveStartTime()) {
         mHaveStartTimePromise.ResolveIfExists(true, __func__);
       }
@@ -906,18 +874,6 @@ private:
   // the "decode thread", though in practise tasks can run on a different
   // thread every time they're called.
   TaskQueue* DecodeTaskQueue() const { return mReader->OwnerThread(); }
-
-  // The time that playback started from the system clock. This is used for
-  // timing the presentation of video frames when there's no audio.
-  // Accessed only via the state machine thread.  Must be set via SetPlayStartTime.
-  TimeStamp mPlayStartTime;
-
-  // The amount of time we've spent playing already the media. The current
-  // playback position is therefore |Now() - mPlayStartTime +
-  // mPlayDuration|, which must be adjusted by mStartTime if used with media
-  // timestamps. Accessed on state machine and main threads. Access controlled
-  // by decoder monitor.
-  int64_t mPlayDuration;
 
   // Time that buffering started. Used for buffering timeout and only
   // accessed on the state machine thread. This is null while we're not
@@ -999,15 +955,15 @@ private:
   // Media Fragment end time in microseconds. Access controlled by decoder monitor.
   int64_t mFragmentEndTime;
 
-  // The audio sink resource.  Used on state machine and audio threads.
-  RefPtr<media::AudioSink> mAudioSink;
+  // The media sink resource.  Used on the state machine thread.
+  nsRefPtr<media::MediaSink> mMediaSink;
 
   // The reader, don't call its methods with the decoder monitor held.
   // This is created in the state machine's constructor.
   nsRefPtr<MediaDecoderReader> mReader;
 
-  // The end time of the last audio frame that's been pushed onto the audio sink
-  // or DecodedStream in microseconds. This will approximately be the end time
+  // The end time of the last audio frame that's been pushed onto the media sink
+  // in microseconds. This will approximately be the end time
   // of the audio stream, unless another frame is pushed to the hardware.
   int64_t AudioEndTime() const;
 
@@ -1126,7 +1082,7 @@ private:
   // This is so that if we hit end of stream while we're decoding to reach
   // the seek target, we will still have a frame that we can display as the
   // last frame in the media.
-  nsRefPtr<VideoData> mFirstVideoFrameAfterSeek;
+  nsRefPtr<MediaData> mFirstVideoFrameAfterSeek;
 
   // When we start decoding (either for the first time, or after a pause)
   // we may be low on decoded data. We don't want our "low data" logic to
@@ -1287,13 +1243,12 @@ private:
   // Only written on the main thread while holding the monitor. Therefore it
   // can be read on any thread while holding the monitor, or on the main thread
   // without holding the monitor.
-  nsRefPtr<DecodedStream> mDecodedStream;
+  nsRefPtr<DecodedStream> mStreamSink;
 
   // Media data resource from the decoder.
   nsRefPtr<MediaResource> mResource;
 
-  MozPromiseRequestHolder<GenericPromise> mAudioSinkPromise;
-  MozPromiseRequestHolder<GenericPromise> mDecodedStreamPromise;
+  MozPromiseRequestHolder<GenericPromise> mMediaSinkPromise;
 
   MediaEventListener mAudioQueueListener;
   MediaEventListener mVideoQueueListener;

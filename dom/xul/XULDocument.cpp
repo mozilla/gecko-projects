@@ -839,7 +839,7 @@ XULDocument::RemoveBroadcastListenerFor(Element& aBroadcaster,
                 delete bl;
 
                 if (entry->mListeners.IsEmpty())
-                    PL_DHashTableRemove(mBroadcasterMap, &aBroadcaster);
+                    mBroadcasterMap->RemoveEntry(entry);
 
                 break;
             }
@@ -890,7 +890,7 @@ XULDocument::ExecuteOnBroadcastHandlerFor(Element* aBroadcaster,
 
         // This is the right <observes> element. Execute the
         // |onbroadcast| event handler
-        WidgetEvent event(true, NS_XUL_BROADCAST);
+        WidgetEvent event(true, eXULBroadcast);
 
         nsCOMPtr<nsIPresShell> shell = GetShell();
         if (shell) {

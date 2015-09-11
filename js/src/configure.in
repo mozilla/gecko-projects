@@ -1188,7 +1188,6 @@ if test "$GNU_CC"; then
     # -Waddress - catches suspicious uses of memory addresses
     # -Wchar-subscripts - catches array index using signed char
     # -Wcomment - catches nested comments
-    # -Wdeclaration-after-statement - MSVC doesn't like these
     # -Wempty-body - catches bugs, e.g. "if (c); foo();", few false positives
     # -Wendif-labels - catches `#else FOO` and `#endif FOO` not in comment
     # -Wenum-compare - catches comparison of different enum types
@@ -1213,7 +1212,6 @@ if test "$GNU_CC"; then
     # -Wwrite-strings - catches non-const char* pointers to string literals
     #
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wall"
-    _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wdeclaration-after-statement"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wsign-compare"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wtype-limits"
 
@@ -1250,10 +1248,12 @@ if test "$GNU_CC"; then
     # Turn off the following warnings that -Wall turns on:
     # -Wno-unused - lots of violations in third-party code
     # -Wno-inline-new-delete - we inline 'new' and 'delete' in mozalloc
+    # -Wno-unused-local-typedef - catches unused typedefs, which are commonly used in assertion macros
     #
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wno-unused"
 
     MOZ_CXX_SUPPORTS_WARNING(-Wno-, inline-new-delete, ac_cxx_has_wno_inline_new_delete)
+    MOZ_CXX_SUPPORTS_WARNING(-Wno-, unused-local-typedef, ac_cxx_has_wno_unused_local_typedef)
 
     if test -z "$INTEL_CC" -a -z "$CLANG_CC"; then
        # Don't use -Wcast-align with ICC or clang
@@ -1312,6 +1312,7 @@ if test "$GNU_CXX"; then
     # -Wparentheses - catches `if (a=b)` and operator precedence bugs
     # -Wpointer-arith - catches pointer arithmetic using NULL or sizeof(void)
     # -Wpointer-to-int-cast - catches casts from pointer to different sized int
+    # -Wrange-loop-analysis - catches copies during range-based for loops.
     # -Wreorder - catches ctor initializer list not matching class definition order
     # -Wreturn-type - catches missing returns, zero false positives
     # -Wsequence-point - catches undefined order behavior like `a = a++`
@@ -1352,13 +1353,17 @@ if test "$GNU_CXX"; then
 
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, conversion-null, ac_cxx_has_werror_conversion_null)
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, non-literal-null-conversion, ac_cxx_has_werror_non_literal_null_conversion)
+        MOZ_CXX_SUPPORTS_WARNING(-Werror=, range-loop-analysis, ac_cxx_has_range_loop_analysis)
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, sometimes-uninitialized, ac_cxx_has_sometimes_uninitialized)
     fi
 
     # Turn off the following warnings that -Wall turns on:
     # -Wno-invalid-offsetof - we use offsetof on non-POD types frequently
+    # -Wno-unused-local-typedef - catches unused typedefs, which are commonly used in assertion macros
     #
     _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Wno-invalid-offsetof"
+
+    MOZ_CXX_SUPPORTS_WARNING(-Wno-, unused-local-typedef, ac_cxx_has_wno_unused_local_typedef)
 
     if test -z "$INTEL_CXX" -a -z "$CLANG_CXX"; then
        # Don't use -Wcast-align with ICC or clang
@@ -1431,7 +1436,6 @@ case "$host" in
         HOST_CFLAGS="$HOST_CFLAGS -mwindows"
     fi
     HOST_CFLAGS="$HOST_CFLAGS -DXP_WIN32 -DXP_WIN -DWIN32 -D_WIN32 -DNO_X11 -D_CRT_SECURE_NO_WARNINGS"
-    HOST_NSPR_MDCPUCFG='\"md/_winnt.cfg\"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O2}"
     HOST_BIN_SUFFIX=.exe
     case "$host" in
@@ -1457,13 +1461,11 @@ case "$host" in
 
 *-darwin*)
     HOST_CFLAGS="$HOST_CFLAGS -DXP_UNIX -DXP_MACOSX -DNO_X11"
-    HOST_NSPR_MDCPUCFG='\"md/_darwin.cfg\"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O3}"
     ;;
 
 *-linux*|*-kfreebsd*-gnu|*-gnu*)
     HOST_CFLAGS="$HOST_CFLAGS -DXP_UNIX"
-    HOST_NSPR_MDCPUCFG='\"md/_linux.cfg\"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O3}"
     ;;
 
@@ -3713,7 +3715,6 @@ AC_SUBST(HOST_AR)
 AC_SUBST(HOST_AR_FLAGS)
 AC_SUBST(HOST_LD)
 AC_SUBST(HOST_RANLIB)
-AC_SUBST(HOST_NSPR_MDCPUCFG)
 AC_SUBST(HOST_BIN_SUFFIX)
 AC_SUBST(HOST_OS_ARCH)
 

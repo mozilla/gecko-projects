@@ -4062,6 +4062,11 @@
     "extended_statistics_ok": true,
     "description": "Firefox: Time to initialize the bookmarks toolbar view (ms)"
   },
+  "FX_BROWSER_FULLSCREEN_USED": {
+    "expires_in_version": "46",
+    "kind": "count",
+    "description": "The number of times that a session enters browser fullscreen (f11-fullscreen)"
+  },
   "FX_NEW_WINDOW_MS": {
     "expires_in_version": "default",
     "kind": "exponential",
@@ -4233,6 +4238,16 @@
     "n_buckets": 10,
     "extended_statistics_ok": true,
     "description": "Session restore: Time spent blocking the main thread while restoring a window state (ms)"
+  },
+  "FX_TABLET_MODE_USED_DURING_SESSION": {
+    "expires_in_version": "46",
+    "kind": "count",
+    "description": "Windows 10+ only: The number of times tablet-mode is used during a session"
+  },
+  "FX_TOUCH_USED": {
+    "expires_in_version": "46",
+    "kind": "count",
+    "description": "Windows only. Counts occurrences of touch events"
   },
   "FX_URLBAR_SELECTED_RESULT_INDEX": {
     "expires_in_version": "45",
@@ -7318,6 +7333,13 @@
     "kind": "enumerated",
     "n_values": 3,
     "description": "A simple counter of daily mixed-content unblock operations and top documents loaded"
+  },
+  "MIXED_CONTENT_HSTS": {
+    "alert_emails": ["seceng@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 10,
+    "description": "How often would blocked mixed content be allowed if HSTS upgrades were allowed? 0=display/no-HSTS, 1=display/HSTS, 2=active/no-HSTS, 3=active/HSTS"
   },
   "NTLM_MODULE_USED_2": {
     "expires_in_version": "never",

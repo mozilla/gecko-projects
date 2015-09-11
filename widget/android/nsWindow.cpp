@@ -27,6 +27,7 @@ using mozilla::unused;
 
 #include "nsAppShell.h"
 #include "nsIdleService.h"
+#include "nsLayoutUtils.h"
 #include "nsWindow.h"
 #include "nsIObserverService.h"
 #include "nsFocusManager.h"
@@ -1807,7 +1808,7 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
                 RemoveIMEComposition();
 
                 {
-                    WidgetSelectionEvent event(true, NS_SELECTION_SET, this);
+                    WidgetSelectionEvent event(true, eSetSelection, this);
                     InitEvent(event, nullptr);
                     event.mOffset = uint32_t(ae->Start());
                     event.mLength = uint32_t(ae->End() - ae->Start());
@@ -1887,14 +1888,13 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
             */
             AutoIMEMask selMask(mIMEMaskSelectionUpdate);
             RemoveIMEComposition();
-            WidgetSelectionEvent selEvent(true, NS_SELECTION_SET, this);
+            WidgetSelectionEvent selEvent(true, eSetSelection, this);
             InitEvent(selEvent, nullptr);
 
             int32_t start = ae->Start(), end = ae->End();
 
             if (start < 0 || end < 0) {
-                WidgetQueryContentEvent event(true, NS_QUERY_SELECTED_TEXT,
-                                              this);
+                WidgetQueryContentEvent event(true, eQuerySelectedText, this);
                 InitEvent(event, nullptr);
                 DispatchEvent(&event);
                 MOZ_ASSERT(event.mSucceeded);
@@ -1966,7 +1966,7 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
                 RemoveIMEComposition();
 
                 {
-                    WidgetSelectionEvent event(true, NS_SELECTION_SET, this);
+                    WidgetSelectionEvent event(true, eSetSelection, this);
                     InitEvent(event, nullptr);
                     event.mOffset = uint32_t(ae->Start());
                     event.mLength = uint32_t(ae->End() - ae->Start());
@@ -1975,8 +1975,7 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
                 }
 
                 {
-                    WidgetQueryContentEvent queryEvent(true,
-                                                       NS_QUERY_SELECTED_TEXT,
+                    WidgetQueryContentEvent queryEvent(true, eQuerySelectedText,
                                                        this);
                     InitEvent(queryEvent, nullptr);
                     DispatchEvent(&queryEvent);
@@ -2209,7 +2208,7 @@ nsWindow::FlushIMEChanges()
             continue;
         }
 
-        WidgetQueryContentEvent event(true, NS_QUERY_TEXT_CONTENT, this);
+        WidgetQueryContentEvent event(true, eQueryTextContent, this);
 
         if (change.mNewEnd != change.mStart) {
             InitEvent(event, nullptr);
@@ -2226,7 +2225,7 @@ nsWindow::FlushIMEChanges()
     mIMETextChanges.Clear();
 
     if (mIMESelectionChanged) {
-        WidgetQueryContentEvent event(true, NS_QUERY_SELECTED_TEXT, this);
+        WidgetQueryContentEvent event(true, eQuerySelectedText, this);
         InitEvent(event, nullptr);
 
         DispatchEvent(&event);
@@ -2540,4 +2539,35 @@ uint32_t
 nsWindow::GetMaxTouchPoints() const
 {
     return GeckoAppShell::GetMaxTouchPoints();
+}
+
+void
+nsWindow::UpdateZoomConstraints(const uint32_t& aPresShellId,
+                                const FrameMetrics::ViewID& aViewId,
+                                const mozilla::Maybe<ZoomConstraints>& aConstraints)
+{
+#ifdef MOZ_ANDROID_APZ
+    nsBaseWidget::UpdateZoomConstraints(aPresShellId, aViewId, aConstraints);
+#else
+    if (!aConstraints) {
+        // This is intended to "clear" previously stored constraints but in our
+        // case we don't need to bother since they'll get GC'd from browser.js
+        return;
+    }
+    nsIContent* content = nsLayoutUtils::FindContentFor(aViewId);
+    nsIDocument* doc = content ? content->GetComposedDoc() : nullptr;
+    if (!doc) {
+        return;
+    }
+    nsCOMPtr<nsIObserverService> obsServ = mozilla::services::GetObserverService();
+    nsPrintfCString json("{ \"allowZoom\": %s,"
+                         "  \"allowDoubleTapZoom\": %s,"
+                         "  \"minZoom\": %f,"
+                         "  \"maxZoom\": %f }",
+        aConstraints->mAllowZoom ? "true" : "false",
+        aConstraints->mAllowDoubleTapZoom ? "true" : "false",
+        aConstraints->mMinZoom.scale, aConstraints->mMaxZoom.scale);
+    obsServ->NotifyObservers(doc, "zoom-constraints-updated",
+        NS_ConvertASCIItoUTF16(json.get()).get());
+#endif
 }

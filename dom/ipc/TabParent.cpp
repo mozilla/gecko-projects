@@ -79,7 +79,7 @@
 #include "nsWindowWatcher.h"
 #include "private/pprio.h"
 #include "PermissionMessageUtils.h"
-#include "StructuredCloneUtils.h"
+#include "StructuredCloneData.h"
 #include "ColorPickerParent.h"
 #include "FilePickerParent.h"
 #include "TabChild.h"
@@ -276,8 +276,10 @@ TabParent::TabParent(nsIContentParent* aManager,
   , mDefaultScale(0)
   , mUpdatedDimensions(false)
   , mManager(aManager)
+  , mDocShellIsActive(false)
   , mMarkedDestroying(false)
   , mIsDestroyed(false)
+  , mIsDetached(true)
   , mAppPackageFileDescriptorSent(false)
   , mSendOfflineStatus(true)
   , mChromeFlags(aChromeFlags)
@@ -479,6 +481,35 @@ TabParent::Destroy()
   }
 
   mMarkedDestroying = true;
+}
+
+void
+TabParent::Detach()
+{
+  if (mIsDetached) {
+    return;
+  }
+  RemoveWindowListeners();
+  if (RenderFrameParent* frame = GetRenderFrame()) {
+    RemoveTabParentFromTable(frame->GetLayersId());
+  }
+  mIsDetached = true;
+}
+
+void
+TabParent::Attach(nsFrameLoader* aFrameLoader)
+{
+  MOZ_ASSERT(mIsDetached);
+  if (!mIsDetached) {
+    return;
+  }
+  Element* ownerElement = aFrameLoader->GetOwnerContent();
+  SetOwnerElement(ownerElement);
+  if (RenderFrameParent* frame = GetRenderFrame()) {
+    AddTabParentToTable(frame->GetLayersId(), this);
+    frame->OwnerContentChanged(ownerElement);
+  }
+  mIsDetached = false;
 }
 
 bool
@@ -1835,7 +1866,7 @@ TabParent::RecvSyncMessage(const nsString& aMessage,
                            const ClonedMessageData& aData,
                            InfallibleTArray<CpowEntry>&& aCpows,
                            const IPC::Principal& aPrincipal,
-                           nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal)
+                           nsTArray<StructuredCloneData>* aRetVal)
 {
   // FIXME Permission check for TabParent in Content process
   nsIPrincipal* principal = aPrincipal;
@@ -1847,9 +1878,11 @@ TabParent::RecvSyncMessage(const nsString& aMessage,
     }
   }
 
-  StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
+  StructuredCloneData data;
+  ipc::UnpackClonedMessageDataForParent(aData, data);
+
   CrossProcessCpowHolder cpows(Manager(), aCpows);
-  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aPrincipal, aRetVal);
+  return ReceiveMessage(aMessage, true, &data, &cpows, aPrincipal, aRetVal);
 }
 
 bool
@@ -1857,7 +1890,7 @@ TabParent::RecvRpcMessage(const nsString& aMessage,
                           const ClonedMessageData& aData,
                           InfallibleTArray<CpowEntry>&& aCpows,
                           const IPC::Principal& aPrincipal,
-                          nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal)
+                          nsTArray<StructuredCloneData>* aRetVal)
 {
   // FIXME Permission check for TabParent in Content process
   nsIPrincipal* principal = aPrincipal;
@@ -1869,9 +1902,11 @@ TabParent::RecvRpcMessage(const nsString& aMessage,
     }
   }
 
-  StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
+  StructuredCloneData data;
+  ipc::UnpackClonedMessageDataForParent(aData, data);
+
   CrossProcessCpowHolder cpows(Manager(), aCpows);
-  return ReceiveMessage(aMessage, true, &cloneData, &cpows, aPrincipal, aRetVal);
+  return ReceiveMessage(aMessage, true, &data, &cpows, aPrincipal, aRetVal);
 }
 
 bool
@@ -1890,9 +1925,11 @@ TabParent::RecvAsyncMessage(const nsString& aMessage,
     }
   }
 
-  StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForParent(aData);
+  StructuredCloneData data;
+  ipc::UnpackClonedMessageDataForParent(aData, data);
+
   CrossProcessCpowHolder cpows(Manager(), aCpows);
-  return ReceiveMessage(aMessage, false, &cloneData, &cpows, aPrincipal, nullptr);
+  return ReceiveMessage(aMessage, false, &data, &cpows, aPrincipal, nullptr);
 }
 
 bool
@@ -2333,8 +2370,8 @@ TabParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent)
   }
   switch (aEvent.mMessage) {
     case NS_QUERY_TEXT_RECT:
-    case NS_QUERY_CARET_RECT:
-    case NS_QUERY_EDITOR_RECT:
+    case eQueryCaretRect:
+    case eQueryEditorRect:
       aEvent.mReply.mRect -= GetChildProcessOffset();
       break;
     default:
@@ -2626,10 +2663,10 @@ TabParent::RecvDispatchFocusToTopLevelWindow()
 bool
 TabParent::ReceiveMessage(const nsString& aMessage,
                           bool aSync,
-                          const StructuredCloneData* aCloneData,
+                          StructuredCloneData* aData,
                           CpowHolder* aCpows,
                           nsIPrincipal* aPrincipal,
-                          nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal)
+                          nsTArray<StructuredCloneData>* aRetVal)
 {
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader(true);
   if (frameLoader && frameLoader->GetFrameMessageManager()) {
@@ -2640,7 +2677,7 @@ TabParent::ReceiveMessage(const nsString& aMessage,
                             frameLoader,
                             aMessage,
                             aSync,
-                            aCloneData,
+                            aData,
                             aCpows,
                             aPrincipal,
                             aRetVal);
@@ -3008,10 +3045,19 @@ TabParent::GetUseAsyncPanZoom(bool* useAsyncPanZoom)
   return NS_OK;
 }
 
+// defined in nsITabParent
 NS_IMETHODIMP
-TabParent::SetIsDocShellActive(bool isActive)
+TabParent::SetDocShellIsActive(bool isActive)
 {
-  unused << SendSetIsDocShellActive(isActive);
+  mDocShellIsActive = isActive;
+  unused << SendSetDocShellIsActive(isActive);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::GetDocShellIsActive(bool* aIsActive)
+{
+  *aIsActive = mDocShellIsActive;
   return NS_OK;
 }
 

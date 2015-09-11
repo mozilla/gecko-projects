@@ -76,8 +76,8 @@ public:
   }
 
   virtual void ProcessBlock(AudioNodeStream* aStream,
-                            const AudioChunk& aInput,
-                            AudioChunk* aOutput,
+                            const AudioBlock& aInput,
+                            AudioBlock* aOutput,
                             bool* aFinished) override
   {
     MOZ_ASSERT(mSource == aStream, "Invalid source stream");
@@ -114,15 +114,12 @@ public:
     // ProduceBlockBeforeInput() when in a cycle.
     if (!mHaveProducedBeforeInput) {
       UpdateOutputBlock(aOutput, 0.0);
-      // Not in cycle, so no need for additional buffer reference.
-      // See ProduceBlockBeforeInput().
-      mLastOutput.SetNull(0);
     }
     mHaveProducedBeforeInput = false;
     mBuffer.NextBlock();
   }
 
-  void UpdateOutputBlock(AudioChunk* aOutput, double minDelay)
+  void UpdateOutputBlock(AudioBlock* aOutput, double minDelay)
   {
     double maxDelay = mMaxDelay;
     double sampleRate = mSource->SampleRate();
@@ -154,18 +151,12 @@ public:
     }
   }
 
-  virtual void ProduceBlockBeforeInput(AudioChunk* aOutput) override
+  virtual void ProduceBlockBeforeInput(AudioBlock* aOutput) override
   {
     if (mLeftOverData <= 0) {
       aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
     } else {
-      // AudioNodeStream::ReleaseSharedBuffers() is called on delay nodes in
-      // cycles first and so may release the buffer reference in aOutput
-      // because downstream nodes may still be sharing when called.  Therefore
-      // keep a separate reference to the output buffer for re-use next
-      // iteration.
-      UpdateOutputBlock(&mLastOutput, WEBAUDIO_BLOCK_SIZE);
-      *aOutput = mLastOutput;
+      UpdateOutputBlock(aOutput, WEBAUDIO_BLOCK_SIZE);
     }
     mHaveProducedBeforeInput = true;
   }
@@ -186,7 +177,6 @@ public:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  AudioChunk mLastOutput; // Used only when in a cycle.
   AudioNodeStream* mSource;
   AudioNodeStream* mDestination;
   AudioParamTimeline mDelay;

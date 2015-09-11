@@ -67,6 +67,12 @@ StringToUuid(const char* aString, BluetoothUuid& aUuid)
 }
 
 void
+StringToUuid(const nsAString& aString, BluetoothUuid& aUuid)
+{
+  StringToUuid(NS_ConvertUTF16toUTF8(aString).get(), aUuid);
+}
+
+void
 GenerateUuid(nsAString &aUuidString)
 {
   nsresult rv;
@@ -312,13 +318,34 @@ DispatchStatusChangedEvent(const nsAString& aType,
   MOZ_ASSERT(NS_IsMainThread());
 
   InfallibleTArray<BluetoothNamedValue> data;
-  BT_APPEND_NAMED_VALUE(data, "address", nsString(aAddress));
-  BT_APPEND_NAMED_VALUE(data, "status", aStatus);
+  AppendNamedValue(data, "address", nsString(aAddress));
+  AppendNamedValue(data, "status", aStatus);
 
   BluetoothService* bs = BluetoothService::Get();
   NS_ENSURE_TRUE_VOID(bs);
 
   bs->DistributeSignal(aType, NS_LITERAL_STRING(KEY_ADAPTER), data);
+}
+
+void
+AppendNamedValue(InfallibleTArray<BluetoothNamedValue>& aArray,
+                 const char* aName, const BluetoothValue& aValue)
+{
+  nsString name;
+  name.AssignASCII(aName);
+
+  aArray.AppendElement(BluetoothNamedValue(name, aValue));
+}
+
+void
+InsertNamedValue(InfallibleTArray<BluetoothNamedValue>& aArray,
+                 uint8_t aIndex, const char* aName,
+                 const BluetoothValue& aValue)
+{
+  nsString name;
+  name.AssignASCII(aName);
+
+  aArray.InsertElementAt(aIndex, BluetoothNamedValue(name, aValue));
 }
 
 END_BLUETOOTH_NAMESPACE

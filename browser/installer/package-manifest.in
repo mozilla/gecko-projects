@@ -123,11 +123,6 @@
 #endif
 #endif
 #endif
-#ifdef MOZ_REPLACE_MALLOC
-#ifndef MOZ_JEMALLOC3
-@BINPATH@/@DLL_PREFIX@replace_jemalloc@DLL_SUFFIX@
-#endif
-#endif
 #ifdef MOZ_GTK3
 @BINPATH@/@DLL_PREFIX@mozgtk@DLL_SUFFIX@
 @BINPATH@/gtk2/@DLL_PREFIX@mozgtk@DLL_SUFFIX@
@@ -495,9 +490,6 @@
 #endif
 #ifdef XP_MACOSX
 @RESPATH@/browser/components/SafariProfileMigrator.js
-#endif
-#ifdef MOZ_ENABLE_DBUS
-@RESPATH@/components/@DLL_PREFIX@dbusservice@DLL_SUFFIX@
 #endif
 #ifdef MOZ_ENABLE_GNOME_COMPONENT
 @RESPATH@/components/@DLL_PREFIX@mozgnome@DLL_SUFFIX@

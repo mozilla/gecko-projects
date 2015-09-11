@@ -124,6 +124,9 @@ pref("dom.indexedDB.logging.details", true);
 // Enable profiler marks for indexedDB events.
 pref("dom.indexedDB.logging.profiler-marks", false);
 
+// Whether or not File Handle is enabled.
+pref("dom.fileHandle.enabled", true);
+
 // Whether or not the Permissions API is enabled.
 #ifdef NIGHTLY_BUILD
 pref("dom.permissions.enabled", true);
@@ -668,7 +671,6 @@ pref("gfx.font_rendering.wordcache.maxentries", 10000);
 pref("gfx.font_rendering.graphite.enabled", true);
 
 #ifdef XP_WIN
-pref("gfx.font_rendering.directwrite.enabled", false);
 pref("gfx.font_rendering.directwrite.use_gdi_table_loading", true);
 #endif
 
@@ -1436,6 +1438,11 @@ pref("network.http.enforce-framing.soft", true);
 // See http://www.w3.org/TR/web-packaging/#streamable-package-format
 pref("network.http.enable-packaged-apps", false);
 
+// Enable this pref to skip verification process. The packaged app
+// will be considered signed no matter the package has a valid/invalid
+// signature or no signature.
+pref("network.http.packaged-apps-developer-mode", false);
+
 // default values for FTP
 // in a DSCP environment this should be 40 (0x28, or AF11), per RFC-4594,
 // Section 4.8 "High-Throughput Data Service Class", and 80 (0x50, or AF22)
@@ -1782,7 +1789,7 @@ pref("network.generic-ntlm-auth.workstation", "WORKSTATION");
 //   1 - allow sub-resources to open HTTP authentication credentials dialogs,
 //       but don't allow it for cross-origin sub-resources
 //   2 - allow the cross-origin authentication as well.
-pref("network.auth.allow-subresource-auth", 2);
+pref("network.auth.subresource-http-auth-allow", 2);
 
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
@@ -2236,9 +2243,6 @@ pref("layout.css.clip-path-shapes.enabled", false);
 // Is support for CSS sticky positioning enabled?
 pref("layout.css.sticky.enabled", true);
 
-// Is support for CSS "will-change" enabled?
-pref("layout.css.will-change.enabled", true);
-
 // Is support for DOMPoint enabled?
 pref("layout.css.DOMPoint.enabled", true);
 
@@ -2536,9 +2540,9 @@ pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 // Asynchronous plugin initialization should only be enabled on non-e10s
 // channels until some remaining bugs are resolved.
 #ifdef E10S_TESTING_ONLY
-pref("dom.ipc.plugins.asyncInit", false);
+pref("dom.ipc.plugins.asyncInit.enabled", false);
 #else
-pref("dom.ipc.plugins.asyncInit", true);
+pref("dom.ipc.plugins.asyncInit.enabled", true);
 #endif
 
 pref("dom.ipc.processCount", 1);
@@ -3164,6 +3168,15 @@ pref("intl.tsf.hack.google_ja_input.do_not_return_no_layout_error_at_first_char"
 // ITfContextView::GetTextExt() if the specified range is the caret of
 // composition string.
 pref("intl.tsf.hack.google_ja_input.do_not_return_no_layout_error_at_caret", true);
+// Whether hack ITextStoreACP::QueryInsert() or not.  The method should return
+// new selection after specified length text is inserted at specified range.
+// However, Microsoft's some Chinese TIPs expect that the result is same as
+// specified range.  If following prefs are true, ITextStoreACP::QueryInsert()
+// returns specified range only when one of the TIPs is active.
+// For Microsoft Pinyin and Microsoft Wubi
+pref("intl.tsf.hack.ms_simplified_chinese.query_insert_result", true);
+// For Microsoft ChangJie and Microsoft Quick
+pref("intl.tsf.hack.ms_traditional_chinese.query_insert_result", true);
 #endif
 
 // If composition_font is set, Gecko sets the font to IME.  IME may use
@@ -4035,37 +4048,6 @@ pref("zoom.minPercent", 30);
 pref("zoom.maxPercent", 300);
 pref("toolkit.zoomManager.zoomValues", ".3,.5,.67,.8,.9,1,1.1,1.2,1.33,1.5,1.7,2,2.4,3");
 
-/**
- * Specify whether or not the browser should generate a reflow event on zoom.
- * For a pan-and-zoom ui on mobile, it is sometimes desirable for a zoom event
- * to limit the max line box width of text in order to enable easier reading
- * of large amounts of text.
- *
- * If enabled, this will limit the max line box width of all text on a page to
- * the viewport width (also generating a reflow), after a zoom event occurs.
- *
- * By default, this is not enabled.
- */
-pref("browser.zoom.reflowOnZoom", false);
-
-/**
- * Specifies the number of milliseconds to wait after a given reflow-on-zoom
- * operation has completed before allowing another one to be triggered. This
- * is to prevent a buildup of reflow-zoom events.
- */
-pref("browser.zoom.reflowZoom.reflowTimeout", 500);
-
-/**
- * Controls whether or not the reflow-on-zoom behavior happens on page load.
- * This can be enabled in conjunction with the above preference (reflowOnZoom),
- * but has no effect if browser.zoom.reflowOnZoom is disabled.
- *
- * Note that this should be turned off only in cases where debugging of the
- * reflow-on-zoom feature is necessary, and enabling the feature during
- * a page load inhbits this debugging.
- */
-pref("browser.zoom.reflowZoom.reflowTextOnPageLoad", true);
-
 //
 // Image-related prefs
 //
@@ -4786,8 +4768,10 @@ pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simpl
 // checks.
 pref("urlclassifier.trackingTable", "test-track-simple,mozpub-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozpub-trackwhite-digest256");
-pref("browser.trackingprotection.updateURL", "https://tracking.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
-pref("browser.trackingprotection.gethashURL", "https://tracking.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+
+pref("browser.safebrowsing.provider.mozilla.lists", "mozpub-track-digest256,mozpub-trackwhite-digest256");
+pref("browser.safebrowsing.provider.mozilla.updateURL", "https://tracking.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://tracking.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
 
 // Turn off Spatial navigation by default.
 pref("snav.enabled", false);

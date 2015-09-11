@@ -547,12 +547,14 @@ CodeGeneratorARM::visitDivI(LDivI* ins)
     if (mir->canTruncateRemainder()) {
         masm.ma_sdiv(lhs, rhs, output);
     } else {
-        ScratchRegisterScope scratch(masm);
-        masm.ma_sdiv(lhs, rhs, scratch);
-        masm.ma_mul(scratch, rhs, temp);
-        masm.ma_cmp(lhs, temp);
+        {
+            ScratchRegisterScope scratch(masm);
+            masm.ma_sdiv(lhs, rhs, temp);
+            masm.ma_mul(temp, rhs, scratch);
+            masm.ma_cmp(lhs, scratch);
+        }
         bailoutIf(Assembler::NotEqual, ins->snapshot());
-        masm.ma_mov(scratch, output);
+        masm.ma_mov(temp, output);
     }
 
     masm.bind(&done);
@@ -1482,12 +1484,12 @@ CodeGeneratorARM::visitCompareBAndBranch(LCompareBAndBranch* lir)
 }
 
 void
-CodeGeneratorARM::visitCompareV(LCompareV* lir)
+CodeGeneratorARM::visitCompareBitwise(LCompareBitwise* lir)
 {
     MCompare* mir = lir->mir();
     Assembler::Condition cond = JSOpToCondition(mir->compareType(), mir->jsop());
-    const ValueOperand lhs = ToValue(lir, LCompareV::LhsInput);
-    const ValueOperand rhs = ToValue(lir, LCompareV::RhsInput);
+    const ValueOperand lhs = ToValue(lir, LCompareBitwise::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareBitwise::RhsInput);
     const Register output = ToRegister(lir->output());
 
     MOZ_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
@@ -1510,12 +1512,12 @@ CodeGeneratorARM::visitCompareV(LCompareV* lir)
 }
 
 void
-CodeGeneratorARM::visitCompareVAndBranch(LCompareVAndBranch* lir)
+CodeGeneratorARM::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
 {
     MCompare* mir = lir->cmpMir();
     Assembler::Condition cond = JSOpToCondition(mir->compareType(), mir->jsop());
-    const ValueOperand lhs = ToValue(lir, LCompareVAndBranch::LhsInput);
-    const ValueOperand rhs = ToValue(lir, LCompareVAndBranch::RhsInput);
+    const ValueOperand lhs = ToValue(lir, LCompareBitwiseAndBranch::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareBitwiseAndBranch::RhsInput);
 
     MOZ_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
                mir->jsop() == JSOP_NE || mir->jsop() == JSOP_STRICTNE);
@@ -1805,7 +1807,10 @@ CodeGeneratorARM::visitAsmJSLoadHeap(LAsmJSLoadHeap* ins)
         }
     } else {
         Register d = ToRegister(ins->output());
-        masm.ma_mov(Imm32(0), d, LeaveCC, Assembler::AboveOrEqual);
+        if (mir->isAtomicAccess())
+            masm.ma_b(gen->outOfBoundsLabel(), Assembler::AboveOrEqual);
+        else
+            masm.ma_mov(Imm32(0), d, LeaveCC, Assembler::AboveOrEqual);
         masm.ma_dataTransferN(IsLoad, size, isSigned, HeapReg, ptrReg, d, Offset, Assembler::Below);
     }
     memoryBarrier(mir->barrierAfter());
@@ -1876,6 +1881,8 @@ CodeGeneratorARM::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
         else
             masm.ma_vstr(vd, HeapReg, ptrReg, 0, 0, Assembler::Below);
     } else {
+        if (mir->isAtomicAccess())
+            masm.ma_b(gen->outOfBoundsLabel(), Assembler::AboveOrEqual);
         masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, ptrReg,
                               ToRegister(ins->value()), Offset, Assembler::Below);
     }
@@ -1896,26 +1903,17 @@ CodeGeneratorARM::visitAsmJSCompareExchangeHeap(LAsmJSCompareExchangeHeap* ins)
     Register oldval = ToRegister(ins->oldValue());
     Register newval = ToRegister(ins->newValue());
 
-    Label rejoin;
     uint32_t maybeCmpOffset = 0;
     if (mir->needsBoundsCheck()) {
-        Label goahead;
         BufferOffset bo = masm.ma_BoundsCheck(ptrReg);
-        Register out = ToRegister(ins->output());
         maybeCmpOffset = bo.getOffset();
-        masm.ma_b(&goahead, Assembler::Below);
-        memoryBarrier(MembarFull);
-        masm.as_eor(out, out, O2Reg(out));
-        masm.ma_b(&rejoin, Assembler::Always);
-        masm.bind(&goahead);
+        masm.ma_b(gen->outOfBoundsLabel(), Assembler::AboveOrEqual);
     }
     masm.compareExchangeToTypedIntArray(vt == Scalar::Uint32 ? Scalar::Int32 : vt,
                                         srcAddr, oldval, newval, InvalidReg,
                                         ToAnyRegister(ins->output()));
-    if (rejoin.used()) {
-        masm.bind(&rejoin);
+    if (mir->needsBoundsCheck())
         masm.append(AsmJSHeapAccess(maybeCmpOffset));
-    }
 }
 
 void
@@ -1946,32 +1944,23 @@ CodeGeneratorARM::visitAsmJSAtomicExchangeHeap(LAsmJSAtomicExchangeHeap* ins)
 {
     MAsmJSAtomicExchangeHeap* mir = ins->mir();
     Scalar::Type vt = mir->accessType();
-    const LAllocation* ptr = ins->ptr();
-    Register ptrReg = ToRegister(ptr);
+    Register ptrReg = ToRegister(ins->ptr());
+    Register value = ToRegister(ins->value());
     BaseIndex srcAddr(HeapReg, ptrReg, TimesOne);
     MOZ_ASSERT(ins->addrTemp()->isBogusTemp());
 
-    Register value = ToRegister(ins->value());
-
-    Label rejoin;
     uint32_t maybeCmpOffset = 0;
     if (mir->needsBoundsCheck()) {
-        Label goahead;
         BufferOffset bo = masm.ma_BoundsCheck(ptrReg);
-        Register out = ToRegister(ins->output());
         maybeCmpOffset = bo.getOffset();
-        masm.ma_b(&goahead, Assembler::Below);
-        memoryBarrier(MembarFull);
-        masm.as_eor(out, out, O2Reg(out));
-        masm.ma_b(&rejoin, Assembler::Always);
-        masm.bind(&goahead);
+        masm.ma_b(gen->outOfBoundsLabel(), Assembler::AboveOrEqual);
     }
+
     masm.atomicExchangeToTypedIntArray(vt == Scalar::Uint32 ? Scalar::Int32 : vt,
                                        srcAddr, value, InvalidReg, ToAnyRegister(ins->output()));
-    if (rejoin.used()) {
-        masm.bind(&rejoin);
+
+    if (mir->needsBoundsCheck())
         masm.append(AsmJSHeapAccess(maybeCmpOffset));
-    }
 }
 
 void
@@ -2011,19 +2000,13 @@ CodeGeneratorARM::visitAsmJSAtomicBinopHeap(LAsmJSAtomicBinopHeap* ins)
 
     BaseIndex srcAddr(HeapReg, ptrReg, TimesOne);
 
-    Label rejoin;
     uint32_t maybeCmpOffset = 0;
     if (mir->needsBoundsCheck()) {
-        Label goahead;
         BufferOffset bo = masm.ma_BoundsCheck(ptrReg);
-        Register out = ToRegister(ins->output());
         maybeCmpOffset = bo.getOffset();
-        masm.ma_b(&goahead, Assembler::Below);
-        memoryBarrier(MembarFull);
-        masm.as_eor(out, out, O2Reg(out));
-        masm.ma_b(&rejoin, Assembler::Always);
-        masm.bind(&goahead);
+        masm.ma_b(gen->outOfBoundsLabel(), Assembler::AboveOrEqual);
     }
+
     if (value->isConstant())
         masm.atomicBinopToTypedIntArray(op, vt == Scalar::Uint32 ? Scalar::Int32 : vt,
                                         Imm32(ToInt32(value)), srcAddr, temp, InvalidReg,
@@ -2032,10 +2015,9 @@ CodeGeneratorARM::visitAsmJSAtomicBinopHeap(LAsmJSAtomicBinopHeap* ins)
         masm.atomicBinopToTypedIntArray(op, vt == Scalar::Uint32 ? Scalar::Int32 : vt,
                                         ToRegister(value), srcAddr, temp, InvalidReg,
                                         ToAnyRegister(ins->output()));
-    if (rejoin.used()) {
-        masm.bind(&rejoin);
+
+    if (mir->needsBoundsCheck())
         masm.append(AsmJSHeapAccess(maybeCmpOffset));
-    }
 }
 
 void
@@ -2053,16 +2035,11 @@ CodeGeneratorARM::visitAsmJSAtomicBinopHeapForEffect(LAsmJSAtomicBinopHeapForEff
 
     BaseIndex srcAddr(HeapReg, ptrReg, TimesOne);
 
-    Label rejoin;
     uint32_t maybeCmpOffset = 0;
     if (mir->needsBoundsCheck()) {
-        Label goahead;
         BufferOffset bo = masm.ma_BoundsCheck(ptrReg);
         maybeCmpOffset = bo.getOffset();
-        masm.ma_b(&goahead, Assembler::Below);
-        memoryBarrier(MembarFull);
-        masm.ma_b(&rejoin, Assembler::Always);
-        masm.bind(&goahead);
+        masm.ma_b(gen->outOfBoundsLabel(), Assembler::AboveOrEqual);
     }
 
     if (value->isConstant())
@@ -2070,10 +2047,8 @@ CodeGeneratorARM::visitAsmJSAtomicBinopHeapForEffect(LAsmJSAtomicBinopHeapForEff
     else
         masm.atomicBinopToTypedIntArray(op, vt, ToRegister(value), srcAddr);
 
-    if (rejoin.used()) {
-        masm.bind(&rejoin);
+    if (mir->needsBoundsCheck())
         masm.append(AsmJSHeapAccess(maybeCmpOffset));
-    }
 }
 
 void

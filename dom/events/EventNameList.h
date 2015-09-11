@@ -153,11 +153,11 @@ EVENT(abort,
       EventNameType_All,
       eBasicEventClass)
 EVENT(canplay,
-      NS_CANPLAY,
+      eCanPlay,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(canplaythrough,
-      NS_CANPLAYTHROUGH,
+      eCanPlayThrough,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(change,
@@ -207,15 +207,15 @@ EVENT(drop,
       EventNameType_HTMLXUL,
       eDragEventClass)
 EVENT(durationchange,
-      NS_DURATIONCHANGE,
+      eDurationChange,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(emptied,
-      NS_EMPTIED,
+      eEmptied,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(ended,
-      NS_ENDED,
+      eEnded,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(input,
@@ -255,15 +255,15 @@ NON_IDL_EVENT(mozbrowserafterkeyup,
               EventNameType_None,
               eBeforeAfterKeyboardEventClass)
 EVENT(loadeddata,
-      NS_LOADEDDATA,
+      eLoadedData,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(loadedmetadata,
-      NS_LOADEDMETADATA,
+      eLoadedMetaData,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(loadstart,
-      NS_LOADSTART,
+      eLoadStart,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(mousedown,
@@ -295,11 +295,11 @@ EVENT(mouseup,
       EventNameType_All,
       eMouseEventClass)
 EVENT(mozfullscreenchange,
-      NS_FULLSCREENCHANGE,
+      eFullscreenChange,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(mozfullscreenerror,
-      NS_FULLSCREENERROR,
+      eFullscreenError,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(mozpointerlockchange,
@@ -354,23 +354,23 @@ EVENT(lostpointercapture,
 // Not supported yet; probably never because "wheel" is a better idea.
 // EVENT(mousewheel)
 EVENT(pause,
-      NS_PAUSE,
+      ePause,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(play,
-      NS_PLAY,
+      ePlay,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(playing,
-      NS_PLAYING,
+      ePlaying,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(progress,
-      NS_PROGRESS,
+      eProgress,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(ratechange,
-      NS_RATECHANGE,
+      eRateChange,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(reset,
@@ -378,11 +378,11 @@ EVENT(reset,
       EventNameType_HTMLXUL,
       eBasicEventClass)
 EVENT(seeked,
-      NS_SEEKED,
+      eSeeked,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(seeking,
-      NS_SEEKING,
+      eSeeking,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(select,
@@ -394,7 +394,7 @@ EVENT(show,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(stalled,
-      NS_STALLED,
+      eStalled,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(submit,
@@ -402,44 +402,44 @@ EVENT(submit,
       EventNameType_HTMLXUL,
       eBasicEventClass)
 EVENT(suspend,
-      NS_SUSPEND,
+      eSuspend,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(timeupdate,
-      NS_TIMEUPDATE,
+      eTimeUpdate,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(volumechange,
-      NS_VOLUMECHANGE,
+      eVolumeChange,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(waiting,
-      NS_WAITING,
+      eWaiting,
       EventNameType_HTML,
       eBasicEventClass)
 EVENT(wheel,
-      NS_WHEEL_WHEEL,
+      eWheel,
       EventNameType_All,
       eWheelEventClass)
 EVENT(copy,
-      NS_COPY,
+      eCopy,
       EventNameType_HTMLXUL,
       eClipboardEventClass)
 EVENT(cut,
-      NS_CUT,
+      eCut,
       EventNameType_HTMLXUL,
       eClipboardEventClass)
 EVENT(paste,
-      NS_PASTE,
+      ePaste,
       EventNameType_HTMLXUL,
       eClipboardEventClass)
 // Gecko-specific extensions that apply to elements
 EVENT(beforescriptexecute,
-      NS_BEFORE_SCRIPT_EXECUTE,
+      eBeforeScriptExecute,
       EventNameType_HTMLXUL,
       eBasicEventClass)
 EVENT(afterscriptexecute,
-      NS_AFTER_SCRIPT_EXECUTE,
+      eAfterScriptExecute,
       EventNameType_HTMLXUL,
       eBasicEventClass)
 
@@ -504,11 +504,11 @@ WINDOW_EVENT(online,
              EventNameType_XUL | EventNameType_HTMLBodyOrFramesetOnly,
              eBasicEventClass)
 WINDOW_EVENT(pagehide,
-             NS_PAGE_HIDE,
+             ePageHide,
              EventNameType_HTMLBodyOrFramesetOnly,
              eBasicEventClass)
 WINDOW_EVENT(pageshow,
-             NS_PAGE_SHOW,
+             ePageShow,
              EventNameType_HTMLBodyOrFramesetOnly,
              eBasicEventClass)
 WINDOW_EVENT(popstate,
@@ -591,31 +591,31 @@ NON_IDL_EVENT(MozMouseHittest,
               eMouseEventClass)
 
 NON_IDL_EVENT(DOMAttrModified,
-              NS_MUTATION_ATTRMODIFIED,
+              eLegacyAttrModified,
               EventNameType_HTMLXUL,
               eMutationEventClass)
 NON_IDL_EVENT(DOMCharacterDataModified,
-              NS_MUTATION_CHARACTERDATAMODIFIED,
+              eLegacyCharacterDataModified,
               EventNameType_HTMLXUL,
               eMutationEventClass)
 NON_IDL_EVENT(DOMNodeInserted,
-              NS_MUTATION_NODEINSERTED,
+              eLegacyNodeInserted,
               EventNameType_HTMLXUL,
               eMutationEventClass)
 NON_IDL_EVENT(DOMNodeRemoved,
-              NS_MUTATION_NODEREMOVED,
+              eLegacyNodeRemoved,
               EventNameType_HTMLXUL,
               eMutationEventClass)
 NON_IDL_EVENT(DOMNodeInsertedIntoDocument,
-              NS_MUTATION_NODEINSERTEDINTODOCUMENT,
+              eLegacyNodeInsertedIntoDocument,
               EventNameType_HTMLXUL,
               eMutationEventClass)
 NON_IDL_EVENT(DOMNodeRemovedFromDocument,
-              NS_MUTATION_NODEREMOVEDFROMDOCUMENT,
+              eLegacyNodeRemovedFromDocument,
               EventNameType_HTMLXUL,
               eMutationEventClass)
 NON_IDL_EVENT(DOMSubtreeModified,
-              NS_MUTATION_SUBTREEMODIFIED,
+              eLegacySubtreeModified,
               EventNameType_HTMLXUL,
               eMutationEventClass)
 
@@ -633,16 +633,16 @@ NON_IDL_EVENT(DOMFocusOut,
               eUIEventClass)
                                   
 NON_IDL_EVENT(DOMMouseScroll,
-              NS_MOUSE_SCROLL,
+              eLegacyMouseLineOrPageScroll,
               EventNameType_HTMLXUL,
               eMouseScrollEventClass)
 NON_IDL_EVENT(MozMousePixelScroll,
-              NS_MOUSE_PIXEL_SCROLL,
+              eLegacyMousePixelScroll,
               EventNameType_HTMLXUL,
               eMouseScrollEventClass)
                                                 
 NON_IDL_EVENT(open,
-              NS_OPEN,
+              eOpen,
               EventNameType_None,
               eBasicEventClass)
 
@@ -688,7 +688,7 @@ NON_IDL_EVENT(compositionend,
               EventNameType_XUL,
               eCompositionEventClass)
 NON_IDL_EVENT(command,
-              NS_XUL_COMMAND,
+              eXULCommand,
               EventNameType_XUL,
               eInputEventClass)
 NON_IDL_EVENT(close,
@@ -696,27 +696,27 @@ NON_IDL_EVENT(close,
               EventNameType_XUL,
               eBasicEventClass)
 NON_IDL_EVENT(popupshowing,
-              NS_XUL_POPUP_SHOWING,
+              eXULPopupShowing,
               EventNameType_XUL,
               eBasicEventClass)
 NON_IDL_EVENT(popupshown,
-              NS_XUL_POPUP_SHOWN,
+              eXULPopupShown,
               EventNameType_XUL,
               eBasicEventClass)
 NON_IDL_EVENT(popuphiding,
-              NS_XUL_POPUP_HIDING,
+              eXULPopupHiding,
               EventNameType_XUL,
               eBasicEventClass)
 NON_IDL_EVENT(popuphidden,
-              NS_XUL_POPUP_HIDDEN,
+              eXULPopupHidden,
               EventNameType_XUL,
               eBasicEventClass)
 NON_IDL_EVENT(broadcast,
-              NS_XUL_BROADCAST,
+              eXULBroadcast,
               EventNameType_XUL,
               eBasicEventClass)
 NON_IDL_EVENT(commandupdate,
-              NS_XUL_COMMAND_UPDATE,
+              eXULCommandUpdate,
               EventNameType_XUL,
               eBasicEventClass)
 NON_IDL_EVENT(dragexit,
@@ -742,24 +742,24 @@ NON_IDL_EVENT(underflow,
 
 // Various SVG events
 NON_IDL_EVENT(SVGLoad,
-              NS_SVG_LOAD,
+              eSVGLoad,
               EventNameType_None,
               eBasicEventClass)
 NON_IDL_EVENT(SVGUnload,
-              NS_SVG_UNLOAD,
+              eSVGUnload,
               EventNameType_None,
               eBasicEventClass)
 NON_IDL_EVENT(SVGResize,
-              NS_SVG_RESIZE,
+              eSVGResize,
               EventNameType_None,
               eBasicEventClass)
 NON_IDL_EVENT(SVGScroll,
-              NS_SVG_SCROLL,
+              eSVGScroll,
               EventNameType_None,
               eBasicEventClass)
 
 NON_IDL_EVENT(SVGZoom,
-              NS_SVG_ZOOM,
+              eSVGZoom,
               EventNameType_None,
               eSVGZoomEventClass)
 
@@ -767,7 +767,7 @@ NON_IDL_EVENT(SVGZoom,
 #ifndef MESSAGE_TO_EVENT
 // This is a bit hackish, but SVG's event names are weird.
 NON_IDL_EVENT(zoom,
-              NS_SVG_ZOOM,
+              eSVGZoom,
               EventNameType_SVGSVG,
               eBasicEventClass)
 #endif
@@ -806,7 +806,7 @@ NON_IDL_EVENT(repeatEvent,
               eSMILTimeEventClass)
 
 NON_IDL_EVENT(MozAfterPaint,
-              NS_AFTERPAINT,
+              eAfterPaint,
               EventNameType_None,
               eBasicEventClass)
 
@@ -909,15 +909,15 @@ NON_IDL_EVENT(transitionend,
               EventNameType_None,
               eTransitionEventClass)
 NON_IDL_EVENT(animationstart,
-              NS_ANIMATION_START,
+              eAnimationStart,
               EventNameType_None,
               eAnimationEventClass)
 NON_IDL_EVENT(animationend,
-              NS_ANIMATION_END,
+              eAnimationEnd,
               EventNameType_None,
               eAnimationEventClass)
 NON_IDL_EVENT(animationiteration,
-              NS_ANIMATION_ITERATION,
+              eAnimationIteration,
               EventNameType_None,
               eAnimationEventClass)
 

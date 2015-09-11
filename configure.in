@@ -94,7 +94,6 @@ dnl ==============================================================
 _topsrcdir=`cd \`dirname $0\`; pwd`
 _objdir=`pwd`
 
-
 dnl TODO Don't exempt L10N builds once bug 842760 is resolved.
 if test "$_topsrcdir" = "$_objdir" -a "${with_l10n_base+set}" != set; then
   echo "  ***"
@@ -851,6 +850,8 @@ fi
 MOZ_PATH_PROG(RPMBUILD, rpmbuild, :)
 AC_SUBST(RPMBUILD)
 
+MOZ_PATH_PROG(GENISOIMAGE, genisoimage, :)
+
 if test "$COMPILE_ENVIRONMENT"; then
 
 dnl ========================================================
@@ -1484,7 +1485,6 @@ if test "$GNU_CC"; then
     # -Wall - turn on a lot of warnings
     # -Wchar-subscripts - catches array index using signed char
     # -Wcomment - catches nested comments
-    # -Wdeclaration-after-statement - MSVC doesn't like these
     # -Wempty-body - catches bugs, e.g. "if (c); foo();", few false positives
     # -Wendif-labels - catches `#else FOO` and `#endif FOO` not in comment
     # -Wenum-compare - catches comparison of different enum types
@@ -1504,7 +1504,6 @@ if test "$GNU_CC"; then
     # -Wunknown-pragmas - catches unexpected #pragma directives
     #
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wall"
-    _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wdeclaration-after-statement"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wempty-body"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wpointer-to-int-cast"
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wsign-compare"
@@ -1534,8 +1533,11 @@ if test "$GNU_CC"; then
 
     # Turn off the following warnings that -Wall turns on:
     # -Wno-unused - lots of violations in third-party code
+    # -Wno-unused-local-typedef - catches unused typedefs, which are commonly used in assertion macros
     #
     _WARNINGS_CFLAGS="${_WARNINGS_CFLAGS} -Wno-unused"
+
+    MOZ_CXX_SUPPORTS_WARNING(-Wno-, unused-local-typedef, ac_cxx_has_wno_unused_local_typedef)
 
     if test -z "$INTEL_CC" -a -z "$CLANG_CC"; then
        # Don't use -Wcast-align with ICC or clang
@@ -1593,6 +1595,7 @@ if test "$GNU_CXX"; then
     # -Woverloaded-virtual - function declaration hides virtual function from base class
     # -Wparentheses - catches `if (a=b)` and operator precedence bugs
     # -Wpointer-arith - catches pointer arithmetic using NULL or sizeof(void)
+    # -Wrange-loop-analysis - catches copies during range-based for loops.
     # -Wreturn-type - catches missing returns, zero false positives
     # -Wsequence-point - catches undefined order behavior like `a = a++`
     # -Wsign-compare - catches comparison of signed and unsigned types
@@ -1624,18 +1627,21 @@ if test "$GNU_CXX"; then
         _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Werror=unused-label"
 
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, non-literal-null-conversion, ac_cxx_has_werror_non_literal_null_conversion)
+        MOZ_CXX_SUPPORTS_WARNING(-Werror=, range-loop-analysis, ac_cxx_has_range_loop_analysis)
         MOZ_CXX_SUPPORTS_WARNING(-Werror=, sometimes-uninitialized, ac_cxx_has_sometimes_uninitialized)
     fi
 
     # Turn off the following warnings that -Wall turns on:
     # -Wno-invalid-offsetof - we use offsetof on non-POD types frequently
     # -Wno-inline-new-delete - we inline 'new' and 'delete' in mozalloc
+    # -Wno-unused-local-typedef - catches unused typedefs, which are commonly used in assertion macros
     #   for performance reasons, and because GCC and clang accept it (though
     #   clang warns about it).
     #
     _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Wno-invalid-offsetof"
 
     MOZ_CXX_SUPPORTS_WARNING(-Wno-, inline-new-delete, ac_cxx_has_wno_inline_new_delete)
+    MOZ_CXX_SUPPORTS_WARNING(-Wno-, unused-local-typedef, ac_cxx_has_wno_unused_local_typedef)
 
     if test -z "$INTEL_CXX" -a -z "$CLANG_CXX"; then
        # Don't use -Wcast-align with ICC or clang
@@ -1833,7 +1839,7 @@ case "$host" in
         HOST_CFLAGS="$HOST_CFLAGS -mwindows"
     fi
     HOST_CFLAGS="$HOST_CFLAGS -DXP_WIN32 -DXP_WIN -DWIN32 -D_WIN32 -DNO_X11 -D_CRT_SECURE_NO_WARNINGS"
-    HOST_NSPR_MDCPUCFG='\"md/_winnt.cfg\"'
+    HOST_NSPR_MDCPUCFG='"md/_winnt.cfg"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O2}"
     HOST_BIN_SUFFIX=.exe
     case "$host" in
@@ -1859,13 +1865,13 @@ case "$host" in
 
 *-darwin*)
     HOST_CFLAGS="$HOST_CFLAGS -DXP_UNIX -DXP_MACOSX -DNO_X11"
-    HOST_NSPR_MDCPUCFG='\"md/_darwin.cfg\"'
+    HOST_NSPR_MDCPUCFG='"md/_darwin.cfg"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O3}"
     ;;
 
 *-linux*|*-kfreebsd*-gnu|*-gnu*)
     HOST_CFLAGS="$HOST_CFLAGS -DXP_UNIX"
-    HOST_NSPR_MDCPUCFG='\"md/_linux.cfg\"'
+    HOST_NSPR_MDCPUCFG='"md/_linux.cfg"'
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O3}"
     ;;
 
@@ -5444,6 +5450,23 @@ if test -n "$MOZ_VPX" -a -z "$MOZ_NATIVE_LIBVPX"; then
         VPX_AS_CONVERSION='$(PERL) $(topsrcdir)/media/libvpx/build/make/ads2gas.pl'
         VPX_ASM_SUFFIX="$ASM_SUFFIX"
         VPX_ARM_ASM=1
+        dnl Building with -mfpu=neon requires either the "softfp" or the
+        dnl "hardfp" ABI. Depending on the compiler's default target, and the
+        dnl CFLAGS, the default ABI might be neither, in which case it is the
+        dnl "softfloat" ABI.
+        dnl The "softfloat" ABI is binary-compatible with the "softfp" ABI, so
+        dnl we can safely mix code built with both ABIs. So, if we detect
+        dnl that compiling uses the "softfloat" ABI, force the use of the
+        dnl "softfp" ABI instead.
+        dnl Confusingly, the __SOFTFP__ preprocessor variable indicates the
+        dnl "softfloat" ABI, not the "softfp" ABI.
+        dnl Note: VPX_ASFLAGS is also used in CFLAGS.
+        AC_TRY_COMPILE([],
+          [#ifndef __SOFTFP__
+           #error "compiler target supports -mfpu=neon, so we don't have to add extra flags"
+           #endif],
+           VPX_ASFLAGS="$VPX_ASFLAGS -mfloat-abi=softfp"
+           )
       fi
     ;;
     *:x86)
@@ -7212,7 +7235,7 @@ dnl ========================================================
 dnl = Jemalloc build setup
 dnl ========================================================
 if test -z "$MOZ_MEMORY"; then
-  if test -n "$MOZ_JEMALLOC3" -a -z "$MOZ_REPLACE_MALLOC"; then
+  if test -n "$MOZ_JEMALLOC4" -a -z "$MOZ_REPLACE_MALLOC"; then
     MOZ_NATIVE_JEMALLOC=1
     AC_CHECK_FUNCS(mallctl nallocx,,
       [MOZ_NATIVE_JEMALLOC=
@@ -7220,7 +7243,7 @@ if test -z "$MOZ_MEMORY"; then
     if test -n "$MOZ_NATIVE_JEMALLOC"; then
       MOZ_MEMORY=1
       AC_DEFINE(MOZ_MEMORY)
-      AC_DEFINE(MOZ_JEMALLOC3)
+      AC_DEFINE(MOZ_JEMALLOC4)
       AC_DEFINE(MOZ_NATIVE_JEMALLOC)
     fi
   fi
@@ -7233,8 +7256,11 @@ if test -z "$MOZ_MEMORY"; then
   esac
 else
   AC_DEFINE(MOZ_MEMORY)
-  if test -n "$MOZ_JEMALLOC3"; then
-    AC_DEFINE(MOZ_JEMALLOC3)
+  if test -n "$NIGHTLY_BUILD"; then
+    MOZ_JEMALLOC4=1
+  fi
+  if test -n "$MOZ_JEMALLOC4"; then
+    AC_DEFINE(MOZ_JEMALLOC4)
   fi
   if test "x$MOZ_DEBUG" = "x1"; then
     AC_DEFINE(MOZ_MEMORY_DEBUG)
@@ -7283,7 +7309,7 @@ else
   esac
 fi # MOZ_MEMORY
 AC_SUBST(MOZ_MEMORY)
-AC_SUBST(MOZ_JEMALLOC3)
+AC_SUBST(MOZ_JEMALLOC4)
 AC_SUBST(MOZ_NATIVE_JEMALLOC)
 AC_SUBST(MOZ_CRT)
 export MOZ_CRT
@@ -8770,6 +8796,7 @@ fi
 AC_SUBST(MOZ_APP_STATIC_INI)
 
 AC_SUBST(MOZ_PKG_SPECIAL)
+AC_SUBST(MOZ_SIMPLE_PACKAGE_NAME)
 
 AC_SUBST(MOZILLA_OFFICIAL)
 
@@ -8975,6 +9002,8 @@ AC_SUBST(SOCORRO_SYMBOL_UPLOAD_TOKEN_FILE)
 AC_SUBST(MOZ_ENABLE_SZIP)
 AC_SUBST(MOZ_SZIP_FLAGS)
 
+AC_SUBST(DMG_TOOL)
+
 dnl Host JavaScript runtime, if any, to use during cross compiles.
 AC_SUBST(JS_BINARY)
 
@@ -9129,7 +9158,7 @@ fi
 
 # Run jemalloc configure script
 
-if test -z "$MOZ_NATIVE_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC3" -o -n "$MOZ_REPLACE_MALLOC"; then
+if test -z "$MOZ_NATIVE_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC4" -o -n "$MOZ_REPLACE_MALLOC"; then
   ac_configure_args="--build=$build --host=$target --enable-stats --with-jemalloc-prefix=je_ --disable-valgrind"
   # We're using memalign for _aligned_malloc in memory/build/mozmemory_wrap.c
   # on Windows, so just export memalign on all platforms.
@@ -9143,7 +9172,7 @@ if test -z "$MOZ_NATIVE_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC3" -
       ac_configure_args="$ac_configure_args --enable-ivsalloc"
     fi
   fi
-  if test -n "$MOZ_JEMALLOC3"; then
+  if test -n "$MOZ_JEMALLOC4"; then
     case "${OS_ARCH}" in
       WINNT|Darwin)
         # We want jemalloc functions to be kept hidden on both Mac and Windows
@@ -9169,7 +9198,7 @@ if test -z "$MOZ_NATIVE_JEMALLOC" -a "$MOZ_MEMORY" && test -n "$MOZ_JEMALLOC3" -
         MANGLE=$_MANGLE
         ;;
     esac
-  elif test -z "$MOZ_JEMALLOC3"; then
+  elif test -z "$MOZ_JEMALLOC4"; then
     MANGLE=$_MANGLE
     JEMALLOC_WRAPPER=replace_
   fi

@@ -84,7 +84,7 @@ static const char kContentTimeoutPref[] = "dom.ipc.plugins.contentTimeoutSecs";
 static const char kChildTimeoutPref[] = "dom.ipc.plugins.timeoutSecs";
 static const char kParentTimeoutPref[] = "dom.ipc.plugins.parentTimeoutSecs";
 static const char kLaunchTimeoutPref[] = "dom.ipc.plugins.processLaunchTimeoutSecs";
-static const char kAsyncInitPref[] = "dom.ipc.plugins.asyncInit";
+static const char kAsyncInitPref[] = "dom.ipc.plugins.asyncInit.enabled";
 #ifdef XP_WIN
 static const char kHangUITimeoutPref[] = "dom.ipc.plugins.hangUITimeoutSecs";
 static const char kHangUIMinDisplayPref[] = "dom.ipc.plugins.hangUIMinDisplaySecs";
@@ -207,8 +207,9 @@ namespace {
 class PluginModuleMapping : public PRCList
 {
 public:
-    explicit PluginModuleMapping(uint32_t aPluginId)
+    explicit PluginModuleMapping(uint32_t aPluginId, bool aAllowAsyncInit)
         : mPluginId(aPluginId)
+        , mAllowAsyncInit(aAllowAsyncInit)
         , mProcessIdValid(false)
         , mModule(nullptr)
         , mChannelOpened(false)
@@ -240,7 +241,7 @@ public:
     GetModule()
     {
         if (!mModule) {
-            mModule = new PluginModuleContentParent();
+            mModule = new PluginModuleContentParent(mAllowAsyncInit);
         }
         return mModule;
     }
@@ -333,6 +334,7 @@ private:
     }
 
     uint32_t mPluginId;
+    bool mAllowAsyncInit;
     bool mProcessIdValid;
     base::ProcessId mProcessId;
     PluginModuleContentParent* mModule;
@@ -372,10 +374,12 @@ mozilla::plugins::TerminatePlugin(uint32_t aPluginId,
 }
 
 /* static */ PluginLibrary*
-PluginModuleContentParent::LoadModule(uint32_t aPluginId)
+PluginModuleContentParent::LoadModule(uint32_t aPluginId,
+                                      nsPluginTag* aPluginTag)
 {
     PluginModuleMapping::NotifyLoadingModule loadingModule;
-    nsAutoPtr<PluginModuleMapping> mapping(new PluginModuleMapping(aPluginId));
+    nsAutoPtr<PluginModuleMapping> mapping(
+            new PluginModuleMapping(aPluginId, aPluginTag->mSupportsAsyncInit));
 
     MOZ_ASSERT(XRE_IsContentProcess());
 
@@ -503,8 +507,9 @@ PluginModuleChromeParent::LoadModule(const char* aFilePath, uint32_t aPluginId,
 #endif
 #endif
 
-    nsAutoPtr<PluginModuleChromeParent> parent(new PluginModuleChromeParent(aFilePath, aPluginId,
-                                                                            sandboxLevel));
+    nsAutoPtr<PluginModuleChromeParent> parent(
+            new PluginModuleChromeParent(aFilePath, aPluginId, sandboxLevel,
+                                         aPluginTag->mSupportsAsyncInit));
     UniquePtr<LaunchCompleteTask> onLaunchedRunnable(new LaunchedTask(parent));
     parent->mSubprocess->SetCallRunnableImmediately(!parent->mIsStartingAsync);
     TimeStamp launchStart = TimeStamp::Now();
@@ -635,7 +640,7 @@ PluginModuleChromeParent::WaitForIPCConnection()
     return true;
 }
 
-PluginModuleParent::PluginModuleParent(bool aIsChrome)
+PluginModuleParent::PluginModuleParent(bool aIsChrome, bool aAllowAsyncInit)
     : mQuirks(QUIRKS_NOT_INITIALIZED)
     , mIsChrome(aIsChrome)
     , mShutdown(false)
@@ -653,7 +658,8 @@ PluginModuleParent::PluginModuleParent(bool aIsChrome)
     , mAsyncNewRv(NS_ERROR_NOT_INITIALIZED)
 {
 #if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GTK)
-    mIsStartingAsync = Preferences::GetBool(kAsyncInitPref, false);
+    mIsStartingAsync = aAllowAsyncInit &&
+                       Preferences::GetBool(kAsyncInitPref, false);
 #if defined(MOZ_CRASHREPORTER)
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AsyncPluginInit"),
                                        mIsStartingAsync ?
@@ -676,8 +682,8 @@ PluginModuleParent::~PluginModuleParent()
     }
 }
 
-PluginModuleContentParent::PluginModuleContentParent()
-    : PluginModuleParent(false)
+PluginModuleContentParent::PluginModuleContentParent(bool aAllowAsyncInit)
+    : PluginModuleParent(false, aAllowAsyncInit)
 {
     Preferences::RegisterCallback(TimeoutChanged, kContentTimeoutPref, this);
 }
@@ -691,8 +697,9 @@ bool PluginModuleChromeParent::sInstantiated = false;
 
 PluginModuleChromeParent::PluginModuleChromeParent(const char* aFilePath,
                                                    uint32_t aPluginId,
-                                                   int32_t aSandboxLevel)
-    : PluginModuleParent(true)
+                                                   int32_t aSandboxLevel,
+                                                   bool aAllowAsyncInit)
+    : PluginModuleParent(true, aAllowAsyncInit)
     , mSubprocess(new PluginProcessParent(aFilePath))
     , mPluginId(aPluginId)
     , mChromeTaskFactory(this)
@@ -2560,21 +2567,6 @@ PluginModuleParent::NPP_New(NPMIMEType pluginType, NPP instance,
         }
     }
 
-    if (mPluginName.IsEmpty()) {
-        GetPluginDetails();
-        InitQuirksModes(nsDependentCString(pluginType));
-        /** mTimeBlocked measures the time that the main thread has been blocked
-         *  on plugin module initialization. As implemented, this is the sum of
-         *  plugin-container launch + toolhelp32 snapshot + NP_Initialize.
-         *  We don't accumulate its value until here because the plugin info
-         *  is not available until *after* NP_Initialize.
-         */
-        Telemetry::Accumulate(Telemetry::BLOCKED_ON_PLUGIN_MODULE_INIT_MS,
-                              GetHistogramKey(),
-                              static_cast<uint32_t>(mTimeBlocked.ToMilliseconds()));
-        mTimeBlocked = TimeDuration();
-    }
-
     // create the instance on the other side
     InfallibleTArray<nsCString> names;
     InfallibleTArray<nsCString> values;
@@ -2608,6 +2600,21 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
                                     InfallibleTArray<nsCString>& values,
                                     NPSavedData* saved, NPError* error)
 {
+    if (mPluginName.IsEmpty()) {
+        GetPluginDetails();
+        InitQuirksModes(nsDependentCString(pluginType));
+        /** mTimeBlocked measures the time that the main thread has been blocked
+         *  on plugin module initialization. As implemented, this is the sum of
+         *  plugin-container launch + toolhelp32 snapshot + NP_Initialize.
+         *  We don't accumulate its value until here because the plugin info
+         *  is not available until *after* NP_Initialize.
+         */
+        Telemetry::Accumulate(Telemetry::BLOCKED_ON_PLUGIN_MODULE_INIT_MS,
+                              GetHistogramKey(),
+                              static_cast<uint32_t>(mTimeBlocked.ToMilliseconds()));
+        mTimeBlocked = TimeDuration();
+    }
+
     nsCaseInsensitiveUTF8StringArrayComparator comparator;
     NS_NAMED_LITERAL_CSTRING(srcAttributeName, "src");
     auto srcAttributeIndex = names.IndexOf(srcAttributeName, 0, comparator);

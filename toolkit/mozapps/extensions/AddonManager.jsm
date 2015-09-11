@@ -1646,6 +1646,7 @@ var AddonManagerInternal = {
 
     if (gStartupComplete)
       return;
+    logger.debug("Registering startup change '" + aType + "' for " + aID);
 
     // Ensure that an ID is only listed in one type of change
     for (let type in this.startupChanges)
@@ -2184,6 +2185,19 @@ var AddonManagerInternal = {
       return;
     }
 
+    // When a chrome in-content UI has loaded a <browser> inside to host a
+    // website we want to do our security checks on the inner-browser but
+    // notify front-end that install events came from the outer-browser (the
+    // main tab's browser). Check this by seeing if the browser we've been
+    // passed is in a content type docshell and if so get the outer-browser.
+    let topBrowser = aBrowser;
+    let docShell = aBrowser.ownerDocument.defaultView
+                           .QueryInterface(Ci.nsIInterfaceRequestor)
+                           .getInterface(Ci.nsIDocShell)
+                           .QueryInterface(Ci.nsIDocShellTreeItem);
+    if (docShell.itemType == Ci.nsIDocShellTreeItem.typeContent)
+      topBrowser = docShell.chromeEventHandler;
+
     try {
       let weblistener = Cc["@mozilla.org/addons/web-install-listener;1"].
                         getService(Ci.amIWebInstallListener);
@@ -2192,7 +2206,7 @@ var AddonManagerInternal = {
         for (let install of aInstalls)
           install.cancel();
 
-        weblistener.onWebInstallDisabled(aBrowser, aInstallingPrincipal.URI,
+        weblistener.onWebInstallDisabled(topBrowser, aInstallingPrincipal.URI,
                                          aInstalls, aInstalls.length);
         return;
       }
@@ -2201,7 +2215,7 @@ var AddonManagerInternal = {
           install.cancel();
 
         if (weblistener instanceof Ci.amIWebInstallListener2) {
-          weblistener.onWebInstallOriginBlocked(aBrowser, aInstallingPrincipal.URI,
+          weblistener.onWebInstallOriginBlocked(topBrowser, aInstallingPrincipal.URI,
                                                 aInstalls, aInstalls.length);
         }
         return;
@@ -2213,14 +2227,14 @@ var AddonManagerInternal = {
       new BrowserListener(aBrowser, aInstallingPrincipal, aInstalls);
 
       if (!this.isInstallAllowed(aMimetype, aInstallingPrincipal)) {
-        if (weblistener.onWebInstallBlocked(aBrowser, aInstallingPrincipal.URI,
+        if (weblistener.onWebInstallBlocked(topBrowser, aInstallingPrincipal.URI,
                                             aInstalls, aInstalls.length)) {
           aInstalls.forEach(function(aInstall) {
             aInstall.install();
           });
         }
       }
-      else if (weblistener.onWebInstallRequested(aBrowser, aInstallingPrincipal.URI,
+      else if (weblistener.onWebInstallRequested(topBrowser, aInstallingPrincipal.URI,
                                                  aInstalls, aInstalls.length)) {
         aInstalls.forEach(function(aInstall) {
           aInstall.install();
@@ -2984,6 +2998,8 @@ this.AddonManager = {
   SIGNEDSTATE_PRELIMINARY: 1,
   // Add-on is fully reviewed.
   SIGNEDSTATE_SIGNED: 2,
+  // Add-on is system add-on.
+  SIGNEDSTATE_SYSTEM: 3,
 
   // Constants for the Addon.userDisabled property
   // Indicates that the userDisabled state of this add-on is currently

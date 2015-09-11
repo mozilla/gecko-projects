@@ -39,6 +39,15 @@ void
 StringToUuid(const char* aString, BluetoothUuid& aUuid);
 
 /**
+ * Convert xxxxxxxx-xxxx-xxxx-xxxxxxxxxxxx uuid string to BluetoothUuid object.
+ *
+ * This utility function is used by gecko internal only to convert uuid string
+ * created by gecko back to BluetoothUuid representation.
+ */
+void
+StringToUuid(const nsAString& aString, BluetoothUuid& aUuid);
+
+/**
  * Generate a random uuid.
  *
  * @param aUuidString [out] String to store the generated uuid.
@@ -156,6 +165,25 @@ void
 DispatchStatusChangedEvent(const nsAString& aType,
                            const nsAString& aDeviceAddress,
                            bool aStatus);
+
+//
+// BluetoothNamedValue manipulation
+//
+
+/**
+ * Wrap literal name and value into a BluetoothNamedValue and
+ * append it to the array.
+ */
+void AppendNamedValue(InfallibleTArray<BluetoothNamedValue>& aArray,
+                      const char* aName, const BluetoothValue& aValue);
+
+/**
+ * Wrap literal name and value into a BluetoothNamedValue and
+ * insert it to the array.
+ */
+void InsertNamedValue(InfallibleTArray<BluetoothNamedValue>& aArray,
+                      uint8_t aIndex, const char* aName,
+                      const BluetoothValue& aValue);
 
 END_BLUETOOTH_NAMESPACE
 

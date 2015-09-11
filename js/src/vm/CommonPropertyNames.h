@@ -150,6 +150,7 @@
     macro(multiline, multiline, "multiline") \
     macro(name, name, "name") \
     macro(NaN, NaN, "NaN") \
+    macro(new, new_, "new") \
     macro(next, next, "next") \
     macro(NFC, NFC, "NFC") \
     macro(NFD, NFD, "NFD") \
@@ -190,6 +191,7 @@
     macro(resumeGenerator, resumeGenerator, "resumeGenerator") \
     macro(return, return_, "return") \
     macro(revoke, revoke, "revoke") \
+    macro(script, script, "script") \
     macro(scripts, scripts, "scripts") \
     macro(sensitivity, sensitivity, "sensitivity") \
     macro(set, set, "set") \

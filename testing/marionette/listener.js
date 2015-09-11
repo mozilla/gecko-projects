@@ -101,6 +101,9 @@ function registerSelf() {
 
   if (register[0]) {
     let {id, remotenessChange} = register[0][0];
+    let {B2G, raisesAccessibilityExceptions} = register[0][2];
+    isB2G = B2G;
+    accessibility.strict = raisesAccessibilityExceptions;
     listenerId = id;
     if (typeof id != "undefined") {
       // check if we're the main process
@@ -194,7 +197,6 @@ function removeMessageListenerId(messageName, handler) {
 }
 
 let getTitleFn = dispatch(getTitle);
-let getElementSizeFn = dispatch(getElementSize);
 let getPageSourceFn = dispatch(getPageSource);
 let getActiveElementFn = dispatch(getActiveElement);
 let clickElementFn = dispatch(clickElement);
@@ -208,11 +210,11 @@ let getCurrentUrlFn = dispatch(getCurrentUrl);
 let findElementContentFn = dispatch(findElementContent);
 let findElementsContentFn = dispatch(findElementsContent);
 let isElementSelectedFn = dispatch(isElementSelected);
-let getElementLocationFn = dispatch(getElementLocation);
 let clearElementFn = dispatch(clearElement);
 let isElementDisplayedFn = dispatch(isElementDisplayed);
 let getElementValueOfCssPropertyFn = dispatch(getElementValueOfCssProperty);
 let switchToShadowRootFn = dispatch(switchToShadowRoot);
+let getCookiesFn = dispatch(getCookies);
 
 /**
  * Start all message listeners
@@ -244,12 +246,10 @@ function startListeners() {
   addMessageListenerId("Marionette:getElementTagName", getElementTagNameFn);
   addMessageListenerId("Marionette:isElementDisplayed", isElementDisplayedFn);
   addMessageListenerId("Marionette:getElementValueOfCssProperty", getElementValueOfCssPropertyFn);
-  addMessageListenerId("Marionette:getElementSize", getElementSizeFn);  // deprecated
   addMessageListenerId("Marionette:getElementRect", getElementRectFn);
   addMessageListenerId("Marionette:isElementEnabled", isElementEnabledFn);
   addMessageListenerId("Marionette:isElementSelected", isElementSelectedFn);
   addMessageListenerId("Marionette:sendKeysToElement", sendKeysToElement);
-  addMessageListenerId("Marionette:getElementLocation", getElementLocationFn); //deprecated
   addMessageListenerId("Marionette:clearElement", clearElementFn);
   addMessageListenerId("Marionette:switchToFrame", switchToFrame);
   addMessageListenerId("Marionette:switchToShadowRoot", switchToShadowRootFn);
@@ -261,7 +261,7 @@ function startListeners() {
   addMessageListenerId("Marionette:setTestName", setTestName);
   addMessageListenerId("Marionette:takeScreenshot", takeScreenshot);
   addMessageListenerId("Marionette:addCookie", addCookie);
-  addMessageListenerId("Marionette:getCookies", getCookies);
+  addMessageListenerId("Marionette:getCookies", getCookiesFn);
   addMessageListenerId("Marionette:deleteAllCookies", deleteAllCookies);
   addMessageListenerId("Marionette:deleteCookie", deleteCookie);
 }
@@ -350,12 +350,10 @@ function deleteSession(msg) {
   removeMessageListenerId("Marionette:getElementTagName", getElementTagNameFn);
   removeMessageListenerId("Marionette:isElementDisplayed", isElementDisplayedFn);
   removeMessageListenerId("Marionette:getElementValueOfCssProperty", getElementValueOfCssPropertyFn);
-  removeMessageListenerId("Marionette:getElementSize", getElementSizeFn); // deprecated
   removeMessageListenerId("Marionette:getElementRect", getElementRectFn);
   removeMessageListenerId("Marionette:isElementEnabled", isElementEnabledFn);
   removeMessageListenerId("Marionette:isElementSelected", isElementSelectedFn);
   removeMessageListenerId("Marionette:sendKeysToElement", sendKeysToElement);
-  removeMessageListenerId("Marionette:getElementLocation", getElementLocationFn);
   removeMessageListenerId("Marionette:clearElement", clearElementFn);
   removeMessageListenerId("Marionette:switchToFrame", switchToFrame);
   removeMessageListenerId("Marionette:switchToShadowRoot", switchToShadowRootFn);
@@ -367,7 +365,7 @@ function deleteSession(msg) {
   removeMessageListenerId("Marionette:setTestName", setTestName);
   removeMessageListenerId("Marionette:takeScreenshot", takeScreenshot);
   removeMessageListenerId("Marionette:addCookie", addCookie);
-  removeMessageListenerId("Marionette:getCookies", getCookies);
+  removeMessageListenerId("Marionette:getCookies", getCookiesFn);
   removeMessageListenerId("Marionette:deleteAllCookies", deleteAllCookies);
   removeMessageListenerId("Marionette:deleteCookie", deleteCookie);
   if (isB2G) {
@@ -481,20 +479,16 @@ function checkForInterrupted() {
  */
 function createExecuteContentSandbox(win, timeout) {
   let mn = new Marionette(
-      this,
       win,
       "content",
       marionetteLogObj,
       timeout,
       heartbeatCallback,
       marionetteTestName);
-  mn.runEmulatorCmd = (cmd, cb) => this.runEmulatorCmd(cmd, cb);
-  mn.runEmulatorShell = (args, cb) => this.runEmulatorShell(args, cb);
 
   let principal = win;
-  if (sandboxName == 'system') {
-    principal = Cc["@mozilla.org/systemprincipal;1"].
-                createInstance(Ci.nsIPrincipal);
+  if (sandboxName == "system") {
+    principal = Cc["@mozilla.org/systemprincipal;1"].createInstance(Ci.nsIPrincipal);
   }
   let sandbox = new Cu.Sandbox(principal, {sandboxPrototype: win});
   sandbox.global = sandbox;
@@ -512,6 +506,8 @@ function createExecuteContentSandbox(win, timeout) {
       sandbox[fn] = mn[fn];
     }
   });
+  sandbox.runEmulatorCmd = (cmd, cb) => this.runEmulatorCmd(cmd, cb);
+  sandbox.runEmulatorShell = (args, cb) => this.runEmulatorShell(args, cb);
 
   sandbox.asyncComplete = (obj, id) => {
     if (id == asyncTestCommandId) {
@@ -1543,22 +1539,7 @@ function getElementValueOfCssProperty(id, prop) {
 }
 
 /**
- * Get the size of the element.
- *
- * @param {WebElement} id
- *     Web element reference.
- *
- * @return {Object.<string, number>}
- *     The width/height dimensions of th element.
- */
-function getElementSize(id) {
-  let el = elementManager.getKnownElement(id, curContainer);
-  let clientRect = el.getBoundingClientRect();
-  return {width: clientRect.width, height: clientRect.height};
-}
-
-/**
- * Get the size of the element.
+ * Get the position and dimensions of the element.
  *
  * @param {WebElement} id
  *     Reference to web element.
@@ -1633,15 +1614,6 @@ function sendKeysToElement(msg) {
   } catch (e) {
     sendError(e, command_id);
   }
-}
-
-/**
- * Get the element's top left-hand corner point.
- */
-function getElementLocation(id) {
-  let el = elementManager.getKnownElement(id, curContainer);
-  let rect = el.getBoundingClientRect();
-  return {x: rect.left, y: rect.top};
 }
 
 /**
@@ -1878,17 +1850,20 @@ function addCookie(msg) {
 /**
  * Get all cookies for the current domain.
  */
-function getCookies(msg) {
-  var toReturn = [];
-  var cookies = getVisibleCookies(curContainer.frame.location);
+function getCookies() {
+  let rv = [];
+  let cookies = getVisibleCookies(curContainer.frame.location);
+
   for (let cookie of cookies) {
-    var expires = cookie.expires;
-    if (expires == 0) {  // Session cookie, don't return an expiry.
+    let expires = cookie.expires;
+    // session cookie, don't return an expiry
+    if (expires == 0) {
       expires = null;
-    } else if (expires == 1) { // Date before epoch time, cap to epoch.
+    // date before epoch time, cap to epoch
+    } else if (expires == 1) {
       expires = 0;
     }
-    toReturn.push({
+    rv.push({
       'name': cookie.name,
       'value': cookie.value,
       'path': cookie.path,
@@ -1898,7 +1873,8 @@ function getCookies(msg) {
       'expiry': expires
     });
   }
-  sendResponse({value: toReturn}, msg.json.command_id);
+
+  return rv;
 }
 
 /**

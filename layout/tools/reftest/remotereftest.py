@@ -359,8 +359,10 @@ class RemoteReftest(RefTest):
         prefs["datareporting.policy.dataSubmissionPolicyBypassAcceptance"] = True
 
         # Point the url-classifier to the local testing server for fast failures
-        prefs["browser.safebrowsing.gethashURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/gethash"
-        prefs["browser.safebrowsing.updateURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/update"
+        prefs["browser.safebrowsing.provider.google.gethashURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/gethash"
+        prefs["browser.safebrowsing.provider.google.updateURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/update"
+        prefs["browser.safebrowsing.provider.mozilla.gethashURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/gethash"
+        prefs["browser.safebrowsing.provider.mozilla.updateURL"] = "http://127.0.0.1:8888/safebrowsing-dummy/update"
         # Point update checks to the local testing server for fast failures
         prefs["extensions.update.url"] = "http://127.0.0.1:8888/extensions-dummy/updateURL"
         prefs["extensions.update.background.url"] = "http://127.0.0.1:8888/extensions-dummy/updateBackgroundURL"
@@ -512,6 +514,13 @@ def main(args):
         if (width < 1050 or height < 1050):
             print "ERROR: Invalid screen resolution %sx%s, please adjust to 1366x1050 or higher" % (width, height)
             return 1
+
+    # Check that Firefox is installed
+    expected = options.app.split('/')[-1]
+    installed = dm.shellCheckOutput(['pm', 'list', 'packages', expected])
+    if expected not in installed:
+        print "%s is not installed on this device" % expected
+        return 1
 
     automation.setAppName(options.app)
     automation.setRemoteProfile(options.remoteProfile)

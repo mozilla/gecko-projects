@@ -125,13 +125,13 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_HEALTHREPORT_LINK = NON_PREF_PREFIX + "healthreport.link";
     private static final String PREFS_DEVTOOLS_REMOTE_USB_ENABLED = "devtools.remote.usb.enabled";
     private static final String PREFS_DEVTOOLS_REMOTE_WIFI_ENABLED = "devtools.remote.wifi.enabled";
-    private static final String PREFS_DISPLAY_REFLOW_ON_ZOOM = "browser.zoom.reflowOnZoom";
     private static final String PREFS_DISPLAY_TITLEBAR_MODE = "browser.chrome.titlebarMode";
     private static final String PREFS_SYNC = NON_PREF_PREFIX + "sync";
     public static final String PREFS_OPEN_URLS_IN_PRIVATE = NON_PREF_PREFIX + "openExternalURLsPrivately";
     public static final String PREFS_VOICE_INPUT_ENABLED = NON_PREF_PREFIX + "voice_input_enabled";
     public static final String PREFS_QRCODE_ENABLED = NON_PREF_PREFIX + "qrcode_enabled";
     private static final String PREFS_DEVTOOLS = NON_PREF_PREFIX + "devtools.enabled";
+    private static final String PREFS_DISPLAY = NON_PREF_PREFIX + "display.enabled";
     private static final String PREFS_CUSTOMIZE_HOME = NON_PREF_PREFIX + "customize_home";
     private static final String PREFS_TRACKING_PROTECTION_PRIVATE_BROWSING = "privacy.trackingprotection.pbmode.enabled";
     private static final String PREFS_TRACKING_PROTECTION_LEARN_MORE = NON_PREF_PREFIX + "trackingprotection.learn_more";
@@ -706,12 +706,16 @@ OnSharedPreferenceChangeListener
                     }
                 }
                 if (PREFS_DEVTOOLS.equals(key) &&
-                    RestrictedProfiles.isUserRestricted(this)) {
+                    !RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_DEVELOPER_TOOLS)) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
                 }
-
+                if (PREFS_DISPLAY.equals(key) && !RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_DISPLAY_SETTINGS)) {
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
+                }
                 if (PREFS_CUSTOMIZE_HOME.equals(key)) {
                     if (!RestrictedProfiles.isAllowed(this, Restriction.DISALLOW_CUSTOMIZE_HOME)) {
                         preferences.removePreference(pref);
@@ -739,13 +743,6 @@ OnSharedPreferenceChangeListener
                 } else if (PREFS_ZOOMED_VIEW_ENABLED.equals(key)) {
                     // Only enable the ZoomedView / magnifying pref on Nightly.
                     if (!AppConstants.NIGHTLY_BUILD) {
-                        preferences.removePreference(pref);
-                        i--;
-                        continue;
-                    }
-                } else if (PREFS_DISPLAY_REFLOW_ON_ZOOM.equals(key)) {
-                    // Remove UI for reflow on release builds.
-                    if (AppConstants.RELEASE_BUILD) {
                         preferences.removePreference(pref);
                         i--;
                         continue;

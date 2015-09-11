@@ -1287,6 +1287,8 @@ bool TSFTextStore::sDoNotReturnNoLayoutErrorToFreeChangJie = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToEasyChangjei = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret = false;
+bool TSFTextStore::sHackQueryInsertForMSSimplifiedTIP = false;
+bool TSFTextStore::sHackQueryInsertForMSTraditionalTIP = false;
 
 #define TEXTSTORE_DEFAULT_VIEW (1)
 
@@ -1687,7 +1689,7 @@ TSFTextStore::FlushPendingActions()
 
         if (action.mAdjustSelection) {
           // Select composition range so the new composition replaces the range
-          WidgetSelectionEvent selectionSet(true, NS_SELECTION_SET, mWidget);
+          WidgetSelectionEvent selectionSet(true, eSetSelection, mWidget);
           mWidget->InitEvent(selectionSet);
           selectionSet.mOffset = static_cast<uint32_t>(action.mSelectionStart);
           selectionSet.mLength = static_cast<uint32_t>(action.mSelectionLength);
@@ -1696,7 +1698,7 @@ TSFTextStore::FlushPendingActions()
           if (!selectionSet.mSucceeded) {
             MOZ_LOG(sTextStoreLog, LogLevel::Error,
                    ("TSF: 0x%p   TSFTextStore::FlushPendingActions() "
-                    "FAILED due to NS_SELECTION_SET failure", this));
+                    "FAILED due to eSetSelection failure", this));
             break;
           }
         }
@@ -1813,15 +1815,15 @@ TSFTextStore::FlushPendingActions()
         }
         break;
       }
-      case PendingAction::SELECTION_SET: {
+      case PendingAction::SET_SELECTION: {
         MOZ_LOG(sTextStoreLog, LogLevel::Debug,
                ("TSF: 0x%p   TSFTextStore::FlushPendingActions() "
-                "flushing SELECTION_SET={ mSelectionStart=%d, "
+                "flushing SET_SELECTION={ mSelectionStart=%d, "
                 "mSelectionLength=%d, mSelectionReversed=%s }",
                 this, action.mSelectionStart, action.mSelectionLength,
                 GetBoolName(action.mSelectionReversed)));
 
-        WidgetSelectionEvent selectionSet(true, NS_SELECTION_SET, mWidget);
+        WidgetSelectionEvent selectionSet(true, eSetSelection, mWidget);
         selectionSet.mOffset = 
           static_cast<uint32_t>(action.mSelectionStart);
         selectionSet.mLength =
@@ -1936,8 +1938,23 @@ TSFTextStore::QueryInsert(LONG acpTestStart,
 
   // XXX need to adjust to cluster boundary
   // Assume we are given good offsets for now
-  *pacpResultStart = acpTestStart;
-  *pacpResultEnd = acpTestStart + cch;
+  const TSFStaticSink* kSink = TSFStaticSink::GetInstance();
+  if (IsWin8OrLater() && !mComposition.IsComposing() &&
+      ((sHackQueryInsertForMSTraditionalTIP &&
+         (kSink->IsMSChangJieActive() || kSink->IsMSQuickQuickActive())) ||
+       (sHackQueryInsertForMSSimplifiedTIP &&
+         (kSink->IsMSPinyinActive() || kSink->IsMSWubiActive())))) {
+    MOZ_LOG(sTextStoreLog, LogLevel::Warning,
+            ("TSF: 0x%p   TSFTextStore::QueryInsert() WARNING using different "
+             "result for the TIP", this));
+    // Chinese TIPs of Microsoft assume that QueryInsert() returns selected
+    // range which should be removed.
+    *pacpResultStart = acpTestStart;
+    *pacpResultEnd = acpTestEnd;
+  } else {
+    *pacpResultStart = acpTestStart;
+    *pacpResultEnd = acpTestStart + cch;
+  }
 
   MOZ_LOG(sTextStoreLog, LogLevel::Info,
          ("TSF: 0x%p  TSFTextStore::QueryInsert() succeeded: "
@@ -2066,14 +2083,14 @@ TSFTextStore::GetCurrentText(nsAString& aTextContent)
          ("TSF: 0x%p   TSFTextStore::GetCurrentText(): "
           "retrieving text from the content...", this));
 
-  WidgetQueryContentEvent queryText(true, NS_QUERY_TEXT_CONTENT, mWidget);
+  WidgetQueryContentEvent queryText(true, eQueryTextContent, mWidget);
   queryText.InitForQueryTextContent(0, UINT32_MAX);
   mWidget->InitEvent(queryText);
   DispatchEvent(queryText);
   if (NS_WARN_IF(!queryText.mSucceeded)) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
            ("TSF: 0x%p   TSFTextStore::GetCurrentText(), FAILED, due to "
-            "NS_QUERY_TEXT_CONTENT failure", this));
+            "eQueryTextContent failure", this));
     aTextContent.Truncate();
     return false;
   }
@@ -2092,8 +2109,7 @@ TSFTextStore::CurrentSelection()
       MOZ_CRASH();
     }
 
-    WidgetQueryContentEvent querySelection(true, NS_QUERY_SELECTED_TEXT,
-                                           mWidget);
+    WidgetQueryContentEvent querySelection(true, eQuerySelectedText, mWidget);
     mWidget->InitEvent(querySelection);
     DispatchEvent(querySelection);
     NS_ENSURE_TRUE(querySelection.mSucceeded, mSelection);
@@ -2695,7 +2711,7 @@ TSFTextStore::SetSelectionInternal(const TS_SELECTION_ACP* pSelection,
 
   CompleteLastActionIfStillIncomplete();
   PendingAction* action = mPendingActions.AppendElement();
-  action->mType = PendingAction::SELECTION_SET;
+  action->mType = PendingAction::SET_SELECTION;
   action->mSelectionStart = pSelection->acpStart;
   action->mSelectionLength = pSelection->acpEnd - pSelection->acpStart;
   action->mSelectionReversed = (pSelection->style.ase == TS_AE_START);
@@ -3348,7 +3364,7 @@ TSFTextStore::GetACPFromPoint(TsViewCookie vcView,
   // NOTE: Don't check if the point is in the widget since the point can be
   //       outside of the widget if focused editor is in a XUL <panel>.
 
-  WidgetQueryContentEvent charAtPt(true, NS_QUERY_CHARACTER_AT_POINT, mWidget);
+  WidgetQueryContentEvent charAtPt(true, eQueryCharacterAtPoint, mWidget);
   mWidget->InitEvent(charAtPt, &ourPt);
 
   // FYI: WidgetQueryContentEvent may cause flushing pending layout and it
@@ -3358,7 +3374,7 @@ TSFTextStore::GetACPFromPoint(TsViewCookie vcView,
   if (!mWidget || mWidget->Destroyed()) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
            ("TSF: 0x%p   TSFTextStore::GetACPFromPoint() FAILED due to "
-            "mWidget was destroyed during NS_QUERY_CHARACTER_AT_POINT", this));
+            "mWidget was destroyed during eQueryCharacterAtPoint", this));
     return E_FAIL;
   }
 
@@ -3371,7 +3387,7 @@ TSFTextStore::GetACPFromPoint(TsViewCookie vcView,
   if (NS_WARN_IF(!charAtPt.mSucceeded)) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
            ("TSF: 0x%p   TSFTextStore::GetACPFromPoint() FAILED due to "
-            "NS_QUERY_CHARACTER_AT_POINT failure", this));
+            "eQueryCharacterAtPoint failure", this));
     return E_FAIL;
   }
 
@@ -3679,13 +3695,13 @@ TSFTextStore::GetScreenExtInternal(RECT& aScreenExt)
          ("TSF: 0x%p   TSFTextStore::GetScreenExtInternal()", this));
 
   // use NS_QUERY_EDITOR_RECT to get rect in system, screen coordinates
-  WidgetQueryContentEvent event(true, NS_QUERY_EDITOR_RECT, mWidget);
+  WidgetQueryContentEvent event(true, eQueryEditorRect, mWidget);
   mWidget->InitEvent(event);
   DispatchEvent(event);
   if (!event.mSucceeded) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
            ("TSF: 0x%p   TSFTextStore::GetScreenExtInternal() FAILED due to "
-            "NS_QUERY_EDITOR_RECT failure", this));
+            "eQueryEditorRect failure", this));
     return false;
   }
 
@@ -4812,14 +4828,14 @@ TSFTextStore::CreateNativeCaret()
   //     collapsed, is it OK?
   uint32_t caretOffset = currentSel.MaxOffset();
 
-  WidgetQueryContentEvent queryCaretRect(true, NS_QUERY_CARET_RECT, mWidget);
+  WidgetQueryContentEvent queryCaretRect(true, eQueryCaretRect, mWidget);
   queryCaretRect.InitForQueryCaretRect(caretOffset);
   mWidget->InitEvent(queryCaretRect);
   DispatchEvent(queryCaretRect);
   if (!queryCaretRect.mSucceeded) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
            ("TSF: 0x%p   TSFTextStore::CreateNativeCaret() FAILED due to "
-            "NS_QUERY_CARET_RECT failure (offset=%d)", this, caretOffset));
+            "eQueryCaretRect failure (offset=%d)", this, caretOffset));
     return;
   }
 
@@ -5232,6 +5248,12 @@ TSFTextStore::Initialize()
     Preferences::GetBool(
       "intl.tsf.hack.google_ja_input.do_not_return_no_layout_error_at_caret",
       true);
+  sHackQueryInsertForMSSimplifiedTIP =
+    Preferences::GetBool(
+      "intl.tsf.hack.ms_simplified_chinese.query_insert_result", true);
+  sHackQueryInsertForMSTraditionalTIP =
+    Preferences::GetBool(
+      "intl.tsf.hack.ms_traditional_chinese.query_insert_result", true);
 
   MOZ_LOG(sTextStoreLog, LogLevel::Info,
     ("TSF:   TSFTextStore::Initialize(), sThreadMgr=0x%p, "

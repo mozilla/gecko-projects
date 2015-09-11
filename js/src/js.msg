@@ -244,6 +244,7 @@ MSG_DEF(JSMSG_DEPRECATED_LET_BLOCK,      0, JSEXN_NONE, "JavaScript 1.7's let bl
 MSG_DEF(JSMSG_DEPRECATED_FOR_EACH,     0, JSEXN_NONE, "JavaScript 1.6's for-each-in loops are deprecated; consider using ES6 for-of instead")
 MSG_DEF(JSMSG_DEPRECATED_OCTAL,        0, JSEXN_SYNTAXERR, "octal literals and octal escape sequences are deprecated")
 MSG_DEF(JSMSG_DEPRECATED_PRAGMA,       1, JSEXN_NONE, "Using //@ to indicate {0} pragmas is deprecated. Use //# instead")
+MSG_DEF(JSMSG_DUPLICATE_EXPORT_NAME,   1, JSEXN_SYNTAXERR, "duplicate export name '{0}'")
 MSG_DEF(JSMSG_DUPLICATE_FORMAL,        1, JSEXN_SYNTAXERR, "duplicate formal argument {0}")
 MSG_DEF(JSMSG_DUPLICATE_LABEL,         0, JSEXN_SYNTAXERR, "duplicate label")
 MSG_DEF(JSMSG_DUPLICATE_PROPERTY,      1, JSEXN_SYNTAXERR, "property name {0} appears more than once in object literal")
@@ -490,6 +491,7 @@ MSG_DEF(JSMSG_SYMBOL_TO_NUMBER,        0, JSEXN_TYPEERR, "can't convert symbol t
 MSG_DEF(JSMSG_ATOMICS_BAD_ARRAY,         0, JSEXN_TYPEERR, "invalid array type for the operation")
 MSG_DEF(JSMSG_ATOMICS_TOO_LONG,          0, JSEXN_RANGEERR, "timeout value too large")
 MSG_DEF(JSMSG_ATOMICS_WAIT_NOT_ALLOWED,  0, JSEXN_ERR, "waiting is not allowed on this thread")
+MSG_DEF(JSMSG_ATOMICS_BAD_INDEX,         0, JSEXN_RANGEERR, "out-of-range index for atomic access")
 
 // XPConnect wrappers and DOM bindings
 MSG_DEF(JSMSG_CANT_SET_INTERPOSED,       1, JSEXN_TYPEERR, "unable to set interposed data property '{0}'")

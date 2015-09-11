@@ -79,8 +79,8 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     scheduledForDestruction(false),
     maybeAlive(true),
     jitCompartment_(nullptr),
-    normalArgumentsTemplate_(nullptr),
-    strictArgumentsTemplate_(nullptr)
+    mappedArgumentsTemplate_(nullptr),
+    unmappedArgumentsTemplate_(nullptr)
 {
     PodArrayZero(sawDeprecatedLanguageExtension);
     runtime_->numCompartments++;
@@ -270,17 +270,21 @@ JSCompartment::putWrapper(JSContext* cx, const CrossCompartmentKey& wrapped, con
     MOZ_ASSERT(wrapped.wrapped);
     MOZ_ASSERT_IF(wrapped.kind == CrossCompartmentKey::StringWrapper, wrapper.isString());
     MOZ_ASSERT_IF(wrapped.kind != CrossCompartmentKey::StringWrapper, wrapper.isObject());
-    bool success = crossCompartmentWrappers.put(wrapped, ReadBarriered<Value>(wrapper));
 
     /* There's no point allocating wrappers in the nursery since we will tenure them anyway. */
     MOZ_ASSERT(!IsInsideNursery(static_cast<gc::Cell*>(wrapper.toGCThing())));
 
-    if (success && (IsInsideNursery(wrapped.wrapped) || IsInsideNursery(wrapped.debugger))) {
+    if (!crossCompartmentWrappers.put(wrapped, ReadBarriered<Value>(wrapper))) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    if (IsInsideNursery(wrapped.wrapped) || IsInsideNursery(wrapped.debugger)) {
         WrapperMapRef ref(&crossCompartmentWrappers, wrapped);
         cx->runtime()->gc.storeBuffer.putGeneric(ref);
     }
 
-    return success;
+    return true;
 }
 
 static JSString*
@@ -715,11 +719,11 @@ JSCompartment::sweepCrossCompartmentWrappers()
 void
 JSCompartment::sweepTemplateObjects()
 {
-    if (normalArgumentsTemplate_ && IsAboutToBeFinalized(&normalArgumentsTemplate_))
-        normalArgumentsTemplate_.set(nullptr);
+    if (mappedArgumentsTemplate_ && IsAboutToBeFinalized(&mappedArgumentsTemplate_))
+        mappedArgumentsTemplate_.set(nullptr);
 
-    if (strictArgumentsTemplate_ && IsAboutToBeFinalized(&strictArgumentsTemplate_))
-        strictArgumentsTemplate_.set(nullptr);
+    if (unmappedArgumentsTemplate_ && IsAboutToBeFinalized(&unmappedArgumentsTemplate_))
+        unmappedArgumentsTemplate_.set(nullptr);
 }
 
 /* static */ void
@@ -807,7 +811,7 @@ JSCompartment::setNewObjectMetadata(JSContext* cx, JSObject* obj)
         assertSameCompartment(cx, metadata);
         if (!objectMetadataTable) {
             objectMetadataTable = cx->new_<ObjectWeakMap>(cx);
-            if (!objectMetadataTable)
+            if (!objectMetadataTable || !objectMetadataTable->init())
                 CrashAtUnhandlableOOM("setNewObjectMetadata");
         }
         if (!objectMetadataTable->add(cx, obj, metadata))

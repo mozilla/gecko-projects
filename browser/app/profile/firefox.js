@@ -52,6 +52,8 @@ pref("extensions.getAddons.link.url", "https://addons.mozilla.org/%LOCALE%/firef
 
 // Blocklist preferences
 pref("extensions.blocklist.enabled", true);
+// OneCRL freshness checking depends on this value, so if you change it,
+// please also update security.onecrl.maximum_staleness_in_seconds.
 pref("extensions.blocklist.interval", 86400);
 // Controls what level the blocklist switches from warning about items to forcibly
 // blocking them.
@@ -273,13 +275,7 @@ pref("browser.urlbar.doubleClickSelectsAll", false);
 pref("browser.urlbar.autoFill", true);
 pref("browser.urlbar.autoFill.typed", true);
 
-#ifdef NIGHTLY_BUILD
-// Use the new unifiedComplete component
 pref("browser.urlbar.unifiedcomplete", true);
-#else
-// Don't use the new unifiedComplete component
-pref("browser.urlbar.unifiedcomplete", false);
-#endif
 
 // 0: Match anywhere (e.g., middle of words)
 // 1: Match on word boundaries and then try matching anywhere
@@ -356,10 +352,6 @@ pref("browser.helperApps.deleteTempFileOnExit", true);
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
 
-// Tell the search service to load search plugins from the locale JAR
-pref("browser.search.loadFromJars", true);
-pref("browser.search.jarURIs", "chrome://browser/locale/searchplugins/");
-
 // pointer to the default engine name
 pref("browser.search.defaultenginename",      "chrome://browser-region/locale/region.properties");
 
@@ -385,8 +377,6 @@ pref("browser.search.openintab", false);
 
 // context menu searches open in the foreground
 pref("browser.search.context.loadInBackground", false);
-
-pref("browser.search.showOneOffButtons", true);
 
 // comma seperated list of of engines to hide in the search panel.
 pref("browser.search.hiddenOneOffs", "");
@@ -643,9 +633,6 @@ pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
 
-// plugin finder service url
-pref("pfs.datasource.url", "https://pfs.mozilla.org/plugins/PluginFinderService.php?mimetype=%PLUGIN_MIMETYPE%&appID=%APP_ID%&appVersion=%APP_VERSION%&clientOS=%CLIENT_OS%&chromeLocale=%CHROME_LOCALE%&appRelease=%APP_RELEASE%");
-
 pref("plugins.update.url", "https://www.mozilla.org/%LOCALE%/plugincheck/?utm_source=firefox-browser&utm_medium=firefox-browser&utm_campaign=plugincheck-update");
 pref("plugins.update.notifyUser", false);
 
@@ -855,9 +842,6 @@ pref("browser.preferences.instantApply", false);
 pref("browser.preferences.instantApply", true);
 #endif
 
-// Toggles between the two Preferences implementations, pop-up window and in-content
-pref("browser.preferences.inContent", true);
-
 pref("browser.download.show_plugins_in_list", true);
 pref("browser.download.hide_plugins_without_extensions", true);
 
@@ -966,15 +950,15 @@ pref("browser.safebrowsing.downloads.remote.enabled", true);
 pref("browser.safebrowsing.downloads.remote.timeout_ms", 10000);
 pref("browser.safebrowsing.debug", false);
 
-pref("browser.safebrowsing.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
-pref("browser.safebrowsing.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.provider.google.lists", "goog-badbinurl-shavar,goog-downloadwhite-digest256,goog-phish-shavar,goog-malware-shavar,goog-unwanted-shavar");
+pref("browser.safebrowsing.provider.google.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2&key=%GOOGLE_API_KEY%");
+pref("browser.safebrowsing.provider.google.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.provider.google.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
+pref("browser.safebrowsing.provider.google.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
+
 pref("browser.safebrowsing.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
-pref("browser.safebrowsing.malware.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
-
-pref("browser.safebrowsing.appRepURL", "https://sb-ssl.google.com/safebrowsing/clientreport/download?key=%GOOGLE_API_KEY%");
-
 #ifdef MOZILLA_OFFICIAL
 // Normally the "client ID" sent in updates is appinfo.name, but for
 // official Firefox releases from Mozilla we use a special identifier.
@@ -1310,6 +1294,7 @@ pref("services.sync.prefs.sync.privacy.clearOnShutdown.siteSettings", true);
 pref("services.sync.prefs.sync.privacy.donottrackheader.enabled", true);
 pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.enabled", true);
+pref("services.sync.prefs.sync.privacy.trackingprotection.pbmode.enabled", true);
 pref("services.sync.prefs.sync.security.OCSP.enabled", true);
 pref("services.sync.prefs.sync.security.OCSP.require", true);
 pref("services.sync.prefs.sync.security.default_personal_cert", true);
@@ -1426,6 +1411,9 @@ pref("devtools.debugger.ui.panes-visible-on-startup", false);
 pref("devtools.debugger.ui.variables-sorting-enabled", true);
 pref("devtools.debugger.ui.variables-only-enum-visible", false);
 pref("devtools.debugger.ui.variables-searchbox-visible", false);
+
+// Enable the Memory tools
+pref("devtools.memory.enabled", false);
 
 // Enable the Performance tools
 pref("devtools.performance.enabled", true);
@@ -1759,8 +1747,8 @@ pref("security.mixed_content.block_active_content", true);
 pref("security.cert_pinning.enforcement_level", 1);
 
 // Required blocklist freshness for OneCRL OCSP bypass
-// (default should be at least as large as extensions.blocklist.interval)
-pref("security.onecrl.maximum_staleness_in_seconds", 0);
+// (default is 1.25x extensions.blocklist.interval, or 30 hours)
+pref("security.onecrl.maximum_staleness_in_seconds", 108000);
 
 // Override the Gecko-default value of false for Firefox.
 pref("plain_text.wrap_long_lines", true);
@@ -1940,7 +1928,12 @@ pref("browser.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 pref("browser.pocket.useLocaleList", true);
 pref("browser.pocket.enabledLocales", "cs de en-GB en-US en-ZA es-ES es-MX fr hu it ja ja-JP-mac ko nl pl pt-BR pt-PT ru zh-CN zh-TW");
 
+// View source tabs are only enabled by default for Dev. Ed and Nightly.
+#ifdef RELEASE_BUILD
+pref("view_source.tab", false);
+#else
 pref("view_source.tab", true);
+#endif
 
 // Enable ServiceWorkers for Push API consumers.
 // Interception is still disabled.

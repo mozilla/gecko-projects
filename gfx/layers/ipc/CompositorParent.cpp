@@ -2002,10 +2002,8 @@ UpdatePluginWindowState(uint64_t aId)
       // tree contained visible plugins and the new tree does not. All we need
       // to do here is hide the plugins for the old tree, so don't waste time
       // calculating clipping.
-      nsTArray<uintptr_t> aVisibleIdList;
       uintptr_t parentWidget = (uintptr_t)lts.mParent->GetWidget();
-      unused << lts.mParent->SendUpdatePluginVisibility(parentWidget,
-                                                        aVisibleIdList);
+      unused << lts.mParent->SendHideAllPlugins(parentWidget);
       lts.mUpdatedPluginDataAvailable = false;
       return;
     }
@@ -2030,9 +2028,8 @@ UpdatePluginWindowState(uint64_t aId)
     }
   }
 
-  // Hide all plugins, this remote layer tree is no longer active
+  // Hide all of our plugins, this remote layer tree is no longer active.
   if (shouldHidePlugin) {
-    // hide all the plugins
     for (uint32_t pluginsIdx = 0; pluginsIdx < lts.mPluginData.Length();
          pluginsIdx++) {
       lts.mPluginData[pluginsIdx].visible() = false;
@@ -2061,7 +2058,7 @@ CrossProcessCompositorParent::DidComposite(uint64_t aId,
     layerTree->SetPendingTransactionId(0);
   }
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
-  UpdatePluginWindowState(aId);
+      UpdatePluginWindowState(aId);
 #endif
 }
 

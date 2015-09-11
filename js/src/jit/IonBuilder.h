@@ -28,6 +28,8 @@ class CodeGenerator;
 class CallInfo;
 class BaselineFrameInspector;
 
+enum class InlinableNative : uint16_t;
+
 // Records information about a baseline frame for compilation that is stable
 // when later used off thread.
 BaselineFrameInspector*
@@ -494,6 +496,13 @@ class IonBuilder
     // jsop_bitnot helpers.
     bool bitnotTrySpecialized(bool* emitted, MDefinition* input);
 
+    // jsop_compare helpes.
+    bool compareTrySpecialized(bool* emitted, JSOp op, MDefinition* left, MDefinition* right);
+    bool compareTryBitwise(bool* emitted, JSOp op, MDefinition* left, MDefinition* right);
+    bool compareTrySpecializedOnBaselineInspector(bool* emitted, JSOp op, MDefinition* left,
+                                                  MDefinition* right);
+    bool compareTrySharedStub(bool* emitted, JSOp op, MDefinition* left, MDefinition* right);
+
     // binary data lookup helpers.
     TypedObjectPrediction typedObjectPrediction(MDefinition* typedObj);
     TypedObjectPrediction typedObjectPrediction(TemporaryTypeSet* types);
@@ -659,6 +668,7 @@ class IonBuilder
     bool jsop_dup2();
     bool jsop_loophead(jsbytecode* pc);
     bool jsop_compare(JSOp op);
+    bool jsop_compare(JSOp op, MDefinition* left, MDefinition* right);
     bool getStaticName(JSObject* staticObject, PropertyName* name, bool* psucceeded,
                        MDefinition* lexicalCheck = nullptr);
     bool setStaticName(JSObject* staticObject, PropertyName* name);
@@ -752,6 +762,7 @@ class IonBuilder
 
     // Array natives.
     InliningStatus inlineArray(CallInfo& callInfo);
+    InliningStatus inlineArrayIsArray(CallInfo& callInfo);
     InliningStatus inlineArrayPopShift(CallInfo& callInfo, MArrayPopShift::Mode mode);
     InliningStatus inlineArrayPush(CallInfo& callInfo);
     InliningStatus inlineArrayConcat(CallInfo& callInfo);
@@ -800,7 +811,7 @@ class IonBuilder
     InliningStatus inlineAtomicsLoad(CallInfo& callInfo);
     InliningStatus inlineAtomicsStore(CallInfo& callInfo);
     InliningStatus inlineAtomicsFence(CallInfo& callInfo);
-    InliningStatus inlineAtomicsBinop(CallInfo& callInfo, JSFunction* target);
+    InliningStatus inlineAtomicsBinop(CallInfo& callInfo, InlinableNative target);
     InliningStatus inlineAtomicsIsLockFree(CallInfo& callInfo);
 
     // Slot intrinsics.

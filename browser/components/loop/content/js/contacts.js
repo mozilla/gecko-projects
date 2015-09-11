@@ -155,7 +155,7 @@ loop.contacts = (function(_, mozL10n) {
   const ContactDropdown = React.createClass({displayName: "ContactDropdown",
     propTypes: {
       // If the contact is blocked or not.
-      blocked: React.PropTypes.bool.isRequired,
+      blocked: React.PropTypes.bool,
       canEdit: React.PropTypes.bool,
       handleAction: React.PropTypes.func.isRequired
     },
@@ -175,6 +175,13 @@ loop.contacts = (function(_, mozL10n) {
       let menuNodeRect = menuNode.getBoundingClientRect();
 
       let listNode = document.getElementsByClassName("contact-list")[0];
+      // XXX Workaround the contact-list element not being available in tests.
+      // Assumptions about the embedded DOM are a bad idea, and this needs
+      // reworking. For example, tests use a virtual DOM. Really we should
+      // rework this view with the DropdownMenuMixin, which would save some of this pain.
+      if (!listNode) {
+        return;
+      }
       let listNodeRect = listNode.getBoundingClientRect();
 
       if (menuNodeRect.top + menuNodeRect.height >=
@@ -198,6 +205,22 @@ loop.contacts = (function(_, mozL10n) {
       return (
         React.createElement("ul", {className: cx({ "dropdown-menu": true,
                             "dropdown-menu-up": this.state.openDirUp })}, 
+          React.createElement("li", {className: cx({ "dropdown-menu-item": true,
+                              "disabled": this.props.blocked,
+                              "video-call-item": true }), 
+              "data-action": "video-call", 
+              onClick: this.onItemClick}, 
+            React.createElement("i", {className: "icon icon-video-call"}), 
+            mozL10n.get("video_call_menu_button")
+          ), 
+          React.createElement("li", {className: cx({ "dropdown-menu-item": true,
+                              "disabled": this.props.blocked,
+                              "audio-call-item": true }), 
+              "data-action": "audio-call", 
+              onClick: this.onItemClick}, 
+            React.createElement("i", {className: "icon icon-audio-call"}), 
+            mozL10n.get("audio_call_menu_button")
+          ), 
           React.createElement("li", {className: cx({ "dropdown-menu-item": true,
                               "disabled": !this.props.canEdit }), 
               "data-action": "edit", 
@@ -308,7 +331,7 @@ loop.contacts = (function(_, mozL10n) {
           React.createElement("div", {className: "icons"}, 
             React.createElement("i", {className: "icon icon-contact-video-call", 
                onClick: this.handleAction.bind(null, "video-call")}), 
-            React.createElement("i", {className: "icon icon-vertical-ellipsis", 
+            React.createElement("i", {className: "icon icon-vertical-ellipsis icon-contact-menu-button", 
                onClick: this.showDropdownMenu})
           ), 
           this.state.showMenu
@@ -666,35 +689,40 @@ loop.contacts = (function(_, mozL10n) {
       if (!shownContacts.available && !shownContacts.blocked &&
           !this.state.filter) {
         return (
-          React.createElement("div", {className: "contact-list-empty"}, 
-            React.createElement("p", {className: "panel-text-medium"}, 
-              mozL10n.get("no_contacts_message_heading2")
-            ), 
-            React.createElement("p", {className: "panel-text-medium"}, 
-              mozL10n.get("no_contacts_import_or_add2")
+            React.createElement("div", {className: "contact-list-empty-container"}, 
+              this._renderGravatarPromoMessage(), 
+              React.createElement("div", {className: "contact-list-empty"}, 
+                React.createElement("p", {className: "panel-text-large"}, 
+                  mozL10n.get("no_contacts_message_heading2")
+                ), 
+                React.createElement("p", {className: "panel-text-medium"}, 
+                  mozL10n.get("no_contacts_import_or_add2")
+                )
+              )
             )
-          )
         );
       }
 
       return (
-        React.createElement("div", null, 
-          !this.state.filter ? React.createElement("div", {className: "contact-list-title"}, 
-                                  mozL10n.get("contact_list_title")
-                                ) : null, 
-          this._renderGravatarPromoMessage(), 
-          React.createElement("ul", {className: "contact-list"}, 
-            shownContacts.available ?
-              shownContacts.available.sort(this.sortContacts).map(viewForItem) :
-              null, 
-            shownContacts.blocked && shownContacts.blocked.length > 0 ?
-              React.createElement("div", {className: "contact-separator"}, mozL10n.get("contacts_blocked_contacts")) :
-              null, 
-            shownContacts.blocked ?
-              shownContacts.blocked.sort(this.sortContacts).map(viewForItem) :
-              null
+          React.createElement("div", {className: "contact-list-container"}, 
+            !this.state.filter ? React.createElement("div", {className: "contact-list-title"}, 
+              mozL10n.get("contact_list_title")
+            ) : null, 
+            React.createElement("div", {className: "contact-list-wrapper"}, 
+              this._renderGravatarPromoMessage(), 
+              React.createElement("ul", {className: "contact-list"}, 
+                shownContacts.available ?
+                    shownContacts.available.sort(this.sortContacts).map(viewForItem) :
+                    null, 
+                shownContacts.blocked && shownContacts.blocked.length > 0 ?
+                    React.createElement("div", {className: "contact-separator"}, mozL10n.get("contacts_blocked_contacts")) :
+                    null, 
+                shownContacts.blocked ?
+                    shownContacts.blocked.sort(this.sortContacts).map(viewForItem) :
+                    null
+              )
+            )
           )
-        )
       );
     },
 
@@ -735,7 +763,7 @@ loop.contacts = (function(_, mozL10n) {
 
     render: function() {
       return (
-        React.createElement("div", null, 
+        React.createElement("div", {className: "contacts-container"}, 
           this._renderContactsFilter(), 
           this._renderContactsList(), 
           this._renderAddContactButtons()

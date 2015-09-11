@@ -352,7 +352,7 @@ NS_IMETHODIMP nsXULPopupShownEvent::Run()
     popup->SetPopupState(ePopupShown);
   }
 
-  WidgetMouseEvent event(true, NS_XUL_POPUP_SHOWN, nullptr,
+  WidgetMouseEvent event(true, eXULPopupShown, nullptr,
                          WidgetMouseEvent::eReal);
   return EventDispatcher::Dispatch(mPopup, mPresContext, &event);                 
 }
@@ -1414,7 +1414,11 @@ nsMenuPopupFrame::SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aS
                        margin.top + offsetForContextMenu.y);
 
     // screen positioned popups can be flipped vertically but never horizontally
+#ifdef XP_MACOSX
+    hFlip = FlipStyle_Outside;
+#else
     vFlip = FlipStyle_Outside;
+#endif // #ifdef XP_MACOSX
   }
 
   // If a panel is being moved or has flip="none", don't constrain or flip it. But always do this for

@@ -420,6 +420,22 @@ let gTests = [
   }
 },
 {
+  desc: "Cmd+f should focus the search box in the page",
+  setup: function () {},
+  run: Task.async(function* () {
+    let doc = gBrowser.selectedBrowser.contentDocument;
+    let logo = doc.getElementById("brandLogo");
+    let searchInput = doc.getElementById("searchText");
+
+    EventUtils.synthesizeMouseAtCenter(logo, {});
+    isnot(searchInput, doc.activeElement, "Search input should not be the active element.");
+
+    EventUtils.synthesizeKey("f", { accelKey: true });
+    yield promiseWaitForCondition(() => doc.activeElement === searchInput);
+    is(searchInput, doc.activeElement, "Search input should be the active element.");
+  })
+},
+{
   desc: "Cmd+k should focus the search box in the page when the search box in the toolbar is absent",
   setup: function () {
     // Remove the search bar from toolbar
@@ -619,33 +635,12 @@ function promiseWaitForEvent(node, type, capturing) {
 }
 
 let promisePrefsOpen = Task.async(function*() {
-  if (Services.prefs.getBoolPref("browser.preferences.inContent")) {
-    info("Waiting for the preferences tab to open...");
-    let event = yield promiseWaitForEvent(gBrowser.tabContainer, "TabOpen", true);
-    let tab = event.target;
-    yield promiseTabLoadEvent(tab);
-    is(tab.linkedBrowser.currentURI.spec, "about:preferences#search", "Should have seen the prefs tab");
-    gBrowser.removeTab(tab);
-  } else {
-    info("Waiting for the preferences window to open...");
-    yield new Promise(resolve => {
-      let winWatcher = Cc["@mozilla.org/embedcomp/window-watcher;1"].
-                       getService(Ci.nsIWindowWatcher);
-      winWatcher.registerNotification(function onWin(subj, topic, data) {
-        if (topic == "domwindowopened" && subj instanceof Ci.nsIDOMWindow) {
-          subj.addEventListener("load", function onLoad() {
-            subj.removeEventListener("load", onLoad);
-            is(subj.document.documentURI, "chrome://browser/content/preferences/preferences.xul", "Should have seen the prefs window");
-            winWatcher.unregisterNotification(onWin);
-            executeSoon(() => {
-              subj.close();
-              resolve();
-            });
-          });
-        }
-      });
-    });
-  }
+  info("Waiting for the preferences tab to open...");
+  let event = yield promiseWaitForEvent(gBrowser.tabContainer, "TabOpen", true);
+  let tab = event.target;
+  yield promiseTabLoadEvent(tab);
+  is(tab.linkedBrowser.currentURI.spec, "about:preferences#search", "Should have seen the prefs tab");
+  gBrowser.removeTab(tab);
 });
 
 function promiseContentSearchChange(newEngineName) {

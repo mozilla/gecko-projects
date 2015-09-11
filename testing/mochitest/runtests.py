@@ -51,7 +51,7 @@ from mozprofile.permissions import ServerLocations
 from urllib import quote_plus as encodeURIComponent
 from mozlog.formatters import TbplFormatter
 from mozlog import commandline
-from mozrunner.utils import test_environment
+from mozrunner.utils import get_stack_fixer_function, test_environment
 from mozscreenshot import dump_screen
 import mozleak
 
@@ -1217,7 +1217,6 @@ class Mochitest(MochitestUtilsMixin):
     _active_tests = None
     certdbNew = False
     sslTunnel = None
-    vmwareHelper = None
     DEFAULT_TIMEOUT = 60.0
     mediaDevices = None
 
@@ -1623,37 +1622,6 @@ class Mochitest(MochitestUtilsMixin):
                     dump_screen=not debuggerInfo)
 
         return foundZombie
-
-    def startVMwareRecording(self, options):
-        """ starts recording inside VMware VM using the recording helper dll """
-        assert mozinfo.isWin
-        from ctypes import cdll
-        self.vmwareHelper = cdll.LoadLibrary(self.vmwareHelperPath)
-        if self.vmwareHelper is None:
-            self.log.warning("runtests.py | Failed to load "
-                             "VMware recording helper")
-            return
-        self.log.info("runtests.py | Starting VMware recording.")
-        try:
-            self.vmwareHelper.StartRecording()
-        except Exception as e:
-            self.log.warning("runtests.py | Failed to start "
-                             "VMware recording: (%s)" % str(e))
-            self.vmwareHelper = None
-
-    def stopVMwareRecording(self):
-        """ stops recording inside VMware VM using the recording helper dll """
-        try:
-            assert mozinfo.isWin
-            if self.vmwareHelper is not None:
-                self.log.info("runtests.py | Stopping VMware recording.")
-                self.vmwareHelper.StopRecording()
-        except Exception as e:
-            self.log.warning("runtests.py | Failed to stop "
-                             "VMware recording: (%s)" % str(e))
-            self.log.exception('Error stopping VMWare recording')
-
-        self.vmwareHelper = None
 
     def runApp(self,
                testUrl,
@@ -2242,9 +2210,6 @@ class Mochitest(MochitestUtilsMixin):
             else:
                 timeout = 330.0  # default JS harness timeout is 300 seconds
 
-            if options.vmwareRecording:
-                self.startVMwareRecording(options)
-
             # detect shutdown leaks for m-bc runs
             detectShutdownLeaks = mozinfo.info[
                 "debug"] and options.browserChrome and not options.webapprtChrome
@@ -2276,8 +2241,6 @@ class Mochitest(MochitestUtilsMixin):
                 status = 1
 
         finally:
-            if options.vmwareRecording:
-                self.stopVMwareRecording()
             self.stopServers()
 
         mozleak.process_leak_log(
@@ -2285,6 +2248,8 @@ class Mochitest(MochitestUtilsMixin):
             leak_thresholds=options.leakThresholds,
             ignore_missing_leaks=options.ignoreMissingLeaks,
             log=self.log,
+            stack_fixer=get_stack_fixer_function(options.utilityPath,
+                                                 options.symbolsPath),
         )
 
         if self.nsprLogs:
@@ -2394,47 +2359,9 @@ class Mochitest(MochitestUtilsMixin):
 
         def stackFixer(self):
             """
-            return stackFixerFunction, if any, to use on the output lines
+            return get_stack_fixer_function, if any, to use on the output lines
             """
-
-            if not mozinfo.info.get('debug'):
-                return None
-
-            stackFixerFunction = None
-
-            def import_stackFixerModule(module_name):
-                sys.path.insert(0, self.utilityPath)
-                module = __import__(module_name, globals(), locals(), [])
-                sys.path.pop(0)
-                return module
-
-            if self.symbolsPath and os.path.exists(self.symbolsPath):
-                # Run each line through a function in fix_stack_using_bpsyms.py (uses breakpad symbol files).
-                # This method is preferred for Tinderbox builds, since native
-                # symbols may have been stripped.
-                stackFixerModule = import_stackFixerModule(
-                    'fix_stack_using_bpsyms')
-                stackFixerFunction = lambda line: stackFixerModule.fixSymbols(
-                    line,
-                    self.symbolsPath)
-
-            elif mozinfo.isMac:
-                # Run each line through fix_macosx_stack.py (uses atos).
-                # This method is preferred for developer machines, so we don't
-                # have to run "make buildsymbols".
-                stackFixerModule = import_stackFixerModule('fix_macosx_stack')
-                stackFixerFunction = lambda line: stackFixerModule.fixSymbols(
-                    line)
-
-            elif mozinfo.isLinux:
-                # Run each line through fix_linux_stack.py (uses addr2line).
-                # This method is preferred for developer machines, so we don't
-                # have to run "make buildsymbols".
-                stackFixerModule = import_stackFixerModule('fix_linux_stack')
-                stackFixerFunction = lambda line: stackFixerModule.fixSymbols(
-                    line)
-
-            return stackFixerFunction
+            return get_stack_fixer_function(self.utilityPath, self.symbolsPath)
 
         def finish(self):
             if self.shutdownLeaks:
@@ -2596,10 +2523,16 @@ def run_test_harness(options):
 
     options.runByDir = False
 
-    if runner.getTestFlavor(options) == 'browser-chrome':
+    if runner.getTestFlavor(options) == 'mochitest':
         options.runByDir = True
 
-    if runner.getTestFlavor(options) == 'mochitest' and (not mozinfo.info['debug']) and (not mozinfo.info['asan']):
+    if mozinfo.info['asan'] and options.e10s:
+        options.runByDir = False
+
+    if mozinfo.isMac and mozinfo.info['debug']:
+        options.runByDir = False
+
+    if runner.getTestFlavor(options) == 'browser-chrome':
         options.runByDir = True
 
     if mozinfo.info.get('buildapp') == 'mulet':

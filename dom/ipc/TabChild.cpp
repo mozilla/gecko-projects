@@ -83,7 +83,7 @@
 #include "nsWindowWatcher.h"
 #include "PermissionMessageUtils.h"
 #include "PuppetWidget.h"
-#include "StructuredCloneUtils.h"
+#include "StructuredCloneData.h"
 #include "nsViewportInfo.h"
 #include "nsILoadContext.h"
 #include "ipc/nsGUIEventIPC.h"
@@ -237,15 +237,16 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
 {
     AutoSafeJSContext cx;
     JS::Rooted<JS::Value> json(cx, JS::NullValue());
-    StructuredCloneData cloneData;
-    JSAutoStructuredCloneBuffer buffer;
+    StructuredCloneData data;
     if (JS_ParseJSON(cx,
                       static_cast<const char16_t*>(aJSONData.BeginReading()),
                       aJSONData.Length(),
                       &json)) {
-        WriteStructuredClone(cx, json, buffer, cloneData.mClosure);
-        cloneData.mData = buffer.data();
-        cloneData.mDataLength = buffer.nbytes();
+        ErrorResult rv;
+        data.Write(cx, json, rv);
+        if (NS_WARN_IF(rv.Failed())) {
+            return;
+        }
     }
 
     nsCOMPtr<nsIXPConnectJSObjectHolder> kungFuDeathGrip(GetGlobal());
@@ -254,7 +255,7 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
     nsRefPtr<nsFrameMessageManager> mm =
       static_cast<nsFrameMessageManager*>(mTabChildGlobal->mMessageManager.get());
     mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal), nullptr,
-                       aMessageName, false, &cloneData, nullptr, nullptr, nullptr);
+                       aMessageName, false, &data, nullptr, nullptr, nullptr);
 }
 
 bool
@@ -459,6 +460,24 @@ PreloadSlowThingsPostFork(void* aUnused)
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
     observerService->NotifyObservers(nullptr, "preload-postfork", nullptr);
+
+    MOZ_ASSERT(sPreallocatedTab);
+    // Initialize initial reflow of the PresShell has to happen after fork
+    // because about:blank content viewer is created in the above observer
+    // notification.
+    nsCOMPtr<nsIDocShell> docShell =
+      do_GetInterface(sPreallocatedTab->WebNavigation());
+    if (nsIPresShell* presShell = docShell->GetPresShell()) {
+        // Initialize and do an initial reflow of the about:blank
+        // PresShell to let it preload some things for us.
+        presShell->Initialize(0, 0);
+        nsIDocument* doc = presShell->GetDocument();
+        doc->FlushPendingNotifications(Flush_Layout);
+        // ... but after it's done, make sure it doesn't do any more
+        // work.
+        presShell->MakeZombie();
+    }
+
 }
 
 #ifdef MOZ_NUWA_PROCESS
@@ -539,30 +558,18 @@ TabChild::PreloadSlowThings()
         NS_LITERAL_STRING("chrome://global/content/preload.js"),
         true);
 
+    sPreallocatedTab = tab;
+    ClearOnShutdown(&sPreallocatedTab);
+
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
         NuwaAddFinalConstructor(PreloadSlowThingsPostFork, nullptr);
     } else {
-      PreloadSlowThingsPostFork(nullptr);
+        PreloadSlowThingsPostFork(nullptr);
     }
 #else
     PreloadSlowThingsPostFork(nullptr);
 #endif
-
-    nsCOMPtr<nsIDocShell> docShell = do_GetInterface(tab->WebNavigation());
-    if (nsIPresShell* presShell = docShell->GetPresShell()) {
-        // Initialize and do an initial reflow of the about:blank
-        // PresShell to let it preload some things for us.
-        presShell->Initialize(0, 0);
-        nsIDocument* doc = presShell->GetDocument();
-        doc->FlushPendingNotifications(Flush_Layout);
-        // ... but after it's done, make sure it doesn't do any more
-        // work.
-        presShell->MakeZombie();
-    }
-
-    sPreallocatedTab = tab;
-    ClearOnShutdown(&sPreallocatedTab);
 }
 
 /*static*/ already_AddRefed<TabChild>
@@ -2452,12 +2459,13 @@ TabChild::RecvAsyncMessage(const nsString& aMessage,
 {
   if (mTabChildGlobal) {
     nsCOMPtr<nsIXPConnectJSObjectHolder> kungFuDeathGrip(GetGlobal());
-    StructuredCloneData cloneData = UnpackClonedMessageDataForChild(aData);
+    StructuredCloneData data;
+    UnpackClonedMessageDataForChild(aData, data);
     nsRefPtr<nsFrameMessageManager> mm =
       static_cast<nsFrameMessageManager*>(mTabChildGlobal->mMessageManager.get());
     CrossProcessCpowHolder cpows(Manager(), aCpows);
     mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal), nullptr,
-                       aMessage, false, &cloneData, &cpows, aPrincipal, nullptr);
+                       aMessage, false, &data, &cpows, aPrincipal, nullptr);
   }
   return true;
 }
@@ -2570,7 +2578,7 @@ TabChild::RecvSetUpdateHitRegion(const bool& aEnabled)
 }
 
 bool
-TabChild::RecvSetIsDocShellActive(const bool& aIsActive)
+TabChild::RecvSetDocShellIsActive(const bool& aIsActive)
 {
     nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
     if (docShell) {
@@ -2887,10 +2895,10 @@ TabChild::SetTabId(const TabId& aTabId)
 bool
 TabChild::DoSendBlockingMessage(JSContext* aCx,
                                 const nsAString& aMessage,
-                                const StructuredCloneData& aData,
+                                StructuredCloneData& aData,
                                 JS::Handle<JSObject *> aCpows,
                                 nsIPrincipal* aPrincipal,
-                                nsTArray<OwningSerializedStructuredCloneBuffer>* aRetVal,
+                                nsTArray<StructuredCloneData>* aRetVal,
                                 bool aIsSync)
 {
   ClonedMessageData data;
@@ -2913,7 +2921,7 @@ TabChild::DoSendBlockingMessage(JSContext* aCx,
 bool
 TabChild::DoSendAsyncMessage(JSContext* aCx,
                              const nsAString& aMessage,
-                             const StructuredCloneData& aData,
+                             StructuredCloneData& aData,
                              JS::Handle<JSObject *> aCpows,
                              nsIPrincipal* aPrincipal)
 {
