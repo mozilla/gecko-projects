@@ -40,7 +40,7 @@
 #define CULLING_LOG(...)
 // #define CULLING_LOG(...) printf_stderr("CULLING: " __VA_ARGS__)
 
-#define DUMP(...) do { if (gfxUtils::sDumpDebug) { printf_stderr(__VA_ARGS__); } } while(0)
+#define DUMP(...) do { if (getenv("DUMP_DEBUG")) { printf_stderr(__VA_ARGS__); } } while(0)
 #define XYWH(k)  (k).x, (k).y, (k).width, (k).height
 #define XY(k)    (k).x, (k).y
 #define WH(k)    (k).width, (k).height
@@ -142,8 +142,6 @@ ContainerRenderVR(ContainerT* aContainer,
 {
   RefPtr<CompositingRenderTarget> surface;
 
-  DUMP(">>> ContainerRenderVR [%p]\n", aContainer);
-  
   Compositor* compositor = aManager->GetCompositor();
 
   RefPtr<CompositingRenderTarget> previousTarget = compositor->GetCurrentRenderTarget();
@@ -161,15 +159,9 @@ ContainerRenderVR(ContainerT* aContainer,
   gfx::IntRect surfaceRect = gfx::IntRect(0, 0, eyeResolution.width * 2, eyeResolution.height);
 
   int32_t maxTextureSize = compositor->GetMaxTextureSize();
-  if (surfaceRect.width > maxTextureSize ||
-      surfaceRect.height > maxTextureSize)
-  {
-    NS_WARNING("VR intermediate surface exceeded max texture size");
-    surfaceRect.width = std::min(maxTextureSize, surfaceRect.width);
-    surfaceRect.height = std::min(maxTextureSize, surfaceRect.height);
-  }
-  
-  // use NONE here, because we draw black to clear below
+  surfaceRect.width = std::min(maxTextureSize, surfaceRect.width);
+  surfaceRect.height = std::min(maxTextureSize, surfaceRect.height);
+
   gfx::VRHMDRenderingSupport *vrRendering = aHMD->GetRenderingSupport();
   if (PR_GetEnv("NO_VR_RENDERING")) vrRendering = nullptr;
   if (vrRendering) {
@@ -198,30 +190,6 @@ ContainerRenderVR(ContainerT* aContainer,
   aContainer->SortChildrenBy3DZOrder(children);
 
   gfx::Matrix4x4 origTransform = aContainer->GetEffectiveTransform();
-  gfx::Matrix4x4 cssEyeTransform[2];
-  gfx::Matrix4x4 cssEyeProjection[2];
-
-  for (uint32_t eye = 0; eye < 2; eye++) {
-    // Compute the CSS-rendered VR eye transform:
-    // - Translate by negative of the eye translation (or rather, the inverse of it)
-    // - The convert units so that pixels become 96 dpi "dots", and metres make sense;
-    //   this makes the eye translation in metres turn into an appropriate number of pixels
-    gfx::Point3D eyeTranslation = aHMD->GetEyeTranslation(eye);
-    cssEyeTransform[eye] = gfx::Matrix4x4::Translation(gfx::Point3D(-eyeTranslation.x,
-                                                                    -eyeTranslation.y,
-                                                                    -eyeTranslation.z));
-
-    const float pixelsToMetres = 0.0254f / 96.0f;  // 96 dpi, 2.54 cm per inch, cm -> meters
-    cssEyeTransform[eye].PreScale(pixelsToMetres, pixelsToMetres, pixelsToMetres);
-
-    // The CSS-rendered VR projection matrix.  This is a right-handed projection matrix, to match CSS.
-    // But this projection matrix has Y-up, and CSS has Y-down.  Scale by -1 Y to fix this.
-    cssEyeProjection[eye] = aHMD->GetEyeProjectionMatrix(eye);
-    
-    // Scale and translate the projected image to fit each eye viewport.
-    cssEyeProjection[eye].PostScale(0.5f, -1.0f, 1.0f);
-    cssEyeProjection[eye].PostTranslate(-0.5f + eye * 1.0f, 0.0f, 0.0f);
-  }
 
   for (uint32_t i = 0; i < children.Length(); i++) {
     LayerComposite* layerToRender = static_cast<LayerComposite*>(children.ElementAt(i)->ImplData());
@@ -242,7 +210,6 @@ ContainerRenderVR(ContainerT* aContainer,
       // XXX we still need depth test here, but we have no way of preserving
       // depth anyway in native VR layers until we have a way to save them
       // from WebGL (and maybe depth video?)
-      surface->ClearProjection();
       compositor->SetRenderTarget(surface);
       aContainer->ReplaceEffectiveTransform(origTransform);
 
@@ -292,20 +259,7 @@ ContainerRenderVR(ContainerT* aContainer,
         layer->ReplaceEffectiveTransform(childTransform);
       }
     } else {
-      DUMP("%p Gecko-rendered VR layer %p\n", aContainer, layerToRender);
-      for (uint32_t eye = 0; eye < 2; eye++) {
-        DUMP(" -- ContainerRenderVR [%p] EYE %d\n", aContainer, eye);
-
-        surface->SetProjection(cssEyeProjection[eye], true, aHMD->GetZNear(), aHMD->GetZFar());
-        compositor->SetRenderTarget(surface);
-        aContainer->ReplaceEffectiveTransform(cssEyeTransform[eye]);
-
-        // These are both clip rects, which end up as scissor rects in the
-        // compositor.  We rely on the compositor to clip content to these
-        // rects so that the eye viewports do not overlap.
-        layerToRender->Prepare(RenderTargetIntRect(eyeRect[eye].x, eyeRect[eye].y, eyeRect[eye].width, eyeRect[eye].height));
-        layerToRender->RenderLayer(eyeRect[eye]);
-      }
+      // Gecko-rendered CSS VR -- not supported yet, so just don't render this layer!
     }
   }
 
@@ -717,24 +671,6 @@ ContainerRender(ContainerT* aContainer,
                  const gfx::IntRect& aClipRect)
 {
   MOZ_ASSERT(aContainer->mPrepared);
-
-  if (gfxUtils::sDumpDebug) {
-    nsIntRegion visibleRegion = aContainer->GetEffectiveVisibleRegion();
-    gfx::IntRect bounds = visibleRegion.GetBounds();
-    const gfx::Matrix4x4& xform = aContainer->GetEffectiveTransform();
-    printf_stderr("ContainerLayer[%p]: visible: [%d %d %d %d] clip: [%d %d %d %d] %s\n",
-                  aContainer, bounds.X(), bounds.Y(), bounds.Width(), bounds.Height(),
-                  aClipRect.X(), aClipRect.Y(), aClipRect.Width(), aClipRect.Height(),
-                  aContainer->GetVRHMDInfo() ? "HMD" : "");
-    if (xform.IsTranslation()) {
-      printf_stderr("                  xform: [translate %.2f %.2f %.2f]\n", xform._41, xform._42, xform._43);
-    } else {
-      printf_stderr("   xform: [%7.6f %7.6f %7.6f %7.6f]\n", xform._11, xform._12, xform._13, xform._14);
-      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._21, xform._22, xform._23, xform._24);
-      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._31, xform._32, xform._33, xform._34);
-      printf_stderr("          [%7.6f %7.6f %7.6f %7.6f]\n", xform._41, xform._42, xform._43, xform._44);
-    }
-  }
 
   gfx::VRHMDInfo *hmdInfo = aContainer->GetVRHMDInfo();
   if (hmdInfo && hmdInfo->GetConfiguration().IsValid()) {

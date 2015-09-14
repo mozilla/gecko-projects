@@ -194,8 +194,6 @@ public:
   const IntSize& SuggestedEyeResolution() const { return mEyeResolution; }
   const Point3D& GetEyeTranslation(uint32_t whichEye) const { return mEyeTranslation[whichEye]; }
   const Matrix4x4& GetEyeProjectionMatrix(uint32_t whichEye) const { return mEyeProjectionMatrix[whichEye]; }
-  const double GetZNear() const { return mZNear; }
-  const double GetZFar() const { return mZFar; }
 
   virtual uint32_t GetSupportedSensorStateBits() { return mSupportedSensorBits; }
   virtual bool StartSensorTracking() = 0;
@@ -236,7 +234,6 @@ protected:
   Matrix4x4 mEyeProjectionMatrix[NumEyes];
   VRDistortionMesh mDistortionMesh[NumEyes];
   uint32_t mSupportedSensorBits;
-  double mZNear, mZFar;
 
   VRFieldOfView mRecommendedEyeFOV[NumEyes];
   VRFieldOfView mMaximumEyeFOV[NumEyes];

@@ -301,9 +301,6 @@ HMDInfoOculus050::SetFOV(const VRFieldOfView& aFOVLeft, const VRFieldOfView& aFO
   float pixelsPerDisplayPixel = 1.0;
   ovrSizei texSize[2];
 
-  mZNear = zNear;
-  mZFar = zFar;
-
   uint32_t caps = ovrDistortionCap_Chromatic | ovrDistortionCap_Vignette; // XXX TODO add TimeWarp
 
   // get eye parameters and create the mesh

@@ -40,11 +40,6 @@
 
 uint8_t gLayerManagerLayerBuilder;
 
-// XXXX HORIZON - remove this once we have builds with MOZ_HORIZON
-#ifndef MOZ_HORIZON
-#define MOZ_HORIZON 1
-#endif
-
 namespace mozilla {
 namespace layers {
 
@@ -701,40 +696,6 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
     currentClip = aCurrentScissorRect;
   }
 
-#if 1
-//#ifdef MOZ_HORIZON
-  if (gfxPrefs::VREnabled()) {
-    return currentClip;
-  }
-#if 0
-  // XXX this isn't correct for VR; we need to unscissor child layers too,
-  // not just those that are preserve-3d.
-  // The problem is that we're using "scissor" to mean "clip" which isn't
-  // correct when we're dealing with real 3D scenes.
-  bool hasUnbroken3DChainToVRContainer = false;
-  // XXX We need to actually fully un-clip these layers somehow.
-  //
-  // If this container has an unbroken chain of preserve-3d containers
-  // all the way up to a VR container, then we don't really want to modify the
-  // clip at all.
-  if (GetContentFlags() & CONTENT_PRESERVE_3D) {
-    for (ContainerLayer *p = container; p; p = p->mParent) {
-      if (p->GetVRHMDInfo() != nullptr) {
-        hasUnbroken3DChainToVRContainer = true;
-        break;
-      }
-      if (!(p->GetContentFlags() & CONTENT_PRESERVE_3D)) {
-        break;
-      }
-    }
-  }
-  
-  if (hasUnbroken3DChainToVRContainer) {
-    return currentClip;
-  }
-#endif
-#endif
-
   if (!GetEffectiveClipRect()) {
     return currentClip;
   }
@@ -1242,47 +1203,17 @@ ContainerLayer::SortChildrenBy3DZOrder(nsTArray<Layer*>& aArray)
 void
 ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToSurface)
 {
-  Matrix4x4 residual;
+  Matrix residual;
   Matrix4x4 idealTransform = GetLocalTransform() * aTransformToSurface;
-
-  bool hasUnbroken3DChainToVRContainer = false;
-#if 1
-//#ifdef MOZ_HORIZON
-  // XXX We need to figure out if this is the proper thing to do or not.
-  // Right now we do the below for HORIZON builds but this needs to be
-  // heavily reviewed.
-  //
-  // If this container has an unbroken chain of preserve-3d containers
-  // all the way up to a VR container, then we're going to make sure that
-  // its transforms are kept as pure 3D as possible.
-  if (gfxPrefs::VREnabled()) {
-    for (ContainerLayer *p = this; p; p = p->mParent) {
-      if (p->GetVRHMDInfo() != nullptr) {
-        hasUnbroken3DChainToVRContainer = true;
-        break;
-      }
-      if (!(p->GetContentFlags() & CONTENT_PRESERVE_3D))
-        break;
-    }
-  }
-#endif
-
-  if (hasUnbroken3DChainToVRContainer) {
-    mEffectiveTransform = idealTransform;
-    // Residual stays as identity if we're using an intermediate surface.
-  } else {
-    idealTransform.ProjectTo2D();
-    Matrix residual2d;
-    mEffectiveTransform = SnapTransformTranslation(idealTransform, &residual2d);
-    residual = Matrix4x4::From2D(residual2d);
-  }
+  idealTransform.ProjectTo2D();
+  mEffectiveTransform = SnapTransformTranslation(idealTransform, &residual);
 
   bool useIntermediateSurface;
   if (HasMaskLayers() ||
       GetForceIsolatedGroup()) {
     useIntermediateSurface = true;
 #ifdef MOZ_DUMP_PAINTING
-  } else if (!hasUnbroken3DChainToVRContainer && gfxUtils::sDumpPaintingIntermediate) {
+  } else if (gfxUtils::sDumpPaintingIntermediate) {
     useIntermediateSurface = true;
 #endif
   } else {
@@ -1290,9 +1221,6 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
     CompositionOp blendMode = GetEffectiveMixBlendMode();
     if ((opacity != 1.0f || blendMode != CompositionOp::OP_OVER) && HasMultipleChildren()) {
       useIntermediateSurface = true;
-    } else if (hasUnbroken3DChainToVRContainer) {
-      // XXX do we need to do something with the clip stuff below
-      useIntermediateSurface = false;
     } else {
       useIntermediateSurface = false;
       gfx::Matrix contTransform;
@@ -1342,7 +1270,7 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
 
   mUseIntermediateSurface = useIntermediateSurface && !GetEffectiveVisibleRegion().IsEmpty();
   if (useIntermediateSurface) {
-    ComputeEffectiveTransformsForChildren(residual);
+    ComputeEffectiveTransformsForChildren(Matrix4x4::From2D(residual));
   } else {
     ComputeEffectiveTransformsForChildren(idealTransform);
   }

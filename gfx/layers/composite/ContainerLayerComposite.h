@@ -30,12 +30,7 @@ class ContainerLayerComposite : public ContainerLayer,
   template<class ContainerT>
   friend void ContainerRender(ContainerT* aContainer,
                               LayerManagerComposite* aManager,
-                              const nsIntRect& aClipRect);
-  template<class ContainerT>
-  friend void ContainerRenderVR(ContainerT* aContainer,
-                                LayerManagerComposite* aManager,
-                                const nsIntRect& aClipRect,
-                                gfx::VRHMDInfo& aHMD);
+                              const RenderTargetIntRect& aClipRect);
   template<class ContainerT>
   friend void RenderLayers(ContainerT* aContainer,
                            LayerManagerComposite* aManager,
@@ -135,11 +130,6 @@ class RefLayerComposite : public RefLayer,
   friend void ContainerRender(ContainerT* aContainer,
                               LayerManagerComposite* aManager,
                               const gfx::IntRect& aClipRect);
-  template<class ContainerT>
-  friend void ContainerRenderVR(ContainerT* aContainer,
-                                LayerManagerComposite* aManager,
-                                const nsIntRect& aClipRect,
-                                gfx::VRHMDInfo& aHMD);
   template<class ContainerT>
   friend void RenderLayers(ContainerT* aContainer,
                            LayerManagerComposite* aManager,

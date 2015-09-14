@@ -242,7 +242,6 @@ struct ContainerLayerProperties : public LayerPropertiesBase
     : LayerPropertiesBase(aLayer)
     , mPreXScale(aLayer->GetPreXScale())
     , mPreYScale(aLayer->GetPreYScale())
-    , mHasHMD(aLayer->GetVRHMDInfo() != nullptr)
   {
     for (Layer* child = aLayer->GetFirstChild(); child; child = child->GetNextSibling()) {
       mChildren.AppendElement(Move(CloneLayerTreePropertiesInternal(child)));
@@ -256,11 +255,6 @@ struct ContainerLayerProperties : public LayerPropertiesBase
     nsIntRegion result;
 
     bool childrenChanged = false;
-
-    if (mHasHMD) {
-      result = OldTransformedBounds();
-      AddRegion(result, NewTransformedBounds());
-    }
 
     if (mPreXScale != container->GetPreXScale() ||
         mPreYScale != container->GetPreYScale()) {
@@ -359,7 +353,6 @@ struct ContainerLayerProperties : public LayerPropertiesBase
   nsAutoTArray<UniquePtr<LayerPropertiesBase>,1> mChildren;
   float mPreXScale;
   float mPreYScale;
-  bool mHasHMD;
 };
 
 struct ColorLayerProperties : public LayerPropertiesBase
