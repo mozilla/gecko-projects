@@ -24,7 +24,7 @@ XPCOMUtils.defineLazyModuleGetter(this, 'States',  // jshint ignore:line
 XPCOMUtils.defineLazyModuleGetter(this, 'Prefilters',  // jshint ignore:line
   'resource://gre/modules/accessibility/Constants.jsm');
 
-let gSkipEmptyImages = new PrefCache('accessibility.accessfu.skip_empty_images');
+var gSkipEmptyImages = new PrefCache('accessibility.accessfu.skip_empty_images');
 
 function BaseTraversalRule(aRoles, aMatchFunc, aPreFilter, aContainerRule) {
   this._explicitMatchRoles = new Set(aRoles);
@@ -294,6 +294,36 @@ this.TraversalRules = { // jshint ignore:line
       } else {
         return Filters.IGNORE;
       }
+    }),
+
+  /* For TalkBack's "Control" granularity. Form conrols and links */
+  Control: new BaseTraversalRule(
+    [Roles.PUSHBUTTON,
+     Roles.SPINBUTTON,
+     Roles.TOGGLE_BUTTON,
+     Roles.BUTTONDROPDOWN,
+     Roles.BUTTONDROPDOWNGRID,
+     Roles.COMBOBOX,
+     Roles.LISTBOX,
+     Roles.ENTRY,
+     Roles.PASSWORD_TEXT,
+     Roles.PAGETAB,
+     Roles.RADIOBUTTON,
+     Roles.RADIO_MENU_ITEM,
+     Roles.SLIDER,
+     Roles.CHECKBUTTON,
+     Roles.CHECK_MENU_ITEM,
+     Roles.SWITCH,
+     Roles.LINK,
+     Roles.MENUITEM],
+    function Control_match(aAccessible)
+    {
+      // We want to ignore anchors, only focus real links.
+      if (aAccessible.role == Roles.LINK &&
+          !Utils.getState(aAccessible).contains(States.LINKED)) {
+        return Filters.IGNORE;
+      }
+      return Filters.MATCH;
     }),
 
   List: new BaseTraversalRule(

@@ -136,7 +136,6 @@ html[dir="rtl"] .contact-filter {
 }
 
 .contact {
-  position: relative;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -251,18 +250,10 @@ html[dir="rtl"] .contact-filter {
   width: 100%;
 }
 
-.panel-text-medium,
-.panel-text-large {
+.panel-text-medium{
   margin: 3px;
   color: #4a4a4a;
-}
-
-.panel-text-medium {
-  font-size: 1.2rem;
-}
-
-.panel-text-large {
-  font-size: 2.2rem;
+  font-size: 1.3rem;
 }
 
 .contact > .details > .username {
@@ -325,12 +316,9 @@ html[dir="rtl"] .contact-filter {
   background-size: 14px 14px;
 }
 
-.icon-contact-video-call:hover {
-  background-color: #47b396;
-}
-
+.icon-contact-video-call:hover,
 .icon-contact-video-call:active {
-  background-color: #3aa689;
+  background-color: #50E3C2;
 }
 
 .icon-vertical-ellipsis {

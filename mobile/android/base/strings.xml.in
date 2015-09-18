@@ -171,6 +171,9 @@
   <string name="pref_home_updates_wifi">&pref_home_updates_wifi;</string>
   <string name="pref_home_suggested_sites">&pref_home_suggested_sites;</string>
   <string name="pref_home_suggested_sites_summary">&pref_home_suggested_sites_summary;</string>
+  <string name="pref_category_home_homepage">&pref_category_home_homepage;</string>
+  <string name="home_homepage_title">&home_homepage_title;</string>
+  <string name="home_homepage_use_current_tab">&home_homepage_use_current_tab;</string>
 
   <string name="pref_header_customize">&pref_header_customize;</string>
   <string name="pref_header_display">&pref_header_display;</string>
@@ -469,8 +472,8 @@
   <string name="bookmarkdefaults_title_restricted_webmaker">&bookmarks_restricted_webmaker;</string>
   <string name="bookmarkdefaults_url_restricted_webmaker">https://webmaker.org/</string>
 
-  <string name="bookmarkdefaults_title_restricted_support">&bookmarks_restricted_support;</string>
-  <string name="bookmarkdefaults_url_restricted_support">https://support.mozilla.org/kb/kids</string>
+  <string name="bookmarkdefaults_title_restricted_support">&bookmarks_restricted_support2;</string>
+  <string name="bookmarkdefaults_url_restricted_support">https://support.mozilla.org/kb/controlledaccess</string>
 
   <!-- Site identity popup -->
   <string name="identity_connection_secure">&identity_connection_secure;</string>

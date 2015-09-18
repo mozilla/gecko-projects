@@ -1,13 +1,13 @@
 /* -*- Mode: javascript; tab-width: 2; indent-tabs-mode: nil; js-indent-level: 2 -*- */
 
-let {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+var {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
 
 const gHttpTestRoot = "http://example.com/browser/dom/base/test/";
 
 /**
  * Enable local telemetry recording for the duration of the tests.
  */
-let gOldContentCanRecord = false;
+var gOldContentCanRecord = false;
 add_task(function* test_initialize() {
    gOldContentCanRecord = yield ContentTask.spawn(gBrowser.selectedBrowser, {}, function () {
     let telemetry = Cc["@mozilla.org/base/telemetry;1"].getService(Ci.nsITelemetry);
@@ -104,15 +104,18 @@ function grabHistogramsFromContent(browser, use_counter_middlefix) {
       return telemetry.getHistogramById(name).snapshot();
     }
 
-    let histogram_page_name = "USE_COUNTER_" + arg.middlefix + "_PAGE";
-    let histogram_document_name = "USE_COUNTER_" + arg.middlefix + "_DOCUMENT";
+    let histogram_page_name = "USE_COUNTER2_" + arg.middlefix + "_PAGE";
+    let histogram_document_name = "USE_COUNTER2_" + arg.middlefix + "_DOCUMENT";
     let histogram_page = snapshot_histogram(histogram_page_name);
     let histogram_document = snapshot_histogram(histogram_document_name);
-    return [histogram_page.sum, histogram_document.sum];
+    let histogram_docs = snapshot_histogram("CONTENT_DOCUMENTS_DESTROYED");
+    let histogram_toplevel_docs = snapshot_histogram("TOP_LEVEL_CONTENT_DOCUMENTS_DESTROYED");
+    return [histogram_page.sum, histogram_document.sum,
+            histogram_docs.sum, histogram_toplevel_docs.sum];
   });
 }
 
-let check_use_counter_iframe = Task.async(function* (file, use_counter_middlefix, check_documents=true) {
+var check_use_counter_iframe = Task.async(function* (file, use_counter_middlefix, check_documents=true) {
   info("checking " + file + " with histogram " + use_counter_middlefix);
 
   let newTab = gBrowser.addTab( "about:blank");
@@ -121,7 +124,8 @@ let check_use_counter_iframe = Task.async(function* (file, use_counter_middlefix
 
   // Hold on to the current values of the telemetry histograms we're
   // interested in.
-  let [histogram_page_before, histogram_document_before] =
+  let [histogram_page_before, histogram_document_before,
+       histogram_docs_before, histogram_toplevel_docs_before] =
       yield grabHistogramsFromContent(gBrowser.selectedBrowser, use_counter_middlefix);
 
   gBrowser.selectedBrowser.loadURI(gHttpTestRoot + "file_use_counter_outer.html");
@@ -161,18 +165,21 @@ let check_use_counter_iframe = Task.async(function* (file, use_counter_middlefix
   yield waitForDestroyedDocuments();
 
   // Grab histograms again and compare.
-  let [histogram_page_after, histogram_document_after] =
+  let [histogram_page_after, histogram_document_after,
+       histogram_docs_after, histogram_toplevel_docs_after] =
       yield grabHistogramsFromContent(gBrowser.selectedBrowser, use_counter_middlefix);
 
   is(histogram_page_after, histogram_page_before + 1,
      "page counts for " + use_counter_middlefix + " after are correct");
+  ok(histogram_toplevel_docs_after >= histogram_toplevel_docs_before + 1,
+     "top level document counts are correct");
   if (check_documents) {
     is(histogram_document_after, histogram_document_before + 1,
-       "document counts " + use_counter_middlefix + " after are correct");
+       "document counts for " + use_counter_middlefix + " after are correct");
   }
 });
 
-let check_use_counter_img = Task.async(function* (file, use_counter_middlefix) {
+var check_use_counter_img = Task.async(function* (file, use_counter_middlefix) {
   info("checking " + file + " as image with histogram " + use_counter_middlefix);
 
   let newTab = gBrowser.addTab("about:blank");
@@ -181,7 +188,8 @@ let check_use_counter_img = Task.async(function* (file, use_counter_middlefix) {
 
   // Hold on to the current values of the telemetry histograms we're
   // interested in.
-  let [histogram_page_before, histogram_document_before] =
+  let [histogram_page_before, histogram_document_before,
+       histogram_docs_before, histogram_toplevel_docs_before] =
       yield grabHistogramsFromContent(gBrowser.selectedBrowser, use_counter_middlefix);
 
   gBrowser.selectedBrowser.loadURI(gHttpTestRoot + "file_use_counter_outer.html");
@@ -222,15 +230,22 @@ let check_use_counter_img = Task.async(function* (file, use_counter_middlefix) {
   yield waitForDestroyedDocuments();
 
   // Grab histograms again and compare.
-  let [histogram_page_after, histogram_document_after] =
+  let [histogram_page_after, histogram_document_after,
+       histogram_docs_after, histogram_toplevel_docs_after] =
       yield grabHistogramsFromContent(gBrowser.selectedBrowser, use_counter_middlefix);
   is(histogram_page_after, histogram_page_before + 1,
      "page counts for " + use_counter_middlefix + " after are correct");
   is(histogram_document_after, histogram_document_before + 1,
-     "document counts " + use_counter_middlefix + " after are correct");
+     "document counts for " + use_counter_middlefix + " after are correct");
+  ok(histogram_toplevel_docs_after >= histogram_toplevel_docs_before + 1,
+     "top level document counts are correct");
+  // 2 documents: one for the outer html page containing the <img> element, and
+  // one for the SVG image itself.
+  ok(histogram_docs_after >= histogram_docs_before + 2,
+     "document counts are correct");
 });
 
-let check_use_counter_direct = Task.async(function* (file, use_counter_middlefix, xfail=false) {
+var check_use_counter_direct = Task.async(function* (file, use_counter_middlefix, xfail=false) {
   info("checking " + file + " with histogram " + use_counter_middlefix);
 
   let newTab = gBrowser.addTab( "about:blank");
@@ -239,7 +254,8 @@ let check_use_counter_direct = Task.async(function* (file, use_counter_middlefix
 
   // Hold on to the current values of the telemetry histograms we're
   // interested in.
-  let [histogram_page_before, histogram_document_before] =
+  let [histogram_page_before, histogram_document_before,
+       histogram_docs_before, histogram_toplevel_docs_before] =
       yield grabHistogramsFromContent(gBrowser.selectedBrowser, use_counter_middlefix);
 
   gBrowser.selectedBrowser.loadURI(gHttpTestRoot + file);
@@ -267,10 +283,15 @@ let check_use_counter_direct = Task.async(function* (file, use_counter_middlefix
   yield waitForDestroyedDocuments();
 
   // Grab histograms again and compare.
-  let [histogram_page_after, histogram_document_after] =
+  let [histogram_page_after, histogram_document_after,
+       histogram_docs_after, histogram_toplevel_docs_after] =
       yield grabHistogramsFromContent(gBrowser.selectedBrowser, use_counter_middlefix);
   (xfail ? todo_is : is)(histogram_page_after, histogram_page_before + 1,
                          "page counts for " + use_counter_middlefix + " after are correct");
   (xfail ? todo_is : is)(histogram_document_after, histogram_document_before + 1,
-                         "document counts " + use_counter_middlefix + " after are correct");
+                         "document counts for " + use_counter_middlefix + " after are correct");
+  ok(histogram_toplevel_docs_after >= histogram_toplevel_docs_before + 1,
+     "top level document counts are correct");
+  ok(histogram_docs_after >= histogram_docs_before + 1,
+     "document counts are correct");
 });

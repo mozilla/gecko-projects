@@ -145,6 +145,7 @@ if CONFIG['MOZ_WEBRTC']:
 gbjar = add_java_jar('gecko-browser')
 gbjar.sources += [
     'AboutPages.java',
+    'AccountsHelper.java',
     'ActionModeCompat.java',
     'ActionModeCompatView.java',
     'ActivityHandlerHelper.java',
@@ -419,6 +420,7 @@ gbjar.sources += [
     'preferences/PrivateDataPreference.java',
     'preferences/SearchEnginePreference.java',
     'preferences/SearchPreferenceCategory.java',
+    'preferences/SetHomepagePreference.java',
     'preferences/SyncPreference.java',
     'PrefsHelper.java',
     'PrintHelper.java',

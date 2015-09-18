@@ -52,6 +52,7 @@
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/WorkerPrivate.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/EventStateManager.h"
@@ -267,6 +268,7 @@ bool nsContentUtils::sEncodeDecodeURLHash = false;
 bool nsContentUtils::sGettersDecodeURLHash = false;
 bool nsContentUtils::sPrivacyResistFingerprinting = false;
 bool nsContentUtils::sSendPerformanceTimingNotifications = false;
+bool nsContentUtils::sSWInterceptionEnabled = false;
 
 uint32_t nsContentUtils::sHandlingInputTimeout = 1000;
 
@@ -508,9 +510,9 @@ nsContentUtils::Init()
   if (!sEventListenerManagersHash) {
     static const PLDHashTableOps hash_table_ops =
     {
-      PL_DHashVoidPtrKeyStub,
-      PL_DHashMatchEntryStub,
-      PL_DHashMoveEntryStub,
+      PLDHashTable::HashVoidPtrKeyStub,
+      PLDHashTable::MatchEntryStub,
+      PLDHashTable::MoveEntryStub,
       EventListenerManagerHashClearEntry,
       EventListenerManagerHashInitEntry
     };
@@ -558,6 +560,10 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sPrivacyResistFingerprinting,
                                "privacy.resistFingerprinting", false);
+
+  Preferences::AddBoolVarCache(&sSWInterceptionEnabled,
+                               "dom.serviceWorkers.interception.enabled",
+                               false);
 
   Preferences::AddUintVarCache(&sHandlingInputTimeout,
                                "dom.event.handling-user-input-time-limit",
@@ -1737,9 +1743,37 @@ nsContentUtils::ParseLegacyFontSize(const nsAString& aValue)
 }
 
 /* static */
+bool
+nsContentUtils::IsControlledByServiceWorker(nsIDocument* aDocument)
+{
+  if (!ServiceWorkerInterceptionEnabled() ||
+      nsContentUtils::IsInPrivateBrowsing(aDocument)) {
+    return false;
+  }
+
+  nsRefPtr<workers::ServiceWorkerManager> swm =
+    workers::ServiceWorkerManager::GetInstance();
+  MOZ_ASSERT(swm);
+
+  ErrorResult rv;
+  bool controlled = swm->IsControlled(aDocument, rv);
+  NS_WARN_IF(rv.Failed());
+
+  return !rv.Failed() && controlled;
+}
+
+/* static */
 void
 nsContentUtils::GetOfflineAppManifest(nsIDocument *aDocument, nsIURI **aURI)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aDocument);
+  *aURI = nullptr;
+
+  if (IsControlledByServiceWorker(aDocument)) {
+    return;
+  }
+
   Element* docElement = aDocument->GetRootElement();
   if (!docElement) {
     return;
@@ -4122,9 +4156,8 @@ nsContentUtils::TraverseListenerManager(nsINode *aNode,
     return;
   }
 
-  EventListenerManagerMapEntry *entry =
-    static_cast<EventListenerManagerMapEntry *>
-               (PL_DHashTableSearch(sEventListenerManagersHash, aNode));
+  auto entry = static_cast<EventListenerManagerMapEntry*>
+                          (sEventListenerManagersHash->Search(aNode));
   if (entry) {
     CycleCollectionNoteChild(cb, entry->mListenerManager.get(),
                              "[via hash] mListenerManager");
@@ -4141,9 +4174,9 @@ nsContentUtils::GetListenerManagerForNode(nsINode *aNode)
     return nullptr;
   }
 
-  EventListenerManagerMapEntry *entry =
-    static_cast<EventListenerManagerMapEntry *>
-      (PL_DHashTableAdd(sEventListenerManagersHash, aNode, fallible));
+  auto entry =
+    static_cast<EventListenerManagerMapEntry*>
+               (sEventListenerManagersHash->Add(aNode, fallible));
 
   if (!entry) {
     return nullptr;
@@ -4172,9 +4205,8 @@ nsContentUtils::GetExistingListenerManagerForNode(const nsINode *aNode)
     return nullptr;
   }
 
-  EventListenerManagerMapEntry *entry =
-    static_cast<EventListenerManagerMapEntry *>
-               (PL_DHashTableSearch(sEventListenerManagersHash, aNode));
+  auto entry = static_cast<EventListenerManagerMapEntry*>
+                          (sEventListenerManagersHash->Search(aNode));
   if (entry) {
     return entry->mListenerManager;
   }
@@ -4187,15 +4219,14 @@ void
 nsContentUtils::RemoveListenerManager(nsINode *aNode)
 {
   if (sEventListenerManagersHash) {
-    EventListenerManagerMapEntry *entry =
-      static_cast<EventListenerManagerMapEntry *>
-                 (PL_DHashTableSearch(sEventListenerManagersHash, aNode));
+    auto entry = static_cast<EventListenerManagerMapEntry*>
+                            (sEventListenerManagersHash->Search(aNode));
     if (entry) {
       nsRefPtr<EventListenerManager> listenerManager;
       listenerManager.swap(entry->mListenerManager);
       // Remove the entry and *then* do operations that could cause further
       // modification of sEventListenerManagersHash.  See bug 334177.
-      PL_DHashTableRawRemove(sEventListenerManagersHash, entry);
+      sEventListenerManagersHash->RawRemove(entry);
       if (listenerManager) {
         listenerManager->Disconnect();
       }
@@ -4779,55 +4810,6 @@ static bool SchemeIs(nsIURI* aURI, const char* aScheme)
   return NS_SUCCEEDED(baseURI->SchemeIs(aScheme, &isScheme)) && isScheme;
 }
 
-/* static */
-nsresult
-nsContentUtils::CheckSecurityBeforeLoad(nsIURI* aURIToLoad,
-                                        nsIPrincipal* aLoadingPrincipal,
-                                        uint32_t aCheckLoadFlags,
-                                        bool aAllowData,
-                                        uint32_t aContentPolicyType,
-                                        nsISupports* aContext,
-                                        const nsAFlatCString& aMimeGuess,
-                                        nsISupports* aExtra)
-{
-  NS_PRECONDITION(aLoadingPrincipal, "Must have a loading principal here");
-
-  if (aLoadingPrincipal == sSystemPrincipal) {
-    return NS_OK;
-  }
-  
-  // XXXbz do we want to fast-path skin stylesheets loading XBL here somehow?
-  // CheckLoadURIWithPrincipal
-  nsresult rv = sSecurityManager->
-    CheckLoadURIWithPrincipal(aLoadingPrincipal, aURIToLoad, aCheckLoadFlags);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Content Policy
-  int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-  rv = NS_CheckContentLoadPolicy(aContentPolicyType,
-                                 aURIToLoad,
-                                 aLoadingPrincipal,
-                                 aContext,
-                                 aMimeGuess,
-                                 aExtra,
-                                 &shouldLoad,
-                                 GetContentPolicy(),
-                                 sSecurityManager);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (NS_CP_REJECTED(shouldLoad)) {
-    return NS_ERROR_CONTENT_BLOCKED;
-  }
-
-  // Same Origin
-  if ((aAllowData && SchemeIs(aURIToLoad, "data")) ||
-      ((aCheckLoadFlags & nsIScriptSecurityManager::ALLOW_CHROME) &&
-       SchemeIs(aURIToLoad, "chrome"))) {
-    return NS_OK;
-  }
-
-  return aLoadingPrincipal->CheckMayLoad(aURIToLoad, true, false);
-}
-
 bool
 nsContentUtils::IsSystemPrincipal(nsIPrincipal* aPrincipal)
 {
@@ -5282,7 +5264,6 @@ nsContentUtils::LeaveMicroTask()
   MOZ_ASSERT(NS_IsMainThread());
   if (--sMicroTaskLevel == 0) {
     PerformMainThreadMicroTaskCheckpoint();
-    nsDocument::ProcessBaseElementQueue();
   }
 }
 
@@ -7188,7 +7169,7 @@ nsContentUtils::IsForbiddenSystemRequestHeader(const nsACString& aHeader)
     "access-control-request-method", "connection", "content-length",
     "cookie", "cookie2", "content-transfer-encoding", "date", "dnt",
     "expect", "host", "keep-alive", "origin", "referer", "te", "trailer",
-    "transfer-encoding", "upgrade", "user-agent", "via"
+    "transfer-encoding", "upgrade", "via"
   };
   for (uint32_t i = 0; i < ArrayLength(kInvalidHeaders); ++i) {
     if (aHeader.LowerCaseEqualsASCII(kInvalidHeaders[i])) {
@@ -7980,6 +7961,7 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType)
   case nsIContentPolicy::TYPE_INTERNAL_SCRIPT:
   case nsIContentPolicy::TYPE_INTERNAL_WORKER:
   case nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER:
+  case nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER:
     return nsIContentPolicy::TYPE_SCRIPT;
 
   case nsIContentPolicy::TYPE_INTERNAL_EMBED:
@@ -8001,6 +7983,22 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType)
 
   default:
     return aType;
+  }
+}
+
+/* static */
+nsContentPolicyType
+nsContentUtils::InternalContentPolicyTypeToExternalOrScript(nsContentPolicyType aType)
+{
+  switch (aType) {
+  case nsIContentPolicy::TYPE_INTERNAL_SCRIPT:
+  case nsIContentPolicy::TYPE_INTERNAL_WORKER:
+  case nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER:
+  case nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER:
+    return aType;
+
+  default:
+    return InternalContentPolicyTypeToExternal(aType);
   }
 }
 

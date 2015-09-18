@@ -77,11 +77,11 @@ XPCOMUtils.defineLazyGetter(this, "gmpService",
 
 XPCOMUtils.defineLazyGetter(this, "telemetryService", () => Services.telemetry);
 
-let messageManager = Cc["@mozilla.org/globalmessagemanager;1"]
+var messageManager = Cc["@mozilla.org/globalmessagemanager;1"]
                        .getService(Ci.nsIMessageListenerManager);
 
-let gLogger;
-let gLogAppenderDump = null;
+var gLogger;
+var gLogAppenderDump = null;
 
 function configureLogging() {
   if (!gLogger) {
@@ -444,6 +444,9 @@ GMPWrapper.prototype = {
       gmpService.removeAndDeletePluginDirectory(this.gmpPath);
     }
     GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_VERSION, this.id);
+    GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_TRIAL_CREATE, this.id);
+    GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_ABI, this.id);
+    GMPPrefs.reset(GMPPrefs.KEY_PLUGIN_LAST_UPDATE, this.id);
     AddonManagerPrivate.callAddonListeners("onUninstalled", this);
   },
 
@@ -487,9 +490,21 @@ GMPWrapper.prototype = {
       return { installed: false, valid: true };
     }
 
+    let abi = GMPPrefs.get(GMPPrefs.KEY_PLUGIN_ABI, GMPUtils.ABI(), this._plugin.id);
+    if (abi != GMPUtils.ABI()) {
+      // ABI doesn't match. Possibly this is a profile migrated across platforms
+      // or from 32 -> 64 bit.
+      return {
+        installed: true,
+        mismatchedABI: true,
+        valid: false
+      };
+    }
+
     // Installed -> Check if files are missing.
     let status = this._arePluginFilesOnDisk();
     status.installed = true;
+    status.mismatchedABI = false;
     status.valid = true;
     status.missing = [];
     status.telemetry = 0;
@@ -514,7 +529,7 @@ GMPWrapper.prototype = {
   },
 };
 
-let GMPProvider = {
+var GMPProvider = {
   get name() { return "GMPProvider"; },
 
   _plugins: null,
@@ -538,6 +553,12 @@ let GMPProvider = {
 
       if (gmpPath && isEnabled) {
         let validation = wrapper.validate();
+        if (validation.mismatchedABI) {
+          this._log.info("startup - gmp " + plugin.id +
+                         " mismatched ABI, uninstalling");
+          wrapper.uninstallPlugin();
+          continue;
+        }
         if (validation.installed) {
           telemetryService.getHistogramById(wrapper.missingFilesKey).add(validation.telemetry);
         }

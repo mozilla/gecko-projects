@@ -38,7 +38,7 @@ function indirectCallCannotGC(fullCaller, fullVariable)
     if (name == "op" && /GetWeakmapKeyDelegate/.test(caller))
         return true;
 
-    var CheckCallArgs = "AsmJSValidate.cpp:uint8 CheckCallArgs(FunctionValidator*, js::frontend::ParseNode*, (uint8)(FunctionValidator*,js::frontend::ParseNode*,Type)*, Signature*)";
+    var CheckCallArgs = "AsmJSValidate.cpp:uint8 CheckCallArgs(FunctionValidator*, js::frontend::ParseNode*, (uint8)(FunctionValidator*,js::frontend::ParseNode*,js::wasm::Type)*, js::wasm::Signature*)";
     if (name == "checkArg" && caller == CheckCallArgs)
         return true;
 
@@ -176,7 +176,7 @@ var ignoreFunctions = {
     "void js::AutoCompartment::AutoCompartment(js::ExclusiveContext*, JSCompartment*)": true,
 
     // The nsScriptNameSpaceManager functions can't actually GC.  They
-    // just use a pldhash which has function pointers, which makes the
+    // just use a PLDHashTable which has function pointers, which makes the
     // analysis think maybe they can.
     "nsGlobalNameStruct* nsScriptNameSpaceManager::LookupNavigatorName(nsAString_internal*)": true,
     "nsGlobalNameStruct* nsScriptNameSpaceManager::LookupName(nsAString_internal*, uint16**)": true,

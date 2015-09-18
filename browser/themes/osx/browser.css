@@ -1699,6 +1699,11 @@ toolbarbutton[constrain-size="true"][cui-areatype="toolbar"] > .toolbarbutton-ba
   padding: 0 3px;
   list-style-image: var(--urlbar-dropmarker-url);
   -moz-image-region: var(--urlbar-dropmarker-region);
+  transition: opacity 0.15s ease;
+}
+
+#urlbar:not(:hover) > .urlbar-textbox-container > .urlbar-history-dropmarker {
+  opacity: 0;
 }
 
 .urlbar-history-dropmarker[open="true"],
@@ -2951,6 +2956,14 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
 .alltabs-item[tabIsVisible] {
   /* box-shadow instead of background-color to work around native styling */
   box-shadow: inset -5px 0 ThreeDShadow;
+}
+
+.alltabs-endimage[muted] {
+  list-style-image: url(chrome://browser/skin/tabbrowser/tab-audio.svg#tab-audio-muted);
+}
+
+.alltabs-endimage[soundplaying] {
+  list-style-image: url(chrome://browser/skin/tabbrowser/tab-audio.svg#tab-audio);
 }
 
 /* Bookmarks toolbar */

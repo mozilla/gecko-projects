@@ -134,6 +134,13 @@ pref("dom.permissions.enabled", true);
 pref("dom.permissions.enabled", false);
 #endif
 
+// Whether or not selection events are enabled
+#ifdef NIGHTLY_BUILD
+pref("dom.select_events.enabled", true);
+#else
+pref("dom.select_events.enabled", false);
+#endif
+
 // Whether or not Web Workers are enabled.
 pref("dom.workers.enabled", true);
 // The number of workers per domain allowed to run concurrently.
@@ -482,11 +489,6 @@ pref("media.mediasource.webm.enabled", false);
 pref("media.mediasource.webm.enabled", true);
 #endif
 
-// Enable new MediaSource architecture.
-pref("media.mediasource.format-reader", true);
-
-// Enable new MediaFormatReader architecture for webm in MSE
-pref("media.mediasource.format-reader.webm", false);
 // Enable new MediaFormatReader architecture for plain webm.
 pref("media.format-reader.webm", true);
 
@@ -892,6 +894,9 @@ pref("devtools.gcli.imgurUploadURL", "https://api.imgur.com/3/image");
 
 // GCLI commands directory
 pref("devtools.commands.dir", "");
+
+// Allows setting the performance marks for which telemetry metrics will be recorded.
+pref("devtools.telemetry.supported_performance_marks", "contentInteractive,navigationInteractive,navigationLoaded,visuallyLoaded,fullyLoaded,mediaEnumerated,scanEnd");
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -1404,7 +1409,8 @@ pref("network.http.spdy.ping-threshold", 58);
 pref("network.http.spdy.ping-timeout", 8);
 pref("network.http.spdy.send-buffer-size", 131072);
 pref("network.http.spdy.allow-push", true);
-pref("network.http.spdy.push-allowance", 131072);
+pref("network.http.spdy.push-allowance", 131072);   // 128KB
+pref("network.http.spdy.pull-allowance", 12582912); // 12MB
 pref("network.http.spdy.default-concurrent", 100);
 
 // alt-svc allows separation of transport routing from
@@ -1450,10 +1456,6 @@ pref("network.http.packaged-apps-developer-mode", false);
 pref("network.ftp.data.qos", 0);
 pref("network.ftp.control.qos", 0);
 
-// If this pref is false only one xpcom event will be served per poll
-// iteration. This is the original behavior.
-// If it is true multiple events will be served.
-pref("network.sts.serve_multiple_events_per_poll_iteration", true);
 // The max time to spend on xpcom events between two polls in ms.
 pref("network.sts.max_time_for_events_between_two_polls", 100);
 // </http>
@@ -1532,7 +1534,7 @@ pref("network.IDN_show_punycode", false);
 // "network.IDN_show_punycode" is false. In other words, all IDNs will be shown
 // in punycode if "network.IDN_show_punycode" is true.
 pref("network.IDN.restriction_profile", "moderate");
-pref("network.IDN.use_whitelist", true);
+pref("network.IDN.use_whitelist", false);
 
 // ccTLDs
 pref("network.IDN.whitelist.ac", true);
@@ -1963,7 +1965,7 @@ pref("security.mixed_content.block_active_content", false);
 pref("security.mixed_content.block_display_content", false);
 
 // Sub-resource integrity
-pref("security.sri.enable", false);
+pref("security.sri.enable", true);
 
 // Disable pinning checks by default.
 pref("security.cert_pinning.enforcement_level", 0);
@@ -2423,7 +2425,7 @@ pref("layout.display-list.dump", false);
 pref("layout.frame_rate.precise", false);
 
 // pref to control whether layout warnings that are hit quite often are enabled
-pref("layout.spammy_warnings.enabled", true);
+pref("layout.spammy_warnings.enabled", false);
 
 // Should we fragment floats inside CSS column layout?
 pref("layout.float-fragments-inside-column.enabled", true);
@@ -2565,9 +2567,9 @@ pref("svg.marker-improvements.enabled", true);
 pref("svg.new-getBBox.enabled", false);
 
 #ifdef RELEASE_BUILD
-pref("svg.transform-origin.enabled", false);
+pref("svg.transform-box.enabled", false);
 #else
-pref("svg.transform-origin.enabled", true);
+pref("svg.transform-box.enabled", true);
 #endif // RELEASE_BUILD
 
 // Default font types and sizes by locale
@@ -2713,7 +2715,10 @@ pref("font.size.fixed.zh-TW", 16);
 
 // mathml.css sets font-size to "inherit" and font-family to "serif" so only
 // font.name.*.x-math and font.minimum-size.x-math are really relevant.
+pref("font.default.x-math", "serif");
 pref("font.minimum-size.x-math", 0);
+pref("font.size.variable.x-math", 16);
+pref("font.size.fixed.x-math", 13);
 
 /*
  * A value greater than zero enables font size inflation for
@@ -3163,11 +3168,11 @@ pref("intl.tsf.hack.easy_changjei.do_not_return_no_layout_error", true);
 // Whether use previous character rect for the result of
 // ITfContextView::GetTextExt() if the specified range is the first character
 // of selected clause of composition string.
-pref("intl.tsf.hack.google_ja_input.do_not_return_no_layout_error_at_first_char", true);
+pref("intl.tsf.hack.ms_japanese_ime.do_not_return_no_layout_error_at_first_char", true);
 // Whether use previous character rect for the result of
 // ITfContextView::GetTextExt() if the specified range is the caret of
 // composition string.
-pref("intl.tsf.hack.google_ja_input.do_not_return_no_layout_error_at_caret", true);
+pref("intl.tsf.hack.ms_japanese_ime.do_not_return_no_layout_error_at_caret", true);
 // Whether hack ITextStoreACP::QueryInsert() or not.  The method should return
 // new selection after specified length text is inserted at specified range.
 // However, Microsoft's some Chinese TIPs expect that the result is same as
@@ -4762,16 +4767,16 @@ pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,tes
 pref("urlclassifier.phishTable", "goog-phish-shavar,test-phish-simple");
 pref("urlclassifier.downloadBlockTable", "");
 pref("urlclassifier.downloadAllowTable", "");
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,goog-downloadwhite-digest256,mozpub-track-digest256,mozpub-trackwhite-digest256");
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,goog-downloadwhite-digest256,mozstd-track-digest256,mozstd-trackwhite-digest256");
 
 // The table and update/gethash URLs for Safebrowsing phishing and malware
 // checks.
-pref("urlclassifier.trackingTable", "test-track-simple,mozpub-track-digest256");
-pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozpub-trackwhite-digest256");
+pref("urlclassifier.trackingTable", "test-track-simple,mozstd-track-digest256");
+pref("urlclassifier.trackingWhitelistTable", "test-trackwhite-simple,mozstd-trackwhite-digest256");
 
-pref("browser.safebrowsing.provider.mozilla.lists", "mozpub-track-digest256,mozpub-trackwhite-digest256");
-pref("browser.safebrowsing.provider.mozilla.updateURL", "https://tracking.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
-pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://tracking.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.provider.mozilla.lists", "mozstd-track-digest256,mozstd-trackwhite-digest256");
+pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
+pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%VERSION%&pver=2.2");
 
 // Turn off Spatial navigation by default.
 pref("snav.enabled", false);

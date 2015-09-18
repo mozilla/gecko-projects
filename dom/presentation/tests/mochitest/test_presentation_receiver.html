@@ -62,6 +62,11 @@ function setup() {
       info("An offer is received.");
     });
 
+    gScript.addMessageListener('answer-sent', function answerSentHandler(aIsValid) {
+      gScript.removeMessageListener('answer-sent', answerSentHandler);
+      ok(aIsValid, "A valid answer is sent.");
+    });
+
     gScript.addMessageListener('control-channel-closed', function controlChannelClosedHandler(aReason) {
       gScript.removeMessageListener('control-channel-closed', controlChannelClosedHandler);
       is(aReason, SpecialPowers.Cr.NS_OK, "The control channel is closed normally.");
@@ -88,9 +93,18 @@ function testIncomingSessionRequest() {
       info("Trying to launch receiver page.");
 
       ok(navigator.presentation, "navigator.presentation should be available in in-process pages.");
-      ok(!navigator.presentation.session, "Non-receiving in-process pages shouldn't get a predefined presentation session instance.");
 
-      aResolve();
+      navigator.presentation.getSessions().then(
+        function(aSessions) {
+          is(aSessions.length, 0, "Non-receiving in-process pages shouldn't get a predefined presentation session instance.");
+          aResolve();
+        },
+        function(aError) {
+          ok(false, "Error occurred when getting sessions: " + aError);
+          teardown();
+          aReject();
+        }
+      );
     });
 
     gScript.sendAsyncMessage('trigger-incoming-session-request', receiverUrl);

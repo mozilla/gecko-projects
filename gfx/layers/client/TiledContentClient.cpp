@@ -89,7 +89,7 @@ namespace layers {
 
 MultiTiledContentClient::MultiTiledContentClient(ClientTiledPaintedLayer* aPaintedLayer,
                                                  ClientLayerManager* aManager)
-  : TiledContentClient(aManager)
+  : TiledContentClient(aManager, "Multi")
 {
   MOZ_COUNT_CTOR(MultiTiledContentClient);
 
@@ -442,7 +442,7 @@ gfxShmSharedReadLock::GetReadCount() {
 class TileExpiry final : public nsExpirationTracker<TileClient, 3>
 {
   public:
-    TileExpiry() : nsExpirationTracker<TileClient, 3>(1000) {}
+    TileExpiry() : nsExpirationTracker<TileClient, 3>(1000, "TileExpiry") {}
 
     static void AddTile(TileClient* aTile)
     {
@@ -964,7 +964,7 @@ ClientMultiTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
     PROFILER_LABEL("ClientMultiTiledLayerBuffer", "PaintThebesSingleBufferDraw",
       js::ProfileEntry::Category::GRAPHICS);
 
-    mCallback(mPaintedLayer, ctxt, aPaintRegion, &aDirtyRegion,
+    mCallback(mPaintedLayer, ctxt, aPaintRegion, aDirtyRegion,
               DrawRegionClip::NONE, nsIntRegion(), mCallbackData);
   }
 
@@ -1171,7 +1171,7 @@ void ClientMultiTiledLayerBuffer::Update(const nsIntRegion& newValidRegion,
     ctx->SetMatrix(
       ctx->CurrentMatrix().Scale(mResolution, mResolution).Translate(ThebesPoint(-mTilingOrigin)));
 
-    mCallback(mPaintedLayer, ctx, aPaintRegion, &aDirtyRegion,
+    mCallback(mPaintedLayer, ctx, aPaintRegion, aDirtyRegion,
               DrawRegionClip::DRAW, nsIntRegion(), mCallbackData);
     mMoz2DTiles.clear();
     // Reset:
@@ -1669,7 +1669,7 @@ void
 TiledContentClient::PrintInfo(std::stringstream& aStream, const char* aPrefix)
 {
   aStream << aPrefix;
-  aStream << nsPrintfCString("TiledContentClient (0x%p)", this).get();
+  aStream << nsPrintfCString("%sTiledContentClient (0x%p)", mName, this).get();
 
   if (profiler_feature_active("displaylistdump")) {
     nsAutoCString pfx(aPrefix);

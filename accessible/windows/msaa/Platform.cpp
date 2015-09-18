@@ -35,9 +35,17 @@ a11y::PlatformShutdown()
 }
 
 void
-a11y::ProxyCreated(ProxyAccessible* aProxy, uint32_t)
+a11y::ProxyCreated(ProxyAccessible* aProxy, uint32_t aInterfaces)
 {
-  ProxyAccessibleWrap* wrapper = new ProxyAccessibleWrap(aProxy);
+  AccessibleWrap* wrapper = nullptr;
+  if (aInterfaces & Interfaces::DOCUMENT) {
+    wrapper = new DocProxyAccessibleWrap(aProxy);
+  } else if (aInterfaces & Interfaces::HYPERTEXT) {
+    wrapper = new HyperTextProxyAccessibleWrap(aProxy);
+  } else {
+    wrapper = new ProxyAccessibleWrap(aProxy);
+  }
+
   wrapper->AddRef();
   aProxy->SetWrapper(reinterpret_cast<uintptr_t>(wrapper));
 }
@@ -45,11 +53,22 @@ a11y::ProxyCreated(ProxyAccessible* aProxy, uint32_t)
 void
 a11y::ProxyDestroyed(ProxyAccessible* aProxy)
 {
-  ProxyAccessibleWrap* wrapper =
-    reinterpret_cast<ProxyAccessibleWrap*>(aProxy->GetWrapper());
+  AccessibleWrap* wrapper =
+    reinterpret_cast<AccessibleWrap*>(aProxy->GetWrapper());
   MOZ_ASSERT(wrapper);
   if (!wrapper)
     return;
+
+  auto doc =
+    static_cast<DocProxyAccessibleWrap*>(WrapperFor(aProxy->Document()));
+#ifdef _WIN64
+  uint32_t id = wrapper->GetExistingID();
+  if (id != AccessibleWrap::kNoID) {
+    doc->RemoveID(id);
+  }
+#else
+  doc->RemoveID(-reinterpret_cast<int32_t>(wrapper));
+#endif
 
   wrapper->Shutdown();
   aProxy->SetWrapper(0);
@@ -57,18 +76,23 @@ a11y::ProxyDestroyed(ProxyAccessible* aProxy)
 }
 
 void
-a11y::ProxyEvent(ProxyAccessible*, uint32_t)
+a11y::ProxyEvent(ProxyAccessible* aTarget, uint32_t aEventType)
 {
+  AccessibleWrap::FireWinEvent(WrapperFor(aTarget), aEventType);
 }
 
 void
-a11y::ProxyStateChangeEvent(ProxyAccessible*, uint64_t, bool)
+a11y::ProxyStateChangeEvent(ProxyAccessible* aTarget, uint64_t, bool)
 {
+  AccessibleWrap::FireWinEvent(WrapperFor(aTarget),
+                               nsIAccessibleEvent::EVENT_STATE_CHANGE);
 }
 
 void
 a11y::ProxyCaretMoveEvent(ProxyAccessible* aTarget, int32_t aOffset)
 {
+  AccessibleWrap::FireWinEvent(WrapperFor(aTarget),
+                               nsIAccessibleEvent::EVENT_TEXT_CARET_MOVED);
 }
 
 void
@@ -85,4 +109,8 @@ a11y::ProxyTextChangeEvent(ProxyAccessible* aText, const nsString& aStr,
   if (text) {
     ia2AccessibleText::UpdateTextChangeData(text, aInsert, aStr, aStart, aLen);
   }
+
+  uint32_t eventType = aInsert ? nsIAccessibleEvent::EVENT_TEXT_INSERTED :
+    nsIAccessibleEvent::EVENT_TEXT_REMOVED;
+  AccessibleWrap::FireWinEvent(wrapper, eventType);
 }

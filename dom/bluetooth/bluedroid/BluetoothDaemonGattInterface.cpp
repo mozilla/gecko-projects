@@ -5,7 +5,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "BluetoothDaemonGattInterface.h"
-#include "BluetoothDaemonSetupInterface.h"
 #include "mozilla/unused.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
@@ -28,25 +27,14 @@ BluetoothDaemonGattModule::SetNotificationHandler(
   sNotificationHandler = aNotificationHandler;
 }
 
-nsresult
-BluetoothDaemonGattModule::Send(DaemonSocketPDU* aPDU,
-                                BluetoothGattResultHandler* aRes)
-{
-  nsRefPtr<BluetoothGattResultHandler> res(aRes);
-  nsresult rv = Send(aPDU, static_cast<void*>(res.get()));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  unused << res.forget(); // Keep reference for response
-  return NS_OK;
-}
-
 void
 BluetoothDaemonGattModule::HandleSvc(const DaemonSocketPDUHeader& aHeader,
-                                     DaemonSocketPDU& aPDU, void* aUserData)
+                                     DaemonSocketPDU& aPDU,
+                                     DaemonSocketResultHandler* aRes)
 {
   static void (BluetoothDaemonGattModule::* const HandleOp[])(
-    const DaemonSocketPDUHeader&, DaemonSocketPDU&, void*) = {
+    const DaemonSocketPDUHeader&, DaemonSocketPDU&,
+    DaemonSocketResultHandler*) = {
     [0] = &BluetoothDaemonGattModule::HandleRsp,
     [1] = &BluetoothDaemonGattModule::HandleNtf
   };
@@ -56,7 +44,7 @@ BluetoothDaemonGattModule::HandleSvc(const DaemonSocketPDUHeader& aHeader,
   // Negate twice to map bit to 0/1
   unsigned long isNtf = !!(aHeader.mOpcode & 0x80);
 
-  (this->*(HandleOp[isNtf]))(aHeader, aPDU, aUserData);
+  (this->*(HandleOp[isNtf]))(aHeader, aPDU, aRes);
 }
 
 // Commands
@@ -1405,7 +1393,7 @@ BluetoothDaemonGattModule::ServerSendResponseRsp(
 void
 BluetoothDaemonGattModule::HandleRsp(
   const DaemonSocketPDUHeader& aHeader, DaemonSocketPDU& aPDU,
-  void* aUserData)
+  DaemonSocketResultHandler* aRes)
 {
   static void (BluetoothDaemonGattModule::* const HandleRsp[])(
     const DaemonSocketPDUHeader&,
@@ -1493,8 +1481,7 @@ BluetoothDaemonGattModule::HandleRsp(
   }
 
   nsRefPtr<BluetoothGattResultHandler> res =
-    already_AddRefed<BluetoothGattResultHandler>(
-      static_cast<BluetoothGattResultHandler*>(aUserData));
+    static_cast<BluetoothGattResultHandler*>(aRes);
 
   if (!res) {
     return;
@@ -2152,7 +2139,7 @@ BluetoothDaemonGattModule::ServerResponseConfirmationNtf(
 void
 BluetoothDaemonGattModule::HandleNtf(
   const DaemonSocketPDUHeader& aHeader, DaemonSocketPDU& aPDU,
-  void* aUserData)
+  DaemonSocketResultHandler* aRes)
 {
   static void (BluetoothDaemonGattModule::* const HandleNtf[])(
     const DaemonSocketPDUHeader&, DaemonSocketPDU&) = {

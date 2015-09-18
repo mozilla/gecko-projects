@@ -473,7 +473,7 @@ AddAnimationsForProperty(nsIFrame* aFrame, nsCSSProperty aProperty,
     }
 
     AddAnimationForProperty(aFrame, *property, anim, aLayer, aData, aPending);
-    anim->SetIsRunningOnCompositor();
+    effect->SetIsRunningOnCompositor(aProperty, true);
   }
 }
 
@@ -522,11 +522,16 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
   aLayer->SetAnimationGeneration(animationGeneration);
 
   nsPresContext* presContext = aFrame->PresContext();
+  presContext->TransitionManager()->ClearIsRunningOnCompositor(aFrame,
+                                                               aProperty);
+  presContext->AnimationManager()->ClearIsRunningOnCompositor(aFrame,
+                                                              aProperty);
   AnimationCollection* transitions =
-    presContext->TransitionManager()->GetAnimationsForCompositor(aFrame, aProperty);
+    presContext->TransitionManager()->GetAnimationsForCompositor(aFrame,
+                                                                 aProperty);
   AnimationCollection* animations =
-    presContext->AnimationManager()->GetAnimationsForCompositor(aFrame, aProperty);
-
+    presContext->AnimationManager()->GetAnimationsForCompositor(aFrame,
+                                                                aProperty);
   if (!animations && !transitions) {
     return;
   }
@@ -552,7 +557,7 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
     // XXX Performance here isn't ideal for SVG. We'd prefer to avoid resolving
     // the dimensions of refBox. That said, we only get here if there are CSS
     // animations or transitions on this element, and that is likely to be a
-    // lot rarer that transforms on SVG (the frequency of which drives the need
+    // lot rarer than transforms on SVG (the frequency of which drives the need
     // for TransformReferenceBox).
     TransformReferenceBox refBox(aFrame);
     nsRect bounds(0, 0, refBox.Width(), refBox.Height());
@@ -2350,6 +2355,13 @@ nsDisplayBackgroundImage::IsSingleFixedPositionImage(nsDisplayListBuilder* aBuil
 }
 
 bool
+nsDisplayBackgroundImage::IsNonEmptyFixedImage() const
+{
+  return mBackgroundStyle->mLayers[mLayer].mAttachment == NS_STYLE_BG_ATTACHMENT_FIXED &&
+         !mBackgroundStyle->mLayers[mLayer].mImage.IsEmpty();
+}
+
+bool
 nsDisplayBackgroundImage::ShouldFixToViewport(LayerManager* aManager)
 {
   // APZ needs background-attachment:fixed images layerized for correctness.
@@ -2360,8 +2372,7 @@ nsDisplayBackgroundImage::ShouldFixToViewport(LayerManager* aManager)
 
   // Put background-attachment:fixed background images in their own
   // compositing layer.
-  return mBackgroundStyle->mLayers[mLayer].mAttachment == NS_STYLE_BG_ATTACHMENT_FIXED &&
-         !mBackgroundStyle->mLayers[mLayer].mImage.IsEmpty();
+  return IsNonEmptyFixedImage();
 }
 
 bool
@@ -2777,6 +2788,15 @@ nsDisplayBackgroundImage::GetBoundsInternal(nsDisplayListBuilder* aBuilder) {
   if (mFrame->GetType() == nsGkAtoms::canvasFrame) {
     nsCanvasFrame* frame = static_cast<nsCanvasFrame*>(mFrame);
     clipRect = frame->CanvasArea() + ToReferenceFrame();
+  } else if (nsLayoutUtils::UsesAsyncScrolling(mFrame) && IsNonEmptyFixedImage()) {
+    // If this is a background-attachment:fixed image, and APZ is enabled,
+    // async scrolling could reveal additional areas of the image, so don't
+    // clip it beyond clipping to the document's viewport.
+    nsIFrame* rootFrame = presContext->PresShell()->GetRootFrame();
+    nsRect rootRect = rootFrame->GetRectRelativeToSelf();
+    if (nsLayoutUtils::TransformRect(rootFrame, mFrame, rootRect) == nsLayoutUtils::TRANSFORM_SUCCEEDED) {
+      clipRect = rootRect + aBuilder->ToReferenceFrame(mFrame);
+    }
   }
   const nsStyleBackground::Layer& layer = mBackgroundStyle->mLayers[mLayer];
   return nsCSSRendering::GetBackgroundLayerRect(presContext, mFrame,
@@ -4389,7 +4409,7 @@ nsDisplayStickyPosition::BuildLayer(nsDisplayListBuilder* aBuilder,
 
   nsLayoutUtils::SetFixedPositionLayerData(layer, scrollFrame,
     nsRect(scrollFrame->GetOffsetToCrossDoc(ReferenceFrame()), scrollFrameSize),
-    mFrame, presContext, aContainerParameters);
+    mFrame, presContext, aContainerParameters, /* clip is fixed = */ true);
 
   ViewID scrollId = nsLayoutUtils::FindOrCreateIDFor(
     stickyScrollContainer->ScrollFrame()->GetScrolledFrame()->GetContent());
@@ -4711,7 +4731,7 @@ nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder,
   Init(aBuilder);
 }
 
-/* Returns the delta specified by the -moz-transform-origin property.
+/* Returns the delta specified by the -transform-origin property.
  * This is a positive delta, meaning that it indicates the direction to move
  * to get from (0, 0) of the frame to the transform origin.  This function is
  * called off the main thread.
@@ -4729,7 +4749,7 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
     return Point3D();
   }
 
-  /* For both of the coordinates, if the value of -moz-transform is a
+  /* For both of the coordinates, if the value of -transform is a
    * percentage, it's relative to the size of the frame.  Otherwise, if it's
    * a distance, it's already computed for us!
    */
@@ -4753,7 +4773,7 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
     { &TransformReferenceBox::X, &TransformReferenceBox::Y };
 
   for (uint8_t index = 0; index < 2; ++index) {
-    /* If the -moz-transform-origin specifies a percentage, take the percentage
+    /* If the -transform-origin specifies a percentage, take the percentage
      * of the size of the box.
      */
     const nsStyleCoord &coord = display->mTransformOrigin[index];
@@ -4811,19 +4831,12 @@ nsDisplayTransform::GetDeltaToPerspectiveOrigin(const nsIFrame* aFrame,
 
   //TODO: Should this be using our bounds or the parent's bounds?
   // How do we handle aBoundsOverride in the latter case?
-  nsIFrame* parent;
-  nsStyleContext* psc = aFrame->GetParentStyleContext(&parent);
-  if (!psc) {
+  nsIFrame* cbFrame = aFrame->GetContainingBlock(nsIFrame::SKIP_SCROLLED_FRAME);
+  if (!cbFrame) {
     return Point3D();
   }
-  if (!parent) {
-    parent = aFrame->GetParent();
-    if (!parent) {
-      return Point3D();
-    }
-  }
-  const nsStyleDisplay* display = psc->StyleDisplay();
-  TransformReferenceBox refBox(parent);
+  const nsStyleDisplay* display = cbFrame->StyleDisplay();
+  TransformReferenceBox refBox(cbFrame);
 
   /* Allows us to access named variables by index. */
   Point3D result;
@@ -4833,7 +4846,7 @@ nsDisplayTransform::GetDeltaToPerspectiveOrigin(const nsIFrame* aFrame,
     { &TransformReferenceBox::Width, &TransformReferenceBox::Height };
 
   for (uint8_t index = 0; index < 2; ++index) {
-    /* If the -moz-transform-origin specifies a percentage, take the percentage
+    /* If the -transform-origin specifies a percentage, take the percentage
      * of the size of the box.
      */
     const nsStyleCoord &coord = display->mPerspectiveOrigin[index];
@@ -4854,7 +4867,7 @@ nsDisplayTransform::GetDeltaToPerspectiveOrigin(const nsIFrame* aFrame,
     }
   }
 
-  nsPoint parentOffset = aFrame->GetOffsetTo(parent);
+  nsPoint parentOffset = aFrame->GetOffsetTo(cbFrame);
   Point3D gfxOffset(
             NSAppUnitsToFloatPixels(parentOffset.x, aAppUnitsPerPixel),
             NSAppUnitsToFloatPixels(parentOffset.y, aAppUnitsPerPixel),
@@ -4871,22 +4884,21 @@ nsDisplayTransform::FrameTransformProperties::FrameTransformProperties(const nsI
   , mToTransformOrigin(GetDeltaToTransformOrigin(aFrame, aAppUnitsPerPixel, aBoundsOverride))
   , mChildPerspective(0)
 {
-  const nsStyleDisplay* parentDisp = nullptr;
-  nsStyleContext* parentStyleContext = aFrame->StyleContext()->GetParent();
-  if (parentStyleContext) {
-    parentDisp = parentStyleContext->StyleDisplay();
-  }
-  if (parentDisp && parentDisp->mChildPerspective.GetUnit() == eStyleUnit_Coord) {
-    mChildPerspective = parentDisp->mChildPerspective.GetCoordValue();
-    // Calling GetDeltaToPerspectiveOrigin can be expensive, so we avoid
-    // calling it unnecessarily.
-    if (mChildPerspective > 0.0) {
-      mToPerspectiveOrigin = GetDeltaToPerspectiveOrigin(aFrame, aAppUnitsPerPixel);
+  nsIFrame* cbFrame = aFrame->GetContainingBlock(nsIFrame::SKIP_SCROLLED_FRAME);
+  if (cbFrame) {
+    const nsStyleDisplay* display = cbFrame->StyleDisplay();
+    if (display->mChildPerspective.GetUnit() == eStyleUnit_Coord) {
+      mChildPerspective = display->mChildPerspective.GetCoordValue();
+      // Calling GetDeltaToPerspectiveOrigin can be expensive, so we avoid
+      // calling it unnecessarily.
+      if (mChildPerspective > 0.0) {
+        mToPerspectiveOrigin = GetDeltaToPerspectiveOrigin(aFrame, aAppUnitsPerPixel);
+      }
     }
   }
 }
 
-/* Wraps up the -moz-transform matrix in a change-of-basis matrix pair that
+/* Wraps up the -transform matrix in a change-of-basis matrix pair that
  * translates from local coordinate space to transform coordinate space, then
  * hands it back.
  */
@@ -4981,7 +4993,7 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const FrameTransformProp
     result = result * perspective;
   }
 
-  /* Account for the -moz-transform-origin property by translating the
+  /* Account for the -transform-origin property by translating the
    * coordinate space to the new origin.
    */
   Point3D newOrigin =

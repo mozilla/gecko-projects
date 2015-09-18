@@ -8,14 +8,13 @@
 
 #include "nsTArray.h"
 #include "MediaDataDemuxer.h"
+#include "NesteggPacketHolder.h"
 
 typedef struct nestegg nestegg;
 
 namespace mozilla {
 
-class NesteggPacketHolder;
 class WebMBufferedState;
-class WebMPacketQueue;
 
 // Queue for holding MediaRawData samples
 class MediaRawDataQueue {
@@ -28,8 +27,16 @@ class MediaRawDataQueue {
     mQueue.push_back(aItem);
   }
 
+  void Push(const MediaRawDataQueue& aOther) {
+    mQueue.insert(mQueue.end(), aOther.mQueue.begin(), aOther.mQueue.end());
+  }
+
   void PushFront(MediaRawData* aItem) {
     mQueue.push_front(aItem);
+  }
+
+  void PushFront(const MediaRawDataQueue& aOther) {
+    mQueue.insert(mQueue.begin(), aOther.mQueue.begin(), aOther.mQueue.end());
   }
 
   already_AddRefed<MediaRawData> PopFront() {
@@ -42,6 +49,19 @@ class MediaRawDataQueue {
     while (!mQueue.empty()) {
       mQueue.pop_front();
     }
+  }
+
+  MediaRawDataQueue& operator=(const MediaRawDataQueue& aOther) {
+    mQueue = aOther.mQueue;
+    return *this;
+  }
+
+  const nsRefPtr<MediaRawData>& First() const {
+    return mQueue.front();
+  }
+
+  const nsRefPtr<MediaRawData>& Last() const {
+    return mQueue.back();
   }
 
 private:
@@ -59,8 +79,6 @@ public:
   WebMDemuxer(MediaResource* aResource, bool aIsMediaSource);
   
   nsRefPtr<InitPromise> Init() override;
-
-  already_AddRefed<MediaDataDemuxer> Clone() const override;
 
   bool HasTrackType(TrackInfo::TrackType aType) const override;
 
@@ -109,15 +127,13 @@ private:
 
   ~WebMDemuxer();
   void Cleanup();
-  nsresult InitBufferedState();
+  void InitBufferedState();
   nsresult ReadMetadata();
   void NotifyDataArrived(uint32_t aLength, int64_t aOffset) override;
   void NotifyDataRemoved() override;
   void EnsureUpToDateIndex();
   media::TimeIntervals GetBuffered();
   virtual nsresult SeekInternal(const media::TimeUnit& aTarget);
-  // Get the timestamp of the next keyframe
-  int64_t GetNextKeyframeTime();
 
   // Read a packet from the nestegg file. Returns nullptr if all packets for
   // the particular track have been read. Pass TrackInfo::kVideoTrack or
@@ -198,8 +214,6 @@ public:
   nsRefPtr<SkipAccessPointPromise> SkipToNextRandomAccessPoint(media::TimeUnit aTimeThreshold) override;
 
   media::TimeIntervals GetBuffered() override;
-
-  int64_t GetEvictionOffset(media::TimeUnit aTime) override;
 
   void BreakCycles() override;
 

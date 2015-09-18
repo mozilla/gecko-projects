@@ -143,7 +143,7 @@ typedef nsStyleTransformMatrix::TransformReferenceBox TransformReferenceBox;
 /* static */ bool nsLayoutUtils::sInvalidationDebuggingIsEnabled;
 /* static */ bool nsLayoutUtils::sCSSVariablesEnabled;
 /* static */ bool nsLayoutUtils::sInterruptibleReflowEnabled;
-/* static */ bool nsLayoutUtils::sSVGTransformOriginEnabled;
+/* static */ bool nsLayoutUtils::sSVGTransformBoxEnabled;
 
 static ViewID sScrollIdCounter = FrameMetrics::START_SCROLL_ID;
 
@@ -920,6 +920,9 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
   ScreenRect screenRect = LayoutDeviceRect::FromAppUnits(base, auPerDevPixel)
                         * parentRes;
 
+  nsRect expandedScrollableRect =
+    nsLayoutUtils::CalculateExpandedScrollableRect(frame);
+
   if (gfxPrefs::LayersTilesEnabled()) {
     // Note on the correctness of applying the alignment in Screen space:
     //   The correct space to apply the alignment in would be Layer space, but
@@ -955,12 +958,20 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
                                 * res;
 
     screenRect += scrollPosScreen;
+    // Round-out the display port to the nearest alignment (tiles)
     float x = alignmentX * floor(screenRect.x / alignmentX);
     float y = alignmentY * floor(screenRect.y / alignmentY);
-    float w = alignmentX * ceil(screenRect.XMost() / alignmentX) - x;
-    float h = alignmentY * ceil(screenRect.YMost() / alignmentY) - y;
+    float w = alignmentX * ceil(screenRect.width / alignmentX);
+    float h = alignmentY * ceil(screenRect.height / alignmentY);
     screenRect = ScreenRect(x, y, w, h);
     screenRect -= scrollPosScreen;
+
+    ScreenRect screenExpScrollableRect =
+      LayoutDeviceRect::FromAppUnits(expandedScrollableRect,
+                                     auPerDevPixel) * res;
+
+    // Make sure the displayport remains within the scrollable rect.
+    screenRect = screenRect.ForceInside(screenExpScrollableRect - scrollPosScreen);
   } else {
     nscoord maxSizeInAppUnits = GetMaxDisplayPortSize(aContent);
     if (maxSizeInAppUnits == nscoord_MAX) {
@@ -1001,7 +1012,6 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
   result = ApplyRectMultiplier(result, aMultiplier);
 
   // Finally, clamp it to the expanded scrollable rect.
-  nsRect expandedScrollableRect = nsLayoutUtils::CalculateExpandedScrollableRect(frame);
   result = expandedScrollableRect.Intersect(result + scrollPos) - scrollPos;
 
   return result;
@@ -1727,7 +1737,8 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
                                          const nsRect& aAnchorRect,
                                          const nsIFrame* aFixedPosFrame,
                                          nsPresContext* aPresContext,
-                                         const ContainerLayerParameters& aContainerParameters) {
+                                         const ContainerLayerParameters& aContainerParameters,
+                                         bool aIsClipFixed) {
   // Find out the rect of the viewport frame relative to the reference frame.
   // This, in conjunction with the container scale, will correspond to the
   // coordinate-space of the built layer.
@@ -1781,7 +1792,7 @@ nsLayoutUtils::SetFixedPositionLayerData(Layer* aLayer,
       id = FindOrCreateIDFor(content);
     }
   }
-  aLayer->SetFixedPositionData(id, anchor);
+  aLayer->SetFixedPositionData(id, anchor, aIsClipFixed);
 }
 
 bool
@@ -4190,19 +4201,15 @@ GetPercentBSize(const nsStyleCoord& aStyle,
   MOZ_ASSERT(!aStyle.IsCalcUnit() || aStyle.CalcHasPercent(),
              "GetAbsoluteCoord should have handled this");
 
-  nsIFrame *f = aFrame->GetContainingBlock();
-  if (!f) {
-    NS_NOTREACHED("top of frame tree not a containing block");
-    return false;
-  }
-
   // During reflow, nsHTMLScrollFrame::ReflowScrolledFrame uses
   // SetComputedHeight on the reflow state for its child to propagate its
   // computed height to the scrolled content. So here we skip to the scroll
   // frame that contains this scrolled content in order to get the same
   // behavior as layout when computing percentage heights.
-  if (f->StyleContext()->GetPseudo() == nsCSSAnonBoxes::scrolledContent) {
-    f = f->GetParent();
+  nsIFrame *f = aFrame->GetContainingBlock(nsIFrame::SKIP_SCROLLED_FRAME);
+  if (!f) {
+    NS_NOTREACHED("top of frame tree not a containing block");
+    return false;
   }
 
   WritingMode wm = f->GetWritingMode();
@@ -7249,8 +7256,8 @@ nsLayoutUtils::Initialize()
                                "layout.css.variables.enabled");
   Preferences::AddBoolVarCache(&sInterruptibleReflowEnabled,
                                "layout.interruptible-reflow.enabled");
-  Preferences::AddBoolVarCache(&sSVGTransformOriginEnabled,
-                               "svg.transform-origin.enabled");
+  Preferences::AddBoolVarCache(&sSVGTransformBoxEnabled,
+                               "svg.transform-box.enabled");
 
   Preferences::RegisterCallback(GridEnabledPrefChangeCallback,
                                 GRID_ENABLED_PREF_NAME);
@@ -8193,20 +8200,6 @@ nsLayoutUtils::SetBSizeFromFontMetrics(const nsIFrame* aFrame,
 }
 
 /* static */ bool
-nsLayoutUtils::HasApzAwareListeners(EventListenerManager* aElm)
-{
-  if (!aElm) {
-    return false;
-  }
-  return aElm->HasListenersFor(nsGkAtoms::ontouchstart) ||
-         aElm->HasListenersFor(nsGkAtoms::ontouchmove) ||
-         aElm->HasListenersFor(nsGkAtoms::onwheel) ||
-         aElm->HasListenersFor(nsGkAtoms::onDOMMouseScroll) ||
-         aElm->HasListenersFor(nsHtml5Atoms::onmousewheel) ||
-         aElm->HasListenersFor(nsGkAtoms::onMozMousePixelScroll);
-}
-
-/* static */ bool
 nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell)
 {
   if (nsIDocument* doc = aShell->GetDocument()) {
@@ -8216,7 +8209,7 @@ nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell)
         nullptr, nullptr, &targets);
     NS_ENSURE_SUCCESS(rv, false);
     for (size_t i = 0; i < targets.Length(); i++) {
-      if (HasApzAwareListeners(targets[i]->GetExistingListenerManager())) {
+      if (targets[i]->HasApzAwareListeners()) {
         return true;
       }
     }

@@ -484,6 +484,9 @@ pref("security.mixed_content.block_active_content", true);
 // Enable pinning
 pref("security.cert_pinning.enforcement_level", 1);
 
+// Allow SHA-1 certificates only before 2016-01-01
+pref("security.pki.sha1_enforcement_level", 2);
+
 // Required blocklist freshness for OneCRL OCSP bypass
 // (default is 1.25x extensions.blocklist.interval, or 30 hours)
 pref("security.onecrl.maximum_staleness_in_seconds", 108000);
@@ -562,10 +565,6 @@ pref("layers.low-precision-opacity", "1.0");
 // By limiting the number of layers on mobile we're making the main thread
 // work harder keep scrolling smooth and memory low.
 pref("layers.max-active", 20);
-
-// Temporarily disable support for offsetX/Y to work around Google Maps bug
-// (bug 1150284)
-pref("dom.mouseEvent.offsetXY.enabled", false);
 
 pref("notification.feature.enabled", true);
 pref("dom.webnotifications.enabled", true);

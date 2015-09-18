@@ -14,7 +14,7 @@ namespace layers {
 
 SingleTiledContentClient::SingleTiledContentClient(ClientTiledPaintedLayer* aPaintedLayer,
                                                    ClientLayerManager* aManager)
-  : TiledContentClient(aManager)
+  : TiledContentClient(aManager, "Single")
 {
   MOZ_COUNT_CTOR(SingleTiledContentClient);
 
@@ -181,7 +181,7 @@ ClientSingleTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
     nsRefPtr<gfxContext> ctx = new gfxContext(dt);
     ctx->SetMatrix(ctx->CurrentMatrix().Translate(-mTilingOrigin.x, -mTilingOrigin.y));
 
-    aCallback(mPaintedLayer, ctx, paintRegion, &paintRegion, DrawRegionClip::DRAW, nsIntRegion(), aCallbackData);
+    aCallback(mPaintedLayer, ctx, paintRegion, paintRegion, DrawRegionClip::DRAW, nsIntRegion(), aCallbackData);
   }
 
   // Mark the area we just drew into the back buffer as invalid in the front buffer as they're

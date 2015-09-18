@@ -142,6 +142,8 @@ PresentationSessionInfo::Init(nsIPresentationControlChannel* aControlChannel)
 /* virtual */ void
 PresentationSessionInfo::Shutdown(nsresult aReason)
 {
+  NS_WARN_IF(NS_FAILED(aReason));
+
   // Close the control channel if any.
   if (mControlChannel) {
     NS_WARN_IF(NS_FAILED(mControlChannel->Close(aReason)));
@@ -298,9 +300,9 @@ PresentationSessionInfo::NotifyTransportClosed(nsresult aReason)
   mTransport->SetCallback(nullptr);
   mTransport = nullptr;
 
-  if (!IsSessionReady()) {
+  if (NS_WARN_IF(!IsSessionReady())) {
     // It happens before the session is ready. Reply the callback.
-    return ReplyError(aReason);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   // Unset |mIsTransportReady| here so it won't affect |IsSessionReady()| above.
@@ -341,30 +343,33 @@ PresentationSessionInfo::NotifyData(const nsACString& aData)
 }
 
 /*
- * Implementation of PresentationRequesterInfo
+ * Implementation of PresentationControllingInfo
  *
  * During presentation session establishment, the sender expects the following
- * after trying to establish the control channel: (The order between step 2 and
- * 3 is not guaranteed.)
+ * after trying to establish the control channel: (The order between step 3 and
+ * 4 is not guaranteed.)
  * 1. |Init| is called to open a socket |mServerSocket| for data transport
- *    channel and send the offer to the receiver via the control channel.
- * 2.1 |OnSocketAccepted| of |nsIServerSocketListener| is called to indicate the
+ *    channel.
+ * 2. |NotifyOpened| of |nsIPresentationControlChannelListener| is called to
+ *    indicate the control channel is ready to use. Then send the offer to the
+ *    receiver via the control channel.
+ * 3.1 |OnSocketAccepted| of |nsIServerSocketListener| is called to indicate the
  *     data transport channel is connected. Then initialize |mTransport|.
- * 2.2 |NotifyTransportReady| of |nsIPresentationSessionTransportCallback| is
+ * 3.2 |NotifyTransportReady| of |nsIPresentationSessionTransportCallback| is
  *     called.
- * 3. |OnAnswer| of |nsIPresentationControlChannelListener| is called to
+ * 4. |OnAnswer| of |nsIPresentationControlChannelListener| is called to
  *    indicate the receiver is ready. Close the control channel since it's no
  *    longer needed.
- * 4. Once both step 2 and 3 are done, the presentation session is ready to use.
+ * 5. Once both step 3 and 4 are done, the presentation session is ready to use.
  *    So notify the listener of CONNECTED state.
  */
 
-NS_IMPL_ISUPPORTS_INHERITED(PresentationRequesterInfo,
+NS_IMPL_ISUPPORTS_INHERITED(PresentationControllingInfo,
                             PresentationSessionInfo,
                             nsIServerSocketListener)
 
 nsresult
-PresentationRequesterInfo::Init(nsIPresentationControlChannel* aControlChannel)
+PresentationControllingInfo::Init(nsIPresentationControlChannel* aControlChannel)
 {
   PresentationSessionInfo::Init(aControlChannel);
 
@@ -372,7 +377,7 @@ PresentationRequesterInfo::Init(nsIPresentationControlChannel* aControlChannel)
   // use |this| as the listener.
   mServerSocket = do_CreateInstance(NS_SERVERSOCKET_CONTRACTID);
   if (NS_WARN_IF(!mServerSocket)) {
-    return ReplyError(NS_ERROR_NOT_AVAILABLE);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   nsresult rv = mServerSocket->Init(-1, false, -1);
@@ -385,31 +390,11 @@ PresentationRequesterInfo::Init(nsIPresentationControlChannel* aControlChannel)
     return rv;
   }
 
-  // Prepare and send the offer.
-  int32_t port;
-  rv = mServerSocket->GetPort(&port);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsCString address;
-  rv = GetAddress(address);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsRefPtr<PresentationChannelDescription> description =
-    new PresentationChannelDescription(address, static_cast<uint16_t>(port));
-  rv = mControlChannel->SendOffer(description);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
   return NS_OK;
 }
 
 void
-PresentationRequesterInfo::Shutdown(nsresult aReason)
+PresentationControllingInfo::Shutdown(nsresult aReason)
 {
   PresentationSessionInfo::Shutdown(aReason);
 
@@ -421,7 +406,7 @@ PresentationRequesterInfo::Shutdown(nsresult aReason)
 }
 
 nsresult
-PresentationRequesterInfo::GetAddress(nsACString& aAddress)
+PresentationControllingInfo::GetAddress(nsACString& aAddress)
 {
 #ifdef MOZ_WIDGET_GONK
   nsCOMPtr<nsINetworkManager> networkManager =
@@ -467,21 +452,21 @@ PresentationRequesterInfo::GetAddress(nsACString& aAddress)
 
 // nsIPresentationControlChannelListener
 NS_IMETHODIMP
-PresentationRequesterInfo::OnOffer(nsIPresentationChannelDescription* aDescription)
+PresentationControllingInfo::OnOffer(nsIPresentationChannelDescription* aDescription)
 {
   MOZ_ASSERT(false, "Sender side should not receive offer.");
   return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
-PresentationRequesterInfo::OnAnswer(nsIPresentationChannelDescription* aDescription)
+PresentationControllingInfo::OnAnswer(nsIPresentationChannelDescription* aDescription)
 {
   mIsResponderReady = true;
 
   // Close the control channel since it's no longer needed.
   nsresult rv = mControlChannel->Close(NS_OK);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return ReplyError(rv);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   // Session might not be ready at this moment (waiting for the establishment of
@@ -494,14 +479,28 @@ PresentationRequesterInfo::OnAnswer(nsIPresentationChannelDescription* aDescript
 }
 
 NS_IMETHODIMP
-PresentationRequesterInfo::NotifyOpened()
+PresentationControllingInfo::NotifyOpened()
 {
-  // Do nothing and wait for receiver to be ready.
-  return NS_OK;
+  // Prepare and send the offer.
+  int32_t port;
+  nsresult rv = mServerSocket->GetPort(&port);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCString address;
+  rv = GetAddress(address);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsRefPtr<PresentationChannelDescription> description =
+    new PresentationChannelDescription(address, static_cast<uint16_t>(port));
+  return mControlChannel->SendOffer(description);
 }
 
 NS_IMETHODIMP
-PresentationRequesterInfo::NotifyClosed(nsresult aReason)
+PresentationControllingInfo::NotifyClosed(nsresult aReason)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -518,7 +517,7 @@ PresentationRequesterInfo::NotifyClosed(nsresult aReason)
     }
 
     // Reply error for an abnormal close.
-    return ReplyError(aReason);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   return NS_OK;
@@ -526,7 +525,7 @@ PresentationRequesterInfo::NotifyClosed(nsresult aReason)
 
 // nsIServerSocketListener
 NS_IMETHODIMP
-PresentationRequesterInfo::OnSocketAccepted(nsIServerSocket* aServerSocket,
+PresentationControllingInfo::OnSocketAccepted(nsIServerSocket* aServerSocket,
                                             nsISocketTransport* aTransport)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -534,7 +533,7 @@ PresentationRequesterInfo::OnSocketAccepted(nsIServerSocket* aServerSocket,
   // Initialize |mTransport| and use |this| as the callback.
   mTransport = do_CreateInstance(PRESENTATION_SESSION_TRANSPORT_CONTRACTID);
   if (NS_WARN_IF(!mTransport)) {
-    return ReplyError(NS_ERROR_NOT_AVAILABLE);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   nsresult rv = mTransport->InitWithSocketTransport(aTransport, this);
@@ -551,7 +550,7 @@ PresentationRequesterInfo::OnSocketAccepted(nsIServerSocket* aServerSocket,
 }
 
 NS_IMETHODIMP
-PresentationRequesterInfo::OnStopListening(nsIServerSocket* aServerSocket,
+PresentationControllingInfo::OnStopListening(nsIServerSocket* aServerSocket,
                                            nsresult aStatus)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -562,9 +561,9 @@ PresentationRequesterInfo::OnStopListening(nsIServerSocket* aServerSocket,
 
   Shutdown(aStatus);
 
-  if (!IsSessionReady()) {
+  if (NS_WARN_IF(!IsSessionReady())) {
     // It happens before the session is ready. Reply the callback.
-    return ReplyError(aStatus);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   // It happens after the session is ready. Notify session state change.
@@ -577,7 +576,7 @@ PresentationRequesterInfo::OnStopListening(nsIServerSocket* aServerSocket,
 }
 
 /*
- * Implementation of PresentationResponderInfo
+ * Implementation of PresentationPresentingInfo
  *
  * During presentation session establishment, the receiver expects the following
  * after trying to launch the app by notifying "presentation-launch-receiver":
@@ -595,12 +594,12 @@ PresentationRequesterInfo::OnStopListening(nsIServerSocket* aServerSocket,
  *    of CONNECTED state.
  */
 
-NS_IMPL_ISUPPORTS_INHERITED(PresentationResponderInfo,
+NS_IMPL_ISUPPORTS_INHERITED(PresentationPresentingInfo,
                             PresentationSessionInfo,
                             nsITimerCallback)
 
 nsresult
-PresentationResponderInfo::Init(nsIPresentationControlChannel* aControlChannel)
+PresentationPresentingInfo::Init(nsIPresentationControlChannel* aControlChannel)
 {
   PresentationSessionInfo::Init(aControlChannel);
 
@@ -622,7 +621,7 @@ PresentationResponderInfo::Init(nsIPresentationControlChannel* aControlChannel)
 }
 
 void
-PresentationResponderInfo::Shutdown(nsresult aReason)
+PresentationPresentingInfo::Shutdown(nsresult aReason)
 {
   PresentationSessionInfo::Shutdown(aReason);
 
@@ -636,7 +635,7 @@ PresentationResponderInfo::Shutdown(nsresult aReason)
 }
 
 nsresult
-PresentationResponderInfo::InitTransportAndSendAnswer()
+PresentationPresentingInfo::InitTransportAndSendAnswer()
 {
   // Establish a data transport channel |mTransport| to the sender and use
   // |this| as the callback.
@@ -666,27 +665,22 @@ PresentationResponderInfo::InitTransportAndSendAnswer()
   // description for the answer, which is not actually checked at requester side.
   nsCOMPtr<nsINetAddr> selfAddr;
   rv = mTransport->GetSelfAddress(getter_AddRefs(selfAddr));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  NS_WARN_IF(NS_FAILED(rv));
 
   nsCString address;
-  selfAddr->GetAddress(address);
-  uint16_t port;
-  selfAddr->GetPort(&port);
+  uint16_t port = 0;
+  if (NS_SUCCEEDED(rv)) {
+    selfAddr->GetAddress(address);
+    selfAddr->GetPort(&port);
+  }
   nsCOMPtr<nsIPresentationChannelDescription> description =
     new PresentationChannelDescription(address, port);
 
-  rv = mControlChannel->SendAnswer(description);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return NS_OK;
- }
+  return mControlChannel->SendAnswer(description);
+}
 
 nsresult
-PresentationResponderInfo::UntrackFromService()
+PresentationPresentingInfo::UntrackFromService()
 {
   // Remove the OOP responding info (if it has never been used).
   if (mContentParent) {
@@ -705,7 +699,7 @@ PresentationResponderInfo::UntrackFromService()
 }
 
 bool
-PresentationResponderInfo::IsAccessible(base::ProcessId aProcessId)
+PresentationPresentingInfo::IsAccessible(base::ProcessId aProcessId)
 {
   // Only the specific content process should access the responder info.
   return (mContentParent) ?
@@ -714,7 +708,7 @@ PresentationResponderInfo::IsAccessible(base::ProcessId aProcessId)
 }
 
 nsresult
-PresentationResponderInfo::NotifyResponderReady()
+PresentationPresentingInfo::NotifyResponderReady()
 {
   if (mTimer) {
     mTimer->Cancel();
@@ -728,7 +722,7 @@ PresentationResponderInfo::NotifyResponderReady()
   if (mRequesterDescription) {
     nsresult rv = InitTransportAndSendAnswer();
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return ReplyError(rv);
+      return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     }
   }
 
@@ -737,10 +731,10 @@ PresentationResponderInfo::NotifyResponderReady()
 
 // nsIPresentationControlChannelListener
 NS_IMETHODIMP
-PresentationResponderInfo::OnOffer(nsIPresentationChannelDescription* aDescription)
+PresentationPresentingInfo::OnOffer(nsIPresentationChannelDescription* aDescription)
 {
   if (NS_WARN_IF(!aDescription)) {
-    return ReplyError(NS_ERROR_INVALID_ARG);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   mRequesterDescription = aDescription;
@@ -750,7 +744,7 @@ PresentationResponderInfo::OnOffer(nsIPresentationChannelDescription* aDescripti
   if (mIsResponderReady) {
     nsresult rv = InitTransportAndSendAnswer();
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return ReplyError(rv);
+      return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     }
   }
 
@@ -758,21 +752,21 @@ PresentationResponderInfo::OnOffer(nsIPresentationChannelDescription* aDescripti
 }
 
 NS_IMETHODIMP
-PresentationResponderInfo::OnAnswer(nsIPresentationChannelDescription* aDescription)
+PresentationPresentingInfo::OnAnswer(nsIPresentationChannelDescription* aDescription)
 {
   MOZ_ASSERT(false, "Receiver side should not receive answer.");
   return NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
-PresentationResponderInfo::NotifyOpened()
+PresentationPresentingInfo::NotifyOpened()
 {
   // Do nothing.
   return NS_OK;
 }
 
 NS_IMETHODIMP
-PresentationResponderInfo::NotifyClosed(nsresult aReason)
+PresentationPresentingInfo::NotifyClosed(nsresult aReason)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -789,7 +783,7 @@ PresentationResponderInfo::NotifyClosed(nsresult aReason)
     }
 
     // Reply error for an abnormal close.
-    return ReplyError(aReason);
+    return ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   return NS_OK;
@@ -797,7 +791,7 @@ PresentationResponderInfo::NotifyClosed(nsresult aReason)
 
 // nsITimerCallback
 NS_IMETHODIMP
-PresentationResponderInfo::Notify(nsITimer* aTimer)
+PresentationPresentingInfo::Notify(nsITimer* aTimer)
 {
   MOZ_ASSERT(NS_IsMainThread());
   NS_WARNING("The receiver page fails to become ready before timeout.");
@@ -808,19 +802,19 @@ PresentationResponderInfo::Notify(nsITimer* aTimer)
 
 // PromiseNativeHandler
 void
-PresentationResponderInfo::ResolvedCallback(JSContext* aCx,
+PresentationPresentingInfo::ResolvedCallback(JSContext* aCx,
                                             JS::Handle<JS::Value> aValue)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (NS_WARN_IF(!aValue.isObject())) {
-    ReplyError(NS_ERROR_NOT_AVAILABLE);
+    ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     return;
   }
 
   JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
   if (NS_WARN_IF(!obj)) {
-    ReplyError(NS_ERROR_NOT_AVAILABLE);
+    ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     return;
   }
 
@@ -828,20 +822,20 @@ PresentationResponderInfo::ResolvedCallback(JSContext* aCx,
   HTMLIFrameElement* frame = nullptr;
   nsresult rv = UNWRAP_OBJECT(HTMLIFrameElement, obj, frame);
   if (NS_WARN_IF(!frame)) {
-    ReplyError(NS_ERROR_NOT_AVAILABLE);
+    ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     return;
   }
 
   nsCOMPtr<nsIFrameLoaderOwner> owner = do_QueryInterface((nsIFrameLoaderOwner*) frame);
   if (NS_WARN_IF(!owner)) {
-    ReplyError(NS_ERROR_NOT_AVAILABLE);
+    ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     return;
   }
 
   nsCOMPtr<nsIFrameLoader> frameLoader;
   rv = owner->GetFrameLoader(getter_AddRefs(frameLoader));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ReplyError(rv);
+    ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     return;
   }
 
@@ -857,7 +851,7 @@ PresentationResponderInfo::ResolvedCallback(JSContext* aCx,
     nsCOMPtr<nsIDocShell> docShell;
     rv = frameLoader->GetDocShell(getter_AddRefs(docShell));
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      ReplyError(rv);
+      ReplyError(NS_ERROR_DOM_OPERATION_ERR);
       return;
     }
 
@@ -865,14 +859,14 @@ PresentationResponderInfo::ResolvedCallback(JSContext* aCx,
     mLoadingCallback = new PresentationResponderLoadingCallback(mSessionId);
     rv = mLoadingCallback->Init(docShell);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      ReplyError(rv);
+      ReplyError(NS_ERROR_DOM_OPERATION_ERR);
       return;
     }
   }
 }
 
 void
-PresentationResponderInfo::RejectedCallback(JSContext* aCx,
+PresentationPresentingInfo::RejectedCallback(JSContext* aCx,
                                             JS::Handle<JS::Value> aValue)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -883,5 +877,5 @@ PresentationResponderInfo::RejectedCallback(JSContext* aCx,
     mTimer = nullptr;
   }
 
-  ReplyError(NS_ERROR_DOM_ABORT_ERR);
+  ReplyError(NS_ERROR_DOM_OPERATION_ERR);
 }

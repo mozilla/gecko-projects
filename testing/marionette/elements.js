@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let {utils: Cu} = Components;
+var {utils: Cu} = Components;
 
 Cu.import("chrome://marionette/content/error.js");
 
@@ -98,7 +98,8 @@ Accessibility.prototype = {
   getAccessibleObject(element, mustHaveAccessible = false) {
     let acc = this.accessibleRetrieval.getAccessibleFor(element);
     if (!acc && mustHaveAccessible) {
-      this.handleErrorMessage('Element does not have an accessible object');
+      this.handleErrorMessage('Element does not have an accessible object',
+        element);
     }
     return acc;
   },
@@ -178,10 +179,14 @@ Accessibility.prototype = {
   /**
    * Send an error message or log the error message in the log
    * @param String message
+   * @param DOMElement element that caused an error
    */
-  handleErrorMessage(message) {
+  handleErrorMessage(message, element) {
     if (!message) {
       return;
+    }
+    if (element) {
+      message += ` -> id: ${element.id}, tagName: ${element.tagName}, className: ${element.className}\n`;
     }
     if (this.strict) {
       throw new ElementNotAccessibleError(message);
@@ -354,7 +359,7 @@ ElementManager.prototype = {
         }
         else if (val.nodeType == 1) {
           let elementId = this.addToKnownElements(val);
-          result = {'ELEMENT': elementId, 'element-6066-11e4-a52e-4f735466cecf': elementId};
+          result = {[this.elementKey]: elementId, [this.w3cElementKey]: elementId};
         }
         else {
           result = {};
@@ -512,12 +517,17 @@ ElementManager.prototype = {
       if (isArrayLike) {
         let ids = []
         for (let i = 0 ; i < found.length ; i++) {
-          ids.push({"ELEMENT": this.addToKnownElements(found[i])});
+          let foundElement = this.addToKnownElements(found[i]);
+          let returnElement = {
+            [this.elementKey] : foundElement,
+            [this.w3cElementKey] : foundElement,
+          };
+          ids.push(returnElement);
         }
         on_success(ids, command_id);
       } else {
         let id = this.addToKnownElements(found);
-        on_success({"ELEMENT": id}, command_id);
+        on_success({[this.elementKey]: id, [this.w3cElementKey]:id}, command_id);
       }
     }
   },
@@ -671,7 +681,7 @@ ElementManager.prototype = {
         break;
       case LINK_TEXT:
       case PARTIAL_LINK_TEXT:
-        let allLinks = rootNode.getElementsByTagName('A');
+        let allLinks = startNode.getElementsByTagName('A');
         for (let i = 0; i < allLinks.length; i++) {
           let text = allLinks[i].text;
           if (PARTIAL_LINK_TEXT == using) {

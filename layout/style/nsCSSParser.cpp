@@ -428,7 +428,7 @@ protected:
    * state (in a CSSParserInputState object), and it restores the parser to
    * that state when destructed, unless "DoNotRestore()" has been called.
   */
-  class MOZ_STACK_CLASS nsAutoCSSParserInputStateRestorer {
+  class MOZ_RAII nsAutoCSSParserInputStateRestorer {
     public:
       explicit nsAutoCSSParserInputStateRestorer(CSSParserImpl* aParser
                                                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -476,7 +476,7 @@ protected:
    * XXXdholbert we could also change this & report errors, if needed. Might
    * want to customize the error reporting somehow though.
    */
-  class MOZ_STACK_CLASS nsAutoScannerChanger {
+  class MOZ_RAII nsAutoScannerChanger {
     public:
       nsAutoScannerChanger(CSSParserImpl* aParser,
                            const nsAString& aStringToScan
@@ -2145,6 +2145,7 @@ SeparatorRequiredBetweenTokens(nsCSSTokenSerializationType aToken1,
              aToken2 == eCSSTokenSerialization_URange ||
              aToken2 == eCSSTokenSerialization_CDC;
     case eCSSTokenSerialization_Symbol_Hash:
+    case eCSSTokenSerialization_Symbol_Minus:
       return aToken2 == eCSSTokenSerialization_Ident ||
              aToken2 == eCSSTokenSerialization_Function ||
              aToken2 == eCSSTokenSerialization_URL_or_BadURL ||
@@ -2153,7 +2154,6 @@ SeparatorRequiredBetweenTokens(nsCSSTokenSerializationType aToken1,
              aToken2 == eCSSTokenSerialization_Percentage ||
              aToken2 == eCSSTokenSerialization_Dimension ||
              aToken2 == eCSSTokenSerialization_URange;
-    case eCSSTokenSerialization_Symbol_Minus:
     case eCSSTokenSerialization_Number:
       return aToken2 == eCSSTokenSerialization_Ident ||
              aToken2 == eCSSTokenSerialization_Function ||

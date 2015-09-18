@@ -9,7 +9,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FxAccounts.jsm");
 
-let fxAccountsCommon = {};
+var fxAccountsCommon = {};
 Cu.import("resource://gre/modules/FxAccountsCommon.js", fxAccountsCommon);
 
 // for master-password utilities
@@ -102,7 +102,7 @@ function updateDisplayedEmail(user) {
   }
 }
 
-let wrapper = {
+var wrapper = {
   iframe: null,
 
   init: function (url, urlParams) {
@@ -219,8 +219,8 @@ let wrapper = {
       // we need to tell the page we successfully received the message, but
       // then bail without telling fxAccounts
       this.injectData("message", { status: "login" });
-      // and re-init the page by navigating to about:accounts
-      window.location = "about:accounts";
+      // after a successful login we return to preferences
+      openPrefs();
       return;
     }
     delete accountData.verifiedCanLinkAccount;
@@ -333,7 +333,9 @@ function retry() {
 }
 
 function openPrefs() {
-  window.openPreferences("paneSync");
+  // Bug 1199303 calls for this tab to always be replaced with Preferences
+  // rather than it opening in a different tab.
+  window.location = "about:preferences#sync";
 }
 
 function init() {
@@ -511,8 +513,9 @@ function initObservers() {
       window.location = "about:accounts?action=signin";
       return;
     }
-    // must be onverified - just about:accounts is loaded.
-    window.location = "about:accounts";
+
+    // must be onverified - we want to open preferences.
+    openPrefs();
   }
 
   for (let topic of OBSERVER_TOPICS) {

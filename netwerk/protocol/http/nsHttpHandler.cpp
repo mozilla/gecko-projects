@@ -197,6 +197,7 @@ nsHttpHandler::nsHttpHandler()
     , mSpdySendingChunkSize(ASpdySession::kSendingChunkSize)
     , mSpdySendBufferSize(ASpdySession::kTCPSendBufferSize)
     , mSpdyPushAllowance(32768)
+    , mSpdyPullAllowance(ASpdySession::kInitialRwin)
     , mDefaultSpdyConcurrent(ASpdySession::kDefaultMaxConcurrent)
     , mSpdyPingThreshold(PR_SecondsToInterval(58))
     , mSpdyPingTimeout(PR_SecondsToInterval(8))
@@ -422,34 +423,40 @@ nsHttpHandler::AddStandardRequestHeaders(nsHttpHeaderArray *request)
     nsresult rv;
 
     // Add the "User-Agent" header
-    rv = request->SetHeader(nsHttp::User_Agent, UserAgent());
+    rv = request->SetHeader(nsHttp::User_Agent, UserAgent(),
+                            false, nsHttpHeaderArray::eVarietyDefault);
     if (NS_FAILED(rv)) return rv;
 
     // MIME based content negotiation lives!
     // Add the "Accept" header
-    rv = request->SetHeader(nsHttp::Accept, mAccept);
+    rv = request->SetHeader(nsHttp::Accept, mAccept,
+                            false, nsHttpHeaderArray::eVarietyDefault);
     if (NS_FAILED(rv)) return rv;
 
     // Add the "Accept-Language" header
     if (!mAcceptLanguages.IsEmpty()) {
         // Add the "Accept-Language" header
-        rv = request->SetHeader(nsHttp::Accept_Language, mAcceptLanguages);
+        rv = request->SetHeader(nsHttp::Accept_Language, mAcceptLanguages,
+                                false, nsHttpHeaderArray::eVarietyDefault);
         if (NS_FAILED(rv)) return rv;
     }
 
     // Add the "Accept-Encoding" header
-    rv = request->SetHeader(nsHttp::Accept_Encoding, mAcceptEncodings);
+    rv = request->SetHeader(nsHttp::Accept_Encoding, mAcceptEncodings,
+                            false, nsHttpHeaderArray::eVarietyDefault);
     if (NS_FAILED(rv)) return rv;
 
     // Add the "Do-Not-Track" header
     if (mDoNotTrackEnabled) {
-      rv = request->SetHeader(nsHttp::DoNotTrack, NS_LITERAL_CSTRING("1"));
+      rv = request->SetHeader(nsHttp::DoNotTrack, NS_LITERAL_CSTRING("1"),
+                              false, nsHttpHeaderArray::eVarietyDefault);
       if (NS_FAILED(rv)) return rv;
     }
 
     // add the "Send Hint" header
     if (mSafeHintEnabled || mParentalControlEnabled) {
-      rv = request->SetHeader(nsHttp::Prefer, NS_LITERAL_CSTRING("safe"));
+      rv = request->SetHeader(nsHttp::Prefer, NS_LITERAL_CSTRING("safe"),
+                              false, nsHttpHeaderArray::eVarietyDefault);
       if (NS_FAILED(rv)) return rv;
     }
     return NS_OK;
@@ -1306,6 +1313,14 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
             mSpdyPushAllowance =
                 static_cast<uint32_t>
                 (clamped(val, 1024, static_cast<int32_t>(ASpdySession::kInitialRwin)));
+        }
+    }
+
+    if (PREF_CHANGED(HTTP_PREF("spdy.pull-allowance"))) {
+        rv = prefs->GetIntPref(HTTP_PREF("spdy.pull-allowance"), &val);
+        if (NS_SUCCEEDED(rv)) {
+            mSpdyPullAllowance =
+                static_cast<uint32_t>(clamped(val, 1024, 0x7fffffff));
         }
     }
 

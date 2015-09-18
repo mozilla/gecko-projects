@@ -28,6 +28,7 @@
 #include "UnitTransforms.h"             // for ViewAs
 #include "gfxPrefs.h"                   // for gfxPrefs
 #include "OverscrollHandoffState.h"     // for OverscrollHandoffState
+#include "TaskThrottler.h"              // for TaskThrottler
 #include "TreeTraversal.h"              // for generic tree traveral algorithms
 #include "LayersLogging.h"              // for Stringify
 #include "Units.h"                      // for ParentlayerPixel
@@ -107,11 +108,18 @@ APZCTreeManager::~APZCTreeManager()
 }
 
 AsyncPanZoomController*
-APZCTreeManager::MakeAPZCInstance(uint64_t aLayersId,
-                                  GeckoContentController* aController)
+APZCTreeManager::NewAPZCInstance(uint64_t aLayersId,
+                                 GeckoContentController* aController,
+                                 TaskThrottler* aPaintThrottler)
 {
   return new AsyncPanZoomController(aLayersId, this, mInputQueue,
-    aController, AsyncPanZoomController::USE_GESTURE_DETECTOR);
+    aController, aPaintThrottler, AsyncPanZoomController::USE_GESTURE_DETECTOR);
+}
+
+TimeStamp
+APZCTreeManager::GetFrameTime()
+{
+  return TimeStamp::Now();
 }
 
 void
@@ -413,7 +421,17 @@ APZCTreeManager::PrepareNodeForLayer(const LayerMetricsWrapper& aLayer,
     // a destroyed APZC and so we need to throw that out and make a new one.
     bool newApzc = (apzc == nullptr || apzc->IsDestroyed());
     if (newApzc) {
-      apzc = MakeAPZCInstance(aLayersId, state->mController);
+      // Look up the paint throttler for this layers id, or create it if
+      // this is the first APZC for this layers id.
+      auto throttlerInsertResult = mPaintThrottlerMap.insert(
+          std::make_pair(aLayersId, nsRefPtr<TaskThrottler>()));
+      if (throttlerInsertResult.second) {
+        throttlerInsertResult.first->second = new TaskThrottler(
+            GetFrameTime(), TimeDuration::FromMilliseconds(500));
+      }
+
+      apzc = NewAPZCInstance(aLayersId, state->mController,
+                             throttlerInsertResult.first->second);
       apzc->SetCompositorParent(aState.mCompositor);
       if (state->mCrossProcessParent != nullptr) {
         apzc->ShareFrameMetricsAcrossProcesses();
@@ -1209,6 +1227,10 @@ TransformDisplacement(APZCTreeManager* aTreeManager,
                       AsyncPanZoomController* aTarget,
                       ParentLayerPoint& aStartPoint,
                       ParentLayerPoint& aEndPoint) {
+  if (aSource == aTarget) {
+    return true;
+  }
+
   // Convert start and end points to Screen coordinates.
   Matrix4x4 untransformToApzc = aTreeManager->GetScreenToApzcTransform(aSource).Inverse();
   ScreenPoint screenStart = TransformTo<ScreenPixel>(untransformToApzc, aStartPoint);
@@ -1228,10 +1250,10 @@ TransformDisplacement(APZCTreeManager* aTreeManager,
   return true;
 }
 
-bool
+void
 APZCTreeManager::DispatchScroll(AsyncPanZoomController* aPrev,
-                                ParentLayerPoint aStartPoint,
-                                ParentLayerPoint aEndPoint,
+                                ParentLayerPoint& aStartPoint,
+                                ParentLayerPoint& aEndPoint,
                                 OverscrollHandoffState& aOverscrollHandoffState)
 {
   const OverscrollHandoffChain& overscrollHandoffChain = aOverscrollHandoffState.mChain;
@@ -1241,34 +1263,39 @@ APZCTreeManager::DispatchScroll(AsyncPanZoomController* aPrev,
   // nothing more to scroll, so we ignore the rest of the pan gesture.
   if (overscrollHandoffChainIndex >= overscrollHandoffChain.Length()) {
     // Nothing more to scroll - ignore the rest of the pan gesture.
-    return false;
+    return;
   }
 
   next = overscrollHandoffChain.GetApzcAtIndex(overscrollHandoffChainIndex);
 
   if (next == nullptr || next->IsDestroyed()) {
-    return false;
+    return;
   }
 
   // Convert the start and end points from |aPrev|'s coordinate space to
-  // |next|'s coordinate space. Since |aPrev| may be the same as |next|
-  // (if |aPrev| is the APZC that is initiating the scroll and there is no
-  // scroll grabbing to grab the scroll from it), don't bother doing the
-  // transformations in that case.
-  if (next != aPrev) {
-    if (!TransformDisplacement(this, aPrev, next, aStartPoint, aEndPoint)) {
-      return false;
-    }
+  // |next|'s coordinate space.
+  if (!TransformDisplacement(this, aPrev, next, aStartPoint, aEndPoint)) {
+    return;
   }
 
   // Scroll |next|. If this causes overscroll, it will call DispatchScroll()
   // again with an incremented index.
-  return next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffState);
+  if (!next->AttemptScroll(aStartPoint, aEndPoint, aOverscrollHandoffState)) {
+    // Transform |aStartPoint| and |aEndPoint| (which now represent the
+    // portion of the displacement that wasn't consumed by APZCs later
+    // in the handoff chain) back into |aPrev|'s coordinate space. This
+    // allows the caller (which is |aPrev|) to interpret the unconsumed
+    // displacement in its own coordinate space, and make use of it
+    // (e.g. by going into overscroll).
+    if (!TransformDisplacement(this, next, aPrev, aStartPoint, aEndPoint)) {
+      NS_WARNING("Failed to untransform scroll points during dispatch");
+    }
+  }
 }
 
-bool
+void
 APZCTreeManager::DispatchFling(AsyncPanZoomController* aPrev,
-                               ParentLayerPoint aVelocity,
+                               ParentLayerPoint& aVelocity,
                                nsRefPtr<const OverscrollHandoffChain> aOverscrollHandoffChain,
                                bool aHandoff)
 {
@@ -1285,7 +1312,7 @@ APZCTreeManager::DispatchFling(AsyncPanZoomController* aPrev,
   // rather than (0, 0).
   ParentLayerPoint startPoint;  // (0, 0)
   ParentLayerPoint endPoint;
-  ParentLayerPoint transformedVelocity = aVelocity;
+  ParentLayerPoint usedTransformedVelocity = aVelocity;
 
   if (aHandoff) {
     startIndex = aOverscrollHandoffChain->IndexOf(aPrev) + 1;
@@ -1293,7 +1320,7 @@ APZCTreeManager::DispatchFling(AsyncPanZoomController* aPrev,
     // IndexOf will return aOverscrollHandoffChain->Length() if
     // |aPrev| is not found.
     if (startIndex >= aOverscrollHandoffChainLength) {
-      return false;
+      return;
     }
   } else {
     startIndex = 0;
@@ -1304,10 +1331,10 @@ APZCTreeManager::DispatchFling(AsyncPanZoomController* aPrev,
 
     // Make sure the apcz about to be handled can be handled
     if (current == nullptr || current->IsDestroyed()) {
-      return false;
+      return;
     }
 
-    endPoint = startPoint + transformedVelocity;
+    endPoint = startPoint + usedTransformedVelocity;
 
     // Only transform when current apcz can be transformed with previous
     if (startIndex > 0) {
@@ -1316,20 +1343,34 @@ APZCTreeManager::DispatchFling(AsyncPanZoomController* aPrev,
                             current,
                             startPoint,
                             endPoint)) {
-          return false;
+        return;
       }
     }
 
-    transformedVelocity = endPoint - startPoint;
+    ParentLayerPoint transformedVelocity = endPoint - startPoint;
+    usedTransformedVelocity = transformedVelocity;
 
-    if (current->AttemptFling(transformedVelocity,
+    if (current->AttemptFling(usedTransformedVelocity,
                               aOverscrollHandoffChain,
                               aHandoff)) {
-      return true;
+      if (IsZero(usedTransformedVelocity)) {
+        aVelocity = ParentLayerPoint();
+        return;
+      }
+
+      // Subtract the proportion of used velocity from aVelocity
+      if (!FuzzyEqualsAdditive(transformedVelocity.x,
+                               usedTransformedVelocity.x, COORDINATE_EPSILON)) {
+        aVelocity.x = aVelocity.x *
+          (usedTransformedVelocity.x / transformedVelocity.x);
+      }
+      if (!FuzzyEqualsAdditive(transformedVelocity.y,
+                               usedTransformedVelocity.y, COORDINATE_EPSILON)) {
+        aVelocity.y = aVelocity.y *
+          (usedTransformedVelocity.y / transformedVelocity.y);
+      }
     }
   }
-
-  return false;
 }
 
 bool

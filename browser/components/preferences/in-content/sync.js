@@ -29,7 +29,7 @@ const FXA_LOGIN_UNVERIFIED = 1;
 // We are logged in locally, but the server rejected our credentials.
 const FXA_LOGIN_FAILED = 2;
 
-let gSyncPane = {
+var gSyncPane = {
   prefArray: ["engine.bookmarks", "engine.passwords", "engine.prefs",
               "engine.tabs", "engine.history"],
 
@@ -607,10 +607,7 @@ let gSyncPane = {
     }
     params.set("entrypoint", entryPoint);
 
-    this.openContentInBrowser("about:accounts?" + params, {
-      replaceQueryString: true
-    });
-
+    this.replaceTabWithUrl("about:accounts?" + params);
   },
 
   /**
@@ -651,6 +648,17 @@ let gSyncPane = {
       return;
     }
     win.switchToTabHavingURI(url, true, options);
+  },
+
+  // Replace the current tab with the specified URL.
+  replaceTabWithUrl(url) {
+    // Get the <browser> element hosting us.
+    let browser = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                        .getInterface(Ci.nsIWebNavigation)
+                        .QueryInterface(Ci.nsIDocShell)
+                        .chromeEventHandler;
+    // And tell it to load our URL.
+    browser.loadURI(url);
   },
 
   openPrivacyPolicy: function(aEvent) {

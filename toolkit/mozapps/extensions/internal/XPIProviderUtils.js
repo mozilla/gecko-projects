@@ -33,7 +33,7 @@ const LOGGER_ID = "addons.xpi-utils";
 
 // Create a new logger for use by the Addons XPI Provider Utils
 // (Requires AddonManager.jsm)
-let logger = Log.repository.getLogger(LOGGER_ID);
+var logger = Log.repository.getLogger(LOGGER_ID);
 
 const KEY_PROFILEDIR                  = "ProfD";
 const FILE_DATABASE                   = "extensions.sqlite";
@@ -2118,8 +2118,10 @@ this.XPIDatabaseReconcile = {
       }
     }
 
-    // None of the active add-ons match the selected theme, enable the default.
-    if (!sawActiveTheme) {
+    // If a custom theme is selected and it wasn't seen in the new list of
+    // active add-ons then enable the default theme
+    if (XPIProvider.selectedSkin != XPIProvider.defaultSkin && !sawActiveTheme) {
+      logger.info("Didn't see selected skin " + XPIProvider.selectedSkin);
       XPIProvider.enableDefaultTheme();
     }
 

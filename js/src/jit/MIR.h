@@ -739,6 +739,10 @@ class MDefinition : public MNode
     // Like replaceAllUsesWith, but doesn't set UseRemoved on |this|'s operands.
     void justReplaceAllUsesWith(MDefinition* dom);
 
+    // Like justReplaceAllUsesWith, but doesn't replace its own use to the
+    // dominating instruction (which would introduce a circular dependency).
+    void justReplaceAllUsesWithExcept(MDefinition* dom);
+
     // Replace the current instruction by an optimized-out constant in all uses
     // of the current instruction. Note, that optimized-out constant should not
     // be observed, and thus they should not flow in any computation.
@@ -6115,6 +6119,8 @@ class MMathFunction
     void computeRange(TempAllocator& alloc) override;
     bool writeRecoverData(CompactBufferWriter& writer) const override;
     bool canRecoverOnBailout() const override {
+        if (input()->type() == MIRType_SinCosDouble)
+            return false;
         switch(function_) {
           case Sin:
           case Log:
@@ -6622,6 +6628,40 @@ class MFromCharCode
     ALLOW_CLONE(MFromCharCode)
 };
 
+class MSinCos
+  : public MUnaryInstruction,
+    public FloatingPointPolicy<0>::Data
+{
+    const MathCache* cache_;
+
+    MSinCos(MDefinition *input, const MathCache *cache) : MUnaryInstruction(input), cache_(cache)
+    {
+        setResultType(MIRType_SinCosDouble);
+        specialization_ = MIRType_Double;
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(SinCos)
+
+    static MSinCos *New(TempAllocator &alloc, MDefinition *input, const MathCache *cache)
+    {
+        return new (alloc) MSinCos(input, cache);
+    }
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
+    bool congruentTo(const MDefinition *ins) const override {
+        return congruentIfOperandsEqual(ins);
+    }
+    bool possiblyCalls() const override {
+        return true;
+    }
+    const MathCache* cache() const {
+        return cache_;
+    }
+};
+
 class MStringSplit
   : public MTernaryInstruction,
     public MixPolicy<StringPolicy<0>, StringPolicy<1> >::Data
@@ -6898,6 +6938,7 @@ class MPhi final
 
     MDefinition* foldsTo(TempAllocator& alloc) override;
     MDefinition* foldsTernary();
+    MDefinition* foldsFilterTypeSet();
 
     bool congruentTo(const MDefinition* ins) const override;
 

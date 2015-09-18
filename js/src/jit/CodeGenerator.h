@@ -242,6 +242,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitConcat(LConcat* lir);
     void visitCharCodeAt(LCharCodeAt* lir);
     void visitFromCharCode(LFromCharCode* lir);
+    void visitSinCos(LSinCos *lir);
     void visitStringSplit(LStringSplit* lir);
     void visitFunctionEnvironment(LFunctionEnvironment* lir);
     void visitCallGetProperty(LCallGetProperty* lir);
@@ -283,8 +284,6 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitAtomicIsLockFree(LAtomicIsLockFree* lir);
     void visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir);
     void visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir);
-    void visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop* lir);
-    void visitAtomicTypedArrayElementBinopForEffect(LAtomicTypedArrayElementBinopForEffect* lir);
     void visitClampIToUint8(LClampIToUint8* lir);
     void visitClampDToUint8(LClampDToUint8* lir);
     void visitClampVToUint8(LClampVToUint8* lir);

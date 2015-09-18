@@ -14,7 +14,7 @@ describe("loop.store.ConversationStore", function () {
   var sharedActions = loop.shared.actions;
   var sharedUtils = loop.shared.utils;
   var sandbox, dispatcher, client, store, fakeSessionData, sdkDriver;
-  var contact, fakeMozLoop, fakeVideoElement;
+  var contact, fakeMozLoop, fakeStreamElement;
   var connectPromise, resolveConnectPromise, rejectConnectPromise;
   var wsCancelSpy, wsCloseSpy, wsDeclineSpy, wsMediaUpSpy, fakeWebsocket;
 
@@ -95,7 +95,7 @@ describe("loop.store.ConversationStore", function () {
       progressURL: "fakeURL"
     };
 
-    fakeVideoElement = { id: "fakeVideoElement" };
+    fakeStreamElement = { id: "fakeStreamElement" };
 
     var dummySocket = {
       close: sinon.spy(),
@@ -955,52 +955,117 @@ describe("loop.store.ConversationStore", function () {
     });
   });
 
-  describe("#localVideoEnabled", function() {
-    it("should set store.localSrcVideoObject from the action data", function () {
-      store.localVideoEnabled(
-        new sharedActions.LocalVideoEnabled({srcVideoObject: fakeVideoElement}));
+  describe("#mediaStreamCreated", function() {
+    it("should add a local video object to the store", function() {
+      expect(store.getStoreState()).to.not.have.property("localSrcMediaElement");
 
-      expect(store.getStoreState("localSrcVideoObject")).eql(fakeVideoElement);
+      store.mediaStreamCreated(new sharedActions.MediaStreamCreated({
+        hasVideo: false,
+        isLocal: true,
+        srcMediaElement: fakeStreamElement
+      }));
+
+      expect(store.getStoreState().localSrcMediaElement).eql(fakeStreamElement);
+      expect(store.getStoreState()).to.not.have.property("remoteSrcMediaElement");
+    });
+
+    it("should set the local video enabled", function() {
+      store.setStoreState({
+        localVideoEnabled: false,
+        remoteVideoEnabled: false
+      });
+
+      store.mediaStreamCreated(new sharedActions.MediaStreamCreated({
+        hasVideo: true,
+        isLocal: true,
+        srcMediaElement: fakeStreamElement
+      }));
+
+      expect(store.getStoreState().localVideoEnabled).eql(true);
+      expect(store.getStoreState().remoteVideoEnabled).eql(false);
+    });
+
+    it("should add a remote video object to the store", function() {
+      expect(store.getStoreState()).to.not.have.property("remoteSrcMediaElement");
+
+      store.mediaStreamCreated(new sharedActions.MediaStreamCreated({
+        hasVideo: false,
+        isLocal: false,
+        srcMediaElement: fakeStreamElement
+      }));
+
+      expect(store.getStoreState()).not.have.property("localSrcMediaElement");
+      expect(store.getStoreState().remoteSrcMediaElement).eql(fakeStreamElement);
+    });
+
+    it("should set the remote video enabled", function() {
+      store.setStoreState({
+        localVideoEnabled: false,
+        remoteVideoEnabled: false
+      });
+
+      store.mediaStreamCreated(new sharedActions.MediaStreamCreated({
+        hasVideo: true,
+        isLocal: false,
+        srcMediaElement: fakeStreamElement
+      }));
+
+      expect(store.getStoreState().localVideoEnabled).eql(false);
+      expect(store.getStoreState().remoteVideoEnabled).eql(true);
     });
   });
 
-  describe("#remoteVideoEnabled", function() {
-    it("should set store.remoteSrcVideoObject from the actionData", function () {
-      store.setStoreState({remoteSrcVideoObject: undefined});
-
-      store.remoteVideoEnabled(
-        new sharedActions.RemoteVideoEnabled({srcVideoObject: fakeVideoElement}));
-
-      expect(store.getStoreState("remoteSrcVideoObject")).eql(fakeVideoElement);
+  describe("#mediaStreamDestroyed", function() {
+    beforeEach(function() {
+      store.setStoreState({
+        localSrcMediaElement: fakeStreamElement,
+        remoteSrcMediaElement: fakeStreamElement
+      });
     });
 
-    it("should set store.remoteVideoEnabled to true", function () {
-      store.setStoreState({remoteVideoEnabled: false});
+    it("should clear the local video object", function() {
+      store.mediaStreamDestroyed(new sharedActions.MediaStreamDestroyed({
+        isLocal: true
+      }));
 
-      store.remoteVideoEnabled(
-        new sharedActions.RemoteVideoEnabled({srcVideoObject: fakeVideoElement}));
+      expect(store.getStoreState().localSrcMediaElement).eql(null);
+      expect(store.getStoreState().remoteSrcMediaElement).eql(fakeStreamElement);
+    });
 
-      expect(store.getStoreState("remoteVideoEnabled")).to.be.true;
+    it("should clear the remote video object", function() {
+      store.mediaStreamDestroyed(new sharedActions.MediaStreamDestroyed({
+        isLocal: false
+      }));
+
+      expect(store.getStoreState().localSrcMediaElement).eql(fakeStreamElement);
+      expect(store.getStoreState().remoteSrcMediaElement).eql(null);
     });
   });
 
-  describe("#remoteVideoDisabled", function() {
-    it("should set store.remoteVideoEnabled to false", function () {
-      store.setStoreState({remoteVideoEnabled: true});
+  describe("#remoteVideoStatus", function() {
+    it("should set remoteVideoEnabled to true", function() {
+      store.setStoreState({
+        remoteVideoEnabled: false
+      });
 
-      store.remoteVideoDisabled(new sharedActions.RemoteVideoDisabled({}));
+      store.remoteVideoStatus(new sharedActions.RemoteVideoStatus({
+        videoEnabled: true
+      }));
 
-      expect(store.getStoreState("remoteVideoEnabled")).to.be.false;
+      expect(store.getStoreState().remoteVideoEnabled).eql(true);
     });
 
-    it("should set store.remoteSrcVideoObject to undefined", function () {
-      store.setStoreState({remoteSrcVideoObject: fakeVideoElement});
+    it("should set remoteVideoEnabled to false", function() {
+      store.setStoreState({
+        remoteVideoEnabled: true
+      });
 
-      store.remoteVideoDisabled(new sharedActions.RemoteVideoDisabled({}));
+      store.remoteVideoStatus(new sharedActions.RemoteVideoStatus({
+        videoEnabled: false
+      }));
 
-      expect(store.getStoreState("remoteSrcVideoObject")).to.be.undefined;
+      expect(store.getStoreState().remoteVideoEnabled).eql(false);
     });
-
   });
 
   describe("#setMute", function() {

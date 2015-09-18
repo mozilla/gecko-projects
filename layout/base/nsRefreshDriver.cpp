@@ -78,7 +78,6 @@ using namespace mozilla::layout;
 static PRLogModuleInfo *gLog = nullptr;
 #define LOG(...) MOZ_LOG(gLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
-#define DEFAULT_FRAME_RATE 60
 #define DEFAULT_THROTTLED_FRAME_RATE 1
 #define DEFAULT_RECOMPUTE_VISIBILITY_INTERVAL_MS 1000
 // after 10 minutes, stop firing off inactive timers
@@ -765,7 +764,7 @@ nsRefreshDriver::Shutdown()
 /* static */ int32_t
 nsRefreshDriver::DefaultInterval()
 {
-  return NSToIntRound(1000.0 / DEFAULT_FRAME_RATE);
+  return NSToIntRound(1000.0 / gfxPlatform::GetDefaultFrameRate());
 }
 
 // Compute the interval to use for the refresh driver timer, in milliseconds.
@@ -781,7 +780,7 @@ nsRefreshDriver::GetRegularTimerInterval(bool *outIsDefault) const
 {
   int32_t rate = Preferences::GetInt("layout.frame_rate", -1);
   if (rate < 0) {
-    rate = DEFAULT_FRAME_RATE;
+    rate = gfxPlatform::GetDefaultFrameRate();
     if (outIsDefault) {
       *outIsDefault = true;
     }
@@ -1320,44 +1319,32 @@ nsRefreshDriver::DispatchPendingEvents()
   }
 }
 
-namespace {
-  enum class AnimationEventType {
-    CSSAnimations,
-    CSSTransitions
-  };
-
-  struct DispatchAnimationEventParams {
-    AnimationEventType mEventType;
-    nsRefreshDriver* mRefreshDriver;
-  };
-}
-
 static bool
 DispatchAnimationEventsOnSubDocuments(nsIDocument* aDocument,
-                                      void* aParams)
+                                      void* aRefreshDriver)
 {
-  MOZ_ASSERT(aParams, "Animation event parameters should be set");
-  auto params = static_cast<DispatchAnimationEventParams*>(aParams);
-
   nsIPresShell* shell = aDocument->GetShell();
   if (!shell) {
     return true;
   }
 
   nsPresContext* context = shell->GetPresContext();
-  if (!context || context->RefreshDriver() != params->mRefreshDriver) {
+  if (!context || context->RefreshDriver() != aRefreshDriver) {
     return true;
   }
 
   nsCOMPtr<nsIDocument> kungFuDeathGrip(aDocument);
 
-  if (params->mEventType == AnimationEventType::CSSAnimations) {
-    context->AnimationManager()->DispatchEvents();
-  } else {
-    context->TransitionManager()->DispatchEvents();
-  }
+  context->TransitionManager()->SortEvents();
+  context->AnimationManager()->SortEvents();
+
+  // Dispatch transition events first since transitions conceptually sit
+  // below animations in terms of compositing order.
+  context->TransitionManager()->DispatchEvents();
+  context->AnimationManager()->DispatchEvents();
+
   aDocument->EnumerateSubDocuments(DispatchAnimationEventsOnSubDocuments,
-                                   aParams);
+                                   aRefreshDriver);
 
   return true;
 }
@@ -1369,19 +1356,7 @@ nsRefreshDriver::DispatchAnimationEvents()
     return;
   }
 
-  nsIDocument* doc = mPresContext->Document();
-
-  // Dispatch transition events first since transitions conceptually sit
-  // below animations in terms of compositing order.
-  DispatchAnimationEventParams params { AnimationEventType::CSSTransitions,
-                                        this };
-  DispatchAnimationEventsOnSubDocuments(doc, &params);
-  if (!mPresContext) {
-    return;
-  }
-
-  params.mEventType = AnimationEventType::CSSAnimations;
-  DispatchAnimationEventsOnSubDocuments(doc, &params);
+  DispatchAnimationEventsOnSubDocuments(mPresContext->Document(), this);
 }
 
 void

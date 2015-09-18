@@ -13,6 +13,7 @@
 #include "nsIDocument.h"
 #include "nsWrapperCache.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/LayerAnimationInfo.h" // LayerAnimations::kRecords
 #include "mozilla/StickyTimeDuration.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/TimeStamp.h"
@@ -199,14 +200,7 @@ public:
   KeyframeEffectReadOnly(nsIDocument* aDocument,
                          Element* aTarget,
                          nsCSSPseudoElements::Type aPseudoType,
-                         const AnimationTiming &aTiming)
-    : AnimationEffectReadOnly(aDocument)
-    , mTarget(aTarget)
-    , mTiming(aTiming)
-    , mPseudoType(aPseudoType)
-  {
-    MOZ_ASSERT(aTarget, "null animation target is not yet supported");
-  }
+                         const AnimationTiming& aTiming);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(KeyframeEffectReadOnly,
@@ -252,14 +246,6 @@ public:
   // FIXME: Drop |aOwningAnimation| once we make AnimationEffects track their
   // owning animation.
   void SetTiming(const AnimationTiming& aTiming, Animation& aOwningAnimtion);
-
-  // Return the duration from the start the active interval to the point where
-  // the animation begins playback. This is zero unless the animation has
-  // a negative delay in which case it is the absolute value of the delay.
-  // This is used for setting the elapsedTime member of CSS AnimationEvents.
-  TimeDuration InitialAdvance() const {
-    return std::max(TimeDuration(), mTiming.mDelay * -1);
-  }
 
   Nullable<TimeDuration> GetLocalTime() const {
     // Since the *animation* start time is currently always zero, the local
@@ -316,9 +302,12 @@ public:
   // Any updated properties are added to |aSetProperties|.
   void ComposeStyle(nsRefPtr<AnimValuesStyleRule>& aStyleRule,
                     nsCSSPropertySet& aSetProperties);
+  bool IsRunningOnCompositor() const;
+  void SetIsRunningOnCompositor(nsCSSProperty aProperty, bool aIsRunning);
 
 protected:
   virtual ~KeyframeEffectReadOnly() { }
+  void ResetIsRunningOnCompositor();
 
   nsCOMPtr<Element> mTarget;
   Nullable<TimeDuration> mParentTime;
@@ -327,6 +316,17 @@ protected:
   nsCSSPseudoElements::Type mPseudoType;
 
   InfallibleTArray<AnimationProperty> mProperties;
+
+  // Parallel array corresponding to CommonAnimationManager::sLayerAnimationInfo
+  // such that mIsPropertyRunningOnCompositor[x] is true only if this effect has
+  // an animation of CommonAnimationManager::sLayerAnimationInfo[x].mProperty
+  // that is currently running on the compositor.
+  //
+  // Note that when the owning Animation requests a non-throttled restyle, in
+  // between calling RequestRestyle on its AnimationCollection and when the
+  // restyle is performed, this member may temporarily become false even if
+  // the animation remains on the layer after the restyle.
+  bool mIsPropertyRunningOnCompositor[LayerAnimationInfo::kRecords];
 };
 
 } // namespace dom

@@ -47,6 +47,8 @@
 #include "SurfaceTexture.h"
 #include "GLContextProvider.h"
 
+#include "mozilla/dom/ContentChild.h"
+
 using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::jni;
@@ -55,6 +57,7 @@ using namespace mozilla::widget;
 AndroidBridge* AndroidBridge::sBridge = nullptr;
 pthread_t AndroidBridge::sJavaUiThread;
 static jobject sGlobalContext = nullptr;
+nsDataHashtable<nsStringHashKey, nsString> AndroidBridge::sStoragePaths;
 
 // This is a dummy class that can be used in the template for android::sp
 class AndroidRefable {
@@ -1479,25 +1482,27 @@ AndroidBridge::SyncViewportInfo(const LayerIntRect& aDisplayPort, const CSSToLay
     aFixedLayerMargins.left = viewTransform->FixedLayerMarginLeft();
 }
 
-void AndroidBridge::SyncFrameMetrics(const ParentLayerPoint& aScrollOffset, float aZoom, const CSSRect& aCssPageRect,
-                                     bool aLayersUpdated, const CSSRect& aDisplayPort, const CSSToLayerScale& aDisplayResolution,
-                                     bool aIsFirstPaint, ScreenMargin& aFixedLayerMargins)
+void AndroidBridge::SyncFrameMetrics(const ParentLayerPoint& aScrollOffset,
+                                     const CSSToParentLayerScale& aZoom,
+                                     const CSSRect& aCssPageRect,
+                                     const CSSRect& aDisplayPort,
+                                     const CSSToLayerScale& aPaintedResolution,
+                                     bool aLayersUpdated, int32_t aPaintSyncId,
+                                     ScreenMargin& aFixedLayerMargins)
 {
     if (!mLayerClient) {
         ALOG_BRIDGE("Exceptional Exit: %s", __PRETTY_FUNCTION__);
         return;
     }
 
-    // convert the displayport rect from scroll-relative CSS pixels to document-relative device pixels
-    LayerRect dpUnrounded = aDisplayPort * aDisplayResolution;
-    dpUnrounded += LayerPoint::FromUnknownPoint(aScrollOffset.ToUnknownPoint());
-    LayerIntRect dp = gfx::RoundedToInt(dpUnrounded);
-
+    // convert the displayport rect from document-relative CSS pixels to
+    // document-relative device pixels
+    LayerIntRect dp = gfx::RoundedToInt(aDisplayPort * aPaintedResolution);
     ViewTransform::LocalRef viewTransform = mLayerClient->SyncFrameMetrics(
-            aScrollOffset.x, aScrollOffset.y, aZoom,
+            aScrollOffset.x, aScrollOffset.y, aZoom.scale,
             aCssPageRect.x, aCssPageRect.y, aCssPageRect.XMost(), aCssPageRect.YMost(),
-            aLayersUpdated, dp.x, dp.y, dp.width, dp.height, aDisplayResolution.scale,
-            aIsFirstPaint);
+            dp.x, dp.y, dp.width, dp.height, aPaintedResolution.scale,
+            aLayersUpdated, aPaintSyncId);
 
     MOZ_ASSERT(viewTransform, "No view transform object!");
 
@@ -2119,6 +2124,30 @@ nsresult AndroidBridge::InputStreamRead(Object::Param obj, char *aBuf, uint32_t 
 }
 
 nsresult AndroidBridge::GetExternalPublicDirectory(const nsAString& aType, nsAString& aPath) {
+    if (XRE_IsContentProcess()) {
+        nsString key(aType);
+        nsAutoString path;
+        if (AndroidBridge::sStoragePaths.Get(key, &path)) {
+            aPath = path;
+            return NS_OK;
+        }
+
+        // Lazily get the value from the parent.
+        dom::ContentChild* child = dom::ContentChild::GetSingleton();
+        if (child) {
+          nsAutoString type(aType);
+          child->SendGetDeviceStorageLocation(type, &path);
+          if (!path.IsEmpty()) {
+            AndroidBridge::sStoragePaths.Put(key, path);
+            return NS_OK;
+          }
+        }
+
+        ALOG_BRIDGE("AndroidBridge::GetExternalPublicDirectory no cache for %s",
+              NS_ConvertUTF16toUTF8(aType).get());
+        return NS_ERROR_NOT_AVAILABLE;
+    }
+
     auto path = GeckoAppShell::GetExternalPublicDirectory(aType);
     if (!path) {
         return NS_ERROR_NOT_AVAILABLE;

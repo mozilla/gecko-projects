@@ -455,7 +455,7 @@ class ScriptCounts
 
     inline ScriptCounts();
     inline explicit ScriptCounts(PCCountsVector&& jumpTargets);
-    inline explicit ScriptCounts(ScriptCounts&& src);
+    inline ScriptCounts(ScriptCounts&& src);
     inline ~ScriptCounts();
 
     inline ScriptCounts& operator=(ScriptCounts&& src);
@@ -1639,6 +1639,8 @@ class JSScript : public js::gc::TenuredCell
     js::jit::IonScriptCounts* getIonCounts();
     void releaseScriptCounts(js::ScriptCounts* counts);
     void destroyScriptCounts(js::FreeOp* fop);
+    // The entry should be removed after using this function.
+    void takeOverScriptCountsMapEntry(js::ScriptCounts* entryValue);
 
     jsbytecode* main() {
         return code() + mainOffset();
@@ -2363,7 +2365,7 @@ struct ScriptAndCounts
     ScriptCounts scriptCounts;
 
     inline explicit ScriptAndCounts(JSScript* script);
-    inline explicit ScriptAndCounts(ScriptAndCounts&& sac);
+    inline ScriptAndCounts(ScriptAndCounts&& sac);
 
     const PCCounts* maybeGetPCCounts(jsbytecode* pc) const {
         return scriptCounts.maybeGetPCCounts(script->pcToOffset(pc));

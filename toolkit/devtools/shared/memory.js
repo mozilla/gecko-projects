@@ -28,7 +28,7 @@ loader.lazyRequireGetter(this, "HeapSnapshotFileUtils",
  * send information over RDP, and TimelineActor for using more light-weight
  * utilities like GC events and measuring memory consumption.
  */
-let Memory = exports.Memory = Class({
+var Memory = exports.Memory = Class({
   extends: EventTarget,
 
   /**
@@ -139,8 +139,7 @@ let Memory = exports.Memory = Class({
    * @returns {String} The snapshot id.
    */
   saveHeapSnapshot: expectState("attached", function () {
-    const path = HeapSnapshotFileUtils.getNewUniqueHeapSnapshotTempFilePath();
-    ThreadSafeChromeUtils.saveHeapSnapshot(path, { debugger: this.dbg });
+    const path = ThreadSafeChromeUtils.saveHeapSnapshot({ debugger: this.dbg });
     return HeapSnapshotFileUtils.getSnapshotIdFromPath(path);
   }, "saveHeapSnapshot"),
 

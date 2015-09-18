@@ -486,232 +486,6 @@ loop.shared.views = (function(_, mozL10n) {
   });
 
   /**
-   * Conversation view.
-   */
-  var ConversationView = React.createClass({displayName: "ConversationView",
-    mixins: [
-      Backbone.Events,
-      sharedMixins.AudioMixin,
-      sharedMixins.MediaSetupMixin
-    ],
-
-    propTypes: {
-      audio: React.PropTypes.object,
-      dispatcher: React.PropTypes.instanceOf(loop.Dispatcher).isRequired,
-      initiate: React.PropTypes.bool,
-      isDesktop: React.PropTypes.bool,
-      model: React.PropTypes.object.isRequired,
-      mozLoop: React.PropTypes.object,
-      sdk: React.PropTypes.object.isRequired,
-      video: React.PropTypes.object
-    },
-
-    getDefaultProps: function() {
-      return {
-        initiate: true,
-        isDesktop: false,
-        video: {enabled: true, visible: true},
-        audio: {enabled: true, visible: true}
-      };
-    },
-
-    getInitialState: function() {
-      return {
-        video: this.props.video,
-        audio: this.props.audio
-      };
-    },
-
-    componentDidMount: function() {
-      if (this.props.initiate) {
-        /**
-         * XXX This is a workaround for desktop machines that do not have a
-         * camera installed. As we don't yet have device enumeration, when
-         * we do, this can be removed (bug 1138851), and the sdk should handle it.
-         */
-        if (this.props.isDesktop &&
-            !window.MediaStreamTrack.getSources) {
-          // If there's no getSources function, the sdk defines its own and caches
-          // the result. So here we define the "normal" one which doesn't get cached, so
-          // we can change it later.
-          window.MediaStreamTrack.getSources = function(callback) {
-            callback([{kind: "audio"}, {kind: "video"}]);
-          };
-        }
-
-        this.listenTo(this.props.sdk, "exception", this._handleSdkException);
-
-        this.listenTo(this.props.model, "session:connected",
-                                        this._onSessionConnected);
-        this.listenTo(this.props.model, "session:stream-created",
-                                        this._streamCreated);
-        this.listenTo(this.props.model, ["session:peer-hungup",
-                                         "session:network-disconnected",
-                                         "session:ended"].join(" "),
-                                         this.stopPublishing);
-        this.props.model.startSession();
-      }
-    },
-
-    componentWillUnmount: function() {
-      // Unregister all local event listeners
-      this.stopListening();
-      this.hangup();
-    },
-
-    hangup: function() {
-      this.stopPublishing();
-      this.props.model.endSession();
-    },
-
-    _onSessionConnected: function(event) {
-      this.startPublishing(event);
-      this.play("connected");
-    },
-
-    /**
-     * Subscribes and attaches each created stream to a DOM element.
-     *
-     * XXX: for now we only support a single remote stream, hence a single DOM
-     *      element.
-     *
-     * http://tokbox.com/opentok/libraries/client/js/reference/StreamEvent.html
-     *
-     * @param  {StreamEvent} event
-     */
-    _streamCreated: function(event) {
-      var incoming = this.getDOMNode().querySelector(".remote");
-      this.props.model.subscribe(event.stream, incoming,
-        this.getDefaultPublisherConfig({
-          publishVideo: this.props.video.enabled
-        }));
-    },
-
-    /**
-     * Handles the SDK Exception event.
-     *
-     * https://tokbox.com/opentok/libraries/client/js/reference/ExceptionEvent.html
-     *
-     * @param {ExceptionEvent} event
-     */
-    _handleSdkException: function(event) {
-      /**
-       * XXX This is a workaround for desktop machines that do not have a
-       * camera installed. As we don't yet have device enumeration, when
-       * we do, this can be removed (bug 1138851), and the sdk should handle it.
-       */
-      if (this.publisher &&
-          event.code === OT.ExceptionCodes.UNABLE_TO_PUBLISH &&
-          event.message === "GetUserMedia" &&
-          this.state.video.enabled) {
-        this.state.video.enabled = false;
-
-        window.MediaStreamTrack.getSources = function(callback) {
-          callback([{kind: "audio"}]);
-        };
-
-        this.stopListening(this.publisher);
-        this.publisher.destroy();
-        this.startPublishing();
-      }
-    },
-
-    /**
-     * Publishes remote streams available once a session is connected.
-     *
-     * http://tokbox.com/opentok/libraries/client/js/reference/SessionConnectEvent.html
-     *
-     * @param  {SessionConnectEvent} event
-     */
-    startPublishing: function(event) {
-      var outgoing = this.getDOMNode().querySelector(".local");
-
-      // XXX move this into its StreamingVideo component?
-      this.publisher = this.props.sdk.initPublisher(
-        outgoing, this.getDefaultPublisherConfig({publishVideo: this.props.video.enabled}));
-
-      // Suppress OT GuM custom dialog, see bug 1018875
-      this.listenTo(this.publisher, "accessDialogOpened accessDenied",
-                    function(ev) {
-                      ev.preventDefault();
-                    });
-
-      this.listenTo(this.publisher, "streamCreated", function(ev) {
-        this.setState({
-          audio: {enabled: ev.stream.hasAudio},
-          video: {enabled: ev.stream.hasVideo}
-        });
-      });
-
-      this.listenTo(this.publisher, "streamDestroyed", function() {
-        this.setState({
-          audio: {enabled: false},
-          video: {enabled: false}
-        });
-      });
-
-      this.props.model.publish(this.publisher);
-    },
-
-    /**
-     * Toggles streaming status for a given stream type.
-     *
-     * @param  {String}  type     Stream type ("audio" or "video").
-     * @param  {Boolean} enabled  Enabled stream flag.
-     */
-    publishStream: function(type, enabled) {
-      if (type === "audio") {
-        this.publisher.publishAudio(enabled);
-        this.setState({audio: {enabled: enabled}});
-      } else {
-        this.publisher.publishVideo(enabled);
-        this.setState({video: {enabled: enabled}});
-      }
-    },
-
-    /**
-     * Unpublishes local stream.
-     */
-    stopPublishing: function() {
-      if (this.publisher) {
-        // Unregister listeners for publisher events
-        this.stopListening(this.publisher);
-
-        this.props.model.session.unpublish(this.publisher);
-      }
-    },
-
-    render: function() {
-      var localStreamClasses = React.addons.classSet({
-        local: true,
-        "local-stream": true,
-        "local-stream-audio": !this.state.video.enabled
-      });
-      return (
-        React.createElement("div", {className: "video-layout-wrapper"}, 
-          React.createElement("div", {className: "conversation in-call"}, 
-            React.createElement("div", {className: "media nested"}, 
-              React.createElement("div", {className: "video_wrapper remote_wrapper"}, 
-                React.createElement("div", {className: "video_inner remote focus-stream"}, 
-                  React.createElement(ConversationToolbar, {
-                    audio: this.state.audio, 
-                    dispatcher: this.props.dispatcher, 
-                    hangup: this.hangup, 
-                    mozLoop: this.props.mozLoop, 
-                    publishStream: this.publishStream, 
-                    video: this.state.video})
-                )
-              ), 
-              React.createElement("div", {className: localStreamClasses})
-
-            )
-          )
-        )
-      );
-    }
-  });
-
-  /**
    * Notification view.
    */
   var NotificationView = React.createClass({displayName: "NotificationView",
@@ -1075,7 +849,7 @@ loop.shared.views = (function(_, mozL10n) {
    * instead of the video, and attaching a video stream to the video element.
    */
   var MediaView = React.createClass({displayName: "MediaView",
-    // srcVideoObject should be ok for a shallow comparison, so we are safe
+    // srcMediaElement should be ok for a shallow comparison, so we are safe
     // to use the pure render mixin here.
     mixins: [React.addons.PureRenderMixin],
 
@@ -1085,18 +859,18 @@ loop.shared.views = (function(_, mozL10n) {
       mediaType: React.PropTypes.string.isRequired,
       posterUrl: React.PropTypes.string,
       // Expecting "local" or "remote".
-      srcVideoObject: React.PropTypes.object
+      srcMediaElement: React.PropTypes.object
     },
 
     componentDidMount: function() {
       if (!this.props.displayAvatar) {
-        this.attachVideo(this.props.srcVideoObject);
+        this.attachVideo(this.props.srcMediaElement);
       }
     },
 
     componentDidUpdate: function() {
       if (!this.props.displayAvatar) {
-        this.attachVideo(this.props.srcVideoObject);
+        this.attachVideo(this.props.srcMediaElement);
       }
     },
 
@@ -1104,14 +878,14 @@ loop.shared.views = (function(_, mozL10n) {
      * Attaches a video stream from a donor video element to this component's
      * video element if the component is displaying one.
      *
-     * @param {Object} srcVideoObject The src video object to clone the stream
+     * @param {Object} srcMediaElement The src video object to clone the stream
      *                                from.
      *
      * XXX need to have a corresponding detachVideo or change this to syncVideo
      * to protect from leaks (bug 1171978)
      */
-    attachVideo: function(srcVideoObject) {
-      if (!srcVideoObject) {
+    attachVideo: function(srcMediaElement) {
+      if (!srcMediaElement) {
         // Not got anything to display.
         return;
       }
@@ -1141,8 +915,8 @@ loop.shared.views = (function(_, mozL10n) {
       }
 
       // If the object hasn't changed it, then don't reattach it.
-      if (videoElement[attrName] !== srcVideoObject[attrName]) {
-        videoElement[attrName] = srcVideoObject[attrName];
+      if (videoElement[attrName] !== srcMediaElement[attrName]) {
+        videoElement[attrName] = srcMediaElement[attrName];
       }
       videoElement.play();
     },
@@ -1156,7 +930,7 @@ loop.shared.views = (function(_, mozL10n) {
         return React.createElement(AvatarView, null);
       }
 
-      if (!this.props.srcVideoObject && !this.props.posterUrl) {
+      if (!this.props.srcMediaElement && !this.props.posterUrl) {
         return React.createElement("div", {className: "no-video"});
       }
 
@@ -1192,16 +966,16 @@ loop.shared.views = (function(_, mozL10n) {
       isScreenShareLoading: React.PropTypes.bool.isRequired,
       // The poster URLs are for UI-showcase testing and development.
       localPosterUrl: React.PropTypes.string,
-      localSrcVideoObject: React.PropTypes.object,
+      localSrcMediaElement: React.PropTypes.object,
       localVideoMuted: React.PropTypes.bool.isRequired,
       // Passing in matchMedia, allows it to be overriden for ui-showcase's
       // benefit. We expect either the override or window.matchMedia.
       matchMedia: React.PropTypes.func.isRequired,
       remotePosterUrl: React.PropTypes.string,
-      remoteSrcVideoObject: React.PropTypes.object,
+      remoteSrcMediaElement: React.PropTypes.object,
       renderRemoteVideo: React.PropTypes.bool.isRequired,
+      screenShareMediaElement: React.PropTypes.object,
       screenSharePosterUrl: React.PropTypes.string,
-      screenShareVideoObject: React.PropTypes.object,
       showContextRoomName: React.PropTypes.bool.isRequired,
       useDesktopPaths: React.PropTypes.bool.isRequired
     },
@@ -1255,7 +1029,7 @@ loop.shared.views = (function(_, mozL10n) {
             isLoading: this.props.isLocalLoading, 
             mediaType: "local", 
             posterUrl: this.props.localPosterUrl, 
-            srcVideoObject: this.props.localSrcVideoObject})
+            srcMediaElement: this.props.localSrcMediaElement})
         )
       );
     },
@@ -1274,9 +1048,9 @@ loop.shared.views = (function(_, mozL10n) {
       var mediaWrapperClasses = React.addons.classSet({
         "media-wrapper": true,
         "receiving-screen-share": this.props.displayScreenShare,
-        "showing-local-streams": this.props.localSrcVideoObject ||
+        "showing-local-streams": this.props.localSrcMediaElement ||
           this.props.localPosterUrl,
-        "showing-remote-streams": this.props.remoteSrcVideoObject ||
+        "showing-remote-streams": this.props.remoteSrcMediaElement ||
           this.props.remotePosterUrl || this.props.isRemoteLoading
       });
 
@@ -1291,7 +1065,7 @@ loop.shared.views = (function(_, mozL10n) {
                 isLoading: this.props.isRemoteLoading, 
                 mediaType: "remote", 
                 posterUrl: this.props.remotePosterUrl, 
-                srcVideoObject: this.props.remoteSrcVideoObject}), 
+                srcMediaElement: this.props.remoteSrcMediaElement}), 
                this.state.localMediaAboslutelyPositioned ?
                 this.renderLocalVideo() : null, 
                this.props.children
@@ -1302,7 +1076,7 @@ loop.shared.views = (function(_, mozL10n) {
                 isLoading: this.props.isScreenShareLoading, 
                 mediaType: "screen-share", 
                 posterUrl: this.props.screenSharePosterUrl, 
-                srcVideoObject: this.props.screenShareVideoObject})
+                srcMediaElement: this.props.screenShareMediaElement})
             ), 
             React.createElement(loop.shared.views.chat.TextChatView, {
               dispatcher: this.props.dispatcher, 
@@ -1322,7 +1096,6 @@ loop.shared.views = (function(_, mozL10n) {
     ButtonGroup: ButtonGroup,
     Checkbox: Checkbox,
     ContextUrlView: ContextUrlView,
-    ConversationView: ConversationView,
     ConversationToolbar: ConversationToolbar,
     MediaControlButton: MediaControlButton,
     MediaLayoutView: MediaLayoutView,

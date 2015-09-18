@@ -35,7 +35,8 @@ public:
   {
     MutexAutoLock lock(mMutex);
     if (mStream) {
-      mLastOutputTime = mStream->StreamTimeToMicroseconds(mStream->GraphTimeToStreamTime(aCurrentTime));
+      mLastOutputTime = mStream->StreamTimeToMicroseconds(
+          mStream->GraphTimeToStreamTime(aCurrentTime));
     }
   }
 
@@ -86,14 +87,21 @@ private:
 };
 
 static void
-UpdateStreamBlocking(MediaStream* aStream, bool aBlocking)
+UpdateStreamSuspended(MediaStream* aStream, bool aBlocking)
 {
-  int32_t delta = aBlocking ? 1 : -1;
   if (NS_IsMainThread()) {
-    aStream->ChangeExplicitBlockerCount(delta);
+    if (aBlocking) {
+      aStream->Suspend();
+    } else {
+      aStream->Resume();
+    }
   } else {
-    nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethodWithArg<int32_t>(
-      aStream, &MediaStream::ChangeExplicitBlockerCount, delta);
+    nsCOMPtr<nsIRunnable> r;
+    if (aBlocking) {
+      r = NS_NewRunnableMethod(aStream, &MediaStream::Suspend);
+    } else {
+      r = NS_NewRunnableMethod(aStream, &MediaStream::Resume);
+    }
     AbstractThread::MainThread()->Dispatch(r.forget());
   }
 }
@@ -189,48 +197,13 @@ DecodedStreamData::SetPlaying(bool aPlaying)
 {
   if (mPlaying != aPlaying) {
     mPlaying = aPlaying;
-    UpdateStreamBlocking(mStream, !mPlaying);
+    UpdateStreamSuspended(mStream, !mPlaying);
   }
 }
-
-class OutputStreamListener : public MediaStreamListener {
-  typedef MediaStreamListener::MediaStreamGraphEvent MediaStreamGraphEvent;
-public:
-  explicit OutputStreamListener(OutputStreamData* aOwner) : mOwner(aOwner) {}
-
-  void NotifyEvent(MediaStreamGraph* aGraph, MediaStreamGraphEvent event) override
-  {
-    if (event == EVENT_FINISHED) {
-      nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(
-        this, &OutputStreamListener::DoNotifyFinished);
-      aGraph->DispatchToMainThreadAfterStreamStateUpdate(r.forget());
-    }
-  }
-
-  void Forget()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    mOwner = nullptr;
-  }
-
-private:
-  void DoNotifyFinished()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    if (mOwner) {
-      // Remove the finished stream so it won't block the decoded stream.
-      mOwner->Remove();
-    }
-  }
-
-  // Main thread only
-  OutputStreamData* mOwner;
-};
 
 OutputStreamData::~OutputStreamData()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  mListener->Forget();
   // Break the connection to the input stream if necessary.
   if (mPort) {
     mPort->Destroy();
@@ -242,8 +215,6 @@ OutputStreamData::Init(OutputStreamManager* aOwner, ProcessedMediaStream* aStrea
 {
   mOwner = aOwner;
   mStream = aStream;
-  mListener = new OutputStreamListener(this);
-  aStream->AddListener(mListener);
 }
 
 void
@@ -253,10 +224,7 @@ OutputStreamData::Connect(MediaStream* aStream)
   MOZ_ASSERT(!mPort, "Already connected?");
   MOZ_ASSERT(!mStream->IsDestroyed(), "Can't connect a destroyed stream.");
 
-  mPort = mStream->AllocateInputPort(aStream, 0);
-  // Unblock the output stream now. The input stream is responsible for
-  // controlling blocking from now on.
-  mStream->ChangeExplicitBlockerCount(-1);
+  mPort = mStream->AllocateInputPort(aStream);
 }
 
 bool
@@ -276,17 +244,7 @@ OutputStreamData::Disconnect()
     mPort->Destroy();
     mPort = nullptr;
   }
-  // Block the stream again. It will be unlocked when connecting
-  // to the input stream.
-  mStream->ChangeExplicitBlockerCount(1);
   return true;
-}
-
-void
-OutputStreamData::Remove()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  mOwner->Remove(mStream);
 }
 
 MediaStreamGraph*

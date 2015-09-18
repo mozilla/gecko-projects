@@ -954,6 +954,18 @@ public:
   static nsContentPolicyType InternalContentPolicyTypeToExternal(nsContentPolicyType aType);
 
   /**
+   * Map internal content policy types to external ones or script types:
+   *   * TYPE_INTERNAL_SCRIPT
+   *   * TYPE_INTERNAL_WORKER
+   *   * TYPE_INTERNAL_SHARED_WORKER
+   *   * TYPE_INTERNAL_SERVICE_WORKER
+   *
+   *
+   * Note: DO NOT call this function unless you know what you're doing!
+   */
+  static nsContentPolicyType InternalContentPolicyTypeToExternalOrScript(nsContentPolicyType aType);
+
+  /**
    * Quick helper to determine whether there are any mutation listeners
    * of a given type that apply to this content or any of its ancestors.
    * The method has the side effect to call document's MayDispatchMutationEvent
@@ -1365,38 +1377,6 @@ public:
    * FALSE.
    */
   static void NotifyInstalledMenuKeyboardListener(bool aInstalling);
-
-  /**
-   * Do security checks before loading a resource. Does the following checks:
-   *   nsIScriptSecurityManager::CheckLoadURIWithPrincipal
-   *   NS_CheckContentLoadPolicy
-   *   nsIScriptSecurityManager::CheckSameOriginURI
-   *
-   * You will still need to do at least SameOrigin checks before on redirects.
-   *
-   * @param aURIToLoad         URI that is getting loaded.
-   * @param aLoadingPrincipal  Principal of the resource that is initiating
-   *                           the load
-   * @param aCheckLoadFlags    Flags to be passed to
-   *                           nsIScriptSecurityManager::CheckLoadURIWithPrincipal
-   *                           NOTE: If this contains ALLOW_CHROME the
-   *                                 CheckSameOriginURI check will be skipped if
-   *                                 aURIToLoad is a chrome uri.
-   * @param aAllowData         Set to true to skip CheckSameOriginURI check when
-                               aURIToLoad is a data uri.
-   * @param aContentPolicyType Type     \
-   * @param aContext           Context   |- to be passed to
-   * @param aMimeGuess         Mimetype  |      NS_CheckContentLoadPolicy
-   * @param aExtra             Extra    /
-   */
-  static nsresult CheckSecurityBeforeLoad(nsIURI* aURIToLoad,
-                                          nsIPrincipal* aLoadingPrincipal,
-                                          uint32_t aCheckLoadFlags,
-                                          bool aAllowData,
-                                          uint32_t aContentPolicyType,
-                                          nsISupports* aContext,
-                                          const nsAFlatCString& aMimeGuess = EmptyCString(),
-                                          nsISupports* aExtra = nullptr);
 
   /**
    * Returns true if aPrincipal is the system principal.
@@ -1976,6 +1956,14 @@ public:
   }
 
   /*
+   * Returns true if ServiceWorker Interception is enabled by pref.
+   */
+  static bool ServiceWorkerInterceptionEnabled()
+  {
+    return sSWInterceptionEnabled;
+  }
+
+  /*
    * Returns true if the frame timing APIs are enabled.
    */
   static bool IsFrameTimingEnabled();
@@ -2014,6 +2002,11 @@ public:
    * control? This always returns false on MacOSX.
    */
   static bool HasPluginWithUncontrolledEventDispatch(nsIDocument* aDoc);
+
+  /**
+   * Return true if this doc is controlled by a ServiceWorker.
+   */
+  static bool IsControlledByServiceWorker(nsIDocument* aDocument);
 
   /**
    * Fire mutation events for changes caused by parsing directly into a
@@ -2627,6 +2620,7 @@ private:
   static bool sGettersDecodeURLHash;
   static bool sPrivacyResistFingerprinting;
   static bool sSendPerformanceTimingNotifications;
+  static bool sSWInterceptionEnabled;
   static uint32_t sCookiesLifetimePolicy;
   static uint32_t sCookiesBehavior;
 
@@ -2651,7 +2645,7 @@ private:
 #endif
 };
 
-class MOZ_STACK_CLASS nsAutoScriptBlocker {
+class MOZ_RAII nsAutoScriptBlocker {
 public:
   explicit nsAutoScriptBlocker(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;

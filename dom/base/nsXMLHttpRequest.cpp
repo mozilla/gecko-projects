@@ -13,6 +13,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/dom/BlobSet.h"
 #include "mozilla/dom/File.h"
+#include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
@@ -485,7 +486,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXMLHttpRequest,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContext)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChannel)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResponseXML)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCORSPreflightChannel)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mXMLParserStreamListener)
 
@@ -507,7 +507,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXMLHttpRequest,
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mContext)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChannel)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mResponseXML)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCORSPreflightChannel)
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mXMLParserStreamListener)
 
@@ -1209,9 +1208,6 @@ nsXMLHttpRequest::CloseRequestWithError(const nsAString& aType,
   if (mChannel) {
     mChannel->Cancel(NS_BINDING_ABORTED);
   }
-  if (mCORSPreflightChannel) {
-    mCORSPreflightChannel->Cancel(NS_BINDING_ABORTED);
-  }
   if (mTimeoutTimer) {
     mTimeoutTimer->Cancel();
   }
@@ -1617,31 +1613,10 @@ nsXMLHttpRequest::Open(const nsACString& inMethod, const nsACString& url,
 
   NS_ENSURE_TRUE(mPrincipal, NS_ERROR_NOT_INITIALIZED);
 
-  // Disallow HTTP/1.1 TRACE method (see bug 302489)
-  // and MS IIS equivalent TRACK (see bug 381264)
-  // and CONNECT
-  if (inMethod.LowerCaseEqualsLiteral("trace") ||
-      inMethod.LowerCaseEqualsLiteral("connect") ||
-      inMethod.LowerCaseEqualsLiteral("track")) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
-
   nsAutoCString method;
-  // GET, POST, DELETE, HEAD, OPTIONS, PUT methods normalized to upper case
-  if (inMethod.LowerCaseEqualsLiteral("get")) {
-    method.AssignLiteral("GET");
-  } else if (inMethod.LowerCaseEqualsLiteral("post")) {
-    method.AssignLiteral("POST");
-  } else if (inMethod.LowerCaseEqualsLiteral("delete")) {
-    method.AssignLiteral("DELETE");
-  } else if (inMethod.LowerCaseEqualsLiteral("head")) {
-    method.AssignLiteral("HEAD");
-  } else if (inMethod.LowerCaseEqualsLiteral("options")) {
-    method.AssignLiteral("OPTIONS");
-  } else if (inMethod.LowerCaseEqualsLiteral("put")) {
-    method.AssignLiteral("PUT");
-  } else {
-    method = inMethod; // other methods are not normalized
+  nsresult rv = FetchUtil::GetValidRequestMethod(inMethod, method);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
   // sync request is not allowed using withCredential or responseType
@@ -1662,7 +1637,6 @@ nsXMLHttpRequest::Open(const nsACString& inMethod, const nsACString& url,
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
 
-  nsresult rv;
   nsCOMPtr<nsIURI> uri;
 
   if (mState & (XML_HTTP_REQUEST_OPENED |
@@ -2368,7 +2342,6 @@ nsXMLHttpRequest::ChangeStateToDone()
     // methods/members will not throw.
     // This matches what IE does.
     mChannel = nullptr;
-    mCORSPreflightChannel = nullptr;
   }
 }
 
@@ -2912,36 +2885,33 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
     // Check to see if this initial OPTIONS request has already been cached
     // in our special Access Control Cache.
 
-    rv = NS_StartCORSPreflight(mChannel, listener,
-                               mPrincipal, withCredentials,
-                               mCORSUnsafeHeaders,
-                               getter_AddRefs(mCORSPreflightChannel));
+    rv = internalHttpChannel->SetCorsPreflightParameters(mCORSUnsafeHeaders,
+                                                         withCredentials, mPrincipal);
     NS_ENSURE_SUCCESS(rv, rv);
   }
-  else {
-    mIsMappedArrayBuffer = false;
-    if (mResponseType == XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER &&
-        Preferences::GetBool("dom.mapped_arraybuffer.enabled", false)) {
-      nsCOMPtr<nsIURI> uri;
-      nsAutoCString scheme;
 
-      rv = mChannel->GetURI(getter_AddRefs(uri));
-      if (NS_SUCCEEDED(rv)) {
-        uri->GetScheme(scheme);
-        if (scheme.LowerCaseEqualsLiteral("app") ||
-            scheme.LowerCaseEqualsLiteral("jar")) {
-          mIsMappedArrayBuffer = true;
-        }
+  mIsMappedArrayBuffer = false;
+  if (mResponseType == XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER &&
+      Preferences::GetBool("dom.mapped_arraybuffer.enabled", false)) {
+    nsCOMPtr<nsIURI> uri;
+    nsAutoCString scheme;
+
+    rv = mChannel->GetURI(getter_AddRefs(uri));
+    if (NS_SUCCEEDED(rv)) {
+      uri->GetScheme(scheme);
+      if (scheme.LowerCaseEqualsLiteral("app") ||
+          scheme.LowerCaseEqualsLiteral("jar")) {
+        mIsMappedArrayBuffer = true;
       }
     }
-    // Start reading from the channel
-    rv = mChannel->AsyncOpen(listener, nullptr);
   }
 
-  if (NS_FAILED(rv)) {
+  // Start reading from the channel
+  rv = mChannel->AsyncOpen(listener, nullptr);
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     // Drop our ref to the channel to avoid cycles
     mChannel = nullptr;
-    mCORSPreflightChannel = nullptr;
     return rv;
   }
 
@@ -3032,19 +3002,6 @@ nsXMLHttpRequest::SetRequestHeader(const nsACString& header,
   // Make sure we don't store an invalid header name in mCORSUnsafeHeaders
   if (!NS_IsValidHTTPToken(header)) {
     return NS_ERROR_DOM_SYNTAX_ERR;
-  }
-
-  // Check that we haven't already opened the channel. We can't rely on
-  // the channel throwing from mChannel->SetRequestHeader since we might
-  // still be waiting for mCORSPreflightChannel to actually open mChannel
-  if (mCORSPreflightChannel) {
-    bool pending;
-    nsresult rv = mCORSPreflightChannel->IsPending(&pending);
-    NS_ENSURE_SUCCESS(rv, rv);
-    
-    if (pending) {
-      return NS_ERROR_IN_PROGRESS;
-    }
   }
 
   if (!mChannel)             // open() initializes mChannel, and open()

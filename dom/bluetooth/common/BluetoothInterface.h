@@ -9,18 +9,35 @@
 
 #include "BluetoothCommon.h"
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
+#include "mozilla/ipc/DaemonSocketMessageHandlers.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
+
+//
+// Setup Interface
+//
+
+class BluetoothSetupResultHandler
+  : public mozilla::ipc::DaemonSocketResultHandler
+{
+public:
+  virtual void OnError(BluetoothStatus aStatus);
+  virtual void RegisterModule();
+  virtual void UnregisterModule();
+  virtual void Configuration();
+
+protected:
+  virtual ~BluetoothSetupResultHandler();
+};
 
 //
 // Socket Interface
 //
 
 class BluetoothSocketResultHandler
+  : public mozilla::ipc::DaemonSocketResultHandler
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BluetoothSocketResultHandler)
-
   virtual void OnError(BluetoothStatus aStatus)
   {
     BT_WARNING("Received error code %d", (int)aStatus);
@@ -155,10 +172,9 @@ protected:
 };
 
 class BluetoothHandsfreeResultHandler
+  : public mozilla::ipc::DaemonSocketResultHandler
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BluetoothHandsfreeResultHandler)
-
   virtual void OnError(BluetoothStatus aStatus)
   {
     BT_WARNING("Received error code %d", (int)aStatus);
@@ -303,10 +319,9 @@ protected:
 };
 
 class BluetoothA2dpResultHandler
+  : public mozilla::ipc::DaemonSocketResultHandler
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BluetoothA2dpResultHandler)
-
   virtual void OnError(BluetoothStatus aStatus)
   {
     BT_WARNING("Received error code %d", (int)aStatus);
@@ -406,10 +421,9 @@ protected:
 };
 
 class BluetoothAvrcpResultHandler
+  : public mozilla::ipc::DaemonSocketResultHandler
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BluetoothAvrcpResultHandler)
-
   virtual void OnError(BluetoothStatus aStatus)
   {
     BT_WARNING("Received error code %d", (int)aStatus);
@@ -720,10 +734,9 @@ protected:
 };
 
 class BluetoothGattResultHandler
+  : public mozilla::ipc::DaemonSocketResultHandler
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BluetoothGattResultHandler)
-
   virtual void OnError(BluetoothStatus aStatus)
   {
     BT_WARNING("Received error code %d", (int)aStatus);
@@ -1048,10 +1061,9 @@ protected:
 };
 
 class BluetoothResultHandler
+  : public mozilla::ipc::DaemonSocketResultHandler
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BluetoothResultHandler)
-
   virtual void OnError(BluetoothStatus aStatus)
   {
     BT_LOGR("Received error code %d", aStatus);

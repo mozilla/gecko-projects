@@ -53,7 +53,7 @@ function b2gStart() {
   webNav.loadURI(url, null, null, null, null);
 }
 
-let TabDestroyObserver = {
+var TabDestroyObserver = {
   outstanding: new Set(),
   promiseResolver: null,
 
@@ -479,6 +479,8 @@ Tester.prototype = {
       // for its own purposes, nulling it out it will go back to the default
       // behavior of returning the last opened popup.
       document.popupNode = null;
+
+      yield new Promise(resolve => SpecialPowers.flushPrefEnv(resolve));
 
       // Notify a long running test problem if it didn't end up in a timeout.
       if (this.currentTest.unexpectedTimeouts && !this.currentTest.timedOut) {

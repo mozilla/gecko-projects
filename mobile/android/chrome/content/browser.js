@@ -4,10 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-let Cc = Components.classes;
-let Ci = Components.interfaces;
-let Cu = Components.utils;
-let Cr = Components.results;
+var Cc = Components.classes;
+var Ci = Components.interfaces;
+var Cu = Components.utils;
+var Cr = Components.results;
 
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -118,7 +118,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "GMPInstallManager",
 
 XPCOMUtils.defineLazyModuleGetter(this, "ReaderMode", "resource://gre/modules/ReaderMode.jsm");
 
-let lazilyLoadedBrowserScripts = [
+var lazilyLoadedBrowserScripts = [
   ["SelectHelper", "chrome://browser/content/SelectHelper.js"],
   ["InputWidgetHelper", "chrome://browser/content/InputWidgetHelper.js"],
   ["MasterPassword", "chrome://browser/content/MasterPassword.js"],
@@ -143,7 +143,7 @@ lazilyLoadedBrowserScripts.forEach(function (aScript) {
   });
 });
 
-let lazilyLoadedObserverScripts = [
+var lazilyLoadedObserverScripts = [
   ["MemoryObserver", ["memory-pressure", "Memory:Dump"], "chrome://browser/content/MemoryObserver.js"],
   ["ConsoleAPI", ["console-api-log-event"], "chrome://browser/content/ConsoleAPI.js"],
   ["FindHelper", ["FindInPage:Opened", "FindInPage:Closed", "Tab:Selected"], "chrome://browser/content/FindHelper.js"],
@@ -355,7 +355,7 @@ function resolveGeckoURI(aURI) {
 /**
  * Cache of commonly used string bundles.
  */
-let Strings = {
+var Strings = {
   init: function () {
     XPCOMUtils.defineLazyGetter(Strings, "brand", () => Services.strings.createBundle("chrome://branding/locale/brand.properties"));
     XPCOMUtils.defineLazyGetter(Strings, "browser", () => Services.strings.createBundle("chrome://browser/locale/browser.properties"));
@@ -519,6 +519,10 @@ var BrowserApp = {
       Services.prefs.setIntPref("extensions.enabledScopes", 1);
       Services.prefs.setIntPref("extensions.autoDisableScopes", 1);
       Services.prefs.setBoolPref("xpinstall.enabled", false);
+    } else if (ParentalControls.parentalControlsEnabled) {
+      Services.prefs.clearUserPref("extensions.enabledScopes");
+      Services.prefs.clearUserPref("extensions.autoDisableScopes");
+      Services.prefs.setBoolPref("xpinstall.enabled", true);
     }
 
     try {
@@ -544,6 +548,16 @@ var BrowserApp = {
 
     if (AppConstants.ACCESSIBILITY) {
       InitLater(() => AccessFu.attach(window), window, "AccessFu");
+    }
+
+    if (!AppConstants.MOZ_ANDROID_NATIVE_ACCOUNT_UI) {
+      // We can't delay registering WebChannel listeners: if the first page is
+      // about:accounts, which can happen when starting the Firefox Account flow
+      // from the first run experience, or via the Firefox Account Status
+      // Activity, we can and do miss messages from the fxa-content-server.
+      console.log("browser.js: loading Firefox Accounts WebChannel");
+      Cu.import("resource://gre/modules/FxAccountsWebChannel.jsm");
+      EnsureFxAccountsWebChannel();
     }
 
     // Notify Java that Gecko has loaded.
@@ -3356,11 +3370,11 @@ nsBrowserAccess.prototype = {
 
 // track the last known screen size so that new tabs
 // get created with the right size rather than being 1x1
-let gScreenWidth = 1;
-let gScreenHeight = 1;
+var gScreenWidth = 1;
+var gScreenHeight = 1;
 
 // The URL where suggested tile clicks are posted.
-let gTilesReportURL = null;
+var gTilesReportURL = null;
 
 function Tab(aURL, aParams) {
   this.filter = null;
@@ -3742,6 +3756,12 @@ Tab.prototype = {
   },
 
   setViewport: function(aViewport) {
+    if (AppConstants.MOZ_ANDROID_APZ) {
+      // This should already be getting short-circuited out in GeckoLayerClient,
+      // but this is an extra safety precaution
+      return;
+    }
+
     // Transform coordinates based on zoom
     let x = aViewport.x / aViewport.zoom;
     let y = aViewport.y / aViewport.zoom;
@@ -3761,6 +3781,9 @@ Tab.prototype = {
   },
 
   setResolution: function(aZoom, aForce) {
+    if (AppConstants.MOZ_ANDROID_APZ) {
+      return;
+    }
     // Set zoom level
     if (aForce || !fuzzyEquals(aZoom, this._zoom)) {
       this._zoom = aZoom;
@@ -3834,6 +3857,9 @@ Tab.prototype = {
   },
 
   sendViewportUpdate: function(aPageSizeUpdate) {
+    if (AppConstants.MOZ_ANDROID_APZ) {
+      return;
+    }
     let viewport = this.getViewport();
     let displayPort = Services.androidBridge.getDisplayPort(aPageSizeUpdate, BrowserApp.isBrowserContentDocumentDisplayed(), this.id, viewport);
     if (displayPort != null)
@@ -5525,7 +5551,7 @@ var FormAssistant = {
  * An object to watch for Gecko status changes -- add-on installs, pref changes
  * -- and reflect them back to Java.
  */
-let HealthReportStatusListener = {
+var HealthReportStatusListener = {
   PREF_ACCEPT_LANG: "intl.accept_languages",
   PREF_BLOCKLIST_ENABLED: "extensions.blocklist.enabled",
 
@@ -6527,15 +6553,14 @@ var IdentityHandler = {
   },
 
   /**
-   * Return the eTLD+1 version of the current hostname
+   * Attempt to provide proper IDN treatment for host names
    */
   getEffectiveHost: function getEffectiveHost() {
     if (!this._IDNService)
       this._IDNService = Cc["@mozilla.org/network/idn-service;1"]
                          .getService(Ci.nsIIDNService);
     try {
-      let baseDomain = Services.eTLD.getBaseDomainFromHost(this._lastLocation.hostname);
-      return this._IDNService.convertToDisplayIDN(baseDomain, {});
+      return this._IDNService.convertToDisplayIDN(this._uri.host, {});
     } catch (e) {
       // If something goes wrong (e.g. hostname is an IP address) just fail back
       // to the full domain.

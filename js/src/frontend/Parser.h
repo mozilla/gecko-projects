@@ -358,7 +358,9 @@ enum class PropertyType {
     Normal,
     Shorthand,
     Getter,
+    GetterNoExpressionClosure,
     Setter,
+    SetterNoExpressionClosure,
     Method,
     GeneratorMethod,
     Constructor,
@@ -549,6 +551,8 @@ class Parser : private JS::AutoGCRooter, public StrictModeGetter
     }
 
     bool isUnexpectedEOF() const { return isUnexpectedEOF_; }
+
+    bool checkUnescapedName();
 
   private:
     Parser* thisForCtor() { return this; }

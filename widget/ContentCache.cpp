@@ -24,29 +24,6 @@ GetBoolName(bool aBool)
 }
 
 static const char*
-GetEventMessageName(EventMessage aMessage)
-{
-  switch (aMessage) {
-    case NS_COMPOSITION_START:
-      return "NS_COMPOSITION_START";
-    case NS_COMPOSITION_END:
-      return "NS_COMPOSITION_END";
-    case NS_COMPOSITION_UPDATE:
-      return "NS_COMPOSITION_UPDATE";
-    case NS_COMPOSITION_CHANGE:
-      return "NS_COMPOSITION_CHANGE";
-    case NS_COMPOSITION_COMMIT_AS_IS:
-      return "NS_COMPOSITION_COMMIT_AS_IS";
-    case NS_COMPOSITION_COMMIT:
-      return "NS_COMPOSITION_COMMIT";
-    case eSetSelection:
-      return "eSetSelection";
-    default:
-      return "unacceptable event message";
-  }
-}
-
-static const char*
 GetNotificationName(const IMENotification* aNotification)
 {
   if (!aNotification) {
@@ -302,7 +279,7 @@ ContentCacheInChild::QueryCharRect(nsIWidget* aWidget,
   aCharRect.SetEmpty();
 
   nsEventStatus status = nsEventStatus_eIgnore;
-  WidgetQueryContentEvent textRect(true, NS_QUERY_TEXT_RECT, aWidget);
+  WidgetQueryContentEvent textRect(true, eQueryTextRect, aWidget);
   textRect.InitForQueryTextRect(aOffset, 1);
   aWidget->DispatchEvent(&textRect, status);
   if (NS_WARN_IF(!textRect.mSucceeded)) {
@@ -394,7 +371,7 @@ ContentCacheInChild::CacheTextRects(nsIWidget* aWidget,
 
   if (!mSelection.Collapsed()) {
     nsEventStatus status = nsEventStatus_eIgnore;
-    WidgetQueryContentEvent textRect(true, NS_QUERY_TEXT_RECT, aWidget);
+    WidgetQueryContentEvent textRect(true, eQueryTextRect, aWidget);
     textRect.InitForQueryTextRect(mSelection.StartOffset(),
                                   mSelection.Length());
     aWidget->DispatchEvent(&textRect, status);
@@ -583,10 +560,10 @@ ContentCacheInParent::HandleQueryContentEvent(WidgetQueryContentEvent& aEvent,
          this, aEvent.mReply.mOffset, aEvent.mReply.mString.Length()));
       break;
     }
-    case NS_QUERY_TEXT_RECT:
+    case eQueryTextRect:
       MOZ_LOG(sContentCacheLog, LogLevel::Info,
         ("ContentCacheInParent: 0x%p HandleQueryContentEvent("
-         "aEvent={ mMessage=NS_QUERY_TEXT_RECT, mInput={ mOffset=%u, "
+         "aEvent={ mMessage=eQueryTextRect, mInput={ mOffset=%u, "
          "mLength=%u } }, aWidget=0x%p), mText.Length()=%u",
          this, aEvent.mInput.mOffset, aEvent.mInput.mLength, aWidget,
          mText.Length()));
@@ -851,14 +828,14 @@ ContentCacheInParent::OnCompositionEvent(const WidgetCompositionEvent& aEvent)
      "mMessage=%s, mData=\"%s\" (Length()=%u), mRanges->Length()=%u }), "
      "mPendingEventsNeedingAck=%u, mIsComposing=%s, "
      "mRequestedToCommitOrCancelComposition=%s",
-     this, GetEventMessageName(aEvent.mMessage),
+     this, ToChar(aEvent.mMessage),
      NS_ConvertUTF16toUTF8(aEvent.mData).get(), aEvent.mData.Length(),
      aEvent.mRanges ? aEvent.mRanges->Length() : 0, mPendingEventsNeedingAck,
      GetBoolName(mIsComposing),
      GetBoolName(mRequestedToCommitOrCancelComposition)));
 
   if (!aEvent.CausesDOMTextEvent()) {
-    MOZ_ASSERT(aEvent.mMessage == NS_COMPOSITION_START);
+    MOZ_ASSERT(aEvent.mMessage == eCompositionStart);
     mIsComposing = !aEvent.CausesDOMCompositionEndEvent();
     mCompositionStart = mSelection.StartOffset();
     // XXX What's this case??
@@ -875,7 +852,7 @@ ContentCacheInParent::OnCompositionEvent(const WidgetCompositionEvent& aEvent)
   //     TextComposition must handle following events correctly!
 
   // During REQUEST_TO_COMMIT_COMPOSITION or REQUEST_TO_CANCEL_COMPOSITION,
-  // widget usually sends a NS_COMPOSITION_CHANGE event to finalize or
+  // widget usually sends a eCompositionChange event to finalize or
   // clear the composition, respectively.
   // Because the event will not reach content in time, we intercept it
   // here and pass the text as the DidRequestToCommitOrCancelComposition()
@@ -905,7 +882,7 @@ ContentCacheInParent::OnSelectionEvent(
      "mMessage=%s, mOffset=%u, mLength=%u, mReversed=%s, "
      "mExpandToClusterBoundary=%s, mUseNativeLineBreak=%s }), "
      "mPendingEventsNeedingAck=%u, mIsComposing=%s",
-     this, GetEventMessageName(aSelectionEvent.mMessage),
+     this, ToChar(aSelectionEvent.mMessage),
      aSelectionEvent.mOffset, aSelectionEvent.mLength,
      GetBoolName(aSelectionEvent.mReversed),
      GetBoolName(aSelectionEvent.mExpandToClusterBoundary),
@@ -925,7 +902,7 @@ ContentCacheInParent::OnEventNeedingAckHandled(nsIWidget* aWidget,
   MOZ_LOG(sContentCacheLog, LogLevel::Info,
     ("ContentCacheInParent: 0x%p OnEventNeedingAckHandled(aWidget=0x%p, "
      "aMessage=%s), mPendingEventsNeedingAck=%u",
-     this, aWidget, GetEventMessageName(aMessage), mPendingEventsNeedingAck));
+     this, aWidget, ToChar(aMessage), mPendingEventsNeedingAck));
 
   MOZ_RELEASE_ASSERT(mPendingEventsNeedingAck > 0);
   if (--mPendingEventsNeedingAck) {

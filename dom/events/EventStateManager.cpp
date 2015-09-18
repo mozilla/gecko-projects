@@ -759,7 +759,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   case eContentCommandScroll:
     DoContentCommandScrollEvent(aEvent->AsContentCommandEvent());
     break;
-  case NS_COMPOSITION_START:
+  case eCompositionStart:
     if (aEvent->mFlags.mIsTrusted) {
       // If the event is trusted event, set the selected text to data of
       // composition event.
@@ -784,7 +784,7 @@ EventStateManager::HandleQueryContentEvent(WidgetQueryContentEvent* aEvent)
     case eQuerySelectedText:
     case eQueryTextContent:
     case eQueryCaretRect:
-    case NS_QUERY_TEXT_RECT:
+    case eQueryTextRect:
     case eQueryEditorRect:
       if (!IsTargetCrossProcess(aEvent)) {
         break;
@@ -1153,10 +1153,10 @@ CrossProcessSafeEvent(const WidgetEvent& aEvent)
     }
   case eTouchEventClass:
     switch (aEvent.mMessage) {
-    case NS_TOUCH_START:
-    case NS_TOUCH_MOVE:
-    case NS_TOUCH_END:
-    case NS_TOUCH_CANCEL:
+    case eTouchStart:
+    case eTouchMove:
+    case eTouchEnd:
+    case eTouchCancel:
       return true;
     default:
       return false;
@@ -1189,8 +1189,7 @@ EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
   //
   // NB: the elements of |targets| must be unique, for correctness.
   nsAutoTArray<nsCOMPtr<nsIContent>, 1> targets;
-  if (aEvent->mClass != eTouchEventClass ||
-      aEvent->mMessage == NS_TOUCH_START) {
+  if (aEvent->mClass != eTouchEventClass || aEvent->mMessage == eTouchStart) {
     // If this event only has one target, and it's remote, add it to
     // the array.
     nsIFrame* frame = GetEventTarget();
@@ -2563,7 +2562,7 @@ EventStateManager::DecideGestureEvent(WidgetGestureNotifyEvent* aEvent,
                                       nsIFrame* targetFrame)
 {
 
-  NS_ASSERTION(aEvent->mMessage == NS_GESTURENOTIFY_EVENT_START,
+  NS_ASSERTION(aEvent->mMessage == eGestureNotify,
                "DecideGestureEvent called with a non-gesture event");
 
   /* Check the ancestor tree to decide if any frame is willing* to receive
@@ -3133,7 +3132,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
     }
     break;
 
-  case NS_GESTURENOTIFY_EVENT_START:
+  case eGestureNotify:
     {
       if (nsEventStatus_eConsumeNoDefault != *aStatus) {
         DecideGestureEvent(aEvent->AsGestureNotifyEvent(), mCurrentTarget);

@@ -20,7 +20,7 @@ const xpcInspector = require("xpcInspector");
 const ScriptStore = require("./utils/ScriptStore");
 const { DevToolsWorker } = require("devtools/toolkit/shared/worker.js");
 
-const { defer, resolve, reject, all } = require("devtools/toolkit/deprecated-sync-thenables");
+const { defer, resolve, reject, all } = promise;
 
 loader.lazyGetter(this, "Debugger", () => {
   let Debugger = require("Debugger");
@@ -3729,7 +3729,7 @@ exports.AddonThreadActor = AddonThreadActor;
  * @param String aPrefix
  *        An optional prefix for the reported error message.
  */
-let oldReportError = reportError;
+var oldReportError = reportError;
 reportError = function(aError, aPrefix="") {
   dbg_assert(aError instanceof Error, "Must pass Error objects to reportError");
   let msg = aPrefix + aError.message + ":\n" + aError.stack;

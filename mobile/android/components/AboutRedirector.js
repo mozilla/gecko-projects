@@ -8,7 +8,7 @@ const Cu = Components.utils;
 Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-let modules = {
+var modules = {
   // about:
   "": {
     uri: "chrome://browser/content/about.xhtml",
@@ -36,7 +36,7 @@ let modules = {
   rights: {
     uri: AppConstants.MOZ_OFFICIAL_BRANDING ?
       "chrome://browser/content/aboutRights.xhtml" :
-      "chrome://global/content/aboutRights-unbranded.xhtml",
+      "chrome://global/content/aboutRights.xhtml",
     privileged: false
   },
   blocked: {

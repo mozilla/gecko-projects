@@ -67,10 +67,16 @@ const {
   HighlighterActor,
   CustomHighlighterActor,
   isTypeRegistered,
-} = require("devtools/server/actors/highlighter");
+} = require("devtools/server/actors/highlighters");
+const {
+  isAnonymous,
+  isNativeAnonymous,
+  isXBLAnonymous,
+  isShadowAnonymous,
+  getFrameElement
+} = require("devtools/toolkit/layout/utils");
 const {getLayoutChangesObserver, releaseLayoutChangesObserver} =
   require("devtools/server/actors/layout");
-const LayoutHelpers = require("devtools/toolkit/layout-helpers");
 
 const {EventParsers} = require("devtools/toolkit/event-parsers");
 
@@ -113,7 +119,7 @@ const PSEUDO_SELECTORS = [
   ["::selection", 0]
 ];
 
-let HELPER_SHEET = ".__fx-devtools-hide-shortcut__ { visibility: hidden !important } ";
+var HELPER_SHEET = ".__fx-devtools-hide-shortcut__ { visibility: hidden !important } ";
 HELPER_SHEET += ":-moz-devtools-highlighted { outline: 2px dashed #F06!important; outline-offset: -2px!important } ";
 
 loader.lazyRequireGetter(this, "DevToolsUtils",
@@ -224,6 +230,19 @@ var NodeActor = exports.NodeActor = protocol.ActorClass({
            this.rawNode.ownerDocument.documentElement === this.rawNode;
   },
 
+  destroy: function () {
+    protocol.Actor.prototype.destroy.call(this);
+
+    if (this.mutationObserver) {
+      if (!Cu.isDeadWrapper(this.mutationObserver)) {
+        this.mutationObserver.disconnect();
+      }
+      this.mutationObserver = null;
+    }
+    this.rawNode = null;
+    this.walker = null;
+  },
+
   // Returns the JSON representation of this object over the wire.
   form: function(detail) {
     if (detail === "actorid") {
@@ -251,10 +270,10 @@ var NodeActor = exports.NodeActor = protocol.ActorClass({
       attrs: this.writeAttrs(),
       isBeforePseudoElement: this.isBeforePseudoElement,
       isAfterPseudoElement: this.isAfterPseudoElement,
-      isAnonymous: LayoutHelpers.isAnonymous(this.rawNode),
-      isNativeAnonymous: LayoutHelpers.isNativeAnonymous(this.rawNode),
-      isXBLAnonymous: LayoutHelpers.isXBLAnonymous(this.rawNode),
-      isShadowAnonymous: LayoutHelpers.isShadowAnonymous(this.rawNode),
+      isAnonymous: isAnonymous(this.rawNode),
+      isNativeAnonymous: isNativeAnonymous(this.rawNode),
+      isXBLAnonymous: isXBLAnonymous(this.rawNode),
+      isShadowAnonymous: isShadowAnonymous(this.rawNode),
       pseudoClassLocks: this.writePseudoClassLocks(),
 
       isDisplayed: this.isDisplayed,
@@ -294,6 +313,25 @@ var NodeActor = exports.NodeActor = protocol.ActorClass({
     });
 
     return form;
+  },
+
+  /**
+   * Watch the given document node for mutations using the DOM observer
+   * API.
+   */
+  watchDocument: function(callback) {
+    let node = this.rawNode;
+    // Create the observer on the node's actor.  The node will make sure
+    // the observer is cleaned up when the actor is released.
+    let observer = new node.defaultView.MutationObserver(callback);
+    observer.mergeAttributeRecords = true;
+    observer.observe(node, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true
+    });
+    this.mutationObserver = observer;
   },
 
   get isBeforePseudoElement() {
@@ -726,7 +764,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClass({
  * the parent node from clients, but the `children` request should be used
  * to traverse children.
  */
-let NodeFront = protocol.FrontClass(NodeActor, {
+var NodeFront = protocol.FrontClass(NodeActor, {
   initialize: function(conn, form, detail, ctx) {
     this._parent = null; // The parent node
     this._child = null;  // The first child of this node.
@@ -741,12 +779,6 @@ let NodeFront = protocol.FrontClass(NodeActor, {
    * is being destroyed.
    */
   destroy: function() {
-    // If an observer was added on this node, shut it down.
-    if (this.observer) {
-      this.observer.disconnect();
-      this.observer = null;
-    }
-
     protocol.Front.prototype.destroy.call(this);
   },
 
@@ -1193,7 +1225,7 @@ var NodeListFront = exports.NodeListFront = protocol.FrontClass(NodeListActor, {
 
 // Some common request/response templates for the dom walker
 
-let nodeArrayMethod = {
+var nodeArrayMethod = {
   request: {
     node: Arg(0, "domnode"),
     maxNodes: Option(1),
@@ -1206,7 +1238,7 @@ let nodeArrayMethod = {
   }))
 };
 
-let traversalMethod = {
+var traversalMethod = {
   request: {
     node: Arg(0, "domnode"),
     whatToShow: Option(1)
@@ -1264,8 +1296,6 @@ var WalkerActor = protocol.ActorClass({
     this._activePseudoClassLocks = new Set();
     this.showAllAnonymousContent = options.showAllAnonymousContent;
 
-    this.layoutHelpers = new LayoutHelpers(this.rootWin);
-
     // Nodes which have been removed from the client's known
     // ownership tree are considered "orphaned", and stored in
     // this set.
@@ -1319,24 +1349,44 @@ var WalkerActor = protocol.ActorClass({
   },
 
   destroy: function() {
+    if (this._destroyed) {
+      return;
+    }
+    this._destroyed = true;
+    protocol.Actor.prototype.destroy.call(this);
     try {
-      this._destroyed = true;
-
       this.clearPseudoClassLocks();
       this._activePseudoClassLocks = null;
 
       this._hoveredNode = null;
+      this.rootWin = null;
       this.rootDoc = null;
+      this.rootNode = null;
+      this.layoutHelpers = null;
+      this._orphaned = null;
+      this._retainedOrphans = null;
+      this._refMap = null;
+
+      events.off(this.tabActor, "will-navigate", this.onFrameUnload);
+      events.off(this.tabActor, "navigate", this.onFrameLoad);
+
+      this.onFrameLoad = null;
+      this.onFrameUnload = null;
 
       this.reflowObserver.off("reflows", this._onReflows);
       this.reflowObserver = null;
+      this._onReflows = null;
       releaseLayoutChangesObserver(this.tabActor);
+
+      this.onMutations = null;
+
+      this.tabActor = null;
 
       events.emit(this, "destroyed");
     } catch(e) {
       console.error(e);
     }
-    protocol.Actor.prototype.destroy.call(this);
+
   },
 
   release: method(function() {}, { release: true }),
@@ -1368,7 +1418,7 @@ var WalkerActor = protocol.ActorClass({
     this._refMap.set(node, actor);
 
     if (node.nodeType === Ci.nsIDOMNode.DOCUMENT_NODE) {
-      this._watchDocument(actor);
+      actor.watchDocument(this.onMutations);
     }
     return actor;
   },
@@ -1445,7 +1495,7 @@ var WalkerActor = protocol.ActorClass({
         // If an anonymous node was passed in and we aren't supposed to know
         // about it, then consult with the document walker as the source of
         // truth about which elements exist.
-        if (!this.showAllAnonymousContent && LayoutHelpers.isAnonymous(node)) {
+        if (!this.showAllAnonymousContent && isAnonymous(node)) {
           node = this.getDocumentWalker(node).currentNode;
         }
 
@@ -1462,24 +1512,6 @@ var WalkerActor = protocol.ActorClass({
       nodes: nodeActors,
       newParents: [...newParents]
     };
-  },
-
-  /**
-   * Watch the given document node for mutations using the DOM observer
-   * API.
-   */
-  _watchDocument: function(actor) {
-    let node = actor.rawNode;
-    // Create the observer on the node's actor.  The node will make sure
-    // the observer is cleaned up when the actor is released.
-    actor.observer = new actor.rawNode.defaultView.MutationObserver(this.onMutations);
-    actor.observer.mergeAttributeRecords = true;
-    actor.observer.observe(node, {
-      attributes: true,
-      characterData: true,
-      childList: true,
-      subtree: true
-    });
   },
 
   /**
@@ -2850,7 +2882,7 @@ var WalkerActor = protocol.ActorClass({
       });
       return;
     }
-    let frame = this.layoutHelpers.getFrameElement(window);
+    let frame = getFrameElement(window);
     let frameActor = this._refMap.get(frame);
     if (!frameActor) {
       return;
@@ -2877,7 +2909,7 @@ var WalkerActor = protocol.ActorClass({
       if (win === window) {
         return true;
       }
-      win = this.layoutHelpers.getFrameElement(win);
+      win = getFrameElement(win);
     }
     return false;
   },
@@ -3507,6 +3539,11 @@ var InspectorActor = exports.InspectorActor = protocol.ActorClass({
 
   destroy: function () {
     protocol.Actor.prototype.destroy.call(this);
+    this._highlighterPromise = null;
+    this._pageStylePromise = null;
+    this._walkerPromise = null;
+    this.walker = null;
+    this.tabActor = null;
   },
 
   // Forces destruction of the actor and all its children
@@ -3562,7 +3599,9 @@ var InspectorActor = exports.InspectorActor = protocol.ActorClass({
     }
 
     this._pageStylePromise = this.getWalker().then(walker => {
-      return PageStyleActor(this);
+      let pageStyle = PageStyleActor(this);
+      this.manage(pageStyle);
+      return pageStyle;
     });
     return this._pageStylePromise;
   }, {
@@ -3871,8 +3910,8 @@ function standardTreeWalkerFilter(aNode) {
   }
 
   // Ignore all native and XBL anonymous content inside a non-XUL document
-  if (!isInXULDocument(aNode) && (LayoutHelpers.isXBLAnonymous(aNode) ||
-                                  LayoutHelpers.isNativeAnonymous(aNode))) {
+  if (!isInXULDocument(aNode) && (isXBLAnonymous(aNode) ||
+                                  isNativeAnonymous(aNode))) {
     // Note: this will skip inspecting the contents of feedSubscribeLine since
     // that's XUL content injected in an HTML document, but we need to because
     // this also skips many other elements that need to be skipped - like form
@@ -3962,7 +4001,7 @@ function ensureImageLoaded(image, timeout) {
  *
  * If something goes wrong, the promise is rejected.
  */
-let imageToImageData = Task.async(function* (node, maxDim) {
+var imageToImageData = Task.async(function* (node, maxDim) {
   let { HTMLCanvasElement, HTMLImageElement } = node.ownerDocument.defaultView;
 
   let isImg = node instanceof HTMLImageElement;

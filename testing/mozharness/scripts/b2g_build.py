@@ -37,6 +37,7 @@ from mozharness.base.python import VirtualenvMixin
 from mozharness.base.python import InfluxRecordingMixin
 from mozharness.mozilla.building.buildbase import MakeUploadOutputParser
 from mozharness.mozilla.building.buildb2gbase import B2GBuildBaseScript, B2GMakefileErrorList
+from mozharness.base.script import PostScriptRun
 
 
 class B2GBuild(LocalesMixin, PurgeMixin,
@@ -540,6 +541,18 @@ class B2GBuild(LocalesMixin, PurgeMixin,
             cmd.append(target)
         return cmd
 
+    def symlink_gtk3(self):
+        dirs = self.query_abs_dirs()
+        gtk3_path = os.path.join(dirs['abs_work_dir'], 'gtk3')
+        gtk3_symlink_path = os.path.join(dirs['abs_work_dir'], 'gecko', 'gtk3')
+
+        if os.path.isdir(gtk3_path):
+            cmd = ["ln", "-s", gtk3_path, gtk3_symlink_path]
+            retval = self.run_command(cmd)
+            if retval != 0:
+                self.error("failed to create symlink")
+                self.return_code = 2
+
     def build(self):
         dirs = self.query_abs_dirs()
         gecko_config = self.load_gecko_config()
@@ -549,7 +562,14 @@ class B2GBuild(LocalesMixin, PurgeMixin,
             cmds = [self.generate_build_command()]
         else:
             cmds = [self.generate_build_command(t) for t in build_targets]
+
+        self.symlink_gtk3()
         env = self.query_build_env()
+        env['LD_LIBRARY_PATH'] = os.environ.get('LD_LIBRARY_PATH')
+        if env['LD_LIBRARY_PATH'] is None:
+            env['LD_LIBRARY_PATH'] = os.path.join(dirs['abs_work_dir'], 'gecko', 'gtk3', 'usr', 'local', 'lib')
+        else:
+            env['LD_LIBRARY_PATH'] += ':%s' % os.path.join(dirs['abs_work_dir'], 'gecko', 'gtk3', 'usr', 'local', 'lib')
         if self.config.get('gaia_languages_file'):
             env['LOCALE_BASEDIR'] = dirs['gaia_l10n_base_dir']
             env['LOCALES_FILE'] = os.path.join(dirs['abs_work_dir'], 'gaia', self.config['gaia_languages_file'])
@@ -1110,6 +1130,13 @@ class B2GBuild(LocalesMixin, PurgeMixin,
         self.set_buildbot_property("isOSUpdate", self.isOSUpdate)
 
         self.submit_balrog_updates(product='b2g')
+
+    @PostScriptRun
+    def _remove_userconfig(self):
+        self.info("Cleanup .userconfig file.")
+        dirs = self.query_abs_dirs()
+        userconfig_path = os.path.join(dirs["work_dir"], ".userconfig")
+        os.remove(userconfig_path)
 
 # main {{{1
 if __name__ == '__main__':

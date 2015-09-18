@@ -535,19 +535,6 @@ GetDisplayAttrStr(const TF_DISPLAYATTRIBUTE& aDispAttr)
 }
 
 static const char*
-GetEventMessageName(uint32_t aMessage)
-{
-  switch (aMessage) {
-    case eMouseDown:
-      return "eMouseDown";
-    case eMouseUp:
-      return "eMouseUp";
-    default:
-      return "Unknown";
-  }
-}
-
-static const char*
 GetMouseButtonName(int16_t aButton)
 {
   switch (aButton) {
@@ -814,11 +801,19 @@ public:
   // Note that TIP name may depend on the language of the environment.
   // For example, some TIP may use localized name for its target language
   // environment but English name for the others.
-  bool IsGoogleJapaneseInputActive() const
+
+  bool IsMSJapaneseIMEActive() const
   {
-    return mActiveTIPKeyboardDescription.Equals(
-             NS_LITERAL_STRING("Google \x65E5\x672C\x8A9E\x5165\x529B")) ||
-           mActiveTIPKeyboardDescription.EqualsLiteral("Google Japanese Input");
+    // FYI: Name of MS-IME for Japanese is same as MS-IME for Korean.
+    //      Therefore, we need to check the langid too.
+    return mLangID == 0x411 &&
+      (mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft IME") ||
+       mActiveTIPKeyboardDescription.Equals(
+         NS_LITERAL_STRING("Microsoft \xC785\xB825\xAE30")) ||
+       mActiveTIPKeyboardDescription.Equals(
+         NS_LITERAL_STRING("\x5FAE\x8F6F\x8F93\x5165\x6CD5")) ||
+       mActiveTIPKeyboardDescription.Equals(
+         NS_LITERAL_STRING("\x5FAE\x8EDF\x8F38\x5165\x6CD5")));
   }
 
   bool IsATOKActive() const
@@ -910,6 +905,8 @@ private:
   // Cookie of installing ITfActiveLanguageProfileNotifySink
   DWORD mLangProfileCookie;
 
+  LANGID mLangID;
+
   // True if current IME is implemented with IMM.
   bool mIsIMM_IME;
   // True if OnActivated() is already called
@@ -930,6 +927,7 @@ StaticRefPtr<TSFStaticSink> TSFStaticSink::sInstance;
 TSFStaticSink::TSFStaticSink()
   : mIPProfileCookie(TF_INVALID_COOKIE)
   , mLangProfileCookie(TF_INVALID_COOKIE)
+  , mLangID(0)
   , mIsIMM_IME(false)
   , mOnActivatedCalled(false)
 {
@@ -1048,14 +1046,13 @@ TSFStaticSink::OnActivated(REFCLSID clsid, REFGUID guidProfile,
     mOnActivatedCalled = true;
     mIsIMM_IME = IsIMM_IME(::GetKeyboardLayout(0));
 
-    LANGID langID;
-    HRESULT hr = mInputProcessorProfiles->GetCurrentLanguage(&langID);
+    HRESULT hr = mInputProcessorProfiles->GetCurrentLanguage(&mLangID);
     if (FAILED(hr)) {
       MOZ_LOG(sTextStoreLog, LogLevel::Error,
              ("TSF: TSFStaticSink::OnActivated() FAILED due to "
               "GetCurrentLanguage() failure, hr=0x%08X", hr));
-    } else if (IsTIPCategoryKeyboard(clsid, langID, guidProfile)) {
-      GetTIPDescription(clsid, langID, guidProfile,
+    } else if (IsTIPCategoryKeyboard(clsid, mLangID, guidProfile)) {
+      GetTIPDescription(clsid, mLangID, guidProfile,
                         mActiveTIPKeyboardDescription);
     } else if (clsid == CLSID_NULL || guidProfile == GUID_NULL) {
       // Perhaps, this case is that keyboard layout without TIP is activated.
@@ -1089,8 +1086,9 @@ TSFStaticSink::OnActivated(DWORD dwProfileType,
       (dwProfileType == TF_PROFILETYPE_KEYBOARDLAYOUT ||
        catid == GUID_TFCAT_TIP_KEYBOARD)) {
     mOnActivatedCalled = true;
+    mLangID = langid;
     mIsIMM_IME = IsIMM_IME(hkl);
-    GetTIPDescription(rclsid, langid, guidProfile,
+    GetTIPDescription(rclsid, mLangID, guidProfile,
                       mActiveTIPKeyboardDescription);
   }
   MOZ_LOG(sTextStoreLog, LogLevel::Info,
@@ -1285,8 +1283,8 @@ bool TSFTextStore::sDoNotReturnNoLayoutErrorToMSSimplifiedTIP = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToMSTraditionalTIP = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToFreeChangJie = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToEasyChangjei = false;
-bool TSFTextStore::sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar = false;
-bool TSFTextStore::sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret = false;
+bool TSFTextStore::sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar = false;
+bool TSFTextStore::sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret = false;
 bool TSFTextStore::sHackQueryInsertForMSSimplifiedTIP = false;
 bool TSFTextStore::sHackQueryInsertForMSTraditionalTIP = false;
 
@@ -1705,10 +1703,10 @@ TSFTextStore::FlushPendingActions()
         MOZ_LOG(sTextStoreLog, LogLevel::Debug,
                ("TSF: 0x%p   TSFTextStore::FlushPendingActions() "
                 "dispatching compositionstart event...", this));
-        WidgetCompositionEvent compositionStart(true, NS_COMPOSITION_START,
+        WidgetCompositionEvent compositionStart(true, eCompositionStart,
                                                 mWidget);
         mWidget->InitEvent(compositionStart);
-        // NS_COMPOSITION_START always causes NOTIFY_IME_OF_COMPOSITION_UPDATE.
+        // eCompositionStart always causes NOTIFY_IME_OF_COMPOSITION_UPDATE.
         // Therefore, we should wait to clear the locked content until it's
         // notified.
         mDeferClearingLockedContent = true;
@@ -1763,7 +1761,7 @@ TSFTextStore::FlushPendingActions()
         MOZ_LOG(sTextStoreLog, LogLevel::Debug,
                ("TSF: 0x%p   TSFTextStore::FlushPendingActions(), "
                 "dispatching compositionchange event...", this));
-        WidgetCompositionEvent compositionChange(true, NS_COMPOSITION_CHANGE,
+        WidgetCompositionEvent compositionChange(true, eCompositionChange,
                                                  mWidget);
         mWidget->InitEvent(compositionChange);
         compositionChange.mData = action.mData;
@@ -1775,7 +1773,7 @@ TSFTextStore::FlushPendingActions()
           action.mRanges->AppendElement(wholeRange);
         }
         compositionChange.mRanges = action.mRanges;
-        // When the NS_COMPOSITION_CHANGE causes a DOM text event,
+        // When the eCompositionChange causes a DOM text event,
         // the IME will be notified of NOTIFY_IME_OF_COMPOSITION_UPDATE.  In
         // such case, we should not clear the locked content until we notify
         // the IME of the composition update.
@@ -1798,11 +1796,11 @@ TSFTextStore::FlushPendingActions()
         MOZ_LOG(sTextStoreLog, LogLevel::Debug,
                ("TSF: 0x%p   TSFTextStore::FlushPendingActions(), "
                 "dispatching compositioncommit event...", this));
-        WidgetCompositionEvent compositionCommit(true, NS_COMPOSITION_COMMIT,
+        WidgetCompositionEvent compositionCommit(true, eCompositionCommit,
                                                  mWidget);
         mWidget->InitEvent(compositionCommit);
         compositionCommit.mData = action.mData;
-        // When the NS_COMPOSITION_COMMIT causes a DOM text event,
+        // When the eCompositionCommit causes a DOM text event,
         // the IME will be notified of NOTIFY_IME_OF_COMPOSITION_UPDATE.  In
         // such case, we should not clear the locked content until we notify
         // the IME of the composition update.
@@ -2476,7 +2474,7 @@ TSFTextStore::RecordCompositionUpdateAction()
   // the attribute, we have to find out all the ranges that have distinct
   // attribute values. Then we query for what the value represents through
   // the display attribute manager and translate that to TextRange to be
-  // sent in NS_COMPOSITION_CHANGE
+  // sent in eCompositionChange
 
   nsRefPtr<ITfProperty> attrPropetry;
   HRESULT hr = mContext->GetProperty(GUID_PROP_ATTRIBUTE,
@@ -2525,7 +2523,7 @@ TSFTextStore::RecordCompositionUpdateAction()
 
   TextRange newRange;
   // No matter if we have display attribute info or not,
-  // we always pass in at least one range to NS_COMPOSITION_CHANGE
+  // we always pass in at least one range to eCompositionChange
   newRange.mStartOffset = 0;
   newRange.mEndOffset = action->mData.Length();
   newRange.mRangeType = NS_TEXTRANGE_RAWINPUT;
@@ -3424,7 +3422,7 @@ TSFTextStore::GetACPFromPoint(TsViewCookie vcView,
     // offset since there is no inexpensive API to check it strictly.
     // XXX If we retrieve 2 bounding boxes, one is before the offset and
     //     the other is after the offset, we could resolve the offset.
-    //     However, dispatching 2 NS_QUERY_TEXT_RECT may be expensive.
+    //     However, dispatching 2 eQueryTextRect may be expensive.
 
     // So, use tentative offset for now.
     offset = charAtPt.mReply.mTentativeCaretOffset;
@@ -3509,39 +3507,41 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
   if (mComposition.IsComposing() && mComposition.mStart < acpEnd &&
       mLockedContent.IsLayoutChangedAfter(acpEnd)) {
     const Selection& currentSel = CurrentSelection();
-    if ((sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar ||
-         sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret) &&
-        kSink->IsGoogleJapaneseInputActive()) {
-      // Google Japanese Input doesn't handle ITfContextView::GetTextExt()
-      // properly due to the same bug of TSF mentioned above.  Google Japanese
-      // Input calls this twice for the first character of changing range of
-      // composition string and the caret which is typically at the end of
-      // composition string.  The formar is used for showing candidate window.
-      // This is typically shown at wrong position.  We should avoid only this
-      // case. This is not necessary on Windows 10.
-      if (sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar &&
-          !mLockedContent.IsLayoutChangedAfter(acpStart) &&
-          acpStart < acpEnd) {
-        acpEnd = acpStart;
-        MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-               ("TSF: 0x%p   TSFTextStore::GetTextExt() hacked the offsets of "
-                "the first character of changing range of the composition "
-                "string for TIP acpStart=%d, acpEnd=%d",
-                this, acpStart, acpEnd));
-      }
-      // Google Japanese Input sometimes uses caret position for deciding its
-      // candidate window position. In such case, we should return the previous
-      // offset of selected clause. However, it's difficult to get where is
-      // selected clause for now.  Instead, we should use the first character
-      // which is modified. This is useful in most cases.
-      else if (sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret &&
-               acpStart == acpEnd &&
-               currentSel.IsCollapsed() && currentSel.EndOffset() == acpEnd) {
-        acpEnd = acpStart = mLockedContent.MinOffsetOfLayoutChanged();
-        MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-               ("TSF: 0x%p   TSFTextStore::GetTextExt() hacked the offsets of "
-                "the caret of the composition string for TIP acpStart=%d, "
-                "acpEnd=%d", this, acpStart, acpEnd));
+    if ((sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar ||
+         sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret) &&
+        kSink->IsMSJapaneseIMEActive()) {
+      // MS IME for Japanese doesn't support asynchronous handling at deciding
+      // its suggest list window position.  The feature was implemented
+      // starting from Windows 8.
+      if (IsWin8OrLater()) {
+        // Basically, MS-IME tries to retrieve whole composition string rect
+        // at deciding suggest window immediately after unlocking the document.
+        // However, in e10s mode, the content hasn't updated yet in most cases.
+        // Therefore, if the first character at the retrieving range rect is
+        // available, we should use it as the result.
+        if (sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar &&
+            !mLockedContent.IsLayoutChangedAfter(acpStart) &&
+            acpStart < acpEnd) {
+          acpEnd = acpStart;
+          MOZ_LOG(sTextStoreLog, LogLevel::Debug,
+                 ("TSF: 0x%p   TSFTextStore::GetTextExt() hacked the offsets "
+                  "of the first character of changing range of the composition "
+                  "string for TIP acpStart=%d, acpEnd=%d",
+                  this, acpStart, acpEnd));
+        }
+        // Although, the condition is not clear, MS-IME sometimes retrieves the
+        // caret rect immediately after modifying the composition string but
+        // before unlocking the document.  In such case, we should return the
+        // nearest character rect.
+        else if (sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret &&
+                 acpStart == acpEnd &&
+                 currentSel.IsCollapsed() && currentSel.EndOffset() == acpEnd) {
+          acpEnd = acpStart = mLockedContent.MinOffsetOfLayoutChanged();
+          MOZ_LOG(sTextStoreLog, LogLevel::Debug,
+                 ("TSF: 0x%p   TSFTextStore::GetTextExt() hacked the offsets "
+                  "of the caret of the composition string for TIP acpStart=%d, "
+                  "acpEnd=%d", this, acpStart, acpEnd));
+        }
       }
     }
     // Free ChangJie 2010 and Easy Changjei 1.0.12.0 doesn't handle
@@ -3583,15 +3583,15 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
     return TS_E_NOLAYOUT;
   }
 
-  // use NS_QUERY_TEXT_RECT to get rect in system, screen coordinates
-  WidgetQueryContentEvent event(true, NS_QUERY_TEXT_RECT, mWidget);
+  // use eQueryTextRect to get rect in system, screen coordinates
+  WidgetQueryContentEvent event(true, eQueryTextRect, mWidget);
   mWidget->InitEvent(event);
   event.InitForQueryTextRect(acpStart, acpEnd - acpStart);
   DispatchEvent(event);
   if (!event.mSucceeded) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
            ("TSF: 0x%p   TSFTextStore::GetTextExt() FAILED due to "
-            "NS_QUERY_TEXT_RECT failure", this));
+            "eQueryTextRect failure", this));
     return TS_E_INVALIDPOS; // but unexpected failure, maybe.
   }
   // IMEs don't like empty rects, fix here
@@ -4744,8 +4744,7 @@ TSFTextStore::OnMouseButtonEventInternal(
           "aIMENotification={ mEventMessage=%s, mOffset=%u, mCursorPos={ "
           "mX=%d, mY=%d }, mCharRect={ mX=%d, mY=%d, mWidth=%d, mHeight=%d }, "
           "mButton=%s, mButtons=%s, mModifiers=%s })",
-          this, GetEventMessageName(
-                  aIMENotification.mMouseButtonEventData.mEventMessage),
+          this, ToChar(aIMENotification.mMouseButtonEventData.mEventMessage),
           aIMENotification.mMouseButtonEventData.mOffset,
           aIMENotification.mMouseButtonEventData.mCursorPos.mX,
           aIMENotification.mMouseButtonEventData.mCursorPos.mY,
@@ -5240,13 +5239,13 @@ TSFTextStore::Initialize()
   sDoNotReturnNoLayoutErrorToEasyChangjei =
     Preferences::GetBool(
       "intl.tsf.hack.easy_changjei.do_not_return_no_layout_error", true);
-  sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar =
+  sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar =
     Preferences::GetBool(
-      "intl.tsf.hack.google_ja_input."
-        "do_not_return_no_layout_error_at_first_char", true);
-  sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret =
+      "intl.tsf.hack.ms_japanese_ime."
+      "do_not_return_no_layout_error_at_first_char", true);
+  sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret =
     Preferences::GetBool(
-      "intl.tsf.hack.google_ja_input.do_not_return_no_layout_error_at_caret",
+      "intl.tsf.hack.ms_japanese_ime.do_not_return_no_layout_error_at_caret",
       true);
   sHackQueryInsertForMSSimplifiedTIP =
     Preferences::GetBool(
@@ -5262,15 +5261,15 @@ TSFTextStore::Initialize()
      "sCreateNativeCaretForATOK=%s, "
      "sDoNotReturnNoLayoutErrorToFreeChangJie=%s, "
      "sDoNotReturnNoLayoutErrorToEasyChangjei=%s, "
-     "sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar=%s, "
-     "sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret=%s",
+     "sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar=%s, "
+     "sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret=%s",
      sThreadMgr.get(), sClientId, sDisplayAttrMgr.get(),
      sCategoryMgr.get(), sDisabledDocumentMgr.get(), sDisabledContext.get(),
      GetBoolName(sCreateNativeCaretForATOK),
      GetBoolName(sDoNotReturnNoLayoutErrorToFreeChangJie),
      GetBoolName(sDoNotReturnNoLayoutErrorToEasyChangjei),
-     GetBoolName(sDoNotReturnNoLayoutErrorToGoogleJaInputAtFirstChar),
-     GetBoolName(sDoNotReturnNoLayoutErrorToGoogleJaInputAtCaret)));
+     GetBoolName(sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar),
+     GetBoolName(sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret)));
 }
 
 // static
@@ -5435,8 +5434,8 @@ TSFTextStore::Content::ReplaceTextWith(LONG aStart,
     if (mComposition.IsComposing()) {
       // Emulate text insertion during compositions, because during a
       // composition, editor expects the whole composition string to
-      // be sent in NS_COMPOSITION_CHANGE, not just the inserted part.
-      // The actual NS_COMPOSITION_CHANGE will be sent in SetSelection
+      // be sent in eCompositionChange, not just the inserted part.
+      // The actual eCompositionChange will be sent in SetSelection
       // or OnUpdateComposition.
       MOZ_ASSERT(aStart >= mComposition.mStart);
       MOZ_ASSERT(aStart + aLength <= mComposition.EndOffset());

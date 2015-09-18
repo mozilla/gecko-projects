@@ -121,7 +121,8 @@ struct Token
     {
         NoException,
 
-        // After |yield| we look for a token on the same line that starts an
+        // Used in following 2 cases:
+        // a) After |yield| we look for a token on the same line that starts an
         // expression (Operand): |yield <expr>|.  If no token is found, the
         // |yield| stands alone, and the next token on a subsequent line must
         // be: a comma continuing a comma expression, a semicolon terminating
@@ -129,6 +130,19 @@ struct Token
         // statement (possibly an expression statement).  The comma/semicolon
         // cases are gotten as operators (None), contrasting with Operand
         // earlier.
+        // b) After an arrow function with a block body in an expression
+        // statement, the next token must be: a colon in a conditional
+        // expression, a comma continuing a comma expression, a semicolon
+        // terminating the statement, or the token on a subsequent line that is
+        // the start of another statement (possibly an expression statement).
+        // Colon is gotten as operator (None), and it should only be gotten in
+        // conditional expression and missing it results in SyntaxError.
+        // Comma/semicolon cases are also gotten as operators (None), and 4th
+        // case is gotten after them.  If no comma/semicolon found but EOL,
+        // the next token should be gotten as operand in 4th case (especially if
+        // '/' is the first character).  So we should peek the token as
+        // operand before try getting colon/comma/semicolon.
+        // See also the comment in Parser::assignExpr().
         NoneIsOperand,
 
         // If a semicolon is inserted automatically, the next token is already
@@ -209,7 +223,12 @@ struct Token
 
     PropertyName* name() const {
         MOZ_ASSERT(type == TOK_NAME);
-        return u.name->asPropertyName(); // poor-man's type verification
+        return u.name->JSAtom::asPropertyName(); // poor-man's type verification
+    }
+
+    bool nameContainsEscape() const {
+        PropertyName* n = name();
+        return pos.begin + n->length() != pos.end;
     }
 
     JSAtom* atom() const {
@@ -628,11 +647,28 @@ class MOZ_STACK_CLASS TokenStream
         MOZ_ALWAYS_TRUE(matched);
     }
 
-    bool matchContextualKeyword(bool* matchedp, Handle<PropertyName*> keyword) {
+    // Like matchToken(..., TOK_NAME) but further matching the name token only
+    // if it has the given characters, without containing escape sequences.
+    // If the name token has the given characters yet *does* contain an escape,
+    // a syntax error will be reported.
+    //
+    // This latter behavior makes this method unsuitable for use in any context
+    // where ASI might occur.  In such places, an escaped "contextual keyword"
+    // on a new line is the start of an ExpressionStatement, not a continuation
+    // of a StatementListItem (or ImportDeclaration or ExportDeclaration, in
+    // modules).
+    bool matchContextualKeyword(bool* matchedp, Handle<PropertyName*> keyword,
+                                Modifier modifier = None)
+    {
         TokenKind token;
-        if (!getToken(&token))
+        if (!getToken(&token, modifier))
             return false;
         if (token == TOK_NAME && currentToken().name() == keyword) {
+            if (currentToken().nameContainsEscape()) {
+                reportError(JSMSG_ESCAPED_KEYWORD);
+                return false;
+            }
+
             *matchedp = true;
         } else {
             *matchedp = false;
@@ -706,8 +742,8 @@ class MOZ_STACK_CLASS TokenStream
         return sourceMapURL_.get();
     }
 
-    // If the name at s[0:length] is not a keyword in this version, return
-    // true with *ttp unchanged.
+    // If |atom| is not a keyword in this version, return true with *ttp
+    // unchanged.
     //
     // If it is a reserved word in this version and strictness mode, and thus
     // can't be present in correct code, report a SyntaxError and return false.
@@ -716,9 +752,10 @@ class MOZ_STACK_CLASS TokenStream
     // null, report a SyntaxError ("if is a reserved identifier") and return
     // false. If ttp is non-null, return true with the keyword's TokenKind in
     // *ttp.
-    bool checkForKeyword(const KeywordInfo* kw, TokenKind* ttp);
-    bool checkForKeyword(const char16_t* s, size_t length, TokenKind* ttp);
     bool checkForKeyword(JSAtom* atom, TokenKind* ttp);
+
+    // Same semantics as above, but for the provided keyword.
+    bool checkForKeyword(const KeywordInfo* kw, TokenKind* ttp);
 
     // This class maps a userbuf offset (which is 0-indexed) to a line number
     // (which is 1-indexed) and a column index (which is 0-indexed).

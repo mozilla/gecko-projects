@@ -259,11 +259,12 @@ public:
    * The callee must draw all of aRegionToDraw.
    * This region is relative to 0,0 in the PaintedLayer.
    *
-   * aDirtyRegion, if non-null, contains the total region that is due to be
-   * painted during the transaction, even though only aRegionToDraw should
-   * be drawn during this call. The sum of every aRegionToDraw over the
-   * course of the transaction must equal aDirtyRegion. aDirtyRegion can be
-   * null if the total dirty region is unknown.
+   * aDirtyRegion should contain the total region that is be due to be painted
+   * during the transaction, even though only aRegionToDraw should be drawn
+   * during this call. aRegionToDraw must be entirely contained within
+   * aDirtyRegion. If the total dirty region is unknown it is okay to pass a
+   * subregion of the total dirty region, e.g. just aRegionToDraw, though it
+   * may not be as efficient.
    *
    * aRegionToInvalidate contains a region whose contents have been
    * changed by the layer manager and which must therefore be invalidated.
@@ -285,7 +286,7 @@ public:
   typedef void (* DrawPaintedLayerCallback)(PaintedLayer* aLayer,
                                            gfxContext* aContext,
                                            const nsIntRegion& aRegionToDraw,
-                                           const nsIntRegion* aDirtyRegion,
+                                           const nsIntRegion& aDirtyRegion,
                                            DrawRegionClip aClip,
                                            const nsIntRegion& aRegionToInvalidate,
                                            void* aCallbackData);
@@ -1161,19 +1162,27 @@ public:
    *     point, that is, the point which remains in the same position when
    *     compositing the layer tree with a transformation (such as when
    *     asynchronously scrolling and zooming).
+   *
+   *   - |aIsClipFixed| is true if this layer's clip rect and mask layer
+   *     should also remain fixed during async scrolling/animations.
+   *     This is the case for fixed position layers, but not for
+   *     fixed background layers.
    */
   void SetFixedPositionData(FrameMetrics::ViewID aScrollId,
-                            const LayerPoint& aAnchor)
+                            const LayerPoint& aAnchor,
+                            bool aIsClipFixed)
   {
     if (!mFixedPositionData ||
         mFixedPositionData->mScrollId != aScrollId ||
-        mFixedPositionData->mAnchor != aAnchor) {
+        mFixedPositionData->mAnchor != aAnchor ||
+        mFixedPositionData->mIsClipFixed != aIsClipFixed) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) FixedPositionData", this));
       if (!mFixedPositionData) {
         mFixedPositionData = MakeUnique<FixedPositionData>();
       }
       mFixedPositionData->mScrollId = aScrollId;
       mFixedPositionData->mAnchor = aAnchor;
+      mFixedPositionData->mIsClipFixed = aIsClipFixed;
       Mutated();
     }
   }
@@ -1267,6 +1276,7 @@ public:
   bool GetIsStickyPosition() { return mStickyPositionData; }
   FrameMetrics::ViewID GetFixedPositionScrollContainerId() { return mFixedPositionData ? mFixedPositionData->mScrollId : FrameMetrics::NULL_SCROLL_ID; }
   LayerPoint GetFixedPositionAnchor() { return mFixedPositionData ? mFixedPositionData->mAnchor : LayerPoint(); }
+  bool IsClipFixed() { return mFixedPositionData ? mFixedPositionData->mIsClipFixed : false; }
   FrameMetrics::ViewID GetStickyScrollContainerId() { return mStickyPositionData->mScrollId; }
   const LayerRect& GetStickyScrollRangeOuter() { return mStickyPositionData->mOuter; }
   const LayerRect& GetStickyScrollRangeInner() { return mStickyPositionData->mInner; }
@@ -1770,6 +1780,7 @@ protected:
   struct FixedPositionData {
     FrameMetrics::ViewID mScrollId;
     LayerPoint mAnchor;
+    bool mIsClipFixed;
   };
   UniquePtr<FixedPositionData> mFixedPositionData;
   struct StickyPositionData {

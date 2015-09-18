@@ -3079,7 +3079,7 @@ nsWindow::OnKeyPressEvent(GdkEventKey *aEvent)
         }
         else {
             WidgetCompositionEvent compositionChangeEvent(
-                                     true, NS_COMPOSITION_CHANGE, this);
+                                     true, eCompositionChange, this);
             char16_t textString[3];
             textString[0] = H_SURROGATE(event.charCode);
             textString[1] = L_SURROGATE(event.charCode);
@@ -3173,9 +3173,6 @@ nsWindow::OnScrollEvent(GdkEventScroll *aEvent)
         wheelEvent.deltaX = wheelEvent.lineOrPageDeltaX = 1;
         break;
     }
-
-    NS_ASSERTION(wheelEvent.deltaX || wheelEvent.deltaY,
-                 "deltaX or deltaY must be non-zero");
 
     if (aEvent->window == mGdkWindow) {
         // we are the window that the event happened on so no need for expensive WidgetToScreenOffset
@@ -6545,6 +6542,11 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
                           LayerManagerPersistence aPersistence,
                           bool* aAllowRetaining)
 {
+    if (mIsDestroyed) {
+      // Prevent external code from triggering the re-creation of the LayerManager/Compositor
+      // during shutdown. Just return what we currently have, which is most likely null.
+      return mLayerManager;
+    }
     if (!mLayerManager && eTransparencyTransparent == GetTransparencyMode()) {
         mLayerManager = CreateBasicLayerManager();
     }

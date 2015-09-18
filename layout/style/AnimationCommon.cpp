@@ -373,7 +373,7 @@ CommonAnimationManager::FlushAnimations()
 
     MOZ_ASSERT(collection->mElement->GetComposedDoc() ==
                  mPresContext->Document(),
-               "Should not have a transition/animations collection for an "
+               "Should not have a transition/animation collection for an "
                "element that is not part of the document tree");
 
     collection->RequestRestyle(AnimationCollection::RestyleType::Standard);
@@ -435,6 +435,16 @@ CommonAnimationManager::WillRefresh(TimeStamp aTime)
   }
 
   MaybeStartOrStopObservingRefreshDriver();
+}
+
+void
+CommonAnimationManager::ClearIsRunningOnCompositor(const nsIFrame* aFrame,
+                                                   nsCSSProperty aProperty)
+{
+  AnimationCollection* collection = GetAnimationCollection(aFrame);
+  if (collection) {
+    collection->ClearIsRunningOnCompositor(aProperty);
+  }
 }
 
 NS_IMPL_ISUPPORTS(AnimValuesStyleRule, nsIStyleRule)
@@ -874,6 +884,17 @@ AnimationCollection::CanThrottleAnimation(TimeStamp aTime)
   }
 
   return true;
+}
+
+void
+AnimationCollection::ClearIsRunningOnCompositor(nsCSSProperty aProperty)
+{
+  for (Animation* anim : mAnimations) {
+    dom::KeyframeEffectReadOnly* effect = anim->GetEffect();
+    if (effect) {
+      effect->SetIsRunningOnCompositor(aProperty, false);
+    }
+  }
 }
 
 void

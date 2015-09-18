@@ -414,7 +414,7 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
 void
 RenderFrameParent::OwnerContentChanged(nsIContent* aContent)
 {
-  MOZ_ASSERT(mFrameLoader->GetOwnerContent() == aContent,
+  MOZ_ASSERT(!mFrameLoader || mFrameLoader->GetOwnerContent() == aContent,
              "Don't build new map if owner is same!");
 
   nsRefPtr<LayerManager> lm = mFrameLoader ? GetFrom(mFrameLoader) : nullptr;
@@ -424,6 +424,9 @@ RenderFrameParent::OwnerContentChanged(nsIContent* aContent)
       static_cast<ClientLayerManager*>(lm.get());
     clientManager->GetRemoteRenderer()->SendAdoptChild(mLayersId);
   }
+  // The APZCTreeManager associated with this RenderFrameParent may have changed
+  // so reset it and let GetApzcTreeManager() pick it up again.
+  mApzcTreeManager = nullptr;
 }
 
 void
@@ -586,7 +589,7 @@ RenderFrameParent::HitTest(const nsRect& aRect)
 void
 RenderFrameParent::GetTextureFactoryIdentifier(TextureFactoryIdentifier* aTextureFactoryIdentifier)
 {
-  nsRefPtr<LayerManager> lm = GetFrom(mFrameLoader);
+  nsRefPtr<LayerManager> lm = mFrameLoader ? GetFrom(mFrameLoader) : nullptr;
   // Perhaps the document containing this frame currently has no presentation?
   if (lm && lm->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
     *aTextureFactoryIdentifier =

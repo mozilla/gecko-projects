@@ -700,6 +700,13 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
     return currentClip;
   }
 
+  if (GetVisibleRegion().IsEmpty()) {
+    // When our visible region is empty, our parent may not have created the
+    // intermediate surface that we would require for correct clipping; however,
+    // this does not matter since we are invisible.
+    return RenderTargetIntRect(currentClip.TopLeft(), RenderTargetIntSize(0, 0));
+  }
+
   const RenderTargetIntRect clipRect =
     ViewAs<RenderTargetPixel>(*GetEffectiveClipRect(),
                               PixelCastJustification::RenderTargetIsParentLayerForRoot);
@@ -1190,6 +1197,12 @@ ContainerLayer::SortChildrenBy3DZOrder(nsTArray<Layer*>& aArray)
       if (toSort.Length() > 0) {
         SortLayersBy3DZOrder(toSort);
         aArray.AppendElements(Move(toSort));
+        // XXX The move analysis gets confused here, because toSort gets moved
+        // here, and then gets used again outside of the loop. To clarify that
+        // we realize that the array is going to be empty to the move checker,
+        // we clear it again here. (This method renews toSort for the move
+        // analysis)
+        toSort.ClearAndRetainStorage();
       }
       aArray.AppendElement(l);
     }
@@ -1724,9 +1737,10 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   }
   if (GetIsFixedPosition()) {
     LayerPoint anchor = GetFixedPositionAnchor();
-    aStream << nsPrintfCString(" [isFixedPosition scrollId=%d anchor=%s]",
+    aStream << nsPrintfCString(" [isFixedPosition scrollId=%lld anchor=%s%s]",
                      GetFixedPositionScrollContainerId(),
-                     ToString(anchor).c_str()).get();
+                     ToString(anchor).c_str(),
+                     IsClipFixed() ? "" : " scrollingClip").get();
   }
   if (GetIsStickyPosition()) {
     aStream << nsPrintfCString(" [isStickyPosition scrollId=%d outer=%f,%f %fx%f "

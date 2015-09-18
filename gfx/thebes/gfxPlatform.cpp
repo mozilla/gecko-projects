@@ -90,12 +90,20 @@
 #endif
 
 #include "mozilla/Hal.h"
+
 #ifdef USE_SKIA
-#include "skia/include/core/SkGraphics.h"
+# ifdef __GNUC__
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wshadow"
+# endif
+# include "skia/include/core/SkGraphics.h"
 # ifdef USE_SKIA_GPU
 #  include "skia/include/gpu/GrContext.h"
 #  include "skia/include/gpu/gl/GrGLInterface.h"
 #  include "SkiaGLGlue.h"
+# endif
+# ifdef __GNUC__
+#  pragma GCC diagnostic pop // -Wshadow
 # endif
 #endif
 
@@ -581,7 +589,11 @@ gfxPlatform::Init()
     RegisterStrongMemoryReporter(new GfxMemoryImageReporter());
 
     if (XRE_IsParentProcess()) {
-      gPlatform->mVsyncSource = gPlatform->CreateHardwareVsyncSource();
+      if (gfxPlatform::ForceSoftwareVsync()) {
+        gPlatform->mVsyncSource = (gPlatform)->gfxPlatform::CreateHardwareVsyncSource();
+      } else {
+        gPlatform->mVsyncSource = gPlatform->CreateHardwareVsyncSource();
+      }
     }
 }
 
@@ -2328,6 +2340,13 @@ gfxPlatform::UsesOffMainThreadCompositing()
   return result;
 }
 
+/***
+ * The preference "layout.frame_rate" has 3 meanings depending on the value:
+ *
+ * -1 = Auto (default), use hardware vsync or software vsync @ 60 hz if hw vsync fails.
+ *  0 = ASAP mode - used during talos testing.
+ *  X = Software vsync at a rate of X times per second.
+ */
 already_AddRefed<mozilla::gfx::VsyncSource>
 gfxPlatform::CreateHardwareVsyncSource()
 {
@@ -2345,6 +2364,29 @@ gfxPlatform::IsInLayoutAsapMode()
   // goes at whatever the configurated rate is. This only checks the version
   // talos uses, which is the refresh driver and compositor are in lockstep.
   return Preferences::GetInt("layout.frame_rate", -1) == 0;
+}
+
+/* static */ bool
+gfxPlatform::ForceSoftwareVsync()
+{
+  return Preferences::GetInt("layout.frame_rate", -1) > 0;
+}
+
+/* static */ int
+gfxPlatform::GetSoftwareVsyncRate()
+{
+  int preferenceRate = Preferences::GetInt("layout.frame_rate",
+                                           gfxPlatform::GetDefaultFrameRate());
+  if (preferenceRate <= 0) {
+    return gfxPlatform::GetDefaultFrameRate();
+  }
+  return preferenceRate;
+}
+
+/* static */ int
+gfxPlatform::GetDefaultFrameRate()
+{
+  return 60;
 }
 
 static nsString
@@ -2484,9 +2526,11 @@ gfxPlatform::NotifyCompositorCreated(LayersBackend aBackend)
   mCompositorBackend = aBackend;
 
   // Notify that we created a compositor, so telemetry can update.
-  if (nsCOMPtr<nsIObserverService> obsvc = services::GetObserverService()) {
-    obsvc->NotifyObservers(nullptr, "compositor:created", nullptr);
-  }
+  NS_DispatchToMainThread(NS_NewRunnableFunction([] {
+    if (nsCOMPtr<nsIObserverService> obsvc = services::GetObserverService()) {
+      obsvc->NotifyObservers(nullptr, "compositor:created", nullptr);
+    }
+  }));
 }
 
 void

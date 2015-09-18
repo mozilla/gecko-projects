@@ -308,11 +308,15 @@ this.AccessFu = { // jshint ignore:line
         this._enableOrDisable();
         break;
       case 'Accessibility:NextObject':
-        this.Input.moveCursor('moveNext', 'Simple', 'gesture');
-        break;
       case 'Accessibility:PreviousObject':
-        this.Input.moveCursor('movePrevious', 'Simple', 'gesture');
+      {
+        let rule = aData ?
+          aData.substr(0, 1).toUpperCase() + aData.substr(1).toLowerCase() :
+          'Simple';
+        let method = aTopic.replace(/Accessibility:(\w+)Object/, 'move$1');
+        this.Input.moveCursor(method, rule, 'gesture');
         break;
+      }
       case 'Accessibility:ActivateObject':
         this.Input.activateCurrent(JSON.parse(aData));
         break;
@@ -854,11 +858,12 @@ var Input = {
   },
 
   moveByGranularity: function moveByGranularity(aDetails) {
-    const MOVEMENT_GRANULARITY_PARAGRAPH = 8;
+    const GRANULARITY_PARAGRAPH = 8;
+    const GRANULARITY_LINE = 4;
 
     if (!this.editState.editing) {
-      if (aDetails.granularity === MOVEMENT_GRANULARITY_PARAGRAPH) {
-        this.moveCursor('move' + aDetails.direction, 'Paragraph', 'gesture');
+      if (aDetails.granularity & (GRANULARITY_PARAGRAPH | GRANULARITY_LINE)) {
+        this.moveCursor('move' + aDetails.direction, 'Simple', 'gesture');
         return;
       }
     } else {

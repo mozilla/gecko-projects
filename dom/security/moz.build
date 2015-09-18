@@ -18,12 +18,10 @@ EXPORTS.mozilla.dom += [
 
 EXPORTS += [
     'nsContentSecurityManager.h',
-    'nsCORSListenerProxy.h'
 ]
 
 UNIFIED_SOURCES += [
     'nsContentSecurityManager.cpp',
-    'nsCORSListenerProxy.cpp',
     'nsCSPContext.cpp',
     'nsCSPParser.cpp',
     'nsCSPService.cpp',
@@ -42,5 +40,5 @@ LOCAL_INCLUDES += [
 ]
 
 if CONFIG['GNU_CC']:
-    CFLAGS += ['-Wformat-security']
-    CXXFLAGS += ['-Wformat-security']
+    CFLAGS += ['-Wshadow', '-Wformat-security']
+    CXXFLAGS += ['-Wshadow', '-Wformat-security']

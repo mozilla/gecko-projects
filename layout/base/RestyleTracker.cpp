@@ -138,7 +138,8 @@ CollectRestyles(nsISupports* aElement,
   // Unset the restyle bits now, so if they get readded later as we
   // process we won't clobber that adding of the bit.
   element->UnsetFlags(collector->tracker->RestyleBit() |
-                      collector->tracker->RootBit());
+                      collector->tracker->RootBit() |
+                      collector->tracker->ConditionalDescendantsBit());
 
   RestyleEnumerateData** restyleArrayPtr = collector->restyleArrayPtr;
   RestyleEnumerateData* currentRestyle = *restyleArrayPtr;
@@ -223,6 +224,12 @@ RestyleTracker::DoProcessRestyles()
   if (docShell) {
     docShell->GetRecordProfileTimelineMarkers(&isTimelineRecording);
   }
+
+  // Create a AnimationsWithDestroyedFrame during restyling process to
+  // stop animations on elements that have no frame at the end of the
+  // restyling process.
+  RestyleManager::AnimationsWithDestroyedFrame
+    animationsWithDestroyedFrame(mRestyleManager);
 
   // Create a ReframingStyleContexts struct on the stack and put it in our
   // mReframingStyleContexts for almost all of the remaining scope of

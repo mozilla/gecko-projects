@@ -5633,8 +5633,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         nsPointWin touchPoint;
         touchPoint = gestureinfo->ptsLocation;
         touchPoint.ScreenToClient(mWnd);
-        WidgetGestureNotifyEvent gestureNotifyEvent(true,
-                                   NS_GESTURENOTIFY_EVENT_START, this);
+        WidgetGestureNotifyEvent gestureNotifyEvent(true, eGestureNotify, this);
         gestureNotifyEvent.refPoint = LayoutDeviceIntPoint::FromUntyped(touchPoint);
         nsEventStatus status;
         DispatchEvent(&gestureNotifyEvent, status);
@@ -6404,7 +6403,7 @@ bool nsWindow::OnTouch(WPARAM wParam, LPARAM lParam)
           ModifierKeyState modifierKeyState;
           touchInput.modifiers = modifierKeyState.GetModifiers();
         }
-        // Pres shell expects this event to be a NS_TOUCH_START
+        // Pres shell expects this event to be a eTouchStart
         // if any new contact points have been added since the last event sent.
         if (pInputs[i].dwFlags & TOUCHEVENTF_DOWN) {
           touchInput.mType = MultiTouchInput::MULTITOUCH_START;
@@ -6413,7 +6412,7 @@ bool nsWindow::OnTouch(WPARAM wParam, LPARAM lParam)
       }
       if (pInputs[i].dwFlags & TOUCHEVENTF_UP) {
         // Pres shell expects removed contacts points to be delivered in a separate
-        // NS_TOUCH_END event containing only the contact points that were removed.
+        // eTouchEnd event containing only the contact points that were removed.
         if (touchEndInput.mTimeStamp.IsNull()) {
           // Initialize a touch event to send.
           touchEndInput.mType = MultiTouchInput::MULTITOUCH_END;

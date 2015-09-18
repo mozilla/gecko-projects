@@ -203,6 +203,7 @@ destroying the MediaDecoder object.
 #include "nsITimer.h"
 
 #include "AbstractMediaDecoder.h"
+#include "FrameStatistics.h"
 #include "MediaDecoderOwner.h"
 #include "MediaEventSource.h"
 #include "MediaMetadataManager.h"
@@ -568,13 +569,15 @@ public:
   // Records activity stopping on the channel.
   void DispatchPlaybackStopped() {
     nsRefPtr<MediaDecoder> self = this;
-    nsCOMPtr<nsIRunnable> r =
-      NS_NewRunnableFunction([self] () { self->mPlaybackStatistics->Stop(); });
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([self] () {
+      self->mPlaybackStatistics->Stop();
+      self->ComputePlaybackRate();
+    });
     AbstractThread::MainThread()->Dispatch(r.forget());
   }
 
   // The actual playback rate computation. The monitor must be held.
-  virtual double ComputePlaybackRate(bool* aReliable);
+  void ComputePlaybackRate();
 
   // Returns true if we can play the entire media through without stopping
   // to buffer, given the current download and playback rates.
@@ -652,10 +655,6 @@ public:
   // position.
   int64_t GetDownloadPosition();
 
-  // Updates the approximate byte offset which playback has reached. This is
-  // used to calculate the readyState transitions.
-  void UpdatePlaybackOffset(int64_t aOffset);
-
   // Provide access to the state machine object
   MediaDecoderStateMachine* GetStateMachine() const;
 
@@ -723,99 +722,6 @@ public:
   // at any time.
   MediaStatistics GetStatistics();
 
-  // Frame decoding/painting related performance counters.
-  // Threadsafe.
-  class FrameStatistics {
-  public:
-
-    FrameStatistics() :
-        mReentrantMonitor("MediaDecoder::FrameStats"),
-        mParsedFrames(0),
-        mDecodedFrames(0),
-        mPresentedFrames(0),
-        mDroppedFrames(0),
-        mCorruptFrames(0) {}
-
-    // Returns number of frames which have been parsed from the media.
-    // Can be called on any thread.
-    uint32_t GetParsedFrames() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      return mParsedFrames;
-    }
-
-    // Returns the number of parsed frames which have been decoded.
-    // Can be called on any thread.
-    uint32_t GetDecodedFrames() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      return mDecodedFrames;
-    }
-
-    // Returns the number of decoded frames which have been sent to the rendering
-    // pipeline for painting ("presented").
-    // Can be called on any thread.
-    uint32_t GetPresentedFrames() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      return mPresentedFrames;
-    }
-
-    // Number of frames that have been skipped because they have missed their
-    // compoisition deadline.
-    uint32_t GetDroppedFrames() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      return mDroppedFrames + mCorruptFrames;
-    }
-
-    uint32_t GetCorruptedFrames() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      return mCorruptFrames;
-    }
-
-    // Increments the parsed and decoded frame counters by the passed in counts.
-    // Can be called on any thread.
-    void NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded,
-                             uint32_t aDropped) {
-      if (aParsed == 0 && aDecoded == 0 && aDropped == 0)
-        return;
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      mParsedFrames += aParsed;
-      mDecodedFrames += aDecoded;
-      mDroppedFrames += aDropped;
-    }
-
-    // Increments the presented frame counters.
-    // Can be called on any thread.
-    void NotifyPresentedFrame() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      ++mPresentedFrames;
-    }
-
-    void NotifyCorruptFrame() {
-      ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-      ++mCorruptFrames;
-    }
-
-  private:
-
-    // ReentrantMonitor to protect access of playback statistics.
-    ReentrantMonitor mReentrantMonitor;
-
-    // Number of frames parsed and demuxed from media.
-    // Access protected by mReentrantMonitor.
-    uint32_t mParsedFrames;
-
-    // Number of parsed frames which were actually decoded.
-    // Access protected by mReentrantMonitor.
-    uint32_t mDecodedFrames;
-
-    // Number of decoded frames which were actually sent down the rendering
-    // pipeline to be painted ("presented"). Access protected by mReentrantMonitor.
-    uint32_t mPresentedFrames;
-
-    uint32_t mDroppedFrames;
-
-    uint32_t mCorruptFrames;
-  };
-
   // Return the frame decode/paint related statistics.
   FrameStatistics& GetFrameStatistics() { return mFrameStats; }
 
@@ -878,17 +784,6 @@ protected:
 
   // Whether the decoder implementation supports dormant mode.
   bool mDormantSupported;
-
-  // Current decoding position in the stream. This is where the decoder
-  // is up to consuming the stream. This is not adjusted during decoder
-  // seek operations, but it's updated at the end when we start playing
-  // back again.
-  int64_t mDecoderPosition;
-  // Current playback position in the stream. This is (approximately)
-  // where we're up to playing back the stream. This is not adjusted
-  // during decoder seek operations, but it's updated at the end when we
-  // start playing back again.
-  int64_t mPlaybackPosition;
 
   // The logical playback position of the media resource in units of
   // seconds. This corresponds to the "official position" in HTML5. Note that
@@ -1051,6 +946,12 @@ protected:
   // Duration of the media resource according to the state machine.
   Mirror<media::NullableTimeUnit> mStateMachineDuration;
 
+  // Current playback position in the stream. This is (approximately)
+  // where we're up to playing back the stream. This is not adjusted
+  // during decoder seek operations, but it's updated at the end when we
+  // start playing back again.
+  Mirror<int64_t> mPlaybackPosition;
+
   // Volume of playback.  0.0 = muted. 1.0 = full volume.
   Canonical<double> mVolume;
 
@@ -1088,6 +989,18 @@ protected:
   // passed to MediaStreams when this is true.
   Canonical<bool> mSameOriginMedia;
 
+  // Estimate of the current playback rate (bytes/second).
+  Canonical<double> mPlaybackBytesPerSecond;
+
+  // True if mPlaybackBytesPerSecond is a reliable estimate.
+  Canonical<bool> mPlaybackRateReliable;
+
+  // Current decoding position in the stream. This is where the decoder
+  // is up to consuming the stream. This is not adjusted during decoder
+  // seek operations, but it's updated at the end when we start playing
+  // back again.
+  Canonical<int64_t> mDecoderPosition;
+
 public:
   AbstractCanonical<media::NullableTimeUnit>* CanonicalDurationOrNull() override;
   AbstractCanonical<double>* CanonicalVolume() {
@@ -1116,6 +1029,15 @@ public:
   }
   AbstractCanonical<bool>* CanonicalSameOriginMedia() {
     return &mSameOriginMedia;
+  }
+  AbstractCanonical<double>* CanonicalPlaybackBytesPerSecond() {
+    return &mPlaybackBytesPerSecond;
+  }
+  AbstractCanonical<bool>* CanonicalPlaybackRateReliable() {
+    return &mPlaybackRateReliable;
+  }
+  AbstractCanonical<int64_t>* CanonicalDecoderPosition() {
+    return &mDecoderPosition;
   }
 };
 

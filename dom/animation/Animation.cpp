@@ -22,7 +22,7 @@ namespace mozilla {
 namespace dom {
 
 // Static members
-uint64_t Animation::sNextSequenceNum = 0;
+uint64_t Animation::sNextAnimationIndex = 0;
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(Animation, DOMEventTargetHelper,
                                    mTimeline,
@@ -517,15 +517,15 @@ Animation::UpdateRelevance()
 bool
 Animation::HasLowerCompositeOrderThan(const Animation& aOther) const
 {
-  // We only ever sort non-idle animations so we don't ever expect
-  // mSequenceNum to be set to kUnsequenced
-  MOZ_ASSERT(mSequenceNum != kUnsequenced &&
-             aOther.mSequenceNum != kUnsequenced,
-             "Animations to compare should not be idle");
-  MOZ_ASSERT(mSequenceNum != aOther.mSequenceNum || &aOther == this,
-             "Sequence numbers should be unique");
+  // Due to the way subclasses of this repurpose the mAnimationIndex to
+  // implement their own brand of composite ordering it is possible for
+  // two animations to have an identical mAnimationIndex member.
+  // However, these subclasses override this method so we shouldn't see
+  // identical animation indices here.
+  MOZ_ASSERT(mAnimationIndex != aOther.mAnimationIndex || &aOther == this,
+             "Animation indices should be unique");
 
-  return mSequenceNum < aOther.mSequenceNum;
+  return mAnimationIndex < aOther.mAnimationIndex;
 }
 
 bool
@@ -560,7 +560,7 @@ Animation::CanThrottle() const
     return true;
   }
 
-  return mIsRunningOnCompositor;
+  return IsRunningOnCompositor();
 }
 
 void
@@ -763,11 +763,6 @@ Animation::DoPause(ErrorResult& aRv)
     reuseReadyPromise = true;
   }
 
-  // Mark this as no longer running on the compositor so that next time
-  // we update animations we won't throttle them and will have a chance
-  // to remove the animation from any layer it might be on.
-  mIsRunningOnCompositor = false;
-
   if (!reuseReadyPromise) {
     // Clear ready promise. We'll create a new one lazily.
     mReady = nullptr;
@@ -842,16 +837,6 @@ Animation::PauseAt(const TimeDuration& aReadyTime)
 void
 Animation::UpdateTiming(SeekFlag aSeekFlag, SyncNotifyFlag aSyncNotifyFlag)
 {
-  // Update the sequence number each time we transition in or out of the
-  // idle state
-  if (!IsUsingCustomCompositeOrder()) {
-    if (PlayState() == AnimationPlayState::Idle) {
-      mSequenceNum = kUnsequenced;
-    } else if (mSequenceNum == kUnsequenced) {
-      mSequenceNum = sNextSequenceNum++;
-    }
-  }
-
   // We call UpdateFinishedState before UpdateEffect because the former
   // can change the current time, which is used by the latter.
   UpdateFinishedState(aSeekFlag, aSyncNotifyFlag);
@@ -1058,6 +1043,46 @@ Animation::EffectEnd() const
          + mEffect->GetComputedTiming().mActiveDuration;
 }
 
+TimeStamp
+Animation::AnimationTimeToTimeStamp(const StickyTimeDuration& aTime) const
+{
+  // Initializes to null. Return the same object every time to benefit from
+  // return-value-optimization.
+  TimeStamp result;
+
+  // We *don't* check for mTimeline->TracksWallclockTime() here because that
+  // method only tells us if the timeline times can be converted to
+  // TimeStamps that can be compared to TimeStamp::Now() or not, *not*
+  // whether the timelines can be converted to TimeStamp values at all.
+  //
+  // Since we never compare the result of this method with TimeStamp::Now()
+  // it is ok to return values even if mTimeline->TracksWallclockTime() is
+  // false. Furthermore, we want to be able to use this method when the
+  // refresh driver is under test control (in which case TracksWallclockTime()
+  // will return false).
+  //
+  // Once we introduce timelines that are not time-based we will need to
+  // differentiate between them here and determine how to sort their events.
+  if (!mTimeline) {
+    return result;
+  }
+
+  // Check the time is convertible to a timestamp
+  if (aTime == TimeDuration::Forever() ||
+      mPlaybackRate == 0.0 ||
+      mStartTime.IsNull()) {
+    return result;
+  }
+
+  // Invert the standard relation:
+  //   animation time = (timeline time - start time) * playback rate
+  TimeDuration timelineTime =
+    TimeDuration(aTime).MultDouble(1.0 / mPlaybackRate) + mStartTime.Value();
+
+  result = mTimeline->ToTimeStamp(timelineTime);
+  return result;
+}
+
 nsIDocument*
 Animation::GetRenderedDocument() const
 {
@@ -1170,6 +1195,12 @@ Animation::DispatchPlaybackEvent(const nsAString& aName)
   nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(this, event);
   asyncDispatcher->PostDOMEvent();
+}
+
+bool
+Animation::IsRunningOnCompositor() const
+{
+  return mEffect && mEffect->IsRunningOnCompositor();
 }
 
 } // namespace dom

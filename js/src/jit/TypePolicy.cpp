@@ -24,6 +24,8 @@ EnsureOperandNotFloat32(TempAllocator& alloc, MInstruction* def, unsigned op)
     if (in->type() == MIRType_Float32) {
         MToDouble* replace = MToDouble::New(alloc, in);
         def->block()->insertBefore(def, replace);
+        if (def->isRecoveredOnBailout())
+            replace->setRecoveredOnBailout();
         def->replaceOperand(op, replace);
     }
 }
@@ -491,7 +493,7 @@ bool
 DoublePolicy<Op>::staticAdjustInputs(TempAllocator& alloc, MInstruction* def)
 {
     MDefinition* in = def->getOperand(Op);
-    if (in->type() == MIRType_Double)
+    if (in->type() == MIRType_Double || in->type() == MIRType_SinCosDouble)
         return true;
 
     MToDouble* replace = MToDouble::New(alloc, in);
@@ -1079,6 +1081,30 @@ FilterTypeSetPolicy::adjustInputs(TempAllocator& alloc, MInstruction* ins)
     MOZ_ASSERT(ins->numOperands() == 1);
     MIRType inputType = ins->getOperand(0)->type();
     MIRType outputType = ins->type();
+
+    // Special case when output is a Float32, but input isn't.
+    if (outputType == MIRType_Float32 && inputType != MIRType_Float32) {
+        // Create a MToFloat32 to add between the MFilterTypeSet and
+        // its uses.
+        MInstruction* replace = MToFloat32::New(alloc, ins);
+        ins->justReplaceAllUsesWithExcept(replace);
+        ins->block()->insertAfter(ins, replace);
+
+        // Reset the type to not MIRType_Float32
+        // Note: setResultType shouldn't happen in TypePolicies,
+        //       Here it is fine, since there is just one use we just
+        //       added ourself. And the resulting type after MToFloat32
+        //       equals the original type.
+        ins->setResultType(ins->resultTypeSet()->getKnownMIRType());
+        outputType = ins->type();
+
+        // Do the type analysis
+        if (!replace->typePolicy()->adjustInputs(alloc, replace))
+            return false;
+
+        // Fall through to let the MFilterTypeSet adjust its input based
+        // on its new type.
+    }
 
     // Input and output type are already in accordance.
     if (inputType == outputType)

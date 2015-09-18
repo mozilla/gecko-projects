@@ -89,18 +89,27 @@ enum {
   // change will attempt to restyle descendants).
   ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT = ELEMENT_FLAG_BIT(3),
 
-  // All of those bits together, for convenience.
-  ELEMENT_ALL_RESTYLE_FLAGS = ELEMENT_HAS_PENDING_RESTYLE |
-                              ELEMENT_IS_POTENTIAL_RESTYLE_ROOT |
-                              ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE |
-                              ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT,
+  // Set if this element has a pending restyle with an eRestyle_SomeDescendants
+  // restyle hint.
+  ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR = ELEMENT_FLAG_BIT(4),
 
   // Just the HAS_PENDING bits, for convenience
-  ELEMENT_PENDING_RESTYLE_FLAGS = ELEMENT_HAS_PENDING_RESTYLE |
-                                  ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE,
+  ELEMENT_PENDING_RESTYLE_FLAGS =
+    ELEMENT_HAS_PENDING_RESTYLE |
+    ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE,
+
+  // Just the IS_POTENTIAL bits, for convenience
+  ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS =
+    ELEMENT_IS_POTENTIAL_RESTYLE_ROOT |
+    ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT,
+
+  // All of the restyle bits together, for convenience.
+  ELEMENT_ALL_RESTYLE_FLAGS = ELEMENT_PENDING_RESTYLE_FLAGS |
+                              ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS |
+                              ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR,
 
   // Remaining bits are for subclasses
-  ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 4
+  ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 5
 };
 
 #undef ELEMENT_FLAG_BIT
@@ -126,8 +135,8 @@ class DestinationInsertionPointList;
 
 // IID for the dom::Element interface
 #define NS_ELEMENT_IID \
-{ 0x31d3f3fb, 0xcdf8, 0x4e40, \
- { 0xb7, 0x09, 0x1a, 0x11, 0x43, 0x93, 0x61, 0x71 } }
+{ 0xc67ed254, 0xfd3b, 0x4b10, \
+  { 0x96, 0xa2, 0xc5, 0x8b, 0x7b, 0x64, 0x97, 0xd1 } }
 
 class Element : public FragmentOrElement
 {

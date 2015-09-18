@@ -232,12 +232,11 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using mozilla::dom::workers::ServiceWorkerManager;
 
-// True means sUseErrorPages and sInterceptionEnabled has been added to
+// True means sUseErrorPages has been added to
 // preferences var cache.
 static bool gAddedPreferencesVarCache = false;
 
 bool nsDocShell::sUseErrorPages = false;
-bool nsDocShell::sInterceptionEnabled = false;
 
 // Number of documents currently loading
 static int32_t gNumberOfDocumentsLoading = 0;
@@ -3366,6 +3365,25 @@ nsDocShell::GetSameTypeRootTreeItem(nsIDocShellTreeItem** aRootTreeItem)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsDocShell::GetSameTypeRootTreeItemIgnoreBrowserAndAppBoundaries(nsIDocShell ** aRootTreeItem)
+{
+    NS_ENSURE_ARG_POINTER(aRootTreeItem);
+    *aRootTreeItem = static_cast<nsIDocShell *>(this);
+
+    nsCOMPtr<nsIDocShell> parent;
+    NS_ENSURE_SUCCESS(GetSameTypeParentIgnoreBrowserAndAppBoundaries(getter_AddRefs(parent)),
+                      NS_ERROR_FAILURE);
+    while (parent) {
+      *aRootTreeItem = parent;
+      NS_ENSURE_SUCCESS((*aRootTreeItem)->
+        GetSameTypeParentIgnoreBrowserAndAppBoundaries(getter_AddRefs(parent)),
+        NS_ERROR_FAILURE);
+    }
+    NS_ADDREF(*aRootTreeItem);
+    return NS_OK;
+}
+
 /* static */
 bool
 nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
@@ -5517,9 +5535,6 @@ nsDocShell::Create()
     Preferences::AddBoolVarCache(&sUseErrorPages,
                                  "browser.xul.error_pages.enabled",
                                  mUseErrorPages);
-    Preferences::AddBoolVarCache(&sInterceptionEnabled,
-                                 "dom.serviceWorkers.interception.enabled",
-                                 false);
     gAddedPreferencesVarCache = true;
   }
 
@@ -10852,10 +10867,7 @@ nsDocShell::DoChannelLoad(nsIChannel* aChannel,
 
   // If the user pressed shift-reload, then do not allow ServiceWorker
   // interception to occur. See step 12.1 of the SW HandleFetch algorithm.
-  if (mLoadType == LOAD_RELOAD_BYPASS_CACHE ||
-      mLoadType == LOAD_RELOAD_BYPASS_PROXY ||
-      mLoadType == LOAD_RELOAD_BYPASS_PROXY_AND_CACHE ||
-      mLoadType == LOAD_RELOAD_ALLOW_MIXED_CONTENT) {
+  if (IsForceReloadType(mLoadType)) {
     nsCOMPtr<nsIHttpChannelInternal> internal = do_QueryInterface(aChannel);
     if (internal) {
       internal->ForceNoIntercept();
@@ -11144,11 +11156,7 @@ nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel, nsISupports* aOwner,
    * for the page. Save the new cacheKey in Session History.
    * see bug 90098
    */
-  if (aChannel &&
-      (aLoadType == LOAD_RELOAD_BYPASS_CACHE ||
-       aLoadType == LOAD_RELOAD_BYPASS_PROXY ||
-       aLoadType == LOAD_RELOAD_BYPASS_PROXY_AND_CACHE ||
-       aLoadType == LOAD_RELOAD_ALLOW_MIXED_CONTENT)) {
+  if (aChannel && IsForceReloadType(aLoadType)) {
     NS_ASSERTION(!updateSHistory,
                  "We shouldn't be updating session history for forced"
                  " reloads!");
@@ -13846,7 +13854,7 @@ nsDocShell::ShouldPrepareForIntercept(nsIURI* aURI, bool aIsNavigate,
 {
   *aShouldIntercept = false;
   // Preffed off.
-  if (!sInterceptionEnabled) {
+  if (!nsContentUtils::ServiceWorkerInterceptionEnabled()) {
     return NS_OK;
   }
 

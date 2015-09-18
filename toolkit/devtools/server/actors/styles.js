@@ -125,7 +125,7 @@ types.addDictType("fontface", {
  * The PageStyle actor lets the client look at the styles on a page, as
  * they are applied to a given node.
  */
-let PageStyleActor = protocol.ActorClass({
+var PageStyleActor = protocol.ActorClass({
   typeName: "pagestyle",
 
   /**
@@ -151,6 +151,19 @@ let PageStyleActor = protocol.ActorClass({
 
     this.onFrameUnload = this.onFrameUnload.bind(this);
     events.on(this.inspector.tabActor, "will-navigate", this.onFrameUnload);
+  },
+
+  destroy: function () {
+    if (!this.walker) {
+      return;
+    }
+    protocol.Actor.prototype.destroy.call(this);
+    events.off(this.inspector.tabActor, "will-navigate", this.onFrameUnload);
+    this.inspector = null;
+    this.walker = null;
+    this.refMap = null;
+    this.cssLogic = null;
+    this._styleElement = null;
   },
 
   get conn() {
@@ -332,7 +345,9 @@ let PageStyleActor = protocol.ActorClass({
 
       // If this font comes from a @font-face rule
       if (font.rule) {
-        fontFace.rule = StyleRuleActor(this, font.rule);
+        let styleActor = StyleRuleActor(this, font.rule);
+        this.manage(styleActor);
+        fontFace.rule = styleActor;
         fontFace.ruleText = font.rule.cssText;
       }
 
@@ -929,7 +944,7 @@ exports.PageStyleActor = PageStyleActor;
 /**
  * Front object for the PageStyleActor
  */
-let PageStyleFront = protocol.FrontClass(PageStyleActor, {
+var PageStyleFront = protocol.FrontClass(PageStyleActor, {
   initialize: function(conn, form, ctx, detail) {
     protocol.Front.prototype.initialize.call(this, conn, form, ctx, detail);
     this.inspector = this.parent();
@@ -990,7 +1005,7 @@ let PageStyleFront = protocol.FrontClass(PageStyleActor, {
  * (which have a CSSStyle but no CSSRule) we create a StyleRuleActor
  * with a special rule type (100).
  */
-let StyleRuleActor = protocol.ActorClass({
+var StyleRuleActor = protocol.ActorClass({
   typeName: "domstylerule",
   initialize: function(pageStyle, item) {
     protocol.Actor.prototype.initialize.call(this, null);
@@ -1021,6 +1036,17 @@ let StyleRuleActor = protocol.ActorClass({
 
   get conn() {
     return this.pageStyle.conn;
+  },
+
+  destroy: function () {
+    if (!this.rawStyle) {
+      return;
+    }
+    protocol.Actor.prototype.destroy.call(this);
+    this.rawStyle = null;
+    this.pageStyle = null;
+    this.rawNode = null;
+    this.rawRule = null;
   },
 
   // Objects returned by this actor are owned by the PageStyleActor
@@ -1298,7 +1324,7 @@ let StyleRuleActor = protocol.ActorClass({
 /**
  * Front for the StyleRule actor.
  */
-let StyleRuleFront = protocol.FrontClass(StyleRuleActor, {
+var StyleRuleFront = protocol.FrontClass(StyleRuleActor, {
   initialize: function(client, form, ctx, detail) {
     protocol.Front.prototype.initialize.call(this, client, form, ctx, detail);
   },
@@ -1453,7 +1479,7 @@ let StyleRuleFront = protocol.FrontClass(StyleRuleActor, {
  * The modifications are processed in the order in which they are
  * added to the RuleModificationList.
  */
-let RuleModificationList = Class({
+var RuleModificationList = Class({
   /**
    * Initialize a RuleModificationList.
    * @param {StyleRuleFront} rule the associated rule

@@ -2365,8 +2365,8 @@ var gCSSProperties = {
     domProp: "captionSide",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
-    initial_values: [ "block-start" ],
-    other_values: [ "block-end", "inline-start", "inline-end", "block-start-outside", "block-end-outside", "top", "bottom", "left", "right", "top-outside", "bottom-outside" ],
+    initial_values: [ "top" ],
+    other_values: [ "bottom", "left", "right", "top-outside", "bottom-outside" ],
     invalid_values: []
   },
   "clear": {
@@ -3681,8 +3681,8 @@ var gCSSProperties = {
     other_values: [ "break-word" ],
     invalid_values: []
   },
-  "-moz-hyphens": {
-    domProp: "MozHyphens",
+  "hyphens": {
+    domProp: "hyphens",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "manual" ],
@@ -4556,6 +4556,16 @@ var gCSSProperties = {
     initial_values: [ "normal" ],
     other_values: [ "'ENG'", "'TRK'", "\"TRK\"", "'N\\'Ko'" ],
     invalid_values: [ "TRK", "ja" ]
+  },
+  "-moz-hyphens": {
+    domProp: "MozHyphens",
+    inherited: true,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "hyphens",
+    subproperties: [ "hyphens" ],
+    initial_values: [ "manual" ],
+    other_values: [ "none", "auto" ],
+    invalid_values: []
   }
 }
 
@@ -5327,7 +5337,7 @@ if (SpecialPowers.getBoolPref("svg.paint-order.enabled")) {
   };
 }
 
-if (SpecialPowers.getBoolPref("svg.transform-origin.enabled")) {
+if (SpecialPowers.getBoolPref("svg.transform-box.enabled")) {
   gCSSProperties["transform-box"] = {
     domProp: "transformBox",
     inherited: false,

@@ -205,9 +205,15 @@ PeerConnectionMedia::ProtocolProxyQueryHandler::SetProxyOnPcm(
 
   if (pcm_->mIceCtx.get()) {
     assert(httpsProxyPort >= 0 && httpsProxyPort < (1 << 16));
+    // Note that this could check if PrivacyRequested() is set on the PC and
+    // remove "webrtc" from the ALPN list.  But that would only work if the PC
+    // was constructed with a peerIdentity constraint, not when isolated
+    // streams are added.  If we ever need to signal to the proxy that the
+    // media is isolated, then we would need to restructure this code.
     pcm_->mProxyServer.reset(
       new NrIceProxyServer(httpsProxyHost.get(),
-                           static_cast<uint16_t>(httpsProxyPort)));
+                           static_cast<uint16_t>(httpsProxyPort),
+                           "webrtc,c-webrtc"));
   } else {
     CSFLogError(logTag, "%s: Failed to set proxy server (ICE ctx unavailable)",
         __FUNCTION__);
@@ -316,7 +322,6 @@ nsresult PeerConnectionMedia::Init(const std::vector<NrIceStunServer>& stun_serv
   // Looks like a bug in the NrIceCtx API.
   mIceCtx = NrIceCtx::Create("PC:" + mParentName,
                              true, // Offerer
-                             true, // Explicitly set priorities
                              mParent->GetAllowIceLoopback(),
                              ice_tcp,
                              mParent->GetAllowIceLinkLocal(),

@@ -492,18 +492,28 @@ public:
     }
   }
 
-  // For unicode-bidi: plaintext, reset the direction of the writing mode from
-  // the bidi paragraph level of the content
-
-  //XXX change uint8_t to UBiDiLevel after bug 924851
+  /**
+   * This function performs fixup for elements with 'unicode-bidi: plaintext',
+   * where inline directionality is derived from the Unicode bidi categories
+   * of the element's content, and not the CSS 'direction' property.
+   *
+   * The WritingMode constructor will have already incorporated the 'direction'
+   * property into our flag bits, so such elements need to use this method
+   * (after resolving the bidi level of their content) to update the direction
+   * bits as needed.
+   *
+   * If it turns out that our bidi direction already matches what plaintext
+   * resolution determined, there's nothing to do here. If it didn't (i.e. if
+   * the rtl-ness doesn't match), then we correct the direction by flipping the
+   * same bits that get flipped in the constructor's CSS 'direction'-based
+   * chunk.
+   *
+   * XXX change uint8_t to UBiDiLevel after bug 924851
+   */
   void SetDirectionFromBidiLevel(uint8_t level)
   {
-    if (IS_LEVEL_RTL(level)) {
-      // set RTL
-      mWritingMode |= eBidiMask;
-    } else {
-      // set LTR
-      mWritingMode &= ~eBidiMask;
+    if (IS_LEVEL_RTL(level) == IsBidiLTR()) {
+      mWritingMode ^= eBidiMask | eInlineFlowMask;
     }
   }
 
@@ -1133,6 +1143,29 @@ public:
   {
     CHECK_WRITING_MODE(aWritingMode);
     return mMargin.TopBottom();
+  }
+
+  /*
+   * Return margin values for line-relative sides, as defined in
+   * http://www.w3.org/TR/css-writing-modes-3/#line-directions:
+   *
+   * line-left
+   *     Nominally the side from which LTR text would start.
+   * line-right
+   *     Nominally the side from which RTL text would start. (Opposite of
+   *     line-left.)
+   */
+  nscoord LineLeft(WritingMode aWritingMode) const
+  {
+    // We don't need to CHECK_WRITING_MODE here because the IStart or IEnd
+    // accessor that we call will do it.
+    return aWritingMode.IsBidiLTR()
+           ? IStart(aWritingMode) : IEnd(aWritingMode);
+  }
+  nscoord LineRight(WritingMode aWritingMode) const
+  {
+    return aWritingMode.IsBidiLTR()
+           ? IEnd(aWritingMode) : IStart(aWritingMode);
   }
 
   /**
@@ -1889,43 +1922,6 @@ nsStylePosition::MaxBSizeDependsOnContainer(mozilla::WritingMode aWM) const
 {
   return aWM.IsVertical() ? MaxWidthDependsOnContainer()
                           : MaxHeightDependsOnContainer();
-}
-
-inline uint8_t
-nsStyleTableBorder::LogicalCaptionSide(mozilla::WritingMode aWM) const
-{
-  // sanity-check that constants we're using have the expected relationships
-  static_assert(NS_STYLE_CAPTION_SIDE_BSTART == mozilla::eLogicalSideBStart &&
-                NS_STYLE_CAPTION_SIDE_BEND == mozilla::eLogicalSideBEnd &&
-                NS_STYLE_CAPTION_SIDE_ISTART == mozilla::eLogicalSideIStart &&
-                NS_STYLE_CAPTION_SIDE_IEND == mozilla::eLogicalSideIEnd,
-                "bad logical caption-side values");
-  static_assert((NS_STYLE_CAPTION_SIDE_TOP - NS_SIDE_TOP ==
-                 NS_STYLE_CAPTION_SIDE_BOTTOM - NS_SIDE_BOTTOM) &&
-                (NS_STYLE_CAPTION_SIDE_LEFT - NS_SIDE_LEFT ==
-                 NS_STYLE_CAPTION_SIDE_RIGHT - NS_SIDE_RIGHT) &&
-                (NS_STYLE_CAPTION_SIDE_LEFT - NS_SIDE_LEFT ==
-                 NS_STYLE_CAPTION_SIDE_TOP - NS_SIDE_TOP),
-                "mismatch between caption-side and side values");
-  switch (mCaptionSide) {
-    case NS_STYLE_CAPTION_SIDE_TOP:
-    case NS_STYLE_CAPTION_SIDE_RIGHT:
-    case NS_STYLE_CAPTION_SIDE_BOTTOM:
-    case NS_STYLE_CAPTION_SIDE_LEFT: {
-      uint8_t side = mCaptionSide - (NS_STYLE_CAPTION_SIDE_TOP - NS_SIDE_TOP);
-      return aWM.LogicalSideForPhysicalSide(mozilla::css::Side(side));
-    }
-
-    case NS_STYLE_CAPTION_SIDE_TOP_OUTSIDE:
-      return aWM.IsVertical() ? aWM.LogicalSideForPhysicalSide(NS_SIDE_TOP)
-                              : NS_STYLE_CAPTION_SIDE_BSTART_OUTSIDE;
-
-    case NS_STYLE_CAPTION_SIDE_BOTTOM_OUTSIDE:
-      return aWM.IsVertical() ? aWM.LogicalSideForPhysicalSide(NS_SIDE_BOTTOM)
-                              : NS_STYLE_CAPTION_SIDE_BEND_OUTSIDE;
-  }
-  MOZ_ASSERT(mCaptionSide <= NS_STYLE_CAPTION_SIDE_BEND_OUTSIDE);
-  return mCaptionSide;
 }
 
 #endif // WritingModes_h_

@@ -41,7 +41,6 @@
 #include "MediaDecoderReader.h"
 #include "MediaDecoderStateMachine.h"
 #include "MediaShutdownManager.h"
-#include "MediaStatistics.h"
 #include "MediaTimer.h"
 #include "TimeUnits.h"
 #include "VideoSegment.h"
@@ -137,7 +136,7 @@ static_assert(LOW_DATA_THRESHOLD_USECS > AMPLE_AUDIO_USECS,
 } // namespace detail
 
 // Amount of excess usecs of data to add in to the "should we buffer" calculation.
-static const uint32_t EXHAUSTED_DATA_MARGIN_USECS = 60000;
+static const uint32_t EXHAUSTED_DATA_MARGIN_USECS = 100000;
 
 // If we enter buffering within QUICK_BUFFER_THRESHOLD_USECS seconds of starting
 // decoding, we'll enter "quick buffering" mode, which exits a lot sooner than
@@ -244,6 +243,12 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
                   "MediaDecoderStateMachine::mPreservesPitch (Mirror)"),
   mSameOriginMedia(mTaskQueue, false,
                    "MediaDecoderStateMachine::mSameOriginMedia (Mirror)"),
+  mPlaybackBytesPerSecond(mTaskQueue, 0.0,
+                          "MediaDecoderStateMachine::mPlaybackBytesPerSecond (Mirror)"),
+  mPlaybackRateReliable(mTaskQueue, true,
+                        "MediaDecoderStateMachine::mPlaybackRateReliable (Mirror)"),
+  mDecoderPosition(mTaskQueue, 0,
+                   "MediaDecoderStateMachine::mDecoderPosition (Mirror)"),
   mDuration(mTaskQueue, NullableTimeUnit(),
             "MediaDecoderStateMachine::mDuration (Canonical"),
   mIsShutdown(mTaskQueue, false,
@@ -251,7 +256,9 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   mNextFrameStatus(mTaskQueue, MediaDecoderOwner::NEXT_FRAME_UNINITIALIZED,
                    "MediaDecoderStateMachine::mNextFrameStatus (Canonical)"),
   mCurrentPosition(mTaskQueue, 0,
-                   "MediaDecoderStateMachine::mCurrentPosition (Canonical)")
+                   "MediaDecoderStateMachine::mCurrentPosition (Canonical)"),
+  mPlaybackOffset(mTaskQueue, 0,
+                  "MediaDecoderStateMachine::mPlaybackOffset (Canonical)")
 {
   MOZ_COUNT_CTOR(MediaDecoderStateMachine);
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
@@ -324,6 +331,9 @@ MediaDecoderStateMachine::InitializationTask()
   mLogicalPlaybackRate.Connect(mDecoder->CanonicalPlaybackRate());
   mPreservesPitch.Connect(mDecoder->CanonicalPreservesPitch());
   mSameOriginMedia.Connect(mDecoder->CanonicalSameOriginMedia());
+  mPlaybackBytesPerSecond.Connect(mDecoder->CanonicalPlaybackBytesPerSecond());
+  mPlaybackRateReliable.Connect(mDecoder->CanonicalPlaybackRateReliable());
+  mDecoderPosition.Connect(mDecoder->CanonicalDecoderPosition());
 
   // Initialize watchers.
   mWatchManager.Watch(mBuffered, &MediaDecoderStateMachine::BufferedRangeUpdated);
@@ -686,9 +696,10 @@ MediaDecoderStateMachine::OnAudioPopped(const nsRefPtr<MediaData>& aSample)
 {
   MOZ_ASSERT(OnTaskQueue());
   ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-  mDecoder->UpdatePlaybackOffset(std::max<int64_t>(0, aSample->mOffset));
+  mPlaybackOffset = std::max(mPlaybackOffset.Ref(), aSample->mOffset);
   UpdateNextFrameStatus();
   DispatchAudioDecodeTaskIfNeeded();
+  MaybeStartBuffering();
 }
 
 void
@@ -696,9 +707,10 @@ MediaDecoderStateMachine::OnVideoPopped(const nsRefPtr<MediaData>& aSample)
 {
   MOZ_ASSERT(OnTaskQueue());
   ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
-  mDecoder->UpdatePlaybackOffset(aSample->mOffset);
+  mPlaybackOffset = std::max(mPlaybackOffset.Ref(), aSample->mOffset);
   UpdateNextFrameStatus();
   DispatchVideoDecodeTaskIfNeeded();
+  MaybeStartBuffering();
 }
 
 void
@@ -1085,6 +1097,34 @@ void MediaDecoderStateMachine::MaybeStartPlayback()
   }
 
   DispatchDecodeTasksIfNeeded();
+}
+
+void
+MediaDecoderStateMachine::MaybeStartBuffering()
+{
+  MOZ_ASSERT(OnTaskQueue());
+  AssertCurrentThreadInMonitor();
+
+  if (mState == DECODER_STATE_DECODING &&
+      mPlayState == MediaDecoder::PLAY_STATE_PLAYING &&
+      mResource->IsExpectingMoreData()) {
+    bool shouldBuffer;
+    if (mReader->UseBufferingHeuristics()) {
+      shouldBuffer = HasLowDecodedData(EXHAUSTED_DATA_MARGIN_USECS) &&
+                     (JustExitedQuickBuffering() || HasLowUndecodedData());
+    } else {
+      MOZ_ASSERT(mReader->IsWaitForDataSupported());
+      shouldBuffer = (OutOfDecodedAudio() && mAudioWaitRequest.Exists()) ||
+                     (OutOfDecodedVideo() && mVideoWaitRequest.Exists());
+    }
+    if (shouldBuffer) {
+      StartBuffering();
+      // Don't go straight back to the state machine loop since that might
+      // cause us to start decoding again and we could flip-flop between
+      // decoding and quick-buffering.
+      ScheduleStateMachineIn(USECS_PER_S);
+    }
+  }
 }
 
 void MediaDecoderStateMachine::UpdatePlaybackPositionInternal(int64_t aTime)
@@ -2027,7 +2067,7 @@ MediaDecoderStateMachine::FinishDecodeFirstFrame()
 
   DECODER_LOG("Media duration %lld, "
               "transportSeekable=%d, mediaSeekable=%d",
-              Duration().ToMicroseconds(), mDecoder->IsTransportSeekable(), mDecoder->IsMediaSeekable());
+              Duration().ToMicroseconds(), mResource->IsTransportSeekable(), mDecoder->IsMediaSeekable());
 
   if (HasAudio() && !HasVideo() && !mSentFirstFrameLoadedEvent) {
     // We're playing audio only. We don't need to worry about slow video
@@ -2193,10 +2233,15 @@ MediaDecoderStateMachine::FinishShutdown()
   mLogicalPlaybackRate.DisconnectIfConnected();
   mPreservesPitch.DisconnectIfConnected();
   mSameOriginMedia.DisconnectIfConnected();
+  mPlaybackBytesPerSecond.DisconnectIfConnected();
+  mPlaybackRateReliable.DisconnectIfConnected();
+  mDecoderPosition.DisconnectIfConnected();
+
   mDuration.DisconnectAll();
   mIsShutdown.DisconnectAll();
   mNextFrameStatus.DisconnectAll();
   mCurrentPosition.DisconnectAll();
+  mPlaybackOffset.DisconnectAll();
 
   // Shut down the watch manager before shutting down our task queue.
   mWatchManager.Shutdown();
@@ -2433,6 +2478,8 @@ MediaDecoderStateMachine::Reset()
   mVideoWaitRequest.DisconnectIfExists();
   mSeekRequest.DisconnectIfExists();
 
+  mPlaybackOffset = 0;
+
   nsCOMPtr<nsIRunnable> resetTask =
     NS_NewRunnableMethod(mReader, &MediaDecoderReader::ResetDecode);
   DecodeTaskQueue()->Dispatch(resetTask.forget());
@@ -2451,7 +2498,7 @@ bool MediaDecoderStateMachine::CheckFrameValidity(VideoData* aData)
 
   // Update corrupt-frames statistics
   if (aData->mImage && !aData->mImage->IsValid()) {
-    MediaDecoder::FrameStatistics& frameStats = mDecoder->GetFrameStatistics();
+    FrameStatistics& frameStats = mDecoder->GetFrameStatistics();
     frameStats.NotifyCorruptFrame();
     // If more than 10% of the last 30 frames have been corrupted, then try disabling
     // hardware acceleration. We use 10 as the corrupt value because RollingMean<>
@@ -2588,36 +2635,12 @@ void MediaDecoderStateMachine::UpdateRenderedVideoFrames()
     VideoQueue().PushFront(currentFrame);
     if (framesRemoved > 0) {
       mVideoFrameEndTime = currentFrame->GetEndTime();
-      MediaDecoder::FrameStatistics& frameStats = mDecoder->GetFrameStatistics();
+      FrameStatistics& frameStats = mDecoder->GetFrameStatistics();
       frameStats.NotifyPresentedFrame();
     }
   }
 
   RenderVideoFrames(sVideoQueueSendToCompositorSize, clockTime, nowTime);
-
-  // Check to see if we don't have enough data to play up to the next frame.
-  // If we don't, switch to buffering mode.
-  if (mState == DECODER_STATE_DECODING &&
-      mPlayState == MediaDecoder::PLAY_STATE_PLAYING &&
-      mResource->IsExpectingMoreData()) {
-    bool shouldBuffer;
-    if (mReader->UseBufferingHeuristics()) {
-      shouldBuffer = HasLowDecodedData(remainingTime + EXHAUSTED_DATA_MARGIN_USECS) &&
-                     (JustExitedQuickBuffering() || HasLowUndecodedData());
-    } else {
-      MOZ_ASSERT(mReader->IsWaitForDataSupported());
-      shouldBuffer = (OutOfDecodedAudio() && mAudioWaitRequest.Exists()) ||
-                     (OutOfDecodedVideo() && mVideoWaitRequest.Exists());
-    }
-    if (shouldBuffer) {
-      StartBuffering();
-      // Don't go straight back to the state machine loop since that might
-      // cause us to start decoding again and we could flip-flop between
-      // decoding and quick-buffering.
-      ScheduleStateMachineIn(USECS_PER_S);
-      return;
-    }
-  }
 
   // Cap the current time to the larger of the audio and video end time.
   // This ensures that if we're running off the system clock, we don't
@@ -2790,7 +2813,22 @@ bool
 MediaDecoderStateMachine::CanPlayThrough()
 {
   MOZ_ASSERT(OnTaskQueue());
-  return IsRealTime() || mDecoder->GetStatistics().CanPlayThrough();
+  return IsRealTime() || GetStatistics().CanPlayThrough();
+}
+
+MediaStatistics
+MediaDecoderStateMachine::GetStatistics()
+{
+  MOZ_ASSERT(OnTaskQueue());
+  MediaStatistics result;
+  result.mDownloadRate = mResource->GetDownloadRate(&result.mDownloadRateReliable);
+  result.mDownloadPosition = mResource->GetCachedDataEnd(mDecoderPosition);
+  result.mTotalBytes = mResource->GetLength();
+  result.mPlaybackRate = mPlaybackBytesPerSecond;
+  result.mPlaybackRateReliable = mPlaybackRateReliable;
+  result.mDecoderPosition = mDecoderPosition;
+  result.mPlaybackPosition = mPlaybackOffset;
+  return result;
 }
 
 void MediaDecoderStateMachine::StartBuffering()
@@ -2823,7 +2861,7 @@ void MediaDecoderStateMachine::StartBuffering()
   SetState(DECODER_STATE_BUFFERING);
   DECODER_LOG("Changed state from DECODING to BUFFERING, decoded for %.3lfs",
               decodeDuration.ToSeconds());
-  MediaStatistics stats = mDecoder->GetStatistics();
+  MediaStatistics stats = GetStatistics();
   DECODER_LOG("Playback rate: %.1lfKB/s%s download rate: %.1lfKB/s%s",
               stats.mPlaybackRate/1024, stats.mPlaybackRateReliable ? "" : " (unreliable)",
               stats.mDownloadRate/1024, stats.mDownloadRateReliable ? "" : " (unreliable)");

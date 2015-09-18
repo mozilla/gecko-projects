@@ -34,6 +34,7 @@
 #include "nsIHttpHeaderVisitor.h"
 #include "nsQueryObject.h"
 #include "mozilla/BasePrincipal.h"
+#include "nsCORSListenerProxy.h"
 
 using mozilla::BasePrincipal;
 using mozilla::OriginAttributes;
@@ -126,7 +127,8 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
                        a.appCacheClientID(), a.allowSpdy(), a.allowAltSvc(), a.fds(),
                        a.loadInfo(), a.synthesizedResponseHead(),
                        a.synthesizedSecurityInfoSerialization(),
-                       a.cacheKey(), a.schedulingContextID());
+                       a.cacheKey(), a.schedulingContextID(), a.preflightArgs(),
+                       a.initialRwin());
   }
   case HttpChannelCreationArgs::THttpChannelConnectArgs:
   {
@@ -284,7 +286,9 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const OptionalHttpResponseHead& aSynthesizedResponseHead,
                                  const nsCString&           aSecurityInfoSerialization,
                                  const uint32_t&            aCacheKey,
-                                 const nsCString&           aSchedulingContextID)
+                                 const nsCString&           aSchedulingContextID,
+                                 const OptionalCorsPreflightArgs& aCorsPreflightArgs,
+                                 const uint32_t&            aInitialRwin)
 {
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
   if (!uri) {
@@ -391,6 +395,18 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
       get_ArrayOfFileDescriptor().SwapElements(fds);
   }
 
+  if (aCorsPreflightArgs.type() == OptionalCorsPreflightArgs::TCorsPreflightArgs) {
+    const CorsPreflightArgs& args = aCorsPreflightArgs.get_CorsPreflightArgs();
+    nsCOMPtr<nsIPrincipal> preflightPrincipal =
+      PrincipalInfoToPrincipal(args.preflightPrincipal());
+    rv = mChannel->SetCorsPreflightParameters(args.unsafeHeaders(),
+                                              args.withCredentials(),
+                                              preflightPrincipal);
+    if (NS_FAILED(rv)) {
+      return SendFailedAsyncOpen(rv);
+    }
+  }
+
   nsCOMPtr<nsIInputStream> stream = DeserializeInputStream(uploadStream, fds);
   if (stream) {
     mChannel->InternalSetUploadStream(stream);
@@ -437,6 +453,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
   mChannel->SetThirdPartyFlags(thirdPartyFlags);
   mChannel->SetAllowSpdy(allowSpdy);
   mChannel->SetAllowAltSvc(allowAltSvc);
+  mChannel->SetInitialRwin(aInitialRwin);
 
   nsCOMPtr<nsIApplicationCacheChannel> appCacheChan =
     do_QueryObject(mChannel);
@@ -924,6 +941,24 @@ HttpChannelParent::DivertComplete()
   }
 
   mParentListener = nullptr;
+}
+
+bool
+HttpChannelParent::RecvRemoveCorsPreflightCacheEntry(const URIParams& uri,
+  const mozilla::ipc::PrincipalInfo& requestingPrincipal)
+{
+  nsCOMPtr<nsIURI> deserializedURI = DeserializeURI(uri);
+  if (!deserializedURI) {
+    return false;
+  }
+  nsCOMPtr<nsIPrincipal> principal =
+    PrincipalInfoToPrincipal(requestingPrincipal);
+  if (!principal) {
+    return false;
+  }
+  nsCORSListenerProxy::RemoveFromCorsPreflightCache(deserializedURI,
+                                                    principal);
+  return true;
 }
 
 //-----------------------------------------------------------------------------
