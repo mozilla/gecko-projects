@@ -7,6 +7,7 @@ pref("b2g.reload_key", '{ "key": 116, "shift": false, "ctrl": false, "alt": fals
 pref("b2g.default.start_manifest_url", "https://mozvr.github.io/horizon/web/manifest.webapp");
 pref("dom.vr.enabled", true);
 pref("dom.ipc.tabs.disabled", true);
+pref("b2g.is_mulet", true);
 #else
 pref("b2g.default.start_manifest_url", "https://mozilla.github.io/browser.html/manifest.webapp");
 pref("dom.ipc.tabs.disabled", false);
