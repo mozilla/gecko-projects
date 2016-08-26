@@ -1,0 +1,76 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim: sw=2 ts=8 et :
+ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include "mozilla/GfxMessageUtils.h";
+
+include protocol PCompositorBridge;
+
+using mozilla::LayoutDevicePoint from "Units.h";
+using CSSRect from "Units.h";
+using struct mozilla::layers::FrameMetrics from "FrameMetrics.h";
+using struct mozilla::layers::ScrollableLayerGuid from "FrameMetrics.h";
+using mozilla::layers::FrameMetrics::ViewID from "FrameMetrics.h";
+using mozilla::layers::MaybeZoomConstraints from "FrameMetrics.h";
+using mozilla::layers::TouchBehaviorFlags from "mozilla/layers/APZUtils.h";
+using mozilla::layers::GeckoContentController::TapType from "mozilla/layers/GeckoContentController.h";
+using mozilla::layers::GeckoContentController::APZStateChange from "mozilla/layers/GeckoContentController.h";
+using mozilla::dom::TabId from "mozilla/dom/ipc/IdType.h";
+using mozilla::dom::ContentParentId from "mozilla/dom/ipc/IdType.h";
+using mozilla::layers::AsyncDragMetrics from "mozilla/layers/AsyncDragMetrics.h";
+using mozilla::Modifiers from "mozilla/EventForwards.h";
+using class nsRegion from "nsRegion.h";
+
+namespace mozilla {
+namespace layers {
+
+
+/**
+ * If APZ is enabled then one PAPZ will be opened per PBrowser between the
+ * process where the PBrowser child actor lives and the main process (the
+ * PBrowser parent actor doesn't necessarily live in the main process, for
+ * example with nested browsers). This will typically be set up when the layers
+ * id is allocated for the PBrowser.
+ *
+ * Opened through PContent and runs on the main thread in both parent and child.
+ */
+sync protocol PAPZ
+{
+  manager PCompositorBridge;
+
+parent:
+
+  async UpdateHitRegion(nsRegion aRegion);
+
+  async __delete__();
+
+child:
+  async RequestContentRepaint(FrameMetrics frame);
+
+  // The aCallTakeFocusForClickFromTap argument is used for eSingleTap types,
+  // to request that the child take focus before dispatching the mouse events
+  // for the tap (otherwise the resulting focus behaviour is incorrect).
+  async HandleTap(TapType aType, LayoutDevicePoint point, Modifiers aModifiers,
+                  ScrollableLayerGuid aGuid, uint64_t aInputBlockId,
+                  bool aCallTakeFocusForClickFromTap);
+
+  async UpdateOverscrollVelocity(float aX, float aY, bool aIsRootContent);
+
+  async UpdateOverscrollOffset(float aX, float aY, bool aIsRootContent);
+
+  async SetScrollingRootContent(bool aIsRootContent);
+
+  async NotifyMozMouseScrollEvent(ViewID aScrollId, nsString aEvent);
+
+  async NotifyAPZStateChange(ScrollableLayerGuid aGuid, APZStateChange aChange, int aArg);
+
+  async NotifyFlushComplete();
+
+  async Destroy();
+};
+
+} // layers
+} // mozilla

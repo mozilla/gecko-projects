@@ -1,0 +1,18 @@
+[root]
+name = "gkrust"
+version = "0.1.0"
+dependencies = [
+ "mp4parse 0.4.0",
+]
+
+[[package]]
+name = "byteorder"
+version = "0.5.3"
+
+[[package]]
+name = "mp4parse"
+version = "0.4.0"
+dependencies = [
+ "byteorder 0.5.3",
+]
+

@@ -1,0 +1,151 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+:root {
+  --eyedropper-image: url(images/command-eyedropper.svg);
+}
+
+.theme-firebug {
+  --eyedropper-image: url(images/firebug/command-eyedropper.svg);
+}
+
+/* Use flex layout for the Inspector toolbar. For now, it's done
+   specifically for the Inspector toolbar since general rule applied
+   on .devtools-toolbar breaks breadcrubs and also toolbars in other
+   panels (e.g. webconsole, debugger), these are not ready for HTML
+   layout yet. */
+#inspector-toolbar.devtools-toolbar {
+  display: flex;
+}
+
+#inspector-toolbar.devtools-toolbar .devtools-toolbar-spacer {
+  flex-grow: 1;
+  display: inline-block;
+}
+
+/* Add element toolbar button */
+#inspector-element-add-button::before {
+  background-image: url("chrome://devtools/skin/images/add.svg");
+  list-style-image: url("chrome://devtools/skin/images/add.svg");
+  -moz-user-focus: normal;
+}
+
+#inspector-searchlabel {
+  overflow: hidden;
+  margin-inline-end: 2px;
+}
+
+#inspector-search {
+  flex: unset;
+}
+
+/* TODO: bug 1265759: should apply to .devtools-searchinput once all searchbox
+   is converted to html*/
+#inspector-searchbox {
+  width: 100%;
+}
+
+/* Make sure the text is vertically centered in Inspector's
+   search box. This can be removed when the search box is
+   switched to HTML.
+   See also: https://bugzilla.mozilla.org/show_bug.cgi?id=1265759 */
+.theme-dark #inspector-searchbox,
+.theme-light #inspector-searchbox {
+  line-height: 19px;
+}
+.theme-firebug #inspector-searchbox {
+  line-height: 17px;
+}
+
+/* Eyedropper toolbar button */
+
+#inspector-eyedropper-toggle {
+  /* hidden by default, until we can check that the required highlighter exists */
+  display: none;
+}
+
+#inspector-eyedropper-toggle::before {
+  background-image: var(--eyedropper-image);
+}
+
+#inspector-sidebar-toggle-box {
+  line-height: initial;
+}
+
+#inspector-breadcrumbs-toolbar {
+  padding: 0px;
+  border-bottom-width: 0px;
+  border-top-width: 1px;
+  display: block;
+  position: relative;
+}
+
+#inspector-breadcrumbs-toolbar,
+#inspector-breadcrumbs-toolbar * {
+  box-sizing: border-box;
+}
+
+#inspector-breadcrumbs {
+  display: flex;
+
+  /* Break out of the XUL flexbox, so the splitter can still shrink the
+     markup view even if the contents of the breadcrumbs are wider than
+     the new width. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+}
+
+#inspector-breadcrumbs .scrollbutton-up,
+#inspector-breadcrumbs .scrollbutton-down {
+  flex: 0;
+  display: flex;
+  align-items: center;
+}
+
+#inspector-breadcrumbs .html-arrowscrollbox-inner {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+#inspector-breadcrumbs .breadcrumbs-widget-item {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font: message-box;
+}
+
+/* Set the minimum width for the side bar so, all tabs are
+  properly visible. The value can be decreased when bug 1281789
+  is fixed and the all-tabs-menu is available again. */
+#inspector-sidebar-container {
+  overflow: hidden;
+  min-width: 300px;
+  position: relative;
+}
+
+#inspector-sidebar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+
+/* Override `-moz-user-focus:ignore;` from toolkit/content/minimal-xul.css */
+.inspector-tabpanel > * {
+  -moz-user-focus: normal;
+}
+
+/* "no results" warning message displayed in the ruleview and in the computed view */
+
+#ruleview-no-results,
+#computedview-no-results {
+  color: var(--theme-body-color-inactive);
+  text-align: center;
+  margin: 5px;
+}

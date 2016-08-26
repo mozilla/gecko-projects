@@ -1,0 +1,73 @@
+[
+{
+"version": "clang 3.8.0, libgcc 4.8.5",
+"size": 140319580,
+"digest": "34e219d7e8eaffa81710631c34d21355563d06335b3c00851e94c1f42f9098788fded8463dd0f67dd699f77b47a0245dd7aff754943a7a03fb5fd145a808254f",
+"algorithm": "sha512",
+"filename": "clang.tar.xz",
+"unpack": true
+},
+{
+"size": 3008804, 
+"visibility": "public", 
+"digest": "ba6937f14f3d8b26dcb2d39490dee6b0a8afb60f672f5debb71d7b62c1ec52103201b4b1a3d258f945567de531384b36ddb2ce4aa73dc63d72305b11c146847c", 
+"algorithm": "sha512", 
+"unpack": true,
+"filename": "cctools.tar.gz"
+},
+{
+"size": 35215976, 
+"visibility": "internal", 
+"digest": "8be736545ddab25ebded188458ce974d5c9a7e29f3c50d2ebfbcb878f6aff853dd2ff5a3528bdefc64396a10101a1b50fd2fe52000140df33643cebe1ea759da", 
+"algorithm": "sha512", 
+"unpack": true,
+"filename": "MacOSX10.7.sdk.tar.bz2"
+},
+{
+"version": "cargo 0.13.0-nightly (664125b 2016-07-19)",
+"size": 3123796,
+"digest": "4b9d2bcb8488b6649ba6c748e19d33bfceb25c7566e882fc7e00322392e424a5a9c5878c11c61d57cdaecf67bcc110842c6eff95e49736e8f3c83d9ce1677122",
+"algorithm": "sha512",
+"filename": "cargo.tar.xz",
+"unpack": true
+},
+{
+"size": 167175,
+"digest": "0b71a936edf5bd70cf274aaa5d7abc8f77fe8e7b5593a208f805cc9436fac646b9c4f0b43c2b10de63ff3da671497d35536077ecbc72dba7f8159a38b580f831",
+"algorithm": "sha512",
+"unpack": true,
+"filename": "sccache.tar.bz2"
+},
+{
+"size": 57060, 
+"visibility": "public", 
+"digest": "9649ca595f4cf088d118da26201f92cc94cda7af49c7c48112ee31cd13c83b2935b3e145de9dd78060cff2480b4c2e7ff5fb24235876956fed13c87852071998", 
+"algorithm": "sha512", 
+"unpack": true,
+"filename": "dmg.tar.xz"
+},
+{
+"size": 188880, 
+"visibility": "public", 
+"digest": "1ffddd43efb03aed897ee42035d9d8d758a8d66ab6c867599ef755e1a586768fc22011ce03698af61454920b00fe8bed08c9a681e7bd324d7f8f78c026c83943", 
+"algorithm": "sha512", 
+"unpack": true,
+"filename": "genisoimage.tar.xz"
+},
+{
+"version": "gecko rustc 1.10.0 (cfcb716cf 2016-07-03)",
+"size": 102276708,
+"digest": "8cc9ea8347fc7e6e6fdb15a8fd1faae977f1235a426b879b3f9128ec91d8f2b6268297ce80bf4eceb47738bd40bfeda13f143dc3fe85f1434b13adfbc095ab90",
+"algorithm": "sha512",
+"filename": "rustc.tar.xz",
+"unpack": true
+},
+{
+"size": 53754194,
+"visibility": "public",
+"digest": "d861a8c857e5cbc98318951b009c82cd88cbf151f1f5ad83d140e5e662b92c1ae1250c71c5d4cd29ebbcb4efa360a2ed4a6eb4db6281ecfb313038b5487eb1d2",
+"algorithm": "sha512",
+"filename": "rust-std-lib-x86_64-apple-darwin.tar.bz2",
+"unpack": true
+}
+]

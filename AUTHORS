@@ -6,429 +6,1322 @@ appropriate place.
 For a full list of the people who are credited with making a
 contribution to Mozilla, see http://www.mozilla.org/credits/ .
 
+<1010mozilla@Ostermiller.com>
+Aaron Boodman <aa@google.com>
 Aaron Kaluszka <ask@swva.net>
+Aaron Leventhal <aaronleventhal@moonset.net>
 Aaron Leventhal <aaronl@netscape.com>
+Aaron Nowack <anowack@mimiru.net>
+Aaron Reed <aaronr@us.ibm.com>
+Aaron Spangler <aaron@spangler.ods.org>
+Aaron Train <aaron.train@gmail.com>
 Abdelrhman Ahmed <a.ahmed1026@gmail.com>
+Achim Hasenmueller <achimha@innotek.de>
 ActiveState Software Inc
+ActiveState Tool Corp.
+Adam Barth <hk9565@gmail.com>
 Adam Becevello <abecevello@sympatico.ca>
 Adam Christian <adam.christian@gmail.com>
 Adam D. Moss <adam@gimp.org>
+Adam Hauner
 Adam Lock <adamlock@netscape.com>
+Adam L. Peller
+Adam Souzis <adam@souzis.com>
+Aditya Rao <adicoolrao@gmail.com>
+Adobe Systems Incorporated
 Adrian Havill <havill@redhat.com>
+Adrian Herscu <bmf1972@icqmail.com>
+Adrian Johnson <ajohnson@redneon.com>
+Adrian Kalla <akalla@aviary.pl>
+Adrian Klein <dragosan@dragosan.net>
+a-higuti
+Aiko
+Akhil Arora <akhil.arora@sun.com>
 Akihiro Misaki <spitfire.kuden@gmail.com>
 Akkana Peck <akkana@netscape.com>
+Alden D'Souza <aldenfloyd@gmail.com>
+Alec Flett <alecf@flett.org>
 Alec Flett <alecf@netscape.com>
+Aleksey Chernoraenko <archer@meta-comm.com>
+Aleksey Nogin <ayn2@cornell.edu>
+Aleks Totic <a@totic.org>
+Alexander Law <1@1o.ru>
+Alexander Surkov <surkov.alexander@gmail.com>
 Alexey Chernyak <alexeyc@bigfoot.com>
+Alex Fritze <alex@croczilla.com>
+Alex Miller <amiller@mozilla.com>
+Alex Musil
+Alex Pakhotin <alexp@mozilla.com>
+Alex Russell
+Alex Vincent <ajvincent@gmail.com>
+Alfred Kayser <alfredkayser@nl.ibm.com>
+Alfred Peng <alfred.peng@sun.com>
+Ali Juma <ajuma@mozilla.com>
+Allan Beaufour <allan@beaufour.dk>
 Allan Masri <amasri@netscape.com>
+Allen Eubank <adeubank@gmail.com>
+Allison Naaktgeboren <ally@mozilla.com>
+Alon Zakai <azakai@mozilla.com>
 alta88 <alta88@gmail.com>
+Amir Szekely <kichik@gmail.com>
+Anant Narayanan <anant@kix.in>
+An-Cheng Huang <pach@cs.cmu.edu>
+Anders Hammarquist
 <andersma@luther.edu>
+Andras Timar
+Andrea Canciani <ranma42@gmail.com>
+Andreas Gal <gal@uci.edu>
+Andreas M. Schneider <clarence@clarence.de>
 Andreas Nilsson <nisses.mail@home.se>
+Andreas Otte <andreas.otte@debitel.net>
+Andrei Saprykin
+Andrei Volkov <av@netscape.com>
+Andrew Drake <drakedevel@gmail.com>
+Andrew Halberstadt <halbersa@gmail.com>
+Andrew Huntwork <ash@huntwork.net>
+Andrew Schultz <ajschult@verizon.net>
+Andrew Shilliday <andrewshilliday@gmail.com>
+Andrew Shultz
+Andrew Smith
 Andrew Sutherland <asutherland@asutherland.org>
+Andrew Thompson
 Andrew Wooldridge <andreww@netscape.com>
+Andrew Zabolotny
 Andrey Terentyev <andreycpp@gmail.com>
+Andrzej Skalski <askalski@mozilla.com>
 Anirvana Mishra <anidps@gmail.com>
 Annie Sullivan <annie.sullivan@gmail.com>
+Anoop Saldanha <poonaatsoc@gmail.com>
+antonglv
+Antti Järvelin <antti.i.jarvelin@gmail.com>
 Archaeopteryx <archaeopteryx@coole-files.de>
 ArentJan Banck <ajbanck@planet.nl>
+Arkady Blyakher <rkadyb@mit.edu>
 Arlo Breault <arlolra@gmail.com>
+Armen Zambrano Gasparnian <armenzg@mozilla.com>
+Arno Renevier
+Arpad Borsos <arpad.borsos@googlemail.com>
+Arron Mogge <paper@animecity.nu>
 Arthur Wiebe <artooro@gmail.com>
 Asaf Romano <mano@mozilla.com>
+Asaf Romano <mozilla.mano@sent.com>
+Asko Tontti <atontti@cc.hut.fi>
+Atul Apte <aapte135@gmail.com>
 Atul Varma <atul@mozilla.com>
 ause <ause@sun.com>
+Axel Hecht <axel@pike.org>
 Axel Zechner <axel.zechner@googlemail.com>
+Aza Raskin <aza@mozilla.com>
 Baki Bon <bakibon@yahoo.com>
+Bart <dev@bartbizon.com>
+Bas Schouten <bschouten@mozilla.com>
+Bastiaan Jacques <b.jacques@planet.nl>
+<bedney@technicalpursuit.com>
+Behdad Esfahbod <behdad@behdad.org>
+Behnam Esfahbod <behnam@zwnj.org>
+Ben Basson <contact@cusser.net>
 Ben Bucksch <mozilla@bucksch.org>
+Ben Combee <bcombee@mozilla.com>
+Bencsath Boldizsar
+Benedict Hsieh <bhsieh@mozilla.com>
 Benedikt Pfeifer <benediktp@ymail.com>
 Ben Frisch <bfrisch@gmail.com>
 Ben Goodger <ben@bengoodger.com>
+Ben Hearsum <bhearsum@mozilla.com>
+Ben Hsieh <ben.hsieh@gmail.com>
+Benjamin Frisch <bfrisch@gmail.com>
+Benjamin Otte <otte@gnome.org>
 Benjamin Smedberg <benjamin@smedbergs.us>
+Benjamin Stover <bstover@mozilla.com>
+Ben Newman <bnewman@mozilla.com>
+Benoit Girard <b56girard@gmail.com>
+Benoit Jacob <bjacob@mozilla.com>
 Benoît Renard <benoit@gawab.com>
+Ben Turner <bent.mozilla@gmail.com>
 Ben Turner <mozilla@songbirdnest.com>
 Berend Cornelius <berend.cornelius@sun.com>
+Bertrand Le Roy
 Beth Epperson
+bex@xaotec.com
 Bhuvan Racham <racham@netscape.com>
+Biju
+Bill Haneman (bill.haneman@sun.com)
 Bill Law <law@netscape.com>
+Bill Worley
+Biro Arpad
+Bjarne Geir Herland <bjarne@runitsoft.com>
+Björn Jacke <bjoern.jacke@gmx.de>
 Blair McBride <bmcbride@mozilla.com>
+Blake Kaplan <mrbkap@gmail.com>
+Blake Ross <blake@blakeross.com>
 Blake Ross <firefox@blakeross.com>
 Blake Winton <bwinton@latte.ca>
+Blue Static
+Bobby Holley <bobbyholley@gmail.com>
+Bob Clary <bob@bclary.com>
+bobj@netscape.com
 Bob Lord <lord@netscape.com>
+Bob Miller <kbob@oblix.com>
+Bob Moss <bmoss@mozilla.com>
+Bob Relyea <rrelyea@redhat.com>
+Bodo Moeller <moeller@cdc.informatik.tu-darmstadt.de>
+bogomip
+Bolian Yin <bolian.yin@sun.com>
 Boris Zbarsky <bzbarsky@mit.edu>
+Brad Lassey <brad@lassey.us>
+Bradley Baetz <bbaetz@acm.org>
 Bradley Baetz <bbaetz@student.usyd.edu.au>
+Brad Taylor <brad@getcoded.net>
+Bram Moolenaar
 Brandon Pung <brandonpung@gmail.com>
+Brandon Sterne <bsterne@mozilla.com>
 Brant Gurganus <brantgurganus2001@cherokeescouting.org>
+Braun <ebraun@o2.pl>
+Brendan Eich <brendan@mozilla.org>
 Brett Wilson <brettw@gmail.com>
+Brian Birtles <birtles@gmail.com>
 Brian Bober
+Brian Bober <netdemonz@yahoo.com>
+Brian Crowder <crowderbt@gmail.com>
+briang@tonic.com
+Brian Hackett <bhackett@mozilla.com>
 Brian King
 Brian Lu <brian.lu@sun.com>
 Brian Nesse <bnesse@netscape.com>
+Brian Nicholson <bnicholson@mozilla.com>
+Brian O'Keefe <bokeefe@alum.wpi.edu>
 Brian R. Bondy <netzen@gmail.com>
 Brian Ryner <bryner@brianryner.com>
+Brian Smith <bsmith@mozilla.com>
+Brian Stell <bstell@ix.netcom.com>
+Brijesh Patel <brijesh3105@gmail.com>
 Brodie Thiesfield <brofield@jellycan.com>
+Bruce Hoult
 Bruno Browning <browning@uwalumni.com>
 Bruno Escherl <aqualon@aquachan.de>
+Bruno Haible <bruno@clisp.org>
 Bryan Clark <clarkbw@gnome.org>
+Bryant Chen
 Caio Tiago Oliveira <asrail@gmail.com>
+Calum Robinson <calumr@mac.com>
+CanadianGuy
+Canonical Ltd
+Caolan McNamara <cmc@openoffice.org>
+Carl D. Worth <cworth@cworth.org>
+Carlo Alberto Ferraris <cafxx@strayorange.com>
+Carsten Book
+Catalin Patulea
+Cavin Song <cavin@netscape.com>
 Cédric Corazza <cedric.corazza@wanadoo.fr>
+Cedric Vivier <cedricv@neonux.com>
+Celso Aguiar <celsoaguiar@hotmail.com>
+Chak Nanga <chak@netscape.com>
+Chao-ying Fu <fu@mips.com>
 Charles Manske <cmanske@netscape.com>
+Charles Verdon
 Chase Phillips <chase@mozilla.org>
+Chase Tingley <tingley@sundell.net>
+Chenxia Liu <liuche@mozilla.com>
 Chinmay Deepakbhai Patel <chinu.ptl@gmail.com>
 Chip Clark <chipc@netscape.com>
+Chookij Vanatham <Chookij.Vanatham@Eng.Sun.COM>
 Chris Allen <chris@netinflux.com>
+Chris AtLee <catlee@mozilla.com>
 Chris Beard <cbeard@mozilla.com>
 Chris Charabaruk <ccharabaruk@meldstar.com>
+Chris Coulson <chris.coulson@canonical.com>
+Chris Double <chris.double@double.co.nz>
+Chris Evans
+Chris Halls
+Chris Jones <jones.chris.g@gmail.com>
+Chris Leary <cdleary@mozilla.com>
+Chris Lord <chrislord.net@gmail.com>
 Chris McAfee <mcafee@netscape.com>
 Chris Nelson <chrisn@statecollege.com>
+Chris Pearce <chris@pearce.org.nz>
+Chris Saari <saari@netscape.com>
+Chris Seawood <cls@seawood.org>
 Christian Biesinger
+Christian Biesinger <cbiesinger@gmail.com>
+Christian Bodart <chris@bodar.com>
 Christian Eyrich <ch.ey@gmx.net>
 Christian Jansen <christian.jansen@sun.com>
 Christian Schmidt <bugzilla.mozilla.org-1@chsc.dk>
+Christian Schneider <c.schneider@scram.de>
+christine@netscape.com
 Christopher A. Aillon <christopher@aillon.com>
 Christopher Blizzard <blizzard@appliedtheory.com>
+Christopher Blizzard <blizzard@mozilla.org>
 Christopher Cook <tangent@intraplanar.net>
+Christopher Davis <chrisd@torproject.org>
 Christopher Hoess <choess@force.stwing.upenn.edu>
+Christopher Nebergall <cneberg@sandia.gov>
 Christopher Seawood
 Christopher Thomas <cst@yecc.com>
+Chris Torek <torek@bsdi.com>
 Chris Waterson <waterson@netscape.com>
+Chris Wilson <chris@chris-wilson.co.uk>
 <chuang@netscape.com>
 Chuck Boatwright <cboatwri@netscape.com>
+<chwu@nortelnetworks.com>
+Claudio Ciccani <klan@users.sf.net>
+Clayton Williams <claytonw@mit.edu>
+Clint Talbert <cmtalbert@gmail.com>
 Clint Talbert <ctalbert.moz@gmail.com>
+Colin Barrett <cbarrett@mozilla.com>
+Colin Blake <colin@theblakes.com>
 Colin Phillips <colinp@oeone.com>
+<coliver@mminternet.com>
+Collabora Ltd
+Collin Jackson <mozilla@collinjackson.com>
+conor@the325project.org
+Conrad Carlen <conrad@ingress.com>
+Constantine A. Murenin <cnst+moz#bugmail.mojo.ru>
+Craig Topper <craig.topper@gmail.com>
+crock@veilnetworks.com
+Crocodile Clips Ltd
+Cryptography Research
 Csaba Borbola <csaba.borbola@sun.com>
+CSIRO
 Curtis Bartley <cbartley@mozilla.com>
 Curtis Jewell <csjewell@mail.freeshell.org>
 Cyrille Moureaux <Cyrille.Moureaux@sun.com>
+Cyrus Omar
+Cyrus Patel <cyp@fb14.uni-mainz.de>
+Dafydd Jones
+Dainis Jonitis <Dainis_Jonitis@swh-t.lv>
 Dan Cannon <dc2@myrealbox.com>
 Dan Haddix <dan6992@hotmail.com>
 Daniel Aquino <mr.danielaquino@gmail.com>
 Daniel Boelzle <mozilla@boelzle.org>
+Daniel Bratell <bratell@lysator.liu.se>
+Daniel Brooks <db48x@db48x.net>
 Daniel Brooks <db48x@yahoo.com>
+Daniel Glazman <daniel.glazman@disruptive-innovations.com>
 Daniel Glazman <daniel@glazman.org>
+Daniel Holbert <dholbert@mozilla.com>
+Daniel Kouril <kouril@ics.muni.cz>
+Daniel Kraft <d@domob.eu>
+Daniel Krieg
+Daniel Veditz <dveditz@cruzio.com>
 Daniel Veditz <dveditz@mozilla.com>
 Daniel Witte <dwitte@stanford.edu>
 Dan Matejka <danm@netscape.com>
 Dan Mills <thunder@mozilla.com>
 Dan Mosedale <dmose@mozilla.org>
 Dan Parent <danp@oeone.com>
+Dan Rosen <dr@netscape.com>
 Dan Veditz <dveditz@netscape.com>
+Dan Witte <dwitte@mozilla.com>
 Dão Gottwald <dao@design-noir.de>
 Darin Fisher <darin@meer.net>
+darren.deridder@icarusproject.com
+Dave Camp <dcamp@mozilla.com>
+Dave Herman <dherman@mozilla.com>
+davel@mozilla.com
+Dave Mandelin <dmandelin@mozilla.com>
+Dave Reed
 Dave Townsend <dtownsend@oxymoronical.com>
+David Anderson <danderson@mozilla.com>
+David Andersson <liorean@gmail.com>
 David Ascher <dascher@mozilla.com>
+David Baron <dbaron@dbaron.org>
 David Baron <dbaron@mozilla.org>
 David Bienvenu <bienvenu@davidbienvenu.org>
+David Bienvenu <bienvenu@nventure.com>
+David Bradley <bradley@netscape.com>
+David Burns <dburns@mozilla.com>
+David Courtin <dcourtin@systemplus.fr>
+David Dahl <ddahl@mozilla.com>
+David Dick <ddick@cpan.org>
 David Drinan <ddrinan@netscape.com>
+David Einstein <Deinst@world.std.com>
+Davide Prina
+David Finch
+David Gardiner <david.gardiner@unisa.edu.au>
+David Greenspan
+David Haas <haasd@cae.wisc.edu>
+David Hamp-Gonsalves
 David Humphrey <david.humphrey@senecac.on.ca>
 David Hyatt <hyatt@mozilla.org>
+David James
+David J. Fiddes <D.J.Fiddes@hw.ac.uk>
+<davidm@netscape.com>
+David P. Caldwell <inonit@inonit.com>
 David P. Drinan <ddrinan@netscape.com>
+David Rajchenbach-Teller <dteller@mozilla.com>
+David Savage
+David S. Miller <davem@redhat.com>
 David Turley <dturley@pobox.com>
+David Woodhouse <dwmw2@infradead.org>
+David Zbarsky <dzbarsky@gmail.com>
 Dean Tessman <dean_tessman@hotmail.com>
+<deneen@alum.bucknell.edu>
+Denis Antrushin <adu@sparc.spb.su>
+Denis Issoupov <denis@macadamian.com>
+Dennis Handly
+Derrick Rice <derrick.rice@gmail.com>
+<desale@netscape.com>
+diablohn
 <dianesun@netscape.com>
+Diane Trout <diane@ghic.org>
 Diego Biurrun <diego@biurrun.de>
 Diego Mira David <diegomd86@gmail.com>
 Dietrich Ayala <autonome@gmail.com>
+Dietrich Ayala <dietrich@mozilla.com>
+Digital Creations 2, Inc
 Dimas Perez Gago <dimassevfc@gmail.com>
+Disruptive Innovations
+<djoham@criadvantage.com>
 Don Bragg <dbragg@netscape.com>
+Don Brown
+Don Cone <dcone@netscape.com>
 Don Crandall <macdoc@interx.net>
 Donna Oberes <donna.oberes@gmail.com>
+Doodle <doodle@scenergy.dfmk.hu>
 Doron Rosenberg <doronr@naboonline.com>
+Dorus Peelen
+Douglas Stebila <douglas@stebila.ca>
 Douglas Thrift <douglas@douglasthrift.net>
+Doug Sherk <dsherk@mozilla.com>
+Doug Turner <dougt@dougt.org>
+Doug Wright
+<drbrain-bugzilla@segment7.net>
 Drew Willcoxon <adw@mozilla.com>
+<drimbk@yahoo.com>
+Dr Stephen Henson <stephen.henson@gemplus.com>
+<d-russo@ti.com>
+Dr Vipul Gupta <vipul.gupta@sun.com>
+Dvornik Laszlo
+Ed Burns <edburns@acm.org>
 Edmund Wong <ewong@pw-wspx.org>
 Eduardo Teruo Katayama <eduardo@ime.usp.br>
 Edward Lee <edilee@mozilla.com>
+Egor Starkov <starkov.egor@gmail.com>
 Ehsan Akhgari <ehsan.akhgari@gmail.com>
+Eitan Isaacson <eitan@monotonous.org>
+Eli Friedman <sharparrow1@yahoo.com>
+Elika J. Etemad <fantasai@inkedblade.net>
+Emanuele Costa <emanuele.costa@gmail.com>
+emk <VYV03354@nifty.ne.jp>
+Emmanuel Pacaud <emmanuel.pacaud@free.fr>
 Emre Birol <emrebirol@gmail.com>
+<epstein@tellme.com>
+Ere Maijala <emaijala@kolumbus.fi>
+Eric Anholt <eric@anholt.net>
 Eric Ballet Baz
 Eric Belhaire <eric.belhaire@ief.u-psud.fr>
+Eric Butler <zantifon@gmail.com>
+Eric Hedekar <afterthebeep@gmail.com>
 Eric Hodel <drbrain@segment7.net>
+Eric J. Burley <ericb@neoplanet.com>
+Eric Promislow
+Eric Vaughan <evaughan@netscape.com>
 Erik Fabert <jerfa@yahoo.com>
+Erik van der Poel
+Erik Vold <erikvvold@gmail.com>
 Ernst Herbst <hb@calen.de>
+Ervin Yan <ervin.yan@sun.com>
+Erwan Loisant <eloisant@gmail.com>
+Esben Mose Hansen <esben@oek.dk>
+Ethan Hugg
+Eugeniy Meshcheryakov <eugen@debian.org>
 Evan Stratford <evan.stratford@gmail.com>
+Evan Yan <evan.yan@sun.com>
 Fabian Guisset <hidday@geocities.com>
+Fabrice Desré <fabrice.desre@gmail.com>
+Federico Mena-Quintero <federico@novell.com>
+Felipe Gomes <felipc@gmail.com>
+Felix Fung <felix.the.cheshire.cat@gmail.com>
+<felix.meschberger@day.com>
+Feng Qian
+Fernando Herrera <fherrera@onirica.com>
+Fernando Jimenez <ferjmoreno@gmail.com>
 Fidesfit
+Flock Inc.
+Florian Boesch <pyalot@gmail.com>
+Florian Hänel <heeen@gmx.de>
 Florian Quèze <florian@instantbird.org>
+Florian Queze <florian@queze.net>
+Florian Scholz <elchi3@elchi3.de>
+<flying@dom.natm.ru>
+France Telecom Research and Development
 Francisco Jose Mulero <fjmulero@gmv.com>
+Franck
+Francois Marier <francois@fmarier.org>
 Frank Schönheit <frank.schoenheit@gmx.de>
+Frank Tang <ftang@netscape.com>
 Frank Tang ftang@netscape.com
 Frank Wein <mcsmurf@mcsmurf.de>
+Frank Yan <fyan@mozilla.com>
+Franky Braem
+<franky@pacificconnections.com>
+Franz Sirl <Franz.Sirl-kernel@lauterbach.com>
+Frederic Plourde <frederic.plourde@polymtl.ca>
+Frederic Wang <fred.wang@free.fr>
 Fred Jendrzejewski <fred.jen@web.de>
 Fredrik Holmqvist <thesuckiestemail@yahoo.se>
+Fredrik Larsson <nossralf@gmail.com>
 Friedrich Beckmann <friedrich.beckmann@gmx.de>
 Fritz Schneider <fritz@google.com>
+<fur@netscape.com>
+Gagan Saksena <gagan@netscape.com>
+Garrett Arch Blythe
+Garrett Smith
 Garth Smedley <garths@oeone.com>
+Gary Kwong
 Gary Kwong <nth10sd@gmail.com>
 Gary van der Merwe <garyvdm@gmail.com>
 Gavin Sharp <gavin@gavinsharp.com>
 Gayatri Bhimaraju <gayatrib@netscape.com>
+Gefferth Andras
 Gekacheka <gekacheka@yahoo.com>
+Geoff Lankow <geoff@darktrojan.net>
 Geoffrey C. Wenger <gwenger@qualcomm.com>
+George Kangas
+<george@vanous.com>
+George Wright <george@mozilla.com>
+Georgi Guninski <guninski@guninski.com>
+Georg Maaß <georg@bioshop.de>
 Gervase Markham <gerv@gerv.net>
+Gian-Carlo Pascutto <gpascutto@mozilla.com>
 Gianfranco Balza <bv1578@gmail.com>
+Gianluca Turconi
+Gianugo Rabellino <gianugo@apache.org>
 Gijs Kruitbosch <gijskruitbosch@gmail.com>
+Ginn Chen <ginn.chen@sun.com>
 Giorgio Maone <g.maone@informaction.com>
+Girish Sharma <scrapmachines@gmail.com>
+Girts
+Giscard Girard
+Giuseppe Modugno
 Glaucus Augustus Grecco Cardoso <glaucus@ime.usp.br>
+Glen Nakamura <glen@imodulo.com>
+Glenn Randers-Pehrson <glennrp@gmail.com>
+Goldman Eleonora
 Google Inc
+Google Inc.
+Gordon Sheridan <gordon@netscape.com>
+Graeme McCutcheon <graememcc_firefox@graeme-online.co.uk>
+Graydon Hoare <graydon@mozilla.com>
+Gregory Szorc <gps@mozilla.com>
+Grig Gheorghiu <grig@gheorghiu.net>
+Guillermo Robla Vicario <groblavicario@gmail.com>
+Guoxin Fan <gfan@sta.samsung.com>
+Gus Verdun <gustavoverdun@aol.com>
+<gwatmuff@geographicweb.com.au>
+Haamed Gheibi <gheibi@metanetworking.com>
+Håkan Waara <hwaara@chello.se>
+Håkan Waara <hwaara@gmail.com>
+Halacsy Peter
+<hannes@helma.at>
+Hanno Boeck <hanno@hboeck.de>
+Hans-Andreas Engel
 Hans-Andreas Engel <engel@physics.harvard.edu>
+Harri Pitkanen
+Harshal Pradhan <keeda@hotpop.com>
+Heather Arthur <fayearthur@gmail.com>
 Heather Arthur <harthur@cmu.edu>
 Heikki Toivonen <heikki@netscape.com>
+Hein Roehrig
 Henrik Gemal <mozilla@gemal.dk>
 Henrik Skupin <hskupin@gmail.com>
 Henri Sivonen <henris@clinet.fi>
+Henri Sivonen <hsivonen@iki.fi>
+Henry Cejtin
 Henry Jia <Henry.Jia@sun.com>
 Henry Sobotka <sobotka@axess.com>
-Håkan Waara <hwaara@chello.se>
+Heriot-Watt University
+Hermann Schwab <hhschwab@gmail.com>
+Hermecz Vajk
+Hernan Rodriguez Colmeiro <colmeiro@gmail.com>.
+Hewlett-Packard Company
+Hiroshi Shimoda <piro@p.club.ne.jp>
+Hoa Nguyen <hoa.nguyen@intel.com>
+Honza Bambas <honzab@firemni.cz>
 Howard Chu <hyc@symas.com>
+Hubbie Shaw
+Hubert Figuière <hub@mozilla.com>
 Hubert Gajewski <hubert@hubertgajewski.com>
+Ian Gilman <ian@iangilman.com>
+Ian Hickson <ian@hixie.ch>
 Ian McGreer <mcgreer@netscape.com>
+Ian Melven <imelven@mozilla.com>
 Ian Neal <iann_bugzilla@blueyonder.co.uk>
+Ian Oeschger
 IBM Corporation
+i-DNS.net International
+<igor3@apochta.com>
+Igor Bazarny <igor.bazarny@gmail.com>
+Igor Bukanov <igor@mir2.org>
+igor@fastmail.fm
+igor@icesoft.no
+Igor Tandetnik
+Ilya Konstantinov <mozilla-code@future.shiny.co.il>
+Intel Corporation
 Irakli Gozalishvili <rfobic@gmail.com>
+Jaakko Kiviluoto <jaakko.kiviluoto@digia.com>
+Jacek Piskozub <piskozub@iopan.gda.pl>
+Jacob Bramley <Jacob.Bramely@arm.com>
+Jae-Seong Lee-Russo <lusian@gmail.com>
+James Boston <mozilla@jamesboston.ca>
+James Bunton <jamesbunton@fastmail.fm>
 James Green <jg@cyberstorm.demon.co.uk>
+James Justin Harrell
+James L. Nance
+James Ross <silver@warwickcompsoc.co.uk>
+James Willcox <jwillcox@mozilla.com>
 Jamie Zawinski <jwz@jwz.org>
+Jan Bambas <honzab@firemni.cz>
+Jan Darmochwal
+Jan de Mooij <jandemooij@gmail.com>
 Jan Horak <jhorak@redhat.com>
+Jan-Klaas Kollhof
+Jan Odvarko <odvarko@gmail.com>
+Jan Varga <Jan.Varga@gmail.com>
 Jan Varga <varga@ku.sk>
+Jan Wrobel <wrobel@blues.ath.cx>
+Jared Wein <jwein@mozilla.com>
 <jarrod.k.gray@rose-hulman.edu>
 Jason Barnabe <jason_barnabe@fastmail.fm>
+Jason Duell <jduell.mcbugs@gmail.com>
 Jason Eager <jce2@po.cwru.edu>
+Jason Kersey <kerz@netscape.com>
+Jason Orendorff <jorendorff@mozilla.com>
 Jason Oster <parasyte@kodewerx.org>
+Jason Sachs <jmsachs@gmail.com>
+Jason Voll <jvoll@mozilla.com>
 Javier Delgadillo <javi@netscape.com>
+Javier Pedemonte <pedemont@us.ibm.com>
+Jay Patel <jay@mozilla.org>
+Jean-Francois Ducarroz <ducarroz@netscaape.com>
 Jean-François Ducarroz <ducarroz@netscaape.com>
+Jean-Jacques Enser <jj@netscape.com>
 Jeff Beckley <beckley@qualcomm.com>
+Jeff Gilbert <jgilbert@mozilla.com>
 Jeff Hammel <jhammel@mozilla.com>
+Jeff Muizelaar <jmuizelaar@mozilla.com>
+Jeff Thompson
 Jeff Tsai <jt95070@netscape.net>
+Jeff Walden <jwalden+bmo@mit.edu>
 Jeff Walden <jwalden+code@mit.edu>
 Jens Bannmann <jens.b@web.de>
 Jens Hatlak <jh@junetz.de>
+Jeremias Bosch <jeremias.bosch@gmail.com>
+Jeremy D. Lea <reg@openpave.org>
 Jeremy Laine <jeremy.laine@m4x.org>
 Jeremy M. Dolan <jmd@pobox.com>
 Jeremy Morton <bugzilla@game-point.net>
+Jeroen Dobbelaere <jeroen.dobbelaere@acunia.com>
+<Jerry.Kirk@Nexwarecorp.com>
+Jesper Kristensen <mail@jesperkristensen.dk>
 Jesse Ruderman <jruderman@gmail.com>
+Jessica Blanco <jblanco@us.ibm.com>
+<jhs@lysator.liu.se>
+<ji_bo@yahoo.com>
 Jie Zhang <jzhang918@gmail.com>
+Jignesh Kakadiya <jigneshhk1992@gmail.com>
+Jim Blandy <jimb@mozilla.com>
+Jim Chen <jchen@mozilla.com>
+Jim Grandy
+Jim Ley <jim@jibbering.com>
 Jim Mathies <jmathies@mozilla.com>
+Jim Nance <jim_nance@yahoo.com>
+<jim-patterson@ncf.ca>
 Jim Porter <squibblyflabbetydoo@gmail.com>
+Jim Roskind <jar@netscape.com>
+<jlaprise@delanotech.com>
 J.M Betak jbetak@netscape.com
 Joachim Herb <herb@leo.org>
+Joachim Kuebart
+Joaquin Cuenca Abela
+Joe Drew <joe@drew.ca>
 Joe Hewitt <hewitt@netscape.com>
 Joe Hughes <joe@retrovirus.com>
+Joel Maher <joel.maher@gmail.com>
+joerg.schaible@gmx.de
+Joe Walker <jwalker@mozilla.com>
+Joey Armstrong <joey@mozilla.com>
 Joey Minta <jminta@gmail.com>
+Johan Charlez <johan.charlez@gmail.com>
+Johann Petrak <johann@ai.univie.ac.at>
 Johnathan Nightingale <johnath@mozilla.com>
+John Bandhauer <jband@netscape.com>
+John B. Keiser
+John C. Griggs <johng@corel.com>
+John Daggett <jdaggett@mozilla.com>
+John Fairhurst <john_fairhurst@iname.com>
+John Ford <jhford@mozilla.com>
+John Gardiner Myers <jgmyers@speakeasy.net>
 John Gaunt <jgaunt@netscape.com>
 John G Myers <jgmyers@netscape.com>
+John Hanely
 John Morkel <jmorkel@gmail.com>
+John Morrison <jrgmorrison@aol.com>
+Johnny Stenback <jst@mozilla.com>
 John Ratke <jratke@owc.net>
 John Resig <jresig@mozilla.com>
+John Schneider
+John Sun <john.sun@sun.com>
+John Taylor <jtaylor@netscape.com>
+John Zhang <jzhang@aptana.com>
 Jonas Joergensen <jonasj@jonasj.dk>
+Jonas Jonsson <mozilla.nospam@fatbrain.org>
+Jonas Sicking <jonas@sicking.cc>
 Jonas Sicking <sicking@bigfoot.com>
+Jonathan Granrose <granrose@netscape.com>
+Jonathan Griffin <jgriffin@mozilla.com>
+Jonathan Hage <hage.jonathan@gmail.com>
 Jonathan Kamens <jik@kamens.us>
+Jonathan Kew <jfkthame@gmail.com>
 Jonathan Protzenko <jonathan.protzenko@gmail.com>
+Jonathan Watt <jwatt@jwatt.org>
 Jonathan Wilson <jonwil@tpgi.com.au>
+Jonathon Jongsma <jonathon.jongsma@collabora.co.uk>
 Jon Baumgartner <jon@bergenstreetsoftware.com>
+Jon Herron <leftturnsolutions@yahoo.com>
+Jono DiCarlo <jdicarlo@mozilla.com>
 Jono X <jono@mozilla.com>
+Joonas Pihlaja <jpihlaja@cc.helsinki.fi>
+Jorge Villalobos <jorge@mozilla.com>
 Jorge Villalobos <jorge.villalobos@gmail.com>
+Jory A. Pratt <geekypenguin@gmail.com>
 Josh Aas <josh@mozilla.com>
 Josh Geenen <joshgeenen+tb@gmail.com>
+Josh Lurz <jlurz24@gmail.com>
+Josh Matthews <josh@joshmatthews.net>
 Josh Soref <timeless@bemail.org>
 Joshua Cranmer <Pidgeot18@gmail.com>
+Joshua M. <soapyhamhocks@gmail.com>
+Joshua Randall <jcrandall@alum.mit.edu>
 J. Paul Reed <preed@mozilla.com>
+Juan Lang
+Julian Seward <jseward@acm.org>
+Julian Viereck <jviereck@mozilla.com>
+Julien Lafon <julien.lafon@gmail.com>
+Julien Lecomte
 Jungshik Shin <jshin@mailaps.org>
 Jussi Kukkonen <jussi.kukkonen@welho.com>
+Justin Arthur <justinarthur@ieee.org>
+Justin Bradford <jab@atdot.org>
 Justin Dolske <dolske@mozilla.com>
 Justin Lebar <justin.lebar@gmail.com>
 Justin Wood <Callek@gmail.com>
+Kai Engert <kaie@redhat.com>
 Kai Engert <kengert@redhat.com>
+Kailas Patil <patilkr24@gmail.com>
+Kan-Ru Chen <kchen@mozilla.com>
 Karl Guertin <grayrest@grayrest.com>
+Karl Tomlinson <karlt+@karlt.net>
 Karsten Düsterloh <mnromyr@tprac.de>
+Karsten Sperling <spiff@phreax.net>
+Kartikaya Gupta <kgupta@mozilla.com>
+Kaspar Brand <mozcontrib@velox.ch>
 Kathleen Brade <brade@pearlcrescent.com>
+Katsuhiko Momoi
 Kefu (Fisher) Zhao <kza3@sfu.ca>
+Keith Packard <keithp@keithp.com>
+Keith Rarick <kr@xph.us>
+Keith Schwarz <kschwarz@mozilla.com>
+Keith Visco <kvisco@ziplink.net>
+Ken Key <key+mozilla@ksquared.net>
+Kenneth Herron <kherron@fmailbox.com>
+Kenny Heaton <kennyheaton@gmail.com>
 Kent James <kent@caspia.com>
 Kevin Gerich <kevin@kmgerich.com>
+Kevin Hendricks <kevin.hendricks@sympatico.ca>
+Kevin McCluskey <kmcclusk@netscape.com>
 Kevin Puetz <puetzk@iastate.edu>
+<khanson@netscape.com>
 Kin Blas <kin@netscape.com>
+Kipp E.B. Hickman
 Kipp Hickman <kipp@netscape.com>
+Kishore Arepalli <kishore.arepalli@gmail.com>
+<k.mike@gmx.net>
 Kohei Yoshino <kohei.yoshino@gmail.com>
+Konstantin Mirny
+Korea Information Security Agency
 Krishna Mohan Khandrika <kkhandrika@netscape.com>
+Kris Maglione <maglione.k@gmail.com>
+Kristian Høgsberg <krh@redhat.com>
 Kuden <spitfire.kuden@gmail.com>
+Kurt Lidl <lidl@pix.net>
+Kyle Huey <khuey@kylehuey.com>
 Kyle Huey <me@kylehuey.com>
+Kyle Machulis <kyle@nonpolynomial.com>
+Kyle Simpson <ksimpson@mozilla.com>
 Kyle Yuan <kyle.yuan@sun.com>
+Landry Breuil <landry@openbsd.org>
+Lan Qiang <jameslan@gmail.com>
+Larry Fitzpatrick <lef@opentext.com>
+Lars Erdmann
+Lars Knoll <knoll@kde.org>
 Lars Wohlfahrt <thetux.moz@googlemail.com>
+LastPass.com
+László Jánszky
+László Németh <nemethl@gyorsposta.hu>
+Laurent Jouanneau <laurent.jouanneau@disruptive-innovations.com>
 Leif Hedstrom <leif@netscape.com>
+Lenka Fibikova <fibikova@exp-math.uni-essen.de>
 Lennart Bublies <Lennart.Bublies@gmx.de>
+Leon Sha <leon.sha@oracle.com>
+Lev Serebryakov <lev@serebryakov.spb.ru>
+Le Zhang <r0bertz@gentoo.org>
+Liam Davis-Mead
+Lidong <lidong520@263.net>
+Lina Kemmel <lkemmel@il.ibm.com>
 <loadrunner@betak.net>
 Lorenzo Colitti <lorenzo@colitti.com>
+Louie Zhao <louie.zhao@sun.com>
+Lubos Ures
+Lucas Rocha <lucasr@mozilla.com>
 Ludovic Hirlimann <ludovic@hirlimann.net>
+Luke Wagner <lw@mozilla.com>
+<Lupin.wp@gmail.com>
 M.-A. Darche
 Magnus Melin <mkmelin+mozilla@iki.fi>
+Maha Abou El Rous <mahar@eg.ibm.com>
 Makoto Kato <m_kato@ga2.so-net.ne.jp>
+Malcolm Rowe <malcolm-bmo@farside.org.uk>
+Malcolm Smith <malsmith@cs.rmit.edu.au>
+Malini Das <mdas@mozilla.com>
+Manish Singh <manish@flock.com>
 Manuel Reimer <manuel.reimer@gmx.de>
+Marc Attinasi
+Marc Bevand <bevand_m@epita.fr>
+Marcin Lubonski
+Marc Mulcahy <marc.mulcahy@sun.com>
 Marco Bonardo <mak77@bonardo.net>
+Marco Castelluccio <mar.castelluccio@studenti.unina.it>
+Marco Fabbri
+Marco Pesenti Gritti <marco@gnome.org>
 Marc Zahnlecker <m.zahnlecker@googlemail.com>
 Margaret Leibovic <margaret.leibovic@gmail.com>
+Marina Samuel <msamuel@mozilla.com>
+Mark Banner <bugzilla@standard8.plus.com>
 Mark Banner <mark@standard8.plus.com>
+Mark Capella <markcapella@twcny.rr.com>
+Mark Cote <mcote@mozilla.com>
+Mark Finkle <mark.finkle@gmail.com>
 Mark Finkle <mfinkle@mozilla.com>
+Mark Hammond <markh@activestate.com>
 Mark Mentovai <mark@moxienet.com>
 Mark "Mook" Yen <Mook.moz+Instantbird.code@gmail.com>
 Mark Olson <maolson@earthlink.net>
+Mark Pilgrim <pilgrim@gmail.com>
 Mark Smith <mcs@pearlcrescent.com>
+Mark Steele <mwsteele@gmail.com>
 Mark Swaffer <swaff@fudo.org>
 Markus Adrario <mozilla@adrario.de>
+Markus G. Kuhn <mkuhn@acm.org>
 Markus Hossner <markushossner@gmx.de>
 Markus Stange <mstange@themasta.com>
+Martijn Pieters <mj@digicool.com>
+Martijn Wargers <martijn.martijn@gmail.com>
+Martin Hassman <hassman@czilla.cz>
+Martin Honnen <martin.honnen@gmx.de>
+Martin McNickle <mmcnickle@gmail.com>
 Martin Schroeder <mschroeder@mozilla.x-home.org>
+Martin Stransky <stransky@redhat.com>
+Martin v. Loewis <martin@v.loewis.de>
+Martin Zvieger <martin.zvieger@sphinx.at>
+Masakazu Takahashi
+Masaki Katakai <katakai@japan.sun.com>
+Masatoshi Kimura <VYV03354@nifty.ne.jp>
 Masayuki Nakano <masayuki@d-toybox.com>
+Mathias Hasselmann <mathias.hasselmann@gmx.de>
+Mathieu Fenniak
+Mats Palmgren <matspal@gmail.com>
+Matt Brubeck <mbrubeck@mozilla.com>
+Matt Crocker <matt@songbirdnest.com>
 Matt Dudziak <mdudziak@qualcomm.com>
+Matt Fisher <matt@netscape.com>
+Matthew Gregan <kinetik@flim.org>
 Matthew Mecca <matthew.mecca@gmail.com>
+Matthew Noorenberghe <mnoorenberghe@mozilla.com>
 Matthew Willis <mattwillis@gmail.com>
+Matt Woodrow <mwoodrow@mozilla.com>
 Mauro Cicognini <mcicogni@libero.it>
+Max Stepin <maxstepin@gmail.com>
+<mcmullen@netscape.com>
+Meena Vyas <meena.vyas@oracle.com>
 Mehdi Mulani <mmmulani@uwaterloo.ca>
+Mehdi Mulani <mmulani@mozilla.com>
 Merike Sell <merikes@gmail.com>
+Merle Sterling <msterlin@us.ibm.com>
+<mff@research.att.com>
+Michael Ash <kal_el_1938@hotmail.com>
 Michael Braun <michael-dev@fami-braun.de>
 Michael Büttner <michael.buettner@sun.com>
+Michael Daumling <daumling@adobe.com>
+Michael Emmel <mike.emmel@gmail.com>
 Michael Foord <fuzzyman@voidspace.org.uk>
+Michael Hanson <mhanson@mozilla.com>
 Michael Hein <mhein@sun.com>
+Michael J. Fromberger <sting@linguist.dartmouth.edu>
 Michael Johnston <special.michael@gmail.com>
+Michael Judge <mjudge@netscape.com>
 Michael Kohler <michaelkohler@live.com>
+Michael Kraft <morac99-firefox2@yahoo.com>
 Michael Kraft <morac99-firefox@yahoo.com>
+Michael Lipp
 Michael Lowe <michael.lowe@bigfoot.com>
+Michael Martin
+michaelp
+Michael Ratcliffe <mratcliffe@mozilla.com>
+Michael Roovers
 Michael Ventnor <m.ventnor@gmail.com>
+Michael Wu <flamingice@sourmilk.net>
+Michael Yoshitaka Erlewine <mitcho@mitcho.com>
+Michal Novotny <michal.novotny@gmail.com>
 Michiel van Leeuwen <mvl@exedo.nl>
+Mihai Șucan <mihai.sucan@gmail.com>
+Miika Jarvinen <mjarvin@gmail.com>
 Mikeal Rogers <mikeal.rogers@gmail.com>
+Mike Beltzner <beltzner@mozilla.com>
 Mike Conley <mconley@mozilla.com>
 Mike Connor <mconnor@steelgryphon.com>
+Mike Hommey <mh@glandium.org>
 Mike Kaganski <mikekaganski@gmail.com>
+Mike Kaplinskiy <mike.kaplinskiy@gmail.com>
+Mike Kaply
 Mike Kowalski <mikejk@ameritech.net>
+Mike Kristoffersen <mikek@mikek.dk>
+Mike McCabe <mccabe@netscape.com>
 Mike Norton <xor@ivwnet.com>
 Mike Pinkerton <pinkerton@netscape.com>
 Mike Potter <mikep@oeone.com>
 Mike Shaver <shaver@off.net>
+Milen Nankov
+Milind <sukhisoul@yahoo.com>
+Ming Gao <gaoming@cn.ibm.com>
 Misak Khachatryan <misak.bugzilla@gmail.com>
+Mitchell Field <mitch_1_2@live.com.au>
+Mitchell Stoltz <mstoltz@netscape.com>
 Mitesh Shah <mitesh@netscape.com>
+M Joonas Pihlaja <jpihlaja@cc.helsinki.fi>
+Mohammad R. Haghighat <mohammad.r.haghighat@intel.com>
 Mohan Bhamidipati <mohanb@netscape.com>
+Mook <mook.moz@gmail.com>
+Morten Nilsen <morten@nilsen.com>
 Mostafa Hosseini <mostafah@oeone.com>
+Mounir Lamouri <mounir.lamouri@mozilla.com>
+moz_bug_r_a4
+Mozdev Group, Inc
 Mozilla Foundation
 Mozilla Japan
+<mozilla@pdavis.cx>
+Mrinal Kant <mrinal.kant@gmail.com>
+Ms2ger <ms2ger@gmail.com>
+Murali S R <murali.sr92@yahoo.com>
+Muzaffar Mahkamov <mmahkamov@eisst.com>
 Myk Melez <myk@mozilla.org>
+<myngs@hotmail.com>
+Nagendra Modadugu <ngm@google.com>
+Nagy Viktor
+Naoki Hotta <nhotta@netscape.com>
+Nao Toyamo
+Nate Nielsen <nielsen@memberwebs.com>
+Nattachai Ungsriwong <nattachai@gmail.com>
 Navin Gupta <naving@netscape.com>
+Neil Deakin <enndeakin@gmail.com>
 Neil Deakin <enndeakin@sympatico.ca>
 Neil Rashbrook <neil@parkwaycc.co.uk>
+Nelson Bolyard <nelson@bolyard.me>
+Neo Liu <nian.liu@sun.com>
 Netscape Communications Corporation
 New Dimensions Consulting, Inc
+Nicholas Nethercote <nnethercote@mozilla.com>
+Nick Fitzgerald <nfitzgerald@mozilla.com>
 Nick Kreeger <nick.kreeger@park.edu>
+Nickolay Ponomarev <asqueella@gmail.com>
 Niels Provos <niels@google.com>
+Nikhil Marathe <nsm.nikhil@gmail.com>
+Nils Gura <nils.gura@sun.com>
+Nils Larsch <nla@trustcenter.de>
 Nils Maier <maierman@web.de>
+Ningjie Chen <chenn@email.uc.edu>
+Nino D'Aversa <ninodaversa@gmail.com>
+Nippon Telegraph and Telephone Corporation
+Nochum Sossonko <highmind63@gmail.com>
+Nokia Corporation
+Noll Janos
+Norris Boyd <nboyd@atg.com>
+Novell Corporation
+NVIDIA Corporation
 OEone Corporation
+<okin7@yahoo.fr>
+Oleg Romashin <romaxa@gmail.com>
+Oliver Hunt
+Olivier Cahagne
+Olivier Gerardin <ogerardin@vo.lu>
 Olivier Parniere
 Olli Pettay <Olli.Pettay@helsinki.fi>
+Ondrej Brablc <ondrej@allpeers.com>
 Oracle Corporation
 Oren Nachmore <nachmore@gmail.com>
+Oscar Fogelberg <osfo@home.se>
+Owen Taylor <otaylor@redhat.com>
+Øyvind Kolås <pippin@gimp.org>
 Pamela Greene <pamg.bugs@gmail.com>
+Panagiotis Astithas <past@mozilla.com>
+Paolo Amadini <http://www.amadzone.org/>
+Patipat Susumpow <kengggg@gmail.com>
+Patrick Beard <beard@netscape.com>
 Patrick C. Beard <beard@netscape.com>
 Patrick Cloke <clokep@gmail.com>
+Patrick Fey <bugzilla@nachtarbeiter.net>
+Patrick McManus <mcmanus@ducksong.com>
 Patrick Thompson <sailfish@unforgettable.com>
+Patrick Walton <pwalton@mozilla.com>
+Pattara Kiatisevi <ott@linux.thai.net>
+Paul Ashford <arougthopher@lizardland.net>
+Paul Biggar <pbiggar@mozilla.com>
 Paul Hangas <hangas@netscape.com>
+Paul Kocher
+Paul Kurczaba
 Paul O'Shannessy <paul@oshannessy.com>
+Paul Rouget <paul@mozilla.com>
 Paul Sandoz <paul.sandoz@sun.com>
 Paul Tomlin <paul@wavebreaks.com>
+Pavel Cvrcek
+Pawel Chmielowski
+PenPal
 Pete Collins
+Pete Collins <petejc@collab.net>
 Peter Annema <disttsc@bart.nl>
+Peter Bajusz <hyp-x@inf.bme.hu>
+Peter Lubczynski <peterl@netscape.com>
+Peter Naulls
 Peter Parente <parente@cs.unc.edu>
+Peter Seliger
+Peter Van der Beken <peter@propagandism.org>
 Peter Van der Beken <peterv@propagandism.org>
+Peter van der Woude
 Peter Weilbacher <mozilla@weilbacher.org>
+Pete Zha <pete.zha@sun.com>
+Petr Kostka <petr.kostka@st.com>
 Philip Chee <philip.chee@gmail.com>
 Philipp Kewisch <mozilla@kewis.ch>
+Philipp Vogt <vogge@vlbg.dhs.org>
 Philipp von Weitershausen <philipp@weitershausen.de>
+Philip Taylor <philip.taylor@cl.cam.ac.uk>
 Philip Zhao <philip.zhao@sun.com>
 Phil Lacy <philbaseless-firefox@yahoo.com>
+Phil Ringnalda
 Phil Ringnalda <philringnalda@gmail.com>
+Phil Schwartau <pschwartau@meer.net>
 Pierre Chanial <chanial@noos.fr>
 Pierre Phaneuf <pp@ludusdesign.com>
+Pierre Tardy <tardyp@gmail.com>
+POTI Inc
+Prabhat Hegde <prabhat.hegde@sun.com>
+Pranav Ravichandran <prp.1111@gmail.com>
 Prasad Sunkari <prasad@medhas.org>
+Priit Laes
 Princess Marshmallow <yumminess@netscape.com>
+Proofpoint, Inc.
+Q42 <http://www.q42.nl>
 QUALCOMM Incorporated
 Quentin Castier <idechix@instantbird.org>
 <racham@netscape.com>
+Radha Kulkarni <radha@netscape.com>
 Rajiv Dayal <rdayal@netscape.com>
 Ramalingam Saravanan
+Ramanathan Guha <guha@netscape.com>
 Ramiro Estrugo <ramiro@netscape.com>
+Randell Jesup
+Randolph Chung <tausq@debian.org>
+Rangan Sen <rangansen@netscape.com>
+Raúl Porcel <armin76@gentoo.org>
 Raymond Lee <raymond@appcoast.com>
 Ray Whitmer <rayw@netscape.com>
+Red Hat, Inc
+Rene Engelhard
+Rene Pronk <r.pronk@its.tudelft.nl>
+Reto Laemmler
+<rhp@netscape.com>
+Ria Klaassen
 <riceman+bmo@mail.rit.edu>
+Richard C. Swift <swift@netscape.com>
+Richard L. Walsh <dragtext@e-vertise.com>
 Richard Marti <richard.marti@gmail.com>
+Richard Newman <rnewman@mozilla.com>
+Richard Verhoeven <river@win.tue.nl>
+Richard Walsh
+Rich Dougherty
+Rich Salz
+Rich Walsh <dragtext@e-vertise.com>
+Rick Gessner <rickg@netscape.com>
 R.J. Keller
+R.J. Keller <rlk@trfenv.com>
 Rob Arnold <tellrob@gmail.com>
+Rob Campbell <rcampbell@mozilla.com>
+Robert Accettura <robert@accettura.com>
+Robert Churchill <rjc@netscape.com>
+Robert Ginda <rginda@hacksrus.com>
 Robert Ginda <rginda@ndcico.com>
 Robert John Churchill <rjc@netscape.com>
 Robert Kaiser <kairo@kairo.at>
+Robert Longson <longsonr@gmail.com>
+Robert Miner <rminer@geomtech.com>
+Robert O'Callahan <robert@ocallahan.org>
+Roberto Estrada <roberto.estrada@yahoo.es>
+Robert Relyea <rrelyea@redhat.com>
 Robert Sayre <sayrer@gmail.com>
+Robert Sesek <rsesek@bluestatic.org>
 Robert Strong <robert.bugzilla@gmail.com>
 Robin Edrenius <robin.edrenius@gmail.com>
 Robin Foster-Clark <robinf@netscape.com>
+Robin Lu <robin.lu@sun.com>
+Rob McCool
 Rod Spears <rods@netscape.com>
+Roger B. Sidje <rbs@maths.uq.edu.au>
+<rogerl@netscape.com>
+<rokicki@instantis.com>
+Roland Mainz <roland.mainz@informatik.med.uni-giessen.de>
 Romain Bezut <romain@bezut.info>
+Roman Ivanov <thingol@mail.ru>
 Roman Kaeppeler <rkaeppeler@web.de>
+Ronny Perinke <ronny.perinke@gmx.de>
+Roozbeh Pournader <roozbeh@sharif.edu>
+Roy Frostig <rfrostig@mozilla.com>
+Roy Yokoyama <yokoyama@netscape.com>
+RSA Security, Inc
+Russell King <rmk@arm.linux.org.uk>
+Rusty Lynch <rusty.lynch@intel.com>
 Ryan Cassin <rcassin@supernova.org>
 Ryan Flint <rflint@dslr.net>
 Ryan Jones <sciguyryan@gmail.com>
+Ryan VanderMeulen <ryanvm@gmail.com>
+Ryoichi Furukawa <oliver@1000cp.com>
+sagdjb@softwareag.com
 Samir Gehani <sgehani@netscape.com>
+Sammy Ford
 Sammy Ford <sford@swbell.net>
+Samphan Raruenrom
+Samuel Sieb <samuel@sieb.net>
+Sarlos Tamas
+scole@planetweb.com
+Scooter Morris <scootermorris@comcast.net>
+Scott Collins <scc@ScottCollins.net>
 Scott MacGregor <mscott@mozilla.org>
 Scott Putterman <putterman@netscape.com>
+Sean Cotter <cotter@netscape.com>
+Sean Dunn <seanedunn@yahoo.com>
+Sean Echevarria <sean@beatnik.com>
+Sean McMurray
+Sean Stangl <sstangl@mozilla.com>
 Sean Su <ssu@netscape.com>
+Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+Sebastian Kromp <46b@gulli.com>
 Sebastian Schwieger <sebo.moz@googlemail.com>
+Seno Aiko <Seno.Aiko@gmail.com>
 Serge Gautherie <sgautherie.bz@free.fr>
+Sergei Dolgov <sergei_d@fi.tartu.ee>
+Sergey Novikov <sergeyn@google.com>
 Seth Spitzer <sspitzer@mozilla.org>
+sfraser@netscape.com
+shadowpage
+Shailendra N Jain<shailen.n.jain@gmail.com>
 Shane Caraveo <shane@caraveo.com>
+Shaohua Wen
+Shawn Gong <shawn@mozilla.com>
 Shawn Wilsher <me@shawnwilsher.com>
+Sheueling Chang Shantz <sheueling.chang@sun.com>,
+Shi-Jun He
 <shliang@netscape.com>
+Shoji Matsumoto <shom@vinelinux.org>
+Shoshannah Forbes <xslf@xslf.com>
+shutdown@flashmail.com
+Shyjan Mahamud <mahamud@cs.cmu.edu>
+Shy Shalom <shooshX@gmail.com>
+Siarhei Siamashka <siarhei.siamashka@gmail.com>
 Siddharth Agarwal <sid1337@gmail.com>
+Siddharth Agarwal <sid.bugzilla@gmail.com>
+Sid Stamm <sid@mozilla.com>
+Silvia Zhao <silvia.zhao@sun.com>
+Silviu Trasca
 Simdesk Technologies Inc
 Simeon Morrison <smorrison@gte.com>
+Simmule Turner
+Simon Brouwer
 Simon Bünzli <zeniko@gmail.com>
 Simon Fraser <sfraser@netscape.com>
+Simon Fraser <smfr@smfr.org>
+Simon Montagu <smontagu@smontagu.org>
 Simon Paquet <bugzilla@babylonsounds.com>
 Simon Vaillancourt <simon.at.orcl@gmail.com>
 Simon Wilkinson <simon@sxw.org.uk>
+simonzack
+Sindre Dammann <sindrebugzilla@gmail.com>
+Sinker Li <thinker@codemud.net>
+Sion Fraser <sfraser@netscape.com>
+Siraj Razick <siraj.razick@collabora.co.uk>
+Sjoerd Visscher <sjoerd@w3future.com>
+Slavomir Katuscak <slavomir.katuscak@sun.com>
 slucy@objectivesw.co.uk
 smorrison@gte.com
+Soeren Munk Skroeder
+Sonja Mirtitsch
+Sonny Piers <sonny.piers@gmail.com>
+Søren Sandmann <sandmann@daimi.au.dk>
 Spencer Murray <spence@netscape.com>
+Spyros Livathinos <livathinos.spyros@gmail.com>
 Srilatha Moturi <srilatha@netscape.com>
+Sriram Ramasubramanian <sriram@mozilla.com>
+Srirang G Doddihal <brahmana@doddihal.com>
+Stanford University
+Stan Shebs <stanshebs@earthlink.net>
+Stefan Borggraefe
 Stefan Borggraefe <borggraefe@despammed.com>
 Stefan Fleiter <stefan.fleiter@web.de>
 Stefan Hermes <stefanh@inbox.com>
+Stefan Hundhammer <HuHa-zilla@gmx.de>
+Stefanik Gábor
 Stefan Sitter <ssitter@gmail.com>
+Steffen Imhof <steffen.imhof@gmail.com>
 Steffen Wilberg <steffen.wilberg@web.de>
 Stephane Saux <ssaux@netscape.com>
+Stephen Blackheath <entangled.mooched.stephen@blacksapphire.com>
 Stephen Clavering <mozilla@clav.me.uk>
+Stephen Donner
 Stephen Donner <technutz@netscape.net>
+Stephen Fung <fungstep@hotmail.com>
+Stephen Horlander <shorlander@mozilla.com>
 Stephen Horlander <stephen@noved.org>
 Stephen Lamm <slamm@netscape.com>
 Stephen Walker <walk84@yahoo.com>
+Steve Chapel <steven.chapel@sbcglobal.net>
+Steve Clark <buster@netscape.com>
+Steve Dagley <sdagley@netscape.com>
 Steve Dorner <sdorner@qualcomm.com>
+Steve Fink <sfink@mozilla.org>
 Steve Hampton <mvgrad78@yahoo.com>
+Steve Lamm <slamm@netscape.com>
+Steve Meredith <smeredith@netscape.com>
+Steve Morse <morse@netscape.com>
 Steven Garrity <steven@silverorange.com>
+Steven Michaud <smichaud@pobox.com>
+Steve Roussey
+Steve Swanson <steve.swanson@mackichan.com>
 Stuart Ballard <sballard@netreach.net>
+Stuart Morgan <stuart.morgan@alumni.case.edu>
 Stuart Parmenter <pavlov@pavlov.net>
 Sungjoon Steve Won <stevewon@gmail.com>
 Sun Microsystems, Inc
+Sun Microsystems, Inc.
+Suresh Duddi <dp@netscape.com>
+<svendtofte@svendtofte.com>
+Sylvain Pasche <sylvain.pasche@gmail.com>
 Takayuki Tei <taka@netscape.com>
+Takeshi Ichimaru <ayakawa.m@gmail.com>
+Takuro Ashie <ashie@clear-code.com>
+Tanner M. Young <mozilla@alyoung.com>
+Taras Glek <tglek@mozilla.com>
+Tatiana Meshkova <tanya.meshkova@gmail.com>
+Ted Mielczarek <ted@mielczarek.org>
 <tenthumbs@cybernex.net>
+Tero Koskinen <tero.koskinen@iki.fi>
+Terrence Cole <terrence@mozilla.com>
 Terry Hayes <thayes@netscape.com>
+Teune van Steeg <t.vansteeg@gmail.com>
+The Hewlett-Packard Company
+The MITRE Corporation
+The Nokia Corporation
+Theppitak Karoonboonyanan <thep@linux.thai.net>
+The University of Queensland
+Thiemo Seufer <seufer@csv.ica.uni-stuttgart.de>
 Thomas Benisch <thomas.benisch@sun.com>
+Thomas Blatter <bebabo@swissonline.ch>
+Thomas de Grenier de Latour <tom.gl@free.fr>
 Thomas Düllmann <bugzilla2009@duellmann24.net>
+Thomas K. Dyas <tom.dyas@gmail.com>
 Thomas Schmid <schmid-thomas@gmx.net>
+Tim Copperfield <timecop@network.email.ne.jp>
 timeless
+timeless <timeless@mac.com>
+Tim Hill <tim@prismelite.com>
+Tim Miller <mille449@gmail.com>
+Timothy B. Terriberry <tterriberry@mozilla.com>
+Timothy Nikkel <tnikkel@gmail.com>
+Timothy Wall <twalljava@dev.java.net>
+Timothy Watt <riceman+moz@mail.rit.edu>
+Tim Rowley <tor@cs.brown.edu>
+Tim Taubert <tim.taubert@gmx.de>
 Tim Taylor <tim@tool-man.org>
 Tobias Koenig <tobias.koenig@credativ.de>
+Tom Brinkman <reportbase@gmail.com>
 Tom Germeau <tom.germeau@epigoon.com>
+Tomi Leppikangas <tomi.leppikangas@oulu.fi>
+Tom Kneeland <tomk@mitre.org>
+Tom Pixley <joki@netscape.com>
+Tom Schuster <evilpies@gmail.com>
+Tom St Denis, tomstdenis@iahu.ca
+Tom Tromey
+Tony Chang <tony@ponderer.org>
+Tor Lillqvist
+Travis Bogard <travis@netscape.com>
+Trent Mick <TrentM@ActiveState.com>
+Trevor Fairey <tnfairey@gmail.com>
+Trevor Saunders <trev.saunders@gmail.com>
+Troy Farrell <troy@entheossoft.com>
 Tuukka Tolvanen <tt@lament.cjb.net>
+T. Zachary Laine <whatwasthataddress@gmail.com>
+Ulrich Drepper <drepper@redhat.com>
+University of Southern California
+Uri Bernstein <uriber@gmail.com>
 Varada Parthasarathi <varada@netscape.com>
+Varga Daniel
 Varuna Jayasiri <vpjayasiri@gmail.com>
+Vee Satayamas <vsatayamas@gmail.com>
+Victor Porof <vporof@mozilla.com>
+Vidur Apparao <vidur@netscape.com>
+Vilya Harvey <vilya@nag.co.uk>
+Vincent Béron <vberon@hermes.usherb.ca>
+Vipul Gupta <vipul.gupta@sun.com>
+Viswanath Ramachandran <vishy@netscape.com>
+Vivien Nicolas <21@vingtetun.org>
+Vladan Djeric <vdjeric@mozilla.com>
 Vladimir Vukicevic <vladimir@pobox.com>
+Vlad Sukhoy <vladimir.sukhoy@gmail.com>
+WADA <m-wada@japan.com>
+Waldemar Horwat <waldemar@acm.org>
+Walter Meinl <wuno@lsvw.de>
 Warren Harris <warren@netscape.com>
 Wei Xian Woo <wei0@gmx.com>
+Wellington Fernando de Macedo <wfernandom2004@gmail.com>
+Werner Sharp
+Wesley Garland
+Wesley Johnston <wjohnston@mozilla.com>
 Will Guaraldi <will.guaraldi@pculture.org>
 William A. Law <law@netscape.com>
+William B. Ackerman
 William Bonnet <wbonnet@on-x.com>
+William Chen <wchen@mozilla.com>
+William Cook <william.cook@crocodile-clips.com>
+William Jon McCann <william.jon.mccann@gmail.com>
+William Lachance <wlachance@mozilla.com>
+William Price <bugzilla@mob.rice.edu>
 William R. Price <wrprice@alumni.rice.edu>
+<william.tan@i-dns.net>
+Wladimir Palant <trev@gtchat.de>
 Wolfgang Rosenauer <wr@rosenauer.org>
 Wolfgang Sourdeau <wsourdeau@inverse.ca>
+<wtam@bigfoot.com>
+Wyllys Ingersoll <wyllys.ingersoll@sun.com>
+<x00000000@freenet.de>
+Yueheng Xu <yueheng.xu@intel.com>
+Yuh-Ruey Chen
+Yury <async.processingjs@yahoo.com>
+Yury Delendik
+Zachary Weinberg <zweinberg@mozilla.com>
+Zach Linder <zakness@gmail.com>
+Zach Lipton <zach@zachlipton.com>
+Zack Rusin <zack@kde.org>
+<zack-weg@gmx.de>
+Zack Weinberg <zweinberg@mozilla.com>
+Zbigniew Braniecki <gandalf@e-gandalf.net>
+<zen-parse@gmx.net>
+Zero-Knowledge Systems, Inc
 Žiga Sancin <bisi@pikslar.com>
