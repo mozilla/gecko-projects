@@ -30,7 +30,7 @@ var ApplicationFactory = {
   }
 };
 
-#include ../../mozilla/toolkit/components/exthelper/extApplication.js
+#include ../../toolkit/components/exthelper/extApplication.js
 
 function Application() {
   Deprecated.warning("STEEL is deprecated, you should use AppConstants.jsm or Services.jsm.",

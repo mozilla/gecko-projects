@@ -38,6 +38,6 @@ l10n-check::
 	@$(MAKE) -C mail/locales l10n-check
 
 ifdef ENABLE_TESTS
-include $(topsrcdir)/../mail/testsuite-targets.mk
+include $(topsrcdir)/mail/testsuite-targets.mk
 endif
 endif

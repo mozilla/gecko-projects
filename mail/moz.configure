@@ -6,4 +6,4 @@
 
 imply_option('MOZ_PLACES', True)
 
-include('../mozilla/toolkit/moz.configure')
+include('../toolkit/moz.configure')

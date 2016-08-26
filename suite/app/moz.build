@@ -8,9 +8,9 @@ USE_LIBS += ['mozglue']
 SOURCES += ['nsSuiteApp.cpp']
 LOCAL_INCLUDES += [
     '!/build',
-    '/mozilla/toolkit/xre',
-    '/mozilla/xpcom/base',
-    '/mozilla/xpcom/build',
+    '/toolkit/xre',
+    '/xpcom/base',
+    '/xpcom/build',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
@@ -25,8 +25,8 @@ if CONFIG['_MSC_VER']:
 if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_ARCH'] == 'WINNT':
     # For sandbox includes and the include dependencies those have
     LOCAL_INCLUDES += [
-        '/mozilla/security/sandbox/chromium',
-        '/mozilla/security/sandbox/chromium-shim',
+        '/security/sandbox/chromium',
+        '/security/sandbox/chromium-shim',
     ]
 
     USE_LIBS += [

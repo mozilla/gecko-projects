@@ -17,5 +17,5 @@ EXTRA_COMPONENTS += [
 FINAL_LIBRARY = 'mail'
 
 LOCAL_INCLUDES += [
-    '/mozilla/security/pkix/include'
+    '/security/pkix/include'
 ]

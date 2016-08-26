@@ -79,7 +79,7 @@
     </menu>
 #ifdef XP_MACOSX
     <!-- Mac window menu -->
-#include ../../mozilla/toolkit/content/macWindowMenu.inc
+#include ../../toolkit/content/macWindowMenu.inc
 #endif
     <menu label="&help.menu;" id="helpMenu" accesskey="&help.accesskey;">
 #ifdef MOZ_UPDATER

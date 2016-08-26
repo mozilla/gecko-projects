@@ -156,7 +156,7 @@ NON_OMNIJAR_FILES = \
 
 INSTALL_SDK = 1
 
-include $(MOZILLA_SRCDIR)/toolkit/mozapps/installer/packager.mk
+include $(topsrcdir)/toolkit/mozapps/installer/packager.mk
 
 ifeq (Darwin, $(OS_ARCH))
 BINPATH = $(_BINPATH)

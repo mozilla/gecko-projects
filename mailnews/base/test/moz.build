@@ -10,6 +10,6 @@ GeckoCppUnitTests([
 ])
 
 LOCAL_INCLUDES += [
-    '/mozilla/netwerk/test',
-    '/mozilla/xpcom/tests',
+    '/netwerk/test',
+    '/xpcom/tests',
 ]

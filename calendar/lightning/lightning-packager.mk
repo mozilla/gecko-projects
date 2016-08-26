@@ -20,7 +20,7 @@
 #   LIGHTNING_VERSION = 2.2  # Will be used to replace the Thunderbird version
 #   						 # in POST_UPLOAD_CMD
 
-include $(MOZILLA_SRCDIR)/toolkit/mozapps/installer/package-name.mk
+include $(topsrcdir)/toolkit/mozapps/installer/package-name.mk
 
 # Set the univeral path only if we are building a univeral binary and it was
 # not restricted by the calling makefile
@@ -75,7 +75,7 @@ SHORTOS = linux
 endif
 
 # function print_ltnconfig(section,configname)
-print_ltnconfig = $(shell $(PYTHON) $(MOZILLA_SRCDIR)/config/printconfigsetting.py $(XPI_STAGE_PATH)/$(XPI_NAME)/app.ini $1 $2)
+print_ltnconfig = $(shell $(PYTHON) $(topsrcdir)/config/printconfigsetting.py $(XPI_STAGE_PATH)/$(XPI_NAME)/app.ini $1 $2)
 
 wget-en-US: FINAL_BINARY_URL = $(subst thunderbird,calendar/lightning,$(EN_US_BINARY_URL))
 wget-en-US: $(XPI_STAGE_PATH)
@@ -100,7 +100,7 @@ langpack-en-US:
 # It wouldn't fit into mozharness to run compare-locales for calendar
 # separately, so we need to do it ourselves. Unfortunately compare-locales is
 # not installed globally on the slaves, so we need to hardcode the path.
-BUILD_COMPARE_LOCALES = $(wildcard $(topsrcdir)/../compare-locales)
+BUILD_COMPARE_LOCALES = $(wildcard $(topsrcdir)/compare-locales)
 COMPARE_LOCALES = $(if $(BUILD_COMPARE_LOCALES),$(PYTHON) $(BUILD_COMPARE_LOCALES)/scripts/compare-locales,compare-locales)
 COMPARE_LOCALES_PYTHONPATH = $(if $(BUILD_COMPARE_LOCALES),$(BUILD_COMPARE_LOCALES)/lib,)
 

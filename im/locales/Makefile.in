@@ -68,7 +68,7 @@ libs:: searchplugins
 
 include $(topsrcdir)/config/rules.mk
 
-include $(topsrcdir)/mozilla/toolkit/locales/l10n.mk
+include $(topsrcdir)/toolkit/locales/l10n.mk
 
 $(list-txt): $(call mkdir_deps,$(SEARCHPLUGINS_PATH)) $(if $(IS_LANGUAGE_REPACK),FORCE)
 	$(RM) $(list-txt)
@@ -161,13 +161,13 @@ endif
 
 ident:
 	@printf "ib_revision "
-	@$(PYTHON) $(MOZILLA_SRCDIR)/config/printconfigsetting.py \
+	@$(PYTHON) $(topsrcdir)/config/printconfigsetting.py \
 	    $(STAGEDIST)/application.ini App SourceStamp
 	@printf "moz_revision "
-	@$(PYTHON) $(MOZILLA_SRCDIR)/config/printconfigsetting.py \
+	@$(PYTHON) $(topsrcdir)/config/printconfigsetting.py \
 	    $(STAGEDIST)/platform.ini Build SourceStamp
 	@printf "buildid "
-	@$(PYTHON) $(MOZILLA_SRCDIR)/config/printconfigsetting.py \
+	@$(PYTHON) $(topsrcdir)/config/printconfigsetting.py \
 	    $(STAGEDIST)/application.ini App BuildID
 
 #These make targets call prepare-repackages by setting different UPLOAD_DIR

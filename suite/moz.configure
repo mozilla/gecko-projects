@@ -9,4 +9,4 @@ imply_option('MOZ_SERVICES_SYNC', True)
 imply_option('MOZ_SERVICES_CLOUDSYNC', True)
 imply_option('MOZ_SOCIAL', False)
 
-include('../mozilla/toolkit/moz.configure')
+include('../toolkit/moz.configure')
