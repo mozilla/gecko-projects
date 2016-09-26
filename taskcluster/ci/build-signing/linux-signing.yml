@@ -1,10 +1,10 @@
-signing-nightly-fennec:
+signing-nightly-linux:
   task:
     provisionerId: "scriptworker-prov-v1"
     workerType: "signing-linux-v1"
     scopes:
       - "project:releng:signing:cert:dep-signing"
-      - "project:releng:signing:format:jar"
+      - "project:releng:signing:format:gpg"
     created:
       relative-datestamp: "0 seconds"
     deadline:
@@ -14,15 +14,14 @@ signing-nightly-fennec:
       maxRunTime: 600
     metadata:
       name: "Signing Scriptworker Task"
-      description: "Sign Android Build Tasks"
-      owner: "jlund@mozilla.com"
+      description: "Sign Linux Build Tasks"
+      owner: "kmoir@mozilla.com"
       source: "https://tools.taskcluster.net/task-creator/"
   attributes:
     nightly: true
-    build_platform: android-api-15-nightly
+    build_platform: linux64-nightly
     build_type: opt
   unsigned-task:
-    label: "build-android-api-15-nightly/opt"
+    label: "build-linux64-nightly/opt"
     artifacts:
-      - "public/build/target.apk"
-      - "public/build/en-US/target.apk"
+      - "public/build/target.tar.bz2"
