@@ -335,9 +335,9 @@ ImageBridgeChild::NotifyNotUsedToNonRecycle(uint64_t aTextureId, uint64_t aTrans
   // Release TextureClient on allocator's message loop.
   RefPtr<TextureClientReleaseTask> task =
     MakeAndAddRef<TextureClientReleaseTask>(client);
-  RefPtr<ClientIPCAllocator> allocator = client->GetAllocator();
+  RefPtr<LayersIPCChannel> allocator = client->GetAllocator();
   client = nullptr;
-  allocator->AsClientAllocator()->GetMessageLoop()->PostTask(task.forget());
+  allocator->GetMessageLoop()->PostTask(task.forget());
 #else
   NS_RUNTIMEABORT("not reached");
 #endif
@@ -1227,7 +1227,6 @@ ImageBridgeChild::DispatchAllocShmemInternal(size_t aSize,
 
 void
 ImageBridgeChild::ProxyDeallocShmemNow(SynchronousTask* aTask,
-                                       ISurfaceAllocator* aAllocator,
                                        ipc::Shmem* aShmem)
 {
   AutoCompleteTask complete(aTask);
@@ -1255,7 +1254,6 @@ ImageBridgeChild::DeallocShmem(ipc::Shmem& aShmem)
     RefPtr<ImageBridgeChild>(this),
     &ImageBridgeChild::ProxyDeallocShmemNow,
     &task,
-    this,
     &aShmem);
   GetMessageLoop()->PostTask(runnable.forget());
 

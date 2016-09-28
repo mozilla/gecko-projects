@@ -21,7 +21,8 @@
 #include "nsIUUIDGenerator.h"
 #include "nsPIDOMWindow.h"               // for use in inline functions
 #include "nsPropertyTable.h"             // for member
-#include "nsTHashtable.h"                // for member
+#include "nsDataHashtable.h"             // for member
+#include "nsURIHashKey.h"                // for member
 #include "mozilla/net/ReferrerPolicy.h"  // for member
 #include "nsWeakReference.h"
 #include "mozilla/UseCounter.h"
@@ -34,7 +35,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/StyleBackendType.h"
-#include "mozilla/StyleSheetHandle.h"
+#include "mozilla/StyleSheet.h"
 #include <bitset>                        // for member
 
 #ifdef MOZILLA_INTERNAL_API
@@ -173,6 +174,13 @@ enum DocumentFlavor {
   DocumentFlavorHTML, // HTMLDocument with HTMLness bit set to true
   DocumentFlavorSVG, // SVGDocument
   DocumentFlavorPlain, // Just a Document
+};
+
+// Enum for HSTS priming states
+enum class HSTSPrimingState {
+  eNO_HSTS_PRIMING = 0,    // don't do HSTS Priming
+  eHSTS_PRIMING_ALLOW = 1, // if HSTS priming fails, allow the load to proceed
+  eHSTS_PRIMING_BLOCK = 2  // if HSTS priming fails, block the load
 };
 
 // Document states
@@ -362,6 +370,34 @@ public:
 
   void SetReferrer(const nsACString& aReferrer) {
     mReferrer = aReferrer;
+  }
+
+  /**
+   * Check to see if a subresource we want to load requires HSTS priming
+   * to be done.
+   */
+  HSTSPrimingState GetHSTSPrimingStateForLocation(nsIURI* aContentLocation) const
+  {
+    HSTSPrimingState state;
+    if (mHSTSPrimingURIList.Get(aContentLocation, &state)) {
+      return state;
+    }
+    return HSTSPrimingState::eNO_HSTS_PRIMING;
+  }
+
+  /**
+   * Add a subresource to the HSTS priming list. If this URI is
+   * not in the HSTS cache, it will trigger an HSTS priming request
+   * when we try to load it.
+   */
+  void AddHSTSPrimingLocation(nsIURI* aContentLocation, HSTSPrimingState aState)
+  {
+    mHSTSPrimingURIList.Put(aContentLocation, aState);
+  }
+
+  void ClearHSTSPrimingLocation(nsIURI* aContentLocation)
+  {
+    mHSTSPrimingURIList.Remove(aContentLocation);
   }
 
   /**
@@ -997,7 +1033,7 @@ public:
    * TODO We can get rid of the whole concept of delayed loading if we fix
    * bug 77999.
    */
-  virtual void EnsureOnDemandBuiltInUASheet(mozilla::StyleSheetHandle aSheet) = 0;
+  virtual void EnsureOnDemandBuiltInUASheet(mozilla::StyleSheet* aSheet) = 0;
 
   /**
    * Get the number of (document) stylesheets
@@ -1013,7 +1049,7 @@ public:
    * @return the stylesheet at aIndex.  Null if aIndex is out of range.
    * @throws no exceptions
    */
-  virtual mozilla::StyleSheetHandle GetStyleSheetAt(int32_t aIndex) const = 0;
+  virtual mozilla::StyleSheet* GetStyleSheetAt(int32_t aIndex) const = 0;
 
   /**
    * Insert a sheet at a particular spot in the stylesheet list (zero-based)
@@ -1022,7 +1058,7 @@ public:
    *   adjusted for the "special" sheets.
    * @throws no exceptions
    */
-  virtual void InsertStyleSheetAt(mozilla::StyleSheetHandle aSheet,
+  virtual void InsertStyleSheetAt(mozilla::StyleSheet* aSheet,
                                   int32_t aIndex) = 0;
 
   /**
@@ -1032,7 +1068,7 @@ public:
    * @return aIndex the index of the sheet in the full list
    */
   virtual int32_t GetIndexOfStyleSheet(
-      const mozilla::StyleSheetHandle aSheet) const = 0;
+      const mozilla::StyleSheet* aSheet) const = 0;
 
   /**
    * Replace the stylesheets in aOldSheets with the stylesheets in
@@ -1043,24 +1079,24 @@ public:
    * will simply be removed.
    */
   virtual void UpdateStyleSheets(
-      nsTArray<mozilla::StyleSheetHandle::RefPtr>& aOldSheets,
-      nsTArray<mozilla::StyleSheetHandle::RefPtr>& aNewSheets) = 0;
+      nsTArray<RefPtr<mozilla::StyleSheet>>& aOldSheets,
+      nsTArray<RefPtr<mozilla::StyleSheet>>& aNewSheets) = 0;
 
   /**
    * Add a stylesheet to the document
    */
-  virtual void AddStyleSheet(mozilla::StyleSheetHandle aSheet) = 0;
+  virtual void AddStyleSheet(mozilla::StyleSheet* aSheet) = 0;
 
   /**
    * Remove a stylesheet from the document
    */
-  virtual void RemoveStyleSheet(mozilla::StyleSheetHandle aSheet) = 0;
+  virtual void RemoveStyleSheet(mozilla::StyleSheet* aSheet) = 0;
 
   /**
    * Notify the document that the applicable state of the sheet changed
    * and that observers should be notified and style sets updated
    */
-  virtual void SetStyleSheetApplicableState(mozilla::StyleSheetHandle aSheet,
+  virtual void SetStyleSheetApplicableState(mozilla::StyleSheet* aSheet,
                                             bool aApplicable) = 0;
 
   enum additionalSheetType {
@@ -1073,10 +1109,10 @@ public:
   virtual nsresult LoadAdditionalStyleSheet(additionalSheetType aType,
                                             nsIURI* aSheetURI) = 0;
   virtual nsresult AddAdditionalStyleSheet(additionalSheetType aType,
-                                           mozilla::StyleSheetHandle aSheet) = 0;
+                                           mozilla::StyleSheet* aSheet) = 0;
   virtual void RemoveAdditionalStyleSheet(additionalSheetType aType,
                                           nsIURI* sheetURI) = 0;
-  virtual mozilla::StyleSheetHandle GetFirstAdditionalAuthorSheet() = 0;
+  virtual mozilla::StyleSheet* GetFirstAdditionalAuthorSheet() = 0;
 
   /**
    * Assuming that aDocSheets is an array of document-level style
@@ -1397,11 +1433,11 @@ public:
 
   // Observation hooks for style data to propagate notifications
   // to document observers
-  virtual void StyleRuleChanged(mozilla::StyleSheetHandle aStyleSheet,
+  virtual void StyleRuleChanged(mozilla::StyleSheet* aStyleSheet,
                                 mozilla::css::Rule* aStyleRule) = 0;
-  virtual void StyleRuleAdded(mozilla::StyleSheetHandle aStyleSheet,
+  virtual void StyleRuleAdded(mozilla::StyleSheet* aStyleSheet,
                               mozilla::css::Rule* aStyleRule) = 0;
-  virtual void StyleRuleRemoved(mozilla::StyleSheetHandle aStyleSheet,
+  virtual void StyleRuleRemoved(mozilla::StyleSheet* aStyleSheet,
                                 mozilla::css::Rule* aStyleRule) = 0;
 
   /**
@@ -2209,7 +2245,7 @@ public:
    * DO NOT USE FOR UNTRUSTED CONTENT.
    */
   virtual nsresult LoadChromeSheetSync(nsIURI* aURI, bool aIsAgentSheet,
-                                       mozilla::StyleSheetHandle::RefPtr* aSheet) = 0;
+                                       RefPtr<mozilla::StyleSheet>* aSheet) = 0;
 
   /**
    * Returns true if the locale used for the document specifies a direction of
@@ -2768,16 +2804,6 @@ public:
     return mHasScrollLinkedEffect;
   }
 
-  bool MayHavePluginFramesForPrinting()
-  {
-    return mMayHavePluginFramesForPrinting;
-  }
-
-  void SetMayHavePluginFramesForPrinting()
-  {
-    mMayHavePluginFramesForPrinting = true;
-  }
-
 protected:
   bool GetUseCounter(mozilla::UseCounter aUseCounter)
   {
@@ -2865,6 +2891,11 @@ protected:
   bool mBlockAllMixedContentPreloads;
   bool mUpgradeInsecureRequests;
   bool mUpgradeInsecurePreloads;
+
+  // if nsMixedContentBlocker requires sending an HSTS priming request,
+  // temporarily store that in the document so that it can be propogated to the
+  // LoadInfo and eventually the HTTP Channel
+  nsDataHashtable<nsURIHashKey, HSTSPrimingState> mHSTSPrimingURIList;
 
   mozilla::WeakPtr<nsDocShell> mDocumentContainer;
 
@@ -3073,10 +3104,6 @@ protected:
 
   // True is document has ever been in a foreground window.
   bool mEverInForeground : 1;
-
-  // True if this document is a static clone for printing and may
-  // have elements referring to plugins in the original document.
-  bool mMayHavePluginFramesForPrinting : 1;
 
   enum Type {
     eUnknown, // should never be used

@@ -391,7 +391,7 @@ pref("media.gmp.storage.version.expected", 1);
 
 // Filter what triggers user notifications.
 // See DecoderDoctorDocumentWatcher::ReportAnalysis for details.
-pref("media.decoder-doctor.notifications-allowed", "MediaWMFNeeded,MediaWidevineNoWMFNoSilverlight");
+pref("media.decoder-doctor.notifications-allowed", "MediaWMFNeeded,MediaWidevineNoWMFNoSilverlight,MediaCannotInitializePulseAudio");
 // Whether we report partial failures.
 pref("media.decoder-doctor.verbose", false);
 // Whether DD should consider WMF-disabled a WMF failure, useful for testing.
@@ -5088,10 +5088,6 @@ pref("dom.voicemail.defaultServiceId", 0);
 // Enable mapped array buffer by default.
 pref("dom.mapped_arraybuffer.enabled", true);
 
-// Whether to send more than one "loading" readystatechange during XHRs to
-// simulate progress events for sites still not using modern progress events.
-pref("dom.fire_extra_xhr_loading_readystatechanges", false);
-
 // The tables used for Safebrowsing phishing and malware checks.
 pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-malware-simple,test-unwanted-simple");
 
@@ -5356,9 +5352,7 @@ pref("browser.search.reset.enabled", false);
 pref("browser.search.reset.whitelist", "");
 pref("browser.search.geoSpecificDefaults", false);
 pref("browser.search.geoip.url", "https://location.services.mozilla.com/v1/country?key=%MOZILLA_API_KEY%");
-// NOTE: this timeout figure is also the "high" value for the telemetry probe
-// SEARCH_SERVICE_COUNTRY_FETCH_MS - if you change this also change that probe.
-pref("browser.search.geoip.timeout", 2000);
+pref("browser.search.geoip.timeout", 3000);
 
 #ifdef MOZ_OFFICIAL_BRANDING
 // {moz:official} expands to "official"
@@ -5557,4 +5551,18 @@ pref("media.block-autoplay-until-in-foreground", true);
 #ifdef MOZ_STYLO
 // Is the Servo-backed style system enabled?
 pref("layout.css.servo.enabled", true);
+#endif
+
+// HSTS Priming
+// If a request is mixed-content, send an HSTS priming request to attempt to
+// see if it is available over HTTPS.
+pref("security.mixed_content.send_hsts_priming", true);
+#ifdef RELEASE_BUILD
+// Don't change the order of evaluation of mixed-content and HSTS upgrades in
+// order to be most compatible with current standards
+pref("security.mixed_content.use_hsts", false);
+#else
+// Change the order of evaluation so HSTS upgrades happen before
+// mixed-content blocking
+pref("security.mixed_content.use_hsts", true);
 #endif
