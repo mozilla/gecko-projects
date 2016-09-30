@@ -3,7 +3,7 @@ signing-nightly-fennec:
     provisionerId: "scriptworker-prov-v1"
     workerType: "signing-linux-v1"
     scopes:
-      - "project:releng:signing:cert:dep-signing"
+      - "project:releng:signing:cert:nightly-signing"
       - "project:releng:signing:format:jar"
     created:
       relative-datestamp: "0 seconds"
