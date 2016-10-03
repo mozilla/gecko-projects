@@ -100,9 +100,28 @@ task_description_schema = Schema({
             {
                 # the name as it appears in buildbot routes
                 Optional('buildbot'): basestring,
-                Optional('gecko-v1'): basestring,
                 Required('gecko-v2'): basestring,
             }
+        ),
+
+        # The rank that the task will receive in the TaskCluster
+        # index.  A newly completed task supercedes the currently
+        # indexed task iff it has a higher rank.  If unspecified,
+        # 'by-tier' behavior will be used.
+        'rank': Any(
+            # Rank is equal the timestamp of the pushdate for tier-1
+            # tasks, and zero for non-tier-1.  This sorts tier-{2,3}
+            # builds below tier-1 in the index.
+            'by-tier',
+
+            # Rank is given as an integer constant (e.g. zero to make
+            # sure a task is last in the index).
+            int,
+
+            # Rank is equal to the timestamp of the pushdate.  This
+            # option can be used to override the 'by-tier' behavior
+            # for non-tier-1 tasks.
+            'pushdate',
         ),
     },
 
@@ -256,11 +275,6 @@ BUILDBOT_ROUTE_TEMPLATES = [
     "index.buildbot.revisions.{head_rev}.{project}.{job-name-buildbot}",
 ]
 
-V1_ROUTE_TEMPLATES = [
-    "index.gecko.v1.{project}.latest.linux.{job-name-gecko-v1}",
-    "index.gecko.v1.{project}.revision.linux.{head_rev}.{job-name-gecko-v1}",
-]
-
 V2_ROUTE_TEMPLATES = [
     "index.gecko.v2.{project}.latest.{product}.{job-name-gecko-v2}",
     "index.gecko.v2.{project}.pushdate.{pushdate_long}.{product}.{job-name-gecko-v2}",
@@ -408,7 +422,6 @@ def add_index_routes(config, tasks):
             base_name, type_name = job_name.rsplit('-', 1)
             job_name = {
                 'buildbot': base_name,
-                'gecko-v1': '{}.{}'.format(base_name, type_name),
                 'gecko-v2': '{}-{}'.format(base_name, type_name),
             }
 
@@ -426,19 +439,24 @@ def add_index_routes(config, tasks):
         if 'buildbot' in job_name:
             for tpl in BUILDBOT_ROUTE_TEMPLATES:
                 routes.append(tpl.format(**subs))
-        if 'gecko-v1' in job_name:
-            for tpl in V1_ROUTE_TEMPLATES:
-                routes.append(tpl.format(**subs))
         if 'gecko-v2' in job_name:
             for tpl in V2_ROUTE_TEMPLATES:
                 routes.append(tpl.format(**subs))
 
-        # rank is zero for non-tier-1 tasks and based on pushid for others;
-        # this sorts tier-{2,3} builds below tier-1 in the index
-        tier = task.get('treeherder', {}).get('tier', 3)
-        task.setdefault('extra', {})['index'] = {
-            'rank': 0 if tier > 1 else int(config.params['pushdate'])
-        }
+        # The default behavior is to rank tasks according to their tier
+        extra_index = task.setdefault('extra', {}).setdefault('index', {})
+        rank = index.get('rank', 'by-tier')
+
+        if rank == 'by-tier':
+            # rank is zero for non-tier-1 tasks and based on pushid for others;
+            # this sorts tier-{2,3} builds below tier-1 in the index
+            tier = task.get('treeherder', {}).get('tier', 3)
+            extra_index['rank'] = 0 if tier > 1 else int(config.params['pushdate'])
+        elif rank == 'pushdate':
+            extra_index['rank'] = int(config.params['pushdate'])
+        else:
+            extra_index['rank'] = rank
+
         del task['index']
         yield task
 

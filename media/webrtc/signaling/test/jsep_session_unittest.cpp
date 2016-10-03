@@ -313,6 +313,102 @@ protected:
     return pairs;
   }
 
+  bool Equals(const SdpFingerprintAttributeList::Fingerprint& f1,
+              const SdpFingerprintAttributeList::Fingerprint& f2) const {
+    if (f1.hashFunc != f2.hashFunc) {
+      return false;
+    }
+
+    if (f1.fingerprint != f2.fingerprint) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool Equals(const SdpFingerprintAttributeList& f1,
+              const SdpFingerprintAttributeList& f2) const {
+    if (f1.mFingerprints.size() != f2.mFingerprints.size()) {
+      return false;
+    }
+
+    for (size_t i=0; i<f1.mFingerprints.size(); ++i) {
+      if (!Equals(f1.mFingerprints[i], f2.mFingerprints[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool Equals(const UniquePtr<JsepDtlsTransport>& t1,
+              const UniquePtr<JsepDtlsTransport>& t2) const {
+    if (!t1 && !t2) {
+      return true;
+    }
+
+    if (!t1 || !t2) {
+      return false;
+    }
+
+    if (!Equals(t1->GetFingerprints(),  t2->GetFingerprints())) {
+      return false;
+    }
+
+    if (t1->GetRole() != t2->GetRole()) {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  bool Equals(const UniquePtr<JsepIceTransport>& t1,
+              const UniquePtr<JsepIceTransport>& t2) const {
+    if (!t1 && !t2) {
+      return true;
+    }
+
+    if (!t1 || !t2) {
+      return false;
+    }
+
+    if (t1->GetUfrag() != t2->GetUfrag()) {
+      return false;
+    }
+
+    if (t1->GetPassword() != t2->GetPassword()) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool Equals(const RefPtr<JsepTransport>& t1,
+              const RefPtr<JsepTransport>& t2) const {
+    if (!t1 && !t2) {
+      return true;
+    }
+
+    if (!t1 || !t2) {
+      return false;
+    }
+
+    if (t1->mTransportId != t2->mTransportId) {
+      return false;
+    }
+
+    if (t1->mComponents != t2->mComponents) {
+      return false;
+    }
+
+    if (!Equals(t1->mIce, t2->mIce)) {
+      return false;
+    }
+
+    return true;
+  }
+
   bool Equals(const JsepTrackPair& p1,
               const JsepTrackPair& p2) const {
     if (p1.mLevel != p2.mLevel) {
@@ -330,11 +426,11 @@ protected:
       return false;
     }
 
-    if (p1.mRtpTransport.get() != p2.mRtpTransport.get()) {
+    if (!Equals(p1.mRtpTransport, p2.mRtpTransport)) {
       return false;
     }
 
-    if (p1.mRtcpTransport.get() != p2.mRtcpTransport.get()) {
+    if (!Equals(p1.mRtcpTransport, p2.mRtcpTransport)) {
       return false;
     }
 
@@ -1885,8 +1981,10 @@ TEST_P(JsepSessionTest, RenegotiationAnswererEnablesMsid)
               newOffererPairs[i].mReceiving->GetMediaType());
 
     ASSERT_EQ(offererPairs[i].mSending, newOffererPairs[i].mSending);
-    ASSERT_EQ(offererPairs[i].mRtpTransport, newOffererPairs[i].mRtpTransport);
-    ASSERT_EQ(offererPairs[i].mRtcpTransport, newOffererPairs[i].mRtcpTransport);
+    ASSERT_TRUE(Equals(offererPairs[i].mRtpTransport,
+                       newOffererPairs[i].mRtpTransport));
+    ASSERT_TRUE(Equals(offererPairs[i].mRtcpTransport,
+                       newOffererPairs[i].mRtcpTransport));
 
     if (offererPairs[i].mReceiving->GetMediaType() ==
         SdpMediaSection::kApplication) {
@@ -1930,8 +2028,10 @@ TEST_P(JsepSessionTest, RenegotiationAnswererDisablesMsid)
               newOffererPairs[i].mReceiving->GetMediaType());
 
     ASSERT_EQ(offererPairs[i].mSending, newOffererPairs[i].mSending);
-    ASSERT_EQ(offererPairs[i].mRtpTransport, newOffererPairs[i].mRtpTransport);
-    ASSERT_EQ(offererPairs[i].mRtcpTransport, newOffererPairs[i].mRtcpTransport);
+    ASSERT_TRUE(Equals(offererPairs[i].mRtpTransport,
+                       newOffererPairs[i].mRtpTransport));
+    ASSERT_TRUE(Equals(offererPairs[i].mRtcpTransport,
+                       newOffererPairs[i].mRtcpTransport));
 
     if (offererPairs[i].mReceiving->GetMediaType() ==
         SdpMediaSection::kApplication) {
@@ -3474,10 +3574,9 @@ TEST_F(JsepSessionTest, TestExtmap)
   AddTracks(mSessionOff, "audio");
   AddTracks(mSessionAns, "audio");
   // ssrc-audio-level will be extmap 1 for both
-  // rtp-stream-id will be extmap 2 for both
-  mSessionOff.AddAudioRtpExtension("foo"); // Default mapping of 3
-  mSessionOff.AddAudioRtpExtension("bar"); // Default mapping of 4
-  mSessionAns.AddAudioRtpExtension("bar"); // Default mapping of 3
+  mSessionOff.AddAudioRtpExtension("foo"); // Default mapping of 2
+  mSessionOff.AddAudioRtpExtension("bar"); // Default mapping of 3
+  mSessionAns.AddAudioRtpExtension("bar"); // Default mapping of 2
   std::string offer = CreateOffer();
   SetLocalOffer(offer, CHECK_SUCCESS);
   SetRemoteOffer(offer, CHECK_SUCCESS);
@@ -3491,17 +3590,14 @@ TEST_F(JsepSessionTest, TestExtmap)
   auto& offerMediaAttrs = parsedOffer->GetMediaSection(0).GetAttributeList();
   ASSERT_TRUE(offerMediaAttrs.HasAttribute(SdpAttribute::kExtmapAttribute));
   auto& offerExtmap = offerMediaAttrs.GetExtmap().mExtmaps;
-  ASSERT_EQ(4U, offerExtmap.size());
+  ASSERT_EQ(3U, offerExtmap.size());
   ASSERT_EQ("urn:ietf:params:rtp-hdrext:ssrc-audio-level",
       offerExtmap[0].extensionname);
   ASSERT_EQ(1U, offerExtmap[0].entry);
-  ASSERT_EQ("urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
-      offerExtmap[1].extensionname);
+  ASSERT_EQ("foo", offerExtmap[1].extensionname);
   ASSERT_EQ(2U, offerExtmap[1].entry);
-  ASSERT_EQ("foo", offerExtmap[2].extensionname);
+  ASSERT_EQ("bar", offerExtmap[2].extensionname);
   ASSERT_EQ(3U, offerExtmap[2].entry);
-  ASSERT_EQ("bar", offerExtmap[3].extensionname);
-  ASSERT_EQ(4U, offerExtmap[3].entry);
 
   UniquePtr<Sdp> parsedAnswer(Parse(answer));
   ASSERT_EQ(1U, parsedAnswer->GetMediaSectionCount());
@@ -3509,16 +3605,10 @@ TEST_F(JsepSessionTest, TestExtmap)
   auto& answerMediaAttrs = parsedAnswer->GetMediaSection(0).GetAttributeList();
   ASSERT_TRUE(answerMediaAttrs.HasAttribute(SdpAttribute::kExtmapAttribute));
   auto& answerExtmap = answerMediaAttrs.GetExtmap().mExtmaps;
-  ASSERT_EQ(3U, answerExtmap.size());
-  ASSERT_EQ("urn:ietf:params:rtp-hdrext:ssrc-audio-level",
-      answerExtmap[0].extensionname);
-  ASSERT_EQ(1U, answerExtmap[0].entry);
-  ASSERT_EQ("urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
-      answerExtmap[1].extensionname);
-  ASSERT_EQ(2U, answerExtmap[1].entry);
+  ASSERT_EQ(1U, answerExtmap.size());
   // We ensure that the entry for "bar" matches what was in the offer
-  ASSERT_EQ("bar", answerExtmap[2].extensionname);
-  ASSERT_EQ(4U, answerExtmap[2].entry);
+  ASSERT_EQ("bar", answerExtmap[0].extensionname);
+  ASSERT_EQ(3U, answerExtmap[0].entry);
 }
 
 TEST_F(JsepSessionTest, TestRtcpFbStar)

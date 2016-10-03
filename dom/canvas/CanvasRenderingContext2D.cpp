@@ -2436,7 +2436,9 @@ CanvasRenderingContext2D::CreatePattern(const CanvasImageSource& aSource,
       if (!srcSurf) {
         JSContext* context = nsContentUtils::GetCurrentJSContext();
         if (context) {
-          JS_ReportWarning(context, "CanvasRenderingContext2D.createPattern() failed to snapshot source canvas.");
+          JS_ReportWarningASCII(context,
+                                "CanvasRenderingContext2D.createPattern()"
+                                " failed to snapshot source canvas.");
         }
         aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
         return nullptr;
@@ -2467,7 +2469,9 @@ CanvasRenderingContext2D::CreatePattern(const CanvasImageSource& aSource,
     if (!srcSurf) {
       JSContext* context = nsContentUtils::GetCurrentJSContext();
       if (context) {
-        JS_ReportWarning(context, "CanvasRenderingContext2D.createPattern() failed to prepare source ImageBitmap.");
+        JS_ReportWarningASCII(context,
+                              "CanvasRenderingContext2D.createPattern()"
+                              " failed to prepare source ImageBitmap.");
       }
       aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return nullptr;
@@ -3980,8 +3984,9 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
     Style style = (mOp == CanvasRenderingContext2D::TextDrawOperation::FILL)
                     ? Style::FILL
                     : Style::STROKE;
+    AdjustedTarget target(mCtx);
     RefPtr<gfxContext> thebes =
-      gfxContext::CreatePreservingTransformOrNull(mCtx->mTarget);
+      gfxContext::CreatePreservingTransformOrNull(target);
     gfxTextRun::DrawParams params(thebes);
 
     if (mState->StyleIsColor(style)) { // Color
@@ -4785,12 +4790,10 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
       return;
     }
 
-#ifdef MOZ_EME
     if (video->ContainsRestrictedContent()) {
       aError.Throw(NS_ERROR_NOT_AVAILABLE);
       return;
     }
-#endif
 
     uint16_t readyState;
     if (NS_SUCCEEDED(video->GetReadyState(&readyState)) &&

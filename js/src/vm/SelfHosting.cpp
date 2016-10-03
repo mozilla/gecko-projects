@@ -336,8 +336,8 @@ ThrowErrorWithType(JSContext* cx, JSExnType type, const CallArgs& args)
             return;
     }
 
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, errorNumber,
-                         errorArgs[0].ptr(), errorArgs[1].ptr(), errorArgs[2].ptr());
+    JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, errorNumber,
+                               errorArgs[0].ptr(), errorArgs[1].ptr(), errorArgs[2].ptr());
 }
 
 static bool
@@ -957,7 +957,7 @@ intrinsic_IsWrappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
 
     JSObject* unwrapped = CheckedUnwrap(obj);
     if (!unwrapped) {
-        JS_ReportError(cx, "Permission denied to access object");
+        JS_ReportErrorASCII(cx, "Permission denied to access object");
         return false;
     }
 
@@ -986,7 +986,7 @@ intrinsic_PossiblyWrappedArrayBufferByteLength(JSContext* cx, unsigned argc, Val
 
     JSObject* obj = CheckedUnwrap(&args[0].toObject());
     if (!obj) {
-        JS_ReportError(cx, "Permission denied to access object");
+        JS_ReportErrorASCII(cx, "Permission denied to access object");
         return false;
     }
 
@@ -1010,7 +1010,7 @@ intrinsic_ArrayBufferCopyData(JSContext* cx, unsigned argc, Value* vp)
         MOZ_ASSERT(wrapped->is<WrapperObject>());
         RootedObject toBufferObj(cx, CheckedUnwrap(wrapped));
         if (!toBufferObj) {
-            JS_ReportError(cx, "Permission denied to access object");
+            JS_ReportErrorASCII(cx, "Permission denied to access object");
             return false;
         }
         toBuffer = toBufferObj.as<ArrayBufferObject>();
@@ -1093,7 +1093,7 @@ intrinsic_IsPossiblyWrappedTypedArray(JSContext* cx, unsigned argc, Value* vp)
     if (args[0].isObject()) {
         JSObject* obj = CheckedUnwrap(&args[0].toObject());
         if (!obj) {
-            JS_ReportError(cx, "Permission denied to access object");
+            JS_ReportErrorASCII(cx, "Permission denied to access object");
             return false;
         }
 
@@ -1167,7 +1167,7 @@ intrinsic_PossiblyWrappedTypedArrayLength(JSContext* cx, unsigned argc, Value* v
     JSObject* obj = CheckedUnwrap(&args[0].toObject());
 
     if (!obj) {
-        JS_ReportError(cx, "Permission denied to access object");
+        JS_ReportErrorASCII(cx, "Permission denied to access object");
         return false;
     }
 
@@ -1193,7 +1193,7 @@ intrinsic_MoveTypedArrayElements(JSContext* cx, unsigned argc, Value* vp)
                "the not-detached requirement is wrong");
 
     if (tarray->hasDetachedBuffer()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
         return false;
     }
 
@@ -1256,7 +1256,7 @@ DangerouslyUnwrapTypedArray(JSContext* cx, JSObject* obj)
         // Yeah, yeah, it's pretty unlikely.  Are you willing to stake a
         // sec-critical bug on that assessment, now and forever, against
         // all changes those pesky GC and JIT people might make?
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEAD_OBJECT);
         return nullptr;
     }
 
@@ -1296,14 +1296,14 @@ intrinsic_SetFromTypedArrayApproach(JSContext* cx, unsigned argc, Value* vp)
 
     // Steps 12-13.
     if (unsafeTypedArrayCrossCompartment->hasDetachedBuffer()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
         return false;
     }
 
     // Steps 21, 23.
     uint32_t unsafeSrcLengthCrossCompartment = unsafeTypedArrayCrossCompartment->length();
     if (unsafeSrcLengthCrossCompartment + doubleTargetOffset > targetLength) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
         return false;
     }
 
@@ -1793,8 +1793,8 @@ js::ReportIncompatibleSelfHostedMethod(JSContext* cx, const CallArgs& args)
         if (!funName)
             return false;
         if (strcmp(funName, "IsTypedArrayEnsuringArrayBuffer") != 0) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_METHOD,
-                                 funName, "method", InformalValueTypeName(args.thisv()));
+            JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_METHOD,
+                                       funName, "method", InformalValueTypeName(args.thisv()));
             return false;
         }
         ++iter;
@@ -1863,7 +1863,7 @@ intrinsic_RuntimeDefaultLocale(JSContext* cx, unsigned argc, Value* vp)
 
     const char* locale = cx->runtime()->getDefaultLocale();
     if (!locale) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_DEFAULT_LOCALE_ERROR);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_DEFAULT_LOCALE_ERROR);
         return false;
     }
 
@@ -2053,7 +2053,7 @@ intrinsic_HostResolveImportedModule(JSContext* cx, unsigned argc, Value* vp)
 
     RootedFunction moduleResolveHook(cx, cx->global()->moduleResolveHook());
     if (!moduleResolveHook) {
-        JS_ReportError(cx, "Module resolve hook not set");
+        JS_ReportErrorASCII(cx, "Module resolve hook not set");
         return false;
     }
 
@@ -2062,7 +2062,7 @@ intrinsic_HostResolveImportedModule(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     if (!result.isObject() || !result.toObject().is<ModuleObject>()) {
-        JS_ReportError(cx, "Module resolve hook did not return Module object");
+        JS_ReportErrorASCII(cx, "Module resolve hook did not return Module object");
         return false;
     }
 

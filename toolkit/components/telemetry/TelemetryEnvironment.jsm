@@ -24,6 +24,8 @@ Cu.import("resource://gre/modules/AppConstants.jsm");
 
 const Utils = TelemetryUtils;
 
+XPCOMUtils.defineLazyModuleGetter(this, "AttributionCode",
+                                  "resource:///modules/AttributionCode.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ctypes",
                                   "resource://gre/modules/ctypes.jsm");
 if (AppConstants.platform !== "gonk") {
@@ -42,6 +44,8 @@ const CHANGE_THROTTLE_INTERVAL_MS = 5 * 60 * 1000;
 
 // The maximum length of a string (e.g. description) in the addons section.
 const MAX_ADDON_STRING_LENGTH = 100;
+// The maximum length of a string value in the settings.attribution object.
+const MAX_ATTRIBUTION_STRING_LENGTH = 100;
 
 /**
  * This is a policy object used to override behavior for testing.
@@ -142,6 +146,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["dom.ipc.plugins.enabled", {what: RECORD_PREF_VALUE}],
   ["dom.ipc.processCount", {what: RECORD_PREF_VALUE, requiresRestart: true}],
   ["dom.max_script_run_time", {what: RECORD_PREF_VALUE}],
+  ["e10s.rollout.disabledByLongSpinners", {what: RECORD_PREF_VALUE}],
   ["experiments.manifest.uri", {what: RECORD_PREF_VALUE}],
   ["extensions.autoDisableScopes", {what: RECORD_PREF_VALUE}],
   ["extensions.enabledScopes", {what: RECORD_PREF_VALUE}],
@@ -764,6 +769,7 @@ function EnvironmentCache() {
 
   this._currentEnvironment.profile = {};
   p.push(this._updateProfile());
+  p.push(this._updateAttribution());
 
   let setup = () => {
     this._initTask = null;
@@ -1175,6 +1181,21 @@ EnvironmentCache.prototype = {
     if (resetDate) {
       this._currentEnvironment.profile.resetDate =
         Utils.millisecondsToDays(resetDate);
+    }
+  }),
+
+  /**
+   * Update the cached attribution data object.
+   * @returns Promise<> resolved when the I/O is complete.
+   */
+  _updateAttribution: Task.async(function* () {
+    let data = yield AttributionCode.getAttrDataAsync();
+    if (Object.keys(data).length > 0) {
+      this._currentEnvironment.settings.attribution = {};
+      for (let key in data) {
+        this._currentEnvironment.settings.attribution[key] =
+          limitStringToLength(data[key], MAX_ATTRIBUTION_STRING_LENGTH);
+      }
     }
   }),
 

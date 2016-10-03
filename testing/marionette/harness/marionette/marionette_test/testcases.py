@@ -253,12 +253,7 @@ class CommonTestCase(unittest.TestCase):
         self.marionette = self._marionette_weakref()
         if self.marionette.session is None:
             self.marionette.start_session()
-        if self.marionette.timeout is not None:
-            self.marionette.timeouts(self.marionette.TIMEOUT_SEARCH, self.marionette.timeout)
-            self.marionette.timeouts(self.marionette.TIMEOUT_SCRIPT, self.marionette.timeout)
-            self.marionette.timeouts(self.marionette.TIMEOUT_PAGE, self.marionette.timeout)
-        else:
-            self.marionette.timeouts(self.marionette.TIMEOUT_PAGE, 30000)
+        self.marionette.reset_timeouts()
 
     def tearDown(self):
         pass
@@ -363,11 +358,11 @@ if (!testUtils.hasOwnProperty("specialPowersObserver")) {
         timeout = JSTest.timeout_re.search(js)
         if timeout:
             timeout = timeout.group(3)
-            marionette.set_script_timeout(timeout)
+            marionette.set_script_timeout(int(timeout))
 
         inactivity_timeout = JSTest.inactivity_timeout_re.search(js)
         if inactivity_timeout:
-            inactivity_timeout = inactivity_timeout.group(3)
+            inactivity_timeout = int(inactivity_timeout.group(3))
 
         try:
             results = marionette.execute_js_script(

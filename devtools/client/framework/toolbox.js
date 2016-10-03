@@ -137,7 +137,7 @@ function Toolbox(target, selectedTool, hostType, hostOptions) {
   this._saveSplitConsoleHeight = this._saveSplitConsoleHeight.bind(this);
   this._onFocus = this._onFocus.bind(this);
   this._showDevEditionPromo = this._showDevEditionPromo.bind(this);
-  this._updateTextboxMenuItems = this._updateTextboxMenuItems.bind(this);
+  this._updateTextBoxMenuItems = this._updateTextBoxMenuItems.bind(this);
   this._onBottomHostMinimized = this._onBottomHostMinimized.bind(this);
   this._onBottomHostMaximized = this._onBottomHostMaximized.bind(this);
   this._onToolSelectWhileMinimized = this._onToolSelectWhileMinimized.bind(this);
@@ -335,6 +335,7 @@ Toolbox.prototype = {
   get splitConsole() {
     return this._splitConsole;
   },
+
   /**
    * Get the focused state of the split console
    */
@@ -401,10 +402,10 @@ Toolbox.prototype = {
       let noautohideMenu = this.doc.getElementById("command-button-noautohide");
       noautohideMenu.addEventListener("click", this._toggleAutohide, true);
 
-      this.textboxContextMenuPopup =
+      this.textBoxContextMenuPopup =
         this.doc.getElementById("toolbox-textbox-context-popup");
-      this.textboxContextMenuPopup.addEventListener("popupshowing",
-        this._updateTextboxMenuItems, true);
+      this.textBoxContextMenuPopup.addEventListener("popupshowing",
+        this._updateTextBoxMenuItems, true);
 
       this.shortcuts = new KeyShortcuts({
         window: this.doc.defaultView
@@ -1262,11 +1263,15 @@ Toolbox.prototype = {
       // Prevent flicker while loading by waiting to make visible until now.
       iframe.style.visibility = "visible";
 
+      // Try to set the dir attribute as early as possible.
+      this.setIframeDocumentDir(iframe);
+
       // The build method should return a panel instance, so events can
       // be fired with the panel as an argument. However, in order to keep
       // backward compatibility with existing extensions do a check
       // for a promise return value.
       let built = definition.build(iframe.contentWindow, this);
+
       if (!(typeof built.then == "function")) {
         let panel = built;
         iframe.panel = panel;
@@ -1337,6 +1342,28 @@ Toolbox.prototype = {
     }
 
     return deferred.promise;
+  },
+
+  /**
+   * Set the dir attribute on the content document element of the provided iframe.
+   *
+   * @param {IFrameElement} iframe
+   */
+  setIframeDocumentDir: function (iframe) {
+    let docEl = iframe.contentWindow && iframe.contentWindow.document.documentElement;
+    if (!docEl || docEl.namespaceURI !== HTML_NS) {
+      // Bail out if the content window or document is not ready or if the document is not
+      // HTML.
+      return;
+    }
+
+    if (docEl.hasAttribute("dir")) {
+      // Set the dir attribute value only if dir is already present on the document.
+      let top = this.win.top;
+      let topDocEl = top.document.documentElement;
+      let isRtl = top.getComputedStyle(topDocEl).direction === "rtl";
+      docEl.setAttribute("dir", isRtl ? "rtl" : "ltr");
+    }
   },
 
   /**
@@ -2085,10 +2112,10 @@ Toolbox.prototype = {
       this.closeButton.removeEventListener("click", this.destroy, true);
       this.closeButton = null;
     }
-    if (this.textboxContextMenuPopup) {
-      this.textboxContextMenuPopup.removeEventListener("popupshowing",
-        this._updateTextboxMenuItems, true);
-      this.textboxContextMenuPopup = null;
+    if (this.textBoxContextMenuPopup) {
+      this.textBoxContextMenuPopup.removeEventListener("popupshowing",
+        this._updateTextBoxMenuItems, true);
+      this.textBoxContextMenuPopup = null;
     }
     if (this.tabbar) {
       this.tabbar.removeEventListener("focus", this._onTabbarFocus, true);
@@ -2224,10 +2251,21 @@ Toolbox.prototype = {
   /**
    * Enable / disable necessary textbox menu items using globalOverlay.js.
    */
-  _updateTextboxMenuItems: function () {
+  _updateTextBoxMenuItems: function () {
     let window = this.win;
     ["cmd_undo", "cmd_delete", "cmd_cut",
      "cmd_copy", "cmd_paste", "cmd_selectAll"].forEach(window.goUpdateCommand);
+  },
+
+  /**
+   * Open the textbox context menu at given coordinates.
+   * Panels in the toolbox can call this on contextmenu events with event.screenX/Y
+   * instead of having to implement their own copy/paste/selectAll menu.
+   * @param {Number} x
+   * @param {Number} y
+   */
+  openTextBoxContextMenu: function (x, y) {
+    this.textBoxContextMenuPopup.openPopupAtScreen(x, y, true);
   },
 
   /**

@@ -333,8 +333,6 @@ private:
   // request is discarded.
   void ScheduleStateMachineIn(int64_t aMicroseconds);
 
-  // Discard audio/video data that are already played by MSG.
-  void DiscardStreamData();
   bool HaveEnoughDecodedAudio();
   bool HaveEnoughDecodedVideo();
 
@@ -873,12 +871,10 @@ private:
   // Playback will not start when audio is offloading.
   bool mAudioOffloading;
 
-#ifdef MOZ_EME
   void OnCDMProxyReady(RefPtr<CDMProxy> aProxy);
   void OnCDMProxyNotReady();
   RefPtr<CDMProxy> mCDMProxy;
   MozPromiseRequestHolder<MediaDecoder::CDMProxyPromise> mCDMProxyPromise;
-#endif
 
 private:
   // The buffered range. Mirrored from the decoder thread.

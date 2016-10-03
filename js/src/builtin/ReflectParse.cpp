@@ -193,7 +193,7 @@ typedef AutoValueVector NodeVector;
     JS_BEGIN_MACRO                                                                        \
         MOZ_ASSERT(expr);                                                                 \
         if (!(expr)) {                                                                    \
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_PARSE_NODE);     \
+            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_PARSE_NODE);\
             return false;                                                                 \
         }                                                                                 \
     JS_END_MACRO
@@ -201,7 +201,7 @@ typedef AutoValueVector NodeVector;
 #define LOCAL_NOT_REACHED(expr)                                                           \
     JS_BEGIN_MACRO                                                                        \
         MOZ_ASSERT(false);                                                                \
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_PARSE_NODE);         \
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_PARSE_NODE);    \
         return false;                                                                     \
     JS_END_MACRO
 
@@ -3546,8 +3546,8 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     if (args.length() < 1) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_MORE_ARGS_NEEDED,
-                             "Reflect.parse", "0", "s");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_MORE_ARGS_NEEDED,
+                                  "Reflect.parse", "0", "s");
         return false;
     }
 
@@ -3651,7 +3651,7 @@ reflect_parse(JSContext* cx, uint32_t argc, Value* vp)
         } else if (isModule) {
             target = ParseTarget::Module;
         } else {
-            JS_ReportError(cx, "Bad target value, expected 'script' or 'module'");
+            JS_ReportErrorASCII(cx, "Bad target value, expected 'script' or 'module'");
             return false;
         }
     }
@@ -3724,7 +3724,7 @@ JS_InitReflectParse(JSContext* cx, HandleObject global)
     if (!GetProperty(cx, global, global, cx->names().Reflect, &reflectVal))
         return false;
     if (!reflectVal.isObject()) {
-        JS_ReportError(cx, "JS_InitReflectParse must be called during global initialization");
+        JS_ReportErrorASCII(cx, "JS_InitReflectParse must be called during global initialization");
         return false;
     }
 

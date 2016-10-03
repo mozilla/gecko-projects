@@ -92,7 +92,7 @@ binding_detail::ThrowErrorMessage(JSContext* aCx, const unsigned aErrorNumber, .
 {
   va_list ap;
   va_start(ap, aErrorNumber);
-  JS_ReportErrorNumberVA(aCx, GetErrorMessage, nullptr, aErrorNumber, ap);
+  JS_ReportErrorNumberUTF8VA(aCx, GetErrorMessage, nullptr, aErrorNumber, ap);
   va_end(ap);
 }
 
@@ -1117,7 +1117,7 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
   JS::Rooted<JSObject*> obj(cx, js::CheckedUnwrap(origObj,
                                                   /* stopAtWindowProxy = */ false));
   if (!obj) {
-      JS_ReportError(cx, "Permission denied to access object");
+      JS_ReportErrorASCII(cx, "Permission denied to access object");
       return false;
   }
 
@@ -2252,6 +2252,19 @@ GlobalObject::GetAsSupports() const
 
   Throw(mCx, NS_ERROR_XPC_BAD_CONVERT_JS);
   return nullptr;
+}
+
+nsIPrincipal*
+GlobalObject::GetSubjectPrincipal() const
+{
+  if (!NS_IsMainThread()) {
+    return nullptr;
+  }
+
+  JSCompartment* compartment = js::GetContextCompartment(mCx);
+  MOZ_ASSERT(compartment);
+  JSPrincipals* principals = JS_GetCompartmentPrincipals(compartment);
+  return nsJSPrincipals::get(principals);
 }
 
 static bool

@@ -260,6 +260,15 @@ nsBaseWidget::Shutdown()
 
 void nsBaseWidget::DestroyCompositor()
 {
+  // We release this before releasing the compositor, since it may hold the
+  // last reference to our ClientLayerManager. ClientLayerManager's dtor can
+  // trigger a paint, creating a new compositor, and we don't want to re-use
+  // the old vsync dispatcher.
+  if (mCompositorVsyncDispatcher) {
+    mCompositorVsyncDispatcher->Shutdown();
+    mCompositorVsyncDispatcher = nullptr;
+  }
+
   // The compositor shutdown sequence looks like this:
   //  1. CompositorSession calls CompositorBridgeChild::Destroy.
   //  2. CompositorBridgeChild synchronously sends WillClose.
@@ -283,13 +292,6 @@ void nsBaseWidget::DestroyCompositor()
     // ClientLayerManager destructor. See bug 1133426.
     RefPtr<CompositorSession> session = mCompositorSession.forget();
     session->Shutdown();
-  }
-
-  // Can have base widgets that are things like tooltips
-  // which don't have CompositorVsyncDispatchers
-  if (mCompositorVsyncDispatcher) {
-    mCompositorVsyncDispatcher->Shutdown();
-    mCompositorVsyncDispatcher = nullptr;
   }
 }
 
@@ -1363,9 +1365,15 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 
   mLayerManager = lm.forget();
 
-  if (mWindowType == eWindowType_toplevel) {
-    // Only track compositors for top-level windows, since other window types
-    // may use the basic compositor.
+  // Only track compositors for top-level windows, since other window types
+  // may use the basic compositor.  Except on the OS X - see bug 1306383
+#if defined(XP_MACOSX)
+  bool getCompositorFromThisWindow = true;
+#else
+  bool getCompositorFromThisWindow = (mWindowType == eWindowType_toplevel);
+#endif
+
+  if (getCompositorFromThisWindow) {
     gfxPlatform::GetPlatform()->NotifyCompositorCreated(mLayerManager->GetCompositorBackendType());
   }
 }
@@ -1924,7 +1932,7 @@ nsBaseWidget::StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics)
 }
 
 already_AddRefed<nsIScreen>
-nsIWidget::GetWidgetScreen()
+nsBaseWidget::GetWidgetScreen()
 {
   nsCOMPtr<nsIScreenManager> screenManager;
   screenManager = do_GetService("@mozilla.org/gfx/screenmanager;1");

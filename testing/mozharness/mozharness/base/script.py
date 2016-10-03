@@ -392,14 +392,15 @@ class ScriptMixin(PlatformMixin):
         if parsed_url.scheme in ('http', 'https'):
             expected_file_size = int(response.headers.get('Content-Length'))
 
-        self.info('Expected file size: {}'.format(expected_file_size))
-        self.debug('Url: {}'.format(url))
-        self.info('Content-Encoding {}'.format(response.headers.get('Content-Encoding')))
-        self.info('Content-Type {}'.format(response.headers.get('Content-Type')))
-        self.info('Http code {}'.format(response.getcode()))
+        self.info('Http code: {}'.format(response.getcode()))
+        for k in sorted(response.headers.keys()):
+            if k.lower().startswith('x-amz-') or k in ('Content-Encoding', 'Content-Type', 'via'):
+                self.info('{}: {}'.format(k, response.headers.get(k)))
 
         file_contents = response.read()
         obtained_file_size = len(file_contents)
+        self.info('Expected file size: {}'.format(expected_file_size))
+        self.info('Obtained file size: {}'.format(obtained_file_size))
 
         if obtained_file_size != expected_file_size:
             raise FetchedIncorrectFilesize(
@@ -553,7 +554,7 @@ class ScriptMixin(PlatformMixin):
                                       Defaults to False.
 
         Raises:
-            zipfile.BadZipFile: on contents of zipfile being invalid
+            zipfile.BadZipfile: on contents of zipfile being invalid
         """
         with zipfile.ZipFile(compressed_file) as bundle:
             entries = self._filter_entries(bundle.namelist(), extract_dirs)
@@ -683,7 +684,12 @@ class ScriptMixin(PlatformMixin):
         # 2) We're guaranteed to have download the file with error_level=FATAL
         #    Let's unpack the file
         function, kwargs = _determine_extraction_method_and_kwargs(url)
-        function(**kwargs)
+        try:
+            function(**kwargs)
+        except zipfile.BadZipfile:
+            # Bug 1306189 - Sometimes a good download turns out to be a
+            # corrupted zipfile. Let's create a signature that is easy to match
+            self.fatal('Check bug 1306189 for details on downloading a truncated zip file.')
 
 
     def load_json_url(self, url, error_level=None, *args, **kwargs):
@@ -1654,6 +1660,11 @@ class ScriptMixin(PlatformMixin):
         else:
             self.log('No extraction method found for: %s' % filename,
                      level=error_level, exit_code=fatal_exit_code)
+
+    def is_taskcluster(self):
+        """Returns boolean indicating if we're running in TaskCluster."""
+        # This may need expanding in the future to work on
+        return 'TASKCLUSTER_WORKER_TYPE' in os.environ
 
 
 def PreScriptRun(func):

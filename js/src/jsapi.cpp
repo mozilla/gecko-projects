@@ -122,8 +122,8 @@ JS::CallArgs::requireAtLeast(JSContext* cx, const char* fnname, unsigned require
     if (length() < required) {
         char numArgsStr[40];
         SprintfLiteral(numArgsStr, "%u", required - 1);
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_MORE_ARGS_NEEDED,
-                             fnname, numArgsStr, required == 2 ? "" : "s");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_MORE_ARGS_NEEDED,
+                                  fnname, numArgsStr, required == 2 ? "" : "s");
         return false;
     }
 
@@ -169,19 +169,19 @@ JS::ObjectOpResult::reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, 
         if (!str)
             return false;
 
-        JSAutoByteString propName(cx, str);
-        if (!propName)
+        JSAutoByteString propName;
+        if (!propName.encodeUtf8(cx, str))
             return false;
 
         if (ErrorTakesObjectArgument(code_)) {
-            return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr, code_,
-                                                obj->getClass()->name, propName.ptr());
+            return JS_ReportErrorFlagsAndNumberUTF8(cx, flags, GetErrorMessage, nullptr, code_,
+                                                    obj->getClass()->name, propName.ptr());
         }
 
-        return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr, code_,
-                                            propName.ptr());
+        return JS_ReportErrorFlagsAndNumberUTF8(cx, flags, GetErrorMessage, nullptr, code_,
+                                                propName.ptr());
     }
-    return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr, code_);
+    return JS_ReportErrorFlagsAndNumberASCII(cx, flags, GetErrorMessage, nullptr, code_);
 }
 
 JS_PUBLIC_API(bool)
@@ -192,7 +192,7 @@ JS::ObjectOpResult::reportStrictErrorOrWarning(JSContext* cx, HandleObject obj, 
     MOZ_ASSERT(!ErrorTakesArguments(code_));
 
     unsigned flags = strict ? JSREPORT_ERROR : (JSREPORT_WARNING | JSREPORT_STRICT);
-    return JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage, nullptr, code_);
+    return JS_ReportErrorFlagsAndNumberASCII(cx, flags, GetErrorMessage, nullptr, code_);
 }
 
 JS_PUBLIC_API(bool)
@@ -1589,10 +1589,10 @@ JS_PUBLIC_API(bool)
 JS::GetFirstArgumentAsTypeHint(JSContext* cx, CallArgs args, JSType *result)
 {
     if (!args.get(0).isString()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
-                             "Symbol.toPrimitive",
-                             "\"string\", \"number\", or \"default\"",
-                             InformalValueTypeName(args.get(0)));
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
+                                  "Symbol.toPrimitive",
+                                  "\"string\", \"number\", or \"default\"",
+                                  InformalValueTypeName(args.get(0)));
         return false;
     }
 
@@ -1627,9 +1627,9 @@ JS::GetFirstArgumentAsTypeHint(JSContext* cx, CallArgs args, JSType *result)
         return false;
     }
 
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
-                         "Symbol.toPrimitive",
-                         "\"string\", \"number\", or \"default\"", source);
+    JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_NOT_EXPECTED_TYPE,
+                               "Symbol.toPrimitive",
+                               "\"string\", \"number\", or \"default\"", source);
     return false;
 }
 
@@ -1731,8 +1731,8 @@ JS_GetConstructor(JSContext* cx, HandleObject proto)
     if (!GetProperty(cx, proto, proto, cx->names().constructor, &cval))
         return nullptr;
     if (!IsFunctionObject(cval)) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
-                             proto->getClass()->name);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
+                                  proto->getClass()->name);
         return nullptr;
     }
     return &cval.toObject();
@@ -3211,7 +3211,7 @@ JS_GetReservedSlot(JSObject* obj, uint32_t index)
 }
 
 JS_PUBLIC_API(void)
-JS_SetReservedSlot(JSObject* obj, uint32_t index, Value value)
+JS_SetReservedSlot(JSObject* obj, uint32_t index, const Value& value)
 {
     obj->as<NativeObject>().setReservedSlot(index, value);
 }
@@ -3505,17 +3505,17 @@ CloneFunctionObject(JSContext* cx, HandleObject funobj, HandleObject env, Handle
     }
 
     if (!IsFunctionCloneable(fun)) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_CLONE_FUNOBJ_SCOPE);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BAD_CLONE_FUNOBJ_SCOPE);
         return nullptr;
     }
 
     if (fun->isBoundFunction()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
         return nullptr;
     }
 
     if (IsAsmJSModule(fun)) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_CANT_CLONE_OBJECT);
         return nullptr;
     }
 
@@ -3738,8 +3738,12 @@ AutoFile::open(JSContext* cx, const char* filename)
     } else {
         fp_ = fopen(filename, "r");
         if (!fp_) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_OPEN,
-                                 filename, "No such file or directory");
+            /*
+             * Use Latin1 variant here because the encoding of filename is
+             * platform dependent.
+             */
+            JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_CANT_OPEN,
+                                       filename, "No such file or directory");
             return false;
         }
     }
@@ -4540,7 +4544,7 @@ JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(void)
-JS::SetModuleHostDefinedField(JSObject* module, JS::Value value)
+JS::SetModuleHostDefinedField(JSObject* module, const JS::Value& value)
 {
     module->as<ModuleObject>().setHostDefinedField(value);
 }
@@ -5314,7 +5318,7 @@ JS_DecodeBytes(JSContext* cx, const char* src, size_t srclen, char16_t* dst, siz
         CopyAndInflateChars(dst, src, dstlen);
 
         AutoSuppressGC suppress(cx);
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BUFFER_TOO_SMALL);
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_BUFFER_TOO_SMALL);
         return false;
     }
 
@@ -5562,13 +5566,13 @@ JS_ParseJSONWithReviver(JSContext* cx, HandleString str, HandleValue reviver, Mu
 /************************************************************************/
 
 JS_PUBLIC_API(void)
-JS_ReportError(JSContext* cx, const char* format, ...)
+JS_ReportErrorASCII(JSContext* cx, const char* format, ...)
 {
     va_list ap;
 
     AssertHeapIsIdle(cx);
     va_start(ap, format);
-    ReportErrorVA(cx, JSREPORT_ERROR, format, ap);
+    ReportErrorVA(cx, JSREPORT_ERROR, format, ArgumentsAreASCII, ap);
     va_end(ap);
 }
 
@@ -5579,24 +5583,35 @@ JS_ReportErrorLatin1(JSContext* cx, const char* format, ...)
 
     AssertHeapIsIdle(cx);
     va_start(ap, format);
-    ReportErrorVA(cx, JSREPORT_ERROR, format, ap);
+    ReportErrorVA(cx, JSREPORT_ERROR, format, ArgumentsAreLatin1, ap);
     va_end(ap);
 }
 
 JS_PUBLIC_API(void)
-JS_ReportErrorNumber(JSContext* cx, JSErrorCallback errorCallback,
-                     void* userRef, const unsigned errorNumber, ...)
+JS_ReportErrorUTF8(JSContext* cx, const char* format, ...)
+{
+    va_list ap;
+
+    AssertHeapIsIdle(cx);
+    va_start(ap, format);
+    ReportErrorVA(cx, JSREPORT_ERROR, format, ArgumentsAreUTF8, ap);
+    va_end(ap);
+}
+
+JS_PUBLIC_API(void)
+JS_ReportErrorNumberASCII(JSContext* cx, JSErrorCallback errorCallback,
+                          void* userRef, const unsigned errorNumber, ...)
 {
     va_list ap;
     va_start(ap, errorNumber);
-    JS_ReportErrorNumberVA(cx, errorCallback, userRef, errorNumber, ap);
+    JS_ReportErrorNumberASCIIVA(cx, errorCallback, userRef, errorNumber, ap);
     va_end(ap);
 }
 
 JS_PUBLIC_API(void)
-JS_ReportErrorNumberVA(JSContext* cx, JSErrorCallback errorCallback,
-                       void* userRef, const unsigned errorNumber,
-                       va_list ap)
+JS_ReportErrorNumberASCIIVA(JSContext* cx, JSErrorCallback errorCallback,
+                            void* userRef, const unsigned errorNumber,
+                            va_list ap)
 {
     AssertHeapIsIdle(cx);
     ReportErrorNumberVA(cx, JSREPORT_ERROR, errorCallback, userRef,
@@ -5624,6 +5639,26 @@ JS_ReportErrorNumberLatin1VA(JSContext* cx, JSErrorCallback errorCallback,
 }
 
 JS_PUBLIC_API(void)
+JS_ReportErrorNumberUTF8(JSContext* cx, JSErrorCallback errorCallback,
+                           void* userRef, const unsigned errorNumber, ...)
+{
+    va_list ap;
+    va_start(ap, errorNumber);
+    JS_ReportErrorNumberUTF8VA(cx, errorCallback, userRef, errorNumber, ap);
+    va_end(ap);
+}
+
+JS_PUBLIC_API(void)
+JS_ReportErrorNumberUTF8VA(JSContext* cx, JSErrorCallback errorCallback,
+                           void* userRef, const unsigned errorNumber,
+                           va_list ap)
+{
+    AssertHeapIsIdle(cx);
+    ReportErrorNumberVA(cx, JSREPORT_ERROR, errorCallback, userRef,
+                        errorNumber, ArgumentsAreUTF8, ap);
+}
+
+JS_PUBLIC_API(void)
 JS_ReportErrorNumberUC(JSContext* cx, JSErrorCallback errorCallback,
                        void* userRef, const unsigned errorNumber, ...)
 {
@@ -5647,14 +5682,14 @@ JS_ReportErrorNumberUCArray(JSContext* cx, JSErrorCallback errorCallback,
 }
 
 JS_PUBLIC_API(bool)
-JS_ReportWarning(JSContext* cx, const char* format, ...)
+JS_ReportWarningASCII(JSContext* cx, const char* format, ...)
 {
     va_list ap;
     bool ok;
 
     AssertHeapIsIdle(cx);
     va_start(ap, format);
-    ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ap);
+    ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ArgumentsAreASCII, ap);
     va_end(ap);
     return ok;
 }
@@ -5667,15 +5702,28 @@ JS_ReportWarningLatin1(JSContext* cx, const char* format, ...)
 
     AssertHeapIsIdle(cx);
     va_start(ap, format);
-    ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ap);
+    ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ArgumentsAreLatin1, ap);
     va_end(ap);
     return ok;
 }
 
 JS_PUBLIC_API(bool)
-JS_ReportErrorFlagsAndNumber(JSContext* cx, unsigned flags,
-                             JSErrorCallback errorCallback, void* userRef,
-                             const unsigned errorNumber, ...)
+JS_ReportWarningUTF8(JSContext* cx, const char* format, ...)
+{
+    va_list ap;
+    bool ok;
+
+    AssertHeapIsIdle(cx);
+    va_start(ap, format);
+    ok = ReportErrorVA(cx, JSREPORT_WARNING, format, ArgumentsAreUTF8, ap);
+    va_end(ap);
+    return ok;
+}
+
+JS_PUBLIC_API(bool)
+JS_ReportErrorFlagsAndNumberASCII(JSContext* cx, unsigned flags,
+                                  JSErrorCallback errorCallback, void* userRef,
+                                  const unsigned errorNumber, ...)
 {
     va_list ap;
     bool ok;
@@ -5700,6 +5748,22 @@ JS_ReportErrorFlagsAndNumberLatin1(JSContext* cx, unsigned flags,
     va_start(ap, errorNumber);
     ok = ReportErrorNumberVA(cx, flags, errorCallback, userRef,
                              errorNumber, ArgumentsAreLatin1, ap);
+    va_end(ap);
+    return ok;
+}
+
+JS_PUBLIC_API(bool)
+JS_ReportErrorFlagsAndNumberUTF8(JSContext* cx, unsigned flags,
+                                 JSErrorCallback errorCallback, void* userRef,
+                                 const unsigned errorNumber, ...)
+{
+    va_list ap;
+    bool ok;
+
+    AssertHeapIsIdle(cx);
+    va_start(ap, errorNumber);
+    ok = ReportErrorNumberVA(cx, flags, errorCallback, userRef,
+                             errorNumber, ArgumentsAreUTF8, ap);
     va_end(ap);
     return ok;
 }
@@ -6095,7 +6159,7 @@ JS_ThrowStopIteration(JSContext* cx)
 }
 
 JS_PUBLIC_API(bool)
-JS_IsStopIteration(Value v)
+JS_IsStopIteration(const Value& v)
 {
     return v.isObject() && v.toObject().is<StopIterationObject>();
 }

@@ -1455,8 +1455,8 @@ struct MOZ_STACK_CLASS JS_FRIEND_API(ErrorReport)
     //
     // Returns false if we fail to actually populate the ErrorReport
     // for some reason (probably out of memory).
-    bool populateUncaughtExceptionReport(JSContext* cx, ...);
-    bool populateUncaughtExceptionReportVA(JSContext* cx, va_list ap);
+    bool populateUncaughtExceptionReportUTF8(JSContext* cx, ...);
+    bool populateUncaughtExceptionReportUTF8VA(JSContext* cx, va_list ap);
 
     // Reports exceptions from add-on scopes to telementry.
     void ReportAddonExceptionToTelementry(JSContext* cx);
@@ -2780,7 +2780,7 @@ SetPropertyIgnoringNamedGetter(JSContext* cx, JS::HandleObject obj, JS::HandleId
                                JS::ObjectOpResult& result);
 
 JS_FRIEND_API(void)
-ReportErrorWithId(JSContext* cx, const char* msg, JS::HandleId id);
+ReportASCIIErrorWithId(JSContext* cx, const char* msg, JS::HandleId id);
 
 // This function is for one specific use case, please don't use this for anything else!
 extern JS_FRIEND_API(bool)

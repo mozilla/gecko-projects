@@ -194,19 +194,12 @@ Script.prototype = {
     let scheduled = this.run_at || "document_idle";
     if (shouldRun(scheduled)) {
       for (let url of this.js) {
-        // On gonk we need to load the resources asynchronously because the
-        // app: channels only support asyncOpen. This is safe only in the
-        // `document_idle` state.
-        if (AppConstants.platform == "gonk" && scheduled != "document_idle") {
-          Cu.reportError(`Script injection: ignoring ${url} at ${scheduled}`);
-          continue;
-        }
         url = this.extension.baseURI.resolve(url);
 
         let options = {
           target: sandbox,
           charset: "UTF-8",
-          async: AppConstants.platform == "gonk",
+          async: false,
         };
         try {
           result = Services.scriptloader.loadSubScriptWithOptions(url, options);
@@ -325,10 +318,9 @@ class ExtensionContext extends BaseContext {
     let url = contentWindow.location.href;
     // The |sender| parameter is passed directly to the extension.
     let sender = {id: this.extension.uuid, frameId, url};
-    // Properties in |filter| must match those in the |recipient|
-    // parameter of sendMessage.
-    let filter = {extensionId: this.extension.id, frameId};
-    this.messenger = new Messenger(this, [this.messageManager], sender, filter);
+    let filter = {extensionId: this.extension.id};
+    let optionalFilter = {frameId};
+    this.messenger = new Messenger(this, [this.messageManager], sender, filter, optionalFilter);
 
     this.chromeObj = Cu.createObjectIn(this.sandbox, {defineAs: "browser"});
 

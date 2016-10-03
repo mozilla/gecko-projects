@@ -9,6 +9,7 @@ import android.Manifest;
 import android.annotation.TargetApi;
 import android.app.DownloadManager;
 import android.os.Environment;
+import android.os.Process;
 import android.support.annotation.CheckResult;
 import android.support.annotation.NonNull;
 
@@ -63,6 +64,7 @@ import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuItem;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.notifications.NotificationClient;
+import org.mozilla.gecko.notifications.NotificationHelper;
 import org.mozilla.gecko.notifications.ServiceNotificationClient;
 import org.mozilla.gecko.overlays.ui.ShareDialog;
 import org.mozilla.gecko.permissions.Permissions;
@@ -157,6 +159,7 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.SubMenu;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.ViewStub;
 import android.view.ViewTreeObserver;
@@ -547,8 +550,31 @@ public class BrowserApp extends GeckoApp
         return false;
     }
 
+    private Runnable mCheckLongPress;
+    {
+        // Only initialise the runnable if we are >= N.
+        // See onKeyDown() for more details of the back-button long-press workaround
+        if (!Versions.preN) {
+            mCheckLongPress = new Runnable() {
+                public void run() {
+                    handleBackLongPress();
+                }
+            };
+        }
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        // Bug 1304688: Android N has broken passing onKeyLongPress events for the back button, so we
+        // instead copy the long-press-handler technique from Android's KeyButtonView.
+        // - For short presses, we cancel the callback in onKeyUp
+        // - For long presses, the normal keypress is marked as cancelled, hence won't be handled elsewhere
+        //   (but Android still provides the haptic feedback), and the runnable is run.
+        if (!Versions.preN) {
+            ThreadUtils.getUiHandler().removeCallbacks(mCheckLongPress);
+            ThreadUtils.getUiHandler().postDelayed(mCheckLongPress, ViewConfiguration.getLongPressTimeout());
+        }
+
         if (!mBrowserToolbar.isEditing() && onKey(null, keyCode, event)) {
             return true;
         }
@@ -557,6 +583,11 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (!Versions.preN &&
+                keyCode == KeyEvent.KEYCODE_BACK) {
+            ThreadUtils.getUiHandler().removeCallbacks(mCheckLongPress);
+        }
+
         if (AndroidGamepadManager.handleKeyEvent(event)) {
             return true;
         }
@@ -1475,7 +1506,48 @@ public class BrowserApp extends GeckoApp
             delegate.onDestroy(this);
         }
 
+        deleteTempFiles();
+
+        if (mDoorHangerPopup != null)
+            mDoorHangerPopup.destroy();
+        if (mFormAssistPopup != null)
+            mFormAssistPopup.destroy();
+        if (mTextSelection != null)
+            mTextSelection.destroy();
+        NotificationHelper.destroy();
+        IntentHelper.destroy();
+        GeckoNetworkManager.destroy();
+
+        if (SmsManager.isEnabled()) {
+            SmsManager.getInstance().stop();
+            if (isFinishing()) {
+                SmsManager.getInstance().shutdown();
+            }
+        }
+
         super.onDestroy();
+
+        if (!isFinishing()) {
+            // GeckoApp was not intentionally destroyed, so keep our process alive.
+            return;
+        }
+
+        // Wait for Gecko to handle our pause event sent in onPause.
+        if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
+            GeckoThread.waitOnGecko();
+        }
+
+        if (mRestartIntent != null) {
+            // Restarting, so let Restarter kill us.
+            final Intent intent = new Intent();
+            intent.setClass(getApplicationContext(), Restarter.class)
+                  .putExtra("pid", Process.myPid())
+                  .putExtra(Intent.EXTRA_INTENT, mRestartIntent);
+            startService(intent);
+        } else {
+            // Exiting, so kill our own process.
+            Process.killProcess(Process.myPid());
+        }
     }
 
     @Override
@@ -3830,21 +3902,37 @@ public class BrowserApp extends GeckoApp
     }
 
     /**
+     * Handle a long press on the back button
+     */
+    private boolean handleBackLongPress() {
+        // If the tab search history is already shown, do nothing.
+        TabHistoryFragment frag = (TabHistoryFragment) getSupportFragmentManager().findFragmentByTag(TAB_HISTORY_FRAGMENT_TAG);
+        if (frag != null) {
+            return true;
+        }
+
+        Tab tab = Tabs.getInstance().getSelectedTab();
+        if (tab != null  && !tab.isEditing()) {
+            return tabHistoryController.showTabHistory(tab, TabHistoryController.HistoryAction.ALL);
+        }
+
+        return false;
+    }
+
+    /**
      * This will detect if the key pressed is back. If so, will show the history.
      */
     @Override
     public boolean onKeyLongPress(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            // If the tab search history is already shown, do nothing.
-            TabHistoryFragment frag = (TabHistoryFragment) getSupportFragmentManager().findFragmentByTag(TAB_HISTORY_FRAGMENT_TAG);
-            if (frag != null) {
-                return false;
+        // onKeyLongPress is broken in Android N, see onKeyDown() for more information. We add a version
+        // check here to match our fallback code in order to avoid handling a long press twice (which
+        // could happen if newer versions of android and/or other vendors were to  fix this problem).
+        if (Versions.preN &&
+                keyCode == KeyEvent.KEYCODE_BACK) {
+            if (handleBackLongPress()) {
+                return true;
             }
 
-            Tab tab = Tabs.getInstance().getSelectedTab();
-            if (tab != null  && !tab.isEditing()) {
-                return tabHistoryController.showTabHistory(tab, TabHistoryController.HistoryAction.ALL);
-            }
         }
         return super.onKeyLongPress(keyCode, event);
     }

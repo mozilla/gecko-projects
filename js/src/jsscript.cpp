@@ -358,9 +358,9 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
             if (!comp->creationOptions().cloneSingletons() ||
                 !comp->behaviors().getSingletonsAsTemplates())
             {
-                JS_ReportError(cx,
-                               "Can't serialize a run-once non-function script "
-                               "when we're not doing singleton cloning");
+                JS_ReportErrorASCII(cx,
+                                    "Can't serialize a run-once non-function script "
+                                    "when we're not doing singleton cloning");
                 return false;
             }
         }
@@ -795,7 +795,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
                     funEnclosingScope = function->nonLazyScript()->enclosingScope();
                 } else {
                     MOZ_ASSERT(function->isAsmJSNative());
-                    JS_ReportError(cx, "AsmJS modules are not yet supported in XDR serialization.");
+                    JS_ReportErrorASCII(cx, "AsmJS modules are not yet supported in XDR serialization.");
                     return false;
                 }
 
@@ -2103,11 +2103,12 @@ ScriptSource::setDisplayURL(ExclusiveContext* cx, const char16_t* displayURL)
 {
     MOZ_ASSERT(displayURL);
     if (hasDisplayURL()) {
+        // FIXME: filename_.get() should be UTF-8 (bug 987069).
         if (cx->isJSContext() &&
-            !JS_ReportErrorFlagsAndNumber(cx->asJSContext(), JSREPORT_WARNING,
-                                          GetErrorMessage, nullptr,
-                                          JSMSG_ALREADY_HAS_PRAGMA, filename_.get(),
-                                          "//# sourceURL"))
+            !JS_ReportErrorFlagsAndNumberLatin1(cx->asJSContext(), JSREPORT_WARNING,
+                                                GetErrorMessage, nullptr,
+                                                JSMSG_ALREADY_HAS_PRAGMA, filename_.get(),
+                                                "//# sourceURL"))
         {
             return false;
         }
@@ -3140,7 +3141,7 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
                        MutableHandle<GCVector<Scope*>> scopes)
 {
     if (src->treatAsRunOnce() && !src->functionNonDelazifying()) {
-        JS_ReportError(cx, "No cloning toplevel run-once scripts");
+        JS_ReportErrorASCII(cx, "No cloning toplevel run-once scripts");
         return false;
     }
 
@@ -3202,7 +3203,7 @@ js::detail::CopyScript(JSContext* cx, HandleScript src, HandleScript dst,
                 if (innerFun->isNative()) {
                     if (cx->compartment() != innerFun->compartment()) {
                         MOZ_ASSERT(innerFun->isAsmJSNative());
-                        JS_ReportError(cx, "AsmJS modules do not yet support cloning.");
+                        JS_ReportErrorASCII(cx, "AsmJS modules do not yet support cloning.");
                         return false;
                     }
                     clone = innerFun;

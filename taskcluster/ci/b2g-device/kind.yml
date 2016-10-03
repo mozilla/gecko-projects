@@ -36,6 +36,9 @@ job-defaults:
       - mozilla-central
       - integration
       - pine
+    index:
+        # despite being tier-3, these jobs should be inserted into the index ranked by pushdate
+        rank: pushdate
 
 
 jobs:
@@ -44,7 +47,6 @@ jobs:
         index:
             product: b2g
             job-name:
-                gecko-v1: aries-eng.opt
                 gecko-v2: aries-eng-opt
         treeherder:
             platform: b2g-device-image/opt
@@ -58,7 +60,6 @@ jobs:
         index:
             product: b2g
             job-name:
-                gecko-v1: aries.debug
                 gecko-v2: aries-debug
         treeherder:
             platform: b2g-device-image/debug
@@ -73,7 +74,6 @@ jobs:
         index:
             product: b2g
             job-name:
-                gecko-v1: nexus-5-l-eng.opt
                 gecko-v2: nexus-5-l-eng-opt
         treeherder:
             platform: b2g-device-image/opt
@@ -87,7 +87,6 @@ jobs:
         index:
             product: b2g
             job-name:
-                gecko-v1: nexus-5-l-eng.debug
                 gecko-v2: nexus-5-l-eng-debug
         treeherder:
             platform: b2g-device-image/debug

@@ -1523,6 +1523,8 @@ protected:
     GLsizei mViewportHeight;
     bool mAlreadyWarnedAboutViewportLargerThanDest;
 
+    GLfloat mLineWidth;
+
     WebGLContextLossHandler mContextLossHandler;
     bool mAllowContextRestore;
     bool mLastLossWasSimulated;
@@ -1829,6 +1831,21 @@ public:
         : ScopedGLWrapper<ScopedFBRebinder>(webgl->gl)
         , mWebGL(webgl)
     { }
+
+private:
+    void UnwrapImpl();
+};
+
+class ScopedLazyBind final
+    : public gl::ScopedGLWrapper<ScopedLazyBind>
+{
+    friend struct gl::ScopedGLWrapper<ScopedLazyBind>;
+
+    const GLenum mTarget;
+    const WebGLBuffer* const mBuf;
+
+public:
+    ScopedLazyBind(gl::GLContext* gl, GLenum target, const WebGLBuffer* buf);
 
 private:
     void UnwrapImpl();

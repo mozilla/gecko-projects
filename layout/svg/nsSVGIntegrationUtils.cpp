@@ -492,11 +492,12 @@ ComputeMaskGeometry(const PaintFramesParams& aParams,
 
 static DrawResult
 GenerateMaskSurface(const PaintFramesParams& aParams,
-                    nsStyleContext* aSC,
+                    float aOpacity, nsStyleContext* aSC,
                     const nsTArray<nsSVGMaskFrame *>& aMaskFrames,
                     const nsPoint& aOffsetToUserSpace,
                     Matrix& aOutMaskTransform,
-                    RefPtr<SourceSurface>& aOutMaskSurface)
+                    RefPtr<SourceSurface>& aOutMaskSurface,
+                    bool& aOpacityApplied)
 {
   const nsStyleSVGReset *svgReset = aSC->StyleSVGReset();
   MOZ_ASSERT(aMaskFrames.Length() > 0);
@@ -508,9 +509,10 @@ GenerateMaskSurface(const PaintFramesParams& aParams,
 
   // There is only one SVG mask.
   if (((aMaskFrames.Length() == 1) && aMaskFrames[0])) {
+    aOpacityApplied = true;
     aOutMaskSurface =
       aMaskFrames[0]->GetMaskForMaskedFrame(&ctx, aParams.frame,
-                                            cssPxToDevPxMatrix, 1.0,
+                                            cssPxToDevPxMatrix, aOpacity,
                                             &aOutMaskTransform,
                                             svgReset->mMask.mLayers[0].mMaskMode);
     return DrawResult::SUCCESS;
@@ -550,6 +552,18 @@ GenerateMaskSurface(const PaintFramesParams& aParams,
     ctx.CurrentMatrix() * gfxMatrix::Translation(-maskSurfaceRect.TopLeft());
   maskContext->SetMatrix(maskSurfaceMatrix);
 
+  // Set aAppliedOpacity as true only if all mask layers are svg mask.
+  // In this case, we will apply opacity into the final mask surface, so the
+  // caller does not need to apply it again.
+  aOpacityApplied = true;
+  for (size_t i = 0; i < aMaskFrames.Length() ; i++) {
+    nsSVGMaskFrame *maskFrame = aMaskFrames[i];
+    if (!maskFrame) {
+      aOpacityApplied = false;
+      break;
+    }
+  }
+
   // Multiple SVG masks interleave with image mask. Paint each layer onto
   // maskDT one at a time.
   for (int i = aMaskFrames.Length() - 1; i >= 0 ; i--) {
@@ -565,7 +579,8 @@ GenerateMaskSurface(const PaintFramesParams& aParams,
       Matrix svgMaskMatrix;
       RefPtr<SourceSurface> svgMask =
         maskFrame->GetMaskForMaskedFrame(maskContext, aParams.frame,
-                                         cssPxToDevPxMatrix, 1.0,
+                                         cssPxToDevPxMatrix,
+                                         aOpacityApplied ? aOpacity : 1.0,
                                          &svgMaskMatrix,
                                          svgReset->mMask.mLayers[i].mMaskMode);
       if (svgMask) {
@@ -573,7 +588,8 @@ GenerateMaskSurface(const PaintFramesParams& aParams,
 
         maskContext->Multiply(ThebesMatrix(svgMaskMatrix));
         Rect drawRect = IntRectToRect(IntRect(IntPoint(0, 0), svgMask->GetSize()));
-        maskDT->MaskSurface(ColorPattern(Color(0.0, 0.0, 0.0, 1.0)), svgMask, drawRect.TopLeft(),
+        maskDT->MaskSurface(ColorPattern(Color(0.0, 0.0, 0.0, 1.0)), svgMask,
+                            drawRect.TopLeft(),
                             DrawOptions(1.0, compositionOp));
       }
     } else {
@@ -720,48 +736,6 @@ SetupContextMatrix(nsIFrame* aFrame, const PaintFramesParams& aParams,
   }
 }
 
-static already_AddRefed<gfxContext>
-CreateBlendTarget(const PaintFramesParams& aParams, IntPoint& aTargetOffset)
-{
-  MOZ_ASSERT(aParams.frame->StyleEffects()->mMixBlendMode !=
-             NS_STYLE_BLEND_NORMAL);
-
-  // Create a temporary context to draw to so we can blend it back with
-  // another operator.
-  IntRect drawRect = ComputeClipExtsInDeviceSpace(aParams.ctx);
-
-  RefPtr<DrawTarget> targetDT = aParams.ctx.GetDrawTarget()->CreateSimilarDrawTarget(drawRect.Size(), SurfaceFormat::B8G8R8A8);
-  if (!targetDT || !targetDT->IsValid()) {
-    return nullptr;
-  }
-
-  RefPtr<gfxContext> target = gfxContext::CreateOrNull(targetDT);
-  MOZ_ASSERT(target); // already checked the draw target above
-  target->SetMatrix(aParams.ctx.CurrentMatrix() *
-                    gfxMatrix::Translation(-drawRect.TopLeft()));
-  aTargetOffset = drawRect.TopLeft();
-
-  return target.forget();
-}
-
-static void
-BlendToTarget(const PaintFramesParams& aParams, gfxContext* aTarget,
-              const IntPoint& aTargetOffset)
-{
-  MOZ_ASSERT(aParams.frame->StyleEffects()->mMixBlendMode !=
-             NS_STYLE_BLEND_NORMAL);
-
-  RefPtr<DrawTarget> targetDT = aTarget->GetDrawTarget();
-  RefPtr<SourceSurface> targetSurf = targetDT->Snapshot();
-
-  gfxContext& context = aParams.ctx;
-  gfxContextAutoSaveRestore save(&context);
-  context.SetMatrix(gfxMatrix()); // This will be restored right after.
-  RefPtr<gfxPattern> pattern = new gfxPattern(targetSurf, Matrix::Translation(aTargetOffset.x, aTargetOffset.y));
-  context.SetPattern(pattern);
-  context.Paint();
-}
-
 DrawResult
 nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
 {
@@ -842,24 +816,6 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
   nsPoint offsetToBoundingBox;
   nsPoint offsetToUserSpace;
 
-  // These are used if we require a temporary surface for a custom blend mode.
-  // Clip the source context first, so that we can generate a smaller temporary
-  // surface. (Since we will clip this context in SetupContextMatrix, a pair
-  // of save/restore is needed.)
-  context.Save();
-  SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
-                     offsetToUserSpace, true);
-  IntPoint targetOffset;
-  RefPtr<gfxContext> target =
-    (aParams.frame->StyleEffects()->mMixBlendMode == NS_STYLE_BLEND_NORMAL)
-      ? RefPtr<gfxContext>(&aParams.ctx).forget()
-      : CreateBlendTarget(aParams, targetOffset);
-  context.Restore();
-
-  if (!target) {
-    return DrawResult::TEMPORARY_ERROR;
-  }
-
   bool shouldGenerateMask = (opacity != 1.0f || shouldGenerateClipMaskLayer ||
                              shouldGenerateMaskLayer);
 
@@ -870,6 +826,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
 
     Matrix maskTransform;
     RefPtr<SourceSurface> maskSurface;
+    bool opacityApplied = false;
 
     if (shouldGenerateMaskLayer) {
       matSR.SetContext(&context);
@@ -879,10 +836,10 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
       // instead of the first continuation frame.
       SetupContextMatrix(frame, aParams, offsetToBoundingBox,
                          offsetToUserSpace, true);
-      result = GenerateMaskSurface(aParams,
+      result = GenerateMaskSurface(aParams, opacity,
                                   firstFrame->StyleContext(),
                                   maskFrames, offsetToUserSpace,
-                                  maskTransform, maskSurface);
+                                  maskTransform, maskSurface, opacityApplied);
       context.PopClip();
       if (!maskSurface) {
         // Entire surface is clipped out.
@@ -922,7 +879,9 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
                          offsetToUserSpace, true);
     }
 
-    target->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacity, maskSurface, maskTransform);
+    context.PushGroupForBlendBack(gfxContentType::COLOR_ALPHA,
+                                  opacityApplied ?  1.0 : opacity,
+                                  maskSurface, maskTransform);
   }
 
   /* If this frame has only a trivial clipPath, set up cairo's clipping now so
@@ -942,10 +901,10 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
   }
 
   /* Paint the child */
-  target->SetMatrix(matrixAutoSaveRestore.Matrix());
+  context.SetMatrix(matrixAutoSaveRestore.Matrix());
   BasicLayerManager* basic = static_cast<BasicLayerManager*>(aParams.layerManager);
   RefPtr<gfxContext> oldCtx = basic->GetTarget();
-  basic->SetTarget(target);
+  basic->SetTarget(&context);
   aParams.layerManager->EndTransaction(FrameLayerBuilder::DrawPaintedLayer,
                                        aParams.builder);
   basic->SetTarget(oldCtx);
@@ -955,18 +914,13 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
   }
 
   if (shouldGenerateMask) {
-    target->PopGroupAndBlend();
+    context.PopGroupAndBlend();
 
     if (!shouldGenerateClipMaskLayer && !shouldGenerateMaskLayer) {
       MOZ_ASSERT(opacity != 1.0f);
       // Pop the clip push by SetupContextMatrix
       context.PopClip();
     }
-  }
-
-  if (aParams.frame->StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
-    MOZ_ASSERT(target != &aParams.ctx);
-    BlendToTarget(aParams, target, targetOffset);
   }
 
   return result;
@@ -1007,25 +961,12 @@ nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams)
   nsPoint offsetToBoundingBox;
   nsPoint offsetToUserSpace;
 
-  // These are used if we require a temporary surface for a custom blend mode.
-  // Clip the source context first, so that we can generate a smaller temporary
-  // surface. (Since we will clip this context in SetupContextMatrix, a pair
-  // of save/restore is needed.)
   gfxContextAutoSaveRestore autoSR(&context);
   SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
                      offsetToUserSpace, true);
-  IntPoint targetOffset;
-  RefPtr<gfxContext> target =
-    (aParams.frame->StyleEffects()->mMixBlendMode == NS_STYLE_BLEND_NORMAL)
-    ? RefPtr<gfxContext>(&aParams.ctx).forget()
-    : CreateBlendTarget(aParams, targetOffset);
-  if (!target) {
-    context.Restore();
-    return DrawResult::TEMPORARY_ERROR;
-  }
 
   if (opacity != 1.0f) {
-    target->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacity,
+    context.PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacity,
                                   nullptr, Matrix());
   }
 
@@ -1034,16 +975,11 @@ nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams)
                                      offsetToUserSpace);
   nsRegion dirtyRegion = aParams.dirtyRect - offsetToBoundingBox;
   gfxMatrix tm = nsSVGIntegrationUtils::GetCSSPxToDevPxMatrix(frame);
-  nsFilterInstance::PaintFilteredFrame(frame, target->GetDrawTarget(),
+  nsFilterInstance::PaintFilteredFrame(frame, context.GetDrawTarget(),
                                        tm, &callback, &dirtyRegion);
 
   if (opacity != 1.0f) {
-    target->PopGroupAndBlend();
-  }
-
-  if (aParams.frame->StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
-    MOZ_ASSERT(target != &aParams.ctx);
-    BlendToTarget(aParams, target, targetOffset);
+    context.PopGroupAndBlend();
   }
 
   return result;

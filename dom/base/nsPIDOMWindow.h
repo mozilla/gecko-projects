@@ -28,6 +28,7 @@ class nsICSSDeclaration;
 class nsIDocShell;
 class nsIDocument;
 class nsIIdleObserver;
+class nsIPrincipal;
 class nsIScriptTimeoutHandler;
 class nsIURI;
 class nsPIDOMWindowInner;
@@ -117,6 +118,12 @@ public:
   virtual nsPIDOMWindowOuter* GetScriptableTop() = 0;
   virtual nsPIDOMWindowOuter* GetScriptableParent() = 0;
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() = 0;
+
+  bool IsRootOuterWindow()
+  {
+    MOZ_ASSERT(IsOuterWindow());
+    return mIsRootOuterWindow;
+  }
 
   /**
    * Behavies identically to GetScriptableParent extept that it returns null
@@ -665,6 +672,8 @@ protected:
 
   // current desktop mode flag.
   bool                   mDesktopModeViewport;
+
+  bool                   mIsRootOuterWindow;
 
   // And these are the references between inner and outer windows.
   nsPIDOMWindowInner* MOZ_NON_OWNING_REF mInnerWindow;

@@ -201,14 +201,13 @@ ExtensionContext = class extends BaseContext {
     }
     Management.emit("page-load", this, params, sender);
 
-    // Properties in |filter| must match those in the |recipient|
-    // parameter of sendMessage.
     let filter = {extensionId: extension.id};
+    let optionalFilter = {};
     // Addon-generated messages (not necessarily from the same process as the
     // addon itself) are sent to the main process, which forwards them via the
     // parent process message manager. Specific replies can be sent to the frame
     // message manager.
-    this.messenger = new Messenger(this, [Services.cpmm, this.messageManager], sender, filter);
+    this.messenger = new Messenger(this, [Services.cpmm, this.messageManager], sender, filter, optionalFilter);
 
     if (this.externallyVisible) {
       this.extension.views.add(this);
@@ -901,20 +900,14 @@ this.ExtensionData = class {
         return results;
       }
 
-      if (!(this.rootURI instanceof Ci.nsIJARURI &&
-            this.rootURI.JARFile instanceof Ci.nsIFileURL)) {
-        // This currently happens for app:// URLs passed to us by
-        // UserCustomizations.jsm
-        return [];
-      }
-
       // FIXME: We need a way to do this without main thread IO.
 
-      let file = this.rootURI.JARFile.file;
-      let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(Ci.nsIZipReader);
-      try {
-        zipReader.open(file);
+      this.rootURI.QueryInterface(Ci.nsIJARURI);
 
+      let file = this.rootURI.JARFile.QueryInterface(Ci.nsIFileURL).file;
+      let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].createInstance(Ci.nsIZipReader);
+      zipReader.open(file);
+      try {
         let results = [];
 
         // Normalize the directory path.
@@ -1361,6 +1354,52 @@ this.Extension = class extends ExtensionData {
 
     provide(files, ["manifest.json"], manifest);
 
+    if (data.embedded) {
+      // Package this as a webextension embedded inside a legacy
+      // extension.
+
+      let xpiFiles = {
+        "install.rdf": `<?xml version="1.0" encoding="UTF-8"?>
+          <RDF xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+               xmlns:em="http://www.mozilla.org/2004/em-rdf#">
+              <Description about="urn:mozilla:install-manifest"
+                  em:id="${manifest.applications.gecko.id}"
+                  em:name="${manifest.name}"
+                  em:type="2"
+                  em:version="${manifest.version}"
+                  em:description=""
+                  em:hasEmbeddedWebExtension="true"
+                  em:bootstrap="true">
+
+                  <!-- Firefox -->
+                  <em:targetApplication>
+                      <Description
+                          em:id="{ec8030f7-c20a-464f-9b0e-13a3a9e97384}"
+                          em:minVersion="51.0a1"
+                          em:maxVersion="*"/>
+                  </em:targetApplication>
+              </Description>
+          </RDF>
+        `,
+
+        "bootstrap.js": `
+          function install() {}
+          function uninstall() {}
+          function shutdown() {}
+
+          function startup(data) {
+            data.webExtension.startup();
+          }
+        `,
+      };
+
+      for (let [path, data] of Object.entries(files)) {
+        xpiFiles[`webextension/${path}`] = data;
+      }
+
+      files = xpiFiles;
+    }
+
     return this.generateZipFile(files);
   }
 
@@ -1609,11 +1648,7 @@ this.Extension = class extends ExtensionData {
       }
     }).then(() => {
       if (this.errors.length) {
-        // b2g add-ons generate manifest errors that we've silently
-        // ignoring prior to adding this check.
-        if (!this.rootURI.schemeIs("app")) {
-          return Promise.reject({errors: this.errors});
-        }
+        return Promise.reject({errors: this.errors});
       }
 
       if (this.hasShutdown) {

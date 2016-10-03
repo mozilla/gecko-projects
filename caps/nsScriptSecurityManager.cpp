@@ -147,14 +147,15 @@ GetPrincipalDomainOrigin(nsIPrincipal* aPrincipal,
   return GetOriginFromURI(uri, aOrigin);
 }
 
-inline void SetPendingException(JSContext *cx, const char *aMsg)
+inline void SetPendingExceptionASCII(JSContext *cx, const char *aMsg)
 {
-    JS_ReportError(cx, "%s", aMsg);
+    JS_ReportErrorASCII(cx, "%s", aMsg);
 }
 
 inline void SetPendingException(JSContext *cx, const char16_t *aMsg)
 {
-    JS_ReportError(cx, "%hs", aMsg);
+    // FIXME: Need to convert to UTF-8 (bug XXX).
+    JS_ReportErrorLatin1(cx, "%hs", aMsg);
 }
 
 // Helper class to get stuff from the ClassInfo and not waste extra time with
@@ -596,7 +597,7 @@ nsScriptSecurityManager::CheckLoadURIFromScript(JSContext *cx, nsIURI *aURI)
     nsAutoCString msg("Access to '");
     msg.Append(spec);
     msg.AppendLiteral("' from script denied");
-    SetPendingException(cx, msg.get());
+    SetPendingExceptionASCII(cx, msg.get());
     return NS_ERROR_DOM_BAD_URI;
 }
 
@@ -650,37 +651,6 @@ EqualOrSubdomain(nsIURI* aProbeArg, nsIURI* aBase)
         rv = probe->SetHost(newHost);
         NS_ENSURE_SUCCESS(rv, false);
     }
-}
-
-static bool
-AllSchemesMatch(nsIURI* aURI, nsIURI* aOtherURI)
-{
-    auto stringComparator = nsCaseInsensitiveCStringComparator();
-    nsCOMPtr<nsIURI> currentURI = aURI;
-    nsCOMPtr<nsIURI> currentOtherURI = aOtherURI;
-    while (currentURI && currentOtherURI) {
-        nsAutoCString scheme, otherScheme;
-        currentURI->GetScheme(scheme);
-        currentOtherURI->GetScheme(otherScheme);
-        if (!scheme.Equals(otherScheme, stringComparator)) {
-            return false;
-        }
-        nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(currentURI);
-        nsCOMPtr<nsINestedURI> nestedOtherURI = do_QueryInterface(currentOtherURI);
-        // If neither are nested and all schemes have matched so far
-        // (or we would have bailed already), we're the same:
-        if (!nestedURI && !nestedOtherURI) {
-            return true;
-        }
-        // If one is nested and the other not, they're not equal:
-        if (!nestedURI != !nestedOtherURI) {
-            return false;
-        }
-        // At this stage, both are still nested URIs, so let's play again:
-        nestedURI->GetInnerURI(getter_AddRefs(currentURI));
-        nestedOtherURI->GetInnerURI(getter_AddRefs(currentOtherURI));
-    }
-    return false;
 }
 
 NS_IMETHODIMP
@@ -805,53 +775,50 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
             return NS_OK;
         }
     }
-    else if (AllSchemesMatch(sourceURI, aTargetURI) ||
-             (sViewSourceReachableFromInner &&
-              sourceScheme.EqualsIgnoreCase(targetScheme.get()) &&
-              NS_SUCCEEDED(aTargetURI->SchemeIs("view-source", &targetIsViewSource)) &&
-              targetIsViewSource))
+    else if (sViewSourceReachableFromInner &&
+             sourceScheme.EqualsIgnoreCase(targetScheme.get()) &&
+             NS_SUCCEEDED(aTargetURI->SchemeIs("view-source", &targetIsViewSource)) &&
+             targetIsViewSource)
     {
-        // every scheme can access another URI from the same scheme,
-        // as long as they don't represent null principals...
-        // Or they don't require an special permission to do so
-        // See bug#773886
-        rv = NS_URIChainHasFlags(targetBaseURI,
-                                 nsIProtocolHandler::URI_CROSS_ORIGIN_NEEDS_WEBAPPS_PERM,
-                                 &hasFlags);
-        NS_ENSURE_SUCCESS(rv, rv);
-
-        if (hasFlags) {
-            // Let apps load the whitelisted theme resources even if they don't
-            // have the webapps-manage permission but have the themeable one.
-            // Resources from the theme origin are also allowed to load from
-            // the theme origin (eg. stylesheets using images from the theme).
-            auto themeOrigin = Preferences::GetCString("b2g.theme.origin");
-            if (themeOrigin) {
-                nsAutoCString targetOrigin;
-                nsPrincipal::GetOriginForURI(targetBaseURI, targetOrigin);
-                if (targetOrigin.Equals(themeOrigin)) {
-                    nsAutoCString pOrigin;
-                    aPrincipal->GetOrigin(pOrigin);
-                    return nsContentUtils::IsExactSitePermAllow(aPrincipal, "themeable") ||
-                           pOrigin.Equals(themeOrigin)
-                        ? NS_OK : NS_ERROR_DOM_BAD_URI;
-                }
-            }
-            // In this case, we allow opening only if the source and target URIS
-            // are on the same domain, or the opening URI has the webapps
-            // permision granted
-            if (!SecurityCompareURIs(sourceBaseURI, targetBaseURI) &&
-                !nsContentUtils::IsExactSitePermAllow(aPrincipal, WEBAPPS_PERM_NAME)) {
-                return NS_ERROR_DOM_BAD_URI;
-            }
-        }
+        // exception for foo: linking to view-source:foo for reftests...
         return NS_OK;
     }
 
-    // If the schemes don't match, the policy is specified by the protocol
-    // flags on the target URI.
-    return CheckLoadURIFlags(sourceURI, aTargetURI, sourceBaseURI,
-                             targetBaseURI, aFlags);
+    // If we get here, check all the schemes can link to each other, from the top down:
+    nsCaseInsensitiveCStringComparator stringComparator;
+    nsCOMPtr<nsIURI> currentURI = sourceURI;
+    nsCOMPtr<nsIURI> currentOtherURI = aTargetURI;
+    while (currentURI && currentOtherURI) {
+        nsAutoCString scheme, otherScheme;
+        currentURI->GetScheme(scheme);
+        currentOtherURI->GetScheme(otherScheme);
+
+        // If schemes are not equal, check if the URI flags of the current
+        // target URI allow the current source URI to link to it.
+        // The policy is specified by the protocol flags on both URIs.
+        if (!scheme.Equals(otherScheme, stringComparator)) {
+            return CheckLoadURIFlags(currentURI, currentOtherURI,
+                                     sourceBaseURI, targetBaseURI, aFlags);
+        }
+        // Otherwise... check if we can nest another level:
+        nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(currentURI);
+        nsCOMPtr<nsINestedURI> nestedOtherURI = do_QueryInterface(currentOtherURI);
+
+        // If schemes match and neither URI is nested further, we're OK.
+        if (!nestedURI && !nestedOtherURI) {
+            return NS_OK;
+        }
+        // If one is nested and the other isn't, something is wrong.
+        if (!nestedURI != !nestedOtherURI) {
+            return NS_ERROR_DOM_BAD_URI;
+        }
+        // Otherwise, both should be nested and we'll go through the loop again.
+        nestedURI->GetInnerURI(getter_AddRefs(currentURI));
+        nestedOtherURI->GetInnerURI(getter_AddRefs(currentOtherURI));
+    }
+
+    // We should never get here. We should always return from inside the loop.
+    return NS_ERROR_DOM_BAD_URI;
 }
 
 /**
@@ -1202,6 +1169,7 @@ nsScriptSecurityManager::
                                   nsILoadContext* aLoadContext,
                                   nsIPrincipal** aPrincipal)
 {
+  NS_ENSURE_STATE(aLoadContext);
   DocShellOriginAttributes docShellAttrs;
   bool result = aLoadContext->GetOriginAttributes(docShellAttrs);;
   NS_ENSURE_TRUE(result, NS_ERROR_FAILURE);
@@ -1305,7 +1273,7 @@ nsScriptSecurityManager::CanCreateInstance(JSContext *cx,
     char cidStr[NSID_LENGTH];
     aCID.ToProvidedString(cidStr);
     errorMsg.Append(cidStr);
-    SetPendingException(cx, errorMsg.get());
+    SetPendingExceptionASCII(cx, errorMsg.get());
     return NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED;
 }
 
@@ -1322,7 +1290,7 @@ nsScriptSecurityManager::CanGetService(JSContext *cx,
     char cidStr[NSID_LENGTH];
     aCID.ToProvidedString(cidStr);
     errorMsg.Append(cidStr);
-    SetPendingException(cx, errorMsg.get());
+    SetPendingExceptionASCII(cx, errorMsg.get());
     return NS_ERROR_DOM_XPCONNECT_ACCESS_DENIED;
 }
 

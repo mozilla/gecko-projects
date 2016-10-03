@@ -93,9 +93,16 @@ MacroAssemblerARM::convertUInt32ToDouble(Register src, FloatRegister dest_)
 
 static const double TO_DOUBLE_HIGH_SCALE = 0x100000000;
 
-void
-MacroAssemblerARMCompat::convertUInt64ToDouble(Register64 src, Register temp, FloatRegister dest)
+bool
+MacroAssemblerARMCompat::convertUInt64ToDoubleNeedsTemp()
 {
+    return false;
+}
+
+void
+MacroAssemblerARMCompat::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
     convertUInt32ToDouble(src.high, dest);
     movePtr(ImmPtr(&TO_DOUBLE_HIGH_SCALE), ScratchRegister);
     loadDouble(Address(ScratchRegister, 0), ScratchDoubleReg);
@@ -5201,8 +5208,8 @@ MacroAssembler::branchTestValue(Condition cond, const ValueOperand& lhs,
 // Memory access primitives.
 template <typename T>
 void
-MacroAssembler::storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const T& dest,
-                                  MIRType slotType)
+MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value, MIRType valueType,
+                                  const T& dest, MIRType slotType)
 {
     if (valueType == MIRType::Double) {
         storeDouble(value.reg().typedReg().fpu(), dest);
@@ -5221,10 +5228,10 @@ MacroAssembler::storeUnboxedValue(ConstantOrRegister value, MIRType valueType, c
 }
 
 template void
-MacroAssembler::storeUnboxedValue(ConstantOrRegister value, MIRType valueType,
+MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value, MIRType valueType,
                                   const Address& dest, MIRType slotType);
 template void
-MacroAssembler::storeUnboxedValue(ConstantOrRegister value, MIRType valueType,
+MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value, MIRType valueType,
                                   const BaseIndex& dest, MIRType slotType);
 
 //}}} check_macroassembler_style

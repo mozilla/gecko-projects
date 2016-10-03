@@ -538,9 +538,6 @@ class Marionette(object):
 
     CONTEXT_CHROME = 'chrome'  # non-browser content: windows, dialogs, etc.
     CONTEXT_CONTENT = 'content'  # browser content: iframes, divs, etc.
-    TIMEOUT_SEARCH = 'implicit'
-    TIMEOUT_SCRIPT = 'script'
-    TIMEOUT_PAGE = 'page load'
     DEFAULT_SOCKET_TIMEOUT = 60
     DEFAULT_STARTUP_TIMEOUT = 120
     DEFAULT_SHUTDOWN_TIMEOUT = 65  # Firefox will kill hanging threads after 60s
@@ -726,12 +723,21 @@ class Marionette(object):
         raise errors.lookup(error)(message, stacktrace=stacktrace)
 
     def reset_timeouts(self):
+        """Resets timeouts to their defaults to the `self.timeout`
+        attribute. If unset, only the page load timeout is reset to
+        30 seconds.
+
+        """
+
+        timeout_types = {"search": self.set_search_timeout,
+                         "script": self.set_script_timeout,
+                         "page load": self.set_page_load_timeout}
+
         if self.timeout is not None:
-            self.timeouts(self.TIMEOUT_SEARCH, self.timeout)
-            self.timeouts(self.TIMEOUT_SCRIPT, self.timeout)
-            self.timeouts(self.TIMEOUT_PAGE, self.timeout)
+            for typ, ms in self.timeout:
+                timeout_types[typ](ms)
         else:
-            self.timeouts(self.TIMEOUT_PAGE, 30000)
+            self.set_page_load_timeout(30000)
 
     def check_for_crash(self):
         returncode = None
@@ -1037,11 +1043,24 @@ class Marionette(object):
                                of the application. Possible values here correspond
                                to constants in nsIAppStartup: http://mzl.la/1X0JZsC.
         """
-        flags = set(["eForceQuit"])
+        flags = set([])
         if shutdown_flags:
             flags.add(shutdown_flags)
-        self._send_message("quitApplication", {"flags": list(flags)})
 
+        # Trigger a 'quit-application-requested' observer notification so that
+        # components can safely shutdown before quitting the application.
+        with self.using_context("chrome"):
+            canceled = self.execute_script("""
+                Components.utils.import("resource://gre/modules/Services.jsm");
+                let cancelQuit = Components.classes["@mozilla.org/supports-PRBool;1"].
+                                 createInstance(Components.interfaces.nsISupportsPRBool);
+                Services.obs.notifyObservers(cancelQuit, "quit-application-requested", null);
+                return cancelQuit.data;
+                """)
+            if canceled:
+                raise errors.MarionetteException("Something canceled the quit application request")
+
+        self._send_message("quitApplication", {"flags": list(flags)})
         self.delete_session(in_app=True)
 
     @do_process_check
@@ -1197,9 +1216,10 @@ class Marionette(object):
 
     @property
     def session_capabilities(self):
-        '''
-        A JSON dictionary representing the capabilities of the current session.
-        '''
+        """A JSON dictionary representing the capabilities of the
+        current session.
+
+        """
         return self.session
 
     def set_script_timeout(self, timeout):
@@ -1212,8 +1232,9 @@ class Marionette(object):
         :param timeout: The maximum number of milliseconds an asynchronous
             script can run without causing an ScriptTimeoutException to
             be raised
+
         """
-        self._send_message("setScriptTimeout", {"ms": timeout})
+        self._send_message("timeouts", {"script": timeout})
 
     def set_search_timeout(self, timeout):
         """Sets a timeout for the find methods.
@@ -1227,8 +1248,21 @@ class Marionette(object):
         currently being loaded.
 
         :param timeout: Timeout in milliseconds.
+
         """
-        self._send_message("setSearchTimeout", {"ms": timeout})
+        self._send_message("timeouts", {"implicit": timeout})
+
+    def set_page_load_timeout(self, timeout):
+        """Sets a timeout for loading pages.
+
+        A page load timeout specifies the amount of time the Marionette
+        instance should wait for a page load operation to complete. A
+        ``TimeoutException`` is returned if this limit is exceeded.
+
+        :param timeout: Timeout in milliseconds.
+
+        """
+        self._send_message("timeouts", {"page load": timeout})
 
     @property
     def current_window_handle(self):
@@ -1486,49 +1520,6 @@ class Marionette(object):
         :param url: The URL to navigate to.
         """
         self._send_message("get", {"url": url})
-
-    def timeouts(self, timeout_type, ms):
-        """An interface for managing timeout behaviour of a Marionette
-        instance.
-
-        Setting timeouts specifies the type and amount of time the
-        Marionette instance should wait during requests.
-
-        There are three types of timeouts that can be set: implicit,
-        script and page load.
-
-        * An implicit  timeout specifies the amount of time a Marionette
-        instance should wait when searching for elements. Here, marionette
-        polls a page until an element is found or the timeout expires,
-        whichever occurs first. When searching for multiple elements,
-        the driver should poll the page until at least one element is
-        found or the timeout expires, at which point it should return
-        an empty list.
-
-        * A script timeout specifies the amount of time the Marionette
-        instance should wait after calling executeAsyncScript for the
-        callback to have executed before returning a timeout response.
-
-        * A page load timeout specifies the amount of time the Marionette
-        instance should wait for a page load operation to complete. If
-        this limit is exceeded, the Marionette instance will return a
-        "timeout" response status.
-
-        :param timeout_type: A string value specifying the timeout
-            type. This must be one of three types: 'implicit', 'script'
-            or 'page load'
-        :param ms: A number value specifying the timeout length in
-            milliseconds (ms)
-        """
-        timeout_types = (self.TIMEOUT_PAGE,
-                         self.TIMEOUT_SCRIPT,
-                         self.TIMEOUT_SEARCH,
-                         )
-        if timeout_type not in timeout_types:
-            raise ValueError("Unknown timeout type: {0} (should be one "
-                             "of {1})".format(timeout_type, timeout_types))
-        body = {"type": timeout_type, "ms": ms}
-        self._send_message("timeouts", body)
 
     def go_back(self):
         """Causes the browser to perform a back navigation."""

@@ -154,6 +154,24 @@ TreeMutation::PrefixLog(void* aData, Accessible* aAcc)
 // EventTree
 
 void
+EventTree::Shown(Accessible* aChild)
+{
+  RefPtr<AccShowEvent> ev = new AccShowEvent(aChild);
+  Controller(aChild)->WithdrawPrecedingEvents(&ev->mPrecedingEvents);
+  Mutated(ev);
+}
+
+void
+EventTree::Hidden(Accessible* aChild, bool aNeedsShutdown)
+{
+  RefPtr<AccHideEvent> ev = new AccHideEvent(aChild, aNeedsShutdown);
+  if (!aNeedsShutdown) {
+    Controller(aChild)->StorePrecedingEvent(ev);
+  }
+  Mutated(ev);
+}
+
+void
 EventTree::Process(const RefPtr<DocAccessible>& aDeathGrip)
 {
   while (mFirst) {
@@ -177,9 +195,18 @@ EventTree::Process(const RefPtr<DocAccessible>& aDeathGrip)
   uint32_t eventsCount = mDependentEvents.Length();
   for (uint32_t jdx = 0; jdx < eventsCount; jdx++) {
     AccMutationEvent* mtEvent = mDependentEvents[jdx];
-    MOZ_ASSERT(mtEvent->mEventRule != AccEvent::eDoNotEmit,
-               "The event shouldn't be presented in the tree");
     MOZ_ASSERT(mtEvent->Document(), "No document for event target");
+
+    // Fire all hide events that has to be fired before this show event.
+    if (mtEvent->IsShow()) {
+      AccShowEvent* showEv = downcast_accEvent(mtEvent);
+      for (uint32_t i = 0; i < showEv->mPrecedingEvents.Length(); i++) {
+        nsEventShell::FireEvent(showEv->mPrecedingEvents[i]);
+        if (aDeathGrip->IsDefunct()) {
+          return;
+        }
+      }
+    }
 
     nsEventShell::FireEvent(mtEvent);
     if (aDeathGrip->IsDefunct()) {
@@ -415,13 +442,22 @@ EventTree::Log(uint32_t aLevel) const
   for (uint32_t i = 0; i < mDependentEvents.Length(); i++) {
     AccMutationEvent* ev = mDependentEvents[i];
     if (ev->IsShow()) {
-      for (uint32_t i = 0; i < aLevel; i++) {
+      for (uint32_t i = 0; i < aLevel + 1; i++) {
         printf("  ");
       }
       logging::AccessibleInfo("shown", ev->mAccessible);
+
+      AccShowEvent* showEv = downcast_accEvent(ev);
+      for (uint32_t i = 0; i < showEv->mPrecedingEvents.Length(); i++) {
+        for (uint32_t j = 0; j < aLevel + 1; j++) {
+          printf("  ");
+        }
+        logging::AccessibleInfo("preceding",
+                                showEv->mPrecedingEvents[i]->mAccessible);
+      }
     }
     else {
-      for (uint32_t i = 0; i < aLevel; i++) {
+      for (uint32_t i = 0; i < aLevel + 1; i++) {
         printf("  ");
       }
       logging::AccessibleInfo("hidden", ev->mAccessible);
@@ -448,6 +484,59 @@ EventTree::Mutated(AccMutationEvent* aEv)
     Accessible* cntr = (*node)->mContainer;
     while (cntr != mContainer) {
       if (cntr == aEv->mAccessible) {
+#ifdef A11Y_LOG
+        if (logging::IsEnabled(logging::eEventTree)) {
+          logging::MsgBegin("EVENTS_TREE", "Trim subtree");
+          logging::AccessibleInfo("Show/hide container", aEv->mAccessible);
+          logging::AccessibleInfo("Trimmed subtree root", (*node)->mContainer);
+          logging::MsgEnd();
+        }
+#endif
+
+        // If the new hide is part of a move and it contains existing child
+        // shows, then move preceding events from the child shows to the buffer,
+        // so the ongoing show event will pick them up.
+        if (aEv->IsHide()) {
+          AccHideEvent* hideEv = downcast_accEvent(aEv);
+          if (!hideEv->mNeedsShutdown) {
+            for (uint32_t i = 0; i < (*node)->mDependentEvents.Length(); i++) {
+              AccMutationEvent* childEv = (*node)->mDependentEvents[i];
+              if (childEv->IsShow()) {
+                AccShowEvent* childShowEv = downcast_accEvent(childEv);
+                if (childShowEv->mPrecedingEvents.Length() > 0) {
+                  Controller(mContainer)->StorePrecedingEvents(
+                    mozilla::Move(childShowEv->mPrecedingEvents));
+                }
+              }
+            }
+          }
+        }
+        // If the new show contains existing child shows, then move preceding
+        // events from the child shows to the new show.
+        else if (aEv->IsShow()) {
+          AccShowEvent* showEv = downcast_accEvent(aEv);
+          for (uint32_t i = 0; (*node)->mDependentEvents.Length(); i++) {
+            AccMutationEvent* childEv = (*node)->mDependentEvents[i];
+            if (childEv->IsShow()) {
+              AccShowEvent* showChildEv = downcast_accEvent(childEv);
+              if (showChildEv->mPrecedingEvents.Length() > 0) {
+#ifdef A11Y_LOG
+                if (logging::IsEnabled(logging::eEventTree)) {
+                  logging::MsgBegin("EVENTS_TREE", "Adopt preceding events");
+                  logging::AccessibleInfo("Parent", aEv->mAccessible);
+                  for (uint32_t j = 0; j < showChildEv->mPrecedingEvents.Length(); j++) {
+                    logging::AccessibleInfo("Adoptee",
+                      showChildEv->mPrecedingEvents[i]->mAccessible);
+                  }
+                  logging::MsgEnd();
+                }
+#endif
+                showEv->mPrecedingEvents.AppendElements(showChildEv->mPrecedingEvents);
+              }
+            }
+          }
+        }
+
         *node = Move((*node)->mNext);
         break;
       }

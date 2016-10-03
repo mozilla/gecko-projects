@@ -137,6 +137,13 @@ WebGLContext::BindBuffer(GLenum target, WebGLBuffer* buffer)
     if (buffer) {
         buffer->SetContentAfterBind(target);
     }
+
+    switch (target) {
+    case LOCAL_GL_PIXEL_PACK_BUFFER:
+    case LOCAL_GL_PIXEL_UNPACK_BUFFER:
+        gl->fBindBuffer(target, 0);
+        break;
+    }
 }
 
 ////////////////////////////////////////
@@ -429,6 +436,8 @@ WebGLContext::BufferSubDataT(GLenum target,
     }
 
     MakeContextCurrent();
+    const ScopedLazyBind lazyBind(gl, target, buffer);
+
     // Warning: Possibly shared memory.  See bug 1225033.
     gl->fBufferSubData(target, byteOffset, data.LengthAllowShared(),
                        data.DataAllowShared());
@@ -524,7 +533,7 @@ WebGLContext::DeleteBuffer(WebGLBuffer* buffer)
 
     for (int32_t i = 0; i < mGLMaxVertexAttribs; i++) {
         if (mBoundVertexArray->HasAttrib(i)) {
-            fnClearIfBuffer(mBoundVertexArray->mAttribs[i].buf);
+            fnClearIfBuffer(mBoundVertexArray->mAttribs[i].mBuf);
         }
     }
 

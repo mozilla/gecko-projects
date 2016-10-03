@@ -7,8 +7,18 @@ WORKDIR /home/worker
 # %include testing/docker/recipes/tooltool.py
 ADD topsrcdir/testing/docker/recipes/tooltool.py /setup/tooltool.py
 
+# %include testing/mozharness/external_tools/robustcheckout.py
+ADD topsrcdir/testing/mozharness/external_tools/robustcheckout.py /usr/local/mercurial/robustcheckout.py
+
+# %include testing/docker/recipes/common.sh
+ADD topsrcdir/testing/docker/recipes/common.sh /setup/common.sh
+
 # %include testing/docker/recipes/install-mercurial.sh
 ADD topsrcdir/testing/docker/recipes/install-mercurial.sh /setup/install-mercurial.sh
+
+# Add the tooltool manifest containing the minidump_stackwalk binary.
+# %include testing/config/tooltool-manifests/linux64/releng.manifest
+ADD topsrcdir/testing/config/tooltool-manifests/linux64/releng.manifest /tmp/minidump_stackwalk.manifest
 
 # %include testing/docker/recipes/ubuntu1604-test-system-setup.sh
 ADD topsrcdir/testing/docker/recipes/ubuntu1604-test-system-setup.sh /setup/system-setup.sh

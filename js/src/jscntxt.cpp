@@ -261,7 +261,7 @@ js::ReportOverRecursed(JSContext* maybecx, unsigned errorNumber)
     fprintf(stderr, "ReportOverRecursed called\n");
 #endif
     if (maybecx) {
-        JS_ReportErrorNumber(maybecx, GetErrorMessage, nullptr, errorNumber);
+        JS_ReportErrorNumberASCII(maybecx, GetErrorMessage, nullptr, errorNumber);
         maybecx->overRecursed_ = true;
     }
 }
@@ -292,7 +292,7 @@ js::ReportAllocationOverflow(ExclusiveContext* cxArg)
     JSContext* cx = cxArg->asJSContext();
 
     AutoSuppressGC suppressGC(cx);
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_ALLOC_OVERFLOW);
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_ALLOC_OVERFLOW);
 }
 
 /*
@@ -318,7 +318,8 @@ checkReportFlags(JSContext* cx, unsigned* flags)
 }
 
 bool
-js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format, va_list ap)
+js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format,
+                  ErrorArgumentsType argumentsType, va_list ap)
 {
     char* message;
     char16_t* ucmessage;
@@ -336,9 +337,22 @@ js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format, va_list ap)
     }
     messagelen = strlen(message);
 
+    MOZ_ASSERT_IF(argumentsType == ArgumentsAreASCII, JS::StringIsASCII(message));
+
     report.flags = flags;
     report.errorNumber = JSMSG_USER_DEFINED_ERROR;
-    report.ucmessage = ucmessage = InflateString(cx, message, &messagelen);
+    if (argumentsType == ArgumentsAreASCII || argumentsType == ArgumentsAreLatin1) {
+        ucmessage = InflateString(cx, message, &messagelen);
+    } else {
+        JS::UTF8Chars utf8(message, messagelen);
+        size_t unused;
+        ucmessage = LossyUTF8CharsToNewTwoByteCharsZ(cx, utf8, &unused).get();
+    }
+    if (!ucmessage) {
+        js_free(message);
+        return false;
+    }
+    report.ucmessage = ucmessage;
     PopulateReportBlame(cx, &report);
 
     warning = JSREPORT_IS_WARNING(report.flags);
@@ -351,7 +365,7 @@ js::ReportErrorVA(JSContext* cx, unsigned flags, const char* format, va_list ap)
 
 /* |callee| requires a usage string provided by JS_DefineFunctionsWithHelp. */
 void
-js::ReportUsageError(JSContext* cx, HandleObject callee, const char* msg)
+js::ReportUsageErrorASCII(JSContext* cx, HandleObject callee, const char* msg)
 {
     const char* usageStr = "usage";
     PropertyName* usageAtom = Atomize(cx, usageStr, strlen(usageStr))->asPropertyName();
@@ -366,16 +380,13 @@ js::ReportUsageError(JSContext* cx, HandleObject callee, const char* msg)
         return;
 
     if (!usage.isString()) {
-        JS_ReportError(cx, "%s", msg);
+        JS_ReportErrorASCII(cx, "%s", msg);
     } else {
-        JSString* str = usage.toString();
-        if (!str->ensureFlat(cx))
+        RootedString usageStr(cx, usage.toString());
+        JSAutoByteString str;
+        if (!str.encodeUtf8(cx, usageStr))
             return;
-        AutoStableStringChars chars(cx);
-        if (!chars.initTwoByte(cx, str))
-            return;
-
-        JS_ReportError(cx, "%s. Usage: %hs", msg, chars.twoByteRange().start().get());
+        JS_ReportErrorUTF8(cx, "%s. Usage: %s", msg, str.ptr());
     }
 }
 
@@ -539,14 +550,24 @@ class MOZ_RAII AutoMessageArgs
             if (passed_) {
                 lengths_[i] = js_strlen(args_[i]);
             } else if (typeArg == ArgumentsAreASCII || typeArg == ArgumentsAreLatin1) {
-                char* charArg = va_arg(ap, char*);
+                const char* charArg = va_arg(ap, char*);
                 size_t charArgLength = strlen(charArg);
+
+                MOZ_ASSERT_IF(typeArg == ArgumentsAreASCII, JS::StringIsASCII(charArg));
+
                 args_[i] = InflateString(cx, charArg, &charArgLength);
                 if (!args_[i])
                     return false;
                 allocatedElements_ = true;
                 MOZ_ASSERT(charArgLength == js_strlen(args_[i]));
                 lengths_[i] = charArgLength;
+            } else if (typeArg == ArgumentsAreUTF8) {
+                const char* charArg = va_arg(ap, char*);
+                JS::UTF8Chars utf8(charArg, strlen(charArg));
+                args_[i] = LossyUTF8CharsToNewTwoByteCharsZ(cx, utf8, &lengths_[i]).get();
+                if (!args_[i])
+                    return false;
+                allocatedElements_ = true;
             } else {
                 args_[i] = va_arg(ap, char16_t*);
                 lengths_[i] = js_strlen(args_[i]);
@@ -589,6 +610,8 @@ js::ExpandErrorArgumentsVA(ExclusiveContext* cx, JSErrorCallback callback,
 
     if (efs) {
         reportp->exnType = efs->exnType;
+
+        MOZ_ASSERT_IF(argumentsType == ArgumentsAreASCII, JS::StringIsASCII(efs->format));
 
         uint16_t argCount = efs->argCount;
         MOZ_RELEASE_ASSERT(argCount <= JS::MaxNumErrorArguments);
@@ -785,8 +808,10 @@ bool
 js::ReportIsNotDefined(JSContext* cx, HandleId id)
 {
     JSAutoByteString printable;
-    if (ValueToPrintable(cx, IdToValue(id), &printable))
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_DEFINED, printable.ptr());
+    if (ValueToPrintable(cx, IdToValue(id), &printable)) {
+        JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_NOT_DEFINED,
+                                   printable.ptr());
+    }
     return false;
 }
 
@@ -809,21 +834,21 @@ js::ReportIsNullOrUndefined(JSContext* cx, int spindex, HandleValue v,
 
     if (strcmp(bytes.get(), js_undefined_str) == 0 ||
         strcmp(bytes.get(), js_null_str) == 0) {
-        ok = JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR,
-                                          GetErrorMessage, nullptr,
-                                          JSMSG_NO_PROPERTIES, bytes.get(),
-                                          nullptr, nullptr);
+        ok = JS_ReportErrorFlagsAndNumberLatin1(cx, JSREPORT_ERROR,
+                                                GetErrorMessage, nullptr,
+                                                JSMSG_NO_PROPERTIES,
+                                                bytes.get());
     } else if (v.isUndefined()) {
-        ok = JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR,
-                                          GetErrorMessage, nullptr,
-                                          JSMSG_UNEXPECTED_TYPE, bytes.get(),
-                                          js_undefined_str, nullptr);
+        ok = JS_ReportErrorFlagsAndNumberLatin1(cx, JSREPORT_ERROR,
+                                                GetErrorMessage, nullptr,
+                                                JSMSG_UNEXPECTED_TYPE,
+                                                bytes.get(), js_undefined_str);
     } else {
         MOZ_ASSERT(v.isNull());
-        ok = JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR,
-                                          GetErrorMessage, nullptr,
-                                          JSMSG_UNEXPECTED_TYPE, bytes.get(),
-                                          js_null_str, nullptr);
+        ok = JS_ReportErrorFlagsAndNumberLatin1(cx, JSREPORT_ERROR,
+                                                GetErrorMessage, nullptr,
+                                                JSMSG_UNEXPECTED_TYPE,
+                                                bytes.get(), js_null_str);
     }
 
     return ok;
@@ -842,9 +867,9 @@ js::ReportMissingArg(JSContext* cx, HandleValue v, unsigned arg)
         if (!bytes)
             return;
     }
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                         JSMSG_MISSING_FUN_ARG, argbuf,
-                         bytes ? bytes.get() : "");
+    JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr,
+                               JSMSG_MISSING_FUN_ARG,
+                               argbuf, bytes ? bytes.get() : "");
 }
 
 bool
@@ -861,8 +886,8 @@ js::ReportValueErrorFlags(JSContext* cx, unsigned flags, const unsigned errorNum
     if (!bytes)
         return false;
 
-    ok = JS_ReportErrorFlagsAndNumber(cx, flags, GetErrorMessage,
-                                      nullptr, errorNumber, bytes.get(), arg1, arg2);
+    ok = JS_ReportErrorFlagsAndNumberLatin1(cx, flags, GetErrorMessage, nullptr, errorNumber,
+                                            bytes.get(), arg1, arg2);
     return ok;
 }
 

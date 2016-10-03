@@ -34,7 +34,8 @@ namespace camera {
 CamerasSingleton::CamerasSingleton()
   : mCamerasMutex("CamerasSingleton::mCamerasMutex"),
     mCameras(nullptr),
-    mCamerasChildThread(nullptr) {
+    mCamerasChildThread(nullptr),
+    mFakeDeviceChangeEventThread(nullptr) {
   LOG(("CamerasSingleton: %p", this));
 }
 
@@ -58,7 +59,7 @@ public:
 
       if (mCounter++ < FAKE_ONDEVICECHANGE_EVENT_REPEAT_COUNT) {
         RefPtr<FakeOnDeviceChangeEventRunnable> evt = new FakeOnDeviceChangeEventRunnable(mCounter);
-        CamerasSingleton::Thread()->DelayedDispatch(evt.forget(),
+        CamerasSingleton::FakeDeviceChangeEventThread()->DelayedDispatch(evt.forget(),
           FAKE_ONDEVICECHANGE_EVENT_PERIOD_IN_MS);
       }
     }
@@ -590,10 +591,18 @@ CamerasChild::ShutdownChild()
   LOG(("Erasing sCameras & thread refs (original thread)"));
   CamerasSingleton::Child() = nullptr;
   CamerasSingleton::Thread() = nullptr;
+
+  if (CamerasSingleton::FakeDeviceChangeEventThread()) {
+    RefPtr<ShutdownRunnable> runnable =
+      new ShutdownRunnable(NewRunnableMethod(CamerasSingleton::FakeDeviceChangeEventThread(),
+                                             &nsIThread::Shutdown));
+    CamerasSingleton::FakeDeviceChangeEventThread()->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
+  }
+  CamerasSingleton::FakeDeviceChangeEventThread() = nullptr;
 }
 
 bool
-CamerasChild::RecvDeliverFrame(const int& capEngine,
+CamerasChild::RecvDeliverFrame(const CaptureEngine& capEngine,
                                const int& capId,
                                mozilla::ipc::Shmem&& shmem,
                                const size_t& size,
@@ -602,13 +611,12 @@ CamerasChild::RecvDeliverFrame(const int& capEngine,
                                const int64_t& render_time)
 {
   MutexAutoLock lock(mCallbackMutex);
-  CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Callback(capEng, capId)) {
+  if (Callback(capEngine, capId)) {
     unsigned char* image = shmem.get<unsigned char>();
-    Callback(capEng, capId)->DeliverFrame(image, size,
-                                          time_stamp,
-                                          ntp_time, render_time,
-                                          nullptr);
+    Callback(capEngine, capId)->DeliverFrame(image, size,
+                                             time_stamp,
+                                             ntp_time, render_time,
+                                             nullptr);
   } else {
     LOG(("DeliverFrame called with dead callback"));
   }
@@ -628,24 +636,32 @@ CamerasChild::SetFakeDeviceChangeEvents()
 {
   CamerasSingleton::Mutex().AssertCurrentThreadOwns();
 
+  if(!CamerasSingleton::FakeDeviceChangeEventThread()) {
+    nsresult rv = NS_NewNamedThread("Fake DC Event",
+                                    getter_AddRefs(CamerasSingleton::FakeDeviceChangeEventThread()));
+    if (NS_FAILED(rv)) {
+      LOG(("Error launching Fake OnDeviceChange Event Thread"));
+      return -1;
+    }
+  }
+
   // To simulate the devicechange event in mochitest,
   // we fire a fake devicechange event in Camera IPC thread periodically
   RefPtr<FakeOnDeviceChangeEventRunnable> evt = new FakeOnDeviceChangeEventRunnable(0);
-  CamerasSingleton::Thread()->Dispatch(evt.forget(), NS_DISPATCH_NORMAL);
+  CamerasSingleton::FakeDeviceChangeEventThread()->Dispatch(evt.forget(), NS_DISPATCH_NORMAL);
 
   return 0;
 }
 
 bool
-CamerasChild::RecvFrameSizeChange(const int& capEngine,
+CamerasChild::RecvFrameSizeChange(const CaptureEngine& capEngine,
                                   const int& capId,
                                   const int& w, const int& h)
 {
   LOG((__PRETTY_FUNCTION__));
   MutexAutoLock lock(mCallbackMutex);
-  CaptureEngine capEng = static_cast<CaptureEngine>(capEngine);
-  if (Callback(capEng, capId)) {
-    Callback(capEng, capId)->FrameSizeChange(w, h, 0);
+  if (Callback(capEngine, capId)) {
+    Callback(capEngine, capId)->FrameSizeChange(w, h, 0);
   } else {
     LOG(("Frame size change with dead callback"));
   }

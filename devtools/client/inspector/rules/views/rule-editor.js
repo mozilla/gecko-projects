@@ -87,7 +87,7 @@ RuleEditor.prototype = {
 
   get isSelectorEditable() {
     let trait = this.isEditable &&
-      this.toolbox.target.client.traits.selectorEditable &&
+      this.ruleView.inspector.target.client.traits.selectorEditable &&
       this.rule.domRule.type !== ELEMENT_STYLE &&
       this.rule.domRule.type !== CSSRule.KEYFRAME_RULE;
 
@@ -145,13 +145,15 @@ RuleEditor.prototype = {
       editableField({
         element: this.selectorText,
         done: this._onSelectorDone,
-        cssProperties: this.rule.cssProperties
+        cssProperties: this.rule.cssProperties,
+        contextMenu: this.ruleView.inspector.onTextBoxContextMenu
       });
     }
 
-    if (this.rule.domRule.type !== CSSRule.KEYFRAME_RULE &&
-        this.rule.domRule.selectors) {
-      let selector = this.rule.domRule.selectors.join(", ");
+    if (this.rule.domRule.type !== CSSRule.KEYFRAME_RULE) {
+      let selector = this.rule.domRule.selectors
+               ? this.rule.domRule.selectors.join(", ")
+               : this.ruleView.inspector.selectionCssSelector;
 
       let selectorHighlighter = createChild(header, "span", {
         class: "ruleview-selectorhighlighter" +
@@ -447,7 +449,8 @@ RuleEditor.prototype = {
       advanceChars: ":",
       contentType: InplaceEditor.CONTENT_TYPES.CSS_PROPERTY,
       popup: this.ruleView.popup,
-      cssProperties: this.rule.cssProperties
+      cssProperties: this.rule.cssProperties,
+      contextMenu: this.ruleView.inspector.onTextBoxContextMenu
     });
 
     // Auto-close the input if multiple rules get pasted into new property.
