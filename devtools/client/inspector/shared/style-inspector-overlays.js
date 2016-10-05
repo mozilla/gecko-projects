@@ -13,20 +13,16 @@
 // - etc.
 
 const {getColor} = require("devtools/client/shared/theme");
-const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const {
   getImageDimensions,
   setImageTooltip,
   setBrokenImageTooltip,
 } = require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
-const {
-  CssDocsTooltip,
-} = require("devtools/client/shared/widgets/tooltip/CssDocsTooltip");
-const {
-  SwatchColorPickerTooltip,
-  SwatchCubicBezierTooltip,
-  SwatchFilterTooltip
-} = require("devtools/client/shared/widgets/Tooltip");
+const CssDocsTooltip = require("devtools/client/shared/widgets/tooltip/CssDocsTooltip");
+const SwatchColorPickerTooltip = require("devtools/client/shared/widgets/tooltip/SwatchColorPickerTooltip");
+const SwatchCubicBezierTooltip = require("devtools/client/shared/widgets/tooltip/SwatchCubicBezierTooltip");
+const SwatchFilterTooltip = require("devtools/client/shared/widgets/tooltip/SwatchFilterTooltip");
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
 const {Task} = require("devtools/shared/task");

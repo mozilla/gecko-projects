@@ -4,7 +4,7 @@
 
 "use strict";
 
-const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const {MdnDocsWidget} = require("devtools/client/shared/widgets/MdnDocsWidget");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -36,8 +36,6 @@ function CssDocsTooltip(toolbox) {
 
   this.shortcuts.on("Escape", this._onShortcut);
 }
-
-module.exports.CssDocsTooltip = CssDocsTooltip;
 
 CssDocsTooltip.prototype = {
   /**
@@ -91,3 +89,5 @@ CssDocsTooltip.prototype = {
     this.tooltip.destroy();
   }
 };
+
+module.exports = CssDocsTooltip;

@@ -581,7 +581,9 @@ WebConsoleFrame.prototype = {
     if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
       // @TODO Remove this once JSTerm is handled with React/Redux.
       this.window.jsterm = this.jsterm;
-      console.log("Entering experimental mode for console frontend");
+
+      // Remove context menu for now (see Bug 1307239).
+      this.outputWrapper.removeAttribute("context");
 
       // XXX: We should actually stop output from happening on old output
       // panel, but for now let's just hide it.
@@ -591,6 +593,7 @@ WebConsoleFrame.prototype = {
       this.outputNode.parentNode.appendChild(this.experimentalOutputNode);
       // @TODO Once the toolbox has been converted to React, see if passing
       // in JSTerm is still necessary.
+
       this.newConsoleOutput = new this.window.NewConsoleOutput(
         this.experimentalOutputNode, this.jsterm, toolbox, this.owner);
       console.log("Created newConsoleOutput", this.newConsoleOutput);
@@ -3266,10 +3269,6 @@ WebConsoleConnectionProxy.prototype = {
    */
   dispatchMessageAdd: function(packet) {
     this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
-    this.webConsoleFrame.emit("new-messages", new Set([{
-      response: packet,
-      node: this.webConsoleFrame.newConsoleOutput.getLastMessage(),
-    }]));
   },
 
   /**

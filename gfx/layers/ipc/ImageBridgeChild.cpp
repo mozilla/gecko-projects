@@ -32,6 +32,7 @@
 #include "mozilla/layers/LayersMessages.h"  // for CompositableOperation
 #include "mozilla/layers/PCompositableChild.h"  // for PCompositableChild
 #include "mozilla/layers/TextureClient.h"  // for TextureClient
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "mtransport/runnable_utils.h"
 #include "nsContentUtils.h"
@@ -522,15 +523,10 @@ ImageBridgeChild::ImageBridgeChild()
   MOZ_ASSERT(NS_IsMainThread());
 
   mTxn = new CompositableTransaction();
-  mShutdownObserver = new ShutdownObserver(this);
 }
 
 ImageBridgeChild::~ImageBridgeChild()
 {
-  // We should have already removed this in WillShutdown, since it must be
-  // removed on the main thread.
-  MOZ_ASSERT(!mShutdownObserver);
-
   delete mTxn;
 }
 
@@ -975,11 +971,6 @@ ImageBridgeChild::WillShutdown()
     GetMessageLoop()->PostTask(runnable.forget());
 
     task.Wait();
-  }
-
-  if (mShutdownObserver) {
-    mShutdownObserver->Unregister();
-    mShutdownObserver = nullptr;
   }
 }
 
@@ -1488,38 +1479,9 @@ ImageBridgeChild::CanSend() const
 }
 
 void
-ImageBridgeChild::OnXPCOMShutdown()
+ImageBridgeChild::FatalError(const char* const aName, const char* const aMsg) const
 {
-  // This uses nsIObserverService, so it must be cleaned up. Other threads may
-  // hold references to ImageBridgeChild and we may actually be destroyed well
-  // after XPCOM shutdown.
-  mActiveResourceTracker = nullptr;
-}
-
-NS_IMPL_ISUPPORTS(ImageBridgeChild::ShutdownObserver, nsIObserver);
-
-ImageBridgeChild::ShutdownObserver::ShutdownObserver(ImageBridgeChild* aImageBridge)
- : mImageBridge(aImageBridge)
-{
-  nsContentUtils::RegisterShutdownObserver(this);
-}
-
-void
-ImageBridgeChild::ShutdownObserver::Unregister()
-{
-  nsContentUtils::UnregisterShutdownObserver(this);
-  mImageBridge = nullptr;
-}
-
-NS_IMETHODIMP
-ImageBridgeChild::ShutdownObserver::Observe(nsISupports* aSubject,
-                                            const char* aTopic,
-                                            const char16_t* aData)
-{
-  if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
-    mImageBridge->OnXPCOMShutdown();
-  }
-  return NS_OK;
+  dom::ContentChild::FatalErrorIfNotUsingGPUProcess(aName, aMsg, OtherPid());
 }
 
 } // namespace layers

@@ -116,6 +116,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Snackbars", "resource://gre/modules/Sna
 
 XPCOMUtils.defineLazyModuleGetter(this, "RuntimePermissions", "resource://gre/modules/RuntimePermissions.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "WebsiteMetadata", "resource://gre/modules/WebsiteMetadata.jsm");
+
 XPCOMUtils.defineLazyServiceGetter(this, "FontEnumerator",
   "@mozilla.org/gfx/fontenumerator;1",
   "nsIFontEnumerator");
@@ -1051,7 +1053,7 @@ var BrowserApp = {
   // off to the compositor.
   isBrowserContentDocumentDisplayed: function() {
     try {
-      if (!Services.androidBridge.isContentDocumentDisplayed())
+      if (!Services.androidBridge.isContentDocumentDisplayed(window))
         return false;
     } catch (e) {
       return false;
@@ -1065,7 +1067,7 @@ var BrowserApp = {
 
   contentDocumentChanged: function() {
     window.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).isFirstPaint = true;
-    Services.androidBridge.contentDocumentChanged();
+    Services.androidBridge.contentDocumentChanged(window);
   },
 
   get tabs() {
@@ -3930,6 +3932,11 @@ Tab.prototype = {
 
           this.browser.addEventListener("pagehide", listener, true);
         }
+
+        if (AppConstants.NIGHTLY_BUILD || AppConstants.MOZ_ANDROID_ACTIVITY_STREAM) {
+          WebsiteMetadata.parseAsynchronously(this.browser.contentDocument);
+        }
+
         break;
       }
 

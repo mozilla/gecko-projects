@@ -604,8 +604,7 @@ Gecko_AtomEqualsUTF8(nsIAtom* aAtom, const char* aString, uint32_t aLength)
 {
   // XXXbholley: We should be able to do this without converting, I just can't
   // find the right thing to call.
-  nsAutoString atomStr;
-  aAtom->ToString(atomStr);
+  nsDependentAtomString atomStr(aAtom);
   NS_ConvertUTF8toUTF16 inStr(nsDependentCSubstring(aString, aLength));
   return atomStr.Equals(inStr);
 }
@@ -615,10 +614,22 @@ Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLe
 {
   // XXXbholley: We should be able to do this without converting, I just can't
   // find the right thing to call.
-  nsAutoString atomStr;
-  aAtom->ToString(atomStr);
+  nsDependentAtomString atomStr(aAtom);
   NS_ConvertUTF8toUTF16 inStr(nsDependentCSubstring(aString, aLength));
   return nsContentUtils::EqualsIgnoreASCIICase(atomStr, inStr);
+}
+
+void
+Gecko_Utf8SliceToString(nsString* aString,
+                        const uint8_t* aBuffer,
+                        size_t aBufferLen)
+{
+  MOZ_ASSERT(aString);
+  MOZ_ASSERT(aBuffer);
+
+  aString->Truncate();
+  AppendUTF8toUTF16(Substring(reinterpret_cast<const char*>(aBuffer),
+                              aBufferLen), *aString);
 }
 
 void

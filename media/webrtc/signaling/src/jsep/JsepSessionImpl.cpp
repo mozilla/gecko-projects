@@ -289,12 +289,9 @@ JsepSessionImpl::SetParameters(const std::string& streamId,
   SdpDirectionAttribute::Direction addVideoExt = SdpDirectionAttribute::kInactive;
   for (auto constraintEntry: constraints) {
     if (constraintEntry.rid != "") {
-      switch (it->mTrack->GetMediaType()) {
-        case SdpMediaSection::kVideo: {
-           addVideoExt = static_cast<SdpDirectionAttribute::Direction>(addVideoExt
-                                                                       | it->mTrack->GetDirection());
-          break;
-        }
+      if (it->mTrack->GetMediaType() == SdpMediaSection::kVideo) {
+        addVideoExt = static_cast<SdpDirectionAttribute::Direction>(addVideoExt
+                                                                    | it->mTrack->GetDirection());
       }
     }
   }
@@ -2151,6 +2148,18 @@ JsepSessionImpl::SetupDefaultCodecs()
                                     1,
                                     8000 / 50,   // frequency / 50
                                     8 * 8000 * 1 // 8 * frequency * channels
+                                    ));
+
+  // note: because telephone-event is effectively a marker codec that indicates
+  // that dtmf rtp packets may be passed, the packetSize and bitRate fields
+  // don't make sense here.  For now, use zero. (mjf)
+  mSupportedCodecs.values.push_back(
+      new JsepAudioCodecDescription("101",
+                                    "telephone-event",
+                                    8000,
+                                    1,
+                                    0, // packetSize doesn't make sense here
+                                    0  // bitRate doesn't make sense here
                                     ));
 
   // Supported video codecs.

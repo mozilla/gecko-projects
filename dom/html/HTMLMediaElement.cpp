@@ -1617,18 +1617,6 @@ nsresult HTMLMediaElement::LoadResource()
   // Set the media element's CORS mode only when loading a resource
   mCORSMode = AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin));
 
-  bool isBlob = false;
-  if (mMediaKeys &&
-      Preferences::GetBool("media.eme.mse-only", true) &&
-      // We only want mediaSource URLs, but they are BlobURL, so we have to
-      // check the schema and if they are not MediaStream or real Blob.
-      (NS_FAILED(mLoadingSrc->SchemeIs(BLOBURI_SCHEME, &isBlob)) ||
-       !isBlob ||
-       IsMediaStreamURI(mLoadingSrc) ||
-       IsBlobURI(mLoadingSrc))) {
-    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
-  }
-
   HTMLMediaElement* other = LookupMediaElementURITable(mLoadingSrc);
   if (other && other->mDecoder) {
     // Clone it.
@@ -2907,7 +2895,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
     mAudioChannelVolume(1.0),
     mPlayingThroughTheAudioChannel(false),
     mDisableVideo(false),
-    mElementInTreeState(ELEMENT_NOT_INTREE),
     mHasUserInteraction(false),
     mFirstFrameLoaded(false),
     mDefaultPlaybackStartPosition(0.0),
@@ -3408,6 +3395,9 @@ nsresult HTMLMediaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParen
                                                  aParent,
                                                  aBindingParent,
                                                  aCompileEventHandlers);
+
+  mUnboundFromTree = false;
+
   if (aDocument) {
     mAutoplayEnabled =
       IsAutoplayEnabled() && (!aDocument || !aDocument->IsStaticDocument()) &&
@@ -3416,7 +3406,6 @@ nsresult HTMLMediaElement::BindToTree(nsIDocument* aDocument, nsIContent* aParen
     // It's value may have changed, so update it.
     UpdatePreloadAction();
   }
-  mElementInTreeState = ELEMENT_INTREE;
 
   if (mDecoder) {
     // When the MediaElement is binding to tree, the dormant status is
@@ -3650,11 +3639,7 @@ HTMLMediaElement::ReportTelemetry()
 void HTMLMediaElement::UnbindFromTree(bool aDeep,
                                       bool aNullParent)
 {
-  if (!mPaused && mNetworkState != nsIDOMHTMLMediaElement::NETWORK_EMPTY) {
-    Pause();
-  }
-
-  mElementInTreeState = ELEMENT_NOT_INTREE_HAD_INTREE;
+  mUnboundFromTree = true;
 
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
 
@@ -3662,6 +3647,15 @@ void HTMLMediaElement::UnbindFromTree(bool aDeep,
     MOZ_ASSERT(IsHidden());
     mDecoder->NotifyOwnerActivityChanged(false);
   }
+
+  RefPtr<HTMLMediaElement> self(this);
+  nsCOMPtr<nsIRunnable> task = NS_NewRunnableFunction([self] () {
+    if (self->mUnboundFromTree &&
+        self->mNetworkState != nsIDOMHTMLMediaElement::NETWORK_EMPTY) {
+      self->Pause();
+    }
+  });
+  RunInStableState(task);
 }
 
 /* static */
@@ -4989,11 +4983,8 @@ bool HTMLMediaElement::IsActive() const
 
 bool HTMLMediaElement::IsHidden() const
 {
-  if (mElementInTreeState == ELEMENT_NOT_INTREE_HAD_INTREE) {
-    return true;
-  }
-  nsIDocument* ownerDoc = OwnerDoc();
-  return !ownerDoc || ownerDoc->Hidden();
+  nsIDocument* ownerDoc;
+  return mUnboundFromTree || !(ownerDoc = OwnerDoc()) || ownerDoc->Hidden();
 }
 
 VideoFrameContainer* HTMLMediaElement::GetVideoFrameContainer()

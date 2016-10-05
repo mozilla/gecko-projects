@@ -12,23 +12,17 @@ const {
   DOM: dom,
   PropTypes
 } = require("devtools/client/shared/vendor/react");
-const FrameView = createFactory(require("devtools/client/shared/components/frame"));
-const StackTrace = createFactory(require("devtools/client/shared/components/stack-trace"));
-const GripMessageBody = createFactory(require("devtools/client/webconsole/new-console-output/components/grip-message-body").GripMessageBody);
-const MessageRepeat = createFactory(require("devtools/client/webconsole/new-console-output/components/message-repeat").MessageRepeat);
-const MessageIcon = createFactory(require("devtools/client/webconsole/new-console-output/components/message-icon").MessageIcon);
-const CollapseButton = createFactory(require("devtools/client/webconsole/new-console-output/components/collapse-button").CollapseButton);
-const ConsoleTable = createFactory(require("devtools/client/webconsole/new-console-output/components/console-table").ConsoleTable);
-const actions = require("devtools/client/webconsole/new-console-output/actions/index");
+const GripMessageBody = createFactory(require("devtools/client/webconsole/new-console-output/components/grip-message-body"));
+const ConsoleTable = createFactory(require("devtools/client/webconsole/new-console-output/components/console-table"));
+
+const Message = createFactory(require("devtools/client/webconsole/new-console-output/components/message"));
 
 ConsoleApiCall.displayName = "ConsoleApiCall";
 
 ConsoleApiCall.propTypes = {
   message: PropTypes.object.isRequired,
-  sourceMapService: PropTypes.object,
-  onViewSourceInDebugger: PropTypes.func.isRequired,
   open: PropTypes.bool,
-  hudProxyClient: PropTypes.object.isRequired,
+  serviceContainer: PropTypes.object.isRequired,
 };
 
 ConsoleApiCall.defaultProps = {
@@ -39,13 +33,19 @@ function ConsoleApiCall(props) {
   const {
     dispatch,
     message,
-    sourceMapService,
-    onViewSourceInDebugger,
     open,
-    hudProxyClient,
-    tableData
+    tableData,
+    serviceContainer,
   } = props;
-  const {source, level, stacktrace, type, frame, parameters } = message;
+  const {
+    id: messageId,
+    source, type,
+    level,
+    repeat,
+    stacktrace,
+    frame,
+    parameters
+  } = message;
 
   let messageBody;
   if (type === "trace") {
@@ -62,76 +62,34 @@ function ConsoleApiCall(props) {
     messageBody = message.messageText;
   }
 
-  const icon = MessageIcon({ level });
-  const repeat = MessageRepeat({ repeat: message.repeat });
-  const shouldRenderFrame = frame && frame.source !== "debugger eval code";
-  const location = dom.span({ className: "message-location devtools-monospace" },
-    shouldRenderFrame ? FrameView({
-      frame,
-      onClick: onViewSourceInDebugger,
-      showEmptyPathAsHost: true,
-      sourceMapService
-    }) : null
-  );
-
-  let collapse = "";
-  let attachment = "";
-  if (stacktrace) {
-    if (open) {
-      attachment = dom.div({ className: "stacktrace devtools-monospace" },
-        StackTrace({
-          stacktrace: stacktrace,
-          onViewSourceInDebugger: onViewSourceInDebugger
-        })
-      );
-    }
-
-    collapse = CollapseButton({
-      open,
-      onClick: function () {
-        if (open) {
-          dispatch(actions.messageClose(message.id));
-        } else {
-          dispatch(actions.messageOpen(message.id));
-        }
-      },
-    });
-  } else if (type === "table") {
+  let attachment = null;
+  if (type === "table") {
     attachment = ConsoleTable({
       dispatch,
       id: message.id,
-      hudProxyClient,
+      serviceContainer,
       parameters: message.parameters,
       tableData
     });
   }
 
-  const classes = ["message", "cm-s-mozilla"];
+  const topLevelClasses = ["cm-s-mozilla"];
 
-  classes.push(source);
-  classes.push(type);
-  classes.push(level);
-
-  if (open === true) {
-    classes.push("open");
-  }
-
-  return dom.div({ className: classes.join(" ") },
-    // @TODO add timestamp
-    // @TODO add indent if necessary
-    icon,
-    collapse,
-    dom.span({ className: "message-body-wrapper" },
-      dom.span({ className: "message-flex-body" },
-        dom.span({ className: "message-body devtools-monospace" },
-          messageBody
-        ),
-        repeat,
-        location
-      ),
-      attachment
-    )
-  );
+  return Message({
+    messageId,
+    open,
+    source,
+    type,
+    level,
+    topLevelClasses,
+    messageBody,
+    repeat,
+    frame,
+    stacktrace,
+    attachment,
+    serviceContainer,
+    dispatch,
+  });
 }
 
 function formatReps(parameters) {
@@ -148,4 +106,4 @@ function formatReps(parameters) {
   );
 }
 
-module.exports.ConsoleApiCall = ConsoleApiCall;
+module.exports = ConsoleApiCall;
