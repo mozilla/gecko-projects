@@ -612,15 +612,15 @@ double nsIWidget::DefaultScaleOverride()
 //-------------------------------------------------------------------------
 void nsBaseWidget::AddChild(nsIWidget* aChild)
 {
-  MOZ_RELEASE_ASSERT(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
-                     "aChild not properly removed from its old child list");
+  MOZ_ASSERT(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
+             "aChild not properly removed from its old child list");
 
   if (!mFirstChild) {
     mFirstChild = mLastChild = aChild;
   } else {
     // append to the list
-    MOZ_RELEASE_ASSERT(mLastChild);
-    MOZ_RELEASE_ASSERT(!mLastChild->GetNextSibling());
+    MOZ_ASSERT(mLastChild);
+    MOZ_ASSERT(!mLastChild->GetNextSibling());
     mLastChild->SetNextSibling(aChild);
     aChild->SetPrevSibling(mLastChild);
     mLastChild = aChild;
@@ -936,12 +936,8 @@ bool nsBaseWidget::IsSmallPopup() const
 bool
 nsBaseWidget::ComputeShouldAccelerate()
 {
-  bool enabled = gfx::gfxConfig::IsEnabled(gfx::Feature::HW_COMPOSITING);
-#ifdef MOZ_WIDGET_GTK
-  return enabled && !IsSmallPopup();
-#else
-  return enabled;
-#endif
+  return gfx::gfxConfig::IsEnabled(gfx::Feature::HW_COMPOSITING) &&
+         WidgetTypeSupportsAcceleration();
 }
 
 bool
@@ -1359,8 +1355,12 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 
   lf->SetShadowManager(shadowManager);
   lm->UpdateTextureFactoryIdentifier(textureFactoryIdentifier);
-  ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
-  gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
+  // Some popup or transparent widgets may use a different backend than the
+  // compositors used with ImageBridge and VR (and more generally web content).
+  if (WidgetTypeSupportsAcceleration()) {
+    ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
+    gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
+  }
   WindowUsesOMTC();
 
   mLayerManager = lm.forget();

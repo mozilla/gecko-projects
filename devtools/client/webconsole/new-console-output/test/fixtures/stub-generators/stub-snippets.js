@@ -21,6 +21,7 @@ const consoleApiCommands = [
   "console.assert(false, {message: 'foobar'})",
   "console.log('hello \\nfrom \\rthe \\\"string world!')",
   "console.log('\xFA\u1E47\u0129\xE7\xF6d\xEA \u021B\u0115\u0219\u0165')",
+  "console.dirxml(window)",
 ];
 
 let consoleApi = new Map(consoleApiCommands.map(
@@ -57,8 +58,29 @@ consoleApi.set("console.table(['a', 'b', 'c'])", {
   code: `
 console.table(['a', 'b', 'c']);
 `});
-// Evaluation Result
 
+consoleApi.set("console.group('bar')", {
+  keys: ["console.group('bar')", "console.groupEnd('bar')"],
+  code: `
+console.group("bar");
+console.groupEnd("bar");
+`});
+
+consoleApi.set("console.groupCollapsed('foo')", {
+  keys: ["console.groupCollapsed('foo')", "console.groupEnd('foo')"],
+  code: `
+console.groupCollapsed("foo");
+console.groupEnd("foo");
+`});
+
+consoleApi.set("console.group()", {
+  keys: ["console.group()", "console.groupEnd()"],
+  code: `
+console.group();
+console.groupEnd();
+`});
+
+// Evaluation Result
 const evaluationResultCommands = [
   "new Date(0)",
   "asdf()"

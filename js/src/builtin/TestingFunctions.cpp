@@ -117,12 +117,12 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp)
     if (!JS_SetProperty(cx, info, "debug", value))
         return false;
 
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
     value = BooleanValue(true);
 #else
     value = BooleanValue(false);
 #endif
-    if (!JS_SetProperty(cx, info, "release", value))
+    if (!JS_SetProperty(cx, info, "release_or_beta", value))
         return false;
 
 #ifdef JS_HAS_CTYPES
@@ -1996,20 +1996,22 @@ GetJitCompilerOptions(JSContext* cx, unsigned argc, Value* vp)
     if (!info)
         return false;
 
+    uint32_t intValue = 0;
     RootedValue value(cx);
 
 #define JIT_COMPILER_MATCH(key, string)                                \
     opt = JSJITCOMPILER_ ## key;                                       \
-    value.setInt32(JS_GetGlobalJitCompilerOption(cx, opt));            \
-    if (!JS_SetProperty(cx, info, string, value))                      \
-        return false;
+    if (JS_GetGlobalJitCompilerOption(cx, opt, &intValue)) {           \
+        value.setInt32(intValue);                                      \
+        if (!JS_SetProperty(cx, info, string, value))                  \
+            return false;                                              \
+    }
 
     JSJitCompilerOption opt = JSJITCOMPILER_NOT_AN_OPTION;
     JIT_COMPILER_OPTIONS(JIT_COMPILER_MATCH);
 #undef JIT_COMPILER_MATCH
 
     args.rval().setObject(*info);
-
     return true;
 }
 

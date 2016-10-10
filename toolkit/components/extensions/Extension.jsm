@@ -79,7 +79,7 @@ const CATEGORY_EXTENSION_SCRIPTS_ADDON = "webextension-scripts-addon";
 
 let schemaURLs = new Set();
 
-if (!AppConstants.RELEASE_BUILD) {
+if (!AppConstants.RELEASE_OR_BETA) {
   schemaURLs.add("chrome://extensions/content/schemas/experiments.json");
 }
 
@@ -627,7 +627,7 @@ var UninstallObserver = {
 
       // Clear localStorage created by the extension
       let attrs = JSON.stringify({addonId: addon.id});
-      Services.obs.notifyObservers(null, "clear-origin-data", attrs);
+      Services.obs.notifyObservers(null, "clear-origin-attributes-data", attrs);
     }
 
     if (!this.leaveUuid) {
@@ -686,6 +686,10 @@ GlobalManager = {
 
     let schemaWrapper = {
       isChromeCompat,
+
+      get url() {
+        return context.uri.spec;
+      },
 
       get principal() {
         return context.principal;
@@ -1526,7 +1530,7 @@ this.Extension = class extends ExtensionData {
 
   readManifest() {
     return super.readManifest().then(manifest => {
-      if (AppConstants.RELEASE_BUILD) {
+      if (AppConstants.RELEASE_OR_BETA) {
         return manifest;
       }
 

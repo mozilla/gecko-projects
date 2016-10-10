@@ -33,6 +33,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "AlertsService", "@mozilla.org/alerts-s
   ["ContentClick", "resource:///modules/ContentClick.jsm"],
   ["ContentPrefServiceParent", "resource://gre/modules/ContentPrefServiceParent.jsm"],
   ["ContentSearch", "resource:///modules/ContentSearch.jsm"],
+  ["DateTimePickerHelper", "resource://gre/modules/DateTimePickerHelper.jsm"],
   ["DirectoryLinksProvider", "resource:///modules/DirectoryLinksProvider.jsm"],
   ["Feeds", "resource:///modules/Feeds.jsm"],
   ["FileUtils", "resource://gre/modules/FileUtils.jsm"],
@@ -702,7 +703,7 @@ BrowserGlue.prototype = {
     // Ensure we keep track of places/pw-mananager undo by init'ing this early.
     Cu.import("resource:///modules/AutoMigrate.jsm");
 
-    if (!AppConstants.RELEASE_BUILD) {
+    if (!AppConstants.RELEASE_OR_BETA) {
       let themeName = gBrowserBundle.GetStringFromName("deveditionTheme.name");
       let vendorShortName = gBrandBundle.GetStringFromName("vendorShortName");
 
@@ -1022,6 +1023,7 @@ BrowserGlue.prototype = {
     CaptivePortalWatcher.init();
 
     AutoCompletePopup.init();
+    DateTimePickerHelper.init();
 
     this._firstWindowTelemetry(aWindow);
     this._firstWindowLoaded();
@@ -1053,6 +1055,7 @@ BrowserGlue.prototype = {
     webrtcUI.uninit();
     FormValidationHandler.uninit();
     AutoCompletePopup.uninit();
+    DateTimePickerHelper.uninit();
     if (AppConstants.NIGHTLY_BUILD) {
       AddonWatcher.uninit();
     }
@@ -1147,7 +1150,7 @@ BrowserGlue.prototype = {
                                              ShellService.shouldCheckDefaultBrowser;
       let promptCount;
       let skipDefaultBrowserCheck = false;
-      if (!AppConstants.RELEASE_BUILD) {
+      if (!AppConstants.RELEASE_OR_BETA) {
         promptCount =
           Services.prefs.getIntPref("browser.shell.defaultBrowserCheckCount");
         skipDefaultBrowserCheck =
@@ -1192,7 +1195,7 @@ BrowserGlue.prototype = {
         }
       }
 
-      if (!AppConstants.RELEASE_BUILD) {
+      if (!AppConstants.RELEASE_OR_BETA) {
         if (willPrompt) {
           Services.prefs.setIntPref("browser.shell.defaultBrowserCheckCount",
                                     promptCount);

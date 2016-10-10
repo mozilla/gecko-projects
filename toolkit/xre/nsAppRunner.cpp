@@ -1016,7 +1016,7 @@ nsXULAppInfo::GetLastRunCrashID(nsAString &aLastRunCrashID)
 NS_IMETHODIMP
 nsXULAppInfo::GetIsReleaseBuild(bool* aResult)
 {
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
   *aResult = true;
 #else
   *aResult = false;
@@ -3414,6 +3414,47 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     gSafeMode = true;
 #endif
 
+#ifdef XP_WIN
+  {
+    // Add CPU microcode version to the crash report as "CPUMicrocodeVersion".
+    // It feels like this code may belong in nsSystemInfo instead.
+    int cpuUpdateRevision = -1;
+    HKEY key;
+    static const WCHAR keyName[] =
+      L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0";
+
+    if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, keyName , 0, KEY_QUERY_VALUE, &key) == ERROR_SUCCESS) {
+
+      DWORD updateRevision[2];
+      DWORD len = sizeof(updateRevision);
+      DWORD vtype;
+
+      // Windows 7 uses Update Signature, 8 uses "Update Revision".
+      // Take the first one we find.
+      LPCWSTR choices[] = {L"Update Signature", L"Update Revision"};
+      for (size_t oneChoice=0; oneChoice<ArrayLength(choices); oneChoice++) {
+        if (RegQueryValueExW(key, choices[oneChoice],
+                             0, &vtype,
+                             reinterpret_cast<LPBYTE>(updateRevision),
+                             &len) == ERROR_SUCCESS &&
+            vtype == REG_BINARY && len == sizeof(updateRevision)) {
+          // The first word is unused
+          cpuUpdateRevision = static_cast<int>(updateRevision[1]);
+          break;
+        }
+      }
+    }
+
+#ifdef MOZ_CRASHREPORTER
+    if (cpuUpdateRevision > 0) {
+      CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("CPUMicrocodeVersion"),
+                                         nsPrintfCString("0x%x",
+                                                         cpuUpdateRevision));
+    }
+#endif
+  }
+#endif
+
 #ifdef MOZ_CRASHREPORTER
     CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("SafeMode"),
                                        gSafeMode ? NS_LITERAL_CSTRING("1") :
@@ -4829,7 +4870,7 @@ MultiprocessBlockPolicy() {
   // For linux nightly and aurora builds skip accessibility
   // checks.
   bool doAccessibilityCheck = true;
-#if defined(MOZ_WIDGET_GTK) && !defined(RELEASE_BUILD)
+#if defined(MOZ_WIDGET_GTK) && !defined(RELEASE_OR_BETA)
   doAccessibilityCheck = false;
 #endif
 

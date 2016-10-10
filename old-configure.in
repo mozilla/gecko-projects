@@ -1095,6 +1095,10 @@ case "$target" in
         dnl If nothing, compiler sometimes causes C1041 error.
         CFLAGS="$CFLAGS -FS"
         CXXFLAGS="$CXXFLAGS -FS"
+        dnl VS2013+ supports -Gw for better linker optimizations.
+        dnl http://blogs.msdn.com/b/vcblog/archive/2013/09/11/introducing-gw-compiler-switch.aspx
+        CFLAGS="$CFLAGS -Gw"
+        CXXFLAGS="$CXXFLAGS -Gw"
         # khuey says we can safely ignore MSVC warning C4251
         # MSVC warning C4244 (implicit type conversion may lose data) warns
         # and requires workarounds for perfectly valid code.  Also, GCC/clang
@@ -5696,7 +5700,7 @@ if test "$MOZ_TELEMETRY_REPORTING"; then
     AC_DEFINE(MOZ_TELEMETRY_REPORTING)
 
     # Enable Telemetry by default for nightly and aurora channels
-    if test -z "$RELEASE_BUILD"; then
+    if test -z "$RELEASE_OR_BETA"; then
       AC_DEFINE(MOZ_TELEMETRY_ON_BY_DEFAULT)
     fi
 fi
@@ -5994,7 +5998,7 @@ dnl ========================================================
 # Refer to bug 1281101 for more details.
 
 # Enable mask-as-shorthand property by default for nightly and aurora channels
-if test -z "$RELEASE_BUILD"; then
+if test -z "$RELEASE_OR_BETA"; then
   dnl mask as shorthand property enabled
   MOZ_ENABLE_MASK_AS_SHORTHAND=1
   AC_DEFINE(MOZ_ENABLE_MASK_AS_SHORTHAND)

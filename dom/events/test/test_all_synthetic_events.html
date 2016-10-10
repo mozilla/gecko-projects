@@ -332,10 +332,6 @@ const kEventConstructors = {
                                                          return new MozApplicationEvent(aName, aProps);
                                                        },
                                              },
-  MozCellBroadcastEvent:                     { create: function (aName, aProps) {
-                                                          return new MozCellBroadcastEvent(aName, aProps);
-                                                       },
-                                             },
   MozClirModeEvent:                          { create: function (aName, aProps) {
                                                          return new MozClirModeEvent(aName, aProps);
                                                        },
@@ -442,6 +438,10 @@ const kEventConstructors = {
                                              },
   RTCDataChannelEvent:                       { create: function (aName, aProps) {
                                                          return new RTCDataChannelEvent(aName, aProps);
+                                                       },
+                                             },
+  RTCDTMFToneChangeEvent:                       { create: function (aName, aProps) {
+                                                         return new RTCDTMFToneChangeEvent(aName, aProps);
                                                        },
                                              },
   RTCPeerConnectionIceEvent:                 { create: function (aName, aProps) {

@@ -314,8 +314,12 @@ pref("devtools.webconsole.timestampMessages", false);
 // to automatically trigger multiline editing (equivalent to shift + enter).
 pref("devtools.webconsole.autoMultiline", true);
 
-// Enable the experimental webconsole frontend (work in progress)
+// Enable the experimental webconsole frontend
+#if defined(NIGHTLY_BUILD)
+pref("devtools.webconsole.new-frontend-enabled", true);
+#else
 pref("devtools.webconsole.new-frontend-enabled", false);
+#endif
 
 // Enable the experimental support for source maps in console (work in progress)
 pref("devtools.sourcemap.locations.enabled", false);
@@ -353,7 +357,7 @@ pref("devtools.telemetry.tools.opened.version", "{}");
 
 // Enable the JSON View tool (an inspector for application/json documents) on
 // Nightly and Dev. Edition.
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 pref("devtools.jsonview.enabled", false);
 #else
 pref("devtools.jsonview.enabled", true);

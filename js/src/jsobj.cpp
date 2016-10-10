@@ -442,23 +442,6 @@ js::ReadPropertyDescriptors(JSContext* cx, HandleObject props, bool checkAccesso
     return true;
 }
 
-bool
-js::DefineProperties(JSContext* cx, HandleObject obj, HandleObject props)
-{
-    AutoIdVector ids(cx);
-    Rooted<PropertyDescriptorVector> descs(cx, PropertyDescriptorVector(cx));
-    if (!ReadPropertyDescriptors(cx, props, true, &ids, &descs))
-        return false;
-
-    for (size_t i = 0, len = ids.length(); i < len; i++) {
-        if (!DefineProperty(cx, obj, ids[i], descs[i]))
-            return false;
-    }
-
-    return true;
-}
-
-
 /*** Seal and freeze *****************************************************************************/
 
 static unsigned
@@ -3745,7 +3728,6 @@ JSObject::allocKindForTenure(const js::Nursery& nursery) const
         return kind;
     return GetBackgroundAllocKind(kind);
 }
-
 
 void
 JSObject::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf, JS::ClassInfo* info)
