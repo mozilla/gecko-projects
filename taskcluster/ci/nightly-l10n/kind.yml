@@ -1,0 +1,124 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# NOTE: please write a description of this kind in taskcluster/docs/kinds.rst
+
+implementation: taskgraph.task.transform:TransformTask
+
+transforms:
+   - taskgraph.transforms.l10n:transforms
+   - taskgraph.transforms.build_attrs:transforms
+   - taskgraph.transforms.job:transforms
+   - taskgraph.transforms.task:transforms
+
+job-defaults:
+    index:
+        product: firefox
+    treeherder:
+        kind: build
+        tier: 2
+        symbol: tc-L10n(N)
+    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker:
+        implementation: docker-worker
+        docker-image: {in-tree: desktop-build}
+        max-run-time: 36000
+    # don't run anywhere by default, but still used from nightlies
+    run-on-projects: []
+    run:
+        # NOTE: this should really be a different "using" since it's using
+        # build-l10n.sh instead of build-linux.sh.  Preferably, build-linux.sh
+        # and the mozharness run implementation should be modified to support
+        # the functionality that l10n needs
+        using: mozharness
+        job-script: taskcluster/scripts/builder/build-l10n.sh
+    chunks: 6
+
+jobs:
+    # Names correspond to the <platform> nightly label (as used in signing)
+    # In order to automatically set the dependency.
+    linux-nightly/opt:
+        description: "Localization"
+        attributes:
+            build_platform: linux64-nightly
+            nightly: true
+        index:
+            job-name:
+                gecko-v2: linux64-nightly-l10n-opt
+        treeherder:
+            platform: linux/opt
+        worker:
+            env:
+                EN_US_PACKAGE_NAME: target.tar.bz2
+                EN_US_BINARY_URL:
+                    task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build
+        run:
+            script: mozharness/scripts/desktop_l10n.py
+            actions: [clone-locales list-locales setup repack summary]
+            config:
+                - single_locale/tc_linux64.py
+            options:
+                - environment-config=single_locale/production.py
+                - branch-config=single_locale/{project}.py
+                - platform-config=single_locale/linux64.py
+            tooltool-downloads: public
+            need-xvfb: true
+
+    linux64-nightly/opt:
+        description: "Localization"
+        attributes:
+            build_platform: linux64-nightly
+            nightly: true
+        index:
+            job-name:
+                gecko-v2: linux64-nightly-l10n-opt
+        treeherder:
+            platform: linux64/opt
+        worker:
+            env:
+                EN_US_PACKAGE_NAME: target.tar.bz2
+                EN_US_BINARY_URL:
+                    task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build
+        run:
+            script: mozharness/scripts/desktop_l10n.py
+            actions: [clone-locales list-locales setup repack summary]
+            config:
+                - single_locale/tc_linux64.py
+            options:
+                - environment-config=single_locale/production.py
+                - branch-config=single_locale/{project}.py
+                - platform-config=single_locale/linux64.py
+            tooltool-downloads: public
+            need-xvfb: true
+
+    android-api-15-nightly/opt:
+        description: "Single Locale Repack"
+        attributes:
+            nightly: true
+            build_platform: android-api-15-nightly
+        index:
+            product: mobile
+            job-name:
+                gecko-v2: android-nightly-l10n-opt
+        treeherder:
+            platform: android-api-15/opt
+        worker-type: aws-provisioner-v1/android-api-15
+        worker:
+            max-run-time: 18000
+            env:
+                EN_US_PACKAGE_NAME: target.apk
+                EN_US_BINARY_URL:
+                    task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build/en-US
+        run:
+            using: mozharness
+            script: mozharness/scripts/mobile_l10n.py
+            actions: [clone-locales list-locales setup repack upload-repacks summary]
+            config:
+                - single_locale/{project}_android-api-15.py
+                - single_locale/tc_android-api-15.py
+            tooltool-downloads: internal
+            need-xvfb: true
+
+kind-dependencies:
+  - build-signing

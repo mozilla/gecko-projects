@@ -25,9 +25,9 @@ def set_build_attributes(config, jobs):
             build_type = 'opt'
 
         attributes = job.setdefault('attributes', {})
-        attributes.update({
-            'build_platform': build_platform,
-            'build_type': build_type,
-        })
+        attributes.update({'build_type': build_type})
+        if 'build_platform' not in attributes:
+            # Allow some jobs to specify build_platform differently
+            attributes.update({'build_platform': build_platform})
 
         yield job
