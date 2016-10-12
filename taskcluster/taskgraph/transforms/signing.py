@@ -17,7 +17,6 @@ transforms = TransformSequence()
 @transforms.add
 def make_task_description(config, tasks):
     for task in tasks:
-        # Fill out the dynamic fields in the task description
         task['label'] = task['build-label'].replace("build-", "signing-")
         task['description'] = task['description'].replace("build-", "signing-")
 
@@ -41,6 +40,8 @@ def make_task_description(config, tasks):
                           signing_format_scope]
 
         task['dependencies'] = {'build': task['build-label']}
+        attributes = task.setdefault('attributes', {})
+        attributes['nightly'] = True
 
         # delete stuff that's not part of a task description
         del task['build-label']
