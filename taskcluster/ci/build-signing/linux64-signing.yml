@@ -1,0 +1,27 @@
+signing-nightly-linux:
+  task:
+    provisionerId: "scriptworker-prov-v1"
+    workerType: "signing-linux-v1"
+    scopes:
+      - "project:releng:signing:cert:nightly-signing"
+      - "project:releng:signing:format:gpg"
+    created:
+      relative-datestamp: "0 seconds"
+    deadline:
+      relative-datestamp: "24 hours"
+    payload:
+      unsignedArtifacts: []
+      maxRunTime: 600
+    metadata:
+      name: "Signing Scriptworker Task"
+      description: "Sign Linux Build Tasks"
+      owner: "kmoir@mozilla.com"
+      source: "https://tools.taskcluster.net/task-creator/"
+  attributes:
+    nightly: true
+    build_platform: linux64-nightly
+    build_type: opt
+  unsigned-task:
+    label: "build-linux64-nightly/opt"
+    artifacts:
+      - "public/build/target.tar.bz2"
