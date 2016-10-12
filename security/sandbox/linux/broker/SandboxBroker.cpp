@@ -523,7 +523,7 @@ SandboxBroker::ThreadMain(void)
       pathLen2 = strnlen(pathBuf2, kMaxPathLen);
       if (pathLen2 > 0) {
         // Force 0 termination.
-        pathBuf[pathLen2] = '\0';
+        pathBuf2[pathLen2] = '\0';
         pathLen2 = ConvertToRealPath(pathBuf2, sizeof(pathBuf2), pathLen2);
         int perms2 = mPolicy->Lookup(nsDependentCString(pathBuf2, pathLen2));
 
@@ -720,11 +720,11 @@ SandboxBroker::AuditPermissive(int aOp, int aFlags, int aPerms, const char* aPat
 void
 SandboxBroker::AuditDenial(int aOp, int aFlags, int aPerms, const char* aPath)
 {
-#ifdef DEBUG
-  SANDBOX_LOG_ERROR("SandboxBroker: denied op=%d rflags=%o perms=%d path=%s for pid=%d" \
-                    " error=\"%s\"", aOp, aFlags, aPerms, aPath, mChildPid,
-                    strerror(errno));
-#endif
+  if (SandboxInfo::Get().Test(SandboxInfo::kVerbose)) {
+    SANDBOX_LOG_ERROR("SandboxBroker: denied op=%d rflags=%o perms=%d path=%s for pid=%d" \
+                      " error=\"%s\"", aOp, aFlags, aPerms, aPath, mChildPid,
+                      strerror(errno));
+  }
 }
 
 

@@ -334,18 +334,6 @@ public:
                   const ContentParentId& aCpId,
                   bool aMarkedDestroying);
 
-  /*
-   * Add the appId's reference count by the given ContentParentId and TabId
-   */
-  static bool
-  PermissionManagerAddref(const ContentParentId& aCpId, const TabId& aTabId);
-
-  /*
-   * Release the appId's reference count by the given ContentParentId and TabId
-   */
-  static bool
-  PermissionManagerRelease(const ContentParentId& aCpId, const TabId& aTabId);
-
   void ReportChildAlreadyBlocked();
 
   bool RequestRunToCompletion();
@@ -880,10 +868,6 @@ private:
   virtual bool DeallocPBluetoothParent(PBluetoothParent* aActor) override;
 
   virtual bool RecvPBluetoothConstructor(PBluetoothParent* aActor) override;
-
-  virtual PFMRadioParent* AllocPFMRadioParent() override;
-
-  virtual bool DeallocPFMRadioParent(PFMRadioParent* aActor) override;
 
   virtual PPresentationParent* AllocPPresentationParent() override;
 

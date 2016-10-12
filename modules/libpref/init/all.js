@@ -411,6 +411,7 @@ pref("media.suspend-bkgnd-video.delay-ms", 10000);
 pref("media.navigator.enabled", true);
 pref("media.navigator.video.enabled", true);
 pref("media.navigator.load_adapt", true);
+pref("media.navigator.load_adapt.encoder_only", true);
 pref("media.navigator.load_adapt.measure_interval",1000);
 pref("media.navigator.load_adapt.avg_seconds",3);
 pref("media.navigator.load_adapt.high_load","0.90");
@@ -2467,9 +2468,6 @@ pref("layout.css.devPixelsPerPx", "-1.0");
 
 // Is support for CSS initial-letter property enabled?
 pref("layout.css.initial-letter.enabled", false);
-
-// Is support for CSS Masking features enabled?
-pref("layout.css.masking.enabled", true);
 
 // Is support for mix-blend-mode enabled?
 pref("layout.css.mix-blend-mode.enabled", true);

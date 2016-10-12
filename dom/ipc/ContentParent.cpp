@@ -54,7 +54,6 @@
 #include "mozilla/dom/PContentBridgeParent.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
 #include "mozilla/dom/PCycleCollectWithLogsParent.h"
-#include "mozilla/dom/PFMRadioParent.h"
 #include "mozilla/dom/PMemoryReportRequestParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/bluetooth/PBluetoothParent.h"
@@ -235,10 +234,6 @@ using namespace mozilla::system;
 #endif
 
 #include "mozilla/RemoteSpellCheckEngineParent.h"
-
-#ifdef MOZ_B2G_FM
-#include "mozilla/dom/FMRadioParent.h"
-#endif
 
 #include "Crypto.h"
 
@@ -1907,33 +1902,9 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   // least until after the current task finishes running.
   NS_DispatchToCurrentThread(new DelayedDeleteContentParentTask(this));
 
-  // Release the appId's reference count of any processes
-  // created by this ContentParent and the frame opened by this ContentParent
-  // if this ContentParent crashes.
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   nsTArray<ContentParentId> childIDArray =
     cpm->GetAllChildProcessById(this->ChildID());
-  if (why == AbnormalShutdown) {
-    nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-    if(permMgr) {
-    // Release the appId's reference count of its child-processes
-    for (uint32_t i = 0; i < childIDArray.Length(); i++) {
-      nsTArray<TabContext> tabCtxs = cpm->GetTabContextByContentProcess(childIDArray[i]);
-      for (uint32_t j = 0 ; j < tabCtxs.Length() ; j++) {
-      if (tabCtxs[j].OwnOrContainingAppId() != nsIScriptSecurityManager::NO_APP_ID) {
-        permMgr->ReleaseAppId(tabCtxs[j].OwnOrContainingAppId());
-      }
-      }
-    }
-    // Release the appId's reference count belong to itself
-    nsTArray<TabContext> tabCtxs = cpm->GetTabContextByContentProcess(mChildID);
-    for (uint32_t i = 0; i < tabCtxs.Length() ; i++) {
-      if (tabCtxs[i].OwnOrContainingAppId()!= nsIScriptSecurityManager::NO_APP_ID) {
-      permMgr->ReleaseAppId(tabCtxs[i].OwnOrContainingAppId());
-      }
-    }
-    }
-  }
 
   // Destroy any processes created by this ContentParent
   for(uint32_t i = 0; i < childIDArray.Length(); i++) {
@@ -3596,32 +3567,6 @@ ContentParent::RecvPBluetoothConstructor(PBluetoothParent* aActor)
 #endif
 }
 
-PFMRadioParent*
-ContentParent::AllocPFMRadioParent()
-{
-#ifdef MOZ_B2G_FM
-  if (!AssertAppProcessPermission(this, "fmradio")) {
-  return nullptr;
-  }
-  return new FMRadioParent();
-#else
-  NS_WARNING("No support for FMRadio on this platform!");
-  return nullptr;
-#endif
-}
-
-bool
-ContentParent::DeallocPFMRadioParent(PFMRadioParent* aActor)
-{
-#ifdef MOZ_B2G_FM
-  delete aActor;
-  return true;
-#else
-  NS_WARNING("No support for FMRadio on this platform!");
-  return false;
-#endif
-}
-
 PPresentationParent*
 ContentParent::AllocPPresentationParent()
 {
@@ -4616,10 +4561,6 @@ ContentParent::AllocateTabId(const TabId& aOpenerTabId,
   if (XRE_IsParentProcess()) {
     ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
     tabId = cpm->AllocateTabId(aOpenerTabId, aContext, aCpId);
-    // Add appId's reference count in oop case
-    if (tabId) {
-      PermissionManagerAddref(aCpId, tabId);
-    }
   }
   else {
     ContentChild::GetSingleton()->SendAllocateTabId(aOpenerTabId,
@@ -4636,11 +4577,6 @@ ContentParent::DeallocateTabId(const TabId& aTabId,
                                bool aMarkedDestroying)
 {
   if (XRE_IsParentProcess()) {
-    // Release appId's reference count in oop case
-    if (aTabId) {
-      PermissionManagerRelease(aCpId, aTabId);
-    }
-
     ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
     ContentParent* cp = cpm->GetContentProcessById(aCpId);
 
@@ -5033,38 +4969,6 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
   }
 
   return true;
-}
-
-/* static */ bool
-ContentParent::PermissionManagerAddref(const ContentParentId& aCpId,
-                                       const TabId& aTabId)
-{
-  MOZ_ASSERT(XRE_IsParentProcess(),
-             "Call PermissionManagerAddref in content process!");
-  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-  uint32_t appId = cpm->GetAppIdByProcessAndTabId(aCpId, aTabId);
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-  if (appId != nsIScriptSecurityManager::NO_APP_ID && permMgr) {
-    permMgr->AddrefAppId(appId);
-    return true;
-  }
-  return false;
-}
-
-/* static */ bool
-ContentParent::PermissionManagerRelease(const ContentParentId& aCpId,
-                                        const TabId& aTabId)
-{
-  MOZ_ASSERT(XRE_IsParentProcess(),
-             "Call PermissionManagerRelease in content process!");
-  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-  uint32_t appId = cpm->GetAppIdByProcessAndTabId(aCpId, aTabId);
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-  if (appId != nsIScriptSecurityManager::NO_APP_ID && permMgr) {
-    permMgr->ReleaseAppId(appId);
-    return true;
-  }
-  return false;
 }
 
 bool

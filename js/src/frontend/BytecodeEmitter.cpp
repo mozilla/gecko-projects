@@ -4335,9 +4335,9 @@ BytecodeEmitter::emitDestructuringLHS(ParseNode* target, DestructuringFlavor fla
     else if (target->isKind(PNK_ASSIGN))
         target = target->pn_left;
     if (target->isKind(PNK_ARRAY) || target->isKind(PNK_OBJECT)) {
-        if (!emitDestructuringOpsHelper(target, flav))
+        if (!emitDestructuringOps(target, flav))
             return false;
-        // Per its post-condition, emitDestructuringOpsHelper has left the
+        // Per its post-condition, emitDestructuringOps has left the
         // to-be-destructured value on top of the stack.
         if (!emit1(JSOP_POP))
             return false;
@@ -4462,6 +4462,13 @@ BytecodeEmitter::emitDestructuringLHS(ParseNode* target, DestructuringFlavor fla
 }
 
 bool
+BytecodeEmitter::emitConditionallyExecutedDestructuringLHS(ParseNode* target, DestructuringFlavor flav)
+{
+    TDZCheckCache tdzCache(this);
+    return emitDestructuringLHS(target, flav);
+}
+
+bool
 BytecodeEmitter::emitIteratorNext(ParseNode* pn, bool allowSelfHosted)
 {
     MOZ_ASSERT(allowSelfHosted || emitterMode != BytecodeEmitter::SelfHosting,
@@ -4507,11 +4514,81 @@ BytecodeEmitter::emitDefault(ParseNode* defaultExpr)
 }
 
 bool
-BytecodeEmitter::emitDestructuringOpsArrayHelper(ParseNode* pattern, DestructuringFlavor flav)
+BytecodeEmitter::emitDestructuringOpsArray(ParseNode* pattern, DestructuringFlavor flav)
 {
     MOZ_ASSERT(pattern->isKind(PNK_ARRAY));
     MOZ_ASSERT(pattern->isArity(PN_LIST));
     MOZ_ASSERT(this->stackDepth != 0);
+
+    // Here's pseudo code for |let [a, b, , c=y, ...d] = x;|
+    //
+    //   let x, y;
+    //   let a, b, c, d;
+    //   let tmp, done, iter, result; // stack values
+    //
+    //   iter = x[Symbol.iterator]();
+    //
+    //   // ==== emitted by loop for a ====
+    //   result = iter.next();
+    //   done = result.done;
+    //
+    //   if (done) {
+    //     a = undefined;
+    //
+    //     result = undefined;
+    //     done = true;
+    //   } else {
+    //     a = result.value;
+    //
+    //     // Do next element's .next() and .done access here
+    //     result = iter.next();
+    //     done = result.done;
+    //   }
+    //
+    //   // ==== emitted by loop for b ====
+    //   if (done) {
+    //     b = undefined;
+    //
+    //     result = undefined;
+    //     done = true;
+    //   } else {
+    //     b = result.value;
+    //
+    //     result = iter.next();
+    //     done = result.done;
+    //   }
+    //
+    //   // ==== emitted by loop for elision ====
+    //   if (done) {
+    //     result = undefined
+    //     done = true
+    //   } else {
+    //     result.value;
+    //
+    //     result = iter.next();
+    //     done = result.done;
+    //   }
+    //
+    //   // ==== emitted by loop for c ====
+    //   if (done) {
+    //     c = y;
+    //   } else {
+    //     tmp = result.value;
+    //     if (tmp === undefined)
+    //       tmp = y;
+    //     c = tmp;
+    //
+    //     // Don't do next element's .next() and .done access if
+    //     // this is the last non-spread element.
+    //   }
+    //
+    //   // ==== emitted by loop for d ====
+    //   if (done) {
+    //     // Assing empty array when completed
+    //     d = [];
+    //   } else {
+    //     d = [...iter];
+    //   }
 
     /*
      * Use an iterator to destructure the RHS, instead of index lookup. We
@@ -4524,20 +4601,36 @@ BytecodeEmitter::emitDestructuringOpsArrayHelper(ParseNode* pattern, Destructuri
     bool needToPopIterator = true;
 
     for (ParseNode* member = pattern->pn_head; member; member = member->pn_next) {
-        /*
-         * Now push the property name currently being matched, which is the
-         * current property name "label" on the left of a colon in the object
-         * initializer.
-         */
-        ParseNode* pndefault = nullptr;
-        ParseNode* elem = member;
-        if (elem->isKind(PNK_ASSIGN)) {
-            pndefault = elem->pn_right;
-            elem = elem->pn_left;
-        }
+        bool isHead = member == pattern->pn_head;
+        if (member->isKind(PNK_SPREAD)) {
+            JumpList beq;
+            JumpList end;
+            unsigned noteIndex = -1;
+            if (!isHead) {
+                // If spread is not the first element of the pattern,
+                // iterator can already be completed.
+                if (!newSrcNote(SRC_IF_ELSE, &noteIndex))
+                    return false;
+                if (!emitJump(JSOP_IFEQ, &beq))                   // ... OBJ? ITER
+                    return false;
 
-        if (elem->isKind(PNK_SPREAD)) {
-            /* Create a new array with the rest of the iterator */
+                int32_t depth = stackDepth;
+                if (!emit1(JSOP_POP))                             // ... OBJ?
+                    return false;
+                if (!emitUint32Operand(JSOP_NEWARRAY, 0))         // ... OBJ? ARRAY
+                    return false;
+                if (!emitConditionallyExecutedDestructuringLHS(member, flav)) // ... OBJ?
+                    return false;
+
+                if (!emitJump(JSOP_GOTO, &end))
+                    return false;
+                if (!emitJumpTargetAndPatch(beq))
+                    return false;
+                stackDepth = depth;
+            }
+
+            // If iterator is not completed, create a new array with the rest
+            // of the iterator.
             if (!emitUint32Operand(JSOP_NEWARRAY, 0))             // ... OBJ? ITER ARRAY
                 return false;
             if (!emitNumberOp(0))                                 // ... OBJ? ITER ARRAY INDEX
@@ -4546,68 +4639,136 @@ BytecodeEmitter::emitDestructuringOpsArrayHelper(ParseNode* pattern, Destructuri
                 return false;
             if (!emit1(JSOP_POP))                                 // ... OBJ? ARRAY
                 return false;
+            if (!emitConditionallyExecutedDestructuringLHS(member, flav)) // ... OBJ?
+                return false;
+
+            if (!isHead) {
+                if (!emitJumpTargetAndPatch(end))
+                    return false;
+                if (!setSrcNoteOffset(noteIndex, 0, end.offset - beq.offset))
+                    return false;
+            }
             needToPopIterator = false;
+            MOZ_ASSERT(!member->pn_next);
+            break;
+        }
+
+        ParseNode* pndefault = nullptr;
+        ParseNode* subpattern = member;
+        if (subpattern->isKind(PNK_ASSIGN)) {
+            pndefault = subpattern->pn_right;
+            subpattern = subpattern->pn_left;
+        }
+
+        bool isElision = subpattern->isKind(PNK_ELISION);
+        bool hasNextNonSpread = member->pn_next && !member->pn_next->isKind(PNK_SPREAD);
+        bool hasNextSpread = member->pn_next && member->pn_next->isKind(PNK_SPREAD);
+
+        MOZ_ASSERT(!subpattern->isKind(PNK_SPREAD));
+
+        auto emitNext = [pattern](ExclusiveContext* cx, BytecodeEmitter* bce) {
+            if (!bce->emit1(JSOP_DUP))                            // ... OBJ? ITER ITER
+                return false;
+            if (!bce->emitIteratorNext(pattern))                  // ... OBJ? ITER RESULT
+                return false;
+            if (!bce->emit1(JSOP_DUP))                            // ... OBJ? ITER RESULT RESULT
+                return false;
+            if (!bce->emitAtomOp(cx->names().done, JSOP_GETPROP)) // ... OBJ? ITER RESULT DONE?
+                return false;
+            return true;
+        };
+
+        if (isHead) {
+            if (!emitNext(cx, this))                              // ... OBJ? ITER RESULT DONE?
+                return false;
+        }
+
+        unsigned noteIndex;
+        if (!newSrcNote(SRC_IF_ELSE, &noteIndex))
+            return false;
+        JumpList beq;
+        if (!emitJump(JSOP_IFEQ, &beq))                           // ... OBJ? ITER RESULT
+            return false;
+
+        int32_t depth = stackDepth;
+        if (!emit1(JSOP_POP))                                     // ... OBJ? ITER
+            return false;
+        if (pndefault) {
+            // Emit only pndefault tree here, as undefined check in emitDefault
+            // should always be true.
+            if (!emitConditionallyExecutedTree(pndefault))        // ... OBJ? ITER VALUE
+                return false;
         } else {
-            if (!emit1(JSOP_DUP))                                 // ... OBJ? ITER ITER
+            if (!isElision) {
+                if (!emit1(JSOP_UNDEFINED))                       // ... OBJ? ITER UNDEFINED
+                    return false;
+                if (!emit1(JSOP_NOP_DESTRUCTURING))
+                    return false;
+            }
+        }
+        if (!isElision) {
+            if (!emitConditionallyExecutedDestructuringLHS(subpattern, flav)) // ... OBJ? ITER
                 return false;
-            if (!emitIteratorNext(pattern))                       // ... OBJ? ITER RESULT
-                return false;
-            if (!emit1(JSOP_DUP))                                 // ... OBJ? ITER RESULT RESULT
-                return false;
-            if (!emitAtomOp(cx->names().done, JSOP_GETPROP))      // ... OBJ? ITER RESULT DONE?
-                return false;
-
-            // Emit (result.done ? undefined : result.value)
-            // This is mostly copied from emitConditionalExpression, except that this code
-            // does not push new values onto the stack.
-            unsigned noteIndex;
-            if (!newSrcNote(SRC_COND, &noteIndex))
-                return false;
-            JumpList beq;
-            if (!emitJump(JSOP_IFEQ, &beq))
-                return false;
-
+        } else if (pndefault) {
             if (!emit1(JSOP_POP))                                 // ... OBJ? ITER
                 return false;
-            if (!emit1(JSOP_UNDEFINED))                           // ... OBJ? ITER UNDEFINED
+        }
+
+        // Setup next element's result when the iterator is done.
+        if (hasNextNonSpread) {
+            if (!emit1(JSOP_UNDEFINED))                           // ... OBJ? ITER RESULT
                 return false;
             if (!emit1(JSOP_NOP_DESTRUCTURING))
                 return false;
-
-            /* Jump around else, fixup the branch, emit else, fixup jump. */
-            JumpList jmp;
-            if (!emitJump(JSOP_GOTO, &jmp))
+            if (!emit1(JSOP_TRUE))                                // ... OBJ? ITER RESULT DONE?
                 return false;
-            if (!emitJumpTargetAndPatch(beq))
-                return false;
-
-            if (!emitAtomOp(cx->names().value, JSOP_GETPROP))     // ... OBJ? ITER VALUE
-                return false;
-
-            if (!emitJumpTargetAndPatch(jmp))
-                return false;
-            if (!setSrcNoteOffset(noteIndex, 0, jmp.offset - beq.offset))
+        } else if (hasNextSpread) {
+            if (!emit1(JSOP_TRUE))                                // ... OBJ? ITER DONE?
                 return false;
         }
 
-        if (pndefault && !emitDefault(pndefault))
+        JumpList end;
+        if (!emitJump(JSOP_GOTO, &end))
+            return false;
+        if (!emitJumpTargetAndPatch(beq))
             return false;
 
-        // Destructure into the pattern the element contains.
-        ParseNode* subpattern = elem;
-        if (subpattern->isKind(PNK_ELISION)) {
-            // The value destructuring into an elision just gets ignored.
-            if (!emit1(JSOP_POP))                                 // ... OBJ? ITER
+        stackDepth = depth;
+        if (!emitAtomOp(cx->names().value, JSOP_GETPROP))         // ... OBJ? ITER VALUE
+            return false;
+
+        if (pndefault) {
+            if (!emitDefault(pndefault))                          // ... OBJ? ITER VALUE
                 return false;
-            continue;
         }
 
-        if (!emitDestructuringLHS(subpattern, flav))
+        if (!isElision) {
+            if (!emitConditionallyExecutedDestructuringLHS(subpattern, flav)) // ... OBJ? ITER
+                return false;
+        } else {
+            if (!emit1(JSOP_POP))                                 // ... OBJ? ITER
+                return false;
+        }
+
+        // Setup next element's result when the iterator is not done.
+        if (hasNextNonSpread) {
+            if (!emitNext(cx, this))                              // ... OBJ? ITER RESULT DONE?
+                return false;
+        } else if (hasNextSpread) {
+            if (!emit1(JSOP_FALSE))                               // ... OBJ? ITER DONE?
+                return false;
+        }
+
+        if (!emitJumpTargetAndPatch(end))
+            return false;
+        if (!setSrcNoteOffset(noteIndex, 0, end.offset - beq.offset))
             return false;
     }
 
-    if (needToPopIterator && !emit1(JSOP_POP))
-        return false;
+    if (needToPopIterator) {
+        if (!emit1(JSOP_POP))                                     // ... OBJ?
+            return false;
+    }
 
     return true;
 }
@@ -4620,7 +4781,7 @@ BytecodeEmitter::emitComputedPropertyName(ParseNode* computedPropName)
 }
 
 bool
-BytecodeEmitter::emitDestructuringOpsObjectHelper(ParseNode* pattern, DestructuringFlavor flav)
+BytecodeEmitter::emitDestructuringOpsObject(ParseNode* pattern, DestructuringFlavor flav)
 {
     MOZ_ASSERT(pattern->isKind(PNK_OBJECT));
     MOZ_ASSERT(pattern->isArity(PN_LIST));
@@ -4694,28 +4855,12 @@ BytecodeEmitter::emitDestructuringOpsObjectHelper(ParseNode* pattern, Destructur
     return true;
 }
 
-/*
- * Recursive helper for emitDestructuringOps.
- * EmitDestructuringOpsHelper assumes the to-be-destructured value has been
- * pushed on the stack and emits code to destructure each part of a [] or {}
- * lhs expression.
- */
-bool
-BytecodeEmitter::emitDestructuringOpsHelper(ParseNode* pattern, DestructuringFlavor flav)
-{
-    if (pattern->isKind(PNK_ARRAY))
-        return emitDestructuringOpsArrayHelper(pattern, flav);
-    return emitDestructuringOpsObjectHelper(pattern, flav);
-}
-
 bool
 BytecodeEmitter::emitDestructuringOps(ParseNode* pattern, DestructuringFlavor flav)
 {
-    /*
-     * Call our recursive helper to emit the destructuring assignments and
-     * related stack manipulations.
-     */
-    return emitDestructuringOpsHelper(pattern, flav);
+    if (pattern->isKind(PNK_ARRAY))
+        return emitDestructuringOpsArray(pattern, flav);
+    return emitDestructuringOpsObject(pattern, flav);
 }
 
 bool
@@ -4779,55 +4924,20 @@ BytecodeEmitter::emitDeclarationList(ParseNode* declList)
             return false;
         next = decl->pn_next;
 
-        if (decl->isKind(PNK_ARRAY) || decl->isKind(PNK_OBJECT)) {
-            // Destructuring BindingPattern in a deprecated comprehension:
-            //     a = [x*y for (let [x, y] of pts)];
-            //
-            // (When emitting code for a plain LexicalDeclaration, like
-            // `let [x, y] = pt;`, decl will be a PNK_ASSIGN node, not a
-            // PNK_ARRAY node.  `let [x, y];` without an initializer is a
-            // SyntaxError.)
-
-            MOZ_ASSERT(declList->pn_count == 1);
-
-            auto emitInitializeToUndefined = [](BytecodeEmitter* bce, ParseNode *pn) {
-                MOZ_ASSERT(bce->lookupName(pn->name()).hasKnownSlot());
-                MOZ_ASSERT(bce->lookupName(pn->name()).isLexical());
-                auto emitUndefined = [](BytecodeEmitter* bce, const NameLocation&, bool) {
-                    return bce->emit1(JSOP_UNDEFINED);
-                };
-                if (!bce->emitInitializeName(pn, emitUndefined))
-                    return false;
-                // Pop the RHS.
-                return bce->emit1(JSOP_POP);
-            };
-
-            if (!emitDestructuringDeclsWithEmitter(decl, emitInitializeToUndefined))
-                return false;
-        } else if (decl->isKind(PNK_ASSIGN)) {
-            /*
-             * A destructuring initialiser assignment preceded by var will
-             * never occur to the left of 'in' in a for-in loop.  As with 'for
-             * (var x = i in o)...', this will cause the entire 'var [a, b] =
-             * i' to be hoisted out of the loop.
-             */
+        if (decl->isKind(PNK_ASSIGN)) {
             MOZ_ASSERT(decl->isOp(JSOP_NOP));
 
-            if (decl->pn_left->isKind(PNK_NAME)) {
-                if (!emitSingleDeclaration(declList, decl->pn_left, decl->pn_right))
-                    return false;
-            } else {
-                ParseNode* initializer = decl->pn_left;
+            ParseNode* pattern = decl->pn_left;
+            MOZ_ASSERT(pattern->isKind(PNK_ARRAY) || pattern->isKind(PNK_OBJECT));
 
-                if (!emitTree(decl->pn_right))
-                    return false;
+            if (!emitTree(decl->pn_right))
+                return false;
 
-                if (!emitDestructuringOpsHelper(initializer, DestructuringDeclaration))
-                    return false;
+            if (!emitDestructuringOps(pattern, DestructuringDeclaration))
+                return false;
 
-                if (!emit1(JSOP_POP))
-                    return false;
-            }
+            if (!emit1(JSOP_POP))
+                return false;
         } else {
             if (!emitSingleDeclaration(declList, decl, decl->expr()))
                 return false;
@@ -5921,9 +6031,7 @@ BytecodeEmitter::emitInitializeForInOrOfTarget(ParseNode* forHead)
     }
 
     MOZ_ASSERT(!target->isKind(PNK_ASSIGN),
-               "for-in/of loop declarations can't have initializers; or if "
-               "they do, those initializers are ignored -- see "
-               "Parser::declarationPattern");
+               "for-in/of loop destructuring declarations can't have initializers");
 
     MOZ_ASSERT(target->isKind(PNK_ARRAY) || target->isKind(PNK_OBJECT));
     return emitDestructuringOps(target, DestructuringDeclaration);
@@ -6065,6 +6173,33 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop, EmitterScope* headLexicalEmitte
     MOZ_ASSERT(forInHead->isKind(PNK_FORIN));
     MOZ_ASSERT(forInHead->isArity(PN_TERNARY));
 
+    // Annex B: Evaluate the var-initializer expression if present.
+    // |for (var i = initializer in expr) { ... }|
+    ParseNode* forInTarget = forInHead->pn_kid1;
+    if (parser->handler.isDeclarationList(forInTarget)) {
+        ParseNode* decl = parser->handler.singleBindingFromDeclaration(forInTarget);
+        if (decl->isKind(PNK_NAME)) {
+            if (ParseNode* initializer = decl->expr()) {
+                MOZ_ASSERT(forInTarget->isKind(PNK_VAR),
+                           "for-in initializers are only permitted for |var| declarations");
+
+                if (!updateSourceCoordNotes(decl->pn_pos.begin))
+                    return false;
+
+                auto emitRhs = [initializer](BytecodeEmitter* bce, const NameLocation&, bool) {
+                    return bce->emitTree(initializer);
+                };
+
+                if (!emitInitializeName(decl, emitRhs))
+                    return false;
+
+                // Pop the initializer.
+                if (!emit1(JSOP_POP))
+                    return false;
+            }
+        }
+    }
+
     // Evaluate the expression being iterated.
     ParseNode* expr = forInHead->pn_kid3;
     if (!emitTree(expr))                                  // EXPR
@@ -6107,7 +6242,6 @@ BytecodeEmitter::emitForIn(ParseNode* forInLoop, EmitterScope* headLexicalEmitte
         // recreation each iteration. If a lexical scope exists for the head,
         // it must be the innermost one. If that scope has closed-over
         // bindings inducing an environment, recreate the current environment.
-        DebugOnly<ParseNode*> forInTarget = forInHead->pn_kid1;
         MOZ_ASSERT(forInTarget->isKind(PNK_LET) || forInTarget->isKind(PNK_CONST));
         MOZ_ASSERT(headLexicalEmitterScope == innermostEmitterScope);
         MOZ_ASSERT(headLexicalEmitterScope->scope(this)->kind() == ScopeKind::Lexical);
@@ -6674,13 +6808,14 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
     RootedFunction fun(cx, funbox->function());
     RootedAtom name(cx, fun->name());
     MOZ_ASSERT_IF(fun->isInterpretedLazy(), fun->lazyScript());
+    MOZ_ASSERT_IF(pn->isOp(JSOP_FUNWITHPROTO), needsProto);
 
     /*
      * Set the |wasEmitted| flag in the funbox once the function has been
      * emitted. Function definitions that need hoisting to the top of the
      * function will be seen by emitFunction in two places.
      */
-    if (funbox->wasEmitted) {
+    if (funbox->wasEmitted && pn->functionIsHoisted()) {
         // Annex B block-scoped functions are hoisted like any other
         // block-scoped function to the top of their scope. When their
         // definitions are seen for the second time, we need to emit the
@@ -6804,7 +6939,7 @@ BytecodeEmitter::emitFunction(ParseNode* pn, bool needsProto)
         }
 
         if (needsProto) {
-            MOZ_ASSERT(pn->getOp() == JSOP_LAMBDA);
+            MOZ_ASSERT(pn->getOp() == JSOP_FUNWITHPROTO || pn->getOp() == JSOP_LAMBDA);
             pn->setOp(JSOP_FUNWITHPROTO);
         }
         return emitIndex32(pn->getOp(), index);
@@ -9651,6 +9786,15 @@ CGConstList::finish(ConstArray* array)
         array->vector[i] = list[i];
 }
 
+bool
+CGObjectList::isAdded(ObjectBox* objbox)
+{
+    // An objbox added to CGObjectList as non-first element has non-null
+    // emitLink member.  The first element has null emitLink.
+    // Check for firstbox to cover the first element.
+    return objbox->emitLink || objbox == firstbox;
+}
+
 /*
  * Find the index of the given object for code generator.
  *
@@ -9662,9 +9806,15 @@ CGConstList::finish(ConstArray* array)
 unsigned
 CGObjectList::add(ObjectBox* objbox)
 {
-    MOZ_ASSERT(!objbox->emitLink);
+    if (isAdded(objbox))
+        return indexOf(objbox->object);
+
     objbox->emitLink = lastbox;
     lastbox = objbox;
+
+    // See the comment in CGObjectList::isAdded.
+    if (!firstbox)
+        firstbox = objbox;
     return length++;
 }
 
@@ -9691,7 +9841,12 @@ CGObjectList::finish(ObjectArray* array)
         MOZ_ASSERT(!*cursor);
         MOZ_ASSERT(objbox->object->isTenured());
         *cursor = objbox->object;
-    } while ((objbox = objbox->emitLink) != nullptr);
+
+        ObjectBox* tmp = objbox->emitLink;
+        // Clear emitLink for CGObjectList::isAdded.
+        objbox->emitLink = nullptr;
+        objbox = tmp;
+    } while (objbox != nullptr);
     MOZ_ASSERT(cursor == array->vector);
 }
 

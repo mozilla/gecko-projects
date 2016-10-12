@@ -293,6 +293,7 @@ WEBIDL_FILES = [
     'KeyEvent.webidl',
     'KeyframeAnimationOptions.webidl',
     'KeyframeEffect.webidl',
+    'KeyIdsInitData.webidl',
     'LegacyQueryInterface.webidl',
     'LinkStyle.webidl',
     'ListBoxObject.webidl',
@@ -610,6 +611,7 @@ WEBIDL_FILES = [
     'WheelEvent.webidl',
     'WidevineCDMManifest.webidl',
     'WifiOptions.webidl',
+    'WindowOrWorkerGlobalScope.webidl',
     'WindowRoot.webidl',
     'Worker.webidl',
     'WorkerDebuggerGlobalScope.webidl',
@@ -767,11 +769,6 @@ else:
         'InstallTrigger.webidl',
     ]
 
-if CONFIG['MOZ_B2G_FM']:
-    WEBIDL_FILES += [
-        'FMRadio.webidl',
-    ]
-
 GENERATED_EVENTS_WEBIDL_FILES = [
     'AddonEvent.webidl',
     'AnimationPlaybackEvent.webidl',
@@ -909,7 +906,6 @@ if CONFIG['MOZ_BUILD_APP'] in ['browser', 'mobile/android', 'xulrunner']:
 if CONFIG['MOZ_B2G']:
     WEBIDL_FILES += [
         'Apps.webidl',
-        'Identity.webidl',
         'MozApplicationEvent.webidl'
     ]
     GENERATED_EVENTS_WEBIDL_FILES += [
