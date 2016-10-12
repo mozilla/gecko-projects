@@ -245,7 +245,7 @@ task_description_schema = Schema({
         Required('max-run-time', default=600): int,
 
         # list of artifact URLs for the artifacts that should be signed
-        Required('unsigned-artifacts'): [basestring],
+        Required('unsigned-artifacts'): [taskref_or_string],
     }),
 
     # The "when" section contains descriptions of the circumstances

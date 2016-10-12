@@ -18,8 +18,8 @@ transforms = TransformSequence()
 def make_task_description(config, tasks):
     for task in tasks:
         # Fill out the dynamic fields in the task description
-        task['label'] = ((str(task['build-label'])).replace("build-", "signing-"))
-        task['description'] = ((str(task['description'])).replace("build-", "signing-"))
+        task['label'] = task['build-label'].replace("build-", "signing-")
+        task['description'] = task['description'].replace("build-", "signing-")
 
         artifacts = []
         if 'android' in task['build-platform']:
@@ -29,7 +29,7 @@ def make_task_description(config, tasks):
         unsigned_artifacts = []
         for artifact in artifacts:
             url = {"task-reference": ARTIFACT_URL.format(task['build-label'], artifact)}
-            unsigned_artifacts.append(str(url))
+            unsigned_artifacts.append(url)
 
         task['worker-type'] = "scriptworker-prov-v1/signing-linux-v1"
         task['worker'] = {'implementation': 'scriptworker-signing',
