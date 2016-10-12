@@ -42,6 +42,8 @@ def make_task_description(config, tasks):
         task['dependencies'] = {'build': task['build-label']}
         attributes = task.setdefault('attributes', {})
         attributes['nightly'] = True
+        attributes['build_platform'] = task['build-platform']
+        attributes['build_type'] = task['build-type']
 
         # delete stuff that's not part of a task description
         del task['build-label']
