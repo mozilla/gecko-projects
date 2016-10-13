@@ -22,6 +22,7 @@ from voluptuous import Schema, Any, Required, Optional, Extra
 
 from .gecko_v2_whitelist import JOB_NAME_WHITELIST, JOB_NAME_WHITELIST_ERROR
 
+
 # shortcut for a string where task references are allowed
 taskref_or_string = Any(
     basestring,
@@ -238,6 +239,14 @@ task_description_schema = Schema({
             'product': basestring,
             Extra: basestring,  # additional properties are allowed
         },
+    }, {
+        Required('implementation'): 'scriptworker-signing',
+
+        # the maximum time to spend signing, in seconds
+        Required('max-run-time', default=600): int,
+
+        # list of artifact URLs for the artifacts that should be signed
+        Required('unsigned-artifacts'): [taskref_or_string],
     }),
 
     # The "when" section contains descriptions of the circumstances
@@ -407,6 +416,16 @@ def build_generic_worker_payload(config, task, task_def):
 
     if 'retry-exit-status' in worker:
         raise Exception("retry-exit-status not supported in generic-worker")
+
+
+@payload_builder('scriptworker-signing')
+def build_scriptworker_signing_payload(config, task, task_def):
+    worker = task['worker']
+
+    task_def['payload'] = {
+        'maxRunTime': worker['max-run-time'],
+        'unsignedArtifacts':  worker['unsigned-artifacts']
+    }
 
 
 transforms = TransformSequence()

@@ -97,7 +97,7 @@ android-api-15-nightly/opt:
         script: "mozharness/scripts/fx_desktop_build.py"
         custom-build-variant-cfg: api-15
         tooltool-downloads: internal
-    run-on-projects: []
+    run-on-projects: [ ]
 
 android-api-15-gradle/opt:
     description: "Android 4.0 API15+ (Gradle) Opt"

@@ -228,7 +228,7 @@ linux64-nightly/opt:
         secrets: true
         tooltool-downloads: public
         need-xvfb: true
-    run-on-projects: []
+    run-on-projects: [ ]
 
 linux64-jsdcov/opt:
     description: "Linux64-JSDCov Opt"
