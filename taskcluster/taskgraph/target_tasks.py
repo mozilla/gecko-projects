@@ -131,6 +131,6 @@ def target_tasks_nightly_linux(full_task_graph, parameters):
     and, eventually, uploading the tasks to balrog."""
     def filter(task):
         platform = task.attributes.get('build_platform')
-        if platform in ('linux64-nightly',):
+        if platform in ('linux64-nightly', 'linux-nightly'):
             return task.attributes.get('nightly', False)
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

@@ -34,7 +34,7 @@ def make_task_description(config, tasks):
         task['worker'] = {'implementation': 'scriptworker-signing',
                           'unsigned-artifacts': unsigned_artifacts}
 
-        signing_format = "gpg" if "linux64" in task['label'] else "jar"
+        signing_format = "gpg" if "linux" in task['label'] else "jar"
         signing_format_scope = "project:releng:signing:format:" + signing_format
         task['scopes'] = ["project:releng:signing:cert:nightly-signing",
                           signing_format_scope]
