@@ -43,7 +43,7 @@ JOB_NAME_WHITELIST = set([
     'linux-debug',
     'linux-opt',
     'linux-pgo',
-    'linux-nightly-opt',
+    'linux32-nightly-opt',
     'macosx64-debug',
     'macosx64-opt',
     'macosx64-st-an-opt',

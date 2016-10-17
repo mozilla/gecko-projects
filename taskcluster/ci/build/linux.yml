@@ -160,9 +160,9 @@ linux-nightly/opt:
         nightly: true
     index:
         product: firefox
-        job-name: linux-nightly-opt
+        job-name: linux32-nightly-opt
     treeherder:
-        platform: linux/opt
+        platform: linux32/opt
         symbol: tc(N)
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-linux
