@@ -18,7 +18,8 @@ transforms = TransformSequence()
 def make_task_description(config, tasks):
     for task in tasks:
         task['label'] = task['build-label'].replace("build-", "signing-")
-        task['description'] = task['description'].replace("build-", "signing-")
+        task['description'] = (task['build-description'].replace("-", " ") + " signing").title()
+        task['description'] = task['description'].replace("Api 15", "4.0 API15+")
 
         artifacts = []
         if 'android' in task['build-platform']:
@@ -45,11 +46,18 @@ def make_task_description(config, tasks):
         attributes['build_platform'] = task['build-platform']
         attributes['build_type'] = task['build-type']
         task['run-on-projects'] = task['build-run-on-projects']
+        task['treeherder'] = task['build-treeherder']
+        task['treeherder'].setdefault('symbol', 'tc(Ns)')
+        task['treeherder'].setdefault('platform', task['label'])
+        task['treeherder'].setdefault('tier', 2)
+        task['treeherder'].setdefault('kind', 'build')
 
         # delete stuff that's not part of a task description
+        del task['build-description']
         del task['build-label']
         del task['build-type']
         del task['build-platform']
         del task['build-run-on-projects']
+        del task['build-treeherder']
 
         yield task

@@ -30,6 +30,7 @@ class SigningTask(transform.TransformTask):
             signing_task['build-label'] = task.label
             signing_task['build-platform'] = task.attributes.get('build_platform')
             signing_task['build-type'] = task.attributes.get('build_type')
-            signing_task['description'] = task.label
+            signing_task['build-description'] = signing_task['build-platform']
             signing_task['build-run-on-projects'] = task.attributes.get('run_on_projects')
+            signing_task['build-treeherder'] = {}
             yield signing_task
