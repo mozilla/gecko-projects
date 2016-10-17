@@ -379,9 +379,6 @@ pref("browser.search.hiddenOneOffs", "");
 
 pref("browser.search.reset.enabled", true);
 
-pref("browser.usedOnWindows10", false);
-pref("browser.usedOnWindows10.introURL", "https://www.mozilla.org/%LOCALE%/firefox/windows-10/welcome/?utm_source=firefox-browser&utm_medium=firefox-browser");
-
 pref("browser.sessionhistory.max_entries", 50);
 
 // Built-in default permissions.
@@ -1423,9 +1420,11 @@ pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/fi
 #ifdef NIGHTLY_BUILD
 pref("privacy.userContext.enabled", true);
 pref("privacy.userContext.ui.enabled", true);
+pref("privacy.usercontext.about_newtab_segregation.enabled", true);
 #else
 pref("privacy.userContext.enabled", false);
 pref("privacy.userContext.ui.enabled", false);
+pref("privacy.usercontext.about_newtab_segregation.enabled", false);
 #endif
 
 #ifndef RELEASE_OR_BETA

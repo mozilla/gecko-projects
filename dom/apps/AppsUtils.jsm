@@ -157,10 +157,6 @@ this.AppsUtils = {
        usePrivateBrowsing: false,
        isContent: false,
 
-       isAppOfType: function(appType) {
-         throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-       },
-
        QueryInterface: XPCOMUtils.generateQI([Ci.nsILoadContext,
                                               Ci.nsIInterfaceRequestor,
                                               Ci.nsISupports]),
@@ -609,35 +605,6 @@ this.AppsUtils = {
       return Ci.nsIPrincipal.APP_STATUS_CERTIFIED;
     default:
       throw new Error("Webapps.jsm: Undetermined app manifest type");
-    }
-  },
-
-  /**
-   * Determines if an update or a factory reset occured.
-   */
-  isFirstRun: function isFirstRun(aPrefBranch) {
-    let savedmstone = null;
-    try {
-      savedmstone = aPrefBranch.getCharPref("dom.apps.lastUpdate.mstone");
-    } catch (e) {}
-
-    let mstone = Services.appinfo.platformVersion;
-
-    let savedBuildID = null;
-    try {
-      savedBuildID = aPrefBranch.getCharPref("dom.apps.lastUpdate.buildID");
-    } catch (e) {}
-
-    let buildID = Services.appinfo.platformBuildID;
-
-    aPrefBranch.setCharPref("dom.apps.lastUpdate.mstone", mstone);
-    aPrefBranch.setCharPref("dom.apps.lastUpdate.buildID", buildID);
-
-    if ((mstone != savedmstone) || (buildID != savedBuildID)) {
-      aPrefBranch.setBoolPref("dom.apps.reset-permissions", false);
-      return true;
-    } else {
-      return false;
     }
   },
 

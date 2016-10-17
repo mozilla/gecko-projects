@@ -143,7 +143,7 @@ MSG_DEF(JSMSG_DEPRECATED_USAGE,        1, JSEXN_REFERENCEERR, "deprecated {0} us
 MSG_DEF(JSMSG_NOT_SCRIPTED_FUNCTION,   1, JSEXN_TYPEERR, "{0} is not a scripted function")
 MSG_DEF(JSMSG_NO_REST_NAME,            0, JSEXN_SYNTAXERR, "no parameter name after ...")
 MSG_DEF(JSMSG_PARAMETER_AFTER_REST,    0, JSEXN_SYNTAXERR, "parameter after rest parameter")
-MSG_DEF(JSMSG_TOO_MANY_FUN_APPLY_ARGS, 0, JSEXN_RANGEERR, "arguments array passed to Function.prototype.apply is too large")
+MSG_DEF(JSMSG_TOO_MANY_ARGUMENTS,      0, JSEXN_RANGEERR, "too many arguments provided for a function call")
 
 // CSP
 MSG_DEF(JSMSG_CSP_BLOCKED_EVAL,        0, JSEXN_ERR, "call to eval() blocked by CSP")
@@ -162,7 +162,6 @@ MSG_DEF(JSMSG_USER_DEFINED_ERROR,      0, JSEXN_ERR, "JS_ReportError was called"
 
 // Internal errors
 MSG_DEF(JSMSG_ALLOC_OVERFLOW,          0, JSEXN_INTERNALERR, "allocation size overflow")
-MSG_DEF(JSMSG_BAD_BUILD_ID,            0, JSEXN_INTERNALERR, "bad build ID for XDR script")
 MSG_DEF(JSMSG_BAD_BYTECODE,            1, JSEXN_INTERNALERR, "unimplemented JavaScript bytecode {0}")
 MSG_DEF(JSMSG_BUFFER_TOO_SMALL,        0, JSEXN_INTERNALERR, "buffer too small")
 MSG_DEF(JSMSG_BUILD_ID_NOT_AVAILABLE,  0, JSEXN_INTERNALERR, "build ID is not available")
@@ -246,6 +245,7 @@ MSG_DEF(JSMSG_DUPLICATE_EXPORT_NAME,   1, JSEXN_SYNTAXERR, "duplicate export nam
 MSG_DEF(JSMSG_DUPLICATE_FORMAL,        1, JSEXN_SYNTAXERR, "duplicate formal argument {0}")
 MSG_DEF(JSMSG_DUPLICATE_LABEL,         0, JSEXN_SYNTAXERR, "duplicate label")
 MSG_DEF(JSMSG_DUPLICATE_PROPERTY,      1, JSEXN_SYNTAXERR, "property name {0} appears more than once in object literal")
+MSG_DEF(JSMSG_DUPLICATE_PROTO_PROPERTY, 0, JSEXN_SYNTAXERR, "property name __proto__ appears more than once in object literal")
 MSG_DEF(JSMSG_EMPTY_CONSEQUENT,        0, JSEXN_SYNTAXERR, "mistyped ; after conditional?")
 MSG_DEF(JSMSG_EQUAL_AS_ASSIGN,         0, JSEXN_SYNTAXERR, "test for equality (==) mistyped as assignment (=)?")
 MSG_DEF(JSMSG_EXPORT_DECL_AT_TOP_LEVEL,0, JSEXN_SYNTAXERR, "export declarations may only appear at top level of a module")
@@ -354,6 +354,7 @@ MSG_DEF(JSMSG_WASM_UNREACHABLE,        0, JSEXN_WASMRUNTIMEERROR, "unreachable e
 MSG_DEF(JSMSG_WASM_INTEGER_OVERFLOW,   0, JSEXN_WASMRUNTIMEERROR, "integer overflow")
 MSG_DEF(JSMSG_WASM_INVALID_CONVERSION, 0, JSEXN_WASMRUNTIMEERROR, "invalid conversion to integer")
 MSG_DEF(JSMSG_WASM_INT_DIVIDE_BY_ZERO, 0, JSEXN_WASMRUNTIMEERROR, "integer divide by zero")
+MSG_DEF(JSMSG_WASM_OUT_OF_BOUNDS,      0, JSEXN_WASMRUNTIMEERROR, "index out of bounds")
 MSG_DEF(JSMSG_WASM_UNALIGNED_ACCESS,   0, JSEXN_WASMRUNTIMEERROR, "unaligned memory access")
 MSG_DEF(JSMSG_WASM_BAD_UINT32,         2, JSEXN_RANGEERR,    "bad {0} {1}")
 MSG_DEF(JSMSG_WASM_BAD_FIT,            2, JSEXN_RANGEERR,    "{0} segment does not fit in {1}")

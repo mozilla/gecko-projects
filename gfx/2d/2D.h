@@ -45,11 +45,10 @@ struct ID3D11Texture2D;
 struct ID3D11Device;
 struct ID2D1Device;
 struct IDWriteRenderingParams;
-struct IDWriteFont;
-struct IDWriteFontFamily;
 struct IDWriteFontFace;
 
 class GrContext;
+struct gfxFontStyle;
 
 struct CGContext;
 typedef struct CGContext *CGContextRef;
@@ -1437,9 +1436,6 @@ public:
 
   static void SetGlobalEventRecorder(DrawEventRecorder *aRecorder);
 
-  // This is a little hacky at the moment, but we want to have this data. Bug 1068613.
-  static void SetLogForwarder(LogForwarder* aLogFwd);
-
   static uint32_t GetMaxSurfaceSize(BackendType aType);
 
   static LogForwarder* GetLogForwarder() { return sConfig ? sConfig->mLogForwarder : nullptr; }
@@ -1496,9 +1492,8 @@ public:
   static void D2DCleanup();
 
   static already_AddRefed<ScaledFont>
-    CreateScaledFontForDWriteFont(IDWriteFont* aFont,
-                                  IDWriteFontFamily* aFontFamily,
-                                  IDWriteFontFace* aFontFace,
+    CreateScaledFontForDWriteFont(IDWriteFontFace* aFontFace,
+                                  const gfxFontStyle* aStyle,
                                   Float aSize,
                                   bool aUseEmbeddedBitmap,
                                   bool aForceGDIMode);

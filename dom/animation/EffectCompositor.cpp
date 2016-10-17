@@ -131,7 +131,7 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
     MOZ_ASSERT(effect && effect->GetAnimation());
     Animation* animation = effect->GetAnimation();
 
-    if (!animation->IsPlaying()) {
+    if (!animation->IsPlayableOnCompositor()) {
       continue;
     }
 
@@ -148,7 +148,7 @@ FindAnimationsForCompositor(const nsIFrame* aFrame,
       return false;
     }
 
-    if (!effect->HasAnimationOfProperty(aProperty)) {
+    if (!effect->HasEffectiveAnimationOfProperty(aProperty)) {
       continue;
     }
 

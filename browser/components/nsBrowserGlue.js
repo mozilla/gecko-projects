@@ -669,9 +669,6 @@ BrowserGlue.prototype = {
     // handle any UI migration
     this._migrateUI();
 
-    // Evaluate Webapps.jsm early to resolve ts_paint regression bug 1256667.
-    Cu.import("resource://gre/modules/Webapps.jsm", {});
-
     PageThumbs.init();
     webrtcUI.init();
     AboutHome.init();
@@ -1779,7 +1776,7 @@ BrowserGlue.prototype = {
   },
 
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 40;
+    const UI_VERSION = 41;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
 
     let currentUIVersion;
@@ -2103,6 +2100,11 @@ BrowserGlue.prototype = {
         // only in about:config
         Services.prefs.clearUserPref(kOldSafeBrowsingPref);
       }
+    }
+
+    if (currentUIVersion < 41) {
+      const Preferences = Cu.import("resource://gre/modules/Preferences.jsm", {}).Preferences;
+      Preferences.resetBranch("loop.");
     }
 
     // Update the migration version.

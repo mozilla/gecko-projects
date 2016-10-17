@@ -46,6 +46,9 @@ using mozilla::Nothing;
 bool
 wasm::HasCompilerSupport(ExclusiveContext* cx)
 {
+    if (gc::SystemPageSize() > wasm::PageSize)
+        return false;
+
     if (!cx->jitSupportsFloatingPoint())
         return false;
 
@@ -54,6 +57,13 @@ wasm::HasCompilerSupport(ExclusiveContext* cx)
 
     if (!wasm::HaveSignalHandlers())
         return false;
+
+#if defined(JS_CODEGEN_ARM)
+    // movw/t are required for the loadWasmActivationFromSymbolicAddress in
+    // GenerateProfilingPrologue/Epilogue to avoid using the constant pool.
+    if (!HasMOVWT())
+        return false;
+#endif
 
 #if defined(JS_CODEGEN_NONE) || defined(JS_CODEGEN_ARM64)
     return false;
@@ -226,7 +236,7 @@ GetImports(JSContext* cx,
             return ThrowBadImportField(cx, "an Object");
 
         RootedObject obj(cx, &v.toObject());
-        if (!GetProperty(cx, obj, import.func.get(), &v))
+        if (!GetProperty(cx, obj, import.field.get(), &v))
             return false;
 
         switch (import.kind) {
@@ -260,6 +270,8 @@ GetImports(JSContext* cx,
             MOZ_ASSERT(!global.isMutable());
             switch (global.type()) {
               case ValType::I32: {
+                if (!v.isNumber())
+                    return ThrowBadImportField(cx, "a number");
                 int32_t i32;
                 if (!ToInt32(cx, v, &i32))
                     return false;
@@ -282,6 +294,8 @@ GetImports(JSContext* cx,
                     val = Val(RawF32::fromBits(bits));
                     break;
                 }
+                if (!v.isNumber())
+                    return ThrowBadImportField(cx, "a number");
                 double d;
                 if (!ToNumber(cx, v, &d))
                     return false;
@@ -296,6 +310,8 @@ GetImports(JSContext* cx,
                     val = Val(RawF64::fromBits(bits));
                     break;
                 }
+                if (!v.isNumber())
+                    return ThrowBadImportField(cx, "a number");
                 double d;
                 if (!ToNumber(cx, v, &d))
                     return false;

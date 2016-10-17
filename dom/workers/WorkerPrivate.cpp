@@ -57,7 +57,6 @@
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/MessagePortBinding.h"
-#include "mozilla/dom/MessagePortList.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PMessagePort.h"
 #include "mozilla/dom/Promise.h"
@@ -710,8 +709,8 @@ public:
         return false;
       }
       extendableEvent->SetSource(client);
-      extendableEvent->SetPorts(new MessagePortList(static_cast<dom::Event*>(extendableEvent.get()),
-                                                    ports));
+      extendableEvent->SetPorts(Move(ports));
+
       domEvent = do_QueryObject(extendableEvent);
     } else {
       RefPtr<MessageEvent> event = new MessageEvent(aTarget, nullptr, nullptr);
@@ -724,8 +723,7 @@ public:
                               EmptyString(),
                               nullptr,
                               nullptr);
-      event->SetPorts(new MessagePortList(static_cast<dom::Event*>(event.get()),
-                                          ports));
+      event->SetPorts(Move(ports));
       domEvent = do_QueryObject(event);
     }
 
@@ -2562,7 +2560,7 @@ WorkerPrivateParent<Derived>::Freeze(nsPIDOMWindowInner* aWindow)
   if ((IsSharedWorker() || IsServiceWorker()) && !mSharedWorkers.IsEmpty()) {
     AssertIsOnMainThread();
 
-    bool allFrozen = false;
+    bool allFrozen = true;
 
     for (uint32_t i = 0; i < mSharedWorkers.Length(); ++i) {
       if (aWindow && mSharedWorkers[i]->GetOwner() == aWindow) {
@@ -2668,7 +2666,6 @@ WorkerPrivateParent<Derived>::Thaw(nsPIDOMWindowInner* aWindow)
   // Execute queued runnables before waking up the worker, otherwise the worker
   // could post new messages before we run those that have been queued.
   if (!IsParentWindowPaused() && !mQueuedRunnables.IsEmpty()) {
-    AssertIsOnMainThread();
     MOZ_ASSERT(IsDedicatedWorker());
 
     nsTArray<nsCOMPtr<nsIRunnable>> runnables;
@@ -2720,7 +2717,6 @@ WorkerPrivateParent<Derived>::ParentWindowResumed()
   // Execute queued runnables before waking up, otherwise the worker could post
   // new messages before we run those that have been queued.
   if (!IsFrozen() && !mQueuedRunnables.IsEmpty()) {
-    AssertIsOnMainThread();
     MOZ_ASSERT(IsDedicatedWorker());
 
     nsTArray<nsCOMPtr<nsIRunnable>> runnables;
@@ -6488,9 +6484,7 @@ WorkerPrivate::ConnectMessagePort(JSContext* aCx,
   nsTArray<RefPtr<MessagePort>> ports;
   ports.AppendElement(port);
 
-  RefPtr<MessagePortList> portList =
-    new MessagePortList(static_cast<nsIDOMEventTarget*>(globalScope), ports);
-  event->SetPorts(portList);
+  event->SetPorts(Move(ports));
 
   nsCOMPtr<nsIDOMEvent> domEvent = do_QueryObject(event);
 

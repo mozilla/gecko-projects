@@ -3111,8 +3111,14 @@ class CGGetPerInterfaceObject(CGAbstractMethod):
              * Calling fromMarkedLocation() is safe because protoAndIfaceCache is
              * traced by TraceProtoAndIfaceCache() and its contents are never
              * changed after they have been set.
+             *
+             * Calling address() avoids the read read barrier that does gray
+             * unmarking, but it's not possible for the object to be gray here.
              */
-            return JS::Handle<JSObject*>::fromMarkedLocation(protoAndIfaceCache.EntrySlotMustExist(${id}).address());
+
+            const JS::Heap<JSObject*>& entrySlot = protoAndIfaceCache.EntrySlotMustExist(${id});
+            MOZ_ASSERT_IF(entrySlot, !JS::ObjectIsMarkedGray(entrySlot));
+            return JS::Handle<JSObject*>::fromMarkedLocation(entrySlot.address());
             """,
             id=self.id)
 
@@ -5591,9 +5597,8 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         template = fill(
             """
             {
-              bool ok;
-              int index = FindEnumStringIndex<${invalidEnumValueFatal}>(cx, $${val}, ${values}, "${enumtype}", "${sourceDescription}", &ok);
-              if (!ok) {
+              int index;
+              if (!FindEnumStringIndex<${invalidEnumValueFatal}>(cx, $${val}, ${values}, "${enumtype}", "${sourceDescription}", &index)) {
                 $*{exceptionCode}
               }
               $*{handleInvalidEnumValueCode}
@@ -7205,6 +7210,10 @@ def wrapArgIntoCurrentCompartment(arg, value, isMember=True):
     return wrap
 
 
+def needsContainsHack(m):
+    return m.getExtendedAttribute("ReturnValueNeedsContainsHack")
+
+
 class CGPerSignatureCall(CGThing):
     """
     This class handles the guts of generating code for a particular
@@ -7578,6 +7587,22 @@ class CGPerSignatureCall(CGThing):
             # the compartment we do our conversion in but after we've finished
             # the initial conversion into args.rval().
             postConversionSteps = ""
+            if needsContainsHack(self.idlNode):
+                # Define a .contains on the object that has the same value as
+                # .includes; needed for backwards compat in extensions as we
+                # migrate some DOMStringLists to FrozenArray.
+                postConversionSteps += dedent(
+                    """
+                    if (args.rval().isObject() && nsContentUtils::ThreadsafeIsCallerChrome()) {
+                      JS::Rooted<JSObject*> rvalObj(cx, &args.rval().toObject());
+                      JS::Rooted<JS::Value> includesVal(cx);
+                      if (!JS_GetProperty(cx, rvalObj, "includes", &includesVal) ||
+                          !JS_DefineProperty(cx, rvalObj, "contains", includesVal, JSPROP_ENUMERATE)) {
+                        return false;
+                      }
+                    }
+
+                    """)
             if self.idlNode.getExtendedAttribute("Frozen"):
                 assert self.idlNode.type.isSequence() or self.idlNode.type.isDictionary()
                 freezeValue = CGGeneric(
@@ -13568,7 +13593,8 @@ class CGBindingRoot(CGThing):
         def descriptorHasChromeOnly(desc):
             ctor = desc.interface.ctor()
 
-            return (any(isChromeOnly(a) for a in desc.interface.members) or
+            return (any(isChromeOnly(a) or needsContainsHack(a)
+                        for a in desc.interface.members) or
                     desc.interface.getExtendedAttribute("ChromeOnly") is not None or
                     # JS-implemented interfaces with an interface object get a
                     # chromeonly _create method.  And interfaces with an

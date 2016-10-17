@@ -24,7 +24,6 @@ class nsPluginArray;
 class nsMimeTypeArray;
 class nsPIDOMWindowInner;
 class nsIDOMNavigatorSystemMessages;
-class nsDOMCameraManager;
 class nsDOMDeviceStorage;
 class nsIPrincipal;
 class nsIURI;
@@ -87,8 +86,6 @@ class MobileConnectionArray;
 class PowerManager;
 class IccManager;
 class Telephony;
-class Voicemail;
-class TVManager;
 class InputPortManager;
 class DeviceStorageAreaListener;
 class Presentation;
@@ -227,12 +224,9 @@ public:
   IccManager* GetMozIccManager(ErrorResult& aRv);
   MobileMessageManager* GetMozMobileMessage();
   Telephony* GetMozTelephony(ErrorResult& aRv);
-  Voicemail* GetMozVoicemail(ErrorResult& aRv);
-  TVManager* GetTv();
   InputPortManager* GetInputPortManager(ErrorResult& aRv);
   already_AddRefed<LegacyMozTCPSocket> MozTCPSocket();
   network::Connection* GetConnection(ErrorResult& aRv);
-  nsDOMCameraManager* GetMozCameras(ErrorResult& aRv);
   MediaDevices* GetMediaDevices(ErrorResult& aRv);
 
 #ifdef MOZ_B2G_RIL
@@ -283,8 +277,6 @@ public:
 
   // WebIDL helper methods
   static bool HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */);
-  static bool HasCameraSupport(JSContext* /* unused */,
-                               JSObject* aGlobal);
   static bool HasWifiManagerSupport(JSContext* /* unused */,
                                   JSObject* aGlobal);
 #ifdef MOZ_NFC
@@ -337,8 +329,6 @@ private:
   RefPtr<IccManager> mIccManager;
   RefPtr<MobileMessageManager> mMobileMessageManager;
   RefPtr<Telephony> mTelephony;
-  RefPtr<Voicemail> mVoicemail;
-  RefPtr<TVManager> mTVManager;
   RefPtr<InputPortManager> mInputPortManager;
   RefPtr<network::Connection> mConnection;
 #ifdef MOZ_B2G_RIL
@@ -350,7 +340,6 @@ private:
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   RefPtr<system::AudioChannelManager> mAudioChannelManager;
 #endif
-  RefPtr<nsDOMCameraManager> mCameraManager;
   RefPtr<MediaDevices> mMediaDevices;
   nsTArray<nsWeakPtr> mDeviceStorageStores;
   RefPtr<time::TimeManager> mTimeManager;

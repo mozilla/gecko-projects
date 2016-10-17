@@ -33,6 +33,7 @@ using mozilla::dom::BlobImpl;
 using mozilla::dom::MediaSource;
 using mozilla::ErrorResult;
 using mozilla::net::LoadInfo;
+using mozilla::Move;
 
 // -----------------------------------------------------------------------
 // Hash table
@@ -433,7 +434,9 @@ public:
   {
     RefPtr<ReleasingTimerHolder> holder = new ReleasingTimerHolder(Move(aArray));
     holder->mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
-    if (NS_WARN_IF(!holder->mTimer)) {
+
+    // If we are shutting down, we are not able to create a timer.
+    if (!holder->mTimer) {
       return;
     }
 
@@ -613,7 +616,7 @@ nsHostObjectProtocolHandler::RemoveDataEntry(const nsACString& aUri,
   }
 
   if (!info->mURIs.IsEmpty()) {
-    ReleasingTimerHolder::Create(Move(info->mURIs));
+    mozilla::ReleasingTimerHolder::Create(Move(info->mURIs));
   }
 
   gDataTable->Remove(aUri);

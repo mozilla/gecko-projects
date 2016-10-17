@@ -247,6 +247,7 @@ UNIFIED_SOURCES += [
     'jit/EffectiveAddressAnalysis.cpp',
     'jit/ExecutableAllocator.cpp',
     'jit/FlowAliasAnalysis.cpp',
+    'jit/FoldLinearArithConstants.cpp',
     'jit/InstructionReordering.cpp',
     'jit/Ion.cpp',
     'jit/IonAnalysis.cpp',
@@ -767,6 +768,7 @@ selfhosted.inputs = [
     'builtin/Sorting.js',
     'builtin/TypedArray.js',
     'builtin/TypedObject.js',
+    'builtin/WeakMap.js',
     'builtin/WeakSet.js'
 ]
 

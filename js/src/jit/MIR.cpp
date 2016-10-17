@@ -39,6 +39,7 @@ using mozilla::CheckedInt;
 using mozilla::NumbersAreIdentical;
 using mozilla::IsFloat32Representable;
 using mozilla::IsNaN;
+using mozilla::IsPowerOfTwo;
 using mozilla::Maybe;
 using mozilla::DebugOnly;
 
@@ -1322,12 +1323,12 @@ MSimdGeneralShuffle::foldsTo(TempAllocator& alloc)
 
 MInstruction*
 MSimdConvert::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition* obj,
-                           MIRType toType, SimdSign sign)
+                           MIRType toType, SimdSign sign, wasm::TrapOffset trapOffset)
 {
     MIRType fromType = obj->type();
 
     if (SupportsUint32x4FloatConversions || sign != SimdSign::Unsigned) {
-        MInstruction* ins = New(alloc, obj, toType, sign);
+        MInstruction* ins = New(alloc, obj, toType, sign, trapOffset);
         addTo->add(ins);
         return ins;
     }
@@ -1403,7 +1404,7 @@ MSimdConvert::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition
     if (fromType == MIRType::Float32x4 && toType == MIRType::Int32x4) {
         // The Float32x4 -> Uint32x4 conversion can throw if the input is out of
         // range. This is handled by the LFloat32x4ToUint32x4 expansion.
-        MInstruction* ins = New(alloc, obj, toType, sign);
+        MInstruction* ins = New(alloc, obj, toType, sign, trapOffset);
         addTo->add(ins);
         return ins;
     }
@@ -3390,7 +3391,7 @@ MMod::analyzeEdgeCasesForward()
 
     if (rhs()->isConstant()) {
         int32_t n = rhs()->toConstant()->toInt32();
-        if (n > 0 && !IsPowerOfTwo(n))
+        if (n > 0 && !IsPowerOfTwo(uint32_t(n)))
             canBePowerOfTwoDivisor_ = false;
     }
 }

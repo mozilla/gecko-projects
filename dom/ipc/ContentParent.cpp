@@ -70,7 +70,6 @@
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/telephony/TelephonyParent.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
-#include "mozilla/dom/voicemail/VoicemailParent.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -294,7 +293,6 @@ using namespace mozilla::dom::power;
 using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
-using namespace mozilla::dom::voicemail;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gfx;
@@ -566,7 +564,6 @@ static const char* sObserverTopics[] = {
 #ifdef ACCESSIBILITY
   "a11y-init-or-shutdown",
 #endif
-  "app-theme-changed",
 #ifdef MOZ_ENABLE_PROFILER_SPS
   "profiler-started",
   "profiler-stopped",
@@ -2808,9 +2805,6 @@ ContentParent::Observe(nsISupports* aSubject,
     }
   }
 #endif
-  else if (!strcmp(aTopic, "app-theme-changed")) {
-    Unused << SendOnAppThemeChanged();
-  }
 #ifdef MOZ_ENABLE_PROFILER_SPS
   else if (!strcmp(aTopic, "profiler-started")) {
     nsCOMPtr<nsIProfilerStartParams> params(do_QueryInterface(aSubject));
@@ -3476,31 +3470,6 @@ bool
 ContentParent::DeallocPTelephonyParent(PTelephonyParent* aActor)
 {
   static_cast<TelephonyParent*>(aActor)->Release();
-  return true;
-}
-
-PVoicemailParent*
-ContentParent::AllocPVoicemailParent()
-{
-  if (!AssertAppProcessPermission(this, "voicemail")) {
-    return nullptr;
-  }
-
-  VoicemailParent* actor = new VoicemailParent();
-  actor->AddRef();
-  return actor;
-}
-
-bool
-ContentParent::RecvPVoicemailConstructor(PVoicemailParent* aActor)
-{
-  return static_cast<VoicemailParent*>(aActor)->Init();
-}
-
-bool
-ContentParent::DeallocPVoicemailParent(PVoicemailParent* aActor)
-{
-  static_cast<VoicemailParent*>(aActor)->Release();
   return true;
 }
 

@@ -270,22 +270,10 @@ partial interface Navigator {
   readonly attribute NetworkInformation connection;
 };
 
-// nsIDOMNavigatorCamera
-partial interface Navigator {
-  [Throws, Func="Navigator::HasCameraSupport", UnsafeInPrerendering]
-  readonly attribute CameraManager mozCameras;
-};
-
 #ifdef MOZ_B2G_RIL
 partial interface Navigator {
   [Throws, Pref="dom.mobileconnection.enabled", ChromeOnly, UnsafeInPrerendering]
   readonly attribute MozMobileConnectionArray mozMobileConnections;
-};
-
-partial interface Navigator {
-  [Throws, Pref="dom.voicemail.enabled", ChromeOnly,
-   UnsafeInPrerendering]
-  readonly attribute MozVoicemail mozVoicemail;
 };
 
 partial interface Navigator {
@@ -387,11 +375,6 @@ partial interface Navigator {
   [Throws, Pref="beacon.enabled"]
   boolean sendBeacon(DOMString url,
                      optional (ArrayBufferView or Blob or DOMString or FormData)? data = null);
-};
-
-partial interface Navigator {
-  [Pref="dom.tv.enabled", ChromeOnly]
-  readonly attribute TVManager? tv;
 };
 
 partial interface Navigator {

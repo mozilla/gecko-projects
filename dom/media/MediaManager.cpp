@@ -10,6 +10,7 @@
 #include "mozilla/dom/MediaStreamTrack.h"
 #include "GetUserMediaRequest.h"
 #include "MediaStreamListener.h"
+#include "nsArray.h"
 #include "nsContentUtils.h"
 #include "nsHashPropertyBag.h"
 #ifdef MOZ_WIDGET_GONK
@@ -20,7 +21,6 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIPermissionManager.h"
 #include "nsIPopupWindowManager.h"
-#include "nsISupportsArray.h"
 #include "nsIDocShell.h"
 #include "nsIDocument.h"
 #include "nsISupportsPrimitives.h"
@@ -1513,18 +1513,13 @@ public:
     }
     if (errorMsg) {
       LOG(("%s %d", errorMsg, rv));
-      switch (rv) {
-        case NS_ERROR_NOT_AVAILABLE: {
-          MOZ_ASSERT(badConstraint);
-          Fail(NS_LITERAL_STRING("OverconstrainedError"),
-               NS_LITERAL_STRING(""),
-               NS_ConvertUTF8toUTF16(badConstraint));
-          break;
-        }
-        default:
-          Fail(NS_LITERAL_STRING("NotReadableError"),
-               NS_ConvertUTF8toUTF16(errorMsg));
-          break;
+      if (badConstraint) {
+        Fail(NS_LITERAL_STRING("OverconstrainedError"),
+             NS_LITERAL_STRING(""),
+             NS_ConvertUTF8toUTF16(badConstraint));
+      } else {
+        Fail(NS_LITERAL_STRING("NotReadableError"),
+             NS_ConvertUTF8toUTF16(errorMsg));
       }
       return NS_OK;
     }
@@ -2344,12 +2339,6 @@ if (privileged) {
     }
   }
 
-#if defined(MOZ_B2G_CAMERA) && defined(MOZ_WIDGET_GONK)
-  if (mCameraManager == nullptr) {
-    mCameraManager = nsDOMCameraManager::CreateInstance(aWindow);
-  }
-#endif
-
   // Get list of all devices, with origin-specific device ids.
 
   MediaEnginePrefs prefs = mPrefs;
@@ -2411,14 +2400,10 @@ if (privileged) {
         return;
       }
 
-      nsCOMPtr<nsISupportsArray> devicesCopy; // before we give up devices below
+      nsCOMPtr<nsIMutableArray> devicesCopy = nsArray::Create(); // before we give up devices below
       if (!askPermission) {
-        nsresult rv = NS_NewISupportsArray(getter_AddRefs(devicesCopy));
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return;
-        }
         for (auto& device : **devices) {
-          rv = devicesCopy->AppendElement(device);
+          nsresult rv = devicesCopy->AppendElement(device, /*weak =*/ false);
           if (NS_WARN_IF(NS_FAILED(rv))) {
             return;
           }
@@ -3036,15 +3021,15 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
     if (aSubject) {
       // A particular device or devices were chosen by the user.
       // NOTE: does not allow setting a device to null; assumes nullptr
-      nsCOMPtr<nsISupportsArray> array(do_QueryInterface(aSubject));
+      nsCOMPtr<nsIArray> array(do_QueryInterface(aSubject));
       MOZ_ASSERT(array);
       uint32_t len = 0;
-      array->Count(&len);
+      array->GetLength(&len);
       bool videoFound = false, audioFound = false;
       for (uint32_t i = 0; i < len; i++) {
-        nsCOMPtr<nsISupports> supports;
-        array->GetElementAt(i,getter_AddRefs(supports));
-        nsCOMPtr<nsIMediaDevice> device(do_QueryInterface(supports));
+        nsCOMPtr<nsIMediaDevice> device;
+        array->QueryElementAt(i, NS_GET_IID(nsIMediaDevice),
+                              getter_AddRefs(device));
         MOZ_ASSERT(device); // shouldn't be returning anything else...
         if (device) {
           nsString type;
@@ -3138,14 +3123,11 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
 }
 
 nsresult
-MediaManager::GetActiveMediaCaptureWindows(nsISupportsArray** aArray)
+MediaManager::GetActiveMediaCaptureWindows(nsIArray** aArray)
 {
   MOZ_ASSERT(aArray);
-  nsISupportsArray* array;
-  nsresult rv = NS_NewISupportsArray(&array); // AddRefs
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+
+  nsCOMPtr<nsIMutableArray> array = nsArray::Create();
 
   for (auto iter = mActiveWindows.Iter(); !iter.Done(); iter.Next()) {
     const uint64_t& id = iter.Key();
@@ -3176,11 +3158,11 @@ MediaManager::GetActiveMediaCaptureWindows(nsISupportsArray** aArray)
       }
     }
     if (capturing) {
-      array->AppendElement(window);
+      array->AppendElement(window, /*weak =*/ false);
     }
   }
 
-  *aArray = array;
+  array.forget(aArray);
   return NS_OK;
 }
 
@@ -3339,14 +3321,14 @@ MediaManager::IterateWindowListeners(nsPIDOMWindowInner* aWindow,
 void
 MediaManager::StopMediaStreams()
 {
-  nsCOMPtr<nsISupportsArray> array;
+  nsCOMPtr<nsIArray> array;
   GetActiveMediaCaptureWindows(getter_AddRefs(array));
   uint32_t len;
-  array->Count(&len);
+  array->GetLength(&len);
   for (uint32_t i = 0; i < len; i++) {
-    nsCOMPtr<nsISupports> window;
-    array->GetElementAt(i, getter_AddRefs(window));
-    nsCOMPtr<nsPIDOMWindowInner> win(do_QueryInterface(window));
+    nsCOMPtr<nsPIDOMWindowInner> win;
+    array->QueryElementAt(i, NS_GET_IID(nsPIDOMWindowInner),
+                          getter_AddRefs(win));
     if (win) {
       OnNavigation(win->WindowID());
     }
@@ -3358,14 +3340,14 @@ MediaManager::IsActivelyCapturingOrHasAPermission(uint64_t aWindowId)
 {
   // Does page currently have a gUM stream active?
 
-  nsCOMPtr<nsISupportsArray> array;
+  nsCOMPtr<nsIArray> array;
   GetActiveMediaCaptureWindows(getter_AddRefs(array));
   uint32_t len;
-  array->Count(&len);
+  array->GetLength(&len);
   for (uint32_t i = 0; i < len; i++) {
-    nsCOMPtr<nsISupports> window;
-    array->GetElementAt(i, getter_AddRefs(window));
-    nsCOMPtr<nsPIDOMWindowInner> win(do_QueryInterface(window));
+    nsCOMPtr<nsPIDOMWindowInner> win;
+    array->QueryElementAt(i, NS_GET_IID(nsPIDOMWindowInner),
+                          getter_AddRefs(win));
     if (win && win->WindowID() == aWindowId) {
       return true;
     }
@@ -3520,7 +3502,7 @@ GetUserMediaCallbackMediaStreamListener::ApplyConstraintsToTrack(
         } else {
           auto* window = nsGlobalWindow::GetInnerWindowWithId(windowId);
           if (window) {
-            if (rv == NS_ERROR_NOT_AVAILABLE) {
+            if (badConstraint) {
               nsString constraint;
               constraint.AssignASCII(badConstraint);
               RefPtr<MediaStreamError> error =

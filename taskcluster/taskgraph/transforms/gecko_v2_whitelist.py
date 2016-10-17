@@ -57,6 +57,7 @@ JOB_NAME_WHITELIST = set([
     'sm-arm-sim-debug',
     'sm-asan-opt',
     'sm-compacting-debug',
+    'sm-mozjs-sys-debug',
     'sm-msan-opt',
     'sm-nonunified-debug',
     'sm-package-opt',

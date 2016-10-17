@@ -47,7 +47,6 @@ include protocol PSpeechSynthesis;
 include protocol PStorage;
 include protocol PTelephony;
 include protocol PTestShell;
-include protocol PVoicemail;
 include protocol PJavaScript;
 include protocol PRemoteSpellcheckEngine;
 include protocol PWebBrowserPersistDocument;
@@ -377,7 +376,6 @@ nested(upto inside_cpow) sync protocol PContent
     manages PStorage;
     manages PTelephony;
     manages PTestShell;
-    manages PVoicemail;
     manages PJavaScript;
     manages PRemoteSpellcheckEngine;
     manages PWebBrowserPersistDocument;
@@ -566,11 +564,6 @@ child:
      * Notify idle observers in the child
      */
     async NotifyIdleObserver(uint64_t observerId, nsCString topic, nsString str);
-
-    /**
-     * Notify windows in the child to apply a new app style.
-     */
-    async OnAppThemeChanged();
 
     /**
      * Called during plugin initialization to map a plugin id to a child process
@@ -831,8 +824,6 @@ parent:
     nested(inside_cpow) async PStorage();
 
     async PTelephony();
-
-    async PVoicemail();
 
     async PMedia();
 

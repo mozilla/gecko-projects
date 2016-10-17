@@ -347,8 +347,6 @@ private:
 protected:
   virtual ~MediaDecoderStateMachine();
 
-  void SetState(State aState);
-
   void BufferedRangeUpdated();
 
   void ReaderSuspendedChanged();
@@ -458,10 +456,6 @@ protected:
   // Must be called with the decode monitor held.
   void MaybeStartPlayback();
 
-  // Check to see if we don't have enough data to play up to the next frame.
-  // If we don't, switch to buffering mode.
-  void MaybeStartBuffering();
-
   // Moves the decoder into the shutdown state, and dispatches an error
   // event to the media element. This begins shutting down the decoder.
   // The decoder monitor must be held. This is only called on the
@@ -474,9 +468,6 @@ protected:
   void EnqueueLoadedMetadataEvent();
 
   void EnqueueFirstFrameLoadedEvent();
-
-  // Clears any previous seeking state and initiates a new seek on the decoder.
-  void InitiateSeek(SeekJob aSeekJob);
 
   void DispatchAudioDecodeTaskIfNeeded();
   void DispatchVideoDecodeTaskIfNeeded();
@@ -676,32 +667,6 @@ private:
     MOZ_ASSERT(OnTaskQueue());
     return GetAmpleVideoFrames() / 2;
   }
-
-  bool DonePrerollingAudio()
-  {
-    MOZ_ASSERT(OnTaskQueue());
-    return !IsAudioDecoding() ||
-        GetDecodedAudioDuration() >= AudioPrerollUsecs() * mPlaybackRate;
-  }
-
-  bool DonePrerollingVideo()
-  {
-    MOZ_ASSERT(OnTaskQueue());
-    return !IsVideoDecoding() ||
-        static_cast<uint32_t>(VideoQueue().GetSize()) >=
-            VideoPrerollFrames() * mPlaybackRate + 1;
-  }
-
-  void MaybeStopPrerolling();
-
-  // When we start decoding (either for the first time, or after a pause)
-  // we may be low on decoded data. We don't want our "low data" logic to
-  // kick in and decide that we're low on decoded data because the download
-  // can't keep up with the decode, and cause us to pause playback. So we
-  // have a "preroll" stage, where we ignore the results of our "low data"
-  // logic during the first few frames of our decode. This occurs during
-  // playback.
-  bool mIsPrerolling = false;
 
   // Only one of a given pair of ({Audio,Video}DataPromise, WaitForDataPromise)
   // should exist at any given moment.

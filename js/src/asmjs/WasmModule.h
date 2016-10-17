@@ -85,12 +85,12 @@ typedef UniquePtr<const LinkData> UniqueConstLinkData;
 struct Import
 {
     CacheableChars module;
-    CacheableChars func;
+    CacheableChars field;
     DefinitionKind kind;
 
     Import() = default;
-    Import(UniqueChars&& module, UniqueChars&& func, DefinitionKind kind)
-      : module(Move(module)), func(Move(func)), kind(kind)
+    Import(UniqueChars&& module, UniqueChars&& field, DefinitionKind kind)
+      : module(Move(module)), field(Move(field)), kind(kind)
     {}
 
     WASM_DECLARE_SERIALIZABLE(Import)
@@ -242,6 +242,10 @@ class Module : public RefCounted<Module>
                        Metadata::SeenSet* seenMetadata,
                        ShareableBytes::SeenSet* seenBytes,
                        size_t* code, size_t* data) const;
+
+    // Generated code analysis support:
+
+    bool extractCode(JSContext* cx, MutableHandleValue vp);
 };
 
 typedef RefPtr<Module> SharedModule;

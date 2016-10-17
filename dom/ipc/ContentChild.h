@@ -343,12 +343,6 @@ public:
 
   virtual bool DeallocPTelephonyChild(PTelephonyChild*) override;
 
-  virtual PVoicemailChild* AllocPVoicemailChild() override;
-
-  PVoicemailChild* SendPVoicemailConstructor(PVoicemailChild* aActor);
-
-  virtual bool DeallocPVoicemailChild(PVoicemailChild*) override;
-
   virtual PMediaChild* AllocPMediaChild() override;
 
   virtual bool DeallocPMediaChild(PMediaChild* aActor) override;
@@ -513,8 +507,6 @@ public:
   virtual bool RecvNotifyIdleObserver(const uint64_t& aObserver,
                                       const nsCString& aTopic,
                                       const nsString& aData) override;
-
-  virtual bool RecvOnAppThemeChanged() override;
 
   virtual bool RecvAssociatePluginId(const uint32_t& aPluginId,
                                      const base::ProcessId& aProcessId) override;

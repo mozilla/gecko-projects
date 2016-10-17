@@ -191,6 +191,7 @@ void
 Factory::ShutDown()
 {
   if (sConfig) {
+    delete sConfig->mLogForwarder;
     delete sConfig;
     sConfig = nullptr;
   }
@@ -705,15 +706,15 @@ Factory::D2DCleanup()
 }
 
 already_AddRefed<ScaledFont>
-Factory::CreateScaledFontForDWriteFont(IDWriteFont* aFont,
-                                       IDWriteFontFamily* aFontFamily,
-                                       IDWriteFontFace* aFontFace,
+Factory::CreateScaledFontForDWriteFont(IDWriteFontFace* aFontFace,
+                                       const gfxFontStyle* aStyle,
                                        float aSize,
                                        bool aUseEmbeddedBitmap,
                                        bool aForceGDIMode)
 {
-  return MakeAndAddRef<ScaledFontDWrite>(aFont, aFontFamily, aFontFace,
-                                         aSize, aUseEmbeddedBitmap, aForceGDIMode);
+  return MakeAndAddRef<ScaledFontDWrite>(aFontFace, aSize,
+                                         aUseEmbeddedBitmap, aForceGDIMode,
+                                         aStyle);
 }
 
 #endif // XP_WIN
@@ -979,13 +980,6 @@ Factory::SetGlobalEventRecorder(DrawEventRecorder *aRecorder)
 {
   mRecorder = aRecorder;
 }
-
-// static
-void
-Factory::SetLogForwarder(LogForwarder* aLogFwd) {
-  sConfig->mLogForwarder = aLogFwd;
-}
-
 
 // static
 void

@@ -192,7 +192,6 @@
 #include "mozilla/dom/ipc/StructuredCloneData.h"
 #include "mozilla/dom/telephony/PTelephonyChild.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
-#include "mozilla/dom/voicemail/VoicemailIPCService.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 #include "mozilla/widget/PuppetBidiKeyboard.h"
 #include "mozilla/RemoteSpellCheckEngineChild.h"
@@ -211,7 +210,6 @@ using namespace mozilla::dom::ipc;
 using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
-using namespace mozilla::dom::voicemail;
 using namespace mozilla::dom::workers;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
@@ -2005,30 +2003,6 @@ ContentChild::DeallocPTelephonyChild(PTelephonyChild* aActor)
   return true;
 }
 
-PVoicemailChild*
-ContentChild::AllocPVoicemailChild()
-{
-  MOZ_CRASH("No one should be allocating PVoicemailChild actors");
-}
-
-PVoicemailChild*
-ContentChild::SendPVoicemailConstructor(PVoicemailChild* aActor)
-{
-  aActor = PContentChild::SendPVoicemailConstructor(aActor);
-  if (aActor) {
-    static_cast<VoicemailIPCService*>(aActor)->AddRef();
-  }
-
-  return aActor;
-}
-
-bool
-ContentChild::DeallocPVoicemailChild(PVoicemailChild* aActor)
-{
-  static_cast<VoicemailIPCService*>(aActor)->Release();
-  return true;
-}
-
 media::PMediaChild*
 ContentChild::AllocPMediaChild()
 {
@@ -2804,16 +2778,6 @@ ContentChild::DeallocPOfflineCacheUpdateChild(POfflineCacheUpdateChild* actor)
   OfflineCacheUpdateChild* offlineCacheUpdate =
     static_cast<OfflineCacheUpdateChild*>(actor);
   NS_RELEASE(offlineCacheUpdate);
-  return true;
-}
-
-bool
-ContentChild::RecvOnAppThemeChanged()
-{
-  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
-  if (os) {
-    os->NotifyObservers(nullptr, "app-theme-changed", nullptr);
-  }
   return true;
 }
 

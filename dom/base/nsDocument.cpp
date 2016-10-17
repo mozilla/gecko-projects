@@ -212,14 +212,15 @@
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
+#include "mozilla/dom/ImageTracker.h"
 #include "mozilla/dom/MediaQueryList.h"
 #include "mozilla/dom/NodeFilterBinding.h"
 #include "mozilla/OwningNonNull.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/UndoManager.h"
 #include "mozilla/dom/WebComponentsBinding.h"
-#include "mozilla/dom/CustomElementsRegistryBinding.h"
-#include "mozilla/dom/CustomElementsRegistry.h"
+#include "mozilla/dom/CustomElementRegistryBinding.h"
+#include "mozilla/dom/CustomElementRegistry.h"
 #include "nsFrame.h"
 #include "nsDOMCaretPosition.h"
 #include "nsIDOMHTMLTextAreaElement.h"
@@ -591,25 +592,15 @@ nsDOMStyleSheetList::Length()
   return mLength;
 }
 
-CSSStyleSheet*
+StyleSheet*
 nsDOMStyleSheetList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   if (!mDocument || aIndex >= (uint32_t)mDocument->GetNumberOfStyleSheets()) {
     aFound = false;
     return nullptr;
   }
-
   aFound = true;
-  StyleSheet* sheet = mDocument->GetStyleSheetAt(aIndex);
-  NS_ASSERTION(sheet, "Must have a sheet");
-
-  // XXXheycam Return null until ServoStyleSheet implements the right DOM
-  // interfaces.
-  if (sheet->IsServo()) {
-    NS_ERROR("stylo: can't return a ServoStyleSheet to the DOM yet");
-    return nullptr;
-  }
-  return sheet->AsGecko();
+  return mDocument->GetStyleSheetAt(aIndex);
 }
 
 void
@@ -1316,6 +1307,7 @@ nsIDocument::nsIDocument()
     mFontFaceSetDirty(true),
     mGetUserFontSetCalled(false),
     mPostedFlushUserFontSet(false),
+    mBidiOptions(IBMBIDI_DEFAULT_BIDI_OPTIONS),
     mPartID(0),
     mDidFireDOMContentLoaded(true),
     mHasScrollLinkedEffect(false),
@@ -1331,7 +1323,6 @@ nsIDocument::nsIDocument()
 
 nsDocument::nsDocument(const char* aContentType)
   : nsIDocument()
-  , mAnimatingImages(true)
   , mViewportType(Unknown)
 {
   SetContentTypeInternal(nsDependentCString(aContentType));
@@ -1396,12 +1387,6 @@ nsDocument::~nsDocument()
            ("DOCUMENT %p destroyed", this));
 
   NS_ASSERTION(!mIsShowing, "Destroying a currently-showing document");
-
-  // Note: This assert is only non-fatal because mochitest-bc triggers
-  // it... as well as the preceding assert about !mIsShowing.
-  NS_ASSERTION(!mObservingAppThemeChanged,
-               "Document leaked to shutdown, then the observer service dropped "
-               "its ref to us so we were able to go away.");
 
   if (IsTopLevelContentDocument()) {
     //don't report for about: pages
@@ -1530,11 +1515,6 @@ nsDocument::~nsDocument()
   ClearAllBoxObjects();
 
   mPendingTitleChangeEvent.Revoke();
-
-  // We don't want to leave residual locks on images. Make sure we're in an
-  // unlocked state, and then clear the table.
-  SetImageLockingState(false);
-  mImageTracker.Clear();
 
   mPlugins.Clear();
 }
@@ -3727,9 +3707,7 @@ nsDocument::DeleteShell()
   // When our shell goes away, request that all our images be immediately
   // discarded, so we don't carry around decoded image data for a document we
   // no longer intend to paint.
-  for (auto iter = mImageTracker.Iter(); !iter.Done(); iter.Next()) {
-    iter.Key()->RequestDiscard();
-  }
+  ImageTracker()->RequestDiscardAll();
 
   // Now that we no longer have a shell, we need to forget about any FontFace
   // objects for @font-face rules that came from the style set.
@@ -5396,8 +5374,8 @@ bool IsLowercaseASCII(const nsAString& aValue)
   return true;
 }
 
-already_AddRefed<mozilla::dom::CustomElementsRegistry>
-nsDocument::GetCustomElementsRegistry()
+already_AddRefed<mozilla::dom::CustomElementRegistry>
+nsDocument::GetCustomElementRegistry()
 {
   nsAutoString contentType;
   GetContentType(contentType);
@@ -5413,7 +5391,7 @@ nsDocument::GetCustomElementsRegistry()
     return nullptr;
   }
 
-  RefPtr<CustomElementsRegistry> registry = window->CustomElements();
+  RefPtr<CustomElementRegistry> registry = window->CustomElements();
   if (!registry) {
     return nullptr;
   }
@@ -5712,7 +5690,7 @@ nsDocument::CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* 
     return true;
   }
 
-  RefPtr<mozilla::dom::CustomElementsRegistry> registry = window->CustomElements();
+  RefPtr<mozilla::dom::CustomElementRegistry> registry = window->CustomElements();
   if (!registry) {
     return true;
   }
@@ -5780,7 +5758,7 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
                             JS::MutableHandle<JSObject*> aRetval,
                             ErrorResult& rv)
 {
-  RefPtr<CustomElementsRegistry> registry(GetCustomElementsRegistry());
+  RefPtr<CustomElementRegistry> registry(GetCustomElementRegistry());
   if (!registry) {
     rv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return;
@@ -8721,7 +8699,7 @@ nsDocument::OnPageShow(bool aPersisted,
   }
 
   if (aPersisted) {
-    SetImagesNeedAnimating(true);
+    ImageTracker()->SetAnimatingState(true);
   }
 
   UpdateVisibilityState();
@@ -8740,10 +8718,6 @@ nsDocument::OnPageShow(bool aPersisted,
                           "chrome-page-shown" :
                           "content-page-shown",
                         nullptr);
-    if (!mObservingAppThemeChanged) {
-      os->AddObserver(this, "app-theme-changed", /* ownsWeak */ false);
-      mObservingAppThemeChanged = true;
-    }
   }
 
   DispatchPageTransition(target, NS_LITERAL_STRING("pageshow"), aPersisted);
@@ -8816,7 +8790,7 @@ nsDocument::OnPageHide(bool aPersisted,
   // when the page is refreshing while being dragged out
   nsDocShell* docShell = mDocumentContainer.get();
   if (aPersisted && !(docShell && docShell->InFrameSwap())) {
-    SetImagesNeedAnimating(false);
+    ImageTracker()->SetAnimatingState(false);
   }
 
   ExitPointerLock();
@@ -8836,12 +8810,12 @@ nsDocument::OnPageHide(bool aPersisted,
                           "chrome-page-hidden" :
                           "content-page-hidden",
                         nullptr);
-
-    os->RemoveObserver(this, "app-theme-changed");
-    mObservingAppThemeChanged = false;
   }
 
-  DispatchPageTransition(target, NS_LITERAL_STRING("pagehide"), aPersisted);
+  {
+    PageUnloadingEventTimeStamp timeStamp(this);
+    DispatchPageTransition(target, NS_LITERAL_STRING("pagehide"), aPersisted);
+  }
 
   mVisible = false;
 
@@ -10040,81 +10014,13 @@ nsIDocument::WarnOnceAbout(DocumentWarnings aWarning,
                                   aParamsLength);
 }
 
-nsresult
-nsDocument::AddImage(imgIRequest* aImage)
+mozilla::dom::ImageTracker*
+nsIDocument::ImageTracker()
 {
-  NS_ENSURE_ARG_POINTER(aImage);
-
-  // See if the image is already in the hashtable. If it is, get the old count.
-  uint32_t oldCount = 0;
-  mImageTracker.Get(aImage, &oldCount);
-
-  // Put the image in the hashtable, with the proper count.
-  mImageTracker.Put(aImage, oldCount + 1);
-
-  nsresult rv = NS_OK;
-
-  // If this is the first insertion and we're locking images, lock this image
-  // too.
-  if (oldCount == 0 && mLockingImages) {
-    rv = aImage->LockImage();
+  if (!mImageTracker) {
+    mImageTracker = new mozilla::dom::ImageTracker;
   }
-
-  // If this is the first insertion and we're animating images, request
-  // that this image be animated too.
-  if (oldCount == 0 && mAnimatingImages) {
-    nsresult rv2 = aImage->IncrementAnimationConsumers();
-    rv = NS_SUCCEEDED(rv) ? rv2 : rv;
-  }
-
-  return rv;
-}
-
-nsresult
-nsDocument::RemoveImage(imgIRequest* aImage, uint32_t aFlags)
-{
-  NS_ENSURE_ARG_POINTER(aImage);
-
-  // Get the old count. It should exist and be > 0.
-  uint32_t count = 0;
-  DebugOnly<bool> found = mImageTracker.Get(aImage, &count);
-  MOZ_ASSERT(found, "Removing image that wasn't in the tracker!");
-  MOZ_ASSERT(count > 0, "Entry in the cache tracker with count 0!");
-
-  // We're removing, so decrement the count.
-  count--;
-
-  // If the count is now zero, remove from the tracker.
-  // Otherwise, set the new value.
-  if (count != 0) {
-    mImageTracker.Put(aImage, count);
-    return NS_OK;
-  }
-
-  mImageTracker.Remove(aImage);
-
-  nsresult rv = NS_OK;
-
-  // Now that we're no longer tracking this image, unlock it if we'd
-  // previously locked it.
-  if (mLockingImages) {
-    rv = aImage->UnlockImage();
-  }
-
-  // If we're animating images, remove our request to animate this one.
-  if (mAnimatingImages) {
-    nsresult rv2 = aImage->DecrementAnimationConsumers();
-    rv = NS_SUCCEEDED(rv) ? rv2 : rv;
-  }
-
-  if (aFlags & REQUEST_DISCARD) {
-    // Request that the image be discarded if nobody else holds a lock on it.
-    // Do this even if !mLockingImages, because even if we didn't just unlock
-    // this image, it might still be a candidate for discarding.
-    aImage->RequestDiscard();
-  }
-
-  return rv;
+  return mImageTracker;
 }
 
 nsresult
@@ -10181,55 +10087,6 @@ nsDocument::NotifyMediaFeatureValuesChanged()
       imageElement->MediaFeatureValuesChanged();
     }
   }
-}
-
-nsresult
-nsDocument::SetImageLockingState(bool aLocked)
-{
-  if (XRE_IsContentProcess() &&
-      !Preferences::GetBool("image.mem.allow_locking_in_content_processes", true)) {
-    return NS_OK;
-  }
-
-  // If there's no change, there's nothing to do.
-  if (mLockingImages == aLocked)
-    return NS_OK;
-
-  // Otherwise, iterate over our images and perform the appropriate action.
-  for (auto iter = mImageTracker.Iter(); !iter.Done(); iter.Next()) {
-    imgIRequest* image = iter.Key();
-    if (aLocked) {
-      image->LockImage();
-    } else {
-      image->UnlockImage();
-    }
-  }
-
-  // Update state.
-  mLockingImages = aLocked;
-
-  return NS_OK;
-}
-
-void
-nsDocument::SetImagesNeedAnimating(bool aAnimating)
-{
-  // If there's no change, there's nothing to do.
-  if (mAnimatingImages == aAnimating)
-    return;
-
-  // Otherwise, iterate over our images and perform the appropriate action.
-  for (auto iter = mImageTracker.Iter(); !iter.Done(); iter.Next()) {
-    imgIRequest* image = iter.Key();
-    if (aAnimating) {
-      image->IncrementAnimationConsumers();
-    } else {
-      image->DecrementAnimationConsumers();
-    }
-  }
-
-  // Update state.
-  mAnimatingImages = aAnimating;
 }
 
 already_AddRefed<Touch>
@@ -11413,9 +11270,18 @@ nsDocument::RequestFullScreen(UniquePtr<FullscreenRequest>&& aRequest)
     return;
   }
 
+  // Per spec only HTML, <svg>, and <math> should be allowed, but
+  // we also need to allow XUL elements right now.
+  Element* elem = aRequest->GetElement();
+  if (!elem->IsHTMLElement() && !elem->IsXULElement() &&
+      !elem->IsSVGElement(nsGkAtoms::svg) &&
+      !elem->IsMathMLElement(nsGkAtoms::math)) {
+    DispatchFullscreenError("FullscreenDeniedNotHTMLSVGOrMathML");
+    return;
+  }
+
   // We don't need to check element ready before this point, because
   // if we called ApplyFullscreen, it would check that for us.
-  Element* elem = aRequest->GetElement();
   if (!FullscreenElementReadyCheck(elem, aRequest->mIsCallerChrome)) {
     return;
   }
@@ -11961,13 +11827,7 @@ nsDocument::Observe(nsISupports *aSubject,
                     const char *aTopic,
                     const char16_t *aData)
 {
-  if (strcmp("app-theme-changed", aTopic) == 0) {
-    if (!nsContentUtils::IsSystemPrincipal(NodePrincipal()) &&
-        !IsUnstyledDocument()) {
-      // We don't want to style the chrome window, only app ones.
-      OnAppThemeChanged();
-    }
-  } else if (strcmp("service-worker-get-client", aTopic) == 0) {
+  if (strcmp("service-worker-get-client", aTopic) == 0) {
     // No need to generate the ID if it doesn't exist here.  The ID being
     // requested must already be generated in order to passed in as
     // aSubject.
@@ -11986,47 +11846,6 @@ nsDocument::Observe(nsISupports *aSubject,
     }
   }
   return NS_OK;
-}
-
-void
-nsDocument::OnAppThemeChanged()
-{
-  // Bail out if there is no theme support set up properly.
-  auto themeOrigin = Preferences::GetString("b2g.theme.origin");
-  if (!themeOrigin || !Preferences::GetBool("dom.mozApps.themable")) {
-    return;
-  }
-
-  for (int32_t i = 0; i < GetNumberOfStyleSheets(); i++) {
-    RefPtr<StyleSheet> sheet = GetStyleSheetAt(i);
-    if (!sheet) {
-      continue;
-    }
-
-    nsINode* owningNode = sheet->GetOwnerNode();
-    if (!owningNode) {
-      continue;
-    }
-    // Get a DOM stylesheet link to check the href against the theme origin.
-    nsIURI* sheetURI = sheet->GetOriginalURI();
-    if (!sheetURI) {
-      continue;
-    }
-    nsAutoString sheetOrigin;
-    nsContentUtils::GetUTFOrigin(sheetURI, sheetOrigin);
-    if (!sheetOrigin.Equals(themeOrigin)) {
-      continue;
-    }
-
-    // Finally getting a Stylesheet link.
-    nsCOMPtr<nsIStyleSheetLinkingElement> link = do_QueryInterface(owningNode);
-    if (!link) {
-      continue;
-    }
-    bool willNotify;
-    bool isAlternate;
-    link->UpdateStyleSheet(nullptr, &willNotify, &isAlternate, true);
-  }
 }
 
 void

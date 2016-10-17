@@ -9,6 +9,8 @@
 
 #include "jit/MacroAssembler.h"
 
+#include "mozilla/MathAlgorithms.h"
+
 #if defined(JS_CODEGEN_X86)
 # include "jit/x86/MacroAssembler-x86-inl.h"
 #elif defined(JS_CODEGEN_X64)
@@ -90,6 +92,13 @@ MacroAssembler::call(const wasm::CallSiteDesc& desc, uint32_t funcDefIndex)
 {
     CodeOffset l = callWithPatch();
     append(desc, l, framePushed(), funcDefIndex);
+}
+
+void
+MacroAssembler::call(const wasm::CallSiteDesc& desc, wasm::Trap trap)
+{
+    CodeOffset l = callWithPatch();
+    append(desc, l, framePushed(), trap);
 }
 
 // ===============================================================
@@ -725,7 +734,7 @@ MacroAssembler::assertStackAlignment(uint32_t alignment, int32_t offset /* = 0 *
 {
 #ifdef DEBUG
     Label ok, bad;
-    MOZ_ASSERT(IsPowerOfTwo(alignment));
+    MOZ_ASSERT(mozilla::IsPowerOfTwo(alignment));
 
     // Wrap around the offset to be a non-negative number.
     offset %= alignment;

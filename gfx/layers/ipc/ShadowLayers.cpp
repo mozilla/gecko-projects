@@ -54,7 +54,7 @@ class ClientTiledLayerBuffer;
 
 typedef nsTArray<SurfaceDescriptor> BufferArray;
 typedef std::vector<Edit> EditVector;
-typedef std::set<ShadowableLayer*> ShadowableLayerSet;
+typedef nsTHashtable<nsPtrHashKey<ShadowableLayer>> ShadowableLayerSet;
 typedef nsTArray<OpDestroy> OpDestroyVector;
 
 class Transaction
@@ -119,13 +119,13 @@ public:
   void AddMutant(ShadowableLayer* aLayer)
   {
     MOZ_ASSERT(!Finished(), "forgot BeginTransaction?");
-    mMutants.insert(aLayer);
+    mMutants.PutEntry(aLayer);
   }
   void End()
   {
     mCset.clear();
     mPaints.clear();
-    mMutants.clear();
+    mMutants.Clear();
     mDestroyedActors.Clear();
     mOpen = false;
     mSwapRequired = false;
@@ -133,7 +133,7 @@ public:
   }
 
   bool Empty() const {
-    return mCset.empty() && mPaints.empty() && mMutants.empty()
+    return mCset.empty() && mPaints.empty() && mMutants.IsEmpty()
            && mDestroyedActors.IsEmpty();
   }
   bool RotationChanged() const {
@@ -578,6 +578,11 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
 {
   *aSent = false;
 
+  MOZ_ASSERT(HasShadowManager(), "no manager to forward to");
+  if (!IPCOpen()) {
+    return false;
+  }
+
   GetCompositorBridgeChild()->WillEndTransaction();
 
   MOZ_ASSERT(aId);
@@ -586,7 +591,6 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     js::ProfileEntry::Category::GRAPHICS);
 
   RenderTraceScope rendertrace("Foward Transaction", "000091");
-  MOZ_ASSERT(HasShadowManager(), "no manager to forward to");
   MOZ_ASSERT(!mTxn->Finished(), "forgot BeginTransaction?");
 
   DiagnosticTypes diagnostics = gfxPlatform::GetPlatform()->GetLayerDiagnosticTypes();
@@ -621,9 +625,9 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
   // attribute changes before new pixels arrive, which can be useful
   // for setting up back/front buffers.
   RenderTraceScope rendertrace2("Foward Transaction", "000092");
-  for (ShadowableLayerSet::const_iterator it = mTxn->mMutants.begin();
-       it != mTxn->mMutants.end(); ++it) {
-    ShadowableLayer* shadow = *it;
+  for (ShadowableLayerSet::Iterator it(&mTxn->mMutants);
+       !it.Done(); it.Next()) {
+    ShadowableLayer* shadow = it.Get()->GetKey();
 
     if (!shadow->HasShadow()) {
       continue;
@@ -729,9 +733,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
   if (mTxn->mSwapRequired) {
     MOZ_LAYERS_LOG(("[LayersForwarder] sending transaction..."));
     RenderTraceScope rendertrace3("Forward Transaction", "000093");
-    if (!HasShadowManager() ||
-        !mShadowManager->IPCOpen() ||
-        !mShadowManager->SendUpdate(cset, mTxn->mDestroyedActors,
+    if (!mShadowManager->SendUpdate(cset, mTxn->mDestroyedActors,
                                     GetFwdTransactionId(),
                                     aId, targetConfig, mPluginWindowData,
                                     mIsFirstPaint, aScheduleComposite,
@@ -745,9 +747,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     // assumes that aReplies is empty (DEBUG assertion)
     MOZ_LAYERS_LOG(("[LayersForwarder] sending no swap transaction..."));
     RenderTraceScope rendertrace3("Forward NoSwap Transaction", "000093");
-    if (!HasShadowManager() ||
-        !mShadowManager->IPCOpen() ||
-        !mShadowManager->SendUpdateNoSwap(cset, mTxn->mDestroyedActors,
+    if (!mShadowManager->SendUpdateNoSwap(cset, mTxn->mDestroyedActors,
                                           GetFwdTransactionId(),
                                           aId, targetConfig, mPluginWindowData,
                                           mIsFirstPaint, aScheduleComposite,

@@ -139,6 +139,9 @@ this.CrashManager.prototype = Object.freeze({
   // A crash in a Gecko media plugin process.
   PROCESS_TYPE_GMPLUGIN: "gmplugin",
 
+  // A crash in the GPU process.
+  PROCESS_TYPE_GPU: "gpu",
+
   // A real crash.
   CRASH_TYPE_CRASH: "crash",
 
@@ -544,6 +547,9 @@ this.CrashManager.prototype = Object.freeze({
           if ('TelemetrySessionId' in reportMeta) {
             sessionId = reportMeta.TelemetrySessionId;
             delete reportMeta.TelemetrySessionId;
+          }
+          if ('StackTraces' in reportMeta) {
+            delete reportMeta.StackTraces;
           }
           TelemetryController.submitExternalPing("crash",
             {

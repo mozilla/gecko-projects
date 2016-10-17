@@ -1659,13 +1659,17 @@
             if (isRemote == aShouldBeRemote)
               return false;
 
+            let tab = this.getTabForBrowser(aBrowser);
+            let evt = document.createEvent("Events");
+            evt.initEvent("BeforeTabRemotenessChange", true, false);
+            tab.dispatchEvent(evt);
+
             let wasActive = document.activeElement == aBrowser;
 
             // Unmap the old outerWindowID.
             this._outerWindowIDBrowserMap.delete(aBrowser.outerWindowID);
 
             // Unhook our progress listener.
-            let tab = this.getTabForBrowser(aBrowser);
             let filter = this._tabFilters.get(tab);
             let listener = this._tabListeners.get(tab);
             aBrowser.webProgress.removeProgressListener(filter);
@@ -1749,7 +1753,7 @@
               this.getFindBar(tab).browser = aBrowser;
             }
 
-            let evt = document.createEvent("Events");
+            evt = document.createEvent("Events");
             evt.initEvent("TabRemotenessChange", true, false);
             tab.dispatchEvent(evt);
 
@@ -6453,7 +6457,7 @@
                      class="tab-throbber"
                      role="presentation"
                      layer="true" />
-          <xul:image xbl:inherits="src=image,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"
+          <xul:image xbl:inherits="src=image,loadingprincipal=iconLoadingPrincipal,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"
                      anonid="tab-icon-image"
                      class="tab-icon-image"
                      validate="never"

@@ -476,19 +476,6 @@ HasMatchingAnimations(const nsIFrame* aFrame, TestType&& aTest)
 }
 
 bool
-nsLayoutUtils::HasActiveAnimationOfProperty(const nsIFrame* aFrame,
-                                            nsCSSPropertyID aProperty)
-{
-  return HasMatchingAnimations(aFrame,
-    [&aProperty](KeyframeEffectReadOnly& aEffect)
-    {
-      return aEffect.IsCurrent() && aEffect.IsInEffect() &&
-        aEffect.HasAnimationOfProperty(aProperty);
-    }
-  );
-}
-
-bool
 nsLayoutUtils::HasCurrentTransitions(const nsIFrame* aFrame)
 {
   return HasMatchingAnimations(aFrame,
@@ -502,14 +489,27 @@ nsLayoutUtils::HasCurrentTransitions(const nsIFrame* aFrame)
 }
 
 bool
-nsLayoutUtils::HasRelevantAnimationOfProperty(const nsIFrame* aFrame,
-                                              nsCSSPropertyID aProperty)
+nsLayoutUtils::HasAnimationOfProperty(const nsIFrame* aFrame,
+                                      nsCSSPropertyID aProperty)
 {
   return HasMatchingAnimations(aFrame,
     [&aProperty](KeyframeEffectReadOnly& aEffect)
     {
       return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
              aEffect.HasAnimationOfProperty(aProperty);
+    }
+  );
+}
+
+bool
+nsLayoutUtils::HasEffectiveAnimation(const nsIFrame* aFrame,
+                                     nsCSSPropertyID aProperty)
+{
+  return HasMatchingAnimations(aFrame,
+    [&aProperty](KeyframeEffectReadOnly& aEffect)
+    {
+      return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
+             aEffect.HasEffectiveAnimationOfProperty(aProperty);
     }
   );
 }
@@ -3522,6 +3522,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     PROFILER_LABEL("nsLayoutUtils", "PaintFrame::BuildDisplayList",
       js::ProfileEntry::Category::GRAPHICS);
 
+
+    PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::DisplayList);
     aFrame->BuildDisplayListForStackingContext(&builder, dirtyRect, &list);
   }
 
@@ -3634,8 +3636,8 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   }
 
   TimeStamp paintStart = TimeStamp::Now();
-  RefPtr<LayerManager> layerManager =
-    list.PaintRoot(&builder, aRenderingContext, flags);
+  RefPtr<LayerManager> layerManager
+    = list.PaintRoot(&builder, aRenderingContext, flags);
   Telemetry::AccumulateTimeDelta(Telemetry::PAINT_RASTERIZE_TIME,
                                  paintStart);
 
@@ -8895,6 +8897,7 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     } else if (CanScrollOriginClobberApz(scrollableFrame->LastScrollOrigin())) {
       metrics.SetScrollOffsetUpdated(scrollableFrame->CurrentScrollGeneration());
     }
+    scrollableFrame->AllowScrollOriginDowngrade();
 
     nsIAtom* lastSmoothScrollOrigin = scrollableFrame->LastSmoothScrollOrigin();
     if (lastSmoothScrollOrigin) {
@@ -9366,4 +9369,93 @@ nsLayoutUtils::SupportsServoStyleBackend(nsIDocument* aDocument)
   return StyloEnabled() &&
          aDocument->IsHTMLOrXHTML() &&
          static_cast<nsDocument*>(aDocument)->IsContentDocument();
+}
+
+static
+bool
+LineHasNonEmptyContentWorker(nsIFrame* aFrame)
+{
+  // Look for non-empty frames, but ignore inline and br frames.
+  // For inline frames, descend into the children, if any.
+  if (aFrame->GetType() == nsGkAtoms::inlineFrame) {
+    for (nsIFrame* child : aFrame->PrincipalChildList()) {
+      if (LineHasNonEmptyContentWorker(child)) {
+        return true;
+      }
+    }
+  } else {
+    if (aFrame->GetType() != nsGkAtoms::brFrame &&
+        !aFrame->IsEmpty()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static
+bool
+LineHasNonEmptyContent(nsLineBox* aLine)
+{
+  int32_t count = aLine->GetChildCount();
+  for (nsIFrame* frame = aLine->mFirstChild; count > 0;
+       --count, frame = frame->GetNextSibling()) {
+    if (LineHasNonEmptyContentWorker(frame)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* static */ bool
+nsLayoutUtils::IsInvisibleBreak(nsINode* aNode, nsIFrame** aNextLineFrame)
+{
+  if (aNextLineFrame) {
+    *aNextLineFrame = nullptr;
+  }
+
+  if (!aNode->IsElement() || !aNode->IsEditable()) {
+    return false;
+  }
+  nsIFrame* frame = aNode->AsElement()->GetPrimaryFrame();
+  if (!frame || frame->GetType() != nsGkAtoms::brFrame) {
+    return false;
+  }
+
+  nsContainerFrame* f = frame->GetParent();
+  while (f && f->IsFrameOfType(nsBox::eLineParticipant)) {
+    f = f->GetParent();
+  }
+  nsBlockFrame* blockAncestor = do_QueryFrame(f);
+  if (!blockAncestor) {
+    // The container frame doesn't support line breaking.
+    return false;
+  }
+
+  bool valid = false;
+  nsBlockInFlowLineIterator iter(blockAncestor, frame, &valid);
+  if (!valid) {
+    return false;
+  }
+
+  bool lineNonEmpty = LineHasNonEmptyContent(iter.GetLine());
+  if (!lineNonEmpty) {
+    return false;
+  }
+
+  while (iter.Next()) {
+    auto currentLine = iter.GetLine();
+    // Completely skip empty lines.
+    if (!currentLine->IsEmpty()) {
+      // If we come across an inline line, the BR has caused a visible line break.
+      if (currentLine->IsInline()) {
+        if (aNextLineFrame) {
+          *aNextLineFrame = currentLine->mFirstChild;
+        }
+        return false;
+      }
+      break;
+    }
+  }
+
+  return lineNonEmpty;
 }
