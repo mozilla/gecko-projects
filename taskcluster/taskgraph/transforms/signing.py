@@ -48,7 +48,8 @@ def make_task_description(config, tasks):
         task['run-on-projects'] = task['build-run-on-projects']
         task['treeherder'] = task['build-treeherder']
         task['treeherder'].setdefault('symbol', 'tc(Ns)')
-        task['treeherder'].setdefault('platform', task['label'])
+        th_platform = task['build-platform'].replace("-nightly", "") + "/opt"
+        task['treeherder'].setdefault('platform', th_platform)
         task['treeherder'].setdefault('tier', 2)
         task['treeherder'].setdefault('kind', 'build')
 
