@@ -49,6 +49,7 @@ def make_task_description(config, tasks):
         task['treeherder'] = task['build-treeherder']
         task['treeherder'].setdefault('symbol', 'tc(Ns)')
         th_platform = task['build-platform'].replace("-nightly", "") + "/opt"
+        th_platform = th_platform.replace("linux/opt", "linux32/opt")
         task['treeherder'].setdefault('platform', th_platform)
         task['treeherder'].setdefault('tier', 2)
         task['treeherder'].setdefault('kind', 'build')
