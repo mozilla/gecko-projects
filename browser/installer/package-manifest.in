@@ -345,8 +345,6 @@
 @RESPATH@/components/telemetry.xpt
 
 ; JavaScript components
-@RESPATH@/components/ChromeNotifications.js
-@RESPATH@/components/ChromeNotifications.manifest
 @RESPATH@/components/ConsoleAPI.manifest
 @RESPATH@/components/ConsoleAPIStorage.js
 @RESPATH@/components/BrowserElementParent.manifest
@@ -568,9 +566,6 @@
 @RESPATH@/components/TestInterfaceJS.manifest
 @RESPATH@/components/TestInterfaceJSMaplike.js
 #endif
-
-@RESPATH@/components/PACGenerator.js
-@RESPATH@/components/PACGenerator.manifest
 
 ; [Extensions]
 @RESPATH@/components/extensions-toolkit.manifest

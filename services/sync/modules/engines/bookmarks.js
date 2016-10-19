@@ -544,8 +544,8 @@ BookmarksEngine.prototype = {
          startIndex < modifiedGUIDs.length;
          startIndex += SQLITE_MAX_VARIABLE_NUMBER) {
 
-      let chunkLength = Math.min(startIndex + SQLITE_MAX_VARIABLE_NUMBER,
-                                 modifiedGUIDs.length);
+      let chunkLength = Math.min(SQLITE_MAX_VARIABLE_NUMBER,
+                                 modifiedGUIDs.length - startIndex);
 
       let query = `
         WITH RECURSIVE
@@ -1110,7 +1110,8 @@ BookmarksTracker.prototype = {
   // *each change*.
   onItemChanged: function BMT_onItemChanged(itemId, property, isAnno, value,
                                             lastModified, itemType, parentId,
-                                            guid, parentGuid, source) {
+                                            guid, parentGuid, oldValue,
+                                            source) {
     if (IGNORED_SOURCES.includes(source)) {
       return;
     }

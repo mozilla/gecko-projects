@@ -33,6 +33,9 @@ class nsDOMStringMap;
 class nsIURI;
 
 namespace mozilla {
+namespace css {
+class Declaration;
+} // namespace css
 namespace dom {
 class Element;
 } // namespace dom
@@ -101,7 +104,6 @@ namespace mozilla {
 namespace dom {
 
 class ShadowRoot;
-class UndoManager;
 
 class FragmentOrElement : public nsIContent
 {
@@ -271,12 +273,6 @@ public:
      * @see nsGenericHTMLElement::GetDataset
      */
     nsDOMStringMap* mDataset; // [Weak]
-
-    /**
-     * The .undoManager property.
-     * @see nsGenericHTMLElement::GetUndoManager
-     */
-    RefPtr<UndoManager> mUndoManager;
 
     /**
      * SMIL Overridde style rules (for SMIL animation of CSS properties)

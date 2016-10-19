@@ -1490,29 +1490,6 @@ NS_NewNotificationCallbacksAggregation(nsIInterfaceRequestor  *callbacks,
     return NS_NewNotificationCallbacksAggregation(callbacks, loadGroup, nullptr, result);
 }
 
-bool
-NS_IsAppOffline(uint32_t appId)
-{
-    bool appOffline = false;
-    nsCOMPtr<nsIIOService> io(
-        do_GetService("@mozilla.org/network/io-service;1"));
-    if (io) {
-        io->IsAppOffline(appId, &appOffline);
-    }
-    return appOffline;
-}
-
-bool
-NS_IsAppOffline(nsIPrincipal *principal)
-{
-    if (!principal) {
-        return NS_IsOffline();
-    }
-    uint32_t appId = principal->GetAppId();
-
-    return NS_IsAppOffline(appId);
-}
-
 nsresult
 NS_DoImplGetInnermostURI(nsINestedURI *nestedURI, nsIURI **result)
 {
@@ -2398,9 +2375,8 @@ NS_CompareLoadInfoAndLoadContext(nsIChannel *aChannel)
     nsIDocument* doc = node->OwnerDoc();
     if (doc) {
       nsIURI* uri = doc->GetDocumentURI();
-      nsCString spec = uri->GetSpecOrDefault();
-      isAboutPage = spec.EqualsLiteral("about:newtab") ||
-                    spec.EqualsLiteral("about:sync-tabs");
+      nsresult rv = uri->SchemeIs("about", &isAboutPage);
+      NS_ENSURE_SUCCESS(rv, rv);
     }
   }
 

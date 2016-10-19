@@ -15,6 +15,7 @@
 
 #include "mozIApplication.h"
 #include "nsDocShell.h"
+#include "nsIAppsService.h"
 #include "nsIDOMHTMLIFrameElement.h"
 #include "nsIDOMHTMLFrameElement.h"
 #include "nsIDOMMozBrowserFrame.h"
@@ -1762,22 +1763,6 @@ NS_IMETHODIMP
 nsFrameLoader::GetOwnerIsMozBrowserOrAppFrame(bool* aResult)
 {
   *aResult = OwnerIsMozBrowserOrAppFrame();
-  return NS_OK;
-}
-
-bool
-nsFrameLoader::OwnerIsWidget()
-{
-  nsCOMPtr<nsIMozBrowserFrame> browserFrame = do_QueryInterface(mOwnerContent);
-  return browserFrame ? browserFrame->GetReallyIsWidget() : false;
-}
-
-
-// The xpcom getter version
-NS_IMETHODIMP
-nsFrameLoader::GetOwnerIsWidget(bool* aResult)
-{
-  *aResult = OwnerIsWidget();
   return NS_OK;
 }
 

@@ -53,15 +53,6 @@ mozIApplication.prototype = {
     return (perm === Ci.nsIPermissionManager.ALLOW_ACTION);
   },
 
-  hasWidgetPage: function(aPageURL) {
-    let uri = Services.io.newURI(aPageURL, null, null);
-    let filepath = AppsUtils.getFilePath(uri.path);
-    let eliminatedUri = Services.io.newURI(uri.prePath + filepath, null, null);
-    let equalCriterion = aUrl => Services.io.newURI(aUrl, null, null)
-                                            .equals(eliminatedUri);
-    return this.widgetPages.find(equalCriterion) !== undefined;
-  },
-
   get principal() {
     if (this._principal) {
       return this._principal;
@@ -122,8 +113,6 @@ function _setAppProperties(aObj, aApp) {
   aObj.storeId = aApp.storeId || "";
   aObj.storeVersion = aApp.storeVersion || 0;
   aObj.role = aApp.role || "";
-  aObj.redirects = aApp.redirects;
-  aObj.widgetPages = aApp.widgetPages || [];
   aObj.kind = aApp.kind;
   aObj.enabled = aApp.enabled !== undefined ? aApp.enabled : true;
   aObj.sideloaded = aApp.sideloaded;
@@ -271,43 +260,6 @@ this.AppsUtils = {
     }
 
     return Ci.nsIScriptSecurityManager.NO_APP_ID;
-  },
-
-  getManifestCSPByLocalId: function getManifestCSPByLocalId(aApps, aLocalId) {
-    debug("getManifestCSPByLocalId " + aLocalId);
-    for (let id in aApps) {
-      let app = aApps[id];
-      if (app.localId == aLocalId) {
-        return ( app.csp || "" );
-      }
-    }
-
-    return "";
-  },
-
-  getDefaultCSPByLocalId: function(aApps, aLocalId) {
-    debug("getDefaultCSPByLocalId " + aLocalId);
-    for (let id in aApps) {
-      let app = aApps[id];
-      if (app.localId == aLocalId) {
-        // Use the app status to choose the right default CSP.
-        try {
-          switch (app.appStatus) {
-            case Ci.nsIPrincipal.APP_STATUS_CERTIFIED:
-              return Services.prefs.getCharPref("security.apps.certified.CSP.default");
-              break;
-            case Ci.nsIPrincipal.APP_STATUS_PRIVILEGED:
-              return Services.prefs.getCharPref("security.apps.privileged.CSP.default");
-              break;
-            case Ci.nsIPrincipal.APP_STATUS_INSTALLED:
-              return "";
-              break;
-          }
-        } catch(e) {}
-      }
-    }
-
-    return "default-src 'self'; object-src 'none'";
   },
 
   getAppByLocalId: function getAppByLocalId(aApps, aLocalId) {
@@ -853,10 +805,6 @@ ManifestHelper.prototype = {
 
   get package_path() {
     return this._localeProp("package_path");
-  },
-
-  get widgetPages() {
-    return this._localeProp("widgetPages");
   },
 
   get size() {

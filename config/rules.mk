@@ -900,9 +900,9 @@ endif
 ifdef MOZ_RUST
 ifdef RUST_LIBRARY_FILE
 
-ifdef MOZ_DEBUG
-cargo_build_flags =
-else
+# Permit users to pass flags to cargo from their mozconfigs (e.g. --color=always).
+cargo_build_flags = $(CARGOFLAGS)
+ifndef MOZ_DEBUG
 cargo_build_flags = --release
 endif
 ifdef MOZ_CARGO_SUPPORTS_FROZEN
@@ -918,12 +918,9 @@ cargo_build_flags += --verbose
 # We need to run cargo unconditionally, because cargo is the only thing that
 # has full visibility into how changes in Rust sources might affect the final
 # build.
-#
-# XXX: We're passing `-C debuginfo=1` to rustc to work around an llvm-dsymutil
-# crash (bug 1301751). This should be temporary until we upgrade to Rust 1.12.
 force-cargo-build:
 	$(REPORT_BUILD)
-	env CARGO_TARGET_DIR=. RUSTC=$(RUSTC) RUSTFLAGS='-C debuginfo=1' $(CARGO) build $(cargo_build_flags) --
+	env CARGO_TARGET_DIR=. RUSTC=$(RUSTC) $(CARGO) build $(cargo_build_flags) --
 
 $(RUST_LIBRARY_FILE): force-cargo-build
 endif # CARGO_FILE

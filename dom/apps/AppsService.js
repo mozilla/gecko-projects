@@ -17,9 +17,6 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Promise.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "UserCustomizations",
-  "resource://gre/modules/UserCustomizations.jsm");
-
 const APPS_SERVICE_CID = Components.ID("{05072afa-92fe-45bf-ae22-39b69c117058}");
 
 function AppsService()
@@ -38,22 +35,6 @@ AppsService.prototype = {
   isInvalidId: function(localId) {
     return (localId == Ci.nsIScriptSecurityManager.NO_APP_ID ||
             localId == Ci.nsIScriptSecurityManager.UNKNOWN_APP_ID);
-  },
-
-  getManifestCSPByLocalId: function getCSPByLocalId(localId) {
-    debug("GetManifestCSPByLocalId( " + localId + " )");
-    if (this.isInvalidId(localId)) {
-      return null;
-    }
-    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-  },
-
-  getDefaultCSPByLocalId: function getCSPByLocalId(localId) {
-    debug("GetDefaultCSPByLocalId( " + localId + " )");
-    if (this.isInvalidId(localId)) {
-      return null;
-    }
-    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
 
   getAppByManifestURL: function getAppByManifestURL(aManifestURL) {
@@ -116,15 +97,6 @@ AppsService.prototype = {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
 
-  getRedirect: function getRedirect(aLocalId, aURI) {
-    debug("getRedirect for " + aLocalId + " " + aURI.spec);
-    if (this.isInvalidId(aLocalId)) {
-      return null;
-    }
-
-    throw Cr.NS_ERROR_NOT_IMPLEMENTED;
-  },
-
   getScopeByLocalId: function(aLocalId) {
     debug("getScopeByLocalId( " + aLocalId + " )");
     if (this.isInvalidId(aLocalId)) {
@@ -133,16 +105,6 @@ AppsService.prototype = {
     // TODO : implement properly!
     // We just return null for now to not break PushService.jsm
     return null;
-  },
-
-  isExtensionResource: function(aURI) {
-    // This is only expected to be used by NeckoParent, and will not work
-    // properly in child processes.
-    if (Services.appinfo.processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
-      throw Cr.NS_ERROR_FAILURE;
-    }
-
-    return UserCustomizations.isFromExtension(aURI);
   },
 
   classID : APPS_SERVICE_CID,

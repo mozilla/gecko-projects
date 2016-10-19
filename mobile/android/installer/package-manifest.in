@@ -262,8 +262,6 @@
 @BINPATH@/components/zipwriter.xpt
 
 ; JavaScript components
-@BINPATH@/components/ChromeNotifications.js
-@BINPATH@/components/ChromeNotifications.manifest
 @BINPATH@/components/ConsoleAPI.manifest
 @BINPATH@/components/ConsoleAPIStorage.js
 @BINPATH@/components/ContactManager.js
@@ -413,9 +411,6 @@
 @BINPATH@/components/PresentationDataChannelSessionTransport.manifest
 @BINPATH@/components/LegacyProviders.manifest
 @BINPATH@/components/LegacyPresentationControlService.js
-
-@BINPATH@/components/PACGenerator.js
-@BINPATH@/components/PACGenerator.manifest
 
 @BINPATH@/components/TVSimulatorService.js
 @BINPATH@/components/TVSimulatorService.manifest

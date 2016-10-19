@@ -184,7 +184,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
           }
 
           // Set the actiontype only if the user is not overriding actions.
-          if (action && this._noActionsKeys.size == 0) {
+          if (action && this._pressedNoActionKeys.size == 0) {
             this.setAttribute("actiontype", action.type);
           } else {
             this.removeAttribute("actiontype");
@@ -371,8 +371,19 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
             return;
           }
 
-          // Do the command of the selected one-off if it's not an engine.
+          // Determine whether to use the selected one-off search button.  In
+          // one-off search buttons parlance, "selected" means that the button
+          // has been navigated to via the keyboard.  So we want to use it if
+          // the triggering event is not a mouse click -- i.e., it's a Return
+          // key -- or if the one-off was mouse-clicked.
           let selectedOneOff = this.popup.oneOffSearchButtons.selectedButton;
+          if (selectedOneOff &&
+              isMouseEvent &&
+              event.originalTarget != selectedOneOff) {
+            selectedOneOff = null;
+          }
+
+          // Do the command of the selected one-off if it's not an engine.
           if (selectedOneOff && !selectedOneOff.engine) {
             selectedOneOff.doCommand();
             return;
@@ -989,14 +1000,22 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
         ]]></body>
       </method>
 
-      <field name="_noActionsKeys"><![CDATA[
-        new Set();
+      <field name="_noActionKeys"><![CDATA[
+        [
+          KeyEvent.DOM_VK_ALT,
+          KeyEvent.DOM_VK_SHIFT,
+          KeyEvent.DOM_VK_META,
+        ]
+      ]]></field>
+
+      <field name="_pressedNoActionKeys"><![CDATA[
+        new Set()
       ]]></field>
 
       <method name="_clearNoActions">
         <parameter name="aURL"/>
         <body><![CDATA[
-          this._noActionsKeys.clear();
+          this._pressedNoActionKeys.clear();
           this.popup.removeAttribute("noactions");
           let action = this._parseActionUrl(this._value);
           if (action)
@@ -1103,24 +1122,22 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
     <handlers>
       <handler event="keydown"><![CDATA[
-        if ((event.keyCode === KeyEvent.DOM_VK_ALT ||
-             event.keyCode === KeyEvent.DOM_VK_SHIFT) &&
+        if (this._noActionKeys.includes(event.keyCode) &&
             this.popup.selectedIndex >= 0 &&
-            !this._noActionsKeys.has(event.keyCode)) {
-          if (this._noActionsKeys.size == 0) {
+            !this._pressedNoActionKeys.has(event.keyCode)) {
+          if (this._pressedNoActionKeys.size == 0) {
             this.popup.setAttribute("noactions", "true");
             this.removeAttribute("actiontype");
           }
-          this._noActionsKeys.add(event.keyCode);
+          this._pressedNoActionKeys.add(event.keyCode);
         }
       ]]></handler>
 
       <handler event="keyup"><![CDATA[
-        if ((event.keyCode === KeyEvent.DOM_VK_ALT ||
-             event.keyCode === KeyEvent.DOM_VK_SHIFT) &&
-            this._noActionsKeys.has(event.keyCode)) {
-          this._noActionsKeys.delete(event.keyCode);
-          if (this._noActionsKeys.size == 0)
+        if (this._noActionKeys.includes(event.keyCode) &&
+            this._pressedNoActionKeys.has(event.keyCode)) {
+          this._pressedNoActionKeys.delete(event.keyCode);
+          if (this._pressedNoActionKeys.size == 0)
             this._clearNoActions();
         }
       ]]></handler>
@@ -1248,6 +1265,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
             // open the search results according to the clicking subtlety
             var where = whereToOpenLink(aEvent, false, true);
+            let params = {};
 
             // But open ctrl/cmd clicks on autocomplete items in a new background tab.
             let modifier = this.AppConstants.platform == "macosx" ?
@@ -1255,10 +1273,10 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
                            aEvent.ctrlKey;
             if (where == "tab" && (aEvent instanceof MouseEvent) &&
                 (aEvent.button == 1 || modifier))
-              where = "tab-background";
+              params.inBackground = true;
 
-            searchBar.doSearch(search, where);
-            if (where == "tab-background")
+            searchBar.doSearch(search, where, null, params);
+            if (where == "tab" && params.inBackground)
               searchBar.focus();
             else
               searchBar.value = search;
@@ -1713,17 +1731,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
            should show in their labels and include in their url attributes. -->
       <property name="overrideSearchEngineName" readonly="true">
         <getter><![CDATA[
-          // When building the popup, autocomplete reuses an item at index i if
-          // that item's url attribute matches the controller's value at index
-          // i, but only if overrideSearchEngineName matches the engine in the
-          // url attribute.  To absolutely avoid reusing items that shouldn't be
-          // reused, always return a non-null name here by falling back to the
-          // current engine.
-          let engine =
-            (this.oneOffSearchButtons.selectedButton &&
-             this.oneOffSearchButtons.selectedButton.engine) ||
-             Services.search.currentEngine;
-          return engine ? engine.name : null;
+          let button = this.oneOffSearchButtons.selectedButton;
+          return button && button.engine && button.engine.name;
         ]]></getter>
       </property>
 

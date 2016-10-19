@@ -73,7 +73,6 @@ XPIDL_SOURCES += [
     'nsINetworkProperties.idl',
     'nsINSSErrorsService.idl',
     'nsINullChannel.idl',
-    'nsIPACGenerator.idl',
     'nsIPackagedAppService.idl',
     'nsIPackagedAppUtils.idl',
     'nsIPackagedAppVerifier.idl',
@@ -183,7 +182,6 @@ EXPORTS.mozilla.net += [
     'Dashboard.h',
     'DashboardTypes.h',
     'MemoryDownloader.h',
-    'OfflineObserver.h',
     'Predictor.h',
     'ReferrerPolicy.h',
 ]
@@ -252,7 +250,6 @@ UNIFIED_SOURCES += [
     'nsUnicharStreamLoader.cpp',
     'nsURLHelper.cpp',
     'nsURLParsers.cpp',
-    'OfflineObserver.cpp',
     'PollableEvent.cpp',
     'Predictor.cpp',
     'ProxyAutoConfig.cpp',
@@ -295,11 +292,6 @@ elif CONFIG['OS_ARCH'] == 'Linux':
         'NetworkInfoServiceLinux.cpp',
         'nsNetworkInfoService.cpp',
     ]
-
-EXTRA_COMPONENTS += [
-    'PACGenerator.js',
-    'PACGenerator.manifest'
-]
 
 EXTRA_JS_MODULES += [
     'NetUtil.jsm',

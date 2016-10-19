@@ -153,7 +153,7 @@ parent:
     /**
      * Return native data of root widget
      */
-    sync GetWidgetNativeData() returns (WindowsHandle value);
+    nested(inside_cpow) sync GetWidgetNativeData() returns (WindowsHandle value);
 
     /**
      * Sends an NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW to be adopted by the
@@ -799,11 +799,6 @@ child:
      * is necessary.
      */
     async ThemeChanged(LookAndFeelInt[] lookAndFeelIntCache);
-
-    /**
-     * Tell the child of an app's offline status
-     */
-    async AppOfflineStatus(uint32_t id, bool offline);
 
     /**
      * Tell the browser that its frame loader has been swapped

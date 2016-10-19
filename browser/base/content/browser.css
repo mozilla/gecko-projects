@@ -448,7 +448,8 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 }
 
 /* Always show URLs LTR. */
-.ac-url-text:-moz-locale-dir(rtl) {
+.ac-url-text:-moz-locale-dir(rtl),
+.ac-title-text[lookslikeurl]:-moz-locale-dir(rtl) {
   direction: ltr !important;
 }
 
@@ -475,8 +476,12 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   display: none;
 }
 
-#PopupAutoComplete {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#browser-autocomplete-result-popup");
+#PopupAutoComplete > richlistbox > richlistitem > .ac-type-icon,
+#PopupAutoComplete > richlistbox > richlistitem > .ac-site-icon,
+#PopupAutoComplete > richlistbox > richlistitem > .ac-tags,
+#PopupAutoComplete > richlistbox > richlistitem > .ac-separator,
+#PopupAutoComplete > richlistbox > richlistitem > .ac-url {
+  display: none;
 }
 
 #PopupSearchAutoComplete {

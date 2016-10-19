@@ -301,6 +301,7 @@ MSG_DEF(JSMSG_RC_AFTER_EXPORT_SPEC_LIST, 0, JSEXN_SYNTAXERR, "missing '}' after 
 MSG_DEF(JSMSG_RC_AFTER_IMPORT_SPEC_LIST, 0, JSEXN_SYNTAXERR, "missing '}' after module specifier list")
 MSG_DEF(JSMSG_REDECLARED_CATCH_IDENTIFIER, 1, JSEXN_SYNTAXERR, "redeclaration of identifier '{0}' in catch")
 MSG_DEF(JSMSG_RESERVED_ID,             1, JSEXN_SYNTAXERR, "{0} is a reserved identifier")
+MSG_DEF(JSMSG_REST_WITH_COMMA,         0, JSEXN_SYNTAXERR, "rest element may not have a trailing comma")
 MSG_DEF(JSMSG_REST_WITH_DEFAULT,       0, JSEXN_SYNTAXERR, "rest parameter may not have a default")
 MSG_DEF(JSMSG_SELFHOSTED_TOP_LEVEL_LEXICAL, 1, JSEXN_SYNTAXERR, "self-hosted code cannot contain top-level {0} declarations")
 MSG_DEF(JSMSG_SELFHOSTED_METHOD_CALL,  0, JSEXN_SYNTAXERR, "self-hosted code may not contain direct method calls. Use callFunction() or callContentFunction()")
@@ -365,7 +366,7 @@ MSG_DEF(JSMSG_WASM_BAD_IMP_SIZE,       1, JSEXN_TYPEERR,     "imported {0} with 
 MSG_DEF(JSMSG_WASM_BAD_IMP_MAX,        1, JSEXN_TYPEERR,     "imported {0} with incompatible maximum size")
 MSG_DEF(JSMSG_WASM_BAD_ELEMENT,        0, JSEXN_TYPEERR,     "\"element\" property of table descriptor must be \"anyfunc\"")
 MSG_DEF(JSMSG_WASM_BAD_IMPORT_ARG,     0, JSEXN_TYPEERR,     "second argument must be an object")
-MSG_DEF(JSMSG_WASM_BAD_IMPORT_FIELD,   1, JSEXN_TYPEERR,     "import object field is not {0}")
+MSG_DEF(JSMSG_WASM_BAD_IMPORT_FIELD,   2, JSEXN_TYPEERR,     "import object field '{0}' is not {1}")
 MSG_DEF(JSMSG_WASM_BAD_IMPORT_SIG,     0, JSEXN_TYPEERR,     "imported function signature mismatch")
 MSG_DEF(JSMSG_WASM_BAD_TABLE_VALUE,    0, JSEXN_TYPEERR,     "can only assign WebAssembly exported functions to Table")
 MSG_DEF(JSMSG_WASM_BAD_I64,            0, JSEXN_TYPEERR,     "cannot pass i64 to or from JS")
@@ -516,6 +517,8 @@ MSG_DEF(JSMSG_TYPED_ARRAY_NEGATIVE_ARG,1, JSEXN_RANGEERR, "argument {0} must be 
 MSG_DEF(JSMSG_TYPED_ARRAY_DETACHED,    0, JSEXN_TYPEERR, "attempting to access detached ArrayBuffer")
 MSG_DEF(JSMSG_TYPED_ARRAY_CONSTRUCT_BOUNDS, 0, JSEXN_RANGEERR, "attempting to construct out-of-bounds TypedArray on ArrayBuffer")
 MSG_DEF(JSMSG_TYPED_ARRAY_CALL_OR_CONSTRUCT, 1, JSEXN_TYPEERR, "cannot directly {0} builtin %TypedArray%")
+MSG_DEF(JSMSG_NON_TYPED_ARRAY_RETURNED, 0, JSEXN_TYPEERR, "constructor didn't return TypedArray object")
+MSG_DEF(JSMSG_SHORT_TYPED_ARRAY_RETURNED, 2, JSEXN_TYPEERR, "expected TypedArray of at least length {0}, but constructor returned TypedArray of length {1}")
 
 // Shared array buffer
 MSG_DEF(JSMSG_SHARED_ARRAY_BAD_LENGTH,  0, JSEXN_RANGEERR, "length argument out of range")

@@ -1124,6 +1124,10 @@ extends="chrome://global/content/bindings/popup.xml#popup">
         <body>
           <![CDATA[
           if (!this.mPopupOpen) {
+            // It's possible that the panel is hidden initially
+            // to avoid impacting startup / new window performance
+            aInput.popup.hidden = false;
+
             this.mInput = aInput;
             // clear any previous selection, see bugs 400671 and 488357
             this.selectedIndex = -1;
@@ -1928,6 +1932,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           }
 
           let title = this.getAttribute("title");
+          let titleLooksLikeUrl = false;
 
           let displayUrl;
           let originalUrl = this.getAttribute("url");
@@ -2037,6 +2042,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
               emphasiseUrl = false;
               displayUrl = this._unescapeUrl(action.params.url);
               title = displayUrl;
+              titleLooksLikeUrl = true;
               let visitStr = this._stringBundle.GetStringFromName("visit");
               this._setUpDescription(this._actionText, visitStr, true);
             }
@@ -2058,6 +2064,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           // Show the domain as the title if we don't have a title.
           if (!title) {
             title = displayUrl;
+            titleLooksLikeUrl = true;
             try {
               let uri = Services.io.newURI(originalUrl, null, null);
               // Not all valid URLs have a domain.
@@ -2108,6 +2115,12 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           }
 
           this.setAttribute("type", type);
+
+          if (titleLooksLikeUrl) {
+            this._titleText.setAttribute("lookslikeurl", "true");
+          } else {
+            this._titleText.removeAttribute("lookslikeurl");
+          }
 
           if (Array.isArray(title)) {
             // For performance reasons we may want to limit the title size.

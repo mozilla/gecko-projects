@@ -56,6 +56,7 @@ class nsDocument;
 class nsDOMStringMap;
 
 namespace mozilla {
+class DeclarationBlock;
 namespace dom {
   struct AnimationFilter;
   struct ScrollIntoViewOptions;
@@ -138,7 +139,6 @@ namespace dom {
 class Animation;
 class CustomElementRegistry;
 class Link;
-class UndoManager;
 class DOMRect;
 class DOMRectList;
 class DestinationInsertionPointList;
@@ -255,13 +255,13 @@ public:
   /**
    * Get the inline style declaration, if any, for this element.
    */
-  virtual css::Declaration* GetInlineStyleDeclaration();
+  virtual DeclarationBlock* GetInlineStyleDeclaration();
 
   /**
    * Set the inline style declaration for this element. This will send
    * an appropriate AttributeChanged notification if aNotify is true.
    */
-  virtual nsresult SetInlineStyleDeclaration(css::Declaration* aDeclaration,
+  virtual nsresult SetInlineStyleDeclaration(DeclarationBlock* aDeclaration,
                                              const nsAString* aSerialized,
                                              bool aNotify);
 
@@ -868,20 +868,6 @@ public:
 
   void GetGridFragments(nsTArray<RefPtr<Grid>>& aResult);
 
-  virtual already_AddRefed<UndoManager> GetUndoManager()
-  {
-    return nullptr;
-  }
-
-  virtual bool UndoScope()
-  {
-    return false;
-  }
-
-  virtual void SetUndoScope(bool aUndoScope, ErrorResult& aError)
-  {
-  }
-
   already_AddRefed<Animation>
   Animate(JSContext* aContext,
           JS::Handle<JSObject*> aKeyframes,
@@ -898,6 +884,8 @@ public:
           ErrorResult& aError);
 
   // Note: GetAnimations will flush style while GetAnimationsUnsorted won't.
+  // Callers must keep this element alive because flushing style may destroy
+  // this element.
   void GetAnimations(const AnimationFilter& filter,
                      nsTArray<RefPtr<Animation>>& aAnimations);
   static void GetAnimationsUnsorted(Element* aElement,
