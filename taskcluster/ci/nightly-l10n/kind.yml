@@ -41,13 +41,13 @@ jobs:
     linux-nightly/opt:
         description: "Localization"
         attributes:
-            build_platform: linux64-nightly
+            build_platform: linux32-nightly
             nightly: true
         index:
             job-name:
-                gecko-v2: linux64-nightly-l10n-opt
+                gecko-v2: linux32-nightly-l10n-opt
         treeherder:
-            platform: linux/opt
+            platform: linux32/opt
         worker:
             env:
                 EN_US_PACKAGE_NAME: target.tar.bz2
@@ -57,11 +57,11 @@ jobs:
             script: mozharness/scripts/desktop_l10n.py
             actions: [clone-locales list-locales setup repack summary]
             config:
-                - single_locale/tc_linux64.py
+                - single_locale/tc_linux32.py
             options:
                 - environment-config=single_locale/production.py
                 - branch-config=single_locale/{project}.py
-                - platform-config=single_locale/linux64.py
+                - platform-config=single_locale/linux32.py
             tooltool-downloads: public
             need-xvfb: true
 
