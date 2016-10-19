@@ -42,6 +42,7 @@ def chunkify(config, jobs):
                 chunked['run']['options'] = chunked['run'].get('options', [])
                 chunked['run']['options'].extend(["total-chunks={}".format(chunks),
                                                   "this-chunk={}".format(this_chunk)])
+                chunked['attributes']['l10n_chunk'] = this_chunk
                 yield chunked
         else:
             yield job

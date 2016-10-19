@@ -19,10 +19,11 @@ class SigningTask(transform.TransformTask):
 
     @classmethod
     def get_inputs(cls, kind, path, config, params, loaded_tasks):
-        if config.get('kind-dependencies', []) != ["build"]:
+        if (config.get('kind-dependencies', []) != ["build"] and
+                config.get('kind-dependencies', []) != ["nightly-l10n"]):
             raise Exception("Signing kinds must depend on builds")
         for task in loaded_tasks:
-            if task.kind != 'build':
+            if task.kind not in config.get('kind-dependencies'):
                 continue
             if not task.attributes.get('nightly'):
                 continue
@@ -33,4 +34,6 @@ class SigningTask(transform.TransformTask):
             signing_task['build-description'] = signing_task['build-platform']
             signing_task['build-run-on-projects'] = task.attributes.get('run_on_projects')
             signing_task['build-treeherder'] = {}
+            if task.attributes.get('l10n_chunk'):
+                signing_task['l10n_chunk'] = task.attributes['l10n_chunk']
             yield signing_task
