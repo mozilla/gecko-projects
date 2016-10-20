@@ -41,7 +41,7 @@ jobs:
     linux-nightly/opt:
         description: "Localization"
         attributes:
-            build_platform: linux32-nightly
+            build_platform: linux-nightly
             nightly: true
         index:
             job-name:
