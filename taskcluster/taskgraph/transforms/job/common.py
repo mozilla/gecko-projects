@@ -65,22 +65,17 @@ def docker_worker_support_vcs_checkout(config, job, taskdesc):
     """
     level = config.params['level']
 
-    taskdesc['worker'].setdefault('caches', []).extend([
-        {
-            'type': 'persistent',
-            'name': 'level-%s-hg-shared' % level,
-            'mount-point': '/home/worker/hg-shared',
-        }, {
-            'type': 'persistent',
-            'name': 'level-%s-checkouts' % level,
-            'mount-point': '/home/worker/checkouts',
-        }
-    ])
+    taskdesc['worker'].setdefault('caches', []).append({
+        'type': 'persistent',
+        'name': 'level-%s-checkouts' % level,
+        'mount-point': '/home/worker/checkouts',
+    })
 
     taskdesc['worker'].setdefault('env', {}).update({
         'GECKO_BASE_REPOSITORY': config.params['base_repository'],
         'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
         'GECKO_HEAD_REV': config.params['head_rev'],
+        'HG_STORE_PATH': '/home/worker/checkouts/hg-store',
     })
 
     # Give task access to hgfingerprint secret so it can pin the certificate

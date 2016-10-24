@@ -40,6 +40,8 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Move.h"
+#include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextEvents.h"
@@ -2586,6 +2588,17 @@ TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
   MOZ_ASSERT(mPuppetWidget->GetLayerManager()->GetBackendType() ==
              LayersBackend::LAYERS_CLIENT);
 
+  auto clearForcePaint = MakeScopeExit([&] {
+    // We might force a paint, or we might already have painted and this is a
+    // no-op. In either case, once we exit this scope, we need to alert the
+    // ProcessHangMonitor that we've finished responding to what might have
+    // been a request to force paint. This is so that the BackgroundHangMonitor
+    // for force painting can be made to wait again.
+    if (aIsActive) {
+      ProcessHangMonitor::ClearForcePaint();
+    }
+  });
+
   // We send the current layer observer epoch to the compositor so that
   // TabParent knows whether a layer update notification corresponds to the
   // latest SetDocShellIsActive request that was made.
@@ -2636,8 +2649,7 @@ TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
         RefPtr<nsViewManager> vm = presShell->GetViewManager();
         if (nsView* view = vm->GetRootView()) {
           presShell->Paint(view, view->GetBounds(),
-                           nsIPresShell::PAINT_LAYERS |
-                           nsIPresShell::PAINT_SYNC_DECODE_IMAGES);
+                           nsIPresShell::PAINT_LAYERS);
         }
       }
       APZCCallbackHelper::SuppressDisplayport(false, presShell);

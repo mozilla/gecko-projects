@@ -28,12 +28,18 @@ XPCOMUtils.defineLazyModuleGetter(this, "Locale",
                                   "resource://gre/modules/Locale.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
+                                  "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
                                   "resource://gre/modules/Preferences.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
                                   "resource://gre/modules/PromiseUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
                                   "resource://gre/modules/Schemas.jsm");
+
+XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
+                                   "@mozilla.org/content/style-sheet-service;1",
+                                   "nsIStyleSheetService");
 
 function getConsole() {
   return new ConsoleAPI({
@@ -143,6 +149,20 @@ class DefaultWeakMap extends WeakMap {
   get(key) {
     if (!this.has(key)) {
       this.set(key, this.defaultConstructor());
+    }
+    return super.get(key);
+  }
+}
+
+class DefaultMap extends Map {
+  constructor(defaultConstructor, init) {
+    super(init);
+    this.defaultConstructor = defaultConstructor;
+  }
+
+  get(key) {
+    if (!this.has(key)) {
+      this.set(key, this.defaultConstructor(key));
     }
     return super.get(key);
   }
@@ -345,11 +365,17 @@ class BaseContext {
     if (error instanceof this.cloneScope.Error) {
       return error;
     }
-    if (!instanceOf(error, "Object")) {
+    let message;
+    if (instanceOf(error, "Object")) {
+      message = error.message;
+    } else if (typeof error == "object" &&
+        this.principal.subsumes(Cu.getObjectPrincipal(error))) {
+      message = error.message;
+    } else {
       Cu.reportError(error);
-      error = {message: "An unexpected error occurred"};
     }
-    return new this.cloneScope.Error(error.message);
+    message = message || "An unexpected error occurred";
+    return new this.cloneScope.Error(message);
   }
 
   /**
@@ -437,6 +463,8 @@ class BaseContext {
               dump(`Promise resolved after context unloaded\n`);
             } else if (!this.active) {
               dump(`Promise resolved while context is inactive\n`);
+            } else if (value instanceof SpreadArgs) {
+              runSafe(resolve, value.length == 1 ? value[0] : value);
             } else {
               runSafe(resolve, value);
             }
@@ -569,11 +597,11 @@ let IconDetails = {
     return {size, icon: DEFAULT};
   },
 
-  convertImageURLToDataURL(imageURL, context, browserWindow, size = 18) {
+  convertImageURLToDataURL(imageURL, contentWindow, browserWindow, size = 18) {
     return new Promise((resolve, reject) => {
-      let image = new context.contentWindow.Image();
+      let image = new contentWindow.Image();
       image.onload = function() {
-        let canvas = context.contentWindow.document.createElement("canvas");
+        let canvas = contentWindow.document.createElement("canvas");
         let ctx = canvas.getContext("2d");
         let dSize = size * browserWindow.devicePixelRatio;
 
@@ -1038,14 +1066,11 @@ function ignoreEvent(context, name) {
       let id = context.extension.id;
       let frame = Components.stack.caller;
       let msg = `In add-on ${id}, attempting to use listener "${name}", which is unimplemented.`;
-      let winID = context.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
       let scriptError = Cc["@mozilla.org/scripterror;1"]
         .createInstance(Ci.nsIScriptError);
-      scriptError.initWithWindowID(msg, frame.filename, null,
-                                   frame.lineNumber, frame.columnNumber,
-                                   Ci.nsIScriptError.warningFlag,
-                                   "content javascript", winID);
+      scriptError.init(msg, frame.filename, null, frame.lineNumber,
+                       frame.columnNumber, Ci.nsIScriptError.warningFlag,
+                       "content javascript");
       let consoleService = Cc["@mozilla.org/consoleservice;1"]
         .getService(Ci.nsIConsoleService);
       consoleService.logMessage(scriptError);
@@ -1114,6 +1139,35 @@ function promiseDocumentLoaded(doc) {
       doc.defaultView.removeEventListener("load", onReady);
       resolve(doc);
     });
+  });
+}
+
+/**
+ * Returns a Promise which resolves when the given event is dispatched to the
+ * given element.
+ *
+ * @param {Element} element
+ *        The element on which to listen.
+ * @param {string} eventName
+ *        The event to listen for.
+ * @param {boolean} [useCapture = true]
+ *        If true, listen for the even in the capturing rather than
+ *        bubbling phase.
+ * @param {Event} [test]
+ *        An optional test function which, when called with the
+ *        observer's subject and data, should return true if this is the
+ *        expected event, false otherwise.
+ * @returns {Promise<Event>}
+ */
+function promiseEvent(element, eventName, useCapture = true, test = event => true) {
+  return new Promise(resolve => {
+    function listener(event) {
+      if (test(event)) {
+        element.removeEventListener(eventName, listener, useCapture);
+        resolve(event);
+      }
+    }
+    element.addEventListener(eventName, listener, useCapture);
   });
 }
 
@@ -1648,26 +1702,11 @@ class ProxyAPIImplementation extends SchemaAPIInterface {
   }
 
   callFunctionNoReturn(args) {
-    this.childApiManager.messageManager.sendAsyncMessage("API:Call", {
-      childId: this.childApiManager.id,
-      path: this.path,
-      args,
-    });
+    this.childApiManager.callParentFunctionNoReturn(this.path, args);
   }
 
   callAsyncFunction(args, callback) {
-    let callId = nextId++;
-    let deferred = PromiseUtils.defer();
-    this.childApiManager.callPromises.set(callId, deferred);
-
-    this.childApiManager.messageManager.sendAsyncMessage("API:Call", {
-      childId: this.childApiManager.id,
-      callId,
-      path: this.path,
-      args,
-    });
-
-    return this.childApiManager.context.wrapPromise(deferred.promise, callback);
+    return this.childApiManager.callParentAsyncFunction(this.path, args, callback);
   }
 
   addListener(listener, args) {
@@ -1695,7 +1734,7 @@ class ProxyAPIImplementation extends SchemaAPIInterface {
     if (!set) {
       return;
     }
-    set.remove(listener);
+    set.delete(listener);
 
     if (set.size == 0) {
       this.childApiManager.messageManager.sendAsyncMessage("API:RemoveListener", {
@@ -1731,7 +1770,6 @@ class ChildAPIManager {
 
     let data = {childId: id, extensionId: context.extension.id, principal: context.principal};
     Object.assign(data, contextData);
-    messageManager.sendAsyncMessage("API:CreateProxyContext", data);
 
     messageManager.addMessageListener("API:RunListener", this);
     messageManager.addMessageListener("API:CallResult", this);
@@ -1742,6 +1780,12 @@ class ChildAPIManager {
 
     // Map[callId -> Deferred]
     this.callPromises = new Map();
+
+    this.createProxyContextInConstructor(data);
+  }
+
+  createProxyContextInConstructor(data) {
+    this.messageManager.sendAsyncMessage("API:CreateProxyContext", data);
   }
 
   receiveMessage({name, data}) {
@@ -1769,6 +1813,70 @@ class ChildAPIManager {
     }
   }
 
+  /**
+   * Call a function in the parent process and ignores its return value.
+   *
+   * @param {string} path The full name of the method, e.g. "tabs.create".
+   * @param {Array} args The parameters for the function.
+   */
+  callParentFunctionNoReturn(path, args) {
+    this.messageManager.sendAsyncMessage("API:Call", {
+      childId: this.id,
+      path,
+      args,
+    });
+  }
+
+  /**
+   * Calls a function in the parent process and returns its result
+   * asynchronously.
+   *
+   * @param {string} path The full name of the method, e.g. "tabs.create".
+   * @param {Array} args The parameters for the function.
+   * @param {function(*)} [callback] The callback to be called when the function
+   *     completes.
+   * @returns {Promise|undefined} Must be void if `callback` is set, and a
+   *     promise otherwise. The promise is resolved when the function completes.
+   */
+  callParentAsyncFunction(path, args, callback) {
+    let callId = nextId++;
+    let deferred = PromiseUtils.defer();
+    this.callPromises.set(callId, deferred);
+
+    this.messageManager.sendAsyncMessage("API:Call", {
+      childId: this.id,
+      callId,
+      path,
+      args,
+    });
+
+    return this.context.wrapPromise(deferred.promise, callback);
+  }
+
+  /**
+   * Create a proxy for an event in the parent process. The returned event
+   * object shares its internal state with other instances. For instance, if
+   * `removeListener` is used on a listener that was added on another object
+   * through `addListener`, then the event is unregistered.
+   *
+   * @param {string} path The full name of the event, e.g. "tabs.onCreated".
+   * @returns {object} An object with the addListener, removeListener and
+   *   hasListener methods. See SchemaAPIInterface for documentation.
+   */
+  getParentEvent(path) {
+    let parsed = /^(.+)\.(on[A-Z][^.]+)$/.exec(path);
+    if (!parsed) {
+      throw new Error("getParentEvent: Invalid event name: " + path);
+    }
+    let [, namespace, name] = parsed;
+    let impl = new ProxyAPIImplementation(namespace, name, this);
+    return {
+      addListener: (listener, ...args) => impl.addListener(listener, args),
+      removeListener: (listener) => impl.removeListener(listener),
+      hasListener: (listener) => impl.hasListener(listener),
+    };
+  }
+
   close() {
     this.messageManager.sendAsyncMessage("API:CloseProxyContext", {childId: this.id});
   }
@@ -1777,9 +1885,20 @@ class ChildAPIManager {
     return this.context.cloneScope;
   }
 
+  get principal() {
+    return this.context.principal;
+  }
+
   shouldInject(namespace, name, allowedContexts) {
     // Do not generate content script APIs, unless explicitly allowed.
-    return this.context.envType !== "content_child" || allowedContexts.includes("content");
+    if (this.context.envType === "content_child" &&
+        !allowedContexts.includes("content")) {
+      return false;
+    }
+    if (allowedContexts.includes("addon_parent_only")) {
+      return false;
+    }
+    return true;
   }
 
   getImplementation(namespace, name) {
@@ -1796,12 +1915,16 @@ class ChildAPIManager {
       }
     }
 
+    return this.getFallbackImplementation(namespace, name);
+  }
+
+  getFallbackImplementation(namespace, name) {
     // No local API found, defer implementation to the parent.
     return new ProxyAPIImplementation(namespace, name, this);
   }
 
   hasPermission(permission) {
-    return this.context.extension.permissions.has(permission);
+    return this.context.extension.hasPermission(permission);
   }
 }
 
@@ -1967,6 +2090,11 @@ function normalizeTime(date) {
                         ? parseInt(date, 10) : date);
 }
 
+const stylesheetMap = new DefaultMap(url => {
+  let uri = NetUtil.newURI(url);
+  return styleSheetService.preloadSheet(uri, styleSheetService.AGENT_SHEET);
+});
+
 this.ExtensionUtils = {
   detectLanguage,
   extend,
@@ -1979,11 +2107,13 @@ this.ExtensionUtils = {
   normalizeTime,
   promiseDocumentLoaded,
   promiseDocumentReady,
+  promiseEvent,
   promiseObserved,
   runSafe,
   runSafeSync,
   runSafeSyncWithoutClone,
   runSafeWithoutClone,
+  stylesheetMap,
   BaseContext,
   DefaultWeakMap,
   EventEmitter,

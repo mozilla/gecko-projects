@@ -340,15 +340,6 @@ IsFlexOrGridContainer(const nsIFrame* aFrame)
          t == nsGkAtoms::gridContainerFrame;
 }
 
-// Returns true if aFrame has "display: -webkit-{inline-}box"
-static inline bool
-IsWebkitBox(const nsIFrame* aFrame)
-{
-  auto containerDisplay = aFrame->StyleDisplay()->mDisplay;
-  return containerDisplay == StyleDisplay::WebkitBox ||
-    containerDisplay == StyleDisplay::WebkitInlineBox;
-}
-
 #if DEBUG
 static void
 AssertAnonymousFlexOrGridItemParent(const nsIFrame* aChild,
@@ -9876,7 +9867,7 @@ nsCSSFrameConstructor::CreateNeededAnonFlexOrGridItems(
   }
 
   nsIAtom* containerType = aParentFrame->GetType();
-  const bool isWebkitBox = IsWebkitBox(aParentFrame);
+  const bool isWebkitBox = nsFlexContainerFrame::IsLegacyBox(aParentFrame);
 
   FCItemIterator iter(aItems);
   do {
@@ -12182,7 +12173,7 @@ nsCSSFrameConstructor::WipeContainingBlock(nsFrameConstructorState& aState,
     // Check if we're adding to-be-wrapped content right *after* an existing
     // anonymous flex or grid item (which would need to absorb this content).
     nsIAtom* containerType = aFrame->GetType();
-    bool isWebkitBox = IsWebkitBox(aFrame);
+    const bool isWebkitBox = nsFlexContainerFrame::IsLegacyBox(aFrame);
     if (aPrevSibling && IsAnonymousFlexOrGridItem(aPrevSibling) &&
         iter.item().NeedsAnonFlexOrGridItem(aState, containerType,
                                             isWebkitBox)) {
@@ -12224,9 +12215,10 @@ nsCSSFrameConstructor::WipeContainingBlock(nsFrameConstructorState& aState,
     // Skip over things that _do_ need an anonymous flex item, because
     // they're perfectly happy to go here -- they won't cause a reframe.
     nsIFrame* containerFrame = aFrame->GetParent();
+    const bool isWebkitBox = nsFlexContainerFrame::IsLegacyBox(containerFrame);
     if (!iter.SkipItemsThatNeedAnonFlexOrGridItem(aState,
                                                   containerFrame->GetType(),
-                                                  IsWebkitBox(containerFrame))) {
+                                                  isWebkitBox)) {
       // We hit something that _doesn't_ need an anonymous flex item!
       // Rebuild the flex container to bust it out.
       RecreateFramesForContent(containerFrame->GetContent(), true,
@@ -12785,10 +12777,10 @@ Iterator::AppendItemToList(FrameConstructionItemList& aTargetList)
   NS_ASSERTION(&aTargetList != &mList, "Unexpected call");
   NS_PRECONDITION(!IsDone(), "should not be done");
 
-  FrameConstructionItem* item = ToItem(mCurrent);
+  FrameConstructionItem* item = mCurrent;
   Next();
-  PR_REMOVE_LINK(item);
-  PR_APPEND_LINK(item, &aTargetList.mItems);
+  item->remove();
+  aTargetList.mItems.insertBack(item);
 
   mList.AdjustCountsForItem(item, -1);
   aTargetList.AdjustCountsForItem(item, 1);
@@ -12800,7 +12792,7 @@ Iterator::AppendItemsToList(const Iterator& aEnd,
                             FrameConstructionItemList& aTargetList)
 {
   NS_ASSERTION(&aTargetList != &mList, "Unexpected call");
-  NS_PRECONDITION(mEnd == aEnd.mEnd, "end iterator for some other list?");
+  NS_PRECONDITION(&mList == &aEnd.mList, "End iterator for some other list?");
 
   // We can't just move our guts to the other list if it already has
   // some information or if we're not moving our entire list.
@@ -12812,10 +12804,8 @@ Iterator::AppendItemsToList(const Iterator& aEnd,
     return;
   }
 
-  // move over the list of items
-  PR_INSERT_AFTER(&aTargetList.mItems, &mList.mItems);
-  // Need to init when we remove to makd ~FrameConstructionItemList work right.
-  PR_REMOVE_AND_INIT_LINK(&mList.mItems);
+  // Move our entire list of items into the empty target list.
+  aTargetList.mItems = Move(mList.mItems);
 
   // Copy over the various counters
   aTargetList.mInlineCount = mList.mInlineCount;
@@ -12833,7 +12823,7 @@ Iterator::AppendItemsToList(const Iterator& aEnd,
   new (&mList) FrameConstructionItemList();
 
   // Point ourselves to aEnd, as advertised
-  mCurrent = mEnd = &mList.mItems;
+  SetToEnd();
   NS_POSTCONDITION(*this == aEnd, "How did that happen?");
 }
 
@@ -12841,25 +12831,29 @@ void
 nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::InsertItem(FrameConstructionItem* aItem)
 {
-  // Just insert the item before us.  There's no magic here.
-  PR_INSERT_BEFORE(aItem, mCurrent);
+  if (IsDone()) {
+    mList.mItems.insertBack(aItem);
+  } else {
+    // Just insert the item before us.  There's no magic here.
+    mCurrent->setPrevious(aItem);
+  }
   mList.AdjustCountsForItem(aItem, 1);
 
-  NS_POSTCONDITION(PR_NEXT_LINK(aItem) == mCurrent, "How did that happen?");
+  NS_POSTCONDITION(aItem->getNext() == mCurrent, "How did that happen?");
 }
 
 void
 nsCSSFrameConstructor::FrameConstructionItemList::
 Iterator::DeleteItemsTo(const Iterator& aEnd)
 {
-  NS_PRECONDITION(mEnd == aEnd.mEnd, "end iterator for some other list?");
+  NS_PRECONDITION(&mList == &aEnd.mList, "End iterator for some other list?");
   NS_PRECONDITION(*this != aEnd, "Shouldn't be at aEnd yet");
 
   do {
     NS_ASSERTION(!IsDone(), "Ran off end of list?");
-    FrameConstructionItem* item = ToItem(mCurrent);
+    FrameConstructionItem* item = mCurrent;
     Next();
-    PR_REMOVE_LINK(item);
+    item->remove();
     mList.AdjustCountsForItem(item, -1);
     delete item;
   } while (*this != aEnd);

@@ -59,7 +59,6 @@ class BatteryManager;
 class Promise;
 
 class DesktopNotificationCenter;
-class MobileMessageManager;
 class MozIdleObserver;
 #ifdef MOZ_GAMEPAD
 class Gamepad;
@@ -199,6 +198,7 @@ public:
   PowerManager* GetMozPower(ErrorResult& aRv);
   bool JavaEnabled(ErrorResult& aRv);
   uint64_t HardwareConcurrency();
+  bool CpuHasSSE2();
   bool TaintEnabled()
   {
     return false;
@@ -222,7 +222,6 @@ public:
 
   DesktopNotificationCenter* GetMozNotification(ErrorResult& aRv);
   IccManager* GetMozIccManager(ErrorResult& aRv);
-  MobileMessageManager* GetMozMobileMessage();
   Telephony* GetMozTelephony(ErrorResult& aRv);
   InputPortManager* GetInputPortManager(ErrorResult& aRv);
   already_AddRefed<LegacyMozTCPSocket> MozTCPSocket();
@@ -279,9 +278,6 @@ public:
   static bool HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */);
   static bool HasWifiManagerSupport(JSContext* /* unused */,
                                   JSObject* aGlobal);
-#ifdef MOZ_NFC
-  static bool HasNFCSupport(JSContext* /* unused */, JSObject* aGlobal);
-#endif // MOZ_NFC
   static bool HasUserMediaSupport(JSContext* /* unused */,
                                   JSObject* /* unused */);
 
@@ -327,7 +323,6 @@ private:
   RefPtr<Promise> mBatteryPromise;
   RefPtr<PowerManager> mPowerManager;
   RefPtr<IccManager> mIccManager;
-  RefPtr<MobileMessageManager> mMobileMessageManager;
   RefPtr<Telephony> mTelephony;
   RefPtr<InputPortManager> mInputPortManager;
   RefPtr<network::Connection> mConnection;

@@ -87,7 +87,7 @@ task_description_schema = Schema({
     # if omitted, the build will not be indexed.
     Optional('index'): {
         # the name of the product this build produces
-        'product': Any('firefox', 'mobile', 'b2g'),
+        'product': Any('firefox', 'mobile'),
 
         # the names to use for this job in the TaskCluster index
         'job-name': Any(
@@ -206,7 +206,7 @@ task_description_schema = Schema({
         Required('implementation'): 'generic-worker',
 
         # command is a list of commands to run, sequentially
-        'command': [basestring],
+        'command': [taskref_or_string],
 
         # artifacts to extract from the task image after completion; note that artifacts
         # for the generic worker cannot have names
@@ -223,6 +223,9 @@ task_description_schema = Schema({
 
         # the maximum time to run, in seconds
         'max-run-time': int,
+
+        # os user groups for test task workers
+        Optional('os-groups', default=[]): [basestring],
     }, {
         Required('implementation'): 'buildbot-bridge',
 
@@ -276,7 +279,6 @@ GROUP_NAMES = {
     'tc-W-e10s': 'Web platform tests executed by TaskCluster with e10s',
     'tc-X': 'Xpcshell tests executed by TaskCluster',
     'tc-X-e10s': 'Xpcshell tests executed by TaskCluster with e10s',
-    'tc-Sim': 'Mulet simulator runs',
     'tc-L10n': 'Localised Repacks executed by Taskcluster',
     'Aries': 'Aries Device Image',
     'Nexus 5-L': 'Nexus 5-L Device Image',
@@ -411,8 +413,9 @@ def build_generic_worker_payload(config, task, task_def):
     task_def['payload'] = {
         'command': worker['command'],
         'artifacts': artifacts,
-        'env': worker['env'],
+        'env': worker.get('env', {}),
         'maxRunTime': worker['max-run-time'],
+        'osGroups': worker.get('os-groups', []),
     }
 
     if 'retry-exit-status' in worker:

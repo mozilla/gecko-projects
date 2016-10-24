@@ -52,11 +52,6 @@ class ImageTracker;
 } // namespace dom
 } // namespace mozilla
 
-typedef nsINode RawGeckoNode;
-typedef mozilla::dom::Element RawGeckoElement;
-typedef nsIDocument RawGeckoDocument;
-struct ServoNodeData;
-
 // Includes nsStyleStructID.
 #include "nsStyleStructFwd.h"
 
@@ -3273,8 +3268,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleContent
     mResets[aIndex].mValue = aValue;
   }
 
-  nsStyleCoord  mMarkerOffset;  // [reset] coord, auto
-
 protected:
   nsTArray<nsStyleContentData> mContents;
   nsTArray<nsStyleCounterData> mIncrements;
@@ -3387,7 +3380,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUserInterface
     return nsChangeHint_NeedReflow;
   }
 
-  uint8_t                   mUserInput;       // [inherited]
+  mozilla::StyleUserInput   mUserInput;       // [inherited]
   uint8_t                   mUserModify;      // [inherited] (modify-content)
   mozilla::StyleUserFocus   mUserFocus;       // [inherited] (auto-select)
   uint8_t                   mPointerEvents;   // [inherited] see nsStyleConsts.h

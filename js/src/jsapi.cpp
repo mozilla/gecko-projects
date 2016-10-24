@@ -43,6 +43,7 @@
 #include "jswrapper.h"
 
 #include "asmjs/AsmJS.h"
+#include "asmjs/WasmModule.h"
 #include "builtin/AtomicsObject.h"
 #include "builtin/Eval.h"
 #include "builtin/Intl.h"
@@ -70,6 +71,7 @@
 #include "js/SliceBudget.h"
 #include "js/StructuredClone.h"
 #include "js/UniquePtr.h"
+#include "js/Utility.h"
 #include "vm/DateObject.h"
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
@@ -6129,15 +6131,45 @@ JS_ErrorFromException(JSContext* cx, HandleObject obj)
 }
 
 void
-JSErrorReport::initLinebuf(const char16_t* linebuf, size_t linebufLength, size_t tokenOffset)
+JSErrorReport::initBorrowedLinebuf(const char16_t* linebufArg, size_t linebufLengthArg,
+                                   size_t tokenOffsetArg)
 {
-    MOZ_ASSERT(linebuf);
-    MOZ_ASSERT(tokenOffset <= linebufLength);
-    MOZ_ASSERT(linebuf[linebufLength] == '\0');
+    MOZ_ASSERT(linebufArg);
+    MOZ_ASSERT(tokenOffsetArg <= linebufLengthArg);
+    MOZ_ASSERT(linebufArg[linebufLengthArg] == '\0');
 
-    linebuf_ = linebuf;
-    linebufLength_ = linebufLength;
-    tokenOffset_ = tokenOffset;
+    linebuf_ = linebufArg;
+    linebufLength_ = linebufLengthArg;
+    tokenOffset_ = tokenOffsetArg;
+}
+
+void
+JSErrorReport::freeLinebuf()
+{
+    if (ownsLinebuf_ && linebuf_) {
+        js_free((void*)linebuf_);
+        ownsLinebuf_ = false;
+    }
+    linebuf_ = nullptr;
+}
+
+JSString*
+JSErrorReport::newMessageString(JSContext* cx)
+{
+    if (!message_)
+        return cx->runtime()->emptyString;
+
+    return JS_NewStringCopyUTF8Z(cx, message_);
+}
+
+void
+JSErrorReport::freeMessage()
+{
+    if (ownsMessage_) {
+        js_free((void*)message_.get());
+        ownsMessage_ = false;
+    }
+    message_ = JS::ConstUTF8CharsZ();
 }
 
 JS_PUBLIC_API(bool)
@@ -6592,47 +6624,44 @@ JS::detail::AssertArgumentsAreSane(JSContext* cx, HandleValue value)
 }
 #endif /* JS_DEBUG */
 
-JS_PUBLIC_API(TranscodeResult)
-JS_EncodeScript(JSContext* cx, HandleScript scriptArg,
-                uint32_t* lengthp, void** buffer)
+JS_PUBLIC_API(JS::TranscodeResult)
+JS::EncodeScript(JSContext* cx, TranscodeBuffer& buffer, HandleScript scriptArg)
 {
-    XDREncoder encoder(cx);
+    XDREncoder encoder(cx, buffer, buffer.length());
     RootedScript script(cx, scriptArg);
-    *buffer = nullptr;
-    if (encoder.codeScript(&script))
-        *buffer = encoder.forgetData(lengthp);
-    MOZ_ASSERT(bool(*buffer) == (encoder.resultCode() == TranscodeResult_Ok));
+    if (!encoder.codeScript(&script))
+        buffer.clearAndFree();
+    MOZ_ASSERT(!buffer.empty() == (encoder.resultCode() == TranscodeResult_Ok));
     return encoder.resultCode();
 }
 
-JS_PUBLIC_API(TranscodeResult)
-JS_EncodeInterpretedFunction(JSContext* cx, HandleObject funobjArg,
-                             uint32_t* lengthp, void** buffer)
+JS_PUBLIC_API(JS::TranscodeResult)
+JS::EncodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer, HandleObject funobjArg)
 {
-    XDREncoder encoder(cx);
+    XDREncoder encoder(cx, buffer, buffer.length());
     RootedFunction funobj(cx, &funobjArg->as<JSFunction>());
-    *buffer = nullptr;
-    if (encoder.codeFunction(&funobj))
-        *buffer = encoder.forgetData(lengthp);
-    MOZ_ASSERT(bool(*buffer) == (encoder.resultCode() == TranscodeResult_Ok));
+    if (!encoder.codeFunction(&funobj))
+        buffer.clearAndFree();
+    MOZ_ASSERT(!buffer.empty() == (encoder.resultCode() == TranscodeResult_Ok));
     return encoder.resultCode();
 }
 
-JS_PUBLIC_API(TranscodeResult)
-JS_DecodeScript(JSContext* cx, const void* data, uint32_t length,
-                JS::MutableHandleScript scriptp)
+JS_PUBLIC_API(JS::TranscodeResult)
+JS::DecodeScript(JSContext* cx, TranscodeBuffer& buffer, JS::MutableHandleScript scriptp,
+                 size_t cursorIndex)
 {
-    XDRDecoder decoder(cx, data, length);
+    XDRDecoder decoder(cx, buffer, cursorIndex);
     decoder.codeScript(scriptp);
     MOZ_ASSERT(bool(scriptp) == (decoder.resultCode() == TranscodeResult_Ok));
     return decoder.resultCode();
 }
 
-JS_PUBLIC_API(TranscodeResult)
-JS_DecodeInterpretedFunction(JSContext* cx, const void* data, uint32_t length,
-                             JS::MutableHandleFunction funp)
+JS_PUBLIC_API(JS::TranscodeResult)
+JS::DecodeInterpretedFunction(JSContext* cx, TranscodeBuffer& buffer,
+                              JS::MutableHandleFunction funp,
+                              size_t cursorIndex)
 {
-    XDRDecoder decoder(cx, data, length);
+    XDRDecoder decoder(cx, buffer, cursorIndex);
     decoder.codeFunction(funp);
     MOZ_ASSERT(bool(funp) == (decoder.resultCode() == TranscodeResult_Ok));
     return decoder.resultCode();
@@ -6648,6 +6677,32 @@ JS_PUBLIC_API(void)
 JS::SetAsmJSCacheOps(JSContext* cx, const JS::AsmJSCacheOps* ops)
 {
     cx->runtime()->asmJSCacheOps = *ops;
+}
+
+bool
+JS::IsWasmModuleObject(HandleObject obj)
+{
+    return obj->is<WasmModuleObject>();
+}
+
+JS_PUBLIC_API(RefPtr<JS::WasmModule>)
+JS::GetWasmModule(HandleObject obj)
+{
+    return &obj->as<WasmModuleObject>().module();
+}
+
+JS_PUBLIC_API(bool)
+JS::CompiledWasmModuleAssumptionsMatch(PRFileDesc* compiled, JS::BuildIdCharVector&& buildId)
+{
+    return wasm::CompiledModuleAssumptionsMatch(compiled, Move(buildId));
+}
+
+JS_PUBLIC_API(RefPtr<JS::WasmModule>)
+JS::DeserializeWasmModule(PRFileDesc* bytecode, PRFileDesc* maybeCompiled,
+                          JS::BuildIdCharVector&& buildId, UniqueChars file,
+                          unsigned line, unsigned column)
+{
+    return wasm::DeserializeModule(bytecode, maybeCompiled, Move(buildId), Move(file), line, column);
 }
 
 char*
