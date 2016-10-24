@@ -16,27 +16,6 @@ ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/<{}>/artifacts/public/buil
 
 transforms = TransformSequence()
 
-# XXXCallek: Do not merge this logic to m-c, its hardcoded for simplicity on date
-# And should actually parse chunking info and/or the locales file instead.
-LOCALES_PER_CHUNK = {
-    'android': [
-        ['ar', 'be', 'ca', 'cs', 'da', 'de', 'es-AR', 'es-ES'],  # chunk 1
-        ['et', 'eu', 'fa', 'fi', 'fr', 'fy-NL', 'ga-IE'],  # chunk 2
-        ['gd', 'gl', 'he', 'hu', 'id', 'it', 'ja'],  # chunk 3
-        ['ko', 'lt', 'nb-NO', 'nl', 'nn-NO', 'pa-IN', 'pl'],  # chunk 4
-        ['pt-BR', 'pt-PT', 'ro', 'ru', 'sk', 'sl', 'sq'],  # chunk 5
-        ['sr', 'sv-SE', 'th', 'tr', 'uk', 'zh-CN', 'zh-TW'],  # chunk 6
-    ],
-    'desktop': [
-        ['ar', 'ast', 'cs', 'de', 'en-GB', 'eo', 'es-AR'],  # chunk 1
-        ['es-CL', 'es-ES', 'es-MX', 'fa', 'fr', 'fy-NL', 'gl'],  # chunk 2
-        ['he', 'hu', 'id', 'it', 'ja', 'kk', 'ko'],  # chunk 3
-        ['lt', 'lv', 'nb-NO', 'nl', 'nn-NO', 'pl'],  # chunk 4
-        ['pt-BR', 'pt-PT', 'ru', 'sk', 'sl', 'sv-SE'],  # chunk 5
-        ['th', 'tr', 'uk', 'vi', 'zh-CN', 'zh-TW'],  # chunk 6
-    ]
-}
-
 # XXX Prettynames are bad, fix them
 PRETTYNAMES = {
     'desktop': "firefox-{version}.{locale}.{platform}.tar.bz2",
@@ -48,15 +27,6 @@ PRETTY_PLATFORM_FROM_BUILD_PLATFORM = {
     'linux-nightly': 'linux-i686',
 }
 _version_cache = None  # don't get this multiple times
-
-
-def get_locale_list(product, chunk):
-    """ Gets the list of locales for this l10n chunk """
-    # XXXCallek This should be refactored to parse the locales file instead of
-    # a hardcoded list of things
-    if product not in LOCALES_PER_CHUNK.keys():
-        raise ValueError("Unexpected product passed")
-    return LOCALES_PER_CHUNK[product][chunk - 1]
 
 
 def get_version_number():
@@ -86,8 +56,7 @@ def add_signing_artifacts(config, jobs):
 
         job['unsigned-artifacts'] = []
         product = 'android' if 'android' in dep_platform else 'desktop'
-        l10n_chunk = dep_job.attributes.get('l10n_chunk')
-        for locale in get_locale_list(product, l10n_chunk):
+        for locale in dep_job.attributes.get('chunk_locales', []):
             filename = make_pretty_name(product, dep_platform, locale)
             job['unsigned-artifacts'].append({
                 'task-reference': ARTIFACT_URL.format('unsigned-repack',
