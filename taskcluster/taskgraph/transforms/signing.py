@@ -7,60 +7,94 @@ Transform the signing task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from taskgraph.transforms.base import TransformSequence
+from taskgraph.transforms.base import (
+    validate_schema,
+    TransformSequence
+)
+from taskgraph.transforms.task import task_description_schema
+from voluptuous import Schema, Any, Required, Optional
+
 
 ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/<{}>/artifacts/{}'
 
+# Voluptuous uses marker objects as dictionary *keys*, but they are not
+# comparable, so we cast all of the keys back to regular strings
+task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
+
 transforms = TransformSequence()
+
+# shortcut for a string where task references are allowed
+taskref_or_string = Any(
+    basestring,
+    {Required('task-reference'): basestring})
+
+signing_description_schema = Schema({
+    # the dependant task (object) for this signing job, used to inform signing.
+    Required('dependent-task'): object,
+
+    # Artifacts from dep task to sign
+    Required('unsigned-artifacts'): [taskref_or_string],
+
+    # depname is used in taskref's to identify the taskID of the unsigned things
+    Required('depname', default='build'): basestring,
+
+    # Format to use to sign the artifacts
+    Required('signing-format'): basestring,
+
+    # unique label to describe this signing task, defaults to {dep.label}-signing
+    Optional('label'): basestring,
+
+    # treeherder is allowed here to override any defaults we use for signing.  See
+    # taskcluster/taskgraph/transforms/task.py for the schema details, and the
+    # below transforms for defaults of various values.
+    Optional('treeherder'): task_description_schema['treeherder'],
+})
 
 
 @transforms.add
-def make_task_description(config, tasks):
-    for task in tasks:
-        task['label'] = task['build-label'].replace("build-", "signing-")
-        task['description'] = (task['build-description'].replace("-", " ") + " signing").title()
-        task['description'] = task['description'].replace("Api 15", "4.0 API15+")
+def validate(config, jobs):
+    for job in jobs:
+        label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
+        yield validate_schema(
+            signing_description_schema, job,
+            "In signing ({!r} kind) task for {!r}:".format(config.kind, label))
 
-        artifacts = []
-        if 'android' in task['build-platform']:
-            artifacts = ['public/build/target.apk', 'public/build/en-US/target.apk']
-        else:
-            artifacts = ['public/build/target.tar.bz2']
-        unsigned_artifacts = []
-        for artifact in artifacts:
-            url = {"task-reference": ARTIFACT_URL.format('build', artifact)}
-            unsigned_artifacts.append(url)
 
-        task['worker-type'] = "scriptworker-prov-v1/signing-linux-v1"
-        task['worker'] = {'implementation': 'scriptworker-signing',
-                          'unsigned-artifacts': unsigned_artifacts}
+@transforms.add
+def make_task_description(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
 
-        signing_format = "gpg" if "linux" in task['label'] else "jar"
-        signing_format_scope = "project:releng:signing:format:" + signing_format
-        task['scopes'] = ["project:releng:signing:cert:nightly-signing",
-                          signing_format_scope]
+        signing_format_scope = "project:releng:signing:format:{}".format(
+            job['signing-format'])
 
-        task['dependencies'] = {'build': task['build-label']}
-        attributes = task.setdefault('attributes', {})
-        attributes['nightly'] = True
-        attributes['build_platform'] = task['build-platform']
-        attributes['build_type'] = task['build-type']
-        task['run-on-projects'] = task['build-run-on-projects']
-        task['treeherder'] = task['build-treeherder']
-        task['treeherder'].setdefault('symbol', 'tc(Ns)')
-        th_platform = task['build-platform'].replace("-nightly", "") + "/opt"
-        th_platform = th_platform.replace("linux/opt", "linux32/opt")
-        th_platform = th_platform.replace("android-api-15/opt", "android-4-0-armv7-api15/opt")
-        task['treeherder'].setdefault('platform', th_platform)
-        task['treeherder'].setdefault('tier', 2)
-        task['treeherder'].setdefault('kind', 'build')
+        treeherder = job.get('treeherder', {})
+        treeherder.setdefault('symbol', 'tc(Ns)')
+        dep_th_platform = dep_job.task.get('extra', {}).get(
+            'treeherder', {}).get('machine', {}).get('platform', '')
+        treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
+        treeherder.setdefault('tier', 2)
+        treeherder.setdefault('kind', 'build')
 
-        # delete stuff that's not part of a task description
-        del task['build-description']
-        del task['build-label']
-        del task['build-type']
-        del task['build-platform']
-        del task['build-run-on-projects']
-        del task['build-treeherder']
+        label = job.get('label', "{}-signing".format(dep_job))
+
+        task = {
+            'label': label,
+            'description': "{} Signing".format(
+                dep_job.task["metadata"]["description"]),
+            'worker-type': "scriptworker-prov-v1/signing-linux-v1",
+            'worker': {'implementation': 'scriptworker-signing',
+                       'unsigned-artifacts': job['unsigned-artifacts']},
+            'scopes': ["project:releng:signing:cert:nightly-signing",
+                       signing_format_scope],
+            'dependencies': {job['depname']: dep_job.label},
+            'attributes': {
+                'nightly': dep_job.attributes.get('nightly', False),
+                'build_platform': dep_job.attributes.get('build_platform'),
+                'build_type': dep_job.attributes.get('build_type'),
+            },
+            'run-on-projects': dep_job.attributes.get('run_on_projects'),
+            'treeherder': treeherder,
+        }
 
         yield task

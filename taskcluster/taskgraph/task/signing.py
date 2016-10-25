@@ -27,13 +27,6 @@ class SigningTask(transform.TransformTask):
                 continue
             if not task.attributes.get('nightly'):
                 continue
-            signing_task = {}
-            signing_task['build-label'] = task.label
-            signing_task['build-platform'] = task.attributes.get('build_platform')
-            signing_task['build-type'] = task.attributes.get('build_type')
-            signing_task['build-description'] = signing_task['build-platform']
-            signing_task['build-run-on-projects'] = task.attributes.get('run_on_projects')
-            signing_task['build-treeherder'] = {}
-            if task.attributes.get('l10n_chunk'):
-                signing_task['l10n_chunk'] = task.attributes['l10n_chunk']
+            signing_task = {'dependent-task': task}
+
             yield signing_task

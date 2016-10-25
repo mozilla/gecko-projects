@@ -79,69 +79,43 @@ def make_pretty_name(product, build_platform, locale):
 
 
 @transforms.add
-def add_signing_artifacts(config, tasks):
-    for task in tasks:
-        task['unsigned-artifacts'] = []
-        product = 'android' if 'android' in task['build-platform'] else 'desktop'
-        for locale in get_locale_list(product, task['l10n_chunk']):
-            filename = make_pretty_name(product, task['build-platform'], locale)
-            task['unsigned-artifacts'].append({
+def add_signing_artifacts(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
+        dep_platform = dep_job.attributes.get('build_platform')
+
+        job['unsigned-artifacts'] = []
+        product = 'android' if 'android' in dep_platform else 'desktop'
+        l10n_chunk = dep_job.attributes.get('l10n_chunk')
+        for locale in get_locale_list(product, l10n_chunk):
+            filename = make_pretty_name(product, dep_platform, locale)
+            job['unsigned-artifacts'].append({
                 'task-reference': ARTIFACT_URL.format('unsigned-repack',
                                                       filename)
                 })
             if 'tar.bz2' == filename[-7:]:
                 # Add the checksums file to be signed for linux
                 checksums_file = filename[:-7] + "checksums"
-                task['unsigned-artifacts'].append({
+                job['unsigned-artifacts'].append({
                     'task-reference': ARTIFACT_URL.format('unsigned-repack',
                                                           checksums_file)
                     })
-        yield task
+        yield job
 
 
 @transforms.add
-def make_task_description(config, tasks):
-    for task in tasks:
-        task['label'] = task['build-label'].replace("nightly-l10n-", "signing-l10n-")
-        task['description'] = (task['build-description'].replace("-", " ") +
-                               " l10n repack signing").title()
-        task['description'] = task['description'].replace("Api 15", "4.0 API15+")
+def make_signing_description(config, jobs):
+    for job in jobs:
+        dep_job = job['dependent-task']
 
-        unsigned_artifacts = task['unsigned-artifacts']
+        job['label'] = dep_job.label.replace("nightly-l10n-", "signing-l10n-")
 
-        task['worker-type'] = "scriptworker-prov-v1/signing-linux-v1"
-        task['worker'] = {'implementation': 'scriptworker-signing',
-                          'unsigned-artifacts': unsigned_artifacts}
+        job['depname'] = 'unsigned-repack'
+        job['signing-format'] = "gpg" if "linux" in dep_job.label else "jar"
 
-        signing_format = "gpg" if "linux" in task['label'] else "jar"
-        signing_format_scope = "project:releng:signing:format:" + signing_format
-        task['scopes'] = ["project:releng:signing:cert:nightly-signing",
-                          signing_format_scope]
-
-        task['dependencies'] = {'unsigned-repack': task['build-label']}
-        attributes = task.setdefault('attributes', {})
-        attributes['nightly'] = True
-        attributes['build_platform'] = task['build-platform']
-        attributes['build_type'] = task['build-type']
-        task['run-on-projects'] = task['build-run-on-projects']
-        task['treeherder'] = task['build-treeherder']
-        task['treeherder'].setdefault('symbol', 'tc(Ns{})'.format(
-            task.get('l10n_chunk', "")
-        ))
-        th_platform = task['build-platform'].replace("-nightly", "") + "/opt"
-        th_platform = th_platform.replace("linux/opt", "linux32/opt")
-        task['treeherder'].setdefault('platform', th_platform)
-        task['treeherder'].setdefault('tier', 2)
-        task['treeherder'].setdefault('kind', 'build')
-
-        # delete stuff that's not part of a task description
-        del task['build-description']
-        del task['build-label']
-        del task['build-type']
-        del task['build-platform']
-        del task['build-run-on-projects']
-        del task['build-treeherder']
-        del task['l10n_chunk']
-        del task['unsigned-artifacts']
-
-        yield task
+        job['treeherder'] = {
+            # Format symbol appropriate for l10n chunking
+            'symbol': 'tc-L10n(Ns{})'.format(
+                dep_job.attributes.get('l10n_chunk')),
+        }
+        yield job
