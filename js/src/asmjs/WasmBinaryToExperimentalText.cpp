@@ -317,19 +317,6 @@ PrintBlockLevelExpr(WasmPrintContext& c, AstExpr& expr, bool isLast)
 // binary format parsing and rendering
 
 static bool
-PrintNullaryOperator(WasmPrintContext& c, AstNullaryOperator& op)
-{
-    const char* opStr;
-
-    switch (op.expr()) {
-        case Expr::CurrentMemory:   opStr = "curent_memory"; break;
-        default:  return false;
-    }
-
-    return c.buffer.append(opStr, strlen(opStr));
-}
-
-static bool
 PrintNop(WasmPrintContext& c)
 {
     return c.buffer.append("nop");
@@ -378,9 +365,6 @@ PrintCall(WasmPrintContext& c, AstCall& call)
 {
     if (call.expr() == Expr::Call) {
         if (!c.buffer.append("call "))
-            return false;
-    } else if (call.expr() == Expr::CallImport) {
-        if (!c.buffer.append("call_import "))
             return false;
     } else {
         return false;
@@ -657,7 +641,6 @@ PrintUnaryOperator(WasmPrintContext& c, AstUnaryOperator& op)
       case Expr::F64Ceil:    opStr = "f64.ceil"; break;
       case Expr::F64Floor:   opStr = "f64.floor"; break;
       case Expr::F64Sqrt:    opStr = "f64.sqrt"; break;
-      case Expr::GrowMemory: opStr = "grow_memory"; break;
       default: return false;
     }
 
@@ -1365,6 +1348,31 @@ PrintFirst(WasmPrintContext& c, AstFirst& first)
 }
 
 static bool
+PrintCurrentMemory(WasmPrintContext& c, AstCurrentMemory& cm)
+{
+    return c.buffer.append("current_memory");
+}
+
+static bool
+PrintGrowMemory(WasmPrintContext& c, AstGrowMemory& gm)
+{
+    if (!c.buffer.append("grow_memory("))
+        return false;
+
+    PrintOperatorPrecedence lastPrecedence = c.currentPrecedence;
+    c.currentPrecedence = ExpressionPrecedence;
+
+    if (!PrintExpr(c, *gm.op()))
+        return false;
+
+    if (!c.buffer.append(")"))
+        return false;
+
+    c.currentPrecedence = lastPrecedence;
+    return true;
+}
+
+static bool
 PrintExpr(WasmPrintContext& c, AstExpr& expr)
 {
     if (c.maybeSourceMap) {
@@ -1379,8 +1387,6 @@ PrintExpr(WasmPrintContext& c, AstExpr& expr)
         return PrintNop(c);
       case AstExprKind::Drop:
         return PrintDrop(c, expr.as<AstDrop>());
-      case AstExprKind::NullaryOperator:
-        return PrintNullaryOperator(c, expr.as<AstNullaryOperator>());
       case AstExprKind::Unreachable:
         return PrintUnreachable(c, expr.as<AstUnreachable>());
       case AstExprKind::Call:
@@ -1421,6 +1427,10 @@ PrintExpr(WasmPrintContext& c, AstExpr& expr)
         return PrintReturn(c, expr.as<AstReturn>());
       case AstExprKind::First:
         return PrintFirst(c, expr.as<AstFirst>());
+      case AstExprKind::CurrentMemory:
+        return PrintCurrentMemory(c, expr.as<AstCurrentMemory>());
+      case AstExprKind::GrowMemory:
+        return PrintGrowMemory(c, expr.as<AstGrowMemory>());
       default:
         // Note: it's important not to remove this default since readExpr()
         // can return Expr values for which there is no enumerator.
@@ -1747,23 +1757,29 @@ PrintCodeSection(WasmPrintContext& c, const AstModule::FuncVector& funcs, const 
    return true;
 }
 
-
 static bool
 PrintDataSection(WasmPrintContext& c, const AstModule& module)
 {
     if (!module.hasMemory())
         return true;
 
+    MOZ_ASSERT(module.memories().length() == 1, "NYI: several memories");
+
     if (!PrintIndent(c))
         return false;
     if (!c.buffer.append("memory "))
         return false;
-    if (!PrintInt32(c, module.memory().initial))
+
+    const Limits& memory = module.memories()[0].limits;
+    MOZ_ASSERT(memory.initial % PageSize == 0);
+    if (!PrintInt32(c, memory.initial / PageSize))
        return false;
-    if (module.memory().maximum) {
+
+    if (memory.maximum) {
+        MOZ_ASSERT(*memory.maximum % PageSize == 0);
         if (!c.buffer.append(", "))
             return false;
-        if (!PrintInt32(c, *module.memory().maximum))
+        if (!PrintInt32(c, *memory.maximum / PageSize))
             return false;
     }
 

@@ -3656,6 +3656,8 @@ nsCSSFrameConstructor::FindInputData(Element* aElement,
     SIMPLE_INT_CREATE(NS_FORM_INPUT_MONTH, NS_NewTextControlFrame),
     // TODO: this is temporary until a frame is written: bug 888320
     SIMPLE_INT_CREATE(NS_FORM_INPUT_WEEK, NS_NewTextControlFrame),
+    // TODO: this is temporary until a frame is written: bug 888320
+    SIMPLE_INT_CREATE(NS_FORM_INPUT_DATETIME_LOCAL, NS_NewTextControlFrame),
     { NS_FORM_INPUT_SUBMIT,
       FCDATA_WITH_WRAPPING_BLOCK(0, NS_NewGfxButtonControlFrame,
                                  nsCSSAnonBoxes::buttonContent) },
@@ -10639,7 +10641,8 @@ nsCSSFrameConstructor::AddFCItemsForAnonymousContent(
       // If we don't have an explicit style context, that means we need the
       // ordinary computed values. Make sure we eagerly cascaded them when the
       // anonymous nodes were created.
-      MOZ_ASSERT_IF(content->IsStyledByServo(), content->HasServoData());
+      MOZ_ASSERT_IF(content->IsStyledByServo() && content->IsElement(),
+                    content->HasServoData());
       styleContext = ResolveStyleContext(aFrame, content, &aState);
     }
 

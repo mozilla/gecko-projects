@@ -179,6 +179,30 @@ CompositorBridgeParentBase::DeallocShmem(ipc::Shmem& aShmem)
   PCompositorBridgeParent::DeallocShmem(aShmem);
 }
 
+base::ProcessId
+CompositorBridgeParentBase::RemotePid()
+{
+  return OtherPid();
+}
+
+bool
+CompositorBridgeParentBase::StartSharingMetrics(ipc::SharedMemoryBasic::Handle aHandle,
+                                                CrossProcessMutexHandle aMutexHandle,
+                                                uint64_t aLayersId,
+                                                uint32_t aApzcId)
+{
+  return PCompositorBridgeParent::SendSharedCompositorFrameMetrics(
+    aHandle, aMutexHandle, aLayersId, aApzcId);
+}
+
+bool
+CompositorBridgeParentBase::StopSharingMetrics(FrameMetrics::ViewID aScrollId,
+                                               uint32_t aApzcId)
+{
+  return PCompositorBridgeParent::SendReleaseSharedCompositorFrameMetrics(
+    aScrollId, aApzcId);
+}
+
 CompositorBridgeParent::LayerTreeState::LayerTreeState()
   : mApzcTreeManagerParent(nullptr)
   , mParent(nullptr)
@@ -232,15 +256,6 @@ CompositorBridgeParent::ForEachIndirectLayerTree(const Lambda& aCallback)
   */
 typedef map<uint64_t,CompositorBridgeParent*> CompositorMap;
 static StaticAutoPtr<CompositorMap> sCompositorMap;
-
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
-static TimeDuration
-GetGlobalVsyncRate()
-{
-  return gfxPlatform::GetPlatform()->GetHardwareVsync()->
-           GetGlobalDisplay().GetVsyncRate();
-}
-#endif
 
 void
 CompositorBridgeParent::Setup()
@@ -1007,7 +1022,6 @@ CompositorBridgeParent::ActorDestroy(ActorDestroyReason why)
   MessageLoop::current()->PostTask(NewRunnableMethod(this, &CompositorBridgeParent::DeferredDestroy));
 }
 
-
 void
 CompositorBridgeParent::ScheduleRenderOnCompositorThread()
 {
@@ -1193,8 +1207,8 @@ CompositorBridgeParent::NotifyShadowTreeTransaction(uint64_t aId, bool aIsFirstP
 #endif
 
     if (mApzcTreeManager && aHitTestUpdate) {
-      mApzcTreeManager->UpdateHitTestingTree(this, mLayerManager->GetRoot(),
-          aIsFirstPaint, aId, aPaintSequenceNumber);
+      mApzcTreeManager->UpdateHitTestingTree(mRootLayerTreeID,
+          mLayerManager->GetRoot(), aIsFirstPaint, aId, aPaintSequenceNumber);
     }
 
     mLayerManager->NotifyShadowTreeTransaction();
@@ -1335,8 +1349,7 @@ CompositorBridgeParent::CompositeToTarget(DrawTarget* aTarget, const gfx::IntRec
     // If we have visible windowed plugins then we need to wait for content (and
     // then the plugins) to have been updated by the active animation.
     if (!mPluginWindowsHidden && mCachedPluginData.Length()) {
-      mWaitForPluginsUntil = mCompositorScheduler->GetLastComposeTime()
-                             + (GetGlobalVsyncRate() * 2);
+      mWaitForPluginsUntil = mCompositorScheduler->GetLastComposeTime() + (mVsyncRate * 2);
     }
 #endif
   }
@@ -1546,7 +1559,7 @@ CompositorBridgeParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
   if (mApzcTreeManager && !aIsRepeatTransaction && aHitTestUpdate) {
     AutoResolveRefLayers resolve(mCompositionManager);
 
-    mApzcTreeManager->UpdateHitTestingTree(this, root, aIsFirstPaint,
+    mApzcTreeManager->UpdateHitTestingTree(mRootLayerTreeID, root, aIsFirstPaint,
         mRootLayerTreeID, aPaintSequenceNumber);
   }
 
@@ -2265,10 +2278,22 @@ private:
   bool mDestroyCalled;
 };
 
-PCompositorBridgeParent*
-CompositorBridgeParent::LayerTreeState::CrossProcessPCompositorBridge() const
+CompositorController*
+CompositorBridgeParent::LayerTreeState::GetCompositorController() const
+{
+  return mParent;
+}
+
+MetricsSharingController*
+CompositorBridgeParent::LayerTreeState::CrossProcessSharingController() const
 {
   return mCrossProcessParent;
+}
+
+MetricsSharingController*
+CompositorBridgeParent::LayerTreeState::InProcessSharingController() const
+{
+  return mParent;
 }
 
 void
@@ -2891,7 +2916,7 @@ CompositorBridgeParent::HideAllPluginWindows()
 
 #if defined(XP_WIN)
   // We will get an async reply that this has happened and then send hide.
-  mWaitForPluginsUntil = TimeStamp::Now() + GetGlobalVsyncRate();
+  mWaitForPluginsUntil = TimeStamp::Now() + mVsyncRate;
   Unused << SendCaptureAllPlugins(parentWidget);
 #else
   Unused << SendHideAllPlugins(parentWidget);
