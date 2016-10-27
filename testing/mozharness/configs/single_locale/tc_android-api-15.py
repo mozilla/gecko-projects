@@ -1,5 +1,3 @@
-import os
-
 config = {
     "locales_file": "src/mobile/android/locales/all-locales",
     "tools_repo": "https://hg.mozilla.org/build/tools",
@@ -15,4 +13,7 @@ config = {
         'UPLOAD_PATH': '/home/worker/artifacts/',
     },
     "mozilla_dir": "src/",
+    "simple_name_move": True,
+    # XXX Don't land next line
+    "update_gecko_source_to_enUS": False,
 }

@@ -7,45 +7,11 @@ Transform the signing task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import os
-
-from mozbuild import milestone
 from taskgraph.transforms.base import TransformSequence
 
 ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/<{}>/artifacts/public/build/{}'
 
 transforms = TransformSequence()
-
-# XXX Prettynames are bad, fix them
-PRETTYNAMES = {
-    'desktop': "firefox-{version}.{locale}.{platform}.tar.bz2",
-    'android': "fennec-{version}.{locale}.{platform}.apk",
-}
-PRETTY_PLATFORM_FROM_BUILD_PLATFORM = {
-    'android-api-15-nightly': 'android-arm',
-    'linux64-nightly': 'linux-x86_64',
-    'linux-nightly': 'linux-i686',
-}
-_version_cache = None  # don't get this multiple times
-
-
-def get_version_number():
-    global _version_cache  # Cache this value
-    if _version_cache:
-        return _version_cache
-    milestone_file = os.path.join('config', 'milestone.txt')
-    _version_cache = milestone.get_official_milestone(milestone_file)
-    return _version_cache
-
-
-def make_pretty_name(product, build_platform, locale):
-    # If this fails, we need to add a new key to PRETTY_PLATFORM_FROM_BUILD_PLATFORM
-    platform = PRETTY_PLATFORM_FROM_BUILD_PLATFORM[build_platform]
-    return PRETTYNAMES[product].format(
-        version=get_version_number(),
-        locale=locale,
-        platform=platform,
-    )
 
 
 @transforms.add
@@ -55,9 +21,9 @@ def add_signing_artifacts(config, jobs):
         dep_platform = dep_job.attributes.get('build_platform')
 
         job['unsigned-artifacts'] = []
-        product = 'android' if 'android' in dep_platform else 'desktop'
+        extension = '.apk' if 'android' in dep_platform else '.tar.bz2'
         for locale in dep_job.attributes.get('chunk_locales', []):
-            filename = make_pretty_name(product, dep_platform, locale)
+            filename = '{}/target{}'.format(locale, extension)
             job['unsigned-artifacts'].append({
                 'task-reference': ARTIFACT_URL.format('unsigned-repack',
                                                       filename)
