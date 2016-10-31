@@ -11,6 +11,7 @@ import copy
 
 from mozbuild.chunkify import chunkify
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.treeherder import split_symbol, join_symbol
 
 transforms = TransformSequence()
 
@@ -80,6 +81,11 @@ def chunk_locales(config, jobs):
                     ])
                 chunked['attributes']['l10n_chunk'] = str(this_chunk)
                 chunked['attributes']['chunk_locales'] = my_locales
+
+                # add the chunk number to the TH symbol
+                group, symbol = split_symbol(chunked['treeherder-symbol'])
+                symbol += str(this_chunk)
+                chunked['treeherder-symbol'] = join_symbol(group, symbol)
                 yield chunked
         else:
             job['run']['options'] = job['run'].get('options', [])

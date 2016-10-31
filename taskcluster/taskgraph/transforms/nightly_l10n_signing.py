@@ -8,6 +8,7 @@ Transform the signing task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.treeherder import join_symbol
 
 ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/<{}>/artifacts/public/build/{}'
 
@@ -48,9 +49,11 @@ def make_signing_description(config, jobs):
         job['depname'] = 'unsigned-repack'
         job['signing-format'] = "gpg" if "linux" in dep_job.label else "jar"
 
+        # add the chunk number to the TH symbol
+        symbol = 'Ns{}'.format(dep_job.attributes.get('l10n_chunk'))
+        group = 'tc-L10n'
+
         job['treeherder'] = {
-            # Format symbol appropriate for l10n chunking
-            'symbol': 'tc-L10n(Ns{})'.format(
-                dep_job.attributes.get('l10n_chunk')),
+            'symbol': join_symbol(group, symbol),
         }
         yield job
