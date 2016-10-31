@@ -83,9 +83,10 @@ def chunk_locales(config, jobs):
                 chunked['attributes']['chunk_locales'] = my_locales
 
                 # add the chunk number to the TH symbol
-                group, symbol = split_symbol(chunked['treeherder-symbol'])
+                group, symbol = split_symbol(
+                    chunked.get('treeherder', {}).get('symbol', ''))
                 symbol += str(this_chunk)
-                chunked['treeherder-symbol'] = join_symbol(group, symbol)
+                chunked['treeherder']['symbol'] = join_symbol(group, symbol)
                 yield chunked
         else:
             job['run']['options'] = job['run'].get('options', [])
