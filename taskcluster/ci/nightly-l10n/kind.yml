@@ -32,6 +32,8 @@ job-defaults:
         # the functionality that l10n needs
         using: mozharness
         job-script: taskcluster/scripts/builder/build-l10n.sh
+        config:
+                - taskcluster_nightly.py
     chunks: 6
 
 jobs:
@@ -115,7 +117,7 @@ jobs:
         run:
             using: mozharness
             script: mozharness/scripts/mobile_l10n.py
-            actions: [clone-locales list-locales setup repack upload-repacks summary]
+            actions: [clone-locales list-locales setup repack upload-repacks submit-to-balrog summary]
             config:
                 - single_locale/{project}_android-api-15.py
                 - single_locale/tc_android-api-15.py
