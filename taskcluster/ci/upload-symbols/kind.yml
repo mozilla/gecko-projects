@@ -17,3 +17,4 @@ only-for-build-platforms:
     - linux64/opt
     - linux64/debug
     - android-api-15/opt
+    - android-api-15-nightly/opt

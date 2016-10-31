@@ -28,6 +28,8 @@ def fill_template(config, tasks):
         attributes = task.setdefault('attributes', {})
         attributes['build_platform'] = build_platform
         attributes['build_type'] = build_type
+        if 'nightly' in build_platform:
+            attributes['nightly'] = True
 
         # clear out the stuff that's not part of a task description
         del task['build-label']
