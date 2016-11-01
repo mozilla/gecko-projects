@@ -126,3 +126,17 @@ def mh_options_replace_project(config, jobs):
             job['run']['options']
             )
         yield job
+
+
+@transforms.add
+def chain_of_trust(config, jobs):
+    for job in jobs:
+        if job['worker']['implementation'] in ('docker-worker', 'docker-engine'):
+            job['worker']['chain-of-trust'] = True
+            job.setdefault('extra', {})
+            job['extra'].setdefault('chainOfTrust', {})
+            job['extra']['chainOfTrust'].setdefault('inputs', {})
+            job['extra']['chainOfTrust']['inputs']['docker-image'] = {
+                "task-reference": "<docker-image>"
+            }
+        yield job
