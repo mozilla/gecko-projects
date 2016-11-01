@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
-Transform the signing task into an actual task description.
+Transform the beetmover task into an actual task description.
 """
 
 from __future__ import absolute_import, print_function, unicode_literals
@@ -13,9 +13,6 @@ from taskgraph.transforms.base import (
 )
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Schema, Any, Required, Optional
-
-
-ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/<{}>/artifacts/{}'
 
 
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
@@ -29,23 +26,18 @@ taskref_or_string = Any(
     basestring,
     {Required('task-reference'): basestring})
 
-signing_description_schema = Schema({
-    # the dependant task (object) for this signing job, used to inform signing.
+beetmover_description_schema = Schema({
+    # the dependent task (object) for this beetmover job, used to inform beetmover.
     Required('dependent-task'): object,
 
-    # Artifacts from dep task to sign
-    Required('unsigned-artifacts'): [taskref_or_string],
-
     # depname is used in taskref's to identify the taskID of the unsigned things
+    # to do change to build or signed-build
     Required('depname', default='build'): basestring,
 
-    # Format to use to sign the artifacts
-    Required('signing-format'): basestring,
-
-    # unique label to describe this signing task, defaults to {dep.label}-signing
+    # unique label to describe this beetmover task, defaults to {dep.label}-beetmover
     Optional('label'): basestring,
 
-    # treeherder is allowed here to override any defaults we use for signing.  See
+    # treeherder is allowed here to override any defaults we use for beetmover.  See
     # taskcluster/taskgraph/transforms/task.py for the schema details, and the
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
@@ -57,8 +49,8 @@ def validate(config, jobs):
     for job in jobs:
         label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
         yield validate_schema(
-            signing_description_schema, job,
-            "In signing ({!r} kind) task for {!r}:".format(config.kind, label))
+            beetmover_description_schema, job,
+            "In beetmover ({!r} kind) task for {!r}:".format(config.kind, label))
 
 
 @transforms.add
@@ -66,29 +58,47 @@ def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
 
-        signing_format_scope = "project:releng:signing:format:{}".format(
-            job['signing-format'])
-
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'tc(Ns)')
+        treeherder.setdefault('symbol', 'tc(BM)')
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
-        treeherder.setdefault('platform', "{}/opt".format(dep_th_platform))
+        treeherder.setdefault('platform',
+                              "{}/opt".format(dep_th_platform))
         treeherder.setdefault('tier', 2)
         treeherder.setdefault('kind', 'build')
 
-        label = job.get('label', "{}-signing".format(dep_job))
+        label = job.get('label', "beetmover-{}".format(dep_job.label))
+        # if dependent task is build, taskid_to_beetmove == taskid_of_manifest
+        # and update_manifest = False
+        # if dependent task is signed, the taskid_to_beetmove is the signed
+        # build and update_manifest = True
+        dependent_kind = str(job['dependent-task'].kind)
+        # both artifacts are the build artifacts if not the signing task
+        taskid_of_manifest = "<" + str(dependent_kind) + ">"
+        taskid_to_beetmove = taskid_of_manifest
+        update_manifest = False
+        dependencies = {job['dependent-task'].kind: dep_job.label}
+        # taskid_of_manifest always refers to the unsigned task
+        if "signing" in dependent_kind:
+            taskid_of_manifest = "<build>"
+            update_manifest = True
+            signing_dependencies = dep_job.dependencies
+            dependencies.update(signing_dependencies)
 
         task = {
             'label': label,
-            'description': "{} Signing".format(
+            'description': "{} Beetmover".format(
                 dep_job.task["metadata"]["description"]),
-            'worker-type': "scriptworker-prov-v1/signing-linux-v1",
-            'worker': {'implementation': 'scriptworker-signing',
-                       'unsigned-artifacts': job['unsigned-artifacts']},
-            'scopes': ["project:releng:signing:cert:nightly-signing",
-                       signing_format_scope],
-            'dependencies': {job['depname']: dep_job.label},
+            # do we have to define worker type somewhere?
+            'worker-type': 'beetmover/beetmover-linux-v1',
+            'worker': {'implementation': 'beetmover',
+                       'taskid_to_beetmove': {"task-reference":
+                                              taskid_to_beetmove},
+                       'taskid_of_manifest': {"task-reference":
+                                              taskid_of_manifest},
+                       'update_manifest': update_manifest},
+            'scopes': [],
+            'dependencies': dependencies,
             'attributes': {
                 'nightly': dep_job.attributes.get('nightly', False),
                 'build_platform': dep_job.attributes.get('build_platform'),

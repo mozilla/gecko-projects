@@ -259,6 +259,20 @@ task_description_schema = Schema({
 
         # list of artifact URLs for the artifacts that should be signed
         Required('unsigned-artifacts'): [taskref_or_string],
+    }, {
+        Required('implementation'): 'beetmover',
+
+        # the maximum time to spend signing, in seconds
+        Required('max-run-time', default=600): int,
+
+        # taskid of task with artifacts to beetmove
+        Required('taskid_to_beetmove'): taskref_or_string,
+
+        # taskid of task with artifacts to beetmove
+        Required('taskid_of_manifest'): taskref_or_string,
+
+        # beetmover template key
+        Required('update_manifest'): bool,
     }),
 
     # The "when" section contains descriptions of the circumstances
@@ -447,6 +461,22 @@ def build_scriptworker_signing_payload(config, task, task_def):
     task_def['payload'] = {
         'maxRunTime': worker['max-run-time'],
         'unsignedArtifacts':  worker['unsigned-artifacts']
+    }
+
+
+@payload_builder('beetmover')
+def build_beetmover_payload(config, task, task_def):
+    worker = task['worker']
+
+    pushdate = str(time.strftime("%Y%m%d%H%M%S",
+                                 time.gmtime(config.params['pushdate'])))
+
+    task_def['payload'] = {
+        'maxRunTime': worker['max-run-time'],
+        'upload_date': pushdate,
+        'taskid_to_beetmove': worker['taskid_to_beetmove'],
+        'taskid_of_manifest': worker['taskid_of_manifest'],
+        'update_manifest': worker['update_manifest']
     }
 
 
