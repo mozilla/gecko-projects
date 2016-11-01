@@ -16,8 +16,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
 var gCookiesWindow = {
   _cm               : Components.classes["@mozilla.org/cookiemanager;1"]
                                 .getService(Components.interfaces.nsICookieManager),
-  _ds               : Components.classes["@mozilla.org/intl/scriptabledateformat;1"]
-                                .getService(Components.interfaces.nsIScriptableDateFormat),
   _hosts            : {},
   _hostOrder        : [],
   _tree             : null,
@@ -129,10 +127,10 @@ var gCookiesWindow = {
     var rowIndex = 0;
     var cookieItem = null;
     if (!this._view._filtered) {
-      for (let host of this._hostsOrder) { // (var host in this._hosts) {
+      for (let host of this._hostOrder) {
         ++rowIndex;
         var hostItem = this._hosts[host];
-        if (this._hostOrder[i] == strippedHost) { // host == strippedHost) {
+        if (host == strippedHost) {
           // Host matches, look for the cookie within this Host collection
           // and update its data
           for (let currCookie of hostItem.cookies) {
@@ -513,14 +511,12 @@ var gCookiesWindow = {
   formatExpiresString: function (aExpires) {
     if (aExpires) {
       var date = new Date(1000 * aExpires);
-      return this._ds.FormatDateTime("", this._ds.dateFormatLong,
-                                     this._ds.timeFormatSeconds,
-                                     date.getFullYear(),
-                                     date.getMonth() + 1,
-                                     date.getDate(),
-                                     date.getHours(),
-                                     date.getMinutes(),
-                                     date.getSeconds());
+      const locale = Components.classes["@mozilla.org/chrome/chrome-registry;1"]
+                     .getService(Components.interfaces.nsIXULChromeRegistry)
+                     .getSelectedLocale("global", true);
+      const dtOptions = { year: 'numeric', month: 'long', day: 'numeric',
+                          hour: 'numeric', minute: 'numeric', second: 'numeric' };
+      return date.toLocaleString(locale, dtOptions);
     }
     return this._bundle.getString("expireAtEndOfSession");
   },
@@ -866,7 +862,7 @@ var gCookiesWindow = {
   _filterCookies: function (aFilterValue) {
     this._view._filterValue = aFilterValue;
     var cookies = [];
-    for (let i = 0; i < gCookiesWindow._hostOrder.length; ++i) { //var host in gCookiesWindow._hosts) {
+    for (let i = 0; i < gCookiesWindow._hostOrder.length; ++i) { // var host in gCookiesWindow._hosts) {
       let currHost = gCookiesWindow._hosts[gCookiesWindow._hostOrder[i]]; // gCookiesWindow._hosts[host];
       if (!currHost) continue;
       for (let cookie of currHost.cookies) {
@@ -892,7 +888,7 @@ var gCookiesWindow = {
 
     // Save open states
     this._openIndices = [];
-    for (i = 0; i < this._view.rowCount; ++i) {
+    for (let i = 0; i < this._view.rowCount; ++i) {
       var item = this._view._getItemAtIndex(i);
       if (item && item.container && item.open)
         this._openIndices.push(i);

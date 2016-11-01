@@ -46,6 +46,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "MatchPattern",
                                   "resource://gre/modules/MatchPattern.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "NativeApp",
+                                  "resource://gre/modules/NativeMessaging.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
@@ -109,6 +111,7 @@ const COMMENT_REGEXP = new RegExp(String.raw`
   `.replace(/\s+/g, ""), "gm");
 
 var GlobalManager;
+var ParentAPIManager;
 
 // This object loads the ext-*.js scripts that define the extension API.
 var Management = new class extends SchemaAPIManager {
@@ -182,6 +185,21 @@ let ProxyMessenger = {
   },
 
   receiveMessage({target, messageName, channelId, sender, recipient, data, responseType}) {
+    if (recipient.toNativeApp) {
+      let {childId, toNativeApp} = recipient;
+      if (messageName == "Extension:Message") {
+        let context = ParentAPIManager.getContextById(childId);
+        return new NativeApp(context, toNativeApp).sendMessage(data);
+      }
+      if (messageName == "Extension:Connect") {
+        let context = ParentAPIManager.getContextById(childId);
+        NativeApp.onConnectNative(context, target.messageManager, data.portId, sender, toNativeApp);
+        return true;
+      }
+      // "Extension:Port:Disconnect" and "Extension:Port:PostMessage" for
+      // native messages are handled by NativeApp.
+      return;
+    }
     let extension = GlobalManager.extensionMap.get(sender.extensionId);
     let receiverMM = this._getMessageManagerForRecipient(recipient);
     if (!extension || !receiverMM) {
@@ -227,8 +245,6 @@ let ProxyMessenger = {
       return pipmm;
     }
 
-    // Note: No special handling for sendNativeMessage / connectNative because
-    // native messaging runs in the chrome process, so it never needs a proxy.
     return null;
   },
 };
@@ -390,7 +406,7 @@ function findPathInObject(obj, path, printErrors = true) {
   return obj;
 }
 
-var ParentAPIManager = {
+ParentAPIManager = {
   proxyContexts: new Map(),
 
   init() {
@@ -487,11 +503,7 @@ var ParentAPIManager = {
   },
 
   call(data, target) {
-    let context = this.proxyContexts.get(data.childId);
-    if (!context) {
-      Cu.reportError("WebExtension context not found!");
-      return;
-    }
+    let context = this.getContextById(data.childId);
     if (context.currentMessageManager !== target.messageManager) {
       Cu.reportError("WebExtension warning: Message manager unexpectedly changed");
     }
@@ -525,11 +537,7 @@ var ParentAPIManager = {
   },
 
   addListener(data, target) {
-    let context = this.proxyContexts.get(data.childId);
-    if (!context) {
-      Cu.reportError("WebExtension context not found!");
-      return;
-    }
+    let context = this.getContextById(data.childId);
     if (context.currentMessageManager !== target.messageManager) {
       Cu.reportError("WebExtension warning: Message manager unexpectedly changed");
     }
@@ -549,12 +557,19 @@ var ParentAPIManager = {
   },
 
   removeListener(data) {
-    let context = this.proxyContexts.get(data.childId);
-    if (!context) {
-      Cu.reportError("WebExtension context not found!");
-    }
+    let context = this.getContextById(data.childId);
     let listener = context.listenerProxies.get(data.path);
     findPathInObject(context.apiObj, data.path).removeListener(listener);
+  },
+
+  getContextById(childId) {
+    let context = this.proxyContexts.get(childId);
+    if (!context) {
+      let error = new Error("WebExtension context not found!");
+      Cu.reportError(error);
+      throw error;
+    }
+    return context;
   },
 };
 
@@ -1200,10 +1215,12 @@ class MockExtension {
   }
 }
 
+let _browserUpdated = false;
+
 // We create one instance of this class per extension. |addonData|
 // comes directly from bootstrap.js when initializing.
 this.Extension = class extends ExtensionData {
-  constructor(addonData) {
+  constructor(addonData, startupReason) {
     super(addonData.resourceURI);
 
     this.uuid = UUIDMap.get(addonData.id);
@@ -1215,6 +1232,8 @@ this.Extension = class extends ExtensionData {
     }
 
     this.addonData = addonData;
+    this.startupReason = startupReason;
+
     this.id = addonData.id;
     this.baseURI = NetUtil.newURI(this.getURL("")).QueryInterface(Ci.nsIURL);
     this.principal = this.createPrincipal();
@@ -1231,6 +1250,14 @@ this.Extension = class extends ExtensionData {
     this.webAccessibleResources = null;
 
     this.emitter = new EventEmitter();
+  }
+
+  static set browserUpdated(updated) {
+    _browserUpdated = updated;
+  }
+
+  static get browserUpdated() {
+    return _browserUpdated;
   }
 
   /**

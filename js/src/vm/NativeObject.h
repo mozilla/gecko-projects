@@ -228,8 +228,7 @@ class ObjectElements
         flags &= ~CONVERT_DOUBLE_ELEMENTS;
     }
     bool hasNonwritableArrayLength() const {
-        return flags & NONWRITABLE_ARRAY_LENGTH ||
-               flags & FROZEN;
+        return flags & NONWRITABLE_ARRAY_LENGTH;
     }
     void setNonwritableArrayLength() {
         MOZ_ASSERT(!isCopyOnWrite());
@@ -304,6 +303,12 @@ class ObjectElements
         MOZ_ASSERT(isFrozen());
         MOZ_ASSERT(!isCopyOnWrite());
         flags &= ~FROZEN;
+    }
+
+    uint8_t elementAttributes() const {
+        if (isFrozen())
+            return JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY;
+        return JSPROP_ENUMERATE;
     }
 
     // This is enough slots to store an object of this class. See the static
@@ -865,7 +870,14 @@ class NativeObject : public ShapedObject
   protected:
     inline bool updateSlotsForSpan(ExclusiveContext* cx, size_t oldSpan, size_t newSpan);
 
-  public:
+  private:
+    void prepareElementRangeForOverwrite(size_t start, size_t end) {
+        MOZ_ASSERT(end <= getDenseInitializedLength());
+        MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        for (size_t i = start; i < end; i++)
+            elements_[i].HeapSlot::~HeapSlot();
+    }
+
     /*
      * Trigger the write barrier on a range of slots that will no longer be
      * reachable.
@@ -875,14 +887,7 @@ class NativeObject : public ShapedObject
             getSlotAddressUnchecked(i)->HeapSlot::~HeapSlot();
     }
 
-    void prepareElementRangeForOverwrite(size_t start, size_t end) {
-        MOZ_ASSERT(end <= getDenseInitializedLength());
-        MOZ_ASSERT(!denseElementsAreCopyOnWrite());
-        MOZ_ASSERT(!denseElementsAreFrozen());
-        for (size_t i = start; i < end; i++)
-            elements_[i].HeapSlot::~HeapSlot();
-    }
-
+  public:
     static bool rollbackProperties(ExclusiveContext* cx, HandleNativeObject obj,
                                    uint32_t slotSpan);
 
@@ -1016,22 +1021,35 @@ class NativeObject : public ShapedObject
         }
     }
 
-  public:
-    void setDenseInitializedLength(uint32_t length) {
+    // See the comment over setDenseElementUnchecked, this applies in the same way.
+    void setDenseInitializedLengthUnchecked(uint32_t length) {
         MOZ_ASSERT(length <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
-        MOZ_ASSERT(!denseElementsAreFrozen());
         prepareElementRangeForOverwrite(length, getElementsHeader()->initializedLength);
         getElementsHeader()->initializedLength = length;
     }
 
-    inline void ensureDenseInitializedLength(ExclusiveContext* cx,
-                                             uint32_t index, uint32_t extra);
-    void setDenseElement(uint32_t index, const Value& val) {
+    // Use this function with care.  This is done to allow sparsifying frozen
+    // objects, but should only be called in a few places, and should be
+    // audited carefully!
+    void setDenseElementUnchecked(uint32_t index, const Value& val) {
         MOZ_ASSERT(index < getDenseInitializedLength());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
-        MOZ_ASSERT(!denseElementsAreFrozen());
         elements_[index].set(this, HeapSlot::Element, index, val);
+    }
+
+  public:
+    void setDenseInitializedLength(uint32_t length) {
+        MOZ_ASSERT(!denseElementsAreFrozen());
+        setDenseInitializedLengthUnchecked(length);
+    }
+
+    inline void ensureDenseInitializedLength(ExclusiveContext* cx,
+                                             uint32_t index, uint32_t extra);
+
+    void setDenseElement(uint32_t index, const Value& val) {
+        MOZ_ASSERT(!denseElementsAreFrozen());
+        setDenseElementUnchecked(index, val);
     }
 
     void initDenseElement(uint32_t index, const Value& val) {

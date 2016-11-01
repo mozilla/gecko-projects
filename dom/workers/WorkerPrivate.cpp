@@ -683,7 +683,10 @@ public:
       return false;
     }
 
-    nsTArray<RefPtr<MessagePort>> ports = TakeTransferredPorts();
+    Sequence<OwningNonNull<MessagePort>> ports;
+    if (!TakeTransferredPortsAsSequence(ports)) {
+      return false;
+    }
 
     nsCOMPtr<nsIDOMEvent> domEvent;
     RefPtr<ExtendableMessageEvent> extendableEvent;
@@ -699,6 +702,8 @@ public:
       init.mCancelable = false;
 
       init.mData = messageData;
+      init.mPorts = ports;
+      init.mSource.SetValue().SetAsClient() = client;
 
       ErrorResult rv;
       extendableEvent = ExtendableMessageEvent::Constructor(
@@ -707,8 +712,6 @@ public:
         rv.SuppressException();
         return false;
       }
-      extendableEvent->SetSource(client);
-      extendableEvent->SetPorts(Move(ports));
 
       domEvent = do_QueryObject(extendableEvent);
     } else {
@@ -721,8 +724,7 @@ public:
                               EmptyString(),
                               EmptyString(),
                               nullptr,
-                              Sequence<OwningNonNull<MessagePort>>());
-      event->SetPorts(Move(ports));
+                              ports);
       domEvent = do_QueryObject(event);
     }
 
@@ -2212,6 +2214,10 @@ WorkerPrivateParent<Derived>::WorkerPrivateParent(
     MOZ_ASSERT(IsDedicatedWorker());
     mNowBaseTimeStamp = aParent->NowBaseTimeStamp();
     mNowBaseTimeHighRes = aParent->NowBaseTime();
+
+    if (aParent->mParentFrozen) {
+      Freeze(nullptr);
+    }
   }
   else {
     AssertIsOnMainThread();
@@ -2248,6 +2254,16 @@ WorkerPrivateParent<Derived>::WorkerPrivateParent(
     } else {
       mNowBaseTimeStamp = CreationTimeStamp();
       mNowBaseTimeHighRes = CreationTime();
+    }
+
+    // Our parent can get suspended after it initiates the async creation
+    // of a new worker thread.  In this case suspend the new worker as well.
+    if (mLoadInfo.mWindow && mLoadInfo.mWindow->IsSuspended()) {
+      ParentWindowPaused();
+    }
+
+    if (mLoadInfo.mWindow && mLoadInfo.mWindow->IsFrozen()) {
+      Freeze(mLoadInfo.mWindow);
     }
   }
 }
@@ -2610,12 +2626,7 @@ WorkerPrivateParent<Derived>::Thaw(nsPIDOMWindowInner* aWindow)
 {
   AssertIsOnParentThread();
 
-  if (IsDedicatedWorker() && !mParentFrozen) {
-    // If we are in here, it means that this worker has been created when the
-    // parent was actually suspended (maybe during a sync XHR), and in this case
-    // we don't need to thaw.
-    return true;
-  }
+  MOZ_ASSERT(mParentFrozen);
 
   // Shared workers are resumed if any of their owning documents are thawed.
   // It can happen that mSharedWorkers is empty but this thread has not been
@@ -3120,7 +3131,7 @@ WorkerPrivateParent<Derived>::RegisterSharedWorker(SharedWorker* aSharedWorker,
 
   // If there were other SharedWorker objects attached to this worker then they
   // may all have been frozen and this worker would need to be thawed.
-  if (mSharedWorkers.Length() > 1 && !Thaw(nullptr)) {
+  if (mSharedWorkers.Length() > 1 && IsFrozen() && !Thaw(nullptr)) {
     return false;
   }
 
@@ -6480,17 +6491,15 @@ WorkerPrivate::ConnectMessagePort(JSContext* aCx,
   init.mBubbles = false;
   init.mCancelable = false;
   init.mSource.SetValue().SetAsMessagePort() = port;
+  if (!init.mPorts.AppendElement(port.forget(), fallible)) {
+    return false;
+  }
 
   RefPtr<MessageEvent> event =
     MessageEvent::Constructor(globalObject,
                               NS_LITERAL_STRING("connect"), init, rv);
 
   event->SetTrusted(true);
-
-  nsTArray<RefPtr<MessagePort>> ports;
-  ports.AppendElement(port);
-
-  event->SetPorts(Move(ports));
 
   nsCOMPtr<nsIDOMEvent> domEvent = do_QueryObject(event);
 

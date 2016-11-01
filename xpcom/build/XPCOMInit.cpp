@@ -18,7 +18,6 @@
 
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/layers/SharedBufferManagerChild.h"
 
 #include "prlink.h"
 
@@ -803,6 +802,7 @@ NS_InitMinimalXPCOM()
 
   AbstractThread::InitStatics();
   SharedThreadPool::InitStatics();
+  mozilla::Telemetry::Init();
   mozilla::HangMonitor::Startup();
   mozilla::BackgroundHangMonitor::Startup();
 

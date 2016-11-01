@@ -158,7 +158,7 @@ task_description_schema = Schema({
 
         # worker features that should be enabled
         Required('relengapi-proxy', default=False): bool,
-        Required('chainOfTrust', default=False): bool,
+        Required('chain-of-trust', default=False): bool,
         Required('taskcluster-proxy', default=False): bool,
         Required('allow-ptrace', default=False): bool,
         Required('loopback-video', default=False): bool,
@@ -215,6 +215,15 @@ task_description_schema = Schema({
             'type': Any('file', 'directory'),
 
             # task image path from which to read artifact
+            'path': basestring,
+        }],
+
+        # directories and/or files to be mounted
+        Optional('mounts'): [{
+            # a unique name for the cache volume
+            'cache-name': basestring,
+
+            # task image path for the cache
             'path': basestring,
         }],
 
@@ -343,7 +352,7 @@ def build_docker_worker_payload(config, task, task_def):
         features['allowPtrace'] = True
         task_def['scopes'].append('docker-worker:feature:allowPtrace')
 
-    if worker.get('chainOfTrust'):
+    if worker.get('chain-of-trust'):
         features['chainOfTrust'] = True
 
     capabilities = {}
@@ -410,10 +419,19 @@ def build_generic_worker_payload(config, task, task_def):
             'expires': task_def['expires'],  # always expire with the task
         })
 
+    mounts = []
+
+    for mount in worker.get('mounts', []):
+        mounts.append({
+            'cacheName': mount['cache-name'],
+            'directory': mount['path']
+        })
+
     task_def['payload'] = {
         'command': worker['command'],
         'artifacts': artifacts,
         'env': worker.get('env', {}),
+        'mounts': mounts,
         'maxRunTime': worker['max-run-time'],
         'osGroups': worker.get('os-groups', []),
     }
@@ -538,7 +556,7 @@ def build_task(config, tasks):
             ])
 
         if 'expires-after' not in task:
-            task['expires-after'] = '14 days' if config.params['project'] == 'try' else '1 year'
+            task['expires-after'] = '28 days' if config.params['project'] == 'try' else '1 year'
 
         if 'deadline-after' not in task:
             task['deadline-after'] = '1 day'

@@ -46,6 +46,7 @@ asan-tests:
     - jsreftest
     - marionette
     - mochitest
+    - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-chrome
     - mochitest-clipboard
@@ -88,7 +89,10 @@ windows-vm-tests:
 #    - mochitest-other
 
 ccov-code-coverage-tests:
+    - mochitest
     - mochitest-browser-chrome
+    - mochitest-devtools-chrome
+    - xpcshell
 
 jsdcov-code-coverage-tests:
     - mochitest-browser-chrome

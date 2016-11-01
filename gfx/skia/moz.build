@@ -307,6 +307,30 @@ SOURCES['skia/src/core/SkOpts.cpp'].flags += skia_opt_flags
 SOURCES['skia/src/core/SkSpriteBlitter4f.cpp'].flags += skia_opt_flags
 SOURCES['skia/src/core/SkSpriteBlitter_ARGB32.cpp'].flags += skia_opt_flags
 SOURCES['skia/src/core/SkSpriteBlitter_RGB16.cpp'].flags += skia_opt_flags
+if CONFIG['MOZ_ENABLE_SKIA_PDF']:
+    UNIFIED_SOURCES += [
+        'skia/src/core/SkMD5.cpp',
+        'skia/src/pdf/SkDeflate.cpp',
+        'skia/src/pdf/SkJpegInfo.cpp',
+        'skia/src/pdf/SkPDFBitmap.cpp',
+        'skia/src/pdf/SkPDFCanon.cpp',
+        'skia/src/pdf/SkPDFCanvas.cpp',
+        'skia/src/pdf/SkPDFConvertType1FontStream.cpp',
+        'skia/src/pdf/SkPDFDevice.cpp',
+        'skia/src/pdf/SkPDFDocument.cpp',
+        'skia/src/pdf/SkPDFFormXObject.cpp',
+        'skia/src/pdf/SkPDFGraphicState.cpp',
+        'skia/src/pdf/SkPDFMakeCIDGlyphWidthsArray.cpp',
+        'skia/src/pdf/SkPDFMakeToUnicodeCmap.cpp',
+        'skia/src/pdf/SkPDFMetadata.cpp',
+        'skia/src/pdf/SkPDFResourceDict.cpp',
+        'skia/src/pdf/SkPDFShader.cpp',
+        'skia/src/pdf/SkPDFTypes.cpp',
+        'skia/src/pdf/SkPDFUtils.cpp',
+    ]
+    SOURCES += [
+        'skia/src/pdf/SkPDFFont.cpp',
+    ]
 if CONFIG['MOZ_ENABLE_SKIA_GPU']:
     UNIFIED_SOURCES += [
         'skia/src/effects/gradients/SkTwoPointConicalGradient_gpu.cpp',
@@ -492,7 +516,7 @@ if CONFIG['MOZ_ENABLE_SKIA_GPU']:
         'skia/src/gpu/GrResourceCache.cpp',
         'skia/src/image/SkImage_Gpu.cpp',
     ]
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gonk'):
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android'):
     UNIFIED_SOURCES += [
         'skia/src/ports/SkDebug_android.cpp',
         'skia/src/ports/SkOSFile_posix.cpp',
@@ -650,7 +674,7 @@ LOCAL_INCLUDES += [
     'skia/src/utils/win',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gonk'):
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android'):
     DEFINES['SK_FONTHOST_CAIRO_STANDALONE'] = 0
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in {
@@ -659,7 +683,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] in {
     'gtk2',
     'gtk3',
     'uikit',
-    'gonk',
   }:
     DEFINES['SK_FONTHOST_DOES_NOT_USE_FONTMGR'] = 1
 
@@ -730,7 +753,7 @@ if CONFIG['CLANG_CXX'] or CONFIG['CLANG_CL']:
         '-Wno-unused-private-field',
     ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'gtk3', 'android', 'gonk'):
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'gtk3', 'android'):
     CXXFLAGS += CONFIG['MOZ_CAIRO_CFLAGS']
     CXXFLAGS += CONFIG['CAIRO_FT_CFLAGS']
 

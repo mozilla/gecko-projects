@@ -557,6 +557,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'media/FormatParam.java',
     'media/JellyBeanAsyncCodec.java',
     'media/MediaControlService.java',
+    'media/MediaDrmProxy.java',
     'media/MediaManager.java',
     'media/RemoteManager.java',
     'media/Sample.java',
@@ -618,6 +619,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'preferences/SearchPreferenceCategory.java',
     'preferences/SetHomepagePreference.java',
     'preferences/SyncPreference.java',
+    'PresentationView.java',
     'PrintHelper.java',
     'PrivateTab.java',
     'promotion/AddToHomeScreenPromotion.java',
@@ -726,6 +728,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'updater/PostUpdateHandler.java',
     'updater/UpdateService.java',
     'updater/UpdateServiceHelper.java',
+    'util/TouchTargetUtil.java',
     'widget/ActivityChooserModel.java',
     'widget/AllCapsTextView.java',
     'widget/AnchoredPopup.java',
@@ -839,10 +842,13 @@ moz_native_devices_jars = [
     CONFIG['ANDROID_PLAY_SERVICES_CAST_AAR_LIB'],
 ]
 moz_native_devices_sources = ['java/org/mozilla/gecko/' + x for x in [
-    'ChromeCast.java',
+    'ChromeCastDisplay.java',
+    'ChromeCastPlayer.java',
     'GeckoMediaPlayer.java',
+    'GeckoPresentationDisplay.java',
     'MediaPlayerManager.java',
     'PresentationMediaPlayerManager.java',
+    'RemotePresentationService.java',
 ]]
 if CONFIG['MOZ_NATIVE_DEVICES']:
     gbjar.extra_jars += moz_native_devices_jars

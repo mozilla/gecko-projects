@@ -37,6 +37,8 @@
 #include "nsContentUtils.h"
 #include "nsIRequest.h"
 #include "nsQueryObject.h"
+#include "nsIObserverService.h"
+#include "nsISupportsPrimitives.h"
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIXPConnect.h"
@@ -2210,15 +2212,11 @@ public:
                              nsString())
     , mCapturedTrackSource(aCapturedTrackSource)
   {
-    mCapturedTrackSource->RegisterSink(this);
   }
 
   void Destroy() override
   {
     MOZ_ASSERT(mCapturedTrackSource);
-    if (mCapturedTrackSource) {
-      mCapturedTrackSource->UnregisterSink(this);
-    }
   }
 
   MediaSourceEnum GetMediaSource() const override
@@ -4709,7 +4707,9 @@ HTMLMediaElement::UpdateReadyStateInternal()
   }
 
   enum NextFrameStatus nextFrameStatus = NextFrameStatus();
-  if (nextFrameStatus == NEXT_FRAME_UNAVAILABLE) {
+  if (nextFrameStatus == NEXT_FRAME_UNAVAILABLE ||
+      (nextFrameStatus == NEXT_FRAME_UNAVAILABLE_BUFFERING &&
+       mWaitingForKey == WAITING_FOR_KEY)) {
     if (mWaitingForKey != NOT_WAITING_FOR_KEY) {
       // http://w3c.github.io/encrypted-media/#wait-for-key
       // Continuing 7.3.4 Queue a "waitingforkey" Event
@@ -4798,7 +4798,7 @@ HTMLMediaElement::UpdateReadyStateInternal()
   // autoplay elements for live streams will never play. Otherwise we
   // move to HAVE_ENOUGH_DATA if we can play through the entire media
   // without stopping to buffer.
-  if (mDecoder->CanPlayThrough()) {
+  if (mWaitingForKey == NOT_WAITING_FOR_KEY && mDecoder->CanPlayThrough()) {
     LOG(LogLevel::Debug, ("MediaElement %p UpdateReadyStateInternal() "
                           "Decoder can play through", this));
     ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_ENOUGH_DATA);
@@ -5949,6 +5949,7 @@ HTMLMediaElement::SetAudioChannelSuspended(SuspendTypes aSuspend)
     return;
   }
 
+  MaybeNotifyMediaResumed(aSuspend);
   mAudioChannelSuspended = aSuspend;
   MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
          ("HTMLMediaElement, SetAudioChannelSuspended, this = %p, "
@@ -6206,6 +6207,10 @@ void
 HTMLMediaElement::DispatchEncrypted(const nsTArray<uint8_t>& aInitData,
                                     const nsAString& aInitDataType)
 {
+  LOG(LogLevel::Debug,
+      ("%p DispatchEncrypted initDataType='%s'",
+      this, NS_ConvertUTF16toUTF8(aInitDataType).get()));
+
   if (mReadyState == nsIDOMHTMLMediaElement::HAVE_NOTHING) {
     // Ready state not HAVE_METADATA (yet), don't dispatch encrypted now.
     // Queueing for later dispatch in MetadataLoaded.
@@ -6429,6 +6434,37 @@ HTMLMediaElement::IsAudible() const
   }
 
   return true;
+}
+
+void
+HTMLMediaElement::MaybeNotifyMediaResumed(SuspendTypes aSuspend)
+{
+  // In fennec, we should send the notification when media is resumed from the
+  // pause-disposable which was called by media control.
+  if (mAudioChannelSuspended != nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE &&
+      aSuspend != nsISuspendedTypes::NONE_SUSPENDED) {
+    return;
+  }
+
+  uint64_t windowID = mAudioChannelAgent->WindowID();
+  NS_DispatchToMainThread(NS_NewRunnableFunction([windowID]() -> void {
+    nsCOMPtr<nsIObserverService> observerService =
+      services::GetObserverService();
+    if (NS_WARN_IF(!observerService)) {
+      return;
+    }
+
+    nsCOMPtr<nsISupportsPRUint64> wrapper =
+      do_CreateInstance(NS_SUPPORTS_PRUINT64_CONTRACTID);
+    if (NS_WARN_IF(!wrapper)) {
+       return;
+    }
+
+    wrapper->SetData(windowID);
+    observerService->NotifyObservers(wrapper,
+                                     "media-playback-resumed",
+                                     u"active");
+  }));
 }
 
 bool

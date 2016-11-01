@@ -219,7 +219,13 @@ public:
 
   virtual void HandleResumeVideoDecoding();
 
+  virtual void HandlePlayStateChanged(MediaDecoder::PlayState aPlayState) {}
+
   virtual void DumpDebugInfo() {}
+
+private:
+  template <class S, typename R, typename... As>
+  auto ReturnTypeHelper(R(S::*)(As...)) -> R;
 
 protected:
   using Master = MediaDecoderStateMachine;
@@ -228,12 +234,20 @@ protected:
   MediaResource* Resource() const { return mMaster->mResource; }
   MediaDecoderReaderWrapper* Reader() const { return mMaster->mReader; }
   const MediaInfo& Info() const { return mMaster->Info(); }
+  bool IsExpectingMoreData() const
+  {
+    // We are expecting more data if either the resource states so, or if we
+    // have a waiting promise pending (such as with non-MSE EME).
+    return Resource()->IsExpectingMoreData() ||
+           (Reader()->IsWaitForDataSupported() &&
+            (Reader()->IsWaitingAudioData() || Reader()->IsWaitingVideoData()));
+  }
 
   // Note this function will delete the current state object.
   // Don't access members to avoid UAF after this call.
   template <class S, typename... Ts>
   auto SetState(Ts... aArgs)
-    -> decltype(DeclVal<S>().Enter(Move(aArgs)...))
+    -> decltype(ReturnTypeHelper(&S::Enter))
   {
     // keep mMaster in a local object because mMaster will become invalid after
     // the current state object is deleted.
@@ -627,6 +641,14 @@ public:
       mMaster->mVideoDecodeSuspended = true;
       mMaster->mOnPlaybackEvent.Notify(MediaEventType::EnterVideoSuspend);
       Reader()->SetVideoBlankDecode(true);
+    }
+  }
+
+  void HandlePlayStateChanged(MediaDecoder::PlayState aPlayState) override
+  {
+    if (aPlayState == MediaDecoder::PLAY_STATE_PLAYING) {
+      // Schedule Step() to check if we can start playback.
+      mMaster->ScheduleStateMachine();
     }
   }
 
@@ -1051,6 +1073,14 @@ public:
     // Do nothing since no decoding is going on.
   }
 
+  void HandlePlayStateChanged(MediaDecoder::PlayState aPlayState) override
+  {
+    if (aPlayState == MediaDecoder::PLAY_STATE_PLAYING) {
+      // Schedule Step() to check if we can start playback.
+      mMaster->ScheduleStateMachine();
+    }
+  }
+
 private:
   bool mSentPlaybackEndedEvent = false;
 };
@@ -1451,14 +1481,11 @@ DecodingState::MaybeStartBuffering()
     return;
   }
 
-  // No more data to download. No need to enter buffering.
-  if (!Resource()->IsExpectingMoreData()) {
-    return;
-  }
-
   bool shouldBuffer;
   if (Reader()->UseBufferingHeuristics()) {
-    shouldBuffer = mMaster->HasLowDecodedData() && mMaster->HasLowBufferedData();
+    shouldBuffer = IsExpectingMoreData() &&
+                   mMaster->HasLowDecodedData() &&
+                   mMaster->HasLowBufferedData();
   } else {
     MOZ_ASSERT(Reader()->IsWaitForDataSupported());
     shouldBuffer =
@@ -1596,7 +1623,7 @@ BufferingState::Step()
     if ((isLiveStream || !mMaster->CanPlayThrough()) &&
         elapsed < TimeDuration::FromSeconds(mBufferingWait * mMaster->mPlaybackRate) &&
         mMaster->HasLowBufferedData(mBufferingWait * USECS_PER_S) &&
-        Resource()->IsExpectingMoreData()) {
+        IsExpectingMoreData()) {
       SLOG("Buffering: wait %ds, timeout in %.3lfs",
            mBufferingWait, mBufferingWait - elapsed.ToSeconds());
       mMaster->ScheduleStateMachineIn(USECS_PER_S);
@@ -2457,34 +2484,15 @@ void MediaDecoderStateMachine::PlayStateChanged()
 
   if (mPlayState != MediaDecoder::PLAY_STATE_PLAYING) {
     mVideoDecodeSuspendTimer.Reset();
-    return;
-  }
-
-  // Once we start playing, we don't want to minimize our prerolling, as we
-  // assume the user is likely to want to keep playing in future. This needs to
-  // happen before we invoke StartDecoding().
-  if (mMinimizePreroll) {
+  } else if (mMinimizePreroll) {
+    // Once we start playing, we don't want to minimize our prerolling, as we
+    // assume the user is likely to want to keep playing in future. This needs to
+    // happen before we invoke StartDecoding().
     mMinimizePreroll = false;
     DispatchDecodeTasksIfNeeded();
   }
 
-  // Some state transitions still happen synchronously on the main thread. So
-  // if the main thread invokes Play() and then Seek(), the seek will initiate
-  // synchronously on the main thread, and the asynchronous PlayInternal task
-  // will arrive when it's no longer valid. The proper thing to do is to move
-  // all state transitions to the state machine task queue, but for now we just
-  // make sure that none of the possible main-thread state transitions (Seek(),
-  // SetDormant(), and Shutdown()) have not occurred.
-  if (mState != DECODER_STATE_DECODING &&
-      mState != DECODER_STATE_DECODING_FIRSTFRAME &&
-      mState != DECODER_STATE_BUFFERING &&
-      mState != DECODER_STATE_COMPLETED)
-  {
-    DECODER_LOG("Unexpected state - Bailing out of PlayInternal()");
-    return;
-  }
-
-  ScheduleStateMachine();
+  mStateObj->HandlePlayStateChanged(mPlayState);
 }
 
 void MediaDecoderStateMachine::VisibilityChanged()
