@@ -90,7 +90,7 @@ def make_task_description(config, jobs):
             'description': "{} Beetmover".format(
                 dep_job.task["metadata"]["description"]),
             # do we have to define worker type somewhere?
-            'worker-type': 'beetmover/beetmover-linux-v1',
+            'worker-type': 'scriptworker-prov-v1/beetmoverworker-v1',
             'worker': {'implementation': 'beetmover',
                        'taskid_to_beetmove': {"task-reference":
                                               taskid_to_beetmove},
