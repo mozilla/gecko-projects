@@ -468,7 +468,7 @@ def build_scriptworker_signing_payload(config, task, task_def):
 def build_beetmover_payload(config, task, task_def):
     worker = task['worker']
 
-    pushdate = str(time.strftime("%Y%m%d%H%M%S",
+    pushdate = int(time.strftime("%Y%m%d%H%M%S",
                                  time.gmtime(config.params['pushdate'])))
 
     task_def['payload'] = {
