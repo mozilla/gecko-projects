@@ -22,7 +22,7 @@ class BeetmoverTask(transform.TransformTask):
         if config.get('kind-dependencies', []) != ["build", "build-signing"]:
             raise Exception("Beetmover kinds must depend on builds or signing builds")
         for task in loaded_tasks:
-            if task.attributes.get('build_platform') != "android-api-15-nightly":
+            if not task.attributes.get('nightly'):
                 continue
             if task.kind != "build-signing" and task.kind != "build":
                 continue
