@@ -81,8 +81,9 @@ def make_task_description(config, jobs):
 
         task = {
             'label': label,
-            'description': "{} Signing".format(
-                dep_job.task["metadata"]["description"]),
+            'description': "{} Signing ({})".format(
+                dep_job.task["metadata"]["description"],
+                job['signing-format']),
             'worker-type': "scriptworker-prov-v1/signing-linux-v1",
             'worker': {'implementation': 'scriptworker-signing',
                        'unsigned-artifacts': job['unsigned-artifacts']},
