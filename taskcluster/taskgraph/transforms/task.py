@@ -468,12 +468,9 @@ def build_scriptworker_signing_payload(config, task, task_def):
 def build_beetmover_payload(config, task, task_def):
     worker = task['worker']
 
-    pushdate = int(time.strftime("%Y%m%d%H%M%S",
-                                 time.gmtime(config.params['pushdate'])))
-
     task_def['payload'] = {
         'maxRunTime': worker['max-run-time'],
-        'upload_date': pushdate,
+        'upload_date': config.params['build_date'],
         'taskid_to_beetmove': worker['taskid_to_beetmove'],
         'taskid_of_manifest': worker['taskid_of_manifest'],
         'update_manifest': worker['update_manifest']
