@@ -307,11 +307,8 @@ config = {
         "graph_server_branch_name": "UX",
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
     },
-    # When build promotion goes live the mozconfig changes are probably better
-    # expressed once in files like configs/builds/releng_base_windows_32_builds.py
     'date': {
-        'update_channel': 'beta-dev',
-        'enable_release_promotion': 1,
+        'update_channel': 'nightly-date',
         'platform_overrides': {
             'linux': {
                 'src_mozconfig': 'browser/config/mozconfigs/linux32/beta',
