@@ -3,9 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const actionTypes = {
-  TOGGLE_FILTER: "TOGGLE_FILTER",
-  ENABLE_FILTER_ONLY: "ENABLE_FILTER_ONLY",
+const general = {
+  FREETEXT_FILTER_SEARCH_DELAY: 200,
 };
 
-module.exports = actionTypes;
+const actionTypes = {
+  TOGGLE_FILTER_TYPE: "TOGGLE_FILTER_TYPE",
+  ENABLE_FILTER_TYPE_ONLY: "ENABLE_FILTER_TYPE_ONLY",
+  TOGGLE_SIDEBAR: "TOGGLE_SIDEBAR",
+  SHOW_SIDEBAR: "SHOW_SIDEBAR",
+  DISABLE_TOGGLE_BUTTON: "DISABLE_TOGGLE_BUTTON",
+  SET_FILTER_TEXT: "SET_FILTER_TEXT",
+};
+
+module.exports = Object.assign({}, general, actionTypes);

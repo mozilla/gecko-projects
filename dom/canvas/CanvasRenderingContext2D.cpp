@@ -2686,7 +2686,7 @@ GetFontStyleContext(Element* aElement, const nsAString& aFont,
   // parsed (including having line-height removed).  (Older drafts of
   // the spec required font sizes be converted to pixels, but that no
   // longer seems to be required.)
-  decl->GetValue(eCSSProperty_font, aOutUsedFont);
+  decl->GetPropertyValueByID(eCSSProperty_font, aOutUsedFont);
 
   return sc.forget();
 }
@@ -4941,6 +4941,11 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
   if (NeedToCalculateBounds()) {
     bounds = gfx::Rect(aDx, aDy, aDw, aDh);
     bounds = mTarget->GetTransform().TransformBounds(bounds);
+  }
+
+  if (!IsTargetValid()) {
+    gfxCriticalError() << "Unexpected invalid target in a Canvas2d.";
+    return;
   }
 
   if (srcSurf) {

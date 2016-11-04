@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/MediaKeySystemAccess.h"
 #include "mozilla/dom/MediaKeySystemAccessBinding.h"
 #include "mozilla/Preferences.h"
@@ -54,11 +53,9 @@ NS_INTERFACE_MAP_END
 
 MediaKeySystemAccess::MediaKeySystemAccess(nsPIDOMWindowInner* aParent,
                                            const nsAString& aKeySystem,
-                                           const nsAString& aCDMVersion,
                                            const MediaKeySystemConfiguration& aConfig)
   : mParent(aParent)
   , mKeySystem(aKeySystem)
-  , mCDMVersion(aCDMVersion)
   , mConfig(aConfig)
 {
 }
@@ -96,7 +93,6 @@ MediaKeySystemAccess::CreateMediaKeys(ErrorResult& aRv)
 {
   RefPtr<MediaKeys> keys(new MediaKeys(mParent,
                                        mKeySystem,
-                                       mCDMVersion,
                                        mConfig));
   return keys->Init(aRv);
 }
@@ -121,142 +117,33 @@ HaveGMPFor(mozIGeckoMediaPluginService* aGMPService,
   return hasPlugin;
 }
 
-#ifdef XP_WIN
 static bool
-AdobePluginFileExists(const nsACString& aVersionStr,
-                      const nsAString& aFilename)
+HavePluginForKeySystem(const nsCString& aKeySystem)
 {
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
-
-  nsCOMPtr<nsIFile> path;
-  nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR, getter_AddRefs(path));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
+  bool havePlugin = false;
+  nsCOMPtr<mozIGeckoMediaPluginService> mps =
+    do_GetService("@mozilla.org/gecko-media-plugin-service;1");
+  if (mps) {
+    havePlugin = HaveGMPFor(mps,
+                            aKeySystem,
+                            NS_LITERAL_CSTRING(GMP_API_DECRYPTOR));
   }
-
-  rv = path->Append(NS_LITERAL_STRING("gmp-eme-adobe"));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
-
-  rv = path->AppendNative(aVersionStr);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
-
-  rv = path->Append(aFilename);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return false;
-  }
-
-  bool exists = false;
-  return NS_SUCCEEDED(path->Exists(&exists)) && exists;
-}
-
-static bool
-AdobePluginDLLExists(const nsACString& aVersionStr)
-{
-  return AdobePluginFileExists(aVersionStr, NS_LITERAL_STRING("eme-adobe.dll"));
-}
-
-static bool
-AdobePluginVoucherExists(const nsACString& aVersionStr)
-{
-  return AdobePluginFileExists(aVersionStr, NS_LITERAL_STRING("eme-adobe.voucher"));
-}
-#endif
-
-/* static */ bool
-MediaKeySystemAccess::IsGMPPresentOnDisk(const nsAString& aKeySystem,
-                                         const nsACString& aVersion,
-                                         nsACString& aOutMessage)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
-    // We need to be able to access the filesystem, so call this in the
-    // main process via ContentChild.
-    ContentChild* contentChild = ContentChild::GetSingleton();
-    if (NS_WARN_IF(!contentChild)) {
-      return false;
-    }
-
-    nsCString message;
-    bool result = false;
-    bool ok = contentChild->SendIsGMPPresentOnDisk(nsString(aKeySystem), nsCString(aVersion),
-                                                   &result, &message);
-    aOutMessage = message;
-    return ok && result;
-  }
-
-  bool isPresent = true;
-
-#if XP_WIN
-  if (IsPrimetimeKeySystem(aKeySystem)) {
-    if (!AdobePluginDLLExists(aVersion)) {
-      NS_WARNING("Adobe EME plugin disappeared from disk!");
-      aOutMessage = NS_LITERAL_CSTRING("Adobe DLL was expected to be on disk but was not");
-      isPresent = false;
-    }
-    if (!AdobePluginVoucherExists(aVersion)) {
-      NS_WARNING("Adobe EME voucher disappeared from disk!");
-      aOutMessage = NS_LITERAL_CSTRING("Adobe plugin voucher was expected to be on disk but was not");
-      isPresent = false;
-    }
-
-    if (!isPresent) {
-      // Reset the prefs that Firefox's GMP downloader sets, so that
-      // Firefox will try to download the plugin next time the updater runs.
-      Preferences::ClearUser("media.gmp-eme-adobe.lastUpdate");
-      Preferences::ClearUser("media.gmp-eme-adobe.version");
-    } else if (!EMEVoucherFileExists()) {
-      // Gecko doesn't have a voucher file for the plugin-container.
-      // Adobe EME isn't going to work, so don't advertise that it will.
-      aOutMessage = NS_LITERAL_CSTRING("Plugin-container voucher not present");
-      isPresent = false;
-    }
+#ifdef MOZ_WIDGET_ANDROID
+  // Check if we can use MediaDrm for this keysystem.
+  if (!havePlugin) {
+    havePlugin = mozilla::java::MediaDrmProxy::IsSchemeSupported(aKeySystem);
   }
 #endif
-
-  return isPresent;
+  return havePlugin;
 }
 
 static MediaKeySystemStatus
-EnsureMinCDMVersion(mozIGeckoMediaPluginService* aGMPService,
-                    const nsAString& aKeySystem,
-                    int32_t aMinCdmVersion,
-                    nsACString& aOutMessage,
-                    nsACString& aOutCdmVersion)
+EnsureCDMInstalled(const nsAString& aKeySystem,
+                    nsACString& aOutMessage)
 {
-  nsTArray<nsCString> tags;
-  tags.AppendElement(NS_ConvertUTF16toUTF8(aKeySystem));
-  bool hasPlugin;
-  nsAutoCString versionStr;
-  if (NS_FAILED(aGMPService->GetPluginVersionForAPI(NS_LITERAL_CSTRING(GMP_API_DECRYPTOR),
-                                                    &tags,
-                                                    &hasPlugin,
-                                                    versionStr))) {
-    aOutMessage = NS_LITERAL_CSTRING("GetPluginVersionForAPI failed");
-    return MediaKeySystemStatus::Error;
-  }
-
-  aOutCdmVersion = versionStr;
-
-  if (!hasPlugin) {
+  if (!HavePluginForKeySystem(NS_ConvertUTF16toUTF8(aKeySystem))) {
     aOutMessage = NS_LITERAL_CSTRING("CDM is not installed");
     return MediaKeySystemStatus::Cdm_not_installed;
-  }
-
-  if (!MediaKeySystemAccess::IsGMPPresentOnDisk(aKeySystem, versionStr, aOutMessage)) {
-    return MediaKeySystemStatus::Cdm_not_installed;
-  }
-
-  nsresult rv;
-  int32_t version = versionStr.ToInteger(&rv);
-  if (aMinCdmVersion != NO_CDM_VERSION &&
-      (NS_FAILED(rv) || version < 0 || aMinCdmVersion > version)) {
-    aOutMessage = NS_LITERAL_CSTRING("Installed CDM version insufficient");
-    return MediaKeySystemStatus::Cdm_insufficient_version;
   }
 
   return MediaKeySystemStatus::Available;
@@ -265,20 +152,12 @@ EnsureMinCDMVersion(mozIGeckoMediaPluginService* aGMPService,
 /* static */
 MediaKeySystemStatus
 MediaKeySystemAccess::GetKeySystemStatus(const nsAString& aKeySystem,
-                                         int32_t aMinCdmVersion,
-                                         nsACString& aOutMessage,
-                                         nsACString& aOutCdmVersion)
+                                         nsACString& aOutMessage)
 {
   MOZ_ASSERT(MediaPrefs::EMEEnabled() || IsClearkeyKeySystem(aKeySystem));
-  nsCOMPtr<mozIGeckoMediaPluginService> mps =
-    do_GetService("@mozilla.org/gecko-media-plugin-service;1");
-  if (NS_WARN_IF(!mps)) {
-    aOutMessage = NS_LITERAL_CSTRING("Failed to get GMP service");
-    return MediaKeySystemStatus::Error;
-  }
 
   if (IsClearkeyKeySystem(aKeySystem)) {
-    return EnsureMinCDMVersion(mps, aKeySystem, aMinCdmVersion, aOutMessage, aOutCdmVersion);
+    return EnsureCDMInstalled(aKeySystem, aOutMessage);
   }
 
   if (Preferences::GetBool("media.gmp-eme-adobe.visible", false)) {
@@ -294,7 +173,7 @@ MediaKeySystemAccess::GetKeySystemStatus(const nsAString& aKeySystem,
         return MediaKeySystemStatus::Cdm_not_supported;
       }
 #endif
-      return EnsureMinCDMVersion(mps, aKeySystem, aMinCdmVersion, aOutMessage, aOutCdmVersion);
+      return EnsureCDMInstalled(aKeySystem, aOutMessage);
     }
   }
 
@@ -311,7 +190,7 @@ MediaKeySystemAccess::GetKeySystemStatus(const nsAString& aKeySystem,
         aOutMessage = NS_LITERAL_CSTRING("Widevine EME disabled");
         return MediaKeySystemStatus::Cdm_disabled;
       }
-      return EnsureMinCDMVersion(mps, aKeySystem, aMinCdmVersion, aOutMessage, aOutCdmVersion);
+      return EnsureCDMInstalled(aKeySystem, aOutMessage);
 #ifdef MOZ_WIDGET_ANDROID
     } else if (Preferences::GetBool("media.mediadrm-widevinecdm.visible", false)) {
         nsCString keySystem = NS_ConvertUTF16toUTF8(aKeySystem);
@@ -425,26 +304,6 @@ struct KeySystemConfig
   KeySystemContainerSupport mMP4;
   KeySystemContainerSupport mWebM;
 };
-
-bool
-HavePluginForKeySystem(const nsCString& aKeySystem)
-{
-  bool havePlugin = false;
-  nsCOMPtr<mozIGeckoMediaPluginService> mps =
-    do_GetService("@mozilla.org/gecko-media-plugin-service;1");
-  if (mps) {
-    havePlugin = HaveGMPFor(mps,
-                            aKeySystem,
-                            NS_LITERAL_CSTRING(GMP_API_DECRYPTOR));
-  }
-#ifdef MOZ_WIDGET_ANDROID
-  // Check if we can use MediaDrm for this keysystem.
-  if (!havePlugin) {
-     havePlugin = mozilla::java::MediaDrmProxy::IsSchemeSupported(aKeySystem);
-  }
-#endif
-  return havePlugin;
-}
 
 static nsTArray<KeySystemConfig>
 GetSupportedKeySystems()

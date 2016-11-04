@@ -1580,10 +1580,18 @@ MMod::computeRange(TempAllocator& alloc)
 
     // If both operands are non-negative integers, we can optimize this to an
     // unsigned mod.
-    if (specialization() == MIRType::Int32 && lhs.lower() >= 0 && rhs.lower() > 0 &&
-        !lhs.canHaveFractionalPart() && !rhs.canHaveFractionalPart())
-    {
-        unsigned_ = true;
+    if (specialization() == MIRType::Int32 && rhs.lower() > 0) {
+        bool hasDoubles = lhs.lower() < 0 || lhs.canHaveFractionalPart() ||
+            rhs.canHaveFractionalPart();
+        // It is not possible to check that lhs.lower() >= 0, since the range
+        // of a ursh with rhs a 0 constant is wrapped around the int32 range in
+        // Range::Range(). However, IsUint32Type() will only return true for
+        // nodes that lie in the range [0, UINT32_MAX].
+        bool hasUint32s = IsUint32Type(getOperand(0)) &&
+            getOperand(1)->type() == MIRType::Int32 &&
+            (IsUint32Type(getOperand(1)) || getOperand(1)->isConstant());
+        if (!hasDoubles || hasUint32s)
+            unsigned_ = true;
     }
 
     // For unsigned mod, we have to convert both operands to unsigned.
@@ -1967,7 +1975,7 @@ RangeAnalysis::analyzeLoop(MBasicBlock* header)
     for (MPhiIterator iter(header->phisBegin()); iter != header->phisEnd(); iter++)
         analyzeLoopPhi(header, iterationBound, *iter);
 
-    if (!mir->compilingAsmJS()) {
+    if (!mir->compilingWasm()) {
         // Try to hoist any bounds checks from the loop using symbolic bounds.
 
         Vector<MBoundsCheck*, 0, JitAllocPolicy> hoistedChecks(alloc());
@@ -2683,7 +2691,7 @@ MCompare::needTruncation(TruncateKind kind)
     // the code presumably is already using the type it wants. Also, AsmJS
     // doesn't support bailouts, so we woudn't be able to rely on
     // TruncateAfterBailouts to convert our inputs.
-    if (block()->info().compilingAsmJS())
+    if (block()->info().compilingWasm())
        return false;
 
     if (!isDoubleComparison())
@@ -3095,7 +3103,7 @@ RangeAnalysis::truncate()
     // is based on IonMonkey which assumes that we can bailout if the truncation
     // logic fails. As AsmJS code has no bailout mechanism, it is safer to avoid
     // any automatic truncations.
-    MOZ_ASSERT(!mir->compilingAsmJS());
+    MOZ_ASSERT(!mir->compilingWasm());
 
     Vector<MDefinition*, 16, SystemAllocPolicy> worklist;
 

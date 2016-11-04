@@ -425,12 +425,6 @@ AliasSet::Name(size_t flag)
     }
 }
 
-MTest*
-MTest::NewAsm(TempAllocator& alloc, MDefinition* ins, MBasicBlock* ifFalse)
-{
-    return new(alloc) MTest(ins, nullptr, ifFalse);
-}
-
 void
 MTest::cacheOperandMightEmulateUndefined(CompilerConstraintList* constraints)
 {
@@ -848,7 +842,7 @@ MConstant::NewInt64(TempAllocator& alloc, int64_t i)
 }
 
 MConstant*
-MConstant::NewAsmJS(TempAllocator& alloc, const Value& v, MIRType type)
+MConstant::New(TempAllocator& alloc, const Value& v, MIRType type)
 {
     if (type == MIRType::Float32)
         return NewFloat32(alloc, v.toNumber());
@@ -2166,20 +2160,6 @@ MRound::trySpecializeFloat32(TempAllocator& alloc)
         specialization_ = MIRType::Float32;
 }
 
-MCompare*
-MCompare::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, JSOp op,
-                   CompareType compareType)
-{
-    MOZ_ASSERT(compareType == Compare_Int32 || compareType == Compare_UInt32 ||
-               compareType == Compare_Int64 || compareType == Compare_UInt64 ||
-               compareType == Compare_Double || compareType == Compare_Float32);
-    MCompare* comp = new(alloc) MCompare(left, right, op);
-    comp->compareType_ = compareType;
-    comp->operandMightEmulateUndefined_ = false;
-    comp->setResultType(MIRType::Int32);
-    return comp;
-}
-
 MTableSwitch*
 MTableSwitch::New(TempAllocator& alloc, MDefinition* ins, int32_t low, int32_t high)
 {
@@ -2201,7 +2181,7 @@ MGoto::New(TempAllocator::Fallible alloc, MBasicBlock* target)
 }
 
 MGoto*
-MGoto::NewAsm(TempAllocator& alloc)
+MGoto::New(TempAllocator& alloc)
 {
     return new(alloc) MGoto(nullptr);
 }
@@ -2815,6 +2795,17 @@ MBinaryBitwiseInstruction::foldUnnecessaryBitop()
     if (specialization_ != MIRType::Int32)
         return this;
 
+    // Fold unsigned shift right operator when the second operand is zero and
+    // the only use is an unsigned modulo. Thus, the expression
+    // |(x >>> 0) % y| becomes |x % y|.
+    if (isUrsh() && hasOneDefUse() && IsUint32Type(this)) {
+        for (MUseDefIterator use(this); use; use++) {
+            if (use.def()->isMod() && use.def()->toMod()->isUnsigned())
+                return getOperand(0);
+            break;
+        }
+    }
+
     // Eliminate bitwise operations that are no-ops when used on integer
     // inputs, such as (x | 0).
 
@@ -3034,6 +3025,39 @@ NeedNegativeZeroCheck(MDefinition* def)
         }
     }
     return false;
+}
+
+void
+MBinaryArithInstruction::printOpcode(GenericPrinter& out) const
+{
+    MDefinition::printOpcode(out);
+
+    switch (type()) {
+      case MIRType::Int32:
+        if (isDiv())
+            out.printf(" [%s]", toDiv()->isUnsigned() ? "uint32" : "int32");
+        else if (isMod())
+            out.printf(" [%s]", toMod()->isUnsigned() ? "uint32" : "int32");
+        else
+            out.printf(" [int32]");
+        break;
+      case MIRType::Int64:
+        if (isDiv())
+            out.printf(" [%s]", toDiv()->isUnsigned() ? "uint64" : "int64");
+        else if (isMod())
+            out.printf(" [%s]", toMod()->isUnsigned() ? "uint64" : "int64");
+        else
+            out.printf(" [int64]");
+        break;
+      case MIRType::Float32:
+        out.printf(" [float]");
+        break;
+      case MIRType::Double:
+        out.printf(" [double]");
+        break;
+      default:
+        break;
+    }
 }
 
 MBinaryArithInstruction*
@@ -3792,7 +3816,7 @@ MCompare::cacheOperandMightEmulateUndefined(CompilerConstraintList* constraints)
 }
 
 MBitNot*
-MBitNot::NewAsmJS(TempAllocator& alloc, MDefinition* input)
+MBitNot::NewInt32(TempAllocator& alloc, MDefinition* input)
 {
     MBitNot* ins = new(alloc) MBitNot(input);
     ins->specialization_ = MIRType::Int32;
@@ -3882,7 +3906,7 @@ MBitAnd::New(TempAllocator& alloc, MDefinition* left, MDefinition* right)
 }
 
 MBitAnd*
-MBitAnd::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
+MBitAnd::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
 {
     MBitAnd* ins = new(alloc) MBitAnd(left, right, type);
     ins->specializeAs(type);
@@ -3896,7 +3920,7 @@ MBitOr::New(TempAllocator& alloc, MDefinition* left, MDefinition* right)
 }
 
 MBitOr*
-MBitOr::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
+MBitOr::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
 {
     MBitOr* ins = new(alloc) MBitOr(left, right, type);
     ins->specializeAs(type);
@@ -3910,7 +3934,7 @@ MBitXor::New(TempAllocator& alloc, MDefinition* left, MDefinition* right)
 }
 
 MBitXor*
-MBitXor::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
+MBitXor::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
 {
     MBitXor* ins = new(alloc) MBitXor(left, right, type);
     ins->specializeAs(type);
@@ -3924,7 +3948,7 @@ MLsh::New(TempAllocator& alloc, MDefinition* left, MDefinition* right)
 }
 
 MLsh*
-MLsh::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
+MLsh::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
 {
     MLsh* ins = new(alloc) MLsh(left, right, type);
     ins->specializeAs(type);
@@ -3938,7 +3962,7 @@ MRsh::New(TempAllocator& alloc, MDefinition* left, MDefinition* right)
 }
 
 MRsh*
-MRsh::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
+MRsh::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
 {
     MRsh* ins = new(alloc) MRsh(left, right, type);
     ins->specializeAs(type);
@@ -3952,7 +3976,7 @@ MUrsh::New(TempAllocator& alloc, MDefinition* left, MDefinition* right)
 }
 
 MUrsh*
-MUrsh::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
+MUrsh::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, MIRType type)
 {
     MUrsh* ins = new(alloc) MUrsh(left, right, type);
     ins->specializeAs(type);
@@ -4157,8 +4181,17 @@ MToInt32::foldsTo(TempAllocator& alloc)
         }
     }
 
-    if (input->type() == MIRType::Int32)
+    // Do not fold the TruncateToInt32 node when the input is uint32 (e.g. ursh
+    // with a zero constant. Consider the test jit-test/tests/ion/bug1247880.js,
+    // where the relevant code is: |(imul(1, x >>> 0) % 2)|. The imul operator
+    // is folded to a MTruncateToInt32 node, which will result in this MIR:
+    // MMod(MTruncateToInt32(MUrsh(x, MConstant(0))), MConstant(2)). Note that
+    // the MUrsh node's type is int32 (since uint32 is not implemented), and
+    // that would fold the MTruncateToInt32 node. This will make the modulo
+    // unsigned, while is should have been signed.
+    if (input->type() == MIRType::Int32 && !IsUint32Type(input))
         return input;
+
     return this;
 }
 
@@ -4176,7 +4209,15 @@ MTruncateToInt32::foldsTo(TempAllocator& alloc)
     if (input->isBox())
         input = input->getOperand(0);
 
-    if (input->type() == MIRType::Int32)
+    // Do not fold the TruncateToInt32 node when the input is uint32 (e.g. ursh
+    // with a zero constant. Consider the test jit-test/tests/ion/bug1247880.js,
+    // where the relevant code is: |(imul(1, x >>> 0) % 2)|. The imul operator
+    // is folded to a MTruncateToInt32 node, which will result in this MIR:
+    // MMod(MTruncateToInt32(MUrsh(x, MConstant(0))), MConstant(2)). Note that
+    // the MUrsh node's type is int32 (since uint32 is not implemented), and
+    // that would fold the MTruncateToInt32 node. This will make the modulo
+    // unsigned, while is should have been signed.
+    if (input->type() == MIRType::Int32 && !IsUint32Type(input))
         return input;
 
     if (input->type() == MIRType::Double && input->isConstant()) {
@@ -5597,7 +5638,7 @@ MGetPropertyCache::updateForReplacement(MDefinition* ins)
 }
 
 MDefinition*
-MAsmJSUnsignedToDouble::foldsTo(TempAllocator& alloc)
+MWasmUnsignedToDouble::foldsTo(TempAllocator& alloc)
 {
     if (input()->isConstant() && input()->type() == MIRType::Int32)
         return MConstant::New(alloc, DoubleValue(uint32_t(input()->toConstant()->toInt32())));
@@ -5606,12 +5647,12 @@ MAsmJSUnsignedToDouble::foldsTo(TempAllocator& alloc)
 }
 
 MDefinition*
-MAsmJSUnsignedToFloat32::foldsTo(TempAllocator& alloc)
+MWasmUnsignedToFloat32::foldsTo(TempAllocator& alloc)
 {
     if (input()->isConstant() && input()->type() == MIRType::Int32) {
         double dval = double(uint32_t(input()->toConstant()->toInt32()));
         if (IsFloat32Representable(dval))
-            return MConstant::NewAsmJS(alloc, JS::Float32Value(float(dval)), MIRType::Float32);
+            return MConstant::New(alloc, JS::Float32Value(float(dval)), MIRType::Float32);
     }
 
     return this;

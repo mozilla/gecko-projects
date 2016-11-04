@@ -766,8 +766,7 @@ Gecko_SetUrlImageValue(nsStyleImage* aImage,
                        ThreadSafePrincipalHolder* aPrincipal)
 {
   RefPtr<nsStyleImageRequest> req =
-    CreateStyleImageRequest(nsStyleImageRequest::Mode::Track |
-                            nsStyleImageRequest::Mode::Lock,
+    CreateStyleImageRequest(nsStyleImageRequest::Mode::Track,
                             aURLString, aURLStringLength,
                             aBaseURI, aReferrer, aPrincipal);
   aImage->SetImageRequest(req.forget());
@@ -828,8 +827,7 @@ Gecko_SetListStyleImage(nsStyleList* aList,
                         ThreadSafePrincipalHolder* aPrincipal)
 {
   aList->mListStyleImage =
-    CreateStyleImageRequest(nsStyleImageRequest::Mode::Track |
-                            nsStyleImageRequest::Mode::Lock,
+    CreateStyleImageRequest(nsStyleImageRequest::Mode(0),
                             aURLString, aURLStringLength,
                             aBaseURI, aReferrer, aPrincipal);
 }

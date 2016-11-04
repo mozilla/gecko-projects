@@ -50,14 +50,12 @@
 #include "mozilla/dom/ExternalHelperAppParent.h"
 #include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/GeolocationBinding.h"
-#include "mozilla/dom/MediaKeySystemAccess.h"
 #include "mozilla/dom/Notification.h"
 #include "mozilla/dom/PContentBridgeParent.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
 #include "mozilla/dom/PCycleCollectWithLogsParent.h"
 #include "mozilla/dom/PMemoryReportRequestParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
-#include "mozilla/dom/bluetooth/PBluetoothParent.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestParent.h"
 #include "mozilla/dom/icc/IccParent.h"
 #include "mozilla/dom/mobileconnection/MobileConnectionParent.h"
@@ -225,11 +223,6 @@ using namespace mozilla::system;
 #include <gdk/gdk.h>
 #endif
 
-#ifdef MOZ_B2G_BT
-#include "BluetoothParent.h"
-#include "BluetoothService.h"
-#endif
-
 #include "mozilla/RemoteSpellCheckEngineParent.h"
 
 #include "Crypto.h"
@@ -284,7 +277,6 @@ using mozilla::ProfileGatherer;
 #ifdef MOZ_CRASHREPORTER
 using namespace CrashReporter;
 #endif
-using namespace mozilla::dom::bluetooth;
 using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::icc;
 using namespace mozilla::dom::power;
@@ -750,14 +742,14 @@ ContentParent::JoinAllSubprocesses()
 ContentParent::GetNewOrUsedBrowserProcess(bool aForBrowserElement,
                                           ProcessPriority aPriority,
                                           ContentParent* aOpener,
-                                          bool aFreshProcess)
+                                          bool aLargeAllocationProcess)
 {
   nsTArray<ContentParent*>* contentParents;
   int32_t maxContentParents;
 
   // Decide which pool of content parents we are going to be pulling from based
-  // on the aFreshProcess flag.
-  if (aFreshProcess) {
+  // on the aLargeAllocationProcess flag.
+  if (aLargeAllocationProcess) {
     if (!sLargeAllocationContentParents) {
       sLargeAllocationContentParents = new nsTArray<ContentParent*>();
     }
@@ -778,7 +770,9 @@ ContentParent::GetNewOrUsedBrowserProcess(bool aForBrowserElement,
   }
 
   if (contentParents->Length() >= uint32_t(maxContentParents)) {
-    uint32_t startIdx = rand() % contentParents->Length();
+    uint32_t maxSelectable = std::min(static_cast<uint32_t>(contentParents->Length()),
+                                      static_cast<uint32_t>(maxContentParents));
+    uint32_t startIdx = rand() % maxSelectable;
     uint32_t currIdx = startIdx;
     do {
       RefPtr<ContentParent> p = (*contentParents)[currIdx];
@@ -786,7 +780,7 @@ ContentParent::GetNewOrUsedBrowserProcess(bool aForBrowserElement,
       if (p->mOpener == aOpener) {
         return p.forget();
       }
-      currIdx = (currIdx + 1) % contentParents->Length();
+      currIdx = (currIdx + 1) % maxSelectable;
     } while (currIdx != startIdx);
   }
 
@@ -807,6 +801,9 @@ ContentParent::GetNewOrUsedBrowserProcess(bool aForBrowserElement,
 
     p->Init();
   }
+
+  p->mLargeAllocationProcess = aLargeAllocationProcess;
+
   p->ForwardKnownInfo();
 
   contentParents->AppendElement(p);
@@ -963,29 +960,6 @@ bool
 ContentParent::RecvCreateGMPService()
 {
   return PGMPService::Open(this);
-}
-
-bool
-ContentParent::RecvGetGMPPluginVersionForAPI(const nsCString& aAPI,
-                                             nsTArray<nsCString>&& aTags,
-                                             bool* aHasVersion,
-                                             nsCString* aVersion)
-{
-  return GMPServiceParent::RecvGetGMPPluginVersionForAPI(aAPI, Move(aTags),
-                                                         aHasVersion,
-                                                         aVersion);
-}
-
-bool
-ContentParent::RecvIsGMPPresentOnDisk(const nsString& aKeySystem,
-                                      const nsCString& aVersion,
-                                      bool* aIsPresent,
-                                      nsCString* aMessage)
-{
-  *aIsPresent = MediaKeySystemAccess::IsGMPPresentOnDisk(aKeySystem,
-                                                         aVersion,
-                                                         *aMessage);
-  return true;
 }
 
 bool
@@ -1415,6 +1389,9 @@ ContentParent::Init()
     StartProfiler(currentProfilerParams);
   }
 #endif
+
+  RefPtr<GeckoMediaPluginServiceParent> gmps(GeckoMediaPluginServiceParent::GetSingleton());
+  gmps->UpdateContentProcessGMPCapabilities();
 }
 
 void
@@ -1773,13 +1750,13 @@ ContentParent::RecvDeallocateLayerTreeId(const uint64_t& aId)
 {
   GPUProcessManager* gpu = GPUProcessManager::Get();
 
-  if (!gpu->IsLayerTreeIdMapped(aId, this->OtherPid()))
+  if (!gpu->IsLayerTreeIdMapped(aId, OtherPid()))
   {
     // You can't deallocate layer tree ids that you didn't allocate
     KillHard("DeallocateLayerTreeId");
   }
 
-  gpu->DeallocateLayerTreeId(aId);
+  gpu->UnmapLayerTreeId(aId, OtherPid());
 
   return true;
 }
@@ -1986,6 +1963,12 @@ ContentParent::NotifyTabDestroying(const TabId& aTabId,
         return;
     }
 
+    uint32_t numberOfParents = sNonAppContentParents ? sNonAppContentParents->Length() : 0;
+    int32_t processesToKeepAlive = Preferences::GetInt("dom.ipc.keepProcessesAlive", 0);
+    if (!cp->mLargeAllocationProcess && static_cast<int32_t>(numberOfParents) <= processesToKeepAlive) {
+      return;
+    }
+
     // We're dying now, so prevent this content process from being
     // recycled during its shutdown procedure.
     cp->MarkAsDead();
@@ -2034,7 +2017,15 @@ ContentParent::NotifyTabDestroyed(const TabId& aTabId,
   // us down.
   ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
   nsTArray<TabId> tabIds = cpm->GetTabParentsByProcessId(this->ChildID());
-  if (tabIds.Length() == 1) {
+
+  // We might want to keep alive some content processes for testing, because of performance
+  // reasons, but we don't want to alter behavior if the pref is not set.
+  uint32_t numberOfParents = sNonAppContentParents ? sNonAppContentParents->Length() : 0;
+  int32_t processesToKeepAlive = Preferences::GetInt("dom.ipc.keepProcessesAlive", 0);
+  bool shouldKeepAliveAny = !mLargeAllocationProcess && processesToKeepAlive > 0;
+  bool shouldKeepAliveThis = shouldKeepAliveAny && static_cast<int32_t>(numberOfParents) <= processesToKeepAlive;
+
+  if (tabIds.Length() == 1 && !shouldKeepAliveThis) {
     // In the case of normal shutdown, send a shutdown message to child to
     // allow it to perform shutdown tasks.
     MessageLoop::current()->PostTask(NewRunnableMethod
@@ -2125,6 +2116,7 @@ ContentParent::ContentParent(mozIApplication* aApp,
   : nsIContentParent()
   , mOpener(aOpener)
   , mIsForBrowser(aIsForBrowser)
+  , mLargeAllocationProcess(false)
 {
   InitializeMembers();  // Perform common initialization.
 
@@ -3485,43 +3477,6 @@ ContentParent::DeallocPStorageParent(PStorageParent* aActor)
   DOMStorageDBParent* child = static_cast<DOMStorageDBParent*>(aActor);
   child->ReleaseIPDLReference();
   return true;
-}
-
-PBluetoothParent*
-ContentParent::AllocPBluetoothParent()
-{
-#ifdef MOZ_B2G_BT
-  if (!AssertAppProcessPermission(this, "bluetooth")) {
-  return nullptr;
-  }
-  return new mozilla::dom::bluetooth::BluetoothParent();
-#else
-  MOZ_CRASH("No support for bluetooth on this platform!");
-#endif
-}
-
-bool
-ContentParent::DeallocPBluetoothParent(PBluetoothParent* aActor)
-{
-#ifdef MOZ_B2G_BT
-  delete aActor;
-  return true;
-#else
-  MOZ_CRASH("No support for bluetooth on this platform!");
-#endif
-}
-
-bool
-ContentParent::RecvPBluetoothConstructor(PBluetoothParent* aActor)
-{
-#ifdef MOZ_B2G_BT
-  RefPtr<BluetoothService> btService = BluetoothService::Get();
-  NS_ENSURE_TRUE(btService, false);
-
-  return static_cast<BluetoothParent*>(aActor)->InitWithService(btService);
-#else
-  MOZ_CRASH("No support for bluetooth on this platform!");
-#endif
 }
 
 PPresentationParent*

@@ -85,6 +85,10 @@ function transformError(error, engineName) {
     return { name: "autherror", from: error.source };
   }
 
+  if (error instanceof Ci.mozIStorageError) {
+    return { name: "sqlerror", code: error.result };
+  }
+
   let httpCode = error.status ||
     (error.response && error.response.status) ||
     error.code;
@@ -173,8 +177,9 @@ class EngineRecord {
       log.error(`Multiple validations occurred for engine ${this.name}!`);
       return;
     }
-    let { problems, duration, recordCount } = validationResult;
+    let { problems, version, duration, recordCount } = validationResult;
     let validation = {
+      version: version || 0,
       checked: recordCount || 0,
     };
     if (duration > 0) {

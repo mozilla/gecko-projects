@@ -18,7 +18,6 @@ const { ADDON_SIGNING, REQUIRE_SIGNING } = CONSTANTS
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AddonManager.jsm");
-/* globals AddonManagerPrivate*/
 Cu.import("resource://gre/modules/Preferences.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository",
@@ -1003,7 +1002,8 @@ var loadManifestFromWebManifest = Task.async(function*(aUri) {
     // localization placeholders still in place.
     let rawManifest = extension.rawManifest;
 
-    let creator = rawManifest.author;
+    // As a convenience, allow author to be set if its a string bug 1313567.
+    let creator = typeof(rawManifest.author) === 'string' ? rawManifest.author : null;
     let homepageURL = rawManifest.homepage_url;
 
     // Allow developer to override creator and homepage_url.

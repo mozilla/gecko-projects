@@ -87,7 +87,6 @@ static SECStatus tls13_ClientHandleFinished(sslSocket *ss,
 static SECStatus tls13_ServerHandleFinished(sslSocket *ss,
                                             SSL3Opaque *b, PRUint32 length,
                                             const TLS13CombinedHash *hashes);
-static SECStatus tls13_SendNewSessionTicket(sslSocket *ss);
 static SECStatus tls13_HandleNewSessionTicket(sslSocket *ss, SSL3Opaque *b,
                                               PRUint32 length);
 static void
@@ -202,8 +201,7 @@ tls13_SetHsState(sslSocket *ss, SSL3WaitState ws,
         tls13_HandshakeState(ws);
 
     SSL_TRC(3, ("%d: TLS13[%d]: %s state change from %s->%s in %s (%s:%d)",
-                SSL_GETPID(), ss->fd,
-                ss->sec.isServer ? "server" : "client",
+                SSL_GETPID(), ss->fd, SSL_ROLE(ss),
                 tls13_HandshakeState(TLS13_BASE_WAIT_STATE(ss->ssl3.hs.ws)),
                 new_state_name,
                 func, file, line));
@@ -332,7 +330,7 @@ tls13_CreateKeyShare(sslSocket *ss, const sslNamedGroupDef *groupDef)
     PORT_Assert(groupDef);
     switch (groupDef->keaType) {
         case ssl_kea_ecdh:
-            rv = ssl_CreateECDHEphemeralKeyPair(groupDef, &keyPair);
+            rv = ssl_CreateECDHEphemeralKeyPair(ss, groupDef, &keyPair);
             if (rv != SECSuccess) {
                 return SECFailure;
             }
@@ -589,8 +587,7 @@ tls13_RecoverWrappedSharedSecret(sslSocket *ss, sslSessionID *sid)
     SECStatus rv;
 
     SSL_TRC(3, ("%d: TLS13[%d]: recovering static secret (%s)",
-                SSL_GETPID(), ss->fd,
-                ss->sec.isServer ? "server" : "client"));
+                SSL_GETPID(), ss->fd, SSL_ROLE(ss)));
     if (!sid->u.ssl3.keys.msIsWrapped) {
         PORT_Assert(0); /* I think this can't happen. */
         return SECFailure;
@@ -749,6 +746,9 @@ tls13_ComputeEarlySecrets(sslSocket *ss, PRBool setup0Rtt)
     PRUint8 hash[HASH_LENGTH_MAX];
     unsigned int len;
 
+    SSL_TRC(5, ("%d: TLS13[%d]: compute early secrets (%s)",
+                SSL_GETPID(), ss->fd, SSL_ROLE(ss)));
+
     /* Extract off the resumptionPsk (if present), else pass the NULL
      * resumptionPsk which will be internally translated to zeroes. */
     PORT_Assert(!ss->ssl3.hs.currentSecret);
@@ -823,6 +823,9 @@ tls13_ComputeHandshakeSecrets(sslSocket *ss)
     SECStatus rv;
     PK11SymKey *newSecret = NULL;
 
+    SSL_TRC(5, ("%d: TLS13[%d]: compute handshake secrets (%s)",
+                SSL_GETPID(), ss->fd, SSL_ROLE(ss)));
+
     /* First update |currentSecret| to add |dheSecret|, if any. */
     PORT_Assert(ss->ssl3.hs.currentSecret);
     PORT_Assert(ss->ssl3.hs.dheSecret);
@@ -854,6 +857,9 @@ tls13_ComputeHandshakeSecrets(sslSocket *ss)
         LOG_ERROR(ss, SEC_ERROR_LIBRARY_FAILURE);
         return rv;
     }
+
+    SSL_TRC(5, ("%d: TLS13[%d]: compute master secret (%s)",
+                SSL_GETPID(), ss->fd, SSL_ROLE(ss)));
 
     /* Crank HKDF forward to make master secret, which we
      * stuff in current secret. */
@@ -1146,6 +1152,8 @@ tls13_NegotiateKeyExchange(sslSocket *ss, TLS13KeyShareEntry **clientShare)
         FATAL_ERROR(ss, SSL_ERROR_NO_CYPHER_OVERLAP, handshake_failure);
         return SECFailure;
     }
+    SSL_TRC(3, ("%d: TLS13[%d]: group = %d", SSL_GETPID(), ss->fd,
+                preferredGroup->name));
 
     SSL_TRC(3, ("%d: TLS13[%d]: group = %d", preferredGroup->name));
 
@@ -1187,7 +1195,9 @@ tls13_SelectServerCert(sslSocket *ss)
             continue;
         }
 
-        rv = ssl_PickSignatureScheme(ss, cert->serverKeyPair->pubKey,
+        rv = ssl_PickSignatureScheme(ss,
+                                     cert->serverKeyPair->pubKey,
+                                     cert->serverKeyPair->privKey,
                                      ss->ssl3.hs.clientSigSchemes,
                                      ss->ssl3.hs.numClientSigScheme,
                                      PR_FALSE);
@@ -2439,8 +2449,9 @@ tls13_DeriveTrafficKeys(sslSocket *ss, ssl3CipherSpec *spec,
     PORT_Assert(prkp != NULL);
     prk = *prkp;
 
-    SSL_TRC(3, ("%d: TLS13[%d]: deriving traffic keys phase='%s'",
-                SSL_GETPID(), ss->fd, phase));
+    SSL_TRC(3, ("%d: TLS13[%d]: deriving %s traffic keys phase='%s'",
+                SSL_GETPID(), ss->fd,
+                (direction == CipherSpecWrite) ? "write" : "read", phase));
     PORT_Assert(phase);
     spec->phase = phase;
 
@@ -2574,8 +2585,7 @@ tls13_SetCipherSpec(sslSocket *ss, TrafficKeyType type,
     ssl_ReleaseSpecWriteLock(ss);
 
     SSL_TRC(3, ("%d: TLS13[%d]: %s installed key for phase='%s'.%d dir=%s",
-                SSL_GETPID(), ss->fd,
-                ss->sec.isServer ? "server" : "client",
+                SSL_GETPID(), ss->fd, SSL_ROLE(ss),
                 spec->phase, spec->epoch,
                 direction == CipherSpecRead ? "read" : "write"));
 
@@ -3343,10 +3353,7 @@ tls13_ServerHandleFinished(sslSocket *ss, SSL3Opaque *b, PRUint32 length,
             return SECFailure; /* Error code and alerts handled below */
         }
         ssl_GetXmitBufLock(ss);
-        if (ss->opt.enableSessionTickets &&
-            ss->ssl3.hs.kea_def->authKeyType != ssl_auth_psk) {
-            /* TODO(ekr@rtfm.com): Add support for new tickets in PSK
-             * (bug 1281034).*/
+        if (ss->opt.enableSessionTickets) {
             rv = tls13_SendNewSessionTicket(ss);
             if (rv != SECSuccess) {
                 ssl_ReleaseXmitBufLock(ss);
@@ -3530,7 +3537,7 @@ loser:
  *       TicketExtension extensions<0..2^16-2>;
  *   } NewSessionTicket;
  */
-static SECStatus
+SECStatus
 tls13_SendNewSessionTicket(sslSocket *ss)
 {
     PRUint16 message_length;
@@ -3715,10 +3722,6 @@ tls13_HandleNewSessionTicket(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
         return SECFailure;
     }
 
-    /* TODO(ekr@rtfm.com): Re-enable new tickets when PSK mode is
-     * in use. I believe this works, but I can't test it until the
-     * server side supports it. Bug 1257047.
-     */
     if (!ss->opt.noCache) {
         PORT_Assert(ss->sec.ci.sid);
 
@@ -3743,13 +3746,24 @@ tls13_HandleNewSessionTicket(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
         /* Replace a previous session ticket when
          * we receive a second NewSessionTicket message. */
         if (ss->sec.ci.sid->cached == in_client_cache) {
-            /* Uncache first. */
-            ss->sec.uncache(ss->sec.ci.sid);
+            /* Create a new session ID. */
+            sslSessionID *sid = ssl3_NewSessionID(ss, PR_FALSE);
+            if (!sid) {
+                return SECFailure;
+            }
 
-            /* Then destroy and rebuild the SID. */
+            /* Copy over the peerCert. */
+            PORT_Assert(ss->sec.ci.sid->peerCert);
+            sid->peerCert = CERT_DupCertificate(ss->sec.ci.sid->peerCert);
+            if (!sid->peerCert) {
+                ssl_FreeSID(sid);
+                return SECFailure;
+            }
+
+            /* Destroy the old SID. */
+            ss->sec.uncache(ss->sec.ci.sid);
             ssl_FreeSID(ss->sec.ci.sid);
-            ss->sec.ci.sid = ssl3_NewSessionID(ss, PR_FALSE);
-            ss->sec.ci.sid->cached = never_cached;
+            ss->sec.ci.sid = sid;
         }
 
         ssl3_SetSIDSessionTicket(ss->sec.ci.sid, &ticket);

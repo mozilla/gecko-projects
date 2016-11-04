@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* globals template */
-
 "use strict";
 
 const promise = require("promise");
@@ -28,7 +26,8 @@ const MarkupReadOnlyContainer = require("devtools/client/inspector/markup/views/
 const MarkupTextContainer = require("devtools/client/inspector/markup/views/text-container");
 const RootContainer = require("devtools/client/inspector/markup/views/root-container");
 
-const INSPECTOR_L10N = new LocalizationHelper("devtools/locale/inspector.properties");
+const INSPECTOR_L10N =
+      new LocalizationHelper("devtools/client/locales/inspector.properties");
 
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;

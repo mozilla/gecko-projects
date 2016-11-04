@@ -134,7 +134,7 @@ GetMediaManagerLog()
 }
 #define LOG(msg) MOZ_LOG(GetMediaManagerLog(), mozilla::LogLevel::Debug, msg)
 
-using dom::BasicUnstoppableTrackSource;
+using dom::BasicTrackSource;
 using dom::ConstrainDOMStringParameters;
 using dom::File;
 using dom::GetUserMediaRequest;
@@ -1022,7 +1022,7 @@ public:
                  "Only fake tracks should appear dynamically");
     NS_ASSERTION(kVideoTrack != aInputTrackID,
                  "Only fake tracks should appear dynamically");
-    return do_AddRef(new BasicUnstoppableTrackSource(mPrincipal));
+    return do_AddRef(new BasicTrackSource(mPrincipal));
   }
 
 protected:
@@ -1170,7 +1170,7 @@ public:
                          const MediaSourceEnum aSource,
                          const TrackID aTrackID,
                          const PeerIdentity* aPeerIdentity)
-          : MediaStreamTrackSource(aPrincipal, false, aLabel), mListener(aListener),
+          : MediaStreamTrackSource(aPrincipal, aLabel), mListener(aListener),
             mSource(aSource), mTrackID(aTrackID), mPeerIdentity(aPeerIdentity) {}
 
         MediaSourceEnum GetMediaSource() const override
@@ -1919,9 +1919,9 @@ media::Parent<media::NonE10s>*
 MediaManager::GetNonE10sParent()
 {
   if (!mNonE10sParent) {
-    mNonE10sParent = MakeUnique<media::Parent<media::NonE10s>>(true);
+    mNonE10sParent = new media::Parent<media::NonE10s>();
   }
-  return mNonE10sParent.get();
+  return mNonE10sParent;
 }
 
 /* static */ void

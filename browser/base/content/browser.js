@@ -621,7 +621,7 @@ var gPopupBlockerObserver = {
 
   showAllBlockedPopups: function (aBrowser)
   {
-    let popups = aBrowser.retrieveListOfBlockedPopups().then(popups => {
+    aBrowser.retrieveListOfBlockedPopups().then(popups => {
       for (let i = 0; i < popups.length; i++) {
         if (popups[i].popupWindowURIspec)
           aBrowser.unblockPopup(i);
@@ -796,7 +796,6 @@ function _loadURIWithFlags(browser, uri, params) {
   let referrer = params.referrerURI;
   let referrerPolicy = ('referrerPolicy' in params ? params.referrerPolicy :
                         Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT);
-  let charset = params.charset;
   let postData = params.postData;
 
   let wasRemote = browser.isRemoteBrowser;
@@ -3104,7 +3103,6 @@ function populateMirrorTabMenu(popup) {
   if (!Services.prefs.getBoolPref("browser.casting.enabled")) {
     return;
   }
-  let videoEl = this.target;
   let doc = popup.ownerDocument;
   let services = CastingApps.getServicesForMirroring();
   services.forEach(service => {
@@ -3576,17 +3574,9 @@ const BrowserSearch = {
       return;
     }
 
-    let openSearchPageIfFieldIsNotActive = function(aSearchBar) {
+    let focusUrlBarIfSearchFieldIsNotActive = function(aSearchBar) {
       if (!aSearchBar || document.activeElement != aSearchBar.textbox.inputField) {
-        let url = gBrowser.currentURI.spec.toLowerCase();
-        let mm = gBrowser.selectedBrowser.messageManager;
-        let newTabRemoted = Services.prefs.getBoolPref("browser.newtabpage.remote");
-        let localNewTabEnabled = url === "about:newtab" && !newTabRemoted && NewTabUtils.allPages.enabled;
-        if (url === "about:home" || localNewTabEnabled) {
-          ContentSearch.focusInput(mm);
-        } else {
-          openUILinkIn("about:home", "current");
-        }
+        focusAndSelectUrlBar();
       }
     };
 
@@ -3595,7 +3585,7 @@ const BrowserSearch = {
     let focusSearchBar = () => {
       searchBar = this.searchBar;
       searchBar.select();
-      openSearchPageIfFieldIsNotActive(searchBar);
+      focusUrlBarIfSearchFieldIsNotActive(searchBar);
     };
     if (placement && placement.area == CustomizableUI.AREA_PANEL) {
       // The panel is not constructed until the first time it is shown.
@@ -3615,7 +3605,7 @@ const BrowserSearch = {
         FullScreen.showNavToolbox();
       searchBar.select();
     }
-    openSearchPageIfFieldIsNotActive(searchBar);
+    focusUrlBarIfSearchFieldIsNotActive(searchBar);
   },
 
   /**
@@ -4109,22 +4099,25 @@ function updateUserContextUIIndicator()
 
   let userContextId = gBrowser.selectedBrowser.getAttribute("usercontextid");
   if (!userContextId) {
+    hbox.setAttribute("data-identity-color", "");
     hbox.hidden = true;
     return;
   }
 
   let identity = ContextualIdentityService.getIdentityFromId(userContextId);
   if (!identity) {
+    hbox.setAttribute("data-identity-color", "");
     hbox.hidden = true;
     return;
   }
 
+  hbox.setAttribute("data-identity-color", identity.color);
+
   let label = document.getElementById("userContext-label");
-  label.setAttribute('value', ContextualIdentityService.getUserContextLabel(userContextId));
-  label.style.color = identity.color;
+  label.setAttribute("value", ContextualIdentityService.getUserContextLabel(userContextId));
 
   let indicator = document.getElementById("userContext-indicator");
-  indicator.style.listStyleImage = "url(" + identity.icon + ")";
+  indicator.setAttribute("data-identity-icon", identity.icon);
 
   hbox.hidden = false;
 }
@@ -5643,7 +5636,7 @@ function handleDroppedLink(event, urlOrLinks, name)
   // inBackground should be false, as it's loading into current browser.
   let inBackground = false;
   if (event) {
-    let inBackground = Services.prefs.getBoolPref("browser.tabs.loadInBackground");
+    inBackground = Services.prefs.getBoolPref("browser.tabs.loadInBackground");
     if (event.shiftKey)
       inBackground = !inBackground;
   }

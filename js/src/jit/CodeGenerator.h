@@ -224,7 +224,7 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitComputeThis(LComputeThis* lir);
     void visitArrayLength(LArrayLength* lir);
     void visitSetArrayLength(LSetArrayLength* lir);
-    void visitGetNextMapEntryForIterator(LGetNextMapEntryForIterator* lir);
+    void visitGetNextEntryForIterator(LGetNextEntryForIterator* lir);
     void visitTypedArrayLength(LTypedArrayLength* lir);
     void visitTypedArrayElements(LTypedArrayElements* lir);
     void visitSetDisjointTypedElements(LSetDisjointTypedElements* lir);
@@ -369,11 +369,11 @@ class CodeGenerator final : public CodeGeneratorSpecific
     void visitIsObject(LIsObject* lir);
     void visitIsObjectAndBranch(LIsObjectAndBranch* lir);
     void visitHasClass(LHasClass* lir);
-    void visitAsmJSParameter(LAsmJSParameter* lir);
-    void visitAsmJSParameterI64(LAsmJSParameterI64* lir);
-    void visitAsmJSReturn(LAsmJSReturn* ret);
-    void visitAsmJSReturnI64(LAsmJSReturnI64* ret);
-    void visitAsmJSVoidReturn(LAsmJSVoidReturn* ret);
+    void visitWasmParameter(LWasmParameter* lir);
+    void visitWasmParameterI64(LWasmParameterI64* lir);
+    void visitWasmReturn(LWasmReturn* ret);
+    void visitWasmReturnI64(LWasmReturnI64* ret);
+    void visitWasmReturnVoid(LWasmReturnVoid* ret);
     void visitLexicalCheck(LLexicalCheck* ins);
     void visitThrowRuntimeLexicalError(LThrowRuntimeLexicalError* ins);
     void visitGlobalNameConflictsCheck(LGlobalNameConflictsCheck* ins);
@@ -462,6 +462,12 @@ class CodeGenerator final : public CodeGeneratorSpecific
 
     void emitFilterArgumentsOrEval(LInstruction* lir, Register string, Register temp1,
                                    Register temp2);
+
+    template <class IteratorObject, class OrderedHashTable>
+    void emitGetNextEntryForIterator(LGetNextEntryForIterator* lir);
+
+    template <class OrderedHashTable>
+    void emitLoadIteratorValues(Register result, Register temp, Register front);
 
     IonScriptCounts* maybeCreateScriptCounts();
 

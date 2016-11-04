@@ -139,14 +139,16 @@ SetStyleImageRequest(function<void(nsStyleImageRequest*)> aCallback,
                      nsPresContext* aPresContext,
                      const nsCSSValue& aValue,
                      nsStyleImageRequest::Mode aModeFlags =
-                       nsStyleImageRequest::Mode::Track |
-                       nsStyleImageRequest::Mode::Lock)
+                       nsStyleImageRequest::Mode::Track)
 {
   SetImageRequest([&](imgRequestProxy* aProxy) {
     RefPtr<nsStyleImageRequest> request;
     if (aProxy) {
       css::ImageValue* imageValue = aValue.GetImageStructValue();
-      ImageTracker* imageTracker = aPresContext->Document()->ImageTracker();
+      ImageTracker* imageTracker =
+        (aModeFlags & nsStyleImageRequest::Mode::Track)
+        ? aPresContext->Document()->ImageTracker()
+        : nullptr;
       request =
         new nsStyleImageRequest(aModeFlags, aProxy, imageValue, imageTracker);
     }
@@ -7967,7 +7969,7 @@ nsRuleNode::ComputeListData(void* aStartStruct,
   if (eCSSUnit_Image == imageValue->GetUnit()) {
     SetStyleImageRequest([&](nsStyleImageRequest* req) {
       list->mListStyleImage = req;
-    }, mPresContext, *imageValue);
+    }, mPresContext, *imageValue, nsStyleImageRequest::Mode(0));
   }
   else if (eCSSUnit_None == imageValue->GetUnit() ||
            eCSSUnit_Initial == imageValue->GetUnit()) {

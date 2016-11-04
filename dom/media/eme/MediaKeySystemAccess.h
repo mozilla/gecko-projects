@@ -34,7 +34,6 @@ public:
 public:
   explicit MediaKeySystemAccess(nsPIDOMWindowInner* aParent,
                                 const nsAString& aKeySystem,
-                                const nsAString& aCDMVersion,
                                 const MediaKeySystemConfiguration& aConfig);
 
 protected:
@@ -51,12 +50,8 @@ public:
 
   already_AddRefed<Promise> CreateMediaKeys(ErrorResult& aRv);
 
-
-
   static MediaKeySystemStatus GetKeySystemStatus(const nsAString& aKeySystem,
-                                                 int32_t aMinCdmVersion,
-                                                 nsACString& aOutExceptionMessage,
-                                                 nsACString& aOutCdmVersion);
+                                                 nsACString& aOutExceptionMessage);
 
   static bool IsSupported(const nsAString& aKeySystem,
                           const Sequence<MediaKeySystemConfiguration>& aConfigs,
@@ -65,10 +60,6 @@ public:
   static void NotifyObservers(nsPIDOMWindowInner* aWindow,
                               const nsAString& aKeySystem,
                               MediaKeySystemStatus aStatus);
-
-  static bool IsGMPPresentOnDisk(const nsAString& aKeySystem,
-                                 const nsACString& aVersion,
-                                 nsACString& aOutMessage);
 
   static bool GetSupportedConfig(const nsAString& aKeySystem,
                                  const Sequence<MediaKeySystemConfiguration>& aConfigs,
@@ -81,7 +72,6 @@ public:
 private:
   nsCOMPtr<nsPIDOMWindowInner> mParent;
   const nsString mKeySystem;
-  const nsString mCDMVersion;
   const MediaKeySystemConfiguration mConfig;
 };
 

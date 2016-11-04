@@ -80,6 +80,8 @@ Structure:
               // Optional, excluded if it would be empty or if the engine cannot
               // or did not run validation on itself.
               validation: {
+                // Optional validator version, default of 0.
+                version: <integer>,
                 checked: <integer>,
                 took: <non-monotonic integer duration in milliseconds>,
                 // Entries with a count of 0 are excluded, the array is excluded if no problems are found.
@@ -159,6 +161,10 @@ Stores error information, if any is present. Always contains the "name" property
 - ``unexpectederror``: Indicates that some other error caused sync to fail, typically an uncaught exception.
 
    - ``error``: The message provided by the error.
+
+- ``sqlerror``: Indicates that we recieved a ``mozIStorageError`` from a database query.
+
+    - ``code``: Value of the ``error.result`` property, one of the constants listed `here <https://developer.mozilla.org/en-US/docs/Mozilla/Tech/XPCOM/Reference/Interface/MozIStorageError#Constants>`_.
 
 syncs.engine.name
 ~~~~~~~~~~~~~~~~~

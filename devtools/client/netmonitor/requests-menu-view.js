@@ -2,7 +2,7 @@
            NetMonitorController, NetMonitorView */
 "use strict";
 /* eslint-disable mozilla/reject-some-requires */
-const { Cc, Ci, Cu } = require("chrome");
+const { Cu } = require("chrome");
 const Services = require("Services");
 const {Task} = require("devtools/shared/task");
 const {DeferredTask} = Cu.import("resource://gre/modules/DeferredTask.jsm", {});
@@ -70,8 +70,7 @@ const REQUESTS_WATERFALL_BACKGROUND_TICKS_OPACITY_MIN = 32;
 const REQUESTS_WATERFALL_BACKGROUND_TICKS_OPACITY_ADD = 32;
 const REQUESTS_WATERFALL_DOMCONTENTLOADED_TICKS_COLOR_RGBA = [255, 0, 0, 128];
 const REQUESTS_WATERFALL_LOAD_TICKS_COLOR_RGBA = [0, 0, 255, 128];
-// ms
-const FREETEXT_FILTER_SEARCH_DELAY = 200;
+
 // Constants for formatting bytes.
 const BYTES_IN_KB = 1024;
 const BYTES_IN_MB = Math.pow(BYTES_IN_KB, 2);
@@ -127,13 +126,13 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   initialize: function (store) {
     dumpn("Initializing the RequestsMenuView");
 
+    this.store = store;
+
     let widgetParentEl = $("#requests-menu-contents");
     this.widget = new SideMenuWidget(widgetParentEl);
     this._splitter = $("#network-inspector-view-splitter");
     this._summary = $("#requests-menu-network-summary-button");
     this._summary.setAttribute("label", L10N.getStr("networkMenu.empty"));
-    this.userInputTimer = Cc["@mozilla.org/timer;1"]
-      .createInstance(Ci.nsITimer);
 
     // Create a tooltip for the newly appended network request item.
     this.tooltip = new HTMLTooltip(NetMonitorController._toolbox.doc, { type: "arrow" });
@@ -172,15 +171,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this.cloneSelectedRequestEvent = this.cloneSelectedRequest.bind(this);
     this.toggleRawHeadersEvent = this.toggleRawHeaders.bind(this);
 
-    this.requestsFreetextFilterEvent =
-      this.requestsFreetextFilterEvent.bind(this);
     this.reFilterRequests = this.reFilterRequests.bind(this);
-
-    this.freetextFilterBox = $("#requests-menu-filter-freetext-text");
-    this.freetextFilterBox.addEventListener("input",
-      this.requestsFreetextFilterEvent, false);
-    this.freetextFilterBox.addEventListener("command",
-      this.requestsFreetextFilterEvent, false);
 
     $("#toolbar-labels").addEventListener("click",
       this.requestsMenuSortEvent, false);
@@ -193,18 +184,20 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     this.unsubscribeStore = store.subscribe(storeWatcher(
       null,
-      () => store.getState().filters.types,
-      (newTypes) => {
-        this._activeFilters = newTypes
+      () => store.getState().filters,
+      (newFilters) => {
+        this._activeFilters = newFilters.types
           .toSeq()
           .filter((checked, key) => checked)
           .keySeq()
           .toArray();
+        this._currentFreetextFilter = newFilters.url;
         this.reFilterRequests();
       }
     ));
 
-    Prefs.filters.forEach(type => store.dispatch(Actions.toggleFilter(type)));
+    Prefs.filters.forEach(type =>
+      store.dispatch(Actions.toggleFilterType(type)));
 
     window.once("connected", this._onConnect.bind(this));
   },
@@ -266,12 +259,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       this.requestsMenuSortEvent, false);
     $("#toolbar-labels").removeEventListener("keydown",
       this.requestsMenuSortKeyboardEvent, false);
-    this.freetextFilterBox.removeEventListener("input",
-      this.requestsFreetextFilterEvent, false);
-    this.freetextFilterBox.removeEventListener("command",
-      this.requestsFreetextFilterEvent, false);
 
-    this.userInputTimer.cancel();
     this._flushRequestsTask.disarm();
 
     $("#requests-menu-reload-notice-button").removeEventListener("command",
@@ -614,23 +602,6 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   /**
-   * Handles the timeout on the freetext filter textbox
-   */
-  requestsFreetextFilterEvent: function () {
-    this.userInputTimer.cancel();
-    this._currentFreetextFilter = this.freetextFilterBox.value || "";
-
-    if (this._currentFreetextFilter.length === 0) {
-      this.freetextFilterBox.removeAttribute("filled");
-    } else {
-      this.freetextFilterBox.setAttribute("filled", true);
-    }
-
-    this.userInputTimer.initWithCallback(this.reFilterRequests,
-      FREETEXT_FILTER_SEARCH_DELAY, Ci.nsITimer.TYPE_ONE_SHOT);
-  },
-
-  /**
    * Refreshes the view contents with the newly selected filters
    */
   reFilterRequests: function () {
@@ -765,7 +736,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     NetMonitorController.NetworkEventsHandler.clearMarkers();
     NetMonitorView.Sidebar.toggle(false);
 
-    $("#details-pane-toggle").disabled = true;
+    this.store.dispatch(Actions.disableToggleButton(true));
     $("#requests-menu-empty-notice").hidden = false;
 
     this.empty();
@@ -1078,7 +1049,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this._updateQueue = [];
     this._addQueue = [];
 
-    $("#details-pane-toggle").disabled = !this.itemCount;
+    this.store.dispatch(Actions.disableToggleButton(!this.itemCount));
     $("#requests-menu-empty-notice").hidden = !!this.itemCount;
 
     // Make sure all the requests are sorted and filtered.

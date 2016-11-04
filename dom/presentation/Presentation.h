@@ -30,8 +30,6 @@ public:
 
   static already_AddRefed<Presentation> Create(nsPIDOMWindowInner* aWindow);
 
-  static bool HasReceiverSupport(JSContext* aCx, JSObject* aGlobal);
-
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
@@ -47,16 +45,23 @@ public:
 
   already_AddRefed<PresentationReceiver> GetReceiver();
 
+  // For bookkeeping unsettled start session request
+  void SetStartSessionUnsettled(bool aIsUnsettled);
+  bool IsStartSessionUnsettled() const;
+
 private:
   explicit Presentation(nsPIDOMWindowInner* aWindow);
 
   virtual ~Presentation();
+
+  bool HasReceiverSupport() const;
 
   bool IsInPresentedContent() const;
 
   RefPtr<PresentationRequest> mDefaultRequest;
   RefPtr<PresentationReceiver> mReceiver;
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
+  bool mStartSessionUnsettled = false;
 };
 
 } // namespace dom

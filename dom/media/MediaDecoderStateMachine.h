@@ -180,9 +180,6 @@ public:
       this, &MediaDecoderStateMachine::SetPlaybackRate, aPlaybackRate));
   }
 
-  // Set/Unset dormant state.
-  void DispatchSetDormant(bool aDormant);
-
   RefPtr<ShutdownPromise> BeginShutdown();
 
   // Notifies the state machine that should minimize the number of samples
@@ -779,8 +776,6 @@ private:
 private:
   // The buffered range. Mirrored from the decoder thread.
   Mirror<media::TimeIntervals> mBuffered;
-
-  Mirror<bool> mIsReaderSuspended;
 
   // The duration according to the demuxer's current estimate, mirrored from the main thread.
   Mirror<media::NullableTimeUnit> mEstimatedDuration;
