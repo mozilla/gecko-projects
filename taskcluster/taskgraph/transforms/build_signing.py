@@ -20,7 +20,6 @@ def make_signing_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
 
-        artifacts = []
         if 'android' in dep_job.attributes.get('build_platform'):
             job_specs = [
                 {
@@ -43,12 +42,12 @@ def make_signing_description(config, jobs):
         unsigned_artifacts = []
         for spec in job_specs:
             fmt = spec["format"]
-            for artifact in artifacts:
+            for artifact in spec["artifacts"]:
                 url = {"task-reference": ARTIFACT_URL.format('build', artifact)}
                 unsigned_artifacts.append(url)
 
             job['unsigned-artifacts'] = unsigned_artifacts
-            job['signing-format'] = "gpg" if "linux" in dep_job.label else "jar"
+            job['signing-format'] = fmt
 
             label = dep_job.label.replace("build-", "signing-{}-".format(fmt))
             job['label'] = label
