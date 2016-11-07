@@ -50,8 +50,10 @@ from mozharness.mozilla.testing.errors import TinderBoxPrintRe
 from mozharness.mozilla.testing.unittest import tbox_print_summary
 from mozharness.mozilla.updates.balrog import BalrogMixin
 from mozharness.mozilla.taskcluster_helper import Taskcluster
-from mozharness.base.python import VirtualenvMixin
-from mozharness.base.python import InfluxRecordingMixin
+from mozharness.base.python import (
+    PerfherderResourceOptionsMixin,
+    VirtualenvMixin,
+)
 
 AUTOMATION_EXIT_CODES = EXIT_STATUS_DICT.values()
 AUTOMATION_EXIT_CODES.sort()
@@ -588,7 +590,7 @@ def generate_build_UID():
 
 class BuildScript(BuildbotMixin, PurgeMixin, MockMixin, BalrogMixin,
                   SigningMixin, VirtualenvMixin, MercurialScript,
-                  InfluxRecordingMixin, SecretsMixin):
+                  SecretsMixin, PerfherderResourceOptionsMixin):
     def __init__(self, **kwargs):
         # objdir is referenced in _query_abs_dirs() so let's make sure we
         # have that attribute before calling BaseScript.__init__
@@ -908,15 +910,15 @@ or run without that action (ie: --no-{action})"
         mach_env = {}
         if c.get('upload_env'):
             mach_env.update(c['upload_env'])
-            if 'UPLOAD_HOST' in mach_env:
+            if 'UPLOAD_HOST' in mach_env and 'stage_server' in c:
                 mach_env['UPLOAD_HOST'] = mach_env['UPLOAD_HOST'] % {
                     'stage_server': c['stage_server']
                 }
-            if 'UPLOAD_USER' in mach_env:
+            if 'UPLOAD_USER' in mach_env and 'stage_username' in c:
                 mach_env['UPLOAD_USER'] = mach_env['UPLOAD_USER'] % {
                     'stage_username': c['stage_username']
                 }
-            if 'UPLOAD_SSH_KEY' in mach_env:
+            if 'UPLOAD_SSH_KEY' in mach_env and 'stage_ssh_key' in c:
                 mach_env['UPLOAD_SSH_KEY'] = mach_env['UPLOAD_SSH_KEY'] % {
                     'stage_ssh_key': c['stage_ssh_key']
                 }
@@ -1848,6 +1850,36 @@ or run without that action (ie: --no-{action})"
             self.error("'make -k check' did not run successfully. Please check "
                        "log for errors.")
 
+    def _load_build_resources(self):
+        p = self.config.get('build_resources_path') % self.query_abs_dirs()
+        if not os.path.exists(p):
+            self.info('%s does not exist; not loading build resources' % p)
+            return None
+
+        with open(p, 'rb') as fh:
+            resources = json.load(fh)
+
+        if 'duration' not in resources:
+            self.info('resource usage lacks duration; ignoring')
+            return None
+
+        data = {
+            'name': 'build times',
+            'value': resources['duration'],
+            'extraOptions': self.perfherder_resource_options(),
+            'subtests': [],
+        }
+
+        for phase in resources['phases']:
+            if 'duration' not in phase:
+                continue
+            data['subtests'].append({
+                'name': phase['name'],
+                'value': phase['duration'],
+            })
+
+        return data
+
     def generate_build_stats(self):
         """grab build stats following a compile.
 
@@ -1944,13 +1976,13 @@ or run without that action (ie: --no-{action})"
                 "alertThreshold": 0.25,
                 "subtests": size_measurements
             })
-        if (hasattr(self, "build_metrics_summary") and
-            self.build_metrics_summary):
-            perfherder_data["suites"].append(self.build_metrics_summary)
+
+        build_metrics = self._load_build_resources()
+        if build_metrics:
+            perfherder_data['suites'].append(build_metrics)
 
         if perfherder_data["suites"]:
             self.info('PERFHERDER_DATA: %s' % json.dumps(perfherder_data))
-
 
     def sendchange(self):
         if os.environ.get('TASK_ID'):

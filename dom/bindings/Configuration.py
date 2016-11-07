@@ -198,6 +198,8 @@ class Configuration(DescriptorProvider):
                 getter = lambda x: x.interface.isExposedInAnyWorker()
             elif key == 'isExposedInWorkerDebugger':
                 getter = lambda x: x.interface.isExposedInWorkerDebugger()
+            elif key == 'isExposedInAnyWorklet':
+                getter = lambda x: x.interface.isExposedInAnyWorklet()
             elif key == 'isExposedInSystemGlobals':
                 getter = lambda x: x.interface.isExposedInSystemGlobals()
             elif key == 'isExposedInWindow':
@@ -653,6 +655,8 @@ class Descriptor(DescriptorProvider):
                 self.interface.identifier.name not in ["HTMLObjectElement",
                                                        "HTMLEmbedElement",
                                                        "HTMLAppletElement"])
+    def needsXrayNamedDeleterHook(self):
+        return self.operations["NamedDeleter"] is not None
 
     def needsSpecialGenericOps(self):
         """

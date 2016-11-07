@@ -480,8 +480,10 @@ enum UDateFormatField {
     UDAT_TIMEZONE_ISO_FIELD = 32,
     UDAT_TIMEZONE_ISO_LOCAL_FIELD = 33,
     UDAT_RELATED_YEAR_FIELD = 34,
-    UDAT_TIME_SEPARATOR_FIELD = 35,
-    UDAT_FIELD_COUNT = 36
+    UDAT_AM_PM_MIDNIGHT_NOON_FIELD = 35,
+    UDAT_FLEXIBLE_DAY_PERIOD_FIELD = 36,
+    UDAT_TIME_SEPARATOR_FIELD = 37,
+    UDAT_FIELD_COUNT = 38
 };
 
 enum UDateFormatStyle {
@@ -1143,8 +1145,8 @@ intl_CompareStrings(JSContext* cx, UCollator* coll, HandleString str1, HandleStr
     mozilla::Range<const char16_t> chars2 = stableChars2.twoByteRange();
 
     UCollationResult uresult = ucol_strcoll(coll,
-                                            Char16ToUChar(chars1.start().get()), chars1.length(),
-                                            Char16ToUChar(chars2.start().get()), chars2.length());
+                                            Char16ToUChar(chars1.begin().get()), chars1.length(),
+                                            Char16ToUChar(chars2.begin().get()), chars2.length());
     int32_t res;
     switch (uresult) {
         case UCOL_LESS: res = -1; break;
@@ -1498,7 +1500,7 @@ NewUNumberFormat(JSContext* cx, HandleObject numberFormat)
         if (!currency->ensureFlat(cx) || !stableChars.initTwoByte(cx, currency))
             return nullptr;
         // uCurrency remains owned by stableChars.
-        uCurrency = Char16ToUChar(stableChars.twoByteRange().start().get());
+        uCurrency = Char16ToUChar(stableChars.twoByteRange().begin().get());
         if (!uCurrency)
             return nullptr;
 
@@ -2064,7 +2066,7 @@ js::intl_canonicalizeTimeZone(JSContext* cx, unsigned argc, Value* vp)
 
     UBool* isSystemID = nullptr;
     UErrorCode status = U_ZERO_ERROR;
-    int32_t size = ucal_getCanonicalTimeZoneID(Char16ToUChar(tzchars.start().get()),
+    int32_t size = ucal_getCanonicalTimeZoneID(Char16ToUChar(tzchars.begin().get()),
                                                tzchars.length(), Char16ToUChar(chars.begin()),
                                                INITIAL_CHAR_BUFFER_SIZE, isSystemID, &status);
     if (status == U_BUFFER_OVERFLOW_ERROR) {
@@ -2072,7 +2074,7 @@ js::intl_canonicalizeTimeZone(JSContext* cx, unsigned argc, Value* vp)
         if (!chars.resize(size_t(size)))
             return false;
         status = U_ZERO_ERROR;
-        ucal_getCanonicalTimeZoneID(Char16ToUChar(tzchars.start().get()), tzchars.length(),
+        ucal_getCanonicalTimeZoneID(Char16ToUChar(tzchars.begin().get()), tzchars.length(),
                                     Char16ToUChar(chars.begin()), size, isSystemID, &status);
     }
     if (U_FAILURE(status)) {
@@ -2173,7 +2175,7 @@ js::intl_patternForSkeleton(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     mozilla::Range<const char16_t> skeletonChars = stableChars.twoByteRange();
-    uint32_t skeletonLen = u_strlen(Char16ToUChar(skeletonChars.start().get()));
+    uint32_t skeletonLen = u_strlen(Char16ToUChar(skeletonChars.begin().get()));
 
     UErrorCode status = U_ZERO_ERROR;
     UDateTimePatternGenerator* gen = udatpg_open(icuLocale(locale.ptr()), &status);
@@ -2183,7 +2185,7 @@ js::intl_patternForSkeleton(JSContext* cx, unsigned argc, Value* vp)
     }
     ScopedICUObject<UDateTimePatternGenerator, udatpg_close> toClose(gen);
 
-    int32_t size = udatpg_getBestPattern(gen, Char16ToUChar(skeletonChars.start().get()),
+    int32_t size = udatpg_getBestPattern(gen, Char16ToUChar(skeletonChars.begin().get()),
                                          skeletonLen, nullptr, 0, &status);
     if (U_FAILURE(status) && status != U_BUFFER_OVERFLOW_ERROR) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
@@ -2194,7 +2196,7 @@ js::intl_patternForSkeleton(JSContext* cx, unsigned argc, Value* vp)
         return false;
     pattern[size] = '\0';
     status = U_ZERO_ERROR;
-    udatpg_getBestPattern(gen, Char16ToUChar(skeletonChars.start().get()),
+    udatpg_getBestPattern(gen, Char16ToUChar(skeletonChars.begin().get()),
                           skeletonLen, pattern, size, &status);
     if (U_FAILURE(status)) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INTERNAL_INTL_ERROR);
@@ -2239,7 +2241,7 @@ NewUDateFormat(JSContext* cx, HandleObject dateTimeFormat)
     if (!timeZoneFlat || !timeZoneChars.initTwoByte(cx, timeZoneFlat))
         return nullptr;
 
-    const UChar* uTimeZone = Char16ToUChar(timeZoneChars.twoByteRange().start().get());
+    const UChar* uTimeZone = Char16ToUChar(timeZoneChars.twoByteRange().begin().get());
     uint32_t uTimeZoneLength = u_strlen(uTimeZone);
 
     if (!GetProperty(cx, internals, internals, cx->names().pattern, &value))
@@ -2250,7 +2252,7 @@ NewUDateFormat(JSContext* cx, HandleObject dateTimeFormat)
     if (!patternFlat || !patternChars.initTwoByte(cx, patternFlat))
         return nullptr;
 
-    const UChar* uPattern = Char16ToUChar(patternChars.twoByteRange().start().get());
+    const UChar* uPattern = Char16ToUChar(patternChars.twoByteRange().begin().get());
     uint32_t uPatternLength = u_strlen(uPattern);
 
     UErrorCode status = U_ZERO_ERROR;
@@ -2375,6 +2377,10 @@ GetFieldTypeForFormatField(UDateFormatField fieldName)
       case UDAT_RELATED_YEAR_FIELD:
 #endif
 #ifndef U_HIDE_DRAFT_API
+      case UDAT_AM_PM_MIDNIGHT_NOON_FIELD:
+      case UDAT_FLEXIBLE_DAY_PERIOD_FIELD:
+#endif
+#ifndef U_HIDE_INTERNAL_API
       case UDAT_TIME_SEPARATOR_FIELD:
 #endif
         // These fields are all unsupported.

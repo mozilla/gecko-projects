@@ -46,9 +46,7 @@ DIRS += [
     'browser-element',
     'cache',
     'canvas',
-    'contacts',
     'crypto',
-    'phonenumberutils',
     'devicestorage',
     'encoding',
     'events',
@@ -60,14 +58,12 @@ DIRS += [
     'geolocation',
     'grid',
     'html',
-    'icc',
     'inputport',
     'json',
     'jsurl',
     'asmjscache',
     'mathml',
     'media',
-    'mobileconnection',
     'notification',
     'offline',
     'power',
@@ -105,6 +101,7 @@ DIRS += [
     'console',
     'performance',
     'xhr',
+    'worklet',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':

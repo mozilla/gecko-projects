@@ -514,7 +514,7 @@ def add_index_routes(config, tasks):
         for n in job_name:
             subs['job-name-' + n] = job_name[n]
         subs['build_date_long'] = time.strftime("%Y.%m.%d.%Y%m%d%H%M%S",
-                                              time.gmtime(config.params['build_date']))
+                                                time.gmtime(config.params['build_date']))
         subs['product'] = index['product']
 
         if 'buildbot' in job_name:

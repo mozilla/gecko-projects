@@ -9,7 +9,6 @@ import json
 import os
 import re
 import urllib2
-import time
 
 from . import base
 from taskgraph.util.docker import (

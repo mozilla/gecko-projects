@@ -136,11 +136,6 @@ this.PermissionsTable =  { geolocation: {
                              privileged: DENY_ACTION,
                              certified: ALLOW_ACTION
                            },
-                           mobileconnection: {
-                             app: DENY_ACTION,
-                             privileged: DENY_ACTION,
-                             certified: ALLOW_ACTION
-                           },
                            mobilenetwork: {
                              app: DENY_ACTION,
                              privileged: ALLOW_ACTION,
@@ -173,11 +168,6 @@ this.PermissionsTable =  { geolocation: {
                              additional: ["indexedDB-chrome-settings", "settings-api"]
                            },
                            permissions: {
-                             app: DENY_ACTION,
-                             privileged: DENY_ACTION,
-                             certified: ALLOW_ACTION
-                           },
-                           phonenumberservice: {
                              app: DENY_ACTION,
                              privileged: DENY_ACTION,
                              certified: ALLOW_ACTION

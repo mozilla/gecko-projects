@@ -148,20 +148,6 @@ function test()
   // ECMAScript-defined properties live on the prototype, overriding any named properties.
   checkXrayProperty(coll, "toString", [ undefined, undefined, win.Object.prototype.toString ]);
 
-  // NavigatorProperty things should come from the target compartment, always.
-  var contacts = win.navigator.mozContacts;
-  isnot(contacts, undefined,
-        "Must have a mozContacts for this to work.  Find another " +
-        "NavigatorProperty, or remove all this NavigatorProperty code")
-  ok(Cu.isXrayWrapper(contacts),
-     "Should have an Xray for the underlying value, not a value newly " +
-     "created for us");
-  is(Cu.getGlobalForObject(contacts), win,
-     "contacts should come from the underlying window");
-  // Unfortunately, I can't figure out a decent way to test that we're not
-  // creating a separate thing from the thing content sees, because none of the
-  // NavigatorProperty things are available to content.
-
   // Frozen arrays should come from our compartment, not the target one.
   var languages1 = win.navigator.languages;
   isnot(languages1, undefined, "Must have .languages");
@@ -194,6 +180,44 @@ function test()
   is(dataTransfer.wrappedJSObject.types.contains, undefined,
      "Underlying object should not have contains() set up as an alias to " +
      "includes()");
+
+  // Check that deleters work correctly in the [OverrideBuiltins] case.
+  var elem = win.document.documentElement;
+  var dataset = elem.dataset;
+  is(dataset.foo, undefined, "Should not have a 'foo' property");
+  ok(!('foo' in dataset), "Really should not have a 'foo' property");
+  is(elem.getAttribute("data-foo"), null,
+     "Should not have a 'data-foo' attribute");
+  ok(!elem.hasAttribute("data-foo"),
+     "Really should not have a 'data-foo' attribute");
+  dataset.foo = "bar";
+  is(dataset.foo, "bar", "Should now have a 'foo' property");
+  ok('foo' in dataset, "Really should have a 'foo' property");
+  is(elem.getAttribute("data-foo"), "bar",
+     "Should have a 'data-foo' attribute");
+  ok(elem.hasAttribute("data-foo"),
+     "Really should have a 'data-foo' attribute");
+  delete dataset.foo;
+  is(dataset.foo, undefined, "Should not have a 'foo' property again");
+  ok(!('foo' in dataset), "Really should not have a 'foo' property again");
+  is(elem.getAttribute("data-foo"), null,
+     "Should not have a 'data-foo' attribute again");
+  ok(!elem.hasAttribute("data-foo"),
+     "Really should not have a 'data-foo' attribute again");
+
+  // Check that deleters work correctly in the non-[OverrideBuiltins] case.
+  var storage = win.sessionStorage;
+  is(storage.foo, undefined, "Should not have a 'foo' property");
+  ok(!('foo' in storage), "Really should not have a 'foo' property");
+  is(storage.getItem("foo"), null, "Should not have an item named 'foo'");
+  storage.foo = "bar";
+  is(storage.foo, "bar", "Should have a 'foo' property");
+  ok('foo' in storage, "Really should have a 'foo' property");
+  is(storage.getItem("foo"), "bar", "Should have an item named 'foo'");
+  delete storage.foo
+  is(storage.foo, undefined, "Should not have a 'foo' property again");
+  ok(!('foo' in storage), "Really should not have a 'foo' property again");
+  is(storage.getItem("foo"), null, "Should not have an item named 'foo' again");
 
   SimpleTest.finish();
 }

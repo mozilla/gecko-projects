@@ -335,9 +335,12 @@ class CGNativePropertyHooks(CGThing):
     def define(self):
         if not self.descriptor.wantsXrays:
             return ""
+        deleteNamedProperty = "nullptr"
         if self.descriptor.concrete and self.descriptor.proxy:
             resolveOwnProperty = "ResolveOwnProperty"
             enumerateOwnProperties = "EnumerateOwnProperties"
+            if self.descriptor.needsXrayNamedDeleterHook():
+                deleteNamedProperty = "DeleteNamedProperty"
         elif self.descriptor.needsXrayResolveHooks():
             resolveOwnProperty = "ResolveOwnPropertyViaResolve"
             enumerateOwnProperties = "EnumerateOwnPropertiesViaGetOwnPropertyNames"
@@ -376,6 +379,7 @@ class CGNativePropertyHooks(CGThing):
             const NativePropertyHooks sNativePropertyHooks[] = { {
               ${resolveOwnProperty},
               ${enumerateOwnProperties},
+              ${deleteNamedProperty},
               { ${regular}, ${chrome} },
               ${prototypeID},
               ${constructorID},
@@ -385,6 +389,7 @@ class CGNativePropertyHooks(CGThing):
             """,
             resolveOwnProperty=resolveOwnProperty,
             enumerateOwnProperties=enumerateOwnProperties,
+            deleteNamedProperty=deleteNamedProperty,
             regular=regular,
             chrome=chrome,
             prototypeID=prototypeID,
@@ -1797,6 +1802,7 @@ class CGNamedConstructors(CGThing):
         return fill(
             """
             const NativePropertyHooks sNamedConstructorNativePropertyHooks = {
+                nullptr,
                 nullptr,
                 nullptr,
                 { nullptr, nullptr },
@@ -10990,20 +10996,6 @@ class CGProxyIndexedSetter(CGProxyIndexedOperation):
                                          argumentHandleValue=argumentHandleValue)
 
 
-class CGProxyIndexedDeleter(CGProxyIndexedOperation):
-    """
-    Class to generate a call to an indexed deleter.
-
-    resultVar: See the docstring for CGCallGenerator.
-
-    foundVar: See the docstring for CGProxySpecialOperation.
-    """
-    def __init__(self, descriptor, resultVar=None, foundVar=None):
-        CGProxyIndexedOperation.__init__(self, descriptor, 'IndexedDeleter',
-                                         resultVar=resultVar,
-                                         foundVar=foundVar)
-
-
 class CGProxyNamedOperation(CGProxySpecialOperation):
     """
     Class to generate a call to a named operation.
@@ -11365,6 +11357,95 @@ class CGDOMJSProxyHandler_defineProperty(ClassMethod):
         return set
 
 
+def getDeleterBody(descriptor, type, foundVar=None):
+    """
+    type should be "Named" or "Indexed"
+
+    The possible outcomes:
+    - an error happened                       (the emitted code returns false)
+    - own property not found                  (foundVar=false, deleteSucceeded=true)
+    - own property found and deleted          (foundVar=true,  deleteSucceeded=true)
+    - own property found but can't be deleted (foundVar=true,  deleteSucceeded=false)
+    """
+    assert type in ("Named", "Indexed")
+    deleter = descriptor.operations[type + 'Deleter']
+    if deleter:
+        assert type == "Named"
+        assert foundVar is not None
+        if descriptor.hasUnforgeableMembers:
+            raise TypeError("Can't handle a deleter on an interface "
+                            "that has unforgeables.  Figure out how "
+                            "that should work!")
+        # See if the deleter method is fallible.
+        t = deleter.signatures()[0][0]
+        if t.isPrimitive() and not t.nullable() and t.tag() == IDLType.Tags.bool:
+            # The deleter method has a boolean return value. When a
+            # property is found, the return value indicates whether it
+            # was successfully deleted.
+            setDS = fill(
+                """
+                if (!${foundVar}) {
+                  deleteSucceeded = true;
+                }
+                """,
+                foundVar=foundVar)
+        else:
+            # No boolean return value: if a property is found,
+            # deleting it always succeeds.
+            setDS = "deleteSucceeded = true;\n"
+
+        body = (CGProxyNamedDeleter(descriptor,
+                                    resultVar="deleteSucceeded",
+                                    foundVar=foundVar).define() +
+                setDS)
+    elif getattr(descriptor, "supports%sProperties" % type)():
+        presenceCheckerClass = globals()["CGProxy%sPresenceChecker" % type]
+        foundDecl = ""
+        if foundVar is None:
+            foundVar = "found"
+            foundDecl = "bool found = false;\n"
+        body = fill(
+            """
+            $*{foundDecl}
+            $*{presenceChecker}
+            deleteSucceeded = !${foundVar};
+            """,
+            foundDecl=foundDecl,
+            presenceChecker=presenceCheckerClass(descriptor, foundVar=foundVar).define(),
+            foundVar=foundVar)
+    else:
+        body = None
+    return body
+
+
+class CGDeleteNamedProperty(CGAbstractStaticMethod):
+    def __init__(self, descriptor):
+        args = [Argument('JSContext*', 'cx'),
+                Argument('JS::Handle<JSObject*>', 'xray'),
+                Argument('JS::Handle<JSObject*>', 'proxy'),
+                Argument('JS::Handle<jsid>', 'id'),
+                Argument('JS::ObjectOpResult&', 'opresult')]
+        CGAbstractStaticMethod.__init__(self, descriptor, "DeleteNamedProperty",
+                                        "bool", args)
+
+    def definition_body(self):
+        return fill(
+            """
+            MOZ_ASSERT(xpc::WrapperFactory::IsXrayWrapper(xray));
+            MOZ_ASSERT(js::IsProxy(proxy));
+            MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy));
+            JSAutoCompartment ac(cx, proxy);
+            bool deleteSucceeded;
+            bool found = false;
+            $*{namedBody}
+            if (!found || deleteSucceeded) {
+              return opresult.succeed();
+            }
+            return opresult.failCantDelete();
+            """,
+            namedBody=getDeleterBody(self.descriptor, "Named", foundVar="found"))
+
+
 class CGDOMJSProxyHandler_delete(ClassMethod):
     def __init__(self, descriptor):
         args = [Argument('JSContext*', 'cx'),
@@ -11376,77 +11457,13 @@ class CGDOMJSProxyHandler_delete(ClassMethod):
         self.descriptor = descriptor
 
     def getBody(self):
-        def getDeleterBody(type, foundVar=None):
-            """
-            type should be "Named" or "Indexed"
-
-            The possible outcomes:
-            - an error happened                       (the emitted code returns false)
-            - own property not found                  (foundVar=false, deleteSucceeded=true)
-            - own property found and deleted          (foundVar=true,  deleteSucceeded=true)
-            - own property found but can't be deleted (foundVar=true,  deleteSucceeded=false)
-            """
-            assert type in ("Named", "Indexed")
-            deleter = self.descriptor.operations[type + 'Deleter']
-            if deleter:
-                if self.descriptor.hasUnforgeableMembers:
-                    raise TypeError("Can't handle a deleter on an interface "
-                                    "that has unforgeables.  Figure out how "
-                                    "that should work!")
-                # See if the deleter method is fallible.
-                t = deleter.signatures()[0][0]
-                if t.isPrimitive() and not t.nullable() and t.tag() == IDLType.Tags.bool:
-                    # The deleter method has a boolean out-parameter. When a
-                    # property is found, the out-param indicates whether it was
-                    # successfully deleted.
-                    decls = ""
-                    if foundVar is None:
-                        foundVar = "found"
-                        decls += "bool found = false;\n"
-                    setDS = fill(
-                        """
-                        if (!${foundVar}) {
-                          deleteSucceeded = true;
-                        }
-                        """,
-                        foundVar=foundVar)
-                else:
-                    # No boolean out-parameter: if a property is found,
-                    # deleting it always succeeds.
-                    decls = ""
-                    setDS = "deleteSucceeded = true;\n"
-
-                deleterClass = globals()["CGProxy%sDeleter" % type]
-                body = (decls +
-                        deleterClass(self.descriptor, resultVar="deleteSucceeded",
-                                     foundVar=foundVar).define() +
-                        setDS)
-            elif getattr(self.descriptor, "supports%sProperties" % type)():
-                presenceCheckerClass = globals()["CGProxy%sPresenceChecker" % type]
-                foundDecl = ""
-                if foundVar is None:
-                    foundVar = "found"
-                    foundDecl = "bool found = false;\n"
-                body = fill(
-                    """
-                    $*{foundDecl}
-                    $*{presenceChecker}
-                    deleteSucceeded = !${foundVar};
-                    """,
-                    foundDecl=foundDecl,
-                    presenceChecker=presenceCheckerClass(self.descriptor, foundVar=foundVar).define(),
-                    foundVar=foundVar)
-            else:
-                body = None
-            return body
-
         delete = dedent("""
             MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy),
                       "Should not have a XrayWrapper here");
 
             """)
 
-        indexedBody = getDeleterBody("Indexed")
+        indexedBody = getDeleterBody(self.descriptor, "Indexed")
         if indexedBody is not None:
             delete += fill(
                 """
@@ -11459,7 +11476,7 @@ class CGDOMJSProxyHandler_delete(ClassMethod):
                 """,
                 indexedBody=indexedBody)
 
-        namedBody = getDeleterBody("Named", foundVar="found")
+        namedBody = getDeleterBody(self.descriptor, "Named", foundVar="found")
         if namedBody is not None:
             delete += dedent(
                 """
@@ -12260,21 +12277,6 @@ class CGDescriptor(CGThing):
         cgThings.append(CGGeneric(define=str(properties)))
         cgThings.append(CGNativeProperties(descriptor, properties))
 
-        # Set up our Xray callbacks as needed.
-        if descriptor.wantsXrays:
-            if descriptor.concrete and descriptor.proxy:
-                cgThings.append(CGResolveOwnProperty(descriptor))
-                cgThings.append(CGEnumerateOwnProperties(descriptor))
-            elif descriptor.needsXrayResolveHooks():
-                cgThings.append(CGResolveOwnPropertyViaResolve(descriptor))
-                cgThings.append(CGEnumerateOwnPropertiesViaGetOwnPropertyNames(descriptor))
-            if descriptor.wantsXrayExpandoClass:
-                cgThings.append(CGXrayExpandoJSClass(descriptor))
-
-        # Now that we have our ResolveOwnProperty/EnumerateOwnProperties stuff
-        # done, set up our NativePropertyHooks.
-        cgThings.append(CGNativePropertyHooks(descriptor, properties))
-
         if descriptor.interface.hasInterfaceObject():
             cgThings.append(CGClassConstructor(descriptor,
                                                descriptor.interface.ctor()))
@@ -12345,6 +12347,24 @@ class CGDescriptor(CGThing):
             else:
                 cgThings.append(CGWrapNonWrapperCacheMethod(descriptor,
                                                             properties))
+
+        # Set up our Xray callbacks as needed.  This needs to come
+        # after we have our DOMProxyHandler defined.
+        if descriptor.wantsXrays:
+            if descriptor.concrete and descriptor.proxy:
+                cgThings.append(CGResolveOwnProperty(descriptor))
+                cgThings.append(CGEnumerateOwnProperties(descriptor))
+                if descriptor.needsXrayNamedDeleterHook():
+                    cgThings.append(CGDeleteNamedProperty(descriptor))
+            elif descriptor.needsXrayResolveHooks():
+                cgThings.append(CGResolveOwnPropertyViaResolve(descriptor))
+                cgThings.append(CGEnumerateOwnPropertiesViaGetOwnPropertyNames(descriptor))
+            if descriptor.wantsXrayExpandoClass:
+                cgThings.append(CGXrayExpandoJSClass(descriptor))
+
+        # Now that we have our ResolveOwnProperty/EnumerateOwnProperties stuff
+        # done, set up our NativePropertyHooks.
+        cgThings.append(CGNativePropertyHooks(descriptor, properties))
 
         # If we're not wrappercached, we don't know how to clear our
         # cached values, since we can't get at the JSObject.
@@ -13205,6 +13225,31 @@ class CGRegisterWorkerDebuggerBindings(CGAbstractMethod):
     def definition_body(self):
         descriptors = self.config.getDescriptors(hasInterfaceObject=True,
                                                  isExposedInWorkerDebugger=True,
+                                                 register=True)
+        conditions = []
+        for desc in descriptors:
+            bindingNS = toBindingNamespace(desc.name)
+            condition = "!%s::GetConstructorObject(aCx)" % bindingNS
+            if desc.isExposedConditionally():
+                condition = (
+                    "%s::ConstructorEnabled(aCx, aObj) && " % bindingNS
+                    + condition)
+            conditions.append(condition)
+        lines = [CGIfWrapper(CGGeneric("return false;\n"), condition) for
+                 condition in conditions]
+        lines.append(CGGeneric("return true;\n"))
+        return CGList(lines, "\n").define()
+
+class CGRegisterWorkletBindings(CGAbstractMethod):
+    def __init__(self, config):
+        CGAbstractMethod.__init__(self, None, 'RegisterWorkletBindings', 'bool',
+                                  [Argument('JSContext*', 'aCx'),
+                                   Argument('JS::Handle<JSObject*>', 'aObj')])
+        self.config = config
+
+    def definition_body(self):
+        descriptors = self.config.getDescriptors(hasInterfaceObject=True,
+                                                 isExposedInAnyWorklet=True,
                                                  register=True)
         conditions = []
         for desc in descriptors:
@@ -16584,6 +16629,31 @@ class GlobalGenRoots():
 
         # Add include guards.
         curr = CGIncludeGuard('RegisterWorkerDebuggerBindings', curr)
+
+        # Done.
+        return curr
+
+    @staticmethod
+    def RegisterWorkletBindings(config):
+
+        curr = CGRegisterWorkletBindings(config)
+
+        # Wrap all of that in our namespaces.
+        curr = CGNamespace.build(['mozilla', 'dom'],
+                                 CGWrapper(curr, post='\n'))
+        curr = CGWrapper(curr, post='\n')
+
+        # Add the includes
+        defineIncludes = [CGHeaders.getDeclarationFilename(desc.interface)
+                          for desc in config.getDescriptors(hasInterfaceObject=True,
+                                                            register=True,
+                                                            isExposedInAnyWorklet=True)]
+
+        curr = CGHeaders([], [], [], [], [], defineIncludes,
+                         'RegisterWorkletBindings', curr)
+
+        # Add include guards.
+        curr = CGIncludeGuard('RegisterWorkletBindings', curr)
 
         # Done.
         return curr

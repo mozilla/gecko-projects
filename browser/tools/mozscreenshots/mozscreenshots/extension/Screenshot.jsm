@@ -57,7 +57,6 @@ this.Screenshot = {
         break;
       default:
         throw new Error("Unsupported operating system");
-        break;
     }
   },
 
@@ -73,7 +72,7 @@ this.Screenshot = {
     });
   },
 
-  // /// helpers /////
+  // helpers
 
   _screenshotWindows(filename) {
     return new Promise((resolve, reject) => {

@@ -1907,6 +1907,21 @@ XrayGetExpandoClass(JSContext* cx, JS::Handle<JSObject*> obj)
   return nativePropertyHooks->mXrayExpandoClass;
 }
 
+bool
+XrayDeleteNamedProperty(JSContext* cx, JS::Handle<JSObject*> wrapper,
+                        JS::Handle<JSObject*> obj, JS::Handle<jsid> id,
+                        JS::ObjectOpResult& opresult)
+{
+  DOMObjectType type;
+  const NativePropertyHooks* nativePropertyHooks =
+    GetNativePropertyHooks(cx, obj, type);
+  if (!IsInstance(type) || !nativePropertyHooks->mDeleteNamedProperty) {
+    return opresult.succeed();
+  }
+  return nativePropertyHooks->mDeleteNamedProperty(cx, wrapper, obj, id,
+                                                   opresult);
+}
+
 JSObject*
 GetCachedSlotStorageObjectSlow(JSContext* cx, JS::Handle<JSObject*> obj,
                                bool* isXray)
@@ -1925,6 +1940,7 @@ GetCachedSlotStorageObjectSlow(JSContext* cx, JS::Handle<JSObject*> obj,
 DEFINE_XRAY_EXPANDO_CLASS(, DefaultXrayExpandoObjectClass, 0);
 
 NativePropertyHooks sEmptyNativePropertyHooks = {
+  nullptr,
   nullptr,
   nullptr,
   {
@@ -2690,7 +2706,8 @@ IsNonExposedGlobal(JSContext* aCx, JSObject* aGlobal,
                 GlobalNames::DedicatedWorkerGlobalScope |
                 GlobalNames::SharedWorkerGlobalScope |
                 GlobalNames::ServiceWorkerGlobalScope |
-                GlobalNames::WorkerDebuggerGlobalScope)) == 0,
+                GlobalNames::WorkerDebuggerGlobalScope |
+                GlobalNames::WorkletGlobalScope)) == 0,
              "Unknown non-exposed global type");
 
   const char* name = js::GetObjectClass(aGlobal)->name;
@@ -2722,6 +2739,11 @@ IsNonExposedGlobal(JSContext* aCx, JSObject* aGlobal,
 
   if ((aNonExposedGlobals & GlobalNames::WorkerDebuggerGlobalScope) &&
       !strcmp(name, "WorkerDebuggerGlobalScopex")) {
+    return true;
+  }
+
+  if ((aNonExposedGlobals & GlobalNames::WorkletGlobalScope) &&
+      !strcmp(name, "WorkletGlobalScope")) {
     return true;
   }
 

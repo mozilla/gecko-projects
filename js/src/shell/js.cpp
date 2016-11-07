@@ -62,7 +62,6 @@
 #include "jswrapper.h"
 #include "shellmoduleloader.out.h"
 
-#include "asmjs/WasmJS.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/TestingFunctions.h"
 #include "frontend/Parser.h"
@@ -96,6 +95,7 @@
 #include "vm/Time.h"
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
+#include "wasm/WasmJS.h"
 
 #include "jscompartmentinlines.h"
 #include "jsobjinlines.h"
@@ -315,6 +315,7 @@ static bool offthreadCompilation = false;
 static bool enableBaseline = false;
 static bool enableIon = false;
 static bool enableAsmJS = false;
+static bool enableWasm = false;
 static bool enableNativeRegExp = false;
 static bool enableUnboxedArrays = false;
 static bool enableSharedMemory = SHARED_MEMORY_DEFAULT;
@@ -1706,7 +1707,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
                     return false;
             } else {
                 mozilla::Range<const char16_t> chars = codeChars.twoByteRange();
-                (void) JS::Compile(cx, options, chars.start().get(), chars.length(), &script);
+                (void) JS::Compile(cx, options, chars.begin().get(), chars.length(), &script);
             }
 
             if (!script)
@@ -1722,7 +1723,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
             if (!chars.initTwoByte(cx, flat))
                 return false;
 
-            const char16_t* durl = chars.twoByteRange().start().get();
+            const char16_t* durl = chars.twoByteRange().begin().get();
             if (!script->scriptSource()->setDisplayURL(cx, durl))
                 return false;
         }
@@ -1735,7 +1736,7 @@ Evaluate(JSContext* cx, unsigned argc, Value* vp)
             if (!chars.initTwoByte(cx, flat))
                 return false;
 
-            const char16_t* smurl = chars.twoByteRange().start().get();
+            const char16_t* smurl = chars.twoByteRange().begin().get();
             if (!script->scriptSource()->setSourceMapURL(cx, smurl))
                 return false;
         }
@@ -1887,7 +1888,7 @@ Run(JSContext* cx, unsigned argc, Value* vp)
     if (!chars.initTwoByte(cx, str))
         return false;
 
-    const char16_t* ucbuf = chars.twoByteRange().start().get();
+    const char16_t* ucbuf = chars.twoByteRange().begin().get();
     size_t buflen = str->length();
 
     RootedScript script(cx);
@@ -2275,7 +2276,7 @@ ValueToScript(JSContext* cx, HandleValue v, JSFunction** funp = nullptr)
         AutoStableStringChars linearChars(cx);
         if (!linearChars.initTwoByte(cx, linearStr))
             return nullptr;
-        const char16_t* chars = linearChars.twoByteRange().start().get();
+        const char16_t* chars = linearChars.twoByteRange().begin().get();
 
         RootedScript script(cx);
         CompileOptions options(cx);
@@ -3009,7 +3010,7 @@ Intern(JSContext* cx, unsigned argc, Value* vp)
 
     mozilla::Range<const char16_t> chars = strChars.twoByteRange();
 
-    if (!JS_AtomizeAndPinUCStringN(cx, chars.start().get(), chars.length()))
+    if (!JS_AtomizeAndPinUCStringN(cx, chars.begin().get(), chars.length()))
         return false;
 
     args.rval().setUndefined();
@@ -3211,7 +3212,7 @@ EvalInContext(JSContext* cx, unsigned argc, Value* vp)
 
     mozilla::Range<const char16_t> chars = strChars.twoByteRange();
     size_t srclen = chars.length();
-    const char16_t* src = chars.start().get();
+    const char16_t* src = chars.begin().get();
 
     bool lazy = false;
     if (srclen == 4) {
@@ -3931,7 +3932,7 @@ Compile(JSContext* cx, unsigned argc, Value* vp)
            .setIsRunOnce(true)
            .setNoScriptRval(true);
     RootedScript script(cx);
-    const char16_t* chars = stableChars.twoByteRange().start().get();
+    const char16_t* chars = stableChars.twoByteRange().begin().get();
     bool ok = JS_CompileUCScript(cx, chars, scriptContents->length(), options, &script);
     args.rval().setUndefined();
     return ok;
@@ -3980,7 +3981,7 @@ ParseModule(JSContext* cx, unsigned argc, Value* vp)
     if (!stableChars.initTwoByte(cx, scriptContents))
         return false;
 
-    const char16_t* chars = stableChars.twoByteRange().start().get();
+    const char16_t* chars = stableChars.twoByteRange().begin().get();
     SourceBufferHolder srcBuf(chars, scriptContents->length(),
                               SourceBufferHolder::NoOwnership);
 
@@ -4050,7 +4051,7 @@ Parse(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     size_t length = scriptContents->length();
-    const char16_t* chars = stableChars.twoByteRange().start().get();
+    const char16_t* chars = stableChars.twoByteRange().begin().get();
 
     CompileOptions options(cx);
     options.setIntroductionType("js shell parse")
@@ -4103,7 +4104,7 @@ SyntaxParse(JSContext* cx, unsigned argc, Value* vp)
     if (!stableChars.initTwoByte(cx, scriptContents))
         return false;
 
-    const char16_t* chars = stableChars.twoByteRange().start().get();
+    const char16_t* chars = stableChars.twoByteRange().begin().get();
     size_t length = scriptContents->length();
     UsedNameTracker usedNames(cx);
     if (!usedNames.init())
@@ -4188,7 +4189,7 @@ OffThreadCompileScript(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     size_t length = scriptContents->length();
-    const char16_t* chars = stableChars.twoByteRange().start().get();
+    const char16_t* chars = stableChars.twoByteRange().begin().get();
 
     // Make sure we own the string's chars, so that they are not freed before
     // the compilation is finished.
@@ -4275,7 +4276,7 @@ OffThreadCompileModule(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     size_t length = scriptContents->length();
-    const char16_t* chars = stableChars.twoByteRange().start().get();
+    const char16_t* chars = stableChars.twoByteRange().begin().get();
 
     // Make sure we own the string's chars, so that they are not freed before
     // the compilation is finished.
@@ -5558,7 +5559,7 @@ EntryPoints(JSContext* cx, unsigned argc, Value* vp)
             AutoStableStringChars stableChars(cx);
             if (!stableChars.initTwoByte(cx, codeString))
                 return false;
-            const char16_t* chars = stableChars.twoByteRange().start().get();
+            const char16_t* chars = stableChars.twoByteRange().begin().get();
             size_t length = codeString->length();
 
             CompileOptions options(cx);
@@ -7209,6 +7210,7 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     enableBaseline = !op.getBoolOption("no-baseline");
     enableIon = !op.getBoolOption("no-ion");
     enableAsmJS = !op.getBoolOption("no-asmjs");
+    enableWasm = !op.getBoolOption("no-wasm");
     enableNativeRegExp = !op.getBoolOption("no-native-regexp");
     enableUnboxedArrays = op.getBoolOption("unboxed-arrays");
     enableWasmAlwaysBaseline = op.getBoolOption("wasm-always-baseline");
@@ -7216,7 +7218,7 @@ SetContextOptions(JSContext* cx, const OptionParser& op)
     JS::ContextOptionsRef(cx).setBaseline(enableBaseline)
                              .setIon(enableIon)
                              .setAsmJS(enableAsmJS)
-                             .setWasm(true)
+                             .setWasm(enableWasm)
                              .setWasmAlwaysBaseline(enableWasmAlwaysBaseline)
                              .setNativeRegExp(enableNativeRegExp)
                              .setUnboxedArrays(enableUnboxedArrays);
@@ -7494,7 +7496,7 @@ SetWorkerContextOptions(JSContext* cx)
     JS::ContextOptionsRef(cx).setBaseline(enableBaseline)
                              .setIon(enableIon)
                              .setAsmJS(enableAsmJS)
-                             .setWasm(true)
+                             .setWasm(enableWasm)
                              .setWasmAlwaysBaseline(enableWasmAlwaysBaseline)
                              .setNativeRegExp(enableNativeRegExp)
                              .setUnboxedArrays(enableUnboxedArrays);
@@ -7674,6 +7676,7 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "ion", "Enable IonMonkey (default)")
         || !op.addBoolOption('\0', "no-ion", "Disable IonMonkey")
         || !op.addBoolOption('\0', "no-asmjs", "Disable asm.js compilation")
+        || !op.addBoolOption('\0', "no-wasm", "Disable WebAssembly compilation")
         || !op.addBoolOption('\0', "no-native-regexp", "Disable native regexp compilation")
         || !op.addBoolOption('\0', "no-unboxed-objects", "Disable creating unboxed plain objects")
         || !op.addBoolOption('\0', "unboxed-arrays", "Allow creating unboxed arrays")

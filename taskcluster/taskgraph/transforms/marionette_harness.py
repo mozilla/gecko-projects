@@ -7,7 +7,6 @@ Set dynamic task description properties of the marionette-harness task.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-import time
 from taskgraph.transforms.base import TransformSequence
 
 transforms = TransformSequence()

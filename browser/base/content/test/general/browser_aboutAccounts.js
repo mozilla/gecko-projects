@@ -2,7 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-// /////////////////
 //
 // Whitelisting this test.
 // As part of bug 1077403, the leaking uncaught rejection should be fixed.
@@ -407,12 +406,12 @@ function test()
   waitForExplicitFinish();
 
   Task.spawn(function* () {
-    for (let test of gTests) {
-      info(test.desc);
+    for (let testCase of gTests) {
+      info(testCase.desc);
       try {
-        yield test.run();
+        yield testCase.run();
       } finally {
-        yield test.teardown();
+        yield testCase.teardown();
       }
     }
 

@@ -515,6 +515,9 @@ class IDLExposureMixins():
     def isExposedInWorkerDebugger(self):
         return len(self.getWorkerDebuggerExposureSet()) > 0
 
+    def isExposedInAnyWorklet(self):
+        return len(self.getWorkletExposureSet()) > 0
+
     def isExposedInSystemGlobals(self):
         return 'BackstagePass' in self.exposureSet
 
@@ -533,6 +536,10 @@ class IDLExposureMixins():
     def getWorkerExposureSet(self):
         workerScopes = self._globalScope.globalNameMapping["Worker"]
         return workerScopes.intersection(self.exposureSet)
+
+    def getWorkletExposureSet(self):
+        workletScopes = self._globalScope.globalNameMapping["Worklet"]
+        return workletScopes.intersection(self.exposureSet)
 
     def getWorkerDebuggerExposureSet(self):
         workerDebuggerScopes = self._globalScope.globalNameMapping["WorkerDebugger"]
@@ -1090,7 +1097,10 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
         # {getter,setter,creator,deleter}, at most one stringifier,
         # and at most one legacycaller.  Note that this last is not
         # quite per spec, but in practice no one overloads
-        # legacycallers.
+        # legacycallers.  Also note that in practice we disallow
+        # indexed deleters, but it simplifies some other code to
+        # treat deleter analogously to getter/setter/creator by
+        # prefixing it with "named".
         specialMembersSeen = {}
         for member in self.members:
             if not member.isMethod():
@@ -5853,6 +5863,9 @@ class Parser(Tokenizer):
                 specialType = IDLMethod.NamedOrIndexed.Named
             elif argType == BuiltinTypes[IDLBuiltinType.Types.unsigned_long]:
                 specialType = IDLMethod.NamedOrIndexed.Indexed
+                if deleter:
+                    raise WebIDLError("There is no such thing as an indexed deleter.",
+                                      [self.getLocation(p, 1)])
             else:
                 raise WebIDLError("%s has wrong argument type (must be DOMString or UnsignedLong)" %
                                   ("getter" if getter else "deleter"),
