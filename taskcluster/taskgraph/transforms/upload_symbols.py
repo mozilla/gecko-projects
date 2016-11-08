@@ -31,6 +31,14 @@ def fill_template(config, tasks):
         if 'nightly' in build_platform:
             attributes['nightly'] = True
 
+        treeherder = task.get('treeherder', {})
+        treeherder.setdefault('symbol', 'tc(Sym)')
+        treeherder.setdefault('platform',
+                              "{}/opt".format(build_platform))
+        treeherder.setdefault('tier', 2)
+        treeherder.setdefault('kind', 'build')
+        task['treeherder'] = treeherder
+
         # clear out the stuff that's not part of a task description
         del task['build-label']
         del task['build-platform']
