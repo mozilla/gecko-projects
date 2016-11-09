@@ -54,16 +54,6 @@ def validate(config, jobs):
 
 
 @transforms.add
-def skip_mar_sign_moving(config, jobs):
-    "We should skip beetmoving mar files until we are ready for that piece"
-    for job in jobs:
-        dep_job = job['dependent-task']
-        if "signing-mar-" in dep_job.label:
-            continue  # by not yielding we are not creating a task
-        yield job
-
-
-@transforms.add
 def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']

@@ -10,8 +10,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.treeherder import join_symbol
 
-ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/<{}>/artifacts/{}'
-
 transforms = TransformSequence()
 
 
@@ -39,24 +37,27 @@ def make_signing_description(config, jobs):
                     'format': 'mar',
                 }
             ]
-        unsigned_artifacts = []
+        upstream_artifacts = []
+        job.setdefault('signing-formats', [])
         for spec in job_specs:
             fmt = spec["format"]
-            for artifact in spec["artifacts"]:
-                url = {"task-reference": ARTIFACT_URL.format('build', artifact)}
-                unsigned_artifacts.append(url)
+            upstream_artifacts.append({
+                "taskId": {"task-reference": "<build>"},
+                "taskType": "build",
+                "paths": spec["artifacts"],
+                "formats": [fmt]
+            })
+            job['signing-formats'].append(fmt)
 
-            job['unsigned-artifacts'] = unsigned_artifacts
-            job['signing-format'] = fmt
+        job['upstream-artifacts'] = upstream_artifacts
 
-            label = dep_job.label.replace("build-", "signing-{}-".format(fmt))
-            job['label'] = label
+        label = dep_job.label.replace("build-", "signing-")
+        job['label'] = label
 
-            # add the format character to the TH symbol
-            symbol = 'Ns{}'.format(fmt.title()[:1])
-            group = 'tc'
+        symbol = 'Ns'
+        group = 'tc'
 
-            job['treeherder'] = {
-                'symbol': join_symbol(group, symbol),
-            }
-            yield job
+        job['treeherder'] = {
+            'symbol': join_symbol(group, symbol),
+        }
+        yield job

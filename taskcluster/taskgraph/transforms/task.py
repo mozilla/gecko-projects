@@ -258,7 +258,19 @@ task_description_schema = Schema({
         Required('max-run-time', default=600): int,
 
         # list of artifact URLs for the artifacts that should be signed
-        Required('unsigned-artifacts'): [taskref_or_string],
+        Required('upstream-artifacts'): [{
+            # taskId of the task with the artifact
+            Required('taskId'): taskref_or_string,
+
+            # type of signing task (for CoT)
+            Required('taskType'): basestring,
+
+            # Paths to the artifacts to sign
+            Required('paths'): [basestring],
+
+            # Signing formats to use on each of the paths
+            Required('formats'): [basestring],
+        }],
     }, {
         Required('implementation'): 'beetmover',
 
@@ -460,7 +472,7 @@ def build_scriptworker_signing_payload(config, task, task_def):
 
     task_def['payload'] = {
         'maxRunTime': worker['max-run-time'],
-        'unsignedArtifacts':  worker['unsigned-artifacts']
+        'upstreamArtifacts':  worker['upstream-artifacts']
     }
 
 

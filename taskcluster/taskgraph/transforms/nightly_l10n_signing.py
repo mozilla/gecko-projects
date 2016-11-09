@@ -10,8 +10,6 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.treeherder import join_symbol
 
-ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/<{}>/artifacts/public/build/{}'
-
 transforms = TransformSequence()
 
 
@@ -23,46 +21,49 @@ def make_signing_description(config, jobs):
         dep_job = job['dependent-task']
         dep_platform = dep_job.attributes.get('build_platform')
 
-        job['unsigned-artifacts'] = []
+        job['upstream-artifacts'] = []
         if 'android' in dep_platform:
             job_specs = [
                 {
-                    'extensions': ['.apk'],
+                    'artifacts': ['public/build/target.apk'],
                     'format': 'jar',
                 },
             ]
         else:
             job_specs = [
                 {
-                    'extensions': ['.tar.bz2', '.checksums'],
+                    'artifacts': ['public/build/{locale}/target.tar.bz2',
+                                  'public/build/{locale}/target.checksums'],
                     'format': 'gpg',
                 }, {
-                    'extensions': ['complete.mar'],
+                    'artifacts': ['public/build/{locale}/target.complete.mar'],
                     'format': 'mar',
                 }
             ]
+        upstream_artifacts = []
+        job.setdefault('signing-formats', [])
         for spec in job_specs:
             fmt = spec['format']
-            for locale in dep_job.attributes.get('chunk_locales', []):
-                for ext in spec['extensions']:
-                    filename = '{}/target{}'.format(locale, ext)
-                    job['unsigned-artifacts'].append({
-                        'task-reference': ARTIFACT_URL.format('unsigned-repack',
-                                                              filename)
-                        })
+            upstream_artifacts.append({
+                "taskId": {"task-reference": "<build>"},
+                "taskType": "l10n",
+                # Set paths based on artifacts in the specs (above) one per
+                # locale present in the chunk this is signing stuff for.
+                "paths": [f.format(locale=l)
+                          for l in dep_job.attributes.get('chunk_locales', [])
+                          for f in spec['artifacts']],
+                "formats": [fmt]
+            })
+            job['signing-formats'].append(fmt)
 
-            job['signing-format'] = fmt
+        label = dep_job.label.replace("nightly-l10n-", "signing-l10n-")
+        job['label'] = label
 
-            label = dep_job.label.replace("nightly-l10n-",
-                                          "signing-l10n-{}-".format(fmt))
-            job['label'] = label
+        # add the chunk number to the TH symbol
+        symbol = 'Ns{}'.format(dep_job.attributes.get('l10n_chunk'))
+        group = 'tc-L10n'
 
-            # add the chunk number to the TH symbol
-            symbol = 'Ns{}{}'.format(dep_job.attributes.get('l10n_chunk'),
-                                     fmt.title()[:1])
-            group = 'tc-L10n'
-
-            job['treeherder'] = {
-                'symbol': join_symbol(group, symbol),
-            }
-            yield job
+        job['treeherder'] = {
+            'symbol': join_symbol(group, symbol),
+        }
+        yield job

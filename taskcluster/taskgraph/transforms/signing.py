@@ -33,14 +33,27 @@ signing_description_schema = Schema({
     # the dependant task (object) for this signing job, used to inform signing.
     Required('dependent-task'): object,
 
-    # Artifacts from dep task to sign
-    Required('unsigned-artifacts'): [taskref_or_string],
+    # Artifacts from dep task to sign - Sync with taskgraph/transforms/task.py
+    # because this is passed directly into the signingscript worker
+    Required('upstream-artifacts'): [{
+        # taskId of the task with the artifact
+        Required('taskId'): taskref_or_string,
+
+        # type of signing task (for CoT)
+        Required('taskType'): basestring,
+
+        # Paths to the artifacts to sign
+        Required('paths'): [basestring],
+
+        # Signing formats to use on each of the paths
+        Required('formats'): [basestring],
+    }],
 
     # depname is used in taskref's to identify the taskID of the unsigned things
     Required('depname', default='build'): basestring,
 
-    # Format to use to sign the artifacts
-    Required('signing-format'): basestring,
+    # Formats to use to sign the artifacts
+    Required('signing-formats'): [basestring],
 
     # unique label to describe this signing task, defaults to {dep.label}-signing
     Optional('label'): basestring,
@@ -66,8 +79,9 @@ def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
 
-        signing_format_scope = "project:releng:signing:format:{}".format(
-            job['signing-format'])
+        signing_format_scopes = []
+        for format in job['signing-formats']:
+            signing_format_scopes.append("project:releng:signing:format:{}".format(format))
 
         treeherder = job.get('treeherder', {})
         treeherder.setdefault('symbol', 'tc(Ns)')
@@ -81,14 +95,13 @@ def make_task_description(config, jobs):
 
         task = {
             'label': label,
-            'description': "{} Signing ({})".format(
-                dep_job.task["metadata"]["description"],
-                job['signing-format']),
+            'description': "{} Signing".format(
+                dep_job.task["metadata"]["description"]),
             'worker-type': "scriptworker-prov-v1/signing-linux-v1",
             'worker': {'implementation': 'scriptworker-signing',
-                       'unsigned-artifacts': job['unsigned-artifacts']},
-            'scopes': ["project:releng:signing:cert:nightly-signing",
-                       signing_format_scope],
+                       'upstream-artifacts': job['upstream-artifacts']},
+            'scopes': ["project:releng:signing:cert:nightly-signing"] + \
+                    signing_format_scopes,
             'dependencies': {job['depname']: dep_job.label},
             'attributes': {
                 'nightly': dep_job.attributes.get('nightly', False),
