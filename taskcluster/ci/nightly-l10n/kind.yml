@@ -103,7 +103,7 @@ jobs:
                 gecko-v2: android-nightly-l10n-opt
         treeherder:
             platform: android-4-0-armv7-api15/opt
-        worker-type: aws-provisioner-v1/android-api-15
+        worker-type: aws-provisioner-v1/gecko-{level}-b-android
         worker:
             max-run-time: 18000
             env:
