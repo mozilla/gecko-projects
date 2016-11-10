@@ -33,7 +33,7 @@ def make_signing_description(config, jobs):
                                   'public/build/target.checksums'],
                     'format': 'gpg',
                 }, {
-                    'artifacts': ['public/build/target.complete.mar'],
+                    'artifacts': ['public/build/update/target.complete.mar'],
                     'format': 'mar',
                 }
             ]

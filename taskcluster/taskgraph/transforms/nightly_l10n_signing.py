@@ -56,6 +56,8 @@ def make_signing_description(config, jobs):
             })
             job['signing-formats'].append(fmt)
 
+        job['upstream-artifacts'] = upstream_artifacts
+
         label = dep_job.label.replace("nightly-l10n-", "signing-l10n-")
         job['label'] = label
 
