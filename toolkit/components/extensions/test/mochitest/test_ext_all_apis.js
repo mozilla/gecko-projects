@@ -39,6 +39,8 @@ let expectedCommonApis = [
   // If you want to add a new powerful test API, please see bug 1287233.
   "test.assertEq",
   "test.assertFalse",
+  "test.assertRejects",
+  "test.assertThrows",
   "test.assertTrue",
   "test.fail",
   "test.log",
@@ -74,6 +76,7 @@ let expectedBackgroundApis = [
   "runtime.getBrowserInfo",
   "runtime.getPlatformInfo",
   "runtime.onInstalled",
+  "runtime.onStartup",
   "runtime.onUpdateAvailable",
   "runtime.openOptionsPage",
   "runtime.reload",

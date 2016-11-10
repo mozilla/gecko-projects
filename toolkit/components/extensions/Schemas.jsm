@@ -120,6 +120,18 @@ function exportLazyGetter(object, prop, getter) {
   });
 }
 
+const POSTPROCESSORS = {
+  convertImageDataToURL(imageData, context) {
+    let document = context.cloneScope.document;
+    let canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+    canvas.width = imageData.width;
+    canvas.height = imageData.height;
+    canvas.getContext("2d").putImageData(imageData, 0, 0);
+
+    return canvas.toDataURL("image/png");
+  },
+};
+
 // Parses a regular expression, with support for the Python extended
 // syntax that allows setting flags by including the string (?im)
 function parsePattern(pattern) {
@@ -183,6 +195,7 @@ class Context {
         return value;
       },
     };
+    this.postprocessors = POSTPROCESSORS;
     this.isChromeCompat = false;
 
     this.currentChoices = new Set();
@@ -540,6 +553,14 @@ class Entry {
     this.preprocessor = schema.preprocess || null;
 
     /**
+     * @property {string} [postprocessor]
+     * If set to a string value, and a postprocessor of the same is
+     * defined in the validation context, it will be applied to this
+     * value after any normalization.
+     */
+    this.postprocessor = schema.postprocess || null;
+
+    /**
      * @property {Array<string>} allowedContexts A list of allowed contexts
      * to consider before generating the API.
      * These are not parsed by the schema, but passed to `shouldInject`.
@@ -560,6 +581,23 @@ class Entry {
       return context.preprocessors[this.preprocessor](value, context);
     }
     return value;
+  }
+
+  /**
+   * Postprocess the given result with the postprocessor declared in
+   * `postprocessor`.
+   *
+   * @param {object} result
+   * @param {Context} context
+   * @returns {object}
+   */
+  postprocess(result, context) {
+    if (result.error || !this.postprocessor) {
+      return result;
+    }
+
+    let value = context.postprocessors[this.postprocessor](result.value, context);
+    return {value};
   }
 
   /**
@@ -623,7 +661,7 @@ class Type extends Entry {
    *        schemas of this type.
    */
   static get EXTRA_PROPERTIES() {
-    return ["description", "deprecated", "preprocess", "allowedContexts"];
+    return ["description", "deprecated", "preprocess", "postprocess", "allowedContexts"];
   }
 
   /**
@@ -722,7 +760,7 @@ class Type extends Entry {
 class AnyType extends Type {
   normalize(value, context) {
     this.checkDeprecated(context, value);
-    return {value};
+    return this.postprocess({value}, context);
   }
 
   checkBaseType(baseType) {
@@ -896,7 +934,7 @@ class StringType extends Type {
 
     if (this.enumeration) {
       if (this.enumeration.includes(value)) {
-        return {value};
+        return this.postprocess({value}, context);
       }
 
       let choices = this.enumeration.map(JSON.stringify).join(", ");
@@ -999,7 +1037,12 @@ class ObjectType extends Type {
     // Parse "additionalProperties" schema.
     let additionalProperties = null;
     if (schema.additionalProperties) {
-      additionalProperties = Schemas.parseSchema(schema.additionalProperties, path);
+      let type = schema.additionalProperties;
+      if (type === true) {
+        type = {"type": "any"};
+      }
+
+      additionalProperties = Schemas.parseSchema(type, path);
     }
 
     return new this(schema, properties, additionalProperties, patternProperties, schema.isInstanceOf || null);
@@ -1136,7 +1179,7 @@ class ObjectType extends Type {
 
         // This is kind of a hack, but we can't normalize things that
         // aren't JSON, so we just return them.
-        return {value};
+        return this.postprocess({value}, context);
       }
 
       let properties = this.extractProperties(value, context);
@@ -1175,7 +1218,7 @@ class ObjectType extends Type {
                              `not contain the unexpected properties [${props}]`);
       }
 
-      return {value: result};
+      return this.postprocess({value: result}, context);
     } catch (e) {
       if (e.error) {
         return e;
@@ -1267,7 +1310,7 @@ class IntegerType extends Type {
                            `be no greater than ${this.maximum}`);
     }
 
-    return r;
+    return this.postprocess(r, context);
   }
 
   checkBaseType(baseType) {
@@ -1331,7 +1374,7 @@ class ArrayType extends Type {
                            `have at most ${this.maxItems} items`);
     }
 
-    return {value: result};
+    return this.postprocess({value: result}, context);
   }
 
   checkBaseType(baseType) {
@@ -1348,7 +1391,7 @@ class FunctionType extends Type {
     this.checkSchemaProperties(schema, path, extraProperties);
 
     let isAsync = !!schema.async;
-    let isExpectingCallback = isAsync;
+    let isExpectingCallback = typeof schema.async === "string";
     let parameters = null;
     if ("parameters" in schema) {
       parameters = [];
@@ -1374,9 +1417,10 @@ class FunctionType extends Type {
 
     let hasAsyncCallback = false;
     if (isAsync) {
-      if (parameters && parameters.length && parameters[parameters.length - 1].name == schema.async) {
-        hasAsyncCallback = true;
-      }
+      hasAsyncCallback = (parameters &&
+                          parameters.length &&
+                          parameters[parameters.length - 1].name == schema.async);
+
       if (schema.returns) {
         throw new Error("Internal error: Async functions must not have return values.");
       }
@@ -1917,7 +1961,11 @@ this.Schemas = {
     });
 
     for (let json of this.schemaJSON.values()) {
-      this.loadSchema(json);
+      try {
+        this.loadSchema(json);
+      } catch (e) {
+        Cu.reportError(e);
+      }
     }
 
     return this.namespaces;

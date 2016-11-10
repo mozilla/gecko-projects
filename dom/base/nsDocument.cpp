@@ -12268,6 +12268,7 @@ nsIDocument::InlineScriptAllowedByCSP()
   if (csp) {
     nsresult rv = csp->GetAllowsInline(nsIContentPolicy::TYPE_SCRIPT,
                                        EmptyString(), // aNonce
+                                       false,         // parserCreated
                                        EmptyString(), // FIXME get script sample (bug 1314567)
                                        0,             // aLineNumber
                                        &allowsInlineScript);
@@ -12430,6 +12431,20 @@ nsDocument::NotifyIntersectionObservers()
   for (const auto& observer : mIntersectionObservers) {
     observer->Notify();
   }
+}
+
+static bool
+NotifyLayerManagerRecreatedCallback(nsIDocument* aDocument, void* aData)
+{
+  aDocument->NotifyLayerManagerRecreated();
+  return true;
+}
+
+void
+nsDocument::NotifyLayerManagerRecreated()
+{
+  EnumerateActivityObservers(NotifyActivityChanged, nullptr);
+  EnumerateSubDocuments(NotifyLayerManagerRecreatedCallback, nullptr);
 }
 
 XPathEvaluator*

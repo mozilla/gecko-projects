@@ -13,12 +13,15 @@ var NetworkHelper = require("devtools/shared/webconsole/network-helper");
 var { Toolbox } = require("devtools/client/framework/toolbox");
 
 const EXAMPLE_URL = "http://example.com/browser/devtools/client/netmonitor/test/";
+const HTTPS_EXAMPLE_URL = "https://example.com/browser/devtools/client/netmonitor/test/";
 
 const API_CALLS_URL = EXAMPLE_URL + "html_api-calls-test-page.html";
 const SIMPLE_URL = EXAMPLE_URL + "html_simple-test-page.html";
 const NAVIGATE_URL = EXAMPLE_URL + "html_navigate-test-page.html";
 const CONTENT_TYPE_URL = EXAMPLE_URL + "html_content-type-test-page.html";
 const CONTENT_TYPE_WITHOUT_CACHE_URL = EXAMPLE_URL + "html_content-type-without-cache-test-page.html";
+const HTTPS_CONTENT_TYPE_WITHOUT_CACHE_URL = HTTPS_EXAMPLE_URL + "html_content-type-without-cache-test-page.html";
+const CONTENT_TYPE_WITHOUT_CACHE_REQUESTS = 8;
 const CYRILLIC_URL = EXAMPLE_URL + "html_cyrillic-test-page.html";
 const STATUS_CODES_URL = EXAMPLE_URL + "html_status-codes-test-page.html";
 const POST_DATA_URL = EXAMPLE_URL + "html_post-data-test-page.html";
@@ -44,6 +47,7 @@ const CORS_URL = EXAMPLE_URL + "html_cors-test-page.html";
 
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const CONTENT_TYPE_SJS = EXAMPLE_URL + "sjs_content-type-test-server.sjs";
+const HTTPS_CONTENT_TYPE_SJS = HTTPS_EXAMPLE_URL + "sjs_content-type-test-server.sjs";
 const STATUS_CODES_SJS = EXAMPLE_URL + "sjs_status-codes-test-server.sjs";
 const SORTING_SJS = EXAMPLE_URL + "sjs_sorting-test-server.sjs";
 const HTTPS_REDIRECT_SJS = EXAMPLE_URL + "sjs_https-redirect-test-server.sjs";
@@ -54,6 +58,7 @@ const HSTS_BASE_URL = EXAMPLE_URL;
 const HSTS_PAGE_URL = CUSTOM_GET_URL;
 
 const TEST_IMAGE = EXAMPLE_URL + "test-image.png";
+const HTTPS_TEST_IMAGE = HTTPS_EXAMPLE_URL + "test-image.png";
 const TEST_IMAGE_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABGdBTUEAAK/INwWK6QAAABl0RVh0U29mdHdhcmUAQWRvYmUgSW1hZ2VSZWFkeXHJZTwAAAHWSURBVHjaYvz//z8DJQAggJiQOe/fv2fv7Oz8rays/N+VkfG/iYnJfyD/1+rVq7ffu3dPFpsBAAHEAHIBCJ85c8bN2Nj4vwsDw/8zQLwKiO8CcRoQu0DxqlWrdsHUwzBAAIGJmTNnPgYa9j8UqhFElwPxf2MIDeIrKSn9FwSJoRkAEEAM0DD4DzMAyPi/G+QKY4hh5WAXGf8PDQ0FGwJ22d27CjADAAIIrLmjo+MXA9R2kAHvGBA2wwx6B8W7od6CeQcggKCmCEL8bgwxYCbUIGTDVkHDBia+CuotgACCueD3TDQN75D4xmAvCoK9ARMHBzAw0AECiBHkAlC0Mdy7x9ABNA3obAZXIAa6iKEcGlMVQHwWyjYuL2d4v2cPg8vZswx7gHyAAAK7AOif7SAbOqCmn4Ha3AHFsIDtgPq/vLz8P4MSkJ2W9h8ggBjevXvHDo4FQUQg/kdypqCg4H8lUIACnQ/SOBMYI8bAsAJFPcj1AAEEjwVQqLpAbXmH5BJjqI0gi9DTAAgDBBCcAVLkgmQ7yKCZxpCQxqUZhAECCJ4XgMl493ug21ZD+aDAXH0WLM4A9MZPXJkJIIAwTAR5pQMalaCABQUULttBGCCAGCnNzgABBgAMJ5THwGvJLAAAAABJRU5ErkJggg==";
 
 const FRAME_SCRIPT_UTILS_URL = "chrome://devtools/content/shared/frame-script-utils.js";
@@ -382,17 +387,19 @@ function waitFor(subject, eventName) {
 /**
  * Tests if a button for a filter of given type is the only one checked.
  *
- * @param string aFilterType
+ * @param string filterType
  *        The type of the filter that should be the only one checked.
  */
-function testFilterButtons(aMonitor, aFilterType) {
-  let doc = aMonitor.panelWin.document;
-  let target = doc.querySelector("#requests-menu-filter-" + aFilterType + "-button");
-  let buttons = doc.querySelectorAll(".requests-menu-footer-button");
+function testFilterButtons(monitor, filterType) {
+  let doc = monitor.panelWin.document;
+  let target = doc.querySelector("#requests-menu-filter-" + filterType + "-button");
+  ok(target, `Filter button '${filterType}' was found`);
+  let buttons = [...doc.querySelectorAll(".menu-filter-button")];
+  ok(buttons.length > 0, "More than zero filter buttons were found");
 
   // Only target should be checked.
-  let checkStatus = [...buttons].map(button => button == target ? 1 : 0);
-  testFilterButtonsCustom(aMonitor, checkStatus);
+  let checkStatus = buttons.map(button => button == target ? 1 : 0);
+  testFilterButtonsCustom(monitor, checkStatus);
 }
 
 /**
@@ -495,11 +502,11 @@ function waitForContentMessage(name) {
 /**
  * Open the requestMenu menu and return all of it's items in a flat array
  * @param {netmonitorPanel} netmonitor
- * @param {Object} options to pass into openMenu
+ * @param {Event} event mouse event with screenX and screenX coordinates
  * @return An array of MenuItems
  */
-function openContextMenuAndGetAllItems(netmonitor, options) {
-  let menu = netmonitor.RequestsMenu._openMenu(options);
+function openContextMenuAndGetAllItems(netmonitor, event) {
+  let menu = netmonitor.RequestsMenu.contextMenu.open(event);
 
   // Flatten all menu items into a single array to make searching through it easier
   let allItems = [].concat.apply([], menu.items.map(function addItem(item) {

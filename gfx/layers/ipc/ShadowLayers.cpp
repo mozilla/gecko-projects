@@ -192,6 +192,21 @@ ShadowLayerForwarder::ShadowLayerForwarder(ClientLayerManager* aClientLayerManag
   mActiveResourceTracker = MakeUnique<ActiveResourceTracker>(1000, "CompositableForwarder");
 }
 
+template<typename T>
+struct ReleaseOnMainThreadTask : public Runnable
+{
+  UniquePtr<T> mObj;
+
+  explicit ReleaseOnMainThreadTask(UniquePtr<T>& aObj)
+    : mObj(Move(aObj))
+  {}
+
+  NS_IMETHOD Run() override {
+    mObj = nullptr;
+    return NS_OK;
+  }
+};
+
 ShadowLayerForwarder::~ShadowLayerForwarder()
 {
   MOZ_ASSERT(mTxn->Finished(), "unfinished transaction?");
@@ -199,6 +214,10 @@ ShadowLayerForwarder::~ShadowLayerForwarder()
   if (mShadowManager) {
     mShadowManager->SetForwarder(nullptr);
     mShadowManager->Destroy();
+  }
+  if (!NS_IsMainThread()) {
+    NS_DispatchToMainThread(
+      new ReleaseOnMainThreadTask<ActiveResourceTracker>(mActiveResourceTracker));
   }
 }
 
@@ -749,7 +768,14 @@ ShadowLayerForwarder::ConstructShadowFor(ShadowableLayer* aLayer)
   if (!IPCOpen()) {
     return nullptr;
   }
-  return mShadowManager->SendPLayerConstructor(new ShadowLayerChild(aLayer));
+
+  ShadowLayerChild* child = new ShadowLayerChild();
+  if (!mShadowManager->SendPLayerConstructor(child)) {
+    return nullptr;
+  }
+
+  child->SetShadowableLayer(aLayer);
+  return child;
 }
 
 #if !defined(MOZ_HAVE_PLATFORM_SPECIFIC_LAYER_BUFFERS)

@@ -34,14 +34,6 @@ def get_method(method):
     return _target_task_methods[method]
 
 
-@_target_task('from_parameters')
-def target_tasks_from_parameters(full_task_graph, parameters):
-    """Get the target task set from parameters['target_tasks'].  This is
-    useful for re-running a decision task with the same target set as in an
-    earlier run, by copying `target_tasks.json` into `parameters.yml`."""
-    return parameters['target_tasks']
-
-
 @_target_task('try_option_syntax')
 def target_tasks_try_option_syntax(full_task_graph, parameters):
     """Generate a list of target tasks based on try syntax in
@@ -108,6 +100,22 @@ def target_tasks_ash(full_task_graph, parameters):
         # don't upload symbols
         if task.attributes['kind'] == 'upload-symbols':
             return False
+        return True
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('cedar_tasks')
+def target_tasks_cedar(full_task_graph, parameters):
+    """Target tasks that only run on the cedar branch."""
+    def filter(task):
+        platform = task.attributes.get('build_platform')
+        # only select platforms
+        if platform not in ['linux64']:
+            return False
+        if task.attributes.get('unittest_suite'):
+            if not (task.attributes['unittest_suite'].startswith('mochitest')
+                    or 'xpcshell' in task.attributes['unittest_suite']):
+                return False
         return True
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 

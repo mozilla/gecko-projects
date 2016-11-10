@@ -584,7 +584,7 @@ PuppetWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
     mLayerManager = new ClientLayerManager(this);
   }
   ShadowLayerForwarder* lf = mLayerManager->AsShadowForwarder();
-  if (!lf->HasShadowManager() && aShadowManager) {
+  if (lf && !lf->HasShadowManager() && aShadowManager) {
     lf->SetShadowManager(aShadowManager);
   }
   return mLayerManager;
@@ -594,7 +594,9 @@ LayerManager*
 PuppetWidget::RecreateLayerManager(PLayerTransactionChild* aShadowManager)
 {
   mLayerManager = new ClientLayerManager(this);
-  mLayerManager->AsShadowForwarder()->SetShadowManager(aShadowManager);
+  if (ShadowLayerForwarder* lf = mLayerManager->AsShadowForwarder()) {
+    lf->SetShadowManager(aShadowManager);
+  }
   return mLayerManager;
 }
 
@@ -1081,7 +1083,7 @@ PuppetWidget::Paint()
       if (mTabChild) {
         mTabChild->NotifyPainted();
       }
-    } else {
+    } else if (mozilla::layers::LayersBackend::LAYERS_BASIC == mLayerManager->GetBackendType()) {
       RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(mDrawTarget);
       if (!ctx) {
         gfxDevCrash(LogReason::InvalidContext) << "PuppetWidget context problem " << gfx::hexa(mDrawTarget);

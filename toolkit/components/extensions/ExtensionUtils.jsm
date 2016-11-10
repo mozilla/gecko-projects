@@ -32,6 +32,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
                                   "resource://gre/modules/Preferences.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
                                   "resource://gre/modules/PromiseUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
@@ -49,6 +51,12 @@ function getConsole() {
 }
 
 XPCOMUtils.defineLazyGetter(this, "console", getConsole);
+
+/**
+ * An Error subclass for which complete error messages are always passed
+ * to extensions, rather than being interpreted as an unknown error.
+ */
+class ExtensionError extends Error {}
 
 function filterStack(error) {
   return String(error.stack).replace(/(^.*(Task\.jsm|Promise-backend\.js).*\n)+/gm, "<Promise Chain>\n");
@@ -188,7 +196,7 @@ class BaseContext {
     this.extension = extension;
     this.jsonSandbox = null;
     this.active = true;
-
+    this.incognito = null;
     this.messageManager = null;
     this.docShell = null;
     this.contentWindow = null;
@@ -203,6 +211,10 @@ class BaseContext {
     this.innerWindowID = getInnerWindowID(contentWindow);
     this.messageManager = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                                   .getInterface(Ci.nsIContentFrameMessageManager);
+
+    if (this.incognito == null) {
+      this.incognito = PrivateBrowsingUtils.isContentWindowPrivate(contentWindow);
+    }
 
     MessageChannel.setupMessageManagers([this.messageManager]);
 
@@ -368,7 +380,7 @@ class BaseContext {
       return error;
     }
     let message;
-    if (instanceOf(error, "Object")) {
+    if (instanceOf(error, "Object") || error instanceof ExtensionError) {
       message = error.message;
     } else if (typeof error == "object" &&
         this.principal.subsumes(Cu.getObjectPrincipal(error))) {
@@ -496,6 +508,13 @@ class BaseContext {
       obj.close();
     }
   }
+
+  /**
+   * A simple proxy for unload(), for use with callOnClose().
+   */
+  close() {
+    this.unload();
+  }
 }
 
 // Manages icon details for toolbar buttons in the |pageAction| and
@@ -517,20 +536,15 @@ let IconDetails = {
       if (details.imageData) {
         let imageData = details.imageData;
 
-        // The global might actually be from Schema.jsm, which
-        // normalizes most of our arguments. In that case it won't have
-        // an ImageData property. But Schema.jsm doesn't normalize
-        // actual ImageData objects, so they will come from a global
-        // with the right property.
-        if (instanceOf(imageData, "ImageData")) {
+        if (typeof imageData == "string") {
           imageData = {"19": imageData};
         }
 
         for (let size of Object.keys(imageData)) {
           if (!INTEGER.test(size)) {
-            throw new Error(`Invalid icon size ${size}, must be an integer`);
+            throw new ExtensionError(`Invalid icon size ${size}, must be an integer`);
           }
-          result[size] = this.convertImageDataToDataURL(imageData[size], context);
+          result[size] = imageData[size];
         }
       }
 
@@ -544,7 +558,7 @@ let IconDetails = {
 
         for (let size of Object.keys(path)) {
           if (!INTEGER.test(size)) {
-            throw new Error(`Invalid icon size ${size}, must be an integer`);
+            throw new ExtensionError(`Invalid icon size ${size}, must be an integer`);
           }
 
           let url = baseURI.resolve(path[size]);
@@ -553,9 +567,13 @@ let IconDetails = {
           // relative paths. We currently accept absolute URLs as well,
           // which means we need to check that the extension is allowed
           // to load them. This will throw an error if it's not allowed.
-          Services.scriptSecurityManager.checkLoadURIStrWithPrincipal(
-            extension.principal, url,
-            Services.scriptSecurityManager.DISALLOW_SCRIPT);
+          try {
+            Services.scriptSecurityManager.checkLoadURIStrWithPrincipal(
+              extension.principal, url,
+              Services.scriptSecurityManager.DISALLOW_SCRIPT);
+          } catch (e) {
+            throw new ExtensionError(`Illegal URL ${url}`);
+          }
 
           result[size] = url;
         }
@@ -629,16 +647,6 @@ let IconDetails = {
       image.onerror = reject;
       image.src = imageURL;
     });
-  },
-
-  convertImageDataToDataURL(imageData, context) {
-    let document = context.contentWindow.document;
-    let canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
-    canvas.width = imageData.width;
-    canvas.height = imageData.height;
-    canvas.getContext("2d").putImageData(imageData, 0, 0);
-
-    return canvas.toDataURL("image/png");
   },
 };
 
@@ -1748,7 +1756,11 @@ class LocalAPIImplementation extends SchemaAPIInterface {
   }
 
   addListener(listener, args) {
-    this.pathObj[this.name].addListener.call(null, listener, ...args);
+    try {
+      this.pathObj[this.name].addListener.call(null, listener, ...args);
+    } catch (e) {
+      throw this.context.normalizeError(e);
+    }
   }
 
   hasListener(listener) {
@@ -1880,10 +1892,10 @@ class ChildAPIManager {
 
       case "API:CallResult":
         let deferred = this.callPromises.get(data.callId);
-        if (data.lastError) {
-          deferred.reject({message: data.lastError});
+        if ("error" in data) {
+          deferred.reject(data.error);
         } else {
-          deferred.resolve(new SpreadArgs(data.args));
+          deferred.resolve(new SpreadArgs(data.result));
         }
         this.callPromises.delete(data.callId);
         break;
@@ -2236,6 +2248,7 @@ this.ExtensionUtils = {
   DefaultWeakMap,
   EventEmitter,
   EventManager,
+  ExtensionError,
   IconDetails,
   LocalAPIImplementation,
   LocaleData,

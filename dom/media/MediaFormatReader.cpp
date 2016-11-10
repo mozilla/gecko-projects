@@ -443,6 +443,12 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
 {
   MOZ_ASSERT(aDemuxer);
   MOZ_COUNT_CTOR(MediaFormatReader);
+
+  if (aDecoder && aDecoder->CompositorUpdatedEvent()) {
+    mCompositorUpdatedListener =
+      aDecoder->CompositorUpdatedEvent()->Connect(
+        mTaskQueue, this, &MediaFormatReader::NotifyCompositorUpdated);
+  }
 }
 
 MediaFormatReader::~MediaFormatReader()
@@ -502,6 +508,8 @@ MediaFormatReader::Shutdown()
   mDemuxer = nullptr;
   mPlatform = nullptr;
   mVideoFrameContainer = nullptr;
+
+  mCompositorUpdatedListener.DisconnectIfExists();
 
   return MediaDecoderReader::Shutdown();
 }
@@ -1504,7 +1512,8 @@ MediaFormatReader::Update(TrackType aTrack)
 
   if (decoder.mError && !decoder.HasFatalError()) {
     decoder.mDecodePending = false;
-    if (++decoder.mNumOfConsecutiveError > decoder.mMaxConsecutiveError) {
+    bool needsNewDecoder = decoder.mError.ref() == NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER;
+    if (!needsNewDecoder && ++decoder.mNumOfConsecutiveError > decoder.mMaxConsecutiveError) {
       NotifyError(aTrack, decoder.mError.ref());
       return;
     }
@@ -1514,6 +1523,9 @@ MediaFormatReader::Update(TrackType aTrack)
     media::TimeUnit nextKeyframe;
     if (aTrack == TrackType::kVideoTrack && !decoder.HasInternalSeekPending() &&
         NS_SUCCEEDED(decoder.mTrackDemuxer->GetNextRandomAccessPoint(&nextKeyframe))) {
+      if (needsNewDecoder) {
+        decoder.ShutdownDecoder();
+      }
       SkipVideoDemuxToNextKeyFrame(decoder.mLastSampleTime.refOr(TimeInterval()).Length());
       return;
     } else if (aTrack == TrackType::kAudioTrack) {

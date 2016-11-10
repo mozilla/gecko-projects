@@ -33,6 +33,7 @@ namespace mozilla {
 namespace ipc {
 
 class MessageChannel;
+class IToplevelProtocol;
 
 class RefCountedMonitor : public Monitor
 {
@@ -60,6 +61,15 @@ enum class SyncSendError {
     ReplyError,
 };
 
+enum ChannelState {
+    ChannelClosed,
+    ChannelOpening,
+    ChannelConnected,
+    ChannelTimeout,
+    ChannelClosing,
+    ChannelError
+};
+
 class AutoEnterTransaction;
 
 class MessageChannel : HasResultCodes
@@ -79,7 +89,7 @@ class MessageChannel : HasResultCodes
     typedef IPC::MessageInfo MessageInfo;
     typedef mozilla::ipc::Transport Transport;
 
-    explicit MessageChannel(MessageListener *aListener);
+    explicit MessageChannel(IToplevelProtocol *aListener);
     ~MessageChannel();
 
     // "Open" from the perspective of the transport layer; the underlying
@@ -328,29 +338,16 @@ class MessageChannel : HasResultCodes
     // This helper class manages mCxxStackDepth on behalf of MessageChannel.
     // When the stack depth is incremented from zero to non-zero, it invokes
     // a callback, and similarly for when the depth goes from non-zero to zero.
-    void EnteredCxxStack() {
-       mListener->OnEnteredCxxStack();
-    }
-
+    void EnteredCxxStack();
     void ExitedCxxStack();
 
-    void EnteredCall() {
-        mListener->OnEnteredCall();
-    }
+    void EnteredCall();
+    void ExitedCall();
 
-    void ExitedCall() {
-        mListener->OnExitedCall();
-    }
+    void EnteredSyncSend();
+    void ExitedSyncSend();
 
-    void EnteredSyncSend() {
-        mListener->OnEnteredSyncSend();
-    }
-
-    void ExitedSyncSend() {
-        mListener->OnExitedSyncSend();
-    }
-
-    MessageListener *Listener() const {
+    IToplevelProtocol *Listener() const {
         return mListener;
     }
 
@@ -454,15 +451,19 @@ class MessageChannel : HasResultCodes
   private:
     class MessageTask :
         public CancelableRunnable,
-        public LinkedListElement<RefPtr<MessageTask>>
+        public LinkedListElement<RefPtr<MessageTask>>,
+        public nsIRunnablePriority
     {
     public:
         explicit MessageTask(MessageChannel* aChannel, Message&& aMessage)
           : mChannel(aChannel), mMessage(Move(aMessage)), mScheduled(false)
         {}
 
+        NS_DECL_ISUPPORTS_INHERITED
+
         NS_IMETHOD Run() override;
         nsresult Cancel() override;
+        NS_IMETHOD GetPriority(uint32_t* aPriority) override;
         void Post();
         void Clear();
 
@@ -474,6 +475,7 @@ class MessageChannel : HasResultCodes
     private:
         MessageTask() = delete;
         MessageTask(const MessageTask&) = delete;
+        ~MessageTask() {}
 
         MessageChannel* mChannel;
         Message mMessage;
@@ -490,7 +492,7 @@ class MessageChannel : HasResultCodes
   private:
     // Based on presumption the listener owns and overlives the channel,
     // this is never nullified.
-    MessageListener* mListener;
+    IToplevelProtocol* mListener;
     ChannelState mChannelState;
     RefPtr<RefCountedMonitor> mMonitor;
     Side mSide;

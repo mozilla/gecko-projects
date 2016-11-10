@@ -43,6 +43,9 @@ public:
     // Shutdown().
     virtual void OnProcessUnexpectedShutdown(GPUProcessHost* aHost)
     {}
+
+    virtual void OnProcessDeviceReset(GPUProcessHost* aHost)
+    {}
   };
 
 public:
@@ -95,6 +98,9 @@ public:
   void OnChannelError() override;
 
   void SetListener(Listener* aListener);
+
+  // Used for tests and diagnostics
+  void KillProcess();
 
 private:
   // Called on the main thread.

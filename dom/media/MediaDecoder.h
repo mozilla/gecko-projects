@@ -59,10 +59,7 @@ class MediaDecoder : public AbstractMediaDecoder
 {
 public:
   struct SeekResolveValue {
-    SeekResolveValue(bool aAtEnd, MediaDecoderEventVisibility aEventVisibility)
-      : mAtEnd(aAtEnd), mEventVisibility(aEventVisibility) {}
     bool mAtEnd;
-    MediaDecoderEventVisibility mEventVisibility;
   };
 
   // Used to register with MediaResource to receive notifications which will
@@ -82,7 +79,6 @@ public:
     /* MediaResourceCallback functions */
     MediaDecoderOwner* GetMediaOwner() const override;
     void SetInfinite(bool aInfinite) override;
-    void SetMediaSeekable(bool aMediaSeekable) override;
     void NotifyNetworkError() override;
     void NotifyDecodeError() override;
     void NotifyDataArrived() override;
@@ -252,17 +248,9 @@ protected:
   void UpdateEstimatedMediaDuration(int64_t aDuration) override;
 
 public:
-  // Set a flag indicating whether random seeking is supported
-  void SetMediaSeekable(bool aMediaSeekable);
-  // Set a flag indicating whether seeking is supported only in buffered ranges
-  void SetMediaSeekableOnlyInBufferedRanges(bool aMediaSeekableOnlyInBufferedRanges);
-
   // Returns true if this media supports random seeking. False for example with
   // chained ogg files.
   bool IsMediaSeekable();
-  // Returns true if this media supports seeking only in buffered ranges. True
-  // for example in WebMs with no cues
-  bool IsMediaSeekableOnlyInBufferedRanges();
   // Returns true if seeking is supported on a transport level (e.g. the server
   // supports range requests, we are playing a file, etc.).
   bool IsTransportSeekable();
@@ -411,7 +399,7 @@ private:
   // Seeking has started. Inform the element on the main thread.
   void SeekingStarted();
 
-  void UpdateLogicalPositionInternal(MediaDecoderEventVisibility aEventVisibility);
+  void UpdateLogicalPositionInternal();
   void UpdateLogicalPosition()
   {
     MOZ_ASSERT(NS_IsMainThread());
@@ -420,7 +408,7 @@ private:
     if (mPlayState == PLAY_STATE_PAUSED || IsSeeking()) {
       return;
     }
-    UpdateLogicalPositionInternal(MediaDecoderEventVisibility::Observable);
+    UpdateLogicalPositionInternal();
   }
 
   // Find the end of the cached data starting at the current decoder
@@ -566,6 +554,9 @@ private:
   MediaEventSource<void>*
   DataArrivedEvent() override { return &mDataArrivedEvent; }
 
+  MediaEventSource<RefPtr<layers::KnowsCompositor>>*
+  CompositorUpdatedEvent() override { return &mCompositorUpdatedEvent; }
+
   void OnPlaybackEvent(MediaEventType aEvent);
   void OnPlaybackErrorEvent(const MediaResult& aError);
 
@@ -573,7 +564,7 @@ private:
 
   void OnMediaNotSeekable()
   {
-    SetMediaSeekable(false);
+    mMediaSeekable = false;
   }
 
   void FinishShutdown();
@@ -582,6 +573,7 @@ private:
   void DisconnectMirrors();
 
   MediaEventProducer<void> mDataArrivedEvent;
+  MediaEventProducer<RefPtr<layers::KnowsCompositor>> mCompositorUpdatedEvent;
 
   // The state machine object for handling the decoding. It is safe to
   // call methods of this object from other threads. Its internal data
@@ -668,6 +660,13 @@ protected:
 
   // True if we've already fired metadataloaded.
   bool mFiredMetadataLoaded;
+
+  // True if the media is seekable (i.e. supports random access).
+  bool mMediaSeekable = true;
+
+  // True if the media is only seekable within its buffered ranges
+  // like WebMs with no cues.
+  bool mMediaSeekableOnlyInBufferedRanges = false;
 
   // Stores media info, including info of audio tracks and video tracks, should
   // only be accessed from main thread.
@@ -768,12 +767,6 @@ protected:
   // back again.
   Canonical<int64_t> mDecoderPosition;
 
-  // True if the media is seekable (i.e. supports random access).
-  Canonical<bool> mMediaSeekable;
-
-  // True if the media is only seekable within its buffered ranges.
-  Canonical<bool> mMediaSeekableOnlyInBufferedRanges;
-
   // True if the decoder is visible.
   Canonical<bool> mIsVisible;
 
@@ -814,12 +807,6 @@ public:
   }
   AbstractCanonical<int64_t>* CanonicalDecoderPosition() {
     return &mDecoderPosition;
-  }
-  AbstractCanonical<bool>* CanonicalMediaSeekable() {
-    return &mMediaSeekable;
-  }
-  AbstractCanonical<bool>* CanonicalMediaSeekableOnlyInBufferedRanges() {
-    return &mMediaSeekableOnlyInBufferedRanges;
   }
   AbstractCanonical<bool>* CanonicalIsVisible() {
     return &mIsVisible;

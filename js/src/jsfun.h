@@ -40,7 +40,7 @@ class JSFunction : public js::NativeObject
         ClassConstructor,
         Getter,
         Setter,
-        Wasm,                       /* function is wasm module or exported function */
+        AsmJS,                      /* function is an asm.js module or exported function */
         FunctionKindLimit
     };
 
@@ -66,7 +66,7 @@ class JSFunction : public js::NativeObject
         FUNCTION_KIND_SHIFT = 13,
         FUNCTION_KIND_MASK  = 0x7 << FUNCTION_KIND_SHIFT,
 
-        WASM_KIND = Wasm << FUNCTION_KIND_SHIFT,
+        ASMJS_KIND = AsmJS << FUNCTION_KIND_SHIFT,
         ARROW_KIND = Arrow << FUNCTION_KIND_SHIFT,
         METHOD_KIND = Method << FUNCTION_KIND_SHIFT,
         CLASSCONSTRUCTOR_KIND = ClassConstructor << FUNCTION_KIND_SHIFT,
@@ -77,8 +77,8 @@ class JSFunction : public js::NativeObject
         NATIVE_FUN = 0,
         NATIVE_CTOR = NATIVE_FUN | CONSTRUCTOR,
         NATIVE_CLASS_CTOR = NATIVE_FUN | CONSTRUCTOR | CLASSCONSTRUCTOR_KIND,
-        WASM_CTOR = WASM_KIND | NATIVE_CTOR,
-        ASMJS_LAMBDA_CTOR = WASM_KIND | NATIVE_CTOR | LAMBDA,
+        ASMJS_CTOR = ASMJS_KIND | NATIVE_CTOR,
+        ASMJS_LAMBDA_CTOR = ASMJS_KIND | NATIVE_CTOR | LAMBDA,
         INTERPRETED_METHOD = INTERPRETED | METHOD_KIND,
         INTERPRETED_METHOD_GENERATOR = INTERPRETED | METHOD_KIND,
         INTERPRETED_CLASS_CONSTRUCTOR = INTERPRETED | CLASSCONSTRUCTOR_KIND | CONSTRUCTOR,
@@ -173,7 +173,7 @@ class JSFunction : public js::NativeObject
     bool isConstructor()            const { return flags() & CONSTRUCTOR; }
 
     /* Possible attributes of a native function: */
-    bool isWasmNative()            const { return kind() == Wasm; }
+    bool isAsmJSNative()            const { return kind() == AsmJS; }
 
     /* Possible attributes of an interpreted function: */
     bool isExprBody()               const { return flags() & EXPR_BODY; }
@@ -215,7 +215,7 @@ class JSFunction : public js::NativeObject
 
     /* Compound attributes: */
     bool isBuiltin() const {
-        return (isNative() && !isWasmNative()) || isSelfHostedBuiltin();
+        return (isNative() && !isAsmJSNative()) || isSelfHostedBuiltin();
     }
 
     bool isNamedLambda() const {
@@ -394,8 +394,9 @@ class JSFunction : public js::NativeObject
     //   use, but has extra checks, requires a cx and may trigger a GC.
     //
     // - For inlined functions which may have a LazyScript but whose JSScript
-    //   is known to exist, existingScriptForInlinedFunction() will get the
-    //   script and delazify the function if necessary.
+    //   is known to exist, existingScript() will get the script and delazify
+    //   the function if necessary. If the function should not be delazified,
+    //   use existingScriptNonDelazifying().
     //
     // - For functions known to have a JSScript, nonLazyScript() will get it.
 
@@ -411,7 +412,7 @@ class JSFunction : public js::NativeObject
         return nonLazyScript();
     }
 
-    JSScript* existingScriptForInlinedFunction() {
+    JSScript* existingScriptNonDelazifying() const {
         MOZ_ASSERT(isInterpreted());
         if (isInterpretedLazy()) {
             // Get the script from the canonical function. Ion used the
@@ -422,11 +423,17 @@ class JSFunction : public js::NativeObject
             js::LazyScript* lazy = lazyScript();
             JSFunction* fun = lazy->functionNonDelazifying();
             MOZ_ASSERT(fun);
-            JSScript* script = fun->nonLazyScript();
+            return fun->nonLazyScript();
+        }
+        return nonLazyScript();
+    }
 
+    JSScript* existingScript() {
+        MOZ_ASSERT(isInterpreted());
+        if (isInterpretedLazy()) {
             if (shadowZone()->needsIncrementalBarrier())
-                js::LazyScript::writeBarrierPre(lazy);
-
+                js::LazyScript::writeBarrierPre(lazyScript());
+            JSScript* script = existingScriptNonDelazifying();
             flags_ &= ~INTERPRETED_LAZY;
             flags_ |= INTERPRETED;
             initScript(script);

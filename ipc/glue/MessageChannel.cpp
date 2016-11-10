@@ -472,7 +472,7 @@ private:
     nsAutoPtr<IPC::Message> mReply;
 };
 
-MessageChannel::MessageChannel(MessageListener *aListener)
+MessageChannel::MessageChannel(IToplevelProtocol *aListener)
   : mListener(aListener),
     mChannelState(ChannelClosed),
     mSide(UnknownSide),
@@ -1544,7 +1544,10 @@ MessageChannel::RunMessage(MessageTask& aTask)
         if (task == &aTask) {
             break;
         }
-        MOZ_ASSERT(!ShouldRunMessage(task->Msg()));
+
+        MOZ_ASSERT(!ShouldRunMessage(task->Msg()) ||
+                   aTask.Msg().priority() != task->Msg().priority());
+
     }
 #endif
 
@@ -1568,6 +1571,8 @@ MessageChannel::RunMessage(MessageTask& aTask)
 
     DispatchMessage(Move(msg));
 }
+
+NS_IMPL_ISUPPORTS_INHERITED(MessageChannel::MessageTask, CancelableRunnable, nsIRunnablePriority)
 
 nsresult
 MessageChannel::MessageTask::Run()
@@ -1632,6 +1637,14 @@ MessageChannel::MessageTask::Clear()
     mChannel->AssertWorkerThread();
 
     mChannel = nullptr;
+}
+
+NS_IMETHODIMP
+MessageChannel::MessageTask::GetPriority(uint32_t* aPriority)
+{
+  *aPriority = mMessage.priority() == Message::HIGH_PRIORITY ?
+               PRIORITY_HIGH : PRIORITY_NORMAL;
+  return NS_OK;
 }
 
 void
@@ -1844,15 +1857,45 @@ MessageChannel::MaybeUndeferIncall()
 }
 
 void
+MessageChannel::EnteredCxxStack()
+{
+    mListener->EnteredCxxStack();
+}
+
+void
 MessageChannel::ExitedCxxStack()
 {
-    mListener->OnExitedCxxStack();
+    mListener->ExitedCxxStack();
     if (mSawInterruptOutMsg) {
         MonitorAutoLock lock(*mMonitor);
         // see long comment in OnMaybeDequeueOne()
         EnqueuePendingMessages();
         mSawInterruptOutMsg = false;
     }
+}
+
+void
+MessageChannel::EnteredCall()
+{
+    mListener->EnteredCall();
+}
+
+void
+MessageChannel::ExitedCall()
+{
+    mListener->ExitedCall();
+}
+
+void
+MessageChannel::EnteredSyncSend()
+{
+    mListener->OnEnteredSyncSend();
+}
+
+void
+MessageChannel::ExitedSyncSend()
+{
+    mListener->OnExitedSyncSend();
 }
 
 void
@@ -1940,7 +1983,7 @@ MessageChannel::ShouldContinueFromTimeout()
     bool cont;
     {
         MonitorAutoUnlock unlock(*mMonitor);
-        cont = mListener->OnReplyTimeout();
+        cont = mListener->ShouldContinueFromReplyTimeout();
         mListener->ArtificialSleep();
     }
 
@@ -1989,7 +2032,7 @@ void
 MessageChannel::ReportMessageRouteError(const char* channelName) const
 {
     PrintErrorMessage(mSide, channelName, "Need a route");
-    mListener->OnProcessingError(MsgRouteError, "MsgRouteError");
+    mListener->ProcessingError(MsgRouteError, "MsgRouteError");
 }
 
 void
@@ -2031,7 +2074,7 @@ MessageChannel::ReportConnectionError(const char* aChannelName, Message* aMsg) c
     }
 
     MonitorAutoUnlock unlock(*mMonitor);
-    mListener->OnProcessingError(MsgDropped, errorMsg);
+    mListener->ProcessingError(MsgDropped, errorMsg);
 }
 
 bool
@@ -2076,7 +2119,7 @@ MessageChannel::MaybeHandleError(Result code, const Message& aMsg, const char* c
 
     PrintErrorMessage(mSide, channelName, reason);
 
-    mListener->OnProcessingError(code, reason);
+    mListener->ProcessingError(code, reason);
 
     return false;
 }

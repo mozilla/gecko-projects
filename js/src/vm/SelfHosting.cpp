@@ -38,7 +38,6 @@
 #include "jit/InlinableNatives.h"
 #include "js/CharacterEncoding.h"
 #include "js/Date.h"
-#include "vm/AsyncFunction.h"
 #include "vm/Compression.h"
 #include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
@@ -977,6 +976,7 @@ intrinsic_GeneratorSetClosed(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+template<typename T>
 static bool
 intrinsic_IsWrappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1000,23 +1000,25 @@ intrinsic_IsWrappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    args.rval().setBoolean(unwrapped->is<ArrayBufferObject>());
+    args.rval().setBoolean(unwrapped->is<T>());
     return true;
 }
 
+template<typename T>
 static bool
 intrinsic_ArrayBufferByteLength(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 1);
     MOZ_ASSERT(args[0].isObject());
-    MOZ_ASSERT(args[0].toObject().is<ArrayBufferObject>());
+    MOZ_ASSERT(args[0].toObject().is<T>());
 
-    size_t byteLength = args[0].toObject().as<ArrayBufferObject>().byteLength();
+    size_t byteLength = args[0].toObject().as<T>().byteLength();
     args.rval().setInt32(mozilla::AssertedCast<int32_t>(byteLength));
     return true;
 }
 
+template<typename T>
 static bool
 intrinsic_PossiblyWrappedArrayBufferByteLength(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1029,11 +1031,12 @@ intrinsic_PossiblyWrappedArrayBufferByteLength(JSContext* cx, unsigned argc, Val
         return false;
     }
 
-    uint32_t length = obj->as<ArrayBufferObject>().byteLength();
+    uint32_t length = obj->as<T>().byteLength();
     args.rval().setInt32(mozilla::AssertedCast<int32_t>(length));
     return true;
 }
 
+template<typename T>
 static bool
 intrinsic_ArrayBufferCopyData(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1041,9 +1044,9 @@ intrinsic_ArrayBufferCopyData(JSContext* cx, unsigned argc, Value* vp)
     MOZ_ASSERT(args.length() == 5);
 
     bool isWrapped = args[4].toBoolean();
-    Rooted<ArrayBufferObject*> toBuffer(cx);
+    Rooted<T*> toBuffer(cx);
     if (!isWrapped) {
-        toBuffer = &args[0].toObject().as<ArrayBufferObject>();
+        toBuffer = &args[0].toObject().as<T>();
     } else {
         JSObject* wrapped = &args[0].toObject();
         MOZ_ASSERT(wrapped->is<WrapperObject>());
@@ -1052,13 +1055,13 @@ intrinsic_ArrayBufferCopyData(JSContext* cx, unsigned argc, Value* vp)
             JS_ReportErrorASCII(cx, "Permission denied to access object");
             return false;
         }
-        toBuffer = toBufferObj.as<ArrayBufferObject>();
+        toBuffer = toBufferObj.as<T>();
     }
-    Rooted<ArrayBufferObject*> fromBuffer(cx, &args[1].toObject().as<ArrayBufferObject>());
+    Rooted<T*> fromBuffer(cx, &args[1].toObject().as<T>());
     uint32_t fromIndex = uint32_t(args[2].toInt32());
     uint32_t count = uint32_t(args[3].toInt32());
 
-    ArrayBufferObject::copyData(toBuffer, fromBuffer, fromIndex, count);
+    T::copyData(toBuffer, fromBuffer, fromIndex, count);
 
     args.rval().setUndefined();
     return true;
@@ -1861,23 +1864,6 @@ js::ReportIncompatibleSelfHostedMethod(JSContext* cx, const CallArgs& args)
     return false;
 }
 
-bool
-intrinsic_CreateAsyncFunction(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    MOZ_ASSERT(args.length() == 2);
-
-    RootedFunction wrapper(cx, &args[0].toObject().as<JSFunction>());
-    RootedFunction unwrapped(cx, &args[1].toObject().as<JSFunction>());
-
-    RootedFunction wrapped(cx);
-    if (!CreateAsyncFunction(cx, wrapper, unwrapped, &wrapped))
-        return false;
-
-    args.rval().setObject(*wrapped);
-    return true;
-}
-
 /**
  * Returns the default locale as a well-formed, but not necessarily canonicalized,
  * BCP-47 language tag.
@@ -2277,8 +2263,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("RuntimeDefaultLocale",    intrinsic_RuntimeDefaultLocale,    0,0),
     JS_FN("AddContentTelemetry",     intrinsic_AddContentTelemetry,     2,0),
 
-    JS_FN("CreateAsyncFunction",     intrinsic_CreateAsyncFunction,     1,0),
-
     JS_INLINABLE_FN("_IsConstructing", intrinsic_IsConstructing,        0,0,
                     IntrinsicIsConstructing),
     JS_INLINABLE_FN("SubstringKernel", intrinsic_SubstringKernel,       3,0,
@@ -2368,13 +2352,26 @@ static const JSFunctionSpec intrinsic_functions[] = {
           intrinsic_IsInstanceOfBuiltin<ArrayBufferObject>,             1,0),
     JS_FN("IsSharedArrayBuffer",
           intrinsic_IsInstanceOfBuiltin<SharedArrayBufferObject>,       1,0),
-    JS_FN("IsWrappedArrayBuffer",    intrinsic_IsWrappedArrayBuffer,    1,0),
+    JS_FN("IsWrappedArrayBuffer",
+          intrinsic_IsWrappedArrayBuffer<ArrayBufferObject>,            1,0),
+    JS_FN("IsWrappedSharedArrayBuffer",
+          intrinsic_IsWrappedArrayBuffer<SharedArrayBufferObject>,      1,0),
 
-    JS_INLINABLE_FN("ArrayBufferByteLength",   intrinsic_ArrayBufferByteLength, 1,0,
+    JS_INLINABLE_FN("ArrayBufferByteLength",
+                    intrinsic_ArrayBufferByteLength<ArrayBufferObject>, 1,0,
                     IntrinsicArrayBufferByteLength),
-    JS_INLINABLE_FN("PossiblyWrappedArrayBufferByteLength", intrinsic_PossiblyWrappedArrayBufferByteLength, 1,0,
+    JS_INLINABLE_FN("PossiblyWrappedArrayBufferByteLength",
+                    intrinsic_PossiblyWrappedArrayBufferByteLength<ArrayBufferObject>, 1,0,
                     IntrinsicPossiblyWrappedArrayBufferByteLength),
-    JS_FN("ArrayBufferCopyData",     intrinsic_ArrayBufferCopyData,     5,0),
+    JS_FN("ArrayBufferCopyData",
+          intrinsic_ArrayBufferCopyData<ArrayBufferObject>,             5,0),
+
+    JS_FN("SharedArrayBufferByteLength",
+          intrinsic_ArrayBufferByteLength<SharedArrayBufferObject>,     1,0),
+    JS_FN("PossiblyWrappedSharedArrayBufferByteLength",
+          intrinsic_PossiblyWrappedArrayBufferByteLength<SharedArrayBufferObject>, 1,0),
+    JS_FN("SharedArrayBufferCopyData",
+          intrinsic_ArrayBufferCopyData<SharedArrayBufferObject>,       5,0),
 
     JS_FN("IsUint8TypedArray",        intrinsic_IsUint8TypedArray,      1,0),
     JS_FN("IsInt8TypedArray",         intrinsic_IsInt8TypedArray,       1,0),
@@ -2409,6 +2406,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_FN("CallArrayBufferMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<ArrayBufferObject>>, 2, 0),
+    JS_FN("CallSharedArrayBufferMethodIfWrapped",
+          CallNonGenericSelfhostedMethod<Is<SharedArrayBufferObject>>, 2, 0),
     JS_FN("CallTypedArrayMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<TypedArrayObject>>, 2, 0),
 

@@ -1022,6 +1022,9 @@ void HTMLMediaElement::AbortExistingLoads()
 
 void HTMLMediaElement::NoSupportedMediaSourceError(const nsACString& aErrorDetails)
 {
+  if (mDecoder) {
+    ShutdownDecoder();
+  }
   mError = new MediaError(this, MEDIA_ERR_SRC_NOT_SUPPORTED, aErrorDetails);
   ChangeNetworkState(nsIDOMHTMLMediaElement::NETWORK_NO_SOURCE);
   DispatchAsyncEvent(NS_LITERAL_STRING("error"));
@@ -2949,7 +2952,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   mWatchManager.Watch(mReadyState, &HTMLMediaElement::UpdateReadyStateInternal);
 
   mShutdownObserver->Subscribe(this);
-  CreateAudioChannelAgent();
+  MaybeCreateAudioChannelAgent();
 }
 
 HTMLMediaElement::~HTMLMediaElement()
@@ -2990,6 +2993,7 @@ HTMLMediaElement::~HTMLMediaElement()
   }
 
   WakeLockRelease();
+  mAudioChannelAgent = nullptr;
 }
 
 void HTMLMediaElement::StopSuspendingAfterFirstFrame()
@@ -3749,10 +3753,6 @@ nsresult HTMLMediaElement::InitializeDecoderAsClone(MediaDecoder* aOriginal)
 
   LOG(LogLevel::Debug, ("%p Cloned decoder %p from %p", this, decoder.get(), aOriginal));
 
-  decoder->SetMediaSeekable(aOriginal->IsMediaSeekable());
-  decoder->SetMediaSeekableOnlyInBufferedRanges(
-    aOriginal->IsMediaSeekableOnlyInBufferedRanges());
-
   RefPtr<MediaResource> resource =
     originalResource->CloneData(decoder->GetResourceCallback());
 
@@ -4413,9 +4413,6 @@ void HTMLMediaElement::FirstFrameLoaded()
 
 void HTMLMediaElement::NetworkError()
 {
-  if (mDecoder) {
-    ShutdownDecoder();
-  }
   if (mReadyState == nsIDOMHTMLMediaElement::HAVE_NOTHING) {
     NoSupportedMediaSourceError();
   } else {
@@ -4430,9 +4427,6 @@ void HTMLMediaElement::DecodeError(const MediaResult& aError)
   const char16_t* params[] = { src.get() };
   ReportLoadError("MediaLoadDecodeError", params, ArrayLength(params));
 
-  if (mDecoder) {
-    ShutdownDecoder();
-  }
   AudioTracks()->EmptyTracks();
   VideoTracks()->EmptyTracks();
   if (mIsLoadingFromSourceChildren) {
@@ -5762,17 +5756,26 @@ ImageContainer* HTMLMediaElement::GetImageContainer()
   return container ? container->GetImageContainer() : nullptr;
 }
 
-void
-HTMLMediaElement::CreateAudioChannelAgent()
+bool
+HTMLMediaElement::MaybeCreateAudioChannelAgent()
 {
   if (mAudioChannelAgent) {
-    return;
+    return true;
   }
 
   mAudioChannelAgent = new AudioChannelAgent();
-  mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetInnerWindow(),
+  nsresult rv = mAudioChannelAgent->InitWithWeakCallback(OwnerDoc()->GetInnerWindow(),
                                            static_cast<int32_t>(mAudioChannel),
                                            this);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    mAudioChannelAgent = nullptr;
+    MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
+           ("HTMLMediaElement, Fail to initialize the audio channel agent,"
+            " this = %p\n", this));
+    return false;
+  }
+
+  return true;
 }
 
 bool
@@ -5828,6 +5831,10 @@ HTMLMediaElement::UpdateAudioChannelPlayingState(bool aForcePlaying)
     aForcePlaying || IsPlayingThroughTheAudioChannel();
 
   if (playingThroughTheAudioChannel != mPlayingThroughTheAudioChannel) {
+    if (!MaybeCreateAudioChannelAgent()) {
+      return;
+    }
+
     mPlayingThroughTheAudioChannel = playingThroughTheAudioChannel;
     NotifyAudioChannelAgent(mPlayingThroughTheAudioChannel);
   }
@@ -6038,7 +6045,7 @@ HTMLMediaElement::IsAllowedToPlay()
   // If the tab hasn't been activated yet, the media element in that tab can't
   // be playback now until the tab goes to foreground first time or user clicks
   // the unblocking tab icon.
-  if (!IsTabActivated()) {
+  if (MaybeCreateAudioChannelAgent() && !IsTabActivated()) {
     // Even we haven't start playing yet, we still need to notify the audio
     // channe system because we need to receive the resume notification later.
     UpdateAudioChannelPlayingState(true /* force to start */);
@@ -6051,6 +6058,7 @@ HTMLMediaElement::IsAllowedToPlay()
 bool
 HTMLMediaElement::IsTabActivated() const
 {
+  MOZ_ASSERT(mAudioChannelAgent);
   return !mAudioChannelAgent->ShouldBlockMedia();
 }
 
@@ -6462,9 +6470,8 @@ HTMLMediaElement::SetAudibleState(bool aAudible)
 void
 HTMLMediaElement::NotifyAudioPlaybackChanged(AudibleChangedReasons aReason)
 {
-  MOZ_ASSERT(mAudioChannelAgent);
-
-  if (!mAudioChannelAgent->IsPlayingStarted()) {
+  if (MaybeCreateAudioChannelAgent() &&
+      !mAudioChannelAgent->IsPlayingStarted()) {
     return;
   }
 
@@ -6507,6 +6514,7 @@ HTMLMediaElement::MaybeNotifyMediaResumed(SuspendTypes aSuspend)
     return;
   }
 
+  MOZ_ASSERT(mAudioChannelAgent);
   uint64_t windowID = mAudioChannelAgent->WindowID();
   NS_DispatchToMainThread(NS_NewRunnableFunction([windowID]() -> void {
     nsCOMPtr<nsIObserverService> observerService =
@@ -6583,14 +6591,13 @@ HTMLMediaElement::SetMediaInfo(const MediaInfo& aInfo)
 void
 HTMLMediaElement::AudioCaptureStreamChangeIfNeeded()
 {
-  MOZ_ASSERT(mAudioChannelAgent);
-
   // No need to capture a silence media element.
   if (!HasAudio()) {
     return;
   }
 
-  if (!mAudioChannelAgent->IsPlayingStarted()) {
+  if (MaybeCreateAudioChannelAgent() &&
+      !mAudioChannelAgent->IsPlayingStarted()) {
     return;
   }
 

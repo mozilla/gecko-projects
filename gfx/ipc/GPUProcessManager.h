@@ -25,7 +25,6 @@ namespace mozilla {
 namespace layers {
 class IAPZCTreeManager;
 class CompositorSession;
-class ClientLayerManager;
 class CompositorUpdateObserver;
 class PCompositorBridgeChild;
 class PImageBridgeChild;
@@ -57,10 +56,10 @@ class GPUProcessManager final : public GPUProcessHost::Listener
 {
   friend class layers::RemoteCompositorSession;
 
-  typedef layers::ClientLayerManager ClientLayerManager;
   typedef layers::CompositorSession CompositorSession;
-  typedef layers::IAPZCTreeManager IAPZCTreeManager;
   typedef layers::CompositorUpdateObserver CompositorUpdateObserver;
+  typedef layers::IAPZCTreeManager IAPZCTreeManager;
+  typedef layers::LayerManager LayerManager;
   typedef layers::PCompositorBridgeChild PCompositorBridgeChild;
   typedef layers::PImageBridgeChild PImageBridgeChild;
   typedef layers::RemoteCompositorSession RemoteCompositorSession;
@@ -82,7 +81,7 @@ public:
 
   RefPtr<CompositorSession> CreateTopLevelCompositor(
     nsBaseWidget* aWidget,
-    ClientLayerManager* aLayerManager,
+    LayerManager* aLayerManager,
     CSSToLayoutDeviceScale aScale,
     bool aUseAPZ,
     bool aUseExternalSurfaceSize,
@@ -92,9 +91,8 @@ public:
     base::ProcessId aOtherProcess,
     ipc::Endpoint<PCompositorBridgeChild>* aOutCompositor,
     ipc::Endpoint<PImageBridgeChild>* aOutImageBridge,
-    ipc::Endpoint<PVRManagerChild>* aOutVRBridge);
-  bool CreateContentVideoDecoderManager(base::ProcessId aOtherProcess,
-                                        ipc::Endpoint<dom::PVideoDecoderManagerChild>* aOutEndPoint);
+    ipc::Endpoint<PVRManagerChild>* aOutVRBridge,
+    ipc::Endpoint<dom::PVideoDecoderManagerChild>* aOutVideoManager);
 
   // This returns a reference to the APZCTreeManager to which
   // pan/zoom-related events can be sent.
@@ -121,6 +119,7 @@ public:
 
   void OnProcessLaunchComplete(GPUProcessHost* aHost) override;
   void OnProcessUnexpectedShutdown(GPUProcessHost* aHost) override;
+  void OnProcessDeviceReset(GPUProcessHost* aHost) override;
 
   // Notify the GPUProcessManager that a top-level PGPU protocol has been
   // terminated. This may be called from any thread.
@@ -132,6 +131,12 @@ public:
   // Send a message to the GPU process observer service to broadcast. Returns
   // true if the message was sent, false if not.
   bool NotifyGpuObservers(const char* aTopic);
+
+  // Used for tests and diagnostics
+  void KillProcess();
+
+  // Returns -1 if there is no GPU process, or the platform pid for it.
+  base::ProcessId GPUProcessPid();
 
   // Returns access to the PGPU protocol if a GPU process is present.
   GPUChild* GetGPUChild() {
@@ -153,6 +158,8 @@ private:
                                 ipc::Endpoint<PImageBridgeChild>* aOutEndpoint);
   bool CreateContentVRManager(base::ProcessId aOtherProcess,
                               ipc::Endpoint<PVRManagerChild>* aOutEndpoint);
+  void CreateContentVideoDecoderManager(base::ProcessId aOtherProcess,
+                                        ipc::Endpoint<dom::PVideoDecoderManagerChild>* aOutEndPoint);
 
   // Called from RemoteCompositorSession. We track remote sessions so we can
   // notify their owning widgets that the session must be restarted.
@@ -177,7 +184,7 @@ private:
 
   RefPtr<CompositorSession> CreateRemoteSession(
     nsBaseWidget* aWidget,
-    ClientLayerManager* aLayerManager,
+    LayerManager* aLayerManager,
     const uint64_t& aRootLayerTreeId,
     CSSToLayoutDeviceScale aScale,
     bool aUseAPZ,
