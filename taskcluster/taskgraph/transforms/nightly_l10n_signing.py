@@ -25,7 +25,7 @@ def make_signing_description(config, jobs):
         if 'android' in dep_platform:
             job_specs = [
                 {
-                    'artifacts': ['public/build/target.apk'],
+                    'artifacts': ['public/build/{locale}/target.apk'],
                     'format': 'jar',
                 },
             ]
@@ -45,7 +45,7 @@ def make_signing_description(config, jobs):
         for spec in job_specs:
             fmt = spec['format']
             upstream_artifacts.append({
-                "taskId": {"task-reference": "<build>"},
+                "taskId": {"task-reference": "<unsigned-repack>"},
                 "taskType": "l10n",
                 # Set paths based on artifacts in the specs (above) one per
                 # locale present in the chunk this is signing stuff for.
