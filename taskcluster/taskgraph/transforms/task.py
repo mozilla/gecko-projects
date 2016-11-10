@@ -274,6 +274,7 @@ task_description_schema = Schema({
             # name of the produced artifact (root of the names for
             # type=directory)
             Required('name'): basestring,
+        }],
     }, {
         Required('implementation'): 'scriptworker-signing',
 
