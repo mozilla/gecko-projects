@@ -23,6 +23,8 @@ from voluptuous import Schema, Any, Required, Optional, Extra
 from .gecko_v2_whitelist import JOB_NAME_WHITELIST, JOB_NAME_WHITELIST_ERROR
 
 
+ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/{}/artifacts/{}'
+
 # shortcut for a string where task references are allowed
 taskref_or_string = Any(
     basestring,
@@ -309,6 +311,11 @@ task_description_schema = Schema({
 
         # beetmover template key
         Required('update_manifest'): bool,
+    }, {
+        Required('implementation'): 'balrog',
+
+        # taskid of the signed beetmoved task
+        Required('taskid', default="invalid"): taskref_or_string,
     }),
 
     # The "when" section contains descriptions of the circumstances
@@ -339,6 +346,7 @@ GROUP_NAMES = {
     'tc-X': 'Xpcshell tests executed by TaskCluster',
     'tc-X-e10s': 'Xpcshell tests executed by TaskCluster with e10s',
     'tc-L10n': 'Localised Repacks executed by Taskcluster',
+    'tc-Up': 'Balrog submission of updates, executed by Taskcluster',
     'Aries': 'Aries Device Image',
     'Nexus 5-L': 'Nexus 5-L Device Image',
     'Cc': 'Toolchain builds',
@@ -510,6 +518,19 @@ def build_beetmover_payload(config, task, task_def):
         'taskid_to_beetmove': worker['taskid_to_beetmove'],
         'taskid_of_manifest': worker['taskid_of_manifest'],
         'update_manifest': worker['update_manifest']
+    }
+
+
+@payload_builder('balrog')
+def build_balrog_payload(config, task, task_def):
+    worker = task['worker']
+
+    artifact_url = ARTIFACT_URL.format(worker['taskid'], "public")
+
+    task_def['payload'] = {
+        'parent_task_artifacts_url': artifact_url,
+        # signing cert is unused, but required by balrogworker (Bug 1282187 c#7)
+        'signing_cert': "dep",
     }
 
 
