@@ -99,9 +99,7 @@ def make_task_description(config, jobs):
                 dep_job.task["metadata"]["description"]),
             'worker-type': "scriptworker-prov-v1/signing-linux-v1",
             'worker': {'implementation': 'scriptworker-signing',
-                       'upstream-artifacts': job['upstream-artifacts'],
-                       'max-run-time': 3600,
-                      },
+                       'upstream-artifacts': job['upstream-artifacts']},
             'scopes': ["project:releng:signing:cert:nightly-signing"] + \
                     signing_format_scopes,
             'dependencies': {job['depname']: dep_job.label},
