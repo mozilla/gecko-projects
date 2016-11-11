@@ -23,8 +23,6 @@ from voluptuous import Schema, Any, Required, Optional, Extra
 from .gecko_v2_whitelist import JOB_NAME_WHITELIST, JOB_NAME_WHITELIST_ERROR
 
 
-ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/{}/artifacts/{}'
-
 # shortcut for a string where task references are allowed
 taskref_or_string = Any(
     basestring,
@@ -315,7 +313,7 @@ task_description_schema = Schema({
         Required('implementation'): 'balrog',
 
         # taskid of the signed beetmoved task
-        Required('taskid', default="invalid"): taskref_or_string,
+        Required('task_artifact_url'): taskref_or_string,
     }),
 
     # The "when" section contains descriptions of the circumstances
@@ -525,10 +523,8 @@ def build_beetmover_payload(config, task, task_def):
 def build_balrog_payload(config, task, task_def):
     worker = task['worker']
 
-    artifact_url = ARTIFACT_URL.format(worker['taskid'], "public")
-
     task_def['payload'] = {
-        'parent_task_artifacts_url': artifact_url,
+        'parent_task_artifacts_url': worker['task_artifact_url'],
         # signing cert is unused, but required by balrogworker (Bug 1282187 c#7)
         'signing_cert': "dep",
     }
