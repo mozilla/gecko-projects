@@ -18,6 +18,9 @@ def make_signing_description(config, jobs):
     for job in jobs:
         job['depname'] = 'unsigned-repack'
 
+        job.setdefault('worker', {})
+        job['worker']['max-run-time'] = 3600
+
         dep_job = job['dependent-task']
         dep_platform = dep_job.attributes.get('build_platform')
 
