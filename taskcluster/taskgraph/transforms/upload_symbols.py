@@ -33,7 +33,10 @@ def fill_template(config, tasks):
 
         treeherder = task.get('treeherder', {})
         treeherder.setdefault('symbol', 'tc(Sym)')
-        treeherder.setdefault('platform',
+        if 'android' in build_platform:
+            treeherder.setdefault('platform',"{}/opt".format("android-4-0-armv7-api15"))
+        else:
+            treeherder.setdefault('platform',
                               "{}/opt".format(build_platform).replace("-nightly",
                                                                       ""))
         treeherder.setdefault('tier', 2)
