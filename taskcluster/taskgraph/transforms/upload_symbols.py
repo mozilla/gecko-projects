@@ -34,7 +34,8 @@ def fill_template(config, tasks):
         treeherder = task.get('treeherder', {})
         treeherder.setdefault('symbol', 'tc(Sym)')
         treeherder.setdefault('platform',
-                              "{}/opt".format(build_platform))
+                              "{}/opt".format(build_platform).replace("-nightly",
+                                                                      ""))
         treeherder.setdefault('tier', 2)
         treeherder.setdefault('kind', 'build')
         task['treeherder'] = treeherder
