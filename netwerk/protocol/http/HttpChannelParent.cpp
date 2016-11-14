@@ -787,8 +787,8 @@ bool
 HttpChannelParent::RecvDocumentChannelCleanup()
 {
   // From now on only using mAssociatedContentSecurity.  Free everything else.
-  mChannel = 0;          // Reclaim some memory sooner.
-  mCacheEntry = 0;  // Else we'll block other channels reading same URI
+  mChannel = nullptr;          // Reclaim some memory sooner.
+  mCacheEntry = nullptr;  // Else we'll block other channels reading same URI
   return true;
 }
 

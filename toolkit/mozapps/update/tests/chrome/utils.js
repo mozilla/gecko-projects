@@ -69,6 +69,8 @@
 
 'use strict';
 
+/* globals TESTS, runTest, finishTest */
+
 const { classes: Cc, interfaces: Ci, manager: Cm, results: Cr,
         utils: Cu } = Components;
 
@@ -132,7 +134,6 @@ var gAppUpdateEnabled;            // app.update.enabled
 var gAppUpdateServiceEnabled;     // app.update.service.enabled
 var gAppUpdateStagingEnabled;     // app.update.staging.enabled
 var gAppUpdateURLDefault;         // app.update.url (default prefbranch)
-var gAppUpdateURL;                // app.update.url.override
 
 var gTestCounter = -1;
 var gWin;
@@ -146,6 +147,7 @@ var gUseTestUpdater = false;
 var DEBUG_AUS_TEST = true;
 
 const DATA_URI_SPEC = "chrome://mochitests/content/chrome/toolkit/mozapps/update/tests/data/";
+/* import-globals-from ../data/shared.js */
 Services.scriptloader.loadSubScript(DATA_URI_SPEC + "shared.js", this);
 
 /**
@@ -797,10 +799,6 @@ function setupPrefs() {
   Services.prefs.setIntPref(PREF_APP_UPDATE_LASTUPDATETIME, now);
   Services.prefs.setIntPref(PREF_APP_UPDATE_INTERVAL, 43200);
 
-  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_URL_OVERRIDE)) {
-    gAppUpdateURL = Services.prefs.getCharPref(PREF_APP_UPDATE_URL_OVERRIDE);
-  }
-
   if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_ENABLED)) {
     gAppUpdateEnabled = Services.prefs.getBoolPref(PREF_APP_UPDATE_ENABLED);
   }
@@ -859,12 +857,6 @@ function resetFiles() {
  * Resets the most common preferences used by tests to their original values.
  */
 function resetPrefs() {
-  if (gAppUpdateURL !== undefined) {
-    Services.prefs.setCharPref(PREF_APP_UPDATE_URL_OVERRIDE, gAppUpdateURL);
-  } else if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_URL_OVERRIDE)) {
-    Services.prefs.clearUserPref(PREF_APP_UPDATE_URL_OVERRIDE);
-  }
-
   if (gAppUpdateURLDefault) {
     gDefaultPrefBranch.setCharPref(PREF_APP_UPDATE_URL, gAppUpdateURLDefault);
   }
@@ -917,10 +909,6 @@ function resetPrefs() {
 
   if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_BACKGROUNDMAXERRORS)) {
     Services.prefs.clearUserPref(PREF_APP_UPDATE_BACKGROUNDMAXERRORS);
-  }
-
-  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CERT_REQUIREBUILTIN)) {
-    Services.prefs.clearUserPref(PREF_APP_UPDATE_CERT_REQUIREBUILTIN);
   }
 
   try {

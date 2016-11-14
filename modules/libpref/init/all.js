@@ -203,6 +203,7 @@ pref("dom.gamepad.non_standard_events.enabled", false);
 #else
 pref("dom.gamepad.non_standard_events.enabled", true);
 #endif
+pref("dom.gamepad.extensions.enabled", false);
 
 // Whether the KeyboardEvent.code is enabled
 pref("dom.keyboardevent.code.enabled", true);
@@ -381,7 +382,6 @@ pref("media.raw.enabled", true);
 pref("media.ogg.enabled", true);
 pref("media.opus.enabled", true);
 pref("media.wave.enabled", true);
-pref("media.wave.decoder.enabled", true);
 pref("media.webm.enabled", true);
 
 #ifdef MOZ_APPLEMEDIA
@@ -578,7 +578,6 @@ pref("media.mediasource.webm.enabled", true);
 pref("media.mediasource.webm.audio.enabled", true);
 
 // Use new MediaFormatReader architecture for plain ogg.
-pref("media.format-reader.ogg", true);
 pref("media.flac.enabled", true);
 pref("media.ogg.flac.enabled", true);
 
@@ -1186,6 +1185,9 @@ pref("dom.forms.color", true);
 // Support for input type=date, time, month, week and datetime-local. By
 // default, disabled.
 pref("dom.forms.datetime", false);
+
+// Enable time picker UI. By default, disabled.
+pref("dom.forms.datetime.timepicker", false);
 
 // Support for new @autocomplete values
 pref("dom.forms.autocomplete.experimental", false);
@@ -1963,6 +1965,18 @@ pref("network.generic-ntlm-auth.workstation", "WORKSTATION");
 //   2 - allow the cross-origin authentication as well.
 pref("network.auth.subresource-http-auth-allow", 2);
 
+// This preference controls whether to allow sending default credentials (SSO) to
+// NTLM/Negotiate servers allowed in the "trusted uri" list when navigating them
+// in a Private Browsing window.
+// If set to false, Private Browsing windows will not use default credentials and ask
+// for credentials from the user explicitly.
+// If set to true, and a server URL conforms other conditions for sending default
+// credentials, those will be sent automatically in Private Browsing windows.
+//
+// This preference has no effect when the browser is set to "Never Remember History",
+// in that case default credentials will always be used.
+pref("network.auth.private-browsing-sso", false);
+
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
 
 pref("network.proxy.type",                  5);
@@ -2156,6 +2170,9 @@ pref("security.xcto_nosniff_block_images", false);
 
 // OCSP must-staple
 pref("security.ssl.enable_ocsp_must_staple", true);
+
+// Insecure Form Field Warning
+pref("security.insecure_field_warning.contextual.enabled", false);
 
 // Disable pinning checks by default.
 pref("security.cert_pinning.enforcement_level", 0);
@@ -4613,6 +4630,7 @@ pref("layers.offmainthreadcomposition.log-animations", false);
 pref("layers.bufferrotation.enabled", true);
 
 pref("layers.componentalpha.enabled", true);
+pref("layers.draw-mask-debug", false);
 
 // Use the DT-backend implemented PushLayer
 pref("gfx.content.use-native-pushlayer", false);
@@ -5448,6 +5466,14 @@ pref("webextensions.tests", false);
 // 16MB default non-parseable upload limit for requestBody.raw.bytes
 pref("webextensions.webRequest.requestBodyMaxRawBytes", 16777216);
 
+// This functionality is still experimental
+pref("webextensions.storage.sync.enabled", false);
+#ifdef RELEASE_OR_BETA
+pref("webextensions.storage.sync.serverURL", "https://webextensions.settings.services.mozilla.com/v1");
+#else
+pref("webextensions.storage.sync.serverURL", "https://webextensions.dev.mozaws.net/v1");
+#endif
+
 // Allow customization of the fallback directory for file uploads
 pref("dom.input.fallbackUploadDir", "");
 
@@ -5515,6 +5541,11 @@ pref("security.mixed_content.use_hsts", false);
 // mixed-content blocking
 pref("security.mixed_content.use_hsts", true);
 #endif
+// Approximately 1 week default cache for HSTS priming failures, in seconds
+pref ("security.mixed_content.hsts_priming_cache_timeout", 10080);
+// Force the channel to timeout in 3 seconds if we have not received
+// expects a time in milliseconds
+pref ("security.mixed_content.hsts_priming_request_timeout", 3000);
 
 // Disable Storage api in release builds.
 #ifdef NIGHTLY_BUILD

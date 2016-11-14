@@ -2,9 +2,9 @@
 
 Components.utils.import("resource://gre/modules/Schemas.jsm");
 Components.utils.import("resource://gre/modules/BrowserUtils.jsm");
-Components.utils.import("resource://gre/modules/ExtensionUtils.jsm");
+Components.utils.import("resource://gre/modules/ExtensionCommon.jsm");
 
-let {LocalAPIImplementation, SchemaAPIInterface} = ExtensionUtils;
+let {LocalAPIImplementation, SchemaAPIInterface} = ExtensionCommon;
 
 let json = [
   {namespace: "testing",
@@ -637,8 +637,8 @@ add_task(function* () {
                   "should throw for access denied");
   }
 
-  for (let url of ["//foo.html", "http://foo/bar.html"]) {
-    Assert.throws(() => root.testing.format({strictRelativeUrl: url}),
+  for (let urlString of ["//foo.html", "http://foo/bar.html"]) {
+    Assert.throws(() => root.testing.format({strictRelativeUrl: urlString}),
                   /must be a relative URL/,
                   "should throw for non-relative URL");
   }
@@ -753,10 +753,10 @@ add_task(function* () {
                 "should throw when passing a Proxy");
 
   if (Symbol.toStringTag) {
-    let target = {prop1: 12, prop2: ["value1", "value3"]};
-    target[Symbol.toStringTag] = () => "[object Object]";
-    let proxy = new Proxy(target, {});
-    Assert.throws(() => root.testing.quack(proxy),
+    let stringTarget = {prop1: 12, prop2: ["value1", "value3"]};
+    stringTarget[Symbol.toStringTag] = () => "[object Object]";
+    let stringProxy = new Proxy(stringTarget, {});
+    Assert.throws(() => root.testing.quack(stringProxy),
                   /Expected a plain JavaScript object, got a Proxy/,
                   "should throw when passing a Proxy");
   }

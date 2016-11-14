@@ -500,7 +500,7 @@ HTMLEditRules::AfterEditInner(EditAction action,
     // if we created a new block, make sure selection lands in it
     if (mNewBlock) {
       rv = PinSelectionToNewBlock(selection);
-      mNewBlock = 0;
+      mNewBlock = nullptr;
     }
 
     // adjust selection for insert text, html paste, and delete actions
@@ -1956,6 +1956,19 @@ HTMLEditRules::WillDeleteSelection(Selection* aSelection,
                                    DeprecatedAbs(eo - so));
       NS_ENSURE_SUCCESS(rv, rv);
 
+      // XXX When Backspace key is pressed, Chromium removes following empty
+      //     text nodes when removing the last character of the non-empty text
+      //     node.  However, Edge never removes empty text nodes even if
+      //     selection is in the following empty text node(s).  For now, we
+      //     should keep our traditional behavior same as Edge for backward
+      //     compatibility.
+      // XXX When Delete key is pressed, Edge removes all preceding empty
+      //     text nodes when removing the first character of the non-empty
+      //     text node.  Chromium removes only selected empty text node and
+      //     following empty text nodes and the first character of the
+      //     non-empty text node.  For now, we should keep our traditional
+      //     behavior same as Chromium for backward compatibility.
+
       DeleteNodeIfCollapsedText(nodeAsText);
 
       rv = InsertBRIfNeeded(aSelection);
@@ -3079,7 +3092,7 @@ HTMLEditRules::WillMakeList(Selection* aSelection,
       NS_ENSURE_STATE(mHTMLEditor);
       rv = mHTMLEditor->DeleteNode(curNode);
       NS_ENSURE_SUCCESS(rv, rv);
-      prevListItem = 0;
+      prevListItem = nullptr;
       continue;
     } else if (IsEmptyInline(curNode)) {
       // if curNode is an empty inline container, delete it
@@ -3112,7 +3125,7 @@ HTMLEditRules::WillMakeList(Selection* aSelection,
         NS_ENSURE_SUCCESS(rv, rv);
         curList = newBlock;
       }
-      prevListItem = 0;
+      prevListItem = nullptr;
       continue;
     }
 
@@ -3206,7 +3219,7 @@ HTMLEditRules::WillMakeList(Selection* aSelection,
       // remember our new block for postprocessing
       mNewBlock = curList;
       // curList is now the correct thing to put curNode in
-      prevListItem = 0;
+      prevListItem = nullptr;
     }
 
     // if curNode isn't a list item, we must wrap it in one

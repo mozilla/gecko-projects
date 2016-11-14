@@ -1728,7 +1728,9 @@ nsDocShell::MaybeInitTiming()
     mTiming = new nsDOMNavigationTiming();
   }
 
-  mTiming->NotifyNavigationStart();
+  mTiming->NotifyNavigationStart(
+    mIsActive ? nsDOMNavigationTiming::DocShellState::eActive
+              : nsDOMNavigationTiming::DocShellState::eInactive);
 }
 
 //
@@ -3573,8 +3575,54 @@ nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
     return false;
   }
 
-  if (static_cast<nsDocShell*>(targetDS.get())->GetOriginAttributes() !=
-      static_cast<nsDocShell*>(accessingDS.get())->GetOriginAttributes()) {
+  nsCOMPtr<nsIDocShellTreeItem> accessingRoot;
+  aAccessingItem->GetSameTypeRootTreeItem(getter_AddRefs(accessingRoot));
+  nsCOMPtr<nsIDocShell> accessingRootDS = do_QueryInterface(accessingRoot);
+
+  nsCOMPtr<nsIDocShellTreeItem> targetRoot;
+  aTargetItem->GetSameTypeRootTreeItem(getter_AddRefs(targetRoot));
+  nsCOMPtr<nsIDocShell> targetRootDS = do_QueryInterface(targetRoot);
+
+  DocShellOriginAttributes targetOA =
+    static_cast<nsDocShell*>(targetDS.get())->GetOriginAttributes();
+  DocShellOriginAttributes accessingOA =
+    static_cast<nsDocShell*>(accessingDS.get())->GetOriginAttributes();
+
+  // When the first party isolation is on, the top-level docShell may not have
+  // the firstPartyDomain in its originAttributes, but its document will have
+  // it. So we get the firstPartyDomain from the nodePrincipal of the document
+  // before we compare the originAttributes.
+  if (OriginAttributes::IsFirstPartyEnabled()) {
+    if (accessingDS == accessingRootDS &&
+        aAccessingItem->ItemType() == nsIDocShellTreeItem::typeContent &&
+        !accessingDS->GetIsMozBrowserOrApp()) {
+
+      nsCOMPtr<nsIDocument> accessingDoc = aAccessingItem->GetDocument();
+
+      if (accessingDoc) {
+        nsCOMPtr<nsIPrincipal> accessingPrincipal = accessingDoc->NodePrincipal();
+
+        accessingOA.mFirstPartyDomain =
+          BasePrincipal::Cast(accessingPrincipal)->OriginAttributesRef().mFirstPartyDomain;
+      }
+    }
+
+    if (targetDS == targetRootDS &&
+        aTargetItem->ItemType() == nsIDocShellTreeItem::typeContent &&
+        !targetDS->GetIsMozBrowserOrApp()) {
+
+      nsCOMPtr<nsIDocument> targetDoc = aAccessingItem->GetDocument();
+
+      if (targetDoc) {
+        nsCOMPtr<nsIPrincipal> targetPrincipal = targetDoc->NodePrincipal();
+
+        targetOA.mFirstPartyDomain =
+          BasePrincipal::Cast(targetPrincipal)->OriginAttributesRef().mFirstPartyDomain;
+      }
+    }
+  }
+
+  if (targetOA != accessingOA) {
     return false;
   }
 
@@ -3583,10 +3631,6 @@ nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
       static_cast<nsDocShell*>(accessingDS.get())->UsePrivateBrowsing()) {
     return false;
   }
-
-
-  nsCOMPtr<nsIDocShellTreeItem> accessingRoot;
-  aAccessingItem->GetSameTypeRootTreeItem(getter_AddRefs(accessingRoot));
 
   if (aTargetItem == accessingRoot) {
     // A frame can navigate its root.
@@ -3604,9 +3648,6 @@ nsDocShell::CanAccessItem(nsIDocShellTreeItem* aTargetItem,
     target->GetSameTypeParent(getter_AddRefs(parent));
     parent.swap(target);
   } while (target);
-
-  nsCOMPtr<nsIDocShellTreeItem> targetRoot;
-  aTargetItem->GetSameTypeRootTreeItem(getter_AddRefs(targetRoot));
 
   if (aTargetItem != targetRoot) {
     // target is a subframe, not in accessor's frame hierarchy, and all its
@@ -6178,6 +6219,20 @@ nsDocShell::SetIsActive(bool aIsActive)
 
       doc->PostVisibilityUpdateEvent();
     }
+  }
+
+  // Tell the nsDOMNavigationTiming about it
+  RefPtr<nsDOMNavigationTiming> timing = mTiming;
+  if (!timing && mContentViewer) {
+    nsIDocument* doc = mContentViewer->GetDocument();
+    if (doc) {
+      timing = doc->GetNavigationTiming();
+    }
+  }
+  if (timing) {
+    timing->NotifyDocShellStateChanged(
+      aIsActive ? nsDOMNavigationTiming::DocShellState::eActive
+                : nsDOMNavigationTiming::DocShellState::eInactive);
   }
 
   // Recursively tell all of our children, but don't tell <iframe mozbrowser>
@@ -8780,9 +8835,6 @@ nsDocShell::RestoreFromHistory()
   nsCOMPtr<nsPIDOMWindowOuter> privWin = GetWindow();
   NS_ASSERTION(privWin, "could not get nsPIDOMWindow interface");
 
-  rv = privWin->RestoreWindowState(windowState);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // Now, dispatch a title change event which would happen as the
   // <head> is parsed.
   document->NotifyPossibleTitleChange(false);
@@ -8842,6 +8894,12 @@ nsDocShell::RestoreFromHistory()
     rv = childShell->BeginRestore(nullptr, false);
     NS_ENSURE_SUCCESS(rv, rv);
   }
+
+  // Make sure to restore the window state after adding the child shells back
+  // to the tree.  This is necessary for Thaw() and Resume() to propagate
+  // properly.
+  rv = privWin->RestoreWindowState(windowState);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIPresShell> shell = GetPresShell();
 
@@ -9818,18 +9876,10 @@ nsDocShell::InternalLoad(nsIURI* aURI,
 #endif
     }
 
-    // XXXbz would be nice to know the loading principal here... but we don't
-    nsCOMPtr<nsIPrincipal> requestingPrincipal = aTriggeringPrincipal;
-    if (!requestingPrincipal && aReferrer) {
-      rv =
-        CreatePrincipalFromReferrer(aReferrer, getter_AddRefs(requestingPrincipal));
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-
     int16_t shouldLoad = nsIContentPolicy::ACCEPT;
     rv = NS_CheckContentLoadPolicy(contentType,
                                    aURI,
-                                   requestingPrincipal,
+                                   aTriggeringPrincipal,
                                    requestingContext,
                                    EmptyCString(),  // mime guess
                                    nullptr,  // extra
@@ -14244,6 +14294,20 @@ nsDocShell::GetIsInIsolatedMozBrowserElement(bool* aIsInIsolatedMozBrowserElemen
 nsDocShell::GetIsInMozBrowserOrApp(bool* aIsInMozBrowserOrApp)
 {
   *aIsInMozBrowserOrApp = (GetInheritedFrameType() != FRAME_TYPE_REGULAR);
+  return NS_OK;
+}
+
+/* [infallible] */ NS_IMETHODIMP
+nsDocShell::GetIsTopLevelContentDocShell(bool* aIsTopLevelContentDocShell)
+{
+  *aIsTopLevelContentDocShell = false;
+
+  if (mItemType == typeContent) {
+    nsCOMPtr<nsIDocShellTreeItem> root;
+    GetSameTypeRootTreeItem(getter_AddRefs(root));
+    *aIsTopLevelContentDocShell = root.get() == static_cast<nsIDocShellTreeItem*>(this);
+  }
+
   return NS_OK;
 }
 

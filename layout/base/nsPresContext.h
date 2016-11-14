@@ -1056,6 +1056,12 @@ public:
 
   bool IsRootContentDocument() const;
 
+  bool HadNonBlankPaint() const {
+    return mHadNonBlankPaint;
+  }
+
+  void NotifyNonBlankPaint();
+
   bool IsGlyph() const {
     return mIsGlyph;
   }
@@ -1200,8 +1206,6 @@ protected:
 
   // Can't be inline because we can't include nsStyleSet.h.
   bool HasCachedStyleData();
-
-  bool IsChromeSlow() const;
 
   // Creates a one-shot timer with the given aCallback & aDelay.
   // Returns a refcounted pointer to the timer (or nullptr on failure).
@@ -1400,6 +1404,9 @@ protected:
 
   // Is there a pref update to process once we have a container?
   unsigned              mNeedsPrefUpdate : 1;
+
+  // Has NotifyNonBlankPaint been called on this PresContext?
+  unsigned              mHadNonBlankPaint : 1;
 
 #ifdef RESTYLE_LOGGING
   // Should we output debug information about restyling for this document?

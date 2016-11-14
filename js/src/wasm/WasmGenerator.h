@@ -20,7 +20,6 @@
 #define wasm_generator_h
 
 #include "jit/MacroAssembler.h"
-#include "wasm/WasmBinary.h"
 #include "wasm/WasmCompile.h"
 #include "wasm/WasmModule.h"
 
@@ -119,6 +118,7 @@ class MOZ_STACK_CLASS ModuleGenerator
     bool funcIsCompiled(uint32_t funcIndex) const;
     const CodeRange& funcCodeRange(uint32_t funcIndex) const;
     MOZ_MUST_USE bool patchCallSites(TrapExitOffsetArray* maybeTrapExits = nullptr);
+    MOZ_MUST_USE bool patchFarJumps(const TrapExitOffsetArray& trapExits);
     MOZ_MUST_USE bool finishTask(IonCompileTask* task);
     MOZ_MUST_USE bool finishOutstandingTask();
     MOZ_MUST_USE bool finishFuncExports();

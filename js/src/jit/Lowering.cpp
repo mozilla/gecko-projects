@@ -4168,10 +4168,10 @@ LIRGenerator::visitWasmAddOffset(MWasmAddOffset* ins)
 void
 LIRGenerator::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
 {
-#ifndef DEBUG
-    if (ins->isRedundant())
-        return;
-#endif
+    if (ins->isRedundant()) {
+        if (MOZ_LIKELY(!JitOptions.wasmAlwaysCheckBounds))
+            return;
+    }
 
     MDefinition* input = ins->input();
     MOZ_ASSERT(input->type() == MIRType::Int32);
@@ -4282,7 +4282,7 @@ void
 LIRGenerator::visitWasmStackArg(MWasmStackArg* ins)
 {
     if (ins->arg()->type() == MIRType::Int64) {
-        add(new(alloc()) LWasmStackArgI64(useInt64OrConstantAtStart(ins->arg())), ins);
+        add(new(alloc()) LWasmStackArgI64(useInt64RegisterOrConstantAtStart(ins->arg())), ins);
     } else if (IsFloatingPointType(ins->arg()->type()) || IsSimdType(ins->arg()->type())) {
         MOZ_ASSERT(!ins->arg()->isEmittedAtUses());
         add(new(alloc()) LWasmStackArg(useRegisterAtStart(ins->arg())), ins);

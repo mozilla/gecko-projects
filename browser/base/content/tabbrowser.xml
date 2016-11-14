@@ -474,6 +474,22 @@
         </body>
       </method>
 
+      <method name="getTabFromAudioEvent">
+        <parameter name="aEvent"/>
+        <body>
+        <![CDATA[
+          if (!Services.prefs.getBoolPref("browser.tabs.showAudioPlayingIcon") ||
+              !aEvent.isTrusted) {
+            return null;
+          }
+
+          var browser = aEvent.originalTarget;
+          var tab = this.getTabForBrowser(browser);
+          return tab;
+        ]]>
+        </body>
+      </method>
+
       <method name="_callProgressListeners">
         <parameter name="aBrowser"/>
         <parameter name="aMethod"/>
@@ -796,8 +812,10 @@
                 }
 
                 let unifiedComplete = this.mTabBrowser._unifiedComplete;
+                let userContextId = this.mBrowser.getAttribute("usercontextid") || 0;
                 if (this.mBrowser.registeredOpenURI) {
-                  unifiedComplete.unregisterOpenPage(this.mBrowser.registeredOpenURI);
+                  unifiedComplete.unregisterOpenPage(this.mBrowser.registeredOpenURI,
+                                                     userContextId);
                   delete this.mBrowser.registeredOpenURI;
                 }
                 // Tabs in private windows aren't registered as "Open" so
@@ -805,7 +823,7 @@
                 if (!isBlankPageURL(aLocation.spec) &&
                     (!PrivateBrowsingUtils.isWindowPrivate(window) ||
                     PrivateBrowsingUtils.permanentPrivateBrowsing)) {
-                  unifiedComplete.registerOpenPage(aLocation);
+                  unifiedComplete.registerOpenPage(aLocation, userContextId);
                   this.mBrowser.registeredOpenURI = aLocation;
                 }
               }
@@ -2575,7 +2593,8 @@
             listener.destroy();
 
             if (browser.registeredOpenURI && !aAdoptedByTab) {
-              this._unifiedComplete.unregisterOpenPage(browser.registeredOpenURI);
+              this._unifiedComplete.unregisterOpenPage(browser.registeredOpenURI,
+                                                       browser.getAttribute("usercontextid") || 0);
               delete browser.registeredOpenURI;
             }
 
@@ -2947,7 +2966,8 @@
           <![CDATA[
             // If the current URI is registered as open remove it from the list.
             if (aOurBrowser.registeredOpenURI) {
-              this._unifiedComplete.unregisterOpenPage(aOurBrowser.registeredOpenURI);
+              this._unifiedComplete.unregisterOpenPage(aOurBrowser.registeredOpenURI,
+                                                       aOurBrowser.getAttribute("usercontextid") || 0);
               delete aOurBrowser.registeredOpenURI;
             }
 
@@ -4537,9 +4557,14 @@
                 "tabs.muteAudio.tooltip";
               label = stringWithShortcut(stringID, "key_toggleMute");
             } else {
-              stringID = tab.linkedBrowser.audioMuted ?
-                "tabs.unmuteAudio.background.tooltip" :
-                "tabs.muteAudio.background.tooltip";
+              if (tab.linkedBrowser.audioBlocked) {
+                stringID = "tabs.unblockAudio.tooltip";
+              } else {
+                stringID = tab.linkedBrowser.audioMuted ?
+                  "tabs.unmuteAudio.background.tooltip" :
+                  "tabs.muteAudio.background.tooltip";
+              }
+
               label = this.mStringBundle.getString(stringID);
             }
           } else {
@@ -4853,7 +4878,8 @@
           for (let tab of this.tabs) {
             let browser = tab.linkedBrowser;
             if (browser.registeredOpenURI) {
-              this._unifiedComplete.unregisterOpenPage(browser.registeredOpenURI);
+              this._unifiedComplete.unregisterOpenPage(browser.registeredOpenURI,
+                                                       browser.getAttribute("usercontextid") || 0);
               delete browser.registeredOpenURI;
             }
             let filter = this._tabFilters.get(tab);
@@ -5064,14 +5090,10 @@
       </handler>
       <handler event="DOMAudioPlaybackStarted">
         <![CDATA[
-          if (!Services.prefs.getBoolPref("browser.tabs.showAudioPlayingIcon") ||
-              !event.isTrusted)
+          var tab = getTabFromAudioEvent(event)
+          if (!tab) {
             return;
-
-          var browser = event.originalTarget;
-          var tab = this.getTabForBrowser(browser);
-          if (!tab)
-            return;
+          }
 
           clearTimeout(tab._soundPlayingAttrRemovalTimer);
           tab._soundPlayingAttrRemovalTimer = 0;
@@ -5092,14 +5114,10 @@
       </handler>
       <handler event="DOMAudioPlaybackStopped">
         <![CDATA[
-          if (!Services.prefs.getBoolPref("browser.tabs.showAudioPlayingIcon") ||
-              !event.isTrusted)
+          var tab = getTabFromAudioEvent(event)
+          if (!tab) {
             return;
-
-          var browser = event.originalTarget;
-          var tab = this.getTabForBrowser(browser);
-          if (!tab)
-            return;
+          }
 
           if (tab.hasAttribute("soundplaying")) {
             let removalDelay = Services.prefs.getIntPref("browser.tabs.delayHidingAudioPlayingIconMS");
@@ -5113,6 +5131,32 @@
               tab.removeAttribute("soundplaying");
               this._tabAttrModified(tab, ["soundplaying", "soundplaying-scheduledremoval"]);
             }, removalDelay);
+          }
+        ]]>
+      </handler>
+      <handler event="DOMAudioPlaybackBlockStarted">
+        <![CDATA[
+          var tab = getTabFromAudioEvent(event)
+          if (!tab) {
+            return;
+          }
+
+          if (!tab.hasAttribute("blocked")) {
+            tab.setAttribute("blocked", true);
+            this._tabAttrModified(tab, ["blocked"]);
+          }
+        ]]>
+      </handler>
+      <handler event="DOMAudioPlaybackBlockStopped">
+        <![CDATA[
+          var tab = getTabFromAudioEvent(event)
+          if (!tab) {
+            return;
+          }
+
+          if (tab.hasAttribute("blocked")) {
+            tab.removeAttribute("blocked");
+            this._tabAttrModified(tab, ["blocked"]);
           }
         ]]>
       </handler>
@@ -5236,7 +5280,7 @@
       </xul:arrowscrollbox>
     </content>
 
-    <implementation implements="nsIDOMEventListener">
+    <implementation implements="nsIDOMEventListener, nsIObserver">
       <constructor>
         <![CDATA[
           this.mTabClipWidth = Services.prefs.getIntPref("browser.tabs.tabClipWidth");
@@ -5255,8 +5299,16 @@
             this._tabAnimationLoggingEnabled = false;
           }
           this._browserNewtabpageEnabled = Services.prefs.getBoolPref("browser.newtabpage.enabled");
+          this.observe(null, "nsPref:changed", "privacy.userContext.enabled");
+          Services.prefs.addObserver("privacy.userContext.enabled", this, false);
         ]]>
       </constructor>
+
+      <destructor>
+        <![CDATA[
+          Services.prefs.removeObserver("privacy.userContext.enabled", this);
+        ]]>
+      </destructor>
 
       <field name="tabbrowser" readonly="true">
         document.getElementById(this.getAttribute("tabbrowser"));
@@ -5282,6 +5334,53 @@
       <field name="_beforeHoveredTab">null</field>
       <field name="_afterHoveredTab">null</field>
       <field name="_hoveredTab">null</field>
+
+      <method name="observe">
+        <parameter name="aSubject"/>
+        <parameter name="aTopic"/>
+        <parameter name="aData"/>
+        <body><![CDATA[
+          switch (aTopic) {
+            case "nsPref:changed":
+              // This is the only pref observed.
+              let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
+
+              const newTab = document.getElementById("new-tab-button");
+              const newTab2 = document.getAnonymousElementByAttribute(this, "anonid", "tabs-newtab-button")
+
+              if (containersEnabled) {
+                for (let parent of [newTab, newTab2]) {
+                  if (!parent)
+                    continue;
+                  let popup = document.createElementNS(
+                                "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul",
+                                "menupopup");
+                  if (parent.id) {
+                    popup.id = "newtab-popup";
+                  } else {
+                    popup.setAttribute("anonid", "newtab-popup");
+                  }
+                  popup.className = "new-tab-popup";
+                  popup.setAttribute("position", "after_end");
+                  parent.appendChild(popup);
+
+                  gClickAndHoldListenersOnElement.add(parent);
+                  parent.setAttribute("type", "menu");
+                }
+              } else {
+                for (let parent of [newTab, newTab2]) {
+                  if (!parent)
+                    continue;
+                  gClickAndHoldListenersOnElement.remove(parent);
+                  parent.removeAttribute("type");
+                  parent.firstChild.remove();
+                }
+              }
+
+              break;
+          }
+        ]]></body>
+      </method>
 
       <property name="_isCustomizing" readonly="true">
         <getter>
@@ -6556,7 +6655,7 @@
                      anonid="sharing-icon"
                      class="tab-sharing-icon-overlay"
                      role="presentation"/>
-          <xul:image xbl:inherits="crashed,busy,soundplaying,soundplaying-scheduledremoval,pinned,muted,selected=visuallyselected"
+          <xul:image xbl:inherits="crashed,busy,soundplaying,soundplaying-scheduledremoval,pinned,muted,blocked,selected=visuallyselected"
                      anonid="overlay-icon"
                      class="tab-icon-overlay"
                      role="presentation"/>
@@ -6564,7 +6663,7 @@
                      xbl:inherits="value=label,crop,accesskey,fadein,pinned,selected=visuallyselected,attention"
                      class="tab-text tab-label"
                      role="presentation"/>
-          <xul:image xbl:inherits="soundplaying,soundplaying-scheduledremoval,pinned,muted,selected=visuallyselected"
+          <xul:image xbl:inherits="soundplaying,soundplaying-scheduledremoval,pinned,muted,blocked,selected=visuallyselected"
                      anonid="soundplaying-icon"
                      class="tab-icon-sound"
                      role="presentation"/>
@@ -6637,6 +6736,11 @@
           return this.getAttribute("muted") == "true";
         </getter>
       </property>
+      <property name="blocked" readonly="true">
+        <getter>
+          return this.getAttribute("blocked") == "true";
+        </getter>
+      </property>
       <!--
       Describes how the tab ended up in this mute state. May be any of:
 
@@ -6679,7 +6783,8 @@
       <property name="_overPlayingIcon" readonly="true">
         <getter><![CDATA[
           let iconVisible = this.hasAttribute("soundplaying") ||
-                            this.hasAttribute("muted");
+                            this.hasAttribute("muted") ||
+                            this.hasAttribute("blocked");
           let soundPlayingIcon =
             document.getAnonymousElementByAttribute(this, "anonid", "soundplaying-icon");
           let overlayIcon =
@@ -6752,17 +6857,34 @@
         <![CDATA[
           let tabContainer = this.parentNode;
           let browser = this.linkedBrowser;
-          if (browser.audioMuted) {
-            browser.unmute();
-            this.removeAttribute("muted");
-            BrowserUITelemetry.countTabMutingEvent("unmute", aMuteReason);
+          let modifiedAttrs = [];
+          if (browser.audioBlocked) {
+            this.removeAttribute("blocked");
+            modifiedAttrs.push("blocked");
+
+            // We don't want sound icon flickering between "blocked", "none" and
+            // "sound-playing", here adding the "soundplaying" is to keep the
+            // transition smoothly.
+            if (!this.hasAttribute("soundplaying")) {
+              this.setAttribute("soundplaying", true);
+              modifiedAttrs.push("soundplaying");
+            }
+
+            browser.resumeMedia();
           } else {
-            browser.mute();
-            this.setAttribute("muted", "true");
-            BrowserUITelemetry.countTabMutingEvent("mute", aMuteReason);
+            if (browser.audioMuted) {
+              browser.unmute();
+              this.removeAttribute("muted");
+              BrowserUITelemetry.countTabMutingEvent("unmute", aMuteReason);
+            } else {
+              browser.mute();
+              this.setAttribute("muted", "true");
+              BrowserUITelemetry.countTabMutingEvent("mute", aMuteReason);
+            }
+            this.muteReason = aMuteReason || null;
+            modifiedAttrs.push("muted");
           }
-          this.muteReason = aMuteReason || null;
-          tabContainer.tabbrowser._tabAttrModified(this, ["muted"]);
+          tabContainer.tabbrowser._tabAttrModified(this, modifiedAttrs);
         ]]>
         </body>
       </method>
@@ -6963,41 +7085,47 @@
     <handlers>
       <handler event="popupshowing">
       <![CDATA[
-        if (event.target.getAttribute('id') == "alltabs_containersMenuTab") {
+        if (event.target.getAttribute("id") == "alltabs_containersMenuTab") {
           createUserContextMenu(event);
           return;
         }
 
         let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled");
-        document.getElementById("alltabs-popup-separator-1").hidden = !containersEnabled;
-        let containersTab = document.getElementById("alltabs_containersTab");
 
-        containersTab.hidden = !containersEnabled;
-        if (PrivateBrowsingUtils.isWindowPrivate(window)) {
-          containersTab.setAttribute("disabled", "true");
+        if (event.target.getAttribute("anonid") == "newtab-popup" ||
+            event.target.id == "newtab-popup") {
+          createUserContextMenu(event);
+        } else {
+          document.getElementById("alltabs-popup-separator-1").hidden = !containersEnabled;
+          let containersTab = document.getElementById("alltabs_containersTab");
+
+          containersTab.hidden = !containersEnabled;
+          if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+            containersTab.setAttribute("disabled", "true");
+          }
+
+          document.getElementById("alltabs_undoCloseTab").disabled =
+            SessionStore.getClosedTabCount(window) == 0;
+
+          var tabcontainer = gBrowser.tabContainer;
+
+          // Listen for changes in the tab bar.
+          tabcontainer.addEventListener("TabAttrModified", this, false);
+          tabcontainer.addEventListener("TabClose", this, false);
+          tabcontainer.mTabstrip.addEventListener("scroll", this, false);
+
+          let tabs = gBrowser.visibleTabs;
+          for (var i = 0; i < tabs.length; i++) {
+            if (!tabs[i].pinned)
+              this._createTabMenuItem(tabs[i]);
+          }
+          this._updateTabsVisibilityStatus();
         }
-
-        document.getElementById("alltabs_undoCloseTab").disabled =
-          SessionStore.getClosedTabCount(window) == 0;
-
-        var tabcontainer = gBrowser.tabContainer;
-
-        // Listen for changes in the tab bar.
-        tabcontainer.addEventListener("TabAttrModified", this, false);
-        tabcontainer.addEventListener("TabClose", this, false);
-        tabcontainer.mTabstrip.addEventListener("scroll", this, false);
-
-        let tabs = gBrowser.visibleTabs;
-        for (var i = 0; i < tabs.length; i++) {
-          if (!tabs[i].pinned)
-            this._createTabMenuItem(tabs[i]);
-        }
-        this._updateTabsVisibilityStatus();
       ]]></handler>
 
       <handler event="popuphidden">
       <![CDATA[
-        if (event.target.getAttribute('id') == "alltabs_containersMenuTab") {
+        if (event.target.getAttribute("id") == "alltabs_containersMenuTab") {
           return;
         }
 
@@ -7006,6 +7134,9 @@
           let menuItem = this.childNodes[i];
           if (menuItem.tab) {
             menuItem.tab.mCorrespondingMenuitem = null;
+            this.removeChild(menuItem);
+          }
+          if (menuItem.hasAttribute("usercontextid")) {
             this.removeChild(menuItem);
           }
         }

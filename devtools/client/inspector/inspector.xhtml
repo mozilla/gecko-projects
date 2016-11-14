@@ -26,6 +26,13 @@
 
   <script type="application/javascript;version=1.8"
           src="chrome://devtools/content/shared/theme-switching.js"></script>
+  <script type="application/javascript;version=1.8">
+    const { BrowserLoader } = Components.utils.import("resource://devtools/client/shared/browser-loader.js", {});
+    const { require } = BrowserLoader({
+      window,
+      baseURI: "resource://devtools/client/inspector/",
+    });
+    </script>
   <script type="application/javascript;version=1.8" src="inspector.js" defer="true"></script>
 </head>
 <body class="theme-body" role="application">
@@ -182,11 +189,6 @@
             <div id="computedview-no-results" hidden="" data-localization="content=inspector.noProperties"></div>
           </div>
         </div>
-      </div>
-
-      <div id="sidebar-panel-layoutview" class="devtools-monospace theme-sidebar inspector-tabpanel"
-           data-localization-bundle="devtools/client/locales/inspector.properties">
-        <div id="layoutview-container"></div>
       </div>
 
       <div id="sidebar-panel-fontinspector" class="devtools-monospace theme-sidebar inspector-tabpanel"
