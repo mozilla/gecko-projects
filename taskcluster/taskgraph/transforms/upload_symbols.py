@@ -35,6 +35,8 @@ def fill_template(config, tasks):
         treeherder.setdefault('symbol', 'tc(Sym)')
         if 'android' in build_platform:
             treeherder.setdefault('platform',"{}/opt".format("android-4-0-armv7-api15"))
+        elif build_platform == "linux-nightly":
+            treeherder.setdefault('platform',"{}/opt".format("linux32"))
         else:
             treeherder.setdefault('platform',
                               "{}/opt".format(build_platform).replace("-nightly",
@@ -48,3 +50,4 @@ def fill_template(config, tasks):
         del task['build-platform']
 
         yield task
+
