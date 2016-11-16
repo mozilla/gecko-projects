@@ -711,6 +711,7 @@ static const TransportSecurityPreload kPublicKeyPinningPreloadList[] = {
   { "at.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
   { "au.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
   { "aus4.mozilla.org", true, true, true, 3, &kPinset_mozilla },
+  { "aus4.stage.mozaws.net", true, true, true, -1, &kPinset_mozilla },
   { "aus5.mozilla.org", true, true, true, 7, &kPinset_mozilla },
   { "az.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
   { "be.search.yahoo.com", false, true, false, -1, &kPinset_yahoo },
