@@ -54,7 +54,7 @@ jobs:
                     task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build
         run:
             script: mozharness/scripts/desktop_l10n.py
-            actions: [clone-locales list-locales setup repack summary]
+            actions: [clone-locales list-locales setup repack submit-to-balrog summary]
             config:
                 - single_locale/tc_linux32.py
             options:
@@ -81,7 +81,7 @@ jobs:
                     task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build
         run:
             script: mozharness/scripts/desktop_l10n.py
-            actions: [clone-locales list-locales setup repack summary]
+            actions: [clone-locales list-locales setup repack submit-to-balrog summary]
             config:
                 - single_locale/tc_linux64.py
             options:
