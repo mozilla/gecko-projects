@@ -309,7 +309,6 @@ this.OnRefTestLoad = function OnRefTestLoad(win)
     if (gBrowserIsIframe) {
       gBrowser = gContainingWindow.document.createElementNS(XHTML_NS, "iframe");
       gBrowser.setAttribute("mozbrowser", "");
-      gBrowser.setAttribute("mozapp", prefs.getCharPref("b2g.system_manifest_url"));
     } else {
       gBrowser = gContainingWindow.document.createElementNS(XUL_NS, "xul:browser");
     }
@@ -661,6 +660,7 @@ function BuildConditionSandbox(aURL) {
     var contentBackend = readGfxInfo(info, "AzureContentBackend");
     var canvasAccelerated = readGfxInfo(info, "AzureCanvasAccelerated");
 
+    sandbox.gpuProcess = gfxInfo.usingGPUProcess;
     sandbox.azureCairo = canvasBackend == "cairo";
     sandbox.azureQuartz = canvasBackend == "quartz";
     sandbox.azureSkia = canvasBackend == "skia";

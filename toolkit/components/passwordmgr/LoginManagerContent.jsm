@@ -937,8 +937,11 @@ var LoginManagerContent = {
     }
 
     try {
-      // Nothing to do if we have no matching logins available.
-      if (foundLogins.length == 0) {
+      // Nothing to do if we have no matching logins available,
+      // and there isn't a need to show the insecure form warning.
+      if (foundLogins.length == 0 &&
+          (InsecurePasswordUtils.isFormSecure(form) ||
+          !LoginHelper.showInsecureFieldWarning)) {
         // We don't log() here since this is a very common case.
         recordAutofillResult(AUTOFILL_RESULT.NO_SAVED_LOGINS);
         return;
@@ -983,6 +986,24 @@ var LoginManagerContent = {
         return;
       }
 
+      // Attach autocomplete stuff to the username field, if we have
+      // one. This is normally used to select from multiple accounts,
+      // but even with one account we should refill if the user edits.
+      // We would also need this attached to show the insecure login
+      // warning, regardless of saved login.
+      if (usernameField) {
+        this._formFillService.markAsLoginManagerField(usernameField);
+      }
+
+      // Nothing to do if we have no matching logins available.
+      // Only insecure pages reach this block and logs the same
+      // telemetry flag.
+      if (foundLogins.length == 0) {
+        // We don't log() here since this is a very common case.
+        recordAutofillResult(AUTOFILL_RESULT.NO_SAVED_LOGINS);
+        return;
+      }
+
       // Prevent autofilling insecure forms.
       if (!userTriggered && !LoginHelper.insecureAutofill &&
           !InsecurePasswordUtils.isFormSecure(form)) {
@@ -1011,7 +1032,7 @@ var LoginManagerContent = {
       if (passwordField.maxLength >= 0)
         maxPasswordLen = passwordField.maxLength;
 
-      var logins = foundLogins.filter(function (l) {
+      var logins = foundLogins.filter(function(l) {
         var fit = (l.username.length <= maxUsernameLen &&
                    l.password.length <= maxPasswordLen);
         if (!fit)
@@ -1024,13 +1045,6 @@ var LoginManagerContent = {
         log("form not filled, none of the logins fit in the field");
         recordAutofillResult(AUTOFILL_RESULT.NO_LOGINS_FIT);
         return;
-      }
-
-      // Attach autocomplete stuff to the username field, if we have
-      // one. This is normally used to select from multiple accounts,
-      // but even with one account we should refill if the user edits.
-      if (usernameField) {
-        this._formFillService.markAsLoginManagerField(usernameField);
       }
 
       // Don't clobber an existing password.
@@ -1220,7 +1234,7 @@ var LoginUtils = {
 };
 
 // nsIAutoCompleteResult implementation
-function UserAutoCompleteResult (aSearchString, matchingLogins, {isSecure, messageManager, isPasswordField}) {
+function UserAutoCompleteResult(aSearchString, matchingLogins, {isSecure, messageManager, isPasswordField}) {
   this.searchString = aSearchString;
 
   this._stringBundle = Services.strings.createBundle("chrome://passwordmgr/locale/passwordmgr.properties");

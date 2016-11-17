@@ -910,76 +910,6 @@ const Class JSFunction::class_ = {
 
 const Class* const js::FunctionClassPtr = &JSFunction::class_;
 
-/* Find the body of a function (not including braces). */
-bool
-js::FindBody(JSContext* cx, HandleFunction fun, HandleLinearString src, size_t* bodyStart,
-             size_t* bodyEnd)
-{
-    // We don't need principals, since those are only used for error reporting.
-    CompileOptions options(cx);
-    options.setFileAndLine("internal-findBody", 0);
-
-    // For asm.js/wasm modules, there's no script.
-    if (fun->hasScript())
-        options.setVersion(fun->nonLazyScript()->getVersion());
-
-    AutoKeepAtoms keepAtoms(cx->perThreadData);
-
-    AutoStableStringChars stableChars(cx);
-    if (!stableChars.initTwoByte(cx, src))
-        return false;
-
-    const mozilla::Range<const char16_t> srcChars = stableChars.twoByteRange();
-    TokenStream ts(cx, options, srcChars.begin().get(), srcChars.length(), nullptr);
-    int nest = 0;
-    bool onward = true;
-    // Skip arguments list.
-    do {
-        TokenKind tt;
-        if (!ts.getToken(&tt))
-            return false;
-        switch (tt) {
-          case TOK_NAME:
-          case TOK_YIELD:
-            if (nest == 0)
-                onward = false;
-            break;
-          case TOK_LP:
-            nest++;
-            break;
-          case TOK_RP:
-            if (--nest == 0)
-                onward = false;
-            break;
-          default:
-            break;
-        }
-    } while (onward);
-    TokenKind tt;
-    if (!ts.getToken(&tt))
-        return false;
-    if (tt == TOK_ARROW) {
-        if (!ts.getToken(&tt))
-            return false;
-    }
-    bool braced = tt == TOK_LC;
-    MOZ_ASSERT_IF(fun->isExprBody(), !braced);
-    *bodyStart = ts.currentToken().pos.begin;
-    if (braced)
-        *bodyStart += 1;
-    mozilla::RangedPtr<const char16_t> end = srcChars.end();
-    if (end[-1] == '}') {
-        end--;
-    } else {
-        MOZ_ASSERT(!braced);
-        for (; unicode::IsSpaceOrBOM2(end[-1]); end--)
-            ;
-    }
-    *bodyEnd = end - srcChars.begin();
-    MOZ_ASSERT(*bodyStart <= *bodyEnd);
-    return true;
-}
-
 JSString*
 js::FunctionToString(JSContext* cx, HandleFunction fun, bool lambdaParen)
 {
@@ -1595,9 +1525,12 @@ JSFunction::maybeRelazify(JSRuntime* rt)
     if (comp->hasBeenEntered() && !rt->allowRelazificationForTesting)
         return;
 
-    // Don't relazify if the compartment is being debugged or is the
-    // self-hosting compartment.
-    if (comp->isDebuggee() || comp->isSelfHosting)
+    // The caller should have checked we're not in the self-hosting zone (it's
+    // shared with worker runtimes so relazifying functions in it will race).
+    MOZ_ASSERT(!comp->isSelfHosting);
+
+    // Don't relazify if the compartment is being debugged.
+    if (comp->isDebuggee())
         return;
 
     // Don't relazify if the compartment and/or runtime is instrumented to
@@ -2239,9 +2172,10 @@ js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun, HandleObject enclo
  *
  * Function names are always strings. If id is the well-known @@iterator
  * symbol, this returns "[Symbol.iterator]".  If a prefix is supplied the final
- * name is |prefix + " " + name|.
+ * name is |prefix + " " + name|. A prefix cannot be supplied if id is a
+ * symbol value.
  *
- * Implements step 4 and 5 of SetFunctionName in ES 2016 draft Dec 20, 2015.
+ * Implements steps 3-5 of 9.2.11 SetFunctionName in ES2016.
  */
 JSAtom*
 js::IdToFunctionName(JSContext* cx, HandleId id, const char* prefix /* = nullptr */)
@@ -2249,7 +2183,11 @@ js::IdToFunctionName(JSContext* cx, HandleId id, const char* prefix /* = nullptr
     if (JSID_IS_ATOM(id) && !prefix)
         return JSID_TO_ATOM(id);
 
-    if (JSID_IS_SYMBOL(id) && !prefix) {
+    // Step 3.
+    MOZ_ASSERT_IF(prefix, !JSID_IS_SYMBOL(id));
+
+    // Step 4.
+    if (JSID_IS_SYMBOL(id)) {
         RootedAtom desc(cx, JSID_TO_SYMBOL(id)->description());
         StringBuffer sb(cx);
         if (!sb.append('[') || !sb.append(desc) || !sb.append(']'))
@@ -2257,6 +2195,7 @@ js::IdToFunctionName(JSContext* cx, HandleId id, const char* prefix /* = nullptr
         return sb.finishAtom();
     }
 
+    // Step 5.
     RootedValue idv(cx, IdToValue(id));
     if (!prefix)
         return ToAtom<CanGC>(cx, idv);

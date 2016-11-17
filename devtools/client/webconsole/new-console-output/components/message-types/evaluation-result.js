@@ -34,13 +34,14 @@ function EvaluationResult(props) {
     id: messageId,
     exceptionDocURL,
     frame,
+    timeStamp,
   } = message;
 
   let messageBody;
   if (message.messageText) {
     messageBody = message.messageText;
   } else {
-    messageBody = GripMessageBody({grip: message.parameters});
+    messageBody = GripMessageBody({grip: message.parameters, serviceContainer});
   }
 
   const topLevelClasses = ["cm-s-mozilla"];
@@ -57,6 +58,7 @@ function EvaluationResult(props) {
     serviceContainer,
     exceptionDocURL,
     frame,
+    timeStamp,
   };
   return Message(childProps);
 }

@@ -506,7 +506,7 @@ public:
   }
 
 private:
-  ~nsGlobalWindowObserver() {}
+  ~nsGlobalWindowObserver() = default;
 
   // This reference is non-owning and safe because it's cleared by
   // nsGlobalWindow::CleanUp().
@@ -719,77 +719,77 @@ class nsOuterWindowProxy : public js::Wrapper
 public:
   constexpr nsOuterWindowProxy() : js::Wrapper(0) { }
 
-  virtual bool finalizeInBackground(const JS::Value& priv) const override {
+  bool finalizeInBackground(const JS::Value& priv) const override {
     return false;
   }
 
   // Standard internal methods
-  virtual bool getOwnPropertyDescriptor(JSContext* cx,
-                                        JS::Handle<JSObject*> proxy,
-                                        JS::Handle<jsid> id,
-                                        JS::MutableHandle<JS::PropertyDescriptor> desc)
-                                        const override;
-  virtual bool defineProperty(JSContext* cx,
-                              JS::Handle<JSObject*> proxy,
-                              JS::Handle<jsid> id,
-                              JS::Handle<JS::PropertyDescriptor> desc,
-                              JS::ObjectOpResult &result) const override;
-  virtual bool ownPropertyKeys(JSContext *cx,
-                               JS::Handle<JSObject*> proxy,
-                               JS::AutoIdVector &props) const override;
-  virtual bool delete_(JSContext *cx, JS::Handle<JSObject*> proxy,
+  bool getOwnPropertyDescriptor(JSContext* cx,
+                                JS::Handle<JSObject*> proxy,
+                                JS::Handle<jsid> id,
+                                JS::MutableHandle<JS::PropertyDescriptor> desc)
+                                const override;
+  bool defineProperty(JSContext* cx,
+                      JS::Handle<JSObject*> proxy,
+                      JS::Handle<jsid> id,
+                      JS::Handle<JS::PropertyDescriptor> desc,
+                      JS::ObjectOpResult &result) const override;
+  bool ownPropertyKeys(JSContext *cx,
+                       JS::Handle<JSObject*> proxy,
+                       JS::AutoIdVector &props) const override;
+  bool delete_(JSContext *cx, JS::Handle<JSObject*> proxy,
                        JS::Handle<jsid> id,
                        JS::ObjectOpResult &result) const override;
 
-  virtual bool getPrototypeIfOrdinary(JSContext* cx,
-                                      JS::Handle<JSObject*> proxy,
-                                      bool* isOrdinary,
-                                      JS::MutableHandle<JSObject*> protop) const override;
+  bool getPrototypeIfOrdinary(JSContext* cx,
+                              JS::Handle<JSObject*> proxy,
+                              bool* isOrdinary,
+                              JS::MutableHandle<JSObject*> protop) const override;
 
-  virtual bool enumerate(JSContext *cx, JS::Handle<JSObject*> proxy,
-                         JS::MutableHandle<JSObject*> vp) const override;
-  virtual bool preventExtensions(JSContext* cx,
-                                 JS::Handle<JSObject*> proxy,
-                                 JS::ObjectOpResult& result) const override;
-  virtual bool isExtensible(JSContext *cx, JS::Handle<JSObject*> proxy, bool *extensible)
-                            const override;
-  virtual bool has(JSContext *cx, JS::Handle<JSObject*> proxy,
-                   JS::Handle<jsid> id, bool *bp) const override;
-  virtual bool get(JSContext *cx, JS::Handle<JSObject*> proxy,
-                   JS::Handle<JS::Value> receiver,
-                   JS::Handle<jsid> id,
-                   JS::MutableHandle<JS::Value> vp) const override;
-  virtual bool set(JSContext *cx, JS::Handle<JSObject*> proxy,
-                   JS::Handle<jsid> id, JS::Handle<JS::Value> v,
-                   JS::Handle<JS::Value> receiver,
-                   JS::ObjectOpResult &result) const override;
+  bool enumerate(JSContext *cx, JS::Handle<JSObject*> proxy,
+                 JS::MutableHandle<JSObject*> vp) const override;
+  bool preventExtensions(JSContext* cx,
+                         JS::Handle<JSObject*> proxy,
+                         JS::ObjectOpResult& result) const override;
+  bool isExtensible(JSContext *cx, JS::Handle<JSObject*> proxy, bool *extensible)
+                    const override;
+  bool has(JSContext *cx, JS::Handle<JSObject*> proxy,
+           JS::Handle<jsid> id, bool *bp) const override;
+  bool get(JSContext *cx, JS::Handle<JSObject*> proxy,
+           JS::Handle<JS::Value> receiver,
+           JS::Handle<jsid> id,
+           JS::MutableHandle<JS::Value> vp) const override;
+  bool set(JSContext *cx, JS::Handle<JSObject*> proxy,
+           JS::Handle<jsid> id, JS::Handle<JS::Value> v,
+           JS::Handle<JS::Value> receiver,
+           JS::ObjectOpResult &result) const override;
 
   // SpiderMonkey extensions
-  virtual bool getPropertyDescriptor(JSContext* cx,
-                                     JS::Handle<JSObject*> proxy,
-                                     JS::Handle<jsid> id,
-                                     JS::MutableHandle<JS::PropertyDescriptor> desc)
-                                     const override;
-  virtual bool hasOwn(JSContext *cx, JS::Handle<JSObject*> proxy,
-                      JS::Handle<jsid> id, bool *bp) const override;
-  virtual bool getOwnEnumerablePropertyKeys(JSContext *cx, JS::Handle<JSObject*> proxy,
-                                            JS::AutoIdVector &props) const override;
-  virtual const char *className(JSContext *cx,
-                                JS::Handle<JSObject*> wrapper) const override;
+  bool getPropertyDescriptor(JSContext* cx,
+                             JS::Handle<JSObject*> proxy,
+                             JS::Handle<jsid> id,
+                             JS::MutableHandle<JS::PropertyDescriptor> desc)
+                             const override;
+  bool hasOwn(JSContext *cx, JS::Handle<JSObject*> proxy,
+              JS::Handle<jsid> id, bool *bp) const override;
+  bool getOwnEnumerablePropertyKeys(JSContext *cx, JS::Handle<JSObject*> proxy,
+                                    JS::AutoIdVector &props) const override;
+  const char *className(JSContext *cx,
+                        JS::Handle<JSObject*> wrapper) const override;
 
-  virtual void finalize(JSFreeOp *fop, JSObject *proxy) const override;
+  void finalize(JSFreeOp *fop, JSObject *proxy) const override;
 
-  virtual bool isCallable(JSObject *obj) const override {
+  bool isCallable(JSObject *obj) const override {
     return false;
   }
-  virtual bool isConstructor(JSObject *obj) const override {
+  bool isConstructor(JSObject *obj) const override {
     return false;
   }
 
-  virtual bool watch(JSContext *cx, JS::Handle<JSObject*> proxy,
-                     JS::Handle<jsid> id, JS::Handle<JSObject*> callable) const override;
-  virtual bool unwatch(JSContext *cx, JS::Handle<JSObject*> proxy,
-                       JS::Handle<jsid> id) const override;
+  bool watch(JSContext *cx, JS::Handle<JSObject*> proxy,
+             JS::Handle<jsid> id, JS::Handle<JSObject*> callable) const override;
+  bool unwatch(JSContext *cx, JS::Handle<JSObject*> proxy,
+               JS::Handle<jsid> id) const override;
 
   static void ObjectMoved(JSObject *obj, const JSObject *old);
 
@@ -1189,7 +1189,7 @@ class nsChromeOuterWindowProxy : public nsOuterWindowProxy
 public:
   constexpr nsChromeOuterWindowProxy() : nsOuterWindowProxy() { }
 
-  virtual const char *className(JSContext *cx, JS::Handle<JSObject*> wrapper) const override;
+  const char *className(JSContext *cx, JS::Handle<JSObject*> wrapper) const override;
 
   static const nsChromeOuterWindowProxy singleton;
 };
@@ -4200,7 +4200,7 @@ nsGlobalWindow::GetParentOuter()
   }
 
   nsCOMPtr<nsPIDOMWindowOuter> parent;
-  if (mDocShell->GetIsMozBrowserOrApp()) {
+  if (mDocShell->GetIsMozBrowser()) {
     parent = AsOuter();
   } else {
     parent = GetParent();
@@ -4258,7 +4258,7 @@ nsGlobalWindow::GetParent()
   }
 
   nsCOMPtr<nsIDocShell> parent;
-  mDocShell->GetSameTypeParentIgnoreBrowserAndAppBoundaries(getter_AddRefs(parent));
+  mDocShell->GetSameTypeParentIgnoreBrowserBoundaries(getter_AddRefs(parent));
 
   if (parent) {
     nsCOMPtr<nsPIDOMWindowOuter> win = parent->GetWindow();
@@ -4377,9 +4377,9 @@ nsGlobalWindow::GetContentInternal(ErrorResult& aError, bool aUnprivilegedCaller
     return domWindow.forget();
   }
 
-  // If we're contained in <iframe mozbrowser> or <iframe mozapp>, then
-  // GetContent is the same as window.top.
-  if (mDocShell && mDocShell->GetIsInMozBrowserOrApp()) {
+  // If we're contained in <iframe mozbrowser>, then GetContent is the same as
+  // window.top.
+  if (mDocShell && mDocShell->GetIsInMozBrowser()) {
     return GetTopOuter();
   }
 
@@ -6338,7 +6338,7 @@ public:
   NS_IMETHOD Run() override;
 
 private:
-  virtual ~FullscreenTransitionTask()
+  ~FullscreenTransitionTask() override
   {
     MOZ_COUNT_DTOR(FullscreenTransitionTask);
   }
@@ -6390,7 +6390,7 @@ private:
       : mTask(aTask) { }
 
   private:
-    ~Observer() {}
+    ~Observer() = default;
 
     RefPtr<FullscreenTransitionTask> mTask;
   };
@@ -7700,7 +7700,7 @@ nsGlobalWindow::ResizeToOuter(int32_t aWidth, int32_t aHeight, ErrorResult& aErr
    * If caller is a browser-element then dispatch a resize event to
    * the embedder.
    */
-  if (mDocShell && mDocShell->GetIsMozBrowserOrApp()) {
+  if (mDocShell && mDocShell->GetIsMozBrowser()) {
     CSSIntSize size(aWidth, aHeight);
     if (!DispatchResizeEvent(size)) {
       // The embedder chose to prevent the default action for this
@@ -7750,7 +7750,7 @@ nsGlobalWindow::ResizeByOuter(int32_t aWidthDif, int32_t aHeightDif,
    * If caller is a browser-element then dispatch a resize event to
    * parent.
    */
-  if (mDocShell && mDocShell->GetIsMozBrowserOrApp()) {
+  if (mDocShell && mDocShell->GetIsMozBrowser()) {
     CSSIntSize size;
     if (NS_FAILED(GetInnerSize(size))) {
       return;
@@ -8556,9 +8556,9 @@ nsGlobalWindow::PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> aMessa
 
         nsContentUtils::LogSimpleConsoleError(
           NS_ConvertUTF8toUTF16(nsPrintfCString(
-            "Attempting to post a message to window with url \"%s\" and "
-            "origin \"%s\" from a system principal scope with mismatched "
-            "origin \"%s\".",
+            R"(Attempting to post a message to window with url "%s" and )"
+            R"(origin "%s" from a system principal scope with mismatched )"
+            R"(origin "%s".)",
             targetURL.get(), targetOrigin.get(), sourceOrigin.get())),
           "DOM");
 
@@ -8719,7 +8719,7 @@ nsGlobalWindow::CloseOuter(bool aTrustedCaller)
   MOZ_RELEASE_ASSERT(IsOuterWindow());
 
   if (!mDocShell || IsInModalState() ||
-      (IsFrame() && !mDocShell->GetIsMozBrowserOrApp())) {
+      (IsFrame() && !mDocShell->GetIsMozBrowser())) {
     // window.close() is called on a frame in a frameset, on a window
     // that's already closed, or on a window for which there's
     // currently a modal dialog open. Ignore such calls.
@@ -8740,14 +8740,13 @@ nsGlobalWindow::CloseOuter(bool aTrustedCaller)
     return;
   }
 
-  // Don't allow scripts from content to close non-app or non-neterror
-  // windows that were not opened by script.
+  // Don't allow scripts from content to close non-neterror windows that
+  // were not opened by script.
   nsAutoString url;
   nsresult rv = mDoc->GetURL(url);
   NS_ENSURE_SUCCESS_VOID(rv);
 
-  if (!mDocShell->GetIsApp() &&
-      !StringBeginsWith(url, NS_LITERAL_STRING("about:neterror")) &&
+  if (!StringBeginsWith(url, NS_LITERAL_STRING("about:neterror")) &&
       !mHadOriginalOpener && !aTrustedCaller) {
     bool allowClose = mAllowScriptsToClose ||
       Preferences::GetBool("dom.allow_scripts_to_close_windows", true);
@@ -9062,9 +9061,9 @@ nsGlobalWindow::NotifyDOMWindowDestroyed(nsGlobalWindow* aWindow) {
 // with principals that are either the system principal or an expanded principal.
 // This may not return true for all non-web-content compartments.
 struct BrowserCompartmentMatcher : public js::CompartmentFilter {
-  virtual bool match(JSCompartment* c) const override
+  bool match(JSCompartment* aC) const override
   {
-    nsCOMPtr<nsIPrincipal> pc = nsJSPrincipals::get(JS_GetCompartmentPrincipals(c));
+    nsCOMPtr<nsIPrincipal> pc = nsJSPrincipals::get(JS_GetCompartmentPrincipals(aC));
     return nsContentUtils::IsSystemOrExpandedPrincipal(pc);
   }
 };
@@ -9195,7 +9194,7 @@ nsGlobalWindow::GetFrameElementOuter(nsIPrincipal& aSubjectPrincipal)
 {
   MOZ_RELEASE_ASSERT(IsOuterWindow());
 
-  if (!mDocShell || mDocShell->GetIsMozBrowserOrApp()) {
+  if (!mDocShell || mDocShell->GetIsMozBrowser()) {
     return nullptr;
   }
 
@@ -9230,7 +9229,7 @@ nsGlobalWindow::GetRealFrameElementOuter()
   }
 
   nsCOMPtr<nsIDocShell> parent;
-  mDocShell->GetSameTypeParentIgnoreBrowserAndAppBoundaries(getter_AddRefs(parent));
+  mDocShell->GetSameTypeParentIgnoreBrowserBoundaries(getter_AddRefs(parent));
 
   if (!parent || parent == mDocShell) {
     // We're at a chrome boundary, don't expose the chrome iframe
@@ -11843,7 +11842,20 @@ void
 nsGlobalWindow::Suspend()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsInnerWindow());
+  MOZ_DIAGNOSTIC_ASSERT(IsInnerWindow());
+
+  // We can only safely suspend windows that are the current inner window.  If
+  // its not the current inner, then we are in one of two different cases.
+  // Either we are in the bfcache or we are doomed window that is going away.
+  // When a window becomes inactive we purposely avoid placing already suspended
+  // windows into the bfcache.  It only expects windows suspended due to the
+  // Freeze() method which occurs while the window is still the current inner.
+  // So we must not call Suspend() on bfcache windows at this point or this
+  // invariant will be broken.  If the window is doomed there is no point in
+  // suspending it since it will soon be gone.
+  if (!AsInner()->IsCurrentInnerWindow()) {
+    return;
+  }
 
   // All children are also suspended.  This ensure mSuspendDepth is
   // set properly and the timers are properly canceled for each child.
@@ -11891,7 +11903,17 @@ void
 nsGlobalWindow::Resume()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsInnerWindow());
+  MOZ_DIAGNOSTIC_ASSERT(IsInnerWindow());
+
+  // We can only safely resume a window if its the current inner window.  If
+  // its not the current inner, then we are in one of two different cases.
+  // Either we are in the bfcache or we are doomed window that is going away.
+  // If a window is suspended when it becomes inactive we purposely do not
+  // put it in the bfcache, so Resume should never be needed in that case.
+  // If the window is doomed then there is no point in resuming it.
+  if (!AsInner()->IsCurrentInnerWindow()) {
+    return;
+  }
 
   // Resume all children.  This restores timers recursively canceled
   // in Suspend() and ensures all children have the correct mSuspendDepth.
@@ -11988,7 +12010,6 @@ void
 nsGlobalWindow::Freeze()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsInnerWindow());
   Suspend();
   FreezeInternal();
 }
@@ -11997,7 +12018,9 @@ void
 nsGlobalWindow::FreezeInternal()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsSuspended());
+  MOZ_DIAGNOSTIC_ASSERT(IsInnerWindow());
+  MOZ_DIAGNOSTIC_ASSERT(AsInner()->IsCurrentInnerWindow());
+  MOZ_DIAGNOSTIC_ASSERT(IsSuspended());
 
   CallOnChildren(&nsGlobalWindow::FreezeInternal);
 
@@ -12033,7 +12056,6 @@ void
 nsGlobalWindow::Thaw()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsInnerWindow());
   ThawInternal();
   Resume();
 }
@@ -12042,7 +12064,9 @@ void
 nsGlobalWindow::ThawInternal()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(IsSuspended());
+  MOZ_DIAGNOSTIC_ASSERT(IsInnerWindow());
+  MOZ_DIAGNOSTIC_ASSERT(AsInner()->IsCurrentInnerWindow());
+  MOZ_DIAGNOSTIC_ASSERT(IsSuspended());
 
   CallOnChildren(&nsGlobalWindow::ThawInternal);
 
@@ -12099,6 +12123,7 @@ nsGlobalWindow::SyncStateFromParentWindow()
   // This method should only be called on an inner window that has been
   // assigned to an outer window already.
   MOZ_ASSERT(IsInnerWindow());
+  MOZ_ASSERT(AsInner()->IsCurrentInnerWindow());
   nsPIDOMWindowOuter* outer = GetOuterWindow();
   MOZ_ASSERT(outer);
 
@@ -12142,6 +12167,8 @@ void
 nsGlobalWindow::CallOnChildren(Method aMethod)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(IsInnerWindow());
+  MOZ_ASSERT(AsInner()->IsCurrentInnerWindow());
 
   nsCOMPtr<nsIDocShell> docShell = GetDocShell();
   if (!docShell) {

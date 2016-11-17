@@ -43,9 +43,7 @@ nsPluginArray::Init()
   }
 }
 
-nsPluginArray::~nsPluginArray()
-{
-}
+nsPluginArray::~nsPluginArray() = default;
 
 static bool
 ResistFingerprinting() {
@@ -331,7 +329,7 @@ operator<(const RefPtr<nsPluginElement>& lhs,
 }
 
 static bool
-PluginShouldBeHidden(nsCString aName) {
+PluginShouldBeHidden(const nsCString& aName) {
   // This only supports one hidden plugin
   return Preferences::GetCString("plugins.navigator.hidden_ctp_plugin").Equals(aName);
 }
@@ -415,9 +413,7 @@ nsPluginElement::nsPluginElement(nsPIDOMWindowInner* aWindow,
 {
 }
 
-nsPluginElement::~nsPluginElement()
-{
-}
+nsPluginElement::~nsPluginElement() = default;
 
 nsPIDOMWindowInner*
 nsPluginElement::GetParentObject() const

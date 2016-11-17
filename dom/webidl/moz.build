@@ -59,7 +59,6 @@ WEBIDL_FILES = [
     'BrowserElement.webidl',
     'BrowserElementAudioChannel.webidl',
     'BrowserElementDictionaries.webidl',
-    'BrowserElementProxy.webidl',
     'Cache.webidl',
     'CacheStorage.webidl',
     'CanvasCaptureMediaStream.webidl',
@@ -569,7 +568,6 @@ WEBIDL_FILES = [
     'WebSocket.webidl',
     'WheelEvent.webidl',
     'WidevineCDMManifest.webidl',
-    'WifiOptions.webidl',
     'WindowOrWorkerGlobalScope.webidl',
     'WindowRoot.webidl',
     'Worker.webidl',
@@ -685,10 +683,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
         'MozNetworkStatsData.webidl',
         'MozNetworkStatsInterface.webidl',
         'MozNetworkStatsManager.webidl',
-        'MozSpeakerManager.webidl',
-        'MozWifiCapabilities.webidl',
-        'MozWifiManager.webidl',
-        'MozWifiP2pManager.webidl',
     ]
 else:
     WEBIDL_FILES += [
@@ -760,14 +754,6 @@ if CONFIG['MOZ_GAMEPAD']:
         'GamepadAxisMoveEvent.webidl',
         'GamepadButtonEvent.webidl',
         'GamepadEvent.webidl',
-    ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    GENERATED_EVENTS_WEBIDL_FILES += [
-        'MozWifiConnectionInfoEvent.webidl',
-        'MozWifiP2pStatusChangeEvent.webidl',
-        'MozWifiStationInfoEvent.webidl',
-        'MozWifiStatusChangeEvent.webidl',
     ]
 
 if CONFIG['MOZ_BUILD_APP'] in ['browser', 'xulrunner'] or CONFIG['MOZ_SUITE']:

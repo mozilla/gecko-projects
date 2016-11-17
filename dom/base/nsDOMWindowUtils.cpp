@@ -152,7 +152,7 @@ public:
 private:
   explicit OldWindowSize(nsIWeakReference* aWindowRef, const nsSize& aSize)
     : mWindowRef(aWindowRef), mSize(aSize) { }
-  ~OldWindowSize() { };
+  ~OldWindowSize() = default;;
 
   static OldWindowSize* GetItem(nsIWeakReference* aWindowRef)
   {
@@ -1669,7 +1669,7 @@ nsDOMWindowUtils::SuppressEventHandling(bool aSuppress)
 }
 
 static nsresult
-getScrollXYAppUnits(nsWeakPtr aWindow, bool aFlushLayout, nsPoint& aScrollPos) {
+getScrollXYAppUnits(const nsWeakPtr& aWindow, bool aFlushLayout, nsPoint& aScrollPos) {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(aWindow);
   nsCOMPtr<nsIDocument> doc = window ? window->GetExtantDoc() : nullptr;
   NS_ENSURE_STATE(doc);
@@ -2092,7 +2092,7 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
   nsresult rv = targetWidget->DispatchEvent(&queryEvent, status);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsQueryContentEventResult* result = new nsQueryContentEventResult();
+  auto* result = new nsQueryContentEventResult();
   result->SetEventResult(widget, queryEvent);
   NS_ADDREF(*aResult = result);
   return NS_OK;

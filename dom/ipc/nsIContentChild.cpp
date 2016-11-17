@@ -44,7 +44,6 @@ nsIContentChild::AllocPBrowserChild(const TabId& aTabId,
                                     const IPCTabContext& aContext,
                                     const uint32_t& aChromeFlags,
                                     const ContentParentId& aCpID,
-                                    const bool& aIsForApp,
                                     const bool& aIsForBrowser)
 {
   // We'll happily accept any kind of IPCTabContext here; we don't need to
@@ -137,7 +136,7 @@ nsIContentChild::DeallocPFileDescriptorSetChild(PFileDescriptorSetChild* aActor)
   return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 nsIContentChild::RecvAsyncMessage(const nsString& aMsg,
                                   InfallibleTArray<CpowEntry>&& aCpows,
                                   const IPC::Principal& aPrincipal,
@@ -152,7 +151,7 @@ nsIContentChild::RecvAsyncMessage(const nsString& aMsg,
     cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()), nullptr,
                         aMsg, false, &data, &cpows, aPrincipal, nullptr);
   }
-  return true;
+  return IPC_OK();
 }
 
 } // namespace dom

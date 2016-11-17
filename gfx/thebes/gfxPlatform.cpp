@@ -653,10 +653,9 @@ gfxPlatform::Init()
                                gfxPrefs::WebGLForceLayersReadback(),
                                gfxPrefs::WebGLForceMSAA());
       // Prefs that don't fit into any of the other sections
-      forcedPrefs.AppendPrintf("-T%d%d%d%d) ",
+      forcedPrefs.AppendPrintf("-T%d%d%d) ",
                                gfxPrefs::AndroidRGB16Force(),
                                gfxPrefs::CanvasAzureAccelerated(),
-                               gfxPrefs::DisableGralloc(),
                                gfxPrefs::ForceShmemTiles());
       ScopedGfxFeatureReporter::AppNote(forcedPrefs);
     }
@@ -795,9 +794,26 @@ gfxPlatform::Init()
     InitNullMetadata();
     InitOpenGLConfig();
 
+    if (XRE_IsParentProcess()) {
+      gfxVars::SetDXInterop2Blocked(IsDXInterop2Blocked());
+    }
+
     if (obs) {
       obs->NotifyObservers(nullptr, "gfx-features-ready", nullptr);
     }
+}
+
+/* static*/ bool
+gfxPlatform::IsDXInterop2Blocked()
+{
+  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+  nsCString blockId;
+  int32_t status;
+  if (!NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DX_INTEROP2,
+                                              blockId, &status))) {
+    return true;
+  }
+  return status != nsIGfxInfo::FEATURE_STATUS_OK;
 }
 
 /* static */ void
@@ -2407,9 +2423,9 @@ gfxPlatform::GetTilesSupportInfo(mozilla::widget::InfoObject& aObj)
 /*static*/ bool
 gfxPlatform::AsyncPanZoomEnabled()
 {
-#if !defined(MOZ_B2G) && !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_UIKIT)
-  // For XUL applications (everything but B2G on mobile and desktop, and
-  // Firefox on Android) we only want to use APZ when E10S is enabled. If
+#if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_UIKIT)
+  // For XUL applications (everything but Firefox on Android)
+  // we only want to use APZ when E10S is enabled. If
   // we ever get input events off the main thread we can consider relaxing
   // this requirement.
   if (!BrowserTabsRemoteAutostart()) {

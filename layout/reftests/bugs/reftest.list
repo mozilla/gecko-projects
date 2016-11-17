@@ -462,8 +462,8 @@ fuzzy-if(skiaContent,2,3) == 339289-1.html 339289-1-ref.html
 != 345563-sub.xhtml 345563-sup.xhtml
 == 346189-1.xul 346189-1-ref.xul
 fuzzy-if(skiaContent,4,2) == 346774-1a.html 346774-1-ref.html
-== 346774-1b.html 346774-1-ref.html
-== 346774-1c.html 346774-1-ref.html
+fuzzy-if(skiaContent,4,2) == 346774-1b.html 346774-1-ref.html
+fuzzy-if(skiaContent,4,2) == 346774-1c.html 346774-1-ref.html
 == 347348-1.xhtml 347348-1-ref.xhtml
 == 347496-1.xhtml 347496-1-ref.xhtml
 == 347912-1.html 347912-1-ref.html
@@ -1973,6 +1973,8 @@ fuzzy(8,1900) == 1291528.html 1291528-ref.html
 # should be same.  |fuzzy()| here allows the difference in border, but not
 # background color.
 fuzzy(255,1000) skip-if(!cocoaWidget) == 1294102-1.html 1294102-1-ref.html
+fuzzy(2,320000) == 1315113-1.html 1315113-1-ref.html
+fuzzy(2,20000) == 1315113-2.html 1315113-2-ref.html
 == 1315632-1.html 1315632-1-ref.html
 fuzzy(2,40000) == 1316719-1a.html 1316719-1-ref.html
 fuzzy(2,40000) == 1316719-1b.html 1316719-1-ref.html

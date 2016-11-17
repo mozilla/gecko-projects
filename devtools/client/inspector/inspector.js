@@ -8,6 +8,8 @@
 
 "use strict";
 
+var Cu = Components.utils;
+var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 var Services = require("Services");
 var promise = require("promise");
 var defer = require("devtools/shared/defer");
@@ -413,21 +415,26 @@ Inspector.prototype = {
   },
 
   get React() {
-    return require("devtools/client/shared/vendor/react");
+    return this._toolbox.React;
   },
 
   get ReactDOM() {
-    return require("devtools/client/shared/vendor/react-dom");
+    return this._toolbox.ReactDOM;
   },
 
   get ReactRedux() {
-    return require("devtools/client/shared/vendor/react-redux");
+    return this._toolbox.ReactRedux;
+  },
+
+  get browserRequire() {
+    return this._toolbox.browserRequire;
   },
 
   get InspectorTabPanel() {
     if (!this._InspectorTabPanel) {
       this._InspectorTabPanel =
-        this.React.createFactory(require("devtools/client/inspector/components/inspector-tab-panel"));
+        this.React.createFactory(this.browserRequire(
+        "devtools/client/inspector/components/inspector-tab-panel"));
     }
     return this._InspectorTabPanel;
   },
@@ -447,7 +454,8 @@ Inspector.prototype = {
    * the Inspector panel.
    */
   setupSplitter: function () {
-    let SplitBox = this.React.createFactory(require("devtools/client/shared/components/splitter/split-box"));
+    let SplitBox = this.React.createFactory(this.browserRequire(
+      "devtools/client/shared/components/splitter/split-box"));
 
     let splitter = SplitBox({
       className: "inspector-sidebar-splitter",
@@ -560,7 +568,7 @@ Inspector.prototype = {
     this.computedview = new ComputedViewTool(this, this.panelWin);
 
     if (Services.prefs.getBoolPref("devtools.layoutview.enabled")) {
-      const {LayoutView} = require("devtools/client/inspector/layout/layout");
+      const {LayoutView} = this.browserRequire("devtools/client/inspector/layout/layout");
       this.layoutview = new LayoutView(this, this.panelWin);
     }
 
@@ -608,7 +616,8 @@ Inspector.prototype = {
     this.teardownToolbar();
 
     // Setup the sidebar toggle button.
-    let SidebarToggle = this.React.createFactory(require("devtools/client/shared/components/sidebar-toggle"));
+    let SidebarToggle = this.React.createFactory(this.browserRequire(
+      "devtools/client/shared/components/sidebar-toggle"));
 
     let sidebarToggle = SidebarToggle({
       onClick: this.onPaneToggleButtonClicked,
@@ -1462,12 +1471,11 @@ Inspector.prototype = {
 
     // Insert the html and expect a childList markup mutation.
     let onMutations = this.once("markupmutation");
-    let {nodes} = yield this.walker.insertAdjacentHTML(this.selection.nodeFront,
-                                                       "beforeEnd", html);
+    yield this.walker.insertAdjacentHTML(this.selection.nodeFront, "beforeEnd", html);
     yield onMutations;
 
-    // Select the new node (this will auto-expand its parent).
-    this.selection.setNodeFront(nodes[0], "node-inserted");
+    // Expand the parent node.
+    this.markup.expandNode(this.selection.nodeFront);
   }),
 
   /**
@@ -1847,7 +1855,6 @@ let url = new window.URL(href);
 if (url.search.length > 1) {
   const { targetFromURL } = require("devtools/client/framework/target-from-url");
   const { attachThread } = require("devtools/client/framework/attach-thread");
-  const Cu = Components.utils;
   const { BrowserLoader } =
     Cu.import("resource://devtools/client/shared/browser-loader.js", {});
 

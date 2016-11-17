@@ -326,8 +326,6 @@ private:
 };
 
 namespace {
-StaticRefPtr<TabChild> sPreallocatedTab;
-
 std::map<TabId, RefPtr<TabChild>>&
 NestedTabChildMap()
 {
@@ -348,89 +346,12 @@ TabChild::FindTabChild(const TabId& aTabId)
   return tabChild.forget();
 }
 
-static void
-PreloadSlowThingsPostFork(void* aUnused)
-{
-    nsCOMPtr<nsIObserverService> observerService =
-      mozilla::services::GetObserverService();
-    observerService->NotifyObservers(nullptr, "preload-postfork", nullptr);
-
-    MOZ_ASSERT(sPreallocatedTab);
-    // Initialize initial reflow of the PresShell has to happen after fork
-    // because about:blank content viewer is created in the above observer
-    // notification.
-    nsCOMPtr<nsIDocShell> docShell =
-      do_GetInterface(sPreallocatedTab->WebNavigation());
-    if (nsIPresShell* presShell = docShell->GetPresShell()) {
-        // Initialize and do an initial reflow of the about:blank
-        // PresShell to let it preload some things for us.
-        presShell->Initialize(0, 0);
-        nsIDocument* doc = presShell->GetDocument();
-        doc->FlushPendingNotifications(Flush_Layout);
-        // ... but after it's done, make sure it doesn't do any more
-        // work.
-        presShell->MakeZombie();
-    }
-
-}
-
-static bool sPreloaded = false;
-
-/*static*/ void
-TabChild::PreloadSlowThings()
-{
-    if (sPreloaded) {
-        // If we are alredy initialized in Nuwa, don't redo preloading.
-        return;
-    }
-    sPreloaded = true;
-
-    // Pass nullptr to aManager since at this point the TabChild is
-    // not connected to any manager. Any attempt to use the TabChild
-    // in IPC will crash.
-    RefPtr<TabChild> tab(new TabChild(nullptr,
-                                        TabId(0),
-                                        TabContext(), /* chromeFlags */ 0));
-    if (!NS_SUCCEEDED(tab->Init()) ||
-        !tab->InitTabChildGlobal(DONT_LOAD_SCRIPTS)) {
-        return;
-    }
-
-    // Just load and compile these scripts, but don't run them.
-    tab->TryCacheLoadAndCompileScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
-    // Load, compile, and run these scripts.
-    tab->RecvLoadRemoteScript(
-        NS_LITERAL_STRING("chrome://global/content/preload.js"),
-        true);
-
-    sPreallocatedTab = tab;
-    ClearOnShutdown(&sPreallocatedTab);
-
-    PreloadSlowThingsPostFork(nullptr);
-}
-
 /*static*/ already_AddRefed<TabChild>
 TabChild::Create(nsIContentChild* aManager,
                  const TabId& aTabId,
                  const TabContext &aContext,
                  uint32_t aChromeFlags)
 {
-    if (sPreallocatedTab &&
-        sPreallocatedTab->mChromeFlags == aChromeFlags &&
-        aContext.IsMozBrowserOrApp()) {
-
-        RefPtr<TabChild> child = sPreallocatedTab.get();
-        sPreallocatedTab = nullptr;
-
-        MOZ_ASSERT(!child->mTriedBrowserInit);
-
-        child->mManager = aManager;
-        child->SetTabId(aTabId);
-        child->SetTabContext(aContext);
-        child->NotifyTabContextUpdated(true);
-        return child.forget();
-    }
-
     RefPtr<TabChild> iframe = new TabChild(aManager, aTabId,
                                              aContext, aChromeFlags);
     return NS_SUCCEEDED(iframe->Init()) ? iframe.forget() : nullptr;
@@ -621,13 +542,6 @@ TabChild::DoUpdateZoomConstraints(const uint32_t& aPresShellId,
                                   const ViewID& aViewId,
                                   const Maybe<ZoomConstraints>& aConstraints)
 {
-  if (sPreallocatedTab == this) {
-    // If we're the preallocated tab, bail out because doing IPC will crash.
-    // Once we get used for something we'll get another zoom constraints update
-    // and all will be well.
-    return true;
-  }
-
   if (!mApzcTreeManager) {
     return false;
   }
@@ -792,8 +706,7 @@ TabChild::UpdateFrameType()
 
   // TODO: Bug 1252794 - remove frameType from nsIDocShell.idl
   docShell->SetFrameType(IsMozBrowserElement() ? nsIDocShell::FRAME_TYPE_BROWSER :
-                           HasOwnApp() ? nsIDocShell::FRAME_TYPE_APP :
-                             nsIDocShell::FRAME_TYPE_REGULAR);
+                           nsIDocShell::FRAME_TYPE_REGULAR);
 }
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TabChild)
@@ -1103,11 +1016,11 @@ TabChild::ProvideWindow(mozIDOMWindowProxy* aParent,
 {
     *aReturn = nullptr;
 
-    // If aParent is inside an <iframe mozbrowser> or <iframe mozapp> and this
-    // isn't a request to open a modal-type window, we're going to create a new
-    // <iframe mozbrowser/mozapp> and return its window here.
+    // If aParent is inside an <iframe mozbrowser> and this isn't a request to
+    // open a modal-type window, we're going to create a new <iframe mozbrowser>
+    // and return its window here.
     nsCOMPtr<nsIDocShell> docshell = do_GetInterface(aParent);
-    bool iframeMoz = (docshell && docshell->GetIsInMozBrowserOrApp() &&
+    bool iframeMoz = (docshell && docshell->GetIsInMozBrowser() &&
                       !(aChromeFlags & (nsIWebBrowserChrome::CHROME_MODAL |
                                         nsIWebBrowserChrome::CHROME_OPENAS_DIALOG |
                                         nsIWebBrowserChrome::CHROME_OPENAS_CHROME)));
@@ -1214,37 +1127,17 @@ TabChild::~TabChild()
   }
 }
 
-void
-TabChild::SetProcessNameToAppName()
-{
-  nsCOMPtr<mozIApplication> app = GetOwnApp();
-  if (!app) {
-    return;
-  }
-
-  nsAutoString appName;
-  nsresult rv = app->GetName(appName);
-  if (NS_FAILED(rv)) {
-    NS_WARNING("Failed to retrieve app name");
-    return;
-  }
-
-  ContentChild::GetSingleton()->SetProcessName(appName, true);
-}
-
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvLoadURL(const nsCString& aURI,
                       const ShowInfo& aInfo)
 {
   if (!mDidLoadURLInit) {
     mDidLoadURLInit = true;
     if (!InitTabChildGlobal()) {
-      return false;
+      return IPC_FAIL_NO_REASON(this);
     }
 
     ApplyShowInfo(aInfo);
-
-    SetProcessNameToAppName();
   }
 
   nsresult rv =
@@ -1260,7 +1153,7 @@ TabChild::RecvLoadURL(const nsCString& aURI,
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("URL"), aURI);
 #endif
 
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -1289,7 +1182,7 @@ TabChild::ApplyShowInfo(const ShowInfo& aInfo)
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
   if (docShell) {
     nsCOMPtr<nsIDocShellTreeItem> item = do_GetInterface(docShell);
-    if (IsMozBrowserOrApp()) {
+    if (IsMozBrowser()) {
       // B2G allows window.name to be set by changing the name attribute on the
       // <iframe mozbrowser> element. window.open calls cause this attribute to
       // be set to the correct value. A normal <xul:browser> element has no such
@@ -1322,7 +1215,7 @@ TabChild::ApplyShowInfo(const ShowInfo& aInfo)
   mIsTransparent = aInfo.isTransparent();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvShow(const ScreenIntSize& aSize,
                    const ShowInfo& aInfo,
                    const TextureFactoryIdentifier& aTextureFactoryIdentifier,
@@ -1337,22 +1230,16 @@ TabChild::RecvShow(const ScreenIntSize& aSize,
     if (mDidFakeShow) {
         ApplyShowInfo(aInfo);
         RecvParentActivated(aParentIsActive);
-        return true;
+        return IPC_OK();
     }
 
     nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(WebNavigation());
     if (!baseWindow) {
         NS_ERROR("WebNavigation() doesn't QI to nsIBaseWindow");
-        return false;
+        return IPC_FAIL_NO_REASON(this);
     }
 
-    if (!InitRenderingState(aTextureFactoryIdentifier, aLayersId, aRenderFrame)) {
-        // We can fail to initialize our widget if the <browser
-        // remote> has already been destroyed, and we couldn't hook
-        // into the parent-process's layer system.  That's not a fatal
-        // error.
-        return true;
-    }
+    InitRenderingState(aTextureFactoryIdentifier, aLayersId, aRenderFrame);
 
     baseWindow->SetVisibility(true);
 
@@ -1360,17 +1247,20 @@ TabChild::RecvShow(const ScreenIntSize& aSize,
     ApplyShowInfo(aInfo);
     RecvParentActivated(aParentIsActive);
 
-    return res;
+    if (!res) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvUpdateDimensions(const CSSRect& rect, const CSSSize& size,
                                const ScreenOrientationInternal& orientation,
                                const LayoutDeviceIntPoint& clientOffset,
                                const LayoutDeviceIntPoint& chromeDisp)
 {
     if (!mRemoteFrame) {
-        return true;
+        return IPC_OK();
     }
 
     mUnscaledOuterRect = rect;
@@ -1397,15 +1287,15 @@ TabChild::RecvUpdateDimensions(const CSSRect& rect, const CSSSize& size,
                           screenRect.y + clientOffset.y + chromeDisp.y,
                           screenSize.width, screenSize.height, true);
 
-    return true;
+    return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSizeModeChanged(const nsSizeMode& aSizeMode)
 {
   mPuppetWidget->SetSizeMode(aSizeMode);
   if (!mPuppetWidget->IsVisible()) {
-    return true;
+    return IPC_OK();
   }
   nsCOMPtr<nsIDocument> document(GetDocument());
   nsCOMPtr<nsIPresShell> presShell = document->GetShell();
@@ -1415,7 +1305,7 @@ TabChild::RecvSizeModeChanged(const nsSizeMode& aSizeMode)
       presContext->SizeModeChanged(aSizeMode);
     }
   }
-  return true;
+  return IPC_OK();
 }
 
 bool
@@ -1424,7 +1314,7 @@ TabChild::UpdateFrame(const FrameMetrics& aFrameMetrics)
   return TabChildBase::UpdateFrameHandler(aFrameMetrics);
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSuppressDisplayport(const bool& aEnabled)
 {
   if (aEnabled) {
@@ -1435,7 +1325,7 @@ TabChild::RecvSuppressDisplayport(const bool& aEnabled)
 
   MOZ_ASSERT(mActiveSuppressDisplayport >= 0);
   APZCCallbackHelper::SuppressDisplayport(aEnabled, GetPresShell());
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -1467,7 +1357,7 @@ TabChild::HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvHandleTap(const GeckoContentController::TapType& aType,
                         const LayoutDevicePoint& aPoint,
                         const Modifiers& aModifiers,
@@ -1476,10 +1366,10 @@ TabChild::RecvHandleTap(const GeckoContentController::TapType& aType,
 {
   nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   if (!presShell) {
-    return true;
+    return IPC_OK();
   }
   if (!presShell->GetPresContext()) {
-    return true;
+    return IPC_OK();
   }
   CSSToLayoutDeviceScale scale(presShell->GetPresContext()->CSSToDevPixelScale());
   CSSPoint point = APZCCallbackHelper::ApplyCallbackTransform(aPoint / scale, aGuid);
@@ -1515,7 +1405,7 @@ TabChild::RecvHandleTap(const GeckoContentController::TapType& aType,
     MOZ_ASSERT(false);
     break;
   }
-  return true;
+  return IPC_OK();
 }
 
 bool
@@ -1557,100 +1447,112 @@ TabChild::ZoomToRect(const uint32_t& aPresShellId,
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvActivate()
 {
   nsCOMPtr<nsIWebBrowserFocus> browser = do_QueryInterface(WebNavigation());
   browser->Activate();
-  return true;
+  return IPC_OK();
 }
 
-bool TabChild::RecvDeactivate()
+mozilla::ipc::IPCResult
+TabChild::RecvDeactivate()
 {
   nsCOMPtr<nsIWebBrowserFocus> browser = do_QueryInterface(WebNavigation());
   browser->Deactivate();
-  return true;
+  return IPC_OK();
 }
 
-bool TabChild::RecvParentActivated(const bool& aActivated)
+mozilla::ipc::IPCResult
+TabChild::RecvParentActivated(const bool& aActivated)
 {
   mParentIsActive = aActivated;
 
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
-  NS_ENSURE_TRUE(fm, true);
+  NS_ENSURE_TRUE(fm, IPC_OK());
 
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
   fm->ParentActivated(window, aActivated);
-  return true;
+  return IPC_OK();
 }
 
-bool TabChild::RecvSetKeyboardIndicators(const UIStateChangeType& aShowAccelerators,
-                                         const UIStateChangeType& aShowFocusRings)
+mozilla::ipc::IPCResult
+TabChild::RecvSetKeyboardIndicators(const UIStateChangeType& aShowAccelerators,
+                                    const UIStateChangeType& aShowFocusRings)
 {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
-  NS_ENSURE_TRUE(window, true);
+  NS_ENSURE_TRUE(window, IPC_OK());
 
   window->SetKeyboardIndicators(aShowAccelerators, aShowFocusRings);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvStopIMEStateManagement()
 {
   IMEStateManager::StopIMEStateManagement();
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvMenuKeyboardListenerInstalled(const bool& aInstalled)
 {
   IMEStateManager::OnInstalledMenuKeyboardListener(aInstalled);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvNotifyAttachGroupedSessionHistory(const uint32_t& aOffset)
 {
   // nsISHistory uses int32_t
   if (NS_WARN_IF(aOffset > INT32_MAX)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   nsCOMPtr<nsISHistory> shistory;
   mWebNav->GetSessionHistory(getter_AddRefs(shistory));
-  NS_ENSURE_TRUE(shistory, false);
+  NS_ENSURE_TRUE(shistory, IPC_FAIL_NO_REASON(this));
 
-  return NS_SUCCEEDED(shistory->OnAttachGroupedSessionHistory(aOffset));
+  if (NS_FAILED(shistory->OnAttachGroupedSessionHistory(aOffset))) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvNotifyPartialSessionHistoryActive(const uint32_t& aGlobalLength,
                                                 const uint32_t& aTargetLocalIndex)
 {
   // nsISHistory uses int32_t
   if (NS_WARN_IF(aGlobalLength > INT32_MAX || aTargetLocalIndex > INT32_MAX)) {
-    return false;
+    return IPC_FAIL_NO_REASON(this);
   }
 
   nsCOMPtr<nsISHistory> shistory;
   mWebNav->GetSessionHistory(getter_AddRefs(shistory));
-  NS_ENSURE_TRUE(shistory, false);
+  NS_ENSURE_TRUE(shistory, IPC_FAIL_NO_REASON(this));
 
-  return NS_SUCCEEDED(shistory->OnPartialSessionHistoryActive(aGlobalLength,
-                                                              aTargetLocalIndex));
+  if (NS_FAILED(shistory->OnPartialSessionHistoryActive(aGlobalLength,
+                                                        aTargetLocalIndex))) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvNotifyPartialSessionHistoryDeactive()
 {
   nsCOMPtr<nsISHistory> shistory;
   mWebNav->GetSessionHistory(getter_AddRefs(shistory));
-  NS_ENSURE_TRUE(shistory, false);
+  NS_ENSURE_TRUE(shistory, IPC_FAIL_NO_REASON(this));
 
-  return NS_SUCCEEDED(shistory->OnPartialSessionHistoryDeactive());
+  if (NS_FAILED(shistory->OnPartialSessionHistoryDeactive())) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvMouseEvent(const nsString& aType,
                          const float&    aX,
                          const float&    aY,
@@ -1661,26 +1563,32 @@ TabChild::RecvMouseEvent(const nsString& aType,
 {
   APZCCallbackHelper::DispatchMouseEvent(GetPresShell(), aType, CSSPoint(aX, aY),
       aButton, aClickCount, aModifiers, aIgnoreRootScrollFrame, nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvRealMouseMoveEvent(const WidgetMouseEvent& aEvent,
                                  const ScrollableLayerGuid& aGuid,
                                  const uint64_t& aInputBlockId)
 {
-  return RecvRealMouseButtonEvent(aEvent, aGuid, aInputBlockId);
+  if (!RecvRealMouseButtonEvent(aEvent, aGuid, aInputBlockId)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSynthMouseMoveEvent(const WidgetMouseEvent& aEvent,
                                   const ScrollableLayerGuid& aGuid,
                                   const uint64_t& aInputBlockId)
 {
-  return RecvRealMouseButtonEvent(aEvent, aGuid, aInputBlockId);
+  if (!RecvRealMouseButtonEvent(aEvent, aGuid, aInputBlockId)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
                                    const ScrollableLayerGuid& aGuid,
                                    const uint64_t& aInputBlockId)
@@ -1709,10 +1617,10 @@ TabChild::RecvRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
   if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     mAPZEventState->ProcessMouseEvent(aEvent, aGuid, aInputBlockId);
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
                               const ScrollableLayerGuid& aGuid,
                               const uint64_t& aInputBlockId)
@@ -1736,10 +1644,10 @@ TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
   if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     mAPZEventState->ProcessWheelEvent(localEvent, aGuid, aInputBlockId);
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
                              const ScrollableLayerGuid& aGuid,
                              const uint64_t& aInputBlockId,
@@ -1770,24 +1678,27 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
     // We shouldn't have any e10s platforms that have touch events enabled
     // without APZ.
     MOZ_ASSERT(false);
-    return true;
+    return IPC_OK();
   }
 
   mAPZEventState->ProcessTouchEvent(localEvent, aGuid, aInputBlockId,
       aApzResponse, status);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvRealTouchMoveEvent(const WidgetTouchEvent& aEvent,
                                  const ScrollableLayerGuid& aGuid,
                                  const uint64_t& aInputBlockId,
                                  const nsEventStatus& aApzResponse)
 {
-  return RecvRealTouchEvent(aEvent, aGuid, aInputBlockId, aApzResponse);
+  if (!RecvRealTouchEvent(aEvent, aGuid, aInputBlockId, aApzResponse)) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvRealDragEvent(const WidgetDragEvent& aEvent,
                             const uint32_t& aDragAction,
                             const uint32_t& aDropEffect)
@@ -1822,10 +1733,10 @@ TabChild::RecvRealDragEvent(const WidgetDragEvent& aEvent,
   }
 
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvPluginEvent(const WidgetPluginEvent& aEvent)
 {
   WidgetPluginEvent localEvent(aEvent);
@@ -1835,7 +1746,7 @@ TabChild::RecvPluginEvent(const WidgetPluginEvent& aEvent)
     // If not consumed, we should call default action
     SendDefaultProcOfPluginEvent(aEvent);
   }
-  return true;
+  return IPC_OK();
 }
 
 void
@@ -1857,15 +1768,15 @@ TabChild::RequestNativeKeyBindings(AutoCacheNativeKeyCommands* aAutoCache,
   }
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvNativeSynthesisResponse(const uint64_t& aObserverId,
                                       const nsCString& aResponse)
 {
   mozilla::widget::AutoObserverNotifier::NotifySavedObserver(aObserverId, aResponse.get());
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
                            const MaybeNativeKeyBinding& aBindings)
 {
@@ -1875,7 +1786,7 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
     // If content code called preventDefault() on a keydown event, then we don't
     // want to process any following keypress events.
     if (mIgnoreKeyPressEvent) {
-      return true;
+      return IPC_OK();
     }
     if (aBindings.type() == MaybeNativeKeyBinding::TNativeKeyBinding) {
       const NativeKeyBinding& bindings = aBindings;
@@ -1910,10 +1821,10 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
     SendDispatchAfterKeyboardEvent(localEvent);
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvKeyEvent(const nsString& aType,
                        const int32_t& aKeyCode,
                        const int32_t& aCharCode,
@@ -1923,30 +1834,30 @@ TabChild::RecvKeyEvent(const nsString& aType,
   bool ignored = false;
   nsContentUtils::SendKeyEvent(mPuppetWidget, aType, aKeyCode, aCharCode,
                                aModifiers, aPreventDefault, &ignored);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvCompositionEvent(const WidgetCompositionEvent& event)
 {
   WidgetCompositionEvent localEvent(event);
   localEvent.mWidget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
   Unused << SendOnEventNeedingAckHandled(event.mMessage);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
 {
   WidgetSelectionEvent localEvent(event);
   localEvent.mWidget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
   Unused << SendOnEventNeedingAckHandled(event.mMessage);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvPasteTransferable(const IPCDataTransfer& aDataTransfer,
                                 const bool& aIsPrivateData,
                                 const IPC::Principal& aRequestingPrincipal)
@@ -1954,28 +1865,28 @@ TabChild::RecvPasteTransferable(const IPCDataTransfer& aDataTransfer,
   nsresult rv;
   nsCOMPtr<nsITransferable> trans =
     do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
-  NS_ENSURE_SUCCESS(rv, true);
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
   trans->Init(nullptr);
 
   rv = nsContentUtils::IPCTransferableToTransferable(aDataTransfer,
                                                      aIsPrivateData,
                                                      aRequestingPrincipal,
                                                      trans, nullptr, this);
-  NS_ENSURE_SUCCESS(rv, true);
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
 
   nsCOMPtr<nsIDocShell> ourDocShell = do_GetInterface(WebNavigation());
   if (NS_WARN_IF(!ourDocShell)) {
-    return true;
+    return IPC_OK();
   }
 
   nsCOMPtr<nsICommandParams> params = do_CreateInstance("@mozilla.org/embedcomp/command-params;1", &rv);
-  NS_ENSURE_SUCCESS(rv, true);
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
 
   rv = params->SetISupportsValue("transferable", trans);
-  NS_ENSURE_SUCCESS(rv, true);
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
 
   ourDocShell->DoCommandWithParams("cmd_pasteTransferable", params);
-  return true;
+  return IPC_OK();
 }
 
 
@@ -2014,7 +1925,7 @@ TabChild::DeallocPDocumentRendererChild(PDocumentRendererChild* actor)
     return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvPDocumentRendererConstructor(PDocumentRendererChild* actor,
                                            const nsRect& documentRect,
                                            const mozilla::gfx::Matrix& transform,
@@ -2027,12 +1938,12 @@ TabChild::RecvPDocumentRendererConstructor(PDocumentRendererChild* actor,
 
     nsCOMPtr<nsIWebBrowser> browser = do_QueryInterface(WebNavigation());
     if (!browser)
-        return true; // silently ignore
+        return IPC_OK(); // silently ignore
     nsCOMPtr<mozIDOMWindowProxy> window;
     if (NS_FAILED(browser->GetContentDOMWindow(getter_AddRefs(window))) ||
         !window)
     {
-        return true; // silently ignore
+        return IPC_OK(); // silently ignore
     }
 
     nsCString data;
@@ -2042,9 +1953,12 @@ TabChild::RecvPDocumentRendererConstructor(PDocumentRendererChild* actor,
                                       renderFlags, flushLayout,
                                       renderSize, data);
     if (!ret)
-        return true; // silently ignore
+        return IPC_OK(); // silently ignore
 
-    return PDocumentRendererChild::Send__delete__(actor, renderSize, data);
+    if (!PDocumentRendererChild::Send__delete__(actor, renderSize, data)) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+    return IPC_OK();
 }
 
 PColorPickerChild*
@@ -2109,32 +2023,32 @@ TabChild::DeallocPIndexedDBPermissionRequestChild(
   return true;
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvActivateFrameEvent(const nsString& aType, const bool& capture)
 {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
-  NS_ENSURE_TRUE(window, true);
+  NS_ENSURE_TRUE(window, IPC_OK());
   nsCOMPtr<EventTarget> chromeHandler =
     do_QueryInterface(window->GetChromeEventHandler());
-  NS_ENSURE_TRUE(chromeHandler, true);
+  NS_ENSURE_TRUE(chromeHandler, IPC_OK());
   RefPtr<ContentListener> listener = new ContentListener(this);
   chromeHandler->AddEventListener(aType, listener, capture);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvLoadRemoteScript(const nsString& aURL, const bool& aRunInGlobalScope)
 {
   if (!mGlobal && !InitTabChildGlobal())
     // This can happen if we're half-destroyed.  It's not a fatal
     // error.
-    return true;
+    return IPC_OK();
 
   LoadScriptInternal(aURL, aRunInGlobalScope);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvAsyncMessage(const nsString& aMessage,
                            InfallibleTArray<CpowEntry>&& aCpows,
                            const IPC::Principal& aPrincipal,
@@ -2150,20 +2064,20 @@ TabChild::RecvAsyncMessage(const nsString& aMessage,
     mm->ReceiveMessage(static_cast<EventTarget*>(mTabChildGlobal), nullptr,
                        aMessage, false, &data, &cpows, aPrincipal, nullptr);
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext)
 {
   nsCOMPtr<nsIDocShell> ourDocShell = do_GetInterface(WebNavigation());
   if (NS_WARN_IF(!ourDocShell)) {
-    return true;
+    return IPC_OK();
   }
 
   nsCOMPtr<nsPIDOMWindowOuter> ourWindow = ourDocShell->GetWindow();
   if (NS_WARN_IF(!ourWindow)) {
-    return true;
+    return IPC_OK();
   }
 
   RefPtr<nsDocShell> docShell = static_cast<nsDocShell*>(ourDocShell.get());
@@ -2197,7 +2111,7 @@ TabChild::RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext)
   // Ignore previous value of mTriedBrowserInit since owner content has changed.
   mTriedBrowserInit = true;
   // Initialize the child side of the browser element machinery, if appropriate.
-  if (IsMozBrowserOrApp()) {
+  if (IsMozBrowser()) {
     RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
   }
 
@@ -2205,10 +2119,10 @@ TabChild::RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext)
 
   docShell->SetInFrameSwap(false);
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvHandleAccessKey(const WidgetKeyboardEvent& aEvent,
                               nsTArray<uint32_t>&& aCharCodes,
                               const int32_t& aModifierMask)
@@ -2231,10 +2145,10 @@ TabChild::RecvHandleAccessKey(const WidgetKeyboardEvent& aEvent,
     }
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvAudioChannelChangeNotification(const uint32_t& aAudioChannel,
                                              const float& aVolume,
                                              const bool& aMuted)
@@ -2252,10 +2166,10 @@ TabChild::RecvAudioChannelChangeNotification(const uint32_t& aAudioChannel,
                                   aMuted);
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSetUseGlobalHistory(const bool& aUse)
 {
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
@@ -2266,67 +2180,67 @@ TabChild::RecvSetUseGlobalHistory(const bool& aUse)
     NS_WARNING("Failed to set UseGlobalHistory on TabChild docShell");
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvPrint(const uint64_t& aOuterWindowID, const PrintData& aPrintData)
 {
 #ifdef NS_PRINTING
   nsGlobalWindow* outerWindow =
     nsGlobalWindow::GetOuterWindowWithId(aOuterWindowID);
   if (NS_WARN_IF(!outerWindow)) {
-    return true;
+    return IPC_OK();
   }
 
   nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint =
     do_GetInterface(outerWindow->AsOuter());
   if (NS_WARN_IF(!webBrowserPrint)) {
-    return true;
+    return IPC_OK();
   }
 
   nsCOMPtr<nsIPrintSettingsService> printSettingsSvc =
     do_GetService("@mozilla.org/gfx/printsettings-service;1");
   if (NS_WARN_IF(!printSettingsSvc)) {
-    return true;
+    return IPC_OK();
   }
 
   nsCOMPtr<nsIPrintSettings> printSettings;
   nsresult rv =
     printSettingsSvc->GetNewPrintSettings(getter_AddRefs(printSettings));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return true;
+    return IPC_OK();
   }
 
   nsCOMPtr<nsIPrintSession>  printSession =
     do_CreateInstance("@mozilla.org/gfx/printsession;1", &rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return true;
+    return IPC_OK();
   }
 
   printSettings->SetPrintSession(printSession);
   printSettingsSvc->DeserializeToPrintSettings(aPrintData, printSettings);
   rv = webBrowserPrint->Print(printSettings, nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return true;
+    return IPC_OK();
   }
 
 #endif
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvUpdateNativeWindowHandle(const uintptr_t& aNewHandle)
 {
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
   mNativeWindowHandle = aNewHandle;
-  return true;
+  return IPC_OK();
 #else
-  return false;
+  return IPC_FAIL_NO_REASON(this);
 #endif
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvDestroy()
 {
   MOZ_ASSERT(mDestroyed == false);
@@ -2377,10 +2291,10 @@ TabChild::RecvDestroy()
   nsCOMPtr<nsIRunnable> deleteRunnable = new DelayedDeleteRunnable(this);
   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(deleteRunnable));
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
                                   const bool& aPreserveLayers,
                                   const uint64_t& aLayerObserverEpoch)
@@ -2390,7 +2304,7 @@ TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
   // ensures that we respect the order in which the requests were made and
   // ignore stale requests.
   if (mLayerObserverEpoch >= aLayerObserverEpoch) {
-    return true;
+    return IPC_OK();
   }
   mLayerObserverEpoch = aLayerObserverEpoch;
 
@@ -2429,7 +2343,7 @@ TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
       // updated its epoch). ForcePaintNoOp does that.
       if (IPCOpen()) {
         Unused << SendForcePaintNoOp(aLayerObserverEpoch);
-        return true;
+        return IPC_OK();
       }
     }
 
@@ -2471,10 +2385,10 @@ TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
     MakeHidden();
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvNavigateByKey(const bool& aForward, const bool& aForDocumentNavigation)
 {
   nsIFocusManager* fm = nsFocusManager::GetFocusManager();
@@ -2500,19 +2414,19 @@ TabChild::RecvNavigateByKey(const bool& aForward, const bool& aForDocumentNaviga
     SendRequestFocus(false);
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvHandledWindowedPluginKeyEvent(
             const NativeEventData& aKeyEventData,
             const bool& aIsConsumed)
 {
   if (NS_WARN_IF(!mPuppetWidget)) {
-    return true;
+    return IPC_OK();
   }
   mPuppetWidget->HandledWindowedPluginKeyEvent(aKeyEventData, aIsConsumed);
-  return true;
+  return IPC_OK();
 }
 
 PRenderFrameChild*
@@ -2529,7 +2443,7 @@ TabChild::DeallocPRenderFrameChild(PRenderFrameChild* aFrame)
 }
 
 bool
-TabChild::InitTabChildGlobal(FrameScriptLoading aScriptLoading)
+TabChild::InitTabChildGlobal()
 {
   if (!mGlobal && !mTabChildGlobal) {
     nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
@@ -2553,11 +2467,11 @@ TabChild::InitTabChildGlobal(FrameScriptLoading aScriptLoading)
     root->SetParentTarget(scope);
   }
 
-  if (aScriptLoading != DONT_LOAD_SCRIPTS && !mTriedBrowserInit) {
+  if (!mTriedBrowserInit) {
     mTriedBrowserInit = true;
     // Initialize the child side of the browser element machinery,
     // if appropriate.
-    if (IsMozBrowserOrApp()) {
+    if (IsMozBrowser()) {
       RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
     }
   }
@@ -2565,17 +2479,16 @@ TabChild::InitTabChildGlobal(FrameScriptLoading aScriptLoading)
   return true;
 }
 
-bool
+void
 TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIdentifier,
                              const uint64_t& aLayersId,
                              PRenderFrameChild* aRenderFrame)
 {
     mPuppetWidget->InitIMEState();
 
-    RenderFrameChild* remoteFrame = static_cast<RenderFrameChild*>(aRenderFrame);
-    if (!remoteFrame) {
-        NS_WARNING("failed to construct RenderFrame");
-        return false;
+    if (!aRenderFrame) {
+      NS_WARNING("failed to construct RenderFrame");
+      return;
     }
 
     MOZ_ASSERT(aLayersId != 0);
@@ -2586,8 +2499,7 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
     PCompositorBridgeChild* compositorChild = CompositorBridgeChild::Get();
     if (!compositorChild) {
       NS_WARNING("failed to get CompositorBridgeChild instance");
-      PRenderFrameChild::Send__delete__(remoteFrame);
-      return false;
+      return;
     }
 
     ShadowLayerForwarder* lf =
@@ -2605,26 +2517,15 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       PLayerTransactionChild* shadowManager =
           compositorChild->SendPLayerTransactionConstructor(backends,
                                                             aLayersId, &mTextureFactoryIdentifier, &success);
-      if (!success) {
-        NS_WARNING("failed to properly allocate layer transaction");
-        PRenderFrameChild::Send__delete__(remoteFrame);
-        return false;
+      if (shadowManager && success) {
+        lf->SetShadowManager(shadowManager);
+        lf->IdentifyTextureHost(mTextureFactoryIdentifier);
+        ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
+        gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
       }
-
-      if (!shadowManager) {
-        NS_WARNING("failed to construct LayersChild");
-        // This results in |remoteFrame| being deleted.
-        PRenderFrameChild::Send__delete__(remoteFrame);
-        return false;
-      }
-
-      lf->SetShadowManager(shadowManager);
-      lf->IdentifyTextureHost(mTextureFactoryIdentifier);
-      ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
-      gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
     }
 
-    mRemoteFrame = remoteFrame;
+    mRemoteFrame = static_cast<RenderFrameChild*>(aRenderFrame);
     if (aLayersId != 0) {
       if (!sTabChildren) {
         sTabChildren = new TabChildMap;
@@ -2644,7 +2545,6 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
                                      BEFORE_FIRST_PAINT,
                                      false);
     }
-    return true;
 }
 
 void
@@ -3003,8 +2903,6 @@ TabChild::ReinitRendering()
 void
 TabChild::CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier)
 {
-  gfxPlatform::GetPlatform()->CompositorUpdated();
-
   RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
   ClientLayerManager* clm = lm->AsClientLayerManager();
   MOZ_ASSERT(clm);
@@ -3031,7 +2929,7 @@ TabChild::OnHideTooltip()
     return NS_OK;
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvRequestNotifyAfterRemotePaint()
 {
   // Get the CompositorBridgeChild instance for this content thread.
@@ -3041,10 +2939,10 @@ TabChild::RecvRequestNotifyAfterRemotePaint()
   // message that it should forward it us so that we can bounce it to our
   // RenderFrameParent.
   compositor->RequestNotifyAfterRemotePaint(this);
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvUIResolutionChanged(const float& aDpi,
                                   const int32_t& aRounding,
                                   const double& aScale)
@@ -3075,10 +2973,10 @@ TabChild::RecvUIResolutionChanged(const float& aDpi,
                                 nsIBaseWindow::eRepaint);
   }
 
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvThemeChanged(nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache)
 {
   LookAndFeel::SetIntCache(aLookAndFeelIntCache);
@@ -3090,14 +2988,14 @@ TabChild::RecvThemeChanged(nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache)
       presContext->ThemeChanged();
     }
   }
-  return true;
+  return IPC_OK();
 }
 
-bool
+mozilla::ipc::IPCResult
 TabChild::RecvSetFreshProcess()
 {
   mIsFreshProcess = true;
-  return true;
+  return IPC_OK();
 }
 
 mozilla::plugins::PPluginWidgetChild*

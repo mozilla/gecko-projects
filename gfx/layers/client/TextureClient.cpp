@@ -111,7 +111,7 @@ public:
   , mOwnerCalledDestroy(false)
   {}
 
-  bool Recv__delete__() override { return true; }
+  mozilla::ipc::IPCResult Recv__delete__() override { return IPC_OK(); }
 
   LayersIPCChannel* GetAllocator() { return mTextureForwarder; }
 
@@ -392,7 +392,7 @@ DeallocateTextureClient(TextureDeallocParams params)
     // ..except if the lovely mWorkaroundAnnoyingSharedSurfaceOwnershipIssues member
     // is set to true. In this case we are in a special situation where this
     // TextureClient is in wrapped into another TextureClient which assumes it owns
-    // our data. This is specific to the gralloc SharedSurface.
+    // our data.
     bool shouldDeallocate = !params.workAroundSharedSurfaceOwnershipIssue;
     DestroyTextureData(params.data, params.allocator,
                        shouldDeallocate,
@@ -851,6 +851,11 @@ bool
 TextureClient::InitIPDLActor(CompositableForwarder* aForwarder)
 {
   MOZ_ASSERT(aForwarder && aForwarder->GetTextureForwarder()->GetMessageLoop() == mAllocator->GetMessageLoop());
+
+  if (mActor && !mActor->IPCOpen()) {
+    return false;
+  }
+
   if (mActor && !mActor->mDestroyed) {
     CompositableForwarder* currentFwd = mActor->mCompositableForwarder;
     TextureForwarder* currentTexFwd = mActor->mTextureForwarder;
@@ -1182,7 +1187,6 @@ TextureClient::CreateForRawBufferAccess(LayersIPCChannel* aAllocator,
                                         TextureAllocationFlags aAllocFlags)
 {
   // also test the validity of aAllocator
-  MOZ_ASSERT(aAllocator && aAllocator->IPCOpen());
   if (!aAllocator || !aAllocator->IPCOpen()) {
     return nullptr;
   }
@@ -1220,7 +1224,6 @@ TextureClient::CreateForYCbCr(KnowsCompositor* aAllocator,
                               YUVColorSpace aYUVColorSpace,
                               TextureFlags aTextureFlags)
 {
-  MOZ_ASSERT(!aAllocator || aAllocator->GetLayersIPCActor()->IPCOpen());
   if (!aAllocator || !aAllocator->GetLayersIPCActor()->IPCOpen()) {
     return nullptr;
   }
@@ -1247,8 +1250,6 @@ TextureClient::CreateForYCbCrWithBufferSize(KnowsCompositor* aAllocator,
                                             YUVColorSpace aYUVColorSpace,
                                             TextureFlags aTextureFlags)
 {
-  // also test the validity of aAllocator
-  MOZ_ASSERT(!aAllocator || aAllocator->GetLayersIPCActor()->IPCOpen());
   if (!aAllocator || !aAllocator->GetLayersIPCActor()->IPCOpen()) {
     return nullptr;
   }

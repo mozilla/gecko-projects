@@ -125,7 +125,6 @@ var NetMonitorView = {
     if (!Prefs.statistics) {
       $("#request-menu-context-perf").hidden = true;
       $("#notice-perf-message").hidden = true;
-      $("#requests-menu-network-summary-button").hidden = true;
     }
   },
 
@@ -171,10 +170,10 @@ var NetMonitorView = {
 
     if (flags.visible) {
       this._body.classList.remove("pane-collapsed");
-      gStore.dispatch(Actions.showSidebar(true));
+      gStore.dispatch(Actions.openSidebar(true));
     } else {
       this._body.classList.add("pane-collapsed");
-      gStore.dispatch(Actions.showSidebar(false));
+      gStore.dispatch(Actions.openSidebar(false));
     }
 
     if (tabIndex !== undefined) {
@@ -233,7 +232,7 @@ var NetMonitorView = {
         // • The response content size and request total time are necessary for
         // populating the statistics view.
         // • The response mime type is used for categorization.
-        yield whenDataAvailable(requestsView.attachments, [
+        yield whenDataAvailable(requestsView, [
           "responseHeaders", "status", "contentSize", "mimeType", "totalTime"
         ]);
       } catch (ex) {
@@ -1190,18 +1189,19 @@ var $all = (selector, target = document) => target.querySelectorAll(selector);
  * Makes sure certain properties are available on all objects in a data store.
  *
  * @param array dataStore
- *        A list of objects for which to check the availability of properties.
+ *        The request view object from which to fetch the item list.
  * @param array mandatoryFields
  *        A list of strings representing properties of objects in dataStore.
  * @return object
  *         A promise resolved when all objects in dataStore contain the
  *         properties defined in mandatoryFields.
  */
-function whenDataAvailable(dataStore, mandatoryFields) {
+function whenDataAvailable(requestsView, mandatoryFields) {
   let deferred = promise.defer();
 
   let interval = setInterval(() => {
-    if (dataStore.every(item => {
+    const { attachments } = requestsView;
+    if (attachments.length > 0 && attachments.every(item => {
       return mandatoryFields.every(field => field in item);
     })) {
       clearInterval(interval);
