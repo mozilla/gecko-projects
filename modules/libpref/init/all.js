@@ -795,7 +795,6 @@ pref("gfx.canvas.skiagl.dynamic-cache", true);
 pref("gfx.text.disable-aa", false);
 
 pref("gfx.work-around-driver-bugs", true);
-pref("gfx.prefer-mesa-llvmpipe", false);
 
 pref("gfx.draw-color-bars", false);
 
@@ -1111,10 +1110,7 @@ pref("print.print_edge_right", 0);
 pref("print.print_edge_bottom", 0);
 
 // Print via the parent process. This is only used when e10s is enabled.
-// For Mac, limit to Nightly.
-#if defined(XP_WIN)
-pref("print.print_via_parent", true);
-#elif defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("print.print_via_parent", true);
 #else
 pref("print.print_via_parent", false);
@@ -4709,6 +4705,7 @@ pref("extensions.webextensions.keepStorageOnUninstall", false);
 pref("extensions.webextensions.keepUuidOnUninstall", false);
 // Redirect basedomain used by identity api
 pref("extensions.webextensions.identity.redirectDomain", "extensions.allizom.org");
+pref("extensions.webextensions.remote", false);
 
 pref("network.buffer.cache.count", 24);
 pref("network.buffer.cache.size",  32768);
@@ -4824,7 +4821,6 @@ pref("dom.mozNetworkStats.enabled", false);
 
 // WebSettings
 pref("dom.mozSettings.enabled", false);
-pref("dom.mozPermissionSettings.enabled", false);
 
 // W3C touch events
 // 0 - disabled, 1 - enabled, 2 - autodetect
