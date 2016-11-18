@@ -57,6 +57,7 @@ jobs:
             actions: [clone-locales list-locales setup repack submit-to-balrog summary]
             config:
                 - single_locale/tc_linux32.py
+                - taskcluster_nightly.py
             options:
                 - environment-config=single_locale/production.py
                 - branch-config=single_locale/{project}.py
@@ -84,6 +85,7 @@ jobs:
             actions: [clone-locales list-locales setup repack submit-to-balrog summary]
             config:
                 - single_locale/tc_linux64.py
+                - taskcluster_nightly.py
             options:
                 - environment-config=single_locale/production.py
                 - branch-config=single_locale/{project}.py
