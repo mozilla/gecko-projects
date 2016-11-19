@@ -39,8 +39,8 @@ def fill_template(config, tasks):
             treeherder.setdefault('platform',"{}/opt".format("linux32"))
         else:
             treeherder.setdefault('platform',
-                              "{}/opt".format(build_platform).replace("-nightly",
-                                                                      ""))
+                                  "{}/opt".format(build_platform).replace("-nightly",
+                                  ""))
         treeherder.setdefault('tier', 2)
         treeherder.setdefault('kind', 'build')
         task['treeherder'] = treeherder
