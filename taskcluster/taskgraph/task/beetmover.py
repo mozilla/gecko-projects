@@ -19,12 +19,13 @@ class BeetmoverTask(transform.TransformTask):
 
     @classmethod
     def get_inputs(cls, kind, path, config, params, loaded_tasks):
-        if config.get('kind-dependencies', []) != ["build", "build-signing"]:
+        if config.get('kind-dependencies', []) != ["build", "build-signing"] and \
+           config.get('kind-dependencies', []) != ["nightly-l10n", "nightly-l10n-signing"]:
             raise Exception("Beetmover kinds must depend on builds or signing builds")
         for task in loaded_tasks:
             if not task.attributes.get('nightly'):
                 continue
-            if task.kind != "build-signing" and task.kind != "build":
+            if task.kind not in config.get('kind-dependencies'):
                 continue
             beetmover_task = {}
             beetmover_task['dependent-task'] = task

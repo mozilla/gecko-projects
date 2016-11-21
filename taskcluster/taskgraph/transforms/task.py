@@ -309,6 +309,9 @@ task_description_schema = Schema({
 
         # beetmover template key
         Required('update_manifest'): bool,
+
+        # locale key, if this is a locale beetmover job
+        Optional('locale'): basestring,
     }, {
         Required('implementation'): 'balrog',
 
@@ -344,6 +347,7 @@ GROUP_NAMES = {
     'tc-X': 'Xpcshell tests executed by TaskCluster',
     'tc-X-e10s': 'Xpcshell tests executed by TaskCluster with e10s',
     'tc-L10n': 'Localised Repacks executed by Taskcluster',
+    'tc-BM-L10n': 'Beetmover for locales executed by Taskcluster',
     'tc-Up': 'Balrog submission of updates, executed by Taskcluster',
     'Aries': 'Aries Device Image',
     'Nexus 5-L': 'Nexus 5-L Device Image',
@@ -515,8 +519,10 @@ def build_beetmover_payload(config, task, task_def):
         'upload_date': config.params['build_date'],
         'taskid_to_beetmove': worker['taskid_to_beetmove'],
         'taskid_of_manifest': worker['taskid_of_manifest'],
-        'update_manifest': worker['update_manifest']
+        'update_manifest': worker['update_manifest'],
     }
+    if worker.get('locale'):
+        task_def['payload']['locale'] = worker['locale']
 
 
 @payload_builder('balrog')

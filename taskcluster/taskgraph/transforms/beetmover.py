@@ -41,6 +41,9 @@ beetmover_description_schema = Schema({
     # taskcluster/taskgraph/transforms/task.py for the schema details, and the
     # below transforms for defaults of various values.
     Optional('treeherder'): task_description_schema['treeherder'],
+
+    # locale is passed only for l10n beetmoving
+    Optional('locale'): basestring,
 })
 
 
@@ -80,10 +83,23 @@ def make_task_description(config, jobs):
         dependencies = {job['dependent-task'].kind: dep_job.label}
         # taskid_of_manifest always refers to the unsigned task
         if "signing" in dependent_kind:
-            taskid_of_manifest = "<build>"
+            if len(dep_job.dependencies) > 1:
+                raise NotImplementedError(
+                    "can't beetmove a signing task with multiple dependencies")
+            dep_name = dep_job.dependencies.keys()[0]
+            taskid_of_manifest = "<" + str(dep_name) + ">"
             update_manifest = True
             signing_dependencies = dep_job.dependencies
             dependencies.update(signing_dependencies)
+
+        worker = {'implementation': 'beetmover',
+                  'taskid_to_beetmove': {"task-reference":
+                                         taskid_to_beetmove},
+                  'taskid_of_manifest': {"task-reference":
+                                         taskid_of_manifest},
+                  'update_manifest': update_manifest}
+        if job.get('locale'):
+            worker['locale'] = job['locale']
 
         task = {
             'label': label,
@@ -91,12 +107,7 @@ def make_task_description(config, jobs):
                 dep_job.task["metadata"]["description"]),
             # do we have to define worker type somewhere?
             'worker-type': 'scriptworker-prov-v1/beetmoverworker-v1',
-            'worker': {'implementation': 'beetmover',
-                       'taskid_to_beetmove': {"task-reference":
-                                              taskid_to_beetmove},
-                       'taskid_of_manifest': {"task-reference":
-                                              taskid_of_manifest},
-                       'update_manifest': update_manifest},
+            'worker': worker,
             'scopes': [],
             'dependencies': dependencies,
             'attributes': {

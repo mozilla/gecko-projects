@@ -93,6 +93,15 @@ def make_task_description(config, jobs):
 
         label = job.get('label', "{}-signing".format(dep_job))
 
+        attributes = {
+                'nightly': dep_job.attributes.get('nightly', False),
+                'build_platform': dep_job.attributes.get('build_platform'),
+                'build_type': dep_job.attributes.get('build_type'),
+        }
+        if dep_job.attributes.get('chunk_locales'):
+            # Used for l10n attribute passthrough
+            attributes['chunk_locales'] = dep_job.attributes.get('chunk_locales')
+
         task = {
             'label': label,
             'description': "{} Signing".format(
@@ -104,11 +113,7 @@ def make_task_description(config, jobs):
             'scopes': ["project:releng:signing:cert:nightly-signing"] + \
                     signing_format_scopes,
             'dependencies': {job['depname']: dep_job.label},
-            'attributes': {
-                'nightly': dep_job.attributes.get('nightly', False),
-                'build_platform': dep_job.attributes.get('build_platform'),
-                'build_type': dep_job.attributes.get('build_type'),
-            },
+            'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
         }
