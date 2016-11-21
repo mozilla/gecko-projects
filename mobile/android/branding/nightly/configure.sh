@@ -3,7 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 ANDROID_PACKAGE_NAME=org.mozilla.fennec_date
-MOZ_APP_DISPLAYNAME=Date Nightly
+MOZ_APP_DISPLAYNAME="Date Nightly"
 MOZ_UPDATER=1
 MOZ_ANDROID_ANR_REPORTER=1
 MOZ_ANDROID_SHARED_ID=org.mozilla.fennec.sharedID
