@@ -15,12 +15,13 @@ class BalrogTask(transform.TransformTask):
 
     @classmethod
     def get_inputs(cls, kind, path, config, params, loaded_tasks):
-        if config.get('kind-dependencies', []) != ["beetmover"]:
+        if config.get('kind-dependencies', []) != ["beetmover"] and \
+           config.get('kind-dependencies', []) != ["beetmover-l10n"]:
             raise Exception("Balrog kinds must depend on beetmover kinds")
         for task in loaded_tasks:
             if not task.attributes.get('nightly'):
                 continue
-            if task.kind != "beetmover":
+            if task.kind not in config.get('kind-dependencies', []):
                 continue
             beetmover_task = {}
             beetmover_task['dependent-task'] = task
