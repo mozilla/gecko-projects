@@ -42,6 +42,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
 XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
                                   "resource://gre/modules/Downloads.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "EventDispatcher",
+                                  "resource://gre/modules/Messaging.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "Messaging",
                                   "resource://gre/modules/Messaging.jsm");
 
@@ -331,6 +334,9 @@ const kMaxHistoryListSize = 50;
 function InitLater(fn, object, name) {
   return DelayedInit.schedule(fn, object, name, 15000 /* 15s max wait */);
 }
+
+XPCOMUtils.defineLazyGetter(this, "GlobalEventDispatcher", () => EventDispatcher.instance);
+XPCOMUtils.defineLazyGetter(this, "WindowEventDispatcher", () => EventDispatcher.for(window));
 
 var BrowserApp = {
   _tabs: [],
@@ -4397,14 +4403,14 @@ Tab.prototype = {
     const mediaDurationThreshold = 1.0;
 
     let audioElements = this.browser.contentDocument.getElementsByTagName("audio");
-    for each (let audio in audioElements) {
+    for (let audio of audioElements) {
       if (audio.paused == inactive && audio.duration > mediaDurationThreshold) {
         return true;
       }
     }
 
     let videoElements = this.browser.contentDocument.getElementsByTagName("video");
-    for each (let video in videoElements) {
+    for (let video of videoElements) {
       if (video.paused == inactive && video.duration > mediaDurationThreshold) {
         return true;
       }

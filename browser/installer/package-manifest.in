@@ -527,8 +527,8 @@
 
 @RESPATH@/chrome/marionette@JAREXT@
 @RESPATH@/chrome/marionette.manifest
-@RESPATH@/components/MarionetteComponents.manifest
-@RESPATH@/components/marionettecomponent.js
+@RESPATH@/components/marionette.manifest
+@RESPATH@/components/marionette.js
 
 #ifdef MOZ_WEBSPEECH
 @RESPATH@/components/dom_webspeechsynth.xpt
@@ -775,6 +775,7 @@ bin/libfreebl_32int64_3.so
 @BINPATH@/crashreporter.app/
 #else
 @BINPATH@/crashreporter@BIN_SUFFIX@
+@BINPATH@/minidump-analyzer@BIN_SUFFIX@
 @RESPATH@/crashreporter.ini
 #ifdef XP_UNIX
 @RESPATH@/Throbber-small.gif

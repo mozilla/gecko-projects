@@ -259,8 +259,7 @@
   color: HighlightText;
 }
 
-.addengine-item[type=menu][selected],
-.addengine-item[type=menu][open] {
+.addengine-item[type=menu][selected] {
   color: inherit;
   background-color: var(--arrowpanel-dimmed-further);
 }
@@ -336,6 +335,6 @@
 
 .search-setting-button-compact > .button-box > .button-icon {
   list-style-image: url("chrome://browser/skin/gear.svg");
-  filter: url(chrome://browser/skin/filters.svg#fill);
+  filter: url(chrome://global/skin/filters.svg#fill);
   fill: currentColor;
 }

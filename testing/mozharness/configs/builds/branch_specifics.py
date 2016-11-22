@@ -75,16 +75,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'linux64-add-on-devel': {
@@ -155,16 +149,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'linux64-add-on-devel': {
@@ -236,16 +224,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'macosx64-debug': {
@@ -328,16 +310,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'macosx64': {
@@ -417,16 +393,10 @@ config = {
             'linux64-asan': {
                 'update_channel': 'default',
             },
-            'linux64-cc': {
-                'update_channel': 'default',
-            },
             'linux64-st-an-debug': {
                 'update_channel': 'default',
             },
             'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'linux64-tsan': {
                 'update_channel': 'default',
             },
             'macosx64': {

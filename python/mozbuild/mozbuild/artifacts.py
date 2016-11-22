@@ -251,6 +251,7 @@ class LinuxArtifactJob(ArtifactJob):
         'firefox/dependentlibs.list',
         'firefox/firefox',
         'firefox/firefox-bin',
+        'firefox/minidump-analyzer',
         'firefox/platform.ini',
         'firefox/plugin-container',
         'firefox/updater',
@@ -320,6 +321,7 @@ class MacArtifactJob(ArtifactJob):
             # These get copied into dist/bin without the path, so "root/a/b/c" -> "dist/bin/c".
             paths_no_keep_path = ('Contents/MacOS', [
                 'crashreporter.app/Contents/MacOS/crashreporter',
+                'crashreporter.app/Contents/MacOS/minidump-analyzer',
                 'firefox',
                 'firefox-bin',
                 'libfreebl3.dylib',
@@ -434,7 +436,7 @@ class WinArtifactJob(ArtifactJob):
 # https://tools.taskcluster.net/index/artifacts/#gecko.v2.mozilla-central.latest/gecko.v2.mozilla-central.latest
 # The values correpsond to a pair of (<package regex>, <test archive regex>).
 JOB_DETAILS = {
-    'android-api-15-opt': (AndroidArtifactJob, ('public/build/target.apk',
+    'android-api-15-opt': (AndroidArtifactJob, ('(public/build/fennec-(.*)\.android-arm.apk|public/build/target.apk)',
                                                 None)),
     'android-api-15-debug': (AndroidArtifactJob, ('public/build/target.apk',
                                                   None)),

@@ -437,7 +437,6 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
   , mPreviousDecodedKeyframeTime_us(sNoPreviousDecodedKeyframe)
   , mInitDone(false)
   , mTrackDemuxersMayBlock(false)
-  , mDemuxOnly(false)
   , mSeekScheduled(false)
   , mVideoFrameContainer(aVideoFrameContainer)
   , mDecoderFactory(new DecoderFactory(this))
@@ -732,10 +731,50 @@ MediaFormatReader::OnDemuxerInitDone(nsresult)
     return;
   }
 
+  mTags = Move(tags);
   mInitDone = true;
+
+  // Try to get the start time.
+  // For MSE case, the start time of each track is assumed to be 0.
+  // For others, we must demux the first sample to know the start time for each
+  // track.
+  if (ForceZeroStartTime()) {
+    mAudio.mFirstDemuxedSampleTime.emplace(TimeUnit::FromMicroseconds(0));
+    mVideo.mFirstDemuxedSampleTime.emplace(TimeUnit::FromMicroseconds(0));
+  } else {
+    if (HasAudio()) {
+      RequestDemuxSamples(TrackInfo::kAudioTrack);
+    }
+
+    if (HasVideo()) {
+      RequestDemuxSamples(TrackInfo::kVideoTrack);
+    }
+  }
+
+  MaybeResolveMetadataPromise();
+}
+
+void
+MediaFormatReader::MaybeResolveMetadataPromise()
+{
+  MOZ_ASSERT(OnTaskQueue());
+
+  if ((HasAudio() && mAudio.mFirstDemuxedSampleTime.isNothing()) ||
+      (HasVideo() && mVideo.mFirstDemuxedSampleTime.isNothing())) {
+    return;
+  }
+
+  TimeUnit startTime =
+    std::min(mAudio.mFirstDemuxedSampleTime.refOr(TimeUnit::FromInfinity()),
+             mVideo.mFirstDemuxedSampleTime.refOr(TimeUnit::FromInfinity()));
+
+  if (!startTime.IsInfinite()) {
+    mInfo.mStartTime = startTime; // mInfo.mStartTime is initialized to 0.
+  }
+
   RefPtr<MetadataHolder> metadata = new MetadataHolder();
   metadata->mInfo = mInfo;
-  metadata->mTags = tags->Count() ? tags.release() : nullptr;
+  metadata->mTags = mTags->Count() ? mTags.release() : nullptr;
   mMetadataPromise.Resolve(metadata, __func__);
 }
 
@@ -863,10 +902,22 @@ MediaFormatReader::OnDemuxFailed(TrackType aTrack, const MediaResult& aError)
 void
 MediaFormatReader::DoDemuxVideo()
 {
-  mVideo.mDemuxRequest.Begin(mVideo.mTrackDemuxer->GetSamples(1)
-                      ->Then(OwnerThread(), __func__, this,
-                             &MediaFormatReader::OnVideoDemuxCompleted,
-                             &MediaFormatReader::OnVideoDemuxFailed));
+  auto p = mVideo.mTrackDemuxer->GetSamples(1);
+
+  if (mVideo.mFirstDemuxedSampleTime.isNothing()) {
+    RefPtr<MediaFormatReader> self = this;
+    p = p->Then(OwnerThread(), __func__,
+                [self] (RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples) {
+                  self->OnFirstDemuxCompleted(TrackInfo::kVideoTrack, aSamples);
+                },
+                [self] (const MediaResult& aError) {
+                  self->OnFirstDemuxFailed(TrackInfo::kVideoTrack, aError);
+                })->CompletionPromise();
+  }
+
+  mVideo.mDemuxRequest.Begin(p->Then(OwnerThread(), __func__, this,
+                                     &MediaFormatReader::OnVideoDemuxCompleted,
+                                     &MediaFormatReader::OnVideoDemuxFailed));
 }
 
 void
@@ -917,10 +968,22 @@ MediaFormatReader::RequestAudioData()
 void
 MediaFormatReader::DoDemuxAudio()
 {
-  mAudio.mDemuxRequest.Begin(mAudio.mTrackDemuxer->GetSamples(1)
-                      ->Then(OwnerThread(), __func__, this,
-                             &MediaFormatReader::OnAudioDemuxCompleted,
-                             &MediaFormatReader::OnAudioDemuxFailed));
+  auto p = mAudio.mTrackDemuxer->GetSamples(1);
+
+  if (mAudio.mFirstDemuxedSampleTime.isNothing()) {
+    RefPtr<MediaFormatReader> self = this;
+    p = p->Then(OwnerThread(), __func__,
+                [self] (RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples) {
+                  self->OnFirstDemuxCompleted(TrackInfo::kAudioTrack, aSamples);
+                },
+                [self] (const MediaResult& aError) {
+                  self->OnFirstDemuxFailed(TrackInfo::kAudioTrack, aError);
+                })->CompletionPromise();
+  }
+
+  mAudio.mDemuxRequest.Begin(p->Then(OwnerThread(), __func__, this,
+                                     &MediaFormatReader::OnAudioDemuxCompleted,
+                                     &MediaFormatReader::OnAudioDemuxFailed));
 }
 
 void
@@ -1204,11 +1267,6 @@ MediaFormatReader::HandleDemuxedSamples(TrackType aTrack,
     return;
   }
 
-  if (!ForceZeroStartTime() && decoder.mFirstDemuxedSampleTime.isNothing()) {
-    decoder.mFirstDemuxedSampleTime.emplace(
-      media::TimeUnit::FromMicroseconds(decoder.mQueuedSamples[0]->mTime));
-  }
-
   LOGV("Giving %s input to decoder", TrackTypeToStr(aTrack));
 
   // Decode all our demuxed frames.
@@ -1269,18 +1327,9 @@ MediaFormatReader::HandleDemuxedSamples(TrackType aTrack,
       aA.mStats.mParsedFrames++;
     }
 
-    if (mDemuxOnly) {
-      ReturnOutput(sample, aTrack);
-    } else {
-      DecodeDemuxedSamples(aTrack, sample);
-    }
+    DecodeDemuxedSamples(aTrack, sample);
 
     decoder.mQueuedSamples.RemoveElementAt(0);
-    if (mDemuxOnly) {
-      // If demuxed-only case, ReturnOutput will resolve with one demuxed data.
-      // Then we should stop doing the iteration.
-      return;
-    }
     samplesPending = true;
   }
 }
@@ -1581,29 +1630,25 @@ MediaFormatReader::ReturnOutput(MediaData* aData, TrackType aTrack)
       aData->mTime, aData->GetEndTime());
 
   if (aTrack == TrackInfo::kAudioTrack) {
-    if (aData->mType != MediaData::RAW_DATA) {
-      AudioData* audioData = static_cast<AudioData*>(aData);
+    AudioData* audioData = static_cast<AudioData*>(aData);
 
-      if (audioData->mChannels != mInfo.mAudio.mChannels ||
-          audioData->mRate != mInfo.mAudio.mRate) {
-        LOG("change of audio format (rate:%d->%d). "
-            "This is an unsupported configuration",
-            mInfo.mAudio.mRate, audioData->mRate);
-        mInfo.mAudio.mRate = audioData->mRate;
-        mInfo.mAudio.mChannels = audioData->mChannels;
-      }
+    if (audioData->mChannels != mInfo.mAudio.mChannels ||
+        audioData->mRate != mInfo.mAudio.mRate) {
+      LOG("change of audio format (rate:%d->%d). "
+          "This is an unsupported configuration",
+          mInfo.mAudio.mRate, audioData->mRate);
+      mInfo.mAudio.mRate = audioData->mRate;
+      mInfo.mAudio.mChannels = audioData->mChannels;
     }
     mAudio.ResolvePromise(aData, __func__);
   } else if (aTrack == TrackInfo::kVideoTrack) {
-    if (aData->mType != MediaData::RAW_DATA) {
-      VideoData* videoData = static_cast<VideoData*>(aData);
+    VideoData* videoData = static_cast<VideoData*>(aData);
 
-      if (videoData->mDisplay != mInfo.mVideo.mDisplay) {
-        LOG("change of video display size (%dx%d->%dx%d)",
-            mInfo.mVideo.mDisplay.width, mInfo.mVideo.mDisplay.height,
-            videoData->mDisplay.width, videoData->mDisplay.height);
-        mInfo.mVideo.mDisplay = videoData->mDisplay;
-      }
+    if (videoData->mDisplay != mInfo.mVideo.mDisplay) {
+      LOG("change of video display size (%dx%d->%dx%d)",
+          mInfo.mVideo.mDisplay.width, mInfo.mVideo.mDisplay.height,
+          videoData->mDisplay.width, videoData->mDisplay.height);
+      mInfo.mVideo.mDisplay = videoData->mDisplay;
     }
     mVideo.ResolvePromise(aData, __func__);
   }
@@ -1901,30 +1946,8 @@ MediaFormatReader::SetSeekTarget(const SeekTarget& aTarget)
 {
   MOZ_ASSERT(OnTaskQueue());
 
-  SeekTarget target = aTarget;
-
-  // Transform the seek target time to the demuxer timeline.
-  if (!ForceZeroStartTime()) {
-    target.SetTime(aTarget.GetTime() - TimeUnit::FromMicroseconds(StartTime())
-                   + DemuxStartTime());
-  }
-
-  mOriginalSeekTarget = target;
-  mFallbackSeekTime = mPendingSeekTime = Some(target.GetTime());
-}
-
-TimeUnit
-MediaFormatReader::DemuxStartTime()
-{
-  MOZ_ASSERT(OnTaskQueue());
-  MOZ_ASSERT(!ForceZeroStartTime());
-  MOZ_ASSERT(HasAudio() || HasVideo());
-
-  const TimeUnit startTime =
-    std::min(mAudio.mFirstDemuxedSampleTime.refOr(TimeUnit::FromInfinity()),
-             mVideo.mFirstDemuxedSampleTime.refOr(TimeUnit::FromInfinity()));
-
-  return startTime.IsInfinite() ? TimeUnit::FromMicroseconds(0) : startTime;
+  mOriginalSeekTarget = aTarget;
+  mFallbackSeekTime = mPendingSeekTime = Some(aTarget.GetTime());
 }
 
 void
@@ -2338,6 +2361,39 @@ MediaFormatReader::SetBlankDecode(TrackType aTrack, bool aIsBlankDecode)
   ScheduleUpdate(TrackInfo::kVideoTrack);
 
   return;
+}
+
+void
+MediaFormatReader::OnFirstDemuxCompleted(TrackInfo::TrackType aType,
+                                         RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples)
+{
+  MOZ_ASSERT(OnTaskQueue());
+
+  if (mShutdown) {
+    return;
+  }
+
+  auto& decoder = GetDecoderData(aType);
+  MOZ_ASSERT(decoder.mFirstDemuxedSampleTime.isNothing());
+  decoder.mFirstDemuxedSampleTime.emplace(
+    TimeUnit::FromMicroseconds(aSamples->mSamples[0]->mTime));
+  MaybeResolveMetadataPromise();
+}
+
+void
+MediaFormatReader::OnFirstDemuxFailed(TrackInfo::TrackType aType,
+                                      const MediaResult& aError)
+{
+  MOZ_ASSERT(OnTaskQueue());
+
+  if (mShutdown) {
+    return;
+  }
+
+  auto& decoder = GetDecoderData(aType);
+  MOZ_ASSERT(decoder.mFirstDemuxedSampleTime.isNothing());
+  decoder.mFirstDemuxedSampleTime.emplace(TimeUnit::FromInfinity());
+  MaybeResolveMetadataPromise();
 }
 
 } // namespace mozilla
