@@ -14,15 +14,6 @@ transforms = TransformSequence()
 
 
 @transforms.add
-def ignore_android_moving(config, jobs):
-    for job in jobs:
-        if 'android' in job['dependent-task'].label:
-            # skip android until we general balrog_props.json for it
-            continue
-        yield job
-
-
-@transforms.add
 def make_signing_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
