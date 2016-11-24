@@ -25,6 +25,7 @@ JOB_NAME_WHITELIST = set([
     'android-l10n-opt',
     'android-nightly-l10n-opt',
     'android-x86-opt',
+    'android-x86-nightly-opt',
     'aries-debug',
     'aries-eng-opt',
     'browser-haz-debug',
