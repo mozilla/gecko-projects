@@ -1254,7 +1254,7 @@ ssl3_VerifySignedHashes(sslSocket *ss, SSLSignatureScheme scheme, SSL3Hashes *ha
 {
     SECKEYPublicKey *key;
     SECItem *signature = NULL;
-    SECStatus rv;
+    SECStatus rv = SECFailure;
     SECItem hashItem;
     SECOidTag encAlg;
     SECOidTag hashAlg;
@@ -1297,7 +1297,7 @@ ssl3_VerifySignedHashes(sslSocket *ss, SSLSignatureScheme scheme, SSL3Hashes *ha
                 signature = DSAU_DecodeDerSigToLen(buf, SECKEY_SignatureLen(key));
                 if (!signature) {
                     PORT_SetError(SSL_ERROR_BAD_HANDSHAKE_HASH_VALUE);
-                    return SECFailure;
+                    goto loser;
                 }
                 buf = signature;
             }
@@ -1328,9 +1328,8 @@ ssl3_VerifySignedHashes(sslSocket *ss, SSLSignatureScheme scheme, SSL3Hashes *ha
             break;
 
         default:
-            SECKEY_DestroyPublicKey(key);
             PORT_SetError(SEC_ERROR_UNSUPPORTED_KEYALG);
-            return SECFailure;
+            goto loser;
     }
 
     PRINT_BUF(60, (NULL, "hash(es) to be verified",
@@ -1365,20 +1364,22 @@ ssl3_VerifySignedHashes(sslSocket *ss, SSLSignatureScheme scheme, SSL3Hashes *ha
         rv = VFY_VerifyDigestDirect(&hashItem, key, buf, encAlg, hashAlg,
                                     pwArg);
     }
-    SECKEY_DestroyPublicKey(key);
     if (signature) {
         SECITEM_FreeItem(signature, PR_TRUE);
     }
-#ifdef UNSAFE_FUZZER_MODE
-    rv = SECSuccess;
-    PORT_SetError(0);
-#endif
     if (rv != SECSuccess) {
         ssl_MapLowLevelError(SSL_ERROR_BAD_HANDSHAKE_HASH_VALUE);
     }
     if (!ss->sec.isServer) {
         ss->sec.signatureScheme = scheme;
     }
+
+loser:
+    SECKEY_DestroyPublicKey(key);
+#ifdef UNSAFE_FUZZER_MODE
+    rv = SECSuccess;
+    PORT_SetError(0);
+#endif
     return rv;
 }
 
@@ -1623,10 +1624,6 @@ ssl3_SetupPendingCipherSpec(sslSocket *ss)
     pwSpec->compressContext = NULL;
     pwSpec->decompressContext = NULL;
 
-    if (ss->version >= SSL_LIBRARY_VERSION_TLS_1_3) {
-        PORT_Assert(ss->ssl3.hs.kea_def->ephemeral);
-        PORT_Assert(pwSpec->cipher_def->type == type_aead);
-    }
     ssl_ReleaseSpecWriteLock(ss); /*******************************/
     return SECSuccess;
 }
@@ -6504,14 +6501,13 @@ ssl3_SendCertificateVerify(sslSocket *ss, SECKEYPrivateKey *privKey)
                                        hashAlg, &hashes);
         if (rv != SECSuccess) {
             ssl_MapLowLevelError(SSL_ERROR_DIGEST_FAILURE);
-            goto done;
         }
     } else {
         rv = ssl3_ComputeHandshakeHashes(ss, ss->ssl3.pwSpec, &hashes, 0);
     }
     ssl_ReleaseSpecReadLock(ss);
     if (rv != SECSuccess) {
-        goto done; /* err code was set by ssl3_ComputeHandshakeHashes */
+        goto done; /* err code was set by ssl3_ComputeHandshakeHash(es) */
     }
 
     isTLS12 = (PRBool)(ss->version == SSL_LIBRARY_VERSION_TLS_1_2);
@@ -9453,10 +9449,7 @@ ssl3_SendDHServerKeyExchange(sslSocket *ss)
     if (rv != SECSuccess) {
         goto loser; /* ssl3_SignHashes has set err. */
     }
-    if (signed_hash.data == NULL) {
-        PORT_SetError(SSL_ERROR_SERVER_KEY_EXCHANGE_FAILURE);
-        goto loser;
-    }
+
     length = 2 + pubKey->u.dh.prime.len +
              2 + pubKey->u.dh.base.len +
              2 + pubKey->u.dh.prime.len +
@@ -11024,13 +11017,10 @@ ssl3_ComputeTLSFinished(sslSocket *ss, ssl3CipherSpec *spec,
     PK11Context *prf_context;
     unsigned int retLen;
 
+    PORT_Assert(spec->master_secret);
     if (!spec->master_secret) {
-        const char *label = isServer ? "server finished" : "client finished";
-        unsigned int len = 15;
-        HASH_HashType hashType = ssl3_GetTls12HashType(ss);
-        return ssl3_TLSPRFWithMasterSecret(spec, label, len, hashes->u.raw,
-                                           hashes->len, tlsFinished->verify_data,
-                                           sizeof tlsFinished->verify_data, hashType);
+        PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+        return SECFailure;
     }
 
     if (spec->version < SSL_LIBRARY_VERSION_TLS_1_2) {
@@ -11063,9 +11053,10 @@ ssl3_ComputeTLSFinished(sslSocket *ss, ssl3CipherSpec *spec,
  * ss->ssl3.crSpec).
  */
 SECStatus
-ssl3_TLSPRFWithMasterSecret(ssl3CipherSpec *spec, const char *label,
-                            unsigned int labelLen, const unsigned char *val, unsigned int valLen,
-                            unsigned char *out, unsigned int outLen, HASH_HashType tls12HashType)
+ssl3_TLSPRFWithMasterSecret(sslSocket *ss, ssl3CipherSpec *spec,
+                            const char *label, unsigned int labelLen,
+                            const unsigned char *val, unsigned int valLen,
+                            unsigned char *out, unsigned int outLen)
 {
     SECStatus rv = SECSuccess;
 
@@ -11076,6 +11067,12 @@ ssl3_TLSPRFWithMasterSecret(ssl3CipherSpec *spec, const char *label,
         unsigned int retLen;
 
         if (spec->version >= SSL_LIBRARY_VERSION_TLS_1_2) {
+            /* Bug 1312976 non-SHA256 exporters are broken. */
+            if (ssl3_GetPrfHashMechanism(ss) != CKM_SHA256) {
+                PORT_Assert(0);
+                PORT_SetError(SEC_ERROR_LIBRARY_FAILURE);
+                return SECFailure;
+            }
             mech = CKM_NSS_TLS_PRF_GENERAL_SHA256;
         }
         prf_context = PK11_CreateContextBySymKey(mech, CKA_SIGN,
@@ -13193,6 +13190,9 @@ ssl3_DestroySSL3Info(sslSocket *ss)
     if (ss->ssl3.clientCertChain != NULL) {
         CERT_DestroyCertificateList(ss->ssl3.clientCertChain);
         ss->ssl3.clientCertChain = NULL;
+    }
+    if (ss->ssl3.ca_list) {
+        CERT_FreeDistNames(ss->ssl3.ca_list);
     }
 
     /* clean up handshake */

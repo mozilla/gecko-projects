@@ -64,6 +64,16 @@ struct nsStyleDisplay;
   void Gecko_Release##name_##ArbitraryThread(ThreadSafe##name_##Holder* aPtr) \
   { NS_RELEASE(aPtr); }                                                       \
 
+
+#define DEFINE_ARRAY_TYPE_FOR(type_)                                \
+  struct nsTArrayBorrowed_##type_ {                                 \
+    nsTArray<type_>* mArray;                                        \
+    MOZ_IMPLICIT nsTArrayBorrowed_##type_(nsTArray<type_>* aArray)  \
+      : mArray(aArray) {}                                           \
+  }
+DEFINE_ARRAY_TYPE_FOR(uintptr_t);
+#undef DEFINE_ARRAY_TYPE_FOR
+
 extern "C" {
 
 // Object refcounting.
@@ -128,7 +138,7 @@ nsIAtom* Gecko_GetElementId(RawGeckoElementBorrowed element);
 
 SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_, RawGeckoElementBorrowed)
 SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_Snapshot,
-                                              ServoElementSnapshot*)
+                                              const ServoElementSnapshot*)
 
 #undef SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS
 
@@ -210,17 +220,16 @@ void Gecko_SetNodeFlags(RawGeckoNodeBorrowed node, uint32_t flags);
 void Gecko_UnsetNodeFlags(RawGeckoNodeBorrowed node, uint32_t flags);
 
 // Incremental restyle.
-// TODO: We would avoid a few ffi calls if we decide to make an API like the
-// former CalcAndStoreStyleDifference, but that would effectively mean breaking
-// some safety guarantees in the servo side.
-//
 // Also, we might want a ComputedValues to ComputedValues API for animations?
 // Not if we do them in Gecko...
 nsStyleContext* Gecko_GetStyleContext(RawGeckoNodeBorrowed node,
                                       nsIAtom* aPseudoTagOrNull);
 nsChangeHint Gecko_CalcStyleDifference(nsStyleContext* oldstyle,
                                        ServoComputedValuesBorrowed newstyle);
-void Gecko_StoreStyleDifference(RawGeckoNodeBorrowed node, nsChangeHint change);
+
+// Element snapshot.
+ServoElementSnapshotOwned Gecko_CreateElementSnapshot(RawGeckoElementBorrowed element);
+void Gecko_DropElementSnapshot(ServoElementSnapshotOwned snapshot);
 
 // `array` must be an nsTArray
 // If changing this signature, please update the

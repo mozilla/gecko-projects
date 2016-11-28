@@ -70,10 +70,6 @@ queue.map(task => {
     task.maxRunTime = 7200;
   }
 
-  // Enable TLS 1.3 for every task.
-  task.env = task.env || {};
-  task.env.NSS_ENABLE_TLS_1_3 = "1";
-
   return task;
 });
 
@@ -329,6 +325,21 @@ async function scheduleFuzzing() {
     // Need a privileged docker container to remove this.
     env: {ASAN_OPTIONS: "detect_leaks=0"},
     symbol: "SCert",
+    kind: "test"
+  }));
+
+  queue.scheduleTask(merge(base, {
+    parent: task_build,
+    name: "SPKI",
+    command: [
+      "/bin/bash",
+      "-c",
+      "bin/checkout.sh && nss/automation/taskcluster/scripts/fuzz.sh " +
+        "spki nss/fuzz/corpus/spki -max_total_time=300"
+    ],
+    // Need a privileged docker container to remove this.
+    env: {ASAN_OPTIONS: "detect_leaks=0"},
+    symbol: "SPKI",
     kind: "test"
   }));
 

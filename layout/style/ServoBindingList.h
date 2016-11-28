@@ -18,8 +18,8 @@
  * before including this file.
  */
 
-// Node data
-SERVO_BINDING_FUNC(Servo_Node_ClearNodeData, void, RawGeckoNodeBorrowed node)
+// Element data
+SERVO_BINDING_FUNC(Servo_Element_ClearData, void, RawGeckoElementBorrowed node)
 
 // Styleset and Stylesheet management
 SERVO_BINDING_FUNC(Servo_StyleSheet_Empty, RawServoStyleSheetStrong,
@@ -37,6 +37,8 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_Release, void,
                    RawServoStyleSheetBorrowed sheet)
 SERVO_BINDING_FUNC(Servo_StyleSheet_HasRules, bool,
                    RawServoStyleSheetBorrowed sheet)
+SERVO_BINDING_FUNC(Servo_StyleSheet_GetRules, ServoCssRulesStrong,
+                   RawServoStyleSheetBorrowed sheet)
 SERVO_BINDING_FUNC(Servo_StyleSet_Init, RawServoStyleSetOwned)
 SERVO_BINDING_FUNC(Servo_StyleSet_Drop, void, RawServoStyleSetOwned set)
 SERVO_BINDING_FUNC(Servo_StyleSet_AppendStyleSheet, void,
@@ -48,6 +50,32 @@ SERVO_BINDING_FUNC(Servo_StyleSet_RemoveStyleSheet, void,
 SERVO_BINDING_FUNC(Servo_StyleSet_InsertStyleSheetBefore, void,
                    RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet,
                    RawServoStyleSheetBorrowed reference)
+
+// CSSRuleList
+SERVO_BINDING_FUNC(Servo_CssRules_AddRef, void, ServoCssRulesBorrowed rules)
+SERVO_BINDING_FUNC(Servo_CssRules_Release, void, ServoCssRulesBorrowed rules)
+SERVO_BINDING_FUNC(Servo_CssRules_ListTypes, void,
+                   ServoCssRulesBorrowed rules,
+                   nsTArrayBorrowed_uintptr_t result)
+SERVO_BINDING_FUNC(Servo_CssRules_GetStyleRuleAt, RawServoStyleRuleStrong,
+                   ServoCssRulesBorrowed rules, uint32_t index)
+
+// CSS Rules
+SERVO_BINDING_FUNC(Servo_StyleRule_AddRef, void,
+                   RawServoStyleRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_StyleRule_Release, void,
+                   RawServoStyleRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_StyleRule_Debug, void,
+                   RawServoStyleRuleBorrowed rule, nsACString* result)
+SERVO_BINDING_FUNC(Servo_StyleRule_GetStyle, RawServoDeclarationBlockStrong,
+                   RawServoStyleRuleBorrowed rule)
+SERVO_BINDING_FUNC(Servo_StyleRule_SetStyle, void,
+                   RawServoStyleRuleBorrowed rule,
+                   RawServoDeclarationBlockBorrowed declarations)
+SERVO_BINDING_FUNC(Servo_StyleRule_GetCssText, void,
+                   RawServoStyleRuleBorrowed rule, nsAString* result)
+SERVO_BINDING_FUNC(Servo_StyleRule_GetSelectorText, void,
+                   RawServoStyleRuleBorrowed rule, nsAString* result)
 
 // Animations API
 SERVO_BINDING_FUNC(Servo_ParseProperty,
@@ -80,7 +108,7 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetCssText, void,
                    nsAString* result)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SerializeOneValue, void,
                    RawServoDeclarationBlockBorrowed declarations,
-                   nsString* buffer)
+                   const nsIAtom* property, bool is_custom, nsString* buffer)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_Count, uint32_t,
                    RawServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetNthProperty, bool,
@@ -105,8 +133,6 @@ SERVO_BINDING_FUNC(Servo_CSSSupports, bool,
                    const nsACString* name, const nsACString* value)
 
 // Computed style data
-SERVO_BINDING_FUNC(Servo_ComputedValues_Get, ServoComputedValuesStrong,
-                   RawGeckoNodeBorrowed node)
 SERVO_BINDING_FUNC(Servo_ComputedValues_GetForAnonymousBox,
                    ServoComputedValuesStrong,
                    ServoComputedValuesBorrowedOrNull parent_style_or_null,
@@ -128,14 +154,26 @@ SERVO_BINDING_FUNC(Servo_Initialize, void)
 // Shut down Servo components. Should be called exactly once at shutdown.
 SERVO_BINDING_FUNC(Servo_Shutdown, void)
 
-// Restyle hints
-SERVO_BINDING_FUNC(Servo_ComputeRestyleHint, nsRestyleHint,
-                   RawGeckoElementBorrowed element, ServoElementSnapshot* snapshot,
-                   RawServoStyleSetBorrowed set)
+// Gets the snapshot for the element. This will return null if the element
+// has never been styled, since snapshotting in that case is wasted work.
+SERVO_BINDING_FUNC(Servo_Element_GetSnapshot, ServoElementSnapshot*,
+                   RawGeckoElementBorrowed element)
+
+// Restyle and change hints.
+SERVO_BINDING_FUNC(Servo_NoteExplicitHints, void, RawGeckoElementBorrowed element,
+                   nsRestyleHint restyle_hint, nsChangeHint change_hint)
+SERVO_BINDING_FUNC(Servo_CheckChangeHint, nsChangeHint, RawGeckoElementBorrowed element)
+SERVO_BINDING_FUNC(Servo_ResolveStyle, ServoComputedValuesStrong,
+                   RawGeckoElementBorrowed element, RawServoStyleSetBorrowed set,
+                   mozilla::ConsumeStyleBehavior consume, mozilla::LazyComputeBehavior compute)
 
 // Restyle the given subtree.
-SERVO_BINDING_FUNC(Servo_RestyleSubtree, void,
-                   RawGeckoNodeBorrowed node, RawServoStyleSetBorrowed set)
+SERVO_BINDING_FUNC(Servo_TraverseSubtree, void,
+                   RawGeckoElementBorrowed root, RawServoStyleSetBorrowed set,
+                   mozilla::SkipRootBehavior skip_root)
+
+// Assert that the tree has no pending or unconsumed restyles.
+SERVO_BINDING_FUNC(Servo_AssertTreeIsClean, void, RawGeckoElementBorrowed root)
 
 // Style-struct management.
 #define STYLE_STRUCT(name, checkdata_cb)                            \
