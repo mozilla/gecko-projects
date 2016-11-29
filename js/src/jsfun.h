@@ -52,8 +52,6 @@ class JSFunction : public js::NativeObject
         CONSTRUCTOR      = 0x0002,  /* function that can be called as a constructor */
         EXTENDED         = 0x0004,  /* structure is FunctionExtended */
         BOUND_FUN        = 0x0008,  /* function was created with Function.prototype.bind. */
-        EXPR_BODY        = 0x0010,  /* arrow function with expression body or
-                                     * expression closure: function(x) x*x */
         HAS_GUESSED_ATOM = 0x0020,  /* function had no explicit name, but a
                                        name was guessed for it anyway */
         LAMBDA           = 0x0040,  /* function comes from a FunctionExpression, ArrowFunction, or
@@ -61,7 +59,6 @@ class JSFunction : public js::NativeObject
                                        function-statement) */
         SELF_HOSTED      = 0x0080,  /* function is self-hosted builtin and must not be
                                        decompilable nor constructible. */
-        HAS_REST         = 0x0100,  /* function has a rest (...) parameter */
         INTERPRETED_LAZY = 0x0200,  /* function is interpreted but doesn't have a script yet */
         RESOLVED_LENGTH  = 0x0400,  /* f.length has been resolved (see fun_resolve). */
         RESOLVED_NAME    = 0x0800,  /* f.name has been resolved (see fun_resolve). */
@@ -94,8 +91,8 @@ class JSFunction : public js::NativeObject
         INTERPRETED_GENERATOR = INTERPRETED,
         NO_XDR_FLAGS = RESOLVED_LENGTH | RESOLVED_NAME,
 
-        STABLE_ACROSS_CLONES = CONSTRUCTOR | EXPR_BODY | HAS_GUESSED_ATOM | LAMBDA |
-                               SELF_HOSTED |  HAS_REST | FUNCTION_KIND_MASK
+        STABLE_ACROSS_CLONES = CONSTRUCTOR | HAS_GUESSED_ATOM | LAMBDA |
+                               SELF_HOSTED | FUNCTION_KIND_MASK
     };
 
     static_assert((INTERPRETED | INTERPRETED_LAZY) == js::JS_FUNCTION_INTERPRETED_BITS,
@@ -179,11 +176,9 @@ class JSFunction : public js::NativeObject
     bool isAsmJSNative()            const { return kind() == AsmJS; }
 
     /* Possible attributes of an interpreted function: */
-    bool isExprBody()               const { return flags() & EXPR_BODY; }
     bool hasGuessedAtom()           const { return flags() & HAS_GUESSED_ATOM; }
     bool isLambda()                 const { return flags() & LAMBDA; }
     bool isBoundFunction()          const { return flags() & BOUND_FUN; }
-    bool hasRest()                  const { return flags() & HAS_REST; }
     bool isInterpretedLazy()        const { return flags() & INTERPRETED_LAZY; }
     bool hasScript()                const { return flags() & INTERPRETED; }
 
@@ -264,11 +259,6 @@ class JSFunction : public js::NativeObject
         this->nargs_ = nargs;
     }
 
-    // Can be called multiple times by the parser.
-    void setHasRest() {
-        flags_ |= HAS_REST;
-    }
-
     void setIsBoundFunction() {
         MOZ_ASSERT(!isBoundFunction());
         flags_ |= BOUND_FUN;
@@ -285,11 +275,6 @@ class JSFunction : public js::NativeObject
         MOZ_ASSERT(isNative());
         MOZ_ASSERT(!isIntrinsic());
         flags_ |= SELF_HOSTED;
-    }
-
-    // Can be called multiple times by the parser.
-    void setIsExprBody() {
-        flags_ |= EXPR_BODY;
     }
 
     void setArrow() {
@@ -311,7 +296,8 @@ class JSFunction : public js::NativeObject
             nonLazyScript()->setAsyncKind(asyncKind);
     }
 
-    bool getUnresolvedLength(JSContext* cx, js::MutableHandleValue v);
+    static bool getUnresolvedLength(JSContext* cx, js::HandleFunction fun,
+                                    js::MutableHandleValue v);
 
     JSAtom* getUnresolvedName(JSContext* cx);
 
@@ -403,16 +389,15 @@ class JSFunction : public js::NativeObject
     //
     // - For functions known to have a JSScript, nonLazyScript() will get it.
 
-    JSScript* getOrCreateScript(JSContext* cx) {
-        MOZ_ASSERT(isInterpreted());
+    static JSScript* getOrCreateScript(JSContext* cx, js::HandleFunction fun) {
+        MOZ_ASSERT(fun->isInterpreted());
         MOZ_ASSERT(cx);
-        if (isInterpretedLazy()) {
-            JS::RootedFunction self(cx, this);
-            if (!createScriptForLazilyInterpretedFunction(cx, self))
+        if (fun->isInterpretedLazy()) {
+            if (!createScriptForLazilyInterpretedFunction(cx, fun))
                 return nullptr;
-            return self->nonLazyScript();
+            return fun->nonLazyScript();
         }
-        return nonLazyScript();
+        return fun->nonLazyScript();
     }
 
     JSScript* existingScriptNonDelazifying() const {
@@ -457,7 +442,7 @@ class JSFunction : public js::NativeObject
         return u.i.s.script_;
     }
 
-    bool getLength(JSContext* cx, uint16_t* length);
+    static bool getLength(JSContext* cx, js::HandleFunction fun, uint16_t* length);
 
     js::LazyScript* lazyScript() const {
         MOZ_ASSERT(isInterpretedLazy() && u.i.s.lazy_);
@@ -570,7 +555,7 @@ class JSFunction : public js::NativeObject
 
     JSObject* getBoundFunctionTarget() const;
     const js::Value& getBoundFunctionThis() const;
-    const js::Value& getBoundFunctionArgument(JSContext* cx, unsigned which) const;
+    const js::Value& getBoundFunctionArgument(unsigned which) const;
     size_t getBoundFunctionArgumentCount() const;
 
   private:
