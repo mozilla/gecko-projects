@@ -30,7 +30,7 @@ android-x86/opt:
         job-name: android-x86-opt
     treeherder:
         platform: android-4-2-x86/opt
-        symbol: tc(N)
+        symbol: tc(B)
         tier: 1
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
@@ -56,7 +56,7 @@ android-x86-nightly/opt:
         job-name: android-x86-nightly-opt
     treeherder:
         platform: android-4-2-x86/opt
-        symbol: tc(B)
+        symbol: tc(N)
         tier: 2
     worker-type: aws-provisioner-v1/gecko-{level}-b-android
     worker:
