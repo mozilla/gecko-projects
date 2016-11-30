@@ -18,6 +18,7 @@
 #include "mozilla/dom/AnimationEffectReadOnlyBinding.h" // for PlaybackDirection
 #include "mozilla/Likely.h"
 #include "mozilla/LookAndFeel.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/OperatorNewExtensions.h"
 #include "mozilla/Unused.h"
 
@@ -442,6 +443,11 @@ static nsSize CalcViewportUnitsScale(nsPresContext* aPresContext)
   return viewportSize;
 }
 
+// If |aStyleFont| is nullptr, aStyleContext->StyleFont() is used.
+//
+// In case that |aValue| is rem unit, if |aStyleContext| is null, callers must
+// specify a valid |aStyleFont| and |aUseProvidedRootEmSize| must be true so
+// that we can get the length from |aStyleFont|.
 static nscoord CalcLengthWith(const nsCSSValue& aValue,
                               nscoord aFontSize,
                               const nsStyleFont* aStyleFont,
@@ -458,8 +464,8 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
                "not a length or calc unit");
   NS_ASSERTION(aStyleFont || aStyleContext,
                "Must have style data");
-  NS_ASSERTION(!aStyleFont || !aStyleContext,
-               "Duplicate sources of data");
+  NS_ASSERTION(aStyleContext || aUseProvidedRootEmSize,
+               "Must have style context or specify aUseProvidedRootEmSize");
   NS_ASSERTION(aPresContext, "Must have prescontext");
 
   if (aValue.IsFixedLengthUnit()) {
@@ -554,21 +560,12 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
       } else {
         // This is not the root element or we are calculating something other
         // than font size, so rem is relative to the root element's font size.
-        RefPtr<nsStyleContext> rootStyle;
-        const nsStyleFont *rootStyleFont = styleFont;
-        Element* docElement = aPresContext->Document()->GetRootElement();
-
-        if (docElement) {
-          nsIFrame* rootFrame = docElement->GetPrimaryFrame();
-          if (rootFrame) {
-            rootStyle = rootFrame->StyleContext();
-          } else {
-            rootStyle = aPresContext->StyleSet()->AsGecko()->ResolveStyleFor(docElement,
-                                                                             nullptr);
-          }
-          rootStyleFont = rootStyle->StyleFont();
+        // Find the root style context by walking up the style context tree.
+        nsStyleContext* rootStyle = aStyleContext;
+        while (rootStyle->GetParent()) {
+          rootStyle = rootStyle->GetParent();
         }
-
+        const nsStyleFont *rootStyleFont = rootStyle->StyleFont();
         rootFontSize = rootStyleFont->mFont.size;
       }
 
@@ -1153,6 +1150,46 @@ SetComplexColor(const nsCSSValue& aValue,
       return;
     }
     aResult.mForegroundRatio = 0;
+  }
+}
+
+template<UnsetAction UnsetTo>
+static Maybe<nscoord>
+ComputeLineWidthValue(const nsCSSValue& aValue,
+                      const nscoord aParentCoord,
+                      const nscoord aInitialCoord,
+                      nsStyleContext* aStyleContext,
+                      nsPresContext* aPresContext,
+                      RuleNodeCacheConditions& aConditions)
+{
+  nsCSSUnit unit = aValue.GetUnit();
+  if (unit == eCSSUnit_Initial ||
+      (UnsetTo == eUnsetInitial && unit == eCSSUnit_Unset)) {
+    return Some(aInitialCoord);
+  } else if (unit == eCSSUnit_Inherit ||
+             (UnsetTo == eUnsetInherit && unit == eCSSUnit_Unset)) {
+    aConditions.SetUncacheable();
+    return Some(aParentCoord);
+  } else if (unit == eCSSUnit_Enumerated) {
+    NS_ASSERTION(aValue.GetIntValue() == NS_STYLE_BORDER_WIDTH_THIN ||
+                 aValue.GetIntValue() == NS_STYLE_BORDER_WIDTH_MEDIUM ||
+                 aValue.GetIntValue() == NS_STYLE_BORDER_WIDTH_THICK,
+                 "Unexpected line-width keyword!");
+    return Some(nsPresContext::GetBorderWidthForKeyword(aValue.GetIntValue()));
+  } else if (aValue.IsLengthUnit() ||
+             aValue.IsCalcUnit()) {
+    nscoord len =
+      CalcLength(aValue, aStyleContext, aPresContext, aConditions);
+    if (len < 0) {
+      NS_ASSERTION(aValue.IsCalcUnit(),
+                   "Parser should have rejected negative length!");
+      len = 0;
+    }
+    return Some(len);
+  } else {
+    NS_ASSERTION(unit == eCSSUnit_Null,
+                 "Missing case handling for line-width computing!");
+    return Maybe<nscoord>(Nothing());
   }
 }
 
@@ -3323,15 +3360,19 @@ struct SetFontSizeCalcOps : public css::BasicCoordCalcOps,
   const nscoord mParentSize;
   const nsStyleFont* const mParentFont;
   nsPresContext* const mPresContext;
+  nsStyleContext* const mStyleContext;
   const bool mAtRoot;
   RuleNodeCacheConditions& mConditions;
 
   SetFontSizeCalcOps(nscoord aParentSize, const nsStyleFont* aParentFont,
-                     nsPresContext* aPresContext, bool aAtRoot,
+                     nsPresContext* aPresContext,
+                     nsStyleContext* aStyleContext,
+                     bool aAtRoot,
                      RuleNodeCacheConditions& aConditions)
     : mParentSize(aParentSize),
       mParentFont(aParentFont),
       mPresContext(aPresContext),
+      mStyleContext(aStyleContext),
       mAtRoot(aAtRoot),
       mConditions(aConditions)
   {
@@ -3346,7 +3387,7 @@ struct SetFontSizeCalcOps : public css::BasicCoordCalcOps,
       // between us and the parent is simply ignored.
       size = CalcLengthWith(aValue, mParentSize,
                             mParentFont,
-                            nullptr, mPresContext, mAtRoot,
+                            mStyleContext, mPresContext, mAtRoot,
                             true, mConditions);
       if (!aValue.IsRelativeLengthUnit() && mParentFont->mAllowZoom) {
         size = nsStyleFont::ZoomText(mPresContext, size);
@@ -3370,6 +3411,7 @@ struct SetFontSizeCalcOps : public css::BasicCoordCalcOps,
 
 /* static */ void
 nsRuleNode::SetFontSize(nsPresContext* aPresContext,
+                        nsStyleContext* aContext,
                         const nsRuleData* aRuleData,
                         const nsStyleFont* aFont,
                         const nsStyleFont* aParentFont,
@@ -3436,7 +3478,8 @@ nsRuleNode::SetFontSize(nsPresContext* aPresContext,
            sizeValue->GetUnit() == eCSSUnit_Percent ||
            sizeValue->IsCalcUnit()) {
     SetFontSizeCalcOps ops(aParentSize, aParentFont,
-                           aPresContext, aAtRoot,
+                           aPresContext, aContext,
+                           aAtRoot,
                            aConditions);
     *aSize = css::ComputeCalc(*sizeValue, ops);
     if (*aSize < 0) {
@@ -3782,7 +3825,7 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     aFont->mScriptMinSize =
       CalcLengthWith(*scriptMinSizeValue, aParentFont->mSize,
                      aParentFont,
-                     nullptr, aPresContext, atRoot, true,
+                     aContext, aPresContext, atRoot, true /* aUseUserFontSet */,
                      aConditions);
   }
 
@@ -4024,7 +4067,8 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     scriptLevelAdjustedParentSize !=
       scriptLevelAdjustedUnconstrainedParentSize;
 
-  SetFontSize(aPresContext, aRuleData, aFont, aParentFont,
+  SetFontSize(aPresContext, aContext,
+              aRuleData, aFont, aParentFont,
               &aFont->mSize,
               systemFont, aParentFont->mSize, scriptLevelAdjustedParentSize,
               aUsedStartStruct, atRoot, aConditions);
@@ -4054,7 +4098,8 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     // already called SetUncacheable.
     RuleNodeCacheConditions unconstrainedConditions;
 
-    SetFontSize(aPresContext, aRuleData, aFont, aParentFont,
+    SetFontSize(aPresContext, aContext,
+                aRuleData, aFont, aParentFont,
                 &aFont->mScriptUnconstrainedSize,
                 systemFont, aParentFont->mScriptUnconstrainedSize,
                 scriptLevelAdjustedUnconstrainedParentSize,
@@ -4442,22 +4487,22 @@ TruncateStringToSingleGrapheme(nsAString& aStr)
   }
 }
 
-struct LineHeightCalcObj
+struct LengthNumberCalcObj
 {
-  float mLineHeight;
+  float mValue;
   bool mIsNumber;
 };
 
-struct SetLineHeightCalcOps : public css::FloatCoeffsAlreadyNormalizedOps
+struct LengthNumberCalcOps : public css::FloatCoeffsAlreadyNormalizedOps
 {
-  typedef LineHeightCalcObj result_type;
+  typedef LengthNumberCalcObj result_type;
   nsStyleContext* const mStyleContext;
   nsPresContext* const mPresContext;
   RuleNodeCacheConditions& mConditions;
 
-  SetLineHeightCalcOps(nsStyleContext* aStyleContext,
-                       nsPresContext* aPresContext,
-                       RuleNodeCacheConditions& aConditions)
+  LengthNumberCalcOps(nsStyleContext* aStyleContext,
+                      nsPresContext* aPresContext,
+                      RuleNodeCacheConditions& aConditions)
     : mStyleContext(aStyleContext),
       mPresContext(aPresContext),
       mConditions(aConditions)
@@ -4470,15 +4515,15 @@ struct SetLineHeightCalcOps : public css::FloatCoeffsAlreadyNormalizedOps
   {
     MOZ_ASSERT(aValue1.mIsNumber == aValue2.mIsNumber);
 
-    LineHeightCalcObj result;
+    LengthNumberCalcObj result;
     result.mIsNumber = aValue1.mIsNumber;
     if (aCalcFunction == eCSSUnit_Calc_Plus) {
-      result.mLineHeight = aValue1.mLineHeight + aValue2.mLineHeight;
+      result.mValue = aValue1.mValue + aValue2.mValue;
       return result;
     }
     MOZ_ASSERT(aCalcFunction == eCSSUnit_Calc_Minus,
                "unexpected unit");
-    result.mLineHeight = aValue1.mLineHeight - aValue2.mLineHeight;
+    result.mValue = aValue1.mValue - aValue2.mValue;
     return result;
   }
 
@@ -4488,9 +4533,9 @@ struct SetLineHeightCalcOps : public css::FloatCoeffsAlreadyNormalizedOps
   {
     MOZ_ASSERT(aCalcFunction == eCSSUnit_Calc_Times_L,
                "unexpected unit");
-    LineHeightCalcObj result;
+    LengthNumberCalcObj result;
     result.mIsNumber = aValue2.mIsNumber;
-    result.mLineHeight = aValue1 * aValue2.mLineHeight;
+    result.mValue = aValue1 * aValue2.mValue;
     return result;
   }
 
@@ -4498,39 +4543,69 @@ struct SetLineHeightCalcOps : public css::FloatCoeffsAlreadyNormalizedOps
   MergeMultiplicativeR(nsCSSUnit aCalcFunction,
                        result_type aValue1, float aValue2)
   {
-    LineHeightCalcObj result;
+    LengthNumberCalcObj result;
     result.mIsNumber = aValue1.mIsNumber;
     if (aCalcFunction == eCSSUnit_Calc_Times_R) {
-      result.mLineHeight = aValue1.mLineHeight * aValue2;
+      result.mValue = aValue1.mValue * aValue2;
       return result;
     }
     MOZ_ASSERT(aCalcFunction == eCSSUnit_Calc_Divided,
                "unexpected unit");
-    result.mLineHeight = aValue1.mLineHeight / aValue2;
+    result.mValue = aValue1.mValue / aValue2;
     return result;
   }
 
   result_type ComputeLeafValue(const nsCSSValue& aValue)
   {
-    LineHeightCalcObj result;
+    LengthNumberCalcObj result;
     if (aValue.IsLengthUnit()) {
       result.mIsNumber = false;
-      result.mLineHeight = CalcLength(aValue, mStyleContext,
+      result.mValue = CalcLength(aValue, mStyleContext,
+                                      mPresContext, mConditions);
+    }
+    else if (eCSSUnit_Number == aValue.GetUnit()) {
+      result.mIsNumber = true;
+      result.mValue = aValue.GetFloatValue();
+    } else {
+      MOZ_ASSERT(false, "unexpected value");
+      result.mIsNumber = true;
+      result.mValue = 1.0f;
+    }
+
+    return result;
+  }
+};
+
+struct SetLineHeightCalcOps : public LengthNumberCalcOps
+{
+  SetLineHeightCalcOps(nsStyleContext* aStyleContext,
+                       nsPresContext* aPresContext,
+                       RuleNodeCacheConditions& aConditions)
+    : LengthNumberCalcOps(aStyleContext, aPresContext, aConditions)
+  {
+  }
+
+  result_type ComputeLeafValue(const nsCSSValue& aValue)
+  {
+    LengthNumberCalcObj result;
+    if (aValue.IsLengthUnit()) {
+      result.mIsNumber = false;
+      result.mValue = CalcLength(aValue, mStyleContext,
                                       mPresContext, mConditions);
     }
     else if (eCSSUnit_Percent == aValue.GetUnit()) {
       mConditions.SetUncacheable();
       result.mIsNumber = false;
       nscoord fontSize = mStyleContext->StyleFont()->mFont.size;
-      result.mLineHeight = fontSize * aValue.GetPercentValue();
+      result.mValue = fontSize * aValue.GetPercentValue();
     }
     else if (eCSSUnit_Number == aValue.GetUnit()) {
       result.mIsNumber = true;
-      result.mLineHeight = aValue.GetFloatValue();
+      result.mValue = aValue.GetFloatValue();
     } else {
       MOZ_ASSERT(false, "unexpected value");
       result.mIsNumber = true;
-      result.mLineHeight = 1.0f;
+      result.mValue = 1.0f;
     }
 
     return result;
@@ -4554,11 +4629,25 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
                                    mPresContext, text->*aField, conditions);
   };
 
-  // tab-size: integer, inherit
-  SetValue(*aRuleData->ValueForTabSize(),
-           text->mTabSize, conditions,
-           SETVAL_INTEGER | SETVAL_UNSET_INHERIT, parentText->mTabSize,
-           NS_STYLE_TABSIZE_INITIAL);
+  // tab-size: number, length, calc, inherit
+  const nsCSSValue* tabSizeValue = aRuleData->ValueForTabSize();
+  if (tabSizeValue->GetUnit() == eCSSUnit_Initial) {
+    text->mTabSize = nsStyleCoord(float(NS_STYLE_TABSIZE_INITIAL), eStyleUnit_Factor);
+  } else if (eCSSUnit_Calc == tabSizeValue->GetUnit()) {
+    LengthNumberCalcOps ops(aContext, mPresContext, conditions);
+    LengthNumberCalcObj obj = css::ComputeCalc(*tabSizeValue, ops);
+    float value = obj.mValue < 0 ? 0 : obj.mValue;
+    if (obj.mIsNumber) {
+      text->mTabSize.SetFactorValue(value);
+    } else {
+      text->mTabSize.SetCoordValue(
+        NSToCoordRoundWithClamp(value));
+    }
+  } else {
+    SetCoord(*tabSizeValue, text->mTabSize, parentText->mTabSize,
+             SETCOORD_LH | SETCOORD_FACTOR | SETCOORD_UNSET_INHERIT,
+             aContext, mPresContext, conditions);
+  }
 
   // letter-spacing: normal, length, inherit
   SetCoord(*aRuleData->ValueForLetterSpacing(),
@@ -4601,12 +4690,12 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
   }
   else if (eCSSUnit_Calc == lineHeightValue->GetUnit()) {
     SetLineHeightCalcOps ops(aContext, mPresContext, conditions);
-    LineHeightCalcObj obj = css::ComputeCalc(*lineHeightValue, ops);
+    LengthNumberCalcObj obj = css::ComputeCalc(*lineHeightValue, ops);
     if (obj.mIsNumber) {
-      text->mLineHeight.SetFactorValue(obj.mLineHeight);
+      text->mLineHeight.SetFactorValue(obj.mValue);
     } else {
       text->mLineHeight.SetCoordValue(
-        NSToCoordRoundWithClamp(obj.mLineHeight));
+        NSToCoordRoundWithClamp(obj.mValue));
     }
   }
   else {
@@ -4880,22 +4969,13 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
                   &nsStyleText::mWebkitTextStrokeColor);
 
   // -webkit-text-stroke-width: length, inherit, initial, enum
-  const nsCSSValue*
-    webkitTextStrokeWidthValue = aRuleData->ValueForWebkitTextStrokeWidth();
-  if (webkitTextStrokeWidthValue->GetUnit() == eCSSUnit_Enumerated) {
-    NS_ASSERTION(webkitTextStrokeWidthValue->GetIntValue() == NS_STYLE_BORDER_WIDTH_THIN ||
-                 webkitTextStrokeWidthValue->GetIntValue() == NS_STYLE_BORDER_WIDTH_MEDIUM ||
-                 webkitTextStrokeWidthValue->GetIntValue() == NS_STYLE_BORDER_WIDTH_THICK,
-                 "Unexpected enum value");
-    text->mWebkitTextStrokeWidth.SetCoordValue(
-      nsPresContext::GetBorderWidthForKeyword(webkitTextStrokeWidthValue->GetIntValue()));
-  } else {
-    SetCoord(*webkitTextStrokeWidthValue, text->mWebkitTextStrokeWidth,
-             parentText->mWebkitTextStrokeWidth,
-             SETCOORD_LH | SETCOORD_CALC_LENGTH_ONLY |
-               SETCOORD_CALC_CLAMP_NONNEGATIVE |
-               SETCOORD_INITIAL_ZERO | SETCOORD_UNSET_INHERIT,
-             aContext, mPresContext, conditions);
+  Maybe<nscoord> coord =
+    ComputeLineWidthValue<eUnsetInherit>(
+      *aRuleData->ValueForWebkitTextStrokeWidth(),
+      parentText->mWebkitTextStrokeWidth, 0,
+      aContext, mPresContext, conditions);
+  if (coord.isSome()) {
+    text->mWebkitTextStrokeWidth = *coord;
   }
 
   // -moz-control-character-visibility: enum, inherit, initial
@@ -5665,6 +5745,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
       animation->SetName(EmptyString());
     } else if (animName.list) {
       switch (animName.list->mValue.GetUnit()) {
+        case eCSSUnit_String:
         case eCSSUnit_Ident: {
           nsDependentString
             nameStr(animName.list->mValue.GetStringBufferValue());
@@ -7487,35 +7568,13 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
                    "method, the "
                    "nsLineLayout::IsPercentageAwareReplacedElement method "
                    "and probably some other places");
-      if (eCSSUnit_Enumerated == value.GetUnit()) {
-        NS_ASSERTION(value.GetIntValue() == NS_STYLE_BORDER_WIDTH_THIN ||
-                     value.GetIntValue() == NS_STYLE_BORDER_WIDTH_MEDIUM ||
-                     value.GetIntValue() == NS_STYLE_BORDER_WIDTH_THICK,
-                     "Unexpected enum value");
-        border->SetBorderWidth(side,
-          nsPresContext::GetBorderWidthForKeyword(value.GetIntValue()));
-      }
-      // OK to pass bad aParentCoord since we're not passing SETCOORD_INHERIT
-      else if (SetCoord(value, coord, nsStyleCoord(),
-                        SETCOORD_LENGTH | SETCOORD_CALC_LENGTH_ONLY,
-                        aContext, mPresContext, conditions)) {
-        NS_ASSERTION(coord.GetUnit() == eStyleUnit_Coord, "unexpected unit");
-        // clamp negative calc() to 0.
-        border->SetBorderWidth(side, std::max(coord.GetCoordValue(), 0));
-      }
-      else if (eCSSUnit_Inherit == value.GetUnit()) {
-        conditions.SetUncacheable();
-        border->SetBorderWidth(side,
-                               parentBorder->GetComputedBorder().Side(side));
-      }
-      else if (eCSSUnit_Initial == value.GetUnit() ||
-               eCSSUnit_Unset == value.GetUnit()) {
-        border->SetBorderWidth(side,
-          nsPresContext::GetBorderWidthForKeyword(NS_STYLE_BORDER_WIDTH_MEDIUM));
-      }
-      else {
-        NS_ASSERTION(eCSSUnit_Null == value.GetUnit(),
-                     "missing case handling border width");
+      Maybe<nscoord> coord =
+        ComputeLineWidthValue<eUnsetInitial>(
+          value, parentBorder->GetComputedBorder().Side(side),
+          nsPresContext::GetBorderWidthForKeyword(NS_STYLE_BORDER_WIDTH_MEDIUM),
+          aContext, mPresContext, conditions);
+      if (coord.isSome()) {
+        border->SetBorderWidth(side, *coord);
       }
     }
   }
@@ -7775,17 +7834,13 @@ nsRuleNode::ComputeOutlineData(void* aStartStruct,
   COMPUTE_START_RESET(Outline, outline, parentOutline)
 
   // outline-width: length, enum, inherit
-  const nsCSSValue* outlineWidthValue = aRuleData->ValueForOutlineWidth();
-  if (eCSSUnit_Initial == outlineWidthValue->GetUnit() ||
-      eCSSUnit_Unset == outlineWidthValue->GetUnit()) {
-    outline->mOutlineWidth =
-      nsStyleCoord(NS_STYLE_BORDER_WIDTH_MEDIUM, eStyleUnit_Enumerated);
-  }
-  else {
-    SetCoord(*outlineWidthValue, outline->mOutlineWidth,
-             parentOutline->mOutlineWidth,
-             SETCOORD_LEH | SETCOORD_CALC_LENGTH_ONLY, aContext,
-             mPresContext, conditions);
+  Maybe<nscoord> coord =
+    ComputeLineWidthValue<eUnsetInitial>(
+      *aRuleData->ValueForOutlineWidth(), parentOutline->mOutlineWidth,
+      nsPresContext::GetBorderWidthForKeyword(NS_STYLE_BORDER_WIDTH_MEDIUM),
+      aContext, mPresContext, conditions);
+  if (coord.isSome()) {
+    outline->mOutlineWidth = *coord;
   }
 
   // outline-offset: length, inherit
@@ -9113,36 +9168,14 @@ nsRuleNode::ComputeColumnData(void* aStartStruct,
   }
 
   // column-rule-width: length, enum, inherit
-  const nsCSSValue& widthValue = *aRuleData->ValueForColumnRuleWidth();
-  if (eCSSUnit_Initial == widthValue.GetUnit() ||
-      eCSSUnit_Unset == widthValue.GetUnit()) {
-    column->SetColumnRuleWidth(
-        nsPresContext::GetBorderWidthForKeyword(NS_STYLE_BORDER_WIDTH_MEDIUM));
-  }
-  else if (eCSSUnit_Enumerated == widthValue.GetUnit()) {
-    NS_ASSERTION(widthValue.GetIntValue() == NS_STYLE_BORDER_WIDTH_THIN ||
-                 widthValue.GetIntValue() == NS_STYLE_BORDER_WIDTH_MEDIUM ||
-                 widthValue.GetIntValue() == NS_STYLE_BORDER_WIDTH_THICK,
-                 "Unexpected enum value");
-    column->SetColumnRuleWidth(
-        nsPresContext::GetBorderWidthForKeyword(widthValue.GetIntValue()));
-  }
-  else if (eCSSUnit_Inherit == widthValue.GetUnit()) {
-    column->SetColumnRuleWidth(parent->GetComputedColumnRuleWidth());
-    conditions.SetUncacheable();
-  }
-  else if (widthValue.IsLengthUnit() || widthValue.IsCalcUnit()) {
-    nscoord len =
-      CalcLength(widthValue, aContext, mPresContext, conditions);
-    if (len < 0) {
-      // FIXME: This is untested (by test_value_storage.html) for
-      // column-rule-width since it gets covered up by the border
-      // rounding code.
-      NS_ASSERTION(widthValue.IsCalcUnit(),
-                   "parser should have rejected negative length");
-      len = 0;
-    }
-    column->SetColumnRuleWidth(len);
+  Maybe<nscoord> coord =
+    ComputeLineWidthValue<eUnsetInitial>(
+      *aRuleData->ValueForColumnRuleWidth(),
+      parent->GetComputedColumnRuleWidth(),
+      nsPresContext::GetBorderWidthForKeyword(NS_STYLE_BORDER_WIDTH_MEDIUM),
+      aContext, mPresContext, conditions);
+  if (coord.isSome()) {
+    column->SetColumnRuleWidth(*coord);
   }
 
   // column-rule-style: enum, inherit

@@ -434,7 +434,7 @@ CSS_PROP_DISPLAY(
     "",
     // FIXME: The spec should say something about 'inherit' and 'initial'
     // not being allowed.
-    VARIANT_NONE | VARIANT_IDENTIFIER_NO_INHERIT, // used by list parsing
+    VARIANT_NONE | VARIANT_IDENTIFIER_NO_INHERIT | VARIANT_STRING, // used by list parsing
     nullptr,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
@@ -3194,7 +3194,7 @@ CSS_PROP_OUTLINE(
     VARIANT_HKL | VARIANT_CALC,
     kBorderWidthKTable,
     offsetof(nsStyleOutline, mOutlineWidth),
-    eStyleAnimType_Coord)
+    eStyleAnimType_nscoord)
 CSS_PROP_SHORTHAND(
     overflow,
     overflow,
@@ -3861,7 +3861,7 @@ CSS_PROP_TEXT(
     CSS_PROPERTY_PARSE_VALUE |
         CSS_PROPERTY_VALUE_NONNEGATIVE,
     "",
-    VARIANT_HI,
+    VARIANT_INHERIT | VARIANT_LNCALC,
     nullptr,
     offsetof(nsStyleText, mTabSize),
     eStyleAnimType_Discrete)

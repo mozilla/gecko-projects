@@ -1486,7 +1486,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleOutline
   // value used by layout.  (We must store mOutlineWidth for the same
   // style struct resolution reasons that we do nsStyleBorder::mBorder;
   // see that field's comment.)
-  nsStyleCoord  mOutlineWidth;    // [reset] coord, enum (see nsStyleConsts.h)
+  nscoord       mOutlineWidth;    // [reset] coord, enum (see nsStyleConsts.h)
   nscoord       mOutlineOffset;   // [reset]
   mozilla::StyleComplexColor mOutlineColor; // [reset]
   uint8_t       mOutlineStyle;    // [reset] See nsStyleConsts.h
@@ -2083,16 +2083,16 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText
   uint8_t mTextEmphasisPosition;        // [inherited] see nsStyleConsts.h
   uint8_t mTextEmphasisStyle;           // [inherited] see nsStyleConsts.h
   uint8_t mTextRendering;               // [inherited] see nsStyleConsts.h
-  int32_t mTabSize;                     // [inherited] see nsStyleConsts.h
   mozilla::StyleComplexColor mTextEmphasisColor;      // [inherited]
   mozilla::StyleComplexColor mWebkitTextFillColor;    // [inherited]
   mozilla::StyleComplexColor mWebkitTextStrokeColor;  // [inherited]
 
+  nsStyleCoord mTabSize;                // [inherited] coord, factor, calc
   nsStyleCoord mWordSpacing;            // [inherited] coord, percent, calc
   nsStyleCoord mLetterSpacing;          // [inherited] coord, normal
   nsStyleCoord mLineHeight;             // [inherited] coord, factor, normal
   nsStyleCoord mTextIndent;             // [inherited] coord, percent, calc
-  nsStyleCoord mWebkitTextStrokeWidth;  // [inherited] coord
+  nscoord mWebkitTextStrokeWidth;       // [inherited] coord
 
   RefPtr<nsCSSShadowArray> mTextShadow; // [inherited] nullptr in case of a zero-length
 
@@ -2138,7 +2138,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText
   }
 
   bool HasWebkitTextStroke() const {
-    return mWebkitTextStrokeWidth.GetCoordValue() > 0;
+    return mWebkitTextStrokeWidth > 0;
   }
 
   // These are defined in nsStyleStructInlines.h.

@@ -53,6 +53,12 @@ SERVO_BINDING_FUNC(Servo_CssRules_ListTypes, void,
                    nsTArrayBorrowed_uintptr_t result)
 SERVO_BINDING_FUNC(Servo_CssRules_GetStyleRuleAt, RawServoStyleRuleStrong,
                    ServoCssRulesBorrowed rules, uint32_t index)
+SERVO_BINDING_FUNC(Servo_CssRules_InsertRule, nsresult,
+                   ServoCssRulesBorrowed rules,
+                   RawServoStyleSheetBorrowed sheet, const nsACString* rule,
+                   uint32_t index, bool nested, uint16_t* rule_type)
+SERVO_BINDING_FUNC(Servo_CssRules_DeleteRule, nsresult,
+                   ServoCssRulesBorrowed rules, uint32_t index)
 
 // CSS Rules
 SERVO_BINDING_FUNC(Servo_StyleRule_Debug, void,
@@ -94,7 +100,7 @@ SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetCssText, void,
                    nsAString* result)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_SerializeOneValue, void,
                    RawServoDeclarationBlockBorrowed declarations,
-                   const nsIAtom* property, bool is_custom, nsString* buffer)
+                   const nsIAtom* property, bool is_custom, nsAString* buffer)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_Count, uint32_t,
                    RawServoDeclarationBlockBorrowed declarations)
 SERVO_BINDING_FUNC(Servo_DeclarationBlock_GetNthProperty, bool,

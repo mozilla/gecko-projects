@@ -33,8 +33,6 @@ public:
 
   virtual ~MediaFormatReader();
 
-  nsresult Init() override;
-
   size_t SizeOfVideoQueueInFrames() override;
   size_t SizeOfAudioQueueInFrames() override;
 
@@ -55,8 +53,6 @@ protected:
 
 public:
   media::TimeIntervals GetBuffered() override;
-
-  RefPtr<BufferedUpdatePromise> UpdateBufferedWithPromise() override;
 
   bool ForceZeroStartTime() const override;
 
@@ -88,6 +84,7 @@ public:
   void SetVideoBlankDecode(bool aIsBlankDecode) override;
 
 private:
+  nsresult InitInternal() override;
 
   bool HasVideo() const { return mVideo.mTrackDemuxer; }
   bool HasAudio() const { return mAudio.mTrackDemuxer; }
@@ -586,6 +583,9 @@ private:
   void MaybeResolveMetadataPromise();
 
   UniquePtr<MetadataTags> mTags;
+
+  // A flag indicating if the start time is known or not.
+  bool mHasStartTime = false;
 };
 
 } // namespace mozilla
