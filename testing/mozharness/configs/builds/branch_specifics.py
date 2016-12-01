@@ -291,56 +291,6 @@ config = {
     },
     'date': {
         'update_channel': 'nightly-date',
-        'platform_overrides': {
-            'linux': {
-                'src_mozconfig': 'browser/config/mozconfigs/linux32/beta',
-            },
-            'linux-debug': {
-                'update_channel': 'default',
-            },
-            'linux64': {
-                'src_mozconfig': 'browser/config/mozconfigs/linux64/beta',
-            },
-            'linux64-debug': {
-                'update_channel': 'default',
-            },
-            'linux64-asan-debug': {
-                'update_channel': 'default',
-            },
-            'linux64-asan': {
-                'update_channel': 'default',
-            },
-            'linux64-st-an-debug': {
-                'update_channel': 'default',
-            },
-            'linux64-st-an': {
-                'update_channel': 'default',
-            },
-            'macosx64': {
-                'src_mozconfig': 'browser/config/mozconfigs/macosx-universal/beta',
-            },
-            'macosx64-debug': {
-                'update_channel': 'default',
-            },
-            'macosx64-st-an': {
-                'update_channel': 'default',
-            },
-            'macosx64-st-an-debug': {
-                'update_channel': 'default',
-            },
-            'win32': {
-                'src_mozconfig': 'browser/config/mozconfigs/win32/beta',
-            },
-            'win32-debug': {
-                'update_channel': 'default',
-            },
-            'win64': {
-                'src_mozconfig': 'browser/config/mozconfigs/win64/beta',
-            },
-            'win64-debug': {
-                'update_channel': 'default',
-            },
-        },
         'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
     },
     'cypress': {
