@@ -1220,6 +1220,8 @@ pref("privacy.donottrackheader.enabled",    false);
 pref("privacy.trackingprotection.enabled",  false);
 // Enforce tracking protection in Private Browsing mode
 pref("privacy.trackingprotection.pbmode.enabled",  true);
+// Annotate channels based on the tracking protection list in all modes
+pref("privacy.trackingprotection.annotate_channels",  false);
 
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.clipboardevents.enabled",   true);
@@ -5165,7 +5167,9 @@ pref("browser.safebrowsing.id", "Firefox");
 // Turn off Spatial navigation by default.
 pref("snav.enabled", false);
 
-// New implementation to unify touch-caret and selection-carets.
+// Debug-only pref to force enable the AccessibleCaret. If you want to
+// control AccessibleCaret by mouse, you'll need to set
+// "layout.accessiblecaret.hide_carets_for_mouse_input" to false.
 pref("layout.accessiblecaret.enabled", false);
 
 // Enable the accessible caret on platforms/devices
