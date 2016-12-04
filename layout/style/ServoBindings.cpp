@@ -32,6 +32,7 @@
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/DeclarationBlockInlines.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ElementInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -61,7 +62,7 @@ Gecko_NodeIsElement(RawGeckoNodeBorrowed aNode)
 RawGeckoNodeBorrowedOrNull
 Gecko_GetParentNode(RawGeckoNodeBorrowed aNode)
 {
-  return aNode->GetFlattenedTreeParentNode();
+  return aNode->GetFlattenedTreeParentNodeForStyle();
 }
 
 RawGeckoNodeBorrowedOrNull
@@ -91,7 +92,7 @@ Gecko_GetNextSibling(RawGeckoNodeBorrowed aNode)
 RawGeckoElementBorrowedOrNull
 Gecko_GetParentElement(RawGeckoElementBorrowed aElement)
 {
-  return aElement->GetFlattenedTreeParentElement();
+  return aElement->GetFlattenedTreeParentElementForStyle();
 }
 
 RawGeckoElementBorrowedOrNull
