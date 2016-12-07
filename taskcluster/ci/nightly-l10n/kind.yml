@@ -45,8 +45,7 @@ jobs:
             build_platform: linux-nightly
             nightly: true
         index:
-            job-name:
-                gecko-v2: linux32-nightly-l10n-opt
+            job-name: linux32-nightly-l10n-opt
         treeherder:
             platform: linux32/opt
         worker:
@@ -73,8 +72,7 @@ jobs:
             build_platform: linux64-nightly
             nightly: true
         index:
-            job-name:
-                gecko-v2: linux64-nightly-l10n-opt
+            job-name: linux64-nightly-l10n-opt
         treeherder:
             platform: linux64/opt
         worker:
@@ -103,8 +101,7 @@ jobs:
             build_platform: android-api-15-nightly
         index:
             product: mobile
-            job-name:
-                gecko-v2: android-nightly-l10n-opt
+            job-name: android-nightly-l10n-opt
         treeherder:
             platform: android-4-0-armv7-api15/opt
         worker-type: aws-provisioner-v1/gecko-{level}-b-android
