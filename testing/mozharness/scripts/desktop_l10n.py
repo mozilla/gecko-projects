@@ -803,6 +803,11 @@ class DesktopSingleLocale(LocalesMixin, ReleaseMixin, MockMixin, BuildbotMixin,
             self.error('failed to upload %s' % locale)
             ret = FAILURE
 
+        if ret == FAILURE:
+            # If we failed above, we shouldn't even attempt a SIMPLE_NAME move
+            # even if we are configured to do so
+            return ret
+
         # XXX Move the files to a SIMPLE_NAME format until we can enable
         #     Simple names in the build system
         if self.config.get("simple_name_move"):

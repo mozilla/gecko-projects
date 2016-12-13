@@ -8,7 +8,6 @@ Transform the signing task into an actual task description.
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
-from taskgraph.util.treeherder import join_symbol
 
 transforms = TransformSequence()
 
@@ -38,7 +37,6 @@ def make_signing_description(config, jobs):
                 }
             ]
         upstream_artifacts = []
-        job.setdefault('signing-formats', [])
         for spec in job_specs:
             fmt = spec["format"]
             upstream_artifacts.append({
@@ -47,19 +45,12 @@ def make_signing_description(config, jobs):
                 "paths": spec["artifacts"],
                 "formats": [fmt]
             })
-            job['signing-formats'].append(fmt)
 
         job['upstream-artifacts'] = upstream_artifacts
 
         label = dep_job.label.replace("build-", "signing-")
         job['label'] = label
 
-        symbol = 'Ns'
-        group = 'tc'
-
-        job['treeherder'] = {
-            'symbol': join_symbol(group, symbol),
-        }
 
         # Announce job status on funsize specific routes, so that it can
         # start the partial generation for nightlies only.

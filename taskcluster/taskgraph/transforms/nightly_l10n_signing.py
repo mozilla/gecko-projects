@@ -41,7 +41,6 @@ def make_signing_description(config, jobs):
                 }
             ]
         upstream_artifacts = []
-        job.setdefault('signing-formats', [])
         for spec in job_specs:
             fmt = spec['format']
             upstream_artifacts.append({
@@ -54,7 +53,6 @@ def make_signing_description(config, jobs):
                           for f in spec['artifacts']],
                 "formats": [fmt]
             })
-            job['signing-formats'].append(fmt)
 
         job['upstream-artifacts'] = upstream_artifacts
 

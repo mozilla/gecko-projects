@@ -11,17 +11,13 @@ class SigningTask(transform.TransformTask):
     """
     A task implementing a signing job.  These depend on nightly build jobs and
     sign the artifacts after a build has completed.
-
-    We use a dictionary to create the input to the transforms.
-    It will have added to it keys `build-label`, the label for the build task,
-    and `build-platform` / `build-type`, its platform and type.
     """
 
     @classmethod
     def get_inputs(cls, kind, path, config, params, loaded_tasks):
         if (config.get('kind-dependencies', []) != ["build"] and
                 config.get('kind-dependencies', []) != ["nightly-l10n"]):
-            raise Exception("Signing kinds must depend on builds")
+            raise Exception("Signing kinds must depend on builds or l10n repacks")
         for task in loaded_tasks:
             if task.kind not in config.get('kind-dependencies'):
                 continue

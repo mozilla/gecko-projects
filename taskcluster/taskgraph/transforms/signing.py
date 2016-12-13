@@ -52,9 +52,6 @@ signing_description_schema = Schema({
     # depname is used in taskref's to identify the taskID of the unsigned things
     Required('depname', default='build'): basestring,
 
-    # Formats to use to sign the artifacts
-    Required('signing-formats'): [basestring],
-
     # unique label to describe this signing task, defaults to {dep.label}-signing
     Optional('label'): basestring,
 
@@ -84,7 +81,11 @@ def make_task_description(config, jobs):
         dep_job = job['dependent-task']
 
         signing_format_scopes = []
-        for format in job['signing-formats']:
+        formats = set([])
+        for artifacts in job['upstream-artifacts']:
+            for f in artifacts['formats']:
+                formats.update(f)  # Add each format only once
+        for format in formats:
             signing_format_scopes.append("project:releng:signing:format:{}".format(format))
 
         treeherder = job.get('treeherder', {})
@@ -95,7 +96,7 @@ def make_task_description(config, jobs):
         treeherder.setdefault('tier', 2)
         treeherder.setdefault('kind', 'build')
 
-        label = job.get('label', "{}-signing".format(dep_job))
+        label = job.get('label', "{}-signing".format(dep_job.label))
 
         attributes = {
                 'nightly': dep_job.attributes.get('nightly', False),
