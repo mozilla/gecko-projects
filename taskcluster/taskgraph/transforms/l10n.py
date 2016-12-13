@@ -51,9 +51,8 @@ def all_locales_attribute(config, jobs):
         locales = locales - set(("ja-JP-mac", ))
         # Convert to mutable list.
         locales = list(sorted(locales))
-        attributes = job.get('attributes', {})
+        attributes = job.setdefault('attributes', {})
         attributes["all_locales"] = locales
-        job["attributes"] = attributes
 
         del job["locales-file"]
         yield job
