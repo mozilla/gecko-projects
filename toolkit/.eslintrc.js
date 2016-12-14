@@ -114,9 +114,6 @@ module.exports = {
     // No reassigning native JS objects
     "no-native-reassign": "error",
 
-    // No (!foo in bar)
-    "no-negated-in-lhs": "error",
-
     // Nested ternary statements are confusing
     "no-nested-ternary": "error",
 
@@ -154,11 +151,11 @@ module.exports = {
     "no-unreachable": "error",
 
     // No declaring variables that are never used
-    // "no-unused-vars": ["error", {
-    //   "vars": "local",
-    //   "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS",
-    //   "args": "none",
-    // }],
+    "no-unused-vars": ["error", {
+      "vars": "local",
+      "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS",
+      "args": "none",
+    }],
 
     // No using variables before defined
     // "no-use-before-define": ["error", "nofunc"],
