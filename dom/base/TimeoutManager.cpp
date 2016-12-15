@@ -55,19 +55,35 @@ const uint32_t kThrottledEventQueueBackPressure = 5000;
 // in the queue equates to an additional kBackPressureDelayMS.
 const double kBackPressureDelayMS = 500;
 
+// This defines a limit for how much the delay must drop before we actually
+// reduce back pressure throttle amount.  This makes the throttle delay
+// a bit "sticky" once we enter back pressure.
+const double kBackPressureDelayReductionThresholdMS = 400;
+
+// The minimum delay we can reduce back pressure to before we just floor
+// the value back to zero.  This allows us to ensure that we can exit
+// back pressure event if there are always a small number of runnables
+// queued up.
+const double kBackPressureDelayMinimumMS = 100;
+
 // Convert a ThrottledEventQueue length to a timer delay in milliseconds.
-// This will return a value between kBackPressureDelayMS and INT32_MAX.
+// This will return a value between 0 and INT32_MAX.
 int32_t
 CalculateNewBackPressureDelayMS(uint32_t aBacklogDepth)
 {
-  // The calculations here assume we are only operating while in back
-  // pressure conditions.
-  MOZ_ASSERT(aBacklogDepth >= kThrottledEventQueueBackPressure);
   double multiplier = static_cast<double>(aBacklogDepth) /
                       static_cast<double>(kThrottledEventQueueBackPressure);
   double value = kBackPressureDelayMS * multiplier;
+  // Avoid overflow
   if (value > INT32_MAX) {
     value = INT32_MAX;
+  }
+
+  // Once we get close to an empty queue just floor the delay back to zero.
+  // We want to ensure we don't get stuck in a condition where there is a
+  // small amount of delay remaining due to an active, but reasonable, queue.
+  else if (value < kBackPressureDelayMinimumMS) {
+    value = 0;
   }
   return static_cast<int32_t>(value);
 }
@@ -76,7 +92,6 @@ CalculateNewBackPressureDelayMS(uint32_t aBacklogDepth)
 
 TimeoutManager::TimeoutManager(nsGlobalWindow& aWindow)
   : mWindow(aWindow),
-    mTimeoutInsertionPoint(nullptr),
     mTimeoutIdCounter(1),
     mTimeoutFiringDepth(0),
     mRunningTimeout(nullptr),
@@ -226,7 +241,7 @@ TimeoutManager::ClearTimeout(int32_t aTimerId, Timeout::Reason aReason)
   uint32_t timerId = (uint32_t)aTimerId;
   Timeout* timeout;
 
-  for (timeout = mTimeouts.getFirst(); timeout; timeout = timeout->getNext()) {
+  for (timeout = mTimeouts.GetFirst(); timeout; timeout = timeout->getNext()) {
     if (timeout->mTimeoutId == timerId && timeout->mReason == aReason) {
       if (timeout->mRunning) {
         /* We're running from inside the timeout. Mark this
@@ -296,7 +311,7 @@ TimeoutManager::RunTimeout(Timeout* aTimeout)
   // whose mWhen is greater than deadline, since once that happens we know
   // nothing past that point is expired.
   last_expired_timeout = nullptr;
-  for (Timeout* timeout = mTimeouts.getFirst();
+  for (Timeout* timeout = mTimeouts.GetFirst();
        timeout && timeout->mWhen <= deadline;
        timeout = timeout->getNext()) {
     if (timeout->mFiringDepth == 0) {
@@ -339,12 +354,12 @@ TimeoutManager::RunTimeout(Timeout* aTimeout)
   last_expired_timeout->setNext(dummy_timeout);
   RefPtr<Timeout> timeoutExtraRef(dummy_timeout);
 
-  last_insertion_point = mTimeoutInsertionPoint;
-  // If we ever start setting mTimeoutInsertionPoint to a non-dummy timeout,
-  // the logic in ResetTimersForThrottleReduction will need to change.
-  mTimeoutInsertionPoint = dummy_timeout;
+  last_insertion_point = mTimeouts.InsertionPoint();
+  // If we ever start setting insertion point to a non-dummy timeout, the logic
+  // in ResetTimersForThrottleReduction will need to change.
+  mTimeouts.SetInsertionPoint(dummy_timeout);
 
-  for (Timeout* timeout = mTimeouts.getFirst();
+  for (Timeout* timeout = mTimeouts.GetFirst();
        timeout != dummy_timeout && !mWindow.IsFrozen();
        timeout = nextTimeout) {
     nextTimeout = timeout->getNext();
@@ -387,7 +402,7 @@ TimeoutManager::RunTimeout(Timeout* aTimeout)
       MOZ_ASSERT(dummy_timeout->HasRefCntOne(), "dummy_timeout may leak");
       Unused << timeoutExtraRef.forget().take();
 
-      mTimeoutInsertionPoint = last_insertion_point;
+      mTimeouts.SetInsertionPoint(last_insertion_point);
 
       return;
     }
@@ -417,7 +432,7 @@ TimeoutManager::RunTimeout(Timeout* aTimeout)
   timeoutExtraRef = nullptr;
   MOZ_ASSERT(dummy_timeout->HasRefCntOne(), "dummy_timeout may leak");
 
-  mTimeoutInsertionPoint = last_insertion_point;
+  mTimeouts.SetInsertionPoint(last_insertion_point);
 
   MaybeApplyBackPressure();
 }
@@ -469,32 +484,50 @@ TimeoutManager::CancelOrUpdateBackPressure(nsGlobalWindow* aWindow)
   MOZ_ASSERT(aWindow == &mWindow);
   MOZ_ASSERT(mBackPressureDelayMS > 0);
 
-  // First, check to see if we are still in back pressure.  If we've dropped
-  // below the threshold we can simply drop our back pressure delay.  We
-  // must also reset timers to remove the old back pressure delay in order to
-  // avoid out-of-order timer execution.
+  // First, re-calculate the back pressure delay.
   RefPtr<ThrottledEventQueue> queue = mWindow.TabGroup()->GetThrottledEventQueue();
-  if (!queue || queue->Length() < kThrottledEventQueueBackPressure) {
+  int32_t newBackPressureDelayMS =
+    CalculateNewBackPressureDelayMS(queue ? queue->Length() : 0);
+
+  // If the delay has increased, then simply apply it.  Increasing the delay
+  // does not risk re-ordering timers with similar parameters.  We want to
+  // extra careful not to re-order sequential calls to setTimeout(func, 0),
+  // for example.
+  if (newBackPressureDelayMS > mBackPressureDelayMS) {
+    mBackPressureDelayMS = newBackPressureDelayMS;
+  }
+
+  // If the delay has decreased, though, we only apply the new value if it has
+  // reduced significantly.  This hysteresis avoids thrashing the back pressure
+  // value back and forth rapidly.  This is important because reducing the
+  // backpressure delay requires calling ResetTimerForThrottleReduction() which
+  // can be quite expensive.  We only want to call that method if the back log
+  // is really clearing.
+  else if (newBackPressureDelayMS == 0 ||
+           (newBackPressureDelayMS <=
+           (mBackPressureDelayMS - kBackPressureDelayReductionThresholdMS))) {
     int32_t oldBackPressureDelayMS = mBackPressureDelayMS;
-    mBackPressureDelayMS = 0;
+    mBackPressureDelayMS = newBackPressureDelayMS;
+
+    // If the back pressure delay has gone down we must reset any existing
+    // timers to use the new value.  Otherwise we run the risk of executing
+    // timer callbacks out-of-order.
     ResetTimersForThrottleReduction(oldBackPressureDelayMS);
+  }
+
+  // If all of the back pressure delay has been removed then we no longer need
+  // to check back pressure updates.  We can simply return without scheduling
+  // another update runnable.
+  if (!mBackPressureDelayMS) {
     return;
   }
 
-  // Otherwise we are still in back pressure mode.
-
-  // Re-calculate the back pressure delay.
-  int32_t oldBackPressureDelayMS = mBackPressureDelayMS;
-  mBackPressureDelayMS = CalculateNewBackPressureDelayMS(queue->Length());
-
-  // If the back pressure delay has gone down we must reset any existing
-  // timers to use the new value.  Otherwise we run the risk of executing
-  // timer callbacks out-of-order.
-  if (mBackPressureDelayMS < oldBackPressureDelayMS) {
-    ResetTimersForThrottleReduction(oldBackPressureDelayMS);
-  }
-
-  // Dispatch another runnable to update the back pressure state again.
+  // Otherwise, if there is a back pressure delay still in effect we need
+  // queue a runnable to check if it can be reduced in the future.  Note
+  // that this runnable is dispatched to the ThrottledEventQueue.  This
+  // means we will not check for a new value until the current back log
+  // has been processed.  The next update will only keep back pressure if
+  // more runnables continue to be dispatched to the queue.
   nsCOMPtr<nsIRunnable> r =
     NewNonOwningRunnableMethod<StorensRefPtrPassByPtr<nsGlobalWindow>>(this,
       &TimeoutManager::CancelOrUpdateBackPressure, &mWindow);
@@ -598,15 +631,15 @@ TimeoutManager::ResetTimersForThrottleReduction(int32_t aPreviousThrottleDelayMS
 
   TimeStamp now = TimeStamp::Now();
 
-  // If mTimeoutInsertionPoint is non-null, we're in the middle of firing
-  // timers and the timers we're planning to fire all come before
-  // mTimeoutInsertionPoint; mTimeoutInsertionPoint itself is a dummy timeout
-  // with an mWhen that may be semi-bogus.  In that case, we don't need to do
-  // anything with mTimeoutInsertionPoint or anything before it, so should
-  // start at the timer after mTimeoutInsertionPoint, if there is one.
+  // If insertion point is non-null, we're in the middle of firing timers and
+  // the timers we're planning to fire all come before insertion point;
+  // insertion point itself is a dummy timeout with an mWhen that may be
+  // semi-bogus.  In that case, we don't need to do anything with insertion
+  // point or anything before it, so should start at the timer after insertion
+  // point, if there is one.
   // Otherwise, start at the beginning of the list.
-  for (Timeout* timeout = mTimeoutInsertionPoint ?
-         mTimeoutInsertionPoint->getNext() : mTimeouts.getFirst();
+  for (Timeout* timeout = mTimeouts.InsertionPoint() ?
+         mTimeouts.InsertionPoint()->getNext() : mTimeouts.GetFirst();
        timeout; ) {
     // It's important that this check be <= so that we guarantee that
     // taking std::max with |now| won't make a quantity equal to
@@ -687,14 +720,15 @@ TimeoutManager::ClearAllTimeouts()
   Timeout* timeout;
   Timeout* nextTimeout;
 
-  for (timeout = mTimeouts.getFirst(); timeout; timeout = nextTimeout) {
+  for (timeout = mTimeouts.GetFirst(); timeout; timeout = nextTimeout) {
     /* If RunTimeout() is higher up on the stack for this
        window, e.g. as a result of document.write from a timeout,
        then we need to reset the list insertion point for
        newly-created timeouts in case the user adds a timeout,
        before we pop the stack back to RunTimeout. */
-    if (mRunningTimeout == timeout)
-      mTimeoutInsertionPoint = nullptr;
+    if (mRunningTimeout == timeout) {
+      mTimeouts.SetInsertionPoint(nullptr);
+    }
 
     nextTimeout = timeout->getNext();
 
@@ -716,18 +750,17 @@ TimeoutManager::ClearAllTimeouts()
   }
 
   // Clear out our list
-  mTimeouts.clear();
+  mTimeouts.Clear();
 }
 
 void
 TimeoutManager::InsertTimeoutIntoList(Timeout* aTimeout)
 {
-  // Start at mLastTimeout and go backwards.  Don't go further than
-  // mTimeoutInsertionPoint, though.  This optimizes for the common case of
-  // insertion at the end.
+  // Start at mLastTimeout and go backwards.  Don't go further than insertion
+  // point, though.  This optimizes for the common case of insertion at the end.
   Timeout* prevSibling;
-  for (prevSibling = mTimeouts.getLast();
-       prevSibling && prevSibling != mTimeoutInsertionPoint &&
+  for (prevSibling = mTimeouts.GetLast();
+       prevSibling && prevSibling != mTimeouts.InsertionPoint() &&
          // This condition needs to match the one in SetTimeoutOrInterval that
          // determines whether to set mWhen or mTimeRemaining.
          (mWindow.IsFrozen() ?
@@ -741,7 +774,7 @@ TimeoutManager::InsertTimeoutIntoList(Timeout* aTimeout)
   if (prevSibling) {
     prevSibling->setNext(aTimeout);
   } else {
-    mTimeouts.insertFront(aTimeout);
+    mTimeouts.InsertFront(aTimeout);
   }
 
   aTimeout->mFiringDepth = 0;
@@ -775,7 +808,7 @@ TimeoutManager::EndRunningTimeout(Timeout* aTimeout)
 void
 TimeoutManager::UnmarkGrayTimers()
 {
-  for (Timeout* timeout = mTimeouts.getFirst();
+  for (Timeout* timeout = mTimeouts.GetFirst();
        timeout;
        timeout = timeout->getNext()) {
     if (timeout->mScriptHandler) {
@@ -787,7 +820,7 @@ TimeoutManager::UnmarkGrayTimers()
 void
 TimeoutManager::Suspend()
 {
-  for (Timeout* t = mTimeouts.getFirst(); t; t = t->getNext()) {
+  for (Timeout* t = mTimeouts.GetFirst(); t; t = t->getNext()) {
     // Leave the timers with the current time remaining.  This will
     // cause the timers to potentially fire when the window is
     // Resume()'d.  Time effectively passes while suspended.
@@ -810,7 +843,7 @@ TimeoutManager::Resume()
   TimeStamp now = TimeStamp::Now();
   DebugOnly<bool> _seenDummyTimeout = false;
 
-  for (Timeout* t = mTimeouts.getFirst(); t; t = t->getNext()) {
+  for (Timeout* t = mTimeouts.GetFirst(); t; t = t->getNext()) {
     // There's a chance we're being called with RunTimeout on the stack in which
     // case we have a dummy timeout in the list that *must not* be resumed. It
     // can be identified by a null mWindow.
@@ -856,7 +889,7 @@ void
 TimeoutManager::Freeze()
 {
   TimeStamp now = TimeStamp::Now();
-  for (Timeout *t = mTimeouts.getFirst(); t; t = t->getNext()) {
+  for (Timeout *t = mTimeouts.GetFirst(); t; t = t->getNext()) {
     // Save the current remaining time for this timeout.  We will
     // re-apply it when the window is Thaw()'d.  This effectively
     // shifts timers to the right as if time does not pass while
@@ -879,7 +912,7 @@ TimeoutManager::Thaw()
   TimeStamp now = TimeStamp::Now();
   DebugOnly<bool> _seenDummyTimeout = false;
 
-  for (Timeout *t = mTimeouts.getFirst(); t; t = t->getNext()) {
+  for (Timeout *t = mTimeouts.GetFirst(); t; t = t->getNext()) {
     // There's a chance we're being called with RunTimeout on the stack in which
     // case we have a dummy timeout in the list that *must not* be resumed. It
     // can be identified by a null mWindow.
