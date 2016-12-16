@@ -22,6 +22,9 @@ config = {
         'UPLOAD_HOST': 'localhost',
         'UPLOAD_PATH': '/home/worker/artifacts/',
     },
+
+    "tooltool_url": 'http://relengapi/tooltool/',
+    'tooltool_manifest_src': "browser/config/tooltool-manifests/macosx64/cross-releng.manifest",
     "mozilla_dir": "src/",
     "simple_name_move": True,
 }
