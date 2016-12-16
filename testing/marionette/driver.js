@@ -43,6 +43,8 @@ const BROWSER_STARTUP_FINISHED = "browser-delayed-startup-finished";
 const CLICK_TO_START_PREF = "marionette.debugging.clicktostart";
 const CONTENT_LISTENER_PREF = "marionette.contentListener";
 
+const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
 const SUPPORTED_STRATEGIES = new Set([
   element.Strategy.ClassName,
   element.Strategy.Selector,
@@ -427,7 +429,13 @@ GeckoDriver.prototype.registerBrowser = function (id, be) {
   let reg = {};
   // this will be sent to tell the content process if it is the main content
   let mainContent = this.curBrowser.mainContentId === null;
-  if (be.getAttribute("type") != "content") {
+  // We want to ignore frames that are XUL browsers that aren't in the "main"
+  // tabbrowser, but accept things on Fennec (which doesn't have a
+  // xul:tabbrowser), and accept HTML iframes (because tests depend on it),
+  // as well as XUL frames. Ideally this should be cleaned up and we should
+  // keep track of browsers a different way.
+  if (this.appName != "Firefox" || be.namespaceURI != XUL_NS ||
+      be.nodeName != "browser" || be.getTabBrowser()) {
     // curBrowser holds all the registered frames in knownFrames
     let uid = this.generateFrameId(id);
     reg.id = uid;
@@ -882,7 +890,7 @@ GeckoDriver.prototype.executeScript = function*(cmd, resp) {
  * @throws JavaScriptError
  *     If an Error was thrown whilst evaluating the script.
  */
-GeckoDriver.prototype.executeAsyncScript = function (cmd, resp) {
+GeckoDriver.prototype.executeAsyncScript = function* (cmd, resp) {
   let {script, args, scriptTimeout} = cmd.parameters;
   scriptTimeout = scriptTimeout || this.scriptTimeout;
 
@@ -932,7 +940,7 @@ GeckoDriver.prototype.execute_ = function (script, args, timeout, opts = {}) {
  *
  * Scripts are expected to call the {@code finish} global when done.
  */
-GeckoDriver.prototype.executeJSScript = function (cmd, resp) {
+GeckoDriver.prototype.executeJSScript = function* (cmd, resp) {
   let {script, args, scriptTimeout} = cmd.parameters;
   scriptTimeout = scriptTimeout || this.scriptTimeout;
 
@@ -2241,6 +2249,9 @@ GeckoDriver.prototype.closeChromeWindow = function (cmd, resp) {
   }
 
   try {
+    // reset frame to the top-most frame
+    this.curFrame = null;
+
     this.mm.removeDelayedFrameScript(FRAME_SCRIPT);
     this.getCurrentWindow().close();
   } catch (e) {
