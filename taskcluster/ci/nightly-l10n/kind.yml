@@ -121,5 +121,33 @@ jobs:
             tooltool-downloads: internal
             need-xvfb: true
 
+
+    macosx64-nightly/opt:
+        description: "Localization"
+        attributes:
+            build_platform: macosx64-nightly
+            nightly: true
+        index:
+            job-name: macosx64-nightly-l10n-opt
+        treeherder:
+            platform: macosx64/opt
+        worker:
+            env:
+                EN_US_PACKAGE_NAME: target.dmg
+                EN_US_BINARY_URL:
+                    task-reference: https://queue.taskcluster.net/v1/task/<unsigned-build>/artifacts/public/build
+        run:
+            script: mozharness/scripts/desktop_l10n.py
+            actions: [clone-locales list-locales setup repack submit-to-balrog summary]
+            config:
+                - single_locale/tc_macosx64.py
+                - taskcluster_nightly.py
+            options:
+                - environment-config=single_locale/production.py
+                - branch-config=single_locale/{project}.py
+                - platform-config=single_locale/macosx64.py
+            tooltool-downloads: internal
+
+
 kind-dependencies:
   - build-signing

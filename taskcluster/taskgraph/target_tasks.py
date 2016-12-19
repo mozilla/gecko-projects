@@ -157,3 +157,17 @@ def target_tasks_nightly_linux(full_task_graph, parameters):
         if platform in ('linux64-nightly', 'linux-nightly'):
             return task.attributes.get('nightly', False)
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+# nightly_linux should be refactored to be nightly_all once
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1267425 dependent bugs are implemented
+@_target_task('nightly_macosx')
+def target_tasks_nightly_macosx(full_task_graph, parameters):
+    """Select the set of tasks required for a nightly build of linux. The
+    nightly build process involves a pipeline of builds, signing,
+    and, eventually, uploading the tasks to balrog."""
+    def filter(task):
+        platform = task.attributes.get('build_platform')
+        if platform in ('macosx64-nightly', ):
+            return task.attributes.get('nightly', False)
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]

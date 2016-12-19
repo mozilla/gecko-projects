@@ -52,6 +52,8 @@ JOB_NAME_WHITELIST = set([
     'linux32-nightly-l10n-opt',
     'macosx64-debug',
     'macosx64-opt',
+    'macosx64-nightly-opt',
+    'macosx64-nightly-l10n-opt',
     'macosx64-st-an-opt',
     'nexus-5-l-eng-debug',
     'nexus-5-l-eng-opt',
