@@ -540,7 +540,7 @@ size. -->
 <!-- Localization note (pref_compact_tabs): Label for setting that controls whether 1 wide column or
      2 narrower (compact) columns are used for tabs in the tabs tray in portrait mode on phones. -->
 <!ENTITY pref_compact_tabs "Compact tabs">
-<!ENTITY pref_compact_tabs_summary "Display two columns of tabs in the tabs tray in portrait mode">
+<!ENTITY pref_compact_tabs_summary2 "Arrange tabs in two columns in portrait mode">
 
 <!-- Localization note (page_removed): This string appears in a toast message when
      any page is removed frome about:home. This includes pages that are in history,
@@ -854,4 +854,4 @@ is simply hidden from the Activity Stream panel. -->
 <!ENTITY activity_stream_delete_history "Delete from History">
 
 <!ENTITY activity_stream_welcome_title "Welcome to your Highlights">
-<!ENTITY activity_stream_welcome_content "Firefox now creates highlights of things you\'ve discovered on the web so you can find your way back to great articles, videos, bookmarks, and other pages.">
+<!ENTITY activity_stream_welcome_content1 "&brandShortName; now creates highlights of things you\'ve discovered on the web so you can find your way back to great articles, videos, bookmarks, and other pages.">

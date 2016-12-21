@@ -81,6 +81,14 @@ using namespace mozilla::layers;
 using namespace mozilla::widget;
 using namespace mozilla::image;
 
+IDWriteRenderingParams* GetDwriteRenderingParams(bool aGDI)
+{
+  gfxWindowsPlatform::TextRenderingMode mode = aGDI ?
+    gfxWindowsPlatform::TEXT_RENDERING_GDI_CLASSIC :
+    gfxWindowsPlatform::TEXT_RENDERING_NORMAL;
+  return gfxWindowsPlatform::GetPlatform()->GetRenderingParams(mode);
+}
+
 DCFromDrawTarget::DCFromDrawTarget(DrawTarget& aDrawTarget)
 {
   mDC = nullptr;
@@ -422,6 +430,7 @@ gfxWindowsPlatform::InitDWriteSupport()
   }
 
   mDWriteFactory = factory;
+  Factory::SetDWriteFactory(mDWriteFactory);
 
   SetupClearTypeParams();
   reporter.SetSuccessful();
@@ -464,17 +473,16 @@ gfxWindowsPlatform::HandleDeviceReset()
 void
 gfxWindowsPlatform::UpdateBackendPrefs()
 {
-  uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO);
-  uint32_t contentMask = BackendTypeBit(BackendType::CAIRO);
+  uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) |
+                        BackendTypeBit(BackendType::SKIA);
+  uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) |
+                         BackendTypeBit(BackendType::SKIA);
   BackendType defaultBackend = BackendType::CAIRO;
   if (gfxConfig::IsEnabled(Feature::DIRECT2D) && Factory::GetD2D1Device()) {
     contentMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     canvasMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     defaultBackend = BackendType::DIRECT2D1_1;
-  } else {
-    canvasMask |= BackendTypeBit(BackendType::SKIA);
   }
-  contentMask |= BackendTypeBit(BackendType::SKIA);
   InitBackendPrefs(canvasMask, defaultBackend, contentMask, defaultBackend);
 }
 

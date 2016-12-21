@@ -3570,6 +3570,11 @@ nsresult nsContentUtils::FormatLocalizedString(PropertiesFile aFile,
   NS_ENSURE_SUCCESS(rv, rv);
   nsIStringBundle *bundle = sStringBundles[aFile];
 
+  if (!aParams || !aParamsLength) {
+    return bundle->GetStringFromName(NS_ConvertASCIItoUTF16(aKey).get(),
+                                     getter_Copies(aResult));
+  }
+
   return bundle->FormatStringFromName(NS_ConvertASCIItoUTF16(aKey).get(),
                                       aParams, aParamsLength,
                                       getter_Copies(aResult));
@@ -6742,6 +6747,8 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   AutoJSAPI jsapi;
   jsapi.Init();
   JSContext* cx = jsapi.cx();
+
+  MOZ_RELEASE_ASSERT(js::AllowGCBarriers(cx), "IsPatternMatching can enter the JS engine during painting. See bug 1310335.");
 
   // We can use the junk scope here, because we're just using it for
   // regexp evaluation, not actual script execution.

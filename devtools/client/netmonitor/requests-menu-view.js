@@ -70,6 +70,7 @@ RequestsMenuView.prototype = {
     this.store = store;
 
     this.contextMenu = new RequestListContextMenu();
+    this.contextMenu.initialize(store);
 
     Prefs.filters.forEach(type => store.dispatch(Actions.toggleFilterType(type)));
 
@@ -86,8 +87,6 @@ RequestsMenuView.prototype = {
       () => this.store.getState().ui.sidebarOpen,
       () => this.onResize()
     ));
-
-    this._onContextPerfCommand = () => NetMonitorView.toggleFrontendMode();
 
     this.sendCustomRequestEvent = this.sendCustomRequest.bind(this);
     this.closeCustomRequestEvent = this.closeCustomRequest.bind(this);
@@ -127,9 +126,6 @@ RequestsMenuView.prototype = {
     } else {
       $("#headers-summary-resend").hidden = true;
     }
-
-    $("#network-statistics-back-button")
-      .addEventListener("command", this._onContextPerfCommand, false);
   },
 
   /**
@@ -142,8 +138,6 @@ RequestsMenuView.prototype = {
 
     // this.flushRequestsTask.disarm();
 
-    $("#network-statistics-back-button")
-      .removeEventListener("command", this._onContextPerfCommand, false);
     $("#custom-request-send-button")
       .removeEventListener("click", this.sendCustomRequestEvent, false);
     $("#custom-request-close-button")
@@ -210,15 +204,16 @@ RequestsMenuView.prototype = {
     const action = Actions.updateRequest(id, data, true);
     yield this.store.dispatch(action);
 
-    const { responseContent, requestPostData } = action.data;
+    let { responseContent, requestPostData } = action.data;
 
-    // Fetch response data if the response is an image (to display thumbnail)
     if (responseContent && responseContent.content) {
       let request = getRequestById(this.store.getState(), action.id);
+      let { text, encoding } = responseContent.content;
       if (request) {
         let { mimeType } = request;
+
+        // Fetch response data if the response is an image (to display thumbnail)
         if (mimeType.includes("image/")) {
-          let { text, encoding } = responseContent.content;
           let responseBody = yield gNetwork.getString(text);
           const dataUri = formDataURI(mimeType, encoding, responseBody);
           yield this.store.dispatch(Actions.updateRequest(
@@ -227,6 +222,16 @@ RequestsMenuView.prototype = {
             true
           ));
           window.emit(EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
+        // Fetch response text only if the response is html, but not all text/*
+        } else if (mimeType.includes("text/html") && typeof text !== "string") {
+          let responseBody = yield gNetwork.getString(text);
+          responseContent.content.text = responseBody;
+          responseContent = Object.assign({}, responseContent);
+          yield this.store.dispatch(Actions.updateRequest(
+            action.id,
+            { responseContent },
+            true
+          ));
         }
       }
     }

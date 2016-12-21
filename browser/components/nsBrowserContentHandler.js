@@ -551,8 +551,11 @@ nsBrowserContentHandler.prototype = {
     if (startPage == "about:blank")
       startPage = "";
 
-    // Only show the startPage if we're not restoring an update session.
-    if (overridePage && startPage && !willRestoreSession)
+    let skipStartPage = override == OVERRIDE_NEW_PROFILE &&
+      prefb.getBoolPref("browser.startup.firstrunSkipsHomepage");
+    // Only show the startPage if we're not restoring an update session and are
+    // not set to skip the start page on this profile
+    if (overridePage && startPage && !willRestoreSession && !skipStartPage)
       return overridePage + "|" + startPage;
 
     return overridePage || startPage || "about:blank";
@@ -694,18 +697,6 @@ nsDefaultCommandLineHandler.prototype = {
 
   /* nsICommandLineHandler */
   handle : function dch_handle(cmdLine) {
-    // The -url flag is inserted by the operating system when the default
-    // application handler is used. We check for default browser to remove
-    // instances where users explicitly decide to "open with" the browser.
-    // Note that users who launch firefox manually with the -url flag will
-    // get erroneously counted.
-    try {
-      if (cmdLine.findFlag("url", false) &&
-          ShellService.isDefaultBrowser(false, false)) {
-        Services.telemetry.getHistogramById("FX_STARTUP_EXTERNAL_CONTENT_HANDLER").add();
-      }
-    } catch (e) {}
-
     var urilist = [];
 
     if (AppConstants.platform == "win") {

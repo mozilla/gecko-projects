@@ -1817,10 +1817,6 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
     SendAccessKeyNotHandled(localEvent);
   }
 
-  if (PresShell::BeforeAfterKeyboardEventEnabled()) {
-    SendDispatchAfterKeyboardEvent(localEvent);
-  }
-
   return IPC_OK();
 }
 
@@ -1892,7 +1888,7 @@ TabChild::RecvPasteTransferable(const IPCDataTransfer& aDataTransfer,
 
 a11y::PDocAccessibleChild*
 TabChild::AllocPDocAccessibleChild(PDocAccessibleChild*, const uint64_t&,
-                                   const uint32_t&)
+                                   const uint32_t&, const IAccessibleHolder&)
 {
   MOZ_ASSERT(false, "should never call this!");
   return nullptr;

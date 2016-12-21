@@ -444,6 +444,11 @@ WebGLTexture::TexSubImage(const char* funcName, TexImageTarget target, GLint lev
     if (!blob)
         return;
 
+    if (!blob->HasData()) {
+        mContext->ErrorInvalidValue("%s: Source must not be null.", funcName);
+        return;
+    }
+
     TexSubImage(funcName, target, level, xOffset, yOffset, zOffset, pi, blob.get());
 }
 
@@ -475,8 +480,8 @@ ValidateTexImage(WebGLContext* webgl, WebGLTexture* texture, const char* funcNam
 // For *TexImage*
 bool
 WebGLTexture::ValidateTexImageSpecification(const char* funcName, TexImageTarget target,
-                                            GLint level, uint32_t width, uint32_t height,
-                                            uint32_t depth,
+                                            GLint rawLevel, uint32_t width,
+                                            uint32_t height, uint32_t depth,
                                             WebGLTexture::ImageInfo** const out_imageInfo)
 {
     if (mImmutable) {
@@ -486,8 +491,9 @@ WebGLTexture::ValidateTexImageSpecification(const char* funcName, TexImageTarget
 
     // Do this early to validate `level`.
     WebGLTexture::ImageInfo* imageInfo;
-    if (!ValidateTexImage(mContext, this, funcName, target, level, &imageInfo))
+    if (!ValidateTexImage(mContext, this, funcName, target, rawLevel, &imageInfo))
         return false;
+    const uint32_t level(rawLevel);
 
     if (mTarget == LOCAL_GL_TEXTURE_CUBE_MAP &&
         width != height)
@@ -512,17 +518,20 @@ WebGLTexture::ValidateTexImageSpecification(const char* funcName, TexImageTarget
 
     uint32_t maxWidthHeight = 0;
     uint32_t maxDepth = 0;
+    uint32_t maxLevel = 0;
 
     MOZ_ASSERT(level <= 31);
     switch (target.get()) {
     case LOCAL_GL_TEXTURE_2D:
         maxWidthHeight = mContext->mImplMaxTextureSize >> level;
         maxDepth = 1;
+        maxLevel = CeilingLog2(mContext->mImplMaxTextureSize);
         break;
 
     case LOCAL_GL_TEXTURE_3D:
         maxWidthHeight = mContext->mImplMax3DTextureSize >> level;
         maxDepth = maxWidthHeight;
+        maxLevel = CeilingLog2(mContext->mImplMax3DTextureSize);
         break;
 
     case LOCAL_GL_TEXTURE_2D_ARRAY:
@@ -530,13 +539,21 @@ WebGLTexture::ValidateTexImageSpecification(const char* funcName, TexImageTarget
         // "The maximum number of layers for two-dimensional array textures (depth)
         //  must be at least MAX_ARRAY_TEXTURE_LAYERS for all levels."
         maxDepth = mContext->mImplMaxArrayTextureLayers;
+        maxLevel = CeilingLog2(mContext->mImplMaxTextureSize);
         break;
 
     default: // cube maps
         MOZ_ASSERT(IsCubeMap());
         maxWidthHeight = mContext->mImplMaxCubeMapTextureSize >> level;
         maxDepth = 1;
+        maxLevel = CeilingLog2(mContext->mImplMaxCubeMapTextureSize);
         break;
+    }
+
+    if (level > maxLevel) {
+        mContext->ErrorInvalidValue("%s: Requested level is not supported for target.",
+                                    funcName);
+        return false;
     }
 
     if (width > maxWidthHeight ||
@@ -2004,6 +2021,13 @@ DoCopyTexOrSubImage(WebGLContext* webgl, const char* funcName, bool isSubImage,
 
     if (error == LOCAL_GL_OUT_OF_MEMORY) {
         webgl->ErrorOutOfMemory("%s: Ran out of memory during texture copy.", funcName);
+        return false;
+    }
+
+    if (gl->IsANGLE() && error == LOCAL_GL_INVALID_OPERATION) {
+        webgl->ErrorImplementationBug("%s: ANGLE is particular about CopyTexSubImage"
+                                      " formats matching exactly.",
+                                      funcName);
         return false;
     }
 

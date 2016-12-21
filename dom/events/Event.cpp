@@ -568,6 +568,34 @@ Event::SetEventType(const nsAString& aEventTypeArg)
   mEvent->SetDefaultComposedInNativeAnonymousContent();
 }
 
+already_AddRefed<EventTarget>
+Event::EnsureWebAccessibleRelatedTarget(EventTarget* aRelatedTarget)
+{
+  nsCOMPtr<EventTarget> relatedTarget = aRelatedTarget;
+  if (relatedTarget) {
+    nsCOMPtr<nsIContent> content = do_QueryInterface(relatedTarget);
+    nsCOMPtr<nsIContent> currentTarget =
+      do_QueryInterface(mEvent->mCurrentTarget);
+
+    if (content && content->ChromeOnlyAccess() &&
+        !nsContentUtils::CanAccessNativeAnon()) {
+      content = content->FindFirstNonChromeOnlyAccessContent();
+      relatedTarget = do_QueryInterface(content);
+    }
+
+    nsIContent* shadowRelatedTarget =
+      GetShadowRelatedTarget(currentTarget, content);
+    if (shadowRelatedTarget) {
+      relatedTarget = shadowRelatedTarget;
+    }
+
+    if (relatedTarget) {
+      relatedTarget = relatedTarget->GetTargetForDOMEvent();
+    }
+  }
+  return relatedTarget.forget();
+}
+
 void
 Event::InitEvent(const nsAString& aEventTypeArg,
                  bool aCanBubbleArg,
@@ -1094,16 +1122,11 @@ Event::TimeStamp() const
     return perf->GetDOMTiming()->TimeStampToDOMHighRes(mEvent->mTimeStamp);
   }
 
-  // For dedicated workers, we should make times relative to the navigation
-  // start of the document that created the worker, which is the same as the
-  // timebase for performance.now().
   workers::WorkerPrivate* workerPrivate =
     workers::GetCurrentThreadWorkerPrivate();
   MOZ_ASSERT(workerPrivate);
 
-  TimeDuration duration =
-    mEvent->mTimeStamp - workerPrivate->NowBaseTimeStamp();
-  return duration.ToMilliseconds();
+  return workerPrivate->TimeStampToDOMHighRes(mEvent->mTimeStamp);
 }
 
 bool

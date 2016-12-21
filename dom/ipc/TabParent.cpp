@@ -867,7 +867,8 @@ TabParent::SetDocShell(nsIDocShell *aDocShell)
 
   a11y::PDocAccessibleParent*
 TabParent::AllocPDocAccessibleParent(PDocAccessibleParent* aParent,
-                                     const uint64_t&, const uint32_t&)
+                                     const uint64_t&, const uint32_t&,
+                                     const IAccessibleHolder&)
 {
 #ifdef ACCESSIBILITY
   return new a11y::DocAccessibleParent();
@@ -889,7 +890,8 @@ mozilla::ipc::IPCResult
 TabParent::RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
                                          PDocAccessibleParent* aParentDoc,
                                          const uint64_t& aParentID,
-                                         const uint32_t& aMsaaID)
+                                         const uint32_t& aMsaaID,
+                                         const IAccessibleHolder& aDocCOMProxy)
 {
 #ifdef ACCESSIBILITY
   auto doc = static_cast<a11y::DocAccessibleParent*>(aDoc);
@@ -905,6 +907,7 @@ TabParent::RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
     auto parentDoc = static_cast<a11y::DocAccessibleParent*>(aParentDoc);
     bool added = parentDoc->AddChildDoc(doc, aParentID);
 #ifdef XP_WIN
+    MOZ_ASSERT(aDocCOMProxy.IsNull());
     if (added) {
       a11y::WrapperFor(doc)->SetID(aMsaaID);
     }
@@ -926,6 +929,9 @@ TabParent::RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
     a11y::DocManager::RemoteDocAdded(doc);
 #ifdef XP_WIN
     a11y::WrapperFor(doc)->SetID(aMsaaID);
+    MOZ_ASSERT(!aDocCOMProxy.IsNull());
+    RefPtr<IAccessible> proxy(aDocCOMProxy.Get());
+    doc->SetCOMProxy(proxy);
 #endif
   }
 #endif
@@ -1946,28 +1952,6 @@ TabParent::RecvReplyKeyEvent(const WidgetKeyboardEvent& event)
 }
 
 mozilla::ipc::IPCResult
-TabParent::RecvDispatchAfterKeyboardEvent(const WidgetKeyboardEvent& aEvent)
-{
-  NS_ENSURE_TRUE(mFrameElement, IPC_OK());
-
-  WidgetKeyboardEvent localEvent(aEvent);
-  localEvent.mWidget = GetWidget();
-
-  nsIDocument* doc = mFrameElement->OwnerDoc();
-  nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
-  NS_ENSURE_TRUE(presShell, IPC_OK());
-
-  if (mFrameElement &&
-      PresShell::BeforeAfterKeyboardEventEnabled() &&
-      localEvent.mMessage != eKeyPress) {
-    presShell->DispatchAfterKeyboardEvent(mFrameElement, localEvent,
-                                          aEvent.DefaultPrevented());
-  }
-
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
 TabParent::RecvAccessKeyNotHandled(const WidgetKeyboardEvent& aEvent)
 {
   NS_ENSURE_TRUE(mFrameElement, IPC_OK());
@@ -2142,10 +2126,10 @@ TabParent::RecvStartPluginIME(const WidgetKeyboardEvent& aKeyboardEvent,
   if (!widget) {
     return IPC_OK();
   }
-  widget->StartPluginIME(aKeyboardEvent,
-                         (int32_t&)aPanelX,
-                         (int32_t&)aPanelY,
-                         *aCommitted);
+  Unused << widget->StartPluginIME(aKeyboardEvent,
+                                   (int32_t&)aPanelX,
+                                   (int32_t&)aPanelY,
+                                   *aCommitted);
   return IPC_OK();
 }
 

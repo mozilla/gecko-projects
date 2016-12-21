@@ -431,7 +431,7 @@
   <string name="pref_scroll_title_bar_summary">&pref_scroll_title_bar_summary2;</string>
 
   <string name="pref_compact_tabs">&pref_compact_tabs;</string>
-  <string name="pref_compact_tabs_summary">&pref_compact_tabs_summary;</string>
+  <string name="pref_compact_tabs_summary">&pref_compact_tabs_summary2;</string>
 
   <string name="page_removed">&page_removed;</string>
 
@@ -642,5 +642,5 @@
   <string name="activity_stream_delete_history">&activity_stream_delete_history;</string>
 
   <string name="activity_stream_welcome_title">&activity_stream_welcome_title;</string>
-  <string name="activity_stream_welcome_content">&activity_stream_welcome_content;</string>
+  <string name="activity_stream_welcome_content">&activity_stream_welcome_content1;</string>
 </resources>

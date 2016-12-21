@@ -204,6 +204,15 @@ PuppetWidget::Show(bool aState)
   }
 
   if (!wasVisible && mVisible) {
+    // The previously attached widget listener is handy if
+    // we're transitioning from page to page without dropping
+    // layers (since we'll continue to show the old layers
+    // associated with that old widget listener). If the
+    // PuppetWidget was hidden, those layers are dropped,
+    // so the previously attached widget listener is really
+    // of no use anymore (and is actually actively harmful - see
+    // bug 1323586).
+    mPreviouslyAttachedWidgetListener = nullptr;
     Resize(mBounds.width, mBounds.height, false);
     Invalidate(mBounds);
   }
@@ -211,7 +220,7 @@ PuppetWidget::Show(bool aState)
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 PuppetWidget::Resize(double aWidth,
                      double aHeight,
                      bool   aRepaint)
@@ -221,7 +230,8 @@ PuppetWidget::Resize(double aWidth,
                                      NSToIntRound(aHeight)));
 
   if (mChild) {
-    return mChild->Resize(aWidth, aHeight, aRepaint);
+    mChild->Resize(aWidth, aHeight, aRepaint);
+    return;
   }
 
   // XXX: roc says that |aRepaint| dictates whether or not to
@@ -242,8 +252,6 @@ PuppetWidget::Resize(double aWidth,
     }
     mAttachedWidgetListener->WindowResized(this, mBounds.width, mBounds.height);
   }
-
-  return NS_OK;
 }
 
 nsresult
@@ -672,7 +680,7 @@ PuppetWidget::NotifyIMEInternal(const IMENotification& aIMENotification)
   }
 }
 
-NS_IMETHODIMP
+nsresult
 PuppetWidget::StartPluginIME(const mozilla::WidgetKeyboardEvent& aKeyboardEvent,
                              int32_t aPanelX, int32_t aPanelY,
                              nsString& aCommitted)

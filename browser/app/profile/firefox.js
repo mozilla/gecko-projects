@@ -49,6 +49,7 @@ pref("extensions.getAddons.search.url", "https://services.addons.mozilla.org/%LO
 pref("extensions.webservice.discoverURL", "https://discovery.addons.mozilla.org/%LOCALE%/firefox/discovery/pane/%VERSION%/%OS%/%COMPATIBILITY_MODE%");
 pref("extensions.getAddons.recommended.url", "https://services.addons.mozilla.org/%LOCALE%/%APP%/api/%API_VERSION%/list/recommended/all/%MAX_RESULTS%/%OS%/%VERSION%?src=firefox");
 pref("extensions.getAddons.link.url", "https://addons.mozilla.org/%LOCALE%/firefox/");
+pref("extensions.getAddons.themes.browseURL", "https://addons.mozilla.org/%LOCALE%/firefox/themes/?src=firefox");
 
 pref("extensions.update.autoUpdateDefault", true);
 
@@ -216,6 +217,8 @@ pref("browser.shell.defaultBrowserCheckCount", 0);
 // The behavior of option 3 is detailed at: http://wiki.mozilla.org/Session_Restore
 pref("browser.startup.page",                1);
 pref("browser.startup.homepage",            "chrome://branding/locale/browserconfig.properties");
+// Whether we should skip the homepage when opening the first-run page
+pref("browser.startup.firstrunSkipsHomepage", false);
 
 pref("browser.slowStartup.notificationDisabled", false);
 pref("browser.slowStartup.timeThreshold", 40000);
@@ -499,6 +502,8 @@ pref("privacy.cpd.offlineApps",             false);
 pref("privacy.cpd.siteSettings",            false);
 pref("privacy.cpd.openWindows",             false);
 
+pref("privacy.history.custom",              false);
+
 // What default should we use for the time span in the sanitizer:
 // 0 - Clear everything
 // 1 - Last Hour
@@ -751,9 +756,6 @@ pref("gecko.handlerService.schemes.ircs.2.name", "chrome://browser-region/locale
 pref("gecko.handlerService.schemes.ircs.2.uriTemplate", "chrome://browser-region/locale/region.properties");
 pref("gecko.handlerService.schemes.ircs.3.name", "chrome://browser-region/locale/region.properties");
 pref("gecko.handlerService.schemes.ircs.3.uriTemplate", "chrome://browser-region/locale/region.properties");
-
-// By default, we don't want protocol/content handlers to be registered from a different host, see bug 402287
-pref("gecko.handlerService.allowRegisterFromDifferentHost", false);
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
 
@@ -1553,3 +1555,6 @@ pref("browser.crashReports.unsubmittedCheck.autoSubmit", false);
 // controlling validation are located in /services/sync/services-sync.js
 pref("services.sync.validation.enabled", true);
 #endif
+
+// Preferences for the form autofill system extension
+pref("browser.formautofill.enabled", false);

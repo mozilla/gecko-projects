@@ -499,13 +499,9 @@ IsMessageMouseUserActivity(EventMessage aMessage)
 static bool
 IsMessageGamepadUserActivity(EventMessage aMessage)
 {
-#ifndef MOZ_GAMEPAD
-  return false;
-#else
   return aMessage == eGamepadButtonDown ||
          aMessage == eGamepadButtonUp ||
          aMessage == eGamepadAxisMove;
-#endif
 }
 
 nsresult
@@ -761,12 +757,8 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     }
     // then fall through...
     MOZ_FALLTHROUGH;
-  case eBeforeKeyDown:
   case eKeyDown:
-  case eAfterKeyDown:
-  case eBeforeKeyUp:
   case eKeyUp:
-  case eAfterKeyUp:
     {
       nsIContent* content = GetFocusedContent();
       if (content)
@@ -2948,7 +2940,14 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       }
 
       nsCOMPtr<nsIContent> activeContent;
-      if (nsEventStatus_eConsumeNoDefault != *aStatus) {
+      // When content calls PreventDefault on pointerdown, we also call
+      // PreventDefault on the subsequent mouse events to suppress default
+      // behaviors. Normally, aStatus should be nsEventStatus_eConsumeNoDefault
+      // when the event is DefaultPrevented but it's reset to
+      // nsEventStatus_eIgnore in EventStateManager::PreHandleEvent. So we also
+      // check if the event is DefaultPrevented.
+      if (nsEventStatus_eConsumeNoDefault != *aStatus &&
+          !aEvent->DefaultPrevented()) {
         nsCOMPtr<nsIContent> newFocus;      
         bool suppressBlur = false;
         if (mCurrentTarget) {
@@ -3328,6 +3327,20 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
     {
       NS_ASSERTION(aEvent->mClass == eDragEventClass, "Expected a drag event");
 
+      // Check if the drag is occurring inside a scrollable area. If so, scroll
+      // the area when the mouse is near the edges.
+      if (mCurrentTarget && aEvent->mMessage == eDragOver) {
+        nsIFrame* checkFrame = mCurrentTarget;
+        while (checkFrame) {
+          nsIScrollableFrame* scrollFrame = do_QueryFrame(checkFrame);
+          // Break out so only the innermost scrollframe is scrolled.
+          if (scrollFrame && scrollFrame->DragScroll(aEvent)) {
+            break;
+          }
+          checkFrame = checkFrame->GetParent();
+        }
+      }
+
       nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
       if (!dragSession)
         break;
@@ -3450,9 +3463,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
     GenerateDragDropEnterExit(presContext, aEvent->AsDragEvent());
     break;
 
-  case eBeforeKeyUp:
   case eKeyUp:
-  case eAfterKeyUp:
     break;
 
   case eKeyPress:

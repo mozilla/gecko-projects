@@ -628,7 +628,11 @@ pref("media.decoder.recycle.enabled", true);
 pref("media.android-media-codec.enabled", true);
 pref("media.android-media-codec.preferred", true);
 // Run decoder in seperate process.
+#ifdef NIGHTLY_BUILD
+pref("media.android-remote-codec.enabled", true);
+#else
 pref("media.android-remote-codec.enabled", false);
+#endif
 
 // Enable MSE
 pref("media.mediasource.enabled", true);
@@ -734,10 +738,6 @@ pref("media.stagefright.omxcodec.flags", 0);
 
 // Coalesce touch events to prevent them from flooding the event queue
 pref("dom.event.touch.coalescing.enabled", false);
-
-// default orientation for the app, default to undefined
-// the java GeckoScreenOrientationListener needs this to be defined
-pref("app.orientation.default", "");
 
 // On memory pressure, release dirty but unused pages held by jemalloc
 // back to the system.

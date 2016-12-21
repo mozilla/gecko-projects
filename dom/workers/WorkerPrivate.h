@@ -216,8 +216,6 @@ private:
   WorkerType mWorkerType;
   TimeStamp mCreationTimeStamp;
   DOMHighResTimeStamp mCreationTimeHighRes;
-  TimeStamp mNowBaseTimeStamp;
-  DOMHighResTimeStamp mNowBaseTimeHighRes;
 
 protected:
   // The worker is owned by its thread, which is represented here.  This is set
@@ -574,14 +572,11 @@ public:
     return mCreationTimeHighRes;
   }
 
-  TimeStamp NowBaseTimeStamp() const
+  DOMHighResTimeStamp TimeStampToDOMHighRes(const TimeStamp& aTimeStamp) const
   {
-    return mNowBaseTimeStamp;
-  }
-
-  DOMHighResTimeStamp NowBaseTime() const
-  {
-    return mNowBaseTimeHighRes;
+    MOZ_ASSERT(!aTimeStamp.IsNull());
+    TimeDuration duration = aTimeStamp - mCreationTimeStamp;
+    return duration.ToMilliseconds();
   }
 
   nsIPrincipal*
@@ -978,6 +973,7 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   bool mPeriodicGCTimerRunning;
   bool mIdleGCTimerRunning;
   bool mWorkerScriptExecutedSuccessfully;
+  bool mFetchHandlerWasAdded;
   bool mPreferences[WORKERPREF_COUNT];
   bool mOnLine;
 
@@ -1215,6 +1211,22 @@ public:
 
   void
   MemoryPressureInternal();
+
+  void
+  SetFetchHandlerWasAdded()
+  {
+    MOZ_ASSERT(IsServiceWorker());
+    AssertIsOnWorkerThread();
+    mFetchHandlerWasAdded = true;
+  }
+
+  bool
+  FetchHandlerWasAdded() const
+  {
+    MOZ_ASSERT(IsServiceWorker());
+    AssertIsOnWorkerThread();
+    return mFetchHandlerWasAdded;
+  }
 
   JSContext*
   GetJSContext() const

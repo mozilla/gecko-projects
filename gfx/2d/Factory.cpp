@@ -157,8 +157,9 @@ namespace gfx {
 int32_t LoggingPrefs::sGfxLogLevel = LOG_DEFAULT;
 
 #ifdef WIN32
-ID3D11Device *Factory::mD3D11Device;
-ID2D1Device *Factory::mD2D1Device;
+ID3D11Device *Factory::mD3D11Device = nullptr;
+ID2D1Device *Factory::mD2D1Device = nullptr;
+IDWriteFactory *Factory::mDWriteFactory = nullptr;
 #endif
 
 DrawEventRecorder *Factory::mRecorder;
@@ -254,7 +255,6 @@ Factory::CheckSurfaceSize(const IntSize &sz,
                           int32_t allocLimit)
 {
   if (sz.width <= 0 || sz.height <= 0) {
-    gfxDebug() << "Surface width or height <= 0!";
     return false;
   }
 
@@ -507,7 +507,7 @@ Factory::CreateNativeFontResource(uint8_t *aData, uint32_t aSize,
 #endif
     {
 #ifdef WIN32
-      if (GetDirect3D11Device()) {
+      if (GetDWriteFactory()) {
         return NativeFontResourceDWrite::Create(aData, aSize,
                                                 /* aNeedsCairo = */ true);
       } else {
@@ -595,6 +595,13 @@ Factory::CreateDrawTargetForD3D11Texture(ID3D11Texture2D *aTexture, SurfaceForma
 }
 
 bool
+Factory::SetDWriteFactory(IDWriteFactory *aFactory)
+{
+  mDWriteFactory = aFactory;
+  return true;
+}
+
+bool
 Factory::SetDirect3D11Device(ID3D11Device *aDevice)
 {
   mD3D11Device = aDevice;
@@ -633,6 +640,12 @@ ID2D1Device*
 Factory::GetD2D1Device()
 {
   return mD2D1Device;
+}
+
+IDWriteFactory*
+Factory::GetDWriteFactory()
+{
+  return mDWriteFactory;
 }
 
 bool

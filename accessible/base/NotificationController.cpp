@@ -842,6 +842,10 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
     size_t newDocCount = newChildDocs.Length();
     for (size_t i = 0; i < newDocCount; i++) {
       DocAccessible* childDoc = newChildDocs[i];
+      if (childDoc->IsDefunct()) {
+        continue;
+      }
+
       Accessible* parent = childDoc->Parent();
       DocAccessibleChild* parentIPCDoc = mDocument->IPCDoc();
       uint64_t id = reinterpret_cast<uintptr_t>(parent->UniqueID());
@@ -854,19 +858,20 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
 
       ipcDoc = new DocAccessibleChild(childDoc);
       childDoc->SetIPCDoc(ipcDoc);
+
+#if defined(XP_WIN)
+      MOZ_ASSERT(parentIPCDoc);
+      parentIPCDoc->ConstructChildDocInParentProcess(ipcDoc, id,
+                                                     AccessibleWrap::GetChildIDFor(childDoc));
+#else
       nsCOMPtr<nsITabChild> tabChild =
         do_GetInterface(mDocument->DocumentNode()->GetDocShell());
       if (tabChild) {
         MOZ_ASSERT(parentIPCDoc);
         static_cast<TabChild*>(tabChild.get())->
-          SendPDocAccessibleConstructor(ipcDoc, parentIPCDoc, id,
-#if defined(XP_WIN)
-                                        AccessibleWrap::GetChildIDFor(childDoc)
-#else
-                                        0
-#endif
-                                        );
+          SendPDocAccessibleConstructor(ipcDoc, parentIPCDoc, id, 0, 0);
       }
+#endif
     }
   }
 

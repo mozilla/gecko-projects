@@ -60,6 +60,8 @@ var gAdvancedPane = {
       SiteDataManager.updateSites();
       setEventListener("clearSiteDataButton", "command",
                        gAdvancedPane.clearSiteData);
+      setEventListener("siteDataSettings", "command",
+                       gAdvancedPane.showSiteDataSettings);
     }
 
     setEventListener("layers.acceleration.disabled", "change",
@@ -119,6 +121,16 @@ var gAdvancedPane = {
       return;
     var advancedPrefs = document.getElementById("advancedPrefs");
     var preference = document.getElementById("browser.preferences.advanced.selectedTabIndex");
+
+    // tabSelectionChanged gets called twice due to the selectedIndex being set
+    // by both the selectedItem and selectedPanel callstacks. This guard is used
+    // to prevent double-counting in Telemetry.
+    if (preference.valueFromPreferences != advancedPrefs.selectedIndex) {
+      Services.telemetry
+              .getHistogramById("FX_PREFERENCES_CATEGORY_OPENED")
+              .add(telemetryBucketForCategory("advanced"));
+    }
+
     preference.valueFromPreferences = advancedPrefs.selectedIndex;
   },
 
@@ -337,6 +349,10 @@ var gAdvancedPane = {
   showConnections: function()
   {
     gSubDialog.open("chrome://browser/content/preferences/connection.xul");
+  },
+
+  showSiteDataSettings: function() {
+    gSubDialog.open("chrome://browser/content/preferences/siteDataSettings.xul");
   },
 
   updateTotalSiteDataSize: function() {

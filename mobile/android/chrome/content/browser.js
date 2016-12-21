@@ -4851,9 +4851,8 @@ var FormAssistant = {
         // If we have an active composition string, commit it before sending
         // the autocomplete event with the text that will replace it.
         try {
-          let imeEditor = editableElement.editor.QueryInterface(Ci.nsIEditorIMESupport);
-          if (imeEditor.composing)
-            imeEditor.forceCompositionEnd();
+          if (editableElement.editor.composing)
+            editableElement.editor.forceCompositionEnd();
         } catch (e) {}
 
         editableElement.setUserInput(aData);
@@ -6005,7 +6004,7 @@ var SearchEngines = {
     }
 
     // By convention, the currently configured default engine is at position zero in searchEngines.
-    Messaging.sendRequest({
+    GlobalEventDispatcher.sendRequest({
       type: "SearchEngines:Data",
       searchEngines: searchEngines,
       suggest: {
@@ -6723,9 +6722,7 @@ var Distribution = {
           return;
         }
 
-        new Promise((resolve, reject) => {
-          AddonManager.getInstallForFile(new FileUtils.File(entry.path), resolve);
-        }).then(install => {
+        AddonManager.getInstallForFile(new FileUtils.File(entry.path)).then(install => {
           let id = entry.name.substring(0, entry.name.length - 4);
           if (install.addon.id !== id) {
             Cu.reportError("File entry " + entry.path + " contains an add-on with an incorrect ID");

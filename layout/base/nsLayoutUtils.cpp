@@ -84,6 +84,7 @@
 #include "gfxEnv.h"
 #include "gfxUtils.h"
 #include "nsDataHashtable.h"
+#include "nsTableWrapperFrame.h"
 #include "nsTextFrame.h"
 #include "nsFontFaceList.h"
 #include "nsFontInflationData.h"
@@ -3173,8 +3174,6 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
     builder.SetDescendIntoSubdocuments(false);
   }
 
-  builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
-
   builder.EnterPresShell(aFrame);
   aFrame->BuildDisplayListForStackingContext(&builder, aRect, &list);
   builder.LeavePresShell(aFrame, nullptr);
@@ -3190,6 +3189,7 @@ nsLayoutUtils::GetFramesForArea(nsIFrame* aFrame, const nsRect& aRect,
 #endif
 
   nsDisplayItem::HitTestState hitTestState;
+  builder.SetHitTestShouldStopAtFirstOpaque(aFlags & ONLY_VISIBLE);
   list.HitTest(&builder, aRect, &hitTestState, &aOutFrames);
   list.DeleteAll();
   return NS_OK;
@@ -5869,6 +5869,19 @@ nsLayoutUtils::GetFirstLinePosition(WritingMode aWM,
     if (fType == nsGkAtoms::tableWrapperFrame  ||
         fType == nsGkAtoms::flexContainerFrame ||
         fType == nsGkAtoms::gridContainerFrame) {
+      if ((fType == nsGkAtoms::gridContainerFrame &&
+           aFrame->HasAnyStateBits(NS_STATE_GRID_SYNTHESIZE_BASELINE)) ||
+          (fType == nsGkAtoms::flexContainerFrame &&
+           aFrame->HasAnyStateBits(NS_STATE_FLEX_SYNTHESIZE_BASELINE)) ||
+          (fType == nsGkAtoms::tableWrapperFrame &&
+           static_cast<const nsTableWrapperFrame*>(aFrame)->GetRowCount() == 0)) {
+        // empty grid/flex/table container
+        aResult->mBStart = 0;
+        aResult->mBaseline = aFrame->SynthesizeBaselineBOffsetFromBorderBox(aWM,
+                                       BaselineSharingGroup::eFirst);
+        aResult->mBEnd = aFrame->BSize(aWM);
+        return true;
+      }
       aResult->mBStart = 0;
       aResult->mBaseline = aFrame->GetLogicalBaseline(aWM);
       // This is what we want for the list bullet caller; not sure if
