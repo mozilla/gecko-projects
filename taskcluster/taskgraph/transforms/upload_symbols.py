@@ -32,22 +32,17 @@ def fill_template(config, tasks):
             attributes['nightly'] = True
 
         treeherder = task.get('treeherder', {})
+        th = task['build-task'].task.get('extra')['treeherder']
+        treeherder.setdefault('platform',
+                              "{}/opt".format(th['machine']['platform']))
+        treeherder.setdefault('tier', th['tier'])
+        treeherder.setdefault('kind', th['jobKind'])
         treeherder.setdefault('symbol', 'tc(Sym)')
-        if 'android-api-15' in build_platform:
-            treeherder.setdefault('platform', "{}/opt".format("android-4-0-armv7-api15"))
-        elif 'android-x86' in build_platform:
-            treeherder.setdefault('platform', "{}/opt".format("android-4-2-x86"))
-        elif build_platform == "linux-nightly":
-            treeherder.setdefault('platform', "{}/opt".format("linux32"))
-        else:
-            treeherder.setdefault('platform',
-                                  "{}/opt".format(build_platform).replace("-nightly", ""))
-        treeherder.setdefault('tier', 2)
-        treeherder.setdefault('kind', 'build')
         task['treeherder'] = treeherder
 
         # clear out the stuff that's not part of a task description
         del task['build-label']
         del task['build-platform']
+        del task['build-task']
 
         yield task
