@@ -98,8 +98,15 @@ def make_task_description(config, jobs):
                   'taskid_of_manifest': {"task-reference":
                                          taskid_of_manifest},
                   'update_manifest': update_manifest}
+
+        attributes = {
+                'nightly': dep_job.attributes.get('nightly', False),
+                'build_platform': dep_job.attributes.get('build_platform'),
+                'build_type': dep_job.attributes.get('build_type'),
+        }
         if job.get('locale'):
             worker['locale'] = job['locale']
+            attributes['locale'] = job['locale']
 
         task = {
             'label': label,
@@ -110,11 +117,7 @@ def make_task_description(config, jobs):
             'worker': worker,
             'scopes': [],
             'dependencies': dependencies,
-            'attributes': {
-                'nightly': dep_job.attributes.get('nightly', False),
-                'build_platform': dep_job.attributes.get('build_platform'),
-                'build_type': dep_job.attributes.get('build_type'),
-            },
+            'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
         }

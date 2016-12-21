@@ -74,6 +74,16 @@ def make_task_description(config, jobs):
         treeherder.setdefault('tier', 2)
         treeherder.setdefault('kind', 'build')
 
+        attributes = {
+                'nightly': dep_job.attributes.get('nightly', False),
+                'build_platform': dep_job.attributes.get('build_platform'),
+                'build_type': dep_job.attributes.get('build_type'),
+        }
+
+        if dep_job.attributes.get('locale'):
+            treeherder['symbol'] = 'tc-Up({})'.format(dep_job.attributes.get('locale'))
+            attributes['locale'] = dep_job.attributes.get('locale')
+
         label = job.get('label', "balrog-{}".format(dep_job.label))
 
         parent_task_artifacts_url = {
@@ -90,11 +100,7 @@ def make_task_description(config, jobs):
                        'task_artifact_url': parent_task_artifacts_url},
             'scopes': [],
             'dependencies': {'beetmover': dep_job.label},
-            'attributes': {
-                'nightly': dep_job.attributes.get('nightly', False),
-                'build_platform': dep_job.attributes.get('build_platform'),
-                'build_type': dep_job.attributes.get('build_type'),
-            },
+            'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
             'treeherder': treeherder,
         }
