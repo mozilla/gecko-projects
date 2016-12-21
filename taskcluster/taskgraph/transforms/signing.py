@@ -110,8 +110,7 @@ def make_task_description(config, jobs):
             'worker': {'implementation': 'scriptworker-signing',
                        'upstream-artifacts': job['upstream-artifacts'],
                        'max-run-time': 3600},
-            'scopes': ["project:releng:signing:cert:nightly-signing"] +
-                      signing_format_scopes,
+            'scopes': ["project:releng:signing:cert:nightly-signing"] + signing_format_scopes,
             'dependencies': {job['depname']: dep_job.label},
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
