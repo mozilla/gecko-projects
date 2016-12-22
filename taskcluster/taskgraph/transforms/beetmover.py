@@ -62,7 +62,6 @@ def make_task_description(config, jobs):
         dep_job = job['dependent-task']
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'tc(BM)')
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
@@ -91,6 +90,9 @@ def make_task_description(config, jobs):
             update_manifest = True
             signing_dependencies = dep_job.dependencies
             dependencies.update(signing_dependencies)
+            treeherder.setdefault('symbol', 'tc(BM-S)')
+        else:
+            treeherder.setdefault('symbol', 'tc(BM)')
 
         worker = {'implementation': 'beetmover',
                   'taskid_to_beetmove': {"task-reference":

@@ -33,11 +33,21 @@ def fill_template(config, tasks):
 
         treeherder = task.get('treeherder', {})
         th = task['build-task'].task.get('extra')['treeherder']
+        if "opt" in th['collection']:
+            style = 'opt'
+        elif 'debug' in th['collection']:
+            style = 'debug'
+        else:
+            raise ValueError("Unsupported symbol upload job")
         treeherder.setdefault('platform',
-                              "{}/opt".format(th['machine']['platform']))
+                              "{}/{}".format(th['machine']['platform'],
+                                             style))
         treeherder.setdefault('tier', th['tier'])
         treeherder.setdefault('kind', th['jobKind'])
-        treeherder.setdefault('symbol', 'tc(Sym)')
+        if 'nightly' in task['build-label']:
+            treeherder.setdefault('symbol', 'tc(SymN)')
+        else:
+            treeherder.setdefault('symbol', 'tc(Sym)')
         task['treeherder'] = treeherder
 
         # clear out the stuff that's not part of a task description
