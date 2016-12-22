@@ -22,9 +22,13 @@ def make_signing_description(config, jobs):
             label = job.get('label',
                             "beetmover-{}-{}".format(locale, dep_job.label))
 
-            # add the locale code
-            symbol = locale
             group = 'tc-BM-L10n'
+
+            # add the locale code
+            if 'signing' in label:
+                symbol = 'S{}'.format(locale)
+            else:
+                symbol = locale
 
             treeherder = {
                 'symbol': join_symbol(group, symbol),
