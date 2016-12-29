@@ -73,6 +73,7 @@ using mozilla::Unused;
 
 #include "AndroidBridge.h"
 #include "AndroidBridgeUtilities.h"
+#include "AndroidUiThread.h"
 #include "android_npapi.h"
 #include "FennecJNINatives.h"
 #include "GeneratedJNINatives.h"
@@ -478,6 +479,50 @@ class nsWindow::NPZCSupport final
     NativePanZoomController::GlobalRef mNPZC;
     int mPreviousButtons;
 
+    template<typename Lambda>
+    class InputEvent final : public nsAppShell::Event
+    {
+        NativePanZoomController::GlobalRef mNPZC;
+        Lambda mLambda;
+
+    public:
+        InputEvent(const NPZCSupport* aNPZCSupport, Lambda&& aLambda)
+            : mNPZC(aNPZCSupport->mNPZC)
+            , mLambda(mozilla::Move(aLambda))
+        {}
+
+        void Run() override
+        {
+            MOZ_ASSERT(NS_IsMainThread());
+
+            JNIEnv* const env = jni::GetGeckoThreadEnv();
+            NPZCSupport* npzcSupport = GetNative(
+                    NativePanZoomController::LocalRef(env, mNPZC));
+
+            if (!npzcSupport || !npzcSupport->mWindow) {
+                // We already shut down.
+                env->ExceptionClear();
+                return;
+            }
+
+            nsWindow* const window = npzcSupport->mWindow;
+            window->UserActivity();
+            return mLambda(window);
+        }
+
+        nsAppShell::Event::Type ActivityType() const override
+        {
+            return nsAppShell::Event::Type::kUIActivity;
+        }
+    };
+
+    template<typename Lambda>
+    void PostInputEvent(Lambda&& aLambda)
+    {
+        nsAppShell::PostEvent(MakeUnique<InputEvent<Lambda>>(
+                this, mozilla::Move(aLambda)));
+    }
+
 public:
     typedef NativePanZoomController::Natives<NPZCSupport> Base;
 
@@ -604,22 +649,7 @@ public:
             return true;
         }
 
-        NativePanZoomController::GlobalRef npzc = mNPZC;
-        nsAppShell::PostEvent([npzc, input, guid, blockId, status] {
-            MOZ_ASSERT(NS_IsMainThread());
-
-            JNIEnv* const env = jni::GetGeckoThreadEnv();
-            NPZCSupport* npzcSupport = GetNative(
-                    NativePanZoomController::LocalRef(env, npzc));
-
-            if (!npzcSupport || !npzcSupport->mWindow) {
-                // We already shut down.
-                env->ExceptionClear();
-                return;
-            }
-
-            nsWindow* const window = npzcSupport->mWindow;
-            window->UserActivity();
+        PostInputEvent([input, guid, blockId, status] (nsWindow* window) {
             WidgetWheelEvent wheelEvent = input.ToWidgetWheelEvent(window);
             window->ProcessUntransformedAPZEvent(&wheelEvent, guid,
                                                  blockId, status);
@@ -733,22 +763,7 @@ public:
             return true;
         }
 
-        NativePanZoomController::GlobalRef npzc = mNPZC;
-        nsAppShell::PostEvent([npzc, input, guid, blockId, status] {
-            MOZ_ASSERT(NS_IsMainThread());
-
-            JNIEnv* const env = jni::GetGeckoThreadEnv();
-            NPZCSupport* npzcSupport = GetNative(
-                    NativePanZoomController::LocalRef(env, npzc));
-
-            if (!npzcSupport || !npzcSupport->mWindow) {
-                // We already shut down.
-                env->ExceptionClear();
-                return;
-            }
-
-            nsWindow* const window = npzcSupport->mWindow;
-            window->UserActivity();
+        PostInputEvent([input, guid, blockId, status] (nsWindow* window) {
             WidgetMouseEvent mouseEvent = input.ToWidgetMouseEvent(window);
             window->ProcessUntransformedAPZEvent(&mouseEvent, guid,
                                                  blockId, status);
@@ -871,22 +886,7 @@ public:
         }
 
         // Dispatch APZ input event on Gecko thread.
-        NativePanZoomController::GlobalRef npzc = mNPZC;
-        nsAppShell::PostEvent([npzc, input, guid, blockId, status] {
-            MOZ_ASSERT(NS_IsMainThread());
-
-            JNIEnv* const env = jni::GetGeckoThreadEnv();
-            NPZCSupport* npzcSupport = GetNative(
-                    NativePanZoomController::LocalRef(env, npzc));
-
-            if (!npzcSupport || !npzcSupport->mWindow) {
-                // We already shut down.
-                env->ExceptionClear();
-                return;
-            }
-
-            nsWindow* const window = npzcSupport->mWindow;
-            window->UserActivity();
+        PostInputEvent([input, guid, blockId, status] (nsWindow* window) {
             WidgetTouchEvent touchEvent = input.ToWidgetTouchEvent(window);
             window->ProcessUntransformedAPZEvent(&touchEvent, guid,
                                                  blockId, status);
@@ -3561,7 +3561,7 @@ nsWindow::NeedsPaint()
 void
 nsWindow::ConfigureAPZControllerThread()
 {
-    APZThreadUtils::SetControllerThread(nullptr);
+    APZThreadUtils::SetControllerThread(mozilla::GetAndroidUiThreadMessageLoop());
 }
 
 already_AddRefed<GeckoContentController>

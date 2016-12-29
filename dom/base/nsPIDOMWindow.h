@@ -12,6 +12,7 @@
 
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
+#include "mozilla/dom/Dispatcher.h"
 #include "mozilla/dom/EventTarget.h"
 #include "js/TypeDecls.h"
 #include "nsRefPtrHashtable.h"
@@ -51,6 +52,7 @@ class ServiceWorkerRegistration;
 class Timeout;
 class TimeoutManager;
 class CustomElementRegistry;
+enum class CallerType : uint32_t;
 } // namespace dom
 } // namespace mozilla
 
@@ -557,7 +559,6 @@ public:
                               nsISupports* aExtraArgument,
                               nsPIDOMWindowOuter** _retval) = 0;
 
-  virtual nsresult GetDevicePixelRatio(float* aRatio) = 0;
   virtual nsresult GetInnerWidth(int32_t* aWidth) = 0;
   virtual nsresult GetInnerHeight(int32_t* aHeight) = 0;
   virtual already_AddRefed<nsICSSDeclaration>
@@ -579,7 +580,8 @@ public:
 
   mozilla::dom::DocGroup* GetDocGroup() const;
 
-  virtual mozilla::ThrottledEventQueue* GetThrottledEventQueue() = 0;
+  virtual nsIEventTarget*
+  EventTargetFor(mozilla::dom::TaskCategory aCategory) const = 0;
 
 protected:
   // The nsPIDOMWindow constructor. The aOuterWindow argument should
@@ -936,6 +938,8 @@ public:
 
   void SetServiceWorkersTestingEnabled(bool aEnabled);
   bool GetServiceWorkersTestingEnabled();
+
+  float GetDevicePixelRatio(mozilla::dom::CallerType aCallerType);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindowOuter, NS_PIDOMWINDOWOUTER_IID)

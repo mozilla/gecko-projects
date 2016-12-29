@@ -3286,8 +3286,8 @@ void
 MacroAssemblerARMCompat::moveValue(const Value& val, Register type, Register data)
 {
     ma_mov(Imm32(val.toNunboxTag()), type);
-    if (val.isMarkable())
-        ma_mov(ImmGCPtr(val.toMarkablePointer()), data);
+    if (val.isGCThing())
+        ma_mov(ImmGCPtr(val.toGCThing()), data);
     else
         ma_mov(Imm32(val.toNunboxPayload()), data);
 }
@@ -3462,8 +3462,8 @@ MacroAssemblerARMCompat::storePayload(const Value& val, const Address& dest)
     ScratchRegisterScope scratch(asMasm());
     SecondScratchRegisterScope scratch2(asMasm());
 
-    if (val.isMarkable())
-        ma_mov(ImmGCPtr(val.toMarkablePointer()), scratch);
+    if (val.isGCThing())
+        ma_mov(ImmGCPtr(val.toGCThing()), scratch);
     else
         ma_mov(Imm32(val.toNunboxPayload()), scratch);
     ma_str(scratch, ToPayload(dest), scratch2);
@@ -3484,8 +3484,8 @@ MacroAssemblerARMCompat::storePayload(const Value& val, const BaseIndex& dest)
     ScratchRegisterScope scratch(asMasm());
     SecondScratchRegisterScope scratch2(asMasm());
 
-    if (val.isMarkable())
-        ma_mov(ImmGCPtr(val.toMarkablePointer()), scratch);
+    if (val.isGCThing())
+        ma_mov(ImmGCPtr(val.toGCThing()), scratch);
     else
         ma_mov(Imm32(val.toNunboxPayload()), scratch);
 
@@ -4844,6 +4844,43 @@ MacroAssembler::PushRegsInMask(LiveRegisterSet set)
 }
 
 void
+MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest, Register scratch)
+{
+    MOZ_ASSERT(!set.has(scratch));
+
+    int32_t diffF = set.fpus().getPushSizeInBytes();
+    int32_t diffG = set.gprs().size() * sizeof(intptr_t);
+
+    MOZ_ASSERT(dest.offset >= diffF + diffG);
+
+    if (set.gprs().size() > 1) {
+        computeEffectiveAddress(dest, scratch);
+
+        startDataTransferM(IsStore, scratch, DB, WriteBack);
+        for (GeneralRegisterBackwardIterator iter(set.gprs()); iter.more(); ++iter) {
+            diffG -= sizeof(intptr_t);
+            dest.offset -= sizeof(intptr_t);
+            transferReg(*iter);
+        }
+        finishDataTransfer();
+    } else {
+        for (GeneralRegisterBackwardIterator iter(set.gprs()); iter.more(); ++iter) {
+            diffG -= sizeof(intptr_t);
+            dest.offset -= sizeof(intptr_t);
+            storePtr(*iter, dest);
+        }
+    }
+    MOZ_ASSERT(diffG == 0);
+
+    if (diffF > 0) {
+        computeEffectiveAddress(dest, scratch);
+        diffF += transferMultipleByRuns(set.fpus(), IsStore, scratch, DB);
+    }
+
+    MOZ_ASSERT(diffF == 0);
+}
+
+void
 MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set, LiveRegisterSet ignore)
 {
     int32_t diffG = set.gprs().size() * sizeof(intptr_t);
@@ -5314,8 +5351,8 @@ MacroAssembler::branchTestValue(Condition cond, const ValueOperand& lhs,
     // equal, short circuit false (NotEqual).
     ScratchRegisterScope scratch(*this);
 
-    if (rhs.isMarkable())
-        ma_cmp(lhs.payloadReg(), ImmGCPtr(rhs.toMarkablePointer()), scratch);
+    if (rhs.isGCThing())
+        ma_cmp(lhs.payloadReg(), ImmGCPtr(rhs.toGCThing()), scratch);
     else
         ma_cmp(lhs.payloadReg(), Imm32(rhs.toNunboxPayload()), scratch);
     ma_cmp(lhs.typeReg(), Imm32(rhs.toNunboxTag()), scratch, Equal);

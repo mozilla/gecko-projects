@@ -665,13 +665,10 @@ ValidateSVGFrame(nsIFrame* aFrame)
  *        and the bounding box of aFrame.
  * @oaram aOffsetToUserSpace returns the offset between the reference frame and
  *        the user space coordinate of aFrame.
- * @param aClipCtx indicate whether clip aParams.ctx by visual overflow rect of
- *        aFrame or not.
  */
 static void
 SetupContextMatrix(nsIFrame* aFrame, const PaintFramesParams& aParams,
-                   nsPoint& aOffsetToBoundingBox, nsPoint& aOffsetToUserSpace,
-                   bool aClipCtx)
+                   nsPoint& aOffsetToBoundingBox, nsPoint& aOffsetToUserSpace)
 {
   aOffsetToBoundingBox = aParams.builder->ToReferenceFrame(aFrame) -
                          nsSVGIntegrationUtils::GetOffsetToBoundingBox(aFrame);
@@ -691,7 +688,7 @@ SetupContextMatrix(nsIFrame* aFrame, const PaintFramesParams& aParams,
   // frame's BBox lives.
   // SVG geometry frames and foreignObject frames apply their own offsets, so
   // their position is relative to their user space. So for these frame types,
-  // if we want aCtx to be in user space, we first need to subtract the
+  // if we want aParams.ctx to be in user space, we first need to subtract the
   // frame's position so that SVG painting can later add it again and the
   // frame is painted in the right place.
 
@@ -713,14 +710,6 @@ SetupContextMatrix(nsIFrame* aFrame, const PaintFramesParams& aParams,
                                    aFrame->PresContext()->AppUnitsPerDevPixel());
   gfxContext& context = aParams.ctx;
   context.SetMatrix(context.CurrentMatrix().Translate(devPixelOffsetToUserSpace));
-
-  if (aClipCtx) {
-    nsRect clipRect =
-      aParams.frame->GetVisualOverflowRectRelativeToSelf() + toUserSpace;
-    context.Clip(NSRectToSnappedRect(clipRect,
-                                  aFrame->PresContext()->AppUnitsPerDevPixel(),
-                                  *context.GetDrawTarget()));
-  }
 }
 
 bool
@@ -755,9 +744,6 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
   nsSVGUtils::MaskUsage maskUsage;
   nsSVGUtils::DetermineMaskUsage(aParams.frame, aParams.handleOpacity,
                                  maskUsage);
-  MOZ_ASSERT(maskUsage.shouldGenerateMaskLayer ||
-             maskUsage.shouldApplyClipPath ||
-             maskUsage.shouldGenerateClipMaskLayer);
 
   nsIFrame* frame = aParams.frame;
   if (!ValidateSVGFrame(frame)) {
@@ -792,21 +778,50 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
                                                      SurfaceFormat::A8);
   }
 
+  if (maskUsage.shouldApplyBasicShape) {
+    matSR.SetContext(&ctx);
+
+    SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
+                       offsetToUserSpace);
+
+    nsCSSClipPathInstance::ApplyBasicShapeClip(ctx, frame);
+    if (!maskUsage.shouldGenerateMaskLayer) {
+      // Only have basic-shape clip-path effect. Fill clipped region by
+      // opaque white.
+      ctx.SetColor(Color(0.0, 0.0, 0.0, 1.0));
+      ctx.Fill();
+      ctx.PopClip();
+
+      return result;
+    }
+  }
+
   // Paint mask onto ctx.
   if (maskUsage.shouldGenerateMaskLayer) {
+    matSR.Restore();
     matSR.SetContext(&ctx);
 
     SetupContextMatrix(frame, aParams, offsetToBoundingBox,
-                       offsetToUserSpace, false);
+                       offsetToUserSpace);
     nsTArray<nsSVGMaskFrame *> maskFrames = effectProperties.GetMaskFrames();
-    bool opacityApplied = !HasNonSVGMask(maskFrames);
-    result = PaintMaskSurface(aParams, maskTarget,
-                              opacityApplied ? maskUsage.opacity : 1.0,
+    // XXX Bug 1323912.
+    MOZ_ASSERT(maskUsage.opacity == 1.0,
+               "nsSVGIntegrationUtils::PaintMask can not handle opacity now.");
+    result = PaintMaskSurface(aParams, maskTarget, 1.0,
                               firstFrame->StyleContext(), maskFrames,
                               ctx.CurrentMatrix(), offsetToUserSpace);
     if (result != DrawResult::SUCCESS) {
+      if (maskUsage.shouldApplyBasicShape) {
+        ctx.PopClip();
+      }
+
       return result;
     }
+  }
+
+  if (maskUsage.shouldApplyBasicShape) {
+    ctx.PopClip();
+    return result;
   }
 
   // Paint clip-path onto ctx.
@@ -815,7 +830,7 @@ nsSVGIntegrationUtils::PaintMask(const PaintFramesParams& aParams)
     matSR.SetContext(&ctx);
 
     SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
-                       offsetToUserSpace, false);
+                       offsetToUserSpace);
     Matrix clipMaskTransform;
     gfxMatrix cssPxToDevPxMatrix = GetCSSPxToDevPxMatrix(frame);
 
@@ -904,7 +919,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
       // so we setup context matrix by the position of the current frame,
       // instead of the first continuation frame.
       SetupContextMatrix(frame, aParams, offsetToBoundingBox,
-                         offsetToUserSpace, false);
+                         offsetToUserSpace);
       MaskPaintResult paintResult =
         CreateAndPaintMaskSurface(aParams, maskUsage.opacity,
                                   firstFrame->StyleContext(),
@@ -929,7 +944,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
       matSR.SetContext(&context);
 
       SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
-                         offsetToUserSpace, false);
+                         offsetToUserSpace);
       Matrix clipMaskTransform;
       DrawResult clipMaskResult;
       RefPtr<SourceSurface> clipMaskSurface;
@@ -957,7 +972,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
 
       matSR.SetContext(&context);
       SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
-                         offsetToUserSpace, false);
+                         offsetToUserSpace);
       shouldPushMask = true;
     }
 
@@ -984,7 +999,7 @@ nsSVGIntegrationUtils::PaintMaskAndClipPath(const PaintFramesParams& aParams)
     gfxContextMatrixAutoSaveRestore matSR(&context);
 
     SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
-                       offsetToUserSpace, false);
+                       offsetToUserSpace);
 
     MOZ_ASSERT(!maskUsage.shouldApplyClipPath ||
                !maskUsage.shouldApplyBasicShape);
@@ -1062,7 +1077,7 @@ nsSVGIntegrationUtils::PaintFilter(const PaintFramesParams& aParams)
 
   gfxContextAutoSaveRestore autoSR(&context);
   SetupContextMatrix(firstFrame, aParams, offsetToBoundingBox,
-                     offsetToUserSpace, true);
+                     offsetToUserSpace);
 
   if (opacity != 1.0f) {
     context.PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacity,

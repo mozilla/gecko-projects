@@ -75,6 +75,24 @@ def validate_schema(schema, obj, msg_prefix):
         raise Exception('\n'.join(msg) + '\n' + pprint.pformat(obj))
 
 
+def optionally_keyed_by(*arguments):
+    """
+    Mark a schema value as optionally keyed by any of a number of fields.  The
+    schema is the last argument, and the remaining fields are taken to be the
+    field names.  For example:
+
+        'some-value': optionally_keyed_by(
+            'test-platform', 'build-platform',
+            Any('a', 'b', 'c'))
+    """
+    subschema = arguments[-1]
+    fields = arguments[:-1]
+    options = [subschema]
+    for field in fields:
+        options.append({'by-' + field: {basestring: subschema}})
+    return voluptuous.Any(*options)
+
+
 def get_keyed_by(item, field, item_name, subfield=None):
     """
     For values which can either accept a literal value, or be keyed by some
@@ -111,9 +129,15 @@ def get_keyed_by(item, field, item_name, subfield=None):
     keyed_by = keyed_by[3:]  # strip 'by-' off the keyed-by field name
     if item[keyed_by] in values:
         return values[item[keyed_by]]
-    for k in values.keys():
-        if re.match(k, item[keyed_by]):
-            return values[k]
+
+    matches = [(k, v) for k, v in values.iteritems() if re.match(k, item[keyed_by])]
+    if len(matches) > 1:
+        raise Exception(
+            "Multiple matching values for {} {!r} found while determining item {} in {}".format(
+                keyed_by, item[keyed_by], field, item_name))
+    elif matches:
+        return matches[0][1]
+
     if 'default' in values:
         return values['default']
     for k in item[keyed_by], 'default':
@@ -121,5 +145,5 @@ def get_keyed_by(item, field, item_name, subfield=None):
             return values[k]
     else:
         raise Exception(
-            "Neither {} {} nor 'default' found while determining item {} in {}".format(
+            "No {} matching {!r} nor 'default' found while determining item {} in {}".format(
                 keyed_by, item[keyed_by], field, item_name))

@@ -255,10 +255,10 @@ class MacroAssemblerNone : public Assembler
     template <typename T, typename S> void cmpPtrSet(Condition, T, S, Register) { MOZ_CRASH(); }
     template <typename T, typename S> void cmp32Set(Condition, T, S, Register) { MOZ_CRASH(); }
 
-    template <typename T, typename S> void mov(T, S) { MOZ_CRASH(); }
+    template <typename T> void mov(T, Register) { MOZ_CRASH(); }
+    template <typename T> void movePtr(T, Register) { MOZ_CRASH(); }
+    template <typename T> void move32(T, Register) { MOZ_CRASH(); }
     template <typename T, typename S> void movq(T, S) { MOZ_CRASH(); }
-    template <typename T, typename S> void movePtr(T, S) { MOZ_CRASH(); }
-    template <typename T, typename S> void move32(T, S) { MOZ_CRASH(); }
     template <typename T, typename S> void moveFloat32(T, S) { MOZ_CRASH(); }
     template <typename T, typename S> void moveDouble(T, S) { MOZ_CRASH(); }
     template <typename T, typename S> void move64(T, S) { MOZ_CRASH(); }
@@ -366,6 +366,7 @@ class MacroAssemblerNone : public Assembler
     template <typename T> void unboxDouble(T, FloatRegister) { MOZ_CRASH(); }
     void unboxValue(const ValueOperand&, AnyRegister) { MOZ_CRASH(); }
     void unboxNonDouble(const ValueOperand&, Register ) { MOZ_CRASH();}
+    void unboxNonDouble(const Address&, Register ) { MOZ_CRASH();}
     void notBoolean(ValueOperand) { MOZ_CRASH(); }
     Register extractObject(Address, Register) { MOZ_CRASH(); }
     Register extractObject(ValueOperand, Register) { MOZ_CRASH(); }

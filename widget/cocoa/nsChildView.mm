@@ -2644,7 +2644,8 @@ nsChildView::SendMayStartSwipe(const mozilla::PanGestureInput& aSwipeStartEvent)
     RoundedToInt(aSwipeStartEvent.mPanStartPoint * ScreenToLayoutDeviceScale(1));
   WidgetSimpleGestureEvent geckoEvent =
     SwipeTracker::CreateSwipeGestureEvent(eSwipeGestureMayStart, this,
-                                          position);
+                                          position,
+                                          aSwipeStartEvent.mTimeStamp);
   geckoEvent.mDirection = direction;
   geckoEvent.mDelta = 0.0;
   geckoEvent.mAllowedDirections = 0;
@@ -2661,7 +2662,7 @@ nsChildView::TrackScrollEventAsSwipe(const mozilla::PanGestureInput& aSwipeStart
   // If a swipe is currently being tracked kill it -- it's been interrupted
   // by another gesture event.
   if (mSwipeTracker) {
-    mSwipeTracker->CancelSwipe();
+    mSwipeTracker->CancelSwipe(aSwipeStartEvent.mTimeStamp);
     mSwipeTracker->Destroy();
     mSwipeTracker = nullptr;
   }
@@ -3542,6 +3543,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   return [[self window] isOpaque];
 }
 
+// XXX Is this really used?
 - (void)sendFocusEvent:(EventMessage)eventMessage
 {
   if (!mGeckoChild)
@@ -3550,6 +3552,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   nsEventStatus status = nsEventStatus_eIgnore;
   WidgetGUIEvent focusGuiEvent(true, eventMessage, mGeckoChild);
   focusGuiEvent.mTime = PR_IntervalNow();
+  focusGuiEvent.mTimeStamp = nsCocoaUtils::GetEventTimeStamp(0);
   mGeckoChild->DispatchEvent(&focusGuiEvent, status);
 }
 
@@ -5811,6 +5814,9 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
   if (mDragService) {
     // set the dragend point from the current mouse location
     nsDragService* dragService = static_cast<nsDragService *>(mDragService);
+    FlipCocoaScreenCoordinate(aPoint);
+    dragService->SetDragEndPoint(gfx::IntPoint::Round(aPoint.x, aPoint.y));
+
     NSPoint pnt = [NSEvent mouseLocation];
     FlipCocoaScreenCoordinate(pnt);
     dragService->SetDragEndPoint(gfx::IntPoint::Round(pnt.x, pnt.y));
@@ -5856,11 +5862,8 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
   }
 
   if (dragService) {
-    NSPoint pnt = [NSEvent mouseLocation];
-    FlipCocoaScreenCoordinate(pnt);
-
-    LayoutDeviceIntPoint devPoint = mGeckoChild->CocoaPointsToDevPixels(pnt);
-    dragService->DragMoved(devPoint.x, devPoint.y);
+    nsDragService* ds = static_cast<nsDragService *>(dragService.get());
+    ds->DragMovedWithView(aSession, aPoint);
   }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -5882,67 +5885,6 @@ GetIntegerDeltaForEvent(NSEvent* aEvent)
   globalDragPboard = [[aSession draggingPasteboard] retain];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
-}
-
-// This method is a callback typically invoked in response to a drag ending on the desktop
-// or a Findow folder window; the argument passed is a path to the drop location, to be used
-// in constructing a complete pathname for the file(s) we want to create as a result of
-// the drag.
-- (NSArray *)namesOfPromisedFilesDroppedAtDestination:(NSURL*)dropDestination
-{
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-
-  nsresult rv;
-
-  MOZ_LOG(sCocoaLog, LogLevel::Info, ("ChildView namesOfPromisedFilesDroppedAtDestination: entering callback for promised files\n"));
-
-  nsCOMPtr<nsIFile> targFile;
-  NS_NewLocalFile(EmptyString(), true, getter_AddRefs(targFile));
-  nsCOMPtr<nsILocalFileMac> macLocalFile = do_QueryInterface(targFile);
-  if (!macLocalFile) {
-    NS_ERROR("No Mac local file");
-    return nil;
-  }
-
-  if (!NS_SUCCEEDED(macLocalFile->InitWithCFURL((CFURLRef)dropDestination))) {
-    NS_ERROR("failed InitWithCFURL");
-    return nil;
-  }
-
-  if (!gDraggedTransferables)
-    return nil;
-
-  uint32_t transferableCount;
-  rv = gDraggedTransferables->GetLength(&transferableCount);
-  if (NS_FAILED(rv))
-    return nil;
-
-  for (uint32_t i = 0; i < transferableCount; i++) {
-    nsCOMPtr<nsITransferable> item = do_QueryElementAt(gDraggedTransferables, i);
-    if (!item) {
-      NS_ERROR("no transferable");
-      return nil;
-    }
-
-    item->SetTransferData(kFilePromiseDirectoryMime, macLocalFile, sizeof(nsIFile*));
-
-    // now request the kFilePromiseMime data, which will invoke the data provider
-    // If successful, the returned data is a reference to the resulting file.
-    nsCOMPtr<nsISupports> fileDataPrimitive;
-    uint32_t dataSize = 0;
-    item->GetTransferData(kFilePromiseMime, getter_AddRefs(fileDataPrimitive), &dataSize);
-  }
-
-  NSPasteboard* generalPboard = [NSPasteboard pasteboardWithName:NSDragPboard];
-  NSData* data = [generalPboard dataForType:@"application/x-moz-file-promise-dest-filename"];
-  NSString* name = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-  NSArray* rslt = [NSArray arrayWithObject:name];
-
-  [name release];
-
-  return rslt;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
 }
 
 // NSPasteboardItemDataProvider
@@ -5998,6 +5940,72 @@ provideDataForType:(NSString*)aType
       } else if (
         [curType isEqualToString:(NSString*)kPasteboardTypeFileURLPromise] ||
         [curType isEqualToString:NSFilenamesPboardType]) {
+
+        nsCOMPtr<nsIFile> targFile;
+        NS_NewLocalFile(EmptyString(), true, getter_AddRefs(targFile));
+        nsCOMPtr<nsILocalFileMac> macLocalFile = do_QueryInterface(targFile);
+        if (!macLocalFile) {
+          NS_ERROR("No Mac local file");
+          continue;
+        }
+
+        // get paste location from low level pasteboard
+        PasteboardRef pboardRef = NULL;
+        PasteboardCreate((CFStringRef)[aPasteboard name], &pboardRef);
+        if (!pboardRef) {
+          continue;
+        }
+
+        PasteboardSynchronize(pboardRef);
+        CFURLRef urlRef = NULL;
+        PasteboardCopyPasteLocation(pboardRef, &urlRef);
+        if (!urlRef) {
+          CFRelease(pboardRef);
+          continue;
+        }
+
+        if (!NS_SUCCEEDED(macLocalFile->InitWithCFURL(urlRef))) {
+          NS_ERROR("failed InitWithCFURL");
+          CFRelease(urlRef);
+          CFRelease(pboardRef);
+          continue;
+        }
+
+        if (!gDraggedTransferables) {
+          CFRelease(urlRef);
+          CFRelease(pboardRef);
+          continue;
+        }
+
+        uint32_t transferableCount;
+        nsresult rv = gDraggedTransferables->GetLength(&transferableCount);
+        if (NS_FAILED(rv)) {
+          CFRelease(urlRef);
+          CFRelease(pboardRef);
+          continue;
+        }
+
+        for (uint32_t i = 0; i < transferableCount; i++) {
+          nsCOMPtr<nsITransferable> item =
+            do_QueryElementAt(gDraggedTransferables, i);
+          if (!item) {
+            NS_ERROR("no transferable");
+            continue;
+          }
+
+          item->SetTransferData(kFilePromiseDirectoryMime, macLocalFile,
+                                sizeof(nsIFile*));
+
+          // Now request the kFilePromiseMime data, which will invoke the data
+          // provider. If successful, the file will have been created.
+          nsCOMPtr<nsISupports> fileDataPrimitive;
+          uint32_t dataSize = 0;
+          item->GetTransferData(kFilePromiseMime,
+                                getter_AddRefs(fileDataPrimitive), &dataSize);
+        }
+        CFRelease(urlRef);
+        CFRelease(pboardRef);
+
         [aPasteboard setPropertyList:[pasteboardOutputDict valueForKey:curType]
                              forType:curType];
       }

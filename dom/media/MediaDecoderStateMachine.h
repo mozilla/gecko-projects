@@ -148,9 +148,6 @@ public:
 
   nsresult Init(MediaDecoder* aDecoder);
 
-  void SetMediaDecoderReaderWrapperCallback();
-  void CancelMediaDecoderReaderWrapperCallback();
-
   // Enumeration for the valid decoding states
   enum State {
     DECODER_STATE_DECODING_METADATA,
@@ -327,13 +324,6 @@ private:
   // be held.
   bool IsPlaying() const;
 
-  void OnAudioDecoded(MediaData* aAudio);
-  void OnVideoDecoded(MediaData* aVideo, TimeStamp aDecodeStartTime);
-  void OnNotDecoded(MediaData::Type aType, const MediaResult& aError);
-  void OnAudioWaited(MediaData::Type aType);
-  void OnVideoWaited(MediaData::Type aType);
-  void OnNotWaited(const WaitForDataRejectValue& aRejection);
-
   // Resets all state related to decoding and playback, emptying all buffers
   // and aborting all pending operations on the decode task queue.
   void Reset(TrackSet aTracks = TrackSet(TrackInfo::kAudioTrack,
@@ -348,7 +338,8 @@ protected:
 
   // Inserts MediaData* samples into their respective MediaQueues.
   // aSample must not be null.
-  void Push(MediaData* aSample);
+  void PushAudio(MediaData* aSample);
+  void PushVideo(MediaData* aSample);
 
   void OnAudioPopped(const RefPtr<MediaData>& aSample);
   void OnVideoPopped(const RefPtr<MediaData>& aSample);
@@ -467,12 +458,18 @@ protected:
   void EnsureVideoDecodeTaskQueued();
 
   // Start a task to decode audio.
-  // The decoder monitor must be held.
   void RequestAudioData();
 
   // Start a task to decode video.
-  // The decoder monitor must be held.
-  void RequestVideoData();
+  void RequestVideoData(bool aSkipToNextKeyframe,
+                        const media::TimeUnit& aCurrentTime);
+
+  void WaitForData(MediaData::Type aType);
+
+  bool IsRequestingAudioData() const { return mAudioDataRequest.Exists(); }
+  bool IsRequestingVideoData() const { return mVideoDataRequest.Exists(); }
+  bool IsWaitingAudioData() const { return mAudioWaitRequest.Exists(); }
+  bool IsWaitingVideoData() const { return mVideoWaitRequest.Exists(); }
 
   // Re-evaluates the state and determines whether we need to dispatch
   // events to run the decode, or if not whether we should set the reader
@@ -653,11 +650,12 @@ private:
 
   // Only one of a given pair of ({Audio,Video}DataPromise, WaitForDataPromise)
   // should exist at any given moment.
-
-  MediaEventListener mAudioCallback;
-  MediaEventListener mVideoCallback;
-  MediaEventListener mAudioWaitCallback;
-  MediaEventListener mVideoWaitCallback;
+  using MediaDataPromise = MediaDecoderReader::MediaDataPromise;
+  using WaitForDataPromise = MediaDecoderReader::WaitForDataPromise;
+  MozPromiseRequestHolder<MediaDataPromise> mAudioDataRequest;
+  MozPromiseRequestHolder<MediaDataPromise> mVideoDataRequest;
+  MozPromiseRequestHolder<WaitForDataPromise> mAudioWaitRequest;
+  MozPromiseRequestHolder<WaitForDataPromise> mVideoWaitRequest;
 
   const char* AudioRequestStatus() const;
   const char* VideoRequestStatus() const;

@@ -8,6 +8,7 @@ user_pref("gfx.color_management.force_srgb", true);
 user_pref("gfx.logging.level", 1);
 user_pref("browser.dom.window.dump.enabled", true);
 user_pref("ui.caretBlinkTime", -1);
+user_pref("ui.caretWidth", 1);
 user_pref("dom.send_after_paint_to_content", true);
 // no slow script dialogs
 user_pref("dom.max_script_run_time", 0);
@@ -62,6 +63,7 @@ user_pref("browser.search.geoSpecificDefaults", false);
 
 // Make sure SelfSupport doesn't hit the network.
 user_pref("browser.selfsupport.url", "https://localhost/selfsupport-dummy/");
+user_pref("extensions.shield-recipe-client.api_url", "https://localhost/selfsupport-dummy/");
 
 // use about:blank, not browser.startup.homepage
 user_pref("browser.startup.page", 0);

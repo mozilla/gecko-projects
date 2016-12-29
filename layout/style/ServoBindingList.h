@@ -39,14 +39,15 @@ SERVO_BINDING_FUNC(Servo_StyleSheet_GetRules, ServoCssRulesStrong,
 SERVO_BINDING_FUNC(Servo_StyleSet_Init, RawServoStyleSetOwned)
 SERVO_BINDING_FUNC(Servo_StyleSet_Drop, void, RawServoStyleSetOwned set)
 SERVO_BINDING_FUNC(Servo_StyleSet_AppendStyleSheet, void,
-                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet)
+                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet, bool flush)
 SERVO_BINDING_FUNC(Servo_StyleSet_PrependStyleSheet, void,
-                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet)
+                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet, bool flush)
 SERVO_BINDING_FUNC(Servo_StyleSet_RemoveStyleSheet, void,
-                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet)
+                   RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet, bool flush)
 SERVO_BINDING_FUNC(Servo_StyleSet_InsertStyleSheetBefore, void,
                    RawServoStyleSetBorrowed set, RawServoStyleSheetBorrowed sheet,
-                   RawServoStyleSheetBorrowed reference)
+                   RawServoStyleSheetBorrowed reference, bool flush)
+SERVO_BINDING_FUNC(Servo_StyleSet_FlushStyleSheets, void, RawServoStyleSetBorrowed set)
 SERVO_BINDING_FUNC(Servo_StyleSet_NoteStyleSheetsChanged, void,
                    RawServoStyleSetBorrowed set)
 
@@ -142,11 +143,6 @@ SERVO_BINDING_FUNC(Servo_ComputedValues_GetForAnonymousBox,
                    ServoComputedValuesStrong,
                    ServoComputedValuesBorrowedOrNull parent_style_or_null,
                    nsIAtom* pseudoTag, RawServoStyleSetBorrowed set)
-SERVO_BINDING_FUNC(Servo_ComputedValues_GetForPseudoElement,
-                   ServoComputedValuesStrong,
-                   ServoComputedValuesBorrowed parent_style,
-                   RawGeckoElementBorrowed match_element, nsIAtom* pseudo_tag,
-                   RawServoStyleSetBorrowed set, bool is_probe)
 SERVO_BINDING_FUNC(Servo_ComputedValues_Inherit, ServoComputedValuesStrong,
                    ServoComputedValuesBorrowedOrNull parent_style)
 
@@ -165,8 +161,23 @@ SERVO_BINDING_FUNC(Servo_NoteExplicitHints, void, RawGeckoElementBorrowed elemen
                    nsRestyleHint restyle_hint, nsChangeHint change_hint)
 SERVO_BINDING_FUNC(Servo_CheckChangeHint, nsChangeHint, RawGeckoElementBorrowed element)
 SERVO_BINDING_FUNC(Servo_ResolveStyle, ServoComputedValuesStrong,
-                   RawGeckoElementBorrowed element, RawServoStyleSetBorrowed set,
-                   mozilla::ConsumeStyleBehavior consume, mozilla::LazyComputeBehavior compute)
+                   RawGeckoElementBorrowed element, mozilla::ConsumeStyleBehavior consume)
+SERVO_BINDING_FUNC(Servo_ResolvePseudoStyle, ServoComputedValuesStrong,
+                   RawGeckoElementBorrowed element, nsIAtom* pseudo_tag,
+                   bool is_probe, RawServoStyleSetBorrowed set)
+
+// Resolves style for an element or pseudo-element without processing pending
+// restyles first. The Element and its ancestors may be unstyled, have pending
+// restyles, or be in a display:none subtree. Styles are cached when possible,
+// though caching is not possible within display:none subtrees, and the styles
+// may be invalidated by already-scheduled restyles.
+//
+// The tree must be in a consistent state such that a normal traversal could be
+// performed, and this function maintains that invariant.
+SERVO_BINDING_FUNC(Servo_ResolveStyleLazily, ServoComputedValuesStrong,
+                   RawGeckoElementBorrowed element, nsIAtom* pseudo_tag,
+                   mozilla::ConsumeStyleBehavior consume,
+                   RawServoStyleSetBorrowed set)
 
 // Restyle the given subtree.
 SERVO_BINDING_FUNC(Servo_TraverseSubtree, void,

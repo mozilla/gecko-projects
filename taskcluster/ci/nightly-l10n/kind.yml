@@ -12,8 +12,8 @@ transforms:
 
 job-defaults:
     locales-file: browser/locales/all-locales
-    index:
-        product: firefox
+    #index:
+    #    product: firefox
     treeherder:
         kind: build
         tier: 2
@@ -44,8 +44,8 @@ jobs:
         attributes:
             build_platform: linux-nightly
             nightly: true
-        index:
-            job-name: linux32-nightly-l10n-opt
+        #index:
+        #    job-name: linux32-nightly-l10n-opt
         treeherder:
             platform: linux32/opt
         worker:
@@ -71,8 +71,8 @@ jobs:
         attributes:
             build_platform: linux64-nightly
             nightly: true
-        index:
-            job-name: linux64-nightly-l10n-opt
+        #index:
+        #    job-name: linux64-nightly-l10n-opt
         treeherder:
             platform: linux64/opt
         worker:
@@ -99,9 +99,9 @@ jobs:
         attributes:
             nightly: true
             build_platform: android-api-15-nightly
-        index:
-            product: mobile
-            job-name: android-nightly-l10n-opt
+        #index:
+        #    product: mobile
+        #    job-name: android-nightly-l10n-opt
         treeherder:
             platform: android-4-0-armv7-api15/opt
         worker-type: aws-provisioner-v1/gecko-{level}-b-android
@@ -127,8 +127,8 @@ jobs:
         attributes:
             build_platform: macosx64-nightly
             nightly: true
-        index:
-            job-name: macosx64-nightly-l10n-opt
+        #index:
+        #    job-name: macosx64-nightly-l10n-opt
         treeherder:
             platform: macosx64/opt
         worker:

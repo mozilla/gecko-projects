@@ -2339,7 +2339,7 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "border-box" ],
     other_values: [ "content-box", "padding-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
-    invalid_values: [ "margin-box", "border-box border-box" ]
+    invalid_values: [ "margin-box", "border-box border-box", "fill-box", "stroke-box", "view-box", "no-clip" ]
   },
   "background-color": {
     domProp: "backgroundColor",
@@ -2374,7 +2374,7 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "padding-box" ],
     other_values: [ "border-box", "content-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
-    invalid_values: [ "margin-box", "padding-box padding-box" ]
+    invalid_values: [ "margin-box", "padding-box padding-box", "fill-box", "stroke-box", "view-box", "no-clip" ]
   },
   "background-position": {
     domProp: "backgroundPosition",
@@ -2835,6 +2835,18 @@ var gCSSProperties = {
     initial_values: [ "top" ],
     other_values: [ "bottom", "left", "right", "top-outside", "bottom-outside" ],
     invalid_values: []
+  },
+  "caret-color": {
+    domProp: "caretColor",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    prerequisites: { "color": "black" },
+    // Though "auto" is an independent computed-value time keyword value,
+    // it is not distinguishable from currentcolor because getComputedStyle
+    // always returns used value for <color>.
+    initial_values: [ "auto", "currentcolor", "black", "rgb(0,0,0)" ],
+    other_values: [ "green", "transparent", "rgba(128,128,128,.5)", "#123" ],
+    invalid_values: [ "#0", "#00", "#00000", "cc00ff" ]
   },
   "clear": {
     domProp: "clear",
@@ -7149,8 +7161,8 @@ if (SupportsMaskShorthand()) {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "border-box" ],
-    other_values: [ "content-box", "padding-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
-    invalid_values: [ "margin-box", "content-box content-box" ]
+    other_values: [ "content-box", "fill-box", "stroke-box", "view-box", "no-clip", "padding-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
+    invalid_values: [ "content-box content-box", "margin-box" ]
   };
   gCSSProperties["mask-image"] = {
     domProp: "maskImage",
@@ -7192,8 +7204,8 @@ if (SupportsMaskShorthand()) {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "border-box" ],
-    other_values: [ "padding-box", "content-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
-    invalid_values: [ "margin-box", "padding-box padding-box" ]
+    other_values: [ "padding-box", "content-box", "fill-box", "stroke-box", "view-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
+    invalid_values: [ "padding-box padding-box", "no-clip", "margin-box" ]
   };
   gCSSProperties["mask-position"] = {
     domProp: "maskPosition",
@@ -7889,6 +7901,10 @@ if (IsCSSPropertyPrefEnabled("layout.css.background-clip-text.enabled")) {
     "url(404.png) green padding-box text",
     "content-box text url(404.png) blue"
   );
+}
+
+if (IsCSSPropertyPrefEnabled("layout.css.display-flow-root.enabled")) {
+  gCSSProperties["display"].other_values.push("flow-root");
 }
 
 // Copy aliased properties' fields from their alias targets.

@@ -17,7 +17,31 @@ namespace jit {
 #define CACHE_IR_SHARED_OPS(_)            \
     _(GuardIsObject)                      \
     _(GuardIsString)                      \
-    _(GuardIsSymbol)
+    _(GuardIsSymbol)                      \
+    _(GuardIsInt32)                       \
+    _(GuardType)                          \
+    _(GuardClass)                         \
+    _(GuardIsProxy)                       \
+    _(GuardNotDOMProxy)                   \
+    _(GuardMagicValue)                    \
+    _(GuardNoUnboxedExpando)              \
+    _(GuardAndLoadUnboxedExpando)         \
+    _(GuardNoDetachedTypedObjects)        \
+    _(GuardNoDenseElements)               \
+    _(LoadProto)                          \
+    _(LoadEnclosingEnvironment)           \
+    _(LoadDOMExpandoValue)                \
+    _(LoadUndefinedResult)                \
+    _(LoadInt32ArrayLengthResult)         \
+    _(LoadUnboxedArrayLengthResult)       \
+    _(LoadArgumentsObjectLengthResult)    \
+    _(LoadStringLengthResult)             \
+    _(LoadStringCharResult)               \
+    _(LoadArgumentsObjectArgResult)       \
+    _(LoadDenseElementResult)             \
+    _(LoadDenseElementHoleResult)         \
+    _(LoadUnboxedArrayElementResult)      \
+    _(LoadTypedElementResult)
 
 // OperandLocation represents the location of an OperandId. The operand is
 // either in a register or on the stack, and is either boxed or unboxed.
@@ -112,14 +136,38 @@ class OperandLocation
         data_.constant = v;
     }
 
-    bool aliasesReg(Register reg) {
+    bool isInRegister() const { return kind_ == PayloadReg || kind_ == ValueReg; }
+    bool isOnStack() const { return kind_ == PayloadStack || kind_ == ValueStack; }
+
+    size_t stackPushed() const {
+        if (kind_ == PayloadStack)
+            return data_.payloadStack.stackPushed;
+        MOZ_ASSERT(kind_ == ValueStack);
+        return data_.valueStackPushed;
+    }
+    size_t stackSizeInBytes() const {
+        if (kind_ == PayloadStack)
+            return sizeof(uintptr_t);
+        MOZ_ASSERT(kind_ == ValueStack);
+        return sizeof(js::Value);
+    }
+    void adjustStackPushed(int32_t diff) {
+        if (kind_ == PayloadStack) {
+            data_.payloadStack.stackPushed += diff;
+            return;
+        }
+        MOZ_ASSERT(kind_ == ValueStack);
+        data_.valueStackPushed += diff;
+    }
+
+    bool aliasesReg(Register reg) const {
         if (kind_ == PayloadReg)
             return payloadReg() == reg;
         if (kind_ == ValueReg)
             return valueReg().aliases(reg);
         return false;
     }
-    bool aliasesReg(ValueOperand reg) {
+    bool aliasesReg(ValueOperand reg) const {
 #if defined(JS_NUNBOX32)
         return aliasesReg(reg.typeReg()) || aliasesReg(reg.payloadReg());
 #else
@@ -127,9 +175,27 @@ class OperandLocation
 #endif
     }
 
+    bool aliasesReg(const OperandLocation& other) const;
+
     bool operator==(const OperandLocation& other) const;
     bool operator!=(const OperandLocation& other) const { return !operator==(other); }
 };
+
+struct SpilledRegister
+{
+    Register reg;
+    uint32_t stackPushed;
+
+    SpilledRegister(Register reg, uint32_t stackPushed)
+        : reg(reg), stackPushed(stackPushed)
+    {}
+    bool operator==(const SpilledRegister& other) const {
+        return reg == other.reg && stackPushed == other.stackPushed;
+    }
+    bool operator!=(const SpilledRegister& other) const { return !(*this == other); }
+};
+
+using SpilledRegisterVector = Vector<SpilledRegister, 2, SystemAllocPolicy>;
 
 // Class to track and allocate registers while emitting IC code.
 class MOZ_RAII CacheRegisterAllocator
@@ -150,6 +216,13 @@ class MOZ_RAII CacheRegisterAllocator
     // Registers that are currently unused and available.
     AllocatableGeneralRegisterSet availableRegs_;
 
+    // Registers that are available, but before use they must be saved and
+    // then restored when returning from the stub.
+    AllocatableGeneralRegisterSet availableRegsAfterSpill_;
+
+    // Registers we took from availableRegsAfterSpill_ and spilled to the stack.
+    SpilledRegisterVector spilledRegs_;
+
     // The number of bytes pushed on the native stack.
     uint32_t stackPushed_;
 
@@ -163,6 +236,12 @@ class MOZ_RAII CacheRegisterAllocator
 
     void freeDeadOperandRegisters();
 
+    void spillOperandToStack(MacroAssembler& masm, OperandLocation* loc);
+    void spillOperandToStackOrRegister(MacroAssembler& masm, OperandLocation* loc);
+
+    void popPayload(MacroAssembler& masm, OperandLocation* loc, Register dest);
+    void popValue(MacroAssembler& masm, OperandLocation* loc, ValueOperand dest);
+
   public:
     friend class AutoScratchRegister;
     friend class AutoScratchRegisterExcluding;
@@ -174,17 +253,44 @@ class MOZ_RAII CacheRegisterAllocator
         writer_(writer)
     {}
 
-    MOZ_MUST_USE bool init(const AllocatableGeneralRegisterSet& available);
+    MOZ_MUST_USE bool init();
+
+    void initAvailableRegs(const AllocatableGeneralRegisterSet& available) {
+        availableRegs_ = available;
+    }
+    void initAvailableRegsAfterSpill();
 
     OperandLocation operandLocation(size_t i) const {
         return operandLocations_[i];
     }
+    void setOperandLocation(size_t i, const OperandLocation& loc) {
+        operandLocations_[i] = loc;
+    }
+
     OperandLocation origInputLocation(size_t i) const {
         return origInputLocations_[i];
     }
     void initInputLocation(size_t i, ValueOperand reg) {
         origInputLocations_[i].setValueReg(reg);
-        operandLocations_[i] = origInputLocations_[i];
+        operandLocations_[i].setValueReg(reg);
+    }
+    void initInputLocation(size_t i, Register reg, JSValueType type) {
+        origInputLocations_[i].setPayloadReg(reg, type);
+        operandLocations_[i].setPayloadReg(reg, type);
+    }
+    void initInputLocation(size_t i, const Value& v) {
+        origInputLocations_[i].setConstant(v);
+        operandLocations_[i].setConstant(v);
+    }
+
+    void initInputLocation(size_t i, const TypedOrValueRegister& reg);
+    void initInputLocation(size_t i, const ConstantOrRegister& value);
+
+    const SpilledRegisterVector& spilledRegs() const { return spilledRegs_; }
+
+    MOZ_MUST_USE bool setSpilledRegs(const SpilledRegisterVector& regs) {
+        spilledRegs_.clear();
+        return spilledRegs_.appendAll(regs);
     }
 
     void nextOp() {
@@ -195,6 +301,9 @@ class MOZ_RAII CacheRegisterAllocator
     uint32_t stackPushed() const {
         return stackPushed_;
     }
+    void setStackPushed(uint32_t pushed) {
+        stackPushed_ = pushed;
+    }
 
     bool isAllocatable(Register reg) const {
         return allocatableRegs_.has(reg);
@@ -203,12 +312,22 @@ class MOZ_RAII CacheRegisterAllocator
     // Allocates a new register.
     Register allocateRegister(MacroAssembler& masm);
     ValueOperand allocateValueRegister(MacroAssembler& masm);
+
     void allocateFixedRegister(MacroAssembler& masm, Register reg);
+    void allocateFixedValueRegister(MacroAssembler& masm, ValueOperand reg);
 
     // Releases a register so it can be reused later.
     void releaseRegister(Register reg) {
         MOZ_ASSERT(currentOpRegs_.has(reg));
         availableRegs_.add(reg);
+    }
+    void releaseValueRegister(ValueOperand reg) {
+#ifdef JS_NUNBOX32
+        releaseRegister(reg.payloadReg());
+        releaseRegister(reg.typeReg());
+#else
+        releaseRegister(reg.valueReg());
+#endif
     }
 
     // Removes spilled values from the native stack. This should only be
@@ -226,6 +345,17 @@ class MOZ_RAII CacheRegisterAllocator
 
     // Returns |val|'s JSValueType or JSVAL_TYPE_UNKNOWN.
     JSValueType knownType(ValOperandId val) const;
+
+    // Emits code to restore registers and stack to the state at the start of
+    // the stub.
+    void restoreInputState(MacroAssembler& masm, bool discardStack = true);
+
+    // Returns the set of registers storing the IC input operands.
+    GeneralRegisterSet inputRegisterSet() const;
+
+    void saveIonLiveRegisters(MacroAssembler& masm, LiveRegisterSet liveRegs,
+                              Register scratch, IonScript* ionScript);
+    void restoreIonLiveRegisters(MacroAssembler& masm, LiveRegisterSet liveRegs);
 };
 
 // RAII class to allocate a scratch register and release it when we're done
@@ -234,6 +364,9 @@ class MOZ_RAII AutoScratchRegister
 {
     CacheRegisterAllocator& alloc_;
     Register reg_;
+
+    AutoScratchRegister(const AutoScratchRegister&) = delete;
+    void operator=(const AutoScratchRegister&) = delete;
 
   public:
     AutoScratchRegister(CacheRegisterAllocator& alloc, MacroAssembler& masm,
@@ -251,6 +384,8 @@ class MOZ_RAII AutoScratchRegister
     ~AutoScratchRegister() {
         alloc_.releaseRegister(reg_);
     }
+
+    Register get() const { return reg_; }
     operator Register() const { return reg_; }
 };
 
@@ -291,6 +426,7 @@ class MOZ_RAII AutoScratchRegisterExcluding
 class FailurePath
 {
     Vector<OperandLocation, 4, SystemAllocPolicy> inputs_;
+    SpilledRegisterVector spilledRegs_;
     NonAssertingLabel label_;
     uint32_t stackPushed_;
 
@@ -299,6 +435,7 @@ class FailurePath
 
     FailurePath(FailurePath&& other)
       : inputs_(Move(other.inputs_)),
+        spilledRegs_(Move(other.spilledRegs_)),
         label_(other.label_),
         stackPushed_(other.stackPushed_)
     {}
@@ -308,11 +445,18 @@ class FailurePath
     void setStackPushed(uint32_t i) { stackPushed_ = i; }
     uint32_t stackPushed() const { return stackPushed_; }
 
-    bool appendInput(const OperandLocation& loc) {
+    MOZ_MUST_USE bool appendInput(const OperandLocation& loc) {
         return inputs_.append(loc);
     }
     OperandLocation input(size_t i) const {
         return inputs_[i];
+    }
+
+    const SpilledRegisterVector& spilledRegs() const { return spilledRegs_; }
+
+    MOZ_MUST_USE bool setSpilledRegs(const SpilledRegisterVector& regs) {
+        MOZ_ASSERT(spilledRegs_.empty());
+        return spilledRegs_.appendAll(regs);
     }
 
     // If canShareFailurePath(other) returns true, the same machine code will
@@ -320,10 +464,16 @@ class FailurePath
     bool canShareFailurePath(const FailurePath& other) const;
 };
 
+class AutoOutputRegister;
+
 // Base class for BaselineCacheIRCompiler and IonCacheIRCompiler.
 class MOZ_RAII CacheIRCompiler
 {
   protected:
+    friend class AutoOutputRegister;
+
+    enum class Mode { Baseline, Ion };
+
     JSContext* cx_;
     CacheIRReader reader;
     const CacheIRWriter& writer_;
@@ -332,20 +482,88 @@ class MOZ_RAII CacheIRCompiler
     CacheRegisterAllocator allocator;
     Vector<FailurePath, 4, SystemAllocPolicy> failurePaths;
 
-    CacheIRCompiler(JSContext* cx, const CacheIRWriter& writer)
+    Maybe<TypedOrValueRegister> outputUnchecked_;
+    Mode mode_;
+
+    // Whether this IC may read double values from uint32 arrays.
+    Maybe<bool> allowDoubleResult_;
+
+    CacheIRCompiler(JSContext* cx, const CacheIRWriter& writer, Mode mode)
       : cx_(cx),
         reader(writer),
         writer_(writer),
-        allocator(writer_)
-    {}
+        allocator(writer_),
+        mode_(mode)
+    {
+        MOZ_ASSERT(!writer.failed());
+    }
 
     MOZ_MUST_USE bool addFailurePath(FailurePath** failure);
+    MOZ_MUST_USE bool emitFailurePath(size_t i);
 
-    void emitFailurePath(size_t i);
+    void emitLoadTypedObjectResultShared(const Address& fieldAddr, Register scratch,
+                                         TypedThingLayout layout, uint32_t typeDescr,
+                                         const AutoOutputRegister& output);
 
 #define DEFINE_SHARED_OP(op) MOZ_MUST_USE bool emit##op();
     CACHE_IR_SHARED_OPS(DEFINE_SHARED_OP)
 #undef DEFINE_SHARED_OP
+};
+
+// Ensures the IC's output register is available for writing.
+class MOZ_RAII AutoOutputRegister
+{
+    TypedOrValueRegister output_;
+    CacheRegisterAllocator& alloc_;
+
+    AutoOutputRegister(const AutoOutputRegister&) = delete;
+    void operator=(const AutoOutputRegister&) = delete;
+
+  public:
+    explicit AutoOutputRegister(CacheIRCompiler& compiler);
+    ~AutoOutputRegister();
+
+    Register maybeReg() const {
+        if (output_.hasValue())
+            return output_.valueReg().scratchReg();
+        if (!output_.typedReg().isFloat())
+            return output_.typedReg().gpr();
+        return InvalidReg;
+    }
+
+    bool hasValue() const { return output_.hasValue(); }
+    ValueOperand valueReg() const { return output_.valueReg(); }
+    AnyRegister typedReg() const { return output_.typedReg(); }
+
+    JSValueType type() const {
+        MOZ_ASSERT(!hasValue());
+        return ValueTypeFromMIRType(output_.type());
+    }
+
+    operator TypedOrValueRegister() const { return output_; }
+};
+
+// Like AutoScratchRegister, but reuse a register of |output| if possible.
+class MOZ_RAII AutoScratchRegisterMaybeOutput
+{
+    mozilla::Maybe<AutoScratchRegister> scratch_;
+    Register scratchReg_;
+
+    AutoScratchRegisterMaybeOutput(const AutoScratchRegisterMaybeOutput&) = delete;
+    void operator=(const AutoScratchRegisterMaybeOutput&) = delete;
+
+  public:
+    AutoScratchRegisterMaybeOutput(CacheRegisterAllocator& alloc, MacroAssembler& masm,
+                                   const AutoOutputRegister& output)
+    {
+        scratchReg_ = output.maybeReg();
+        if (scratchReg_ == InvalidReg) {
+            scratch_.emplace(alloc, masm);
+            scratchReg_ = scratch_.ref();
+        }
+    }
+
+    operator Register() const { return scratchReg_; }
 };
 
 // See the 'Sharing Baseline stub code' comment in CacheIR.h for a description
@@ -398,11 +616,19 @@ class CacheIRStubInfo
     static CacheIRStubInfo* New(CacheKind kind, ICStubEngine engine, bool canMakeCalls,
                                 uint32_t stubDataOffset, const CacheIRWriter& writer);
 
+    template <class Stub, class T>
+    js::GCPtr<T>& getStubField(Stub* stub, uint32_t field) const;
+
     template <class T>
-    js::GCPtr<T>& getStubField(ICStub* stub, uint32_t field) const;
+    js::GCPtr<T>& getStubField(ICStub* stub, uint32_t field) const {
+        return getStubField<ICStub, T>(stub, field);
+    }
 
     void copyStubData(ICStub* src, ICStub* dest) const;
 };
+
+template <typename T>
+void TraceCacheIRStub(JSTracer* trc, T* stub, const CacheIRStubInfo* stubInfo);
 
 } // namespace jit
 } // namespace js
