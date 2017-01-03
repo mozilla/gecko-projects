@@ -144,6 +144,11 @@ def get_keyed_by(item, field, item_name, subfield=None):
         if k in values:
             return values[k]
     else:
+        if subfield:
+            raise Exception(
+                "No {} matching {!r} nor 'default' found while determining item "
+                "{}[{}] in {}".format(
+                    keyed_by, item[keyed_by], field, subfield, item_name))
         raise Exception(
             "No {} matching {!r} nor 'default' found while determining item {} in {}".format(
                 keyed_by, item[keyed_by], field, item_name))
