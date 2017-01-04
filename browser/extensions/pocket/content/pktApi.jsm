@@ -101,8 +101,7 @@ var pktApi = (function() {
             if (o && typeof o === "object" && o !== null) {
                 return o;
             }
-        }
-        catch (e) { }
+        } catch (e) { }
 
         return undefined;
     };
@@ -141,8 +140,7 @@ var pktApi = (function() {
 
         if (!value)
             prefBranch.clearUserPref(key);
-        else
-        {
+        else {
             // We use complexValue as tags can have utf-8 characters in them
             var str = Components.classes["@mozilla.org/supports-string;1"].createInstance(Components.interfaces.nsISupportsString);
             str.data = value;
@@ -337,7 +335,7 @@ var pktApi = (function() {
 
         var sendData = {
             access_token: accessToken,
-            url: url,
+            url,
             since: since ? since : 0
         };
 
@@ -348,7 +346,7 @@ var pktApi = (function() {
         return apiRequest({
             path: "/firefox/save",
             data: sendData,
-            success: function(data) {
+            success(data) {
 
                 // Update premium status, tags and since
                 var tags = data.tags;
@@ -458,7 +456,7 @@ var pktApi = (function() {
      * @return {Boolean} Returns Boolean whether the api call started sucessfully
      */
     function addTagsToURL(url, tags, options) {
-        return addTags({url: url}, tags, options);
+        return addTags({url}, tags, options);
     }
 
     /**
@@ -475,7 +473,7 @@ var pktApi = (function() {
         // Tags add action
         var action = {
             action: "tags_add",
-            tags: tags
+            tags
         };
         action = extend(action, actionPart);
 
@@ -584,7 +582,7 @@ var pktApi = (function() {
      * @return {Boolean} Returns Boolean whether the api call started sucessfully
      */
     function getSuggestedTagsForURL(url, options) {
-        return getSuggestedTags({url: url}, options);
+        return getSuggestedTags({url}, options);
     }
 
     /**
@@ -600,7 +598,7 @@ var pktApi = (function() {
 
         return apiRequest({
             path: "/getSuggestedTags",
-            data: data,
+            data,
             success: options.success,
             error: options.error
         });
@@ -620,8 +618,7 @@ var pktApi = (function() {
         var valArray = [];
 
         // If not assigned yet, pick and store a value
-        if (!assignedValue)
-        {
+        if (!assignedValue) {
             // Get a weighted array of test variants from the testOptions object
             Object.keys(testOptions).forEach(function(key) {
               for (var i = 0; i < testOptions[key]; i++) {
@@ -642,16 +639,16 @@ var pktApi = (function() {
      * Public functions
      */
     return {
-        isUserLoggedIn : isUserLoggedIn,
-        clearUserData: clearUserData,
-        addLink: addLink,
-        deleteItem: deleteItem,
-        addTagsToItem: addTagsToItem,
-        addTagsToURL: addTagsToURL,
-        getTags: getTags,
-        isPremiumUser: isPremiumUser,
-        getSuggestedTagsForItem: getSuggestedTagsForItem,
-        getSuggestedTagsForURL: getSuggestedTagsForURL,
-        getSignupPanelTabTestVariant: getSignupPanelTabTestVariant,
+        isUserLoggedIn,
+        clearUserData,
+        addLink,
+        deleteItem,
+        addTagsToItem,
+        addTagsToURL,
+        getTags,
+        isPremiumUser,
+        getSuggestedTagsForItem,
+        getSuggestedTagsForURL,
+        getSignupPanelTabTestVariant,
     };
 }());

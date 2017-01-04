@@ -51,8 +51,7 @@ function promiseLibrary(aLeftPaneRoot) {
         library.PlacesOrganizer.selectLeftPaneContainerByHierarchy(aLeftPaneRoot);
       }
       resolve(library);
-    }
-    else {
+    } else {
       openLibrary(resolve, aLeftPaneRoot);
     }
   });
@@ -104,8 +103,7 @@ function promiseClipboard(aPopulateClipboardFn, aFlavor) {
  *       complete.  Note that WAL makes so that writers don't block readers, but
  *       this is a problem only across different connections.
  */
-function waitForAsyncUpdates(aCallback, aScope, aArguments)
-{
+function waitForAsyncUpdates(aCallback, aScope, aArguments) {
   let scope = aScope || this;
   let args = aArguments || [];
   let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
@@ -116,10 +114,9 @@ function waitForAsyncUpdates(aCallback, aScope, aArguments)
 
   let commit = db.createAsyncStatement("COMMIT");
   commit.executeAsync({
-    handleResult: function() {},
-    handleError: function() {},
-    handleCompletion: function(aReason)
-    {
+    handleResult() {},
+    handleError() {},
+    handleCompletion(aReason) {
       aCallback.apply(scope, args);
     }
   });

@@ -24,15 +24,13 @@ const SCHEMES = {
 };
 
 var gRunner;
-function run_test()
-{
+function run_test() {
   do_test_pending();
   gRunner = step();
   gRunner.next();
 }
 
-function* step()
-{
+function* step() {
   let history = Cc["@mozilla.org/browser/history;1"]
                   .getService(Ci.mozIAsyncHistory);
 
@@ -49,9 +47,9 @@ function* step()
         do_check_false(aIsVisited);
 
         let callback = {
-          handleError:  function() {},
-          handleResult: function() {},
-          handleCompletion: function() {
+          handleError() {},
+          handleResult() {},
+          handleCompletion() {
             do_print("Added visit to " + uri.spec);
 
             history.isURIVisited(uri, function(aURI2, aIsVisited2) {
@@ -70,7 +68,7 @@ function* step()
           },
         };
 
-        history.updatePlaces({ uri:    uri
+        history.updatePlaces({ uri
                              , visits: [ { transitionType: transition
                                          , visitDate:      Date.now() * 1000
                                          } ]

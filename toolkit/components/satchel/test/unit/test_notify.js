@@ -11,7 +11,7 @@ var expectedData;
 var TestObserver = {
   QueryInterface : XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
 
-  observe : function(subject, topic, data) {
+  observe(subject, topic, data) {
     do_check_eq(topic, "satchel-storage-changed");
     do_check_eq(data, expectedNotification);
 
@@ -41,8 +41,7 @@ function run_test() {
   testIterator.next();
 }
 
-function next_test()
-{
+function next_test() {
   testIterator.next();
 }
 
@@ -140,8 +139,8 @@ expectedNotification = "formhistory-remove";
 expectedData = [10, 99999999999];
 
 yield FormHistory.update({ op: "remove", firstUsedStart: expectedData[0], firstUsedEnd: expectedData[1] },
-                         { handleCompletion: function(reason) { if (!reason) next_test() },
-                           handleErrors: function(error) {
+                         { handleCompletion(reason) { if (!reason) next_test() },
+                           handleErrors(error) {
                              do_throw("Error occurred updating form history: " + error);
                            }
                          });

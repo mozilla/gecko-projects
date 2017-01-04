@@ -10,6 +10,7 @@
 #include "StyleStructContext.h"
 #include "gfxFontFamilyList.h"
 #include "nsAttrValueInlines.h"
+#include "nsCSSParser.h"
 #include "nsCSSRuleProcessor.h"
 #include "nsContentUtils.h"
 #include "nsDOMTokenList.h"
@@ -20,6 +21,7 @@
 #include "nsINode.h"
 #include "nsIPrincipal.h"
 #include "nsNameSpaceManager.h"
+#include "nsNetUtil.h"
 #include "nsRuleNode.h"
 #include "nsString.h"
 #include "nsStyleStruct.h"
@@ -57,6 +59,12 @@ bool
 Gecko_NodeIsElement(RawGeckoNodeBorrowed aNode)
 {
   return aNode->IsElement();
+}
+
+bool
+Gecko_IsInDocument(RawGeckoNodeBorrowed aNode)
+{
+  return aNode->IsInComposedDoc();
 }
 
 RawGeckoNodeBorrowedOrNull
@@ -1019,6 +1027,46 @@ nsCSSValueBorrowedMut
 Gecko_CSSValue_GetArrayItem(nsCSSValueBorrowedMut aCSSValue, int32_t aIndex)
 {
   return &aCSSValue->GetArrayValue()->Item(aIndex);
+}
+
+void
+Gecko_LoadStyleSheet(css::Loader* aLoader,
+                     ServoStyleSheet* aParent,
+                     RawServoImportRuleBorrowed aImportRule,
+                     const uint8_t* aURLString,
+                     uint32_t aURLStringLength,
+                     const uint8_t* aMediaString,
+                     uint32_t aMediaStringLength)
+{
+  MOZ_ASSERT(aLoader, "Should've catched this before");
+  MOZ_ASSERT(aParent, "Only used for @import, so parent should exist!");
+  MOZ_ASSERT(aURLString, "Invalid URLs shouldn't be loaded!");
+  RefPtr<nsMediaList> media = new nsMediaList();
+  if (aMediaStringLength) {
+    MOZ_ASSERT(aMediaString);
+    // TODO(emilio, bug 1325878): This is not great, though this is going away
+    // soon anyway, when we can have a Servo-backed nsMediaList.
+    nsDependentCSubstring medium(reinterpret_cast<const char*>(aMediaString),
+                                 aMediaStringLength);
+    nsCSSParser mediumParser(aLoader);
+    mediumParser.ParseMediaList(
+        NS_ConvertUTF8toUTF16(medium), nullptr, 0, media);
+  }
+
+  nsDependentCSubstring urlSpec(reinterpret_cast<const char*>(aURLString),
+                                aURLStringLength);
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = NS_NewURI(getter_AddRefs(uri), urlSpec);
+
+  if (NS_FAILED(rv)) {
+    // Servo and Gecko have different ideas of what a valid URL is, so we might
+    // get in here with a URL string that NS_NewURI can't handle.  If so,
+    // silently do nothing.  Eventually we should be able to assert that the
+    // NS_NewURI succeeds, here.
+    return;
+  }
+
+  aLoader->LoadChildSheet(aParent, uri, media, nullptr, aImportRule, nullptr);
 }
 
 NS_IMPL_THREADSAFE_FFI_REFCOUNTING(nsCSSValueSharedList, CSSValueSharedList);

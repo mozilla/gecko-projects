@@ -115,10 +115,10 @@ function doKey(aKey, modifier) {
                QueryInterface(SpecialPowers.Ci.nsIInterfaceRequestor).
                getInterface(SpecialPowers.Ci.nsIDOMWindowUtils);
 
-  if (wutils.sendKeyEvent("keydown",  key, 0, modifier)) {
+  if (wutils.sendKeyEvent("keydown", key, 0, modifier)) {
     wutils.sendKeyEvent("keypress", key, 0, modifier);
   }
-  wutils.sendKeyEvent("keyup",    key, 0, modifier);
+  wutils.sendKeyEvent("keyup", key, 0, modifier);
 }
 
 /**
@@ -436,7 +436,10 @@ if (this.addMessageListener) {
   });
 } else {
   // Code to only run in the mochitest pages (not in the chrome script).
-  SpecialPowers.pushPrefEnv({"set": [["signon.rememberSignons", true]]});
+  SpecialPowers.pushPrefEnv({"set": [["signon.rememberSignons", true],
+                                     ["signon.autofillForms.http", true],
+                                     ["security.insecure_field_warning.contextual.enabled", false]]
+                           });
   SimpleTest.registerCleanupFunction(() => {
     SpecialPowers.popPrefEnv();
     runInParent(function cleanupParent() {

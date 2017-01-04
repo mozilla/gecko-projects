@@ -38,15 +38,13 @@ function Sanitizer() {
 }
 Sanitizer.prototype = {
   // warning to the caller: this one may raise an exception (e.g. bug #265028)
-  clearItem: function(aItemName)
-  {
+  clearItem(aItemName) {
     this.items[aItemName].clear();
   },
 
   prefDomain: "",
 
-  getNameFromPreference: function(aPreferenceName)
-  {
+  getNameFromPreference(aPreferenceName) {
     return aPreferenceName.substr(this.prefDomain.length);
   },
 
@@ -254,8 +252,7 @@ Sanitizer.prototype = {
                 }
               }
             }
-          }
-          else {
+          } else {
             // Remove everything
             cookieMgr.removeAll();
             yield new Promise(resolve => setTimeout(resolve, 0)); // Don't block the main thread too long
@@ -516,7 +513,7 @@ Sanitizer.prototype = {
 
     openWindows: {
       privateStateForNewWindow: "non-private",
-      _canCloseWindow: function(aWindow) {
+      _canCloseWindow(aWindow) {
         if (aWindow.CanCloseWindow()) {
           // We already showed PermitUnload for the window, so let's
           // make sure we don't do it again when we actually close the
@@ -526,7 +523,7 @@ Sanitizer.prototype = {
         }
         return false;
       },
-      _resetAllWindowClosures: function(aWindowList) {
+      _resetAllWindowClosures(aWindowList) {
         for (let win of aWindowList) {
           win.skipNextCanClose = false;
         }
@@ -793,8 +790,7 @@ Sanitizer.clearPluginData = Task.async(function* (range) {
 });
 
 Sanitizer._prefs = null;
-Sanitizer.__defineGetter__("prefs", function()
-{
+Sanitizer.__defineGetter__("prefs", function() {
   return Sanitizer._prefs ? Sanitizer._prefs
     : Sanitizer._prefs = Components.classes["@mozilla.org/preferences-service;1"]
                          .getService(Components.interfaces.nsIPrefService)
@@ -802,8 +798,7 @@ Sanitizer.__defineGetter__("prefs", function()
 });
 
 // Shows sanitization UI
-Sanitizer.showUI = function(aParentWindow)
-{
+Sanitizer.showUI = function(aParentWindow) {
   let win = AppConstants.platform == "macosx" ?
     null : // make this an app-modal window on Mac
     aParentWindow;
@@ -818,8 +813,7 @@ Sanitizer.showUI = function(aParentWindow)
  * Deletes privacy sensitive data in a batch, optionally showing the
  * sanitize UI, according to user preferences
  */
-Sanitizer.sanitize = function(aParentWindow)
-{
+Sanitizer.sanitize = function(aParentWindow) {
   Sanitizer.showUI(aParentWindow);
 };
 

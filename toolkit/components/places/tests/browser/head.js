@@ -23,8 +23,7 @@ const TRANSITION_DOWNLOAD = PlacesUtils.history.TRANSITION_DOWNLOAD;
  * param aCallback
  *        Callback function that will get the property value.
  */
-function fieldForUrl(aURI, aFieldName, aCallback)
-{
+function fieldForUrl(aURI, aFieldName, aCallback) {
   let url = aURI instanceof Ci.nsIURI ? aURI.spec : aURI;
   let stmt = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
                                 .DBConnection.createAsyncStatement(
@@ -33,14 +32,14 @@ function fieldForUrl(aURI, aFieldName, aCallback)
   stmt.params.page_url = url;
   stmt.executeAsync({
     _value: -1,
-    handleResult: function(aResultSet) {
+    handleResult(aResultSet) {
       let row = aResultSet.getNextRow();
       if (!row)
         ok(false, "The page should exist in the database");
       this._value = row.getResultByName(aFieldName);
     },
-    handleError: function() {},
-    handleCompletion: function(aReason) {
+    handleError() {},
+    handleCompletion(aReason) {
       if (aReason != Ci.mozIStorageStatementCallback.REASON_FINISHED)
          ok(false, "The statement should properly succeed");
       aCallback(this._value);
@@ -56,14 +55,14 @@ function fieldForUrl(aURI, aFieldName, aCallback)
 function NavHistoryObserver() {}
 
 NavHistoryObserver.prototype = {
-  onBeginUpdateBatch: function() {},
-  onEndUpdateBatch: function() {},
-  onVisit: function() {},
-  onTitleChanged: function() {},
-  onDeleteURI: function() {},
-  onClearHistory: function() {},
-  onPageChanged: function() {},
-  onDeleteVisits: function() {},
+  onBeginUpdateBatch() {},
+  onEndUpdateBatch() {},
+  onVisit() {},
+  onTitleChanged() {},
+  onDeleteURI() {},
+  onClearHistory() {},
+  onPageChanged() {},
+  onDeleteVisits() {},
   QueryInterface: XPCOMUtils.generateQI([
     Ci.nsINavHistoryObserver,
   ])
@@ -128,8 +127,7 @@ function addVisits(aPlaceInfo, aWindow, aCallback, aStack) {
   let places = [];
   if (aPlaceInfo instanceof Ci.nsIURI) {
     places.push({ uri: aPlaceInfo });
-  }
-  else if (Array.isArray(aPlaceInfo)) {
+  } else if (Array.isArray(aPlaceInfo)) {
     places = places.concat(aPlaceInfo);
   } else {
     places.push(aPlaceInfo)
@@ -155,7 +153,7 @@ function addVisits(aPlaceInfo, aWindow, aCallback, aStack) {
       handleError: function AAV_handleError() {
         throw ("Unexpected error in adding visit.");
       },
-      handleResult: function() {},
+      handleResult() {},
       handleCompletion: function UP_handleCompletion() {
         if (aCallback)
           aCallback();

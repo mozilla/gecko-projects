@@ -27,7 +27,7 @@ const SIZES_TELEMETRY_ENUM = {
 };
 
 this.ContentLinkHandler = {
-  init: function(chromeGlobal) {
+  init(chromeGlobal) {
     chromeGlobal.addEventListener("DOMLinkAdded", (event) => {
       this.onLinkEvent(event, chromeGlobal);
     }, false);
@@ -36,7 +36,7 @@ this.ContentLinkHandler = {
     }, false);
   },
 
-  onLinkEvent: function(event, chromeGlobal) {
+  onLinkEvent(event, chromeGlobal) {
     var link = event.originalTarget;
     var rel = link.rel && link.rel.toLowerCase();
     if (!link || !link.ownerDocument || !rel || !link.href)
@@ -120,11 +120,10 @@ this.ContentLinkHandler = {
 
             let re = /^(?:https?|ftp):/i;
             if (type == "application/opensearchdescription+xml" && link.title &&
-                re.test(link.href))
-            {
+                re.test(link.href)) {
               let engine = { title: link.title, href: link.href };
               chromeGlobal.sendAsyncMessage("Link:AddSearch",
-                                            {engine: engine,
+                                            {engine,
                                              url: link.ownerDocument.documentURI});
               searchAdded = true;
             }
@@ -134,7 +133,7 @@ this.ContentLinkHandler = {
     }
   },
 
-  getLinkIconURI: function(aLink) {
+  getLinkIconURI(aLink) {
     let targetDoc = aLink.ownerDocument;
     var uri = BrowserUtils.makeURI(aLink.href, targetDoc.characterSet);
     try {

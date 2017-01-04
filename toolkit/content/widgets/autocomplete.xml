@@ -618,16 +618,16 @@
           _autocomplete: this,
           _kGlobalClipboard: Components.interfaces.nsIClipboard.kGlobalClipboard,
           supportsCommand: aCommand => aCommand == "cmd_paste",
-          doCommand: function(aCommand) {
+          doCommand(aCommand) {
             this._autocomplete._valueIsPasted = true;
             this._autocomplete.editor.paste(this._kGlobalClipboard);
             this._autocomplete._valueIsPasted = false;
           },
-          isCommandEnabled: function(aCommand) {
+          isCommandEnabled(aCommand) {
             return this._autocomplete.editor.isSelectionEditable &&
                    this._autocomplete.editor.canPaste(this._kGlobalClipboard);
           },
-          onEvent: function() {}
+          onEvent() {}
         })
       ]]></field>
 
@@ -1338,8 +1338,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
                   continue;
                 }
               }
-            }
-            else {
+            } else {
               // need to create a new item
               item = document.createElementNS("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul", "richlistitem");
               item.setAttribute("dir", this.style.direction);
@@ -1358,8 +1357,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
               // re-use the existing item
               item._adjustAcItem();
               item.collapsed = false;
-            }
-            else {
+            } else {
               // set the class at the end so we can use the attributes
               // in the xbl constructor
               item.className = "autocomplete-richlistitem";
@@ -2353,7 +2351,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           let [, type, params] = aUrl.match(/^moz-action:([^,]+),(.*)$/);
 
           let action = {
-            type: type,
+            type,
           };
 
           try {

@@ -152,13 +152,13 @@ function waitForInstallDialog() {
 
     let window = yield new Promise(resolve => {
       Services.wm.addListener({
-        onOpenWindow: function(aXULWindow) {
+        onOpenWindow(aXULWindow) {
           Services.wm.removeListener(this);
           resolve(aXULWindow);
         },
-        onCloseWindow: function(aXULWindow) {
+        onCloseWindow(aXULWindow) {
         },
-        onWindowTitleChange: function(aXULWindow, aNewTitle) {
+        onWindowTitleChange(aXULWindow, aNewTitle) {
         }
       });
     });
@@ -260,8 +260,7 @@ function test_disabledInstall() {
 
     try {
       ok(Services.prefs.getBoolPref("xpinstall.enabled"), "Installation should be enabled");
-    }
-    catch (e) {
+    } catch (e) {
       ok(false, "xpinstall.enabled should be set");
     }
 
@@ -1055,7 +1054,7 @@ function test_cancel() {
     let install = notification.notification.options.installs[0];
     let cancelledPromise = new Promise(resolve => {
       install.addListener({
-        onDownloadCancelled: function() {
+        onDownloadCancelled() {
           install.removeListener(this);
           resolve();
         }
@@ -1124,7 +1123,7 @@ function test_failedSecurity() {
 var gTestStart = null;
 
 var XPInstallObserver = {
-  observe: function(aSubject, aTopic, aData) {
+  observe(aSubject, aTopic, aData) {
     var installInfo = aSubject.QueryInterface(Components.interfaces.amIWebInstallInfo);
     info("Observed " + aTopic + " for " + installInfo.installs.length + " installs");
     installInfo.installs.forEach(function(aInstall) {

@@ -10,13 +10,13 @@ var anno = PlacesUtils.annotations;
 
 
 var bookmarksObserver = {
-  onBeginUpdateBatch: function() {
+  onBeginUpdateBatch() {
     this._beginUpdateBatch = true;
   },
-  onEndUpdateBatch: function() {
+  onEndUpdateBatch() {
     this._endUpdateBatch = true;
   },
-  onItemAdded: function(id, folder, index, itemType, uri, title, dateAdded,
+  onItemAdded(id, folder, index, itemType, uri, title, dateAdded,
                         guid) {
     this._itemAddedId = id;
     this._itemAddedParent = folder;
@@ -37,12 +37,12 @@ var bookmarksObserver = {
     do_check_eq(stmt.row.guid, guid);
     stmt.finalize();
   },
-  onItemRemoved: function(id, folder, index, itemType) {
+  onItemRemoved(id, folder, index, itemType) {
     this._itemRemovedId = id;
     this._itemRemovedFolder = folder;
     this._itemRemovedIndex = index;
   },
-  onItemChanged: function(id, property, isAnnotationProperty, value,
+  onItemChanged(id, property, isAnnotationProperty, value,
                           lastModified, itemType, parentId, guid, parentGuid,
                           oldValue) {
     this._itemChangedId = id;
@@ -51,12 +51,12 @@ var bookmarksObserver = {
     this._itemChangedValue = value;
     this._itemChangedOldValue = oldValue;
   },
-  onItemVisited: function(id, visitID, time) {
+  onItemVisited(id, visitID, time) {
     this._itemVisitedId = id;
     this._itemVisitedVistId = visitID;
     this._itemVisitedTime = time;
   },
-  onItemMoved: function(id, oldParent, oldIndex, newParent, newIndex,
+  onItemMoved(id, oldParent, oldIndex, newParent, newIndex,
                         itemType) {
     this._itemMovedId = id
     this._itemMovedOldParent = oldParent;
@@ -386,14 +386,12 @@ add_task(function* test_bookmarks() {
           node.type == node.RESULT_TYPE_SEPARATOR ||
           node.type == node.RESULT_TYPE_QUERY) {
         do_check_true(node.itemId > 0);
-      }
-      else {
+      } else {
         do_check_eq(node.itemId, -1);
       }
     }
     rootNode.containerOpen = false;
-  }
-  catch (ex) {
+  } catch (ex) {
     do_throw("bookmarks query: " + ex);
   }
 
@@ -420,8 +418,7 @@ add_task(function* test_bookmarks() {
     do_check_eq(rootNode.getChild(0).title, "title 1");
     do_check_eq(rootNode.getChild(1).title, "title 2");
     rootNode.containerOpen = false;
-  }
-  catch (ex) {
+  } catch (ex) {
     do_throw("bookmarks query: " + ex);
   }
 
@@ -513,8 +510,7 @@ add_task(function* test_bookmarks() {
     do_check_eq(node.title, "ZZZXXXYYY");
     do_check_true(node.itemId > 0);
     rootNode.containerOpen = false;
-  }
-  catch (ex) {
+  } catch (ex) {
     do_throw("bookmarks query: " + ex);
   }
 
@@ -540,8 +536,7 @@ add_task(function* test_bookmarks() {
     do_check_true(node.lastModified > 0);
 
     rootNode.containerOpen = false;
-  }
-  catch (ex) {
+  } catch (ex) {
     do_throw("bookmarks query: " + ex);
   }
 
@@ -569,8 +564,7 @@ add_task(function* test_bookmarks() {
       }
     }
     rootNode.containerOpen = false;
-  }
-  catch (ex) {
+  } catch (ex) {
     do_throw("bookmarks query: " + ex);
   }
 

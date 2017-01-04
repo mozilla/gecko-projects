@@ -38,8 +38,7 @@ FormSubmitObserver.prototype =
    * Public apis
    */
 
-  init: function(aWindow, aTabChildGlobal)
-  {
+  init(aWindow, aTabChildGlobal) {
     this._content = aWindow;
     this._tab = aTabChildGlobal;
     this._mm =
@@ -57,8 +56,7 @@ FormSubmitObserver.prototype =
     this._tab.addEventListener("unload", this, false);
   },
 
-  uninit: function()
-  {
+  uninit() {
     Services.obs.removeObserver(this, "invalidformsubmit");
     this._content.removeEventListener("pageshow", this, false);
     this._content.removeEventListener("unload", this, false);
@@ -72,7 +70,7 @@ FormSubmitObserver.prototype =
    * Events
    */
 
-  handleEvent: function(aEvent) {
+  handleEvent(aEvent) {
     switch (aEvent.type) {
       case "pageshow":
         if (this._isRootDocumentEvent(aEvent)) {
@@ -95,8 +93,7 @@ FormSubmitObserver.prototype =
    * nsIFormSubmitObserver
    */
 
-  notifyInvalidSubmit : function(aFormElement, aInvalidElements)
-  {
+  notifyInvalidSubmit(aFormElement, aInvalidElements) {
     // We are going to handle invalid form submission attempt by focusing the
     // first invalid element and show the corresponding validation message in a
     // panel attached to the element.
@@ -149,7 +146,7 @@ FormSubmitObserver.prototype =
    * with. Updates the validation message or closes the popup if form data
    * becomes valid.
    */
-  _onInput: function(aEvent) {
+  _onInput(aEvent) {
     let element = aEvent.originalTarget;
 
     // If the form input is now valid, hide the popup.
@@ -170,7 +167,7 @@ FormSubmitObserver.prototype =
    * Blur event handler in which we disconnect from the form element and
    * hide the popup.
    */
-  _onBlur: function(aEvent) {
+  _onBlur(aEvent) {
     aEvent.originalTarget.removeEventListener("input", this, false);
     aEvent.originalTarget.removeEventListener("blur", this, false);
     this._element = null;
@@ -182,7 +179,7 @@ FormSubmitObserver.prototype =
    * information. Can be called repetitively to update the currently
    * displayed popup position and text.
    */
-  _showPopup: function(aElement) {
+  _showPopup(aElement) {
     // Collect positional information and show the popup
     let panelData = {};
 
@@ -214,15 +211,15 @@ FormSubmitObserver.prototype =
     this._mm.sendAsyncMessage("FormValidation:ShowPopup", panelData);
   },
 
-  _hidePopup: function() {
+  _hidePopup() {
     this._mm.sendAsyncMessage("FormValidation:HidePopup", {});
   },
 
-  _getWindowUtils: function() {
+  _getWindowUtils() {
     return this._content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
   },
 
-  _isRootDocumentEvent: function(aEvent) {
+  _isRootDocumentEvent(aEvent) {
     if (this._content == null) {
       return true;
     }

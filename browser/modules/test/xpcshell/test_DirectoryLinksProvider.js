@@ -139,8 +139,7 @@ function getHttpHandler(path) {
 function isIdentical(actual, expected) {
   if (expected == null) {
     do_check_eq(actual, expected);
-  }
-  else if (typeof expected == "object") {
+  } else if (typeof expected == "object") {
     // Make sure all the keys match up
     do_check_eq(Object.keys(actual).sort() + "", Object.keys(expected).sort());
 
@@ -148,8 +147,7 @@ function isIdentical(actual, expected) {
     Object.keys(expected).forEach(key => {
       isIdentical(actual[key], expected[key]);
     });
-  }
-  else {
+  } else {
     do_check_eq(actual, expected);
   }
 }
@@ -247,7 +245,7 @@ function setTimeout(fun, timeout) {
   let timer = Components.classes["@mozilla.org/timer;1"]
                         .createInstance(Components.interfaces.nsITimer);
   var event = {
-    notify: function() {
+    notify() {
       fun();
     }
   };
@@ -1062,7 +1060,7 @@ add_task(function* test_DirectoryLinksProvider_getEnhancedLink() {
   do_check_eq(links.length, 0); // There are no directory links.
 
   function checkEnhanced(url, image) {
-    let enhanced = DirectoryLinksProvider.getEnhancedLink({url: url});
+    let enhanced = DirectoryLinksProvider.getEnhancedLink({url});
     do_check_eq(enhanced && enhanced.enhancedImageURI, image);
   }
 
@@ -1234,8 +1232,7 @@ add_task(function* test_timeSensetiveSuggestedTiles() {
           do_check_true(timeDelta >= 1000 / 2); // check for at least half time
           do_check_eq(link.targetedSite, "hrblock.com");
           do_check_true(DirectoryLinksProvider._campaignTimeoutID);
-        }
-        else {
+        } else {
           // this is the campaign end timeout, so 3 seconds must pass
           // and timeout should be cleared
           do_print("TESTING END timeDelta: " + timeDelta);
@@ -1487,7 +1484,7 @@ add_task(function* test_DirectoryLinksProvider_getFrequencyCapReportSiteAction()
       targetedSite: "foo.com",
       url: "bar.com"
     },
-    isPinned: function() { return false; },
+    isPinned() { return false; },
   }], "view", 0);
 
   // read file content and ensure that view counters are updated
@@ -1531,9 +1528,9 @@ add_task(function* test_DirectoryLinksProvider_ClickRemoval() {
         }]
       },
       {
-        handleError: function() { do_check_true(false); },
-        handleResult: function() {},
-        handleCompletion: function() { resolve(); }
+        handleError() { do_check_true(false); },
+        handleResult() {},
+        handleCompletion() { resolve(); }
       }
     );
   });
@@ -1827,7 +1824,7 @@ add_task(function* test_blockSuggestedTiles() {
 
   // block suggested tile in a regular way
   DirectoryLinksProvider.reportSitesAction([{
-      isPinned: function() { return false; },
+      isPinned() { return false; },
       link: Object.assign({frecency: 1000}, suggestedLink)
   }], "block", 0);
 

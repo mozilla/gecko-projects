@@ -393,8 +393,6 @@ class MacroAssemblerNone : public Assembler
 
     void loadConstantDouble(double, FloatRegister) { MOZ_CRASH(); }
     void loadConstantFloat32(float, FloatRegister) { MOZ_CRASH(); }
-    void loadConstantDouble(wasm::RawF64, FloatRegister) { MOZ_CRASH(); }
-    void loadConstantFloat32(wasm::RawF32, FloatRegister) { MOZ_CRASH(); }
     Condition testInt32Truthy(bool, ValueOperand) { MOZ_CRASH(); }
     Condition testStringTruthy(bool, ValueOperand) { MOZ_CRASH(); }
 
@@ -423,6 +421,12 @@ class MacroAssemblerNone : public Assembler
     // Instrumentation for entering and leaving the profiler.
     void profilerEnterFrame(Register , Register ) { MOZ_CRASH(); }
     void profilerExitFrame() { MOZ_CRASH(); }
+
+    void disableProtection() { MOZ_CRASH(); }
+    void enableProtection() { MOZ_CRASH(); }
+    void setLowerBoundForProtection(size_t) { MOZ_CRASH(); }
+    void unprotectRegion(unsigned char*, size_t) { MOZ_CRASH(); }
+    void reprotectRegion(unsigned char*, size_t) { MOZ_CRASH(); }
 
 #ifdef JS_NUNBOX32
     Address ToPayload(Address) { MOZ_CRASH(); }

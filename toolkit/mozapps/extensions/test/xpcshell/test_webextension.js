@@ -52,8 +52,7 @@ add_task(function*() {
   try {
     chromeReg.convertChromeURL(NetUtil.newURI("chrome://webex/content/webex.xul"));
     do_throw("Chrome manifest should not have been registered");
-  }
-  catch (e) {
+  } catch (e) {
     // Expected the chrome url to not be registered
   }
 
@@ -388,7 +387,7 @@ add_task(function* developerEmpty() {
     let addon = yield promiseInstallWebExtension({
       manifest: {
         author: "Some author",
-        developer: developer,
+        developer,
         homepage_url: "https://example.net",
         manifest_version: 2,
         name: "Web Extension Name",
@@ -407,7 +406,7 @@ add_task(function* authorNotString() {
   for (let author of [{}, [], 42]) {
     let addon = yield promiseInstallWebExtension({
       manifest: {
-        author: author,
+        author,
         manifest_version: 2,
         name: "Web Extension Name",
         version: "1.0",

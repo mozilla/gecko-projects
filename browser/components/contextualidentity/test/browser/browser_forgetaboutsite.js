@@ -71,15 +71,13 @@ function getCookiesForOA(host, userContextId) {
   return Services.cookies.getCookiesFromHost(host, {userContextId});
 }
 
-function createURI(uri)
-{
+function createURI(uri) {
   let ioServ = Cc["@mozilla.org/network/io-service;1"]
                   .getService(Components.interfaces.nsIIOService);
   return ioServ.newURI(uri, null, null);
 }
 
-function getCacheStorage(where, lci, appcache)
-{
+function getCacheStorage(where, lci, appcache) {
   if (!lci) lci = LoadContextInfo.default;
   switch (where) {
     case "disk": return css.diskCacheStorage(lci, false);
@@ -90,30 +88,29 @@ function getCacheStorage(where, lci, appcache)
   return null;
 }
 
-function OpenCacheEntry(key, where, flags, lci)
-{
+function OpenCacheEntry(key, where, flags, lci) {
   return new Promise(resolve => {
     key = createURI(key);
     function CacheListener() { }
     CacheListener.prototype = {
       _appCache: null,
 
-      QueryInterface: function(iid) {
+      QueryInterface(iid) {
         if (iid.equals(Components.interfaces.nsICacheEntryOpenCallback) ||
             iid.equals(Components.interfaces.nsISupports))
           return this;
         throw Components.results.NS_ERROR_NO_INTERFACE;
       },
 
-      onCacheEntryCheck: function(entry, appCache) {
+      onCacheEntryCheck(entry, appCache) {
         return Ci.nsICacheEntryOpenCallback.ENTRY_WANTED;
       },
 
-      onCacheEntryAvailable: function(entry, isnew, appCache, status) {
+      onCacheEntryAvailable(entry, isnew, appCache, status) {
         resolve();
       },
 
-      run: function() {
+      run() {
         let storage = getCacheStorage(where, lci, this._appCache);
         storage.asyncOpenURI(key, "", flags, this);
       }

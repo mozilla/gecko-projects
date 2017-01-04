@@ -113,8 +113,7 @@ this.__defineGetter__("gBG", function() {
                     getService(Ci.nsIObserver);
 });
 
-function test()
-{
+function test() {
   waitForExplicitFinish();
 
   // Reset the startup page pref since it may have been set by other tests
@@ -135,11 +134,11 @@ function test()
 var gWindowCatcher = {
   windowsOpen: 0,
   finishCalled: false,
-  start: function() {
+  start() {
     Services.ww.registerNotification(this);
   },
 
-  finish: function(aFunc) {
+  finish(aFunc) {
     Services.ww.unregisterNotification(this);
     this.finishFunc = aFunc;
     if (this.windowsOpen > 0)
@@ -148,7 +147,7 @@ var gWindowCatcher = {
     this.finishFunc();
   },
 
-  closeWindow: function(win) {
+  closeWindow(win) {
     info("window catcher closing window: " + win.document.documentURI);
     win.close();
     this.windowsOpen--;
@@ -157,11 +156,11 @@ var gWindowCatcher = {
     }
   },
 
-  windowLoad: function(win) {
+  windowLoad(win) {
     executeSoon(this.closeWindow.bind(this, win));
   },
 
-  observe: function(subject, topic, data) {
+  observe(subject, topic, data) {
     if (topic != "domwindowopened")
       return;
 
@@ -175,8 +174,7 @@ var gWindowCatcher = {
   }
 };
 
-function finish_test()
-{
+function finish_test() {
   // Reset browser.startup.homepage_override.mstone to the original value or
   // clear it if it didn't exist.
   if (gOriginalMStone) {
@@ -200,8 +198,7 @@ function finish_test()
 }
 
 // Test the defaultArgs returned by nsBrowserContentHandler after an update
-function testDefaultArgs()
-{
+function testDefaultArgs() {
   // Clear any pre-existing override in defaultArgs that are hanging around.
   // This will also set the browser.startup.homepage_override.mstone preference
   // if it isn't already set.
@@ -300,8 +297,7 @@ const BG_NOTIFY_TESTS = [
 
 // Test showing a notification after an update
 // _showUpdateNotification in nsBrowserGlue.js
-function testShowNotification()
-{
+function testShowNotification() {
   let notifyBox = document.getElementById("high-priority-global-notificationbox");
 
   // Catches any windows opened by these tests (e.g. alert windows) and closes
@@ -382,8 +378,7 @@ function testShowNotification()
 }
 
 // Test opening the url provided by the updates.xml in the last test
-function testNotificationURL()
-{
+function testNotificationURL() {
   ok(true, "Test testNotificationURL: clicking the notification button " +
            "opened the url specified by the update");
   let href = gBrowser.currentURI.spec;
@@ -396,15 +391,13 @@ function testNotificationURL()
 }
 
 /* Reloads the update metadata from disk */
-function reloadUpdateManagerData()
-{
+function reloadUpdateManagerData() {
   Cc["@mozilla.org/updates/update-manager;1"].getService(Ci.nsIUpdateManager).
   QueryInterface(Ci.nsIObserver).observe(null, "um-reload-update-data", "");
 }
 
 
-function writeUpdatesToXMLFile(aText)
-{
+function writeUpdatesToXMLFile(aText) {
   const PERMS_FILE = 0o644;
 
   const MODE_WRONLY   = 0x02;

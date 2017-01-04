@@ -30,7 +30,7 @@ function test() {
     {
       name: "context menu search",
       searchURL: base,
-      run: function() {
+      run() {
         // Simulate a contextmenu search
         // FIXME: This is a bit "low-level"...
         BrowserSearch.loadSearch("foo", false, "contextmenu");
@@ -39,7 +39,7 @@ function test() {
     {
       name: "keyword search",
       searchURL: base,
-      run: function() {
+      run() {
         gURLBar.value = "? foo";
         gURLBar.focus();
         EventUtils.synthesizeKey("VK_RETURN", {});
@@ -48,7 +48,7 @@ function test() {
     {
       name: "keyword search",
       searchURL: base,
-      run: function() {
+      run() {
         gURLBar.value = "g foo";
         gURLBar.focus();
         EventUtils.synthesizeKey("VK_RETURN", {});
@@ -57,7 +57,7 @@ function test() {
     {
       name: "search bar search",
       searchURL: base,
-      run: function() {
+      run() {
         let sb = BrowserSearch.searchBar;
         sb.focus();
         sb.value = "foo";
@@ -70,7 +70,7 @@ function test() {
     {
       name: "new tab search",
       searchURL: base,
-      run: function() {
+      run() {
         function doSearch(doc) {
           // Re-add the listener, and perform a search
           gBrowser.addProgressListener(listener);
@@ -96,8 +96,7 @@ function test() {
           if (win.gSearch.currentEngineName ==
               Services.search.currentEngine.name) {
             doSearch(win.document);
-          }
-          else {
+          } else {
             info("Waiting for newtab search init");
             win.addEventListener("ContentSearchService", function done(searchServiceEvent) {
               info("Got newtab search event " + searchServiceEvent.detail.type);

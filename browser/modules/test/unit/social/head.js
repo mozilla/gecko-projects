@@ -132,7 +132,7 @@ function AsyncRunner() {
 
   this._callbacks = {
     done: do_test_finished,
-    error: function(err) {
+    error(err) {
       // xpcshell test functions like do_check_eq throw NS_ERROR_ABORT on
       // failure.  Ignore those so they aren't rethrown here.
       if (err !== Cr.NS_ERROR_ABORT) {
@@ -143,7 +143,7 @@ function AsyncRunner() {
         do_throw(err);
       }
     },
-    consoleError: function(scriptErr) {
+    consoleError(scriptErr) {
       // Try to ensure the error is related to the test.
       let filename = scriptErr.sourceName || scriptErr.toString() || "";
       if (filename.indexOf("/toolkit/components/social/") >= 0)
@@ -179,8 +179,7 @@ AsyncRunner.prototype = {
         this.next();
         return;
       }
-    }
-    catch (err) {
+    } catch (err) {
       this._callbacks.error(err);
     }
 
@@ -202,8 +201,7 @@ AsyncRunner.prototype = {
 
   observe: function observe(msg) {
     if (msg instanceof Ci.nsIScriptError &&
-        !(msg.flags & Ci.nsIScriptError.warningFlag))
-    {
+        !(msg.flags & Ci.nsIScriptError.warningFlag)) {
       this._callbacks.consoleError(msg);
     }
   },

@@ -275,7 +275,7 @@ tests.push(make_promise_test(
 // does not prevent other observers from receiving the notification
 // of success.
 tests.push(
-  make_promise_test(function exceptions_do_not_stop_notifications(test)  {
+  make_promise_test(function exceptions_do_not_stop_notifications(test) {
     let source = Promise.defer();
 
     let exception_thrown = false;
@@ -1013,7 +1013,7 @@ function wait_for_uncaught(aMustAppear, aTimeout = undefined) {
     let error = new Error("This is an uncaught error " + salt);
     return {
       mustFind: [error.message, error.fileName, error.lineNumber, error.stack],
-      error: error
+      error
     };
   };
   let make_exception_rejection = function make_exception_rejection() {
@@ -1097,8 +1097,7 @@ tests.push(
   })
 );
 
-function run_test()
-{
+function run_test() {
   do_test_pending();
   run_promise_tests(tests, do_test_finished);
 }

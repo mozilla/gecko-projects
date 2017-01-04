@@ -16,7 +16,7 @@ var gLibrary;
 
 gTests.push({
   desc: "Bug 430148 - Remove or hide the more/less button in details pane...",
-  run: function() {
+  run() {
     var PO = gLibrary.PlacesOrganizer;
     let ContentTree = gLibrary.ContentTree;
     var infoBoxExpanderWrapper = getAndCheckElmtById("infoBoxExpanderWrapper");
@@ -173,8 +173,7 @@ function nextTest() {
     ok(true, "TEST: " + testCase.desc);
     dump("TEST: " + testCase.desc + "\n");
     testCase.run();
-  }
-  else {
+  } else {
     // Close Library window.
     gLibrary.close();
     // No need to cleanup anything, we have a correct left pane now.

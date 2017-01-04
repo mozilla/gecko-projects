@@ -400,8 +400,7 @@ Bookmarks.prototype = {
               folderGuid =
                 yield MigrationUtils.createImportedBookmarksFolder(this.importedAppLabel, folderGuid);
             }
-          }
-          else {
+          } else {
             // Import to a new folder.
             folderGuid = (yield MigrationUtils.insertBookmarkWrapper({
               type: PlacesUtils.bookmarks.TYPE_FOLDER,
@@ -414,8 +413,7 @@ Bookmarks.prototype = {
             // Recursively import the folder.
             yield this._migrateFolder(entry, folderGuid);
           }
-        }
-        else {
+        } else {
           // Strip the .url extension, to both check this is a valid link file,
           // and get the associated title.
           let matches = entry.leafName.match(/(.+)\.url$/i);
@@ -874,7 +872,7 @@ WindowsVaultFormPasswords.prototype = {
 var MSMigrationUtils = {
   MIGRATION_TYPE_IE: 1,
   MIGRATION_TYPE_EDGE: 2,
-  CtypesKernelHelpers: CtypesKernelHelpers,
+  CtypesKernelHelpers,
   getBookmarksMigrator(migrationType = this.MIGRATION_TYPE_IE) {
     return new Bookmarks(migrationType);
   },

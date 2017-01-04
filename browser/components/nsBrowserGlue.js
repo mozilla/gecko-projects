@@ -298,19 +298,15 @@ BrowserGlue.prototype = {
         if (data == "post-update-notification") {
           if (Services.prefs.prefHasUserValue("app.update.postupdate"))
             this._showUpdateNotification();
-        }
-        else if (data == "force-ui-migration") {
+        } else if (data == "force-ui-migration") {
           this._migrateUI();
-        }
-        else if (data == "force-distribution-customization") {
+        } else if (data == "force-distribution-customization") {
           this._distributionCustomizer.applyPrefDefaults();
           this._distributionCustomizer.applyCustomizations();
           // To apply distribution bookmarks use "places-init-complete".
-        }
-        else if (data == "force-places-init") {
+        } else if (data == "force-places-init") {
           this._initPlaces(false);
-        }
-        else if (data == "smart-bookmarks-init") {
+        } else if (data == "smart-bookmarks-init") {
           this.ensurePlacesDefaultQueriesInitialized().then(() => {
             Services.obs.notifyObservers(null, "test-smart-bookmarks-done", null);
           });
@@ -543,7 +539,7 @@ BrowserGlue.prototype = {
           {
             label: win.gNavigatorBundle.getFormattedString("addonwatch.disable.label", [addon.name]),
             accessKey: "", // workaround for bug 1192901
-            callback: function() {
+            callback() {
               done(STATE_USER_PICKED_DISABLE);
               addon.userDisabled = true;
               if (addon.pendingOperations == addon.PENDING_NONE) {
@@ -554,7 +550,7 @@ BrowserGlue.prototype = {
                 {
                   label: win.gNavigatorBundle.getFormattedString("addonwatch.restart.label", [brandShortName]),
                   accessKey: win.gNavigatorBundle.getString("addonwatch.restart.accesskey"),
-                  callback: function() {
+                  callback() {
                     let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
                       .getService(Ci.nsIAppStartup);
                     appStartup.quit(appStartup.eForceQuit | appStartup.eRestart);
@@ -569,7 +565,7 @@ BrowserGlue.prototype = {
           {
             label: win.gNavigatorBundle.getString("addonwatch.ignoreSession.label"),
             accessKey: win.gNavigatorBundle.getString("addonwatch.ignoreSession.accesskey"),
-            callback: function() {
+            callback() {
               done(STATE_USER_PICKED_IGNORE_FOR_NOW);
               AddonWatcher.ignoreAddonForSession(addonId);
             }
@@ -577,7 +573,7 @@ BrowserGlue.prototype = {
           {
             label: win.gNavigatorBundle.getString("addonwatch.ignorePerm.label"),
             accessKey: win.gNavigatorBundle.getString("addonwatch.ignorePerm.accesskey"),
-            callback: function() {
+            callback() {
               done(STATE_USER_PICKED_IGNORE_FOREVER);
               AddonWatcher.ignoreAddonPermanently(addonId);
             }
@@ -672,7 +668,7 @@ BrowserGlue.prototype = {
     Services.obs.notifyObservers(null, "browser-ui-startup-complete", "");
   },
 
-  _checkForOldBuildUpdates: function() {
+  _checkForOldBuildUpdates() {
     // check for update if our build is old
     if (AppConstants.MOZ_UPDATER &&
         Services.prefs.getBoolPref("app.update.enabled") &&
@@ -724,7 +720,7 @@ BrowserGlue.prototype = {
     }
   },
 
-  _trackSlowStartup: function() {
+  _trackSlowStartup() {
     if (Services.startup.interrupted ||
         Services.prefs.getBoolPref("browser.slowStartup.notificationDisabled"))
       return;
@@ -767,7 +763,7 @@ BrowserGlue.prototype = {
     return (Date.now() - profileDate) / ONE_DAY;
   }),
 
-  _showSlowStartupNotification: function(profileAge) {
+  _showSlowStartupNotification(profileAge) {
     if (profileAge < 90) // 3 months
       return;
 
@@ -782,14 +778,14 @@ BrowserGlue.prototype = {
       {
         label:     win.gNavigatorBundle.getString("slowStartup.helpButton.label"),
         accessKey: win.gNavigatorBundle.getString("slowStartup.helpButton.accesskey"),
-        callback: function() {
+        callback() {
           win.openUILinkIn("https://support.mozilla.org/kb/reset-firefox-easily-fix-most-problems", "tab");
         }
       },
       {
         label:     win.gNavigatorBundle.getString("slowStartup.disableNotificationButton.label"),
         accessKey: win.gNavigatorBundle.getString("slowStartup.disableNotificationButton.accesskey"),
-        callback: function() {
+        callback() {
           Services.prefs.setBoolPref("browser.slowStartup.notificationDisabled", true);
         }
       }
@@ -808,7 +804,7 @@ BrowserGlue.prototype = {
    *        String of either "unused" or "uninstall", specifying the reason
    *        why a profile reset is offered.
    */
-  _resetProfileNotification: function(reason) {
+  _resetProfileNotification(reason) {
     let win = RecentWindow.getMostRecentBrowserWindow();
     if (!win)
       return;
@@ -833,7 +829,7 @@ BrowserGlue.prototype = {
       {
         label:     resetBundle.formatStringFromName("refreshProfile.resetButton.label", [productName], 1),
         accessKey: resetBundle.GetStringFromName("refreshProfile.resetButton.accesskey"),
-        callback: function() {
+        callback() {
           ResetProfile.openConfirmationDialog(win);
         }
       },
@@ -845,7 +841,7 @@ BrowserGlue.prototype = {
                           nb.PRIORITY_INFO_LOW, buttons);
   },
 
-  _notifyUnsignedAddonsDisabled: function() {
+  _notifyUnsignedAddonsDisabled() {
     let win = RecentWindow.getMostRecentBrowserWindow();
     if (!win)
       return;
@@ -855,7 +851,7 @@ BrowserGlue.prototype = {
       {
         label:     win.gNavigatorBundle.getString("unsignedAddonsDisabled.learnMore.label"),
         accessKey: win.gNavigatorBundle.getString("unsignedAddonsDisabled.learnMore.accesskey"),
-        callback: function() {
+        callback() {
           win.BrowserOpenAddonsMgr("addons://list/extension?unsigned=true");
         }
       },
@@ -866,7 +862,7 @@ BrowserGlue.prototype = {
                           nb.PRIORITY_WARNING_MEDIUM, buttons);
   },
 
-  _firstWindowTelemetry: function(aWindow) {
+  _firstWindowTelemetry(aWindow) {
     let SCALING_PROBE_NAME = "";
     switch (AppConstants.platform) {
       case "win":
@@ -979,7 +975,7 @@ BrowserGlue.prototype = {
   /**
    * Application shutdown handler.
    */
-  _onQuitApplicationGranted: function() {
+  _onQuitApplicationGranted() {
     // This pref must be set here because SessionStore will use its value
     // on quit-application.
     this._setPrefToSaveSession();
@@ -1008,14 +1004,14 @@ BrowserGlue.prototype = {
     }
   },
 
-  _initServiceDiscovery: function() {
+  _initServiceDiscovery() {
     if (!Services.prefs.getBoolPref("browser.casting.enabled")) {
       return;
     }
     var rokuDevice = {
       id: "roku:ecp",
       target: "roku:ecp",
-      factory: function(aService) {
+      factory(aService) {
         Cu.import("resource://gre/modules/RokuApp.jsm");
         return new RokuApp(aService);
       },
@@ -1110,8 +1106,7 @@ BrowserGlue.prototype = {
                  getService(Ci.nsISessionStartup);
         willRecoverSession =
           (ss.sessionType == Ci.nsISessionStartup.RECOVER_SESSION);
-      }
-      catch (ex) { /* never mind; suppose SessionStore is broken */ }
+      } catch (ex) { /* never mind; suppose SessionStore is broken */ }
 
       // startup check, check all assoc
       let isDefault = false;
@@ -1158,8 +1153,7 @@ BrowserGlue.prototype = {
                           .add(shouldCheck);
         Services.telemetry.getHistogramById("BROWSER_SET_DEFAULT_DIALOG_PROMPT_RAWCOUNT")
                           .add(promptCount);
-      }
-      catch (ex) { /* Don't break the default prompt if telemetry is broken. */ }
+      } catch (ex) { /* Don't break the default prompt if telemetry is broken. */ }
 
       if (willPrompt) {
         Services.tm.mainThread.dispatch(function() {
@@ -1171,7 +1165,7 @@ BrowserGlue.prototype = {
     E10SAccessibilityCheck.onWindowsRestored();
   },
 
-  _createExtraDefaultProfile: function() {
+  _createExtraDefaultProfile() {
     if (!AppConstants.MOZ_DEV_EDITION) {
       return;
     }
@@ -1345,8 +1339,7 @@ BrowserGlue.prototype = {
     try {
       // If the updates.xml file is deleted then getUpdateAt will throw.
       var update = um.getUpdateAt(0).QueryInterface(Ci.nsIPropertyBag);
-    }
-    catch (e) {
+    } catch (e) {
       // This should never happen.
       Cu.reportError("Unable to find update: " + e);
       return;
@@ -1391,10 +1384,10 @@ BrowserGlue.prototype = {
 
       let buttons = [
                       {
-                        label:     label,
+                        label,
                         accessKey: key,
                         popup:     null,
-                        callback: function(aNotificationBar, aButton) {
+                        callback(aNotificationBar, aButton) {
                           win.openUILinkIn(url, "tab");
                         }
                       }
@@ -1430,8 +1423,7 @@ BrowserGlue.prototype = {
       // be displayed per the idl.
       AlertsService.showAlertNotification(null, title, text,
                                           true, url, clickCallback);
-    }
-    catch (e) {
+    } catch (e) {
       Cu.reportError(e);
     }
   },
@@ -1516,15 +1508,13 @@ BrowserGlue.prototype = {
           // restore from JSON backup
           yield BookmarkJSONUtils.importFromFile(lastBackupFile, true);
           importBookmarks = false;
-        }
-        else {
+        } else {
           // We have created a new database but we don't have any backup available
           importBookmarks = true;
           if (yield OS.File.exists(BookmarkHTMLUtils.defaultPath)) {
             // If bookmarks.html is available in current profile import it...
             importBookmarksHTML = true;
-          }
-          else {
+          } else {
             // ...otherwise we will restore defaults
             restoreDefaultBookmarks = true;
           }
@@ -1545,8 +1535,7 @@ BrowserGlue.prototype = {
         } catch (e) {
           Cu.reportError(e);
         }
-      }
-      else {
+      } else {
         // An import operation is about to run.
         // Don't try to recreate smart bookmarks if autoExportHTML is true or
         // smart bookmarks are disabled.
@@ -1561,8 +1550,7 @@ BrowserGlue.prototype = {
         if (restoreDefaultBookmarks) {
           // User wants to restore bookmarks.html file from default profile folder
           bookmarksUrl = "chrome://browser/locale/bookmarks.html";
-        }
-        else if (yield OS.File.exists(BookmarkHTMLUtils.defaultPath)) {
+        } else if (yield OS.File.exists(BookmarkHTMLUtils.defaultPath)) {
           bookmarksUrl = OS.Path.toFileURI(BookmarkHTMLUtils.defaultPath);
         }
 
@@ -1584,8 +1572,7 @@ BrowserGlue.prototype = {
             Cu.reportError(e);
           }
 
-        }
-        else {
+        } else {
           Cu.reportError(new Error("Unable to find bookmarks.html file."));
         }
 
@@ -1607,8 +1594,7 @@ BrowserGlue.prototype = {
           lastBackupFile = yield PlacesBackups.getMostRecentBackup();
         if (!lastBackupFile) {
             this._bookmarksBackupIdleTime /= 2;
-        }
-        else {
+        } else {
           let lastBackupTime = PlacesBackups.getDateForFile(lastBackupFile);
           let profileLastUse = Services.appinfo.replacedLockTime || Date.now();
 
@@ -1694,9 +1680,9 @@ BrowserGlue.prototype = {
     var buttons = [
                     {
                       label:     buttonText,
-                      accessKey: accessKey,
+                      accessKey,
                       popup:     null,
-                      callback:  function(aNotificationBar, aButton) {
+                      callback(aNotificationBar, aButton) {
                         win.openUILinkIn(url, "tab");
                       }
                     }
@@ -1709,7 +1695,7 @@ BrowserGlue.prototype = {
     notification.persistence = -1; // Until user closes it
   },
 
-  _showSyncStartedDoorhanger: function() {
+  _showSyncStartedDoorhanger() {
     let bundle = Services.strings.createBundle("chrome://browser/locale/accounts.properties");
     let productName = gBrandBundle.GetStringFromName("brandShortName");
     let title = bundle.GetStringFromName("syncStartNotification.title");
@@ -1910,8 +1896,7 @@ BrowserGlue.prototype = {
           Services.prefs.clearUserPref("privacy.donottrackheader.enabled");
           Services.prefs.clearUserPref("privacy.donottrackheader.value");
         }
-      }
-      catch (ex) {}
+      } catch (ex) {}
     }
 
     if (currentUIVersion < 26) {
@@ -2098,7 +2083,7 @@ BrowserGlue.prototype = {
                                         true, url, clickCallback);
   }),
 
-  _hasSystemAlertsService: function() {
+  _hasSystemAlertsService() {
     try {
       return !!Cc["@mozilla.org/system-alerts-service;1"].getService(
         Ci.nsIAlertsService);
@@ -2183,8 +2168,7 @@ BrowserGlue.prototype = {
           let bm = yield PlacesUtils.bookmarks.fetch(smartBookmark.guid);
           smartBookmark.parentGuid = bm.parentGuid;
           smartBookmark.index = bm.index;
-        }
-        else {
+        } else {
           // We don't remove old Smart Bookmarks because user could still
           // find them useful, or could have personalized them.
           // Instead we remove the Smart Bookmark annotation.
@@ -2356,7 +2340,7 @@ BrowserGlue.prototype = {
     AlertsService.showAlertNotification(null, title, body, true, null, clickCallback);
   },
 
-  _handleFlashHang: function() {
+  _handleFlashHang() {
     ++this._flashHangCount;
     if (this._flashHangCount < 2) {
       return;
@@ -2388,7 +2372,7 @@ BrowserGlue.prototype = {
     let buttons = [{
       label: win.gNavigatorBundle.getString("flashHang.helpButton.label"),
       accessKey: win.gNavigatorBundle.getString("flashHang.helpButton.accesskey"),
-      callback: function() {
+      callback() {
         win.openUILinkIn("https://support.mozilla.org/kb/flash-protected-mode-autodisabled", "tab");
       }
     }];
@@ -2509,13 +2493,13 @@ var DefaultBrowserCheck = {
   _setAsDefaultTimer: null,
   _setAsDefaultButtonClickStartTime: 0,
 
-  closePrompt: function(aNode) {
+  closePrompt(aNode) {
     if (this._notification) {
       this._notification.close();
     }
   },
 
-  setAsDefault: function() {
+  setAsDefault() {
     let claimAllTypes = true;
     let setAsDefaultError = false;
     if (AppConstants.platform == "win") {
@@ -2571,7 +2555,7 @@ var DefaultBrowserCheck = {
                       .add(setAsDefaultError);
   },
 
-  _createPopup: function(win, notNowStrings, neverStrings) {
+  _createPopup(win, notNowStrings, neverStrings) {
     let doc = win.document;
     let popup = doc.createElement("menupopup");
     popup.id = this.OPTIONPOPUP;
@@ -2594,7 +2578,7 @@ var DefaultBrowserCheck = {
     popupset.appendChild(popup);
   },
 
-  handleEvent: function(event) {
+  handleEvent(event) {
     if (event.type == "command") {
       if (event.target.id == "defaultBrowserNever") {
         ShellService.shouldCheckDefaultBrowser = false;
@@ -2603,7 +2587,7 @@ var DefaultBrowserCheck = {
     }
   },
 
-  prompt: function(win) {
+  prompt(win) {
     let useNotificationBar = Services.prefs.getBoolPref("browser.defaultbrowser.notificationbar");
 
     let brandBundle = win.document.getElementById("bundle_brand");
@@ -2689,7 +2673,7 @@ var DefaultBrowserCheck = {
     }
   },
 
-  _onNotificationEvent: function(eventType) {
+  _onNotificationEvent(eventType) {
     if (eventType == "removed") {
       let doc = this._notification.ownerDocument;
       let popup = doc.getElementById(this.OPTIONPOPUP);
@@ -2705,7 +2689,7 @@ var E10SAccessibilityCheck = {
   // first window being opening.
   _wantsPrompt: false,
 
-  init: function() {
+  init() {
     Services.obs.addObserver(this, "a11y-init-or-shutdown", true);
     Services.obs.addObserver(this, "quit-application-granted", true);
   },
@@ -2719,7 +2703,7 @@ var E10SAccessibilityCheck = {
     return false;
   },
 
-  observe: function(subject, topic, data) {
+  observe(subject, topic, data) {
     switch (topic) {
       case "quit-application-granted":
         // Tag the profile with a11y load state. We use this in nsAppRunner
@@ -2737,7 +2721,7 @@ var E10SAccessibilityCheck = {
     }
   },
 
-  onWindowsRestored: function() {
+  onWindowsRestored() {
     if (this._wantsPrompt) {
       this._wantsPrompt = false;
       this._showE10sAccessibilityWarning();
@@ -2746,7 +2730,7 @@ var E10SAccessibilityCheck = {
 
   _warnedAboutAccessibility: false,
 
-  _showE10sAccessibilityWarning: function() {
+  _showE10sAccessibilityWarning() {
     // We don't prompt about a11y incompat if e10s is off.
     if (!Services.appinfo.browserTabsRemoteAutostart) {
       return;
@@ -2794,7 +2778,7 @@ var E10SAccessibilityCheck = {
     let mainAction = {
       label: win.gNavigatorBundle.getString("e10s.accessibilityNotice.acceptButton.label"),
       accessKey: win.gNavigatorBundle.getString("e10s.accessibilityNotice.acceptButton.accesskey"),
-      callback: function() {
+      callback() {
         // If the user invoked the button option remove the notification,
         // otherwise keep the alert icon around in the address bar.
         notification.remove();

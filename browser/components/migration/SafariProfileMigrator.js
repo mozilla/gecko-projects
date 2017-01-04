@@ -86,13 +86,11 @@ Bookmarks.prototype = {
             yield this._migrateCollection(children, this.READING_LIST_COLLECTION);
           else if (entry.get("ShouldOmitFromUI") !== true)
             entriesFiltered.push(entry);
-        }
-        else if (type == "WebBookmarkTypeLeaf") {
+        } else if (type == "WebBookmarkTypeLeaf") {
           entriesFiltered.push(entry);
         }
       }
-    }
-    else {
+    } else {
       entriesFiltered = aEntries;
     }
 
@@ -161,8 +159,7 @@ Bookmarks.prototype = {
         // Empty folders may not have a children array.
         if (entry.has("Children"))
           yield this._migrateEntries(entry.get("Children"), newFolderGuid, false);
-      }
-      else if (type == "WebBookmarkTypeLeaf" && entry.has("URLString")) {
+      } else if (type == "WebBookmarkTypeLeaf" && entry.has("URLString")) {
         let title;
         if (entry.has("URIDictionary"))
           title = entry.get("URIDictionary").get("title");
@@ -220,9 +217,8 @@ History.prototype = {
               places.push({ uri: NetUtil.newURI(entry.get("")),
                             title: entry.get("title"),
                             visits: [{ transitionType: transType,
-                                       visitDate: visitDate }] });
-            }
-            catch (ex) {
+                                       visitDate }] });
+            } catch (ex) {
               // Safari's History file may contain malformed URIs which
               // will be ignored.
               Cu.reportError(ex);
@@ -232,21 +228,19 @@ History.prototype = {
         if (places.length > 0) {
           MigrationUtils.insertVisitsWrapper(places, {
             _success: false,
-            handleResult: function() {
+            handleResult() {
               // Importing any entry is considered a successful import.
               this._success = true;
             },
-            handleError: function() {},
-            handleCompletion: function() {
+            handleError() {},
+            handleCompletion() {
               aCallback(this._success);
             }
           });
-        }
-        else {
+        } else {
           aCallback(false);
         }
-      }
-      catch (ex) {
+      } catch (ex) {
         Cu.reportError(ex);
         aCallback(false);
       }
@@ -284,8 +278,7 @@ MainPreferencesPropertyList.prototype = {
         for (let callback of this._callbacks) {
           try {
             callback(aDict);
-          }
-          catch (ex) {
+          } catch (ex) {
             Cu.reportError(ex);
           }
         }
@@ -329,9 +322,9 @@ SearchStrings.prototype = {
           let recentSearchStrings = aDict.get("RecentSearchStrings");
           if (recentSearchStrings && recentSearchStrings.length > 0) {
             let changes = recentSearchStrings.map((searchString) => (
-                           {op: "add",
-                            fieldname: "searchbar-history",
-                            value: searchString}));
+              {op: "add",
+               fieldname: "searchbar-history",
+               value: searchString}));
             FormHistory.update(changes);
           }
         }

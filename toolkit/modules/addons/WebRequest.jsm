@@ -535,8 +535,8 @@ HttpObserverManager = {
       let loadContext = this.getLoadContext(channel);
       if (!this.errorCheck(channel, loadContext, channelData)) {
         this.runChannelListener(channel, loadContext, "onError",
-                                {error: this.activityErrorsMap.get(lastActivity) ||
-                                        `NS_ERROR_NET_UNKNOWN_${lastActivity}`});
+          {error: this.activityErrorsMap.get(lastActivity) ||
+                  `NS_ERROR_NET_UNKNOWN_${lastActivity}`});
       }
     } else if (lastActivity !== this.GOOD_LAST_ACTIVITY &&
                lastActivity !== nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE) {
@@ -813,14 +813,14 @@ HttpObserverManager = {
       // Check whether we've already added a listener to this channel,
       // so we don't wind up chaining multiple listeners.
       let channelData = getData(channel);
-      if (!channelData.listener && channel instanceof Ci.nsITraceableChannel) {
+      if (!channelData.hasListener && channel instanceof Ci.nsITraceableChannel) {
         let responseStatus = channel.responseStatus;
         // skip redirections, https://bugzilla.mozilla.org/show_bug.cgi?id=728901#c8
         if (responseStatus < 300 || responseStatus >= 400) {
           let listener = new StartStopListener(this, loadContext);
           let orig = channel.setNewListener(listener);
           listener.orig = orig;
-          channelData.listener = listener;
+          channelData.hasListener = true;
         }
       }
     }

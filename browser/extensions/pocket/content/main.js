@@ -119,8 +119,7 @@ var pktUI = (function() {
      */
     function showSignUp() {
         // AB test: Direct logged-out users to tab vs panel
-        if (pktApi.getSignupPanelTabTestVariant() == 'v2')
-        {
+        if (pktApi.getSignupPanelTabTestVariant() == 'v2') {
             let site = Services.prefs.getCharPref("extensions.pocket.site");
             openTabWithUrl('https://' + site + '/firefox_learnmore?s=ffi&t=autoredirect&tv=page_learnmore&src=ff_ext', true);
 
@@ -131,22 +130,17 @@ var pktUI = (function() {
         }
 
         // Control: Show panel as normal
-        getFirefoxAccountSignedInUser(function(userdata)
-        {
+        getFirefoxAccountSignedInUser(function(userdata) {
             var fxasignedin = (typeof userdata == 'object' && userdata !== null) ? '1' : '0';
             var startheight = 490;
             var inOverflowMenu = isInOverflowMenu();
             var controlvariant = pktApi.getSignupPanelTabTestVariant() == 'control';
 
-            if (inOverflowMenu)
-            {
+            if (inOverflowMenu) {
                 startheight = overflowMenuHeight;
-            }
-            else
-            {
+            } else {
                 startheight = 460;
-                if (fxasignedin == '1')
-                {
+                if (fxasignedin == '1') {
                     startheight = 406;
                 }
             }
@@ -154,12 +148,9 @@ var pktUI = (function() {
                 startheight = 427;
             }
             var variant;
-            if (inOverflowMenu)
-            {
+            if (inOverflowMenu) {
                 variant = 'overflow';
-            }
-            else
-            {
+            } else {
                 variant = 'storyboard_lm';
             }
 
@@ -175,7 +166,7 @@ var pktUI = (function() {
                 + inOverflowMenu
                 + "&locale="
                 + getUILocale(), {
-                    onShow: function() {
+                    onShow() {
                     },
                     onHide: panelDidHide,
                     width: inOverflowMenu ? overflowMenuWidth : 300,
@@ -203,7 +194,7 @@ var pktUI = (function() {
         }
 
         var panelId = showPanel("about:pocket-saved?pockethost=" + Services.prefs.getCharPref("extensions.pocket.site") + "&premiumStatus=" + (pktApi.isPremiumUser() ? '1' : '0') + '&inoverflowmenu=' + inOverflowMenu + "&locale=" + getUILocale(), {
-            onShow: function() {
+            onShow() {
                 var saveLinkMessageId = 'saveLink';
 
                 // Send error message for invalid url
@@ -229,15 +220,15 @@ var pktUI = (function() {
 
                 // Add url
                 var options = {
-                    success: function(data, request) {
+                    success(data, request) {
                         var item = data.item;
                         var successResponse = {
                             status: "success",
-                            item: item
+                            item
                         };
                         pktUIMessaging.sendMessageToPanel(panelId, saveLinkMessageId, successResponse);
                     },
-                    error: function(error, request) {
+                    error(error, request) {
                         // If user is not authorized show singup page
                         if (request.status === 401) {
                             showSignUp();
@@ -323,7 +314,7 @@ var pktUI = (function() {
           iframe.style.height = subview.parentNode.clientHeight + "px";
         } else {
           // Set an explicit size, panel will adapt.
-          iframe.style.width  = options.width  + "px";
+          iframe.style.width  = options.width + "px";
           iframe.style.height = options.height + "px";
         }
     }
@@ -418,8 +409,8 @@ var pktUI = (function() {
         pktUIMessaging.addMessageListener(iframe, _getTagsMessageId, function(panelId, data) {
             pktApi.getTags(function(tags, usedTags) {
                 pktUIMessaging.sendResponseMessageToPanel(panelId, _getTagsMessageId, {
-                    tags: tags,
-                    usedTags: usedTags
+                    tags,
+                    usedTags
                 });
             });
         });
@@ -428,17 +419,17 @@ var pktUI = (function() {
         var _getSuggestedTagsMessageId = "getSuggestedTags";
         pktUIMessaging.addMessageListener(iframe, _getSuggestedTagsMessageId, function(panelId, data) {
             pktApi.getSuggestedTagsForURL(data.url, {
-                success: function(data, response) {
+                success(data, response) {
                     var suggestedTags = data.suggested_tags;
                     var successResponse = {
                         status: "success",
                         value: {
-                            suggestedTags: suggestedTags
+                            suggestedTags
                         }
                     }
                     pktUIMessaging.sendResponseMessageToPanel(panelId, _getSuggestedTagsMessageId, successResponse);
                 },
-                error: function(error, response) {
+                error(error, response) {
                     pktUIMessaging.sendErrorResponseMessageToPanel(panelId, _getSuggestedTagsMessageId, error);
                 }
             })
@@ -448,11 +439,11 @@ var pktUI = (function() {
         var _addTagsMessageId = "addTags";
         pktUIMessaging.addMessageListener(iframe, _addTagsMessageId, function(panelId, data) {
             pktApi.addTagsToURL(data.url, data.tags, {
-                success: function(data, response) {
+                success(data, response) {
                     var successResponse = {status: "success"};
                     pktUIMessaging.sendResponseMessageToPanel(panelId, _addTagsMessageId, successResponse);
                 },
-                error: function(error, response) {
+                error(error, response) {
                     pktUIMessaging.sendErrorResponseMessageToPanel(panelId, _addTagsMessageId, error);
                 }
             });
@@ -462,11 +453,11 @@ var pktUI = (function() {
         var _deleteItemMessageId = "deleteItem";
         pktUIMessaging.addMessageListener(iframe, _deleteItemMessageId, function(panelId, data) {
             pktApi.deleteItem(data.itemId, {
-                success: function(data, response) {
+                success(data, response) {
                     var successResponse = {status: "success"};
                     pktUIMessaging.sendResponseMessageToPanel(panelId, _deleteItemMessageId, successResponse);
                 },
-                error: function(error, response) {
+                error(error, response) {
                     pktUIMessaging.sendErrorResponseMessageToPanel(panelId, _deleteItemMessageId, error);
                 }
             })
@@ -485,7 +476,7 @@ var pktUI = (function() {
                     strings[str.key] = str.value;
                 }
             }
-            pktUIMessaging.sendResponseMessageToPanel(panelId, _initL10NMessageId, { strings: strings });
+            pktUIMessaging.sendResponseMessageToPanel(panelId, _initL10NMessageId, { strings });
         });
 
     }
@@ -588,15 +579,15 @@ var pktUI = (function() {
      * Public functions
      */
     return {
-        getPanelFrame: getPanelFrame,
+        getPanelFrame,
 
-        openTabWithUrl: openTabWithUrl,
+        openTabWithUrl,
 
-        pocketPanelDidShow: pocketPanelDidShow,
-        pocketPanelDidHide: pocketPanelDidHide,
+        pocketPanelDidShow,
+        pocketPanelDidHide,
 
-        tryToSaveUrl: tryToSaveUrl,
-        tryToSaveCurrentPage: tryToSaveCurrentPage
+        tryToSaveUrl,
+        tryToSaveCurrentPage
     };
 }());
 
@@ -669,12 +660,12 @@ var pktUIMessaging = (function() {
      * iframe as a message response
      */
     function sendErrorMessageToPanel(panelId, messageId, error) {
-        var errorResponse = {status: "error", error: error};
+        var errorResponse = {status: "error", error};
         sendMessageToPanel(panelId, messageId, errorResponse);
     }
 
     function sendErrorResponseMessageToPanel(panelId, messageId, error) {
-        var errorResponse = {status: "error", error: error};
+        var errorResponse = {status: "error", error};
         sendResponseMessageToPanel(panelId, messageId, errorResponse);
     }
 
@@ -730,10 +721,10 @@ var pktUIMessaging = (function() {
      * Public
      */
     return {
-        addMessageListener: addMessageListener,
-        sendMessageToPanel: sendMessageToPanel,
-        sendResponseMessageToPanel: sendResponseMessageToPanel,
-        sendErrorMessageToPanel: sendErrorMessageToPanel,
-        sendErrorResponseMessageToPanel: sendErrorResponseMessageToPanel
+        addMessageListener,
+        sendMessageToPanel,
+        sendResponseMessageToPanel,
+        sendErrorMessageToPanel,
+        sendErrorResponseMessageToPanel
     }
 }());

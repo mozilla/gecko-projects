@@ -338,8 +338,7 @@ var gGestureSupport = {
         node.dispatchEvent(cmdEvent);
       }
 
-    }
-    else {
+    } else {
       goDoCommand(aCommand);
     }
   },
@@ -351,7 +350,7 @@ var gGestureSupport = {
    * @param aEvent
    *        The continual motion update event to handle
    */
-  _doUpdate: function(aEvent) {},
+  _doUpdate(aEvent) {},
 
   /**
    * Handle gesture end events.  This function will be set by _setupSwipe.
@@ -359,7 +358,7 @@ var gGestureSupport = {
    * @param aEvent
    *        The gesture end event to handle
    */
-  _doEnd: function(aEvent) {},
+  _doEnd(aEvent) {},
 
   /**
    * Convert the swipe gesture into a browser action based on the direction.
@@ -405,8 +404,7 @@ var gGestureSupport = {
     if ((gHistorySwipeAnimation.isAnimationRunning()) &&
         (aDir == "RIGHT" || aDir == "LEFT")) {
       gHistorySwipeAnimation.processSwipeEvent(aEvent, aDir);
-    }
-    else {
+    } else {
       this.processSwipeEvent(aEvent, aDir);
     }
   },
@@ -432,8 +430,7 @@ var gGestureSupport = {
       else if (type == "number")
         getFunc = "Int";
       return gPrefService["get" + getFunc + "Pref"](branch + aPref);
-    }
-    catch (e) {
+    } catch (e) {
       return aDef;
     }
   },
@@ -444,7 +441,7 @@ var gGestureSupport = {
    * @param aEvent
    *        The MozRotateGestureUpdate event triggering this call
    */
-  rotate: function(aEvent) {
+  rotate(aEvent) {
     if (!(content.document instanceof ImageDocument))
       return;
 
@@ -463,7 +460,7 @@ var gGestureSupport = {
   /**
    * Perform a rotation end for ImageDocuments
    */
-  rotateEnd: function() {
+  rotateEnd() {
     if (!(content.document instanceof ImageDocument))
       return;
 
@@ -531,7 +528,7 @@ var gGestureSupport = {
    * When the location/tab changes, need to reload the current rotation for the
    * image
    */
-  restoreRotationState: function() {
+  restoreRotationState() {
     // Bug 863514 - Make gesture support work in electrolysis
     if (gMultiProcessBrowser)
       return;
@@ -560,7 +557,7 @@ var gGestureSupport = {
   /**
    * Removes the transition rule by removing the completeRotation class
    */
-  _clearCompleteRotation: function() {
+  _clearCompleteRotation() {
     let contentElement = content.document &&
                          content.document instanceof ImageDocument &&
                          content.document.body &&
@@ -649,8 +646,7 @@ var gHistorySwipeAnimation = {
         this._handleFastSwiping();
       }
       this.updateAnimation(0);
-    }
-    else {
+    } else {
       // Get the session history from SessionStore.
       let updateSessionHistory = sessionHistory => {
         this._startingIndex = sessionHistory.index;
@@ -731,7 +727,7 @@ var gHistorySwipeAnimation = {
     }
   },
 
-  _getCurrentHistoryIndex: function() {
+  _getCurrentHistoryIndex() {
     return SessionStore.getSessionHistory(gBrowser.selectedTab).index;
   },
 
@@ -850,8 +846,7 @@ var gHistorySwipeAnimation = {
   _doesIndexExistInHistory: function HSA__doesIndexExistInHistory(aIndex) {
     try {
       return SessionStore.getSessionHistory(gBrowser.selectedTab).entries[aIndex] != null;
-    }
-    catch (ex) {
+    } catch (ex) {
       return false;
     }
   },
@@ -1154,8 +1149,7 @@ var gHistorySwipeAnimation = {
       img.onload = function() {
         URL.revokeObjectURL(url);
       };
-    }
-    finally {
+    } finally {
       img.src = url;
       return img;
     }

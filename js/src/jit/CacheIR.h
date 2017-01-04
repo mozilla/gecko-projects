@@ -720,6 +720,8 @@ class MOZ_RAII IRGenerator
     CacheKind cacheKind() const { return cacheKind_; }
 };
 
+enum class CanAttachGetter { Yes, No };
+
 // GetPropIRGenerator generates CacheIR for a GetProp IC.
 class MOZ_RAII GetPropIRGenerator : public IRGenerator
 {
@@ -727,6 +729,7 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator
     HandleValue idVal_;
     ICStubEngine engine_;
     bool* isTemporarilyUnoptimizable_;
+    CanAttachGetter canAttachGetter_;
 
     enum class PreliminaryObjectAction { None, Unlink, NotePreliminary };
     PreliminaryObjectAction preliminaryObjectAction_;
@@ -762,6 +765,8 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator
     bool tryAttachTypedElement(HandleObject obj, ObjOperandId objId,
                                uint32_t index, Int32OperandId indexId);
 
+    bool tryAttachProxyElement(HandleObject obj, ObjOperandId objId);
+
     ValOperandId getElemKeyValueId() const {
         MOZ_ASSERT(cacheKind_ == CacheKind::GetElem);
         return ValOperandId(1);
@@ -777,7 +782,8 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator
 
   public:
     GetPropIRGenerator(JSContext* cx, jsbytecode* pc, CacheKind cacheKind, ICStubEngine engine,
-                       bool* isTemporarilyUnoptimizable, HandleValue val, HandleValue idVal);
+                       bool* isTemporarilyUnoptimizable, HandleValue val, HandleValue idVal,
+                       CanAttachGetter canAttachGetter);
 
     bool tryAttachStub();
     bool tryAttachIdempotentStub();
@@ -798,6 +804,7 @@ class MOZ_RAII GetNameIRGenerator : public IRGenerator
     HandlePropertyName name_;
 
     bool tryAttachGlobalNameValue(ObjOperandId objId, HandleId id);
+    bool tryAttachGlobalNameGetter(ObjOperandId objId, HandleId id);
     bool tryAttachEnvironmentName(ObjOperandId objId, HandleId id);
 
   public:

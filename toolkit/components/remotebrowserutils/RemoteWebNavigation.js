@@ -12,18 +12,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "Services",
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
   "resource://gre/modules/NetUtil.jsm");
 
-function makeURI(url)
-{
+function makeURI(url) {
   return Services.io.newURI(url, null, null);
 }
 
-function readInputStreamToString(aStream)
-{
+function readInputStreamToString(aStream) {
   return NetUtil.readInputStreamToString(aStream, aStream.available());
 }
 
-function RemoteWebNavigation()
-{
+function RemoteWebNavigation() {
   this.wrappedJSObject = this;
 }
 
@@ -34,7 +31,7 @@ RemoteWebNavigation.prototype = {
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebNavigation, Ci.nsISupports]),
 
-  swapBrowser: function(aBrowser) {
+  swapBrowser(aBrowser) {
     this._browser = aBrowser;
   },
 
@@ -61,21 +58,21 @@ RemoteWebNavigation.prototype = {
 
   canGoBack: false,
   canGoForward: false,
-  goBack: function() {
+  goBack() {
     this._sendMessage("WebNavigation:GoBack", {});
   },
-  goForward: function() {
+  goForward() {
     this._sendMessage("WebNavigation:GoForward", {});
   },
-  gotoIndex: function(aIndex) {
+  gotoIndex(aIndex) {
     this._sendMessage("WebNavigation:GotoIndex", {index: aIndex});
   },
-  loadURI: function(aURI, aLoadFlags, aReferrer, aPostData, aHeaders) {
+  loadURI(aURI, aLoadFlags, aReferrer, aPostData, aHeaders) {
     this.loadURIWithOptions(aURI, aLoadFlags, aReferrer,
                             Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT,
                             aPostData, aHeaders, null);
   },
-  loadURIWithOptions: function(aURI, aLoadFlags, aReferrer, aReferrerPolicy,
+  loadURIWithOptions(aURI, aLoadFlags, aReferrer, aReferrerPolicy,
                                aPostData, aHeaders, aBaseURI) {
     this._sendMessage("WebNavigation:LoadURI", {
       uri: aURI,
@@ -87,15 +84,15 @@ RemoteWebNavigation.prototype = {
       baseURI: aBaseURI ? aBaseURI.spec : null,
     });
   },
-  setOriginAttributesBeforeLoading: function(aOriginAttributes) {
+  setOriginAttributesBeforeLoading(aOriginAttributes) {
     this._sendMessage("WebNavigation:SetOriginAttributes", {
       originAttributes: aOriginAttributes,
     });
   },
-  reload: function(aReloadFlags) {
+  reload(aReloadFlags) {
     this._sendMessage("WebNavigation:Reload", {flags: aReloadFlags});
   },
-  stop: function(aStopFlags) {
+  stop(aStopFlags) {
     this._sendMessage("WebNavigation:Stop", {flags: aStopFlags});
   },
 
@@ -126,11 +123,10 @@ RemoteWebNavigation.prototype = {
     throw Cr.NS_ERROR_NOT_IMPLEMENTED;
   },
 
-  _sendMessage: function(aMessage, aData) {
+  _sendMessage(aMessage, aData) {
     try {
       this._browser.messageManager.sendAsyncMessage(aMessage, aData);
-    }
-    catch (e) {
+    } catch (e) {
       Cu.reportError(e);
     }
   },

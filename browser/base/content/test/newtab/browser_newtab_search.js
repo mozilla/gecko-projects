@@ -211,12 +211,12 @@ function promiseNewSearchEngine({name: basename, numLogos}) {
   let addEnginePromise = new Promise((resolve, reject) => {
     let url = getRootDirectory(gTestPath) + basename;
     Services.search.addEngine(url, null, "", false, {
-      onSuccess: function(engine) {
+      onSuccess(engine) {
         info("Search engine added: " + basename);
         gNewEngines.push(engine);
         resolve(engine);
       },
-      onError: function(errCode) {
+      onError(errCode) {
         ok(false, "addEngine failed with error code " + errCode);
         reject();
       },
@@ -228,8 +228,7 @@ function promiseNewSearchEngine({name: basename, numLogos}) {
   });
 }
 
-function* checkCurrentEngine(engineInfo)
-{
+function* checkCurrentEngine(engineInfo) {
   let engine = Services.search.currentEngine;
   ok(engine.name.includes(engineInfo.name),
      "Sanity check: current engine: engine.name=" + engine.name +

@@ -5,8 +5,7 @@ try {
 } catch (e) {
 }
 
-function open_ctypes_test_lib()
-{
+function open_ctypes_test_lib() {
   return ctypes.open(do_get_file(ctypes.libraryName("jsctypes-test")).path);
 }
 
@@ -44,7 +43,7 @@ function ResourceTester(start, stop) {
   this._stop  = stop;
 }
 ResourceTester.prototype = {
-  launch: function(size, test, args) {
+  launch(size, test, args) {
     trigger_gc();
     let cleaner = new ResourceCleaner();
     this._start(size);

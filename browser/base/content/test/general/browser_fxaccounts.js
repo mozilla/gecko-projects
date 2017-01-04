@@ -16,7 +16,7 @@ const TEST_ROOT = "http://example.com/browser/browser/base/content/test/general/
 
   // The stub functions.
   let stubs = {
-    updateAppMenuItem: function() {
+    updateAppMenuItem() {
       return unstubs['updateAppMenuItem'].call(gFxAccounts).then(() => {
         Services.obs.notifyObservers(null, "test:browser_fxaccounts:updateAppMenuItem", null);
       });
@@ -25,7 +25,7 @@ const TEST_ROOT = "http://example.com/browser/browser/base/content/test/general/
     // due to the promises it fires off at load time  and there's no clear way to
     // know when they are done.
     // So just ensure openPreferences is called rather than whether it opens.
-    openPreferences: function() {
+    openPreferences() {
       Services.obs.notifyObservers(null, "test:browser_fxaccounts:openPreferences", null);
     }
   };
@@ -215,8 +215,7 @@ var promiseTabOpen = Task.async(function*(urlBase) {
   yield whenUnloaded;
 });
 
-function promiseTabUnloaded(tab)
-{
+function promiseTabUnloaded(tab) {
   return new Promise(resolve => {
     info("Wait for tab to unload");
     function handle(event) {
@@ -237,7 +236,7 @@ function setSignedInUser(verified) {
     sessionToken: "dead",
     kA: "beef",
     kB: "cafe",
-    verified: verified,
+    verified,
 
     oauthTokens: {
       // a token for the profile server.
