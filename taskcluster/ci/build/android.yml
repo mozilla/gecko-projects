@@ -12,7 +12,7 @@ android-api-15/debug:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build generate-build-stats multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -37,7 +37,7 @@ android-x86/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build generate-build-stats multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -91,7 +91,7 @@ android-api-15/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build generate-build-stats multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -118,7 +118,7 @@ android-api-15-nightly/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build generate-build-stats multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -158,7 +158,7 @@ android-api-15-gradle/opt:
             type: directory
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build generate-build-stats multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
