@@ -12,7 +12,7 @@ import copy
 from mozbuild.chunkify import chunkify
 from taskgraph.transforms.base import (
     TransformSequence,
-    get_keyed_by,
+    resolve_keyed_by,
     optionally_keyed_by,
     validate_schema
 )
@@ -197,7 +197,7 @@ def setup_nightly_dependency(config, jobs):
 
 
 @transforms.add
-def resolve_keyed_by(config, jobs):
+def handle_keyed_by(config, jobs):
     """Resolve fields that can be keyed by platform, etc."""
     fields = [
         "locales-file",
@@ -207,38 +207,20 @@ def resolve_keyed_by(config, jobs):
         "run-time",
         "tooltool",
         "env",
+        "mozharness.config",
+        "mozharness.options",
+        "mozharness.actions",
+        "mozharness.script",
+        "treeherder.tier",
+        "treeherder.platform",
+        "index.product",
+        "index.job-name",
+        "when.files-changed",
     ]
-    subfields = {
-        'mozharness': [
-            'config',
-            'options',
-            'actions',
-            'script',
-        ],
-        'treeherder': [
-            'tier',
-            'platform',
-        ],
-        'index': [
-            'product',
-            'job-name',
-        ],
-        'when': [
-            'files-changed',
-        ]
-    }
     for job in jobs:
+        job = copy.deepcopy(job)  # don't overwrite dict values here
         for field in fields:
-            if not job.get(field):
-                continue
-            job[field] = get_keyed_by(item=job, field=field, item_name=job['name'])
-        for k in subfields.keys():
-            if not job.get(k):
-                continue
-            job[k] = copy.deepcopy(job[k])  # don't overwrite dict values here
-            for subfield in subfields[k]:
-                job[k][subfield] = get_keyed_by(item=job, field=k, subfield=subfield,
-                                                item_name=job['name'])
+            resolve_keyed_by(item=job, field=field, item_name=job['name'])
         yield job
 
 
