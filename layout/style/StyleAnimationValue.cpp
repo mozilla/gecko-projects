@@ -10,6 +10,8 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/RuleNodeCacheConditions.h"
 #include "mozilla/StyleAnimationValue.h"
+#include "mozilla/StyleSetHandle.h"
+#include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/UniquePtr.h"
 #include "nsStyleTransformMatrix.h"
@@ -1972,12 +1974,10 @@ AddCSSValuePercentNumber(const uint32_t aValueRestrictions,
                         eCSSUnit_Number);
 }
 
-// Multiplies |aValue| color by |aDilutionRation|.
+// Multiplies |aValue| color by |aDilutionRatio|.
 static nscolor
 DiluteColor(const RGBAColorData& aValue, double aDilutionRatio)
 {
-  MOZ_ASSERT(aDilutionRatio >= 0.0 && aDilutionRatio <= 1.0,
-             "Dilution ratio should be in [0, 1]");
   float resultA = aValue.mA * aDilutionRatio;
   return resultA <= 0.0 ? NS_RGBA(0, 0, 0, 0)
                         : aValue.WithAlpha(resultA).ToColor();
