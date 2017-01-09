@@ -51,7 +51,8 @@ macosx64-nightly/opt:
         nightly: true
     index:
         product: firefox
-        job-name: macosx64-nightly-opt
+        job-name: macosx64-opt
+        type: nightly
     treeherder:
         platform: osx-10-7/opt
         symbol: tc(N)
