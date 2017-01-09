@@ -387,7 +387,9 @@ pref("browser.search.context.loadInBackground", false);
 // comma seperated list of of engines to hide in the search panel.
 pref("browser.search.hiddenOneOffs", "");
 
+#ifndef RELEASE_OR_BETA
 pref("browser.search.reset.enabled", true);
+#endif
 
 pref("browser.sessionhistory.max_entries", 50);
 
@@ -1159,6 +1161,9 @@ sticky_pref("browser.newtabpage.enhanced", true);
 // enables Activity Stream inspired layout
 pref("browser.newtabpage.compact", false);
 
+// enables showing basic placeholders for missing thumbnails
+pref("browser.newtabpage.thumbnailPlaceholder", false);
+
 // number of rows of newtab grid
 pref("browser.newtabpage.rows", 3);
 
@@ -1298,6 +1303,9 @@ pref("identity.fxaccounts.contextParam", "fx_desktop_v3");
 // Note that this will always need to be in the same TLD as the
 // "identity.fxaccounts.remote.signup.uri" pref.
 pref("identity.fxaccounts.settings.uri", "https://accounts.firefox.com/settings?service=sync&context=fx_desktop_v3");
+
+// The URL of the FxA device manager page
+pref("identity.fxaccounts.settings.devices.uri", "https://accounts.firefox.com/settings/clients?service=sync&context=fx_desktop_v3");
 
 // The remote URL of the FxA Profile Server
 pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox.com/v1");
@@ -1558,4 +1566,4 @@ pref("services.sync.validation.enabled", true);
 #endif
 
 // Preferences for the form autofill system extension
-pref("browser.formautofill.enabled", false);
+pref("browser.formautofill.experimental", false);

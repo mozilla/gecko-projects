@@ -2887,7 +2887,7 @@ GetTextFrameForContent(nsIContent* aContent, bool aFlushLayout)
         static_cast<nsGenericDOMDataNode*>(aContent));
 
     if (aFlushLayout) {
-      aContent->OwnerDoc()->FlushPendingNotifications(Flush_Layout);
+      aContent->OwnerDoc()->FlushPendingNotifications(FlushType::Layout);
     }
 
     nsIFrame* frame = aContent->GetPrimaryFrame();
@@ -2972,7 +2972,7 @@ nsRange::CollectClientRectsAndText(nsLayoutUtils::RectCallback* aCollector,
   }
 
   if (aFlushLayout) {
-    aStartParent->OwnerDoc()->FlushPendingNotifications(Flush_Layout);
+    aStartParent->OwnerDoc()->FlushPendingNotifications(FlushType::Layout);
     // Recheck whether we're still in the document
     if (!aStartParent->IsInUncomposedDoc()) {
       return;
@@ -3118,7 +3118,7 @@ nsRange::GetUsedFontFaces(nsIDOMFontFaceList** aResult)
   // Flush out layout so our frames are up to date.
   nsIDocument* doc = mStartParent->OwnerDoc();
   NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
-  doc->FlushPendingNotifications(Flush_Frames);
+  doc->FlushPendingNotifications(FlushType::Frames);
 
   // Recheck whether we're still in the document
   NS_ENSURE_TRUE(mStartParent->IsInUncomposedDoc(), NS_ERROR_UNEXPECTED);
@@ -3300,7 +3300,18 @@ nsRange::ExcludeNonSelectableNodes(nsTArray<RefPtr<nsRange>>* aOutRanges)
           }
 
           // Create a new range for the remainder.
-          rv = CreateRange(node, 0, endParent, endOffset,
+          nsINode* startParent = node;
+          int32_t startOffset = 0;
+          // Don't start *inside* a node with independent selection though
+          // (e.g. <input>).
+          if (content && content->HasIndependentSelection()) {
+            nsINode* parent = startParent->GetParent();
+            if (parent) {
+              startOffset = parent->IndexOf(startParent);
+              startParent = parent;
+            }
+          }
+          rv = CreateRange(startParent, startOffset, endParent, endOffset,
                            getter_AddRefs(newRange));
           if (NS_FAILED(rv) || newRange->Collapsed()) {
             newRange = nullptr;

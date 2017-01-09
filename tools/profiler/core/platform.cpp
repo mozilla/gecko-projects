@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -152,6 +154,72 @@ void Sampler::Shutdown() {
     sLUL = nullptr;
   }
 #endif
+}
+
+bool
+Sampler::RegisterCurrentThread(const char* aName,
+                               PseudoStack* aPseudoStack,
+                               bool aIsMainThread, void* stackTop)
+{
+  if (!sRegisteredThreadsMutex)
+    return false;
+
+  ::MutexAutoLock lock(*sRegisteredThreadsMutex);
+
+  Thread::tid_t id = Thread::GetCurrentId();
+
+  for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
+    ThreadInfo* info = sRegisteredThreads->at(i);
+    if (info->ThreadId() == id && !info->IsPendingDelete()) {
+      // Thread already registered. This means the first unregister will be
+      // too early.
+      ASSERT(false);
+      return false;
+    }
+  }
+
+  set_tls_stack_top(stackTop);
+
+  ThreadInfo* info = new StackOwningThreadInfo(aName, id,
+    aIsMainThread, aPseudoStack, stackTop);
+
+  if (sActiveSampler) {
+    sActiveSampler->RegisterThread(info);
+  }
+
+  sRegisteredThreads->push_back(info);
+
+  return true;
+}
+
+void
+Sampler::UnregisterCurrentThread()
+{
+  if (!sRegisteredThreadsMutex)
+    return;
+
+  tlsStackTop.set(nullptr);
+
+  ::MutexAutoLock lock(*sRegisteredThreadsMutex);
+
+  Thread::tid_t id = Thread::GetCurrentId();
+
+  for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
+    ThreadInfo* info = sRegisteredThreads->at(i);
+    if (info->ThreadId() == id && !info->IsPendingDelete()) {
+      if (profiler_is_active()) {
+        // We still want to show the results of this thread if you
+        // save the profile shortly after a thread is terminated.
+        // For now we will defer the delete to profile stop.
+        info->SetPendingDelete();
+        break;
+      } else {
+        delete info;
+        sRegisteredThreads->erase(sRegisteredThreads->begin() + i);
+        break;
+      }
+    }
+  }
 }
 
 StackOwningThreadInfo::StackOwningThreadInfo(const char* aName, int aThreadId,
@@ -810,7 +878,7 @@ void mozilla_sampler_start(int aProfileEntries, double aInterval,
   t->Start();
   if (t->ProfileJS() || t->InPrivacyMode()) {
       ::MutexAutoLock lock(*Sampler::sRegisteredThreadsMutex);
-      std::vector<ThreadInfo*> threads = t->GetRegisteredThreads();
+      const std::vector<ThreadInfo*>& threads = t->GetRegisteredThreads();
 
       for (uint32_t i = 0; i < threads.size(); i++) {
         ThreadInfo* info = threads[i];
@@ -1116,7 +1184,7 @@ double mozilla_sampler_time()
   return mozilla_sampler_time(mozilla::TimeStamp::Now());
 }
 
-ProfilerBacktrace* mozilla_sampler_get_backtrace()
+UniqueProfilerBacktrace mozilla_sampler_get_backtrace()
 {
   if (!stack_key_initialized)
     return nullptr;
@@ -1136,10 +1204,11 @@ ProfilerBacktrace* mozilla_sampler_get_backtrace()
     return nullptr;
   }
 
-  return new ProfilerBacktrace(t->GetBacktrace());
+  return UniqueProfilerBacktrace(new ProfilerBacktrace(t->GetBacktrace()));
 }
 
-void mozilla_sampler_free_backtrace(ProfilerBacktrace* aBacktrace)
+void
+ProfilerBacktraceDestructor::operator()(ProfilerBacktrace* aBacktrace)
 {
   delete aBacktrace;
 }
@@ -1178,10 +1247,11 @@ void mozilla_sampler_tracing(const char* aCategory, const char* aInfo,
 }
 
 void mozilla_sampler_tracing(const char* aCategory, const char* aInfo,
-                             ProfilerBacktrace* aCause,
+                             UniqueProfilerBacktrace aCause,
                              TracingMetadata aMetaData)
 {
-  mozilla_sampler_add_marker(aInfo, new ProfilerMarkerTracing(aCategory, aMetaData, aCause));
+  mozilla_sampler_add_marker(aInfo, new ProfilerMarkerTracing(aCategory, aMetaData,
+                                                              mozilla::Move(aCause)));
 }
 
 void mozilla_sampler_add_marker(const char *aMarker, ProfilerMarkerPayload *aPayload)

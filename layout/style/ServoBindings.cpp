@@ -199,6 +199,13 @@ Gecko_IsRootElement(RawGeckoElementBorrowed aElement)
   return aElement->OwnerDoc()->GetRootElement() == aElement;
 }
 
+bool
+Gecko_MatchesElement(CSSPseudoClassType aType,
+                     RawGeckoElementBorrowed aElement)
+{
+  return nsCSSPseudoClasses::MatchesElement(aType, aElement).value();
+}
+
 nsIAtom*
 Gecko_LocalName(RawGeckoElementBorrowed aElement)
 {
@@ -891,6 +898,15 @@ Gecko_EnsureImageLayersLength(nsStyleImageLayers* aLayers, size_t aLen,
   for (size_t i = oldLength; i < aLen; ++i) {
     aLayers->mLayers[i].Initialize(aLayerType);
   }
+}
+
+void
+Gecko_EnsureStyleAnimationArrayLength(void* aArray, size_t aLen)
+{
+  auto base =
+    reinterpret_cast<nsStyleAutoArray<StyleAnimation>*>(aArray);
+
+  base->EnsureLengthAtLeast(aLen);
 }
 
 void

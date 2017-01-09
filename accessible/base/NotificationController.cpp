@@ -80,7 +80,7 @@ void
 NotificationController::Shutdown()
 {
   if (mObservingState != eNotObservingRefresh &&
-      mPresShell->RemoveRefreshObserver(this, Flush_Display)) {
+      mPresShell->RemoveRefreshObserver(this, FlushType::Display)) {
     mObservingState = eNotObservingRefresh;
   }
 
@@ -437,7 +437,7 @@ NotificationController::ScheduleProcessing()
   // If notification flush isn't planed yet start notification flush
   // asynchronously (after style and layout).
   if (mObservingState == eNotObservingRefresh) {
-    if (mPresShell->AddRefreshObserver(this, Flush_Display))
+    if (mPresShell->AddRefreshObserver(this, FlushType::Display))
       mObservingState = eRefreshObserving;
   }
 }
@@ -848,8 +848,9 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
 
       Accessible* parent = childDoc->Parent();
       DocAccessibleChild* parentIPCDoc = mDocument->IPCDoc();
+      MOZ_DIAGNOSTIC_ASSERT(parentIPCDoc);
       uint64_t id = reinterpret_cast<uintptr_t>(parent->UniqueID());
-      MOZ_ASSERT(id);
+      MOZ_DIAGNOSTIC_ASSERT(id);
       DocAccessibleChild* ipcDoc = childDoc->IPCDoc();
       if (ipcDoc) {
         parentIPCDoc->SendBindChildDoc(ipcDoc, id);
@@ -860,14 +861,12 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
       childDoc->SetIPCDoc(ipcDoc);
 
 #if defined(XP_WIN)
-      MOZ_ASSERT(parentIPCDoc);
       parentIPCDoc->ConstructChildDocInParentProcess(ipcDoc, id,
                                                      AccessibleWrap::GetChildIDFor(childDoc));
 #else
       nsCOMPtr<nsITabChild> tabChild =
         do_GetInterface(mDocument->DocumentNode()->GetDocShell());
       if (tabChild) {
-        MOZ_ASSERT(parentIPCDoc);
         static_cast<TabChild*>(tabChild.get())->
           SendPDocAccessibleConstructor(ipcDoc, parentIPCDoc, id, 0, 0);
       }
@@ -885,7 +884,7 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
       mEvents.IsEmpty() && mTextHash.Count() == 0 &&
       mHangingChildDocuments.IsEmpty() &&
       mDocument->HasLoadState(DocAccessible::eCompletelyLoaded) &&
-      mPresShell->RemoveRefreshObserver(this, Flush_Display)) {
+      mPresShell->RemoveRefreshObserver(this, FlushType::Display)) {
     mObservingState = eNotObservingRefresh;
   }
 }
