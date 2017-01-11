@@ -8,7 +8,10 @@ define(function (require, exports, module) {
   // ReactJS
   const React = require("devtools/client/shared/vendor/react");
   // Utils
-  const { isGrip } = require("./rep-utils");
+  const {
+    isGrip,
+    wrapRender,
+  } = require("./rep-utils");
   const { MODE } = require("./constants");
   // Shortcuts
   const { span } = React.DOM;
@@ -23,9 +26,10 @@ define(function (require, exports, module) {
       object: React.PropTypes.object.isRequired,
       // @TODO Change this to Object.values once it's supported in Node's version of V8
       mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+      objectLink: React.PropTypes.func,
     },
 
-    render: function () {
+    render: wrapRender(function () {
       let object = this.props.object;
       let preview = object.preview;
       let name = preview && preview.name
@@ -51,7 +55,7 @@ define(function (require, exports, module) {
           span({}, content)
         )
       );
-    },
+    }),
   });
 
   // Registration

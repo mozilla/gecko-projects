@@ -23,11 +23,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "PageThumbs",
 XPCOMUtils.defineLazyModuleGetter(this, "BinarySearch",
   "resource://gre/modules/BinarySearch.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "gPrincipal", function() {
-  let uri = Services.io.newURI("about:newtab", null, null);
-  return Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
-});
-
 XPCOMUtils.defineLazyGetter(this, "gCryptoHash", function() {
   return Cc["@mozilla.org/security/hash;1"].createInstance(Ci.nsICryptoHash);
 });
@@ -1351,8 +1346,12 @@ var LinkChecker = {
 
   _doCheckLoadURI: function Links_doCheckLoadURI(aURI) {
     try {
+      // about:newtab is currently privileged. In any case, it should be
+      // possible for tiles to point to pretty much everything - but not
+      // to stuff that inherits the system principal, so we check:
+      let systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
       Services.scriptSecurityManager.
-        checkLoadURIStrWithPrincipal(gPrincipal, aURI, this.flags);
+        checkLoadURIStrWithPrincipal(systemPrincipal, aURI, this.flags);
       return true;
     } catch (e) {
       // We got a weird URI or one that would inherit the caller's principal.
@@ -1404,7 +1403,7 @@ this.NewTabUtils = {
     try {
       // Note that nsIURI.asciiHost throws NS_ERROR_FAILURE for some types of
       // URIs, including jar and moz-icon URIs.
-      host = Services.io.newURI(url, null, null).asciiHost;
+      host = Services.io.newURI(url).asciiHost;
     } catch (ex) {
       return null;
     }

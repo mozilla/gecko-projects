@@ -9,7 +9,10 @@
 define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
-  const { createFactories } = require("./rep-utils");
+  const {
+    createFactories,
+    wrapRender,
+  } = require("./rep-utils");
   const { MODE } = require("./constants");
   // Shortcuts
   const { span } = React.DOM;
@@ -19,7 +22,7 @@ define(function (require, exports, module) {
    * and GripMap (remote JS maps and weakmaps) reps.
    * It's used to render object properties.
    */
-  let PropRep = React.createFactory(React.createClass({
+  let PropRep = React.createClass({
     displayName: "PropRep",
 
     propTypes: {
@@ -34,9 +37,10 @@ define(function (require, exports, module) {
       delim: React.PropTypes.string,
       // @TODO Change this to Object.values once it's supported in Node's version of V8
       mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+      objectLink: React.PropTypes.func,
     },
 
-    render: function () {
+    render: wrapRender(function () {
       const { Grip } = require("./grip");
       let { Rep } = createFactories(require("./rep"));
 
@@ -66,8 +70,8 @@ define(function (require, exports, module) {
           }, this.props.delim)
         )
       );
-    }
-  }));
+    })
+  });
 
   // Exports from this module
   exports.PropRep = PropRep;

@@ -9,7 +9,10 @@
 define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
-  const { createFactories } = require("./rep-utils");
+  const {
+    createFactories,
+    wrapRender,
+  } = require("./rep-utils");
   const { Caption } = createFactories(require("./caption"));
   const { PropRep } = createFactories(require("./prop-rep"));
   const { MODE } = require("./constants");
@@ -26,6 +29,7 @@ define(function (require, exports, module) {
       object: React.PropTypes.object,
       // @TODO Change this to Object.values once it's supported in Node's version of V8
       mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+      objectLink: React.PropTypes.func,
     },
 
     getTitle: function (object) {
@@ -132,7 +136,7 @@ define(function (require, exports, module) {
       return props;
     },
 
-    render: function () {
+    render: wrapRender(function () {
       let object = this.props.object;
       let props = this.safePropIterator(object);
       let objectLink = this.props.objectLink || span;
@@ -159,7 +163,7 @@ define(function (require, exports, module) {
           }, " }")
         )
       );
-    },
+    }),
   });
   function supportsObject(object, type) {
     return true;

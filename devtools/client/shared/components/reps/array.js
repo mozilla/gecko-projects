@@ -10,7 +10,10 @@
 define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
-  const { createFactories } = require("./rep-utils");
+  const {
+    createFactories,
+    wrapRender,
+  } = require("./rep-utils");
   const { Caption } = createFactories(require("./caption"));
   const { MODE } = require("./constants");
 
@@ -27,6 +30,8 @@ define(function (require, exports, module) {
     propTypes: {
       // @TODO Change this to Object.values once it's supported in Node's version of V8
       mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+      objectLink: React.PropTypes.func,
+      object: React.PropTypes.array.isRequired,
     },
 
     getTitle: function (object, context) {
@@ -116,7 +121,7 @@ define(function (require, exports, module) {
     onClickBracket: function (event) {
     },
 
-    render: function () {
+    render: wrapRender(function () {
       let {
         object,
         mode = MODE.SHORT,
@@ -158,7 +163,7 @@ define(function (require, exports, module) {
           )
         )
       );
-    },
+    }),
   });
 
   /**
@@ -167,7 +172,13 @@ define(function (require, exports, module) {
   let ItemRep = React.createFactory(React.createClass({
     displayName: "ItemRep",
 
-    render: function () {
+    propTypes: {
+      object: React.PropTypes.any.isRequired,
+      delim: React.PropTypes.string.isRequired,
+      mode: React.PropTypes.symbol,
+    },
+
+    render: wrapRender(function () {
       const { Rep } = createFactories(require("./rep"));
 
       let object = this.props.object;
@@ -179,7 +190,7 @@ define(function (require, exports, module) {
           delim
         )
       );
-    }
+    })
   }));
 
   function supportsObject(object, type) {

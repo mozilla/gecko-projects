@@ -9,7 +9,11 @@
 define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
-  const { createFactories, isGrip } = require("./rep-utils");
+  const {
+    createFactories,
+    isGrip,
+    wrapRender,
+  } = require("./rep-utils");
   const { Caption } = createFactories(require("./caption"));
   const { PropRep } = createFactories(require("./prop-rep"));
   const { MODE } = require("./constants");
@@ -26,6 +30,8 @@ define(function (require, exports, module) {
       object: React.PropTypes.object,
       // @TODO Change this to Object.values once it's supported in Node's version of V8
       mode: React.PropTypes.oneOf(Object.keys(MODE).map(key => MODE[key])),
+      objectLink: React.PropTypes.func,
+      isInterestingEntry: React.PropTypes.func,
     },
 
     getTitle: function (object) {
@@ -144,7 +150,7 @@ define(function (require, exports, module) {
         }, []);
     },
 
-    render: function () {
+    render: wrapRender(function () {
       let object = this.props.object;
       let props = this.safeEntriesIterator(object,
         (this.props.mode === MODE.LONG) ? 10 : 3);
@@ -176,7 +182,7 @@ define(function (require, exports, module) {
           }, " }")
         )
       );
-    },
+    }),
   });
 
   function supportsObject(grip, type) {

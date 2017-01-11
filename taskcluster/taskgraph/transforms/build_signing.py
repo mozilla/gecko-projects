@@ -51,7 +51,6 @@ def make_signing_description(config, jobs):
         label = dep_job.label.replace("build-", "signing-")
         job['label'] = label
 
-
         # Announce job status on funsize specific routes, so that it can
         # start the partial generation for nightlies only.
         job['use_funsize_route'] = True
