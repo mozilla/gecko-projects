@@ -113,10 +113,12 @@ UPSTREAM_ARTIFACT_UNSIGNED_PATHS = {
 }
 UPSTREAM_ARTIFACT_SIGNED_PATHS = {
     'linux64-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
-        "target.sdk.tar.bz2"
+        "target.tar.bz2",
+        "target.tar.bz2.asc",
     ],
     'linux-nightly': _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US + [
-        "target.sdk.tar.bz2"
+        "target.tar.bz2",
+        "target.tar.bz2.asc",
     ],
     'android-x86-nightly': ["en-US/target.apk"],
     'android-api-15-nightly': ["en-US/target.apk"],
