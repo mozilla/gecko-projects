@@ -273,7 +273,7 @@ def generate_signing_upstream_artifacts(taskid_to_beetmove, taskid_of_manifest, 
     manifest_path = "{}/balrog_props.json".format(artifact_prefix)
     upstream_artifacts.append({
         "taskId": {"task-reference": taskid_of_manifest},
-        "taskType": "signing",
+        "taskType": "build",
         "paths": [manifest_path],
         "locale": locale or "en-US",
     })
