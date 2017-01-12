@@ -15,8 +15,6 @@ from taskgraph.transforms.task import task_description_schema
 from voluptuous import Schema, Any, Required, Optional
 
 
-ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/{}/artifacts/public'
-
 # Voluptuous uses marker objects as dictionary *keys*, but they are not
 # comparable, so we cast all of the keys back to regular strings
 task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
@@ -86,9 +84,13 @@ def make_task_description(config, jobs):
 
         label = job.get('label', "balrog-{}".format(dep_job.label))
 
-        parent_task_artifacts_url = {
-            "task-reference": ARTIFACT_URL.format('<beetmover>')
-        }
+        upstream_artifacts = [{
+            "taskId": {"task-reference": "<beetmover>"},
+            "taskType": "beetmover",
+            "paths": [
+                "public/manifest.json"
+            ],
+        }]
 
         task = {
             'label': label,
@@ -96,9 +98,12 @@ def make_task_description(config, jobs):
                 dep_job.task["metadata"]["description"]),
             # do we have to define worker type somewhere?
             'worker-type': 'scriptworker-prov-v1/balrogworker-v1',
-            'worker': {'implementation': 'balrog',
-                       'task_artifact_url': parent_task_artifacts_url},
-            'scopes': [],
+            'worker': {
+                'implementation': 'balrog',
+                'upstream-artifacts': upstream_artifacts,
+            },
+            # bump this to nightly / release when applicable+permitted
+            'scopes': ["project:releng:balrog:dep"],
             'dependencies': {'beetmover': dep_job.label},
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),

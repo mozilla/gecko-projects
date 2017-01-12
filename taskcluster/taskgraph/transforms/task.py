@@ -292,21 +292,40 @@ task_description_schema = Schema({
         Required('max-run-time', default=600): int,
 
         # taskid of task with artifacts to beetmove
-        Required('taskid_to_beetmove'): taskref_or_string,
-
-        # taskid of task with artifacts to beetmove
-        Required('taskid_of_manifest'): taskref_or_string,
-
         # beetmover template key
         Required('update_manifest'): bool,
 
         # locale key, if this is a locale beetmover job
         Optional('locale'): basestring,
+
+        # list of artifact URLs for the artifacts that should be beetmoved
+        Required('upstream-artifacts'): [{
+            # taskId of the task with the artifact
+            Required('taskId'): taskref_or_string,
+
+            # type of signing task (for CoT)
+            Required('taskType'): basestring,
+
+            # Paths to the artifacts to sign
+            Required('paths'): [basestring],
+
+            # locale is used to map upload path and allow for duplicate simple names
+            Required('locale'): basestring,
+        }],
     }, {
         Required('implementation'): 'balrog',
 
-        # taskid of the signed beetmoved task
-        Required('task_artifact_url'): taskref_or_string,
+        # list of artifact URLs for the artifacts that should be beetmoved
+        Required('upstream-artifacts'): [{
+            # taskId of the task with the artifact
+            Required('taskId'): taskref_or_string,
+
+            # type of signing task (for CoT)
+            Required('taskType'): basestring,
+
+            # Paths to the artifacts to sign
+            Required('paths'): [basestring],
+        }],
     }),
 
     # The "when" section contains descriptions of the circumstances
@@ -515,9 +534,8 @@ def build_beetmover_payload(config, task, task_def):
     task_def['payload'] = {
         'maxRunTime': worker['max-run-time'],
         'upload_date': config.params['build_date'],
-        'taskid_to_beetmove': worker['taskid_to_beetmove'],
-        'taskid_of_manifest': worker['taskid_of_manifest'],
         'update_manifest': worker['update_manifest'],
+        'upstreamArtifacts':  worker['upstream-artifacts']
     }
     if worker.get('locale'):
         task_def['payload']['locale'] = worker['locale']
@@ -528,9 +546,9 @@ def build_balrog_payload(config, task, task_def):
     worker = task['worker']
 
     task_def['payload'] = {
-        'parent_task_artifacts_url': worker['task_artifact_url'],
         # signing cert is unused, but required by balrogworker (Bug 1282187 c#7)
         'signing_cert': "dep",
+        'upstreamArtifacts':  worker['upstream-artifacts']
     }
 
 
