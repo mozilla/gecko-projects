@@ -219,7 +219,7 @@ def make_task_description(config, jobs):
             # do we have to define worker type somewhere?
             'worker-type': 'scriptworker-prov-v1/beetmoverworker-v1',
             # bump this to nightly / release when applicable+permitted
-            'scopes': ["project:releng:beetmover:dep"],
+            'scopes': ["project:releng:beetmover:nightly"],
             'dependencies': dependencies,
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),

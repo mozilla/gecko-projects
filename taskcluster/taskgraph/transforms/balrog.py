@@ -103,7 +103,7 @@ def make_task_description(config, jobs):
                 'upstream-artifacts': upstream_artifacts,
             },
             # bump this to nightly / release when applicable+permitted
-            'scopes': ["project:releng:balrog:dep"],
+            'scopes': ["project:releng:balrog:nightly"],
             'dependencies': {'beetmover': dep_job.label},
             'attributes': attributes,
             'run-on-projects': dep_job.attributes.get('run_on_projects'),
