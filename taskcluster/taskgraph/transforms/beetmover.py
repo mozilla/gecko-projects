@@ -36,8 +36,6 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
 ]
 _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_EN_US = [
     "update/target.complete.mar",
-    "target.checksums",
-    "target.checksums.asc",
 ]
 _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
     "target.langpack.xpi",
@@ -45,8 +43,6 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
 ]
 _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N = [
     "target.complete.mar",
-    "target.checksums",
-    "target.checksums.asc",
 ]
 _MOBILE_UPSTREAM_ARTIFACTS_UNSIGNED_EN_US = [
     "en-US/target.common.tests.zip",
