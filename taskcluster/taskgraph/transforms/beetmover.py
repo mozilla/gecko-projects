@@ -44,7 +44,7 @@ _DESKTOP_UPSTREAM_ARTIFACTS_UNSIGNED_L10N = [
     "balrog_props.json",
 ]
 _DESKTOP_UPSTREAM_ARTIFACTS_SIGNED_L10N = [
-    "update/target.complete.mar",
+    "target.complete.mar",
     "target.checksums",
     "target.checksums.asc",
 ]
