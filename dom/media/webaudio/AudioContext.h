@@ -13,6 +13,7 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/TypedArray.h"
+#include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsHashKeys.h"
@@ -42,7 +43,7 @@ class AudioNodeStream;
 
 namespace dom {
 
-enum class AudioContextState : uint32_t;
+enum class AudioContextState : uint8_t;
 class AnalyserNode;
 class AudioBuffer;
 class AudioBufferSourceNode;
@@ -71,7 +72,7 @@ class WaveShaperNode;
 class PeriodicWave;
 struct PeriodicWaveConstraints;
 class Promise;
-enum class OscillatorType : uint32_t;
+enum class OscillatorType : uint8_t;
 
 // This is addrefed by the OscillatorNodeEngine on the main thread
 // and then used from the MSG thread.
@@ -348,7 +349,7 @@ private:
   AudioContextState mAudioContextState;
   RefPtr<AudioDestinationNode> mDestination;
   RefPtr<AudioListener> mListener;
-  nsTArray<RefPtr<WebAudioDecodeJob> > mDecodeJobs;
+  nsTArray<UniquePtr<WebAudioDecodeJob> > mDecodeJobs;
   // This array is used to keep the suspend/resume/close promises alive until
   // they are resolved, so we can safely pass them accross threads.
   nsTArray<RefPtr<Promise>> mPromiseGripArray;

@@ -181,7 +181,8 @@ H264Converter::CreateDecoder(DecoderDoctorDiagnostics* aDiagnostics)
   if (mp4_demuxer::H264::DecodeSPSFromExtraData(mCurrentConfig.mExtraData, spsdata)) {
     // Do some format check here.
     // WMF H.264 Video Decoder and Apple ATDecoder do not support YUV444 format.
-    if (spsdata.chroma_format_idc == 3 /*YUV444*/) {
+    if (spsdata.profile_idc == 244 /* Hi444PP */ ||
+        spsdata.chroma_format_idc == PDMFactory::kYUV444) {
       mLastError = NS_ERROR_FAILURE;
       if (aDiagnostics) {
         aDiagnostics->SetVideoNotSupported();
@@ -230,10 +231,11 @@ H264Converter::CreateDecoderAndInit(MediaRawData* aSample)
     // Queue the incoming sample.
     mMediaRawSamples.AppendElement(aSample);
 
-    mInitPromiseRequest.Begin(mDecoder->Init()
+    mDecoder->Init()
       ->Then(AbstractThread::GetCurrent()->AsTaskQueue(), __func__, this,
              &H264Converter::OnDecoderInitDone,
-             &H264Converter::OnDecoderInitFailed));
+             &H264Converter::OnDecoderInitFailed)
+      ->Track(mInitPromiseRequest);
     return NS_ERROR_NOT_INITIALIZED;
   }
   return rv;

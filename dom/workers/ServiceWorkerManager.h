@@ -37,10 +37,11 @@ class nsIConsoleReportCollector;
 
 namespace mozilla {
 
-class PrincipalOriginAttributes;
+class OriginAttributes;
 
 namespace dom {
 
+class ServiceWorkerRegistrar;
 class ServiceWorkerRegistrationListener;
 
 namespace workers {
@@ -150,7 +151,7 @@ public:
                                      nsIPrincipal* aPrincipal);
 
   void
-  DispatchFetchEvent(const PrincipalOriginAttributes& aOriginAttributes,
+  DispatchFetchEvent(const OriginAttributes& aOriginAttributes,
                      nsIDocument* aDoc,
                      const nsAString& aDocumentIdForTopLevelNavigation,
                      nsIInterceptedChannel* aChannel,
@@ -164,11 +165,11 @@ public:
          ServiceWorkerUpdateFinishCallback* aCallback);
 
   void
-  SoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
+  SoftUpdate(const OriginAttributes& aOriginAttributes,
              const nsACString& aScope);
 
   void
-  PropagateSoftUpdate(const PrincipalOriginAttributes& aOriginAttributes,
+  PropagateSoftUpdate(const OriginAttributes& aOriginAttributes,
                       const nsAString& aScope);
 
   void
@@ -328,7 +329,10 @@ private:
   ~ServiceWorkerManager();
 
   void
-  Init();
+  Init(ServiceWorkerRegistrar* aRegistrar);
+
+  void
+  MaybeStartShutdown();
 
   already_AddRefed<ServiceWorkerJobQueue>
   GetOrCreateJobQueue(const nsACString& aOriginSuffix,
@@ -358,7 +362,7 @@ private:
                            nsISupports** aServiceWorker);
 
   ServiceWorkerInfo*
-  GetActiveWorkerInfoForScope(const PrincipalOriginAttributes& aOriginAttributes,
+  GetActiveWorkerInfoForScope(const OriginAttributes& aOriginAttributes,
                               const nsACString& aScope);
 
   ServiceWorkerInfo*

@@ -1717,6 +1717,9 @@ class WasmActivation : public Activation
     // Read/written from SIGSEGV handler:
     void setResumePC(void* pc) { resumePC_ = pc; }
     void* resumePC() const { return resumePC_; }
+
+    // Used by wasm::FrameIterator during stack unwinding.
+    void unwindFP(uint8_t* fp) { fp_ = fp; }
 };
 
 // A FrameIter walks over the runtime's stack of JS script activations,
@@ -1811,6 +1814,8 @@ class FrameIter
     // -----------------------------------------------------------
     //  The following functions can only be called when isWasm()
     // -----------------------------------------------------------
+
+    inline bool wasmDebugEnabled() const;
     inline wasm::Instance* wasmInstance() const;
 
     // -----------------------------------------------------------
@@ -2056,11 +2061,19 @@ FrameIter::script() const
     return data_.jitFrames_.script();
 }
 
+inline bool
+FrameIter::wasmDebugEnabled() const
+{
+    MOZ_ASSERT(!done());
+    MOZ_ASSERT(data_.state_ == WASM);
+    return data_.wasmFrames_.debugEnabled();
+}
+
 inline wasm::Instance*
 FrameIter::wasmInstance() const
 {
     MOZ_ASSERT(!done());
-    MOZ_ASSERT(data_.state_ == WASM);
+    MOZ_ASSERT(data_.state_ == WASM && wasmDebugEnabled());
     return data_.wasmFrames_.instance();
 }
 

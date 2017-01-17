@@ -33,6 +33,7 @@
 #include "mozilla/EventForwards.h"
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
+#include "mozilla/layers/CompositorOptions.h"
 #include "nsIWebBrowserChrome3.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "AudioChannelService.h"
@@ -617,7 +618,7 @@ public:
     return mParentIsActive;
   }
 
-  bool AsyncPanZoomEnabled() const { return mAsyncPanZoomEnabled; }
+  bool AsyncPanZoomEnabled() const;
 
   virtual ScreenIntSize GetInnerSize() override;
 
@@ -659,14 +660,27 @@ public:
 
   bool TakeIsFreshProcess()
   {
-    bool wasFreshProcess = mIsFreshProcess;
-    mIsFreshProcess = false;
-    return wasFreshProcess;
+    if (mIsFreshProcess) {
+      MOZ_ASSERT(!sWasFreshProcess,
+                 "At most one tabGroup may be a fresh process per process");
+      sWasFreshProcess = true;
+      mIsFreshProcess = false;
+      return true;
+    }
+    return false;
   }
 
   already_AddRefed<nsISHistory> GetRelatedSHistory();
 
   mozilla::dom::TabGroup* TabGroup();
+
+  // Returns `true` if this this process was created to load a docshell in a
+  // "Fresh Process". This value is initialized to `false`, and is set to `true`
+  // in RecvSetFreshProcess.
+  static bool GetWasFreshProcess()
+  {
+    return sWasFreshProcess;
+  }
 
 protected:
   virtual ~TabChild();
@@ -746,6 +760,10 @@ private:
     mUnscaledInnerSize = aSize;
   }
 
+  bool SkipRepeatedKeyEvent(const WidgetKeyboardEvent& aEvent);
+
+  void UpdateRepeatedKeyEventEndTime(const WidgetKeyboardEvent& aEvent);
+
   class DelayedDeleteRunnable;
 
   TextureFactoryIdentifier mTextureFactoryIdentifier;
@@ -776,6 +794,10 @@ private:
   LayoutDeviceIntPoint mChromeDisp;
   TabId mUniqueId;
 
+  // Holds the compositor options for the compositor rendering this tab,
+  // once we find out which compositor that is.
+  Maybe<mozilla::layers::CompositorOptions> mCompositorOptions;
+
   friend class ContentChild;
   float mDPI;
   int32_t mRounding;
@@ -785,11 +807,17 @@ private:
 
   bool mIPCOpen;
   bool mParentIsActive;
-  bool mAsyncPanZoomEnabled;
   CSSSize mUnscaledInnerSize;
   bool mDidSetRealShowInfo;
   bool mDidLoadURLInit;
   bool mIsFreshProcess;
+
+  bool mSkipKeyPress;
+
+  // Store the end time of the handling of the last repeated keydown/keypress
+  // event so that in case event handling takes time, some repeated events can
+  // be skipped to not flood child process.
+  mozilla::TimeStamp mRepeatedKeyEventTime;
 
   AutoTArray<bool, NUMBER_OF_AUDIO_CHANNELS> mAudioChannelsActive;
 
@@ -802,6 +830,8 @@ private:
   // The handle associated with the native window that contains this tab
   uintptr_t mNativeWindowHandle;
 #endif // defined(XP_WIN)
+
+  static bool sWasFreshProcess;
 
   DISALLOW_EVIL_CONSTRUCTORS(TabChild);
 };

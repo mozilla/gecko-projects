@@ -43,6 +43,7 @@
 #include "Telemetry.h"
 #include "TelemetryCommon.h"
 #include "TelemetryHistogram.h"
+#include "TelemetryIPCAccumulator.h"
 #include "TelemetryScalar.h"
 #include "TelemetryEvent.h"
 #include "WebrtcTelemetry.h"
@@ -2131,9 +2132,7 @@ TelemetryImpl::CreateTelemetryInstance()
 
   // First, initialize the TelemetryHistogram and TelemetryScalar global states.
   TelemetryHistogram::InitializeGlobalState(useTelemetry, useTelemetry);
-
-  // Only record scalars from the parent process.
-  TelemetryScalar::InitializeGlobalState(XRE_IsParentProcess(), XRE_IsParentProcess());
+  TelemetryScalar::InitializeGlobalState(useTelemetry, useTelemetry);
 
   // Only record events from the parent process.
   TelemetryEvent::InitializeGlobalState(XRE_IsParentProcess(), XRE_IsParentProcess());
@@ -2164,6 +2163,7 @@ TelemetryImpl::ShutdownTelemetry()
   TelemetryHistogram::DeInitializeGlobalState();
   TelemetryScalar::DeInitializeGlobalState();
   TelemetryEvent::DeInitializeGlobalState();
+  TelemetryIPCAccumulator::DeInitializeGlobalState();
 }
 
 void
@@ -2635,11 +2635,17 @@ TelemetryImpl::ClearEvents()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+TelemetryImpl::SetEventRecordingEnabled(const nsACString& aCategory, bool aEnabled)
+{
+  TelemetryEvent::SetEventRecordingEnabled(aCategory, aEnabled);
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 TelemetryImpl::FlushBatchedChildTelemetry()
 {
-  TelemetryHistogram::IPCTimerFired(nullptr, nullptr);
+  TelemetryIPCAccumulator::IPCTimerFired(nullptr, nullptr);
   return NS_OK;
 }
 
@@ -2927,8 +2933,8 @@ GetStackAndModules(const std::vector<uintptr_t>& aPCs)
     const SharedLibrary &info = rawModules.GetEntry(i);
     const std::string &name = info.GetName();
     std::string basename = name;
-#ifdef XP_MACOSX
-    // FIXME: We want to use just the basename as the libname, but the
+#if defined(XP_MACOSX) || defined(XP_LINUX)
+    // We want to use just the basename as the libname, but the
     // current profiler addon needs the full path name, so we compute the
     // basename in here.
     size_t pos = name.rfind('/');
@@ -3097,6 +3103,20 @@ AccumulateChildKeyed(GeckoProcessType aProcessType,
                      const nsTArray<KeyedAccumulation>& aAccumulations)
 {
   TelemetryHistogram::AccumulateChildKeyed(aProcessType, aAccumulations);
+}
+
+void
+UpdateChildScalars(GeckoProcessType aProcessType,
+                   const nsTArray<ScalarAction>& aScalarActions)
+{
+  TelemetryScalar::UpdateChildData(aProcessType, aScalarActions);
+}
+
+void
+UpdateChildKeyedScalars(GeckoProcessType aProcessType,
+                        const nsTArray<KeyedScalarAction>& aScalarActions)
+{
+  TelemetryScalar::UpdateChildKeyedData(aProcessType, aScalarActions);
 }
 
 const char*

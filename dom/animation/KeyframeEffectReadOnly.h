@@ -48,8 +48,8 @@ class GlobalObject;
 class OwningElementOrCSSPseudoElement;
 class UnrestrictedDoubleOrKeyframeAnimationOptions;
 class UnrestrictedDoubleOrKeyframeEffectOptions;
-enum class IterationCompositeOperation : uint32_t;
-enum class CompositeOperation : uint32_t;
+enum class IterationCompositeOperation : uint8_t;
+enum class CompositeOperation : uint8_t;
 struct AnimationPropertyDetails;
 }
 
@@ -409,8 +409,19 @@ protected:
   // context. That's because calling GetStyleContextForElement when we are in
   // the process of building a style context may trigger various forms of
   // infinite recursion.
+  already_AddRefed<nsStyleContext> GetTargetStyleContext();
+
+  // Similar to the above but ignoring animation rules. We use this to get base
+  // styles (which don't include animation rules).
   already_AddRefed<nsStyleContext>
-  GetTargetStyleContext();
+  GetTargetStyleContextWithoutAnimation();
+
+  enum AnimationStyle {
+    Skip,
+    Include
+  };
+  template<AnimationStyle aAnimationStyle>
+  already_AddRefed<nsStyleContext> DoGetTargetStyleContext();
 
   // A wrapper for marking cascade update according to the current
   // target and its effectSet.

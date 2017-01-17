@@ -90,11 +90,13 @@ using struct LookAndFeelInt from "mozilla/widget/WidgetMessageUtils.h";
 using class mozilla::dom::MessagePort from "mozilla/dom/MessagePort.h";
 using class mozilla::dom::ipc::StructuredCloneData from "mozilla/dom/ipc/StructuredCloneData.h";
 using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
-using mozilla::DocShellOriginAttributes from "mozilla/ipc/BackgroundUtils.h";
+using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::dom::FlyWebPublishOptions from "mozilla/dom/FlyWebPublishOptionsIPCSerializer.h";
 using mozilla::Telemetry::Accumulation from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedAccumulation from "mozilla/TelemetryComms.h";
+using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
+using mozilla::Telemetry::KeyedScalarAction from "mozilla/TelemetryComms.h";
 
 union ChromeRegistryItem
 {
@@ -343,6 +345,11 @@ struct GMPCapabilityData
     GMPAPITags[] capabilities;
 };
 
+/**
+ * The PContent protocol is a top-level protocol between the UI process
+ * and a content process. There is exactly one PContentParent/PContentChild pair
+ * for each content process.
+ */
 nested(upto inside_cpow) sync protocol PContent
 {
     parent spawns PPluginModule;
@@ -1066,7 +1073,7 @@ parent:
                       bool aSizeSpecified,
                       nsCString aFeatures,
                       nsCString aBaseURI,
-                      DocShellOriginAttributes aOpenerOriginAttributes,
+                      OriginAttributes aOpenerOriginAttributes,
                       float aFullZoom)
       returns (nsresult rv,
                bool windowOpened,
@@ -1084,7 +1091,7 @@ parent:
       URIParams aURIToLoad,
       nsCString aFeatures,
       nsCString aBaseURI,
-      DocShellOriginAttributes aOpenerOriginAttributes,
+      OriginAttributes aOpenerOriginAttributes,
       float aFullZoom);
 
     sync GetDeviceStorageLocation(nsString type)
@@ -1150,6 +1157,8 @@ parent:
      */
     async AccumulateChildHistogram(Accumulation[] accumulations);
     async AccumulateChildKeyedHistogram(KeyedAccumulation[] accumulations);
+    async UpdateChildScalars(ScalarAction[] updates);
+    async UpdateChildKeyedScalars(KeyedScalarAction[] updates);
 
     sync GetA11yContentId() returns (uint32_t aContentId);
 

@@ -408,12 +408,6 @@ protected:
 
   void EnqueueFirstFrameLoadedEvent();
 
-  // Dispatch a task to decode audio if there is not.
-  void EnsureAudioDecodeTaskQueued();
-
-  // Dispatch a task to decode video if there is not.
-  void EnsureVideoDecodeTaskQueued();
-
   // Start a task to decode audio.
   void RequestAudioData();
 
@@ -449,9 +443,6 @@ protected:
 
   void FinishDecodeFirstFrame();
 
-  // Queries our state to see whether the decode has finished for all streams.
-  bool CheckIfDecodeComplete();
-
   // Performs one "cycle" of the state machine.
   void RunStateMachine();
 
@@ -471,10 +462,6 @@ private:
   // Rejected by the MediaSink to signal errors for audio/video.
   void OnMediaSinkAudioError(nsresult aResult);
   void OnMediaSinkVideoError();
-
-  // Return true if the video decoder's decode speed can not catch up the
-  // play time.
-  bool NeedToSkipToNextKeyframe();
 
   void* const mDecoderID;
   const RefPtr<FrameStatistics> mFrameStats;
@@ -500,8 +487,6 @@ private:
   // Queue of video frames. This queue is threadsafe, and is accessed from
   // the decoder, state machine, and main threads.
   MediaQueue<MediaData> mVideoQueue;
-
-  State mState = DECODER_STATE_DECODING_METADATA;
 
   UniquePtr<StateObject> mStateObj;
 

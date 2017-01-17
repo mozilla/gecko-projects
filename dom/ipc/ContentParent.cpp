@@ -4177,7 +4177,7 @@ ContentParent::CommonCreateWindow(PBrowserParent* aThisTab,
                                   nsIURI* aURIToLoad,
                                   const nsCString& aFeatures,
                                   const nsCString& aBaseURI,
-                                  const DocShellOriginAttributes& aOpenerOriginAttributes,
+                                  const OriginAttributes& aOpenerOriginAttributes,
                                   const float& aFullZoom,
                                   nsresult& aResult,
                                   nsCOMPtr<nsITabParent>& aNewTabParent,
@@ -4301,7 +4301,7 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                                 const bool& aSizeSpecified,
                                 const nsCString& aFeatures,
                                 const nsCString& aBaseURI,
-                                const DocShellOriginAttributes& aOpenerOriginAttributes,
+                                const OriginAttributes& aOpenerOriginAttributes,
                                 const float& aFullZoom,
                                 nsresult* aResult,
                                 bool* aWindowIsNew,
@@ -4368,7 +4368,7 @@ ContentParent::RecvCreateWindowInDifferentProcess(
   const URIParams& aURIToLoad,
   const nsCString& aFeatures,
   const nsCString& aBaseURI,
-  const DocShellOriginAttributes& aOpenerOriginAttributes,
+  const OriginAttributes& aOpenerOriginAttributes,
   const float& aFullZoom)
 {
   nsCOMPtr<nsITabParent> newRemoteTab;
@@ -4762,6 +4762,22 @@ ContentParent::RecvAccumulateChildKeyedHistogram(
                 InfallibleTArray<KeyedAccumulation>&& aAccumulations)
 {
   Telemetry::AccumulateChildKeyed(GeckoProcessType_Content, aAccumulations);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvUpdateChildScalars(
+                InfallibleTArray<ScalarAction>&& aScalarActions)
+{
+  Telemetry::UpdateChildScalars(GeckoProcessType_Content, aScalarActions);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvUpdateChildKeyedScalars(
+                InfallibleTArray<KeyedScalarAction>&& aScalarActions)
+{
+  Telemetry::UpdateChildKeyedScalars(GeckoProcessType_Content, aScalarActions);
   return IPC_OK();
 }
 

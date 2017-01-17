@@ -21,17 +21,17 @@ const Actions = require("./actions/index");
 const { Prefs } = require("./prefs");
 
 const {
+  fetchHeaders,
   formDataURI,
-  writeHeaderText,
   getFormDataSections,
 } = require("./request-utils");
 
 const {
   getActiveFilters,
-  getSortedRequests,
   getDisplayedRequests,
   getRequestById,
   getSelectedRequest,
+  getSortedRequests,
 } = require("./selectors/index");
 
 // ms
@@ -141,11 +141,6 @@ RequestsMenuView.prototype = {
 
     this.sendCustomRequestEvent = this.sendCustomRequest.bind(this);
     this.closeCustomRequestEvent = this.closeCustomRequest.bind(this);
-    this.cloneSelectedRequestEvent = this.cloneSelectedRequest.bind(this);
-    this.toggleRawHeadersEvent = this.toggleRawHeaders.bind(this);
-
-    $("#toggle-raw-headers")
-      .addEventListener("click", this.toggleRawHeadersEvent, false);
 
     this._summary = $("#requests-menu-network-summary-button");
     this._summary.setAttribute("label", L10N.getStr("networkMenu.empty"));
@@ -172,10 +167,6 @@ RequestsMenuView.prototype = {
         .addEventListener("click", this.sendCustomRequestEvent, false);
       $("#custom-request-close-button")
         .addEventListener("click", this.closeCustomRequestEvent, false);
-      $("#headers-summary-resend")
-        .addEventListener("click", this.cloneSelectedRequestEvent, false);
-    } else {
-      $("#headers-summary-resend").hidden = true;
     }
   },
 
@@ -193,10 +184,6 @@ RequestsMenuView.prototype = {
       .removeEventListener("click", this.sendCustomRequestEvent, false);
     $("#custom-request-close-button")
       .removeEventListener("click", this.closeCustomRequestEvent, false);
-    $("#headers-summary-resend")
-      .removeEventListener("click", this.cloneSelectedRequestEvent, false);
-    $("#toggle-raw-headers")
-      .removeEventListener("click", this.toggleRawHeadersEvent, false);
 
     this._splitter.removeEventListener("mouseup", this.onResize, false);
     window.removeEventListener("resize", this.onResize, false);
@@ -237,7 +224,7 @@ RequestsMenuView.prototype = {
         isXHR,
         cause,
         fromCache,
-        fromServiceWorker
+        fromServiceWorker,
       },
       true
     );
@@ -248,29 +235,57 @@ RequestsMenuView.prototype = {
   updateRequest: Task.async(function* (id, data) {
     const action = Actions.updateRequest(id, data, true);
     yield this.store.dispatch(action);
+    let {
+      responseContent,
+      responseCookies,
+      responseHeaders,
+      requestCookies,
+      requestHeaders,
+      requestPostData,
+    } = action.data;
+    let request = getRequestById(this.store.getState(), action.id);
 
-    let { responseContent, requestPostData } = action.data;
+    if (requestHeaders && requestHeaders.headers && requestHeaders.headers.length) {
+      let headers = yield fetchHeaders(
+        requestHeaders, gNetwork.getString.bind(gNetwork));
+      if (headers) {
+        yield this.store.dispatch(Actions.updateRequest(
+          action.id,
+          { requestHeaders: headers },
+          true,
+        ));
+      }
+    }
 
-    if (responseContent && responseContent.content) {
-      let request = getRequestById(this.store.getState(), action.id);
-      if (request) {
-        let { mimeType } = request;
-        let { text, encoding } = responseContent.content;
-        let response = yield gNetwork.getString(text);
-        let payload = {};
+    if (responseHeaders && responseHeaders.headers && responseHeaders.headers.length) {
+      let headers = yield fetchHeaders(
+        responseHeaders, gNetwork.getString.bind(gNetwork));
+      if (headers) {
+        yield this.store.dispatch(Actions.updateRequest(
+          action.id,
+          { responseHeaders: headers },
+          true,
+        ));
+      }
+    }
 
-        if (mimeType.includes("image/")) {
-          payload.responseContentDataUri = formDataURI(mimeType, encoding, response);
-        }
+    if (request && responseContent && responseContent.content) {
+      let { mimeType } = request;
+      let { text, encoding } = responseContent.content;
+      let response = yield gNetwork.getString(text);
+      let payload = {};
 
-        responseContent.content.text = response;
-        payload.responseContent = responseContent;
+      if (mimeType.includes("image/")) {
+        payload.responseContentDataUri = formDataURI(mimeType, encoding, response);
+      }
 
-        yield this.store.dispatch(Actions.updateRequest(action.id, payload, true));
+      responseContent.content.text = response;
+      payload.responseContent = responseContent;
 
-        if (mimeType.includes("image/")) {
-          window.emit(EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
-        }
+      yield this.store.dispatch(Actions.updateRequest(action.id, payload, true));
+
+      if (mimeType.includes("image/")) {
+        window.emit(EVENTS.RESPONSE_IMAGE_THUMBNAIL_DISPLAYED);
       }
     }
 
@@ -289,6 +304,51 @@ RequestsMenuView.prototype = {
       payload.requestHeadersFromUploadStream = { headers, headersSize };
 
       yield this.store.dispatch(Actions.updateRequest(action.id, payload, true));
+    }
+
+    // Fetch request and response cookies long value.
+    // Actor does not provide full sized cookie value when the value is too long
+    // To display values correctly, we need fetch them in each request.
+    if (requestCookies) {
+      let reqCookies = [];
+      // request store cookies in requestCookies or requestCookies.cookies
+      let cookies = requestCookies.cookies ?
+        requestCookies.cookies : requestCookies;
+      // make sure cookies is iterable
+      if (typeof cookies[Symbol.iterator] === "function") {
+        for (let cookie of cookies) {
+          reqCookies.push(Object.assign({}, cookie, {
+            value: yield gNetwork.getString(cookie.value),
+          }));
+        }
+        if (reqCookies.length) {
+          yield this.store.dispatch(Actions.updateRequest(
+            action.id,
+            { requestCookies: reqCookies },
+            true));
+        }
+      }
+    }
+
+    if (responseCookies) {
+      let resCookies = [];
+      // response store cookies in responseCookies or responseCookies.cookies
+      let cookies = responseCookies.cookies ?
+        responseCookies.cookies : responseCookies;
+      // make sure cookies is iterable
+      if (typeof cookies[Symbol.iterator] === "function") {
+        for (let cookie of cookies) {
+          resCookies.push(Object.assign({}, cookie, {
+            value: yield gNetwork.getString(cookie.value),
+          }));
+        }
+        if (resCookies.length) {
+          yield this.store.dispatch(Actions.updateRequest(
+            action.id,
+            { responseCookies: resCookies },
+            true));
+        }
+      }
     }
   }),
 
@@ -377,28 +437,6 @@ RequestsMenuView.prototype = {
    */
   cloneSelectedRequest() {
     this.store.dispatch(Actions.cloneSelectedRequest());
-  },
-
-  /**
-   * Shows raw request/response headers in textboxes.
-   */
-  toggleRawHeaders: function () {
-    let requestTextarea = $("#raw-request-headers-textarea");
-    let responseTextarea = $("#raw-response-headers-textarea");
-    let rawHeadersHidden = $("#raw-headers").getAttribute("hidden");
-
-    if (rawHeadersHidden) {
-      let selected = getSelectedRequest(this.store.getState());
-      let selectedRequestHeaders = selected.requestHeaders.headers;
-      let selectedResponseHeaders = selected.responseHeaders.headers;
-      requestTextarea.value = writeHeaderText(selectedRequestHeaders);
-      responseTextarea.value = writeHeaderText(selectedResponseHeaders);
-      $("#raw-headers").hidden = false;
-    } else {
-      requestTextarea.value = null;
-      responseTextarea.value = null;
-      $("#raw-headers").hidden = true;
-    }
   },
 
   /**

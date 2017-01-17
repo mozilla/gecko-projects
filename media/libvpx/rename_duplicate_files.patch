@@ -1,0 +1,18 @@
+diff --git a/libvpx/vpx_dsp/x86/loopfilter_sse2.c b/libvpx/vpx_dsp/x86/loopfilter_intrin_sse2.c
+similarity index 100%
+rename from libvpx/vpx_dsp/x86/loopfilter_sse2.c
+rename to libvpx/vpx_dsp/x86/loopfilter_intrin_sse2.c
+diff --git a/libvpx/vpx_dsp/vpx_dsp.mk b/libvpx/vpx_dsp/vpx_dsp.mk
+index 84b529136ba9..7f3111320dc9 100644
+--- a/libvpx/vpx_dsp/vpx_dsp.mk
++++ b/libvpx/vpx_dsp/vpx_dsp.mk
+@@ -132,7 +132,7 @@ DSP_SRCS-$(HAVE_DSPR2)  += mips/convolve8_vert_dspr2.c
+ # loop filters
+ DSP_SRCS-yes += loopfilter.c
+
+-DSP_SRCS-$(ARCH_X86)$(ARCH_X86_64)   += x86/loopfilter_sse2.c
++DSP_SRCS-$(ARCH_X86)$(ARCH_X86_64)   += x86/loopfilter_intrin_sse2.c
+ DSP_SRCS-$(HAVE_AVX2)                += x86/loopfilter_avx2.c
+
+ DSP_SRCS-$(HAVE_NEON)   += arm/loopfilter_neon.c
+

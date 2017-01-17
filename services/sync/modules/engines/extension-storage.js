@@ -43,7 +43,7 @@ ExtensionStorageEngine.prototype = {
   syncPriority: 10,
   allowSkippedRecord: false,
 
-  _sync: function () {
+  _sync() {
     return Async.promiseSpinningly(ExtensionStorageSync.syncAll());
   },
 
@@ -68,15 +68,15 @@ function ExtensionStorageTracker(name, engine) {
 ExtensionStorageTracker.prototype = {
   __proto__: Tracker.prototype,
 
-  startTracking: function () {
+  startTracking() {
     Svc.Obs.add("ext.storage.sync-changed", this);
   },
 
-  stopTracking: function () {
+  stopTracking() {
     Svc.Obs.remove("ext.storage.sync-changed", this);
   },
 
-  observe: function (subject, topic, data) {
+  observe(subject, topic, data) {
     Tracker.prototype.observe.call(this, subject, topic, data);
 
     if (this.ignoreAll) {
@@ -94,15 +94,15 @@ ExtensionStorageTracker.prototype = {
 
   // Override a bunch of methods which don't do anything for us.
   // This is a performance hack.
-  ignoreID: function() {
+  ignoreID() {
   },
-  unignoreID: function() {
+  unignoreID() {
   },
-  addChangedID: function() {
+  addChangedID() {
   },
-  removeChangedID: function() {
+  removeChangedID() {
   },
-  clearChangedIDs: function() {
+  clearChangedIDs() {
   },
 };
 
@@ -149,10 +149,14 @@ class EncryptionRemoteTransformer {
   decode(record) {
     const self = this;
     return Task.spawn(function* () {
-      const keyBundle = yield self.getKeys();
       if (!record.ciphertext) {
+        // This can happen for tombstones if a record is deleted.
+        if (record.deleted) {
+          return record;
+        }
         throw new Error("No ciphertext: nothing to decrypt?");
       }
+      const keyBundle = yield self.getKeys();
       // Authenticate the encrypted blob with the expected HMAC
       let computedHMAC = ciphertextHMAC(keyBundle, record.id, record.IV, record.ciphertext);
 
@@ -217,7 +221,7 @@ class KeyRingEncryptionRemoteTransformer extends EncryptionRemoteTransformer {
       let kB = Utils.hexToBytes(user.kB);
 
       let keyMaterial = CryptoUtils.hkdf(kB, undefined,
-                                       "identity.mozilla.com/picl/v1/chrome.storage.sync", 2*32);
+                                       "identity.mozilla.com/picl/v1/chrome.storage.sync", 2 * 32);
       let bundle = new BulkKeyBundle();
       // [encryptionKey, hmacKey]
       bundle.keyPair = [keyMaterial.slice(0, 32), keyMaterial.slice(32, 64)];

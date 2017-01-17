@@ -24,7 +24,6 @@ browser/chrome/browser/skin/classic/browser/addons/addon-install-confirm.svg
 browser/chrome/browser/skin/classic/browser/connection-secure.svg
 browser/chrome/browser/skin/classic/browser/controlcenter/warning-gray.svg
 browser/chrome/browser/skin/classic/browser/newtab/close.png
-browser/chrome/browser/skin/classic/browser/theme-switcher-icon.png
 # devtools reduction is bug 1311178
 browser/chrome/devtools/content/dom/content/dom-view.css
 browser/chrome/devtools/content/dom/dom.html
@@ -219,6 +218,5 @@ res/table-remove-row-active.gif
 res/table-remove-row-hover.gif
 res/table-remove-row.gif
 # Aurora branding
-browser/chrome/browser/content/browser/defaultthemes/devedition.icon.png
 browser/chrome/browser/content/branding/icon64.png
 browser/chrome/devtools/content/framework/dev-edition-promo/dev-edition-logo.png

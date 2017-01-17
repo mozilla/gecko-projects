@@ -1688,7 +1688,8 @@
 
             // Abort if we're not going to change anything
             if (isRemote == aShouldBeRemote && !aOptions.newFrameloader && !aOptions.freshProcess &&
-                (!isRemote || aBrowser.getAttribute("remoteType") == aOptions.remoteType)) {
+                (!isRemote || aBrowser.getAttribute("remoteType") == aOptions.remoteType) &&
+                !aBrowser.frameLoader.isFreshProcess) {
               return false;
             }
 
@@ -1835,7 +1836,8 @@
               E10SUtils.getRemoteTypeForURI(aURL, gMultiProcessBrowser,
                                             currentRemoteType);
             if (currentRemoteType != aOptions.remoteType ||
-                aOptions.freshProcess || aOptions.newFrameloader) {
+                aOptions.freshProcess || aOptions.newFrameloader ||
+                aBrowser.frameLoader.isFreshProcess) {
               let remote = aOptions.remoteType != E10SUtils.NOT_REMOTE;
               return this.updateBrowserRemoteness(aBrowser, remote, aOptions);
             }
@@ -2180,6 +2182,13 @@
 
             if (aIsPrerendered) {
               t.setAttribute("hidden", "true");
+            }
+
+            // Related tab inherits current tab's user context unless a different
+            // usercontextid is specified
+            if (aUserContextId == null &&
+                (aRelatedToCurrent == null ? aReferrerURI : aRelatedToCurrent)) {
+              aUserContextId = this.mCurrentTab.getAttribute("usercontextid") || 0;
             }
 
             if (aUserContextId) {
@@ -2862,6 +2871,8 @@
               aOurTab._sharingState = aOtherTab._sharingState;
               webrtcUI.swapBrowserForNotification(otherBrowser, ourBrowser);
             }
+
+            SitePermissions.copyTemporaryPermissions(otherBrowser, ourBrowser);
 
             // If the other tab is pending (i.e. has not been restored, yet)
             // then do not switch docShells but retrieve the other tab's state
@@ -5469,14 +5480,14 @@
             this._tabAnimationLoggingEnabled = false;
           }
           this._browserNewtabpageEnabled = Services.prefs.getBoolPref("browser.newtabpage.enabled");
+          Services.prefs.addObserver("privacy.userContext", this, false);
           this.observe(null, "nsPref:changed", "privacy.userContext.enabled");
-          Services.prefs.addObserver("privacy.userContext.enabled", this, false);
         ]]>
       </constructor>
 
       <destructor>
         <![CDATA[
-          Services.prefs.removeObserver("privacy.userContext.enabled", this);
+          Services.prefs.removeObserver("privacy.userContext", this);
         ]]>
       </destructor>
 
@@ -5512,17 +5523,35 @@
         <body><![CDATA[
           switch (aTopic) {
             case "nsPref:changed":
-              // This is the only pref observed.
+              // This is has to deal with changes in
+              // privacy.userContext.enabled and
+              // privacy.userContext.longPressBehavior.
               let containersEnabled = Services.prefs.getBoolPref("privacy.userContext.enabled")
                                         && !PrivateBrowsingUtils.isWindowPrivate(window);
+
+              // This pref won't change so often, so just recreate the menu.
+              let longPressBehavior = Services.prefs.getIntPref("privacy.userContext.longPressBehavior");
+
+              // If longPressBehavior pref is set to 0 (or any invalid value)
+              // long press menu is disabled.
+              if (containersEnabled && (longPressBehavior <= 0 || longPressBehavior > 2)) {
+                containersEnabled = false;
+              }
 
               const newTab = document.getElementById("new-tab-button");
               const newTab2 = document.getAnonymousElementByAttribute(this, "anonid", "tabs-newtab-button")
 
-              if (containersEnabled) {
-                for (let parent of [newTab, newTab2]) {
-                  if (!parent)
-                    continue;
+              for (let parent of [newTab, newTab2]) {
+                if (!parent)
+                  continue;
+
+                gClickAndHoldListenersOnElement.remove(parent);
+                parent.removeAttribute("type");
+                if (parent.firstChild) {
+                  parent.firstChild.remove();
+                }
+
+                if (containersEnabled) {
                   let popup = document.createElementNS(
                                 "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul",
                                 "menupopup");
@@ -5535,18 +5564,13 @@
                   popup.setAttribute("position", "after_end");
                   parent.appendChild(popup);
 
-                  gClickAndHoldListenersOnElement.add(parent);
+                  // longPressBehavior == 2 means that the menu is shown after X
+                  // millisecs. Otherwise, with 1, the menu is open immediatelly.
+                  if (longPressBehavior == 2) {
+                    gClickAndHoldListenersOnElement.add(parent);
+                  }
+
                   parent.setAttribute("type", "menu");
-                }
-              } else {
-                for (let parent of [newTab, newTab2]) {
-                  if (!parent)
-                    continue;
-                  gClickAndHoldListenersOnElement.remove(parent);
-                  parent.removeAttribute("type");
-                  if (!parent.firstChild)
-                    continue;
-                  parent.firstChild.remove();
                 }
               }
 
