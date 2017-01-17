@@ -150,7 +150,6 @@ beetmover_description_schema = Schema({
     Required('dependent-task'): object,
 
     # depname is used in taskref's to identify the taskID of the unsigned things
-    # to do change to build or signed-build
     Required('depname', default='build'): basestring,
 
     # unique label to describe this beetmover task, defaults to {dep.label}-beetmover

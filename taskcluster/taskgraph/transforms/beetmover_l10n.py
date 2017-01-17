@@ -14,7 +14,7 @@ transforms = TransformSequence()
 
 
 @transforms.add
-def make_signing_description(config, jobs):
+def make_beetmover_description(config, jobs):
     for job in jobs:
         dep_job = job['dependent-task']
         for locale in dep_job.attributes.get('chunk_locales', []):

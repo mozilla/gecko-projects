@@ -779,7 +779,7 @@ class MobileSingleLocale(MockMixin, LocalesMixin, ReleaseMixin,
                 if self.query_is_nightly():
                     self.submit_balrog_updates(release_type="nightly")
                 else:
-                   self.submit_balrog_updates(release_type="release")
+                    self.submit_balrog_updates(release_type="release")
 
                 if not self.query_is_nightly():
                     self.submit_balrog_release_pusher(dirs)

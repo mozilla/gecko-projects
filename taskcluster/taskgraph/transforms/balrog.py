@@ -73,9 +73,9 @@ def make_task_description(config, jobs):
         treeherder.setdefault('kind', 'build')
 
         attributes = {
-                'nightly': dep_job.attributes.get('nightly', False),
-                'build_platform': dep_job.attributes.get('build_platform'),
-                'build_type': dep_job.attributes.get('build_type'),
+            'nightly': dep_job.attributes.get('nightly', False),
+            'build_platform': dep_job.attributes.get('build_platform'),
+            'build_type': dep_job.attributes.get('build_type'),
         }
 
         if dep_job.attributes.get('locale'):

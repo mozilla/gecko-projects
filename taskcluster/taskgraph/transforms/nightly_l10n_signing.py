@@ -69,6 +69,6 @@ def make_signing_description(config, jobs):
 
         # Announce job status on funsize specific routes, so that it can
         # start the partial generation for nightlies only.
-        job['use_funsize_route'] = True
+        job['use-funsize-route'] = True
 
         yield job
