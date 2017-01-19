@@ -159,7 +159,7 @@ public:
    */
   void SelectBitrates(unsigned short width,
                       unsigned short height,
-                      unsigned int cap,
+                      int cap,
                       int32_t aLastFramerateTenths,
                       webrtc::VideoStream& aVideoStream);
 
@@ -189,7 +189,10 @@ public:
    * @param current framerate
    * @result new framerate
    */
-  unsigned int SelectSendFrameRate(unsigned int framerate) const;
+  unsigned int SelectSendFrameRate(const VideoCodecConfig* codecConfig,
+                                   unsigned int old_framerate,
+                                   unsigned short sending_width,
+                                   unsigned short sending_height) const;
 
   /**
    * Function to deliver a capture video frame for encoding and transport
@@ -417,7 +420,8 @@ private:
   //Utility function to dump recv codec database
   void DumpCodecDB() const;
 
-  bool CopyCodecToDB(const VideoCodecConfig* codecInfo);
+  bool CodecsDifferent(const nsTArray<UniquePtr<VideoCodecConfig>>& a,
+                       const nsTArray<UniquePtr<VideoCodecConfig>>& b);
 
   // Video Latency Test averaging filter
   void VideoLatencyUpdate(uint64_t new_sample);
@@ -462,11 +466,11 @@ private:
   unsigned short mNumReceivingStreams;
   bool mVideoLatencyTestEnable;
   uint64_t mVideoLatencyAvg;
-  uint32_t mMinBitrate;
-  uint32_t mStartBitrate;
-  uint32_t mPrefMaxBitrate;
-  uint32_t mNegotiatedMaxBitrate;
-  uint32_t mMinBitrateEstimate;
+  int mMinBitrate;
+  int mStartBitrate;
+  int mPrefMaxBitrate;
+  int mNegotiatedMaxBitrate;
+  int mMinBitrateEstimate;
 
   bool mRtpStreamIdEnabled;
   uint8_t mRtpStreamIdExtId;

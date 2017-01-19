@@ -103,11 +103,11 @@ if (AppConstants.MOZ_CRASHREPORTER) {
 }
 
 XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
-  return Services.strings.createBundle('chrome://branding/locale/brand.properties');
+  return Services.strings.createBundle("chrome://branding/locale/brand.properties");
 });
 
 XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", function() {
-  return Services.strings.createBundle('chrome://browser/locale/browser.properties');
+  return Services.strings.createBundle("chrome://browser/locale/browser.properties");
 });
 
 // Seconds of idle before trying to create a bookmarks backup.
@@ -509,7 +509,7 @@ BrowserGlue.prototype = {
       let brandShortName = brandBundle.getString("brandShortName");
       let message = win.gNavigatorBundle.getFormattedString("addonwatch.slow", [addon.name, brandShortName]);
       let notificationBox = win.document.getElementById("global-notificationbox");
-      let notificationId = 'addon-slow:' + addonId;
+      let notificationId = "addon-slow:" + addonId;
       let notification = notificationBox.getNotificationWithValue(notificationId);
 
       // Monitor the response of users
@@ -1060,27 +1060,6 @@ BrowserGlue.prototype = {
     if (this._isPlacesDatabaseLocked) {
       this._showPlacesLockedNotificationBox();
     }
-
-    // For any add-ons that were installed disabled and can be enabled offer
-    // them to the user.
-    let win = RecentWindow.getMostRecentBrowserWindow();
-    AddonManager.getAllAddons(addons => {
-      for (let addon of addons) {
-        // If this add-on has already seen (or seen is undefined for non-XPI
-        // add-ons) then skip it.
-        if (addon.seen !== false) {
-          continue;
-        }
-
-        // If this add-on cannot be enabled (either already enabled or
-        // appDisabled) then skip it.
-        if (!(addon.permissions & AddonManager.PERM_CAN_ENABLE)) {
-          continue;
-        }
-
-        win.openUILinkIn("about:newaddon?id=" + addon.id, "tab");
-      }
-    });
 
     ExtensionsUI.init();
 

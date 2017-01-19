@@ -338,8 +338,9 @@ class HTMLInputElementState final : public nsISupports
           MOZ_ASSERT(mBlobImplsOrDirectoryPaths[i].mType == BlobImplOrDirectoryPath::eDirectoryPath);
 
           nsCOMPtr<nsIFile> file;
-          NS_ConvertUTF16toUTF8 path(mBlobImplsOrDirectoryPaths[i].mDirectoryPath);
-          nsresult rv = NS_NewNativeLocalFile(path, true, getter_AddRefs(file));
+          nsresult rv =
+            NS_NewLocalFile(mBlobImplsOrDirectoryPaths[i].mDirectoryPath,
+                            true, getter_AddRefs(file));
           if (NS_WARN_IF(NS_FAILED(rv))) {
             continue;
           }
@@ -486,8 +487,7 @@ LastUsedDirectory(const OwningFileOrDirectory& aData)
     }
 
     nsCOMPtr<nsIFile> localFile;
-    nsresult rv = NS_NewNativeLocalFile(NS_ConvertUTF16toUTF8(path), true,
-                                        getter_AddRefs(localFile));
+    nsresult rv = NS_NewLocalFile(path, true, getter_AddRefs(localFile));
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return nullptr;
     }
@@ -1772,14 +1772,23 @@ HTMLInputElement::GetValueInternal(nsAString& aValue,
 
   if (aCallerType == CallerType::System) {
     aValue.Assign(mFirstFilePath);
-  } else {
-    // Just return the leaf name
-    if (mFilesOrDirectories.IsEmpty()) {
-      aValue.Truncate();
-    } else {
-      GetDOMFileOrDirectoryName(mFilesOrDirectories[0], aValue);
-    }
+    return;
   }
+
+  if (mFilesOrDirectories.IsEmpty()) {
+    aValue.Truncate();
+    return;
+  }
+
+  nsAutoString file;
+  GetDOMFileOrDirectoryName(mFilesOrDirectories[0], file);
+  if (file.IsEmpty()) {
+    aValue.Truncate();
+    return;
+  }
+
+  aValue.AssignLiteral("C:\\fakepath\\");
+  aValue.Append(file);
 }
 
 void
@@ -2684,8 +2693,7 @@ HTMLInputElement::MozSetDirectory(const nsAString& aDirectoryPath,
                                   ErrorResult& aRv)
 {
   nsCOMPtr<nsIFile> file;
-  NS_ConvertUTF16toUTF8 path(aDirectoryPath);
-  aRv = NS_NewNativeLocalFile(path, true, getter_AddRefs(file));
+  aRv = NS_NewLocalFile(aDirectoryPath, true, getter_AddRefs(file));
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }

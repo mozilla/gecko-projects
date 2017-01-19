@@ -8,7 +8,6 @@
 
 #include "GMPProcessParent.h"
 #include "GMPServiceParent.h"
-#include "GMPAudioDecoderParent.h"
 #include "GMPDecryptorParent.h"
 #include "GMPVideoDecoderParent.h"
 #include "GMPVideoEncoderParent.h"
@@ -183,9 +182,6 @@ private:
   PGMPTimerParent* AllocPGMPTimerParent() override;
   bool DeallocPGMPTimerParent(PGMPTimerParent* aActor) override;
 
-  mozilla::ipc::IPCResult RecvAsyncShutdownComplete() override;
-  mozilla::ipc::IPCResult RecvAsyncShutdownRequired() override;
-
   mozilla::ipc::IPCResult RecvPGMPContentChildDestroyed() override;
   bool IsUsed()
   {
@@ -195,9 +191,6 @@ private:
 
   void ResolveGetContentParentPromises();
   void RejectGetContentParentPromises();
-
-  static void AbortWaitingForGMPAsyncShutdown(nsITimer* aTimer, void* aClosure);
-  nsresult EnsureAsyncShutdownTimeoutSet();
 
   GMPState mState;
   nsCOMPtr<nsIFile> mDirectory; // plugin directory on disk
@@ -221,7 +214,6 @@ private:
   nsTArray<RefPtr<GMPTimerParent>> mTimers;
   nsTArray<RefPtr<GMPStorageParent>> mStorage;
   nsCOMPtr<nsIThread> mGMPThread;
-  nsCOMPtr<nsITimer> mAsyncShutdownTimeout; // GMP Thread only.
   // NodeId the plugin is assigned to, or empty if the the plugin is not
   // assigned to a NodeId.
   nsCString mNodeId;
@@ -230,9 +222,6 @@ private:
   RefPtr<GMPContentParent> mGMPContentParent;
   nsTArray<UniquePtr<MozPromiseHolder<GetGMPContentParentPromise>>> mGetContentParentPromises;
   uint32_t mGMPContentChildCount;
-
-  bool mAsyncShutdownRequired;
-  bool mAsyncShutdownInProgress;
 
   int mChildPid;
 

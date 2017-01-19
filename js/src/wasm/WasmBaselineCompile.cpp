@@ -123,31 +123,14 @@ namespace wasm {
 using namespace js::jit;
 using JS::GenericNaN;
 
-struct BaseCompilePolicy : OpIterPolicy
-{
-    static const bool Output = true;
-
-    // The baseline compiler tracks values on a stack of its own -- it
-    // needs to scan that stack for spilling -- and thus has no need
-    // for the values maintained by the iterator.
-    //
-    // The baseline compiler tracks control items on a stack of its
-    // own as well.
-    //
-    // TODO / REDUNDANT (Bug 1316814): It would be nice if we could
-    // make use of the iterator's ControlItems and not require our own
-    // stack for that.
-};
-
-typedef OpIter<BaseCompilePolicy> BaseOpIter;
-
-typedef bool IsUnsigned;
-typedef bool IsSigned;
-typedef bool ZeroOnOverflow;
-typedef bool IsKnownNotZero;
 typedef bool HandleNaNSpecially;
-typedef bool PopStack;
 typedef bool InvertBranch;
+typedef bool IsKnownNotZero;
+typedef bool IsSigned;
+typedef bool IsUnsigned;
+typedef bool PopStack;
+typedef bool ZeroOnOverflow;
+
 typedef unsigned ByteSize;
 typedef unsigned BitSize;
 
@@ -288,26 +271,7 @@ class BaseCompiler
     };
 #endif
 
-    // A Label in the code, allocated out of a temp pool in the
-    // TempAllocator attached to the compilation.
-
-    struct PooledLabel : public Label, public TempObject, public InlineListNode<PooledLabel>
-    {
-        PooledLabel() : f(nullptr) {}
-        explicit PooledLabel(BaseCompiler* f) : f(f) {}
-        BaseCompiler* f;
-    };
-
-    typedef Vector<PooledLabel*, 8, SystemAllocPolicy> LabelVector;
-
-    struct UniquePooledLabelFreePolicy
-    {
-        void operator()(PooledLabel* p) {
-            p->f->freeLabel(p);
-        }
-    };
-
-    typedef UniquePtr<PooledLabel, UniquePooledLabelFreePolicy> UniquePooledLabel;
+    typedef Vector<NonAssertingLabel, 8, SystemAllocPolicy> LabelVector;
 
     // The strongly typed register wrappers have saved my bacon a few
     // times; though they are largely redundant they stay, for now.
@@ -411,22 +375,35 @@ class BaseCompiler
 
     struct Control
     {
-        Control(uint32_t framePushed, uint32_t stackSize)
-            : label(nullptr),
-              otherLabel(nullptr),
-              framePushed(framePushed),
-              stackSize(stackSize),
+        Control()
+            : framePushed(UINT32_MAX),
+              stackSize(UINT32_MAX),
               deadOnArrival(false),
               deadThenBranch(false)
         {}
 
-        PooledLabel* label;
-        PooledLabel* otherLabel;        // Used for the "else" branch of if-then-else
+        NonAssertingLabel label;        // The "exit" label
+        NonAssertingLabel otherLabel;   // Used for the "else" branch of if-then-else
         uint32_t framePushed;           // From masm
         uint32_t stackSize;             // Value stack height
         bool deadOnArrival;             // deadCode_ was set on entry to the region
         bool deadThenBranch;            // deadCode_ was set on exit from "then"
     };
+
+    struct BaseCompilePolicy : OpIterPolicy
+    {
+        static const bool Output = true;
+
+        // The baseline compiler tracks values on a stack of its own -- it
+        // needs to scan that stack for spilling -- and thus has no need
+        // for the values maintained by the iterator.
+
+        // The baseline compiler uses the iterator's control stack, attaching
+        // its own control information.
+        typedef Control ControlItem;
+    };
+
+    typedef OpIter<BaseCompilePolicy> BaseOpIter;
 
     // Volatile registers except ReturnReg.
 
@@ -536,8 +513,6 @@ class BaseCompiler
     bool                        scratchRegisterTaken_;
 #endif
 
-    TempObjectPool<PooledLabel> labelPool_;
-
     Vector<Local, 8, SystemAllocPolicy> localInfo_;
     Vector<OutOfLineCode*, 8, SystemAllocPolicy> outOfLine_;
 
@@ -575,7 +550,7 @@ class BaseCompiler
     RegF32 joinRegF32;
     RegF64 joinRegF64;
 
-    // More members: see the stk_ and ctl_ vectors, defined below.
+    // There are more members scattered throughout.
 
   public:
     BaseCompiler(const ModuleEnvironment& env,
@@ -1716,6 +1691,22 @@ class BaseCompiler
         return true;
     }
 
+    MOZ_MUST_USE bool peekConstI32(int32_t* c) {
+        Stk& v = stk_.back();
+        if (v.kind() != Stk::ConstI32)
+            return false;
+        *c = v.i32val();
+        return true;
+    }
+
+    MOZ_MUST_USE bool peekConstI64(int64_t* c) {
+        Stk& v = stk_.back();
+        if (v.kind() != Stk::ConstI64)
+            return false;
+        *c = v.i64val();
+        return true;
+    }
+
     MOZ_MUST_USE bool popConstPositivePowerOfTwoI32(int32_t& c,
                                                     uint_fast8_t& power,
                                                     int32_t cutoff)
@@ -2040,48 +2031,31 @@ class BaseCompiler
     //
     // Control stack
 
-    Vector<Control, 8, SystemAllocPolicy> ctl_;
-
-    MOZ_MUST_USE bool pushControl(UniquePooledLabel* label, UniquePooledLabel* otherLabel = nullptr)
+    void initControl(Control& item)
     {
-        uint32_t framePushed = masm.framePushed();
-        uint32_t stackSize = stk_.length();
+        // Make sure the constructor was run properly
+        MOZ_ASSERT(item.framePushed == UINT32_MAX && item.stackSize == UINT32_MAX);
 
-        if (!ctl_.emplaceBack(Control(framePushed, stackSize)))
-            return false;
-        ctl_.back().label = label->release();
-        if (otherLabel)
-            ctl_.back().otherLabel = otherLabel->release();
-        ctl_.back().deadOnArrival = deadCode_;
-        return true;
+        item.framePushed = masm.framePushed();
+        item.stackSize = stk_.length();
+        item.deadOnArrival = deadCode_;
     }
 
-    void popControl() {
-        Control last = ctl_.popCopy();
-        if (last.label)
-            freeLabel(last.label);
-        if (last.otherLabel)
-            freeLabel(last.otherLabel);
+    Control& controlItem() {
+        return iter_.controlItem();
     }
 
     Control& controlItem(uint32_t relativeDepth) {
-        return ctl_[ctl_.length() - 1 - relativeDepth];
+        return iter_.controlItem(relativeDepth);
     }
 
-    MOZ_MUST_USE PooledLabel* newLabel() {
-        // TODO / INVESTIGATE (Bug 1316819): allocate() is fallible, but we can
-        // probably rely on an infallible allocator here.  That would simplify
-        // code later.
-        PooledLabel* candidate = labelPool_.allocate();
-        if (!candidate)
-            return nullptr;
-        return new (candidate) PooledLabel(this);
+    Control& controlOutermost() {
+        return iter_.controlOutermost();
     }
 
-    void freeLabel(PooledLabel* label) {
-        label->~PooledLabel();
-        labelPool_.free(label);
-    }
+    ////////////////////////////////////////////////////////////
+    //
+    // Labels
 
     void insertBreakablePoint(CallSiteDesc::Kind kind) {
         const uint32_t offset = iter_.currentOffset();
@@ -2574,7 +2548,7 @@ class BaseCompiler
         for (uint32_t i = 0; i < labels.length(); i++) {
             CodeLabel cl;
             masm.writeCodePointer(cl.patchAt());
-            cl.target()->bind(labels[i]->offset());
+            cl.target()->bind(labels[i].offset());
             masm.addCodeLabel(cl);
         }
 #else
@@ -2680,7 +2654,7 @@ class BaseCompiler
 
     void returnCleanup(bool popStack) {
         if (popStack)
-            popStackBeforeBranch(ctl_[0].framePushed);
+            popStackBeforeBranch(controlOutermost().framePushed);
         masm.jump(&returnLabel_);
     }
 
@@ -2758,12 +2732,15 @@ class BaseCompiler
     }
 
 #ifndef INT_DIV_I64_CALLOUT
-    void quotientI64(RegI64 rhs, RegI64 srcDest, IsUnsigned isUnsigned) {
+    void quotientI64(RegI64 rhs, RegI64 srcDest, IsUnsigned isUnsigned,
+                     bool isConst, int64_t c)
+    {
         Label done;
 
-        checkDivideByZeroI64(rhs);
+        if (!isConst || c == 0)
+            checkDivideByZeroI64(rhs);
 
-        if (!isUnsigned)
+        if (!isUnsigned && (!isConst || c == -1))
             checkDivideSignedOverflowI64(rhs, srcDest, &done, ZeroOnOverflow(false));
 
 # if defined(JS_CODEGEN_X64)
@@ -2783,12 +2760,15 @@ class BaseCompiler
         masm.bind(&done);
     }
 
-    void remainderI64(RegI64 rhs, RegI64 srcDest, IsUnsigned isUnsigned) {
+    void remainderI64(RegI64 rhs, RegI64 srcDest, IsUnsigned isUnsigned,
+                      bool isConst, int64_t c)
+    {
         Label done;
 
-        checkDivideByZeroI64(rhs);
+        if (!isConst || c == 0)
+            checkDivideByZeroI64(rhs);
 
-        if (!isUnsigned)
+        if (!isUnsigned && (!isConst || c == -1))
             checkDivideSignedOverflowI64(rhs, srcDest, &done, ZeroOnOverflow(true));
 
 # if defined(JS_CODEGEN_X64)
@@ -4184,12 +4164,15 @@ BaseCompiler::emitQuotientI32()
             pushI32(r);
         }
     } else {
+        bool isConst = peekConstI32(&c);
         RegI32 r0, r1;
         pop2xI32ForIntMulDiv(&r0, &r1);
 
         Label done;
-        checkDivideByZeroI32(r1, r0, &done);
-        checkDivideSignedOverflowI32(r1, r0, &done, ZeroOnOverflow(false));
+        if (!isConst || c == 0)
+            checkDivideByZeroI32(r1, r0, &done);
+        if (!isConst || c == -1)
+            checkDivideSignedOverflowI32(r1, r0, &done, ZeroOnOverflow(false));
         masm.quotient32(r1, r0, IsUnsigned(false));
         masm.bind(&done);
 
@@ -4210,11 +4193,13 @@ BaseCompiler::emitQuotientU32()
             pushI32(r);
         }
     } else {
+        bool isConst = peekConstI32(&c);
         RegI32 r0, r1;
         pop2xI32ForIntMulDiv(&r0, &r1);
 
         Label done;
-        checkDivideByZeroI32(r1, r0, &done);
+        if (!isConst || c == 0)
+            checkDivideByZeroI32(r1, r0, &done);
         masm.quotient32(r1, r0, IsUnsigned(true));
         masm.bind(&done);
 
@@ -4245,12 +4230,15 @@ BaseCompiler::emitRemainderI32()
 
         pushI32(r);
     } else {
+        bool isConst = peekConstI32(&c);
         RegI32 r0, r1;
         pop2xI32ForIntMulDiv(&r0, &r1);
 
         Label done;
-        checkDivideByZeroI32(r1, r0, &done);
-        checkDivideSignedOverflowI32(r1, r0, &done, ZeroOnOverflow(true));
+        if (!isConst || c == 0)
+            checkDivideByZeroI32(r1, r0, &done);
+        if (!isConst || c == -1)
+            checkDivideSignedOverflowI32(r1, r0, &done, ZeroOnOverflow(true));
         masm.remainder32(r1, r0, IsUnsigned(false));
         masm.bind(&done);
 
@@ -4269,11 +4257,13 @@ BaseCompiler::emitRemainderU32()
         masm.and32(Imm32(c-1), r);
         pushI32(r);
     } else {
+        bool isConst = peekConstI32(&c);
         RegI32 r0, r1;
         pop2xI32ForIntMulDiv(&r0, &r1);
 
         Label done;
-        checkDivideByZeroI32(r1, r0, &done);
+        if (!isConst || c == 0)
+            checkDivideByZeroI32(r1, r0, &done);
         masm.remainder32(r1, r0, IsUnsigned(true));
         masm.bind(&done);
 
@@ -4302,9 +4292,10 @@ BaseCompiler::emitQuotientI64()
             pushI64(r);
         }
     } else {
+        bool isConst = peekConstI64(&c);
         RegI64 r0, r1;
         pop2xI64ForIntDiv(&r0, &r1);
-        quotientI64(r1, r0, IsUnsigned(false));
+        quotientI64(r1, r0, IsUnsigned(false), isConst, c);
         freeI64(r1);
         pushI64(r0);
     }
@@ -4326,9 +4317,10 @@ BaseCompiler::emitQuotientU64()
             pushI64(r);
         }
     } else {
+        bool isConst = peekConstI64(&c);
         RegI64 r0, r1;
         pop2xI64ForIntDiv(&r0, &r1);
-        quotientI64(r1, r0, IsUnsigned(true));
+        quotientI64(r1, r0, IsUnsigned(true), isConst, c);
         freeI64(r1);
         pushI64(r0);
     }
@@ -4361,9 +4353,10 @@ BaseCompiler::emitRemainderI64()
 
         pushI64(r);
     } else {
+        bool isConst = peekConstI64(&c);
         RegI64 r0, r1;
         pop2xI64ForIntDiv(&r0, &r1);
-        remainderI64(r1, r0, IsUnsigned(false));
+        remainderI64(r1, r0, IsUnsigned(false), isConst, c);
         freeI64(r1);
         pushI64(r0);
     }
@@ -4383,9 +4376,10 @@ BaseCompiler::emitRemainderU64()
         masm.and64(Imm64(c-1), r);
         pushI64(r);
     } else {
+        bool isConst = peekConstI64(&c);
         RegI64 r0, r1;
         pop2xI64ForIntDiv(&r0, &r1);
-        remainderI64(r1, r0, IsUnsigned(true));
+        remainderI64(r1, r0, IsUnsigned(true), isConst, c);
         freeI64(r1);
         pushI64(r0);
     }
@@ -5423,20 +5417,18 @@ BaseCompiler::emitBlock()
     if (!iter_.readBlock())
         return false;
 
-    UniquePooledLabel blockEnd(newLabel());
-    if (!blockEnd)
-        return false;
-
     if (!deadCode_)
         sync();                    // Simplifies branching out from block
 
-    return pushControl(&blockEnd);
+    initControl(controlItem());
+
+    return true;
 }
 
 void
 BaseCompiler::endBlock(ExprType type)
 {
-    Control& block = controlItem(0);
+    Control& block = controlItem();
 
     // Save the value.
     AnyReg r;
@@ -5448,16 +5440,14 @@ BaseCompiler::endBlock(ExprType type)
     popValueStackTo(block.stackSize);
 
     // Bind after cleanup: branches out will have popped the stack.
-    if (block.label->used()) {
-        masm.bind(block.label);
+    if (block.label.used()) {
+        masm.bind(&block.label);
         // No value was provided by the fallthrough but the branch out will
         // have stored one in joinReg, so capture that.
         if (deadCode_)
             r = captureJoinRegUnlessVoid(type);
         deadCode_ = false;
     }
-
-    popControl();
 
     // Retain the value stored in joinReg by all paths, if there are any.
     if (!deadCode_)
@@ -5470,18 +5460,13 @@ BaseCompiler::emitLoop()
     if (!iter_.readLoop())
         return false;
 
-    UniquePooledLabel blockCont(newLabel());
-    if (!blockCont)
-        return false;
-
     if (!deadCode_)
         sync();                    // Simplifies branching out from block
 
-    if (!pushControl(&blockCont))
-        return false;
+    initControl(controlItem());
 
     if (!deadCode_) {
-        masm.bind(controlItem(0).label);
+        masm.bind(&controlItem(0).label);
         addInterruptCheck();
     }
 
@@ -5491,7 +5476,7 @@ BaseCompiler::emitLoop()
 void
 BaseCompiler::endLoop(ExprType type)
 {
-    Control& block = controlItem(0);
+    Control& block = controlItem();
 
     AnyReg r;
     if (!deadCode_)
@@ -5499,8 +5484,6 @@ BaseCompiler::endLoop(ExprType type)
 
     popStackOnBlockExit(block.framePushed);
     popValueStackTo(block.stackSize);
-
-    popControl();
 
     // Retain the value stored in joinReg by all paths.
     if (!deadCode_)
@@ -5528,15 +5511,7 @@ BaseCompiler::emitIf()
     if (!iter_.readIf(&unused_cond))
         return false;
 
-    UniquePooledLabel endLabel(newLabel());
-    if (!endLabel)
-        return false;
-
-    UniquePooledLabel elseLabel(newLabel());
-    if (!elseLabel)
-        return false;
-
-    BranchState b(elseLabel.get(), BranchState::NoPop, InvertBranch(true));
+    BranchState b(&controlItem().otherLabel, BranchState::NoPop, InvertBranch(true));
     if (!deadCode_) {
         emitBranchSetup(&b);
         sync();
@@ -5544,8 +5519,7 @@ BaseCompiler::emitIf()
         resetLatentOp();
     }
 
-    if (!pushControl(&endLabel, &elseLabel))
-        return false;
+    initControl(controlItem());
 
     if (!deadCode_)
         emitBranchPerform(&b);
@@ -5556,20 +5530,18 @@ BaseCompiler::emitIf()
 void
 BaseCompiler::endIfThen()
 {
-    Control& ifThen = controlItem(0);
+    Control& ifThen = controlItem();
 
     popStackOnBlockExit(ifThen.framePushed);
     popValueStackTo(ifThen.stackSize);
 
-    if (ifThen.otherLabel->used())
-        masm.bind(ifThen.otherLabel);
+    if (ifThen.otherLabel.used())
+        masm.bind(&ifThen.otherLabel);
 
-    if (ifThen.label->used())
-        masm.bind(ifThen.label);
+    if (ifThen.label.used())
+        masm.bind(&ifThen.label);
 
     deadCode_ = ifThen.deadOnArrival;
-
-    popControl();
 }
 
 bool
@@ -5577,6 +5549,7 @@ BaseCompiler::emitElse()
 {
     ExprType thenType;
     Nothing unused_thenValue;
+
     if (!iter_.readElse(&thenType, &unused_thenValue))
         return false;
 
@@ -5596,10 +5569,10 @@ BaseCompiler::emitElse()
     popValueStackTo(ifThenElse.stackSize);
 
     if (!deadCode_)
-        masm.jump(ifThenElse.label);
+        masm.jump(&ifThenElse.label);
 
-    if (ifThenElse.otherLabel->used())
-        masm.bind(ifThenElse.otherLabel);
+    if (ifThenElse.otherLabel.used())
+        masm.bind(&ifThenElse.otherLabel);
 
     // Reset to the "else" branch.
 
@@ -5614,7 +5587,7 @@ BaseCompiler::emitElse()
 void
 BaseCompiler::endIfThenElse(ExprType type)
 {
-    Control& ifThenElse = controlItem(0);
+    Control& ifThenElse = controlItem();
 
     // The expression type is not a reliable guide to what we'll find
     // on the stack, we could have (if E (i32.const 1) (unreachable))
@@ -5630,11 +5603,11 @@ BaseCompiler::endIfThenElse(ExprType type)
     popStackOnBlockExit(ifThenElse.framePushed);
     popValueStackTo(ifThenElse.stackSize);
 
-    if (ifThenElse.label->used())
-        masm.bind(ifThenElse.label);
+    if (ifThenElse.label.used())
+        masm.bind(&ifThenElse.label);
 
     bool joinLive = !ifThenElse.deadOnArrival &&
-                    (!ifThenElse.deadThenBranch || !deadCode_ || ifThenElse.label->bound());
+                    (!ifThenElse.deadThenBranch || !deadCode_ || ifThenElse.label.bound());
 
     if (joinLive) {
         // No value was provided by the "then" path but capture the one
@@ -5643,8 +5616,6 @@ BaseCompiler::endIfThenElse(ExprType type)
             r = captureJoinRegUnlessVoid(type);
         deadCode_ = false;
     }
-
-    popControl();
 
     if (!deadCode_)
         pushJoinRegUnlessVoid(r);
@@ -5656,6 +5627,7 @@ BaseCompiler::emitEnd()
     LabelKind kind;
     ExprType type;
     Nothing unused_value;
+
     if (!iter_.readEnd(&kind, &type, &unused_value))
         return false;
 
@@ -5666,6 +5638,8 @@ BaseCompiler::emitEnd()
       case LabelKind::Then:  endIfThen(); break;
       case LabelKind::Else:  endIfThenElse(type); break;
     }
+
+    iter_.popEnd();
 
     return true;
 }
@@ -5690,7 +5664,7 @@ BaseCompiler::emitBr()
     AnyReg r = popJoinRegUnlessVoid(type);
 
     popStackBeforeBranch(target.framePushed);
-    masm.jump(target.label);
+    masm.jump(&target.label);
 
     // The register holding the join value is free for the remainder
     // of this block.
@@ -5718,7 +5692,7 @@ BaseCompiler::emitBrIf()
 
     Control& target = controlItem(relativeDepth);
 
-    BranchState b(target.label, target.framePushed, InvertBranch(false), type);
+    BranchState b(&target.label, target.framePushed, InvertBranch(false), type);
     emitBranchSetup(&b);
     emitBranchPerform(&b);
 
@@ -5772,7 +5746,7 @@ BaseCompiler::emitBrTable()
     // This is the out-of-range stub.  rc is dead here but we don't need it.
 
     popStackBeforeBranch(controlItem(defaultDepth).framePushed);
-    masm.jump(controlItem(defaultDepth).label);
+    masm.jump(&controlItem(defaultDepth).label);
 
     // Emit stubs.  rc is dead in all of these but we don't need it.
     //
@@ -5783,15 +5757,11 @@ BaseCompiler::emitBrTable()
     // can, don't emit an intermediate stub.
 
     for (uint32_t i = 0; i < tableLength; i++) {
-        PooledLabel* stubLabel = newLabel();
-        if (!stubLabel)
-            return false;
-
-        stubs.infallibleAppend(stubLabel);
-        masm.bind(stubLabel);
+        stubs.infallibleEmplaceBack(NonAssertingLabel());
+        masm.bind(&stubs.back());
         uint32_t k = depths[i];
         popStackBeforeBranch(controlItem(k).framePushed);
-        masm.jump(controlItem(k).label);
+        masm.jump(&controlItem(k).label);
     }
 
     // Emit table.
@@ -5809,9 +5779,6 @@ BaseCompiler::emitBrTable()
 
     freeI32(rc);
     freeJoinRegUnlessVoid(r);
-
-    for (uint32_t i = 0; i < tableLength; i++)
-        freeLabel(stubs[i]);
 
     return true;
 }
@@ -7628,14 +7595,6 @@ done:
 bool
 BaseCompiler::emitFunction()
 {
-    // emitBody() will ensure that there is enough memory reserved in the
-    // vector for infallible allocation to succeed within the compiler, but we
-    // need a little headroom for the initial pushControl(), which pushes a
-    // void value onto the value stack.
-
-    if (!stk_.reserve(8))
-        return false;
-
     const Sig& sig = func_.sig();
 
     if (!iter_.readFunctionStart(sig.ret()))
@@ -7643,13 +7602,7 @@ BaseCompiler::emitFunction()
 
     beginFunction();
 
-    UniquePooledLabel functionEnd(newLabel());
-    if (!functionEnd)
-        return false;
-
-    // For the function's block; it will be popped by endBlock().
-    if (!pushControl(&functionEnd))
-        return false;
+    initControl(controlItem());
 
     if (!emitBody())
         return false;
@@ -7738,8 +7691,6 @@ BaseCompiler::BaseCompiler(const ModuleEnvironment& env,
     availGPR_.take(HeapReg);
     availGPR_.take(GlobalReg);
 #endif
-
-    labelPool_.setAllocator(alloc_);
 }
 
 bool
@@ -7866,7 +7817,7 @@ LiveRegisterSet BaseCompiler::VolatileReturnGPR = volatileReturnGPR();
 } // js
 
 bool
-js::wasm::BaselineCanCompile(const FunctionGenerator* fg)
+js::wasm::BaselineCanCompile()
 {
     // On all platforms we require signals for AsmJS/Wasm.
     // If we made it this far we must have signals.
@@ -7884,12 +7835,6 @@ js::wasm::BaselineCanCompile(const FunctionGenerator* fg)
 #endif
 
 #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_ARM)
-    // AsmJS code may use SIMD or atomics, which Baseline doesn't currently
-    // handle. Since we haven't yet validated the function, we don't know
-    // whether it actually uses those features. Assume the worst.
-    if (fg->isAsmJS())
-        return false;
-
     return true;
 #else
     return false;
@@ -7899,7 +7844,7 @@ js::wasm::BaselineCanCompile(const FunctionGenerator* fg)
 bool
 js::wasm::BaselineCompileFunction(CompileTask* task, FuncCompileUnit* unit, UniqueChars *error)
 {
-    MOZ_ASSERT(unit->mode() == CompileMode::Baseline);
+    MOZ_ASSERT(task->mode() == CompileMode::Baseline);
 
     const FuncBytes& func = unit->func();
     uint32_t bodySize = func.bytes().length();

@@ -4253,7 +4253,9 @@ class CastableObjectUnwrapper():
                 // that already has a content reflection...
                 if (!IsDOMObject(js::UncheckedUnwrap(${source}))) {
                   nsCOMPtr<nsIGlobalObject> contentGlobal;
-                  if (!GetContentGlobalForJSImplementedObject(cx, Callback(), getter_AddRefs(contentGlobal))) {
+                  JS::Handle<JSObject*> callback = CallbackOrNull();
+                  if (!callback ||
+                      !GetContentGlobalForJSImplementedObject(cx, callback, getter_AddRefs(contentGlobal))) {
                     $*{exceptionCode}
                   }
                   JS::Rooted<JSObject*> jsImplSourceObj(cx, ${source});
@@ -7081,7 +7083,8 @@ class CGCallGenerator(CGThing):
         if needsCallerType:
             args.append(CGGeneric(callerTypeGetterForDescriptor(descriptor)))
 
-        if isFallible:
+        canOOM = "canOOM" in extendedAttributes
+        if isFallible or canOOM:
             args.append(CGGeneric("rv"))
         args.extend(CGGeneric(arg) for arg in argsPost)
 
@@ -7147,8 +7150,12 @@ class CGCallGenerator(CGThing):
                     """,
                     getPrincipal=getPrincipal)))
 
-        if isFallible:
-            self.cgRoot.prepend(CGGeneric("binding_detail::FastErrorResult rv;\n"))
+        if isFallible or canOOM:
+            if isFallible:
+                reporterClass = "binding_detail::FastErrorResult"
+            else:
+                reporterClass = "binding_danger::OOMReporterInstantiator"
+            self.cgRoot.prepend(CGGeneric("%s rv;\n" % reporterClass))
             self.cgRoot.append(CGGeneric(dedent(
                 """
                 if (MOZ_UNLIKELY(rv.MaybeSetPendingException(cx))) {
@@ -8931,9 +8938,10 @@ class CGSpecializedGetter(CGAbstractStaticMethod):
         nativeName = MakeNativeName(descriptor.binaryNameFor(name))
         _, resultOutParam, _, _, _ = getRetvalDeclarationForType(attr.type,
                                                                  descriptor)
-        infallible = ('infallible' in
-                      descriptor.getExtendedAttributes(attr, getter=True))
-        if resultOutParam or attr.type.nullable() or not infallible:
+        extendedAttrs = descriptor.getExtendedAttributes(attr, getter=True)
+        canFail = ('infallible' not in extendedAttrs or
+                   'canOOM' in extendedAttrs)
+        if resultOutParam or attr.type.nullable() or canFail:
             nativeName = "Get" + nativeName
         return nativeName
 
@@ -9231,13 +9239,26 @@ class CGMemberJITInfo(CGThing):
             # while we have the right type.
             getter = ("(JSJitGetterOp)get_%s" %
                       IDLToCIdentifier(self.member.identifier.name))
-            getterinfal = "infallible" in self.descriptor.getExtendedAttributes(self.member, getter=True)
+            extendedAttrs = self.descriptor.getExtendedAttributes(self.member, getter=True)
+            getterinfal = "infallible" in extendedAttrs
 
+            # At this point getterinfal is true if our getter either can't throw
+            # at all, or can only throw OOM.  In both cases, it's safe to move,
+            # or dead-code-eliminate, the getter, because throwing OOM is not
+            # semantically meaningful, so code can't rely on it happening.  Note
+            # that this makes the behavior consistent for OOM thrown from the
+            # getter itself and OOM thrown from the to-JS conversion of the
+            # return value (see the "canOOM" and "infallibleForMember" checks
+            # below).
             movable = self.mayBeMovable() and getterinfal
             eliminatable = self.mayBeEliminatable() and getterinfal
             aliasSet = self.aliasSet()
 
-            getterinfal = getterinfal and infallibleForMember(self.member, self.member.type, self.descriptor)
+            # Now we have to set getterinfal to whether we can _really_ ever
+            # throw, from the point of view of the JS engine.
+            getterinfal = (getterinfal and
+                           "canOOM" not in extendedAttrs and
+                           infallibleForMember(self.member, self.member.type, self.descriptor))
             isAlwaysInSlot = self.member.getExtendedAttribute("StoreInSlot")
             if self.member.slotIndices is not None:
                 assert isAlwaysInSlot or self.member.getExtendedAttribute("Cached")
@@ -9300,7 +9321,16 @@ class CGMemberJITInfo(CGThing):
                 # argument conversions, since argument conversions that can
                 # reliably throw would be effectful anyway and the jit doesn't
                 # move effectful things.
-                hasInfallibleImpl = "infallible" in self.descriptor.getExtendedAttributes(self.member)
+                extendedAttrs = self.descriptor.getExtendedAttributes(self.member)
+                hasInfallibleImpl = "infallible" in extendedAttrs
+                # At this point hasInfallibleImpl is true if our method either
+                # can't throw at all, or can only throw OOM.  In both cases, it
+                # may be safe to move, or dead-code-eliminate, the method,
+                # because throwing OOM is not semantically meaningful, so code
+                # can't rely on it happening.  Note that this makes the behavior
+                # consistent for OOM thrown from the method itself and OOM
+                # thrown from the to-JS conversion of the return value (see the
+                # "canOOM" and "infallibleForMember" checks below).
                 movable = self.mayBeMovable() and hasInfallibleImpl
                 eliminatable = self.mayBeEliminatable() and hasInfallibleImpl
                 # XXXbz can we move the smarts about fallibility due to arg
@@ -9310,7 +9340,8 @@ class CGMemberJITInfo(CGThing):
                     # We have arguments or our return-value boxing can fail
                     methodInfal = False
                 else:
-                    methodInfal = hasInfallibleImpl
+                    methodInfal = (hasInfallibleImpl and
+                                   "canOOM" not in extendedAttrs)
                 # For now, only bother to output args if we're side-effect-free.
                 if self.member.affects == "Nothing":
                     args = sig[1]
@@ -14182,10 +14213,13 @@ class CGNativeMember(ClassMethod):
         # And the caller type, if desired.
         if needsCallerType(self.member):
             args.append(Argument("CallerType", "aCallerType"))
-        # And the ErrorResult
+        # And the ErrorResult or OOMReporter
         if 'infallible' not in self.extendedAttrs:
             # Use aRv so it won't conflict with local vars named "rv"
             args.append(Argument("ErrorResult&", "aRv"))
+        elif 'canOOM' in self.extendedAttrs:
+            args.append(Argument("OOMReporter&", "aRv"))
+
         # The legacycaller thisval
         if self.member.isMethod() and self.member.isLegacycaller():
             # If it has an identifier, we can't deal with it yet
@@ -15089,11 +15123,11 @@ class CGJSImplClass(CGBindingImplClass):
             }
 
             // Now define it on our chrome object
-            JSAutoCompartment ac(aCx, mImpl->Callback());
+            JSAutoCompartment ac(aCx, mImpl->CallbackOrNull());
             if (!JS_WrapObject(aCx, &obj)) {
               return nullptr;
             }
-            if (!JS_DefineProperty(aCx, mImpl->Callback(), "__DOM_IMPL__", obj, 0)) {
+            if (!JS_DefineProperty(aCx, mImpl->CallbackOrNull(), "__DOM_IMPL__", obj, 0)) {
               return nullptr;
             }
             return obj;
@@ -16868,6 +16902,8 @@ class CGEventGetter(CGNativeMember):
     def getArgs(self, returnType, argList):
         if 'infallible' not in self.extendedAttrs:
             raise TypeError("Event code generator does not support [Throws]!")
+        if 'canOOM' in self.extendedAttrs:
+            raise TypeError("Event code generator does not support [CanOOM]!")
         if not self.member.isAttr():
             raise TypeError("Event code generator does not support methods")
         if self.member.isStatic():

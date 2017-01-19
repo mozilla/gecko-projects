@@ -13,6 +13,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "useRemoteWebExtensions",
                                       "extensions.webextensions.remote", false);
+XPCOMUtils.defineLazyModuleGetter(this, "Utils",
+                                  "resource://gre/modules/sessionstore/Utils.jsm");
 
 function getAboutModule(aURL) {
   // Needs to match NS_GetAboutModuleName
@@ -32,6 +34,7 @@ const NOT_REMOTE = null;
 // These must match any similar ones in ContentParent.h.
 const WEB_REMOTE_TYPE = "web";
 const FILE_REMOTE_TYPE = "file";
+const EXTENSION_REMOTE_TYPE = "extension";
 const DEFAULT_REMOTE_TYPE = WEB_REMOTE_TYPE;
 
 function validatedWebRemoteType(aPreferredRemoteType) {
@@ -44,6 +47,7 @@ this.E10SUtils = {
   NOT_REMOTE,
   WEB_REMOTE_TYPE,
   FILE_REMOTE_TYPE,
+  EXTENSION_REMOTE_TYPE,
 
   canLoadURIInProcess(aURL, aProcess) {
     let remoteType = aProcess == Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
@@ -131,7 +135,7 @@ this.E10SUtils = {
     }
 
     if (aURL.startsWith("moz-extension:")) {
-      return useRemoteWebExtensions ? WEB_REMOTE_TYPE : NOT_REMOTE;
+      return useRemoteWebExtensions ? EXTENSION_REMOTE_TYPE : NOT_REMOTE;
     }
 
     if (aURL.startsWith("view-source:")) {
@@ -163,7 +167,7 @@ this.E10SUtils = {
     return this.shouldLoadURIInThisProcess(aURI);
   },
 
-  redirectLoad(aDocShell, aURI, aReferrer, aFreshProcess) {
+  redirectLoad(aDocShell, aURI, aReferrer, aTriggeringPrincipal, aFreshProcess) {
     // Retarget the load to the correct process
     let messageManager = aDocShell.QueryInterface(Ci.nsIInterfaceRequestor)
                                   .getInterface(Ci.nsIContentFrameMessageManager);
@@ -174,6 +178,9 @@ this.E10SUtils = {
         uri: aURI.spec,
         flags: Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
         referrer: aReferrer ? aReferrer.spec : null,
+        triggeringPrincipal: aTriggeringPrincipal
+                             ? Utils.serializePrincipal(aTriggeringPrincipal)
+                             : null,
         reloadInFreshProcess: !!aFreshProcess,
       },
       historyIndex: sessionHistory.requestedIndex,

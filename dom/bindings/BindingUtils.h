@@ -1728,7 +1728,7 @@ template <class T>
 inline JSObject*
 GetCallbackFromCallbackObject(T* aObj)
 {
-  return aObj->Callback();
+  return aObj->CallbackOrNull();
 }
 
 // Helper for getting the callback JSObject* of a smart ptr around a
@@ -1851,16 +1851,6 @@ bool
 AppendNamedPropertyIds(JSContext* cx, JS::Handle<JSObject*> proxy,
                        nsTArray<nsString>& names,
                        bool shadowPrototypeProperties, JS::AutoIdVector& props);
-
-namespace binding_detail {
-
-class FastErrorResult :
-    public mozilla::binding_danger::TErrorResult<
-      mozilla::binding_danger::JustAssertCleanupPolicy>
-{
-};
-
-} // namespace binding_detail
 
 enum StringificationBehavior {
   eStringify,

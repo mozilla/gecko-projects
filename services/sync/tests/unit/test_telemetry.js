@@ -199,7 +199,7 @@ add_task(async function test_uploading() {
 add_task(async function test_upload_failed() {
   Service.identity.username = "foo";
   let collection = new ServerCollection();
-  collection._wbos.flying = new ServerWBO('flying');
+  collection._wbos.flying = new ServerWBO("flying");
 
   let server = sync_httpd_setup({
       "/1.1/foo/storage/rotary": collection.handler()
@@ -267,7 +267,7 @@ add_task(async function test_sync_partialUpload() {
 
   // Create a bunch of records (and server side handlers)
   for (let i = 0; i < 234; i++) {
-    let id = 'record-no-' + i;
+    let id = "record-no-" + i;
     engine._store.items[id] = "Record No. " + i;
     engine._tracker.addChangedID(id, i);
     // Let two items in the first upload batch fail.
@@ -668,6 +668,38 @@ add_task(async function test_invalid_events() {
     }
     await checkNotRecorded("object", "method", "value", badextra);
   } finally {
+    Service.engineManager.unregister(engine);
+    await cleanAndGo(engine, server);
+  }
+});
+
+add_task(async function test_no_ping_for_self_hosters() {
+  let telem = get_sync_test_telemetry();
+  let oldSubmit = telem.submit;
+
+  Service.engineManager.register(BogusEngine);
+  let engine = Service.engineManager.get("bogus");
+  engine.enabled = true;
+  let server = serverForUsers({"foo": "password"}, {
+    meta: {global: {engines: {bogus: {version: engine.version, syncID: engine.syncID}}}},
+    steam: {}
+  });
+
+  await SyncTestingInfrastructure(server);
+  try {
+    let submitPromise = new Promise(resolve => {
+      telem.submit = function() {
+        let result = oldSubmit.apply(this, arguments);
+        resolve(result);
+      };
+    });
+    Service.sync();
+    let pingSubmitted = await submitPromise;
+    // The Sync testing infrastructure already sets up a custom token server,
+    // so we don't need to do anything to simulate a self-hosted user.
+    ok(!pingSubmitted, "Should not submit ping with custom token server URL");
+  } finally {
+    telem.submit = oldSubmit;
     Service.engineManager.unregister(engine);
     await cleanAndGo(engine, server);
   }

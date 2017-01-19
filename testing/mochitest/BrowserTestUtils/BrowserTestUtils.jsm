@@ -738,11 +738,15 @@ this.BrowserTestUtils = {
    */
   synthesizeMouse(target, offsetX, offsetY, event, browser)
   {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       let mm = browser.messageManager;
       mm.addMessageListener("Test:SynthesizeMouseDone", function mouseMsg(message) {
         mm.removeMessageListener("Test:SynthesizeMouseDone", mouseMsg);
-        resolve(message.data.defaultPrevented);
+        if (message.data.hasOwnProperty("defaultPrevented")) {
+          resolve(message.data.defaultPrevented);
+        } else {
+          reject(new Error(message.data.error));
+        }
       });
 
       let cpowObject = null;
@@ -964,7 +968,7 @@ this.BrowserTestUtils = {
     if (shouldShowTabCrashPage) {
       expectedPromises.push(new Promise((resolve, reject) => {
         browser.addEventListener("AboutTabCrashedReady", function onCrash() {
-          browser.removeEventListener("AboutTabCrashedReady", onCrash, false);
+          browser.removeEventListener("AboutTabCrashedReady", onCrash);
           dump("\nabout:tabcrashed loaded and ready\n");
           resolve();
         }, false, true);

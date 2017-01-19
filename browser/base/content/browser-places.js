@@ -7,6 +7,7 @@ var StarUI = {
   uri: null,
   _batching: false,
   _isNewBookmark: false,
+  _isComposing: false,
   _autoCloseTimer: 0,
 
   _element(aID) {
@@ -20,11 +21,14 @@ var StarUI = {
     // initially the panel is hidden
     // to avoid impacting startup / new window performance
     element.hidden = false;
-    element.addEventListener("keypress", this, false);
-    element.addEventListener("mouseout", this, false);
-    element.addEventListener("mousemove", this, false);
-    element.addEventListener("popuphidden", this, false);
-    element.addEventListener("popupshown", this, false);
+    element.addEventListener("keypress", this);
+    element.addEventListener("mouseout", this);
+    element.addEventListener("mousemove", this);
+    element.addEventListener("compositionstart", this);
+    element.addEventListener("compositionend", this);
+    element.addEventListener("input", this);
+    element.addEventListener("popuphidden", this);
+    element.addEventListener("popupshown", this);
     return this.panel = element;
   },
 
@@ -135,6 +139,25 @@ var StarUI = {
             break;
         }
         break;
+      case "compositionstart":
+        if (aEvent.defaultPrevented) {
+          // If the composition was canceled, nothing to do here.
+          break;
+        }
+        // During composition, panel shouldn't be hidden automatically.
+        clearTimeout(this._autoCloseTimer);
+        this._isComposing = true;
+        break;
+      case "compositionend":
+        // After composition is committed, "mouseout" or something can set
+        // auto close timer.
+        this._isComposing = false;
+        break;
+      case "input":
+        // Might be edited some text without keyboard events nor composition
+        // events. Let's cancel auto close in such case.
+        clearTimeout(this._autoCloseTimer);
+        break;
       case "mouseout":
         // Explicit fall-through
       case "popupshown":
@@ -143,13 +166,14 @@ var StarUI = {
           break;
         }
         // auto-close if new and not interacted with
-        if (this._isNewBookmark) {
+        if (this._isNewBookmark && !this._isComposing) {
           // 3500ms matches the timeout that Pocket uses in
           // browser/extensions/pocket/content/panels/js/saved.js
           let delay = 3500;
           if (this._closePanelQuickForTesting) {
             delay /= 10;
           }
+          clearTimeout(this._autoCloseTimer);
           this._autoCloseTimer = setTimeout(() => {
             this.panel.hidePopup();
           }, delay);
@@ -1697,7 +1721,7 @@ var BookmarkingUI = {
       clearTimeout(this._notificationTimeout);
     }
 
-    if (this.notifier.style.transform == '') {
+    if (this.notifier.style.transform == "") {
       // Get all the relevant nodes and computed style objects
       let dropmarker = document.getAnonymousElementByAttribute(this.button, "anonid", "dropmarker");
       let dropmarkerIcon = document.getAnonymousElementByAttribute(dropmarker, "class", "dropmarker-icon");
@@ -1742,8 +1766,8 @@ var BookmarkingUI = {
       this.dropmarkerNotifier.removeAttribute("notification");
       this.button.removeAttribute("notification");
 
-      this.dropmarkerNotifier.style.transform = '';
-      this.notifier.style.transform = '';
+      this.dropmarkerNotifier.style.transform = "";
+      this.notifier.style.transform = "";
     }, 1000);
   },
 

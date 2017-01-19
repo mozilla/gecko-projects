@@ -7,7 +7,7 @@
 #include "mozilla/dom/MediaKeySystemAccess.h"
 #include "mozilla/dom/MediaKeySystemAccessBinding.h"
 #include "mozilla/Preferences.h"
-#include "MediaContentType.h"
+#include "MediaContainerType.h"
 #include "MediaPrefs.h"
 #ifdef MOZ_FMP4
 #include "MP4Decoder.h"
@@ -27,8 +27,6 @@
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsXULAppAPI.h"
-#include "gmp-audio-decode.h"
-#include "gmp-video-decode.h"
 #include "DecoderDoctorDiagnostics.h"
 #include "WebMDecoder.h"
 #include "mozilla/StaticPtr.h"
@@ -132,16 +130,6 @@ MediaKeySystemAccess::GetKeySystemStatus(const nsAString& aKeySystem,
 
   if (IsClearkeyKeySystem(aKeySystem)) {
     return EnsureCDMInstalled(aKeySystem, aOutMessage);
-  }
-
-  if (Preferences::GetBool("media.gmp-eme-adobe.visible", false)) {
-    if (IsPrimetimeKeySystem(aKeySystem)) {
-      if (!Preferences::GetBool("media.gmp-eme-adobe.enabled", false)) {
-        aOutMessage = NS_LITERAL_CSTRING("Adobe EME disabled");
-        return MediaKeySystemStatus::Cdm_disabled;
-      }
-      return EnsureCDMInstalled(aKeySystem, aOutMessage);
-    }
   }
 
   if (IsWidevineKeySystem(aKeySystem)) {
@@ -324,9 +312,8 @@ GetSupportedKeySystems()
 #if defined(XP_WIN)
       // Widevine CDM doesn't include an AAC decoder. So if WMF can't
       // decode AAC, and a codec wasn't specified, be conservative
-      // and reject the MediaKeys request, since our policy is to prevent
-      //  the Adobe GMP's unencrypted AAC decoding path being used to
-      // decode content decrypted by the Widevine CDM.
+      // and reject the MediaKeys request, since we assume Widevine
+      // will be used with AAC.
       if (WMFDecoderModule::HasAAC()) {
         widevine.mMP4.SetCanDecrypt(EME_CODEC_AAC);
       }
@@ -374,19 +361,6 @@ GetSupportedKeySystems()
       widevine.mWebM.SetCanDecryptAndDecode(EME_CODEC_VP9);
 #endif
       keySystemConfigs.AppendElement(Move(widevine));
-    }
-  }
-  {
-    if (HavePluginForKeySystem(kEMEKeySystemPrimetime)) {
-      KeySystemConfig primetime;
-      primetime.mKeySystem = NS_ConvertUTF8toUTF16(kEMEKeySystemPrimetime);
-      primetime.mInitDataTypes.AppendElement(NS_LITERAL_STRING("cenc"));
-      primetime.mPersistentState = KeySystemFeatureSupport::Required;
-      primetime.mDistinctiveIdentifier = KeySystemFeatureSupport::Required;
-      primetime.mSessionTypes.AppendElement(MediaKeySessionType::Temporary);
-      primetime.mMP4.SetCanDecryptAndDecode(EME_CODEC_AAC);
-      primetime.mMP4.SetCanDecryptAndDecode(EME_CODEC_H264);
-      keySystemConfigs.AppendElement(Move(primetime));
     }
   }
 
@@ -453,9 +427,8 @@ CanDecryptAndDecode(const nsString& aKeySystem,
 #if defined(XP_WIN)
     // Widevine CDM doesn't include an AAC decoder. So if WMF can't
     // decode AAC, and a codec wasn't specified, be conservative
-    // and reject the MediaKeys request, since our policy is to prevent
-    //  the Adobe GMP's unencrypted AAC decoding path being used to
-    // decode content decrypted by the Widevine CDM.
+    // and reject the MediaKeys request, since we assume Widevine
+    // will be used with AAC.
     if (codec == EME_CODEC_AAC &&
         IsWidevineKeySystem(aKeySystem) &&
         !WMFDecoderModule::HasAAC()) {
@@ -601,21 +574,21 @@ GetSupportedCapabilities(const CodecType aCodecType,
     }
     // If content type is an invalid or unrecognized MIME type, continue
     // to the next iteration.
-    Maybe<MediaContentType> maybeContentType =
-      MakeMediaContentType(contentTypeString);
-    if (!maybeContentType) {
+    Maybe<MediaContainerType> maybeContainerType =
+      MakeMediaContainerType(contentTypeString);
+    if (!maybeContainerType) {
       EME_LOG("MediaKeySystemConfiguration (label='%s') "
               "MediaKeySystemMediaCapability('%s','%s') unsupported; "
-              "failed to parse contentType as MIME type.",
+              "failed to parse contentTypeString as MIME type.",
               NS_ConvertUTF16toUTF8(aPartialConfig.mLabel).get(),
               NS_ConvertUTF16toUTF8(contentTypeString).get(),
               NS_ConvertUTF16toUTF8(robustness).get());
       continue;
     }
-    const MediaContentType& contentType = *maybeContentType;
+    const MediaContainerType& containerType = *maybeContainerType;
     bool invalid = false;
     nsTArray<EMECodecString> codecs;
-    for (const auto& codecString : contentType.ExtendedType().Codecs().Range()) {
+    for (const auto& codecString : containerType.ExtendedType().Codecs().Range()) {
       EMECodecString emeCodec = ToEMEAPICodecString(nsString(codecString));
       if (emeCodec.IsEmpty()) {
         invalid = true;
@@ -640,7 +613,7 @@ GetSupportedCapabilities(const CodecType aCodecType,
     // case-insensitive."'. We're using nsContentTypeParser and that is
     // case-insensitive and converts all its parameter outputs to lower case.)
     const bool isMP4 =
-      DecoderTraits::IsMP4SupportedType(contentType, aDiagnostics);
+      DecoderTraits::IsMP4SupportedType(containerType, aDiagnostics);
     if (isMP4 && !aKeySystem.mMP4.IsSupported()) {
       EME_LOG("MediaKeySystemConfiguration (label='%s') "
               "MediaKeySystemMediaCapability('%s','%s') unsupported; "
@@ -650,7 +623,7 @@ GetSupportedCapabilities(const CodecType aCodecType,
               NS_ConvertUTF16toUTF8(robustness).get());
       continue;
     }
-    const bool isWebM = WebMDecoder::IsSupportedType(contentType);
+    const bool isWebM = WebMDecoder::IsSupportedType(containerType);
     if (isWebM && !aKeySystem.mWebM.IsSupported()) {
       EME_LOG("MediaKeySystemConfiguration (label='%s') "
               "MediaKeySystemMediaCapability('%s','%s') unsupported; "
@@ -704,8 +677,8 @@ GetSupportedCapabilities(const CodecType aCodecType,
       // (Note: all containers we support have implied codecs, so don't continue here.)
     }
 
-    // If content type is not strictly a audio/video type, continue to the next iteration.
-    const auto majorType = GetMajorType(contentType.Type());
+    // If container type is not strictly a audio/video type, continue to the next iteration.
+    const auto majorType = GetMajorType(containerType.Type());
     if (majorType == Invalid) {
       EME_LOG("MediaKeySystemConfiguration (label='%s') "
               "MediaKeySystemMediaCapability('%s','%s') unsupported; "

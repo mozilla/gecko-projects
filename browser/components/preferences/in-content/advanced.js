@@ -33,10 +33,10 @@ var gAdvancedPane = {
 
     if (AppConstants.MOZ_UPDATER) {
       let onUnload = function() {
-        window.removeEventListener("unload", onUnload, false);
+        window.removeEventListener("unload", onUnload);
         Services.prefs.removeObserver("app.update.", this);
       }.bind(this);
-      window.addEventListener("unload", onUnload, false);
+      window.addEventListener("unload", onUnload);
       Services.prefs.addObserver("app.update.", this, false);
       this.updateReadPrefs();
     }
@@ -65,6 +65,9 @@ var gAdvancedPane = {
                        gAdvancedPane.clearSiteData);
       setEventListener("siteDataSettings", "command",
                        gAdvancedPane.showSiteDataSettings);
+
+      let url = Services.urlFormatter.formatURLPref("app.support.baseURL") + "storage-permissions";
+      document.getElementById("siteDataLearnMoreLink").setAttribute("href", url);
     }
 
     setEventListener("layers.acceleration.disabled", "change",

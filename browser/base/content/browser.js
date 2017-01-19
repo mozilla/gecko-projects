@@ -47,6 +47,7 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
   ["ContentSearch", "resource:///modules/ContentSearch.jsm"],
   ["Deprecated", "resource://gre/modules/Deprecated.jsm"],
   ["E10SUtils", "resource:///modules/E10SUtils.jsm"],
+  ["ExtensionsUI", "resource:///modules/ExtensionsUI.jsm"],
   ["FormValidationHandler", "resource:///modules/FormValidationHandler.jsm"],
   ["GMPInstallManager", "resource://gre/modules/GMPInstallManager.jsm"],
   ["LightweightThemeManager", "resource://gre/modules/LightweightThemeManager.jsm"],
@@ -118,7 +119,7 @@ XPCOMUtils.defineLazyGetter(this, "BrowserToolboxProcess", function() {
 });
 
 XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", function() {
-  return Services.strings.createBundle('chrome://browser/locale/browser.properties');
+  return Services.strings.createBundle("chrome://browser/locale/browser.properties");
 });
 
 XPCOMUtils.defineLazyGetter(this, "gCustomizeMode", function() {
@@ -323,8 +324,8 @@ const gClickAndHoldListenersOnElement = {
     // Prevent the menupopup from opening immediately
     aEvent.currentTarget.firstChild.hidden = true;
 
-    aEvent.currentTarget.addEventListener("mouseout", this, false);
-    aEvent.currentTarget.addEventListener("mouseup", this, false);
+    aEvent.currentTarget.addEventListener("mouseout", this);
+    aEvent.currentTarget.addEventListener("mouseup", this);
     this._timers.set(aEvent.currentTarget, setTimeout((b) => this._openMenu(b), 500, aEvent.currentTarget));
   },
 
@@ -368,8 +369,8 @@ const gClickAndHoldListenersOnElement = {
 
   _cancelHold(aButton) {
     clearTimeout(this._timers.get(aButton));
-    aButton.removeEventListener("mouseout", this, false);
-    aButton.removeEventListener("mouseup", this, false);
+    aButton.removeEventListener("mouseout", this);
+    aButton.removeEventListener("mouseup", this);
   },
 
   handleEvent(e) {
@@ -753,7 +754,7 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
   // because we need to be sure this last dot is the *only* dot, too.
   // More generally, this is used for the pref and should stay in sync with
   // the code in nsDefaultURIFixup::KeywordURIFixup .
-  if (asciiHost.indexOf('.') == asciiHost.length - 1) {
+  if (asciiHost.indexOf(".") == asciiHost.length - 1) {
     asciiHost = asciiHost.slice(0, -1);
   }
 
@@ -849,7 +850,7 @@ function _loadURIWithFlags(browser, uri, params) {
   }
   let flags = params.flags || 0;
   let referrer = params.referrerURI;
-  let referrerPolicy = ('referrerPolicy' in params ? params.referrerPolicy :
+  let referrerPolicy = ("referrerPolicy" in params ? params.referrerPolicy :
                         Ci.nsIHttpChannel.REFERRER_POLICY_UNSET);
   let postData = params.postData;
 
@@ -872,6 +873,12 @@ function _loadURIWithFlags(browser, uri, params) {
                                                referrer, referrerPolicy,
                                                postData, null, null);
     } else {
+      // Check if the current browser is allowed to unload.
+      let {permitUnload, timedOut} = browser.permitUnload();
+      if (!timedOut && !permitUnload) {
+        return;
+      }
+
       if (postData) {
         postData = NetUtil.readInputStreamToString(postData, postData.available());
       }
@@ -983,7 +990,7 @@ var gBrowserInit = {
   delayedStartupFinished: false,
 
   onLoad() {
-    gBrowser.addEventListener("DOMUpdatePageReport", gPopupBlockerObserver, false);
+    gBrowser.addEventListener("DOMUpdatePageReport", gPopupBlockerObserver);
 
     Services.obs.addObserver(gPluginHandler.NPAPIPluginCrashed, "plugin-crashed", false);
 
@@ -1341,8 +1348,8 @@ var gBrowserInit = {
     if (AppConstants.platform != "macosx") {
       updateEditUIVisibility();
       let placesContext = document.getElementById("placesContext");
-      placesContext.addEventListener("popupshowing", updateEditUIVisibility, false);
-      placesContext.addEventListener("popuphiding", updateEditUIVisibility, false);
+      placesContext.addEventListener("popupshowing", updateEditUIVisibility);
+      placesContext.addEventListener("popuphiding", updateEditUIVisibility);
     }
 
     LightWeightThemeWebInstaller.init();
@@ -1366,8 +1373,10 @@ var gBrowserInit = {
 
     gMenuButtonUpdateBadge.init();
 
-    window.addEventListener("mousemove", MousePosTracker, false);
-    window.addEventListener("dragover", MousePosTracker, false);
+    gExtensionsNotifications.init();
+
+    window.addEventListener("mousemove", MousePosTracker);
+    window.addEventListener("dragover", MousePosTracker);
 
     gNavToolbox.addEventListener("customizationstarting", CustomizationHandler);
     gNavToolbox.addEventListener("customizationchange", CustomizationHandler);
@@ -1495,6 +1504,8 @@ var gBrowserInit = {
 
     gFxAccounts.uninit();
 
+    gExtensionsNotifications.uninit();
+
     Services.obs.removeObserver(gPluginHandler.NPAPIPluginCrashed, "plugin-crashed");
 
     try {
@@ -1592,12 +1603,12 @@ if (AppConstants.platform == "macosx") {
   // macBrowserOverlay
   gBrowserInit.nonBrowserWindowStartup = function() {
     // Disable inappropriate commands / submenus
-    var disabledItems = ['Browser:SavePage',
-                         'Browser:SendLink', 'cmd_pageSetup', 'cmd_print', 'cmd_find', 'cmd_findAgain',
-                         'viewToolbarsMenu', 'viewSidebarMenuMenu', 'Browser:Reload',
-                         'viewFullZoomMenu', 'pageStyleMenu', 'charsetMenu', 'View:PageSource', 'View:FullScreen',
-                         'viewHistorySidebar', 'Browser:AddBookmarkAs', 'Browser:BookmarkAllTabs',
-                         'View:PageInfo'];
+    var disabledItems = ["Browser:SavePage",
+                         "Browser:SendLink", "cmd_pageSetup", "cmd_print", "cmd_find", "cmd_findAgain",
+                         "viewToolbarsMenu", "viewSidebarMenuMenu", "Browser:Reload",
+                         "viewFullZoomMenu", "pageStyleMenu", "charsetMenu", "View:PageSource", "View:FullScreen",
+                         "viewHistorySidebar", "Browser:AddBookmarkAs", "Browser:BookmarkAllTabs",
+                         "View:PageInfo"];
     var element;
 
     for (let disabledItem of disabledItems) {
@@ -1609,7 +1620,7 @@ if (AppConstants.platform == "macosx") {
     // If no windows are active (i.e. we're the hidden window), disable the close, minimize
     // and zoom menu commands as well
     if (window.location.href == "chrome://browser/content/hiddenWindow.xul") {
-      var hiddenWindowDisabledItems = ['cmd_close', 'minimizeWindow', 'zoomWindow'];
+      var hiddenWindowDisabledItems = ["cmd_close", "minimizeWindow", "zoomWindow"];
       for (let hiddenWindowDisabledItem of hiddenWindowDisabledItems) {
         element = document.getElementById(hiddenWindowDisabledItem);
         if (element)
@@ -1722,7 +1733,7 @@ function HandleAppCommandEvent(evt) {
     gFindBar.onFindCommand();
     break;
   case "Help":
-    openHelpLink('firefox-help');
+    openHelpLink("firefox-help");
     break;
   case "Open":
     BrowserOpenFileWindow();
@@ -2546,9 +2557,9 @@ function SetPageProxyState(aState, aOptions = {}) {
   // gets called when we switch tabs.
   if (aState == "valid") {
     gLastValidURLStr = gURLBar.value;
-    gURLBar.addEventListener("input", UpdatePageProxyState, false);
+    gURLBar.addEventListener("input", UpdatePageProxyState);
   } else if (aState == "invalid") {
-    gURLBar.removeEventListener("input", UpdatePageProxyState, false);
+    gURLBar.removeEventListener("input", UpdatePageProxyState);
   }
 
   // Only need to call anchorVisibilityChange if the PopupNotifications object
@@ -2570,10 +2581,12 @@ var gMenuButtonBadgeManager = {
   BADGEID_APPUPDATE: "update",
   BADGEID_DOWNLOAD: "download",
   BADGEID_FXA: "fxa",
+  BADGEID_ADDONS: "addons",
 
   fxaBadge: null,
   downloadBadge: null,
   appUpdateBadge: null,
+  addonsBadge: null,
 
   init() {
     PanelUI.panel.addEventListener("popupshowing", this, true);
@@ -2590,7 +2603,7 @@ var gMenuButtonBadgeManager = {
   },
 
   _showBadge() {
-    let badgeToShow = this.downloadBadge || this.appUpdateBadge || this.fxaBadge;
+    let badgeToShow = this.downloadBadge || this.appUpdateBadge || this.fxaBadge || this.addonsBadge;
 
     if (badgeToShow) {
       PanelUI.menuButton.setAttribute("badge-status", badgeToShow);
@@ -2606,6 +2619,8 @@ var gMenuButtonBadgeManager = {
       this.downloadBadge = badgeStatus;
     } else if (badgeId == this.BADGEID_FXA) {
       this.fxaBadge = badgeStatus;
+    } else if (badgeId == this.BADGEID_ADDONS) {
+      this.addonsBadge = badgeStatus;
     } else {
       Cu.reportError("The badge ID '" + badgeId + "' is unknown!");
     }
@@ -2931,8 +2946,8 @@ var BrowserOnClick = {
           Components.utils.reportError("Couldn't get ssl_override pref: " + e);
         }
 
-        window.openDialog('chrome://pippki/content/exceptionDialog.xul',
-                          '', 'chrome,centerscreen,modal', params);
+        window.openDialog("chrome://pippki/content/exceptionDialog.xul",
+                          "", "chrome,centerscreen,modal", params);
 
         // If the user added the exception cert, attempt to reload the page
         if (params.exceptionAdded) {
@@ -3000,13 +3015,13 @@ var BrowserOnClick = {
     // use the right strings and links for each.
     let bucketName = "";
     let sendTelemetry = false;
-    if (reason === 'malware') {
+    if (reason === "malware") {
       sendTelemetry = true;
       bucketName = "WARNING_MALWARE_PAGE_";
-    } else if (reason === 'phishing') {
+    } else if (reason === "phishing") {
       sendTelemetry = true;
       bucketName = "WARNING_PHISHING_PAGE_";
-    } else if (reason === 'unwanted') {
+    } else if (reason === "unwanted") {
       sendTelemetry = true;
       bucketName = "WARNING_UNWANTED_PAGE_";
     }
@@ -3085,25 +3100,25 @@ var BrowserOnClick = {
     }];
 
     let title;
-    if (reason === 'malware') {
+    if (reason === "malware") {
       title = gNavigatorBundle.getString("safebrowsing.reportedAttackSite");
       buttons[1] = {
         label: gNavigatorBundle.getString("safebrowsing.notAnAttackButton.label"),
         accessKey: gNavigatorBundle.getString("safebrowsing.notAnAttackButton.accessKey"),
         callback() {
-          openUILinkIn(gSafeBrowsing.getReportURL('MalwareMistake'), 'tab');
+          openUILinkIn(gSafeBrowsing.getReportURL("MalwareMistake"), "tab");
         }
       };
-    } else if (reason === 'phishing') {
+    } else if (reason === "phishing") {
       title = gNavigatorBundle.getString("safebrowsing.deceptiveSite");
       buttons[1] = {
         label: gNavigatorBundle.getString("safebrowsing.notADeceptiveSiteButton.label"),
         accessKey: gNavigatorBundle.getString("safebrowsing.notADeceptiveSiteButton.accessKey"),
         callback() {
-          openUILinkIn(gSafeBrowsing.getReportURL('PhishMistake'), 'tab');
+          openUILinkIn(gSafeBrowsing.getReportURL("PhishMistake"), "tab");
         }
       };
-    } else if (reason === 'unwanted') {
+    } else if (reason === "unwanted") {
       title = gNavigatorBundle.getString("safebrowsing.reportedUnwantedSite");
       // There is no button for reporting errors since Google doesn't currently
       // provide a URL endpoint for these reports.
@@ -3311,7 +3326,7 @@ function getDetailedCertErrorInfo(location, securityInfo) {
 function getDERString(cert) {
   var length = {};
   var derArray = cert.getRawDER(length);
-  var derString = '';
+  var derString = "";
   for (var i = 0; i < derArray.length; i++) {
     derString += String.fromCharCode(derArray[i]);
   }
@@ -3875,10 +3890,10 @@ function FillHistoryMenu(aParent) {
       // Only the current page should have the checked attribute, so skip it
       if (!aEvent.target.hasAttribute("checked"))
         XULBrowserWindow.setOverLink(aEvent.target.getAttribute("uri"));
-    }, false);
+    });
     aParent.addEventListener("DOMMenuItemInactive", function() {
       XULBrowserWindow.setOverLink("");
-    }, false);
+    });
 
     aParent.hasStatusListener = true;
   }
@@ -4047,7 +4062,7 @@ function OpenBrowserWindow(options) {
   var handler = Components.classes["@mozilla.org/browser/clh;1"]
                           .getService(Components.interfaces.nsIBrowserHandler);
   var defaultArgs = handler.defaultArgs;
-  var wintype = document.documentElement.getAttribute('windowtype');
+  var wintype = document.documentElement.getAttribute("windowtype");
 
   var extraFeatures = "";
   if (options && options.private) {
@@ -4158,7 +4173,7 @@ function updateEditUIVisibility() {
  */
 function openNewUserContextTab(event) {
   openUILinkIn(BROWSER_NEW_TAB_URL, "tab", {
-    userContextId: parseInt(event.target.getAttribute('data-usercontextid')),
+    userContextId: parseInt(event.target.getAttribute("data-usercontextid")),
   });
 }
 
@@ -4360,7 +4375,7 @@ var XULBrowserWindow = {
   },
 
   // Check whether this URI should load in the current process
-  shouldLoadURI(aDocShell, aURI, aReferrer) {
+  shouldLoadURI(aDocShell, aURI, aReferrer, aTriggeringPrincipal) {
     if (!gMultiProcessBrowser)
       return true;
 
@@ -4374,7 +4389,7 @@ var XULBrowserWindow = {
       return true;
 
     if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aReferrer)) {
-      E10SUtils.redirectLoad(aDocShell, aURI, aReferrer);
+      E10SUtils.redirectLoad(aDocShell, aURI, aReferrer, aTriggeringPrincipal, false);
       return false;
     }
 
@@ -4455,16 +4470,16 @@ var XULBrowserWindow = {
 
         // Disable menu entries for images, enable otherwise
         if (browser.documentContentType && BrowserUtils.mimeTypeIsTextBased(browser.documentContentType)) {
-          this.isImage.removeAttribute('disabled');
+          this.isImage.removeAttribute("disabled");
         } else {
           canViewSource = false;
-          this.isImage.setAttribute('disabled', 'true');
+          this.isImage.setAttribute("disabled", "true");
         }
 
         if (canViewSource) {
-          this.canViewSource.removeAttribute('disabled');
+          this.canViewSource.removeAttribute("disabled");
         } else {
-          this.canViewSource.setAttribute('disabled', 'true');
+          this.canViewSource.setAttribute("disabled", "true");
         }
       }
 
@@ -4507,9 +4522,9 @@ var XULBrowserWindow = {
 
     // Disable menu entries for images, enable otherwise
     if (browser.documentContentType && BrowserUtils.mimeTypeIsTextBased(browser.documentContentType))
-      this.isImage.removeAttribute('disabled');
+      this.isImage.removeAttribute("disabled");
     else
-      this.isImage.setAttribute('disabled', 'true');
+      this.isImage.setAttribute("disabled", "true");
 
     this.hideOverLinkImmediately = true;
     this.setOverLink("", null);
@@ -4779,7 +4794,7 @@ var CombinedStopReload = {
     this._initialized = true;
     if (XULBrowserWindow.stopCommand.getAttribute("disabled") != "true")
       reload.setAttribute("displaystop", "true");
-    stop.addEventListener("click", this, false);
+    stop.addEventListener("click", this);
     this.reload = reload;
     this.stop = stop;
   },
@@ -4790,7 +4805,7 @@ var CombinedStopReload = {
 
     this._cancelTransition();
     this._initialized = false;
-    this.stop.removeEventListener("click", this, false);
+    this.stop.removeEventListener("click", this);
     this.reload = null;
     this.stop = null;
   },
@@ -5148,7 +5163,7 @@ function onViewToolbarsPopupShowing(aEvent, aInsertPoint) {
 
     popup.insertBefore(menuItem, firstMenuItem);
 
-    menuItem.addEventListener("command", onViewToolbarCommand, false);
+    menuItem.addEventListener("command", onViewToolbarCommand);
   }
 
 
@@ -5327,7 +5342,7 @@ var gHomeButton = {
       homeButton = document.getElementById("home-button");
     if (homeButton) {
       var homePage = this.getHomePage();
-      homePage = homePage.replace(/\|/g, ', ');
+      homePage = homePage.replace(/\|/g, ", ");
       if (["about:home", "about:newtab"].includes(homePage.toLowerCase()))
         homeButton.setAttribute("tooltiptext", homeButton.getAttribute("aboutHomeOverrideTooltip"));
       else
@@ -7863,10 +7878,10 @@ var TabContextMenu = {
     this.contextTab.toggleMuteMenuItem = toggleMute;
     this._updateToggleMuteMenuItem(this.contextTab);
 
-    this.contextTab.addEventListener("TabAttrModified", this, false);
-    aPopupMenu.addEventListener("popuphiding", this, false);
+    this.contextTab.addEventListener("TabAttrModified", this);
+    aPopupMenu.addEventListener("popuphiding", this);
 
-    gFxAccounts.updateTabContextMenu(aPopupMenu);
+    gFxAccounts.updateTabContextMenu(aPopupMenu, this.contextTab);
   },
   handleEvent(aEvent) {
     switch (aEvent.type) {
