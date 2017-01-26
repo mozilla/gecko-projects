@@ -122,6 +122,11 @@ LazyLogModule gUrlClassifierDbServiceLog("UrlClassifierDbService");
 #define CONFIRM_AGE_PREF        "urlclassifier.max-complete-age"
 #define CONFIRM_AGE_DEFAULT_SEC (45 * 60)
 
+// TODO: The following two prefs are to be removed after we
+//       roll out full v4 hash completion. See Bug 1331534.
+#define TAKE_V4_COMPLETION_RESULT_PREF    "browser.safebrowsing.temporary.take_v4_completion_result"
+#define TAKE_V4_COMPLETION_RESULT_DEFAULT false
+
 class nsUrlClassifierDBServiceWorker;
 
 // Singleton instance.
@@ -1007,10 +1012,9 @@ nsUrlClassifierLookupCallback::LookupComplete(nsTArray<LookupResult>* results)
         }
       } else {
         // For tables with no hash completer, a complete hash match is
-        // good enough, we'll consider it fresh, even if it hasn't been updated
-        // in 45 minutes.
+        // good enough, we'll consider it is valid.
         if (result.Complete()) {
-          result.mFresh = true;
+          result.mConfirmed = true;
           LOG(("Skipping completion in a table without a valid completer (%s).",
                result.mTableName.get()));
         } else {
@@ -1055,6 +1059,15 @@ nsUrlClassifierLookupCallback::Completion(const nsACString& completeHash,
 {
   LOG(("nsUrlClassifierLookupCallback::Completion [%p, %s, %d]",
        this, PromiseFlatCString(tableName).get(), chunkId));
+
+  if (StringEndsWith(tableName, NS_LITERAL_CSTRING("-proto")) &&
+      !Preferences::GetBool(TAKE_V4_COMPLETION_RESULT_PREF,
+                            TAKE_V4_COMPLETION_RESULT_DEFAULT)) {
+    // Bug 1331534 - We temporarily ignore hash completion result
+    // for v4 tables.
+    return NS_OK;
+  }
+
   mozilla::safebrowsing::Completion hash;
   hash.Assign(completeHash);
 

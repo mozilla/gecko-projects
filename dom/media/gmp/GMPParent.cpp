@@ -11,6 +11,7 @@
 #include "nsIRunnable.h"
 #include "nsIWritablePropertyBag2.h"
 #include "mozIGeckoMediaPluginService.h"
+#include "mozilla/AbstractThread.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/SSE.h"
 #include "mozilla/SyncRunnable.h"
@@ -715,9 +716,12 @@ GMPParent::ReadGMPInfoFile(nsIFile* aFile)
 
 #if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
       if (!mozilla::SandboxInfo::Get().CanSandboxMedia()) {
-        printf_stderr("GMPParent::ReadGMPMetaData: Plugin \"%s\" is an EME CDM"
-                      " but this system can't sandbox it; not loading.\n",
-                      mDisplayName.get());
+        nsPrintfCString msg(
+          "GMPParent::ReadGMPMetaData: Plugin \"%s\" is an EME CDM"
+          " but this system can't sandbox it; not loading.",
+          mDisplayName.get());
+        printf_stderr("%s\n", msg.get());
+        LOGD("%s", msg.get());
         return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
       }
 #endif
@@ -743,6 +747,7 @@ GMPParent::ReadChromiumManifestFile(nsIFile* aFile)
 
   // DOM JSON parsing needs to run on the main thread.
   return InvokeAsync<nsString&&>(
+    // Non DocGroup-version of AbstractThread::MainThread for the task in parent.
     AbstractThread::MainThread(), this, __func__,
     &GMPParent::ParseChromiumManifest, NS_ConvertUTF8toUTF16(json));
 }
@@ -768,6 +773,18 @@ GMPParent::ParseChromiumManifest(const nsAString& aJSON)
   mDisplayName = NS_ConvertUTF16toUTF8(m.mName);
   mDescription = NS_ConvertUTF16toUTF8(m.mDescription);
   mVersion = NS_ConvertUTF16toUTF8(m.mVersion);
+
+#if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
+  if (!mozilla::SandboxInfo::Get().CanSandboxMedia()) {
+    nsPrintfCString msg(
+      "GMPParent::ParseChromiumManifest: Plugin \"%s\" is an EME CDM"
+      " but this system can't sandbox it; not loading.",
+      mDisplayName.get());
+    printf_stderr("%s\n", msg.get());
+    LOGD("%s", msg.get());
+    return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+  }
+#endif
 
   nsCString kEMEKeySystem;
 
@@ -875,19 +892,32 @@ GMPParent::ResolveGetContentParentPromises()
   }
 }
 
-PGMPContentParent*
-GMPParent::AllocPGMPContentParent(Transport* aTransport, ProcessId aOtherPid)
+bool
+GMPParent::OpenPGMPContent()
 {
   MOZ_ASSERT(GMPThread() == NS_GetCurrentThread());
   MOZ_ASSERT(!mGMPContentParent);
 
+  Endpoint<PGMPContentParent> parent;
+  Endpoint<PGMPContentChild> child;
+  if (NS_FAILED(PGMPContent::CreateEndpoints(base::GetCurrentProcId(),
+                                             OtherPid(), &parent, &child))) {
+    return false;
+  }
+
   mGMPContentParent = new GMPContentParent(this);
-  mGMPContentParent->Open(aTransport, aOtherPid, XRE_GetIOMessageLoop(),
-                          ipc::ParentSide);
+
+  if (!parent.Bind(mGMPContentParent)) {
+    return false;
+  }
+
+  if (!SendInitGMPContentChild(Move(child))) {
+    return false;
+  }
 
   ResolveGetContentParentPromises();
 
-  return mGMPContentParent;
+  return true;
 }
 
 void
@@ -918,7 +948,7 @@ GMPParent::GetGMPContentParent(UniquePtr<MozPromiseHolder<GetGMPContentParentPro
     // set then we should just store them, so that they get called when we set
     // mGMPContentParent as a result of the PGMPContent::Open call.
     if (mGetContentParentPromises.Length() == 1) {
-      if (!EnsureProcessLoaded() || !PGMPContent::Open(this)) {
+      if (!EnsureProcessLoaded() || !OpenPGMPContent()) {
         RejectGetContentParentPromises();
         return;
       }
@@ -947,14 +977,10 @@ GMPParent::EnsureProcessLoaded(base::ProcessId* aID)
   return true;
 }
 
-bool
-GMPParent::Bridge(GMPServiceParent* aGMPServiceParent)
+void
+GMPParent::IncrementGMPContentChildCount()
 {
-  if (NS_FAILED(PGMPContent::Bridge(aGMPServiceParent, this))) {
-    return false;
-  }
   ++mGMPContentChildCount;
-  return true;
 }
 
 nsString

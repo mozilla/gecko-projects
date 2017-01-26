@@ -61,7 +61,7 @@ public:
 
   virtual CSSStyleSheet* GetParentObject() override;
 
-  virtual nsIDOMCSSRule*
+  virtual css::Rule*
   IndexedGetter(uint32_t aIndex, bool& aFound) override;
   virtual uint32_t
   Length() override;
@@ -101,7 +101,7 @@ CSSRuleListImpl::Length()
   return AssertedCast<uint32_t>(mStyleSheet->StyleRuleCount());
 }
 
-nsIDOMCSSRule*    
+css::Rule*
 CSSRuleListImpl::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   aFound = false;
@@ -112,7 +112,7 @@ CSSRuleListImpl::IndexedGetter(uint32_t aIndex, bool& aFound)
     css::Rule* rule = mStyleSheet->GetStyleRuleAt(aIndex);
     if (rule) {
       aFound = true;
-      return rule->GetDOMRule();
+      return rule;
     }
   }
 
@@ -146,24 +146,26 @@ static bool SetStyleSheetReference(css::Rule* aRule, void* aSheet)
 }
 
 struct ChildSheetListBuilder {
-  RefPtr<CSSStyleSheet>* sheetSlot;
-  CSSStyleSheet* parent;
+  RefPtr<StyleSheet>* sheetSlot;
+  StyleSheet* parent;
 
-  void SetParentLinks(CSSStyleSheet* aSheet) {
+  void SetParentLinks(StyleSheet* aSheet) {
     aSheet->mParent = parent;
-    aSheet->SetOwningDocument(parent->mDocument);
+    aSheet->SetAssociatedDocument(parent->mDocument,
+                                  parent->mDocumentAssociationMode);
   }
 
-  static void ReparentChildList(CSSStyleSheet* aPrimarySheet,
-                                CSSStyleSheet* aFirstChild)
+  static void ReparentChildList(StyleSheet* aPrimarySheet,
+                                StyleSheet* aFirstChild)
   {
-    for (CSSStyleSheet *child = aFirstChild; child; child = child->mNext) {
+    for (StyleSheet *child = aFirstChild; child; child = child->mNext) {
       child->mParent = aPrimarySheet;
-      child->SetOwningDocument(aPrimarySheet->mDocument);
+      child->SetAssociatedDocument(aPrimarySheet->mDocument,
+                                   aPrimarySheet->mDocumentAssociationMode);
     }
   }
 };
-  
+
 bool
 CSSStyleSheet::RebuildChildList(css::Rule* aRule, void* aBuilder)
 {
@@ -192,12 +194,12 @@ CSSStyleSheet::RebuildChildList(css::Rule* aRule, void* aBuilder)
 
   // Have to do this QI to be safe, since XPConnect can fake
   // nsIDOMCSSStyleSheets
-  RefPtr<CSSStyleSheet> cssSheet = do_QueryObject(childSheet);
-  if (!cssSheet) {
+  RefPtr<CSSStyleSheet> sheet = do_QueryObject(childSheet);
+  if (!sheet) {
     return true;
   }
 
-  (*builder->sheetSlot) = cssSheet;
+  (*builder->sheetSlot) = sheet;
   builder->SetParentLinks(*builder->sheetSlot);
   builder->sheetSlot = &(*builder->sheetSlot)->mNext;
   return true;
@@ -206,11 +208,9 @@ CSSStyleSheet::RebuildChildList(css::Rule* aRule, void* aBuilder)
 size_t
 CSSStyleSheet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
-  size_t n = 0;
+  size_t n = StyleSheet::SizeOfIncludingThis(aMallocSizeOf);
   const CSSStyleSheet* s = this;
   while (s) {
-    n += aMallocSizeOf(s);
-
     // Each inner can be shared by multiple sheets.  So we only count the inner
     // if this sheet is the last one in the list of those sharing it.  As a
     // result, the last such sheet takes all the blame for the memory
@@ -224,15 +224,13 @@ CSSStyleSheet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 
     // Measurement of the following members may be added later if DMD finds it
     // is worthwhile:
-    // - s->mTitle
-    // - s->mMedia
     // - s->mRuleCollection
     // - s->mRuleProcessors
     //
     // The following members are not measured:
     // - s->mOwnerRule, because it's non-owning
 
-    s = s->mNext;
+    s = s->mNext ? s->mNext->AsGecko() : nullptr;
   }
   return n;
 }
@@ -369,7 +367,6 @@ CSSStyleSheetInner::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 CSSStyleSheet::CSSStyleSheet(css::SheetParsingMode aParsingMode,
                              CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy)
   : StyleSheet(StyleBackendType::Gecko, aParsingMode),
-    mParent(nullptr),
     mOwnerRule(nullptr),
     mDirty(false),
     mInRuleProcessorCache(false),
@@ -385,7 +382,6 @@ CSSStyleSheet::CSSStyleSheet(css::SheetParsingMode aParsingMode,
                              ReferrerPolicy aReferrerPolicy,
                              const SRIMetadata& aIntegrity)
   : StyleSheet(StyleBackendType::Gecko, aParsingMode),
-    mParent(nullptr),
     mOwnerRule(nullptr),
     mDirty(false),
     mInRuleProcessorCache(false),
@@ -402,7 +398,6 @@ CSSStyleSheet::CSSStyleSheet(const CSSStyleSheet& aCopy,
                              nsIDocument* aDocumentToUse,
                              nsINode* aOwningNodeToUse)
   : StyleSheet(aCopy, aDocumentToUse, aOwningNodeToUse),
-    mParent(aParentToUse),
     mOwnerRule(aOwnerRuleToUse),
     mDirty(aCopy.mDirty),
     mInRuleProcessorCache(false),
@@ -410,6 +405,7 @@ CSSStyleSheet::CSSStyleSheet(const CSSStyleSheet& aCopy,
     mInner(aCopy.mInner),
     mRuleProcessors(nullptr)
 {
+  mParent = aParentToUse;
 
   mInner->AddSheet(this);
 
@@ -422,16 +418,8 @@ CSSStyleSheet::CSSStyleSheet(const CSSStyleSheet& aCopy,
 
 CSSStyleSheet::~CSSStyleSheet()
 {
-  for (CSSStyleSheet* child = mInner->mFirstChild;
-       child;
-       child = child->mNext) {
-    // XXXbz this is a little bogus; see the XXX comment where we
-    // declare mFirstChild.
-    if (child->mParent == this) {
-      child->mParent = nullptr;
-      child->mDocument = nullptr;
-    }
-  }
+  UnparentChildren();
+
   DropRuleCollection();
   mInner->RemoveSheet(this);
   // XXX The document reference is not reference counted and should
@@ -473,13 +461,14 @@ CSSStyleSheet::UnlinkInner()
   // don't want to do any addrefing in the process, just to make sure
   // we don't confuse the cycle collector (though on the face of it,
   // addref/release pairs during unlink should probably be ok).
-  RefPtr<CSSStyleSheet> child;
-  child.swap(mInner->mFirstChild);
+  RefPtr<StyleSheet> child;
+  child.swap(SheetInfo().mFirstChild);
   while (child) {
     MOZ_ASSERT(child->mParent == this, "We have a unique inner!");
     child->mParent = nullptr;
     child->mDocument = nullptr;
-    RefPtr<CSSStyleSheet> next;
+
+    RefPtr<StyleSheet> next;
     // Null out child->mNext, but don't let it die yet
     next.swap(child->mNext);
     // Switch to looking at the old value of child->mNext next iteration
@@ -498,17 +487,19 @@ CSSStyleSheet::TraverseInner(nsCycleCollectionTraversalCallback &cb)
     return;
   }
 
-  RefPtr<CSSStyleSheet>* childSheetSlot = &mInner->mFirstChild;
-  while (*childSheetSlot) {
+  StyleSheet* childSheet = GetFirstChild();
+  while (childSheet) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "child sheet");
-    cb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, childSheetSlot->get()));
-    childSheetSlot = &(*childSheetSlot)->mNext;
+    cb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIDOMCSSStyleSheet*, childSheet));
+    childSheet = childSheet->mNext;
   }
 
   const nsCOMArray<css::Rule>& rules = mInner->mOrderedRules;
   for (int32_t i = 0, count = rules.Count(); i < count; ++i) {
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mOrderedRules[i]");
-    cb.NoteXPCOMChild(rules[i]->GetExistingDOMRule());
+    if (!rules[i]->IsCCLeaf()) {
+      NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mOrderedRules[i]");
+      cb.NoteXPCOMChild(rules[i]);
+    }
   }
 }
 
@@ -605,27 +596,6 @@ CSSStyleSheet::EnabledStateChangedInternal()
   ClearRuleCascades();
 }
 
-CSSStyleSheet*
-CSSStyleSheet::GetParentSheet() const
-{
-  return mParent;
-}
-
-void
-CSSStyleSheet::SetOwningDocument(nsIDocument* aDocument)
-{ // not ref counted
-  mDocument = aDocument;
-  // Now set the same document on all our child sheets....
-  // XXXbz this is a little bogus; see the XXX comment where we
-  // declare mFirstChild.
-  for (CSSStyleSheet* child = mInner->mFirstChild;
-       child; child = child->mNext) {
-    if (child->mParent == this) {
-      child->SetOwningDocument(aDocument);
-    }
-  }
-}
-
 uint64_t
 CSSStyleSheet::FindOwningWindowInnerID() const
 {
@@ -647,29 +617,11 @@ CSSStyleSheet::FindOwningWindowInnerID() const
   }
 
   if (windowID == 0 && mParent) {
-    windowID = mParent->FindOwningWindowInnerID();
+    CSSStyleSheet* parentAsCSS = mParent->AsGecko();
+    windowID = parentAsCSS->FindOwningWindowInnerID();
   }
 
   return windowID;
-}
-
-void
-CSSStyleSheet::AppendStyleSheet(CSSStyleSheet* aSheet)
-{
-  NS_PRECONDITION(nullptr != aSheet, "null arg");
-
-  WillDirty();
-  RefPtr<CSSStyleSheet>* tail = &mInner->mFirstChild;
-  while (*tail) {
-    tail = &(*tail)->mNext;
-  }
-  *tail = aSheet;
-
-  // This is not reference counted. Our parent tells us when
-  // it's going away.
-  aSheet->mParent = this;
-  aSheet->mDocument = mDocument;
-  DidDirty();
 }
 
 void
@@ -736,9 +688,10 @@ CSSStyleSheet::EnsureUniqueInner()
 void
 CSSStyleSheet::AppendAllChildSheets(nsTArray<CSSStyleSheet*>& aArray)
 {
-  for (CSSStyleSheet* child = mInner->mFirstChild; child;
+  for (StyleSheet* child = GetFirstChild(); child;
        child = child->mNext) {
-    aArray.AppendElement(child);
+
+    aArray.AppendElement(child->AsGecko());
   }
 }
 
@@ -768,36 +721,7 @@ ListRules(const nsCOMArray<css::Rule>& aRules, FILE* aOut, int32_t aIndent)
 void
 CSSStyleSheet::List(FILE* out, int32_t aIndent) const
 {
-
-  int32_t index;
-
-  // Indent
-  nsAutoCString str;
-  for (index = aIndent; --index >= 0; ) {
-    str.AppendLiteral("  ");
-  }
-
-  str.AppendLiteral("CSS Style Sheet: ");
-  nsAutoCString urlSpec;
-  nsresult rv = mInner->mSheetURI->GetSpec(urlSpec);
-  if (NS_SUCCEEDED(rv) && !urlSpec.IsEmpty()) {
-    str.Append(urlSpec);
-  }
-
-  if (mMedia) {
-    str.AppendLiteral(" media: ");
-    nsAutoString  buffer;
-    mMedia->GetText(buffer);
-    AppendUTF16toUTF8(buffer, str);
-  }
-  str.Append('\n');
-  fprintf_stderr(out, "%s", str.get());
-
-  for (const CSSStyleSheet* child = mInner->mFirstChild;
-       child;
-       child = child->mNext) {
-    child->List(out, aIndent + 1);
-  }
+  StyleSheet::List(out, aIndent);
 
   fprintf_stderr(out, "%s", "Rules in source order:\n");
   ListRules(mInner->mOrderedRules, out, aIndent);
@@ -865,10 +789,10 @@ CSSStyleSheet::RegisterNamespaceRule(css::Rule* aRule)
   return NS_OK;
 }
 
-nsIDOMCSSRule*
+css::Rule*
 CSSStyleSheet::GetDOMOwnerRule() const
 {
-  return mOwnerRule ? mOwnerRule->GetDOMRule() : nullptr;
+  return mOwnerRule;
 }
 
 CSSRuleList*
@@ -1031,11 +955,6 @@ CSSStyleSheet::DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv)
   RefPtr<css::Rule> rule = mInner->mOrderedRules.ObjectAt(aIndex);
   if (rule) {
     mInner->mOrderedRules.RemoveObjectAt(aIndex);
-    if (mDocument && mDocument->StyleSheetChangeEventsEnabled()) {
-      // Force creation of the DOM rule, so that it can be put on the
-      // StyleRuleRemoved event object.
-      rule->GetDOMRule();
-    }
     rule->SetStyleSheet(nullptr);
     DidDirty();
 
@@ -1217,15 +1136,15 @@ CSSStyleSheet::ReparseSheet(const nsAString& aInput)
   }
 
   // nuke child sheets list and current namespace map
-  for (CSSStyleSheet* child = mInner->mFirstChild; child; ) {
+  for (StyleSheet* child = GetFirstChild(); child; ) {
     NS_ASSERTION(child->mParent == this, "Child sheet is not parented to this!");
-    CSSStyleSheet* next = child->mNext;
+    StyleSheet* next = child->mNext;
     child->mParent = nullptr;
     child->mDocument = nullptr;
     child->mNext = nullptr;
     child = next;
   }
-  mInner->mFirstChild = nullptr;
+  SheetInfo().mFirstChild = nullptr;
   mInner->mNameSpaceMap = nullptr;
 
   uint32_t lineNumber = 1;

@@ -175,6 +175,24 @@ var gTests = [
 
     // the stream is already closed, but this will do some cleanup anyway
     yield closeStream(true);
+
+    // After stop sharing, gUM(audio+camera) causes a prompt.
+    promise = promisePopupNotificationShown("webRTC-shareDevices");
+    yield promiseRequestDevice(true, true);
+    yield promise;
+    yield expectObserverCalled("getUserMedia:request");
+    checkDeviceSelectors(true, true);
+
+    yield promiseMessage(permissionError, () => {
+      activateSecondaryAction(kActionDeny);
+    });
+
+    yield expectObserverCalled("getUserMedia:response:deny");
+    yield expectObserverCalled("recording-window-ended");
+    yield checkNotSharing();
+    SitePermissions.remove(null, "screen", gBrowser.selectedBrowser);
+    SitePermissions.remove(null, "camera", gBrowser.selectedBrowser);
+    SitePermissions.remove(null, "microphone", gBrowser.selectedBrowser);
   }
 },
 
@@ -200,6 +218,24 @@ var gTests = [
     yield checkSharingUI({video: true, audio: true});
 
     yield reloadAndAssertClosedStreams();
+
+    // After the reload, gUM(audio+camera) causes a prompt.
+    promise = promisePopupNotificationShown("webRTC-shareDevices");
+    yield promiseRequestDevice(true, true);
+    yield promise;
+    yield expectObserverCalled("getUserMedia:request");
+    checkDeviceSelectors(true, true);
+
+    yield promiseMessage(permissionError, () => {
+      activateSecondaryAction(kActionDeny);
+    });
+
+    yield expectObserverCalled("getUserMedia:response:deny");
+    yield expectObserverCalled("recording-window-ended");
+    yield checkNotSharing();
+    SitePermissions.remove(null, "screen", gBrowser.selectedBrowser);
+    SitePermissions.remove(null, "camera", gBrowser.selectedBrowser);
+    SitePermissions.remove(null, "microphone", gBrowser.selectedBrowser);
   }
 },
 
@@ -531,6 +567,14 @@ var gTests = [
     Perms.remove(uri, "camera");
     Perms.remove(uri, "microphone");
   }
+},
+
+{
+  desc: "getUserMedia init & uninit",
+  run: function* checkInitAndUninit() {
+    webrtcUI.uninit();
+    webrtcUI.init();
+  }
 }
 
 ];
@@ -544,9 +588,7 @@ function test() {
 
   browser.messageManager.loadFrameScript(CONTENT_SCRIPT_HELPER, true);
 
-  browser.addEventListener("load", function onload() {
-    browser.removeEventListener("load", onload, true);
-
+  browser.addEventListener("load", function() {
     is(PopupNotifications._currentNotifications.length, 0,
        "should start the test without any prior popup notification");
     ok(gIdentityHandler._identityPopup.hidden,
@@ -567,7 +609,7 @@ function test() {
      ok(false, "Unexpected Exception: " + ex);
      finish();
     });
-  }, true);
+  }, {capture: true, once: true});
   let rootDir = getRootDirectory(gTestPath);
   rootDir = rootDir.replace("chrome://mochitests/content/",
                             "https://example.com/");

@@ -28,7 +28,6 @@
  * Unimplemented functionality:
  *
  *  - Tiered compilation (bug 1277562)
- *  - profiler support / devtools (bug 1286948)
  *  - SIMD
  *  - Atomics
  *
@@ -48,10 +47,6 @@
  *
  *
  * High-value code generation improvements:
- *
- * - (Bug 1316803) Opportunities for cheaply folding in a constant rhs to
- *   arithmetic operations, we do this already for I32 add and shift operators,
- *   this reduces register pressure and instruction count.
  *
  * - (Bug 1316804) brTable pessimizes by always dispatching to code that pops
  *   the stack and then jumps to the code for the target case.  If no cleanup is
@@ -2076,6 +2071,18 @@ class BaseCompiler
 
         maxFramePushed_ = localSize_;
 
+        // The TLS pointer is always passed as a hidden argument in WasmTlsReg.
+        // Save it into its assigned local slot.
+        storeToFramePtr(WasmTlsReg, localInfo_[tlsSlot_].offs());
+        if (debugEnabled_) {
+            // Initialize funcIndex and flag fields of DebugFrame.
+            size_t debugFrame = masm.framePushed() - DebugFrame::offsetOfFrame();
+            masm.store32(Imm32(func_.index()),
+                         Address(masm.getStackPointer(), debugFrame + DebugFrame::offsetOfFuncIndex()));
+            masm.storePtr(ImmWord(0),
+                          Address(masm.getStackPointer(), debugFrame + DebugFrame::offsetOfFlagsWord()));
+        }
+
         // We won't know until after we've generated code how big the frame will
         // be (we may need arbitrary spill slots and outgoing param slots) so
         // emit a patchable add that is patched in endFunction().
@@ -2115,18 +2122,6 @@ class BaseCompiler
               default:
                 MOZ_CRASH("Function argument type");
             }
-        }
-
-        // The TLS pointer is always passed as a hidden argument in WasmTlsReg.
-        // Save it into its assigned local slot.
-        storeToFramePtr(WasmTlsReg, localInfo_[tlsSlot_].offs());
-        if (debugEnabled_) {
-            // Initialize funcIndex and flag fields of DebugFrame.
-            size_t debugFrame = masm.framePushed() - DebugFrame::offsetOfFrame();
-            masm.store32(Imm32(func_.index()),
-                         Address(masm.getStackPointer(), debugFrame + DebugFrame::offsetOfFuncIndex()));
-            masm.storePtr(ImmWord(0),
-                          Address(masm.getStackPointer(), debugFrame + DebugFrame::offsetOfFlagsWord()));
         }
 
         // Initialize the stack locals to zero.
@@ -2214,11 +2209,16 @@ class BaseCompiler
 
         // Since we just overflowed the stack, to be on the safe side, pop the
         // stack so that, when the trap exit stub executes, it is a safe
-        // distance away from the end of the native stack.
+        // distance away from the end of the native stack. If debugEnabled_ is
+        // set, we pop all locals space except allocated for DebugFrame to
+        // maintain the invariant that, when debugEnabled_, all wasm::Frames
+        // are valid wasm::DebugFrames which is observable by WasmHandleThrow.
         masm.bind(&stackOverflowLabel_);
-        if (localSize_)
-            masm.addToStackPtr(Imm32(localSize_));
-        masm.jump(TrapDesc(prologueTrapOffset_, Trap::StackOverflow, /* framePushed = */ 0));
+        int32_t debugFrameReserved = debugEnabled_ ? DebugFrame::offsetOfFrame() : 0;
+        MOZ_ASSERT(localSize_ >= debugFrameReserved);
+        if (localSize_ > debugFrameReserved)
+            masm.addToStackPtr(Imm32(localSize_ - debugFrameReserved));
+        masm.jump(TrapDesc(prologueTrapOffset_, Trap::StackOverflow, debugFrameReserved));
 
         masm.bind(&returnLabel_);
 
@@ -2236,7 +2236,7 @@ class BaseCompiler
         GenerateFunctionEpilogue(masm, localSize_, &offsets_);
 
 #if defined(JS_ION_PERF)
-        // FIXME - profiling code missing.  Bug 1286948.
+        // FIXME - profiling code missing.  No bug for this.
 
         // Note the end of the inline code and start of the OOL code.
         //gen->perfSpewer().noteEndInlineCode(masm);
@@ -3399,7 +3399,7 @@ class BaseCompiler
     // This is the temp register passed as the last argument to load()
     MOZ_MUST_USE size_t loadTemps(MemoryAccessDesc& access) {
 #if defined(JS_CODEGEN_ARM)
-        if (access.isUnaligned()) {
+        if (IsUnaligned(access)) {
             switch (access.type()) {
               case Scalar::Float32:
                 return 2;
@@ -3460,7 +3460,7 @@ class BaseCompiler
                 masm.mov(ScratchRegX86, dest.i32());
         }
 #elif defined(JS_CODEGEN_ARM)
-        if (access.isUnaligned()) {
+        if (IsUnaligned(access)) {
             switch (dest.tag) {
               case AnyReg::I64:
                 masm.wasmUnalignedLoadI64(access, ptr, ptr, dest.i64(), tmp1);
@@ -3492,7 +3492,7 @@ class BaseCompiler
 
     MOZ_MUST_USE size_t storeTemps(MemoryAccessDesc& access) {
 #if defined(JS_CODEGEN_ARM)
-        if (access.isUnaligned()) {
+        if (IsUnaligned(access)) {
             // See comment in store() about how this temp could be avoided for
             // unaligned i8/i16/i32 stores with some restructuring elsewhere.
             return 1;
@@ -3547,7 +3547,7 @@ class BaseCompiler
             masm.wasmStore(access, value, dstAddr);
         }
 #elif defined(JS_CODEGEN_ARM)
-        if (access.isUnaligned()) {
+        if (IsUnaligned(access)) {
             // TODO / OPTIMIZE (bug 1331264): We perform the copy on the i32
             // path (and allocate the temp for the copy) because we will destroy
             // the value in the temp.  We could avoid the copy and the temp if
@@ -4091,7 +4091,6 @@ BaseCompiler::emitSubtractF64()
 void
 BaseCompiler::emitMultiplyI32()
 {
-    // TODO / OPTIMIZE: Multiplication by constant is common (Bug 1275442, 1316803)
     RegI32 r0, r1;
     pop2xI32ForIntMulDiv(&r0, &r1);
     masm.mul32(r1, r0);
@@ -4102,7 +4101,6 @@ BaseCompiler::emitMultiplyI32()
 void
 BaseCompiler::emitMultiplyI64()
 {
-    // TODO / OPTIMIZE: Multiplication by constant is common (Bug 1275442, 1316803)
     RegI64 r0, r1;
     RegI32 temp;
 #if defined(JS_CODEGEN_X64)
@@ -6515,7 +6513,7 @@ BaseCompiler::emitLoad(ValType type, Scalar::Type viewType)
       case ValType::I32: {
         RegI32 rp = popMemoryAccess(&access, &omitBoundsCheck);
 #ifdef JS_CODEGEN_ARM
-        RegI32 rv = access.isUnaligned() ? needI32() : rp;
+        RegI32 rv = IsUnaligned(access) ? needI32() : rp;
 #else
         RegI32 rv = rp;
 #endif

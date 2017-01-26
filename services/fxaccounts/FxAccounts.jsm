@@ -26,7 +26,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsConfig",
   "resource://gre/modules/FxAccountsConfig.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "jwcrypto",
-  "resource://gre/modules/identity/jwcrypto.jsm");
+  "resource://gre/modules/services-crypto/jwcrypto.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsOAuthGrantClient",
   "resource://gre/modules/FxAccountsOAuthGrantClient.jsm");
@@ -46,6 +46,7 @@ var publicProperties = [
   "getDeviceId",
   "getKeys",
   "getOAuthToken",
+  "getProfileCache",
   "getSignedInUser",
   "getSignedInUserProfile",
   "handleDeviceDisconnection",
@@ -64,6 +65,7 @@ var publicProperties = [
   "resendVerificationEmail",
   "resetCredentials",
   "sessionStatus",
+  "setProfileCache",
   "setSignedInUser",
   "signOut",
   "updateDeviceRegistration",
@@ -742,7 +744,7 @@ FxAccountsInternal.prototype = {
   _destroyAllOAuthTokens(tokenInfos) {
     // let's just destroy them all in parallel...
     let promises = [];
-    for (let [key, tokenInfo] of Object.entries(tokenInfos || {})) {
+    for (let tokenInfo of Object.values(tokenInfos || {})) {
       promises.push(this._destroyOAuthToken(tokenInfo));
     }
     return Promise.all(promises);
@@ -953,7 +955,6 @@ FxAccountsInternal.prototype = {
 
   getAssertionFromCert(data, keyPair, cert, audience) {
     log.debug("getAssertionFromCert");
-    let payload = {};
     let d = Promise.defer();
     let options = {
       duration: ASSERTION_LIFETIME,
@@ -1575,6 +1576,17 @@ FxAccountsInternal.prototype = {
 
     let currentState = this.currentAccountState;
     return currentState.updateUserAccountData(updateData);
+  },
+
+  getProfileCache() {
+    return this.currentAccountState.getUserAccountData(["profileCache"])
+      .then(data => data ? data.profileCache : null);
+  },
+
+  setProfileCache(profileCache) {
+    return this.currentAccountState.updateUserAccountData({
+      profileCache
+    });
   },
 
   // If you change what we send to the FxA servers during device registration,

@@ -45,6 +45,7 @@ class Promise;
 class HTMLMediaElement;
 }
 
+class AbstractThread;
 class VideoFrameContainer;
 class MediaDecoderStateMachine;
 
@@ -67,6 +68,7 @@ public:
     static const uint32_t sDelay = 500;
 
   public:
+    explicit ResourceCallback(AbstractThread* aMainThread);
     // Start to receive notifications from ResourceCallback.
     void Connect(MediaDecoder* aDecoder);
     // Called upon shutdown to stop receiving notifications.
@@ -91,6 +93,7 @@ public:
     MediaDecoder* mDecoder = nullptr;
     nsCOMPtr<nsITimer> mTimer;
     bool mTimerArmed = false;
+    const RefPtr<AbstractThread> mAbstractMainThread;
   };
 
   typedef MozPromise<bool /* aIgnored */, bool /* aIgnored */, /* IsExclusive = */ true> SeekPromise;
@@ -422,6 +425,11 @@ private:
 
   MediaDecoderOwner* GetOwner() const override;
 
+  AbstractThread* AbstractMainThread() const final override
+  {
+    return mAbstractMainThread;
+  }
+
   typedef MozPromise<RefPtr<CDMProxy>, bool /* aIgnored */, /* IsExclusive = */ true> CDMProxyPromise;
 
   // Resolved when a CDMProxy is available and the capabilities are known or
@@ -465,7 +473,7 @@ private:
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_DIAGNOSTIC_ASSERT(!IsShutdown());
-    mOwner->UpdateReadyState();
+    GetOwner()->UpdateReadyState();
   }
 
   virtual MediaDecoderOwner::NextFrameStatus NextFrameStatus() { return mNextFrameStatus; }
@@ -476,6 +484,9 @@ private:
   virtual void GetMozDebugReaderData(nsACString& aString) {}
 
   virtual void DumpDebugInfo();
+
+  using DebugInfoPromise = MozPromise<nsCString, bool, true>;
+  RefPtr<DebugInfoPromise> RequestDebugInfo();
 
 protected:
   virtual ~MediaDecoder();
@@ -544,6 +555,8 @@ protected:
   static const int DEFAULT_NEXT_FRAME_AVAILABLE_BUFFERED = 250000;
 
 private:
+  nsCString GetDebugInfo();
+
   // Called when the metadata from the media file has been loaded by the
   // state machine. Call on the main thread only.
   void MetadataLoaded(nsAutoPtr<MediaInfo> aInfo,
@@ -628,6 +641,9 @@ protected:
   // It is set in the constructor and cleared in Shutdown when the element goes
   // away. The decoder does not add a reference the element.
   MediaDecoderOwner* mOwner;
+
+  // The AbstractThread from mOwner.
+  const RefPtr<AbstractThread> mAbstractMainThread;
 
   // Counters related to decode and presentation of frames.
   const RefPtr<FrameStatistics> mFrameStats;

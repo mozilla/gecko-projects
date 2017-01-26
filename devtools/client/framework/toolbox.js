@@ -988,7 +988,14 @@ Toolbox.prototype = {
    * @param  {KeyboardEvent} event
    */
   _onToolbarArrowKeypress: function (event) {
-    let { key, target } = event;
+    let { key, target, ctrlKey, shiftKey, altKey, metaKey } = event;
+
+    // If any of the modifier keys are pressed do not attempt navigation as it
+    // might conflict with global shortcuts (Bug 1327972).
+    if (ctrlKey || shiftKey || altKey || metaKey) {
+      return;
+    }
+
     let buttons = [...this._componentMount.querySelectorAll("button")];
     let curIndex = buttons.indexOf(target);
 
@@ -2424,7 +2431,7 @@ Toolbox.prototype = {
   },
 
   /**
-   * Connects to the SPS profiler when the developer tools are open. This is
+   * Connects to the Gecko Profiler when the developer tools are open. This is
    * necessary because of the WebConsole's `profile` and `profileEnd` methods.
    */
   initPerformance: Task.async(function* () {

@@ -118,9 +118,31 @@ function isInDevEdition() {
   return AppConstants.MOZ_DEV_EDITION;
 }
 
-function removeDeveloperButtonIfDevEdition(areaPanelPlacements) {
-  if (isInDevEdition()) {
+function isInNightly() {
+  return AppConstants.NIGHTLY_BUILD;
+}
+
+function removeNonReleaseButtons(areaPanelPlacements) {
+  if (isInDevEdition() && areaPanelPlacements.includes("developer-button")) {
     areaPanelPlacements.splice(areaPanelPlacements.indexOf("developer-button"), 1);
+  }
+
+  if (!isInNightly() && areaPanelPlacements.includes("webcompat-reporter-button")) {
+    areaPanelPlacements.splice(areaPanelPlacements.indexOf("webcompat-reporter-button"), 1);
+  }
+}
+
+function removeNonOriginalButtons() {
+  CustomizableUI.removeWidgetFromArea("sync-button");
+  if (isInNightly()) {
+    CustomizableUI.removeWidgetFromArea("webcompat-reporter-button");
+  }
+}
+
+function restoreNonOriginalButtons() {
+  CustomizableUI.addWidgetToArea("sync-button", CustomizableUI.AREA_PANEL);
+  if (isInNightly()) {
+    CustomizableUI.addWidgetToArea("webcompat-reporter-button", CustomizableUI.AREA_PANEL);
   }
 }
 
@@ -130,6 +152,8 @@ function assertAreaPlacements(areaId, expectedPlacements) {
 }
 
 function placementArraysEqual(areaId, actualPlacements, expectedPlacements) {
+  info("Actual placements: " + actualPlacements.join(", "));
+  info("Expected placements: " + expectedPlacements.join(", "));
   is(actualPlacements.length, expectedPlacements.length,
      "Area " + areaId + " should have " + expectedPlacements.length + " items.");
   let minItems = Math.min(expectedPlacements.length, actualPlacements.length);
@@ -229,20 +253,18 @@ function openAndLoadWindow(aOptions, aWaitForDelayedStartup = false) {
     }, "browser-delayed-startup-finished", false);
 
   } else {
-    win.addEventListener("load", function onLoad() {
-      win.removeEventListener("load", onLoad);
+    win.addEventListener("load", function() {
       deferred.resolve(win);
-    });
+    }, {once: true});
   }
   return deferred.promise;
 }
 
 function promiseWindowClosed(win) {
   let deferred = Promise.defer();
-  win.addEventListener("unload", function onunload() {
-    win.removeEventListener("unload", onunload);
+  win.addEventListener("unload", function() {
     deferred.resolve();
-  });
+  }, {once: true});
   win.close();
   return deferred.promise;
 }

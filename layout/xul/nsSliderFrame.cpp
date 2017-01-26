@@ -38,6 +38,7 @@
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsRefreshDriver.h"            // for nsAPostRefreshObserver
+#include "nsSVGIntegrationUtils.h"
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
@@ -886,6 +887,7 @@ nsSliderFrame::SetCurrentPositionInternal(nsIContent* aScrollbar, int32_t aNewPo
       if (!weakFrame.IsAlive()) {
         return;
       }
+      UpdateAttribute(scrollbar, aNewPos, /* aNotify */false, aIsSmooth);
       CurrentPositionChanged();
       mUserChanged = false;
       return;
@@ -968,6 +970,26 @@ private:
 };
 
 bool
+UsesSVGEffects(nsIFrame* aFrame)
+{
+  return aFrame->StyleEffects()->HasFilters()
+      || nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(aFrame);
+}
+
+bool
+ScrollFrameWillBuildScrollInfoLayer(nsIFrame* aScrollFrame)
+{
+  nsIFrame* current = aScrollFrame;
+  while (current) {
+    if (UsesSVGEffects(current)) {
+      return true;
+    }
+    current = nsLayoutUtils::GetParentOrPlaceholderForCrossDoc(current);
+  }
+  return false;
+}
+
+bool
 nsSliderFrame::StartAPZDrag(WidgetGUIEvent* aEvent)
 {
   if (!aEvent->mFlags.mHandledByAPZ) {
@@ -990,6 +1012,12 @@ nsSliderFrame::StartAPZDrag(WidgetGUIEvent* aEvent)
 
   nsIScrollableFrame* scrollFrameAsScrollable = do_QueryFrame(scrollFrame);
   if (!scrollFrameAsScrollable) {
+    return false;
+  }
+
+  // APZ dragging requires the scrollbar to be layerized, which doesn't
+  // happen for scroll info layers.
+  if (ScrollFrameWillBuildScrollInfoLayer(scrollFrame)) {
     return false;
   }
 

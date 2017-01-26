@@ -197,7 +197,7 @@ RegExpObject::trace(JSTracer* trc, JSObject* obj)
 static JSObject*
 CreateRegExpPrototype(JSContext* cx, JSProtoKey key)
 {
-    return cx->global()->createBlankPrototype(cx, &RegExpObject::protoClass_);
+    return GlobalObject::createBlankPrototype(cx, cx->global(), &RegExpObject::protoClass_);
 }
 
 static const ClassOps RegExpObjectClassOps = {
@@ -1275,7 +1275,7 @@ RegExpShared::needsSweep(JSRuntime* rt)
     // Because of this we only treat the marked_ bit as a hint, and destroy the
     // RegExpShared if it was accidentally marked earlier but wasn't marked by
     // the current trace.
-    bool keep = marked() && IsMarked(&source);
+    bool keep = marked() && IsMarked(rt, &source);
     for (size_t i = 0; i < ArrayLength(compilationArray); i++) {
         RegExpShared::RegExpCompilation& compilation = compilationArray[i];
         if (compilation.jitCode && gc::IsAboutToBeFinalized(&compilation.jitCode))

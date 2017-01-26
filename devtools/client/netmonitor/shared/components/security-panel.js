@@ -4,14 +4,18 @@
 
 "use strict";
 
-const { DOM, PropTypes, createFactory } = require("devtools/client/shared/vendor/react");
-const { connect } = require("devtools/client/shared/vendor/react-redux");
-const TreeView = createFactory(require("devtools/client/shared/components/tree/tree-view"));
+const {
+  createFactory,
+  DOM,
+  PropTypes,
+} = require("devtools/client/shared/vendor/react");
 const { L10N } = require("../../l10n");
 const { getUrlHost } = require("../../request-utils");
-const { getSelectedRequest } = require("../../selectors/index");
 
-const { div, input } = DOM;
+// Components
+const PropertiesView = createFactory(require("./properties-view"));
+
+const { div, input, span } = DOM;
 
 /*
  * Security panel component
@@ -20,17 +24,18 @@ const { div, input } = DOM;
  * the cipher suite, and certificate details
  */
 function SecurityPanel({
-  securityInfo,
-  url,
+  request,
 }) {
+  const { securityInfo, url } = request;
+
   if (!securityInfo || !url) {
-    return div();
+    return null;
   }
 
   const notAvailable = L10N.getStr("netmonitor.security.notAvailable");
   let object;
 
-  if ((securityInfo.state === "secure" || securityInfo.state === "weak")) {
+  if (securityInfo.state === "secure" || securityInfo.state === "weak") {
     const { subject, issuer, validity, fingerprint } = securityInfo.cert;
     const enabledLabel = L10N.getStr("netmonitor.security.enabled");
     const disabledLabel = L10N.getStr("netmonitor.security.disabled");
@@ -87,16 +92,12 @@ function SecurityPanel({
     };
   }
 
-  return div({ id: "security-information" },
-    TreeView({
+  return div({ className: "panel-container security-panel" },
+    PropertiesView({
       object,
-      columns: [{
-        id: "value",
-        width: "100%",
-      }],
-      renderValue: renderValue.bind(null, securityInfo.weaknessReasons),
+      renderValue: (props) => renderValue(props, securityInfo.weaknessReasons),
+      enableFilter: false,
       expandedNodes: getExpandedNodes(object),
-      expandableStrings: false,
     })
   );
 }
@@ -104,11 +105,10 @@ function SecurityPanel({
 SecurityPanel.displayName = "SecurityPanel";
 
 SecurityPanel.propTypes = {
-  securityInfo: PropTypes.object,
-  url: PropTypes.string,
+  request: PropTypes.object.isRequired,
 };
 
-function renderValue(weaknessReasons = [], props) {
+function renderValue(props, weaknessReasons = []) {
   const { member, value } = props;
 
   // Hide object summary
@@ -116,7 +116,7 @@ function renderValue(weaknessReasons = [], props) {
     return null;
   }
 
-  return div({ className: "security-info-value" },
+  return span({ className: "security-info-value" },
     member.name === L10N.getStr("netmonitor.security.error") ?
       // Display multiline text for security error
       value
@@ -159,18 +159,4 @@ function getExpandedNodes(object, path = "", level = 0) {
   return expandedNodes;
 }
 
-module.exports = connect(
-  (state) => {
-    const selectedRequest = getSelectedRequest(state);
-
-    if (selectedRequest) {
-      const { securityInfo, url} = selectedRequest;
-      return {
-        securityInfo,
-        url,
-      };
-    }
-
-    return {};
-  }
-)(SecurityPanel);
+module.exports = SecurityPanel;

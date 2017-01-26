@@ -37,6 +37,7 @@ import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
@@ -433,13 +434,13 @@ public class Tab {
         return mHasTouchListeners;
     }
 
-    public synchronized void addFavicon(String faviconURL, int faviconSize, String mimeType) {
+    public synchronized void addFavicon(@NonNull String faviconURL, int faviconSize, String mimeType) {
         mIconRequestBuilder
                 .icon(IconDescriptor.createFavicon(faviconURL, faviconSize, mimeType))
                 .deferBuild();
     }
 
-    public synchronized void addTouchicon(String iconUrl, int faviconSize, String mimeType) {
+    public synchronized void addTouchicon(@NonNull String iconUrl, int faviconSize, String mimeType) {
         mIconRequestBuilder
                 .icon(IconDescriptor.createTouchicon(iconUrl, faviconSize, mimeType))
                 .deferBuild();
@@ -530,16 +531,18 @@ public class Tab {
 
         final String pageUrl = ReaderModeUtils.stripAboutReaderUrl(getURL());
 
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                mDB.addBookmark(getContentResolver(), mTitle, pageUrl);
-                Tabs.getInstance().notifyListeners(Tab.this, Tabs.TabEvents.BOOKMARK_ADDED);
-            }
-        });
-
         if (AboutPages.isAboutReader(url)) {
             ReadingListHelper.cacheReaderItem(pageUrl, mId, mAppContext);
+            // defer bookmarking after completely added to cache.
+        } else {
+            ThreadUtils.postToBackgroundThread(new Runnable() {
+                @Override
+                public void run() {
+                    mDB.addBookmark(getContentResolver(), mTitle, pageUrl);
+                    Tabs.getInstance().notifyListeners(Tab.this, Tabs.TabEvents.BOOKMARK_ADDED);
+                }
+            });
+
         }
     }
 
@@ -569,7 +572,9 @@ public class Tab {
     }
 
     public void doReload(boolean bypassCache) {
-        GeckoAppShell.notifyObservers("Session:Reload", "{\"bypassCache\":" + String.valueOf(bypassCache) + "}");
+        final GeckoBundle data = new GeckoBundle(1);
+        data.putBoolean("bypassCache", bypassCache);
+        EventDispatcher.getInstance().dispatch("Session:Reload", data);
     }
 
     // Our version of nsSHistory::GetCanGoBack

@@ -614,7 +614,11 @@ EngineManager.prototype = {
     if (val instanceof Engine) {
       name = val.name;
     }
-    delete this._engines[name];
+    if (name in this._engines) {
+      let engine = this._engines[name];
+      delete this._engines[name];
+      engine.finalize();
+    }
   },
 
   clear() {
@@ -727,7 +731,12 @@ Engine.prototype = {
    */
   getValidator() {
     return null;
-  }
+  },
+
+  finalize() {
+    // Ensure the tracker finishes persisting changed IDs to disk.
+    Async.promiseSpinningly(this._tracker._storage.finalize());
+  },
 };
 
 this.SyncEngine = function SyncEngine(name, service) {
@@ -929,15 +938,13 @@ SyncEngine.prototype = {
       engines[this.name] = engineData;
       metaGlobal.payload.engines = engines;
       metaGlobal.changed = true;
-    }
-    // Don't sync this engine if the server has newer data
-    else if (engineData.version > this.version) {
+    } else if (engineData.version > this.version) {
+      // Don't sync this engine if the server has newer data
       let error = new String("New data: " + [engineData.version, this.version]);
       error.failureCode = VERSION_OUT_OF_DATE;
       throw error;
-    }
-    // Changes to syncID mean we'll need to upload everything
-    else if (engineData.syncID != this.syncID) {
+    } else if (engineData.syncID != this.syncID) {
+      // Changes to syncID mean we'll need to upload everything
       this._log.debug("Engine syncIDs: " + [engineData.syncID, this.syncID]);
       this.syncID = engineData.syncID;
       this._resetClient();

@@ -29,6 +29,8 @@ ServoStyleSheet::ServoStyleSheet(css::SheetParsingMode aParsingMode,
 
 ServoStyleSheet::~ServoStyleSheet()
 {
+  UnparentChildren();
+
   DropSheet();
 }
 
@@ -52,30 +54,6 @@ bool
 ServoStyleSheet::HasRules() const
 {
   return mSheet && Servo_StyleSheet_HasRules(mSheet);
-}
-
-void
-ServoStyleSheet::SetOwningDocument(nsIDocument* aDocument)
-{
-  // XXXheycam: Traverse to child ServoStyleSheets to set this, like
-  // CSSStyleSheet::SetOwningDocument does.
-
-  mDocument = aDocument;
-}
-
-ServoStyleSheet*
-ServoStyleSheet::GetParentSheet() const
-{
-  // XXXheycam: When we implement support for child sheets, we'll have
-  // to fix SetOwningDocument to propagate the owning document down
-  // to the children.
-  MOZ_CRASH("stylo: not implemented");
-}
-
-void
-ServoStyleSheet::AppendStyleSheet(ServoStyleSheet* aSheet)
-{
-  aSheet->mDocument = mDocument;
 }
 
 nsresult
@@ -131,23 +109,10 @@ ServoStyleSheet::DropRuleList()
   }
 }
 
-size_t
-ServoStyleSheet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
-{
-  MOZ_CRASH("stylo: not implemented");
-}
-
-#ifdef DEBUG
-void
-ServoStyleSheet::List(FILE* aOut, int32_t aIndex) const
-{
-  MOZ_CRASH("stylo: not implemented");
-}
-#endif
-
-nsIDOMCSSRule*
+css::Rule*
 ServoStyleSheet::GetDOMOwnerRule() const
 {
+  NS_ERROR("stylo: Don't know how to get DOM owner rule for ServoStyleSheet");
   return nullptr;
 }
 

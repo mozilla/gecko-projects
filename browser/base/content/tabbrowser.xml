@@ -1114,10 +1114,9 @@
             var forwardButtonContainer = document.getElementById("urlbar-wrapper");
             if (forwardButtonContainer) {
               forwardButtonContainer.setAttribute("switchingtabs", "true");
-              window.addEventListener("MozAfterPaint", function removeSwitchingtabsAttr() {
-                window.removeEventListener("MozAfterPaint", removeSwitchingtabsAttr);
+              window.addEventListener("MozAfterPaint", function() {
                 forwardButtonContainer.removeAttribute("switchingtabs");
-              });
+              }, {once: true});
             }
 
             this._appendStatusPanel();
@@ -1505,6 +1504,7 @@
         <parameter name="aIsPrerendered"/>
         <body>
           <![CDATA[
+            var aTriggeringPrincipal;
             var aReferrerPolicy;
             var aFromExternal;
             var aRelatedToCurrent;
@@ -1521,6 +1521,7 @@
                 typeof arguments[1] == "object" &&
                 !(arguments[1] instanceof Ci.nsIURI)) {
               let params = arguments[1];
+              aTriggeringPrincipal  = params.triggeringPrincipal
               aReferrerURI          = params.referrerURI;
               aReferrerPolicy       = params.referrerPolicy;
               aCharset              = params.charset;
@@ -1544,7 +1545,9 @@
             var bgLoad = (aLoadInBackground != null) ? aLoadInBackground :
                          Services.prefs.getBoolPref("browser.tabs.loadInBackground");
             var owner = bgLoad ? null : this.selectedTab;
+
             var tab = this.addTab(aURI, {
+                                  triggeringPrincipal: aTriggeringPrincipal,
                                   referrerURI: aReferrerURI,
                                   referrerPolicy: aReferrerPolicy,
                                   charset: aCharset,
@@ -2141,6 +2144,7 @@
             "use strict";
 
             const NS_XUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+            var aTriggeringPrincipal;
             var aReferrerPolicy;
             var aFromExternal;
             var aRelatedToCurrent;
@@ -2159,6 +2163,7 @@
                 typeof arguments[1] == "object" &&
                 !(arguments[1] instanceof Ci.nsIURI)) {
               let params = arguments[1];
+              aTriggeringPrincipal      = params.triggeringPrincipal;
               aReferrerURI              = params.referrerURI;
               aReferrerPolicy           = params.referrerPolicy;
               aCharset                  = params.charset;
@@ -2306,6 +2311,7 @@
               try {
                 b.loadURIWithFlags(aURI, {
                   flags,
+                  triggeringPrincipal: aTriggeringPrincipal,
                   referrerURI: aNoReferrer ? null : aReferrerURI,
                   referrerPolicy: aReferrerPolicy,
                   charset: aCharset,
@@ -3091,7 +3097,11 @@
         <parameter name="aTab"/>
         <body>
           <![CDATA[
-            this.getBrowserForTab(aTab).reload();
+            let browser = this.getBrowserForTab(aTab);
+            // Reset temporary permissions on the current tab. This is done here
+            // because we only want to reset permissions on user reload.
+            SitePermissions.clearTemporaryPermissions(browser);
+            browser.reload();
           ]]>
         </body>
       </method>
@@ -4658,8 +4668,15 @@
               label = this.mStringBundle.getString(stringID);
             }
           } else {
-            label = tab.getAttribute("label") +
-                      (this.AppConstants.E10S_TESTING_ONLY && tab.linkedBrowser && tab.linkedBrowser.isRemoteBrowser ? " - e10s" : "");
+            label = tab.getAttribute("label");
+            if (this.AppConstants.E10S_TESTING_ONLY &&
+                tab.linkedBrowser &&
+                tab.linkedBrowser.isRemoteBrowser) {
+              label += " - e10s";
+              if (Services.prefs.getIntPref("dom.ipc.processCount") > 1) {
+                label += " (" + tab.linkedBrowser.frameLoader.tabParent.osPid + ")";
+              }
+            }
             if (tab.userContextId) {
               label = this.mStringBundle.getFormattedString("tabs.containers.tooltip", [label, ContextualIdentityService.getUserContextLabel(tab.userContextId)]);
             }
@@ -6989,6 +7006,12 @@
       <property name="soundPlaying" readonly="true">
         <getter>
           return this.getAttribute("soundplaying") == "true";
+        </getter>
+      </property>
+
+      <property name="soundBlocked" readonly="true">
+        <getter>
+          return this.getAttribute("blocked") == "true";
         </getter>
       </property>
 

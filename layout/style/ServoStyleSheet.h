@@ -20,6 +20,7 @@ class ServoCSSRuleList;
 
 namespace css {
 class Loader;
+class Rule;
 }
 
 /**
@@ -38,11 +39,6 @@ public:
 
   bool HasRules() const;
 
-  void SetOwningDocument(nsIDocument* aDocument);
-
-  ServoStyleSheet* GetParentSheet() const;
-  void AppendStyleSheet(ServoStyleSheet* aSheet);
-
   MOZ_MUST_USE nsresult ParseSheet(css::Loader* aLoader,
                                    const nsAString& aInput,
                                    nsIURI* aSheetURI,
@@ -57,12 +53,6 @@ public:
    */
   void LoadFailed();
 
-  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
-
-#ifdef DEBUG
-  void List(FILE* aOut = stdout, int32_t aIndex = 0) const;
-#endif
-
   RawServoStyleSheet* RawSheet() const { return mSheet; }
   void SetSheetForImport(RawServoStyleSheet* aSheet) {
     MOZ_ASSERT(!mSheet);
@@ -73,7 +63,7 @@ public:
   // Can't be inline because we can't include ImportRule here.  And can't be
   // called GetOwnerRule because that would be ambiguous with the ImportRule
   // version.
-  nsIDOMCSSRule* GetDOMOwnerRule() const final;
+  css::Rule* GetDOMOwnerRule() const final;
 
   void WillDirty() {}
   void DidDirty() {}

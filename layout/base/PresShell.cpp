@@ -768,8 +768,80 @@ PresShell::AccessibleCaretEnabled(nsIDocShell* aDocShell)
   return false;
 }
 
+nsIPresShell::nsIPresShell()
+    : mFrameConstructor(nullptr)
+    , mViewManager(nullptr)
+    , mFrameManager(nullptr)
+    , mHiddenInvalidationObserverRefreshDriver(nullptr)
+#ifdef ACCESSIBILITY
+    , mDocAccessible(nullptr)
+#endif
+#ifdef DEBUG
+    , mDrawEventTargetFrame(nullptr)
+#endif
+    , mPaintCount(0)
+    , mWeakFrames(nullptr)
+    , mCanvasBackgroundColor(NS_RGBA(0,0,0,0))
+    , mSelectionFlags(0)
+    , mRenderFlags(0)
+    , mStylesHaveChanged(false)
+    , mDidInitialize(false)
+    , mIsDestroying(false)
+    , mIsReflowing(false)
+    , mPaintingSuppressed(false)
+    , mIsThemeSupportDisabled(false)
+    , mIsActive(false)
+    , mFrozen(false)
+    , mIsFirstPaint(false)
+    , mObservesMutationsForPrint(false)
+    , mReflowScheduled(false)
+    , mSuppressInterruptibleReflows(false)
+    , mScrollPositionClampingScrollPortSizeSet(false)
+    , mPresShellId(0)
+    , mFontSizeInflationEmPerLine(0)
+    , mFontSizeInflationMinTwips(0)
+    , mFontSizeInflationLineThreshold(0)
+    , mFontSizeInflationForceEnabled(false)
+    , mFontSizeInflationDisabledInMasterProcess(false)
+    , mFontSizeInflationEnabled(false)
+    , mPaintingIsFrozen(false)
+    , mFontSizeInflationEnabledIsDirty(false)
+    , mIsNeverPainting(false)
+  {}
+
 PresShell::PresShell()
-  : mMouseLocation(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)
+  : mCaretEnabled(false)
+#ifdef DEBUG
+  , mInVerifyReflow(false)
+  , mCurrentReflowRoot(nullptr)
+  , mUpdateCount(0)
+#endif
+#ifdef MOZ_REFLOW_PERF
+  , mReflowCountMgr(nullptr)
+#endif
+  , mMouseLocation(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE)
+  , mCurrentEventFrame(nullptr)
+  , mFirstCallbackEventRequest(nullptr)
+  , mLastCallbackEventRequest(nullptr)
+  , mLastReflowStart(0.0)
+  , mLastAnchorScrollPositionY(0)
+  , mChangeNestCount(0)
+  , mDocumentLoading(false)
+  , mIgnoreFrameDestruction(false)
+  , mHaveShutDown(false)
+  , mLastRootReflowHadUnconstrainedBSize(false)
+  , mNoDelayedMouseEvents(false)
+  , mNoDelayedKeyEvents(false)
+  , mIsDocumentGone(false)
+  , mShouldUnsuppressPainting(false)
+  , mAsyncResizeTimerIsActive(false)
+  , mInResize(false)
+  , mApproximateFrameVisibilityVisited(false)
+  , mNextPaintCompressed(false)
+  , mHasCSSBackgroundColor(false)
+  , mScaleToResolution(false)
+  , mIsLastChromeOnlyEscapeKeyConsumed(false)
+  , mHasReceivedPaintMessage(false)
 {
 #ifdef MOZ_REFLOW_PERF
   mReflowCountMgr = new ReflowCountMgr();
@@ -1080,6 +1152,11 @@ LogTextPerfStats(gfxTextPerfMetrics* aTextPerf,
 void
 PresShell::Destroy()
 {
+  // Do not add code before this line please!
+  if (mHaveShutDown) {
+    return;
+  }
+
   NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
     "destroy called on presshell while scripts not blocked");
 
@@ -1092,7 +1169,8 @@ PresShell::Destroy()
     }
   }
   if (mPresContext) {
-    gfxUserFontSet* fs = mPresContext->GetUserFontSet();
+    const bool mayFlushUserFontSet = false;
+    gfxUserFontSet* fs = mPresContext->GetUserFontSet(mayFlushUserFontSet);
     if (fs) {
       uint32_t fontCount;
       uint64_t fontSize;
@@ -1113,9 +1191,6 @@ PresShell::Destroy()
     mReflowCountMgr = nullptr;
   }
 #endif
-
-  if (mHaveShutDown)
-    return;
 
   if (mZoomConstraintsClient) {
     mZoomConstraintsClient->Destroy();
@@ -3997,7 +4072,7 @@ PresShell::FlushPendingNotifications(mozilla::ChangesToFlush aFlush)
    */
   FlushType flushType = aFlush.mFlushType;
 
-#ifdef MOZ_ENABLE_PROFILER_SPS
+#ifdef MOZ_GECKO_PROFILER
   static const EnumeratedArray<FlushType,
                                FlushType::Count,
                                const char*> flushTypeNames = {
@@ -6241,11 +6316,17 @@ PresShell::Paint(nsView*        aViewToPaint,
     js::ProfileEntry::Category::GRAPHICS);
 
   Maybe<js::AutoAssertNoContentJS> nojs;
+
+  // On Android, Flash can call into content JS during painting, so we can't
+  // assert there. However, we don't rely on this assertion on Android because
+  // we don't paint while JS is running.
+#if !defined(MOZ_WIDGET_ANDROID)
   if (!(aFlags & nsIPresShell::PAINT_COMPOSITE)) {
     // We need to allow content JS when the flag is set since we may trigger
     // MozAfterPaint events in content in those cases.
     nojs.emplace(dom::danger::GetJSContext());
   }
+#endif
 
   NS_ASSERTION(!mIsDestroying, "painting a destroyed PresShell");
   NS_ASSERTION(aViewToPaint, "null view");
@@ -7257,25 +7338,31 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     nsPresContext* rootPresContext = framePresContext->GetRootPresContext();
     NS_ASSERTION(rootPresContext == mPresContext->GetRootPresContext(),
                  "How did we end up outside the connected prescontext/viewmanager hierarchy?");
-    // If we aren't starting our event dispatch from the root frame of the root prescontext,
-    // then someone must be capturing the mouse. In that case we don't want to search the popup
-    // list.
-    if (framePresContext == rootPresContext &&
-        frame == mFrameConstructor->GetRootFrame()) {
-      nsIFrame* popupFrame =
-        nsLayoutUtils::GetPopupFrameForEventCoordinates(rootPresContext, aEvent);
-      // If a remote browser is currently capturing input break out if we
-      // detect a chrome generated popup.
-      if (popupFrame && capturingContent &&
-          EventStateManager::IsRemoteTarget(capturingContent)) {
-        capturingContent = nullptr;
-      }
-      // If the popupFrame is an ancestor of the 'frame', the frame should
-      // handle the event, otherwise, the popup should handle it.
-      if (popupFrame &&
-          !nsContentUtils::ContentIsCrossDocDescendantOf(
-             framePresContext->GetPresShell()->GetDocument(),
-             popupFrame->GetContent())) {
+    nsIFrame* popupFrame =
+      nsLayoutUtils::GetPopupFrameForEventCoordinates(rootPresContext, aEvent);
+    // If a remote browser is currently capturing input break out if we
+    // detect a chrome generated popup.
+    if (popupFrame && capturingContent &&
+        EventStateManager::IsRemoteTarget(capturingContent)) {
+      capturingContent = nullptr;
+    }
+    // If the popupFrame is an ancestor of the 'frame', the frame should
+    // handle the event, otherwise, the popup should handle it.
+    if (popupFrame &&
+        !nsContentUtils::ContentIsCrossDocDescendantOf(
+           framePresContext->GetPresShell()->GetDocument(),
+           popupFrame->GetContent())) {
+
+      // If we aren't starting our event dispatch from the root frame of the
+      // root prescontext, then someone must be capturing the mouse. In that
+      // case we only want to use the popup list if the capture is
+      // inside the popup.
+      if (framePresContext == rootPresContext &&
+          frame == mFrameConstructor->GetRootFrame()) {
+        frame = popupFrame;
+      } else if (capturingContent &&
+                 nsContentUtils::ContentIsDescendantOf(
+                   capturingContent, popupFrame->GetContent())) {
         frame = popupFrame;
       }
     }
@@ -8054,9 +8141,6 @@ PresShell::HandleEventInternal(WidgetEvent* aEvent,
             mIsLastChromeOnlyEscapeKeyConsumed = true;
           }
         }
-      }
-      if (aEvent->mMessage == eKeyDown) {
-        mIsLastKeyDownCanceled = aEvent->mFlags.mDefaultPrevented;
       }
       break;
     }
@@ -8847,9 +8931,6 @@ PresShell::FireOrClearDelayedEvents(bool aFireEvents)
            !doc->EventHandlingSuppressed()) {
       nsAutoPtr<DelayedEvent> ev(mDelayedEvents[0].forget());
       mDelayedEvents.RemoveElementAt(0);
-      if (ev->IsKeyPressEvent() && mIsLastKeyDownCanceled) {
-        continue;
-      }
       ev->Dispatch();
     }
     if (!doc->EventHandlingSuppressed()) {
@@ -9038,7 +9119,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
     parent = nsLayoutUtils::GetCrossDocParentFrame(parent);
   }
 
-#ifdef MOZ_ENABLE_PROFILER_SPS
+#ifdef MOZ_GECKO_PROFILER
   nsIURI *uri = mDocument->GetDocumentURI();
   PROFILER_LABEL_PRINTF("PresShell", "DoReflow",
     js::ProfileEntry::Category::GRAPHICS, "(%s)",
@@ -9657,12 +9738,6 @@ PresShell::DelayedKeyEvent::DelayedKeyEvent(WidgetKeyboardEvent* aEvent) :
   mEvent = keyEvent;
 }
 
-bool
-PresShell::DelayedKeyEvent::IsKeyPressEvent()
-{
-  return mEvent->mMessage == eKeyPress;
-}
-
 // Start of DEBUG only code
 
 #ifdef DEBUG
@@ -10039,11 +10114,21 @@ PresShell::VerifyIncrementalReflow()
 
 // Layout debugging hooks
 void
-PresShell::ListStyleContexts(nsIFrame *aRootFrame, FILE *out, int32_t aIndent)
+PresShell::ListStyleContexts(FILE *out, int32_t aIndent)
 {
-  nsStyleContext *sc = aRootFrame->StyleContext();
-  if (sc)
-    sc->List(out, aIndent);
+  nsIFrame* rootFrame = GetRootFrame();
+  if (rootFrame) {
+    rootFrame->StyleContext()->List(out, aIndent);
+  }
+
+  // The root element's frame's style context is the root of a separate tree.
+  Element* rootElement = mDocument->GetRootElement();
+  if (rootElement) {
+    nsIFrame* rootElementFrame = rootElement->GetPrimaryFrame();
+    if (rootElementFrame) {
+      rootElementFrame->StyleContext()->List(out, aIndent);
+    }
+  }
 }
 
 void

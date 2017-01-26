@@ -1376,6 +1376,35 @@ var AddonManagerInternal = {
     return uri.replace(/\+/g, "%2B");
   },
 
+  _updatePromptHandler(info) {
+    let oldPerms = info.existingAddon.userPermissions || {hosts: [], permissions: []};
+    let newPerms = info.addon.userPermissions;
+
+    // See bug 1331769: should we do something more complicated to
+    // compare host permissions?
+    // e.g., if we go from <all_urls> to a specific host or from
+    // a *.domain.com to specific-host.domain.com that's actually a
+    // drop in permissions but the simple test below will cause a prompt.
+    let difference = {
+      hosts: newPerms.hosts.filter(perm => !oldPerms.hosts.includes(perm)),
+      permissions: newPerms.permissions.filter(perm => !oldPerms.permissions.includes(perm)),
+    };
+
+    // If there are no new permissions, just go ahead with the update
+    if (difference.hosts.length == 0 && difference.permissions.length == 0) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      let subject = {wrappedJSObject: {
+        addon: info.addon,
+        permissions: difference,
+        resolve, reject
+      }};
+      Services.obs.notifyObservers(subject, "webextension-update-permissions", null);
+    });
+  },
+
   /**
    * Performs a background update check by starting an update for all add-ons
    * that can be updated.
@@ -1430,6 +1459,9 @@ var AddonManagerInternal = {
                   // XXX we really should resolve when this install is done,
                   // not when update-available check completes, no?
                   logger.debug(`Starting upgrade install of ${aAddon.id}`);
+                  if (WEBEXT_PERMISSION_PROMPTS) {
+                    aInstall.promptHandler = (...args) => AddonManagerInternal._updatePromptHandler(...args);
+                  }
                   aInstall.install();
                 }
               },
@@ -2077,7 +2109,13 @@ var AddonManagerInternal = {
             install.addon.appDisabled == false) {
               install.addon.userDisabled = false;
         }
-        self.installNotifyObservers("addon-install-complete", browser, url, install);
+
+        if (WEBEXT_PERMISSION_PROMPTS) {
+          let subject = {wrappedJSObject: {target: browser, addon: install.addon}};
+          Services.obs.notifyObservers(subject, "webextension-install-notify", null);
+        } else {
+          self.installNotifyObservers("addon-install-complete", browser, url, install);
+        }
       },
     };
 
@@ -2954,14 +2992,29 @@ var AddonManagerInternal = {
       ];
 
       let listener = {};
-      events.forEach(event => {
-        listener[event] = (install) => {
-          let data = {event, id};
-          AddonManager.webAPI.copyProps(install, data);
-          this.sendEvent(mm, data);
-        }
+      let installPromise = new Promise((resolve, reject) => {
+        events.forEach(event => {
+          listener[event] = (install, addon) => {
+            let data = {event, id};
+            AddonManager.webAPI.copyProps(install, data);
+            this.sendEvent(mm, data);
+            if (event == "onInstallEnded") {
+              resolve(addon);
+            } else if (event == "onDownloadFailed" || event == "onInstallFailed") {
+              reject({message: "install failed"});
+            } else if (event == "onDownloadCancelled" || event == "onInstallCancelled") {
+              reject({message: "install cancelled"});
+            }
+          }
+        });
       });
-      return listener;
+
+      // We create the promise here since this is where we're setting
+      // up the InstallListener, but if the install is never started,
+      // no handlers will be attached so make sure we terminate errors.
+      installPromise.catch(() => {});
+
+      return {listener, installPromise};
     },
 
     forgetInstall(id) {
@@ -2995,15 +3048,15 @@ var AddonManagerInternal = {
         return Promise.reject({message: err.message});
       }
 
-      return AddonManagerInternal.getInstallForURL(options.url, "application/x-xpinstall",
-                                                   options.hash).then(install => {
+      return AddonManagerInternal.getInstallForURL(options.url, "application/x-xpinstall", options.hash)
+                                 .then(install => {
         AddonManagerInternal.setupPromptHandler(target, null, install, false);
 
         let id = this.nextInstall++;
-        let listener = this.makeListener(id, target.messageManager);
+        let {listener, installPromise} = this.makeListener(id, target.messageManager);
         install.addListener(listener);
 
-        this.installs.set(id, {install, target, listener});
+        this.installs.set(id, {install, target, listener, installPromise});
 
         let result = {id};
         this.copyProps(install, result);
@@ -3046,7 +3099,17 @@ var AddonManagerInternal = {
       if (!state) {
         return Promise.reject(`invalid id ${id}`);
       }
-      return Promise.resolve(state.install.install());
+      let result = state.install.install();
+
+      return state.installPromise.then(addon => new Promise(resolve => {
+        let callback = () => resolve(result);
+        if (Preferences.get(PREF_WEBEXT_PERM_PROMPTS, false)) {
+          let subject = {wrappedJSObject: {target, addon, callback}};
+          Services.obs.notifyObservers(subject, "webextension-install-notify", null)
+        } else {
+          callback();
+        }
+      }));
     },
 
     addonInstallCancel(target, id) {

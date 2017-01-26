@@ -349,7 +349,7 @@ partial interface Navigator {
 partial interface Navigator {
   [Throws, Pref="beacon.enabled"]
   boolean sendBeacon(DOMString url,
-                     optional (ArrayBufferView or Blob or DOMString or FormData)? data = null);
+                     optional BodyInit? data = null);
 };
 
 partial interface Navigator {
@@ -382,6 +382,6 @@ interface NavigatorConcurrentHardware {
 };
 
 partial interface Navigator {
-  [Pref="security.webauth.w3c", SameObject]
+  [Pref="security.webauth.webauthn", SameObject]
   readonly attribute WebAuthentication authentication;
 };

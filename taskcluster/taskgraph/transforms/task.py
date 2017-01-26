@@ -93,7 +93,7 @@ task_description_schema = Schema({
         'job-name': basestring,
 
         # Type of gecko v2 index to use
-        'type': Any('generic', 'nightly', 'l10n'),
+        'type': Any('generic', 'nightly', 'l10n', 'nightly-with-multi-l10n'),
 
         # The rank that the task will receive in the TaskCluster
         # index.  A newly completed task supercedes the currently
@@ -245,10 +245,14 @@ task_description_schema = Schema({
             Extra: basestring,  # additional properties are allowed
         },
     }, {
-        'implementation': 'macosx-engine',
+        'implementation': 'native-engine',
 
         # A link for an executable to download
-        Optional('link'): basestring,
+        Optional('context'): basestring,
+
+        # Tells the worker whether machine should reboot
+        # after the task is finished.
+        Optional('reboot'): bool,
 
         # the command to run
         Required('command'): [taskref_or_string],
@@ -576,7 +580,7 @@ def build_balrog_payload(config, task, task_def):
     }
 
 
-@payload_builder('macosx-engine')
+@payload_builder('native-engine')
 def build_macosx_engine_payload(config, task, task_def):
     worker = task['worker']
     artifacts = map(lambda artifact: {
@@ -587,14 +591,15 @@ def build_macosx_engine_payload(config, task, task_def):
     }, worker['artifacts'])
 
     task_def['payload'] = {
-        'link': worker['link'],
+        'context': worker['context'],
         'command': worker['command'],
         'env': worker['env'],
+        'reboot': worker['reboot'],
         'artifacts': artifacts,
     }
 
     if task.get('needs-sccache'):
-        raise Exception('needs-sccache not supported in macosx-engine')
+        raise Exception('needs-sccache not supported in native-engine')
 
 
 @payload_builder('buildbot-bridge')
@@ -661,11 +666,21 @@ def add_nightly_index_routes(config, task):
     for tpl in V2_NIGHTLY_TEMPLATES:
         routes.append(tpl.format(**subs))
 
+    # Also add routes for en-US
+    task = add_l10n_index_routes(config, task, force_locale="en-US")
+
+    return task
+
+
+@index_builder('nightly-with-multi-l10n')
+def add_nightly_multi_index_routes(config, task):
+    task = add_nightly_index_routes(config, task)
+    task = add_l10n_index_routes(config, task, force_locale="multi")
     return task
 
 
 @index_builder('l10n')
-def add_l10n_index_routes(config, task):
+def add_l10n_index_routes(config, task, force_locale=None):
     index = task.get('index')
     routes = task.setdefault('routes', [])
 
@@ -681,6 +696,10 @@ def add_l10n_index_routes(config, task):
 
     locales = task['attributes'].get('chunk_locales',
                                      task['attributes'].get('all_locales'))
+
+    if force_locale:
+        # Used for en-US and multi-locale
+        locales = [force_locale]
 
     if not locales:
         raise Exception("Error: Unable to use l10n index for tasks without locales")
@@ -724,6 +743,25 @@ def add_index_routes(config, tasks):
             extra_index['rank'] = rank
 
         del task['index']
+        yield task
+
+
+@transforms.add
+def add_files_changed(config, tasks):
+    for task in tasks:
+        if 'files-changed' not in task.get('when', {}):
+            yield task
+            continue
+
+        task['when']['files-changed'].extend([
+            '{}/**'.format(config.path),
+            'taskcluster/taskgraph/**',
+        ])
+
+        if 'in-tree' in task['worker'].get('docker-image', {}):
+            task['when']['files-changed'].append('taskcluster/docker/{}/**'.format(
+                task['worker']['docker-image']['in-tree']))
+
         yield task
 
 

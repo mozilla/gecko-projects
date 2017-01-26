@@ -70,9 +70,12 @@ stylo-tests:
     - mochitest-style
 
 ccov-code-coverage-tests:
+    - crashtest
+    - jsreftest
     - mochitest
     - mochitest-browser-chrome
     - mochitest-devtools-chrome
+    - reftest
     - xpcshell
 
 jsdcov-code-coverage-tests:
@@ -110,16 +113,6 @@ windows-vm-tests:
 #    - mochitest-clipboard
 #    - mochitest-gpu
 #    - mochitest-other
-
-ccov-code-coverage-tests:
-    - mochitest
-    - mochitest-browser-chrome
-    - mochitest-devtools-chrome
-    - xpcshell
-
-jsdcov-code-coverage-tests:
-    - mochitest-browser-chrome
-    - mochitest-devtools-chrome
 
 macosx64-tests-debug:
     - cppunit
@@ -179,6 +172,9 @@ linux32-tests:
 linux32-opt-tests:
     # mochitest-dt is too slow on linux32/debug
     - mochitest-devtools-chrome
+
+desktop-screenshot-capture:
+    - mochitest-browser-screenshots
 
 android-common-tests:
     - cppunit

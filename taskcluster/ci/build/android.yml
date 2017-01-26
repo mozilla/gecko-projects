@@ -63,7 +63,7 @@ android-x86-nightly/opt:
         max-run-time: 7200
     run:
         using: mozharness
-        actions: [get-secrets build multi-l10n update]
+        actions: [get-secrets build generate-build-stats multi-l10n update]
         config:
             - builds/releng_base_android_64_builds.py
             - disable_signing.py
@@ -106,7 +106,7 @@ android-api-15-nightly/opt:
     index:
         product: mobile
         job-name: android-api-15-opt
-        type: nightly
+        type: nightly-with-multi-l10n
     treeherder:
         platform: android-4-0-armv7-api15/opt
         symbol: tc(N)

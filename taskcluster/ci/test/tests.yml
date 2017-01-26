@@ -10,6 +10,7 @@ cppunit:
     suite: cppunittest
     treeherder-symbol: tc(Cpp)
     e10s: false
+    docker-image: {"in-tree": "desktop1604-test"}
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
@@ -58,6 +59,7 @@ crashtest:
     e10s:
         by-test-platform:
             windows.*: false # Bug 1304435
+            linux64-ccov/opt: false
             default: both
     mozharness:
         by-test-platform:
@@ -94,6 +96,7 @@ external-media-tests:
     e10s: false
     tier: 2
     max-run-time: 5400
+    docker-image: {"in-tree": "desktop1604-test"}
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
@@ -146,6 +149,7 @@ gtest:
     treeherder-symbol: tc(GTest)
     e10s: false
     instance-size: xlarge
+    docker-image: {"in-tree": "desktop1604-test"}
     mozharness:
         script: desktop_unittest.py
         no-read-buildbot-config: true
@@ -167,6 +171,7 @@ jittest:
     suite: jittest/jittest-chunked
     treeherder-symbol: tc(Jit)
     e10s: false
+    docker-image: {"in-tree": "desktop1604-test"}
     chunks:
         by-test-platform:
             windows.*: 1
@@ -191,6 +196,7 @@ jsreftest:
     description: "JS Reftest run"
     suite: reftest/jsreftest
     treeherder-symbol: tc-R(J)
+    docker-image: {"in-tree": "desktop1604-test"}
     instance-size:
         by-test-platform:
             android.*: xlarge
@@ -206,6 +212,7 @@ jsreftest:
             # Bug 1321782
             windows.*: false
             android.*: false
+            linux64-ccov/opt: false
             default: both
     max-run-time:
         by-test-platform:
@@ -294,10 +301,6 @@ mochitest:
         by-test-platform:
             android.*: xlarge
             default: legacy # Bug 1281241: migrating to m3.large instances
-    run-on-projects:
-        by-test-platform:
-            linux64-ccov/opt: []
-            default: ['all']
     chunks:
         by-test-platform:
             android-4.3-arm7-api-15/debug: 32
@@ -341,12 +344,7 @@ mochitest:
                             - unittests/linux_unittest.py
                             - remove_executables.py
                 extra-options:
-                    by-test-platform:
-                        linux64-ccov/opt:
-                            - --mochitest-suite=plain-chunked
-                            - --code-coverage
-                        default:
-                            - --mochitest-suite=plain-chunked
+                    - --mochitest-suite=plain-chunked
 
 mochitest-a11y:
     description: "Mochitest a11y run"
@@ -382,7 +380,6 @@ mochitest-browser-chrome:
     run-on-projects:
         by-test-platform:
             linux64-jsdcov/opt: []
-            linux64-ccov/opt: []
             default: ['all']
     chunks:
         by-test-platform:
@@ -420,9 +417,6 @@ mochitest-browser-chrome:
             by-test-platform:
                 linux64-jsdcov/opt:
                     - --mochitest-suite=browser-chrome-coverage
-                linux64-ccov/opt:
-                    - --mochitest-suite=browser-chrome-chunked
-                    - --code-coverage
                 default:
                     - --mochitest-suite=browser-chrome-chunked
     # Bug 1281241: migrating to m3.large instances
@@ -431,6 +425,35 @@ mochitest-browser-chrome:
             linux64-jsdcov/opt: xlarge
             linux64-ccov/opt: xlarge
             default: legacy
+    allow-software-gl-layers: false
+
+mochitest-browser-screenshots:
+    description: "Mochitest Browser Screenshots"
+    suite: mochitest/browser-chrome-screenshots
+    treeherder-symbol: tc-M(ss)
+    loopback-video: true
+    run-on-projects:
+        by-test-platform:
+            linux64/opt: ['mozilla-central', 'try']
+            default: []
+    e10s: true
+    max-run-time: 3600
+    mozharness:
+        script: desktop_unittest.py
+        no-read-buildbot-config: true
+        config:
+            by-test-platform:
+                windows.*:
+                    - unittests/win_taskcluster_unittest.py
+                macosx.*:
+                    - remove_executables.py
+                    - unittests/mac_unittest.py
+                linux.*:
+                    - unittests/linux_unittest.py
+                    - remove_executables.py
+        extra-options:
+            - --mochitest-suite=browser-chrome-screenshots
+    instance-size: legacy
     allow-software-gl-layers: false
 
 mochitest-chrome:
@@ -444,14 +467,11 @@ mochitest-chrome:
             default: default
     chunks:
         by-test-platform:
-            android-4.3-arm7-api-15/debug: 2
-            android.*: 1
+            android-4.3-arm7-api-15/debug: 4
+            android.*: 2
             macosx.*: 1
             default: 3
-    max-run-time:
-        by-test-platform:
-            android.*: 5400
-            default: 3600
+    max-run-time: 3600
     e10s: false
     mozharness:
         by-test-platform:
@@ -534,7 +554,6 @@ mochitest-devtools-chrome:
             default: 10
     run-on-projects:
         by-test-platform:
-            linux64-ccov/opt: []
             linux64-jsdcov/opt: []
             windows.*: ['mozilla-central', 'try']
             default: ['all']
@@ -560,9 +579,6 @@ mochitest-devtools-chrome:
                     - remove_executables.py
         extra-options:
             by-test-platform:
-                linux64-ccov/opt:
-                    - --mochitest-suite=mochitest-devtools-chrome-chunked
-                    - --code-coverage
                 linux64-jsdcov/opt:
                     - --mochitest-suite=mochitest-devtools-chrome-coverage
                 default:
@@ -621,6 +637,7 @@ mochitest-jetpack:
     loopback-video: true
     e10s: false
     max-run-time: 5400
+    docker-image: {"in-tree": "desktop1604-test"}
     run-on-projects:
         by-test-platform:
             windows.*: ['mozilla-central', 'try']
@@ -817,6 +834,10 @@ reftest:
         by-test-platform:
             android.*: 10800
             default: 3600
+    e10s:
+        by-test-platform:
+            linux64-ccov/opt: false
+            default: both
     mozharness:
         by-test-platform:
             android.*:
@@ -874,6 +895,10 @@ reftest-stylo:
     suite: reftest/reftest-stylo
     treeherder-symbol: tc-R(Rs)
     chunks: 16
+    run-on-projects:
+        by-test-platform:
+            linux64-stylo/opt: []
+            linux64-stylo/debug: []
     mozharness:
         script: desktop_unittest.py
         no-read-buildbot-config: true
@@ -1151,15 +1176,10 @@ xpcshell:
     description: "xpcshell test run"
     suite: xpcshell
     treeherder-symbol: tc-X()
-    run-on-projects:
-        by-test-platform:
-            linux64-ccov/opt: []
-            default: ['all']
     chunks:
         by-test-platform:
             linux64/debug: 10
-            android-4.2-x86/opt: 4
-            android.*: 6
+            android-4.2-x86/opt: 6
             # windows.*: 1
             macosx.*: 1
             default: 8
@@ -1167,10 +1187,7 @@ xpcshell:
         by-test-platform:
             android.*: xlarge
             default: legacy # Bug 1281241: migrating to m3.large instances
-    max-run-time:
-        by-test-platform:
-            android.*: 7200
-            default: 5400
+    max-run-time: 5400
     e10s: false
     allow-software-gl-layers: false
     mozharness:
@@ -1202,9 +1219,4 @@ xpcshell:
                             - unittests/linux_unittest.py
                             - remove_executables.py
                 extra-options:
-                    by-test-platform:
-                        linux64-ccov/opt:
-                            - --xpcshell-suite=xpcshell
-                            - --code-coverage
-                        default:
-                            - --xpcshell-suite=xpcshell
+                    - --xpcshell-suite=xpcshell

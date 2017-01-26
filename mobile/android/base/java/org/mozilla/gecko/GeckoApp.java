@@ -585,17 +585,20 @@ public abstract class GeckoApp
                 Log.e(LOGTAG, "Error adding sanitize object", ex);
             }
 
-            // If the user has opted out of session restore, and does want to clear history
+            // If the user wants to clear open tabs, or else has opted out of session restore and does want to clear history,
             // we also want to prevent the current session info from being saved.
-            if (clearObj.has("private.data.history")) {
-                final String sessionRestore = getSessionRestorePreference(getSharedPreferences());
-                try {
-                    res.put("dontSaveSession", "quit".equals(sessionRestore));
-                } catch (JSONException ex) {
-                    Log.e(LOGTAG, "Error adding session restore data", ex);
-                }
-            }
+            try {
+                if (clearObj.has("private.data.openTabs")) {
+                    res.put("dontSaveSession", true);
+                } else if (clearObj.has("private.data.history")) {
 
+                    final String sessionRestore = getSessionRestorePreference(getSharedPreferences());
+                    res.put("dontSaveSession", "quit".equals(sessionRestore));
+
+                }
+            } catch (JSONException ex) {
+                Log.e(LOGTAG, "Error adding session restore data", ex);
+            }
             GeckoAppShell.notifyObservers("Browser:Quit", res.toString());
             // We don't call doShutdown() here because this creates a race condition which can
             // cause the clearing of private data to fail. Instead, we shut down the UI only after
@@ -862,12 +865,16 @@ public abstract class GeckoApp
                 SparseBooleanArray checkedItemPositions = listView.getCheckedItemPositions();
 
                 // An array of the indices of the permissions we want to clear
-                JSONArray permissionsToClear = new JSONArray();
-                for (int i = 0; i < checkedItemPositions.size(); i++)
-                    if (checkedItemPositions.get(i))
-                        permissionsToClear.put(i);
+                final ArrayList<Integer> permissionsToClear = new ArrayList<>();
+                for (int i = 0; i < checkedItemPositions.size(); i++) {
+                    if (checkedItemPositions.get(i)) {
+                        permissionsToClear.add(i);
+                    }
+                }
 
-                GeckoAppShell.notifyObservers("Permissions:Clear", permissionsToClear.toString());
+                final GeckoBundle data = new GeckoBundle(1);
+                data.putIntArray("permissions", permissionsToClear);
+                EventDispatcher.getInstance().dispatch("Permissions:Clear", data);
             }
         });
 
@@ -1591,10 +1598,26 @@ public abstract class GeckoApp
         return uri != null && !AboutPages.isAboutHome(uri);
     }
 
+    protected int getNewTabFlags() {
+        final boolean isFirstTab = !mWasFirstTabShownAfterActivityUnhidden;
+
+        final SafeIntent intent = new SafeIntent(getIntent());
+        final String action = intent.getAction();
+
+        int flags = Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_USER_ENTERED | Tabs.LOADURL_EXTERNAL;
+        if (ACTION_HOMESCREEN_SHORTCUT.equals(action)) {
+            flags |= Tabs.LOADURL_PINNED;
+        }
+        if (isFirstTab) {
+            flags |= Tabs.LOADURL_FIRST_AFTER_ACTIVITY_UNHIDDEN;
+        }
+
+        return flags;
+    }
+
     private void initialize() {
         mInitialized = true;
 
-        final boolean isFirstTab = !mWasFirstTabShownAfterActivityUnhidden;
         mWasFirstTabShownAfterActivityUnhidden = true; // Reset since we'll be loading a tab.
 
         final SafeIntent intent = new SafeIntent(getIntent());
@@ -1634,13 +1657,7 @@ public abstract class GeckoApp
             processActionViewIntent(new Runnable() {
                 @Override
                 public void run() {
-                    int flags = Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_USER_ENTERED | Tabs.LOADURL_EXTERNAL;
-                    if (ACTION_HOMESCREEN_SHORTCUT.equals(action)) {
-                        flags |= Tabs.LOADURL_PINNED;
-                    }
-                    if (isFirstTab) {
-                        flags |= Tabs.LOADURL_FIRST_AFTER_ACTIVITY_UNHIDDEN;
-                    }
+                    final int flags = getNewTabFlags();
                     loadStartupTab(passedUri, intent, flags);
                 }
             });

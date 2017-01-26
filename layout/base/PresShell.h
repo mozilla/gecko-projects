@@ -84,8 +84,6 @@ class PresShell final : public nsIPresShell,
 public:
   PresShell();
 
-  NS_DECL_AND_IMPL_ZEROING_OPERATOR_NEW
-
   // nsISupports
   NS_DECL_ISUPPORTS
 
@@ -332,8 +330,7 @@ public:
 #endif
 
 #ifdef DEBUG
-  virtual void ListStyleContexts(nsIFrame *aRootFrame, FILE *out,
-                                 int32_t aIndent = 0) override;
+  virtual void ListStyleContexts(FILE *out, int32_t aIndent = 0) override;
 
   virtual void ListStyleSheets(FILE *out, int32_t aIndent = 0) override;
   virtual void VerifyStyleTree() override;
@@ -600,7 +597,6 @@ protected:
   public:
     virtual ~DelayedEvent() { }
     virtual void Dispatch() { }
-    virtual bool IsKeyPressEvent() { return false; }
   };
 
   class DelayedInputEvent : public DelayedEvent
@@ -625,7 +621,6 @@ protected:
   {
   public:
     explicit DelayedKeyEvent(mozilla::WidgetKeyboardEvent* aEvent);
-    virtual bool IsKeyPressEvent() override;
   };
 
   // Check if aEvent is a mouse event and record the mouse location for later
@@ -904,8 +899,6 @@ protected:
 
   // Whether the widget has received a paint message yet.
   bool                      mHasReceivedPaintMessage : 1;
-
-  bool                      mIsLastKeyDownCanceled : 1;
 
   static bool               sDisableNonTestMouseEvents;
 };

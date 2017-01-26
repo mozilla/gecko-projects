@@ -480,13 +480,6 @@ class MochitestArguments(ArgumentContainer):
           "help": "Dump a DMD log after each test in the directory specified "
                   "by --dump-output-directory.",
           }],
-        [["--slowscript"],
-         {"action": "store_true",
-          "default": False,
-          "help": "Do not set the JS_DISABLE_SLOW_SCRIPT_SIGNALS env variable; "
-                  "when not set, recoverable but misleading SIGSEGV instances "
-                  "may occur in Ion/Odin JIT code.",
-          }],
         [["--screenshot-on-fail"],
          {"action": "store_true",
           "default": False,
@@ -594,6 +587,11 @@ class MochitestArguments(ArgumentContainer):
           "default": False,
           "help": "Delete pending crash reports before running tests.",
           "suppress": True,
+          }],
+        [["--websocket-process-bridge-port"],
+         {"default": "8191",
+          "dest": "websocket_process_bridge_port",
+          "help": "Port for websocket/process bridge. Default 8191.",
           }],
     ]
 

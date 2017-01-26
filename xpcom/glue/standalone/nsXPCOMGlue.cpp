@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsXPCOMGlue.h"
+#include "mozilla/Bootstrap.h"
 
 #include "nspr.h"
 #include "nsDebug.h"
@@ -16,6 +16,7 @@
 
 #include "mozilla/FileUtils.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/UniquePtrExtensions.h"
 
 using namespace mozilla;
 
@@ -26,6 +27,8 @@ using namespace mozilla;
 #else
 #define READ_TEXTMODE "r"
 #endif
+
+typedef void (*NSFuncPtr)();
 
 #if defined(XP_WIN)
 #include <windows.h>
@@ -389,10 +392,20 @@ GetBootstrap(const char* aXPCOMFile)
 #endif
 
   if (!aXPCOMFile) {
-    aXPCOMFile = XPCOM_DLL;
+    return nullptr;
   }
 
-  if (NS_FAILED(XPCOMGlueLoad(aXPCOMFile))) {
+  char *lastSlash = strrchr(const_cast<char *>(aXPCOMFile), XPCOM_FILE_PATH_SEPARATOR[0]);
+  if (!lastSlash) {
+    return nullptr;
+  }
+  size_t base_len = size_t(lastSlash - aXPCOMFile) + 1;
+
+  UniqueFreePtr<char> file(reinterpret_cast<char*>(malloc(base_len + sizeof(XPCOM_DLL))));
+  memcpy(file.get(), aXPCOMFile, base_len);
+  memcpy(file.get() + base_len, XPCOM_DLL, sizeof(XPCOM_DLL));
+
+  if (NS_FAILED(XPCOMGlueLoad(file.get()))) {
     return nullptr;
   }
 

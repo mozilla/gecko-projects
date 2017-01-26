@@ -198,8 +198,8 @@ class JSObject : public js::gc::Cell
         GENERATE_SHAPE
     };
 
-    bool setFlags(js::ExclusiveContext* cx, js::BaseShape::Flag flags,
-                  GenerateShape generateShape = GENERATE_NONE);
+    static bool setFlags(js::ExclusiveContext* cx, JS::HandleObject obj, js::BaseShape::Flag flags,
+                         GenerateShape generateShape = GENERATE_NONE);
     inline bool hasAllFlags(js::BaseShape::Flag flags) const;
 
     /*
@@ -212,16 +212,16 @@ class JSObject : public js::gc::Cell
      * (see Purge{Scope,Proto}Chain in jsobj.cpp).
      */
     inline bool isDelegate() const;
-    bool setDelegate(js::ExclusiveContext* cx) {
-        return setFlags(cx, js::BaseShape::DELEGATE, GENERATE_SHAPE);
+    static bool setDelegate(js::ExclusiveContext* cx, JS::HandleObject obj) {
+        return setFlags(cx, obj, js::BaseShape::DELEGATE, GENERATE_SHAPE);
     }
 
     inline bool isBoundFunction() const;
     inline bool hasSpecialEquality() const;
 
     inline bool watched() const;
-    bool setWatched(js::ExclusiveContext* cx) {
-        return setFlags(cx, js::BaseShape::WATCHED, GENERATE_SHAPE);
+    static bool setWatched(js::ExclusiveContext* cx, JS::HandleObject obj) {
+        return setFlags(cx, obj, js::BaseShape::WATCHED, GENERATE_SHAPE);
     }
 
     // A "qualified" varobj is the object on which "qualified" variable
@@ -245,8 +245,8 @@ class JSObject : public js::gc::Cell
     // (e.g., Gecko and XPConnect), as they often wish to run scripts under a
     // scope that captures var bindings.
     inline bool isQualifiedVarObj() const;
-    bool setQualifiedVarObj(js::ExclusiveContext* cx) {
-        return setFlags(cx, js::BaseShape::QUALIFIED_VAROBJ);
+    static bool setQualifiedVarObj(js::ExclusiveContext* cx, JS::HandleObject obj) {
+        return setFlags(cx, obj, js::BaseShape::QUALIFIED_VAROBJ);
     }
 
     // An "unqualified" varobj is the object on which "unqualified"
@@ -260,11 +260,11 @@ class JSObject : public js::gc::Cell
     // generate a new shape when their prototype changes, regardless of this
     // hasUncacheableProto flag.
     inline bool hasUncacheableProto() const;
-    bool setUncacheableProto(js::ExclusiveContext* cx) {
-        MOZ_ASSERT(hasStaticPrototype(),
+    static bool setUncacheableProto(js::ExclusiveContext* cx, JS::HandleObject obj) {
+        MOZ_ASSERT(obj->hasStaticPrototype(),
                    "uncacheability as a concept is only applicable to static "
                    "(not dynamically-computed) prototypes");
-        return setFlags(cx, js::BaseShape::UNCACHEABLE_PROTO, GENERATE_SHAPE);
+        return setFlags(cx, obj, js::BaseShape::UNCACHEABLE_PROTO, GENERATE_SHAPE);
     }
 
     /*
@@ -272,8 +272,8 @@ class JSObject : public js::gc::Cell
      * PropertyTree::MAX_HEIGHT.
      */
     inline bool hadElementsAccess() const;
-    bool setHadElementsAccess(js::ExclusiveContext* cx) {
-        return setFlags(cx, js::BaseShape::HAD_ELEMENTS_ACCESS);
+    static bool setHadElementsAccess(js::ExclusiveContext* cx, JS::HandleObject obj) {
+        return setFlags(cx, obj, js::BaseShape::HAD_ELEMENTS_ACCESS);
     }
 
     /*
@@ -305,7 +305,6 @@ class JSObject : public js::gc::Cell
 
     static const JS::TraceKind TraceKind = JS::TraceKind::Object;
     static const size_t MaxTagBits = 3;
-    static bool isNullLike(const JSObject* obj) { return uintptr_t(obj) < (1 << MaxTagBits); }
 
     MOZ_ALWAYS_INLINE JS::Zone* zone() const {
         return group_->zone();
@@ -419,8 +418,8 @@ class JSObject : public js::gc::Cell
      * is purged on GC.
      */
     inline bool isIteratedSingleton() const;
-    bool setIteratedSingleton(js::ExclusiveContext* cx) {
-        return setFlags(cx, js::BaseShape::ITERATED_SINGLETON);
+    static bool setIteratedSingleton(js::ExclusiveContext* cx, JS::HandleObject obj) {
+        return setFlags(cx, obj, js::BaseShape::ITERATED_SINGLETON);
     }
 
     /*
@@ -432,8 +431,8 @@ class JSObject : public js::gc::Cell
 
     // Mark an object as having its 'new' script information cleared.
     inline bool wasNewScriptCleared() const;
-    bool setNewScriptCleared(js::ExclusiveContext* cx) {
-        return setFlags(cx, js::BaseShape::NEW_SCRIPT_CLEARED);
+    static bool setNewScriptCleared(js::ExclusiveContext* cx, JS::HandleObject obj) {
+        return setFlags(cx, obj, js::BaseShape::NEW_SCRIPT_CLEARED);
     }
 
     /* Set a new prototype for an object with a singleton type. */
@@ -518,8 +517,9 @@ class JSObject : public js::gc::Cell
 
   public:
     static bool reportReadOnly(JSContext* cx, jsid id, unsigned report = JSREPORT_ERROR);
-    bool reportNotConfigurable(JSContext* cx, jsid id, unsigned report = JSREPORT_ERROR);
-    bool reportNotExtensible(JSContext* cx, unsigned report = JSREPORT_ERROR);
+    static bool reportNotConfigurable(JSContext* cx, jsid id, unsigned report = JSREPORT_ERROR);
+    static bool reportNotExtensible(JSContext* cx, js::HandleObject obj,
+                                    unsigned report = JSREPORT_ERROR);
 
     static bool nonNativeSetProperty(JSContext* cx, js::HandleObject obj, js::HandleId id,
                                      js::HandleValue v, js::HandleValue receiver,
@@ -640,7 +640,6 @@ struct JSObject_Slots16 : JSObject { void* data[3]; js::Value fslots[16]; };
 /* static */ MOZ_ALWAYS_INLINE void
 JSObject::readBarrier(JSObject* obj)
 {
-    MOZ_ASSERT_IF(obj, !isNullLike(obj));
     if (obj && obj->isTenured())
         obj->asTenured().readBarrier(&obj->asTenured());
 }
@@ -648,7 +647,6 @@ JSObject::readBarrier(JSObject* obj)
 /* static */ MOZ_ALWAYS_INLINE void
 JSObject::writeBarrierPre(JSObject* obj)
 {
-    MOZ_ASSERT_IF(obj, !isNullLike(obj));
     if (obj && obj->isTenured())
         obj->asTenured().writeBarrierPre(&obj->asTenured());
 }
@@ -657,8 +655,6 @@ JSObject::writeBarrierPre(JSObject* obj)
 JSObject::writeBarrierPost(void* cellp, JSObject* prev, JSObject* next)
 {
     MOZ_ASSERT(cellp);
-    MOZ_ASSERT_IF(next, !IsNullTaggedPointer(next));
-    MOZ_ASSERT_IF(prev, !IsNullTaggedPointer(prev));
 
     // If the target needs an entry, add it.
     js::gc::StoreBuffer* buffer;
@@ -1004,11 +1000,11 @@ GetPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
  */
 extern bool
 LookupProperty(JSContext* cx, HandleObject obj, HandleId id,
-               MutableHandleObject objp, MutableHandleShape propp);
+               MutableHandleObject objp, MutableHandle<PropertyResult> propp);
 
 inline bool
 LookupProperty(JSContext* cx, HandleObject obj, PropertyName* name,
-               MutableHandleObject objp, MutableHandleShape propp)
+               MutableHandleObject objp, MutableHandle<PropertyResult> propp)
 {
     RootedId id(cx, NameToId(name));
     return LookupProperty(cx, obj, id, objp, propp);
@@ -1215,11 +1211,11 @@ ReadPropertyDescriptors(JSContext* cx, HandleObject props, bool checkAccessors,
 /* Read the name using a dynamic lookup on the scopeChain. */
 extern bool
 LookupName(JSContext* cx, HandlePropertyName name, HandleObject scopeChain,
-           MutableHandleObject objp, MutableHandleObject pobjp, MutableHandleShape propp);
+           MutableHandleObject objp, MutableHandleObject pobjp, MutableHandle<PropertyResult> propp);
 
 extern bool
 LookupNameNoGC(JSContext* cx, PropertyName* name, JSObject* scopeChain,
-               JSObject** objp, JSObject** pobjp, Shape** propp);
+               JSObject** objp, JSObject** pobjp, PropertyResult* propp);
 
 /*
  * Like LookupName except returns the global object if 'name' is not found in
@@ -1253,10 +1249,10 @@ FindVariableScope(JSContext* cx, JSFunction** funp);
 
 bool
 LookupPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, JSObject** objp,
-                   Shape** propp);
+                   PropertyResult* propp);
 
 bool
-LookupOwnPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, Shape** propp,
+LookupOwnPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, PropertyResult* propp,
                       bool* isTypedArrayOutOfRange = nullptr);
 
 bool
@@ -1383,6 +1379,17 @@ SpeciesConstructor(JSContext* cx, HandleObject obj, JSProtoKey ctorKey, MutableH
 
 extern bool
 GetObjectFromIncumbentGlobal(JSContext* cx, MutableHandleObject obj);
+
+
+#ifdef DEBUG
+inline bool
+IsObjectValueInCompartment(const Value& v, JSCompartment* comp)
+{
+    if (!v.isObject())
+        return true;
+    return v.toObject().compartment() == comp;
+}
+#endif
 
 }  /* namespace js */
 

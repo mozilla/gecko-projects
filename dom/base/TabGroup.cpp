@@ -9,6 +9,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/dom/DocGroup.h"
+#include "mozilla/AbstractThread.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Telemetry.h"
@@ -28,7 +29,14 @@ TabGroup::TabGroup(bool aIsChrome)
 {
   for (size_t i = 0; i < size_t(TaskCategory::Count); i++) {
     TaskCategory category = static_cast<TaskCategory>(i);
-    mEventTargets[i] = CreateEventTargetFor(category);
+    if (aIsChrome) {
+      // The chrome TabGroup dispatches directly to the main thread. This means
+      // that we don't have to worry about cyclical references when cleaning up
+      // the chrome TabGroup.
+      mEventTargets[i] = do_GetMainThread();
+    } else {
+      mEventTargets[i] = CreateEventTargetFor(category);
+    }
   }
 
   // Do not throttle runnables from chrome windows.  In theory we should
@@ -76,7 +84,7 @@ TabGroup::EnsureThrottledEventQueues()
   }
 }
 
-TabGroup*
+/* static */ TabGroup*
 TabGroup::GetChromeTabGroup()
 {
   if (!sChromeTabGroup) {
@@ -162,7 +170,10 @@ TabGroup::Leave(nsPIDOMWindowOuter* aWindow)
   MOZ_ASSERT(mWindows.Contains(aWindow));
   mWindows.RemoveElement(aWindow);
 
-  if (mWindows.IsEmpty()) {
+  // The Chrome TabGroup doesn't have cyclical references through mEventTargets
+  // to itself, meaning that we don't have to worry about nulling mEventTargets
+  // out after the last window leaves.
+  if (sChromeTabGroup != this && mWindows.IsEmpty()) {
     mLastWindowLeft = true;
 
     // There is a RefPtr cycle TabGroup -> DispatcherEventTarget -> TabGroup. To
@@ -171,6 +182,7 @@ TabGroup::Leave(nsPIDOMWindowOuter* aWindow)
     // so it's safe to null out the queue here.
     for (size_t i = 0; i < size_t(TaskCategory::Count); i++) {
       mEventTargets[i] = nullptr;
+      mAbstractThreads[i] = nullptr;
     }
   }
 }
@@ -256,6 +268,7 @@ TabGroup::Dispatch(const char* aName,
 nsIEventTarget*
 TabGroup::EventTargetFor(TaskCategory aCategory) const
 {
+  MOZ_ASSERT(aCategory != TaskCategory::Count);
   if (aCategory == TaskCategory::Worker || aCategory == TaskCategory::Timer) {
     MOZ_RELEASE_ASSERT(mThrottledQueuesInitialized || this == sChromeTabGroup);
   }
@@ -268,6 +281,29 @@ TabGroup::EventTargetFor(TaskCategory aCategory) const
   }
 
   return mEventTargets[size_t(aCategory)];
+}
+
+AbstractThread*
+TabGroup::AbstractMainThreadFor(TaskCategory aCategory)
+{
+  MOZ_RELEASE_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aCategory != TaskCategory::Count);
+
+  // The mEventTargets of the chrome TabGroup are all set to do_GetMainThread().
+  // We could just return AbstractThread::MainThread() without a wrapper.
+  // Once we've disconnected everything, we still allow people to dispatch.
+  // We'll just go directly to the main thread.
+  if (this == sChromeTabGroup || NS_WARN_IF(mLastWindowLeft)) {
+    return AbstractThread::MainThread();
+  }
+
+  if (!mAbstractThreads[size_t(aCategory)]) {
+    mAbstractThreads[size_t(aCategory)] =
+      AbstractThread::CreateEventTargetWrapper(mEventTargets[size_t(aCategory)],
+                                               /* aDrainDirectTasks = */ true);
+  }
+
+  return mAbstractThreads[size_t(aCategory)];
 }
 
 }

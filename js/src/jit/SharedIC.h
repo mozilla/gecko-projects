@@ -959,15 +959,23 @@ class ICUpdatedStub : public ICStub
 class ICCacheIR_Updated : public ICUpdatedStub
 {
     const CacheIRStubInfo* stubInfo_;
+    GCPtrObjectGroup updateStubGroup_;
     GCPtrId updateStubId_;
 
   public:
     ICCacheIR_Updated(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
       : ICUpdatedStub(ICStub::CacheIR_Updated, stubCode),
         stubInfo_(stubInfo),
+        updateStubGroup_(nullptr),
         updateStubId_(JSID_EMPTY)
     {}
 
+    static ICCacheIR_Updated* Clone(JSContext* cx, ICStubSpace* space, ICStub* firstMonitorStub,
+                                    ICCacheIR_Updated& other);
+
+    GCPtrObjectGroup& updateStubGroup() {
+        return updateStubGroup_;
+    }
     GCPtrId& updateStubId() {
         return updateStubId_;
     }
@@ -2246,10 +2254,6 @@ IsPreliminaryObject(JSObject* obj);
 void
 StripPreliminaryObjectStubs(JSContext* cx, ICFallbackStub* stub);
 
-MOZ_MUST_USE bool
-EffectlesslyLookupProperty(JSContext* cx, HandleObject obj, HandleId name,
-                           MutableHandleObject holder, MutableHandleShape shape);
-
 JSObject*
 GetDOMProxyProto(JSObject* obj);
 
@@ -2383,7 +2387,7 @@ class ICGetProp_Generic : public ICMonitoredStub
     };
 };
 
-static uint32_t
+static inline uint32_t
 SimpleTypeDescrKey(SimpleTypeDescr* descr)
 {
     if (descr->is<ScalarTypeDescr>())

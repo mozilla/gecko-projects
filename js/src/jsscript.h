@@ -1171,6 +1171,10 @@ class JSScript : public js::gc::TenuredCell
         return funLength_;
     }
 
+    static size_t offsetOfFunLength() {
+        return offsetof(JSScript, funLength_);
+    }
+
     size_t sourceStart() const {
         return sourceStart_;
     }
@@ -1489,7 +1493,7 @@ class JSScript : public js::gc::TenuredCell
      * De-lazifies the canonical function. Must be called before entering code
      * that expects the function to be non-lazy.
      */
-    inline void ensureNonLazyCanonicalFunction(JSContext* cx);
+    inline void ensureNonLazyCanonicalFunction();
 
     js::ModuleObject* module() const {
         if (bodyScope()->is<js::ModuleScope>())
@@ -1508,7 +1512,7 @@ class JSScript : public js::gc::TenuredCell
     // directly, via lazy arguments or a rest parameter.
     bool mayReadFrameArgsDirectly();
 
-    JSFlatString* sourceData(JSContext* cx);
+    static JSFlatString* sourceData(JSContext* cx, JS::HandleScript script);
 
     static bool loadSource(JSContext* cx, js::ScriptSource* ss, bool* worked);
 
@@ -2017,7 +2021,7 @@ class LazyScript : public gc::TenuredCell
 
     void initRuntimeFields(uint64_t packedFields);
 
-    inline JSFunction* functionDelazifying(JSContext* cx) const;
+    static inline JSFunction* functionDelazifying(JSContext* cx, Handle<LazyScript*>);
     JSFunction* functionNonDelazifying() const {
         return function_;
     }

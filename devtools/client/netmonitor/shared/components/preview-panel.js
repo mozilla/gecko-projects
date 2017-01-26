@@ -5,40 +5,33 @@
 "use strict";
 
 const { DOM, PropTypes } = require("devtools/client/shared/vendor/react");
-const { connect } = require("devtools/client/shared/vendor/react-redux");
-const { getSelectedRequest } = require("../../selectors/index");
 
-const { iframe } = DOM;
+const { div, iframe } = DOM;
 
 /*
  * Preview panel component
  * Display HTML content within a sandbox enabled iframe
  */
 function PreviewPanel({
-  srcDoc = "",
+  request,
 }) {
-  return iframe({
-    id: "response-preview",
-    sandbox: "",
-    srcDoc,
-  });
+  const htmlBody = request.responseContent ?
+    request.responseContent.content.text : "";
+
+  return (
+    div({ className: "panel-container" },
+      iframe({
+        sandbox: "",
+        srcDoc: typeof htmlBody === "string" ? htmlBody : "",
+      })
+    )
+  );
 }
 
 PreviewPanel.displayName = "PreviewPanel";
 
 PreviewPanel.propTypes = {
-  srcDoc: PropTypes.string,
+  request: PropTypes.object.isRequired,
 };
 
-module.exports = connect(
-  (state) => {
-    const selectedRequest = getSelectedRequest(state);
-    const htmlBody = selectedRequest && selectedRequest.responseContent ?
-      selectedRequest.responseContent.content.text : "";
-    const srcDoc = typeof htmlBody === "string" ? htmlBody : "";
-
-    return {
-      srcDoc,
-    };
-  }
-)(PreviewPanel);
+module.exports = PreviewPanel;

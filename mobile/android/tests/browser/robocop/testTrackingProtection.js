@@ -91,10 +91,9 @@ add_task(function* test_tracking_pb() {
   // Load a blank page
   let browser = BrowserApp.addTab("about:blank", { selected: true, parentId: BrowserApp.selectedTab.id, isPrivate: true }).browser;
   yield new Promise((resolve, reject) => {
-    browser.addEventListener("load", function startTests(event) {
-      browser.removeEventListener("load", startTests, true);
+    browser.addEventListener("load", function(event) {
       Services.tm.mainThread.dispatch(resolve, Ci.nsIThread.DISPATCH_NORMAL);
-    }, true);
+    }, {capture: true, once: true});
   });
 
   // Populate and use 'test-track-simple' for tracking protection lookups
@@ -112,13 +111,19 @@ add_task(function* test_tracking_pb() {
   // Simulate a click on the "Disable protection" button in the site identity popup.
   // We need to wait for a "load" event because "Session:Reload" will cause a full page reload.
   yield promiseLoadEvent(browser, undefined, undefined, () => {
-    Services.obs.notifyObservers(null, "Session:Reload", "{\"allowContent\":true,\"contentType\":\"tracking\"}");
+    EventDispatcher.instance.dispatch("Session:Reload", {
+      allowContent: true,
+      contentType: "tracking",
+    });
   });
   Messaging.sendRequest({ type: "Test:Expected", expected: "tracking_content_loaded" });
 
   // Simulate a click on the "Enable protection" button in the site identity popup.
   yield promiseLoadEvent(browser, undefined, undefined, () => {
-    Services.obs.notifyObservers(null, "Session:Reload", "{\"allowContent\":false,\"contentType\":\"tracking\"}");
+    EventDispatcher.instance.dispatch("Session:Reload", {
+      allowContent: false,
+      contentType: "tracking",
+    });
   });
   Messaging.sendRequest({ type: "Test:Expected", expected: "tracking_content_blocked" });
 
@@ -141,10 +146,9 @@ add_task(function* test_tracking_not_pb() {
   // Load a blank page
   let browser = BrowserApp.addTab("about:blank", { selected: true }).browser;
   yield new Promise((resolve, reject) => {
-    browser.addEventListener("load", function startTests(event) {
-      browser.removeEventListener("load", startTests, true);
+    browser.addEventListener("load", function(event) {
       Services.tm.mainThread.dispatch(resolve, Ci.nsIThread.DISPATCH_NORMAL);
-    }, true);
+    }, {capture: true, once: true});
   });
 
   // Point tab to a test page NOT containing tracking elements

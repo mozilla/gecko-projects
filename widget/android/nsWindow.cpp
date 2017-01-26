@@ -96,9 +96,9 @@ using namespace mozilla::widget;
 NS_IMPL_ISUPPORTS_INHERITED0(nsWindow, nsBaseWidget)
 
 #include "mozilla/layers/CompositorBridgeChild.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorSession.h"
 #include "mozilla/layers/LayerTransactionParent.h"
+#include "mozilla/layers/UiCompositorControllerChild.h"
 #include "mozilla/Services.h"
 #include "nsThreadUtils.h"
 
@@ -1083,8 +1083,8 @@ public:
 
         // Set the first-paint flag so that we (re-)link any new Java objects
         // to Gecko, co-ordinate viewports, etc.
-        if (RefPtr<CompositorBridgeParent> bridge = mWindow->GetCompositorBridgeParent()) {
-            bridge->ForceIsFirstPaint();
+        if (RefPtr<CompositorBridgeChild> bridge = mWindow->GetCompositorBridgeChild()) {
+            bridge->SendForceIsFirstPaint();
         }
     }
 
@@ -1120,15 +1120,19 @@ public:
     {
         MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
 
-        RefPtr<CompositorBridgeParent> bridge;
-
+        int64_t id = 0;
         if (LockedWindowPtr window{mWindow}) {
-            bridge = window->GetCompositorBridgeParent();
+            id = window->GetRootLayerId();
         }
 
-        if (bridge) {
-            mCompositorPaused = true;
-            bridge->SchedulePauseOnCompositorThread();
+        if (id == 0) {
+            return;
+        }
+
+        RefPtr<UiCompositorControllerChild> child = UiCompositorControllerChild::Get();
+        if (child) {
+          mCompositorPaused = true;
+          child->SendPause(id);
         }
     }
 
@@ -1136,14 +1140,19 @@ public:
     {
         MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
 
-        RefPtr<CompositorBridgeParent> bridge;
-
+        int64_t id = 0;
         if (LockedWindowPtr window{mWindow}) {
-            bridge = window->GetCompositorBridgeParent();
+            id = window->GetRootLayerId();
         }
 
-        if (bridge && bridge->ScheduleResumeOnCompositorThread()) {
-            mCompositorPaused = false;
+        if (id == 0) {
+            return;
+        }
+
+        RefPtr<UiCompositorControllerChild> child = UiCompositorControllerChild::Get();
+        if (child) {
+          mCompositorPaused = false;
+          child->SendResume(id);
         }
     }
 
@@ -1153,18 +1162,24 @@ public:
     {
         MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
 
-        RefPtr<CompositorBridgeParent> bridge;
-
-        if (LockedWindowPtr window{mWindow}) {
-            bridge = window->GetCompositorBridgeParent();
-        }
-
         mSurface = aSurface;
 
-        if (!bridge || !bridge->ScheduleResumeOnCompositorThread(aWidth,
-                                                                 aHeight)) {
+        int64_t id = 0;
+        if (LockedWindowPtr window{mWindow}) {
+            id = window->GetRootLayerId();
+        }
+
+        if (id == 0) {
             return;
         }
+
+        RefPtr<UiCompositorControllerChild> child = UiCompositorControllerChild::Get();
+
+        if (!child) {
+            return;
+        }
+
+        child->SendResumeAndResize(id, aWidth, aHeight);
 
         mCompositorPaused = false;
 
@@ -1196,16 +1211,34 @@ public:
 
     void SyncInvalidateAndScheduleComposite()
     {
-        RefPtr<CompositorBridgeParent> bridge;
+        RefPtr<UiCompositorControllerChild> child = UiCompositorControllerChild::Get();
 
+        if (!child) {
+            return;
+        }
+
+        int64_t id = 0;
         if (LockedWindowPtr window{mWindow}) {
-            bridge = window->GetCompositorBridgeParent();
+            id = window->GetRootLayerId();
         }
 
-        if (bridge) {
-            bridge->InvalidateOnCompositorThread();
-            bridge->ScheduleRenderOnCompositorThread();
+        if (id == 0) {
+            return;
         }
+
+        if (!AndroidBridge::IsJavaUiThread()) {
+            RefPtr<nsThread> uiThread = GetAndroidUiThread();
+            if (uiThread) {
+                uiThread->Dispatch(NewRunnableMethod<const int64_t&>(child,
+                                                                     &UiCompositorControllerChild::SendInvalidateAndRender,
+                                                                     id),
+                                   nsIThread::DISPATCH_NORMAL);
+            }
+            return;
+        }
+
+        MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
+        child->SendInvalidateAndRender(id);
     }
 };
 
@@ -1634,6 +1667,12 @@ nsWindow::RedrawAll()
     } else if (mWidgetListener) {
         mWidgetListener->RequestRepaint();
     }
+}
+
+int64_t
+nsWindow::GetRootLayerId() const
+{
+    return mCompositorSession ? mCompositorSession->RootLayerTreeId() : 0;
 }
 
 void
@@ -2724,12 +2763,19 @@ nsWindow::GeckoViewSupport::FlushIMEChanges(FlushChangesFlag aFlags)
     nsCOMPtr<nsIContent> imeRoot;
 
     // If we are receiving notifications, we must have selection/root content.
-    MOZ_ALWAYS_SUCCEEDS(IMEStateManager::GetFocusSelectionAndRoot(
-            getter_AddRefs(imeSelection), getter_AddRefs(imeRoot)));
+    nsresult rv = IMEStateManager::GetFocusSelectionAndRoot(
+            getter_AddRefs(imeSelection), getter_AddRefs(imeRoot));
+
+    // With e10s enabled, GetFocusSelectionAndRoot will fail because the IME
+    // content observer is out of process.
+    const bool e10sEnabled = rv == NS_ERROR_NOT_AVAILABLE;
+    if (!e10sEnabled) {
+        MOZ_ALWAYS_SUCCEEDS(rv);
+    }
 
     // Make sure we still have a valid selection/root. We can potentially get
     // a stale selection/root if the editor becomes hidden, for example.
-    NS_ENSURE_TRUE_VOID(imeRoot->IsInComposedDoc());
+    NS_ENSURE_TRUE_VOID(e10sEnabled || imeRoot->IsInComposedDoc());
 
     RefPtr<nsWindow> kungFuDeathGrip(&window);
     window.UserActivity();
@@ -2778,7 +2824,7 @@ nsWindow::GeckoViewSupport::FlushIMEChanges(FlushChangesFlag aFlags)
                                           change.mNewEnd - change.mStart);
             window.DispatchEvent(&event);
             NS_ENSURE_TRUE_VOID(event.mSucceeded);
-            NS_ENSURE_TRUE_VOID(event.mReply.mContentsRoot == imeRoot.get());
+            NS_ENSURE_TRUE_VOID(e10sEnabled || event.mReply.mContentsRoot == imeRoot.get());
         }
 
         if (shouldAbort()) {
@@ -2799,7 +2845,7 @@ nsWindow::GeckoViewSupport::FlushIMEChanges(FlushChangesFlag aFlags)
         window.DispatchEvent(&event);
 
         NS_ENSURE_TRUE_VOID(event.mSucceeded);
-        NS_ENSURE_TRUE_VOID(event.mReply.mContentsRoot == imeRoot.get());
+        NS_ENSURE_TRUE_VOID(e10sEnabled || event.mReply.mContentsRoot == imeRoot.get());
 
         if (shouldAbort()) {
             return;
@@ -3608,10 +3654,10 @@ nsWindow::UpdateZoomConstraints(const uint32_t& aPresShellId,
     nsBaseWidget::UpdateZoomConstraints(aPresShellId, aViewId, aConstraints);
 }
 
-CompositorBridgeParent*
-nsWindow::GetCompositorBridgeParent() const
+CompositorBridgeChild*
+nsWindow::GetCompositorBridgeChild() const
 {
-    return mCompositorSession ? mCompositorSession->GetInProcessBridge() : nullptr;
+    return mCompositorSession ? mCompositorSession->GetCompositorBridgeChild() : nullptr;
 }
 
 already_AddRefed<nsIScreen>

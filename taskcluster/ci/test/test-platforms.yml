@@ -38,6 +38,7 @@ linux64/opt:
         - external-media-tests
         - web-platform-tests
         - opt-only-tests
+        - desktop-screenshot-capture
         - talos
 
 # TODO: use 'pgo' and 'asan' labels here, instead of -pgo/opt
@@ -47,6 +48,7 @@ linux64-pgo/opt:
         - common-tests
         - external-media-tests
         - web-platform-tests
+        - talos
 
 linux64-asan/opt:
     build-platform: linux64-asan/opt

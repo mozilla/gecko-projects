@@ -68,7 +68,7 @@ browser/components/sessionstore/**
 browser/components/tabview/**
 # generated files in cld2
 browser/components/translation/cld2/cld-worker.js
-browser/extensions/pdfjs/**
+browser/extensions/pdfjs/content/**
 # generated or library files in pocket
 browser/extensions/pocket/content/panels/js/tmpl.js
 browser/extensions/pocket/content/panels/js/vendor/**
@@ -210,7 +210,6 @@ toolkit/content/widgets/wizard.xml
 toolkit/components/jsdownloads/src/DownloadIntegration.jsm
 toolkit/components/url-classifier/**
 toolkit/components/urlformatter/nsURLFormatter.js
-toolkit/identity/FirefoxAccounts.jsm
 toolkit/modules/AppConstants.jsm
 toolkit/mozapps/downloads/nsHelperAppDlg.js
 toolkit/mozapps/extensions/internal/AddonConstants.jsm
