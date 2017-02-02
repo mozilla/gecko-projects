@@ -296,7 +296,7 @@ function SetupEME(test, token, params)
       () => {
         v.setMediaKeys(null);
         if (v.parentNode) {
-          v.parentNode.removeChild(v);
+          v.remove();
         }
         v.onerror = null;
         v.src = null;
@@ -488,10 +488,9 @@ function fetchWithXHR(uri, onLoadFunction) {
 
 function once(target, name, cb) {
   var p = new Promise(function(resolve, reject) {
-    target.addEventListener(name, function onceEvent(arg) {
-      target.removeEventListener(name, onceEvent);
+    target.addEventListener(name, function(arg) {
       resolve(arg);
-    });
+    }, {once: true});
   });
   if (cb) {
     p.then(cb);

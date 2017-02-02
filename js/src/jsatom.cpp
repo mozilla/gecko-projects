@@ -307,6 +307,25 @@ AtomIsPinned(JSContext* cx, JSAtom* atom)
     return p->isPinned();
 }
 
+#ifdef DEBUG
+
+bool
+AtomIsPinnedInRuntime(JSRuntime* rt, JSAtom* atom)
+{
+    Maybe<AutoLockForExclusiveAccess> lock;
+    if (!rt->currentThreadHasExclusiveAccess())
+        lock.emplace(rt);
+
+    AtomHasher::Lookup lookup(atom);
+
+    AtomSet::Ptr p = rt->unsafeAtoms().lookup(lookup);
+    MOZ_ASSERT(p);
+
+    return p->isPinned();
+}
+
+#endif // DEBUG
+
 /* |tbchars| must not point into an inline or short string. */
 template <typename CharT>
 MOZ_ALWAYS_INLINE
@@ -336,31 +355,36 @@ AtomizeAndCopyChars(ExclusiveContext* cx, const CharT* tbchars, size_t length, P
     if (p) {
         JSAtom* atom = p->asPtr(cx);
         p->setPinned(bool(pin));
+        cx->markAtom(atom);
         return atom;
     }
 
-    AutoCompartment ac(cx, cx->atomsCompartment(lock), &lock);
+    JSAtom* atom;
+    {
+        AutoCompartment ac(cx, cx->atomsCompartment(lock), &lock);
 
-    JSFlatString* flat = NewStringCopyN<NoGC>(cx, tbchars, length);
-    if (!flat) {
-        // Grudgingly forgo last-ditch GC. The alternative would be to release
-        // the lock, manually GC here, and retry from the top. If you fix this,
-        // please also fix or comment the similar case in Symbol::new_.
-        ReportOutOfMemory(cx);
-        return nullptr;
+        JSFlatString* flat = NewStringCopyN<NoGC>(cx, tbchars, length);
+        if (!flat) {
+            // Grudgingly forgo last-ditch GC. The alternative would be to release
+            // the lock, manually GC here, and retry from the top. If you fix this,
+            // please also fix or comment the similar case in Symbol::new_.
+            ReportOutOfMemory(cx);
+            return nullptr;
+        }
+
+        atom = flat->morphAtomizedStringIntoAtom(lookup.hash);
+        MOZ_ASSERT(atom->hash() == lookup.hash);
+
+        // We have held the lock since looking up p, and the operations we've done
+        // since then can't GC; therefore the atoms table has not been modified and
+        // p is still valid.
+        if (!atoms.add(p, AtomStateEntry(atom, bool(pin)))) {
+            ReportOutOfMemory(cx); /* SystemAllocPolicy does not report OOM. */
+            return nullptr;
+        }
     }
 
-    JSAtom* atom = flat->morphAtomizedStringIntoAtom(lookup.hash);
-    MOZ_ASSERT(atom->hash() == lookup.hash);
-
-    // We have held the lock since looking up p, and the operations we've done
-    // since then can't GC; therefore the atoms table has not been modified and
-    // p is still valid.
-    if (!atoms.add(p, AtomStateEntry(atom, bool(pin)))) {
-        ReportOutOfMemory(cx); /* SystemAllocPolicy does not report OOM. */
-        return nullptr;
-    }
-
+    cx->markAtom(atom);
     return atom;
 }
 
@@ -571,7 +595,7 @@ js::XDRAtom(XDRState<mode>* xdr, MutableHandleAtom atomp)
     uint32_t length = lengthAndEncoding >> 1;
     bool latin1 = lengthAndEncoding & 0x1;
 
-    JSContext* cx = xdr->cx();
+    ExclusiveContext* cx = xdr->cx();
     JSAtom* atom;
     if (latin1) {
         const Latin1Char* chars = nullptr;
@@ -600,7 +624,7 @@ js::XDRAtom(XDRState<mode>* xdr, MutableHandleAtom atomp)
              * most allocations here will be bigger than tempLifoAlloc's default
              * chunk size.
              */
-            chars = cx->runtime()->pod_malloc<char16_t>(length);
+            chars = cx->pod_malloc<char16_t>(length);
             if (!chars)
                 return false;
         }

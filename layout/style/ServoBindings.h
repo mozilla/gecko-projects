@@ -34,6 +34,7 @@ namespace mozilla {
   class ServoStyleSheet;
   class FontFamilyList;
   enum FontFamilyType : uint32_t;
+  struct Keyframe;
 }
 using mozilla::FontFamilyList;
 using mozilla::FontFamilyType;
@@ -259,13 +260,18 @@ void Gecko_ClearPODTArray(void* array, size_t elem_size, size_t elem_align);
 // Clear the mContents field in nsStyleContent. This is needed to run the
 // destructors, otherwise we'd leak the images (though we still don't support
 // those), strings, and whatnot.
-void Gecko_ClearStyleContents(nsStyleContent* content);
+void Gecko_ClearAndResizeStyleContents(nsStyleContent* content,
+                                       uint32_t how_many);
 void Gecko_CopyStyleContentsFrom(nsStyleContent* content, const nsStyleContent* other);
 
 void Gecko_EnsureImageLayersLength(nsStyleImageLayers* layers, size_t len,
                                    nsStyleImageLayers::LayerType layer_type);
 
 void Gecko_EnsureStyleAnimationArrayLength(void* array, size_t len);
+
+mozilla::Keyframe* Gecko_AnimationAppendKeyframe(RawGeckoKeyframeListBorrowedMut keyframes,
+                                                 float offset,
+                                                 const nsTimingFunction* timingFunction);
 
 // Clean up pointer-based coordinates
 void Gecko_ResetStyleCoord(nsStyleUnit* unit, nsStyleUnion* value);

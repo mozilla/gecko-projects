@@ -117,6 +117,13 @@ JSCompartment::~JSCompartment()
     js_delete(nonSyntacticLexicalEnvironments_),
     js_free(enumerators);
 
+#ifdef DEBUG
+    // Avoid assertion destroying the unboxed layouts list if the embedding
+    // leaked GC things.
+    if (!rt->gc.shutdownCollectedEverything())
+        unboxedLayouts.clear();
+#endif
+
     runtime_->numCompartments--;
 }
 
@@ -315,9 +322,12 @@ JSCompartment::wrap(JSContext* cx, MutableHandleString strp)
     if (str->zoneFromAnyThread() == zone())
         return true;
 
-    /* If the string is an atom, we don't have to copy. */
+    /*
+     * If the string is an atom, we don't have to copy, but we do need to mark
+     * the atom as being in use by the new zone.
+     */
     if (str->isAtom()) {
-        MOZ_ASSERT(str->isPermanentAtom() || str->zone()->isAtomsZone());
+        cx->markAtom(str);
         return true;
     }
 
@@ -928,8 +938,8 @@ JSCompartment::checkScriptMapsAfterMovingGC()
             DebugScript* ds = r.front().value();
             for (uint32_t i = 0; i < ds->numSites; i++) {
                 BreakpointSite* site = ds->breakpoints[i];
-                if (site)
-                    CheckGCThingAfterMovingGC(site->script);
+                if (site && site->type() == BreakpointSite::Type::JS)
+                    CheckGCThingAfterMovingGC(site->asJS()->script);
             }
             auto ptr = debugScriptMap->lookup(script);
             MOZ_RELEASE_ASSERT(ptr.found() && &*ptr == &r.front());

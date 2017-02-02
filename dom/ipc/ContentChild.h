@@ -147,10 +147,6 @@ public:
 
   RefPtr<ContentBridgeParent> mLastBridge;
 
-  PPluginModuleParent *
-  AllocPPluginModuleParent(mozilla::ipc::Transport* transport,
-                           base::ProcessId otherProcess) override;
-
   PContentBridgeParent*
   AllocPContentBridgeParent(mozilla::ipc::Transport* transport,
                             base::ProcessId otherProcess) override;
@@ -182,10 +178,6 @@ public:
     Endpoint<PVideoDecoderManagerChild>&& aVideoManager) override;
 
   virtual mozilla::ipc::IPCResult RecvSetProcessSandbox(const MaybeFileDesc& aBroker) override;
-
-  PBackgroundChild*
-  AllocPBackgroundChild(Transport* aTransport, ProcessId aOtherProcess)
-                        override;
 
   virtual PBrowserChild* AllocPBrowserChild(const TabId& aTabId,
                                             const IPCTabContext& aContext,

@@ -223,6 +223,7 @@ using namespace mozilla::system;
 using namespace mozilla::widget;
 
 namespace mozilla {
+
 namespace dom {
 
 // IPC sender for remote GC/CC logging.
@@ -1068,13 +1069,6 @@ ContentChild::DeallocPCycleCollectWithLogsChild(PCycleCollectWithLogsChild* /* a
   return true;
 }
 
-mozilla::plugins::PPluginModuleParent*
-ContentChild::AllocPPluginModuleParent(mozilla::ipc::Transport* aTransport,
-                                       base::ProcessId aOtherProcess)
-{
-  return plugins::PluginModuleContentParent::Initialize(aTransport, aOtherProcess);
-}
-
 PContentBridgeChild*
 ContentChild::AllocPContentBridgeChild(mozilla::ipc::Transport* aTransport,
                                        base::ProcessId aOtherProcess)
@@ -1169,13 +1163,6 @@ ContentChild::RecvReinitRendering(Endpoint<PCompositorBridgeChild>&& aCompositor
 
   VideoDecoderManagerChild::InitForContent(Move(aVideoManager));
   return IPC_OK();
-}
-
-PBackgroundChild*
-ContentChild::AllocPBackgroundChild(Transport* aTransport,
-                                    ProcessId aOtherProcess)
-{
-  return BackgroundChild::Alloc(aTransport, aOtherProcess);
 }
 
 #if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
@@ -1282,8 +1269,10 @@ StartMacOSContentSandbox()
     MOZ_CRASH("Failed to get NS_OS_TEMP_DIR path");
   }
 
+  ContentChild* cc = ContentChild::GetSingleton();
+
   nsCOMPtr<nsIFile> profileDir;
-  ContentChild::GetSingleton()->GetProfileDir(getter_AddRefs(profileDir));
+  cc->GetProfileDir(getter_AddRefs(profileDir));
   nsCString profileDirPath;
   if (profileDir) {
     rv = profileDir->GetNativePath(profileDirPath);
@@ -1292,9 +1281,12 @@ StartMacOSContentSandbox()
     }
   }
 
+  bool isFileProcess = cc->GetRemoteType().EqualsLiteral(FILE_REMOTE_TYPE);
+
   MacSandboxInfo info;
   info.type = MacSandboxType_Content;
-  info.level = info.level = sandboxLevel;
+  info.level = sandboxLevel;
+  info.hasFilePrivileges = isFileProcess;
   info.shouldLog = Preferences::GetBool("security.sandbox.logging.enabled") ||
                    PR_GetEnv("MOZ_SANDBOX_LOGGING");
   info.appPath.assign(appPath.get());
@@ -1355,7 +1347,20 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
       // didn't intend it.
       MOZ_RELEASE_ASSERT(brokerFd >= 0);
     }
-    sandboxEnabled = SetContentProcessSandbox(brokerFd);
+    // Allow user overrides of seccomp-bpf syscall filtering
+    std::vector<int> syscallWhitelist;
+    nsAdoptingCString extraSyscalls =
+      Preferences::GetCString("security.sandbox.content.syscall_whitelist");
+    if (extraSyscalls) {
+      for (const nsCSubstring& callNrString : extraSyscalls.Split(',')) {
+        nsresult rv;
+        int callNr = PromiseFlatCString(callNrString).ToInteger(&rv);
+        if (NS_SUCCEEDED(rv)) {
+          syscallWhitelist.push_back(callNr);
+        }
+      }
+    }
+    sandboxEnabled = SetContentProcessSandbox(brokerFd, syscallWhitelist);
   }
 #elif defined(XP_WIN)
   mozilla::SandboxTarget::Instance()->StartSandbox();
@@ -2553,10 +2558,13 @@ ContentChild::RecvLoadPluginResult(const uint32_t& aPluginId,
                                    const bool& aResult)
 {
   nsresult rv;
-  bool finalResult = aResult && SendConnectPluginBridge(aPluginId, &rv) &&
+  Endpoint<PPluginModuleParent> endpoint;
+  bool finalResult = aResult &&
+                     SendConnectPluginBridge(aPluginId, &rv, &endpoint) &&
                      NS_SUCCEEDED(rv);
   plugins::PluginModuleContentParent::OnLoadPluginResult(aPluginId,
-                                                         finalResult);
+                                                         finalResult,
+                                                         Move(endpoint));
   return IPC_OK();
 }
 

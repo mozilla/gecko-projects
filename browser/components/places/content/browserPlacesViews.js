@@ -286,7 +286,7 @@ PlacesViewBase.prototype = {
     if (document.popupNode == aChild)
       document.popupNode = null;
 
-    aChild.parentNode.removeChild(aChild);
+    aChild.remove();
   },
 
   _setEmptyPopupStatus:
@@ -755,7 +755,7 @@ PlacesViewBase.prototype = {
       return this._isRTL;
 
     return this._isRTL = document.defaultView
-                                 .getComputedStyle(this.viewElt, "")
+                                 .getComputedStyle(this.viewElt)
                                  .direction == "rtl";
   },
 

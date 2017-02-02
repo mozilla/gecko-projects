@@ -12587,12 +12587,11 @@ nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType)
     srcdoc = NullString();
   }
 
-  // If there is no triggeringPrincipal we can fall back to using the
-  // SystemPrincipal as the triggeringPrincipal for loading the history
-  // entry, since the history entry can only end up in history if security
-  // checks passed in the initial loading phase.
+  // If there is no valid triggeringPrincipal, we deny the load
+  MOZ_ASSERT(triggeringPrincipal,
+             "need a valid triggeringPrincipal to load from history");
   if (!triggeringPrincipal) {
-    triggeringPrincipal = nsContentUtils::GetSystemPrincipal();
+    return NS_ERROR_FAILURE;
   }
 
   // Passing nullptr as aSourceDocShell gives the same behaviour as before
@@ -14855,8 +14854,22 @@ nsDocShell::GetIsOnlyToplevelInTabGroup(bool* aResult)
 }
 
 NS_IMETHODIMP
-nsDocShell::GetInFreshProcess(bool* aResult)
+nsDocShell::GetAwaitingLargeAlloc(bool* aResult)
 {
-  *aResult = TabChild::GetWasFreshProcess();
+  MOZ_ASSERT(aResult);
+  nsCOMPtr<nsITabChild> tabChild = GetTabChild();
+  if (!tabChild) {
+    *aResult = false;
+    return NS_OK;
+  }
+  *aResult = static_cast<TabChild*>(tabChild.get())->IsAwaitingLargeAlloc();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::GetInLargeAllocProcess(bool* aResult)
+{
+  MOZ_ASSERT(aResult);
+  *aResult = TabChild::InLargeAllocProcess();
   return NS_OK;
 }

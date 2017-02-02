@@ -69,7 +69,7 @@ let img = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAAB
 var imageBuffer = Uint8Array.from(atob(img), byte => byte.charCodeAt(0)).buffer;
 
 function getListStyleImage(button) {
-  let style = button.ownerDocument.defaultView.getComputedStyle(button);
+  let style = button.ownerGlobal.getComputedStyle(button);
 
   let match = /^url\("(.*)"\)$/.exec(style.listStyleImage);
 
@@ -257,10 +257,10 @@ function* openExtensionContextMenu(selector = "#img1") {
   return extensionMenu;
 }
 
-function* closeExtensionContextMenu(itemToSelect) {
+function* closeExtensionContextMenu(itemToSelect, modifiers = {}) {
   let contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
   let popupHiddenPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popuphidden");
-  EventUtils.synthesizeMouseAtCenter(itemToSelect, {});
+  EventUtils.synthesizeMouseAtCenter(itemToSelect, modifiers);
   yield popupHiddenPromise;
 }
 

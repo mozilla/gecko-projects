@@ -700,15 +700,12 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
       EffectSet::GetEffectSet(this)) {
     // If no new frame for this element is created by the end of the
     // restyling process, stop animations and transitions for this frame
-    if (presContext->RestyleManager()->IsGecko()) {
-      RestyleManager::AnimationsWithDestroyedFrame* adf =
-        presContext->RestyleManager()->AsGecko()->GetAnimationsWithDestroyedFrame();
-      // AnimationsWithDestroyedFrame only lives during the restyling process.
-      if (adf) {
-        adf->Put(mContent, mStyleContext);
-      }
-    } else {
-      NS_ERROR("stylo: ServoRestyleManager does not support animations yet");
+    RestyleManagerBase::AnimationsWithDestroyedFrame* adf =
+      presContext->RestyleManager()->AsBase()
+                 ->GetAnimationsWithDestroyedFrame();
+    // AnimationsWithDestroyedFrame only lives during the restyling process.
+    if (adf) {
+      adf->Put(mContent, mStyleContext);
     }
   }
 
@@ -3021,6 +3018,19 @@ nsFrame::FireDOMEvent(const nsAString& aDOMEventName, nsIContent *aContent)
     DebugOnly<nsresult> rv = asyncDispatcher->PostDOMEvent();
     NS_ASSERTION(NS_SUCCEEDED(rv), "AsyncEventDispatcher failed to dispatch");
   }
+}
+
+WritingMode
+nsFrame::GetWritingModeDeferringToRootElem() const
+{
+  Element* rootElem = PresContext()->Document()->GetRootElement();
+  if (rootElem) {
+    nsIFrame* primaryFrame = rootElem->GetPrimaryFrame();
+    if (primaryFrame) {
+      return primaryFrame->GetWritingMode();
+    }
+  }
+  return nsIFrame::GetWritingMode();
 }
 
 nsresult

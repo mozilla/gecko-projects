@@ -37,6 +37,13 @@ ServoRestyleManager::PostRestyleEvent(Element* aElement,
     return;
   }
 
+  if (mInStyleRefresh && aRestyleHint == eRestyle_CSSAnimations) {
+    // FIXME: This is the initial restyle for CSS animations when the animation
+    // is created. We have to process this restyle if necessary. Currently we
+    // skip it here and will do this restyle in the next tick.
+    return;
+  }
+
   if (aRestyleHint == 0 && !aMinChangeHint && !HasPendingRestyles()) {
     return; // Nothing to do.
   }
@@ -169,7 +176,7 @@ ServoRestyleManager::RecreateStyleContexts(Element* aElement,
 
     RefPtr<nsStyleContext> newContext =
       aStyleSet->GetContext(computedValues.forget(), aParentContext, nullptr,
-                            CSSPseudoElementType::NotPseudo);
+                            CSSPseudoElementType::NotPseudo, aElement);
 
     // XXX This could not always work as expected: there are kinds of content
     // with the first split and the last sharing style, but others not. We
@@ -309,6 +316,11 @@ ServoRestyleManager::ProcessPendingRestyles()
     return;
   }
 
+  // Create a AnimationsWithDestroyedFrame during restyling process to
+  // stop animations and transitions on elements that have no frame at the end
+  // of the restyling process.
+  AnimationsWithDestroyedFrame animationsWithDestroyedFrame(this);
+
   ServoStyleSet* styleSet = StyleSet();
   nsIDocument* doc = PresContext()->Document();
 
@@ -358,6 +370,11 @@ ServoRestyleManager::ProcessPendingRestyles()
   }
 
   IncrementRestyleGeneration();
+
+  // Note: We are in the scope of |animationsWithDestroyedFrame|, so
+  //       |mAnimationsWithDestroyedFrame| is still valid.
+  MOZ_ASSERT(mAnimationsWithDestroyedFrame);
+  mAnimationsWithDestroyedFrame->StopAnimationsForElementsWithoutFrames();
 }
 
 void

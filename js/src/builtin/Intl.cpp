@@ -2850,10 +2850,12 @@ js::intl_IsValidTimeZoneName(JSContext* cx, unsigned argc, Value* vp)
     if (!sharedIntlData.validateTimeZoneName(cx, timeZone, &validatedTimeZone))
         return false;
 
-    if (validatedTimeZone)
+    if (validatedTimeZone) {
+        cx->markAtom(validatedTimeZone);
         args.rval().setString(validatedTimeZone);
-    else
+    } else {
         args.rval().setNull();
+    }
 
     return true;
 }
@@ -3501,7 +3503,6 @@ js::GlobalObject::addPluralRulesConstructor(JSContext* cx, HandleObject intl)
         const HeapSlot& slot = global->getReservedSlotRef(PLURAL_RULES_PROTO);
         if (!slot.isUndefined()) {
             MOZ_ASSERT(slot.isObject());
-            MOZ_ASSERT(slot.toObject().is<PluralRulesObject>());
             JS_ReportErrorASCII(cx,
                                 "the PluralRules constructor can't be added "
                                 "multiple times in the same global");

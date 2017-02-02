@@ -475,11 +475,7 @@ class NativeObject : public ShapedObject
         elements_ = emptyObjectElementsShared;
     }
 
-    bool isInWholeCellBuffer() const {
-        const gc::TenuredCell* cell = &asTenured();
-        gc::ArenaCellSet* cells = cell->arena()->bufferedCells;
-        return cells && cells->hasCell(cell);
-    }
+    inline bool isInWholeCellBuffer() const;
 
   protected:
 #ifdef DEBUG
@@ -611,7 +607,7 @@ class NativeObject : public ShapedObject
     }
 
     bool shadowingShapeChange(ExclusiveContext* cx, const Shape& shape);
-    bool clearFlag(ExclusiveContext* cx, BaseShape::Flag flag);
+    static bool clearFlag(ExclusiveContext* cx, HandleNativeObject obj, BaseShape::Flag flag);
 
     // The maximum number of slots in an object.
     // |MAX_SLOTS_COUNT * sizeof(JS::Value)| shouldn't overflow
@@ -738,10 +734,10 @@ class NativeObject : public ShapedObject
                               bool allowDictionary = true);
 
     /* Add a data property whose id is not yet in this scope. */
-    Shape* addDataProperty(ExclusiveContext* cx,
-                           jsid id_, uint32_t slot, unsigned attrs);
-    Shape* addDataProperty(ExclusiveContext* cx, HandlePropertyName name,
-                           uint32_t slot, unsigned attrs);
+    static Shape* addDataProperty(ExclusiveContext* cx, HandleNativeObject obj,
+                                  jsid id_, uint32_t slot, unsigned attrs);
+    static Shape* addDataProperty(ExclusiveContext* cx, HandleNativeObject obj,
+                                  HandlePropertyName name, uint32_t slot, unsigned attrs);
 
     /* Add or overwrite a property for id in this scope. */
     static Shape*
@@ -761,7 +757,7 @@ class NativeObject : public ShapedObject
                    unsigned attrs, JSGetterOp getter, JSSetterOp setter);
 
     /* Remove the property named by id from this object. */
-    bool removeProperty(ExclusiveContext* cx, jsid id);
+    static bool removeProperty(ExclusiveContext* cx, HandleNativeObject obj, jsid id);
 
     /* Clear the scope, making it empty. */
     static void clear(ExclusiveContext* cx, HandleNativeObject obj);
@@ -842,16 +838,22 @@ class NativeObject : public ShapedObject
         return *getSlotAddress(slot);
     }
 
+    // Check requirements on values stored to this object.
+    inline void checkStoredValue(const Value& v) {
+        MOZ_ASSERT(IsObjectValueInCompartment(v, compartment()));
+        MOZ_ASSERT(AtomIsMarked(zoneFromAnyThread(), v));
+    }
+
     void setSlot(uint32_t slot, const Value& value) {
         MOZ_ASSERT(slotInRange(slot));
-        MOZ_ASSERT(IsObjectValueInCompartment(value, compartment()));
+        checkStoredValue(value);
         getSlotRef(slot).set(this, HeapSlot::Slot, slot, value);
     }
 
     void initSlot(uint32_t slot, const Value& value) {
         MOZ_ASSERT(getSlot(slot).isUndefined());
         MOZ_ASSERT(slotInRange(slot));
-        MOZ_ASSERT(IsObjectValueInCompartment(value, compartment()));
+        checkStoredValue(value);
         initSlotUnchecked(slot, value);
     }
 
@@ -929,13 +931,13 @@ class NativeObject : public ShapedObject
 
     void setFixedSlot(uint32_t slot, const Value& value) {
         MOZ_ASSERT(slot < numFixedSlots());
-        MOZ_ASSERT(IsObjectValueInCompartment(value, compartment()));
+        checkStoredValue(value);
         fixedSlots()[slot].set(this, HeapSlot::Slot, slot, value);
     }
 
     void initFixedSlot(uint32_t slot, const Value& value) {
         MOZ_ASSERT(slot < numFixedSlots());
-        MOZ_ASSERT(IsObjectValueInCompartment(value, compartment()));
+        checkStoredValue(value);
         fixedSlots()[slot].init(this, HeapSlot::Slot, slot, value);
     }
 
@@ -1033,6 +1035,7 @@ class NativeObject : public ShapedObject
     void setDenseElementUnchecked(uint32_t index, const Value& val) {
         MOZ_ASSERT(index < getDenseInitializedLength());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
+        checkStoredValue(val);
         elements_[index].set(this, HeapSlot::Element, index, val);
     }
 
@@ -1054,6 +1057,7 @@ class NativeObject : public ShapedObject
         MOZ_ASSERT(index < getDenseInitializedLength());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         MOZ_ASSERT(!denseElementsAreFrozen());
+        checkStoredValue(val);
         elements_[index].init(this, HeapSlot::Element, index, val);
     }
 
@@ -1078,6 +1082,10 @@ class NativeObject : public ShapedObject
         MOZ_ASSERT(dstStart + count <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         MOZ_ASSERT(!denseElementsAreFrozen());
+#ifdef DEBUG
+        for (uint32_t i = 0; i < count; ++i)
+            checkStoredValue(src[i]);
+#endif
         if (JS::shadow::Zone::asShadowZone(zone())->needsIncrementalBarrier()) {
             for (uint32_t i = 0; i < count; ++i)
                 elements_[dstStart + i].set(this, HeapSlot::Element, dstStart + i, src[i]);
@@ -1091,6 +1099,10 @@ class NativeObject : public ShapedObject
         MOZ_ASSERT(dstStart + count <= getDenseCapacity());
         MOZ_ASSERT(!denseElementsAreCopyOnWrite());
         MOZ_ASSERT(!denseElementsAreFrozen());
+#ifdef DEBUG
+        for (uint32_t i = 0; i < count; ++i)
+            checkStoredValue(src[i]);
+#endif
         memcpy(&elements_[dstStart], src, count * sizeof(HeapSlot));
         elementsRangeWriteBarrierPost(dstStart, count);
     }

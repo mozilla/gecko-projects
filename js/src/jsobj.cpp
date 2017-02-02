@@ -1053,6 +1053,7 @@ JS_CopyPropertyFrom(JSContext* cx, HandleId id, HandleObject target,
     }
 
     JSAutoCompartment ac(cx, target);
+    cx->markId(id);
     RootedId wrappedId(cx, id);
     if (!cx->compartment()->wrap(cx, &desc))
         return false;
@@ -1142,7 +1143,7 @@ js::CloneObject(JSContext* cx, HandleObject obj, Handle<js::TaggedProto> proto)
 }
 
 static bool
-GetScriptArrayObjectElements(JSContext* cx, HandleObject obj, MutableHandle<GCVector<Value>> values)
+GetScriptArrayObjectElements(ExclusiveContext* cx, HandleObject obj, MutableHandle<GCVector<Value>> values)
 {
     MOZ_ASSERT(!obj->isSingleton());
     MOZ_ASSERT(obj->is<ArrayObject>() || obj->is<UnboxedArrayObject>());
@@ -1160,7 +1161,7 @@ GetScriptArrayObjectElements(JSContext* cx, HandleObject obj, MutableHandle<GCVe
 }
 
 static bool
-GetScriptPlainObjectProperties(JSContext* cx, HandleObject obj,
+GetScriptPlainObjectProperties(ExclusiveContext* cx, HandleObject obj,
                                MutableHandle<IdValueVector> properties)
 {
     if (obj->is<PlainObject>()) {
@@ -1214,6 +1215,8 @@ DeepCloneValue(JSContext* cx, Value* vp, NewObjectKind newKind)
         if (!obj)
             return false;
         vp->setObject(*obj);
+    } else {
+        cx->markAtomValue(*vp);
     }
     return true;
 }
@@ -1252,6 +1255,7 @@ js::DeepCloneObjectLiteral(JSContext* cx, HandleObject obj, NewObjectKind newKin
         return nullptr;
 
     for (size_t i = 0; i < properties.length(); i++) {
+        cx->markId(properties[i].get().id);
         if (!DeepCloneValue(cx, &properties[i].get().value, newKind))
             return nullptr;
     }
@@ -1335,9 +1339,8 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
 {
     /* NB: Keep this in sync with DeepCloneObjectLiteral. */
 
-    JSContext* cx = xdr->cx();
-    MOZ_ASSERT_IF(mode == XDR_ENCODE && obj->isSingleton(),
-                  cx->compartment()->behaviors().getSingletonsAsTemplates());
+    ExclusiveContext* cx = xdr->cx();
+    assertSameCompartment(cx, obj);
 
     // Distinguish between objects and array classes.
     uint32_t isArray = 0;
