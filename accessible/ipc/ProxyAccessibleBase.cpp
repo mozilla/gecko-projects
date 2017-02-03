@@ -76,7 +76,9 @@ ProxyAccessibleBase<Derived>::ClearChildDoc(DocAccessibleParent* aChildDoc)
   // in SetChildDoc(). This could result in two subsequent calls to
   // ClearChildDoc() even though mChildren.Length() == 1.
   MOZ_ASSERT(mChildren.Length() <= 1);
-  mChildren.RemoveElement(aChildDoc);
+  if (mChildren.RemoveElement(aChildDoc)) {
+    mOuterDoc = false;
+  }
 }
 
 template <class Derived>
