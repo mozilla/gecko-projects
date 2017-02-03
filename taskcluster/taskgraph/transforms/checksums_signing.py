@@ -7,10 +7,8 @@ Transform the checksums signing task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from taskgraph.transforms.base import (
-    validate_schema,
-    TransformSequence
-)
+from taskgraph.transforms.base import TransformSequence
+from taskgraph.util.schema import validate_schema
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Schema, Any, Required, Optional
 
@@ -26,7 +24,7 @@ taskref_or_string = Any(
 
 checksums_signing_description_schema = Schema({
     Required('dependent-task'): object,
-    Required('depname', default='build'): basestring,
+    Required('depname', default='beetmover'): basestring,
     Optional('label'): basestring,
     Optional('treeherder'): task_description_schema['treeherder'],
 })
@@ -56,8 +54,7 @@ def make_checksums_signing_description(config, jobs):
         treeherder.setdefault('kind', 'build')
 
         label = job.get('label', "checksumssigning-{}".format(dep_job.label))
-        dependent_kind = str(dep_job.kind)
-        dependencies = {dependent_kind: dep_job.label}
+        dependencies =  {"beetmover": dep_job.label}
 
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
