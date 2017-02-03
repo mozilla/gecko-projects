@@ -84,8 +84,8 @@ def make_beetmover_checksums_description(config, jobs):
 
 def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
     common_paths = [
-        "target.checksums",
-        "target.checksums.asc"
+        "public/target.checksums",
+        "public/target.checksums.asc"
     ]
     artifact_prefix = 'public/build'
     if locale:
@@ -94,8 +94,7 @@ def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
     upstream_artifacts = [{
         "taskId": {"task-reference": checksums_signing_ref},
         "taskType": "signing",
-        "paths": ["{}/{}".format(artifact_prefix, p)
-                  for p in common_paths],
+        "paths": common_paths,
         "locale": locale or "en-US",
     }]
 
@@ -104,8 +103,7 @@ def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
         upstream_artifacts.extend([{
             "taskId": {"task-reference": checksums_signing_ref},
             "taskType": "signing",
-            "paths": ["{}/{}".format(artifact_prefix, p)
-                      for p in common_paths],
+            "paths": common_paths,
             "locale": "multi"
         }])
 
