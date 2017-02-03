@@ -93,7 +93,7 @@ def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
 
     upstream_artifacts = [{
         "taskId": {"task-reference": checksums_signing_ref},
-        "taskType": "checksums-signing",
+        "taskType": "signing",
         "paths": ["{}/{}".format(artifact_prefix, p)
                   for p in common_paths],
         "locale": locale or "en-US",
@@ -103,7 +103,7 @@ def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
         # edge case to support 'multi' locale paths
         upstream_artifacts.extend([{
             "taskId": {"task-reference": checksums_signing_ref},
-            "taskType": "checksums-signing",
+            "taskType": "signing",
             "paths": ["{}/{}".format(artifact_prefix, p)
                       for p in common_paths],
             "locale": "multi"
