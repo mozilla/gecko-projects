@@ -85,16 +85,13 @@ def make_beetmover_checksums_description(config, jobs):
 def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
     common_paths = [
         "public/target.checksums",
-        "public/target.checksums.asc"
+        "public/target.checksums.asc",
     ]
-    artifact_prefix = 'public/build'
-    if locale:
-        artifact_prefix = 'public/build/{}'.format(locale)
 
     upstream_artifacts = [{
         "taskId": {"task-reference": checksums_signing_ref},
         "taskType": "signing",
-        "paths": common_paths,
+        "paths": common_paths + ["public/balrog_props.json"],
         "locale": locale or "en-US",
     }]
 
