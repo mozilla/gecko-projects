@@ -7,6 +7,7 @@ Transform the checksums signing task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+from copy import deepcopy
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema
 from taskgraph.transforms.task import task_description_schema
@@ -56,7 +57,8 @@ def make_beetmover_checksums_description(config, jobs):
 
         label = job.get('label', "beetmover-{}".format(dep_job.label))
         dependent_kind = str(dep_job.kind)
-        dependencies = {dependent_kind: dep_job.label}
+        dependencies = deepcopy(dep_job.dependencies)
+        dependencies.update({dependent_kind: dep_job.label})
 
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
@@ -82,23 +84,28 @@ def make_beetmover_checksums_description(config, jobs):
         yield task
 
 
-def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
+def generate_upstream_artifacts(refs, platform, locale=None):
     common_paths = [
         "public/target.checksums",
         "public/target.checksums.asc",
     ]
 
     upstream_artifacts = [{
-        "taskId": {"task-reference": checksums_signing_ref},
+        "taskId": {"task-reference": refs["signing"]},
         "taskType": "signing",
-        "paths": common_paths + ["public/balrog_props.json"],
+        "paths": common_paths,
+        "locale": locale or "en-US",
+    }, {
+        "taskId": {"task-reference": refs["beetmover"]},
+        "taskType": "beetmover",
+        "paths": ["public/balrog_props.json"],
         "locale": locale or "en-US",
     }]
 
     if not locale and "android" in platform:
         # edge case to support 'multi' locale paths
         upstream_artifacts.extend([{
-            "taskId": {"task-reference": checksums_signing_ref},
+            "taskId": {"task-reference": refs["signing"]},
             "taskType": "signing",
             "paths": common_paths,
             "locale": "multi"
@@ -110,19 +117,21 @@ def generate_upstream_artifacts(checksums_signing_ref, platform, locale=None):
 @transforms.add
 def make_beetmover_checksums_worker(config, jobs):
     for job in jobs:
-        valid_beetmover_job = (len(job["dependencies"]) == 1)
+        valid_beetmover_job = (len(job["dependencies"]) >= 1)
         if not valid_beetmover_job:
             raise NotImplementedError("Beetmover checksums must have a dependency.")
 
         locale = job["attributes"].get("locale")
         platform = job["attributes"]["build_platform"]
 
-        dep_task = None
+        refs = {}
         for dependency in job["dependencies"].keys():
-            dep_task = dependency
+            if dependency.startswith("beetmover"):
+                refs['beetmover'] = "<{}>".format(dependency)
+            else:
+                refs['signing'] = "<{}>".format(dependency)
 
-        checksums_signing_ref = "<" + str(dep_task) + ">"
-        upstream_artifacts = generate_upstream_artifacts(checksums_signing_ref,
+        upstream_artifacts = generate_upstream_artifacts(refs,
                                                          platform, locale)
 
         worker = {'implementation': 'beetmover',

@@ -70,7 +70,6 @@ def make_checksums_signing_description(config, jobs):
             "taskType": "beetmover",
             "paths": [
                 "public/target.checksums",
-                "public/balrog_props.json"
             ],
             "formats": ["gpg"]
         }]
