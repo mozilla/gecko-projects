@@ -7,7 +7,6 @@ Transform the checksums signing task into an actual task description.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from copy import deepcopy
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import validate_schema
 from taskgraph.transforms.task import task_description_schema
@@ -57,8 +56,10 @@ def make_beetmover_checksums_description(config, jobs):
 
         label = job.get('label', "beetmover-{}".format(dep_job.label))
         dependent_kind = str(dep_job.kind)
-        dependencies = deepcopy(dep_job.dependencies)
-        dependencies.update({dependent_kind: dep_job.label})
+        dependencies = {dependent_kind: dep_job.label}
+        for k, v in dep_job.dependencies.items():
+            if k.startswith('beetmover'):
+                dependencies[k] = v
 
         attributes = {
             'nightly': dep_job.attributes.get('nightly', False),
@@ -117,19 +118,24 @@ def generate_upstream_artifacts(refs, platform, locale=None):
 @transforms.add
 def make_beetmover_checksums_worker(config, jobs):
     for job in jobs:
-        valid_beetmover_job = (len(job["dependencies"]) >= 1)
+        valid_beetmover_job = (len(job["dependencies"]) == 2)
         if not valid_beetmover_job:
-            raise NotImplementedError("Beetmover checksums must have a dependency.")
+            raise NotImplementedError("Beetmover checksums must have two dependencies.")
 
         locale = job["attributes"].get("locale")
         platform = job["attributes"]["build_platform"]
 
-        refs = {}
+        refs = {
+            "beetmover": None,
+            "signing": None,
+        }
         for dependency in job["dependencies"].keys():
             if dependency.startswith("beetmover"):
                 refs['beetmover'] = "<{}>".format(dependency)
             else:
                 refs['signing'] = "<{}>".format(dependency)
+        if None in refs.values():
+            raise NotImplementedError("Beetmover checksums must have a beetmover and signing dependency!")
 
         upstream_artifacts = generate_upstream_artifacts(refs,
                                                          platform, locale)
