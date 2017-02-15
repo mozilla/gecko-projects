@@ -164,8 +164,8 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
     static {
         sTables = new Table[] {
-            // See awful shortcut assumption hack in getURLMetadataTable.
-            new URLMetadataTable()
+            // See awful shortcut assumption hack in getURLImageDataTable.
+            new URLImageDataTable()
         };
         // We will reuse this.
         HashMap<String, String> map;
@@ -370,8 +370,8 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
     // Convenience accessor.
     // Assumes structure of sTables!
-    private URLMetadataTable getURLMetadataTable() {
-        return (URLMetadataTable) sTables[0];
+    private URLImageDataTable getURLImageDataTable() {
+        return (URLImageDataTable) sTables[0];
     }
 
     private static boolean hasFaviconsInProjection(String[] projection) {
@@ -1077,7 +1077,7 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
                            // Hence the weird SELECT * FROM (SELECT ...relevant suggested sites... LIMIT ?)
                            " SELECT * FROM (SELECT " +
                            Bookmarks._ID + ", " +
-                           Bookmarks._ID + " AS " + Combined.BOOKMARK_ID + ", " +
+                           " NULL " + " AS " + Combined.BOOKMARK_ID + ", " +
                            " -1 AS " + Combined.HISTORY_ID + ", " +
                            Bookmarks.URL + ", " +
                            Bookmarks.TITLE + ", " +
@@ -2204,7 +2204,7 @@ public class BrowserProvider extends SharedBrowserDatabaseProvider {
 
         return deleteFavicons(uri, faviconSelection, null) +
                deleteThumbnails(uri, thumbnailSelection, null) +
-               getURLMetadataTable().deleteUnused(getWritableDatabase(uri));
+               getURLImageDataTable().deleteUnused(getWritableDatabase(uri));
     }
 
     @Override

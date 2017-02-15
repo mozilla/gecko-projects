@@ -49,7 +49,7 @@ use script_layout_interface::{HTMLCanvasData, LayoutNodeType, SVGSVGData, Truste
 use script_layout_interface::{OpaqueStyleAndLayoutData, PartialPersistentLayoutData};
 use script_layout_interface::wrapper_traits::{DangerousThreadSafeLayoutNode, GetLayoutData, LayoutNode};
 use script_layout_interface::wrapper_traits::{PseudoElementType, ThreadSafeLayoutElement, ThreadSafeLayoutNode};
-use selectors::matching::ElementFlags;
+use selectors::matching::ElementSelectorFlags;
 use selectors::parser::{AttrSelector, NamespaceConstraint};
 use servo_atoms::Atom;
 use servo_url::ServoUrl;
@@ -393,10 +393,10 @@ impl<'le> TElement for ServoLayoutElement<'le> {
 
     #[inline]
     fn existing_style_for_restyle_damage<'a>(&'a self,
-                                             current_cv: Option<&'a Arc<ComputedValues>>,
+                                             current_cv: &'a Arc<ComputedValues>,
                                              _pseudo_element: Option<&PseudoElement>)
                                              -> Option<&'a Arc<ComputedValues>> {
-        current_cv
+        Some(current_cv)
     }
 
     fn has_dirty_descendants(&self) -> bool {
@@ -436,6 +436,14 @@ impl<'le> TElement for ServoLayoutElement<'le> {
 
     fn skip_root_and_item_based_display_fixup(&self) -> bool {
         false
+    }
+
+    unsafe fn set_selector_flags(&self, flags: ElementSelectorFlags) {
+        self.element.insert_selector_flags(flags);
+    }
+
+    fn has_selector_flags(&self, flags: ElementSelectorFlags) -> bool {
+        self.element.has_selector_flags(flags)
     }
 }
 
@@ -594,8 +602,8 @@ impl<'le> ::selectors::Element for ServoLayoutElement<'le> {
         self.element.namespace()
     }
 
-    fn match_non_ts_pseudo_class(&self, pseudo_class: NonTSPseudoClass) -> bool {
-        match pseudo_class {
+    fn match_non_ts_pseudo_class(&self, pseudo_class: &NonTSPseudoClass) -> bool {
+        match *pseudo_class {
             // https://github.com/servo/servo/issues/8718
             NonTSPseudoClass::Link |
             NonTSPseudoClass::AnyLink => unsafe {
@@ -664,10 +672,6 @@ impl<'le> ::selectors::Element for ServoLayoutElement<'le> {
         unsafe {
             self.element.html_element_in_html_document_for_layout()
         }
-    }
-
-    fn insert_flags(&self, flags: ElementFlags) {
-        self.element.insert_atomic_flags(flags);
     }
 }
 
@@ -773,7 +777,7 @@ impl<'ln> ThreadSafeLayoutNode for ServoThreadSafeLayoutNode<'ln> {
         debug_assert!(self.is_text_node());
         let parent = self.node.parent_node().unwrap().as_element().unwrap();
         let parent_data = parent.get_data().unwrap().borrow();
-        parent_data.styles().primary.values.clone()
+        parent_data.styles().primary.values().clone()
     }
 
     fn debug_id(self) -> usize {
@@ -1009,6 +1013,10 @@ impl<'le> ThreadSafeLayoutElement for ServoThreadSafeLayoutElement<'le> {
         self.as_node().type_id()
     }
 
+    unsafe fn unsafe_get(self) -> ServoLayoutElement<'le> {
+        self.element
+    }
+
     fn get_attr<'a>(&'a self, namespace: &Namespace, name: &LocalName) -> Option<&'a str> {
         self.element.get_attr(namespace, name)
     }
@@ -1092,7 +1100,7 @@ impl<'le> ::selectors::Element for ServoThreadSafeLayoutElement<'le> {
         self.element.get_namespace()
     }
 
-    fn match_non_ts_pseudo_class(&self, _: NonTSPseudoClass) -> bool {
+    fn match_non_ts_pseudo_class(&self, _: &NonTSPseudoClass) -> bool {
         // NB: This could maybe be implemented
         warn!("ServoThreadSafeLayoutElement::match_non_ts_pseudo_class called");
         false

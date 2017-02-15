@@ -47,7 +47,7 @@ JSString::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
     // JSExternalString: Ask the embedding to tell us what's going on.  If it
     // doesn't want to say, don't count, the chars could be stored anywhere.
     if (isExternal()) {
-        if (auto* cb = runtimeFromMainThread()->externalStringSizeofCallback.ref()) {
+        if (auto* cb = runtimeFromActiveCooperatingThread()->externalStringSizeofCallback.ref()) {
             // Our callback isn't supposed to cause GC.
             JS::AutoSuppressGCAnalysis nogc;
             return cb(this, mallocSizeOf);
@@ -819,7 +819,7 @@ bool
 StaticStrings::init(JSContext* cx)
 {
     AutoLockForExclusiveAccess lock(cx);
-    AutoCompartment ac(cx, cx->runtime()->atomsCompartment(lock), &lock);
+    AutoAtomsCompartment ac(cx, lock);
 
     static_assert(UNIT_STATIC_LIMIT - 1 <= JSString::MAX_LATIN1_CHAR,
                   "Unit strings must fit in Latin1Char.");

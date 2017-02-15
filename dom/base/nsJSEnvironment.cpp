@@ -62,6 +62,7 @@
 #include "mozilla/dom/ErrorEvent.h"
 #include "nsAXPCNativeCallContext.h"
 #include "mozilla/CycleCollectedJSContext.h"
+#include "mozilla/SystemGroup.h"
 
 #include "nsJSPrincipals.h"
 
@@ -111,7 +112,8 @@ const size_t gStackSize = 8192;
 // Maximum amount of time that should elapse between incremental GC slices
 #define NS_INTERSLICE_GC_DELAY      100 // ms
 
-// If we haven't painted in 100ms, we allow for a longer GC budget
+// If we haven't painted in 100ms, or we're in e10s parent process and
+// user isn't active, we allow for a longer GC budget.
 #define NS_INTERSLICE_GC_BUDGET     40 // ms
 
 // The amount of time we wait between a request to CC (after GC ran)
@@ -188,7 +190,8 @@ static bool sNeedsFullGC = false;
 static bool sNeedsGCAfterCC = false;
 static bool sIncrementalCC = false;
 static bool sDidPaintAfterPreviousICCSlice = false;
-
+static bool sUserActive = false;
+static int32_t sActiveIntersliceGCBudget = 0; // ms;
 static nsScriptNameSpaceManager *gNameSpaceManager;
 
 static PRTime sFirstCollectionTime;
@@ -348,10 +351,12 @@ nsJSEnvironmentObserver::Observe(nsISupports* aSubject, const char* aTopic,
       }
     }
   } else if (!nsCRT::strcmp(aTopic, "user-interaction-inactive")) {
+    sUserActive = false;
     if (sCompactOnUserInactive) {
       nsJSContext::PokeShrinkingGC();
     }
   } else if (!nsCRT::strcmp(aTopic, "user-interaction-active")) {
+    sUserActive = true;
     nsJSContext::KillShrinkingGCTimer();
     if (sIsCompactingOnUserInactive) {
       JS::AbortIncrementalGC(sContext);
@@ -1559,6 +1564,7 @@ nsJSContext::BeginCycleCollectionCallback()
   // an incremental collection, and we want to be sure to finish it.
   CallCreateInstance("@mozilla.org/timer;1", &sICCTimer);
   if (sICCTimer) {
+    sICCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
     sICCTimer->InitWithNamedFuncCallback(ICCTimerFired, nullptr,
                                          kICCIntersliceDelay,
                                          nsITimer::TYPE_REPEATING_SLACK,
@@ -1726,10 +1732,13 @@ void
 InterSliceGCTimerFired(nsITimer *aTimer, void *aClosure)
 {
   nsJSContext::KillInterSliceGCTimer();
+  bool e10sParent = XRE_IsParentProcess() && BrowserTabsRemoteAutostart();
+  int64_t budget = e10sParent && sUserActive && sActiveIntersliceGCBudget ?
+    sActiveIntersliceGCBudget : NS_INTERSLICE_GC_BUDGET;
   nsJSContext::GarbageCollectNow(JS::gcreason::INTER_SLICE_GC,
                                  nsJSContext::IncrementalGC,
                                  nsJSContext::NonShrinkingGC,
-                                 NS_INTERSLICE_GC_BUDGET);
+                                 budget);
 }
 
 // static
@@ -1965,6 +1974,7 @@ nsJSContext::PokeGC(JS::gcreason::Reason aReason,
 
   static bool first = true;
 
+  sGCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
   sGCTimer->InitWithNamedFuncCallback(GCTimerFired,
                                       reinterpret_cast<void *>(aReason),
                                       aDelay
@@ -1992,6 +2002,7 @@ nsJSContext::PokeShrinkingGC()
     return;
   }
 
+  sShrinkingGCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
   sShrinkingGCTimer->InitWithNamedFuncCallback(ShrinkingGCTimerFired, nullptr,
                                                sCompactOnUserInactiveDelay,
                                                nsITimer::TYPE_ONE_SHOT,
@@ -2015,6 +2026,7 @@ nsJSContext::MaybePokeCC()
     // We can kill some objects before running forgetSkippable.
     nsCycleCollector_dispatchDeferredDeletion();
 
+    sCCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
     sCCTimer->InitWithNamedFuncCallback(CCTimerFired, nullptr,
                                         NS_CC_SKIPPABLE_DELAY,
                                         nsITimer::TYPE_REPEATING_SLACK,
@@ -2166,6 +2178,7 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
       if (aDesc.isZone_) {
         if (!sFullGCTimer && !sShuttingDown) {
           CallCreateInstance("@mozilla.org/timer;1", &sFullGCTimer);
+          sFullGCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
           sFullGCTimer->InitWithNamedFuncCallback(FullGCTimerFired,
                                                   nullptr,
                                                   NS_FULL_GC_DELAY,
@@ -2196,6 +2209,7 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
       nsJSContext::KillInterSliceGCTimer();
       if (!sShuttingDown) {
         CallCreateInstance("@mozilla.org/timer;1", &sInterSliceGCTimer);
+        sInterSliceGCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
         sInterSliceGCTimer->InitWithNamedFuncCallback(InterSliceGCTimerFired,
                                                       nullptr,
                                                       NS_INTERSLICE_GC_DELAY,
@@ -2319,8 +2333,10 @@ SetMemoryGCSliceTimePrefChangedCallback(const char* aPrefName, void* aClosure)
 {
   int32_t pref = Preferences::GetInt(aPrefName, -1);
   // handle overflow and negative pref values
-  if (pref > 0 && pref < 100000)
+  if (pref > 0 && pref < 100000) {
+    sActiveIntersliceGCBudget = pref;
     JS_SetGCParameter(sContext, JSGC_SLICE_TIME_BUDGET, pref);
+  }
 }
 
 static void
@@ -2607,6 +2623,7 @@ nsJSContext::NotifyDidPaint()
     sICCTimer->Cancel();
     ICCTimerFired(nullptr, nullptr);
     if (sICCTimer) {
+      sICCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
       sICCTimer->InitWithNamedFuncCallback(ICCTimerFired, nullptr,
                                            kICCIntersliceDelay,
                                            nsITimer::TYPE_REPEATING_SLACK,
@@ -2625,6 +2642,7 @@ nsJSContext::NotifyDidPaint()
     sCCTimer->Cancel();
     CCTimerFired(nullptr, nullptr);
     if (sCCTimer) {
+      sCCTimer->SetTarget(SystemGroup::EventTargetFor(TaskCategory::GarbageCollection));
       sCCTimer->InitWithNamedFuncCallback(CCTimerFired, nullptr,
                                           NS_CC_SKIPPABLE_DELAY,
                                           nsITimer::TYPE_REPEATING_SLACK,

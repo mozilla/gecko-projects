@@ -14,7 +14,6 @@ chrome/**
 config/**
 db/**
 docshell/**
-dom/**
 editor/**
 embedding/**
 extensions/**
@@ -24,7 +23,6 @@ hal/**
 image/**
 intl/**
 ipc/**
-js/**
 layout/**
 media/**
 memory/**
@@ -115,7 +113,6 @@ devtools/server/tests/browser/**
 devtools/server/tests/mochitest/**
 devtools/server/tests/unit/**
 devtools/shared/heapsnapshot/**
-devtools/shared/webconsole/test/**
 
 # Ignore devtools pre-processed files
 devtools/client/framework/toolbox-process-window.js
@@ -154,6 +151,88 @@ devtools/client/framework/test/code_ugly*
 devtools/server/tests/unit/babel_and_browserify_script_with_source_map.js
 devtools/server/tests/unit/setBreakpoint*
 
+# dom/ exclusions
+dom/animation/**
+dom/archivereader/**
+dom/asmjscache/**
+dom/audiochannel/**
+dom/base/**
+dom/battery/**
+dom/bindings/**
+dom/broadcastchannel/**
+dom/browser-element/**
+dom/cache/**
+dom/canvas/**
+dom/commandhandler/**
+dom/console/**
+dom/crypto/**
+dom/devicestorage/**
+dom/encoding/**
+dom/events/**
+dom/fetch/**
+dom/file/**
+dom/filehandle/**
+dom/filesystem/**
+dom/flyweb/**
+dom/gamepad/**
+dom/geolocation/**
+dom/grid/**
+dom/html/**
+dom/imptests/**
+dom/interfaces/**
+dom/ipc/**
+dom/json/**
+dom/jsurl/**
+dom/locales/**
+dom/manifest/**
+dom/mathml/**
+dom/media/**
+dom/messagechannel/**
+dom/network/**
+dom/notification/**
+dom/offline/**
+dom/performance/**
+dom/permission/**
+dom/plugins/**
+dom/power/**
+dom/presentation/**
+dom/promise/**
+dom/push/**
+dom/quota/**
+dom/res/**
+dom/secureelement/**
+dom/security/**
+dom/smil/**
+dom/storage/**
+dom/svg/**
+dom/system/**
+dom/tests/**
+dom/time/**
+dom/u2f/**
+dom/url/**
+dom/vr/**
+dom/webauthn/**
+dom/webbrowserpersist/**
+dom/webidl/**
+dom/workers/**
+dom/worklet/**
+dom/xbl/**
+dom/xhr/**
+dom/xml/**
+dom/xslt/**
+dom/xul/**
+
+# Exclude everything but self-hosted JS
+js/ductwork/**
+js/examples/**
+js/ipc/**
+js/public/**
+js/xpconnect/**
+js/src/devtools/**
+js/src/octane/**
+js/src/jit-test/**
+js/src/tests/**
+
 # mobile/android/ exclusions
 mobile/android/tests/
 
@@ -175,6 +254,12 @@ mobile/android/components/Snippets.js
 
 # Bug 1178739: Ignore this file as a quick fix for "Illegal yield expression"
 mobile/android/modules/HomeProvider.jsm
+
+# security/ exclusions (pref files).
+security/manager/ssl/security-prefs.js
+
+#NSS
+security/nss/**
 
 # services/ exclusions
 
@@ -218,6 +303,3 @@ toolkit/webapps/**
 
 # Third party
 toolkit/modules/third_party/**
-
-#NSS
-security/nss/**

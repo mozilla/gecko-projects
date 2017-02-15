@@ -52,9 +52,7 @@ HttpChannelParent::HttpChannelParent(const PBrowserOrId& iframeEmbedding,
                                      nsILoadContext* aLoadContext,
                                      PBOverrideStatus aOverrideStatus)
   : mIPCClosed(false)
-  , mStoredStatus(NS_OK)
-  , mStoredProgress(0)
-  , mStoredProgressMax(0)
+  , mIgnoreProgress(false)
   , mSentRedirect1Begin(false)
   , mSentRedirect1BeginFailed(false)
   , mReceivedRedirect2Verify(false)
@@ -302,7 +300,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const nsCString&           requestMethod,
                                  const OptionalIPCStream&   uploadStream,
                                  const bool&                uploadStreamHasHeaders,
-                                 const uint16_t&            priority,
+                                 const int16_t&             priority,
                                  const uint32_t&            classOfService,
                                  const uint8_t&             redirectionLimit,
                                  const bool&                allowPipelining,
@@ -594,16 +592,20 @@ HttpChannelParent::ConnectChannel(const uint32_t& registrarId, const bool& shoul
        "[this=%p, id=%lu]\n", this, registrarId));
   nsCOMPtr<nsIChannel> channel;
   rv = NS_LinkRedirectChannels(registrarId, this, getter_AddRefs(channel));
+  if (NS_FAILED(rv)) {
+    NS_ERROR("Could not find the http channel to connect its IPC parent");
+    // This makes the channel delete itself safely.  It's the only thing
+    // we can do now, since this parent channel cannot be used and there is
+    // no other way to tell the child side there were something wrong.
+    Delete();
+    return true;
+  }
+
   // It's safe to cast here since the found parent-side real channel is ensured
   // to be http (nsHttpChannel).  ConnectChannel called from HttpChannelParent::Init
   // can only be called for http channels.  It's bound by ipdl.
   mChannel = static_cast<nsHttpChannel*>(channel.get());
   LOG(("  found channel %p, rv=%08x", mChannel.get(), rv));
-
-  if (NS_FAILED(rv)) {
-    NS_ERROR("Could not find the http channel to connect its IPC parent");
-    return false;
-  }
 
   nsCOMPtr<nsINetworkInterceptController> controller;
   NS_QueryNotificationCallbacks(channel, controller);
@@ -623,9 +625,9 @@ HttpChannelParent::ConnectChannel(const uint32_t& registrarId, const bool& shoul
 }
 
 mozilla::ipc::IPCResult
-HttpChannelParent::RecvSetPriority(const uint16_t& priority)
+HttpChannelParent::RecvSetPriority(const int16_t& priority)
 {
-  LOG(("HttpChannelParent::RecvSetPriority [this=%p, priority=%u]\n",
+  LOG(("HttpChannelParent::RecvSetPriority [this=%p, priority=%d]\n",
        this, priority));
 
   if (mChannel) {
@@ -1257,6 +1259,10 @@ HttpChannelParent::OnDataAvailable(nsIRequest *aRequest,
   nsresult channelStatus = NS_OK;
   mChannel->GetStatus(&channelStatus);
 
+  nsresult transportStatus =
+    (mChannel->IsReadingFromCache()) ? NS_NET_STATUS_READING
+                                     : NS_NET_STATUS_RECEIVING_FROM;
+
   static uint32_t const kCopyChunkSize = 128 * 1024;
   uint32_t toRead = std::min<uint32_t>(aCount, kCopyChunkSize);
 
@@ -1272,12 +1278,7 @@ HttpChannelParent::OnDataAvailable(nsIRequest *aRequest,
       return rv;
     }
 
-    // OnDataAvailable is always preceded by OnStatus/OnProgress calls that set
-    // mStoredStatus/mStoredProgress(Max) to appropriate values, unless
-    // LOAD_BACKGROUND set.  In that case, they'll have garbage values, but
-    // child doesn't use them.
-    if (mIPCClosed || !SendOnTransportAndData(channelStatus, mStoredStatus,
-                                              mStoredProgress, mStoredProgressMax,
+    if (mIPCClosed || !SendOnTransportAndData(channelStatus, transportStatus,
                                               aOffset, toRead, data)) {
       return NS_ERROR_UNEXPECTED;
     }
@@ -1300,19 +1301,17 @@ HttpChannelParent::OnProgress(nsIRequest *aRequest,
                               int64_t aProgress,
                               int64_t aProgressMax)
 {
-  // OnStatus has always just set mStoredStatus. If it indicates this precedes
-  // OnDataAvailable, store and ODA will send to child.
-  if (mStoredStatus == NS_NET_STATUS_RECEIVING_FROM ||
-      mStoredStatus == NS_NET_STATUS_READING)
-  {
-    mStoredProgress = aProgress;
-    mStoredProgressMax = aProgressMax;
-  } else {
-    // Send OnProgress events to the child for data upload progress notifications
-    // (i.e. status == NS_NET_STATUS_SENDING_TO) or if the channel has
-    // LOAD_BACKGROUND set.
-    if (mIPCClosed || !SendOnProgress(aProgress, aProgressMax))
-      return NS_ERROR_UNEXPECTED;
+  // If it indicates this precedes OnDataAvailable, child can derive the value in ODA.
+  if (mIgnoreProgress) {
+    mIgnoreProgress = false;
+    return NS_OK;
+  }
+
+  // Send OnProgress events to the child for data upload progress notifications
+  // (i.e. status == NS_NET_STATUS_SENDING_TO) or if the channel has
+  // LOAD_BACKGROUND set.
+  if (mIPCClosed || !SendOnProgress(aProgress, aProgressMax)) {
+    return NS_ERROR_UNEXPECTED;
   }
 
   return NS_OK;
@@ -1324,16 +1323,21 @@ HttpChannelParent::OnStatus(nsIRequest *aRequest,
                             nsresult aStatus,
                             const char16_t *aStatusArg)
 {
-  // If this precedes OnDataAvailable, store and ODA will send to child.
+  // If this precedes OnDataAvailable, transportStatus will be derived in ODA.
   if (aStatus == NS_NET_STATUS_RECEIVING_FROM ||
-      aStatus == NS_NET_STATUS_READING)
-  {
-    mStoredStatus = aStatus;
+      aStatus == NS_NET_STATUS_READING) {
+    // The transport status and progress generated by ODA will be coalesced
+    // into one IPC message. Therefore, we can ignore the next OnProgress event
+    // since it is generated by ODA as well.
+    mIgnoreProgress = true;
     return NS_OK;
   }
+
   // Otherwise, send to child now
-  if (mIPCClosed || !SendOnStatus(aStatus))
+  if (mIPCClosed || !SendOnStatus(aStatus)) {
     return NS_ERROR_UNEXPECTED;
+  }
+
   return NS_OK;
 }
 

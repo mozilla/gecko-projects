@@ -252,6 +252,16 @@ public:
                             nsLayoutUtils::IdlePeriodDeadlineLimit()));
   }
 
+  void SetLastGCCCDuration(TimeDuration aDuration)
+  {
+    mLastGCCCDuration = aDuration;
+  }
+
+  TimeDuration LastGCCCDuration()
+  {
+    return mLastGCCCDuration;
+  }
+
 protected:
   virtual void StartTimer() = 0;
   virtual void StopTimer() = 0;
@@ -329,6 +339,8 @@ protected:
   bool mLastFireSkipped;
   TimeStamp mLastFireTime;
   TimeStamp mTargetTime;
+
+  TimeDuration mLastGCCCDuration;
 
   nsTArray<RefPtr<nsRefreshDriver> > mContentRefreshDrivers;
   nsTArray<RefPtr<nsRefreshDriver> > mRootRefreshDrivers;
@@ -481,6 +493,34 @@ private:
       MOZ_ASSERT(NS_IsMainThread());
     }
 
+    class ParentProcessVsyncNotifier final: public Runnable,
+                                            public nsIRunnablePriority
+    {
+    public:
+      ParentProcessVsyncNotifier(RefreshDriverVsyncObserver* aObserver,
+                                 TimeStamp aVsyncTimestamp)
+        : mObserver(aObserver), mVsyncTimestamp(aVsyncTimestamp) {}
+
+      NS_DECL_ISUPPORTS_INHERITED
+
+      NS_IMETHOD Run() override
+      {
+        mObserver->TickRefreshDriver(mVsyncTimestamp);
+        return NS_OK;
+      }
+
+      NS_IMETHOD GetPriority(uint32_t* aPriority) override
+      {
+        *aPriority = nsIRunnablePriority::PRIORITY_HIGH;
+        return NS_OK;
+      }
+
+    private:
+      ~ParentProcessVsyncNotifier() {}
+      RefPtr<RefreshDriverVsyncObserver> mObserver;
+      TimeStamp mVsyncTimestamp;
+    };
+
     bool NotifyVsync(TimeStamp aVsyncTimestamp) override
     {
       if (!NS_IsMainThread()) {
@@ -498,9 +538,7 @@ private:
         }
 
         nsCOMPtr<nsIRunnable> vsyncEvent =
-             NewRunnableMethod<TimeStamp>(this,
-                                          &RefreshDriverVsyncObserver::TickRefreshDriver,
-                                          aVsyncTimestamp);
+          new ParentProcessVsyncNotifier(this, aVsyncTimestamp);
         NS_DispatchToMainThread(vsyncEvent);
       } else {
         TickRefreshDriver(aVsyncTimestamp);
@@ -578,6 +616,9 @@ private:
         mProcessedVsync = true;
       } else {
         mLastChildTick = TimeStamp::Now();
+        if (!mBlockUntil.IsNull() && mBlockUntil > aVsyncTimestamp) {
+          return;
+        }
       }
       MOZ_ASSERT(aVsyncTimestamp <= TimeStamp::Now());
 
@@ -585,7 +626,19 @@ private:
       // the scheduled TickRefreshDriver() runs. Check mVsyncRefreshDriverTimer
       // before use.
       if (mVsyncRefreshDriverTimer) {
+        // Clear the old GC/CC duration.
+        mVsyncRefreshDriverTimer->SetLastGCCCDuration(TimeDuration());
         mVsyncRefreshDriverTimer->RunRefreshDrivers(aVsyncTimestamp);
+      }
+
+      if (!XRE_IsParentProcess()) {
+        TimeDuration tickDuration = TimeStamp::Now() - mLastChildTick;
+        mBlockUntil = aVsyncTimestamp + tickDuration;
+        if (mVsyncRefreshDriverTimer) {
+          // Since GC/CC slices may run during the tick, but after the actual
+          // layout processing, they are not considered as part of the tick time.
+          mBlockUntil -= mVsyncRefreshDriverTimer->LastGCCCDuration();
+        }
       }
     }
 
@@ -596,6 +649,7 @@ private:
     Monitor mRefreshTickLock;
     TimeStamp mRecentVsync;
     TimeStamp mLastChildTick;
+    TimeStamp mBlockUntil;
     TimeDuration mVsyncRate;
     bool mProcessedVsync;
   }; // RefreshDriverVsyncObserver
@@ -677,6 +731,11 @@ private:
   RefPtr<VsyncChild> mVsyncChild;
   TimeDuration mVsyncRate;
 }; // VsyncRefreshDriverTimer
+
+NS_IMPL_ISUPPORTS_INHERITED(VsyncRefreshDriverTimer::
+                            RefreshDriverVsyncObserver::
+                            ParentProcessVsyncNotifier,
+                            Runnable, nsIRunnablePriority)
 
 /**
  * Since the content process takes some time to setup
@@ -1047,17 +1106,6 @@ nsRefreshDriver::GetMinRecomputeVisibilityInterval()
   return TimeDuration::FromMilliseconds(interval);
 }
 
-/* static */ mozilla::TimeDuration
-nsRefreshDriver::GetMinNotifyIntersectionObserversInterval()
-{
-  int32_t interval =
-    Preferences::GetInt("layout.visibility.min-notify-intersection-observers-interval-ms", -1);
-  if (interval <= 0) {
-    interval = DEFAULT_NOTIFY_INTERSECTION_OBSERVERS_INTERVAL_MS;
-  }
-  return TimeDuration::FromMilliseconds(interval);
-}
-
 double
 nsRefreshDriver::GetRefreshTimerInterval() const
 {
@@ -1098,8 +1146,6 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
     mThrottledFrameRequestInterval(TimeDuration::FromMilliseconds(
                                      GetThrottledTimerInterval())),
     mMinRecomputeVisibilityInterval(GetMinRecomputeVisibilityInterval()),
-    mMinNotifyIntersectionObserversInterval(
-      GetMinNotifyIntersectionObserversInterval()),
     mThrottled(false),
     mNeedToRecomputeVisibility(false),
     mTestControllingRefreshes(false),
@@ -1120,7 +1166,6 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
   mMostRecentTick = mMostRecentRefresh;
   mNextThrottledFrameRequestTick = mMostRecentTick;
   mNextRecomputeVisibilityTick = mMostRecentTick;
-  mNextNotifyIntersectionObserversTick = mMostRecentTick;
 
   ++sRefreshDriverCount;
 }
@@ -1579,7 +1624,8 @@ nsRefreshDriver::DispatchPendingEvents()
 static bool
 CollectDocuments(nsIDocument* aDocument, void* aDocArray)
 {
-  static_cast<nsCOMArray<nsIDocument>*>(aDocArray)->AppendObject(aDocument);
+  static_cast<AutoTArray<nsCOMPtr<nsIDocument>, 32>*>(aDocArray)->
+    AppendElement(aDocument);
   aDocument->EnumerateSubDocuments(CollectDocuments, aDocArray);
   return true;
 }
@@ -1591,10 +1637,10 @@ nsRefreshDriver::DispatchAnimationEvents()
     return;
   }
 
-  nsCOMArray<nsIDocument> documents;
+  AutoTArray<nsCOMPtr<nsIDocument>, 32> documents;
   CollectDocuments(mPresContext->Document(), &documents);
 
-  for (int32_t i = 0; i < documents.Count(); ++i) {
+  for (uint32_t i = 0; i < documents.Length(); ++i) {
     nsIDocument* doc = documents[i];
     nsIPresShell* shell = doc->GetShell();
     if (!shell) {
@@ -1895,20 +1941,12 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     presShell->ScheduleApproximateFrameVisibilityUpdateNow();
   }
 
-  bool notifyIntersectionObservers = false;
-  if (aNowTime >= mNextNotifyIntersectionObserversTick) {
-    mNextNotifyIntersectionObserversTick =
-      aNowTime + mMinNotifyIntersectionObserversInterval;
-    notifyIntersectionObservers = true;
-  }
   nsCOMArray<nsIDocument> documents;
   CollectDocuments(mPresContext->Document(), &documents);
   for (int32_t i = 0; i < documents.Count(); ++i) {
     nsIDocument* doc = documents[i];
     doc->UpdateIntersectionObservations();
-    if (notifyIntersectionObservers) {
-      doc->ScheduleIntersectionObserverNotification();
-    }
+    doc->ScheduleIntersectionObserverNotification();
   }
 
   /*
@@ -2033,8 +2071,12 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
   }
 
   if (notifyGC && nsContentUtils::XPConnect()) {
+    TimeStamp startGCCC = TimeStamp::Now();
     nsContentUtils::XPConnect()->NotifyDidPaint();
     nsJSContext::NotifyDidPaint();
+    if (mActiveTimer) {
+      mActiveTimer->SetLastGCCCDuration(TimeStamp::Now() - startGCCC);
+    }
   }
 }
 

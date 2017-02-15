@@ -58,6 +58,7 @@
 #include "mozilla/dom/MessageEventBinding.h"
 #include "mozilla/dom/MessagePort.h"
 #include "mozilla/dom/MessagePortBinding.h"
+#include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PMessagePort.h"
 #include "mozilla/dom/Promise.h"
@@ -395,15 +396,7 @@ private:
   virtual bool
   WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
-    nsCOMPtr<nsILoadGroup> loadGroupToCancel;
-    mFinishedWorker->ForgetOverridenLoadGroup(loadGroupToCancel);
-
-    nsTArray<nsCOMPtr<nsISupports>> doomed;
-    mFinishedWorker->ForgetMainThreadObjects(doomed);
-
-    RefPtr<MainThreadReleaseRunnable> runnable =
-      new MainThreadReleaseRunnable(doomed, loadGroupToCancel);
-    if (NS_FAILED(mWorkerPrivate->DispatchToMainThread(runnable.forget()))) {
+    if (!mFinishedWorker->ProxyReleaseMainThreadObjects()) {
       NS_WARNING("Failed to dispatch, going to leak!");
     }
 
@@ -447,15 +440,7 @@ private:
 
     runtime->UnregisterWorker(mFinishedWorker);
 
-    nsCOMPtr<nsILoadGroup> loadGroupToCancel;
-    mFinishedWorker->ForgetOverridenLoadGroup(loadGroupToCancel);
-
-    nsTArray<nsCOMPtr<nsISupports> > doomed;
-    mFinishedWorker->ForgetMainThreadObjects(doomed);
-
-    RefPtr<MainThreadReleaseRunnable> runnable =
-      new MainThreadReleaseRunnable(doomed, loadGroupToCancel);
-    if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
+    if (!mFinishedWorker->ProxyReleaseMainThreadObjects()) {
       NS_WARNING("Failed to dispatch, going to leak!");
     }
 
@@ -1836,6 +1821,7 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo& aOther)
   mPrincipalInfo = aOther.mPrincipalInfo.forget();
 
   mDomain = aOther.mDomain;
+  mOrigin = aOther.mOrigin;
   mServiceWorkerCacheName = aOther.mServiceWorkerCacheName;
   mLoadFlags = aOther.mLoadFlags;
   mWindowID = aOther.mWindowID;
@@ -1849,6 +1835,205 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo& aOther)
   mStorageAllowed = aOther.mStorageAllowed;
   mServiceWorkersTestingInWindow = aOther.mServiceWorkersTestingInWindow;
   mOriginAttributes = aOther.mOriginAttributes;
+}
+
+nsresult
+WorkerLoadInfo::SetPrincipalOnMainThread(nsIPrincipal* aPrincipal,
+                                         nsILoadGroup* aLoadGroup)
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(aLoadGroup, aPrincipal));
+
+  mPrincipal = aPrincipal;
+  mPrincipalIsSystem = nsContentUtils::IsSystemPrincipal(aPrincipal);
+
+  nsresult rv = aPrincipal->GetCsp(getter_AddRefs(mCSP));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (mCSP) {
+    mCSP->GetAllowsEval(&mReportCSPViolations, &mEvalAllowed);
+    // Set ReferrerPolicy
+    bool hasReferrerPolicy = false;
+    uint32_t rp = mozilla::net::RP_Unset;
+
+    rv = mCSP->GetReferrerPolicy(&rp, &hasReferrerPolicy);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (hasReferrerPolicy) {
+      mReferrerPolicy = static_cast<net::ReferrerPolicy>(rp);
+    }
+  } else {
+    mEvalAllowed = true;
+    mReportCSPViolations = false;
+  }
+
+  mLoadGroup = aLoadGroup;
+
+  mPrincipalInfo = new PrincipalInfo();
+  mOriginAttributes = nsContentUtils::GetOriginAttributes(aLoadGroup);
+
+  rv = PrincipalToPrincipalInfo(aPrincipal, mPrincipalInfo);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = nsContentUtils::GetUTFOrigin(aPrincipal, mOrigin);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+nsresult
+WorkerLoadInfo::GetPrincipalAndLoadGroupFromChannel(nsIChannel* aChannel,
+                                                    nsIPrincipal** aPrincipalOut,
+                                                    nsILoadGroup** aLoadGroupOut)
+{
+  AssertIsOnMainThread();
+  MOZ_DIAGNOSTIC_ASSERT(aChannel);
+  MOZ_DIAGNOSTIC_ASSERT(aPrincipalOut);
+  MOZ_DIAGNOSTIC_ASSERT(aLoadGroupOut);
+
+  // Initial triggering principal should be set
+  MOZ_DIAGNOSTIC_ASSERT(mPrincipal);
+
+  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+  MOZ_DIAGNOSTIC_ASSERT(ssm);
+
+  nsCOMPtr<nsIPrincipal> channelPrincipal;
+  nsresult rv = ssm->GetChannelResultPrincipal(aChannel, getter_AddRefs(channelPrincipal));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsILoadGroup> channelLoadGroup;
+  rv = aChannel->GetLoadGroup(getter_AddRefs(channelLoadGroup));
+  NS_ENSURE_SUCCESS(rv, rv);
+  MOZ_ASSERT(channelLoadGroup);
+
+  // If the load principal is the system principal then the channel
+  // principal must also be the system principal (we do not allow chrome
+  // code to create workers with non-chrome scripts, and if we ever decide
+  // to change this we need to make sure we don't always set
+  // mPrincipalIsSystem to true in WorkerPrivate::GetLoadInfo()). Otherwise
+  // this channel principal must be same origin with the load principal (we
+  // check again here in case redirects changed the location of the script).
+  if (nsContentUtils::IsSystemPrincipal(mPrincipal)) {
+    if (!nsContentUtils::IsSystemPrincipal(channelPrincipal)) {
+      nsCOMPtr<nsIURI> finalURI;
+      rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(finalURI));
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      // See if this is a resource URI. Since JSMs usually come from
+      // resource:// URIs we're currently considering all URIs with the
+      // URI_IS_UI_RESOURCE flag as valid for creating privileged workers.
+      bool isResource;
+      rv = NS_URIChainHasFlags(finalURI,
+                               nsIProtocolHandler::URI_IS_UI_RESOURCE,
+                               &isResource);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      if (isResource) {
+        // Assign the system principal to the resource:// worker only if it
+        // was loaded from code using the system principal.
+        channelPrincipal = mPrincipal;
+      } else {
+        return NS_ERROR_DOM_BAD_URI;
+      }
+    }
+  }
+
+  // The principal can change, but it should still match the original
+  // load group's appId and browser element flag.
+  MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(channelLoadGroup, channelPrincipal));
+
+  channelPrincipal.forget(aPrincipalOut);
+  channelLoadGroup.forget(aLoadGroupOut);
+
+  return NS_OK;
+}
+
+nsresult
+WorkerLoadInfo::SetPrincipalFromChannel(nsIChannel* aChannel)
+{
+  AssertIsOnMainThread();
+
+  nsCOMPtr<nsIPrincipal> principal;
+  nsCOMPtr<nsILoadGroup> loadGroup;
+  nsresult rv = GetPrincipalAndLoadGroupFromChannel(aChannel,
+                                                    getter_AddRefs(principal),
+                                                    getter_AddRefs(loadGroup));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return SetPrincipalOnMainThread(principal, loadGroup);
+}
+
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
+bool
+WorkerLoadInfo::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
+{
+  AssertIsOnMainThread();
+
+  nsCOMPtr<nsIPrincipal> principal;
+  nsCOMPtr<nsILoadGroup> loadGroup;
+  nsresult rv = GetPrincipalAndLoadGroupFromChannel(aChannel,
+                                                    getter_AddRefs(principal),
+                                                    getter_AddRefs(loadGroup));
+  NS_ENSURE_SUCCESS(rv, false);
+
+
+  // Verify that the channel is still a null principal.  We don't care
+  // if these are the exact same null principal object, though.  From
+  // the worker's perspective its the same effect.
+  if (principal->GetIsNullPrincipal() && mPrincipal->GetIsNullPrincipal()) {
+    return true;
+  }
+
+  // Otherwise we require exact equality.  Redirects can happen, but they
+  // are not allowed to change our principal.
+  if (principal->Equals(mPrincipal)) {
+    return true;
+  }
+
+  return false;
+}
+
+bool
+WorkerLoadInfo::PrincipalIsValid() const
+{
+  return mPrincipal && mPrincipalInfo &&
+         mPrincipalInfo->type() != PrincipalInfo::T__None &&
+         mPrincipalInfo->type() <= PrincipalInfo::T__Last;
+}
+#endif // defined(DEBUG) || !defined(RELEASE_OR_BETA)
+
+bool
+WorkerLoadInfo::ProxyReleaseMainThreadObjects(WorkerPrivate* aWorkerPrivate)
+{
+  nsCOMPtr<nsILoadGroup> nullLoadGroup;
+  return ProxyReleaseMainThreadObjects(aWorkerPrivate, nullLoadGroup);
+}
+
+bool
+WorkerLoadInfo::ProxyReleaseMainThreadObjects(WorkerPrivate* aWorkerPrivate,
+                                              nsCOMPtr<nsILoadGroup>& aLoadGroupToCancel)
+{
+
+  static const uint32_t kDoomedCount = 10;
+  nsTArray<nsCOMPtr<nsISupports>> doomed(kDoomedCount);
+
+  SwapToISupportsArray(mWindow, doomed);
+  SwapToISupportsArray(mScriptContext, doomed);
+  SwapToISupportsArray(mBaseURI, doomed);
+  SwapToISupportsArray(mResolvedScriptURI, doomed);
+  SwapToISupportsArray(mPrincipal, doomed);
+  SwapToISupportsArray(mChannel, doomed);
+  SwapToISupportsArray(mCSP, doomed);
+  SwapToISupportsArray(mLoadGroup, doomed);
+  SwapToISupportsArray(mLoadFailedAsyncRunnable, doomed);
+  SwapToISupportsArray(mInterfaceRequestor, doomed);
+  // Before adding anything here update kDoomedCount above!
+
+  MOZ_ASSERT(doomed.Length() == kDoomedCount);
+
+  RefPtr<MainThreadReleaseRunnable> runnable =
+    new MainThreadReleaseRunnable(doomed, aLoadGroupToCancel);
+  return NS_SUCCEEDED(aWorkerPrivate->DispatchToMainThread(runnable.forget()));
 }
 
 template <class Derived>
@@ -2417,6 +2602,57 @@ WorkerPrivateParent<Derived>::GetDocument() const
   }
   // couldn't query a document, give up and return nullptr
   return nullptr;
+}
+
+template <class Derived>
+nsresult
+WorkerPrivateParent<Derived>::SetCSPFromHeaderValues(const nsACString& aCSPHeaderValue,
+                                                     const nsACString& aCSPReportOnlyHeaderValue)
+{
+  AssertIsOnMainThread();
+  MOZ_DIAGNOSTIC_ASSERT(!mLoadInfo.mCSP);
+
+  NS_ConvertASCIItoUTF16 cspHeaderValue(aCSPHeaderValue);
+  NS_ConvertASCIItoUTF16 cspROHeaderValue(aCSPReportOnlyHeaderValue);
+
+  nsCOMPtr<nsIContentSecurityPolicy> csp;
+  nsresult rv = mLoadInfo.mPrincipal->EnsureCSP(nullptr, getter_AddRefs(csp));
+  if (!csp) {
+    return NS_OK;
+  }
+
+  // If there's a CSP header, apply it.
+  if (!cspHeaderValue.IsEmpty()) {
+    rv = CSP_AppendCSPFromHeader(csp, cspHeaderValue, false);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  // If there's a report-only CSP header, apply it.
+  if (!cspROHeaderValue.IsEmpty()) {
+    rv = CSP_AppendCSPFromHeader(csp, cspROHeaderValue, true);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  // Set evalAllowed, default value is set in GetAllowsEval
+  bool evalAllowed = false;
+  bool reportEvalViolations = false;
+  rv = csp->GetAllowsEval(&reportEvalViolations, &evalAllowed);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Set ReferrerPolicy, default value is set in GetReferrerPolicy
+  bool hasReferrerPolicy = false;
+  uint32_t rp = mozilla::net::RP_Unset;
+  rv = csp->GetReferrerPolicy(&rp, &hasReferrerPolicy);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  mLoadInfo.mCSP = csp;
+  mLoadInfo.mEvalAllowed = evalAllowed;
+  mLoadInfo.mReportCSPViolations = reportEvalViolations;
+
+  if (hasReferrerPolicy) {
+    mLoadInfo.mReferrerPolicy = static_cast<net::ReferrerPolicy>(rp);
+  }
+
+  return NS_OK;
 }
 
 
@@ -3031,48 +3267,25 @@ WorkerPrivateParent<Derived>::ModifyBusyCount(bool aIncrease)
 }
 
 template <class Derived>
-void
-WorkerPrivateParent<Derived>::ForgetOverridenLoadGroup(
-                                          nsCOMPtr<nsILoadGroup>& aLoadGroupOut)
-{
-  AssertIsOnParentThread();
-
-  // If we're not overriden, then do nothing here.  Let the load group get
-  // handled in ForgetMainThreadObjects().
-  if (!mLoadInfo.mInterfaceRequestor) {
-    return;
-  }
-
-  mLoadInfo.mLoadGroup.swap(aLoadGroupOut);
-}
-
-template <class Derived>
-void
-WorkerPrivateParent<Derived>::ForgetMainThreadObjects(
-                                      nsTArray<nsCOMPtr<nsISupports> >& aDoomed)
+bool
+WorkerPrivateParent<Derived>::ProxyReleaseMainThreadObjects()
 {
   AssertIsOnParentThread();
   MOZ_ASSERT(!mMainThreadObjectsForgotten);
 
-  static const uint32_t kDoomedCount = 10;
+  nsCOMPtr<nsILoadGroup> loadGroupToCancel;
+  // If we're not overriden, then do nothing here.  Let the load group get
+  // handled in ForgetMainThreadObjects().
+  if (mLoadInfo.mInterfaceRequestor) {
+    mLoadInfo.mLoadGroup.swap(loadGroupToCancel);
+  }
 
-  aDoomed.SetCapacity(kDoomedCount);
-
-  SwapToISupportsArray(mLoadInfo.mWindow, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mScriptContext, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mBaseURI, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mResolvedScriptURI, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mPrincipal, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mChannel, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mCSP, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mLoadGroup, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mLoadFailedAsyncRunnable, aDoomed);
-  SwapToISupportsArray(mLoadInfo.mInterfaceRequestor, aDoomed);
-  // Before adding anything here update kDoomedCount above!
-
-  MOZ_ASSERT(aDoomed.Length() == kDoomedCount);
+  bool result = mLoadInfo.ProxyReleaseMainThreadObjects(ParentAsWorkerPrivate(),
+                                                        loadGroupToCancel);
 
   mMainThreadObjectsForgotten = true;
+
+  return result;
 }
 
 template <class Derived>
@@ -3655,45 +3868,28 @@ WorkerPrivateParent<Derived>::SetBaseURI(nsIURI* aBaseURI)
 }
 
 template <class Derived>
-void
-WorkerPrivateParent<Derived>::SetPrincipal(nsIPrincipal* aPrincipal,
-                                           nsILoadGroup* aLoadGroup)
+nsresult
+WorkerPrivateParent<Derived>::SetPrincipalOnMainThread(nsIPrincipal* aPrincipal,
+                                                       nsILoadGroup* aLoadGroup)
 {
-  AssertIsOnMainThread();
-  MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(aLoadGroup, aPrincipal));
-  MOZ_ASSERT(!mLoadInfo.mPrincipalInfo);
-
-  mLoadInfo.mPrincipal = aPrincipal;
-  mLoadInfo.mPrincipalIsSystem = nsContentUtils::IsSystemPrincipal(aPrincipal);
-
-  aPrincipal->GetCsp(getter_AddRefs(mLoadInfo.mCSP));
-
-  if (mLoadInfo.mCSP) {
-    mLoadInfo.mCSP->GetAllowsEval(&mLoadInfo.mReportCSPViolations,
-                                  &mLoadInfo.mEvalAllowed);
-    // Set ReferrerPolicy
-    bool hasReferrerPolicy = false;
-    uint32_t rp = mozilla::net::RP_Unset;
-
-    nsresult rv = mLoadInfo.mCSP->GetReferrerPolicy(&rp, &hasReferrerPolicy);
-    NS_ENSURE_SUCCESS_VOID(rv);
-
-    if (hasReferrerPolicy) {
-      mLoadInfo.mReferrerPolicy = static_cast<net::ReferrerPolicy>(rp);
-    }
-  } else {
-    mLoadInfo.mEvalAllowed = true;
-    mLoadInfo.mReportCSPViolations = false;
-  }
-
-  mLoadInfo.mLoadGroup = aLoadGroup;
-
-  mLoadInfo.mPrincipalInfo = new PrincipalInfo();
-  mLoadInfo.mOriginAttributes = nsContentUtils::GetOriginAttributes(aLoadGroup);
-
-  MOZ_ALWAYS_SUCCEEDS(
-    PrincipalToPrincipalInfo(aPrincipal, mLoadInfo.mPrincipalInfo));
+  return mLoadInfo.SetPrincipalOnMainThread(aPrincipal, aLoadGroup);
 }
+
+template <class Derived>
+nsresult
+WorkerPrivateParent<Derived>::SetPrincipalFromChannel(nsIChannel* aChannel)
+{
+  return mLoadInfo.SetPrincipalFromChannel(aChannel);
+}
+
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
+template <class Derived>
+bool
+WorkerPrivateParent<Derived>::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
+{
+  return mLoadInfo.FinalChannelPrincipalIsValid(aChannel);
+}
+#endif
 
 template <class Derived>
 void
@@ -3826,6 +4022,15 @@ WorkerPrivateParent<Derived>::AssertInnerWindowIsCorrect() const
                "Inner window no longer correct!");
 }
 
+#endif
+
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
+template <class Derived>
+bool
+WorkerPrivateParent<Derived>::PrincipalIsValid() const
+{
+  return mLoadInfo.PrincipalIsValid();
+}
 #endif
 
 class PostDebuggerMessageRunnable final : public Runnable
@@ -4400,6 +4605,8 @@ WorkerPrivate::Constructor(JSContext* aCx,
 
   worker->EnableDebugger();
 
+  MOZ_DIAGNOSTIC_ASSERT(worker->PrincipalIsValid());
+
   RefPtr<CompileScriptRunnable> compiler =
     new CompileScriptRunnable(worker, aScriptURL);
   if (!compiler->Dispatch()) {
@@ -4447,12 +4654,14 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       return NS_ERROR_FAILURE;
     }
 
-    // StartAssignment() is used instead getter_AddRefs because, getter_AddRefs
-    // does QI in debug build and, if this worker runs in a child process,
-    // HttpChannelChild will crash because it's not thread-safe.
+    // Passing a pointer to our stack loadInfo is safe here because this
+    // method uses a sync runnable to get the channel from the main thread.
     rv = ChannelFromScriptURLWorkerThread(aCx, aParent, aScriptURL,
-                                          loadInfo.mChannel.StartAssignment());
-    NS_ENSURE_SUCCESS(rv, rv);
+                                          loadInfo);
+    if (NS_FAILED(rv)) {
+      MOZ_ALWAYS_TRUE(loadInfo.ProxyReleaseMainThreadObjects(aParent));
+      return rv;
+    }
 
     // Now that we've spun the loop there's no guarantee that our parent is
     // still alive.  We may have received control messages initiating shutdown.
@@ -4462,7 +4671,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     }
 
     if (parentStatus > Running) {
-      NS_ReleaseOnMainThread(loadInfo.mChannel.forget());
+      MOZ_ALWAYS_TRUE(loadInfo.ProxyReleaseMainThreadObjects(aParent));
       return NS_ERROR_FAILURE;
     }
 
@@ -4662,7 +4871,12 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     rv = NS_GetFinalChannelURI(loadInfo.mChannel,
                                getter_AddRefs(loadInfo.mResolvedScriptURI));
     NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = loadInfo.SetPrincipalFromChannel(loadInfo.mChannel);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
+
+  MOZ_DIAGNOSTIC_ASSERT(loadInfo.PrincipalIsValid());
 
   aLoadInfo->StealFrom(loadInfo);
   return NS_OK;

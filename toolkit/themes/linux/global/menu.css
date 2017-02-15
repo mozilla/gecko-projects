@@ -36,8 +36,11 @@ menuitem[customoptionstyling="true"] {
   -moz-appearance: none;
 }
 
-menuitem[_moz-menuactive="true"][customoptionstyling="true"] {
-  filter: invert(100%);
+menuitem[customoptionstyling="true"][_moz-menuactive="true"] {
+  /* -moz-menuhovertext and -moz-menuhover only apply
+     when -moz-appearance is set to menuitem. */
+  color: highlighttext;
+  background-color: highlight;
 }
 
 menu[disabled="true"],

@@ -59,38 +59,6 @@ using namespace mozilla::media;
 typedef std::vector<CompositableOperation> OpVector;
 typedef nsTArray<OpDestroy> OpDestroyVector;
 
-namespace {
-class ImageBridgeThread : public Thread {
-public:
-
-  ImageBridgeThread() : Thread("ImageBridgeChild") {
-  }
-
-protected:
-
-  MOZ_IS_CLASS_INIT
-  void Init() {
-#ifdef MOZ_GECKO_PROFILER
-    mPseudoStackHack = profiler_get_pseudo_stack();
-#endif
-  }
-
-  void CleanUp() {
-#ifdef MOZ_GECKO_PROFILER
-    mPseudoStackHack = nullptr;
-#endif
-  }
-
-private:
-
-#ifdef MOZ_GECKO_PROFILER
-  // This is needed to avoid a spurious leak report.  There's no other
-  // use for it.  See bug 1239504 and bug 1215265.
-  MOZ_INIT_OUTSIDE_CTOR PseudoStack* mPseudoStackHack;
-#endif
-};
-}
-
 struct CompositableTransaction
 {
   CompositableTransaction()
@@ -587,10 +555,8 @@ ImageBridgeChild::EndTransaction()
     ShadowLayerForwarder::PlatformSyncBeforeUpdate();
   }
 
-  AutoTArray<EditReply, 10> replies;
-
   if (mTxn->mSwapRequired) {
-    if (!SendUpdate(cset, mTxn->mDestroyedActors, GetFwdTransactionId(), &replies)) {
+    if (!SendUpdate(cset, mTxn->mDestroyedActors, GetFwdTransactionId())) {
       NS_WARNING("could not send async texture transaction");
       return;
     }
@@ -601,9 +567,6 @@ ImageBridgeChild::EndTransaction()
       NS_WARNING("could not send async texture transaction (no swap)");
       return;
     }
-  }
-  for (nsTArray<EditReply>::size_type i = 0; i < replies.Length(); ++i) {
-    MOZ_CRASH("not reached");
   }
 }
 
@@ -620,7 +583,7 @@ ImageBridgeChild::InitForContent(Endpoint<PImageBridgeChild>&& aEndpoint)
   gfxPlatform::GetPlatform();
 
   if (!sImageBridgeChildThread) {
-    sImageBridgeChildThread = new ImageBridgeThread();
+    sImageBridgeChildThread = new Thread("ImageBridgeChild");
     if (!sImageBridgeChildThread->Start()) {
       return false;
     }
@@ -747,7 +710,7 @@ ImageBridgeChild::InitSameProcess()
   MOZ_ASSERT(!sImageBridgeChildSingleton);
   MOZ_ASSERT(!sImageBridgeChildThread);
 
-  sImageBridgeChildThread = new ImageBridgeThread();
+  sImageBridgeChildThread = new Thread("ImageBridgeChild");
   if (!sImageBridgeChildThread->IsRunning()) {
     sImageBridgeChildThread->Start();
   }
@@ -775,7 +738,7 @@ ImageBridgeChild::InitWithGPUProcess(Endpoint<PImageBridgeChild>&& aEndpoint)
   MOZ_ASSERT(!sImageBridgeChildSingleton);
   MOZ_ASSERT(!sImageBridgeChildThread);
 
-  sImageBridgeChildThread = new ImageBridgeThread();
+  sImageBridgeChildThread = new Thread("ImageBridgeChild");
   if (!sImageBridgeChildThread->IsRunning()) {
     sImageBridgeChildThread->Start();
   }

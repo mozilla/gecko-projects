@@ -26,7 +26,6 @@ const {
 } = require("./actions/highlighter-settings");
 
 const App = createFactory(require("./components/App"));
-const Store = require("./store");
 
 const EditingSession = require("./utils/editing-session");
 
@@ -42,7 +41,7 @@ function LayoutView(inspector, window) {
   this.document = window.document;
   this.highlighters = inspector.highlighters;
   this.inspector = inspector;
-  this.store = null;
+  this.store = inspector.store;
   this.walker = this.inspector.walker;
 
   this.updateBoxModel = this.updateBoxModel.bind(this);
@@ -72,11 +71,16 @@ LayoutView.prototype = {
     }
 
     this.layoutInspector = yield this.inspector.walker.getLayoutInspector();
-    let store = this.store = Store();
 
     this.loadHighlighterSettings();
 
     let app = App({
+      /**
+       * Shows the box model properties under the box model if true, otherwise, hidden by
+       * default.
+       */
+      showBoxModelProperties: true,
+
       /**
        * Hides the box-model highlighter on the currently selected element.
        */
@@ -226,7 +230,7 @@ LayoutView.prototype = {
     });
 
     let provider = createElement(Provider, {
-      store,
+      store: this.store,
       id: "layoutview",
       title: INSPECTOR_L10N.getStr("inspector.sidebar.layoutViewTitle2"),
       key: "layoutview",

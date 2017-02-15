@@ -353,11 +353,8 @@ public:
   bool
   ModifyBusyCount(bool aIncrease);
 
-  void
-  ForgetOverridenLoadGroup(nsCOMPtr<nsILoadGroup>& aLoadGroupOut);
-
-  void
-  ForgetMainThreadObjects(nsTArray<nsCOMPtr<nsISupports> >& aDoomed);
+  bool
+  ProxyReleaseMainThreadObjects();
 
   void
   PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
@@ -594,6 +591,11 @@ public:
     return mLoadInfo.mPrincipal;
   }
 
+  const nsAString& Origin() const
+  {
+    return mLoadInfo.mOrigin;
+  }
+
   nsILoadGroup*
   GetLoadGroup() const
   {
@@ -610,8 +612,16 @@ public:
       return mLoadInfo.mPrincipal;
   }
 
-  void
-  SetPrincipal(nsIPrincipal* aPrincipal, nsILoadGroup* aLoadGroup);
+  nsresult
+  SetPrincipalOnMainThread(nsIPrincipal* aPrincipal, nsILoadGroup* aLoadGroup);
+
+  nsresult
+  SetPrincipalFromChannel(nsIChannel* aChannel);
+
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
+  bool
+  FinalChannelPrincipalIsValid(nsIChannel* aChannel);
+#endif
 
   bool
   UsesSystemPrincipal() const
@@ -654,6 +664,10 @@ public:
     AssertIsOnMainThread();
     mLoadInfo.mCSP = aCSP;
   }
+
+  nsresult
+  SetCSPFromHeaderValues(const nsACString& aCSPHeaderValue,
+                         const nsACString& aCSPReportOnlyHeaderValue);
 
   net::ReferrerPolicy
   GetReferrerPolicy() const
@@ -852,6 +866,11 @@ public:
   void
   AssertInnerWindowIsCorrect() const
   { }
+#endif
+
+#if defined(DEBUG) || !defined(RELEASE_OR_BETA)
+  bool
+  PrincipalIsValid() const;
 #endif
 };
 

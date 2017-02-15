@@ -97,7 +97,7 @@ See `bug 1204823 <https://bugzilla.mozilla.org/show_bug.cgi?id=1204823>`_ for de
 subsessionLength
 ~~~~~~~~~~~~~~~~
 The length of this subsession in seconds.
-This uses a monotonic clock, so this may mismatch with other measurements that are not monotonic (e.g. based on ``Date.now()`).
+This uses a monotonic clock, so this may mismatch with other measurements that are not monotonic (e.g. based on ``Date.now()``).
 
 If ``sessionLength`` is ``-1``, the monotonic clock is not working.
 
@@ -238,7 +238,7 @@ Integer count of pending pings that are overdue.
 
 histograms
 ----------
-This section contains the histograms that are valid for the current platform. ``Flag`` and ``count`` histograms are always created and submitted, with their default value being respectively ``false`` and ``0``. Other histogram types (`see here <https://developer.mozilla.org/en-US/docs/Mozilla/Performance/Adding_a_new_Telemetry_probe#Choosing_a_Histogram_Type>`_) are not created nor submitted if no data was added to them. The type and format of the reported histograms is described by the ``Histograms.json`` file. Its most recent version is available `here <https://dxr.mozilla.org/mozilla-central/source/toolkit/components/telemetry/Histograms.json>`_. The ``info.revision`` field indicates the revision of the file that describes the reported histograms.
+This section contains the histograms that are valid for the current platform. ``Flag`` and ``count`` histograms are always created and submitted, with their default value being respectively ``false`` and ``0``. Other histogram types (see :ref:`choosing-histogram-type`) are not created nor submitted if no data was added to them. The type and format of the reported histograms is described by the ``Histograms.json`` file. Its most recent version is available `here <https://dxr.mozilla.org/mozilla-central/source/toolkit/components/telemetry/Histograms.json>`_. The ``info.revision`` field indicates the revision of the file that describes the reported histograms.
 
 keyedHistograms
 ---------------
@@ -289,7 +289,12 @@ Structure:
 
 capturedStacks
 --------------
-Contains information about stacks captured on demand via Telemetry API. This is similar to `chromeHangs`, but only stacks captured on the main thread of the parent process are reported. It reports precise C++ stacks are reported and is only available on Windows, either in Firefox Nightly or in builds using "--enable-profiling" switch.
+Contains information about stacks captured on demand via Telemetry API. For more
+information see :doc:`stack capture <../collection/stack-capture>`.
+
+This is similar to :ref:`chromeHangs`, but only Precise C++ stacks on the main thread of
+the parent process are reported. This data is only available on Windows, either
+in Firefox Nightly or in builds using ``--enable-profiling`` switch.
 
 Limits for captured stacks are the same as for chromeHangs (see below). Furthermore:
 
@@ -319,6 +324,8 @@ Structure:
       ],
       "captures": [["string-key", stack-index, count], ... ]
     }
+
+.. _chromeHangs:
 
 chromeHangs
 -----------

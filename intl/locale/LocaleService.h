@@ -10,9 +10,10 @@
 #include "nsString.h"
 #include "nsTArray.h"
 
+#include "mozILocaleService.h"
+
 namespace mozilla {
 namespace intl {
-
 
 /**
  * LocaleService is a manager of language negotiation in Gecko.
@@ -21,10 +22,29 @@ namespace intl {
  * requested languages and negotiating them to produce a fallback
  * chain of locales for the application.
  */
-class LocaleService
+class LocaleService : public mozILocaleService
 {
 public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_MOZILOCALESERVICE
+
+  /**
+   * Create (if necessary) and return a raw pointer to the singleton instance.
+   * Use this accessor in C++ code that just wants to call a method on the
+   * instance, but does not need to hold a reference, as in
+   *    nsAutoCString str;
+   *    LocaleService::GetInstance()->GetAppLocale(str);
+   */
   static LocaleService* GetInstance();
+
+  /**
+   * Return an addRef'd pointer to the singleton instance. This is used by the
+   * XPCOM constructor that exists to support usage from JS.
+   */
+  static already_AddRefed<LocaleService> GetInstanceAddRefed()
+  {
+    return RefPtr<LocaleService>(GetInstance()).forget();
+  }
 
   /**
    * Returns a list of locales that the application should be localized to.
@@ -37,29 +57,12 @@ public:
    * Example: ["en-US", "de", "pl", "sr-Cyrl", "zh-Hans-HK"]
    *
    * Usage:
-   * nsTArray<nsCString> appLocales;
-   * LocaleService::GetInstance()->GetAppLocales(appLocales);
+   *   nsTArray<nsCString> appLocales;
+   *   LocaleService::GetInstance()->GetAppLocales(appLocales);
+   *
+   * (See mozILocaleService.idl for a JS-callable version of this.)
    */
   void GetAppLocales(nsTArray<nsCString>& aRetVal);
-
-  /**
-   * Returns the best locale that the application should be localized to.
-   *
-   * The result is a valid locale IDs and it should be
-   * used for all APIs that do not handle language negotiation.
-   *
-   * Where possible, GetAppLocales should be preferred over this API and
-   * all callsites should handle some form of "best effort" language
-   * negotiation to respect user preferences in case the use case does
-   * not have data for the first locale in the list.
-   *
-   * Example: "zh-Hans-HK"
-   *
-   * Usage:
-   * nsAutoCString appLocale;
-   * LocaleService::GetInstance()->GetAppLocale(appLocale);
-   */
-  void GetAppLocale(nsACString& aRetVal);
 
   /**
    * Triggers a refresh of the language negotiation process.
@@ -73,7 +76,9 @@ protected:
   nsTArray<nsCString> mAppLocales;
 
 private:
-  static StaticAutoPtr<LocaleService> sInstance;
+  virtual ~LocaleService() {};
+
+  static StaticRefPtr<LocaleService> sInstance;
 };
 
 } // intl

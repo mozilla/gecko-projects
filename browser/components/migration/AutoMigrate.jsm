@@ -12,9 +12,13 @@ const kAutoMigrateEnabledPref = "browser.migrate.automigrate.enabled";
 const kUndoUIEnabledPref = "browser.migrate.automigrate.ui.enabled";
 
 const kAutoMigrateBrowserPref = "browser.migrate.automigrate.browser";
+const kAutoMigrateImportedItemIds = "browser.migrate.automigrate.imported-items";
 
 const kAutoMigrateLastUndoPromptDateMsPref = "browser.migrate.automigrate.lastUndoPromptDateMs";
 const kAutoMigrateDaysToOfferUndoPref = "browser.migrate.automigrate.daysToOfferUndo";
+
+const kAutoMigrateUndoSurveyPref = "browser.migrate.automigrate.undo-survey";
+const kAutoMigrateUndoSurveyLocalePref = "browser.migrate.automigrate.undo-survey-locales";
 
 const kNotificationId = "automigration-undo";
 
@@ -35,6 +39,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
                                   "resource://gre/modules/TelemetryStopwatch.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
+  const kBrandBundle = "chrome://branding/locale/brand.properties";
+  return Services.strings.createBundle(kBrandBundle);
+});
 
 Cu.importGlobalProperties(["URL"]);
 
@@ -306,6 +315,12 @@ const AutoMigrate = {
     return null;
   },
 
+  /**
+   * Show the user a notification bar indicating we automatically imported
+   * their data and offering them the possibility of removing it.
+   * @param target (xul:browser)
+   *        The browser in which we should show the notification.
+   */
   maybeShowUndoNotification: Task.async(function* (target) {
     if (!(yield this.canUndo())) {
       return;
@@ -334,27 +349,29 @@ const AutoMigrate = {
     }
 
     let browserName = this.getBrowserUsedForMigration();
-    let message;
-    if (browserName) {
-      message = MigrationUtils.getLocalizedString("automigration.undo.message",
-                                                  [browserName]);
-    } else {
-      message = MigrationUtils.getLocalizedString("automigration.undo.unknownBrowserMessage");
+    if (!browserName) {
+      browserName = MigrationUtils.getLocalizedString("automigration.undo.unknownbrowser");
     }
+    const kMessageId = "automigration.undo.message." +
+                      Preferences.get(kAutoMigrateImportedItemIds, "all");
+    const kBrandShortName = gBrandBundle.GetStringFromName("brandShortName");
+    let message = MigrationUtils.getLocalizedString(kMessageId,
+                                                    [browserName, kBrandShortName]);
 
     let buttons = [
       {
-        label: MigrationUtils.getLocalizedString("automigration.undo.keep.label"),
-        accessKey: MigrationUtils.getLocalizedString("automigration.undo.keep.accesskey"),
+        label: MigrationUtils.getLocalizedString("automigration.undo.keep2.label"),
+        accessKey: MigrationUtils.getLocalizedString("automigration.undo.keep2.accesskey"),
         callback: () => {
           this._purgeUndoState(this.UNDO_REMOVED_REASON_OFFER_REJECTED);
           this._removeNotificationBars();
         },
       },
       {
-        label: MigrationUtils.getLocalizedString("automigration.undo.dontkeep.label"),
-        accessKey: MigrationUtils.getLocalizedString("automigration.undo.dontkeep.accesskey"),
+        label: MigrationUtils.getLocalizedString("automigration.undo.dontkeep2.label"),
+        accessKey: MigrationUtils.getLocalizedString("automigration.undo.dontkeep2.accesskey"),
         callback: () => {
+          this._maybeOpenUndoSurveyTab(win);
           this.undo();
         },
       },
@@ -413,6 +430,9 @@ const AutoMigrate = {
 
   _dejsonifyUndoState(state) {
     state = JSON.parse(state);
+    if (!state) {
+      return new Map();
+    }
     for (let bm of state.bookmarks) {
       bm.lastModified = new Date(bm.lastModified);
     }
@@ -423,12 +443,55 @@ const AutoMigrate = {
     ]);
   },
 
+  /**
+   * Store the items we've saved into a pref. We use this to be able to show
+   * a detailed message to the user indicating what we've imported.
+   * @param state (Map)
+   *        The 'undo' state for the import, which contains info about
+   *        how many items of each kind we've (tried to) import.
+   */
+  _setImportedItemPrefFromState(state) {
+    let itemsWithData = [];
+    if (state) {
+      for (let itemType of state.keys()) {
+        if (state.get(itemType).length) {
+          itemsWithData.push(itemType);
+        }
+      }
+    }
+    if (itemsWithData.length == 3) {
+      itemsWithData = "all";
+    } else {
+      itemsWithData = itemsWithData.sort().join(".");
+    }
+    if (itemsWithData) {
+      Preferences.set(kAutoMigrateImportedItemIds, itemsWithData);
+    }
+  },
+
+  /**
+   * Used for the shutdown blocker's information field.
+   */
   _saveUndoStateTrackerForShutdown: "not running",
+  /**
+   * Store the information required for using 'undo' of the automatic
+   * migration in the user's profile.
+   */
   saveUndoState: Task.async(function* () {
     let resolveSavingPromise;
     this._saveUndoStateTrackerForShutdown = "processing undo history";
     this._savingPromise = new Promise(resolve => { resolveSavingPromise = resolve });
     let state = yield MigrationUtils.stopAndRetrieveUndoData();
+
+    if (!state || ![...state.values()].some(ary => ary.length > 0)) {
+      // If we didn't import anything, abort now.
+      resolveSavingPromise();
+      return Promise.resolve();
+    }
+
+    this._saveUndoStateTrackerForShutdown = "saving imported item list";
+    this._setImportedItemPrefFromState(state);
+
     this._saveUndoStateTrackerForShutdown = "writing undo history";
     this._undoSavePromise = OS.File.writeAtomic(
       kUndoStateFullPath, this._jsonifyUndoState(state), {
@@ -550,6 +613,49 @@ const AutoMigrate = {
       }
     }
   }),
+
+  /**
+   * Maybe open a new tab with a survey. The tab will only be opened if all of
+   * the following are true:
+   * - the 'browser.migrate.automigrate.undo-survey' pref is not empty.
+   *   It should contain the URL of the survey to open.
+   * - the 'browser.migrate.automigrate.undo-survey-locales' pref, a
+   *   comma-separated list of language codes, contains the language code
+   *   that is currently in use for the 'global' chrome pacakge (ie the
+   *   locale in which the user is currently using Firefox).
+   *   The URL will be passed through nsIURLFormatter to allow including
+   *   build ids etc. The special additional formatting variable
+   *   "%IMPORTEDBROWSER" is also replaced with the name of the browser
+   *   from which we imported data.
+   *
+   * @param {Window} chromeWindow   A reference to the window in which to open a link.
+   */
+  _maybeOpenUndoSurveyTab(chromeWindow) {
+    let canDoSurveyInLocale = false;
+    try {
+      let surveyLocales = Preferences.get(kAutoMigrateUndoSurveyLocalePref, "");
+      surveyLocales = surveyLocales.split(",").map(str => str.trim());
+      // Strip out any empty elements, so an empty pref doesn't
+      // lead to a an array with 1 empty string in it.
+      surveyLocales = new Set(surveyLocales.filter(str => !!str));
+      let chromeRegistry = Cc["@mozilla.org/chrome/chrome-registry;1"]
+                             .getService(Ci.nsIXULChromeRegistry);
+      canDoSurveyInLocale =
+        surveyLocales.has(chromeRegistry.getSelectedLocale("global"));
+    } catch (ex) {
+      /* ignore exceptions and just don't do the survey. */
+    }
+
+    let migrationBrowser = this.getBrowserUsedForMigration();
+    let rawURL = Preferences.get(kAutoMigrateUndoSurveyPref, "");
+    if (!canDoSurveyInLocale || !migrationBrowser || !rawURL) {
+      return;
+    }
+
+    let url = Services.urlFormatter.formatURL(rawURL);
+    url = url.replace("%IMPORTEDBROWSER%", encodeURIComponent(migrationBrowser));
+    chromeWindow.openUILinkIn(url, "tab");
+  },
 
   QueryInterface: XPCOMUtils.generateQI(
     [Ci.nsIObserver, Ci.nsINavBookmarkObserver, Ci.nsISupportsWeakReference]

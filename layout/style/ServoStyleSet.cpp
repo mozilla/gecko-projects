@@ -187,11 +187,22 @@ ServoStyleSet::ResolveMappedAttrDeclarationBlocks()
   }
 }
 
-void
+bool
 ServoStyleSet::PrepareAndTraverseSubtree(RawGeckoElementBorrowed aRoot,
                                          mozilla::TraversalRootBehavior aRootBehavior) {
   ResolveMappedAttrDeclarationBlocks();
-  Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior);
+
+  // Get the Document's root element to ensure that the cache is valid before
+  // calling into the (potentially-parallel) Servo traversal, where a cache hit
+  // is necessary to avoid a data race when updating the cache.
+  mozilla::Unused << aRoot->OwnerDoc()->GetRootElement();
+
+  MOZ_ASSERT(!sInServoTraversal);
+  sInServoTraversal = true;
+  bool postTraversalRequired =
+    Servo_TraverseSubtree(aRoot, mRawSet.get(), aRootBehavior);
+  sInServoTraversal = false;
+  return postTraversalRequired;
 }
 
 already_AddRefed<nsStyleContext>
@@ -551,30 +562,36 @@ ServoStyleSet::HasStateDependentStyle(dom::Element* aElement,
   return nsRestyleHint(0);
 }
 
-void
+bool
 ServoStyleSet::StyleDocument()
 {
   // Restyle the document from the root element and each of the document level
   // NAC subtree roots.
+  bool postTraversalRequired = false;
   DocumentStyleRootIterator iter(mPresContext->Document());
   while (Element* root = iter.GetNextStyleRoot()) {
-    if (root->ShouldTraverseForServo()) {
-      PrepareAndTraverseSubtree(root, TraversalRootBehavior::Normal);
+    if (PrepareAndTraverseSubtree(root, TraversalRootBehavior::Normal)) {
+      postTraversalRequired = true;
     }
   }
+  return postTraversalRequired;
 }
 
 void
 ServoStyleSet::StyleNewSubtree(Element* aRoot)
 {
   MOZ_ASSERT(!aRoot->HasServoData());
-  PrepareAndTraverseSubtree(aRoot, TraversalRootBehavior::Normal);
+  DebugOnly<bool> postTraversalRequired =
+    PrepareAndTraverseSubtree(aRoot, TraversalRootBehavior::Normal);
+  MOZ_ASSERT(!postTraversalRequired);
 }
 
 void
 ServoStyleSet::StyleNewChildren(Element* aParent)
 {
   PrepareAndTraverseSubtree(aParent, TraversalRootBehavior::UnstyledChildrenOnly);
+  // We can't assert that Servo_TraverseSubtree returns false, since aParent
+  // or some of its other children might have pending restyles.
 }
 
 void
@@ -628,3 +645,5 @@ ServoStyleSet::ResolveServoStyle(Element* aElement)
 {
   return Servo_ResolveStyle(aElement, mRawSet.get()).Consume();
 }
+
+bool ServoStyleSet::sInServoTraversal = false;

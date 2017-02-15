@@ -356,8 +356,10 @@ SessionStore.prototype = {
         // If we skipped restoring a zombified tab before backgrounding,
         // we might have to do it now instead.
         let window = Services.wm.getMostRecentWindow("navigator:browser");
-        let tab = window.BrowserApp.selectedTab;
-        this.restoreZombieTab(tab);
+        if (window) { // Might not yet be ready during a cold startup.
+          let tab = window.BrowserApp.selectedTab;
+          this.restoreZombieTab(tab);
+        }
         break;
       case "ClosedTabs:StartNotifications":
         this._notifyClosedTabs = true;
@@ -627,14 +629,15 @@ SessionStore.prototype = {
   },
 
   onTabClose: function ss_onTabClose(aWindow, aBrowser, aTabIndex) {
-    if (this._maxTabsUndo == 0) {
+    let data = aBrowser.__SS_data || {};
+    if (this._maxTabsUndo == 0 || this._sessionDataIsEmpty(data)) {
+      this._lastClosedTabIndex = -1;
       return;
     }
 
     if (aWindow.BrowserApp.tabs.length > 0) {
       // Bundle this browser's data and extra data and save in the closedTabs
       // window property
-      let data = aBrowser.__SS_data || {};
       data.extData = aBrowser.__SS_extdata || {};
 
       this._windows[aWindow.__SSID].closedTabs.unshift(data);
@@ -653,6 +656,17 @@ SessionStore.prototype = {
       let evt = new Event("SSTabCloseProcessed", {"bubbles":true, "cancelable":false});
       aBrowser.dispatchEvent(evt);
     }
+  },
+
+  _sessionDataIsEmpty: function ss_sessionDataIsEmpty(aData) {
+    if (!aData || !aData.entries || aData.entries.length == 0) {
+      return true;
+    }
+
+    let entries = aData.entries;
+
+    return (entries.length == 1 &&
+            (entries[0].url == "about:home" || entries[0].url == "about:privatebrowsing"));
   },
 
   onTabLoad: function ss_onTabLoad(aWindow, aBrowser) {
@@ -708,6 +722,10 @@ SessionStore.prototype = {
       // As _collectTabData() doesn't save any form data, we need to manually
       // capture it to bridge the time until the next input event arrives.
       this.onTabInput(aWindow, aBrowser);
+      // A similar thing applies for the scroll position, otherwise a stray
+      // DOMTitleChanged event can clobber the scroll position if the user
+      // doesn't scroll again afterwards.
+      this.onTabScroll(aWindow, aBrowser);
     }
 
     log("onTabLoad() ran for tab " + aWindow.BrowserApp.getTabForBrowser(aBrowser).id);
@@ -1413,30 +1431,16 @@ SessionStore.prototype = {
     // FF55 will remove the triggeringPrincipal_b64, see Bug 1301666.
     if (aEntry.triggeringPrincipal_base64 || aEntry.principalToInherit_base64) {
       if (aEntry.triggeringPrincipal_base64) {
-        try {
-          shEntry.triggeringPrincipal =
-            Utils.deserializePrincipal(aEntry.triggeringPrincipal_base64);
-        }
-        catch (e) {
-          dump(e);
-        }
+        shEntry.triggeringPrincipal =
+          Utils.deserializePrincipal(aEntry.triggeringPrincipal_base64);
       }
       if (aEntry.principalToInherit_base64) {
-        try {
-          shEntry.principalToInherit =
-            Utils.deserializePrincipal(aEntry.principalToInherit_base64);
-        } catch (e) {
-          dump(e);
-        }
+        shEntry.principalToInherit =
+          Utils.deserializePrincipal(aEntry.principalToInherit_base64);
       }
     } else if (aEntry.triggeringPrincipal_b64) {
-      try {
-        shEntry.triggeringPrincipal = Utils.deserializePrincipal(aEntry.triggeringPrincipal_b64);
-        shEntry.principalToInherit = shEntry.triggeringPrincipal;
-      }
-      catch (e) {
-        dump(e);
-      }
+      shEntry.triggeringPrincipal = Utils.deserializePrincipal(aEntry.triggeringPrincipal_b64);
+      shEntry.principalToInherit = shEntry.triggeringPrincipal;
     }
 
     if (aEntry.children && shEntry instanceof Ci.nsISHContainer) {
@@ -1636,7 +1640,7 @@ SessionStore.prototype = {
 
       let parentId = tabData.parentId;
       if (parentId > -1) {
-        tab.setParentId(parentId);
+        tab.parentId = parentId;
       }
 
       tab.browser.__SS_data = tabData;
@@ -1747,6 +1751,10 @@ SessionStore.prototype = {
     if (this._notifyClosedTabs) {
       this._sendClosedTabsToJava(aWindow);
     }
+  },
+
+  get canUndoLastCloseTab() {
+    return this._lastClosedTabIndex > -1;
   },
 
   _sendClosedTabsToJava: function ss_sendClosedTabsToJava(aWindow) {

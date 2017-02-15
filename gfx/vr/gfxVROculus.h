@@ -27,6 +27,14 @@ struct PixelShaderConstants;
 namespace gfx {
 namespace impl {
 
+enum class OculusControllerAxisType : uint16_t {
+  ThumbstickXAxis,
+  ThumbstickYAxis,
+  IndexTrigger,
+  HandTrigger,
+  NumVRControllerAxisType
+};
+
 class VRDisplayOculus : public VRDisplayHost
 {
 public:
@@ -86,6 +94,20 @@ protected:
   };
 };
 
+class VRControllerOculus : public VRControllerHost
+{
+public:
+  explicit VRControllerOculus();
+  float GetAxisMove(uint32_t aAxis);
+  void SetAxisMove(uint32_t aAxis, float aValue);
+  virtual void SetHand(dom::GamepadHand aHand) override;
+
+protected:
+  virtual ~VRControllerOculus();
+  float mAxisMove[static_cast<uint32_t>(
+                  OculusControllerAxisType::NumVRControllerAxisType)];
+};
+
 } // namespace impl
 
 class VRSystemManagerOculus : public VRSystemManager
@@ -103,7 +125,7 @@ public:
 
 protected:
   VRSystemManagerOculus()
-    : mOculusInitialized(false)
+    : mSession(nullptr), mOculusInitialized(false)
   { }
 
 private:
@@ -116,6 +138,7 @@ private:
                                   VRControllerHost* aController) override;
 
   RefPtr<impl::VRDisplayOculus> mHMDInfo;
+  nsTArray<RefPtr<impl::VRControllerOculus>> mOculusController;
   RefPtr<nsIThread> mOculusThread;
   ovrSession mSession;
   bool mOculusInitialized;

@@ -13,10 +13,14 @@ add_task(function* () {
   let { tab, monitor } = yield initNetMonitor(JSON_BASIC_URL + "?name=null");
   info("Starting test... ");
 
-  let { document, NetMonitorView } = monitor.panelWin;
-  let { RequestsMenu } = NetMonitorView;
+  let { document, gStore, windowRequire } = monitor.panelWin;
+  let Actions = windowRequire("devtools/client/netmonitor/actions/index");
+  let {
+    getDisplayedRequests,
+    getSortedRequests,
+  } = windowRequire("devtools/client/netmonitor/selectors/index");
 
-  RequestsMenu.lazyUpdate = false;
+  gStore.dispatch(Actions.batchEnable(false));
 
   let wait = waitForNetworkEvents(monitor, 1);
   yield ContentTask.spawn(tab.linkedBrowser, {}, function* () {
@@ -67,12 +71,11 @@ function checkResponsePanelDisplaysJSON(doc) {
  * Open the netmonitor details panel and switch to the response tab.
  * Returns a promise that will resolve when the response panel DOM element is available.
  */
-function openResponsePanel(doc) {
-  let onReponsePanelReady = waitForDOM(doc, "#response-panel");
-  EventUtils.sendMouseEvent(
-    { type: "mousedown" },
-    doc.getElementById("details-pane-toggle")
-  );
-  doc.querySelector("#response-tab").click();
+function openResponsePanel(document) {
+  let onReponsePanelReady = waitForDOM(document, "#response-panel");
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector(".network-details-panel-toggle"));
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector("#response-tab"));
   return onReponsePanelReady;
 }

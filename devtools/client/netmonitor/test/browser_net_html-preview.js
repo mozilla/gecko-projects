@@ -11,10 +11,10 @@ add_task(function* () {
   let { tab, monitor } = yield initNetMonitor(CONTENT_TYPE_URL);
   info("Starting test... ");
 
-  let { document, NetMonitorView } = monitor.panelWin;
-  let { RequestsMenu } = NetMonitorView;
+  let { document, gStore, windowRequire } = monitor.panelWin;
+  let Actions = windowRequire("devtools/client/netmonitor/actions/index");
 
-  RequestsMenu.lazyUpdate = false;
+  gStore.dispatch(Actions.batchEnable(false));
 
   let wait = waitForNetworkEvents(monitor, 6);
   yield ContentTask.spawn(tab.linkedBrowser, {}, function* () {
@@ -22,8 +22,8 @@ add_task(function* () {
   });
   yield wait;
 
-  EventUtils.sendMouseEvent({ type: "mousedown" },
-    document.getElementById("details-pane-toggle"));
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector(".network-details-panel-toggle"));
 
   ok(document.querySelector("#headers-tab[aria-selected=true]"),
     "The headers tab in the details panel should be selected.");
@@ -32,11 +32,8 @@ add_task(function* () {
   ok(!document.querySelector("#preview-panel"),
     "The preview panel is hidden for non html responses.");
 
-  wait = waitForDOM(document, ".tabs");
   EventUtils.sendMouseEvent({ type: "mousedown" },
     document.querySelectorAll(".request-list-item")[4]);
-  yield wait;
-
   document.querySelector("#preview-tab").click();
 
   ok(document.querySelector("#preview-tab[aria-selected=true]"),

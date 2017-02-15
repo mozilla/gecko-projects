@@ -7,6 +7,7 @@
 #include "mozilla/RestyleManagerBase.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "nsIFrame.h"
+#include "nsIPresShellInlines.h"
 
 namespace mozilla {
 
@@ -218,7 +219,7 @@ RestyleManagerBase::PostRestyleEventInternal(bool aForLazyConstruction)
   // Unconditionally flag our document as needing a flush.  The other
   // option here would be a dedicated boolean to track whether we need
   // to do so (set here and unset in ProcessPendingRestyles).
-  presShell->GetDocument()->SetNeedStyleFlush();
+  presShell->SetNeedStyleFlush();
 }
 
 /**
@@ -1230,6 +1231,13 @@ RestyleManagerBase::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
         // invalidation, so change UpdateOpacityLayer to RepaintFrame.
         hint &= ~nsChangeHint_UpdateOpacityLayer;
         hint |= nsChangeHint_RepaintFrame;
+      }
+
+      // Opacity disables preserve-3d, so if we toggle it, then we also need
+      // to update the overflow areas of all potentially affected frames.
+      if ((hint & nsChangeHint_UpdateUsesOpacity) &&
+          frame->StyleDisplay()->mTransformStyle == NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D) {
+        hint |= nsChangeHint_UpdateSubtreeOverflow;
       }
 
       if (hint & nsChangeHint_UpdateBackgroundPosition) {

@@ -1,9 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-// This test checks that a <select> with an <optgroup> opens and can be navigated
-// in a child process. This is different than single-process as a <menulist> is used
-// to implement the dropdown list.
+// This test tests <select> in a child process. This is different than
+// single-process as a <menulist> is used to implement the dropdown list.
 
 requestLongerTimeout(2);
 
@@ -94,6 +93,18 @@ const PAGECONTENT_COLORS =
   '  <option value="Four" class="defaultColor defaultBackground">{"color": "-moz-ComboboxText", "backgroundColor": "transparent", "unstyled": "true"}</option>' +
   '  <option value="Five" class="defaultColor">{"color": "-moz-ComboboxText", "backgroundColor": "transparent", "unstyled": "true"}</option>' +
   '  <option value="Six" class="defaultBackground">{"color": "-moz-ComboboxText", "backgroundColor": "transparent", "unstyled": "true"}</option>' +
+  '  <option value="Seven" selected="true">{"unstyled": "true"}</option>' +
+  "</select></body></html>";
+
+const PAGECONTENT_COLORS_ON_SELECT =
+  "<html><head><style>" +
+  "  #one { background-color: #7E3A3A; color: #fff }" +
+  "</style>" +
+  "<body><select id='one'>" +
+  '  <option value="One">{"color": "rgb(255, 255, 255)", "backgroundColor": "transparent"}</option>' +
+  '  <option value="Two">{"color": "rgb(255, 255, 255)", "backgroundColor": "transparent"}</option>' +
+  '  <option value="Three">{"color": "rgb(255, 255, 255)", "backgroundColor": "transparent"}</option>' +
+  '  <option value="Four" selected="true">{"end": "true"}</option>' +
   "</select></body></html>";
 
 function openSelectPopup(selectPopup, mode = "key", selector = "select", win = window) {
@@ -148,6 +159,38 @@ function getClickEvents() {
   return ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     return content.wrappedJSObject.gClickEvents;
   });
+}
+
+function testOptionColors(index, item, menulist) {
+  let expected = JSON.parse(item.label);
+
+  for (let color of Object.keys(expected)) {
+    if (color.toLowerCase().includes("color") &&
+        !expected[color].startsWith("rgb")) {
+      // Need to convert system color to RGB color.
+      let textarea = document.createElementNS("http://www.w3.org/1999/xhtml", "textarea");
+      textarea.style.color = expected[color];
+      expected[color] = getComputedStyle(textarea).color;
+    }
+  }
+
+  // Press Down to move the selected item to the next item in the
+  // list and check the colors of this item when it's not selected.
+  EventUtils.synthesizeKey("KEY_ArrowDown", { code: "ArrowDown" });
+
+  if (expected.end) {
+    return;
+  }
+
+  if (expected.unstyled) {
+    ok(!item.hasAttribute("customoptionstyling"),
+      `Item ${index} should not have any custom option styling`);
+  } else {
+    is(getComputedStyle(item).color, expected.color,
+       "Item " + (index) + " has correct foreground color");
+    is(getComputedStyle(item).backgroundColor, expected.backgroundColor,
+       "Item " + (index) + " has correct background color");
+  }
 }
 
 function* doSelectTests(contentType, dtd) {
@@ -745,11 +788,13 @@ add_task(function* test_somehidden() {
   yield BrowserTestUtils.removeTab(tab);
 });
 
-add_task(function* test_colors_applied_to_popup() {
+// This test checks when a <select> element has styles applied to <option>s within it.
+add_task(function* test_colors_applied_to_popup_items() {
   const pageUrl = "data:text/html," + escape(PAGECONTENT_COLORS);
   let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, pageUrl);
 
-  let selectPopup = document.getElementById("ContentSelectDropdown").menupopup;
+  let menulist = document.getElementById("ContentSelectDropdown");
+  let selectPopup = menulist.menupopup;
 
   let popupShownPromise = BrowserTestUtils.waitForEvent(selectPopup, "popupshown");
   yield BrowserTestUtils.synthesizeMouseAtCenter("#one", { type: "mousedown" }, gBrowser.selectedBrowser);
@@ -757,42 +802,83 @@ add_task(function* test_colors_applied_to_popup() {
 
   // The label contains a JSON string of the expected colors for
   // `color` and `background-color`.
-  is(selectPopup.parentNode.itemCount, 6, "Correct number of items");
+  is(selectPopup.parentNode.itemCount, 7, "Correct number of items");
   let child = selectPopup.firstChild;
   let idx = 1;
 
-  ok(child.selected, "The first child should be selected");
+  ok(!child.selected, "The first child should not be selected");
   while (child) {
-    let expected = JSON.parse(child.label);
-
-    for (let color of Object.keys(expected)) {
-      if (color.toLowerCase().includes("color") &&
-          !expected[color].startsWith("rgb")) {
-        // Need to convert system color to RGB color.
-        let textarea = document.createElementNS("http://www.w3.org/1999/xhtml", "textarea");
-        textarea.style.color = expected[color];
-        expected[color] = getComputedStyle(textarea).color;
-      }
-    }
-
-    // Press Down to move the selected item to the next item in the
-    // list and check the colors of this item when it's not selected.
-    EventUtils.synthesizeKey("KEY_ArrowDown", { code: "ArrowDown" });
-
-    if (expected.unstyled) {
-      ok(!child.hasAttribute("customoptionstyling"),
-        `Item ${idx} should not have any custom option styling`);
-    } else {
-      is(getComputedStyle(child).color, expected.color,
-         "Item " + (idx) + " has correct foreground color");
-      is(getComputedStyle(child).backgroundColor, expected.backgroundColor,
-         "Item " + (idx) + " has correct background color");
-    }
-
+    testOptionColors(idx, child, menulist);
     idx++;
     child = child.nextSibling;
   }
 
   yield hideSelectPopup(selectPopup, "escape");
+  yield BrowserTestUtils.removeTab(tab);
+});
+
+// This test checks when a <select> element has styles applied to itself.
+add_task(function* test_colors_applied_to_popup() {
+  const pageUrl = "data:text/html," + escape(PAGECONTENT_COLORS_ON_SELECT);
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, pageUrl);
+
+  let menulist = document.getElementById("ContentSelectDropdown");
+  let selectPopup = menulist.menupopup;
+
+  let popupShownPromise = BrowserTestUtils.waitForEvent(selectPopup, "popupshown");
+  yield BrowserTestUtils.synthesizeMouseAtCenter("#one", { type: "mousedown" }, gBrowser.selectedBrowser);
+  yield popupShownPromise;
+
+  // The label contains a JSON string of the expected colors for
+  // `color` and `background-color`.
+  is(selectPopup.parentNode.itemCount, 4, "Correct number of items");
+  let child = selectPopup.firstChild;
+  let idx = 1;
+
+  is(getComputedStyle(selectPopup).color, "rgb(255, 255, 255)",
+    "popup has expected foreground color");
+  is(getComputedStyle(selectPopup).backgroundColor, "rgb(126, 58, 58)",
+    "popup has expected background color");
+
+  ok(!child.selected, "The first child should not be selected");
+  while (child) {
+    testOptionColors(idx, child, menulist);
+    idx++;
+    child = child.nextSibling;
+  }
+
+  yield hideSelectPopup(selectPopup, "escape");
+  yield BrowserTestUtils.removeTab(tab);
+});
+
+// This test checks that the popup is closed when the select element is blurred.
+add_task(function* test_blur_hides_popup() {
+  const pageUrl = "data:text/html," + escape(PAGECONTENT_SMALL);
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, pageUrl);
+
+  yield ContentTask.spawn(tab.linkedBrowser, null, function*() {
+    content.addEventListener("blur", function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+
+    content.document.getElementById("one").focus();
+  });
+
+  let menulist = document.getElementById("ContentSelectDropdown");
+  let selectPopup = menulist.menupopup;
+
+  yield openSelectPopup(selectPopup);
+
+  let popupHiddenPromise = BrowserTestUtils.waitForEvent(selectPopup, "popuphidden");
+
+  yield ContentTask.spawn(tab.linkedBrowser, null, function*() {
+    content.document.getElementById("one").blur();
+  });
+
+  yield popupHiddenPromise;
+
+  ok(true, "Blur closed popup");
+
   yield BrowserTestUtils.removeTab(tab);
 });

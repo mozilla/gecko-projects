@@ -29,10 +29,7 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <process.h>
-#include "platform.h"
 #include "ProfileEntry.h"
-#include "ThreadInfo.h"
-#include "ThreadResponsiveness.h"
 
 // Memory profile
 #include "nsMemoryReporterManager.h"
@@ -67,20 +64,20 @@ class PlatformData {
   HANDLE profiled_thread_;
 };
 
-/* static */ auto
-Sampler::AllocPlatformData(int aThreadId) -> UniquePlatformData
+UniquePlatformData
+AllocPlatformData(int aThreadId)
 {
   return UniquePlatformData(new PlatformData(aThreadId));
 }
 
 void
-Sampler::PlatformDataDestructor::operator()(PlatformData* aData)
+PlatformDataDestructor::operator()(PlatformData* aData)
 {
   delete aData;
 }
 
 uintptr_t
-Sampler::GetThreadHandle(PlatformData* aData)
+GetThreadHandle(PlatformData* aData)
 {
   return (uintptr_t) aData->profiled_thread();
 }
@@ -143,44 +140,46 @@ class SamplerThread
     MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
     if (mInstance == NULL) {
-      mInstance = new SamplerThread(gSampler->interval());
+      mInstance = new SamplerThread(gInterval);
       mInstance->Start();
     } else {
-      MOZ_ASSERT(mInstance->mInterval == gSampler->interval());
+      MOZ_ASSERT(mInstance->mInterval == gInterval);
     }
   }
 
   static void StopSampler() {
+    MOZ_RELEASE_ASSERT(NS_IsMainThread());
+
     mInstance->Join();
     delete mInstance;
     mInstance = NULL;
   }
 
   void Run() {
+    // This function runs on the sampler thread.
+
     // By default we'll not adjust the timer resolution which tends to be around
     // 16ms. However, if the requested interval is sufficiently low we'll try to
     // adjust the resolution to match.
     if (mInterval < 10)
         ::timeBeginPeriod(mInterval);
 
-    // XXX: this loop is an off-main-thread use of gSampler
-    while (gSampler->IsActive()) {
-      gSampler->DeleteExpiredMarkers();
+    while (gIsActive) {
+      gBuffer->deleteExpiredStoredMarkers();
 
-      if (!gSampler->IsPaused()) {
-        mozilla::StaticMutexAutoLock lock(Sampler::sRegisteredThreadsMutex);
+      if (!gIsPaused) {
+        mozilla::StaticMutexAutoLock lock(sRegisteredThreadsMutex);
 
         bool isFirstProfiledThread = true;
-        for (uint32_t i = 0; i < Sampler::sRegisteredThreads->size(); i++) {
-          ThreadInfo* info = (*Sampler::sRegisteredThreads)[i];
+        for (uint32_t i = 0; i < sRegisteredThreads->size(); i++) {
+          ThreadInfo* info = (*sRegisteredThreads)[i];
 
           // This will be null if we're not interested in profiling this thread.
           if (!info->hasProfile() || info->IsPendingDelete()) {
             continue;
           }
 
-          PseudoStack::SleepState sleeping = info->Stack()->observeSleeping();
-          if (sleeping == PseudoStack::SLEEPING_AGAIN) {
+          if (info->Stack()->CanDuplicateLastSampleDueToSleep()) {
             info->DuplicateLastSample();
             continue;
           }
@@ -201,7 +200,7 @@ class SamplerThread
 
   void SampleContext(ThreadInfo* aThreadInfo, bool isFirstProfiledThread)
   {
-    uintptr_t thread = Sampler::GetThreadHandle(aThreadInfo->GetPlatformData());
+    uintptr_t thread = GetThreadHandle(aThreadInfo->GetPlatformData());
     HANDLE profiled_thread = reinterpret_cast<HANDLE>(thread);
     if (profiled_thread == NULL)
       return;
@@ -217,8 +216,7 @@ class SamplerThread
     sample->timestamp = mozilla::TimeStamp::Now();
     sample->threadInfo = aThreadInfo;
 
-    // XXX: this is an off-main-thread use of gSampler
-    if (isFirstProfiledThread && gSampler->ProfileMemory()) {
+    if (isFirstProfiledThread && gProfileMemory) {
       sample->rssMemory = nsMemoryReporterManager::ResidentFast();
     } else {
       sample->rssMemory = 0;
@@ -282,8 +280,7 @@ class SamplerThread
 
     sample->context = &context;
 
-    // XXX: this is an off-main-thread use of gSampler
-    gSampler->Tick(sample);
+    Tick(sample);
 
     ResumeThread(profiled_thread);
   }
@@ -303,15 +300,19 @@ private:
 
 SamplerThread* SamplerThread::mInstance = NULL;
 
-void Sampler::Start() {
-  MOZ_ASSERT(!IsActive());
-  SetActive(true);
+static void
+PlatformStart()
+{
+  MOZ_ASSERT(!gIsActive);
+  gIsActive = true;
   SamplerThread::StartSampler();
 }
 
-void Sampler::Stop() {
-  MOZ_ASSERT(IsActive());
-  SetActive(false);
+static void
+PlatformStop()
+{
+  MOZ_ASSERT(gIsActive);
+  gIsActive = false;
   SamplerThread::StopSampler();
 }
 

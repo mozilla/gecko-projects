@@ -23,8 +23,6 @@ cppunit:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=cppunittest
             default:
@@ -73,8 +71,6 @@ crashtest:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=crashtest
             default:
@@ -264,10 +260,10 @@ jsreftest:
             default: default
     chunks:
         by-test-platform:
-            android-4.3-arm7-api-15/debug: 20
-            android.*: 6
-            windows.*: 1
-            default: 2
+            android-4.3-arm7-api-15/debug: 35
+            android.*: 10
+            windows.*: 2
+            default: 3
     e10s:
         by-test-platform:
             # Bug 1321782
@@ -291,8 +287,6 @@ jsreftest:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=jsreftest
             default:
@@ -327,7 +321,7 @@ marionette:
     docker-image: {"in-tree": "desktop1604-test"}
     tier:
         by-test-platform:
-            android.*: 3
+            android.*: 2
             default: default
     chunks:
         by-test-platform:
@@ -344,8 +338,6 @@ marionette:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=marionette
             default:
@@ -392,8 +384,6 @@ mochitest:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=mochitest
             default:
@@ -549,11 +539,9 @@ mochitest-chrome:
                 config:
                     by-test-platform:
                         android-4.2-x86/opt:
-                            - android/androidx86-tc.py
+                            - android/androidx86.py
                         default:
                             - android/androidarm_4_3.py
-                            - remove_executables.py
-                            - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=mochitest-chrome
             default:
@@ -585,8 +573,6 @@ mochitest-clipboard:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     # note that Android runs fewer suites than other platforms
                     - --test-suite=mochitest-plain-clipboard
@@ -676,8 +662,6 @@ mochitest-gpu:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     # note that Android runs fewer suites than other platforms
                     - --test-suite=mochitest-plain-gpu
@@ -741,7 +725,7 @@ mochitest-media:
     chunks:
         by-test-platform:
             android.*: 3
-            default: 1
+            default: 3
     docker-image: {"in-tree": "desktop1604-test"}
     mozharness:
         by-test-platform:
@@ -750,8 +734,6 @@ mochitest-media:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=mochitest-media
             default:
@@ -846,8 +828,6 @@ mochitest-webgl:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=mochitest-gl
             default:
@@ -918,8 +898,6 @@ reftest:
                 no-read-buildbot-config: true
                 config:
                     - android/androidarm_4_3.py
-                    - remove_executables.py
-                    - android/androidarm_4_3-tc.py
                 extra-options:
                     - --test-suite=reftest
             default:
@@ -1002,8 +980,6 @@ robocop:
         no-read-buildbot-config: true
         config:
             - android/androidarm_4_3.py
-            - remove_executables.py
-            - android/androidarm_4_3-tc.py
         extra-options:
             - --test-suite=robocop
 
@@ -1260,6 +1236,10 @@ xpcshell:
             linux64-jsdcov/opt: xpcshell-coverage
             default: xpcshell
     treeherder-symbol: tc-X()
+    run-on-projects:
+        by-test-platform:
+            linux64-qr/.*: ['graphics']
+            default: ['all']
     chunks:
         by-test-platform:
             linux64/debug: 10
@@ -1284,11 +1264,9 @@ xpcshell:
                 config:
                     by-test-platform:
                         android-4.2-x86/opt:
-                            - android/androidx86-tc.py
+                            - android/androidx86.py
                         default:
                             - android/androidarm_4_3.py
-                            - remove_executables.py
-                            - android/androidarm_4_3-tc.py
             default:
                 script: desktop_unittest.py
                 no-read-buildbot-config: true

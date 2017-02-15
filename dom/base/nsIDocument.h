@@ -32,7 +32,7 @@
 #include "nsClassHashtable.h"
 #include "prclist.h"
 #include "mozilla/CORSMode.h"
-#include "mozilla/dom/Dispatcher.h"
+#include "mozilla/dom/DispatcherTrait.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/StyleBackendType.h"
 #include "mozilla/StyleSheet.h"
@@ -629,6 +629,15 @@ public:
     mIsInitialDocumentInWindow = aIsInitialDocument;
   }
 
+  /**
+   * Normally we assert if a runnable labeled with one DocGroup touches data
+   * from another DocGroup. Calling IgnoreDocGroupMismatches() on a document
+   * means that we can touch that document from any DocGroup without asserting.
+   */
+  void IgnoreDocGroupMismatches()
+  {
+    mIgnoreDocGroupMismatches = true;
+  }
 
   /**
    * Get the bidi options for this document.
@@ -876,12 +885,15 @@ public:
   void SetParentDocument(nsIDocument* aParent)
   {
     mParentDocument = aParent;
+    if (aParent) {
+      mIgnoreDocGroupMismatches = aParent->mIgnoreDocGroupMismatches;
+    }
   }
 
   /**
    * Are plugins allowed in this document ?
    */
-  virtual nsresult GetAllowPlugins (bool* aAllowPlugins) = 0;
+  virtual bool GetAllowPlugins () = 0;
 
   /**
    * Set the sub document for aContent to aSubDoc.
@@ -2477,20 +2489,6 @@ public:
 
   bool IsSyntheticDocument() const { return mIsSyntheticDocument; }
 
-  void SetNeedLayoutFlush() {
-    mNeedLayoutFlush = true;
-    if (mDisplayDocument) {
-      mDisplayDocument->SetNeedLayoutFlush();
-    }
-  }
-
-  void SetNeedStyleFlush() {
-    mNeedStyleFlush = true;
-    if (mDisplayDocument) {
-      mDisplayDocument->SetNeedStyleFlush();
-    }
-  }
-
   // Note: nsIDocument is a sub-class of nsINode, which has a
   // SizeOfExcludingThis function.  However, because nsIDocument objects can
   // only appear at the top of the DOM tree, we have a specialized measurement
@@ -2895,14 +2893,7 @@ public:
 
   // For more information on Flash classification, see
   // toolkit/components/url-classifier/flash-block-lists.rst
-  enum class FlashClassification {
-    Unclassified,   // Denotes a classification that has not yet been computed.
-                    // Allows for lazy classification.
-    Unknown,        // Site is not on the whitelist or blacklist
-    Allowed,        // Site is on the Flash whitelist
-    Denied          // Site is on the Flash blacklist
-  };
-  virtual FlashClassification DocumentFlashClassification() = 0;
+  virtual mozilla::dom::FlashClassification DocumentFlashClassification() = 0;
 
 protected:
   bool GetUseCounter(mozilla::UseCounter aUseCounter)
@@ -3063,6 +3054,8 @@ protected:
   // document in it.
   bool mIsInitialDocumentInWindow : 1;
 
+  bool mIgnoreDocGroupMismatches : 1;
+
   // True if we're loaded as data and therefor has any dangerous stuff, such
   // as scripts and plugins, disabled.
   bool mLoadedAsData : 1;
@@ -3123,12 +3116,6 @@ protected:
 
   // True if this document has links whose state needs updating
   bool mHasLinksToUpdate : 1;
-
-  // True if a layout flush might not be a no-op
-  bool mNeedLayoutFlush : 1;
-
-  // True if a style flush might not be a no-op
-  bool mNeedStyleFlush : 1;
 
   // True if a DOMMutationObserver is perhaps attached to a node in the document.
   bool mMayHaveDOMMutationObservers : 1;

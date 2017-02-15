@@ -551,7 +551,7 @@ GetSuitableScale(float aMaxScale, float aMinScale,
 
 static inline void
 UpdateMinMaxScale(const nsIFrame* aFrame,
-                  const StyleAnimationValue& aValue,
+                  const AnimationValue& aValue,
                   gfxSize& aMinScale,
                   gfxSize& aMaxScale)
 {
@@ -587,11 +587,11 @@ GetMinAndMaxScaleForAnimationProperty(const nsIFrame* aFrame,
 
       // We need to factor in the scale of the base style if the base style
       // will be used on the compositor.
-      if (effect->NeedsBaseStyle(prop.mProperty)) {
-        StyleAnimationValue baseStyle =
-          EffectCompositor::GetBaseStyle(prop.mProperty, aFrame);
-        MOZ_ASSERT(!baseStyle.IsNull(), "The base value should be set");
-        UpdateMinMaxScale(aFrame, baseStyle, aMinScale, aMaxScale);
+      StyleAnimationValue baseStyle = effect->BaseStyle(prop.mProperty);
+      if (!baseStyle.IsNull()) {
+        // FIXME: Bug 1311257: We need to get the baseStyle for
+        //        RawServoAnimationValue.
+        UpdateMinMaxScale(aFrame, { baseStyle, nullptr }, aMinScale, aMaxScale);
       }
 
       for (const AnimationPropertySegment& segment : prop.mSegments) {
@@ -3394,10 +3394,12 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
     }
     frame = do_QueryFrame(scrollAncestor);
     MOZ_ASSERT(frame);
+    if (!frame) {
+      break;
+    }
     MOZ_ASSERT(scrollAncestor->WantAsyncScroll() ||
       frame->PresContext()->PresShell()->GetRootScrollFrame() == frame);
-    if (nsLayoutUtils::AsyncPanZoomEnabled(frame) &&
-        nsLayoutUtils::HasDisplayPort(frame->GetContent())) {
+    if (nsLayoutUtils::HasDisplayPort(frame->GetContent())) {
       scrollAncestor->TriggerDisplayPortExpiration();
       // Stop after the first trigger. If it failed, there's no point in
       // continuing because all the rest of the frames we encounter are going
@@ -8451,10 +8453,10 @@ namespace layout {
 void
 MaybeSetupTransactionIdAllocator(layers::LayerManager* aManager, nsView* aView)
 {
-  if (aManager->GetBackendType() == layers::LayersBackend::LAYERS_CLIENT) {
-    layers::ClientLayerManager *manager = static_cast<layers::ClientLayerManager*>(aManager);
+  if (aManager->GetBackendType() == LayersBackend::LAYERS_CLIENT ||
+      aManager->GetBackendType() == LayersBackend::LAYERS_WR) {
     nsRefreshDriver *refresh = aView->GetViewManager()->GetPresShell()->GetPresContext()->RefreshDriver();
-    manager->SetTransactionIdAllocator(refresh);
+    aManager->SetTransactionIdAllocator(refresh);
   }
 }
 
@@ -9344,10 +9346,17 @@ nsLayoutUtils::ComputeGeometryBox(nsIFrame* aFrame,
   // We use ComputeSVGReferenceRect for all SVG elements, except <svg>
   // element, which does have an associated CSS layout box. In this case we
   // should still use ComputeHTMLReferenceRect for region computing.
-  nsRect r = aFrame->IsFrameOfType(nsIFrame::eSVG) &&
-             (aFrame->GetType() != nsGkAtoms::svgOuterSVGFrame)
-             ? ComputeSVGReferenceRect(aFrame, aGeometryBox)
-             : ComputeHTMLReferenceRect(aFrame, aGeometryBox);
+  nsRect r = HasCSSBoxLayout(aFrame)
+             ? ComputeHTMLReferenceRect(aFrame, aGeometryBox)
+             : ComputeSVGReferenceRect(aFrame, aGeometryBox);
 
   return r;
+}
+
+/* static */ bool
+nsLayoutUtils::HasCSSBoxLayout(nsIFrame* aFrame)
+{
+  // Except SVG outer element, all SVG element does not have CSS box layout.
+  return !aFrame->IsFrameOfType(nsIFrame::eSVG) ||
+          aFrame->GetType() == nsGkAtoms::svgOuterSVGFrame;
 }

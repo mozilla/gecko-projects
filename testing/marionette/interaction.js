@@ -231,11 +231,14 @@ interaction.selectOption = function (el) {
  * @param {string} path
  *     Full path to file.
  */
-interaction.uploadFile = function (el, path) {
-  let file;
-  try {
-    file = File.createFromFileName(path);
-  } catch (e) {
+interaction.uploadFile = function* (el, path) {
+  let file = yield File.createFromFileName(path).then(file => {
+    return file;
+  }, () => {
+    return null;
+  });
+
+  if (!file) {
     throw new InvalidArgumentError("File not found: " + path);
   }
 

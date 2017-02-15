@@ -620,7 +620,7 @@ nsStandardURL::ValidIPv6orHostname(const char *host, uint32_t length)
     }
 
     const char *end = host + length;
-    if (end != net_FindCharInSet(host, end, "\t\n\v\f\r #/:?@[\\]")) {
+    if (end != net_FindCharInSet(host, end, CONTROL_CHARACTERS " #/:?@[\\]*<>|\"")) {
         // We still allow % because it is in the ID of addons.
         // Any percent encoded ASCII characters that are not allowed in the
         // hostname are not percent decoded, and will be parsed just fine.
@@ -770,10 +770,12 @@ nsStandardURL::BuildNormalizedSpec(const char *spec)
         if (NS_FAILED(rv)) {
             return rv;
         }
-        nsAutoCString ipString;
-        rv = NormalizeIPv4(encHost, ipString);
-        if (NS_SUCCEEDED(rv)) {
-          encHost = ipString;
+        if (!SegmentIs(spec, mScheme, "resource") &&
+            !SegmentIs(spec, mScheme, "chrome")) {
+            nsAutoCString ipString;
+            if (NS_SUCCEEDED(NormalizeIPv4(encHost, ipString))) {
+                encHost = ipString;
+            }
         }
 
         // NormalizeIDN always copies, if the call was successful.
@@ -1554,6 +1556,11 @@ nsStandardURL::SetSpec(const nsACString &input)
         rv = BuildNormalizedSpec(spec);
     }
 
+    // Make sure that a URLTYPE_AUTHORITY has a non-empty hostname.
+    if (mURLType == URLTYPE_AUTHORITY && mHost.mLen == -1) {
+        rv = NS_ERROR_MALFORMED_URI;
+    }
+
     if (NS_FAILED(rv)) {
         Clear();
         // If parsing the spec has failed, restore the old URL
@@ -2005,10 +2012,11 @@ nsStandardURL::SetHost(const nsACString &input)
         return rv;
     }
 
-    nsAutoCString ipString;
-    rv = NormalizeIPv4(hostBuf, ipString);
-    if (NS_SUCCEEDED(rv)) {
-      hostBuf = ipString;
+    if (!SegmentIs(mScheme, "resource") && !SegmentIs(mScheme, "chrome")) {
+        nsAutoCString ipString;
+        if (NS_SUCCEEDED(NormalizeIPv4(hostBuf, ipString))) {
+          hostBuf = ipString;
+        }
     }
 
     // NormalizeIDN always copies if the call was successful
@@ -3182,20 +3190,26 @@ nsStandardURL::SetFile(nsIFile *file)
     rv = net_GetURLSpecFromFile(file, url);
     if (NS_FAILED(rv)) return rv;
 
-    SetSpec(url);
+    uint32_t oldURLType = mURLType;
+    uint32_t oldDefaultPort = mDefaultPort;
+    rv = Init(nsIStandardURL::URLTYPE_NO_AUTHORITY, -1, url, nullptr, nullptr);
 
-    rv = Init(mURLType, mDefaultPort, url, nullptr, nullptr);
+    if (NS_FAILED(rv)) {
+        // Restore the old url type and default port if the call to Init fails.
+        mURLType = oldURLType;
+        mDefaultPort = oldDefaultPort;
+        return rv;
+    }
 
     // must clone |file| since its value is not guaranteed to remain constant
-    if (NS_SUCCEEDED(rv)) {
-        InvalidateCache();
-        if (NS_FAILED(file->Clone(getter_AddRefs(mFile)))) {
-            NS_WARNING("nsIFile::Clone failed");
-            // failure to clone is not fatal (GetFile will generate mFile)
-            mFile = nullptr;
-        }
+    InvalidateCache();
+    if (NS_FAILED(file->Clone(getter_AddRefs(mFile)))) {
+        NS_WARNING("nsIFile::Clone failed");
+        // failure to clone is not fatal (GetFile will generate mFile)
+        mFile = nullptr;
     }
-    return rv;
+
+    return NS_OK;
 }
 
 //----------------------------------------------------------------------------
@@ -3245,8 +3259,22 @@ nsStandardURL::Init(uint32_t urlType,
 
     mOriginCharset.Truncate();
 
-    //if charset override is absent, use UTF8 as url encoding
-    if (charset != nullptr && *charset != '\0' && !IsUTFCharset(charset)) {
+    if (charset == nullptr || *charset == '\0') {
+        // check if baseURI provides an origin charset and use that.
+        if (baseURI)
+            baseURI->GetOriginCharset(mOriginCharset);
+
+        // URI can't be encoded in UTF-16, UTF-16BE, UTF-16LE, UTF-32,
+        // UTF-32-LE, UTF-32LE, UTF-32BE (yet?). Truncate mOriginCharset if
+        // it starts with "utf" (since an empty mOriginCharset implies
+        // UTF-8, this is safe even if mOriginCharset is UTF-8).
+
+        if (mOriginCharset.Length() > 3 &&
+            IsUTFCharset(mOriginCharset.get())) {
+            mOriginCharset.Truncate();
+        }
+    }
+    else if (!IsUTFCharset(charset)) {
         mOriginCharset = charset;
     }
 

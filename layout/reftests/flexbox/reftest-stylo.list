@@ -34,8 +34,8 @@ fails == flexbox-box-sizing-on-items-vert-1b.html flexbox-box-sizing-on-items-ve
 == flexbox-dyn-changeFrameWidth-2.xhtml flexbox-dyn-changeFrameWidth-2.xhtml
 == flexbox-dyn-changeFrameWidth-3.xhtml flexbox-dyn-changeFrameWidth-3.xhtml
 == flexbox-dyn-changeFrameWidth-4.xhtml flexbox-dyn-changeFrameWidth-4.xhtml
-fails == flexbox-dyn-changeOrder-1a.html flexbox-dyn-changeOrder-1a.html
-fails == flexbox-dyn-changeOrder-1b.html flexbox-dyn-changeOrder-1b.html
+== flexbox-dyn-changeOrder-1a.html flexbox-dyn-changeOrder-1a.html
+== flexbox-dyn-changeOrder-1b.html flexbox-dyn-changeOrder-1b.html
 == flexbox-dyn-changePadding-1a.xhtml flexbox-dyn-changePadding-1a.xhtml
 == flexbox-dyn-changePadding-1b.xhtml flexbox-dyn-changePadding-1b.xhtml
 
@@ -94,8 +94,8 @@ fails == flexbox-inlinecontent-horiz-4.xhtml flexbox-inlinecontent-horiz-4.xhtml
 fails == flexbox-inlinecontent-horiz-5.xhtml flexbox-inlinecontent-horiz-5.xhtml
 
 # Tests for intrinsic sizing of flexboxes
-fails == flexbox-intrinsic-sizing-horiz-1a.xhtml flexbox-intrinsic-sizing-horiz-1a.xhtml
-fails == flexbox-intrinsic-sizing-horiz-1b.xhtml flexbox-intrinsic-sizing-horiz-1b.xhtml
+fails asserts-if(stylo,36) == flexbox-intrinsic-sizing-horiz-1a.xhtml flexbox-intrinsic-sizing-horiz-1a.xhtml # bug 1324661
+fails asserts-if(stylo,36) == flexbox-intrinsic-sizing-horiz-1b.xhtml flexbox-intrinsic-sizing-horiz-1b.xhtml # bug 1324661
 fails == flexbox-intrinsic-sizing-horiz-2a.xhtml flexbox-intrinsic-sizing-horiz-2a.xhtml
 fails == flexbox-intrinsic-sizing-horiz-2b.xhtml flexbox-intrinsic-sizing-horiz-2b.xhtml
 

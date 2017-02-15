@@ -47,7 +47,7 @@ use js::glue::{GetProxyPrivate, IsWrapper};
 use js::glue::{RUST_JSID_IS_INT, RUST_JSID_TO_INT};
 use js::glue::{RUST_JSID_IS_STRING, RUST_JSID_TO_STRING, UnwrapObject};
 use js::jsapi::{HandleId, HandleObject, HandleValue, JSContext};
-use js::jsapi::{JSObject, JSString, JS_GetArrayBufferViewType};
+use js::jsapi::{JSObject, JSString};
 use js::jsapi::{JS_GetLatin1StringCharsAndLength, JS_GetObjectAsArrayBuffer, JS_GetObjectAsArrayBufferView};
 use js::jsapi::{JS_GetReservedSlot, JS_GetTwoByteStringCharsAndLength};
 use js::jsapi::{JS_IsArrayObject, JS_NewStringCopyN, JS_StringHasLatin1Chars};
@@ -572,59 +572,6 @@ pub unsafe fn array_buffer_view_data<'a, T>(abv: *mut JSObject) -> Option<&'a mu
     Some(slice::from_raw_parts_mut(ptr as *mut T, byte_length as usize / mem::size_of::<T>()))
 }
 
-/// Returns a copy of the ArrayBufferView data, viewed as T, without checking
-/// the real type of it.
-pub unsafe fn array_buffer_view_to_vec<T>(abv: *mut JSObject) -> Option<Vec<T>>
-    where T: ArrayBufferViewContents
-{
-    array_buffer_view_data(abv).map(|data| data.to_vec())
-}
-
-/// Returns a mutable slice of the Array Buffer View data, viewed as T, checking
-/// that the real type of it is ty.
-pub unsafe fn array_buffer_view_data_checked<'a, T>(abv: *mut JSObject) -> Option<&'a mut [T]>
-    where T: ArrayBufferViewContents
-{
-    array_buffer_view_data::<T>(abv).and_then(|data| {
-        if T::is_type_compatible(JS_GetArrayBufferViewType(abv)) {
-            Some(data)
-        } else {
-            None
-        }
-    })
-}
-
-/// Returns a copy of the ArrayBufferView data, viewed as T, checking that the
-/// real type of it is ty.
-pub unsafe fn array_buffer_view_to_vec_checked<T>(abv: *mut JSObject) -> Option<Vec<T>>
-    where T: ArrayBufferViewContents
-{
-    array_buffer_view_data_checked(abv).map(|data| data.to_vec())
-}
-
-/// Similar API as the array_buffer_view_xxx functions, but for ArrayBuffer
-/// objects.
-pub unsafe fn array_buffer_data<'a, T>(ab: *mut JSObject) -> Option<&'a mut [T]>
-    where T: ArrayBufferViewContents
-{
-    assert!(!ab.is_null());
-
-    let mut byte_length = 0;
-    let mut ptr = ptr::null_mut();
-    let ret = JS_GetObjectAsArrayBuffer(ab, &mut byte_length, &mut ptr);
-    if ret.is_null() {
-        return None;
-    }
-    Some(slice::from_raw_parts_mut(ptr as *mut T, byte_length as usize / mem::size_of::<T>()))
-}
-
-/// Similar API to array_buffer_view_to_vec, but for ArrayBuffer objects.
-pub unsafe fn array_buffer_to_vec<T>(ab: *mut JSObject) -> Option<Vec<T>>
-    where T: ArrayBufferViewContents
-{
-    array_buffer_data(ab).map(|data| data.to_vec())
-}
-
 /// Returns whether `value` is an array-like object.
 /// Note: Currently only Arrays are supported.
 /// TODO: Expand this to support sequences and other array-like objects
@@ -632,24 +579,4 @@ pub unsafe fn is_array_like(cx: *mut JSContext, value: HandleValue) -> bool {
     let mut result = false;
     assert!(JS_IsArrayObject(cx, value, &mut result));
     result
-}
-
-/// Creates a typed JS array from a Rust slice
-pub unsafe fn slice_to_array_buffer_view<T>(cx: *mut JSContext, data: &[T]) -> *mut JSObject
-    where T: ArrayBufferViewContents
-{
-    let js_object = T::new(cx, data.len() as u32);
-    assert!(!js_object.is_null());
-    update_array_buffer_view(js_object, data);
-    js_object
-}
-
-/// Updates a typed JS array from a Rust slice
-pub unsafe fn update_array_buffer_view<T>(obj: *mut JSObject, data: &[T])
-    where T: ArrayBufferViewContents
-{
-    let mut buffer = array_buffer_view_data(obj);
-    if let Some(ref mut buffer) = buffer {
-        ptr::copy_nonoverlapping(&data[0], &mut buffer[0], data.len())
-    }
 }

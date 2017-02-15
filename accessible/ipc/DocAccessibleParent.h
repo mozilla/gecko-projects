@@ -95,7 +95,7 @@ public:
       parent->RemoveChildDoc(this);
     }
 
-    mParent = nullptr;
+    SetParent(nullptr);
   }
 
   virtual mozilla::ipc::IPCResult RecvShutdown() override;
@@ -131,8 +131,9 @@ public:
     if (parent) {
       aChildDoc->Parent()->ClearChildDoc(aChildDoc);
     }
-    mChildDocs.RemoveElement(aChildDoc);
+    DebugOnly<bool> result = mChildDocs.RemoveElement(aChildDoc);
     aChildDoc->mParentDoc = nullptr;
+    MOZ_ASSERT(result);
     MOZ_ASSERT(aChildDoc->mChildDocs.Length() == 0);
   }
 

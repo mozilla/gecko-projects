@@ -690,6 +690,23 @@ nsGlobalWindow::ScheduleIdleRequestDispatch()
 }
 
 void
+nsGlobalWindow::SuspendIdleRequests()
+{
+  if (mIdleRequestExecutor) {
+    mIdleRequestExecutor->Cancel();
+    mIdleRequestExecutor = nullptr;
+  }
+}
+
+void
+nsGlobalWindow::ResumeIdleRequests()
+{
+  MOZ_ASSERT(!mIdleRequestExecutor);
+
+  ScheduleIdleRequestDispatch();
+}
+
+void
 nsGlobalWindow::InsertIdleCallback(IdleRequest* aRequest)
 {
   AssertIsOnMainThread();
@@ -718,9 +735,8 @@ nsGlobalWindow::RunIdleRequest(IdleRequest* aRequest,
 {
   AssertIsOnMainThread();
   RefPtr<IdleRequest> request(aRequest);
-  nsresult result = request->IdleRun(AsInner(), aDeadline, aDidTimeout);
   RemoveIdleCallback(request);
-  return result;
+  return request->IdleRun(AsInner(), aDeadline, aDidTimeout);
 }
 
 nsresult
@@ -817,9 +833,10 @@ nsGlobalWindow::RequestIdleCallback(JSContext* aCx,
   }
 
   // If the list of idle callback requests is not empty it means that
-  // we've already dispatched the first idle request. It is the
-  // responsibility of that to dispatch the next.
-  bool needsScheduling = mIdleRequestCallbacks.isEmpty();
+  // we've already dispatched the first idle request. If we're
+  // suspended we should only queue the idle callback and not schedule
+  // it to run, that will be done in ResumeIdleRequest.
+  bool needsScheduling = !IsSuspended() && mIdleRequestCallbacks.isEmpty();
   // mIdleRequestCallbacks now owns request
   InsertIdleCallback(request);
 
@@ -2737,7 +2754,7 @@ CreateNativeGlobalForInner(JSContext* aCx,
   }
 
   if (top && top->GetGlobalJSObject()) {
-    options.creationOptions().setSameZoneAs(top->GetGlobalJSObject());
+    options.creationOptions().setExistingZone(top->GetGlobalJSObject());
   }
 
   options.creationOptions().setSecureContext(aIsSecureContext);
@@ -3147,6 +3164,17 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
     // Give the new inner window our chrome event handler (since it
     // doesn't have one).
     newInnerWindow->mChromeEventHandler = mChromeEventHandler;
+  }
+
+  // Ask the JS engine to assert that it's valid to access our DocGroup whenever
+  // it runs JS code for this compartment. We skip the check if this window is
+  // for chrome JS or an add-on.
+  nsCOMPtr<nsIPrincipal> principal = mDoc->NodePrincipal();
+  nsString addonId;
+  principal->GetAddonId(addonId);
+  if (GetDocGroup() && !nsContentUtils::IsSystemPrincipal(principal) && addonId.IsEmpty()) {
+    js::SetCompartmentValidAccessPtr(cx, newInnerGlobal,
+                                     newInnerWindow->GetDocGroup()->GetValidAccessPtr());
   }
 
   nsJSContext::PokeGC(JS::gcreason::SET_NEW_DOCUMENT, GetWrapperPreserveColor());
@@ -3744,6 +3772,8 @@ nsGlobalWindow::PostHandleEvent(EventChainPostVisitor& aVisitor)
     // @see nsDocument::GetEventTargetParent.
     mIsDocumentLoaded = true;
 
+    mTimeoutManager->OnDocumentLoaded();
+
     nsCOMPtr<Element> element = GetOuterWindow()->GetFrameElementInternal();
     nsIDocShell* docShell = GetDocShell();
     if (element && GetParentInternal() &&
@@ -4153,9 +4183,13 @@ nsPIDOMWindowInner::SyncStateFromParentWindow()
 }
 
 bool
-nsPIDOMWindowInner::HasAudioContexts() const
+nsPIDOMWindowInner::IsPlayingAudio()
 {
-  return !mAudioContexts.IsEmpty();
+  RefPtr<AudioChannelService> acs = AudioChannelService::Get();
+  if (!acs) {
+    return false;
+  }
+  return acs->IsWindowActive(GetOuterWindow());
 }
 
 mozilla::dom::TimeoutManager&
@@ -6472,6 +6506,7 @@ nsGlobalWindow::WindowExists(const nsAString& aName,
 
   nsCOMPtr<nsIDocShellTreeItem> namedItem;
   mDocShell->FindItemWithName(aName, nullptr, caller,
+                              /* aSkipTabGroup = */ false,
                               getter_AddRefs(namedItem));
   return namedItem != nullptr;
 }
@@ -7773,7 +7808,19 @@ nsGlobalWindow::PrintOuter(ErrorResult& aError)
 
         nsXPIDLString printerName;
         printSettings->GetPrinterName(getter_Copies(printerName));
-        if (printerName.IsEmpty()) {
+
+        bool shouldGetDefaultPrinterName = printerName.IsEmpty();
+#ifdef MOZ_X11
+        // In Linux, GTK backend does not support per printer settings.
+        // Calling GetDefaultPrinterName causes a sandbox violation (see Bug 1329216).
+        // The printer name is not needed anywhere else on Linux before it gets to the parent.
+        // In the parent, we will then query the default printer name if no name is set.
+        // Unless we are in the parent, we will skip this part.
+        if (!XRE_IsParentProcess()) {
+          shouldGetDefaultPrinterName = false;
+        }
+#endif
+        if (shouldGetDefaultPrinterName) {
           printSettingsService->GetDefaultPrinterName(getter_Copies(printerName));
           printSettings->SetPrinterName(printerName);
         }
@@ -9962,6 +10009,13 @@ nsGlobalWindow::Find(const nsAString& aString, bool aCaseSensitive,
 }
 
 void
+nsGlobalWindow::GetOrigin(nsAString& aOrigin)
+{
+  MOZ_DIAGNOSTIC_ASSERT(IsInnerWindow());
+  nsContentUtils::GetUTFOrigin(GetPrincipal(), aOrigin);
+}
+
+void
 nsGlobalWindow::Atob(const nsAString& aAsciiBase64String,
                      nsAString& aBinaryData, ErrorResult& aError)
 {
@@ -12112,6 +12166,8 @@ nsGlobalWindow::Suspend()
 
   mozilla::dom::workers::SuspendWorkersForWindow(AsInner());
 
+  SuspendIdleRequests();
+
   mTimeoutManager->Suspend();
 
   // Suspend all of the AudioContexts for this window
@@ -12165,6 +12221,8 @@ nsGlobalWindow::Resume()
   }
 
   mTimeoutManager->Resume();
+
+  ResumeIdleRequests();
 
   // Resume all of the workers for this window.  We must do this
   // after timeouts since workers may have queued events that can trigger
@@ -13237,6 +13295,14 @@ nsGlobalWindow::NotifyVREventListenerAdded()
   MOZ_ASSERT(IsInnerWindow());
   mHasVREvents = true;
   EnableVRUpdates();
+}
+
+bool
+nsGlobalWindow::HasUsedVR() const
+{
+  MOZ_ASSERT(IsInnerWindow());
+
+  return mHasVREvents;
 }
 
 void

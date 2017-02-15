@@ -178,14 +178,6 @@ class JSObject : public js::gc::Cell
     inline js::Shape* maybeShape() const;
     inline js::Shape* ensureShape(JSContext* cx);
 
-    /*
-     * Make a non-array object with the specified initial state. This method
-     * takes ownership of any extantSlots it is passed.
-     */
-    static inline JS::Result<JSObject*, JS::OOM&>
-    create(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
-           js::HandleShape shape, js::HandleObjectGroup group);
-
     // Set the initial slots and elements of an object. These pointers are only
     // valid for native objects, but during initialization are set for all
     // objects. For non-native objects, these must not be dynamically allocated
@@ -353,6 +345,15 @@ class JSObject : public js::gc::Cell
         return group_;
     }
 
+#ifdef DEBUG
+    static void debugCheckNewObject(js::ObjectGroup* group, js::Shape* shape,
+                                    js::gc::AllocKind allocKind, js::gc::InitialHeap heap);
+#else
+    static void debugCheckNewObject(js::ObjectGroup* group, js::Shape* shape,
+                                    js::gc::AllocKind allocKind, js::gc::InitialHeap heap)
+    {}
+#endif
+
     /*
      * We permit proxies to dynamically compute their prototype if desired.
      * (Not all proxies will so desire: in particular, most DOM proxies can
@@ -479,7 +480,7 @@ class JSObject : public js::gc::Cell
     //
     // These cases are:
     //  1) The off-thread parsing task uses a dummy global since it cannot
-    //     share with the actual global being used concurrently on the main
+    //     share with the actual global being used concurrently on the active
     //     thread.
     //  2) A GC may occur when creating the GlobalObject, in which case the
     //     compartment global pointer may not yet be set. In this case there is
@@ -1051,7 +1052,7 @@ ToPrimitive(JSContext* cx, MutableHandleValue vp)
 {
     if (vp.isPrimitive())
         return true;
-    return ToPrimitiveSlow(cx, JSTYPE_VOID, vp);
+    return ToPrimitiveSlow(cx, JSTYPE_UNDEFINED, vp);
 }
 
 inline bool

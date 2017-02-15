@@ -1652,6 +1652,7 @@ nsWindowWatcher::GetWindowByName(const nsAString& aTargetName,
   if (startItem) {
     // Note: original requestor is null here, per idl comments
     startItem->FindItemWithName(aTargetName, nullptr, nullptr,
+                                /* aSkipTabGroup = */ false,
                                 getter_AddRefs(treeItem));
   } else {
     // Note: original requestor is null here, per idl comments
@@ -1928,8 +1929,8 @@ nsWindowWatcher::CalculateChromeFlagsForParent(mozIDOMWindowProxy* aParent,
     chromeFlags |= nsIWebBrowserChrome::CHROME_WINDOW_RAISED;
   }
 
-  chromeFlags |= WinHasOption(aFeatures, "macsuppressanimation", 0, nullptr) ?
-    nsIWebBrowserChrome::CHROME_MAC_SUPPRESS_ANIMATION : 0;
+  chromeFlags |= WinHasOption(aFeatures, "suppressanimation", 0, nullptr) ?
+    nsIWebBrowserChrome::CHROME_SUPPRESS_ANIMATION : 0;
 
   chromeFlags |= WinHasOption(aFeatures, "chrome", 0, nullptr) ?
     nsIWebBrowserChrome::CHROME_OPENAS_CHROME : 0;
@@ -2108,6 +2109,7 @@ nsWindowWatcher::SafeGetWindowByName(const nsAString& aName,
   nsCOMPtr<nsIDocShellTreeItem> foundItem;
   if (startItem) {
     startItem->FindItemWithName(aName, nullptr, callerItem,
+                                /* aSkipTabGroup = */ false,
                                 getter_AddRefs(foundItem));
   } else {
     FindItemWithName(aName, nullptr, callerItem,

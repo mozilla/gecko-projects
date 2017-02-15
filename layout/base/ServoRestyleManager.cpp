@@ -8,7 +8,6 @@
 
 #include "mozilla/DocumentStyleRootIterator.h"
 #include "mozilla/ServoBindings.h"
-#include "mozilla/ServoRestyleManagerInlines.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/dom/ChildIterator.h"
 #include "nsContentUtils.h"
@@ -44,7 +43,7 @@ ServoRestyleManager::PostRestyleEvent(Element* aElement,
     return;
   }
 
-  if (aRestyleHint == 0 && !aMinChangeHint && !HasPendingRestyles()) {
+  if (aRestyleHint == 0 && !aMinChangeHint) {
     return; // Nothing to do.
   }
 
@@ -144,7 +143,11 @@ ServoRestyleManager::RecreateStyleContexts(Element* aElement,
   nsIFrame* primaryFrame = aElement->GetPrimaryFrame();
 
   nsChangeHint changeHint = Servo_TakeChangeHint(aElement);
-  if (changeHint) {
+  // Although we shouldn't generate non-ReconstructFrame hints for elements with
+  // no frames, we can still get them here if they were explicitly posted by
+  // PostRestyleEvent, such as a RepaintFrame hint when a :link changes to be
+  // :visited.  Skip processing these hints if there is no frame.
+  if ((primaryFrame || changeHint & nsChangeHint_ReconstructFrame) && changeHint) {
     aChangeListToProcess.AppendChange(primaryFrame, aElement, changeHint);
   }
 
@@ -183,8 +186,6 @@ ServoRestyleManager::RecreateStyleContexts(Element* aElement,
   // bug 1251799.
   const bool recreateContext = oldStyleContext &&
     oldStyleContext->StyleSource().AsServoComputedValues() != computedValues;
-
-  MOZ_ASSERT_IF(changeHint, recreateContext);
 
   if (recreateContext) {
     RefPtr<nsStyleContext> newContext =
@@ -325,10 +326,6 @@ ServoRestyleManager::ProcessPendingRestyles()
     return;
   }
 
-  if (!HasPendingRestyles()) {
-    return;
-  }
-
   // Create a AnimationsWithDestroyedFrame during restyling process to
   // stop animations and transitions on elements that have no frame at the end
   // of the restyling process.
@@ -337,10 +334,11 @@ ServoRestyleManager::ProcessPendingRestyles()
   ServoStyleSet* styleSet = StyleSet();
   nsIDocument* doc = PresContext()->Document();
 
-  // XXXbholley: Should this be while() per bug 1316247?
-  if (HasPendingRestyles()) {
-    mInStyleRefresh = true;
-    styleSet->StyleDocument();
+  mInStyleRefresh = true;
+
+  // Perform the Servo traversal, and the post-traversal if required.
+  if (styleSet->StyleDocument()) {
+
     PresContext()->EffectCompositor()->ClearElementsToRestyle();
 
     // First do any queued-up frame creation. (see bugs 827239 and 997506).
@@ -379,10 +377,11 @@ ServoRestyleManager::ProcessPendingRestyles()
     mReentrantChanges = nullptr;
 
     styleSet->AssertTreeIsClean();
-    mInStyleRefresh = false;
+
+    IncrementRestyleGeneration();
   }
 
-  IncrementRestyleGeneration();
+  mInStyleRefresh = false;
 
   // Note: We are in the scope of |animationsWithDestroyedFrame|, so
   //       |mAnimationsWithDestroyedFrame| is still valid.

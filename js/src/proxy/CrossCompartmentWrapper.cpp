@@ -13,6 +13,8 @@
 #include "jscompartmentinlines.h"
 #include "jsobjinlines.h"
 
+#include "gc/Nursery-inl.h"
+
 using namespace js;
 
 #define PIERCE(cx, wrapper, pre, op, post)                      \
@@ -516,7 +518,7 @@ js::NukeCrossCompartmentWrappers(JSContext* cx,
     CHECK_REQUEST(cx);
     JSRuntime* rt = cx->runtime();
 
-    rt->zoneGroupFromMainThread()->evictNursery(JS::gcreason::EVICT_NURSERY);
+    EvictAllNurseries(rt);
 
     // Iterate through scopes looking for system cross compartment wrappers
     // that point to an object that shares a global with obj.
@@ -595,7 +597,7 @@ js::RemapWrapper(JSContext* cx, JSObject* wobjArg, JSObject* newTargetArg)
     // wrapper, |wobj|, since it's been nuked anyway. The wrap() function has
     // the choice to reuse |wobj| or not.
     RootedObject tobj(cx, newTarget);
-    AutoCompartment ac(cx, wobj);
+    AutoCompartmentUnchecked ac(cx, wcompartment);
     if (!wcompartment->rewrap(cx, &tobj, wobj))
         MOZ_CRASH();
 
@@ -618,8 +620,11 @@ js::RemapWrapper(JSContext* cx, JSObject* wobjArg, JSObject* newTargetArg)
     // Update the entry in the compartment's wrapper map to point to the old
     // wrapper, which has now been updated (via reuse or swap).
     MOZ_ASSERT(wobj->is<WrapperObject>());
-    if (!wcompartment->putWrapper(cx, CrossCompartmentKey(newTarget), ObjectValue(*wobj)))
+    if (!wcompartment->putWrapperMaybeUpdate(cx, CrossCompartmentKey(newTarget),
+                                             ObjectValue(*wobj)))
+    {
         MOZ_CRASH();
+    }
 }
 
 // Remap all cross-compartment wrappers pointing to |oldTarget| to point to
@@ -656,7 +661,7 @@ js::RecomputeWrappers(JSContext* cx, const CompartmentFilter& sourceFilter,
                       const CompartmentFilter& targetFilter)
 {
     // Drop any nursery-allocated wrappers.
-    cx->runtime()->zoneGroupFromMainThread()->evictNursery(JS::gcreason::EVICT_NURSERY);
+    EvictAllNurseries(cx->runtime());
 
     AutoWrapperVector toRecompute(cx);
     for (CompartmentsIter c(cx->runtime(), SkipAtoms); !c.done(); c.next()) {

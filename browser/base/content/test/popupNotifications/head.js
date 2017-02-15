@@ -101,8 +101,8 @@ function* runNextTest() {
     });
     onPopupEvent("popuphidden", function() {
       info("[" + nextTest.id + "] popup hidden");
-      nextTest.onHidden(this);
-      goNext();
+      Task.spawn(() => nextTest.onHidden(this))
+          .then(() => goNext(), ex => Assert.ok(false, "onHidden failed: " + ex));
     }, () => shownState);
     info("[" + nextTest.id + "] added listeners; panel is open: " + PopupNotifications.isPanelOpen);
   }
@@ -259,6 +259,14 @@ function onPopupEvent(eventName, callback, condition) {
 function waitForNotificationPanel() {
   return new Promise(resolve => {
     onPopupEvent("popupshown", function() {
+      resolve(this);
+    });
+  });
+}
+
+function waitForNotificationPanelHidden() {
+  return new Promise(resolve => {
+    onPopupEvent("popuphidden", function() {
       resolve(this);
     });
   });

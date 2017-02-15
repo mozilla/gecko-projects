@@ -60,6 +60,8 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
     typedef Vector<Property, 0, SystemAllocPolicy> PropertyVector;
 
   private:
+    Zone* zone_;
+
     // If objects in this group have ever been converted to native objects,
     // these store the corresponding native group and initial shape for such
     // objects. Type information for this object is reflected in nativeGroup.
@@ -103,12 +105,14 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
     JSValueType elementType_;
 
   public:
-    UnboxedLayout()
-      : nativeGroup_(nullptr), nativeShape_(nullptr),
+    explicit UnboxedLayout(Zone* zone)
+      : zone_(zone), nativeGroup_(nullptr), nativeShape_(nullptr),
         allocationScript_(nullptr), allocationPc_(nullptr), replacementGroup_(nullptr),
         size_(0), newScript_(nullptr), traceList_(nullptr), constructorCode_(nullptr),
         elementType_(JSVAL_TYPE_MAGIC)
     {}
+
+    Zone* zone() const { return zone_; }
 
     bool initProperties(const PropertyVector& properties, size_t size) {
         size_ = size;
@@ -216,6 +220,14 @@ class UnboxedLayout : public mozilla::LinkedListElement<UnboxedLayout>
     static bool makeConstructorCode(JSContext* cx, HandleObjectGroup group);
 };
 
+class UnboxedObject : public JSObject
+{
+  protected:
+    static JS::Result<UnboxedObject*, JS::OOM&>
+    createInternal(JSContext* cx, js::gc::AllocKind kind, js::gc::InitialHeap heap,
+                   js::HandleObjectGroup group);
+};
+
 // Class for expando objects holding extra properties given to an unboxed plain
 // object. These objects behave identically to normal native plain objects, and
 // have a separate Class to distinguish them for memory usage reporting.
@@ -229,7 +241,7 @@ class UnboxedExpandoObject : public NativeObject
 // layout of these objects is identical to that of an InlineTypedObject, though
 // these objects use an UnboxedLayout instead of a TypeDescr to keep track of
 // how their properties are stored.
-class UnboxedPlainObject : public JSObject
+class UnboxedPlainObject : public UnboxedObject
 {
     // Optional object which stores extra properties on this object. This is
     // not automatically barriered to avoid problems if the object is converted
@@ -333,7 +345,7 @@ UnboxedLayout::getAllocKind() const
 }
 
 // Class for an array object using an unboxed representation.
-class UnboxedArrayObject : public JSObject
+class UnboxedArrayObject : public UnboxedObject
 {
     // Elements pointer for the object.
     uint8_t* elements_;

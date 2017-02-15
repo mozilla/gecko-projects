@@ -432,7 +432,7 @@ var BrowserApp = {
         // Tab selection has changed during a fullscreen transition, handle it now.
         let tab = this.fullscreenTransitionTab;
         this.fullscreenTransitionTab = null;
-        this._handleTabSelected(tab);
+        this.selectTab(tab);
       }
     });
 
@@ -1206,7 +1206,20 @@ var BrowserApp = {
   addTab: function addTab(aURI, aParams) {
     aParams = aParams || {};
 
+    let fullscreenState;
+    if (this.selectedBrowser) {
+       fullscreenState = this.selectedBrowser.contentDocument.fullscreenElement;
+       if (fullscreenState) {
+         aParams.selected = false;
+       }
+    }
+
     let newTab = new Tab(aURI, aParams);
+
+    if (fullscreenState) {
+       this.fullscreenTransitionTab = newTab;
+       doc.exitFullscreen();
+    }
 
     if (typeof aParams.tabIndex == "number") {
       this._tabs.splice(aParams.tabIndex, 0, newTab);
@@ -1259,9 +1272,9 @@ var BrowserApp = {
     evt.initUIEvent("TabClose", true, false, window, tabIndex);
     aTab.browser.dispatchEvent(evt);
 
-    if (aShowUndoSnackbar) {
+    let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
+    if (aShowUndoSnackbar && ss.canUndoLastCloseTab) {
       // Get a title for the undo close snackbar. Fall back to the URL if there is no title.
-      let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
       let closedTabData = ss.getClosedTabs(window)[0];
 
       if (closedTabData) {
@@ -1312,6 +1325,7 @@ var BrowserApp = {
       // remember the new tab for this.
       this.fullscreenTransitionTab = aTab;
       doc.exitFullscreen();
+      return;
     }
 
     let message = {
@@ -3414,6 +3428,7 @@ function Tab(aURL, aParams) {
   this.filter = null;
   this.browser = null;
   this.id = 0;
+  this._parentId = -1;
   this.lastTouchedAt = Date.now();
   this._zoom = 1.0;
   this._drawZoom = 1.0;
@@ -3541,7 +3556,7 @@ Tab.prototype = {
       }
 
       this.desktopMode = ("desktopMode" in aParams) ? aParams.desktopMode : false;
-      this.parentId = ("parentId" in aParams && typeof aParams.parentId == "number")
+      this._parentId = ("parentId" in aParams && typeof aParams.parentId == "number")
                       ? aParams.parentId : -1;
 
       let message = {
@@ -3945,9 +3960,13 @@ Tab.prototype = {
     }
   },
 
-  setParentId: function(aParentId) {
+  get parentId() {
+    return this._parentId;
+  },
+
+  set parentId(aParentId) {
     let newParentId = (typeof aParentId == "number") ? aParentId : -1;
-    this.parentId = newParentId;
+    this._parentId = newParentId;
     GlobalEventDispatcher.sendRequest({
       type: "Tab:SetParentId",
       tabID: this.id,
@@ -4325,12 +4344,23 @@ Tab.prototype = {
 
   onLocationChange: function(aWebProgress, aRequest, aLocationURI, aFlags) {
     let contentWin = aWebProgress.DOMWindow;
+    let webNav = contentWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
 
     // Browser webapps may load content inside iframes that can not reach across the app/frame boundary
     // i.e. even though the page is loaded in an iframe window.top != webapp
     // Make cure this window is a top level tab before moving on.
-    if (BrowserApp.getBrowserForWindow(contentWin) == null)
+    if (BrowserApp.getBrowserForWindow(contentWin) == null) {
+      // We still need to update the back/forward button state, though.
+      let message = {
+        type: "Content:SubframeNavigation",
+        tabID: this.id,
+        canGoBack: webNav.canGoBack,
+        canGoForward: webNav.canGoForward,
+      };
+
+      GlobalEventDispatcher.sendRequest(message);
       return;
+    }
 
     this._hostChanged = true;
 
@@ -4374,7 +4404,7 @@ Tab.prototype = {
     // If reader mode, get the base domain for the original url.
     let strippedURI = this._stripAboutReaderURL(documentURI);
 
-    // Borrowed from desktop Firefox: http://hg.mozilla.org/mozilla-central/annotate/72835344333f/browser/base/content/urlbarBindings.xml#l236
+    // Borrowed from desktop Firefox: https://hg.mozilla.org/mozilla-central/annotate/72835344333f/browser/base/content/urlbarBindings.xml#l236
     let matchedURL = strippedURI.match(/^((?:[a-z]+:\/\/)?(?:[^\/]+@)?)(.+?)(?::\d+)?(?:\/|$)/);
     let baseDomain = "";
     if (matchedURL) {
@@ -4414,8 +4444,6 @@ Tab.prototype = {
       ExternalApps.updatePageActionUri(fixedURI);
     }
 
-    let webNav = contentWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIWebNavigation);
-
     let message = {
       type: "Content:LocationChange",
       tabID: this.id,
@@ -4425,8 +4453,6 @@ Tab.prototype = {
       contentType: (contentType ? contentType : ""),
       sameDocument: sameDocument,
 
-      historyIndex: webNav.sessionHistory.index,
-      historySize: webNav.sessionHistory.count,
       canGoBack: webNav.canGoBack,
       canGoForward: webNav.canGoForward,
     };

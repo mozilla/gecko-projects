@@ -47,7 +47,8 @@ public class GeckoView extends LayerView
 
     private ChromeDelegate mChromeDelegate;
     /* package */ ContentListener mContentListener;
-
+    /* package */ NavigationListener mNavigationListener;
+    /* package */ ProgressListener mProgressListener;
     private InputConnectionListener mInputConnectionListener;
 
     protected boolean onAttachedToWindowCalled;
@@ -116,6 +117,10 @@ public class GeckoView extends LayerView
         /* package */ void registerListeners() {
             getEventDispatcher().registerUiThreadListener(this,
                 "GeckoView:DOMTitleChanged",
+                "GeckoView:LocationChange",
+                "GeckoView:PageStart",
+                "GeckoView:PageStop",
+                "GeckoView:SecurityChanged",
                 null);
         }
 
@@ -129,6 +134,27 @@ public class GeckoView extends LayerView
             if ("GeckoView:DOMTitleChanged".equals(event)) {
                 if (mContentListener != null) {
                     mContentListener.onTitleChanged(GeckoView.this, message.getString("title"));
+                }
+            } else if ("GeckoView:LocationChange".equals(event)) {
+                if (mNavigationListener == null) {
+                    // We shouldn't be getting this event.
+                    eventDispatcher.dispatch("GeckoViewNavigation:Inactive", null);
+                } else {
+                    mNavigationListener.onLocationChange(GeckoView.this, message.getString("uri"));
+                    mNavigationListener.onCanGoBack(GeckoView.this, message.getBoolean("canGoBack"));
+                    mNavigationListener.onCanGoForward(GeckoView.this, message.getBoolean("canGoForward"));
+                }
+            } else if ("GeckoView:PageStart".equals(event)) {
+                if (mProgressListener != null) {
+                    mProgressListener.onPageStart(GeckoView.this, message.getString("uri"));
+                }
+            } else if ("GeckoView:PageStop".equals(event)) {
+                if (mProgressListener != null) {
+                    mProgressListener.onPageStop(GeckoView.this, message.getBoolean("success"));
+                }
+            } else if ("GeckoView:SecurityChanged".equals(event)) {
+                if (mProgressListener != null) {
+                    mProgressListener.onSecurityChanged(GeckoView.this, message.getInt("status"));
                 }
             }
         }
@@ -266,21 +292,39 @@ public class GeckoView extends LayerView
     @WrapForJNI public static final int LOAD_NEW_TAB = 1;
     @WrapForJNI public static final int LOAD_SWITCH_TAB = 2;
 
+    /**
+    * Load the given URI.
+    * @param uri The URI of the resource to load.
+    * @param flags The load flags (TODO).
+    */
     public void loadUri(String uri, int flags) {
         if (window == null) {
             throw new IllegalStateException("Not attached to window");
         }
 
-        if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
+        if (GeckoThread.isRunning()) {
             window.loadUri(uri, flags);
         }  else {
-            GeckoThread.queueNativeCallUntil(GeckoThread.State.PROFILE_READY,
-                    window, "loadUri", String.class, uri, flags);
+            GeckoThread.queueNativeCall(window, "loadUri", String.class, uri, flags);
         }
     }
 
     /* package */ void setInputConnectionListener(final InputConnectionListener icl) {
         mInputConnectionListener = icl;
+    }
+
+    /**
+    * Go back in history.
+    */
+    public void goBack() {
+        eventDispatcher.dispatch("GeckoView:GoBack", null);
+    }
+
+    /**
+    * Go forward in history.
+    */
+    public void goForward() {
+        eventDispatcher.dispatch("GeckoView:GoForward", null);
     }
 
     @Override
@@ -384,6 +428,49 @@ public class GeckoView extends LayerView
         return mContentListener;
     }
 
+    /**
+    * Set the progress callback handler.
+    * This will replace the current handler.
+    * @param progress An implementation of ProgressListener.
+    */
+    public void setProgressListener(ProgressListener progress) {
+        mProgressListener = progress;
+    }
+
+    /**
+    * Get the progress callback handler.
+    * @return The current progress callback handler.
+    */
+    public ProgressListener getProgressListener() {
+        return mProgressListener;
+    }
+
+    /**
+    * Set the navigation callback handler.
+    * This will replace the current handler.
+    * @param navigation An implementation of NavigationListener.
+    */
+    public void setNavigationDelegate(NavigationListener listener) {
+        if (mNavigationListener == listener) {
+            return;
+        }
+        if (listener == null) {
+            eventDispatcher.dispatch("GeckoViewNavigation:Inactive", null);
+        } else if (mNavigationListener == null) {
+            eventDispatcher.dispatch("GeckoViewNavigation:Active", null);
+        }
+
+        mNavigationListener = listener;
+    }
+
+    /**
+    * Get the navigation callback handler.
+    * @return The current navigation callback handler.
+    */
+    public NavigationListener getNavigationListener() {
+        return mNavigationListener;
+    }
+
     public static void setGeckoInterface(final BaseGeckoInterface geckoInterface) {
         GeckoAppShell.setGeckoInterface(geckoInterface);
     }
@@ -471,6 +558,33 @@ public class GeckoView extends LayerView
         public void onDebugRequest(GeckoView view, GeckoView.PromptResult result);
     }
 
+    public interface ProgressListener {
+        static final int STATE_IS_BROKEN = 1;
+        static final int STATE_IS_SECURE = 2;
+        static final int STATE_IS_INSECURE = 4;
+
+        /**
+        * A View has started loading content from the network.
+        * @param view The GeckoView that initiated the callback.
+        * @param url The resource being loaded.
+        */
+        public void onPageStart(GeckoView view, String url);
+
+        /**
+        * A View has finished loading content from the network.
+        * @param view The GeckoView that initiated the callback.
+        * @param success Whether the page loaded successfully or an error occurred.
+        */
+        public void onPageStop(GeckoView view, boolean success);
+
+        /**
+        * The security status has been updated.
+        * @param view The GeckoView that initiated the callback.
+        * @param status The new security status.
+        */
+        public void onSecurityChanged(GeckoView view, int status);
+    }
+
     public interface ContentListener {
         /**
         * A page title was discovered in the content or updated after the content
@@ -479,5 +593,28 @@ public class GeckoView extends LayerView
         * @param title The title sent from the content.
         */
         public void onTitleChanged(GeckoView view, String title);
+    }
+
+    public interface NavigationListener {
+        /**
+        * A view has started loading content from the network.
+        * @param view The GeckoView that initiated the callback.
+        * @param url The resource being loaded.
+        */
+        public void onLocationChange(GeckoView view, String url);
+
+        /**
+        * The view's ability to go back has changed.
+        * @param view The GeckoView that initiated the callback.
+        * @param canGoBack The new value for the ability.
+        */
+        public void onCanGoBack(GeckoView view, boolean canGoBack);
+
+        /**
+        * The view's ability to go forward has changed.
+        * @param view The GeckoView that initiated the callback.
+        * @param canGoForward The new value for the ability.
+        */
+        public void onCanGoForward(GeckoView view, boolean canGoForward);
     }
 }

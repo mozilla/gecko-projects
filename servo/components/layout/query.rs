@@ -6,7 +6,7 @@
 
 use app_units::Au;
 use construct::ConstructionResult;
-use context::SharedLayoutContext;
+use context::LayoutContext;
 use euclid::point::Point2D;
 use euclid::rect::Rect;
 use euclid::size::Size2D;
@@ -696,7 +696,7 @@ pub fn process_node_scroll_area_request< N: LayoutNode>(requested_node: N, layou
 
 /// Return the resolved value of property for a given (pseudo)element.
 /// https://drafts.csswg.org/cssom/#resolved-value
-pub fn process_resolved_style_request<'a, N>(shared: &SharedLayoutContext,
+pub fn process_resolved_style_request<'a, N>(context: &LayoutContext,
                                              node: N,
                                              pseudo: &Option<PseudoElement>,
                                              property: &PropertyId,
@@ -715,15 +715,15 @@ pub fn process_resolved_style_request<'a, N>(shared: &SharedLayoutContext,
     // However, the element may be in a display:none subtree. The style system
     // has a mechanism to give us that within a defined scope (after which point
     // it's cleared to maintained style system invariants).
-    let mut tlc = ThreadLocalStyleContext::new(&shared.style_context);
-    let context = StyleContext {
-        shared: &shared.style_context,
+    let mut tlc = ThreadLocalStyleContext::new(&context.style_context);
+    let mut context = StyleContext {
+        shared: &context.style_context,
         thread_local: &mut tlc,
     };
     let mut result = None;
     let ensure = |el: N::ConcreteElement| el.as_node().initialize_data();
     let clear = |el: N::ConcreteElement| el.as_node().clear_data();
-    resolve_style(&context, element, &ensure, &clear, |_: &_| {
+    resolve_style(&mut context, element, &ensure, &clear, |_: &_| {
         let s = process_resolved_style_request_internal(node, pseudo, property, layout_root);
         result = Some(s);
     });

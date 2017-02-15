@@ -293,6 +293,20 @@ impl NoCalcLength {
         })
     }
 
+    /// https://drafts.csswg.org/css-fonts-3/#font-size-prop
+    pub fn from_font_size_int(i: u8) -> Self {
+        let au = match i {
+            0 | 1 => Au::from_px(FONT_MEDIUM_PX) * 3 / 4,
+            2 => Au::from_px(FONT_MEDIUM_PX) * 8 / 9,
+            3 => Au::from_px(FONT_MEDIUM_PX),
+            4 => Au::from_px(FONT_MEDIUM_PX) * 6 / 5,
+            5 => Au::from_px(FONT_MEDIUM_PX) * 3 / 2,
+            6 => Au::from_px(FONT_MEDIUM_PX) * 2,
+            _ => Au::from_px(FONT_MEDIUM_PX) * 3,
+        };
+        NoCalcLength::Absolute(au)
+    }
+
     /// Parse a given absolute or relative dimension.
     pub fn parse_dimension(value: CSSFloat, unit: &str) -> Result<NoCalcLength, ()> {
         match_ignore_ascii_case! { unit,
@@ -429,6 +443,11 @@ impl Length {
         NoCalcLength::parse_dimension(value, unit).map(Length::NoCalc)
     }
 
+    /// https://drafts.csswg.org/css-fonts-3/#font-size-prop
+    pub fn from_font_size_int(i: u8) -> Self {
+        Length::NoCalc(NoCalcLength::from_font_size_int(i))
+    }
+
     #[inline]
     fn parse_internal(input: &mut Parser, context: AllowedNumericType) -> Result<Length, ()> {
         match try!(input.next()) {
@@ -444,6 +463,7 @@ impl Length {
     }
 
     /// Parse a non-negative length
+    #[inline]
     pub fn parse_non_negative(input: &mut Parser) -> Result<Length, ()> {
         Length::parse_internal(input, AllowedNumericType::NonNegative)
     }
@@ -1195,7 +1215,7 @@ pub type LengthOrNumber = Either<Length, Number>;
 
 impl LengthOrNumber {
     /// Parse a non-negative LengthOrNumber.
-    pub fn parse_non_negative(input: &mut Parser) -> Result<Self, ()> {
+    pub fn parse_non_negative(_context: &ParserContext, input: &mut Parser) -> Result<Self, ()> {
         // We try to parse as a Number first because, for cases like LengthOrNumber,
         // we want "0" to be parsed as a plain Number rather than a Length (0px); this
         // matches the behaviour of all major browsers

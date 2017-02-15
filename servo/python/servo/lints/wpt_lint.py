@@ -26,12 +26,14 @@ class Lint(LintRunner):
                 yield f[len(working_dir):]
 
     def run(self):
+        if self.stylo:
+            return
         wpt_working_dir = os.path.abspath(os.path.join(WPT_PATH, "web-platform-tests"))
         for suite in SUITES:
             files = self._get_wpt_files(suite)
             site.addsitedir(wpt_working_dir)
             from tools.lint import lint
             file_dir = os.path.abspath(os.path.join(WPT_PATH, suite))
-            returncode = lint.lint(file_dir, files, output_json=False)
+            returncode = lint.lint(file_dir, files, output_json=False, css_mode=False)
             if returncode:
                 yield ("WPT Lint Tool", "", "lint error(s) in Web Platform Tests: exit status %s" % returncode)

@@ -151,9 +151,16 @@ XPCOMUtils.defineLazyGetter(this, "PopupNotifications", function() {
   let tmp = {};
   Cu.import("resource://gre/modules/PopupNotifications.jsm", tmp);
   try {
+    // Hide all notifications while the URL is being edited and the address bar
+    // has focus, including the virtual focus in the results popup.
+    let shouldSuppress = () => {
+      return gURLBar.getAttribute("pageproxystate") != "valid" &&
+             gURLBar.focused;
+    };
     return new tmp.PopupNotifications(gBrowser,
                                       document.getElementById("notification-popup"),
-                                      document.getElementById("notification-popup-box"));
+                                      document.getElementById("notification-popup-box"),
+                                      { shouldSuppress });
   } catch (ex) {
     Cu.reportError(ex);
     return null;
@@ -1285,8 +1292,6 @@ var gBrowserInit = {
     PanelUI.init();
     LightweightThemeListener.init();
 
-    SidebarUI.startDelayedLoad();
-
     UpdateUrlbarSearchSplitterState();
 
     if (!(isBlankPageURL(uriToLoad) || uriToLoad == "about:privatebrowsing") ||
@@ -1460,6 +1465,7 @@ var gBrowserInit = {
       // Enable the Restore Last Session command if needed
       RestoreLastSessionObserver.init();
 
+      SidebarUI.startDelayedLoad();
       SocialUI.init();
 
       // Start monitoring slow add-ons
@@ -2442,17 +2448,8 @@ function BrowserPageInfo(documentURL, initialTab, imageElement, frameOuterWindow
  *
  * @param aURI [optional]
  *        nsIURI to set. If this is unspecified, the current URI will be used.
- * @param aOptions [optional]
- *        An object with the following properties:
- *        {
- *          isForLocationChange:
- *            Set to true to indicate that the function was invoked to respond
- *            to a location change event, rather than to reset the current URI
- *            value. This is useful to avoid calling PopupNotifications.jsm
- *            multiple times.
- *        }
  */
-function URLBarSetURI(aURI, aOptions = {}) {
+function URLBarSetURI(aURI) {
   var value = gBrowser.userTypedValue;
   var valid = false;
 
@@ -2485,7 +2482,7 @@ function URLBarSetURI(aURI, aOptions = {}) {
 
   gURLBar.value = value;
   gURLBar.valueIsTyped = !valid;
-  SetPageProxyState(valid ? "valid" : "invalid", aOptions);
+  SetPageProxyState(valid ? "valid" : "invalid");
 }
 
 function losslessDecodeURI(aURI) {
@@ -2592,19 +2589,15 @@ function UpdatePageProxyState() {
  *        related user interface elments should be shown because the URI in the
  *        location bar matches the loaded page. The string "invalid" indicates
  *        that the URI in the location bar is different than the loaded page.
- * @param aOptions [optional]
- *        An object with the following properties:
- *        {
- *          isForLocationChange:
- *            Set to true to indicate that the function was invoked to respond
- *            to a location change event. This is useful to avoid calling
- *            PopupNotifications.jsm multiple times.
- *        }
  */
-function SetPageProxyState(aState, aOptions = {}) {
+function SetPageProxyState(aState) {
   if (!gURLBar)
     return;
 
+  let oldPageProxyState = gURLBar.getAttribute("pageproxystate");
+  // The "browser_urlbar_stop_pending.js" test uses a MutationObserver to do
+  // some verifications at this point, and it breaks if we don't write the
+  // attribute, even if it hasn't changed (bug 1338115).
   gURLBar.setAttribute("pageproxystate", aState);
 
   // the page proxy state is set to valid via OnLocationChange, which
@@ -2616,14 +2609,26 @@ function SetPageProxyState(aState, aOptions = {}) {
     gURLBar.removeEventListener("input", UpdatePageProxyState);
   }
 
-  // Only need to call anchorVisibilityChange if the PopupNotifications object
-  // for this window has already been initialized (i.e. its getter no
-  // longer exists). If this is the result of a locations change, then we will
-  // already invoke PopupNotifications.locationChange separately.
-  if (!Object.getOwnPropertyDescriptor(window, "PopupNotifications").get &&
-      !aOptions.isForLocationChange) {
-    PopupNotifications.anchorVisibilityChange();
+  // After we've ensured that we've applied the listeners and updated the value
+  // of gLastValidURLStr, return early if the actual state hasn't changed.
+  if (oldPageProxyState == aState) {
+    return;
   }
+
+  UpdatePopupNotificationsVisibility();
+}
+
+function UpdatePopupNotificationsVisibility() {
+  // Only need to do something if the PopupNotifications object for this window
+  // has already been initialized (i.e. its getter no longer exists).
+  if (Object.getOwnPropertyDescriptor(window, "PopupNotifications").get) {
+    return;
+  }
+
+  // Notify PopupNotifications that the visible anchors may have changed. This
+  // also checks the suppression state according to the "shouldSuppress"
+  // function defined earlier in this file.
+  PopupNotifications.anchorVisibilityChange();
 }
 
 function PageProxyClickHandler(aEvent) {
@@ -2846,7 +2851,6 @@ var BrowserOnClick = {
     mm.addMessageListener("Browser:SetSSLErrorReportAuto", this);
     mm.addMessageListener("Browser:ResetSSLPreferences", this);
     mm.addMessageListener("Browser:SSLErrorReportTelemetry", this);
-    mm.addMessageListener("Browser:OverrideWeakCrypto", this);
     mm.addMessageListener("Browser:SSLErrorGoBack", this);
 
     Services.obs.addObserver(this, "captive-portal-login-abort", false);
@@ -2862,7 +2866,6 @@ var BrowserOnClick = {
     mm.removeMessageListener("Browser:SetSSLErrorReportAuto", this);
     mm.removeMessageListener("Browser:ResetSSLPreferences", this);
     mm.removeMessageListener("Browser:SSLErrorReportTelemetry", this);
-    mm.removeMessageListener("Browser:OverrideWeakCrypto", this);
     mm.removeMessageListener("Browser:SSLErrorGoBack", this);
 
     Services.obs.removeObserver(this, "captive-portal-login-abort");
@@ -2877,24 +2880,6 @@ var BrowserOnClick = {
         // can refresh themselves.
         window.messageManager.broadcastAsyncMessage("Browser:CaptivePortalFreed");
       break;
-    }
-  },
-
-  handleEvent(event) {
-    if (!event.isTrusted || // Don't trust synthetic events
-        event.button == 2) {
-      return;
-    }
-
-    let originalTarget = event.originalTarget;
-    let ownerDoc = originalTarget.ownerDocument;
-    if (!ownerDoc) {
-      return;
-    }
-
-    if (gMultiProcessBrowser &&
-        ownerDoc.documentURI.toLowerCase() == "about:newtab") {
-      this.onE10sAboutNewTab(event, ownerDoc);
     }
   },
 
@@ -2942,13 +2927,6 @@ var BrowserOnClick = {
         let reportStatus = msg.data.reportStatus;
         Services.telemetry.getHistogramById("TLS_ERROR_REPORT_UI")
           .add(reportStatus);
-      break;
-      case "Browser:OverrideWeakCrypto":
-        let weakCryptoOverride = Cc["@mozilla.org/security/weakcryptooverride;1"]
-                                   .getService(Ci.nsIWeakCryptoOverride);
-        weakCryptoOverride.addWeakCryptoOverride(
-          msg.data.uri.host,
-          PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser));
       break;
       case "Browser:SSLErrorGoBack":
         goBackFromErrorPage();
@@ -3088,28 +3066,6 @@ var BrowserOnClick = {
           this.ignoreWarningButton(reason);
         }
         break;
-    }
-  },
-
-  /**
-   * This functions prevents navigation from happening directly through the <a>
-   * link in about:newtab (which is loaded in the parent and therefore would load
-   * the next page also in the parent) and instructs the browser to open the url
-   * in the current tab which will make it update the remoteness of the tab.
-   */
-  onE10sAboutNewTab(event, ownerDoc) {
-    let isTopFrame = (ownerDoc.defaultView.parent === ownerDoc.defaultView);
-    if (!isTopFrame) {
-      return;
-    }
-
-    let anchorTarget = event.originalTarget.parentNode;
-
-    if (anchorTarget instanceof HTMLAnchorElement &&
-        anchorTarget.classList.contains("newtab-link")) {
-      event.preventDefault();
-      let where = whereToOpenLink(event, false, false);
-      openLinkIn(anchorTarget.href, where, { charset: ownerDoc.characterSet, referrerURI: ownerDoc.documentURIObject });
     }
   },
 
@@ -3326,15 +3282,15 @@ function getDetailedCertErrorInfo(location, securityInfo) {
   const sss = Cc["@mozilla.org/ssservice;1"]
                  .getService(Ci.nsISiteSecurityService);
   // SiteSecurityService uses different storage if the channel is
-  // private. Thus we must give isSecureHost correct flags or we
+  // private. Thus we must give isSecureURI correct flags or we
   // might get incorrect results.
   let flags = PrivateBrowsingUtils.isWindowPrivate(window) ?
               Ci.nsISocketProvider.NO_PERMANENT_STORAGE : 0;
 
   let uri = Services.io.newURI(location);
 
-  let hasHSTS = sss.isSecureHost(sss.HEADER_HSTS, uri.host, flags);
-  let hasHPKP = sss.isSecureHost(sss.HEADER_HPKP, uri.host, flags);
+  let hasHSTS = sss.isSecureURI(sss.HEADER_HSTS, uri, flags);
+  let hasHPKP = sss.isSecureURI(sss.HEADER_HPKP, uri, flags);
   certErrorDetails += "\r\n\r\n" +
                       gNavigatorBundle.getFormattedString("certErrorDetailsHSTS.label",
                                                           [hasHSTS]);
@@ -4121,6 +4077,13 @@ function OpenBrowserWindow(options) {
     extraFeatures += ",non-remote";
   }
 
+  // If the window is maximized, we want to skip the animation, since we're
+  // going to be taking up most of the screen anyways, and we want to optimize
+  // for showing the user a useful window as soon as possible.
+  if (window.windowState == window.STATE_MAXIMIZED) {
+    extraFeatures += ",suppressanimation";
+  }
+
   // if and only if the current window is a browser window and it has a document with a character
   // set, then extract the current charset menu setting from the current document and use it to
   // initialize the new browser window...
@@ -4584,7 +4547,7 @@ var XULBrowserWindow = {
         this.reloadCommand.removeAttribute("disabled");
       }
 
-      URLBarSetURI(aLocationURI, { isForLocationChange: true });
+      URLBarSetURI(aLocationURI);
 
       BookmarkingUI.onLocationChange();
 
@@ -4926,13 +4889,9 @@ var TabsProgressListener = {
       }
     }
 
-    // Attach a listener to watch for "click" events bubbling up from error
-    // pages and other similar pages (like about:newtab). This lets us fix bugs
-    // like 401575 which require error page UI to do privileged things, without
-    // letting error pages have any privilege themselves.
-    // We can't look for this during onLocationChange since at that point the
-    // document URI is not yet the about:-uri of the error page.
-
+    // We used to listen for clicks in the browser here, but when that
+    // became unnecessary, removing the code below caused focus issues.
+    // This code should be removed. Tracked in bug 1337794.
     let isRemoteBrowser = aBrowser.isRemoteBrowser;
     // We check isRemoteBrowser here to avoid requesting the doc CPOW
     let doc = isRemoteBrowser ? null : aWebProgress.DOMWindow.document;
@@ -4947,11 +4906,9 @@ var TabsProgressListener = {
       // STATE_STOP may be received twice for documents, thus store an
       // attribute to ensure handling it just once.
       doc.documentElement.setAttribute("hasBrowserHandlers", "true");
-      aBrowser.addEventListener("click", BrowserOnClick, true);
       aBrowser.addEventListener("pagehide", function onPageHide(event) {
         if (event.target.defaultView.frameElement)
           return;
-        aBrowser.removeEventListener("click", BrowserOnClick, true);
         aBrowser.removeEventListener("pagehide", onPageHide, true);
         if (event.target.documentElement)
           event.target.documentElement.removeAttribute("hasBrowserHandlers");
@@ -6935,7 +6892,6 @@ var gIdentityHandler = {
     if (shouldHidePopup) {
       this._identityPopup.hidePopup();
     }
-    this.showWeakCryptoInfoBar();
 
     // NOTE: We do NOT update the identity popup (the control center) when
     // we receive a new security state on the existing page (i.e. from a
@@ -7122,55 +7078,6 @@ var gIdentityHandler = {
     this._identityIconLabel.parentNode.style.direction = icon_labels_dir;
     // Hide completely if the organization label is empty
     this._identityIconLabel.parentNode.collapsed = icon_label ? false : true;
-  },
-
-  /**
-   * Show the weak crypto notification bar.
-   */
-  showWeakCryptoInfoBar() {
-    if (!this._uriHasHost || !this._isBroken || !this._sslStatus.cipherName ||
-        this._sslStatus.cipherName.indexOf("_RC4_") < 0) {
-      return;
-    }
-
-    let notificationBox = gBrowser.getNotificationBox();
-    let notification = notificationBox.getNotificationWithValue("weak-crypto");
-    if (notification) {
-      return;
-    }
-
-    let brandBundle = document.getElementById("bundle_brand");
-    let brandShortName = brandBundle.getString("brandShortName");
-    let message = gNavigatorBundle.getFormattedString("weakCryptoOverriding.message",
-                                                      [brandShortName]);
-
-    let host = this._uri.host;
-    let port = 443;
-    try {
-      if (this._uri.port > 0) {
-        port = this._uri.port;
-      }
-    } catch (e) {}
-
-    let buttons = [{
-      label: gNavigatorBundle.getString("revokeOverride.label"),
-      accessKey: gNavigatorBundle.getString("revokeOverride.accesskey"),
-      callback(aNotification, aButton) {
-        try {
-          let weakCryptoOverride = Cc["@mozilla.org/security/weakcryptooverride;1"]
-                                     .getService(Ci.nsIWeakCryptoOverride);
-          weakCryptoOverride.removeWeakCryptoOverride(host, port,
-            PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser));
-          BrowserReloadWithFlags(nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE);
-        } catch (e) {
-          Cu.reportError(e);
-        }
-      }
-    }];
-
-    const priority = notificationBox.PRIORITY_WARNING_MEDIUM;
-    notificationBox.appendNotification(message, "weak-crypto", null,
-                                       priority, buttons);
   },
 
   /**

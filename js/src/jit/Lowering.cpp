@@ -183,7 +183,7 @@ LIRGenerator::visitTableSwitch(MTableSwitch* tableswitch)
 void
 LIRGenerator::visitCheckOverRecursed(MCheckOverRecursed* ins)
 {
-    LCheckOverRecursed* lir = new(alloc()) LCheckOverRecursed();
+    LCheckOverRecursed* lir = new(alloc()) LCheckOverRecursed(temp());
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -779,6 +779,40 @@ LIRGenerator::visitTest(MTest* test)
         return;
     }
 
+    if (opd->isCompare() && opd->isEmittedAtUses()) {
+        // Emit LBitAndBranch for cases like |if ((x & y) === 0)|.
+        MCompare* comp = opd->toCompare();
+        if ((comp->isInt32Comparison() ||
+             comp->compareType() == MCompare::Compare_UInt32) &&
+            comp->getOperand(1)->isConstant() &&
+            comp->getOperand(1)->toConstant()->isInt32(0) &&
+            comp->getOperand(0)->isBitAnd() &&
+            comp->getOperand(0)->isEmittedAtUses())
+        {
+            MDefinition* bitAnd = opd->getOperand(0);
+            MDefinition* lhs = bitAnd->getOperand(0);
+            MDefinition* rhs = bitAnd->getOperand(1);
+
+            Assembler::Condition cond = JSOpToCondition(comp->compareType(),
+                                                        comp->jsop());
+
+            if (lhs->type() == MIRType::Int32 && rhs->type() == MIRType::Int32 &&
+                (cond == Assembler::Equal || cond == Assembler::NotEqual))
+            {
+                ReorderCommutative(&lhs, &rhs, test);
+                if (cond == Assembler::Equal)
+                    cond = Assembler::Zero;
+                else if(cond == Assembler::NotEqual)
+                    cond = Assembler::NonZero;
+                else
+                    MOZ_ASSERT_UNREACHABLE("inequality operators cannot be folded");
+                lowerForBitAndAndBranch(new(alloc()) LBitAndAndBranch(ifTrue, ifFalse, cond),
+                                        test, lhs, rhs);
+                return;
+            }
+        }
+    }
+
     // Check if the operand for this test is a compare operation. If it is, we want
     // to emit an LCompare*AndBranch rather than an LTest*AndBranch, to fuse the
     // compare and jump instructions.
@@ -1221,10 +1255,11 @@ CanEmitBitAndAtUses(MInstruction* ins)
         return false;
 
     MNode* node = iter->consumer();
-    if (!node->isDefinition())
+    if (!node->isDefinition() || !node->toDefinition()->isInstruction())
         return false;
 
-    if (!node->toDefinition()->isTest())
+    MInstruction* use = node->toDefinition()->toInstruction();
+    if (!use->isTest() && !(use->isCompare() && CanEmitCompareAtUses(use)))
         return false;
 
     iter++;
@@ -2564,7 +2599,7 @@ LIRGenerator::visitFunctionEnvironment(MFunctionEnvironment* ins)
 void
 LIRGenerator::visitInterruptCheck(MInterruptCheck* ins)
 {
-    LInstruction* lir = new(alloc()) LInterruptCheck();
+    LInstruction* lir = new(alloc()) LInterruptCheck(temp());
     add(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -4214,22 +4249,37 @@ LIRGenerator::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
 void
 LIRGenerator::visitWasmLoadGlobalVar(MWasmLoadGlobalVar* ins)
 {
-    LAllocation tlsPtr = useRegisterAtStart(ins->tlsPtr());
-    if (ins->type() == MIRType::Int64)
+    if (ins->type() == MIRType::Int64) {
+#ifdef JS_PUNBOX64
+        LAllocation tlsPtr = useRegisterAtStart(ins->tlsPtr());
+#else
+        LAllocation tlsPtr = useRegister(ins->tlsPtr());
+#endif
         defineInt64(new(alloc()) LWasmLoadGlobalVarI64(tlsPtr), ins);
-    else
+    } else {
+        LAllocation tlsPtr = useRegisterAtStart(ins->tlsPtr());
         define(new(alloc()) LWasmLoadGlobalVar(tlsPtr), ins);
+    }
 }
 
 void
 LIRGenerator::visitWasmStoreGlobalVar(MWasmStoreGlobalVar* ins)
 {
     MDefinition* value = ins->value();
-    LAllocation tlsPtr = useRegisterAtStart(ins->tlsPtr());
-    if (value->type() == MIRType::Int64)
-        add(new(alloc()) LWasmStoreGlobalVarI64(useInt64RegisterAtStart(value), tlsPtr), ins);
-    else
-        add(new(alloc()) LWasmStoreGlobalVar(useRegisterAtStart(value), tlsPtr), ins);
+    if (value->type() == MIRType::Int64) {
+#ifdef JS_PUNBOX64
+        LAllocation tlsPtr = useRegisterAtStart(ins->tlsPtr());
+        LInt64Allocation valueAlloc = useInt64RegisterAtStart(value);
+#else
+        LAllocation tlsPtr = useRegister(ins->tlsPtr());
+        LInt64Allocation valueAlloc = useInt64Register(value);
+#endif
+        add(new(alloc()) LWasmStoreGlobalVarI64(valueAlloc, tlsPtr), ins);
+    } else {
+        LAllocation tlsPtr = useRegisterAtStart(ins->tlsPtr());
+        LAllocation valueAlloc = useRegisterAtStart(value);
+        add(new(alloc()) LWasmStoreGlobalVar(valueAlloc, tlsPtr), ins);
+    }
 }
 
 void
@@ -4861,6 +4911,9 @@ LIRGenerator::visitBlock(MBasicBlock* block)
         uint32_t position = block->positionInPhiSuccessor();
         size_t lirIndex = 0;
         for (MPhiIterator phi(successor->phisBegin()); phi != successor->phisEnd(); phi++) {
+            if (!gen->ensureBallast())
+                return false;
+
             MDefinition* opd = phi->getOperand(position);
             ensureDefined(opd);
 

@@ -87,7 +87,6 @@
 #include "vm/String.h"
 #include "vm/StringBuffer.h"
 #include "vm/Symbol.h"
-#include "vm/TypedArrayCommon.h"
 #include "vm/WrapperObject.h"
 #include "vm/Xdr.h"
 #include "wasm/AsmJS.h"
@@ -464,18 +463,14 @@ JS_FRIEND_API(bool) JS::isGCEnabled() { return true; }
 #endif
 
 JS_PUBLIC_API(JSContext*)
-JS_NewContext(uint32_t maxbytes, uint32_t maxNurseryBytes, JSContext* parentContext)
+JS_NewContext(uint32_t maxbytes, uint32_t maxNurseryBytes, JSRuntime* parentRuntime)
 {
     MOZ_ASSERT(JS::detail::libraryInitState == JS::detail::InitState::Running,
                "must call JS_Init prior to creating any JSContexts");
 
     // Make sure that all parent runtimes are the topmost parent.
-    JSRuntime* parentRuntime = nullptr;
-    if (parentContext) {
-        parentRuntime = parentContext->runtime();
-        while (parentRuntime && parentRuntime->parentRuntime)
-            parentRuntime = parentRuntime->parentRuntime;
-    }
+    while (parentRuntime && parentRuntime->parentRuntime)
+        parentRuntime = parentRuntime->parentRuntime;
 
     return NewContext(maxbytes, maxNurseryBytes, parentRuntime);
 }
@@ -547,10 +542,10 @@ JS_EndRequest(JSContext* cx)
     StopRequest(cx);
 }
 
-JS_PUBLIC_API(JSContext*)
-JS_GetParentContext(JSContext* cx)
+JS_PUBLIC_API(JSRuntime*)
+JS_GetParentRuntime(JSContext* cx)
 {
-    return cx->runtime()->parentRuntime ? cx->runtime()->parentRuntime->unsafeContextFromAnyThread() : cx;
+    return cx->runtime()->parentRuntime ? cx->runtime()->parentRuntime : cx->runtime();
 }
 
 JS_PUBLIC_API(JSVersion)
@@ -692,10 +687,9 @@ JS_EnterCompartment(JSContext* cx, JSObject* target)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    MOZ_ASSERT(!JS::ObjectIsMarkedGray(target));
 
     JSCompartment* oldCompartment = cx->compartment();
-    cx->enterCompartment(target->compartment());
+    cx->enterCompartmentOf(target);
     return oldCompartment;
 }
 
@@ -714,8 +708,7 @@ JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSObject* target
 {
     AssertHeapIsIdleOrIterating();
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    MOZ_ASSERT(!JS::ObjectIsMarkedGray(target));
-    cx_->enterCompartment(target->compartment());
+    cx_->enterCompartmentOf(target);
 }
 
 JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSScript* target
@@ -725,8 +718,7 @@ JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSScript* target
 {
     AssertHeapIsIdleOrIterating();
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    MOZ_ASSERT(!JS::ScriptIsMarkedGray(target));
-    cx_->enterCompartment(target->compartment());
+    cx_->enterCompartmentOf(target);
 }
 
 JSAutoCompartment::~JSAutoCompartment()
@@ -742,12 +734,10 @@ JSAutoNullableCompartment::JSAutoNullableCompartment(JSContext* cx,
 {
     AssertHeapIsIdleOrIterating();
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    if (targetOrNull) {
-        MOZ_ASSERT(!JS::ObjectIsMarkedGray(targetOrNull));
-        cx_->enterCompartment(targetOrNull->compartment());
-    } else {
+    if (targetOrNull)
+        cx_->enterCompartmentOf(targetOrNull);
+    else
         cx_->enterNullCompartment();
-    }
 }
 
 JSAutoNullableCompartment::~JSAutoNullableCompartment()
@@ -882,6 +872,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         // destination, then we know that we won't find a wrapper in the
         // destination's cross compartment map and that the same
         // object will continue to work.
+        AutoCompartment ac(cx, origobj);
         if (!JSObject::swap(cx, origobj, target))
             MOZ_CRASH();
         newIdentity = origobj;
@@ -896,6 +887,7 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         destination->removeWrapper(p);
         NukeCrossCompartmentWrapper(cx, newIdentity);
 
+        AutoCompartment ac(cx, newIdentity);
         if (!JSObject::swap(cx, newIdentity, target))
             MOZ_CRASH();
     } else {
@@ -917,8 +909,11 @@ JS_TransplantObject(JSContext* cx, HandleObject origobj, HandleObject target)
         MOZ_ASSERT(Wrapper::wrappedObject(newIdentityWrapper) == newIdentity);
         if (!JSObject::swap(cx, origobj, newIdentityWrapper))
             MOZ_CRASH();
-        if (!origobj->compartment()->putWrapper(cx, CrossCompartmentKey(newIdentity), origv))
+        if (!origobj->compartment()->putWrapperMaybeUpdate(cx, CrossCompartmentKey(newIdentity),
+                                                           origv))
+        {
             MOZ_CRASH();
+        }
     }
 
     // The new identity object might be one of several things. Return it to avoid
@@ -1579,7 +1574,7 @@ JS::ToPrimitive(JSContext* cx, HandleObject obj, JSType hint, MutableHandleValue
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, obj);
     MOZ_ASSERT(obj != nullptr);
-    MOZ_ASSERT(hint == JSTYPE_VOID || hint == JSTYPE_STRING || hint == JSTYPE_NUMBER);
+    MOZ_ASSERT(hint == JSTYPE_UNDEFINED || hint == JSTYPE_STRING || hint == JSTYPE_NUMBER);
     vp.setObject(*obj);
     return ToPrimitiveSlow(cx, hint, vp);
 }
@@ -1601,7 +1596,7 @@ JS::GetFirstArgumentAsTypeHint(JSContext* cx, CallArgs args, JSType *result)
     if (!EqualStrings(cx, str, cx->names().default_, &match))
         return false;
     if (match) {
-        *result = JSTYPE_VOID;
+        *result = JSTYPE_UNDEFINED;
         return true;
     }
 
@@ -1744,16 +1739,42 @@ JS::CompartmentBehaviors::extraWarnings(JSContext* cx) const
 }
 
 JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setZone(ZoneSpecifier spec)
+JS::CompartmentCreationOptions::setSystemZone()
 {
-    zone_.spec = spec;
+    zoneSpec_ = JS::SystemZone;
+    zonePointer_ = nullptr;
     return *this;
 }
 
 JS::CompartmentCreationOptions&
-JS::CompartmentCreationOptions::setSameZoneAs(JSObject* obj)
+JS::CompartmentCreationOptions::setExistingZone(JSObject* obj)
 {
-    zone_.pointer = static_cast<void*>(obj->zone());
+    zoneSpec_ = JS::ExistingZone;
+    zonePointer_ = obj->zone();
+    return *this;
+}
+
+JS::CompartmentCreationOptions&
+JS::CompartmentCreationOptions::setNewZoneInNewZoneGroup()
+{
+    zoneSpec_ = JS::NewZoneInNewZoneGroup;
+    zonePointer_ = nullptr;
+    return *this;
+}
+
+JS::CompartmentCreationOptions&
+JS::CompartmentCreationOptions::setNewZoneInSystemZoneGroup()
+{
+    zoneSpec_ = JS::NewZoneInSystemZoneGroup;
+    zonePointer_ = nullptr;
+    return *this;
+}
+
+JS::CompartmentCreationOptions&
+JS::CompartmentCreationOptions::setNewZoneInExistingZoneGroup(JSObject* obj)
+{
+    zoneSpec_ = JS::NewZoneInExistingZoneGroup;
+    zonePointer_ = obj->zone()->group();
     return *this;
 }
 
@@ -4087,13 +4108,13 @@ JS::CanCompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, si
     // These are heuristics which the caller may choose to ignore (e.g., for
     // testing purposes).
     if (!options.forceAsync) {
-        // Compiling off the main thread inolves creating a new Zone and other
+        // Compiling off the active thread inolves creating a new Zone and other
         // significant overheads.  Don't bother if the script is tiny.
         if (length < TINY_LENGTH)
             return false;
 
         // If the parsing task would have to wait for GC to complete, it'll probably
-        // be faster to just start it synchronously on the main thread unless the
+        // be faster to just start it synchronously on the active thread unless the
         // script is huge.
         if (OffThreadParsingMustWaitForGC(cx->runtime()) && length < HUGE_LENGTH)
             return false;
@@ -4124,7 +4145,7 @@ JS::CancelOffThreadScript(JSContext* cx, void* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
-    HelperThreadState().cancelParseTask(cx, ParseTaskKind::Script, token);
+    HelperThreadState().cancelParseTask(cx->runtime(), ParseTaskKind::Script, token);
 }
 
 JS_PUBLIC_API(bool)
@@ -4149,7 +4170,7 @@ JS::CancelOffThreadModule(JSContext* cx, void* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
-    HelperThreadState().cancelParseTask(cx, ParseTaskKind::Module, token);
+    HelperThreadState().cancelParseTask(cx->runtime(), ParseTaskKind::Module, token);
 }
 
 JS_PUBLIC_API(bool)
@@ -4174,7 +4195,7 @@ JS::CancelOffThreadScriptDecoder(JSContext* cx, void* token)
 {
     MOZ_ASSERT(cx);
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx->runtime()));
-    HelperThreadState().cancelParseTask(cx, ParseTaskKind::ScriptDecode, token);
+    HelperThreadState().cancelParseTask(cx->runtime(), ParseTaskKind::ScriptDecode, token);
 }
 
 JS_PUBLIC_API(bool)
@@ -5995,7 +6016,7 @@ JS_ExecuteRegExp(JSContext* cx, HandleObject obj, HandleObject reobj, char16_t* 
     if (!input)
         return false;
 
-    return ExecuteRegExpLegacy(cx, res, reobj->as<RegExpObject>(), input, indexp, test, rval);
+    return ExecuteRegExpLegacy(cx, res, reobj.as<RegExpObject>(), input, indexp, test, rval);
 }
 
 JS_PUBLIC_API(bool)
@@ -6009,7 +6030,7 @@ JS_ExecuteRegExpNoStatics(JSContext* cx, HandleObject obj, char16_t* chars, size
     if (!input)
         return false;
 
-    return ExecuteRegExpLegacy(cx, nullptr, obj->as<RegExpObject>(), input, indexp, test,
+    return ExecuteRegExpLegacy(cx, nullptr, obj.as<RegExpObject>(), input, indexp, test,
                                rval);
 }
 
@@ -6632,7 +6653,7 @@ DescribeScriptedCaller(JSContext* cx, AutoFilename* filename, unsigned* lineno,
 static bool
 GetScriptedCallerActivationFast(JSContext* cx, Activation** activation)
 {
-    ActivationIterator activationIter(cx->runtime());
+    ActivationIterator activationIter(cx);
 
     if (activationIter.done()) {
         *activation = nullptr;

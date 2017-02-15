@@ -15,6 +15,7 @@
 #include "nsCOMPtr.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
+#include "nsIPresShellInlines.h"
 #include "nsDocShell.h"
 #include "nsIContentViewer.h"
 #include "nsPIDOMWindow.h"
@@ -76,7 +77,6 @@
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
-#include "mozilla/ServoRestyleManagerInlines.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceTiming.h"
@@ -1645,9 +1645,10 @@ nsPresContext::IsTopLevelWindowInactive()
 }
 
 void
-nsPresContext::RecordInteractionTime(InteractionType aType)
+nsPresContext::RecordInteractionTime(InteractionType aType,
+                                     const TimeStamp& aTimeStamp)
 {
-  if (!mInteractionTimeEnabled) {
+  if (!mInteractionTimeEnabled || aTimeStamp.IsNull()) {
     return;
   }
 
@@ -1663,10 +1664,10 @@ nsPresContext::RecordInteractionTime(InteractionType aType)
   // Array of histogram IDs for the different interaction types,
   // keyed by InteractionType.
   Telemetry::ID histogramIds[] = {
-    Telemetry::TIME_TO_FIRST_CLICK,
-    Telemetry::TIME_TO_FIRST_KEY_INPUT,
-    Telemetry::TIME_TO_FIRST_MOUSE_MOVE,
-    Telemetry::TIME_TO_FIRST_SCROLL
+    Telemetry::TIME_TO_FIRST_CLICK_MS,
+    Telemetry::TIME_TO_FIRST_KEY_INPUT_MS,
+    Telemetry::TIME_TO_FIRST_MOUSE_MOVE_MS,
+    Telemetry::TIME_TO_FIRST_SCROLL_MS
   };
 
   TimeStamp& interactionTime = this->*(
@@ -1689,10 +1690,22 @@ nsPresContext::RecordInteractionTime(InteractionType aType)
     return;
   }
 
-  if (topContentPresContext->mFirstPaintTime.IsNull()) {
-    // Top content pres context has not painted yet, so don't record
-    // interaction time.
+  if (topContentPresContext->mFirstNonBlankPaintTime.IsNull() ||
+      topContentPresContext->mFirstNonBlankPaintTime > aTimeStamp) {
+    // Top content pres context has not had a non-blank paint yet
+    // or the event timestamp is before the first non-blank paint,
+    // so don't record interaction time.
     return;
+  }
+
+  // Check if we are recording the first of any of the interaction types.
+  bool isFirstInteraction = true;
+  for (TimeStamp nsPresContext::* memberPtr : interactionTimes) {
+    TimeStamp& timeStamp = this->*(memberPtr);
+    if (!timeStamp.IsNull()) {
+      isFirstInteraction = false;
+      break;
+    }
   }
 
   interactionTime = TimeStamp::Now();
@@ -1700,12 +1713,17 @@ nsPresContext::RecordInteractionTime(InteractionType aType)
   // time to telemetry (if it hasn't already done so).
   if (this == topContentPresContext) {
     if (Telemetry::CanRecordExtended()) {
-       double millis = (interactionTime - mFirstPaintTime).ToMilliseconds();
+       double millis =
+         (interactionTime - mFirstNonBlankPaintTime).ToMilliseconds();
        Telemetry::Accumulate(histogramIds[static_cast<uint32_t>(aType)],
                              millis);
+
+       if (isFirstInteraction) {
+         Telemetry::Accumulate(Telemetry::TIME_TO_FIRST_INTERACTION_MS, millis);
+       }
     }
   } else {
-    topContentPresContext->RecordInteractionTime(aType);
+    topContentPresContext->RecordInteractionTime(aType, aTimeStamp);
   }
 }
 
@@ -2069,12 +2087,12 @@ nsPresContext::PostMediaFeatureValuesChangedEvent()
   // FIXME: We should probably replace this event with use of
   // nsRefreshDriver::AddStyleFlushObserver (except the pres shell would
   // need to track whether it's been added).
-  if (!mPendingMediaFeatureValuesChanged) {
+  if (!mPendingMediaFeatureValuesChanged && mShell) {
     nsCOMPtr<nsIRunnable> ev =
       NewRunnableMethod(this, &nsPresContext::HandleMediaFeatureValuesChangedEvent);
     if (NS_SUCCEEDED(NS_DispatchToCurrentThread(ev))) {
       mPendingMediaFeatureValuesChanged = true;
-      mDocument->SetNeedStyleFlush();
+      mShell->SetNeedStyleFlush();
     }
   }
 }
@@ -2258,7 +2276,9 @@ nsPresContext::RebuildCounterStyles()
   }
 
   mCounterStylesDirty = true;
-  mDocument->SetNeedStyleFlush();
+  if (mShell) {
+    mShell->SetNeedStyleFlush();
+  }
   if (!mPostedFlushCounterStyles) {
     nsCOMPtr<nsIRunnable> ev =
       NewRunnableMethod(this, &nsPresContext::HandleRebuildCounterStyles);
@@ -2616,10 +2636,6 @@ nsPresContext::NotifyDidPaintForSubtree(uint32_t aFlags, uint64_t aTransactionId
       new DelayedFireDOMPaintEvent(this, &mUndeliveredInvalidateRequestsBeforeLastPaint,
                                    aTransactionId, aTimeStamp);
     nsContentUtils::AddScriptRunner(ev);
-
-    if (mFirstPaintTime.IsNull()) {
-      mFirstPaintTime = TimeStamp::Now();
-    }
   }
 
   NotifyDidPaintSubdocumentCallbackClosure closure = { aFlags, aTransactionId, aTimeStamp, false };
@@ -2776,8 +2792,8 @@ nsPresContext::NotifyFontFaceSetOnRefresh()
 bool
 nsPresContext::HasPendingRestyleOrReflow()
 {
-  return (mRestyleManager && mRestyleManager->HasPendingRestyles()) ||
-         PresShell()->HasPendingReflow();
+  nsIPresShell* shell = PresShell();
+  return shell->NeedStyleFlush() || shell->HasPendingReflow();
 }
 
 void
@@ -2912,6 +2928,8 @@ nsPresContext::NotifyNonBlankPaint()
     if (timing) {
       timing->NotifyNonBlankPaintForRootContentDocument();
     }
+
+    mFirstNonBlankPaintTime = TimeStamp::Now();
   }
 }
 

@@ -13,32 +13,36 @@ add_task(function* () {
   let { tab, monitor } = yield initNetMonitor(SIMPLE_SJS);
   info("Starting test... ");
 
-  let { document, EVENTS, Editor, NetMonitorView } = monitor.panelWin;
-  let { RequestsMenu } = NetMonitorView;
-  RequestsMenu.lazyUpdate = false;
+  let { document, gStore, windowRequire } = monitor.panelWin;
+  let Actions = windowRequire("devtools/client/netmonitor/actions/index");
+  let { EVENTS } = windowRequire("devtools/client/netmonitor/events");
+  let {
+    getDisplayedRequests,
+    getSortedRequests,
+  } = windowRequire("devtools/client/netmonitor/selectors/index");
+
+  gStore.dispatch(Actions.batchEnable(false));
 
   let wait = waitForNetworkEvents(monitor, 1);
   tab.linkedBrowser.reload();
   yield wait;
 
-  is(RequestsMenu.selectedItem, null,
+  is(getSelectedRequest(gStore.getState()), undefined,
     "There shouldn't be any selected item in the requests menu.");
-  is(RequestsMenu.itemCount, 1,
+  is(gStore.getState().requests.requests.size, 1,
     "The requests menu should not be empty after the first request.");
-  is(NetMonitorView.detailsPaneHidden, true,
-    "The details pane should still be hidden after the first request.");
+  is(!!document.querySelector(".network-details-panel"), false,
+    "The network details panel should still be hidden after first request.");
 
-  let onTabUpdated = monitor.panelWin.once(EVENTS.TAB_UPDATED);
-  EventUtils.sendMouseEvent({ type: "mousedown" },
-    document.getElementById("details-pane-toggle"));
-  yield onTabUpdated;
+  EventUtils.sendMouseEvent({ type: "click" },
+    document.querySelector(".network-details-panel-toggle"));
 
-  isnot(RequestsMenu.selectedItem, null,
+  isnot(getSelectedRequest(gStore.getState()), undefined,
     "There should be a selected item in the requests menu.");
-  is(RequestsMenu.selectedIndex, 0,
+  is(getSelectedIndex(gStore.getState()), 0,
     "The first item should be selected in the requests menu.");
-  is(NetMonitorView.detailsPaneHidden, false,
-    "The details pane should not be hidden after toggle button was pressed.");
+  is(!!document.querySelector(".network-details-panel"), true,
+    "The network details panel should not be hidden after toggle button was pressed.");
 
   testHeadersTab();
   yield testCookiesTab();
@@ -46,6 +50,13 @@ add_task(function* () {
   yield testResponseTab();
   testTimingsTab();
   return teardown(monitor);
+
+  function getSelectedIndex(state) {
+    if (!state.requests.selectedId) {
+      return -1;
+    }
+    return getSortedRequests(state).findIndex(r => r.id === state.requests.selectedId);
+  }
 
   function testHeadersTab() {
     let tabEl = document.querySelectorAll("#details-pane tab")[0];

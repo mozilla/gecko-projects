@@ -31,32 +31,103 @@
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ProfileStorage",
                                   "resource://formautofill/ProfileStorage.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillPreferences",
+                                  "resource://formautofill/FormAutofillPreferences.jsm");
 
 const PROFILE_JSON_FILE_NAME = "autofill-profiles.json";
+const ENABLED_PREF = "browser.formautofill.enabled";
 
-let FormAutofillParent = {
+function FormAutofillParent() {
+}
+
+FormAutofillParent.prototype = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports, Ci.nsIObserver]),
+
   _profileStore: null,
+
+  /**
+   * Whether Form Autofill is enabled in preferences.
+   * Caches the latest value of this._getStatus().
+   */
+  _enabled: false,
 
   /**
    * Initializes ProfileStorage and registers the message handler.
    */
-  init: function() {
-    let storePath =
-      OS.Path.join(OS.Constants.Path.profileDir, PROFILE_JSON_FILE_NAME);
-
+  init() {
+    let storePath = OS.Path.join(OS.Constants.Path.profileDir, PROFILE_JSON_FILE_NAME);
     this._profileStore = new ProfileStorage(storePath);
     this._profileStore.initialize();
 
-    let mm = Cc["@mozilla.org/globalmessagemanager;1"]
-               .getService(Ci.nsIMessageListenerManager);
-    mm.addMessageListener("FormAutofill:PopulateFieldValues", this);
-    mm.addMessageListener("FormAutofill:GetProfiles", this);
+    Services.obs.addObserver(this, "advanced-pane-loaded", false);
+
+    // Observing the pref (and storage) changes
+    Services.prefs.addObserver(ENABLED_PREF, this, false);
+    this._enabled = this._getStatus();
+    // Force to trigger the onStatusChanged function for setting listeners properly
+    // while initizlization
+    this._onStatusChanged();
+    Services.ppmm.addMessageListener("FormAutofill:getEnabledStatus", this);
+  },
+
+  observe(subject, topic, data) {
+    switch (topic) {
+      case "advanced-pane-loaded": {
+        let formAutofillPreferences = new FormAutofillPreferences();
+        let document = subject.document;
+        let prefGroup = formAutofillPreferences.init(document);
+        let parentNode = document.getElementById("mainPrefPane");
+        let insertBeforeNode = document.getElementById("locationBarGroup");
+        parentNode.insertBefore(prefGroup, insertBeforeNode);
+        break;
+      }
+
+      case "nsPref:changed": {
+        // Observe pref changes and update _enabled cache if status is changed.
+        let currentStatus = this._getStatus();
+        if (currentStatus !== this._enabled) {
+          this._enabled = currentStatus;
+          this._onStatusChanged();
+        }
+        break;
+      }
+
+      default: {
+        throw new Error(`FormAutofillParent: Unexpected topic observed: ${topic}`);
+      }
+    }
+  },
+
+  /**
+   * Add/remove message listener and broadcast the status to frames while the
+   * form autofill status changed.
+   */
+  _onStatusChanged() {
+    if (this._enabled) {
+      Services.ppmm.addMessageListener("FormAutofill:GetProfiles", this);
+    } else {
+      Services.ppmm.removeMessageListener("FormAutofill:GetProfiles", this);
+    }
+
+    Services.ppmm.broadcastAsyncMessage("FormAutofill:enabledStatus", this._enabled);
+  },
+
+  /**
+   * Query pref (and storage) status to determine the overall status for
+   * form autofill feature.
+   *
+   * @returns {boolean} status of form autofill feature
+   */
+  _getStatus() {
+    return Services.prefs.getBoolPref(ENABLED_PREF);
   },
 
   /**
@@ -66,13 +137,14 @@ let FormAutofillParent = {
    * @param   {object} message.data The data of the message.
    * @param   {nsIFrameMessageManager} message.target Caller's message manager.
    */
-  receiveMessage: function({name, data, target}) {
+  receiveMessage({name, data, target}) {
     switch (name) {
-      case "FormAutofill:PopulateFieldValues":
-        this._populateFieldValues(data, target);
-        break;
       case "FormAutofill:GetProfiles":
         this._getProfiles(data, target);
+        break;
+      case "FormAutofill:getEnabledStatus":
+        Services.ppmm.broadcastAsyncMessage("FormAutofill:enabledStatus",
+                                            this._enabled);
         break;
     }
   },
@@ -84,7 +156,7 @@ let FormAutofillParent = {
    *
    * @returns {ProfileStorage}
    */
-  getProfileStore: function() {
+  getProfileStore() {
     return this._profileStore;
   },
 
@@ -93,34 +165,15 @@ let FormAutofillParent = {
    *
    * @private
    */
-  _uninit: function() {
+  _uninit() {
     if (this._profileStore) {
       this._profileStore._saveImmediately();
       this._profileStore = null;
     }
 
-    let mm = Cc["@mozilla.org/globalmessagemanager;1"]
-               .getService(Ci.nsIMessageListenerManager);
-    mm.removeMessageListener("FormAutofill:PopulateFieldValues", this);
-    mm.removeMessageListener("FormAutofill:GetProfiles", this);
-  },
-
-  /**
-   * Populates the field values and notifies content to fill in. Exception will
-   * be thrown if there's no matching profile.
-   *
-   * @private
-   * @param  {string} data.guid
-   *         Indicates which profile to populate
-   * @param  {Fields} data.fields
-   *         The "fields" array collected from content.
-   * @param  {nsIFrameMessageManager} target
-   *         Content's message manager.
-   */
-  _populateFieldValues({guid, fields}, target) {
-    this._profileStore.notifyUsed(guid);
-    this._fillInFields(this._profileStore.get(guid), fields);
-    target.sendAsyncMessage("FormAutofill:fillForm", {fields});
+    Services.ppmm.removeMessageListener("FormAutofill:GetProfiles", this);
+    Services.obs.removeObserver(this, "advanced-pane-loaded");
+    Services.prefs.removeObserver(ENABLED_PREF, this);
   },
 
   /**
@@ -143,58 +196,7 @@ let FormAutofillParent = {
       profiles = this._profileStore.getAll();
     }
 
-    target.messageManager.sendAsyncMessage("FormAutofill:Profiles", profiles);
-  },
-
-  /**
-   * Transforms a word with hyphen into camel case.
-   * (e.g. transforms "address-type" into "addressType".)
-   *
-   * @private
-   * @param   {string} str The original string with hyphen.
-   * @returns {string} The camel-cased output string.
-   */
-  _camelCase(str) {
-    return str.toLowerCase().replace(/-([a-z])/g, s => s[1].toUpperCase());
-  },
-
-  /**
-   * Get the corresponding value from the specified profile according to a valid
-   * @autocomplete field name.
-   *
-   * Note that the field name doesn't need to match the property name defined in
-   * Profile object. This method can transform the raw data to fulfill it. (e.g.
-   * inputting "country-name" as "fieldName" will get a full name transformed
-   * from the country code that is recorded in "country" field.)
-   *
-   * @private
-   * @param   {Profile} profile   The specified profile.
-   * @param   {string}  fieldName A valid @autocomplete field name.
-   * @returns {string}  The corresponding value. Returns "undefined" if there's
-   *                    no matching field.
-   */
-  _getDataByFieldName(profile, fieldName) {
-    let key = this._camelCase(fieldName);
-
-    // TODO: Transform the raw profile data to fulfill "fieldName" here.
-
-    return profile[key];
-  },
-
-  /**
-   * Fills in the "fields" array by the specified profile.
-   *
-   * @private
-   * @param   {Profile} profile The specified profile to fill in.
-   * @param   {Fields}  fields  The "fields" array collected from content.
-   */
-  _fillInFields(profile, fields) {
-    for (let field of fields) {
-      let value = this._getDataByFieldName(profile, field.fieldName);
-      if (value !== undefined) {
-        field.value = value;
-      }
-    }
+    target.sendAsyncMessage("FormAutofill:Profiles", profiles);
   },
 };
 

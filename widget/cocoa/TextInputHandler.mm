@@ -911,14 +911,14 @@ TISInputSourceWrapper::InitKeyEvent(NSEvent *aNativeKeyEvent,
     case kVK_Shift:
     case kVK_Option:
     case kVK_Control:
-      aKeyEvent.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_LEFT;
+      aKeyEvent.mLocation = eKeyLocationLeft;
       break;
 
     case kVK_RightCommand:
     case kVK_RightShift:
     case kVK_RightOption:
     case kVK_RightControl:
-      aKeyEvent.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_RIGHT;
+      aKeyEvent.mLocation = eKeyLocationRight;
       break;
 
     case kVK_ANSI_Keypad0:
@@ -940,11 +940,11 @@ TISInputSourceWrapper::InitKeyEvent(NSEvent *aNativeKeyEvent,
     case kVK_ANSI_KeypadEnter:
     case kVK_JIS_KeypadComma:
     case kVK_Powerbook_KeypadEnter:
-      aKeyEvent.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_NUMPAD;
+      aKeyEvent.mLocation = eKeyLocationNumpad;
       break;
 
     default:
-      aKeyEvent.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_STANDARD;
+      aKeyEvent.mLocation = eKeyLocationStandard;
       break;
   }
 
@@ -3757,7 +3757,24 @@ IMEInputHandler::SendCommittedText(NSString *aString)
 
   NSAttributedString* attrStr =
     [[NSAttributedString alloc] initWithString:aString];
-  [mView insertText:attrStr];
+  if ([mView conformsToProtocol:@protocol(NSTextInputClient)]) {
+    NSObject<NSTextInputClient>* textInputClient =
+      static_cast<NSObject<NSTextInputClient>*>(mView);
+    [textInputClient insertText:attrStr
+               replacementRange:NSMakeRange(NSNotFound, 0)];
+  }
+
+  // Last resort.  If we cannot retrieve NSTextInputProtocol from mView
+  // or blocking to call our InsertText(), we should call InsertText()
+  // directly to commit composition forcibly.
+  if (mIsIMEComposing) {
+    MOZ_LOG(gLog, LogLevel::Info,
+      ("%p IMEInputHandler::SendCommittedText, trying to insert text directly "
+       "due to IME not calling our InsertText()", this));
+    static_cast<TextInputHandler*>(this)->InsertText(attrStr);
+    MOZ_ASSERT(!mIsIMEComposing);
+  }
+
   [attrStr release];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;

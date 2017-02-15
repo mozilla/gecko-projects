@@ -22,7 +22,7 @@
                 (&DeclaredValue::Value(ref x_value), &DeclaredValue::Value(ref y_container)) => {
                     *x_value == y_container.0
                 },
-                (&DeclaredValue::WithVariables { .. }, &DeclaredValue::WithVariables { .. }) => true,
+                (&DeclaredValue::WithVariables(_), &DeclaredValue::WithVariables(_)) => true,
                 (&DeclaredValue::Initial, &DeclaredValue::Initial) => true,
                 (&DeclaredValue::Inherit, &DeclaredValue::Inherit) => true,
                 (&DeclaredValue::Unset, &DeclaredValue::Unset) => true,
@@ -43,8 +43,8 @@
                 (&DeclaredValue::Value(ref x_value), &DeclaredValue::Value(ref y_container)) => {
                     *x_value == y_container.0
                 },
-                (_, &DeclaredValue::WithVariables { .. }) |
-                (&DeclaredValue::WithVariables { .. }, _) => {
+                (_, &DeclaredValue::WithVariables(_)) |
+                (&DeclaredValue::WithVariables(_), _) => {
                     // We don't serialize shorthands with variables
                     return dest.write_str("");
                 },
@@ -311,8 +311,6 @@ macro_rules! try_parse_one {
             try!(self.animation_duration.to_css(dest));
             try!(write!(dest, " "));
 
-            // FIXME: timing function is displaying the actual mathematical name "cubic-bezier(0.25, 0.1, 0.25, 1)"
-            // instead of the common name "ease"
             try!(self.animation_timing_function.to_css(dest));
             try!(write!(dest, " "));
 

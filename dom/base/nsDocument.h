@@ -599,7 +599,7 @@ public:
     final;
   virtual void DeleteShell() override;
 
-  virtual nsresult GetAllowPlugins(bool* aAllowPlugins) override;
+  virtual bool GetAllowPlugins() override;
 
   static bool IsElementAnimateEnabled(JSContext* aCx, JSObject* aObject);
   static bool IsWebAnimationsEnabled(JSContext* aCx, JSObject* aObject);
@@ -1305,7 +1305,7 @@ protected:
 
   void UpdateScreenOrientation();
 
-  virtual FlashClassification DocumentFlashClassification() override;
+  virtual mozilla::dom::FlashClassification DocumentFlashClassification() override;
 
 #define NS_DOCUMENT_NOTIFY_OBSERVERS(func_, params_)                        \
   NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(mObservers, nsIDocumentObserver, \
@@ -1329,11 +1329,11 @@ protected:
 
   // Retrieves the classification of the Flash plugins in the document based on
   // the classification lists.
-  FlashClassification PrincipalFlashClassification(bool aIsTopLevel);
+  mozilla::dom::FlashClassification PrincipalFlashClassification(bool aIsTopLevel);
 
   // Attempts to determine the Flash classification of this page based on the
   // the classification lists and the classification of parent documents.
-  FlashClassification ComputeFlashClassification();
+  mozilla::dom::FlashClassification ComputeFlashClassification();
 
   nsTArray<nsIObserver*> mCharSetObservers;
 
@@ -1379,7 +1379,7 @@ protected:
   // non-null when this document is in fullscreen mode.
   nsWeakPtr mFullscreenRoot;
 
-  FlashClassification mFlashClassification;
+  mozilla::dom::FlashClassification mFlashClassification;
 private:
   static bool CustomElementConstructor(JSContext* aCx, unsigned aArgc, JS::Value* aVp);
 
@@ -1444,10 +1444,6 @@ public:
   bool mSynchronousDOMContentLoaded:1;
 
   bool mInXBLUpdate:1;
-
-  // Whether we're currently under a FlushPendingNotifications call to
-  // our presshell.  This is used to handle flush reentry correctly.
-  bool mInFlush:1;
 
   // Parser aborted. True if the parser of this document was forcibly
   // terminated instead of letting it finish at its own pace.

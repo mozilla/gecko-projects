@@ -24,6 +24,7 @@
 #include "nsXULAppAPI.h"
 
 #ifdef MOZ_X11
+# include "nsX11ErrorHandler.h"
 # include "mozilla/X11Util.h"
 #endif
 #include "mozilla/ipc/ProcessChild.h"
@@ -40,8 +41,8 @@
 #ifdef XP_WIN
 #include "nsWindowsDllInterceptor.h"
 #include "mozilla/widget/AudioSession.h"
-#include "WinUtils.h"
 #include <knownfolders.h>
+#include <shlobj.h>
 #endif
 
 #ifdef MOZ_WIDGET_COCOA
@@ -593,7 +594,7 @@ PluginModuleChild::InitGraphics()
 #endif
 #ifdef MOZ_X11
     // Do this after initializing GDK, or GDK will install its own handler.
-    XRE_InstallX11ErrorHandler();
+    InstallX11ErrorHandler();
 #endif
     return true;
 }
@@ -1933,8 +1934,8 @@ GetLocalLowTempPath(size_t aLen, LPWSTR aPath)
 {
     NS_NAMED_LITERAL_STRING(tempname, "\\Temp");
     LPWSTR path;
-    if (SUCCEEDED(WinUtils::SHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0,
-                                                 nullptr, &path))) {
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0,
+                                       nullptr, &path))) {
         if (wcslen(path) + tempname.Length() < aLen) {
             wcscpy(aPath, path);
             wcscat(aPath, tempname.get());

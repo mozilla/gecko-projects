@@ -20,6 +20,8 @@
 #include "nsIDocument.h"
 #include "nsIFrame.h"
 #include "nsINode.h"
+#include "nsIPresShell.h"
+#include "nsIPresShellInlines.h"
 #include "nsIPrincipal.h"
 #include "nsMappedAttributes.h"
 #include "nsMediaFeatures.h"
@@ -258,6 +260,16 @@ void
 Gecko_UnsetNodeFlags(RawGeckoNodeBorrowed aNode, uint32_t aFlags)
 {
   const_cast<nsINode*>(aNode)->UnsetFlags(aFlags);
+}
+
+void
+Gecko_SetOwnerDocumentNeedsStyleFlush(RawGeckoElementBorrowed aElement)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (nsIPresShell* shell = aElement->OwnerDoc()->GetShell()) {
+    shell->SetNeedStyleFlush();
+  }
 }
 
 nsStyleContext*
@@ -1091,6 +1103,10 @@ Gecko_NewCSSValueSharedList(uint32_t aLen)
 void
 Gecko_CSSValue_SetAbsoluteLength(nsCSSValueBorrowedMut aCSSValue, nscoord aLen)
 {
+  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null || aCSSValue->IsLengthUnit());
+  // The call below could trigger refcounting if aCSSValue were a
+  // FontFamilyList, but we just asserted that it's not. So we can
+  // whitelist this for static analysis.
   aCSSValue->SetIntegerCoordValue(aLen);
 }
 
@@ -1211,6 +1227,7 @@ Gecko_LoadStyleSheet(css::Loader* aLoader,
                      const uint8_t* aMediaString,
                      uint32_t aMediaStringLength)
 {
+  MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aLoader, "Should've catched this before");
   MOZ_ASSERT(aParent, "Only used for @import, so parent should exist!");
   MOZ_ASSERT(aURLString, "Invalid URLs shouldn't be loaded!");

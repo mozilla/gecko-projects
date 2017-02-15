@@ -12,20 +12,6 @@ ifndef TEST_PACKAGE_NAME
 TEST_PACKAGE_NAME := $(ANDROID_PACKAGE_NAME)
 endif
 
-# Linking xul-gtest.dll takes too long, so we disable GTest on
-# Windows PGO builds (bug 1028035).
-ifneq (1_WINNT,$(MOZ_PGO)_$(OS_ARCH))
-BUILD_GTEST=1
-endif
-
-ifneq (browser,$(MOZ_BUILD_APP))
-BUILD_GTEST=
-endif
-
-ifndef COMPILE_ENVIRONMENT
-BUILD_GTEST=
-endif
-
 ifndef NO_FAIL_ON_TEST_ERRORS
 define check_test_error_internal
   @errors=`grep 'TEST-UNEXPECTED-' $@.log` ;\
@@ -152,7 +138,7 @@ TEST_PKGS := \
   xpcshell \
   $(NULL)
 
-ifdef BUILD_GTEST
+ifdef LINK_GTEST_DURING_COMPILE
 stage-all: stage-gtest
 TEST_PKGS += gtest
 endif
@@ -217,11 +203,26 @@ endif
 stage-jstests: make-stage-dir
 	$(MAKE) -C $(DEPTH)/js/src/tests stage-package
 
+ifdef OBJCOPY
+ifneq ($(OBJCOPY), :) # see build/autoconf/toolchain.m4:102 for why this is necessary
+ifndef PKG_SKIP_STRIP
+STRIP_COMPILED_TESTS := 1
+endif
+endif
+endif
+
 stage-gtest: make-stage-dir
-# FIXME: (bug 1200311) We should be generating the gtest xul as part of the build.
-	$(MAKE) -C $(DEPTH)/testing/gtest gtest
-	$(NSINSTALL) -D $(PKG_STAGE)/gtest/gtest_bin
+	$(NSINSTALL) -D $(PKG_STAGE)/gtest/gtest_bin/gtest
+ifdef STRIP_COMPILED_TESTS
+# The libxul file basename will vary per platform. Fortunately
+# dependentlibs.list always lists the library name as its final line, so we
+# can get the value from there.
+	LIBXUL_BASE=`tail -1 $(DIST)/bin/dependentlibs.list` && \
+        $(OBJCOPY) $(or $(STRIP_FLAGS),--strip-unneeded) \
+        $(DIST)/bin/gtest/$$LIBXUL_BASE $(PKG_STAGE)/gtest/gtest_bin/gtest/$$LIBXUL_BASE
+else
 	cp -RL $(DIST)/bin/gtest $(PKG_STAGE)/gtest/gtest_bin
+endif
 	cp -RL $(DEPTH)/_tests/gtest $(PKG_STAGE)
 	cp $(topsrcdir)/testing/gtest/rungtests.py $(PKG_STAGE)/gtest
 	cp $(DIST)/bin/dependentlibs.list.gtest $(PKG_STAGE)/gtest
@@ -236,22 +237,14 @@ stage-jetpack: make-stage-dir
 
 CPP_UNIT_TEST_BINS=$(wildcard $(DIST)/cppunittests/*)
 
-ifdef OBJCOPY
-ifneq ($(OBJCOPY), :) # see build/autoconf/toolchain.m4:102 for why this is necessary
-ifndef PKG_SKIP_STRIP
-STRIP_CPP_TESTS := 1
-endif
-endif
-endif
-
 stage-cppunittests: make-stage-dir
 	$(NSINSTALL) -D $(PKG_STAGE)/cppunittest
-ifdef STRIP_CPP_TESTS
+ifdef STRIP_COMPILED_TESTS
 	$(foreach bin,$(CPP_UNIT_TEST_BINS),$(OBJCOPY) $(or $(STRIP_FLAGS),--strip-unneeded) $(bin) $(bin:$(DIST)/cppunittests/%=$(PKG_STAGE)/cppunittest/%);)
 else
 	cp -RL $(CPP_UNIT_TEST_BINS) $(PKG_STAGE)/cppunittest
 endif
-ifdef STRIP_CPP_TESTS
+ifdef STRIP_COMPILED_TESTS
 	$(OBJCOPY) $(or $(STRIP_FLAGS),--strip-unneeded) $(DIST)/bin/jsapi-tests$(BIN_SUFFIX) $(PKG_STAGE)/cppunittest/jsapi-tests$(BIN_SUFFIX)
 else
 	cp -RL $(DIST)/bin/jsapi-tests$(BIN_SUFFIX) $(PKG_STAGE)/cppunittest

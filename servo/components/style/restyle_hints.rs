@@ -15,7 +15,7 @@ use gecko_bindings::structs::nsRestyleHint;
 use heapsize::HeapSizeOf;
 use selector_parser::{AttrValue, NonTSPseudoClass, Snapshot, SelectorImpl};
 use selectors::{Element, MatchAttr};
-use selectors::matching::{MatchingReason, StyleRelations};
+use selectors::matching::{ElementSelectorFlags, StyleRelations};
 use selectors::matching::matches_complex_selector;
 use selectors::parser::{AttrSelector, Combinator, ComplexSelector, SimpleSelector};
 use std::clone::Clone;
@@ -227,8 +227,8 @@ impl<'a, E> MatchAttr for ElementWrapper<'a, E>
 impl<'a, E> Element for ElementWrapper<'a, E>
     where E: TElement,
 {
-    fn match_non_ts_pseudo_class(&self, pseudo_class: NonTSPseudoClass) -> bool {
-        let flag = SelectorImpl::pseudo_class_state_flag(&pseudo_class);
+    fn match_non_ts_pseudo_class(&self, pseudo_class: &NonTSPseudoClass) -> bool {
+        let flag = SelectorImpl::pseudo_class_state_flag(pseudo_class);
         if flag == ElementState::empty() {
             self.element.match_non_ts_pseudo_class(pseudo_class)
         } else {
@@ -524,14 +524,16 @@ impl DependencySet {
                           (attrs_changed && dep.sensitivities.attrs),
                           "Testing a known ineffective dependency?");
             if (attrs_changed || state_changes.intersects(dep.sensitivities.states)) && !hint.intersects(dep.hint) {
+                // We can ignore the selector flags, since they would have already been set during
+                // original matching for any element that might change its matching behavior here.
                 let matched_then =
                     matches_complex_selector(&dep.selector, snapshot, None,
                                              &mut StyleRelations::empty(),
-                                             MatchingReason::Other);
+                                             &mut ElementSelectorFlags::empty());
                 let matches_now =
                     matches_complex_selector(&dep.selector, element, None,
                                              &mut StyleRelations::empty(),
-                                             MatchingReason::Other);
+                                             &mut ElementSelectorFlags::empty());
                 if matched_then != matches_now {
                     hint.insert(dep.hint);
                 }

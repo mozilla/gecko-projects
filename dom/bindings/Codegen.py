@@ -2389,7 +2389,7 @@ class MethodDefiner(PropertyDefiner):
                 "methodInfo": False,
                 "selfHostedName": "ArrayValues",
                 "length": 0,
-                "flags": "JSPROP_ENUMERATE",
+                "flags": "0", # Not enumerable, per spec.
                 "condition": MemberCondition()
             })
 
@@ -3073,25 +3073,28 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
                                                    symbolJSID=symbolJSID))
                     defineFn = "JS_DefinePropertyById"
                     prop = "iteratorId"
+                    enumFlags = "0" # Not enumerable, per spec.
                 elif alias.startswith("@@"):
                     raise TypeError("Can't handle any well-known Symbol other than @@iterator")
                 else:
                     getSymbolJSID = None
                     defineFn = "JS_DefineProperty"
                     prop = '"%s"' % alias
-                return CGList([
-                    getSymbolJSID,
                     # XXX If we ever create non-enumerable properties that can
                     #     be aliased, we should consider making the aliases
                     #     match the enumerability of the property being aliased.
+                    enumFlags = "JSPROP_ENUMERATE"
+                return CGList([
+                    getSymbolJSID,
                     CGGeneric(fill(
                         """
-                        if (!${defineFn}(aCx, proto, ${prop}, aliasedVal, JSPROP_ENUMERATE)) {
+                        if (!${defineFn}(aCx, proto, ${prop}, aliasedVal, ${enumFlags})) {
                           $*{failureCode}
                         }
                         """,
                         defineFn=defineFn,
                         prop=prop,
+                        enumFlags=enumFlags,
                         failureCode=failureCode))
                 ], "\n")
 
@@ -10231,10 +10234,13 @@ class CGUnionStruct(CGThing):
                         visibility="public",
                         explicit=True,
                         body="*this = aOther;\n"))
+                op_body = CGList([])
+                op_body.append(CGSwitch("aOther.mType", assignmentCases))
+                op_body.append(CGGeneric("return *this;\n"))
                 methods.append(ClassMethod(
-                    "operator=", "void",
+                    "operator=", "%s&" % selfName,
                     [Argument("const %s&" % selfName, "aOther")],
-                    body=CGSwitch("aOther.mType", assignmentCases).define()))
+                    body=op_body.define()))
                 disallowCopyConstruction = False
             else:
                 disallowCopyConstruction = True
@@ -10869,7 +10875,7 @@ class CGClass(CGThing):
                 def declare(self, cgClass):
                     name = cgClass.getNameString()
                     return ("%s(const %s&) = delete;\n"
-                            "void operator=(const %s&) = delete;\n" % (name, name, name))
+                            "%s& operator=(const %s&) = delete;\n" % (name, name, name, name))
 
             disallowedCopyConstructors = [DisallowedCopyConstructor()]
         else:
@@ -12990,8 +12996,9 @@ class CGDictionary(CGThing):
                 memberAssign = CGGeneric(
                     "%s = aOther.%s;\n" % (memberName, memberName))
             body.append(memberAssign)
+        body.append(CGGeneric("return *this;\n"))
         return ClassMethod(
-            "operator=", "void",
+            "operator=", "%s&" % self.makeClassName(self.dictionary),
             [Argument("const %s&" % self.makeClassName(self.dictionary),
                       "aOther")],
             body=body.define())
@@ -15446,6 +15453,7 @@ class CGCallback(CGClass):
 
         setupCall = fill(
             """
+            MOZ_ASSERT(!aRv.Failed(), "Don't pass an already-failed ErrorResult to a callback!");
             if (!aExecutionReason) {
               aExecutionReason = "${executionReason}";
             }

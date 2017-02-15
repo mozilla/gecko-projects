@@ -375,7 +375,6 @@ struct JSCompartment
     js::ReadBarrieredGlobalObject global_;
 
     unsigned                     enterCompartmentDepth;
-    int64_t                      startInterval;
 
   public:
     js::PerformanceGroupHolder performanceMonitoring;
@@ -395,7 +394,7 @@ struct JSCompartment
     JS::CompartmentBehaviors& behaviors() { return behaviors_; }
     const JS::CompartmentBehaviors& behaviors() const { return behaviors_; }
 
-    JSRuntime* runtimeFromMainThread() const {
+    JSRuntime* runtimeFromActiveCooperatingThread() const {
         MOZ_ASSERT(CurrentThreadCanAccessRuntime(runtime_));
         return runtime_;
     }
@@ -404,10 +403,6 @@ struct JSCompartment
     // thread can easily lead to races. Use this method very carefully.
     JSRuntime* runtimeFromAnyThread() const {
         return runtime_;
-    }
-
-    JSContext* contextFromMainThread() const {
-        return runtime_->contextFromMainThread();
     }
 
     /*
@@ -437,9 +432,6 @@ struct JSCompartment
     js::SavedStacks              savedStacks_;
 
     js::WrapperMap               crossCompartmentWrappers;
-
-    using CCKeyVector = mozilla::Vector<js::CrossCompartmentKey, 0, js::SystemAllocPolicy>;
-    CCKeyVector                  nurseryCCKeys;
 
     // The global environment record's [[VarNames]] list that contains all
     // names declared using FunctionDeclaration, GeneratorDeclaration, and
@@ -580,6 +572,16 @@ struct JSCompartment
     bool getNonWrapperObjectForCurrentCompartment(JSContext* cx, js::MutableHandleObject obj);
     bool getOrCreateWrapper(JSContext* cx, js::HandleObject existing, js::MutableHandleObject obj);
 
+  private:
+    // This pointer is controlled by the embedder. If it is non-null, and if
+    // cx->enableAccessValidation is true, then we assert that *validAccessPtr
+    // is true before running any code in this compartment.
+    bool* validAccessPtr;
+
+  public:
+    bool isAccessValid() const { return validAccessPtr ? *validAccessPtr : true; }
+    void setValidAccessPtr(bool* accessp) { validAccessPtr = accessp; }
+
   public:
     JSCompartment(JS::Zone* zone, const JS::CompartmentOptions& options);
     ~JSCompartment();
@@ -594,8 +596,10 @@ struct JSCompartment
     MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<JS::GCVector<JS::Value>> vec);
     MOZ_MUST_USE bool rewrap(JSContext* cx, JS::MutableHandleObject obj, JS::HandleObject existing);
 
-    MOZ_MUST_USE bool putWrapper(JSContext* cx, const js::CrossCompartmentKey& wrapped,
-                                 const js::Value& wrapper);
+    MOZ_MUST_USE bool putNewWrapper(JSContext* cx, const js::CrossCompartmentKey& wrapped,
+                                    const js::Value& wrapper);
+    MOZ_MUST_USE bool putWrapperMaybeUpdate(JSContext* cx, const js::CrossCompartmentKey& wrapped,
+                                            const js::Value& wrapper);
 
     js::WrapperMap::Ptr lookupWrapper(const js::Value& wrapped) const {
         return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(wrapped));
@@ -962,21 +966,38 @@ class AutoCompartment
 {
     JSContext * const cx_;
     JSCompartment * const origin_;
-    const js::AutoLockForExclusiveAccess* maybeLock_;
+    const AutoLockForExclusiveAccess* maybeLock_;
 
   public:
-    inline AutoCompartment(JSContext* cx, JSObject* target,
-                           js::AutoLockForExclusiveAccess* maybeLock = nullptr);
-    inline AutoCompartment(JSContext* cx, JSCompartment* target,
-                           js::AutoLockForExclusiveAccess* maybeLock = nullptr);
+    template <typename T>
+    inline AutoCompartment(JSContext* cx, const T& target);
     inline ~AutoCompartment();
 
     JSContext* context() const { return cx_; }
     JSCompartment* origin() const { return origin_; }
 
+  protected:
+    inline AutoCompartment(JSContext* cx, JSCompartment* target,
+                           AutoLockForExclusiveAccess* maybeLock = nullptr);
+
   private:
     AutoCompartment(const AutoCompartment&) = delete;
     AutoCompartment & operator=(const AutoCompartment&) = delete;
+};
+
+class AutoAtomsCompartment : protected AutoCompartment
+{
+  public:
+    inline AutoAtomsCompartment(JSContext* cx, AutoLockForExclusiveAccess& lock);
+};
+
+// Enter a compartment directly. Only use this where there's no target GC thing
+// to pass to AutoCompartment or where you need to avoid the assertions in
+// JS::Compartment::enterCompartmentOf().
+class AutoCompartmentUnchecked : protected AutoCompartment
+{
+  public:
+    inline AutoCompartmentUnchecked(JSContext* cx, JSCompartment* target);
 };
 
 /*

@@ -8,7 +8,8 @@ pub use style::properties::{DeclaredValue, PropertyDeclaration, PropertyDeclarat
 pub use style::values::specified::{BorderStyle, BorderWidth, CSSColor, Length, NoCalcLength};
 pub use style::values::specified::{LengthOrPercentage, LengthOrPercentageOrAuto, LengthOrPercentageOrAutoOrContent};
 pub use style::properties::longhands::outline_color::computed_value::T as ComputedColor;
-pub use style::values::RGBA;
+pub use style::properties::longhands::outline_style::SpecifiedValue as OutlineStyle;
+pub use style::values::{RGBA, Auto};
 pub use style::values::specified::url::{UrlExtraData, SpecifiedUrl};
 pub use style_traits::ToCss;
 
@@ -230,15 +231,15 @@ mod shorthand_serialization {
         fn border_color_should_serialize_correctly() {
             let mut properties = Vec::new();
 
-            let red = DeclaredValue::Value(CSSColor {
+            let red = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
-            let blue = DeclaredValue::Value(CSSColor {
+            let blue = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 0f32, green: 0f32, blue: 1f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
             properties.push(PropertyDeclaration::BorderTopColor(blue.clone()));
             properties.push(PropertyDeclaration::BorderRightColor(red.clone()));
@@ -280,10 +281,10 @@ mod shorthand_serialization {
 
             let width = DeclaredValue::Value(BorderWidth::from_length(Length::from_px(4f32)));
             let style = DeclaredValue::Value(BorderStyle::solid);
-            let color = DeclaredValue::Value(CSSColor {
+            let color = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
             properties.push(PropertyDeclaration::BorderTopWidth(width));
             properties.push(PropertyDeclaration::BorderTopStyle(style));
@@ -299,10 +300,10 @@ mod shorthand_serialization {
 
             let width = DeclaredValue::Value(BorderWidth::from_length(Length::from_px(4f32)));
             let style = DeclaredValue::Initial;
-            let color = DeclaredValue::Value(CSSColor {
+            let color = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
             properties.push(PropertyDeclaration::BorderTopWidth(width));
             properties.push(PropertyDeclaration::BorderTopStyle(style));
@@ -459,6 +460,7 @@ mod shorthand_serialization {
 
     mod outline {
         use style::properties::longhands::outline_width::SpecifiedValue as WidthContainer;
+        use style::values::Either;
         use super::*;
 
         #[test]
@@ -466,11 +468,11 @@ mod shorthand_serialization {
             let mut properties = Vec::new();
 
             let width = DeclaredValue::Value(WidthContainer(Length::from_px(4f32)));
-            let style = DeclaredValue::Value(BorderStyle::solid);
-            let color = DeclaredValue::Value(CSSColor {
+            let style = DeclaredValue::Value(Either::Second(BorderStyle::solid));
+            let color = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
             properties.push(PropertyDeclaration::OutlineWidth(width));
             properties.push(PropertyDeclaration::OutlineStyle(style));
@@ -485,7 +487,7 @@ mod shorthand_serialization {
             let mut properties = Vec::new();
 
             let width = DeclaredValue::Value(WidthContainer(Length::from_px(4f32)));
-            let style = DeclaredValue::Value(BorderStyle::solid);
+            let style = DeclaredValue::Value(Either::Second(BorderStyle::solid));
             let color = DeclaredValue::Initial;
 
             properties.push(PropertyDeclaration::OutlineWidth(width));
@@ -502,16 +504,34 @@ mod shorthand_serialization {
 
             let width = DeclaredValue::Value(WidthContainer(Length::from_px(4f32)));
             let style = DeclaredValue::Initial;
-            let color = DeclaredValue::Value(CSSColor {
+            let color = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
             properties.push(PropertyDeclaration::OutlineWidth(width));
             properties.push(PropertyDeclaration::OutlineStyle(style));
             properties.push(PropertyDeclaration::OutlineColor(color));
 
             let serialization = shorthand_properties_to_string(properties);
             assert_eq!(serialization, "outline: 4px none rgb(255, 0, 0);");
+        }
+
+        #[test]
+        fn outline_should_serialize_correctly_when_style_is_auto() {
+            let mut properties = Vec::new();
+
+            let width = DeclaredValue::Value(WidthContainer(Length::from_px(4f32)));
+            let style = DeclaredValue::Value(Either::First(Auto));
+            let color = DeclaredValue::Value(Box::new(CSSColor {
+                parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
+                authored: None
+            }));
+            properties.push(PropertyDeclaration::OutlineWidth(width));
+            properties.push(PropertyDeclaration::OutlineStyle(style));
+            properties.push(PropertyDeclaration::OutlineColor(color));
+
+            let serialization = shorthand_properties_to_string(properties);
+            assert_eq!(serialization, "outline: 4px auto rgb(255, 0, 0);");
         }
     }
 
@@ -710,10 +730,10 @@ mod shorthand_serialization {
         fn background_should_serialize_all_available_properties_when_specified() {
             let mut properties = Vec::new();
 
-            let color = DeclaredValue::Value(CSSColor {
+            let color = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
             let position_x = single_vec_value_typedef!(position_x,
                 HorizontalPosition {
@@ -770,10 +790,10 @@ mod shorthand_serialization {
         fn background_should_combine_origin_and_clip_properties_when_equal() {
             let mut properties = Vec::new();
 
-            let color = DeclaredValue::Value(CSSColor {
+            let color = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
             let position_x = single_vec_value_typedef!(position_x,
                 HorizontalPosition {
@@ -829,10 +849,10 @@ mod shorthand_serialization {
         fn background_should_always_print_color_and_url_and_repeat_and_attachment_and_position() {
             let mut properties = Vec::new();
 
-            let color = DeclaredValue::Value(CSSColor {
+            let color = DeclaredValue::Value(Box::new(CSSColor {
                 parsed: ComputedColor::RGBA(RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 1f32 }),
                 authored: None
-            });
+            }));
 
             let position_x = single_vec_value_typedef!(position_x,
                 HorizontalPosition {
@@ -879,11 +899,12 @@ mod shorthand_serialization {
         use style::properties::longhands::mask_image as image;
         use style::properties::longhands::mask_mode as mode;
         use style::properties::longhands::mask_origin as origin;
-        use style::properties::longhands::mask_position as position;
+        use style::properties::longhands::mask_position_x as position_x;
+        use style::properties::longhands::mask_position_y as position_y;
         use style::properties::longhands::mask_repeat as repeat;
         use style::properties::longhands::mask_size as size;
         use style::values::specified::Image;
-        use style::values::specified::position::{HorizontalPosition, Position, VerticalPosition};
+        use style::values::specified::position::{HorizontalPosition, VerticalPosition};
         use super::*;
 
         macro_rules! single_vec_value_typedef {
@@ -918,16 +939,16 @@ mod shorthand_serialization {
 
             let mode = single_vec_keyword_value!(mode, luminance);
 
-            let position = single_vec_value_typedef!(position,
-                Position {
-                    horizontal: HorizontalPosition {
-                        keyword: None,
-                        position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(7f32))),
-                    },
-                    vertical: VerticalPosition {
-                        keyword: None,
-                        position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(4f32))),
-                    },
+            let position_x = single_vec_value_typedef!(position_x,
+                HorizontalPosition {
+                    keyword: None,
+                    position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(7f32))),
+                }
+            );
+            let position_y = single_vec_value_typedef!(position_y,
+                VerticalPosition {
+                    keyword: None,
+                    position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(4f32))),
                 }
             );
 
@@ -947,7 +968,8 @@ mod shorthand_serialization {
 
             properties.push(PropertyDeclaration::MaskImage(image));
             properties.push(PropertyDeclaration::MaskMode(mode));
-            properties.push(PropertyDeclaration::MaskPosition(position));
+            properties.push(PropertyDeclaration::MaskPositionX(position_x));
+            properties.push(PropertyDeclaration::MaskPositionY(position_y));
             properties.push(PropertyDeclaration::MaskSize(size));
             properties.push(PropertyDeclaration::MaskRepeat(repeat));
             properties.push(PropertyDeclaration::MaskOrigin(origin));
@@ -972,16 +994,17 @@ mod shorthand_serialization {
 
             let mode = single_vec_keyword_value!(mode, luminance);
 
-            let position = single_vec_value_typedef!(position,
-                Position {
-                    horizontal: HorizontalPosition {
-                        keyword: None,
-                        position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(7f32))),
-                    },
-                    vertical: VerticalPosition {
-                        keyword: None,
-                        position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(4f32))),
-                    },
+            let position_x = single_vec_value_typedef!(position_x,
+                HorizontalPosition {
+                    keyword: None,
+                    position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(7f32))),
+                }
+            );
+
+            let position_y = single_vec_value_typedef!(position_y,
+                VerticalPosition {
+                    keyword: None,
+                    position: Some(LengthOrPercentage::Length(NoCalcLength::from_px(4f32))),
                 }
             );
 
@@ -1001,7 +1024,8 @@ mod shorthand_serialization {
 
             properties.push(PropertyDeclaration::MaskImage(image));
             properties.push(PropertyDeclaration::MaskMode(mode));
-            properties.push(PropertyDeclaration::MaskPosition(position));
+            properties.push(PropertyDeclaration::MaskPositionX(position_x));
+            properties.push(PropertyDeclaration::MaskPositionY(position_y));
             properties.push(PropertyDeclaration::MaskSize(size));
             properties.push(PropertyDeclaration::MaskRepeat(repeat));
             properties.push(PropertyDeclaration::MaskOrigin(origin));

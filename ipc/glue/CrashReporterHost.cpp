@@ -18,8 +18,7 @@
 namespace mozilla {
 namespace ipc {
 
-CrashReporterHost::CrashReporterHost(GeckoProcessType aProcessType,
-                                     const Shmem& aShmem)
+CrashReporterHost::CrashReporterHost(GeckoProcessType aProcessType, const Shmem& aShmem)
  : mProcessType(aProcessType),
    mShmem(aShmem),
    mStartTime(::time(nullptr))
@@ -27,12 +26,14 @@ CrashReporterHost::CrashReporterHost(GeckoProcessType aProcessType,
 }
 
 #ifdef MOZ_CRASHREPORTER
-void
-CrashReporterHost::GenerateCrashReport(RefPtr<nsIFile> aCrashDump)
+bool
+CrashReporterHost::GenerateCrashReport(RefPtr<nsIFile> aCrashDump,
+                                       const AnnotationTable* aExtraNotes,
+                                       nsString* aOutMinidumpID)
 {
   nsString dumpID;
   if (!CrashReporter::GetIDFromMinidump(aCrashDump, dumpID)) {
-    return;
+    return false;
   }
 
   CrashReporter::AnnotationTable notes;
@@ -60,9 +61,15 @@ CrashReporterHost::GenerateCrashReport(RefPtr<nsIFile> aCrashDump)
   notes.Put(NS_LITERAL_CSTRING("StartupTime"), nsDependentCString(startTime));
 
   CrashReporterMetadataShmem::ReadAppNotes(mShmem, &notes);
-
+  if (aExtraNotes) {
+    CrashReporter::AppendExtraData(dumpID, *aExtraNotes);
+  }
   CrashReporter::AppendExtraData(dumpID, notes);
+
   NotifyCrashService(mProcessType, dumpID, &notes);
+
+  *aOutMinidumpID = dumpID;
+  return true;
 }
 
 /**
@@ -109,8 +116,11 @@ public:
     int32_t processType = mProcessType;
     int32_t crashType = mCrashType;
     nsString childDumpID(mChildDumpID);
+    nsCOMPtr<nsIAsyncShutdownBlocker> self(this);
 
-    NS_DispatchToMainThread(NS_NewRunnableFunction([=] () -> void {
+    NS_DispatchToMainThread(NS_NewRunnableFunction([
+      self, processType, crashType, childDumpID
+    ] {
       nsCOMPtr<nsICrashService> crashService =
         do_GetService("@mozilla.org/crashservice;1");
       if (crashService) {
@@ -120,7 +130,7 @@ public:
       nsCOMPtr<nsIAsyncShutdownClient> barrier = GetShutdownBarrier();
 
       if (barrier) {
-        barrier->RemoveBlocker(this);
+        barrier->RemoveBlocker(self);
       }
     }));
 

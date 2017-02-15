@@ -367,6 +367,9 @@ js::RunScript(JSContext* cx, RunState& state)
     MOZ_DIAGNOSTIC_ASSERT(cx->compartment()->isSystem() ||
                           cx->runtime()->allowContentJS());
 
+    MOZ_ASSERT(!cx->enableAccessValidation ||
+               cx->compartment()->isAccessValid());
+
     if (!Debugger::checkNoExecute(cx, state.script()))
         return false;
 
@@ -934,7 +937,7 @@ JSType
 js::TypeOfObject(JSObject* obj)
 {
     if (EmulatesUndefined(obj))
-        return JSTYPE_VOID;
+        return JSTYPE_UNDEFINED;
     if (obj->isCallable())
         return JSTYPE_FUNCTION;
     return JSTYPE_OBJECT;
@@ -950,7 +953,7 @@ js::TypeOfValue(const Value& v)
     if (v.isNull())
         return JSTYPE_OBJECT;
     if (v.isUndefined())
-        return JSTYPE_VOID;
+        return JSTYPE_UNDEFINED;
     if (v.isObject())
         return TypeOfObject(&v.toObject());
     if (v.isBoolean())
@@ -1766,8 +1769,8 @@ Interpret(JSContext* cx, RunState& state)
     RootedScript script(cx);
     SET_SCRIPT(REGS.fp()->script());
 
-    TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
-    TraceLoggerEvent scriptEvent(logger, TraceLogger_Scripts, script);
+    TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
+    TraceLoggerEvent scriptEvent(TraceLogger_Scripts, script);
     TraceLogStartEvent(logger, scriptEvent);
     TraceLogStartEvent(logger, TraceLogger_Interpreter);
 
@@ -3021,7 +3024,7 @@ CASE(JSOP_FUNCALL)
     SET_SCRIPT(REGS.fp()->script());
 
     {
-        TraceLoggerEvent event(logger, TraceLogger_Scripts, script);
+        TraceLoggerEvent event(TraceLogger_Scripts, script);
         TraceLogStartEvent(logger, event);
         TraceLogStartEvent(logger, TraceLogger_Interpreter);
     }
@@ -3965,8 +3968,8 @@ CASE(JSOP_RESUME)
         bool ok = GeneratorObject::resume(cx, activation, gen, val, resumeKind);
         SET_SCRIPT(REGS.fp()->script());
 
-        TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
-        TraceLoggerEvent scriptEvent(logger, TraceLogger_Scripts, script);
+        TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
+        TraceLoggerEvent scriptEvent(TraceLogger_Scripts, script);
         TraceLogStartEvent(logger, scriptEvent);
         TraceLogStartEvent(logger, TraceLogger_Interpreter);
 

@@ -30,7 +30,7 @@
 #include "vm/ArrayObject.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/SharedMem.h"
-#include "vm/TypedArrayCommon.h"
+#include "vm/TypedArrayObject.h"
 #include "vm/UnboxedObject.h"
 
 // Undo windows.h damage on Win64
@@ -1568,7 +1568,6 @@ class MConstant : public MNullaryInstruction
     MConstant(const Value& v, CompilerConstraintList* constraints);
     explicit MConstant(JSObject* obj);
     explicit MConstant(float f);
-    explicit MConstant(double d);
     explicit MConstant(int64_t i);
 
   public:
@@ -1578,8 +1577,6 @@ class MConstant : public MNullaryInstruction
     static MConstant* New(TempAllocator::Fallible alloc, const Value& v,
                           CompilerConstraintList* constraints = nullptr);
     static MConstant* New(TempAllocator& alloc, const Value& v, MIRType type);
-    static MConstant* NewRawFloat32(TempAllocator& alloc, float f);
-    static MConstant* NewRawDouble(TempAllocator& alloc, double d);
     static MConstant* NewFloat32(TempAllocator& alloc, double d);
     static MConstant* NewInt64(TempAllocator& alloc, int64_t i);
     static MConstant* NewConstraintlessObject(TempAllocator& alloc, JSObject* v);
@@ -1692,6 +1689,52 @@ class MConstant : public MNullaryInstruction
     Value toJSValue() const;
 
     bool appendRoots(MRootList& roots) const override;
+};
+
+// Floating-point value as created by wasm. Just a constant value, used to
+// effectively inhibite all the MIR optimizations. This uses the same LIR nodes
+// as a MConstant of the same type would.
+class MWasmFloatConstant : public MNullaryInstruction
+{
+    union {
+        float f32_;
+        double f64_;
+        uint64_t bits_;
+    } u;
+
+    explicit MWasmFloatConstant(MIRType type)
+    {
+        u.bits_ = 0;
+        setResultType(type);
+    }
+
+  public:
+    INSTRUCTION_HEADER(WasmFloatConstant)
+
+    static MWasmFloatConstant* NewDouble(TempAllocator& alloc, double d) {
+        auto* ret = new(alloc) MWasmFloatConstant(MIRType::Double);
+        ret->u.f64_ = d;
+        return ret;
+    }
+
+    static MWasmFloatConstant* NewFloat32(TempAllocator& alloc, float f) {
+        auto* ret = new(alloc) MWasmFloatConstant(MIRType::Float32);
+        ret->u.f32_ = f;
+        return ret;
+    }
+
+    HashNumber valueHash() const override;
+    bool congruentTo(const MDefinition* ins) const override;
+    AliasSet getAliasSet() const override { return AliasSet::None(); }
+
+    const double& toDouble() const {
+        MOZ_ASSERT(type() == MIRType::Double);
+        return u.f64_;
+    }
+    const float& toFloat32() const {
+        MOZ_ASSERT(type() == MIRType::Float32);
+        return u.f32_;
+    }
 };
 
 // Generic constructor of SIMD valuesX4.
@@ -3986,7 +4029,7 @@ class MInitElemGetterSetter
 };
 
 // WrappedFunction wraps a JSFunction so it can safely be used off-thread.
-// In particular, a function's flags can be modified on the main thread as
+// In particular, a function's flags can be modified on the active thread as
 // functions are relazified and delazified, so we must be careful not to access
 // these flags off-thread.
 class WrappedFunction : public TempObject
@@ -8351,7 +8394,7 @@ struct LambdaFunctionInfo
 {
     // The functions used in lambdas are the canonical original function in
     // the script, and are immutable except for delazification. Record this
-    // information while still on the main thread to avoid races.
+    // information while still on the active thread to avoid races.
     CompilerFunction fun;
     uint16_t flags;
     uint16_t nargs;

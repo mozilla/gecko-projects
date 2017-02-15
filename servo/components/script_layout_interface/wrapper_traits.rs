@@ -313,6 +313,15 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
     /// Returns `None` if this is a pseudo-element; otherwise, returns `Some`.
     fn type_id(&self) -> Option<LayoutNodeType>;
 
+    /// Returns access to the underlying TElement. This is breaks the abstraction
+    /// barrier of ThreadSafeLayout wrapper layer, and can lead to races if not used
+    /// carefully.
+    ///
+    /// We need this so that the functions defined on this trait can call
+    /// lazily_compute_pseudo_element_style, which operates on TElement.
+    unsafe fn unsafe_get(self) ->
+        <<Self::ConcreteThreadSafeLayoutNode as ThreadSafeLayoutNode>::ConcreteNode as TNode>::ConcreteElement;
+
     #[inline]
     fn get_attr(&self, namespace: &Namespace, name: &LocalName) -> Option<&str>;
 
@@ -380,7 +389,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
     fn style(&self, context: &SharedStyleContext) -> Arc<ServoComputedValues> {
         match self.get_pseudo_element_type() {
             PseudoElementType::Normal => self.get_style_data().unwrap().borrow()
-                                             .styles().primary.values.clone(),
+                                             .styles().primary.values().clone(),
             other => {
                 // Precompute non-eagerly-cascaded pseudo-element styles if not
                 // cached before.
@@ -397,7 +406,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
                             let new_style =
                                 context.stylist.precomputed_values_for_pseudo(
                                     &style_pseudo,
-                                    Some(&data.styles().primary.values),
+                                    Some(data.styles().primary.values()),
                                     &context.default_computed_values,
                                     false);
                             data.styles_mut().pseudos
@@ -413,9 +422,9 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
                             let new_style =
                                 context.stylist
                                        .lazily_compute_pseudo_element_style(
-                                           self,
+                                           unsafe { &self.unsafe_get() },
                                            &style_pseudo,
-                                           &data.styles().primary.values,
+                                           data.styles().primary.values(),
                                            &context.default_computed_values);
                             data.styles_mut().pseudos
                                 .insert(style_pseudo.clone(), new_style.unwrap());
@@ -425,7 +434,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
 
                 self.get_style_data().unwrap().borrow()
                     .styles().pseudos.get(&style_pseudo)
-                    .unwrap().values.clone()
+                    .unwrap().values().clone()
             }
         }
     }
@@ -436,7 +445,7 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
         data.styles().pseudos
             .get(&PseudoElement::Selection).map(|s| s)
             .unwrap_or(&data.styles().primary)
-            .values.clone()
+            .values().clone()
     }
 
     /// Returns the already resolved style of the node.
@@ -451,10 +460,10 @@ pub trait ThreadSafeLayoutElement: Clone + Copy + Sized + Debug +
         let data = self.get_style_data().unwrap().borrow();
         match self.get_pseudo_element_type() {
             PseudoElementType::Normal
-                => data.styles().primary.values.clone(),
+                => data.styles().primary.values().clone(),
             other
                 => data.styles().pseudos
-                       .get(&other.style_pseudo_element()).unwrap().values.clone(),
+                       .get(&other.style_pseudo_element()).unwrap().values().clone(),
         }
     }
 }

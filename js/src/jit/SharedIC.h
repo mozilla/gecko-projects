@@ -17,7 +17,7 @@
 #include "jit/SharedICList.h"
 #include "jit/SharedICRegisters.h"
 #include "vm/ReceiverGuard.h"
-#include "vm/TypedArrayCommon.h"
+#include "vm/TypedArrayObject.h"
 
 namespace js {
 namespace jit {
@@ -508,7 +508,7 @@ class ICStub
         return (k > INVALID) && (k < LIMIT);
     }
     static bool IsCacheIRKind(Kind k) {
-        return k == CacheIR_Monitored || k == CacheIR_Updated;
+        return k == CacheIR_Regular || k == CacheIR_Monitored || k == CacheIR_Updated;
     }
 
     static const char* KindString(Kind k) {
@@ -833,6 +833,31 @@ class ICFallbackStub : public ICStub
     void unlinkStubsWithKind(JSContext* cx, ICStub::Kind kind);
 };
 
+// Base class for Trait::Regular CacheIR stubs
+class ICCacheIR_Regular : public ICStub
+{
+    const CacheIRStubInfo* stubInfo_;
+
+  public:
+    ICCacheIR_Regular(JitCode* stubCode, const CacheIRStubInfo* stubInfo)
+      : ICStub(ICStub::CacheIR_Regular, stubCode),
+        stubInfo_(stubInfo)
+    {}
+
+    void notePreliminaryObject() {
+        extra_ = 1;
+    }
+    bool hasPreliminaryObject() const {
+        return extra_;
+    }
+
+    const CacheIRStubInfo* stubInfo() const {
+        return stubInfo_;
+    }
+
+    uint8_t* stubDataStart();
+};
+
 // Monitored stubs are IC stubs that feed a single resulting value out to a
 // type monitor operation.
 class ICMonitoredStub : public ICStub
@@ -1041,10 +1066,6 @@ class ICStubCompiler
 
     // Emits a normal (non-tail) call to a VMFunction wrapper.
     MOZ_MUST_USE bool callVM(const VMFunction& fun, MacroAssembler& masm);
-
-    // Emits a call to a type-update IC, assuming that the value to be
-    // checked is already in R0.
-    MOZ_MUST_USE bool callTypeUpdateIC(MacroAssembler& masm, uint32_t objectOffset);
 
     // A stub frame is used when a stub wants to call into the VM without
     // performing a tail call. This is required for the return address

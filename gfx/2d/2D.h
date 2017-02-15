@@ -751,6 +751,8 @@ public:
 
   virtual bool GetFontDescriptor(FontDescriptorOutput, void *) { return false; }
 
+  virtual bool CanSerialize() { return false; }
+
   void AddUserData(UserDataKey *key, void *userData, void (*destroy)(void*)) {
     mUserData.Add(key, userData, destroy);
   }
@@ -1010,13 +1012,23 @@ public:
                     const DrawOptions &aOptions = DrawOptions()) = 0;
 
   /**
-   * Fill a series of clyphs on the draw target with a certain source pattern.
+   * Fill a series of glyphs on the draw target with a certain source pattern.
    */
   virtual void FillGlyphs(ScaledFont *aFont,
                           const GlyphBuffer &aBuffer,
                           const Pattern &aPattern,
                           const DrawOptions &aOptions = DrawOptions(),
                           const GlyphRenderingOptions *aRenderingOptions = nullptr) = 0;
+
+  /**
+   * Stroke a series of glyphs on the draw target with a certain source pattern.
+   */
+  virtual void StrokeGlyphs(ScaledFont* aFont,
+                            const GlyphBuffer& aBuffer,
+                            const Pattern& aPattern,
+                            const StrokeOptions& aStrokeOptions = StrokeOptions(),
+                            const DrawOptions& aOptions = DrawOptions(),
+                            const GlyphRenderingOptions* aRenderingOptions = nullptr);
 
   /**
    * This takes a source pattern and a mask, and composites the source pattern

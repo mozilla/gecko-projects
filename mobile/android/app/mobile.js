@@ -172,6 +172,7 @@ pref("browser.helperApps.deleteTempFileOnExit", false);
 
 /* password manager */
 pref("signon.rememberSignons", true);
+pref("signon.autofillForms.http", true);
 pref("signon.expireMasterPassword", false);
 pref("signon.debug", false);
 
@@ -620,7 +621,7 @@ pref("media.decoder.recycle.enabled", true);
 pref("media.android-media-codec.enabled", true);
 pref("media.android-media-codec.preferred", true);
 // Run decoder in seperate process.
-pref("media.android-remote-codec.enabled", false);
+pref("media.android-remote-codec.enabled", true);
 
 // Enable MSE
 pref("media.mediasource.enabled", true);

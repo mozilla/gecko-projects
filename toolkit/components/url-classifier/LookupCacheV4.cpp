@@ -117,9 +117,19 @@ LookupCacheV4::IsHashEntryConfirmed(const Completion& aEntry,
   *aConfirmed = true;
 }
 
+bool
+LookupCacheV4::IsEmpty()
+{
+  bool isEmpty;
+  mVLPrefixSet->IsEmpty(&isEmpty);
+  return isEmpty;
+}
+
 nsresult
 LookupCacheV4::Build(PrefixStringMap& aPrefixMap)
 {
+  Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_VLPS_CONSTRUCT_TIME> timer;
+
   return mVLPrefixSet->SetPrefixes(aPrefixMap);
 }
 

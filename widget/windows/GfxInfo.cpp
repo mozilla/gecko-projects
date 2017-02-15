@@ -593,7 +593,7 @@ GfxInfo::Init()
       if (driverNumericVersion < knownSafeMismatchVersion ||
           std::max(dllNumericVersion, dllNumericVersion2) < knownSafeMismatchVersion) {
         mHasDriverVersionMismatch = true;
-        gfxWarningOnce() << "Mismatched driver versions between the registry " << mDriverVersion[mActiveGPUIndex].get() << " and DLL(s) " << NS_ConvertUTF16toUTF8(dllVersion).get() << ", " << NS_ConvertUTF16toUTF8(dllVersion2).get() << " reported.";
+        gfxCriticalNoteOnce << "Mismatched driver versions between the registry " << mDriverVersion[mActiveGPUIndex].get() << " and DLL(s) " << NS_ConvertUTF16toUTF8(dllVersion).get() << ", " << NS_ConvertUTF16toUTF8(dllVersion2).get() << " reported.";
       }
     } else if (dllNumericVersion == 0 && dllNumericVersion2 == 0) {
       // Leave it as an asserting error for now, to see if we can find
@@ -1176,6 +1176,17 @@ GfxInfo::GetGfxDriverInfo()
       (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorIntel), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(IntelGMAX4500HD),
       nsIGfxInfo::FEATURE_DIRECT3D_11_ANGLE, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
       DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_BUG_1153381");
+
+    /* Bug 1336710: Crash in rx::Blit9::initialize. */
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::WindowsXP,
+      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorIntel), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(IntelGMAX4500HD),
+      nsIGfxInfo::FEATURE_WEBGL_ANGLE, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_BUG_1336710");
+
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::WindowsXP,
+      (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorIntel), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(IntelHDGraphicsToSandyBridge),
+      nsIGfxInfo::FEATURE_WEBGL_ANGLE, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_BUG_1336710");
 
     /* Bug 1304360: Graphical artifacts with D3D9 on Windows 7. */
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,

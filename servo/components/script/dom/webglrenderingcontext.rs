@@ -2,15 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use canvas_traits::{CanvasCommonMsg, CanvasMsg, byte_swap};
+use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
+use canvas_traits::{CanvasCommonMsg, CanvasMsg, byte_swap, multiply_u8_pixel};
 use core::nonzero::NonZero;
 use dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::{self, WebGLContextAttributes};
 use dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::WebGLRenderingContextConstants as constants;
 use dom::bindings::codegen::Bindings::WebGLRenderingContextBinding::WebGLRenderingContextMethods;
 use dom::bindings::codegen::UnionTypes::ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement;
-use dom::bindings::conversions::{ArrayBufferViewContents, ConversionResult, FromJSValConvertible, ToJSValConvertible};
-use dom::bindings::conversions::{array_buffer_to_vec, array_buffer_view_data, array_buffer_view_data_checked};
-use dom::bindings::conversions::{array_buffer_view_to_vec, array_buffer_view_to_vec_checked};
+use dom::bindings::conversions::{ConversionResult, FromJSValConvertible, ToJSValConvertible};
 use dom::bindings::error::{Error, Fallible};
 use dom::bindings::inheritance::Castable;
 use dom::bindings::js::{JS, LayoutJS, MutNullableJS, Root};
@@ -38,8 +37,9 @@ use dom::window::Window;
 use euclid::size::Size2D;
 use ipc_channel::ipc::{self, IpcSender};
 use js::conversions::ConversionBehavior;
-use js::jsapi::{JSContext, JSObject, JS_GetArrayBufferViewType, Type};
+use js::jsapi::{JSContext, JSObject, JS_GetArrayBufferViewType, Type, Rooted};
 use js::jsval::{BooleanValue, DoubleValue, Int32Value, JSVal, NullValue, UndefinedValue};
+use js::typedarray::{TypedArray, TypedArrayElement, Float32, Int32};
 use net_traits::image::base::PixelFormat;
 use net_traits::image_cache_thread::ImageResponse;
 use offscreen_gl_context::{GLContextAttributes, GLLimits};
@@ -112,6 +112,7 @@ fn has_invalid_blend_constants(arg1: u32, arg2: u32) -> bool {
         (_, _) => false
     }
 }
+
 /// Set of bitflags for texture unpacking (texImage2d, etc...)
 bitflags! {
     #[derive(HeapSizeOf, JSTraceable)]
@@ -133,6 +134,7 @@ pub struct WebGLRenderingContext {
     #[ignore_heap_size_of = "Defined in webrender_traits"]
     last_error: Cell<Option<WebGLError>>,
     texture_unpacking_settings: Cell<TextureUnpacking>,
+    texture_unpacking_alignment: Cell<u32>,
     bound_framebuffer: MutNullableJS<WebGLFramebuffer>,
     bound_renderbuffer: MutNullableJS<WebGLRenderbuffer>,
     bound_texture_2d: MutNullableJS<WebGLTexture>,
@@ -168,6 +170,7 @@ impl WebGLRenderingContext {
                 canvas: JS::from_ref(canvas),
                 last_error: Cell::new(None),
                 texture_unpacking_settings: Cell::new(CONVERT_COLORSPACE),
+                texture_unpacking_alignment: Cell::new(4),
                 bound_framebuffer: MutNullableJS::new(None),
                 bound_texture_2d: MutNullableJS::new(None),
                 bound_texture_cube_map: MutNullableJS::new(None),
@@ -364,6 +367,67 @@ impl WebGLRenderingContext {
         true
     }
 
+    /// Translates an image in rgba8 (red in the first byte) format to
+    /// the format that was requested of TexImage.
+    ///
+    /// From the WebGL 1.0 spec, 5.14.8:
+    ///
+    ///     "The source image data is conceptually first converted to
+    ///      the data type and format specified by the format and type
+    ///      arguments, and then transferred to the WebGL
+    ///      implementation. If a packed pixel format is specified
+    ///      which would imply loss of bits of precision from the image
+    ///      data, this loss of precision must occur."
+    fn rgba8_image_to_tex_image_data(&self,
+                                     format: TexFormat,
+                                     data_type: TexDataType,
+                                     pixels: Vec<u8>) -> Vec<u8> {
+        // hint for vector allocation sizing.
+        let pixel_count = pixels.len() / 4;
+
+        match (format, data_type) {
+            (TexFormat::RGBA, TexDataType::UnsignedByte) => pixels,
+            (TexFormat::RGB, TexDataType::UnsignedByte) => pixels,
+
+            (TexFormat::RGBA, TexDataType::UnsignedShort4444) => {
+                let mut rgba4 = Vec::<u8>::with_capacity(pixel_count * 2);
+                for rgba8 in pixels.chunks(4) {
+                    rgba4.write_u16::<NativeEndian>((rgba8[0] as u16 & 0xf0) << 8 |
+                                                    (rgba8[1] as u16 & 0xf0) << 4 |
+                                                    (rgba8[2] as u16 & 0xf0) |
+                                                    (rgba8[3] as u16 & 0xf0) >> 4).unwrap();
+                }
+                rgba4
+            }
+
+            (TexFormat::RGBA, TexDataType::UnsignedShort5551) => {
+                let mut rgba5551 = Vec::<u8>::with_capacity(pixel_count * 2);
+                for rgba8 in pixels.chunks(4) {
+                    rgba5551.write_u16::<NativeEndian>((rgba8[0] as u16 & 0xf8) << 8 |
+                                                       (rgba8[1] as u16 & 0xf8) << 3 |
+                                                       (rgba8[2] as u16 & 0xf8) >> 2 |
+                                                       (rgba8[3] as u16) >> 7).unwrap();
+                }
+                rgba5551
+            }
+
+            (TexFormat::RGB, TexDataType::UnsignedShort565) => {
+                let mut rgb565 = Vec::<u8>::with_capacity(pixel_count * 2);
+                for rgba8 in pixels.chunks(4) {
+                    rgb565.write_u16::<NativeEndian>((rgba8[0] as u16 & 0xf8) << 8 |
+                                                     (rgba8[1] as u16 & 0xfc) << 3 |
+                                                     (rgba8[2] as u16 & 0xf8) >> 3).unwrap();
+                }
+                rgb565
+            }
+
+            // Validation should have ensured that we only hit the
+            // above cases, but we haven't turned the (format, type)
+            // into an enum yet so there's a default case here.
+            _ => unreachable!()
+        }
+    }
+
     fn get_image_pixels(&self,
                         source: Option<ImageDataOrHTMLImageElementOrHTMLCanvasElementOrHTMLVideoElement>)
                         -> ImagePixelResult {
@@ -398,10 +462,7 @@ impl WebGLRenderingContext {
 
                 let size = Size2D::new(img.width as i32, img.height as i32);
 
-                // TODO(emilio): Validate that the format argument
-                // is coherent with the image.
-                //
-                // RGB8 should be easy to support too
+                // For now Servo's images are all stored as RGBA8 internally.
                 let mut data = match img.format {
                     PixelFormat::RGBA8 => img.bytes.to_vec(),
                     _ => unimplemented!(),
@@ -436,7 +497,9 @@ impl WebGLRenderingContext {
                                          height: u32,
                                          format: TexFormat,
                                          data_type: TexDataType,
-                                         data: *mut JSObject)
+                                         unpacking_alignment: u32,
+                                         data: *mut JSObject,
+                                         cx: *mut JSContext)
                                          -> Result<u32, ()> {
         let element_size = data_type.element_size();
         let components_per_element = data_type.components_per_element();
@@ -448,12 +511,14 @@ impl WebGLRenderingContext {
         // if it is UNSIGNED_SHORT_5_6_5, UNSIGNED_SHORT_4_4_4_4,
         // or UNSIGNED_SHORT_5_5_5_1, a Uint16Array must be supplied.
         // If the types do not match, an INVALID_OPERATION error is generated.
+        typedarray!(in(cx) let typedarray_u8: Uint8Array = data);
+        typedarray!(in(cx) let typedarray_u16: Uint16Array = data);
         let received_size = if data.is_null() {
             element_size
         } else {
-            if array_buffer_view_data_checked::<u16>(data).is_some() {
+            if typedarray_u16.is_ok() {
                 2
-            } else if array_buffer_view_data_checked::<u8>(data).is_some() {
+            } else if typedarray_u8.is_ok() {
                 1
             } else {
                 self.webgl_error(InvalidOperation);
@@ -467,8 +532,114 @@ impl WebGLRenderingContext {
         }
 
         // NOTE: width and height are positive or zero due to validate()
-        let expected_byte_length = width * height * element_size * components / components_per_element;
-        return Ok(expected_byte_length);
+        if height == 0 {
+            return Ok(0);
+        } else {
+            // We need to be careful here to not count unpack
+            // alignment at the end of the image, otherwise (for
+            // example) passing a single byte for uploading a 1x1
+            // GL_ALPHA/GL_UNSIGNED_BYTE texture would throw an error.
+            let cpp = element_size * components / components_per_element;
+            let stride = (width * cpp + unpacking_alignment - 1) & !(unpacking_alignment - 1);
+            return Ok(stride * (height - 1) + width * cpp);
+        }
+    }
+
+    /// Flips the pixels in the Vec on the Y axis if
+    /// UNPACK_FLIP_Y_WEBGL is currently enabled.
+    fn flip_teximage_y(&self,
+                       pixels: Vec<u8>,
+                       internal_format: TexFormat,
+                       data_type: TexDataType,
+                       width: usize,
+                       height: usize,
+                       unpacking_alignment: usize) -> Vec<u8> {
+        if !self.texture_unpacking_settings.get().contains(FLIP_Y_AXIS) {
+            return pixels;
+        }
+
+        let cpp = (data_type.element_size() *
+                   internal_format.components() / data_type.components_per_element()) as usize;
+
+        let stride = (width * cpp + unpacking_alignment - 1) & !(unpacking_alignment - 1);
+
+        let mut flipped = Vec::<u8>::with_capacity(pixels.len());
+
+        for y in 0..height {
+            let flipped_y = height - 1 - y;
+            let start = flipped_y * stride;
+
+            flipped.extend_from_slice(&pixels[start..(start + width * cpp)]);
+            flipped.extend(vec![0u8; stride - width * cpp]);
+        }
+
+        flipped
+    }
+
+    /// Performs premultiplication of the pixels if
+    /// UNPACK_PREMULTIPLY_ALPHA_WEBGL is currently enabled.
+    fn premultiply_pixels(&self,
+                          format: TexFormat,
+                          data_type: TexDataType,
+                          pixels: Vec<u8>) -> Vec<u8> {
+        if !self.texture_unpacking_settings.get().contains(PREMULTIPLY_ALPHA) {
+            return pixels;
+        }
+
+        match (format, data_type) {
+            (TexFormat::RGBA, TexDataType::UnsignedByte) => {
+                let mut premul = Vec::<u8>::with_capacity(pixels.len());
+                for rgba in pixels.chunks(4) {
+                    premul.push(multiply_u8_pixel(rgba[0], rgba[3]));
+                    premul.push(multiply_u8_pixel(rgba[1], rgba[3]));
+                    premul.push(multiply_u8_pixel(rgba[2], rgba[3]));
+                    premul.push(rgba[3]);
+                }
+                premul
+            }
+            (TexFormat::LuminanceAlpha, TexDataType::UnsignedByte) => {
+                let mut premul = Vec::<u8>::with_capacity(pixels.len());
+                for la in pixels.chunks(2) {
+                    premul.push(multiply_u8_pixel(la[0], la[1]));
+                    premul.push(la[1]);
+                }
+                premul
+            }
+
+            (TexFormat::RGBA, TexDataType::UnsignedShort5551) => {
+                let mut premul = Vec::<u8>::with_capacity(pixels.len());
+                for mut rgba in pixels.chunks(2) {
+                    let pix = rgba.read_u16::<NativeEndian>().unwrap();
+                    if pix & (1 << 15) != 0 {
+                        premul.write_u16::<NativeEndian>(pix).unwrap();
+                    } else {
+                        premul.write_u16::<NativeEndian>(0).unwrap();
+                    }
+                }
+                premul
+            }
+
+            (TexFormat::RGBA, TexDataType::UnsignedShort4444) => {
+                let mut premul = Vec::<u8>::with_capacity(pixels.len());
+                for mut rgba in pixels.chunks(2) {
+                    let pix = rgba.read_u16::<NativeEndian>().unwrap();
+                    let extend_to_8_bits = |val| { (val | val << 4) as u8 };
+                    let r = extend_to_8_bits(pix & 0x000f);
+                    let g = extend_to_8_bits((pix & 0x00f0) >> 4);
+                    let b = extend_to_8_bits((pix & 0x0f00) >> 8);
+                    let a = extend_to_8_bits((pix & 0xf000) >> 12);
+
+                    premul.write_u16::<NativeEndian>((multiply_u8_pixel(r, a) & 0xf0) as u16 >> 4 |
+                                                     (multiply_u8_pixel(g, a) & 0xf0) as u16 |
+                                                     ((multiply_u8_pixel(b, a) & 0xf0) as u16) << 4 |
+                                                     pix & 0xf000).unwrap();
+                }
+                premul
+            }
+
+            // Other formats don't have alpha, so return their data untouched.
+            _ => pixels
+        }
     }
 
     fn tex_image_2d(&self,
@@ -480,14 +651,13 @@ impl WebGLRenderingContext {
                     width: u32,
                     height: u32,
                     _border: u32,
+                    unpacking_alignment: u32,
                     pixels: Vec<u8>) { // NB: pixels should NOT be premultipied
-        if internal_format == TexFormat::RGBA &&
-           data_type == TexDataType::UnsignedByte &&
-           self.texture_unpacking_settings.get().contains(PREMULTIPLY_ALPHA) {
-            // TODO(emilio): premultiply here.
-        }
+        // FINISHME: Consider doing premultiply and flip in a single mutable Vec.
+        let pixels = self.premultiply_pixels(internal_format, data_type, pixels);
 
-        // TODO(emilio): Flip Y axis if necessary here
+        let pixels = self.flip_teximage_y(pixels, internal_format, data_type,
+                                          width as usize, height as usize, unpacking_alignment as usize);
 
         // TexImage2D depth is always equal to 1
         handle_potential_webgl_error!(self, texture.initialize(target,
@@ -497,7 +667,16 @@ impl WebGLRenderingContext {
                                                                level,
                                                                Some(data_type)));
 
-        // TODO(emilio): Invert axis, convert colorspace, premultiply alpha if requested
+        // Set the unpack alignment.  For textures coming from arrays,
+        // this will be the current value of the context's
+        // GL_UNPACK_ALIGNMENT, while for textures from images or
+        // canvas (produced by rgba8_image_to_tex_image_data()), it
+        // will be 1.
+        self.ipc_renderer
+            .send(CanvasMsg::WebGL(WebGLCommand::PixelStorei(constants::UNPACK_ALIGNMENT, unpacking_alignment as i32)))
+            .unwrap();
+
+        // TODO(emilio): convert colorspace if requested
         let msg = WebGLCommand::TexImage2D(target.as_gl_constant(), level as i32,
                                            internal_format.as_gl_constant() as i32,
                                            width as i32, height as i32,
@@ -523,6 +702,7 @@ impl WebGLRenderingContext {
                         height: u32,
                         format: TexFormat,
                         data_type: TexDataType,
+                        unpacking_alignment: u32,
                         pixels: Vec<u8>) {  // NB: pixels should NOT be premultipied
         // We have already validated level
         let image_info = texture.image_info_for_target(&target, level);
@@ -542,9 +722,22 @@ impl WebGLRenderingContext {
             return self.webgl_error(InvalidOperation);
         }
 
-        // TODO(emilio): Flip Y axis if necessary here
+        // FINISHME: Consider doing premultiply and flip in a single mutable Vec.
+        let pixels = self.premultiply_pixels(format, data_type, pixels);
 
-        // TODO(emilio): Invert axis, convert colorspace, premultiply alpha if requested
+        let pixels = self.flip_teximage_y(pixels, format, data_type,
+                                          width as usize, height as usize, unpacking_alignment as usize);
+
+        // Set the unpack alignment.  For textures coming from arrays,
+        // this will be the current value of the context's
+        // GL_UNPACK_ALIGNMENT, while for textures from images or
+        // canvas (produced by rgba8_image_to_tex_image_data()), it
+        // will be 1.
+        self.ipc_renderer
+            .send(CanvasMsg::WebGL(WebGLCommand::PixelStorei(constants::UNPACK_ALIGNMENT, unpacking_alignment as i32)))
+            .unwrap();
+
+        // TODO(emilio): convert colorspace if requested
         let msg = WebGLCommand::TexSubImage2D(target.as_gl_constant(),
                                               level as i32, xoffset, yoffset,
                                               width as i32, height as i32,
@@ -583,19 +776,24 @@ impl Drop for WebGLRenderingContext {
 #[allow(unsafe_code)]
 unsafe fn typed_array_or_sequence_to_vec<T>(cx: *mut JSContext,
                                             sequence_or_abv: *mut JSObject,
-                                            config: <T as FromJSValConvertible>::Config) -> Result<Vec<T>, Error>
-    where T: ArrayBufferViewContents + FromJSValConvertible,
-          <T as FromJSValConvertible>::Config: Clone,
+                                            config: <T::Element as FromJSValConvertible>::Config)
+                                            -> Result<Vec<T::Element>, Error>
+    where T: TypedArrayElement,
+          T::Element: FromJSValConvertible + Clone,
+          <T::Element as FromJSValConvertible>::Config: Clone,
 {
-    assert!(!sequence_or_abv.is_null());
-    if let Some(v) = array_buffer_view_to_vec_checked::<T>(sequence_or_abv) {
-        return Ok(v);
+    // TODO(servo/rust-mozjs#330): replace this with a macro that supports generic types.
+    let mut typed_array_root = Rooted::new_unrooted();
+    let typed_array: Option<TypedArray<T>> =
+          TypedArray::from(cx, &mut typed_array_root, sequence_or_abv).ok();
+    if let Some(mut typed_array) = typed_array {
+        return Ok(typed_array.as_slice().to_vec());
     }
-
+    assert!(!sequence_or_abv.is_null());
     rooted!(in(cx) let mut val = UndefinedValue());
     sequence_or_abv.to_jsval(cx, val.handle_mut());
 
-    match Vec::<T>::from_jsval(cx, val.handle(), config) {
+    match Vec::<T::Element>::from_jsval(cx, val.handle(), config) {
         Ok(ConversionResult::Success(v)) => Ok(v),
         Ok(ConversionResult::Failure(error)) => Err(Error::Type(error.into_owned())),
         // FIXME: What to do here? Generated code only aborts the execution of
@@ -605,13 +803,13 @@ unsafe fn typed_array_or_sequence_to_vec<T>(cx: *mut JSContext,
 }
 
 #[allow(unsafe_code)]
-unsafe fn fallible_array_buffer_view_to_vec<T>(abv: *mut JSObject) -> Result<Vec<T>, Error>
-    where T: ArrayBufferViewContents
+unsafe fn fallible_array_buffer_view_to_vec(cx: *mut JSContext, abv: *mut JSObject) -> Result<Vec<u8>, Error>
 {
     assert!(!abv.is_null());
-    match array_buffer_view_to_vec::<T>(abv) {
-        Some(v) => Ok(v),
-        None => Err(Error::Type("Not an ArrayBufferView".to_owned())),
+    typedarray!(in(cx) let array_buffer_view: ArrayBufferView = abv);
+    match array_buffer_view {
+        Ok(mut v) => Ok(v.as_slice().to_vec()),
+        Err(_) => Err(Error::Type("Not an ArrayBufferView".to_owned())),
     }
 }
 
@@ -990,15 +1188,15 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
-    unsafe fn BufferData(&self, _cx: *mut JSContext, target: u32, data: *mut JSObject, usage: u32) -> Fallible<()> {
+    unsafe fn BufferData(&self, cx: *mut JSContext, target: u32, data: *mut JSObject, usage: u32) -> Fallible<()> {
         if data.is_null() {
             return Ok(self.webgl_error(InvalidValue));
         }
 
-        let data_vec = match array_buffer_to_vec::<u8>(data) {
-            Some(data) => data,
-            // Not an ArrayBuffer object, maybe an ArrayBufferView?
-            None => try!(fallible_array_buffer_view_to_vec::<u8>(data)),
+        typedarray!(in(cx) let array_buffer: ArrayBuffer = data);
+        let data_vec = match array_buffer {
+            Ok(mut data) => data.as_slice().to_vec(),
+            Err(_) => try!(fallible_array_buffer_view_to_vec(cx, data)),
         };
 
         let bound_buffer = match target {
@@ -1058,15 +1256,15 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.5
-    unsafe fn BufferSubData(&self, _cx: *mut JSContext, target: u32, offset: i64, data: *mut JSObject) -> Fallible<()> {
+    unsafe fn BufferSubData(&self, cx: *mut JSContext, target: u32, offset: i64, data: *mut JSObject) -> Fallible<()> {
         if data.is_null() {
             return Ok(self.webgl_error(InvalidValue));
         }
 
-        let data_vec = match array_buffer_to_vec::<u8>(data) {
-            Some(data) => data,
-            // Not an ArrayBuffer object, maybe an ArrayBufferView?
-            None => try!(fallible_array_buffer_view_to_vec::<u8>(data)),
+        typedarray!(in(cx) let array_buffer: ArrayBuffer = data);
+        let data_vec = match array_buffer {
+            Ok(mut data) => data.as_slice().to_vec(),
+            Err(_) => try!(fallible_array_buffer_view_to_vec(cx, data)),
         };
 
         let bound_buffer = match target {
@@ -1096,9 +1294,9 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
-    unsafe fn CompressedTexImage2D(&self, _cx: *mut JSContext, _target: u32, _level: i32, _internal_format: u32,
+    unsafe fn CompressedTexImage2D(&self, cx: *mut JSContext, _target: u32, _level: i32, _internal_format: u32,
                             _width: i32, _height: i32, _border: i32, pixels: *mut JSObject) -> Fallible<()> {
-        let _data = try!(fallible_array_buffer_view_to_vec::<u8>(pixels) );
+        let _data = try!(fallible_array_buffer_view_to_vec(cx, pixels) );
         // FIXME: No compressed texture format is currently supported, so error out as per
         // https://www.khronos.org/registry/webgl/specs/latest/1.0/#COMPRESSED_TEXTURE_SUPPORT
         self.webgl_error(InvalidEnum);
@@ -1107,10 +1305,10 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
-    unsafe fn CompressedTexSubImage2D(&self, _cx: *mut JSContext, _target: u32, _level: i32,
+    unsafe fn CompressedTexSubImage2D(&self, cx: *mut JSContext, _target: u32, _level: i32,
                                _xoffset: i32, _yoffset: i32, _width: i32, _height: i32,
                                _format: u32, pixels: *mut JSObject) -> Fallible<()> {
-        let _data = try!(fallible_array_buffer_view_to_vec::<u8>(pixels));
+        let _data = try!(fallible_array_buffer_view_to_vec(cx, pixels));
         // FIXME: No compressed texture format is currently supported, so error out as per
         // https://www.khronos.org/registry/webgl/specs/latest/1.0/#COMPRESSED_TEXTURE_SUPPORT
         self.webgl_error(InvalidEnum);
@@ -1859,13 +2057,11 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                     1 | 2 | 4 | 8 => (),
                     _ => return self.webgl_error(InvalidValue),
                 }
+                self.texture_unpacking_alignment.set(param_value as u32);
+                return;
             },
             _ => return self.webgl_error(InvalidEnum),
         }
-
-        self.ipc_renderer
-            .send(CanvasMsg::WebGL(WebGLCommand::PixelStorei(param_name, param_value)))
-            .unwrap()
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.3
@@ -1877,15 +2073,16 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
 
     #[allow(unsafe_code)]
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.12
-    unsafe fn ReadPixels(&self, _cx: *mut JSContext, x: i32, y: i32, width: i32, height: i32,
+    unsafe fn ReadPixels(&self, cx: *mut JSContext, x: i32, y: i32, width: i32, height: i32,
                   format: u32, pixel_type: u32, pixels: *mut JSObject) -> Fallible<()> {
         if pixels.is_null() {
             return Ok(self.webgl_error(InvalidValue));
         }
 
-        let mut data = match { array_buffer_view_data::<u8>(pixels) } {
-            Some(data) => data,
-            None => return Err(Error::Type("Not an ArrayBufferView".to_owned())),
+        typedarray!(in(cx) let mut pixels_data: ArrayBufferView = pixels);
+        let mut data = match { pixels_data.as_mut() } {
+            Ok(data) => data.as_mut_slice(),
+            Err(_) => return Err(Error::Type("Not an ArrayBufferView".to_owned())),
         };
 
         if !self.validate_framebuffer_complete() {
@@ -2131,7 +2328,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<i32>(cx, data, ConversionBehavior::Default));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Int32>(cx, data, ConversionBehavior::Default));
 
         if self.validate_uniform_parameters(uniform, UniformSetterType::Int, &data_vec) {
             self.ipc_renderer
@@ -2149,7 +2346,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
 
         if self.validate_uniform_parameters(uniform, UniformSetterType::Float, &data_vec) {
             self.ipc_renderer
@@ -2178,7 +2375,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
 
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::FloatVec2,
@@ -2211,7 +2408,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<i32>(cx, data, ConversionBehavior::Default));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Int32>(cx, data, ConversionBehavior::Default));
 
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::IntVec2,
@@ -2244,7 +2441,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
 
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::FloatVec3,
@@ -2277,7 +2474,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<i32>(cx, data, ConversionBehavior::Default));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Int32>(cx, data, ConversionBehavior::Default));
 
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::IntVec3,
@@ -2311,7 +2508,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<i32>(cx, data, ConversionBehavior::Default));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Int32>(cx, data, ConversionBehavior::Default));
 
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::IntVec4,
@@ -2344,7 +2541,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                   uniform: Option<&WebGLUniformLocation>,
                   data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
 
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::FloatVec4,
@@ -2365,7 +2562,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                         transpose: bool,
                         data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::FloatMat2,
                                             &data_vec) {
@@ -2385,7 +2582,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                         transpose: bool,
                         data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::FloatMat3,
                                             &data_vec) {
@@ -2405,7 +2602,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
                         transpose: bool,
                         data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
         if self.validate_uniform_parameters(uniform,
                                             UniformSetterType::FloatMat4,
                                             &data_vec) {
@@ -2445,7 +2642,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     #[allow(unsafe_code)]
     unsafe fn VertexAttrib1fv(&self, cx: *mut JSContext, indx: u32, data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
         if data_vec.len() < 1 {
             return Ok(self.webgl_error(InvalidOperation));
         }
@@ -2462,7 +2659,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     #[allow(unsafe_code)]
     unsafe fn VertexAttrib2fv(&self, cx: *mut JSContext, indx: u32, data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
         if data_vec.len() < 2 {
             return Ok(self.webgl_error(InvalidOperation));
         }
@@ -2479,7 +2676,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     #[allow(unsafe_code)]
     unsafe fn VertexAttrib3fv(&self, cx: *mut JSContext, indx: u32, data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
         if data_vec.len() < 3 {
             return Ok(self.webgl_error(InvalidOperation));
         }
@@ -2496,7 +2693,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     #[allow(unsafe_code)]
     unsafe fn VertexAttrib4fv(&self, cx: *mut JSContext, indx: u32, data: *mut JSObject) -> Fallible<()> {
         assert!(!data.is_null());
-        let data_vec = try!(typed_array_or_sequence_to_vec::<f32>(cx, data, ()));
+        let data_vec = try!(typed_array_or_sequence_to_vec::<Float32>(cx, data, ()));
         if data_vec.len() < 4 {
             return Ok(self.webgl_error(InvalidOperation));
         }
@@ -2560,7 +2757,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
     #[allow(unsafe_code)]
     unsafe fn TexImage2D(&self,
-                  _cx: *mut JSContext,
+                  cx: *mut JSContext,
                   target: u32,
                   level: i32,
                   internal_format: u32,
@@ -2573,7 +2770,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         let data = if data_ptr.is_null() {
             None
         } else {
-            Some(try!(fallible_array_buffer_view_to_vec::<u8>(data_ptr)))
+            Some(try!(fallible_array_buffer_view_to_vec(cx, data_ptr)))
         };
 
         let validator = TexImage2DValidator::new(self, target, level,
@@ -2594,10 +2791,12 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
             Err(_) => return Ok(()), // NB: The validator sets the correct error for us.
         };
 
+        let unpacking_alignment = self.texture_unpacking_alignment.get();
+
         let expected_byte_length =
             match { self.validate_tex_image_2d_data(width, height,
-                                                           format, data_type,
-                                                           data_ptr) } {
+                                                    format, data_type,
+                                                    unpacking_alignment, data_ptr, cx) } {
                 Ok(byte_length) => byte_length,
                 Err(()) => return Ok(()),
             };
@@ -2620,7 +2819,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         }
 
         self.tex_image_2d(texture, target, data_type, format,
-                          level, width, height, border, buff);
+                          level, width, height, border, unpacking_alignment, buff);
 
         Ok(())
     }
@@ -2658,15 +2857,17 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
             Err(_) => return Ok(()), // NB: The validator sets the correct error for us.
         };
 
+        let pixels = self.rgba8_image_to_tex_image_data(format, data_type, pixels);
+
         self.tex_image_2d(texture, target, data_type, format,
-                          level, width, height, border, pixels);
+                          level, width, height, border, 1, pixels);
         Ok(())
     }
 
     // https://www.khronos.org/registry/webgl/specs/latest/1.0/#5.14.8
     #[allow(unsafe_code)]
     unsafe fn TexSubImage2D(&self,
-                     _cx: *mut JSContext,
+                     cx: *mut JSContext,
                      target: u32,
                      level: i32,
                      xoffset: i32,
@@ -2679,7 +2880,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         let data = if data_ptr.is_null() {
             None
         } else {
-            Some(try!(fallible_array_buffer_view_to_vec::<u8>(data_ptr)))
+            Some(try!(fallible_array_buffer_view_to_vec(cx, data_ptr)))
         };
 
 
@@ -2700,10 +2901,12 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
             Err(_) => return Ok(()), // NB: The validator sets the correct error for us.
         };
 
+        let unpacking_alignment = self.texture_unpacking_alignment.get();
+
         let expected_byte_length =
             match { self.validate_tex_image_2d_data(width, height,
-                                                           format, data_type,
-                                                           data_ptr) } {
+                                                    format, data_type,
+                                                    unpacking_alignment, data_ptr, cx) } {
                 Ok(byte_length) => byte_length,
                 Err(()) => return Ok(()),
             };
@@ -2726,7 +2929,7 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
         }
 
         self.tex_sub_image_2d(texture, target, level, xoffset, yoffset,
-                              width, height, format, data_type, buff);
+                              width, height, format, data_type, unpacking_alignment, buff);
         Ok(())
     }
 
@@ -2762,8 +2965,10 @@ impl WebGLRenderingContextMethods for WebGLRenderingContext {
             Err(_) => return Ok(()), // NB: The validator sets the correct error for us.
         };
 
+        let pixels = self.rgba8_image_to_tex_image_data(format, data_type, pixels);
+
         self.tex_sub_image_2d(texture, target, level, xoffset, yoffset,
-                              width, height, format, data_type, pixels);
+                              width, height, format, data_type, 1, pixels);
         Ok(())
     }
 

@@ -448,6 +448,7 @@ public:
   // Inner windows only.
   virtual void SetHasGamepadEventListener(bool aHasGamepad = true) override;
   void NotifyVREventListenerAdded();
+  bool HasUsedVR() const;
   virtual void EventListenerAdded(nsIAtom* aType) override;
 
   // nsIInterfaceRequestor
@@ -1003,6 +1004,7 @@ public:
                       const mozilla::dom::Sequence<JS::Value>& /* unused */,
                       mozilla::ErrorResult& aError);
   void ClearInterval(int32_t aHandle);
+  void GetOrigin(nsAString& aOrigin);
   void Atob(const nsAString& aAsciiBase64String, nsAString& aBinaryData,
             mozilla::ErrorResult& aError);
   void Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String,
@@ -1801,6 +1803,8 @@ public:
                           DOMHighResTimeStamp aDeadline, bool aDidTimeout);
   nsresult ExecuteIdleRequest(TimeStamp aDeadline);
   void ScheduleIdleRequestDispatch();
+  void SuspendIdleRequests();
+  void ResumeIdleRequests();
 
   typedef mozilla::LinkedList<mozilla::dom::IdleRequest> IdleRequests;
   void InsertIdleCallback(mozilla::dom::IdleRequest* aRequest);

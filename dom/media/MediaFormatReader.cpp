@@ -289,6 +289,10 @@ public:
   {
     return mDecoder->SupportDecoderRecycling();
   }
+  void ConfigurationChanged(const TrackInfo& aConfig) override
+  {
+    mDecoder->ConfigurationChanged(aConfig);
+  }
   RefPtr<ShutdownPromise> Shutdown() override
   {
     RefPtr<MediaDataDecoder> decoder = mDecoder.forget();
@@ -810,9 +814,9 @@ MediaFormatReader::DemuxerProxy::NotifyDataArrived()
 static const char*
 TrackTypeToStr(TrackInfo::TrackType aTrack)
 {
-  MOZ_ASSERT(aTrack == TrackInfo::kAudioTrack ||
-             aTrack == TrackInfo::kVideoTrack ||
-             aTrack == TrackInfo::kTextTrack);
+  MOZ_ASSERT(aTrack == TrackInfo::kAudioTrack
+             || aTrack == TrackInfo::kVideoTrack
+             || aTrack == TrackInfo::kTextTrack);
   switch (aTrack) {
   case TrackInfo::kAudioTrack:
     return "Audio";
@@ -1307,9 +1311,9 @@ MediaFormatReader::ShouldSkip(bool aSkipToNextKeyframe,
   if (NS_FAILED(rv)) {
     return aSkipToNextKeyframe;
   }
-  return (nextKeyframe < aTimeThreshold ||
-          (mVideo.mTimeThreshold
-           && mVideo.mTimeThreshold.ref().EndTime() < aTimeThreshold))
+  return (nextKeyframe < aTimeThreshold
+          || (mVideo.mTimeThreshold
+              && mVideo.mTimeThreshold.ref().EndTime() < aTimeThreshold))
          && nextKeyframe.ToMicroseconds() >= 0
          && !nextKeyframe.IsInfinite();
 }
@@ -1373,13 +1377,13 @@ MediaFormatReader::OnDemuxFailed(TrackType aTrack, const MediaResult& aError)
   switch (aError.Code()) {
     case NS_ERROR_DOM_MEDIA_END_OF_STREAM:
       if (!decoder.mWaitingForData) {
-        decoder.mNeedDraining = true;
+        decoder.RequestDrain();
       }
       NotifyEndOfStream(aTrack);
       break;
     case NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA:
       if (!decoder.mWaitingForData) {
-        decoder.mNeedDraining = true;
+        decoder.RequestDrain();
       }
       NotifyWaitingForData(aTrack);
       break;
@@ -1517,16 +1521,6 @@ MediaFormatReader::NotifyNewOutput(
     decoder.mNumOfConsecutiveError = 0;
   }
   LOG("Done processing new %s samples", TrackTypeToStr(aTrack));
-  ScheduleUpdate(aTrack);
-}
-
-void
-MediaFormatReader::NotifyDrainComplete(TrackType aTrack)
-{
-  MOZ_ASSERT(OnTaskQueue());
-  auto& decoder = GetDecoderData(aTrack);
-  LOG("%s", TrackTypeToStr(aTrack));
-  decoder.mDrainComplete = true;
   ScheduleUpdate(aTrack);
 }
 
@@ -1767,22 +1761,18 @@ MediaFormatReader::HandleDemuxedSamples(
   // Decode all our demuxed frames.
   while (decoder.mQueuedSamples.Length()) {
     RefPtr<MediaRawData> sample = decoder.mQueuedSamples[0];
-    RefPtr<SharedTrackInfo> info = sample->mTrackInfo;
+    RefPtr<TrackInfoSharedPtr> info = sample->mTrackInfo;
 
     if (info && decoder.mLastStreamSourceID != info->GetID()) {
-      bool supportRecycling = MediaPrefs::MediaDecoderCheckRecycling()
-                              && decoder.mDecoder->SupportDecoderRecycling();
-      if (decoder.mNextStreamSourceID.isNothing() ||
-          decoder.mNextStreamSourceID.ref() != info->GetID()) {
-        if (!supportRecycling) {
-          LOG("%s stream id has changed from:%d to:%d, draining decoder.",
-            TrackTypeToStr(aTrack), decoder.mLastStreamSourceID,
-            info->GetID());
-          decoder.mNeedDraining = true;
-          decoder.mNextStreamSourceID = Some(info->GetID());
-          ScheduleUpdate(aTrack);
-          return;
-        }
+      if (decoder.mNextStreamSourceID.isNothing()
+          || decoder.mNextStreamSourceID.ref() != info->GetID()) {
+        LOG("%s stream id has changed from:%d to:%d, draining decoder.",
+          TrackTypeToStr(aTrack), decoder.mLastStreamSourceID,
+          info->GetID());
+        decoder.RequestDrain();
+        decoder.mNextStreamSourceID = Some(info->GetID());
+        ScheduleUpdate(aTrack);
+        return;
       }
 
       LOG("%s stream id has changed from:%d to:%d.",
@@ -1790,9 +1780,9 @@ MediaFormatReader::HandleDemuxedSamples(
           info->GetID());
       decoder.mLastStreamSourceID = info->GetID();
       decoder.mNextStreamSourceID.reset();
-      decoder.mInfo = info;
 
-      if (!supportRecycling) {
+      if (!MediaPrefs::MediaDecoderCheckRecycling()
+          || !decoder.mDecoder->SupportDecoderRecycling()) {
         LOG("Decoder does not support recycling, recreate decoder.");
         // If flushing is required, it will clear our array of queued samples.
         // So make a copy now.
@@ -1801,7 +1791,12 @@ MediaFormatReader::HandleDemuxedSamples(
         if (sample->mKeyframe) {
           decoder.mQueuedSamples.AppendElements(Move(samples));
         }
+      } else if (decoder.mInfo && *decoder.mInfo != *info) {
+        const TrackInfo* trackInfo = *info;
+        decoder.mDecoder->ConfigurationChanged(*trackInfo);
       }
+
+      decoder.mInfo = info;
 
       if (sample->mKeyframe) {
         ScheduleUpdate(aTrack);
@@ -1887,26 +1882,35 @@ MediaFormatReader::DrainDecoder(TrackType aTrack)
   MOZ_ASSERT(OnTaskQueue());
 
   auto& decoder = GetDecoderData(aTrack);
-  if (!decoder.mNeedDraining || decoder.mDraining) {
+  if (decoder.mDrainState == DrainState::Draining) {
     return;
   }
-  decoder.mNeedDraining = false;
-  if (!decoder.mDecoder ||
-      decoder.mNumSamplesInput == decoder.mNumSamplesOutput) {
+  if (!decoder.mDecoder
+      || (decoder.mDrainState != DrainState::PartialDrainPending
+          && decoder.mNumSamplesInput == decoder.mNumSamplesOutput)) {
     // No frames to drain.
     LOGV("Draining %s with nothing to drain", TrackTypeToStr(aTrack));
-    NotifyDrainComplete(aTrack);
+    decoder.mDrainState = DrainState::DrainAborted;
+    ScheduleUpdate(aTrack);
     return;
   }
-  decoder.mDraining = true;
+
+  decoder.mDrainState = DrainState::Draining;
+
   RefPtr<MediaFormatReader> self = this;
   decoder.mDecoder->Drain()
     ->Then(mTaskQueue, __func__,
            [self, this, aTrack, &decoder]
            (const MediaDataDecoder::DecodedData& aResults) {
              decoder.mDrainRequest.Complete();
-             NotifyNewOutput(aTrack, aResults);
-             NotifyDrainComplete(aTrack);
+             if (aResults.IsEmpty()) {
+               decoder.mDrainState = DrainState::DrainCompleted;
+             } else {
+               NotifyNewOutput(aTrack, aResults);
+               // Let's see if we have any more data available to drain.
+               decoder.mDrainState = DrainState::PartialDrainPending;
+             }
+             ScheduleUpdate(aTrack);
            },
            [self, this, aTrack, &decoder](const MediaResult& aError) {
              decoder.mDrainRequest.Complete();
@@ -2026,16 +2030,15 @@ MediaFormatReader::Update(TrackType aTrack)
       LOG("Rejecting %s promise: DECODE_ERROR", TrackTypeToStr(aTrack));
       decoder.RejectPromise(decoder.mError.ref(), __func__);
       return;
-    } else if (decoder.mDrainComplete) {
-      bool wasDraining = decoder.mDraining;
-      decoder.mDrainComplete = false;
-      decoder.mDraining = false;
+    } else if (decoder.mDrainState == DrainState::DrainCompleted
+               || decoder.mDrainState == DrainState::DrainAborted) {
       if (decoder.mDemuxEOS) {
         LOG("Rejecting %s promise: EOS", TrackTypeToStr(aTrack));
         decoder.RejectPromise(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
       } else if (decoder.mWaitingForData) {
-        if (wasDraining && decoder.mLastSampleTime &&
-            !decoder.mNextStreamSourceID) {
+        if (decoder.mDrainState == DrainState::DrainCompleted
+            && decoder.mLastSampleTime
+            && !decoder.mNextStreamSourceID) {
           // We have completed draining the decoder following WaitingForData.
           // Set up the internal seek machinery to be able to resume from the
           // last sample decoded.
@@ -2049,6 +2052,9 @@ MediaFormatReader::Update(TrackType aTrack)
           decoder.RejectPromise(NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA, __func__);
         }
       }
+
+      decoder.mDrainState = DrainState::None;
+
       // Now that draining has completed, we check if we have received
       // new data again as the result may now be different from the earlier
       // run.
@@ -2056,8 +2062,9 @@ MediaFormatReader::Update(TrackType aTrack)
         LOGV("Nothing more to do");
         return;
       }
-    } else if (decoder.mDemuxEOS && !decoder.mNeedDraining &&
-               !decoder.HasPendingDrain() && decoder.mQueuedSamples.IsEmpty()) {
+    } else if (decoder.mDemuxEOS
+               && !decoder.HasPendingDrain()
+               && decoder.mQueuedSamples.IsEmpty()) {
       // It is possible to transition from WAITING_FOR_DATA directly to EOS
       // state during the internal seek; in which case no draining would occur.
       // There is no more samples left to be decoded and we are already in
@@ -2071,8 +2078,11 @@ MediaFormatReader::Update(TrackType aTrack)
     }
   }
 
-  if (decoder.mNeedDraining) {
-    DrainDecoder(aTrack);
+  if (decoder.mDrainState == DrainState::DrainRequested
+      || decoder.mDrainState == DrainState::PartialDrainPending) {
+    if (decoder.mOutput.IsEmpty()) {
+      DrainDecoder(aTrack);
+    }
     return;
   }
 
@@ -2090,7 +2100,7 @@ MediaFormatReader::Update(TrackType aTrack)
     media::TimeUnit nextKeyframe;
     if (aTrack == TrackType::kVideoTrack && !decoder.HasInternalSeekPending()
         && NS_SUCCEEDED(
-          decoder.mTrackDemuxer->GetNextRandomAccessPoint(&nextKeyframe))) {
+             decoder.mTrackDemuxer->GetNextRandomAccessPoint(&nextKeyframe))) {
       if (needsNewDecoder) {
         ShutdownDecoder(aTrack);
       }
@@ -2153,8 +2163,8 @@ MediaFormatReader::ReturnOutput(MediaData* aData, TrackType aTrack)
   if (aTrack == TrackInfo::kAudioTrack) {
     AudioData* audioData = static_cast<AudioData*>(aData);
 
-    if (audioData->mChannels != mInfo.mAudio.mChannels ||
-        audioData->mRate != mInfo.mAudio.mRate) {
+    if (audioData->mChannels != mInfo.mAudio.mChannels
+        || audioData->mRate != mInfo.mAudio.mRate) {
       LOG("change of audio format (rate:%d->%d). "
           "This is an unsupported configuration",
           mInfo.mAudio.mRate, audioData->mRate);
@@ -2489,8 +2499,8 @@ MediaFormatReader::OnSeekFailed(TrackType aTrack, const MediaResult& aError)
           break;
         }
       }
-      if (nextSeekTime.isNothing() ||
-          nextSeekTime.ref() > mFallbackSeekTime.ref()) {
+      if (nextSeekTime.isNothing()
+          || nextSeekTime.ref() > mFallbackSeekTime.ref()) {
         nextSeekTime = Some(mFallbackSeekTime.ref());
         LOG("Unable to seek audio to video seek time. A/V sync may be broken");
       } else {
@@ -2742,8 +2752,8 @@ MediaFormatReader::UpdateBuffered()
     intervals = mVideo.mTimeRanges;
   }
 
-  if (!intervals.Length() ||
-      intervals.GetStart() == media::TimeUnit::FromMicroseconds(0)) {
+  if (!intervals.Length()
+      || intervals.GetStart() == media::TimeUnit::FromMicroseconds(0)) {
     // IntervalSet already starts at 0 or is empty, nothing to shift.
     mBuffered = intervals;
   } else {

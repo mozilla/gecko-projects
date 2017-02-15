@@ -156,6 +156,7 @@ use gecko_bindings::structs::Loader;
 use gecko_bindings::structs::ServoStyleSheet;
 use gecko_bindings::structs::EffectCompositor_CascadeLevel;
 use gecko_bindings::structs::RawServoAnimationValueBorrowedListBorrowed;
+use gecko_bindings::structs::RefPtr;
 pub type nsTArrayBorrowed_uintptr_t<'a> = &'a mut ::gecko_bindings::structs::nsTArray<usize>;
 pub type ServoComputedValuesStrong = ::gecko_bindings::sugar::ownership::Strong<ServoComputedValues>;
 pub type ServoComputedValuesBorrowed<'a> = &'a ServoComputedValues;
@@ -312,6 +313,10 @@ extern "C" {
     pub fn Gecko_IsInDocument(node: RawGeckoNodeBorrowed) -> bool;
 }
 extern "C" {
+    pub fn Gecko_FlattenedTreeParentIsParent(node: RawGeckoNodeBorrowed)
+     -> bool;
+}
+extern "C" {
     pub fn Gecko_GetParentNode(node: RawGeckoNodeBorrowed)
      -> RawGeckoNodeBorrowedOrNull;
 }
@@ -330,10 +335,6 @@ extern "C" {
 extern "C" {
     pub fn Gecko_GetNextSibling(node: RawGeckoNodeBorrowed)
      -> RawGeckoNodeBorrowedOrNull;
-}
-extern "C" {
-    pub fn Gecko_GetParentElement(element: RawGeckoElementBorrowed)
-     -> RawGeckoElementBorrowedOrNull;
 }
 extern "C" {
     pub fn Gecko_GetFirstChildElement(element: RawGeckoElementBorrowed)
@@ -375,10 +376,6 @@ extern "C" {
 }
 extern "C" {
     pub fn Gecko_ElementState(element: RawGeckoElementBorrowed) -> u16;
-}
-extern "C" {
-    pub fn Gecko_IsHTMLElementInHTMLDocument(element: RawGeckoElementBorrowed)
-     -> bool;
 }
 extern "C" {
     pub fn Gecko_IsLink(element: RawGeckoElementBorrowed) -> bool;
@@ -503,7 +500,11 @@ extern "C" {
      -> u32;
 }
 extern "C" {
-    pub fn Gecko_GetServoDeclarationBlock(element: RawGeckoElementBorrowed)
+    pub fn Gecko_GetStyleAttrDeclarationBlock(element: RawGeckoElementBorrowed)
+     -> RawServoDeclarationBlockStrongBorrowedOrNull;
+}
+extern "C" {
+    pub fn Gecko_GetHTMLPresentationAttrDeclarationBlock(element: RawGeckoElementBorrowed)
      -> RawServoDeclarationBlockStrongBorrowedOrNull;
 }
 extern "C" {
@@ -633,6 +634,10 @@ extern "C" {
     pub fn Gecko_UnsetNodeFlags(node: RawGeckoNodeBorrowed, flags: u32);
 }
 extern "C" {
+    pub fn Gecko_SetOwnerDocumentNeedsStyleFlush(element:
+                                                     RawGeckoElementBorrowed);
+}
+extern "C" {
     pub fn Gecko_GetStyleContext(node: RawGeckoNodeBorrowed,
                                  aPseudoTagOrNull: *mut nsIAtom)
      -> *mut nsStyleContext;
@@ -743,6 +748,35 @@ extern "C" {
     pub fn Gecko_NewCSSValueSharedList(len: u32) -> *mut nsCSSValueSharedList;
 }
 extern "C" {
+    pub fn Gecko_CSSValue_GetArrayItem(css_value: nsCSSValueBorrowedMut,
+                                       index: i32) -> nsCSSValueBorrowedMut;
+}
+extern "C" {
+    pub fn Gecko_CSSValue_GetArrayItemConst(css_value: nsCSSValueBorrowed,
+                                            index: i32) -> nsCSSValueBorrowed;
+}
+extern "C" {
+    pub fn Gecko_CSSValue_GetAbsoluteLength(css_value: nsCSSValueBorrowed)
+     -> nscoord;
+}
+extern "C" {
+    pub fn Gecko_CSSValue_GetAngle(css_value: nsCSSValueBorrowed) -> f32;
+}
+extern "C" {
+    pub fn Gecko_CSSValue_GetKeyword(aCSSValue: nsCSSValueBorrowed)
+     -> nsCSSKeyword;
+}
+extern "C" {
+    pub fn Gecko_CSSValue_GetNumber(css_value: nsCSSValueBorrowed) -> f32;
+}
+extern "C" {
+    pub fn Gecko_CSSValue_GetPercentage(css_value: nsCSSValueBorrowed) -> f32;
+}
+extern "C" {
+    pub fn Gecko_CSSValue_GetCalc(aCSSValue: nsCSSValueBorrowed)
+     -> nsStyleCoord_CalcValue;
+}
+extern "C" {
     pub fn Gecko_CSSValue_SetAbsoluteLength(css_value: nsCSSValueBorrowedMut,
                                             len: nscoord);
 }
@@ -769,10 +803,6 @@ extern "C" {
 extern "C" {
     pub fn Gecko_CSSValue_SetFunction(css_value: nsCSSValueBorrowedMut,
                                       len: i32);
-}
-extern "C" {
-    pub fn Gecko_CSSValue_GetArrayItem(css_value: nsCSSValueBorrowedMut,
-                                       index: i32) -> nsCSSValueBorrowedMut;
 }
 extern "C" {
     pub fn Gecko_CSSValue_Drop(css_value: nsCSSValueBorrowedMut);
@@ -1100,10 +1130,6 @@ extern "C" {
     pub fn Servo_Element_ClearData(node: RawGeckoElementBorrowed);
 }
 extern "C" {
-    pub fn Servo_Element_ShouldTraverse(node: RawGeckoElementBorrowed)
-     -> bool;
-}
-extern "C" {
     pub fn Servo_StyleSheet_Empty(parsing_mode: SheetParsingMode)
      -> RawServoStyleSheetStrong;
 }
@@ -1277,6 +1303,20 @@ extern "C" {
      -> RawServoDeclarationBlockStrong;
 }
 extern "C" {
+    pub fn Servo_AnimationValue_Serialize(value:
+                                              RawServoAnimationValueBorrowed,
+                                          property: nsCSSPropertyID,
+                                          buffer: *mut nsAString_internal);
+}
+extern "C" {
+    pub fn Servo_AnimationValue_GetOpacity(value: RawServoAnimationValueBorrowed)
+     -> f32;
+}
+extern "C" {
+    pub fn Servo_AnimationValue_GetTransform(value: RawServoAnimationValueBorrowed,
+                                             list: &mut RefPtr<nsCSSValueSharedList>);
+}
+extern "C" {
     pub fn Servo_ParseStyleAttribute(data: *const nsACString_internal)
      -> RawServoDeclarationBlockStrong;
 }
@@ -1371,6 +1411,13 @@ extern "C" {
                                                          nsCSSPropertyID);
 }
 extern "C" {
+    pub fn Servo_DeclarationBlock_AddPresValue(declarations:
+                                                   RawServoDeclarationBlockBorrowed,
+                                               property: nsCSSPropertyID,
+                                               css_value:
+                                                   nsCSSValueBorrowedMut);
+}
+extern "C" {
     pub fn Servo_CSSSupports2(name: *const nsACString_internal,
                               value: *const nsACString_internal) -> bool;
 }
@@ -1430,7 +1477,7 @@ extern "C" {
 extern "C" {
     pub fn Servo_TraverseSubtree(root: RawGeckoElementBorrowed,
                                  set: RawServoStyleSetBorrowed,
-                                 root_behavior: TraversalRootBehavior);
+                                 root_behavior: TraversalRootBehavior) -> bool;
 }
 extern "C" {
     pub fn Servo_AssertTreeIsClean(root: RawGeckoElementBorrowed);

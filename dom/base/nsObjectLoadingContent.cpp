@@ -88,6 +88,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/dom/HTMLObjectElementBinding.h"
 #include "mozilla/dom/HTMLSharedObjectElement.h"
+#include "mozilla/dom/HTMLObjectElement.h"
 #include "nsChannelClassifier.h"
 
 #ifdef XP_WIN
@@ -96,13 +97,6 @@
 #undef CreateEvent
 #endif
 #endif // XP_WIN
-
-#ifdef XP_MACOSX
-// HandlePluginCrashed() and HandlePluginInstantiated() needed from here to
-// fix bug 1147521.  Should later be replaced by proper interface methods,
-// maybe on nsIObjectLoadingContext.
-#include "mozilla/dom/HTMLObjectElement.h"
-#endif
 
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
@@ -663,7 +657,7 @@ nsObjectLoadingContent::nsObjectLoadingContent()
   , mInstantiating(false)
   , mNetworkCreated(true)
   , mActivated(false)
-  , mContentBlockingDisabled(false)
+  , mContentBlockingEnabled(false)
   , mIsStopping(false)
   , mIsLoading(false)
   , mScriptRequested(false)
@@ -1058,7 +1052,7 @@ nsObjectLoadingContent::OnStartRequest(nsIRequest *aRequest,
   nsCOMPtr<nsIChannel> chan(do_QueryInterface(aRequest));
   NS_ASSERTION(chan, "Why is our request not a channel?");
 
-  nsresult status;
+  nsresult status = NS_OK;
   bool success = IsSuccessfulRequest(aRequest, &status);
 
   if (status == NS_ERROR_BLOCKED_URI) {
@@ -1073,11 +1067,11 @@ nsObjectLoadingContent::OnStartRequest(nsIRequest *aRequest,
       console->LogStringMessage(message.get());
     }
     Telemetry::Accumulate(Telemetry::PLUGIN_BLOCKED_FOR_STABILITY, 1);
+    mContentBlockingEnabled = true;
     return NS_ERROR_FAILURE;
   } else if (status == NS_ERROR_TRACKING_URI) {
+    mContentBlockingEnabled = true;
     return NS_ERROR_FAILURE;
-  } else {
-    mContentBlockingDisabled = true;
   }
 
   if (!success) {
@@ -2595,6 +2589,7 @@ nsObjectLoadingContent::OpenChannel()
   NS_ENSURE_SUCCESS(rv, rv);
   if (inherit) {
     nsCOMPtr<nsILoadInfo> loadinfo = chan->GetLoadInfo();
+    NS_ENSURE_STATE(loadinfo);
     loadinfo->SetPrincipalToInherit(thisContent->NodePrincipal());
   }
 
@@ -3017,7 +3012,7 @@ nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
   // Fixup mFallbackType
   //
   nsCOMPtr<nsIContent> thisContent =
-  do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
+    do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
   NS_ASSERTION(thisContent, "must be a content");
 
   if (!thisContent->IsHTMLElement() || mContentType.IsEmpty()) {
@@ -3030,8 +3025,10 @@ nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
   // child embeds as we find them in the upcoming loop.
   mType = eType_Null;
 
-  // Do a breadth-first traverse of node tree with the current element as root,
-  // looking for the first embed we can find.
+  bool thisIsObject = thisContent->IsHTMLElement(nsGkAtoms::object);
+
+  // Do a depth-first traverse of node tree with the current element as root,
+  // looking for <embed> or <object> elements that might now need to load.
   nsTArray<nsINodeList*> childNodes;
   if ((thisContent->IsHTMLElement(nsGkAtoms::object) ||
        thisContent->IsHTMLElement(nsGkAtoms::applet)) &&
@@ -3047,10 +3044,11 @@ nsObjectLoadingContent::LoadFallback(FallbackType aType, bool aNotify) {
           nsStyleUtil::IsSignificantChild(child, true, false)) {
         aType = eFallbackAlternate;
       }
-      if (child->IsHTMLElement(nsGkAtoms::embed) &&
-          thisContent->IsHTMLElement(nsGkAtoms::object)) {
-        HTMLSharedObjectElement* object = static_cast<HTMLSharedObjectElement*>(child);
-        if (object) {
+      if (thisIsObject) {
+        if (child->IsHTMLElement(nsGkAtoms::embed)) {
+          HTMLSharedObjectElement* embed = static_cast<HTMLSharedObjectElement*>(child);
+          embed->StartObjectLoad(true, true);
+        } else if (auto object = HTMLObjectElement::FromContent(child)) {
           object->StartObjectLoad(true, true);
         }
       }
@@ -3224,19 +3222,34 @@ nsObjectLoadingContent::GetRunID(SystemCallerGuarantee, ErrorResult& aRv)
 static bool sPrefsInitialized;
 static uint32_t sSessionTimeoutMinutes;
 static uint32_t sPersistentTimeoutDays;
+static bool sBlockURIs;
+
+static void initializeObjectLoadingContentPrefs()
+{
+  if (!sPrefsInitialized) {
+    Preferences::AddUintVarCache(&sSessionTimeoutMinutes,
+                                 "plugin.sessionPermissionNow.intervalInMinutes", 60);
+    Preferences::AddUintVarCache(&sPersistentTimeoutDays,
+                                 "plugin.persistentPermissionAlways.intervalInDays", 90);
+
+    Preferences::AddBoolVarCache(&sBlockURIs, kPrefBlockURIs, false);
+    sPrefsInitialized = true;
+  }
+}
 
 bool
 nsObjectLoadingContent::ShouldBlockContent()
 {
-  if (mContentBlockingDisabled || !mURI)
-    return false;
-
-  if (!IsFlashMIME(mContentType) || !Preferences::GetBool(kPrefBlockURIs)) {
-    mContentBlockingDisabled = true;
-    return false;
+ 
+  if (!sPrefsInitialized) {
+    initializeObjectLoadingContentPrefs();
   }
 
-  return true;
+  if (mContentBlockingEnabled && mURI && IsFlashMIME(mContentType) && sBlockURIs ) {
+    return true;
+  }
+
+  return false;
 }
 
 bool
@@ -3245,11 +3258,7 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
   nsresult rv;
 
   if (!sPrefsInitialized) {
-    Preferences::AddUintVarCache(&sSessionTimeoutMinutes,
-                                 "plugin.sessionPermissionNow.intervalInMinutes", 60);
-    Preferences::AddUintVarCache(&sPersistentTimeoutDays,
-                                 "plugin.persistentPermissionAlways.intervalInDays", 90);
-    sPrefsInitialized = true;
+    initializeObjectLoadingContentPrefs();
   }
 
   if (BrowserTabsRemoteAutostart()) {
@@ -3327,11 +3336,11 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
   NS_ENSURE_TRUE(topDoc, false);
 
   // Check the flash blocking status for this page (this applies to Flash only)
-  nsIDocument::FlashClassification documentClassification = nsIDocument::FlashClassification::Allowed;
+  FlashClassification documentClassification = FlashClassification::Allowed;
   if (IsFlashMIME(mContentType)) {
     documentClassification = ownerDoc->DocumentFlashClassification();
   }
-  if (documentClassification == nsIDocument::FlashClassification::Denied) {
+  if (documentClassification == FlashClassification::Denied) {
     aReason = eFallbackSuppressed;
     return false;
   }
@@ -3404,7 +3413,7 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentTyp
 
   switch (enabledState) {
   case nsIPluginTag::STATE_ENABLED:
-    return documentClassification == nsIDocument::FlashClassification::Allowed;
+    return documentClassification == FlashClassification::Allowed;
   case nsIPluginTag::STATE_CLICKTOPLAY:
     return false;
   }
@@ -3803,6 +3812,38 @@ nsObjectLoadingContent::MaybeFireErrorEvent()
                                            false, false);
     loadBlockingAsyncDispatcher->PostDOMEvent();
   }
+}
+
+bool
+nsObjectLoadingContent::BlockEmbedOrObjectContentLoading()
+{
+  nsCOMPtr<nsIContent> thisContent =
+    do_QueryInterface(static_cast<nsIImageLoadingContent*>(this));
+  if (!thisContent->IsHTMLElement(nsGkAtoms::embed) &&
+      !thisContent->IsHTMLElement(nsGkAtoms::object)) {
+    // Doesn't apply to other elements (i.e. <applet>)
+    return false;
+  }
+
+  // Traverse up the node tree to see if we have any ancestors that may block us
+  // from loading
+  for (nsIContent* parent = thisContent->GetParent();
+       parent;
+       parent = parent->GetParent()) {
+    if (parent->IsAnyOfHTMLElements(nsGkAtoms::video, nsGkAtoms::audio)) {
+      return true;
+    }
+    // If we have an ancestor that is an object with a source, it'll have an
+    // associated displayed type. If that type is not null, don't load content
+    // for the embed.
+    if (HTMLObjectElement* object = HTMLObjectElement::FromContent(parent)) {
+      uint32_t type = object->DisplayedType();
+      if (type != eType_Null) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // SetupProtoChainRunner implementation

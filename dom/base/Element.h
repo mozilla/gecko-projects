@@ -44,6 +44,7 @@
 
 class nsIFrame;
 class nsIDOMMozNamedAttrMap;
+class nsIMozBrowserFrame;
 class nsIURI;
 class nsIScrollableFrame;
 class nsAttrValueOrString;
@@ -340,6 +341,16 @@ public:
   virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const;
 
   /**
+   * Returns |this| as an nsIMozBrowserFrame* if the element is a frame or
+   * iframe element.
+   *
+   * We have this method, rather than using QI, so that we can use it during
+   * the servo traversal, where we can't QI DOM nodes because of non-thread-safe
+   * refcounts.
+   */
+  virtual nsIMozBrowserFrame* GetAsMozBrowserFrame() { return nullptr; }
+
+  /**
    * Is the attribute named stored in the mapped attributes?
    *
    * // XXXbz we use this method in HasAttributeDependentStyle, so svg
@@ -435,8 +446,6 @@ public:
     MOZ_ASSERT(IsStyledByServo());
     UnsetFlags(NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
   }
-
-  inline bool ShouldTraverseForServo();
 
   inline void NoteDirtyDescendantsForServo();
 
@@ -607,6 +616,18 @@ public:
   virtual BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const override;
   virtual uint32_t GetAttrCount() const override;
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
+
+  /**
+   * Get the class list of this element (this corresponds to the value of the
+   * class attribute).  This may be null if there are no classes, but that's not
+   * guaranteed (e.g. we could have class="").
+   */
+  const nsAttrValue* GetClasses() const {
+    if (HasFlag(NODE_MAY_HAVE_CLASS)) {
+      return DoGetClasses();
+    }
+    return nullptr;
+  }
 
 #ifdef DEBUG
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const override
@@ -1429,6 +1450,12 @@ protected:
   nsDataHashtable<nsPtrHashKey<DOMIntersectionObserver>, int32_t>* RegisteredIntersectionObservers();
 
 private:
+  /**
+   * Hook for implementing GetClasses.  This is guaranteed to only be
+   * called if the NODE_MAY_HAVE_CLASS flag is set.
+   */
+  const nsAttrValue* DoGetClasses() const;
+
   /**
    * Get this element's client area rect in app units.
    * @return the frame's client area

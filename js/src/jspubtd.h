@@ -64,7 +64,7 @@ enum JSVersion {
 
 /* Result of typeof operator enumeration. */
 enum JSType {
-    JSTYPE_VOID,                /* undefined */
+    JSTYPE_UNDEFINED,           /* undefined */
     JSTYPE_OBJECT,              /* object */
     JSTYPE_FUNCTION,            /* function */
     JSTYPE_STRING,              /* string */
@@ -122,6 +122,8 @@ namespace gc {
 class AutoTraceSession;
 class StoreBuffer;
 } // namespace gc
+
+class CooperatingContext;
 
 inline JSCompartment* GetContextCompartment(const JSContext* cx);
 inline JS::Zone* GetContextZone(const JSContext* cx);
@@ -226,8 +228,8 @@ class JS_PUBLIC_API(AutoGCRooter)
 
     /* Implemented in gc/RootMarking.cpp. */
     inline void trace(JSTracer* trc);
-    static void traceAll(JSTracer* trc);
-    static void traceAllWrappers(JSTracer* trc);
+    static void traceAll(const js::CooperatingContext& target, JSTracer* trc);
+    static void traceAllWrappers(const js::CooperatingContext& target, JSTracer* trc);
 
   protected:
     AutoGCRooter * const down;

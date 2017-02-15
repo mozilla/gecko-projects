@@ -221,7 +221,7 @@ BrowserAction.prototype = {
           // If we have a pending pre-loaded popup, cancel it after we've waited
           // long enough that we can be relatively certain it won't be opening.
           if (this.pendingPopup) {
-            let {node} = this.widget.forWindow(window);
+            let node = window.gBrowser && this.widget.forWindow(window).node;
             if (isAncestorOrSelf(node, event.originalTarget)) {
               this.pendingPopupTimeout = setTimeout(() => this.clearPopup(),
                                                     POPUP_PRELOAD_TIMEOUT_MS);
@@ -355,17 +355,13 @@ BrowserAction.prototype = {
       }
     }
 
-    // These URLs should already be properly escaped, but make doubly sure CSS
-    // string escape characters are escaped here, since they could lead to a
-    // sandbox break.
-    let escape = str => str.replace(/[\\\s"]/g, encodeURIComponent);
-
-    let getIcon = size => escape(IconDetails.getPreferredIcon(tabData.icon, this.extension, size).icon);
+    let getIcon = size => IconDetails.escapeUrl(
+      IconDetails.getPreferredIcon(tabData.icon, this.extension, size).icon);
 
     node.setAttribute("style", `
       --webextension-menupanel-image: url("${getIcon(32)}");
       --webextension-menupanel-image-2x: url("${getIcon(64)}");
-      --webextension-toolbar-image: url("${escape(icon)}");
+      --webextension-toolbar-image: url("${IconDetails.escapeUrl(icon)}");
       --webextension-toolbar-image-2x: url("${getIcon(baseSize * 2)}");
     `);
   },

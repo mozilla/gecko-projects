@@ -1033,7 +1033,7 @@ Wrap(JSContext *cx, JS::HandleObject existing, JS::HandleObject obj)
   }
 
   if (existing) {
-    js::Wrapper::Renew(cx, existing, obj, wrapper);
+    js::Wrapper::Renew(existing, obj, wrapper);
   }
   return js::Wrapper::New(cx, obj, wrapper);
 }
@@ -1075,10 +1075,10 @@ public:
     mWorkerPrivate = nullptr;
   }
 
-  nsresult Initialize(JSContext* aParentContext)
+  nsresult Initialize(JSRuntime* aParentRuntime)
   {
     nsresult rv =
-      CycleCollectedJSContext::Initialize(aParentContext,
+      CycleCollectedJSContext::Initialize(aParentRuntime,
                                           WORKER_DEFAULT_RUNTIME_HEAPSIZE,
                                           WORKER_DEFAULT_NURSERY_SIZE);
      if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1187,7 +1187,7 @@ class WorkerThreadPrimaryRunnable final : public Runnable
 {
   WorkerPrivate* mWorkerPrivate;
   RefPtr<WorkerThread> mThread;
-  JSContext* mParentContext;
+  JSRuntime* mParentRuntime;
 
   class FinishedRunnable final : public Runnable
   {
@@ -1213,8 +1213,8 @@ class WorkerThreadPrimaryRunnable final : public Runnable
 public:
   WorkerThreadPrimaryRunnable(WorkerPrivate* aWorkerPrivate,
                               WorkerThread* aThread,
-                              JSContext* aParentContext)
-  : mWorkerPrivate(aWorkerPrivate), mThread(aThread), mParentContext(aParentContext)
+                              JSRuntime* aParentRuntime)
+  : mWorkerPrivate(aWorkerPrivate), mThread(aThread), mParentRuntime(aParentRuntime)
   {
     MOZ_ASSERT(aWorkerPrivate);
     MOZ_ASSERT(aThread);
@@ -1893,7 +1893,7 @@ RuntimeService::ScheduleWorker(WorkerPrivate* aWorkerPrivate)
   JSContext* cx = CycleCollectedJSContext::Get()->Context();
   nsCOMPtr<nsIRunnable> runnable =
     new WorkerThreadPrimaryRunnable(aWorkerPrivate, thread,
-                                    JS_GetParentContext(cx));
+                                    JS_GetParentRuntime(cx));
   if (NS_FAILED(thread->DispatchPrimaryRunnable(friendKey, runnable.forget()))) {
     UnregisterWorker(aWorkerPrivate);
     return false;
@@ -2767,16 +2767,6 @@ RuntimeService::WorkerPrefChanged(const char* aPrefName, void* aClosure)
   }
 }
 
-void
-RuntimeService::JSVersionChanged(const char* /* aPrefName */, void* /* aClosure */)
-{
-  AssertIsOnMainThread();
-
-  bool useLatest = Preferences::GetBool("dom.workers.latestJSVersion", false);
-  JS::CompartmentOptions& options = sDefaultJSSettings.content.compartmentOptions;
-  options.behaviors().setVersion(useLatest ? JSVERSION_LATEST : JSVERSION_DEFAULT);
-}
-
 bool
 LogViolationDetailsRunnable::MainThreadRun()
 {
@@ -2861,7 +2851,7 @@ WorkerThreadPrimaryRunnable::Run()
     nsCycleCollector_startup();
 
     WorkerJSContext context(mWorkerPrivate);
-    nsresult rv = context.Initialize(mParentContext);
+    nsresult rv = context.Initialize(mParentRuntime);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -2896,9 +2886,6 @@ WorkerThreadPrimaryRunnable::Run()
 
 #ifdef MOZ_GECKO_PROFILER
       if (stack) {
-        // XXX: this is currently a no-op because control ends up
-        // PseudoStack::flushSamplerOnJSShutdown() which is a no-op for any
-        // thread other than the main thread. See the comment in that function.
         stack->sampleContext(nullptr);
       }
 #endif

@@ -254,6 +254,7 @@
 #include "mozilla/dom/SVGSVGElement.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
+#include "nsIPresShellInlines.h"
 
 #include "mozilla/DocLoadingTimelineMarker.h"
 
@@ -1293,6 +1294,7 @@ nsIDocument::nsIDocument()
     mBidiEnabled(false),
     mMathMLEnabled(false),
     mIsInitialDocumentInWindow(false),
+    mIgnoreDocGroupMismatches(false),
     mLoadedAsData(false),
     mLoadedAsInteractiveData(false),
     mMayStartLayout(true),
@@ -1313,8 +1315,6 @@ nsIDocument::nsIDocument()
     mIsBeingUsedAsImage(false),
     mIsSyntheticDocument(false),
     mHasLinksToUpdate(false),
-    mNeedLayoutFlush(false),
-    mNeedStyleFlush(false),
     mMayHaveDOMMutationObservers(false),
     mMayHaveAnimationObservers(false),
     mHasMixedActiveContentLoaded(false),
@@ -1392,7 +1392,6 @@ nsDocument::nsDocument(const char* aContentType)
   , mDelayFrameLoaderInitialization(false)
   , mSynchronousDOMContentLoaded(false)
   , mInXBLUpdate(false)
-  , mInFlush(false)
   , mParserAborted(false)
   , mCurrentOrientationAngle(0)
   , mCurrentOrientationType(OrientationType::Portrait_primary)
@@ -3144,27 +3143,32 @@ nsDocument::SetContentType(const nsAString& aContentType)
   SetContentTypeInternal(NS_ConvertUTF16toUTF8(aContentType));
 }
 
-nsresult
-nsDocument::GetAllowPlugins(bool * aAllowPlugins)
+bool
+nsDocument::GetAllowPlugins()
 {
   // First, we ask our docshell if it allows plugins.
   nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
 
   if (docShell) {
-    docShell->GetAllowPlugins(aAllowPlugins);
+    bool allowPlugins = false;
+    docShell->GetAllowPlugins(&allowPlugins);
+    if (!allowPlugins) {
+      return false;
+    }
 
     // If the docshell allows plugins, we check whether
     // we are sandboxed and plugins should not be allowed.
-    if (*aAllowPlugins)
-      *aAllowPlugins = !(mSandboxFlags & SANDBOXED_PLUGINS);
+    if (mSandboxFlags & SANDBOXED_PLUGINS) {
+      return false;
+    }
   }
 
-  if (*aAllowPlugins) {
-    FlashClassification classification = DocumentFlashClassification();
-    *aAllowPlugins = (classification != FlashClassification::Denied);
+  FlashClassification classification = DocumentFlashClassification();
+  if (classification == FlashClassification::Denied) {
+    return false;
   }
 
-  return NS_OK;
+  return true;
 }
 
 bool
@@ -4032,6 +4036,10 @@ nsIDocument::GetRootElement() const
 Element*
 nsDocument::GetRootElementInternal() const
 {
+  // We invoke GetRootElement() immediately before the servo traversal, so we
+  // should always have a cache hit from Servo.
+  MOZ_ASSERT(NS_IsMainThread());
+
   // Loop backwards because any non-elements, such as doctypes and PIs
   // are likely to appear before the root element.
   uint32_t i;
@@ -4520,6 +4528,7 @@ nsDocument::SetScopeObject(nsIGlobalObject* aGlobal)
         if (NS_SUCCEEDED(rv)) {
           MOZ_RELEASE_ASSERT(mDocGroup->MatchesKey(docGroupKey));
         }
+        MOZ_RELEASE_ASSERT(mDocGroup->GetTabGroup() == tabgroup);
       } else {
         mDocGroup = tabgroup->AddDocument(docGroupKey, this);
         MOZ_ASSERT(mDocGroup);
@@ -4979,6 +4988,14 @@ nsDocument::MaybeEndOutermostXBLUpdate()
 void
 nsDocument::BeginUpdate(nsUpdateType aUpdateType)
 {
+  // If the document is going away, then it's probably okay to do things to it
+  // in the wrong DocGroup. We're unlikely to run JS or do anything else
+  // observable at this point. We reach this point when cycle collecting a
+  // <link> element and the unlink code removes a style sheet.
+  if (mDocGroup && !mIsGoingAway && !mIgnoreDocGroupMismatches) {
+    mDocGroup->ValidateAccess();
+  }
+
   if (mUpdateNestLevel == 0 && !mInXBLUpdate) {
     mInXBLUpdate = true;
     BindingManager()->BeginOutermostUpdate();
@@ -7834,6 +7851,11 @@ nsDocument::GetExistingListenerManager() const
 nsresult
 nsDocument::GetEventTargetParent(EventChainPreVisitor& aVisitor)
 {
+  if (mDocGroup && aVisitor.mEvent->mMessage != eVoidEvent &&
+      !mIgnoreDocGroupMismatches) {
+    mDocGroup->ValidateAccess();
+  }
+
   aVisitor.mCanHandle = true;
    // FIXME! This is a hack to make middle mouse paste working also in Editor.
    // Bug 329119
@@ -7940,27 +7962,12 @@ nsDocument::FlushPendingNotifications(FlushType aType)
     mParentDocument->FlushPendingNotifications(parentType);
   }
 
-  // We can optimize away getting our presshell and calling
-  // FlushPendingNotifications on it if we don't need a flush of the sort we're
-  // looking at.  The one exception is if mInFlush is true, because in that
-  // case we might have set mNeedStyleFlush and mNeedLayoutFlush to false
-  // already but the presshell hasn't actually done the corresponding work yet.
-  // So if mInFlush and reentering this code, we need to flush the presshell.
-  if (mNeedStyleFlush ||
-      (mNeedLayoutFlush && aType >= FlushType::InterruptibleLayout) ||
-      aType >= FlushType::Display ||
-      mInFlush) {
-    nsCOMPtr<nsIPresShell> shell = GetShell();
-    if (shell) {
-      mNeedStyleFlush = false;
-      mNeedLayoutFlush = mNeedLayoutFlush && (aType < FlushType::InterruptibleLayout);
-      // mInFlush is a bitfield, so can't us AutoRestore here.  But we
-      // need to keep track of multi-level reentry correctly, so need
-      // to restore the old mInFlush value.
-      bool oldInFlush = mInFlush;
-      mInFlush = true;
-      shell->FlushPendingNotifications(aType);
-      mInFlush = oldInFlush;
+  // Call nsIPresShell::NeedFlush (inline, non-virtual) to check whether we
+  // really need to flush the shell (virtual, and needs a strong reference).
+  if (nsIPresShell* shell = GetShell()) {
+    if (shell->NeedFlush(aType)) {
+      nsCOMPtr<nsIPresShell> presShell = shell;
+      presShell->FlushPendingNotifications(aType);
     }
   }
 }
@@ -8579,14 +8586,18 @@ nsDocument::CanSavePresentation(nsIRequest *aNewRequest)
     }
   }
 
-#ifdef MOZ_WEBSPEECH
+
   if (win) {
     auto* globalWindow = nsGlobalWindow::Cast(win);
+#ifdef MOZ_WEBSPEECH
     if (globalWindow->HasActiveSpeechSynthesis()) {
       return false;
     }
-  }
 #endif
+    if (globalWindow->HasUsedVR()) {
+      return false;
+    }
+  }
 
   return true;
 }
@@ -9224,12 +9235,17 @@ nsDocument::CloneDocHelper(nsDocument* clone) const
   clone->mDocumentBaseURI = mDocumentBaseURI;
   clone->SetChromeXHRDocBaseURI(mChromeXHRDocBaseURI);
 
-  // Set scripting object
   bool hasHadScriptObject = true;
   nsIScriptGlobalObject* scriptObject =
     GetScriptHandlingObject(hasHadScriptObject);
   NS_ENSURE_STATE(scriptObject || !hasHadScriptObject);
-  if (scriptObject) {
+  if (mCreatingStaticClone) {
+    // If we're doing a static clone (print, print preview), then we're going to
+    // be setting a scope object after the clone. It's better to set it only
+    // once, so we don't do that here. However, we do want to act as if there is
+    // a script handling object. So we set mHasHadScriptHandlingObject.
+    clone->mHasHadScriptHandlingObject = true;
+  } else if (scriptObject) {
     clone->SetScriptHandlingObject(scriptObject);
   } else {
     clone->SetScopeObject(GetScopeObject());
@@ -12889,7 +12905,9 @@ nsIDocument::RebuildUserFontSet()
   }
 
   mFontFaceSetDirty = true;
-  SetNeedStyleFlush();
+  if (nsIPresShell* shell = GetShell()) {
+    shell->SetNeedStyleFlush();
+  }
 
   // Somebody has already asked for the user font set, so we need to
   // post an event to rebuild it.  Setting the user font set to be dirty
@@ -13030,7 +13048,7 @@ ArrayContainsTable(const nsTArray<nsCString>& aTableArray,
  * For more information, see
  * toolkit/components/url-classifier/flash-block-lists.rst
  */
-nsIDocument::FlashClassification
+FlashClassification
 nsDocument::PrincipalFlashClassification(bool aIsTopLevel)
 {
   nsresult rv;
@@ -13119,7 +13137,7 @@ nsDocument::PrincipalFlashClassification(bool aIsTopLevel)
   return FlashClassification::Unknown;
 }
 
-nsIDocument::FlashClassification
+FlashClassification
 nsDocument::ComputeFlashClassification()
 {
   nsCOMPtr<nsIDocShellTreeItem> current = this->GetDocShell();
@@ -13137,6 +13155,9 @@ nsDocument::ComputeFlashClassification()
     classification = PrincipalFlashClassification(isTopLevel);
   } else {
     nsCOMPtr<nsIDocument> parentDocument = GetParentDocument();
+    if (!parentDocument) {
+      return FlashClassification::Denied;
+    }
     FlashClassification parentClassification =
       parentDocument->DocumentFlashClassification();
 
@@ -13165,7 +13186,7 @@ nsDocument::ComputeFlashClassification()
  *
  * This function will NOT return FlashClassification::Unclassified
  */
-nsIDocument::FlashClassification
+FlashClassification
 nsDocument::DocumentFlashClassification()
 {
   if (mFlashClassification == FlashClassification::Unclassified) {

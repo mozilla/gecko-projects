@@ -450,6 +450,14 @@ JSContext::enterCompartment(
     setCompartment(c, maybeLock);
 }
 
+template <typename T>
+inline void
+JSContext::enterCompartmentOf(const T& target)
+{
+    MOZ_ASSERT(!js::gc::detail::CellIsMarkedGrayIfKnown(target));
+    enterCompartment(target->compartment(), nullptr);
+}
+
 inline void
 JSContext::enterNullCompartment()
 {
@@ -485,11 +493,13 @@ JSContext::setCompartment(JSCompartment* comp,
                   comp->zone()->usedByExclusiveThread);
 
     // Normal JSContexts cannot enter exclusive zones.
-    MOZ_ASSERT_IF(this == runtime()->unsafeContextFromAnyThread() && comp,
+    MOZ_ASSERT_IF(this == runtime()->activeContext() && comp,
                   !comp->zone()->usedByExclusiveThread);
 
     // Only one thread can be in the atoms compartment at a time.
     MOZ_ASSERT_IF(runtime_->isAtomsCompartment(comp), maybeLock != nullptr);
+    MOZ_ASSERT_IF(runtime_->isAtomsCompartment(comp) || runtime_->isAtomsCompartment(compartment_),
+                  runtime_->currentThreadHasExclusiveAccess());
 
     // Make sure that the atoms compartment has its own zone.
     MOZ_ASSERT_IF(comp && !runtime_->isAtomsCompartment(comp),
@@ -503,7 +513,7 @@ JSContext::setCompartment(JSCompartment* comp,
     // This context must have exclusive access to the zone's group. There is an
     // exception, for now, for zones used by exclusive threads.
     MOZ_ASSERT_IF(comp && !comp->zone()->isAtomsZone() && !comp->zone()->usedByExclusiveThread,
-                  comp->zone()->group()->context == this);
+                  comp->zone()->group()->ownedByCurrentThread());
 
     compartment_ = comp;
     zone_ = comp ? comp->zone() : nullptr;
@@ -540,14 +550,13 @@ JSContext::currentScript(jsbytecode** ppc,
 
     MOZ_ASSERT(act->cx() == this);
 
+    if (!allowCrossCompartment && act->compartment() != compartment())
+        return nullptr;
+
     if (act->isJit()) {
         JSScript* script = nullptr;
         js::jit::GetPcScript(const_cast<JSContext*>(this), &script, ppc);
-        if (!allowCrossCompartment && script->compartment() != compartment()) {
-            if (ppc)
-                *ppc = nullptr;
-            return nullptr;
-        }
+        MOZ_ASSERT(allowCrossCompartment || script->compartment() == compartment());
         return script;
     }
 
@@ -560,13 +569,13 @@ JSContext::currentScript(jsbytecode** ppc,
     MOZ_ASSERT(!fp->runningInJit());
 
     JSScript* script = fp->script();
-    if (!allowCrossCompartment && script->compartment() != compartment())
-        return nullptr;
+    MOZ_ASSERT(allowCrossCompartment || script->compartment() == compartment());
 
     if (ppc) {
         *ppc = act->asInterpreter()->regs().pc;
         MOZ_ASSERT(script->containsPC(*ppc));
     }
+
     return script;
 }
 

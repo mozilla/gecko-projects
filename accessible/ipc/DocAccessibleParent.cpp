@@ -425,7 +425,7 @@ DocAccessibleParent::AddChildDoc(DocAccessibleParent* aChildDoc,
     return IPC_FAIL(this, "binding to proxy that can't be a outerDoc!");
   }
 
-  aChildDoc->mParent = outerDoc;
+  aChildDoc->SetParent(outerDoc);
   outerDoc->SetChildDoc(aChildDoc);
   mChildDocs.AppendElement(aChildDoc);
   aChildDoc->mParentDoc = this;
@@ -461,11 +461,15 @@ DocAccessibleParent::Destroy()
     return;
   }
 
-  NS_ASSERTION(mChildDocs.IsEmpty(),
-               "why weren't the child docs destroyed already?");
   mShutdown = true;
 
   uint32_t childDocCount = mChildDocs.Length();
+  for (uint32_t i = 0; i < childDocCount; i++) {
+    for (uint32_t j = i + 1; j < childDocCount; j++) {
+      MOZ_DIAGNOSTIC_ASSERT(mChildDocs[i] != mChildDocs[j]);
+    }
+  }
+
   for (uint32_t i = childDocCount - 1; i < childDocCount; i--)
     mChildDocs[i]->Destroy();
 
@@ -530,7 +534,6 @@ DocAccessibleParent::SetCOMProxy(const RefPtr<IAccessible>& aCOMProxy)
   }
 
   Accessible* outerDoc = OuterDocOfRemoteBrowser();
-  MOZ_ASSERT(outerDoc);
 
   IAccessible* rawNative = nullptr;
   if (outerDoc) {
@@ -541,6 +544,7 @@ DocAccessibleParent::SetCOMProxy(const RefPtr<IAccessible>& aCOMProxy)
   IAccessibleHolder::COMPtrType ptr(rawNative);
   IAccessibleHolder holder(Move(ptr));
 
+  IAccessibleHolder hWndAccHolder;
   if (nsWinUtils::IsWindowEmulationStarted()) {
     RootAccessible* rootDocument = outerDoc->RootAccessible();
     MOZ_ASSERT(rootDocument);
@@ -564,10 +568,16 @@ DocAccessibleParent::SetCOMProxy(const RefPtr<IAccessible>& aCOMProxy)
       // Attach accessible document to the emulated native window
       ::SetPropW(hWnd, kPropNameDocAccParent, (HANDLE)this);
       SetEmulatedWindowHandle(hWnd);
+      IAccessible* rawHWNDAcc = nullptr;
+      if (SUCCEEDED(::AccessibleObjectFromWindow(hWnd, OBJID_WINDOW,
+                                                 IID_IAccessible,
+                                                 (void**)&rawHWNDAcc))) {
+        hWndAccHolder.Set(IAccessibleHolder::COMPtrType(rawHWNDAcc));
+      }
     }
   }
   Unused << SendParentCOMProxy(holder, reinterpret_cast<uintptr_t>(
-                               mEmulatedWindowHandle));
+                               mEmulatedWindowHandle), hWndAccHolder);
 }
 
 void

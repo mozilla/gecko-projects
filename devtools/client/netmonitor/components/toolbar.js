@@ -15,7 +15,7 @@ const Actions = require("../actions/index");
 const { L10N } = require("../l10n");
 const {
   getDisplayedRequestsSummary,
-  isSidebarToggleButtonDisabled,
+  isNetworkDetailsToggleButtonDisabled,
 } = require("../selectors/index");
 const {
   getSizeWithDecimals,
@@ -43,14 +43,17 @@ function Toolbar({
   openStatistics,
   requestFilterTypes,
   setRequestFilterText,
-  sidebarToggleDisabled,
-  sidebarOpen,
+  networkDetailsToggleDisabled,
+  networkDetailsOpen,
   summary,
+  toggleNetworkDetails,
   toggleRequestFilterType,
-  toggleSidebar,
 }) {
-  let toggleButtonClassName = ["devtools-button"];
-  if (!sidebarOpen) {
+  let toggleButtonClassName = [
+    "network-details-panel-toggle",
+    "devtools-button",
+  ];
+  if (!networkDetailsOpen) {
     toggleButtonClassName.push("pane-collapsed");
   }
 
@@ -68,11 +71,12 @@ function Toolbar({
     return (
       button({
         id: `requests-menu-filter-${type}-button`,
-        key: type,
         className: classList.join(" "),
-        "data-key": type,
+        key: type,
         onClick: toggleRequestFilterType,
         onKeyDown: toggleRequestFilterType,
+        "aria-pressed": checked,
+        "data-key": type,
       },
         L10N.getStr(`netmonitor.toolbar.filter.${type}`)
       )
@@ -108,12 +112,11 @@ function Toolbar({
           onChange: setRequestFilterText,
         }),
         button({
-          id: "details-pane-toggle",
           className: toggleButtonClassName.join(" "),
-          title: sidebarOpen ? COLLPASE_DETAILS_PANE : EXPAND_DETAILS_PANE,
-          disabled: sidebarToggleDisabled,
+          title: networkDetailsOpen ? COLLPASE_DETAILS_PANE : EXPAND_DETAILS_PANE,
+          disabled: networkDetailsToggleDisabled,
           tabIndex: "0",
-          onMouseDown: toggleSidebar,
+          onClick: toggleNetworkDetails,
         }),
       )
     )
@@ -127,17 +130,17 @@ Toolbar.propTypes = {
   openStatistics: PropTypes.func.isRequired,
   requestFilterTypes: PropTypes.object.isRequired,
   setRequestFilterText: PropTypes.func.isRequired,
-  sidebarToggleDisabled: PropTypes.bool.isRequired,
-  sidebarOpen: PropTypes.bool.isRequired,
+  networkDetailsToggleDisabled: PropTypes.bool.isRequired,
+  networkDetailsOpen: PropTypes.bool.isRequired,
   summary: PropTypes.object.isRequired,
+  toggleNetworkDetails: PropTypes.func.isRequired,
   toggleRequestFilterType: PropTypes.func.isRequired,
-  toggleSidebar: PropTypes.func.isRequired,
 };
 
 module.exports = connect(
   (state) => ({
-    sidebarToggleDisabled: isSidebarToggleButtonDisabled(state),
-    sidebarOpen: state.ui.sidebarOpen,
+    networkDetailsToggleDisabled: isNetworkDetailsToggleButtonDisabled(state),
+    networkDetailsOpen: state.ui.networkDetailsOpen,
     requestFilterTypes: state.filters.requestFilterTypes,
     summary: getDisplayedRequestsSummary(state),
   }),
@@ -151,6 +154,6 @@ module.exports = connect(
       }
       dispatch(Actions.toggleRequestFilterType(evt.target.dataset.key));
     },
-    toggleSidebar: () => dispatch(Actions.toggleSidebar()),
+    toggleNetworkDetails: () => dispatch(Actions.toggleNetworkDetails()),
   })
 )(Toolbar);

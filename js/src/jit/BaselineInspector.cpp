@@ -27,12 +27,6 @@ SetElemICInspector::sawOOBDenseWrite() const
     if (!icEntry_)
         return false;
 
-    // Check for an element adding stub.
-    for (ICStub* stub = icEntry_->firstStub(); stub; stub = stub->next()) {
-        if (stub->isSetElem_DenseOrUnboxedArrayAdd())
-            return true;
-    }
-
     // Check for a write hole bit on the SetElem_Fallback stub.
     ICStub* stub = icEntry_->fallbackStub();
     if (stub->isSetElem_Fallback())
@@ -52,20 +46,6 @@ SetElemICInspector::sawOOBTypedArrayWrite() const
         if (!stub->isSetElem_TypedArray())
             continue;
         if (stub->toSetElem_TypedArray()->expectOutOfBounds())
-            return true;
-    }
-    return false;
-}
-
-bool
-SetElemICInspector::sawDenseWrite() const
-{
-    if (!icEntry_)
-        return false;
-
-    // Check for a SetElem_DenseAdd or SetElem_Dense stub.
-    for (ICStub* stub = icEntry_->firstStub(); stub; stub = stub->next()) {
-        if (stub->isSetElem_DenseOrUnboxedArrayAdd() || stub->isSetElem_DenseOrUnboxedArray())
             return true;
     }
     return false;

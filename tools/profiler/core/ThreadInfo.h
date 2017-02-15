@@ -34,12 +34,14 @@ class ThreadInfo {
 
   bool CanInvokeJS() const;
 
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+
  private:
   mozilla::UniqueFreePtr<char> mName;
   int mThreadId;
   const bool mIsMainThread;
   PseudoStack* mPseudoStack;
-  Sampler::UniquePlatformData mPlatformData;
+  UniquePlatformData mPlatformData;
   void* mStackTop;
 
   // May be null for the main thread if the profiler was started during startup.
@@ -113,15 +115,6 @@ public:
   int64_t mRssMemory;
   int64_t mUssMemory;
 #endif
-};
-
-// Just like ThreadInfo, but owns a reference to the PseudoStack.
-class StackOwningThreadInfo : public ThreadInfo {
- public:
-  StackOwningThreadInfo(const char* aName, int aThreadId, bool aIsMainThread, PseudoStack* aPseudoStack, void* aStackTop);
-  virtual ~StackOwningThreadInfo();
-
-  virtual void SetPendingDelete();
 };
 
 #endif

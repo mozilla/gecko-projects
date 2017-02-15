@@ -101,16 +101,30 @@ public:
   void SyncAttributesWithPrivateBrowsing(bool aInPrivateBrowsing);
 
   // check if "privacy.firstparty.isolate" is enabled.
-  static bool IsFirstPartyEnabled();
+  static inline bool IsFirstPartyEnabled()
+  {
+    return sFirstPartyIsolation;
+  }
 
   // check if the access of window.opener across different FPDs is restricted.
   // We only restrict the access of window.opener when first party isolation
   // is enabled and "privacy.firstparty.isolate.restrict_opener_access" is on.
-  static bool IsRestrictOpenerAccessForFPI();
+  static inline bool IsRestrictOpenerAccessForFPI()
+  {
+    // We always want to restrict window.opener if first party isolation is
+    // disabled.
+    return !sFirstPartyIsolation || sRestrictedOpenerAccess;
+  }
 
   // returns true if the originAttributes suffix has mPrivateBrowsingId value
   // different than 0.
   static bool IsPrivateBrowsing(const nsACString& aOrigin);
+
+  static void InitPrefs();
+
+private:
+  static bool sFirstPartyIsolation;
+  static bool sRestrictedOpenerAccess;
 };
 
 class OriginAttributesPattern : public dom::OriginAttributesPatternDictionary
@@ -264,6 +278,11 @@ public:
 
   already_AddRefed<BasePrincipal> CloneStrippingUserContextIdAndFirstPartyDomain();
 
+  // Helper to check whether this principal is associated with an addon that
+  // allows unprivileged code to load aURI.  aExplicit == true will prevent
+  // use of all_urls permission, requiring the domain in its permissions.
+  bool AddonAllowsLoad(nsIURI* aURI, bool aExplicit = false);
+
 protected:
   virtual ~BasePrincipal();
 
@@ -277,10 +296,6 @@ protected:
   // BasePrincipal::CheckMayLoad.
   virtual bool MayLoadInternal(nsIURI* aURI) = 0;
   friend class ::nsExpandedPrincipal;
-
-  // Helper to check whether this principal is associated with an addon that
-  // allows unprivileged code to load aURI.
-  bool AddonAllowsLoad(nsIURI* aURI);
 
   nsCOMPtr<nsIContentSecurityPolicy> mCSP;
   nsCOMPtr<nsIContentSecurityPolicy> mPreloadCSP;

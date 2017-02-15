@@ -159,7 +159,7 @@ MakeCSSAngle(const nsCSSValue& aValue)
   return CSSAngle(aValue.GetAngleValue(), aValue.GetUnit());
 }
 
-static void AddTransformFunctions(nsCSSValueList* aList,
+static void AddTransformFunctions(const nsCSSValueList* aList,
                                   nsStyleContext* aContext,
                                   nsPresContext* aPresContext,
                                   TransformReferenceBox& aRefBox,
@@ -401,6 +401,20 @@ static void AddTransformFunctions(nsCSSValueList* aList,
   }
 }
 
+static void
+AddTransformFunctions(const nsCSSValueSharedList* aList,
+                      const nsIFrame* aFrame,
+                      TransformReferenceBox& aRefBox,
+                      layers::Animatable& aAnimatable)
+{
+  MOZ_ASSERT(aList->mHead);
+  AddTransformFunctions(aList->mHead,
+                        aFrame->StyleContext(),
+                        aFrame->PresContext(),
+                        aRefBox,
+                        aAnimatable.get_ArrayOfTransformFunction());
+}
+
 static TimingFunction
 ToTimingFunction(const Maybe<ComputedTimingFunction>& aCTF)
 {
@@ -420,7 +434,7 @@ ToTimingFunction(const Maybe<ComputedTimingFunction>& aCTF)
 
 static void
 SetAnimatable(nsCSSPropertyID aProperty,
-              const StyleAnimationValue& aAnimationValue,
+              const AnimationValue& aAnimationValue,
               nsIFrame* aFrame,
               TransformReferenceBox& aRefBox,
               layers::Animatable& aAnimatable)
@@ -434,38 +448,24 @@ SetAnimatable(nsCSSPropertyID aProperty,
 
   switch (aProperty) {
     case eCSSProperty_opacity:
-      aAnimatable = aAnimationValue.GetFloatValue();
+      aAnimatable = aAnimationValue.GetOpacity();
       break;
     case eCSSProperty_transform: {
       aAnimatable = InfallibleTArray<TransformFunction>();
-      nsCSSValueSharedList* list =
-        aAnimationValue.GetCSSValueSharedListValue();
-      AddTransformFunctions(list->mHead,
-                            aFrame->StyleContext(),
-                            aFrame->PresContext(),
-                            aRefBox,
-                            aAnimatable.get_ArrayOfTransformFunction());
+      if (aAnimationValue.mServo) {
+        RefPtr<nsCSSValueSharedList> list;
+        Servo_AnimationValue_GetTransform(aAnimationValue.mServo, &list);
+        AddTransformFunctions(list, aFrame, aRefBox, aAnimatable);
+      } else {
+        nsCSSValueSharedList* list =
+          aAnimationValue.mGecko.GetCSSValueSharedListValue();
+        AddTransformFunctions(list, aFrame, aRefBox, aAnimatable);
+      }
       break;
     }
     default:
       MOZ_ASSERT_UNREACHABLE("Unsupported property");
   }
-}
-
-static void
-SetBaseAnimationStyle(nsCSSPropertyID aProperty,
-                      nsIFrame* aFrame,
-                      TransformReferenceBox& aRefBox,
-                      layers::Animatable& aBaseStyle)
-{
-  MOZ_ASSERT(aFrame);
-
-  StyleAnimationValue baseValue =
-    EffectCompositor::GetBaseStyle(aProperty, aFrame);
-  MOZ_ASSERT(!baseValue.IsNull(),
-             "The base value should be already there");
-
-  SetAnimatable(aProperty, baseValue, aFrame, aRefBox, aBaseStyle);
 }
 
 static void
@@ -543,11 +543,16 @@ AddAnimationForProperty(nsIFrame* aFrame, const AnimationProperty& aProperty,
 
   // If the animation is additive or accumulates, we need to pass its base value
   // to the compositor.
-  if (aAnimation->GetEffect()->AsKeyframeEffect()->
-        NeedsBaseStyle(aProperty.mProperty)) {
-    SetBaseAnimationStyle(aProperty.mProperty,
-                          aFrame, refBox,
-                          animation->baseStyle());
+
+  StyleAnimationValue baseStyle =
+    aAnimation->GetEffect()->AsKeyframeEffect()->BaseStyle(aProperty.mProperty);
+  if (!baseStyle.IsNull()) {
+    // FIXME: Bug 1311257: We need to get the baseValue for
+    //        RawServoAnimationValue.
+    SetAnimatable(aProperty.mProperty,
+                  { baseStyle, nullptr },
+                  aFrame, refBox,
+                  animation->baseStyle());
   } else {
     animation->baseStyle() = null_t();
   }
@@ -739,8 +744,9 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
 
   // Only send animations to a layer that is actually using
   // off-main-thread compositing.
-  if (aLayer->Manager()->GetBackendType() !=
-        layers::LayersBackend::LAYERS_CLIENT) {
+  LayersBackend backend = aLayer->Manager()->GetBackendType();
+  if (!(backend == layers::LayersBackend::LAYERS_CLIENT ||
+        backend == layers::LayersBackend::LAYERS_WR)) {
     return;
   }
 
@@ -4394,6 +4400,28 @@ nsDisplayBorder::GetLayerState(nsDisplayListBuilder* aBuilder,
     return LAYER_NONE;
   }
 
+  LayersBackend backend = aManager->GetBackendType();
+  if (backend == layers::LayersBackend::LAYERS_WR) {
+    bool hasCompositeColors;
+    br->AllBordersSolid(&hasCompositeColors);
+    if (hasCompositeColors) {
+      return LAYER_NONE;
+    }
+
+    NS_FOR_CSS_SIDES(i) {
+      mColors[i] = ToDeviceColor(br->mBorderColors[i]);
+      mWidths[i] = br->mBorderWidths[i];
+      mBorderStyles[i] = br->mBorderStyles[i];
+    }
+    NS_FOR_CSS_FULL_CORNERS(corner) {
+      mCorners[corner] = LayerSize(br->mBorderRadii[corner].width, br->mBorderRadii[corner].height);
+    }
+
+    mRect = ViewAs<LayerPixel>(br->mOuterRect);
+
+    return LAYER_ACTIVE;
+  }
+
   bool hasCompositeColors;
   if (!br->AllBordersSolid(&hasCompositeColors) || hasCompositeColors) {
     return LAYER_NONE;
@@ -4416,9 +4444,13 @@ nsDisplayBorder::GetLayerState(nsDisplayListBuilder* aBuilder,
     if (br->mBorderStyles[i] == NS_STYLE_BORDER_STYLE_SOLID) {
       mColors[i] = ToDeviceColor(br->mBorderColors[i]);
       mWidths[i] = br->mBorderWidths[i];
+      mBorderStyles[i] = br->mBorderStyles[i];
     } else {
       mWidths[i] = 0;
     }
+  }
+  NS_FOR_CSS_FULL_CORNERS(corner) {
+    mCorners[corner] = LayerSize(br->mBorderRadii[corner].width, br->mBorderRadii[corner].height);
   }
 
   mRect = ViewAs<LayerPixel>(br->mOuterRect);
@@ -4438,9 +4470,10 @@ nsDisplayBorder::BuildLayer(nsDisplayListBuilder* aBuilder,
       return nullptr;
   }
   layer->SetRect(mRect);
-  layer->SetCornerRadii({ LayerSize(), LayerSize(), LayerSize(), LayerSize() });
+  layer->SetCornerRadii(mCorners);
   layer->SetColors(mColors);
   layer->SetWidths(mWidths);
+  layer->SetStyles(mBorderStyles);
   layer->SetBaseTransform(gfx::Matrix4x4::Translation(aContainerParameters.mOffset.x,
                                                       aContainerParameters.mOffset.y, 0));
   return layer.forget();

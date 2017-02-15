@@ -29,6 +29,7 @@
 #define VPX_DONT_DEFINE_STDINT_TYPES
 #include "vpx/vp8dx.h"
 #include "vpx/vpx_decoder.h"
+#include <numeric>
 
 #define WEBM_DEBUG(arg, ...) MOZ_LOG(gMediaDemuxerLog, mozilla::LogLevel::Debug, ("WebMDemuxer(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 extern mozilla::LazyLogModule gMediaDemuxerLog;
@@ -76,7 +77,8 @@ static int webmdemux_read(void* aBuffer, size_t aLength, void* aUserData)
 static int webmdemux_seek(int64_t aOffset, int aWhence, void* aUserData)
 {
   MOZ_ASSERT(aUserData);
-  WebMDemuxer::NestEggContext* context = reinterpret_cast<WebMDemuxer::NestEggContext*>(aUserData);
+  WebMDemuxer::NestEggContext* context =
+    reinterpret_cast<WebMDemuxer::NestEggContext*>(aUserData);
   nsresult rv = context->GetResource()->Seek(aWhence, aOffset);
   return NS_SUCCEEDED(rv) ? 0 : -1;
 }
@@ -84,7 +86,8 @@ static int webmdemux_seek(int64_t aOffset, int aWhence, void* aUserData)
 static int64_t webmdemux_tell(void* aUserData)
 {
   MOZ_ASSERT(aUserData);
-  WebMDemuxer::NestEggContext* context = reinterpret_cast<WebMDemuxer::NestEggContext*>(aUserData);
+  WebMDemuxer::NestEggContext* context =
+    reinterpret_cast<WebMDemuxer::NestEggContext*>(aUserData);
   return context->GetResource()->Tell();
 }
 
@@ -188,12 +191,14 @@ WebMDemuxer::Init()
   InitBufferedState();
 
   if (NS_FAILED(ReadMetadata())) {
-    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_METADATA_ERR, __func__);
+    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_METADATA_ERR,
+                                        __func__);
   }
 
-  if (!GetNumberTracks(TrackInfo::kAudioTrack) &&
-      !GetNumberTracks(TrackInfo::kVideoTrack)) {
-    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_METADATA_ERR, __func__);
+  if (!GetNumberTracks(TrackInfo::kAudioTrack)
+      && !GetNumberTracks(TrackInfo::kVideoTrack)) {
+    return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_METADATA_ERR,
+                                        __func__);
   }
 
   return InitPromise::CreateAndResolve(NS_OK, __func__);
@@ -291,8 +296,8 @@ WebMDemuxer::ReadMetadata()
     MOZ_ASSERT(mBufferedState->GetInitEndOffset() <= resource.Tell());
   }
   mInitData = resource.MediaReadAt(0, mBufferedState->GetInitEndOffset());
-  if (!mInitData ||
-      mInitData->Length() != size_t(mBufferedState->GetInitEndOffset())) {
+  if (!mInitData
+      || mInitData->Length() != size_t(mBufferedState->GetInitEndOffset())) {
     return NS_ERROR_FAILURE;
   }
 
@@ -336,10 +341,10 @@ WebMDemuxer::ReadMetadata()
                             params.height - cropV);
 
       // If the cropping data appears invalid then use the frame data
-      if (pictureRect.width <= 0 ||
-          pictureRect.height <= 0 ||
-          pictureRect.x < 0 ||
-          pictureRect.y < 0) {
+      if (pictureRect.width <= 0
+          || pictureRect.height <= 0
+          || pictureRect.x < 0
+          || pictureRect.y < 0) {
         pictureRect.x = 0;
         pictureRect.y = 0;
         pictureRect.width = params.width;
@@ -383,11 +388,13 @@ WebMDemuxer::ReadMetadata()
       uint64_t duration = 0;
       r = nestegg_duration(context, &duration);
       if (!r) {
-        mInfo.mVideo.mDuration = media::TimeUnit::FromNanoseconds(duration).ToMicroseconds();
+        mInfo.mVideo.mDuration =
+          media::TimeUnit::FromNanoseconds(duration).ToMicroseconds();
       }
       mInfo.mVideo.mCrypto = GetTrackCrypto(TrackInfo::kVideoTrack, track);
       if (mInfo.mVideo.mCrypto.mValid) {
-        mCrypto.AddInitData(NS_LITERAL_STRING("webm"), mInfo.mVideo.mCrypto.mKeyId);
+        mCrypto.AddInitData(NS_LITERAL_STRING("webm"),
+                            mInfo.mVideo.mCrypto.mKeyId);
       }
     } else if (type == NESTEGG_TRACK_AUDIO && !mHasAudio) {
       nestegg_audio_params params;
@@ -403,8 +410,10 @@ WebMDemuxer::ReadMetadata()
         mInfo.mAudio.mMimeType = "audio/vorbis";
       } else if (mAudioCodec == NESTEGG_CODEC_OPUS) {
         mInfo.mAudio.mMimeType = "audio/opus";
-        OpusDataDecoder::AppendCodecDelay(mInfo.mAudio.mCodecSpecificConfig,
-            media::TimeUnit::FromNanoseconds(params.codec_delay).ToMicroseconds());
+        OpusDataDecoder::AppendCodecDelay(
+          mInfo.mAudio.mCodecSpecificConfig,
+          media::TimeUnit::FromNanoseconds(params.codec_delay)
+            .ToMicroseconds());
       }
       mSeekPreroll = params.seek_preroll;
       mInfo.mAudio.mRate = params.rate;
@@ -447,11 +456,13 @@ WebMDemuxer::ReadMetadata()
       uint64_t duration = 0;
       r = nestegg_duration(context, &duration);
       if (!r) {
-        mInfo.mAudio.mDuration = media::TimeUnit::FromNanoseconds(duration).ToMicroseconds();
+        mInfo.mAudio.mDuration =
+          media::TimeUnit::FromNanoseconds(duration).ToMicroseconds();
       }
       mInfo.mAudio.mCrypto = GetTrackCrypto(TrackInfo::kAudioTrack, track);
       if (mInfo.mAudio.mCrypto.mValid) {
-        mCrypto.AddInitData(NS_LITERAL_STRING("webm"), mInfo.mAudio.mCrypto.mKeyId);
+        mCrypto.AddInitData(NS_LITERAL_STRING("webm"),
+                            mInfo.mAudio.mCrypto.mKeyId);
       }
     }
   }
@@ -461,15 +472,15 @@ WebMDemuxer::ReadMetadata()
 bool
 WebMDemuxer::IsSeekable() const
 {
-  return Context(TrackInfo::kVideoTrack) &&
-         nestegg_has_cues(Context(TrackInfo::kVideoTrack));
+  return Context(TrackInfo::kVideoTrack)
+         && nestegg_has_cues(Context(TrackInfo::kVideoTrack));
 }
 
 bool
 WebMDemuxer::IsSeekableOnlyInBufferedRanges() const
 {
-  return Context(TrackInfo::kVideoTrack) &&
-         !nestegg_has_cues(Context(TrackInfo::kVideoTrack));
+  return Context(TrackInfo::kVideoTrack)
+         && !nestegg_has_cues(Context(TrackInfo::kVideoTrack));
 }
 
 void
@@ -508,7 +519,8 @@ WebMDemuxer::NotifyDataRemoved()
 {
   mBufferedState->Reset();
   if (mInitData) {
-    mBufferedState->NotifyDataArrived(mInitData->Elements(), mInitData->Length(), 0);
+    mBufferedState->NotifyDataArrived(mInitData->Elements(),
+                                      mInitData->Length(), 0);
   }
   mNeedReIndex = true;
 }
@@ -520,14 +532,16 @@ WebMDemuxer::GetCrypto()
 }
 
 CryptoTrack
-WebMDemuxer::GetTrackCrypto(TrackInfo::TrackType aType, size_t aTrackNumber) {
+WebMDemuxer::GetTrackCrypto(TrackInfo::TrackType aType, size_t aTrackNumber)
+{
   const int WEBM_IV_SIZE = 16;
   const unsigned char * contentEncKeyId;
   size_t contentEncKeyIdLength;
   CryptoTrack crypto;
   nestegg* context = Context(aType);
 
-  int r = nestegg_track_content_enc_key_id(context, aTrackNumber, &contentEncKeyId, &contentEncKeyIdLength);
+  int r = nestegg_track_content_enc_key_id(
+    context, aTrackNumber, &contentEncKeyId, &contentEncKeyIdLength);
 
   if (r == -1) {
     WEBM_DEBUG("nestegg_track_content_enc_key_id failed r=%d", r);
@@ -551,7 +565,8 @@ WebMDemuxer::GetTrackCrypto(TrackInfo::TrackType aType, size_t aTrackNumber) {
 }
 
 bool
-WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSamples)
+WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType,
+                           MediaRawDataQueue *aSamples)
 {
   if (mIsMediaSource) {
     // To ensure mLastWebMBlockOffset is properly up to date.
@@ -585,8 +600,8 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSampl
       PushAudioPacket(next_holder);
     } else if (duration >= 0) {
       next_tstamp = tstamp + duration;
-    } else if (!mIsMediaSource ||
-               (mIsMediaSource && mLastAudioFrameTime.isSome())) {
+    } else if (!mIsMediaSource
+               || (mIsMediaSource && mLastAudioFrameTime.isSome())) {
       next_tstamp = tstamp;
       next_tstamp += tstamp - mLastAudioFrameTime.refOr(0);
     } else {
@@ -600,8 +615,8 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSampl
       PushVideoPacket(next_holder);
     } else if (duration >= 0) {
       next_tstamp = tstamp + duration;
-    } else if (!mIsMediaSource ||
-               (mIsMediaSource && mLastVideoFrameTime.isSome())) {
+    } else if (!mIsMediaSource
+               || (mIsMediaSource && mLastVideoFrameTime.isSome())) {
       next_tstamp = tstamp;
       next_tstamp += tstamp - mLastVideoFrameTime.refOr(0);
     } else {
@@ -650,7 +665,8 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSampl
     } else if (aType == TrackInfo::kVideoTrack) {
       if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED) {
         // Packet is encrypted, can't peek, use packet info
-        isKeyframe = nestegg_packet_has_keyframe(holder->Packet()) == NESTEGG_PACKET_HAS_KEYFRAME_TRUE;
+        isKeyframe = nestegg_packet_has_keyframe(holder->Packet())
+                     == NESTEGG_PACKET_HAS_KEYFRAME_TRUE;
       } else {
         vpx_codec_stream_info_t si;
         PodZero(&si);
@@ -667,11 +683,13 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSampl
         if (isKeyframe) {
           // We only look for resolution changes on keyframes for both VP8 and
           // VP9. Other resolution changes are invalid.
-          if (mLastSeenFrameWidth.isSome() && mLastSeenFrameHeight.isSome() &&
-            (si.w != mLastSeenFrameWidth.value() ||
-              si.h != mLastSeenFrameHeight.value())) {
+          if (mLastSeenFrameWidth.isSome()
+              && mLastSeenFrameHeight.isSome()
+              && (si.w != mLastSeenFrameWidth.value()
+                  || si.h != mLastSeenFrameHeight.value())) {
             mInfo.mVideo.mDisplay = nsIntSize(si.w, si.h);
-            mSharedVideoTrackInfo = new SharedTrackInfo(mInfo.mVideo, ++sStreamSourceID);
+            mSharedVideoTrackInfo =
+              new TrackInfoSharedPtr(mInfo.mVideo, ++sStreamSourceID);
           }
           mLastSeenFrameWidth = Some(si.w);
           mLastSeenFrameHeight = Some(si.h);
@@ -684,8 +702,16 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSampl
     RefPtr<MediaRawData> sample;
     if (mInfo.mVideo.HasAlpha() && alphaLength != 0) {
       sample = new MediaRawData(data, length, alphaData, alphaLength);
+      if (!sample->Data() || !sample->AlphaData()) {
+        // OOM.
+        return false;
+      }
     } else {
       sample = new MediaRawData(data, length);
+      if (!sample->Data()) {
+        // OOM.
+        return false;
+      }
     }
     sample->mTimecode = tstamp;
     sample->mTime = tstamp;
@@ -709,8 +735,9 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSampl
       }
     }
 
-    if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_UNENCRYPTED ||
-        packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED) {
+    if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_UNENCRYPTED
+        || packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED
+        || packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_PARTITIONED) {
       nsAutoPtr<MediaRawDataWriter> writer(sample->CreateWriter());
       unsigned char const* iv;
       size_t ivLength;
@@ -729,8 +756,72 @@ WebMDemuxer::GetNextPacket(TrackInfo::TrackType aType, MediaRawDataQueue *aSampl
         for (uint32_t i = 0; i < 8; i++) {
           writer->mCrypto.mIV.AppendElement(0);
         }
-        writer->mCrypto.mPlainSizes.AppendElement(0);
-        writer->mCrypto.mEncryptedSizes.AppendElement(length);
+
+        if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_ENCRYPTED) {
+          writer->mCrypto.mPlainSizes.AppendElement(0);
+          writer->mCrypto.mEncryptedSizes.AppendElement(length);
+        } else if (packetEncryption == NESTEGG_PACKET_HAS_SIGNAL_BYTE_PARTITIONED) {
+          uint8_t numPartitions = 0;
+          const uint32_t* partitions = NULL;
+          nestegg_packet_offsets(holder->Packet(), &partitions, &numPartitions);
+
+          // WebM stores a list of 'partitions' in the data, which alternate
+          // clear, encrypted. The data in the first partition is always clear.
+          // So, and sample might look as follows:
+          // 00|XXXX|000|XX, where | represents a partition, 0 a clear byte and
+          // X an encrypted byte. If the first bytes in sample are unencrypted,
+          // the first partition will be at zero |XXXX|000|XX.
+          //
+          // As GMP expects the lengths of the clear and encrypted chunks of
+          // data, we calculate these from the difference between the last two
+          // partitions.
+          uint32_t lastOffset = 0;
+          bool encrypted = false;
+
+          for (uint8_t i = 0; i < numPartitions; i++) {
+            uint32_t partition = partitions[i];
+            uint32_t currentLength = partition - lastOffset;
+
+            if (encrypted) {
+              writer->mCrypto.mEncryptedSizes.AppendElement(currentLength);
+            } else {
+              writer->mCrypto.mPlainSizes.AppendElement(currentLength);
+            }
+
+            encrypted = !encrypted;
+            lastOffset = partition;
+
+            assert(lastOffset <= length);
+          }
+
+          // Add the data between the last offset and the end of the data.
+          // 000|XXX|000
+          //        ^---^
+          if (encrypted) {
+            writer->mCrypto.mEncryptedSizes.AppendElement(length - lastOffset);
+          } else {
+            writer->mCrypto.mPlainSizes.AppendElement(length - lastOffset);
+          }
+
+          // Make sure we have an equal number of encrypted and plain sizes (GMP
+          // expects this). This simple check is sufficient as there are two
+          // possible cases at this point:
+          // 1. The number of samples are even (so we don't need to do anything)
+          // 2. There is one more clear sample than encrypted samples, so add a
+          // zero length encrypted chunk.
+          // There can never be more encrypted partitions than clear partitions
+          // due to the alternating structure of the WebM samples and the
+          // restriction that the first chunk is always clear.
+          if (numPartitions % 2 == 0) {
+            writer->mCrypto.mEncryptedSizes.AppendElement(0);
+          }
+
+          // Assert that the lengths of the encrypted and plain samples add to
+          // the length of the data.
+          assert(((size_t)(std::accumulate(writer->mCrypto.mPlainSizes.begin(), writer->mCrypto.mPlainSizes.end(), 0) \
+                 + std::accumulate(writer->mCrypto.mEncryptedSizes.begin(), writer->mCrypto.mEncryptedSizes.end(), 0)) \
+                 == length));
+        }
       }
     }
     if (aType == TrackInfo::kVideoTrack) {
@@ -1004,7 +1095,8 @@ WebMTrackDemuxer::GetSamples(int32_t aNumSamples)
   }
 
   if (samples->mSamples.IsEmpty()) {
-    return SamplesPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
+    return SamplesPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_END_OF_STREAM,
+                                           __func__);
   } else {
     UpdateSamples(samples->mSamples);
     return SamplesPromise::CreateAndResolve(samples, __func__);
@@ -1048,8 +1140,8 @@ WebMTrackDemuxer::SetNextKeyFrameTime()
     skipSamplesQueue.Push(sample.forget());
     if (!startTime) {
       startTime.emplace(sampleTimecode);
-    } else if (!foundKeyframe &&
-               sampleTimecode > startTime.ref() + MAX_LOOK_AHEAD) {
+    } else if (!foundKeyframe
+               && sampleTimecode > startTime.ref() + MAX_LOOK_AHEAD) {
       WEBM_DEBUG("Couldn't find keyframe in a reasonable time, aborting");
       break;
     }
@@ -1063,7 +1155,9 @@ WebMTrackDemuxer::SetNextKeyFrameTime()
     WEBM_DEBUG("Next Keyframe %f (%u queued %.02fs)",
                mNextKeyframeTime.value().ToSeconds(),
                uint32_t(mSamples.GetSize()),
-               media::TimeUnit::FromMicroseconds(mSamples.Last()->mTimecode - mSamples.First()->mTimecode).ToSeconds());
+               media::TimeUnit::FromMicroseconds(mSamples.Last()->mTimecode
+                                                 - mSamples.First()->mTimecode)
+                 .ToSeconds());
   } else {
     WEBM_DEBUG("Couldn't determine next keyframe time  (%u queued)",
                uint32_t(mSamples.GetSize()));
@@ -1096,8 +1190,9 @@ WebMTrackDemuxer::UpdateSamples(nsTArray<RefPtr<MediaRawData>>& aSamples)
       writer->mCrypto.mKeyId.AppendElements(mInfo->mCrypto.mKeyId);
     }
   }
-  if (mNextKeyframeTime.isNothing() ||
-      aSamples.LastElement()->mTime >= mNextKeyframeTime.value().ToMicroseconds()) {
+  if (mNextKeyframeTime.isNothing()
+      || aSamples.LastElement()->mTime
+         >= mNextKeyframeTime.value().ToMicroseconds()) {
     SetNextKeyFrameTime();
   }
 }
@@ -1116,7 +1211,8 @@ WebMTrackDemuxer::GetNextRandomAccessPoint(media::TimeUnit* aTime)
 }
 
 RefPtr<WebMTrackDemuxer::SkipAccessPointPromise>
-WebMTrackDemuxer::SkipToNextRandomAccessPoint(const media::TimeUnit& aTimeThreshold)
+WebMTrackDemuxer::SkipToNextRandomAccessPoint(
+  const media::TimeUnit& aTimeThreshold)
 {
   uint32_t parsed = 0;
   bool found = false;

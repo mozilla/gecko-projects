@@ -77,6 +77,7 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     nonSyntacticLexicalEnvironments_(nullptr),
     gcIncomingGrayPointers(nullptr),
     debugModeBits(0),
+    validAccessPtr(nullptr),
     randomKeyGenerator_(runtime_->forkRandomKeyGenerator()),
     watchpointMap(nullptr),
     scriptCountsMap(nullptr),
@@ -103,7 +104,7 @@ JSCompartment::~JSCompartment()
     reportTelemetry();
 
     // Write the code coverage information in a file.
-    JSRuntime* rt = runtimeFromMainThread();
+    JSRuntime* rt = runtimeFromActiveCooperatingThread();
     if (rt->lcovOutput().isEnabled())
         rt->lcovOutput().writeLCovResult(lcovOutput);
 
@@ -250,8 +251,23 @@ JSCompartment::checkWrapperMapAfterMovingGC()
 #endif
 
 bool
-JSCompartment::putWrapper(JSContext* cx, const CrossCompartmentKey& wrapped,
-                          const js::Value& wrapper)
+JSCompartment::putNewWrapper(JSContext* cx, const CrossCompartmentKey& wrapped,
+                             const js::Value& wrapper)
+{
+    MOZ_ASSERT(wrapped.is<JSString*>() == wrapper.isString());
+    MOZ_ASSERT_IF(!wrapped.is<JSString*>(), wrapper.isObject());
+
+    if (!crossCompartmentWrappers.putNew(wrapped, wrapper)) {
+        ReportOutOfMemory(cx);
+        return false;
+    }
+
+    return true;
+}
+
+bool
+JSCompartment::putWrapperMaybeUpdate(JSContext* cx, const CrossCompartmentKey& wrapped,
+                                     const js::Value& wrapper)
 {
     MOZ_ASSERT(wrapped.is<JSString*>() == wrapper.isString());
     MOZ_ASSERT_IF(!wrapped.is<JSString*>(), wrapper.isObject());
@@ -342,7 +358,7 @@ JSCompartment::wrap(JSContext* cx, MutableHandleString strp)
     JSString* copy = CopyStringPure(cx, str);
     if (!copy)
         return false;
-    if (!putWrapper(cx, CrossCompartmentKey(key), StringValue(copy)))
+    if (!putNewWrapper(cx, CrossCompartmentKey(key), StringValue(copy)))
         return false;
 
     strp.set(copy);
@@ -432,7 +448,7 @@ JSCompartment::getOrCreateWrapper(JSContext* cx, HandleObject existing, MutableH
     // map is always directly wrapped by the value.
     MOZ_ASSERT(Wrapper::wrappedObject(wrapper) == &key.get().toObject());
 
-    if (!putWrapper(cx, CrossCompartmentKey(key), ObjectValue(*wrapper))) {
+    if (!putNewWrapper(cx, CrossCompartmentKey(key), ObjectValue(*wrapper))) {
         // Enforce the invariant that all cross-compartment wrapper object are
         // in the map by nuking the wrapper if we couldn't add it.
         // Unfortunately it's possible for the wrapper to still be marked if we
@@ -649,12 +665,9 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
     }
 
     if (!JS::CurrentThreadIsHeapMinorCollecting()) {
-        // JIT code and the global are never nursery allocated, so we only need
-        // to trace them when not doing a minor collection.
-
-        if (jitCompartment_)
-            jitCompartment_->trace(trc, this);
-
+        // The global is never nursery allocated, so we don't need to
+        // trace it when doing a minor collection.
+        //
         // If a compartment is on-stack, we mark its global so that
         // JSContext::global() remains valid.
         if (enterCompartmentDepth && global_.unbarrieredGet())
@@ -695,7 +708,7 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
     // line option, or with the PCCount JSFriend API functions, then we mark the
     // keys of the map to hold the JSScript alive.
     if (scriptCountsMap &&
-        zone()->group()->profilingScripts &&
+        trc->runtime()->profilingScripts &&
         !JS::CurrentThreadIsHeapMinorCollecting())
     {
         MOZ_ASSERT_IF(!trc->runtime()->isBeingDestroyed(), collectCoverage());
@@ -1060,15 +1073,6 @@ AddLazyFunctionsForCompartment(JSContext* cx, AutoObjectVector& lazyFunctions, A
             continue;
         }
 
-        // This creates a new reference to an object that an ongoing incremental
-        // GC may find to be unreachable. Treat as if we're reading a weak
-        // reference and trigger the read barrier.
-        if (cx->zone()->needsIncrementalBarrier())
-            fun->readBarrier(fun);
-
-        // TODO: The above checks should be rolled into the cell iterator (see
-        // bug 1322971).
-
         if (fun->isInterpretedLazy()) {
             LazyScript* lazy = fun->lazyScriptOrNull();
             if (lazy && lazy->sourceObject() && !lazy->hasUncompiledEnclosingScript()) {
@@ -1121,7 +1125,7 @@ CreateLazyScriptsForCompartment(JSContext* cx)
 bool
 JSCompartment::ensureDelazifyScriptsForDebugger(JSContext* cx)
 {
-    MOZ_ASSERT(cx->compartment() == this);
+    AutoCompartmentUnchecked ac(cx, this);
     if (needsDelazificationForDebugger() && !CreateLazyScriptsForCompartment(cx))
         return false;
     debugModeBits &= ~DebuggerNeedsDelazification;
@@ -1136,7 +1140,7 @@ JSCompartment::updateDebuggerObservesFlag(unsigned flag)
                flag == DebuggerObservesCoverage ||
                flag == DebuggerObservesAsmJS);
 
-    GlobalObject* global = zone()->runtimeFromMainThread()->gc.isForegroundSweeping()
+    GlobalObject* global = zone()->runtimeFromActiveCooperatingThread()->gc.isForegroundSweeping()
                            ? unsafeUnbarrieredMaybeGlobal()
                            : maybeGlobal();
     const GlobalObject::DebuggerVector* v = global->getDebuggers();
@@ -1174,7 +1178,9 @@ JSCompartment::updateDebuggerObservesCoverage()
     if (debuggerObservesCoverage()) {
         // Interrupt any running interpreter frame. The scriptCounts are
         // allocated on demand when a script resume its execution.
-        for (ActivationIterator iter(runtimeFromMainThread()); !iter.done(); ++iter) {
+        JSContext* cx = TlsContext.get();
+        MOZ_ASSERT(zone()->group()->ownedByCurrentThread());
+        for (ActivationIterator iter(cx); !iter.done(); ++iter) {
             if (iter->isInterpreter())
                 iter->asInterpreter()->enableInterruptsUnconditionally();
         }
@@ -1205,7 +1211,7 @@ bool
 JSCompartment::collectCoverageForDebug() const
 {
     return debuggerObservesCoverage() ||
-           zone()->group()->profilingScripts ||
+           runtimeFromAnyThread()->profilingScripts ||
            runtimeFromAnyThread()->lcovOutput().isEnabled();
 }
 

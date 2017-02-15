@@ -1314,9 +1314,10 @@ EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
     // If we didn't find any matching listeners, and our event has a legacy
     // version, we'll now switch to looking for that legacy version and we'll
     // recheck our listeners.
-    if (hasListenerForCurrentGroup || usingLegacyMessage) {
-      // (No need to recheck listeners, because we already found a match, or we
-      // already rechecked them.)
+    if (hasListenerForCurrentGroup ||
+        usingLegacyMessage || !aEvent->IsTrusted()) {
+      // No need to recheck listeners, because we already found a match, we
+      // already rechecked them, or it is not a trusted event.
       break;
     }
     EventMessage legacyEventMessage = GetLegacyEventMessage(eventMessage);
@@ -1571,10 +1572,16 @@ EventListenerManager::GetListenerInfo(nsCOMArray<nsIEventListenerInfo>* aList)
     } else {
       eventType.Assign(Substring(nsDependentAtomString(listener.mTypeAtom), 2));
     }
+    nsCOMPtr<nsIDOMEventListener> callback = listener.mListener.ToXPCOMCallback();
+    if (!callback) {
+      // This will be null for cross-compartment event listeners which have been
+      // destroyed.
+      continue;
+    }
     // EventListenerInfo is defined in XPCOM, so we have to go ahead
     // and convert to an XPCOM callback here...
     RefPtr<EventListenerInfo> info =
-      new EventListenerInfo(eventType, listener.mListener.ToXPCOMCallback(),
+      new EventListenerInfo(eventType, callback.forget(),
                             listener.mFlags.mCapture,
                             listener.mFlags.mAllowUntrustedEvents,
                             listener.mFlags.mInSystemGroup);

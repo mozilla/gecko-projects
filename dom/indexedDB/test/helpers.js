@@ -44,7 +44,7 @@ function clearAllDatabases(callback) {
 var testHarnessGenerator = testHarnessSteps();
 testHarnessGenerator.next();
 
-function testHarnessSteps() {
+function* testHarnessSteps() {
   function nextTestHarnessStep(val) {
     testHarnessGenerator.next(val);
   }
@@ -76,7 +76,6 @@ function testHarnessSteps() {
         ["dom.indexedDB.testing", true],
         ["dom.indexedDB.experimental", true],
         ["dom.archivereader.enabled", true],
-        ["dom.workers.latestJSVersion", true],
         ["javascript.options.wasm", true]
       ]
     },

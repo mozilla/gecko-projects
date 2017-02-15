@@ -101,7 +101,7 @@ struct PhaseInfo
     Phase index;
     const char* name;
     Phase parent;
-    const uint8_t telemetryBucket;
+    uint8_t telemetryBucket;
 };
 
 // The zeroth entry in the timing arrays is used for phases that have a
@@ -1405,7 +1405,12 @@ Statistics::maybePrintProfileHeaders()
     static int printedHeader = 0;
     if ((printedHeader++ % 200) == 0) {
         printProfileHeader();
-        runtime->zoneGroupFromMainThread()->nursery().printProfileHeader();
+        for (ZoneGroupsIter group(runtime); !group.done(); group.next()) {
+            if (group->nursery().enableProfiling()) {
+                Nursery::printProfileHeader();
+                break;
+            }
+        }
     }
 }
 
