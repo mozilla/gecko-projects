@@ -285,20 +285,12 @@ def chunk_locales(config, jobs):
                 locales_with_changesets_as_list = locales_with_changesets.items()
                 chunked_locales = chunkify(locales_with_changesets_as_list, this_chunk, chunks)
                 chunked['mozharness']['options'].extend([
-<<<<<<< working copy
-                    'locale={}:{}'.format(locale, changeset) for locale, changeset in chunked_locales
-=======
                     'locale={}:{}'.format(locale, changeset)
                     for locale, changeset in chunked_locales
->>>>>>> merge rev
                 ])
                 chunked['attributes']['l10n_chunk'] = str(this_chunk)
-<<<<<<< working copy
-                chunked['attributes']['chunk_locales'] = [locale for locale, _ in chunked_locales]  # strip revision
-=======
                 # strip revision
                 chunked['attributes']['chunk_locales'] = [locale for locale, _ in chunked_locales]
->>>>>>> merge rev
 
                 # add the chunk number to the TH symbol
                 group, symbol = split_symbol(
@@ -309,12 +301,8 @@ def chunk_locales(config, jobs):
         else:
             job['mozharness']['options'] = job['mozharness'].get('options', [])
             job['mozharness']['options'].extend([
-<<<<<<< working copy
-                'locale={}:{}'.format(locale, changeset) for locale, changeset in locales_with_changesets.items()
-=======
                 'locale={}:{}'.format(locale, changeset)
                 for locale, changeset in locales_with_changesets.items()
->>>>>>> merge rev
             ])
             yield job
 
