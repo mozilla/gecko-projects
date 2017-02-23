@@ -28,7 +28,7 @@
 #include "nsPrintfCString.h"
 #include "nsCOMPtr.h"
 #include "nsNetCID.h"
-#include "prprf.h"
+#include "mozilla/Printf.h"
 #include "mozilla/Sprintf.h"
 #include "nsAsyncRedirectVerifyHelper.h"
 #include "nsSocketTransportService2.h"
@@ -53,6 +53,7 @@
 #include "nsSocketTransportService2.h"
 #include "nsIOService.h"
 #include "nsIUUIDGenerator.h"
+#include "nsIThrottlingService.h"
 
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/NeckoParent.h"
@@ -589,6 +590,17 @@ nsHttpHandler::GetIOService(nsIIOService** result)
     return NS_OK;
 }
 
+nsIThrottlingService *
+nsHttpHandler::GetThrottlingService()
+{
+    if (!mThrottlingService) {
+        nsCOMPtr<nsIThrottlingService> service = do_GetService(NS_THROTTLINGSERVICE_CONTRACTID);
+        mThrottlingService = new nsMainThreadPtrHolder<nsIThrottlingService>(service);
+    }
+
+    return mThrottlingService;
+}
+
 uint32_t
 nsHttpHandler::Get32BitsOfPseudoRandom()
 {
@@ -614,7 +626,7 @@ nsHttpHandler::Get32BitsOfPseudoRandom()
 void
 nsHttpHandler::NotifyObservers(nsIHttpChannel *chan, const char *event)
 {
-    LOG(("nsHttpHandler::NotifyObservers [chan=%x event=\"%s\"]\n", chan, event));
+    LOG(("nsHttpHandler::NotifyObservers [chan=%p event=\"%s\"]\n", chan, event));
     nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
     if (obsService)
         obsService->NotifyObservers(chan, event, nullptr);
@@ -867,12 +879,12 @@ nsHttpHandler::InitUserAgentComponents()
           ? WNT_BASE "; WOW64"
           : WNT_BASE;
 #endif
-        char *buf = PR_smprintf(format,
-                                info.dwMajorVersion,
-                                info.dwMinorVersion);
+        char *buf = mozilla::Smprintf(format,
+                               info.dwMajorVersion,
+                               info.dwMinorVersion);
         if (buf) {
             mOscpu = buf;
-            PR_smprintf_free(buf);
+            mozilla::SmprintfFree(buf);
         }
     }
 #elif defined (XP_MACOSX)
@@ -883,7 +895,8 @@ nsHttpHandler::InitUserAgentComponents()
 #endif
     SInt32 majorVersion = nsCocoaFeatures::OSXVersionMajor();
     SInt32 minorVersion = nsCocoaFeatures::OSXVersionMinor();
-    mOscpu += nsPrintfCString(" %d.%d", majorVersion, minorVersion);
+    mOscpu += nsPrintfCString(" %d.%d", static_cast<int>(majorVersion),
+                              static_cast<int>(minorVersion));
 #elif defined (XP_UNIX)
     struct utsname name;
 
@@ -2264,9 +2277,22 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
     uint32_t flags = 0;
     if (loadContext && loadContext->UsePrivateBrowsing())
         flags |= nsISocketProvider::NO_PERMANENT_STORAGE;
+
+    OriginAttributes originAttributes;
+    // If the principal is given, we use the originAttributes from this
+    // principal. Otherwise, we use the originAttributes from the
+    // loadContext.
+    if (aPrincipal) {
+        originAttributes.Inherit(aPrincipal->OriginAttributesRef());
+    } else if (loadContext) {
+        loadContext->GetOriginAttributes(originAttributes);
+        originAttributes.StripAttributes(OriginAttributes::STRIP_ADDON_ID);
+    }
+
     nsCOMPtr<nsIURI> clone;
     if (NS_SUCCEEDED(sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
-                                      aURI, flags, nullptr, &isStsHost)) &&
+                                      aURI, flags, originAttributes,
+                                      nullptr, &isStsHost)) &&
                                       isStsHost) {
         if (NS_SUCCEEDED(NS_GetSecureUpgradedURI(aURI,
                                                  getter_AddRefs(clone)))) {
@@ -2311,17 +2337,6 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
 
     nsAutoCString username;
     aURI->GetUsername(username);
-
-    OriginAttributes originAttributes;
-    // If the principal is given, we use the originAttributes from this
-    // principal. Otherwise, we use the originAttributes from the
-    // loadContext.
-    if (aPrincipal) {
-        originAttributes.Inherit(aPrincipal->OriginAttributesRef());
-    } else if (loadContext) {
-        loadContext->GetOriginAttributes(originAttributes);
-        originAttributes.StripAttributes(OriginAttributes::STRIP_ADDON_ID);
-    }
 
     auto *ci =
         new nsHttpConnectionInfo(host, port, EmptyCString(), username, nullptr,

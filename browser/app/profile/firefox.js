@@ -1377,6 +1377,12 @@ pref("media.eme.enabled", false);
 pref("media.eme.enabled", true);
 #endif
 
+#ifdef NIGHTLY_BUILD
+pref("media.eme.vp9-in-mp4.enabled", true);
+#else
+pref("media.eme.vp9-in-mp4.enabled", false);
+#endif
+
 // Whether we should run a test-pattern through EME GMPs before assuming they'll
 // decode H.264.
 pref("media.gmp.trial-create.enabled", true);
@@ -1529,6 +1535,10 @@ pref("browser.migrate.automigrate.enabled", false);
 pref("browser.migrate.automigrate.daysToOfferUndo", 4);
 pref("browser.migrate.automigrate.ui.enabled", true);
 
+// See comments in bug 1340115 on how we got to these numbers.
+pref("browser.migrate.chrome.history.limit", 2000);
+pref("browser.migrate.chrome.history.maxAgeInDays", 180);
+
 // Enable browser frames for use on desktop.  Only exposed to chrome callers.
 pref("dom.mozBrowserFramesEnabled", true);
 
@@ -1580,6 +1590,7 @@ pref("services.sync.validation.enabled", true);
 // Preferences for the form autofill system extension
 pref("browser.formautofill.experimental", false);
 pref("browser.formautofill.enabled", false);
+pref("browser.formautofill.loglevel", "Warn");
 
 // Enable safebrowsing v4 tables (suffixed by "-proto") update.
 #ifdef NIGHTLY_BUILD

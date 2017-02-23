@@ -61,6 +61,7 @@
 #include "nsIXULRuntime.h"
 #include "nsICacheInfoChannel.h"
 #include "nsIDOMWindowUtils.h"
+#include "nsIThrottlingService.h"
 
 #include <algorithm>
 #include "HttpBaseChannel.h"
@@ -204,7 +205,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mForceMainDocumentChannel(false)
   , mIsTrackingResource(false)
 {
-  LOG(("Creating HttpBaseChannel @%x\n", this));
+  LOG(("Creating HttpBaseChannel @%p\n", this));
 
   // Subfields of unions cannot be targeted in an initializer list.
 #ifdef MOZ_VALGRIND
@@ -220,7 +221,7 @@ HttpBaseChannel::HttpBaseChannel()
 
 HttpBaseChannel::~HttpBaseChannel()
 {
-  LOG(("Destroying HttpBaseChannel @%x\n", this));
+  LOG(("Destroying HttpBaseChannel @%p\n", this));
 
   // Make sure we don't leak
   CleanRedirectCacheChainIfNecessary();
@@ -344,6 +345,7 @@ NS_INTERFACE_MAP_BEGIN(HttpBaseChannel)
   NS_INTERFACE_MAP_ENTRY(nsITimedChannel)
   NS_INTERFACE_MAP_ENTRY(nsIConsoleReportCollector)
   NS_INTERFACE_MAP_ENTRY(nsIThrottledInputChannel)
+  NS_INTERFACE_MAP_ENTRY(nsIClassifiedChannel)
   if (aIID.Equals(NS_GET_IID(HttpBaseChannel))) {
     foundInterface = static_cast<nsIWritablePropertyBag*>(this);
   } else
@@ -1042,7 +1044,8 @@ public:
   NS_IMETHOD OnStopRequest(nsIRequest *aRequest, nsISupports *aContext, nsresult aStatusCode) override
   {
     if (NS_FAILED(aStatusCode) && NS_SUCCEEDED(mChannel->mStatus)) {
-      LOG(("HttpBaseChannel::InterceptFailedOnStop %p seting status %x", mChannel, aStatusCode));
+      LOG(("HttpBaseChannel::InterceptFailedOnStop %p seting status %" PRIx32,
+           mChannel, static_cast<uint32_t>(aStatusCode)));
       mChannel->mStatus = aStatusCode;
     }
     return mNext->OnStopRequest(aRequest, aContext, aStatusCode);
@@ -2721,12 +2724,6 @@ HttpBaseChannel::GetIntegrityMetadata(nsAString& aIntegrityMetadata)
   return NS_OK;
 }
 
-mozilla::net::nsHttpChannel*
-HttpBaseChannel::QueryHttpChannelImpl(void)
-{
-  return nullptr;
-}
-
 //-----------------------------------------------------------------------------
 // HttpBaseChannel::nsISupportsPriority
 //-----------------------------------------------------------------------------
@@ -2955,6 +2952,13 @@ void
 HttpBaseChannel::ReleaseListeners()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Should only be called on the main thread.");
+
+  if (mClassOfService & nsIClassOfService::Throttleable) {
+    nsIThrottlingService *throttler = gHttpHandler->GetThrottlingService();
+    if (throttler) {
+      throttler->RemoveChannel(this);
+    }
+  }
 
   mListener = nullptr;
   mListenerContext = nullptr;
@@ -3244,6 +3248,12 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   // share the request context - see bug 1236650
   httpChannel->SetRequestContextID(mRequestContextID);
 
+  // Preserve the loading order
+  nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(newChannel);
+  if (p) {
+    p->SetPriority(mPriority);
+  }
+
   if (httpInternal) {
     // Convey third party cookie, conservative, and spdy flags.
     httpInternal->SetThirdPartyFlags(mThirdPartyFlags);
@@ -3379,6 +3389,41 @@ HttpBaseChannel::SameOriginWithOriginalUri(nsIURI *aURI)
 }
 
 
+//-----------------------------------------------------------------------------
+// HttpBaseChannel::nsIClassifiedChannel
+
+NS_IMETHODIMP
+HttpBaseChannel::GetMatchedList(nsACString& aList)
+{
+  aList = mMatchedList;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetMatchedProvider(nsACString& aProvider)
+{
+  aProvider = mMatchedProvider;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetMatchedPrefix(nsACString& aPrefix)
+{
+  aPrefix = mMatchedPrefix;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetMatchedInfo(const nsACString& aList,
+                                const nsACString& aProvider,
+                                const nsACString& aPrefix) {
+  NS_ENSURE_ARG(!aList.IsEmpty());
+
+  mMatchedList = aList;
+  mMatchedProvider = aProvider;
+  mMatchedPrefix = aPrefix;
+  return NS_OK;
+}
 
 //-----------------------------------------------------------------------------
 // HttpBaseChannel::nsITimedChannel

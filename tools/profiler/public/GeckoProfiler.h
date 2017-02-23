@@ -268,12 +268,12 @@ PROFILER_FUNC_VOID(profiler_register_thread(const char* name,
                                             void* guessStackTop))
 PROFILER_FUNC_VOID(profiler_unregister_thread())
 
-// These functions tell the profiler that a thread went to sleep so that we can avoid
-// sampling it while it's sleeping. Calling profiler_sleep_start() twice without
-// profiler_sleep_end() is an error.
-PROFILER_FUNC_VOID(profiler_sleep_start())
-PROFILER_FUNC_VOID(profiler_sleep_end())
-PROFILER_FUNC(bool profiler_is_sleeping(), false)
+// These functions tell the profiler that a thread went to sleep so that we can
+// avoid sampling it while it's sleeping. Calling profiler_thread_sleep()
+// twice without an intervening profiler_thread_wake() is an error.
+PROFILER_FUNC_VOID(profiler_thread_sleep())
+PROFILER_FUNC_VOID(profiler_thread_wake())
+PROFILER_FUNC(bool profiler_thread_is_sleeping(), false)
 
 // Call by the JSRuntime's operation callback. This is used to enable
 // profiling on auxilerary threads.
@@ -329,9 +329,7 @@ extern MOZ_THREAD_LOCAL(PseudoStack*) tlsPseudoStack;
 extern bool stack_key_initialized;
 
 #ifndef SAMPLE_FUNCTION_NAME
-# ifdef __GNUC__
-#  define SAMPLE_FUNCTION_NAME __FUNCTION__
-# elif defined(_MSC_VER)
+# if defined(__GNUC__) || defined(_MSC_VER)
 #  define SAMPLE_FUNCTION_NAME __FUNCTION__
 # else
 #  define SAMPLE_FUNCTION_NAME __func__  // defined in C99, supported in various C++ compilers. Just raw function name.
@@ -448,20 +446,10 @@ void profiler_get_gatherer(nsISupports** aRetVal);
  * important case, b2g, there are also many gecko processes which
  * magnify these effects. */
 # define PROFILE_DEFAULT_INTERVAL 10
-#elif defined(ANDROID)
-// We use a lower frequency on Android, in order to make things work
-// more smoothly on phones.  This value can be adjusted later with
-// some libunwind optimizations.
-// In one sample measurement on Galaxy Nexus, out of about 700 backtraces,
-// 60 of them took more than 25ms, and the average and standard deviation
-// were 6.17ms and 9.71ms respectively.
-
-// For now since we don't support stackwalking let's use 1ms since it's fast
-// enough.
-#define PROFILE_DEFAULT_INTERVAL 1
 #else
 #define PROFILE_DEFAULT_INTERVAL 1
 #endif
+
 #define PROFILE_DEFAULT_FEATURES NULL
 #define PROFILE_DEFAULT_FEATURE_COUNT 0
 
@@ -558,33 +546,33 @@ public:
   }
 };
 
-class MOZ_RAII GeckoProfilerSleepRAII {
+class MOZ_RAII GeckoProfilerThreadSleepRAII {
 public:
-  GeckoProfilerSleepRAII() {
-    profiler_sleep_start();
+  GeckoProfilerThreadSleepRAII() {
+    profiler_thread_sleep();
   }
-  ~GeckoProfilerSleepRAII() {
-    profiler_sleep_end();
+  ~GeckoProfilerThreadSleepRAII() {
+    profiler_thread_wake();
   }
 };
 
 /**
- * Temporarily wake up the profiler while servicing events such as
+ * Temporarily wake up the profiling of a thread while servicing events such as
  * Asynchronous Procedure Calls (APCs).
  */
-class MOZ_RAII GeckoProfilerWakeRAII {
+class MOZ_RAII GeckoProfilerThreadWakeRAII {
 public:
-  GeckoProfilerWakeRAII()
-    : mIssuedWake(profiler_is_sleeping())
+  GeckoProfilerThreadWakeRAII()
+    : mIssuedWake(profiler_thread_is_sleeping())
   {
     if (mIssuedWake) {
-      profiler_sleep_end();
+      profiler_thread_wake();
     }
   }
-  ~GeckoProfilerWakeRAII() {
+  ~GeckoProfilerThreadWakeRAII() {
     if (mIssuedWake) {
-      MOZ_ASSERT(!profiler_is_sleeping());
-      profiler_sleep_start();
+      MOZ_ASSERT(!profiler_thread_is_sleeping());
+      profiler_thread_sleep();
     }
   }
 private:

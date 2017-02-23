@@ -195,6 +195,7 @@ var tests = [
       // Reset to false so that we can ensure these are not fired a second time.
       notifyObj.shownCallbackTriggered = false;
       notifyObj.showingCallbackTriggered = false;
+      let timeShown = this.notification.timeShown;
 
       let promiseWin = BrowserTestUtils.waitForNewWindow();
       gBrowser.replaceTabWithWindow(firstTab);
@@ -218,6 +219,8 @@ var tests = [
          "Should not have triggered a second shown event");
       ok(!notifyObj.showingCallbackTriggered,
          "Should not have triggered a second showing event");
+      ok(this.notification.timeShown > timeShown,
+         "should have updated timeShown to restart the security delay");
 
       this.notification.remove();
       gBrowser.removeTab(gBrowser.selectedTab);
@@ -339,6 +342,8 @@ var tests = [
   // the currently displayed notification is a persistent one.
   { id: "Test#11",
     *run() {
+      yield SpecialPowers.pushPrefEnv({"set": [["accessibility.tabfocus", 7]]});
+
       function clickAnchor(notifyObj) {
         let anchor = document.getElementById(notifyObj.anchorID);
         EventUtils.synthesizeMouseAtCenter(anchor, {});
@@ -359,10 +364,11 @@ var tests = [
       notifyObj1.shownCallbackTriggered = false;
       notifyObj1.showingCallbackTriggered = false;
 
-      // Click the anchor. This should focus the primary button, but
-      // not call event callbacks on the notification object.
+      // Click the anchor. This should focus the closebutton
+      // (because it's the first focusable element), but not
+      // call event callbacks on the notification object.
       clickAnchor(notifyObj1);
-      is(document.activeElement, popup.childNodes[0].button);
+      is(document.activeElement, popup.childNodes[0].closebutton);
       ok(!notifyObj1.dismissalCallbackTriggered,
          "Should not have dismissed the notification");
       ok(!notifyObj1.shownCallbackTriggered,

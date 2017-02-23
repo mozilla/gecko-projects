@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* eslint-disable react/prop-types */
-
 "use strict";
 
 const {
@@ -12,8 +10,8 @@ const {
   DOM,
   PropTypes,
 } = require("devtools/client/shared/vendor/react");
-const { L10N } = require("../l10n");
-const { getAbbreviatedMimeType } = require("../request-utils");
+const { L10N } = require("../utils/l10n");
+const { getAbbreviatedMimeType } = require("../utils/request-utils");
 const { getFormattedSize } = require("../utils/format-utils");
 
 const { div, img, span } = DOM;
@@ -69,7 +67,6 @@ const RequestListItem = createClass({
     firstRequestStartedMillis: PropTypes.number.isRequired,
     onContextMenu: PropTypes.func.isRequired,
     onFocusedNodeChange: PropTypes.func,
-    onFocusedNodeUnmount: PropTypes.func,
     onMouseDown: PropTypes.func.isRequired,
     onSecurityIconClick: PropTypes.func.isRequired,
   },
@@ -94,20 +91,6 @@ const RequestListItem = createClass({
     }
   },
 
-  componentWillUnmount() {
-    // If this node is being destroyed and has focus, transfer the focus manually
-    // to the parent tree component. Otherwise, the focus will get lost and keyboard
-    // navigation in the tree will stop working. This is a workaround for a XUL bug.
-    // See bugs 1259228 and 1152441 for details.
-    // DE-XUL: Remove this hack once all usages are only in HTML documents.
-    if (this.props.isSelected) {
-      this.refs.el.blur();
-      if (this.props.onFocusedNodeUnmount) {
-        this.props.onFocusedNodeUnmount();
-      }
-    }
-  },
-
   render() {
     const {
       item,
@@ -119,7 +102,7 @@ const RequestListItem = createClass({
       onSecurityIconClick
     } = this.props;
 
-    let classList = [ "request-list-item" ];
+    let classList = ["request-list-item"];
     if (isSelected) {
       classList.push("selected");
     }
@@ -158,6 +141,10 @@ const UPDATED_STATUS_PROPS = [
 const StatusColumn = createFactory(createClass({
   displayName: "StatusColumn",
 
+  propTypes: {
+    item: PropTypes.object.isRequired,
+  },
+
   shouldComponentUpdate(nextProps) {
     return !propertiesEqual(UPDATED_STATUS_PROPS, this.props.item, nextProps.item);
   },
@@ -188,9 +175,9 @@ const StatusColumn = createFactory(createClass({
     }
 
     return (
-      div({ className: "requests-menu-subitem requests-menu-status", title },
-        div({ className: "requests-menu-status-icon", "data-code": code }),
-        span({ className: "subitem-label requests-menu-status-code" }, status),
+        div({ className: "requests-list-subitem requests-list-status", title },
+        div({ className: "requests-list-status-icon", "data-code": code }),
+        span({ className: "subitem-label requests-list-status-code" }, status)
       )
     );
   }
@@ -199,6 +186,10 @@ const StatusColumn = createFactory(createClass({
 const MethodColumn = createFactory(createClass({
   displayName: "MethodColumn",
 
+  propTypes: {
+    item: PropTypes.object.isRequired,
+  },
+
   shouldComponentUpdate(nextProps) {
     return this.props.item.method !== nextProps.item.method;
   },
@@ -206,8 +197,8 @@ const MethodColumn = createFactory(createClass({
   render() {
     const { method } = this.props.item;
     return (
-      div({ className: "requests-menu-subitem requests-menu-method-box" },
-        span({ className: "subitem-label requests-menu-method" }, method)
+      div({ className: "requests-list-subitem requests-list-method-box" },
+        span({ className: "subitem-label requests-list-method" }, method)
       )
     );
   }
@@ -221,6 +212,10 @@ const UPDATED_FILE_PROPS = [
 const FileColumn = createFactory(createClass({
   displayName: "FileColumn",
 
+  propTypes: {
+    item: PropTypes.object.isRequired,
+  },
+
   shouldComponentUpdate(nextProps) {
     return !propertiesEqual(UPDATED_FILE_PROPS, this.props.item, nextProps.item);
   },
@@ -229,15 +224,15 @@ const FileColumn = createFactory(createClass({
     const { urlDetails, responseContentDataUri } = this.props.item;
 
     return (
-      div({ className: "requests-menu-subitem requests-menu-icon-and-file" },
+      div({ className: "requests-list-subitem requests-list-icon-and-file" },
         img({
-          className: "requests-menu-icon",
+          className: "requests-list-icon",
           src: responseContentDataUri,
           hidden: !responseContentDataUri,
           "data-type": responseContentDataUri ? "thumbnail" : undefined,
         }),
         div({
-          className: "subitem-label requests-menu-file",
+          className: "subitem-label requests-list-file",
           title: urlDetails.unicodeUrl,
         },
           urlDetails.baseNameWithQuery,
@@ -256,6 +251,11 @@ const UPDATED_DOMAIN_PROPS = [
 const DomainColumn = createFactory(createClass({
   displayName: "DomainColumn",
 
+  propTypes: {
+    item: PropTypes.object.isRequired,
+    onSecurityIconClick: PropTypes.func.isRequired,
+  },
+
   shouldComponentUpdate(nextProps) {
     return !propertiesEqual(UPDATED_DOMAIN_PROPS, this.props.item, nextProps.item);
   },
@@ -264,7 +264,7 @@ const DomainColumn = createFactory(createClass({
     const { item, onSecurityIconClick } = this.props;
     const { urlDetails, remoteAddress, securityState } = item;
 
-    let iconClassList = [ "requests-security-state-icon" ];
+    let iconClassList = ["requests-security-state-icon"];
     let iconTitle;
     if (urlDetails.isLocal) {
       iconClassList.push("security-state-local");
@@ -277,13 +277,13 @@ const DomainColumn = createFactory(createClass({
     let title = urlDetails.host + (remoteAddress ? ` (${remoteAddress})` : "");
 
     return (
-      div({ className: "requests-menu-subitem requests-menu-security-and-domain" },
+      div({ className: "requests-list-subitem requests-list-security-and-domain" },
         div({
           className: iconClassList.join(" "),
           title: iconTitle,
           onClick: onSecurityIconClick,
         }),
-        span({ className: "subitem-label requests-menu-domain", title }, urlDetails.host),
+        span({ className: "subitem-label requests-list-domain", title }, urlDetails.host),
       )
     );
   }
@@ -291,6 +291,10 @@ const DomainColumn = createFactory(createClass({
 
 const CauseColumn = createFactory(createClass({
   displayName: "CauseColumn",
+
+  propTypes: {
+    item: PropTypes.object.isRequired,
+  },
 
   shouldComponentUpdate(nextProps) {
     return this.props.item.cause !== nextProps.item.cause;
@@ -312,11 +316,11 @@ const CauseColumn = createFactory(createClass({
 
     return (
       div({
-        className: "requests-menu-subitem requests-menu-cause",
+        className: "requests-list-subitem requests-list-cause",
         title: causeUri,
       },
         span({
-          className: "requests-menu-cause-stack",
+          className: "requests-list-cause-stack",
           hidden: !causeHasStack,
         }, "JS"),
         span({ className: "subitem-label" }, causeType),
@@ -334,6 +338,10 @@ const CONTENT_MIME_TYPE_ABBREVIATIONS = {
 const TypeColumn = createFactory(createClass({
   displayName: "TypeColumn",
 
+  propTypes: {
+    item: PropTypes.object.isRequired,
+  },
+
   shouldComponentUpdate(nextProps) {
     return this.props.item.mimeType !== nextProps.item.mimeType;
   },
@@ -348,7 +356,7 @@ const TypeColumn = createFactory(createClass({
 
     return (
       div({
-        className: "requests-menu-subitem requests-menu-type",
+        className: "requests-list-subitem requests-list-type",
         title: mimeType,
       },
         span({ className: "subitem-label" }, abbrevType),
@@ -365,6 +373,10 @@ const UPDATED_TRANSFERRED_PROPS = [
 
 const TransferredSizeColumn = createFactory(createClass({
   displayName: "TransferredSizeColumn",
+
+  propTypes: {
+    item: PropTypes.object.isRequired,
+  },
 
   shouldComponentUpdate(nextProps) {
     return !propertiesEqual(UPDATED_TRANSFERRED_PROPS, this.props.item, nextProps.item);
@@ -389,7 +401,7 @@ const TransferredSizeColumn = createFactory(createClass({
 
     return (
       div({
-        className: "requests-menu-subitem requests-menu-transferred",
+        className: "requests-list-subitem requests-list-transferred",
         title: text,
       },
         span({ className }, text),
@@ -400,6 +412,10 @@ const TransferredSizeColumn = createFactory(createClass({
 
 const ContentSizeColumn = createFactory(createClass({
   displayName: "ContentSizeColumn",
+
+  propTypes: {
+    item: PropTypes.object.isRequired,
+  },
 
   shouldComponentUpdate(nextProps) {
     return this.props.item.contentSize !== nextProps.item.contentSize;
@@ -415,7 +431,7 @@ const ContentSizeColumn = createFactory(createClass({
 
     return (
       div({
-        className: "requests-menu-subitem subitem-label requests-menu-size",
+        className: "requests-list-subitem subitem-label requests-list-size",
         title: text,
       },
         span({ className: "subitem-label" }, text),
@@ -434,6 +450,11 @@ const UPDATED_WATERFALL_PROPS = [
 const WaterfallColumn = createFactory(createClass({
   displayName: "WaterfallColumn",
 
+  propTypes: {
+    firstRequestStartedMillis: PropTypes.number.isRequired,
+    item: PropTypes.object.isRequired,
+  },
+
   shouldComponentUpdate(nextProps) {
     return this.props.firstRequestStartedMillis !== nextProps.firstRequestStartedMillis ||
       !propertiesEqual(UPDATED_WATERFALL_PROPS, this.props.item, nextProps.item);
@@ -443,9 +464,9 @@ const WaterfallColumn = createFactory(createClass({
     const { item, firstRequestStartedMillis } = this.props;
 
     return (
-      div({ className: "requests-menu-subitem requests-menu-waterfall" },
+      div({ className: "requests-list-subitem requests-list-waterfall" },
         div({
-          className: "requests-menu-timings",
+          className: "requests-list-timings",
           style: {
             paddingInlineStart: `${item.startedMillis - firstRequestStartedMillis}px`,
           },
@@ -478,18 +499,18 @@ function timingBoxes(item) {
       if (width > 0) {
         boxes.push(div({
           key,
-          className: "requests-menu-timings-box " + key,
+          className: "requests-list-timings-box " + key,
           style: { width }
         }));
       }
     }
   }
 
-  if (typeof totalTime == "number") {
+  if (typeof totalTime === "number") {
     let text = L10N.getFormatStr("networkMenu.totalMS", totalTime);
     boxes.push(div({
       key: "total",
-      className: "requests-menu-timings-total",
+      className: "requests-list-timings-total",
       title: text
     }, text));
   }
@@ -498,5 +519,3 @@ function timingBoxes(item) {
 }
 
 module.exports = RequestListItem;
-
-/* eslint-enable react/prop-types */

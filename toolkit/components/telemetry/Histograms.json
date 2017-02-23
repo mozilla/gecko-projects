@@ -28,6 +28,26 @@
     "n_buckets": 50,
     "description": "time spent updating accessibility (ms)"
   },
+  "ADDON_CONTENT_POLICY_SHIM_BLOCKING_LOADING_MS": {
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 20,
+    "keyed": true,
+    "description": "The amount of time the content process blocked processing shouldLoad shims for an add-on (keyed by add-on ID) prior to the load event, for each document load.",
+    "bug_numbers": [1331684],
+    "alert_emails": ["kmaglione@mozilla.com"]
+  },
+  "ADDON_CONTENT_POLICY_SHIM_BLOCKING_LOADED_MS": {
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 20,
+    "keyed": true,
+    "description": "The amount of time the content process blocked processing shouldLoad shims for an add-on (keyed by add-on ID) after the load event, for each document load.",
+    "bug_numbers": [1331684],
+    "alert_emails": ["kmaglione@mozilla.com"]
+  },
   "ADDON_MANAGER_UPGRADE_UI_SHOWN": {
     "expires_in_version": "53",
     "kind": "count",
@@ -123,6 +143,41 @@
     "n_values": 16,
     "description": "The operating system audio back-end used when successfully opening an audio stream, or whether the failure occurred on the first try or not <https://dxr.mozilla.org/mozilla-central/search?q=AUDIOSTREAM_BACKEND_ID_STR>",
     "releaseChannelCollection": "opt-out"
+  },
+  "AUSHELPER_CPU_ERROR_CODE": {
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com"],
+    "bug_numbers": [1296630],
+    "expires_in_version": "60",
+    "kind": "enumerated",
+    "n_values": 16,
+    "releaseChannelCollection": "opt-out",
+    "description": "The error code from the aushelper system add-on when querying the registry for CPU information for bug 1296630 (see browser/extensions/aushelper/bootstrap.js)."
+  },
+  "AUSHELPER_CPU_RESULT_CODE": {
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com"],
+    "bug_numbers": [1296630],
+    "expires_in_version": "60",
+    "kind": "enumerated",
+    "n_values": 5,
+    "releaseChannelCollection": "opt-out",
+    "description": "Whether the system is affected by bug 1296630 (1=No, 2=Yes, 3=Error, and 4=Unknown)."
+  },
+  "AUSHELPER_WEBSENSE_ERROR_CODE": {
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com"],
+    "bug_numbers": [1305847],
+    "expires_in_version": "60",
+    "kind": "enumerated",
+    "n_values": 8,
+    "releaseChannelCollection": "opt-out",
+    "description": "The error code from the aushelper system add-on when gathering information on Websense (see browser/extensions/aushelper/bootstrap.js)."
+  },
+  "AUSHELPER_WEBSENSE_REG_EXISTS": {
+    "alert_emails": ["application-update-telemetry-alerts@mozilla.com"],
+    "bug_numbers": [1305847],
+    "expires_in_version": "60",
+    "kind": "boolean",
+    "releaseChannelCollection": "opt-out",
+    "description": "Whether the system has a Websense InstallVersion registry value (see browser/extensions/aushelper/bootstrap.js)."
   },
   "BACKGROUNDFILESAVER_THREAD_COUNT": {
     "expires_in_version": "never",
@@ -962,7 +1017,7 @@
     "description": "This metric is recorded every time a navigator.geolocation.watchPosition() request gets allowed/fulfilled. A false value is recorded if the owner is not visible according to document.isVisible."
   },
   "GPU_PROCESS_LAUNCH_TIME_MS_2" : {
-    "alert_emails": ["george@mozilla.com", "danderson@mozilla.com"],
+    "alert_emails": ["danderson@mozilla.com"],
     "expires_in_version": "never",
     "bug_numbers": [1297790, 1317796],
     "kind": "exponential",
@@ -972,7 +1027,7 @@
     "description": "GPU process launch time in milliseconds"
   },
   "GPU_PROCESS_INITIALIZATION_TIME_MS" : {
-    "alert_emails": ["george@mozilla.com", "danderson@mozilla.com"],
+    "alert_emails": ["danderson@mozilla.com"],
     "expires_in_version": "never",
     "bug_numbers": [1324095],
     "kind": "exponential",
@@ -1928,6 +1983,14 @@
     "kind": "enumerated",
     "n_values": 16,
     "description": "SSL Version (1=tls1, 2=tls1.1, 3=tls1.2, 4=tls1.3)"
+  },
+  "SSL_HANDSHAKE_RESULT": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "bug_numbers": [1331280],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 672,
+    "description": "SSL handshake result, 0=success, 1-255=NSS error offset, 256-511=SEC error offset + 256, 512-639=NSPR error offset + 512, 640-670=PKIX error, 671=unknown err"
   },
   "SSL_TIME_UNTIL_READY": {
     "alert_emails": ["seceng-telemetry@mozilla.com"],
@@ -4099,6 +4162,24 @@
     "bug_numbers": [1298257],
     "description": "Classifier prefix matching result (0 = no match, 1 = match only V2, 2 = match only V4, 3 = match both V2 and V4)"
   },
+  "URLCLASSIFIER_POSITIVE_CACHE_DURATION": {
+    "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 86400000,
+    "n_buckets": 50,
+    "bug_numbers": [1338082],
+    "description": "Positive cache duration (ms) received in fullhash response from any v4 provider"
+  },
+  "URLCLASSIFIER_NEGATIVE_CACHE_DURATION": {
+    "alert_emails": ["safebrowsing-telemetry@mozilla.org"],
+    "expires_in_version": "60",
+    "kind": "exponential",
+    "high": 86400000,
+    "n_buckets": 50,
+    "bug_numbers": [1338082],
+    "description": "Negative cache duration (ms) received in fullhash response from any v4 provider"
+  },
   "CSP_DOCUMENTS_COUNT": {
     "alert_emails": ["seceng@mozilla.com"],
     "bug_numbers": [1252829],
@@ -5085,6 +5166,39 @@
     "releaseChannelCollection": "opt-out",
     "keyed": true,
     "description": "How long it took to import logins (passwords) from another browser, keyed by the name of the browser."
+  },
+  "FX_MIGRATION_BOOKMARKS_JANK_MS": {
+    "bug_numbers": [1338522],
+    "alert_emails": ["dao@mozilla.com"],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "n_buckets": 20,
+    "high": 60000,
+    "releaseChannelCollection": "opt-out",
+    "keyed": true,
+    "description": "Accumulated timer delay (variance between when the timer was expected to fire and when it actually fired) in milliseconds as an indicator for decreased main-thread responsiveness while importing bookmarks from another browser, keyed by the name of the browser (see gAvailableMigratorKeys in MigrationUtils.jsm). The import is happening on a background thread and should ideally not affect the UI noticeably."
+  },
+  "FX_MIGRATION_HISTORY_JANK_MS": {
+    "bug_numbers": [1338522],
+    "alert_emails": ["dao@mozilla.com"],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "n_buckets": 20,
+    "high": 60000,
+    "releaseChannelCollection": "opt-out",
+    "keyed": true,
+    "description": "Accumulated timer delay (variance between when the timer was expected to fire and when it actually fired) in milliseconds as an indicator for decreased main-thread responsiveness while importing history from another browser, keyed by the name of the browser (see gAvailableMigratorKeys in MigrationUtils.jsm). The import is happening on a background thread and should ideally not affect the UI noticeably."
+  },
+  "FX_MIGRATION_LOGINS_JANK_MS": {
+    "bug_numbers": [1338522],
+    "alert_emails": ["dao@mozilla.com"],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "n_buckets": 20,
+    "high": 60000,
+    "releaseChannelCollection": "opt-out",
+    "keyed": true,
+    "description": "Accumulated timer delay (variance between when the timer was expected to fire and when it actually fired) in milliseconds as an indicator for decreased main-thread responsiveness while importing logins / passwords from another browser, keyed by the name of the browser (see gAvailableMigratorKeys in MigrationUtils.jsm). The import is happening on a background thread and should ideally not affect the UI noticeably."
   },
   "FX_MIGRATION_BOOKMARKS_QUANTITY": {
     "bug_numbers": [1279501],
@@ -8637,6 +8751,33 @@
     "n_values": 100,
     "description": "If certificate verification failed in a TLS handshake, what was the error? (see MapCertErrorToProbeValue in security/manager/ssl/SSLServerCertVerification.cpp and the values in security/pkix/include/pkix/Result.h)"
   },
+  "SSL_CT_POLICY_COMPLIANCE_OF_EV_CERTS": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "expires_in_version": "62",
+    "kind": "enumerated",
+    "n_values": 10,
+    "bug_numbers": [1320567],
+    "releaseChannelCollection": "opt-out",
+    "description": "Certificate Transparency Policy compliance of successfully established SSL connections with EV certificate (1=Compliant, 2=Insufficient number of SCTs, 3=Insufficient diversity of CT Log operators)"
+  },
+  "SSL_CT_POLICY_COMPLIANT_CONNECTIONS_BY_CA": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 256,
+    "bug_numbers": [1320567],
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of successfully established TLS connections compliant with the Certificate Transparency Policy, by CA. See https://dxr.mozilla.org/mozilla-central/source/security/manager/ssl/RootHashes.inc for names of CAs. Bucket zero holds CAs not present in the list."
+  },
+  "SSL_CT_POLICY_NON_COMPLIANT_CONNECTIONS_BY_CA": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 256,
+    "bug_numbers": [1320567],
+    "releaseChannelCollection": "opt-out",
+    "description": "Number of successfully established TLS connections NOT compliant with the Certificate Transparency Policy, by CA. See https://dxr.mozilla.org/mozilla-central/source/security/manager/ssl/RootHashes.inc for names of CAs. Bucket zero holds CAs not present in the list."
+  },
   "SSL_PERMANENT_CERT_ERROR_OVERRIDES": {
     "alert_emails": ["seceng@mozilla.org"],
     "expires_in_version": "default",
@@ -10107,22 +10248,6 @@
     "n_values": 64,
     "description": "Count of scroll actions triggered by different input methods. See gfx/layers/apz/util/ScrollInputMethods.h for a list of possible values and their meanings."
   },
-  "TOTAL_SCROLL_Y": {
-    "alert_emails": ["hkirschner@mozilla.com"],
-    "bug_numbers": [1297867],
-    "expires_in_version": "58",
-    "kind": "count",
-    "description": "Count of the total number of CSS pixels scrolled up or down in the vertical axis of the root frame of all the pages visited in a subsession. This doesn't include any scrolling of nested scroll frames such as inputs, iframes, or scrollable divs."
-  },
-  "PAGE_MAX_SCROLL_Y": {
-    "alert_emails": ["hkirschner@mozilla.com"],
-    "bug_numbers": [1312881],
-    "expires_in_version": "58",
-    "kind": "exponential",
-    "high": 100000,
-    "n_buckets": 50,
-    "description": "Maximum distance in CSS pixels a user scrolls down the vertical axis of the root frame of a page. This doesn't include any scrolling of nested scroll frames such as inputs, iframes, or scrollable divs."
-  },
   "WEB_NOTIFICATION_CLICKED": {
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["firefox-dev@mozilla.org"],
@@ -10455,6 +10580,16 @@
     "cpp_guard": "XP_LINUX",
     "description": "Whether the sandbox is enabled for the content process"
   },
+  "SANDBOX_REJECTED_SYSCALLS": {
+    "alert_emails": ["jld@mozilla.com", "gcp@mozilla.com"],
+    "bug_numbers": [1286865],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "count",
+    "keyed": true,
+    "cpp_guard": "XP_LINUX",
+    "description": "System calls blocked by a seccomp-bpf sandbox policy; limited to syscalls where we would crash on Nightly.  The key is generally the architecture and syscall ID but in some cases we include non-personally-identifying information from the syscall arguments; see the function SubmitToTelemetry in security/sandbox/linux/reporter/SandboxReporter.cpp for details."
+  },
   "SYNC_WORKER_OPERATION": {
     "alert_emails": ["amarchesini@mozilla.com", "khuey@mozilla.com" ],
     "bug_numbers": [1267904],
@@ -10591,6 +10726,37 @@
     "bug_numbers": [1276006],
     "kind": "count",
     "description": "Tracking the total number of opened Containers."
+  },
+  "STORAGE_SYNC_GET_OPS_SIZE": {
+    "alert_emails": ["eglassercamp@mozilla.com"],
+    "expires_in_version": "58",
+    "bug_numbers": [1328974],
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 30,
+    "keyed": true,
+    "description": "Track the size of results of get() operations performed this subsession. The key is the addon ID.",
+    "releaseChannelCollection": "opt-out"
+  },
+  "STORAGE_SYNC_SET_OPS_SIZE": {
+    "alert_emails": ["eglassercamp@mozilla.com"],
+    "expires_in_version": "58",
+    "bug_numbers": [1328974],
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 30,
+    "keyed": true,
+    "description": "Track the size of set() operations performed by addons this subsession. The key is the addon ID.",
+    "releaseChannelCollection": "opt-out"
+  },
+  "STORAGE_SYNC_REMOVE_OPS": {
+    "alert_emails": ["eglassercamp@mozilla.com"],
+    "expires_in_version": "58",
+    "bug_numbers": [1328974],
+    "kind": "count",
+    "keyed": true,
+    "description": "Track the number of remove() operations addons perform this subsession. The key is the addon ID.",
+    "releaseChannelCollection": "opt-out"
   },
   "FENNEC_SESSIONSTORE_DAMAGED_SESSION_FILE": {
     "alert_emails": ["jh+bugzilla@buttercookie.de"],

@@ -58,6 +58,17 @@ macro_rules! assert_roundtrip {
     }
 }
 
+macro_rules! assert_parser_exhausted {
+    ($name:ident, $string:expr, $should_exhausted:expr) => {{
+        let url = ::servo_url::ServoUrl::parse("http://localhost").unwrap();
+        let context = ParserContext::new(Origin::Author, &url, Box::new(CSSErrorReporterTest));
+        let mut parser = Parser::new($string);
+        let parsed = $name::parse(&context, &mut parser);
+        assert_eq!(parsed.is_ok(), true);
+        assert_eq!(parser.is_exhausted(), $should_exhausted);
+    }}
+}
+
 macro_rules! parse_longhand {
     ($name:ident, $s:expr) => {{
         let url = ::servo_url::ServoUrl::parse("http://localhost").unwrap();
@@ -70,6 +81,7 @@ mod animation;
 mod background;
 mod basic_shape;
 mod border;
+mod column;
 mod font;
 mod image;
 mod inherited_box;
@@ -80,3 +92,4 @@ mod position;
 mod selectors;
 mod supports;
 mod text_overflow;
+mod transition_timing_function;

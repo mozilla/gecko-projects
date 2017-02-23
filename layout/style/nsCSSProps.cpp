@@ -8,9 +8,10 @@
  * values they accept
  */
 
+#include "nsCSSProps.h"
+
 #include "mozilla/ArrayUtils.h"
 
-#include "nsCSSProps.h"
 #include "nsCSSKeywords.h"
 #include "nsLayoutUtils.h"
 #include "nsStyleConsts.h"
@@ -1668,8 +1669,8 @@ const KTableEntry nsCSSProps::kGridAutoFlowKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kGridTrackBreadthKTable[] = {
-  { eCSSKeyword_min_content, NS_STYLE_GRID_TRACK_BREADTH_MIN_CONTENT },
-  { eCSSKeyword_max_content, NS_STYLE_GRID_TRACK_BREADTH_MAX_CONTENT },
+  { eCSSKeyword_min_content, StyleGridTrackBreadth::MinContent },
+  { eCSSKeyword_max_content, StyleGridTrackBreadth::MaxContent },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -2341,10 +2342,10 @@ const KTableEntry nsCSSProps::kMaskTypeKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kShapeOutsideShapeBoxKTable[] = {
-  { eCSSKeyword_content_box, StyleShapeOutsideShapeBox::Content },
-  { eCSSKeyword_padding_box, StyleShapeOutsideShapeBox::Padding },
-  { eCSSKeyword_border_box, StyleShapeOutsideShapeBox::Border },
-  { eCSSKeyword_margin_box, StyleShapeOutsideShapeBox::Margin },
+  { eCSSKeyword_content_box, StyleGeometryBox::Content },
+  { eCSSKeyword_padding_box, StyleGeometryBox::Padding },
+  { eCSSKeyword_border_box, StyleGeometryBox::Border },
+  { eCSSKeyword_margin_box, StyleGeometryBox::Margin },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 

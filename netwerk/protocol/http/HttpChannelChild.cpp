@@ -181,7 +181,7 @@ HttpChannelChild::HttpChannelChild()
   , mShouldParentIntercept(false)
   , mSuspendParentAfterSynthesizeResponse(false)
 {
-  LOG(("Creating HttpChannelChild @%x\n", this));
+  LOG(("Creating HttpChannelChild @%p\n", this));
 
   mChannelCreationTime = PR_Now();
   mChannelCreationTimestamp = TimeStamp::Now();
@@ -191,7 +191,7 @@ HttpChannelChild::HttpChannelChild()
 
 HttpChannelChild::~HttpChannelChild()
 {
-  LOG(("Destroying HttpChannelChild @%x\n", this));
+  LOG(("Destroying HttpChannelChild @%p\n", this));
 }
 
 //-----------------------------------------------------------------------------
@@ -855,8 +855,8 @@ void
 HttpChannelChild::MaybeDivertOnStop(const nsresult& aChannelStatus)
 {
   LOG(("HttpChannelChild::MaybeDivertOnStop [this=%p, "
-       "mDivertingToParent=%d status=%x]", this, mDivertingToParent,
-       aChannelStatus));
+       "mDivertingToParent=%d status=%" PRIx32 "]", this, mDivertingToParent,
+       static_cast<uint32_t>(aChannelStatus)));
   if (mDivertingToParent) {
     SendDivertOnStopRequest(aChannelStatus);
   }
@@ -866,8 +866,8 @@ void
 HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
                                 const ResourceTimingStruct& timing)
 {
-  LOG(("HttpChannelChild::OnStopRequest [this=%p status=%x]\n",
-       this, channelStatus));
+  LOG(("HttpChannelChild::OnStopRequest [this=%p status=%" PRIx32 "]\n",
+       this, static_cast<uint32_t>(channelStatus)));
 
   if (mDivertingToParent) {
     MOZ_RELEASE_ASSERT(!mFlushedForDiversion,
@@ -951,8 +951,8 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
 void
 HttpChannelChild::DoPreOnStopRequest(nsresult aStatus)
 {
-  LOG(("HttpChannelChild::DoPreOnStopRequest [this=%p status=%x]\n",
-       this, aStatus));
+  LOG(("HttpChannelChild::DoPreOnStopRequest [this=%p status=%" PRIx32 "]\n",
+       this, static_cast<uint32_t>(aStatus)));
   mIsPending = false;
 
   if (!mCanceled && NS_SUCCEEDED(mStatus)) {
@@ -969,8 +969,23 @@ HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest, nsresult aChannelStatus,
   // NB: We use aChannelStatus here instead of mStatus because if there was an
   // nsCORSListenerProxy on this request, it will override the tracking
   // protection's return value.
-  if (aChannelStatus == NS_ERROR_TRACKING_URI) {
-    nsChannelClassifier::SetBlockedTrackingContent(this);
+  if (aChannelStatus == NS_ERROR_TRACKING_URI ||
+      aChannelStatus == NS_ERROR_MALWARE_URI ||
+      aChannelStatus == NS_ERROR_UNWANTED_URI ||
+      aChannelStatus == NS_ERROR_BLOCKED_URI ||
+      aChannelStatus == NS_ERROR_PHISHING_URI) {
+    nsCString list, provider, prefix;
+
+    nsresult rv = GetMatchedList(list);
+    NS_ENSURE_SUCCESS_VOID(rv);
+
+    rv = GetMatchedProvider(provider);
+    NS_ENSURE_SUCCESS_VOID(rv);
+
+    rv = GetMatchedPrefix(prefix);
+    NS_ENSURE_SUCCESS_VOID(rv);
+
+    nsChannelClassifier::SetBlockedContent(this, aChannelStatus, list, provider, prefix);
   }
 
   MOZ_ASSERT(!mOnStopRequestCalled,
@@ -1018,7 +1033,7 @@ void
 HttpChannelChild::OnProgress(const int64_t& progress,
                              const int64_t& progressMax)
 {
-  LOG(("HttpChannelChild::OnProgress [this=%p progress=%lld/%lld]\n",
+  LOG(("HttpChannelChild::OnProgress [this=%p progress=%" PRId64 "/%" PRId64 "]\n",
        this, progress, progressMax));
 
   if (mCanceled)
@@ -1064,7 +1079,8 @@ HttpChannelChild::RecvOnStatus(const nsresult& status)
 void
 HttpChannelChild::OnStatus(const nsresult& status)
 {
-  LOG(("HttpChannelChild::OnStatus [this=%p status=%x]\n", this, status));
+  LOG(("HttpChannelChild::OnStatus [this=%p status=%" PRIx32 "]\n",
+       this, static_cast<uint32_t>(status)));
 
   if (mCanceled)
     return;
@@ -1120,7 +1136,8 @@ HttpChannelChild::HandleAsyncAbort()
 void
 HttpChannelChild::FailedAsyncOpen(const nsresult& status)
 {
-  LOG(("HttpChannelChild::FailedAsyncOpen [this=%p status=%x]\n", this, status));
+  LOG(("HttpChannelChild::FailedAsyncOpen [this=%p status=%" PRIx32 "]\n",
+       this, static_cast<uint32_t>(status)));
 
   mStatus = status;
 
@@ -1516,6 +1533,14 @@ HttpChannelChild::FlushedForDiversion()
 }
 
 mozilla::ipc::IPCResult
+HttpChannelChild::RecvSetClassifierMatchedInfo(const ClassifierInfo& aInfo)
+{
+  SetMatchedInfo(aInfo.list(), aInfo.provider(), aInfo.prefix());
+  return IPC_OK();
+}
+
+
+mozilla::ipc::IPCResult
 HttpChannelChild::RecvDivertMessages()
 {
   LOG(("HttpChannelChild::RecvDivertMessages [this=%p]\n", this));
@@ -1846,7 +1871,7 @@ HttpChannelChild::Cancel(nsresult status)
 NS_IMETHODIMP
 HttpChannelChild::Suspend()
 {
-  LOG(("HttpChannelChild::Suspend [this=%p, mSuspendCount=%lu, "
+  LOG(("HttpChannelChild::Suspend [this=%p, mSuspendCount=%" PRIu32 ", "
        "mDivertingToParent=%d]\n", this, mSuspendCount+1, mDivertingToParent));
   NS_ENSURE_TRUE(RemoteChannelExists() || mInterceptListener,
                  NS_ERROR_NOT_AVAILABLE);
@@ -1871,7 +1896,7 @@ HttpChannelChild::Suspend()
 NS_IMETHODIMP
 HttpChannelChild::Resume()
 {
-  LOG(("HttpChannelChild::Resume [this=%p, mSuspendCount=%lu, "
+  LOG(("HttpChannelChild::Resume [this=%p, mSuspendCount=%" PRIu32 ", "
        "mDivertingToParent=%d]\n", this, mSuspendCount-1, mDivertingToParent));
   NS_ENSURE_TRUE(RemoteChannelExists() || mInterceptListener,
                  NS_ERROR_NOT_AVAILABLE);
@@ -2942,11 +2967,14 @@ HttpChannelChild::ShouldInterceptURI(nsIURI* aURI,
       nsContentUtils::GetSecurityManager()->
         GetChannelResultPrincipal(this, getter_AddRefs(resultPrincipal));
   }
+  OriginAttributes originAttributes;
+  NS_ENSURE_TRUE(NS_GetOriginAttributes(this, originAttributes), false);
   rv = NS_ShouldSecureUpgrade(aURI,
                               mLoadInfo,
                               resultPrincipal,
                               mPrivateBrowsing,
                               mAllowSTS,
+                              originAttributes,
                               aShouldUpgrade);
   NS_ENSURE_SUCCESS(rv, false);
 

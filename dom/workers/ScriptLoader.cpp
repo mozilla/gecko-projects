@@ -113,7 +113,7 @@ ChannelFromScriptURL(nsIPrincipal* principal,
                      const nsAString& aScriptURL,
                      bool aIsMainScript,
                      WorkerScriptType aWorkerScriptType,
-                     nsContentPolicyType aContentPolicyType,
+                     nsContentPolicyType aMainScriptContentPolicyType,
                      nsLoadFlags aLoadFlags,
                      bool aDefaultURIEncoding,
                      nsIChannel** aChannel)
@@ -170,6 +170,10 @@ ChannelFromScriptURL(nsIPrincipal* principal,
     secFlags = nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
   }
 
+  nsContentPolicyType contentPolicyType =
+    aIsMainScript ? aMainScriptContentPolicyType
+                  : nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS;
+
   nsCOMPtr<nsIChannel> channel;
   // If we have the document, use it. Unfortunately, for dedicated workers
   // 'parentDoc' ends up being the parent document, which is not the document
@@ -180,7 +184,7 @@ ChannelFromScriptURL(nsIPrincipal* principal,
                        uri,
                        parentDoc,
                        secFlags,
-                       aContentPolicyType,
+                       contentPolicyType,
                        loadGroup,
                        nullptr, // aCallbacks
                        aLoadFlags,
@@ -195,7 +199,7 @@ ChannelFromScriptURL(nsIPrincipal* principal,
                        uri,
                        principal,
                        secFlags,
-                       aContentPolicyType,
+                       contentPolicyType,
                        loadGroup,
                        nullptr, // aCallbacks
                        aLoadFlags,
@@ -1205,9 +1209,6 @@ private:
         mWorkerPrivate->SetBaseURI(finalURI);
       }
 
-      nsILoadGroup* loadGroup = mWorkerPrivate->GetLoadGroup();
-      MOZ_DIAGNOSTIC_ASSERT(loadGroup);
-
 #if defined(DEBUG) || !defined(RELEASE_OR_BETA)
       nsIPrincipal* principal = mWorkerPrivate->GetPrincipal();
       MOZ_DIAGNOSTIC_ASSERT(principal);
@@ -1223,11 +1224,13 @@ private:
 
       mWorkerPrivate->InitChannelInfo(aChannelInfo);
 
-      // Override the principal on the WorkerPrivate.  We just asserted that
-      // this is the same as our current WorkerPrivate principal, so this is
-      // almost a no-op.  We must do, it though, in order to avoid accidentally
-      // propagating the CSP object back to the ServiceWorkerRegistration
-      // principal.  If bug 965637 is fixed then this can be removed.
+      nsILoadGroup* loadGroup = mWorkerPrivate->GetLoadGroup();
+      MOZ_DIAGNOSTIC_ASSERT(loadGroup);
+
+      // Override the principal on the WorkerPrivate.  This is only necessary
+      // in order to get a principal with exactly the correct URL.  The fetch
+      // referrer logic depends on the WorkerPrivate principal having a URL
+      // that matches the worker script URL.
       rv = mWorkerPrivate->SetPrincipalOnMainThread(responsePrincipal, loadGroup);
       MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
 
@@ -2099,7 +2102,7 @@ ChannelFromScriptURLMainThread(nsIPrincipal* aPrincipal,
                                nsIDocument* aParentDoc,
                                nsILoadGroup* aLoadGroup,
                                const nsAString& aScriptURL,
-                               nsContentPolicyType aContentPolicyType,
+                               nsContentPolicyType aMainScriptContentPolicyType,
                                bool aDefaultURIEncoding,
                                nsIChannel** aChannel)
 {
@@ -2112,8 +2115,9 @@ ChannelFromScriptURLMainThread(nsIPrincipal* aPrincipal,
 
   return ChannelFromScriptURL(aPrincipal, aBaseURI, aParentDoc, aLoadGroup,
                               ios, secMan, aScriptURL, true, WorkerScript,
-                              aContentPolicyType, nsIRequest::LOAD_NORMAL,
-                              aDefaultURIEncoding, aChannel);
+                              aMainScriptContentPolicyType,
+                              nsIRequest::LOAD_NORMAL, aDefaultURIEncoding,
+                              aChannel);
 }
 
 nsresult
@@ -2177,9 +2181,9 @@ void ReportLoadError(ErrorResult& aRv, nsresult aLoadResult,
       // We don't want to throw a JS exception, because for toplevel script
       // loads that would get squelched.
       aRv.ThrowDOMException(NS_ERROR_DOM_NETWORK_ERR,
-        nsPrintfCString("Failed to load worker script at %s (nsresult = 0x%x)",
+        nsPrintfCString("Failed to load worker script at %s (nsresult = 0x%" PRIx32 ")",
                         NS_ConvertUTF16toUTF8(aScriptURL).get(),
-                        aLoadResult));
+                        static_cast<uint32_t>(aLoadResult)));
       return;
   }
 

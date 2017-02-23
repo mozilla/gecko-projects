@@ -898,6 +898,12 @@ IonCacheIRCompiler::emitStoreDenseElementHole()
 }
 
 bool
+IonCacheIRCompiler::emitStoreTypedElement()
+{
+    MOZ_CRASH("Baseline-specific op");
+}
+
+bool
 IonCacheIRCompiler::emitStoreUnboxedArrayElement()
 {
     MOZ_CRASH("Baseline-specific op");
@@ -923,6 +929,18 @@ IonCacheIRCompiler::emitCallScriptedSetter()
 
 bool
 IonCacheIRCompiler::emitCallSetArrayLength()
+{
+    MOZ_CRASH("Baseline-specific op");
+}
+
+bool
+IonCacheIRCompiler::emitCallProxySet()
+{
+    MOZ_CRASH("Baseline-specific op");
+}
+
+bool
+IonCacheIRCompiler::emitCallProxySetByValue()
 {
     MOZ_CRASH("Baseline-specific op");
 }

@@ -17,23 +17,21 @@ add_task(function* () {
   let Actions = windowRequire("devtools/client/netmonitor/actions/index");
 
   EventUtils.sendMouseEvent({ type: "click" },
-    document.querySelector("#requests-menu-filter-html-button"));
+    document.querySelector(".requests-list-filter-html-button"));
   EventUtils.sendMouseEvent({ type: "click" },
-    document.querySelector("#requests-menu-filter-css-button"));
+    document.querySelector(".requests-list-filter-css-button"));
   EventUtils.sendMouseEvent({ type: "click" },
-    document.querySelector("#requests-menu-filter-js-button"));
+    document.querySelector(".requests-list-filter-js-button"));
   EventUtils.sendMouseEvent({ type: "click" },
-    document.querySelector("#requests-menu-filter-ws-button"));
+    document.querySelector(".requests-list-filter-ws-button"));
   EventUtils.sendMouseEvent({ type: "click" },
-    document.querySelector("#requests-menu-filter-other-button"));
+    document.querySelector(".requests-list-filter-other-button"));
   testFilterButtonsCustom(monitor, [0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1]);
   info("The correct filtering predicates are used before entering perf. analysis mode.");
 
   gStore.dispatch(Actions.openStatistics(true));
 
-  let body = document.querySelector("#body");
-
-  is(body.selectedPanel.id, "react-statistics-panel-hook",
+  ok(document.querySelector(".statistics-panel"),
     "The main panel is switched to the statistics panel.");
 
   yield waitUntil(
@@ -43,8 +41,8 @@ add_task(function* () {
   EventUtils.sendMouseEvent({ type: "click" },
     document.querySelector(".pie-chart-slice"));
 
-  is(body.selectedPanel.id, "inspector-panel",
-    "The main panel is switched back to the inspector panel.");
+  ok(document.querySelector(".monitor-panel"),
+    "The main panel is switched back to the monitor panel.");
 
   testFilterButtons(monitor, "html");
   info("The correct filtering predicate is used when exiting perf. analysis mode.");

@@ -15,13 +15,12 @@ add_task(function* test() {
 
   let { document, gStore, windowRequire, NetMonitorController } = monitor.panelWin;
   let Actions = windowRequire("devtools/client/netmonitor/actions/index");
-  let { ACTIVITY_TYPE } = windowRequire("devtools/client/netmonitor/constants");
-  let { EVENTS } = windowRequire("devtools/client/netmonitor/events");
+  let { ACTIVITY_TYPE, EVENTS } = windowRequire("devtools/client/netmonitor/constants");
   let {
     getDisplayedRequests,
     getSortedRequests,
   } = windowRequire("devtools/client/netmonitor/selectors/index");
-  let toolboxDoc = monitor._toolbox.doc;
+  let toolboxDoc = monitor.toolbox.doc;
 
   gStore.dispatch(Actions.batchEnable(false));
 
@@ -38,7 +37,7 @@ add_task(function* test() {
   // Hide tooltip before next test, to avoid the situation that tooltip covers
   // the icon for the request of the next test.
   info("Checking the image thumbnail gets hidden...");
-  yield hideTooltipAndVerify(monitor._toolbox.doc,
+  yield hideTooltipAndVerify(monitor.toolbox.doc,
     document.querySelectorAll(".request-list-item")[0]);
 
   // +1 extra document reload
@@ -56,7 +55,7 @@ add_task(function* test() {
     document.querySelectorAll(".request-list-item")[1]);
 
   info("Checking if the image thumbnail is hidden when mouse leaves the menu widget");
-  let requestsListContents = document.querySelector(".requests-menu-contents");
+  let requestsListContents = document.querySelector(".requests-list-contents");
   EventUtils.synthesizeMouse(requestsListContents, 0, 0, { type: "mouseout" }, monitor.panelWin);
   yield waitUntil(() => !toolboxDoc.querySelector(".tooltip-container.tooltip-visible"));
 
@@ -73,7 +72,7 @@ add_task(function* test() {
    * with the expected content.
    */
   function* showTooltipAndVerify(toolboxDoc, target) {
-    let anchor = target.querySelector(".requests-menu-file");
+    let anchor = target.querySelector(".requests-list-file");
     yield showTooltipOn(toolboxDoc, anchor);
 
     info("Tooltip was successfully opened for the image request.");
@@ -96,7 +95,7 @@ add_task(function* test() {
    */
   function* hideTooltipAndVerify(toolboxDoc, target) {
     // Hovering over the "method" column hides the tooltip.
-    let anchor = target.querySelector(".requests-menu-method");
+    let anchor = target.querySelector(".requests-list-method");
     let win = anchor.ownerDocument.defaultView;
     EventUtils.synthesizeMouseAtCenter(anchor, { type: "mousemove" }, win);
 

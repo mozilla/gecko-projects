@@ -2,12 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#![deny(unsafe_code)]
 #![feature(box_syntax)]
 #![feature(mpsc_select)]
-#![feature(plugin)]
-#![plugin(plugins)]
-
-#![deny(unsafe_code)]
 
 extern crate brotli;
 extern crate content_blocker as content_blocker_parser;
@@ -30,6 +27,10 @@ extern crate openssl;
 extern crate openssl_verify;
 extern crate profile_traits;
 extern crate rustc_serialize;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 extern crate servo_config;
 extern crate servo_url;
 extern crate threadpool;

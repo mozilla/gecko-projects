@@ -7,9 +7,6 @@
 
 #![feature(box_syntax)]
 #![feature(mpsc_select)]
-#![feature(plugin)]
-
-#![plugin(plugins)]
 
 extern crate app_units;
 extern crate euclid;
@@ -989,7 +986,7 @@ impl LayoutThread {
                 viewport_size,
                 builder,
                 true);
-            self.webrender_api.generate_frame();
+            self.webrender_api.generate_frame(None);
         });
     }
 

@@ -336,7 +336,7 @@ var dataProviders = {
                      getInterface(Ci.nsIDOMWindowUtils);
       try {
         // NOTE: windowless browser's windows should not be reported in the graphics troubleshoot report
-        if (winUtils.layerManagerType == "None") {
+        if (winUtils.layerManagerType == "None" || !winUtils.layerManagerRemote) {
           continue;
         }
         data.numTotalWindows++;
@@ -347,6 +347,12 @@ var dataProviders = {
       }
       if (data.windowLayerManagerType != "Basic")
         data.numAcceleratedWindows++;
+    }
+
+    // If we had no OMTC windows, report back Basic Layers.
+    if (!data.windowLayerManagerType) {
+      data.windowLayerManagerType = "Basic";
+      data.windowLayerManagerRemote = false;
     }
 
     let winUtils = Services.wm.getMostRecentWindow("").
@@ -569,6 +575,21 @@ if (AppConstants.MOZ_SANDBOX) {
           data[key] = sysInfo.getPropertyAsBool(key);
         }
       }
+
+      let reporter = Cc["@mozilla.org/sandbox/syscall-reporter;1"].
+                     getService(Ci.mozISandboxReporter);
+      const snapshot = reporter.snapshot();
+      let syscalls = [];
+      for (let index = snapshot.begin; index < snapshot.end; ++index) {
+        let report = snapshot.getElement(index);
+        let { msecAgo, pid, tid, procType, syscall } = report;
+        let args = []
+        for (let i = 0; i < report.numArgs; ++i) {
+          args.push(report.getArg(i));
+        }
+        syscalls.push({ index, msecAgo, pid, tid, procType, syscall, args });
+      }
+      data.syscallLog = syscalls;
     }
 
     if (AppConstants.MOZ_CONTENT_SANDBOX) {

@@ -10,14 +10,14 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js",
   this);
 
-const { EVENTS } = require("devtools/client/netmonitor/events");
+const { EVENTS } = require("devtools/client/netmonitor/constants");
 var { Toolbox } = require("devtools/client/framework/toolbox");
 const {
   decodeUnicodeUrl,
   getUrlBaseName,
   getUrlQuery,
   getUrlHost,
-} = require("devtools/client/netmonitor/request-utils");
+} = require("devtools/client/netmonitor/utils/request-utils");
 
 const EXAMPLE_URL = "http://example.com/browser/devtools/client/netmonitor/test/";
 const HTTPS_EXAMPLE_URL = "https://example.com/browser/devtools/client/netmonitor/test/";
@@ -152,7 +152,7 @@ function restartNetMonitor(monitor, newUrl) {
   info("Restarting the specified network monitor.");
 
   return Task.spawn(function* () {
-    let tab = monitor.target.tab;
+    let tab = monitor.toolbox.target.tab;
     let url = newUrl || tab.linkedBrowser.currentURI.spec;
 
     let onDestroyed = monitor.once("destroyed");
@@ -167,7 +167,7 @@ function teardown(monitor) {
   info("Destroying the specified network monitor.");
 
   return Task.spawn(function* () {
-    let tab = monitor.target.tab;
+    let tab = monitor.toolbox.target.tab;
 
     let onDestroyed = monitor.once("destroyed");
     yield removeTab(tab);
@@ -249,16 +249,6 @@ function waitForNetworkEvents(aMonitor, aGetRequests, aPostRequests = 0) {
   return deferred.promise;
 }
 
-/**
- * Convert a store record (model) to the rendered element. Tests that need to use
- * this should be rewritten - test the rendered markup at unit level, integration
- * mochitest should check only the store state.
- */
-function getItemTarget(requestList, requestItem) {
-  const items = requestList.mountPoint.querySelectorAll(".request-list-item");
-  return [...items].find(el => el.dataset.id == requestItem.id);
-}
-
 function verifyRequestItemTarget(document, requestList, requestItem, aMethod,
                                  aUrl, aData = {}) {
   info("> Verifying: " + aMethod + " " + aUrl + " " + aData.toSource());
@@ -285,32 +275,32 @@ function verifyRequestItemTarget(document, requestList, requestItem, aMethod,
     is(requestItem.url, aUrl, "The attached url is correct.");
   }
 
-  is(target.querySelector(".requests-menu-method").textContent,
+  is(target.querySelector(".requests-list-method").textContent,
     aMethod, "The displayed method is correct.");
 
   if (fuzzyUrl) {
-    ok(target.querySelector(".requests-menu-file").textContent.startsWith(
+    ok(target.querySelector(".requests-list-file").textContent.startsWith(
       name + (query ? "?" + query : "")), "The displayed file is correct.");
-    ok(target.querySelector(".requests-menu-file").getAttribute("title").startsWith(unicodeUrl),
+    ok(target.querySelector(".requests-list-file").getAttribute("title").startsWith(unicodeUrl),
       "The tooltip file is correct.");
   } else {
-    is(target.querySelector(".requests-menu-file").textContent,
+    is(target.querySelector(".requests-list-file").textContent,
       name + (query ? "?" + query : ""), "The displayed file is correct.");
-    is(target.querySelector(".requests-menu-file").getAttribute("title"),
+    is(target.querySelector(".requests-list-file").getAttribute("title"),
       unicodeUrl, "The tooltip file is correct.");
   }
 
-  is(target.querySelector(".requests-menu-domain").textContent,
+  is(target.querySelector(".requests-list-domain").textContent,
     hostPort, "The displayed domain is correct.");
 
   let domainTooltip = hostPort + (remoteAddress ? " (" + remoteAddress + ")" : "");
-  is(target.querySelector(".requests-menu-domain").getAttribute("title"),
+  is(target.querySelector(".requests-list-domain").getAttribute("title"),
     domainTooltip, "The tooltip domain is correct.");
 
   if (status !== undefined) {
-    let value = target.querySelector(".requests-menu-status-icon").getAttribute("data-code");
-    let codeValue = target.querySelector(".requests-menu-status-code").textContent;
-    let tooltip = target.querySelector(".requests-menu-status").getAttribute("title");
+    let value = target.querySelector(".requests-list-status-icon").getAttribute("data-code");
+    let codeValue = target.querySelector(".requests-list-status-code").textContent;
+    let tooltip = target.querySelector(".requests-list-status").getAttribute("title");
     info("Displayed status: " + value);
     info("Displayed code: " + codeValue);
     info("Tooltip status: " + tooltip);
@@ -319,40 +309,40 @@ function verifyRequestItemTarget(document, requestList, requestItem, aMethod,
     is(tooltip, status + " " + statusText, "The tooltip status is correct.");
   }
   if (cause !== undefined) {
-    let value = target.querySelector(".requests-menu-cause > .subitem-label").textContent;
-    let tooltip = target.querySelector(".requests-menu-cause").getAttribute("title");
+    let value = target.querySelector(".requests-list-cause > .subitem-label").textContent;
+    let tooltip = target.querySelector(".requests-list-cause").getAttribute("title");
     info("Displayed cause: " + value);
     info("Tooltip cause: " + tooltip);
     is(value, cause.type, "The displayed cause is correct.");
     is(tooltip, cause.loadingDocumentUri, "The tooltip cause is correct.")
   }
   if (type !== undefined) {
-    let value = target.querySelector(".requests-menu-type").textContent;
-    let tooltip = target.querySelector(".requests-menu-type").getAttribute("title");
+    let value = target.querySelector(".requests-list-type").textContent;
+    let tooltip = target.querySelector(".requests-list-type").getAttribute("title");
     info("Displayed type: " + value);
     info("Tooltip type: " + tooltip);
     is(value, type, "The displayed type is correct.");
     is(tooltip, fullMimeType, "The tooltip type is correct.");
   }
   if (transferred !== undefined) {
-    let value = target.querySelector(".requests-menu-transferred").textContent;
-    let tooltip = target.querySelector(".requests-menu-transferred").getAttribute("title");
+    let value = target.querySelector(".requests-list-transferred").textContent;
+    let tooltip = target.querySelector(".requests-list-transferred").getAttribute("title");
     info("Displayed transferred size: " + value);
     info("Tooltip transferred size: " + tooltip);
     is(value, transferred, "The displayed transferred size is correct.");
     is(tooltip, transferred, "The tooltip transferred size is correct.");
   }
   if (size !== undefined) {
-    let value = target.querySelector(".requests-menu-size").textContent;
-    let tooltip = target.querySelector(".requests-menu-size").getAttribute("title");
+    let value = target.querySelector(".requests-list-size").textContent;
+    let tooltip = target.querySelector(".requests-list-size").getAttribute("title");
     info("Displayed size: " + value);
     info("Tooltip size: " + tooltip);
     is(value, size, "The displayed size is correct.");
     is(tooltip, size, "The tooltip size is correct.");
   }
   if (time !== undefined) {
-    let value = target.querySelector(".requests-menu-timings-total").textContent;
-    let tooltip = target.querySelector(".requests-menu-timings-total").getAttribute("title");
+    let value = target.querySelector(".requests-list-timings-total").textContent;
+    let tooltip = target.querySelector(".requests-list-timings-total").getAttribute("title");
     info("Displayed time: " + value);
     info("Tooltip time: " + tooltip);
     ok(~~(value.match(/[0-9]+/)) >= 0, "The displayed time is correct.");
@@ -395,9 +385,9 @@ function waitFor(subject, eventName) {
  */
 function testFilterButtons(monitor, filterType) {
   let doc = monitor.panelWin.document;
-  let target = doc.querySelector("#requests-menu-filter-" + filterType + "-button");
+  let target = doc.querySelector(".requests-list-filter-" + filterType + "-button");
   ok(target, `Filter button '${filterType}' was found`);
-  let buttons = [...doc.querySelectorAll(".menu-filter-button")];
+  let buttons = [...doc.querySelectorAll("#requests-list-filter-buttons button")];
   ok(buttons.length > 0, "More than zero filter buttons were found");
 
   // Only target should be checked.
@@ -415,7 +405,7 @@ function testFilterButtons(monitor, filterType) {
  */
 function testFilterButtonsCustom(aMonitor, aIsChecked) {
   let doc = aMonitor.panelWin.document;
-  let buttons = doc.querySelectorAll(".menu-filter-button");
+  let buttons = doc.querySelectorAll("#requests-list-filter-buttons button");
   for (let i = 0; i < aIsChecked.length; i++) {
     let button = buttons[i];
     if (aIsChecked[i]) {

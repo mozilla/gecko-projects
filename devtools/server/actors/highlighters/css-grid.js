@@ -15,25 +15,28 @@ const {
 } = require("./utils/markup");
 const {
   getCurrentZoom,
-  setIgnoreLayoutChanges
+  setIgnoreLayoutChanges,
+  getWindowDimensions
 } = require("devtools/shared/layout/utils");
 const { stringifyGridFragments } = require("devtools/server/actors/utils/css-grid-utils");
 
 const CSS_GRID_ENABLED_PREF = "layout.css.grid.enabled";
+const DEFAULT_GRID_COLOR = "#4B0082";
 const ROWS = "rows";
 const COLUMNS = "cols";
+
 const GRID_LINES_PROPERTIES = {
   "edge": {
     lineDash: [0, 0],
-    strokeStyle: "#4B0082"
+    alpha: 1,
   },
   "explicit": {
     lineDash: [5, 3],
-    strokeStyle: "#8A2BE2"
+    alpha: 0.75,
   },
   "implicit": {
     lineDash: [2, 2],
-    strokeStyle: "#9370DB"
+    alpha: 0.5,
   }
 };
 
@@ -41,7 +44,7 @@ const GRID_LINES_PROPERTIES = {
 const GRID_GAP_PATTERN_WIDTH = 14;
 const GRID_GAP_PATTERN_HEIGHT = 14;
 const GRID_GAP_PATTERN_LINE_DASH = [5, 3];
-const GRID_GAP_PATTERN_STROKE_STYLE = "#9370DB";
+const GRID_GAP_ALPHA = 0.5;
 
 /**
  * Cached used by `CssGridHighlighter.getGridGapPattern`.
@@ -63,6 +66,9 @@ const COLUMN_KEY = {};
  * h.destroy();
  *
  * Available Options:
+ * - color(colorValue)
+ *     @param  {String} colorValue
+ *     The color that should be used to draw the highlighter for this grid.
  * - showGridArea(areaName)
  *     @param  {String} areaName
  *     Shows the grid area highlight for the given area name.
@@ -100,10 +106,14 @@ function CssGridHighlighter(highlighterEnv) {
     this._buildMarkup.bind(this));
 
   this.onNavigate = this.onNavigate.bind(this);
+  this.onPageHide = this.hide.bind(this);
   this.onWillNavigate = this.onWillNavigate.bind(this);
 
   this.highlighterEnv.on("navigate", this.onNavigate);
   this.highlighterEnv.on("will-navigate", this.onWillNavigate);
+
+  let { pageListenerTarget } = highlighterEnv;
+  pageListenerTarget.addEventListener("pagehide", this.onPageHide);
 }
 
 CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
@@ -118,11 +128,20 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
       }
     });
 
+    let root = createNode(this.win, {
+      parent: container,
+      attributes: {
+        "id": "root",
+        "class": "root"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+
     // We use a <canvas> element so that we can draw an arbitrary number of lines
     // which wouldn't be possible with HTML or SVG without having to insert and remove
     // the whole markup on every update.
     createNode(this.win, {
-      parent: container,
+      parent: root,
       nodeType: "canvas",
       attributes: {
         "id": "canvas",
@@ -135,7 +154,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     // Build the SVG element
     let svg = createSVGNode(this.win, {
       nodeType: "svg",
-      parent: container,
+      parent: root,
       attributes: {
         "id": "elements",
         "width": "100%",
@@ -214,8 +233,13 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   },
 
   destroy() {
-    this.highlighterEnv.off("navigate", this.onNavigate);
-    this.highlighterEnv.off("will-navigate", this.onWillNavigate);
+    let { highlighterEnv } = this;
+    highlighterEnv.off("navigate", this.onNavigate);
+    highlighterEnv.off("will-navigate", this.onWillNavigate);
+
+    let { pageListenerTarget } = highlighterEnv;
+    pageListenerTarget.removeEventListener("pagehide", this.onPageHide);
+
     this.markup.destroy();
     AutoRefreshHighlighter.prototype.destroy.call(this);
   },
@@ -230,6 +254,10 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
 
   get canvas() {
     return this.getElement("canvas");
+  },
+
+  get color() {
+    return this.options.color || DEFAULT_GRID_COLOR;
   },
 
   /**
@@ -251,6 +279,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     canvas.height = GRID_GAP_PATTERN_HEIGHT;
 
     let ctx = canvas.getContext("2d");
+    ctx.save();
     ctx.setLineDash(GRID_GAP_PATTERN_LINE_DASH);
     ctx.beginPath();
     ctx.translate(.5, .5);
@@ -263,8 +292,10 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
       ctx.lineTo(0, GRID_GAP_PATTERN_HEIGHT);
     }
 
-    ctx.strokeStyle = GRID_GAP_PATTERN_STROKE_STYLE;
+    ctx.strokeStyle = this.color;
+    ctx.globalAlpha = GRID_GAP_ALPHA;
     ctx.stroke();
+    ctx.restore();
 
     let pattern = ctx.createPattern(canvas, "repeat");
     gCachedGridPattern.set(dimension, pattern);
@@ -276,8 +307,7 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    * using DeadWrapper objects as gap patterns the next time.
    */
   onNavigate() {
-    gCachedGridPattern.delete(ROW_KEY);
-    gCachedGridPattern.delete(COLUMN_KEY);
+    this._clearCache();
   },
 
   onWillNavigate({ isTopLevel }) {
@@ -292,7 +322,15 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
       return false;
     }
 
+    // The grid pattern cache should be cleared in case the color changed.
+    this._clearCache();
+
     return this._update();
+  },
+
+  _clearCache() {
+    gCachedGridPattern.delete(ROW_KEY);
+    gCachedGridPattern.delete(COLUMN_KEY);
   },
 
   /**
@@ -355,8 +393,16 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   _update() {
     setIgnoreLayoutChanges(true);
 
+    let root = this.getElement("root");
+    // Hide the root element and force the reflow in order to get the proper window's
+    // dimensions without increasing them.
+    root.setAttribute("style", "display: none");
+    this.currentNode.offsetWidth;
+
+    let { width, height } = getWindowDimensions(this.win);
+
     // Clear the canvas the grid area highlights.
-    this.clearCanvas();
+    this.clearCanvas(width, height);
     this.clearGridAreas();
 
     // Start drawing the grid fragments.
@@ -374,6 +420,9 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     }
 
     this._showGrid();
+
+    root.setAttribute("style",
+      `position:absolute; width:${width}px;height:${height}px; overflow:hidden`);
 
     setIgnoreLayoutChanges(false, this.highlighterEnv.window.document.documentElement);
     return true;
@@ -434,15 +483,13 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     moveInfobar(container, bounds, this.win);
   },
 
-  clearCanvas() {
+  clearCanvas(width, height) {
     let ratio = parseFloat((this.win.devicePixelRatio || 1).toFixed(2));
-    let width = this.win.innerWidth;
-    let height = this.win.innerHeight;
 
     // Resize the canvas taking the dpr into account so as to have crisp lines.
     this.canvas.setAttribute("width", width * ratio);
     this.canvas.setAttribute("height", height * ratio);
-    this.canvas.setAttribute("style", `width:${width}px;height:${height}px`);
+    this.canvas.setAttribute("style", `width:${width}px;height:${height}px;`);
     this.ctx.scale(ratio, ratio);
 
     this.ctx.clearRect(0, 0, width, height);
@@ -582,7 +629,9 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
       this.ctx.lineTo(endPos, linePos);
     }
 
-    this.ctx.strokeStyle = GRID_LINES_PROPERTIES[lineType].strokeStyle;
+    this.ctx.strokeStyle = this.color;
+    this.ctx.globalAlpha = GRID_LINES_PROPERTIES[lineType].alpha;
+
     this.ctx.stroke();
     this.ctx.restore();
   },
@@ -603,11 +652,16 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   renderGridLineNumber(lineNumber, linePos, startPos, dimensionType) {
     this.ctx.save();
 
+    let textWidth = this.ctx.measureText(lineNumber).width;
+    // Guess the font height based on the measured width
+    let textHeight = textWidth * 2;
+
     if (dimensionType === COLUMNS) {
-      this.ctx.fillText(lineNumber, linePos, startPos);
+      let yPos = Math.max(startPos, textHeight);
+      this.ctx.fillText(lineNumber, linePos, yPos);
     } else {
-      let textWidth = this.ctx.measureText(lineNumber).width;
-      this.ctx.fillText(lineNumber, startPos - textWidth, linePos);
+      let xPos = Math.max(startPos, textWidth);
+      this.ctx.fillText(lineNumber, xPos - textWidth, linePos);
     }
 
     this.ctx.restore();

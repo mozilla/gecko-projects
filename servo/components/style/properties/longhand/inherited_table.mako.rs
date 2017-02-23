@@ -16,6 +16,7 @@ ${helpers.single_keyword("empty-cells", "show hide",
                          spec="https://drafts.csswg.org/css-tables/#propdef-empty-cells")}
 ${helpers.single_keyword("caption-side", "top bottom",
                          extra_gecko_values="right left top-outside bottom-outside",
+                         needs_conversion="True",
                          animatable=False,
                          spec="https://drafts.csswg.org/css-tables/#propdef-caption-side")}
 
@@ -113,14 +114,10 @@ ${helpers.single_keyword("caption-side", "top bottom",
             Err(()) => (),
             Ok(length) => {
                 first = Some(length);
-                match specified::Length::parse_non_negative(input) {
-                    Err(()) => (),
-                    Ok(length) => second = Some(length),
+                if let Ok(len) = input.try(|input| specified::Length::parse_non_negative(input)) {
+                    second = Some(len);
                 }
             }
-        }
-        if input.next().is_ok() {
-            return Err(())
         }
         match (first, second) {
             (None, None) => Err(()),

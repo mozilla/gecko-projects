@@ -8,7 +8,7 @@
  */
 
 add_task(function* () {
-  let { L10N } = require("devtools/client/netmonitor/l10n");
+  let { L10N } = require("devtools/client/netmonitor/utils/l10n");
 
   let { tab, monitor } = yield initNetMonitor(JSON_LONG_URL);
   info("Starting test... ");
@@ -32,13 +32,13 @@ add_task(function* () {
   verifyRequest(0);
 
   // Switch to the webconsole.
-  let onWebConsole = monitor._toolbox.once("webconsole-selected");
-  monitor._toolbox.selectTool("webconsole");
+  let onWebConsole = monitor.toolbox.once("webconsole-selected");
+  monitor.toolbox.selectTool("webconsole");
   yield onWebConsole;
 
   // Switch back to the netmonitor.
-  let onNetMonitor = monitor._toolbox.once("netmonitor-selected");
-  monitor._toolbox.selectTool("netmonitor");
+  let onNetMonitor = monitor.toolbox.once("netmonitor-selected");
+  monitor.toolbox.selectTool("netmonitor");
   yield onNetMonitor;
 
   // Reload debugee.

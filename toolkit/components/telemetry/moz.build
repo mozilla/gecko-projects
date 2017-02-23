@@ -30,6 +30,8 @@ if CONFIG['GNU_CXX']:
 if CONFIG['ENABLE_TESTS']:
     DIRS += ['tests/gtest']
 
+TEST_DIRS += ['tests']
+
 XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 
@@ -43,18 +45,20 @@ EXPORTS.mozilla += [
     '!TelemetryEventEnums.h',
     '!TelemetryHistogramEnums.h',
     '!TelemetryScalarEnums.h',
+    'ipc/TelemetryComms.h',
+    'ipc/TelemetryIPC.h',
     'ProcessedStack.h',
     'Telemetry.h',
-    'TelemetryComms.h',
     'ThreadHangStats.h',
 ]
 
 SOURCES += [
+    'ipc/TelemetryIPC.cpp',
+    'ipc/TelemetryIPCAccumulator.cpp',
     'Telemetry.cpp',
     'TelemetryCommon.cpp',
     'TelemetryEvent.cpp',
     'TelemetryHistogram.cpp',
-    'TelemetryIPCAccumulator.cpp',
     'TelemetryScalar.cpp',
     'WebrtcTelemetry.cpp',
 ]
@@ -70,6 +74,7 @@ EXTRA_JS_MODULES += [
     'TelemetryController.jsm',
     'TelemetryEnvironment.jsm',
     'TelemetryLog.jsm',
+    'TelemetryModules.jsm',
     'TelemetryReportingPolicy.jsm',
     'TelemetrySend.jsm',
     'TelemetrySession.jsm',

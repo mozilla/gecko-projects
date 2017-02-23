@@ -6,22 +6,24 @@
 
 #include "EMEDecoderModule.h"
 #include "EMEVideoDecoder.h"
-#include "MediaDataDecoderProxy.h"
+#include "GMPDecoderModule.h"
+#include "GMPService.h"
+#include "MP4Decoder.h"
+#include "MediaInfo.h"
+#include "MediaPrefs.h"
+#include "PDMFactory.h"
+#include "gmp-decryption.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/CDMProxy.h"
+#include "mozilla/EMEUtils.h"
 #include "mozilla/Unused.h"
 #include "nsAutoPtr.h"
-#include "nsServiceManagerUtils.h"
-#include "MediaInfo.h"
 #include "nsClassHashtable.h"
-#include "GMPDecoderModule.h"
-#include "MP4Decoder.h"
-#include "MediaPrefs.h"
-#include "mozilla/EMEUtils.h"
+#include "nsServiceManagerUtils.h"
 
 namespace mozilla {
 
-typedef MozPromiseRequestHolder<CDMProxy::DecryptPromise> DecryptPromiseRequestHolder;
+typedef MozPromiseRequestHolder<DecryptPromise> DecryptPromiseRequestHolder;
 extern already_AddRefed<PlatformDecoderModule> CreateBlankDecoderModule();
 
 class EMEDecryptor : public MediaDataDecoder
@@ -187,11 +189,17 @@ public:
     return mDecoder->GetDescriptionName();
   }
 
+  ConversionRequired NeedsConversion() const override
+  {
+    return mDecoder->NeedsConversion();
+  }
+
 private:
   RefPtr<MediaDataDecoder> mDecoder;
   RefPtr<TaskQueue> mTaskQueue;
   RefPtr<CDMProxy> mProxy;
-  nsClassHashtable<nsRefPtrHashKey<MediaRawData>, DecryptPromiseRequestHolder> mDecrypts;
+  nsClassHashtable<nsRefPtrHashKey<MediaRawData>, DecryptPromiseRequestHolder>
+    mDecrypts;
   RefPtr<SamplesWaitingForKey> mSamplesWaitingForKey;
   MozPromiseRequestHolder<SamplesWaitingForKey::WaitForKeyPromise> mKeyRequest;
   MozPromiseHolder<DecodePromise> mDecodePromise;
@@ -202,33 +210,33 @@ private:
   bool mIsShutdown;
 };
 
-class EMEMediaDataDecoderProxy : public MediaDataDecoderProxy
+EMEMediaDataDecoderProxy::EMEMediaDataDecoderProxy(
+  already_AddRefed<AbstractThread> aProxyThread,
+  CDMProxy* aProxy,
+  const CreateDecoderParams& aParams)
+  : MediaDataDecoderProxy(Move(aProxyThread))
+  , mTaskQueue(AbstractThread::GetCurrent()->AsTaskQueue())
+  , mSamplesWaitingForKey(
+      new SamplesWaitingForKey(aProxy,
+                               aParams.mType,
+                               aParams.mOnWaitingForKeyEvent))
+  , mProxy(aProxy)
 {
-public:
-  EMEMediaDataDecoderProxy(
-    already_AddRefed<AbstractThread> aProxyThread, CDMProxy* aProxy,
-    TrackInfo::TrackType aType,
-    MediaEventProducer<TrackInfo::TrackType>* aOnWaitingForKey)
-    : MediaDataDecoderProxy(Move(aProxyThread))
-    , mTaskQueue(AbstractThread::GetCurrent()->AsTaskQueue())
-    , mSamplesWaitingForKey(
-        new SamplesWaitingForKey(aProxy, aType, aOnWaitingForKey))
-    , mProxy(aProxy)
-  {
-  }
+}
 
-  RefPtr<DecodePromise> Decode(MediaRawData* aSample) override;
-  RefPtr<FlushPromise> Flush() override;
-  RefPtr<ShutdownPromise> Shutdown() override;
-
-private:
-  RefPtr<TaskQueue> mTaskQueue;
-  RefPtr<SamplesWaitingForKey> mSamplesWaitingForKey;
-  MozPromiseRequestHolder<SamplesWaitingForKey::WaitForKeyPromise> mKeyRequest;
-  MozPromiseHolder<DecodePromise> mDecodePromise;
-  MozPromiseRequestHolder<DecodePromise> mDecodeRequest;
-  RefPtr<CDMProxy> mProxy;
-};
+EMEMediaDataDecoderProxy::EMEMediaDataDecoderProxy(
+  const CreateDecoderParams& aParams,
+  already_AddRefed<MediaDataDecoder> aProxyDecoder,
+  CDMProxy* aProxy)
+  : MediaDataDecoderProxy(Move(aProxyDecoder))
+  , mTaskQueue(AbstractThread::GetCurrent()->AsTaskQueue())
+  , mSamplesWaitingForKey(
+      new SamplesWaitingForKey(aProxy,
+                               aParams.mType,
+                               aParams.mOnWaitingForKeyEvent))
+  , mProxy(aProxy)
+{
+}
 
 RefPtr<MediaDataDecoder::DecodePromise>
 EMEMediaDataDecoderProxy::Decode(MediaRawData* aSample)
@@ -295,7 +303,8 @@ EMEDecoderModule::~EMEDecoderModule()
 static already_AddRefed<MediaDataDecoderProxy>
 CreateDecoderWrapper(CDMProxy* aProxy, const CreateDecoderParams& aParams)
 {
-  RefPtr<gmp::GeckoMediaPluginService> s(gmp::GeckoMediaPluginService::GetGeckoMediaPluginService());
+  RefPtr<gmp::GeckoMediaPluginService> s(
+    gmp::GeckoMediaPluginService::GetGeckoMediaPluginService());
   if (!s) {
     return nullptr;
   }
@@ -304,7 +313,7 @@ CreateDecoderWrapper(CDMProxy* aProxy, const CreateDecoderParams& aParams)
     return nullptr;
   }
   RefPtr<MediaDataDecoderProxy> decoder(new EMEMediaDataDecoderProxy(
-    thread.forget(), aProxy, aParams.mType, aParams.mOnWaitingForKeyEvent));
+    thread.forget(), aProxy, aParams));
   return decoder.forget();
 }
 
@@ -364,16 +373,6 @@ EMEDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
     decoder, mProxy, AbstractThread::GetCurrent()->AsTaskQueue(),
     aParams.mType, aParams.mOnWaitingForKeyEvent));
   return emeDecoder.forget();
-}
-
-PlatformDecoderModule::ConversionRequired
-EMEDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
-{
-  if (aConfig.IsVideo() && MP4Decoder::IsH264(aConfig.mMimeType)) {
-    return ConversionRequired::kNeedAVCC;
-  } else {
-    return ConversionRequired::kNeedNone;
-  }
 }
 
 bool

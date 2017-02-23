@@ -51,9 +51,7 @@
 #include "vm/Debugger.h"
 #include "vm/HelperThreads.h"
 #include "vm/TraceLogging.h"
-#ifdef MOZ_VTUNE
-# include "vtune/VTuneWrapper.h"
-#endif
+#include "vtune/VTuneWrapper.h"
 
 #include "jscompartmentinlines.h"
 #include "jsobjinlines.h"
@@ -3077,9 +3075,6 @@ InvalidateActivation(FreeOp* fop, const JitActivationIterator& activations, bool
                     it.returnAddressToFp());
             break;
           }
-          case JitFrame_IonStub:
-            JitSpew(JitSpew_IonInvalidate, "#%" PRIuSIZE " ion stub frame @ %p", frameno, it.fp());
-            break;
           case JitFrame_BaselineStub:
             JitSpew(JitSpew_IonInvalidate, "#%" PRIuSIZE " baseline stub frame @ %p", frameno, it.fp());
             break;

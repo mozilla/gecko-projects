@@ -14,6 +14,7 @@
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/TreeWalker.h"
 #include "mozilla/IMEStateManager.h"
+#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Preferences.h"
 #include "nsCaret.h"
 #include "nsContainerFrame.h"
@@ -196,9 +197,10 @@ AccessibleCaretManager::OnSelectionChanged(nsIDOMDocument* aDoc,
     return NS_OK;
   }
 
-  // No need to show the carets for select all action when we want to hide
-  // the carets for mouse input.
+  // When we want to hide the carets for mouse input, hide them for select
+  // all action fired by keyboard as well.
   if (sHideCaretsForMouseInput &&
+      mLastInputSource == nsIDOMMouseEvent::MOZ_SOURCE_KEYBOARD &&
       (aReason & nsISelectionListener::SELECTALL_REASON)) {
     HideCarets();
     return NS_OK;
@@ -951,9 +953,14 @@ AccessibleCaretManager::ExtendPhoneNumberSelection(const nsAString& aDirection) 
     // be changed after calling Selection::Modify().
     RefPtr<nsRange> oldAnchorFocusRange = anchorFocusRange->CloneRange();
 
-    // Save current Focus position, and extend the selection one char.
-    nsINode* focusNode = selection->GetFocusNode();
-    uint32_t focusOffset = selection->FocusOffset();
+    // Save current focus node, focus offset and the selected text so that
+    // we can compare them with the modified ones later.
+    nsINode* oldFocusNode = selection->GetFocusNode();
+    uint32_t oldFocusOffset = selection->FocusOffset();
+    nsAutoString oldSelectedText;
+    selection->Stringify(oldSelectedText);
+
+    // Extend the selection by one char.
     selection->Modify(NS_LITERAL_STRING("extend"),
                       aDirection,
                       NS_LITERAL_STRING("character"));
@@ -962,17 +969,22 @@ AccessibleCaretManager::ExtendPhoneNumberSelection(const nsAString& aDirection) 
     }
 
     // If the selection didn't change, (can't extend further), we're done.
-    if (selection->GetFocusNode() == focusNode &&
-        selection->FocusOffset() == focusOffset) {
+    if (selection->GetFocusNode() == oldFocusNode &&
+        selection->FocusOffset() == oldFocusOffset) {
       return;
     }
 
     // If the changed selection isn't a valid phone number, we're done.
+    // Also, if the selection was extended to a new block node, the string
+    // returned by stringify() won't have a new line at the beginning or the
+    // end of the string. Therefore, if either focus node or offset is
+    // changed, but selected text is not changed, we're done, too.
     nsAutoString selectedText;
     selection->Stringify(selectedText);
-    nsAutoString phoneRegex(NS_LITERAL_STRING("(^\\+)?[0-9\\s,\\-.()*#pw]{1,30}$"));
+    nsAutoString phoneRegex(NS_LITERAL_STRING("(^\\+)?[0-9 ,\\-.()*#pw]{1,30}$"));
 
-    if (!nsContentUtils::IsPatternMatching(selectedText, phoneRegex, doc)) {
+    if (!nsContentUtils::IsPatternMatching(selectedText, phoneRegex, doc) ||
+        oldSelectedText == selectedText) {
       // Backout the undesired selection extend, restore the old anchor focus
       // range before exit.
       selection->SetAnchorFocusToRange(oldAnchorFocusRange);
@@ -1472,8 +1484,9 @@ AccessibleCaretManager::DispatchCaretStateChangedEvent(CaretChangedReason aReaso
   event->SetTrusted(true);
   event->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
 
-  AC_LOG("%s: reason %d, collapsed %d, caretVisible %d", __FUNCTION__,
-         init.mReason, init.mCollapsed, init.mCaretVisible);
+  AC_LOG("%s: reason %" PRIu32 ", collapsed %d, caretVisible %" PRIu32, __FUNCTION__,
+         static_cast<uint32_t>(init.mReason), init.mCollapsed,
+         static_cast<uint32_t>(init.mCaretVisible));
 
   (new AsyncEventDispatcher(doc, event))->RunDOMEventWhenSafe();
 }

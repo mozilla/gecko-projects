@@ -29,11 +29,15 @@
 
 "use strict";
 
+this.EXPORTED_SYMBOLS = ["FormAutofillParent"];
+
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+
+Cu.import("resource://formautofill/FormAutofillUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
@@ -41,6 +45,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "ProfileStorage",
                                   "resource://formautofill/ProfileStorage.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillPreferences",
                                   "resource://formautofill/FormAutofillPreferences.jsm");
+
+this.log = null;
+FormAutofillUtils.defineLazyLogGetter(this, this.EXPORTED_SYMBOLS[0]);
 
 const PROFILE_JSON_FILE_NAME = "autofill-profiles.json";
 const ENABLED_PREF = "browser.formautofill.enabled";
@@ -63,22 +70,24 @@ FormAutofillParent.prototype = {
    * Initializes ProfileStorage and registers the message handler.
    */
   init() {
+    log.debug("init");
     let storePath = OS.Path.join(OS.Constants.Path.profileDir, PROFILE_JSON_FILE_NAME);
     this._profileStore = new ProfileStorage(storePath);
     this._profileStore.initialize();
 
     Services.obs.addObserver(this, "advanced-pane-loaded", false);
 
-    // Observing the pref (and storage) changes
+    // Observing the pref and storage changes
     Services.prefs.addObserver(ENABLED_PREF, this, false);
-    this._enabled = this._getStatus();
+    Services.obs.addObserver(this, "formautofill-storage-changed", false);
+
     // Force to trigger the onStatusChanged function for setting listeners properly
     // while initizlization
-    this._onStatusChanged();
-    Services.ppmm.addMessageListener("FormAutofill:getEnabledStatus", this);
+    this._setStatus(this._getStatus());
   },
 
   observe(subject, topic, data) {
+    log.debug("observe:", topic, "with data:", data);
     switch (topic) {
       case "advanced-pane-loaded": {
         let formAutofillPreferences = new FormAutofillPreferences();
@@ -94,8 +103,20 @@ FormAutofillParent.prototype = {
         // Observe pref changes and update _enabled cache if status is changed.
         let currentStatus = this._getStatus();
         if (currentStatus !== this._enabled) {
-          this._enabled = currentStatus;
-          this._onStatusChanged();
+          this._setStatus(currentStatus);
+        }
+        break;
+      }
+
+      case "formautofill-storage-changed": {
+        // Early exit if the action is not "add" nor "remove"
+        if (data != "add" && data != "remove") {
+          break;
+        }
+
+        let currentStatus = this._getStatus();
+        if (currentStatus !== this._enabled) {
+          this._setStatus(currentStatus);
         }
         break;
       }
@@ -111,6 +132,7 @@ FormAutofillParent.prototype = {
    * form autofill status changed.
    */
   _onStatusChanged() {
+    log.debug("_onStatusChanged: Status changed to", this._enabled);
     if (this._enabled) {
       Services.ppmm.addMessageListener("FormAutofill:GetProfiles", this);
     } else {
@@ -118,16 +140,33 @@ FormAutofillParent.prototype = {
     }
 
     Services.ppmm.broadcastAsyncMessage("FormAutofill:enabledStatus", this._enabled);
+    // Sync process data autofillEnabled to make sure the value up to date
+    // no matter when the new content process is initialized.
+    Services.ppmm.initialProcessData.autofillEnabled = this._enabled;
   },
 
   /**
-   * Query pref (and storage) status to determine the overall status for
+   * Query pref and storage status to determine the overall status for
    * form autofill feature.
    *
    * @returns {boolean} status of form autofill feature
    */
   _getStatus() {
-    return Services.prefs.getBoolPref(ENABLED_PREF);
+    if (!Services.prefs.getBoolPref(ENABLED_PREF)) {
+      return false;
+    }
+
+    return this._profileStore.getAll().length > 0;
+  },
+
+  /**
+   * Set status and trigger _onStatusChanged.
+   *
+   * @param {boolean} newStatus The latest status we want to set for _enabled
+   */
+  _setStatus(newStatus) {
+    this._enabled = newStatus;
+    this._onStatusChanged();
   },
 
   /**
@@ -141,10 +180,6 @@ FormAutofillParent.prototype = {
     switch (name) {
       case "FormAutofill:GetProfiles":
         this._getProfiles(data, target);
-        break;
-      case "FormAutofill:getEnabledStatus":
-        Services.ppmm.broadcastAsyncMessage("FormAutofill:enabledStatus",
-                                            this._enabled);
         break;
     }
   },
@@ -199,5 +234,3 @@ FormAutofillParent.prototype = {
     target.sendAsyncMessage("FormAutofill:Profiles", profiles);
   },
 };
-
-this.EXPORTED_SYMBOLS = ["FormAutofillParent"];

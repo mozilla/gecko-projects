@@ -6,16 +6,14 @@ from redo import retry
 from requests import exceptions
 
 logger = logging.getLogger(__name__)
-headers = {
-    'User-Agent': 'TaskCluster'
-}
 
 # It's a list of project name which SETA is useful on
 SETA_PROJECTS = ['mozilla-inbound', 'autoland']
 PROJECT_SCHEDULE_ALL_EVERY_PUSHES = {'mozilla-inbound': 5, 'autoland': 5}
 PROJECT_SCHEDULE_ALL_EVERY_MINUTES = {'mozilla-inbound': 60, 'autoland': 60}
 
-SETA_ENDPOINT = "https://seta.herokuapp.com/data/setadetails/?branch=%s"
+SETA_ENDPOINT = "https://treeherder.mozilla.org/api/project/%s/seta/" \
+                "job-priorities/?build_system_type=%s"
 PUSH_ENDPOINT = "https://hg.mozilla.org/integration/%s/json-pushes/?startID=%d&endID=%d"
 
 
@@ -27,6 +25,7 @@ class SETA(object):
     def __init__(self):
         # cached low value tasks, by project
         self.low_value_tasks = {}
+        self.low_value_bb_tasks = {}
         # cached push dates by project
         self.push_dates = defaultdict(dict)
         # cached push_ids that failed to retrieve datetime for
@@ -44,19 +43,25 @@ class SETA(object):
 
         return 'test-%s/%s-%s' % (task_tuple[0], task_tuple[1], task_tuple[2])
 
-    def query_low_value_tasks(self, project):
+    def query_low_value_tasks(self, project, bbb=False):
         # Request the set of low value tasks from the SETA service.  Low value tasks will be
         # optimized out of the task graph.
         low_value_tasks = []
 
-        url = SETA_ENDPOINT % project
+        if not bbb:
+            # we want to get low priority tasklcuster jobs
+            url = SETA_ENDPOINT % (project, 'taskcluster')
+        else:
+            # we want low priority buildbot jobs
+            url = SETA_ENDPOINT % (project, 'buildbot&priority=5')
+
         # Try to fetch the SETA data twice, falling back to an empty list of low value tasks.
         # There are 10 seconds between each try.
         try:
             logger.debug("Retrieving low-value jobs list from SETA")
             response = retry(requests.get, attempts=2, sleeptime=10,
                              args=(url, ),
-                             kwargs={'timeout': 5, 'headers': headers})
+                             kwargs={'timeout': 60, 'headers': ''})
             task_list = json.loads(response.content).get('jobtypes', '')
 
             if type(task_list) == dict and len(task_list) > 0:
@@ -70,14 +75,17 @@ class SETA(object):
             # ensure no build tasks slipped in, we never want to optimize out those
             low_value_tasks = [x for x in low_value_tasks if 'build' not in x.lower()]
 
+            # Bug 1340065, temporarily disable SETA for linux64-stylo
+            low_value_tasks = [x for x in low_value_tasks if x.find('linux64-stylo') == -1]
+
         # In the event of request times out, requests will raise a TimeoutError.
         except exceptions.Timeout:
-            logger.warning("SETA server is timeout, we will treat all test tasks as high value.")
+            logger.warning("SETA timeout, we will treat all test tasks as high value.")
 
         # In the event of a network problem (e.g. DNS failure, refused connection, etc),
         # requests will raise a ConnectionError.
         except exceptions.ConnectionError:
-            logger.warning("SETA server is timeout, we will treat all test tasks as high value.")
+            logger.warning("SETA connection error, we will treat all test tasks as high value.")
 
         # In the event of the rare invalid HTTP response(e.g 404, 401),
         # requests will raise an HTTPError exception
@@ -122,7 +130,7 @@ class SETA(object):
         try:
             response = retry(requests.get, attempts=2, sleeptime=10,
                              args=(url, ),
-                             kwargs={'timeout': 5, 'headers': headers})
+                             kwargs={'timeout': 60, 'headers': {'User-Agent': 'TaskCluster'}})
             prev_push_date = json.loads(response.content).get(str(prev_push_id), {}).get('date', 0)
 
             # cache it for next time
@@ -161,7 +169,7 @@ class SETA(object):
 
         return min_between_pushes
 
-    def is_low_value_task(self, label, project, pushlog_id, push_date):
+    def is_low_value_task(self, label, project, pushlog_id, push_date, bbb_task=False):
         # marking a task as low_value means it will be optimized out by tc
         if project not in SETA_PROJECTS:
             return False
@@ -179,10 +187,17 @@ class SETA(object):
                 int(push_date)) >= PROJECT_SCHEDULE_ALL_EVERY_MINUTES.get(project, 60):
             return False
 
-        # cache the low value tasks per project to avoid repeated SETA server queries
-        if project not in self.low_value_tasks:
-            self.low_value_tasks[project] = self.query_low_value_tasks(project)
-        return label in self.low_value_tasks[project]
+        if not bbb_task:
+            # cache the low value tasks per project to avoid repeated SETA server queries
+            if project not in self.low_value_tasks:
+                self.low_value_tasks[project] = self.query_low_value_tasks(project)
+            return label in self.low_value_tasks[project]
+
+        # gecko decision task requesting if a bbb task is a low value task, so use bb jobs
+        # in this case, the label param sent in will be the buildbot buildername already
+        if project not in self.low_value_bb_tasks:
+            self.low_value_bb_tasks[project] = self.query_low_value_tasks(project, bbb=True)
+        return label in self.low_value_bb_tasks[project]
 
 # create a single instance of this class, and expose its `is_low_value_task`
 # bound method as a module-level function

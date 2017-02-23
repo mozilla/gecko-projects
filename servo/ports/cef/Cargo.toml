@@ -20,7 +20,7 @@ debugmozjs = ["libservo/debugmozjs"]
 [dependencies]
 compositing = {path = "../../components/compositing"}
 devtools = {path = "../../components/devtools"}
-euclid = "0.10.1"
+euclid = "0.11"
 gleam = "0.2.8"
 glutin_app = {path = "../glutin"}
 libc = "0.2"
@@ -28,7 +28,6 @@ libservo = {path = "../../components/servo"}
 log = {version = "0.3.5", features = ["release_max_level_info"]}
 msg = {path = "../../components/msg"}
 net_traits = {path = "../../components/net_traits"}
-plugins = {path = "../../components/plugins"}
 script_traits = {path = "../../components/script_traits"}
 servo_config = {path = "../../components/config"}
 servo_geometry = {path = "../../components/geometry"}
@@ -42,7 +41,7 @@ features = ["serde_derive", "ipc"]
 
 [target.'cfg(target_os="macos")'.dependencies]
 objc = "0.2"
-cocoa = "0.7"
+cocoa = "0.8"
 
 [target.'cfg(target_os="linux")'.dependencies]
 x11 = "2.3"

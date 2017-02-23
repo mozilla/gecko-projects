@@ -737,6 +737,7 @@ CloneLayerTreePropertiesInternal(Layer* aRoot, bool aIsMask /* = false */)
       return MakeUnique<BorderLayerProperties>(static_cast<BorderLayer*>(aRoot));
     case Layer::TYPE_TEXT:
       return MakeUnique<TextLayerProperties>(static_cast<TextLayer*>(aRoot));
+    case Layer::TYPE_DISPLAYITEM:
     case Layer::TYPE_READBACK:
     case Layer::TYPE_SHADOW:
     case Layer::TYPE_PAINTED:
@@ -783,21 +784,21 @@ LayerPropertiesBase::ComputeDifferences(Layer* aRoot, NotifySubDocInvalidationFu
     } else {
       ClearInvalidations(aRoot);
     }
-    IntRect result = TransformRect(aRoot->GetLocalVisibleRegion().ToUnknownRegion().GetBounds(),
-                                     aRoot->GetLocalTransform());
+    IntRect result = TransformRect(
+      aRoot->GetLocalVisibleRegion().ToUnknownRegion().GetBounds(),
+      aRoot->GetLocalTransform());
     result = result.Union(OldTransformedBounds());
     if (aGeometryChanged != nullptr) {
       *aGeometryChanged = true;
     }
     return result;
-  } else {
-    bool geometryChanged = (aGeometryChanged != nullptr) ? *aGeometryChanged : false;
-    nsIntRegion invalid = ComputeChange("  ", aCallback, geometryChanged);
-    if (aGeometryChanged != nullptr) {
-      *aGeometryChanged = geometryChanged;
-    }
-    return invalid;
   }
+  bool geometryChanged = (aGeometryChanged != nullptr) ? *aGeometryChanged : false;
+  nsIntRegion invalid = ComputeChange("  ", aCallback, geometryChanged);
+  if (aGeometryChanged != nullptr) {
+    *aGeometryChanged = geometryChanged;
+  }
+  return invalid;
 }
 
 void

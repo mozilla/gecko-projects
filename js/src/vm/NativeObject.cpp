@@ -483,10 +483,10 @@ NativeObject::growSlotsDontReportOOM(JSContext* cx, NativeObject* obj, uint32_t 
 static void
 FreeSlots(JSContext* cx, HeapSlot* slots)
 {
-    // Note: off thread parse tasks do not have access to GGC nursery allocated things.
-    if (!cx->helperThread())
-        return cx->nursery().freeBuffer(slots);
-    js_free(slots);
+    if (cx->helperThread())
+        js_free(slots);
+    else
+        cx->nursery().freeBuffer(slots);
 }
 
 void

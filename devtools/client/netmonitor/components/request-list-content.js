@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* globals NetMonitorController */
-
 "use strict";
 
 const { KeyCodes } = require("devtools/client/shared/keycodes");
@@ -15,12 +13,11 @@ const {
 } = require("devtools/client/shared/vendor/react");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const { HTMLTooltip } = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
-const { Task } = require("devtools/shared/task");
 const Actions = require("../actions/index");
 const {
   setTooltipImageContent,
   setTooltipStackTraceContent,
-} = require("./request-list-tooltip");
+} = require("../request-list-tooltip");
 const {
   getDisplayedRequests,
   getWaterfallScale,
@@ -28,7 +25,7 @@ const {
 
 // Components
 const RequestListItem = createFactory(require("./request-list-item"));
-const RequestListContextMenu = require("./request-list-context-menu");
+const RequestListContextMenu = require("../request-list-context-menu");
 
 const { div } = DOM;
 
@@ -42,7 +39,6 @@ const RequestListContent = createClass({
   displayName: "RequestListContent",
 
   propTypes: {
-    contextMenu: PropTypes.object.isRequired,
     dispatch: PropTypes.func.isRequired,
     displayedRequests: PropTypes.object.isRequired,
     firstRequestStartedMillis: PropTypes.number.isRequired,
@@ -51,11 +47,6 @@ const RequestListContent = createClass({
     onSelectDelta: PropTypes.func.isRequired,
     scale: PropTypes.number,
     selectedRequestId: PropTypes.string,
-    tooltip: PropTypes.shape({
-      hide: PropTypes.func.isRequired,
-      startTogglingOnHover: PropTypes.func.isRequired,
-      stopTogglingOnHover: PropTypes.func.isRequired,
-    }).isRequired
   },
 
   componentWillMount() {
@@ -64,7 +55,10 @@ const RequestListContent = createClass({
       cloneSelectedRequest: () => dispatch(Actions.cloneSelectedRequest()),
       openStatistics: (open) => dispatch(Actions.openStatistics(open)),
     });
-    this.tooltip = new HTMLTooltip(NetMonitorController._toolbox.doc, { type: "arrow" });
+    this.tooltip = new HTMLTooltip(
+      window.NetMonitorController._toolbox.doc,
+      { type: "arrow" }
+     );
   },
 
   componentDidMount() {
@@ -150,7 +144,7 @@ const RequestListContent = createClass({
    *        The current tooltip instance.
    * @return {Promise}
    */
-  onHover: Task.async(function* (target, tooltip) {
+  onHover(target, tooltip) {
     let itemEl = target.closest(".request-list-item");
     if (!itemEl) {
       return false;
@@ -164,14 +158,14 @@ const RequestListContent = createClass({
       return false;
     }
 
-    if (requestItem.responseContent && target.closest(".requests-menu-icon-and-file")) {
+    if (requestItem.responseContent && target.closest(".requests-list-icon-and-file")) {
       return setTooltipImageContent(tooltip, itemEl, requestItem);
-    } else if (requestItem.cause && target.closest(".requests-menu-cause-stack")) {
+    } else if (requestItem.cause && target.closest(".requests-list-cause-stack")) {
       return setTooltipStackTraceContent(tooltip, requestItem);
     }
 
     return false;
-  }),
+  },
 
   /**
    * Scroll listener for the requests menu view.
@@ -231,15 +225,6 @@ const RequestListContent = createClass({
     this.shouldScrollBottom = false;
   },
 
-  /**
-   * If a focused item was unmounted, transfer the focus to the container element.
-   */
-  onFocusedNodeUnmount() {
-    if (this.refs.contentEl) {
-      this.refs.contentEl.focus();
-    }
-  },
-
   render() {
     const {
       displayedRequests,
@@ -252,20 +237,19 @@ const RequestListContent = createClass({
     return (
       div({
         ref: "contentEl",
-        className: "requests-menu-contents",
+        className: "requests-list-contents",
         tabIndex: 0,
         onKeyDown: this.onKeyDown,
       },
         displayedRequests.map((item, index) => RequestListItem({
-          key: item.id,
+          firstRequestStartedMillis,
           item,
           index,
           isSelected: item.id === selectedRequestId,
-          firstRequestStartedMillis,
-          onMouseDown: () => onItemMouseDown(item.id),
+          key: item.id,
           onContextMenu: this.onContextMenu,
           onFocusedNodeChange: this.onFocusedNodeChange,
-          onFocusedNodeUnmount: this.onFocusedNodeUnmount,
+          onMouseDown: () => onItemMouseDown(item.id),
           onSecurityIconClick: () => onSecurityIconClick(item.securityState),
         }))
       )

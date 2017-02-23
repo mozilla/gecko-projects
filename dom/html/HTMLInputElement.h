@@ -669,7 +669,7 @@ public:
 
   Nullable<Date> GetValueAsDate(ErrorResult& aRv);
 
-  void SetValueAsDate(Nullable<Date>, ErrorResult& aRv);
+  void SetValueAsDate(const Nullable<Date>& aDate, ErrorResult& aRv);
 
   double ValueAsNumber() const
   {
@@ -781,6 +781,12 @@ public:
   void MozSetFileNameArray(const Sequence< nsString >& aFileNames, ErrorResult& aRv);
   void MozSetFileArray(const Sequence<OwningNonNull<File>>& aFiles);
   void MozSetDirectory(const nsAString& aDirectoryPath, ErrorResult& aRv);
+
+  bool MozInputRangeIgnorePreventDefault() const
+  {
+    return (IsInChromeDocument() || IsInNativeAnonymousSubtree()) &&
+      GetBoolAttr(nsGkAtoms::mozinputrangeignorepreventdefault);
+  }
 
   /*
    * The following functions are called from datetime picker to let input box
@@ -1468,7 +1474,7 @@ protected:
   void ClearGetFilesHelpers();
 
   /**
-   * nsINode::SetMayBeApzAware() will be invoked in this function if necessary 
+   * nsINode::SetMayBeApzAware() will be invoked in this function if necessary
    * to prevent default action of APZC so that we can increase/decrease the
    * value of this InputElement when mouse wheel event comes without scrolling
    * the page.

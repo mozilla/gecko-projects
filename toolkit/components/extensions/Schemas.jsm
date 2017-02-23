@@ -966,7 +966,7 @@ class StringType extends Type {
       format = FORMATS[schema.format];
     }
     return new this(schema,
-                    schema.id,
+                    schema.id || undefined,
                     enumeration,
                     schema.minLength || 0,
                     schema.maxLength || Infinity,
@@ -1617,7 +1617,7 @@ class SubModuleProperty extends Entry {
                         `is not a sub-module`);
       }
     }
-    let subpath = [path, this.name];
+    let subpath = [...path, this.name];
     let namespace = subpath.join(".");
 
     let functions = type.functions;

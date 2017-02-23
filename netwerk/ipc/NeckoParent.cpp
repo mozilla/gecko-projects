@@ -44,6 +44,7 @@
 #include "nsINetworkPredictor.h"
 #include "nsINetworkPredictorVerifier.h"
 #include "nsISpeculativeConnect.h"
+#include "nsIThrottlingService.h"
 
 using mozilla::OriginAttributes;
 using mozilla::dom::ChromeUtils;
@@ -148,8 +149,7 @@ static MOZ_COLD
 void CrashWithReason(const char * reason)
 {
 #ifndef RELEASE_OR_BETA
-  MOZ_CRASH_ANNOTATE(reason);
-  MOZ_REALLY_CRASH();
+  MOZ_CRASH_UNSAFE_OOL(reason);
 #endif
 }
 
@@ -888,6 +888,23 @@ NeckoParent::RecvRemoveRequestContext(const nsCString& rcid)
   id.Parse(rcid.BeginReading());
   rcsvc->RemoveRequestContext(id);
 
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+NeckoParent::RecvIncreaseThrottlePressure()
+{
+  mThrottlers.AppendElement(mozilla::UniquePtr<mozilla::net::Throttler>(new mozilla::net::Throttler));
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+NeckoParent::RecvDecreaseThrottlePressure()
+{
+  MOZ_ASSERT(!mThrottlers.IsEmpty());
+  // We do this because we don't actually care which throttler gets removed,
+  // just that one of them does.
+  mThrottlers.RemoveElementAt(0);
   return IPC_OK();
 }
 

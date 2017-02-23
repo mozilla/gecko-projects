@@ -6,10 +6,11 @@
 
 /* Utilities for animation of computed style values */
 
+#include "mozilla/StyleAnimationValue.h"
+
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/RuleNodeCacheConditions.h"
-#include "mozilla/StyleAnimationValue.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "mozilla/Tuple.h"
@@ -3647,46 +3648,6 @@ StyleAnimationValue::ComputeValues(
                                          aResult);
 }
 
-/* static */ bool
-StyleAnimationValue::ComputeValues(
-  nsCSSPropertyID aProperty,
-  CSSEnabledState aEnabledState,
-  nsStyleContext* aStyleContext,
-  const RawServoDeclarationBlock& aDeclarations,
-  nsTArray<PropertyStyleAnimationValuePair>& aValues)
-{
-  MOZ_ASSERT(aStyleContext->PresContext()->StyleSet()->IsServo(),
-             "Should be using ServoStyleSet if we have a"
-             " RawServoDeclarationBlock");
-
-  if (!nsCSSProps::IsEnabled(aProperty, aEnabledState)) {
-    return false;
-  }
-
-  const ServoComputedValues* previousStyle =
-    aStyleContext->StyleSource().AsServoComputedValues();
-
-  // FIXME: Servo bindings don't yet represent const-ness so we just
-  // cast it away for now.
-  auto declarations = const_cast<RawServoDeclarationBlock*>(&aDeclarations);
-  RefPtr<ServoComputedValues> computedValues =
-    aStyleContext->PresContext()->StyleSet()->AsServo()->
-      RestyleWithAddedDeclaration(declarations, previousStyle).Consume();
-  if (!computedValues) {
-    return false;
-  }
-
-  RefPtr<nsStyleContext> tmpStyleContext =
-    NS_NewStyleContext(aStyleContext, aStyleContext->PresContext(),
-                       aStyleContext->GetPseudo(),
-                       aStyleContext->GetPseudoType(),
-                       computedValues.forget(),
-                       false /* skipFixup */);
-
-  return ComputeValuesFromStyleContext(aProperty, aEnabledState,
-                                       tmpStyleContext, aValues);
-}
-
 bool
 StyleAnimationValue::UncomputeValue(nsCSSPropertyID aProperty,
                                     const StyleAnimationValue& aComputedValue,
@@ -4141,7 +4102,7 @@ ExtractImageLayerSizePairList(const nsStyleImageLayers& aLayer,
 }
 
 static bool
-StyleClipBasicShapeToCSSArray(const StyleClipPath& aClipPath,
+StyleClipBasicShapeToCSSArray(const StyleShapeSource& aClipPath,
                               nsCSSValue::Array* aResult)
 {
   MOZ_ASSERT(aResult->Count() == 2,
@@ -4513,7 +4474,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSPropertyID aProperty,
         case eCSSProperty_clip_path: {
           const nsStyleSVGReset* svgReset =
             static_cast<const nsStyleSVGReset*>(styleStruct);
-          const StyleClipPath& clipPath = svgReset->mClipPath;
+          const StyleShapeSource& clipPath = svgReset->mClipPath;
           const StyleShapeSourceType type = clipPath.GetType();
 
           if (type == StyleShapeSourceType::URL) {

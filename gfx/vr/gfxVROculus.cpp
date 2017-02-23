@@ -832,13 +832,26 @@ VRDisplayOculus::NotifyVSync()
   mDisplayInfo.mIsConnected = (ovr == ovrSuccess && sessionStatus.HmdPresent);
 }
 
-VRControllerOculus::VRControllerOculus()
+VRControllerOculus::VRControllerOculus(dom::GamepadHand aHand)
   : VRControllerHost(VRDeviceType::Oculus)
 {
   MOZ_COUNT_CTOR_INHERITED(VRControllerOculus, VRControllerHost);
-  mControllerInfo.mControllerName.AssignLiteral("Oculus Touch");
+
+  char* touchID = "";
+  switch (aHand) {
+    case dom::GamepadHand::Left:
+      touchID = "Oculus Touch (Left)";
+      break;
+    case dom::GamepadHand::Right:
+      touchID = "Oculus Touch (Right)";
+      break;
+    default:
+      MOZ_ASSERT(false);
+      break;
+  }
+  mControllerInfo.mControllerName = touchID;
   mControllerInfo.mMappingType = GamepadMappingType::_empty;
-  mControllerInfo.mHand = GamepadHand::_empty;
+  mControllerInfo.mHand = aHand;
   mControllerInfo.mNumButtons = kNumOculusButton;
   mControllerInfo.mNumAxes = static_cast<uint32_t>(
                              OculusControllerAxisType::NumVRControllerAxisType);;
@@ -854,16 +867,6 @@ void
 VRControllerOculus::SetAxisMove(uint32_t aAxis, float aValue)
 {
   mAxisMove[aAxis] = aValue;
-}
-
-void
-VRControllerOculus::SetHand(dom::GamepadHand aHand)
-{
-  VRControllerHost::SetHand(aHand);
-  mControllerInfo.mControllerName.AssignLiteral("Oculus Touch (");
-  mControllerInfo.mControllerName.AppendPrintf("%s%s",
-                                               GamepadHandValues::strings[uint32_t(aHand)].value,
-                                               ")");
 }
 
 VRControllerOculus::~VRControllerOculus()
@@ -979,19 +982,58 @@ VRSystemManagerOculus::HandleInput()
 
   for (uint32_t i = 0; i < mOculusController.Length(); ++i) {
     controller = mOculusController[i];
-    HandleButtonPress(controller->GetIndex(), inputState.Buttons);
+    HandleButtonPress(i, inputState.Buttons);
 
     axis = static_cast<uint32_t>(OculusControllerAxisType::IndexTrigger);
-    HandleAxisMove(controller->GetIndex(), axis, inputState.IndexTrigger[i]);
+    HandleAxisMove(i, axis, inputState.IndexTrigger[i]);
 
     axis = static_cast<uint32_t>(OculusControllerAxisType::HandTrigger);
-    HandleAxisMove(controller->GetIndex(), axis, inputState.HandTrigger[i]);
+    HandleAxisMove(i, axis, inputState.HandTrigger[i]);
 
     axis = static_cast<uint32_t>(OculusControllerAxisType::ThumbstickXAxis);
-    HandleAxisMove(controller->GetIndex(), axis, inputState.Thumbstick[i].x);
+    HandleAxisMove(i, axis, inputState.Thumbstick[i].x);
 
     axis = static_cast<uint32_t>(OculusControllerAxisType::ThumbstickYAxis);
-    HandleAxisMove(controller->GetIndex(), axis, -inputState.Thumbstick[i].y);
+    HandleAxisMove(i, axis, -inputState.Thumbstick[i].y);
+
+    // Start to process pose
+    ovrTrackingState state = ovr_GetTrackingState(mSession, 0.0, false);
+    // HandPoses is ordered by ovrControllerType_LTouch and ovrControllerType_RTouch,
+    // therefore, we can't get its state by the index of mOculusController.
+    const uint32_t handIdx = static_cast<uint32_t>(controller->GetHand()) - 1;
+    ovrPoseStatef& pose(state.HandPoses[handIdx]);
+    GamepadPoseState poseState;
+
+    if (state.HandStatusFlags[handIdx] & ovrStatus_OrientationTracked) {
+      poseState.flags |= GamepadCapabilityFlags::Cap_Orientation;
+      poseState.orientation[0] = pose.ThePose.Orientation.x;
+      poseState.orientation[1] = pose.ThePose.Orientation.y;
+      poseState.orientation[2] = pose.ThePose.Orientation.z;
+      poseState.orientation[3] = pose.ThePose.Orientation.w;
+      poseState.angularVelocity[0] = pose.AngularVelocity.x;
+      poseState.angularVelocity[1] = pose.AngularVelocity.y;
+      poseState.angularVelocity[2] = pose.AngularVelocity.z;
+
+      poseState.flags |= GamepadCapabilityFlags::Cap_AngularAcceleration;
+      poseState.angularAcceleration[0] = pose.AngularAcceleration.x;
+      poseState.angularAcceleration[1] = pose.AngularAcceleration.y;
+      poseState.angularAcceleration[2] = pose.AngularAcceleration.z;
+    }
+    if (state.HandStatusFlags[handIdx] & ovrStatus_PositionTracked) {
+      poseState.flags |= GamepadCapabilityFlags::Cap_Position;
+      poseState.position[0] = pose.ThePose.Position.x;
+      poseState.position[1] = pose.ThePose.Position.y;
+      poseState.position[2] = pose.ThePose.Position.z;
+      poseState.linearVelocity[0] = pose.LinearVelocity.x;
+      poseState.linearVelocity[1] = pose.LinearVelocity.y;
+      poseState.linearVelocity[2] = pose.LinearVelocity.z;
+
+      poseState.flags |= GamepadCapabilityFlags::Cap_LinearAcceleration;
+      poseState.linearAcceleration[0] = pose.LinearAcceleration.x;
+      poseState.linearAcceleration[1] = pose.LinearAcceleration.y;
+      poseState.linearAcceleration[2] = pose.LinearAcceleration.z;
+    }
+    HandlePoseTracking(i, poseState, controller);
   }
 }
 
@@ -1010,10 +1052,10 @@ VRSystemManagerOculus::HandleButtonPress(uint32_t aControllerIdx,
 
   for (uint32_t i = 0; i < kNumOculusButton; ++i) {
     switch (hand) {
-      case mozilla::dom::GamepadHand::Left:
+      case dom::GamepadHand::Left:
         buttonMask = kOculusTouchLButton[i];
         break;
-      case mozilla::dom::GamepadHand::Right:
+      case dom::GamepadHand::Right:
         buttonMask = kOculusTouchRButton[i];
         break;
       default:
@@ -1051,7 +1093,11 @@ VRSystemManagerOculus::HandlePoseTracking(uint32_t aControllerIdx,
                                           const GamepadPoseState& aPose,
                                           VRControllerHost* aController)
 {
-  // TODO: Bug 1305891
+  MOZ_ASSERT(aController);
+  if (aPose != aController->GetPose()) {
+    aController->SetPose(aPose);
+    NewPoseState(aControllerIdx, aPose);
+  }
 }
 
 void
@@ -1096,7 +1142,7 @@ VRSystemManagerOculus::ScanForControllers()
   if (newControllerCount != mControllerCount) {
     // controller count is changed, removing the existing gamepads first.
     for (uint32_t i = 0; i < mOculusController.Length(); ++i) {
-      RemoveGamepad(mOculusController[i]->GetIndex());
+      RemoveGamepad(i);
     }
 
     mControllerCount = 0;
@@ -1114,9 +1160,8 @@ VRSystemManagerOculus::ScanForControllers()
           hand = GamepadHand::Right;
           break;
       }
-      RefPtr<VRControllerOculus> oculusController = new VRControllerOculus();
+      RefPtr<VRControllerOculus> oculusController = new VRControllerOculus(hand);
       oculusController->SetIndex(mControllerCount);
-      oculusController->SetHand(hand);
       mOculusController.AppendElement(oculusController);
 
       // Not already present, add it.

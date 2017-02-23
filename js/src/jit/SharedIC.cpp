@@ -267,11 +267,6 @@ ICStub::trace(JSTracer* trc)
         TraceEdge(trc, &callStub->expectedStr(), "baseline-callstringsplit-str");
         break;
       }
-      case ICStub::SetElem_TypedArray: {
-        ICSetElem_TypedArray* setElemStub = toSetElem_TypedArray();
-        TraceEdge(trc, &setElemStub->shape(), "baseline-setelem-typedarray-shape");
-        break;
-      }
       case ICStub::TypeMonitor_SingleObject: {
         ICTypeMonitor_SingleObject* monitorStub = toTypeMonitor_SingleObject();
         TraceEdge(trc, &monitorStub->object(), "baseline-monitor-singleton");
@@ -557,10 +552,9 @@ ICStubCompiler::callVM(const VMFunction& fun, MacroAssembler& masm)
         return false;
 
     MOZ_ASSERT(fun.expectTailCall == NonTailCall);
-    if (engine_ == Engine::Baseline)
-        EmitBaselineCallVM(code, masm);
-    else
-        EmitIonCallVM(code, fun.explicitStackSlots(), masm);
+    MOZ_ASSERT(engine_ == Engine::Baseline);
+
+    EmitBaselineCallVM(code, masm);
     return true;
 }
 
@@ -1540,6 +1534,17 @@ DoCompareFallback(JSContext* cx, void* payload, ICCompare_Fallback* stub_, Handl
             return true;
         }
 
+        if (lhs.isSymbol() && rhs.isSymbol() && !stub->hasStub(ICStub::Compare_Symbol)) {
+            JitSpew(JitSpew_BaselineIC, "  Generating %s(Symbol, Symbol) stub", CodeName[op]);
+            ICCompare_Symbol::Compiler compiler(cx, op, engine);
+            ICStub* symbolStub = compiler.getStub(compiler.getStubSpace(info.outerScript(cx)));
+            if (!symbolStub)
+                return false;
+
+            stub->addNewStub(symbolStub);
+            return true;
+        }
+
         if (lhs.isObject() && rhs.isObject()) {
             MOZ_ASSERT(!stub->hasStub(ICStub::Compare_Object));
             JitSpew(JitSpew_BaselineIC, "  Generating %s(Object, Object) stub", CodeName[op]);
@@ -1625,6 +1630,38 @@ ICCompare_String::Compiler::generateStubCode(MacroAssembler& masm)
     masm.tagValue(JSVAL_TYPE_BOOLEAN, scratchReg, R0);
     EmitReturnFromIC(masm);
 
+    masm.bind(&failure);
+    EmitStubGuardFailure(masm);
+    return true;
+}
+
+//
+// Compare_Symbol
+//
+
+bool
+ICCompare_Symbol::Compiler::generateStubCode(MacroAssembler& masm)
+{
+    Label failure;
+    masm.branchTestSymbol(Assembler::NotEqual, R0, &failure);
+    masm.branchTestSymbol(Assembler::NotEqual, R1, &failure);
+
+    MOZ_ASSERT(IsEqualityOp(op));
+
+    Register left = masm.extractSymbol(R0, ExtractTemp0);
+    Register right = masm.extractSymbol(R1, ExtractTemp1);
+
+    Label ifTrue;
+    masm.branchPtr(JSOpToCondition(op, /* signed = */true), left, right, &ifTrue);
+
+    masm.moveValue(BooleanValue(false), R0);
+    EmitReturnFromIC(masm);
+
+    masm.bind(&ifTrue);
+    masm.moveValue(BooleanValue(true), R0);
+    EmitReturnFromIC(masm);
+
+    // Failure case - jump to next stub
     masm.bind(&failure);
     EmitStubGuardFailure(masm);
     return true;
@@ -1875,114 +1912,6 @@ StripPreliminaryObjectStubs(JSContext* cx, ICFallbackStub* stub)
     }
 }
 
-JSObject*
-GetDOMProxyProto(JSObject* obj)
-{
-    MOZ_ASSERT(IsCacheableDOMProxy(obj));
-    return obj->staticPrototype();
-}
-
-bool
-IsCacheableProtoChain(JSObject* obj, JSObject* holder, bool isDOMProxy)
-{
-    MOZ_ASSERT_IF(isDOMProxy, IsCacheableDOMProxy(obj));
-
-    if (!isDOMProxy && !obj->isNative()) {
-        if (obj == holder)
-            return false;
-        if (!obj->is<UnboxedPlainObject>() &&
-            !obj->is<UnboxedArrayObject>() &&
-            !obj->is<TypedObject>())
-        {
-            return false;
-        }
-    }
-
-    JSObject* cur = obj;
-    while (cur != holder) {
-        // We cannot assume that we find the holder object on the prototype
-        // chain and must check for null proto. The prototype chain can be
-        // altered during the lookupProperty call.
-        MOZ_ASSERT(!cur->hasDynamicPrototype());
-
-        // Don't handle objects which require a prototype guard. This should
-        // be uncommon so handling it is likely not worth the complexity.
-        if (cur->hasUncacheableProto())
-            return false;
-
-        JSObject* proto = cur->staticPrototype();
-        if (!proto || !proto->isNative())
-            return false;
-
-        cur = proto;
-    }
-
-    return true;
-}
-
-bool
-IsCacheableGetPropReadSlot(JSObject* obj, JSObject* holder, Shape* shape, bool isDOMProxy)
-{
-    if (!shape || !IsCacheableProtoChain(obj, holder, isDOMProxy))
-        return false;
-
-    if (!shape->hasSlot() || !shape->hasDefaultGetter())
-        return false;
-
-    return true;
-}
-
-void
-GetFixedOrDynamicSlotOffset(Shape* shape, bool* isFixed, uint32_t* offset)
-{
-    MOZ_ASSERT(isFixed);
-    MOZ_ASSERT(offset);
-    *isFixed = shape->slot() < shape->numFixedSlots();
-    *offset = *isFixed ? NativeObject::getFixedSlotOffset(shape->slot())
-                       : (shape->slot() - shape->numFixedSlots()) * sizeof(Value);
-}
-
-bool
-IsCacheableGetPropCall(JSContext* cx, JSObject* obj, JSObject* holder, Shape* shape,
-                       bool* isScripted, bool* isTemporarilyUnoptimizable, bool isDOMProxy)
-{
-    MOZ_ASSERT(isScripted);
-
-    if (!shape || !IsCacheableProtoChain(obj, holder, isDOMProxy))
-        return false;
-
-    if (shape->hasSlot() || shape->hasDefaultGetter())
-        return false;
-
-    if (!shape->hasGetterValue())
-        return false;
-
-    if (!shape->getterValue().isObject() || !shape->getterObject()->is<JSFunction>())
-        return false;
-
-    JSFunction* func = &shape->getterObject()->as<JSFunction>();
-    if (IsWindow(obj)) {
-        if (!func->isNative())
-            return false;
-
-        if (!func->jitInfo() || func->jitInfo()->needsOuterizedThisObject())
-            return false;
-    }
-
-    if (func->isNative()) {
-        *isScripted = false;
-        return true;
-    }
-
-    if (!func->hasJITCode()) {
-        *isTemporarilyUnoptimizable = true;
-        return false;
-    }
-
-    *isScripted = true;
-    return true;
-}
-
 bool
 CheckHasNoSuchProperty(JSContext* cx, JSObject* obj, jsid id,
                        JSObject** lastProto, size_t* protoChainDepthOut)
@@ -2035,7 +1964,7 @@ ComputeGetPropResult(JSContext* cx, BaselineFrame* frame, JSOp op, HandlePropert
 {
     // Handle arguments.length and arguments.callee on optimized arguments, as
     // it is not an object.
-    if (frame && val.isMagic(JS_OPTIMIZED_ARGUMENTS) && IsOptimizedArguments(frame, val)) {
+    if (val.isMagic(JS_OPTIMIZED_ARGUMENTS) && IsOptimizedArguments(frame, val)) {
         if (op == JSOP_LENGTH) {
             res.setInt32(frame->numActualArgs());
         } else {
@@ -2060,17 +1989,16 @@ ComputeGetPropResult(JSContext* cx, BaselineFrame* frame, JSOp op, HandlePropert
 }
 
 static bool
-DoGetPropFallback(JSContext* cx, void* payload, ICGetProp_Fallback* stub_,
+DoGetPropFallback(JSContext* cx, BaselineFrame* frame, ICGetProp_Fallback* stub_,
                   MutableHandleValue val, MutableHandleValue res)
 {
-    SharedStubInfo info(cx, payload, stub_->icEntry());
-    ICStubCompiler::Engine engine = info.engine();
+    SharedStubInfo info(cx, frame, stub_->icEntry());
     HandleScript script = info.innerScript();
 
     // This fallback stub may trigger debug mode toggling.
-    DebugModeOSRVolatileStub<ICGetProp_Fallback*> stub(engine, info.maybeFrame(), stub_);
+    DebugModeOSRVolatileStub<ICGetProp_Fallback*> stub(frame, stub_);
 
-    jsbytecode* pc = info.pc();
+    jsbytecode* pc = stub_->icEntry()->pc(script);
     JSOp op = JSOp(*pc);
     FallbackICSpew(cx, stub, "GetProp(%s)", CodeName[op]);
 
@@ -2097,9 +2025,8 @@ DoGetPropFallback(JSContext* cx, void* payload, ICGetProp_Fallback* stub_,
         // Discard all stubs in this IC and replace with generic getprop stub.
         for (ICStubIterator iter = stub->beginChain(); !iter.atEnd(); iter++)
             iter.unlink(cx);
-        ICGetProp_Generic::Compiler compiler(cx, engine,
-                                             stub->fallbackMonitorStub()->firstMonitorStub());
-        ICStub* newStub = compiler.getStub(compiler.getStubSpace(info.outerScript(cx)));
+        ICGetProp_Generic::Compiler compiler(cx, stub->fallbackMonitorStub()->firstMonitorStub());
+        ICStub* newStub = compiler.getStub(compiler.getStubSpace(script));
         if (!newStub)
             return false;
         stub->addNewStub(newStub);
@@ -2108,11 +2035,12 @@ DoGetPropFallback(JSContext* cx, void* payload, ICGetProp_Fallback* stub_,
 
     if (!attached && !JitOptions.disableCacheIR) {
         RootedValue idVal(cx, StringValue(name));
-        GetPropIRGenerator gen(cx, script, pc, CacheKind::GetProp, engine,
-                               &isTemporarilyUnoptimizable, val, idVal, CanAttachGetter::Yes);
+        GetPropIRGenerator gen(cx, script, pc, CacheKind::GetProp, &isTemporarilyUnoptimizable,
+                               val, idVal, CanAttachGetter::Yes);
         if (gen.tryAttachStub()) {
             ICStub* newStub = AttachBaselineCacheIRStub(cx, gen.writerRef(), gen.cacheKind(),
-                                                        engine, info.outerScript(cx), stub);
+                                                        ICStubEngine::Baseline, script,
+                                                        stub);
             if (newStub) {
                 JitSpew(JitSpew_BaselineIC, "  Attached CacheIR stub");
                 attached = true;
@@ -2124,7 +2052,7 @@ DoGetPropFallback(JSContext* cx, void* payload, ICGetProp_Fallback* stub_,
         }
     }
 
-    if (!ComputeGetPropResult(cx, info.maybeFrame(), op, name, val, res))
+    if (!ComputeGetPropResult(cx, frame, op, name, val, res))
         return false;
 
     TypeScript::Monitor(cx, script, pc, res);
@@ -2147,7 +2075,7 @@ DoGetPropFallback(JSContext* cx, void* payload, ICGetProp_Fallback* stub_,
     return true;
 }
 
-typedef bool (*DoGetPropFallbackFn)(JSContext*, void*, ICGetProp_Fallback*,
+typedef bool (*DoGetPropFallbackFn)(JSContext*, BaselineFrame*, ICGetProp_Fallback*,
                                     MutableHandleValue, MutableHandleValue);
 static const VMFunction DoGetPropFallbackInfo =
     FunctionInfo<DoGetPropFallbackFn>(DoGetPropFallback, "DoGetPropFallback", TailCall,
@@ -2166,7 +2094,7 @@ ICGetProp_Fallback::Compiler::generateStubCode(MacroAssembler& masm)
     // Push arguments.
     masm.pushValue(R0);
     masm.push(ICStubReg);
-    pushStubPayload(masm, R0.scratchReg());
+    masm.pushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
 
     if (!tailCallVM(DoGetPropFallbackInfo, masm))
         return false;
@@ -2205,21 +2133,6 @@ ICGetProp_Fallback::Compiler::postGenerateStubCode(MacroAssembler& masm, Handle<
     }
 }
 
-bool
-GetProtoShapes(JSObject* obj, size_t protoChainDepth, MutableHandle<ShapeVector> shapes)
-{
-    JSObject* curProto = obj->staticPrototype();
-    for (size_t i = 0; i < protoChainDepth; i++) {
-        if (!shapes.append(curProto->as<NativeObject>().lastProperty()))
-            return false;
-        curProto = curProto->staticPrototype();
-    }
-
-    MOZ_ASSERT(!curProto,
-               "longer prototype chain encountered than this stub permits!");
-    return true;
-}
-
 /* static */ ICGetProp_Generic*
 ICGetProp_Generic::Clone(JSContext* cx, ICStubSpace* space, ICStub* firstMonitorStub,
                          ICGetProp_Generic& other)
@@ -2228,19 +2141,19 @@ ICGetProp_Generic::Clone(JSContext* cx, ICStubSpace* space, ICStub* firstMonitor
 }
 
 static bool
-DoGetPropGeneric(JSContext* cx, void* payload, ICGetProp_Generic* stub,
+DoGetPropGeneric(JSContext* cx, BaselineFrame* frame, ICGetProp_Generic* stub,
                  MutableHandleValue val, MutableHandleValue res)
 {
     ICFallbackStub* fallback = stub->getChainFallback();
-    SharedStubInfo info(cx, payload, fallback->icEntry());
-    HandleScript script = info.innerScript();
-    jsbytecode* pc = info.pc();
+    JSScript* script = frame->script();
+    jsbytecode* pc = fallback->icEntry()->pc(script);
     JSOp op = JSOp(*pc);
     RootedPropertyName name(cx, script->getName(pc));
-    return ComputeGetPropResult(cx, info.maybeFrame(), op, name, val, res);
+    return ComputeGetPropResult(cx, frame, op, name, val, res);
 }
 
-typedef bool (*DoGetPropGenericFn)(JSContext*, void*, ICGetProp_Generic*, MutableHandleValue, MutableHandleValue);
+typedef bool (*DoGetPropGenericFn)(JSContext*, BaselineFrame*, ICGetProp_Generic*,
+                                   MutableHandleValue, MutableHandleValue);
 static const VMFunction DoGetPropGenericInfo =
     FunctionInfo<DoGetPropGenericFn>(DoGetPropGeneric, "DoGetPropGeneric");
 

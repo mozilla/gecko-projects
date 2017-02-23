@@ -30,23 +30,21 @@ const REQUESTS_WITH_MEDIA_AND_FLASH_AND_WS = REQUESTS_WITH_MEDIA_AND_FLASH.conca
 ]);
 
 add_task(function* () {
-  Services.prefs.setCharPref("devtools.netmonitor.filters", '["js", "bogus"]');
+  Services.prefs.setCharPref("devtools.netmonitor.filters", '["bogus", "js", "alsobogus"]');
 
   let { monitor } = yield initNetMonitor(FILTERING_URL);
   info("Starting test... ");
 
   let { gStore, windowRequire } = monitor.panelWin;
   let Actions = windowRequire("devtools/client/netmonitor/actions/index");
-  let { Prefs } = windowRequire("devtools/client/netmonitor/prefs");
+  let { Prefs } = windowRequire("devtools/client/netmonitor/utils/prefs");
 
   gStore.dispatch(Actions.batchEnable(false));
 
-  is(Prefs.filters.length, 2,
-    "All filter types were loaded as an array from the preferences.");
+  is(Prefs.filters.length, 1,
+    "Only the valid filter types should be loaded, the others should be ignored");
   is(Prefs.filters[0], "js",
-    "The first filter type is correct.");
-  is(Prefs.filters[1], "bogus",
-    "The second filter type is invalid, but loaded anyway.");
+    "The only filter type is correct.");
 
   let wait = waitForNetworkEvents(monitor, 9);
   loadCommonFrameScript();

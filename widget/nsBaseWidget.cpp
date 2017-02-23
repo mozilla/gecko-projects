@@ -310,13 +310,7 @@ nsBaseWidget::RevokeTransactionIdAllocator()
   if (!mLayerManager) {
     return;
   }
-
-  ClientLayerManager* clm = mLayerManager->AsClientLayerManager();
-  if (!clm) {
-    return;
-  }
-
-  clm->SetTransactionIdAllocator(nullptr);
+  mLayerManager->SetTransactionIdAllocator(nullptr);
 }
 
 void nsBaseWidget::ReleaseContentController()
@@ -1215,20 +1209,21 @@ nsBaseWidget::DispatchInputEvent(WidgetInputEvent* aEvent)
       uint64_t inputBlockId = 0;
       ScrollableLayerGuid guid;
 
-      nsEventStatus result = mAPZC->ReceiveInputEvent(*aEvent, &guid, &inputBlockId);
+      nsEventStatus result =
+        mAPZC->ReceiveInputEvent(*aEvent, &guid, &inputBlockId);
       if (result == nsEventStatus_eConsumeNoDefault) {
-          return result;
+        return result;
       }
       return ProcessUntransformedAPZEvent(aEvent, guid, inputBlockId, result);
-    } else {
-      WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent();
-      if (wheelEvent) {
-        RefPtr<Runnable> r = new DispatchWheelInputOnControllerThread(*wheelEvent, mAPZC, this);
-        APZThreadUtils::RunOnControllerThread(r.forget());
-        return nsEventStatus_eConsumeDoDefault;
-      }
-      MOZ_CRASH();
     }
+    WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent();
+    if (wheelEvent) {
+      RefPtr<Runnable> r =
+        new DispatchWheelInputOnControllerThread(*wheelEvent, mAPZC, this);
+      APZThreadUtils::RunOnControllerThread(r.forget());
+      return nsEventStatus_eConsumeDoDefault;
+    }
+    MOZ_CRASH();
   }
 
   nsEventStatus status;
@@ -1345,7 +1340,7 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
   if (lm->AsWebRenderLayerManager()) {
     TextureFactoryIdentifier textureFactoryIdentifier;
     lm->AsWebRenderLayerManager()->Initialize(mCompositorBridgeChild,
-                                              mCompositorSession->RootLayerTreeId(),
+                                              wr::AsPipelineId(mCompositorSession->RootLayerTreeId()),
                                               &textureFactoryIdentifier);
     ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
     gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);

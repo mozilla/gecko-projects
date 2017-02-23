@@ -9,6 +9,8 @@
  * responsible for converting the rules' information into computed style
  */
 
+#include "nsRuleNode.h"
+
 #include <algorithm>
 #include <functional>
 
@@ -26,7 +28,6 @@
 #include "mozilla/TypeTraits.h"
 
 #include "nsAlgorithm.h" // for clamped()
-#include "nsRuleNode.h"
 #include "nscore.h"
 #include "nsIWidget.h"
 #include "nsIPresShell.h"
@@ -140,9 +141,8 @@ CreateStyleImageRequest(nsPresContext* aPresContext, const nsCSSValue& aValue,
   return request.forget();
 }
 
-template<typename ReferenceBox>
 static void
-SetStyleShapeSourceToCSSValue(StyleShapeSource<ReferenceBox>* aShapeSource,
+SetStyleShapeSourceToCSSValue(StyleShapeSource* aShapeSource,
                               const nsCSSValue* aValue,
                               nsStyleContext* aStyleContext,
                               nsPresContext* aPresContext,
@@ -2615,6 +2615,9 @@ nsRuleNode::WalkRuleTree(const nsStyleStructID aSID,
       const void* parentStruct = parentContext->StyleData(aSID);
       aContext->AddStyleBit(bit); // makes const_cast OK.
       aContext->SetStyle(aSID, const_cast<void*>(parentStruct));
+      if (isReset) {
+        parentContext->AddStyleBit(NS_STYLE_HAS_CHILD_THAT_USES_RESET_STYLE);
+      }
       return parentStruct;
     }
     else
@@ -6614,19 +6617,19 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     case eCSSUnit_None:
     case eCSSUnit_Initial:
     case eCSSUnit_Unset:
-      display->mShapeOutside = StyleShapeOutside();
+      display->mShapeOutside = StyleShapeSource();
       break;
     case eCSSUnit_Inherit:
       conditions.SetUncacheable();
       display->mShapeOutside = parentDisplay->mShapeOutside;
       break;
     case eCSSUnit_URL: {
-      display->mShapeOutside = StyleShapeOutside();
+      display->mShapeOutside = StyleShapeSource();
       display->mShapeOutside.SetURL(shapeOutsideValue->GetURLStructValue());
       break;
     }
     case eCSSUnit_Array: {
-      display->mShapeOutside = StyleShapeOutside();
+      display->mShapeOutside = StyleShapeSource();
       SetStyleShapeSourceToCSSValue(&display->mShapeOutside, shapeOutsideValue,
                                     aContext, mPresContext, conditions);
       break;
@@ -9837,10 +9840,9 @@ GetStyleBasicShapeFromCSSValue(const nsCSSValue& aValue,
   return basicShape.forget();
 }
 
-template<typename ReferenceBox>
 static void
 SetStyleShapeSourceToCSSValue(
-  StyleShapeSource<ReferenceBox>* aShapeSource,
+  StyleShapeSource* aShapeSource,
   const nsCSSValue* aValue,
   nsStyleContext* aStyleContext,
   nsPresContext* aPresContext,
@@ -9853,13 +9855,13 @@ SetStyleShapeSourceToCSSValue(
   MOZ_ASSERT(array->Count() == 1 || array->Count() == 2,
              "Expect one or both of a shape function and a reference box");
 
-  ReferenceBox referenceBox = ReferenceBox::NoBox;
+  StyleGeometryBox referenceBox = StyleGeometryBox::NoBox;
   RefPtr<StyleBasicShape> basicShape;
 
   for (size_t i = 0; i < array->Count(); ++i) {
     const nsCSSValue& item = array->Item(i);
     if (item.GetUnit() == eCSSUnit_Enumerated) {
-      referenceBox = static_cast<ReferenceBox>(item.GetIntValue());
+      referenceBox = static_cast<StyleGeometryBox>(item.GetIntValue());
     } else if (item.GetUnit() == eCSSUnit_Function) {
       basicShape = GetStyleBasicShapeFromCSSValue(item, aStyleContext,
                                                   aPresContext, aConditions);
@@ -9984,19 +9986,19 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
     case eCSSUnit_None:
     case eCSSUnit_Initial:
     case eCSSUnit_Unset:
-      svgReset->mClipPath = StyleClipPath();
+      svgReset->mClipPath = StyleShapeSource();
       break;
     case eCSSUnit_Inherit:
       conditions.SetUncacheable();
       svgReset->mClipPath = parentSVGReset->mClipPath;
       break;
     case eCSSUnit_URL: {
-      svgReset->mClipPath = StyleClipPath();
+      svgReset->mClipPath = StyleShapeSource();
       svgReset->mClipPath.SetURL(clipPathValue->GetURLStructValue());
       break;
     }
     case eCSSUnit_Array: {
-      svgReset->mClipPath = StyleClipPath();
+      svgReset->mClipPath = StyleShapeSource();
       SetStyleShapeSourceToCSSValue(&svgReset->mClipPath, clipPathValue, aContext,
                                     mPresContext, conditions);
       break;

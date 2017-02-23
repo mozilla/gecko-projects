@@ -18,6 +18,7 @@
 #include "cert.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
+#include "mozilla/IntegerPrintfMacros.h"
 #include "nsNSSComponent.h"
 #include "nsServiceManagerUtils.h"
 #include "pk11pub.h"
@@ -124,6 +125,10 @@ IsCertChainRootBuiltInRoot(const UniqueCERTCertList& chain, bool& result)
   return IsCertBuiltInRoot(root, result);
 }
 
+// The term "builtin root" traditionally refers to a root CA certificate that
+// has been added to the NSS trust store, because it has been approved
+// for inclusion according to the Mozilla CA policy, and might be accepted
+// by Mozilla applications as an issuer for certificates seen on the public web.
 Result
 IsCertBuiltInRoot(CERTCertificate* cert, bool& result)
 {
@@ -146,15 +151,28 @@ IsCertBuiltInRoot(CERTCertificate* cert, bool& result)
        list = list->next) {
     for (int i = 0; i < list->module->slotCount; i++) {
       PK11SlotInfo* slot = list->module->slots[i];
-      // PK11_HasRootCerts should return true if and only if the given slot has
-      // an object with a CKA_CLASS of CKO_NETSCAPE_BUILTIN_ROOT_LIST, which
-      // should be true only of the builtin root list.
-      // If we can find a copy of the given certificate on the slot with the
-      // builtin root list, that certificate must be a builtin.
-      if (PK11_IsPresent(slot) && PK11_HasRootCerts(slot) &&
-          PK11_FindCertInSlot(slot, cert, nullptr) != CK_INVALID_HANDLE) {
-        result = true;
-        return Success;
+      // We're searching for the "builtin root module", which is a module that
+      // contains an object with a CKA_CLASS of CKO_NETSCAPE_BUILTIN_ROOT_LIST.
+      // We use PK11_HasRootCerts() to identify a module with that property.
+      // In the past, we exclusively used the PKCS#11 module named nssckbi,
+      // which is provided by the NSS library.
+      // Nowadays, some distributions use a replacement module, which contains
+      // the builtin roots, but which also contains additional CA certificates,
+      // such as CAs trusted in a local deployment.
+      // We want to be able to distinguish between these two categories,
+      // because a CA, which may issue certificates for the public web,
+      // is expected to comply with additional requirements.
+      // If the certificate has attribute CKA_NSS_MOZILLA_CA_POLICY set to true,
+      // then we treat it as a "builtin root".
+      if (PK11_IsPresent(slot) && PK11_HasRootCerts(slot)) {
+        CK_OBJECT_HANDLE handle = PK11_FindCertInSlot(slot, cert, nullptr);
+        if (handle != CK_INVALID_HANDLE &&
+            PK11_HasAttributeSet(slot, handle, CKA_NSS_MOZILLA_CA_POLICY,
+                                 false)) {
+          // Attribute was found, and is set to true
+          result = true;
+          break;
+        }
       }
     }
   }
@@ -309,7 +327,8 @@ CertVerifier::VerifyCertificateTransparencyPolicy(
                            result);
   if (rv != Success) {
     MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
-            ("SCT verification failed with fatal error %i\n", rv));
+            ("SCT verification failed with fatal error %" PRId32 "\n",
+             static_cast<uint32_t>(rv)));
     return rv;
   }
 
@@ -382,7 +401,8 @@ CertVerifier::VerifyCertificateTransparencyPolicy(
                                         dependentOperators, ctPolicyCompliance);
   if (rv != Success) {
     MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
-            ("CT policy check failed with fatal error %i\n", rv));
+            ("CT policy check failed with fatal error %" PRIu32 "\n",
+             static_cast<uint32_t>(rv)));
     return rv;
   }
 
@@ -613,7 +633,7 @@ CertVerifier::VerifyCert(CERTCertificate* cert, SECCertificateUsage usage,
         }
         if (rv == Success) {
           MOZ_LOG(gCertVerifierLog, LogLevel::Debug,
-                  ("cert is EV with status %i\n", sha1ModeResults[i]));
+                  ("cert is EV with status %i\n", static_cast<int>(sha1ModeResults[i])));
           if (evOidPolicy) {
             *evOidPolicy = evPolicyOidTag;
           }

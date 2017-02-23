@@ -8,7 +8,7 @@
  */
 
 add_task(function* () {
-  let { L10N } = require("devtools/client/netmonitor/l10n");
+  let { L10N } = require("devtools/client/netmonitor/utils/l10n");
 
   let { tab, monitor } = yield initNetMonitor(STATUS_CODES_URL);
 
@@ -165,7 +165,7 @@ add_task(function* () {
 
     is(summaryValues[0].value, uri, "The url summary value is incorrect.");
     is(summaryValues[1].value, method, "The method summary value is incorrect.");
-    is(panel.querySelector(".requests-menu-status-icon").dataset.code, status,
+    is(panel.querySelector(".requests-list-status-icon").dataset.code, status,
       "The status summary code is incorrect.");
     is(summaryValues[3].value, status + " " + statusText,
       "The status summary value is incorrect.");

@@ -166,6 +166,7 @@ pub mod shorthands {
     <%include file="/shorthand/outline.mako.rs" />
     <%include file="/shorthand/padding.mako.rs" />
     <%include file="/shorthand/position.mako.rs" />
+    <%include file="/shorthand/inherited_svg.mako.rs" />
     <%include file="/shorthand/text.mako.rs" />
 }
 
@@ -180,8 +181,10 @@ pub mod animated_properties {
 
 // TODO(SimonSapin): Convert this to a syntax extension rather than a Mako template.
 // Maybe submit for inclusion in libstd?
-mod property_bit_field {
+#[allow(missing_docs)]
+pub mod property_bit_field {
     use logical_geometry::WritingMode;
+    use properties::animated_properties::TransitionProperty;
 
     /// A bitfield for all longhand properties, in order to quickly test whether
     /// we've seen one of them.
@@ -212,7 +215,7 @@ mod property_bit_field {
                 pub fn get_${property.ident}(&self) -> bool {
                     self.get(${i})
                 }
-                #[allow(non_snake_case)]
+                #[allow(non_snake_case, missing_docs)]
                 #[inline]
                 pub fn set_${property.ident}(&mut self) {
                     self.set(${i})
@@ -237,6 +240,32 @@ mod property_bit_field {
                 }
             % endif
         % endfor
+
+        /// Set the corresponding bit of TransitionProperty.
+        /// This function will panic if TransitionProperty::All is given.
+        pub fn set_transition_property_bit(&mut self, property: &TransitionProperty) {
+            match *property {
+                % for i, prop in enumerate(data.longhands):
+                    % if prop.animatable:
+                        TransitionProperty::${prop.camel_case} => self.set(${i}),
+                    % endif
+                % endfor
+                TransitionProperty::All => unreachable!("Tried to set TransitionProperty::All in a PropertyBitfield"),
+            }
+        }
+
+        /// Return true if the corresponding bit of TransitionProperty is set.
+        /// This function will panic if TransitionProperty::All is given.
+        pub fn has_transition_property_bit(&self, property: &TransitionProperty) -> bool {
+            match *property {
+                % for i, prop in enumerate(data.longhands):
+                    % if prop.animatable:
+                        TransitionProperty::${prop.camel_case} => self.get(${i}),
+                    % endif
+                % endfor
+                TransitionProperty::All => unreachable!("Tried to get TransitionProperty::All in a PropertyBitfield"),
+            }
+        }
     }
 }
 
@@ -1288,19 +1317,19 @@ pub mod style_structs {
                 /// Whether the text decoration has an underline.
                 #[inline]
                 pub fn has_underline(&self) -> bool {
-                    self.${text_decoration_field}.underline
+                    self.${text_decoration_field}.contains(longhands::${text_decoration_field}::UNDERLINE)
                 }
 
                 /// Whether the text decoration has an overline.
                 #[inline]
                 pub fn has_overline(&self) -> bool {
-                    self.${text_decoration_field}.overline
+                    self.${text_decoration_field}.contains(longhands::${text_decoration_field}::OVERLINE)
                 }
 
                 /// Whether the text decoration has a line through.
                 #[inline]
                 pub fn has_line_through(&self) -> bool {
-                    self.${text_decoration_field}.line_through
+                    self.${text_decoration_field}.contains(longhands::${text_decoration_field}::LINE_THROUGH)
                 }
             % endif
         }

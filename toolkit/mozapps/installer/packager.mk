@@ -21,7 +21,7 @@ endif
 	@rm -rf $(DEPTH)/installer-stage $(DIST)/xpt
 	@echo 'Staging installer files...'
 	@$(NSINSTALL) -D $(DEPTH)/installer-stage/core
-	@cp -av $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)/. $(DEPTH)/installer-stage/core
+	@cp -av $(DIST)/$(MOZ_PKG_DIR)$(_BINPATH)/. $(DEPTH)/installer-stage/core
 ifdef MOZ_SIGN_PREPARED_PACKAGE_CMD
 # The && true is necessary to make sure Pymake spins a shell
 	$(MOZ_SIGN_PREPARED_PACKAGE_CMD) $(DEPTH)/installer-stage && true
@@ -51,10 +51,9 @@ stage-package: $(MOZ_PKG_MANIFEST) $(MOZ_PKG_MANIFEST_DEPS)
 		$(if $(JARLOG_DIR),$(addprefix --jarlog ,$(wildcard $(JARLOG_FILE_AB_CD)))) \
 		$(if $(OPTIMIZEJARS),--optimizejars) \
 		$(if $(DISABLE_JAR_COMPRESSION),--disable-compression) \
-		$(addprefix --unify ,$(UNIFY_DIST)) \
-		$(MOZ_PKG_MANIFEST) $(DIST) $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(if $(MOZ_PKG_MANIFEST),,$(_BINPATH)) \
+		$(MOZ_PKG_MANIFEST) $(DIST) $(DIST)/$(MOZ_PKG_DIR)$(if $(MOZ_PKG_MANIFEST),,$(_BINPATH)) \
 		$(if $(filter omni,$(MOZ_PACKAGER_FORMAT)),$(if $(NON_OMNIJAR_FILES),--non-resource $(NON_OMNIJAR_FILES)))
-	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/find-dupes.py $(MOZ_PKG_DUPEFLAGS) $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)
+	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/find-dupes.py $(MOZ_PKG_DUPEFLAGS) $(DIST)/$(MOZ_PKG_DIR)
 ifndef MOZ_THUNDERBIRD
 	# Package mozharness
 	$(call py_action,test_archive, \
@@ -82,8 +81,8 @@ ifdef MOZ_CODE_COVERAGE
 endif
 ifeq (Darwin, $(OS_ARCH))
 ifdef MOZ_ASAN
-	@echo "Rewriting ASan runtime dylib paths for all binaries in $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH) ..."
-	$(PYTHON) $(MOZILLA_DIR)/build/unix/rewrite_asan_dylib.py $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)
+	@echo "Rewriting ASan runtime dylib paths for all binaries in $(DIST)/$(MOZ_PKG_DIR)$(_BINPATH) ..."
+	$(PYTHON) $(MOZILLA_DIR)/build/unix/rewrite_asan_dylib.py $(DIST)/$(MOZ_PKG_DIR)$(_BINPATH)
 endif # MOZ_ASAN
 endif # Darwin
 
@@ -100,8 +99,7 @@ make-package: FORCE
 GARBAGE += make-package
 
 make-sourcestamp-file::
-	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
-	@echo '$(BUILDID)' > $(MOZ_SOURCESTAMP_FILE)
+	@awk '$$2 == "MOZ_BUILDID" {print $$3}' $(DEPTH)/buildid.h > $(MOZ_SOURCESTAMP_FILE)
 ifdef MOZ_INCLUDE_SOURCE_INFO
 	@awk '$$2 == "MOZ_SOURCE_URL" {print $$3}' $(DEPTH)/source-repo.h >> $(MOZ_SOURCESTAMP_FILE)
 endif
@@ -161,7 +159,7 @@ source-package:
 	@echo 'Generate the sourcestamp file'
 	# Make sure to have repository information available and then generate the
 	# sourcestamp file.
-	$(MAKE) -C $(DEPTH) 'source-repo.h'
+	$(MAKE) -C $(DEPTH) 'source-repo.h' 'buildid.h'
 	$(MAKE) make-sourcestamp-file
 	@echo 'Packaging source tarball...'
 	# We want to include the sourcestamp file in the source tarball, so copy it

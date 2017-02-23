@@ -580,11 +580,41 @@ public:
    * than the document itself) should probably be calling
    * nsIDocument::FlushPendingNotifications.
    *
+   * This method can execute script, which can destroy this presshell object
+   * unless someone is holding a reference to it on the stack.  The presshell
+   * itself will ensure it lives up until the method returns, but callers who
+   * plan to use the presshell after this call should hold a strong ref
+   * themselves!
+   *
    * @param aType the type of notifications to flush
    */
-  virtual void FlushPendingNotifications(mozilla::FlushType aType) = 0;
-  virtual void FlushPendingNotifications(mozilla::ChangesToFlush aType) = 0;
+public:
+  void FlushPendingNotifications(mozilla::FlushType aType)
+  {
+    if (!NeedFlush(aType)) {
+      return;
+    }
 
+    DoFlushPendingNotifications(aType);
+  }
+
+  void FlushPendingNotifications(mozilla::ChangesToFlush aType)
+  {
+    if (!NeedFlush(aType.mFlushType)) {
+      return;
+    }
+
+    DoFlushPendingNotifications(aType);
+  }
+
+protected:
+  /**
+   * Implementation methods for FlushPendingNotifications.
+   */
+  virtual void DoFlushPendingNotifications(mozilla::FlushType aType) = 0;
+  virtual void DoFlushPendingNotifications(mozilla::ChangesToFlush aType) = 0;
+
+public:
   /**
    * Whether we might need a flush for the given flush type.  If this
    * function returns false, we definitely don't need to flush.
@@ -1596,12 +1626,6 @@ public:
     mFontSizeInflationEnabledIsDirty = true;
   }
 
-  virtual void AddInvalidateHiddenPresShellObserver(nsRefreshDriver *aDriver) = 0;
-
-  void InvalidatePresShellIfHidden();
-  void CancelInvalidatePresShellIfHidden();
-
-
   //////////////////////////////////////////////////////////////////////////////
   // Approximate frame visibility tracking public API.
   //////////////////////////////////////////////////////////////////////////////
@@ -1741,6 +1765,12 @@ public:
 
   virtual nsIDocument* GetPrimaryContentDocument() = 0;
 
+  // aSheetType is one of the nsIStyleSheetService *_SHEET constants.
+  virtual void NotifyStyleSheetServiceSheetAdded(mozilla::StyleSheet* aSheet,
+                                                 uint32_t aSheetType) = 0;
+  virtual void NotifyStyleSheetServiceSheetRemoved(mozilla::StyleSheet* aSheet,
+                                                   uint32_t aSheetType) = 0;
+
 protected:
   friend class nsRefreshDriver;
 
@@ -1761,10 +1791,6 @@ protected:
   // GetRootFrame() can be inlined:
   nsFrameManagerBase*       mFrameManager;
   mozilla::WeakPtr<nsDocShell>                 mForwardingContainer;
-  nsRefreshDriver* MOZ_UNSAFE_REF("These two objects hold weak references "
-                                  "to each other, and the validity of this "
-                                  "member is ensured by the logic in nsIPresShell.")
-                            mHiddenInvalidationObserverRefreshDriver;
 #ifdef ACCESSIBILITY
   mozilla::a11y::DocAccessible* mDocAccessible;
 #endif

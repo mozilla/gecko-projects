@@ -385,14 +385,9 @@ NS_NewInputStreamChannelInternal(nsIChannel        **outChannel,
   stream = do_CreateInstance(NS_STRINGINPUTSTREAM_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-#ifdef MOZILLA_INTERNAL_API
     uint32_t len;
     char* utf8Bytes = ToNewUTF8String(aData, &len);
     rv = stream->AdoptData(utf8Bytes, len);
-#else
-    char* utf8Bytes = ToNewUTF8String(aData);
-    rv = stream->AdoptData(utf8Bytes, strlen(utf8Bytes));
-#endif
 
   nsCOMPtr<nsIChannel> channel;
   rv = NS_NewInputStreamChannelInternal(getter_AddRefs(channel),
@@ -994,26 +989,6 @@ NS_ExtractCharsetFromContentType(const nsACString &rawContentType,
 }
 
 nsresult
-NS_NewPartialLocalFileInputStream(nsIInputStream **result,
-                                  nsIFile         *file,
-                                  uint64_t         offset,
-                                  uint64_t         length,
-                                  int32_t          ioFlags       /* = -1 */,
-                                  int32_t          perm          /* = -1 */,
-                                  int32_t          behaviorFlags /* = 0 */)
-{
-    nsresult rv;
-    nsCOMPtr<nsIPartialFileInputStream> in =
-        do_CreateInstance(NS_PARTIALLOCALFILEINPUTSTREAM_CONTRACTID, &rv);
-    if (NS_SUCCEEDED(rv)) {
-        rv = in->Init(file, offset, length, ioFlags, perm, behaviorFlags);
-        if (NS_SUCCEEDED(rv))
-            rv = CallQueryInterface(in, result);
-    }
-    return rv;
-}
-
-nsresult
 NS_NewAtomicFileOutputStream(nsIOutputStream **result,
                                 nsIFile       *file,
                                 int32_t        ioFlags       /* = -1 */,
@@ -1188,8 +1163,6 @@ NS_ReadInputStreamToBuffer(nsIInputStream *aInputStream,
     return rv;
 }
 
-#ifdef MOZILLA_INTERNAL_API
-
 nsresult
 NS_ReadInputStreamToString(nsIInputStream *aInputStream,
                            nsACString &aDest,
@@ -1200,8 +1173,6 @@ NS_ReadInputStreamToString(nsIInputStream *aInputStream,
     void* dest = aDest.BeginWriting();
     return NS_ReadInputStreamToBuffer(aInputStream, &dest, aCount);
 }
-
-#endif
 
 nsresult
 NS_LoadPersistentPropertiesFromURISpec(nsIPersistentProperties **outResult,
@@ -1581,6 +1552,7 @@ NS_SecurityHashURI(nsIURI *aURI)
     if (scheme.EqualsLiteral("file"))
         return schemeHash; // sad face
 
+#if IS_ORIGIN_IS_FULL_SPEC_DEFINED
     bool hasFlag;
     if (NS_FAILED(NS_URIChainHasFlags(baseURI,
         nsIProtocolHandler::ORIGIN_IS_FULL_SPEC, &hasFlag)) ||
@@ -1595,6 +1567,7 @@ NS_SecurityHashURI(nsIURI *aURI)
             specHash = static_cast<uint32_t>(res);
         return specHash;
     }
+#endif
 
     nsAutoCString host;
     uint32_t hostHash = 0;
@@ -1681,6 +1654,7 @@ NS_SecurityCompareURIs(nsIURI *aSourceURI,
         return NS_SUCCEEDED(rv) && filesAreEqual;
     }
 
+#if IS_ORIGIN_IS_FULL_SPEC_DEFINED
     bool hasFlag;
     if (NS_FAILED(NS_URIChainHasFlags(targetBaseURI,
         nsIProtocolHandler::ORIGIN_IS_FULL_SPEC, &hasFlag)) ||
@@ -1694,6 +1668,7 @@ NS_SecurityCompareURIs(nsIURI *aSourceURI,
                  NS_SUCCEEDED( sourceBaseURI->GetSpec(sourceSpec) ) &&
                  targetSpec.Equals(sourceSpec) );
     }
+#endif
 
     // Compare hosts
     nsAutoCString targetHost;
@@ -1711,11 +1686,7 @@ NS_SecurityCompareURIs(nsIURI *aSourceURI,
         return false;
     }
 
-#ifdef MOZILLA_INTERNAL_API
     if (!targetHost.Equals(sourceHost, nsCaseInsensitiveCStringComparator() ))
-#else
-    if (!targetHost.Equals(sourceHost, CaseInsensitiveCompare))
-#endif
     {
         return false;
     }
@@ -2177,6 +2148,7 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
                        nsIPrincipal* aChannelResultPrincipal,
                        bool aPrivateBrowsing,
                        bool aAllowSTS,
+                       const OriginAttributes& aOriginAttributes,
                        bool& aShouldUpgrade)
 {
   // Even if we're in private browsing mode, we still enforce existing STS
@@ -2235,7 +2207,7 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
     bool isStsHost = false;
     uint32_t flags = aPrivateBrowsing ? nsISocketProvider::NO_PERMANENT_STORAGE : 0;
     rv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS, aURI, flags,
-                          nullptr, &isStsHost);
+                          aOriginAttributes, nullptr, &isStsHost);
 
     // if the SSS check fails, it's likely because this load is on a
     // malformed URI or something else in the setup is wrong, so any error

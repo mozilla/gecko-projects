@@ -22,6 +22,7 @@
 #include "gfxUtils.h"                   // for gfxUtils, etc
 #include "gfx2DGlue.h"
 #include "mozilla/DebugOnly.h"          // for DebugOnly
+#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Telemetry.h"          // for Accumulate
 #include "mozilla/ToString.h"
 #include "mozilla/gfx/2D.h"             // for DrawTarget
@@ -42,6 +43,7 @@
 #include "mozilla/layers/ShadowLayers.h"  // for ShadowableLayer
 #include "nsAString.h"
 #include "nsCSSValue.h"                 // for nsCSSValue::Array, etc
+#include "nsDisplayList.h"              // for nsDisplayItem
 #include "nsPrintfCString.h"            // for nsPrintfCString
 #include "nsStyleStruct.h"              // for nsTimingFunction, etc
 #include "protobuf/LayerScopePacket.pb.h"
@@ -670,10 +672,10 @@ Layer::GetTransformTyped() const
 Matrix4x4
 Layer::GetLocalTransform()
 {
-  if (HostLayer* shadow = AsHostLayer())
+  if (HostLayer* shadow = AsHostLayer()) {
     return shadow->GetShadowTransform();
-  else
-    return GetTransform();
+  }
+  return GetTransform();
 }
 
 const LayerToParentLayerMatrix4x4
@@ -1136,10 +1138,8 @@ ContainerLayer::Collect3DContextLeaves(nsTArray<Layer*>& aToSort)
             !container->UseIntermediateSurface())) {
           return TraversalFlag::Continue;
         }
-        else {
-          aToSort.AppendElement(layer);
-          return TraversalFlag::Skip;
-        }
+        aToSort.AppendElement(layer);
+        return TraversalFlag::Skip;
       }
   );
 }
@@ -1874,20 +1874,20 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
     aStream << " [scrollbar]";
   }
   if (GetScrollbarDirection() == ScrollDirection::VERTICAL) {
-    aStream << nsPrintfCString(" [vscrollbar=%lld]", GetScrollbarTargetContainerId()).get();
+    aStream << nsPrintfCString(" [vscrollbar=%" PRIu64 "]", GetScrollbarTargetContainerId()).get();
   }
   if (GetScrollbarDirection() == ScrollDirection::HORIZONTAL) {
-    aStream << nsPrintfCString(" [hscrollbar=%lld]", GetScrollbarTargetContainerId()).get();
+    aStream << nsPrintfCString(" [hscrollbar=%" PRIu64 "]", GetScrollbarTargetContainerId()).get();
   }
   if (GetIsFixedPosition()) {
     LayerPoint anchor = GetFixedPositionAnchor();
-    aStream << nsPrintfCString(" [isFixedPosition scrollId=%lld sides=0x%x anchor=%s]",
+    aStream << nsPrintfCString(" [isFixedPosition scrollId=%" PRIu64 " sides=0x%x anchor=%s]",
                      GetFixedPositionScrollContainerId(),
                      GetFixedPositionSides(),
                      ToString(anchor).c_str()).get();
   }
   if (GetIsStickyPosition()) {
-    aStream << nsPrintfCString(" [isStickyPosition scrollId=%d outer=(%.3f,%.3f)-(%.3f,%.3f) "
+    aStream << nsPrintfCString(" [isStickyPosition scrollId=%" PRIu64 " outer=(%.3f,%.3f)-(%.3f,%.3f) "
                      "inner=(%.3f,%.3f)-(%.3f,%.3f)]",
                      GetStickyScrollContainerId(),
                      GetStickyScrollRangeOuter().x,
@@ -2119,6 +2119,34 @@ ContainerLayer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParen
   using namespace layerscope;
   LayersPacket::Layer* layer = aPacket->mutable_layer(aPacket->layer_size()-1);
   layer->set_type(LayersPacket::Layer::ContainerLayer);
+}
+
+void
+DisplayItemLayer::EndTransaction() {
+  mItem = nullptr;
+  mBuilder = nullptr;
+}
+
+void
+DisplayItemLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
+{
+  Layer::PrintInfo(aStream, aPrefix);
+  const char* type = "TYPE_UNKNOWN";
+  if (mItem) {
+    type = mItem->Name();
+  }
+
+  aStream << " [itype type=" << type << "]";
+}
+
+void
+DisplayItemLayer::DumpPacket(layerscope::LayersPacket* aPacket, const void* aParent)
+{
+  Layer::DumpPacket(aPacket, aParent);
+  // Get this layer data
+  using namespace layerscope;
+  LayersPacket::Layer* layer = aPacket->mutable_layer(aPacket->layer_size()-1);
+  layer->set_type(LayersPacket::Layer::DisplayItemLayer);
 }
 
 void

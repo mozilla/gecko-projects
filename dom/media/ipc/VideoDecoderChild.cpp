@@ -24,6 +24,7 @@ VideoDecoderChild::VideoDecoderChild()
   , mCanSend(false)
   , mInitialized(false)
   , mIsHardwareAccelerated(false)
+  , mConversion(MediaDataDecoder::ConversionRequired::kNeedNone)
   , mNeedNewDecoder(false)
 {
 }
@@ -43,7 +44,7 @@ VideoDecoderChild::RecvOutput(const VideoDataIPDL& aData)
   // The Image here creates a TextureData object that takes ownership
   // of the SurfaceDescriptor, and is responsible for making sure that
   // it gets deallocated.
-  RefPtr<Image> image = new GPUVideoImage(GetManager(), aData.sd(), aData.display());
+  RefPtr<Image> image = new GPUVideoImage(GetManager(), aData.sd(), aData.frameSize());
 
   RefPtr<VideoData> video = VideoData::CreateFromImage(info,
                                                        aData.base().offset(),
@@ -88,13 +89,15 @@ VideoDecoderChild::RecvError(const nsresult& aError)
 
 mozilla::ipc::IPCResult
 VideoDecoderChild::RecvInitComplete(const bool& aHardware,
-                                    const nsCString& aHardwareReason)
+                                    const nsCString& aHardwareReason,
+                                    const uint32_t& aConversion)
 {
   AssertOnManagerThread();
   mInitPromise.ResolveIfExists(TrackInfo::kVideoTrack, __func__);
   mInitialized = true;
   mIsHardwareAccelerated = aHardware;
   mHardwareAcceleratedReason = aHardwareReason;
+  mConversion = static_cast<MediaDataDecoder::ConversionRequired>(aConversion);
   return IPC_OK();
 }
 
@@ -294,8 +297,14 @@ VideoDecoderChild::SetSeekThreshold(const media::TimeUnit& aTime)
   }
 }
 
+MediaDataDecoder::ConversionRequired
+VideoDecoderChild::NeedsConversion() const
+{
+  return mConversion;
+}
+
 void
-VideoDecoderChild::AssertOnManagerThread()
+VideoDecoderChild::AssertOnManagerThread() const
 {
   MOZ_ASSERT(NS_GetCurrentThread() == mThread);
 }

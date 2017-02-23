@@ -9,15 +9,18 @@ this.EXPORTED_SYMBOLS = ["ProfileAutoCompleteResult"];
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://formautofill/FormAutofillUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "FormAutofillUtils",
-                                  "resource://formautofill/FormAutofillUtils.jsm");
+this.log = null;
+FormAutofillUtils.defineLazyLogGetter(this, this.EXPORTED_SYMBOLS[0]);
+
 
 this.ProfileAutoCompleteResult = function(searchString,
                                           focusedFieldName,
                                           allFieldNames,
                                           matchingProfiles,
                                           {resultCode = null}) {
+  log.debug("Constructing new ProfileAutoCompleteResult:", [...arguments]);
   this.searchString = searchString;
   this._focusedFieldName = focusedFieldName;
   this._allFieldNames = allFieldNames;
@@ -66,11 +69,11 @@ ProfileAutoCompleteResult.prototype = {
    * @returns {number} The number of results
    */
   get matchCount() {
-    return this._matchingProfiles.length;
+    return this._popupLabels.length;
   },
 
   _checkIndexBounds(index) {
-    if (index < 0 || index >= this._matchingProfiles.length) {
+    if (index < 0 || index >= this._popupLabels.length) {
       throw Components.Exception("Index out of range.", Cr.NS_ERROR_ILLEGAL_VALUE);
     }
   },
@@ -120,7 +123,10 @@ ProfileAutoCompleteResult.prototype = {
   },
 
   _generateLabels(focusedFieldName, allFieldNames, profiles) {
-    return profiles.map(profile => {
+    // Skip results without a primary label.
+    return profiles.filter(profile => {
+      return !!profile[focusedFieldName];
+    }).map(profile => {
       return {
         primary: profile[focusedFieldName],
         secondary: this._getSecondaryLabel(focusedFieldName,

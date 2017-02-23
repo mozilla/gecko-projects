@@ -2158,31 +2158,20 @@ public:
   virtual mozilla::PendingAnimationTracker*
   GetOrCreatePendingAnimationTracker() = 0;
 
-  enum SuppressionType {
-    eAnimationsOnly = 0x1,
-
-    // Note that suppressing events also suppresses animation frames, so
-    // there's no need to split out events in its own bitmask.
-    eEvents = 0x3,
-  };
-
   /**
    * Prevents user initiated events from being dispatched to the document and
    * subdocuments.
    */
-  virtual void SuppressEventHandling(SuppressionType aWhat,
-                                     uint32_t aIncrease = 1) = 0;
+  virtual void SuppressEventHandling(uint32_t aIncrease = 1) = 0;
 
   /**
    * Unsuppress event handling.
    * @param aFireEvents If true, delayed events (focus/blur) will be fired
    *                    asynchronously.
    */
-  virtual void UnsuppressEventHandlingAndFireEvents(SuppressionType aWhat,
-                                                    bool aFireEvents) = 0;
+  virtual void UnsuppressEventHandlingAndFireEvents(bool aFireEvents) = 0;
 
   uint32_t EventHandlingSuppressed() const { return mEventsSuppressed; }
-  uint32_t AnimationsPaused() const { return mAnimationsPaused; }
 
   bool IsEventHandlingEnabled() {
     return !EventHandlingSuppressed() && mScriptGlobalObject;
@@ -2608,7 +2597,7 @@ public:
   virtual already_AddRefed<Element>
     CreateElementNS(const nsAString& aNamespaceURI,
                     const nsAString& aQualifiedName,
-                    const mozilla::dom::ElementCreationOptions& aOptions,
+                    const mozilla::dom::ElementCreationOptionsOrString& aOptions,
                     mozilla::ErrorResult& rv) = 0;
   already_AddRefed<mozilla::dom::DocumentFragment>
     CreateDocumentFragment() const;
@@ -2867,7 +2856,7 @@ public:
     mozilla::dom::DOMIntersectionObserver* aObserver) = 0;
   virtual void RemoveIntersectionObserver(
     mozilla::dom::DOMIntersectionObserver* aObserver) = 0;
-  
+
   virtual void UpdateIntersectionObservations() = 0;
   virtual void ScheduleIntersectionObserverNotification() = 0;
   virtual void NotifyIntersectionObservers() = 0;
@@ -3035,13 +3024,6 @@ protected:
 
   // container for per-context fonts (downloadable, SVG, etc.)
   RefPtr<mozilla::dom::FontFaceSet> mFontFaceSet;
-
-  // XXXheycam rust-bindgen currently doesn't generate correctly aligned fields
-  // to represent the following bitfields if they are preceded by something
-  // non-pointer aligned, so if adding non-pointer sized fields, please do so
-  // somewhere other than right here.
-  //
-  // https://github.com/servo/rust-bindgen/issues/111
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
@@ -3288,8 +3270,6 @@ protected:
   nsCOMPtr<nsIDocument> mDisplayDocument;
 
   uint32_t mEventsSuppressed;
-
-  uint32_t mAnimationsPaused;
 
   /**
    * The number number of external scripts (ones with the src attribute) that

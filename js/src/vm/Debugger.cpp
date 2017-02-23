@@ -1138,7 +1138,7 @@ Debugger::wrapEnvironment(JSContext* cx, Handle<Env*> env,
         }
 
         CrossCompartmentKey key(object, env, CrossCompartmentKey::DebuggerEnvironment);
-        if (!object->compartment()->putNewWrapper(cx, key, ObjectValue(*envobj))) {
+        if (!object->compartment()->putWrapper(cx, key, ObjectValue(*envobj))) {
             NukeDebuggerWrapper(envobj);
             environments.remove(env);
             return false;
@@ -1225,7 +1225,7 @@ Debugger::wrapDebuggeeObject(JSContext* cx, HandleObject obj,
 
         if (obj->compartment() != object->compartment()) {
             CrossCompartmentKey key(object, obj, CrossCompartmentKey::DebuggerObject);
-            if (!object->compartment()->putNewWrapper(cx, key, ObjectValue(*dobj))) {
+            if (!object->compartment()->putWrapper(cx, key, ObjectValue(*dobj))) {
                 NukeDebuggerWrapper(dobj);
                 objects.remove(obj);
                 ReportOutOfMemory(cx);
@@ -5520,7 +5520,7 @@ Debugger::wrapVariantReferent(JSContext* cx, Map& map, Handle<CrossCompartmentKe
             return nullptr;
         }
 
-        if (!object->compartment()->putNewWrapper(cx, key, ObjectValue(*wrapper))) {
+        if (!object->compartment()->putWrapper(cx, key, ObjectValue(*wrapper))) {
             NukeDebuggerWrapper(wrapper);
             map.remove(untaggedReferent);
             ReportOutOfMemory(cx);
@@ -9275,6 +9275,14 @@ DebuggerObject::errorMessageNameGetter(JSContext *cx, unsigned argc, Value* vp)
 }
 
 /* static */ bool
+DebuggerObject::errorNotesGetter(JSContext *cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGOBJECT(cx, argc, vp, "get errorNotes", args, object)
+
+    return DebuggerObject::getErrorNotes(cx, object, args.rval());
+}
+
+/* static */ bool
 DebuggerObject::errorLineNumberGetter(JSContext *cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get errorLineNumber", args, object)
@@ -9931,6 +9939,7 @@ const JSPropertySpec DebuggerObject::properties_[] = {
     JS_PSG("global", DebuggerObject::globalGetter, 0),
     JS_PSG("allocationSite", DebuggerObject::allocationSiteGetter, 0),
     JS_PSG("errorMessageName", DebuggerObject::errorMessageNameGetter, 0),
+    JS_PSG("errorNotes", DebuggerObject::errorNotesGetter, 0),
     JS_PSG("errorLineNumber", DebuggerObject::errorLineNumberGetter, 0),
     JS_PSG("errorColumnNumber", DebuggerObject::errorColumnNumberGetter, 0),
     JS_PSG("isProxy", DebuggerObject::isProxyGetter, 0),
@@ -10298,6 +10307,30 @@ DebuggerObject::getErrorMessageName(JSContext* cx, HandleDebuggerObject object,
         return false;
 
     result.set(str);
+    return true;
+}
+
+/* static */ bool
+DebuggerObject::getErrorNotes(JSContext* cx, HandleDebuggerObject object,
+                              MutableHandleValue result)
+{
+    RootedObject referent(cx, object->referent());
+    JSErrorReport* report;
+    if (!getErrorReport(cx, referent, report))
+        return false;
+
+    if (!report) {
+        result.setUndefined();
+        return true;
+    }
+
+    RootedObject errorNotesArray(cx, CreateErrorNotesArray(cx, report));
+    if (!errorNotesArray)
+        return false;
+
+    if (!cx->compartment()->wrap(cx, &errorNotesArray))
+        return false;
+    result.setObject(*errorNotesArray);
     return true;
 }
 

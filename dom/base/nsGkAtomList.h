@@ -395,6 +395,7 @@ GK_ATOM(floor, "floor")
 GK_ATOM(flowlength, "flowlength")
 GK_ATOM(focus, "focus")
 GK_ATOM(focused, "focused")
+GK_ATOM(followanchor, "followanchor")
 GK_ATOM(following, "following")
 GK_ATOM(followingSibling, "following-sibling")
 GK_ATOM(font, "font")
@@ -1961,6 +1962,9 @@ GK_ATOM(onmozinterruptend, "onmozinterruptend")
 // MediaDevices device change event
 GK_ATOM(ondevicechange, "ondevicechange")
 
+// HTML element attributes that only exposed to XBL and chrome content
+GK_ATOM(mozinputrangeignorepreventdefault, "mozinputrangeignorepreventdefault")
+
 //---------------------------------------------------------------------------
 // Special atoms
 //---------------------------------------------------------------------------
@@ -2147,11 +2151,11 @@ GK_ATOM(transitionsOfBeforeProperty, "TransitionsOfBeforeProperty") // FrameTran
 GK_ATOM(transitionsOfAfterProperty, "TransitionsOfAfterProperty") // FrameTransitions*
 GK_ATOM(genConInitializerProperty, "QuoteNodeProperty")
 GK_ATOM(labelMouseDownPtProperty, "LabelMouseDownPtProperty")
-GK_ATOM(baseURIProperty, "baseURIProperty")
 GK_ATOM(lockedStyleStates, "lockedStyleStates")
 GK_ATOM(apzCallbackTransform, "apzCallbackTransform")
 GK_ATOM(restylableAnonymousNode, "restylableAnonymousNode")
 GK_ATOM(paintRequestTime, "PaintRequestTime")
+GK_ATOM(pseudoProperty, "PseudoProperty")  // CSSPseudoElementType
 
 // Languages for lang-specific transforms
 GK_ATOM(Japanese, "ja")

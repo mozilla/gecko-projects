@@ -32,7 +32,6 @@ max_log_level = ["log/release_max_level_info"]
 webdriver = ["libservo/webdriver_server"]
 energy-profiling = ["libservo/energy-profiling"]
 testing = ["libservo/testing"]
-clippy = ["libservo/clippy"]
 debugmozjs = ["libservo/debugmozjs"]
 
 [dependencies]
@@ -46,6 +45,4 @@ libservo = {path = "../../components/servo"}
 sig = "0.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
-libc = "0.2"
-android_glue = "0.2"
 android_injected_glue = {git = "https://github.com/mmatyas/android-rs-injected-glue"}

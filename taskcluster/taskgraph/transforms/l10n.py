@@ -142,7 +142,11 @@ def _parse_locales_file(locales_file, platform=None):
         if locales_file.endswith('json'):
             all_locales = json.load(f)
             # XXX Only single locales are fetched
-            locales = {locale: data['revision'] for locale, data in all_locales.items() if 'android' in data['platforms']}
+            locales = {
+                locale: data['revision']
+                for locale, data in all_locales.items()
+                if 'android' in data['platforms']
+            }
         else:
             all_locales = f.read().split()
             # 'default' is the hg revision at the top of hg repo, in this context
@@ -151,6 +155,14 @@ def _parse_locales_file(locales_file, platform=None):
 
 def _remove_ja_jp_mac_locale(locales):
     # ja-JP-mac is a mac-only locale, but there are no mac builds being repacked, so just omit it unconditionally
+    return {
+        locale: revision for locale, revision in locales.items() if locale != 'ja-JP-mac'
+    }
+
+
+def _remove_ja_jp_mac_locale(locales):
+    # ja-JP-mac is a mac-only locale, but there are no mac builds being repacked,
+    # so just omit it unconditionally
     return {
         locale: revision for locale, revision in locales.items() if locale != 'ja-JP-mac'
     }
@@ -273,10 +285,20 @@ def chunk_locales(config, jobs):
                 locales_with_changesets_as_list = locales_with_changesets.items()
                 chunked_locales = chunkify(locales_with_changesets_as_list, this_chunk, chunks)
                 chunked['mozharness']['options'].extend([
+<<<<<<< working copy
                     'locale={}:{}'.format(locale, changeset) for locale, changeset in chunked_locales
+=======
+                    'locale={}:{}'.format(locale, changeset)
+                    for locale, changeset in chunked_locales
+>>>>>>> merge rev
                 ])
                 chunked['attributes']['l10n_chunk'] = str(this_chunk)
+<<<<<<< working copy
                 chunked['attributes']['chunk_locales'] = [locale for locale, _ in chunked_locales]  # strip revision
+=======
+                # strip revision
+                chunked['attributes']['chunk_locales'] = [locale for locale, _ in chunked_locales]
+>>>>>>> merge rev
 
                 # add the chunk number to the TH symbol
                 group, symbol = split_symbol(
@@ -287,7 +309,12 @@ def chunk_locales(config, jobs):
         else:
             job['mozharness']['options'] = job['mozharness'].get('options', [])
             job['mozharness']['options'].extend([
+<<<<<<< working copy
                 'locale={}:{}'.format(locale, changeset) for locale, changeset in locales_with_changesets.items()
+=======
+                'locale={}:{}'.format(locale, changeset)
+                for locale, changeset in locales_with_changesets.items()
+>>>>>>> merge rev
             ])
             yield job
 

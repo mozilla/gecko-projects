@@ -91,6 +91,11 @@ add_task(function* sidebar_windows() {
   // Test sidebar is opened on install
   yield extension.awaitMessage("sidebar");
   ok(!document.getElementById("sidebar-box").hidden, "sidebar box is visible in first window");
+  // Check that the menuitem has our image styling.
+  let elements = document.getElementsByClassName("webextension-menuitem");
+  is(elements.length, 1, "have one menuitem");
+  let style = elements[0].getAttribute("style");
+  ok(style.includes("webextension-menuitem-image"), "this menu has style");
 
   let secondSidebar = extension.awaitMessage("sidebar");
 
@@ -100,6 +105,11 @@ add_task(function* sidebar_windows() {
 
   yield secondSidebar;
   ok(!win.document.getElementById("sidebar-box").hidden, "sidebar box is visible in second window");
+  // Check that the menuitem has our image styling.
+  elements = win.document.getElementsByClassName("webextension-menuitem");
+  is(elements.length, 1, "have one menuitem");
+  style = elements[0].getAttribute("style");
+  ok(style.includes("webextension-menuitem-image"), "this menu has style");
 
   yield extension.unload();
   yield BrowserTestUtils.closeWindow(win);
@@ -113,6 +123,49 @@ add_task(function* sidebar_empty_panel() {
   ok(!document.getElementById("sidebar-box").hidden, "sidebar box is visible in first window");
   extension.sendMessage("set-panel");
   yield extension.awaitFinish();
+  yield extension.unload();
+});
+
+add_task(function* sidebar_tab_query_bug_1340739() {
+  let data = {
+    manifest: {
+      "permissions": [
+        "tabs",
+      ],
+      "sidebar_action": {
+        "default_panel": "sidebar.html",
+      },
+    },
+    useAddonManager: "temporary",
+    files: {
+      "sidebar.html": `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"/>
+        <script src="sidebar.js"></script>
+        </head>
+        <body>
+        A Test Sidebar
+        </body></html>
+      `,
+      "sidebar.js": function() {
+        Promise.all([
+          browser.tabs.query({}).then((tabs) => {
+            browser.test.assertEq(1, tabs.length, "got tab without currentWindow");
+          }),
+          browser.tabs.query({currentWindow: true}).then((tabs) => {
+            browser.test.assertEq(1, tabs.length, "got tab with currentWindow");
+          }),
+        ]).then(() => {
+          browser.test.sendMessage("sidebar");
+        });
+      },
+    },
+  };
+
+  let extension = ExtensionTestUtils.loadExtension(data);
+  yield extension.startup();
+  yield extension.awaitMessage("sidebar");
   yield extension.unload();
 });
 

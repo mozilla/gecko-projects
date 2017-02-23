@@ -109,7 +109,10 @@ VideoDecoderParent::RecvInit()
         nsCString hardwareReason;
         bool hardwareAccelerated =
           self->mDecoder->IsHardwareAccelerated(hardwareReason);
-        Unused << self->SendInitComplete(hardwareAccelerated, hardwareReason);
+        uint32_t conversion =
+          static_cast<uint32_t>(self->mDecoder->NeedsConversion());
+        Unused << self->SendInitComplete(
+          hardwareAccelerated, hardwareReason, conversion);
       }
     },
     [self] (MediaResult aReason) {
@@ -128,7 +131,7 @@ VideoDecoderParent::RecvInput(const MediaRawDataIPDL& aData)
   // we'd just take ownership of the shmem.
   RefPtr<MediaRawData> data = new MediaRawData(aData.buffer().get<uint8_t>(),
                                                aData.buffer().Size<uint8_t>());
-  if (!data->Data()) {
+  if (aData.buffer().Size<uint8_t>() && !data->Data()) {
     // OOM
     Error(NS_ERROR_OUT_OF_MEMORY);
     return IPC_OK();
@@ -186,6 +189,7 @@ VideoDecoderParent::ProcessDecodedData(
       MediaDataIPDL(data->mOffset, data->mTime, data->mTimecode,
                     data->mDuration, data->mFrames, data->mKeyframe),
       video->mDisplay,
+      texture ? texture->GetSize() : IntSize(),
       texture ? mParent->StoreImage(video->mImage, texture)
               : SurfaceDescriptorGPUVideo(0),
       video->mFrameID);

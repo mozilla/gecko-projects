@@ -29,9 +29,9 @@ add_task(function* () {
 
   yield waitForClipboardPromise(function setup() {
     // Context menu is appending in XUL document, we must select it from
-    // _toolbox.doc
-    monitor._toolbox.doc
-      .querySelector("#request-menu-context-copy-url").click();
+    // toolbox.doc
+    monitor.toolbox.doc
+      .querySelector("#request-list-context-copy-url").click();
   }, requestItem.url);
 
   yield teardown(monitor);

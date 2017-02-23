@@ -748,6 +748,8 @@ cfg_if! {
             pub static nsGkAtoms_focus: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms7focusedE"]
             pub static nsGkAtoms_focused: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms12followanchorE"]
+            pub static nsGkAtoms_followanchor: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms9followingE"]
             pub static nsGkAtoms_following: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms16followingSiblingE"]
@@ -1344,6 +1346,8 @@ cfg_if! {
             pub static nsGkAtoms_onafterscriptexecute: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms10onalertingE"]
             pub static nsGkAtoms_onalerting: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms17onanimationcancelE"]
+            pub static nsGkAtoms_onanimationcancel: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms14onanimationendE"]
             pub static nsGkAtoms_onanimationend: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms20onanimationiterationE"]
@@ -1858,8 +1862,12 @@ cfg_if! {
             pub static nsGkAtoms_onvoicechange: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms15onvoiceschangedE"]
             pub static nsGkAtoms_onvoiceschanged: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms19onvrdisplayactivateE"]
+            pub static nsGkAtoms_onvrdisplayactivate: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms18onvrdisplayconnectE"]
             pub static nsGkAtoms_onvrdisplayconnect: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms21onvrdisplaydeactivateE"]
+            pub static nsGkAtoms_onvrdisplaydeactivate: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms21onvrdisplaydisconnectE"]
             pub static nsGkAtoms_onvrdisplaydisconnect: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms24onvrdisplaypresentchangeE"]
@@ -4198,6 +4206,8 @@ cfg_if! {
             pub static nsGkAtoms_restylableAnonymousNode: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms16paintRequestTimeE"]
             pub static nsGkAtoms_paintRequestTime: *mut nsIAtom;
+            #[link_name = "_ZN9nsGkAtoms14pseudoPropertyE"]
+            pub static nsGkAtoms_pseudoProperty: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms8JapaneseE"]
             pub static nsGkAtoms_Japanese: *mut nsIAtom;
             #[link_name = "_ZN9nsGkAtoms7ChineseE"]
@@ -4832,8 +4842,6 @@ cfg_if! {
             pub static nsCSSAnonBoxes_mozLineFrame: *mut nsICSSAnonBoxPseudo;
             #[link_name = "_ZN14nsCSSAnonBoxes13buttonContentE"]
             pub static nsCSSAnonBoxes_buttonContent: *mut nsICSSAnonBoxPseudo;
-            #[link_name = "_ZN14nsCSSAnonBoxes14mozButtonLabelE"]
-            pub static nsCSSAnonBoxes_mozButtonLabel: *mut nsICSSAnonBoxPseudo;
             #[link_name = "_ZN14nsCSSAnonBoxes11cellContentE"]
             pub static nsCSSAnonBoxes_cellContent: *mut nsICSSAnonBoxPseudo;
             #[link_name = "_ZN14nsCSSAnonBoxes12dropDownListE"]
@@ -5661,6 +5669,8 @@ cfg_if! {
             pub static nsGkAtoms_focus: *mut nsIAtom;
             #[link_name = "?focused@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_focused: *mut nsIAtom;
+            #[link_name = "?followanchor@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_followanchor: *mut nsIAtom;
             #[link_name = "?following@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_following: *mut nsIAtom;
             #[link_name = "?followingSibling@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -6257,6 +6267,8 @@ cfg_if! {
             pub static nsGkAtoms_onafterscriptexecute: *mut nsIAtom;
             #[link_name = "?onalerting@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onalerting: *mut nsIAtom;
+            #[link_name = "?onanimationcancel@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_onanimationcancel: *mut nsIAtom;
             #[link_name = "?onanimationend@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onanimationend: *mut nsIAtom;
             #[link_name = "?onanimationiteration@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -6771,8 +6783,12 @@ cfg_if! {
             pub static nsGkAtoms_onvoicechange: *mut nsIAtom;
             #[link_name = "?onvoiceschanged@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onvoiceschanged: *mut nsIAtom;
+            #[link_name = "?onvrdisplayactivate@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_onvrdisplayactivate: *mut nsIAtom;
             #[link_name = "?onvrdisplayconnect@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onvrdisplayconnect: *mut nsIAtom;
+            #[link_name = "?onvrdisplaydeactivate@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_onvrdisplaydeactivate: *mut nsIAtom;
             #[link_name = "?onvrdisplaydisconnect@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_onvrdisplaydisconnect: *mut nsIAtom;
             #[link_name = "?onvrdisplaypresentchange@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -9111,6 +9127,8 @@ cfg_if! {
             pub static nsGkAtoms_restylableAnonymousNode: *mut nsIAtom;
             #[link_name = "?paintRequestTime@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_paintRequestTime: *mut nsIAtom;
+            #[link_name = "?pseudoProperty@nsGkAtoms@@2PEAVnsIAtom@@EA"]
+            pub static nsGkAtoms_pseudoProperty: *mut nsIAtom;
             #[link_name = "?Japanese@nsGkAtoms@@2PEAVnsIAtom@@EA"]
             pub static nsGkAtoms_Japanese: *mut nsIAtom;
             #[link_name = "?Chinese@nsGkAtoms@@2PEAVnsIAtom@@EA"]
@@ -9745,8 +9763,6 @@ cfg_if! {
             pub static nsCSSAnonBoxes_mozLineFrame: *mut nsICSSAnonBoxPseudo;
             #[link_name = "?buttonContent@nsCSSAnonBoxes@@2PEAVnsICSSAnonBoxPseudo@@EA"]
             pub static nsCSSAnonBoxes_buttonContent: *mut nsICSSAnonBoxPseudo;
-            #[link_name = "?mozButtonLabel@nsCSSAnonBoxes@@2PEAVnsICSSAnonBoxPseudo@@EA"]
-            pub static nsCSSAnonBoxes_mozButtonLabel: *mut nsICSSAnonBoxPseudo;
             #[link_name = "?cellContent@nsCSSAnonBoxes@@2PEAVnsICSSAnonBoxPseudo@@EA"]
             pub static nsCSSAnonBoxes_cellContent: *mut nsICSSAnonBoxPseudo;
             #[link_name = "?dropDownList@nsCSSAnonBoxes@@2PEAVnsICSSAnonBoxPseudo@@EA"]
@@ -10574,6 +10590,8 @@ cfg_if! {
             pub static nsGkAtoms_focus: *mut nsIAtom;
             #[link_name = "\x01?focused@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_focused: *mut nsIAtom;
+            #[link_name = "\x01?followanchor@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_followanchor: *mut nsIAtom;
             #[link_name = "\x01?following@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_following: *mut nsIAtom;
             #[link_name = "\x01?followingSibling@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -11170,6 +11188,8 @@ cfg_if! {
             pub static nsGkAtoms_onafterscriptexecute: *mut nsIAtom;
             #[link_name = "\x01?onalerting@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onalerting: *mut nsIAtom;
+            #[link_name = "\x01?onanimationcancel@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_onanimationcancel: *mut nsIAtom;
             #[link_name = "\x01?onanimationend@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onanimationend: *mut nsIAtom;
             #[link_name = "\x01?onanimationiteration@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -11684,8 +11704,12 @@ cfg_if! {
             pub static nsGkAtoms_onvoicechange: *mut nsIAtom;
             #[link_name = "\x01?onvoiceschanged@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onvoiceschanged: *mut nsIAtom;
+            #[link_name = "\x01?onvrdisplayactivate@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_onvrdisplayactivate: *mut nsIAtom;
             #[link_name = "\x01?onvrdisplayconnect@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onvrdisplayconnect: *mut nsIAtom;
+            #[link_name = "\x01?onvrdisplaydeactivate@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_onvrdisplaydeactivate: *mut nsIAtom;
             #[link_name = "\x01?onvrdisplaydisconnect@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_onvrdisplaydisconnect: *mut nsIAtom;
             #[link_name = "\x01?onvrdisplaypresentchange@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -14024,6 +14048,8 @@ cfg_if! {
             pub static nsGkAtoms_restylableAnonymousNode: *mut nsIAtom;
             #[link_name = "\x01?paintRequestTime@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_paintRequestTime: *mut nsIAtom;
+            #[link_name = "\x01?pseudoProperty@nsGkAtoms@@2PAVnsIAtom@@A"]
+            pub static nsGkAtoms_pseudoProperty: *mut nsIAtom;
             #[link_name = "\x01?Japanese@nsGkAtoms@@2PAVnsIAtom@@A"]
             pub static nsGkAtoms_Japanese: *mut nsIAtom;
             #[link_name = "\x01?Chinese@nsGkAtoms@@2PAVnsIAtom@@A"]
@@ -14658,8 +14684,6 @@ cfg_if! {
             pub static nsCSSAnonBoxes_mozLineFrame: *mut nsICSSAnonBoxPseudo;
             #[link_name = "\x01?buttonContent@nsCSSAnonBoxes@@2PAVnsICSSAnonBoxPseudo@@A"]
             pub static nsCSSAnonBoxes_buttonContent: *mut nsICSSAnonBoxPseudo;
-            #[link_name = "\x01?mozButtonLabel@nsCSSAnonBoxes@@2PAVnsICSSAnonBoxPseudo@@A"]
-            pub static nsCSSAnonBoxes_mozButtonLabel: *mut nsICSSAnonBoxPseudo;
             #[link_name = "\x01?cellContent@nsCSSAnonBoxes@@2PAVnsICSSAnonBoxPseudo@@A"]
             pub static nsCSSAnonBoxes_cellContent: *mut nsICSSAnonBoxPseudo;
             #[link_name = "\x01?dropDownList@nsCSSAnonBoxes@@2PAVnsICSSAnonBoxPseudo@@A"]
@@ -15490,6 +15514,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_focus as *mut _) } };
 ("focused") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_focused as *mut _) } };
+("followanchor") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_followanchor as *mut _) } };
 ("following") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_following as *mut _) } };
 ("following-sibling") =>
@@ -16086,6 +16112,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onafterscriptexecute as *mut _) } };
 ("onalerting") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onalerting as *mut _) } };
+("onanimationcancel") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onanimationcancel as *mut _) } };
 ("onanimationend") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onanimationend as *mut _) } };
 ("onanimationiteration") =>
@@ -16600,8 +16628,12 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onvoicechange as *mut _) } };
 ("onvoiceschanged") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onvoiceschanged as *mut _) } };
+("onvrdisplayactivate") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onvrdisplayactivate as *mut _) } };
 ("onvrdisplayconnect") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onvrdisplayconnect as *mut _) } };
+("onvrdisplaydeactivate") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onvrdisplaydeactivate as *mut _) } };
 ("onvrdisplaydisconnect") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_onvrdisplaydisconnect as *mut _) } };
 ("onvrdisplaypresentchange") =>
@@ -18940,6 +18972,8 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_restylableAnonymousNode as *mut _) } };
 ("PaintRequestTime") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_paintRequestTime as *mut _) } };
+("PseudoProperty") =>
+  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_pseudoProperty as *mut _) } };
 ("ja") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsGkAtoms_Japanese as *mut _) } };
 ("zh-CN") =>
@@ -19574,8 +19608,6 @@ macro_rules! atom {
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsCSSAnonBoxes_mozLineFrame as *mut _) } };
 (":-moz-button-content") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsCSSAnonBoxes_buttonContent as *mut _) } };
-(":-moz-buttonlabel") =>
-  { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsCSSAnonBoxes_mozButtonLabel as *mut _) } };
 (":-moz-cell-content") =>
   { unsafe { $crate::string_cache::atom_macro::atom_from_static($crate::string_cache::atom_macro::nsCSSAnonBoxes_cellContent as *mut _) } };
 (":-moz-dropdown-list") =>

@@ -4513,6 +4513,15 @@ void HTMLMediaElement::UnbindFromTree(bool aDeep,
   RunInStableState(task);
 }
 
+static bool
+IsVP9InMP4(const MediaContainerType& aContainerType)
+{
+  const MediaContainerType mimeType(aContainerType.Type());
+  return DecoderTraits::IsMP4SupportedType(mimeType,
+                                           /* DecoderDoctorDiagnostics* */ nullptr)
+         && IsVP9CodecString(aContainerType.ExtendedType().Codecs().AsString());
+}
+
 /* static */
 CanPlayStatus
 HTMLMediaElement::GetCanPlay(const nsAString& aType,
@@ -4522,7 +4531,16 @@ HTMLMediaElement::GetCanPlay(const nsAString& aType,
   if (!containerType) {
     return CANPLAY_NO;
   }
-  return DecoderTraits::CanHandleContainerType(*containerType, aDiagnostics);
+  CanPlayStatus status = DecoderTraits::CanHandleContainerType(*containerType, aDiagnostics);
+  if (status == CANPLAY_YES && IsVP9InMP4(*containerType)) {
+    // We don't have a demuxer that can handle VP9 in non-fragmented MP4.
+    // So special-case VP9 in MP4 here, as we assume canPlayType() implies
+    // non-fragmented MP4 anyway. Note we report that we can play VP9
+    // in MP4 in MediaSource.isTypeSupported(), as the fragmented MP4
+    // demuxer can handle VP9 in fragmented MP4.
+    return CANPLAY_NO;
+  }
+  return status;
 }
 
 NS_IMETHODIMP
@@ -5589,6 +5607,14 @@ HTMLMediaElement::UpdateReadyStateInternal()
 
   if (nextFrameStatus == NEXT_FRAME_UNAVAILABLE_BUFFERING) {
     // Force HAVE_CURRENT_DATA when buffering.
+    ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA);
+    return;
+  }
+
+  // TextTracks must be loaded for the HAVE_ENOUGH_DATA and
+  // HAVE_FUTURE_DATA.
+  // So force HAVE_CURRENT_DATA if text tracks not loaded.
+  if (mTextTrackManager && !mTextTrackManager->IsLoaded()) {
     ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA);
     return;
   }
@@ -7213,12 +7239,12 @@ HTMLMediaElement::MarkAsContentSource(CallerAPI aAPI)
 
   LOG(LogLevel::Debug,
       ("%p Log VIDEO_AS_CONTENT_SOURCE: visibility = %u, API: '%d' and 'All'",
-       this, isVisible, aAPI));
+       this, isVisible, static_cast<int>(aAPI)));
 
   if (!isVisible) {
     LOG(LogLevel::Debug,
         ("%p Log VIDEO_AS_CONTENT_SOURCE_IN_TREE_OR_NOT: inTree = %u, API: '%d' and 'All'",
-         this, IsInUncomposedDoc(), aAPI));
+         this, IsInUncomposedDoc(), static_cast<int>(aAPI)));
   }
 }
 
@@ -7299,6 +7325,11 @@ HTMLMediaElement::AsyncRejectPendingPlayPromises(nsresult aError)
                        event.forget());
 }
 
+bool HasDebuggerPrivilege(JSContext* aCx, JSObject* aObj)
+{
+  return nsContentUtils::CallerHasPermission(aCx,
+                                             NS_LITERAL_STRING("debugger"));
+ }
 
 } // namespace dom
 } // namespace mozilla

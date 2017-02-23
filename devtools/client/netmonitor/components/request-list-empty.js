@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* globals NetMonitorController */
-
 "use strict";
 
 const {
@@ -14,7 +12,7 @@ const {
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const Actions = require("../actions/index");
 const { ACTIVITY_TYPE } = require("../constants");
-const { L10N } = require("../l10n");
+const { L10N } = require("../utils/l10n");
 
 const { button, div, span } = DOM;
 
@@ -33,15 +31,13 @@ const RequestListEmptyNotice = createClass({
   render() {
     return div(
       {
-        id: "requests-menu-empty-notice",
-        className: "request-list-empty-notice",
+        className: "requests-list-empty-notice",
       },
-      div({ id: "notice-reload-message" },
+      div({ className: "notice-reload-message" },
         span(null, L10N.getStr("netmonitor.reloadNotice1")),
         button(
           {
-            id: "requests-menu-reload-notice-button",
-            className: "devtools-toolbarbutton",
+            className: "devtools-toolbarbutton requests-list-reload-notice-button",
             "data-standalone": true,
             onClick: this.props.onReloadClick,
           },
@@ -49,12 +45,11 @@ const RequestListEmptyNotice = createClass({
         ),
         span(null, L10N.getStr("netmonitor.reloadNotice3"))
       ),
-      div({ id: "notice-perf-message" },
+      div({ className: "notice-perf-message" },
         span(null, L10N.getStr("netmonitor.perfNotice1")),
         button({
-          id: "requests-menu-perf-notice-button",
           title: L10N.getStr("netmonitor.perfNotice3"),
-          className: "devtools-button",
+          className: "devtools-button requests-list-perf-notice-button",
           "data-standalone": true,
           onClick: this.props.onPerfClick,
         }),
@@ -69,6 +64,7 @@ module.exports = connect(
   dispatch => ({
     onPerfClick: () => dispatch(Actions.openStatistics(true)),
     onReloadClick: () =>
-      NetMonitorController.triggerActivity(ACTIVITY_TYPE.RELOAD.WITH_CACHE_DEFAULT),
+      window.NetMonitorController
+        .triggerActivity(ACTIVITY_TYPE.RELOAD.WITH_CACHE_DEFAULT),
   })
 )(RequestListEmptyNotice);

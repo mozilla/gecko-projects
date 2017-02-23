@@ -11,6 +11,7 @@
 #include "FFmpegLibWrapper.h"
 #include "FFmpegAudioDecoder.h"
 #include "FFmpegVideoDecoder.h"
+#include "MediaPrefs.h"
 
 namespace mozilla {
 
@@ -39,11 +40,17 @@ public:
     if (aParams.VideoConfig().HasAlpha()) {
       return nullptr;
     }
-    RefPtr<MediaDataDecoder> decoder =
-      new FFmpegVideoDecoder<V>(mLib,
-                                aParams.mTaskQueue,
-                                aParams.VideoConfig(),
-                                aParams.mImageContainer);
+    if (aParams.mOptions.contains(
+          CreateDecoderParams::Option::LowLatency) &&
+        !MediaPrefs::PDMFFVPXLowLatencyEnabled()) {
+      return nullptr;
+    }
+    RefPtr<MediaDataDecoder> decoder = new FFmpegVideoDecoder<V>(
+      mLib,
+      aParams.mTaskQueue,
+      aParams.VideoConfig(),
+      aParams.mImageContainer,
+      aParams.mOptions.contains(CreateDecoderParams::Option::LowLatency));
     return decoder.forget();
   }
 
@@ -67,18 +74,6 @@ public:
     }
     AVCodecID codec = audioCodec != AV_CODEC_ID_NONE ? audioCodec : videoCodec;
     return !!FFmpegDataDecoder<V>::FindAVCodec(mLib, codec);
-  }
-
-  ConversionRequired
-  DecoderNeedsConversion(const TrackInfo& aConfig) const override
-  {
-    if (aConfig.IsVideo()
-        && (aConfig.mMimeType.EqualsLiteral("video/avc")
-            || aConfig.mMimeType.EqualsLiteral("video/mp4"))) {
-      return ConversionRequired::kNeedAVCC;
-    } else {
-      return ConversionRequired::kNeedNone;
-    }
   }
 
 private:

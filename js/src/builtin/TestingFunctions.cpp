@@ -825,7 +825,7 @@ SelectForGC(JSContext* cx, unsigned argc, Value* vp)
      * start to detect missing pre-barriers. It is invalid for nursery things
      * to be in the set, so evict the nursery before adding items.
      */
-    cx->zone()->group()->evictNursery();
+    cx->runtime()->gc.evictNursery();
 
     for (unsigned i = 0; i < args.length(); i++) {
         if (args[i].isObject()) {
@@ -1303,6 +1303,22 @@ EnsureFlatString(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     args.rval().setString(flat);
+    return true;
+}
+
+static bool
+RepresentativeStringArray(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    RootedObject array(cx, JS_NewArrayObject(cx, 0));
+    if (!array)
+        return false;
+
+    if (!JSString::fillWithRepresentatives(cx, array.as<ArrayObject>()))
+        return false;
+
+    args.rval().setObject(*array);
     return true;
 }
 
@@ -3544,7 +3560,7 @@ minorGC(JSContext* cx, JSGCStatus status, void* data)
     if (info->active) {
         info->active = false;
         if (cx->zone() && !cx->zone()->isAtomsZone())
-            cx->zone()->group()->evictNursery(JS::gcreason::DEBUG_GC);
+            cx->runtime()->gc.evictNursery(JS::gcreason::DEBUG_GC);
         info->active = true;
     }
 }
@@ -4227,6 +4243,32 @@ TimeSinceCreation(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+static bool
+GetErrorNotes(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "getErrorNotes", 1))
+        return false;
+
+    if (!args[0].isObject() || !args[0].toObject().is<ErrorObject>()) {
+        args.rval().setNull();
+        return true;
+    }
+
+    JSErrorReport* report = args[0].toObject().as<ErrorObject>().getErrorReport();
+    if (!report) {
+        args.rval().setNull();
+        return true;
+    }
+
+    RootedObject notesArray(cx, CreateErrorNotesArray(cx, report));
+    if (!notesArray)
+        return false;
+
+    args.rval().setObject(*notesArray);
+    return true;
+}
+
 static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
 "gc([obj] | 'zone' [, 'shrinking'])",
@@ -4310,6 +4352,11 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("ensureFlatString", EnsureFlatString, 1, 0,
 "ensureFlatString(str)",
 "  Ensures str is a flat (null-terminated) string and returns it."),
+
+    JS_FN_HELP("representativeStringArray", RepresentativeStringArray, 0, 0,
+"representativeStringArray()",
+"  Returns an array of strings that represent the various internal string\n"
+"  types and character encodings."),
 
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
     JS_FN_HELP("oomThreadTypes", OOMThreadTypes, 0, 0,
@@ -4788,6 +4835,10 @@ static const JSFunctionSpecWithHelp FuzzingUnsafeTestingFunctions[] = {
 "disRegExp(regexp[, match_only[, input]])",
 "  Dumps RegExp bytecode."),
 #endif
+
+    JS_FN_HELP("getErrorNotes", GetErrorNotes, 1, 0,
+"getErrorNotes(error)",
+"  Returns an array of error notes."),
 
     JS_FS_HELP_END
 };

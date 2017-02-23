@@ -69,7 +69,7 @@ pub struct TableRowFlow {
 }
 
 impl Serialize for TableRowFlow {
-    fn serialize<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.block_flow.serialize(serializer)
     }
 }
@@ -578,8 +578,8 @@ pub struct CollapsedBorder {
 }
 
 impl Serialize for CollapsedBorder {
-    fn serialize<S: Serializer>(&self, _: &mut S) -> Result<(), S::Error> {
-        Ok(())
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_unit()
     }
 }
 
@@ -607,12 +607,7 @@ impl CollapsedBorder {
         CollapsedBorder {
             style: border_top_style::T::none,
             width: Au(0),
-            color: Color::RGBA(RGBA {
-                red: 0.0,
-                green: 0.0,
-                blue: 0.0,
-                alpha: 0.0,
-            }),
+            color: Color::RGBA(RGBA::transparent()),
             provenance: CollapsedBorderProvenance::FromTable,
         }
     }

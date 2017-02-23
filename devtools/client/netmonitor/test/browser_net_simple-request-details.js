@@ -8,14 +8,14 @@
  */
 
 add_task(function* () {
-  let { L10N } = require("devtools/client/netmonitor/l10n");
+  let { L10N } = require("devtools/client/netmonitor/utils/l10n");
 
   let { tab, monitor } = yield initNetMonitor(SIMPLE_SJS);
   info("Starting test... ");
 
   let { document, gStore, windowRequire } = monitor.panelWin;
   let Actions = windowRequire("devtools/client/netmonitor/actions/index");
-  let { EVENTS } = windowRequire("devtools/client/netmonitor/events");
+  let { EVENTS } = windowRequire("devtools/client/netmonitor/constants");
   let {
     getDisplayedRequests,
     getSortedRequests,
@@ -245,27 +245,27 @@ add_task(function* () {
     is(tabEl.getAttribute("selected"), "true",
       "The timings tab in the network details pane should be selected.");
 
-    ok(tabpanel.querySelector("#timings-summary-blocked .requests-menu-timings-total")
+    ok(tabpanel.querySelector("#timings-summary-blocked .requests-list-timings-total")
       .getAttribute("value").match(/[0-9]+/),
       "The blocked timing info does not appear to be correct.");
 
-    ok(tabpanel.querySelector("#timings-summary-dns .requests-menu-timings-total")
+    ok(tabpanel.querySelector("#timings-summary-dns .requests-list-timings-total")
       .getAttribute("value").match(/[0-9]+/),
       "The dns timing info does not appear to be correct.");
 
-    ok(tabpanel.querySelector("#timings-summary-connect .requests-menu-timings-total")
+    ok(tabpanel.querySelector("#timings-summary-connect .requests-list-timings-total")
       .getAttribute("value").match(/[0-9]+/),
       "The connect timing info does not appear to be correct.");
 
-    ok(tabpanel.querySelector("#timings-summary-send .requests-menu-timings-total")
+    ok(tabpanel.querySelector("#timings-summary-send .requests-list-timings-total")
       .getAttribute("value").match(/[0-9]+/),
       "The send timing info does not appear to be correct.");
 
-    ok(tabpanel.querySelector("#timings-summary-wait .requests-menu-timings-total")
+    ok(tabpanel.querySelector("#timings-summary-wait .requests-list-timings-total")
       .getAttribute("value").match(/[0-9]+/),
       "The wait timing info does not appear to be correct.");
 
-    ok(tabpanel.querySelector("#timings-summary-receive .requests-menu-timings-total")
+    ok(tabpanel.querySelector("#timings-summary-receive .requests-list-timings-total")
       .getAttribute("value").match(/[0-9]+/),
       "The receive timing info does not appear to be correct.");
   }

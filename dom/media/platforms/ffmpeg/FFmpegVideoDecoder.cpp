@@ -101,12 +101,13 @@ FFmpegVideoDecoder<LIBAV_VER>::PtsCorrectionContext::Reset()
 
 FFmpegVideoDecoder<LIBAV_VER>::FFmpegVideoDecoder(
   FFmpegLibWrapper* aLib, TaskQueue* aTaskQueue, const VideoInfo& aConfig,
-  ImageContainer* aImageContainer)
+  ImageContainer* aImageContainer, bool aLowLatency)
   : FFmpegDataDecoder(aLib, aTaskQueue, GetCodecId(aConfig.mMimeType))
   , mImageContainer(aImageContainer)
   , mInfo(aConfig)
   , mCodecParser(nullptr)
   , mLastInputDts(INT64_MIN)
+  , mLowLatency(aLowLatency)
 {
   MOZ_COUNT_CTOR(FFmpegVideoDecoder);
   // Use a new MediaByteBuffer as the object will be modified during
@@ -143,11 +144,18 @@ FFmpegVideoDecoder<LIBAV_VER>::InitCodecContext()
     decode_threads = 2;
   }
 
-  decode_threads = std::min(decode_threads, PR_GetNumberOfProcessors() - 1);
-  decode_threads = std::max(decode_threads, 1);
-  mCodecContext->thread_count = decode_threads;
-  if (decode_threads > 1) {
-    mCodecContext->thread_type = FF_THREAD_SLICE | FF_THREAD_FRAME;
+  if (mLowLatency) {
+    mCodecContext->flags |= CODEC_FLAG_LOW_DELAY;
+    // ffvp9 and ffvp8 at this stage do not support slice threading, but it may
+    // help with the h264 decoder if there's ever one.
+    mCodecContext->thread_type = FF_THREAD_SLICE;
+  } else {
+    decode_threads = std::min(decode_threads, PR_GetNumberOfProcessors() - 1);
+    decode_threads = std::max(decode_threads, 1);
+    mCodecContext->thread_count = decode_threads;
+    if (decode_threads > 1) {
+      mCodecContext->thread_type = FF_THREAD_SLICE | FF_THREAD_FRAME;
+    }
   }
 
   // FFmpeg will call back to this to negotiate a video pixel format.
@@ -248,8 +256,8 @@ FFmpegVideoDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample,
     mLib->avcodec_decode_video2(mCodecContext, mFrame, &decoded, &packet);
 
   FFMPEG_LOG("DoDecodeFrame:decode_video: rv=%d decoded=%d "
-             "(Input: pts(%lld) dts(%lld) Output: pts(%lld) "
-             "opaque(%lld) pkt_pts(%lld) pkt_dts(%lld))",
+             "(Input: pts(%" PRId64 ") dts(%" PRId64 ") Output: pts(%" PRId64 ") "
+             "opaque(%" PRId64 ") pkt_pts(%" PRId64 ") pkt_dts(%" PRId64 "))",
              bytesConsumed, decoded, packet.pts, packet.dts, mFrame->pts,
              mFrame->reordered_opaque, mFrame->pkt_pts, mFrame->pkt_dts);
 
@@ -281,7 +289,8 @@ FFmpegVideoDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample,
     mDurationMap.Clear();
   }
   FFMPEG_LOG(
-    "Got one frame output with pts=%lld dts=%lld duration=%lld opaque=%lld",
+    "Got one frame output with pts=%" PRId64 " dts=%" PRId64
+    " duration=%" PRId64 " opaque=%" PRId64,
     pts, mFrame->pkt_dts, duration, mCodecContext->reordered_opaque);
 
   VideoData::YCbCrBuffer b;

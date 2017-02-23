@@ -80,6 +80,12 @@ void ReportOverRecursed(JSContext* cx, unsigned errorNumber);
 /* Thread Local Storage slot for storing the context for a thread. */
 extern MOZ_THREAD_LOCAL(JSContext*) TlsContext;
 
+enum class ContextKind
+{
+    Cooperative,
+    Background
+};
+
 } /* namespace js */
 
 /*
@@ -89,13 +95,14 @@ extern MOZ_THREAD_LOCAL(JSContext*) TlsContext;
 struct JSContext : public JS::RootingContext,
                    public js::MallocProvider<JSContext>
 {
-    explicit JSContext(JSRuntime* runtime, const JS::ContextOptions& options);
+    JSContext(JSRuntime* runtime, const JS::ContextOptions& options);
     ~JSContext();
 
-    bool init();
+    bool init(js::ContextKind kind);
 
   private:
     js::UnprotectedData<JSRuntime*> runtime_;
+    js::WriteOnceData<js::ContextKind> kind_;
 
     // System handle for the thread this context is associated with.
     js::WriteOnceData<size_t> threadNative_;
@@ -112,6 +119,7 @@ struct JSContext : public JS::RootingContext,
     // currently operating on.
     void setRuntime(JSRuntime* rt);
 
+    bool isCooperativelyScheduled() const { return kind_ == js::ContextKind::Cooperative; }
     size_t threadNative() const { return threadNative_; }
 
     inline js::gc::ArenaLists* arenas() const { return arenas_; }
@@ -311,12 +319,12 @@ struct JSContext : public JS::RootingContext,
      * boundary between Result-using and non-Result-using code.
      */
     template <typename V, typename E>
-    bool resultToBool(JS::Result<V, E> result) {
+    bool resultToBool(const JS::Result<V, E>& result) {
         return result.isOk();
     }
 
     template <typename V, typename E>
-    V* resultToPtr(JS::Result<V*, E> result) {
+    V* resultToPtr(const JS::Result<V*, E>& result) {
         return result.isOk() ? result.unwrap() : nullptr;
     }
 
@@ -639,7 +647,7 @@ struct JSContext : public JS::RootingContext,
     const js::AutoCycleDetector::Set& cycleDetectorSet() const { return cycleDetectorSet_.ref(); }
 
     /* Client opaque pointer. */
-    void* data;
+    js::UnprotectedData<void*> data;
 
     void initJitStackLimit();
     void resetJitStackLimit();
@@ -764,7 +772,7 @@ struct JSContext : public JS::RootingContext,
 
     void trace(JSTracer* trc);
 
-    inline js::ZoneGroupCaches& caches();
+    inline js::RuntimeCaches& caches();
 
   private:
     /*
@@ -951,6 +959,15 @@ struct MOZ_RAII AutoResolving {
 extern JSContext*
 NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes, JSRuntime* parentRuntime);
 
+extern JSContext*
+NewCooperativeContext(JSContext* siblingContext);
+
+extern void
+YieldCooperativeContext(JSContext* cx);
+
+extern void
+ResumeCooperativeContext(JSContext* cx);
+
 extern void
 DestroyContext(JSContext* cx);
 
@@ -992,6 +1009,13 @@ ExpandErrorArgumentsVA(JSContext* cx, JSErrorCallback callback,
                        const char16_t** messageArgs,
                        ErrorArgumentsType argumentsType,
                        JSErrorReport* reportp, va_list ap);
+
+extern bool
+ExpandErrorArgumentsVA(JSContext* cx, JSErrorCallback callback,
+                       void* userRef, const unsigned errorNumber,
+                       const char16_t** messageArgs,
+                       ErrorArgumentsType argumentsType,
+                       JSErrorNotes::Note* notep, va_list ap);
 
 /* |callee| requires a usage string provided by JS_DefineFunctionsWithHelp. */
 extern void
@@ -1049,6 +1073,9 @@ ReportValueErrorFlags(JSContext* cx, unsigned flags, const unsigned errorNumber,
 #define ReportValueError3(cx,errorNumber,spindex,v,fallback,arg1,arg2)        \
     ((void)ReportValueErrorFlags(cx, JSREPORT_ERROR, errorNumber,             \
                                     spindex, v, fallback, arg1, arg2))
+
+JSObject*
+CreateErrorNotesArray(JSContext* cx, JSErrorReport* report);
 
 } /* namespace js */
 
@@ -1144,7 +1171,7 @@ class MOZ_RAII AutoLockForExclusiveAccess
 
     void init(JSRuntime* rt) {
         runtime = rt;
-        if (runtime->numExclusiveThreads) {
+        if (runtime->hasHelperThreadZones()) {
             runtime->exclusiveAccessLock.lock();
         } else {
             MOZ_ASSERT(!runtime->activeThreadHasExclusiveAccess);
@@ -1164,7 +1191,7 @@ class MOZ_RAII AutoLockForExclusiveAccess
         init(rt);
     }
     ~AutoLockForExclusiveAccess() {
-        if (runtime->numExclusiveThreads) {
+        if (runtime->hasHelperThreadZones()) {
             runtime->exclusiveAccessLock.unlock();
         } else {
             MOZ_ASSERT(runtime->activeThreadHasExclusiveAccess);

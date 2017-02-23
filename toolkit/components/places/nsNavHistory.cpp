@@ -7,6 +7,8 @@
 #include <stdio.h>
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/SizePrintfMacros.h"
 
 #include "nsNavHistory.h"
 
@@ -15,6 +17,7 @@
 #include "nsAnnotationService.h"
 #include "nsFaviconService.h"
 #include "nsPlacesMacros.h"
+#include "DateTimeFormat.h"
 #include "History.h"
 #include "Helpers.h"
 
@@ -210,7 +213,7 @@ void GetTagsSqlFragment(int64_t aTagsFolder,
            "JOIN moz_bookmarks t_t ON t_t.id = +b_t.parent  "
            "WHERE b_t.fk = ") + aRelation + NS_LITERAL_CSTRING(" "
            "AND t_t.parent = ") +
-           nsPrintfCString("%lld", aTagsFolder) + NS_LITERAL_CSTRING(" "
+           nsPrintfCString("%" PRId64, aTagsFolder) + NS_LITERAL_CSTRING(" "
          ")"));
   }
 
@@ -1553,7 +1556,7 @@ PlacesSQLQueryBuilder::SelectAsURI()
           "LEFT OUTER JOIN moz_favicons f ON h.favicon_id = f.id "
           "WHERE NOT EXISTS ( "
             "SELECT id FROM moz_bookmarks WHERE id = b2.parent AND parent = ") +
-                nsPrintfCString("%lld", history->GetTagsFolder()) +
+                nsPrintfCString("%" PRId64, history->GetTagsFolder()) +
           NS_LITERAL_CSTRING(") "
           "ORDER BY b2.fk DESC, b2.lastModified DESC");
       }
@@ -1574,7 +1577,7 @@ PlacesSQLQueryBuilder::SelectAsURI()
           "WHERE NOT EXISTS "
               "(SELECT id FROM moz_bookmarks "
                 "WHERE id = b.parent AND parent = ") +
-                  nsPrintfCString("%lld", history->GetTagsFolder()) +
+                  nsPrintfCString("%" PRId64, history->GetTagsFolder()) +
               NS_LITERAL_CSTRING(") "
             "{ADDITIONAL_CONDITIONS}");
       }
@@ -1634,7 +1637,7 @@ PlacesSQLQueryBuilder::SelectAsDay()
   // insert position in a result.
   mQueryString = nsPrintfCString(
      "SELECT null, "
-       "'place:type=%ld&sort=%ld&beginTime='||beginTime||'&endTime='||endTime, "
+       "'place:type=%d&sort=%d&beginTime='||beginTime||'&endTime='||endTime, "
       "dayTitle, null, null, beginTime, null, null, null, null, null, null, "
       "null, null, null "
      "FROM (", // TOUTER BEGIN
@@ -1752,12 +1755,11 @@ PlacesSQLQueryBuilder::SelectAsDay()
         PR_NormalizeTime(&tm, PR_GMTParameters);
         // If the container is for a past year, add the year to its title,
         // otherwise just show the month name.
-        // Note that tm_month starts from 0, while we need a 1-based index.
         if (tm.tm_year < currentYear) {
-          history->GetMonthYear(tm.tm_month + 1, tm.tm_year, dateName);
+          nsNavHistory::GetMonthYear(tm, dateName);
         }
         else {
-          history->GetMonthName(tm.tm_month + 1, dateName);
+          nsNavHistory::GetMonthName(tm, dateName);
         }
 
         // From start of MonthIndex + 1 months ago
@@ -1838,7 +1840,7 @@ PlacesSQLQueryBuilder::SelectAsSite()
   }
 
   mQueryString = nsPrintfCString(
-    "SELECT null, 'place:type=%ld&sort=%ld&domain=&domainIsHost=true'%s, "
+    "SELECT null, 'place:type=%d&sort=%d&domain=&domainIsHost=true'%s, "
            ":localhost, :localhost, null, null, null, null, null, null, null, "
            "null, null, null "
     "WHERE EXISTS ( "
@@ -1853,7 +1855,7 @@ PlacesSQLQueryBuilder::SelectAsSite()
     ") "
     "UNION ALL "
     "SELECT null, "
-           "'place:type=%ld&sort=%ld&domain='||host||'&domainIsHost=true'%s, "
+           "'place:type=%d&sort=%d&domain='||host||'&domainIsHost=true'%s, "
            "host, host, null, null, null, null, null, null, null, "
            "null, null, null "
     "FROM ( "
@@ -1893,11 +1895,11 @@ PlacesSQLQueryBuilder::SelectAsTag()
   mHasDateColumns = true;
 
   mQueryString = nsPrintfCString(
-    "SELECT null, 'place:folder=' || id || '&queryType=%d&type=%ld', "
+    "SELECT null, 'place:folder=' || id || '&queryType=%d&type=%d', "
            "title, null, null, null, null, null, dateAdded, "
            "lastModified, null, null, null, null, null, null "
     "FROM moz_bookmarks "
-    "WHERE parent = %lld",
+    "WHERE parent = %" PRId64,
     nsINavHistoryQueryOptions::QUERY_TYPE_BOOKMARKS,
     nsINavHistoryQueryOptions::RESULTS_AS_TAG_CONTENTS,
     history->GetTagsFolder()
@@ -3356,7 +3358,7 @@ nsNavHistory::QueryToSelectClause(nsNavHistoryQuery* aQuery, // const
 
     clause.Condition("b.parent IN(");
     for (nsTArray<int64_t>::size_type i = 0; i < includeFolders.Length(); ++i) {
-      clause.Str(nsPrintfCString("%lld", includeFolders[i]).get());
+      clause.Str(nsPrintfCString("%" PRId64, includeFolders[i]).get());
       if (i < includeFolders.Length() - 1) {
         clause.Str(",");
       }
@@ -4208,46 +4210,36 @@ nsNavHistory::GetStringFromName(const char16_t *aName, nsACString& aResult)
   CopyUTF16toUTF8(nsDependentString(aName), aResult);
 }
 
+// static
 void
-nsNavHistory::GetMonthName(int32_t aIndex, nsACString& aResult)
+nsNavHistory::GetMonthName(const PRExplodedTime& aTime, nsACString& aResult)
 {
-  nsIStringBundle *bundle = GetDateFormatBundle();
-  if (bundle) {
-    nsCString name = nsPrintfCString("month.%d.name", aIndex);
-    nsXPIDLString value;
-    nsresult rv = bundle->GetStringFromName(NS_ConvertUTF8toUTF16(name).get(),
-                                            getter_Copies(value));
-    if (NS_SUCCEEDED(rv)) {
-      CopyUTF16toUTF8(value, aResult);
-      return;
-    }
+  nsAutoString month;
+  nsresult rv = DateTimeFormat::FormatPRExplodedTime(kDateFormatMonthLong,
+                                                     kTimeFormatNone,
+                                                     &aTime,
+                                                     month);
+  if (NS_FAILED(rv)) {
+    aResult = nsPrintfCString("[%d]", aTime.tm_month + 1);
+    return;
   }
-  aResult = nsPrintfCString("[%d]", aIndex);
+  CopyUTF16toUTF8(month, aResult);
 }
 
+// static
 void
-nsNavHistory::GetMonthYear(int32_t aMonth, int32_t aYear, nsACString& aResult)
+nsNavHistory::GetMonthYear(const PRExplodedTime& aTime, nsACString& aResult)
 {
-  nsIStringBundle *bundle = GetBundle();
-  if (bundle) {
-    nsAutoCString monthName;
-    GetMonthName(aMonth, monthName);
-    nsAutoString yearString;
-    yearString.AppendInt(aYear);
-    const char16_t* strings[2] = {
-      NS_ConvertUTF8toUTF16(monthName).get()
-    , yearString.get()
-    };
-    nsXPIDLString value;
-    if (NS_SUCCEEDED(bundle->FormatStringFromName(
-          u"finduri-MonthYear", strings, 2,
-          getter_Copies(value)
-        ))) {
-      CopyUTF16toUTF8(value, aResult);
-      return;
-    }
+  nsAutoString monthYear;
+  nsresult rv = DateTimeFormat::FormatPRExplodedTime(kDateFormatYearMonthLong,
+                                                     kTimeFormatNone,
+                                                     &aTime,
+                                                     monthYear);
+  if (NS_FAILED(rv)) {
+    aResult = nsPrintfCString("[%d-%d]", aTime.tm_month + 1, aTime.tm_year);
+    return;
   }
-  aResult.AppendLiteral("finduri-MonthYear");
+  CopyUTF16toUTF8(monthYear, aResult);
 }
 
 
@@ -4515,19 +4507,4 @@ nsNavHistory::GetBundle()
     NS_ENSURE_SUCCESS(rv, nullptr);
   }
   return mBundle;
-}
-
-nsIStringBundle *
-nsNavHistory::GetDateFormatBundle()
-{
-  if (!mDateFormatBundle) {
-    nsCOMPtr<nsIStringBundleService> bundleService =
-      services::GetStringBundleService();
-    NS_ENSURE_TRUE(bundleService, nullptr);
-    nsresult rv = bundleService->CreateBundle(
-        "chrome://global/locale/dateFormat.properties",
-        getter_AddRefs(mDateFormatBundle));
-    NS_ENSURE_SUCCESS(rv, nullptr);
-  }
-  return mDateFormatBundle;
 }

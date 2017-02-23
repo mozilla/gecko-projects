@@ -135,7 +135,6 @@ class CompositorD3D11;
 class BasicCompositor;
 class TextureHost;
 class TextureReadLock;
-class WebRenderCompositorOGL;
 
 enum SurfaceInitMode
 {
@@ -474,7 +473,6 @@ public:
   virtual CompositorD3D9* AsCompositorD3D9() { return nullptr; }
   virtual CompositorD3D11* AsCompositorD3D11() { return nullptr; }
   virtual BasicCompositor* AsBasicCompositor() { return nullptr; }
-  virtual WebRenderCompositorOGL* AsWebRenderCompositorOGL() { return nullptr; }
 
   /**
    * Each Compositor has a unique ID.
@@ -542,27 +540,6 @@ public:
   }
   void SetScreenRotation(ScreenRotation aRotation) {
     mScreenRotation = aRotation;
-  }
-
-  TimeStamp GetCompositionTime() const {
-    return mCompositionTime;
-  }
-  void SetCompositionTime(TimeStamp aTimeStamp) {
-    mCompositionTime = aTimeStamp;
-    if (!mCompositionTime.IsNull() && !mCompositeUntilTime.IsNull() &&
-        mCompositionTime >= mCompositeUntilTime) {
-      mCompositeUntilTime = TimeStamp();
-    }
-  }
-
-  virtual void CompositeUntil(TimeStamp aTimeStamp) {
-    if (mCompositeUntilTime.IsNull() ||
-        mCompositeUntilTime < aTimeStamp) {
-      mCompositeUntilTime = aTimeStamp;
-    }
-  }
-  TimeStamp GetCompositeUntilTime() const {
-    return mCompositeUntilTime;
   }
 
   // A stale Compositor has no CompositorBridgeParent; it will not process
@@ -653,17 +630,6 @@ protected:
    * Last Composition end time.
    */
   TimeStamp mLastCompositionEndTime;
-
-  /**
-   * Render time for the current composition.
-   */
-  TimeStamp mCompositionTime;
-  /**
-   * When nonnull, during rendering, some compositable indicated that it will
-   * change its rendering at this time. In order not to miss it, we composite
-   * on every vsync until this time occurs (this is the latest such time).
-   */
-  TimeStamp mCompositeUntilTime;
 
   uint32_t mCompositorID;
   DiagnosticTypes mDiagnosticTypes;

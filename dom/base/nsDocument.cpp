@@ -1358,7 +1358,6 @@ nsIDocument::nsIDocument()
     mPresShell(nullptr),
     mSubtreeModifiedDepth(0),
     mEventsSuppressed(0),
-    mAnimationsPaused(0),
     mExternalScriptsBeingEvaluated(0),
     mFrameRequestCallbackCounter(0),
     mStaticCloneCount(0),
@@ -1474,9 +1473,9 @@ nsIDocument::~nsIDocument()
 }
 
 bool
-nsDocument::IsAboutPage()
+nsDocument::IsAboutPage() const
 {
-  nsCOMPtr<nsIPrincipal> principal = GetPrincipal();
+  nsCOMPtr<nsIPrincipal> principal = NodePrincipal();
   nsCOMPtr<nsIURI> uri;
   principal->GetURI(getter_AddRefs(uri));
   bool isAboutScheme = true;
@@ -2287,13 +2286,9 @@ nsDocument::ResetStylesheetsToURI(nsIURI* aURI)
     RemoveStyleSheetsFromStyleSets(mAdditionalSheets[eUserSheet], SheetType::User);
     RemoveStyleSheetsFromStyleSets(mAdditionalSheets[eAuthorSheet], SheetType::Doc);
 
-    if (GetStyleBackendType() == StyleBackendType::Gecko) {
-      nsStyleSheetService *sheetService = nsStyleSheetService::GetInstance();
-      if (sheetService) {
-        RemoveStyleSheetsFromStyleSets(*sheetService->AuthorStyleSheets(), SheetType::Doc);
-      }
-    } else {
-      NS_ERROR("stylo: nsStyleSheetService doesn't handle ServoStyleSheets yet");
+    if (nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance()) {
+      RemoveStyleSheetsFromStyleSets(
+        *sheetService->AuthorStyleSheets(GetStyleBackendType()), SheetType::Doc);
     }
 
     mStyleSetFilled = false;
@@ -2360,23 +2355,19 @@ nsDocument::FillStyleSet(StyleSetHandle aStyleSet)
     }
   }
 
-  if (aStyleSet->IsGecko()) {
-    nsStyleSheetService *sheetService = nsStyleSheetService::GetInstance();
-    if (sheetService) {
-      for (StyleSheet* sheet : *sheetService->AuthorStyleSheets()) {
-        aStyleSet->AppendStyleSheet(SheetType::Doc, sheet);
-      }
+  if (nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance()) {
+    nsTArray<RefPtr<StyleSheet>>& sheets =
+      *sheetService->AuthorStyleSheets(aStyleSet->BackendType());
+    for (StyleSheet* sheet : sheets) {
+      aStyleSet->AppendStyleSheet(SheetType::Doc, sheet);
     }
+  }
 
-    // Iterate backwards to maintain order
-    for (StyleSheet* sheet : Reversed(mOnDemandBuiltInUASheets)) {
-      if (sheet->IsApplicable()) {
-        aStyleSet->PrependStyleSheet(SheetType::Agent, sheet);
-      }
+  // Iterate backwards to maintain order
+  for (StyleSheet* sheet : Reversed(mOnDemandBuiltInUASheets)) {
+    if (sheet->IsApplicable()) {
+      aStyleSet->PrependStyleSheet(SheetType::Agent, sheet);
     }
-  } else {
-    NS_WARNING("stylo: Not yet checking nsStyleSheetService for Servo-backed "
-               "documents. See bug 1290224");
   }
 
   AppendSheetsToStyleSet(aStyleSet, mAdditionalSheets[eAgentSheet],
@@ -3882,7 +3873,7 @@ void
 nsDocument::DeleteShell()
 {
   mExternalResourceMap.HideViewers();
-  if (IsEventHandlingEnabled() && !AnimationsPaused()) {
+  if (IsEventHandlingEnabled()) {
     RevokeAnimationFrameNotifications();
   }
   if (nsPresContext* presContext = mPresShell->GetPresContext()) {
@@ -4664,7 +4655,7 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
     // our layout history state now.
     mLayoutHistoryState = GetLayoutHistoryState();
 
-    if (mPresShell && !EventHandlingSuppressed() && !AnimationsPaused()) {
+    if (mPresShell && !EventHandlingSuppressed()) {
       RevokeAnimationFrameNotifications();
     }
 
@@ -5659,7 +5650,9 @@ nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
                             nsIDOMElement** aReturn)
 {
   *aReturn = nullptr;
-  ElementCreationOptions options;
+  ElementCreationOptionsOrString options;
+
+  options.SetAsString();
   ErrorResult rv;
   nsCOMPtr<Element> element =
     CreateElementNS(aNamespaceURI, aQualifiedName, options, rv);
@@ -5670,7 +5663,7 @@ nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
 already_AddRefed<Element>
 nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
                             const nsAString& aQualifiedName,
-                            const ElementCreationOptions& aOptions,
+                            const ElementCreationOptionsOrString& aOptions,
                             ErrorResult& rv)
 {
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
@@ -5683,11 +5676,14 @@ nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
     return nullptr;
   }
 
-  // Throw NotFoundError if 'is' is not-null and definition is null
-  const nsString* is = CheckCustomElementName(
-    aOptions, aQualifiedName, nodeInfo->NamespaceID(), rv);
-  if (rv.Failed()) {
-    return nullptr;
+  const nsString* is = nullptr;
+  if (aOptions.IsElementCreationOptions()) {
+    // Throw NotFoundError if 'is' is not-null and definition is null
+    is = CheckCustomElementName(aOptions.GetAsElementCreationOptions(),
+                                aQualifiedName, nodeInfo->NamespaceID(), rv);
+    if (rv.Failed()) {
+      return nullptr;
+    }
   }
 
   nsCOMPtr<Element> element;
@@ -7962,13 +7958,8 @@ nsDocument::FlushPendingNotifications(FlushType aType)
     mParentDocument->FlushPendingNotifications(parentType);
   }
 
-  // Call nsIPresShell::NeedFlush (inline, non-virtual) to check whether we
-  // really need to flush the shell (virtual, and needs a strong reference).
   if (nsIPresShell* shell = GetShell()) {
-    if (shell->NeedFlush(aType)) {
-      nsCOMPtr<nsIPresShell> presShell = shell;
-      presShell->FlushPendingNotifications(aType);
-    }
+    shell->FlushPendingNotifications(aType);
   }
 }
 
@@ -9333,44 +9324,28 @@ nsIDocument::GetReadyState(nsAString& aReadyState) const
   }
 }
 
-namespace {
-
-struct SuppressArgs
-{
-  nsIDocument::SuppressionType mWhat;
-  uint32_t mIncrease;
-};
-
-} // namespace
-
 static bool
 SuppressEventHandlingInDocument(nsIDocument* aDocument, void* aData)
 {
-  SuppressArgs* args = static_cast<SuppressArgs*>(aData);
-  aDocument->SuppressEventHandling(args->mWhat, args->mIncrease);
+  aDocument->SuppressEventHandling(*static_cast<uint32_t*>(aData));
+
   return true;
 }
 
 void
-nsDocument::SuppressEventHandling(nsIDocument::SuppressionType aWhat,
-                                  uint32_t aIncrease)
+nsDocument::SuppressEventHandling(uint32_t aIncrease)
 {
-  if (mEventsSuppressed == 0 && mAnimationsPaused == 0 &&
-      aIncrease != 0 && mPresShell && mScriptGlobalObject) {
+  if (mEventsSuppressed == 0 && aIncrease != 0 && mPresShell &&
+      mScriptGlobalObject) {
     RevokeAnimationFrameNotifications();
   }
 
-  if (aWhat == eAnimationsOnly) {
-    mAnimationsPaused += aIncrease;
-  } else {
-    mEventsSuppressed += aIncrease;
-    for (uint32_t i = 0; i < aIncrease; ++i) {
-      ScriptLoader()->AddExecuteBlocker();
-    }
+  mEventsSuppressed += aIncrease;
+  for (uint32_t i = 0; i < aIncrease; ++i) {
+    ScriptLoader()->AddExecuteBlocker();
   }
 
-  SuppressArgs args = { aWhat, aIncrease };
-  EnumerateSubDocuments(SuppressEventHandlingInDocument, &args);
+  EnumerateSubDocuments(SuppressEventHandlingInDocument, &aIncrease);
 }
 
 static void
@@ -9672,62 +9647,35 @@ private:
   nsTArray<nsCOMPtr<nsIDocument> > mDocuments;
 };
 
-namespace {
-
-struct UnsuppressArgs
-{
-  explicit UnsuppressArgs(nsIDocument::SuppressionType aWhat)
-    : mWhat(aWhat)
-  {
-  }
-
-  nsIDocument::SuppressionType mWhat;
-  nsTArray<nsCOMPtr<nsIDocument>> mDocs;
-};
-
-} // namespace
-
 static bool
 GetAndUnsuppressSubDocuments(nsIDocument* aDocument,
                              void* aData)
 {
-  UnsuppressArgs* args = static_cast<UnsuppressArgs*>(aData);
-  if (args->mWhat != nsIDocument::eAnimationsOnly &&
-      aDocument->EventHandlingSuppressed() > 0) {
+  if (aDocument->EventHandlingSuppressed() > 0) {
     static_cast<nsDocument*>(aDocument)->DecreaseEventSuppression();
     aDocument->ScriptLoader()->RemoveExecuteBlocker();
-  } else if (args->mWhat == nsIDocument::eAnimationsOnly &&
-             aDocument->AnimationsPaused()) {
-    static_cast<nsDocument*>(aDocument)->ResumeAnimations();
   }
 
-  if (args->mWhat != nsIDocument::eAnimationsOnly) {
-    // No need to remember documents if we only care about animation frames.
-    args->mDocs.AppendElement(aDocument);
-  }
+  nsTArray<nsCOMPtr<nsIDocument> >* docs =
+    static_cast<nsTArray<nsCOMPtr<nsIDocument> >* >(aData);
 
+  docs->AppendElement(aDocument);
   aDocument->EnumerateSubDocuments(GetAndUnsuppressSubDocuments, aData);
   return true;
 }
 
 void
-nsDocument::UnsuppressEventHandlingAndFireEvents(nsIDocument::SuppressionType aWhat,
-                                                 bool aFireEvents)
+nsDocument::UnsuppressEventHandlingAndFireEvents(bool aFireEvents)
 {
-  UnsuppressArgs args(aWhat);
-  GetAndUnsuppressSubDocuments(this, &args);
-
-  if (aWhat == nsIDocument::eAnimationsOnly) {
-    // No need to fire events if we only care about animations here.
-    return;
-  }
+  nsTArray<nsCOMPtr<nsIDocument>> documents;
+  GetAndUnsuppressSubDocuments(this, &documents);
 
   if (aFireEvents) {
     MOZ_RELEASE_ASSERT(NS_IsMainThread());
-    nsCOMPtr<nsIRunnable> ded = new nsDelayedEventDispatcher(args.mDocs);
+    nsCOMPtr<nsIRunnable> ded = new nsDelayedEventDispatcher(documents);
     Dispatch("nsDelayedEventDispatcher", TaskCategory::Other, ded.forget());
   } else {
-    FireOrClearDelayedEvents(args.mDocs, false);
+    FireOrClearDelayedEvents(documents, false);
   }
 }
 
@@ -10052,8 +10000,7 @@ nsIDocument::ScheduleFrameRequestCallback(FrameRequestCallback& aCallback,
   DebugOnly<FrameRequest*> request =
     mFrameRequestCallbacks.AppendElement(FrameRequest(aCallback, newHandle));
   NS_ASSERTION(request, "This is supposed to be infallible!");
-  if (!alreadyRegistered && mPresShell && IsEventHandlingEnabled() &&
-      !AnimationsPaused()) {
+  if (!alreadyRegistered && mPresShell && IsEventHandlingEnabled()) {
     mPresShell->GetPresContext()->RefreshDriver()->
       ScheduleFrameRequestCallbacks(this);
   }
@@ -10201,7 +10148,13 @@ nsIDocument::WarnOnceAbout(DeprecatedOperations aOperation,
     return;
   }
   mDeprecationWarnedAbout[aOperation] = true;
-  const_cast<nsIDocument*>(this)->SetDocumentAndPageUseCounter(OperationToUseCounter(aOperation));
+  // Don't count deprecated operations for about pages since those pages
+  // are almost in our control, and we always need to remove uses there
+  // before we remove the operation itself anyway.
+  if (!static_cast<const nsDocument*>(this)->IsAboutPage()) {
+    const_cast<nsIDocument*>(this)->
+      SetDocumentAndPageUseCounter(OperationToUseCounter(aOperation));
+  }
   uint32_t flags = asError ? nsIScriptError::errorFlag
                            : nsIScriptError::warningFlag;
   nsContentUtils::ReportToConsole(flags,
@@ -12552,8 +12505,8 @@ nsDocument::ReportUseCounters(UseCounterReportKind aKind)
          c < eUseCounter_Count; ++c) {
       UseCounter uc = static_cast<UseCounter>(c);
 
-      Telemetry::ID id =
-        static_cast<Telemetry::ID>(Telemetry::HistogramFirstUseCounter + uc * 2);
+      Telemetry::HistogramID id =
+        static_cast<Telemetry::HistogramID>(Telemetry::HistogramFirstUseCounter + uc * 2);
       bool value = GetUseCounter(uc);
 
       if (value) {
@@ -12571,8 +12524,8 @@ nsDocument::ReportUseCounters(UseCounterReportKind aKind)
       }
 
       if (IsTopLevelContentDocument()) {
-        id = static_cast<Telemetry::ID>(Telemetry::HistogramFirstUseCounter +
-                                        uc * 2 + 1);
+        id = static_cast<Telemetry::HistogramID>(Telemetry::HistogramFirstUseCounter +
+                                                 uc * 2 + 1);
         value = GetUseCounter(uc) || GetChildDocumentUseCounter(uc);
 
         if (value) {
@@ -12610,6 +12563,10 @@ nsDocument::RemoveIntersectionObserver(DOMIntersectionObserver* aObserver)
 void
 nsDocument::UpdateIntersectionObservations()
 {
+  if (mIntersectionObservers.IsEmpty()) {
+    return;
+  }
+
   DOMHighResTimeStamp time = 0;
   if (nsPIDOMWindowInner* window = GetInnerWindow()) {
     Performance* perf = window->GetPerformance();

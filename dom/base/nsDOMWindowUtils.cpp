@@ -1631,16 +1631,6 @@ nsDOMWindowUtils::GetIsMozAfterPaintPending(bool *aResult)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::ClearMozAfterPaintEvents()
-{
-  nsPresContext* presContext = GetPresContext();
-  if (!presContext)
-    return NS_OK;
-  presContext->ClearMozAfterPaintEvents();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDOMWindowUtils::DisableNonTestMouseEvents(bool aDisable)
 {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
@@ -1660,9 +1650,9 @@ nsDOMWindowUtils::SuppressEventHandling(bool aSuppress)
   NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
 
   if (aSuppress) {
-    doc->SuppressEventHandling(nsIDocument::eEvents);
+    doc->SuppressEventHandling();
   } else {
-    doc->UnsuppressEventHandlingAndFireEvents(nsIDocument::eEvents, true);
+    doc->UnsuppressEventHandlingAndFireEvents(true);
   }
 
   return NS_OK;
@@ -3707,10 +3697,8 @@ nsDOMWindowUtils::GetOMTAStyle(nsIDOMElement* aElement,
     cssValue->GetCssText(text, rv);
     aResult.Assign(text);
     return rv.StealNSResult();
-  } else {
-    aResult.Truncate();
   }
-
+  aResult.Truncate();
   return NS_OK;
 }
 

@@ -6,6 +6,8 @@
 
 /* parsing of CSS stylesheets, based on a token stream from the CSS scanner */
 
+#include "nsCSSParser.h"
+
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
@@ -16,7 +18,6 @@
 #include <algorithm> // for std::stable_sort
 #include <limits> // for std::numeric_limits
 
-#include "nsCSSParser.h"
 #include "nsAlgorithm.h"
 #include "nsCSSProps.h"
 #include "nsCSSKeywords.h"
@@ -1180,10 +1181,10 @@ protected:
   // Parse a <number> color component. The range of color component is [0, 255].
   // If |aSeparator| is provided, this function will also attempt to parse that
   // character after parsing the color component.
-  bool ParseColorComponent(uint8_t& aComponent, Maybe<char> aSeparator);
+  bool ParseColorComponent(uint8_t& aComponent, const Maybe<char>& aSeparator);
   // Similar to the previous one, but parse a <percentage> color component.
   // The range of color component is [0.0f, 1.0f].
-  bool ParseColorComponent(float& aComponent, Maybe<char> aSeparator);
+  bool ParseColorComponent(float& aComponent, const Maybe<char>& aSeparator);
 
   // Parse a <hue> component.
   //   <hue> = <number> | <angle>
@@ -1677,7 +1678,6 @@ void
 CSSParserImpl::ReleaseScanner()
 {
   mScanner = nullptr;
-  mIsSVGMode = false;
   mReporter = nullptr;
   mBaseURI = nullptr;
   mSheetURI = nullptr;
@@ -6861,7 +6861,7 @@ CSSParserImpl::ParseColor(nsCSSValue& aValue)
 }
 
 bool
-CSSParserImpl::ParseColorComponent(uint8_t& aComponent, Maybe<char> aSeparator)
+CSSParserImpl::ParseColorComponent(uint8_t& aComponent, const Maybe<char>& aSeparator)
 {
   if (!GetToken(true)) {
     REPORT_UNEXPECTED_EOF(PEColorComponentEOF);
@@ -6889,7 +6889,7 @@ CSSParserImpl::ParseColorComponent(uint8_t& aComponent, Maybe<char> aSeparator)
 }
 
 bool
-CSSParserImpl::ParseColorComponent(float& aComponent, Maybe<char> aSeparator)
+CSSParserImpl::ParseColorComponent(float& aComponent, const Maybe<char>& aSeparator)
 {
   if (!GetToken(true)) {
     REPORT_UNEXPECTED_EOF(PEColorComponentEOF);
@@ -6936,7 +6936,12 @@ CSSParserImpl::ParseHue(float& aAngle)
   // The '0' value is handled by <number> parsing, so use VARIANT_ANGLE flag
   // instead of VARIANT_ANGLE_OR_ZERO.
   if (ParseSingleTokenVariant(angleValue, VARIANT_ANGLE, nullptr)) {
+    // Convert double value of GetAngleValueInDegrees() to float.
     aAngle = angleValue.GetAngleValueInDegrees();
+    // And then clamp it as finite values in float.
+    aAngle = mozilla::clamped(aAngle,
+                              -std::numeric_limits<float>::max(),
+                               std::numeric_limits<float>::max());
     return true;
   }
 

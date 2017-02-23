@@ -84,8 +84,8 @@ enum class StyleClear : uint8_t {
   Max = 13  // Max = (Both | Line)
 };
 
-// Define geometry box for clip-path's reference-box, background-clip,
-// background-origin, mask-clip and mask-origin.
+// Define geometry box for clip-path's reference-box, shape-outside's shape
+// box, background-clip, background-origin, mask-clip and mask-origin.
 enum class StyleGeometryBox : uint8_t {
   Content,
   Padding,
@@ -142,15 +142,6 @@ enum class StyleHyphens : uint8_t {
   None,
   Manual,
   Auto,
-};
-
-// shape-box for shape-outside
-enum class StyleShapeOutsideShapeBox : uint8_t {
-  NoBox,
-  Content,
-  Padding,
-  Border,
-  Margin
 };
 
 // <shape-radius> for <basic-shape>
@@ -682,8 +673,10 @@ enum class StyleDisplay : uint8_t {
 
 // CSS Grid <track-breadth> keywords
 // Should not overlap with NS_STYLE_GRID_TEMPLATE_SUBGRID
-#define NS_STYLE_GRID_TRACK_BREADTH_MAX_CONTENT 1
-#define NS_STYLE_GRID_TRACK_BREADTH_MIN_CONTENT 2
+enum class StyleGridTrackBreadth : uint8_t {
+  MaxContent = 1,
+  MinContent = 2,
+};
 
 // CSS Grid keywords for <auto-repeat>
 #define NS_STYLE_GRID_REPEAT_AUTO_FILL          0

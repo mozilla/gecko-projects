@@ -17,7 +17,6 @@ namespace layers {
 
 WebRenderBridgeChild::WebRenderBridgeChild(const wr::PipelineId& aPipelineId)
   : mIsInTransaction(false)
-  , mSyncTransaction(false)
   , mIPCOpen(false)
   , mDestroyed(false)
 {
@@ -49,18 +48,21 @@ WebRenderBridgeChild::AddWebRenderCommand(const WebRenderCommand& aCmd)
   mCommands.AppendElement(aCmd);
 }
 
+void
+WebRenderBridgeChild::AddWebRenderCommands(const nsTArray<WebRenderCommand>& aCommands)
+{
+  MOZ_ASSERT(mIsInTransaction);
+  mCommands.AppendElements(aCommands);
+}
+
 bool
 WebRenderBridgeChild::DPBegin(const gfx::IntSize& aSize)
 {
   MOZ_ASSERT(!mDestroyed);
   MOZ_ASSERT(!mIsInTransaction);
-  bool success = false;
-  UpdateFwdTransactionId();
-  this->SendDPBegin(aSize, &success);
-  if (!success) {
-    return false;
-  }
 
+  UpdateFwdTransactionId();
+  this->SendDPBegin(aSize);
   mIsInTransaction = true;
   return true;
 }
@@ -79,7 +81,6 @@ WebRenderBridgeChild::DPEnd(bool aIsSync, uint64_t aTransactionId)
   mCommands.Clear();
   mDestroyedActors.Clear();
   mIsInTransaction = false;
-  mSyncTransaction = false;
 }
 
 uint64_t
@@ -176,16 +177,13 @@ WebRenderBridgeChild::UpdateTextureRegion(CompositableClient* aCompositable,
 }
 
 bool
-WebRenderBridgeChild::AddOpDestroy(const OpDestroy& aOp, bool aSynchronously)
+WebRenderBridgeChild::AddOpDestroy(const OpDestroy& aOp)
 {
   if (!mIsInTransaction) {
     return false;
   }
 
   mDestroyedActors.AppendElement(aOp);
-  if (aSynchronously) {
-    MarkSyncTransaction();
-  }
   return true;
 }
 
@@ -199,15 +197,15 @@ WebRenderBridgeChild::ReleaseCompositable(const CompositableHandle& aHandle)
 }
 
 bool
-WebRenderBridgeChild::DestroyInTransaction(PTextureChild* aTexture, bool aSynchronously)
+WebRenderBridgeChild::DestroyInTransaction(PTextureChild* aTexture)
 {
-  return AddOpDestroy(OpDestroy(aTexture), aSynchronously);
+  return AddOpDestroy(OpDestroy(aTexture));
 }
 
 bool
 WebRenderBridgeChild::DestroyInTransaction(const CompositableHandle& aHandle)
 {
-  return AddOpDestroy(OpDestroy(aHandle), false);
+  return AddOpDestroy(OpDestroy(aHandle));
 }
 
 void
@@ -227,9 +225,6 @@ WebRenderBridgeChild::RemoveTextureFromCompositable(CompositableClient* aComposi
     CompositableOperation(
       aCompositable->GetIPCHandle(),
       OpRemoveTexture(nullptr, aTexture->GetIPDLActor())));
-  if (aTexture->GetFlags() & TextureFlags::DEALLOCATE_CLIENT) {
-    MarkSyncTransaction();
-  }
 }
 
 void
@@ -254,15 +249,6 @@ WebRenderBridgeChild::UseTextures(CompositableClient* aCompositable,
                                         readLock,
                                         t.mTimeStamp, t.mPictureRect,
                                         t.mFrameID, t.mProducerID));
-    if ((t.mTextureClient->GetFlags() & TextureFlags::IMMEDIATE_UPLOAD)
-        && t.mTextureClient->HasIntermediateBuffer()) {
-
-      // We use IMMEDIATE_UPLOAD when we want to be sure that the upload cannot
-      // race with updates on the main thread. In this case we want the transaction
-      // to be synchronous.
-
-      MarkSyncTransaction();
-    }
     GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(t.mTextureClient);
   }
   AddWebRenderCommand(CompositableOperation(aCompositable->GetIPCHandle(),

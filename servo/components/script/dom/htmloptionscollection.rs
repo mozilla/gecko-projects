@@ -6,6 +6,7 @@ use dom::bindings::codegen::Bindings::ElementBinding::ElementMethods;
 use dom::bindings::codegen::Bindings::HTMLCollectionBinding::HTMLCollectionMethods;
 use dom::bindings::codegen::Bindings::HTMLOptionsCollectionBinding;
 use dom::bindings::codegen::Bindings::HTMLOptionsCollectionBinding::HTMLOptionsCollectionMethods;
+use dom::bindings::codegen::Bindings::HTMLSelectElementBinding::HTMLSelectElementMethods;
 use dom::bindings::codegen::Bindings::NodeBinding::NodeBinding::NodeMethods;
 use dom::bindings::codegen::UnionTypes::{HTMLOptionElementOrHTMLOptGroupElement, HTMLElementOrLong};
 use dom::bindings::error::{Error, ErrorResult};
@@ -16,6 +17,7 @@ use dom::bindings::str::DOMString;
 use dom::element::Element;
 use dom::htmlcollection::{CollectionFilter, HTMLCollection};
 use dom::htmloptionelement::HTMLOptionElement;
+use dom::htmlselectelement::HTMLSelectElement;
 use dom::node::{document_from_node, Node};
 use dom::window::Window;
 
@@ -25,16 +27,16 @@ pub struct HTMLOptionsCollection {
 }
 
 impl HTMLOptionsCollection {
-    fn new_inherited(root: &Node, filter: Box<CollectionFilter + 'static>) -> HTMLOptionsCollection {
+    fn new_inherited(select: &HTMLSelectElement, filter: Box<CollectionFilter + 'static>) -> HTMLOptionsCollection {
         HTMLOptionsCollection {
-            collection: HTMLCollection::new_inherited(root, filter),
+            collection: HTMLCollection::new_inherited(select.upcast(), filter),
         }
     }
 
-    pub fn new(window: &Window, root: &Node, filter: Box<CollectionFilter + 'static>)
+    pub fn new(window: &Window, select: &HTMLSelectElement, filter: Box<CollectionFilter + 'static>)
         -> Root<HTMLOptionsCollection>
     {
-        reflect_dom_object(box HTMLOptionsCollection::new_inherited(root, filter),
+        reflect_dom_object(box HTMLOptionsCollection::new_inherited(select, filter),
                            window,
                            HTMLOptionsCollectionBinding::Wrap)
     }
@@ -181,5 +183,23 @@ impl HTMLOptionsCollectionMethods for HTMLOptionsCollection {
         if let Some(element) = self.upcast().IndexedGetter(index as u32) {
             element.Remove();
         }
+    }
+
+    // https://html.spec.whatwg.org/multipage/#dom-htmloptionscollection-selectedindex
+    fn SelectedIndex(&self) -> i32 {
+        self.upcast()
+            .root_node()
+            .downcast::<HTMLSelectElement>()
+            .expect("HTMLOptionsCollection not rooted on a HTMLSelectElement")
+            .SelectedIndex()
+    }
+
+    // https://html.spec.whatwg.org/multipage/#dom-htmloptionscollection-selectedindex
+    fn SetSelectedIndex(&self, index: i32) {
+        self.upcast()
+            .root_node()
+            .downcast::<HTMLSelectElement>()
+            .expect("HTMLOptionsCollection not rooted on a HTMLSelectElement")
+            .SetSelectedIndex(index)
     }
 }

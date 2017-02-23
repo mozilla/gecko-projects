@@ -102,6 +102,20 @@ NS_IMPL_ISUPPORTS_INHERITED0(nsWindow, nsBaseWidget)
 #include "mozilla/Services.h"
 #include "nsThreadUtils.h"
 
+static TimeStamp
+GetEventTimeStamp(int64_t aEventTime)
+{
+    // Android's event time is SystemClock.uptimeMillis that is counted in ms
+    // since OS was booted.
+    // (https://developer.android.com/reference/android/os/SystemClock.html)
+    // and this SystemClock.uptimeMillis uses SYSTEM_TIME_MONOTONIC.
+    // Our posix implemententaion of TimeStamp::Now uses SYSTEM_TIME_MONOTONIC
+    //  too. Due to same implementation, we can use this via FromSystemTime.
+    int64_t tick =
+        BaseTimeDurationPlatformUtils::TicksFromMilliseconds(aEventTime);
+    return TimeStamp::FromSystemTime(tick);
+}
+
 // All the toplevel windows that have been created; these are in
 // stacking order, so the window at gTopLevelWindows[0] is the topmost
 // one.
@@ -350,6 +364,7 @@ public:
                      GeckoView::Param aView, jni::Object::Param aCompositor,
                      jni::Object::Param aDispatcher,
                      jni::String::Param aChromeURI,
+                     jni::Object::Param aSettings,
                      int32_t screenId);
 
     // Close and destroy the nsWindow.
@@ -638,7 +653,7 @@ public:
 
         ScreenPoint origin = ScreenPoint(aX, aY);
 
-        ScrollWheelInput input(aTime, TimeStamp::Now(), GetModifiers(aMetaState),
+        ScrollWheelInput input(aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState),
                                ScrollWheelInput::SCROLLMODE_SMOOTH,
                                ScrollWheelInput::SCROLLDELTA_PIXEL,
                                origin,
@@ -757,7 +772,7 @@ public:
 
         ScreenPoint origin = ScreenPoint(aX, aY);
 
-        MouseInput input(mouseType, buttonType, nsIDOMMouseEvent::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, TimeStamp(), GetModifiers(aMetaState));
+        MouseInput input(mouseType, buttonType, nsIDOMMouseEvent::MOZ_SOURCE_MOUSE, ConvertButtons(buttons), origin, aTime, GetEventTimeStamp(aTime), GetModifiers(aMetaState));
 
         ScrollableLayerGuid guid;
         uint64_t blockId;
@@ -828,7 +843,7 @@ public:
                 return false;
         }
 
-        MultiTouchInput input(type, aTime, TimeStamp(), 0);
+        MultiTouchInput input(type, aTime, GetEventTimeStamp(aTime), 0);
         input.modifiers = GetModifiers(aMetaState);
         input.mTouches.SetCapacity(endIndex - startIndex);
 
@@ -941,6 +956,23 @@ nsWindow::NativePtr<nsWindow::NPZCSupport>::sName[] = "NPZCSupport";
 NS_IMPL_ISUPPORTS(nsWindow::AndroidView,
                   nsIAndroidEventDispatcher,
                   nsIAndroidView)
+
+
+nsresult
+nsWindow::AndroidView::GetSettings(JSContext* aCx, JS::MutableHandleValue aOut)
+{
+    if (!mSettings) {
+        aOut.setNull();
+        return NS_OK;
+    }
+
+    JNIEnv* const env = jni::GetGeckoThreadEnv();
+    env->MonitorEnter(mSettings.Get());
+    nsresult rv = widget::EventDispatcher::UnboxBundle(aCx, mSettings, aOut);
+    env->MonitorExit(mSettings.Get());
+
+    return rv;
+}
 
 /**
  * Compositor has some unique requirements for its native calls, so make it
@@ -1357,6 +1389,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
                                  jni::Object::Param aCompositor,
                                  jni::Object::Param aDispatcher,
                                  jni::String::Param aChromeURI,
+                                 jni::Object::Param aSettings,
                                  int32_t aScreenId)
 {
     MOZ_ASSERT(NS_IsMainThread());
@@ -1380,6 +1413,9 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     RefPtr<AndroidView> androidView = new AndroidView();
     androidView->mEventDispatcher->Attach(
             java::EventDispatcher::Ref::From(aDispatcher), nullptr);
+    if (aSettings) {
+        androidView->mSettings = java::GeckoBundle::Ref::From(aSettings);
+    }
 
     nsCOMPtr<mozIDOMWindowProxy> domWindow;
     ww->OpenWindow(nullptr, url, nullptr, "chrome,dialog=0,resizable,scrollbars=yes",
@@ -2530,6 +2566,7 @@ InitKeyEvent(WidgetKeyboardEvent& event,
     event.mLocation =
         WidgetKeyboardEvent::ComputeLocationFromCodeValue(event.mCodeNameIndex);
     event.mTime = time;
+    event.mTimeStamp = GetEventTimeStamp(time);
 }
 
 void

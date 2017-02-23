@@ -244,7 +244,7 @@ public:
 
   SSLServerCertVerificationResult(nsNSSSocketInfo* infoObject,
                                   PRErrorCode errorCode,
-                                  Telemetry::ID telemetryID = Telemetry::HistogramCount,
+                                  Telemetry::HistogramID telemetryID = Telemetry::HistogramCount,
                                   uint32_t telemetryValue = -1,
                                   SSLErrorMessageType errorMessageType =
                                       PlainErrorMessage);
@@ -255,7 +255,7 @@ private:
 public:
   const PRErrorCode mErrorCode;
   const SSLErrorMessageType mErrorMessageType;
-  const Telemetry::ID mTelemetryID;
+  const Telemetry::HistogramID mTelemetryID;
   const uint32_t mTelemetryValue;
 };
 
@@ -524,6 +524,7 @@ CertErrorRunnable::CheckCertOverrides()
   nsrv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
                           uri,
                           mProviderFlags,
+                          mInfoObject->GetOriginAttributes(),
                           nullptr,
                           &strictTransportSecurityEnabled);
   if (NS_FAILED(nsrv)) {
@@ -535,6 +536,7 @@ CertErrorRunnable::CheckCertOverrides()
   nsrv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HPKP,
                           uri,
                           mProviderFlags,
+                          mInfoObject->GetOriginAttributes(),
                           nullptr,
                           &hasPinningInformation);
   if (NS_FAILED(nsrv)) {
@@ -1281,6 +1283,7 @@ GatherTelemetryForSingleSCT(const ct::VerifiedSCT& verifiedSct)
 
 void
 GatherCertificateTransparencyTelemetry(const UniqueCERTCertList& certList,
+                                       bool isEV,
                                        const CertificateTransparencyInfo& info)
 {
   if (!info.enabled) {
@@ -1304,6 +1307,59 @@ GatherCertificateTransparencyTelemetry(const UniqueCERTCertList& certList,
   // Note that sctsCount can also be 0 in case we've received SCT binary data,
   // but it failed to parse (e.g. due to unsupported CT protocol version).
   Telemetry::Accumulate(Telemetry::SSL_SCTS_PER_CONNECTION, sctsCount);
+
+  // Report CT Policy compliance of EV certificates.
+  if (isEV) {
+    uint32_t evCompliance = 0;
+    switch (info.policyCompliance) {
+      case ct::CTPolicyCompliance::Compliant:
+        evCompliance = 1;
+        break;
+      case ct::CTPolicyCompliance::NotEnoughScts:
+        evCompliance = 2;
+        break;
+      case ct::CTPolicyCompliance::NotDiverseScts:
+        evCompliance = 3;
+        break;
+      case ct::CTPolicyCompliance::Unknown:
+      default:
+        MOZ_ASSERT_UNREACHABLE("Unexpected CTPolicyCompliance type");
+    }
+    Telemetry::Accumulate(Telemetry::SSL_CT_POLICY_COMPLIANCE_OF_EV_CERTS,
+                          evCompliance);
+  }
+
+  // Get the root cert.
+  CERTCertListNode* rootNode = CERT_LIST_TAIL(certList);
+  MOZ_ASSERT(rootNode);
+  if (!rootNode) {
+    return;
+  }
+  MOZ_ASSERT(!CERT_LIST_END(rootNode, certList));
+  if (CERT_LIST_END(rootNode, certList)) {
+    return;
+  }
+  CERTCertificate* rootCert = rootNode->cert;
+  MOZ_ASSERT(rootCert);
+  if (!rootCert) {
+    return;
+  }
+
+  // Report CT Policy compliance by CA.
+  switch (info.policyCompliance) {
+    case ct::CTPolicyCompliance::Compliant:
+      AccumulateTelemetryForRootCA(
+        Telemetry::SSL_CT_POLICY_COMPLIANT_CONNECTIONS_BY_CA, rootCert);
+      break;
+    case ct::CTPolicyCompliance::NotEnoughScts:
+    case ct::CTPolicyCompliance::NotDiverseScts:
+      AccumulateTelemetryForRootCA(
+        Telemetry::SSL_CT_POLICY_NON_COMPLIANT_CONNECTIONS_BY_CA, rootCert);
+      break;
+    case ct::CTPolicyCompliance::Unknown:
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unexpected CTPolicyCompliance type");
+  }
 }
 
 // Note: Takes ownership of |peerCertChain| if SECSuccess is not returned.
@@ -1388,6 +1444,7 @@ AuthCertificate(CertVerifier& certVerifier,
                                                                 SECSuccess);
     GatherSuccessfulValidationTelemetry(certList);
     GatherCertificateTransparencyTelemetry(certList,
+                                  /*isEV*/ evOidPolicy != SEC_OID_UNKNOWN,
                                            certificateTransparencyInfo);
 
     // The connection may get terminated, for example, if the server requires
@@ -1503,9 +1560,9 @@ SSLServerCertVerificationJob::Run()
   if (mInfoObject->isAlreadyShutDown()) {
     error = SEC_ERROR_USER_CANCELLED;
   } else {
-    Telemetry::ID successTelemetry
+    Telemetry::HistogramID successTelemetry
       = Telemetry::SSL_SUCCESFUL_CERT_VALIDATION_TIME_MOZILLAPKIX;
-    Telemetry::ID failureTelemetry
+    Telemetry::HistogramID failureTelemetry
       = Telemetry::SSL_INITIAL_FAILED_CERT_VALIDATION_TIME_MOZILLAPKIX;
 
     // Reset the error code here so we can detect if AuthCertificate fails to
@@ -1757,7 +1814,7 @@ AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig, PRBool isServer)
 
 SSLServerCertVerificationResult::SSLServerCertVerificationResult(
         nsNSSSocketInfo* infoObject, PRErrorCode errorCode,
-        Telemetry::ID telemetryID, uint32_t telemetryValue,
+        Telemetry::HistogramID telemetryID, uint32_t telemetryValue,
         SSLErrorMessageType errorMessageType)
   : mInfoObject(infoObject)
   , mErrorCode(errorCode)

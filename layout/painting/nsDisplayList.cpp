@@ -61,6 +61,7 @@
 #include "mozilla/OperatorNewExtensions.h"
 #include "mozilla/PendingAnimationTracker.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StyleAnimationValueInlines.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
@@ -73,7 +74,7 @@
 #include "LayersLogging.h"
 #include "FrameLayerBuilder.h"
 #include "mozilla/EventStateManager.h"
-#include "mozilla/RestyleManager.h"
+#include "mozilla/GeckoRestyleManager.h"
 #include "nsCaret.h"
 #include "nsISelection.h"
 #include "nsDOMTokenList.h"
@@ -81,6 +82,9 @@
 #include "nsCSSProps.h"
 #include "nsPluginFrame.h"
 #include "nsSVGMaskFrame.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
+#include "mozilla/layers/WebRenderDisplayItemLayer.h"
+#include "mozilla/layers/WebRenderMessages.h"
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount().
@@ -764,7 +768,7 @@ nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
   // Otherwise, in RestyleManager we'll notice the discrepancy between the
   // animation generation numbers and update the layer indefinitely.
   uint64_t animationGeneration =
-    RestyleManager::GetAnimationGenerationForFrame(aFrame);
+    GeckoRestyleManager::GetAnimationGenerationForFrame(aFrame);
   aLayer->SetAnimationGeneration(animationGeneration);
 
   EffectCompositor::ClearIsRunningOnCompositor(aFrame, aProperty);
@@ -2256,7 +2260,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
         if (shouldInvalidate) {
           view->GetViewManager()->InvalidateViewNoSuppression(view, rect);
         }
-        presContext->NotifyInvalidation(bounds, 0);
+        presContext->NotifyInvalidation(layerManager->GetLastTransactionId(), bounds);
       }
     } else if (shouldInvalidate) {
       view->GetViewManager()->InvalidateView(view);
@@ -2726,6 +2730,27 @@ nsDisplayItem::GetClippedBounds(nsDisplayListBuilder* aBuilder)
   bool snap;
   nsRect r = GetBounds(aBuilder, &snap);
   return GetClip().ApplyNonRoundedIntersection(r);
+}
+
+already_AddRefed<Layer>
+nsDisplayItem::BuildDisplayItemLayer(nsDisplayListBuilder* aBuilder,
+                                     LayerManager* aManager,
+                                     const ContainerLayerParameters& aContainerParameters)
+{
+  RefPtr<DisplayItemLayer> layer = static_cast<DisplayItemLayer*>
+    (aManager->GetLayerBuilder()->GetLeafLayerFor(aBuilder, this));
+  if (!layer) {
+    layer = aManager->CreateDisplayItemLayer();
+
+    if (!layer) {
+      return nullptr;
+    }
+  }
+
+  layer->SetDisplayItem(this, aBuilder);
+  layer->SetBaseTransform(gfx::Matrix4x4::Translation(aContainerParameters.mOffset.x,
+                                                      aContainerParameters.mOffset.y, 0));
+  return layer.forget();
 }
 
 nsRect
@@ -4321,6 +4346,69 @@ nsDisplayCaret::Paint(nsDisplayListBuilder* aBuilder,
   mCaret->PaintCaret(*aCtx->GetDrawTarget(), mFrame, ToReferenceFrame());
 }
 
+void
+nsDisplayCaret::CreateWebRenderCommands(nsTArray<WebRenderCommand>& aCommands,
+                                        WebRenderDisplayItemLayer* aLayer) {
+  using namespace mozilla::layers;
+  int32_t contentOffset;
+  nsIFrame* frame = mCaret->GetFrame(&contentOffset);
+  if (!frame) {
+    return;
+  }
+  NS_ASSERTION(frame == mFrame, "We're referring different frame");
+
+  int32_t appUnitsPerDevPixel = frame->PresContext()->AppUnitsPerDevPixel();
+
+  nsRect caretRect;
+  nsRect hookRect;
+  mCaret->ComputeCaretRects(frame, contentOffset, &caretRect, &hookRect);
+
+  gfx::Color color = ToDeviceColor(frame->GetCaretColorAt(contentOffset));
+  Rect devCaretRect =
+    NSRectToRect(caretRect + ToReferenceFrame(), appUnitsPerDevPixel);
+  Rect devHookRect =
+    NSRectToRect(hookRect + ToReferenceFrame(), appUnitsPerDevPixel);
+
+  Rect caretTransformedRect = aLayer->RelativeToParent(devCaretRect);
+  Rect hookTransformedRect = aLayer->RelativeToParent(devHookRect);
+
+  IntRect caret = RoundedToInt(caretTransformedRect);
+  IntRect hook = RoundedToInt(hookTransformedRect);
+
+  // Note, WR will pixel snap anything that is layout aligned.
+  aCommands.AppendElement(OpDPPushRect(
+                          wr::ToWrRect(caret),
+                          wr::ToWrRect(caret),
+                          wr::ToWrColor(color)));
+
+  if (!devHookRect.IsEmpty()) {
+    aCommands.AppendElement(OpDPPushRect(
+                            wr::ToWrRect(hook),
+                            wr::ToWrRect(hook),
+                            wr::ToWrColor(color)));
+  }
+}
+
+LayerState
+nsDisplayCaret::GetLayerState(nsDisplayListBuilder* aBuilder,
+                              LayerManager* aManager,
+                              const ContainerLayerParameters& aParameters)
+{
+  if (gfxPrefs::LayersAllowCaretLayers()) {
+    return LAYER_ACTIVE;
+  }
+
+  return LAYER_NONE;
+}
+
+already_AddRefed<Layer>
+nsDisplayCaret::BuildLayer(nsDisplayListBuilder* aBuilder,
+                           LayerManager* aManager,
+                           const ContainerLayerParameters& aContainerParameters)
+{
+  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
+}
+
 nsDisplayBorder::nsDisplayBorder(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
   : nsDisplayItem(aBuilder, aFrame)
 {
@@ -4643,6 +4731,87 @@ nsDisplayBoxShadowOuter::ComputeVisibility(nsDisplayListBuilder* aBuilder,
   // Store the actual visible region
   mVisibleRegion.And(*aVisibleRegion, mVisibleRect);
   return true;
+}
+
+
+LayerState
+nsDisplayBoxShadowOuter::GetLayerState(nsDisplayListBuilder* aBuilder,
+                                                  LayerManager* aManager,
+                                                  const ContainerLayerParameters& aParameters)
+{
+  if (gfxPrefs::LayersAllowOuterBoxShadow()) {
+    return LAYER_ACTIVE;
+  }
+
+  return LAYER_NONE;
+}
+
+already_AddRefed<Layer>
+nsDisplayBoxShadowOuter::BuildLayer(nsDisplayListBuilder* aBuilder,
+                                    LayerManager* aManager,
+                                    const ContainerLayerParameters& aContainerParameters)
+{
+  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
+}
+
+void
+nsDisplayBoxShadowOuter::CreateWebRenderCommands(nsTArray<WebRenderCommand>& aCommands,
+                                                 WebRenderDisplayItemLayer* aLayer)
+{
+  int32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
+  nsPoint offset = ToReferenceFrame();
+  nsRect borderRect = mFrame->VisualBorderRectRelativeToSelf() + offset;
+  //nsPresContext* presContext = mFrame->PresContext();
+  AutoTArray<nsRect,10> rects;
+  nsRegion visible = aLayer->GetVisibleRegion().ToAppUnits(appUnitsPerDevPixel);
+
+  ComputeDisjointRectangles(visible, &rects);
+
+  nsCSSShadowArray* shadows = mFrame->StyleEffects()->mBoxShadow;
+  if (!shadows)
+    return;
+
+  // Everything here is in app units, change to device units.
+  for (uint32_t i = 0; i < rects.Length(); ++i) {
+    Rect clipRect = NSRectToRect(rects[i], appUnitsPerDevPixel);
+    Rect gfxBorderRect = NSRectToRect(borderRect, appUnitsPerDevPixel);
+
+    Rect deviceClipRect = aLayer->RelativeToParent(clipRect);
+    Rect deviceBoxRect = aLayer->RelativeToParent(gfxBorderRect);
+
+    for (uint32_t j = shadows->Length(); j > 0; --j) {
+      nsCSSShadowItem* shadowItem = shadows->ShadowAt(j - 1);
+      nscoord blurRadius = shadowItem->mRadius;
+      float gfxBlurRadius = blurRadius / appUnitsPerDevPixel;
+
+      // TODO: Have to refactor our nsCSSRendering
+      // to get the acual rects correct.
+      nscolor shadowColor;
+      if (shadowItem->mHasColor)
+        shadowColor = shadowItem->mColor;
+      else
+        shadowColor = mFrame->StyleColor()->mColor;
+
+      Color gfxShadowColor(Color::FromABGR(shadowColor));
+      gfxShadowColor.a *= mOpacity;
+
+      WrPoint offset;
+      offset.x = shadowItem->mXOffset;
+      offset.y = shadowItem->mYOffset;
+
+      aCommands.AppendElement(OpDPPushBoxShadow(
+                              wr::ToWrRect(deviceBoxRect),
+                              wr::ToWrRect(deviceClipRect),
+                              wr::ToWrRect(deviceBoxRect),
+                              offset,
+                              wr::ToWrColor(gfxShadowColor),
+                              gfxBlurRadius,
+                              0,
+                              0,
+                              WrBoxShadowClipMode::Outset
+      ));
+    }
+  }
 }
 
 void
@@ -5043,43 +5212,20 @@ IsItemTooSmallForActiveLayer(nsIFrame* aFrame)
 {
   nsIntRect visibleDevPixels = aFrame->GetVisualOverflowRectRelativeToSelf().ToOutsidePixels(
           aFrame->PresContext()->AppUnitsPerDevPixel());
-  static const int MIN_ACTIVE_LAYER_SIZE_DEV_PIXELS = 16;
   return visibleDevPixels.Size() <
-    nsIntSize(MIN_ACTIVE_LAYER_SIZE_DEV_PIXELS, MIN_ACTIVE_LAYER_SIZE_DEV_PIXELS);
-}
-
-static void
-SetAnimationPerformanceWarningForTooSmallItem(nsIFrame* aFrame,
-                                              nsCSSPropertyID aProperty)
-{
-  // We use ToNearestPixels() here since ToOutsidePixels causes some sort of
-  // errors. See https://bugzilla.mozilla.org/show_bug.cgi?id=1258904#c19
-  nsIntRect visibleDevPixels = aFrame->GetVisualOverflowRectRelativeToSelf().ToNearestPixels(
-          aFrame->PresContext()->AppUnitsPerDevPixel());
-
-  // Set performance warning only if the visible dev pixels is not empty
-  // because dev pixels is empty if the frame has 'preserve-3d' style.
-  if (visibleDevPixels.IsEmpty()) {
-    return;
-  }
-
-  EffectCompositor::SetPerformanceWarning(aFrame, aProperty,
-      AnimationPerformanceWarning(
-        AnimationPerformanceWarning::Type::ContentTooSmall,
-        { visibleDevPixels.Width(), visibleDevPixels.Height() }));
+    nsIntSize(gfxPrefs::LayoutMinActiveLayerSize(),
+              gfxPrefs::LayoutMinActiveLayerSize());
 }
 
 /* static */ bool
 nsDisplayOpacity::NeedsActiveLayer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
 {
-  if (ActiveLayerTracker::IsStyleAnimated(aBuilder, aFrame,
-                                          eCSSProperty_opacity) ||
-      EffectCompositor::HasAnimationsForCompositor(aFrame,
-                                                   eCSSProperty_opacity)) {
-    if (!IsItemTooSmallForActiveLayer(aFrame)) {
-      return true;
-    }
-    SetAnimationPerformanceWarningForTooSmallItem(aFrame, eCSSProperty_opacity);
+  if (EffectCompositor::HasAnimationsForCompositor(aFrame,
+                                                   eCSSProperty_opacity) ||
+      (ActiveLayerTracker::IsStyleAnimated(aBuilder, aFrame,
+                                           eCSSProperty_opacity) &&
+       !IsItemTooSmallForActiveLayer(aFrame))) {
+    return true;
   }
   return false;
 }
@@ -6181,7 +6327,7 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
   }
 
   /* Allows us to access dimension getters by index. */
-  float coords[2];
+  float transformOrigin[2];
   TransformReferenceBox::DimensionGetter dimensionGetter[] =
     { &TransformReferenceBox::Width, &TransformReferenceBox::Height };
   TransformReferenceBox::DimensionGetter offsetGetter[] =
@@ -6191,33 +6337,35 @@ nsDisplayTransform::GetDeltaToTransformOrigin(const nsIFrame* aFrame,
     /* If the transform-origin specifies a percentage, take the percentage
      * of the size of the box.
      */
-    const nsStyleCoord &coord = display->mTransformOrigin[index];
-    if (coord.GetUnit() == eStyleUnit_Calc) {
-      const nsStyleCoord::Calc *calc = coord.GetCalcValue();
-      coords[index] =
+    const nsStyleCoord& originValue  = display->mTransformOrigin[index];
+    if (originValue.GetUnit() == eStyleUnit_Calc) {
+      const nsStyleCoord::Calc *calc = originValue.GetCalcValue();
+      transformOrigin[index] =
         NSAppUnitsToFloatPixels((refBox.*dimensionGetter[index])(), aAppUnitsPerPixel) *
           calc->mPercent +
         NSAppUnitsToFloatPixels(calc->mLength, aAppUnitsPerPixel);
-    } else if (coord.GetUnit() == eStyleUnit_Percent) {
-      coords[index] =
+    } else if (originValue.GetUnit() == eStyleUnit_Percent) {
+      transformOrigin[index] =
         NSAppUnitsToFloatPixels((refBox.*dimensionGetter[index])(), aAppUnitsPerPixel) *
-        coord.GetPercentValue();
+        originValue.GetPercentValue();
     } else {
-      MOZ_ASSERT(coord.GetUnit() == eStyleUnit_Coord, "unexpected unit");
-      coords[index] =
-        NSAppUnitsToFloatPixels(coord.GetCoordValue(), aAppUnitsPerPixel);
+      MOZ_ASSERT(originValue.GetUnit() == eStyleUnit_Coord,
+                 "unexpected unit");
+      transformOrigin[index] =
+        NSAppUnitsToFloatPixels(originValue.GetCoordValue(),
+                                aAppUnitsPerPixel);
     }
 
     if (aFrame->GetStateBits() & NS_FRAME_SVG_LAYOUT) {
       // SVG frames (unlike other frames) have a reference box that can be (and
       // typically is) offset from the TopLeft() of the frame. We need to
       // account for that here.
-      coords[index] +=
+      transformOrigin[index] +=
         NSAppUnitsToFloatPixels((refBox.*offsetGetter[index])(), aAppUnitsPerPixel);
     }
   }
 
-  return Point3D(coords[0], coords[1],
+  return Point3D(transformOrigin[0], transformOrigin[1],
                  NSAppUnitsToFloatPixels(display->mTransformOrigin[2].GetCoordValue(),
                                          aAppUnitsPerPixel));
 }
@@ -6384,12 +6532,12 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const FrameTransformProp
   bool dummyBool;
   Matrix4x4 result;
   // Call IsSVGTransformed() regardless of the value of
-  // disp->mSpecifiedTransform, since we still need any transformFromSVGParent.
-  Matrix svgTransform, transformFromSVGParent;
+  // disp->mSpecifiedTransform, since we still need any
+  // parentsChildrenOnlyTransform.
+  Matrix svgTransform, parentsChildrenOnlyTransform;
   bool hasSVGTransforms =
-    frame && frame->IsSVGTransformed(&svgTransform, &transformFromSVGParent);
-  bool hasTransformFromSVGParent =
-    hasSVGTransforms && !transformFromSVGParent.IsIdentity();
+    frame && frame->IsSVGTransformed(&svgTransform,
+                                     &parentsChildrenOnlyTransform);
   /* Transformed frames always have a transform, or are preserving 3d (and might still have perspective!) */
   if (aProperties.mTransformList) {
     result = nsStyleTransformMatrix::ReadTransforms(aProperties.mTransformList->mHead,
@@ -6406,47 +6554,36 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const FrameTransformProp
     result = Matrix4x4::From2D(svgTransform);
   }
 
+  // Apply any translation due to 'transform-origin' and/or 'transform-box':
+  result.ChangeBasis(aProperties.mToTransformOrigin);
+
+  // See the comment for nsSVGContainerFrame::HasChildrenOnlyTransform for
+  // an explanation of what children-only transforms are.
+  bool parentHasChildrenOnlyTransform =
+    hasSVGTransforms && !parentsChildrenOnlyTransform.IsIdentity();
+
+  if (parentHasChildrenOnlyTransform) {
+    float pixelsPerCSSPx =
+      frame->PresContext()->AppUnitsPerCSSPixel() / aAppUnitsPerPixel;
+    parentsChildrenOnlyTransform._31 *= pixelsPerCSSPx;
+    parentsChildrenOnlyTransform._32 *= pixelsPerCSSPx;
+
+    Point3D frameOffset(
+      NSAppUnitsToFloatPixels(-frame->GetPosition().x, aAppUnitsPerPixel),
+      NSAppUnitsToFloatPixels(-frame->GetPosition().y, aAppUnitsPerPixel),
+      0);
+    Matrix4x4 parentsChildrenOnlyTransform3D =
+      Matrix4x4::From2D(parentsChildrenOnlyTransform).ChangeBasis(frameOffset);
+
+    result *= parentsChildrenOnlyTransform3D;
+  }
 
   Matrix4x4 perspectiveMatrix;
   bool hasPerspective = aFlags & INCLUDE_PERSPECTIVE;
   if (hasPerspective) {
-    hasPerspective = ComputePerspectiveMatrix(frame, aAppUnitsPerPixel,
-                                              perspectiveMatrix);
-  }
-
-  if (!hasSVGTransforms || !hasTransformFromSVGParent) {
-    // This is a simplification of the following |else| block, the
-    // simplification being possible because we don't need to apply
-    // mToTransformOrigin between two transforms.
-    result.ChangeBasis(aProperties.mToTransformOrigin);
-  } else {
-    Point3D refBoxOffset(NSAppUnitsToFloatPixels(refBox.X(), aAppUnitsPerPixel),
-                         NSAppUnitsToFloatPixels(refBox.Y(), aAppUnitsPerPixel),
-                         0);
-    // We have both a transform and children-only transform. The
-    // 'transform-origin' must apply between the two, so we need to apply it
-    // now before we apply transformFromSVGParent. Since mToTransformOrigin is
-    // relative to the frame's TopLeft(), we need to convert it to SVG user
-    // space by subtracting refBoxOffset. (Then after applying
-    // transformFromSVGParent we have to reapply refBoxOffset below.)
-    result.ChangeBasis(aProperties.mToTransformOrigin - refBoxOffset);
-
-    // Now apply the children-only transforms, converting the translation
-    // components to device pixels:
-    float pixelsPerCSSPx =
-      frame->PresContext()->AppUnitsPerCSSPixel() / aAppUnitsPerPixel;
-    transformFromSVGParent._31 *= pixelsPerCSSPx;
-    transformFromSVGParent._32 *= pixelsPerCSSPx;
-    result = result * Matrix4x4::From2D(transformFromSVGParent);
-
-    // Similar to the code in the |if| block above, but since we've accounted
-    // for mToTransformOrigin so we don't include that. We also need to reapply
-    // refBoxOffset.
-    result.ChangeBasis(refBoxOffset);
-  }
-
-  if (hasPerspective) {
-    result = result * perspectiveMatrix;
+    if (ComputePerspectiveMatrix(frame, aAppUnitsPerPixel, perspectiveMatrix)) {
+      result *= perspectiveMatrix;
+    }
   }
 
   if ((aFlags & INCLUDE_PRESERVE3D_ANCESTORS) &&
@@ -6721,17 +6858,20 @@ already_AddRefed<Layer> nsDisplayTransform::BuildLayer(nsDisplayListBuilder *aBu
 bool
 nsDisplayTransform::MayBeAnimated(nsDisplayListBuilder* aBuilder)
 {
-  // Here we check if the *post-transform* bounds of this item are big enough
-  // to justify an active layer.
-  if (ActiveLayerTracker::IsStyleAnimated(aBuilder,
-                                          mFrame,
-                                          eCSSProperty_transform) ||
-      EffectCompositor::HasAnimationsForCompositor(mFrame,
-                                                   eCSSProperty_transform)) {
-    if (!IsItemTooSmallForActiveLayer(mFrame)) {
-      return true;
-    }
-    SetAnimationPerformanceWarningForTooSmallItem(mFrame, eCSSProperty_transform);
+  // If EffectCompositor::HasAnimationsForCompositor() is true then we can
+  // completely bypass the main thread for this animation, so it is always
+  // worthwhile.
+  // For ActiveLayerTracker::IsStyleAnimated() cases the main thread is
+  // already involved so there is less to be gained.
+  // Therefore we check that the *post-transform* bounds of this item are
+  // big enough to justify an active layer.
+  if (EffectCompositor::HasAnimationsForCompositor(mFrame,
+                                                   eCSSProperty_transform) ||
+      (ActiveLayerTracker::IsStyleAnimated(aBuilder,
+                                           mFrame,
+                                           eCSSProperty_transform) &&
+       !IsItemTooSmallForActiveLayer(mFrame))) {
+    return true;
   }
   return false;
 }
