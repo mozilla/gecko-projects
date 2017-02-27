@@ -18,9 +18,6 @@
 #include "mozilla/plugins/PluginBridge.h"
 #include "mozilla/plugins/PluginInstanceParent.h"
 #include "mozilla/Preferences.h"
-#ifdef MOZ_GECKO_PROFILER
-#include "mozilla/ProfileGatherer.h"
-#endif
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
@@ -61,9 +58,6 @@
 using base::KillProcess;
 
 using mozilla::PluginLibrary;
-#ifdef MOZ_GECKO_PROFILER
-using mozilla::ProfileGatherer;
-#endif
 using mozilla::ipc::MessageChannel;
 using mozilla::ipc::GeckoChildProcessHost;
 
@@ -649,10 +643,7 @@ PluginModuleChromeParent::OnProcessLaunched(const bool aSucceeded)
         rv = profiler->GetStartParams(getter_AddRefs(currentProfilerParams));
         MOZ_ASSERT(NS_SUCCEEDED(rv));
 
-        nsCOMPtr<nsISupports> gatherer;
-        rv = profiler->GetProfileGatherer(getter_AddRefs(gatherer));
-        MOZ_ASSERT(NS_SUCCEEDED(rv));
-        mGatherer = static_cast<ProfileGatherer*>(gatherer.get());
+        mIsProfilerActive = true;
 
         StartProfiler(currentProfilerParams);
     }
@@ -781,6 +772,9 @@ PluginModuleChromeParent::PluginModuleChromeParent(const char* aFilePath,
     , mAsyncInitRv(NS_ERROR_NOT_INITIALIZED)
     , mAsyncInitError(NPERR_NO_ERROR)
     , mContentParent(nullptr)
+#ifdef MOZ_GECKO_PROFILER
+    , mIsProfilerActive(false)
+#endif
 {
     NS_ASSERTION(mSubprocess, "Out of memory!");
     sInstantiated = true;
@@ -808,6 +802,10 @@ PluginModuleChromeParent::~PluginModuleChromeParent()
     // If we registered for audio notifications, stop.
     mozilla::plugins::PluginUtilsWin::RegisterForAudioDeviceChanges(this,
                                                                     false);
+#endif
+
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+    mSandboxPermissions.RemovePermissionsForProcess(OtherPid());
 #endif
 
     if (!mShutdown) {
@@ -1688,7 +1686,6 @@ PluginModuleParent::NotifyPluginCrashed()
 
 PPluginInstanceParent*
 PluginModuleParent::AllocPPluginInstanceParent(const nsCString& aMimeType,
-                                               const uint16_t& aMode,
                                                const InfallibleTArray<nsCString>& aNames,
                                                const InfallibleTArray<nsCString>& aValues)
 {
@@ -2635,7 +2632,7 @@ PluginModuleChromeParent::NP_GetEntryPoints(NPPluginFuncs* pFuncs, NPError* erro
 
 nsresult
 PluginModuleParent::NPP_New(NPMIMEType pluginType, NPP instance,
-                            uint16_t mode, int16_t argc, char* argn[],
+                            int16_t argc, char* argn[],
                             char* argv[], NPSavedData* saved,
                             NPError* error)
 {
@@ -2647,7 +2644,7 @@ PluginModuleParent::NPP_New(NPMIMEType pluginType, NPP instance,
     }
 
     if (mIsStartingAsync) {
-        if (!PluginAsyncSurrogate::Create(this, pluginType, instance, mode,
+        if (!PluginAsyncSurrogate::Create(this, pluginType, instance,
                                           argc, argn, argv)) {
             *error = NPERR_GENERIC_ERROR;
             return NS_ERROR_FAILURE;
@@ -2671,7 +2668,7 @@ PluginModuleParent::NPP_New(NPMIMEType pluginType, NPP instance,
         values.AppendElement(NullableString(argv[i]));
     }
 
-    nsresult rv = NPP_NewInternal(pluginType, instance, mode, names, values,
+    nsresult rv = NPP_NewInternal(pluginType, instance, names, values,
                                   saved, error);
     if (NS_FAILED(rv) || !mIsStartingAsync) {
         return rv;
@@ -2743,7 +2740,6 @@ ForceDirect(InfallibleTArray<nsCString>& names,
 
 nsresult
 PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
-                                    uint16_t mode,
                                     InfallibleTArray<nsCString>& names,
                                     InfallibleTArray<nsCString>& values,
                                     NPSavedData* saved, NPError* error)
@@ -2830,7 +2826,7 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
     }
 
     if (!SendPPluginInstanceConstructor(parentInstance,
-                                        nsDependentCString(pluginType), mode,
+                                        nsDependentCString(pluginType),
                                         names, values)) {
         // |parentInstance| is automatically deleted.
         instance->pdata = nullptr;
@@ -3370,25 +3366,23 @@ PluginModuleChromeParent::StartProfiler(nsIProfilerStartParams* aParams)
     if (NS_WARN_IF(!profiler)) {
         return;
     }
-    nsCOMPtr<nsISupports> gatherer;
-    profiler->GetProfileGatherer(getter_AddRefs(gatherer));
-    mGatherer = static_cast<ProfileGatherer*>(gatherer.get());
+    mIsProfilerActive = true;
 }
 
 void
 PluginModuleChromeParent::StopProfiler()
 {
-    mGatherer = nullptr;
+    mIsProfilerActive = false;
     Unused << SendStopProfiler();
 }
 
 void
 PluginModuleChromeParent::GatherAsyncProfile()
 {
-    if (NS_WARN_IF(!mGatherer)) {
+    if (NS_WARN_IF(!mIsProfilerActive)) {
         return;
     }
-    mGatherer->WillGatherOOPProfile();
+    profiler_will_gather_OOP_profile();
     Unused << SendGatherProfile();
 }
 
@@ -3406,12 +3400,12 @@ mozilla::ipc::IPCResult
 PluginModuleChromeParent::RecvProfile(const nsCString& aProfile)
 {
 #ifdef MOZ_GECKO_PROFILER
-    if (NS_WARN_IF(!mGatherer)) {
+    if (NS_WARN_IF(!mIsProfilerActive)) {
         return IPC_OK();
     }
 
     mProfile = aProfile;
-    mGatherer->GatheredOOPProfile();
+    profiler_gathered_OOP_profile();
 #endif
     return IPC_OK();
 }
@@ -3431,5 +3425,71 @@ PluginModuleChromeParent::AnswerGetKeyState(const int32_t& aVirtKey,
     return IPC_OK();
 #else
     return PluginModuleParent::AnswerGetKeyState(aVirtKey, aRet);
+#endif
+}
+
+mozilla::ipc::IPCResult
+PluginModuleChromeParent::AnswerGetFileName(const GetFileNameFunc& aFunc,
+                                            const OpenFileNameIPC& aOfnIn,
+                                            OpenFileNameRetIPC* aOfnOut,
+                                            bool* aResult)
+{
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+    OPENFILENAMEW ofn;
+    memset(&ofn, 0, sizeof(ofn));
+    aOfnIn.AllocateOfnStrings(&ofn);
+    aOfnIn.AddToOfn(&ofn);
+    switch (aFunc) {
+    case OPEN_FUNC:
+        *aResult = GetOpenFileName(&ofn);
+        break;
+    case SAVE_FUNC:
+        *aResult = GetSaveFileName(&ofn);
+        break;
+    }
+    if (*aResult) {
+        if (ofn.Flags & OFN_ALLOWMULTISELECT) {
+            // We only support multiselect with the OFN_EXPLORER flag.
+            // This guarantees that ofn.lpstrFile follows the pattern below.
+            MOZ_ASSERT(ofn.Flags & OFN_EXPLORER);
+
+            // lpstrFile is one of two things:
+            // 1. A null terminated full path to a file, or
+            // 2. A path to a folder, followed by a NULL, followed by a
+            // list of file names, each NULL terminated, followed by an
+            // additional NULL (so it is also double-NULL terminated).
+            std::wstring path = std::wstring(ofn.lpstrFile);
+            MOZ_ASSERT(ofn.nFileOffset > 0);
+            // For condition #1, nFileOffset points to the file name in the path.
+            // It will be preceeded by a non-NULL character from the path.
+            if (ofn.lpstrFile[ofn.nFileOffset-1] != L'\0') {
+                mSandboxPermissions.GrantFileAccess(OtherPid(), path.c_str(),
+                                                          aFunc == SAVE_FUNC);
+            }
+            else {
+                // This is condition #2
+                wchar_t* nextFile = ofn.lpstrFile + path.size() + 1;
+                while (*nextFile != L'\0') {
+                    std::wstring nextFileStr(nextFile);
+                    std::wstring fullPath =
+                        path + std::wstring(L"\\") + nextFileStr;
+                    mSandboxPermissions.GrantFileAccess(OtherPid(), fullPath.c_str(),
+                                                              aFunc == SAVE_FUNC);
+                    nextFile += nextFileStr.size() + 1;
+                }
+            }
+        }
+        else {
+            mSandboxPermissions.GrantFileAccess(OtherPid(), ofn.lpstrFile,
+                                                 aFunc == SAVE_FUNC);
+        }
+        aOfnOut->CopyFromOfn(&ofn);
+    }
+    aOfnIn.FreeOfnStrings(&ofn);
+    return IPC_OK();
+#else
+    MOZ_ASSERT_UNREACHABLE("GetFileName IPC message is only available on "
+                           "Windows builds with sandbox.");
+    return IPC_FAIL_NO_REASON(this);
 #endif
 }

@@ -354,6 +354,7 @@ struct nsBackgroundLayerState {
 };
 
 struct nsCSSRendering {
+  typedef mozilla::gfx::Color Color;
   typedef mozilla::gfx::CompositionOp CompositionOp;
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::Float Float;
@@ -379,6 +380,17 @@ struct nsCSSRendering {
                                   nsIFrame* aForFrame,
                                   const nsRect& aFrameArea);
 
+  static nsRect GetShadowRect(const nsRect aFrameArea,
+                              bool aNativeTheme,
+                              nsIFrame* aForFrame);
+  static mozilla::gfx::Color GetShadowColor(nsCSSShadowItem* aShadow,
+                                   nsIFrame* aFrame,
+                                   float aOpacity);
+  // Returns if the frame has a themed frame.
+  // aMaybeHasBorderRadius will return false if we can early detect
+  // that we don't have a border radius.
+  static bool HasBoxShadowNativeTheme(nsIFrame* aFrame,
+                                      bool& aMaybeHasBorderRadius);
   static void PaintBoxShadowOuter(nsPresContext* aPresContext,
                                   nsRenderingContext& aRenderingContext,
                                   nsIFrame* aForFrame,
@@ -438,6 +450,13 @@ struct nsCSSRendering {
                                       nsStyleContext* aStyleContext,
                                       Sides aSkipSides = Sides());
 
+  static mozilla::Maybe<nsCSSBorderRenderer>
+  CreateBorderRendererForOutline(nsPresContext* aPresContext,
+                                 nsRenderingContext* aRenderingContext,
+                                 nsIFrame* aForFrame,
+                                 const nsRect& aDirtyRect,
+                                 const nsRect& aBorderArea,
+                                 nsStyleContext* aStyleContext);
 
   /**
    * Render the outline for an element using css rendering rules
@@ -577,10 +596,10 @@ struct nsCSSRendering {
                     bool* aOutIsTransformedFixed = nullptr);
 
   struct ImageLayerClipState {
-    nsRect mBGClipArea;  // Affected by mClippedRadii
+    nsRect mBGClipArea;            // Affected by mClippedRadii
     nsRect mAdditionalBGClipArea;  // Not affected by mClippedRadii
-    nsRect mDirtyRect;
-    gfxRect mDirtyRectGfx;
+    nsRect mDirtyRectInAppUnits;
+    gfxRect mDirtyRectInDevPx;
 
     nscoord mRadii[8];
     RectCornerRadii mClippedRadii;
@@ -590,6 +609,16 @@ struct nsCSSRendering {
     // Whether we are being asked to draw with a caller provided background
     // clipping area. If this is true we also disable rounded corners.
     bool mCustomClip;
+
+    ImageLayerClipState()
+     : mHasRoundedCorners(false),
+       mHasAdditionalBGClipArea(false),
+       mCustomClip(false)
+    {
+      memset(mRadii, 0, sizeof(nscoord) * 8);
+    }
+
+    bool IsValid() const;
   };
 
   static void

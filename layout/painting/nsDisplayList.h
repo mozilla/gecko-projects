@@ -34,6 +34,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/gfx/UserData.h"
+#include "nsCSSRenderingBorders.h"
 
 #include <stdint.h>
 #include "nsTHashtable.h"
@@ -448,11 +449,8 @@ public:
    * Get the ViewID and the scrollbar flags corresponding to the scrollbar for
    * which we are building display items at the moment.
    */
-  void GetScrollbarInfo(ViewID* aOutScrollbarTarget, uint32_t* aOutScrollbarFlags)
-  {
-    *aOutScrollbarTarget = mCurrentScrollbarTarget;
-    *aOutScrollbarFlags = mCurrentScrollbarFlags;
-  }
+  ViewID GetCurrentScrollbarTarget() const { return mCurrentScrollbarTarget; }
+  uint32_t GetCurrentScrollbarFlags() const { return mCurrentScrollbarFlags; }
   /**
    * Returns true if building a scrollbar, and the scrollbar will not be
    * layerized.
@@ -3453,10 +3451,20 @@ public:
   }
 #endif
 
+  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aParameters) override;
+  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
+                                             LayerManager* aManager,
+                                             const ContainerLayerParameters& aContainerParameters) override;
+  virtual void CreateWebRenderCommands(nsTArray<WebRenderCommand>& aCommands,
+                                       mozilla::layers::WebRenderDisplayItemLayer* aLayer) override;
   virtual bool IsInvisibleInRect(const nsRect& aRect) override;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override;
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("Outline", TYPE_OUTLINE)
+
+  mozilla::Maybe<nsCSSBorderRenderer> mBorderRenderer;
 };
 
 /**

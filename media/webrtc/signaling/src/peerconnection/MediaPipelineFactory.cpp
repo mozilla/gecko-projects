@@ -25,9 +25,7 @@
 #include "mozilla/Preferences.h"
 #include "MediaEngine.h"
 
-#ifdef MOZILLA_INTERNAL_API
 #include "mozilla/Preferences.h"
-#endif
 
 #include "WebrtcGmpVideoCodec.h"
 
@@ -328,8 +326,8 @@ MediaPipelineFactory::GetTransportParameters(
 {
   *aLevelOut = aTrackPair.mLevel;
 
-  size_t transportLevel = aTrackPair.mBundleLevel.isSome() ?
-                          *aTrackPair.mBundleLevel :
+  size_t transportLevel = aTrackPair.HasBundleLevel() ?
+                          aTrackPair.BundleLevel() :
                           aTrackPair.mLevel;
 
   nsresult rv = CreateOrGetTransportFlow(
@@ -348,7 +346,7 @@ MediaPipelineFactory::GetTransportParameters(
     MOZ_ASSERT(aRtcpOut);
   }
 
-  if (aTrackPair.mBundleLevel.isSome()) {
+  if (aTrackPair.HasBundleLevel()) {
     bool receiving = aTrack.GetDirection() == sdp::kRecv;
 
     *aFilterOut = new MediaPipelineFilter;

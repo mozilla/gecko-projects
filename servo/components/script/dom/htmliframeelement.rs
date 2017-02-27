@@ -35,6 +35,7 @@ use dom::htmlelement::HTMLElement;
 use dom::node::{Node, NodeDamage, UnbindContext, document_from_node, window_from_node};
 use dom::virtualmethods::VirtualMethods;
 use dom::window::{ReflowReason, Window};
+use dom_struct::dom_struct;
 use html5ever_atoms::LocalName;
 use ipc_channel::ipc;
 use js::jsapi::{JSAutoCompartment, JSContext, MutableHandleValue};
@@ -167,7 +168,7 @@ impl HTMLIFrameElement {
                 layout_threads: PREFS.get("layout.threads").as_u64().expect("count") as usize,
             };
 
-            ScriptThread::process_attach_layout(new_layout_info, document.origin().alias());
+            ScriptThread::process_attach_layout(new_layout_info, document.origin().clone());
         } else {
             let load_info = IFrameLoadInfoWithData {
                 info: load_info,

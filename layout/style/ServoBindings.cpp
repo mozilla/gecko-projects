@@ -9,6 +9,7 @@
 #include "ChildIterator.h"
 #include "gfxFontFamilyList.h"
 #include "nsAttrValueInlines.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsCSSProps.h"
 #include "nsCSSParser.h"
 #include "nsCSSPseudoElements.h"
@@ -279,11 +280,21 @@ Gecko_GetStyleContext(RawGeckoNodeBorrowed aNode, nsIAtom* aPseudoTagOrNull)
   nsIFrame* relevantFrame =
     ServoRestyleManager::FrameForPseudoElement(aNode->AsContent(),
                                                aPseudoTagOrNull);
-  if (!relevantFrame) {
+  if (relevantFrame) {
+    return relevantFrame->StyleContext();
+  }
+
+  if (aPseudoTagOrNull) {
     return nullptr;
   }
 
-  return relevantFrame->StyleContext();
+  // FIXME(emilio): Is there a shorter path?
+  nsCSSFrameConstructor* fc =
+    aNode->OwnerDoc()->GetShell()->GetPresContext()->FrameConstructor();
+
+  // NB: This is only called for CalcStyleDifference, and we handle correctly
+  // the display: none case since Servo still has the older style.
+  return fc->GetDisplayContentsStyleFor(aNode->AsContent());
 }
 
 nsChangeHint
@@ -1237,6 +1248,46 @@ Gecko_CSSValue_SetFunction(nsCSSValueBorrowedMut aCSSValue, int32_t aLen)
 {
   nsCSSValue::Array* arr = nsCSSValue::Array::Create(aLen);
   aCSSValue->SetArrayValue(arr, eCSSUnit_Function);
+}
+
+void
+Gecko_CSSValue_SetString(nsCSSValueBorrowedMut aCSSValue, const nsString aString)
+{
+  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null);
+  aCSSValue->SetStringValue(aString, eCSSUnit_String);
+}
+
+void
+Gecko_CSSValue_SetArray(nsCSSValueBorrowedMut aCSSValue, int32_t aLength)
+{
+  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null);
+  RefPtr<nsCSSValue::Array> array
+    = nsCSSValue::Array::Create(aLength);
+  aCSSValue->SetArrayValue(array, eCSSUnit_Array);
+}
+
+void
+Gecko_CSSValue_SetURL(nsCSSValueBorrowedMut aCSSValue,
+                      ServoBundledURI aURI)
+{
+  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null);
+  RefPtr<css::URLValue> url = aURI.IntoCssUrl();
+  aCSSValue->SetURLValue(url.get());
+}
+
+void
+Gecko_CSSValue_SetLocal(nsCSSValueBorrowedMut aCSSValue, const nsString aFamily)
+{
+  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null);
+  aCSSValue->SetStringValue(aFamily, eCSSUnit_Local_Font);
+}
+
+void
+Gecko_CSSValue_SetInteger(nsCSSValueBorrowedMut aCSSValue, int32_t aInteger)
+{
+  MOZ_ASSERT(aCSSValue->GetUnit() == eCSSUnit_Null ||
+    aCSSValue->GetUnit() == eCSSUnit_Integer);
+  aCSSValue->SetIntValue(aInteger, eCSSUnit_Integer);
 }
 
 nsCSSValueBorrowedMut

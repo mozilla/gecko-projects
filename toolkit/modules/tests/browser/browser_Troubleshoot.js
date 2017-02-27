@@ -138,6 +138,12 @@ const SNAPSHOT_SCHEMA = {
         numRemoteWindows: {
           type: "number",
         },
+        keyGoogleFound: {
+          type: "boolean",
+        },
+        keyMozillaFound: {
+          type: "boolean",
+        },
         safeMode: {
           type: "boolean",
         },
@@ -300,6 +306,9 @@ const SNAPSHOT_SCHEMA = {
         webgl1Version: {
           type: "string",
         },
+        webgl1DriverExtensions: {
+          type: "string",
+        },
         webgl1Extensions: {
           type: "string",
         },
@@ -310,6 +319,9 @@ const SNAPSHOT_SCHEMA = {
           type: "string",
         },
         webgl2Version: {
+          type: "string",
+        },
+        webgl2DriverExtensions: {
           type: "string",
         },
         webgl2Extensions: {

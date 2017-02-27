@@ -870,9 +870,12 @@ IonBuilder::processIterators()
     Vector<MDefinition*, 8, SystemAllocPolicy> worklist;
 
     for (size_t i = 0; i < iterators_.length(); i++) {
-        if (!worklist.append(iterators_[i]))
-            return abort(AbortReason::Alloc);
-        iterators_[i]->setInWorklist();
+        MDefinition* iter = iterators_[i];
+        if (!iter->isInWorklist()) {
+            if (!worklist.append(iter))
+                return abort(AbortReason::Alloc);
+            iter->setInWorklist();
+        }
     }
 
     while (!worklist.empty()) {
@@ -2263,6 +2266,9 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_CHECKISOBJ:
         return jsop_checkisobj(GET_UINT8(pc));
+
+      case JSOP_CHECKISCALLABLE:
+        return jsop_checkiscallable(GET_UINT8(pc));
 
       case JSOP_CHECKOBJCOERCIBLE:
         return jsop_checkobjcoercible();
@@ -9411,6 +9417,15 @@ IonBuilder::jsop_checkisobj(uint8_t kind)
     }
 
     MCheckIsObj* check = MCheckIsObj::New(alloc(), current->pop(), kind);
+    current->add(check);
+    current->push(check);
+    return Ok();
+}
+
+AbortReasonOr<Ok>
+IonBuilder::jsop_checkiscallable(uint8_t kind)
+{
+    MCheckIsCallable* check = MCheckIsCallable::New(alloc(), current->pop(), kind);
     current->add(check);
     current->push(check);
     return Ok();

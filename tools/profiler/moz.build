@@ -16,16 +16,13 @@ if CONFIG['MOZ_GECKO_PROFILER']:
         'public/PseudoStack.h',
         'public/shared-libraries.h',
     ]
-    EXPORTS.mozilla += [
-        'public/ProfileGatherer.h',
-    ]
     EXTRA_JS_MODULES += [
         'gecko/Profiler.jsm',
     ]
     UNIFIED_SOURCES += [
         'core/platform.cpp',
         'core/ProfileBuffer.cpp',
-        'core/ProfileEntry.cpp',
+        'core/ProfileBufferEntry.cpp',
         'core/ProfileJSONWriter.cpp',
         'core/ProfilerBacktrace.cpp',
         'core/ProfilerMarkers.cpp',

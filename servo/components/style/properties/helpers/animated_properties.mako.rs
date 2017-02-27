@@ -33,6 +33,7 @@ use values::Either;
 use values::computed::{Angle, LengthOrPercentageOrAuto, LengthOrPercentageOrNone};
 use values::computed::{BorderRadiusSize, ClipRect, LengthOrNone};
 use values::computed::{CalcLengthOrPercentage, Context, LengthOrPercentage};
+use values::computed::{MaxLength, MinLength};
 use values::computed::position::{HorizontalPosition, Position, VerticalPosition};
 use values::computed::ToComputedValue;
 use values::specified::Angle as SpecifiedAngle;
@@ -68,7 +69,7 @@ impl TransitionProperty {
 
     /// Parse a transition-property value.
     pub fn parse(input: &mut Parser) -> Result<Self, ()> {
-        match_ignore_ascii_case! { try!(input.expect_ident()),
+        match_ignore_ascii_case! { &try!(input.expect_ident()),
             "all" => Ok(TransitionProperty::All),
             % for prop in data.longhands:
                 % if prop.animatable:
@@ -231,17 +232,6 @@ impl AnimatedProperty {
         }
     }
 }
-
-
-% if product == "gecko":
-    use gecko_bindings::structs::RawServoAnimationValue;
-    use gecko_bindings::sugar::ownership::{HasArcFFI, HasFFI};
-
-    unsafe impl HasFFI for AnimationValue {
-        type FFIType = RawServoAnimationValue;
-    }
-    unsafe impl HasArcFFI for AnimationValue {}
-% endif
 
 /// An enum to represent a single computed value belonging to an animated
 /// property in order to be interpolated with another one. When interpolating,
@@ -637,6 +627,34 @@ impl Interpolate for LengthOrPercentageOrNone {
                 Ok(LengthOrPercentageOrNone::None)
             }
             _ => Err(())
+        }
+    }
+}
+
+/// https://drafts.csswg.org/css-transitions/#animtype-lpcalc
+impl Interpolate for MinLength {
+    #[inline]
+    fn interpolate(&self, other: &Self, progress: f64) -> Result<Self, ()> {
+        match (*self, *other) {
+            (MinLength::LengthOrPercentage(ref this),
+             MinLength::LengthOrPercentage(ref other)) => {
+                this.interpolate(other, progress).map(MinLength::LengthOrPercentage)
+            }
+            _ => Err(()),
+        }
+    }
+}
+
+/// https://drafts.csswg.org/css-transitions/#animtype-lpcalc
+impl Interpolate for MaxLength {
+    #[inline]
+    fn interpolate(&self, other: &Self, progress: f64) -> Result<Self, ()> {
+        match (*self, *other) {
+            (MaxLength::LengthOrPercentage(ref this),
+             MaxLength::LengthOrPercentage(ref other)) => {
+                this.interpolate(other, progress).map(MaxLength::LengthOrPercentage)
+            }
+            _ => Err(()),
         }
     }
 }

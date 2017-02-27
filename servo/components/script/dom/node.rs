@@ -53,6 +53,7 @@ use dom::svgsvgelement::{SVGSVGElement, LayoutSVGSVGElementHelpers};
 use dom::text::Text;
 use dom::virtualmethods::{VirtualMethods, vtable_for};
 use dom::window::Window;
+use dom_struct::dom_struct;
 use euclid::point::Point2D;
 use euclid::rect::Rect;
 use euclid::size::Size2D;
@@ -1729,7 +1730,7 @@ impl Node {
                 let document = Document::new(window, HasBrowsingContext::No,
                                              Some(document.url()),
                                              // https://github.com/whatwg/dom/issues/378
-                                             document.origin().alias(),
+                                             document.origin().clone(),
                                              is_html_doc, None,
                                              None, DocumentActivity::Inactive,
                                              DocumentSource::NotFromParser, loader,

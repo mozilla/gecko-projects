@@ -85,6 +85,7 @@
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layers/WebRenderDisplayItemLayer.h"
 #include "mozilla/layers/WebRenderMessages.h"
+#include "mozilla/layers/WebRenderDisplayItemLayer.h"
 
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount().
@@ -594,9 +595,10 @@ AddAnimationsForProperty(nsIFrame* aFrame, nsCSSPropertyID aProperty,
                                       CSS_PROPERTY_CAN_ANIMATE_ON_COMPOSITOR),
              "inconsistent property flags");
 
-  DebugOnly<EffectSet*> effects = EffectSet::GetEffectSet(aFrame);
+  EffectSet* effects = EffectSet::GetEffectSet(aFrame);
   MOZ_ASSERT(effects);
 
+  bool sentAnimations = false;
   // Add from first to last (since last overrides)
   for (size_t animIdx = 0; animIdx < aAnimations.Length(); animIdx++) {
     dom::Animation* anim = aAnimations[animIdx];
@@ -643,6 +645,12 @@ AddAnimationsForProperty(nsIFrame* aFrame, nsCSSPropertyID aProperty,
 
     AddAnimationForProperty(aFrame, *property, anim, aLayer, aData, aPending);
     keyframeEffect->SetIsRunningOnCompositor(aProperty, true);
+    sentAnimations = true;
+  }
+
+  if (sentAnimations && aProperty == eCSSProperty_transform) {
+    TimeStamp now = aFrame->PresContext()->RefreshDriver()->MostRecentRefresh();
+    effects->UpdateLastTransformSyncTime(now);
   }
 }
 
@@ -2045,6 +2053,17 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
     layerManager = new BasicLayerManager(BasicLayerManager::BLM_OFFSCREEN);
   }
 
+  nsIFrame* frame = aBuilder->RootReferenceFrame();
+  nsPresContext* presContext = frame->PresContext();
+  nsIPresShell* presShell = presContext->PresShell();
+  nsIDocument* document = presShell->GetDocument();
+
+  NotifySubDocInvalidationFunc computeInvalidFunc =
+    presContext->MayHavePaintEventListenerInSubDocument() ? nsPresContext::NotifySubDocInvalidation : 0;
+
+  UniquePtr<LayerProperties> props;
+  RefPtr<ContainerLayer> root;
+
   // Store the existing layer builder to reinstate it on return.
   FrameLayerBuilder *oldBuilder = layerManager->GetLayerBuilder();
 
@@ -2055,146 +2074,139 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
     layerBuilder->SetLayerTreeCompressionMode();
   }
 
-  if (doBeginTransaction) {
-    if (aCtx) {
-      if (!layerManager->BeginTransactionWithTarget(aCtx->ThebesContext())) {
-        return nullptr;
-      }
-    } else {
-      if (!layerManager->BeginTransaction()) {
-        return nullptr;
-      }
-    }
-  }
-
-  if (XRE_IsContentProcess() && gfxPrefs::AlwaysPaint()) {
-    FrameLayerBuilder::InvalidateAllLayers(layerManager);
-  }
-
-  if (widgetTransaction) {
-    layerBuilder->DidBeginRetainedLayerTransaction(layerManager);
-  }
-
-  nsIFrame* frame = aBuilder->RootReferenceFrame();
-  nsPresContext* presContext = frame->PresContext();
-  nsIPresShell* presShell = presContext->PresShell();
-  nsRootPresContext* rootPresContext = presContext->GetRootPresContext();
-
-  NotifySubDocInvalidationFunc computeInvalidFunc =
-    presContext->MayHavePaintEventListenerInSubDocument() ? nsPresContext::NotifySubDocInvalidation : 0;
-  bool computeInvalidRect = (computeInvalidFunc ||
-                             (!layerManager->IsCompositingCheap() && layerManager->NeedsWidgetInvalidation())) &&
-                            widgetTransaction;
-
-  UniquePtr<LayerProperties> props;
-  if (computeInvalidRect) {
-    props = Move(LayerProperties::CloneFrom(layerManager->GetRoot()));
-  }
-
-  // Clear any ScrollMetadata that may have been set on the root layer on a
-  // previous paint. This paint will set new metrics if necessary, and if we
-  // don't clear the old one here, we may be left with extra metrics.
-  if (Layer* root = layerManager->GetRoot()) {
-    root->SetScrollMetadata(nsTArray<ScrollMetadata>());
-  }
-
-  ContainerLayerParameters containerParameters
-    (presShell->GetResolution(), presShell->GetResolution());
-
-  RefPtr<ContainerLayer> root;
   {
-    PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::Layerization);
-    root = layerBuilder->
-      BuildContainerLayerFor(aBuilder, layerManager, frame, nullptr, this,
-                             containerParameters, nullptr);
-  }
+    GeckoProfilerTracingRAII tracer("Paint", "LayerBuilding");
 
-  nsIDocument* document = presShell->GetDocument();
-
-  if (!root) {
-    layerManager->SetUserData(&gLayerManagerLayerBuilder, oldBuilder);
-    return nullptr;
-  }
-  // Root is being scaled up by the X/Y resolution. Scale it back down.
-  root->SetPostScale(1.0f/containerParameters.mXScale,
-                     1.0f/containerParameters.mYScale);
-  root->SetScaleToResolution(presShell->ScaleToResolution(),
-      containerParameters.mXScale);
-  if (aBuilder->IsBuildingLayerEventRegions() &&
-      nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(presShell)) {
-    root->SetEventRegionsOverride(EventRegionsOverride::ForceDispatchToContent);
-  } else {
-    root->SetEventRegionsOverride(EventRegionsOverride::NoOverride);
-  }
-
-  // If we're using containerless scrolling, there is still one case where we
-  // want the root container layer to have metrics. If the parent process is
-  // using XUL windows, there is no root scrollframe, and without explicitly
-  // creating metrics there will be no guaranteed top-level APZC.
-  bool addMetrics = gfxPrefs::LayoutUseContainersForRootFrames() ||
-      (XRE_IsParentProcess() && !presShell->GetRootScrollFrame());
-
-  // Add metrics if there are none in the layer tree with the id (create an id
-  // if there isn't one already) of the root scroll frame/root content.
-  bool ensureMetricsForRootId =
-    nsLayoutUtils::AsyncPanZoomEnabled(frame) &&
-    !gfxPrefs::LayoutUseContainersForRootFrames() &&
-    aBuilder->IsPaintingToWindow() &&
-    !presContext->GetParentPresContext();
-
-  nsIContent* content = nullptr;
-  nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
-  if (rootScrollFrame) {
-    content = rootScrollFrame->GetContent();
-  } else {
-    // If there is no root scroll frame, pick the document element instead.
-    // The only case we don't want to do this is in non-APZ fennec, where
-    // we want the root xul document to get a null scroll id so that the root
-    // content document gets the first non-null scroll id.
-    content = document->GetDocumentElement();
-  }
-
-
-  if (ensureMetricsForRootId && content) {
-    ViewID scrollId = nsLayoutUtils::FindOrCreateIDFor(content);
-    if (nsLayoutUtils::ContainsMetricsWithId(root, scrollId)) {
-      ensureMetricsForRootId = false;
+    if (doBeginTransaction) {
+      if (aCtx) {
+        if (!layerManager->BeginTransactionWithTarget(aCtx->ThebesContext())) {
+          return nullptr;
+        }
+      } else {
+        if (!layerManager->BeginTransaction()) {
+          return nullptr;
+        }
+      }
     }
-  }
 
-  if (addMetrics || ensureMetricsForRootId) {
-    bool isRootContent = presContext->IsRootContentDocument();
+    if (XRE_IsContentProcess() && gfxPrefs::AlwaysPaint()) {
+      FrameLayerBuilder::InvalidateAllLayers(layerManager);
+    }
 
-    nsRect viewport(aBuilder->ToReferenceFrame(frame), frame->GetSize());
+    if (widgetTransaction) {
+      layerBuilder->DidBeginRetainedLayerTransaction(layerManager);
+    }
 
-    root->SetScrollMetadata(
-      nsLayoutUtils::ComputeScrollMetadata(frame,
-                         rootScrollFrame, content,
-                         aBuilder->FindReferenceFrameFor(frame),
-                         root, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
-                         isRootContent, containerParameters));
-  }
+    bool computeInvalidRect = (computeInvalidFunc ||
+                               (!layerManager->IsCompositingCheap() && layerManager->NeedsWidgetInvalidation())) &&
+                              widgetTransaction;
 
-  // NS_WARNING is debug-only, so don't even bother checking the conditions in
-  // a release build.
+    if (computeInvalidRect) {
+      props = Move(LayerProperties::CloneFrom(layerManager->GetRoot()));
+    }
+
+    // Clear any ScrollMetadata that may have been set on the root layer on a
+    // previous paint. This paint will set new metrics if necessary, and if we
+    // don't clear the old one here, we may be left with extra metrics.
+    if (Layer* rootLayer = layerManager->GetRoot()) {
+      rootLayer->SetScrollMetadata(nsTArray<ScrollMetadata>());
+    }
+
+    ContainerLayerParameters containerParameters
+      (presShell->GetResolution(), presShell->GetResolution());
+
+    {
+      PaintTelemetry::AutoRecord record(PaintTelemetry::Metric::Layerization);
+      root = layerBuilder->
+        BuildContainerLayerFor(aBuilder, layerManager, frame, nullptr, this,
+                               containerParameters, nullptr);
+    }
+
+    if (!root) {
+      layerManager->SetUserData(&gLayerManagerLayerBuilder, oldBuilder);
+      return nullptr;
+    }
+    // Root is being scaled up by the X/Y resolution. Scale it back down.
+    root->SetPostScale(1.0f/containerParameters.mXScale,
+                       1.0f/containerParameters.mYScale);
+    root->SetScaleToResolution(presShell->ScaleToResolution(),
+        containerParameters.mXScale);
+    if (aBuilder->IsBuildingLayerEventRegions() &&
+        nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(presShell)) {
+      root->SetEventRegionsOverride(EventRegionsOverride::ForceDispatchToContent);
+    } else {
+      root->SetEventRegionsOverride(EventRegionsOverride::NoOverride);
+    }
+
+    // If we're using containerless scrolling, there is still one case where we
+    // want the root container layer to have metrics. If the parent process is
+    // using XUL windows, there is no root scrollframe, and without explicitly
+    // creating metrics there will be no guaranteed top-level APZC.
+    bool addMetrics = gfxPrefs::LayoutUseContainersForRootFrames() ||
+        (XRE_IsParentProcess() && !presShell->GetRootScrollFrame());
+
+    // Add metrics if there are none in the layer tree with the id (create an id
+    // if there isn't one already) of the root scroll frame/root content.
+    bool ensureMetricsForRootId =
+      nsLayoutUtils::AsyncPanZoomEnabled(frame) &&
+      !gfxPrefs::LayoutUseContainersForRootFrames() &&
+      aBuilder->IsPaintingToWindow() &&
+      !presContext->GetParentPresContext();
+
+    nsIContent* content = nullptr;
+    nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame();
+    if (rootScrollFrame) {
+      content = rootScrollFrame->GetContent();
+    } else {
+      // If there is no root scroll frame, pick the document element instead.
+      // The only case we don't want to do this is in non-APZ fennec, where
+      // we want the root xul document to get a null scroll id so that the root
+      // content document gets the first non-null scroll id.
+      content = document->GetDocumentElement();
+    }
+
+
+    if (ensureMetricsForRootId && content) {
+      ViewID scrollId = nsLayoutUtils::FindOrCreateIDFor(content);
+      if (nsLayoutUtils::ContainsMetricsWithId(root, scrollId)) {
+        ensureMetricsForRootId = false;
+      }
+    }
+
+    if (addMetrics || ensureMetricsForRootId) {
+      bool isRootContent = presContext->IsRootContentDocument();
+
+      nsRect viewport(aBuilder->ToReferenceFrame(frame), frame->GetSize());
+
+      root->SetScrollMetadata(
+        nsLayoutUtils::ComputeScrollMetadata(frame,
+                           rootScrollFrame, content,
+                           aBuilder->FindReferenceFrameFor(frame),
+                           root, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
+                           isRootContent, containerParameters));
+    }
+
+    // NS_WARNING is debug-only, so don't even bother checking the conditions in
+    // a release build.
 #ifdef DEBUG
-  bool usingDisplayport = false;
-  if (nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame()) {
-    nsIContent* content = rootScrollFrame->GetContent();
-    if (content) {
-      usingDisplayport = nsLayoutUtils::HasDisplayPort(content);
+    bool usingDisplayport = false;
+    if (nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame()) {
+      nsIContent* content = rootScrollFrame->GetContent();
+      if (content) {
+        usingDisplayport = nsLayoutUtils::HasDisplayPort(content);
+      }
     }
-  }
-  if (usingDisplayport &&
-      !(root->GetContentFlags() & Layer::CONTENT_OPAQUE) &&
-      SpammyLayoutWarningsEnabled()) {
-    // See bug 693938, attachment 567017
-    NS_WARNING("Transparent content with displayports can be expensive.");
-  }
+    if (usingDisplayport &&
+        !(root->GetContentFlags() & Layer::CONTENT_OPAQUE) &&
+        SpammyLayoutWarningsEnabled()) {
+      // See bug 693938, attachment 567017
+      NS_WARNING("Transparent content with displayports can be expensive.");
+    }
 #endif
 
-  layerManager->SetRoot(root);
-  layerBuilder->WillEndTransaction();
+    layerManager->SetRoot(root);
+    layerBuilder->WillEndTransaction();
+  }
 
   if (widgetTransaction ||
       // SVG-as-an-image docs don't paint as part of the retained layer tree,
@@ -2220,6 +2232,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
 
   // If this is the content process, we ship plugin geometry updates over with layer
   // updates, so calculate that now before we call EndTransaction.
+  nsRootPresContext* rootPresContext = presContext->GetRootPresContext();
   if (rootPresContext && XRE_IsContentProcess()) {
     if (aBuilder->WillComputePluginGeometry()) {
       rootPresContext->ComputePluginGeometryUpdates(aBuilder->RootReferenceFrame(), aBuilder, this);
@@ -4090,6 +4103,72 @@ nsDisplayOutline::Paint(nsDisplayListBuilder* aBuilder,
                                mFrame->StyleContext());
 }
 
+LayerState
+nsDisplayOutline::GetLayerState(nsDisplayListBuilder* aBuilder,
+                                LayerManager* aManager,
+                                const ContainerLayerParameters& aParameters)
+{
+  if (!gfxPrefs::LayersAllowOutlineLayers()) {
+    return LAYER_NONE;
+  }
+
+  uint8_t outlineStyle = mFrame->StyleContext()->StyleOutline()->mOutlineStyle;
+  if (outlineStyle == NS_STYLE_BORDER_STYLE_AUTO && nsLayoutUtils::IsOutlineStyleAutoEnabled()) {
+      nsITheme* theme = mFrame->PresContext()->GetTheme();
+      if (theme && theme->ThemeSupportsWidget(mFrame->PresContext(), mFrame,
+                                              NS_THEME_FOCUS_OUTLINE)) {
+        return LAYER_NONE;
+      }
+  }
+
+  nsPoint offset = ToReferenceFrame();
+  Maybe<nsCSSBorderRenderer> br =
+    nsCSSRendering::CreateBorderRendererForOutline(mFrame->PresContext(),
+                                                   nullptr, mFrame,
+                                                   mVisibleRect,
+                                                   nsRect(offset, mFrame->GetSize()),
+                                                   mFrame->StyleContext());
+
+  if (!br) {
+    return LAYER_NONE;
+  }
+
+  mBorderRenderer = br;
+
+  return LAYER_ACTIVE;
+}
+
+already_AddRefed<Layer>
+nsDisplayOutline::BuildLayer(nsDisplayListBuilder* aBuilder,
+                             LayerManager* aManager,
+                             const ContainerLayerParameters& aContainerParameters)
+{
+  return BuildDisplayItemLayer(aBuilder, aManager, aContainerParameters);
+}
+
+void
+nsDisplayOutline::CreateWebRenderCommands(nsTArray<WebRenderCommand>& aCommands,
+                                          WebRenderDisplayItemLayer* aLayer)
+{
+  MOZ_ASSERT(mBorderRenderer.isSome());
+
+  Rect outlineTransformedRect = aLayer->RelativeToParent(mBorderRenderer->mOuterRect);
+
+  nsCSSBorderRenderer* br = mBorderRenderer.ptr();
+  WrBorderSide side[4];
+  NS_FOR_CSS_SIDES(i) {
+    side[i] = wr::ToWrBorderSide(br->mBorderWidths[i], ToDeviceColor(br->mBorderColors[i]), br->mBorderStyles[i]);
+  }
+  WrBorderRadius borderRadius = wr::ToWrBorderRadius(LayerSize(br->mBorderRadii[0].width, br->mBorderRadii[0].height),
+                                                     LayerSize(br->mBorderRadii[1].width, br->mBorderRadii[1].height),
+                                                     LayerSize(br->mBorderRadii[3].width, br->mBorderRadii[3].height),
+                                                     LayerSize(br->mBorderRadii[2].width, br->mBorderRadii[2].height));
+  aCommands.AppendElement(OpDPPushBorder(wr::ToWrRect(outlineTransformedRect),
+                                         wr::ToWrRect(outlineTransformedRect),
+                                         side[0], side[1], side[2], side[3],
+                                         borderRadius));
+}
+
 bool
 nsDisplayOutline::IsInvisibleInRect(const nsRect& aRect)
 {
@@ -4771,45 +4850,54 @@ nsDisplayBoxShadowOuter::CreateWebRenderCommands(nsTArray<WebRenderCommand>& aCo
   if (!shadows)
     return;
 
+  bool hasBorderRadius;
+  bool nativeTheme = nsCSSRendering::HasBoxShadowNativeTheme(mFrame,
+                                                             hasBorderRadius);
+
   // Everything here is in app units, change to device units.
   for (uint32_t i = 0; i < rects.Length(); ++i) {
     Rect clipRect = NSRectToRect(rects[i], appUnitsPerDevPixel);
-    Rect gfxBorderRect = NSRectToRect(borderRect, appUnitsPerDevPixel);
+    nsCSSShadowArray* shadows = mFrame->StyleEffects()->mBoxShadow;
 
-    Rect deviceClipRect = aLayer->RelativeToParent(clipRect);
-    Rect deviceBoxRect = aLayer->RelativeToParent(gfxBorderRect);
+    for (uint32_t j = shadows->Length(); j  > 0; j--) {
+      nsCSSShadowItem* shadow = shadows->ShadowAt(j - 1);
+      // Don't need the full size of the shadow rect like we do in
+      // nsCSSRendering since WR takes care of calculations for blur
+      // and spread radius.
+      nsRect shadowRect = nsCSSRendering::GetShadowRect(borderRect,
+                                                        nativeTheme,
+                                                        mFrame);
+      gfx::Color shadowColor = nsCSSRendering::GetShadowColor(shadow,
+                                                              mFrame,
+                                                              mOpacity);
+      shadowRect.MoveBy(shadow->mXOffset, shadow->mYOffset);
 
-    for (uint32_t j = shadows->Length(); j > 0; --j) {
-      nsCSSShadowItem* shadowItem = shadows->ShadowAt(j - 1);
-      nscoord blurRadius = shadowItem->mRadius;
-      float gfxBlurRadius = blurRadius / appUnitsPerDevPixel;
+      // Now translate everything to device pixels.
+      Point shadowOffset;
+      shadowOffset.x = (shadow->mXOffset / appUnitsPerDevPixel);
+      shadowOffset.y = (shadow->mYOffset / appUnitsPerDevPixel);
 
-      // TODO: Have to refactor our nsCSSRendering
-      // to get the acual rects correct.
-      nscolor shadowColor;
-      if (shadowItem->mHasColor)
-        shadowColor = shadowItem->mColor;
-      else
-        shadowColor = mFrame->StyleColor()->mColor;
+      Rect deviceBoxRect = NSRectToRect(shadowRect, appUnitsPerDevPixel);
+      deviceBoxRect = aLayer->RelativeToParent(deviceBoxRect);
 
-      Color gfxShadowColor(Color::FromABGR(shadowColor));
-      gfxShadowColor.a *= mOpacity;
+      Rect deviceClipRect = aLayer->RelativeToParent(clipRect + shadowOffset);
 
-      WrPoint offset;
-      offset.x = shadowItem->mXOffset;
-      offset.y = shadowItem->mYOffset;
+      float blurRadius = shadow->mRadius / appUnitsPerDevPixel;
+      // TODO: Calculate the border radius here.
+      float borderRadius = 0.0;
+      float spreadRadius = shadow->mSpread / appUnitsPerDevPixel;
 
       aCommands.AppendElement(OpDPPushBoxShadow(
                               wr::ToWrRect(deviceBoxRect),
                               wr::ToWrRect(deviceClipRect),
                               wr::ToWrRect(deviceBoxRect),
-                              offset,
-                              wr::ToWrColor(gfxShadowColor),
-                              gfxBlurRadius,
-                              0,
-                              0,
+                              wr::ToWrPoint(shadowOffset),
+                              wr::ToWrColor(shadowColor),
+                              blurRadius,
+                              spreadRadius,
+                              borderRadius,
                               WrBoxShadowClipMode::Outset
-      ));
+                              ));
     }
   }
 }
@@ -5570,7 +5658,7 @@ nsDisplayOwnLayer::BuildLayer(nsDisplayListBuilder* aBuilder,
     layer->SetScrollbarData(mScrollTarget, ScrollDirection::HORIZONTAL, mScrollbarThumbRatio);
   }
   if (mFlags & SCROLLBAR_CONTAINER) {
-    layer->SetIsScrollbarContainer();
+    layer->SetIsScrollbarContainer(mScrollTarget);
   }
 
   if (mFlags & GENERATE_SUBDOC_INVALIDATIONS) {
@@ -7616,7 +7704,7 @@ ComputeMaskGeometry(PaintFramesParams& aParams)
                                        false, /* aWillPaintBorder */
                                        appUnitsPerDevPixel,
                                        &clipState);
-      currentMaskSurfaceRect = clipState.mDirtyRectGfx;
+      currentMaskSurfaceRect = clipState.mDirtyRectInDevPx;
     }
 
     maskInUserSpace = maskInUserSpace.Union(currentMaskSurfaceRect);

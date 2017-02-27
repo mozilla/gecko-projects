@@ -78,6 +78,7 @@ class nsCSSBorderRenderer final
   typedef mozilla::gfx::StrokeOptions StrokeOptions;
 
   friend class nsDisplayBorder;
+  friend class nsDisplayOutline;
 
 public:
 
@@ -121,7 +122,7 @@ private:
 
   // destination DrawTarget and dirty rect
   DrawTarget* mDrawTarget;
-  const Rect mDirtyRect;
+  Rect mDirtyRect;
 
   // the rectangle of the outside and the inside of the border
   Rect mOuterRect;
@@ -179,7 +180,8 @@ private:
   // Return start or end point for dashed/dotted side
   Point GetStraightBorderPoint(mozilla::Side aSide,
                                mozilla::Corner aCorner,
-                               bool* aIsUnfilled);
+                               bool* aIsUnfilled,
+                               Float aDotOffset = 0.0f);
 
   // Return bezier control points for the outer and the inner curve for given
   // corner

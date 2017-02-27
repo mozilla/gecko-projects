@@ -21,6 +21,7 @@
 #include "mediasink/OutputStreamManager.h"
 #include "mediasink/VideoSink.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/IndexSequence.h"
 #include "mozilla/Logging.h"
 #include "mozilla/mozalloc.h"
 #include "mozilla/MathAlgorithms.h"
@@ -29,6 +30,7 @@
 #include "mozilla/SizePrintfMacros.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TaskQueue.h"
+#include "mozilla/Tuple.h"
 
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
@@ -284,17 +286,35 @@ protected:
   MediaQueue<MediaData>& AudioQueue() const { return mMaster->mAudioQueue; }
   MediaQueue<MediaData>& VideoQueue() const { return mMaster->mVideoQueue; }
 
+  template <class S, typename... Args, size_t... Indexes>
+  auto
+  CallEnterMemberFunction(S* aS,
+                          Tuple<Args...>& aTuple,
+                          IndexSequence<Indexes...>)
+    -> decltype(ReturnTypeHelper(&S::Enter))
+  {
+    return aS->Enter(Move(Get<Indexes>(aTuple))...);
+  }
+
   // Note this function will delete the current state object.
   // Don't access members to avoid UAF after this call.
   template <class S, typename... Ts>
-  auto SetState(Ts... aArgs)
+  auto SetState(Ts&&... aArgs)
     -> decltype(ReturnTypeHelper(&S::Enter))
   {
+    // |aArgs| must be passed by reference to avoid passing MOZ_NON_PARAM class
+    // SeekJob by value.  See bug 1287006 and bug 1338374.  But we still *must*
+    // copy the parameters, because |Exit()| can modify them.  See bug 1312321.
+    // So we 1) pass the parameters by reference, but then 2) immediately copy
+    // them into a Tuple to be safe against modification, and finally 3) move
+    // the elements of the Tuple into the final function call.
+    auto copiedArgs = MakeTuple(Forward<Ts>(aArgs)...);
+
     // keep mMaster in a local object because mMaster will become invalid after
     // the current state object is deleted.
     auto master = mMaster;
 
-    auto s = new S(master);
+    auto* s = new S(master);
 
     MOZ_ASSERT(GetState() != s->GetState()
                || GetState() == DECODER_STATE_SEEKING);
@@ -304,7 +324,8 @@ protected:
     Exit();
 
     master->mStateObj.reset(s);
-    return s->Enter(Move(aArgs)...);
+    return CallEnterMemberFunction(s, copiedArgs,
+                                   typename IndexSequenceFor<Ts...>::Type());
   }
 
   RefPtr<MediaDecoder::SeekPromise>
@@ -904,7 +925,7 @@ class MediaDecoderStateMachine::SeekingState
 public:
   explicit SeekingState(Master* aPtr) : StateObject(aPtr) { }
 
-  RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob aSeekJob,
+  RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob&& aSeekJob,
                                           EventVisibility aVisibility)
   {
     mSeekJob = Move(aSeekJob);
@@ -982,7 +1003,7 @@ public:
   {
   }
 
-  RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob aSeekJob,
+  RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob&& aSeekJob,
                                           EventVisibility aVisibility)
   {
     MOZ_ASSERT(aSeekJob.mTarget->IsAccurate() || aSeekJob.mTarget->IsFast());
@@ -1441,7 +1462,7 @@ public:
   {
   }
 
-  RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob aSeekJob,
+  RefPtr<MediaDecoder::SeekPromise> Enter(SeekJob&& aSeekJob,
                                           EventVisibility aVisibility)
   {
     MOZ_ASSERT(aSeekJob.mTarget->IsNextFrame());
@@ -2784,6 +2805,11 @@ bool MediaDecoderStateMachine::IsPlaying() const
   return mMediaSink->IsPlaying();
 }
 
+void MediaDecoderStateMachine::SetMediaNotSeekable()
+{
+  mMediaSeekable = false;
+}
+
 nsresult MediaDecoderStateMachine::Init(MediaDecoder* aDecoder)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -2801,9 +2827,7 @@ nsresult MediaDecoderStateMachine::Init(MediaDecoder* aDecoder)
   mMetadataManager.Connect(mReader->TimedMetadataEvent(), OwnerThread());
 
   mOnMediaNotSeekable = mReader->OnMediaNotSeekable().Connect(
-    OwnerThread(), [this] () {
-      mMediaSeekable = false;
-    });
+    OwnerThread(), this, &MediaDecoderStateMachine::SetMediaNotSeekable);
 
   mMediaSink = CreateMediaSink(mAudioCaptured);
 
@@ -3091,9 +3115,10 @@ MediaDecoderStateMachine::RequestAudioData()
   SAMPLE_LOG("Queueing audio task - queued=%" PRIuSIZE ", decoder-queued=%" PRIuSIZE,
              AudioQueue().GetSize(), mReader->SizeOfAudioQueueInFrames());
 
+  RefPtr<MediaDecoderStateMachine> self = this;
   mReader->RequestAudioData()->Then(
     OwnerThread(), __func__,
-    [this] (MediaData* aAudio) {
+    [this, self] (MediaData* aAudio) {
       MOZ_ASSERT(aAudio);
       mAudioDataRequest.Complete();
       // audio->GetEndTime() is not always mono-increasing in chained ogg.
@@ -3103,7 +3128,7 @@ MediaDecoderStateMachine::RequestAudioData()
                  aAudio->GetEndTime());
       mStateObj->HandleAudioDecoded(aAudio);
     },
-    [this] (const MediaResult& aError) {
+    [this, self] (const MediaResult& aError) {
       SAMPLE_LOG("OnAudioNotDecoded aError=%" PRIu32, static_cast<uint32_t>(aError.Code()));
       mAudioDataRequest.Complete();
       switch (aError.Code()) {
@@ -3137,9 +3162,10 @@ MediaDecoderStateMachine::RequestVideoData(bool aSkipToNextKeyframe,
     aSkipToNextKeyframe, aCurrentTime.ToMicroseconds());
 
   TimeStamp videoDecodeStartTime = TimeStamp::Now();
+  RefPtr<MediaDecoderStateMachine> self = this;
   mReader->RequestVideoData(aSkipToNextKeyframe, aCurrentTime)->Then(
     OwnerThread(), __func__,
-    [this, videoDecodeStartTime] (MediaData* aVideo) {
+    [this, self, videoDecodeStartTime] (MediaData* aVideo) {
       MOZ_ASSERT(aVideo);
       mVideoDataRequest.Complete();
       // Handle abnormal or negative timestamps.
@@ -3149,7 +3175,7 @@ MediaDecoderStateMachine::RequestVideoData(bool aSkipToNextKeyframe,
                  aVideo->GetEndTime());
       mStateObj->HandleVideoDecoded(aVideo, videoDecodeStartTime);
     },
-    [this] (const MediaResult& aError) {
+    [this, self] (const MediaResult& aError) {
       SAMPLE_LOG("OnVideoNotDecoded aError=%" PRIu32 , static_cast<uint32_t>(aError.Code()));
       mVideoDataRequest.Complete();
       switch (aError.Code()) {
@@ -3173,29 +3199,30 @@ MediaDecoderStateMachine::WaitForData(MediaData::Type aType)
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(aType == MediaData::AUDIO_DATA || aType == MediaData::VIDEO_DATA);
+  RefPtr<MediaDecoderStateMachine> self = this;
   if (aType == MediaData::AUDIO_DATA) {
     mReader->WaitForData(MediaData::AUDIO_DATA)->Then(
       OwnerThread(), __func__,
-      [this] (MediaData::Type aType) {
-        mAudioWaitRequest.Complete();
+      [self] (MediaData::Type aType) {
+        self->mAudioWaitRequest.Complete();
         MOZ_ASSERT(aType == MediaData::AUDIO_DATA);
-        mStateObj->HandleAudioWaited(aType);
+        self->mStateObj->HandleAudioWaited(aType);
       },
-      [this] (const WaitForDataRejectValue& aRejection) {
-        mAudioWaitRequest.Complete();
-        DecodeError(NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA);
+      [self] (const WaitForDataRejectValue& aRejection) {
+        self->mAudioWaitRequest.Complete();
+        self->DecodeError(NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA);
       })->Track(mAudioWaitRequest);
   } else {
     mReader->WaitForData(MediaData::VIDEO_DATA)->Then(
       OwnerThread(), __func__,
-      [this] (MediaData::Type aType) {
-        mVideoWaitRequest.Complete();
+      [self] (MediaData::Type aType) {
+        self->mVideoWaitRequest.Complete();
         MOZ_ASSERT(aType == MediaData::VIDEO_DATA);
-        mStateObj->HandleVideoWaited(aType);
+        self->mStateObj->HandleVideoWaited(aType);
       },
-      [this] (const WaitForDataRejectValue& aRejection) {
-        mVideoWaitRequest.Complete();
-        DecodeError(NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA);
+      [self] (const WaitForDataRejectValue& aRejection) {
+        self->mVideoWaitRequest.Complete();
+        self->DecodeError(NS_ERROR_DOM_MEDIA_WAITING_FOR_DATA);
       })->Track(mVideoWaitRequest);
   }
 }
@@ -3556,9 +3583,10 @@ MediaDecoderStateMachine::ScheduleStateMachineIn(int64_t aMicroseconds)
 
   // It is OK to capture 'this' without causing UAF because the callback
   // always happens before shutdown.
-  mDelayedScheduler.Ensure(target, [this] () {
-    mDelayedScheduler.CompleteRequest();
-    RunStateMachine();
+  RefPtr<MediaDecoderStateMachine> self = this;
+  mDelayedScheduler.Ensure(target, [self] () {
+    self->mDelayedScheduler.CompleteRequest();
+    self->RunStateMachine();
   }, [] () {
     MOZ_DIAGNOSTIC_ASSERT(false);
   });
@@ -3775,8 +3803,9 @@ MediaDecoderStateMachine::RequestDebugInfo()
 {
   using PromiseType = MediaDecoder::DebugInfoPromise;
   RefPtr<PromiseType::Private> p = new PromiseType::Private(__func__);
-  OwnerThread()->Dispatch(NS_NewRunnableFunction([this, p] () {
-    p->Resolve(GetDebugInfo(), __func__);
+  RefPtr<MediaDecoderStateMachine> self = this;
+  OwnerThread()->Dispatch(NS_NewRunnableFunction([self, p] () {
+    p->Resolve(self->GetDebugInfo(), __func__);
   }), AbstractThread::AssertDispatchSuccess, AbstractThread::TailDispatch);
   return p.forget();
 }

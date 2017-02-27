@@ -23,7 +23,7 @@ const Menu = require("devtools/client/framework/menu");
 const MenuItem = require("devtools/client/framework/menu-item");
 
 const {HTMLBreadcrumbs} = require("devtools/client/inspector/breadcrumbs");
-const {ComputedViewTool} = require("devtools/client/inspector/computed/computed");
+const BoxModel = require("devtools/client/inspector/boxmodel/box-model");
 const {FontInspector} = require("devtools/client/inspector/fonts/fonts");
 const {InspectorSearch} = require("devtools/client/inspector/inspector-search");
 const {RuleViewTool} = require("devtools/client/inspector/rules/rules");
@@ -78,8 +78,6 @@ const PORTRAIT_MODE_WIDTH = 700;
  * - computed-view-sourcelinks-updated
  *      Fired when the stylesheet source links have been updated (when switching
  *      to source-mapped files)
- * - computed-view-filtered
- *      Fired when the computed rules view is filtered
  * - rule-view-refreshed
  *      Fired when the rule view updates to a new node
  * - rule-view-sourcelinks-updated
@@ -572,6 +570,10 @@ Inspector.prototype = {
       defaultTab == "computedview");
 
     this.ruleview = new RuleViewTool(this, this.panelWin);
+    this.boxmodel = new BoxModel(this, this.panelWin);
+
+    const {ComputedViewTool} =
+      this.browserRequire("devtools/client/inspector/computed/computed");
     this.computedview = new ComputedViewTool(this, this.panelWin);
 
     if (Services.prefs.getBoolPref("devtools.layoutview.enabled")) {
@@ -1290,7 +1292,7 @@ Inspector.prototype = {
     attributesSubmenu.append(new MenuItem({
       id: "node-menu-copy-attribute",
       label: INSPECTOR_L10N.getFormatStr("inspectorCopyAttributeValue.label",
-                                        isAttributeClicked ? `"${nodeInfo.value}"` : ""),
+                                        isAttributeClicked ? `${nodeInfo.value}` : ""),
       accesskey: INSPECTOR_L10N.getStr("inspectorCopyAttributeValue.accesskey"),
       disabled: !isAttributeClicked,
       click: () => this.onCopyAttributeValue(),
@@ -1298,7 +1300,7 @@ Inspector.prototype = {
     attributesSubmenu.append(new MenuItem({
       id: "node-menu-edit-attribute",
       label: INSPECTOR_L10N.getFormatStr("inspectorEditAttribute.label",
-                                        isAttributeClicked ? `"${nodeInfo.name}"` : ""),
+                                        isAttributeClicked ? `${nodeInfo.name}` : ""),
       accesskey: INSPECTOR_L10N.getStr("inspectorEditAttribute.accesskey"),
       disabled: !isAttributeClicked,
       click: () => this.onEditAttribute(),
@@ -1306,7 +1308,7 @@ Inspector.prototype = {
     attributesSubmenu.append(new MenuItem({
       id: "node-menu-remove-attribute",
       label: INSPECTOR_L10N.getFormatStr("inspectorRemoveAttribute.label",
-                                        isAttributeClicked ? `"${nodeInfo.name}"` : ""),
+                                        isAttributeClicked ? `${nodeInfo.name}` : ""),
       accesskey: INSPECTOR_L10N.getStr("inspectorRemoveAttribute.accesskey"),
       disabled: !isAttributeClicked,
       click: () => this.onRemoveAttribute(),

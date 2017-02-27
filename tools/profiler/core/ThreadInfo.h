@@ -57,7 +57,7 @@ class ThreadInfo {
 public:
   bool hasProfile() { return !!mBuffer; }
 
-  void addTag(const ProfileEntry& aTag);
+  void addTag(const ProfileBufferEntry& aTag);
 
   // Track a marker which has been inserted into the thread profile.
   // This marker can safely be deleted once the generation has
@@ -73,7 +73,7 @@ public:
   void BeginUnwind();
   virtual void EndUnwind();
 
-  void DuplicateLastSample();
+  void DuplicateLastSample(const mozilla::TimeStamp& aStartTime);
 
   ThreadResponsiveness* GetThreadResponsiveness() { return &mRespInfo; }
 
@@ -106,15 +106,6 @@ private:
 
   mozilla::UniquePtr<mozilla::Mutex> mMutex;
   ThreadResponsiveness mRespInfo;
-
-#if defined(GP_OS_linux) || defined(GP_OS_android)
-  // Only Linux is using a signal sender, instead of stopping the thread, so we
-  // need some space to store the data which cannot be collected in the signal
-  // handler code.
-public:
-  int64_t mRssMemory;
-  int64_t mUssMemory;
-#endif
 };
 
 #endif

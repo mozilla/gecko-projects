@@ -2834,9 +2834,7 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   // transplanting code, since it has no good way to handle errors. This uses
   // the untrusted script limit, which is not strictly necessary since no
   // actual script should run.
-  bool overrecursed = false;
-  JS_CHECK_RECURSION_CONSERVATIVE_DONT_REPORT(cx, overrecursed = true);
-  if (overrecursed) {
+  if (!js::CheckRecursionLimitConservativeDontReport(cx)) {
     NS_WARNING("Overrecursion in SetNewDocument");
     return NS_ERROR_FAILURE;
   }
@@ -3448,7 +3446,7 @@ nsGlobalWindow::SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
 
   // Check that the js visible opener matches!
   nsPIDOMWindowOuter* contentOpener = GetSanitizedOpener(aOpener);
-  MOZ_RELEASE_ASSERT(!contentOpener || !mTabGroup ||
+  MOZ_DIAGNOSTIC_ASSERT(!contentOpener || !mTabGroup ||
     mTabGroup == Cast(contentOpener)->mTabGroup);
 
   if (aOriginalOpener) {
@@ -4097,8 +4095,9 @@ CustomElementRegistry*
 nsGlobalWindow::CustomElements()
 {
   MOZ_RELEASE_ASSERT(IsInnerWindow());
+
   if (!mCustomElements) {
-      mCustomElements = CustomElementRegistry::Create(AsInner());
+    mCustomElements = new CustomElementRegistry(AsInner());
   }
 
   return mCustomElements;
@@ -9406,21 +9405,16 @@ public:
         nsAutoString addonId;
         if (NS_SUCCEEDED(pc->GetAddonId(addonId)) && !addonId.IsEmpty()) {
           // We want to nuke all references to the add-on compartment.
-          js::NukeCrossCompartmentWrappers(cx, js::AllCompartments(),
-                                           js::SingleCompartment(cpt),
-                                           win->IsInnerWindow() ? js::DontNukeWindowReferences
-                                                                : js::NukeWindowReferences);
-
-          // Now mark the compartment as nuked and non-scriptable.
-          auto compartmentPrivate = xpc::CompartmentPrivate::Get(cpt);
-          compartmentPrivate->wasNuked = true;
-          compartmentPrivate->scriptability.Block();
+          xpc::NukeAllWrappersForCompartment(cx, cpt,
+                                             win->IsInnerWindow() ? js::DontNukeWindowReferences
+                                                                  : js::NukeWindowReferences);
         } else {
           // We only want to nuke wrappers for the chrome->content case
           js::NukeCrossCompartmentWrappers(cx, BrowserCompartmentMatcher(),
                                            js::SingleCompartment(cpt),
                                            win->IsInnerWindow() ? js::DontNukeWindowReferences
-                                                                : js::NukeWindowReferences);
+                                                                : js::NukeWindowReferences,
+                                           js::NukeIncomingReferences);
         }
       }
     }

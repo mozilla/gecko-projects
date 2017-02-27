@@ -24,6 +24,7 @@
 #include "nsIObserver.h"
 #ifdef XP_WIN
 #include "nsWindowsHelpers.h"
+#include "sandboxPermissions.h"
 #endif
 
 #ifdef MOZ_CRASHREPORTER
@@ -34,9 +35,6 @@ class nsIProfileSaveEvent;
 class nsPluginTag;
 
 namespace mozilla {
-#ifdef MOZ_GECKO_PROFILER
-class ProfileGatherer;
-#endif
 
 namespace ipc {
 class CrashReporterHost;
@@ -88,7 +86,6 @@ protected:
 
     PPluginInstanceParent*
     AllocPPluginInstanceParent(const nsCString& aMimeType,
-                               const uint16_t& aMode,
                                const InfallibleTArray<nsCString>& aNames,
                                const InfallibleTArray<nsCString>& aValues)
                                override;
@@ -194,6 +191,14 @@ protected:
                                         const bool& shouldRegister,
                                         NPError* result) override;
 
+    virtual mozilla::ipc::IPCResult
+    AnswerGetFileName(const GetFileNameFunc& aFunc,
+                      const OpenFileNameIPC& aOfnIn,
+                      OpenFileNameRetIPC* aOfnOut, bool* aResult) override
+    {
+      return IPC_FAIL_NO_REASON(this);
+    }
+
 protected:
     void SetChildTimeout(const int32_t aChildTimeout);
     static void TimeoutChanged(const char* aPref, void* aModule);
@@ -214,7 +219,7 @@ protected:
 
     void SetPluginFuncs(NPPluginFuncs* aFuncs);
 
-    nsresult NPP_NewInternal(NPMIMEType pluginType, NPP instance, uint16_t mode,
+    nsresult NPP_NewInternal(NPMIMEType pluginType, NPP instance,
                              InfallibleTArray<nsCString>& names,
                              InfallibleTArray<nsCString>& values,
                              NPSavedData* saved, NPError* error);
@@ -282,7 +287,7 @@ protected:
     virtual nsresult NP_GetEntryPoints(NPPluginFuncs* pFuncs, NPError* error) override;
 #endif
     virtual nsresult NPP_New(NPMIMEType pluginType, NPP instance,
-                             uint16_t mode, int16_t argc, char* argn[],
+                             int16_t argc, char* argn[],
                              char* argv[], NPSavedData* saved,
                              NPError* error) override;
     virtual nsresult NPP_ClearSiteData(const char* site, uint64_t flags, uint64_t maxAge,
@@ -509,6 +514,12 @@ class PluginModuleChromeParent
     virtual mozilla::ipc::IPCResult
     AnswerGetKeyState(const int32_t& aVirtKey, int16_t* aRet) override;
 
+    // Proxy GetOpenFileName/GetSaveFileName on Windows.
+    virtual mozilla::ipc::IPCResult
+    AnswerGetFileName(const GetFileNameFunc& aFunc,
+                      const OpenFileNameIPC& aOfnIn,
+                      OpenFileNameRetIPC* aOfnOut, bool* aResult) override;
+
 private:
     virtual void
     EnteredCxxStack() override;
@@ -657,11 +668,14 @@ private:
     dom::ContentParent* mContentParent;
     nsCOMPtr<nsIObserver> mPluginOfflineObserver;
 #ifdef MOZ_GECKO_PROFILER
-    RefPtr<mozilla::ProfileGatherer> mGatherer;
+    bool mIsProfilerActive;
 #endif
     nsCString mProfile;
     bool mIsBlocklisted;
     static bool sInstantiated;
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+    mozilla::SandboxPermissions mSandboxPermissions;
+#endif
 };
 
 } // namespace plugins

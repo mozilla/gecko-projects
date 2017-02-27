@@ -230,6 +230,12 @@ var dataProviders = {
       data.autoStartStatus = -1;
     }
 
+    const keyGoogle = Services.urlFormatter.formatURL("%GOOGLE_API_KEY%").trim();
+    data.keyGoogleFound = keyGoogle != "no-google-api-key" && keyGoogle.length > 0;
+
+    const keyMozilla = Services.urlFormatter.formatURL("%MOZILLA_API_KEY%").trim();
+    data.keyMozillaFound = keyMozilla != "no-mozilla-api-key" && keyMozilla.length > 0;
+
     done(data);
   },
 
@@ -422,6 +428,7 @@ var dataProviders = {
     function GetWebGLInfo(data, keyPrefix, contextType) {
         data[keyPrefix + "Renderer"] = "-";
         data[keyPrefix + "Version"] = "-";
+        data[keyPrefix + "DriverExtensions"] = "-";
         data[keyPrefix + "Extensions"] = "-";
         data[keyPrefix + "WSIInfo"] = "-";
 
@@ -458,6 +465,10 @@ var dataProviders = {
 
         // //
 
+        data[keyPrefix + "Extensions"] = gl.getSupportedExtensions().join(" ");
+
+        // //
+
         let ext = gl.getExtension("MOZ_debug_get");
         // This extension is unconditionally available to chrome. No need to check.
         let vendor = ext.getParameter(gl.VENDOR);
@@ -465,7 +476,7 @@ var dataProviders = {
 
         data[keyPrefix + "Renderer"] = vendor + " -- " + renderer;
         data[keyPrefix + "Version"] = ext.getParameter(gl.VERSION);
-        data[keyPrefix + "Extensions"] = ext.getParameter(ext.EXTENSIONS);
+        data[keyPrefix + "DriverExtensions"] = ext.getParameter(ext.EXTENSIONS);
         data[keyPrefix + "WSIInfo"] = ext.getParameter(ext.WSI_INFO);
 
         // //

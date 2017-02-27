@@ -2913,11 +2913,11 @@ PresShell::RecreateFramesFor(nsIContent* aContent)
   // Mark ourselves as not safe to flush while we're doing frame construction.
   ++mChangeNestCount;
   RestyleManager* restyleManager = mPresContext->RestyleManager();
-  nsresult rv = restyleManager->ProcessRestyledFrames(changeList);
+  restyleManager->ProcessRestyledFrames(changeList);
   restyleManager->FlushOverflowChangedTracker();
   --mChangeNestCount;
 
-  return rv;
+  return NS_OK;
 }
 
 void
@@ -3698,6 +3698,7 @@ void
 PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
                                   bool aFlushOnHoverChange)
 {
+  GeckoProfilerTracingRAII tracer("Paint", "DispatchSynthMouseMove");
   RestyleManager* restyleManager = mPresContext->RestyleManager();
   uint32_t hoverGenerationBefore =
     restyleManager->GetHoverGeneration();
@@ -4717,10 +4718,10 @@ PresShell::RenderDocument(const nsRect& aRect, uint32_t aFlags,
     if (view && view->GetWidget() &&
         nsLayoutUtils::GetDisplayRootFrame(rootFrame) == rootFrame) {
       LayerManager* layerManager = view->GetWidget()->GetLayerManager();
-      // ClientLayerManagers in content processes don't support
-      // taking snapshots.
+      // ClientLayerManagers or WebRenderLayerManagers in content processes
+      // don't support taking snapshots.
       if (layerManager &&
-          (!layerManager->AsClientLayerManager() ||
+          (!layerManager->AsKnowsCompositor() ||
            XRE_IsParentProcess())) {
         flags |= PaintFrameFlags::PAINT_WIDGET_LAYERS;
       }
@@ -9217,7 +9218,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
   NS_ASSERTION(target == rootFrame ||
                desiredSize.ScrollableOverflow().IsEqualEdges(boundsRelativeToTarget),
                "non-root reflow roots must not have scrollable overflow");
-  NS_ASSERTION(status == NS_FRAME_COMPLETE,
+  NS_ASSERTION(status.IsEmpty(),
                "reflow roots should never split");
 
   target->SetSize(boundsRelativeToTarget.Size());

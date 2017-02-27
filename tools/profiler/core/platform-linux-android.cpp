@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 // Copyright (c) 2006-2011 The Chromium Authors. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -28,9 +30,6 @@
 
 // This file is used for both Linux and Android.
 
-/*
-# vim: sw=2
-*/
 #include <stdio.h>
 #include <math.h>
 
@@ -62,10 +61,8 @@
 #include <stdarg.h>
 
 #include "prenv.h"
-#include "mozilla/Atomics.h"
 #include "mozilla/LinuxSignal.h"
 #include "mozilla/DebugOnly.h"
-#include "ProfileEntry.h"
 
 // Memory profile
 #include "nsMemoryReporterManager.h"
@@ -75,14 +72,12 @@
 
 using namespace mozilla;
 
-// All accesses to these two variables are on the main thread, so no locking is
+// All accesses to this variable are on the main thread, so no locking is
 // needed.
-static bool gIsSigprofHandlerInstalled;
 static struct sigaction gOldSigprofHandler;
 
-// All accesses to these two variables are on the main thread, so no locking is
+// All accesses to this variable are on the main thread, so no locking is
 // needed.
-static bool gHasSigprofSenderLaunched;
 static pthread_t gSigprofSenderThread;
 
 #if defined(USE_LUL_STACKWALK)
@@ -146,7 +141,15 @@ static void* setup_atfork() {
 }
 #endif /* !defined(GP_OS_android) */
 
-static mozilla::Atomic<ThreadInfo*> gCurrentThreadInfo;
+static int gIntervalMicro;
+
+// Global variables through which data is sent from SigprofSender() to
+// SigprofHandler(). gSignalHandlingDone provides inter-thread synchronization.
+static ThreadInfo* gCurrentThreadInfo;
+static int64_t gRssMemory;
+static int64_t gUssMemory;
+
+// Semaphore used to coordinate SigprofSender() and SigprofHandler().
 static sem_t gSignalHandlingDone;
 
 static void SetSampleContext(TickSample* sample, void* context)
@@ -178,13 +181,6 @@ SigprofHandler(int signal, siginfo_t* info, void* context)
   // Avoid TSan warning about clobbering errno.
   int savedErrno = errno;
 
-  // XXX: this is an off-main-thread(?) use of gSampler
-  if (!gSampler) {
-    sem_post(&gSignalHandlingDone);
-    errno = savedErrno;
-    return;
-  }
-
   TickSample sample_obj;
   TickSample* sample = &sample_obj;
   sample->context = context;
@@ -193,12 +189,11 @@ SigprofHandler(int signal, siginfo_t* info, void* context)
   SetSampleContext(sample, context);
   sample->threadInfo = gCurrentThreadInfo;
   sample->timestamp = mozilla::TimeStamp::Now();
-  sample->rssMemory = sample->threadInfo->mRssMemory;
-  sample->ussMemory = sample->threadInfo->mUssMemory;
+  sample->rssMemory = gRssMemory;
+  sample->ussMemory = gUssMemory;
 
   Tick(sample);
 
-  gCurrentThreadInfo = NULL;
   sem_post(&gSignalHandlingDone);
   errno = savedErrno;
 }
@@ -290,7 +285,7 @@ SigprofSender(void* aArg)
         }
 
         if (info->Stack()->CanDuplicateLastSampleDueToSleep()) {
-          info->DuplicateLastSample();
+          info->DuplicateLastSample(gStartTime);
           continue;
         }
 
@@ -307,11 +302,11 @@ SigprofSender(void* aArg)
         // safe, and will have low variation between the emission of the signal
         // and the signal handler catch.
         if (isFirstProfiledThread && gProfileMemory) {
-          info->mRssMemory = nsMemoryReporterManager::ResidentFast();
-          info->mUssMemory = nsMemoryReporterManager::ResidentUnique();
+          gRssMemory = nsMemoryReporterManager::ResidentFast();
+          gUssMemory = nsMemoryReporterManager::ResidentUnique();
         } else {
-          info->mRssMemory = 0;
-          info->mUssMemory = 0;
+          gRssMemory = 0;
+          gUssMemory = 0;
         }
 
         // Profile from the signal handler for information which is signal safe
@@ -326,8 +321,13 @@ SigprofSender(void* aArg)
 #endif
         }
 
-        // Wait for the signal handler to run before moving on to the next one
+        // Wait for the signal handler to run before moving on to the next one.
         sem_wait(&gSignalHandlingDone);
+
+        gCurrentThreadInfo = nullptr;
+        gRssMemory = 0;
+        gUssMemory = 0;
+
         isFirstProfiledThread = false;
       }
 #if defined(USE_LUL_STACKWALK)
@@ -340,11 +340,8 @@ SigprofSender(void* aArg)
 #endif
     }
 
-    // This off-main-thread use of gInterval is safe due to implicit
-    // synchronization -- this function cannot run at the same time as
-    // profiler_{start,stop}(), where gInterval is set.
     TimeStamp targetSleepEndTime =
-      sampleStart + TimeDuration::FromMicroseconds(gInterval * 1000);
+      sampleStart + TimeDuration::FromMicroseconds(gIntervalMicro);
     TimeStamp beforeSleep = TimeStamp::Now();
     TimeDuration targetSleepDuration = targetSleepEndTime - beforeSleep;
     double sleepTime = std::max(0.0, (targetSleepDuration - lastSleepOverhead).ToMicroseconds());
@@ -356,7 +353,7 @@ SigprofSender(void* aArg)
 }
 
 static void
-PlatformStart()
+PlatformStart(double aInterval)
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -370,11 +367,17 @@ PlatformStart()
   }
 #endif
 
+  gIntervalMicro = floor(aInterval * 1000 + 0.5);
+  if (gIntervalMicro <= 0) {
+    gIntervalMicro = 1;
+  }
+
   // Initialize signal handler communication
   gCurrentThreadInfo = nullptr;
+  gRssMemory = 0;
+  gUssMemory = 0;
   if (sem_init(&gSignalHandlingDone, /* pshared: */ 0, /* value: */ 0) != 0) {
-    LOG("Error initializing semaphore");
-    return;
+    MOZ_CRASH("Error initializing semaphore");
   }
 
   // Request profiling signals.
@@ -384,11 +387,9 @@ PlatformStart()
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESTART | SA_SIGINFO;
   if (sigaction(SIGPROF, &sa, &gOldSigprofHandler) != 0) {
-    LOG("Error installing signal");
-    return;
+    MOZ_CRASH("Error installing signal");
   }
   LOG("Signal installed");
-  gIsSigprofHandlerInstalled = true;
 
 #if defined(USE_LUL_STACKWALK)
   // Switch into unwind mode.  After this point, we can't add or
@@ -403,13 +404,10 @@ PlatformStart()
   }
 #endif
 
-  // Start a thread that sends SIGPROF signal to VM thread.
-  // Sending the signal ourselves instead of relying on itimer provides
-  // much better accuracy.
-  MOZ_ASSERT(!gIsActive);
-  gIsActive = true;
-  if (pthread_create(&gSigprofSenderThread, NULL, SigprofSender, NULL) == 0) {
-    gHasSigprofSenderLaunched = true;
+  // Start a thread that sends SIGPROF signal to VM thread. Sending the signal
+  // ourselves instead of relying on itimer provides much better accuracy.
+  if (pthread_create(&gSigprofSenderThread, NULL, SigprofSender, NULL) != 0) {
+    MOZ_CRASH("pthread_create failed");
   }
   LOG("Profiler thread started");
 }
@@ -419,21 +417,14 @@ PlatformStop()
 {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  MOZ_ASSERT(gIsActive);
-  gIsActive = false;
+  gIntervalMicro = 0;
 
-  // Wait for signal sender termination (it will exit after setting
-  // active_ to false).
-  if (gHasSigprofSenderLaunched) {
-    pthread_join(gSigprofSenderThread, NULL);
-    gHasSigprofSenderLaunched = false;
-  }
+  // Wait for SigprofSender() termination (SigprofSender() will exit because
+  // gIsActive has been set to false).
+  pthread_join(gSigprofSenderThread, NULL);
 
   // Restore old signal handler
-  if (gIsSigprofHandlerInstalled) {
-    sigaction(SIGPROF, &gOldSigprofHandler, 0);
-    gIsSigprofHandlerInstalled = false;
-  }
+  sigaction(SIGPROF, &gOldSigprofHandler, 0);
 }
 
 #if defined(GP_OS_android)
@@ -466,10 +457,12 @@ static uint32_t readCSVArray(char* csvList, const char** buffer) {
   return count;
 }
 
-// Currently support only the env variables
-// reported in read_profiler_env
-static void ReadProfilerVars(const char* fileName, const char** features,
-                            uint32_t* featureCount, const char** threadNames, uint32_t* threadCount) {
+// Support some of the env variables reported in ReadProfilerEnvVars, plus some
+// extra stuff.
+static void
+ReadProfilerVars(const char* fileName,
+                 const char** features, uint32_t* featureCount,
+                 const char** threadNames, uint32_t* threadCount) {
   FILE* file = fopen(fileName, "r");
   const int bufferSize = 1024;
   char line[bufferSize];
@@ -482,13 +475,11 @@ static void ReadProfilerVars(const char* fileName, const char** features,
       feature = strtok_r(line, "=", &savePtr);
       value = strtok_r(NULL, "", &savePtr);
 
-      if (strncmp(feature, PROFILER_INTERVAL, bufferSize) == 0) {
+      if (strncmp(feature, "MOZ_PROFILER_INTERVAL", bufferSize) == 0) {
         set_profiler_interval(value);
-      } else if (strncmp(feature, PROFILER_ENTRIES, bufferSize) == 0) {
+      } else if (strncmp(feature, "MOZ_PROFILER_ENTRIES", bufferSize) == 0) {
         set_profiler_entries(value);
-      } else if (strncmp(feature, PROFILER_STACK, bufferSize) == 0) {
-        set_profiler_scan(value);
-      } else if (strncmp(feature, PROFILER_FEATURES, bufferSize) == 0) {
+      } else if (strncmp(feature, "MOZ_PROFILER_FEATURES", bufferSize) == 0) {
         *featureCount = readCSVArray(value, features);
       } else if (strncmp(feature, "threads", bufferSize) == 0) {
         *threadCount = readCSVArray(value, threadNames);
@@ -515,9 +506,8 @@ static void DoStartTask() {
   MOZ_ASSERT(featureCount < 10);
   MOZ_ASSERT(threadCount < 10);
 
-  profiler_start(PROFILE_DEFAULT_ENTRY, 1,
-      features, featureCount,
-      threadNames, threadCount);
+  profiler_start(PROFILE_DEFAULT_ENTRIES, /* interval */ 1,
+                 features, featureCount, threadNames, threadCount);
 
   freeArray(threadNames, threadCount);
   freeArray(features, featureCount);

@@ -87,7 +87,7 @@ Any line which doesn't follow the format above would be ignored like comment.
   * test_bug389464.html: also font-size computation [1]
   * test_html_attribute_computed_values.html: also list-style-type [8]
 * test_bug387615.html: getComputedStyle value not updated bug 1331294 ##important## (when that gets fixed, servo/servo#15006) [1]
-* test_bug397427.html: @import issue bug 1331291 and CSSOM support of @import [2]
+* test_bug397427.html: @import issue bug 1331291 and CSSOM support of @import [3]
 * console support:
   * test_bug413958.html `monitorConsole` [3]
   * test_parser_diagnostics_unprintables.html [550]
@@ -107,7 +107,7 @@ Any line which doesn't follow the format above would be ignored like comment.
   * test_transitions_computed_values.html [10]
   * test_transitions_dynamic_changes.html [10]
   * test_transitions_step_functions.html [24]
-  * test_value_storage.html `transition` [635]
+  * test_value_storage.html `transition` [620]
 * test_bug798843_pref.html: conditional opentype svg support [7]
 * test_computed_style.html `gradient`: -moz-prefixed radient value [9]
 * url value in style attribute bug 1310886
@@ -118,11 +118,8 @@ Any line which doesn't follow the format above would be ignored like comment.
   * ... `url` [3]
 * test_computed_style.html `mask`: setting mask shorthand resets subproperties to non-initial value bug 1331516 [11]
 * auto value for min-{width,height} servo/servo#15045
-  * test_computed_style_min_size_auto.html [14]
-  * test_compute_data_with_start_struct.html `height` [4]
-  * ... `min-width` [2]
+  * test_compute_data_with_start_struct.html `height` [1]
   * ... ` width` [1]
-  * test_value_storage.html `'auto' on 'min-` [4]
 * test_compute_data_with_start_struct.html `timing-function`: incorrectly computing keywords to bezier function servo/servo#15086 [2]
 * test_condition_text.html: @-moz-document, CSSOM support of @media, @support [2]
 * @counter-style support:
@@ -142,7 +139,7 @@ Any line which doesn't follow the format above would be ignored like comment.
   * test_namespace_rule.html [17]
 * test_dont_use_document_colors.html: support of disabling document color [21]
 * test_exposed_prop_accessors.html: mainly various unsupported properties [*]
-* test_extra_inherit_initial.html: CSS-wide keywords are accepted as part of value servo/servo#15054 [930]
+* test_extra_inherit_initial.html: CSS-wide keywords are accepted as part of value servo/servo#15054 [822]
 * flex-basis glue not implemented bug 1331529
   * test_flexbox_flex_shorthand.html `flex-basis` [28]
   * test_flexbox_layout.html [355]
@@ -221,7 +218,7 @@ Any line which doesn't follow the format above would be ignored like comment.
     * test_inherit_storage.html `transform`: for -moz-transform [3]
     * test_initial_computation.html `-moz-transform`: need different parsing rules [4]
     * test_initial_storage.html `transform`: for -moz-transform [6]
-    * test_value_storage.html `-moz-transform`: need different parsing rules [280]
+    * test_value_storage.html `-moz-transform`: need different parsing rules [284]
   * test_variables.html `var(--var6)`: -x-system-font [1]
 * Unimplemented CSS properties:
   * will-change longhand property
@@ -314,13 +311,8 @@ Any line which doesn't follow the format above would be ignored like comment.
     * test_initial_computation.html `counter-increment` [4]
     * test_initial_storage.html `counter-increment` [4]
     * test_value_storage.html `counter-increment` [30]
-  * clip property
-    * test_compute_data_with_start_struct.html `clip` [2]
-    * test_inherit_computation.html `clip` [2]
-    * test_inherit_storage.html `clip` [2]
-    * test_initial_computation.html `'clip'` [4]
-    * test_initial_storage.html `clip` [4]
-    * test_value_storage.html `on 'clip'` [12]
+  * clip property: servo/servo#15729
+    * test_value_storage.html `should be idempotent for 'clip` [4]
   * font-feature-settings property
     * test_compute_data_with_start_struct.html `font-feature-settings` [2]
     * test_inherit_computation.html `font-feature-settings` [8]
@@ -392,7 +384,6 @@ Any line which doesn't follow the format above would be ignored like comment.
     * test_pointer-events.html [2]
     * test_value_storage.html `pointer-events` [8]
   * new syntax of rgba?() and hsla?() functions servo/rust-cssparser#113
-    * test_parse_rule.html `128.0` [1]
     * test_value_storage.html `'color'` [37]
     * ... `rgb(100, 100.0, 100)` [1]
   * color interpolation hint not supported servo/servo#15166
@@ -402,7 +393,7 @@ Any line which doesn't follow the format above would be ignored like comment.
     * ... `mask-repeat` [24]
   * lack glue for function values of content property bug 1296477
     * test_rule_insertion.html `decimal counter` [3]
-    * test_value_storage.html `'content` [41]
+    * test_value_storage.html `'content` [40]
   * SVG-in-OpenType values not supported servo/servo#15211
     * test_value_storage.html `context-` [2]
   * writing-mode: sideways-{lr,rl} and SVG values servo/servo#15213
@@ -433,10 +424,12 @@ Any line which doesn't follow the format above would be ignored like comment.
     * ... `circle(at ` [2]
     * ... `ellipse(at ` [2]
   * accepts rubbish for second part of value:
-    * {transform,perspective}-origin servo/servo#15487
-      * test_property_syntax_errors.html `transform-origin'` [50]
-      * ... `perspective-origin'` [30]
     * test_property_syntax_errors.html `'text-overflow'`: servo/servo#15491 [8]
+  * -moz-alt-content parsing is wrong: servo/servo#15726
+    * test_property_syntax_errors.html `-moz-alt-content` [4]
+  * {transform,perspective}-origin fail to parse 'center left' and 'center right' servo/servo#15750
+    * test_value_storage.html `'center left'` [8]
+    * ... `'center right'` [8]
 * Incorrect serialization
   * border-radius and -moz-outline-radius shorthand servo/servo#15169
     * test_priority_preservation.html `border-radius` [4]
@@ -464,9 +457,6 @@ Any line which doesn't follow the format above would be ignored like comment.
     * test_shorthand_property_getters.html `should not be able to serialize border` [7]
   * color value not canonicalized servo/servo#15397
     * test_shorthand_property_getters.html `should condense to canonical case` [2]
-  * animation and transition shorthand serialization is wrong servo/servo#15398
-    * test_shorthand_property_getters.html `animation` [9]
-    * ... `transition` [5]
   * background-position invalid 3-value form **issue to be filed**
     * test_shorthand_property_getters.html `should serialize to 4-value` [2]
   * test_variables.html `--weird`: name of custom property is not escaped properly servo/servo#15399 [1]
@@ -475,8 +465,6 @@ Any line which doesn't follow the format above would be ignored like comment.
   * :default ##easy##
     * test_bug302186.html [24]
   * test_bug98997.html: pseudo-class :empty and :-moz-only-whitespace bug 1337068 [75]
-  * :lang() servo/servo#15415
-    * test_parse_rule.html `:lang` [2]
   * :-moz-{first,last}-node
     * test_selectors.html `:-moz-` [4]
     * ... `unexpected rule index` [2]
@@ -493,7 +481,6 @@ Any line which doesn't follow the format above would be ignored like comment.
 * rounding issue
   * test_value_storage.html `33.5833px` [2]
   * ... `0.766667px` [2]
-  * ... `75.5667px` [2]
   * ... `105.333px` [2]
 * test_viewport_units.html: viewport units support [12]
 * test_value_storage.html `: var(--a)`: extra whitespace is added for shorthand with variables servo/servo#15295 [*]
@@ -521,7 +508,7 @@ Any line which doesn't follow the format above would be ignored like comment.
     * ... ` 2 ` [26]
     * ... `: 5 ` [84]
     * ... `border-spacing: ` [6]
-    * ... `rect(1, ` [1]
+    * ... `rect(1, ` [2]
 * test_pseudoelement_parsing.html: support parsing some pseudo-classes on some pseudo-elements [5]
 * Unit should be preserved after parsing servo/servo#15346
   * test_units_length.html [5]
@@ -534,7 +521,6 @@ Any line which doesn't follow the format above would be ignored like comment.
   * test_variable_serialization_computed.html [36]
   * test_variables.html `custom property name` [2]
 * test_css_supports.html: issues around @supports syntax servo/servo#15482 [8]
-* test_load_events_on_stylesheets.html: stylesheets from data uri are not sync loaded [3]
 
 ## Assertions
 
@@ -542,10 +528,10 @@ Any line which doesn't follow the format above would be ignored like comment.
   * assertion in frame constructor bug 1324704
     * test_rule_insertion.html asserts [1]
   * assertion in computed style bug 1337635
-    * test_value_cloning.html asserts [24]
+    * test_value_cloning.html asserts [12]
     * test_value_computation.html asserts [24]
     * test_value_storage.html asserts [44]
-* test_value_cloning.html asserts: negative radius bug 1337618 [6]
+* test_value_cloning.html asserts: negative radius bug 1337618 [4]
 
 ## Need Gecko change
 
@@ -570,6 +556,7 @@ Any line which doesn't follow the format above would be ignored like comment.
 * test_selectors_on_anonymous_content.html: xbl and :nth-child [1]
 * test_variables.html `url`: url in custom property [1]
 * test_pseudoelement_state.html: doesn't seem to work at all, but only range-thumb fails... [4]
+* test_parse_rule.html `rgb(0, 128, 0)`: color properties not getting computed [8]
 
 ## Ignore
 

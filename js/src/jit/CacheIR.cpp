@@ -159,6 +159,8 @@ GetPropIRGenerator::tryAttachStub()
                 return true;
             if (tryAttachWindowProxy(obj, objId, id))
                 return true;
+            if (tryAttachCrossCompartmentWrapper(obj, objId, id))
+                return true;
             if (tryAttachFunction(obj, objId, id))
                 return true;
             if (tryAttachProxy(obj, objId, id))
@@ -265,7 +267,7 @@ IsCacheableNoProperty(JSContext* cx, JSObject* obj, JSObject* holder, Shape* sha
 
     // If we're doing a name lookup, we have to throw a ReferenceError. If
     // extra warnings are enabled, we may have to report a warning.
-    if (*pc == JSOP_GETXPROP || cx->compartment()->behaviors().extraWarnings(cx))
+    if (*pc == JSOP_GETBOUNDNAME || cx->compartment()->behaviors().extraWarnings(cx))
         return false;
 
     return CheckHasNoSuchProperty(cx, obj, id);
@@ -435,11 +437,14 @@ EmitReadSlotResult(CacheIRWriter& writer, JSObject* obj, JSObject* holder,
 }
 
 static void
-EmitReadSlotReturn(CacheIRWriter& writer, JSObject*, JSObject* holder, Shape* shape)
+EmitReadSlotReturn(CacheIRWriter& writer, JSObject*, JSObject* holder, Shape* shape,
+                   bool wrapResult = false)
 {
     // Slot access.
     if (holder) {
         MOZ_ASSERT(shape);
+        if (wrapResult)
+            writer.wrapResult();
         writer.typeMonitorResult();
     } else {
         // Normally for this op, the result would have to be monitored by TI.
@@ -591,6 +596,78 @@ GetPropIRGenerator::tryAttachWindowProxy(HandleObject obj, ObjOperandId objId, H
     }
 
     MOZ_CRASH("Unreachable");
+}
+
+bool
+GetPropIRGenerator::tryAttachCrossCompartmentWrapper(HandleObject obj, ObjOperandId objId,
+                                                     HandleId id)
+{
+    // We can only optimize this very wrapper-handler, because others might
+    // have a security policy.
+    if (!IsWrapper(obj) || Wrapper::wrapperHandler(obj) != &CrossCompartmentWrapper::singleton)
+        return false;
+
+    RootedObject unwrapped(cx_, Wrapper::wrappedObject(obj));
+    MOZ_ASSERT(unwrapped == UnwrapOneChecked(obj));
+
+    // If we allowed different zones we would have to wrap strings.
+    if (unwrapped->compartment()->zone() != cx_->compartment()->zone())
+        return false;
+
+    AutoCompartment ac(cx_, unwrapped);
+
+    // The first CCW for iframes is almost always wrapping another WindowProxy
+    // so we optimize for that case as well.
+    bool isWindowProxy = IsWindowProxy(unwrapped);
+    if (isWindowProxy) {
+        MOZ_ASSERT(ToWindowIfWindowProxy(unwrapped) == unwrapped->compartment()->maybeGlobal());
+        unwrapped = cx_->global();
+        MOZ_ASSERT(unwrapped);
+    }
+
+    RootedShape shape(cx_);
+    RootedNativeObject holder(cx_);
+    NativeGetPropCacheability canCache =
+        CanAttachNativeGetProp(cx_, unwrapped, id, &holder, &shape, pc_, canAttachGetter_,
+                               isTemporarilyUnoptimizable_);
+    if (canCache != CanAttachReadSlot)
+        return false;
+
+    if (holder) {
+        EnsureTrackPropertyTypes(cx_, holder, id);
+        if (unwrapped == holder) {
+            // See the comment in StripPreliminaryObjectStubs.
+            if (IsPreliminaryObject(unwrapped))
+                preliminaryObjectAction_ = PreliminaryObjectAction::NotePreliminary;
+            else
+                preliminaryObjectAction_ = PreliminaryObjectAction::Unlink;
+        }
+    }
+
+    maybeEmitIdGuard(id);
+    writer.guardIsProxy(objId);
+    writer.guardIsCrossCompartmentWrapper(objId);
+
+    // Load the object wrapped by the CCW
+    ObjOperandId wrapperTargetId = writer.loadWrapperTarget(objId);
+
+    // If the compartment of the wrapped object is different we should fail.
+    writer.guardCompartment(wrapperTargetId, unwrapped->compartment());
+
+    ObjOperandId unwrappedId = wrapperTargetId;
+    if (isWindowProxy) {
+        // For the WindowProxy case also unwrap the inner window.
+        // We avoid loadObject, because storing cross compartment objects in
+        // stubs / JIT code is tricky.
+        writer.guardClass(wrapperTargetId, GuardClassKind::WindowProxy);
+        unwrappedId = writer.loadWrapperTarget(wrapperTargetId);
+    }
+
+    EmitReadSlotResult(writer, unwrapped, holder, shape, unwrappedId);
+    EmitReadSlotReturn(writer, unwrapped, holder, shape, /* wrapResult = */ true);
+
+    trackAttached("CCWSlot");
+    return true;
 }
 
 bool
@@ -1848,17 +1925,17 @@ IRGenerator::maybeGuardInt32Index(const Value& index, ValOperandId indexId,
 
 SetPropIRGenerator::SetPropIRGenerator(JSContext* cx, HandleScript script, jsbytecode* pc,
                                        CacheKind cacheKind, bool* isTemporarilyUnoptimizable,
-                                       HandleValue lhsVal, HandleValue idVal, HandleValue rhsVal)
+                                       HandleValue lhsVal, HandleValue idVal, HandleValue rhsVal,
+                                       bool needsTypeBarrier, bool maybeHasExtraIndexedProps)
   : IRGenerator(cx, script, pc, cacheKind),
     lhsVal_(lhsVal),
     idVal_(idVal),
     rhsVal_(rhsVal),
     isTemporarilyUnoptimizable_(isTemporarilyUnoptimizable),
+    typeCheckInfo_(cx, needsTypeBarrier),
     preliminaryObjectAction_(PreliminaryObjectAction::None),
     attachedTypedArrayOOBStub_(false),
-    updateStubGroup_(cx),
-    updateStubId_(cx, JSID_EMPTY),
-    needUpdateStub_(false)
+    maybeHasExtraIndexedProps_(maybeHasExtraIndexedProps)
 {}
 
 bool
@@ -1983,12 +2060,12 @@ SetPropIRGenerator::tryAttachNativeSetSlot(HandleObject obj, ObjOperandId objId,
 
     maybeEmitIdGuard(id);
 
-    // For Baseline, we have to guard on both the shape and group, because the
-    // type update IC applies to a single group. When we port the Ion IC, we can
-    // do a bit better and avoid the group guard if we don't have to guard on
-    // the property types.
+    // If we need a property type barrier (always in Baseline, sometimes in
+    // Ion), guard on both the shape and the group. If Ion knows the property
+    // types match, we don't need the group guard.
     NativeObject* nobj = &obj->as<NativeObject>();
-    writer.guardGroup(objId, nobj->group());
+    if (typeCheckInfo_.needsTypeBarrier())
+        writer.guardGroup(objId, nobj->group());
     writer.guardShape(objId, nobj->lastProperty());
 
     if (IsPreliminaryObject(obj))
@@ -1996,7 +2073,7 @@ SetPropIRGenerator::tryAttachNativeSetSlot(HandleObject obj, ObjOperandId objId,
     else
         preliminaryObjectAction_ = PreliminaryObjectAction::Unlink;
 
-    setUpdateStubInfo(nobj->group(), id);
+    typeCheckInfo_.set(nobj->group(), id);
     EmitStoreSlotAndReturn(writer, objId, nobj, propShape, rhsId);
 
     trackAttached("NativeSlot");
@@ -2025,7 +2102,7 @@ SetPropIRGenerator::tryAttachUnboxedExpandoSetSlot(HandleObject obj, ObjOperandI
 
     // Property types must be added to the unboxed object's group, not the
     // expando's group (it has unknown properties).
-    setUpdateStubInfo(obj->group(), id);
+    typeCheckInfo_.set(obj->group(), id);
     EmitStoreSlotAndReturn(writer, expandoId, expando, propShape, rhsId);
 
     trackAttached("UnboxedExpando");
@@ -2062,7 +2139,7 @@ SetPropIRGenerator::tryAttachUnboxedProperty(HandleObject obj, ObjOperandId objI
                                 rhsId);
     writer.returnFromIC();
 
-    setUpdateStubInfo(obj->group(), id);
+    typeCheckInfo_.set(obj->group(), id);
     preliminaryObjectAction_ = PreliminaryObjectAction::Unlink;
 
     trackAttached("Unboxed");
@@ -2099,7 +2176,7 @@ SetPropIRGenerator::tryAttachTypedObjectProperty(HandleObject obj, ObjOperandId 
     writer.guardShape(objId, obj->as<TypedObject>().shape());
     writer.guardGroup(objId, obj->group());
 
-    setUpdateStubInfo(obj->group(), id);
+    typeCheckInfo_.set(obj->group(), id);
 
     // Scalar types can always be stored without a type update stub.
     if (fieldDescr->is<ScalarTypeDescr>()) {
@@ -2271,14 +2348,15 @@ SetPropIRGenerator::tryAttachSetDenseElement(HandleObject obj, ObjOperandId objI
     if (!nobj->containsDenseElement(index) || nobj->getElementsHeader()->isFrozen())
         return false;
 
-    writer.guardGroup(objId, nobj->group());
+    if (typeCheckInfo_.needsTypeBarrier())
+        writer.guardGroup(objId, nobj->group());
     writer.guardShape(objId, nobj->shape());
 
     writer.storeDenseElement(objId, indexId, rhsId);
     writer.returnFromIC();
 
     // Type inference uses JSID_VOID for the element types.
-    setUpdateStubInfo(nobj->group(), JSID_VOID);
+    typeCheckInfo_.set(nobj->group(), JSID_VOID);
 
     trackAttached("SetDenseElement");
     return true;
@@ -2383,18 +2461,20 @@ SetPropIRGenerator::tryAttachSetDenseElementHole(HandleObject obj, ObjOperandId 
     if (!CanAttachAddElement(nobj, IsPropertyInitOp(op)))
         return false;
 
-    writer.guardGroup(objId, nobj->group());
+    if (typeCheckInfo_.needsTypeBarrier())
+        writer.guardGroup(objId, nobj->group());
     writer.guardShape(objId, nobj->shape());
 
-    // Also shape guard the proto chain, unless this is an INITELEM.
-    if (IsPropertySetOp(op))
+    // Also shape guard the proto chain, unless this is an INITELEM or we know
+    // the proto chain has no indexed props.
+    if (IsPropertySetOp(op) && maybeHasExtraIndexedProps_)
         ShapeGuardProtoChain(writer, obj, objId);
 
     writer.storeDenseElementHole(objId, indexId, rhsId, isAdd);
     writer.returnFromIC();
 
     // Type inference uses JSID_VOID for the element types.
-    setUpdateStubInfo(nobj->group(), JSID_VOID);
+    typeCheckInfo_.set(nobj->group(), JSID_VOID);
 
     trackAttached(isAdd ? "AddDenseElement" : "StoreDenseElementHole");
     return true;
@@ -2423,7 +2503,7 @@ SetPropIRGenerator::tryAttachSetUnboxedArrayElement(HandleObject obj, ObjOperand
     writer.returnFromIC();
 
     // Type inference uses JSID_VOID for the element types.
-    setUpdateStubInfo(obj->group(), JSID_VOID);
+    typeCheckInfo_.set(obj->group(), JSID_VOID);
 
     trackAttached("SetUnboxedArrayElement");
     return true;
@@ -2516,7 +2596,7 @@ SetPropIRGenerator::tryAttachSetUnboxedArrayElementHole(HandleObject obj, ObjOpe
     writer.returnFromIC();
 
     // Type inference uses JSID_VOID for the element types.
-    setUpdateStubInfo(aobj->group(), JSID_VOID);
+    typeCheckInfo_.set(aobj->group(), JSID_VOID);
 
     trackAttached("StoreUnboxedArrayElementHole");
     return true;
@@ -2806,6 +2886,6 @@ SetPropIRGenerator::tryAttachAddSlotStub(HandleObjectGroup oldGroup, HandleShape
     }
     writer.returnFromIC();
 
-    setUpdateStubInfo(oldGroup, id);
+    typeCheckInfo_.set(oldGroup, id);
     return true;
 }

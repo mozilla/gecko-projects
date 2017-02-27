@@ -1278,6 +1278,26 @@ var gViewController = {
                 hasPermission(aAddon, "enable"));
       },
       doCommand(aAddon) {
+        if (aAddon.isWebExtension && !aAddon.seen && WEBEXT_PERMISSION_PROMPTS) {
+          let perms = aAddon.userPermissions;
+          if (perms.hosts.length > 0 || perms.permissions.length > 0) {
+            let subject = {
+              wrappedJSObject: {
+                target: getBrowserElement(),
+                info: {
+                  type: "sideload",
+                  addon: aAddon,
+                  icon: aAddon.iconURL,
+                  permissions: perms,
+                  resolve() { aAddon.userDisabled = false },
+                  reject() {},
+                },
+              },
+            };
+            Services.obs.notifyObservers(subject, "webextension-permission-prompt", null);
+            return;
+          }
+        }
         aAddon.userDisabled = false;
       },
       getTooltip(aAddon) {
@@ -1387,7 +1407,7 @@ var gViewController = {
                 nsIFilePicker.modeOpenMultiple);
         try {
           fp.appendFilter(gStrings.ext.GetStringFromName("installFromFile.filterName"),
-                          "*.xpi;*.jar");
+                          "*.xpi;*.jar;*.zip");
           fp.appendFilters(nsIFilePicker.filterAll);
         } catch (e) { }
 
