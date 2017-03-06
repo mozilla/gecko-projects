@@ -1102,6 +1102,8 @@ var gViewController = {
           document.getElementById("updates-progress").hidden = true;
           gUpdatesView.maybeRefresh();
 
+          Services.obs.notifyObservers(null, "EM-update-check-finished", null);
+
           if (numManualUpdates > 0 && numUpdated == 0) {
             document.getElementById("updates-manualUpdatesFound-btn").hidden = false;
             return;
@@ -1411,17 +1413,19 @@ var gViewController = {
           fp.appendFilters(nsIFilePicker.filterAll);
         } catch (e) { }
 
-        if (fp.show() != nsIFilePicker.returnOK)
-          return;
+        fp.open(result => {
+          if (result != nsIFilePicker.returnOK)
+            return;
 
-        let browser = getBrowserElement();
-        let files = fp.files;
-        while (files.hasMoreElements()) {
-          let file = files.getNext();
-          AddonManager.getInstallForFile(file, install => {
-            AddonManager.installAddonFromAOM(browser, document.documentURI, install);
-          });
-        }
+          let browser = getBrowserElement();
+          let files = fp.files;
+          while (files.hasMoreElements()) {
+            let file = files.getNext();
+            AddonManager.getInstallForFile(file, install => {
+              AddonManager.installAddonFromAOM(browser, document.documentURI, install);
+            });
+          }
+        });
       }
     },
 

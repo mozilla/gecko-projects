@@ -40,12 +40,14 @@
 #include "nsFrameManager.h"
 #include "nsError.h"
 #include "nsCSSFrameConstructor.h"
+#include "mozilla/ServoStyleSet.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "nsDisplayList.h"
 #include "nsIScrollableFrame.h"
 #include "nsCSSProps.h"
 #include "RestyleTracker.h"
+#include "nsStyleChangeList.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -916,19 +918,26 @@ nsTableFrame::InsertRows(nsTableRowGroupFrame*       aRowGroupFrame,
   nsTableCellMap* cellMap = GetCellMap();
   if (cellMap) {
     TableArea damageArea(0, 0, 0, 0);
+    bool didRecalculate = RecalculateRowIndices();
     int32_t origNumRows = cellMap->GetRowCount();
     int32_t numNewRows = aRowFrames.Length();
     cellMap->InsertRows(aRowGroupFrame, aRowFrames, aRowIndex, aConsiderSpans, damageArea);
     MatchCellMapToColCache(cellMap);
-    if (aRowIndex < origNumRows) {
-      AdjustRowIndices(aRowIndex, numNewRows);
+
+    if (!didRecalculate) {
+      if (aRowIndex < origNumRows) {
+        AdjustRowIndices(aRowIndex, numNewRows);
+      }
+
+      // assign the correct row indices to the new rows. If they were recalculated
+      // above it may not have been done correctly because each row is constructed
+      // with index 0
+      for (int32_t rowB = 0; rowB < numNewRows; rowB++) {
+        nsTableRowFrame* rowFrame = aRowFrames.ElementAt(rowB);
+        rowFrame->SetRowIndex(aRowIndex + rowB);
+      }
     }
-    // assign the correct row indices to the new rows. If they were adjusted above
-    // it may not have been done correctly because each row is constructed with index 0
-    for (int32_t rowB = 0; rowB < numNewRows; rowB++) {
-      nsTableRowFrame* rowFrame = aRowFrames.ElementAt(rowB);
-      rowFrame->SetRowIndex(aRowIndex + rowB);
-    }
+
     if (IsBorderCollapse()) {
       AddBCDamageArea(damageArea);
     }
@@ -941,11 +950,111 @@ nsTableFrame::InsertRows(nsTableRowGroupFrame*       aRowGroupFrame,
   return numColsToAdd;
 }
 
+bool
+nsTableFrame::RecalculateRowIndices()
+{
+  if (mDeletedRowIndexRanges.size() == 0) {
+    return false;
+  }
+  mDeletedRowIndexRanges.clear();
+
+  RowGroupArray rowGroups;
+  OrderRowGroups(rowGroups);
+
+  int32_t rowIndex = 0;
+  for (uint32_t rgIdx = 0; rgIdx < rowGroups.Length(); rgIdx++) {
+    nsTableRowGroupFrame* rgFrame = rowGroups[rgIdx];
+    const nsFrameList& rowFrames = rgFrame->PrincipalChildList();
+    for (nsFrameList::Enumerator rEnum(rowFrames); !rEnum.AtEnd(); rEnum.Next()) {
+      if (mozilla::StyleDisplay::TableRow == rEnum.get()->StyleDisplay()->mDisplay) {
+        nsTableRowFrame *row = static_cast<nsTableRowFrame*>(rEnum.get());
+        row->SetRowIndex(rowIndex);
+        rowIndex++;
+      }
+    }
+  }
+  return true;
+}
+
+void
+nsTableFrame::AddDeletedRowIndex(int32_t aDeletedRowStoredIndex)
+{
+  if (mDeletedRowIndexRanges.size() == 0) {
+    mDeletedRowIndexRanges.insert(std::pair<int32_t, int32_t>
+                                    (aDeletedRowStoredIndex,
+                                     aDeletedRowStoredIndex));
+    return;
+  }
+
+  // Find the position of the current deleted row's stored index
+  // among the previous deleted row index ranges and merge ranges if
+  // they are consecutive, else add a new (disjoint) range to the map.
+  // Call to mDeletedRowIndexRanges.upper_bound is
+  // O(log(mDeletedRowIndexRanges.size())) therefore call to
+  // AddDeletedRowIndex is also ~O(log(mDeletedRowIndexRanges.size()))
+
+  // greaterIter = will point to smallest range in the map with lower value
+  //              greater than the aDeletedRowStoredIndex.
+  //              If no such value exists, point to end of map.
+  // smallerIter = will point to largest range in the map with higher value
+  //              smaller than the aDeletedRowStoredIndex
+  //              If no such value exists, point to beginning of map.
+  // i.e. when both values exist below is true:
+  // smallerIter->second < aDeletedRowStoredIndex < greaterIter->first
+  auto greaterIter = mDeletedRowIndexRanges.upper_bound(aDeletedRowStoredIndex);
+  auto smallerIter = greaterIter;
+  if (smallerIter != mDeletedRowIndexRanges.begin()) {
+    smallerIter--;
+  }
+
+  if (smallerIter->second == aDeletedRowStoredIndex - 1) {
+    if (greaterIter != mDeletedRowIndexRanges.end() &&
+        greaterIter->first == aDeletedRowStoredIndex + 1) {
+      // merge current index with smaller and greater range as they are consecutive
+      smallerIter->second = greaterIter->second;
+      mDeletedRowIndexRanges.erase(greaterIter);
+    }
+    else {
+      // add aDeletedRowStoredIndex in the smaller range as it is consecutive
+      smallerIter->second = aDeletedRowStoredIndex;
+    }
+  } else if (greaterIter != mDeletedRowIndexRanges.end() &&
+             greaterIter->first == aDeletedRowStoredIndex + 1) {
+    // add aDeletedRowStoredIndex in the greater range as it is consecutive
+    mDeletedRowIndexRanges.insert(std::pair<int32_t, int32_t>
+                                   (aDeletedRowStoredIndex,
+                                    greaterIter->second));
+    mDeletedRowIndexRanges.erase(greaterIter);
+  } else {
+    // add new range as aDeletedRowStoredIndex is disjoint from existing ranges
+    mDeletedRowIndexRanges.insert(std::pair<int32_t, int32_t>
+                                   (aDeletedRowStoredIndex,
+                                    aDeletedRowStoredIndex));
+  }
+}
+
+int32_t
+nsTableFrame::GetAdjustmentForStoredIndex(int32_t aStoredIndex)
+{
+  if (mDeletedRowIndexRanges.size() == 0)
+    return 0;
+
+  int32_t adjustment = 0;
+
+  // O(log(mDeletedRowIndexRanges.size()))
+  auto endIter = mDeletedRowIndexRanges.upper_bound(aStoredIndex);
+  for (auto iter = mDeletedRowIndexRanges.begin(); iter != endIter; ++iter) {
+    adjustment += iter->second - iter->first + 1;
+  }
+
+  return adjustment;
+}
+
 // this cannot extend beyond a single row group
 void
 nsTableFrame::RemoveRows(nsTableRowFrame& aFirstRowFrame,
-                              int32_t          aNumRowsToRemove,
-                              bool             aConsiderSpans)
+                         int32_t          aNumRowsToRemove,
+                         bool             aConsiderSpans)
 {
 #ifdef TBD_OPTIMIZATION
   // decide if we need to rebalance. we have to do this here because the row group
@@ -971,13 +1080,19 @@ nsTableFrame::RemoveRows(nsTableRowFrame& aFirstRowFrame,
   nsTableCellMap* cellMap = GetCellMap();
   if (cellMap) {
     TableArea damageArea(0, 0, 0, 0);
+
+    // Mark rows starting from aFirstRowFrame to the next 'aNumRowsToRemove-1'
+    // number of rows as deleted.
+    nsTableRowGroupFrame* parentFrame = aFirstRowFrame.GetTableRowGroupFrame();
+    parentFrame->MarkRowsAsDeleted(aFirstRowFrame, aNumRowsToRemove);
+
     cellMap->RemoveRows(firstRowIndex, aNumRowsToRemove, aConsiderSpans, damageArea);
     MatchCellMapToColCache(cellMap);
     if (IsBorderCollapse()) {
       AddBCDamageArea(damageArea);
     }
   }
-  AdjustRowIndices(firstRowIndex, -aNumRowsToRemove);
+
 #ifdef DEBUG_TABLE_CELLMAP
   printf("=== removeRowsAfter\n");
   Dump(true, true, true);
@@ -7563,4 +7678,44 @@ nsTableFrame::InvalidateTableFrame(nsIFrame* aFrame,
     parent->InvalidateFrameWithRect(aOrigRect);
     parent->InvalidateFrame();
   }
+}
+
+void
+nsTableFrame::DoUpdateStyleOfOwnedAnonBoxes(ServoStyleSet& aStyleSet,
+                                            nsStyleChangeList& aChangeList,
+                                            nsChangeHint aHintForThisFrame)
+{
+  nsIFrame* wrapper = GetParent();
+
+  MOZ_ASSERT(wrapper->StyleContext()->GetPseudo() ==
+               nsCSSAnonBoxes::tableWrapper,
+             "What happened to our parent?");
+
+  RefPtr<nsStyleContext> newContext =
+    aStyleSet.ResolveAnonymousBoxStyle(nsCSSAnonBoxes::tableWrapper,
+                                       StyleContext());
+
+  // Figure out whether we have an actual change.  It's important that we do
+  // this, even though all the wrapper's changes are due to properties it
+  // inherits from us, because it's possible that no one ever asked us for those
+  // style structs and hence changes to them aren't reflected in
+  // aHintForThisFrame at all.
+  uint32_t equalStructs, samePointerStructs; // Not used, actually.
+  nsChangeHint wrapperHint = wrapper->StyleContext()->CalcStyleDifference(
+    newContext,
+    // The wrapper is not our descendant, so just be pessimistic about which
+    // things it needs to care about.
+    nsChangeHint_Hints_NotHandledForDescendants,
+    &equalStructs,
+    &samePointerStructs);
+  if (wrapperHint) {
+    aChangeList.AppendChange(wrapper, wrapper->GetContent(), wrapperHint);
+  }
+
+  for (nsIFrame* cur = wrapper; cur; cur = cur->GetNextContinuation()) {
+    cur->SetStyleContext(newContext);
+  }
+
+  MOZ_ASSERT(!(wrapper->GetStateBits() & NS_FRAME_OWNS_ANON_BOXES),
+             "Wrapper frame doesn't have any anon boxes of its own!");
 }

@@ -3,6 +3,12 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
+<!-- This file is imported into the browser window. -->
+<!-- eslint-env mozilla/browser-window -->
+
+<!-- XULCommandEvent is a specialised global. -->
+<!-- global XULCommandEvent -->
+
 <!DOCTYPE bindings [
 <!ENTITY % searchBarDTD SYSTEM "chrome://browser/locale/searchbar.dtd" >
 %searchBarDTD;
@@ -1114,6 +1120,21 @@
           this._isHiding = false;
         }, 0);
       ]]></handler>
+
+      <!-- This handles clicks on the topmost "Foo Search" header in the
+           popup (hbox[anonid="searchbar-engine"]). -->
+      <handler event="click"><![CDATA[
+        if (event.button == 2) {
+          // Ignore right clicks.
+          return;
+        }
+        let button = event.originalTarget;
+        let engine = button.parentNode.engine;
+        if (!engine) {
+          return;
+        }
+        this.oneOffButtons.handleSearchCommand(event, engine);
+      ]]></handler>
     </handlers>
 
   </binding>
@@ -2223,7 +2244,7 @@
           return; // ignore right clicks.
 
         let button = event.originalTarget;
-        let engine = button.engine || button.parentNode.engine;
+        let engine = button.engine;
 
         if (!engine)
           return;

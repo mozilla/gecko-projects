@@ -2540,11 +2540,8 @@ function URLBarSetURI(aURI) {
     } catch (e) {}
 
     // Replace initial page URIs with an empty string
-    // 1. only if there's no opener (bug 370555).
-    // 2. if remote newtab is enabled and it's the default remote newtab page
-    let defaultRemoteURL = gAboutNewTabService.remoteEnabled &&
-                           uri.spec === gAboutNewTabService.newTabURL;
-    if ((gInitialPages.includes(uri.spec) || defaultRemoteURL) &&
+    // only if there's no opener (bug 370555).
+    if (gInitialPages.includes(uri.spec) &&
         checkEmptyPageOrigin(gBrowser.selectedBrowser, uri)) {
       value = "";
     } else {
@@ -4647,8 +4644,6 @@ var XULBrowserWindow = {
 
       SocialUI.updateState();
 
-      UITour.onLocationChange(location);
-
       gTabletModePageCounter.inc();
 
       // Utility functions for disabling find
@@ -5081,7 +5076,6 @@ nsBrowserAccess.prototype = {
                                       fromExternal: aIsExternal,
                                       inBackground: loadInBackground,
                                       forceNotRemote: aForceNotRemote,
-                                      forceBrowserInsertion: true,
                                       opener: aOpener,
                                       });
     let browser = win.gBrowser.getBrowserForTab(tab);
@@ -5740,6 +5734,10 @@ function handleLinkClick(event, href, linkNode) {
     }
   }
 
+  let frameOuterWindowID = doc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
+                              .getInterface(Ci.nsIDOMWindowUtils)
+                              .outerWindowID;
+
   urlSecurityCheck(href, doc.nodePrincipal);
   let params = {
     charset: doc.characterSet,
@@ -5748,6 +5746,7 @@ function handleLinkClick(event, href, linkNode) {
     referrerPolicy,
     noReferrer: BrowserUtils.linkHasNoReferrer(linkNode),
     originPrincipal: doc.nodePrincipal,
+    frameOuterWindowID,
   };
 
   // The new tab/window must use the same userContextId

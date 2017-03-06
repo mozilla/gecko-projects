@@ -14,7 +14,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "WebNavigation",
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 var {
   SingletonEventManager,
-  ignoreEvent,
 } = ExtensionUtils;
 
 const defaultTransitionTypes = {
@@ -113,18 +112,29 @@ function WebNavigationEventManager(context, eventName) {
       let data2 = {
         url: data.url,
         timeStamp: Date.now(),
-        frameId: ExtensionManagement.getFrameId(data.windowId),
-        parentFrameId: ExtensionManagement.getParentFrameId(data.parentWindowId, data.windowId),
       };
 
       if (eventName == "onErrorOccurred") {
         data2.error = data.error;
       }
 
+      if (data.windowId) {
+        data2.frameId = ExtensionManagement.getFrameId(data.windowId);
+        data2.parentFrameId = ExtensionManagement.getParentFrameId(data.parentWindowId, data.windowId);
+      }
+
+      if (data.sourceWindowId) {
+        data2.sourceFrameId = ExtensionManagement.getFrameId(data.sourceWindowId);
+      }
+
       // Fills in tabId typically.
       Object.assign(data2, tabTracker.getBrowserData(data.browser));
       if (data2.tabId < 0) {
         return;
+      }
+
+      if (data.sourceTabBrowser) {
+        data2.sourceTabId = tabTracker.getBrowserData(data.sourceTabBrowser).tabId;
       }
 
       fillTransitionProperties(eventName, data, data2);
@@ -158,7 +168,9 @@ extensions.registerSchemaAPI("webNavigation", "addon_parent", context => {
 
   return {
     webNavigation: {
-      onTabReplaced: ignoreEvent(context, "webNavigation.onTabReplaced"),
+      onTabReplaced: new SingletonEventManager(context, "webNavigation.onTabReplaced", fire => {
+        return () => {};
+      }).api(),
       onBeforeNavigate: new WebNavigationEventManager(context, "onBeforeNavigate").api(),
       onCommitted: new WebNavigationEventManager(context, "onCommitted").api(),
       onDOMContentLoaded: new WebNavigationEventManager(context, "onDOMContentLoaded").api(),
@@ -166,7 +178,7 @@ extensions.registerSchemaAPI("webNavigation", "addon_parent", context => {
       onErrorOccurred: new WebNavigationEventManager(context, "onErrorOccurred").api(),
       onReferenceFragmentUpdated: new WebNavigationEventManager(context, "onReferenceFragmentUpdated").api(),
       onHistoryStateUpdated: new WebNavigationEventManager(context, "onHistoryStateUpdated").api(),
-      onCreatedNavigationTarget: ignoreEvent(context, "webNavigation.onCreatedNavigationTarget"),
+      onCreatedNavigationTarget: new WebNavigationEventManager(context, "onCreatedNavigationTarget").api(),
       getAllFrames(details) {
         let tab = tabManager.get(details.tabId);
 

@@ -1114,7 +1114,7 @@ Process(JSContext* cx, const char* filename, bool forceTTY, FileKind kind = File
     if (forceTTY || !filename || strcmp(filename, "-") == 0) {
         file = stdin;
     } else {
-        file = fopen(filename, "r");
+        file = fopen(filename, "rb");
         if (!file) {
             ReportCantOpenErrorUnknownEncoding(cx, filename);
             return false;
@@ -1220,7 +1220,7 @@ CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
         }
     }
 
-    FILE* file = fopen(filename.ptr(), "r");
+    FILE* file = fopen(filename.ptr(), "rb");
     if (!file) {
         ReportCantOpenErrorUnknownEncoding(cx, filename.ptr());
         return false;
@@ -3025,7 +3025,7 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
             return false;
         }
 
-        FILE* file = fopen(script->filename(), "r");
+        FILE* file = fopen(script->filename(), "rb");
         if (!file) {
             /* FIXME: script->filename() should become UTF-8 (bug 987069). */
             ReportCantOpenErrorUnknownEncoding(cx, script->filename());
@@ -5381,12 +5381,13 @@ EnableGeckoProfiling(JSContext* cx, unsigned argc, Value* vp)
 
     // Disable before re-enabling; see the assertion in |GeckoProfiler::setProfilingStack|.
     if (cx->runtime()->geckoProfiler().installed())
-        cx->runtime()->geckoProfiler().enable(false);
+        MOZ_ALWAYS_TRUE(cx->runtime()->geckoProfiler().enable(false));
 
     SetContextProfilingStack(cx, sc->geckoProfilingStack, &sc->geckoProfilingStackSize,
                              ShellContext::GeckoProfilingMaxStackSize);
     cx->runtime()->geckoProfiler().enableSlowAssertions(false);
-    cx->runtime()->geckoProfiler().enable(true);
+    if (!cx->runtime()->geckoProfiler().enable(true))
+        JS_ReportErrorASCII(cx, "Cannot ensure single threaded execution in profiler");
 
     args.rval().setUndefined();
     return true;
@@ -5408,17 +5409,18 @@ EnableGeckoProfilingWithSlowAssertions(JSContext* cx, unsigned argc, Value* vp)
 
         // Slow assertions are off.  Disable profiling before re-enabling
         // with slow assertions on.
-        cx->runtime()->geckoProfiler().enable(false);
+        MOZ_ALWAYS_TRUE(cx->runtime()->geckoProfiler().enable(false));
     }
 
     // Disable before re-enabling; see the assertion in |GeckoProfiler::setProfilingStack|.
     if (cx->runtime()->geckoProfiler().installed())
-        cx->runtime()->geckoProfiler().enable(false);
+        MOZ_ALWAYS_TRUE(cx->runtime()->geckoProfiler().enable(false));
 
     SetContextProfilingStack(cx, sc->geckoProfilingStack, &sc->geckoProfilingStackSize,
                              ShellContext::GeckoProfilingMaxStackSize);
     cx->runtime()->geckoProfiler().enableSlowAssertions(true);
-    cx->runtime()->geckoProfiler().enable(true);
+    if (!cx->runtime()->geckoProfiler().enable(true))
+        JS_ReportErrorASCII(cx, "Cannot ensure single threaded execution in profiler");
 
     return true;
 }
@@ -5428,7 +5430,7 @@ DisableGeckoProfiling(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (cx->runtime()->geckoProfiler().installed())
-        cx->runtime()->geckoProfiler().enable(false);
+        MOZ_ALWAYS_TRUE(cx->runtime()->geckoProfiler().enable(false));
     args.rval().setUndefined();
     return true;
 }
@@ -7460,6 +7462,20 @@ static const JS::AsmJSCacheOps asmJSCacheOps = {
     ShellCloseAsmJSCacheEntryForWrite
 };
 
+static bool
+TimesAccessed(JSContext* cx, unsigned argc, Value* vp)
+{
+    static int32_t accessed = 0;
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setInt32(++accessed);
+    return true;
+}
+
+static const JSPropertySpec TestingProperties[] = {
+    JS_PSG("timesAccessed", TimesAccessed, 0),
+    JS_PS_END
+};
+
 static JSObject*
 NewGlobalObject(JSContext* cx, JS::CompartmentOptions& options,
                 JSPrincipals* principals)
@@ -7500,6 +7516,8 @@ NewGlobalObject(JSContext* cx, JS::CompartmentOptions& options,
             return nullptr;
         }
         if (!js::DefineTestingFunctions(cx, glob, fuzzingSafe, disableOOMFunctions))
+            return nullptr;
+        if (!JS_DefineProperties(cx, glob, TestingProperties))
             return nullptr;
 
         if (!fuzzingSafe) {

@@ -43,6 +43,8 @@ mozilla::LazyLogModule gMediaDemuxerLog("MediaDemuxer");
 #define LOG(arg, ...) MOZ_LOG(sFormatDecoderLog, mozilla::LogLevel::Debug, ("MediaFormatReader(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #define LOGV(arg, ...) MOZ_LOG(sFormatDecoderLog, mozilla::LogLevel::Verbose, ("MediaFormatReader(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 
+#define NS_DispatchToMainThread(...) CompileError_UseAbstractMainThreadInstead
+
 namespace mozilla {
 
 /**
@@ -116,11 +118,13 @@ GlobalAllocPolicy::GlobalAllocPolicy()
   : mMonitor("DecoderAllocPolicy::mMonitor")
   , mDecoderLimit(MediaPrefs::MediaDecoderLimit())
 {
-  // Non DocGroup-version AbstractThread::MainThread is fine for
-  // ClearOnShutdown().
-  AbstractThread::MainThread()->Dispatch(NS_NewRunnableFunction([this] () {
-    ClearOnShutdown(this, ShutdownPhase::ShutdownThreads);
-  }));
+  SystemGroup::Dispatch(
+    "GlobalAllocPolicy::ClearOnShutdown",
+    TaskCategory::Other,
+    NS_NewRunnableFunction([this] () {
+      ClearOnShutdown(this, ShutdownPhase::ShutdownThreads);
+    })
+  );
 }
 
 GlobalAllocPolicy::~GlobalAllocPolicy()
@@ -368,6 +372,91 @@ MediaFormatReader::ShutdownPromisePool::Track(RefPtr<ShutdownPromise> aPromise)
         mOnShutdownComplete->Resolve(true, __func__);
       }
     });
+}
+
+void
+MediaFormatReader::DecoderData::ShutdownDecoder()
+{
+  MutexAutoLock lock(mMutex);
+
+  if (!mDecoder) {
+    // No decoder to shut down.
+    return;
+  }
+
+  if (mFlushing) {
+    // Flush is is in action. Shutdown will be initiated after flush completes.
+    MOZ_DIAGNOSTIC_ASSERT(mShutdownPromise);
+    mOwner->mShutdownPromisePool->Track(mShutdownPromise->Ensure(__func__));
+    // The order of decoder creation and shutdown is handled by LocalAllocPolicy
+    // and ShutdownPromisePool. MFR can now reset these members to a fresh state
+    // and be ready to create new decoders again without explicitly waiting for
+    // flush/shutdown to complete.
+    mShutdownPromise = nullptr;
+    mFlushing = false;
+  } else {
+    // No flush is in action. We can shut down the decoder now.
+    mOwner->mShutdownPromisePool->Track(mDecoder->Shutdown());
+  }
+
+  // mShutdownPromisePool will handle the order of decoder shutdown so
+  // we can forget mDecoder and be ready to create a new one.
+  mDecoder = nullptr;
+  mDescription = "shutdown";
+  mOwner->ScheduleUpdate(mType == MediaData::AUDIO_DATA
+                         ? TrackType::kAudioTrack
+                         : TrackType::kVideoTrack);
+}
+
+void
+MediaFormatReader::DecoderData::Flush()
+{
+  if (mFlushing || mFlushed) {
+    // Flush still pending or already flushed, nothing more to do.
+    return;
+  }
+  mDecodeRequest.DisconnectIfExists();
+  mDrainRequest.DisconnectIfExists();
+  mDrainState = DrainState::None;
+  CancelWaitingForKey();
+  mOutput.Clear();
+  mNumSamplesInput = 0;
+  mNumSamplesOutput = 0;
+  mSizeOfQueue = 0;
+  if (mDecoder) {
+    TrackType type = mType == MediaData::AUDIO_DATA
+                     ? TrackType::kAudioTrack
+                     : TrackType::kVideoTrack;
+    mFlushing = true;
+    MOZ_DIAGNOSTIC_ASSERT(!mShutdownPromise);
+    mShutdownPromise = new SharedShutdownPromiseHolder();
+    RefPtr<SharedShutdownPromiseHolder> p = mShutdownPromise;
+    RefPtr<MediaDataDecoder> d = mDecoder;
+    mDecoder->Flush()
+      ->Then(mOwner->OwnerThread(), __func__,
+             [type, this, p, d]() {
+               if (!p->IsEmpty()) {
+                 // Shutdown happened before flush completes. Let's continue to
+                 // shut down the decoder. Note we don't access |this| because
+                 // this decoder is no longer managed by MFR::DecoderData.
+                 d->Shutdown()->ChainTo(p->Steal(), __func__);
+                 return;
+               }
+               mFlushing = false;
+               mShutdownPromise = nullptr;
+               mOwner->ScheduleUpdate(type);
+             },
+             [type, this, p, d](const MediaResult& aError) {
+               if (!p->IsEmpty()) {
+                 d->Shutdown()->ChainTo(p->Steal(), __func__);
+                 return;
+               }
+               mFlushing = false;
+               mShutdownPromise = nullptr;
+               mOwner->NotifyError(type, aError);
+             });
+  }
+  mFlushed = true;
 }
 
 class MediaFormatReader::DecoderFactory
@@ -652,10 +741,9 @@ class MediaFormatReader::DemuxerProxy
   class Wrapper;
 
 public:
-  explicit DemuxerProxy(MediaDataDemuxer* aDemuxer, AbstractThread* aMainThread)
+  explicit DemuxerProxy(MediaDataDemuxer* aDemuxer)
     : mTaskQueue(new AutoTaskQueue(
-                   GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER),
-                   aMainThread))
+                   GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER)))
     , mData(new Data(aDemuxer))
   {
     MOZ_COUNT_CTOR(DemuxerProxy);
@@ -992,9 +1080,7 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
            Preferences::GetUint("media.audio-max-decode-error", 3))
   , mVideo(this, MediaData::VIDEO_DATA,
            Preferences::GetUint("media.video-max-decode-error", 2))
-  , mDemuxer(new DemuxerProxy(aDemuxer, aDecoder
-                                        ? aDecoder->AbstractMainThread()
-                                        : AbstractThread::MainThread()))
+  , mDemuxer(new DemuxerProxy(aDemuxer))
   , mDemuxerInitDone(false)
   , mLastReportedNumDecodedFrames(0)
   , mPreviousDecodedKeyframeTime_us(sNoPreviousDecodedKeyframe)
@@ -1046,7 +1132,7 @@ MediaFormatReader::Shutdown()
     mAudio.mTrackDemuxer->BreakCycles();
     mAudio.mTrackDemuxer = nullptr;
     mAudio.ResetState();
-    mShutdownPromisePool->Track(ShutdownDecoderWithPromise(TrackInfo::kAudioTrack));
+    ShutdownDecoder(TrackInfo::kAudioTrack);
   }
 
   if (HasVideo()) {
@@ -1054,7 +1140,7 @@ MediaFormatReader::Shutdown()
     mVideo.mTrackDemuxer->BreakCycles();
     mVideo.mTrackDemuxer = nullptr;
     mVideo.ResetState();
-    mShutdownPromisePool->Track(ShutdownDecoderWithPromise(TrackInfo::kVideoTrack));
+    ShutdownDecoder(TrackInfo::kVideoTrack);
   }
 
   mShutdownPromisePool->Track(mDemuxer->Shutdown());
@@ -1070,54 +1156,19 @@ MediaFormatReader::Shutdown()
            &MediaFormatReader::TearDownDecoders);
 }
 
-RefPtr<ShutdownPromise>
-MediaFormatReader::ShutdownDecoderWithPromise(TrackType aTrack)
-{
-  LOGV("%s", TrackTypeToStr(aTrack));
-
-  auto& decoder = GetDecoderData(aTrack);
-  if (!decoder.mFlushed && decoder.mDecoder) {
-    // The decoder has yet to be flushed.
-    // We always flush the decoder prior to a shutdown to ensure that all the
-    // potentially pending operations on the decoder are completed.
-    decoder.Flush();
-    return decoder.mShutdownPromise.Ensure(__func__);
-  }
-
-  if (decoder.mFlushRequest.Exists() || decoder.mShutdownRequest.Exists()) {
-    // Let the current flush or shutdown operation complete, Flush will continue
-    // shutting down the current decoder now that the shutdown promise is set.
-    return decoder.mShutdownPromise.Ensure(__func__);
-  }
-
-  if (!decoder.mDecoder) {
-    // Shutdown any decoders that may be in the process of being initialized
-    // in the Decoder Factory.
-    // This will be a no-op until we're processing the final decoder shutdown
-    // prior to the MediaFormatReader being shutdown.
-    mDecoderFactory->ShutdownDecoder(aTrack);
-    return ShutdownPromise::CreateAndResolve(true, __func__);
-  }
-
-  // Finally, let's just shut down the currently active decoder.
-  decoder.ShutdownDecoder();
-  return decoder.mShutdownPromise.Ensure(__func__);
-}
-
 void
 MediaFormatReader::ShutdownDecoder(TrackType aTrack)
 {
-  LOG("%s", TrackTypeToStr(aTrack));
+  LOGV("%s", TrackTypeToStr(aTrack));
+
+  // Shut down the pending decoder if any.
+  mDecoderFactory->ShutdownDecoder(aTrack);
+
   auto& decoder = GetDecoderData(aTrack);
-  if (!decoder.mDecoder) {
-    LOGV("Already shut down");
-    return;
-  }
-  if (!decoder.mShutdownPromise.IsEmpty()) {
-    LOGV("Shutdown already in progress");
-    return;
-  }
-  Unused << ShutdownDecoderWithPromise(aTrack);
+  // Flush the decoder if necessary.
+  decoder.Flush();
+  // Shut down the decoder if any.
+  decoder.ShutdownDecoder();
 }
 
 RefPtr<ShutdownPromise>
@@ -1339,9 +1390,10 @@ MediaFormatReader::OnDemuxerInitDone(nsresult)
   if (mDecoder && crypto && crypto->IsEncrypted()) {
     // Try and dispatch 'encrypted'. Won't go if ready state still HAVE_NOTHING.
     for (uint32_t i = 0; i < crypto->mInitDatas.Length(); i++) {
-      NS_DispatchToMainThread(
+      nsCOMPtr<nsIRunnable> r =
         new DispatchKeyNeededEvent(mDecoder, crypto->mInitDatas[i].mInitData,
-                                   crypto->mInitDatas[i].mType));
+                                   crypto->mInitDatas[i].mType);
+      mDecoder->AbstractMainThread()->Dispatch(r.forget());
     }
     mInfo.mCrypto = *crypto;
   }
@@ -1704,6 +1756,7 @@ MediaFormatReader::NotifyWaitingForKey(TrackType aTrack)
   }
   if (!decoder.mDecodeRequest.Exists()) {
     LOGV("WaitingForKey received while no pending decode. Ignoring");
+    return;
   }
   decoder.mWaitingForKey = true;
   ScheduleUpdate(aTrack);
@@ -1889,7 +1942,7 @@ MediaFormatReader::HandleDemuxedSamples(
 
   auto& decoder = GetDecoderData(aTrack);
 
-  if (decoder.mFlushRequest.Exists() || decoder.mShutdownRequest.Exists()) {
+  if (decoder.mFlushing) {
     LOGV("Decoder operation in progress, let it complete.");
     return;
   }
@@ -2261,15 +2314,21 @@ MediaFormatReader::Update(TrackType aTrack)
 
   bool needInput = NeedInput(decoder);
 
-  LOGV("Update(%s) ni=%d no=%d in:%" PRIu64 " out:%" PRIu64
-       " qs=%u decoding:%d flushing:%d "
-       "shutdown:%d pending:%u waiting:%d promise:%d sid:%u",
-       TrackTypeToStr(aTrack), needInput, needOutput, decoder.mNumSamplesInput,
-       decoder.mNumSamplesOutput, uint32_t(size_t(decoder.mSizeOfQueue)),
-       decoder.mDecodeRequest.Exists(), decoder.mFlushRequest.Exists(),
-       decoder.mShutdownRequest.Exists(), uint32_t(decoder.mOutput.Length()),
-       decoder.mWaitingForData, decoder.HasPromise(),
-       decoder.mLastStreamSourceID);
+  LOGV(
+    "Update(%s) ni=%d no=%d in:%" PRIu64 " out:%" PRIu64
+    " qs=%u decoding:%d flushing:%d desc:%s pending:%u waiting:%d sid:%u",
+    TrackTypeToStr(aTrack),
+    needInput,
+    needOutput,
+    decoder.mNumSamplesInput,
+    decoder.mNumSamplesOutput,
+    uint32_t(size_t(decoder.mSizeOfQueue)),
+    decoder.mDecodeRequest.Exists(),
+    decoder.mFlushing,
+    decoder.mDescription,
+    uint32_t(decoder.mOutput.Length()),
+    decoder.mWaitingForData,
+    decoder.mLastStreamSourceID);
 
   if ((decoder.mWaitingForData
        && (!decoder.mTimeThreshold || decoder.mTimeThreshold.ref().mWaiting))
@@ -2279,13 +2338,9 @@ MediaFormatReader::Update(TrackType aTrack)
     return;
   }
 
-  if (decoder.mWaitingForKey) {
-    decoder.mWaitingForKey = false;
-    if (decoder.HasWaitingPromise() && !decoder.IsWaiting()) {
-      LOGV("No longer waiting for key. Resolving waiting promise");
-      decoder.mWaitingPromise.Resolve(decoder.mType, __func__);
-      return;
-    }
+  if (decoder.CancelWaitingForKey()) {
+    LOGV("No longer waiting for key. Resolving waiting promise");
+    return;
   }
 
   if (!needInput) {
@@ -2938,36 +2993,55 @@ MediaFormatReader::GetMozDebugReaderData(nsACString& aString)
                             mAudio.mNumSamplesOutputTotal);
   if (HasAudio()) {
     result += nsPrintfCString(
-      "audio state: ni=%d no=%d demuxr:%d demuxq:%d tt:%f tths:%d in:%" PRIu64
-      " out:%" PRIu64 " qs=%u pending:%u waiting:%d sid:%u\n",
-      NeedInput(mAudio), mAudio.HasPromise(), mAudio.mDemuxRequest.Exists(),
-      int(mAudio.mQueuedSamples.Length()),
+      "audio state: ni=%d no=%d wp:%d demuxr:%d demuxq:%u decoder:%d tt:%.1f "
+      "tths:%d in:%" PRIu64 " out:%" PRIu64
+      " qs=%u pending:%u wfd:%d wfk:%d sid:%u\n",
+      NeedInput(mAudio),
+      mAudio.HasPromise(),
+      !mAudio.mWaitingPromise.IsEmpty(),
+      mAudio.mDemuxRequest.Exists(),
+      uint32_t(mAudio.mQueuedSamples.Length()),
+      mAudio.mDecodeRequest.Exists(),
       mAudio.mTimeThreshold ? mAudio.mTimeThreshold.ref().Time().ToSeconds()
                             : -1.0,
       mAudio.mTimeThreshold ? mAudio.mTimeThreshold.ref().mHasSeeked : -1,
-      mAudio.mNumSamplesInput, mAudio.mNumSamplesOutput,
-      unsigned(size_t(mAudio.mSizeOfQueue)), unsigned(mAudio.mOutput.Length()),
-      mAudio.mWaitingForData, mAudio.mLastStreamSourceID);
+      mAudio.mNumSamplesInput,
+      mAudio.mNumSamplesOutput,
+      unsigned(size_t(mAudio.mSizeOfQueue)),
+      unsigned(mAudio.mOutput.Length()),
+      mAudio.mWaitingForData,
+      mAudio.mWaitingForKey,
+      mAudio.mLastStreamSourceID);
   }
   result += nsPrintfCString("video decoder: %s\n", videoName);
   result +=
     nsPrintfCString("hardware video decoding: %s\n",
                     VideoIsHardwareAccelerated() ? "enabled" : "disabled");
-  result += nsPrintfCString("video frames decoded: %" PRIu64 " (skipped:%" PRIu64 ")\n",
-                            mVideo.mNumSamplesOutputTotal,
-                            mVideo.mNumSamplesSkippedTotal);
+  result +=
+    nsPrintfCString("video frames decoded: %" PRIu64 " (skipped:%" PRIu64 ")\n",
+                    mVideo.mNumSamplesOutputTotal,
+                    mVideo.mNumSamplesSkippedTotal);
   if (HasVideo()) {
     result += nsPrintfCString(
-      "video state: ni=%d no=%d demuxr:%d demuxq:%d tt:%f tths:%d in:%" PRIu64
-      " out:%" PRIu64 " qs=%u pending:%u waiting:%d sid:%u\n",
-      NeedInput(mVideo), mVideo.HasPromise(), mVideo.mDemuxRequest.Exists(),
-      int(mVideo.mQueuedSamples.Length()),
+      "video state: ni=%d no=%d wp:%d demuxr:%d demuxq:%u decoder:%d tt:%.1f "
+      "tths:%d in:%" PRIu64 " out:%" PRIu64
+      " qs=%u pending:%u wfd:%d wfk:%d sid:%u\n",
+      NeedInput(mVideo),
+      mVideo.HasPromise(),
+      !mVideo.mWaitingPromise.IsEmpty(),
+      mVideo.mDemuxRequest.Exists(),
+      uint32_t(mVideo.mQueuedSamples.Length()),
+      mVideo.mDecodeRequest.Exists(),
       mVideo.mTimeThreshold ? mVideo.mTimeThreshold.ref().Time().ToSeconds()
                             : -1.0,
       mVideo.mTimeThreshold ? mVideo.mTimeThreshold.ref().mHasSeeked : -1,
-      mVideo.mNumSamplesInput, mVideo.mNumSamplesOutput,
-      unsigned(size_t(mVideo.mSizeOfQueue)), unsigned(mVideo.mOutput.Length()),
-      mVideo.mWaitingForData, mVideo.mLastStreamSourceID);
+      mVideo.mNumSamplesInput,
+      mVideo.mNumSamplesOutput,
+      unsigned(size_t(mVideo.mSizeOfQueue)),
+      unsigned(mVideo.mOutput.Length()),
+      mVideo.mWaitingForData,
+      mVideo.mWaitingForKey,
+      mVideo.mLastStreamSourceID);
   }
   aString += result;
 }
@@ -3030,3 +3104,5 @@ MediaFormatReader::OnFirstDemuxFailed(TrackInfo::TrackType aType,
 }
 
 } // namespace mozilla
+
+#undef NS_DispatchToMainThread

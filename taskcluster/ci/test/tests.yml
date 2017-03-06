@@ -270,8 +270,8 @@ jsreftest:
             default: default
     chunks:
         by-test-platform:
-            android-4.3-arm7-api-15/debug: 35
-            android.*: 10
+            android-4.3-arm7-api-15/debug: 100
+            android.*: 40
             windows.*: 2
             linux64-qr/.*: 4
             macosx.*: 2
@@ -838,6 +838,10 @@ mochitest-webgl:
     suite: mochitest/mochitest-gl
     treeherder-symbol: tc-M(gl)
     docker-image: {"in-tree": "desktop1604-test"}
+    run-on-projects:
+        by-test-platform:
+            linux64-qr/.*: ['graphics', 'mozilla-central']
+            default: ['all']
     chunks:
         by-test-platform:
             android.*: 10

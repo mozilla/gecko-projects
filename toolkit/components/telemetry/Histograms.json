@@ -2570,13 +2570,6 @@
     "n_buckets": 100,
     "description": "Time from submission to dispatch of HTTP transaction (ms)"
   },
-  "TRANSACTION_WAIT_TIME_HTTP_PIPELINES": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 5000,
-    "n_buckets": 100,
-    "description": "Time from submission to dispatch of HTTP with pipelines transaction (ms)"
-  },
   "TRANSACTION_WAIT_TIME_SPDY": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -10313,6 +10306,22 @@
     "kind": "enumerated",
     "n_values": 64,
     "description": "Count of scroll actions triggered by different input methods. See gfx/layers/apz/util/ScrollInputMethods.h for a list of possible values and their meanings."
+  },
+  "TOTAL_SCROLL_Y": {
+    "alert_emails": ["hkirschner@mozilla.com"],
+    "bug_numbers": [1297867],
+    "expires_in_version": "58",
+    "kind": "count",
+    "description": "Count of the total number of CSS pixels scrolled up or down in the vertical axis of the root frame of all the pages visited in a subsession. This doesn't include any scrolling of nested scroll frames such as inputs, iframes, or scrollable divs."
+  },
+  "PAGE_MAX_SCROLL_Y": {
+    "alert_emails": ["hkirschner@mozilla.com"],
+    "bug_numbers": [1312881],
+    "expires_in_version": "58",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 50,
+    "description": "Maximum distance in CSS pixels a user scrolls down the vertical axis of the root frame of a page. This doesn't include any scrolling of nested scroll frames such as inputs, iframes, or scrollable divs."
   },
   "WEB_NOTIFICATION_CLICKED": {
     "releaseChannelCollection": "opt-out",
