@@ -36,6 +36,7 @@ SIGNING_SCOPE_ALIAS_TO_PROJECT = [[
     'all-nightly-branches', set([
         'mozilla-central',
         'mozilla-aurora',
+        'date',
     ])
 ], [
     'all-release-branches', set([
@@ -60,6 +61,7 @@ BEETMOVER_SCOPE_ALIAS_TO_PROJECT = [[
         'mozilla-aurora',
         'mozilla-beta',
         'mozilla-release',
+        'date',
     ])
 ], [
     'all-release-branches', set([
@@ -118,6 +120,7 @@ This is a list of list-pairs, for ordering.
 BALROG_SCOPE_ALIAS_TO_PROJECT = [[
     'nightly', set([
         'mozilla-central',
+        'date',
     ])
 ], [
     'aurora', set([
