@@ -1575,3 +1575,38 @@ class Vendor(MachCommandBase):
         from mozbuild.vendor_rust import VendorRust
         vendor_command = self._spawn(VendorRust)
         vendor_command.vendor(**kwargs)
+
+@CommandProvider
+class Repackage(MachCommandBase):
+    '''Repackages artifacts into different formats.
+
+    This is generally used after packages are signed by the signing
+    scriptworkers in order to bundle things up into shippable formats, such as a
+    .dmg on OSX or an installer exe on Windows.
+    '''
+    @Command('repackage', category='misc',
+             description='Repackage artifacts into different formats.')
+    @CommandArgument('--input', '-i', type=str, required=True,
+        help='Input filename')
+    @CommandArgument('--output', '-o', type=str, required=True,
+        help='Output filename')
+    def repackage(self, input, output):
+        import tempfile
+        import shutil
+        from mozpack.dmg import repackage_dmg
+        from mozpack.unarchive import unpack_archive
+
+        if not os.path.exists(input):
+            print('Input file does not exist: %s' % input)
+            return 1
+
+        tmpdir = tempfile.mkdtemp()
+        try:
+            # TODO: These should automatically call out to the appropriate
+            # unpack/make functions depending on file extension (eg: create an
+            # installer exe if the output file ends with .exe, etc)
+            unpack_archive(input, tmpdir)
+
+            repackage_dmg(tmpdir, output)
+        finally:
+            shutil.rmtree(tmpdir)
