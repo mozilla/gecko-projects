@@ -124,7 +124,7 @@ def make_task_description(config, job):
     task = {
         'label': job['label'],
         'description': 'PushApk',
-        'worker-type': 'scriptworker-prov-v1/pushapk-v1',
+        'worker-type': 'scriptworker-prov-v1/pushapk-v1-dev',
         'worker': {
             'implementation': 'push-apk',
             'upstream-artifacts': generate_upstream_artifacts(dependencies),
