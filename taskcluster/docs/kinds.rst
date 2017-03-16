@@ -195,9 +195,3 @@ beetmover-checksums
 Beetmover, takes specific artifact checksums and pushes it to a location outside
 of Taskcluster's task artifacts (archive.mozilla.org as one place) and in the
 process determines the final location and "pretty" names it (version product name)
-
-push-apk
---------
-PushApk publishes Android packages onto Google Play Store. Jobs of this kind take
-all the signed multi-locales (aka "multi") APKs for a given release and upload them
-all at once.
