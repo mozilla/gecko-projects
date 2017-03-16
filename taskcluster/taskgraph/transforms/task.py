@@ -343,6 +343,7 @@ task_description_schema = Schema({
 
             # Paths to the artifacts to sign
             Required('paths'): [basestring],
+        }],
     }, {
         Required('implementation'): 'push-apk',
 
@@ -360,7 +361,6 @@ task_description_schema = Schema({
 
         Required('google-play-track'): Any('production', 'beta', 'alpha'),
         Optional('dry-run', default=True): bool,
-        }],
     }),
 })
 
@@ -397,7 +397,7 @@ GROUP_NAMES = {
     'TW32': 'Toolchain builds for Windows 32-bits',
     'TW64': 'Toolchain builds for Windows 64-bits',
     'SM-tc': 'Spidermonkey builds',
-    'pub': 'APK publishing'
+    'pub': 'APK publishing',
 }
 UNKNOWN_GROUP_NAME = "Treeherder group {} has no name; add it to " + __file__
 
